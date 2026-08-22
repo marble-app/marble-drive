@@ -38,10 +38,17 @@ export const STARTERS = [
   {
     id: 'doc',
     title: 'Document',
-    blurb: 'A page, a ruler and a toolbar. Enter makes a paragraph, and the toolbar is in the file.',
-    // No sortable, no removable, no adder: a word processor has no drag handle
-    // beside every paragraph and no button at the bottom that makes one. Enter
-    // and Backspace do that work, and the document's own script binds them.
+    blurb: 'Notes on a page. Select words and the toolbar acts on them; the toolbar is in the file.',
+    // No sortable, no removable, no adder: neither a word processor nor a
+    // notebook has a drag handle beside every paragraph and a button at the
+    // bottom that makes one. Enter and Backspace do that work, bound by the
+    // document's own script.
+    //
+    // `editable` is here for the name in the chrome and the widget's labels —
+    // plain text, edited with setText. The paragraphs are not: they carry
+    // inline markup, so the document defines its own data-marble-rich and
+    // edits them with setInner, which is the whole reason that attribute
+    // exists rather than reusing this one.
     parts: ['editable', 'history', 'status'],
     accent: '#738698',
   },
