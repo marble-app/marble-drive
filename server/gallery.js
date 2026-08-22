@@ -38,8 +38,11 @@ export const STARTERS = [
   {
     id: 'doc',
     title: 'Document',
-    blurb: 'Headings and paragraphs you can type over, in sections you can drag.',
-    parts: ['editable', 'sortable', 'removable', 'add', 'status'],
+    blurb: 'A page, a ruler and a toolbar. Enter makes a paragraph, and the toolbar is in the file.',
+    // No sortable, no removable, no adder: a word processor has no drag handle
+    // beside every paragraph and no button at the bottom that makes one. Enter
+    // and Backspace do that work, and the document's own script binds them.
+    parts: ['editable', 'history', 'status'],
     accent: '#738698',
   },
   {

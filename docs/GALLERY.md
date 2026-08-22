@@ -42,7 +42,7 @@ is a build error rather than a silently ignored file.
 
 | | |
 |---|---|
-| `doc` | headings and paragraphs, in sections you can drag |
+| `doc` | a word processor. A letter-size page on a workspace, a ruler whose markers are the page's margins, and a menu bar and toolbar that are markup in the file |
 | `sheet` | a grid of cells. Rows are sortable and the column count is one custom property, so adding a column is a cell per row plus one number |
 | `slides` | one section per slide. The slide number is a CSS counter, so reordering renumbers without touching a byte |
 | `board` | columns of cards. A card's column is where it sits and nothing else |
@@ -50,7 +50,17 @@ is a build error rather than a silently ignored file.
 
 Two of them do something the affordance library cannot, and do it in their own
 `<script>`: the sheet's "+ column" (three kinds of edit in one gesture, filed as
-one undo step) and nothing else. That is the intended way to extend a document —
+one undo step), and the doc's editing model. The doc is the larger case, and the
+instructive one. It asks for `editable`, `history` and `status` and nothing else
+— no `sortable`, no `removable`, no `add`, because a drag handle and a delete
+cross beside every paragraph are what an outliner looks like and not what a word
+processor does. What it wants instead is Enter splitting a paragraph at the
+caret, Backspace joining it to the one above, the arrow keys crossing between
+paragraphs, and a toolbar; all of that is one keydown listener and a table of
+commands in the document's own `<script>`, each command moving the page and
+filing the same change as an op. The one key it takes from the shared affordance
+is Enter, in the capture phase, because `editable` reads Enter as "done" and a
+word processor reads it as "next paragraph". That is the intended way to extend a document —
 the generic parts handle the generic gestures, and a document is allowed to know
 things about itself.
 

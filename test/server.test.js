@@ -248,7 +248,7 @@ test('a bad path is a 400 with a sentence, not a stack trace', async () => {
 test('ops that would destroy addressed content nobody asked to remove are refused', async () => {
   const doc = encodeURIComponent('work/q3/notes');
   const page = await (await get('/a/work%2Fq3%2Fnotes')).text();
-  const listId = page.match(/<ol class="sections" data-marble-id="([^"]+)"/)?.[1];
+  const listId = page.match(/<div class="flow" id="flow" data-marble-id="([^"]+)"/)?.[1];
   assert.ok(listId);
 
   const before = await drive.store.read('work/q3/notes');
