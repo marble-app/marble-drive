@@ -1,0 +1,101 @@
+<!doctype html>
+<html lang="en" data-marble="1">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="marble:capabilities" content="storage; net=none">
+<title>__TITLE__</title>
+<style>
+  /* The Marble design system's palette, with one change the system does not
+     make: a document is white to the edge. The off-white paper belongs to
+     the interface — the Drive itself — not to the thing you are writing in.
+     One dusty blue does all the accenting, the same blue in every starter,
+     because five colours would be five claims and there is only one. */
+  :root {
+    --ink: #111111;
+    --muted: #5a5a5a;
+    --line: #ddd9cf;
+    --paper: #ffffff;
+    --card: #ffffff;
+    --note: #e1e9f1;
+    --accent: #9bb6cf;
+    --accent-soft: #f1f5f8;
+    --accent-ink: #738698;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --ink: #e8e6e1; --muted: #a3a7ab; --line: #2f3438;
+      --paper: #1c1f22; --card: #1c1f22; --note: #22303a;
+      --accent: #7fa8c9; --accent-soft: #1d2932; --accent-ink: #9dc0dc;
+    }
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; padding: 2rem 1.5rem 4rem; background: var(--paper); color: var(--ink);
+    font: 15px/1.5 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    -webkit-font-smoothing: antialiased;
+  }
+  header { max-width: 60rem; margin: 0 auto .9rem; }
+  h1 { font-size: 1.4rem; margin: 0 0 .2rem; letter-spacing: -.015em; }
+  .lede { color: var(--muted); margin: 0; font-size: .95rem; }
+
+  .board {
+    position: relative; max-width: 60rem; height: 34rem; margin: 0 auto;
+    background: var(--card); border: 1px solid var(--line); border-radius: 10px;
+    background-image: radial-gradient(color-mix(in srgb, var(--line) 90%, transparent) 1px, transparent 1px);
+    background-size: 16px 16px; overflow: hidden;
+    /* A finger dragging a note should move the note, not scroll the page. */
+    touch-action: none;
+  }
+  .note {
+    position: absolute; width: 12rem; min-height: 5.5rem; padding: .65rem .75rem;
+    background: var(--note); border: 1px solid color-mix(in srgb, var(--ink) 12%, transparent);
+    border-radius: 6px; box-shadow: 0 2px 6px rgba(0,0,0,.09);
+  }
+  .note h3 { font-size: .85rem; margin: 0 0 .25rem; }
+  .note p { margin: 0; font-size: .8rem; color: var(--muted); line-height: 1.45; }
+  [data-marble-editable] { outline: none; border-radius: 3px; }
+  [data-marble-editable]:hover { background: var(--accent-soft); }
+  [data-marble-editable]:focus { background: var(--card); box-shadow: 0 0 0 1px var(--accent), 0 0 0 4px var(--accent-soft); }
+  .bar { max-width: 60rem; margin: .75rem auto 0; }
+  .add {
+    appearance: none; padding: .45rem .9rem; border: 1px dashed var(--line); border-radius: 999px;
+    background: none; color: var(--muted); font: 500 .85rem/1 inherit; cursor: pointer;
+  }
+  .add:hover { color: var(--accent-ink); border-color: var(--accent); }
+</style>
+</head>
+<body>
+<header data-marble-id="__ID__">
+  <h1 data-marble-id="__ID__" data-marble-editable>__TITLE__</h1>
+  <p class="lede" data-marble-id="__ID__" data-marble-editable>Drag a note anywhere. Where it is written as an inline style on the note itself — one attribute in the file, not a table of coordinates beside it.</p>
+</header>
+
+<div class="board" data-marble-id="__ID__" id="board" data-marble-canvas>
+
+  <div class="note" data-marble-id="__ID__" style="left:32px;top:28px" data-marble-removable>
+    <h3 data-marble-id="__ID__" data-marble-editable>Start here</h3>
+    <p data-marble-id="__ID__" data-marble-editable>Move me. Then open this file in a text editor and find the number that changed.</p>
+  </div>
+
+  <div class="note" data-marble-id="__ID__" style="left:272px;top:132px" data-marble-removable>
+    <h3 data-marble-id="__ID__" data-marble-editable>A second note</h3>
+    <p data-marble-id="__ID__" data-marble-editable>A canvas answers <em>where</em>, which a list has no way to say.</p>
+  </div>
+
+</div>
+
+<div class="bar" data-marble-transient>
+  <button class="add" data-marble-add="#tpl-note" data-marble-into="#board">+ note</button>
+</div>
+
+<template id="tpl-note" data-marble-transient>
+  <div class="note" style="left:64px;top:64px" data-marble-removable>
+    <h3 data-marble-editable>New note</h3>
+    <p data-marble-editable>Say something, then move it.</p>
+  </div>
+</template>
+
+__SCRIPT__
+</body>
+</html>

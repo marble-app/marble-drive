@@ -1,0 +1,103 @@
+<!doctype html>
+<html lang="en" data-marble="1">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="marble:capabilities" content="storage; net=none">
+<title>__TITLE__</title>
+<style>
+  /* The Marble design system's palette, with one change the system does not
+     make: a document is white to the edge. The off-white paper belongs to
+     the interface — the Drive itself — not to the thing you are writing in.
+     One dusty blue does all the accenting, the same blue in every starter,
+     because five colours would be five claims and there is only one. */
+  :root {
+    --ink: #111111;
+    --muted: #5a5a5a;
+    --line: #ddd9cf;
+    --paper: #ffffff;
+    --card: #ffffff;
+    --accent: #9bb6cf;
+    --accent-soft: #f1f5f8;
+    --accent-ink: #738698;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --ink: #e8e6e1; --muted: #a3a7ab; --line: #2f3438;
+      --paper: #1c1f22; --card: #1c1f22;
+      --accent: #7fa8c9; --accent-soft: #1d2932; --accent-ink: #9dc0dc;
+    }
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; padding: 2.5rem 1.5rem 8rem; background: var(--paper); color: var(--ink);
+    font: 16px/1.5 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    -webkit-font-smoothing: antialiased;
+  }
+  .deck { max-width: 54rem; margin: 0 auto; }
+  .deck > h1 { font-size: 1.4rem; margin: 0 0 .2rem; letter-spacing: -.015em; }
+  .lede { color: var(--muted); margin: 0 0 1.75rem; font-size: .95rem; }
+
+  .slides { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 1.1rem; }
+  .slide {
+    aspect-ratio: 16 / 9; padding: 3rem 3.5rem; display: flex; flex-direction: column; justify-content: center;
+    background: var(--card); border: 1px solid var(--line); border-radius: 10px;
+    counter-increment: slide;
+  }
+  .slides { counter-reset: slide; }
+  /* The number is drawn, never stored: reorder the deck and every slide is
+     renumbered without a byte of the file changing. */
+  .slide::after {
+    content: counter(slide); align-self: flex-end; margin-top: auto;
+    font: 600 .7rem/1 ui-monospace, SFMono-Regular, Menlo, monospace; color: var(--muted); opacity: .6;
+  }
+  .slide h2 { font-size: 2.1rem; line-height: 1.15; margin: 0 0 .6rem; letter-spacing: -.02em; }
+  .slide p { margin: 0; font-size: 1.1rem; color: var(--muted); max-width: 34rem; }
+  .slide.title h2 { font-size: 2.8rem; }
+  [data-marble-editable] { outline: none; border-radius: 3px; }
+  [data-marble-editable]:hover { background: var(--accent-soft); }
+  [data-marble-editable]:focus { background: var(--card); box-shadow: 0 0 0 1px var(--accent), 0 0 0 4px var(--accent-soft); }
+  .add {
+    appearance: none; display: block; width: 100%; margin-top: 1.1rem; padding: .8rem;
+    border: 1px dashed var(--line); border-radius: 10px; background: none;
+    color: var(--muted); font: 500 .9rem/1 inherit; cursor: pointer;
+  }
+  .add:hover { color: var(--accent-ink); border-color: var(--accent); }
+  @media (max-width: 40rem) { .slide { padding: 1.5rem; aspect-ratio: auto; } .slide h2 { font-size: 1.6rem; } }
+</style>
+</head>
+<body>
+<main class="deck" data-marble-id="__ID__">
+
+  <h1 data-marble-id="__ID__" data-marble-editable>__TITLE__</h1>
+  <p class="lede" data-marble-id="__ID__" data-marble-editable>A slide is a section. Drag one by its handle to reorder the deck; the numbers follow on their own.</p>
+
+  <ol class="slides" data-marble-id="__ID__" data-marble-sortable="slides">
+    <li class="slide title" data-marble-id="__ID__" data-marble-removable>
+      <h2 data-marble-id="__ID__" data-marble-editable>__TITLE__</h2>
+      <p data-marble-id="__ID__" data-marble-editable>Your name, and the date</p>
+    </li>
+    <li class="slide" data-marble-id="__ID__" data-marble-removable>
+      <h2 data-marble-id="__ID__" data-marble-editable>The point</h2>
+      <p data-marble-id="__ID__" data-marble-editable>One idea per slide, said in a sentence you could read aloud.</p>
+    </li>
+    <li class="slide" data-marble-id="__ID__" data-marble-removable>
+      <h2 data-marble-id="__ID__" data-marble-editable>What follows from it</h2>
+      <p data-marble-id="__ID__" data-marble-editable>And what you want the room to do about it.</p>
+    </li>
+  </ol>
+
+  <button class="add" data-marble-transient data-marble-add="#tpl-slide" data-marble-into="prev">+ slide</button>
+
+</main>
+
+<template id="tpl-slide" data-marble-transient>
+  <li class="slide" data-marble-removable>
+    <h2 data-marble-editable>New slide</h2>
+    <p data-marble-editable>Say it in a sentence.</p>
+  </li>
+</template>
+
+__SCRIPT__
+</body>
+</html>

@@ -1,0 +1,936 @@
+<!doctype html>
+<html lang="en" data-marble="1">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="marble:capabilities" content="storage; net=none">
+<title>__TITLE__</title>
+<style>
+  /* The shape is Drive's, because the whole point of the comparison is that
+     you already know how to use this. The colour is not: these are the
+     tokens out of the Marble design system — "UIST warm" in the light,
+     "Dusk" after dark. This is the interface, so it sits on the off-white
+     paper; the documents it holds are white. What is also not Drive's is
+     that every label on this page is a word in the file — the nav, the
+     column headings, the name of the drive itself. Type over one and you
+     have changed the app. */
+  :root {
+    --ink: #111111;
+    --muted: #5a5a5a;
+    --faint: #8a8a8a;
+    --line: #ddd9cf;
+    --paper: #fafaf7;
+    --paper-2: #f3f1ea;
+    --paper-3: #eceae1;
+    --card: #ffffff;
+    --accent: #9bb6cf;
+    --accent-soft: #f1f5f8;
+    --accent-ink: #738698;
+    --shadow: 0 1px 3px rgba(74,66,52,.12), 0 4px 8px rgba(74,66,52,.06);
+    --folder: #5a5a5a;
+    --radius: 12px;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --ink: #e8e6e1; --muted: #a3a7ab; --faint: #71767a; --line: #2f3438;
+      --paper: #16181a; --paper-2: #1e2124; --paper-3: #262a2e; --card: #1c1f22;
+      --accent: #7fa8c9; --accent-soft: #1d2932; --accent-ink: #9dc0dc;
+      --folder: #a3a7ab;
+      --shadow: 0 1px 3px rgba(0,0,0,.5), 0 4px 8px rgba(0,0,0,.3);
+    }
+  }
+  * { box-sizing: border-box; }
+  html, body { height: 100%; }
+  body {
+    margin: 0; background: var(--paper); color: var(--ink);
+    font: 14px/1.5 "Google Sans", Roboto, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    -webkit-font-smoothing: antialiased;
+    display: flex; flex-direction: column;
+  }
+  [data-marble-editable] { outline: none; border-radius: 4px; }
+  [data-marble-editable]:hover { background: var(--accent-soft); }
+  [data-marble-editable]:focus { background: var(--card); box-shadow: 0 0 0 1px var(--accent), 0 0 0 4px var(--accent-soft); }
+  button { font: inherit; }
+
+  /* ------------------------------------------------------------------ topbar */
+  .topbar {
+    display: flex; align-items: center; gap: 1rem; flex: 0 0 auto;
+    padding: .55rem 1rem; border-bottom: 1px solid var(--line); background: var(--paper);
+  }
+  .brand { display: flex; align-items: center; gap: .6rem; min-width: 13rem; }
+  .logo {
+    width: 1.9rem; height: 1.9rem; display: grid; place-items: center;
+    border-radius: 7px; background: var(--accent-ink); color: var(--paper); font-size: .85rem;
+  }
+  .brand h1 { font-size: 1.15rem; font-weight: 400; margin: 0; letter-spacing: -.01em; }
+  .search { flex: 1 1 auto; max-width: 44rem; }
+  .search input {
+    width: 100%; padding: .6rem 1rem; border: 1px solid transparent; border-radius: 999px;
+    background: var(--paper-3); color: var(--ink); font: inherit; outline: none;
+  }
+  .search input:focus { background: var(--card); border-color: var(--line); box-shadow: var(--shadow); }
+  .status {
+    margin-left: auto; display: flex; align-items: center; gap: .5rem;
+    font-size: .78rem; color: var(--faint); white-space: nowrap;
+  }
+  .dot { width: 7px; height: 7px; border-radius: 999px; background: var(--faint); }
+  .status[data-live="1"] .dot { background: var(--accent-ink); }
+
+  /* ------------------------------------------------------------------- shell */
+  .shell { flex: 1 1 auto; display: flex; min-height: 0; }
+  .side {
+    flex: 0 0 15rem; padding: .9rem .75rem 1rem; overflow-y: auto;
+    display: flex; flex-direction: column; gap: .35rem;
+  }
+  .new {
+    display: flex; align-items: center; gap: .55rem; align-self: flex-start;
+    padding: .75rem 1.4rem .75rem 1.1rem; margin: 0 0 .9rem .35rem;
+    border: 1px solid var(--line); border-radius: var(--radius);
+    background: var(--card); color: var(--ink); box-shadow: var(--shadow);
+    font-size: .92rem; cursor: pointer;
+  }
+  .new:hover { background: var(--accent-soft); }
+  .new .plus { font-size: 1.15rem; line-height: 1; color: var(--accent-ink); }
+
+  .nav { list-style: none; margin: 0; padding: 0; }
+  .nav-item {
+    display: flex; align-items: center; gap: .75rem;
+    padding: .45rem .8rem; border-radius: 999px; cursor: pointer; color: var(--muted);
+  }
+  .nav-item:hover { background: var(--paper-3); }
+  /* Which one is current is derived, never stored: it is where you are, not
+     something the file knows. The prefix is what tells the carrier the class
+     belongs to the page and must survive a reconcile. */
+  .nav-item.marble-current { background: var(--accent-soft); color: var(--accent-ink); font-weight: 500; }
+  .nav-item .ico { width: 1.1rem; text-align: center; opacity: .9; }
+  .side h2 {
+    font-size: .7rem; text-transform: uppercase; letter-spacing: .08em;
+    color: var(--faint); margin: 1.2rem 0 .35rem .85rem; font-weight: 600;
+  }
+  .pins { list-style: none; margin: 0; padding: 0; min-height: 1.5rem; }
+  .pin {
+    display: flex; align-items: center; gap: .6rem; padding: .35rem .8rem;
+    border-radius: 999px; color: var(--muted); cursor: pointer; font-size: .88rem;
+  }
+  .pin:hover { background: var(--paper-3); }
+  .pin.marble-missing { opacity: .45; text-decoration: line-through; }
+  .quota { margin-top: auto; padding: .8rem .85rem 0; font-size: .75rem; color: var(--faint); }
+  .bar { height: 4px; border-radius: 999px; background: var(--line); margin: .4rem 0 .35rem; overflow: hidden; }
+  .bar > i { display: block; height: 100%; background: var(--accent-ink); width: 0; }
+
+  /* -------------------------------------------------------------------- main */
+  .main {
+    flex: 1 1 auto; min-width: 0; margin: 0 .75rem .75rem 0;
+    background: var(--card); border-radius: var(--radius);
+    display: flex; flex-direction: column; overflow: hidden;
+  }
+  .crumbs { display: flex; align-items: center; gap: .3rem; padding: 1rem 1.25rem .25rem; flex-wrap: wrap; }
+  .crumb {
+    appearance: none; border: 0; background: none; cursor: pointer;
+    color: var(--muted); font-size: 1.3rem; font-weight: 400; padding: .1rem .3rem; border-radius: 6px;
+  }
+  .crumb:last-child { color: var(--ink); }
+  .crumb:hover { background: var(--paper-3); }
+  .crumbs .sep { color: var(--faint); }
+
+  .toolbar { display: flex; align-items: center; gap: .5rem; padding: .35rem 1.25rem .6rem; }
+  .chip {
+    appearance: none; display: inline-flex; align-items: center; gap: .4rem;
+    padding: .3rem .8rem; border: 1px solid var(--line); border-radius: 999px;
+    background: none; color: var(--muted); font-size: .82rem; cursor: pointer;
+  }
+  .chip:hover { background: var(--paper-3); }
+  .toolbar .spacer { margin-left: auto; }
+  .toggle { display: inline-flex; border: 1px solid var(--line); border-radius: 999px; overflow: hidden; }
+  .toggle button {
+    appearance: none; border: 0; background: none; color: var(--muted);
+    padding: .3rem .7rem; cursor: pointer; font-size: .85rem;
+  }
+  /* The view is a fact about this Drive, so it lives in one attribute and the
+     stylesheet reads it. Nothing derives it, nothing copies it. */
+  body[data-view="grid"] .toggle [data-set-view="grid"],
+  body[data-view="list"] .toggle [data-set-view="list"] { background: var(--accent-soft); color: var(--accent-ink); }
+
+  .listhead {
+    display: none; gap: 1rem; padding: .4rem 1.4rem .35rem;
+    border-bottom: 1px solid var(--line); color: var(--faint);
+    font-size: .75rem; text-transform: uppercase; letter-spacing: .06em;
+  }
+  /* One track list, shared by the heading and every row, so the columns line
+     up without either side knowing about the other. The last track is the row
+     menu — a row has five cells in list view and four of them have a heading. */
+  body[data-view="list"] .listhead,
+  body[data-view="list"] .item { grid-template-columns: 1fr 8rem 9rem 6rem 2.2rem; }
+  body[data-view="list"] .listhead { display: grid; }
+  .listhead > * { margin: 0; }
+
+  .items { flex: 1 1 auto; overflow-y: auto; padding: .6rem 1rem 2rem; }
+  body[data-view="grid"] .items {
+    display: grid; grid-template-columns: repeat(auto-fill, minmax(13rem, 1fr)); gap: .7rem;
+    align-content: start;
+  }
+  .item { position: relative; cursor: pointer; user-select: none; touch-action: none; }
+  body[data-view="grid"] .item {
+    border: 1px solid var(--line); border-radius: var(--radius); padding: .7rem .8rem;
+    background: var(--card);
+  }
+  body[data-view="grid"] .item:hover { background: var(--paper-3); }
+  body[data-view="grid"] .item .row-meta { display: none; }
+  body[data-view="grid"] .item .thumb {
+    display: block; height: 6.5rem; margin: .6rem 0 0; border-radius: 8px;
+    background: var(--paper); border: 1px solid var(--line);
+    display: grid; grid-auto-flow: row; place-items: center; align-content: center;
+    gap: .5rem; padding: 0 .7rem; color: var(--faint); font-size: .72rem;
+    overflow: hidden;
+  }
+  .item .thumb .big { display: block; color: var(--folder); }
+  .item[data-kind="doc"] .thumb .big { color: var(--accent-ink); }
+  .item .thumb .big .glyph { width: 2.5rem; height: 2.5rem; }
+  .item .thumb .cap { max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  body[data-view="list"] .items { padding: 0 0 2rem; }
+  body[data-view="list"] .item {
+    display: grid; gap: 1rem; align-items: center;
+    padding: .45rem 1.4rem; border-bottom: 1px solid var(--line);
+  }
+  body[data-view="list"] .item:hover { background: var(--paper-3); }
+  body[data-view="list"] .item .thumb { display: none; }
+
+  .item .name { display: flex; align-items: center; gap: .6rem; min-width: 0; }
+  .item .name .ico { flex: 0 0 auto; display: flex; color: var(--folder); }
+  .item[data-kind="doc"] .name .ico { color: var(--accent-ink); }
+  /* One shape for a thing you go into, another for a thing you open. The two
+     glyphs these replaced were both boxes, which is the same as no answer —
+     and the kind of a row is the first thing you ask of it, before the name. */
+  .glyph { width: 1.15rem; height: 1.15rem; display: block; flex: 0 0 auto; }
+  .pin .ico { display: flex; color: var(--folder); }
+  .pin[data-kind="doc"] .ico { color: var(--accent-ink); }
+  .item .name b { font-weight: 500; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .item .row-meta { color: var(--faint); font-size: .82rem; white-space: nowrap; }
+  .item.marble-drop { outline: 2px solid var(--accent-ink); outline-offset: -2px; border-radius: 8px; }
+  .item.marble-lifting { opacity: .45; }
+  .item .more {
+    position: absolute; top: .4rem; right: .4rem; width: 1.7rem; height: 1.7rem;
+    border: 0; border-radius: 999px; background: none; color: var(--muted);
+    cursor: pointer; opacity: 0;
+  }
+  body[data-view="list"] .item .more { position: static; opacity: .5; justify-self: end; }
+  .item:hover .more { opacity: 1; }
+  .item .more:hover { background: var(--line); }
+
+  .empty { padding: 4rem 1.5rem; text-align: center; color: var(--faint); }
+  .empty strong { display: block; font-size: 1rem; color: var(--muted); margin-bottom: .3rem; font-weight: 500; }
+
+  /* ------------------------------------------------------------- the overlays */
+  .sheet {
+    position: fixed; inset: auto 0 0 0; z-index: 20; display: none;
+    background: var(--card); border-top: 1px solid var(--line);
+    box-shadow: 0 -8px 30px rgba(74,66,52,.18); padding: 1.2rem 1.5rem 1.6rem;
+  }
+  .sheet[data-open="1"] { display: block; }
+  .sheet h3 { margin: 0 0 .1rem; font-size: 1rem; font-weight: 500; }
+  .sheet p { margin: 0 0 1rem; color: var(--faint); font-size: .85rem; }
+  .starters { display: grid; grid-template-columns: repeat(auto-fill, minmax(11rem, 1fr)); gap: .7rem; }
+  .starter {
+    text-align: left; padding: .8rem .9rem; border: 1px solid var(--line); border-radius: var(--radius);
+    background: var(--card); color: var(--ink); cursor: pointer;
+  }
+  .starter:hover { background: var(--paper-3); }
+  .starter b { display: flex; align-items: center; gap: .5rem; font-weight: 500; margin-bottom: .25rem; }
+  .starter i { width: .6rem; height: .6rem; border-radius: 3px; background: var(--accent-ink); }
+  .starter span { display: block; color: var(--faint); font-size: .8rem; line-height: 1.4; }
+
+  .menu {
+    position: fixed; z-index: 30; display: none; min-width: 12rem; padding: .35rem;
+    background: var(--card); border: 1px solid var(--line); border-radius: 10px; box-shadow: var(--shadow);
+  }
+  .menu[data-open="1"] { display: block; }
+  .menu button {
+    display: block; width: 100%; text-align: left; padding: .45rem .7rem;
+    border: 0; border-radius: 6px; background: none; color: var(--ink); cursor: pointer; font-size: .88rem;
+  }
+  .menu button:hover { background: var(--paper-3); }
+  .menu hr { border: 0; border-top: 1px solid var(--line); margin: .3rem 0; }
+
+  .toast {
+    position: fixed; left: 1.2rem; bottom: 1.2rem; z-index: 40;
+    padding: .65rem 1rem; border-radius: 8px; background: var(--ink); color: var(--paper);
+    font-size: .85rem; box-shadow: var(--shadow); opacity: 0; transform: translateY(.5rem);
+    transition: opacity .16s, transform .16s; pointer-events: none;
+  }
+  .toast[data-open="1"] { opacity: 1; transform: none; }
+
+  .ghost {
+    position: fixed; z-index: 50; pointer-events: none; padding: .4rem .7rem;
+    background: var(--card); border: 1px solid var(--accent-ink); border-radius: 8px;
+    box-shadow: var(--shadow); font-size: .85rem; display: none;
+  }
+  .ghost[data-open="1"] { display: block; }
+
+  @media (max-width: 52rem) {
+    .side { flex-basis: 4.5rem; }
+    .side h2, .nav-item span:not(.ico), .pin span:not(.ico), .quota { display: none; }
+    .new { padding: .75rem; }
+    .new .label { display: none; }
+    .brand h1 { display: none; }
+    body[data-view="list"] .item,
+    body[data-view="list"] .listhead { grid-template-columns: 1fr 7rem 2.2rem; }
+    body[data-view="list"] .item > .row-meta.owner,
+    body[data-view="list"] .item > .row-meta.size,
+    .listhead > .owner, .listhead > .size { display: none; }
+  }
+</style>
+</head>
+<body class="drive" data-marble-id="__ID__" data-view="grid">
+
+<header class="topbar" data-marble-id="__ID__">
+  <div class="brand" data-marble-id="__ID__">
+    <span class="logo" data-marble-id="__ID__" aria-hidden="true">◆</span>
+    <h1 data-marble-id="__ID__" data-marble-editable>__TITLE__</h1>
+  </div>
+  <div class="search" data-marble-transient>
+    <input id="q" type="search" placeholder="Search in Drive" autocomplete="off" aria-label="Search in Drive">
+  </div>
+  <div class="status" id="status" data-marble-transient><span class="dot"></span><span id="status-text">offline</span></div>
+</header>
+
+<div class="shell" data-marble-id="__ID__">
+
+  <aside class="side" data-marble-id="__ID__">
+    <button class="new" id="new" data-marble-transient><span class="plus">+</span><span class="label">New</span></button>
+
+    <ul class="nav" id="nav" data-marble-id="__ID__" data-marble-sortable="nav">
+      <li class="nav-item" data-marble-id="__ID__" data-nav="drive" data-marble-removable>
+        <span class="ico" data-marble-id="__ID__">▤</span><span data-marble-id="__ID__" data-marble-editable>My Drive</span>
+      </li>
+      <li class="nav-item" data-marble-id="__ID__" data-nav="recent" data-marble-removable>
+        <span class="ico" data-marble-id="__ID__">◷</span><span data-marble-id="__ID__" data-marble-editable>Recent</span>
+      </li>
+      <li class="nav-item" data-marble-id="__ID__" data-nav="templates" data-marble-removable>
+        <span class="ico" data-marble-id="__ID__">◲</span><span data-marble-id="__ID__" data-marble-editable>Templates</span>
+      </li>
+      <li class="nav-item" data-marble-id="__ID__" data-nav="trash" data-marble-removable>
+        <span class="ico" data-marble-id="__ID__">⌫</span><span data-marble-id="__ID__" data-marble-editable>Trash</span>
+      </li>
+    </ul>
+
+    <h2 data-marble-id="__ID__" data-marble-editable>Pinned</h2>
+    <ul class="pins" id="pins" data-marble-id="__ID__" data-marble-sortable="pins">
+      <!-- A pin is a claim this document makes about a folder it cannot see, so
+           it is written here in the file and the folder gets the last word on
+           whether it still opens. -->
+    </ul>
+
+    <div class="quota" data-marble-id="__ID__">
+      <div data-marble-id="__ID__" id="weight">—</div>
+      <div class="bar" data-marble-id="__ID__"><i id="weight-bar"></i></div>
+      <div data-marble-id="__ID__" data-marble-editable>Everything here is a file you can open in a text editor.</div>
+    </div>
+  </aside>
+
+  <main class="main" data-marble-id="__ID__">
+    <div class="crumbs" id="crumbs" data-marble-transient></div>
+
+    <div class="toolbar" data-marble-id="__ID__">
+      <button class="chip" id="mk" data-marble-transient>New folder</button>
+      <button class="chip" id="up" data-marble-transient>Up</button>
+      <span class="spacer"></span>
+      <span class="toggle" data-marble-transient>
+        <button data-set-view="grid" title="Grid">▦</button>
+        <button data-set-view="list" title="List">☰</button>
+      </span>
+    </div>
+
+    <div class="listhead" data-marble-id="__ID__">
+      <p data-marble-id="__ID__" data-marble-editable>Name</p>
+      <p class="owner" data-marble-id="__ID__" data-marble-editable>Nodes</p>
+      <p data-marble-id="__ID__" data-marble-editable>Last modified</p>
+      <p class="size" data-marble-id="__ID__" data-marble-editable>Size</p>
+    </div>
+
+    <div class="items" id="items" data-marble-transient>
+      <div class="empty">
+        <strong>No host</strong>
+        This document is the Drive. Opened on its own it is a page; served by a
+        Marble Drive host it is the folder it is sitting in.
+      </div>
+    </div>
+  </main>
+</div>
+
+<div class="sheet" id="sheet" data-marble-transient>
+  <h3>New</h3>
+  <p>A starter is a document you clone. The copy is yours — including the parts of it you would rather were different.</p>
+  <div class="starters" id="starters"></div>
+</div>
+
+<div class="menu" id="menu" data-marble-transient></div>
+<div class="toast" id="toast" data-marble-transient></div>
+<div class="ghost" id="ghost" data-marble-transient></div>
+
+<script>
+  // The Drive's own behaviour.
+  //
+  // Everything on this page is one of two things, and the split is the whole
+  // design. The chrome — the name of the drive, the nav labels, the column
+  // headings, the pins — is content: it lives in the file, it is edited with
+  // ops, and changing it changes the app for good. The listing is not: it is
+  // what the folder currently holds, drawn from `marble.drive.tree()` into a
+  // transient container, and never written down. A Drive that stored its own
+  // listing would have two answers to "what is in this folder" and would show
+  // you the wrong one exactly when it mattered.
+  (() => {
+    const begin = (marble) => {
+      const drive = marble.drive;
+      if (!drive) return;
+
+      const $ = (sel) => document.querySelector(sel);
+      const items = $('#items');
+      const crumbs = $('#crumbs');
+      const menu = $('#menu');
+      const sheet = $('#sheet');
+      const toast = $('#toast');
+      const ghost = $('#ghost');
+      const search = $('#q');
+      const status = $('#status');
+
+      // Where you are is not a fact about the file. Two people in one drive are
+      // allowed to be in different folders, and writing the current path into
+      // the document would move one of them every time the other navigated. It
+      // lives in the URL fragment instead, which is what makes a folder
+      // linkable without making it shared state.
+      let here = decodeURIComponent(location.hash.replace(/^#\/?/, ''));
+      let view = 'drive';
+      let latest = null;
+      let query = '';
+
+      const say = (message) => {
+        toast.textContent = message;
+        toast.setAttribute('data-open', '1');
+        clearTimeout(say.timer);
+        say.timer = setTimeout(() => toast.removeAttribute('data-open'), 2600);
+      };
+
+      const fail = (err) => say(err?.message ?? String(err));
+
+      const bytes = (n) =>
+        n < 1024 ? n + ' B' : n < 1048576 ? (n / 1024).toFixed(0) + ' KB' : (n / 1048576).toFixed(1) + ' MB';
+
+      const ago = (t) => {
+        const s = Math.max(0, (Date.now() - t) / 1000);
+        if (s < 90) return 'just now';
+        if (s < 5400) return Math.round(s / 60) + ' min ago';
+        if (s < 172800) return Math.round(s / 3600) + ' hr ago';
+        return new Date(t).toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
+      };
+
+      const leaf = (path) => path.split('/').pop();
+
+      // A folder is drawn as a folder and a document as a window, because a
+      // document here is an app you open. Written down once: the listing draws
+      // these and so does a pin, and a pin is markup that goes in the file.
+      const ICON = {
+        folder:
+          '<svg class="glyph" viewBox="0 0 16 16" aria-hidden="true" focusable="false">' +
+          '<path fill="currentColor" d="M1.6 4.1A1.7 1.7 0 0 1 3.3 2.4h2.8c.45 0 .88.18 1.2.5l1 1h4.4a1.7 1.7 0 0 1 1.7 1.7v6.1a1.7 1.7 0 0 1-1.7 1.7H3.3a1.7 1.7 0 0 1-1.7-1.7z"/></svg>',
+        doc:
+          '<svg class="glyph" viewBox="0 0 16 16" aria-hidden="true" focusable="false">' +
+          '<rect x="2.2" y="2.7" width="11.6" height="10.6" rx="2.1" fill="none" stroke="currentColor" stroke-width="1.3"/>' +
+          '<path stroke="currentColor" stroke-width="1.3" d="M2.2 6.2h11.6"/>' +
+          '<circle cx="4.6" cy="4.45" r=".78" fill="currentColor"/></svg>',
+      };
+      const iconFor = (kind) => (kind === 'folder' ? ICON.folder : ICON.doc);
+
+      // ------------------------------------------------------------ the listing
+
+      function node(entry) {
+        const el = document.createElement('div');
+        el.className = 'item';
+        el.dataset.kind = entry.kind;
+        el.dataset.path = entry.path;
+        el.innerHTML =
+          '<span class="name"><span class="ico">' +
+          iconFor(entry.kind) +
+          '</span><b></b></span>' +
+          '<span class="row-meta owner"></span>' +
+          '<span class="row-meta when"></span>' +
+          '<span class="row-meta size"></span>' +
+          '<button class="more" aria-label="More">⋮</button>' +
+          '<span class="thumb"></span>';
+
+        // The label is the name in the folder, because that is the address —
+        // what a link points at and what a move changes. What the document
+        // calls itself is its own business and lives in the tooltip, which is
+        // where the two are allowed to disagree after a rename.
+        el.querySelector('b').textContent = entry.name ?? leaf(entry.path);
+        el.title = entry.title && entry.title !== entry.name ? entry.title : '';
+        el.querySelector('.owner').textContent = entry.kind === 'doc' ? entry.nodes + ' nodes' : '—';
+        el.querySelector('.when').textContent = entry.modified ? ago(entry.modified) : '';
+        el.querySelector('.size').textContent = entry.kind === 'doc' ? bytes(entry.bytes) : '';
+        el.querySelector('.thumb').innerHTML =
+          '<span class="big">' + iconFor(entry.kind) + '</span><span class="cap"></span>';
+        el.querySelector('.thumb .cap').textContent =
+          entry.kind === 'folder' ? 'folder' : leaf(entry.path) + '.mrbl';
+        return el;
+      }
+
+      function draw() {
+        if (!latest) return;
+        const folder = latest.children ?? [];
+        const matching = query
+          ? flatten(latest).filter((entry) =>
+              `${entry.title ?? ''} ${entry.path}`.toLowerCase().includes(query),
+            )
+          : folder;
+
+        items.replaceChildren();
+        if (!matching.length) {
+          const empty = document.createElement('div');
+          empty.className = 'empty';
+          empty.innerHTML = query
+            ? '<strong>Nothing matches</strong>Try a different word.'
+            : '<strong>This folder is empty</strong>Press New to make something, or drag a file onto a folder to move it.';
+          items.append(empty);
+          return;
+        }
+        for (const entry of matching) items.append(node(entry));
+      }
+
+      const flatten = (folder, out = []) => {
+        for (const child of folder.children ?? []) {
+          out.push(child);
+          if (child.kind === 'folder') flatten(child, out);
+        }
+        return out;
+      };
+
+      function drawCrumbs() {
+        crumbs.replaceChildren();
+        const parts = here ? here.split('/') : [];
+        const add = (label, path) => {
+          const button = document.createElement('button');
+          button.className = 'crumb';
+          button.textContent = label;
+          button.dataset.path = path;
+          button.addEventListener('click', () => go(path));
+          crumbs.append(button);
+        };
+        add(document.querySelector('.brand h1').textContent.trim() || 'My Drive', '');
+        let walked = '';
+        for (const part of parts) {
+          walked = walked ? walked + '/' + part : part;
+          const sep = document.createElement('span');
+          sep.className = 'sep';
+          sep.textContent = '›';
+          crumbs.append(sep);
+          add(part, walked);
+        }
+      }
+
+      // A pin is content, so it is read out of the file — but whether it still
+      // opens is the folder's answer, and that is derived onto the element
+      // rather than written back into it.
+      function drawPins() {
+        const known = new Set(flatten(root ?? { children: [] }).map((entry) => entry.path));
+        for (const pin of document.querySelectorAll('#pins > .pin')) {
+          const path = pin.dataset.path;
+          pin.classList.toggle('marble-missing', Boolean(path) && known.size > 0 && !known.has(path));
+          pin.title = path ? 'Open ' + path : '';
+        }
+      }
+
+      function drawNav() {
+        for (const item of document.querySelectorAll('#nav > .nav-item')) {
+          item.classList.toggle('marble-current', item.dataset.nav === view);
+        }
+      }
+
+      let root = null;
+
+      async function refresh() {
+        try {
+          root = await drive.tree('');
+          latest = view === 'drive' ? at(root, here) : null;
+
+          if (view === 'recent') latest = { children: flatten(root).filter((e) => e.kind === 'doc').slice(0, 40) };
+          if (view === 'trash') latest = { children: (await drive.trash()).map(asTrash) };
+          if (view === 'templates') return drawTemplates();
+
+          draw();
+          drawCrumbs();
+          drawPins();
+          weigh();
+        } catch (err) {
+          fail(err);
+        }
+      }
+
+      const asTrash = (entry) => ({
+        kind: entry.kind,
+        path: entry.path,
+        title: leaf(entry.path),
+        modified: entry.t,
+        bytes: 0,
+        nodes: 0,
+        trashId: entry.id,
+      });
+
+      function at(folder, path) {
+        if (!path) return folder;
+        let node = folder;
+        for (const part of path.split('/')) {
+          node = (node.children ?? []).find((child) => child.kind === 'folder' && leaf(child.path) === part);
+          if (!node) return { children: [] };
+        }
+        return node;
+      }
+
+      async function drawTemplates() {
+        const starters = await drive.starters();
+        items.replaceChildren();
+        const grid = document.createElement('div');
+        grid.className = 'starters';
+        for (const starter of starters) grid.append(starterButton(starter));
+        items.append(grid);
+        drawCrumbs();
+      }
+
+      function starterButton(starter) {
+        const button = document.createElement('button');
+        button.className = 'starter';
+        button.innerHTML = '<b><i></i><span></span></b><span class="blurb"></span>';
+        button.querySelector('i').style.background = starter.accent;
+        button.querySelector('b span').textContent = starter.title;
+        button.querySelector('.blurb').textContent = starter.blurb;
+        button.addEventListener('click', () => make(starter));
+        return button;
+      }
+
+      async function make(starter) {
+        const name = prompt('Name for the new ' + starter.title.toLowerCase(), starter.title.toLowerCase());
+        if (!name) return;
+        try {
+          const made = await drive.create({ path: [here, name].filter(Boolean).join('/'), from: starter.id });
+          sheet.removeAttribute('data-open');
+          say('Made ' + made.path);
+          location.href = made.href;
+        } catch (err) {
+          fail(err);
+        }
+      }
+
+      async function weigh() {
+        const all = flatten(root ?? { children: [] }).filter((entry) => entry.kind === 'doc');
+        const total = all.reduce((sum, entry) => sum + (entry.bytes ?? 0), 0);
+        const nodes = all.reduce((sum, entry) => sum + (entry.nodes ?? 0), 0);
+        document.querySelector('#weight').textContent =
+          all.length + ' documents · ' + bytes(total) + ' · ' + nodes.toLocaleString() + ' addressable nodes';
+        // Not a quota — there is no quota. It is the same number the `weigh`
+        // command reports, drawn so that a drive getting heavy is visible
+        // before it is a problem.
+        document.querySelector('#weight-bar').style.width = Math.min(100, (total / 5e7) * 100) + '%';
+      }
+
+      // ----------------------------------------------------------- navigation
+
+      function go(path) {
+        here = path;
+        view = 'drive';
+        location.hash = path ? '#/' + path : '';
+        drawNav();
+        refresh();
+      }
+
+      addEventListener('hashchange', () => {
+        const wanted = decodeURIComponent(location.hash.replace(/^#\/?/, ''));
+        if (wanted !== here) {
+          here = wanted;
+          refresh();
+        }
+      });
+
+      // A drag ends in a click, because a pointer that went down and came up
+      // over the listing is a click as far as the browser is concerned. Without
+      // this, dropping a document into a folder also opened it — the move
+      // worked and then the page left before you could see it.
+      let dragged = 0;
+
+      items.addEventListener('click', (event) => {
+        if (Date.now() - dragged < 400) return;
+        const more = event.target.closest('.more');
+        const item = event.target.closest('.item');
+        if (!item) return;
+        if (more) return openMenu(item, more);
+        if (item.dataset.kind === 'folder') return go(item.dataset.path);
+        if (view === 'trash') return say('Restore it first — it is in the trash.');
+        location.href = marble.href(item.dataset.path);
+      });
+
+      document.querySelector('#up').addEventListener('click', () => {
+        go(here.includes('/') ? here.slice(0, here.lastIndexOf('/')) : '');
+      });
+
+      document.querySelector('#nav').addEventListener('click', (event) => {
+        const item = event.target.closest('.nav-item');
+        if (!item || !item.dataset.nav) return;
+        view = item.dataset.nav;
+        if (view === 'drive') return go(here);
+        drawNav();
+        refresh();
+      });
+
+      document.querySelector('#pins').addEventListener('click', (event) => {
+        const pin = event.target.closest('.pin');
+        if (!pin || !pin.dataset.path) return;
+        if (pin.dataset.kind === 'folder') return go(pin.dataset.path);
+        location.href = marble.href(pin.dataset.path);
+      });
+
+      search.addEventListener('input', () => {
+        query = search.value.trim().toLowerCase();
+        draw();
+      });
+
+      // ------------------------------------------------------------ the verbs
+
+      document.querySelector('#new').addEventListener('click', async () => {
+        if (sheet.getAttribute('data-open') === '1') return sheet.removeAttribute('data-open');
+        const starters = await drive.starters();
+        const grid = document.querySelector('#starters');
+        grid.replaceChildren();
+        for (const starter of starters) grid.append(starterButton(starter));
+        sheet.setAttribute('data-open', '1');
+      });
+
+      document.querySelector('#mk').addEventListener('click', async () => {
+        const name = prompt('Name for the new folder');
+        if (!name) return;
+        try {
+          await drive.mkdir([here, name].filter(Boolean).join('/'));
+          refresh();
+        } catch (err) {
+          fail(err);
+        }
+      });
+
+      function openMenu(item, anchor) {
+        const path = item.dataset.path;
+        const isFolder = item.dataset.kind === 'folder';
+        const trashed = view === 'trash';
+        menu.replaceChildren();
+
+        const add = (label, fn) => {
+          const button = document.createElement('button');
+          button.textContent = label;
+          button.addEventListener('click', async () => {
+            menu.removeAttribute('data-open');
+            try {
+              await fn();
+            } catch (err) {
+              fail(err);
+            }
+          });
+          menu.append(button);
+        };
+
+        if (trashed) {
+          add('Restore', async () => {
+            await drive.restore(item.dataset.trashId);
+            refresh();
+          });
+        } else {
+          if (!isFolder) add('Open', () => (location.href = marble.href(path)));
+          add('Rename…', async () => {
+            const name = prompt('New name', leaf(path));
+            if (!name || name === leaf(path)) return;
+            const parent = path.includes('/') ? path.slice(0, path.lastIndexOf('/')) : '';
+            await drive.move(path, [parent, name].filter(Boolean).join('/'));
+            refresh();
+          });
+          add('Move to…', async () => {
+            const to = prompt('Folder to move it into (blank for the top)', here);
+            if (to === null) return;
+            await drive.move(path, [to.trim().replace(/^\/+|\/+$/g, ''), leaf(path)].filter(Boolean).join('/'));
+            refresh();
+          });
+          add(pinned(path) ? 'Unpin' : 'Pin to sidebar', () => togglePin(path, isFolder));
+          if (!isFolder) {
+            add('Make a copy', async () => {
+              await drive.create({ path: path + ' copy', copy: path });
+              refresh();
+            });
+            add('Download (one file)', () => window.open(drive.downloadHref(path), '_blank'));
+          }
+          menu.append(document.createElement('hr'));
+          add('Move to trash', async () => {
+            await drive.remove(path);
+            refresh();
+          });
+        }
+
+        const box = anchor.getBoundingClientRect();
+        menu.style.left = Math.min(box.left, innerWidth - 220) + 'px';
+        menu.style.top = Math.min(box.bottom + 4, innerHeight - 260) + 'px';
+        menu.setAttribute('data-open', '1');
+      }
+
+      addEventListener('pointerdown', (event) => {
+        if (!menu.contains(event.target) && !event.target.closest('.more')) {
+          menu.removeAttribute('data-open');
+        }
+        if (!sheet.contains(event.target) && !event.target.closest('#new')) {
+          sheet.removeAttribute('data-open');
+        }
+      });
+
+      addEventListener('keydown', (event) => {
+        if (event.key !== 'Escape') return;
+        menu.removeAttribute('data-open');
+        sheet.removeAttribute('data-open');
+      });
+
+      // --------------------------------------------------------------- pinning
+      //
+      // The one place in this document where the listing and the file meet. A
+      // pin is markup, so pinning files an insert and unpinning files a remove,
+      // and both are undoable with the same keys as any other edit.
+
+      const pinned = (path) => Boolean(document.querySelector('#pins > .pin[data-path="' + CSS.escape(path) + '"]'));
+
+      function togglePin(path, isFolder) {
+        const list = document.querySelector('#pins');
+        const already = list.querySelector('.pin[data-path="' + CSS.escape(path) + '"]');
+
+        if (already) {
+          const op = { type: 'remove', id: marble.id(already) };
+          const inverse = marble.invert(op);
+          already.remove();
+          if (inverse) marble.record({ redo: [op], undo: [inverse] });
+          marble.op(op, { immediate: true });
+          return say('Unpinned');
+        }
+
+        const id = marble.newId();
+        const label = marble.newId();
+        const icon = marble.newId();
+        const html =
+          '<li class="pin" data-marble-id="' + id + '" data-path="' + path + '" data-kind="' +
+          (isFolder ? 'folder' : 'doc') + '" data-marble-removable>' +
+          '<span class="ico" data-marble-id="' + icon + '">' + iconFor(isFolder ? 'folder' : 'doc') + '</span>' +
+          '<span data-marble-id="' + label + '" data-marble-editable>' + leaf(path) + '</span></li>';
+        const op = { type: 'insert', html, parentId: marble.id(list), beforeId: null };
+        marble.apply(op);
+        marble.record({ redo: [op], undo: [{ type: 'remove', id }] });
+        marble.op(op, { immediate: true });
+        drawPins();
+        say('Pinned — the sidebar is part of the file now');
+      }
+
+      // ------------------------------------------------------------- the drags
+      //
+      // Pointer events rather than the drag-and-drop API, for the same reason
+      // the sortable affordance is: a finger fires no dragstart, and a Drive you
+      // cannot use on a phone is not one you can use.
+
+      let lifting = null;
+      let over = null;
+
+      items.addEventListener('pointerdown', (event) => {
+        const item = event.target.closest('.item');
+        if (!item || event.target.closest('.more') || view === 'trash') return;
+        lifting = { item, x: event.clientX, y: event.clientY, moved: false };
+      });
+
+      addEventListener('pointermove', (event) => {
+        if (!lifting) return;
+        const far = Math.hypot(event.clientX - lifting.x, event.clientY - lifting.y) > 6;
+        if (!far && !lifting.moved) return;
+
+        if (!lifting.moved) {
+          lifting.moved = true;
+          lifting.item.classList.add('marble-lifting');
+          ghost.textContent = lifting.item.querySelector('b').textContent;
+          ghost.setAttribute('data-open', '1');
+          lifting.item.setPointerCapture?.(event.pointerId);
+        }
+        ghost.style.left = event.clientX + 12 + 'px';
+        ghost.style.top = event.clientY + 12 + 'px';
+
+        const under = document.elementFromPoint(event.clientX, event.clientY);
+        const folder = under?.closest?.('.item[data-kind="folder"], .crumb, .nav-item[data-nav="drive"]');
+        if (over !== folder) {
+          over?.classList.remove('marble-drop');
+          over = folder && folder !== lifting.item ? folder : null;
+          over?.classList.add('marble-drop');
+        }
+      });
+
+      addEventListener('pointerup', async () => {
+        if (!lifting) return;
+        const { item, moved } = lifting;
+        const target = over;
+        lifting = null;
+        if (moved) dragged = Date.now();
+        over?.classList.remove('marble-drop');
+        over = null;
+        ghost.removeAttribute('data-open');
+        item.classList.remove('marble-lifting');
+        if (!moved || !target) return;
+
+        const from = item.dataset.path;
+        const into = target.classList.contains('item') ? target.dataset.path : (target.dataset.path ?? '');
+        try {
+          await drive.move(from, [into, leaf(from)].filter(Boolean).join('/'));
+          say('Moved into ' + (into || 'My Drive'));
+          refresh();
+        } catch (err) {
+          fail(err);
+        }
+      });
+
+      // ---------------------------------------------------------- the toggles
+
+      for (const button of document.querySelectorAll('[data-set-view]')) {
+        button.addEventListener('click', () => {
+          const next = button.dataset.setView;
+          const id = marble.id(document.body);
+          if (!id) return;
+          // The page moves and the file is told, from the same value — composed
+          // here rather than read back off the element.
+          const was = document.body.getAttribute('data-view');
+          document.body.setAttribute('data-view', next);
+          marble.record({
+            redo: [{ type: 'setAttr', id, name: 'data-view', value: next }],
+            undo: [{ type: 'setAttr', id, name: 'data-view', value: was }],
+          });
+          marble.op({ type: 'setAttr', id, name: 'data-view', value: next }, { immediate: true });
+        });
+      }
+
+      // ---------------------------------------------------------- the listening
+
+      drive.on('*', () => {
+        if (view === 'templates') return;
+        refresh();
+      });
+      status.setAttribute('data-live', '1');
+      document.querySelector('#status-text').textContent = 'live';
+
+      // Re-derive after a reconcile: an edit to this file in another window
+      // rewrites the sidebar, and the current-nav class is not in the file.
+      marble.register(() => {
+        drawNav();
+        drawPins();
+      });
+
+      drawNav();
+      refresh();
+    };
+
+    if (window.marble?.drive) begin(window.marble);
+    else addEventListener('marble:drive', () => begin(window.marble), { once: true });
+  })();
+</script>
+
+__SCRIPT__
+</body>
+</html>

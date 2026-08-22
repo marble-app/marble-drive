@@ -1,0 +1,24 @@
+{
+  "name": "marble-drive",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "license": "MIT",
+  "description": "A Drive for Marble documents. Folders, a template gallery, and a host that serves every file as the app it is.",
+  "engines": {
+    "node": ">=22.0.0"
+  },
+  "bin": {
+    "marble-drive": "bin/marble-drive.js"
+  },
+  "scripts": {
+    "dev": "node --env-file-if-exists=.env --env-file-if-exists=.env.local bin/marble-drive.js serve",
+    "start": "node bin/marble-drive.js serve",
+    "weigh": "node bin/marble-drive.js weigh",
+    "backup": "node bin/marble-drive.js backup",
+    "test": "node --test --test-reporter=spec \"test/**/*.test.js\""
+  },
+  "dependencies": {
+    "@bdhmin/marble": "file:../marble"
+  }
+}

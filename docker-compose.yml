@@ -1,0 +1,35 @@
+# One drive, one disk, one secret.
+#
+#   cp .env.example .env   # then put a real secret in it
+#   docker compose up -d
+#
+# There is no database and no second service, because a document is a file and
+# the index is a folder listing. That is a decision with a cost — no queries
+# across documents — and it is written down in docs/STORE.md rather than
+# discovered here.
+
+services:
+  drive:
+    build:
+      context: .
+      args:
+        MARBLE_PACKAGE: ${MARBLE_PACKAGE:-@bdhmin/marble@^0.1.2}
+    restart: unless-stopped
+    ports:
+      - "${PORT:-4400}:4400"
+    environment:
+      MARBLE_DRIVE_ROOT: /data
+      MARBLE_DRIVE_SECRET: ${MARBLE_DRIVE_SECRET:?set a secret in .env — an ungated drive on a port is an open drive}
+      MARBLE_DRIVE_SECURE_COOKIE: ${MARBLE_DRIVE_SECURE_COOKIE:-1}
+      MARBLE_DRIVE_BACKUP_DIR: /backups
+      MARBLE_DRIVE_BACKUP_MINUTES: ${MARBLE_DRIVE_BACKUP_MINUTES:-60}
+      MARBLE_DRIVE_BACKUP_KEEP: ${MARBLE_DRIVE_BACKUP_KEEP:-24}
+      # Direct manipulation works without one; only the intent layer needs it.
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
+    volumes:
+      - drive:/data
+      - backups:/backups
+
+volumes:
+  drive:
+  backups:

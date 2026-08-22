@@ -1,0 +1,177 @@
+<!doctype html>
+<html lang="en" data-marble="1">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="marble:capabilities" content="storage; net=none">
+<title>__TITLE__</title>
+<style>
+  /* The Marble design system's palette, with one change the system does not
+     make: a document is white to the edge. The off-white paper belongs to
+     the interface — the Drive itself — not to the thing you are writing in.
+     One dusty blue does all the accenting, the same blue in every starter,
+     because five colours would be five claims and there is only one. */
+  :root {
+    --ink: #111111;
+    --muted: #5a5a5a;
+    --line: #ddd9cf;
+    --paper: #ffffff;
+    --card: #ffffff;
+    --accent: #9bb6cf;
+    --accent-soft: #f1f5f8;
+    --accent-ink: #738698;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --ink: #e8e6e1; --muted: #a3a7ab; --line: #2f3438;
+      --paper: #1c1f22; --card: #1c1f22;
+      --accent: #7fa8c9; --accent-soft: #1d2932; --accent-ink: #9dc0dc;
+    }
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; padding: 2.5rem 1.5rem 8rem; background: var(--paper); color: var(--ink);
+    font: 15px/1.5 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    -webkit-font-smoothing: antialiased;
+  }
+  .sheet { max-width: 62rem; margin: 0 auto; }
+  h1 { font-size: 1.5rem; margin: 0 0 .2rem; letter-spacing: -.015em; }
+  .lede { color: var(--muted); margin: 0 0 1.5rem; font-size: .95rem; }
+
+  /* The column count is one custom property on the grid, so adding a column is
+     one setAttr plus one cell per row — and the layout has no second copy of
+     "how many columns there are" to fall out of step with the markup. */
+  /* Every row is its own grid over the same track list, so the columns line up
+     without the rows having to be children of one grid — which is what leaves
+     room for a drag handle beside a row. */
+  .grid {
+    --cols: 4;
+    background: var(--card); border: 1px solid var(--line); border-radius: 8px;
+  }
+  .rows { display: block; }
+  .row {
+    position: relative;
+    display: grid; grid-template-columns: repeat(var(--cols), minmax(7rem, 1fr));
+  }
+  .cell {
+    padding: .5rem .65rem; border-right: 1px solid var(--line); border-bottom: 1px solid var(--line);
+    min-height: 2.3rem; outline: none; font-variant-numeric: tabular-nums;
+  }
+  .head .cell { background: var(--accent-soft); font-weight: 600; color: var(--muted); }
+  .cell:hover { background: var(--accent-soft); }
+  .cell:focus { background: var(--card); box-shadow: inset 0 0 0 2px var(--accent-ink); }
+
+  .bar { display: flex; gap: .5rem; margin-top: .75rem; }
+  .btn {
+    appearance: none; padding: .45rem .8rem; border: 1px solid var(--line); border-radius: 999px;
+    background: var(--card); color: var(--muted); font: 500 .85rem/1 inherit; cursor: pointer;
+  }
+  .btn:hover { color: var(--accent-ink); border-color: var(--accent); }
+  .row:last-child .cell { border-bottom: 0; }
+  .cell:last-child { border-right: 0; }
+</style>
+</head>
+<body>
+<main class="sheet" data-marble-id="__ID__">
+
+  <h1 data-marble-id="__ID__" data-marble-editable>__TITLE__</h1>
+  <p class="lede" data-marble-id="__ID__" data-marble-editable>Every cell is an element in the file. So is every row, and so is the number of columns — which is why you can change all three from here.</p>
+
+  <div class="grid" data-marble-id="__ID__" id="grid" style="--cols:4">
+    <div class="row head" data-marble-id="__ID__" id="head">
+      <div class="cell" data-marble-id="__ID__" data-marble-editable>Item</div>
+      <div class="cell" data-marble-id="__ID__" data-marble-editable>Owner</div>
+      <div class="cell" data-marble-id="__ID__" data-marble-editable>Due</div>
+      <div class="cell" data-marble-id="__ID__" data-marble-editable>Notes</div>
+    </div>
+    <div class="rows" data-marble-id="__ID__" id="rows" data-marble-sortable="rows">
+      <div class="row" data-marble-id="__ID__" data-marble-removable>
+        <div class="cell" data-marble-id="__ID__" data-marble-editable>First thing</div>
+        <div class="cell" data-marble-id="__ID__" data-marble-editable>You</div>
+        <div class="cell" data-marble-id="__ID__" data-marble-editable>Friday</div>
+        <div class="cell" data-marble-id="__ID__" data-marble-editable></div>
+      </div>
+      <div class="row" data-marble-id="__ID__" data-marble-removable>
+        <div class="cell" data-marble-id="__ID__" data-marble-editable>Second thing</div>
+        <div class="cell" data-marble-id="__ID__" data-marble-editable></div>
+        <div class="cell" data-marble-id="__ID__" data-marble-editable></div>
+        <div class="cell" data-marble-id="__ID__" data-marble-editable></div>
+      </div>
+    </div>
+  </div>
+
+  <div class="bar" data-marble-transient>
+    <button class="btn" data-marble-add="#tpl-row" data-marble-into="#rows">+ row</button>
+    <button class="btn" id="add-col">+ column</button>
+  </div>
+
+</main>
+
+<template id="tpl-row" data-marble-transient>
+  <div class="row" data-marble-removable>
+    <div class="cell" data-marble-editable></div>
+    <div class="cell" data-marble-editable></div>
+    <div class="cell" data-marble-editable></div>
+    <div class="cell" data-marble-editable></div>
+  </div>
+</template>
+
+<script>
+  // Adding a column is this document's own behaviour, not an affordance: a
+  // generic "add" clones one template into one list, and a column is a cell in
+  // every row plus a heading plus one number on the grid. Three kinds of edit,
+  // one gesture — which is exactly the sort of thing a document is allowed to
+  // know about itself.
+  (() => {
+    const begin = (marble) => {
+      const button = document.querySelector('#add-col');
+      const grid = document.querySelector('#grid');
+      if (!button || !grid) return;
+
+      button.addEventListener('click', () => {
+        const rows = [document.querySelector('#head'), ...document.querySelectorAll('#rows > .row')];
+        const cols = Number(getComputedStyle(grid).getPropertyValue('--cols')) || rows[0].children.length;
+
+        const redo = [];
+        const undo = [];
+
+        for (const row of rows) {
+          const id = marble.newId();
+          const head = row.classList.contains('head');
+          const op = {
+            type: 'insert',
+            parentId: marble.id(row),
+            beforeId: null,
+            html: `<div class="cell" data-marble-id="${id}" data-marble-editable>${head ? 'Column' : ''}</div>`,
+          };
+          // The page moves and the file is told, from the same op.
+          marble.apply(op);
+          redo.push(op);
+          undo.unshift({ type: 'remove', id });
+        }
+
+        // Composed rather than read back off the element: the browser's own
+        // serialization of a style attribute is not this document's source. And
+        // the inverse is taken before the write, or it would be the value we
+        // are about to put there.
+        undo.push({ type: 'setAttr', id: marble.id(grid), name: 'style', value: grid.getAttribute('style') });
+        const style = `--cols:${cols + 1}`;
+        grid.setAttribute('style', style);
+        redo.push({ type: 'setAttr', id: marble.id(grid), name: 'style', value: style });
+
+        // One gesture, so one undo step: the inverses go in together, or the
+        // column comes back a cell at a time.
+        marble.record({ redo, undo });
+        for (const op of redo) marble.op(op);
+        marble.flush();
+      });
+    };
+
+    if (window.marble) begin(window.marble);
+    else addEventListener('marble:ready', (event) => begin(event.detail), { once: true });
+  })();
+</script>
+
+__SCRIPT__
+</body>
+</html>

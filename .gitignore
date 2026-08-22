@@ -1,0 +1,9 @@
+node_modules/
+.env
+.env.local
+# The default drive root. A drive belongs to whoever is running the host, not
+# to this repository — and `.marble/` under it is their history.
+drive/
+backups/
+.DS_Store
+*.log

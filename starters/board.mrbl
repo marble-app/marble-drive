@@ -1,0 +1,126 @@
+<!doctype html>
+<html lang="en" data-marble="1">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="marble:capabilities" content="storage; net=none">
+<title>__TITLE__</title>
+<style>
+  /* The Marble design system's palette, with one change the system does not
+     make: a document is white to the edge. The off-white paper belongs to
+     the interface — the Drive itself — not to the thing you are writing in.
+     One dusty blue does all the accenting, the same blue in every starter,
+     because five colours would be five claims and there is only one. */
+  :root {
+    --ink: #111111;
+    --muted: #5a5a5a;
+    --line: #ddd9cf;
+    --paper: #ffffff;
+    --card: #ffffff;
+    --accent: #9bb6cf;
+    --accent-soft: #f1f5f8;
+    --accent-ink: #738698;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --ink: #e8e6e1; --muted: #a3a7ab; --line: #2f3438;
+      --paper: #1c1f22; --card: #1c1f22;
+      --accent: #7fa8c9; --accent-soft: #1d2932; --accent-ink: #9dc0dc;
+    }
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; padding: 2.5rem 1.5rem 6rem; background: var(--paper); color: var(--ink);
+    font: 15px/1.5 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    -webkit-font-smoothing: antialiased;
+  }
+  h1 { font-size: 1.4rem; margin: 0 0 .2rem; letter-spacing: -.015em; }
+  .lede { color: var(--muted); margin: 0 0 1.5rem; font-size: .95rem; }
+
+  .cols { display: flex; gap: 1rem; align-items: flex-start; overflow-x: auto; padding: 0 0 1rem 1.6rem; }
+  .col { flex: 0 0 17rem; }
+  .col-head { display: flex; align-items: baseline; gap: .5rem; padding: 0 .25rem .5rem; }
+  .col-head h2 { font-size: .95rem; margin: 0; letter-spacing: -.005em; }
+  /* How many cards is a count of elements, so it is counted rather than kept. */
+  .cards { counter-reset: card; }
+  .card { counter-increment: card; }
+  .col-head .n { font: 600 .7rem/1 ui-monospace, SFMono-Regular, Menlo, monospace; color: var(--muted); }
+
+  .cards {
+    list-style: none; margin: 0; padding: .25rem; min-height: 4rem;
+    display: flex; flex-direction: column; gap: .5rem;
+    background: color-mix(in srgb, var(--line) 35%, transparent); border-radius: 10px;
+  }
+  .card {
+    background: var(--card); border: 1px solid var(--line); border-radius: 8px;
+    padding: .6rem .7rem; box-shadow: 0 1px 2px rgba(0,0,0,.04);
+  }
+  .card h3 { font-size: .88rem; margin: 0 0 .2rem; line-height: 1.35; }
+  .card p { margin: 0; font-size: .8rem; color: var(--muted); line-height: 1.45; }
+  [data-marble-editable] { outline: none; border-radius: 3px; }
+  [data-marble-editable]:hover { background: var(--accent-soft); }
+  [data-marble-editable]:focus { background: var(--card); box-shadow: 0 0 0 1px var(--accent), 0 0 0 4px var(--accent-soft); }
+  .add {
+    appearance: none; width: 100%; margin-top: .5rem; padding: .45rem;
+    border: 1px dashed var(--line); border-radius: 8px; background: none;
+    color: var(--muted); font: 500 .82rem/1 inherit; cursor: pointer;
+  }
+  .add:hover { color: var(--accent-ink); border-color: var(--accent); }
+</style>
+</head>
+<body>
+<main data-marble-id="__ID__">
+
+  <h1 data-marble-id="__ID__" data-marble-editable>__TITLE__</h1>
+  <p class="lede" data-marble-id="__ID__" data-marble-editable>A card’s column is the column it sits in and nothing else. Drag one across and you have moved it in the file.</p>
+
+  <div class="cols" data-marble-id="__ID__" data-marble-sortable="cols">
+
+    <section class="col" data-marble-id="__ID__" data-marble-removable>
+      <header class="col-head" data-marble-id="__ID__">
+        <h2 data-marble-id="__ID__" data-marble-editable>To do</h2>
+      </header>
+      <ol class="cards" data-marble-id="__ID__" data-marble-sortable="cards">
+        <li class="card" data-marble-id="__ID__" data-marble-removable>
+          <h3 data-marble-id="__ID__" data-marble-editable>Something to do</h3>
+          <p data-marble-id="__ID__" data-marble-editable>And a line about what it means.</p>
+        </li>
+      </ol>
+      <button class="add" data-marble-transient data-marble-add="#tpl-card" data-marble-into="prev">+ card</button>
+    </section>
+
+    <section class="col" data-marble-id="__ID__" data-marble-removable>
+      <header class="col-head" data-marble-id="__ID__">
+        <h2 data-marble-id="__ID__" data-marble-editable>Doing</h2>
+      </header>
+      <ol class="cards" data-marble-id="__ID__" data-marble-sortable="cards">
+        <li class="card" data-marble-id="__ID__" data-marble-removable>
+          <h3 data-marble-id="__ID__" data-marble-editable>Something in flight</h3>
+          <p data-marble-id="__ID__" data-marble-editable>Drag it right when it is finished.</p>
+        </li>
+      </ol>
+      <button class="add" data-marble-transient data-marble-add="#tpl-card" data-marble-into="prev">+ card</button>
+    </section>
+
+    <section class="col" data-marble-id="__ID__" data-marble-removable>
+      <header class="col-head" data-marble-id="__ID__">
+        <h2 data-marble-id="__ID__" data-marble-editable>Done</h2>
+      </header>
+      <ol class="cards" data-marble-id="__ID__" data-marble-sortable="cards"></ol>
+      <button class="add" data-marble-transient data-marble-add="#tpl-card" data-marble-into="prev">+ card</button>
+    </section>
+
+  </div>
+
+</main>
+
+<template id="tpl-card" data-marble-transient>
+  <li class="card" data-marble-removable>
+    <h3 data-marble-editable>New card</h3>
+    <p data-marble-editable>What it is.</p>
+  </li>
+</template>
+
+__SCRIPT__
+</body>
+</html>

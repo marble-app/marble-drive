@@ -1,0 +1,90 @@
+<!doctype html>
+<html lang="en" data-marble="1">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="marble:capabilities" content="storage; net=none">
+<title>__TITLE__</title>
+<style>
+  /* The Marble design system's palette, with one change the system does not
+     make: a document is white to the edge. The off-white paper belongs to
+     the interface — the Drive itself — not to the thing you are writing in.
+     One dusty blue does all the accenting, the same blue in every starter,
+     because five colours would be five claims and there is only one. */
+  :root {
+    --ink: #111111;
+    --muted: #5a5a5a;
+    --line: #ddd9cf;
+    --paper: #ffffff;
+    --card: #ffffff;
+    --accent: #9bb6cf;
+    --accent-soft: #f1f5f8;
+    --accent-ink: #738698;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --ink: #e8e6e1; --muted: #a3a7ab; --line: #2f3438;
+      --paper: #1c1f22; --card: #1c1f22;
+      --accent: #7fa8c9; --accent-soft: #1d2932; --accent-ink: #9dc0dc;
+    }
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; padding: 3.5rem 1.5rem 8rem;
+    background: var(--paper); color: var(--ink);
+    font: 16px/1.7 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    -webkit-font-smoothing: antialiased;
+  }
+  .page {
+    max-width: 46rem; margin: 0 auto; padding: 3.5rem 4rem 4rem;
+    background: var(--card); border: 1px solid var(--line); border-radius: 8px;
+  }
+  h1 { font-size: 2rem; line-height: 1.2; margin: 0 0 .35rem; letter-spacing: -.02em; }
+  .lede { color: var(--muted); margin: 0 0 2.5rem; font-size: 1.05rem; }
+  .sections { list-style: none; margin: 0; padding: 0; }
+  .section { padding: .35rem 0 1.4rem; }
+  .section h2 { font-size: 1.15rem; margin: 0 0 .4rem; letter-spacing: -.01em; }
+  .section p { margin: 0 0 .7rem; }
+  [data-marble-editable] { outline: none; border-radius: 3px; }
+  [data-marble-editable]:hover { background: var(--accent-soft); }
+  [data-marble-editable]:focus { background: var(--card); box-shadow: 0 0 0 1px var(--accent), 0 0 0 4px var(--accent-soft); }
+  .add {
+    appearance: none; display: block; width: 100%; margin-top: .5rem; padding: .6rem;
+    border: 1px dashed var(--line); border-radius: 6px; background: none;
+    color: var(--muted); font: 500 .9rem/1 inherit; cursor: pointer;
+  }
+  .add:hover { color: var(--accent-ink); border-color: var(--accent); }
+  @media (max-width: 40rem) { .page { padding: 2rem 1.5rem; } }
+</style>
+</head>
+<body>
+<article class="page" data-marble-id="__ID__">
+
+  <h1 data-marble-id="__ID__" data-marble-editable>__TITLE__</h1>
+  <p class="lede" data-marble-id="__ID__" data-marble-editable>Type over anything on this page. Drag a section by the handle on its left. What you see is the file.</p>
+
+  <ol class="sections" data-marble-id="__ID__" data-marble-sortable="sections">
+    <li class="section" data-marble-id="__ID__" data-marble-removable>
+      <h2 data-marble-id="__ID__" data-marble-editable>The first section</h2>
+      <p data-marble-id="__ID__" data-marble-editable>There is no save button, because there is nothing to save — the change you just made is the file on disk. Open this document in a text editor and you will find this sentence in it.</p>
+    </li>
+    <li class="section" data-marble-id="__ID__" data-marble-removable>
+      <h2 data-marble-id="__ID__" data-marble-editable>The second section</h2>
+      <p data-marble-id="__ID__" data-marble-editable>Sections reorder by dragging the handle, or by focusing it and pressing the arrow keys. Either way the move is a single edit to the file, and undo is the same move backwards.</p>
+    </li>
+  </ol>
+
+  <button class="add" data-marble-transient data-marble-add="#tpl-section" data-marble-into="prev">+ section</button>
+
+</article>
+
+<template id="tpl-section" data-marble-transient>
+  <li class="section" data-marble-removable>
+    <h2 data-marble-editable>New section</h2>
+    <p data-marble-editable>Say something here.</p>
+  </li>
+</template>
+
+__SCRIPT__
+</body>
+</html>
