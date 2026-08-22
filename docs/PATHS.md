@@ -35,6 +35,25 @@ time. The grammar already makes traversal impossible; two independent reasons is
 the right number for the function that turns a stranger's string into a
 filesystem call.
 
+## A name from somewhere else
+
+Everything above is what the Drive accepts. A file dragged in off a desktop was
+named under a different grammar, and `Q3 Résumé (final).mrbl` is an ordinary
+name there and three separate refusals here — the bracket, the accent, and the
+extension. Turning the drop away would be the Drive refusing work somebody
+already has.
+
+So `safeSegment` exists as the one-way door between the two: accents flattened
+rather than dropped (`Résumé` → `Resume`, because the bytes of a name are not
+what a person means by it), anything else outside the grammar collapsed to a
+space, a leading non-alphanumeric taken off, 64 characters, no trailing dot.
+`safePath` is the same over a whole path, which is what a *folder* dropped in
+arrives as. Both end by running the answer back through `parsePath`, so a
+"safe" name that is not one throws here rather than three frames further in.
+
+A name can never sanitise its way into `.marble`: the leading dot is stripped,
+and the grammar would refuse the reserved word anyway.
+
 ## The flat key
 
 `docKey('work/q3/notes')` is `'work%2Fq3%2Fnotes'`. Marble's history writes

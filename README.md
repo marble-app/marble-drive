@@ -23,6 +23,11 @@ The first run writes one document into the drive: the Drive itself.
 ## What you can do with it
 
 - **Folders.** Nested paths, drag a document onto a folder to move it, breadcrumbs.
+- **Drag documents in.** Drop a `.mrbl` anywhere on the page and it lands in the
+  folder you are looking at; drop it on a folder and it lands in that one. A
+  whole folder from the desktop comes in with its shape intact. A name the path
+  grammar would refuse is flattened rather than turned away, and what is not a
+  document is left where it was.
 - **New.** Five starters — document, sheet, slides, board, canvas. "New sheet" is
   a clone, and the clone is yours to reshape.
 - **Everything is live.** Two tabs on one document stay in step. So does an edit
@@ -83,7 +88,9 @@ The image holds the host; the drive is a volume. See [docs/DEPLOY.md](docs/DEPLO
 npm test
 ```
 
-74 of them. They cover the path grammar, the store, the watcher, the op log, the
+85 of them. They cover the path grammar, the store, the watcher, the op log, the
 gate, the backups, the gallery, the blob round trip, and the loop end to end over
-HTTP — including that the client which filed an edit is never told about it, and
-that every document this repo can produce passes Marble's own doctor.
+HTTP — including that the client which filed an edit is never told about it, that
+a document arriving from outside is checked against the format's own invariants
+before it is let in, and that every document this repo can produce passes
+Marble's own doctor.

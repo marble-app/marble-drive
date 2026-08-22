@@ -31,6 +31,7 @@ The `k-tree` card is explicit that this is the shape of the change:
 | `marble.drive.starters()` | what you can make |
 | `marble.drive.create({path, from, copy})` | a document from a starter, or a copy of another document |
 | `marble.drive.mkdir(path)` | |
+| `marble.drive.upload({folder, name, source})` | a document from outside the drive. The body is the document itself, not JSON with one inside it; `name` is what it was called where it came from, and the host is what decides what this drive can call it |
 | `marble.drive.move(from, to)` | rename and move are one verb, because on a folder they are one operation |
 | `marble.drive.remove(path)` | to the trash, not to nowhere |
 | `marble.drive.trash()` | what is in it |

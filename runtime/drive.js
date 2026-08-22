@@ -22,12 +22,20 @@
 
     const CLIENT = Math.random().toString(36).slice(2, 10);
 
-    const ask = async (route, { method = 'GET', body = null } = {}) => {
+    // `raw` is for the one verb whose body is a document rather than a
+    // description of one. It goes up as itself: a 4 MB file JSON-quoted is a
+    // 4 MB string with every byte of it escaped, and the client id travels in
+    // the query instead, the way `/ops` already does it.
+    const ask = async (route, { method = 'GET', body = null, raw = null } = {}) => {
       const response = await fetch(route, {
         method,
         cache: 'no-store',
-        headers: body ? { 'Content-Type': 'application/json' } : undefined,
-        body: body ? JSON.stringify({ client: CLIENT, ...body }) : undefined,
+        headers: raw !== null
+          ? { 'Content-Type': 'text/html; charset=utf-8' }
+          : body
+            ? { 'Content-Type': 'application/json' }
+            : undefined,
+        body: raw !== null ? raw : body ? JSON.stringify({ client: CLIENT, ...body }) : undefined,
       });
       const answer = await response.json().catch(() => ({}));
       if (!response.ok) throw new Error(answer.error ?? `${route} answered ${response.status}`);
@@ -51,6 +59,17 @@
       ask('/drive/new', { method: 'POST', body: { path, from, copy } });
 
     const mkdir = (path) => ask('/drive/mkdir', { method: 'POST', body: { path } });
+
+    // A document from somewhere else, into a folder here. `name` is the name it
+    // had where it came from — the host is the one that knows what names this
+    // drive accepts, so it sanitises rather than making every caller guess.
+    const upload = ({ folder = '', name, source }) =>
+      ask(
+        `/drive/upload?folder=${encodeURIComponent(folder)}` +
+          `&name=${encodeURIComponent(name)}&client=${CLIENT}`,
+        { method: 'POST', raw: source },
+      );
+
     const move = (from, to) => ask('/drive/move', { method: 'POST', body: { from, to } });
     const remove = (path) => ask('/drive/trash', { method: 'POST', body: { path } });
     const restore = (id, to = null) => ask('/drive/untrash', { method: 'POST', body: { id, to } });
@@ -134,6 +153,7 @@
       trash,
       create,
       mkdir,
+      upload,
       move,
       remove,
       restore,

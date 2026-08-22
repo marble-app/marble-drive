@@ -31,6 +31,16 @@ const post = (route, body) =>
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(body ?? {}),
   });
+/** The upload route, which takes the document as the body rather than as a
+ *  field in a JSON object. The two things it knows about the file — where it
+ *  goes and what it was called — travel in the query, the way `/ops` does it. */
+const put = (folder, name, source, client = 'up') =>
+  fetch(
+    `${base}/drive/upload?folder=${encodeURIComponent(folder)}` +
+      `&name=${encodeURIComponent(name)}&client=${client}`,
+    { method: 'POST', headers: { 'Content-Type': 'text/html; charset=utf-8' }, body: source },
+  );
+
 const asJson = async (response) => {
   const body = await response.json();
   assert.ok(response.ok, `${response.status} ${JSON.stringify(body)}`);
@@ -234,6 +244,84 @@ test('a copy is a copy of the bytes, because a document is one file', async () =
   ]);
   assert.equal(made.replace(/<title>[^<]*/, ''), original.replace(/<title>[^<]*/, ''));
   assert.match(made, /<title>twice copy<\/title>/);
+});
+
+// ------------------------------------------------------------------ uploading
+
+// A document from somewhere else. Small, but a real one: it has to survive the
+// doctor, because the route asks the format's own invariants about anything
+// arriving from outside.
+const brought = (title, id = 'aa11bb22') =>
+  `<!doctype html>\n<html lang="en" data-marble="1">\n<head><meta charset="utf-8"><title>${title}</title></head>\n` +
+  `<body data-marble-id="body${id}">\n<h1 data-marble-id="${id}" data-marble-editable>${title}</h1>\n</body>\n</html>\n`;
+
+test('a document dropped into the drive lands in the folder it was dropped on', async () => {
+  const made = await asJson(await put('archive', 'Brought In.mrbl', brought('Brought In')));
+  assert.equal(made.path, 'archive/Brought In');
+  assert.equal(made.href, '/a/archive%2FBrought%20In');
+  assert.deepEqual(made.warnings, []);
+
+  // Served as the app it is, not previewed — the whole point of the drive.
+  const page = await (await get('/a/archive%2FBrought%20In')).text();
+  assert.match(page, /<script src="\/runtime\/marble\.js" data-marble-app="archive\/Brought In"/);
+  assert.match(page, /<h1 data-marble-id="aa11bb22"/);
+
+  // And it is in the tree, in that folder, rather than at the root.
+  const tree = await asJson(await get('/docs?tree=1'));
+  const folder = tree.children.find((child) => child.path === 'archive');
+  assert.ok(folder.children.some((child) => child.path === 'archive/Brought In'));
+});
+
+test('a drop at the top level lands at the top level', async () => {
+  const made = await asJson(await put('', 'Loose.mrbl', brought('Loose', 'cc33dd44')));
+  assert.equal(made.path, 'Loose');
+});
+
+test('a filename this grammar would refuse is sanitised, not turned away', async () => {
+  // Every one of these is an ordinary name on a filesystem and three separate
+  // refusals in `parsePath`. Refusing a drop that could have worked is worse.
+  const made = await asJson(await put('', 'Q3 Résumé (final).mrbl', brought('Résumé', 'ee55ff66')));
+  assert.equal(made.path, 'Q3 Resume final');
+
+  // The folder a dropped directory came in as gets the same treatment, and the
+  // parents are made on the way.
+  const nested = await asJson(await put('Photos & Notes/', 'Ünterlagen.html', brought('U', '11aa22bb')));
+  assert.equal(nested.path, 'Photos Notes/Unterlagen');
+});
+
+test('dropping the same document twice gets a number, the way a new one does', async () => {
+  const again = await asJson(await put('', 'Loose.mrbl', brought('Loose', 'dd44ee55')));
+  assert.equal(again.path, 'Loose 1');
+});
+
+test('what is not a document does not become one', async () => {
+  const notHtml = await put('', 'notes.mrbl', 'just some words');
+  assert.equal(notHtml.status, 400);
+  assert.match((await notHtml.json()).error, /not a document/);
+
+  assert.equal((await put('', 'empty.mrbl', '   ')).status, 400);
+
+  // Two nodes under one id is the one thing that cannot be let in: every op
+  // naming it would edit the wrong one, silently, from then on. The doctor is
+  // the format's own answer to that, and this route asks it rather than
+  // keeping a second opinion.
+  const collided = brought('Twins').replace('</body>', '<p data-marble-id="aa11bb22">and again</p></body>');
+  const refused = await put('', 'twins.mrbl', collided);
+  assert.equal(refused.status, 400);
+  assert.match((await refused.json()).error, /not addressable/);
+  assert.equal((await get('/a/twins')).status, 404);
+});
+
+test('an upload is announced to the drive, and never to whoever filed it', async () => {
+  const others = collect('/events?drive=1&client=someone-else', { want: 1, ms: 1500 });
+  const uploader = collect('/events?drive=1&client=the-dropper', { want: 1, ms: 900 });
+  await Promise.all([others.ready, uploader.ready]);
+
+  await asJson(await put('', 'Announced.mrbl', brought('Announced', '99xx88yy'), 'the-dropper'));
+
+  const heard = await others.frames;
+  assert.ok(heard.some((frame) => frame.event === 'created' && JSON.parse(frame.data).path === 'Announced'));
+  assert.deepEqual(await uploader.frames, []);
 });
 
 test('a bad path is a 400 with a sentence, not a stack trace', async () => {

@@ -19,13 +19,13 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 import { backupNow, scheduleBackups } from './backup.js';
-import { bytesOf, chooseProvider, enginePath, guardOps, shaOf } from './engine.js';
+import { bytesOf, chooseProvider, enginePath, examine, guardOps, shaOf } from './engine.js';
 import { blobsIn, extract, flatten } from './flatten.js';
 import { createGate } from './gate.js';
 import { escapeHtml, html, json, readBody, readJson, send, text } from './http.js';
 import { createIntents } from './intent-routes.js';
 import { createOpLog } from './oplog.js';
-import { PathError, parsePath, splitPath } from './paths.js';
+import { PathError, joinPath, parsePath, safePath, safeSegment, splitPath, withoutDocExt } from './paths.js';
 import { build as buildStarter, list as listStarters } from './gallery.js';
 import { createChannels } from './sse.js';
 import { createStore } from './store/index.js';
@@ -298,6 +298,36 @@ export async function createDrive(config, { log = console } = {}) {
         return json(res, 200, { ok: true, path: docPath, href: `/a/${encodeURIComponent(docPath)}` });
       }
 
+      // A document arriving from outside the drive — dropped onto the page, or
+      // posted by anything else that has one. Deliberately shaped like `/ops`
+      // rather than like the other drive verbs: the body is the document, not
+      // JSON with a document inside it, so a 4 MB file is 4 MB on the wire
+      // instead of a JSON string quoting every byte of it.
+      //
+      // Where it lands is two strings — the folder, and the name the file had
+      // on the other machine — because those are the two things a drop knows.
+      // Both are sanitised rather than refused: `Q3 Résumé (final).mrbl` is an
+      // ordinary filename and three separate refusals in this repo's grammar.
+      if (route === '/drive/upload' && req.method === 'POST') {
+        const folder = parsePath(safePath(url.searchParams.get('folder') ?? ''));
+        const name = safeSegment(withoutDocExt(url.searchParams.get('name') ?? ''));
+        const client = url.searchParams.get('client');
+        const source = (await readBody(req, config.maxBodyBytes)).toString('utf8');
+
+        const verdict = inspect(name, source);
+        if (verdict.error) return json(res, 400, verdict);
+
+        const docPath = await freePath(joinPath(folder, name));
+        await putDocument(docPath, source, { label: 'uploaded', client });
+        return json(res, 200, {
+          ok: true,
+          path: docPath,
+          href: `/a/${encodeURIComponent(docPath)}`,
+          bytes: bytesOf(source),
+          warnings: verdict.warnings,
+        });
+      }
+
       if (route === '/drive/mkdir' && req.method === 'POST') {
         const body = await readJson(req, config.maxBodyBytes);
         const made = await store.mkdir(body.path);
@@ -447,6 +477,44 @@ button{background:#738698;color:#fafaf7;border-color:#738698;cursor:pointer}p{co
       if (!(await store.has(candidate)) && !(await store.hasFolder(candidate))) return candidate;
     }
     throw new PathError(`too many documents called "${name}"`);
+  }
+
+  /** What the drive thinks of a document somebody just handed it: `{error}`,
+   *  or `{warnings}` and it goes in.
+   *
+   *  Two questions decide it, and only two. Is it a document at all — because a
+   *  drive that will serve anything as a page is a drive that will serve the
+   *  404 page somebody dropped by accident. And does it still address, which is
+   *  the one invariant the format has: two nodes under one id means every op
+   *  naming it edits the wrong one, silently, from then on.
+   *
+   *  Everything else the doctor notices comes back as a warning and does not
+   *  stop the write. A drive that refuses to hold a document it merely has a
+   *  note about is a drive you cannot move your work into.
+   */
+  function inspect(name, source) {
+    if (!source.trim()) return { error: `"${name}" is empty` };
+    if (!/<html[\s>]/i.test(source) && !/<!doctype\s+html/i.test(source)) {
+      return {
+        error: `"${name}" is not a document`,
+        hint: 'a .mrbl is an HTML file, and this one has no <html> in it',
+      };
+    }
+
+    const findings = examine(`${name}.mrbl`, source);
+    const errors = findings.filter((finding) => finding.level === 'error');
+    if (errors.length) {
+      return {
+        error: `"${name}" is not addressable — ${errors[0].message}`,
+        hint:
+          errors.length > 1
+            ? `line ${errors[0].line}, and ${errors.length - 1} more like it`
+            : `line ${errors[0].line}`,
+      };
+    }
+    return {
+      warnings: findings.map((finding) => `line ${finding.line}: ${finding.message}`),
+    };
   }
 
   /** Fork on edit's other half: a copy is a copy of the bytes, because a

@@ -206,7 +206,10 @@
   .pin[data-kind="doc"] .ico { color: var(--accent-ink); }
   .item .name b { font-weight: 500; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .item .row-meta { color: var(--faint); font-size: .82rem; white-space: nowrap; }
-  .item.marble-drop { outline: 2px solid var(--accent-ink); outline-offset: -2px; border-radius: 8px; }
+  /* What a drop would land in. One rule rather than one per target, because a
+     row, a breadcrumb and a nav entry all mean the same thing when something is
+     hovering over them — and the crumbs and the nav had no highlight at all. */
+  .marble-drop { outline: 2px solid var(--accent-ink); outline-offset: -2px; border-radius: 8px; }
   .item.marble-lifting { opacity: .45; }
   .item .more {
     position: absolute; top: .4rem; right: .4rem; width: 1.7rem; height: 1.7rem;
@@ -265,6 +268,22 @@
     box-shadow: var(--shadow); font-size: .85rem; display: none;
   }
   .ghost[data-open="1"] { display: block; }
+
+  /* A file on its way in from outside. The overlay is the whole window because
+     a drop anywhere lands in the folder you are looking at, and it takes no
+     pointer events at all — otherwise it would be the thing every dragover
+     found, and no row underneath it could ever be a target. */
+  .drop {
+    position: fixed; inset: .4rem; z-index: 45; pointer-events: none; display: none;
+    border: 2px dashed var(--accent-ink); border-radius: var(--radius);
+    background: color-mix(in srgb, var(--accent-soft) 72%, transparent);
+  }
+  .drop[data-open="1"] { display: grid; place-items: center; }
+  .drop b {
+    padding: .6rem 1.1rem; border-radius: 999px; font-weight: 500;
+    background: var(--card); border: 1px solid var(--accent-ink); color: var(--accent-ink);
+    box-shadow: var(--shadow);
+  }
 
   @media (max-width: 52rem) {
     .side { flex-basis: 4.5rem; }
@@ -366,6 +385,7 @@
 <div class="menu" id="menu" data-marble-transient></div>
 <div class="toast" id="toast" data-marble-transient></div>
 <div class="ghost" id="ghost" data-marble-transient></div>
+<div class="drop" id="drop" data-marble-transient><b></b></div>
 
 <script>
   // The Drive's own behaviour.
@@ -390,6 +410,7 @@
       const sheet = $('#sheet');
       const toast = $('#toast');
       const ghost = $('#ghost');
+      const dropzone = $('#drop');
       const search = $('#q');
       const status = $('#status');
 
@@ -431,7 +452,7 @@
       const ICON = {
         folder:
           '<svg class="glyph" viewBox="0 0 16 16" aria-hidden="true" focusable="false">' +
-          '<path fill="currentColor" d="M1.6 4.1A1.7 1.7 0 0 1 3.3 2.4h2.8c.45 0 .88.18 1.2.5l1 1h4.4a1.7 1.7 0 0 1 1.7 1.7v6.1a1.7 1.7 0 0 1-1.7 1.7H3.3a1.7 1.7 0 0 1-1.7-1.7z"/></svg>',
+          '<path fill="currentColor" d="M1.6 4.1A1.7 1.7 0 0 1 3.3 2.4h2.8c.45 0 .88.18 1.2.5l1 1h3.4a1.7 1.7 0 0 1 1.7 1.7v6.1a1.7 1.7 0 0 1-1.7 1.7H3.3a1.7 1.7 0 0 1-1.7-1.7z"/></svg>',
         doc:
           '<svg class="glyph" viewBox="0 0 16 16" aria-hidden="true" focusable="false">' +
           '<rect x="2.2" y="2.7" width="11.6" height="10.6" rx="2.1" fill="none" stroke="currentColor" stroke-width="1.3"/>' +
@@ -488,7 +509,7 @@
           empty.className = 'empty';
           empty.innerHTML = query
             ? '<strong>Nothing matches</strong>Try a different word.'
-            : '<strong>This folder is empty</strong>Press New to make something, or drag a file onto a folder to move it.';
+            : '<strong>This folder is empty</strong>Press New to make something, or drop a .mrbl file in from anywhere.';
           items.append(empty);
           return;
         }
@@ -886,6 +907,180 @@
           fail(err);
         }
       });
+
+      // -------------------------------------------------------------- the drops
+      //
+      // A document arriving from outside the drive. This is the one gesture on
+      // the page that has to use the HTML5 drag-and-drop API rather than
+      // pointer events: a file coming from the desktop is not a pointer the
+      // browser will tell us about, it is a `dataTransfer`, and there is no
+      // second way to be handed one.
+      //
+      // Where it lands is the folder under the cursor if there is one, and the
+      // folder you are looking at if there is not — the same two answers the
+      // internal drag gives, marked the same way, because to a hand they are
+      // the same gesture with a different thing in it.
+
+      // A .mrbl is an HTML file, so a document somebody's browser saved under
+      // the other extension is not a different document.
+      const DOCUMENT = /\.(mrbl|html?)$/i;
+
+      let landing = null;
+
+      const carriesFiles = (event) => [...(event.dataTransfer?.types ?? [])].includes('Files');
+
+      const dropTarget = (node) =>
+        view === 'trash'
+          ? null
+          : (node?.closest?.('.item[data-kind="folder"], .crumb, .nav-item[data-nav="drive"]') ?? null);
+
+      // A crumb and the nav entry both carry the path they stand for, and the
+      // root carries none, which is the empty string — My Drive.
+      const pathOf = (target) => (target ? (target.dataset.path ?? '') : here);
+
+      function showDrop(target) {
+        if (landing !== target) {
+          landing?.classList.remove('marble-drop');
+          landing = target;
+          landing?.classList.add('marble-drop');
+        }
+        dropzone.querySelector('b').textContent = 'Drop to add to ' + (pathOf(target) || 'My Drive');
+        dropzone.setAttribute('data-open', '1');
+      }
+
+      function clearDrop() {
+        landing?.classList.remove('marble-drop');
+        landing = null;
+        dropzone.removeAttribute('data-open');
+      }
+
+      // Counted rather than latched: a drag across the page enters and leaves
+      // every element it passes over, and a single boolean is off again the
+      // moment the pointer crosses from the sidebar into a row.
+      let incoming = 0;
+
+      // And a watchdog under the count, because a drag cancelled with Escape
+      // ends without a `dragleave` and the count never comes back down — which
+      // would leave the whole window under an overlay with no way to dismiss
+      // it. `dragover` repeats for as long as something is over the page and
+      // stops dead when it is not, so its absence is the one reliable ending.
+      let waiting = null;
+      const stillHere = () => {
+        clearTimeout(waiting);
+        waiting = setTimeout(() => {
+          incoming = 0;
+          clearDrop();
+        }, 700);
+      };
+
+      // On the capture phase, so that a contenteditable label cannot be the
+      // one that gets the file. The default action of a drop on this page is
+      // always the same and always wrong: navigate away to the file itself.
+      const capture = { capture: true };
+
+      addEventListener('dragenter', (event) => {
+        if (!carriesFiles(event)) return;
+        event.preventDefault();
+        incoming += 1;
+      }, capture);
+
+      addEventListener('dragleave', (event) => {
+        if (!carriesFiles(event)) return;
+        incoming = Math.max(0, incoming - 1);
+        if (!incoming) clearDrop();
+      }, capture);
+
+      addEventListener('dragover', (event) => {
+        if (!carriesFiles(event)) return;
+        event.preventDefault();
+        event.dataTransfer.dropEffect = 'copy';
+        incoming = incoming || 1;
+        stillHere();
+        showDrop(dropTarget(event.target));
+      }, capture);
+
+      addEventListener('drop', (event) => {
+        if (!carriesFiles(event)) return;
+        event.preventDefault();
+        const into = pathOf(dropTarget(event.target));
+        // Both of these have to be taken now. A DataTransfer is emptied the
+        // moment the handler returns, and everything `receive` does after the
+        // first await would be reading from something the browser has cleared.
+        const entries = [...(event.dataTransfer.items ?? [])]
+          .map((item) => item.webkitGetAsEntry?.())
+          .filter(Boolean);
+        const files = [...(event.dataTransfer.files ?? [])];
+        incoming = 0;
+        clearTimeout(waiting);
+        clearDrop();
+        receive(entries, files, into);
+      }, capture);
+
+      /** A folder dropped from the desktop is a directory entry, not a file, and
+       *  `dataTransfer.files` has nothing in it for one. Walking the entries is
+       *  the only way to reach what is inside, and the shape it gives back is
+       *  the shape the upload wants: a file, and the folder it belongs in. */
+      async function collect(entry, folder, out) {
+        if (entry.isFile) {
+          out.push({ file: await new Promise((ok, no) => entry.file(ok, no)), folder });
+          return;
+        }
+        if (!entry.isDirectory) return;
+        const inside = [folder, entry.name].filter(Boolean).join('/');
+        const reader = entry.createReader();
+        // `readEntries` answers in batches and says it has finished by
+        // answering with none. A folder of 200 documents arrives 100 at a time.
+        for (;;) {
+          const batch = await new Promise((ok, no) => reader.readEntries(ok, no));
+          if (!batch.length) break;
+          for (const child of batch) await collect(child, inside, out);
+        }
+      }
+
+      async function receive(entries, files, into) {
+        let dropped = files.map((file) => ({ file, folder: '' }));
+        if (entries.length) {
+          dropped = [];
+          try {
+            for (const entry of entries) await collect(entry, '', dropped);
+          } catch (err) {
+            return fail(err);
+          }
+        }
+
+        const docs = dropped.filter(({ file }) => DOCUMENT.test(file.name));
+        const skipped = dropped.length - docs.length;
+        if (!docs.length) {
+          return say(skipped ? 'A drive holds documents — nothing else came in' : 'Nothing to add');
+        }
+        say(docs.length === 1 ? 'Adding ' + docs[0].file.name + '…' : 'Adding ' + docs.length + ' documents…');
+
+        // One at a time, because the host serialises writes per document
+        // anyway and because a failure should name the file it was.
+        const added = [];
+        const refused = [];
+        for (const { file, folder } of docs) {
+          try {
+            added.push(
+              await drive.upload({
+                folder: [into, folder].filter(Boolean).join('/'),
+                name: file.name,
+                source: await file.text(),
+              }),
+            );
+          } catch (err) {
+            refused.push(file.name + ' — ' + (err?.message ?? err));
+          }
+        }
+
+        if (added.length) refresh();
+        const tally = [];
+        if (added.length === 1) tally.push('Added ' + added[0].path);
+        else if (added.length) tally.push('Added ' + added.length + ' documents to ' + (into || 'My Drive'));
+        if (skipped) tally.push(skipped + (skipped === 1 ? ' other file' : ' other files') + ' left alone');
+        if (refused.length) tally.push(refused.length === 1 ? refused[0] : refused.length + ' refused — ' + refused[0]);
+        say(tally.join(' · '));
+      }
 
       // ---------------------------------------------------------- the toggles
 

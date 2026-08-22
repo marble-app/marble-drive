@@ -46,7 +46,7 @@ What is here is everything to do with there being more than one folder:
 
 | | |
 |---|---|
-| `server/paths.js` | the path grammar. A name is a path now, and `..` is refused twice |
+| `server/paths.js` | the path grammar. A name is a path now, `..` is refused twice, and a name from another filesystem is flattened into one this accepts |
 | `server/store/` | the seam: read, write, list, tree, move, trash, history, blobs |
 | `server/watch.js` | a recursive watcher, with a walk for the platforms that have no recursive flag |
 | `server/oplog.js` | the op log, with `client` and `seq` alongside `t` |

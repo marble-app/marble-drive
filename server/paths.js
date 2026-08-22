@@ -136,3 +136,47 @@ export const titleize = (name) =>
     .replace(new RegExp(`\\${DOC_EXT}$`), '')
     .replace(/[-_]+/g, ' ')
     .replace(/^./, (c) => c.toUpperCase());
+
+/**
+ * An OS filename as a legal segment. A drop comes from a filesystem with a
+ * different grammar — `Q3 Resume (final).mrbl` is an ordinary name there and
+ * three separate refusals here — and refusing a drop that could have worked is
+ * worse than a name with the brackets taken out of it.
+ *
+ * The result is run back through `parsePath`, so a "safe" name that is not one
+ * throws here rather than three frames further in.
+ */
+export function safeSegment(input) {
+  const flattened = String(input ?? '')
+    // e-acute becomes e rather than a dash. The bytes of a name are not what a
+    // person means by it, and a folder of documents off a Mac is mostly this.
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .replace(/[^a-z0-9._ -]+/gi, ' ')
+    .replace(/\s+/g, ' ')
+    // A leading dot is how the store hides its own bookkeeping, and the grammar
+    // wants an alphanumeric first anyway — which is the same rule twice, so a
+    // name can never sanitise its way into `.marble`.
+    .replace(/^[^a-z0-9]+/i, '')
+    .slice(0, MAX_SEGMENT)
+    .replace(/[. ]+$/, '')
+    .trim();
+
+  return parsePath(flattened || 'document', { allowRoot: false });
+}
+
+/** The same, for a path — what a folder dragged in off the desktop arrives as.
+ *  Segments that sanitise away to nothing are dropped rather than replaced by
+ *  a placeholder folder nobody asked for. */
+export const safePath = (input) =>
+  String(input ?? '')
+    .split('/')
+    .filter((segment) => segment.trim() !== '')
+    .map((segment) => safeSegment(segment))
+    .join('/');
+
+/** `Notes.mrbl` and `Notes.html` are both a document called `Notes`. A .mrbl is
+ *  HTML, so somebody's browser having saved one under the other extension is
+ *  not a different file. */
+export const withoutDocExt = (filename) =>
+  String(filename ?? '').replace(/\.(mrbl|html?)$/i, '');

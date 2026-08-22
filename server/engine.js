@@ -21,7 +21,7 @@ const ROOT = new URL('./', import.meta.resolve('@bdhmin/marble/package.json'));
 
 const load = (relative) => import(new URL(relative, ROOT).href);
 
-const [patcher, guard, history, ops, intent, providers, scaffold] = await Promise.all([
+const [patcher, guard, history, ops, intent, providers, scaffold, doctor] = await Promise.all([
   load('server/patcher.js'),
   load('server/guard.js'),
   load('server/history.js'),
@@ -29,6 +29,7 @@ const [patcher, guard, history, ops, intent, providers, scaffold] = await Promis
   load('server/intent.js'),
   load('server/providers/index.js'),
   load('bin/scaffold.js'),
+  load('scripts/doctor.js'),
 ]);
 
 /** Absolute path to a file inside the Marble package — the carrier, the
@@ -54,3 +55,6 @@ export const { chooseProvider, loadProvider } = providers;
 // The cut-point reader for `lib/affordances.js`. The gallery composes starters
 // out of those parts rather than keeping a fourth copy of them.
 export const { readParts } = scaffold;
+// The format's own invariants, asked of a document arriving from outside. The
+// alternative was a second opinion written here, which would drift.
+export const { examine } = doctor;
