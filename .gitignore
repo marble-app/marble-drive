@@ -7,3 +7,8 @@ drive/
 backups/
 .DS_Store
 *.log
+
+# Agent worktrees. Each one is a checkout of this repository, so committing the
+# path stores a gitlink to a branch that lives only on one laptop, and a
+# clone gets an empty directory it cannot fill.
+.claude/worktrees/
