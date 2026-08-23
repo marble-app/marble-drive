@@ -211,6 +211,15 @@
      hovering over them — and the crumbs and the nav had no highlight at all. */
   .marble-drop { outline: 2px solid var(--accent-ink); outline-offset: -2px; border-radius: 8px; }
   .item.marble-lifting { opacity: .45; }
+  /* Picked is the page's answer to "which one", not the file's. A selection is
+     where your attention is and it dies with the tab, so it is a class on a
+     transient row and never an op. Prefixed so a reconcile leaves it alone. */
+  .item.marble-picked { background: var(--accent-soft); }
+  .item.marble-picked .name b { color: var(--accent-ink); }
+  .item.marble-picked .more { opacity: 1; }
+  body[data-view="grid"] .item.marble-picked { border-color: var(--accent-ink); }
+  body[data-view="grid"] .item.marble-picked:hover,
+  body[data-view="list"] .item.marble-picked:hover { background: var(--accent-soft); }
   .item .more {
     position: absolute; top: .4rem; right: .4rem; width: 1.7rem; height: 1.7rem;
     border: 0; border-radius: 999px; background: none; color: var(--muted);
@@ -463,11 +472,24 @@
 
       // ------------------------------------------------------------ the listing
 
+      // Which row is picked, held as a path rather than an element, because the
+      // listing is thrown away and rebuilt on every refresh and a reference
+      // would outlive the thing it referred to.
+      let picked = null;
+
+      function pick(path) {
+        picked = path || null;
+        for (const el of items.querySelectorAll('.item')) {
+          el.classList.toggle('marble-picked', Boolean(picked) && el.dataset.path === picked);
+        }
+      }
+
       function node(entry) {
         const el = document.createElement('div');
         el.className = 'item';
         el.dataset.kind = entry.kind;
         el.dataset.path = entry.path;
+        if (picked && entry.path === picked) el.classList.add('marble-picked');
         el.innerHTML =
           '<span class="name"><span class="ico">' +
           iconFor(entry.kind) +
@@ -514,6 +536,7 @@
           return;
         }
         for (const entry of matching) items.append(node(entry));
+        if (picked && !items.querySelector('.item.marble-picked')) picked = null;
       }
 
       const flatten = (folder, out = []) => {
@@ -653,6 +676,15 @@
 
       // ----------------------------------------------------------- navigation
 
+      // Opening is a folder you go into or a document you leave for. Named once
+      // so the pointer and the keyboard commit to the same thing.
+      function openItem(item) {
+        if (!item) return;
+        if (item.dataset.kind === 'folder') return go(item.dataset.path);
+        if (view === 'trash') return say('Restore it first — it is in the trash.');
+        location.href = marble.href(item.dataset.path);
+      }
+
       function go(path) {
         here = path;
         view = 'drive';
@@ -675,15 +707,23 @@
       // worked and then the page left before you could see it.
       let dragged = 0;
 
+      // One click says which one, two says go. A row you can name without
+      // leaving the folder is what the menu verbs have always wanted — until
+      // now the only way to point at a document was to open it. Empty space is
+      // an answer too: it means none of them.
       items.addEventListener('click', (event) => {
         if (Date.now() - dragged < 400) return;
-        const more = event.target.closest('.more');
         const item = event.target.closest('.item');
-        if (!item) return;
-        if (more) return openMenu(item, more);
-        if (item.dataset.kind === 'folder') return go(item.dataset.path);
-        if (view === 'trash') return say('Restore it first — it is in the trash.');
-        location.href = marble.href(item.dataset.path);
+        if (!item) return pick(null);
+        pick(item.dataset.path);
+        const more = event.target.closest('.more');
+        if (more) openMenu(item, more);
+      });
+
+      items.addEventListener('dblclick', (event) => {
+        if (Date.now() - dragged < 400) return;
+        if (event.target.closest('.more')) return;
+        openItem(event.target.closest('.item'));
       });
 
       document.querySelector('#up').addEventListener('click', () => {
@@ -804,9 +844,25 @@
       });
 
       addEventListener('keydown', (event) => {
+        // A document in the drive is editable content, and Enter inside it is a
+        // paragraph, not a command. Only the page's own chrome gets these keys.
+        const typing = event.target?.closest?.(
+          'input, textarea, select, [contenteditable="true"], [contenteditable=""], [data-marble-editable]',
+        );
+        if (typing) return;
+        if (event.key === 'Enter') {
+          const item = picked && items.querySelector('.item.marble-picked');
+          if (!item) return;
+          event.preventDefault();
+          return openItem(item);
+        }
         if (event.key !== 'Escape') return;
+        // Escape undoes the last thing you opened, one layer at a time: the row
+        // menu, then the New sheet, then the selection itself.
+        const layered = menu.getAttribute('data-open') === '1' || sheet.getAttribute('data-open') === '1';
         menu.removeAttribute('data-open');
         sheet.removeAttribute('data-open');
+        if (!layered) pick(null);
       });
 
       // --------------------------------------------------------------- pinning
