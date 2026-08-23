@@ -52,6 +52,7 @@ Open it in a text editor and you will find the sidebar in it.
 ```
 marble-drive serve              serve the drive
 marble-drive new <path>         a document from a starter, without a browser
+marble-drive icon [path]        the mark, for a document that predates it
 marble-drive weigh [path]       what the documents weigh, and how much is base64
 marble-drive backup             one backup, now
 marble-drive starters           what you can make
@@ -88,9 +89,10 @@ The image holds the host; the drive is a volume. See [docs/DEPLOY.md](docs/DEPLO
 npm test
 ```
 
-85 of them. They cover the path grammar, the store, the watcher, the op log, the
-gate, the backups, the gallery, the blob round trip, and the loop end to end over
-HTTP — including that the client which filed an edit is never told about it, that
-a document arriving from outside is checked against the format's own invariants
-before it is let in, and that every document this repo can produce passes
-Marble's own doctor.
+99 of them. They cover the path grammar, the store, the watcher, the op log, the
+gate, the backups, the gallery, the mark, the blob round trip, and the loop end
+to end over HTTP — including that the client which filed an edit is never told
+about it, that a document arriving from outside is checked against the format's
+own invariants before it is let in, that a document keeps its icon through a
+download, and that every document this repo can produce passes Marble's own
+doctor.

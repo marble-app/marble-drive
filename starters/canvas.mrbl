@@ -5,6 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <meta name="marble:capabilities" content="storage; net=none">
 <title>__TITLE__</title>
+__ICON__
 <style>
   /* The Marble design system's palette, with one change the system does not
      make: a document is white to the edge. The off-white paper belongs to

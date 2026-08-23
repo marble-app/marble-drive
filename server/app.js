@@ -20,6 +20,7 @@ import { fileURLToPath } from 'node:url';
 
 import { backupNow, scheduleBackups } from './backup.js';
 import { bytesOf, chooseProvider, enginePath, examine, guardOps, shaOf } from './engine.js';
+import { dataUri as iconUri, svg as iconSvg } from './favicon.js';
 import { blobsIn, extract, flatten } from './flatten.js';
 import { createGate } from './gate.js';
 import { escapeHtml, html, json, readBody, readJson, send, text } from './http.js';
@@ -130,6 +131,19 @@ export async function createDrive(config, { log = console } = {}) {
       // form itself, and a health check a load balancer runs before anybody has
       // a cookie.
       if (route === '/health') return json(res, 200, { ok: true, docs: channels.counts });
+      // The mark, for the two pages that cannot carry it in their own head: a
+      // document written before this host had one, and the gate. Everything
+      // made here has it inline and never asks — which is why this is a
+      // fallback rather than the mechanism. In front of the gate on purpose: it
+      // is a drawing, and a closed drive that will not draw its own icon is a
+      // browser retrying a 302 it cannot follow.
+      if (route === '/favicon.svg') {
+        return send(res, 200, iconSvg('doc'), {
+          'Content-Type': 'image/svg+xml; charset=utf-8',
+          'Cache-Control': 'public, max-age=3600',
+        });
+      }
+      if (route === '/favicon.ico') return send(res, 302, '', { Location: '/favicon.svg' });
       if (route === '/gate') return gateRoute(req, res, url);
       if (!gate.allows(req)) {
         if ((req.headers.accept ?? '').includes('text/html')) {
@@ -459,6 +473,7 @@ export async function createDrive(config, { log = console } = {}) {
     const to = escapeHtml(url.searchParams.get('to') ?? '/');
     return html(res, 200, `<!doctype html><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1"><title>Marble Drive</title>
+<link rel="icon" href="${iconUri('drive')}">
 <style>body{font:15px/1.5 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;display:grid;place-items:center;height:100vh;margin:0;background:#fafaf7;color:#111111}
 form{display:flex;gap:.5rem}input,button{font:inherit;padding:.6rem .8rem;border:1px solid #ddd9cf;border-radius:8px}
 button{background:#738698;color:#fafaf7;border-color:#738698;cursor:pointer}p{color:#5a5a5a}</style>

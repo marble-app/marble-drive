@@ -18,6 +18,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 import { enginePath, readParts } from './engine.js';
+import { link as iconLink } from './favicon.js';
 import { titleize } from './paths.js';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
@@ -150,6 +151,10 @@ export async function build(id, { name = id } = {}) {
 
   return template
     .replaceAll('__TITLE__', titleize(name))
+    // The mark, inline. Spliced here rather than written into the five starters
+    // so there is one drawing rather than five copies of it — and inline rather
+    // than a URL because a document that leaves this drive still has a tab.
+    .replace('__ICON__', () => iconLink('doc'))
     // Each placeholder gets its own id. One pass rather than a global replace is
     // what keeps them distinct — no id may appear twice in a document.
     .replace(/__ID__/g, () => newId())

@@ -5,6 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <meta name="marble:capabilities" content="storage; net=none">
 <title>__TITLE__</title>
+__ICON__
 <style>
   /* The shape is Drive's, because the whole point of the comparison is that
      you already know how to use this. The colour is not: these are the

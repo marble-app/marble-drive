@@ -3,6 +3,7 @@
 //
 //   marble-drive serve            serve the drive (the default)
 //   marble-drive new <path>       a document from a starter, without a browser
+//   marble-drive icon [path]      give a document already in the drive its mark
 //   marble-drive weigh [path]     what the documents weigh, and how much is base64
 //   marble-drive backup           one backup, now
 //   marble-drive starters         what you can make
@@ -17,6 +18,7 @@ import path from 'node:path';
 import { createDrive } from '../server/app.js';
 import { backupNow } from '../server/backup.js';
 import { config } from '../server/config.js';
+import { stamp, stamped } from '../server/favicon.js';
 import { build as buildStarter, list as listStarters } from '../server/gallery.js';
 import { splitPath, parsePath } from '../server/paths.js';
 import { seedDrive } from '../server/seed.js';
@@ -48,6 +50,9 @@ switch (command) {
   case 'new':
     await make();
     break;
+  case 'icon':
+    await icon();
+    break;
   case 'weigh':
     await weigh();
     break;
@@ -58,7 +63,7 @@ switch (command) {
     for (const starter of listStarters()) console.log(`${starter.id.padEnd(9)} ${starter.blurb}`);
     break;
   default:
-    fail(`no command "${command}" — there is: serve, new, weigh, backup, starters`);
+    fail(`no command "${command}" — there is: serve, new, icon, weigh, backup, starters`);
 }
 
 // ---------------------------------------------------------------------- serve
@@ -138,6 +143,54 @@ async function make() {
   await store.write(docPath, source, { label: 'created' });
   console.log(`${docPath}.mrbl — ${from}`);
   console.log(`\n  marble-drive serve   →   /a/${encodeURIComponent(docPath)}\n`);
+}
+
+// ----------------------------------------------------------------------- icon
+
+/** The mark, for the documents that were here before there was one.
+ *
+ *  A document made from a starter carries it already, so this is a one-time
+ *  pass over an older drive rather than something to run twice — and it is a
+ *  command rather than something the host does on the way past, because a host
+ *  that rewrites your documents to add its own branding is a host you cannot
+ *  trust with the ones it did not write. */
+async function icon() {
+  const store = createStore({ root: config.root });
+  await store.ready();
+
+  const wanted = args[0] ? parsePath(args[0], { allowRoot: false }) : null;
+  const docs = wanted
+    ? [await store.stat(wanted)].filter(Boolean)
+    : (await store.list({ recursive: true })).filter((entry) => entry.kind === 'doc');
+  if (!docs.length) fail(wanted ? `no document "${wanted}"` : `no documents in ${config.root}`);
+
+  let marked = 0;
+  for (const doc of docs) {
+    const source = await store.read(doc.path);
+    if (source === null) continue;
+    if (stamped(source)) {
+      console.log(`  ${'kept'.padEnd(7)} ${doc.path}  (has an icon already)`);
+      continue;
+    }
+    // The Drive is the interface and everything else is a document, which is
+    // the only distinction the mark makes.
+    const kind = doc.path === config.home ? 'drive' : 'doc';
+    if (flags.dry) {
+      console.log(`  ${'would'.padEnd(7)} ${doc.path}  (${kind})`);
+      continue;
+    }
+    // Through the store, so the version without the mark is a restore point
+    // rather than something you needed a backup for.
+    await store.write(doc.path, stamp(source, kind), { label: 'icon' });
+    console.log(`  ${'marked'.padEnd(7)} ${doc.path}  (${kind})`);
+    marked += 1;
+  }
+
+  console.log(
+    flags.dry
+      ? `\n  --dry, so nothing was written. Run it again without the flag.`
+      : `\n  ${marked} document(s) marked. Every one of them can still be edited back.`,
+  );
 }
 
 // ---------------------------------------------------------------------- weigh

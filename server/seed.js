@@ -11,6 +11,7 @@ import fsp from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
+import { link as iconLink } from './favicon.js';
 import { composeScript } from './gallery.js';
 import { titleize } from './paths.js';
 
@@ -28,6 +29,9 @@ export async function buildDrive({ name = 'drive', title = 'My Drive' } = {}) {
 
   return template
     .replaceAll('__TITLE__', title || titleize(name))
+    // The Drive wears the tiled mark, because in a tab strip it is the one page
+    // here that is the interface rather than something the interface holds.
+    .replace('__ICON__', () => iconLink('drive'))
     .replace(/__ID__/g, () => newId())
     .replace('__SCRIPT__', `<script>\n${script}\n</script>`);
 }

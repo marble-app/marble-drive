@@ -53,6 +53,7 @@ What is here is everything to do with there being more than one folder:
 | `server/gate.js` | one shared secret and a signed cookie. Thrown away at G2 |
 | `server/sse.js` | two channels: this document moved, and the folder did |
 | `server/gallery.js` | starters, composed from Marble's affordance parts |
+| `server/favicon.js` | the mark: one marble, bare for a document and tiled for the Drive, inline in the head of both |
 | `server/flatten.js` | blobs out of a document, and blobs back into it |
 | `server/backup.js` | the documents *and* the history, off the box |
 | `lib/affordances.drive.js` | one affordance overridden by name: a sortable a finger can use |
@@ -69,11 +70,17 @@ obvious at the call site.
 
 **The host ships no interface.** The only HTML it serves that is not a document
 is the gate form, and that is one `<form>`, because a door has to be openable
-before there is a document to open. Everything else you see is `drive.mrbl`.
+before there is a document to open. Everything else you see is `drive.mrbl`. The
+one other thing it answers that nothing asked it for is `/favicon.svg`, and that
+is a drawing rather than an interface: it exists for the documents that were in
+a drive before the mark was, because a document made here carries the mark in
+its own head and never asks.
 
 **The host injects no affordance.** It injects the carrier and the Drive's
 extension to it, both marked transient. A document carries its own behaviour, so
-two hosts render the same file identically.
+two hosts render the same file identically. The mark is not injected either — it
+is spliced into the document at build time, which is why a downloaded `.mrbl`
+opened from a file:// URL still has an icon in the tab.
 
 **The write path announces; the watcher does not repeat it.** An op is applied,
 a snapshot is taken of what it replaced, and every client except the one that

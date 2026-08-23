@@ -349,6 +349,28 @@ test('ops that would destroy addressed content nobody asked to remove are refuse
   assert.equal(await drive.store.read('work/q3/notes'), before, 'nothing reached disk');
 });
 
+test('a document made here carries its own mark, and the host has one for the rest', async () => {
+  // What the host serves is the fallback: a document written before this host
+  // had a mark asks for /favicon.ico, the way a browser does when a page names
+  // no icon, and gets the marble.
+  const ico = await get('/favicon.ico');
+  assert.equal(ico.status, 302);
+  assert.equal(ico.headers.get('location'), '/favicon.svg');
+
+  const svg = await get('/favicon.svg');
+  assert.equal(svg.status, 200);
+  assert.match(svg.headers.get('content-type'), /image\/svg\+xml/);
+  assert.match(await svg.text(), /^<svg /);
+
+  // A document made here never asks: the mark is in the file it was served in,
+  // and it is still in the file a download hands you.
+  const { path: made } = await asJson(await post('/drive/new', { path: 'iconed', from: 'doc' }));
+  const served = await (await get(`/a/${encodeURIComponent(made)}`)).text();
+  assert.match(served, /<link rel="icon" href="data:image\/svg\+xml,[^"]+">/);
+  const taken = await (await get(`/drive/download?path=${encodeURIComponent(made)}`)).text();
+  assert.match(taken, /<link rel="icon" href="data:image\/svg\+xml,/);
+});
+
 test('health answers before the gate, and the gate closes everything else', async () => {
   const closed = await createDrive(loadConfig({ ...process.env, MARBLE_DRIVE_SECRET: 'hunter2' }), {
     log: quiet,
@@ -378,6 +400,12 @@ test('health answers before the gate, and the gate closes everything else', asyn
     body: JSON.stringify({ secret: 'hunter2' }),
   });
   assert.equal(right.status, 200);
+  // The gate has to be able to draw itself, so the mark answers in front of it
+  // the way /health does. Everything else still 401s.
+  assert.equal((await fetch(`${shut}/favicon.svg`)).status, 200);
+  const gatePage = await (await fetch(`${shut}/gate`, { headers: { Accept: 'text/html' } })).text();
+  assert.match(gatePage, /<link rel="icon" href="data:image\/svg\+xml,/);
+
   const cookie = right.headers.get('set-cookie').split(';')[0];
   assert.equal((await fetch(`${shut}/docs`, { headers: { cookie } })).status, 200);
   assert.equal(
