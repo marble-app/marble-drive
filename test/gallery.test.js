@@ -8,8 +8,8 @@ import fsp from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 
-test('five starters, each with a blurb somebody could choose from', () => {
-  assert.deepEqual(list().map((s) => s.id), ['doc', 'sheet', 'slides', 'board', 'canvas']);
+test('six starters, each with a blurb somebody could choose from', () => {
+  assert.deepEqual(list().map((s) => s.id), ['doc', 'sheet', 'slides', 'board', 'canvas', 'latex']);
   for (const starter of list()) {
     assert.ok(starter.title && starter.blurb && starter.accent);
   }
@@ -47,9 +47,13 @@ for (const starter of STARTERS) {
     assert.ok(!source.includes('__SCRIPT__'), 'the affordances were spliced in');
     assert.ok(!source.includes('__TITLE__'));
 
+    // Ids are a fact about the markup, so the question is asked of the markup:
+    // a document whose script composes an element writes the attribute in its
+    // own source too, and that is a template rather than a second element.
+    const markup = source.replace(/<(script|style)\b[^>]*>[\s\S]*?<\/\1>/g, '');
     // No id may appear twice — the doctor's first check, and the one that makes
     // every op after this one addressable.
-    const ids = [...source.matchAll(/data-marble-id="([^"]+)"/g)].map((m) => m[1]);
+    const ids = [...markup.matchAll(/data-marble-id="([^"]+)"/g)].map((m) => m[1]);
     assert.equal(new Set(ids).size, ids.length, 'ids are unique');
     assert.ok(ids.length > 5, 'the document is actually addressable');
 
@@ -57,7 +61,7 @@ for (const starter of STARTERS) {
     assert.ok(!/\/(ops|intent|docs|events|drive)\?/.test(source), 'names no route');
 
     // Every script in it parses, including the affordance copy.
-    for (const [, body] of source.matchAll(/<script>([\s\S]*?)<\/script>/g)) {
+    for (const [, body] of source.matchAll(/<script[^>]*>([\s\S]*?)<\/script>/g)) {
       new Function(body);
     }
   });

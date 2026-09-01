@@ -28,8 +28,8 @@ The first run writes one document into the drive: the Drive itself.
   whole folder from the desktop comes in with its shape intact. A name the path
   grammar would refuse is flattened rather than turned away, and what is not a
   document is left where it was.
-- **New.** Five starters — document, sheet, slides, board, canvas. "New sheet" is
-  a clone, and the clone is yours to reshape.
+- **New.** Six starters — document, sheet, slides, board, canvas, LaTeX. "New
+  sheet" is a clone, and the clone is yours to reshape.
 - **Everything is live.** Two tabs on one document stay in step. So does an edit
   made in a text editor, or by an agent — the page patches rather than reloads,
   and your caret and scroll position survive it.

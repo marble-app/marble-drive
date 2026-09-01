@@ -38,7 +38,7 @@ the page instead.
 Everything else is Marble's, unchanged. An override that Marble has no part for
 is a build error rather than a silently ignored file.
 
-## The five
+## The six
 
 | | |
 |---|---|
@@ -47,6 +47,7 @@ is a build error rather than a silently ignored file.
 | `slides` | one section per slide. The slide number is a CSS counter, so reordering renumbers without touching a byte |
 | `board` | columns of cards. A card's column is where it sits and nothing else |
 | `canvas` | notes placed anywhere; the position is an inline style on the note |
+| `latex` | a LaTeX project. The sources are `<pre>` elements, the typesetter and the PDF writer are scripts beside them, and the PDF is the only thing in the room that is not kept |
 
 Two of them do something the affordance library cannot, and do it in their own
 `<script>`: the sheet's "+ column" (three kinds of edit in one gesture, filed as

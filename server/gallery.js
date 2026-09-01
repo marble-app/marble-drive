@@ -30,10 +30,10 @@ const ALWAYS = ['shared', 'tail'];
 const NEEDS = { sortable: ['grip'], removable: ['grip'] };
 
 /**
- * The five starters. Each is a different answer to "what is a document", which
- * is the point of shipping five rather than one good one — and each is small
- * enough to read in a sitting, because the first thing anyone does with a
- * starter is change it.
+ * The starters. Each is a different answer to "what is a document", which is
+ * the point of shipping several rather than one good one — and the first five
+ * are small enough to read in a sitting, because the first thing anyone does
+ * with a starter is change it. The sixth is not, and says why where it stands.
  */
 export const STARTERS = [
   {
@@ -79,6 +79,23 @@ export const STARTERS = [
     title: 'Canvas',
     blurb: 'Notes placed anywhere. The position is an inline style on the note.',
     parts: ['editable', 'canvas', 'removable', 'add', 'status'],
+    accent: '#738698',
+  },
+  {
+    id: 'latex',
+    title: 'LaTeX',
+    blurb: 'A LaTeX project that typesets itself. Sources, engine and PDF, with nothing behind them.',
+    // The odd one out, and deliberately: the other five are small enough to
+    // read in a sitting, and this one carries a typesetter. It is here because
+    // it is the strongest answer this format has to "what is a document" — the
+    // paper, the thing that made the paper, and the editor you made it in, all
+    // addressable, all in one file you can mail to somebody.
+    //
+    // No sortable and no removable: a file list is derived from the sections
+    // and gets its own delete, and the code panes are a `data-marble-code` this
+    // document defines itself, because Marble's editable ends a line on Enter
+    // and a source file needs Enter to mean a new line.
+    parts: ['editable', 'history', 'status'],
     accent: '#738698',
   },
 ];
@@ -151,8 +168,8 @@ export async function build(id, { name = id } = {}) {
 
   return template
     .replaceAll('__TITLE__', titleize(name))
-    // The mark, inline. Spliced here rather than written into the five starters
-    // so there is one drawing rather than five copies of it — and inline rather
+    // The mark, inline. Spliced here rather than written into each starter
+    // so there is one drawing rather than six copies of it — and inline rather
     // than a URL because a document that leaves this drive still has a tab.
     .replace('__ICON__', () => iconLink('doc'))
     // Each placeholder gets its own id. One pass rather than a global replace is
