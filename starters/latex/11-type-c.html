@@ -1,0 +1,793 @@
+
+  // ------------------------------------------------------------- the front
+
+  function maketitle(job) {
+    endParagraph(job);
+    const saved = save(job);
+    vspace(job, job.base * 2.6);
+    job.align = 'center';
+    job.parindent = false;
+    job.font.size = job.base * 1.728;
+    inGroup(job, job.titleTokens || []);
+    endParagraph(job, { indent: 0 });
+    vspace(job, job.base * 1.4);
+    job.font.size = job.base * 1.15;
+    inGroup(job, job.authorTokens || []);
+    endParagraph(job, { indent: 0 });
+    vspace(job, job.base * 0.7);
+    job.font.size = job.base;
+    inGroup(job, job.dateTokens === undefined ? T.lex.tokenize(today()) : job.dateTokens);
+    endParagraph(job, { indent: 0 });
+    restore(job, saved);
+    vspace(job, job.base * 2.2);
+    job.parindent = false;
+  }
+
+  const MONTHS = ['January', 'February', 'March', 'April', 'May', 'June', 'July',
+    'August', 'September', 'October', 'November', 'December'];
+  function today() {
+    const now = new Date();
+    return `${MONTHS[now.getMonth()]} ${now.getDate()}, ${now.getFullYear()}`;
+  }
+
+  function contents(job) {
+    if (!job.previousToc.length) {
+      say(job, 'info', 'The table of contents will fill in on the next run', job.line, job.file);
+    }
+    heading(job, 'section', true, T.lex.tokenize('Contents'));
+    const saved = save(job);
+    job.parindent = false;
+    for (const entry of job.previousToc) {
+      const depth = Math.max(0, entry.level - 1);
+      job.leftSkip = saved.leftSkip + depth * job.base * 1.4;
+      job.font.bold = entry.level === 1;
+      job.font.size = job.base * (entry.level === 1 ? 1 : 0.95);
+      const target = entry.at ? { page: entry.at.page, tx: job.margin, ty: entry.at.y } : null;
+      if (entry.label) { addRun(job, entry.label, fontKey(job), job.font.size, { link: target }); addGlue(job, { w: job.font.size * 0.6, stretch: 0 }); }
+      addRun(job, entry.title, fontKey(job), job.font.size, { link: target });
+      addGlue(job, { fill: true, w: job.font.size, stretch: 0, shrink: 0 });
+      addRun(job, String(entry.page), fontKey(job), job.font.size, { link: target });
+      endParagraph(job, { indent: 0 });
+      job.font.bold = false;
+    }
+    restore(job, saved);
+    vspace(job, job.base);
+    job.parindent = false;
+  }
+
+  const BIB_ORDER = ['author', 'title', 'journal', 'booktitle', 'publisher', 'school',
+    'institution', 'address', 'volume', 'number', 'pages', 'edition', 'note', 'year'];
+  // Which fields the plain style runs on from the one before with a comma
+  // rather than closing the sentence.
+  const COMMA_BEFORE = ['address', 'volume', 'number', 'pages', 'year', 'edition'];
+
+  function bibliography(job) {
+    const entries = Object.values(job.bib).filter((entry) => entry.fields).sort((a, b) => a.number - b.number);
+    if (!entries.length) {
+      say(job, 'warning', 'Nothing is cited, so the bibliography is empty', job.line, job.file);
+      return;
+    }
+    heading(job, 'section', true, T.lex.tokenize('References'));
+    const saved = save(job);
+    const acm = job.bibStyle === 'acm';
+    job.font.size = job.base * (acm ? 0.85 : 0.95);
+    job.parindent = false;
+
+    for (const entry of entries) {
+      const hang = job.font.size * 2;
+      const label = `[${entry.number}]`;
+      const wide = M().width(label, 'rm', job.font.size);
+      addBox(job, {
+        w: wide, h: job.font.size * 0.7, d: 0,
+        items: [{ k: 't', x: 0, y: 0, f: 'rm', s: job.font.size, t: label }],
+      });
+      addGlue(job, { w: Math.max(job.font.size * 0.4, hang - wide), stretch: 0, shrink: 0, nobreak: true });
+
+      if (acm) {
+        acmReference(job, entry);
+      } else {
+        const fields = entry.fields;
+        let first = true;
+        for (const key of BIB_ORDER) {
+          const value = fields[key];
+          if (!value) continue;
+          if (!first) { addText(job, COMMA_BEFORE.includes(key) ? ',' : '.'); addGlue(job); }
+          first = false;
+          const italic = key === 'journal' || key === 'booktitle';
+          const was = job.font.italic;
+          job.font.italic = italic;
+          inGroup(job, T.lex.tokenize(key === 'author' ? people(value) : value));
+          job.font.italic = was;
+        }
+        addText(job, '.');
+      }
+      endParagraph(job, { indent: 0, hanging: hang });
+      vspace(job, job.base * 0.25);
+    }
+    restore(job, saved);
+    job.parindent = false;
+  }
+
+  /** "Lamport, Leslie and Knuth, Donald E." the way a bibliography prints it. */
+  function people(value) {
+    return value
+      .split(/\s+and\s+/)
+      .map((one) => {
+        const parts = one.split(',').map((part) => part.trim());
+        return parts.length > 1 ? `${parts.slice(1).join(' ')} ${parts[0]}` : one.trim();
+      })
+      .reduce((out, one, i, all) => {
+        if (i === 0) return one;
+        return i === all.length - 1 ? `${out} and ${one}` : `${out}, ${one}`;
+      }, '');
+  }
+
+  // ---------------------------------------------------------------- commands
+
+  function command(job, reader, tok) {
+    const name = tok.v;
+
+    if (ACCENTS[name]) {
+      const arg = T.lex.plain(reader.group()).trim();
+      const letter = arg[0] || '';
+      addText(job, (ACCENTS[name][letter] || letter) + arg.slice(1));
+      return;
+    }
+    if (GLYPHS[name] !== undefined) { addText(job, GLYPHS[name]); return; }
+    if (SIZES[name] !== undefined) { job.font.size = job.base * SIZES[name]; return; }
+
+    switch (name) {
+      // ---- the preamble
+      case 'documentclass': {
+        const options = T.lex.plain(reader.optional() || []);
+        job.docClass = T.lex.plain(reader.group()).trim();
+        job.klass = /^acmart$/.test(job.docClass) ? 'acm' : 'article';
+        // acmart's own default is manuscript; an option below may say otherwise.
+        if (job.klass === 'acm') applyFormat(job, 'manuscript');
+        for (const option of options.split(',').map((o) => o.trim())) {
+          if (job.klass === 'acm' && applyFormat(job, option)) continue;
+          const size = /^(\d+)pt$/.exec(option);
+          if (size) { job.base = Number(size[1]); job.font.size = job.base; layout(job); continue; }
+          if (PAPER[option]) {
+            job.paper = option;
+            [job.W, job.H] = PAPER[option];
+            layout(job);
+            continue;
+          }
+          if (option === 'twocolumn') { job.cols = 2; job.colGap = job.base * 2.4; layout(job); continue; }
+          if (option === 'onecolumn') { job.cols = 1; job.colGap = 0; layout(job); continue; }
+          if (option === 'review' || option === 'anonymous' || option === 'authordraft') job.acm.review = true;
+          if (option === 'nonacm') job.nonacm = true;
+        }
+        return;
+      }
+      case 'usepackage': case 'RequirePackage': {
+        const options = T.lex.plain(reader.optional() || []);
+        const packages = T.lex.plain(reader.group());
+        if (packages.includes('geometry')) applyGeometry(job, options);
+        return;
+      }
+      case 'PassOptionsToPackage': { reader.group(); reader.group(); return; }
+      case 'AtBeginDocument': case 'AtEndPreamble': { job.atBegin.push(reader.group()); return; }
+      case 'AtEndDocument': { reader.group(); return; }
+      case 'geometry': applyGeometry(job, T.lex.plain(reader.group())); return;
+      // A short title is for a running head this class does not set. The last
+      // \title wins, which is what a paper with four of them at the top is for.
+      case 'title': reader.optional(); job.titleTokens = reader.group(); return;
+      case 'subtitle': job.subtitleTokens = reader.group(); return;
+      case 'date': job.dateTokens = reader.group(); return;
+      case 'thanks': case 'authornote': case 'authorsaddresses': case 'orcid':
+      case 'additionalaffiliation': case 'acmBadgeR': case 'acmBadgeL':
+      case 'terms': case 'received': case 'acmJournal': case 'acmVolume':
+      case 'acmNumber': case 'acmArticle': case 'acmArticleSeq': case 'acmMonth':
+      case 'acmPrice': case 'acmSubmissionID': case 'startPage': case 'Description':
+        reader.optional(); reader.group(); return;
+      case 'authornotemark': reader.optional(); return;
+
+      case 'author': {
+        const who = reader.group();
+        if (job.klass === 'acm') addAuthor(job, who);
+        else job.authorTokens = who;
+        return;
+      }
+      case 'affiliation': {
+        reader.optional();
+        const lines = affiliation(job, reader.group());
+        const who = lastAuthor(job);
+        if (who && lines.length) who.affils.push(lines);
+        return;
+      }
+      case 'email': {
+        reader.optional();
+        const mail = T.lex.plain(reader.group()).trim();
+        const who = lastAuthor(job);
+        if (who && mail) who.emails.push(mail);
+        return;
+      }
+      // These only mean anything inside an \affiliation, which reads them
+      // itself. Loose ones are the address of nobody.
+      case 'institution': case 'department': case 'city': case 'state':
+      case 'country': case 'postcode': case 'streetaddress': case 'position':
+        reader.group(); return;
+
+      case 'keywords': job.keywordTokens = reader.group(); return;
+      case 'ccsdesc': reader.optional(); job.ccs.push(T.lex.plain(reader.group()).trim()); return;
+      case 'setcopyright': job.acm.copyright = T.lex.plain(reader.group()).trim(); return;
+      case 'setcctype': reader.optional(); job.acm.cctype = T.lex.plain(reader.group()).trim(); return;
+      case 'copyrightyear': job.acm.copyrightYear = T.lex.plain(reader.group()).trim(); return;
+      case 'acmYear': job.acm.year = T.lex.plain(reader.group()).trim(); return;
+      case 'acmDOI': job.acm.doi = T.lex.plain(reader.group()).trim(); return;
+      case 'acmISBN': job.acm.isbn = T.lex.plain(reader.group()).trim(); return;
+      case 'acmBooktitle': job.acm.booktitle = T.lex.plain(reader.group()).trim(); return;
+      case 'nonacm': reader.optional(); job.nonacm = true; return;
+      case 'acmConference': {
+        const short = T.lex.plain(reader.optional() || []).trim();
+        job.acm.conference = {
+          short,
+          name: T.lex.plain(reader.group()).trim(),
+          date: T.lex.plain(reader.group()).trim(),
+          venue: T.lex.plain(reader.group()).trim(),
+        };
+        return;
+      }
+      case 'settopmatter': {
+        const options = T.lex.plain(reader.group());
+        const perRow = /authorsperrow\s*=\s*(\d+)/.exec(options);
+        if (perRow) job.acm.perRow = Number(perRow[1]);
+        if (/printfolios\s*=\s*false/.test(options)) job.folios = false;
+        if (/printacmref\s*=\s*false/.test(options)) job.nonacm = true;
+        return;
+      }
+
+      case 'newcommand': case 'renewcommand': case 'providecommand': {
+        const target = reader.group();
+        const key = target.length === 1 && target[0].t === 'cs' ? target[0].v : T.lex.plain(target).replace(/^\\/, '');
+        const arity = Number(T.lex.plain(reader.optional() || []) || 0);
+        const fallback = reader.optional();
+        job.macros.set(key, { arity, optional: fallback ? fallback : null, body: placeless(reader.group()) });
+        return;
+      }
+      case 'def': {
+        const target = reader.raw();
+        let arity = 0;
+        for (;;) {
+          const next = reader.peekRaw();
+          if (next.t === '#') { reader.raw(); arity = Math.max(arity, next.v); continue; }
+          break;
+        }
+        if (target.t === 'cs') job.macros.set(target.v, { arity, optional: null, body: placeless(reader.group()) });
+        return;
+      }
+      case 'newenvironment': case 'renewenvironment': {
+        const key = T.lex.plain(reader.group());
+        const arity = Number(T.lex.plain(reader.optional() || []) || 0);
+        void arity;
+        job.macros.set(`env@${key}`, { begin: placeless(reader.group()), end: placeless(reader.group()) });
+        return;
+      }
+
+      case 'begin': environment(job, T.lex.plain(reader.group()), reader); return;
+      case 'end': reader.group(); return;
+
+      // The other two ways to open maths: \[ … \] displayed, \( … \) inline.
+      case '[': displayRow(job, mathBox(job, collectUntil(reader, (t) => t.t === 'cs' && t.v === ']'), true), {}); return;
+      case '(': addBox(job, mathBox(job, collectUntil(reader, (t) => t.t === 'cs' && t.v === ')'), false)); return;
+      case ']': case ')': return;
+
+      // ---- structure
+      case 'part': case 'section': case 'subsection': case 'subsubsection':
+      case 'paragraph': case 'subparagraph': {
+        let starred = false;
+        const next = reader.peek();
+        if (next.t === 'char' && next.v === '*') { reader.next(); starred = true; }
+        reader.optional();
+        heading(job, name, starred, reader.group());
+        return;
+      }
+      case 'maketitle': (job.klass === 'acm' ? acmTitle : maketitle)(job); return;
+      case 'tableofcontents': contents(job); return;
+      case 'appendix': {
+        endParagraph(job);
+        job.appendix = true;
+        job.counters.section = 0;
+        job.counters.subsection = 0;
+        job.counters.subsubsection = 0;
+        return;
+      }
+
+      // Changing the number of columns mid-document starts a page, because a
+      // column and a half of one shape followed by another is not a page.
+      case 'onecolumn': case 'twocolumn': {
+        const want = name === 'twocolumn' ? 2 : 1;
+        const header = reader.optional();
+        endParagraph(job);
+        if (want !== job.cols) {
+          job.cols = want;
+          job.colGap = want === 2 ? Math.max(job.colGap, job.base * 2.4) : 0;
+          layout(job);
+          startPage(job);
+        }
+        if (header) {
+          const was = beginSpan(job);
+          inGroup(job, header, (sub) => { process(job, sub); endParagraph(job, { indent: 0 }); });
+          endSpan(job, was);
+        }
+        return;
+      }
+
+      case 'endinput': {
+        // The rest of this file is not read. The marker the reader pushed to
+        // say "this is where the file ends" is left where it is.
+        for (;;) {
+          const skip = reader.raw();
+          if (skip.t === 'eof') break;
+          if (skip.t === 'popfile') { reader.back(skip); break; }
+        }
+        return;
+      }
+
+      case 'item': {
+        endParagraph(job, { indent: 0, hanging: 0 });
+        const custom = reader.optional();
+        const list = job.list[job.list.length - 1];
+        job.parindent = false;
+        if (custom || (list && list.kind === 'description')) {
+          const was = job.font.bold;
+          job.font.bold = true;
+          inGroup(job, custom || []);
+          job.font.bold = was;
+          addGlue(job, { w: job.font.size * 0.5, stretch: 0 });
+          if (list) list.count += 1;
+          return;
+        }
+        const mark = itemMark(job);
+        addBox(job, {
+          w: 0, h: job.font.size * 0.7, d: 0,
+          items: [{ k: 't', x: -job.font.size * 1.7, y: 0, f: fontKey(job), s: job.font.size, t: mark }],
+        });
+        return;
+      }
+
+      // ---- crossings
+      case 'label': {
+        const key = T.lex.plain(reader.group());
+        if (key) job.labels[key] = { number: job.lastNumber || '', page: job.counters.page, kind: job.lastKind || 'section' };
+        return;
+      }
+      case 'ref': case 'cref': reference(job, T.lex.plain(reader.group()), 'ref'); return;
+      // \autoref says what it is pointing at, and what that is called is a
+      // macro the document is allowed to redefine — so it is read from the
+      // macros rather than from a table here.
+      case 'autoref': case 'Cref': {
+        const key = T.lex.plain(reader.group());
+        const found = job.refs[key];
+        const kind = (found && found.kind) || 'section';
+        const macro = job.macros.get(`${kind}autorefname`);
+        const word = macro ? T.lex.plain(macro.body).trim() : (AUTOREF[kind] || 'Section');
+        if (word) {
+          addText(job, word);
+          addGlue(job, { w: job.font.size * 0.32, stretch: 0, shrink: 0, nobreak: true });
+        }
+        reference(job, key, 'ref');
+        return;
+      }
+      case 'eqref': {
+        const key = T.lex.plain(reader.group());
+        addText(job, '(');
+        reference(job, key, 'ref');
+        addText(job, ')');
+        return;
+      }
+      case 'pageref': reference(job, T.lex.plain(reader.group()), 'page'); return;
+      case 'cite': case 'citep': case 'citet': reader.optional(); cite(job, T.lex.plain(reader.group())); return;
+      case 'bibitem': {
+        const hang = job.font.size * 2;
+        endParagraph(job, { indent: 0, hanging: hang });
+        reader.optional();
+        const key = T.lex.plain(reader.group());
+        const found = job.bib[key];
+        const label = `[${found ? found.number : '?'}]`;
+        const wide = M().width(label, 'rm', job.font.size);
+        job.parindent = false;
+        addBox(job, {
+          w: wide, h: job.font.size * 0.7, d: 0,
+          items: [{ k: 't', x: 0, y: 0, f: 'rm', s: job.font.size, t: label }],
+        });
+        addGlue(job, { w: Math.max(job.font.size * 0.4, hang - wide), stretch: 0, shrink: 0, nobreak: true });
+        return;
+      }
+      case 'bibliography': reader.group(); bibliography(job); return;
+      case 'bibliographystyle': {
+        const style = T.lex.plain(reader.group()).trim();
+        job.bibStyle = /ACM-Reference-Format|acmnumeric|acmauthoryear/i.test(style) ? 'acm' : 'plain';
+        return;
+      }
+      case 'nocite': reader.group(); return;
+      case 'footnote': footnote(job, reader.group()); return;
+      case 'footnotemark': job.counters.footnote += 1; addRun(job, String(job.counters.footnote), fontKey(job), job.font.size * 0.72, { rise: job.font.size * 0.38 }); return;
+
+      case 'includegraphics': {
+        const options = reader.optional();
+        graphic(job, options, T.lex.plain(reader.group()).trim());
+        return;
+      }
+      case 'caption': {
+        reader.optional();
+        caption(job, job.floatKind || 'figure', reader.group());
+        return;
+      }
+      case 'definecolor': {
+        reader.optional();
+        const which = T.lex.plain(reader.group()).trim();
+        const model = T.lex.plain(reader.group()).trim();
+        const spec = T.lex.plain(reader.group()).trim();
+        const value = colourSpec(model, spec);
+        if (value) job.colours[which] = value;
+        else say(job, 'warning', `Cannot read the colour "${which}" in model ${model}`, tok.line, tok.file);
+        return;
+      }
+      case 'textcolor': {
+        const model = reader.optional();
+        const which = T.lex.plain(reader.group()).trim();
+        const value = model ? colourSpec(T.lex.plain(model).trim(), which) : colourNamed(job, which);
+        const was = job.colour;
+        if (value) job.colour = value;
+        inGroup(job, reader.group());
+        job.colour = was;
+        return;
+      }
+      case 'color': {
+        const model = reader.optional();
+        const which = T.lex.plain(reader.group()).trim();
+        job.colour = (model ? colourSpec(T.lex.plain(model).trim(), which) : colourNamed(job, which)) || null;
+        return;
+      }
+      case 'normalcolor': job.colour = null; return;
+      // Outside a table these mean nothing; the table reads them itself.
+      case 'cellcolor': case 'rowcolor': case 'columncolor':
+        reader.optional(); reader.group(); return;
+
+      case 'newcolumntype': {
+        const which = T.lex.plain(reader.group()).trim();
+        const argc = Number(T.lex.plain(reader.optional() || []) || 0);
+        const body = specText(reader.group());
+        if (which) job.columnTypes.set(which[0], { argc, body });
+        return;
+      }
+
+      // dirtytalk, which is one command and worth having: \say{…} is quoted.
+      case 'say': case 'enquote': {
+        addText(job, '\u201c');
+        inGroup(job, reader.group());
+        addText(job, '\u201d');
+        return;
+      }
+
+      case 'kern': addGlue(job, { w: takeDimen(reader, job), stretch: 0, shrink: 0, nobreak: true }); return;
+
+      // \xspace is what a macro ending in a name puts after itself: a space,
+      // unless what follows is punctuation, where a space would be wrong.
+      case 'xspace': {
+        const peek = reader.peekRaw();
+        if (peek.t === 'char' && !/[.,;:!?)\]'\u2019"-]/.test(peek.v)) addGlue(job);
+        return;
+      }
+
+      // A counter or a penalty being set. The value is read so that it is not
+      // set as text, and then dropped, because nothing here reads it.
+      case 'hyphenpenalty': case 'exhyphenpenalty': case 'tolerance':
+      case 'emergencystretch': case 'clubpenalty': case 'widowpenalty':
+      case 'interlinepenalty': case 'displaywidowpenalty': case 'brokenpenalty':
+      case 'parskip': case 'parindentation': case 'baselineskip': case 'columnsep':
+      case 'topmargin': case 'oddsidemargin': case 'evensidemargin':
+      case 'arrayrulewidth': case 'tabcolsep': case 'fboxsep': case 'looseness':
+        takeAssignment(reader, job); return;
+
+      case 'list': {
+        reader.group();
+        const spec = T.lex.plain(reader.group());
+        endParagraph(job);
+        job.listStack = job.listStack || [];
+        job.listStack.push(save(job));
+        const left = /leftmargin\s*=\s*([-\d.]+\s*[a-z]*)/.exec(spec);
+        const right = /rightmargin\s*=\s*([-\d.]+\s*[a-z]*)/.exec(spec);
+        job.leftSkip += left ? length(left[1], job, job.font.size * 2) : job.font.size * 2;
+        job.rightSkip += right ? length(right[1], job, 0) : 0;
+        if (/itshape/.test(spec)) job.font.italic = true;
+        if (/bfseries/.test(spec)) job.font.bold = true;
+        job.parindent = false;
+        return;
+      }
+      case 'endlist': {
+        endParagraph(job, { indent: 0 });
+        const back = (job.listStack || []).pop();
+        if (back) restore(job, back);
+        job.parindent = false;
+        return;
+      }
+
+      case 'url': link(job, T.lex.plain(reader.group()), null); return;
+      case 'href': { const url = T.lex.plain(reader.group()); link(job, url, reader.group()); return; }
+
+      case 'input': case 'include': {
+        const wanted = T.lex.plain(reader.group()).trim().replace(/^\.\//, '');
+        // A path from another editor may be rooted differently from the one
+        // the file is filed under here, so a tail match is accepted — which is
+        // what makes an Overleaf project's \input{Source/Files/1-Intro} work
+        // whether or not this project keeps the Source folder.
+        const file = job.files.find((one) => one.name === wanted || one.name === `${wanted}.tex`)
+          || job.files.find((one) => one.name.endsWith(`/${wanted}`) || one.name.endsWith(`/${wanted}.tex`))
+          || job.files.find((one) => wanted.endsWith(one.name.replace(/\.tex$/, '')) && one.kind === 'tex');
+        if (!file) { say(job, 'error', `\\input: there is no file called "${wanted}"`, tok.line, tok.file); return; }
+        if (job.reading.includes(file.name)) { say(job, 'error', `\\input: "${wanted}" includes itself`, tok.line, tok.file); return; }
+        job.reading.push(file.name);
+        reader.push(T.lex.tokenize(file.text, file.name).concat([{ t: 'popfile' }]));
+        return;
+      }
+
+      // ---- spacing and breaks
+      case '\\': case 'newline': case 'linebreak': {
+        reader.optional();
+        endWord(job);
+        job.nodes.push({ k: 'break', w: 0 });
+        return;
+      }
+      case 'newpage': case 'pagebreak':
+        endParagraph(job);
+        if (!job.page || job.firstOnPage) return;
+        if (!job.spanning && job.colIndex + 1 < job.cols) nextColumn(job);
+        else startPage(job);
+        return;
+      case 'clearpage': case 'cleardoublepage':
+        endParagraph(job);
+        if (job.page && !(job.firstOnPage && job.colIndex === 0)) startPage(job);
+        return;
+      case 'noindent': job.parindent = false; return;
+      case 'indent': job.parindent = true; return;
+      case 'centering': endParagraph(job); job.align = 'center'; job.parindent = false; return;
+      case 'raggedright': endParagraph(job); job.align = 'left'; job.parindent = false; return;
+      case 'raggedleft': endParagraph(job); job.align = 'right'; job.parindent = false; return;
+      case 'vspace': case 'vskip': case 'vspace*': {
+        const amount = length(T.lex.plain(reader.group()), job, 0);
+        endParagraph(job);
+        vspace(job, amount);
+        return;
+      }
+      case 'smallskip': endParagraph(job); vspace(job, job.base * 0.3); return;
+      case 'medskip': endParagraph(job); vspace(job, job.base * 0.6); return;
+      case 'bigskip': endParagraph(job); vspace(job, job.base * 1.2); return;
+      case 'hspace': case 'hskip': case 'hspace*':
+        addGlue(job, { w: length(T.lex.plain(reader.group()), job, 0), stretch: 0, shrink: 0, nobreak: true });
+        return;
+      case 'quad': addGlue(job, { w: job.font.size, stretch: 0, shrink: 0, nobreak: true }); return;
+      case 'qquad': addGlue(job, { w: job.font.size * 2, stretch: 0, shrink: 0, nobreak: true }); return;
+      case ',': addGlue(job, { w: job.font.size / 6, stretch: 0, shrink: 0, nobreak: true }); return;
+      case ' ': case ';': case ':': addGlue(job, { nobreak: true }); return;
+      case '!': return;
+      case 'hfill': addGlue(job, { fill: true, w: 0, stretch: 0, shrink: 0 }); return;
+      case 'dotfill': case 'hrulefill': addGlue(job, { fill: true, w: 0, stretch: 0, shrink: 0 }); return;
+      case 'hrule': {
+        endParagraph(job);
+        emitRow(job, { items: [{ k: 'r', x: 0, y: 0, w: job.measure, h: 0.4 }], above: 0.4, below: job.base * 0.3, x: job.leftSkip });
+        return;
+      }
+      case 'rule': {
+        reader.optional();
+        const w = length(T.lex.plain(reader.group()), job, job.measure);
+        const h = length(T.lex.plain(reader.group()), job, 1);
+        addBox(job, { w, h, d: 0, items: [{ k: 'r', x: 0, y: 0, w, h }] });
+        return;
+      }
+
+      // ---- fonts
+      case 'textbf': case 'textit': case 'textrm': case 'textsf': case 'texttt':
+      case 'textsc': case 'textmd': case 'textnormal': case 'textup': case 'textsl':
+      case 'emph': case 'underline': {
+        const saved = save(job);
+        if (name === 'textbf') job.font.bold = true;
+        if (name === 'textit' || name === 'textsl' || name === 'emph') job.font.italic = !job.font.italic;
+        if (name === 'textrm' || name === 'textnormal') { job.font.family = 'rm'; job.font.bold = false; job.font.italic = false; }
+        if (name === 'textsf') job.font.family = 'sf';
+        if (name === 'texttt') job.font.family = 'tt';
+        if (name === 'textsc') job.font.sc = true;
+        if (name === 'textup') job.font.italic = false;
+        if (name === 'textmd') job.font.bold = false;
+        const tokens = reader.group();
+        if (name === 'underline') {
+          const nodes = collect(job, tokens);
+          const box = pack(job, nodes);
+          box.items.push({ k: 'r', x: 0, y: -job.font.size * 0.16, w: box.w, h: 0.4 });
+          addBox(job, box);
+        } else {
+          inGroup(job, tokens);
+        }
+        restore(job, saved);
+        return;
+      }
+      case 'textsuperscript': case 'textsubscript': {
+        const rise = name === 'textsuperscript' ? job.font.size * 0.4 : -job.font.size * 0.18;
+        const text = T.lex.plain(reader.group());
+        addRun(job, text, fontKey(job), job.font.size * 0.72, { rise });
+        return;
+      }
+      case 'MakeUppercase': case 'uppercase': addText(job, T.lex.plain(reader.group()).toUpperCase()); return;
+      case 'MakeLowercase': case 'lowercase': addText(job, T.lex.plain(reader.group()).toLowerCase()); return;
+      case 'bfseries': job.font.bold = true; return;
+      case 'mdseries': job.font.bold = false; return;
+      case 'itshape': case 'slshape': case 'em': job.font.italic = true; return;
+      case 'upshape': job.font.italic = false; return;
+      case 'scshape': job.font.sc = true; return;
+      case 'ttfamily': job.font.family = 'tt'; return;
+      case 'rmfamily': job.font.family = 'rm'; return;
+      case 'sffamily': job.font.family = 'sf'; return;
+      case 'normalfont': job.font = { ...job.font, family: 'rm', bold: false, italic: false, sc: false }; return;
+
+      // ---- names and marks
+      case 'today': addText(job, today()); return;
+      case 'TeX': case 'LaTeX': case 'LaTeXe': {
+        // The logos, drawn the way they are drawn: a raised small A, a dropped
+        // E, and the letters around them at the size they were already.
+        const size = job.font.size;
+        const key = fontKey(job);
+        if (name !== 'TeX') {
+          addRun(job, 'L', key, size);
+          addRun(job, 'A', key, size * 0.7, { rise: size * 0.22 });
+        }
+        addRun(job, 'T', key, size);
+        addRun(job, 'E', key, size, { rise: -size * 0.22 });
+        addRun(job, 'X', key, size);
+        return;
+      }
+
+      // ---- accepted and ignored
+      // Two arguments and no options: a length set, a counter moved.
+      case 'setlength': case 'addtolength': case 'setcounter': case 'addtocounter':
+      case 'renewcommandx':
+        reader.group(); reader.group(); return;
+      // An option, then one argument.
+      case 'captionsetup': case 'hypersetup': case 'graphicspath':
+      case 'pagestyle': case 'thispagestyle': case 'addcontentsline':
+        reader.optional(); reader.group(); return;
+      // No argument at all. Reading one eats the text that follows.
+      case 'arraybackslash': return;
+      case 'linespread': case 'pagenumbering': case 'markboth': case 'markright':
+      case 'listoffigures': case 'listoftables': case 'usetikzlibrary':
+        reader.group(); return;
+      case 'sloppy': case 'fussy': case 'allowdisplaybreaks': case 'flushbottom':
+      case 'raggedbottom': case 'noindentafter': case 'protect':
+      case 'selectfont': case 'sloppypar': case 'unskip': case 'toprule':
+      case 'midrule': case 'bottomrule': case 'hline':
+      case 'nonumber': case 'notag': case 'leavevmode': case 'null': case 'relax':
+      case '@': case 'ignorespaces': case 'newpagestyle':
+        return;
+      case 'multicolumn': { reader.group(); reader.group(); inGroup(job, reader.group()); return; }
+      // Outside a table these say nothing about a page; the table reads them.
+      case 'multirow': { reader.optional(); reader.group(); reader.group(); inGroup(job, reader.group()); return; }
+      case 'rowcolors': { reader.optional(); reader.group(); reader.group(); reader.group(); return; }
+      case 'mbox': case 'text': case 'hbox': inGroup(job, reader.group()); return;
+      case 'ensuremath': addBox(job, mathBox(job, reader.group(), false)); return;
+      case 'frac': case 'sum': case 'int': case 'alpha': case 'beta': case 'infty': {
+        // Maths outside maths mode: TeX refuses. This sets it and says so.
+        say(job, 'warning', `\\${name} needs maths mode — it was set as if in $…$`, tok.line, tok.file);
+        const parts = [tok];
+        if (name === 'frac') {
+          parts.push({ t: '{' }, ...reader.group(), { t: '}' }, { t: '{' }, ...reader.group(), { t: '}' });
+        }
+        addBox(job, mathBox(job, parts, false));
+        return;
+      }
+
+      default:
+        say(job, 'error', `Undefined control sequence \\${name}`, tok.line, tok.file);
+    }
+  }
+
+  // What \autoref calls a thing, when the document has not said.
+  const AUTOREF = {
+    section: 'Section', subsection: 'Section', subsubsection: 'Section',
+    figure: 'Figure', table: 'Table', equation: 'Equation', part: 'Part',
+  };
+
+  /** Tokens with no place of their own. A macro body was read at the line it
+   *  was defined on, and expanding it at line 400 does not move the reader back
+   *  to line 12 — so the body forgets where it came from and the reader keeps
+   *  saying where it is. */
+  const placeless = (tokens) => tokens.map((tok) => ({ ...tok, file: undefined, line: undefined }));
+
+  /** A dimension read off the raw stream, for the commands that take one
+   *  without braces: \kern-0.5em, \hyphenpenalty=10000. */
+  function takeDimen(reader, job) {
+    let text = '';
+    for (;;) {
+      const peek = reader.peekRaw();
+      if (peek.t !== 'char' || !/[-+\d.a-zA-Z]/.test(peek.v)) break;
+      const next = text + peek.v;
+      if (!/^[-+]?[\d.]*[a-zA-Z]{0,2}$/.test(next)) break;
+      reader.raw();
+      text = next;
+      if (/^[-+]?[\d.]+[a-zA-Z]{2}$/.test(text)) break;
+    }
+    return length(text, job, 0);
+  }
+
+  function takeAssignment(reader, job) {
+    const peek = reader.peekRaw();
+    if (peek.t === 'char' && peek.v === '=') reader.raw();
+    takeDimen(reader, job);
+  }
+
+  function applyGeometry(job, options) {
+    for (const pair of String(options).split(',')) {
+      const [key, value] = pair.split('=').map((part) => (part || '').trim());
+      if (key === 'margin' && value) {
+        job.margin = length(value, job, job.margin);
+        job.marginTop = job.margin;
+        job.marginBottom = job.margin;
+        layout(job);
+      }
+      if ((key === 'top' || key === 'bottom') && value) {
+        job[key === 'top' ? 'marginTop' : 'marginBottom'] = length(value, job, job.margin);
+      }
+      if (key === 'columnsep' && value) { job.colGap = length(value, job, job.colGap); layout(job); }
+      if (PAPER[key]) {
+        job.paper = key;
+        [job.W, job.H] = PAPER[key];
+        layout(job);
+      }
+    }
+  }
+
+  // -------------------------------------------------------------------- run
+
+  /** One pass over the project. What comes back is a PDF and everything the
+   *  next pass would need to know: where the labels landed, what the contents
+   *  should say, how many pages there were. */
+  function run(project, options = {}) {
+    const log = [];
+    const job = createJob({
+      base: 10,
+      log,
+      images: options.images || {},
+      files: project.files,
+      refs: options.refs || {},
+    });
+    job.bib = options.bib || {};
+    job.previousToc = options.toc || [];
+    job.previousPages = options.pages || 0;
+    job.reading = [];
+    job.line = 1;
+    job.file = project.main;
+    job.groups = [];
+
+    const main = project.files.find((one) => one.name === project.main) || project.files[0];
+    if (!main) throw new Error('there is no file to typeset');
+
+    const reader = new T.lex.Reader(T.lex.tokenize(main.text, main.name), job.macros);
+    process(job, reader);
+    endParagraph(job);
+    // A wide float that never reached the top of a page gets one of its own,
+    // which is what a class does with a float it has run out of room for.
+    if (job.wide.length) startPage(job);
+    finishPage(job);
+
+    job.doc.meta.title = T.lex.plain(job.titleTokens || []) || project.main;
+    job.doc.meta.author = T.lex.plain(job.authorTokens || []);
+    job.doc.outlineFrom(job.outline);
+
+    if (!job.started) {
+      say(job, 'error', 'There is no \\begin{document} — nothing was set', 1, project.main);
+    }
+
+    return {
+      doc: job.doc,
+      log,
+      labels: job.labels,
+      toc: job.toc,
+      lineMap: job.lineMap,
+      pages: job.doc.pageCount(),
+    };
+  }
+
+  T.type = { run, PAPER, length };
+})();
+</script>

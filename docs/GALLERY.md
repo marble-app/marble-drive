@@ -38,7 +38,7 @@ the page instead.
 Everything else is Marble's, unchanged. An override that Marble has no part for
 is a build error rather than a silently ignored file.
 
-## The six
+## The seven
 
 | | |
 |---|---|
@@ -48,6 +48,14 @@ is a build error rather than a silently ignored file.
 | `board` | columns of cards. A card's column is where it sits and nothing else |
 | `canvas` | notes placed anywhere; the position is an inline style on the note |
 | `latex` | a LaTeX project. The sources are `<pre>` elements, the typesetter and the PDF writer are scripts beside them, and the PDF is the only thing in the room that is not kept |
+| `paper` | the same document with a CHI submission in it: `acmart` in two columns, a folder tree derived from the file names, and a button that rewrites the class option when a draft needs one column instead of two |
+
+The last two are one document with two projects in it. `starters/latex/` is a
+folder of parts rather than a single file, and `starters/paper/` is three files,
+two of which are nothing but `<!-- include: ../latex/… -->` lines. A starter
+that is a folder is concatenated in name order and its includes expanded, so
+what leaves here is still one file with no seams in it — and a fix to the
+typesetter is one fix rather than two.
 
 Two of them do something the affordance library cannot, and do it in their own
 `<script>`: the sheet's "+ column" (three kinds of edit in one gesture, filed as

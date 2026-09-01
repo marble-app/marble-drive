@@ -1,0 +1,263 @@
+
+<!-- ===================================================================== -->
+<!-- The engine. Five scripts: what the letters measure, how a PDF is       -->
+<!-- written, how TeX is read, how mathematics is set, and how the two      -->
+<!-- become pages. Then one more that wires the room around them.          -->
+<!-- ===================================================================== -->
+
+<script data-marble-id="__ID__">
+// ---------------------------------------------------------------- metrics
+//
+// Every PDF reader can draw the fourteen fonts Adobe made standard without
+// being sent one, which is why this document can typeset without a network:
+// the paper is set in Times, Helvetica, Courier and Symbol, and none of them
+// travel with the file.
+//
+// What has to travel is how wide each letter is. These are the advance widths
+// from the fonts' own metrics, in thousandths of the point size — the same
+// numbers the reader will use when it draws them, so a line that fits here
+// fits there.
+
+window.TeX = window.TeX || {};
+
+(() => {
+  const T = window.TeX;
+
+  // ASCII 32..126, ten to a row.
+  const WIDTHS = {
+    'Times-Roman': [
+      250, 333, 408, 500, 500, 833, 778, 333, 333, 333,
+      500, 564, 250, 333, 250, 278, 500, 500, 500, 500,
+      500, 500, 500, 500, 500, 500, 278, 278, 564, 564,
+      564, 444, 921, 722, 667, 667, 722, 611, 556, 722,
+      722, 333, 389, 722, 611, 889, 722, 722, 556, 722,
+      667, 556, 611, 722, 722, 944, 722, 722, 611, 333,
+      278, 333, 469, 500, 333, 444, 500, 444, 500, 444,
+      333, 500, 500, 278, 278, 500, 278, 778, 500, 500,
+      500, 500, 333, 389, 278, 500, 500, 722, 500, 500,
+      444, 480, 200, 480, 541,
+    ],
+    'Times-Bold': [
+      250, 333, 555, 500, 500, 1000, 833, 333, 333, 333,
+      500, 570, 250, 333, 250, 278, 500, 500, 500, 500,
+      500, 500, 500, 500, 500, 500, 333, 333, 570, 570,
+      570, 500, 930, 722, 667, 722, 722, 667, 611, 778,
+      778, 389, 500, 778, 667, 944, 722, 778, 611, 778,
+      722, 556, 667, 722, 722, 1000, 722, 722, 667, 333,
+      278, 333, 581, 500, 333, 500, 556, 444, 556, 444,
+      333, 500, 556, 278, 333, 556, 278, 833, 556, 500,
+      556, 556, 444, 389, 333, 556, 500, 722, 500, 500,
+      444, 394, 220, 394, 520,
+    ],
+    'Times-Italic': [
+      250, 333, 420, 500, 500, 833, 778, 333, 333, 333,
+      500, 675, 250, 333, 250, 278, 500, 500, 500, 500,
+      500, 500, 500, 500, 500, 500, 333, 333, 675, 675,
+      675, 500, 920, 611, 611, 667, 722, 611, 611, 722,
+      722, 333, 444, 667, 556, 833, 667, 722, 611, 722,
+      611, 500, 556, 722, 611, 833, 611, 556, 556, 389,
+      278, 389, 422, 500, 333, 500, 500, 444, 500, 444,
+      278, 500, 500, 278, 278, 444, 278, 722, 500, 500,
+      500, 500, 389, 389, 278, 500, 444, 667, 444, 444,
+      389, 400, 275, 400, 541,
+    ],
+    'Times-BoldItalic': [
+      250, 389, 555, 500, 500, 833, 778, 333, 333, 333,
+      500, 570, 250, 333, 250, 278, 500, 500, 500, 500,
+      500, 500, 500, 500, 500, 500, 333, 333, 570, 570,
+      570, 500, 832, 667, 667, 667, 722, 667, 667, 722,
+      778, 389, 500, 667, 611, 889, 722, 722, 611, 722,
+      667, 556, 611, 722, 667, 889, 667, 611, 611, 333,
+      278, 333, 570, 500, 333, 500, 500, 444, 500, 444,
+      333, 500, 556, 278, 278, 500, 278, 778, 556, 500,
+      500, 500, 389, 389, 278, 556, 444, 667, 500, 444,
+      389, 348, 220, 348, 570,
+    ],
+    'Helvetica': [
+      278, 278, 355, 556, 556, 889, 667, 191, 333, 333,
+      389, 584, 278, 333, 278, 278, 556, 556, 556, 556,
+      556, 556, 556, 556, 556, 556, 278, 278, 584, 584,
+      584, 556, 1015, 667, 667, 722, 722, 667, 611, 778,
+      722, 278, 500, 667, 556, 833, 722, 778, 667, 778,
+      722, 667, 611, 722, 667, 944, 667, 667, 611, 278,
+      278, 278, 469, 556, 333, 556, 556, 500, 556, 556,
+      278, 556, 556, 222, 222, 500, 222, 833, 556, 556,
+      556, 556, 333, 500, 278, 556, 500, 722, 500, 500,
+      500, 334, 260, 334, 584,
+    ],
+    'Helvetica-Bold': [
+      278, 333, 474, 556, 556, 889, 722, 238, 333, 333,
+      389, 584, 278, 333, 278, 278, 556, 556, 556, 556,
+      556, 556, 556, 556, 556, 556, 333, 333, 584, 584,
+      584, 611, 975, 722, 722, 722, 722, 667, 611, 778,
+      722, 278, 556, 722, 611, 833, 722, 778, 667, 778,
+      722, 667, 611, 722, 667, 944, 667, 667, 611, 333,
+      278, 333, 584, 556, 333, 556, 611, 556, 611, 556,
+      333, 611, 611, 278, 278, 556, 278, 889, 611, 611,
+      611, 611, 389, 556, 333, 611, 556, 778, 556, 556,
+      500, 389, 280, 389, 584,
+    ],
+  };
+
+  // The characters past ASCII that a document actually produces — curly
+  // quotes, the two dashes, a bullet, a degree sign — with the code the
+  // reader knows them by in WinAnsiEncoding.
+  const WINANSI = {
+    '‘': 0x91, '’': 0x92, '“': 0x93, '”': 0x94,
+    '–': 0x96, '—': 0x97, '•': 0x95, '…': 0x85,
+    '†': 0x86, '‡': 0x87, '‰': 0x89, 'Œ': 0x8c,
+    'œ': 0x9c, 'Ž': 0x8e, 'ž': 0x9e, 'Š': 0x8a,
+    'š': 0x9a, 'Ÿ': 0x9f, '‹': 0x8b, '›': 0x9b,
+    '‚': 0x82, '„': 0x84, 'ƒ': 0x83, 'ˆ': 0x88,
+    '˜': 0x98, '™': 0x99,
+  };
+
+  const EXTRA = {
+    'Times-Roman':      { 0x91: 333, 0x92: 333, 0x93: 444, 0x94: 444, 0x95: 350, 0x96: 500, 0x97: 1000, 0x85: 1000 },
+    'Times-Bold':       { 0x91: 333, 0x92: 333, 0x93: 500, 0x94: 500, 0x95: 350, 0x96: 500, 0x97: 1000, 0x85: 1000 },
+    'Times-Italic':     { 0x91: 333, 0x92: 333, 0x93: 556, 0x94: 556, 0x95: 350, 0x96: 500, 0x97: 889,  0x85: 889 },
+    'Times-BoldItalic': { 0x91: 333, 0x92: 333, 0x93: 500, 0x94: 500, 0x95: 350, 0x96: 500, 0x97: 1000, 0x85: 1000 },
+    'Helvetica':        { 0x91: 222, 0x92: 222, 0x93: 333, 0x94: 333, 0x95: 350, 0x96: 556, 0x97: 1000, 0x85: 1000 },
+    'Helvetica-Bold':   { 0x91: 278, 0x92: 278, 0x93: 500, 0x94: 500, 0x95: 350, 0x96: 556, 0x97: 1000, 0x85: 1000 },
+  };
+
+  // A font key is family plus what has been done to it: rm, rmb, rmi, rmbi and
+  // the same for sf and tt. `sy` is Symbol, which is where every Greek letter
+  // and every operator in the maths comes from.
+  const FONTS = {
+    rm:   { pdf: 'Times-Roman',           w: 'Times-Roman' },
+    rmb:  { pdf: 'Times-Bold',            w: 'Times-Bold' },
+    rmi:  { pdf: 'Times-Italic',          w: 'Times-Italic' },
+    rmbi: { pdf: 'Times-BoldItalic',      w: 'Times-BoldItalic' },
+    sf:   { pdf: 'Helvetica',             w: 'Helvetica' },
+    sfb:  { pdf: 'Helvetica-Bold',        w: 'Helvetica-Bold' },
+    sfi:  { pdf: 'Helvetica-Oblique',     w: 'Helvetica' },
+    sfbi: { pdf: 'Helvetica-BoldOblique', w: 'Helvetica-Bold' },
+    tt:   { pdf: 'Courier',               w: null },
+    ttb:  { pdf: 'Courier-Bold',          w: null },
+    tti:  { pdf: 'Courier-Oblique',       w: null },
+    ttbi: { pdf: 'Courier-BoldOblique',   w: null },
+    sy:   { pdf: 'Symbol',                w: null, symbol: true },
+  };
+
+  // Symbol's own encoding: the code the reader wants, and how wide it is.
+  // Written against the Unicode character so the layout can carry readable
+  // text and only the writer has to know about byte 0xE5.
+  const SYM = {
+    'Α': [0x41, 722], 'Β': [0x42, 667], 'Γ': [0x47, 603], 'Δ': [0x44, 612],
+    'Ε': [0x45, 611], 'Ζ': [0x5a, 611], 'Η': [0x48, 722], 'Θ': [0x51, 741],
+    'Ι': [0x49, 333], 'Κ': [0x4b, 722], 'Λ': [0x4c, 690], 'Μ': [0x4d, 889],
+    'Ν': [0x4e, 722], 'Ξ': [0x58, 645], 'Ο': [0x4f, 722], 'Π': [0x50, 768],
+    'Ρ': [0x52, 556], 'Σ': [0x53, 592], 'Τ': [0x54, 611], 'Υ': [0x55, 690],
+    'Φ': [0x46, 763], 'Χ': [0x43, 722], 'Ψ': [0x59, 795], 'Ω': [0x57, 768],
+    'α': [0x61, 631], 'β': [0x62, 549], 'γ': [0x67, 411], 'δ': [0x64, 494],
+    'ε': [0x65, 439], 'ζ': [0x7a, 494], 'η': [0x68, 603], 'θ': [0x71, 521],
+    'ι': [0x69, 329], 'κ': [0x6b, 549], 'λ': [0x6c, 549], 'μ': [0x6d, 576],
+    'ν': [0x6e, 521], 'ξ': [0x78, 493], 'ο': [0x6f, 549], 'π': [0x70, 549],
+    'ρ': [0x72, 549], 'ς': [0x56, 439], 'σ': [0x73, 603], 'τ': [0x74, 439],
+    'υ': [0x75, 576], 'φ': [0x66, 521], 'χ': [0x63, 549], 'ψ': [0x79, 686],
+    'ω': [0x77, 686], 'ϑ': [0x4a, 631], 'ϕ': [0x6a, 603], 'ϖ': [0x76, 713],
+    'ϱ': [0x72, 549], 'ℓ': [0x6c, 549],
+
+    '∑': [0xe5, 713], '∏': [0xd5, 823], '∫': [0xf2, 274], '√': [0xd6, 549],
+    '∞': [0xa5, 713], '∂': [0xb6, 494], '∇': [0xd1, 713], '∈': [0xce, 713],
+    '∉': [0xcf, 713], '∋': [0x27, 439], '±': [0xb1, 549], '×': [0xb4, 549],
+    '÷': [0xb8, 549], '≤': [0xa3, 549], '≥': [0xb3, 549], '≠': [0xb9, 549],
+    '≈': [0xbb, 549], '≡': [0xba, 549], '∼': [0x7e, 549], '≅': [0x40, 549],
+    '∝': [0xb5, 713], '→': [0xae, 987], '←': [0xac, 987], '↔': [0xab, 1042],
+    '↑': [0xad, 603], '↓': [0xaf, 603], '⇒': [0xde, 987], '⇐': [0xdc, 987],
+    '⇔': [0xdb, 1042], '∀': [0x22, 713], '∃': [0x24, 549], '¬': [0xd8, 713],
+    '∧': [0xd9, 603], '∨': [0xda, 603], '∩': [0xc7, 768], '∪': [0xc8, 768],
+    '⊂': [0xcc, 713], '⊆': [0xcd, 713], '⊃': [0xc9, 713], '⊇': [0xca, 713],
+    '∅': [0xc6, 823], '⊕': [0xc5, 768], '⊗': [0xc4, 768], '⋅': [0xd7, 250],
+    '∘': [0xb0, 400], '′': [0xa2, 247], '″': [0xb2, 411], '∠': [0xd0, 768],
+    '∴': [0x5c, 863], 'ℵ': [0xc0, 823], 'ℜ': [0xc1, 795], 'ℑ': [0xc2, 686],
+    '℘': [0xc3, 987], '·': [0xd7, 250], '⟨': [0xe1, 329], '⟩': [0xf1, 329],
+    '−': [0x2d, 549], '∗': [0x2a, 500], '⁄': [0xa4, 167], '∣': [0x7c, 200],
+    '∮': [0xf2, 274], '∓': [0xb1, 549], '…': [0xbc, 1000], '⊥': [0x5e, 658],
+    '⌈': [0x5b, 333], '⌉': [0x5d, 333], '⌊': [0x5b, 333], '⌋': [0x5d, 333],
+  };
+
+  // Where the ink sits inside the em, as a fraction of the point size. Enough
+  // for line heights, for the axis the maths hangs off, and for how high a
+  // superscript climbs.
+  const SHAPE = {
+    rm: { asc: 0.683, desc: 0.217, x: 0.448, cap: 0.662 },
+    sf: { asc: 0.718, desc: 0.207, x: 0.523, cap: 0.718 },
+    tt: { asc: 0.629, desc: 0.157, x: 0.426, cap: 0.562 },
+    sy: { asc: 0.700, desc: 0.220, x: 0.450, cap: 0.680 },
+  };
+
+  const familyOf = (key) => (key === 'sy' ? 'sy' : key.slice(0, 2));
+
+  function rawWidth(ch, key) {
+    const font = FONTS[key] || FONTS.rm;
+    if (font.symbol) return (SYM[ch] || [0, 549])[1];
+    if (!font.w) return 600; // Courier, every glyph the same width
+    const code = ch.charCodeAt(0);
+    const table = WIDTHS[font.w];
+    if (code >= 32 && code <= 126) return table[code - 32];
+    const win = T.metrics.encode(ch);
+    if (win === null) return table[0];
+    const extra = EXTRA[font.w];
+    if (extra && extra[win] !== undefined) return extra[win];
+    if (win >= 0xa0) return table['A'.charCodeAt(0) - 32]; // a Latin-1 letter, near enough
+    return table[0];
+  }
+
+  const cache = new Map();
+
+  T.metrics = {
+    FONTS,
+    SYM,
+
+    /** The code a reader wants for this character, or null if it has none. */
+    encode(ch) {
+      const code = ch.charCodeAt(0);
+      if (code >= 32 && code <= 126) return code;
+      if (code >= 0xa0 && code <= 0xff) return code;
+      if (WINANSI[ch] !== undefined) return WINANSI[ch];
+      return null;
+    },
+
+    /** Symbol's byte for a character, or null if Symbol has no such glyph. */
+    symbolCode(ch) {
+      return SYM[ch] ? SYM[ch][0] : null;
+    },
+
+    /** Width of one character at one point size. */
+    charWidth(ch, key, size) {
+      const at = key + ch;
+      let w = cache.get(at);
+      if (w === undefined) {
+        w = rawWidth(ch, key) / 1000;
+        cache.set(at, w);
+      }
+      return w * size;
+    },
+
+    /** Width of a run of text. No kerning: every word is placed by hand, so
+     *  the only thing a missing kern costs is a fraction of a point inside it. */
+    width(text, key, size) {
+      let sum = 0;
+      for (const ch of text) sum += this.charWidth(ch, key, size);
+      return sum;
+    },
+
+    ascent: (key, size) => SHAPE[familyOf(key)].asc * size,
+    descent: (key, size) => SHAPE[familyOf(key)].desc * size,
+    xHeight: (key, size) => SHAPE[familyOf(key)].x * size,
+    capHeight: (key, size) => SHAPE[familyOf(key)].cap * size,
+
+    /** The maths axis — the height the middle of a fraction bar, a minus sign
+     *  and a big delimiter all line up on. */
+    axis: (size) => 0.25 * size,
+
+    /** Bold, italic and family are three switches on one key. */
+    key(family, bold, italic) {
+      if (family === 'sy') return 'sy';
+      return family + (bold ? 'b' : '') + (italic ? 'i' : '');
+    },
+  };
+})();
+</script>

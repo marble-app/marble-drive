@@ -1,0 +1,302 @@
+<!doctype html>
+<html lang="en" data-marble="1">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="marble:capabilities" content="storage; net=none">
+<title>__TITLE__</title>
+__ICON__
+<style>
+  /* A LaTeX project, as one file.
+
+     The layout is the one every TeX editor has settled on — files at the left,
+     source in the middle, the paper at the right — because it is the one that
+     lets you watch a change land. What is different here is where the pieces
+     live: the source is markup in this file, the engine is one of the scripts in it,
+     and the PDF is the only thing that is neither, because a PDF is a
+     rendering of a source and this document keeps sources.
+
+     The palette is Marble's. One dusty blue does the accenting; the desk behind
+     the PDF is the only grey, because that is the one place where a page has to
+     look like a page sitting on something. */
+  :root {
+    --ink: #111111;
+    --muted: #5a5a5a;
+    --faint: #8a8a8a;
+    --line: #ddd9cf;
+    --paper: #ffffff;
+    --chrome: #fbfaf7;
+    --card: #ffffff;
+    --accent: #9bb6cf;
+    --accent-soft: #f1f5f8;
+    --accent-ink: #738698;
+    --desk: #6f7378;
+    --ok: #4b7f52;
+    --warn: #9a7a3a;
+    --bad: #b4544f;
+    --radius: 4px;
+    --rail: 13rem;
+    --mono: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
+    --ui: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    --code: 12.5px;
+    --leading: 1.55;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --ink: #e8e6e1; --muted: #a3a7ab; --faint: #7d8288; --line: #2f3438;
+      --paper: #1c1f22; --chrome: #191c1f; --card: #1c1f22;
+      --accent: #7fa8c9; --accent-soft: #1d2932; --accent-ink: #9dc0dc;
+      --desk: #303438; --ok: #7fb489; --warn: #cfae7f; --bad: #e08c88;
+    }
+  }
+  * { box-sizing: border-box; }
+  html, body { height: 100%; }
+  body {
+    margin: 0; background: var(--paper); color: var(--ink);
+    font: 13px/1.5 var(--ui); -webkit-font-smoothing: antialiased;
+    overflow: hidden;
+  }
+
+  /* ----------------------------------------------------------------- shell */
+
+  .app {
+    height: 100vh; height: 100dvh; display: grid;
+    grid-template-rows: 2.9rem minmax(0, 1fr) auto;
+  }
+  .main {
+    display: grid; min-height: 0; overflow: hidden;
+    grid-template-columns: var(--rail) var(--split, 46%) minmax(0, 1fr);
+    /* One row, and it is the height of the grid rather than of what is in it.
+       Without this the panes report their content height as their minimum, the
+       row grows past the window, and every scroller inside them stops
+       scrolling because nothing is ever too tall for its box. */
+    grid-template-rows: minmax(0, 1fr);
+  }
+  .main > * { min-height: 0; min-width: 0; }
+  .app[data-layout="editor"] .main { grid-template-columns: var(--rail) minmax(0, 1fr) 0; }
+  .app[data-layout="pdf"]    .main { grid-template-columns: var(--rail) 0 minmax(0, 1fr); }
+  .app[data-layout="editor"] .pdfpane,
+  .app[data-layout="pdf"] .editorpane { display: none; }
+  .app[data-rail="closed"] { --rail: 0px; }
+  .app[data-rail="closed"] .rail { display: none; }
+
+  /* --------------------------------------------------------------- the bar */
+
+  .bar {
+    display: flex; align-items: center; gap: .35rem; padding: 0 .55rem;
+    border-bottom: 1px solid var(--line); background: var(--chrome);
+  }
+  .brand { display: flex; align-items: center; gap: .45rem; min-width: 0; }
+  .brand .dot {
+    width: .7rem; height: .7rem; border-radius: 50%; flex: none;
+    background: radial-gradient(circle at 32% 30%, #ffffff 0 8%, var(--accent) 42%, var(--accent-ink) 100%);
+  }
+  .title {
+    font-weight: 600; font-size: .85rem; letter-spacing: -.005em;
+    padding: .15rem .3rem; border-radius: var(--radius); outline: none;
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 22rem;
+  }
+  .kind { color: var(--faint); font-size: .72rem; letter-spacing: .06em; text-transform: uppercase; }
+  .acts { display: flex; align-items: center; gap: .35rem; margin-left: auto; min-width: 0; overflow-x: auto; scrollbar-width: none; padding: .25rem 0; }
+  .acts::-webkit-scrollbar { display: none; }
+
+  .btn {
+    appearance: none; display: inline-flex; align-items: center; gap: .35rem;
+    padding: .3rem .6rem; border: 1px solid var(--line); border-radius: 999px;
+    background: var(--card); color: var(--muted);
+    font: 500 .76rem/1.35 var(--ui); cursor: pointer; white-space: nowrap;
+  }
+  .btn:hover { color: var(--accent-ink); border-color: var(--accent); }
+  .btn[aria-pressed="true"] { background: var(--accent-soft); color: var(--accent-ink); border-color: var(--accent); }
+  .btn.go { background: var(--accent-ink); border-color: var(--accent-ink); color: #fff; }
+  .btn.go:hover { filter: brightness(1.08); color: #fff; }
+  .btn.go[data-busy="1"] { opacity: .55; }
+  .btn .ico { font-size: .8em; opacity: .9; }
+  .seg { display: inline-flex; border: 1px solid var(--line); border-radius: 999px; overflow: hidden; background: var(--card); }
+  .seg .btn { border: 0; border-radius: 0; padding: .3rem .5rem; }
+  .seg .btn + .btn { border-left: 1px solid var(--line); }
+
+  /* -------------------------------------------------------------- the rail */
+
+  .rail {
+    border-right: 1px solid var(--line); background: var(--chrome);
+    overflow: hidden; display: flex; flex-direction: column; min-width: 0;
+  }
+  .railscroll { flex: 1 1 auto; min-height: 0; overflow: auto; overscroll-behavior: contain; }
+  .rail h2 {
+    margin: 0; padding: .7rem .75rem .35rem; font-size: .68rem; letter-spacing: .09em;
+    text-transform: uppercase; color: var(--faint); font-weight: 600;
+  }
+  .filelist { list-style: none; margin: 0; padding: 0 .35rem .35rem; }
+  .frow {
+    display: flex; align-items: center; gap: .35rem; padding: .26rem .4rem;
+    border-radius: var(--radius); cursor: default; color: var(--muted);
+    font-size: .78rem; white-space: nowrap; touch-action: none;
+    padding-left: calc(.4rem + var(--depth, 0) * .8rem);
+  }
+  .frow:hover { background: var(--accent-soft); }
+  .frow.marble-open { background: var(--accent-soft); color: var(--accent-ink); font-weight: 600; }
+  .frow .glyph { width: 1rem; text-align: center; opacity: .65; font-size: .78em; flex: none; }
+  .frow .fn { flex: 1 1 auto; overflow: hidden; text-overflow: ellipsis; }
+  .frow .more {
+    opacity: 0; border: 0; background: none; color: inherit; cursor: pointer;
+    font: inherit; padding: 0 .25rem; border-radius: 3px; flex: none;
+  }
+  .frow:hover .more, .frow .more[aria-expanded="true"] { opacity: .55; }
+  .frow .more:hover { opacity: 1; color: var(--accent-ink); background: var(--card); }
+  .frow.dir > .fn { font-weight: 600; }
+  .frow.dir .glyph { transition: transform .12s ease; }
+  .frow.dir.marble-shut .glyph { transform: rotate(-90deg); }
+
+  /* Dragging a file into a folder is a rename, so the only thing the drag
+     needs to draw is where it would land. */
+  .frow.marble-lift { opacity: .45; }
+  .frow.marble-drop { box-shadow: inset 0 0 0 1px var(--accent); background: var(--accent-soft); }
+  #railfiles.marble-drop { box-shadow: inset 0 0 0 1px var(--accent); border-radius: var(--radius); }
+  .ren {
+    flex: 1 1 auto; min-width: 0; font: inherit; color: var(--ink);
+    background: var(--card); border: 1px solid var(--accent); border-radius: 3px;
+    padding: .05rem .2rem; outline: none;
+  }
+
+  /* The row menu. Fixed, because the rail scrolls and a menu that scrolls with
+     it is a menu that leaves the window. */
+  .menu {
+    position: fixed; z-index: 40; min-width: 9.5rem; padding: .25rem;
+    background: var(--card); border: 1px solid var(--line); border-radius: 6px;
+    box-shadow: 0 6px 24px rgba(0, 0, 0, .16); display: grid; gap: 1px;
+  }
+  .menu[hidden] { display: none; }
+  .menu button {
+    appearance: none; border: 0; background: none; color: var(--muted);
+    font: .78rem/1.5 var(--ui); text-align: left; padding: .3rem .5rem;
+    border-radius: 4px; cursor: pointer;
+  }
+  .menu button:hover { background: var(--accent-soft); color: var(--accent-ink); }
+  .menu button[data-do="delete"]:hover { color: var(--bad); }
+  .menu hr { border: 0; border-top: 1px solid var(--line); margin: .2rem .3rem; }
+
+  /* A folder has no source, so what it shows is what it is. */
+  .dirnote {
+    flex: 1 1 auto; display: grid; place-content: center; gap: .3rem; text-align: center;
+    color: var(--faint); font-size: .8rem; padding: 2rem;
+  }
+  .railfoot { margin-top: auto; padding: .5rem .6rem; border-top: 1px solid var(--line); display: grid; gap: .35rem; }
+  .railnote { font-size: .68rem; line-height: 1.5; color: var(--faint); padding: 0 .75rem .6rem; }
+
+  /* ------------------------------------------------------------ the editor */
+
+  .editorpane { display: flex; flex-direction: column; min-width: 0; min-height: 0; position: relative; overflow: hidden; }
+  .sheets { flex: 1 1 auto; min-height: 0; display: flex; flex-direction: column; }
+  .file { display: none; flex: 1 1 auto; min-height: 0; flex-direction: column; }
+  .file.marble-open { display: flex; }
+  .fhead {
+    display: flex; align-items: baseline; gap: .5rem; padding: .35rem .6rem .35rem 3.6rem;
+    border-bottom: 1px solid var(--line); background: var(--chrome);
+  }
+  .fname {
+    margin: 0; font: 600 .76rem/1.4 var(--mono); color: var(--muted);
+    padding: .1rem .25rem; border-radius: 3px; outline: none;
+  }
+  .fmeta { font: .68rem/1.4 var(--mono); color: var(--faint); }
+
+  .codewrap { position: relative; flex: 1 1 auto; min-height: 0; overflow: auto; background: var(--paper); }
+  .codebox { position: relative; min-height: 100%; }
+  .src, .hl {
+    margin: 0; padding: .55rem .9rem 40vh 3.6rem;
+    font: var(--code)/var(--leading) var(--mono);
+    white-space: pre-wrap; overflow-wrap: break-word; tab-size: 2;
+    font-kerning: none; font-variant-ligatures: none; font-synthesis: none;
+    font-feature-settings: "liga" 0, "clig" 0, "calt" 0;
+    text-align: left; text-indent: 0; letter-spacing: normal; word-spacing: normal;
+  }
+  .hl { position: absolute; inset: 0; pointer-events: none; user-select: none; color: var(--ink); }
+  .src { position: relative; color: transparent; caret-color: var(--accent-ink); outline: none; background: none; }
+  .src::selection { background: rgba(155, 182, 207, .38); }
+  .hl .ln { display: block; position: relative; min-height: calc(var(--code) * var(--leading)); }
+  .hl .ln > .n {
+    position: absolute; left: -2.9rem; width: 2.3rem; text-align: right;
+    color: var(--faint); opacity: .55; font-style: normal; user-select: none;
+  }
+  .hl .ln.marble-hot { background: var(--accent-soft); box-shadow: -3.6rem 0 0 var(--accent-soft), .9rem 0 0 var(--accent-soft); }
+  /* Which line the caret is on. Derived from the selection, so it belongs to
+     the page and never to the file. */
+  .hl .ln.marble-caret > .n { opacity: 1; color: var(--accent-ink); font-weight: 600; }
+  .hl .cs   { color: #2f6f9f; }
+  .hl .arg  { color: #6f4b8f; }
+  .hl .mth  { color: #8a5a2b; }
+  /* Not italic, however much a comment wants to be: an italic advance width is
+     a different advance width, and the caret is positioned by the pane over
+     this one, which is not italic. */
+  .hl .com  { color: var(--faint); }
+  .hl .brc  { color: var(--accent-ink); }
+  .hl .num  { color: #7a6a3a; }
+  @media (prefers-color-scheme: dark) {
+    .hl .cs { color: #86b8dd; } .hl .arg { color: #c2a4de; } .hl .mth { color: #dcae7d; }
+    .hl .num { color: #cbbd8a; } .src::selection { background: rgba(127, 168, 201, .3); }
+  }
+
+  /* The divider between the source and the paper. Dragging it is an edit like
+     any other: it moves the panes and it writes one custom property. */
+  .grabber { position: absolute; top: 0; right: -3px; bottom: 0; width: 6px; cursor: col-resize; z-index: 4; }
+  .grabber:hover, .grabber[data-dragging="1"] { background: var(--accent); }
+  .app[data-layout="editor"] .grabber, .app[data-layout="pdf"] .grabber { display: none; }
+
+  .shot { padding: 1rem; overflow: auto; background: var(--paper); flex: 1 1 auto; min-height: 0; }
+  .shot img { max-width: 100%; height: auto; border: 1px solid var(--line); border-radius: var(--radius); }
+
+  /* --------------------------------------------------------------- the pdf */
+
+  .pdfpane { display: flex; flex-direction: column; min-width: 0; min-height: 0; overflow: hidden; border-left: 1px solid var(--line); background: var(--desk); }
+  .pdfbar {
+    display: flex; align-items: center; gap: .35rem; padding: .25rem .45rem;
+    background: var(--chrome); border-bottom: 1px solid var(--line);
+  }
+  .pdfbar .btn { padding: .22rem .45rem; font-size: .72rem; }
+  .pdfnote { font: .7rem/1.4 var(--mono); color: var(--faint); padding-left: .2rem; }
+  .viewer { flex: 1 1 auto; min-height: 0; position: relative; }
+  .viewer iframe { width: 100%; height: 100%; border: 0; display: block; background: var(--desk); }
+  .curtain {
+    position: absolute; inset: 0; display: grid; place-content: center; gap: .4rem; text-align: center;
+    color: #e2e4e7; font-size: .78rem; background: var(--desk); padding: 2rem;
+  }
+  .curtain[hidden] { display: none; }
+  .curtain .big { font-size: 1.5rem; opacity: .55; }
+
+  /* --------------------------------------------------------------- the log */
+
+  .logpane { border-top: 1px solid var(--line); background: var(--chrome); display: flex; flex-direction: column; }
+  .loghead {
+    display: flex; align-items: center; gap: .5rem; padding: .3rem .6rem;
+    font: .72rem/1.5 var(--ui); color: var(--muted); cursor: pointer; user-select: none;
+  }
+  .loghead .pill {
+    font: 600 .66rem/1 var(--mono); letter-spacing: .04em; padding: .24rem .42rem;
+    border-radius: 999px; border: 1px solid var(--line); color: var(--muted);
+  }
+  .loghead .pill[data-state="ok"]   { color: var(--ok);   border-color: var(--accent); }
+  .loghead .pill[data-state="warn"] { color: var(--warn); border-color: var(--warn); }
+  .loghead .pill[data-state="bad"]  { color: var(--bad);  border-color: var(--bad); }
+  .logbody { display: none; max-height: 12rem; overflow: auto; padding: 0 0 .4rem; }
+  .app[data-log="open"] .logbody { display: block; }
+  .app[data-log="open"] .loghead .chev { transform: rotate(180deg); }
+  .loghead .chev { transition: transform .15s ease; opacity: .5; display: inline-block; margin-left: auto; }
+  .logline {
+    display: grid; grid-template-columns: 5.5rem 1fr; gap: .5rem; align-items: baseline;
+    padding: .16rem .6rem; font: .72rem/1.5 var(--mono); color: var(--muted);
+  }
+  .logline:hover { background: var(--accent-soft); }
+  .logline .at { color: var(--accent-ink); text-align: right; cursor: pointer; }
+  .logline[data-level="error"] .what { color: var(--bad); }
+  .logline[data-level="warning"] .what { color: var(--warn); }
+
+  [data-marble-editable]:hover { background: var(--accent-soft); }
+  [data-marble-editable]:focus { background: var(--card); box-shadow: 0 0 0 1px var(--accent), 0 0 0 4px var(--accent-soft); }
+
+  @media (max-width: 900px) {
+    .app { --rail: 0px; }
+    .rail { display: none; }
+    .main { grid-template-columns: 0 var(--split, 50%) minmax(0, 1fr); }
+  }
+</style>
+</head>

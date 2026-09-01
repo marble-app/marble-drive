@@ -1,0 +1,408 @@
+
+  // ------------------------------------------------------------------ acmart
+  //
+  // The class an HCI paper is written in. A document class decides fewer things
+  // than its length suggests: how wide the columns are, what the front matter
+  // looks like, and where the copyright block hangs. Those are the three things
+  // below.
+  //
+  // `sigconf` is the proceedings format — CHI, UIST, CSCW and most of the SIGs
+  // publish through it — and `manuscript` is acmart's default, one column and
+  // the thing you actually write in. Switching between them is switching one
+  // option in \documentclass, which is why the room has a button for it.
+
+  const ACM_FORMATS = {
+    // Two columns of 9pt on letter paper: 0.75in margins, a third of an inch
+    // between the columns, which comes out at the 241pt column acmart sets.
+    sigconf:    { cols: 2, base: 9, margin: 54, top: 54, bottom: 72, gap: 24, caps: true },
+    sigchi:     { cols: 2, base: 9, margin: 54, top: 54, bottom: 72, gap: 24, caps: true },
+    sigplan:    { cols: 2, base: 9, margin: 54, top: 54, bottom: 72, gap: 24, caps: false },
+    acmtog:     { cols: 2, base: 9, margin: 54, top: 54, bottom: 72, gap: 24, caps: false },
+    // One column. What a reviewer reads, and what a draft is easier to write in.
+    manuscript: { cols: 1, base: 10, margin: 90, top: 72, bottom: 72, gap: 0, caps: false },
+    acmsmall:   { cols: 1, base: 10, margin: 90, top: 72, bottom: 72, gap: 0, caps: false },
+    acmlarge:   { cols: 1, base: 10, margin: 76, top: 72, bottom: 72, gap: 0, caps: false },
+  };
+
+  const CC_KINDS = {
+    by: 'Attribution 4.0 International',
+    'by-sa': 'Attribution-ShareAlike 4.0 International',
+    'by-nc': 'Attribution-NonCommercial 4.0 International',
+    'by-nd': 'Attribution-NoDerivatives 4.0 International',
+    'by-nc-sa': 'Attribution-NonCommercial-ShareAlike 4.0 International',
+    'by-nc-nd': 'Attribution-NonCommercial-NoDerivatives 4.0 International',
+    zero: 'CC0 1.0 Universal Public Domain Dedication',
+  };
+
+  const PERMISSION = 'Permission to make digital or hard copies of all or part of this work for personal or classroom use is granted without fee provided that copies are not made or distributed for profit or commercial advantage and that copies bear this notice and the full citation on the first page. Copyrights for components of this work owned by others than the author(s) must be honored. Abstracting with credit is permitted. To copy otherwise, or republish, to post on servers or to redistribute to lists, requires prior specific permission and/or a fee. Request permissions from permissions@acm.org.';
+
+  /** A sentence, with its spaces left as spaces. addText makes one word of
+   *  everything it is handed — right for a name in a cell, wrong for prose,
+   *  because a word cannot be broken across lines and a sentence must be. */
+  const prose = (job, text) => inGroup(job, T.lex.tokenize(String(text)));
+
+  /** A character Times has no glyph for, set from Symbol, which has. */
+  function symbol(job, ch, scale = 1) {
+    addRun(job, ch, 'sy', job.font.size * scale);
+  }
+
+  function applyFormat(job, name) {
+    const format = ACM_FORMATS[name];
+    if (!format) return false;
+    job.format = name;
+    job.base = format.base;
+    job.font.size = format.base;
+    job.margin = format.margin;
+    job.marginTop = format.top;
+    job.marginBottom = format.bottom;
+    job.cols = format.cols;
+    job.colGap = format.gap;
+    job.capsHeadings = format.caps;
+    layout(job);
+    return true;
+  }
+
+  // --------------------------------------------------------------- the people
+
+  const AFFIL_PARTS = ['position', 'department', 'institution', 'streetaddress',
+    'city', 'state', 'postcode', 'country'];
+
+  /** An \affiliation, reduced to the lines acmart prints: what the place is
+   *  called, then where it is. The parts are read wherever they appear, because
+   *  a person writes them in whatever order they think of them. */
+  function affiliation(job, tokens) {
+    const reader = subReader(job, tokens);
+    const found = {};
+    for (;;) {
+      const tok = reader.next();
+      if (tok.t === 'eof') break;
+      if (tok.t === 'cs' && AFFIL_PARTS.includes(tok.v)) {
+        reader.optional();
+        const value = T.lex.plain(reader.group()).trim();
+        if (value) found[tok.v] = value;
+      }
+    }
+    const lines = [];
+    const who = [found.department, found.institution].filter(Boolean).join(', ');
+    if (who) lines.push(who);
+    const where = [found.city, found.state, found.country].filter(Boolean).join(', ');
+    if (where) lines.push(where);
+    if (!lines.length) {
+      const loose = T.lex.plain(tokens).trim();
+      if (loose) lines.push(loose);
+    }
+    return lines;
+  }
+
+  const lastAuthor = (job) => job.authors[job.authors.length - 1] || null;
+
+  function addAuthor(job, tokens) {
+    job.authors.push({ name: tokens, affils: [], emails: [] });
+  }
+
+  /** One author's cell: the name, the places, the address. Captured at the
+   *  cell's own measure so the grid can put them side by side. */
+  function authorCell(job, author, measure) {
+    const saved = save(job);
+    const wasMeasure = job.measure;
+    job.measure = measure;
+    job.align = 'center';
+    job.parindent = false;
+    const rows = capture(job, () => {
+      job.font.size = job.base * 1.15;
+      job.font.bold = true;
+      inGroup(job, author.name);
+      endParagraph(job, { indent: 0 });
+      job.font.bold = false;
+      job.font.size = job.base * 0.95;
+      for (const lines of author.affils) {
+        for (const line of lines) {
+          prose(job, line);
+          endParagraph(job, { indent: 0 });
+        }
+      }
+      for (const mail of author.emails) {
+        addRun(job, mail, fontKey(job), job.font.size, { link: { url: `mailto:${mail}` } });
+        endParagraph(job, { indent: 0 });
+      }
+    });
+    job.measure = wasMeasure;
+    restore(job, saved);
+    return stack(rows, job.base * 0.1);
+  }
+
+  /** The authors, in rows across the full width. Each row is one row of the
+   *  page: the cells share a top, so they share a baseline. */
+  function authorGrid(job) {
+    if (!job.authors.length) return;
+    const perRow = Math.max(1, Math.min(job.authors.length, job.acm.perRow || (job.cols === 2 ? 3 : 4)));
+    for (let at = 0; at < job.authors.length; at += perRow) {
+      const group = job.authors.slice(at, at + perRow);
+      const cell = job.measure / group.length;
+      const boxes = group.map((author) => authorCell(job, author, cell - job.base));
+      const items = [];
+      boxes.forEach((box, i) => {
+        for (const item of box.items) items.push({ ...item, x: item.x + i * cell + job.base * 0.5 });
+      });
+      vspace(job, job.base * 1.1);
+      emitRow(job, {
+        items,
+        above: Math.max(0, ...boxes.map((box) => box.h)),
+        below: Math.max(0, ...boxes.map((box) => box.d)),
+        x: 0,
+      });
+    }
+  }
+
+  /** "Bryan Min, Nicolai Marquardt, and Haijun Xia" — the reference format
+   *  writes the names out the way they were typed, first name first. */
+  function authorNames(job) {
+    const names = job.authors.map((author) => T.lex.plain(author.name).trim()).filter(Boolean);
+    if (!names.length) return T.lex.plain(job.authorTokens || []).trim();
+    if (names.length === 1) return names[0];
+    if (names.length === 2) return `${names[0]} and ${names[1]}`;
+    return `${names.slice(0, -1).join(', ')}, and ${names[names.length - 1]}`;
+  }
+
+  // -------------------------------------------------------- the front matter
+
+  function frontHeading(job, text) {
+    const saved = save(job);
+    vspace(job, job.base * 0.9);
+    job.font.bold = true;
+    job.font.size = job.base * 1.05;
+    job.align = 'left';
+    job.parindent = false;
+    prose(job, job.capsHeadings ? text.toUpperCase() : text);
+    endParagraph(job, { indent: 0, keep: true });
+    restore(job, saved);
+    vspace(job, job.base * 0.25);
+    job.parindent = false;
+  }
+
+  /** A run-in bold label and then a paragraph — how the class sets the CCS
+   *  concepts and the keywords. */
+  function labelled(job, label, fill) {
+    const saved = save(job);
+    vspace(job, job.base * 0.7);
+    job.align = 'justify';
+    job.parindent = false;
+    job.font.bold = true;
+    addText(job, `${label}:`);
+    job.font.bold = false;
+    addGlue(job);
+    fill();
+    endParagraph(job, { indent: 0 });
+    restore(job, saved);
+    job.parindent = false;
+  }
+
+  function frontMatter(job) {
+    if (job.held.abstract) {
+      frontHeading(job, 'Abstract');
+      for (const row of job.held.abstract) emitRow(job, row);
+      job.parindent = false;
+    }
+    if (job.ccs.length) {
+      labelled(job, 'CCS Concepts', () => {
+        job.ccs.forEach((text, i) => {
+          if (i) { addText(job, ';'); addGlue(job); }
+          addText(job, '\u2022');
+          addGlue(job, { w: job.font.size * 0.3, stretch: 0, shrink: 0, nobreak: true });
+          // A tilde in a concept is the arrow between a field and a thing in
+          // it, and the arrow comes from Symbol because Times has no glyph.
+          const parts = text.split('~').map((part) => part.trim());
+          parts.forEach((part, p) => {
+            if (p) {
+              addGlue(job, { w: job.font.size * 0.28, stretch: 0, shrink: 0 });
+              symbol(job, '\u2192', 0.85);
+              addGlue(job, { w: job.font.size * 0.28, stretch: 0, shrink: 0 });
+            }
+            prose(job, part);
+          });
+        });
+        addText(job, '.');
+      });
+    }
+    if (job.keywordTokens) {
+      labelled(job, 'Keywords', () => { inGroup(job, job.keywordTokens); });
+    }
+  }
+
+  /** The block under the first column of the first page: what you may do with
+   *  the paper, and how to cite it. It is set before the column is filled,
+   *  because the column has to know how much room it does not have. */
+  function copyrightBlock(job) {
+    const acm = job.acm;
+    if (job.nonacm) return;
+    const conference = acm.conference || {};
+    const rows = capture(job, () => {
+      const saved = save(job);
+      job.font.size = job.base * 0.72;
+      job.align = 'justify';
+      job.parindent = false;
+      job.leftSkip = 0;
+      job.rightSkip = 0;
+
+      if (acm.copyright === 'cc') {
+        const kind = CC_KINDS[acm.cctype || 'by'] || CC_KINDS.by;
+        prose(job, `This work is licensed under a Creative Commons ${kind} License.`);
+      } else if (acm.copyright === 'none') {
+        prose(job, 'This work is in the public domain.');
+      } else {
+        prose(job, PERMISSION);
+      }
+      endParagraph(job, { indent: 0 });
+
+      if (conference.name) {
+        vspace(job, job.base * 0.4);
+        job.font.italic = true;
+        prose(job, conference.short || conference.name);
+        job.font.italic = false;
+        addText(job, ',');
+        addGlue(job);
+        prose(job, [conference.date, conference.venue].filter(Boolean).join(', '));
+        endParagraph(job, { indent: 0 });
+      }
+
+      vspace(job, job.base * 0.5);
+      job.font.bold = true;
+      prose(job, 'ACM Reference Format:');
+      job.font.bold = false;
+      endParagraph(job, { indent: 0 });
+
+      const title = T.lex.plain(job.titleTokens || []).replace(/\s+/g, ' ').trim();
+      const year = acm.year || acm.copyrightYear || '';
+      const bits = [];
+      bits.push(authorNames(job));
+      if (year) bits.push(String(year));
+      if (title) bits.push(title.replace(/\.$/, ''));
+      prose(job, `${bits.join('. ')}.`);
+      addGlue(job);
+      if (acm.booktitle || conference.name) {
+        addText(job, 'In');
+        addGlue(job);
+        job.font.italic = true;
+        prose(job, acm.booktitle || conference.name);
+        job.font.italic = false;
+        addText(job, '.');
+        addGlue(job);
+      }
+      prose(job, 'ACM, New York, NY, USA');
+      if (job.previousPages) {
+        addText(job, `, ${job.previousPages} page${job.previousPages === 1 ? '' : 's'}`);
+      }
+      addText(job, '.');
+      if (acm.doi) {
+        addGlue(job);
+        link(job, `https://doi.org/${acm.doi}`, null);
+      }
+      endParagraph(job, { indent: 0 });
+      restore(job, saved);
+    });
+
+    if (!rows.length) return;
+    const height = rows.reduce((sum, row) => sum + row.above + row.below, 0) + job.base * 1.4;
+    job.bottomBlock = { page: Math.max(0, job.pageIndex), col: 0, rows, height };
+  }
+
+  /** The title block: full width, then the columns start under it. */
+  function acmTitle(job) {
+    endParagraph(job);
+    const saved = save(job);
+    const was = beginSpan(job);
+    job.align = 'center';
+    job.parindent = false;
+    job.leftSkip = 0;
+    job.rightSkip = 0;
+
+    job.font.size = job.base * 1.95;
+    job.font.bold = true;
+    inGroup(job, job.titleTokens || []);
+    endParagraph(job, { indent: 0 });
+    job.font.bold = false;
+
+    if (job.subtitleTokens) {
+      vspace(job, job.base * 0.4);
+      job.font.size = job.base * 1.3;
+      job.font.italic = true;
+      inGroup(job, job.subtitleTokens);
+      endParagraph(job, { indent: 0 });
+      job.font.italic = false;
+    }
+
+    job.font.size = job.base;
+    authorGrid(job);
+
+    if (job.teaser) {
+      vspace(job, job.base * 1.4);
+      for (const row of job.teaser) emitRow(job, row);
+    }
+
+    endSpan(job, was);
+    restore(job, saved);
+    vspace(job, job.base * 1.2);
+    job.parindent = false;
+
+    // The column has to know about the block under it before it is filled.
+    copyrightBlock(job);
+    frontMatter(job);
+    vspace(job, job.base * 0.6);
+    job.titleDone = true;
+    job.parindent = false;
+  }
+
+  // ------------------------------------------------------- the ACM references
+  //
+  // ACM-Reference-Format, near enough to read as one: the authors as they are
+  // written, the year, the title, then where it appeared in italic, and the DOI
+  // as a link. Sorted alphabetically, which is what gives the numbers.
+
+  function acmReference(job, entry) {
+    const fields = entry.fields || {};
+    const part = (text, options = {}) => {
+      const was = { bold: job.font.bold, italic: job.font.italic };
+      job.font.bold = !!options.bold;
+      job.font.italic = !!options.italic;
+      prose(job, text);
+      job.font.bold = was.bold;
+      job.font.italic = was.italic;
+    };
+    const stop = () => { addText(job, '.'); addGlue(job); };
+
+    if (fields.author) { part(acmPeople(fields.author)); stop(); }
+    if (fields.year) { part(String(fields.year).replace(/[^\d]/g, '') || String(fields.year)); stop(); }
+    if (fields.title) { part(fields.title); stop(); }
+
+    const venue = fields.journal || fields.booktitle;
+    if (venue) {
+      if (fields.booktitle && !fields.journal) { addText(job, 'In'); addGlue(job); }
+      part(venue, { italic: true });
+      if (fields.volume) { addGlue(job); part(String(fields.volume), { bold: false }); }
+      if (fields.number) part(`, ${fields.number}`);
+      if (fields.pages) part(` (${fields.pages})`);
+      stop();
+    } else if (fields.pages) {
+      part(`Pages ${fields.pages}`);
+      stop();
+    }
+
+    const where = [fields.publisher || fields.institution || fields.school, fields.address].filter(Boolean).join(', ');
+    if (where) { part(where); stop(); }
+    if (fields.note) { part(fields.note); stop(); }
+    if (fields.doi) {
+      link(job, `https://doi.org/${String(fields.doi).replace(/^https?:\/\/doi\.org\//, '')}`, null);
+    } else if (fields.url) {
+      link(job, fields.url, null);
+    }
+  }
+
+  /** "Bryan Min and Haijun Xia" — first name first, and an ampersand nowhere. */
+  function acmPeople(value) {
+    const names = value.split(/\s+and\s+/).map((one) => {
+      const parts = one.split(',').map((part) => part.trim());
+      return parts.length > 1 ? `${parts.slice(1).join(' ')} ${parts[0]}` : one.trim();
+    }).filter(Boolean);
+    if (names.length <= 2) return names.join(' and ');
+    return `${names.slice(0, -1).join(', ')}, and ${names[names.length - 1]}`;
+  }

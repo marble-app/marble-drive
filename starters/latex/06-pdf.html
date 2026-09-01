@@ -1,0 +1,319 @@
+
+<script data-marble-id="__ID__">
+// -------------------------------------------------------------------- pdf
+//
+// A PDF is a list of numbered objects, a table saying what byte each one
+// starts at, and a pointer to that table. Nothing here is clever: pages hold a
+// content stream, the stream holds one instruction per thing drawn, and the
+// cross-reference table is counted in bytes as the file is assembled, which is
+// why everything is appended through one function.
+
+(() => {
+  const T = window.TeX;
+  const enc = () => T.metrics;
+
+  // Two decimals is finer than any reader will draw and keeps the stream small.
+  const n = (v) => {
+    const r = Math.round(v * 100) / 100;
+    return Object.is(r, -0) ? '0' : String(r);
+  };
+
+  const bytes = (text) => {
+    const out = new Uint8Array(text.length);
+    for (let i = 0; i < text.length; i += 1) out[i] = text.charCodeAt(i) & 0xff;
+    return out;
+  };
+
+  /** A string as a PDF reader reads it: parentheses and backslashes escaped,
+   *  anything outside printable ASCII written as an octal code. */
+  function literal(codes) {
+    let out = '';
+    for (const code of codes) {
+      if (code === 40 || code === 41 || code === 92) out += '\\' + String.fromCharCode(code);
+      else if (code < 32 || code > 126) out += '\\' + code.toString(8).padStart(3, '0');
+      else out += String.fromCharCode(code);
+    }
+    return out;
+  }
+
+  /** Text in one font, as the codes that font understands. */
+  function codesFor(text, font) {
+    const m = enc();
+    const out = [];
+    for (const ch of text) {
+      const code = font === 'sy' ? m.symbolCode(ch) : m.encode(ch);
+      out.push(code === null || code === undefined ? 63 : code);
+    }
+    return out;
+  }
+
+  function create({ title = '', author = '', subject = '' } = {}) {
+    const pages = [];
+    const images = new Map();
+    const fontsUsed = new Set();
+    let outline = [];
+    // Read at the end rather than at the start: a document does not know its
+    // own title until it has read its preamble.
+    const meta = { title, author, subject };
+
+    const doc = {
+      meta,
+      /** A page is a size and a list of things drawn on it, in the order they
+       *  were drawn. Coordinates are PDF's: origin bottom left, y upwards. */
+      page(width, height) {
+        const page = { width, height, items: [] };
+        pages.push(page);
+        return page;
+      },
+
+      /** An image, ready to be placed. JPEG bytes go in as they are, because
+       *  every reader can decode them; anything else arrives as raw samples. */
+      image(name, spec) {
+        images.set(name, spec);
+        return name;
+      },
+
+      outlineFrom(entries) {
+        outline = entries;
+      },
+
+      pageCount: () => pages.length,
+
+      bytes() {
+        return assemble({ pages, images, fontsUsed, outline, ...meta });
+      },
+    };
+
+    return doc;
+  }
+
+  function contentFor(page, fontsUsed, imageNames) {
+    const out = [];
+    let inText = false;
+    let font = null;
+    let size = null;
+    let fill = null;
+
+    const endText = () => {
+      if (inText) out.push('ET');
+      inText = false;
+      font = null;
+    };
+    const colour = (c) => {
+      const want = c || '0 0 0';
+      if (want === fill) return;
+      out.push(want + ' rg');
+      fill = want;
+    };
+
+    for (const item of page.items) {
+      if (item.k === 't') {
+        if (!item.t) continue;
+        fontsUsed.add(item.f);
+        if (!inText) { out.push('BT'); inText = true; }
+        colour(item.c);
+        if (item.f !== font || item.s !== size) {
+          out.push(`/${item.f} ${n(item.s)} Tf`);
+          font = item.f; size = item.s;
+        }
+        out.push(`1 0 0 1 ${n(item.x)} ${n(item.y)} Tm`);
+        out.push(`(${literal(codesFor(item.t, item.f))}) Tj`);
+      } else if (item.k === 'r') {
+        endText();
+        colour(item.c);
+        out.push(`${n(item.x)} ${n(item.y)} ${n(item.w)} ${n(item.h)} re f`);
+      } else if (item.k === 'i') {
+        endText();
+        imageNames.add(item.img);
+        out.push('q');
+        out.push(`${n(item.w)} 0 0 ${n(item.h)} ${n(item.x)} ${n(item.y)} cm`);
+        out.push(`/${item.img} Do`);
+        out.push('Q');
+      }
+    }
+    endText();
+    return out.join('\n') + '\n';
+  }
+
+  function assemble({ pages, images, fontsUsed, outline, title, author, subject }) {
+    const objects = [];
+    // Object 0 is the free head of the chain and is never written.
+    const reserve = () => { objects.push(null); return objects.length; };
+    const put = (id, head, stream) => { objects[id - 1] = { head, stream }; return id; };
+
+    const catalogId = reserve();
+    const pagesId = reserve();
+    const infoId = reserve();
+
+    // Every page id is known before any page is written, so a link can point
+    // at a page that has not been assembled yet.
+    const pageIds = pages.map(() => reserve());
+    const contentIds = pages.map(() => reserve());
+
+    const imageNames = new Set();
+    const streams = pages.map((page) => contentFor(page, fontsUsed, imageNames));
+
+    // Fonts
+    const fontIds = new Map();
+    for (const key of fontsUsed) {
+      const spec = enc().FONTS[key];
+      if (!spec) continue;
+      const id = reserve();
+      fontIds.set(key, id);
+      const encoding = spec.symbol ? '' : ' /Encoding /WinAnsiEncoding';
+      put(id, `<< /Type /Font /Subtype /Type1 /BaseFont /${spec.pdf}${encoding} >>`);
+    }
+
+    // Images
+    const imageIds = new Map();
+    for (const [name, spec] of images) {
+      if (!imageNames.has(name)) continue;
+      const id = reserve();
+      imageIds.set(name, id);
+      const filter = spec.kind === 'jpeg' ? ' /Filter /DCTDecode' : '';
+      const space = spec.grey ? '/DeviceGray' : '/DeviceRGB';
+      put(
+        id,
+        `<< /Type /XObject /Subtype /Image /Width ${spec.width} /Height ${spec.height}` +
+          ` /ColorSpace ${space} /BitsPerComponent 8${filter} /Length ${spec.data.length} >>`,
+        spec.data,
+      );
+    }
+
+    const resources = () => {
+      const fonts = [...fontIds].map(([key, id]) => `/${key} ${id} 0 R`).join(' ');
+      const xo = [...imageIds].map(([name, id]) => `/${name} ${id} 0 R`).join(' ');
+      return `<< /Font << ${fonts} >>` + (xo ? ` /XObject << ${xo} >>` : '') + ' /ProcSet [/PDF /Text /ImageC] >>';
+    };
+
+    // Outline: one entry per heading, nested by the level it was given.
+    let outlineId = 0;
+    if (outline.length) {
+      outlineId = reserve();
+      const ids = outline.map(() => reserve());
+      const stack = [];
+      const kids = outline.map(() => []);
+      const top = [];
+      outline.forEach((entry, i) => {
+        while (stack.length && outline[stack[stack.length - 1]].level >= entry.level) stack.pop();
+        if (stack.length) kids[stack[stack.length - 1]].push(i);
+        else top.push(i);
+        stack.push(i);
+      });
+      const write = (i) => {
+        const entry = outline[i];
+        const mine = kids[i];
+        const parent = (() => {
+          for (let j = 0; j < outline.length; j += 1) if (kids[j].includes(i)) return ids[j];
+          return outlineId;
+        })();
+        const siblings = top.includes(i) ? top : kids[outline.findIndex((_, j) => kids[j].includes(i))];
+        const at = siblings.indexOf(i);
+        const near =
+          (at > 0 ? ` /Prev ${ids[siblings[at - 1]]} 0 R` : '') +
+          (at < siblings.length - 1 ? ` /Next ${ids[siblings[at + 1]]} 0 R` : '');
+        const children = mine.length
+          ? ` /First ${ids[mine[0]]} 0 R /Last ${ids[mine[mine.length - 1]]} 0 R /Count -${mine.length}`
+          : '';
+        put(
+          ids[i],
+          `<< /Title (${literal(codesFor(entry.title, 'rm'))}) /Parent ${parent} 0 R${near}${children}` +
+            ` /Dest [${pageIds[entry.page]} 0 R /XYZ ${n(entry.x)} ${n(entry.y)} null] >>`,
+        );
+        for (const child of mine) write(child);
+      };
+      for (const i of top) write(i);
+      put(
+        outlineId,
+        `<< /Type /Outlines /First ${ids[top[0]]} 0 R /Last ${ids[top[top.length - 1]]} 0 R /Count ${top.length} >>`,
+      );
+    }
+
+    pages.forEach((page, i) => {
+      const annots = (page.items || [])
+        .filter((item) => item.k === 'l')
+        .map((item) => {
+          const target = item.url
+            ? `/A << /S /URI /URI (${literal(codesFor(item.url, 'rm'))}) >>`
+            : `/Dest [${pageIds[item.page] || pageIds[0]} 0 R /XYZ ${n(item.tx || 0)} ${n(item.ty || 0)} null]`;
+          return (
+            `<< /Type /Annot /Subtype /Link /Border [0 0 0]` +
+            ` /Rect [${n(item.x)} ${n(item.y)} ${n(item.x + item.w)} ${n(item.y + item.h)}] ${target} >>`
+          );
+        });
+      put(
+        pageIds[i],
+        `<< /Type /Page /Parent ${pagesId} 0 R /MediaBox [0 0 ${n(page.width)} ${n(page.height)}]` +
+          ` /Resources ${resources()} /Contents ${contentIds[i]} 0 R` +
+          (annots.length ? ` /Annots [${annots.join(' ')}]` : '') +
+          ' >>',
+      );
+      put(contentIds[i], `<< /Length ${streams[i].length} >>`, streams[i]);
+    });
+
+    put(pagesId, `<< /Type /Pages /Count ${pages.length} /Kids [${pageIds.map((id) => `${id} 0 R`).join(' ')}] >>`);
+    put(
+      catalogId,
+      `<< /Type /Catalog /Pages ${pagesId} 0 R` + (outlineId ? ` /Outlines ${outlineId} 0 R` : '') + ' >>',
+    );
+
+    const when = new Date();
+    const stamp =
+      'D:' +
+      String(when.getFullYear()) +
+      String(when.getMonth() + 1).padStart(2, '0') +
+      String(when.getDate()).padStart(2, '0') +
+      String(when.getHours()).padStart(2, '0') +
+      String(when.getMinutes()).padStart(2, '0') +
+      String(when.getSeconds()).padStart(2, '0');
+    put(
+      infoId,
+      `<< /Title (${literal(codesFor(title, 'rm'))}) /Author (${literal(codesFor(author, 'rm'))})` +
+        (subject ? ` /Subject (${literal(codesFor(subject, 'rm'))})` : '') +
+        ` /Producer (Marble LaTeX) /Creator (Marble LaTeX) /CreationDate (${stamp}) >>`,
+    );
+
+    // ---- bytes, and the table of where each object starts
+
+    const chunks = [];
+    let at = 0;
+    const push = (chunk) => {
+      const part = typeof chunk === 'string' ? bytes(chunk) : chunk;
+      chunks.push(part);
+      at += part.length;
+    };
+
+    push('%PDF-1.4\n%\xE2\xE3\xCF\xD3\n');
+    const offsets = new Array(objects.length + 1).fill(0);
+    objects.forEach((object, i) => {
+      const id = i + 1;
+      offsets[id] = at;
+      push(`${id} 0 obj\n${object.head}\n`);
+      if (object.stream !== undefined && object.stream !== null) {
+        push('stream\n');
+        push(object.stream);
+        push('\nendstream\n');
+      }
+      push('endobj\n');
+    });
+
+    const xref = at;
+    let table = `xref\n0 ${objects.length + 1}\n0000000000 65535 f \n`;
+    for (let id = 1; id <= objects.length; id += 1) {
+      table += `${String(offsets[id]).padStart(10, '0')} 00000 n \n`;
+    }
+    push(table);
+    push(
+      `trailer\n<< /Size ${objects.length + 1} /Root ${catalogId} 0 R /Info ${infoId} 0 R >>\n` +
+        `startxref\n${xref}\n%%EOF\n`,
+    );
+
+    const out = new Uint8Array(at);
+    let cursor = 0;
+    for (const chunk of chunks) { out.set(chunk, cursor); cursor += chunk.length; }
+    return out;
+  }
+
+  T.pdf = { create };
+})();
+</script>

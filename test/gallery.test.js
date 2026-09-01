@@ -8,8 +8,8 @@ import fsp from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 
-test('six starters, each with a blurb somebody could choose from', () => {
-  assert.deepEqual(list().map((s) => s.id), ['doc', 'sheet', 'slides', 'board', 'canvas', 'latex']);
+test('seven starters, each with a blurb somebody could choose from', () => {
+  assert.deepEqual(list().map((s) => s.id), ['doc', 'sheet', 'slides', 'board', 'canvas', 'paper', 'latex']);
   for (const starter of list()) {
     assert.ok(starter.title && starter.blurb && starter.accent);
   }
@@ -66,6 +66,24 @@ for (const starter of STARTERS) {
     }
   });
 }
+
+test('a starter built from a folder of parts includes every one of them', async () => {
+  const [paper, latex] = await Promise.all([build('paper', { name: 'p' }), build('latex', { name: 'l' })]);
+
+  // The paper starter is the LaTeX one with a different project in it, so
+  // everything but the project has to be there — and byte for byte the same,
+  // because it is the same file included rather than a copy of it.
+  for (const marker of ['id="logpill"', 'id="pdfframe"', 'id="grabber"', 'id="menu"', 'T.metrics = {', 'ACM_FORMATS']) {
+    assert.ok(paper.includes(marker), `the paper starter is missing ${marker}`);
+    assert.ok(latex.includes(marker), `the latex starter is missing ${marker}`);
+  }
+  assert.ok(!paper.includes('<!-- include:'), 'every include was expanded');
+
+  // And the project really is different.
+  assert.ok(paper.includes('sigconf'), 'the paper is set in the conference format');
+  assert.ok(paper.includes('Source/Files/1-Introduction.tex'), 'the paper has folders');
+  assert.ok(!latex.includes('Source/Files/1-Introduction.tex'), 'the latex starter does not');
+});
 
 test('a heavy document goes out to blobs and comes back byte-identical', async () => {
   const dir = await fsp.mkdtemp(path.join(os.tmpdir(), 'marble-drive-blobs-'));

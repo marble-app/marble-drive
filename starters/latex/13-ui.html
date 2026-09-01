@@ -1,0 +1,1070 @@
+
+<script data-marble-id="__ID__">
+// ------------------------------------------------------------------ the room
+//
+// Everything below is about the page rather than the paper: which file is
+// open, what the source looks like in colour, where the PDF goes. Two rules
+// hold it together.
+//
+// One fact, one place. The source is the <pre>; the colouring, the line
+// numbers, the folder tree and the PDF are all derived from it and marked as
+// the page's, so nothing here can disagree with the file. A file's name is its
+// whole path, which is why folders cost this document nothing: there is no
+// second place recording where a file lives.
+//
+// And every switch is an attribute. Which file is open, how the panes are
+// split, whether it typesets as you type, which folders are shut — each is one
+// attribute on the shell, so each is one setAttr, and closing the tab does not
+// forget any of them. The one thing that is not an attribute is how many
+// columns the paper has, because that is already written down in
+// \documentclass, and the button for it edits the source.
+
+(() => {
+  const app = document.querySelector('#app');
+  const filesEl = document.querySelector('#files');
+  const railList = document.querySelector('#railfiles');
+  const menu = document.querySelector('#menu');
+  const frame = document.querySelector('#pdfframe');
+  const curtain = document.querySelector('#curtain');
+  const pill = document.querySelector('#logpill');
+  const summary = document.querySelector('#logsummary');
+  const logbody = document.querySelector('#logbody');
+  const pdfnote = document.querySelector('#pdfnote');
+  const compileBtn = document.querySelector('#compile');
+  const colsBtn = document.querySelector('#toggle-cols');
+
+  const $$ = (selector, root = document) => [...root.querySelectorAll(selector)];
+  const esc = (text) => String(text).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+
+  const sections = () => $$('#files > .file');
+  const kindOf = (section) => section.getAttribute('data-kind') || 'tex';
+  const nameOf = (section) => (section.querySelector('.fname')?.textContent || '').trim();
+  const preOf = (section) => section.querySelector('.src');
+  const textOf = (section) => (preOf(section) ? preOf(section).textContent : '');
+  const keyOf = (section) => section.getAttribute('data-key');
+  const isDir = (section) => kindOf(section) === 'dir';
+
+  // A path is a name. These three are the whole of the folder model.
+  const baseOf = (path) => path.slice(path.lastIndexOf('/') + 1);
+  const dirOf = (path) => (path.includes('/') ? path.slice(0, path.lastIndexOf('/')) : '');
+  const join = (dir, base) => (dir ? `${dir}/${base}` : base);
+
+  let carrier = null;
+  let pdfUrl = null;
+  let lastPdf = null;
+  let autoTimer = null;
+  let lineMap = {};
+  let caretLine = 0;
+  let renaming = null;
+  const wired = new WeakSet();
+
+  // --------------------------------------------------------------- the file
+
+  /** The project as the engine wants it: names, kinds and text. The main file
+   *  is the one that says \documentclass, because that is what makes it main. */
+  function project() {
+    const files = sections()
+      .filter((section) => !isDir(section))
+      .map((section) => ({ name: nameOf(section), kind: kindOf(section), text: textOf(section) }));
+    const tex = files.filter((file) => file.kind === 'tex');
+    const main =
+      tex.find((file) => /\\documentclass/.test(file.text)) ||
+      tex.find((file) => /(^|\/)main\.tex$/i.test(file.name)) ||
+      tex[0] || files[0];
+    return { files, main: main ? main.name : '' };
+  }
+
+  const mainSection = () => {
+    const list = sections().filter((section) => kindOf(section) === 'tex');
+    return list.find((section) => /\\documentclass/.test(textOf(section)))
+      || list.find((section) => /(^|\/)main\.tex$/i.test(nameOf(section)))
+      || list[0] || null;
+  };
+
+  function activeSection() {
+    const key = app.getAttribute('data-active');
+    return sections().find((section) => keyOf(section) === key) || sections()[0] || null;
+  }
+
+  const sectionFor = (key) => sections().find((section) => keyOf(section) === key) || null;
+
+  function setState(name, value) {
+    app.setAttribute(name, value);
+    derive();
+    const id = carrier && carrier.id(app);
+    if (!id) return;
+    carrier.op({ type: 'setAttr', id, name, value }, { immediate: true });
+  }
+
+  // The commands that name a file, so that renaming one can follow it into the
+  // sources that pull it in. Anything else that looks like a path is left
+  // alone: a rename should not rewrite prose.
+  const NAMING = /(\\(?:input|include|includegraphics|bibliography|subfile)\s*(?:\[[^\]]*\])?\s*\{)([^}]*)(\})/g;
+
+  const stem = (path) => path.replace(/\.(tex|bib|png|jpe?g|pdf)$/i, '');
+
+  /** Point every \input at the new name. One setText per file that mentioned
+   *  it, and nothing at all for the files that did not. */
+  function follow(pairs) {
+    let changed = 0;
+    for (const section of sections()) {
+      const pre = preOf(section);
+      if (!pre || kindOf(section) !== 'tex') continue;
+      const was = pre.textContent;
+      const now = was.replace(NAMING, (whole, head, path, tail) => {
+        const clean = path.trim();
+        for (const [from, to] of pairs) {
+          if (clean === from || clean === stem(from)) {
+            return head + (clean === stem(from) ? stem(to) : to) + tail;
+          }
+        }
+        return whole;
+      });
+      if (now === was) continue;
+      changed += 1;
+      pre.textContent = now;
+      paint(pre);
+      const id = carrier && carrier.id(pre);
+      if (id) carrier.op({ type: 'setText', id, text: now });
+    }
+    return changed;
+  }
+
+  /** Rename, which for a folder means renaming everything under it: the path
+   *  is the only record of where a file lives, so moving one is writing one
+   *  name, and moving a folder is writing all the names inside it. The sources
+   *  that named the old path are brought along, because a rename that breaks
+   *  the project is not what anybody meant by it. */
+  function rename(section, to) {
+    const from = nameOf(section);
+    const wanted = String(to).trim().replace(/^\/+|\/+$/g, '');
+    if (!wanted || wanted === from) return;
+
+    // What moves, and from where to where — worked out before anything moves.
+    const moves = [];
+    if (isDir(section)) {
+      for (const other of sections()) {
+        const name = nameOf(other);
+        if (other !== section && (name === from || name.startsWith(`${from}/`))) {
+          moves.push([other, name, wanted + name.slice(from.length)]);
+        }
+      }
+      moves.unshift([section, from, wanted]);
+    } else {
+      moves.push([section, from, wanted]);
+    }
+
+    for (const [target, , name] of moves) {
+      const label = target.querySelector('.fname');
+      if (!label) continue;
+      label.textContent = name;
+      const id = carrier && carrier.id(label);
+      if (id) carrier.op({ type: 'setText', id, text: name });
+    }
+
+    const followed = follow(moves.filter(([target]) => !isDir(target)).map(([, was, now]) => [was, now]));
+    if (carrier) carrier.flush();
+    derive();
+    queueCompile();
+    if (followed) say(`Renamed, and pointed ${followed} file${followed === 1 ? '' : 's'} at the new name.`);
+  }
+
+  // ------------------------------------------------------------- colouring
+
+  const TOKENS = /(%.*$)|(@[A-Za-z]+)|(\\[A-Za-z@]+\*?|\\.)|([{}])|(\$[^$]*\$?)|(\b\d+(?:\.\d+)?\b)/g;
+
+  function colour(line) {
+    let out = '';
+    let at = 0;
+    TOKENS.lastIndex = 0;
+    for (;;) {
+      const match = TOKENS.exec(line);
+      if (!match) break;
+      out += esc(line.slice(at, match.index));
+      const kind = match[1] ? 'com' : match[2] ? 'cs' : match[3] ? 'cs' : match[4] ? 'brc' : match[5] ? 'mth' : 'num';
+      out += `<span class="${kind}">${esc(match[0])}</span>`;
+      at = match.index + match[0].length;
+    }
+    return out + esc(line.slice(at));
+  }
+
+  /** The colouring and the gutter, drawn behind the text they are of. The
+   *  editable <pre> holds nothing but characters, which is what keeps the
+   *  file plain and the diff readable. */
+  function paint(pre) {
+    const box = pre.parentElement;
+    const layer = box && box.querySelector('.hl');
+    if (!layer) return;
+    const lines = pre.textContent.split('\n');
+    layer.innerHTML = lines
+      .map((line, i) => `<span class="ln"><i class="n">${i + 1}</i>${colour(line)}</span>`)
+      .join('');
+    const meta = pre.closest('.file')?.querySelector('.fmeta');
+    if (meta) meta.textContent = `${lines.length} line${lines.length === 1 ? '' : 's'}`;
+  }
+
+  // ------------------------------------------------------ the editable code
+
+  function caretAt(el) {
+    const selection = window.getSelection();
+    if (!selection || !selection.rangeCount) return null;
+    const range = selection.getRangeAt(0);
+    if (!el.contains(range.endContainer)) return null;
+    const measure = range.cloneRange();
+    measure.selectNodeContents(el);
+    measure.setEnd(range.endContainer, range.endOffset);
+    return measure.toString().length;
+  }
+
+  function putCaret(el, offset) {
+    const walker = document.createTreeWalker(el, NodeFilter.SHOW_TEXT);
+    let seen = 0;
+    let node = walker.nextNode();
+    while (node) {
+      if (seen + node.length >= offset) {
+        const range = document.createRange();
+        range.setStart(node, Math.max(0, offset - seen));
+        range.collapse(true);
+        const selection = window.getSelection();
+        selection.removeAllRanges();
+        selection.addRange(range);
+        return;
+      }
+      seen += node.length;
+      node = walker.nextNode();
+    }
+  }
+
+  /** A paste, or a browser that answers Enter with markup, can leave elements
+   *  in a <pre> that is supposed to hold text. Flatten them, and put the caret
+   *  back where the typing left it. */
+  function flatten(pre) {
+    if (!pre.firstElementChild) return;
+    const offset = caretAt(pre);
+    let text = '';
+    for (const node of pre.childNodes) {
+      if (node.nodeType === 3) text += node.nodeValue;
+      else if (node.nodeName === 'BR') text += '\n';
+      else text += (text.endsWith('\n') || !text ? '' : '\n') + node.textContent;
+    }
+    pre.textContent = text;
+    if (offset !== null) putCaret(pre, offset);
+  }
+
+  /** Which line the caret is on, and mark it. Nothing is stored: the answer is
+   *  the selection, and the mark is the page's. */
+  function followCaret(pre) {
+    const offset = caretAt(pre);
+    if (offset === null) return;
+    const line = pre.textContent.slice(0, offset).split('\n').length;
+    caretLine = line;
+    const layer = pre.parentElement?.querySelector('.hl');
+    if (!layer) return;
+    for (const marked of $$('.ln.marble-caret', layer)) marked.classList.remove('marble-caret');
+    layer.children[line - 1]?.classList.add('marble-caret');
+  }
+
+  function wireCode(pre) {
+    if (wired.has(pre)) return;
+    wired.add(pre);
+    pre.setAttribute('contenteditable', 'plaintext-only');
+    if (pre.contentEditable !== 'plaintext-only') pre.setAttribute('contenteditable', 'true');
+    pre.spellcheck = false;
+
+    let before = null;
+    pre.addEventListener('focus', () => { before = pre.textContent; followCaret(pre); });
+    pre.addEventListener('blur', () => { before = null; if (carrier) carrier.flush(); });
+    pre.addEventListener('keyup', () => followCaret(pre));
+    pre.addEventListener('pointerup', () => followCaret(pre));
+
+    pre.addEventListener('input', () => {
+      flatten(pre);
+      paint(pre);
+      followCaret(pre);
+      const id = carrier && carrier.id(pre);
+      if (id) {
+        const text = pre.textContent;
+        const op = { type: 'setText', id, text };
+        if (before !== null && before !== text) {
+          carrier.record({ redo: [op], undo: [{ type: 'setText', id, text: before }] }, { coalesce: true });
+        }
+        carrier.op(op);
+      }
+      queueCompile();
+    });
+
+    pre.addEventListener('keydown', (event) => {
+      if (event.key === 'Tab') {
+        event.preventDefault();
+        document.execCommand('insertText', false, '  ');
+        return;
+      }
+      if (event.key === 'Enter') {
+        // Keep the indentation of the line being left, the way an editor does.
+        const offset = caretAt(pre);
+        if (offset === null) return;
+        const upto = pre.textContent.slice(0, offset);
+        const indent = (/(^|\n)([ \t]*)[^\n]*$/.exec(upto) || [])[2] || '';
+        if (!indent) return;
+        event.preventDefault();
+        document.execCommand('insertText', false, `\n${indent}`);
+      }
+    });
+  }
+
+  function wire(root) {
+    const scope = root && root.querySelectorAll ? root : document;
+    const list = [
+      ...(scope.matches && scope.matches('[data-marble-code]') ? [scope] : []),
+      ...$$('[data-marble-code]', scope),
+    ];
+    for (const pre of list) { wireCode(pre); paint(pre); }
+    if (list.length) derive();
+  }
+
+  // ----------------------------------------------------------- the folders
+
+  const shutList = () => (app.getAttribute('data-shut') || '').split('|').filter(Boolean);
+
+  function toggleShut(path) {
+    const shut = new Set(shutList());
+    if (shut.has(path)) shut.delete(path);
+    else shut.add(path);
+    setState('data-shut', [...shut].join('|'));
+  }
+
+  /** Every folder in the project: the ones somebody made, and the ones that
+   *  exist because a file is in them. */
+  function folders() {
+    const found = new Map();
+    const ensure = (path) => {
+      if (!path) return;
+      if (!found.has(path)) found.set(path, null);
+      ensure(dirOf(path));
+    };
+    for (const section of sections()) {
+      const name = nameOf(section);
+      if (isDir(section)) { found.set(name, keyOf(section)); ensure(dirOf(name)); }
+      else ensure(dirOf(name));
+    }
+    return found;
+  }
+
+  /** The tree, flattened into the rows the rail draws. Folders first and then
+   *  files, both by name — the order in the file is the document's business
+   *  and this is a way of looking at it. */
+  function treeRows() {
+    const found = folders();
+    const shut = new Set(shutList());
+    const out = [];
+    const walk = (parent, depth) => {
+      const here = [...found.keys()].filter((path) => dirOf(path) === parent).sort();
+      for (const path of here) {
+        out.push({ dir: true, path, depth, key: found.get(path), shut: shut.has(path) });
+        if (!shut.has(path)) walk(path, depth + 1);
+      }
+      sections()
+        .filter((section) => !isDir(section) && dirOf(nameOf(section)) === parent)
+        .sort((a, b) => nameOf(a).localeCompare(nameOf(b)))
+        .forEach((section) => {
+          out.push({ dir: false, path: nameOf(section), depth, key: keyOf(section), kind: kindOf(section) });
+        });
+    };
+    walk('', 0);
+    return out;
+  }
+
+  const GLYPHS = { bib: '❞', img: '▣', tex: '≡' };
+
+  let railSignature = '';
+
+  function derive() {
+    const active = (activeSection() && keyOf(activeSection())) || '';
+    for (const section of sections()) {
+      section.classList.toggle('marble-open', keyOf(section) === active);
+    }
+
+    const rows = treeRows();
+    const signature = rows.map((row) => `${row.key}:${row.dir}:${row.depth}:${row.shut}:${row.path}`).join('|') + `#${active}`;
+    if (signature !== railSignature && !renaming) {
+      railSignature = signature;
+      railList.innerHTML = rows
+        .map((row) => {
+          const open = row.key === active ? ' marble-open' : '';
+          const glyph = row.dir ? '▾' : GLYPHS[row.kind] || GLYPHS.tex;
+          return (
+            `<li class="frow${row.dir ? ' dir' : ''}${open}${row.shut ? ' marble-shut' : ''}"` +
+            ` style="--depth:${row.depth}" data-path="${esc(row.path)}"` +
+            (row.key ? ` data-key="${esc(row.key)}"` : '') +
+            `><span class="glyph">${glyph}</span>` +
+            `<span class="fn">${esc(baseOf(row.path))}</span>` +
+            `<button class="more" title="More">⋯</button></li>`
+          );
+        })
+        .join('');
+    }
+
+    for (const button of $$('.btn[data-set-layout]')) {
+      button.setAttribute('aria-pressed', String(button.getAttribute('data-set-layout') === app.getAttribute('data-layout')));
+    }
+    const auto = document.querySelector('#toggle-auto');
+    if (auto) auto.setAttribute('aria-pressed', String(app.getAttribute('data-auto') === 'on'));
+    deriveColumns();
+  }
+
+  // --------------------------------------------------- one column or two
+  //
+  // How many columns the paper has is not a fact about this room: it is written
+  // in \documentclass, and a class option is the only place it is true. So the
+  // button reads the source to know what it says, and writes the source to
+  // change it — which means typing the option by hand moves the button, and
+  // pressing the button is an edit you can see in the diff.
+
+  const TWO = ['sigconf', 'sigchi', 'sigplan', 'acmtog'];
+  const ONE = ['manuscript', 'acmsmall', 'acmlarge'];
+
+  function documentclass(text) {
+    const match = /\\documentclass\s*(\[[^\]]*\])?\s*\{([^}]*)\}/.exec(text || '');
+    if (!match) return null;
+    const options = (match[1] || '').replace(/^\[|\]$/g, '').split(',').map((one) => one.trim()).filter(Boolean);
+    return { at: match.index, whole: match[0], options, name: match[2].trim() };
+  }
+
+  function columnsOf(text) {
+    const found = documentclass(text);
+    if (!found) return 1;
+    if (found.options.some((option) => TWO.includes(option) || option === 'twocolumn')) return 2;
+    if (found.name === 'acmart' && !found.options.some((option) => ONE.includes(option))) return 1;
+    return 1;
+  }
+
+  function deriveColumns() {
+    if (!colsBtn) return;
+    const section = mainSection();
+    const two = section ? columnsOf(textOf(section)) === 2 : false;
+    colsBtn.textContent = two ? '▥ 2 col' : '▤ 1 col';
+    colsBtn.setAttribute('aria-pressed', String(two));
+  }
+
+  /** Rewrite the class options so the paper is set in the other number of
+   *  columns. One edit to one line, which is what a person would have done. */
+  function switchColumns() {
+    const section = mainSection();
+    const pre = section && preOf(section);
+    if (!pre) return;
+    const text = pre.textContent;
+    const found = documentclass(text);
+    if (!found) {
+      say('There is no \\documentclass to change — the main file needs one.');
+      return;
+    }
+    const two = columnsOf(text) === 2;
+    let options = found.options.filter((option) => !TWO.includes(option) && !ONE.includes(option) && option !== 'twocolumn' && option !== 'onecolumn');
+    if (found.name === 'acmart') {
+      options.unshift(two ? 'manuscript' : 'sigconf');
+    } else {
+      options.push(two ? 'onecolumn' : 'twocolumn');
+    }
+    const replacement = `\\documentclass[${options.join(',')}]{${found.name}}`;
+    const next = text.slice(0, found.at) + replacement + text.slice(found.at + found.whole.length);
+
+    pre.textContent = next;
+    paint(pre);
+    const id = carrier && carrier.id(pre);
+    if (id) {
+      carrier.record({
+        redo: [{ type: 'setText', id, text: next }],
+        undo: [{ type: 'setText', id, text }],
+      });
+      carrier.op({ type: 'setText', id, text: next }, { immediate: true });
+    }
+    if (!section.classList.contains('marble-open')) setState('data-active', keyOf(section));
+    derive();
+    recompile();
+  }
+
+  // ------------------------------------------------------------- the images
+
+  function bytesFromDataUrl(url) {
+    const raw = atob(url.slice(url.indexOf(',') + 1));
+    const out = new Uint8Array(raw.length);
+    for (let i = 0; i < raw.length; i += 1) out[i] = raw.charCodeAt(i);
+    return out;
+  }
+
+  function raster(image) {
+    const cap = 1400;
+    const scale = Math.min(1, cap / Math.max(image.naturalWidth, image.naturalHeight));
+    const width = Math.max(1, Math.round(image.naturalWidth * scale));
+    const height = Math.max(1, Math.round(image.naturalHeight * scale));
+    const canvas = document.createElement('canvas');
+    canvas.width = width;
+    canvas.height = height;
+    const context = canvas.getContext('2d');
+    context.fillStyle = '#ffffff';
+    context.fillRect(0, 0, width, height);
+    context.drawImage(image, 0, 0, width, height);
+    const pixels = context.getImageData(0, 0, width, height).data;
+    const data = new Uint8Array(width * height * 3);
+    for (let i = 0, o = 0; i < pixels.length; i += 4) {
+      data[o] = pixels[i]; data[o + 1] = pixels[i + 1]; data[o + 2] = pixels[i + 2];
+      o += 3;
+    }
+    return { width, height, data, kind: 'rgb' };
+  }
+
+  async function images() {
+    const out = {};
+    let n = 0;
+    for (const section of sections()) {
+      if (kindOf(section) !== 'img') continue;
+      const element = section.querySelector('img');
+      if (!element || !element.getAttribute('src')) continue;
+      if (!element.complete) {
+        await new Promise((done) => { element.onload = done; element.onerror = done; });
+      }
+      n += 1;
+      const name = nameOf(section);
+      const src = element.getAttribute('src');
+      const jpeg = /^data:image\/jpe?g/i.test(src);
+      const spec = jpeg
+        ? { kind: 'jpeg', width: element.naturalWidth, height: element.naturalHeight, data: bytesFromDataUrl(src) }
+        : raster(element);
+      spec.id = `Im${n}`;
+      // Under every name a \includegraphics might use it by: the path, the
+      // path without its extension, and the bare file name either way.
+      for (const key of [name, name.replace(/\.[^./]+$/, ''), baseOf(name), baseOf(name).replace(/\.[^./]+$/, '')]) {
+        if (key) out[key] = spec;
+      }
+    }
+    return out;
+  }
+
+  // ------------------------------------------------------------ typesetting
+
+  const say = (message) => { summary.textContent = message; };
+
+  function report(result, error) {
+    const lines = [];
+    if (error) lines.push({ level: 'error', message: error.message || String(error) });
+    for (const entry of result ? result.log : []) lines.push(entry);
+
+    // The same complaint forty times is one complaint with a count on it.
+    const seen = new Map();
+    for (const line of lines) {
+      const key = `${line.level}|${line.message}|${line.file}|${line.line}`;
+      if (seen.has(key)) seen.get(key).times += 1;
+      else seen.set(key, { ...line, times: 1 });
+    }
+    const shown = [...seen.values()];
+
+    logbody.innerHTML = shown.length
+      ? shown
+          .map((line) => {
+            const at = line.line ? `${baseOf(line.file || '')} ${line.line}` : '';
+            return (
+              `<div class="logline" data-level="${line.level}" data-file="${esc(line.file || '')}" data-line="${line.line || ''}">` +
+              `<span class="at">${esc(at)}</span>` +
+              `<span class="what">${esc(line.message)}${line.times > 1 ? ` <b>×${line.times}</b>` : ''}</span></div>`
+            );
+          })
+          .join('')
+      : '<div class="logline" data-level="info"><span class="at"></span><span class="what">No errors, no warnings.</span></div>';
+
+    const errors = shown.filter((line) => line.level === 'error').length;
+    const warnings = shown.filter((line) => line.level === 'warning').length;
+    pill.setAttribute('data-state', errors ? 'bad' : warnings ? 'warn' : 'ok');
+    pill.textContent = errors ? `${errors} error${errors === 1 ? '' : 's'}` : warnings ? `${warnings} warning${warnings === 1 ? '' : 's'}` : 'ok';
+    say(result
+      ? `${result.pages} page${result.pages === 1 ? '' : 's'} typeset in ${result.ms} ms`
+      : 'The run stopped before any page was finished.');
+    if (errors && app.getAttribute('data-log') === 'closed') setState('data-log', 'open');
+  }
+
+  /** Which page the caret is looking at, so a recompile lands where the work
+   *  is rather than back at page one. */
+  function pageForCaret() {
+    const section = activeSection();
+    if (!section || isDir(section)) return 0;
+    const perFile = lineMap[nameOf(section)];
+    if (!perFile) return 0;
+    let page = -1;
+    let nearest = -1;
+    let firstLine = Infinity;
+    let firstPage = 0;
+    for (const key of Object.keys(perFile)) {
+      const line = Number(key);
+      if (line <= caretLine && line > nearest) { nearest = line; page = perFile[key]; }
+      if (line < firstLine) { firstLine = line; firstPage = perFile[key]; }
+    }
+    return page === -1 ? firstPage : page;
+  }
+
+  function show() {
+    if (!pdfUrl) return;
+    const zoom = app.getAttribute('data-zoom') || 'page-width';
+    const page = pageForCaret() + 1;
+    frame.setAttribute('src', `${pdfUrl}#page=${page}&zoom=${zoom}&navpanes=0&view=FitH`);
+    curtain.setAttribute('hidden', '');
+  }
+
+  async function recompile() {
+    if (!window.TeX || !window.TeX.compile) return;
+    compileBtn.setAttribute('data-busy', '1');
+    pill.setAttribute('data-state', 'idle');
+    pill.textContent = 'running';
+    await new Promise((done) => setTimeout(done, 0));
+    try {
+      const result = window.TeX.compile(project(), { images: await images() });
+      const blob = new Blob([result.bytes], { type: 'application/pdf' });
+      if (pdfUrl) URL.revokeObjectURL(pdfUrl);
+      pdfUrl = URL.createObjectURL(blob);
+      lastPdf = blob;
+      lineMap = result.lineMap || {};
+      show();
+      pdfnote.textContent = `${result.pages} page${result.pages === 1 ? '' : 's'} · ${Math.round(result.bytes.length / 1024)} kB`;
+      report(result, null);
+    } catch (err) {
+      report(null, err);
+      pdfnote.textContent = 'the run stopped';
+      if (window.console) window.console.error(err);
+    } finally {
+      compileBtn.removeAttribute('data-busy');
+    }
+  }
+
+  function queueCompile() {
+    if (app.getAttribute('data-auto') !== 'on') return;
+    clearTimeout(autoTimer);
+    autoTimer = setTimeout(recompile, 900);
+  }
+
+  function download(blob, filename) {
+    const url = URL.createObjectURL(blob);
+    const anchor = document.createElement('a');
+    anchor.href = url;
+    anchor.download = filename;
+    document.body.append(anchor);
+    anchor.click();
+    anchor.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 4000);
+  }
+
+  const projectName = () => (document.querySelector('.title')?.textContent || 'project').trim().replace(/[^\w. -]+/g, '') || 'project';
+
+  // ------------------------------------------------------------- the making
+
+  const freshId = () => (carrier ? carrier.newId() : Math.random().toString(16).slice(2, 10));
+
+  function sectionMarkup({ name, kind, text, src }) {
+    const key = `k${Math.random().toString(36).slice(2, 8)}`;
+    const body = kind === 'img'
+      ? `<div class="shot" data-marble-id="${freshId()}"><img data-marble-id="${freshId()}" alt="${esc(name)}" src="${src}"></div>`
+      : kind === 'dir'
+        ? ''
+        : `<div class="codewrap" data-marble-id="${freshId()}"><div class="codebox" data-marble-id="${freshId()}">` +
+          `<pre class="hl" data-marble-transient aria-hidden="true"></pre>` +
+          `<pre class="src" data-marble-id="${freshId()}" data-marble-code>${esc(text || '')}</pre></div></div>`;
+    const note = kind === 'dir'
+      ? `<div class="dirnote" data-marble-transient>A folder. Drag files onto it in the list, or make one there.</div>`
+      : '';
+    return (
+      `<section class="file" data-marble-id="${freshId()}" data-key="${key}" data-kind="${kind}">` +
+      `<header class="fhead" data-marble-id="${freshId()}">` +
+      `<h3 class="fname" data-marble-id="${freshId()}" data-marble-editable>${esc(name)}</h3>` +
+      `<span class="fmeta" data-marble-transient></span></header>${body}${note}</section>`
+    );
+  }
+
+  /** A name nothing else in the project has. */
+  function freeName(wanted) {
+    const taken = new Set(sections().map((section) => nameOf(section)));
+    if (!taken.has(wanted)) return wanted;
+    const dot = wanted.lastIndexOf('.');
+    const stem = dot > 0 ? wanted.slice(0, dot) : wanted;
+    const rest = dot > 0 ? wanted.slice(dot) : '';
+    for (let n = 2; n < 500; n += 1) {
+      const tried = `${stem} ${n}${rest}`;
+      if (!taken.has(tried)) return tried;
+    }
+    return `${stem} ${Date.now()}${rest}`;
+  }
+
+  function addFile(spec) {
+    const html = sectionMarkup({ ...spec, name: freeName(spec.name) });
+    const parentId = carrier && carrier.id(filesEl);
+    const op = { type: 'insert', parentId, beforeId: null, html };
+    if (carrier && parentId) {
+      // One op, used twice: it moves the page and it is what gets written down.
+      carrier.apply(op);
+      carrier.op(op);
+    } else {
+      filesEl.insertAdjacentHTML('beforeend', html);
+      wire(filesEl.lastElementChild);
+    }
+    const added = filesEl.lastElementChild;
+    setState('data-active', keyOf(added));
+    derive();
+    queueCompile();
+    return added;
+  }
+
+  function removeFile(section) {
+    // A folder takes what is in it with it, which is what deleting a folder
+    // means everywhere else.
+    const doomed = [section];
+    if (isDir(section)) {
+      const path = nameOf(section);
+      for (const other of sections()) {
+        const name = nameOf(other);
+        if (other !== section && (name === path || name.startsWith(`${path}/`))) doomed.push(other);
+      }
+    }
+    if (doomed.length >= sections().length && sections().length > 0) {
+      say('That would leave the project with no files at all.');
+      return;
+    }
+    const wasOpen = doomed.some((one) => one.classList.contains('marble-open'));
+    for (const target of doomed) {
+      const id = carrier && carrier.id(target);
+      const op = { type: 'remove', id };
+      if (carrier && id) { carrier.apply(op); carrier.op(op); }
+      else target.remove();
+    }
+    if (wasOpen && sections()[0]) setState('data-active', keyOf(sections()[0]));
+    derive();
+    queueCompile();
+  }
+
+  function duplicate(section) {
+    if (isDir(section)) {
+      addFile({ name: `${nameOf(section)} copy`, kind: 'dir' });
+      return;
+    }
+    const image = section.querySelector('img');
+    addFile({
+      name: nameOf(section).replace(/(\.[^./]+)?$/, (extension) => ` copy${extension || ''}`),
+      kind: kindOf(section),
+      text: textOf(section),
+      src: image ? image.getAttribute('src') : undefined,
+    });
+  }
+
+  // ---------------------------------------------------------- the row menu
+
+  let menuFor = null;
+
+  function openMenu(row, button) {
+    menuFor = row.getAttribute('data-key') || row.getAttribute('data-path');
+    const box = button.getBoundingClientRect();
+    menu.style.left = `${Math.min(box.left, window.innerWidth - 170)}px`;
+    menu.style.top = `${box.bottom + 4}px`;
+    menu.removeAttribute('hidden');
+    button.setAttribute('aria-expanded', 'true');
+  }
+
+  function closeMenu() {
+    menu.setAttribute('hidden', '');
+    menuFor = null;
+    for (const button of $$('.frow .more[aria-expanded]')) button.removeAttribute('aria-expanded');
+  }
+
+  const rowFor = (token) =>
+    $$('.frow', railList).find((row) => (row.getAttribute('data-key') || row.getAttribute('data-path')) === token) || null;
+
+  /** Rename in place. The input belongs to the page — the name it commits is
+   *  the only thing that reaches the file. */
+  function startRename(row) {
+    const label = row.querySelector('.fn');
+    if (!label) return;
+    const path = row.getAttribute('data-path');
+    const key = row.getAttribute('data-key');
+    renaming = path;
+    const input = document.createElement('input');
+    input.className = 'ren';
+    input.value = baseOf(path);
+    label.replaceWith(input);
+    input.focus();
+    input.select();
+
+    let done = false;
+    const finish = (commit) => {
+      if (done) return;
+      done = true;
+      renaming = null;
+      const wanted = input.value.trim();
+      if (commit && wanted && wanted !== baseOf(path)) {
+        const section = key ? sectionFor(key) : null;
+        if (section) rename(section, join(dirOf(path), wanted));
+        else {
+          // A folder nobody made explicitly: renaming it is renaming the paths
+          // of everything in it, so it becomes a folder somebody made.
+          for (const one of sections()) {
+            const name = nameOf(one);
+            if (name.startsWith(`${path}/`)) rename(one, join(dirOf(path), wanted) + name.slice(path.length));
+          }
+        }
+      }
+      railSignature = '';
+      derive();
+    };
+    input.addEventListener('keydown', (event) => {
+      if (event.key === 'Enter') { event.preventDefault(); finish(true); }
+      if (event.key === 'Escape') { event.preventDefault(); finish(false); }
+    });
+    input.addEventListener('blur', () => finish(true));
+  }
+
+  function menuAction(what) {
+    const row = rowFor(menuFor);
+    closeMenu();
+    if (!row) return;
+    const path = row.getAttribute('data-path');
+    const key = row.getAttribute('data-key');
+    const section = key ? sectionFor(key) : null;
+    const here = row.classList.contains('dir') ? path : dirOf(path);
+
+    if (what === 'rename') { startRename(row); return; }
+    if (what === 'duplicate') {
+      if (section) duplicate(section);
+      return;
+    }
+    if (what === 'newfile') {
+      addFile({ name: join(here, 'section.tex'), kind: 'tex', text: '% A new file. \\input{' + join(here, 'section') + '} pulls it into the main one.\n' });
+      return;
+    }
+    if (what === 'newfolder') { addFile({ name: join(here, 'folder'), kind: 'dir' }); return; }
+    if (what === 'delete') {
+      if (section) removeFile(section);
+      else {
+        // An implied folder is deleted by deleting what implies it.
+        for (const one of sections()) {
+          const name = nameOf(one);
+          if (name === path || name.startsWith(`${path}/`)) removeFile(one);
+        }
+      }
+    }
+  }
+
+  // -------------------------------------------------------------- the wires
+
+  document.addEventListener('click', (event) => {
+    const target = event.target;
+    const closest = (selector) => (target.closest ? target.closest(selector) : null);
+
+    const item = closest('.menu button');
+    if (item) { menuAction(item.getAttribute('data-do')); return; }
+    if (!closest('.menu')) closeMenu();
+
+    const row = closest('.frow');
+    if (row) {
+      const more = closest('.more');
+      if (more) { openMenu(row, more); return; }
+      if (row.classList.contains('dir')) { toggleShut(row.getAttribute('data-path')); return; }
+      const key = row.getAttribute('data-key');
+      if (key) setState('data-active', key);
+      return;
+    }
+
+    const layout = closest('[data-set-layout]');
+    if (layout) { setState('data-layout', layout.getAttribute('data-set-layout')); return; }
+
+    const zoom = closest('[data-set-zoom]');
+    if (zoom) {
+      const how = zoom.getAttribute('data-set-zoom');
+      const now = app.getAttribute('data-zoom');
+      const percent = Number(now) || 100;
+      const next = how === 'page-width' ? 'page-width' : String(Math.max(25, Math.min(400, percent + (how === 'in' ? 25 : -25))));
+      setState('data-zoom', next);
+      show();
+      return;
+    }
+
+    const line = closest('.logline');
+    if (line && line.getAttribute('data-line')) { jump(line.getAttribute('data-file'), Number(line.getAttribute('data-line'))); return; }
+
+    if (closest('#loghead')) {
+      setState('data-log', app.getAttribute('data-log') === 'open' ? 'closed' : 'open');
+      return;
+    }
+    if (closest('#toggle-rail')) {
+      setState('data-rail', app.getAttribute('data-rail') === 'open' ? 'closed' : 'open');
+      return;
+    }
+    if (closest('#toggle-auto')) {
+      setState('data-auto', app.getAttribute('data-auto') === 'on' ? 'off' : 'on');
+      return;
+    }
+    if (closest('#toggle-cols')) { switchColumns(); return; }
+    if (closest('#compile')) { recompile(); return; }
+    if (closest('#get-pdf')) {
+      if (lastPdf) download(lastPdf, `${projectName()}.pdf`);
+      else recompile().then(() => lastPdf && download(lastPdf, `${projectName()}.pdf`));
+      return;
+    }
+    if (closest('#get-tex')) {
+      const section = activeSection();
+      if (section && !isDir(section)) download(new Blob([textOf(section)], { type: 'text/plain' }), baseOf(nameOf(section)) || 'main.tex');
+      return;
+    }
+    if (closest('#new-tex')) { addFile({ name: 'section.tex', kind: 'tex', text: '% A new file. \\input{section} pulls it into the main one.\n' }); return; }
+    if (closest('#new-bib')) { addFile({ name: 'more.bib', kind: 'bib', text: '@article{key2026,\n  author = {},\n  title  = {},\n  year   = {}\n}\n' }); return; }
+    if (closest('#new-dir')) { addFile({ name: 'folder', kind: 'dir' }); return; }
+  });
+
+  function jump(file, line) {
+    const section = sections().find((one) => nameOf(one) === file) || activeSection();
+    if (!section) return;
+    if (!section.classList.contains('marble-open')) setState('data-active', keyOf(section));
+    const layer = section.querySelector('.hl');
+    const wrap = section.querySelector('.codewrap');
+    if (!layer || !wrap) return;
+    for (const marked of $$('.ln.marble-hot', layer)) marked.classList.remove('marble-hot');
+    const row = layer.children[line - 1];
+    if (!row) return;
+    row.classList.add('marble-hot');
+    caretLine = line;
+    wrap.scrollTop = Math.max(0, row.offsetTop - wrap.clientHeight / 3);
+  }
+
+  document.addEventListener('keydown', (event) => {
+    if (event.key === 'Escape') closeMenu();
+    const meta = event.metaKey || event.ctrlKey;
+    if (!meta) return;
+    if (event.key === 'Enter' || event.key.toLowerCase() === 's') {
+      event.preventDefault();
+      recompile();
+      return;
+    }
+    if (event.key.toLowerCase() === 'b') {
+      event.preventDefault();
+      setState('data-rail', app.getAttribute('data-rail') === 'open' ? 'closed' : 'open');
+    }
+  });
+
+  // Dragging a file onto a folder is a rename, because a path is the only
+  // record of where a file lives. Pointer events rather than HTML5 drag, so it
+  // works with a finger.
+  railList.addEventListener('pointerdown', (event) => {
+    const row = event.target.closest && event.target.closest('.frow');
+    if (!row || event.target.closest('.more') || event.target.closest('.ren')) return;
+    const path = row.getAttribute('data-path');
+    const startY = event.clientY;
+    let lifted = false;
+    let over = null;
+
+    const move = (moved) => {
+      if (!lifted && Math.abs(moved.clientY - startY) < 5) return;
+      if (!lifted) { lifted = true; row.classList.add('marble-lift'); railList.setPointerCapture(event.pointerId); }
+      const under = document.elementFromPoint(moved.clientX, moved.clientY);
+      const target = under && under.closest ? under.closest('.frow.dir, #railfiles') : null;
+      if (over && over !== target) over.classList.remove('marble-drop');
+      over = target === row ? null : target;
+      if (over) over.classList.add('marble-drop');
+    };
+
+    const done = () => {
+      railList.removeEventListener('pointermove', move);
+      railList.removeEventListener('pointerup', done);
+      railList.removeEventListener('pointercancel', done);
+      row.classList.remove('marble-lift');
+      if (over) over.classList.remove('marble-drop');
+      if (!lifted || !over) return;
+      const into = over.id === 'railfiles' ? '' : over.getAttribute('data-path');
+      if (into === dirOf(path) || into === path || `${into}/`.startsWith(`${path}/`)) return;
+      const key = row.getAttribute('data-key');
+      const section = key ? sectionFor(key) : null;
+      if (section) rename(section, join(into, baseOf(path)));
+      else {
+        for (const one of sections()) {
+          const name = nameOf(one);
+          if (name.startsWith(`${path}/`)) rename(one, join(into, baseOf(path)) + name.slice(path.length));
+        }
+      }
+      railSignature = '';
+      derive();
+    };
+
+    railList.addEventListener('pointermove', move);
+    railList.addEventListener('pointerup', done);
+    railList.addEventListener('pointercancel', done);
+  });
+
+  // The divider is a gesture that changes the file, like every other one here:
+  // it moves while you drag and files one setAttr when you let go.
+  const grabber = document.querySelector('#grabber');
+  if (grabber) {
+    grabber.addEventListener('pointerdown', (event) => {
+      event.preventDefault();
+      grabber.setPointerCapture(event.pointerId);
+      grabber.setAttribute('data-dragging', '1');
+      const main = document.querySelector('.main');
+      const move = (moved) => {
+        const box = main.getBoundingClientRect();
+        const rail = document.querySelector('.rail').getBoundingClientRect().width;
+        const percent = ((moved.clientX - box.left - rail) / (box.width - rail)) * 100;
+        app.setAttribute('style', `--split:${Math.max(18, Math.min(82, percent)).toFixed(1)}%`);
+      };
+      const done = () => {
+        grabber.removeAttribute('data-dragging');
+        grabber.removeEventListener('pointermove', move);
+        grabber.removeEventListener('pointerup', done);
+        const id = carrier && carrier.id(app);
+        if (id) carrier.op({ type: 'setAttr', id, name: 'style', value: app.getAttribute('style') }, { immediate: true });
+      };
+      grabber.addEventListener('pointermove', move);
+      grabber.addEventListener('pointerup', done);
+    });
+  }
+
+  // An image dropped on the window becomes a file in the project, which is
+  // what \includegraphics then finds. It lands in the folder that is open.
+  app.addEventListener('dragover', (event) => {
+    if ([...(event.dataTransfer?.types || [])].includes('Files')) event.preventDefault();
+  });
+  app.addEventListener('drop', async (event) => {
+    const dropped = [...(event.dataTransfer?.files || [])].filter((file) => /^image\//.test(file.type));
+    if (!dropped.length) return;
+    event.preventDefault();
+    const open = activeSection();
+    const here = open ? (isDir(open) ? nameOf(open) : dirOf(nameOf(open))) : '';
+    for (const file of dropped) {
+      const src = await new Promise((done) => {
+        const reader = new FileReader();
+        reader.onload = () => done(reader.result);
+        reader.readAsDataURL(file);
+      });
+      addFile({ name: join(here, file.name), kind: 'img', src });
+    }
+  });
+
+  // The rail is derived, so it is rebuilt whenever what it is derived from
+  // moves — a rename, a new file, an edit made in another tab.
+  let pending = null;
+  new MutationObserver(() => {
+    if (pending) return;
+    pending = requestAnimationFrame(() => { pending = null; derive(); });
+  }).observe(filesEl, { childList: true, subtree: true, characterData: true });
+
+  new MutationObserver(derive).observe(app, {
+    attributes: true,
+    attributeFilter: ['data-active', 'data-layout', 'data-auto', 'data-log', 'data-rail', 'data-shut'],
+  });
+
+  const begin = (marble) => {
+    carrier = marble;
+    // The editor writes these onto the <pre> to make it typeable; they are the
+    // page's business and must never reach the file.
+    // Not `style`: the divider writes one on the shell and means it.
+    marble.pageOnly('contenteditable', 'spellcheck', 'aria-pressed', 'aria-expanded', 'data-busy', 'hidden');
+    marble.register(wire);
+  };
+
+  if (window.marble) begin(window.marble);
+  else window.addEventListener('marble:ready', (event) => begin(event.detail), { once: true });
+
+  wire(document.body);
+  derive();
+  setTimeout(recompile, 120);
+})();
+</script>

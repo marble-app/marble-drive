@@ -59,7 +59,7 @@ What is here is everything to do with there being more than one folder:
 | `lib/affordances.drive.js` | one affordance overridden by name: a sortable a finger can use |
 | `runtime/drive.js` | `marble.drive` — the carrier surface a Drive needs |
 | `templates/drive.mrbl` | the Drive, as a document |
-| `starters/` | six answers to "what is a document", one of which typesets |
+| `starters/` | seven answers to "what is a document", two of which typeset. A starter is one `.mrbl` file, or a folder of parts that are concatenated — which is how the two that typeset share one typesetter rather than carrying two copies of it |
 
 ## The rules the host keeps
 

@@ -11,6 +11,14 @@
 // with `lib/affordances.drive.js` overriding by name — so a document leaves
 // here carrying its own copy of every behaviour it has, and no starter is a
 // dependency on this host.
+//
+// The markup is `starters/<id>.mrbl`, or a folder `starters/<id>/` whose `.html`
+// files are concatenated in name order. The folder exists for one reason: a
+// starter that carries a typesetter is not a file anybody can read, and two
+// starters that carry the same typesetter must not be two copies of it. So a
+// part may say `<!-- include: ../latex/05-metrics.html -->` and get one. This
+// is a build convenience and nothing more — what leaves here is a single file
+// either way, and the seams are gone from it.
 
 import crypto from 'node:crypto';
 import fsp from 'node:fs/promises';
@@ -33,7 +41,8 @@ const NEEDS = { sortable: ['grip'], removable: ['grip'] };
  * The starters. Each is a different answer to "what is a document", which is
  * the point of shipping several rather than one good one — and the first five
  * are small enough to read in a sitting, because the first thing anyone does
- * with a starter is change it. The sixth is not, and says why where it stands.
+ * with a starter is change it. The last two are not, and say why where they
+ * stand: they carry a typesetter, and they carry the same one.
  */
 export const STARTERS = [
   {
@@ -79,6 +88,17 @@ export const STARTERS = [
     title: 'Canvas',
     blurb: 'Notes placed anywhere. The position is an inline style on the note.',
     parts: ['editable', 'canvas', 'removable', 'add', 'status'],
+    accent: '#738698',
+  },
+  {
+    id: 'paper',
+    title: 'ACM paper',
+    blurb: 'A CHI or UIST submission, in two columns, with the folders a paper is written in.',
+    // The same document as `latex`, with a project in it instead of a tour:
+    // acmart's sigconf, a folder tree, a bibliography in ACM-Reference-Format,
+    // and a button in the bar that rewrites the class option when a draft
+    // needs to be one column instead of two.
+    parts: ['editable', 'history', 'status'],
     accent: '#738698',
   },
   {
@@ -152,6 +172,50 @@ export async function composeScript(wanted) {
 export const list = () =>
   STARTERS.map(({ id, title, blurb, accent }) => ({ id, title, blurb, accent }));
 
+// A fresh regex each time it is asked for. A shared one carries `lastIndex`
+// between a `test` and a `matchAll`, and the cost of that is one include
+// silently dropped per file — which is a missing <!doctype html>, not an error.
+const include = () => /^[ \t]*<!--[ \t]*include:[ \t]*([\w./-]+)[ \t]*-->[ \t]*\n?/gm;
+
+/** A part, with its includes pulled in. Depth-limited rather than
+ *  cycle-detected: a part that includes itself is a mistake, and "too deep" is
+ *  the same complaint said sooner. */
+async function expand(text, from, depth = 0) {
+  const wanted = [...text.matchAll(include())].map((match) => match[1]);
+  if (!wanted.length) return text;
+  if (depth > 4) throw new Error(`starter parts include each other more than four deep, at ${from}`);
+
+  const bodies = new Map(
+    await Promise.all(
+      wanted.map(async (relative) => {
+        const file = path.resolve(from, relative);
+        if (!file.startsWith(path.join(REPO, 'starters') + path.sep)) {
+          throw new Error(`a starter part may only include from starters/, not ${relative}`);
+        }
+        const body = await fsp.readFile(file, 'utf8').catch(() => {
+          throw new Error(`no starter part ${relative}, included from ${from}`);
+        });
+        return [relative, await expand(body, path.dirname(file), depth + 1)];
+      }),
+    ),
+  );
+  return text.replace(include(), (_, relative) => bodies.get(relative));
+}
+
+/** The markup for a starter: one file, or a folder of parts in name order. */
+async function template(id) {
+  const dir = path.join(REPO, 'starters', id);
+  const folder = await fsp.stat(dir).then((s) => s.isDirectory(), () => false);
+  if (!folder) return fsp.readFile(`${dir}.mrbl`, 'utf8');
+
+  const names = (await fsp.readdir(dir)).filter((name) => name.endsWith('.html')).sort();
+  if (!names.length) throw new Error(`starters/${id}/ holds no parts`);
+  const parts = await Promise.all(
+    names.map(async (name) => expand(await fsp.readFile(path.join(dir, name), 'utf8'), dir)),
+  );
+  return parts.join('');
+}
+
 /**
  * A starter, built into a document. `name` is the last segment of the path it
  * is about to be written to — it becomes the title, because a document called
@@ -161,12 +225,12 @@ export async function build(id, { name = id } = {}) {
   const starter = byId.get(id);
   if (!starter) throw Object.assign(new Error(`no starter "${id}"`), { status: 404 });
 
-  const [template, script] = await Promise.all([
-    fsp.readFile(path.join(REPO, 'starters', `${id}.mrbl`), 'utf8'),
+  const [source, script] = await Promise.all([
+    template(id),
     composeScript(starter.parts),
   ]);
 
-  return template
+  return source
     .replaceAll('__TITLE__', titleize(name))
     // The mark, inline. Spliced here rather than written into each starter
     // so there is one drawing rather than six copies of it — and inline rather

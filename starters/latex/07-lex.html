@@ -1,0 +1,295 @@
+
+<script data-marble-id="__ID__">
+// ------------------------------------------------------------------ reading
+//
+// TeX is read in two moves. First the characters become tokens — a control
+// sequence, a brace, a paragraph break — and every token remembers the line it
+// came from, because that is what the log needs to point at. Then the tokens
+// are read back through a stack of streams, which is what makes a macro
+// expansion nothing more than pushing its body on top.
+
+(() => {
+  const T = window.TeX;
+
+  const LETTER = /[A-Za-z]/;
+  // Environments whose bodies are text, not TeX, and so are taken whole.
+  const RAW = ['verbatim', 'lstlisting', 'Verbatim'];
+
+  function tokenize(source, file = 'main.tex', startLine = 1) {
+    const out = [];
+    let i = 0;
+    let line = startLine;
+    const at = () => source[i];
+    const push = (t, v) => out.push({ t, v, line, file });
+
+    while (i < source.length) {
+      const ch = source[i];
+
+      if (ch === '%') {
+        while (i < source.length && source[i] !== '\n') i += 1;
+        // A comment eats its newline and the whitespace opening the next line.
+        if (source[i] === '\n') { i += 1; line += 1; }
+        while (source[i] === ' ' || source[i] === '\t') i += 1;
+        continue;
+      }
+
+      if (ch === '\\') {
+        let j = i + 1;
+        if (LETTER.test(source[j] || '')) {
+          while (LETTER.test(source[j] || '')) j += 1;
+          const name = source.slice(i + 1, j);
+
+          if (name === 'verb') {
+            const delim = source[j];
+            let k = j + 1;
+            while (k < source.length && source[k] !== delim) k += 1;
+            push('verb', source.slice(j + 1, k));
+            i = k + 1;
+            continue;
+          }
+
+          if (name === 'begin' && source[j] === '{') {
+            const close = source.indexOf('}', j);
+            const env = close === -1 ? '' : source.slice(j + 1, close);
+            if (RAW.includes(env)) {
+              const ender = `\\end{${env}}`;
+              const stop = source.indexOf(ender, close);
+              const body = source.slice(close + 1, stop === -1 ? source.length : stop);
+              push('raw', { env, body: body.replace(/^\n/, '').replace(/\n[ \t]*$/, '') });
+              line += (source.slice(i, stop === -1 ? source.length : stop + ender.length).match(/\n/g) || []).length;
+              i = stop === -1 ? source.length : stop + ender.length;
+              continue;
+            }
+          }
+
+          push('cs', name);
+          i = j;
+          // A control word swallows the spaces after it, and a newline counts
+          // as one of them unless it ends the paragraph.
+          let blank = 0;
+          while (i < source.length && /[ \t\n]/.test(source[i])) {
+            if (source[i] === '\n') { blank += 1; line += 1; }
+            i += 1;
+          }
+          if (blank >= 2) push('par');
+          continue;
+        }
+        // A control symbol: \\, \%, \$, \{ and the rest are one character.
+        push('cs', source[j] === undefined ? '\\' : source[j]);
+        i = j + 1;
+        continue;
+      }
+
+      if (ch === '\n') {
+        let j = i;
+        let breaks = 0;
+        while (j < source.length && /[ \t\n]/.test(source[j])) {
+          if (source[j] === '\n') breaks += 1;
+          j += 1;
+        }
+        line += (source.slice(i, j).match(/\n/g) || []).length;
+        push(breaks >= 2 ? 'par' : 'space');
+        i = j;
+        continue;
+      }
+
+      if (ch === ' ' || ch === '\t') {
+        while (i < source.length && (source[i] === ' ' || source[i] === '\t')) i += 1;
+        push('space');
+        continue;
+      }
+
+      if (ch === '$') {
+        if (source[i + 1] === '$') { push('$$'); i += 2; }
+        else { push('$'); i += 1; }
+        continue;
+      }
+
+      if (ch === '{' || ch === '}' || ch === '&' || ch === '^' || ch === '_' || ch === '~') {
+        push(ch);
+        i += 1;
+        continue;
+      }
+
+      if (ch === '#' && /[1-9]/.test(source[i + 1] || '')) {
+        push('#', Number(source[i + 1]));
+        i += 2;
+        continue;
+      }
+
+      push('char', ch);
+      i += 1;
+    }
+
+    push('eof');
+    return out;
+  }
+
+  /** A stack of token streams. Reading a macro is pushing its body on top. */
+  class Reader {
+    constructor(tokens, macros = new Map()) {
+      this.levels = [{ toks: tokens, i: 0 }];
+      this.macros = macros;
+      this.line = 1;
+      this.file = 'main.tex';
+      this.depth = 0;
+    }
+
+    raw() {
+      while (this.levels.length) {
+        const top = this.levels[this.levels.length - 1];
+        if (top.i < top.toks.length) {
+          const tok = top.toks[top.i];
+          top.i += 1;
+          if (tok.t === 'eof' && this.levels.length > 1) { this.levels.pop(); continue; }
+          if (tok.line) { this.line = tok.line; this.file = tok.file || this.file; }
+          return tok;
+        }
+        this.levels.pop();
+      }
+      return { t: 'eof', line: this.line, file: this.file };
+    }
+
+    peekRaw() {
+      for (let d = this.levels.length - 1; d >= 0; d -= 1) {
+        const level = this.levels[d];
+        if (level.i < level.toks.length) {
+          const tok = level.toks[level.i];
+          if (tok.t === 'eof' && d > 0) continue;
+          return tok;
+        }
+      }
+      return { t: 'eof' };
+    }
+
+    push(toks) {
+      if (toks && toks.length) this.levels.push({ toks, i: 0 });
+    }
+
+    back(tok) {
+      this.levels.push({ toks: [tok], i: 0 });
+    }
+
+    /** The next token with user macros already expanded. */
+    next() {
+      for (let guard = 0; guard < 10000; guard += 1) {
+        const tok = this.raw();
+        if (tok.t !== 'cs') return tok;
+        const macro = this.macros.get(tok.v);
+        if (!macro) return tok;
+        this.push(this.expand(macro, tok));
+      }
+      return { t: 'eof', line: this.line, file: this.file };
+    }
+
+    peek() {
+      const tok = this.next();
+      this.back(tok);
+      return tok;
+    }
+
+    expand(macro, site) {
+      const args = [];
+      if (macro.optional !== null && macro.optional !== undefined) {
+        args.push(this.optional() ?? macro.optional);
+      }
+      while (args.length < macro.arity) args.push(this.group());
+      const body = [];
+      for (const tok of macro.body) {
+        if (tok.t === '#') {
+          const arg = args[tok.v - 1] || [];
+          for (const inner of arg) body.push({ ...inner, line: inner.line || site.line });
+        } else {
+          body.push({ ...tok, line: tok.line || site.line });
+        }
+      }
+      return body;
+    }
+
+    /** The next argument: a balanced group, or one token if there is no brace.
+     *  Returned raw, because a macro body is stored, not run. */
+    group() {
+      let tok = this.raw();
+      while (tok.t === 'space' || tok.t === 'par') tok = this.raw();
+      if (tok.t !== '{') return tok.t === 'eof' ? [] : [tok];
+      const out = [];
+      let depth = 1;
+      for (;;) {
+        const inner = this.raw();
+        if (inner.t === 'eof') break;
+        if (inner.t === '{') depth += 1;
+        if (inner.t === '}') { depth -= 1; if (!depth) break; }
+        out.push(inner);
+      }
+      return out;
+    }
+
+    /** An optional [argument], or null if the next thing is not one. */
+    optional() {
+      const saved = this.levels.map((level) => ({ toks: level.toks, i: level.i }));
+      let tok = this.raw();
+      while (tok.t === 'space') tok = this.raw();
+      if (!(tok.t === 'char' && tok.v === '[')) {
+        this.levels = saved;
+        return null;
+      }
+      const out = [];
+      let depth = 0;
+      for (;;) {
+        const inner = this.raw();
+        if (inner.t === 'eof') break;
+        if (inner.t === '{') depth += 1;
+        if (inner.t === '}') depth -= 1;
+        if (!depth && inner.t === 'char' && inner.v === ']') break;
+        out.push(inner);
+      }
+      return out;
+    }
+
+    /** Tokens up to \end{name}, kept whole. */
+    until(name) {
+      const out = [];
+      let depth = 0;
+      for (;;) {
+        const tok = this.raw();
+        if (tok.t === 'eof') break;
+        if (tok.t === 'cs' && (tok.v === 'begin' || tok.v === 'end')) {
+          const which = this.group();
+          const label = T.lex.plain(which);
+          if (tok.v === 'begin') {
+            if (label === name) depth += 1;
+            out.push(tok, { t: '{' }, ...which, { t: '}' });
+            continue;
+          }
+          if (label === name && depth === 0) break;
+          if (label === name) depth -= 1;
+          out.push(tok, { t: '{' }, ...which, { t: '}' });
+          continue;
+        }
+        out.push(tok);
+      }
+      return out;
+    }
+  }
+
+  /** What a group says, read as plain characters. For names: a label, a file,
+   *  a citation key — the places where TeX is being used as a string. */
+  function plain(tokens) {
+    let out = '';
+    for (const tok of tokens || []) {
+      if (tok.t === 'char') out += tok.v;
+      else if (tok.t === 'space') out += ' ';
+      else if (tok.t === 'cs') out += '\\' + tok.v;
+      else if (tok.t === 'verb') out += tok.v;
+      else if (tok.t === '#') out += '#' + tok.v;
+      else if (tok.t === '&') out += '&';
+      else if (tok.t === '~') out += '~';
+      else if (tok.t === '_') out += '_';
+      else if (tok.t === '^') out += '^';
+    }
+    return out;
+  }
+
+  T.lex = { tokenize, Reader, plain, RAW };
+})();
+</script>

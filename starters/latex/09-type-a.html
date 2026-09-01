@@ -1,0 +1,597 @@
+
+<script data-marble-id="__ID__">
+// --------------------------------------------------------------- typesetting
+//
+// The part that turns tokens into pages. Everything on a page arrives as a
+// row: a height above the baseline, a depth below it, and items already
+// positioned relative to that baseline. A line of text is a row, a displayed
+// equation is a row, a table is a row. Pagination therefore has one rule —
+// place the row if it fits, move on if it does not — and "move on" is a column
+// when the page has another one and a new page when it does not. That is the
+// whole of two-column setting: the measure is narrower, and a full frame is
+// not always a full page.
+//
+// Two things take their space from the bottom of a frame that is still being
+// filled: footnotes, which belong to the column they were called from, and the
+// block a conference class hangs under the first column of the first page.
+
+(() => {
+  const T = window.TeX;
+  const M = () => T.metrics;
+
+  const PAPER = {
+    letterpaper: [612, 792],
+    a4paper: [595.28, 841.89],
+    a5paper: [419.53, 595.28],
+    legalpaper: [612, 1008],
+    executivepaper: [540, 720],
+  };
+
+  const SIZES = {
+    tiny: 0.5, scriptsize: 0.7, footnotesize: 0.8, small: 0.9, normalsize: 1,
+    large: 1.2, Large: 1.44, LARGE: 1.728, huge: 2.074, Huge: 2.488,
+  };
+
+  // What a text-mode control sequence stands for, when it stands for one
+  // character. The accents are separate because they take an argument.
+  const GLYPHS = {
+    '%': '%', '$': '$', '&': '&', '#': '#', '_': '_', '{': '{', '}': '}',
+    textbackslash: '\\', textasciitilde: '~', textasciicircum: '^',
+    ldots: '…', dots: '…', textellipsis: '…',
+    textendash: '–', textemdash: '—', textbullet: '•',
+    S: '§', P: '¶', copyright: '©', pounds: '£', dag: '†', ddag: '‡',
+    textdegree: '°', textquotedblleft: '“', textquotedblright: '”',
+    textquoteleft: '‘', textquoteright: '’', textregistered: '®',
+    texttrademark: '™', ae: 'æ', AE: 'Æ', oe: 'œ', OE: 'Œ', ss: 'ß',
+    o: 'ø', O: 'Ø', aa: 'å', AA: 'Å', l: 'l', L: 'L', i: 'ı', j: 'j',
+    textbar: '|', textless: '<', textgreater: '>', textbraceleft: '{',
+    textbraceright: '}', slash: '/', textperiodcentered: '·',
+  };
+
+  const ACCENTS = {
+    "'": { a: 'á', e: 'é', i: 'í', o: 'ó', u: 'ú', y: 'ý', c: 'ć', n: 'ń', s: 'ś', A: 'Á', E: 'É', I: 'Í', O: 'Ó', U: 'Ú' },
+    '`': { a: 'à', e: 'è', i: 'ì', o: 'ò', u: 'ù', A: 'À', E: 'È', I: 'Ì', O: 'Ò', U: 'Ù' },
+    '"': { a: 'ä', e: 'ë', i: 'ï', o: 'ö', u: 'ü', y: 'ÿ', A: 'Ä', E: 'Ë', I: 'Ï', O: 'Ö', U: 'Ü' },
+    '^': { a: 'â', e: 'ê', i: 'î', o: 'ô', u: 'û', A: 'Â', E: 'Ê', I: 'Î', O: 'Ô', U: 'Û' },
+    '~': { a: 'ã', n: 'ñ', o: 'õ', A: 'Ã', N: 'Ñ', O: 'Õ' },
+    c: { c: 'ç', C: 'Ç' },
+    v: { s: 'š', z: 'ž', c: 'č', S: 'Š', Z: 'Ž' },
+    '=': {}, '.': {}, u: {}, H: {},
+  };
+
+  const ITEM_MARKS = ['•', '–', '·', '*'];
+  const ROMAN = [[1000,'m'],[900,'cm'],[500,'d'],[400,'cd'],[100,'c'],[90,'xc'],[50,'l'],[40,'xl'],[10,'x'],[9,'ix'],[5,'v'],[4,'iv'],[1,'i']];
+
+  const roman = (value) => {
+    let out = '';
+    let left = value;
+    for (const [v, s] of ROMAN) while (left >= v) { out += s; left -= v; }
+    return out;
+  };
+  const alpha = (value) => String.fromCharCode(96 + ((value - 1) % 26) + 1);
+
+  /** A length, in points. Understands the units a document actually uses, and
+   *  the two that are really fractions of the measure. */
+  function length(text, job, fallback = 0) {
+    if (!text) return fallback;
+    const clean = String(text).trim();
+    const relative = /^([-\d.]*)\s*\\(textwidth|linewidth|columnwidth|hsize|paperwidth)/.exec(clean);
+    if (relative) {
+      const whole = relative[2] === 'paperwidth' ? job.W : job.measure;
+      return (relative[1] === '' ? 1 : Number(relative[1])) * whole;
+    }
+    const match = /^([-\d.]+)\s*(pt|bp|in|cm|mm|em|ex|pc|sp)?/.exec(clean);
+    if (!match) return fallback;
+    const value = Number(match[1]);
+    const unit = match[2] || 'pt';
+    const size = job.font.size;
+    const per = {
+      pt: 1, bp: 1, in: 72, cm: 28.3465, mm: 2.83465, pc: 12, sp: 1 / 65536,
+      em: size, ex: M().xHeight('rm', size),
+    };
+    return value * (per[unit] === undefined ? 1 : per[unit]);
+  }
+
+  // ------------------------------------------------------------------- a job
+
+  function createJob(options) {
+    const job = {
+      paper: options.paper || 'letterpaper',
+      base: options.base || 10,
+      margin: options.margin || 72,
+      title: '', author: '', date: null,
+      log: options.log,
+      refs: options.refs || {},
+      images: options.images || {},
+      files: options.files || [],
+      macros: new Map(),
+      labels: {},
+      toc: [],
+      outline: [],
+      cites: [],
+      counters: { section: 0, subsection: 0, subsubsection: 0, figure: 0, table: 0, equation: 0, footnote: 0, page: 1 },
+      font: { family: 'rm', bold: false, italic: false, size: options.base || 10, sc: false },
+      align: 'justify',
+      // Columns. `cols` frames across the measure, filled left to right; a
+      // spanning zone ignores them and runs the full width, which is what a
+      // title block and a starred float are.
+      cols: 1,
+      colGap: 0,
+      colIndex: 0,
+      columnTop: 0,
+      spanning: false,
+      wide: [],
+      colour: null,
+      colours: {},
+      columnTypes: new Map(),
+      atBegin: [],
+      appendix: false,
+      docClass: 'article',
+      klass: 'article',
+      bibStyle: 'plain',
+      authors: [],
+      acm: {},
+      ccs: [],
+      keywordTokens: null,
+      teaser: null,
+      held: {},
+      bottomBlock: null,
+      lineMap: {},
+      leftSkip: 0,
+      rightSkip: 0,
+      parindent: true,
+      inTitlePage: false,
+      nodes: [],
+      word: null,
+      list: [],
+      notes: [],
+      pendingNotes: [],
+      started: false,
+      inFront: false,
+    };
+
+    const [width, height] = PAPER[job.paper] || PAPER.letterpaper;
+    job.W = width;
+    job.H = height;
+    job.marginTop = options.marginTop || job.margin;
+    job.marginBottom = options.marginBottom || job.margin;
+    layout(job);
+    job.doc = T.pdf.create({ title: '', author: '' });
+    job.page = null;
+    job.pageIndex = -1;
+    job.y = 0;
+    job.prevDepth = 0;
+    job.firstOnPage = true;
+    job.colNotes = [[]];
+    job.colNoteHeight = [0];
+    return job;
+  }
+
+  // -------------------------------------------------------------- the frames
+
+  /** The measure, from the page and the number of columns. Called whenever
+   *  either changes, because everything downstream reads `job.measure` and
+   *  nothing downstream needs to know why it is what it is. */
+  function layout(job) {
+    job.textWidth = job.W - job.margin * 2;
+    job.colWidth = (job.textWidth - job.colGap * (job.cols - 1)) / job.cols;
+    job.measure = job.spanning ? job.textWidth : job.colWidth;
+  }
+
+  const columnX = (job, index) => job.margin + index * (job.colWidth + job.colGap);
+  const frameX = (job) => (job.spanning ? job.margin : columnX(job, job.colIndex));
+
+  /** How much of the bottom of this frame is promised to something else: the
+   *  footnotes called from it, and on the first page the block a conference
+   *  class hangs under the first column. */
+  function reserved(job) {
+    const col = job.spanning ? 0 : job.colIndex;
+    let room = job.spanning
+      ? Math.max(0, ...job.colNoteHeight)
+      : job.colNoteHeight[col] || 0;
+    const block = job.bottomBlock;
+    if (block && job.pageIndex === block.page && (job.spanning || col === block.col)) {
+      room += block.height;
+    }
+    return room;
+  }
+
+  function nextColumn(job) {
+    job.colIndex += 1;
+    job.y = job.columnTop;
+    job.firstOnPage = true;
+    job.prevDepth = 0;
+  }
+
+  /** Leave the columns for a moment and run the full width — a title block, a
+   *  teaser figure, a starred float: the three things that are wider than the
+   *  column they were written in. */
+  function beginSpan(job) {
+    if (job.spanning) return null;
+    if (!job.page) startPage(job);
+    const was = { colIndex: job.colIndex, columnTop: job.columnTop };
+    job.spanning = true;
+    layout(job);
+    return was;
+  }
+
+  function endSpan(job, was) {
+    if (!was) return;
+    job.spanning = false;
+    layout(job);
+    // Both columns start where the wide block stopped.
+    job.columnTop = job.y - job.prevDepth;
+    job.colIndex = 0;
+    job.y = job.columnTop;
+    job.firstOnPage = true;
+    job.prevDepth = 0;
+  }
+
+  /** Wide floats wait for the top of a page, which is where a two-column class
+   *  puts them. They are already rows by the time they get here. */
+  function flushWide(job) {
+    if (!job.wide.length || job.flushing || job.spanning) return;
+    const queue = job.wide;
+    job.wide = [];
+    job.flushing = true;
+    const was = beginSpan(job);
+    for (const row of queue) emitRow(job, row);
+    endSpan(job, was);
+    job.flushing = false;
+  }
+
+  const leading = (job) => job.font.size * 1.2;
+  const fontKey = (job) => M().key(job.font.family, job.font.bold, job.font.italic);
+
+  function say(job, level, message, line, file) {
+    job.log.push({ level, message, line: line || null, file: file || null });
+  }
+
+  // ------------------------------------------------------------- pages, rows
+
+  function startPage(job) {
+    finishPage(job);
+    job.page = job.doc.page(job.W, job.H);
+    job.pageIndex += 1;
+    job.y = job.H - job.marginTop;
+    job.columnTop = job.y;
+    job.colIndex = 0;
+    job.firstOnPage = true;
+    job.prevDepth = 0;
+    job.colNotes = Array.from({ length: job.cols }, () => []);
+    job.colNoteHeight = Array.from({ length: job.cols }, () => 0);
+    flushWide(job);
+    return job.page;
+  }
+
+  function finishPage(job) {
+    if (!job.page) return;
+    // The folio, centred under the text block, the way an article sets it.
+    if (job.folios !== false) {
+      const number = String(job.counters.page);
+      const size = job.base * 0.9;
+      const width = M().width(number, 'rm', size);
+      job.page.items.push({
+        k: 't', x: (job.W - width) / 2, y: job.marginBottom * 0.5, f: 'rm', s: size, t: number,
+      });
+    }
+    job.counters.page += 1;
+
+    // A note belongs to the column it was called from and is set at the foot
+    // of that column, which is the only place a reader looks for it. The rule
+    // goes at the top of the strip the column reserved and not a point higher,
+    // or it lands on the last line the column was still allowed to set.
+    const block = job.bottomBlock;
+    const onBlockPage = block && job.pageIndex === block.page;
+    job.colNotes.forEach((notes, col) => {
+      if (!notes.length) return;
+      const floor = job.marginBottom + (onBlockPage && col === block.col ? block.height : 0);
+      const top = floor + job.colNoteHeight[col];
+      let y = top - job.base * 1.1;
+      job.page.items.push({ k: 'r', x: columnX(job, col), y: top - job.base * 0.5, w: job.colWidth * 0.4, h: 0.4 });
+      for (const note of notes) {
+        for (const row of note) {
+          y -= row.above;
+          for (const item of row.items) {
+            job.page.items.push({ ...item, x: item.x + columnX(job, col) + (row.x || 0), y: item.y + y });
+          }
+          y -= row.below;
+        }
+      }
+    });
+
+    if (onBlockPage) {
+      let y = job.marginBottom + block.height;
+      for (const row of block.rows) {
+        y -= row.above;
+        for (const item of row.items) {
+          job.page.items.push({ ...item, x: item.x + columnX(job, block.col) + (row.x || 0), y: item.y + y });
+        }
+        y -= row.below;
+      }
+    }
+  }
+
+  const noteHeightOf = (rows) => rows.reduce((sum, row) => sum + row.above + row.below, 0);
+
+  function fits(job, need) {
+    return job.y - need >= job.marginBottom + reserved(job);
+  }
+
+  /** Put one row on the page, starting a new one if it will not go. Rows made
+   *  for a footnote or a table cell are captured instead: the same paragraph
+   *  machinery, without the page it usually ends on. */
+  function emitRow(job, row) {
+    if (job.capture) { job.capture.push(row); return undefined; }
+    if (!job.page) startPage(job);
+    const col = job.spanning ? 0 : job.colIndex;
+    const extra = row.notes
+      ? noteHeightOf(row.notes.flat()) + job.base * 1.2 * (job.colNotes[col].length ? 0 : 1)
+      : 0;
+    const drop = job.firstOnPage
+      ? row.above
+      : Math.max(leading(job), job.prevDepth + row.above + job.base * 0.1) + (row.lead || 0);
+
+    // A frame that cannot hold this row hands it on: to the next column if the
+    // page has one, to a new page if it does not. A row taller than a whole
+    // frame is set where it is rather than moved for ever.
+    if (!fits(job, drop + row.below + extra) && !job.firstOnPage) {
+      if (!job.spanning && job.colIndex + 1 < job.cols) nextColumn(job);
+      else startPage(job);
+      return emitRow(job, row);
+    }
+
+    job.y -= drop;
+    for (const item of row.items) {
+      job.page.items.push({ ...item, x: item.x + frameX(job) + (row.x || 0), y: item.y + job.y });
+    }
+    job.prevDepth = row.below;
+    job.firstOnPage = false;
+
+    if (row.notes) {
+      for (const note of row.notes) {
+        job.colNotes[col].push(note);
+        job.colNoteHeight[col] += noteHeightOf(note) + (job.colNotes[col].length === 1 ? job.base * 1.2 : 0);
+      }
+    }
+    if (row.mark) row.mark(job.pageIndex, job.y);
+    return undefined;
+  }
+
+  /** Space asked for by name rather than by what is in it. The depth of the
+   *  last row is settled here rather than being carried into the next one,
+   *  because after an explicit skip there is no "next row" to settle it. */
+  function vspace(job, height) {
+    if (job.capture) return;
+    if (!job.page) startPage(job);
+    if (job.firstOnPage) return;
+    job.y -= job.prevDepth + height;
+    job.prevDepth = 0;
+  }
+
+  // ------------------------------------------------------- words and glue
+
+  function spaceWidth(job) {
+    return M().charWidth(' ', fontKey(job), job.font.size);
+  }
+
+  function ensureWord(job) {
+    if (!job.word) job.word = { k: 'word', runs: [], w: 0, h: 0, d: 0 };
+    return job.word;
+  }
+
+  function addRun(job, text, key, size, options = {}) {
+    if (!text) return;
+    const word = ensureWord(job);
+    const last = word.runs[word.runs.length - 1];
+    const rise = options.rise || 0;
+    const c = options.c || job.colour || null;
+    if (last && last.f === key && last.s === size && (last.rise || 0) === rise
+        && (last.c || null) === c && !options.link && !last.link) {
+      last.t += text;
+    } else {
+      word.runs.push({ f: key, s: size, t: text, rise, c, link: options.link || null });
+    }
+    const m = M();
+    word.w += m.width(text, key, size);
+    word.h = Math.max(word.h, m.ascent(key, size) * 0.95 + rise);
+    word.d = Math.max(word.d, m.descent(key, size) - rise);
+  }
+
+  function addText(job, text) {
+    if (job.upper) {
+      addRun(job, text.toUpperCase(), fontKey(job), job.font.size);
+      return;
+    }
+    if (job.font.sc) {
+      // Small capitals, as close as base-14 gets: capitals at full size,
+      // lower case as capitals at four fifths.
+      for (const ch of text) {
+        const upper = ch.toUpperCase();
+        const small = upper !== ch && /[a-z]/.test(ch);
+        addRun(job, upper, fontKey(job), job.font.size * (small ? 0.8 : 1));
+      }
+      return;
+    }
+    addRun(job, text, fontKey(job), job.font.size);
+  }
+
+  function addBox(job, box, options = {}) {
+    endWord(job);
+    const items = job.colour
+      ? box.items.map((item) => (item.k === 't' || item.k === 'r' ? { ...item, c: item.c || job.colour } : item))
+      : box.items;
+    job.nodes.push({ k: 'box', w: box.w, h: box.h, d: box.d, items, ...options });
+  }
+
+  function endWord(job) {
+    if (job.word && job.word.runs.length) job.nodes.push(job.word);
+    job.word = null;
+  }
+
+  function addGlue(job, options = {}) {
+    endWord(job);
+    const last = job.nodes[job.nodes.length - 1];
+    if (!last || last.k === 'glue') return;
+    const w = options.w === undefined ? spaceWidth(job) : options.w;
+    job.nodes.push({
+      k: 'glue', w,
+      stretch: options.stretch === undefined ? w * 0.6 : options.stretch,
+      shrink: options.shrink === undefined ? w * 0.32 : options.shrink,
+      nobreak: options.nobreak || false,
+      fill: options.fill || false,
+    });
+  }
+
+  // ------------------------------------------------------------ line breaking
+
+  /** First fit, which is what a person reading the result would call "the way
+   *  lines break". Knuth's optimum is better and needs the whole paragraph;
+   *  this needs one line at a time and is wrong about a handful of them. */
+  function breakLines(nodes, measure, job) {
+    const lines = [];
+    let line = [];
+    let width = 0;
+    let lastGlue = -1;
+
+    const flush = (upto, next) => {
+      let take = line.slice(0, upto);
+      while (take.length && take[take.length - 1].k === 'glue') take.pop();
+      lines.push(take);
+      line = line.slice(next);
+      width = line.reduce((sum, node) => sum + node.w, 0);
+      lastGlue = -1;
+      for (let i = line.length - 1; i >= 0; i -= 1) if (line[i].k === 'glue' && !line[i].nobreak) { lastGlue = i; break; }
+    };
+
+    for (const node of nodes) {
+      if (node.k === 'break') {
+        line.push(node);
+        flush(line.length, line.length);
+        lines[lines.length - 1].forced = true;
+        continue;
+      }
+      if (node.k === 'glue' && !line.length) continue;
+      line.push(node);
+      width += node.w;
+      if (node.k === 'glue' && !node.nobreak) lastGlue = line.length - 1;
+
+      if (width > measure + 0.01) {
+        if (lastGlue > 0) {
+          flush(lastGlue, lastGlue + 1);
+        } else if (line.length > 1) {
+          // No break point: the word is longer than the measure and has to
+          // stick out. TeX calls this overfull and so does the log.
+          const overflow = width - node.w - measure;
+          if (overflow > 0.1 && job) {
+            say(job, 'warning', `Overfull line by ${Math.round(overflow)}pt`, job.line, job.file);
+          }
+          flush(line.length - 1, line.length - 1);
+        }
+      }
+    }
+    while (line.length && line[line.length - 1].k === 'glue') line.pop();
+    if (line.length) lines.push(line);
+    return lines;
+  }
+
+  /** A broken line becomes a row: items placed at their final x, and the
+   *  spaces stretched if the line is being justified. */
+  function lineRow(job, line, measure, { justify, align, indent = 0 }) {
+    const natural = line.reduce((sum, node) => sum + node.w, 0);
+    const glues = line.filter((node) => node.k === 'glue' && !node.fill);
+    const fills = line.filter((node) => node.k === 'glue' && node.fill);
+    const slack = measure - indent - natural;
+
+    let stretchPer = 0;
+    let fillPer = 0;
+    if (fills.length) {
+      fillPer = slack / fills.length;
+    } else if (justify && slack > 0 && glues.length) {
+      const total = glues.reduce((sum, glue) => sum + glue.stretch, 0);
+      stretchPer = total > 0 ? slack / total : 0;
+    } else if (justify && slack < 0 && glues.length) {
+      const total = glues.reduce((sum, glue) => sum + glue.shrink, 0);
+      stretchPer = total > 0 ? Math.max(-1, slack / total) : 0;
+    }
+
+    let x = indent;
+    if (!justify && !fills.length) {
+      if (align === 'center') x += slack / 2;
+      else if (align === 'right') x += slack;
+    }
+
+    const items = [];
+    let above = 0;
+    let below = 0;
+    const notes = [];
+
+    for (const node of line) {
+      if (node.k === 'glue') {
+        x += node.w + (node.fill ? fillPer : (stretchPer ? (slack > 0 ? node.stretch : node.shrink) * stretchPer : 0));
+        continue;
+      }
+      if (node.k === 'break') continue;
+      if (node.k === 'word') {
+        let at = x;
+        for (const run of node.runs) {
+          items.push({ k: 't', x: at, y: run.rise || 0, f: run.f, s: run.s, t: run.t, c: run.c || undefined });
+          const w = M().width(run.t, run.f, run.s);
+          if (run.link) {
+            items.push({ k: 'l', x: at, y: -run.s * 0.22, w, h: run.s * 1.02, url: run.link.url, page: run.link.page, tx: run.link.tx, ty: run.link.ty });
+          }
+          at += w;
+        }
+        above = Math.max(above, node.h);
+        below = Math.max(below, node.d);
+        if (node.notes) notes.push(...node.notes);
+        x += node.w;
+        continue;
+      }
+      if (node.k === 'box') {
+        for (const item of node.items) items.push({ ...item, x: item.x + x, y: item.y });
+        above = Math.max(above, node.h);
+        below = Math.max(below, node.d);
+        if (node.notes) notes.push(...node.notes);
+        x += node.w;
+      }
+    }
+
+    return {
+      items,
+      above: above || job.font.size * 0.75,
+      below,
+      x: job.leftSkip,
+      notes: notes.length ? notes : null,
+    };
+  }
+
+  /** End the paragraph being built and put its lines on the page. */
+  function endParagraph(job, options = {}) {
+    endWord(job);
+    const nodes = job.nodes;
+    job.nodes = [];
+    if (!nodes.length) return;
+
+    const measure = job.measure - job.leftSkip - job.rightSkip;
+    const indent = options.indent === undefined
+      ? (job.parindent && job.align === 'justify' ? job.font.size * 1.5 : 0)
+      : options.indent;
+    const hanging = options.hanging || 0;
+
+    const lines = breakLines(nodes, measure - indent, job);
+    lines.forEach((line, i) => {
+      const first = i === 0;
+      const last = i === lines.length - 1 || line.forced;
+      const row = lineRow(job, line, measure, {
+        justify: job.align === 'justify' && !last,
+        align: job.align === 'justify' ? 'left' : job.align,
+        indent: first ? indent : hanging,
+      });
+      row.x = job.leftSkip;
+      if (options.keep && i === lines.length - 1) row.keep = true;
+      if (options.mark && first) row.mark = options.mark;
+      emitRow(job, row);
+    });
+    job.parindent = true;
+  }

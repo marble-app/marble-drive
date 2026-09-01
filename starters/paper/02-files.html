@@ -1,0 +1,446 @@
+
+        <!-- A file is a section: its name is its whole path, so the folder tree
+             in the rail is derived from these eight names and nothing records a
+             folder twice. Drag a file onto a folder and the path is what
+             changes. -->
+        <section class="file" data-marble-id="__ID__" data-key="main" data-kind="tex">
+          <header class="fhead" data-marble-id="__ID__">
+            <h3 class="fname" data-marble-id="__ID__" data-marble-editable>main.tex</h3>
+            <span class="fmeta" data-marble-transient></span>
+          </header>
+          <div class="codewrap" data-marble-id="__ID__">
+            <div class="codebox" data-marble-id="__ID__">
+              <pre class="hl" data-marble-transient aria-hidden="true"></pre>
+              <pre class="src" data-marble-id="__ID__" data-marble-code>%% An ACM submission, in the format CHI, UIST and CSCW use.
+%%
+%% The button marked "2 col" in the bar rewrites the option below: sigconf is
+%% the two-column proceedings format, manuscript is the one-column draft one.
+%% Nothing else in the project changes when you switch.
+
+\documentclass[sigconf]{acmart}
+
+\usepackage{booktabs}
+\usepackage{graphicx}
+\usepackage{subcaption}
+\usepackage{xcolor,colortbl}
+\usepackage{enumitem}
+\usepackage{multirow}
+\usepackage{array}
+\usepackage{xspace}
+\usepackage{dirtytalk}
+
+%% A shaded cell, for the table in Section 2.
+\definecolor{rowgray}{HTML}{F1F5F9}
+\newcommand{\sh}{\cellcolor{rowgray}}
+
+%% Column types that wrap: L is ragged-right, M is the same but centred
+%% vertically in its row.
+\newcolumntype{L}[1]{&gt;{\raggedright\arraybackslash}p{#1}}
+\newcolumntype{M}[1]{&gt;{\raggedright\arraybackslash}m{#1}}
+
+%% The system, named once.
+\newcommand{\SystemName}{\textsc{ProjectName}\xspace}
+
+%% Notes to each other, in colour, easy to find and easy to delete.
+\newcommand{\todo}[1]{\textcolor{red}{#1}}
+\newcommand{\note}[1]{\textcolor{olive}{\textbf{Note}: #1}}
+
+%% A quotation from a participant, set the way a quotation should be.
+\newcommand{\sayit}[1]{{\textit{\say{#1}}}}
+\newenvironment{blockquote}%
+  {\list{}{\itshape\leftmargin=0.25in\rightmargin=0.25in}\item[]}%
+  {\endlist}
+
+\renewcommand{\sectionautorefname}{Section}
+\renewcommand{\subsectionautorefname}{Section}
+\renewcommand{\tableautorefname}{Table}
+\renewcommand{\figureautorefname}{Figure}
+
+\copyrightyear{2027}
+\acmYear{2027}
+\setcopyright{cc}
+\setcctype{by}
+\acmConference[CHI '27]{Proceedings of the CHI Conference on Human Factors in Computing Systems}{May 2027}{Pittsburgh, PA, USA}
+\acmBooktitle{Proceedings of the CHI Conference on Human Factors in Computing Systems}
+\acmDOI{10.1145/nnnnnnn.nnnnnnn}
+\acmISBN{978-x-xxxx-xxxx-x/YY/MM}
+
+\begin{document}
+
+\title{__TITLE__}
+
+\author{First Author}
+\affiliation{
+  \institution{Your Institution}
+  \city{Your City}
+  \state{ST}
+  \country{USA}
+}
+\email{first@example.edu}
+
+\author{Second Author}
+\affiliation{
+  \institution{Another Institution}
+  \city{Another City}
+  \country{USA}
+}
+\email{second@example.edu}
+
+\author{Third Author}
+\affiliation{
+  \institution{Your Institution}
+  \city{Your City}
+  \state{ST}
+  \country{USA}
+}
+\email{third@example.edu}
+
+\renewcommand{\shortauthors}{Author et al.}
+
+\input{Source/Files/0-Abstract}
+
+\begin{CCSXML}
+&lt;ccs2012&gt;
+  &lt;concept&gt;
+      &lt;concept_id&gt;10003120.10003121.10003129&lt;/concept_id&gt;
+      &lt;concept_desc&gt;Human-centered computing~Interactive systems and tools&lt;/concept_desc&gt;
+      &lt;concept_significance&gt;500&lt;/concept_significance&gt;
+      &lt;/concept&gt;
+&lt;/ccs2012&gt;
+\end{CCSXML}
+
+\ccsdesc[500]{Human-centered computing~Interactive systems and tools}
+\ccsdesc[300]{Human-centered computing~Empirical studies in HCI}
+
+\keywords{write, four, or five, keywords}
+
+%% The figure over the title block. Drop an image on this window and it becomes
+%% a file in the project; name it here and it appears.
+\begin{teaserfigure}
+  \centering
+  \includegraphics[width=\textwidth]{Source/Figures/teaser.png}
+  \caption{One figure, the width of the page, that says what the paper is.}
+  \Description{A description for a reader who cannot see the figure.}
+  \label{fig:teaser}
+\end{teaserfigure}
+
+\maketitle
+
+\input{Source/Files/1-Introduction}
+\input{Source/Files/2-System}
+\input{Source/Files/3-Study}
+\input{Source/Files/4-Discussion}
+
+\newpage
+\bibliographystyle{ACM-Reference-Format}
+\bibliography{references}
+
+\appendix
+\input{Source/Files/Appendix}
+
+\end{document}
+</pre>
+            </div>
+          </div>
+        </section>
+
+        <section class="file" data-marble-id="__ID__" data-key="refs" data-kind="bib">
+          <header class="fhead" data-marble-id="__ID__">
+            <h3 class="fname" data-marble-id="__ID__" data-marble-editable>references.bib</h3>
+            <span class="fmeta" data-marble-transient></span>
+          </header>
+          <div class="codewrap" data-marble-id="__ID__">
+            <div class="codebox" data-marble-id="__ID__">
+              <pre class="hl" data-marble-transient aria-hidden="true"></pre>
+              <pre class="src" data-marble-id="__ID__" data-marble-code>@inproceedings{example2020,
+  author    = {Lastname, Firstname and Other, Another},
+  title     = {The Paper That Established the Thing You Are Responding To},
+  booktitle = {Proceedings of the CHI Conference on Human Factors in Computing Systems},
+  year      = {2020},
+  pages     = {1--14},
+  publisher = {ACM},
+  address   = {New York, NY, USA},
+  doi       = {10.1145/3313831.3376728}
+}
+
+@article{example2019,
+  author  = {Someone, Else},
+  title   = {A Journal Article, Which Sets Its Venue in Italics},
+  journal = {ACM Transactions on Computer-Human Interaction},
+  volume  = {26},
+  number  = {4},
+  pages   = {1--29},
+  year    = {2019},
+  doi     = {10.1145/3313831}
+}
+
+@book{knuth1984texbook,
+  author    = {Knuth, Donald E.},
+  title     = {The {\TeX}book},
+  publisher = {Addison-Wesley},
+  address   = {Reading, MA},
+  year      = {1984}
+}
+</pre>
+            </div>
+          </div>
+        </section>
+
+        <section class="file" data-marble-id="__ID__" data-key="abs" data-kind="tex">
+          <header class="fhead" data-marble-id="__ID__">
+            <h3 class="fname" data-marble-id="__ID__" data-marble-editable>Source/Files/0-Abstract.tex</h3>
+            <span class="fmeta" data-marble-transient></span>
+          </header>
+          <div class="codewrap" data-marble-id="__ID__">
+            <div class="codebox" data-marble-id="__ID__">
+              <pre class="hl" data-marble-transient aria-hidden="true"></pre>
+              <pre class="src" data-marble-id="__ID__" data-marble-code>\begin{abstract}
+One paragraph. What the problem is, what you built, what you did with it, and
+what you found --- in that order, because that is the order a reviewer reads
+in. Say the finding rather than promising it: \say{selection, not authoring,
+became the bottleneck} is a result, and \say{we discuss implications} is not.
+Four to six sentences is usually the whole of it.
+\end{abstract}
+</pre>
+            </div>
+          </div>
+        </section>
+
+        <section class="file" data-marble-id="__ID__" data-key="intro" data-kind="tex">
+          <header class="fhead" data-marble-id="__ID__">
+            <h3 class="fname" data-marble-id="__ID__" data-marble-editable>Source/Files/1-Introduction.tex</h3>
+            <span class="fmeta" data-marble-transient></span>
+          </header>
+          <div class="codewrap" data-marble-id="__ID__">
+            <div class="codebox" data-marble-id="__ID__">
+              <pre class="hl" data-marble-transient aria-hidden="true"></pre>
+              <pre class="src" data-marble-id="__ID__" data-marble-code>\section{Introduction}
+
+Open with the thing that is true and awkward. A paragraph that could begin any
+paper in the field is a paragraph a reviewer skips, so name the specific state
+of affairs your work is a response to, and cite the work that established it
+\cite{example2020}.
+
+Then the turn: what nobody has done, and why the obvious way of doing it does
+not work. \SystemName is what this paper calls the thing we built; naming it
+once with a macro means renaming it later costs one line.
+
+\subsection{Contributions}
+
+\begin{itemize}[leftmargin=*,noitemsep]
+  \item A design for \SystemName, and the three decisions in it that a reader
+        could disagree with.
+  \item An implementation, described in \autoref{sec:system}, that runs on
+        ordinary hardware.
+  \item A study with twelve participants (\autoref{sec:study}), and the
+        finding that changed what we thought we were building.
+\end{itemize}
+
+One participant said it better than we have:
+
+\begin{blockquote}
+I stopped drawing things. I started looking for the thing I would have drawn,
+and I found it about half the time --- and the other half I found something
+better.
+\end{blockquote}
+
+\sayit{I stopped drawing things} is, we think, the whole result. \note{Decide
+before submission whether this quotation belongs here or in the discussion.}
+</pre>
+            </div>
+          </div>
+        </section>
+
+        <section class="file" data-marble-id="__ID__" data-key="system" data-kind="tex">
+          <header class="fhead" data-marble-id="__ID__">
+            <h3 class="fname" data-marble-id="__ID__" data-marble-editable>Source/Files/2-System.tex</h3>
+            <span class="fmeta" data-marble-transient></span>
+          </header>
+          <div class="codewrap" data-marble-id="__ID__">
+            <div class="codebox" data-marble-id="__ID__">
+              <pre class="hl" data-marble-transient aria-hidden="true"></pre>
+              <pre class="src" data-marble-id="__ID__" data-marble-code>\section{\SystemName}
+\label{sec:system}
+
+Describe what it does before how it does it. A reader who cannot picture the
+interface cannot follow the implementation.
+
+\subsection{Design goals}
+
+Three at most, each one a sentence, each one something you could have failed at.
+
+\subsection{What it is made of}
+
+\autoref{tab:conditions} is a table in the shape most papers need one: booktabs
+rules, a spanning header, a shaded column, and one column that wraps.
+
+\begin{table}[h]
+\centering
+\begin{tabular}{l M{1.6cm} L{2.9cm}}
+\toprule
+&amp; \multicolumn{2}{c}{\textbf{What we measured}} \\
+\cmidrule(lr){2-3}
+Condition &amp; \sh Trials &amp; Notes \\
+\midrule
+Baseline &amp; \sh 120 &amp; The interface as it was before any of this. \\
+\SystemName &amp; \sh 118 &amp; The same task, the same people, a week later. \\
+\bottomrule
+\end{tabular}
+\caption{Two conditions, and what each of them cost.}
+\label{tab:conditions}
+\end{table}
+
+Two figures that belong side by side go in one float, as subfigures:
+
+\begin{figure}[h]
+  \centering
+  \begin{subfigure}{0.47\columnwidth}
+    \includegraphics[width=\textwidth]{Source/Figures/before.png}
+    \caption{Before.}
+  \end{subfigure}
+  \hfill
+  \begin{subfigure}{0.47\columnwidth}
+    \includegraphics[width=\textwidth]{Source/Figures/after.png}
+    \caption{After.}
+  \end{subfigure}
+  \caption{The same task in both conditions.}
+  \label{fig:conditions}
+\end{figure}
+
+A figure that needs the whole width of the page is a starred float. It waits
+for the top of a page, which is where the class puts it:
+
+\begin{figure*}
+  \centering
+  \includegraphics[width=\textwidth]{Source/Figures/walkthrough.png}
+  \caption{A walkthrough, three panels wide, spanning both columns.}
+  \label{fig:walkthrough}
+\end{figure*}
+
+\subsection{Implementation}
+
+Say what it is written in, what it depends on, and what it cannot do. If there
+is a formula worth writing down, write it down:
+\begin{equation}
+  \label{eq:score}
+  s(r) = \frac{\sum_{i=1}^{n} w_i \, f_i(r)}{\sum_{i=1}^{n} w_i},
+\end{equation}
+and then say in words what \autoref{eq:score} means, because most readers will
+take your word for it.
+</pre>
+            </div>
+          </div>
+        </section>
+
+        <section class="file" data-marble-id="__ID__" data-key="study" data-kind="tex">
+          <header class="fhead" data-marble-id="__ID__">
+            <h3 class="fname" data-marble-id="__ID__" data-marble-editable>Source/Files/3-Study.tex</h3>
+            <span class="fmeta" data-marble-transient></span>
+          </header>
+          <div class="codewrap" data-marble-id="__ID__">
+            <div class="codebox" data-marble-id="__ID__">
+              <pre class="hl" data-marble-transient aria-hidden="true"></pre>
+              <pre class="src" data-marble-id="__ID__" data-marble-code>\section{Study}
+\label{sec:study}
+
+\subsection{Participants}
+
+Twelve people (P1--P12), recruited how, paid what, and screened for what. Say
+the thing that makes them the right or the wrong people to ask.
+
+\subsection{Procedure}
+
+\begin{enumerate}[noitemsep]
+  \item What they did first.
+  \item What they did next.
+  \item What you asked them afterwards.
+\end{enumerate}
+
+Each session lasted about ninety minutes.\footnote{Which is the longest a
+person will do this without resenting it.}
+
+\subsection{Findings}
+
+Number the findings and give each one a sentence you could put in the abstract.
+
+\subsubsection{Selection became the bottleneck}
+
+Eleven of twelve participants stopped composing and started choosing
+(\autoref{tab:conditions}). What they wanted was not a better editor but a
+better ordering.
+
+\subsubsection{The second finding}
+
+State it, evidence it, and resist explaining it here --- that is what the
+discussion is for.
+</pre>
+            </div>
+          </div>
+        </section>
+
+        <section class="file" data-marble-id="__ID__" data-key="disc" data-kind="tex">
+          <header class="fhead" data-marble-id="__ID__">
+            <h3 class="fname" data-marble-id="__ID__" data-marble-editable>Source/Files/4-Discussion.tex</h3>
+            <span class="fmeta" data-marble-transient></span>
+          </header>
+          <div class="codewrap" data-marble-id="__ID__">
+            <div class="codebox" data-marble-id="__ID__">
+              <pre class="hl" data-marble-transient aria-hidden="true"></pre>
+              <pre class="src" data-marble-id="__ID__" data-marble-code>\section{Discussion}
+
+\subsection{What this means for tools}
+
+Two or three implications, each one something a reader could act on. An
+implication nobody could act on is a summary.
+
+\subsection{Limitations}
+
+Say the real ones. A reviewer who finds a limitation you did not mention stops
+trusting the parts you did.
+
+\section{Conclusion}
+
+Two sentences. What you did, and what it tells us.
+
+\begin{acks}
+To the people who read a draft, and to whoever funded it.
+\end{acks}
+</pre>
+            </div>
+          </div>
+        </section>
+
+        <section class="file" data-marble-id="__ID__" data-key="appx" data-kind="tex">
+          <header class="fhead" data-marble-id="__ID__">
+            <h3 class="fname" data-marble-id="__ID__" data-marble-editable>Source/Files/Appendix.tex</h3>
+            <span class="fmeta" data-marble-transient></span>
+          </header>
+          <div class="codewrap" data-marble-id="__ID__">
+            <div class="codebox" data-marble-id="__ID__">
+              <pre class="hl" data-marble-transient aria-hidden="true"></pre>
+              <pre class="src" data-marble-id="__ID__" data-marble-code>\section{Materials}
+\label{app:materials}
+
+Sections after \verb|\appendix| are lettered rather than numbered, which is the
+only thing that command does that a reader can see. Put the interview script,
+the coding scheme and the questionnaire here.
+
+\subsection{Interview script}
+
+\begin{enumerate}[noitemsep]
+  \item Tell me about the last time you did this without our tool.
+  \item What did you expect to happen?
+  \item What happened?
+\end{enumerate}
+</pre>
+            </div>
+          </div>
+        </section>
+
+        <section class="file" data-marble-id="__ID__" data-key="figs" data-kind="dir">
+          <header class="fhead" data-marble-id="__ID__">
+            <h3 class="fname" data-marble-id="__ID__" data-marble-editable>Source/Figures</h3>
+            <span class="fmeta" data-marble-transient></span>
+          </header>
+          <div class="dirnote" data-marble-transient>A folder. Drop an image on this window and it lands here.</div>
+        </section>

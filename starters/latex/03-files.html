@@ -1,0 +1,153 @@
+
+        <!-- A file is a section: its name is a heading you can type over, its
+             source is a <pre> you can type into, and both are in the bytes on
+             disk. The gutter, the colouring and the line the compiler is
+             complaining about are drawn over it and belong to the page. -->
+        <section class="file" data-marble-id="__ID__" data-key="main" data-kind="tex">
+          <header class="fhead" data-marble-id="__ID__">
+            <h3 class="fname" data-marble-id="__ID__" data-marble-editable>main.tex</h3>
+            <span class="fmeta" data-marble-transient></span>
+          </header>
+          <div class="codewrap" data-marble-id="__ID__">
+            <div class="codebox" data-marble-id="__ID__">
+              <pre class="hl" data-marble-transient aria-hidden="true"></pre>
+              <pre class="src" data-marble-id="__ID__" data-marble-code>\documentclass[11pt]{article}
+
+\usepackage{amsmath}
+\usepackage{graphicx}
+
+\title{__TITLE__}
+\author{A Marble document}
+\date{\today}
+
+\newcommand{\R}{\mathbb{R}}
+
+\begin{document}
+\maketitle
+
+\begin{abstract}
+This project is one file. The source in the left pane, the editor you are
+reading it in, and the engine that turned it into the PDF on the right are all
+elements of the same document --- there is no server in the loop, and nothing
+here was uploaded anywhere.
+\end{abstract}
+
+\tableofcontents
+
+\section{Writing}
+
+Type in the pane on the left and press \textbf{Recompile}, or leave
+\emph{auto} on and it will typeset a moment after you stop. Words wrap and
+paragraphs justify the way \LaTeX{} does them; a blank line starts a new one.
+
+You get the usual marks: \textbf{bold}, \emph{emphasis}, \texttt{monospace},
+quotes that curl like ``this'', dashes that are dashes---like that one---and
+footnotes\footnote{Which collect at the foot of the page they were called
+from, numbered in order.} where you want them.
+
+\subsection{Lists}
+
+\begin{itemize}
+  \item Bullets, nested as deep as you like.
+  \begin{itemize}
+    \item The marker changes with the depth.
+  \end{itemize}
+  \item And they break across pages.
+\end{itemize}
+
+\begin{enumerate}
+  \item Numbers, if the order matters.
+  \item Cross-references know their numbers too --- see
+        Section~\ref{sec:maths}.
+\end{enumerate}
+
+\section{Mathematics}
+\label{sec:maths}
+
+Inline maths sits in the line: $e^{i\pi} + 1 = 0$, and $f : \R^n \to \R$ is
+set in the maths italic you would expect.
+
+Displayed maths gets its own space and, in an \texttt{equation}, its own
+number:
+
+\begin{equation}\label{eq:gauss}
+  \int_{-\infty}^{\infty} e^{-x^2}\,dx = \sqrt{\pi}
+\end{equation}
+
+Equation~\ref{eq:gauss} is the one everybody knows. Alignment works the way
+\texttt{amsmath} does it, on the ampersands:
+
+\begin{align}
+  (a+b)^2 &amp;= a^2 + 2ab + b^2 \\
+          &amp;= \sum_{k=0}^{2} \binom{2}{k} a^{2-k} b^{k}
+\end{align}
+
+\[
+  \frac{\partial u}{\partial t} = \alpha \nabla^2 u,
+  \qquad
+  A = \begin{pmatrix} 1 &amp; 2 \\ 3 &amp; 4 \end{pmatrix}
+\]
+
+\section{Tables and figures}
+
+\begin{table}[h]
+\centering
+\begin{tabular}{lrr}
+\hline
+What it holds &amp; Lines &amp; Share \\
+\hline
+Your sources &amp; 96 &amp; 4\% \\
+The engine &amp; 2310 &amp; 94\% \\
+The chrome &amp; 44 &amp; 2\% \\
+\hline
+\end{tabular}
+\caption{Where a document like this spends its bytes.}
+\label{tab:bytes}
+\end{table}
+
+Table~\ref{tab:bytes} is a \texttt{tabular} inside a \texttt{table}, captioned
+and numbered. Drop an image onto the file list and
+\verb|\includegraphics| will place it.
+
+\section{Citing}
+
+The bibliography comes from \texttt{references.bib}, and only the entries you
+cite are printed \cite{knuth1984, lamport1994}. Links work too:
+\url{https://www.latex-project.org}.
+
+\bibliographystyle{plain}
+\bibliography{references}
+
+\end{document}
+</pre>
+            </div>
+          </div>
+        </section>
+
+        <section class="file" data-marble-id="__ID__" data-key="refs" data-kind="bib">
+          <header class="fhead" data-marble-id="__ID__">
+            <h3 class="fname" data-marble-id="__ID__" data-marble-editable>references.bib</h3>
+            <span class="fmeta" data-marble-transient></span>
+          </header>
+          <div class="codewrap" data-marble-id="__ID__">
+            <div class="codebox" data-marble-id="__ID__">
+              <pre class="hl" data-marble-transient aria-hidden="true"></pre>
+              <pre class="src" data-marble-id="__ID__" data-marble-code>@book{knuth1984,
+  author    = {Donald E. Knuth},
+  title     = {The {\TeX}book},
+  publisher = {Addison-Wesley},
+  year      = {1984},
+  address   = {Reading, Massachusetts}
+}
+
+@book{lamport1994,
+  author    = {Leslie Lamport},
+  title     = {{\LaTeX}: A Document Preparation System},
+  publisher = {Addison-Wesley},
+  year      = {1994},
+  edition   = {2nd}
+}
+</pre>
+            </div>
+          </div>
+        </section>

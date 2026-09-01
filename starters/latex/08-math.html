@@ -1,0 +1,677 @@
+
+<script data-marble-id="__ID__">
+// -------------------------------------------------------------------- maths
+//
+// Mathematics is not text with symbols in it. Every piece is an atom with a
+// class — an ordinary letter, an operator, a binary sign, a relation — and
+// almost all of the look of a formula comes from the spaces the classes put
+// between each other, and from the four sizes a script can be set at.
+//
+// What comes out is a box: a width, a height above the baseline, a depth below
+// it, and the things drawn inside it. A box is placed on a page by adding one
+// point to every item in it, which is why a fraction inside a fraction needs no
+// special case.
+
+(() => {
+  const T = window.TeX;
+  const M = () => T.metrics;
+
+  // ---------------------------------------------------------------- symbols
+
+  const GREEK = {
+    alpha: 'α', beta: 'β', gamma: 'γ', delta: 'δ', epsilon: 'ε', varepsilon: 'ε',
+    zeta: 'ζ', eta: 'η', theta: 'θ', vartheta: 'ϑ', iota: 'ι', kappa: 'κ',
+    lambda: 'λ', mu: 'μ', nu: 'ν', xi: 'ξ', pi: 'π', varpi: 'ϖ', rho: 'ρ',
+    varrho: 'ϱ', sigma: 'σ', varsigma: 'ς', tau: 'τ', upsilon: 'υ', phi: 'φ',
+    varphi: 'ϕ', chi: 'χ', psi: 'ψ', omega: 'ω',
+    Gamma: 'Γ', Delta: 'Δ', Theta: 'Θ', Lambda: 'Λ', Xi: 'Ξ', Pi: 'Π',
+    Sigma: 'Σ', Upsilon: 'Υ', Phi: 'Φ', Psi: 'Ψ', Omega: 'Ω',
+  };
+
+  // Class, and the character Symbol draws it with.
+  const SYMBOLS = {
+    infty: ['ord', '∞'], partial: ['ord', '∂'], nabla: ['ord', '∇'],
+    emptyset: ['ord', '∅'], varnothing: ['ord', '∅'], aleph: ['ord', 'ℵ'],
+    Re: ['ord', 'ℜ'], Im: ['ord', 'ℑ'], wp: ['ord', '℘'], ell: ['ord', 'ℓ'],
+    forall: ['ord', '∀'], exists: ['ord', '∃'], neg: ['ord', '¬'], lnot: ['ord', '¬'],
+    prime: ['ord', '′'], angle: ['ord', '∠'], surd: ['ord', '√'],
+
+    pm: ['bin', '±'], mp: ['bin', '∓'], times: ['bin', '×'], div: ['bin', '÷'],
+    cdot: ['bin', '⋅'], ast: ['bin', '∗'], star: ['bin', '∗'], circ: ['bin', '∘'],
+    bullet: ['bin', '•', 'rm'], cap: ['bin', '∩'], cup: ['bin', '∪'],
+    wedge: ['bin', '∧'], land: ['bin', '∧'], vee: ['bin', '∨'], lor: ['bin', '∨'],
+    oplus: ['bin', '⊕'], otimes: ['bin', '⊗'], setminus: ['bin', '\\', 'rm'],
+
+    leq: ['rel', '≤'], le: ['rel', '≤'], geq: ['rel', '≥'], ge: ['rel', '≥'],
+    neq: ['rel', '≠'], ne: ['rel', '≠'], approx: ['rel', '≈'], equiv: ['rel', '≡'],
+    sim: ['rel', '∼'], simeq: ['rel', '≅'], cong: ['rel', '≅'], propto: ['rel', '∝'],
+    in: ['rel', '∈'], notin: ['rel', '∉'], ni: ['rel', '∋'],
+    subset: ['rel', '⊂'], subseteq: ['rel', '⊆'], supset: ['rel', '⊃'], supseteq: ['rel', '⊇'],
+    to: ['rel', '→'], rightarrow: ['rel', '→'], leftarrow: ['rel', '←'], gets: ['rel', '←'],
+    leftrightarrow: ['rel', '↔'], Rightarrow: ['rel', '⇒'], Leftarrow: ['rel', '⇐'],
+    Leftrightarrow: ['rel', '⇔'], mapsto: ['rel', '→'], uparrow: ['rel', '↑'], downarrow: ['rel', '↓'],
+    gg: ['rel', '>>', 'rm'], ll: ['rel', '<<', 'rm'], perp: ['rel', '⊥'],
+    parallel: ['rel', '||', 'rm'], therefore: ['rel', '∴'],
+
+    sum: ['op', '∑'], prod: ['op', '∏'], coprod: ['op', '∏'], int: ['op', '∫'],
+    oint: ['op', '∮'], bigcup: ['op', '∪'], bigcap: ['op', '∩'], bigoplus: ['op', '⊕'],
+    bigotimes: ['op', '⊗'], bigwedge: ['op', '∧'], bigvee: ['op', '∨'],
+
+    ldots: ['inner', '…'], cdots: ['inner', '…'], dots: ['inner', '…'],
+    langle: ['open', '⟨'], rangle: ['close', '⟩'],
+  };
+
+  // Set upright, not italic: these are words, not products of variables.
+  const NAMED = [
+    'sin', 'cos', 'tan', 'cot', 'sec', 'csc', 'arcsin', 'arccos', 'arctan',
+    'sinh', 'cosh', 'tanh', 'log', 'ln', 'exp', 'lim', 'limsup', 'liminf',
+    'max', 'min', 'sup', 'inf', 'det', 'dim', 'ker', 'deg', 'arg', 'gcd', 'Pr', 'mod',
+  ];
+  // The ones whose scripts sit under and over them in display.
+  const LIMITS = ['sum', 'prod', 'coprod', 'bigcup', 'bigcap', 'bigoplus', 'bigotimes', 'bigwedge', 'bigvee', 'lim', 'limsup', 'liminf', 'max', 'min', 'sup', 'inf', 'det', 'gcd'];
+
+  const OPEN = { '(': '(', '[': '[', '\\{': '{', '|': '|', '.': '', 'langle': '⟨', 'lfloor': '⌊', 'lceil': '⌈' };
+  const CLOSE = { ')': ')', ']': ']', '\\}': '}', '|': '|', '.': '', 'rangle': '⟩', 'rfloor': '⌋', 'rceil': '⌉' };
+
+  const MATH_FONTS = {
+    mathrm: 'rm', mathbf: 'rmb', mathit: 'rmi', mathsf: 'sf', mathtt: 'tt',
+    mathcal: 'rmi', mathbb: 'rmb', mathfrak: 'rmi', boldsymbol: 'rmbi',
+  };
+
+  // ------------------------------------------------------------------ boxes
+
+  const empty = () => ({ w: 0, h: 0, d: 0, items: [] });
+
+  const TALL = /[A-Z0-9bdfhklt(){}[\]/|\\∑∏∫∮√⌈⌉⌊⌋]/;
+  const DEEP = /[gjpqy(){}[\]|/\\∑∏∫∮]/;
+
+  function glyph(text, font, size) {
+    const m = M();
+    let h = 0;
+    let d = 0;
+    for (const ch of text) {
+      h = Math.max(h, TALL.test(ch) ? m.capHeight(font, size) * 1.05 : m.xHeight(font, size));
+      d = Math.max(d, DEEP.test(ch) ? size * 0.21 : 0);
+    }
+    if (!text.length) return empty();
+    return {
+      w: m.width(text, font, size),
+      h, d,
+      items: [{ k: 't', x: 0, y: 0, f: font, s: size, t: text }],
+    };
+  }
+
+  function shift(box, dx, dy) {
+    return {
+      w: box.w,
+      h: box.h + dy,
+      d: box.d - dy,
+      items: box.items.map((item) => ({ ...item, x: item.x + dx, y: item.y + dy })),
+    };
+  }
+
+  function merge(boxes) {
+    const out = empty();
+    for (const box of boxes) {
+      out.items.push(...box.items);
+      out.h = Math.max(out.h, box.h);
+      out.d = Math.max(out.d, box.d);
+      out.w = Math.max(out.w, box.w);
+    }
+    return out;
+  }
+
+  function row(parts) {
+    const out = empty();
+    let x = 0;
+    for (const part of parts) {
+      if (typeof part === 'number') { x += part; continue; }
+      for (const item of part.items) out.items.push({ ...item, x: item.x + x });
+      out.h = Math.max(out.h, part.h);
+      out.d = Math.max(out.d, part.d);
+      x += part.w;
+    }
+    out.w = x;
+    return out;
+  }
+
+  const rule = (w, h) => ({ w, h, d: 0, items: [{ k: 'r', x: 0, y: 0, w, h }] });
+
+  // ----------------------------------------------------------------- styles
+
+  const DISPLAY = 0, TEXT = 1, SCRIPT = 2, SCRIPTSCRIPT = 3;
+  const FACTOR = [1, 1, 0.7, 0.5];
+  const sizeAt = (base, style) => base * FACTOR[style];
+  const supStyle = (style) => (style >= SCRIPT ? SCRIPTSCRIPT : SCRIPT);
+  const fracStyle = (style) => (style === DISPLAY ? TEXT : style >= SCRIPT ? SCRIPTSCRIPT : SCRIPT);
+
+  // Space between two classes, in eighteenths of an em. A starred value is
+  // dropped in the script styles, which is why a subscript does not breathe.
+  const SPACE = {
+    ord:   { ord: 0, op: 3, bin: -4, rel: -5, open: 0, close: 0, punct: 0, inner: -3 },
+    op:    { ord: 3, op: 3, bin: 0,  rel: -5, open: 0, close: 0, punct: 0, inner: -3 },
+    bin:   { ord: -4, op: -4, bin: 0, rel: 0, open: -4, close: 0, punct: 0, inner: -4 },
+    rel:   { ord: -5, op: -5, bin: 0, rel: 0, open: -5, close: 0, punct: 0, inner: -5 },
+    open:  { ord: 0, op: 0, bin: 0, rel: 0, open: 0, close: 0, punct: 0, inner: 0 },
+    close: { ord: 0, op: 3, bin: -4, rel: -5, open: 0, close: 0, punct: 0, inner: -3 },
+    punct: { ord: -3, op: -3, bin: 0, rel: -3, open: -3, close: -3, punct: -3, inner: -3 },
+    inner: { ord: -3, op: -3, bin: -4, rel: -5, open: -3, close: 0, punct: -3, inner: -3 },
+  };
+
+  function gap(left, right, size, style) {
+    const table = SPACE[left] || SPACE.ord;
+    const mu = table[right] === undefined ? 0 : table[right];
+    if (mu === 0) return 0;
+    if (mu < 0 && style >= SCRIPT) return 0;
+    return (Math.abs(mu) / 18) * size;
+  }
+
+  // ----------------------------------------------------------------- parsing
+
+  /** Tokens in, a list of atoms out. Groups, scripts, fractions and every
+   *  other construct become one atom carrying boxes it will build later. */
+  function parse(reader, opts) {
+    const atoms = [];
+    const stop = opts.stop || null;
+    let font = opts.font || null;
+
+    const put = (cls, node) => {
+      atoms.push({ cls, node, sup: null, sub: null });
+      return atoms[atoms.length - 1];
+    };
+    const last = () => atoms[atoms.length - 1];
+
+    for (;;) {
+      const tok = reader.next();
+      if (tok.t === 'eof') break;
+      if (tok.t === '}' ) { reader.back(tok); break; }
+      // A stop token belongs to whoever asked for the stop, so it goes back.
+      if (stop && stop(tok, reader)) { reader.back(tok); break; }
+
+      if (tok.t === 'space' || tok.t === 'par') continue;
+
+      if (tok.t === '{') {
+        const inner = parse(reader, { ...opts, stop: null });
+        const close = reader.next();
+        if (close.t !== '}') reader.back(close);
+        put('ord', { k: 'list', atoms: inner });
+        continue;
+      }
+
+      if (tok.t === '^' || tok.t === '_') {
+        const which = tok.t === '^' ? 'sup' : 'sub';
+        const target = last() && !atoms[atoms.length - 1][which] ? last() : put('ord', { k: 'text', text: '', font: 'rm' });
+        target[which] = { k: 'list', atoms: parseArgument(reader, opts) };
+        continue;
+      }
+
+      if (tok.t === '&' || (tok.t === 'cs' && tok.v === '\\')) { reader.back(tok); break; }
+
+      if (tok.t === 'char') {
+        const ch = tok.v;
+        if (ch === "'") {
+          const target = last() || put('ord', { k: 'text', text: '', font: 'rm' });
+          target.sup = { k: 'list', atoms: [{ cls: 'ord', node: { k: 'text', text: '′', font: 'sy' }, sup: null, sub: null }] };
+          continue;
+        }
+        if (/[0-9.]/.test(ch)) { put('ord', { k: 'text', text: ch, font: font || 'rm' }); continue; }
+        if (/[A-Za-z]/.test(ch)) { put('ord', { k: 'text', text: ch, font: font || 'rmi' }); continue; }
+        if ('+-*'.includes(ch)) { put('bin', { k: 'text', text: ch === '-' ? '−' : ch === '*' ? '∗' : ch, font: ch === '+' ? 'rm' : 'sy' }); continue; }
+        if ('=<>'.includes(ch)) { put('rel', { k: 'text', text: ch, font: 'rm' }); continue; }
+        if ('([|'.includes(ch)) { put('open', { k: 'text', text: ch, font: 'rm' }); continue; }
+        if (')]'.includes(ch)) { put('close', { k: 'text', text: ch, font: 'rm' }); continue; }
+        if (',;:'.includes(ch)) { put('punct', { k: 'text', text: ch, font: 'rm' }); continue; }
+        if (ch === '/') { put('ord', { k: 'text', text: '/', font: 'rm' }); continue; }
+        if (ch === '!' || ch === '?') { put('close', { k: 'text', text: ch, font: 'rm' }); continue; }
+        put('ord', { k: 'text', text: ch, font: font || 'rm' });
+        continue;
+      }
+
+      if (tok.t !== 'cs') continue;
+      const name = tok.v;
+
+      if (GREEK[name]) { put('ord', { k: 'text', text: GREEK[name], font: 'sy' }); continue; }
+      if (SYMBOLS[name]) {
+        const [cls, ch, face] = SYMBOLS[name];
+        const atom = put(cls, { k: 'text', text: ch, font: face || 'sy', big: cls === 'op' });
+        atom.limits = LIMITS.includes(name);
+        continue;
+      }
+      if (NAMED.includes(name)) {
+        const atom = put('op', { k: 'text', text: name, font: 'rm' });
+        atom.limits = LIMITS.includes(name);
+        continue;
+      }
+      if (MATH_FONTS[name]) {
+        const body = reader.group();
+        const sub = new T.lex.Reader(body.concat([{ t: 'eof' }]), reader.macros);
+        put('ord', { k: 'list', atoms: parse(sub, { ...opts, font: MATH_FONTS[name] }) });
+        continue;
+      }
+
+      switch (name) {
+        case 'frac': case 'dfrac': case 'tfrac': case 'binom': case 'choose': {
+          const num = parseArgument(reader, opts);
+          const den = parseArgument(reader, opts);
+          put(name === 'binom' ? 'inner' : 'ord', {
+            k: 'frac', num, den,
+            bar: name !== 'binom',
+            around: name === 'binom' ? ['(', ')'] : null,
+            forceDisplay: name === 'dfrac',
+            forceText: name === 'tfrac',
+          });
+          continue;
+        }
+        case 'sqrt': {
+          const index = reader.optional();
+          const body = parseArgument(reader, opts);
+          put('ord', { k: 'sqrt', body, index });
+          continue;
+        }
+        case 'text': case 'textrm': case 'mbox': case 'textnormal': {
+          put('ord', { k: 'text', text: T.lex.plain(reader.group()), font: 'rm', upright: true });
+          continue;
+        }
+        case 'textbf': {
+          put('ord', { k: 'text', text: T.lex.plain(reader.group()), font: 'rmb', upright: true });
+          continue;
+        }
+        case 'textit': case 'emph': {
+          put('ord', { k: 'text', text: T.lex.plain(reader.group()), font: 'rmi', upright: true });
+          continue;
+        }
+        case 'operatorname': {
+          const atom = put('op', { k: 'text', text: T.lex.plain(reader.group()), font: 'rm' });
+          atom.limits = false;
+          continue;
+        }
+        case 'left': {
+          const open = delimiterName(reader);
+          const inner = parse(reader, { ...opts, stop: (t) => t.t === 'cs' && t.v === 'right' });
+          reader.next(); // the \right the stop left behind
+          const close = delimiterName(reader);
+          put('inner', { k: 'fenced', open, close, body: inner });
+          continue;
+        }
+        case 'right': { reader.back(tok); return atoms; }
+        case 'begin': {
+          const env = T.lex.plain(reader.group());
+          put(env === 'cases' || env === 'aligned' || env === 'array' ? 'inner' : 'ord', {
+            k: 'matrix', env, rows: parseRows(reader, env, opts),
+          });
+          continue;
+        }
+        case 'end': { reader.group(); continue; }
+        case 'hat': case 'widehat': case 'bar': case 'overline': case 'vec': case 'tilde':
+        case 'widetilde': case 'dot': case 'ddot': case 'check': case 'acute': case 'grave': {
+          put('ord', { k: 'accent', which: name, body: parseArgument(reader, opts) });
+          continue;
+        }
+        case 'underline': {
+          put('ord', { k: 'under', body: parseArgument(reader, opts) });
+          continue;
+        }
+        case 'quad': put('ord', { k: 'space', em: 1 }); continue;
+        case 'qquad': put('ord', { k: 'space', em: 2 }); continue;
+        case ',': put('ord', { k: 'space', em: 3 / 18 }); continue;
+        case ':': case '>': put('ord', { k: 'space', em: 4 / 18 }); continue;
+        case ';': put('ord', { k: 'space', em: 5 / 18 }); continue;
+        case '!': put('ord', { k: 'space', em: -3 / 18 }); continue;
+        case ' ': put('ord', { k: 'space', em: 0.25 }); continue;
+        case 'displaystyle': opts.style = DISPLAY; continue;
+        case 'textstyle': opts.style = TEXT; continue;
+        case 'nolimits': if (last()) last().limits = false; continue;
+        case 'limits': if (last()) last().limits = true; continue;
+        case 'mathstrut': case 'strut': put('ord', { k: 'strut' }); continue;
+        case 'label': case 'nonumber': case 'notag': reader.group(); continue;
+        case '{': put('open', { k: 'text', text: '{', font: 'rm' }); continue;
+        case '}': put('close', { k: 'text', text: '}', font: 'rm' }); continue;
+        case '|': put('ord', { k: 'text', text: '∥', font: 'sy' }); continue;
+        case '%': case '$': case '#': case '&': case '_':
+          put('ord', { k: 'text', text: name, font: 'rm' }); continue;
+        default:
+          // Unknown, and worth saying so rather than dropping it silently.
+          if (opts.unknown) opts.unknown(name, tok.line, tok.file);
+          continue;
+      }
+    }
+    return atoms;
+  }
+
+  function parseArgument(reader, opts) {
+    const tok = reader.next();
+    if (tok.t === '{') {
+      const inner = parse(reader, { ...opts, stop: null });
+      const close = reader.next();
+      if (close.t !== '}') reader.back(close);
+      return inner;
+    }
+    reader.back(tok);
+    const one = reader.next();
+    if (one.t === 'eof') return [];
+    const sub = new T.lex.Reader([one, { t: 'eof' }], reader.macros);
+    return parse(sub, { ...opts, stop: null });
+  }
+
+  function delimiterName(reader) {
+    const tok = reader.next();
+    if (tok.t === 'char') return tok.v;
+    if (tok.t === 'cs') return tok.v === '\\{' ? '\\{' : tok.v;
+    return '.';
+  }
+
+  function parseRows(reader, env, opts) {
+    if (env === 'array' || env === 'tabular') reader.group();
+    const rows = [];
+    let cells = [];
+    for (;;) {
+      const atoms = parse(reader, {
+        ...opts,
+        stop: (tok) => (tok.t === 'cs' && (tok.v === '\\' || tok.v === 'end')) || tok.t === '&',
+      });
+      cells.push(atoms);
+      const tok = reader.next();
+      if (tok.t === 'eof') break;
+      if (tok.t === '&') continue;
+      if (tok.t === 'cs' && tok.v === '\\') { rows.push(cells); cells = []; continue; }
+      if (tok.t === 'cs' && tok.v === 'end') { reader.group(); break; }
+      break;
+    }
+    if (cells.length && (cells.length > 1 || cells[0].length)) rows.push(cells);
+    return rows;
+  }
+
+  // ------------------------------------------------------------------ layout
+
+  function build(atoms, base, style, opts = {}) {
+    const size = sizeAt(base, style);
+    const parts = [];
+    let previous = null;
+
+    atoms.forEach((atom, index) => {
+      let cls = atom.cls;
+      // A binary sign with nothing to bind on the left is not binary.
+      if (cls === 'bin' && (previous === null || ['bin', 'op', 'rel', 'open', 'punct'].includes(previous))) cls = 'ord';
+      const next = atoms[index + 1];
+      if (cls === 'bin' && !next) cls = 'ord';
+
+      if (previous !== null) {
+        const space = gap(previous, cls, size, style);
+        if (space) parts.push(space);
+      }
+      parts.push(atomBox(atom, base, style, cls, opts));
+      previous = cls;
+    });
+
+    return row(parts);
+  }
+
+  function atomBox(atom, base, style, cls, opts) {
+    const size = sizeAt(base, style);
+    let core = nodeBox(atom.node, base, style, opts);
+
+    const isBigOp = atom.node.k === 'text' && (atom.node.big || cls === 'op');
+    const limitsHere = atom.limits && style === DISPLAY;
+
+    if (limitsHere && (atom.sup || atom.sub)) {
+      const above = atom.sup ? build(atom.sup.atoms, base, supStyle(style), opts) : null;
+      const below = atom.sub ? build(atom.sub.atoms, base, supStyle(style), opts) : null;
+      const w = Math.max(core.w, above ? above.w : 0, below ? below.w : 0);
+      const centre = (box) => (w - box.w) / 2;
+      const out = empty();
+      out.w = w;
+      const clearance = size * 0.18;
+      const middle = shift(core, centre(core), 0);
+      out.items.push(...middle.items);
+      out.h = core.h; out.d = core.d;
+      if (above) {
+        const lift = core.h + clearance + above.d;
+        const placed = shift(above, centre(above), lift);
+        out.items.push(...placed.items);
+        out.h = Math.max(out.h, lift + above.h);
+      }
+      if (below) {
+        const drop = -(core.d + clearance + below.h);
+        const placed = shift(below, centre(below), drop);
+        out.items.push(...placed.items);
+        out.d = Math.max(out.d, -drop + below.d);
+      }
+      return out;
+    }
+
+    if (!atom.sup && !atom.sub) return core;
+
+    const m = M();
+    const scriptSize = sizeAt(base, supStyle(style));
+    const sup = atom.sup ? build(atom.sup.atoms, base, supStyle(style), opts) : null;
+    const sub = atom.sub ? build(atom.sub.atoms, base, supStyle(style), opts) : null;
+    const out = empty();
+    out.items.push(...core.items);
+    out.h = core.h;
+    out.d = core.d;
+    const x = core.w + (isBigOp ? size * 0.04 : 0);
+    let width = core.w;
+
+    if (sup) {
+      const lift = Math.max(core.h - scriptSize * 0.25, m.xHeight('rm', size) * 0.9, sup.d + scriptSize * 0.2);
+      const placed = shift(sup, x, lift);
+      out.items.push(...placed.items);
+      out.h = Math.max(out.h, lift + sup.h);
+      width = Math.max(width, x + sup.w);
+    }
+    if (sub) {
+      const drop = -Math.max(core.d + scriptSize * 0.15, size * 0.22, sub.h - scriptSize * 0.6);
+      const placed = shift(sub, x, drop);
+      out.items.push(...placed.items);
+      out.d = Math.max(out.d, -drop + sub.d);
+      width = Math.max(width, x + sub.w);
+    }
+    out.w = width + size * 0.04;
+    return out;
+  }
+
+  function nodeBox(node, base, style, opts) {
+    const size = sizeAt(base, style);
+    const m = M();
+
+    switch (node.k) {
+      case 'text': {
+        if (node.big && style === DISPLAY) {
+          const big = glyph(node.text, node.font, size * 1.45);
+          return shift(big, 0, -(big.h - big.d) / 2 + m.axis(size));
+        }
+        return glyph(node.text, node.font, size);
+      }
+      case 'list':
+        return build(node.atoms, base, style, opts);
+      case 'space':
+        return { w: node.em * size, h: 0, d: 0, items: [] };
+      case 'strut':
+        return { w: 0, h: size * 0.7, d: size * 0.2, items: [] };
+      case 'frac': {
+        const inner = node.forceDisplay ? TEXT : node.forceText ? SCRIPT : fracStyle(style);
+        const num = build(node.num, base, node.forceDisplay ? TEXT : inner, opts);
+        const den = build(node.den, base, node.forceDisplay ? TEXT : inner, opts);
+        const thick = size * 0.045;
+        const axis = m.axis(size);
+        const w = Math.max(num.w, den.w) + size * 0.24;
+        // Both are baselines, measured from the fraction's own: the numerator
+        // sits a clear gap above the rule and the denominator the same below,
+        // so `drop` is negative and stays that way.
+        const lift = axis + thick / 2 + size * 0.14 + num.d;
+        const drop = axis - thick / 2 - size * 0.18 - den.h;
+        const out = empty();
+        out.w = w;
+        const top = shift(num, (w - num.w) / 2, lift);
+        const bottom = shift(den, (w - den.w) / 2, drop);
+        out.items.push(...top.items, ...bottom.items);
+        out.h = lift + num.h;
+        out.d = -drop + den.d;
+        if (node.bar) {
+          const bar = shift(rule(w - size * 0.06, thick), size * 0.03, axis - thick / 2);
+          out.items.push(...bar.items);
+        }
+        if (node.around) {
+          const left = stretchDelimiter(node.around[0], out.h, out.d, base, size, m);
+          const right = stretchDelimiter(node.around[1], out.h, out.d, base, size, m);
+          return row([left, out, right]);
+        }
+        return out;
+      }
+      case 'sqrt': {
+        const body = build(node.body, base, style, opts);
+        const thick = size * 0.045;
+        const clearance = size * 0.14;
+        // Base-14 has no built-up radical, so Symbol's is set at whatever size
+        // reaches over what is under it. Its ink runs from about -0.05 to 0.80
+        // of the size it is set at, which is what the placement below is for.
+        const TOP = 0.8;
+        const BOTTOM = -0.05;
+        const barTop = body.h + clearance;
+        const scale = Math.max(size, (barTop + body.d) / (TOP - BOTTOM));
+        const sign = glyph('√', 'sy', scale);
+        const placed = shift(sign, 0, barTop - TOP * scale);
+        const out = empty();
+        out.items.push(...placed.items);
+        const inner = shift(body, sign.w + size * 0.06, 0);
+        out.items.push(...inner.items);
+        const bar = shift(rule(body.w + size * 0.14, thick), sign.w, barTop);
+        out.items.push(...bar.items);
+        out.w = sign.w + body.w + size * 0.14;
+        out.h = barTop + thick;
+        out.d = Math.max(body.d, TOP * scale - barTop + BOTTOM * scale);
+        if (node.index && node.index.length) {
+          const sub = new T.lex.Reader(node.index.concat([{ t: 'eof' }]), opts.macros || new Map());
+          const idx = build(parse(sub, { style, unknown: opts.unknown }), base, SCRIPTSCRIPT, opts);
+          const push = idx.w * 0.8;
+          const set = shift(idx, 0, out.h * 0.42);
+          const wrapped = empty();
+          wrapped.items.push(...set.items, ...out.items.map((item) => ({ ...item, x: item.x + push })));
+          wrapped.w = out.w + push;
+          wrapped.h = Math.max(out.h, set.h);
+          wrapped.d = out.d;
+          return wrapped;
+        }
+        return out;
+      }
+      case 'fenced': {
+        const body = build(node.body, base, style, opts);
+        const axis = m.axis(size);
+        const reach = Math.max(body.h - axis, body.d + axis) * 2 + size * 0.1;
+        const left = stretchDelimiter(OPEN[node.open] ?? node.open, reach / 2 + axis, reach / 2 - axis, base, size, m);
+        const right = stretchDelimiter(CLOSE[node.close] ?? node.close, reach / 2 + axis, reach / 2 - axis, base, size, m);
+        return row([left, body, right]);
+      }
+      case 'accent': {
+        const body = build(node.body, base, style, opts);
+        const marks = {
+          hat: '^', widehat: '^', bar: '−', overline: '−', vec: '→', tilde: '~',
+          widetilde: '~', dot: '·', ddot: '··', check: 'v', acute: '´', grave: '`',
+        };
+        const flat = ['bar', 'overline'].includes(node.which);
+        // The arrow is a full-width glyph and the others are not, so it is set
+        // smaller rather than left to reach past the letter it is over.
+        const markSize = size * (flat ? 1 : node.which === 'vec' ? 0.55 : 0.9);
+        const mark = flat
+          ? rule(Math.max(body.w, size * 0.4), size * 0.04)
+          : glyph(marks[node.which] || '^', node.which === 'vec' ? 'sy' : 'rm', markSize);
+        const lift = body.h + size * (flat ? 0.14 : 0.02);
+        const placed = shift(mark, (body.w - mark.w) / 2, lift);
+        const out = empty();
+        out.items.push(...body.items, ...placed.items);
+        out.w = body.w;
+        out.h = lift + mark.h;
+        out.d = body.d;
+        return out;
+      }
+      case 'under': {
+        const body = build(node.body, base, style, opts);
+        const bar = shift(rule(body.w, size * 0.04), 0, -(body.d + size * 0.16));
+        const out = empty();
+        out.items.push(...body.items, ...bar.items);
+        out.w = body.w;
+        out.h = body.h;
+        out.d = body.d + size * 0.22;
+        return out;
+      }
+      case 'matrix':
+        return matrixBox(node, base, style, opts);
+      default:
+        return empty();
+    }
+  }
+
+  const FENCES = {
+    pmatrix: ['(', ')'], bmatrix: ['[', ']'], Bmatrix: ['{', '}'],
+    vmatrix: ['|', '|'], Vmatrix: ['∥', '∥'], cases: ['{', ''],
+  };
+
+  function matrixBox(node, base, style, opts) {
+    const size = sizeAt(base, style);
+    const m = M();
+    const inner = node.env === 'cases' || node.env === 'aligned' ? style : style === DISPLAY ? TEXT : style;
+    const cells = node.rows.map((cells0) => cells0.map((atoms) => build(atoms, base, inner, opts)));
+    const columns = Math.max(0, ...cells.map((r) => r.length));
+    const widths = [];
+    for (let c = 0; c < columns; c += 1) {
+      widths.push(Math.max(0, ...cells.map((r) => (r[c] ? r[c].w : 0))));
+    }
+    const colGap = size * (node.env === 'cases' ? 0.9 : 0.55);
+    const rowGap = size * 0.35;
+    const out = empty();
+    let y = 0;
+    const heights = cells.map((r) => Math.max(size * 0.6, ...r.map((b) => b.h)));
+    const depths = cells.map((r) => Math.max(size * 0.2, ...r.map((b) => b.d)));
+    let total = 0;
+    cells.forEach((_, i) => { total += heights[i] + depths[i] + (i ? rowGap : 0); });
+    y = total / 2 + m.axis(size);
+
+    cells.forEach((r, i) => {
+      y -= heights[i];
+      let x = 0;
+      r.forEach((box, c) => {
+        const left = node.env === 'cases' || node.env === 'aligned' ? 0 : (widths[c] - box.w) / 2;
+        const placed = shift(box, x + left, y);
+        out.items.push(...placed.items);
+        x += widths[c] + colGap;
+      });
+      y -= depths[i] + rowGap;
+    });
+
+    out.w = widths.reduce((a, b) => a + b, 0) + colGap * Math.max(0, columns - 1);
+    out.h = total / 2 + m.axis(size);
+    out.d = total / 2 - m.axis(size);
+
+    const fence = FENCES[node.env];
+    if (!fence) return out;
+    const left = stretchDelimiter(fence[0], out.h, out.d, base, size, m);
+    const right = stretchDelimiter(fence[1], out.h, out.d, base, size, m);
+    return row([left, size * 0.12, out, size * 0.12, right]);
+  }
+
+  /** A delimiter tall enough for what it is around. Base-14 has no built-up
+   *  brackets, so the glyph is set at the size that makes it reach — which is
+   *  what a reader without a maths font would do anyway. */
+  function stretchDelimiter(ch, above, below, base, size, m) {
+    if (!ch) return empty();
+    const font = '⟨⟩∥⌈⌉⌊⌋'.includes(ch) ? 'sy' : 'rm';
+    const want = Math.max(above, below) * 2;
+    const natural = size * 0.72;
+    const scale = Math.max(size, Math.min(size * 4, (want / natural) * size));
+    const box = glyph(ch, font, scale);
+    const axis = m.axis(size);
+    const middle = (box.h - box.d) / 2;
+    return shift(box, 0, axis - middle);
+  }
+
+  /** The whole of it: tokens in, one box out. */
+  function typeset(tokens, macros, { display = false, base = 10, unknown = null } = {}) {
+    const reader = new T.lex.Reader(tokens.concat([{ t: 'eof' }]), macros);
+    const opts = { style: display ? DISPLAY : TEXT, unknown, macros };
+    const atoms = parse(reader, opts);
+    return build(atoms, base, opts.style, { unknown, macros });
+  }
+
+  T.math = { typeset, parse, build, glyph, row, shift, merge, rule, empty, DISPLAY, TEXT };
+})();
+</script>

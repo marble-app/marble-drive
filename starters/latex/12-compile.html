@@ -1,0 +1,148 @@
+
+<script data-marble-id="__ID__">
+// ---------------------------------------------------------------- compiling
+//
+// Twice, like the real thing, and for the same reason: a cross-reference
+// cannot know what page it is pointing at until the pages exist. The first
+// pass is thrown away except for what it learned — where the labels landed,
+// what the contents should say — and the second is the PDF you get.
+
+(() => {
+  const T = window.TeX;
+
+  /** A .bib file, as entries. Values may be braced, quoted or bare. */
+  function parseBib(text) {
+    const entries = {};
+    let i = 0;
+    while (i < text.length) {
+      const at = text.indexOf('@', i);
+      if (at === -1) break;
+      const open = text.indexOf('{', at);
+      if (open === -1) break;
+      const type = text.slice(at + 1, open).trim().toLowerCase();
+      if (type === 'comment' || type === 'preamble') { i = open + 1; continue; }
+
+      let depth = 1;
+      let j = open + 1;
+      while (j < text.length && depth) {
+        if (text[j] === '{') depth += 1;
+        if (text[j] === '}') depth -= 1;
+        j += 1;
+      }
+      const body = text.slice(open + 1, j - 1);
+      const comma = body.indexOf(',');
+      const key = (comma === -1 ? body : body.slice(0, comma)).trim();
+      const fields = {};
+
+      let k = comma + 1;
+      while (comma !== -1 && k < body.length) {
+        const equals = body.indexOf('=', k);
+        if (equals === -1) break;
+        const name = body.slice(k, equals).trim().toLowerCase().replace(/^,/, '').trim();
+        let v = equals + 1;
+        while (v < body.length && /\s/.test(body[v])) v += 1;
+        let value = '';
+        if (body[v] === '{') {
+          let level = 1;
+          const from = v + 1;
+          v += 1;
+          while (v < body.length && level) {
+            if (body[v] === '{') level += 1;
+            if (body[v] === '}') level -= 1;
+            v += 1;
+          }
+          value = body.slice(from, v - 1);
+        } else if (body[v] === '"') {
+          const from = v + 1;
+          v += 1;
+          while (v < body.length && body[v] !== '"') v += 1;
+          value = body.slice(from, v);
+          v += 1;
+        } else {
+          const from = v;
+          while (v < body.length && body[v] !== ',') v += 1;
+          value = body.slice(from, v).trim();
+        }
+        if (name) fields[name] = value.replace(/\s+/g, ' ').trim();
+        const next = body.indexOf(',', v);
+        if (next === -1) break;
+        k = next + 1;
+      }
+      if (key) entries[key] = { key, type, fields };
+      i = j;
+    }
+    return entries;
+  }
+
+  const surname = (author) => {
+    const first = String(author || '').split(/\s+and\s+/)[0] || '';
+    if (first.includes(',')) return first.split(',')[0].trim().toLowerCase();
+    const words = first.trim().split(/\s+/);
+    return (words[words.length - 1] || '').toLowerCase();
+  };
+
+  /** Which entries are cited, and what number each of them gets. Numbering is
+   *  settled before anything is set, so a \cite that comes before the
+   *  bibliography still knows its number on the first pass. */
+  function numbering(project) {
+    const sources = project.files.filter((file) => file.kind !== 'bib' && file.kind !== 'img');
+    const text = sources.map((file) => file.text).join('\n');
+
+    const cited = [];
+    for (const match of text.matchAll(/\\(?:no)?cite[tp]?\s*(?:\[[^\]]*\])?\{([^}]*)\}/g)) {
+      for (const key of match[1].split(',')) {
+        const clean = key.trim();
+        if (clean && !cited.includes(clean)) cited.push(clean);
+      }
+    }
+
+    const bib = {};
+    const manual = [...text.matchAll(/\\bibitem\s*(?:\[[^\]]*\])?\{([^}]*)\}/g)].map((m) => m[1].trim());
+    if (manual.length) {
+      manual.forEach((key, i) => { bib[key] = { number: i + 1 }; });
+      return bib;
+    }
+
+    const known = {};
+    for (const file of project.files) {
+      if (file.kind === 'bib' || /\.bib$/.test(file.name)) Object.assign(known, parseBib(file.text));
+    }
+
+    // The plain style: alphabetical by the first author's surname.
+    const wanted = cited.filter((key) => known[key]);
+    wanted.sort((a, b) => {
+      const left = surname(known[a].fields.author || known[a].fields.editor);
+      const right = surname(known[b].fields.author || known[b].fields.editor);
+      if (left !== right) return left < right ? -1 : 1;
+      return (known[a].fields.year || '') < (known[b].fields.year || '') ? -1 : 1;
+    });
+    wanted.forEach((key, i) => { bib[key] = { number: i + 1, fields: known[key].fields, type: known[key].type }; });
+    for (const key of cited) if (!bib[key]) bib[key] = { number: '?' };
+    return bib;
+  }
+
+  function compile(project, { images = {} } = {}) {
+    const started = Date.now();
+    const bib = numbering(project);
+
+    const first = T.type.run(project, { bib, images });
+    // The second pass knows what the first one found out, including how long
+    // the paper turned out to be — which a reference format has to print.
+    const second = T.type.run(project, {
+      bib, images, refs: first.labels, toc: first.toc, pages: first.pages,
+    });
+
+    return {
+      bytes: second.doc.bytes(),
+      pages: second.pages,
+      log: second.log,
+      labels: second.labels,
+      lineMap: second.lineMap,
+      ms: Date.now() - started,
+    };
+  }
+
+  T.compile = compile;
+  T.parseBib = parseBib;
+})();
+</script>

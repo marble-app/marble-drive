@@ -1,0 +1,59 @@
+<body>
+<!-- The shell holds every decision this app makes about itself — which file is
+     open, how the panes are split, whether it typesets as you type. Each of
+     them is one attribute, so each is one setAttr, and an editor changes them
+     the same way a click does. -->
+<div class="app" id="app" data-marble-id="__ID__"
+     data-active="main" data-layout="split" data-auto="on" data-zoom="page-width"
+     data-rail="open" data-log="closed" data-shut="">
+
+  <header class="bar" data-marble-id="__ID__">
+    <span class="dot"></span>
+    <h1 class="title" data-marble-id="__ID__" data-marble-editable>__TITLE__</h1>
+    <span class="kind" data-marble-id="__ID__" data-marble-editable>LaTeX</span>
+
+    <!-- Chrome, and it says so. The labels above are content — type over them
+         and the file has changed — but a button that recompiles is the page's,
+         so it is kept out of addressing rather than left half in it. -->
+    <div class="acts" data-marble-transient>
+      <button class="btn" id="toggle-rail" title="Files (⌘B)"><span class="ico">▤</span></button>
+      <div class="seg">
+        <button class="btn" data-set-layout="editor" title="Source only">◧</button>
+        <button class="btn" data-set-layout="split" title="Side by side">◫</button>
+        <button class="btn" data-set-layout="pdf" title="PDF only">◨</button>
+      </div>
+      <button class="btn" id="toggle-cols" title="One column or two (rewrites \documentclass)">▥ 2 col</button>
+      <button class="btn" id="toggle-auto" title="Typeset as you type">auto</button>
+      <button class="btn go" id="compile" title="Recompile (⌘⏎)"><span class="ico">▶</span> Recompile</button>
+      <button class="btn" id="get-pdf" title="Download the PDF">⤓ PDF</button>
+      <button class="btn" id="get-tex" title="Download the open file">⤓ .tex</button>
+    </div>
+  </header>
+
+  <div class="main">
+
+    <aside class="rail" id="rail">
+      <div class="railscroll" data-marble-id="__ID__">
+        <h2 data-marble-id="__ID__" data-marble-editable>Project</h2>
+        <ul class="filelist" id="railfiles" data-marble-transient></ul>
+        <p class="railnote" data-marble-id="__ID__" data-marble-editable>Every file here is an element in this document, and the engine that typesets them is a script in it.</p>
+      </div>
+      <div class="railfoot" data-marble-transient>
+        <button class="btn" id="new-tex">+ TeX file</button>
+        <button class="btn" id="new-bib">+ BibTeX file</button>
+        <button class="btn" id="new-dir">+ Folder</button>
+      </div>
+      <!-- The row menu. One of these, moved to whichever row asked for it. -->
+      <div class="menu" id="menu" data-marble-transient hidden>
+        <button data-do="rename">Rename</button>
+        <button data-do="duplicate">Duplicate</button>
+        <hr>
+        <button data-do="newfile">New TeX file here</button>
+        <button data-do="newfolder">New folder here</button>
+        <hr>
+        <button data-do="delete">Delete</button>
+      </div>
+    </aside>
+
+    <section class="editorpane">
+      <div class="sheets" id="files" data-marble-id="__ID__">

@@ -1,0 +1,35 @@
+      </div>
+      <div class="grabber" id="grabber" data-marble-transient></div>
+    </section>
+
+    <!-- The PDF is the one thing here that is not kept: it is what the sources
+         mean, recomputed whenever they change, so it lives in the page and
+         never in the file. -->
+    <section class="pdfpane" data-marble-transient>
+      <div class="pdfbar">
+        <button class="btn" data-set-zoom="out" title="Zoom out">−</button>
+        <button class="btn" data-set-zoom="in" title="Zoom in">+</button>
+        <button class="btn" data-set-zoom="page-width" title="Fit the width">fit</button>
+        <span class="pdfnote" id="pdfnote">not typeset yet</span>
+      </div>
+      <div class="viewer">
+        <iframe id="pdfframe" title="PDF preview"></iframe>
+        <div class="curtain" id="curtain">
+          <div class="big">▶</div>
+          <div>Press Recompile, or ⌘⏎, to typeset the project.</div>
+        </div>
+      </div>
+    </section>
+
+  </div>
+
+  <div class="logpane" data-marble-transient>
+    <div class="loghead" id="loghead">
+      <span class="pill" id="logpill" data-state="idle">idle</span>
+      <span id="logsummary">The engine runs in this page. Nothing is uploaded anywhere.</span>
+      <span class="chev">⌄</span>
+    </div>
+    <div class="logbody" id="logbody"></div>
+  </div>
+
+</div>

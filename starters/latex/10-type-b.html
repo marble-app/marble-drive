@@ -1,0 +1,1234 @@
+
+  // ------------------------------------------------------------- the reading
+
+  const SECTIONS = {
+    part:          { level: -1, scale: 2.074, bold: true, above: 2.4, below: 1.2, number: false },
+    section:       { level: 1, scale: 1.44, bold: true, above: 1.7, below: 0.7, number: true },
+    subsection:    { level: 2, scale: 1.2, bold: true, above: 1.4, below: 0.6, number: true },
+    subsubsection: { level: 3, scale: 1.0, bold: true, above: 1.2, below: 0.5, number: true },
+    paragraph:     { level: 4, scale: 1.0, bold: true, above: 0.9, below: 0, number: false, runIn: true },
+    subparagraph:  { level: 5, scale: 1.0, bold: true, above: 0.8, below: 0, number: false, runIn: true },
+  };
+
+  function save(job) {
+    return {
+      font: { ...job.font }, align: job.align, leftSkip: job.leftSkip,
+      rightSkip: job.rightSkip, parindent: job.parindent,
+      colour: job.colour, upper: job.upper,
+    };
+  }
+  function restore(job, saved) {
+    job.font = { ...saved.font };
+    job.align = saved.align;
+    job.leftSkip = saved.leftSkip;
+    job.rightSkip = saved.rightSkip;
+    job.parindent = saved.parindent;
+    job.colour = saved.colour;
+    job.upper = saved.upper;
+  }
+
+  // ------------------------------------------------------------------ colour
+
+  const NAMED_COLOURS = {
+    black: '0 0 0', white: '1 1 1', red: '1 0 0', green: '0 0.5 0', blue: '0 0 1',
+    cyan: '0 1 1', magenta: '1 0 1', yellow: '1 1 0', gray: '0.5 0.5 0.5',
+    grey: '0.5 0.5 0.5', darkgray: '0.25 0.25 0.25', lightgray: '0.83 0.83 0.83',
+    brown: '0.75 0.5 0.25', lime: '0.75 1 0', olive: '0.5 0.5 0', orange: '1 0.5 0',
+    pink: '1 0.75 0.75', purple: '0.5 0 0.5', teal: '0 0.5 0.5', violet: '0.5 0 1,',
+  };
+
+  /** A colour, as the three numbers a PDF wants. Understands the models a
+   *  paper actually uses: a name, a hex triple, and rgb/RGB/gray/cmyk. */
+  function colourSpec(model, spec) {
+    const numbers = String(spec).split(',').map((part) => Number(part.trim()));
+    const clamp = (value) => Math.max(0, Math.min(1, value)).toFixed(4).replace(/0+$/, '').replace(/\.$/, '');
+    if (model === 'HTML') {
+      const hex = String(spec).trim().replace(/^#/, '');
+      if (!/^[0-9a-fA-F]{6}$/.test(hex)) return null;
+      return [0, 2, 4].map((at) => clamp(parseInt(hex.slice(at, at + 2), 16) / 255)).join(' ');
+    }
+    if (model === 'RGB') return numbers.slice(0, 3).map((n) => clamp(n / 255)).join(' ');
+    if (model === 'rgb') return numbers.slice(0, 3).map(clamp).join(' ');
+    if (model === 'gray' || model === 'grey') return [0, 0, 0].map(() => clamp(numbers[0])).join(' ');
+    if (model === 'cmyk') {
+      const [c, m, y, k] = numbers;
+      return [(1 - c) * (1 - k), (1 - m) * (1 - k), (1 - y) * (1 - k)].map(clamp).join(' ');
+    }
+    return null;
+  }
+
+  const colourNamed = (job, name) => {
+    const key = String(name).trim();
+    if (!key) return null;
+    if (job.colours[key]) return job.colours[key];
+    if (NAMED_COLOURS[key]) return NAMED_COLOURS[key];
+    // `\textcolor[HTML]{F1F5F9}` style, where the name is the value.
+    const direct = colourSpec('HTML', key);
+    if (direct) return direct;
+    say(job, 'warning', `No colour called "${key}" — set in black`, job.line, job.file);
+    return null;
+  };
+
+  /** Tokens back as text with the braces left in, for the arguments that are
+   *  specifications rather than names: a column spec, a \newcolumntype body. */
+  function specText(tokens) {
+    let out = '';
+    for (const tok of tokens || []) {
+      if (tok.t === '{') out += '{';
+      else if (tok.t === '}') out += '}';
+      else out += T.lex.plain([tok]);
+    }
+    return out;
+  }
+
+  function subReader(job, tokens) {
+    return new T.lex.Reader(tokens.concat([{ t: 'eof' }]), job.macros);
+  }
+
+  /** Run a group of tokens with the state put back afterwards. */
+  function inGroup(job, tokens, fn) {
+    const saved = save(job);
+    const reader = subReader(job, tokens);
+    if (fn) fn(reader);
+    else process(job, reader);
+    restore(job, saved);
+  }
+
+  /** The nodes a run of tokens makes, without putting them anywhere. */
+  function collect(job, tokens) {
+    const savedNodes = job.nodes;
+    const savedWord = job.word;
+    job.nodes = [];
+    job.word = null;
+    inGroup(job, tokens);
+    endWord(job);
+    const nodes = job.nodes;
+    job.nodes = savedNodes;
+    job.word = savedWord;
+    return nodes;
+  }
+
+  /** Rows, captured rather than placed. Footnotes and table cells both need
+   *  the paragraph machinery without the page it usually ends on. */
+  function capture(job, fn) {
+    const saved = job.capture;
+    const savedNodes = job.nodes;
+    const savedWord = job.word;
+    const rows = [];
+    job.capture = rows;
+    job.nodes = [];
+    job.word = null;
+    fn();
+    // Anything the callback left unflushed is a last row rather than a leak.
+    endParagraph(job, { indent: 0 });
+    job.capture = saved;
+    job.nodes = savedNodes;
+    job.word = savedWord;
+    return rows;
+  }
+
+  /** Pack nodes into one line, no breaking: a table cell, a caption fragment. */
+  function pack(job, nodes) {
+    const width = nodes.reduce((sum, node) => sum + node.w, 0);
+    const row = lineRow(job, nodes, width, { justify: false, align: 'left', indent: 0 });
+    return { w: width, h: row.above, d: row.below, items: row.items, notes: row.notes };
+  }
+
+  /** A box turned into one that stands on its baseline: the ink measured, and
+   *  everything shifted up so the lowest of it rests on y = 0. */
+  function standing(box) {
+    let top = 0;
+    let bottom = 0;
+    for (const item of box.items) {
+      const up = item.k === 'r' || item.k === 'i' ? (item.h || 0) : (item.s || 0) * 0.75;
+      const down = item.k === 'r' || item.k === 'i' ? 0 : (item.s || 0) * 0.22;
+      top = Math.max(top, item.y + up);
+      bottom = Math.min(bottom, item.y - down);
+    }
+    return {
+      h: top - bottom,
+      d: 0,
+      items: box.items.map((item) => ({ ...item, y: item.y - bottom })),
+    };
+  }
+
+  function stack(rows, gap = 0) {
+    const items = [];
+    let y = 0;
+    let first = true;
+    let height = 0;
+    let width = 0;
+    for (const row of rows) {
+      y -= first ? row.above : row.above + gap;
+      if (first) height = row.above;
+      for (const item of row.items) items.push({ ...item, x: item.x + (row.x || 0), y: item.y + y });
+      width = Math.max(width, row.items.reduce((max, item) => Math.max(max, item.x + (item.w || 0)), 0));
+      y -= row.below;
+      first = false;
+    }
+    return { w: width, h: height, d: -y, items };
+  }
+
+  function mathBox(job, tokens, display) {
+    return T.math.typeset(tokens, job.macros, {
+      display,
+      base: job.font.size,
+      unknown: (name, line, file) => say(job, 'warning', `Unknown command \\${name} in maths`, line, file),
+    });
+  }
+
+  function collectUntil(reader, matches) {
+    const out = [];
+    let depth = 0;
+    for (;;) {
+      const tok = reader.raw();
+      if (tok.t === 'eof') break;
+      if (tok.t === '{') depth += 1;
+      if (tok.t === '}') depth -= 1;
+      if (!depth && matches(tok)) break;
+      out.push(tok);
+    }
+    return out;
+  }
+
+  function number(job, kind) {
+    // An appendix counts in letters, which is the only thing \appendix does
+    // that a reader can see.
+    const top = job.appendix
+      ? String.fromCharCode(64 + Math.max(1, job.counters.section))
+      : String(job.counters.section);
+    if (kind === 'section') return top;
+    if (kind === 'subsection') return `${top}.${job.counters.subsection}`;
+    return `${top}.${job.counters.subsection}.${job.counters.subsubsection}`;
+  }
+
+  // How much bigger than the body a heading is set. A conference class keeps
+  // them close to the text — there is no room in a column for a 14pt heading —
+  // and sets the top level in capitals, which is most of the ACM look.
+  const ACM_SCALE = { part: 1.6, section: 1.15, subsection: 1.05, subsubsection: 1, paragraph: 1, subparagraph: 1 };
+
+  // ------------------------------------------------------------------ pieces
+
+  function heading(job, kind, starred, tokens) {
+    const spec = SECTIONS[kind];
+    endParagraph(job);
+    let label = '';
+    if (spec.number && !starred) {
+      if (kind === 'section') { job.counters.section += 1; job.counters.subsection = 0; job.counters.subsubsection = 0; }
+      if (kind === 'subsection') { job.counters.subsection += 1; job.counters.subsubsection = 0; }
+      if (kind === 'subsubsection') job.counters.subsubsection += 1;
+      label = number(job, kind);
+      job.lastNumber = label;
+    }
+    const title = T.lex.plain(tokens).trim();
+    const entry = { level: spec.level, title, label, page: job.counters.page };
+    if (spec.number && !starred) job.toc.push(entry);
+    job.lastKind = kind;
+
+    vspace(job, spec.above * job.base * (job.klass === 'acm' ? 0.55 : 1));
+    const saved = save(job);
+    job.font.size = job.base * (job.klass === 'acm' ? (ACM_SCALE[kind] || spec.scale) : spec.scale);
+    job.font.bold = spec.bold;
+    job.font.italic = false;
+    job.align = 'left';
+    job.parindent = false;
+    if (job.capsHeadings && kind === 'section') job.upper = true;
+
+    const mark = (pageIndex, y) => {
+      entry.page = job.counters.page;
+      entry.at = { page: pageIndex, y: y + job.font.size };
+      if (!starred) job.outline.push({ title, level: Math.max(1, spec.level), page: pageIndex, x: job.margin, y: y + job.font.size * 1.4 });
+    };
+
+    if (label) { addText(job, label); addGlue(job, { w: job.font.size * 0.5, stretch: 0, shrink: 0, nobreak: true }); }
+    inGroup(job, tokens);
+    if (spec.runIn) {
+      addGlue(job, { w: job.font.size * 0.6, stretch: 0, shrink: 0 });
+      const nodes = job.nodes;
+      job.nodes = [];
+      restore(job, saved);
+      // A run-in heading keeps the paragraph that follows it, so it does not
+      // end here: the next words simply carry on after it.
+      job.nodes = nodes;
+      job.parindent = false;
+      return;
+    }
+    endParagraph(job, { indent: 0, keep: true, mark });
+    restore(job, saved);
+    job.parindent = false;
+    vspace(job, spec.below * job.base * (job.klass === 'acm' ? 0.5 : 1));
+  }
+
+  function displayRow(job, box, { tag = null, gapAbove = 0.9, gapBelow = 0.9, centred = true } = {}) {
+    endParagraph(job);
+    vspace(job, job.base * gapAbove);
+    const x = centred ? Math.max(0, (job.measure - box.w) / 2) : 0;
+    const items = box.items.map((item) => ({ ...item, x: item.x + x }));
+    if (tag) {
+      const size = job.base;
+      const width = M().width(tag, 'rm', size);
+      items.push({ k: 't', x: job.measure - width, y: 0, f: 'rm', s: size, t: tag });
+    }
+    emitRow(job, { items, above: box.h, below: box.d, x: job.leftSkip, lead: 0 });
+    vspace(job, job.base * gapBelow);
+    job.parindent = false;
+  }
+
+  function caption(job, kind, tokens) {
+    // Whatever the float holds has been built by now — the table, the
+    // picture — and the caption is a paragraph under it, not beside it.
+    endParagraph(job);
+    vspace(job, job.base * 0.5);
+    const saved = save(job);
+    job.font.size = job.base * (job.klass === 'acm' ? 0.85 : 0.92);
+    job.align = 'justify';
+    if (job.subKind) {
+      // Inside a subfigure the number is a letter, and the figure it belongs
+      // to has not been numbered yet.
+      job.subCount = (job.subCount || 0) + 1;
+      const letter = alpha(job.subCount);
+      job.lastNumber = `${job.counters[job.subKind] + 1}${letter}`;
+      job.lastKind = job.subKind;
+      job.font.bold = false;
+      addText(job, `(${letter})`);
+      addGlue(job);
+      inGroup(job, tokens);
+      endParagraph(job, { indent: 0 });
+      restore(job, saved);
+      return;
+    }
+    job.counters[kind] += 1;
+    job.subCount = 0;
+    const label = `${kind === 'figure' ? 'Figure' : 'Table'} ${job.counters[kind]}`;
+    job.lastNumber = String(job.counters[kind]);
+    job.lastKind = kind;
+    const saveBold = job.font.bold;
+    job.font.bold = true;
+    addText(job, `${label}:`);
+    job.font.bold = saveBold;
+    addGlue(job);
+    inGroup(job, tokens);
+    endParagraph(job, { indent: 0 });
+    restore(job, saved);
+  }
+
+  // ------------------------------------------------------------------ tables
+
+  const matchBrace = (text, open) => {
+    if (text[open] !== '{') return -1;
+    let depth = 0;
+    for (let i = open; i < text.length; i += 1) {
+      if (text[i] === '{') depth += 1;
+      else if (text[i] === '}') { depth -= 1; if (!depth) return i; }
+    }
+    return -1;
+  };
+
+  /** A column specification, read. A \newcolumntype is substituted before any
+   *  of it is looked at, and a `>{…}` prefix is read for the alignment it sets
+   *  rather than thrown away — that is the whole point of writing one. */
+  function columnSpec(text, job) {
+    let spec = String(text || '');
+    const types = job && job.columnTypes;
+    if (types && types.size) {
+      for (let pass = 0; pass < 4; pass += 1) {
+        let out = '';
+        let i = 0;
+        while (i < spec.length) {
+          const type = types.get(spec[i]);
+          if (!type) { out += spec[i]; i += 1; continue; }
+          i += 1;
+          const args = [];
+          for (let a = 0; a < type.argc; a += 1) {
+            const close = matchBrace(spec, i);
+            if (close === -1) break;
+            args.push(spec.slice(i + 1, close));
+            i = close + 1;
+          }
+          out += type.body.replace(/#(\d)/g, (_, n) => args[Number(n) - 1] || '');
+        }
+        if (out === spec) break;
+        spec = out;
+      }
+    }
+
+    const columns = [];
+    const rules = [];
+    let i = 0;
+    let pending = 0;
+    let decor = '';
+    let guard = 0;
+    while (i < spec.length && guard < 400) {
+      guard += 1;
+      const ch = spec[i];
+      if (ch === '|') { pending += 1; i += 1; continue; }
+      if (ch === ' ') { i += 1; continue; }
+      if (ch === '>' || ch === '<' || ch === '@' || ch === '!') {
+        const open = spec.indexOf('{', i);
+        const close = matchBrace(spec, open);
+        if (ch === '>' && open !== -1 && close !== -1) decor += spec.slice(open + 1, close);
+        i = close === -1 ? spec.length : close + 1;
+        continue;
+      }
+      if (ch === '*') {
+        // *{3}{c} — written out, then read like anything else.
+        const open = spec.indexOf('{', i);
+        const close = matchBrace(spec, open);
+        const open2 = spec.indexOf('{', close);
+        const close2 = matchBrace(spec, open2);
+        if (close === -1 || close2 === -1) { i += 1; continue; }
+        const times = Math.max(0, Math.min(40, Number(spec.slice(open + 1, close)) || 0));
+        spec = spec.slice(0, i) + spec.slice(open2 + 1, close2).repeat(times) + spec.slice(close2 + 1);
+        continue;
+      }
+      const push = (column) => {
+        rules.push(pending);
+        pending = 0;
+        if (/raggedright/.test(decor)) column.ragged = 'left';
+        else if (/centering/.test(decor)) column.ragged = 'center';
+        else if (/raggedleft/.test(decor)) column.ragged = 'right';
+        decor = '';
+        columns.push(column);
+      };
+      if ('lcr'.includes(ch)) { push({ align: ch }); i += 1; continue; }
+      if ('pmbX'.includes(ch)) {
+        const open = spec.indexOf('{', i);
+        const close = matchBrace(spec, open);
+        push({
+          align: 'p',
+          width: open === -1 || close === -1 ? '' : spec.slice(open + 1, close),
+          middle: ch === 'm',
+          foot: ch === 'b',
+        });
+        i = close === -1 ? spec.length : close + 1;
+        continue;
+      }
+      i += 1;
+    }
+    rules.push(pending);
+    return { columns, rules };
+  }
+
+  // How heavy a rule is. booktabs is the reason a table looks like a table
+  // rather than a spreadsheet: three weights and no verticals.
+  const RULES = { hline: 0.4, midrule: 0.45, toprule: 0.8, bottomrule: 0.8 };
+
+  /** A table. Cells are laid out once to be measured and once to be placed,
+   *  because a column is as wide as its widest cell and nothing knows that
+   *  until every cell has been set. A \multicolumn is laid at the width of the
+   *  columns it covers, which is why it is measured after the others. */
+  function tabular(job, spec, body) {
+    const { columns, rules } = columnSpec(spec, job);
+    const pad = job.font.size * 0.55;
+    const rows = [];
+    const hlines = [];
+    let cells = [];
+    let current = [];
+    let rowFill = null;
+
+    const reader = subReader(job, body);
+    for (;;) {
+      const tok = reader.next();
+      if (tok.t === 'eof') break;
+      if (tok.t === '&') { cells.push(current); current = []; continue; }
+      if (tok.t === 'cs' && (tok.v === '\\' || tok.v === 'tabularnewline')) {
+        reader.optional();
+        cells.push(current);
+        rows.push({ cells, fill: rowFill });
+        rowFill = null;
+        cells = [];
+        current = [];
+        continue;
+      }
+      const started = cells.length || current.length;
+      if (tok.t === 'cs' && RULES[tok.v] !== undefined) {
+        hlines.push({ at: rows.length + (started ? 1 : 0), weight: RULES[tok.v] });
+        continue;
+      }
+      if (tok.t === 'cs' && (tok.v === 'cmidrule' || tok.v === 'cline')) {
+        // \cmidrule(lr){2-3} — the trim is parenthesised rather than optional,
+        // so it is read by hand and dropped.
+        reader.optional();
+        if (reader.peekRaw().t === 'char' && reader.peekRaw().v === '(') {
+          for (;;) {
+            const skip = reader.raw();
+            if (skip.t === 'eof' || (skip.t === 'char' && skip.v === ')')) break;
+          }
+        }
+        const range = T.lex.plain(reader.group()).split('-').map((n) => Number(n.trim()));
+        hlines.push({
+          at: rows.length + (started ? 1 : 0),
+          weight: 0.4,
+          from: range[0] || 1,
+          to: range[1] || range[0] || 1,
+        });
+        continue;
+      }
+      if (tok.t === 'cs' && tok.v === 'rowcolor') {
+        reader.optional();
+        rowFill = colourNamed(job, T.lex.plain(reader.group()));
+        continue;
+      }
+      if (tok.t === 'cs' && (tok.v === 'addlinespace' || tok.v === 'morecmidrules')) { reader.optional(); continue; }
+      current.push(tok);
+    }
+    const anything = (tokens) => tokens.some((tok) => tok.t !== 'space' && tok.t !== 'par');
+    if (cells.length || anything(current)) { cells.push(current); rows.push({ cells, fill: rowFill }); }
+
+    /** One cell, with what it says about itself taken off the front. The front
+     *  is not always the first token: a row that begins on a line of its own
+     *  begins with the space that ended the line before it. */
+    const readCell = (tokens) => {
+      const cell = { span: 1, align: null, width: null, fill: null, tokens: [] };
+      const sub = subReader(job, tokens);
+      let fresh = true;
+      for (;;) {
+        const tok = sub.next();
+        if (tok.t === 'eof') break;
+        if (fresh && (tok.t === 'space' || tok.t === 'par')) continue;
+        if (tok.t === 'cs' && tok.v === 'multicolumn' && fresh) {
+          cell.span = Math.max(1, Number(T.lex.plain(sub.group())) || 1);
+          const inner = columnSpec(specText(sub.group()), job).columns[0] || { align: 'l' };
+          cell.align = inner.align === 'p' ? 'l' : inner.align;
+          cell.width = inner.width || null;
+          cell.tokens.push(...sub.group());
+          fresh = false;
+          continue;
+        }
+        if (tok.t === 'cs' && tok.v === 'multirow' && fresh) {
+          // The rows it spans are read and ignored: the text is set in the row
+          // it was written in rather than centred over the ones below it.
+          sub.group();
+          sub.group();
+          cell.tokens.push(...sub.group());
+          fresh = false;
+          continue;
+        }
+        if (tok.t === 'cs' && tok.v === 'cellcolor') {
+          sub.optional();
+          cell.fill = colourNamed(job, T.lex.plain(sub.group()));
+          continue;
+        }
+        cell.tokens.push(tok);
+        fresh = false;
+      }
+      return cell;
+    };
+
+    const grid = rows.map((row) => {
+      const out = row.cells.map(readCell);
+      let at = 0;
+      for (const cell of out) {
+        cell.col = at;
+        at += cell.span;
+        if (!cell.fill && row.fill) cell.fill = row.fill;
+      }
+      return out;
+    });
+
+    const count = Math.max(columns.length, 1, ...grid.map((row) => row.reduce((n, cell) => n + cell.span, 0)));
+    const columnAt = (c) => columns[c] || { align: 'l' };
+    const fixedWidth = (c) => {
+      const column = columnAt(c);
+      return column.align === 'p' ? length(column.width, job, job.measure / count) : null;
+    };
+
+    /** Lay a cell out: at a width if it has one, otherwise as one long line. */
+    const lay = (cell, width, align) => {
+      const saved = save(job);
+      let box;
+      if (width) {
+        const rowsOut = capture(job, () => {
+          const nodes = collect(job, cell.tokens);
+          const lines = breakLines(nodes, width, job);
+          lines.forEach((line, i) => {
+            emitRow(job, lineRow(job, line, width, {
+              justify: !align && i < lines.length - 1,
+              align: align || 'left',
+              indent: 0,
+            }));
+          });
+        });
+        box = stack(rowsOut, job.font.size * 0.25);
+        box.w = width;
+      } else {
+        box = pack(job, collect(job, cell.tokens));
+      }
+      restore(job, saved);
+      return box;
+    };
+
+    // Measured: the plain cells first, because a spanning cell is measured
+    // against what they came to.
+    const widths = new Array(count).fill(0);
+    for (let c = 0; c < count; c += 1) widths[c] = fixedWidth(c) || 0;
+    for (const row of grid) {
+      for (const cell of row) {
+        if (cell.span !== 1) continue;
+        const fixed = cell.width ? length(cell.width, job, null) : fixedWidth(cell.col);
+        cell.box = lay(cell, fixed, cell.align && cell.align !== 'p' ? null : columnAt(cell.col).ragged);
+        if (!fixed) widths[cell.col] = Math.max(widths[cell.col], cell.box.w);
+      }
+    }
+    const gap = pad * 2;
+    const ruleWidth = 0.4;
+    const between = (from, to) => {
+      let sum = 0;
+      for (let c = from; c < to; c += 1) sum += widths[c] + gap;
+      for (let c = from + 1; c < to; c += 1) sum += (rules[c] || 0) * (ruleWidth + 1.5);
+      return sum - gap;
+    };
+    for (const row of grid) {
+      for (const cell of row) {
+        if (cell.span === 1) continue;
+        cell.box = lay(cell, cell.width ? length(cell.width, job, null) : null, cell.align);
+        const room = between(cell.col, cell.col + cell.span);
+        if (cell.box.w > room) {
+          // The spanning cell is wider than the columns under it, so the last
+          // of them grows. TeX would complain; this is what a reader wants.
+          widths[cell.col + cell.span - 1] += cell.box.w - room;
+        }
+      }
+    }
+
+    const xs = [];
+    let x = 0;
+    for (let c = 0; c < count; c += 1) {
+      x += (rules[c] || 0) * (ruleWidth + 1.5);
+      xs.push(x);
+      x += widths[c] + gap;
+    }
+    x += (rules[count] || 0) * (ruleWidth + 1.5);
+    const total = x;
+
+    const fills = [];
+    const items = [];
+    let y = 0;
+    const heights = grid.map((row) => Math.max(job.font.size * 0.75, ...row.map((cell) => cell.box.h)));
+    const depths = grid.map((row) => Math.max(job.font.size * 0.25, ...row.map((cell) => cell.box.d)));
+    const tops = [];
+    grid.forEach((row, r) => {
+      tops.push(y);
+      const top = y;
+      y -= heights[r] + job.font.size * 0.3;
+      row.forEach((cell) => {
+        const room = between(cell.col, cell.col + cell.span);
+        const column = columnAt(cell.col);
+        const align = cell.align || column.align;
+        const left = align === 'r' ? room - cell.box.w
+          : align === 'c' ? (room - cell.box.w) / 2
+          : 0;
+        // A cell shorter than its row sits at the top of it, unless the column
+        // asked for the middle or the foot.
+        const slack = (heights[r] + depths[r]) - (cell.box.h + cell.box.d);
+        const down = column.middle ? slack / 2 : column.foot ? slack : 0;
+        for (const item of cell.box.items) {
+          items.push({ ...item, x: item.x + xs[cell.col] + pad + left, y: item.y + y - down });
+        }
+        if (cell.fill) {
+          const bottom = top - (heights[r] + job.font.size * 0.3 + depths[r] + job.font.size * 0.25);
+          fills.push({
+            k: 'r', c: cell.fill,
+            x: xs[cell.col] - (rules[cell.col] || 0) * (ruleWidth + 1.5),
+            y: bottom,
+            w: room + gap,
+            h: top - bottom,
+          });
+        }
+      });
+      y -= depths[r] + job.font.size * 0.25;
+    });
+    tops.push(y);
+
+    for (const line of hlines) {
+      const where = line.at >= tops.length ? y : tops[line.at];
+      const from = line.from ? xs[line.from - 1] - pad * 0.0 : 0;
+      const to = line.to ? xs[Math.min(count, line.to) - 1] + widths[Math.min(count, line.to) - 1] + gap : total;
+      items.push({ k: 'r', x: from, y: where - line.weight, w: to - from, h: line.weight });
+    }
+    for (let c = 0; c <= count; c += 1) {
+      const many = rules[c] || 0;
+      for (let i = 0; i < many; i += 1) {
+        const at = c === count ? total - (i + 1) * (ruleWidth + 1.5) : xs[c] - (i + 1) * (ruleWidth + 1.5);
+        items.push({ k: 'r', x: at, y, w: ruleWidth, h: -y });
+      }
+    }
+
+    return { w: total, h: 0, d: -y, items: fills.concat(items) };
+  }
+
+  // ------------------------------------------------------------ environments
+
+  function environment(job, name, reader) {
+    const body = () => reader.until(name);
+
+    switch (name) {
+      case 'document':
+        job.started = true;
+        for (const tokens of job.atBegin) inGroup(job, tokens);
+        job.atBegin = [];
+        process(job, reader, (tok) => tok.t === 'cs' && tok.v === 'end');
+        // Whatever follows \end{document} is not part of the document.
+        job.finished = true;
+        return;
+
+      case 'abstract': {
+        if (job.klass === 'acm' && !job.titleDone) {
+          // The class sets the abstract in the first column, under a title
+          // block that has not been read yet, so it is kept rather than set.
+          const saved = save(job);
+          endParagraph(job);
+          job.parindent = false;
+          job.held.abstract = capture(job, () => {
+            inGroup(job, body(), (sub) => { process(job, sub); endParagraph(job, { indent: 0 }); });
+          });
+          restore(job, saved);
+          return;
+        }
+        const saved = save(job);
+        endParagraph(job);
+        vspace(job, job.base * 1.2);
+        job.font.size = job.base * 0.92;
+        job.font.bold = true;
+        job.align = 'center';
+        addText(job, 'Abstract');
+        endParagraph(job, { indent: 0 });
+        restore(job, saved);
+        vspace(job, job.base * 0.4);
+        job.leftSkip += job.measure * 0.08;
+        job.rightSkip += job.measure * 0.08;
+        job.font.size = job.base * 0.92;
+        inGroup(job, body(), (sub) => { process(job, sub); endParagraph(job); });
+        restore(job, saved);
+        vspace(job, job.base * 1.2);
+        job.parindent = false;
+        return;
+      }
+
+      case 'center': case 'flushleft': case 'flushright': {
+        const saved = save(job);
+        endParagraph(job);
+        job.align = name === 'center' ? 'center' : name === 'flushright' ? 'right' : 'left';
+        job.parindent = false;
+        inGroup(job, body(), (sub) => { process(job, sub); endParagraph(job, { indent: 0 }); });
+        restore(job, saved);
+        job.parindent = false;
+        return;
+      }
+
+      case 'quote': case 'quotation': case 'verse': {
+        const saved = save(job);
+        endParagraph(job);
+        vspace(job, job.base * 0.5);
+        job.leftSkip += job.font.size * 2;
+        job.rightSkip += job.font.size * 2;
+        job.parindent = false;
+        inGroup(job, body(), (sub) => { process(job, sub); endParagraph(job, { indent: 0 }); });
+        restore(job, saved);
+        vspace(job, job.base * 0.5);
+        job.parindent = false;
+        return;
+      }
+
+      case 'itemize': case 'enumerate': case 'description': {
+        // enumitem's options, of which two change the page: how far in the
+        // items are, and whether they are set tight.
+        const options = T.lex.plain(reader.optional() || []);
+        const wanted = /leftmargin\s*=\s*([^,\]]+)/.exec(options);
+        const tight = /noitemsep|nosep|itemsep\s*=\s*0/.test(options);
+        const saved = save(job);
+        endParagraph(job);
+        vspace(job, job.base * (tight ? 0.2 : 0.45));
+        job.list.push({ kind: name, count: 0, depth: job.list.length, tight });
+        job.leftSkip += wanted && !/\*/.test(wanted[1])
+          ? length(wanted[1].trim(), job, job.font.size * 2)
+          : job.font.size * 2;
+        job.parindent = false;
+        inGroup(job, body(), (sub) => { process(job, sub); endParagraph(job, { indent: 0, hanging: 0 }); });
+        job.list.pop();
+        restore(job, saved);
+        vspace(job, job.base * (tight ? 0.2 : 0.45));
+        job.parindent = false;
+        return;
+      }
+
+      case 'figure': case 'figure*': case 'table': case 'table*': {
+        const saved = save(job);
+        // The placement — [h!], [tb] — is read and dropped: a float is set
+        // where it was written, except a starred one, which cannot be.
+        reader.optional();
+        endParagraph(job);
+        job.floatKind = name.startsWith('figure') ? 'figure' : 'table';
+        job.parindent = false;
+        if (name.endsWith('*') && job.cols > 1) {
+          job.wide.push(...wideFloat(job, () => body()));
+        } else {
+          vspace(job, job.base * 0.9);
+          inGroup(job, body(), (sub) => { process(job, sub); endParagraph(job, { indent: 0 }); });
+          vspace(job, job.base * 0.9);
+        }
+        job.floatKind = null;
+        restore(job, saved);
+        job.parindent = false;
+        return;
+      }
+
+      // The figure over the title block. It is written before \maketitle and
+      // set by it, so it is captured here and placed there.
+      case 'teaserfigure': {
+        const saved = save(job);
+        endParagraph(job);
+        job.floatKind = 'figure';
+        job.teaser = wideFloat(job, () => body());
+        job.floatKind = null;
+        restore(job, saved);
+        job.parindent = false;
+        return;
+      }
+
+      // The concept list is XML for the ACM's benefit and nobody else's; what
+      // gets set is \ccsdesc.
+      case 'CCSXML': reader.until(name); return;
+
+      case 'tikzpicture': case 'pgfpicture': case 'axis': {
+        reader.until(name);
+        say(job, 'info', `A ${name} was skipped — this engine sets type and does not draw`, job.line, job.file);
+        return;
+      }
+
+      case 'acks': case 'acknowledgments': case 'acknowledgements': {
+        heading(job, 'section', true, T.lex.tokenize('Acknowledgments'));
+        inGroup(job, body(), (sub) => { process(job, sub); endParagraph(job); });
+        job.parindent = false;
+        return;
+      }
+
+      case 'tabular': case 'tabular*': case 'array': case 'tabularx': {
+        if (name === 'tabularx') reader.group();
+        const spec = specText(reader.group());
+        const box = tabular(job, spec, reader.until(name));
+        addBox(job, box);
+        return;
+      }
+
+      case 'equation': case 'equation*': case 'displaymath': case 'gather': case 'gather*': {
+        const tokens = reader.until(name);
+        const starred = name.endsWith('*') || name === 'displaymath';
+        const parts = name.startsWith('gather') ? splitRows(tokens) : [tokens];
+        parts.forEach((part) => {
+          const tagged = !starred && !hasNoTag(part);
+          if (tagged) job.counters.equation += 1;
+          const tag = tagged ? `(${job.counters.equation})` : null;
+          if (tagged) job.lastNumber = String(job.counters.equation);
+          takeLabels(job, part);
+          displayRow(job, mathBox(job, part, true), { tag });
+        });
+        return;
+      }
+
+      case 'align': case 'align*': case 'aligned': case 'eqnarray': case 'eqnarray*': case 'alignat': case 'alignat*': {
+        const starred = name.endsWith('*');
+        if (name === 'alignat' || name === 'alignat*') reader.group();
+        const rows = splitRows(reader.until(name));
+        const left = [];
+        const right = [];
+        rows.forEach((row) => {
+          const at = splitCells(row);
+          left.push(mathBox(job, at[0] || [], true));
+          right.push(mathBox(job, [].concat(...at.slice(1).map((cell, i) => (i ? [{ t: 'space' }, ...cell] : cell))), true));
+        });
+        // The relation the rows align on keeps its thick space, which it would
+        // otherwise lose by being the first thing in its own column.
+        const thick = (job.base * 5) / 18;
+        const axis = Math.max(0, ...left.map((box) => box.w)) + thick;
+        const widest = axis + Math.max(0, ...right.map((box) => box.w));
+        const startX = Math.max(0, (job.measure - widest) / 2);
+        endParagraph(job);
+        vspace(job, job.base * 0.9);
+        rows.forEach((row, i) => {
+          const tagged = !starred && !hasNoTag(row);
+          if (tagged) job.counters.equation += 1;
+          if (tagged) job.lastNumber = String(job.counters.equation);
+          takeLabels(job, row);
+          const items = [];
+          for (const item of left[i].items) items.push({ ...item, x: item.x + startX + (axis - thick - left[i].w) });
+          for (const item of right[i].items) items.push({ ...item, x: item.x + startX + axis });
+          if (tagged) {
+            const tag = `(${job.counters.equation})`;
+            items.push({ k: 't', x: job.measure - M().width(tag, 'rm', job.base), y: 0, f: 'rm', s: job.base, t: tag });
+          }
+          emitRow(job, {
+            items,
+            above: Math.max(left[i].h, right[i].h),
+            below: Math.max(left[i].d, right[i].d),
+            x: job.leftSkip,
+            lead: i ? job.base * 0.35 : 0,
+          });
+        });
+        vspace(job, job.base * 0.9);
+        job.parindent = false;
+        return;
+      }
+
+      case 'thebibliography': {
+        reader.group();
+        const saved = save(job);
+        endParagraph(job);
+        heading(job, 'section', true, T.lex.tokenize('References'));
+        job.font.size = job.base * 0.95;
+        job.inBibliography = true;
+        inGroup(job, reader.until(name), (sub) => { process(job, sub); endParagraph(job, { indent: 0, hanging: job.font.size * 1.6 }); });
+        job.inBibliography = false;
+        restore(job, saved);
+        return;
+      }
+
+      // A box of its own width, set inline — which is what makes two
+      // subfigures separated by \hfill sit next to each other.
+      case 'minipage': case 'subfigure': case 'subtable': case 'subcaptionblock': {
+        reader.optional();
+        const width = length(specText(reader.group()), job, job.measure);
+        const saved = save(job);
+        const wasMeasure = job.measure;
+        const wasSub = job.subKind;
+        if (name !== 'minipage') job.subKind = name === 'subtable' ? 'table' : 'figure';
+        job.measure = width;
+        job.leftSkip = 0;
+        job.rightSkip = 0;
+        job.parindent = false;
+        const rows = capture(job, () => {
+          inGroup(job, body(), (sub) => { process(job, sub); endParagraph(job, { indent: 0 }); });
+        });
+        job.measure = wasMeasure;
+        job.subKind = wasSub;
+        restore(job, saved);
+        // The block sits on the baseline, which is what makes two of them on
+        // one line line up by their feet. How tall it is comes from the ink in
+        // it rather than from the rows, because `stack` reports the first row's
+        // height and this needs all of them.
+        addBox(job, { w: width, ...standing(stack(rows, 0)) });
+        return;
+      }
+
+      case 'small': case 'footnotesize': case 'scriptsize': case 'large': case 'Large': {
+        reader.optional();
+        const saved = save(job);
+        if (SIZES[name]) job.font.size = job.base * SIZES[name];
+        inGroup(job, body(), (sub) => { process(job, sub); endParagraph(job); });
+        restore(job, saved);
+        return;
+      }
+
+      default: {
+        const macro = job.macros.get(`env@${name}`);
+        if (macro) {
+          const saved = save(job);
+          inGroup(job, macro.begin.concat(reader.until(name), macro.end), (sub) => { process(job, sub); endParagraph(job); });
+          restore(job, saved);
+          return;
+        }
+        say(job, 'warning', `Unknown environment "${name}" — its contents were set as ordinary text`, job.line, job.file);
+        inGroup(job, body(), (sub) => { process(job, sub); endParagraph(job); });
+      }
+    }
+  }
+
+  /** Rows for something set at the full width of the page rather than of the
+   *  column it was written in: a starred float, a teaser figure. */
+  function wideFloat(job, tokens) {
+    const saved = save(job);
+    const wasMeasure = job.measure;
+    job.measure = job.textWidth;
+    job.leftSkip = 0;
+    job.rightSkip = 0;
+    job.parindent = false;
+    job.align = 'center';
+    const rows = capture(job, () => {
+      inGroup(job, tokens(), (sub) => { process(job, sub); endParagraph(job, { indent: 0 }); });
+    });
+    job.measure = wasMeasure;
+    restore(job, saved);
+    // A little air under it, so the columns do not start against the caption.
+    rows.push({ items: [], above: job.base * 1.1, below: 0, x: 0 });
+    return rows;
+  }
+
+  const splitRows = (tokens) => {
+    const rows = [[]];
+    let depth = 0;
+    for (const tok of tokens) {
+      if (tok.t === '{') depth += 1;
+      if (tok.t === '}') depth -= 1;
+      if (!depth && tok.t === 'cs' && tok.v === '\\') { rows.push([]); continue; }
+      rows[rows.length - 1].push(tok);
+    }
+    return rows.filter((row) => row.some((tok) => tok.t !== 'space' && tok.t !== 'par'));
+  };
+
+  const splitCells = (tokens) => {
+    const cells = [[]];
+    let depth = 0;
+    for (const tok of tokens) {
+      if (tok.t === '{') depth += 1;
+      if (tok.t === '}') depth -= 1;
+      if (!depth && tok.t === '&') { cells.push([]); continue; }
+      cells[cells.length - 1].push(tok);
+    }
+    return cells;
+  };
+
+  const hasNoTag = (tokens) => tokens.some((tok) => tok.t === 'cs' && (tok.v === 'nonumber' || tok.v === 'notag'));
+
+  /** A \label inside a display belongs to the number that display just got. */
+  function takeLabels(job, tokens) {
+    tokens.forEach((tok, i) => {
+      if (tok.t !== 'cs' || tok.v !== 'label') return;
+      const rest = tokens.slice(i + 1);
+      const reader = subReader(job, rest);
+      const key = T.lex.plain(reader.group());
+      if (key) job.labels[key] = { number: job.lastNumber || '', page: job.counters.page, kind: job.lastKind || 'equation' };
+    });
+  }
+
+  // --------------------------------------------------------------- the loop
+
+  function process(job, reader, stop) {
+    for (;;) {
+      if (job.finished) break;
+      const tok = reader.next();
+      if (tok.t === 'eof') break;
+      if (stop && stop(tok)) { reader.back(tok); break; }
+      if (tok.file) {
+        job.file = tok.file;
+        job.line = tok.line || job.line;
+        // Which page the engine was filling when it read this line, so the
+        // preview can follow the caret. First mention wins: that is where the
+        // line began to matter.
+        if (job.page && !job.capture) {
+          const seen = job.lineMap[job.file] || (job.lineMap[job.file] = {});
+          if (seen[job.line] === undefined) seen[job.line] = job.pageIndex;
+        }
+      }
+      step(job, reader, tok);
+    }
+  }
+
+  function step(job, reader, tok) {
+    switch (tok.t) {
+      case 'space': addGlue(job); return;
+      case 'par': endParagraph(job); return;
+      case '~': addGlue(job, { nobreak: true, stretch: 0 }); return;
+      case '&': addText(job, '&'); return;
+      case 'verb': {
+        const saved = job.font.family;
+        job.font.family = 'tt';
+        addText(job, tok.v);
+        job.font.family = saved;
+        return;
+      }
+      case 'raw': {
+        verbatim(job, tok.v.body);
+        return;
+      }
+      case '{': {
+        const saved = save(job);
+        job.groups = job.groups || [];
+        job.groups.push(saved);
+        return;
+      }
+      case '}': {
+        if (job.groups && job.groups.length) restore(job, job.groups.pop());
+        return;
+      }
+      case '$': {
+        const tokens = collectUntil(reader, (t) => t.t === '$');
+        addBox(job, mathBox(job, tokens, false));
+        return;
+      }
+      case '$$': {
+        const tokens = collectUntil(reader, (t) => t.t === '$$');
+        displayRow(job, mathBox(job, tokens, true), {});
+        return;
+      }
+      case '^': case '_': {
+        const which = tok.t;
+        const arg = reader.group();
+        const saved = job.font.size;
+        job.font.size *= 0.7;
+        const rise = which === '^' ? saved * 0.42 : -saved * 0.18;
+        const runs = collect(job, arg);
+        job.font.size = saved;
+        for (const node of runs) {
+          if (node.k !== 'word') continue;
+          for (const run of node.runs) addRun(job, run.t, run.f, run.s, { rise });
+        }
+        return;
+      }
+      case 'char': {
+        character(job, reader, tok.v);
+        return;
+      }
+      case 'cs':
+        command(job, reader, tok);
+        return;
+      default:
+    }
+  }
+
+  function character(job, reader, ch) {
+    if (ch === '-') {
+      let count = 1;
+      for (;;) {
+        const next = reader.peek();
+        if (next.t === 'char' && next.v === '-' && count < 3) { reader.next(); count += 1; continue; }
+        break;
+      }
+      addText(job, count === 1 ? '-' : count === 2 ? '–' : '—');
+      return;
+    }
+    if (ch === '`' || ch === "'") {
+      const next = reader.peek();
+      const double = next.t === 'char' && next.v === ch;
+      if (double) reader.next();
+      addText(job, ch === '`' ? (double ? '“' : '‘') : (double ? '”' : '’'));
+      return;
+    }
+    if (ch === '<' || ch === '>') { addText(job, ch); return; }
+    addText(job, ch);
+  }
+
+  function verbatim(job, text) {
+    const saved = save(job);
+    endParagraph(job);
+    vspace(job, job.base * 0.5);
+    job.font.family = 'tt';
+    job.font.size = job.base * 0.85;
+    job.align = 'left';
+    for (const line of String(text).split('\n')) {
+      const nodes = [];
+      job.nodes = nodes;
+      job.word = null;
+      addText(job, line.replace(/\t/g, '  ') || ' ');
+      endWord(job);
+      job.nodes = [];
+      const row = lineRow(job, nodes, job.measure, { justify: false, align: 'left', indent: 0 });
+      row.x = job.leftSkip;
+      emitRow(job, row);
+    }
+    restore(job, saved);
+    vspace(job, job.base * 0.5);
+    job.parindent = false;
+  }
+
+  function itemMark(job) {
+    const list = job.list[job.list.length - 1];
+    if (!list) return '';
+    list.count += 1;
+    if (list.kind === 'itemize') return ITEM_MARKS[Math.min(ITEM_MARKS.length - 1, list.depth)];
+    if (list.kind === 'description') return '';
+    const depth = list.depth;
+    if (depth === 0) return `${list.count}.`;
+    if (depth === 1) return `(${alpha(list.count)})`;
+    if (depth === 2) return `${roman(list.count)}.`;
+    return `${alpha(list.count).toUpperCase()}.`;
+  }
+
+  function footnote(job, tokens) {
+    job.counters.footnote += 1;
+    const mark = String(job.counters.footnote);
+    // The mark rides on the word it follows, so it cannot be left at the end
+    // of a line on its own — and so the note travels to whatever page that
+    // word lands on.
+    addRun(job, mark, fontKey(job), job.font.size * 0.72, { rise: job.font.size * 0.38 });
+    const word = ensureWord(job);
+
+    const savedNodes = job.nodes;
+    const savedWord = job.word;
+    const saved = save(job);
+    job.nodes = [];
+    job.word = null;
+    job.font.size = job.base * 0.8;
+    job.align = 'justify';
+    const rows = capture(job, () => {
+      addRun(job, mark, 'rm', job.base * 0.6, { rise: job.base * 0.3 });
+      addGlue(job, { w: job.base * 0.2, stretch: 0 });
+      inGroup(job, tokens);
+      endParagraph(job, { indent: 0 });
+    });
+    restore(job, saved);
+    job.nodes = savedNodes;
+    job.word = savedWord;
+    word.notes = (word.notes || []).concat([rows]);
+  }
+
+  function graphic(job, options, name) {
+    const image = job.images[name] || job.images[`${name}.png`] || job.images[`${name}.jpg`] || job.images[`${name}.jpeg`];
+    if (!image) {
+      say(job, 'warning', `No image called "${name}" in this project`, job.line, job.file);
+      const w = Math.min(job.measure * 0.5, 180);
+      const h = w * 0.62;
+      addBox(job, {
+        w, h, d: 0,
+        items: [
+          { k: 'r', x: 0, y: 0, w, h: 0.5 }, { k: 'r', x: 0, y: h, w, h: 0.5 },
+          { k: 'r', x: 0, y: 0, w: 0.5, h }, { k: 'r', x: w, y: 0, w: 0.5, h },
+          { k: 't', x: 8, y: h / 2, f: 'rm', s: job.base * 0.8, t: `[${name}]` },
+        ],
+      });
+      return;
+    }
+    const opts = {};
+    for (const pair of T.lex.plain(options || []).split(',')) {
+      const [key, value] = pair.split('=');
+      if (key && value !== undefined) opts[key.trim()] = value.trim();
+    }
+    let w = image.width;
+    let h = image.height;
+    if (opts.width) { const want = length(opts.width, job, w); h = h * (want / w); w = want; }
+    if (opts.height) { const want = length(opts.height, job, h); w = w * (want / h); h = want; }
+    if (opts.scale) { w *= Number(opts.scale); h *= Number(opts.scale); }
+    if (w > job.measure) { h *= job.measure / w; w = job.measure; }
+    job.doc.image(image.id, image);
+    addBox(job, { w, h, d: 0, items: [{ k: 'i', x: 0, y: 0, w, h, img: image.id }] });
+  }
+
+  function reference(job, key, kind) {
+    const found = job.refs[key];
+    if (!found) {
+      say(job, 'warning', `Reference "${key}" was never defined`, job.line, job.file);
+      addText(job, '??');
+      return;
+    }
+    addText(job, kind === 'page' ? String(found.page) : String(found.number || '??'));
+  }
+
+  function cite(job, keys) {
+    const numbers = keys.split(',').map((key) => {
+      const trimmed = key.trim();
+      const found = job.bib[trimmed];
+      if (!found) {
+        say(job, 'warning', `Citation "${trimmed}" was never defined`, job.line, job.file);
+        return '?';
+      }
+      return String(found.number);
+    });
+    addText(job, `[${numbers.join(', ')}]`);
+  }
+
+  function link(job, url, tokens) {
+    const saved = save(job);
+    if (!tokens) {
+      // A bare \url is set in the typewriter face, as hyperref does it.
+      job.font.family = 'tt';
+      job.font.size *= 0.95;
+      addRun(job, url, fontKey(job), job.font.size, { link: { url } });
+      restore(job, saved);
+      return;
+    }
+    for (const node of collect(job, tokens)) {
+      if (node.k !== 'word') { job.nodes.push(node); continue; }
+      for (const run of node.runs) addRun(job, run.t, run.f, run.s, { rise: run.rise, link: { url } });
+      endWord(job);
+    }
+    restore(job, saved);
+  }
