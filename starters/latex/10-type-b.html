@@ -202,10 +202,18 @@
     return `${top}.${job.counters.subsection}.${job.counters.subsubsection}`;
   }
 
-  // How much bigger than the body a heading is set. A conference class keeps
-  // them close to the text — there is no room in a column for a 14pt heading —
-  // and sets the top level in capitals, which is most of the ACM look.
-  const ACM_SCALE = { part: 1.6, section: 1.15, subsection: 1.05, subsubsection: 1, paragraph: 1, subparagraph: 1 };
+  // What acmart's heading hooks come to, in multiples of the body size on the
+  // amsart ladder. \@secfont and \@subsecfont are the same size — the class
+  // really does set them both \Large — and the difference between a section
+  // and a subsection is the number in front of it.
+  const ACM_HEADS = {
+    part:          { scale: 20 / 9, bold: true, italic: false, sans: false },
+    section:       { scale: 12 / 9, bold: true, italic: false, sans: false },
+    subsection:    { scale: 12 / 9, bold: true, italic: false, sans: false },
+    subsubsection: { scale: 1, bold: false, italic: true, sans: true },
+    paragraph:     { scale: 1, bold: false, italic: true, sans: false },
+    subparagraph:  { scale: 1, bold: false, italic: true, sans: false },
+  };
 
   // ------------------------------------------------------------------ pieces
 
@@ -225,14 +233,20 @@
     if (spec.number && !starred) job.toc.push(entry);
     job.lastKind = kind;
 
-    vspace(job, spec.above * job.base * (job.klass === 'acm' ? 0.55 : 1));
+    // \@startsection asks for .75 of a baseline above and .25 below.
+    vspace(job, job.klass === 'acm' ? job.base * 0.75 : spec.above * job.base);
     const saved = save(job);
-    job.font.size = job.base * (job.klass === 'acm' ? (ACM_SCALE[kind] || spec.scale) : spec.scale);
-    job.font.bold = spec.bold;
-    job.font.italic = false;
+    const acm = job.klass === 'acm' ? ACM_HEADS[kind] : null;
+    job.font.size = job.base * (acm ? acm.scale : spec.scale);
+    job.font.bold = acm ? acm.bold : spec.bold;
+    job.font.italic = acm ? acm.italic : false;
+    // \@subsubsecfont is sans in every format; \@secfont is sans in every
+    // format except the ones that override it, which sigconf does.
+    const runIn = kind === 'paragraph' || kind === 'subparagraph';
+    if (acm && (acm.sans || (job.headingFamily === 'sf' && !runIn))) job.font.family = 'sf';
+    // \section@raggedright: a heading is set ragged, never justified.
     job.align = 'left';
     job.parindent = false;
-    if (job.capsHeadings && kind === 'section') job.upper = true;
 
     const mark = (pageIndex, y) => {
       entry.page = job.counters.page;
@@ -256,7 +270,7 @@
     endParagraph(job, { indent: 0, keep: true, mark });
     restore(job, saved);
     job.parindent = false;
-    vspace(job, spec.below * job.base * (job.klass === 'acm' ? 0.5 : 1));
+    vspace(job, job.klass === 'acm' ? job.base * 0.25 : spec.below * job.base);
   }
 
   function displayRow(job, box, { tag = null, gapAbove = 0.9, gapBelow = 0.9, centred = true } = {}) {
@@ -280,7 +294,8 @@
     endParagraph(job);
     vspace(job, job.base * 0.5);
     const saved = save(job);
-    job.font.size = job.base * (job.klass === 'acm' ? 0.85 : 0.92);
+    job.font.size = job.base * (job.klass === 'acm' ? 1 : 0.92);
+    if (job.klass === 'acm') job.font.bold = true;
     job.align = 'justify';
     if (job.subKind) {
       // Inside a subfigure the number is a letter, and the figure it belongs

@@ -8,6 +8,7 @@ import fsp from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 
+
 test('seven starters, each with a blurb somebody could choose from', () => {
   assert.deepEqual(list().map((s) => s.id), ['doc', 'sheet', 'slides', 'board', 'canvas', 'paper', 'latex']);
   for (const starter of list()) {
@@ -78,11 +79,19 @@ test('a starter built from a folder of parts includes every one of them', async 
     assert.ok(latex.includes(marker), `the latex starter is missing ${marker}`);
   }
   assert.ok(!paper.includes('<!-- include:'), 'every include was expanded');
+  assert.ok(!paper.includes('<!-- file:'), 'every carried file was read in');
 
   // And the project really is different.
   assert.ok(paper.includes('sigconf'), 'the paper is set in the conference format');
   assert.ok(paper.includes('Source/Files/1-Introduction.tex'), 'the paper has folders');
   assert.ok(!latex.includes('Source/Files/1-Introduction.tex'), 'the latex starter does not');
+
+  // The class and the bibliography style travel with the paper, as files in it
+  // rather than as a dependency on anything here.
+  assert.match(paper, /data-kind="cls"[\s\S]*?ProvidesClass\{acmart\}/, 'acmart.cls is a file in the project');
+  assert.match(paper, /data-kind="bst"/, 'the bibliography style is too');
+  assert.ok(paper.length > 400_000, `the paper carries them: ${paper.length} bytes`);
+  assert.ok(!latex.includes('ProvidesClass'), 'the latex starter carries neither');
 });
 
 test('a heavy document goes out to blobs and comes back byte-identical', async () => {

@@ -134,7 +134,9 @@
       return;
     }
     if (GLYPHS[name] !== undefined) { addText(job, GLYPHS[name]); return; }
-    if (SIZES[name] !== undefined) { job.font.size = job.base * SIZES[name]; return; }
+    // acmart loads amsart, whose size ladder is not the article one.
+    const sizes = job.klass === 'acm' ? AMS_SIZES : SIZES;
+    if (sizes[name] !== undefined) { job.font.size = job.base * sizes[name]; return; }
 
     switch (name) {
       // ---- the preamble

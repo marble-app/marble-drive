@@ -19,6 +19,12 @@
 // part may say `<!-- include: ../latex/05-metrics.html -->` and get one. This
 // is a build convenience and nothing more — what leaves here is a single file
 // either way, and the seams are gone from it.
+//
+// A part may also say `<!-- file: vendor/acmart.cls as Source/acmart.cls -->`,
+// which turns a file on disk into a file in the project the starter carries.
+// That is for the ones nobody here wrote: a document class, a bibliography
+// style. They stay whole files in git so a new release can be dropped in, and
+// they arrive in the document as text somebody can read.
 
 import crypto from 'node:crypto';
 import fsp from 'node:fs/promises';
@@ -176,11 +182,45 @@ export const list = () =>
 // between a `test` and a `matchAll`, and the cost of that is one include
 // silently dropped per file — which is a missing <!doctype html>, not an error.
 const include = () => /^[ \t]*<!--[ \t]*include:[ \t]*([\w./-]+)[ \t]*-->[ \t]*\n?/gm;
+const carry = () => /^[ \t]*<!--[ \t]*file:[ \t]*([\w./-]+)[ \t]+as[ \t]+([\w./ -]+?)[ \t]*-->[ \t]*\n?/gm;
+
+const KINDS = { '.cls': 'cls', '.bst': 'bst', '.tex': 'tex', '.bib': 'bib', '.sty': 'cls' };
+const escape = (text) => text.replace(/[&<>]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;' }[c]));
+
+/** A file on disk, as a file in the project the starter carries. */
+function carried(name, body) {
+  const kind = KINDS[path.extname(name).toLowerCase()] || 'tex';
+  const key = `f${crypto.createHash('sha256').update(name).digest('hex').slice(0, 6)}`;
+  return (
+    `        <section class="file" data-marble-id="__ID__" data-key="${key}" data-kind="${kind}">\n` +
+    `          <header class="fhead" data-marble-id="__ID__">\n` +
+    `            <h3 class="fname" data-marble-id="__ID__" data-marble-editable>${escape(name)}</h3>\n` +
+    `            <span class="fmeta" data-marble-transient></span>\n` +
+    `          </header>\n` +
+    `          <div class="codewrap" data-marble-id="__ID__">\n` +
+    `            <div class="codebox" data-marble-id="__ID__">\n` +
+    `              <pre class="hl" data-marble-transient aria-hidden="true"></pre>\n` +
+    `              <pre class="src" data-marble-id="__ID__" data-marble-code>${escape(body)}</pre>\n` +
+    `            </div>\n` +
+    `          </div>\n` +
+    `        </section>\n\n`
+  );
+}
 
 /** A part, with its includes pulled in. Depth-limited rather than
  *  cycle-detected: a part that includes itself is a mistake, and "too deep" is
  *  the same complaint said sooner. */
 async function expand(text, from, depth = 0) {
+  const carrying = [...text.matchAll(carry())];
+  if (carrying.length) {
+    const bodies = new Map(
+      await Promise.all(
+        carrying.map(async (match) => [match[1], await read(match[1], from)]),
+      ),
+    );
+    text = text.replace(carry(), (_, file, name) => carried(name.trim(), bodies.get(file)));
+  }
+
   const wanted = [...text.matchAll(include())].map((match) => match[1]);
   if (!wanted.length) return text;
   if (depth > 4) throw new Error(`starter parts include each other more than four deep, at ${from}`);
@@ -189,17 +229,23 @@ async function expand(text, from, depth = 0) {
     await Promise.all(
       wanted.map(async (relative) => {
         const file = path.resolve(from, relative);
-        if (!file.startsWith(path.join(REPO, 'starters') + path.sep)) {
-          throw new Error(`a starter part may only include from starters/, not ${relative}`);
-        }
-        const body = await fsp.readFile(file, 'utf8').catch(() => {
-          throw new Error(`no starter part ${relative}, included from ${from}`);
-        });
+        const body = await read(relative, from);
         return [relative, await expand(body, path.dirname(file), depth + 1)];
       }),
     ),
   );
   return text.replace(include(), (_, relative) => bodies.get(relative));
+}
+
+/** A file a part named, read from inside `starters/` and nowhere else. */
+async function read(relative, from) {
+  const file = path.resolve(from, relative);
+  if (!file.startsWith(path.join(REPO, 'starters') + path.sep)) {
+    throw new Error(`a starter part may only name a file under starters/, not ${relative}`);
+  }
+  return fsp.readFile(file, 'utf8').catch(() => {
+    throw new Error(`no file ${relative}, named from ${from}`);
+  });
 }
 
 /** The markup for a starter: one file, or a folder of parts in name order. */

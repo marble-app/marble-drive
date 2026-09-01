@@ -11,17 +11,37 @@
   // the thing you actually write in. Switching between them is switching one
   // option in \documentclass, which is why the room has a button for it.
 
+  // The numbers below are acmart's own, read out of the class file rather than
+  // guessed at: the \geometry{} call for each format, and the \@titlefont,
+  // \@authorfont, \@secfont hooks it sets beside it. Where this engine cannot
+  // do what the class asks — Libertine, which is not one of the fourteen fonts
+  // a PDF reader is required to have — it does the nearest thing and says so.
+  //
+  // A size here is a multiple of the body size, on the ladder amsart uses at
+  // 9pt: 9, 10, 12, 14, 17, 20. acmart loads amsart, which is why the ladder is
+  // not the 1.2-per-step one an article uses.
+  const AMS_SIZES = {
+    tiny: 5 / 9, scriptsize: 6 / 9, footnotesize: 7 / 9, small: 8 / 9,
+    normalsize: 1, large: 10 / 9, Large: 12 / 9, LARGE: 14 / 9,
+    huge: 17 / 9, Huge: 20 / 9,
+  };
+
   const ACM_FORMATS = {
-    // Two columns of 9pt on letter paper: 0.75in margins, a third of an inch
-    // between the columns, which comes out at the 241pt column acmart sets.
-    sigconf:    { cols: 2, base: 9, margin: 54, top: 54, bottom: 72, gap: 24, caps: true },
-    sigchi:     { cols: 2, base: 9, margin: 54, top: 54, bottom: 72, gap: 24, caps: true },
-    sigplan:    { cols: 2, base: 9, margin: 54, top: 54, bottom: 72, gap: 24, caps: false },
-    acmtog:     { cols: 2, base: 9, margin: 54, top: 54, bottom: 72, gap: 24, caps: false },
+    // sigconf: letter paper, columnsep 2pc, top 57pt, bottom 73pt, sides 54pt.
+    // The title is \Huge sans bold, the authors \LARGE serif — not bold, and
+    // not sans, because sigconf overrides the class default for both.
+    sigconf:    { cols: 2, base: 9, margin: 54, top: 57, bottom: 73, gap: 24, headings: 'serif' },
+    siggraph:   { cols: 2, base: 9, margin: 54, top: 57, bottom: 73, gap: 24, headings: 'sans' },
+    sigchi:     { cols: 2, base: 9, margin: 54, top: 66, bottom: 73, gap: 24, headings: 'sans' },
+    sigplan:    { cols: 2, base: 9, margin: 54, top: 72, bottom: 72, gap: 24, headings: 'serif' },
+    acmtog:     { cols: 2, base: 9, margin: 52, top: 52, bottom: 75, gap: 24, headings: 'sans' },
+    acmengage:  { cols: 2, base: 9, margin: 54, top: 57, bottom: 73, gap: 24, headings: 'serif' },
     // One column. What a reviewer reads, and what a draft is easier to write in.
-    manuscript: { cols: 1, base: 10, margin: 90, top: 72, bottom: 72, gap: 0, caps: false },
-    acmsmall:   { cols: 1, base: 10, margin: 90, top: 72, bottom: 72, gap: 0, caps: false },
-    acmlarge:   { cols: 1, base: 10, margin: 76, top: 72, bottom: 72, gap: 0, caps: false },
+    // manuscript takes geometry's own margins, which come out near an inch and
+    // a half on letter paper.
+    manuscript: { cols: 1, base: 10, margin: 90, top: 72, bottom: 72, gap: 0, headings: 'sans' },
+    acmsmall:   { cols: 1, base: 10, margin: 46, top: 58, bottom: 44, gap: 0, paper: [486, 720], headings: 'sans' },
+    acmlarge:   { cols: 1, base: 10, margin: 81, top: 78, bottom: 114, gap: 0, headings: 'sans' },
   };
 
   const CC_KINDS = {
@@ -57,7 +77,12 @@
     job.marginBottom = format.bottom;
     job.cols = format.cols;
     job.colGap = format.gap;
-    job.capsHeadings = format.caps;
+    job.headingFamily = format.headings === 'sans' ? 'sf' : 'rm';
+    if (format.paper) [job.W, job.H] = format.paper;
+    // \setlength\parindent{10\p@}, and it does not scale with the body size.
+    job.parIndent = 10;
+    // \def\footnoterule{... \hrule \@width 4pc ...}
+    job.noteRule = 48;
     layout(job);
     return true;
   }
@@ -109,12 +134,13 @@
     job.align = 'center';
     job.parindent = false;
     const rows = capture(job, () => {
-      job.font.size = job.base * 1.15;
-      job.font.bold = true;
+      // \@authorfont for sigconf is \LARGE, with no weight and no family
+      // change: 14pt of the body face at a 9pt body.
+      job.font.size = job.base * AMS_SIZES.LARGE;
       inGroup(job, author.name);
       endParagraph(job, { indent: 0 });
-      job.font.bold = false;
-      job.font.size = job.base * 0.95;
+      // \@affiliationfont is \large.
+      job.font.size = job.base * AMS_SIZES.large;
       for (const lines of author.affils) {
         for (const line of lines) {
           prose(job, line);
@@ -166,18 +192,10 @@
 
   // -------------------------------------------------------- the front matter
 
+  /** \@mkabstract sets the abstract's heading with \section*, so it is a
+   *  section heading and gets whatever the class says one looks like. */
   function frontHeading(job, text) {
-    const saved = save(job);
-    vspace(job, job.base * 0.9);
-    job.font.bold = true;
-    job.font.size = job.base * 1.05;
-    job.align = 'left';
-    job.parindent = false;
-    prose(job, job.capsHeadings ? text.toUpperCase() : text);
-    endParagraph(job, { indent: 0, keep: true });
-    restore(job, saved);
-    vspace(job, job.base * 0.25);
-    job.parindent = false;
+    heading(job, 'section', true, T.lex.tokenize(text));
   }
 
   /** A run-in bold label and then a paragraph — how the class sets the CCS
@@ -238,7 +256,8 @@
     const conference = acm.conference || {};
     const rows = capture(job, () => {
       const saved = save(job);
-      job.font.size = job.base * 0.72;
+      // The permission block is a footnote, so it is set at footnote size.
+      job.font.size = job.base * AMS_SIZES.footnotesize;
       job.align = 'justify';
       job.parindent = false;
       job.leftSkip = 0;
@@ -302,8 +321,9 @@
     });
 
     if (!rows.length) return;
-    const height = rows.reduce((sum, row) => sum + row.above + row.below, 0) + job.base * 1.4;
-    job.bottomBlock = { page: Math.max(0, job.pageIndex), col: 0, rows, height };
+    const tall = rows.reduce((sum, row) => sum + row.above + row.below, 0);
+    const gap = job.base * 1.9;
+    job.bottomBlock = { page: Math.max(0, job.pageIndex), col: 0, rows, tall, gap, height: tall + gap };
   }
 
   /** The title block: full width, then the columns start under it. */
@@ -316,19 +336,24 @@
     job.leftSkip = 0;
     job.rightSkip = 0;
 
-    job.font.size = job.base * 1.95;
+    // \@titlefont for sigconf is \Huge\sffamily\bfseries. Helvetica Bold is
+    // not Libertine Sans Bold, but it is sans and it is bold, which is what the
+    // page is telling you.
+    job.font.size = job.base * AMS_SIZES.Huge;
+    job.font.family = 'sf';
     job.font.bold = true;
     inGroup(job, job.titleTokens || []);
     endParagraph(job, { indent: 0 });
     job.font.bold = false;
+    job.font.family = 'rm';
 
     if (job.subtitleTokens) {
       vspace(job, job.base * 0.4);
-      job.font.size = job.base * 1.3;
-      job.font.italic = true;
+      job.font.size = job.base * AMS_SIZES.Large;
+      job.font.family = 'sf';
       inGroup(job, job.subtitleTokens);
       endParagraph(job, { indent: 0 });
-      job.font.italic = false;
+      job.font.family = 'rm';
     }
 
     job.font.size = job.base;

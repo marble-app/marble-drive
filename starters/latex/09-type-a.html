@@ -288,7 +288,10 @@
       const floor = job.marginBottom + (onBlockPage && col === block.col ? block.height : 0);
       const top = floor + job.colNoteHeight[col];
       let y = top - job.base * 1.1;
-      job.page.items.push({ k: 'r', x: columnX(job, col), y: top - job.base * 0.5, w: job.colWidth * 0.4, h: 0.4 });
+      job.page.items.push({
+        k: 'r', x: columnX(job, col), y: top - job.base * 0.5,
+        w: Math.min(job.colWidth, job.noteRule || job.colWidth * 0.4), h: 0.4,
+      });
       for (const note of notes) {
         for (const row of note) {
           y -= row.above;
@@ -301,11 +304,16 @@
     });
 
     if (onBlockPage) {
-      let y = job.marginBottom + block.height;
+      // The strip the column reserved is `height`; the block sits at the foot
+      // of it and the gap is above, which is where the reader needs it. The
+      // rule is the class's own: the width of the column.
+      const left = columnX(job, block.col);
+      let y = job.marginBottom + (block.tall === undefined ? block.height : block.tall);
+      job.page.items.push({ k: 'r', x: left, y: y + (block.gap || 0) * 0.42, w: job.colWidth, h: 0.4 });
       for (const row of block.rows) {
         y -= row.above;
         for (const item of row.items) {
-          job.page.items.push({ ...item, x: item.x + columnX(job, block.col) + (row.x || 0), y: item.y + y });
+          job.page.items.push({ ...item, x: item.x + left + (row.x || 0), y: item.y + y });
         }
         y -= row.below;
       }
@@ -575,7 +583,7 @@
 
     const measure = job.measure - job.leftSkip - job.rightSkip;
     const indent = options.indent === undefined
-      ? (job.parindent && job.align === 'justify' ? job.font.size * 1.5 : 0)
+      ? (job.parindent && job.align === 'justify' ? (job.parIndent || job.font.size * 1.5) : 0)
       : options.indent;
     const hanging = options.hanging || 0;
 

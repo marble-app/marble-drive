@@ -16,6 +16,14 @@
 %% The button marked "2 col" in the bar rewrites the option below: sigconf is
 %% the two-column proceedings format, manuscript is the one-column draft one.
 %% Nothing else in the project changes when you switch.
+%%
+%% Source/acmart.cls and Source/ACM-Reference-Format.bst are in this project so
+%% that it is a whole project: download it, put it in front of latexmk or paste
+%% it into Overleaf, and it builds there. The engine in this document does not
+%% read them -- there is no TeX in here to run a class file -- it implements
+%% acmart in JavaScript, from the same geometry and the same font hooks. So the
+%% two files are the reference, and the place to look when this preview and a
+%% real build disagree.
 
 \documentclass[sigconf]{acmart}
 
@@ -436,6 +444,14 @@ the coding scheme and the questionnaire here.
             </div>
           </div>
         </section>
+
+<!-- The class and the bibliography style, so the project is a whole project:
+     download it, put it in front of latexmk or Overleaf, and it builds. The
+     engine in this document implements acmart rather than reading it — there is
+     no TeX in here to run a .cls — so these are for everywhere else, and for
+     looking things up. -->
+<!-- file: vendor/acmart.cls as Source/acmart.cls -->
+<!-- file: vendor/ACM-Reference-Format.bst as Source/ACM-Reference-Format.bst -->
 
         <section class="file" data-marble-id="__ID__" data-key="figs" data-kind="dir">
           <header class="fhead" data-marble-id="__ID__">

@@ -57,14 +57,21 @@
   let caretLine = 0;
   let renaming = null;
   const wired = new WeakSet();
+  const painted = new WeakSet();
 
   // --------------------------------------------------------------- the file
 
   /** The project as the engine wants it: names, kinds and text. The main file
    *  is the one that says \documentclass, because that is what makes it main. */
+  // What the engine is handed. A folder has no source; a document class and a
+  // bibliography style have source it cannot run — this engine implements
+  // acmart rather than interpreting it, so handing it 3,600 lines of TeX to
+  // scan for citations would only find phantoms.
+  const COMPILED = { tex: true, bib: true, img: true };
+
   function project() {
     const files = sections()
-      .filter((section) => !isDir(section))
+      .filter((section) => COMPILED[kindOf(section)])
       .map((section) => ({ name: nameOf(section), kind: kindOf(section), text: textOf(section) }));
     const tex = files.filter((file) => file.kind === 'tex');
     const main =
@@ -196,8 +203,12 @@
     const layer = box && box.querySelector('.hl');
     if (!layer) return;
     const lines = pre.textContent.split('\n');
+    // A bibliography style is not LaTeX and a class file is more of it than
+    // this colouring was written for, so those get the gutter and nothing else.
+    const section = pre.closest('.file');
+    const lit = section && COMPILED[kindOf(section)];
     layer.innerHTML = lines
-      .map((line, i) => `<span class="ln"><i class="n">${i + 1}</i>${colour(line)}</span>`)
+      .map((line, i) => `<span class="ln"><i class="n">${i + 1}</i>${lit ? colour(line) : esc(line)}</span>`)
       .join('');
     const meta = pre.closest('.file')?.querySelector('.fmeta');
     if (meta) meta.textContent = `${lines.length} line${lines.length === 1 ? '' : 's'}`;
@@ -279,6 +290,7 @@
 
     pre.addEventListener('input', () => {
       flatten(pre);
+      painted.add(pre);
       paint(pre);
       followCaret(pre);
       const id = carrier && carrier.id(pre);
@@ -318,8 +330,26 @@
       ...(scope.matches && scope.matches('[data-marble-code]') ? [scope] : []),
       ...$$('[data-marble-code]', scope),
     ];
-    for (const pre of list) { wireCode(pre); paint(pre); }
+    for (const pre of list) {
+      wireCode(pre);
+      // The line count is cheap and the colouring is not, so the count is
+      // filled in now and the colouring waits for the file to be opened.
+      const meta = pre.closest('.file')?.querySelector('.fmeta');
+      if (meta && !meta.textContent) {
+        const many = pre.textContent.split('\n').length;
+        meta.textContent = `${many} line${many === 1 ? '' : 's'}`;
+      }
+    }
     if (list.length) derive();
+  }
+
+  /** Paint the file somebody is looking at, once. */
+  function paintOpen() {
+    const section = activeSection();
+    const pre = section && preOf(section);
+    if (!pre || painted.has(pre)) return;
+    painted.add(pre);
+    paint(pre);
   }
 
   // ----------------------------------------------------------- the folders
@@ -374,7 +404,7 @@
     return out;
   }
 
-  const GLYPHS = { bib: '❞', img: '▣', tex: '≡' };
+  const GLYPHS = { bib: '❞', img: '▣', cls: '◈', bst: '◇', tex: '≡' };
 
   let railSignature = '';
 
@@ -383,6 +413,7 @@
     for (const section of sections()) {
       section.classList.toggle('marble-open', keyOf(section) === active);
     }
+    paintOpen();
 
     const rows = treeRows();
     const signature = rows.map((row) => `${row.key}:${row.dir}:${row.depth}:${row.shut}:${row.path}`).join('|') + `#${active}`;
