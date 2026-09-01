@@ -258,15 +258,18 @@
         job.ccs.forEach((text, i) => {
           if (i) { addText(job, ';'); addGlue(job); }
           addText(job, '\u2022');
-          addGlue(job, { w: job.font.size * 0.3, stretch: 0, shrink: 0, nobreak: true });
+          addGlue(job, { w: job.font.size * 0.3, nobreak: true });
           // A tilde in a concept is the arrow between a field and a thing in
           // it, and the arrow comes from Symbol because Times has no glyph.
           const parts = text.split('~').map((part) => part.trim());
           parts.forEach((part, p) => {
             if (p) {
-              addGlue(job, { w: job.font.size * 0.28, stretch: 0, shrink: 0 });
+              // Ordinary glue, not rigid: a line of concepts is a paragraph
+              // like any other, and one with nothing that can stretch puts all
+              // of the slack into the few spaces that can.
+              addGlue(job, { w: job.font.size * 0.28 });
               symbol(job, '\u2192', 0.85);
-              addGlue(job, { w: job.font.size * 0.28, stretch: 0, shrink: 0 });
+              addGlue(job, { w: job.font.size * 0.28 });
             }
             prose(job, part);
           });

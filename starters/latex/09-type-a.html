@@ -485,17 +485,245 @@
 
   // ------------------------------------------------------------ line breaking
 
-  /** First fit, which is what a person reading the result would call "the way
-   *  lines break". Knuth's optimum is better and needs the whole paragraph;
-   *  this needs one line at a time and is wrong about a handful of them. */
-  function breakLines(nodes, measure, job) {
+  // ------------------------------------------------------------ line breaking
+  //
+  // Knuth and Plass, which is the difference between a paragraph that fits and
+  // a paragraph that reads. Greedy breaking takes the first break that fits and
+  // lives with what that does to the next line; this one scores every way of
+  // breaking the whole paragraph and takes the cheapest.
+  //
+  // A line's cost is its badness — how far its spaces had to stretch, cubed, so
+  // that one very loose line costs more than two slightly loose ones — plus a
+  // penalty for breaking at a hyphen, plus a penalty for a tight line next to a
+  // loose one. The cheapest set of breaks is found by keeping, at every
+  // breakpoint, the best way of having got there.
+  //
+  // The numbers are TeX's, which is the point: linepenalty 10, hyphenpenalty
+  // 50, adjdemerits 10000, doublehyphendemerits 10000, pretolerance 100,
+  // tolerance 200 — or 9999 where the document says \sloppy.
+
+  const INF_PENALTY = 10000;
+  const INF_STRETCH = 100000;
+  const KP = {
+    line: 10,
+    hyphen: 50,
+    adjacent: 10000,
+    doubleHyphen: 10000,
+    pretolerance: 100,
+    tolerance: 200,
+  };
+
+  const badnessOf = (ratio) => {
+    if (ratio < -1) return null;
+    const badness = 100 * Math.abs(ratio) ** 3;
+    return badness > INF_PENALTY ? INF_PENALTY : Math.round(badness);
+  };
+
+  const fitnessOf = (ratio) => {
+    if (ratio < -0.5) return 0;
+    if (ratio <= 0.5) return 1;
+    if (ratio <= 1) return 2;
+    return 3;
+  };
+
+  /** A word split where the patterns say it may be. The pieces are boxes and
+   *  the joints are discretionaries, which is how TeX carries a hyphen that
+   *  only exists if the line happens to break there. */
+  function withDiscretionaries(node) {
+    if (node.k !== 'word' || node.runs.length !== 1 || !T.hyphenate) return [node];
+    const run = node.runs[0];
+    if (run.link || run.f.startsWith('tt') || run.f === 'sy') return [node];
+    const parts = /^([^A-Za-z]*)([A-Za-z]{5,})([^A-Za-z]*)$/.exec(run.t);
+    if (!parts) return [node];
+    const points = T.hyphenate(parts[2]);
+    if (!points.length) return [node];
+
+    const m = M();
+    const out = [];
+    const cuts = [0, ...points.map((n) => n + parts[1].length), run.t.length];
+    for (let i = 0; i < cuts.length - 1; i += 1) {
+      if (i) {
+        out.push({
+          k: 'disc', w: 0, hyphen: m.width('-', run.f, run.s),
+          f: run.f, s: run.s, c: run.c || null, rise: run.rise || 0,
+        });
+      }
+      const text = run.t.slice(cuts[i], cuts[i + 1]);
+      out.push({
+        k: 'word',
+        w: m.width(text, run.f, run.s),
+        h: node.h, d: node.d,
+        runs: [{ ...run, t: text }],
+        notes: i === 0 ? node.notes : null,
+      });
+    }
+    return out;
+  }
+
+  /** The paragraph as TeX sees it: boxes, glue and penalties. */
+  function itemsFor(nodes, hyphenate) {
+    const items = [];
+    for (const node of nodes) {
+      if (node.k === 'break') {
+        items.push({ kind: 'penalty', w: 0, p: -INF_PENALTY, flagged: false, node: null });
+        continue;
+      }
+      if (node.k === 'glue') {
+        items.push({
+          kind: 'glue', w: node.w,
+          y: node.fill ? INF_STRETCH : node.stretch,
+          z: node.shrink, nobreak: node.nobreak, node,
+        });
+        continue;
+      }
+      for (const piece of (hyphenate ? withDiscretionaries(node) : [node])) {
+        if (piece.k === 'disc') items.push({ kind: 'penalty', w: piece.hyphen, p: KP.hyphen, flagged: true, node: piece });
+        else items.push({ kind: 'box', w: piece.w, node: piece });
+      }
+    }
+    // TeX ends a paragraph with \penalty10000 \hfil \penalty-10000, which is
+    // what lets the last line be short without being bad.
+    items.push({ kind: 'penalty', w: 0, p: INF_PENALTY, flagged: false, node: null });
+    items.push({ kind: 'glue', w: 0, y: INF_STRETCH, z: 0, nobreak: false, node: null });
+    items.push({ kind: 'penalty', w: 0, p: -INF_PENALTY, flagged: false, node: null });
+    return items;
+  }
+
+  /** One pass. Returns the chosen breakpoints, or null if no way of breaking
+   *  the paragraph stayed inside the tolerance. */
+  function tryBreaking(items, widthFor, tolerance) {
+    const n = items.length;
+    const sumW = new Array(n + 1).fill(0);
+    const sumY = new Array(n + 1).fill(0);
+    const sumZ = new Array(n + 1).fill(0);
+    for (let i = 0; i < n; i += 1) {
+      const item = items[i];
+      const measured = item.kind === 'glue' || item.kind === 'box';
+      sumW[i + 1] = sumW[i] + (measured ? item.w : 0);
+      sumY[i + 1] = sumY[i] + (item.kind === 'glue' ? item.y : 0);
+      sumZ[i + 1] = sumZ[i] + (item.kind === 'glue' ? item.z : 0);
+    }
+
+    const legal = (i) => {
+      const item = items[i];
+      if (item.kind === 'penalty') return item.p < INF_PENALTY;
+      if (item.kind === 'glue') return !item.nobreak && i > 0 && items[i - 1].kind === 'box';
+      return false;
+    };
+
+    // The glue after a break is discarded, so the next line starts at the first
+    // thing that is neither glue nor a penalty.
+    const startAfter = (i) => {
+      let at = i + (items[i] && items[i].kind === 'penalty' ? 1 : 0);
+      while (at < n && (items[at].kind === 'glue' || items[at].kind === 'penalty')) at += 1;
+      return at;
+    };
+
+    // A paragraph never begins with glue — addGlue refuses to be the first thing
+    // in one — so the first line starts at the first item there is.
+    let active = [{ position: 0, line: 0, fitness: 1, demerits: 0, previous: null, flagged: false, start: 0 }];
+
+    for (let b = 0; b < n; b += 1) {
+      if (!legal(b)) continue;
+      const here = items[b];
+      const forced = here.kind === 'penalty' && here.p <= -INF_PENALTY;
+      const best = new Map();
+      const keep = [];
+
+      for (const node of active) {
+        const width = sumW[b] - sumW[node.start] + (here.kind === 'penalty' ? here.w : 0);
+        const stretch = sumY[b] - sumY[node.start];
+        const shrink = sumZ[b] - sumZ[node.start];
+        const room = widthFor(node.line);
+        const slack = room - width;
+
+        let ratio;
+        if (stretch >= INF_STRETCH) ratio = 0;
+        else if (slack > 0) ratio = stretch > 0 ? Math.min(slack / stretch, 1000) : 1000;
+        else if (slack < 0) ratio = shrink > 0 ? slack / shrink : -1000;
+        else ratio = 0;
+
+        const badness = badnessOf(ratio);
+        if (badness !== null && badness <= tolerance) {
+          const penalty = here.kind === 'penalty' ? here.p : 0;
+          let demerits = (KP.line + badness) ** 2;
+          if (penalty > 0) demerits += penalty ** 2;
+          else if (penalty > -INF_PENALTY) demerits -= penalty ** 2;
+          if (here.flagged && node.flagged) demerits += KP.doubleHyphen;
+          const fitness = fitnessOf(ratio);
+          if (Math.abs(fitness - node.fitness) > 1) demerits += KP.adjacent;
+          demerits += node.demerits;
+
+          const found = best.get(fitness);
+          if (!found || demerits < found.demerits) {
+            best.set(fitness, {
+              position: b,
+              line: node.line + 1,
+              fitness,
+              demerits,
+              previous: node,
+              flagged: !!here.flagged,
+              start: startAfter(b),
+            });
+          }
+        }
+
+        // A node stays active while a line from it could still fit. Once the
+        // text from it to here cannot be squeezed into the measure, nothing
+        // later will fit either.
+        if (ratio >= -1 && !forced) keep.push(node);
+      }
+
+      active = keep.concat([...best.values()]);
+      if (!active.length) return null;
+    }
+
+    const ends = active.filter((node) => node.position === n - 1);
+    const pool = ends.length ? ends : active.filter((node) => node.position > 0);
+    if (!pool.length) return null;
+    let chosen = pool[0];
+    for (const node of pool) if (node.demerits < chosen.demerits) chosen = node;
+
+    const breaks = [];
+    for (let node = chosen; node && node.previous; node = node.previous) breaks.unshift(node);
+    return breaks;
+  }
+
+  /** Cut the node list at the chosen breakpoints. */
+  function linesFrom(items, breaks) {
+    const lines = [];
+    for (const stop of breaks) {
+      const line = [];
+      for (let i = stop.previous.start; i < stop.position; i += 1) {
+        const item = items[i];
+        if (item.kind !== 'penalty' && item.node) line.push(item.node);
+      }
+      while (line.length && line[line.length - 1].k === 'glue') line.pop();
+      const here = items[stop.position];
+      if (here.flagged && here.node) {
+        // The hyphen exists only because the line broke here.
+        line.push({
+          k: 'word', w: here.w, h: 0, d: 0,
+          runs: [{ f: here.node.f, s: here.node.s, t: '-', rise: here.node.rise, c: here.node.c, link: null }],
+        });
+      }
+      if (here.kind === 'penalty' && here.p <= -INF_PENALTY) line.forced = true;
+      lines.push(line);
+    }
+    while (lines.length > 1 && !lines[lines.length - 1].length) lines.pop();
+    return lines;
+  }
+
+  /** First fit, for when nothing else will do: a paragraph holding a word
+   *  longer than the measure has no feasible breaking and still has to be set. */
+  function firstFit(nodes, measure, job) {
     const lines = [];
     let line = [];
     let width = 0;
     let lastGlue = -1;
 
     const flush = (upto, next) => {
-      let take = line.slice(0, upto);
+      const take = line.slice(0, upto);
       while (take.length && take[take.length - 1].k === 'glue') take.pop();
       lines.push(take);
       line = line.slice(next);
@@ -520,8 +748,6 @@
         if (lastGlue > 0) {
           flush(lastGlue, lastGlue + 1);
         } else if (line.length > 1) {
-          // No break point: the word is longer than the measure and has to
-          // stick out. TeX calls this overfull and so does the log.
           const overflow = width - node.w - measure;
           if (overflow > 0.1 && job) {
             say(job, 'warning', `Overfull line by ${Math.round(overflow)}pt`, job.line, job.file);
@@ -533,6 +759,22 @@
     while (line.length && line[line.length - 1].k === 'glue') line.pop();
     if (line.length) lines.push(line);
     return lines;
+  }
+
+  /** Break a paragraph. `widthFor(n)` is how wide the nth line may be, because
+   *  that is not one number when the first line is indented. */
+  function breakLines(nodes, measure, job, options = {}) {
+    const widthFor = options.widthFor || (() => measure);
+    const tolerance = (job && job.tolerance) || KP.tolerance;
+
+    // TeX's first pass does not hyphenate: a paragraph that reads well without
+    // hyphens should not be given any.
+    for (const [hyphenate, limit] of [[false, KP.pretolerance], [true, tolerance]]) {
+      const items = itemsFor(nodes, hyphenate);
+      const breaks = tryBreaking(items, widthFor, limit);
+      if (breaks && breaks.length) return linesFrom(items, breaks);
+    }
+    return firstFit(nodes, widthFor(0), job);
   }
 
   /** A broken line becomes a row: items placed at their final x, and the
@@ -619,7 +861,13 @@
       : options.indent;
     const hanging = options.hanging || 0;
 
-    const lines = breakLines(nodes, measure - indent, job);
+    // Only the first line is indented, so only the first line is that much
+    // narrower. Breaking every line at the indented measure — which is what
+    // this did — made every line after the first too short and then justified
+    // it to the full width, which is where the gappy spacing came from.
+    const lines = breakLines(nodes, measure, job, {
+      widthFor: (n) => measure - (n === 0 ? indent : hanging),
+    });
     lines.forEach((line, i) => {
       const first = i === 0;
       const last = i === lines.length - 1 || line.forced;

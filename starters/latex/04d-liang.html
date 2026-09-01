@@ -1,0 +1,86 @@
+
+<script data-marble-id="__ID__">
+// ------------------------------------------------------ Liang's hyphenation
+//
+// A word is hyphenated by laying every pattern that matches any part of it over
+// the word and keeping, at each position between two letters, the highest
+// number any of them put there. Odd means a break is allowed, even means it is
+// not, and the numbers are arranged so that a more specific pattern beats a
+// more general one by being larger.
+//
+// "hyphenation" is the example Liang used: the patterns hy3ph, he2n, hena4,
+// hen5at and n2at land on it and leave hy-phen-ation.
+
+window.TeX = window.TeX || {};
+
+(() => {
+  const T = window.TeX;
+  const data = T.hyphen;
+  if (!data) return;
+
+  // fragment → the numbers it places, one per position in the fragment.
+  const rules = new Map();
+  for (const pattern of data.patterns.split(' ')) {
+    if (!pattern) continue;
+    let letters = '';
+    const numbers = [];
+    for (const ch of pattern) {
+      if (ch >= '0' && ch <= '9') numbers[letters.length] = Number(ch);
+      else letters += ch;
+    }
+    rules.set(letters, numbers);
+  }
+
+  // The words the patterns get wrong, spelled with the breaks they should have.
+  const exceptions = new Map();
+  for (const word of data.exceptions.split(' ')) {
+    if (!word) continue;
+    const plain = word.replace(/-/g, '');
+    const at = [];
+    let seen = 0;
+    for (const ch of word) {
+      if (ch === '-') at.push(seen);
+      else seen += 1;
+    }
+    exceptions.set(plain, at);
+  }
+
+  const cache = new Map();
+
+  /** Where a word may be broken: offsets into it, counting letters before the
+   *  break. Empty when it may not be broken at all. */
+  function hyphenate(word) {
+    const key = word.toLowerCase();
+    const found = cache.get(key);
+    if (found) return found;
+
+    let out = [];
+    if (exceptions.has(key)) {
+      out = exceptions.get(key).slice();
+    } else if (key.length >= data.left + data.right) {
+      const padded = `.${key}.`;
+      const values = new Array(padded.length + 1).fill(0);
+      for (let i = 0; i < padded.length; i += 1) {
+        for (let j = i + 1; j <= padded.length; j += 1) {
+          const numbers = rules.get(padded.slice(i, j));
+          if (!numbers) continue;
+          for (let k = 0; k < numbers.length; k += 1) {
+            const value = numbers[k];
+            if (value !== undefined && value > values[i + k]) values[i + k] = value;
+          }
+        }
+      }
+      // values[k] sits before padded[k], and padded has a dot in front, so the
+      // break after `n` letters of the word is values[n + 1].
+      for (let n = data.left; n <= key.length - data.right; n += 1) {
+        if (values[n + 1] % 2 === 1) out.push(n);
+      }
+    }
+
+    cache.set(key, out);
+    return out;
+  }
+
+  T.hyphenate = hyphenate;
+})();
+</script>

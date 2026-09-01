@@ -660,7 +660,12 @@
       case 'linespread': case 'pagenumbering': case 'markboth': case 'markright':
       case 'listoffigures': case 'listoftables': case 'usetikzlibrary':
         reader.group(); return;
-      case 'sloppy': case 'fussy': case 'allowdisplaybreaks': case 'flushbottom':
+      // \sloppy raises \tolerance to 9999, which is how a paper gets loose
+      // lines instead of overfull ones. It is the first thing in most ACM
+      // preambles and it changes where every paragraph breaks.
+      case 'sloppy': job.tolerance = 9999; return;
+      case 'fussy': job.tolerance = 200; return;
+      case 'allowdisplaybreaks': case 'flushbottom':
       case 'raggedbottom': case 'noindentafter': case 'protect':
       case 'selectfont': case 'sloppypar': case 'unskip': case 'toprule':
       case 'midrule': case 'bottomrule': case 'hline':
