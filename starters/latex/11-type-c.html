@@ -134,9 +134,14 @@
       return;
     }
     if (GLYPHS[name] !== undefined) { addText(job, GLYPHS[name]); return; }
-    // acmart loads amsart, whose size ladder is not the article one.
-    const sizes = job.klass === 'acm' ? AMS_SIZES : SIZES;
-    if (sizes[name] !== undefined) { job.font.size = job.base * sizes[name]; return; }
+    // acmart loads amsart, whose ladder is not the article one and whose
+    // leadings are declared rather than derived.
+    if (job.klass === 'acm' && amsSize(job, name)) return;
+    if (SIZES[name] !== undefined) {
+      job.font.size = job.base * SIZES[name];
+      job.font.leading = null;
+      return;
+    }
 
     switch (name) {
       // ---- the preamble
@@ -761,6 +766,8 @@
     job.file = project.main;
     job.groups = [];
 
+    T.metrics.use('base14');
+
     const main = project.files.find((one) => one.name === project.main) || project.files[0];
     if (!main) throw new Error('there is no file to typeset');
 
@@ -771,6 +778,9 @@
     // which is what a class does with a float it has run out of room for.
     if (job.wide.length) startPage(job);
     finishPage(job);
+
+    // The widths this pass measured with, so the PDF can declare them.
+    if (T.metrics.using() !== 'base14') job.doc.meta.widths = T.metrics.arrays();
 
     job.doc.meta.title = T.lex.plain(job.titleTokens || []) || project.main;
     job.doc.meta.author = T.lex.plain(job.authorTokens || []);
@@ -790,6 +800,6 @@
     };
   }
 
-  T.type = { run, PAPER, length };
+  T.type = { run, PAPER, length, blockHeight: noteHeightOf };
 })();
 </script>

@@ -207,12 +207,12 @@
   // really does set them both \Large — and the difference between a section
   // and a subsection is the number in front of it.
   const ACM_HEADS = {
-    part:          { scale: 20 / 9, bold: true, italic: false, sans: false },
-    section:       { scale: 12 / 9, bold: true, italic: false, sans: false },
-    subsection:    { scale: 12 / 9, bold: true, italic: false, sans: false },
-    subsubsection: { scale: 1, bold: false, italic: true, sans: true },
-    paragraph:     { scale: 1, bold: false, italic: true, sans: false },
-    subparagraph:  { scale: 1, bold: false, italic: true, sans: false },
+    part:          { step: 'huge', bold: true, italic: false, sans: false },
+    section:       { step: 'Large', bold: true, italic: false, sans: false },
+    subsection:    { step: 'Large', bold: true, italic: false, sans: false },
+    subsubsection: { step: 'normalsize', bold: false, italic: true, sans: true },
+    paragraph:     { step: 'normalsize', bold: false, italic: true, sans: false },
+    subparagraph:  { step: 'normalsize', bold: false, italic: true, sans: false },
   };
 
   // ------------------------------------------------------------------ pieces
@@ -237,7 +237,8 @@
     vspace(job, job.klass === 'acm' ? job.base * 0.75 : spec.above * job.base);
     const saved = save(job);
     const acm = job.klass === 'acm' ? ACM_HEADS[kind] : null;
-    job.font.size = job.base * (acm ? acm.scale : spec.scale);
+    if (acm) amsSize(job, acm.step);
+    else job.font.size = job.base * spec.scale;
     job.font.bold = acm ? acm.bold : spec.bold;
     job.font.italic = acm ? acm.italic : false;
     // \@subsubsecfont is sans in every format; \@secfont is sans in every

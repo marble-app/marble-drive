@@ -976,22 +976,62 @@
   // Dragging a file onto a folder is a rename, because a path is the only
   // record of where a file lives. Pointer events rather than HTML5 drag, so it
   // works with a finger.
+  //
+  // What you are dragging follows the pointer and says where it would land, so
+  // dropping on any row inside a folder means that folder — you do not have to
+  // hit the folder's own line — and nothing underneath has to light up to tell
+  // you so.
+
+  /** Where a drop at this point would put the file: a folder's path, '' for the
+   *  top of the project, or null for nowhere. A row that is not a folder means
+   *  the folder it is in, which is what "drop it in there" looks like. */
+  function destination(x, y, dragged) {
+    const under = document.elementFromPoint(x, y);
+    if (!under || !under.closest) return null;
+    const hit = under.closest('.frow');
+    if (hit) {
+      if (hit === dragged) return null;
+      const path = hit.getAttribute('data-path');
+      return hit.classList.contains('dir') ? path : dirOf(path);
+    }
+    return under.closest('#railfiles') || under.closest('.rail') ? '' : null;
+  }
+
   railList.addEventListener('pointerdown', (event) => {
+    if (event.button !== 0) return;
     const row = event.target.closest && event.target.closest('.frow');
     if (!row || event.target.closest('.more') || event.target.closest('.ren')) return;
     const path = row.getAttribute('data-path');
-    const startY = event.clientY;
+    const from = dirOf(path);
+    const start = { x: event.clientX, y: event.clientY };
     let lifted = false;
-    let over = null;
+    let ghost = null;
+    let into = null;
+
+    /** A drop that would not move anything, or would move a folder inside
+     *  itself, is not a drop. */
+    const allowed = (where) =>
+      where !== null && where !== from && where !== path && !`${where}/`.startsWith(`${path}/`);
 
     const move = (moved) => {
-      if (!lifted && Math.abs(moved.clientY - startY) < 5) return;
-      if (!lifted) { lifted = true; row.classList.add('marble-lift'); railList.setPointerCapture(event.pointerId); }
-      const under = document.elementFromPoint(moved.clientX, moved.clientY);
-      const target = under && under.closest ? under.closest('.frow.dir, #railfiles') : null;
-      if (over && over !== target) over.classList.remove('marble-drop');
-      over = target === row ? null : target;
-      if (over) over.classList.add('marble-drop');
+      if (!lifted && Math.abs(moved.clientY - start.y) + Math.abs(moved.clientX - start.x) < 6) return;
+      if (!lifted) {
+        lifted = true;
+        row.classList.add('marble-lift');
+        railList.setPointerCapture(event.pointerId);
+        ghost = document.createElement('div');
+        ghost.className = 'ghost';
+        ghost.setAttribute('data-marble-transient', '');
+        document.body.append(ghost);
+      }
+      into = destination(moved.clientX, moved.clientY, row);
+      const ok = allowed(into);
+      ghost.innerHTML =
+        `<span class="glyph">${row.querySelector('.glyph').textContent}</span>` +
+        `<span>${esc(baseOf(path))}</span>` +
+        `<span class="into${ok ? '' : ' nowhere'}">${ok ? `→ ${esc(into || 'the top')}` : '—'}</span>`;
+      ghost.style.left = `${moved.clientX}px`;
+      ghost.style.top = `${moved.clientY}px`;
     };
 
     const done = () => {
@@ -999,14 +1039,13 @@
       railList.removeEventListener('pointerup', done);
       railList.removeEventListener('pointercancel', done);
       row.classList.remove('marble-lift');
-      if (over) over.classList.remove('marble-drop');
-      if (!lifted || !over) return;
-      const into = over.id === 'railfiles' ? '' : over.getAttribute('data-path');
-      if (into === dirOf(path) || into === path || `${into}/`.startsWith(`${path}/`)) return;
+      if (ghost) ghost.remove();
+      if (!lifted || !allowed(into)) return;
       const key = row.getAttribute('data-key');
       const section = key ? sectionFor(key) : null;
       if (section) rename(section, join(into, baseOf(path)));
       else {
+        // A folder nobody made explicitly: what moves is everything in it.
         for (const one of sections()) {
           const name = nameOf(one);
           if (name.startsWith(`${path}/`)) rename(one, join(into, baseOf(path)) + name.slice(path.length));

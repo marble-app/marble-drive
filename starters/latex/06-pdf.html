@@ -135,7 +135,7 @@
     return out.join('\n') + '\n';
   }
 
-  function assemble({ pages, images, fontsUsed, outline, title, author, subject }) {
+  function assemble({ pages, images, fontsUsed, outline, title, author, subject, widths: measured }) {
     const objects = [];
     // Object 0 is the free head of the chain and is never written.
     const reserve = () => { objects.push(null); return objects.length; };
@@ -161,7 +161,12 @@
       const id = reserve();
       fontIds.set(key, id);
       const encoding = spec.symbol ? '' : ' /Encoding /WinAnsiEncoding';
-      put(id, `<< /Type /Font /Subtype /Type1 /BaseFont /${spec.pdf}${encoding} >>`);
+      // If the page was measured in a font this file cannot carry, the widths
+      // it was measured with travel instead. The reader draws Times and steps
+      // by Libertine, so a word ends where the typesetter said it would.
+      const widths = spec.symbol ? null : measured && measured[key];
+      const declared = widths ? ` /FirstChar 32 /LastChar 255 /Widths [${widths.join(' ')}]` : '';
+      put(id, `<< /Type /Font /Subtype /Type1 /BaseFont /${spec.pdf}${encoding}${declared} >>`);
     }
 
     // Images

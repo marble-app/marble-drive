@@ -17,14 +17,40 @@
   // do what the class asks — Libertine, which is not one of the fourteen fonts
   // a PDF reader is required to have — it does the nearest thing and says so.
   //
-  // A size here is a multiple of the body size, on the ladder amsart uses at
-  // 9pt: 9, 10, 12, 14, 17, 20. acmart loads amsart, which is why the ladder is
-  // not the 1.2-per-step one an article uses.
-  const AMS_SIZES = {
-    tiny: 5 / 9, scriptsize: 6 / 9, footnotesize: 7 / 9, small: 8 / 9,
-    normalsize: 1, large: 10 / 9, Large: 12 / 9, LARGE: 14 / 9,
-    huge: 17 / 9, Huge: 20 / 9,
+  // acmart loads amsart, and amsart declares its sizes outright rather than
+  // scaling them: at 9pt the ladder is 5/6, 6/7, 7/8, 8/10, 9/11, 10/12, 11/13,
+  // 12/14, 14/17, 17/20. Both halves matter. The first is how big the letters
+  // are; the second is \baselineskip, which is what puts the baselines on a
+  // grid — and a grid off by two tenths of a point is a line every fifty, which
+  // is a page every few pages.
+  //
+  // Each entry is [size, baselineskip] in points.
+  const AMS_LADDER = {
+    9: {
+      tiny: [5, 6], scriptsize: [6, 7], footnotesize: [7, 8], small: [8, 10],
+      normalsize: [9, 11], large: [10, 12], Large: [11, 13], LARGE: [12, 14],
+      huge: [14, 17], Huge: [17, 20],
+    },
+    10: {
+      tiny: [5, 6], scriptsize: [6, 7], footnotesize: [7, 8], small: [8, 10],
+      normalsize: [10, 12], large: [11, 13], Large: [12, 14], LARGE: [14, 17],
+      huge: [17, 20], Huge: [20, 24],
+    },
   };
+
+  const ladder = (job) => AMS_LADDER[job.base] || AMS_LADDER[9];
+
+  /** Set a named size, and the leading that goes with it. */
+  function amsSize(job, name) {
+    const step = ladder(job)[name];
+    if (!step) return false;
+    job.font.size = step[0];
+    job.font.leading = step[1];
+    return true;
+  }
+
+  /** Just the size, for the places that want a number. */
+  const amsPoints = (job, name) => (ladder(job)[name] || [job.base])[0];
 
   const ACM_FORMATS = {
     // sigconf: letter paper, columnsep 2pc, top 57pt, bottom 73pt, sides 54pt.
@@ -79,6 +105,12 @@
     job.colGap = format.gap;
     job.headingFamily = format.headings === 'sans' ? 'sf' : 'rm';
     if (format.paper) [job.W, job.H] = format.paper;
+    // Measure in the fonts the class asks for. What gets drawn is unchanged —
+    // Libertine does not travel with this file — but the line breaks are the
+    // ones a real build would make.
+    M().use('libertine');
+    job.font.leading = (ladder(job).normalsize || [job.base, job.base * 1.2])[1];
+    job.leadRatio = job.font.leading / job.base;
     // \setlength\parindent{10\p@}, and it does not scale with the body size.
     job.parIndent = 10;
     // \def\footnoterule{... \hrule \@width 4pc ...}
@@ -135,12 +167,12 @@
     job.parindent = false;
     const rows = capture(job, () => {
       // \@authorfont for sigconf is \LARGE, with no weight and no family
-      // change: 14pt of the body face at a 9pt body.
-      job.font.size = job.base * AMS_SIZES.LARGE;
+      // change: 12pt of the body face at a 9pt body.
+      amsSize(job, 'LARGE');
       inGroup(job, author.name);
       endParagraph(job, { indent: 0 });
       // \@affiliationfont is \large.
-      job.font.size = job.base * AMS_SIZES.large;
+      amsSize(job, 'large');
       for (const lines of author.affils) {
         for (const line of lines) {
           prose(job, line);
@@ -257,7 +289,7 @@
     const rows = capture(job, () => {
       const saved = save(job);
       // The permission block is a footnote, so it is set at footnote size.
-      job.font.size = job.base * AMS_SIZES.footnotesize;
+      amsSize(job, 'footnotesize');
       job.align = 'justify';
       job.parindent = false;
       job.leftSkip = 0;
@@ -321,7 +353,7 @@
     });
 
     if (!rows.length) return;
-    const tall = rows.reduce((sum, row) => sum + row.above + row.below, 0);
+    const tall = T.type.blockHeight(rows);
     const gap = job.base * 1.9;
     job.bottomBlock = { page: Math.max(0, job.pageIndex), col: 0, rows, tall, gap, height: tall + gap };
   }
@@ -339,7 +371,7 @@
     // \@titlefont for sigconf is \Huge\sffamily\bfseries. Helvetica Bold is
     // not Libertine Sans Bold, but it is sans and it is bold, which is what the
     // page is telling you.
-    job.font.size = job.base * AMS_SIZES.Huge;
+    amsSize(job, 'Huge');
     job.font.family = 'sf';
     job.font.bold = true;
     inGroup(job, job.titleTokens || []);
@@ -349,7 +381,7 @@
 
     if (job.subtitleTokens) {
       vspace(job, job.base * 0.4);
-      job.font.size = job.base * AMS_SIZES.Large;
+      amsSize(job, 'Large');
       job.font.family = 'sf';
       inGroup(job, job.subtitleTokens);
       endParagraph(job, { indent: 0 });

@@ -148,11 +148,21 @@ __ICON__
   .frow.dir .glyph { transition: transform .12s ease; }
   .frow.dir.marble-shut .glyph { transform: rotate(-90deg); }
 
-  /* Dragging a file into a folder is a rename, so the only thing the drag
-     needs to draw is where it would land. */
-  .frow.marble-lift { opacity: .45; }
-  .frow.marble-drop { box-shadow: inset 0 0 0 1px var(--accent); background: var(--accent-soft); }
-  #railfiles.marble-drop { box-shadow: inset 0 0 0 1px var(--accent); border-radius: var(--radius); }
+  /* Dragging a file into a folder is a rename. What the drag draws is the thing
+     in your hand and the name of the folder it would land in — not a box around
+     the row underneath, which is a second thing to read and says less. */
+  .frow.marble-lift { opacity: .4; }
+  .ghost {
+    position: fixed; z-index: 60; pointer-events: none;
+    display: flex; align-items: center; gap: .4rem;
+    padding: .22rem .5rem; border-radius: var(--radius);
+    background: var(--card); border: 1px solid var(--accent);
+    box-shadow: 0 4px 14px rgba(0, 0, 0, .18);
+    font: .78rem/1.4 var(--ui); color: var(--ink); white-space: nowrap;
+    transform: translate(.6rem, .4rem);
+  }
+  .ghost .into { color: var(--accent-ink); }
+  .ghost .into.nowhere { color: var(--faint); }
   .ren {
     flex: 1 1 auto; min-width: 0; font: inherit; color: var(--ink);
     background: var(--card); border: 1px solid var(--accent); border-radius: 3px;

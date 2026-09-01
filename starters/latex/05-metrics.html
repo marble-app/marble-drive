@@ -189,8 +189,13 @@ window.TeX = window.TeX || {};
   };
 
   const familyOf = (key) => (key === 'sy' ? 'sy' : key.slice(0, 2));
+  const shapeOf = (key) => (inLibertine ? LIB_SHAPE : SHAPE)[familyOf(key)];
 
   function rawWidth(ch, key) {
+    if (inLibertine) {
+      const found = libWidth(ch, key);
+      if (found !== null) return found;
+    }
     const font = FONTS[key] || FONTS.rm;
     if (font.symbol) return (SYM[ch] || [0, 549])[1];
     if (!font.w) return 600; // Courier, every glyph the same width
@@ -205,11 +210,85 @@ window.TeX = window.TeX || {};
     return table[0];
   }
 
+  // Which metrics are in force. The fourteen standard fonts are what gets
+  // drawn either way — Libertine is not one of them and does not travel with
+  // this file — but a document set in acmart has to *measure* in Libertine or
+  // it cannot break a line where a real build breaks it.
+  const LIB = T.libertine || null;
+  let inLibertine = false;
+
+  // Line height is the one thing not taken from the font. OS/2 reports an
+  // ascender of .894, which is the em box and not the ink: TeX takes a line's
+  // height from the glyphs actually in it, so a figure near the ink keeps the
+  // baselines on the grid the class asked for. The x-height and the cap height
+  // are the font's own, because those are measurements of ink.
+  const LIB_SHAPE = LIB && {
+    rm: { asc: 0.72, desc: 0.21, x: LIB.shape.rm.x, cap: LIB.shape.rm.cap },
+    sf: { asc: 0.72, desc: 0.21, x: LIB.shape.sf.x, cap: LIB.shape.sf.cap },
+    tt: SHAPE.tt,
+    sy: SHAPE.sy,
+  };
+
+  // Longest first, so ffi is found before ff.
+  const LIG_ORDER = ['ffi', 'ffl', 'ff', 'fi', 'fl'];
+
+  // The kern table arrives grouped by amount, which is how it fits in thirty
+  // kilobytes; it is wanted pair by pair, which is this.
+  const KERNS = new Map();
+  if (LIB) {
+    for (const [key, groups] of Object.entries(LIB.kern)) {
+      const pairs = new Map();
+      for (const [amount, list] of Object.entries(groups)) {
+        const by = Number(amount);
+        for (let i = 0; i < list.length; i += 2) pairs.set(list.slice(i, i + 2), by);
+      }
+      KERNS.set(key, pairs);
+    }
+  }
+
+  const libWidth = (ch, key) => {
+    if (key.startsWith('tt')) return LIB.mono;
+    const table = LIB.w[key];
+    if (!table) return null;
+    const code = ch.charCodeAt(0);
+    if (code >= 32 && code <= 126) return table[code - 32];
+    const win = T.metrics.encode(ch);
+    const extra = LIB.extra[key];
+    if (win !== null && extra[win] !== undefined) return extra[win];
+    return null;
+  };
+
   const cache = new Map();
 
   T.metrics = {
     FONTS,
     SYM,
+
+    /** Every width the reader needs, by font key: codes 32..255, in the set in
+     *  force. A PDF font dictionary can carry these, and when it does the
+     *  reader advances by them rather than by the metrics of the font it is
+     *  actually drawing — which is the whole reason a page set in Libertine can
+     *  be drawn in Times without the words running into each other. */
+    arrays() {
+      const out = {};
+      for (const key of Object.keys(FONTS)) {
+        if (key === 'sy') continue;
+        const row = [];
+        for (let code = 32; code <= 255; code += 1) {
+          row.push(Math.round(rawWidth(String.fromCharCode(code), key)));
+        }
+        out[key] = row;
+      }
+      return out;
+    },
+
+    /** Measure in Libertine, or in the fonts that get drawn. Called by the
+     *  class: an article is Times and acmart is not. */
+    use(which) {
+      inLibertine = which === 'libertine' && !!LIB;
+      return inLibertine;
+    },
+    using: () => (inLibertine ? 'libertine' : 'base14'),
 
     /** The code a reader wants for this character, or null if it has none. */
     encode(ch) {
@@ -227,7 +306,7 @@ window.TeX = window.TeX || {};
 
     /** Width of one character at one point size. */
     charWidth(ch, key, size) {
-      const at = key + ch;
+      const at = (inLibertine ? 'L' : 'B') + key + ch;
       let w = cache.get(at);
       if (w === undefined) {
         w = rawWidth(ch, key) / 1000;
@@ -236,18 +315,46 @@ window.TeX = window.TeX || {};
       return w * size;
     },
 
-    /** Width of a run of text. No kerning: every word is placed by hand, so
-     *  the only thing a missing kern costs is a fraction of a point inside it. */
+    /** Width of a run of text.
+     *
+     *  In Times this is the sum of the letters, because the base-14 metrics
+     *  carry no kerning and there is nowhere to get any. In Libertine it is
+     *  what TeX would make it: the ligatures it would substitute, and the
+     *  kerning it would apply between pairs. Neither is large — a ligature is
+     *  worth a tenth of a point in a line and the kerning about a third — but
+     *  a third of a point is a word every thirty lines, and a word is where a
+     *  line breaks. */
     width(text, key, size) {
+      if (!inLibertine || key === 'sy' || !LIB.w[key]) {
+        let sum = 0;
+        for (const ch of text) sum += this.charWidth(ch, key, size);
+        return sum;
+      }
+      const ligs = LIB.ligs[key] || {};
+      const pairs = KERNS.get(key);
       let sum = 0;
-      for (const ch of text) sum += this.charWidth(ch, key, size);
-      return sum;
+      let i = 0;
+      while (i < text.length) {
+        let step = 1;
+        let w = null;
+        for (const seq of LIG_ORDER) {
+          if (ligs[seq] !== undefined && text.startsWith(seq, i)) { w = ligs[seq]; step = seq.length; break; }
+        }
+        if (w === null) w = rawWidth(text[i], key);
+        sum += w;
+        if (pairs && i + step < text.length) {
+          const kern = pairs.get(text[i + step - 1] + text[i + step]);
+          if (kern) sum += kern;
+        }
+        i += step;
+      }
+      return (sum / 1000) * size;
     },
 
-    ascent: (key, size) => SHAPE[familyOf(key)].asc * size,
-    descent: (key, size) => SHAPE[familyOf(key)].desc * size,
-    xHeight: (key, size) => SHAPE[familyOf(key)].x * size,
-    capHeight: (key, size) => SHAPE[familyOf(key)].cap * size,
+    ascent: (key, size) => shapeOf(key).asc * size,
+    descent: (key, size) => shapeOf(key).desc * size,
+    xHeight: (key, size) => shapeOf(key).x * size,
+    capHeight: (key, size) => shapeOf(key).cap * size,
 
     /** The maths axis — the height the middle of a fraction bar, a minus sign
      *  and a big delimiter all line up on. */
