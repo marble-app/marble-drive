@@ -4,17 +4,19 @@
 //
 // The source pane and this one are two ways of looking at one <pre>. Nothing
 // here is a second copy of the file: the rows are the lines of the source,
-// rebuilt whenever it changes, and an edit in a row is the same setText the
-// source pane files — same undo step, same recompile. The only thing this
-// view adds to the document is `data-view` and `data-comments` on the shell,
-// two attributes that say which pane shows and whether commented-out lines
-// are folded away.
+// rebuilt whenever it changes, and an edit is the same setText the source
+// pane files — same undo step, same recompile. The only state this view adds
+// to the document is `data-view` and `data-comments` on the shell.
 //
-// One row per source line, always. Markup that has a rendered form (a
-// heading, \textbf, a chip for \ref) is drawn instead of the raw command
-// while the row is at rest, and handed back verbatim the moment the caret
-// enters the line — so what you edit is exactly the bytes on disk. A run of
-// comments can be folded into the gap between two lines and stepped over.
+// One row per source line, always, and — this is the rule everything else
+// leans on — **a row's text is exactly its source line**. Markup that has a
+// look (a heading, \textbf, a list marker) is styled, never rewritten: the
+// braces and the backslash are still there, set small and faint. So the whole
+// page is one contenteditable surface and the browser's own editing works
+// unchanged — select across lines, ⌘A, copy, drag, all of it — and reading a
+// row back is just its text. The one exception is a displayed equation: a
+// line of maths draws as maths while the caret is elsewhere, and turns back
+// into its source the moment the caret or the selection reaches it.
 
 (() => {
   const app = document.querySelector('#app');
@@ -27,20 +29,22 @@
 
   const esc = (s) => String(s).replace(/[&<>]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;' }[c]));
   const room = () => window.__latexroom;
+  const ZWSP = '​';
+  const noZwsp = (s) => s.split(ZWSP).join('');
 
   let carrier = null;
   let pre = null;               // the <pre class="src"> we are mirroring
   let preWatch = null;          // its MutationObserver
   let lastWritten = null;       // the last text we put in the <pre> ourselves
-  let editRow = null;           // the row currently shown as raw source
-  let renderSeq = 0;
+  let hereRow = null;           // the row the caret is in
+  let reconcileQueued = false;
+  let selfSelecting = false;    // guard: a selection we set ourselves
 
   // -------------------------------------------------------------- the source
 
-  /** The <pre> of the open file, when the file is one that reads as prose. A
-   *  class file or a bibliography style is thousands of lines this view was
-   *  not written for; an image has no source at all. Those keep to the
-   *  source pane, and the rich pane says so. */
+  /** The <pre> of the open file, when it is one that reads as prose. A class
+   *  file or a bibliography style is thousands of lines this view was not
+   *  written for; an image has no source. Those keep to the source pane. */
   function activePre() {
     const r = room();
     if (!r) return null;
@@ -52,10 +56,11 @@
   }
 
   const rawLines = () => (pre ? pre.textContent.split('\n') : ['']);
+  const rlines = () => [...page.children].filter((el) => el.classList.contains('rline'));
 
   /** Push the rows back to the <pre>, the way a keystroke in the source pane
-   *  would. `lastWritten` lets our own MutationObserver tell our write apart
-   *  from one made in another tab. */
+   *  would. `lastWritten` lets our own MutationObserver tell our write from
+   *  one made in another tab. */
   function commit(next, { coalesce = true } = {}) {
     if (!pre || !carrier) return;
     if (next === pre.textContent) return;
@@ -74,44 +79,36 @@
 
   // --------------------------------------------------------- reading a line
   //
-  // Each row is classified once, from its own text and a little context — how
-  // deep in a list it sits, whether a math environment is open. The context
-  // is carried down the file as the rows are built.
+  // Each row is classified from its own text and a little context — how deep
+  // in a list it sits, whether a maths environment is open — carried down the
+  // file as the rows are built.
 
-  const HEAD = /^(\s*)\\(section|subsection|subsubsection|paragraph|subparagraph)\*?\s*\{([\s\S]*?)\}\s*$/;
-  const BEGIN = /^\s*\\begin\{([^}]+)\}(.*)$/;
-  const END = /^\s*\\end\{([^}]+)\}\s*$/;
-  const ITEM = /^(\s*)\\item\b[ \t]*(.*)$/;
-  const CTL = /^\s*\\(usepackage|documentclass|newcommand|renewcommand|providecommand|def|input|include|includeonly|bibliographystyle|bibliography|addbibresource|graphicspath|pagestyle|thispagestyle|setlength|geometry|hypersetup|maketitle|tableofcontents|listoffigures|listoftables|printbibliography|clearpage|newpage|pagebreak|bigskip|medskip|smallskip|noindent|centering|raggedright|hline|toprule|midrule|bottomrule|label)\b/;
+  const HEAD = /^(\s*\\(?:sub){0,2}(?:section|paragraph)\*?\s*\{)([\s\S]*)(\}[ \t]*)$/;
+  const BEGIN_LINE = /^(\s*\\begin\{)([^}]*)(\}[\s\S]*)$/;
+  const END_LINE = /^(\s*\\end\{)([^}]*)(\}[ \t]*)$/;
+  const BEGIN = /^\s*\\begin\{([^}]+)\}/;
+  const END = /^\s*\\end\{([^}]+)\}/;
+  const ITEM_LINE = /^(\s*)(\\item\b[ \t]*)([\s\S]*)$/;
+  const COMMENT = /^(\s*)(%[\s\S]*)$/;
+  const CTL = /^\s*\\(usepackage|documentclass|newcommand|renewcommand|providecommand|def|input|include|includeonly|bibliographystyle|bibliography|addbibresource|graphicspath|pagestyle|thispagestyle|setlength|geometry|hypersetup|maketitle|tableofcontents|listoffigures|listoftables|printbibliography|clearpage|newpage|pagebreak|bigskip|medskip|smallskip|noindent|centering|raggedright|hline|toprule|midrule|bottomrule|label|title|author|date|thanks|institute|affiliation|email|keywords)\b/;
   const MATH_ENVS = new Set(['equation', 'equation*', 'align', 'align*', 'alignat', 'alignat*', 'gather', 'gather*', 'multline', 'multline*', 'flalign', 'flalign*', 'displaymath', 'math', 'eqnarray', 'eqnarray*']);
   const LIST_ENVS = new Set(['itemize', 'enumerate', 'description']);
   const BULLETS = ['•', '◦', '▪'];
 
-  const HEAD_LVL = { section: 1, subsection: 2, subsubsection: 3, paragraph: 4, subparagraph: 5 };
+  function freshCtx() { return { lists: [], math: null, verbatim: false }; }
 
-  /** The context a row is read in. Mutated as the file is walked. */
-  function freshCtx() {
-    return { lists: [], math: null, mathDelim: false, verbatim: false };
-  }
-
-  function stepCtxBefore(line, ctx) {
-    // A \[ or $$ on its own opens display math without an environment.
-    if (!ctx.math) {
-      if (/^\s*\\\[\s*$/.test(line) || /^\s*\$\$\s*$/.test(line)) { ctx.math = '\\['; ctx.opened = true; return; }
-    }
+  function stepBefore(line, ctx) {
+    if (!ctx.math && (/^\s*\\\[\s*$/.test(line) || /^\s*\$\$\s*$/.test(line))) { ctx.math = '['; return; }
     const b = BEGIN.exec(line);
     if (b) {
       const env = b[1].trim();
       if (LIST_ENVS.has(env)) ctx.lists.push({ env, n: 0 });
       else if (MATH_ENVS.has(env)) ctx.math = env;
       else if (env === 'verbatim' || env === 'lstlisting' || env === 'minted') ctx.verbatim = true;
-      ctx.opened = true;
-      return;
     }
   }
 
-  function stepCtxAfter(line, ctx) {
-    ctx.opened = false;
+  function stepAfter(line, ctx) {
     if (ctx.math && (/^\s*\\\]\s*$/.test(line) || /^\s*\$\$\s*$/.test(line))) { ctx.math = null; return; }
     const e = END.exec(line);
     if (e) {
@@ -122,251 +119,116 @@
     }
   }
 
-  /** The rendered innerHTML and the classes/attrs for one row. */
-  function decorate(line, ctx) {
-    const cls = [];
-    const attr = {};
-    let html;
-
-    if (ctx.verbatim && !BEGIN.test(line) && !END.test(line)) {
-      cls.push('rctl');
-      return { cls, attr, html: esc(line) || '​' };
-    }
-
-    // A whole-line comment.
-    const cm = /^(\s*)%(.*)$/.exec(line);
-    if (cm && !/^\s*%+\s*!/.test(line)) {
-      cls.push('rcom');
-      html = `<span class="mk">${esc(cm[1])}%</span>${esc(cm[2]) || '​'}`;
-      return { cls, attr, html };
-    }
-
-    // Environment delimiters — \begin / \end — as a quiet named rule.
-    const b = BEGIN.exec(line);
-    if (b) {
-      cls.push('renv');
-      html = `<span class="mk">\\begin{</span><span class="name">${esc(b[1].trim())}</span><span class="mk">}${esc(b[2] || '')}</span>`;
-      return { cls, attr, html };
-    }
-    const e = END.exec(line);
-    if (e) {
-      cls.push('renv');
-      html = `<span class="mk">\\end{</span><span class="name">${esc(e[1].trim())}</span><span class="mk">}</span>`;
-      return { cls, attr, html };
-    }
-
-    // Bare display-math delimiter.
-    if (/^\s*\\\[\s*$/.test(line) || /^\s*\\\]\s*$/.test(line) || /^\s*\$\$\s*$/.test(line)) {
-      cls.push('rmath', 'delim');
-      html = esc(line.trim());
-      return { cls, attr, html };
-    }
-
-    // Inside a math environment: set the whole line as maths.
-    if (ctx.math) {
-      cls.push('rmath');
-      const tail = /\\\\\s*$/.test(line);
-      const body = line.replace(/\\\\\s*$/, '');
-      html = `<span class="rmi">${mathHTML(body.trim())}</span>${tail ? '<span class="mk"> \\\\</span>' : ''}`;
-      return { cls, attr, html };
-    }
-
-    // A heading.
-    const h = HEAD.exec(line);
-    if (h) {
-      const lvl = HEAD_LVL[h[2]] || 3;
-      cls.push('rhead');
-      html =
-        `<span class="mk">${esc(h[1])}\\${h[2]}{</span>` +
-        `<span class="rh" data-lvl="${lvl}">${inlineHTML(h[3])}</span>` +
-        `<span class="mk">}</span>`;
-      return { cls, attr, html };
-    }
-
-    // A list item.
-    const it = ITEM.exec(line);
-    if (it && ctx.lists.length) {
-      const top = ctx.lists[ctx.lists.length - 1];
-      const depth = Math.min(ctx.lists.length - 1, 2);
-      cls.push('ritem');
-      attr['data-depth'] = String(depth);
-      let mark;
-      if (top.env === 'enumerate') { top.n += 1; mark = ordinal(top.n, depth) + '.'; }
-      else if (top.env === 'description') mark = '–';
-      else mark = BULLETS[depth] || BULLETS[0];
-      html = `<span class="bullet">${esc(mark)}</span><span class="mk">${esc(it[1])}\\item </span>${inlineHTML(it[2]) || '​'}`;
-      return { cls, attr, html };
-    }
-
-    // A structural / preamble line with nothing to render.
-    if (CTL.test(line)) {
-      cls.push('rctl');
-      html = inlineHTML(line) || '​';
-      return { cls, attr, html };
-    }
-
-    // Prose.
-    html = inlineHTML(line);
-    if (html === '') html = '​';
-    return { cls, attr, html };
-  }
-
   const ORD_A = 'abcdefghijklmnopqrstuvwxyz';
   const ORD_R = ['i', 'ii', 'iii', 'iv', 'v', 'vi', 'vii', 'viii', 'ix', 'x', 'xi', 'xii'];
-  function ordinal(n, depth) {
-    if (depth === 1) return ORD_A[(n - 1) % 26] || String(n);
-    if (depth === 2) return ORD_R[n - 1] || String(n);
-    return String(n);
-  }
+  const ordinal = (n, depth) =>
+    depth === 1 ? (ORD_A[(n - 1) % 26] || String(n))
+      : depth === 2 ? (ORD_R[n - 1] || String(n))
+        : String(n);
 
-  // --------------------------------------------------------- inline markup
+  // ------------------------------------------------------------ inline marks
+  //
+  // The wraps that have a look, kept character-for-character: the command and
+  // its braces go in a faint <span class="mk">, the argument keeps its own
+  // styling, and nothing is added or dropped — so the row's text still reads
+  // back as the source line.
 
-  // Typography that is punctuation, not commands: curled quotes, the two
-  // dashes. Runs on text with every backslash already peeled off by
-  // inlineHTML, so it never has a control sequence to worry about.
-  const QUOTES = (s) => s
-    .replace(/``/g, '“').replace(/''/g, '”')
-    .replace(/(^|[\s(\[])`/g, '$1‘').replace(/'/g, '’')
-    .replace(/---/g, '—').replace(/(^|[^-])--(?!-)/g, '$1–')
-    .replace(/~/g, ' ');
+  const INLINE = { textbf: 'rb', bfseries: 'rb', textit: 'ri', emph: 'ri', textsl: 'ri', itshape: 'ri', textsc: 'rsc', scshape: 'rsc', texttt: 'rtt', ttfamily: 'rtt', underline: 'ru', uline: 'ru' };
 
-  // \command with a look but no argument.
-  const LX = 'L<span style="vertical-align:.24em;font-size:.72em;margin:0 -.14em">a</span>TeX';
-  const TX = 'T<span style="vertical-align:-.2em;margin:0 -.06em">e</span>X';
-  const TYPO = {
-    LaTeX: LX, LaTeXe: LX + ' 2e', TeX: TX, XeLaTeX: 'Xe' + LX,
-    ldots: '…', dots: '…', textellipsis: '…', S: '§', P: '¶',
-    dag: '†', ddag: '‡', copyright: '©', textcopyright: '©',
-    pounds: '£', textbackslash: '\\', textasciitilde: '~', textasciicircum: '^',
-    textbullet: '•', textendash: '–', textemdash: '—',
-    ss: 'ß', ae: 'æ', AE: 'Æ', oe: 'œ', OE: 'Œ',
-    aa: 'å', AA: 'Å', o: 'ø', O: 'Ø', l: 'ł', L: 'Ł',
-    noindent: '', par: '', bigskip: '', medskip: '', smallskip: '', centering: '',
-  };
-  const today = () => new Date().toLocaleDateString(undefined, { year: 'numeric', month: 'long', day: 'numeric' });
-
-  const WRAP = {
-    textbf: 'rb', bfseries: 'rb', textit: 'ri', emph: 'ri', textsl: 'ri', itshape: 'ri',
-    textsc: 'rsc', scshape: 'rsc', texttt: 'rtt', ttfamily: 'rtt', textrm: '',
-    textnormal: '', textmd: '', textup: '', underline: 'ru', uline: 'ru', text: '',
-    mbox: '', caption: 'ri', title: 'rb',
-  };
-  // \command{key} that reads as a small token rather than as its markup.
-  const CHIP = {
-    ref: '', eqref: '', cref: '', Cref: '', autoref: '', nameref: '', vref: '',
-    pageref: 'p. ', cite: '', citep: '', citet: '', citeauthor: '', citeyear: '',
-    label: '§ ', url: '', href: '',
-  };
-
-  /** One brace group starting at `i` (which must point at "{"). Returns the
-   *  inner text and the index just past the closing brace. */
   function group(str, i) {
     let depth = 0;
     for (let j = i; j < str.length; j += 1) {
-      const c = str[j];
-      if (c === '{') depth += 1;
-      else if (c === '}') { depth -= 1; if (!depth) return [str.slice(i + 1, j), j + 1]; }
+      if (str[j] === '{') depth += 1;
+      else if (str[j] === '}') { depth -= 1; if (!depth) return [str.slice(i + 1, j), j + 1]; }
     }
     return [str.slice(i + 1), str.length];
   }
 
-  /** Render inline LaTeX to HTML: the wraps that have a look, the chips, inline
-   *  maths, and the small typographic substitutions. Everything else is text. */
-  function inlineHTML(src) {
+  const mk = (s) => `<span class="mk">${esc(s)}</span>`;
+
+  function inlineHTML(s) {
     let out = '';
     let i = 0;
-    while (i < src.length) {
-      const c = src[i];
-
-      if (c === '%') { out += `<span class="mk">${esc(src.slice(i))}</span>`; break; }
-
-      if (c === '$') {
-        const end = src.indexOf('$', i + 1);
-        if (end !== -1) {
-          out += `<span class="mk">$</span><span class="rmi">${mathHTML(src.slice(i + 1, end))}</span><span class="mk">$</span>`;
-          i = end + 1;
-          continue;
-        }
-      }
-
+    while (i < s.length) {
+      const c = s[i];
+      if (c === '%') { out += mk(s.slice(i)); break; }
       if (c === '\\') {
-        if (src[i + 1] === '\\') { out += '<span class="mk">\\\\</span>'; i += 2; continue; }
-        const vb = /^\\verb\*?(.)/.exec(src.slice(i));
-        if (vb) {
-          const d = vb[1];
-          const close = src.indexOf(d, i + vb[0].length);
-          const body = close === -1 ? src.slice(i + vb[0].length) : src.slice(i + vb[0].length, close);
-          out += `<span class="mk">\\verb${d}</span><span class="rtt">${esc(body)}</span><span class="mk">${d}</span>`;
-          i = close === -1 ? src.length : close + 1;
-          continue;
-        }
-        // An escaped character stands for itself; a thin space or a tie reads
-        // as a space.
-        if ('%&_#${}'.includes(src[i + 1])) { out += esc(src[i + 1]); i += 2; continue; }
-        if (src[i + 1] === ',' || src[i + 1] === ';' || src[i + 1] === ' ') { out += ' '; i += 2; continue; }
-        if (src[i + 1] === '!') { i += 2; continue; }
-
-        const m = /^\\([A-Za-z]+)\*?/.exec(src.slice(i));
+        // An escaped character: dim the pair, keep both characters.
+        if (s[i + 1] && !/[A-Za-z]/.test(s[i + 1])) { out += mk(s.slice(i, i + 2)); i += 2; continue; }
+        const m = /^\\([A-Za-z@]+)\*?/.exec(s.slice(i));
         if (m) {
           const cmd = m[1];
-          let k = i + m[0].length;
-          while (src[k] === ' ') k += 1;
-
-          if (cmd === 'footnote' && src[k] === '{') {
-            const [, next] = group(src, k);
-            out += `<sup class="chip">†</sup><span class="mk">\\footnote{…}</span>`;
+          const k = i + m[0].length;
+          if (INLINE[cmd] && s[k] === '{') {
+            const [inner, next] = group(s, k);
+            out += `${mk(m[0] + '{')}<span class="${INLINE[cmd]}">${inlineHTML(inner)}</span>${mk('}')}`;
             i = next;
             continue;
           }
-          if (WRAP[cmd] !== undefined && src[k] === '{') {
-            const [inner, next] = group(src, k);
-            const klass = WRAP[cmd];
-            out += `<span class="mk">\\${cmd}{</span>${klass ? `<span class="${klass}">` : ''}${inlineHTML(inner)}${klass ? '</span>' : ''}<span class="mk">}</span>`;
-            i = next;
-            continue;
-          }
-          if (CHIP[cmd] !== undefined && src[k] === '{') {
-            const [inner, next] = group(src, k);
-            const lab = cmd === 'label';
-            const isUrl = cmd === 'url' || cmd === 'href';
-            const key = isUrl
-              ? inner.split(/[?#]/)[0].replace(/^https?:\/\//, '').replace(/\/$/, '')
-              : inner.split(',')[0].trim() + (inner.includes(',') ? ' +' : '');
-            out += `<span class="mk">\\${cmd}{</span><span class="chip${lab ? ' lab' : ''}">${esc(CHIP[cmd] + key)}</span><span class="mk">}</span>`;
-            i = next;
-            continue;
-          }
-          if (cmd === 'today') { out += today(); i += m[0].length; continue; }
-          if (TYPO[cmd] !== undefined) {
-            out += TYPO[cmd];
-            i += m[0].length;
-            if (src[i] === '{' && src[i + 1] === '}') i += 2;
-            continue;
-          }
-          // No rendered form of its own: let the command melt, and take an
-          // empty argument with it.
-          out += `<span class="mk">\\${cmd}${src[i + m[0].length] === '{' && src[i + m[0].length + 1] === '}' ? '{}' : ''}</span>`;
-          i += m[0].length + (src[i + m[0].length] === '{' && src[i + m[0].length + 1] === '}' ? 2 : 0);
+          out += mk(m[0]);
+          i += m[0].length;
           continue;
         }
       }
-      // Plain run up to the next command, %, or $.
+      if (c === '{' || c === '}' || c === '$' || c === '&') { out += mk(c); i += 1; continue; }
       let j = i;
-      while (j < src.length && src[j] !== '\\' && src[j] !== '%' && src[j] !== '$') j += 1;
+      while (j < s.length && !'\\{}$&%'.includes(s[j])) j += 1;
       if (j === i) j = i + 1;
-      out += QUOTES(esc(src.slice(i, j)));
+      out += esc(s.slice(i, j));
       i = j;
     }
     return out;
   }
 
+  /** A row's classes, marker and inner HTML — the HTML's text is always the
+   *  source line, so the row can sit in a contenteditable and be read back by
+   *  reading its text. */
+  function lineHTML(raw, ctx) {
+    if (ctx.verbatim && !/^\s*\\(begin|end)\{/.test(raw)) return { cls: ['rverb'], html: esc(raw) || ZWSP };
+
+    const cm = COMMENT.exec(raw);
+    if (cm && !/^\s*%+\s*!/.test(raw)) {
+      return { cls: ['rcom'], html: `${esc(cm[1])}${mk('%')}${esc(cm[2].slice(1)) || ZWSP}` };
+    }
+
+    const h = HEAD.exec(raw);
+    if (h) {
+      const lvl = Math.min((h[1].match(/sub/g) || []).length + 1, 5);
+      return { cls: ['rhead'], html: `${mk(h[1])}<span class="rh" data-lvl="${lvl}">${inlineHTML(h[2]) || ZWSP}</span>${mk(h[3])}` };
+    }
+
+    const bg = BEGIN_LINE.exec(raw);
+    if (bg) return { cls: ['renv'], html: `${mk(bg[1])}<span class="name">${esc(bg[2])}</span>${mk(bg[3])}` };
+    const en = END_LINE.exec(raw);
+    if (en) return { cls: ['renv'], html: `${mk(en[1])}<span class="name">${esc(en[2])}</span>${mk(en[3])}` };
+
+    if (/^\s*(\\\[|\\\]|\$\$)\s*$/.test(raw)) return { cls: ['rmath', 'delim'], html: esc(raw) || ZWSP };
+
+    const it = ITEM_LINE.exec(raw);
+    if (it && ctx.lists.length) {
+      const depth = Math.min(ctx.lists.length - 1, 2);
+      const top = ctx.lists[ctx.lists.length - 1];
+      let marker;
+      if (top.env === 'enumerate') { top.n += 1; marker = ordinal(top.n, depth) + '.'; }
+      else if (top.env === 'description') marker = '–';
+      else marker = BULLETS[depth] || BULLETS[0];
+      return {
+        cls: ['ritem'], attr: { 'data-depth': String(depth), 'data-mark': marker },
+        html: `${esc(it[1])}${mk(it[2])}${inlineHTML(it[3]) || ZWSP}`,
+      };
+    }
+
+    if (ctx.math) return { cls: ['rmath'], html: inlineHTML(raw) || ZWSP };
+    if (CTL.test(raw)) return { cls: ['rctl'], html: inlineHTML(raw) || ZWSP };
+    return { cls: [], html: inlineHTML(raw) || ZWSP };
+  }
+
   // ------------------------------------------------------------- mathematics
   //
-  // Not a typesetter — the one in this file makes the PDF. This is the same
-  // idea as the source pane's colouring: a quick, honest read of the markup,
-  // enough to see the shape of a formula. Fractions stack, scripts raise and
-  // lower, a few hundred symbols get their character, and anything unknown is
-  // shown as its name rather than pretended away.
+  // Not a typesetter — the one in this file makes the PDF. A displayed line
+  // draws like this while the caret is elsewhere; touch it and it is source
+  // again. Fractions stack, scripts raise and lower, a few hundred symbols
+  // get their character, and anything unknown is shown as its name.
 
   const SYM = {
     alpha: 'α', beta: 'β', gamma: 'γ', delta: 'δ', epsilon: 'ε', varepsilon: 'ε',
@@ -403,15 +265,14 @@
     sin: 'sin', cos: 'cos', tan: 'tan', cot: 'cot', sec: 'sec', csc: 'csc', sinh: 'sinh', cosh: 'cosh',
     tanh: 'tanh', arcsin: 'arcsin', arccos: 'arccos', arctan: 'arctan', bmod: 'mod', pmod: 'mod',
     ldots: '…', cdots: '⋯', vdots: '⋮', ddots: '⋱', dots: '…',
-    quad: ' ', qquad: '  ', langle: '⟨', rangle: '⟩', lceil: '⌈',
-    rceil: '⌉', lfloor: '⌊', rfloor: '⌋', backslash: '\\', vert: '|', Vert: '‖',
-    lbrace: '{', rbrace: '}', lbrack: '[', rbrack: ']', colon: ':', neg2: '',
+    langle: '⟨', rangle: '⟩', lceil: '⌈', rceil: '⌉', lfloor: '⌊', rfloor: '⌋',
+    backslash: '\\', vert: '|', Vert: '‖', lbrace: '{', rbrace: '}', lbrack: '[', rbrack: ']', colon: ':',
     checkmark: '✓', square: '□', blacksquare: '■', triangle: '△', diamondsuit: '♢',
     surd: '√', top: '⊤', bot: '⊥', flat: '♭', sharp: '♯', natural: '♮',
   };
-  const BB = { R: 'ℝ', N: 'ℕ', Z: 'ℤ', Q: 'ℚ', C: 'ℂ', H: 'ℍ', E: 'ᵓc', P: 'ℙ', F: '𝔽', 1: '𝟙' };
-  const CAL = { L: 'ℒ', F: 'ℱ', H: 'ℋ', P: '℘', N: 'ᵊ9', O: 'ᵊa', E: 'ℰ', B: 'ℬ', R: 'ℛ', M: 'ℳ', C: '𝒞', D: '𝒟', S: '𝒮', T: '𝒯', A: '𝒜', G: '𝒢', X: '𝒳' };
-  const SPACE = { ',': ' ', ';': ' ', ':': ' ', '!': '', ' ': ' ', quad: ' ', qquad: '  ' };
+  const BB = { R: 'ℝ', N: 'ℕ', Z: 'ℤ', Q: 'ℚ', C: 'ℂ', H: 'ℍ', P: 'ℙ', F: '𝔽' };
+  const CAL = { L: 'ℒ', F: 'ℱ', H: 'ℋ', P: '℘', E: 'ℰ', B: 'ℬ', R: 'ℛ', M: 'ℳ', C: '𝒞', D: '𝒟', S: '𝒮', T: '𝒯', A: '𝒜', G: '𝒢', X: '𝒳' };
+  const SPACE = { ',': ' ', ';': ' ', ':': ' ', '!': '', ' ': ' ', quad: '  ', qquad: '    ' };
 
   function mathHTML(src) {
     let out = '';
@@ -419,35 +280,34 @@
     const n = src.length;
 
     const readScript = () => {
-      // A ^ or _ takes either a brace group or the single next token.
       i += 1;
-      let body;
-      if (src[i] === '{') { const [g, next] = group(src, i); body = mathHTML(g); i = next; }
-      else if (src[i] === '\\') { const m = /^\\([A-Za-z]+|.)/.exec(src.slice(i)); body = mathHTML(m ? m[0] : src[i]); i += m ? m[0].length : 1; }
-      else { body = esc(src[i] || ''); i += 1; }
-      return body;
+      if (src[i] === '{') { const [g, next] = group(src, i); i = next; return mathHTML(g); }
+      if (src[i] === '\\') { const m = /^\\([A-Za-z]+|.)/.exec(src.slice(i)); i += m ? m[0].length : 1; return mathHTML(m ? m[0] : ''); }
+      const ch = esc(src[i] || ''); i += 1; return ch;
+    };
+    const nextArg = () => {
+      while (src[i] === ' ') i += 1;
+      if (src[i] === '{') { const [g, next] = group(src, i); i = next; return g; }
+      if (src[i] === '\\') { const m = /^\\([A-Za-z]+|.)/.exec(src.slice(i)); i += m ? m[0].length : 1; return m ? m[0] : ''; }
+      return src[i++] || '';
     };
 
     while (i < n) {
       const c = src[i];
-
       if (c === '^') { out += `<sup>${readScript()}</sup>`; continue; }
       if (c === '_') { out += `<sub>${readScript()}</sub>`; continue; }
-      if (c === '{' ) { const [g, next] = group(src, i); out += mathHTML(g); i = next; continue; }
+      if (c === '{') { const [g, next] = group(src, i); out += mathHTML(g); i = next; continue; }
       if (c === '}') { i += 1; continue; }
-      if (c === '&') { out += ' '; i += 1; continue; }
-      if (c === ' ') { out += ' '; i += 1; continue; }
+      if (c === '&' || c === ' ' || c === '~') { out += ' '; i += 1; continue; }
       if (c === '\\') {
         if (src[i + 1] === '\\') { out += '<br>'; i += 2; continue; }
         const m = /^\\([A-Za-z]+|.)/.exec(src.slice(i));
         if (!m) { i += 1; continue; }
         const cmd = m[1];
         i += m[0].length;
-
         if ('%&_#${}'.includes(cmd)) { out += esc(cmd); continue; }
         if (cmd === ',' || cmd === ';' || cmd === ' ') { out += ' '; continue; }
-        if (cmd === '!') { continue; }
-
+        if (cmd === '!') continue;
         if (cmd === 'begin' || cmd === 'end') {
           const env = nextArg();
           if (cmd === 'end') continue;
@@ -466,7 +326,6 @@
           out += `<span class="op">(</span><span class="frac" style="font-size:.82em"><span>${mathHTML(a)}</span><span>${mathHTML(b)}</span></span><span class="op">)</span>`;
           continue;
         }
-
         if (cmd === 'frac' || cmd === 'dfrac' || cmd === 'tfrac') {
           const a = nextArg(); const b = nextArg();
           out += `<span class="frac"><span class="fn">${mathHTML(a)}</span><span class="fd">${mathHTML(b)}</span></span>`;
@@ -479,25 +338,20 @@
           out += `<span class="rad">√${idx ? `<sup style="font-size:.6em">${mathHTML(idx)}</sup>` : ''}</span><span class="rsqrt">${mathHTML(a)}</span>`;
           continue;
         }
-        if (cmd === 'mathbb' || cmd === 'mathbf' || cmd === 'mathrm' || cmd === 'mathcal' || cmd === 'mathscr' || cmd === 'mathsf' || cmd === 'mathit' || cmd === 'boldsymbol' || cmd === 'operatorname' || cmd === 'text' || cmd === 'textrm' || cmd === 'textnormal') {
+        if (/^(mathbb|mathbf|mathrm|mathcal|mathscr|mathsf|mathit|boldsymbol|operatorname|text|textrm|textnormal)$/.test(cmd)) {
           const a = nextArg();
           if (cmd === 'mathbb') { out += [...a].map((ch) => BB[ch] || ch).join(''); continue; }
           if (cmd === 'mathcal' || cmd === 'mathscr') { out += [...a].map((ch) => CAL[ch] || ch).join(''); continue; }
           const style = cmd === 'mathbf' || cmd === 'boldsymbol' ? 'font-weight:700' : 'font-style:normal';
-          out += `<span style="${style}">${cmd === 'text' || cmd === 'textrm' || cmd === 'textnormal' ? esc(a) : mathHTML(a)}</span>`;
+          out += `<span style="${style}">${/^text/.test(cmd) ? esc(a) : mathHTML(a)}</span>`;
           continue;
         }
-        if (cmd === 'left' || cmd === 'right' || cmd === 'bigl' || cmd === 'bigr' || cmd === 'Bigl' || cmd === 'Bigr' || cmd === 'big' || cmd === 'Big') {
-          // Drop the sizing wrapper; the delimiter that follows stands alone.
-          if (src[i] === '.') i += 1;
-          continue;
-        }
-        if (cmd === 'not') { const a = nextArg(); out += `<span style="text-decoration:line-through">${mathHTML(a || src[i++] || '')}</span>`; continue; }
-        if (cmd === 'hat' || cmd === 'bar' || cmd === 'vec' || cmd === 'tilde' || cmd === 'dot' || cmd === 'overline' || cmd === 'underline' || cmd === 'widehat' || cmd === 'overrightarrow') {
+        if (/^(left|right|bigl|bigr|Bigl|Bigr|big|Big)$/.test(cmd)) { if (src[i] === '.') i += 1; continue; }
+        if (cmd === 'not') { out += `<span style="text-decoration:line-through">${mathHTML(nextArg() || src[i++] || '')}</span>`; continue; }
+        if (/^(hat|bar|vec|tilde|dot|overline|underline|widehat|overrightarrow)$/.test(cmd)) {
           const a = nextArg();
-          const acc = { hat: '̂', bar: '̄', vec: '⃗', tilde: '̃', dot: '̇', widehat: '̂', overrightarrow: '⃗' }[cmd];
-          if (cmd === 'overline' || cmd === 'underline') out += `<span style="border-${cmd === 'overline' ? 'top' : 'bottom'}:1px solid currentColor">${mathHTML(a)}</span>`;
-          else out += `${mathHTML(a)}${acc}`;
+          if (cmd === 'overline' || cmd === 'underline') { out += `<span style="border-${cmd === 'overline' ? 'top' : 'bottom'}:1px solid currentColor">${mathHTML(a)}</span>`; continue; }
+          out += mathHTML(a) + ({ hat: '̂', bar: '̄', vec: '⃗', tilde: '̃', dot: '̇', widehat: '̂', overrightarrow: '⃗' }[cmd] || '');
           continue;
         }
         if (SPACE[cmd] !== undefined) { out += SPACE[cmd]; continue; }
@@ -507,407 +361,444 @@
           out += isOp ? `<span class="op">${SYM[cmd]}</span>` : isFn ? `<span style="font-style:normal;padding:0 .12em">${SYM[cmd]}</span>` : SYM[cmd];
           continue;
         }
-        // Unknown: a one- or two-letter macro is most likely a variable
-        // ( \\R ), a longer one a name. Either way, letters beat a backslash.
         if (/^[A-Za-z]+$/.test(cmd)) out += cmd.length <= 2 ? esc(cmd) : `<span style="font-style:normal">${esc(cmd)}</span>`;
         continue;
       }
-
-      // A spacing tilde, an ordinary character.
-      if (c === '~') { out += ' '; i += 1; continue; }
       out += esc(c);
       i += 1;
     }
     return out;
-
-    function nextArg() {
-      while (src[i] === ' ') i += 1;
-      if (src[i] === '{') { const [g, next] = group(src, i); i = next; return g; }
-      if (src[i] === '\\') { const m = /^\\([A-Za-z]+|.)/.exec(src.slice(i)); i += m ? m[0].length : 1; return m ? m[0] : ''; }
-      return src[i++] || '';
-    }
   }
 
   // -------------------------------------------------------- building the rows
 
-  function isHiddenComment(rowEl) {
-    return rowEl.classList.contains('rcom')
-      && app.getAttribute('data-comments') === 'hide'
-      && !rowEl.hasAttribute('data-peek')
-      && rowEl !== editRow;
-  }
+  const isFolded = (row) =>
+    row.classList.contains('rcom')
+    && app.getAttribute('data-comments') === 'hide'
+    && !row.hasAttribute('data-peek');
 
-  /** Rebuild every row from the <pre>. Cheap enough to do on any change we did
-   *  not make ourselves; for our own edits we touch one row instead. */
-  function renderAll() {
-    if (!pre) return;
-    const seq = (renderSeq += 1);
-    const lines = rawLines();
-    const ctx = freshCtx();
-    const frag = document.createDocumentFragment();
+  const rowText = (row) => noZwsp(row.__math ? row.__raw : row.textContent);
 
-    // Remember where the caret was, so an external change does not throw the
-    // writer out of the line they are in.
-    const editing = editRow ? { i: Number(editRow.dataset.i), off: caretOffset(editRow) } : null;
-    editRow = null;
-
-    // A fold marker stands in for every run of commented-out lines while
-    // comments are hidden — one line or twenty — so nothing ever disappears
-    // without a way back to it.
-    const hiding = app.getAttribute('data-comments') === 'hide';
-    let commentRun = 0;
-    const closeRun = () => {
-      if (hiding && commentRun >= 1) {
-        const gap = document.createElement('div');
-        gap.className = 'richgap';
-        gap.setAttribute('data-marble-transient', '');
-        gap.setAttribute('data-open', '');
-        gap.setAttribute('data-label', `⋯ ${commentRun} folded`);
-        // Insert before the run: walk back over the rows just added.
-        const rows = frag.childNodes;
-        gap.dataset.run = String(commentRun);
-        frag.insertBefore(gap, rows[rows.length - commentRun]);
-      }
-      commentRun = 0;
-    };
-
-    lines.forEach((line, i) => {
-      stepCtxBefore(line, ctx);
-      const { cls, attr, html } = decorate(line, ctx);
-      stepCtxAfter(line, ctx);
-
-      const row = document.createElement('div');
-      row.className = ['rline', ...cls].join(' ');
-      row.dataset.i = String(i);
-      for (const [k, v] of Object.entries(attr)) row.setAttribute(k, v);
-      row.innerHTML = html;
-      row.__raw = line;
-      frag.append(row);
-
-      if (cls.includes('rcom')) commentRun += 1;
-      else closeRun();
-    });
-    closeRun();
-
-    if (seq !== renderSeq) return;
-    page.replaceChildren(frag);
-    updateMeta();
-
-    if (editing) {
-      const row = page.children[clamp(editing.i, 0, page.children.length - 1)];
-      if (row && row.classList.contains('rline')) enterEdit(row, editing.off, true);
-    }
+  /** The source, read straight back off the rows. */
+  function sourceFromRows() {
+    return rlines().map(rowText).join('\n');
   }
 
   const clamp = (n, lo, hi) => Math.max(lo, Math.min(hi, n));
 
-  /** Recompute the context up to row `i` and redraw just that row — used when
-   *  the caret leaves a line and it goes back to its rendered form. */
-  function redecorateRow(row) {
-    const i = Number(row.dataset.i);
+  /** Draw one row from its raw line and the context it sits in. A displayed
+   *  maths line draws as maths unless `asSource` — the caret is on it, or the
+   *  selection reaches it. */
+  function paintRow(row, raw, ctx, asSource) {
+    row.__raw = raw;
+    // A line *inside* a displayed environment — not the \begin/\end that
+    // bracket it, and not a bare \[ \] $$ delimiter, which read as their own
+    // source.
+    const mathLine = ctx.math && raw.trim()
+      && !/^\s*\\(begin|end)\b/.test(raw)
+      && !/^\s*(\\\[|\\\]|\$\$)\s*$/.test(raw);
+    if (!asSource && mathLine) {
+      row.className = 'rline rmath';
+      const tail = /\\\\\s*$/.test(raw);
+      row.innerHTML = `<span class="rmi">${mathHTML(raw.replace(/\\\\\s*$/, '').replace(/&/g, ' '))}</span>${tail ? mk(' \\\\') : ''}`;
+      row.__math = true;
+    } else {
+      const out = lineHTML(raw, ctx);
+      row.className = ['rline', ...out.cls].join(' ');
+      for (const a of [...row.attributes]) if (a.name.startsWith('data-') && a.name !== 'data-i' && a.name !== 'data-peek') row.removeAttribute(a.name);
+      if (out.attr) for (const [k, v] of Object.entries(out.attr)) row.setAttribute(k, v);
+      row.innerHTML = out.html;
+      row.__math = false;
+    }
+    if (isFolded(row)) row.setAttribute('data-fold', ''); else row.removeAttribute('data-fold');
+  }
+
+  /** Rebuild every row from the <pre>. The caret's line and any line a range
+   *  selection covers are drawn as source. */
+  function renderAll() {
+    if (!pre) return;
+    const sel = captureSel();
     const lines = rawLines();
+    const src = sourceSet(sel);
     const ctx = freshCtx();
-    for (let k = 0; k < i; k += 1) { stepCtxBefore(lines[k], ctx); stepCtxAfter(lines[k], ctx); }
-    stepCtxBefore(lines[i], ctx);
-    const { cls, attr, html } = decorate(row.__raw, ctx);
-    row.className = ['rline', ...cls].join(' ');
-    for (const name of [...row.attributes].map((a) => a.name)) {
-      if (name.startsWith('data-') && name !== 'data-i' && name !== 'data-peek') row.removeAttribute(name);
-    }
-    for (const [k, v] of Object.entries(attr)) row.setAttribute(k, v);
-    row.innerHTML = html;
-  }
+    const frag = document.createDocumentFragment();
 
-  // --------------------------------------------------------------- the caret
-
-  function caretOffset(el) {
-    const sel = window.getSelection();
-    if (!sel || !sel.rangeCount) return 0;
-    const range = sel.getRangeAt(0);
-    if (!el.contains(range.endContainer)) return 0;
-    const measure = range.cloneRange();
-    measure.selectNodeContents(el);
-    measure.setEnd(range.endContainer, range.endOffset);
-    return measure.toString().length;
-  }
-
-  function setCaret(el, offset) {
-    const walker = document.createTreeWalker(el, NodeFilter.SHOW_TEXT);
-    let seen = 0;
-    let node = walker.nextNode();
-    if (!node) {
-      const range = document.createRange();
-      range.selectNodeContents(el);
-      range.collapse(false);
-      const sel = window.getSelection();
-      sel.removeAllRanges();
-      sel.addRange(range);
-      return;
-    }
-    while (node) {
-      if (seen + node.length >= offset) {
-        const range = document.createRange();
-        range.setStart(node, clamp(offset - seen, 0, node.length));
-        range.collapse(true);
-        const sel = window.getSelection();
-        sel.removeAllRanges();
-        sel.addRange(range);
-        return;
+    let run = 0;
+    const closeRun = () => {
+      if (app.getAttribute('data-comments') === 'hide' && run >= 1) {
+        frag.insertBefore(foldGap(run), frag.childNodes[frag.childNodes.length - run]);
       }
-      seen += node.length;
-      const nxt = walker.nextNode();
-      if (!nxt) {
-        const range = document.createRange();
-        range.setStart(node, node.length);
-        range.collapse(true);
-        const sel = window.getSelection();
-        sel.removeAllRanges();
-        sel.addRange(range);
-        return;
-      }
-      node = nxt;
-    }
+      run = 0;
+    };
+
+    lines.forEach((line, i) => {
+      stepBefore(line, ctx);
+      const row = document.createElement('div');
+      row.dataset.i = String(i);
+      paintRow(row, line, ctx, src.has(i));
+      stepAfter(line, ctx);
+      frag.append(row);
+      if (row.classList.contains('rcom')) run += 1; else closeRun();
+    });
+    closeRun();
+
+    page.replaceChildren(frag);
+    updateMeta();
+    restoreSel(sel);
+    markHere();
   }
 
-  function offsetFromPoint(x, y) {
-    let range = null;
-    if (document.caretRangeFromPoint) range = document.caretRangeFromPoint(x, y);
-    else if (document.caretPositionFromPoint) {
-      const p = document.caretPositionFromPoint(x, y);
-      if (p) { range = document.createRange(); range.setStart(p.offsetNode, p.offset); }
-    }
-    return range;
+  function foldGap(count) {
+    const gap = document.createElement('div');
+    gap.className = 'richgap';
+    gap.setAttribute('data-marble-transient', '');
+    gap.setAttribute('contenteditable', 'false');
+    gap.setAttribute('data-label', `⋯ ${count} folded`);
+    return gap;
   }
 
-  // ------------------------------------------------------------ edit a row
-
-  function rowAt(i) {
-    return [...page.children].find((el) => el.classList.contains('rline') && Number(el.dataset.i) === i) || null;
+  /** The line indices that must be drawn as source: the caret's line and every
+   *  line a range selection touches. */
+  function sourceSet(sel) {
+    const set = new Set();
+    if (sel) for (let i = sel.a.i; i <= sel.b.i; i += 1) set.add(i);
+    return set;
   }
 
-  function visibleNeighbour(row, dir) {
-    let el = row;
-    while (el) {
-      el = dir < 0 ? el.previousElementSibling : el.nextElementSibling;
-      if (!el) return null;
-      if (!el.classList.contains('rline')) continue;
-      if (isHiddenComment(el)) continue;
-      return el;
-    }
+  // ----------------------------------------------------- selection <-> model
+
+  function ancestorRow(node) {
+    let el = node && node.nodeType === 3 ? node.parentElement : node;
+    while (el && el !== page) { if (el.classList && el.classList.contains('rline')) return el; el = el.parentElement; }
     return null;
   }
 
-  function enterEdit(row, offset = 0, keepScroll = false) {
-    if (!row) return;
-    if (editRow && editRow !== row) leaveEdit(editRow);
-    editRow = row;
-    row.textContent = row.__raw.length ? row.__raw : '';
-    row.setAttribute('data-editing', '');
-    row.setAttribute('contenteditable', 'plaintext-only');
-    if (row.contentEditable !== 'plaintext-only') row.setAttribute('contenteditable', 'true');
-    row.spellcheck = false;
-    row.focus({ preventScroll: keepScroll });
-    setCaret(row, clamp(offset, 0, row.__raw.length));
-    if (!keepScroll) row.scrollIntoView({ block: 'nearest' });
+  function offsetIn(row, container, nodeOffset) {
+    const r = document.createRange();
+    r.selectNodeContents(row);
+    try { r.setEnd(container, nodeOffset); } catch (e) { return 0; }
+    return noZwsp(r.toString()).length;
   }
 
-  function leaveEdit(row) {
-    if (!row) return;
-    row.__raw = flatText(row);
-    row.removeAttribute('data-editing');
-    row.removeAttribute('contenteditable');
-    if (editRow === row) editRow = null;
-    redecorateRow(row);
+  /** The selection as {a:{i,off}, b:{i,off}} in row-index / character terms,
+   *  a before b, or null when it is not in the page. */
+  function captureSel() {
+    const s = window.getSelection();
+    if (!s || !s.rangeCount) return null;
+    const r = s.getRangeAt(0);
+    const ra = ancestorRow(r.startContainer);
+    const rb = ancestorRow(r.endContainer);
+    if (!ra || !rb) return null;
+    let a = { i: Number(ra.dataset.i), off: offsetIn(ra, r.startContainer, r.startOffset) };
+    let b = { i: Number(rb.dataset.i), off: offsetIn(rb, r.endContainer, r.endOffset) };
+    if (a.i > b.i || (a.i === b.i && a.off > b.off)) { const t = a; a = b; b = t; }
+    return { a, b, collapsed: r.collapsed };
   }
 
-  /** The row's text, with any stray elements a paste left behind flattened
-   *  back to characters and newlines. */
-  function flatText(row) {
-    let text = '';
-    for (const node of row.childNodes) {
-      if (node.nodeType === 3) text += node.nodeValue;
-      else if (node.nodeName === 'BR') text += '\n';
-      else text += node.textContent;
+  function caretInto(row, off) {
+    const walker = document.createTreeWalker(row, NodeFilter.SHOW_TEXT);
+    let seen = 0;
+    let last = null;
+    let node = walker.nextNode();
+    while (node) {
+      const real = noZwsp(node.nodeValue);
+      if (seen + real.length >= off) {
+        // map a real-character offset onto this node's actual offset
+        let want = off - seen;
+        let k = 0;
+        for (; k < node.nodeValue.length && want > 0; k += 1) if (node.nodeValue[k] !== ZWSP) want -= 1;
+        return [node, k];
+      }
+      seen += real.length;
+      last = node;
+      node = walker.nextNode();
     }
-    return text.replace(/​/g, '');
+    return last ? [last, last.nodeValue.length] : [row, 0];
   }
 
-  function sourceFromRows() {
-    return [...page.children]
-      .filter((el) => el.classList.contains('rline'))
-      .map((el) => (el === editRow ? flatText(el) : el.__raw))
-      .join('\n');
+  function restoreSel(sel) {
+    if (!sel) return;
+    const rows = rlines();
+    const ra = rows[clamp(sel.a.i, 0, rows.length - 1)];
+    const rb = rows[clamp(sel.b.i, 0, rows.length - 1)];
+    if (!ra || !rb) return;
+    const [sn, so] = caretInto(ra, sel.a.off);
+    const [en, eo] = caretInto(rb, sel.b.off);
+    const range = document.createRange();
+    try { range.setStart(sn, so); range.setEnd(en, eo); } catch (e) { return; }
+    const s = window.getSelection();
+    selfSelecting = true;
+    s.removeAllRanges();
+    s.addRange(range);
+    selfSelecting = false;
   }
 
-  // ------------------------------------------------------------ interactions
+  function markHere() {
+    const sel = captureSel();
+    const row = sel ? rlines()[sel.a.i] : null;
+    if (row === hereRow) return;
+    if (hereRow) hereRow.removeAttribute('data-here');
+    hereRow = row || null;
+    if (hereRow) hereRow.setAttribute('data-here', '');
+  }
+
+  // --------------------------------------------------------------- editing
+
+  document.addEventListener('selectionchange', () => {
+    if (selfSelecting || app.getAttribute('data-view') !== 'rich') return;
+    const sel = captureSel();
+    if (!sel) return;
+    const want = sourceSet(sel);
+    const rows = rlines();
+    const ctx = freshCtx();
+    const lines = rawLines();
+    let flipped = false;
+    for (let i = 0; i < rows.length; i += 1) {
+      stepBefore(lines[i] ?? rows[i].__raw, ctx);
+      const row = rows[i];
+      const shouldSource = want.has(i);
+      if (row.classList.contains('rmath') && row.__math === shouldSource) { paintRow(row, row.__raw, ctx, shouldSource); flipped = true; }
+      stepAfter(lines[i] ?? rows[i].__raw, ctx);
+    }
+    if (flipped) restoreSel(sel);
+    markHere();
+  });
+
+  page.addEventListener('beforeinput', () => {
+    // Make every maths row the edit could touch be source first, so the
+    // change lands on characters and reads back cleanly.
+    const sel = captureSel();
+    if (!sel) return;
+    const rows = rlines();
+    const ctx = freshCtx();
+    const lines = rawLines();
+    let flipped = false;
+    for (let i = 0; i < rows.length; i += 1) {
+      stepBefore(lines[i] ?? rows[i].__raw, ctx);
+      if (i >= sel.a.i && i <= sel.b.i && rows[i].__math) { paintRow(rows[i], rows[i].__raw, ctx, true); flipped = true; }
+      stepAfter(lines[i] ?? rows[i].__raw, ctx);
+    }
+    if (flipped) restoreSel(sel);
+  });
 
   page.addEventListener('input', () => {
-    if (!editRow) return;
-    const text = flatText(editRow);
-    if (text.includes('\n')) { splitRow(editRow, text); return; }
-    editRow.__raw = text;
     commit(sourceFromRows(), { coalesce: true });
+    queueReconcile();
   });
 
-  /** A newline landed in a row — usually a multi-line paste. Turn it into the
-   *  rows it describes and keep editing at the end of the last one. */
-  function splitRow(row, text) {
-    const i = Number(row.dataset.i);
-    const parts = text.split('\n');
-    row.__raw = parts[0];
-    const lines = rawLines();
-    lines.splice(i, 1, ...parts);
-    editRow = null;
-    commit(lines.join('\n'), { coalesce: false });
-    renderAll();
-    const last = rowAt(i + parts.length - 1);
-    if (last) enterEdit(last, parts[parts.length - 1].length);
+  function queueReconcile() {
+    if (reconcileQueued) return;
+    reconcileQueued = true;
+    requestAnimationFrame(() => { reconcileQueued = false; reconcile(); });
   }
+
+  /** After the browser has changed the DOM: put the rows back in one-per-line
+   *  shape, redraw the ones whose text changed, and keep the caret. */
+  function reconcile() {
+    if (!pre) return;
+    const sel = captureSel();
+
+    // 1. flatten every direct child into line strings (splitting on any \n a
+    //    paste left behind), keeping the element where there is one. A row
+    //    drawn as maths reads back through `rowText`, not its rendered text.
+    const flat = [];
+    for (const node of [...page.childNodes]) {
+      if (node.nodeType === 3) { if (node.nodeValue.replace(/\s+/g, '')) flat.push({ text: node.nodeValue }); node.remove(); continue; }
+      if (node.classList && node.classList.contains('richgap')) { node.remove(); continue; }
+      const isRow = node.classList && node.classList.contains('rline');
+      const parts = (isRow ? rowText(node) : noZwsp(node.textContent || '')).split('\n');
+      flat.push({ node, text: parts[0] });
+      for (let k = 1; k < parts.length; k += 1) flat.push({ text: parts[k] });
+    }
+    if (!flat.length) flat.push({ text: '' });
+
+    const lines = flat.map((f) => f.text);
+    const ctx = freshCtx();
+    const kept = [];
+    flat.forEach((f, i) => {
+      stepBefore(lines[i], ctx);
+      const row = f.node || document.createElement('div');
+      row.dataset.i = String(i);
+      // In range → source. No selection at all → leave each row's state as it
+      // is (a rendered equation stays rendered).
+      const asSource = sel ? (i >= sel.a.i && i <= sel.b.i) : !row.__math;
+      const needs = row.__raw !== lines[i] || !row.classList.contains('rline')
+        || (row.classList.contains('rmath') && row.__math === asSource);
+      if (needs) paintRow(row, lines[i], ctx, asSource);
+      stepAfter(lines[i], ctx);
+      kept.push(row);
+    });
+
+    // 2. splice the kept rows into place, in order, dropping the rest.
+    const have = rlines();
+    for (const row of have) if (!kept.includes(row)) row.remove();
+    kept.forEach((row, i) => {
+      const at = page.children[i];
+      if (at !== row) page.insertBefore(row, at || null);
+    });
+
+    // 3. fold markers.
+    let run = 0;
+    for (let i = 0; i < page.children.length; i += 1) {
+      const row = page.children[i];
+      if (row.classList.contains('rcom')) { run += 1; continue; }
+      if (app.getAttribute('data-comments') === 'hide' && run >= 1) { page.insertBefore(foldGap(run), page.children[i - run]); i += 1; }
+      run = 0;
+    }
+    if (app.getAttribute('data-comments') === 'hide' && run >= 1) page.insertBefore(foldGap(run), page.children[page.children.length - run]);
+
+    updateMeta();
+    restoreSel(sel);
+    markHere();
+  }
+
+  // -------------------------------------------------------------- keyboard
 
   page.addEventListener('keydown', (event) => {
-    const row = event.target.closest && event.target.closest('.rline[data-editing]');
-    if (!row) return;
+    if (app.getAttribute('data-view') !== 'rich') return;
     const meta = event.metaKey || event.ctrlKey;
-    const off = caretOffset(row);
-    const raw = row.__raw;
-    const i = Number(row.dataset.i);
-    const sel = window.getSelection();
-    const collapsed = sel && sel.isCollapsed;
 
     if (meta && (event.key === 'Enter' || event.key.toLowerCase() === 's')) return; // 13-ui typesets
-    if (meta && event.key.toLowerCase() === 'b') { event.preventDefault(); wrap(row, 'textbf'); return; }
-    if (meta && event.key.toLowerCase() === 'i') { event.preventDefault(); wrap(row, 'textit'); return; }
-    if (meta && (event.key === '/' || event.code === 'Slash')) { event.preventDefault(); commentRows(i, i); return; }
-    if (meta) return;
+    if (meta && event.key.toLowerCase() === 'b') { event.preventDefault(); wrapSelection('textbf'); return; }
+    if (meta && event.key.toLowerCase() === 'i') { event.preventDefault(); wrapSelection('textit'); return; }
+    if (meta && (event.key === '/' || event.code === 'Slash')) {
+      event.preventDefault();
+      const sel = captureSel();
+      if (sel) toggleComment(sel.a.i, sel.b.i);
+      return;
+    }
+    if (meta) return; // ⌘A, ⌘C, ⌘X, ⌘V, ⌘Z, word-jumps … all native
+
+    if (event.key === 'Tab') { event.preventDefault(); document.execCommand('insertText', false, '  '); return; }
 
     if (event.key === 'Enter') {
+      // A newline that carries the leaving line's indentation.
       event.preventDefault();
-      const indent = (/^[ \t]*/.exec(raw) || [''])[0];
-      const head = raw.slice(0, off);
-      const tail = raw.slice(off);
-      row.__raw = head;
-      const lines = rawLines();
-      lines.splice(i, 1, head, indent + tail);
-      editRow = null;
-      commit(lines.join('\n'), { coalesce: false });
-      renderAll();
-      const nextRow = rowAt(i + 1);
-      if (nextRow) enterEdit(nextRow, indent.length);
-      return;
-    }
-
-    if (event.key === 'Backspace' && collapsed && off === 0 && i > 0) {
-      event.preventDefault();
-      mergeRows(i - 1, i);
-      return;
-    }
-    if (event.key === 'Delete' && collapsed && off === raw.length && i < rawLines().length - 1) {
-      event.preventDefault();
-      mergeRows(i, i + 1);
-      return;
-    }
-
-    if (event.key === 'Tab') {
-      event.preventDefault();
-      document.execCommand('insertText', false, '  ');
-      return;
-    }
-
-    if (event.key === 'ArrowUp' && collapsed && off === 0) {
-      const prev = visibleNeighbour(row, -1);
-      if (prev) { event.preventDefault(); enterEdit(prev, prev.__raw.length); }
-    }
-    if (event.key === 'ArrowDown' && collapsed && off === raw.length) {
-      const next = visibleNeighbour(row, 1);
-      if (next) { event.preventDefault(); enterEdit(next, 0); }
+      const sel = captureSel();
+      const row = sel ? rlines()[sel.a.i] : null;
+      const indent = row ? (/^[ \t]*/.exec(row.__raw) || [''])[0] : '';
+      document.execCommand('insertText', false, '\n' + indent);
+      queueReconcile();
     }
   });
 
-  function mergeRows(a, b) {
+  /** Toggle "% " on a span of lines. Then keep the caret live: if the lines
+   *  just folded away, drop it onto the next line still showing so typing
+   *  carries on. */
+  function toggleComment(from, to) {
     const lines = rawLines();
-    const joinAt = lines[a].length;
-    lines.splice(a, 2, lines[a] + lines[b]);
-    editRow = null;
-    commit(lines.join('\n'), { coalesce: false });
-    renderAll();
-    const row = rowAt(a);
-    if (row) enterEdit(row, joinAt);
-  }
-
-  /** Toggle `% ` on a span of rows — the source pane's ⌘/, so a folded-comment
-   *  workflow and a commented-out workflow are the same keystroke. */
-  function commentRows(a, b) {
-    const lines = rawLines();
-    const slice = lines.slice(a, b + 1);
+    const slice = lines.slice(from, to + 1);
     const on = slice.every((l) => l.trim() === '' || /^\s*%/.test(l));
-    for (let k = a; k <= b; k += 1) {
+    for (let k = from; k <= to; k += 1) {
       if (lines[k].trim() === '') continue;
       const lead = (/^\s*/.exec(lines[k]) || [''])[0];
-      lines[k] = on
-        ? lines[k].replace(/^(\s*)%+[ \t]?/, '$1')
-        : `${lead}% ${lines[k].slice(lead.length)}`;
+      lines[k] = on ? lines[k].replace(/^(\s*)%+[ \t]?/, '$1') : `${lead}% ${lines[k].slice(lead.length)}`;
     }
-    editRow = null;
     commit(lines.join('\n'), { coalesce: false });
     renderAll();
-    const row = rowAt(a);
-    if (row && !isHiddenComment(row)) enterEdit(row, row.__raw.length);
+
+    const rows = rlines();
+    let landing = rows[to];
+    let off = on ? 0 : (landing ? landing.__raw.length : 0);
+    if (landing && isFolded(landing)) {
+      landing = null;
+      for (let k = to + 1; k < rows.length && !landing; k += 1) if (!isFolded(rows[k])) landing = rows[k];
+      for (let k = from - 1; k >= 0 && !landing; k -= 1) if (!isFolded(rows[k])) landing = rows[k];
+      off = 0;
+    }
+    if (landing) placeCaret(landing, off);
   }
 
-  function wrap(row, command) {
-    const sel = window.getSelection();
-    const a = caretOffset(row);
-    let b = a;
-    if (sel && sel.rangeCount && !sel.isCollapsed) {
-      const r = sel.getRangeAt(0);
-      const m = r.cloneRange();
-      m.selectNodeContents(row);
-      m.setEnd(r.startContainer, r.startOffset);
-      const start = m.toString().length;
-      b = start + r.toString().length;
-      row.__raw = row.__raw.slice(0, start) + `\\${command}{` + row.__raw.slice(start, b) + '}' + row.__raw.slice(b);
-      row.textContent = row.__raw;
-      commit(sourceFromRows(), { coalesce: false });
-      setCaret(row, start + command.length + 2);
-      return;
-    }
-    row.__raw = row.__raw.slice(0, a) + `\\${command}{}` + row.__raw.slice(a);
-    row.textContent = row.__raw;
-    commit(sourceFromRows(), { coalesce: false });
-    setCaret(row, a + command.length + 2);
+  function placeCaret(row, off) {
+    const [node, o] = caretInto(row, off);
+    const range = document.createRange();
+    try { range.setStart(node, o); range.collapse(true); } catch (e) { return; }
+    selfSelecting = true;
+    const s = window.getSelection();
+    s.removeAllRanges();
+    s.addRange(range);
+    selfSelecting = false;
+    row.scrollIntoView({ block: 'nearest' });
+    markHere();
   }
+
+  /** Wrap the selection (within one line) in a one-argument command. */
+  function wrapSelection(command) {
+    const sel = captureSel();
+    if (!sel || sel.a.i !== sel.b.i) return;
+    const lines = rawLines();
+    const line = lines[sel.a.i];
+    const open = `\\${command}{`;
+    const chosen = line.slice(sel.a.off, sel.b.off);
+    lines[sel.a.i] = line.slice(0, sel.a.off) + open + chosen + '}' + line.slice(sel.b.off);
+    commit(lines.join('\n'), { coalesce: false });
+    renderAll();
+    restoreSel({ a: { i: sel.a.i, off: sel.a.off + open.length }, b: { i: sel.a.i, off: sel.a.off + open.length + chosen.length } });
+  }
+
+  // ---------------------------------------------------------------- copy
+  //
+  // Every row's text is its source line, so a plain copy already yields
+  // LaTeX — but Chrome's block-to-text can vary, so spell it out.
+
+  function clipSource() {
+    const sel = captureSel();
+    if (!sel) return null;
+    const rows = rlines();
+    if (sel.a.i === sel.b.i) {
+      const row = rows[sel.a.i];
+      return row ? rowText(row).slice(sel.a.off, sel.b.off) : '';
+    }
+    const out = [];
+    for (let i = sel.a.i; i <= sel.b.i; i += 1) {
+      const t = rows[i] ? rowText(rows[i]) : '';
+      if (i === sel.a.i) out.push(t.slice(sel.a.off));
+      else if (i === sel.b.i) out.push(t.slice(0, sel.b.off));
+      else out.push(t);
+    }
+    return out.join('\n');
+  }
+
+  page.addEventListener('copy', (event) => {
+    const text = clipSource();
+    if (text == null) return;
+    event.preventDefault();
+    event.clipboardData.setData('text/plain', text);
+  });
+
+  page.addEventListener('cut', (event) => {
+    const text = clipSource();
+    if (text == null) return;
+    event.preventDefault();
+    event.clipboardData.setData('text/plain', text);
+    const s = window.getSelection();
+    if (s && s.rangeCount && !s.getRangeAt(0).collapsed) s.getRangeAt(0).deleteContents();
+    commit(sourceFromRows(), { coalesce: false });
+    queueReconcile();
+  });
+
+  // ----------------------------------------------------------- fold + click
 
   page.addEventListener('pointerdown', (event) => {
     const gap = event.target.closest && event.target.closest('.richgap');
     if (gap) {
       event.preventDefault();
       let el = gap.nextElementSibling;
-      while (el && el.classList.contains('rline') && el.classList.contains('rcom')) {
-        el.setAttribute('data-peek', '');
-        el = el.nextElementSibling;
-      }
-      gap.removeAttribute('data-open');
+      while (el && el.classList.contains('rline') && el.classList.contains('rcom')) { el.setAttribute('data-peek', ''); el.removeAttribute('data-fold'); el = el.nextElementSibling; }
+      gap.remove();
       return;
     }
-    const row = event.target.closest && event.target.closest('.rline');
-    if (!row || row === editRow) return;
-    if (row.getAttribute('contenteditable')) return;
-    // Let the browser place the caret, then take the offset from where it fell.
-    const range = offsetFromPoint(event.clientX, event.clientY);
-    let offset = 0;
-    if (range && row.contains(range.startContainer)) {
-      const m = range.cloneRange();
-      m.selectNodeContents(row);
-      m.setEnd(range.startContainer, range.startOffset);
-      offset = m.toString().length;
+    // A maths row drawn as maths has no characters to click into; make it
+    // source before the click lands.
+    const row = event.target.closest && event.target.closest('.rline.rmath');
+    if (row && row.__math) {
+      const lines = rawLines();
+      const ctx = freshCtx();
+      const upto = Number(row.dataset.i);
+      for (let i = 0; i < upto; i += 1) { stepBefore(lines[i], ctx); stepAfter(lines[i], ctx); }
+      stepBefore(row.__raw, ctx);
+      paintRow(row, row.__raw, ctx, true);
     }
-    event.preventDefault();
-    enterEdit(row, clamp(offset, 0, row.__raw.length));
-  });
-
-  page.addEventListener('focusout', (event) => {
-    if (event.relatedTarget && page.contains(event.relatedTarget)) return;
-    if (editRow) { commit(sourceFromRows(), { coalesce: false }); leaveEdit(editRow); }
   });
 
   // ---------------------------------------------------------- the view switch
@@ -921,9 +812,7 @@
 
   function reflect() {
     const view = app.getAttribute('data-view') || 'source';
-    for (const b of document.querySelectorAll('[data-set-view]')) {
-      b.setAttribute('aria-pressed', String(b.getAttribute('data-set-view') === view));
-    }
+    for (const b of document.querySelectorAll('[data-set-view]')) b.setAttribute('aria-pressed', String(b.getAttribute('data-set-view') === view));
     const hidden = app.getAttribute('data-comments') === 'hide';
     const cb = document.querySelector('#toggle-comments');
     if (cb) { cb.textContent = hidden ? '% hidden' : '% shown'; cb.setAttribute('aria-pressed', String(hidden)); }
@@ -934,10 +823,7 @@
     const closest = (s) => (t.closest ? t.closest(s) : null);
     const v = closest('[data-set-view]');
     if (v) { setShell('data-view', v.getAttribute('data-set-view')); if (v.getAttribute('data-set-view') === 'rich') mount(); return; }
-    if (closest('#toggle-comments')) {
-      setShell('data-comments', app.getAttribute('data-comments') === 'hide' ? 'show' : 'hide');
-      return;
-    }
+    if (closest('#toggle-comments')) { setShell('data-comments', app.getAttribute('data-comments') === 'hide' ? 'show' : 'hide'); renderAll(); return; }
     const logline = closest('.logline[data-line]');
     if (logline && app.getAttribute('data-view') === 'rich') {
       const line = Number(logline.getAttribute('data-line'));
@@ -946,7 +832,7 @@
   });
 
   function flashLine(oneBased) {
-    const row = rowAt(oneBased - 1);
+    const row = rlines()[oneBased - 1];
     if (!row) return;
     for (const hot of page.querySelectorAll('.rline.marble-hot')) hot.classList.remove('marble-hot');
     row.classList.add('marble-hot');
@@ -973,9 +859,6 @@
     lastWritten = null;
     if (!pre) return;
     preWatch = new MutationObserver(() => {
-      // Our own writes come back here too; `lastWritten` is how we skip them.
-      // Anything else is the source pane, another tab, or an agent — and the
-      // row the caret is in is carried through renderAll.
       if (pre.textContent === lastWritten) return;
       renderAll();
     });
@@ -990,15 +873,14 @@
     reflect();
   }
 
-  new MutationObserver(() => {
-    reflect();
-    // Follow the open file whatever the view, so a switch to the rich pane
-    // never shows a stale one.
-    mount();
-  }).observe(app, { attributes: true, attributeFilter: ['data-view', 'data-active', 'data-comments'] });
+  new MutationObserver(() => { reflect(); mount(); })
+    .observe(app, { attributes: true, attributeFilter: ['data-view', 'data-active', 'data-comments'] });
 
   room().onReady((marble) => {
     carrier = marble;
+    page.setAttribute('contenteditable', 'plaintext-only');
+    if (page.contentEditable !== 'plaintext-only') page.setAttribute('contenteditable', 'true');
+    page.spellcheck = false;
     mount();
   });
 })();

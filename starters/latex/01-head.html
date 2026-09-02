@@ -346,104 +346,80 @@ __ICON__
     position: relative; counter-reset: rl;
   }
 
-  /* One source line. Prose is serif and generously led; the row the caret is
-     in drops to the source font so you are editing exactly what is on disk. */
+  /* One source line, and it never changes shape — not on hover, not when the
+     caret enters it. The markup is always there, just set small and faint;
+     what you type into reads as the document because it *is* the document. */
+  #richpage { outline: none; caret-color: var(--accent-ink); }
   .rline {
     display: block; position: relative; min-height: 1.75em;
     font: 15px/1.75 var(--serif); color: var(--ink);
     white-space: pre-wrap; overflow-wrap: break-word; tab-size: 2;
-    padding: .05em .25rem; border-radius: 3px; outline: none;
-    transition: background .12s ease;
+    padding: .05em .25rem; border-radius: 3px;
   }
   .rline::before {
     counter-increment: rl; content: counter(rl);
     position: absolute; left: -2.7rem; width: 2.1rem; text-align: right;
-    font: 10.5px/1.9 var(--mono); color: var(--faint); opacity: .45;
+    font: 10.5px/1.9 var(--mono); color: var(--faint); opacity: .4;
     user-select: none; -webkit-user-select: none; pointer-events: none;
   }
-  .rline:hover { background: color-mix(in srgb, var(--accent-soft) 55%, transparent); }
-  .rline[data-editing] {
-    background: var(--accent-soft);
-    font: var(--code)/var(--leading) var(--mono); color: var(--ink);
-    white-space: pre-wrap; caret-color: var(--accent-ink);
-  }
-  .rline[data-editing]::before { opacity: 1; color: var(--accent-ink); font-weight: 600; }
+  /* The line the caret is in: a wash of colour, nothing that moves. */
+  .rline[data-here] { background: color-mix(in srgb, var(--accent-soft) 60%, transparent); }
+  .rline[data-here]::before { opacity: 1; color: var(--accent-ink); font-weight: 600; }
   .rline.marble-hot { background: var(--accent-soft); box-shadow: -2.7rem 0 0 var(--accent-soft); }
   #richpage ::selection { background: rgba(155, 182, 207, .38); }
   @media (prefers-color-scheme: dark) { #richpage ::selection { background: rgba(127, 168, 201, .32); } }
 
-  /* Markup that has a rendered form: shown as a faint ghost, gone when the row
-     is at rest, back in full when you are editing the line. */
-  .rline .mk { font: .8em/1 var(--mono); color: var(--accent-ink); opacity: .32; }
-  .rline:not([data-editing]):not(:hover) .mk { font-size: 0; letter-spacing: -.5px; }
-  .rline[data-editing] .mk { font: inherit; color: inherit; opacity: 1; }
+  /* The markup itself — backslash, braces, the command — kept on screen but
+     small and recessive, so a heading still reads as a heading with a faint
+     \section{ } around it. Same at rest, on hover and with the caret in it. */
+  .rline .mk { font: .78em/1 var(--mono); color: var(--accent-ink); opacity: .34; }
 
-  /* Headings. The row carries the size; editing it takes the size back off so
-     the braces line up under the caret. */
-  .rline .rh { display: inline-block; font-family: var(--serif); font-weight: 700; line-height: 1.25; letter-spacing: -.01em; }
-  .rline .rh[data-lvl="1"] { font-size: 1.75em; }
-  .rline .rh[data-lvl="2"] { font-size: 1.38em; }
-  .rline .rh[data-lvl="3"] { font-size: 1.15em; }
+  /* Headings — always their size, caret or no caret. */
+  .rline .rh { font-family: var(--serif); font-weight: 700; line-height: 1.3; letter-spacing: -.01em; }
+  .rline .rh[data-lvl="1"] { font-size: 1.7em; }
+  .rline .rh[data-lvl="2"] { font-size: 1.34em; }
+  .rline .rh[data-lvl="3"] { font-size: 1.14em; }
   .rline .rh[data-lvl="4"], .rline .rh[data-lvl="5"] { font-size: 1em; text-transform: uppercase; letter-spacing: .04em; }
   .rline.rhead { margin-top: .8em; }
-  .rline[data-editing] .rh { font: inherit; display: inline; text-transform: none; letter-spacing: normal; }
 
   /* Inline marks. */
   .rline .rb { font-weight: 700; }
   .rline .ri { font-style: italic; }
-  .rline .rtt { font-family: var(--mono); font-size: .92em; background: var(--accent-soft); padding: 0 .18em; border-radius: 2px; }
+  .rline .rtt { font-family: var(--mono); font-size: .92em; }
   .rline .ru { text-decoration: underline; text-underline-offset: 2px; }
   .rline .rsc { font-variant: small-caps; letter-spacing: .02em; }
-  .rline[data-editing] .rb, .rline[data-editing] .ri, .rline[data-editing] .rsc { font-weight: inherit; font-style: inherit; font-variant: inherit; }
-  .rline[data-editing] .rtt { background: none; }
 
-  /* References, citations, labels, links — a chip you can read past. */
-  .rline .chip {
-    font: .82em/1.35 var(--mono); color: var(--accent-ink);
-    background: var(--accent-soft); border: 1px solid var(--line);
-    border-radius: 999px; padding: .02em .5em; white-space: nowrap;
-  }
-  .rline .chip.lab { color: var(--faint); background: none; border-style: dashed; }
-  .rline[data-editing] .chip { font: inherit; color: inherit; background: none; border: 0; padding: 0; }
-
-  /* Lists. The bullet is drawn in the gutter of the row; nesting comes from
-     the environment stack, not from indentation in the file. */
+  /* Lists. The marker is a pseudo-element in the gutter — never part of the
+     text — and the depth comes from the environment stack, not indentation. */
   .rline.ritem { padding-left: 1.5rem; }
-  .rline.ritem > .bullet {
-    position: absolute; left: .35rem; color: var(--accent-ink);
-    font-size: .9em; user-select: none;
+  .rline.ritem::after {
+    content: attr(data-mark); position: absolute; left: .3rem; top: .05em;
+    color: var(--accent-ink); font-size: .9em; font-family: var(--serif);
+    user-select: none; pointer-events: none;
   }
   .rline.ritem[data-depth="1"] { padding-left: 2.7rem; }
-  .rline.ritem[data-depth="1"] > .bullet { left: 1.55rem; }
+  .rline.ritem[data-depth="1"]::after { left: 1.5rem; }
   .rline.ritem[data-depth="2"] { padding-left: 3.9rem; }
-  .rline.ritem[data-depth="2"] > .bullet { left: 2.75rem; }
-  .rline[data-editing].ritem { padding-left: .25rem; }
-  .rline[data-editing].ritem > .bullet { display: none; }
+  .rline.ritem[data-depth="2"]::after { left: 2.7rem; }
 
-  /* Environment delimiters — \begin / \end — as a quiet rule with a name on it. */
-  .rline.renv {
-    color: var(--faint); font: .7rem/1.7 var(--mono); letter-spacing: .04em;
-  }
-  .rline.renv .name { color: var(--accent-ink); }
-  .rline.renv::after {
-    content: ""; position: absolute; left: -.6rem; right: 0; top: 50%;
-    border-top: 1px dashed var(--line); z-index: -1;
-  }
-  .rline[data-editing].renv { color: inherit; font: var(--code)/var(--leading) var(--mono); }
-  .rline[data-editing].renv::after { display: none; }
+  /* Environment delimiters — \begin / \end — a quiet named rule. */
+  .rline.renv { color: var(--faint); }
+  .rline.renv .name { color: var(--accent-ink); font-family: var(--mono); font-size: .82em; }
+  .rline.renv .mk { opacity: .5; }
 
-  /* Preamble and other structural lines: kept as a row, set small and dim so
-     the eye slides over them without losing the count. */
-  .rline.rctl { color: var(--faint); font: .74rem/1.8 var(--mono); }
-  .rline[data-editing].rctl { color: inherit; font: var(--code)/var(--leading) var(--mono); }
+  /* Preamble and other structural lines: dim, so the eye slides past without
+     losing the count. */
+  .rline.rctl { color: var(--faint); }
+  .rline.rctl .mk { opacity: .5; }
+  .rline.rverb { font-family: var(--mono); font-size: .9em; color: var(--muted); }
 
-  /* Mathematics. A displayed line is centred in a math face; a bare delimiter
-     ( \[ , \] , \begin{equation} ) is a thin centred marker. */
-  .rline.rmath { text-align: center; font-family: var(--math); font-size: 1.05em; color: var(--ink); }
-  .rline.rmath.delim { color: var(--faint); font: .7rem/1.7 var(--mono); letter-spacing: .06em; }
-  .rline[data-editing].rmath { text-align: left; font: var(--code)/var(--leading) var(--mono); color: inherit; }
-  .rline .rmi { font-family: var(--math); }
-  .rline[data-editing] .rmi { font-family: inherit; }
+  /* Mathematics. A displayed line draws as maths while the caret is elsewhere
+     (it has an .rmi child then); with the caret on it, it is its own source,
+     left-aligned like every other line. */
+  .rline.rmath { font-family: var(--math); }
+  .rline.rmath:not(:has(.rmi)) { font-family: var(--serif); }
+  .rline.rmath .rmi { display: block; text-align: center; font-size: 1.05em; margin: .15em 0; }
+  .rline.rmath.delim { color: var(--faint); font: .72rem/1.7 var(--mono); letter-spacing: .06em; }
   .rline .frac { display: inline-flex; flex-direction: column; align-items: center; vertical-align: middle; font-size: .88em; margin: 0 .12em; }
   .rline .frac > .fn { border-bottom: 1px solid currentColor; padding: 0 .3em .04em; }
   .rline .frac > .fd { padding: .04em .3em 0; }
@@ -455,26 +431,20 @@ __ICON__
   .rline .mtx .mrow { display: flex; justify-content: center; gap: .55em; }
   .rline .mtx .mcell { padding: .05em 0; }
   .rline .op { font-size: 1.15em; vertical-align: -.12em; }
-  .rline[data-editing] .frac { display: inline; font-size: inherit; }
-  .rline[data-editing] .frac > .fn { border: 0; padding: 0; }
 
-  /* Comments. A run of them can be folded into the space between two lines;
-     the fold is a thing you click to read them without unfolding the lot. */
+  /* Comments. Dim; a run of them folds into the gap between two lines while
+     "% hidden" is on, and the fold is a thing you click to read them. */
   .rline.rcom {
-    color: var(--faint); font-family: var(--serif); font-style: italic;
+    color: var(--faint); font-style: italic;
     border-left: 2px solid var(--line); margin-left: -.7rem; padding-left: .45rem;
   }
-  .rline.rcom .mk { display: none; }
-  .rline[data-editing].rcom { color: inherit; font: var(--code)/var(--leading) var(--mono); font-style: normal; border-left-color: var(--accent); }
-  .rline[data-editing].rcom .mk { display: inline; }
-  .app[data-comments="hide"] .rline.rcom:not([data-editing]):not([data-peek]) { display: none; }
-  .rline.rcom[data-peek] { display: block; background: color-mix(in srgb, var(--accent-soft) 40%, transparent); }
+  .rline.rcom[data-fold] { display: none; }
+  .rline.rcom[data-peek] { background: color-mix(in srgb, var(--accent-soft) 40%, transparent); }
 
   .richgap {
-    display: none; position: relative; height: 0; margin: .85em 0;
+    display: block; position: relative; height: 0; margin: .9em 0 1.1em;
     border-top: 1px dashed var(--line); cursor: pointer; user-select: none;
   }
-  .app[data-comments="hide"] .richgap[data-open] { display: block; }
   .richgap::before {
     content: attr(data-label); position: absolute; left: .2rem; top: -.72em;
     font: 10px/1.4 var(--mono); color: var(--faint);
