@@ -589,7 +589,7 @@
     } else {
       const out = lineHTML(raw, ctx);
       row.className = ['rline', ...out.cls].join(' ');
-      for (const a of [...row.attributes]) if (a.name.startsWith('data-') && a.name !== 'data-i' && a.name !== 'data-peek') row.removeAttribute(a.name);
+      for (const a of [...row.attributes]) if (a.name.startsWith('data-') && a.name !== 'data-i' && a.name !== 'data-ln' && a.name !== 'data-peek') row.removeAttribute(a.name);
       if (out.attr) for (const [k, v] of Object.entries(out.attr)) row.setAttribute(k, v);
       row.innerHTML = out.html;
       row.__math = false;
@@ -619,8 +619,8 @@
       stepBefore(line, ctx);
       const row = document.createElement('div');
       row.dataset.i = String(i);
-      row.dataset.ln = String(i + 1);
       paintRow(row, line, ctx, src.has(i));
+      row.dataset.ln = String(i + 1);
       stepAfter(line, ctx);
       frag.append(row);
       if (row.classList.contains('rcom')) run += 1; else closeRun();
@@ -859,13 +859,13 @@
       stepBefore(lines[i], ctx);
       const row = f.node || document.createElement('div');
       row.dataset.i = String(i);
-      row.dataset.ln = String(i + 1);
       // In range → source. No selection at all → leave each row's state as it
       // is (a rendered equation stays rendered).
       const asSource = sel ? (i >= sel.a.i && i <= sel.b.i) : !row.__math;
       const needs = row.__raw !== lines[i] || !row.classList.contains('rline')
         || (row.classList.contains('rmath') && row.__math === asSource);
       if (needs) paintRow(row, lines[i], ctx, asSource);
+      row.dataset.ln = String(i + 1);
       stepAfter(lines[i], ctx);
       kept.push(row);
     });
