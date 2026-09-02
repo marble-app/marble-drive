@@ -246,7 +246,12 @@ __ICON__
     background: var(--card); border: 1px solid var(--line); border-radius: 10px;
     box-shadow: var(--shadow); padding: .4rem;
   }
-  .sheet[data-open="1"] { display: block; }
+  /* Comes in with a short fade and a few pixels of travel from the button it
+     hangs off — re-runs each time it opens because the display flip re-applies
+     the rule. */
+  .sheet[data-open="1"] { display: block; animation: sheet-in .12s ease-out; }
+  @keyframes sheet-in { from { opacity: 0; transform: translateY(-.4rem); } to { opacity: 1; transform: none; } }
+  @media (prefers-reduced-motion: reduce) { .sheet[data-open="1"] { animation: none; } }
   .sheet p { margin: .25rem .55rem .4rem; color: var(--faint); font-size: .78rem; line-height: 1.4; }
   .starters { display: grid; grid-template-columns: repeat(auto-fill, minmax(11rem, 1fr)); gap: .7rem; }
   .starter {
@@ -766,16 +771,19 @@ __ICON__
 
       // ------------------------------------------------------------ the verbs
 
-      document.querySelector('#new').addEventListener('click', async (event) => {
+      const newButton = document.querySelector('#new');
+      newButton.addEventListener('click', async () => {
         if (sheet.getAttribute('data-open') === '1') return sheet.removeAttribute('data-open');
         const starters = await drive.starters();
         const grid = document.querySelector('#starters');
         grid.replaceChildren();
         for (const starter of starters) grid.append(starterButton(starter));
         // Hung under the button that opened it, nudged back inside the window at
-        // the edges — the same placement the row menu does off its anchor.
+        // the edges — the same placement the row menu does off its anchor. The
+        // rect is read from the button held in scope, not from the event: this
+        // handler awaits, and after the await the event's currentTarget is gone.
         sheet.setAttribute('data-open', '1');
-        const box = event.currentTarget.getBoundingClientRect();
+        const box = newButton.getBoundingClientRect();
         sheet.style.left = Math.max(8, Math.min(box.left, innerWidth - sheet.offsetWidth - 8)) + 'px';
         sheet.style.top = Math.min(box.bottom + 6, innerHeight - sheet.offsetHeight - 8) + 'px';
       });
