@@ -242,11 +242,16 @@
     },
     {
       id: 'long-sentence', label: 'Long sentence', cat: 'e',
-      blurb: 'Over 32 words. A full stop in the middle would help.',
+      blurb: 'Over 36 words. A full stop in the middle would help.',
       check(t) {
         const words = t.trim().split(/\s+/).filter(Boolean);
-        if (words.length <= 32) return [];
-        return [{ s: 0, e: t.length, tip: `${words.length} words — consider splitting.` }];
+        if (words.length <= 36) return [];
+        // mark only the opening, not the whole sentence
+        const lead = t.replace(/^\s+/, '');
+        const off = t.length - lead.length;
+        let e = lead.search(/[,;:]/);
+        if (e < 6 || e > 52) e = Math.min(lead.length, 46);
+        return [{ s: off, e: off + e, tip: `${words.length} words — a full stop or a list would help.` }];
       },
     },
   ];
@@ -366,6 +371,10 @@
     if (app.getAttribute('data-view') !== 'rich') return;
     clearSquiggles();
     if (!checkerOn()) return;
+    // Prose only — a .bib file or a class file is not writing to check.
+    const r = room();
+    const sec = r && r.activeSection && r.activeSection();
+    if (sec && r.kindOf && r.kindOf(sec) !== 'tex') return;
 
     // paragraphs = runs of consecutive prose rows
     const rows = [...page.children].filter((el) => el.classList.contains('rline'));
