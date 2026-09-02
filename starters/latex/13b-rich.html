@@ -915,13 +915,24 @@
     if (event.key === 'Tab') { event.preventDefault(); document.execCommand('insertText', false, '  '); return; }
 
     if (event.key === 'Enter') {
-      // A newline that carries the leaving line's indentation.
+      // Split the source line here and land the caret on the new line,
+      // carrying the leaving line's indentation with it.
       event.preventDefault();
       const sel = captureSel();
-      const row = sel ? rlines()[sel.a.i] : null;
-      const indent = row ? (/^[ \t]*/.exec(row.__raw) || [''])[0] : '';
-      document.execCommand('insertText', false, '\n' + indent);
-      queueReconcile();
+      if (!sel) return;
+      const i = sel.a.i;
+      const rows = rlines();
+      const row = rows[i];
+      if (!row) return;
+      const raw = row.__raw;
+      const off = clamp(sel.a.off, 0, raw.length);
+      const indent = (/^[ \t]*/.exec(raw) || [''])[0];
+      const lines = rawLines();
+      lines.splice(i, 1, raw.slice(0, off), indent + raw.slice(off));
+      commit(lines.join('\n'), { coalesce: false });
+      renderAll();
+      const next = rlines()[i + 1];
+      if (next) placeCaret(next, indent.length);
     }
   });
 
@@ -1227,6 +1238,13 @@
 
   new MutationObserver(() => { reflect(); mount(); })
     .observe(app, { attributes: true, attributeFilter: ['data-view', 'data-active', 'data-comments'] });
+
+  // A small door for anything that decorates the rows (13c): put the caret in
+  // a row, which opens that line for editing the same as a click would.
+  window.__richview = {
+    placeCaret: (row, off) => placeCaret(row, off),
+    rowAt: (i) => rlines()[i] || null,
+  };
 
   // The first compile (and every one after it) is what fills in citation and
   // cross-reference numbers, so redraw when one lands.
