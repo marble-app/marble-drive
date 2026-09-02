@@ -275,6 +275,178 @@
     layer.children[line - 1]?.classList.add('marble-caret');
   }
 
+  // ------------------------------------------------ editing the code by script
+  //
+  // Tab, Enter and the shortcuts all change the source the same way: work out
+  // the next string and where the caret should sit in it, then hand both to
+  // one function. It writes the text, repaints, restores the selection itself
+  // rather than trusting the browser to, records one undo step, and asks for a
+  // recompile — everything the `input` listener does, because setting
+  // textContent by script fires no `input`.
+
+  /** The character offset of a position (container, offset) within `pre`. */
+  function offsetOf(pre, container, nodeOffset) {
+    const range = document.createRange();
+    range.selectNodeContents(pre);
+    range.setEnd(container, nodeOffset);
+    return range.toString().length;
+  }
+
+  /** The selection as two character offsets into `pre`, or null if the
+   *  selection is not inside it. */
+  function selRange(pre) {
+    const selection = window.getSelection();
+    if (!selection || !selection.rangeCount) return null;
+    const range = selection.getRangeAt(0);
+    if (!pre.contains(range.startContainer) || !pre.contains(range.endContainer)) return null;
+    return {
+      start: offsetOf(pre, range.startContainer, range.startOffset),
+      end: offsetOf(pre, range.endContainer, range.endOffset),
+    };
+  }
+
+  /** Put the selection at, or across, character offsets in `pre`. */
+  function selectRange(pre, from, to = from) {
+    const walker = document.createTreeWalker(pre, NodeFilter.SHOW_TEXT);
+    const find = (target) => {
+      let seen = 0;
+      let node = walker.nextNode();
+      while (node) {
+        if (seen + node.length >= target) return [node, Math.max(0, target - seen)];
+        seen += node.length;
+        node = walker.nextNode();
+      }
+      return [pre, pre.childNodes.length];
+    };
+    const [sn, so] = find(from);
+    walker.currentNode = pre;
+    const [en, eo] = find(to);
+    const range = document.createRange();
+    range.setStart(sn, so);
+    range.setEnd(en, eo);
+    const selection = window.getSelection();
+    selection.removeAllRanges();
+    selection.addRange(range);
+  }
+
+  /** Replace the whole text of `pre` and leave the caret where it belongs.
+   *  `coalesce` folds this into the previous undo step — right for a run of
+   *  newlines, wrong for a one-shot like bolding or a heading. */
+  function editText(pre, next, from, to = from, { coalesce = false } = {}) {
+    const was = pre.textContent;
+    if (next === was) { selectRange(pre, from, to); return; }
+    pre.textContent = next;
+    painted.add(pre);
+    paint(pre);
+    selectRange(pre, from, to);
+    followCaret(pre);
+    keepCaretInView(pre);
+    const id = carrier && carrier.id(pre);
+    if (id) {
+      const op = { type: 'setText', id, text: next };
+      carrier.record({ redo: [op], undo: [{ type: 'setText', id, text: was }] }, { coalesce });
+      carrier.op(op);
+    }
+    queueCompile();
+  }
+
+  /** Scroll the pane so the caret's line is on screen — a new line at the
+   *  bottom of the view is a line you cannot see the cursor on. */
+  function keepCaretInView(pre) {
+    const wrap = pre.closest('.codewrap');
+    const layer = pre.parentElement && pre.parentElement.querySelector('.hl');
+    const row = layer && layer.children[caretLine - 1];
+    if (!wrap || !row) return;
+    const top = row.offsetTop;
+    const bottom = top + row.offsetHeight;
+    if (bottom > wrap.scrollTop + wrap.clientHeight - 8) wrap.scrollTop = bottom - wrap.clientHeight + 40;
+    else if (top < wrap.scrollTop + 8) wrap.scrollTop = Math.max(0, top - 40);
+  }
+
+  const activeCode = () => {
+    const el = document.activeElement;
+    return el && el.matches && el.matches('.src[data-marble-code]') ? el : null;
+  };
+
+  /** Enter: a newline that carries the leaving line's indentation, and a caret
+   *  that lands on the new line rather than staying put. */
+  function insertNewline(pre) {
+    const at = selRange(pre);
+    if (!at) return;
+    const text = pre.textContent;
+    const upto = text.slice(0, at.start);
+    const indent = (/(^|\n)([ \t]*)[^\n]*$/.exec(upto) || [])[2] || '';
+    const insert = `\n${indent}`;
+    editText(pre, text.slice(0, at.start) + insert + text.slice(at.end), at.start + insert.length, at.start + insert.length, { coalesce: true });
+  }
+
+  /** Wrap the selection in a one-argument command, or drop an empty one with
+   *  the caret between its braces. */
+  function wrapSelection(pre, command) {
+    const at = selRange(pre);
+    if (!at) return;
+    const text = pre.textContent;
+    const open = `\\${command}{`;
+    const chosen = text.slice(at.start, at.end);
+    const next = text.slice(0, at.start) + open + chosen + '}' + text.slice(at.end);
+    editText(pre, next, at.start + open.length, at.start + open.length + chosen.length);
+  }
+
+  const COMMENT = /^([ \t]*)%+[ \t]?/;
+
+  /** Toggle `% ` on every line the selection touches. Comment unless every
+   *  non-blank line already is one, the way an editor's comment key behaves. */
+  function toggleComment(pre) {
+    const at = selRange(pre);
+    if (!at) return;
+    const text = pre.textContent;
+    const from = text.lastIndexOf('\n', Math.max(0, at.start - 1)) + 1;
+    let to = text.indexOf('\n', at.end);
+    if (to === -1) to = text.length;
+    const block = text.slice(from, to);
+    const lines = block.split('\n');
+    const commented = lines.every((line) => line.trim() === '' || COMMENT.test(line));
+    const next = lines
+      .map((line) => {
+        if (line.trim() === '') return line;
+        if (commented) return line.replace(COMMENT, '$1');
+        const lead = (/^\s*/.exec(line) || [''])[0];
+        return `${lead}% ${line.slice(lead.length)}`;
+      })
+      .join('\n');
+    editText(pre, text.slice(0, from) + next + text.slice(to), from, from + next.length);
+  }
+
+  const HEADINGS = ['section', 'subsection', 'subsubsection', 'paragraph', 'subparagraph'];
+  const HEADING_LINE = /^(\s*)\\(section|subsection|subsubsection|paragraph|subparagraph)\*?\s*\{([\s\S]*)\}[ \t]*$/;
+
+  /** Make the caret's line a heading of the given level — or, if it already is
+   *  that level, take the heading off and leave the words. */
+  function applyHeading(pre, level) {
+    const command = HEADINGS[level - 1];
+    if (!command) return;
+    const at = selRange(pre);
+    if (!at) return;
+    const text = pre.textContent;
+    const from = text.lastIndexOf('\n', Math.max(0, at.start - 1)) + 1;
+    let to = text.indexOf('\n', at.start);
+    if (to === -1) to = text.length;
+    const line = text.slice(from, to);
+    const lead = (/^\s*/.exec(line) || [''])[0];
+    const match = HEADING_LINE.exec(line);
+    let replacement;
+    let caret;
+    if (match && match[2] === command) {
+      replacement = lead + match[3];
+      caret = from + replacement.length;
+    } else {
+      const inner = match ? match[3] : line.slice(lead.length);
+      replacement = `${lead}\\${command}{${inner}}`;
+      caret = from + replacement.length - 1;
+    }
+    editText(pre, text.slice(0, from) + replacement + text.slice(to), caret);
+  }
+
   function wireCode(pre) {
     if (wired.has(pre)) return;
     wired.add(pre);
@@ -311,15 +483,12 @@
         document.execCommand('insertText', false, '  ');
         return;
       }
-      if (event.key === 'Enter') {
-        // Keep the indentation of the line being left, the way an editor does.
-        const offset = caretAt(pre);
-        if (offset === null) return;
-        const upto = pre.textContent.slice(0, offset);
-        const indent = (/(^|\n)([ \t]*)[^\n]*$/.exec(upto) || [])[2] || '';
-        if (!indent) return;
+      if (event.key === 'Enter' && !event.metaKey && !event.ctrlKey) {
+        // The browser's own Enter in a contenteditable <pre> can leave the
+        // caret on the line it was on; do the newline ourselves so it lands on
+        // the new one, and carry the leaving line's indentation with it.
         event.preventDefault();
-        document.execCommand('insertText', false, `\n${indent}`);
+        insertNewline(pre);
       }
     });
   }
@@ -898,7 +1067,13 @@
     }
 
     const layout = closest('[data-set-layout]');
-    if (layout) { setState('data-layout', layout.getAttribute('data-set-layout')); return; }
+    if (layout) {
+      setState('data-layout', layout.getAttribute('data-set-layout'));
+      // The PDF pane may have just gone from hidden to shown; an iframe that
+      // laid out at zero width shows nothing until it is pointed again.
+      requestAnimationFrame(show);
+      return;
+    }
 
     const zoom = closest('[data-set-zoom]');
     if (zoom) {
@@ -958,16 +1133,38 @@
     wrap.scrollTop = Math.max(0, row.offsetTop - wrap.clientHeight / 3);
   }
 
+  // The keyboard. ⌘⏎ and ⌘S typeset from anywhere. The rest act on the code
+  // pane that has focus: ⌘/ comments the lines the selection touches, ⌘B and
+  // ⌘I wrap it in \textbf and \textit, and ⌘⌥1..5 turn the caret's line into
+  // \section down to \subparagraph. Switching the panes stays a click on the
+  // bar — it is a view, not an edit, and nothing here should reach for it.
   document.addEventListener('keydown', (event) => {
     if (event.key === 'Escape') closeMenu();
     const meta = event.metaKey || event.ctrlKey;
     if (!meta) return;
-    if (event.key === 'Enter' || event.key.toLowerCase() === 's') {
+    const key = event.key.toLowerCase();
+    const pre = activeCode();
+
+    if (event.key === 'Enter' || (key === 's' && !event.altKey)) {
       event.preventDefault();
       recompile();
       return;
     }
-    if (event.key.toLowerCase() === 'b') {
+
+    if (pre) {
+      if (event.altKey && /^Digit[1-5]$/.test(event.code)) {
+        event.preventDefault();
+        applyHeading(pre, Number(event.code.slice(5)));
+        return;
+      }
+      if (event.altKey) return;
+      if (key === 'b') { event.preventDefault(); wrapSelection(pre, 'textbf'); return; }
+      if (key === 'i') { event.preventDefault(); wrapSelection(pre, 'textit'); return; }
+      if (key === '/' || event.code === 'Slash') { event.preventDefault(); toggleComment(pre); return; }
+    }
+
+    // ⌘B outside the editor still shows and hides the file list.
+    if (!pre && !event.altKey && key === 'b') {
       event.preventDefault();
       setState('data-rail', app.getAttribute('data-rail') === 'open' ? 'closed' : 'open');
     }
@@ -977,10 +1174,25 @@
   // record of where a file lives. Pointer events rather than HTML5 drag, so it
   // works with a finger.
   //
-  // What you are dragging follows the pointer and says where it would land, so
-  // dropping on any row inside a folder means that folder — you do not have to
-  // hit the folder's own line — and nothing underneath has to light up to tell
-  // you so.
+  // What you are dragging follows the pointer and says where it would land.
+  // Dropping on any row inside a folder means that folder — you do not have to
+  // hit the folder's own line — and the folder it would land in lights up, so
+  // there are two things saying the same thing and neither is a guess.
+
+  const clearDrop = () => {
+    for (const marked of $$('.frow.marble-drop', railList)) marked.classList.remove('marble-drop');
+    railList.classList.remove('marble-drop-top');
+  };
+
+  /** Light up the row for the folder a drop would land in, or the whole list
+   *  when that is the top of the project. */
+  function markDrop(where, ok) {
+    clearDrop();
+    if (!ok) return;
+    if (where === '') { railList.classList.add('marble-drop-top'); return; }
+    const target = $$('.frow.dir', railList).find((r) => r.getAttribute('data-path') === where);
+    if (target) target.classList.add('marble-drop');
+  }
 
   /** Where a drop at this point would put the file: a folder's path, '' for the
    *  top of the project, or null for nowhere. A row that is not a folder means
@@ -1001,6 +1213,9 @@
     if (event.button !== 0) return;
     const row = event.target.closest && event.target.closest('.frow');
     if (!row || event.target.closest('.more') || event.target.closest('.ren')) return;
+    // Stop the browser turning the press-and-drag into a text selection of the
+    // rail. The row is not text you select; it is a thing you pick up.
+    event.preventDefault();
     const path = row.getAttribute('data-path');
     const from = dirOf(path);
     const start = { x: event.clientX, y: event.clientY };
@@ -1018,6 +1233,7 @@
       if (!lifted) {
         lifted = true;
         row.classList.add('marble-lift');
+        document.body.classList.add('marble-dragging');
         railList.setPointerCapture(event.pointerId);
         ghost = document.createElement('div');
         ghost.className = 'ghost';
@@ -1026,6 +1242,7 @@
       }
       into = destination(moved.clientX, moved.clientY, row);
       const ok = allowed(into);
+      markDrop(into, ok);
       ghost.innerHTML =
         `<span class="glyph">${row.querySelector('.glyph').textContent}</span>` +
         `<span>${esc(baseOf(path))}</span>` +
@@ -1039,6 +1256,8 @@
       railList.removeEventListener('pointerup', done);
       railList.removeEventListener('pointercancel', done);
       row.classList.remove('marble-lift');
+      document.body.classList.remove('marble-dragging');
+      clearDrop();
       if (ghost) ghost.remove();
       if (!lifted || !allowed(into)) return;
       const key = row.getAttribute('data-key');

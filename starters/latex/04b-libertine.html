@@ -9,10 +9,11 @@
 // else is copied. These are Libertine's own advance widths, and Biolinum's for
 // the sans, in thousandths of the point size.
 //
-// The glyphs on the page are still Times and Helvetica, because those are two
-// of the fourteen fonts a reader is required to have and Libertine is not: the
-// letters are the wrong shape, and they are in the right places. Embedding the
-// outlines is the step after this one.
+// The outlines travel too now: 04e carries the Linux Libertine O and Linux
+// Biolinum O faces themselves, subsetted, and 06 embeds them, so these widths
+// are the widths of the glyphs actually drawn. When 04e is absent the page
+// falls back to Times and Helvetica — the letters the wrong shape, but in the
+// right places, because a reader is required to have those and Libertine is not.
 //
 // Widths and ligatures come from the OpenType fonts, the kerning from the TFM
 // files pdflatex reads — two independent sources that agree on every width to

@@ -73,6 +73,10 @@ __ICON__
     grid-template-rows: minmax(0, 1fr);
   }
   .main > * { min-height: 0; min-width: 0; }
+  /* Three views of the same project. "split" is the grid as declared; the
+     other two give one pane the whole width and take the other out of the
+     grid — display:none so it cannot be tabbed into, and a zero track so the
+     column it held cannot keep a sliver. */
   .app[data-layout="editor"] .main { grid-template-columns: var(--rail) minmax(0, 1fr) 0; }
   .app[data-layout="pdf"]    .main { grid-template-columns: var(--rail) 0 minmax(0, 1fr); }
   .app[data-layout="editor"] .pdfpane,
@@ -133,8 +137,15 @@ __ICON__
     border-radius: var(--radius); cursor: default; color: var(--muted);
     font-size: .78rem; white-space: nowrap; touch-action: none;
     padding-left: calc(.4rem + var(--depth, 0) * .8rem);
+    user-select: none; -webkit-user-select: none;
   }
   .frow:hover { background: var(--accent-soft); }
+  /* While a row is being carried, nothing on the page is text to select and
+     the cursor says so. */
+  body.marble-dragging, body.marble-dragging * { user-select: none !important; -webkit-user-select: none !important; cursor: grabbing !important; }
+  /* The folder a drop would land in, and the whole list when that is the top. */
+  .frow.marble-drop { background: var(--accent-soft); box-shadow: inset 0 0 0 1px var(--accent); color: var(--accent-ink); }
+  .filelist.marble-drop-top { box-shadow: inset 0 0 0 2px var(--accent); border-radius: var(--radius); }
   .frow.marble-open { background: var(--accent-soft); color: var(--accent-ink); font-weight: 600; }
   .frow .glyph { width: 1rem; text-align: center; opacity: .65; font-size: .78em; flex: none; }
   .frow .fn { flex: 1 1 auto; overflow: hidden; text-overflow: ellipsis; }
@@ -167,6 +178,7 @@ __ICON__
     flex: 1 1 auto; min-width: 0; font: inherit; color: var(--ink);
     background: var(--card); border: 1px solid var(--accent); border-radius: 3px;
     padding: .05rem .2rem; outline: none;
+    user-select: text; -webkit-user-select: text;
   }
 
   /* The row menu. Fixed, because the rail scrolls and a menu that scrolls with

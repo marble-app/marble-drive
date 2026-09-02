@@ -24,6 +24,9 @@
     return out;
   };
 
+  // A base64 payload — one embedded font file — as the bytes it stands for.
+  const unb64 = (text) => bytes(atob(text));
+
   /** A string as a PDF reader reads it: parentheses and backslashes escaped,
    *  anything outside printable ASCII written as an octal code. */
   function literal(codes) {
@@ -155,17 +158,44 @@
 
     // Fonts
     const fontIds = new Map();
+    const embed = window.TeX && window.TeX.embed;
     for (const key of fontsUsed) {
       const spec = enc().FONTS[key];
       if (!spec) continue;
       const id = reserve();
       fontIds.set(key, id);
-      const encoding = spec.symbol ? '' : ' /Encoding /WinAnsiEncoding';
-      // If the page was measured in a font this file cannot carry, the widths
-      // it was measured with travel instead. The reader draws Times and steps
-      // by Libertine, so a word ends where the typesetter said it would.
       const widths = spec.symbol ? null : measured && measured[key];
       const declared = widths ? ` /FirstChar 32 /LastChar 255 /Widths [${widths.join(' ')}]` : '';
+
+      // When the outline for this key has travelled (04e), the page is drawn in
+      // the face acmart would set — Linux Libertine O, Linux Biolinum O — and
+      // the widths 04b measured are the widths of those very glyphs. The file
+      // goes in as a FontFile3, which is why this document is a 1.7.
+      const face = !spec.symbol && embed && embed[key];
+      if (face) {
+        const raw = unb64(face.b64);
+        const fileId = reserve();
+        put(fileId, `<< /Length ${raw.length} /Subtype /OpenType >>`, raw);
+        const descId = reserve();
+        put(
+          descId,
+          `<< /Type /FontDescriptor /FontName /${face.name} /Flags ${face.flags}` +
+            ` /FontBBox [${face.bbox.join(' ')}] /ItalicAngle ${face.italic}` +
+            ` /Ascent ${face.ascent} /Descent ${face.descent} /CapHeight ${face.cap}` +
+            ` /StemV ${face.stemv} /FontFile3 ${fileId} 0 R >>`,
+        );
+        put(
+          id,
+          `<< /Type /Font /Subtype /Type1 /BaseFont /${face.name}` +
+            ` /Encoding /WinAnsiEncoding${declared} /FontDescriptor ${descId} 0 R >>`,
+        );
+        continue;
+      }
+
+      // No outline for this key: draw it in the base-14 font of the same shape
+      // and step by whatever width array reached here — Times moving at
+      // Libertine's pace, so a word still ends where the typesetter said.
+      const encoding = spec.symbol ? '' : ' /Encoding /WinAnsiEncoding';
       put(id, `<< /Type /Font /Subtype /Type1 /BaseFont /${spec.pdf}${encoding}${declared} >>`);
     }
 
@@ -288,7 +318,7 @@
       at += part.length;
     };
 
-    push('%PDF-1.4\n%\xE2\xE3\xCF\xD3\n');
+    push('%PDF-1.7\n%\xE2\xE3\xCF\xD3\n');
     const offsets = new Array(objects.length + 1).fill(0);
     objects.forEach((object, i) => {
       const id = i + 1;
