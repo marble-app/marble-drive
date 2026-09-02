@@ -1,0 +1,1005 @@
+
+<script data-marble-id="__ID__">
+// -------------------------------------------------------- the laid-out view
+//
+// The source pane and this one are two ways of looking at one <pre>. Nothing
+// here is a second copy of the file: the rows are the lines of the source,
+// rebuilt whenever it changes, and an edit in a row is the same setText the
+// source pane files — same undo step, same recompile. The only thing this
+// view adds to the document is `data-view` and `data-comments` on the shell,
+// two attributes that say which pane shows and whether commented-out lines
+// are folded away.
+//
+// One row per source line, always. Markup that has a rendered form (a
+// heading, \textbf, a chip for \ref) is drawn instead of the raw command
+// while the row is at rest, and handed back verbatim the moment the caret
+// enters the line — so what you edit is exactly the bytes on disk. A run of
+// comments can be folded into the gap between two lines and stepped over.
+
+(() => {
+  const app = document.querySelector('#app');
+  const rich = document.querySelector('#rich');
+  const page = document.querySelector('#richpage');
+  if (!app || !rich || !page) return;
+
+  const nameEl = rich.querySelector('.rname');
+  const metaEl = rich.querySelector('.rmeta');
+
+  const esc = (s) => String(s).replace(/[&<>]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;' }[c]));
+  const room = () => window.__latexroom;
+
+  let carrier = null;
+  let pre = null;               // the <pre class="src"> we are mirroring
+  let preWatch = null;          // its MutationObserver
+  let lastWritten = null;       // the last text we put in the <pre> ourselves
+  let editRow = null;           // the row currently shown as raw source
+  let renderSeq = 0;
+
+  // -------------------------------------------------------------- the source
+
+  /** The <pre> of the open file, when the file is one that reads as prose. A
+   *  class file or a bibliography style is thousands of lines this view was
+   *  not written for; an image has no source at all. Those keep to the
+   *  source pane, and the rich pane says so. */
+  function activePre() {
+    const r = room();
+    if (!r) return null;
+    const section = r.activeSection();
+    if (!section) return null;
+    const kind = r.kindOf(section);
+    if (kind !== 'tex' && kind !== 'bib') return null;
+    return r.preOf(section);
+  }
+
+  const rawLines = () => (pre ? pre.textContent.split('\n') : ['']);
+
+  /** Push the rows back to the <pre>, the way a keystroke in the source pane
+   *  would. `lastWritten` lets our own MutationObserver tell our write apart
+   *  from one made in another tab. */
+  function commit(next, { coalesce = true } = {}) {
+    if (!pre || !carrier) return;
+    if (next === pre.textContent) return;
+    lastWritten = next;
+    room().writeSource(pre, next, { coalesce });
+    updateMeta();
+  }
+
+  function updateMeta() {
+    const r = room();
+    const section = r && r.activeSection();
+    if (nameEl && section) nameEl.textContent = r.nameOf(section);
+    const n = rawLines().length;
+    if (metaEl) metaEl.textContent = `${n} line${n === 1 ? '' : 's'}`;
+  }
+
+  // --------------------------------------------------------- reading a line
+  //
+  // Each row is classified once, from its own text and a little context — how
+  // deep in a list it sits, whether a math environment is open. The context
+  // is carried down the file as the rows are built.
+
+  const HEAD = /^(\s*)\\(section|subsection|subsubsection|paragraph|subparagraph)\*?\s*\{([\s\S]*?)\}\s*$/;
+  const BEGIN = /^\s*\\begin\{([^}]+)\}(.*)$/;
+  const END = /^\s*\\end\{([^}]+)\}\s*$/;
+  const ITEM = /^(\s*)\\item\b[ \t]*(.*)$/;
+  const CTL = /^\s*\\(usepackage|documentclass|newcommand|renewcommand|providecommand|def|input|include|includeonly|bibliographystyle|bibliography|addbibresource|graphicspath|pagestyle|thispagestyle|setlength|geometry|hypersetup|maketitle|tableofcontents|listoffigures|listoftables|printbibliography|clearpage|newpage|pagebreak|bigskip|medskip|smallskip|noindent|centering|raggedright|hline|toprule|midrule|bottomrule|label)\b/;
+  const MATH_ENVS = new Set(['equation', 'equation*', 'align', 'align*', 'alignat', 'alignat*', 'gather', 'gather*', 'multline', 'multline*', 'flalign', 'flalign*', 'displaymath', 'math', 'eqnarray', 'eqnarray*']);
+  const LIST_ENVS = new Set(['itemize', 'enumerate', 'description']);
+  const BULLETS = ['•', '◦', '▪'];
+
+  const HEAD_LVL = { section: 1, subsection: 2, subsubsection: 3, paragraph: 4, subparagraph: 5 };
+
+  /** The context a row is read in. Mutated as the file is walked. */
+  function freshCtx() {
+    return { lists: [], math: null, mathDelim: false, verbatim: false };
+  }
+
+  function stepCtxBefore(line, ctx) {
+    // A \[ or $$ on its own opens display math without an environment.
+    if (!ctx.math) {
+      if (/^\s*\\\[\s*$/.test(line) || /^\s*\$\$\s*$/.test(line)) { ctx.math = '\\['; ctx.opened = true; return; }
+    }
+    const b = BEGIN.exec(line);
+    if (b) {
+      const env = b[1].trim();
+      if (LIST_ENVS.has(env)) ctx.lists.push({ env, n: 0 });
+      else if (MATH_ENVS.has(env)) ctx.math = env;
+      else if (env === 'verbatim' || env === 'lstlisting' || env === 'minted') ctx.verbatim = true;
+      ctx.opened = true;
+      return;
+    }
+  }
+
+  function stepCtxAfter(line, ctx) {
+    ctx.opened = false;
+    if (ctx.math && (/^\s*\\\]\s*$/.test(line) || /^\s*\$\$\s*$/.test(line))) { ctx.math = null; return; }
+    const e = END.exec(line);
+    if (e) {
+      const env = e[1].trim();
+      if (LIST_ENVS.has(env)) ctx.lists.pop();
+      else if (MATH_ENVS.has(env)) ctx.math = null;
+      else if (env === 'verbatim' || env === 'lstlisting' || env === 'minted') ctx.verbatim = false;
+    }
+  }
+
+  /** The rendered innerHTML and the classes/attrs for one row. */
+  function decorate(line, ctx) {
+    const cls = [];
+    const attr = {};
+    let html;
+
+    if (ctx.verbatim && !BEGIN.test(line) && !END.test(line)) {
+      cls.push('rctl');
+      return { cls, attr, html: esc(line) || '​' };
+    }
+
+    // A whole-line comment.
+    const cm = /^(\s*)%(.*)$/.exec(line);
+    if (cm && !/^\s*%+\s*!/.test(line)) {
+      cls.push('rcom');
+      html = `<span class="mk">${esc(cm[1])}%</span>${esc(cm[2]) || '​'}`;
+      return { cls, attr, html };
+    }
+
+    // Environment delimiters — \begin / \end — as a quiet named rule.
+    const b = BEGIN.exec(line);
+    if (b) {
+      cls.push('renv');
+      html = `<span class="mk">\\begin{</span><span class="name">${esc(b[1].trim())}</span><span class="mk">}${esc(b[2] || '')}</span>`;
+      return { cls, attr, html };
+    }
+    const e = END.exec(line);
+    if (e) {
+      cls.push('renv');
+      html = `<span class="mk">\\end{</span><span class="name">${esc(e[1].trim())}</span><span class="mk">}</span>`;
+      return { cls, attr, html };
+    }
+
+    // Bare display-math delimiter.
+    if (/^\s*\\\[\s*$/.test(line) || /^\s*\\\]\s*$/.test(line) || /^\s*\$\$\s*$/.test(line)) {
+      cls.push('rmath', 'delim');
+      html = esc(line.trim());
+      return { cls, attr, html };
+    }
+
+    // Inside a math environment: set the whole line as maths.
+    if (ctx.math) {
+      cls.push('rmath');
+      const tail = /\\\\\s*$/.test(line);
+      const body = line.replace(/\\\\\s*$/, '');
+      html = `<span class="rmi">${mathHTML(body.trim())}</span>${tail ? '<span class="mk"> \\\\</span>' : ''}`;
+      return { cls, attr, html };
+    }
+
+    // A heading.
+    const h = HEAD.exec(line);
+    if (h) {
+      const lvl = HEAD_LVL[h[2]] || 3;
+      cls.push('rhead');
+      html =
+        `<span class="mk">${esc(h[1])}\\${h[2]}{</span>` +
+        `<span class="rh" data-lvl="${lvl}">${inlineHTML(h[3])}</span>` +
+        `<span class="mk">}</span>`;
+      return { cls, attr, html };
+    }
+
+    // A list item.
+    const it = ITEM.exec(line);
+    if (it && ctx.lists.length) {
+      const top = ctx.lists[ctx.lists.length - 1];
+      const depth = Math.min(ctx.lists.length - 1, 2);
+      cls.push('ritem');
+      attr['data-depth'] = String(depth);
+      let mark;
+      if (top.env === 'enumerate') { top.n += 1; mark = ordinal(top.n, depth) + '.'; }
+      else if (top.env === 'description') mark = '–';
+      else mark = BULLETS[depth] || BULLETS[0];
+      html = `<span class="bullet">${esc(mark)}</span><span class="mk">${esc(it[1])}\\item </span>${inlineHTML(it[2]) || '​'}`;
+      return { cls, attr, html };
+    }
+
+    // A structural / preamble line with nothing to render.
+    if (CTL.test(line)) {
+      cls.push('rctl');
+      html = inlineHTML(line) || '​';
+      return { cls, attr, html };
+    }
+
+    // Prose.
+    html = inlineHTML(line);
+    if (html === '') html = '​';
+    return { cls, attr, html };
+  }
+
+  const ORD_A = 'abcdefghijklmnopqrstuvwxyz';
+  const ORD_R = ['i', 'ii', 'iii', 'iv', 'v', 'vi', 'vii', 'viii', 'ix', 'x', 'xi', 'xii'];
+  function ordinal(n, depth) {
+    if (depth === 1) return ORD_A[(n - 1) % 26] || String(n);
+    if (depth === 2) return ORD_R[n - 1] || String(n);
+    return String(n);
+  }
+
+  // --------------------------------------------------------- inline markup
+
+  // Typography that is punctuation, not commands: curled quotes, the two
+  // dashes. Runs on text with every backslash already peeled off by
+  // inlineHTML, so it never has a control sequence to worry about.
+  const QUOTES = (s) => s
+    .replace(/``/g, '“').replace(/''/g, '”')
+    .replace(/(^|[\s(\[])`/g, '$1‘').replace(/'/g, '’')
+    .replace(/---/g, '—').replace(/(^|[^-])--(?!-)/g, '$1–')
+    .replace(/~/g, ' ');
+
+  // \command with a look but no argument.
+  const LX = 'L<span style="vertical-align:.24em;font-size:.72em;margin:0 -.14em">a</span>TeX';
+  const TX = 'T<span style="vertical-align:-.2em;margin:0 -.06em">e</span>X';
+  const TYPO = {
+    LaTeX: LX, LaTeXe: LX + ' 2e', TeX: TX, XeLaTeX: 'Xe' + LX,
+    ldots: '…', dots: '…', textellipsis: '…', S: '§', P: '¶',
+    dag: '†', ddag: '‡', copyright: '©', textcopyright: '©',
+    pounds: '£', textbackslash: '\\', textasciitilde: '~', textasciicircum: '^',
+    textbullet: '•', textendash: '–', textemdash: '—',
+    ss: 'ß', ae: 'æ', AE: 'Æ', oe: 'œ', OE: 'Œ',
+    aa: 'å', AA: 'Å', o: 'ø', O: 'Ø', l: 'ł', L: 'Ł',
+    noindent: '', par: '', bigskip: '', medskip: '', smallskip: '', centering: '',
+  };
+  const today = () => new Date().toLocaleDateString(undefined, { year: 'numeric', month: 'long', day: 'numeric' });
+
+  const WRAP = {
+    textbf: 'rb', bfseries: 'rb', textit: 'ri', emph: 'ri', textsl: 'ri', itshape: 'ri',
+    textsc: 'rsc', scshape: 'rsc', texttt: 'rtt', ttfamily: 'rtt', textrm: '',
+    textnormal: '', textmd: '', textup: '', underline: 'ru', uline: 'ru', text: '',
+    mbox: '', caption: 'ri', title: 'rb',
+  };
+  // \command{key} that reads as a small token rather than as its markup.
+  const CHIP = {
+    ref: '', eqref: '', cref: '', Cref: '', autoref: '', nameref: '', vref: '',
+    pageref: 'p. ', cite: '', citep: '', citet: '', citeauthor: '', citeyear: '',
+    label: '§ ', url: '', href: '',
+  };
+
+  /** One brace group starting at `i` (which must point at "{"). Returns the
+   *  inner text and the index just past the closing brace. */
+  function group(str, i) {
+    let depth = 0;
+    for (let j = i; j < str.length; j += 1) {
+      const c = str[j];
+      if (c === '{') depth += 1;
+      else if (c === '}') { depth -= 1; if (!depth) return [str.slice(i + 1, j), j + 1]; }
+    }
+    return [str.slice(i + 1), str.length];
+  }
+
+  /** Render inline LaTeX to HTML: the wraps that have a look, the chips, inline
+   *  maths, and the small typographic substitutions. Everything else is text. */
+  function inlineHTML(src) {
+    let out = '';
+    let i = 0;
+    while (i < src.length) {
+      const c = src[i];
+
+      if (c === '%') { out += `<span class="mk">${esc(src.slice(i))}</span>`; break; }
+
+      if (c === '$') {
+        const end = src.indexOf('$', i + 1);
+        if (end !== -1) {
+          out += `<span class="mk">$</span><span class="rmi">${mathHTML(src.slice(i + 1, end))}</span><span class="mk">$</span>`;
+          i = end + 1;
+          continue;
+        }
+      }
+
+      if (c === '\\') {
+        if (src[i + 1] === '\\') { out += '<span class="mk">\\\\</span>'; i += 2; continue; }
+        const vb = /^\\verb\*?(.)/.exec(src.slice(i));
+        if (vb) {
+          const d = vb[1];
+          const close = src.indexOf(d, i + vb[0].length);
+          const body = close === -1 ? src.slice(i + vb[0].length) : src.slice(i + vb[0].length, close);
+          out += `<span class="mk">\\verb${d}</span><span class="rtt">${esc(body)}</span><span class="mk">${d}</span>`;
+          i = close === -1 ? src.length : close + 1;
+          continue;
+        }
+        // An escaped character stands for itself; a thin space or a tie reads
+        // as a space.
+        if ('%&_#${}'.includes(src[i + 1])) { out += esc(src[i + 1]); i += 2; continue; }
+        if (src[i + 1] === ',' || src[i + 1] === ';' || src[i + 1] === ' ') { out += ' '; i += 2; continue; }
+        if (src[i + 1] === '!') { i += 2; continue; }
+
+        const m = /^\\([A-Za-z]+)\*?/.exec(src.slice(i));
+        if (m) {
+          const cmd = m[1];
+          let k = i + m[0].length;
+          while (src[k] === ' ') k += 1;
+
+          if (cmd === 'footnote' && src[k] === '{') {
+            const [, next] = group(src, k);
+            out += `<sup class="chip">†</sup><span class="mk">\\footnote{…}</span>`;
+            i = next;
+            continue;
+          }
+          if (WRAP[cmd] !== undefined && src[k] === '{') {
+            const [inner, next] = group(src, k);
+            const klass = WRAP[cmd];
+            out += `<span class="mk">\\${cmd}{</span>${klass ? `<span class="${klass}">` : ''}${inlineHTML(inner)}${klass ? '</span>' : ''}<span class="mk">}</span>`;
+            i = next;
+            continue;
+          }
+          if (CHIP[cmd] !== undefined && src[k] === '{') {
+            const [inner, next] = group(src, k);
+            const lab = cmd === 'label';
+            const isUrl = cmd === 'url' || cmd === 'href';
+            const key = isUrl
+              ? inner.split(/[?#]/)[0].replace(/^https?:\/\//, '').replace(/\/$/, '')
+              : inner.split(',')[0].trim() + (inner.includes(',') ? ' +' : '');
+            out += `<span class="mk">\\${cmd}{</span><span class="chip${lab ? ' lab' : ''}">${esc(CHIP[cmd] + key)}</span><span class="mk">}</span>`;
+            i = next;
+            continue;
+          }
+          if (cmd === 'today') { out += today(); i += m[0].length; continue; }
+          if (TYPO[cmd] !== undefined) {
+            out += TYPO[cmd];
+            i += m[0].length;
+            if (src[i] === '{' && src[i + 1] === '}') i += 2;
+            continue;
+          }
+          // No rendered form of its own: let the command melt, and take an
+          // empty argument with it.
+          out += `<span class="mk">\\${cmd}${src[i + m[0].length] === '{' && src[i + m[0].length + 1] === '}' ? '{}' : ''}</span>`;
+          i += m[0].length + (src[i + m[0].length] === '{' && src[i + m[0].length + 1] === '}' ? 2 : 0);
+          continue;
+        }
+      }
+      // Plain run up to the next command, %, or $.
+      let j = i;
+      while (j < src.length && src[j] !== '\\' && src[j] !== '%' && src[j] !== '$') j += 1;
+      if (j === i) j = i + 1;
+      out += QUOTES(esc(src.slice(i, j)));
+      i = j;
+    }
+    return out;
+  }
+
+  // ------------------------------------------------------------- mathematics
+  //
+  // Not a typesetter — the one in this file makes the PDF. This is the same
+  // idea as the source pane's colouring: a quick, honest read of the markup,
+  // enough to see the shape of a formula. Fractions stack, scripts raise and
+  // lower, a few hundred symbols get their character, and anything unknown is
+  // shown as its name rather than pretended away.
+
+  const SYM = {
+    alpha: 'α', beta: 'β', gamma: 'γ', delta: 'δ', epsilon: 'ε', varepsilon: 'ε',
+    zeta: 'ζ', eta: 'η', theta: 'θ', vartheta: 'ϑ', iota: 'ι', kappa: 'κ',
+    lambda: 'λ', mu: 'μ', nu: 'ν', xi: 'ξ', pi: 'π', varpi: 'ϖ', rho: 'ρ',
+    varrho: 'ϱ', sigma: 'σ', varsigma: 'ς', tau: 'τ', upsilon: 'υ', phi: 'φ',
+    varphi: 'ϕ', chi: 'χ', psi: 'ψ', omega: 'ω',
+    Gamma: 'Γ', Delta: 'Δ', Theta: 'Θ', Lambda: 'Λ', Xi: 'Ξ', Pi: 'Π',
+    Sigma: 'Σ', Upsilon: 'Υ', Phi: 'Φ', Psi: 'Ψ', Omega: 'Ω',
+    infty: '∞', partial: '∂', nabla: '∇', emptyset: '∅', varnothing: '∅',
+    forall: '∀', exists: '∃', neg: '¬', lnot: '¬', prime: '′', angle: '∠',
+    ell: 'ℓ', hbar: 'ℏ', Re: 'ℜ', Im: 'ℑ', aleph: 'ℵ', wp: '℘',
+    pm: '±', mp: '∓', times: '×', div: '÷', cdot: '⋅', ast: '∗', star: '⋆',
+    circ: '∘', bullet: '∙', oplus: '⊕', ominus: '⊖', otimes: '⊗', odot: '⊙',
+    cap: '∩', cup: '∪', sqcap: '⊓', sqcup: '⊔', uplus: '⊎', wedge: '∧',
+    land: '∧', vee: '∨', lor: '∨', setminus: '∖', wr: '≀', diamond: '⋄',
+    triangleleft: '◁', triangleright: '▷', dagger: '†', ddagger: '‡',
+    leq: '≤', le: '≤', geq: '≥', ge: '≥', neq: '≠', ne: '≠', equiv: '≡',
+    approx: '≈', cong: '≅', simeq: '≃', sim: '∼', propto: '∝', asymp: '≍',
+    doteq: '≐', ll: '≪', gg: '≫', subset: '⊂', supset: '⊃', subseteq: '⊆',
+    supseteq: '⊇', sqsubseteq: '⊑', sqsupseteq: '⊒', in: '∈', ni: '∋', notin: '∉',
+    vdash: '⊢', dashv: '⊣', models: '⊨', perp: '⊥', mid: '∣', parallel: '∥',
+    bowtie: '⋈', smile: '⌣', frown: '⌢', prec: '≺', succ: '≻', preceq: '⪯',
+    succeq: '⪰', gets: '←', leftarrow: '←', rightarrow: '→', to: '→',
+    leftrightarrow: '↔', Leftarrow: '⇐', Rightarrow: '⇒', Leftrightarrow: '⇔',
+    implies: '⟹', iff: '⟺', mapsto: '↦', longmapsto: '⟼', hookrightarrow: '↪',
+    uparrow: '↑', downarrow: '↓', updownarrow: '↕', nearrow: '↗', searrow: '↘',
+    swarrow: '↙', nwarrow: '↖', longrightarrow: '⟶', longleftarrow: '⟵',
+    sum: '∑', prod: '∏', coprod: '∐', int: '∫', iint: '∬', iiint: '∭',
+    oint: '∮', bigcup: '⋃', bigcap: '⋂', bigvee: '⋁', bigwedge: '⋀',
+    bigoplus: '⨁', bigotimes: '⨂', bigsqcup: '⨆', lim: 'lim', limsup: 'lim sup',
+    liminf: 'lim inf', sup: 'sup', inf: 'inf', max: 'max', min: 'min', det: 'det', dim: 'dim',
+    ker: 'ker', deg: 'deg', gcd: 'gcd', arg: 'arg', exp: 'exp', log: 'log', ln: 'ln', lg: 'lg',
+    sin: 'sin', cos: 'cos', tan: 'tan', cot: 'cot', sec: 'sec', csc: 'csc', sinh: 'sinh', cosh: 'cosh',
+    tanh: 'tanh', arcsin: 'arcsin', arccos: 'arccos', arctan: 'arctan', bmod: 'mod', pmod: 'mod',
+    ldots: '…', cdots: '⋯', vdots: '⋮', ddots: '⋱', dots: '…',
+    quad: ' ', qquad: '  ', langle: '⟨', rangle: '⟩', lceil: '⌈',
+    rceil: '⌉', lfloor: '⌊', rfloor: '⌋', backslash: '\\', vert: '|', Vert: '‖',
+    lbrace: '{', rbrace: '}', lbrack: '[', rbrack: ']', colon: ':', neg2: '',
+    checkmark: '✓', square: '□', blacksquare: '■', triangle: '△', diamondsuit: '♢',
+    surd: '√', top: '⊤', bot: '⊥', flat: '♭', sharp: '♯', natural: '♮',
+  };
+  const BB = { R: 'ℝ', N: 'ℕ', Z: 'ℤ', Q: 'ℚ', C: 'ℂ', H: 'ℍ', E: 'ᵓc', P: 'ℙ', F: '𝔽', 1: '𝟙' };
+  const CAL = { L: 'ℒ', F: 'ℱ', H: 'ℋ', P: '℘', N: 'ᵊ9', O: 'ᵊa', E: 'ℰ', B: 'ℬ', R: 'ℛ', M: 'ℳ', C: '𝒞', D: '𝒟', S: '𝒮', T: '𝒯', A: '𝒜', G: '𝒢', X: '𝒳' };
+  const SPACE = { ',': ' ', ';': ' ', ':': ' ', '!': '', ' ': ' ', quad: ' ', qquad: '  ' };
+
+  function mathHTML(src) {
+    let out = '';
+    let i = 0;
+    const n = src.length;
+
+    const readScript = () => {
+      // A ^ or _ takes either a brace group or the single next token.
+      i += 1;
+      let body;
+      if (src[i] === '{') { const [g, next] = group(src, i); body = mathHTML(g); i = next; }
+      else if (src[i] === '\\') { const m = /^\\([A-Za-z]+|.)/.exec(src.slice(i)); body = mathHTML(m ? m[0] : src[i]); i += m ? m[0].length : 1; }
+      else { body = esc(src[i] || ''); i += 1; }
+      return body;
+    };
+
+    while (i < n) {
+      const c = src[i];
+
+      if (c === '^') { out += `<sup>${readScript()}</sup>`; continue; }
+      if (c === '_') { out += `<sub>${readScript()}</sub>`; continue; }
+      if (c === '{' ) { const [g, next] = group(src, i); out += mathHTML(g); i = next; continue; }
+      if (c === '}') { i += 1; continue; }
+      if (c === '&') { out += ' '; i += 1; continue; }
+      if (c === ' ') { out += ' '; i += 1; continue; }
+      if (c === '\\') {
+        if (src[i + 1] === '\\') { out += '<br>'; i += 2; continue; }
+        const m = /^\\([A-Za-z]+|.)/.exec(src.slice(i));
+        if (!m) { i += 1; continue; }
+        const cmd = m[1];
+        i += m[0].length;
+
+        if ('%&_#${}'.includes(cmd)) { out += esc(cmd); continue; }
+        if (cmd === ',' || cmd === ';' || cmd === ' ') { out += ' '; continue; }
+        if (cmd === '!') { continue; }
+
+        if (cmd === 'begin' || cmd === 'end') {
+          const env = nextArg();
+          if (cmd === 'end') continue;
+          const close = `\\end{${env}}`;
+          const at = src.indexOf(close, i);
+          const body = at === -1 ? src.slice(i) : src.slice(i, at);
+          i = at === -1 ? n : at + close.length;
+          const F = { pmatrix: ['(', ')'], bmatrix: ['[', ']'], Bmatrix: ['{', '}'], vmatrix: ['|', '|'], Vmatrix: ['‖', '‖'], cases: ['{', ''], matrix: ['', ''], smallmatrix: ['', ''], array: ['', ''], aligned: ['', ''] }[env] || ['', ''];
+          const rows = body.trim().replace(/\\hline/g, '').split(/\\\\/).map((r) => r.trim()).filter(Boolean);
+          const grid = rows.map((r) => '<span class="mrow">' + r.split('&').map((cell) => `<span class="mcell">${mathHTML(cell.trim())}</span>`).join('') + '</span>').join('');
+          out += `<span class="mtx"><span class="mfence">${F[0]}</span><span class="mgrid">${grid}</span><span class="mfence">${F[1]}</span></span>`;
+          continue;
+        }
+        if (cmd === 'binom' || cmd === 'dbinom' || cmd === 'tbinom') {
+          const a = nextArg(); const b = nextArg();
+          out += `<span class="op">(</span><span class="frac" style="font-size:.82em"><span>${mathHTML(a)}</span><span>${mathHTML(b)}</span></span><span class="op">)</span>`;
+          continue;
+        }
+
+        if (cmd === 'frac' || cmd === 'dfrac' || cmd === 'tfrac') {
+          const a = nextArg(); const b = nextArg();
+          out += `<span class="frac"><span class="fn">${mathHTML(a)}</span><span class="fd">${mathHTML(b)}</span></span>`;
+          continue;
+        }
+        if (cmd === 'sqrt') {
+          let idx = '';
+          if (src[i] === '[') { const close = src.indexOf(']', i); idx = src.slice(i + 1, close); i = close + 1; }
+          const a = nextArg();
+          out += `<span class="rad">√${idx ? `<sup style="font-size:.6em">${mathHTML(idx)}</sup>` : ''}</span><span class="rsqrt">${mathHTML(a)}</span>`;
+          continue;
+        }
+        if (cmd === 'mathbb' || cmd === 'mathbf' || cmd === 'mathrm' || cmd === 'mathcal' || cmd === 'mathscr' || cmd === 'mathsf' || cmd === 'mathit' || cmd === 'boldsymbol' || cmd === 'operatorname' || cmd === 'text' || cmd === 'textrm' || cmd === 'textnormal') {
+          const a = nextArg();
+          if (cmd === 'mathbb') { out += [...a].map((ch) => BB[ch] || ch).join(''); continue; }
+          if (cmd === 'mathcal' || cmd === 'mathscr') { out += [...a].map((ch) => CAL[ch] || ch).join(''); continue; }
+          const style = cmd === 'mathbf' || cmd === 'boldsymbol' ? 'font-weight:700' : 'font-style:normal';
+          out += `<span style="${style}">${cmd === 'text' || cmd === 'textrm' || cmd === 'textnormal' ? esc(a) : mathHTML(a)}</span>`;
+          continue;
+        }
+        if (cmd === 'left' || cmd === 'right' || cmd === 'bigl' || cmd === 'bigr' || cmd === 'Bigl' || cmd === 'Bigr' || cmd === 'big' || cmd === 'Big') {
+          // Drop the sizing wrapper; the delimiter that follows stands alone.
+          if (src[i] === '.') i += 1;
+          continue;
+        }
+        if (cmd === 'not') { const a = nextArg(); out += `<span style="text-decoration:line-through">${mathHTML(a || src[i++] || '')}</span>`; continue; }
+        if (cmd === 'hat' || cmd === 'bar' || cmd === 'vec' || cmd === 'tilde' || cmd === 'dot' || cmd === 'overline' || cmd === 'underline' || cmd === 'widehat' || cmd === 'overrightarrow') {
+          const a = nextArg();
+          const acc = { hat: '̂', bar: '̄', vec: '⃗', tilde: '̃', dot: '̇', widehat: '̂', overrightarrow: '⃗' }[cmd];
+          if (cmd === 'overline' || cmd === 'underline') out += `<span style="border-${cmd === 'overline' ? 'top' : 'bottom'}:1px solid currentColor">${mathHTML(a)}</span>`;
+          else out += `${mathHTML(a)}${acc}`;
+          continue;
+        }
+        if (SPACE[cmd] !== undefined) { out += SPACE[cmd]; continue; }
+        if (SYM[cmd] !== undefined) {
+          const isOp = /^(sum|prod|coprod|int|iint|iiint|oint|bigcup|bigcap|bigvee|bigwedge|bigoplus|bigotimes|bigsqcup)$/.test(cmd);
+          const isFn = /^[a-z]/.test(SYM[cmd]) && SYM[cmd].length > 1;
+          out += isOp ? `<span class="op">${SYM[cmd]}</span>` : isFn ? `<span style="font-style:normal;padding:0 .12em">${SYM[cmd]}</span>` : SYM[cmd];
+          continue;
+        }
+        // Unknown: a one- or two-letter macro is most likely a variable
+        // ( \\R ), a longer one a name. Either way, letters beat a backslash.
+        if (/^[A-Za-z]+$/.test(cmd)) out += cmd.length <= 2 ? esc(cmd) : `<span style="font-style:normal">${esc(cmd)}</span>`;
+        continue;
+      }
+
+      // A spacing tilde, an ordinary character.
+      if (c === '~') { out += ' '; i += 1; continue; }
+      out += esc(c);
+      i += 1;
+    }
+    return out;
+
+    function nextArg() {
+      while (src[i] === ' ') i += 1;
+      if (src[i] === '{') { const [g, next] = group(src, i); i = next; return g; }
+      if (src[i] === '\\') { const m = /^\\([A-Za-z]+|.)/.exec(src.slice(i)); i += m ? m[0].length : 1; return m ? m[0] : ''; }
+      return src[i++] || '';
+    }
+  }
+
+  // -------------------------------------------------------- building the rows
+
+  function isHiddenComment(rowEl) {
+    return rowEl.classList.contains('rcom')
+      && app.getAttribute('data-comments') === 'hide'
+      && !rowEl.hasAttribute('data-peek')
+      && rowEl !== editRow;
+  }
+
+  /** Rebuild every row from the <pre>. Cheap enough to do on any change we did
+   *  not make ourselves; for our own edits we touch one row instead. */
+  function renderAll() {
+    if (!pre) return;
+    const seq = (renderSeq += 1);
+    const lines = rawLines();
+    const ctx = freshCtx();
+    const frag = document.createDocumentFragment();
+
+    // Remember where the caret was, so an external change does not throw the
+    // writer out of the line they are in.
+    const editing = editRow ? { i: Number(editRow.dataset.i), off: caretOffset(editRow) } : null;
+    editRow = null;
+
+    // A fold marker stands in for every run of commented-out lines while
+    // comments are hidden — one line or twenty — so nothing ever disappears
+    // without a way back to it.
+    const hiding = app.getAttribute('data-comments') === 'hide';
+    let commentRun = 0;
+    const closeRun = () => {
+      if (hiding && commentRun >= 1) {
+        const gap = document.createElement('div');
+        gap.className = 'richgap';
+        gap.setAttribute('data-marble-transient', '');
+        gap.setAttribute('data-open', '');
+        gap.setAttribute('data-label', `⋯ ${commentRun} folded`);
+        // Insert before the run: walk back over the rows just added.
+        const rows = frag.childNodes;
+        gap.dataset.run = String(commentRun);
+        frag.insertBefore(gap, rows[rows.length - commentRun]);
+      }
+      commentRun = 0;
+    };
+
+    lines.forEach((line, i) => {
+      stepCtxBefore(line, ctx);
+      const { cls, attr, html } = decorate(line, ctx);
+      stepCtxAfter(line, ctx);
+
+      const row = document.createElement('div');
+      row.className = ['rline', ...cls].join(' ');
+      row.dataset.i = String(i);
+      for (const [k, v] of Object.entries(attr)) row.setAttribute(k, v);
+      row.innerHTML = html;
+      row.__raw = line;
+      frag.append(row);
+
+      if (cls.includes('rcom')) commentRun += 1;
+      else closeRun();
+    });
+    closeRun();
+
+    if (seq !== renderSeq) return;
+    page.replaceChildren(frag);
+    updateMeta();
+
+    if (editing) {
+      const row = page.children[clamp(editing.i, 0, page.children.length - 1)];
+      if (row && row.classList.contains('rline')) enterEdit(row, editing.off, true);
+    }
+  }
+
+  const clamp = (n, lo, hi) => Math.max(lo, Math.min(hi, n));
+
+  /** Recompute the context up to row `i` and redraw just that row — used when
+   *  the caret leaves a line and it goes back to its rendered form. */
+  function redecorateRow(row) {
+    const i = Number(row.dataset.i);
+    const lines = rawLines();
+    const ctx = freshCtx();
+    for (let k = 0; k < i; k += 1) { stepCtxBefore(lines[k], ctx); stepCtxAfter(lines[k], ctx); }
+    stepCtxBefore(lines[i], ctx);
+    const { cls, attr, html } = decorate(row.__raw, ctx);
+    row.className = ['rline', ...cls].join(' ');
+    for (const name of [...row.attributes].map((a) => a.name)) {
+      if (name.startsWith('data-') && name !== 'data-i' && name !== 'data-peek') row.removeAttribute(name);
+    }
+    for (const [k, v] of Object.entries(attr)) row.setAttribute(k, v);
+    row.innerHTML = html;
+  }
+
+  // --------------------------------------------------------------- the caret
+
+  function caretOffset(el) {
+    const sel = window.getSelection();
+    if (!sel || !sel.rangeCount) return 0;
+    const range = sel.getRangeAt(0);
+    if (!el.contains(range.endContainer)) return 0;
+    const measure = range.cloneRange();
+    measure.selectNodeContents(el);
+    measure.setEnd(range.endContainer, range.endOffset);
+    return measure.toString().length;
+  }
+
+  function setCaret(el, offset) {
+    const walker = document.createTreeWalker(el, NodeFilter.SHOW_TEXT);
+    let seen = 0;
+    let node = walker.nextNode();
+    if (!node) {
+      const range = document.createRange();
+      range.selectNodeContents(el);
+      range.collapse(false);
+      const sel = window.getSelection();
+      sel.removeAllRanges();
+      sel.addRange(range);
+      return;
+    }
+    while (node) {
+      if (seen + node.length >= offset) {
+        const range = document.createRange();
+        range.setStart(node, clamp(offset - seen, 0, node.length));
+        range.collapse(true);
+        const sel = window.getSelection();
+        sel.removeAllRanges();
+        sel.addRange(range);
+        return;
+      }
+      seen += node.length;
+      const nxt = walker.nextNode();
+      if (!nxt) {
+        const range = document.createRange();
+        range.setStart(node, node.length);
+        range.collapse(true);
+        const sel = window.getSelection();
+        sel.removeAllRanges();
+        sel.addRange(range);
+        return;
+      }
+      node = nxt;
+    }
+  }
+
+  function offsetFromPoint(x, y) {
+    let range = null;
+    if (document.caretRangeFromPoint) range = document.caretRangeFromPoint(x, y);
+    else if (document.caretPositionFromPoint) {
+      const p = document.caretPositionFromPoint(x, y);
+      if (p) { range = document.createRange(); range.setStart(p.offsetNode, p.offset); }
+    }
+    return range;
+  }
+
+  // ------------------------------------------------------------ edit a row
+
+  function rowAt(i) {
+    return [...page.children].find((el) => el.classList.contains('rline') && Number(el.dataset.i) === i) || null;
+  }
+
+  function visibleNeighbour(row, dir) {
+    let el = row;
+    while (el) {
+      el = dir < 0 ? el.previousElementSibling : el.nextElementSibling;
+      if (!el) return null;
+      if (!el.classList.contains('rline')) continue;
+      if (isHiddenComment(el)) continue;
+      return el;
+    }
+    return null;
+  }
+
+  function enterEdit(row, offset = 0, keepScroll = false) {
+    if (!row) return;
+    if (editRow && editRow !== row) leaveEdit(editRow);
+    editRow = row;
+    row.textContent = row.__raw.length ? row.__raw : '';
+    row.setAttribute('data-editing', '');
+    row.setAttribute('contenteditable', 'plaintext-only');
+    if (row.contentEditable !== 'plaintext-only') row.setAttribute('contenteditable', 'true');
+    row.spellcheck = false;
+    row.focus({ preventScroll: keepScroll });
+    setCaret(row, clamp(offset, 0, row.__raw.length));
+    if (!keepScroll) row.scrollIntoView({ block: 'nearest' });
+  }
+
+  function leaveEdit(row) {
+    if (!row) return;
+    row.__raw = flatText(row);
+    row.removeAttribute('data-editing');
+    row.removeAttribute('contenteditable');
+    if (editRow === row) editRow = null;
+    redecorateRow(row);
+  }
+
+  /** The row's text, with any stray elements a paste left behind flattened
+   *  back to characters and newlines. */
+  function flatText(row) {
+    let text = '';
+    for (const node of row.childNodes) {
+      if (node.nodeType === 3) text += node.nodeValue;
+      else if (node.nodeName === 'BR') text += '\n';
+      else text += node.textContent;
+    }
+    return text.replace(/​/g, '');
+  }
+
+  function sourceFromRows() {
+    return [...page.children]
+      .filter((el) => el.classList.contains('rline'))
+      .map((el) => (el === editRow ? flatText(el) : el.__raw))
+      .join('\n');
+  }
+
+  // ------------------------------------------------------------ interactions
+
+  page.addEventListener('input', () => {
+    if (!editRow) return;
+    const text = flatText(editRow);
+    if (text.includes('\n')) { splitRow(editRow, text); return; }
+    editRow.__raw = text;
+    commit(sourceFromRows(), { coalesce: true });
+  });
+
+  /** A newline landed in a row — usually a multi-line paste. Turn it into the
+   *  rows it describes and keep editing at the end of the last one. */
+  function splitRow(row, text) {
+    const i = Number(row.dataset.i);
+    const parts = text.split('\n');
+    row.__raw = parts[0];
+    const lines = rawLines();
+    lines.splice(i, 1, ...parts);
+    editRow = null;
+    commit(lines.join('\n'), { coalesce: false });
+    renderAll();
+    const last = rowAt(i + parts.length - 1);
+    if (last) enterEdit(last, parts[parts.length - 1].length);
+  }
+
+  page.addEventListener('keydown', (event) => {
+    const row = event.target.closest && event.target.closest('.rline[data-editing]');
+    if (!row) return;
+    const meta = event.metaKey || event.ctrlKey;
+    const off = caretOffset(row);
+    const raw = row.__raw;
+    const i = Number(row.dataset.i);
+    const sel = window.getSelection();
+    const collapsed = sel && sel.isCollapsed;
+
+    if (meta && (event.key === 'Enter' || event.key.toLowerCase() === 's')) return; // 13-ui typesets
+    if (meta && event.key.toLowerCase() === 'b') { event.preventDefault(); wrap(row, 'textbf'); return; }
+    if (meta && event.key.toLowerCase() === 'i') { event.preventDefault(); wrap(row, 'textit'); return; }
+    if (meta && (event.key === '/' || event.code === 'Slash')) { event.preventDefault(); commentRows(i, i); return; }
+    if (meta) return;
+
+    if (event.key === 'Enter') {
+      event.preventDefault();
+      const indent = (/^[ \t]*/.exec(raw) || [''])[0];
+      const head = raw.slice(0, off);
+      const tail = raw.slice(off);
+      row.__raw = head;
+      const lines = rawLines();
+      lines.splice(i, 1, head, indent + tail);
+      editRow = null;
+      commit(lines.join('\n'), { coalesce: false });
+      renderAll();
+      const nextRow = rowAt(i + 1);
+      if (nextRow) enterEdit(nextRow, indent.length);
+      return;
+    }
+
+    if (event.key === 'Backspace' && collapsed && off === 0 && i > 0) {
+      event.preventDefault();
+      mergeRows(i - 1, i);
+      return;
+    }
+    if (event.key === 'Delete' && collapsed && off === raw.length && i < rawLines().length - 1) {
+      event.preventDefault();
+      mergeRows(i, i + 1);
+      return;
+    }
+
+    if (event.key === 'Tab') {
+      event.preventDefault();
+      document.execCommand('insertText', false, '  ');
+      return;
+    }
+
+    if (event.key === 'ArrowUp' && collapsed && off === 0) {
+      const prev = visibleNeighbour(row, -1);
+      if (prev) { event.preventDefault(); enterEdit(prev, prev.__raw.length); }
+    }
+    if (event.key === 'ArrowDown' && collapsed && off === raw.length) {
+      const next = visibleNeighbour(row, 1);
+      if (next) { event.preventDefault(); enterEdit(next, 0); }
+    }
+  });
+
+  function mergeRows(a, b) {
+    const lines = rawLines();
+    const joinAt = lines[a].length;
+    lines.splice(a, 2, lines[a] + lines[b]);
+    editRow = null;
+    commit(lines.join('\n'), { coalesce: false });
+    renderAll();
+    const row = rowAt(a);
+    if (row) enterEdit(row, joinAt);
+  }
+
+  /** Toggle `% ` on a span of rows — the source pane's ⌘/, so a folded-comment
+   *  workflow and a commented-out workflow are the same keystroke. */
+  function commentRows(a, b) {
+    const lines = rawLines();
+    const slice = lines.slice(a, b + 1);
+    const on = slice.every((l) => l.trim() === '' || /^\s*%/.test(l));
+    for (let k = a; k <= b; k += 1) {
+      if (lines[k].trim() === '') continue;
+      const lead = (/^\s*/.exec(lines[k]) || [''])[0];
+      lines[k] = on
+        ? lines[k].replace(/^(\s*)%+[ \t]?/, '$1')
+        : `${lead}% ${lines[k].slice(lead.length)}`;
+    }
+    editRow = null;
+    commit(lines.join('\n'), { coalesce: false });
+    renderAll();
+    const row = rowAt(a);
+    if (row && !isHiddenComment(row)) enterEdit(row, row.__raw.length);
+  }
+
+  function wrap(row, command) {
+    const sel = window.getSelection();
+    const a = caretOffset(row);
+    let b = a;
+    if (sel && sel.rangeCount && !sel.isCollapsed) {
+      const r = sel.getRangeAt(0);
+      const m = r.cloneRange();
+      m.selectNodeContents(row);
+      m.setEnd(r.startContainer, r.startOffset);
+      const start = m.toString().length;
+      b = start + r.toString().length;
+      row.__raw = row.__raw.slice(0, start) + `\\${command}{` + row.__raw.slice(start, b) + '}' + row.__raw.slice(b);
+      row.textContent = row.__raw;
+      commit(sourceFromRows(), { coalesce: false });
+      setCaret(row, start + command.length + 2);
+      return;
+    }
+    row.__raw = row.__raw.slice(0, a) + `\\${command}{}` + row.__raw.slice(a);
+    row.textContent = row.__raw;
+    commit(sourceFromRows(), { coalesce: false });
+    setCaret(row, a + command.length + 2);
+  }
+
+  page.addEventListener('pointerdown', (event) => {
+    const gap = event.target.closest && event.target.closest('.richgap');
+    if (gap) {
+      event.preventDefault();
+      let el = gap.nextElementSibling;
+      while (el && el.classList.contains('rline') && el.classList.contains('rcom')) {
+        el.setAttribute('data-peek', '');
+        el = el.nextElementSibling;
+      }
+      gap.removeAttribute('data-open');
+      return;
+    }
+    const row = event.target.closest && event.target.closest('.rline');
+    if (!row || row === editRow) return;
+    if (row.getAttribute('contenteditable')) return;
+    // Let the browser place the caret, then take the offset from where it fell.
+    const range = offsetFromPoint(event.clientX, event.clientY);
+    let offset = 0;
+    if (range && row.contains(range.startContainer)) {
+      const m = range.cloneRange();
+      m.selectNodeContents(row);
+      m.setEnd(range.startContainer, range.startOffset);
+      offset = m.toString().length;
+    }
+    event.preventDefault();
+    enterEdit(row, clamp(offset, 0, row.__raw.length));
+  });
+
+  page.addEventListener('focusout', (event) => {
+    if (event.relatedTarget && page.contains(event.relatedTarget)) return;
+    if (editRow) { commit(sourceFromRows(), { coalesce: false }); leaveEdit(editRow); }
+  });
+
+  // ---------------------------------------------------------- the view switch
+
+  function setShell(name, value) {
+    app.setAttribute(name, value);
+    reflect();
+    const id = carrier && carrier.id(app);
+    if (id) carrier.op({ type: 'setAttr', id, name, value }, { immediate: true });
+  }
+
+  function reflect() {
+    const view = app.getAttribute('data-view') || 'source';
+    for (const b of document.querySelectorAll('[data-set-view]')) {
+      b.setAttribute('aria-pressed', String(b.getAttribute('data-set-view') === view));
+    }
+    const hidden = app.getAttribute('data-comments') === 'hide';
+    const cb = document.querySelector('#toggle-comments');
+    if (cb) { cb.textContent = hidden ? '% hidden' : '% shown'; cb.setAttribute('aria-pressed', String(hidden)); }
+  }
+
+  document.addEventListener('click', (event) => {
+    const t = event.target;
+    const closest = (s) => (t.closest ? t.closest(s) : null);
+    const v = closest('[data-set-view]');
+    if (v) { setShell('data-view', v.getAttribute('data-set-view')); if (v.getAttribute('data-set-view') === 'rich') mount(); return; }
+    if (closest('#toggle-comments')) {
+      setShell('data-comments', app.getAttribute('data-comments') === 'hide' ? 'show' : 'hide');
+      return;
+    }
+    const logline = closest('.logline[data-line]');
+    if (logline && app.getAttribute('data-view') === 'rich') {
+      const line = Number(logline.getAttribute('data-line'));
+      setTimeout(() => flashLine(line), 60);
+    }
+  });
+
+  function flashLine(oneBased) {
+    const row = rowAt(oneBased - 1);
+    if (!row) return;
+    for (const hot of page.querySelectorAll('.rline.marble-hot')) hot.classList.remove('marble-hot');
+    row.classList.add('marble-hot');
+    row.scrollIntoView({ block: 'center' });
+    setTimeout(() => row.classList.remove('marble-hot'), 1600);
+  }
+
+  // ------------------------------------------------------------- keeping up
+
+  function note(message) {
+    lastWritten = null;
+    page.replaceChildren();
+    const div = document.createElement('div');
+    div.className = 'richnote';
+    div.setAttribute('data-marble-transient', '');
+    div.textContent = message;
+    page.append(div);
+  }
+
+  function watchPre(target) {
+    if (preWatch) preWatch.disconnect();
+    preWatch = null;
+    pre = target;
+    lastWritten = null;
+    if (!pre) return;
+    preWatch = new MutationObserver(() => {
+      // Our own writes come back here too; `lastWritten` is how we skip them.
+      // Anything else is the source pane, another tab, or an agent — and the
+      // row the caret is in is carried through renderAll.
+      if (pre.textContent === lastWritten) return;
+      renderAll();
+    });
+    preWatch.observe(pre, { characterData: true, childList: true, subtree: true });
+  }
+
+  function mount() {
+    const next = activePre();
+    if (next !== pre) watchPre(next);
+    if (pre) renderAll();
+    else note('This file is edited in the source view — the </> tab.');
+    reflect();
+  }
+
+  new MutationObserver(() => {
+    reflect();
+    // Follow the open file whatever the view, so a switch to the rich pane
+    // never shows a stale one.
+    mount();
+  }).observe(app, { attributes: true, attributeFilter: ['data-view', 'data-active', 'data-comments'] });
+
+  room().onReady((marble) => {
+    carrier = marble;
+    mount();
+  });
+})();
+</script>

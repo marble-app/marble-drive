@@ -1349,6 +1349,41 @@
     marble.register(wire);
   };
 
+  // A door for the laid-out view (13b). It is a second way of looking at the
+  // same <pre>, not a second copy of it: everything it needs to read the open
+  // file and to write one back goes through here, so a keystroke in the source
+  // pane and a keystroke in the rich pane are the same setText with the same
+  // undo step and the same recompile behind it. Nothing here is new state.
+  window.__latexroom = {
+    get carrier() { return carrier; },
+    sections, activeSection, preOf, textOf, nameOf, kindOf, keyOf,
+    paint, queueCompile,
+    setActive: (key) => setState('data-active', key),
+    revealLine: (file, line) => jump(file, line),
+    onReady(cb) {
+      if (carrier) cb(carrier);
+      else window.addEventListener('marble:ready', (event) => cb(event.detail), { once: true });
+    },
+    /** Replace the whole text of a source <pre> and file it the way the source
+     *  pane's own edits are filed: repaint the colouring, record one undo step,
+     *  send the op, and ask for a recompile. The caret is the caller's to keep,
+     *  because the rich view sets it in its own rows. */
+    writeSource(pre, next, { coalesce = false } = {}) {
+      const was = pre.textContent;
+      if (next === was) return;
+      pre.textContent = next;
+      painted.add(pre);
+      paint(pre);
+      const id = carrier && carrier.id(pre);
+      if (id) {
+        const op = { type: 'setText', id, text: next };
+        carrier.record({ redo: [op], undo: [{ type: 'setText', id, text: was }] }, { coalesce });
+        carrier.op(op);
+      }
+      queueCompile();
+    },
+  };
+
   if (window.marble) begin(window.marble);
   else window.addEventListener('marble:ready', (event) => begin(event.detail), { once: true });
 

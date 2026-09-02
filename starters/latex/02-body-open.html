@@ -5,7 +5,8 @@
      the same way a click does. -->
 <div class="app" id="app" data-marble-id="__ID__"
      data-active="main" data-layout="split" data-auto="on" data-zoom="page-width"
-     data-rail="open" data-log="closed" data-shut="">
+     data-rail="open" data-log="closed" data-shut=""
+     data-view="source" data-comments="show">
 
   <header class="bar" data-marble-id="__ID__">
     <span class="dot"></span>
@@ -18,10 +19,15 @@
     <div class="acts" data-marble-transient>
       <button class="btn" id="toggle-rail" title="Files (⌘B)"><span class="ico">▤</span></button>
       <div class="seg">
+        <button class="btn" data-set-view="source" title="Edit the source">&lt;/&gt;</button>
+        <button class="btn" data-set-view="rich" title="Edit it laid out">&para;</button>
+      </div>
+      <div class="seg">
         <button class="btn" data-set-layout="editor" title="Source only">◧</button>
         <button class="btn" data-set-layout="split" title="Side by side">◫</button>
         <button class="btn" data-set-layout="pdf" title="PDF only">◨</button>
       </div>
+      <button class="btn" id="toggle-comments" title="Laid-out view: fold commented-out lines away, or show them">% shown</button>
       <button class="btn" id="toggle-cols" title="One column or two (rewrites \documentclass)">▥ 2 col</button>
       <button class="btn" id="toggle-auto" title="Typeset as you type">auto</button>
       <button class="btn go" id="compile" title="Recompile (⌘⏎)"><span class="ico">▶</span> Recompile</button>
