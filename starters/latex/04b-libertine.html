@@ -9,10 +9,9 @@
 // else is copied. These are Libertine's own advance widths, and Biolinum's for
 // the sans, in thousandths of the point size.
 //
-// The glyphs on the page are still Times and Helvetica, because those are two
-// of the fourteen fonts a reader is required to have and Libertine is not: the
-// letters are the wrong shape, and they are in the right places. Embedding the
-// outlines is the step after this one.
+// The outlines that draw these widths are the next script along. Widths come
+// first all the same: they are what a line is broken on, and a page is right
+// when the font that gets sent agrees with the numbers it was measured by.
 //
 // Widths and ligatures come from the OpenType fonts, the kerning from the TFM
 // files pdflatex reads — two independent sources that agree on every width to
@@ -21,9 +20,6 @@
 window.TeX = window.TeX || {};
 
 window.TeX.libertine = {
-  // Drawn with, until the outlines travel too.
-  pdf: {"rm":"Times-Roman","rmb":"Times-Bold","rmi":"Times-Italic","rmbi":"Times-BoldItalic","sf":"Helvetica","sfb":"Helvetica-Bold","sfi":"Helvetica-Oblique","sfbi":"Helvetica-BoldOblique"},
-
   // From each font's OS/2 table.
   shape: {
     rm: {"asc":0.894,"desc":0.246,"x":0.429,"cap":0.658},

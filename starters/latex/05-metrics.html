@@ -9,14 +9,19 @@
 // ---------------------------------------------------------------- metrics
 //
 // Every PDF reader can draw the fourteen fonts Adobe made standard without
-// being sent one, which is why this document can typeset without a network:
-// the paper is set in Times, Helvetica, Courier and Symbol, and none of them
+// being sent one, which is why an ordinary article can be typeset without a
+// network: it is set in Times, Helvetica, Courier and Symbol, and none of them
 // travel with the file.
 //
 // What has to travel is how wide each letter is. These are the advance widths
 // from the fonts' own metrics, in thousandths of the point size — the same
 // numbers the reader will use when it draws them, so a line that fits here
 // fits there.
+//
+// A paper is different: acmart is set in Libertine, which is not one of the
+// fourteen, so the outlines travel too. The widths still come first. They are
+// what a line is broken on, and the font that gets sent has to agree with
+// them — which is what `shape` below is for.
 
 window.TeX = window.TeX || {};
 
@@ -210,12 +215,29 @@ window.TeX = window.TeX || {};
     return table[0];
   }
 
-  // Which metrics are in force. The fourteen standard fonts are what gets
-  // drawn either way — Libertine is not one of them and does not travel with
-  // this file — but a document set in acmart has to *measure* in Libertine or
-  // it cannot break a line where a real build breaks it.
+  // Which metrics are in force. A document set in acmart measures in
+  // Libertine, and — because the outlines travel too — is drawn in it. An
+  // ordinary article measures and draws in the fourteen fonts every reader
+  // already has.
   const LIB = T.libertine || null;
+  const OUT = T.outlines || null;
   let inLibertine = false;
+
+  // Every code this document writes, back to the character it stands for. A
+  // curly quote is byte 0x92 and character U+2019, so a widths table that asks
+  // for String.fromCharCode(0x92) is asking about a control character — and
+  // gets 250 back, which is why quotation marks used to collide with the word
+  // after them.
+  const CHAR_AT = [];
+  for (let code = 32; code <= 255; code += 1) {
+    if (code <= 126 || code >= 0xa0) CHAR_AT[code] = String.fromCharCode(code);
+  }
+  for (const [ch, code] of Object.entries(WINANSI)) CHAR_AT[code] = ch;
+
+  // The f-ligatures sit in codes WinAnsiEncoding leaves undefined, so a
+  // ligature is a code like any other and a widths table can declare it.
+  const LIG_NAME = [];
+  if (OUT) for (const [name, code] of Object.entries(OUT.ligs)) LIG_NAME[code] = name;
 
   // Line height is the one thing not taken from the font. OS/2 reports an
   // ascender of .894, which is the em box and not the ink: TeX takes a line's
@@ -258,6 +280,18 @@ window.TeX = window.TeX || {};
     return null;
   };
 
+  /** What one code is worth in one font. Everything a PDF declares is indexed
+   *  by code rather than by character, and a ligature has a code and no
+   *  character at all, so this is where the two meet. */
+  function codeWidth(code, key) {
+    const lig = LIG_NAME[code];
+    if (lig) {
+      const table = inLibertine && LIB && LIB.ligs[key];
+      return table && table[lig] !== undefined ? table[lig] : 0;
+    }
+    return CHAR_AT[code] === undefined ? 0 : rawWidth(CHAR_AT[code], key);
+  }
+
   const cache = new Map();
 
   T.metrics = {
@@ -274,9 +308,7 @@ window.TeX = window.TeX || {};
       for (const key of Object.keys(FONTS)) {
         if (key === 'sy') continue;
         const row = [];
-        for (let code = 32; code <= 255; code += 1) {
-          row.push(Math.round(rawWidth(String.fromCharCode(code), key)));
-        }
+        for (let code = 32; code <= 255; code += 1) row.push(Math.round(codeWidth(code, key)));
         out[key] = row;
       }
       return out;
@@ -315,6 +347,54 @@ window.TeX = window.TeX || {};
       return w * size;
     },
 
+    /** How a run of text is actually set: the codes for the glyphs it draws,
+     *  with a `{ k }` between any two the font kerns. Ligatures are one code,
+     *  not two letters.
+     *
+     *  Measuring and drawing both read this, which is the point of it. A page
+     *  measured with the ligature TeX would substitute and then drawn as two
+     *  separate letters is a page whose words are wider than the line they
+     *  were fitted to. */
+    shape(text, key) {
+      const out = [];
+      if (key === 'sy') {
+        for (const ch of text) {
+          const code = this.symbolCode(ch);
+          out.push(code === null ? 63 : code);
+        }
+        return out;
+      }
+      // Ligatures need the outline that draws them, so a file carrying only
+      // widths sets f and i separately and measures them that way.
+      const ligs = inLibertine && OUT && LIB.ligs[key];
+      const pairs = inLibertine && KERNS.get(key);
+      let i = 0;
+      while (i < text.length) {
+        let step = 1;
+        let code = null;
+        if (ligs) {
+          for (const seq of LIG_ORDER) {
+            if (ligs[seq] !== undefined && OUT.ligs[seq] !== undefined && text.startsWith(seq, i)) {
+              code = OUT.ligs[seq];
+              step = seq.length;
+              break;
+            }
+          }
+        }
+        if (code === null) {
+          const at = this.encode(text[i]);
+          code = at === null ? 63 : at;
+        }
+        out.push(code);
+        if (pairs && i + step < text.length) {
+          const kern = pairs.get(text[i + step - 1] + text[i + step]);
+          if (kern) out.push({ k: kern });
+        }
+        i += step;
+      }
+      return out;
+    },
+
     /** Width of a run of text.
      *
      *  In Times this is the sum of the letters, because the base-14 metrics
@@ -330,23 +410,9 @@ window.TeX = window.TeX || {};
         for (const ch of text) sum += this.charWidth(ch, key, size);
         return sum;
       }
-      const ligs = LIB.ligs[key] || {};
-      const pairs = KERNS.get(key);
       let sum = 0;
-      let i = 0;
-      while (i < text.length) {
-        let step = 1;
-        let w = null;
-        for (const seq of LIG_ORDER) {
-          if (ligs[seq] !== undefined && text.startsWith(seq, i)) { w = ligs[seq]; step = seq.length; break; }
-        }
-        if (w === null) w = rawWidth(text[i], key);
-        sum += w;
-        if (pairs && i + step < text.length) {
-          const kern = pairs.get(text[i + step - 1] + text[i + step]);
-          if (kern) sum += kern;
-        }
-        i += step;
+      for (const part of this.shape(text, key)) {
+        sum += typeof part === 'number' ? codeWidth(part, key) : part.k;
       }
       return (sum / 1000) * size;
     },

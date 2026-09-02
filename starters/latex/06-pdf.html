@@ -38,13 +38,52 @@
 
   /** Text in one font, as the codes that font understands. */
   function codesFor(text, font) {
-    const m = enc();
-    const out = [];
-    for (const ch of text) {
-      const code = font === 'sy' ? m.symbolCode(ch) : m.encode(ch);
-      out.push(code === null || code === undefined ? 63 : code);
+    return enc().shape(text, font).filter((part) => typeof part === 'number');
+  }
+
+  /** The outlines that can travel with the page, or null when the page is
+   *  drawn in the fourteen fonts every reader is required to have. */
+  const embedded = () => (enc().using() === 'libertine' && T.outlines ? T.outlines : null);
+
+  // Base64, decoded here rather than through the host, because a .mrbl file
+  // has to open with no host at all.
+  const ALPHABET = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/';
+  const REVERSE = new Uint8Array(128);
+  for (let i = 0; i < ALPHABET.length; i += 1) REVERSE[ALPHABET.charCodeAt(i)] = i;
+  const unpacked = new Map();
+
+  function unpack(text) {
+    let out = unpacked.get(text);
+    if (out) return out;
+    let end = text.length;
+    while (end > 0 && text.charCodeAt(end - 1) === 61) end -= 1;
+    out = new Uint8Array(Math.floor((end * 3) / 4));
+    let held = 0;
+    let bits = 0;
+    let at = 0;
+    for (let i = 0; i < end; i += 1) {
+      held = (held << 6) | REVERSE[text.charCodeAt(i)];
+      bits += 6;
+      if (bits >= 8) { bits -= 8; out[at] = (held >> bits) & 0xff; at += 1; }
     }
+    unpacked.set(text, out);
     return out;
+  }
+
+  /** A font dictionary's /Differences: which code names which glyph. Written
+   *  out rather than left to WinAnsiEncoding because a face is allowed to
+   *  spell a glyph its own way, and because five of these codes are
+   *  ligatures that no standard encoding has a name for. */
+  function differences(outlines, face) {
+    const bits = [];
+    let next = -1;
+    outlines.codes.forEach((code, i) => {
+      if (face.has[i] !== '1') return;
+      if (code !== next) bits.push(String(code));
+      bits.push('/' + ((face.spelt && face.spelt[code]) || outlines.names[i]));
+      next = code + 1;
+    });
+    return bits.join(' ');
   }
 
   function create({ title = '', author = '', subject = '' } = {}) {
@@ -87,7 +126,24 @@
     return doc;
   }
 
+  /** One run, positioned. A run with no kerns in it is a plain string; one
+   *  with kerns is TJ, whose numbers are thousandths of the size to be taken
+   *  *off* the advance — so a kern that tightens a pair is a positive one. */
+  function show(parts) {
+    if (parts.every((part) => typeof part === 'number')) return `(${literal(parts)}) Tj`;
+    const bits = [];
+    let run = [];
+    for (const part of parts) {
+      if (typeof part === 'number') { run.push(part); continue; }
+      if (run.length) { bits.push(`(${literal(run)})`); run = []; }
+      bits.push(n(-part.k));
+    }
+    if (run.length) bits.push(`(${literal(run)})`);
+    return `[${bits.join(' ')}] TJ`;
+  }
+
   function contentFor(page, fontsUsed, imageNames) {
+    const outlines = embedded();
     const out = [];
     let inText = false;
     let font = null;
@@ -116,8 +172,12 @@
           out.push(`/${item.f} ${n(item.s)} Tf`);
           font = item.f; size = item.s;
         }
-        out.push(`1 0 0 1 ${n(item.x)} ${n(item.y)} Tm`);
-        out.push(`(${literal(codesFor(item.t, item.f))}) Tj`);
+        // An oblique that the family does not draw is the upright sheared
+        // about its own baseline, which is what the family did to make one.
+        const face = outlines && outlines.face[item.f];
+        const slant = face && face.slant ? n(face.slant) : '0';
+        out.push(`1 0 ${slant} 1 ${n(item.x)} ${n(item.y)} Tm`);
+        out.push(show(enc().shape(item.t, item.f)));
       } else if (item.k === 'r') {
         endText();
         colour(item.c);
@@ -153,20 +213,47 @@
     const imageNames = new Set();
     const streams = pages.map((page) => contentFor(page, fontsUsed, imageNames));
 
-    // Fonts
+    // Fonts. A page set in acmart sends its own: the subset outline goes in as
+    // a CFF program, one program serving every face drawn from it, so the bold
+    // oblique costs a font dictionary and no bytes. Anything the file cannot
+    // carry — Symbol, and every font of an ordinary article — is named and
+    // left to the reader, with the widths it was measured by, so that a word
+    // still ends where the typesetter said it would.
+    const outlines = embedded();
     const fontIds = new Map();
+    const programIds = new Map();
     for (const key of fontsUsed) {
       const spec = enc().FONTS[key];
       if (!spec) continue;
       const id = reserve();
       fontIds.set(key, id);
-      const encoding = spec.symbol ? '' : ' /Encoding /WinAnsiEncoding';
-      // If the page was measured in a font this file cannot carry, the widths
-      // it was measured with travel instead. The reader draws Times and steps
-      // by Libertine, so a word ends where the typesetter said it would.
       const widths = spec.symbol ? null : measured && measured[key];
       const declared = widths ? ` /FirstChar 32 /LastChar 255 /Widths [${widths.join(' ')}]` : '';
-      put(id, `<< /Type /Font /Subtype /Type1 /BaseFont /${spec.pdf}${encoding}${declared} >>`);
+      const face = outlines && outlines.face[key];
+      if (!face) {
+        const encoding = spec.symbol ? '' : ' /Encoding /WinAnsiEncoding';
+        put(id, `<< /Type /Font /Subtype /Type1 /BaseFont /${spec.pdf}${encoding}${declared} >>`);
+        continue;
+      }
+      if (!programIds.has(face.cff)) programIds.set(face.cff, reserve());
+      const descId = reserve();
+      put(
+        id,
+        `<< /Type /Font /Subtype /Type1 /BaseFont /${face.ps}` +
+          ` /Encoding << /Type /Encoding /Differences [${differences(outlines, face)}] >>` +
+          `${declared} /FontDescriptor ${descId} 0 R >>`,
+      );
+      put(
+        descId,
+        `<< /Type /FontDescriptor /FontName /${face.ps} /Flags ${face.flags}` +
+          ` /FontBBox [${face.bbox.join(' ')}] /ItalicAngle ${n(face.angle)}` +
+          ` /Ascent ${face.asc} /Descent ${face.desc} /CapHeight ${face.cap}` +
+          ` /StemV ${face.stem} /FontFile3 ${programIds.get(face.cff)} 0 R >>`,
+      );
+    }
+    for (const [key, id] of programIds) {
+      const data = unpack(outlines.cff[key]);
+      put(id, `<< /Subtype /Type1C /Filter /FlateDecode /Length ${data.length} >>`, data);
     }
 
     // Images
