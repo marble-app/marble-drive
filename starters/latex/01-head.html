@@ -531,6 +531,72 @@ __ICON__
   .rich-fold:hover { color: var(--accent-ink); background: var(--accent-soft); }
   @keyframes rich-in { from { opacity: 0; transform: translateY(2px); } to { opacity: 1; transform: none; } }
 
+  /* List-item drag grip and the "＋" that adds an item. */
+  .rich-grip, .rich-plus {
+    position: fixed; z-index: 55; display: grid; place-items: center;
+    width: 1.2rem; height: 1.4rem; color: var(--faint);
+    font: .8rem/1 var(--mono); cursor: grab; user-select: none;
+    opacity: 0; animation: rich-in 140ms cubic-bezier(.16,1,.3,1) forwards;
+  }
+  .rich-grip:hover, .rich-plus:hover { color: var(--accent-ink); }
+  .rich-grip:active { cursor: grabbing; }
+  .rich-plus { cursor: pointer; font-size: .9rem; }
+  .rich-pen { transform: translateX(-2.4rem); }
+  body[data-dragging], body[data-dragging] * { cursor: grabbing !important; user-select: none !important; }
+  .rline[data-drop-into] { position: relative; }
+  .rline[data-drop-into="above"]::after,
+  .rline[data-drop-into="below"]::after {
+    content: ""; position: absolute; left: -.5rem; right: 0; height: 2px;
+    background: var(--accent); border-radius: 2px;
+  }
+  .rline[data-drop-into="above"]::after { top: -1px; }
+  .rline[data-drop-into="below"]::after { bottom: -1px; }
+
+  /* Citation picker + macro editor — small popovers over the page. */
+  .citepick, .macroedit {
+    position: fixed; z-index: 58; background: var(--card);
+    border: 1px solid var(--line); border-radius: 8px;
+    box-shadow: 0 12px 34px rgba(0,0,0,.2); color: var(--ink);
+    opacity: 0; animation: rich-in 140ms cubic-bezier(.16,1,.3,1) forwards;
+  }
+  .citepick { width: 23rem; padding: .4rem; }
+  .citepick .cp-q {
+    width: 100%; box-sizing: border-box; font: 12px/1.4 var(--ui); color: var(--ink);
+    background: var(--paper); border: 1px solid var(--line); border-radius: 6px;
+    padding: .35rem .5rem; outline: none;
+  }
+  .citepick .cp-q:focus { border-color: var(--accent); }
+  .citepick .cp-list { list-style: none; margin: .35rem 0 0; padding: 0; max-height: 15rem; overflow: auto; }
+  .citepick .cp-row {
+    display: grid; grid-template-columns: 1fr auto; column-gap: .5rem; align-items: baseline;
+    padding: .3rem .45rem; border-radius: 5px; cursor: pointer; font: 12px/1.4 var(--ui);
+  }
+  .citepick .cp-row b { font-weight: 600; }
+  .citepick .cp-row span { color: var(--muted); grid-column: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .citepick .cp-row i { color: var(--faint); font: 10.5px/1.4 var(--mono); font-style: normal; }
+  .citepick .cp-row[data-on], .citepick .cp-row:hover { background: var(--accent-soft); }
+  .citepick .cp-empty { padding: .5rem .45rem; color: var(--faint); font-size: 11.5px; }
+  .citetip .ct-add {
+    appearance: none; width: 100%; text-align: left; cursor: pointer; margin-top: .35rem;
+    font: 500 11px/1.4 var(--ui); color: var(--accent-ink);
+    background: var(--accent-soft); border: 1px solid var(--line); border-radius: 6px; padding: .3rem .5rem;
+  }
+  .citetip .ct-add:hover { border-color: var(--accent); }
+
+  .macroedit { width: 20rem; padding: .55rem .6rem; }
+  .macroedit .me-h { font: 600 .78rem/1.4 var(--mono); color: var(--muted); margin-bottom: .35rem; }
+  .macroedit .me-in {
+    width: 100%; box-sizing: border-box; font: 12px/1.4 var(--mono); color: var(--ink);
+    background: var(--paper); border: 1px solid var(--line); border-radius: 6px; padding: .35rem .5rem; outline: none;
+  }
+  .macroedit .me-in:focus { border-color: var(--accent); }
+  .macroedit .me-acts { display: flex; align-items: center; gap: .5rem; margin-top: .4rem; }
+  .macroedit .me-save {
+    appearance: none; cursor: pointer; font: 600 11px/1.4 var(--ui); color: #fff;
+    background: var(--accent-ink); border: 1px solid var(--accent-ink); border-radius: 6px; padding: .28rem .7rem;
+  }
+  .macroedit .me-note { color: var(--faint); font-size: 10px; }
+
   .citetip {
     position: fixed; z-index: 56; max-width: 20rem; padding: .5rem .6rem;
     background: var(--card); border: 1px solid var(--line); border-radius: 8px;
