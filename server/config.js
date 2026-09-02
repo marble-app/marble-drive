@@ -33,6 +33,16 @@ export function loadConfig(env = process.env) {
   // two this checkout's ancestor had.
   const root = path.resolve(str('MARBLE_DRIVE_ROOT', path.join(process.cwd(), 'drive')));
 
+  // G2's switch. Unset is G0/G1 unchanged: one drive at `root`, the gate in
+  // front of it. Set it and the host is multi-tenant — every account and every
+  // person's drive lives under here, and `MARBLE_DRIVE_ROOT` is ignored. See
+  // docs/ACCOUNTS.md.
+  //
+  //   <data>/accounts/     the identity log — not under any drive root
+  //   <data>/users/<id>/   one person's drive, exactly what `root` is today
+  const dataDir = str('MARBLE_DRIVE_DATA', null);
+  const dataResolved = dataDir ? path.resolve(dataDir) : null;
+
   // Marble's history module resolves its own directory from MARBLE_APPS, and it
   // reads it when it is called rather than when it is imported. Pointing it at
   // the drive root is what makes `<root>/.marble/` the one history tree — the
@@ -56,11 +66,27 @@ export function loadConfig(env = process.env) {
 
     // G0's gate. Unset means an open host, which is right for a laptop and
     // wrong for anything with a domain in front of it — so it says so, loudly,
-    // once, at boot.
+    // once, at boot. On a multi-tenant host this same value is the session
+    // signing key rather than a password, and it is required: an unsigned
+    // multi-tenant session is every account at once.
     secret: str('MARBLE_DRIVE_SECRET', null),
     cookieName: str('MARBLE_DRIVE_COOKIE', 'marble_drive'),
+    sessionCookie: str('MARBLE_DRIVE_SESSION_COOKIE', 'marble_session'),
     sessionDays: num('MARBLE_DRIVE_SESSION_DAYS', 30),
     secureCookie: bool('MARBLE_DRIVE_SECURE_COOKIE', str('NODE_ENV', '') === 'production'),
+
+    // Multi-tenant, or not, and where its data lives. `accountsDir` is
+    // deliberately not under any drive root — a file the Drive can see is a
+    // file it can edit, and a password hash is not content.
+    multiTenant: Boolean(dataResolved),
+    dataDir: dataResolved,
+    accountsDir: dataResolved ? path.join(dataResolved, 'accounts') : null,
+    usersDir: dataResolved ? path.join(dataResolved, 'users') : null,
+
+    // Per account, once there is more than one: a document ceiling and a byte
+    // ceiling, checked against what `marble-drive weigh` already computes.
+    quotaDocs: num('MARBLE_DRIVE_QUOTA_DOCS', 500),
+    quotaBytes: num('MARBLE_DRIVE_QUOTA_BYTES', 512 * 1024 * 1024),
 
     // Backups off the box. A directory is the honest default: a bind mount, a
     // network share, or a path something else syncs to object storage. A

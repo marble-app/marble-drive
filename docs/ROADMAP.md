@@ -30,12 +30,21 @@ this is the map.
 | `k-blob` | Blobs, with a way back | `server/flatten.js`, `server/store/blobs.js`. The round trip is byte-exact |
 | `k-drive` | A Drive that is itself a document | `templates/drive.mrbl` |
 
-## What is deliberately not here
+## G2 — isolation, accounts, sharing (in progress)
 
-**G2 — isolation, accounts, sharing.** No wildcard origin, so every document in
-a drive shares an origin with the host. Survivable at G0 because a drive has one
-owner; not survivable the moment a stranger's document can land in it. The gate
-is a placeholder that says so in its own header.
+Being built on `worktree-multi-tenant-g2`. The plan and the disk layout are in
+[ACCOUNTS.md](ACCOUNTS.md).
+
+| card | | where |
+|---|---|---|
+| `k-acct` | Identity, invite-gated, scrypt over an append-only log | `server/accounts.js` |
+| `k-sess` | A session that knows whose it is — the gate's signed cookie, plus the account id | `server/sessions.js`, `sameOrigin` for CSRF |
+| `k-tenant` | A store per person at `<data>/users/<id>/` | `MARBLE_DRIVE_DATA` in `server/config.js`; the `userContext` refactor of `server/app.js` is increment 2 |
+| `k-orig` | Each document in its own origin | increment 3 — sandboxed iframe + a `postMessage` carrier. The precondition that opens the door |
+| `k-quota` | A document ceiling and a byte ceiling per account | `quotaDocs` / `quotaBytes` in config; checked in `putDocument` at increment 2 |
+
+Increment 1 lands the two hard-to-migrate modules and the config, imported by
+nothing — the same move the op log made with `client` and `seq`.
 
 **G3 — collaboration and versions.** Ops are broadcast as "something changed"
 rather than as ops, so a second tab refetches and reconciles rather than
