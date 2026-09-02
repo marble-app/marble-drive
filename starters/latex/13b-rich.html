@@ -619,6 +619,7 @@
       stepBefore(line, ctx);
       const row = document.createElement('div');
       row.dataset.i = String(i);
+      row.dataset.ln = String(i + 1);
       paintRow(row, line, ctx, src.has(i));
       stepAfter(line, ctx);
       frag.append(row);
@@ -631,6 +632,15 @@
     applyCollapse();
     restoreSel(sel);
     markHere();
+    emitRendered();
+  }
+
+  // A note to anything that decorates the rows (13c, the writing checker):
+  // they were just rebuilt.
+  let renderedTick = null;
+  function emitRendered() {
+    cancelAnimationFrame(renderedTick);
+    renderedTick = requestAnimationFrame(() => document.dispatchEvent(new CustomEvent('latex:rendered')));
   }
 
   // ---------------------------------------------------- collapsible sections
@@ -849,6 +859,7 @@
       stepBefore(lines[i], ctx);
       const row = f.node || document.createElement('div');
       row.dataset.i = String(i);
+      row.dataset.ln = String(i + 1);
       // In range → source. No selection at all → leave each row's state as it
       // is (a rendered equation stays rendered).
       const asSource = sel ? (i >= sel.a.i && i <= sel.b.i) : !row.__math;
@@ -881,6 +892,7 @@
     applyCollapse();
     restoreSel(sel);
     markHere();
+    emitRendered();
   }
 
   // -------------------------------------------------------------- keyboard
@@ -1045,8 +1057,6 @@
   function reflect() {
     const view = app.getAttribute('data-view') || 'source';
     for (const b of document.querySelectorAll('[data-set-view]')) b.setAttribute('aria-pressed', String(b.getAttribute('data-set-view') === view));
-    const tv = document.querySelector('#toggle-view');
-    if (tv) { tv.innerHTML = view === 'rich' ? '&lt;/&gt; Source' : '&para; Laid out'; tv.setAttribute('aria-pressed', String(view === 'rich')); }
     const hidden = app.getAttribute('data-comments') === 'hide';
     const cb = document.querySelector('#toggle-comments');
     if (cb) { cb.textContent = hidden ? '% hidden' : '% shown'; cb.setAttribute('aria-pressed', String(hidden)); }
@@ -1057,12 +1067,6 @@
     const closest = (s) => (t.closest ? t.closest(s) : null);
     const v = closest('[data-set-view]');
     if (v) { setShell('data-view', v.getAttribute('data-set-view')); if (v.getAttribute('data-set-view') === 'rich') mount(); return; }
-    if (closest('#toggle-view')) {
-      const nextView = app.getAttribute('data-view') === 'rich' ? 'source' : 'rich';
-      setShell('data-view', nextView);
-      if (nextView === 'rich') mount();
-      return;
-    }
     if (closest('#toggle-comments')) { setShell('data-comments', app.getAttribute('data-comments') === 'hide' ? 'show' : 'hide'); renderAll(); return; }
     const logline = closest('.logline[data-line]');
     if (logline && app.getAttribute('data-view') === 'rich') {
@@ -1211,7 +1215,13 @@
     if (next !== pre) watchPre(next);
     rebuildMacros();
     if (pre) renderAll();
-    else note('This file is edited in the source view — the </> tab.');
+    else {
+      const r = room();
+      const section = r && r.activeSection();
+      if (nameEl && section) nameEl.textContent = r.nameOf(section);
+      if (metaEl) metaEl.textContent = '';
+      note('This file is edited in the Source view.');
+    }
     reflect();
   }
 

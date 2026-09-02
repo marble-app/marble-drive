@@ -6,7 +6,7 @@
 <div class="app" id="app" data-marble-id="__ID__"
      data-active="main" data-layout="split" data-auto="on" data-zoom="page-width"
      data-rail="open" data-log="closed" data-shut=""
-     data-view="source" data-comments="show">
+     data-view="source" data-comments="show" data-check="on" data-check-off="">
 
   <header class="bar" data-marble-id="__ID__">
     <span class="dot"></span>
@@ -18,7 +18,6 @@
          so it is kept out of addressing rather than left half in it. -->
     <div class="acts" data-marble-transient>
       <button class="btn" id="toggle-rail" title="Files (⌘B)"><span class="ico">▤</span></button>
-      <button class="btn" id="toggle-view" title="Source, or laid out">&para; Laid out</button>
       <div class="seg">
         <button class="btn" data-set-layout="editor" title="Editor only">◧</button>
         <button class="btn" data-set-layout="split" title="Side by side">◫</button>
@@ -58,4 +57,19 @@
     </aside>
 
     <section class="editorpane">
+
+      <!-- One header for both ways of editing. It stays put when you switch
+           between Source and Visual, so the toggles never move. -->
+      <header class="richhead" data-marble-transient>
+        <span class="rname">main.tex</span>
+        <span class="rmeta"></span>
+        <div class="richviews">
+          <div class="seg">
+            <button class="btn" data-set-view="source" title="Edit the source">Source</button>
+            <button class="btn" data-set-view="rich" title="Edit it laid out">Visual</button>
+          </div>
+          <button class="btn" id="toggle-comments" title="Visual view: fold commented-out lines away, or show them">% shown</button>
+        </div>
+      </header>
+
       <div class="sheets" id="files" data-marble-id="__ID__">

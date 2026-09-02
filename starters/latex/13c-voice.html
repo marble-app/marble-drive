@@ -1,0 +1,534 @@
+
+<script data-marble-id="__ID__">
+// ------------------------------------------------- the active-voice checker
+//
+// A writing check that runs in the page — no network, no model, just rules.
+// It reads the prose in the laid-out view and draws a faint green squiggle
+// under anything that reads as passive, hedged, wordy, or adverb-heavy.
+// Hover a squiggle for the reason and a suggested fix; click the fix to make
+// the edit (the same setText the rest of the editor files). The toggle sits
+// in the editor header, on by default; the ▾ on it opens a panel of
+// individual switches, one per rule.
+//
+// Nothing here is kept in the document except `data-check` and
+// `data-check-off` on the shell — which rules are running.
+
+(() => {
+  const app = document.querySelector('#app');
+  const page = document.querySelector('#richpage');
+  const views = document.querySelector('.richviews');
+  if (!app || !page || !views) return;
+
+  const room = () => window.__latexroom;
+  const esc = (s) => String(s).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+  const ZWSP = '​';
+  let carrier = null;
+
+  // ------------------------------------------------------------- the rules
+  //
+  // check(sentence) → [{ s, e, fix?, tip? }], where [s, e) is a range within
+  // the sentence and `fix` is what to put there instead. `cat` is a colour
+  // band, forest → lime: a = passive, b = structure, c = hedging,
+  // d = adverbs, e = length.
+
+  const PARTICIPLE = 'ed|en|wn|ne|un|it|nt|rt|pt|ft|st|ld|nk|ok|ken|ought|aught';
+  const ADJ_LOOKALIKE = /^(interest|excit|tir|pleas|concern|involv|relat|bas|locat|limit|dedicat|commit|motivat|experienc|qualif|complicat|detail|advanc|sophisticat|establish|expect|surpris|worri|prepar|suit|gift|talent|skill|bor|scar|frighten|delight|satisf|disappoint|determin|refin|distinguish|renown|accustom|unbias)/;
+
+  const FILLER_ADV = new Set(('very really quite extremely incredibly remarkably particularly especially notably significantly '
+    + 'substantially considerably relatively fairly rather somewhat arguably essentially basically actually literally simply '
+    + 'just clearly obviously evidently certainly definitely undoubtedly importantly interestingly surprisingly fortunately '
+    + 'unfortunately ultimately effectively generally typically usually often frequently virtually practically completely '
+    + 'totally absolutely entirely perfectly utterly hugely vastly greatly deeply highly strongly heavily').split(' '));
+  const ADV_NOT = new Set('only family apply reply supply ally rely bully jelly early holy ugly silly lily assembly anomaly panoply multiply imply comply July italy'.split(' '));
+  // words that end like a participle but are adjectives / nouns — not passive
+  const NOT_PART = new Set(('important different relevant significant consistent present absent apparent evident sufficient '
+    + 'efficient current recent silent distinct correct direct exact compact abstract complete concrete discrete private '
+    + 'separate appropriate accurate adequate immediate ultimate alternate deliberate elaborate delicate definite opposite '
+    + 'favourite favorite moderate desperate content extent intent talent client patient ancient decent frequent recent '
+    + 'element moment comment segment argument document instrument component treatment agreement statement equipment '
+    + 'candidate template estimate associate corporate coordinate intimate legitimate passionate fortunate').split(' '));
+
+  const NOMINAL = {
+    'decision': 'decide', 'analysis': 'analyse', 'investigation': 'investigate', 'assumption': 'assume',
+    'conclusion': 'conclude', 'evaluation': 'evaluate', 'consideration': 'consider', 'comparison': 'compare',
+    'description': 'describe', 'discussion': 'discuss', 'examination': 'examine', 'explanation': 'explain',
+    'contribution': 'contribute', 'reduction': 'reduce', 'improvement': 'improve', 'measurement': 'measure',
+    'assessment': 'assess', 'adjustment': 'adjust', 'implementation': 'implement', 'observation': 'observe',
+    'recommendation': 'recommend', 'application': 'apply', 'modification': 'modify',
+  };
+
+  const PHRASES = [
+    ['in order to', 'to'], ['in order for', 'for'], ['due to the fact that', 'because'],
+    ['owing to the fact that', 'because'], ['on account of the fact that', 'because'],
+    ['in spite of the fact that', 'although'], ['despite the fact that', 'although'],
+    ['in the event that', 'if'], ['in the case that', 'if'], ['in cases where', 'when'],
+    ['at this point in time', 'now'], ['at the present time', 'now'], ['at this moment in time', 'now'],
+    ['in the near future', 'soon'], ['a large number of', 'many'], ['a great deal of', 'much'],
+    ['a small number of', 'a few'], ['the majority of', 'most'], ['a majority of', 'most'],
+    ['the vast majority of', 'almost all'], ['with regard to', 'about'], ['with respect to', 'about'],
+    ['in relation to', 'about'], ['in terms of', 'for'], ['for the purpose of', 'to'],
+    ['it should be noted that', ''], ['it is worth noting that', ''], ['it is important to note that', ''],
+    ['as a matter of fact', ''], ['in actual fact', ''], ['each and every', 'every'],
+    ['first and foremost', 'first'], ['in a timely manner', 'promptly'], ['prior to', 'before'],
+    ['subsequent to', 'after'], ['in conjunction with', 'with'], ['on a regular basis', 'regularly'],
+    ['in the majority of cases', 'usually'], ['a number of', 'several'], ['the fact that', 'that'],
+    ['whether or not', 'whether'], ['in the process of', ''], ['is able to', 'can'],
+    ['are able to', 'can'], ['has the ability to', 'can'], ['have the ability to', 'can'],
+    ['utilize', 'use'], ['utilise', 'use'], ['utilization', 'use'], ['methodology', 'method'],
+    ['in my opinion', ''], ['needless to say', ''],
+  ];
+
+  const RULES = [
+    {
+      id: 'passive', label: 'Passive voice', cat: 'a',
+      blurb: 'A "to be" verb plus a past participle. Say who does the thing.',
+      check(t) {
+        const out = [];
+        const re = /\b(am|is|are|was|were|be|been|being|get|gets|got|gotten)\s+((?:[a-z]+ly\s+)?)([a-z]{3,}(?:ed|en|wn|ne|lt|pt|ft|nt|ught))\b(\s+by\b)?/gi;
+        let m;
+        while ((m = re.exec(t))) {
+          const part = m[3].toLowerCase();
+          if (NOT_PART.has(part)) continue;
+          if (!m[4] && ADJ_LOOKALIKE.test(part)) continue;       // "is interested"
+          if (/^(need|use|suppose|require|expect|intend|want)ed$/.test(part) && !m[4]) continue;
+          if (!/(ed|en|wn|ught)$/.test(part) && !m[4] && !/(built|felt|kept|left|sent|spent|meant|lost|dealt|slept|swept)$/.test(part)) continue;
+          out.push({ s: m.index, e: m.index + m[0].length, tip: m[4] ? 'Front the agent and use an active verb.' : 'Name the actor and use an active verb.' });
+        }
+        return out;
+      },
+    },
+    {
+      id: 'by-agent', label: 'Passive with a "by" agent', cat: 'a',
+      blurb: 'The clearest passive: "X was done by Y". Make Y the subject.',
+      check(t) {
+        const out = [];
+        const re = /\b(\w[\w-]*(?:\s+[a-z][\w-]*){0,3})\s+(was|were|is|are|has been|have been|had been)\s+([a-z]{3,}(?:ed|en|wn|ne))\s+by\s+((?:the\s+|a\s+|an\s+|our\s+|their\s+|its\s+)?[a-z][\w'-]+(?:\s+[a-z][\w'-]+)?)\b/gi;
+        let m;
+        while ((m = re.exec(t))) {
+          const agent = m[4].replace(/^(the|a|an)\s+/i, '');
+          out.push({ s: m.index, e: m.index + m[0].length, tip: `Make "${m[4].trim()}" the subject: "${agent} ${m[3].replace(/(ed|en)$/, '')}… ${m[1].trim()}".` });
+        }
+        return out;
+      },
+    },
+    {
+      id: 'filler-adverb', label: 'Weak adverb', cat: 'c',
+      blurb: 'An intensifier that adds length, not meaning. Cut it.',
+      check(t) {
+        const out = [];
+        const re = /\b([a-z]+)\b/gi;
+        let m;
+        while ((m = re.exec(t))) {
+          if (FILLER_ADV.has(m[1].toLowerCase())) {
+            let e = m.index + m[0].length;
+            if (t[e] === ' ') e += 1;
+            out.push({ s: m.index, e, fix: '', tip: `"${m[1]}" rarely earns its place.` });
+          }
+        }
+        return out;
+      },
+    },
+    {
+      id: 'adverb', label: '-ly adverb', cat: 'd',
+      blurb: 'An "-ly" adverb. A stronger verb often replaces it.',
+      check(t) {
+        const out = [];
+        const re = /\b([a-z]{4,}ly)\b/gi;
+        let m;
+        while ((m = re.exec(t))) {
+          const w = m[1].toLowerCase();
+          if (ADV_NOT.has(w) || FILLER_ADV.has(w)) continue;
+          out.push({ s: m.index, e: m.index + m[0].length, tip: 'Can a sharper verb carry this?' });
+        }
+        return out;
+      },
+    },
+    {
+      id: 'hedge', label: 'Hedge', cat: 'c',
+      blurb: 'A qualifier that softens the claim. Commit or cut.',
+      check(t) {
+        const out = [];
+        const re = /\b(quite|rather|somewhat|fairly|pretty much|a bit|kind of|sort of|arguably|relatively|comparatively|reasonably|more or less|to some extent|in some sense|perhaps|possibly|presumably|seemingly|apparently)\b/gi;
+        let m;
+        while ((m = re.exec(t))) out.push({ s: m.index, e: m.index + m[0].length, fix: '', tip: `"${m[1]}" — say it plainly.` });
+        return out;
+      },
+    },
+    {
+      id: 'weasel', label: 'Vague quantity', cat: 'c',
+      blurb: 'An unspecified amount. Give the number.',
+      check(t) {
+        const out = [];
+        const re = /\b(several|various|numerous|a variety of|a range of|a lot of|lots of|plenty of)\s+([a-z]+)/gi;
+        let m;
+        while ((m = re.exec(t))) out.push({ s: m.index, e: m.index + m[1].length, tip: 'How many, exactly?' });
+        return out;
+      },
+    },
+    {
+      id: 'there-is', label: '"There is / are" opener', cat: 'b',
+      blurb: 'Delays the subject. Start with the thing itself.',
+      check(t) {
+        const m = /^\s*there\s+(is|are|was|were|has been|have been|exists?|remains?)\b/i.exec(t);
+        return m ? [{ s: m.index + (m[0].length - m[0].trimStart().length), e: m.index + m[0].length, tip: 'Lead with the subject, drop "there is".' }] : [];
+      },
+    },
+    {
+      id: 'it-cleft', label: '"It is … that" cleft', cat: 'b',
+      blurb: 'A frame around the point. Say the point.',
+      check(t) {
+        const out = [];
+        const re = /\bit\s+(is|was)\s+(?:[a-z]+\s+){0,3}that\b/gi;
+        let m;
+        while ((m = re.exec(t))) out.push({ s: m.index, e: m.index + m[0].length, tip: 'Cut "it is … that" and state it directly.' });
+        const m2 = /\bit\s+(is|was)\s+(important|necessary|possible|clear|worth|likely|interesting|notable|crucial|essential|useful)\s+(to|that)\b/i.exec(t);
+        if (m2) out.push({ s: m2.index, e: m2.index + m2[0].length, tip: 'Front the real subject.' });
+        return out;
+      },
+    },
+    {
+      id: 'nominalization', label: 'Buried verb', cat: 'b',
+      blurb: 'A verb hiding inside a noun. Let it act.',
+      check(t) {
+        const out = [];
+        const re = /\b(make|makes|made|perform|performs|performed|conduct|conducts|conducted|provide|provides|provided|carry out|carries out|carried out|reach|reaches|reached|give|gives|gave|do|does|did)\s+(a|an|the)?\s*([a-z]+)\b/gi;
+        let m;
+        while ((m = re.exec(t))) {
+          const v = NOMINAL[m[3].toLowerCase()];
+          if (v) out.push({ s: m.index, e: m.index + m[0].length, fix: v, tip: `"${m[1]} ${m[2] || ''} ${m[3]}" → "${v}".` });
+        }
+        return out;
+      },
+    },
+    {
+      id: 'wordy', label: 'Wordy phrase', cat: 'b',
+      blurb: 'A short form says the same thing.',
+      check(t) {
+        const out = [];
+        for (const [long, short] of PHRASES) {
+          const re = new RegExp('\\b' + long.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '\\b', 'gi');
+          let m;
+          while ((m = re.exec(t))) {
+            let e = m.index + m[0].length;
+            let fix = short;
+            if (!short && t[e] === ' ') e += 1;                  // eat a trailing space when deleting
+            if (!short && m.index > 0 && /[a-z]/i.test(t[m.index - 1] || '')) fix = '';
+            out.push({ s: m.index, e, fix, tip: short ? `→ "${short}"` : 'Delete — it adds nothing.' });
+          }
+        }
+        return out;
+      },
+    },
+    {
+      id: 'this-vague', label: 'Dangling "This"', cat: 'd',
+      blurb: 'A demonstrative with no noun. Name what it points at.',
+      check(t) {
+        const m = /^(\s*)(This|These|That|Those|It)\s+(is|are|was|were|will|would|can|could|may|might|should|has|have|had|means|shows|makes|allows|enables|provides|leads|results)\b/.exec(t);
+        if (!m) return [];
+        const s = m[1].length;
+        return [{ s, e: s + m[2].length, tip: `"${m[2]} ___" — add the noun it refers to.` }];
+      },
+    },
+    {
+      id: 'not-un', label: 'Double negative', cat: 'd',
+      blurb: '"not un-" cancels out. Say the positive.',
+      check(t) {
+        const out = [];
+        const re = /\bnot\s+(un|in|im|dis|non)([a-z]+)/gi;
+        let m;
+        while ((m = re.exec(t))) out.push({ s: m.index, e: m.index + m[0].length, tip: `"${m[0]}" → "${m[2]}".` });
+        return out;
+      },
+    },
+    {
+      id: 'long-sentence', label: 'Long sentence', cat: 'e',
+      blurb: 'Over 32 words. A full stop in the middle would help.',
+      check(t) {
+        const words = t.trim().split(/\s+/).filter(Boolean);
+        if (words.length <= 32) return [];
+        return [{ s: 0, e: t.length, tip: `${words.length} words — consider splitting.` }];
+      },
+    },
+  ];
+
+  const cap = (s) => s.replace(/^([a-z])/, (c) => c.toUpperCase());
+  const lc = (s) => s.replace(/^([A-Z])(?![A-Z])/, (c) => c.toLowerCase());
+  const byId = new Map(RULES.map((r) => [r.id, r]));
+
+  // ---------------------------------------------------------------- state
+
+  const checkerOn = () => app.getAttribute('data-check') !== 'off';
+  const disabled = () => new Set((app.getAttribute('data-check-off') || '').split('|').filter(Boolean));
+  const ruleOn = (id) => checkerOn() && !disabled().has(id);
+
+  function fileAttr(name, value) {
+    app.setAttribute(name, value);
+    const id = carrier && carrier.id(app);
+    if (id) carrier.op({ type: 'setAttr', id, name, value }, { immediate: true });
+  }
+
+  // -------------------------------------------------- the toggle + panel
+
+  const btn = document.createElement('button');
+  btn.className = 'btn voice-btn';
+  btn.id = 'voice-toggle';
+  btn.setAttribute('data-marble-transient', '');
+  btn.innerHTML = 'Voice <span class="voice-caret" title="Which checks">▾</span>';
+  views.append(btn);
+
+  const panel = document.createElement('div');
+  panel.className = 'voice-panel';
+  panel.id = 'voice-panel';
+  panel.setAttribute('data-marble-transient', '');
+  panel.hidden = true;
+  document.body.append(panel);
+
+  function fillPanel() {
+    const off = disabled();
+    panel.innerHTML = '<div class="vp-head">Active-voice checks</div>'
+      + RULES.map((r) => `<label class="vp-row"><input type="checkbox" data-rule="${r.id}"${off.has(r.id) ? '' : ' checked'}>`
+        + `<span class="vp-swatch sq-${r.cat}"></span><span class="vp-label">${esc(r.label)}</span>`
+        + `<span class="vp-blurb">${esc(r.blurb)}</span></label>`).join('')
+      + '<div class="vp-foot">The checker is grammar-by-rule, run in this page. Nothing is sent anywhere.</div>';
+  }
+
+  function reflectBtn() {
+    btn.setAttribute('aria-pressed', String(checkerOn()));
+    if (checkerOn()) btn.removeAttribute('data-off'); else btn.setAttribute('data-off', '');
+  }
+
+  btn.addEventListener('click', (event) => {
+    if (event.target.closest('.voice-caret')) {
+      if (panel.hidden) { fillPanel(); const b = btn.getBoundingClientRect(); panel.style.left = `${Math.max(8, Math.min(b.left, window.innerWidth - 320))}px`; panel.style.top = `${b.bottom + 6}px`; panel.hidden = false; }
+      else panel.hidden = true;
+      return;
+    }
+    fileAttr('data-check', checkerOn() ? 'off' : 'on');
+    reflectBtn();
+    scan();
+  });
+
+  panel.addEventListener('change', (event) => {
+    const cb = event.target.closest('input[data-rule]');
+    if (!cb) return;
+    const set = disabled();
+    if (cb.checked) set.delete(cb.getAttribute('data-rule'));
+    else set.add(cb.getAttribute('data-rule'));
+    fileAttr('data-check-off', [...set].join('|'));
+    scan();
+  });
+
+  document.addEventListener('click', (event) => {
+    if (!panel.hidden && !event.target.closest('#voice-panel') && !event.target.closest('#voice-toggle')) panel.hidden = true;
+  });
+
+  // ---------------------------------------------------------------- scan
+
+  const SKIP = /(?:^|\s)(rctl|renv|rmath|rverb|rcom|rhead|richgap|delim|rabstract)(?:\s|$)/;
+  const rowText = (row) => row.textContent.split(ZWSP).join('');
+  const isProse = (row) => row.classList.contains('rline') && !SKIP.test(' ' + row.className + ' ')
+    && rowText(row).trim() && !row.hasAttribute('data-here')
+    && !row.hasAttribute('data-cfold') && !row.hasAttribute('data-fold');
+
+  const ABBR = /\b(?:e\.g|i\.e|cf|vs|et al|Fig|Eq|Sec|Tab|no|pp|Dr|Mr|Mrs|Ms|St|Ph\.D|U\.S)\.$/i;
+
+  function splitSentences(text) {
+    const out = [];
+    let start = 0;
+    const re = /[.!?]["')\]]?(\s+)/g;
+    let m;
+    while ((m = re.exec(text))) {
+      const head = text.slice(start, m.index + 1);
+      if (ABBR.test(head.trimEnd()) || /\b[A-Z][a-z]?\.$/.test(head.trimEnd())) continue;
+      out.push({ text: text.slice(start, m.index + 1), off: start });
+      start = m.index + m[0].length;
+    }
+    if (start < text.length) out.push({ text: text.slice(start), off: start });
+    return out;
+  }
+
+  function clearSquiggles() {
+    for (const sq of [...page.querySelectorAll('.sq')]) {
+      const t = document.createTextNode(sq.textContent);
+      sq.replaceWith(t);
+    }
+    for (const row of page.querySelectorAll('.rline')) row.normalize();
+  }
+
+  let scanQueued = false;
+  function queueScan() {
+    if (scanQueued) return;
+    scanQueued = true;
+    requestAnimationFrame(() => { scanQueued = false; scan(); });
+  }
+
+  function scan() {
+    if (app.getAttribute('data-view') !== 'rich') return;
+    clearSquiggles();
+    if (!checkerOn()) return;
+
+    // paragraphs = runs of consecutive prose rows
+    const rows = [...page.children].filter((el) => el.classList.contains('rline'));
+    let para = [];
+    const flush = () => {
+      if (para.length) markParagraph(para);
+      para = [];
+    };
+    for (const row of rows) { if (isProse(row)) para.push(row); else flush(); }
+    flush();
+  }
+
+  function markParagraph(para) {
+    const texts = para.map(rowText);
+    const bounds = [];
+    let acc = 0;
+    for (const t of texts) { bounds.push(acc); acc += t.length + 1; }
+    const full = texts.join(' ');
+
+    // Collect every hit across every rule, then lay down non-overlapping
+    // squiggles — a fixable, specific hit beats a broad one over the same run.
+    const all = [];
+    for (const sent of splitSentences(full)) {
+      for (const rule of RULES) {
+        if (!ruleOn(rule.id)) continue;
+        let hits;
+        try { hits = rule.check(sent.text) || []; } catch (e) { hits = []; }
+        for (const hit of hits) {
+          const gs = sent.off + hit.s;
+          const ge = sent.off + hit.e;
+          if (ge > gs) all.push({ gs, ge, rule, hit });
+        }
+      }
+    }
+    all.sort((x, y) => x.gs - y.gs
+      || (y.hit.fix != null) - (x.hit.fix != null)
+      || (x.ge - x.gs) - (y.ge - y.gs));
+
+    let cursor = -1;
+    for (const h of all) {
+      if (h.gs < cursor) continue;                 // overlaps one already placed
+      cursor = h.ge;
+      const touched = [];
+      for (let ri = 0; ri < para.length; ri += 1) {
+        const rs = bounds[ri];
+        const reoff = rs + texts[ri].length;
+        const a = Math.max(h.gs, rs);
+        const b = Math.min(h.ge, reoff);
+        if (a < b) touched.push({ ri, a: a - rs, b: b - rs });
+      }
+      const single = touched.length === 1;
+      for (const seg of touched) wrapInRow(para[seg.ri], seg.a, seg.b, h.rule, h.hit, single && h.hit.fix != null);
+    }
+  }
+
+  function wrapInRow(row, ls, le, rule, hit, canFix) {
+    const walker = document.createTreeWalker(row, NodeFilter.SHOW_TEXT);
+    let seen = 0;
+    const jobs = [];
+    let node = walker.nextNode();
+    while (node) {
+      const len = node.nodeValue.length;
+      const a = Math.max(ls - seen, 0);
+      const b = Math.min(le - seen, len);
+      if (a < b && !(node.parentElement && node.parentElement.classList.contains('mk'))) jobs.push({ node, a, b });
+      seen += len;
+      node = walker.nextNode();
+    }
+    for (const job of jobs) {
+      let target = job.node;
+      if (job.a > 0) target = target.splitText(job.a);
+      if (job.b - job.a < target.nodeValue.length) target.splitText(job.b - job.a);
+      const sq = document.createElement('span');
+      sq.className = `sq sq-${rule.cat}`;
+      sq.setAttribute('data-marble-transient', '');
+      sq.dataset.rule = rule.id;
+      sq.dataset.tip = hit.tip || rule.blurb;
+      if (canFix) {
+        sq.dataset.fix = hit.fix;
+        sq.dataset.i = row.dataset.i;
+        sq.dataset.ls = String(ls);
+        sq.dataset.le = String(le);
+      }
+      target.parentNode.replaceChild(sq, target);
+      sq.appendChild(target);
+    }
+  }
+
+  // ------------------------------------------------------- hover + apply
+
+  let tip = null;
+  let tipTimer = null;
+  const killTip = () => { if (tip) { tip.remove(); tip = null; } };
+
+  page.addEventListener('mouseover', (event) => {
+    const sq = event.target.closest && event.target.closest('.sq');
+    if (!sq) return;
+    clearTimeout(tipTimer);
+    showTip(sq);
+  });
+  page.addEventListener('mouseout', (event) => {
+    if (!event.relatedTarget || !event.relatedTarget.closest || (!event.relatedTarget.closest('.sq') && !event.relatedTarget.closest('.sqtip'))) {
+      tipTimer = setTimeout(killTip, 160);
+    }
+  });
+
+  function showTip(sq) {
+    killTip();
+    const rule = byId.get(sq.dataset.rule);
+    tip = document.createElement('div');
+    tip.className = 'sqtip';
+    tip.setAttribute('data-marble-transient', '');
+    const fix = sq.dataset.fix;
+    tip.innerHTML = `<div class="st-head"><span class="st-dot sq-${rule ? rule.cat : 'c'}"></span>${esc(rule ? rule.label : 'Note')}</div>`
+      + `<div class="st-tip">${esc(sq.dataset.tip || (rule && rule.blurb) || '')}</div>`
+      + (fix !== undefined
+        ? `<button class="st-apply" type="button">${fix === '' ? 'Delete this' : 'Replace with “' + esc(fix) + '”'}</button>`
+        : '<div class="st-note">Spans a line break — edit by hand.</div>');
+    document.body.append(tip);
+    const b = sq.getBoundingClientRect();
+    tip.style.left = `${Math.max(8, Math.min(b.left, window.innerWidth - 300))}px`;
+    tip.style.top = `${Math.min(b.bottom + 6, window.innerHeight - 20)}px`;
+    tip.addEventListener('mouseenter', () => clearTimeout(tipTimer));
+    tip.addEventListener('mouseleave', () => { tipTimer = setTimeout(killTip, 160); });
+    const apply = tip.querySelector('.st-apply');
+    if (apply) apply.addEventListener('click', () => applyFix(sq));
+  }
+
+  function applyFix(sq) {
+    const r = room();
+    const section = r && r.activeSection();
+    const pre = section && r.preOf(section);
+    if (!pre) return;
+    const i = Number(sq.dataset.i);
+    const ls = Number(sq.dataset.ls);
+    const le = Number(sq.dataset.le);
+    const fix = sq.dataset.fix;
+    const lines = pre.textContent.split('\n');
+    if (!(i >= 0 && i < lines.length)) return;
+    const line = lines[i];
+    if (le > line.length) return;
+    let repl = fix;
+    // keep sentence capitalisation if we deleted the opening word
+    if (fix === '' && ls === 0) repl = '';
+    lines[i] = line.slice(0, ls) + repl + line.slice(le);
+    lines[i] = lines[i].replace(/\s{2,}/g, ' ').replace(/\s+([,.;:])/g, '$1');
+    killTip();
+    r.writeSource(pre, lines.join('\n'), { coalesce: false });
+  }
+
+  // ------------------------------------------------------------- wiring
+
+  document.addEventListener('latex:rendered', queueScan);
+  new MutationObserver(() => { reflectBtn(); queueScan(); })
+    .observe(app, { attributes: true, attributeFilter: ['data-view', 'data-check', 'data-check-off'] });
+  window.addEventListener('resize', () => { killTip(); panel.hidden = true; });
+  const sc = document.querySelector('#richscroll');
+  if (sc) sc.addEventListener('scroll', () => { killTip(); }, { passive: true });
+
+  (room().onReady || ((cb) => cb()))((marble) => {
+    carrier = marble || (window.marble || null);
+    reflectBtn();
+    queueScan();
+  });
+})();
+</script>
