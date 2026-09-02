@@ -234,14 +234,20 @@ __ICON__
   .empty strong { display: block; font-size: 1rem; color: var(--muted); margin-bottom: .3rem; font-weight: 500; }
 
   /* ------------------------------------------------------------- the overlays */
+  /* The New menu. It used to be a sheet across the foot of the window, which
+     put the choice as far from the button that summons it as the screen
+     allows. Now it is a popover hung under the New button — the row menu's
+     shape, with room for each starter to say what it is. Script places it from
+     the button's rect; the look is here. */
   .sheet {
-    position: fixed; inset: auto 0 0 0; z-index: 20; display: none;
-    background: var(--card); border-top: 1px solid var(--line);
-    box-shadow: 0 -8px 30px rgba(74,66,52,.18); padding: 1.2rem 1.5rem 1.6rem;
+    position: fixed; z-index: 30; display: none;
+    width: 19rem; max-width: calc(100vw - 1rem);
+    max-height: calc(100vh - 5rem); overflow-y: auto;
+    background: var(--card); border: 1px solid var(--line); border-radius: 10px;
+    box-shadow: var(--shadow); padding: .4rem;
   }
   .sheet[data-open="1"] { display: block; }
-  .sheet h3 { margin: 0 0 .1rem; font-size: 1rem; font-weight: 500; }
-  .sheet p { margin: 0 0 1rem; color: var(--faint); font-size: .85rem; }
+  .sheet p { margin: .25rem .55rem .4rem; color: var(--faint); font-size: .78rem; line-height: 1.4; }
   .starters { display: grid; grid-template-columns: repeat(auto-fill, minmax(11rem, 1fr)); gap: .7rem; }
   .starter {
     text-align: left; padding: .8rem .9rem; border: 1px solid var(--line); border-radius: var(--radius);
@@ -249,8 +255,15 @@ __ICON__
   }
   .starter:hover { background: var(--paper-3); }
   .starter b { display: flex; align-items: center; gap: .5rem; font-weight: 500; margin-bottom: .25rem; }
-  .starter i { width: .6rem; height: .6rem; border-radius: 3px; background: var(--accent-ink); }
+  .starter i { flex: 0 0 auto; width: .6rem; height: .6rem; border-radius: 3px; background: var(--accent-ink); }
   .starter span { display: block; color: var(--faint); font-size: .8rem; line-height: 1.4; }
+  /* In the menu the same starters stack as rows, not a grid of cards: no border
+     of their own, the blurb tucked under the title past the swatch. */
+  .sheet .starters { display: block; }
+  .sheet .starter { border: 0; border-radius: 6px; padding: .5rem .55rem; }
+  .sheet .starter b { margin-bottom: .1rem; }
+  .sheet .starter b span { color: var(--ink); }
+  .sheet .starter .blurb { padding-left: 1.1rem; font-size: .76rem; }
 
   .menu {
     position: fixed; z-index: 30; display: none; min-width: 12rem; padding: .35rem;
@@ -387,7 +400,6 @@ __ICON__
 </div>
 
 <div class="sheet" id="sheet" data-marble-transient>
-  <h3>New</h3>
   <p>A starter is a document you clone. The copy is yours — including the parts of it you would rather were different.</p>
   <div class="starters" id="starters"></div>
 </div>
@@ -754,13 +766,18 @@ __ICON__
 
       // ------------------------------------------------------------ the verbs
 
-      document.querySelector('#new').addEventListener('click', async () => {
+      document.querySelector('#new').addEventListener('click', async (event) => {
         if (sheet.getAttribute('data-open') === '1') return sheet.removeAttribute('data-open');
         const starters = await drive.starters();
         const grid = document.querySelector('#starters');
         grid.replaceChildren();
         for (const starter of starters) grid.append(starterButton(starter));
+        // Hung under the button that opened it, nudged back inside the window at
+        // the edges — the same placement the row menu does off its anchor.
         sheet.setAttribute('data-open', '1');
+        const box = event.currentTarget.getBoundingClientRect();
+        sheet.style.left = Math.max(8, Math.min(box.left, innerWidth - sheet.offsetWidth - 8)) + 'px';
+        sheet.style.top = Math.min(box.bottom + 6, innerHeight - sheet.offsetHeight - 8) + 'px';
       });
 
       document.querySelector('#mk').addEventListener('click', async () => {
@@ -859,7 +876,7 @@ __ICON__
         }
         if (event.key !== 'Escape') return;
         // Escape undoes the last thing you opened, one layer at a time: the row
-        // menu, then the New sheet, then the selection itself.
+        // menu, then the New menu, then the selection itself.
         const layered = menu.getAttribute('data-open') === '1' || sheet.getAttribute('data-open') === '1';
         menu.removeAttribute('data-open');
         sheet.removeAttribute('data-open');
