@@ -1,15 +1,25 @@
       </div>
 
       <!-- The same file, laid out. Every row here is one line of the <pre>
-           above; the markup melts unless the caret is on the line, comments
-           can be folded away, and an edit is the same setText the source pane
-           files. Nothing in here is kept in the document — it is a way of
-           looking at what is. -->
+           above; commands render to their value, the markup shows only on the
+           line the caret is in, and an edit is the same setText the source
+           pane files. Nothing in here is kept in the document. -->
       <div class="richdoc" id="rich" data-marble-transient>
         <header class="richhead">
           <span class="rname">main.tex</span>
           <span class="rmeta"></span>
-          <span class="rhint">Laid out. The file is still the source — the <b>&lt;/&gt;</b> tab shows it.</span>
+          <div class="richviews">
+            <div class="seg">
+              <button class="btn" data-set-view="source" title="Edit the source">&lt;/&gt;</button>
+              <button class="btn" data-set-view="rich" title="Edit it laid out">&para;</button>
+            </div>
+            <div class="seg">
+              <button class="btn" data-set-layout="editor" title="Editor only">◧</button>
+              <button class="btn" data-set-layout="split" title="Side by side">◫</button>
+              <button class="btn" data-set-layout="pdf" title="PDF only">◨</button>
+            </div>
+            <button class="btn" id="toggle-comments" title="Fold commented-out lines away, or show them">% shown</button>
+          </div>
         </header>
         <div class="richscroll" id="richscroll">
           <div class="richpage" id="richpage"></div>

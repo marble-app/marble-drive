@@ -54,6 +54,8 @@
   let lastPdf = null;
   let autoTimer = null;
   let lineMap = {};
+  let lastLabels = {};
+  let lastBib = {};
   let caretLine = 0;
   let renaming = null;
   const wired = new WeakSet();
@@ -821,9 +823,12 @@
       pdfUrl = URL.createObjectURL(blob);
       lastPdf = blob;
       lineMap = result.lineMap || {};
+      lastLabels = result.labels || {};
+      lastBib = result.bib || {};
       show();
       pdfnote.textContent = `${result.pages} page${result.pages === 1 ? '' : 's'} · ${Math.round(result.bytes.length / 1024)} kB`;
       report(result, null);
+      document.dispatchEvent(new CustomEvent('latex:compiled'));
     } catch (err) {
       report(null, err);
       pdfnote.textContent = 'the run stopped';
@@ -1360,6 +1365,20 @@
     paint, queueCompile,
     setActive: (key) => setState('data-active', key),
     revealLine: (file, line) => jump(file, line),
+    // What the last compile learned, so the laid-out view can print the same
+    // numbers the PDF shows. Empty until the first run finishes.
+    refInfo: (label) => lastLabels[label] || null,
+    citeInfo: (key) => (lastBib[key] ? { number: lastBib[key].number, fields: lastBib[key].fields || null, type: lastBib[key].type || null } : null),
+    /** Every .tex file's source, concatenated — for reading \newcommand
+     *  definitions that live in one file and are used in another. */
+    projectText: () => sections()
+      .filter((section) => kindOf(section) === 'tex')
+      .map((section) => textOf(section))
+      .join('\n\n'),
+    bibText: () => sections()
+      .filter((section) => kindOf(section) === 'bib')
+      .map((section) => textOf(section))
+      .join('\n\n'),
     onReady(cb) {
       if (carrier) cb(carrier);
       else window.addEventListener('marble:ready', (event) => cb(event.detail), { once: true });

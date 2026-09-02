@@ -93,9 +93,11 @@
   const CTL = /^\s*\\(usepackage|documentclass|newcommand|renewcommand|providecommand|def|input|include|includeonly|bibliographystyle|bibliography|addbibresource|graphicspath|pagestyle|thispagestyle|setlength|geometry|hypersetup|maketitle|tableofcontents|listoffigures|listoftables|printbibliography|clearpage|newpage|pagebreak|bigskip|medskip|smallskip|noindent|centering|raggedright|hline|toprule|midrule|bottomrule|label|title|author|date|thanks|institute|affiliation|email|keywords)\b/;
   const MATH_ENVS = new Set(['equation', 'equation*', 'align', 'align*', 'alignat', 'alignat*', 'gather', 'gather*', 'multline', 'multline*', 'flalign', 'flalign*', 'displaymath', 'math', 'eqnarray', 'eqnarray*']);
   const LIST_ENVS = new Set(['itemize', 'enumerate', 'description']);
+  const QUOTE_ENVS = new Set(['quote', 'quotation', 'verse', 'displayquote', 'displaycquote']);
+  const VERB_ENVS = new Set(['verbatim', 'lstlisting', 'minted', 'Verbatim', 'BVerbatim', 'CCSXML']);
   const BULLETS = ['•', '◦', '▪'];
 
-  function freshCtx() { return { lists: [], math: null, verbatim: false }; }
+  function freshCtx() { return { lists: [], math: null, verbatim: false, quote: 0, abstract: false }; }
 
   function stepBefore(line, ctx) {
     if (!ctx.math && (/^\s*\\\[\s*$/.test(line) || /^\s*\$\$\s*$/.test(line))) { ctx.math = '['; return; }
@@ -104,7 +106,9 @@
       const env = b[1].trim();
       if (LIST_ENVS.has(env)) ctx.lists.push({ env, n: 0 });
       else if (MATH_ENVS.has(env)) ctx.math = env;
-      else if (env === 'verbatim' || env === 'lstlisting' || env === 'minted') ctx.verbatim = true;
+      else if (VERB_ENVS.has(env)) ctx.verbatim = true;
+      else if (QUOTE_ENVS.has(env)) ctx.quote += 1;
+      else if (env === 'abstract') ctx.abstract = true;
     }
   }
 
@@ -115,8 +119,75 @@
       const env = e[1].trim();
       if (LIST_ENVS.has(env)) ctx.lists.pop();
       else if (MATH_ENVS.has(env)) ctx.math = null;
-      else if (env === 'verbatim' || env === 'lstlisting' || env === 'minted') ctx.verbatim = false;
+      else if (VERB_ENVS.has(env)) ctx.verbatim = false;
+      else if (QUOTE_ENVS.has(env)) ctx.quote = Math.max(0, ctx.quote - 1);
+      else if (env === 'abstract') ctx.abstract = false;
     }
+  }
+
+  // ---------------------------------------------------------------- macros
+  //
+  // \newcommand and friends, read from the whole project so a name defined in
+  // the preamble renders wherever it is used. Zero- and one-argument forms
+  // only — enough for the \SystemName / \todo / \sayit kind of macro a paper
+  // actually carries.
+
+  let MACROS = {};
+
+  function rebuildMacros() {
+    const src = (room() && room().projectText && room().projectText()) || (pre ? pre.textContent : '');
+    const found = {};
+    const re = /\\(?:re|provide)?newcommand\*?\s*(?:\{\s*\\([A-Za-z@]+)\s*\}|\\([A-Za-z@]+))\s*(?:\[(\d+)\])?\s*(?:\[[^\]]*\])?\s*\{/g;
+    let m;
+    while ((m = re.exec(src))) {
+      const name = m[1] || m[2];
+      const [body] = group(src, re.lastIndex - 1);
+      found[name] = { args: Number(m[3] || 0), body };
+    }
+    for (const m2 of src.matchAll(/\\def\s*\\([A-Za-z@]+)\s*\{/g)) {
+      const [body] = group(src, m2.index + m2[0].length - 1);
+      found[m2[1]] = { args: 0, body };
+    }
+    MACROS = found;
+  }
+
+  /** The look a one-argument macro gives its argument, read off its body. */
+  function macroStyle(body) {
+    const s = { cls: [], before: '', after: '' };
+    if (/\\textbf|\\bfseries/.test(body)) s.cls.push('rb');
+    if (/\\emph|\\textit|\\itshape|\\textsl/.test(body)) s.cls.push('ri');
+    if (/\\textsc|\\scshape/.test(body)) s.cls.push('rsc');
+    if (/\\texttt|\\ttfamily/.test(body)) s.cls.push('rtt');
+    const col = /\\textcolor\s*\{([^}]+)\}/.exec(body) || /\\color\s*\{([^}]+)\}/.exec(body);
+    if (col) s.color = col[1].trim();
+    if (/\\(say|enquote|qq)\b/.test(body)) { s.before = '“'; s.after = '”'; }
+    // literal text before the #1, e.g. \note -> "Note: #1"
+    const lead = /\{([^{}#\\]*?[A-Za-z][^{}#\\]*?)\}?\s*:?\s*#1/.exec(body.replace(/\\textbf|\\textcolor\s*\{[^}]*\}|\\emph|\\textit/g, ''));
+    if (lead && lead[1].trim() && lead[1].trim().length < 24) s.before = lead[1].trim() + ' ';
+    return s;
+  }
+
+  /** A macro body flattened to plain text, for the no-argument case where the
+   *  value is shown in a ::after. */
+  function macroPlain(body, depth = 0) {
+    if (depth > 4) return '';
+    let out = '';
+    let i = 0;
+    while (i < body.length) {
+      const c = body[i];
+      if (c === '\\') {
+        const cm = /^\\([A-Za-z@]+)\*?/.exec(body.slice(i));
+        if (!cm) { i += 2; continue; }
+        i += cm[0].length;
+        if (cm[1] === 'xspace' || cm[1] === 'relax') continue;
+        if (body[i] === '{') { const [g, next] = group(body, i); out += macroPlain(g, depth + 1); i = next; }
+        continue;
+      }
+      if (c === '{' || c === '}') { i += 1; continue; }
+      out += c;
+      i += 1;
+    }
+    return out.trim();
   }
 
   const ORD_A = 'abcdefghijklmnopqrstuvwxyz';
@@ -128,44 +199,153 @@
 
   // ------------------------------------------------------------ inline marks
   //
-  // The wraps that have a look, kept character-for-character: the command and
-  // its braces go in a faint <span class="mk">, the argument keeps its own
-  // styling, and nothing is added or dropped — so the row's text still reads
-  // back as the source line.
+  // Every construct is drawn character-for-character: the command and its
+  // braces go in a faint <span class="mk">, and where a command has a *value*
+  // — a citation number, a cross-reference, a macro — that value is put on a
+  // ::after and the source characters are collapsed by CSS. The row's text
+  // therefore still reads back as the exact source line, which is what lets
+  // the whole page be one contenteditable.
 
-  const INLINE = { textbf: 'rb', bfseries: 'rb', textit: 'ri', emph: 'ri', textsl: 'ri', itshape: 'ri', textsc: 'rsc', scshape: 'rsc', texttt: 'rtt', ttfamily: 'rtt', underline: 'ru', uline: 'ru' };
+  const INLINE = { textbf: 'rb', bfseries: 'rb', textit: 'ri', emph: 'ri', textsl: 'ri', itshape: 'ri', textsc: 'rsc', scshape: 'rsc', texttt: 'rtt', ttfamily: 'rtt', underline: 'ru', uline: 'ru', textup: '', textrm: '', textnormal: '', textmd: '' };
+  const CITE = new Set(['cite', 'citep', 'citet', 'citep*', 'citet*', 'citeauthor', 'citeyear', 'citeyearpar', 'parencite', 'textcite', 'autocite', 'footcite', 'Cite', 'Citep', 'Citet']);
+  const REF = { ref: 'plain', eqref: 'eq', autoref: 'auto', cref: 'auto', Cref: 'Auto', vref: 'auto', nameref: 'name', pageref: 'page' };
+  const KINDWORD = { section: 'Section', subsection: 'Section', subsubsection: 'Section', equation: 'Equation', table: 'Table', figure: 'Figure', theorem: 'Theorem', lemma: 'Lemma', definition: 'Definition', algorithm: 'Algorithm' };
 
+  /** The brace group at `i` (which points at "{"): [inner, indexPastClose,
+   *  closed]. `closed` is false when the "}" is on a later line — then the
+   *  caller must not draw a closing brace it does not have. */
   function group(str, i) {
     let depth = 0;
     for (let j = i; j < str.length; j += 1) {
       if (str[j] === '{') depth += 1;
-      else if (str[j] === '}') { depth -= 1; if (!depth) return [str.slice(i + 1, j), j + 1]; }
+      else if (str[j] === '}') { depth -= 1; if (!depth) return [str.slice(i + 1, j), j + 1, true]; }
     }
-    return [str.slice(i + 1), str.length];
+    return [str.slice(i + 1), str.length, false];
   }
+  const close = (closed) => (closed ? mk('}') : '');
 
   const mk = (s) => `<span class="mk">${esc(s)}</span>`;
+  const vattr = (s) => esc(String(s)).replace(/"/g, '&quot;');
 
-  function inlineHTML(s) {
+  function citeValue(keys) {
+    const r = room();
+    const nums = keys.split(',').map((k) => k.trim()).filter(Boolean).map((k) => {
+      const info = r && r.citeInfo && r.citeInfo(k);
+      return info && info.number != null ? info.number : '?';
+    });
+    if (!nums.length) return '[?]';
+    return '[' + nums.join(', ') + ']';
+  }
+
+  function refValue(kind, label) {
+    const r = room();
+    const info = r && r.refInfo && r.refInfo(label);
+    const n = info && info.number != null && info.number !== '' ? info.number : '?';
+    if (kind === 'eq') return `(${n})`;
+    if (kind === 'page') return `p. ${n}`;
+    if (kind === 'name') return label;
+    if (kind === 'auto' || kind === 'Auto') {
+      const word = KINDWORD[(info && info.kind) || ''] || (label.split(/[:.]/)[0].replace(/^[a-z]/, (c) => c.toUpperCase())) || 'Ref';
+      return `${kind === 'auto' ? word : word} ${n}`;
+    }
+    return String(n);
+  }
+
+  const DEFN = /^\s*\\(?:re|provide)?newcommand\b|^\s*\\def\b|^\s*\\newenvironment\b|^\s*\\DeclareRobustCommand\b|^\s*\\(?:re)?newrobustcmd\b/;
+
+  function inlineHTML(s, depth = 0, lit = false) {
     let out = '';
     let i = 0;
     while (i < s.length) {
       const c = s[i];
       if (c === '%') { out += mk(s.slice(i)); break; }
       if (c === '\\') {
-        // An escaped character: dim the pair, keep both characters.
         if (s[i + 1] && !/[A-Za-z]/.test(s[i + 1])) { out += mk(s.slice(i, i + 2)); i += 2; continue; }
-        const m = /^\\([A-Za-z@]+)\*?/.exec(s.slice(i));
+        const m = /^\\([A-Za-z@]+)(\*?)/.exec(s.slice(i));
         if (m) {
           const cmd = m[1];
-          const k = i + m[0].length;
-          if (INLINE[cmd] && s[k] === '{') {
-            const [inner, next] = group(s, k);
-            out += `${mk(m[0] + '{')}<span class="${INLINE[cmd]}">${inlineHTML(inner)}</span>${mk('}')}`;
+          let k = i + m[0].length;
+          while (s[k] === ' ') k += 1;
+
+          // \cite{...} and its relatives  →  [12]
+          if (!lit && CITE.has(cmd) && (s[k] === '{' || s[k] === '[')) {
+            let opt = '';
+            while (s[k] === '[') { const rb = s.indexOf(']', k); if (rb < 0) break; opt += s.slice(k, rb + 1); k = rb + 1; }
+            if (s[k] !== '{') { out += mk('\\' + cmd + m[2] + opt); i = k; continue; }
+            const [keys, next, closed] = group(s, k);
+            out += `<span class="cx" data-v="${vattr(citeValue(keys))}" data-keys="${vattr(keys)}">${mk('\\' + cmd + m[2] + opt + '{')}<span class="ck">${esc(keys)}</span>${close(closed)}</span>`;
             i = next;
             continue;
           }
-          out += mk(m[0]);
+          // \ref / \autoref / \eqref …  →  the resolved number
+          if (!lit && REF[cmd] && s[k] === '{') {
+            const [label, next, closed] = group(s, k);
+            out += `<span class="rx" data-v="${vattr(refValue(REF[cmd], label))}" data-label="${vattr(label)}">${mk('\\' + cmd + '{')}<span class="ck">${esc(label)}</span>${close(closed)}</span>`;
+            i = next;
+            continue;
+          }
+          // \label{…}
+          if (!lit && cmd === 'label' && s[k] === '{') {
+            const [label, next, closed] = group(s, k);
+            out += `<span class="lx" data-label="${vattr(label)}">${mk('\\label{')}<span class="ck">${esc(label)}</span>${close(closed)}</span>`;
+            i = next;
+            continue;
+          }
+          // \url / \href  →  the bare domain, linked
+          if (!lit && (cmd === 'url' || cmd === 'href') && s[k] === '{') {
+            const [target, next, closed] = group(s, k);
+            let rest = next;
+            let label = '';
+            let lc = true;
+            if (cmd === 'href' && closed && s[next] === '{') { const [g, n2, c2] = group(s, next); label = g; rest = n2; lc = c2; }
+            const shown = label || target.replace(/^https?:\/\//, '').replace(/\/$/, '');
+            out += `<span class="ux" data-v="${vattr(shown)}" data-href="${vattr(target)}">${mk('\\' + cmd + '{')}<span class="ck">${esc(target)}</span>${close(closed)}${label || (cmd === 'href' && closed && s[next] === '{') ? mk('{') + `<span class="ck">${esc(label)}</span>` + close(lc) : ''}</span>`;
+            i = rest;
+            continue;
+          }
+          // \footnote{…}  →  a dagger; the text folds until you enter the line
+          if (!lit && (cmd === 'footnote' || cmd === 'thanks') && s[k] === '{') {
+            const [body, next, closed] = group(s, k);
+            out += `<span class="fx" data-v="†">${mk('\\' + cmd + '{')}<span class="ck">${inlineHTML(body, depth + 1)}</span>${close(closed)}</span>`;
+            i = next;
+            continue;
+          }
+          // \say{…} / \enquote{…}  →  curly-quoted
+          if (!lit && (cmd === 'say' || cmd === 'enquote' || cmd === 'qq') && s[k] === '{') {
+            const [body, next, closed] = group(s, k);
+            out += `<span class="qx">${mk('\\' + cmd + '{')}<span class="qq">${inlineHTML(body, depth + 1)}</span>${close(closed)}</span>`;
+            i = next;
+            continue;
+          }
+          // a known text wrap
+          if (INLINE[cmd] !== undefined && s[k] === '{') {
+            const [inner, next, closed] = group(s, k);
+            const klass = INLINE[cmd];
+            out += `${mk('\\' + cmd + m[2] + '{')}${klass ? `<span class="${klass}">` : '<span>'}${inlineHTML(inner, depth + 1, lit)}</span>${close(closed)}`;
+            i = next;
+            continue;
+          }
+          // a project macro
+          const macro = MACROS[cmd];
+          if (!lit && macro && depth < 6) {
+            if (macro.args === 0) {
+              const st = macroStyle(macro.body);
+              out += `<span class="mx" data-v="${vattr(macroPlain(macro.body))}"${st.cls.length ? ` data-mc="${st.cls.join(' ')}"` : ''}>${mk('\\' + cmd)}</span>`;
+              i += m[0].length;
+              continue;
+            }
+            if (macro.args === 1 && s[k] === '{') {
+              const [a1, next, closed] = group(s, k);
+              const st = macroStyle(macro.body);
+              const col = st.color && /^[a-zA-Z]+$/.test(st.color) ? ` style="color:${st.color}"` : '';
+              const inner = `<span class="ma ${st.cls.join(' ')}"${col}>${inlineHTML(a1, depth + 1)}</span>`;
+              out += `<span class="mx1"${st.before ? ` data-before="${vattr(st.before)}"` : ''}${st.after ? ` data-after="${vattr(st.after)}"` : ''}>${mk('\\' + cmd + '{')}${inner}${close(closed)}</span>`;
+              i = next;
+              continue;
+            }
+          }
+          // anything else: just the command, faint
+          out += mk('\\' + cmd + m[2]);
           i += m[0].length;
           continue;
         }
@@ -198,9 +378,9 @@
     }
 
     const bg = BEGIN_LINE.exec(raw);
-    if (bg) return { cls: ['renv'], html: `${mk(bg[1])}<span class="name">${esc(bg[2])}</span>${mk(bg[3])}` };
+    if (bg) { const q = QUOTE_ENVS.has(bg[2].trim()) || bg[2].trim() === 'abstract'; return { cls: q ? ['renv', 'renv-soft'] : ['renv'], html: `${mk(bg[1])}<span class="name">${esc(bg[2])}</span>${mk(bg[3])}` }; }
     const en = END_LINE.exec(raw);
-    if (en) return { cls: ['renv'], html: `${mk(en[1])}<span class="name">${esc(en[2])}</span>${mk(en[3])}` };
+    if (en) { const q = QUOTE_ENVS.has(en[2].trim()) || en[2].trim() === 'abstract'; return { cls: q ? ['renv', 'renv-soft'] : ['renv'], html: `${mk(en[1])}<span class="name">${esc(en[2])}</span>${mk(en[3])}` }; }
 
     if (/^\s*(\\\[|\\\]|\$\$)\s*$/.test(raw)) return { cls: ['rmath', 'delim'], html: esc(raw) || ZWSP };
 
@@ -218,9 +398,13 @@
       };
     }
 
-    if (ctx.math) return { cls: ['rmath'], html: inlineHTML(raw) || ZWSP };
-    if (CTL.test(raw)) return { cls: ['rctl'], html: inlineHTML(raw) || ZWSP };
-    return { cls: [], html: inlineHTML(raw) || ZWSP };
+    const lit = DEFN.test(raw);
+    if (ctx.math) return { cls: ['rmath'], html: inlineHTML(raw, 0, lit) || ZWSP };
+    if (CTL.test(raw) || lit) return { cls: ['rctl'], html: inlineHTML(raw, 0, lit) || ZWSP };
+    const extra = [];
+    if (ctx.quote) extra.push('rquote');
+    if (ctx.abstract) extra.push('rabstract');
+    return { cls: extra, html: inlineHTML(raw, 0, false) || ZWSP };
   }
 
   // ------------------------------------------------------------- mathematics
@@ -444,8 +628,54 @@
 
     page.replaceChildren(frag);
     updateMeta();
+    applyCollapse();
     restoreSel(sel);
     markHere();
+  }
+
+  // ---------------------------------------------------- collapsible sections
+  //
+  // Session-only: a set of heading titles the reader has folded. The rows
+  // from after such a heading down to the next heading of the same or a
+  // higher level are hidden; the source is not touched.
+
+  const collapsed = new Set();
+  const headTitle = (row) => {
+    const rh = row.querySelector('.rh');
+    return rh ? rh.textContent.trim() : row.__raw.replace(/\\[A-Za-z*]+\{|\}/g, '').trim();
+  };
+  const headLevel = (row) => {
+    const rh = row.querySelector('.rh');
+    return rh ? (Number(rh.getAttribute('data-lvl')) || 9) : 9;
+  };
+
+  function applyCollapse() {
+    const rows = rlines();
+    for (let i = 0; i < rows.length; i += 1) {
+      const row = rows[i];
+      row.removeAttribute('data-cfold');
+      if (!row.classList.contains('rhead')) continue;
+      row.removeAttribute('data-collapsed');
+      row.removeAttribute('data-hidden');
+      if (!collapsed.has(headTitle(row))) continue;
+      const lvl = headLevel(row);
+      let hidden = 0;
+      for (let j = i + 1; j < rows.length; j += 1) {
+        if (rows[j].classList.contains('rhead') && headLevel(rows[j]) <= lvl) break;
+        rows[j].setAttribute('data-cfold', '');
+        hidden += 1;
+      }
+      row.setAttribute('data-collapsed', '');
+      row.setAttribute('data-hidden', String(hidden));
+    }
+  }
+
+  function toggleCollapse(row) {
+    const title = headTitle(row);
+    if (collapsed.has(title)) collapsed.delete(title);
+    else collapsed.add(title);
+    applyCollapse();
+    hideHoverUI();
   }
 
   function foldGap(count) {
@@ -648,6 +878,7 @@
     if (app.getAttribute('data-comments') === 'hide' && run >= 1) page.insertBefore(foldGap(run), page.children[page.children.length - run]);
 
     updateMeta();
+    applyCollapse();
     restoreSel(sel);
     markHere();
   }
@@ -710,6 +941,7 @@
   }
 
   function placeCaret(row, off) {
+    if (page.focus) page.focus({ preventScroll: true });
     const [node, o] = caretInto(row, off);
     const range = document.createRange();
     try { range.setStart(node, o); range.collapse(true); } catch (e) { return; }
@@ -813,6 +1045,8 @@
   function reflect() {
     const view = app.getAttribute('data-view') || 'source';
     for (const b of document.querySelectorAll('[data-set-view]')) b.setAttribute('aria-pressed', String(b.getAttribute('data-set-view') === view));
+    const tv = document.querySelector('#toggle-view');
+    if (tv) { tv.innerHTML = view === 'rich' ? '&lt;/&gt; Source' : '&para; Laid out'; tv.setAttribute('aria-pressed', String(view === 'rich')); }
     const hidden = app.getAttribute('data-comments') === 'hide';
     const cb = document.querySelector('#toggle-comments');
     if (cb) { cb.textContent = hidden ? '% hidden' : '% shown'; cb.setAttribute('aria-pressed', String(hidden)); }
@@ -823,6 +1057,12 @@
     const closest = (s) => (t.closest ? t.closest(s) : null);
     const v = closest('[data-set-view]');
     if (v) { setShell('data-view', v.getAttribute('data-set-view')); if (v.getAttribute('data-set-view') === 'rich') mount(); return; }
+    if (closest('#toggle-view')) {
+      const nextView = app.getAttribute('data-view') === 'rich' ? 'source' : 'rich';
+      setShell('data-view', nextView);
+      if (nextView === 'rich') mount();
+      return;
+    }
     if (closest('#toggle-comments')) { setShell('data-comments', app.getAttribute('data-comments') === 'hide' ? 'show' : 'hide'); renderAll(); return; }
     const logline = closest('.logline[data-line]');
     if (logline && app.getAttribute('data-view') === 'rich') {
@@ -838,6 +1078,107 @@
     row.classList.add('marble-hot');
     row.scrollIntoView({ block: 'center' });
     setTimeout(() => row.classList.remove('marble-hot'), 1600);
+  }
+
+  // ------------------------------------------------------ hover affordances
+  //
+  // Everything the reader can do to a *rendered* construct without first
+  // turning the line back into source: read a citation, fold a section, or
+  // reach for the "</>" pill that opens the line for editing. All of it is
+  // floating chrome positioned over the page — never in the contenteditable,
+  // so the row's text stays the source line.
+
+  const scrollEl = document.querySelector('#richscroll');
+  let hoverTimer = null;
+  const floats = [];
+
+  function mkFloat(cls) {
+    const el = document.createElement('div');
+    el.className = cls;
+    el.setAttribute('data-marble-transient', '');
+    el.addEventListener('mouseenter', () => clearTimeout(hoverTimer));
+    el.addEventListener('mouseleave', () => { hoverTimer = setTimeout(hideHoverUI, 140); });
+    document.body.append(el);
+    floats.push(el);
+    return el;
+  }
+  function hideHoverUI() { for (const el of floats.splice(0)) el.remove(); }
+  if (scrollEl) scrollEl.addEventListener('scroll', hideHoverUI, { passive: true });
+  window.addEventListener('resize', hideHoverUI);
+
+  function place(el, ref, where) {
+    const b = ref.getBoundingClientRect();
+    const pb = page.getBoundingClientRect();
+    el.style.position = 'fixed';
+    if (where === 'rowright') { el.style.left = `${Math.min(pb.right + 6, window.innerWidth - 44)}px`; el.style.top = `${b.top - 1}px`; }
+    else if (where === 'left') { el.style.left = `${Math.max(4, pb.left - 26)}px`; el.style.top = `${b.top}px`; }
+    else { el.style.left = `${Math.max(8, Math.min(b.left, window.innerWidth - 340))}px`; el.style.top = `${Math.min(b.bottom + 6, window.innerHeight - 20)}px`; }
+  }
+
+  page.addEventListener('mouseleave', () => { hoverTimer = setTimeout(hideHoverUI, 140); });
+
+  page.addEventListener('mouseover', (event) => {
+    if (app.getAttribute('data-view') !== 'rich') return;
+    clearTimeout(hoverTimer);
+    const t = event.target;
+    const row = t.closest && t.closest('.rline');
+    const chip = t.closest && t.closest('.cx');
+
+    if (chip && row && !row.hasAttribute('data-here')) { showCiteTip(chip); return; }
+    if (!row || row.hasAttribute('data-here') || row.hasAttribute('data-cfold')) return;
+
+    hideHoverUI();
+    const con = t.closest && t.closest('.cx, .rx, .ux, .mx, .mx1, .fx, .lx, .rh');
+    if (con || row.querySelector('.cx, .rx, .ux, .mx, .mx1, .rh')) showEditPill(row, con);
+    if (row.classList.contains('rhead')) showFoldToggle(row);
+  });
+
+  function showEditPill(row, con) {
+    const pill = mkFloat('rich-pill');
+    pill.textContent = '</>';
+    pill.title = 'Edit as command';
+    place(pill, con || row, 'rowright');
+    pill.addEventListener('mousedown', (e) => {
+      e.preventDefault();
+      let off = 0;
+      if (con) { const r = document.createRange(); r.selectNodeContents(row); try { r.setEnd(con, 0); off = noZwsp(r.toString()).length; } catch (err) { off = 0; } }
+      hideHoverUI();
+      placeCaret(row, Math.min(off + 1, row.__raw.length));
+    });
+  }
+
+  function showFoldToggle(row) {
+    const tg = mkFloat('rich-fold');
+    tg.textContent = row.hasAttribute('data-collapsed') ? '▸' : '▾';
+    tg.title = row.hasAttribute('data-collapsed') ? 'Expand section' : 'Collapse section';
+    place(tg, row, 'left');
+    tg.addEventListener('mousedown', (e) => { e.preventDefault(); toggleCollapse(row); });
+  }
+
+  const surname = (a) => (a.includes(',') ? a.split(',')[0] : a.trim().split(/\s+/).pop() || a).trim();
+
+  function showCiteTip(chip) {
+    hideHoverUI();
+    const tip = mkFloat('citetip');
+    const r = room();
+    const keys = (chip.getAttribute('data-keys') || '').split(',').map((s) => s.trim()).filter(Boolean);
+    tip.innerHTML = keys.map((key) => {
+      const info = r && r.citeInfo && r.citeInfo(key);
+      const f = (info && info.fields) || {};
+      const n = info && info.number != null ? info.number : '?';
+      const rawDoi = f.doi || (/doi\.org/.test(f.url || '') ? f.url : '');
+      const doi = String(rawDoi).replace(/^https?:\/\/(dx\.)?doi\.org\//, '');
+      const link = doi ? `https://doi.org/${doi}` : (f.url || '');
+      const authors = (f.author || '').split(/\s+and\s+/).filter(Boolean);
+      const who = authors.slice(0, 3).map(surname).join(', ') + (authors.length > 3 ? ' et al.' : '');
+      const meta = [who, f.year, f.journal || f.booktitle || f.publisher].filter(Boolean).join(' · ');
+      return `<div class="ct-entry"><span class="ct-n">[${esc(String(n))}]</span><span class="ct-body">`
+        + `<span class="ct-title">${esc(f.title || key)}</span>`
+        + (meta ? `<span class="ct-meta">${esc(meta)}</span>` : `<span class="ct-meta">${info ? esc(key) : 'not resolved — waiting on a compile'}</span>`)
+        + (link ? `<a class="ct-doi" href="${vattr(link)}" target="_blank" rel="noopener">${esc(doi || link)}</a>` : '')
+        + `</span></div>`;
+    }).join('') + '<div class="ct-foot">Click the chip to edit the citation source</div>';
+    place(tip, chip, 'below');
   }
 
   // ------------------------------------------------------------- keeping up
@@ -868,6 +1209,7 @@
   function mount() {
     const next = activePre();
     if (next !== pre) watchPre(next);
+    rebuildMacros();
     if (pre) renderAll();
     else note('This file is edited in the source view — the </> tab.');
     reflect();
@@ -875,6 +1217,14 @@
 
   new MutationObserver(() => { reflect(); mount(); })
     .observe(app, { attributes: true, attributeFilter: ['data-view', 'data-active', 'data-comments'] });
+
+  // The first compile (and every one after it) is what fills in citation and
+  // cross-reference numbers, so redraw when one lands.
+  document.addEventListener('latex:compiled', () => {
+    if (app.getAttribute('data-view') !== 'rich' || !pre) return;
+    rebuildMacros();
+    renderAll();
+  });
 
   room().onReady((marble) => {
     carrier = marble;

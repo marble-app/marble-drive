@@ -42,6 +42,8 @@ __ICON__
        mathematics borrows whatever math face the reader has. */
     --serif: "Iowan Old Style", "Palatino Linotype", Palatino, Charter, Georgia, Cambria, "Times New Roman", serif;
     --math: "STIX Two Math", "Cambria Math", "Latin Modern Math", "TeX Gyre Termes Math", var(--serif);
+    /* the ease-out the laid-out view morphs on, between rendered and source */
+    --morph: 260ms cubic-bezier(.16, 1, .3, 1);
     --code: 12.5px;
     --leading: 1.55;
   }
@@ -328,13 +330,15 @@ __ICON__
   .app[data-view="source"] .richdoc { display: none; }
 
   .richhead {
-    display: flex; align-items: baseline; gap: .6rem; padding: .35rem .8rem .35rem 3.4rem;
+    display: flex; align-items: center; gap: .6rem; padding: .3rem .6rem .3rem 3.4rem;
     border-bottom: 1px solid var(--line); background: var(--chrome); flex: none;
   }
   .richhead .rname { font: 600 .76rem/1.4 var(--mono); color: var(--muted); }
   .richhead .rmeta { font: .68rem/1.4 var(--mono); color: var(--faint); }
-  .richhead .rhint { margin-left: auto; font-size: .7rem; color: var(--faint); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-  .richhead .rhint b { font-family: var(--mono); font-weight: 600; color: var(--muted); }
+  .richviews { margin-left: auto; display: flex; align-items: center; gap: .35rem; }
+  .richviews .seg { display: inline-flex; border: 1px solid var(--line); border-radius: 999px; overflow: hidden; background: var(--card); }
+  .richviews .seg .btn { border: 0; border-radius: 0; padding: .26rem .5rem; }
+  .richviews .seg .btn + .btn { border-left: 1px solid var(--line); }
 
   .richnote {
     max-width: 32rem; margin: 4rem auto; padding: 0 1.5rem; text-align: center;
@@ -346,41 +350,84 @@ __ICON__
     position: relative; counter-reset: rl;
   }
 
-  /* One source line, and it never changes shape — not on hover, not when the
-     caret enters it. The markup is always there, just set small and faint;
-     what you type into reads as the document because it *is* the document. */
+  /* One source line. At rest the command syntax is folded to nothing and the
+     values render in its place; the line the caret is in unfolds — smoothly —
+     to its exact source. The row's *text* is the source line either way,
+     which is what lets the whole page be one contenteditable. */
   #richpage { outline: none; caret-color: var(--accent-ink); }
   .rline {
     display: block; position: relative; min-height: 1.75em;
     font: 15px/1.75 var(--serif); color: var(--ink);
     white-space: pre-wrap; overflow-wrap: break-word; tab-size: 2;
     padding: .05em .25rem; border-radius: 3px;
+    transition: background 160ms ease, margin var(--morph), padding var(--morph);
   }
   .rline::before {
     counter-increment: rl; content: counter(rl);
     position: absolute; left: -2.7rem; width: 2.1rem; text-align: right;
     font: 10.5px/1.9 var(--mono); color: var(--faint); opacity: .4;
     user-select: none; -webkit-user-select: none; pointer-events: none;
+    transition: opacity 160ms ease, color 160ms ease;
   }
-  /* The line the caret is in: a wash of colour, nothing that moves. */
-  .rline[data-here] { background: color-mix(in srgb, var(--accent-soft) 60%, transparent); }
+  .rline[data-here] { background: color-mix(in srgb, var(--accent-soft) 55%, transparent); }
   .rline[data-here]::before { opacity: 1; color: var(--accent-ink); font-weight: 600; }
   .rline.marble-hot { background: var(--accent-soft); box-shadow: -2.7rem 0 0 var(--accent-soft); }
   #richpage ::selection { background: rgba(155, 182, 207, .38); }
   @media (prefers-color-scheme: dark) { #richpage ::selection { background: rgba(127, 168, 201, .32); } }
 
-  /* The markup itself — backslash, braces, the command — kept on screen but
-     small and recessive, so a heading still reads as a heading with a faint
-     \section{ } around it. Same at rest, on hover and with the caret in it. */
-  .rline .mk { font: .78em/1 var(--mono); color: var(--accent-ink); opacity: .34; }
+  /* --- the fold ------------------------------------------------------------
+     .mk is the command scaffolding (backslash, braces, \begin{…}); .ck is a
+     key inside a reference (the cite key, the label). Both fold to zero width
+     everywhere, and unfold only on the caret's line, easing open. */
+  .rline .mk, .rline .ck {
+    font-family: var(--mono); font-size: 0; letter-spacing: -.02em;
+    color: var(--accent-ink); opacity: 0;
+    transition: font-size var(--morph), opacity 180ms ease;
+  }
+  .rline[data-here] .mk { font-size: .8em; opacity: .42; }
+  .rline[data-here] .ck { font-size: 1em; opacity: .7; }
 
-  /* Headings — always their size, caret or no caret. */
+  /* --- resolved values --------------------------------------------------
+     A construct with a value renders it on ::after; the folded source sits
+     inside at zero width. On the caret's line the value fades out as the
+     source fades in. */
+  .rline .cx::after, .rline .rx::after, .rline .ux::after, .rline .mx::after, .rline .lx::after, .rline .fx::after {
+    opacity: 1; transition: opacity 160ms ease, font-size var(--morph);
+    white-space: nowrap;
+  }
+  .rline[data-here] .cx::after, .rline[data-here] .rx::after, .rline[data-here] .ux::after,
+  .rline[data-here] .mx::after, .rline[data-here] .lx::after, .rline[data-here] .fx::after {
+    opacity: 0; font-size: 0;
+  }
+  .rline .cx::after { content: attr(data-v); color: var(--accent-ink); font: 600 .86em/1 var(--ui); vertical-align: .04em; }
+  .rline .rx::after { content: attr(data-v); color: var(--accent-ink); }
+  .rline .ux::after { content: attr(data-v); color: var(--accent-ink); text-decoration: underline; text-underline-offset: 2px; }
+  .rline .lx::after { content: "⚓"; color: var(--faint); font-size: .74em; opacity: .5; }
+  .rline .fx::after { content: attr(data-v); color: var(--accent-ink); font-size: .72em; vertical-align: super; }
+  .rline .cx, .rline .rx, .rline .ux, .rline .lx, .rline .fx { cursor: text; }
+  .rline .cx:hover::after, .rline .rx:hover::after, .rline .ux:hover::after { text-decoration-line: underline; }
+
+  /* macros: \SystemName → its value; \todo{x} → x, kept editable and styled */
+  .rline .mx::after { content: attr(data-v); }
+  .rline .mx[data-mc~="rb"]::after { font-weight: 700; }
+  .rline .mx[data-mc~="ri"]::after { font-style: italic; }
+  .rline .mx[data-mc~="rsc"]::after { font-variant: small-caps; letter-spacing: .02em; }
+  .rline .mx[data-mc~="rtt"]::after { font-family: var(--mono); font-size: .92em; }
+  .rline .mx1 > .ma { transition: color 160ms ease; }
+  .rline .mx1::before { content: attr(data-before); color: var(--muted); }
+  .rline .mx1::after { content: attr(data-after); color: var(--muted); }
+  .rline[data-here] .mx1::before, .rline[data-here] .mx1::after { content: ""; }
+  .rline .qx > .qq::before { content: "“"; } .rline .qx > .qq::after { content: "”"; }
+  .rline[data-here] .qx > .qq::before, .rline[data-here] .qx > .qq::after { content: ""; }
+
+  /* Headings — their size at rest and with the caret in them; only the faint
+     \section{ } eases in around the title, which does not move. */
   .rline .rh { font-family: var(--serif); font-weight: 700; line-height: 1.3; letter-spacing: -.01em; }
   .rline .rh[data-lvl="1"] { font-size: 1.7em; }
   .rline .rh[data-lvl="2"] { font-size: 1.34em; }
   .rline .rh[data-lvl="3"] { font-size: 1.14em; }
   .rline .rh[data-lvl="4"], .rline .rh[data-lvl="5"] { font-size: 1em; text-transform: uppercase; letter-spacing: .04em; }
-  .rline.rhead { margin-top: .8em; }
+  .rline.rhead { margin-top: .85em; }
 
   /* Inline marks. */
   .rline .rb { font-weight: 700; }
@@ -402,15 +449,21 @@ __ICON__
   .rline.ritem[data-depth="2"] { padding-left: 3.9rem; }
   .rline.ritem[data-depth="2"]::after { left: 2.7rem; }
 
-  /* Environment delimiters — \begin / \end — a quiet named rule. */
-  .rline.renv { color: var(--faint); }
-  .rline.renv .name { color: var(--accent-ink); font-family: var(--mono); font-size: .82em; }
-  .rline.renv .mk { opacity: .5; }
+  /* Environment delimiters — folded to a faint tick unless the caret is on
+     them. A quote/abstract opener folds away to almost nothing. */
+  .rline.renv { color: var(--faint); font-size: .62rem; min-height: 1em; opacity: .5; transition: font-size var(--morph), opacity 160ms ease, min-height var(--morph); }
+  .rline.renv .name { color: var(--accent-ink); font-family: var(--mono); }
+  .rline.renv[data-here] { font-size: 15px; opacity: 1; min-height: 1.75em; }
+  .rline.renv.renv-soft { min-height: .5em; opacity: .35; }
+  .rline.renv.renv-soft[data-here] { min-height: 1.75em; opacity: 1; }
 
-  /* Preamble and other structural lines: dim, so the eye slides past without
-     losing the count. */
-  .rline.rctl { color: var(--faint); }
-  .rline.rctl .mk { opacity: .5; }
+  /* Quotations and abstracts as real blocks. */
+  .rline.rquote { border-left: 2px solid var(--accent); margin-left: -.15rem; padding-left: 1rem; font-style: italic; color: var(--muted); }
+  .rline.rabstract { padding: 0 1.2rem; font-size: .95em; color: var(--muted); }
+
+  /* Preamble and other structural lines: folded small; unfold on the caret. */
+  .rline.rctl { color: var(--faint); font-size: .68rem; opacity: .6; min-height: 1em; transition: font-size var(--morph), opacity 160ms ease, min-height var(--morph); }
+  .rline.rctl[data-here] { font-size: 15px; opacity: 1; min-height: 1.75em; }
   .rline.rverb { font-family: var(--mono); font-size: .9em; color: var(--muted); }
 
   /* Mathematics. A displayed line draws as maths while the caret is elsewhere
@@ -452,6 +505,44 @@ __ICON__
   }
   .richgap:hover::before { color: var(--accent-ink); }
   .richgap:hover { border-top-color: var(--accent); }
+
+  /* Collapsed section: the rows are display:none, the heading says so. */
+  .rline[data-cfold] { display: none; }
+  .rline.rhead[data-collapsed]::after {
+    content: " ▸ " attr(data-hidden) " lines"; color: var(--faint);
+    font: 400 .62em/1 var(--ui); letter-spacing: .02em; vertical-align: .3em;
+    margin-left: .5em;
+  }
+
+  /* Floating chrome for the rendered view — never inside the contenteditable. */
+  .rich-pill, .rich-fold {
+    position: fixed; z-index: 55; display: grid; place-items: center;
+    font: 600 .66rem/1 var(--mono); color: var(--muted);
+    background: var(--card); border: 1px solid var(--line); border-radius: 6px;
+    cursor: pointer; user-select: none; box-shadow: 0 2px 8px rgba(0,0,0,.12);
+    opacity: 0; animation: rich-in 140ms cubic-bezier(.16,1,.3,1) forwards;
+  }
+  .rich-pill { width: 2rem; height: 1.5rem; }
+  .rich-fold { width: 1.3rem; height: 1.3rem; font-size: .7rem; border-radius: 4px; box-shadow: none; background: transparent; border-color: transparent; color: var(--faint); }
+  .rich-pill:hover { color: var(--accent-ink); border-color: var(--accent); }
+  .rich-fold:hover { color: var(--accent-ink); background: var(--accent-soft); }
+  @keyframes rich-in { from { opacity: 0; transform: translateY(2px); } to { opacity: 1; transform: none; } }
+
+  .citetip {
+    position: fixed; z-index: 56; max-width: 20rem; padding: .5rem .6rem;
+    background: var(--card); border: 1px solid var(--line); border-radius: 8px;
+    box-shadow: 0 8px 28px rgba(0,0,0,.18); font: 12px/1.5 var(--ui); color: var(--ink);
+    opacity: 0; animation: rich-in 140ms cubic-bezier(.16,1,.3,1) forwards;
+  }
+  .citetip .ct-entry { display: flex; gap: .5rem; padding: .25rem 0; }
+  .citetip .ct-entry + .ct-entry { border-top: 1px solid var(--line); margin-top: .1rem; }
+  .citetip .ct-n { color: var(--accent-ink); font: 600 .78rem/1.5 var(--ui); flex: none; }
+  .citetip .ct-body { display: flex; flex-direction: column; gap: .1rem; min-width: 0; }
+  .citetip .ct-title { font-weight: 600; }
+  .citetip .ct-meta { color: var(--muted); font-size: 11px; }
+  .citetip .ct-doi { color: var(--accent-ink); font: 11px/1.4 var(--mono); word-break: break-all; text-decoration: none; }
+  .citetip .ct-doi:hover { text-decoration: underline; }
+  .citetip .ct-foot { color: var(--faint); font-size: 10px; margin-top: .35rem; padding-top: .3rem; border-top: 1px solid var(--line); }
 
   [data-marble-editable]:hover { background: var(--accent-soft); }
   [data-marble-editable]:focus { background: var(--card); box-shadow: 0 0 0 1px var(--accent), 0 0 0 4px var(--accent-soft); }
