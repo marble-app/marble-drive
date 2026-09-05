@@ -26,6 +26,7 @@ import { createGate } from './gate.js';
 import { escapeHtml, html, json, readBody, readJson, send, text } from './http.js';
 import { createIntents } from './intent-routes.js';
 import { createOpLog } from './oplog.js';
+import { createPendingWrites } from './pending-writes.js';
 import { PathError, joinPath, parsePath, safePath, safeSegment, splitPath, withoutDocExt } from './paths.js';
 import { build as buildStarter, list as listStarters } from './gallery.js';
 import { createChannels } from './sse.js';
@@ -59,11 +60,14 @@ export async function createDrive(config, { log = console } = {}) {
   const intents = createIntents({ store, log });
 
   // Writes are serialized per document. `lastKnown` holds the last content this
-  // host is sure about and which client put it there, and it answers the two
-  // questions the watcher cannot: whether a change on disk is one of ours, and
-  // what the document said *before* an edit from outside.
+  // host is sure about and which client put it there, and it answers what the
+  // document said *before* an edit from outside. Whether a change on disk is
+  // one of ours is a separate question — `pendingWrites` answers it, because a
+  // single "last" slot is the wrong shape once two of our own writes to the
+  // same document can be in flight at once.
   const queues = new Map();
   const lastKnown = new Map();
+  const pendingWrites = createPendingWrites();
 
   const enqueue = (docPath, task) => {
     const next = (queues.get(docPath) ?? Promise.resolve()).then(task, task);
@@ -102,6 +106,7 @@ export async function createDrive(config, { log = console } = {}) {
       if (next === source) return { applied: 0, bytes: bytesOf(source), sha: shaOf(source) };
 
       lastKnown.set(docPath, { source: next, client });
+      pendingWrites.mark(docPath, shaOf(next));
       const written = await store.write(docPath, next, { label: 'ops', ops });
       await oplog.append(docPath, ops, { client: client ?? 'anon' });
       return { applied: ops.length, ...written };
@@ -113,6 +118,7 @@ export async function createDrive(config, { log = console } = {}) {
   async function putDocument(docPath, source, { label, client = null, event = 'created' } = {}) {
     const result = await enqueue(docPath, async () => {
       lastKnown.set(docPath, { source, client: null });
+      pendingWrites.mark(docPath, shaOf(source));
       return store.write(docPath, source, { label });
     });
     channels.toDocument(docPath, 'changed', { except: client });
@@ -359,6 +365,7 @@ export async function createDrive(config, { log = console } = {}) {
           lastKnown.set(moved.to, lastKnown.get(moved.from));
           lastKnown.delete(moved.from);
         }
+        pendingWrites.move(moved.from, moved.to);
         channels.toDrive('moved', moved);
         return json(res, 200, { ok: true, ...moved });
       }
@@ -577,11 +584,18 @@ button{background:#738698;color:#fafaf7;border-color:#738698;cursor:pointer}p{co
       return;
     }
 
-    if (prior && current === prior.source) {
+    if (pendingWrites.take(docPath, shaOf(current))) {
       // Our own save, and it has already been announced — synchronously, by the
       // route that made it, which is both faster than this and certain to
       // happen. Marble's host broadcasts from here instead, because its write
       // path does not; doing both is how every other tab hears one edit twice.
+      //
+      // Matched by content rather than by "is this the *last* thing we wrote",
+      // because a document written to fast enough can have a second save start
+      // — and update what "last" means — before this settle check for the
+      // first one ever runs. Comparing against a single slot would call that
+      // race an edit from outside and reconcile the very tab that is still
+      // typing against a version of the file that predates its own keystrokes.
       //
       // Nothing is dropped by returning: a rename can wake this watcher several
       // times for one save, and every one of those wakes is this branch.

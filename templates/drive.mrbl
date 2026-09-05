@@ -24,20 +24,37 @@ __ICON__
     --paper-2: #f3f1ea;
     --paper-3: #eceae1;
     --card: #ffffff;
+    --card-rgb: 255, 255, 255;
+    --paper-rgb: 250, 250, 247;
     --accent: #9bb6cf;
     --accent-soft: #f1f5f8;
     --accent-ink: #738698;
+    --accent-ink-rgb: 115, 134, 152;
     --shadow: 0 1px 3px rgba(74,66,52,.12), 0 4px 8px rgba(74,66,52,.06);
+    --shadow-lift: 0 4px 10px rgba(74,66,52,.10), 0 14px 28px rgba(74,66,52,.12);
     --folder: #5a5a5a;
     --radius: 12px;
+    /* Motion. One family of curves rather than one per component: a settle
+       (things arriving, staying put — critically damped, no overshoot) and a
+       snap (the instant a press registers). Nothing here is a spring in the
+       physics sense — there is no gesture on this page that needs one, because
+       nothing is thrown or flicked — but the curve is shaped like one settling,
+       which is what a spring looks like when nothing is fighting it. */
+    --settle: cubic-bezier(.22, 1, .36, 1);
+    --snap: cubic-bezier(.4, 0, .2, 1);
+    --t-fast: 110ms;
+    --t: 200ms;
+    --t-slow: 340ms;
   }
   @media (prefers-color-scheme: dark) {
     :root {
       --ink: #e8e6e1; --muted: #a3a7ab; --faint: #71767a; --line: #2f3438;
       --paper: #16181a; --paper-2: #1e2124; --paper-3: #262a2e; --card: #1c1f22;
-      --accent: #7fa8c9; --accent-soft: #1d2932; --accent-ink: #9dc0dc;
+      --card-rgb: 28, 31, 34; --paper-rgb: 22, 24, 26;
+      --accent: #7fa8c9; --accent-soft: #1d2932; --accent-ink: #9dc0dc; --accent-ink-rgb: 157, 192, 220;
       --folder: #a3a7ab;
       --shadow: 0 1px 3px rgba(0,0,0,.5), 0 4px 8px rgba(0,0,0,.3);
+      --shadow-lift: 0 6px 16px rgba(0,0,0,.45), 0 18px 36px rgba(0,0,0,.35);
     }
   }
   * { box-sizing: border-box; }
@@ -48,40 +65,66 @@ __ICON__
     -webkit-font-smoothing: antialiased;
     display: flex; flex-direction: column;
   }
-  [data-marble-editable] { outline: none; border-radius: 4px; }
+  [data-marble-editable] { outline: none; border-radius: 4px; transition: background var(--t-fast) var(--snap); }
   [data-marble-editable]:hover { background: var(--accent-soft); }
   [data-marble-editable]:focus { background: var(--card); box-shadow: 0 0 0 1px var(--accent), 0 0 0 4px var(--accent-soft); }
   button { font: inherit; }
+  /* Every press answers on the way down, not the way up — a button that waits
+     for release to show anything reads as unresponsive even at 60fps. Scale
+     rather than color, because a shrink reads as "this is a physical thing"
+     regardless of what is under it. */
+  button, .item, .crumb, .nav-item, .pin, .starter {
+    transition: transform var(--t-fast) var(--snap), background var(--t) var(--settle),
+      box-shadow var(--t) var(--settle), border-color var(--t) var(--settle), opacity var(--t) var(--settle);
+  }
+  button:active { transform: scale(.96); transition-duration: 60ms; }
+  @media (prefers-reduced-motion: reduce) {
+    *, *::before, *::after {
+      animation-duration: .001ms !important; animation-iteration-count: 1 !important;
+      transition-duration: .001ms !important; scroll-behavior: auto !important;
+    }
+  }
 
   /* ------------------------------------------------------------------ topbar */
+  /* A floating material rather than an opaque strip: the page shows through it
+     faintly, which is what tells you it is a layer *above* the content and not
+     a wall the content starts below. */
   .topbar {
-    display: flex; align-items: center; gap: 1rem; flex: 0 0 auto;
-    padding: .55rem 1rem; border-bottom: 1px solid var(--line); background: var(--paper);
+    display: flex; align-items: center; gap: 1rem; flex: 0 0 auto; position: relative; z-index: 5;
+    padding: .55rem 1rem; border-bottom: 1px solid var(--line);
+    background: rgba(var(--paper-rgb), .78); backdrop-filter: blur(20px) saturate(160%);
+    -webkit-backdrop-filter: blur(20px) saturate(160%);
   }
   .brand { display: flex; align-items: center; gap: .6rem; min-width: 13rem; }
   .logo {
     width: 1.9rem; height: 1.9rem; display: grid; place-items: center;
     border-radius: 7px; background: var(--accent-ink); color: var(--paper); font-size: .85rem;
+    box-shadow: inset 0 1px 0 rgba(255,255,255,.25), 0 1px 2px rgba(0,0,0,.12);
   }
-  .brand h1 { font-size: 1.15rem; font-weight: 400; margin: 0; letter-spacing: -.01em; }
+  .brand h1 { font-size: 1.15rem; font-weight: 500; margin: 0; letter-spacing: -.015em; }
   .search { flex: 1 1 auto; max-width: 44rem; }
   .search input {
     width: 100%; padding: .6rem 1rem; border: 1px solid transparent; border-radius: 999px;
     background: var(--paper-3); color: var(--ink); font: inherit; outline: none;
+    transition: background var(--t) var(--settle), box-shadow var(--t) var(--settle);
   }
   .search input:focus { background: var(--card); border-color: var(--line); box-shadow: var(--shadow); }
   .status {
     margin-left: auto; display: flex; align-items: center; gap: .5rem;
     font-size: .78rem; color: var(--faint); white-space: nowrap;
   }
-  .dot { width: 7px; height: 7px; border-radius: 999px; background: var(--faint); }
-  .status[data-live="1"] .dot { background: var(--accent-ink); }
+  .dot { width: 7px; height: 7px; border-radius: 999px; background: var(--faint); transition: background var(--t) var(--settle), box-shadow var(--t) var(--settle); }
+  .status[data-live="1"] .dot { background: var(--accent-ink); box-shadow: 0 0 0 3px rgba(var(--accent-ink-rgb), .18); }
 
   /* ------------------------------------------------------------------- shell */
   .shell { flex: 1 1 auto; display: flex; min-height: 0; }
+  /* One shade back from the page: a sidebar is structure, not content, and
+     "material weight encodes hierarchy" is the whole reason it is not simply
+     var(--paper) again — the eye should read it as a shelf the main pane sits
+     on, not a continuation of the same surface. */
   .side {
     flex: 0 0 15rem; padding: .9rem .75rem 1rem; overflow-y: auto;
-    display: flex; flex-direction: column; gap: .35rem;
+    display: flex; flex-direction: column; gap: .35rem; background: var(--paper-2);
   }
   .new {
     display: flex; align-items: center; gap: .55rem; align-self: flex-start;
@@ -90,7 +133,8 @@ __ICON__
     background: var(--card); color: var(--ink); box-shadow: var(--shadow);
     font-size: .92rem; cursor: pointer;
   }
-  .new:hover { background: var(--accent-soft); }
+  .new:hover { background: var(--accent-soft); box-shadow: var(--shadow-lift); transform: translateY(-1px); }
+  .new:active { transform: scale(.97) translateY(0); }
   .new .plus { font-size: 1.15rem; line-height: 1; color: var(--accent-ink); }
 
   .nav { list-style: none; margin: 0; padding: 0; }
@@ -98,7 +142,8 @@ __ICON__
     display: flex; align-items: center; gap: .75rem;
     padding: .45rem .8rem; border-radius: 999px; cursor: pointer; color: var(--muted);
   }
-  .nav-item:hover { background: var(--paper-3); }
+  .nav-item:hover { background: var(--card); }
+  .nav-item:active { transform: scale(.98); }
   /* Which one is current is derived, never stored: it is where you are, not
      something the file knows. The prefix is what tells the carrier the class
      belongs to the page and must survive a reconcile. */
@@ -113,7 +158,7 @@ __ICON__
     display: flex; align-items: center; gap: .6rem; padding: .35rem .8rem;
     border-radius: 999px; color: var(--muted); cursor: pointer; font-size: .88rem;
   }
-  .pin:hover { background: var(--paper-3); }
+  .pin:hover { background: var(--card); }
   .pin.marble-missing { opacity: .45; text-decoration: line-through; }
   .quota { margin-top: auto; padding: .8rem .85rem 0; font-size: .75rem; color: var(--faint); }
   .bar { height: 4px; border-radius: 999px; background: var(--line); margin: .4rem 0 .35rem; overflow: hidden; }
@@ -129,8 +174,9 @@ __ICON__
   .crumb {
     appearance: none; border: 0; background: none; cursor: pointer;
     color: var(--muted); font-size: 1.3rem; font-weight: 400; padding: .1rem .3rem; border-radius: 6px;
+    letter-spacing: -.01em;
   }
-  .crumb:last-child { color: var(--ink); }
+  .crumb:last-child { color: var(--ink); font-weight: 500; }
   .crumb:hover { background: var(--paper-3); }
   .crumbs .sep { color: var(--faint); }
 
@@ -142,15 +188,36 @@ __ICON__
   }
   .chip:hover { background: var(--paper-3); }
   .toolbar .spacer { margin-left: auto; }
-  .toggle { display: inline-flex; border: 1px solid var(--line); border-radius: 999px; overflow: hidden; }
-  .toggle button {
-    appearance: none; border: 0; background: none; color: var(--muted);
-    padding: .3rem .7rem; cursor: pointer; font-size: .85rem;
+  /* A real segmented control: one pill slides under whichever segment is
+     current instead of each button painting its own background. The slide is
+     driven from script (it has to measure the button it is aiming at), but the
+     easing and the material are the stylesheet's, same as everything else that
+     moves on this page. */
+  .toggle {
+    position: relative; display: inline-flex; border: 1px solid var(--line); border-radius: 999px;
+    padding: 2px; background: var(--paper-3);
   }
+  .toggle .thumb {
+    position: absolute; top: 2px; left: 2px; height: calc(100% - 4px); width: 2rem;
+    border-radius: 999px; background: var(--card); box-shadow: var(--shadow);
+    transition: transform var(--t-slow) var(--settle), width var(--t-slow) var(--settle);
+  }
+  .toggle button {
+    position: relative; z-index: 1; appearance: none; border: 0; background: none; color: var(--muted);
+    padding: .32rem .65rem; cursor: pointer; font-size: .85rem; display: grid; place-items: center;
+    transition: color var(--t) var(--settle);
+  }
+  .toggle button svg { width: 1.05rem; height: 1.05rem; display: block; }
   /* The view is a fact about this Drive, so it lives in one attribute and the
-     stylesheet reads it. Nothing derives it, nothing copies it. */
+     stylesheet reads it. Nothing derives it, nothing copies it — the thumb's
+     position is the one thing here that is neither, because where a pill sits
+     under a row of buttons is not something worth a byte in the file. */
   body[data-view="grid"] .toggle [data-set-view="grid"],
-  body[data-view="list"] .toggle [data-set-view="list"] { background: var(--accent-soft); color: var(--accent-ink); }
+  body[data-view="list"] .toggle [data-set-view="list"],
+  body[data-view="timeline"] .toggle [data-set-view="timeline"],
+  body[data-view="map"] .toggle [data-set-view="map"],
+  body[data-view="pulse"] .toggle [data-set-view="pulse"],
+  body[data-view="weight"] .toggle [data-set-view="weight"] { color: var(--accent-ink); }
 
   .listhead {
     display: none; gap: 1rem; padding: .4rem 1.4rem .35rem;
@@ -171,29 +238,76 @@ __ICON__
     align-content: start;
   }
   .item { position: relative; cursor: pointer; user-select: none; touch-action: none; }
+  /* Every row and card fades and settles into place together rather than
+     popping in mid-refresh — a folder that just changed should look like it
+     changed, not like it was always like this. `animation-delay` is set per
+     item from script, capped low enough that forty rows still finish inside a
+     third of a second. */
+  .item { animation: arrive var(--t-slow) var(--settle) backwards; }
+  @keyframes arrive { from { opacity: 0; transform: translateY(3px) scale(.98); } }
   body[data-view="grid"] .item {
     border: 1px solid var(--line); border-radius: var(--radius); padding: .7rem .8rem;
     background: var(--card);
   }
-  body[data-view="grid"] .item:hover { background: var(--paper-3); }
+  body[data-view="grid"] .item:hover {
+    background: var(--paper-3); border-color: color-mix(in srgb, var(--accent-ink) 30%, var(--line));
+    box-shadow: var(--shadow-lift); transform: translateY(-2px);
+  }
+  body[data-view="grid"] .item:active { transform: translateY(-2px) scale(.98); }
   body[data-view="grid"] .item .row-meta { display: none; }
   body[data-view="grid"] .item .thumb {
-    display: block; height: 6.5rem; margin: .6rem 0 0; border-radius: 8px;
-    background: var(--paper); border: 1px solid var(--line);
-    display: grid; grid-auto-flow: row; place-items: center; align-content: center;
-    gap: .5rem; padding: 0 .7rem; color: var(--faint); font-size: .72rem;
-    overflow: hidden;
+    display: block; height: 7rem; margin: .6rem 0 0; border-radius: 8px;
+    background: linear-gradient(160deg, var(--paper) 0%, var(--paper-2) 100%); border: 1px solid var(--line);
+    overflow: hidden; position: relative; color: var(--faint); font-size: .72rem;
   }
+  /* A thin bar of the accent, proportional to how much of this document is —
+     nodes for a doc, nothing for a folder. Free of a second request or a real
+     thumbnail: it is drawn from numbers the listing already carries, so a
+     heavier document reads as heavier before you have opened it. */
+  .item .thumb .weight {
+    position: absolute; left: 0; right: 0; bottom: 0; height: 3px; background: var(--accent-ink);
+    opacity: .55; transform-origin: left; transform: scaleX(var(--w, 0)); z-index: 2;
+    transition: transform var(--t-slow) var(--settle);
+  }
+  /* A document draws itself. The tile mounts a sandboxed, script-free iframe of
+     the real file — blown up and scaled back down — so what is in the tile is
+     what is in the document, not a guess at it. It is mounted only as the tile
+     nears the viewport, and the glyph shows until it loads. */
+  .item .thumb .peek { position: absolute; inset: 0 0 3px 0; overflow: hidden; display: grid; place-items: center; background: var(--card); }
+  .item .thumb .peek iframe {
+    position: absolute; top: 0; left: 0; width: 500%; height: 500%;
+    border: 0; transform: scale(.2); transform-origin: top left;
+    background: #fff; opacity: 0; transition: opacity var(--t-slow) var(--settle); pointer-events: none;
+  }
+  .item .thumb .peek.marble-is-loaded iframe { opacity: 1; }
+  .item .thumb .peek.marble-is-loaded .big { display: none; }
+  /* A folder draws what it holds: one cell per child, coloured by kind, so
+     "mostly documents", "a nest of folders" and "empty" are all visible without
+     opening it. */
+  .item .thumb .mini {
+    position: absolute; inset: 0 0 3px 0; padding: .55rem;
+    display: grid; grid-template-columns: repeat(3, 1fr); grid-auto-rows: 1fr;
+    gap: .32rem; align-content: start;
+  }
+  .item .thumb .mini .cell { border-radius: 3px; background: var(--paper-3); min-height: .85rem; }
+  .item .thumb .mini .cell.is-doc { background: var(--accent); }
+  .item .thumb .mini .cell.is-folder { background: var(--folder); opacity: .45; }
+  .item .thumb .mini .cell.is-empty { grid-column: 1 / -1; background: none; }
   .item .thumb .big { display: block; color: var(--folder); }
   .item[data-kind="doc"] .thumb .big { color: var(--accent-ink); }
   .item .thumb .big .glyph { width: 2.5rem; height: 2.5rem; }
-  .item .thumb .cap { max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .item .thumb .cap {
+    position: absolute; left: 0; right: 0; bottom: 3px; padding: .28rem .5rem; z-index: 1;
+    background: linear-gradient(transparent, var(--card) 55%);
+    max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  }
   body[data-view="list"] .items { padding: 0 0 2rem; }
   body[data-view="list"] .item {
     display: grid; gap: 1rem; align-items: center;
-    padding: .45rem 1.4rem; border-bottom: 1px solid var(--line);
+    padding: .5rem 1.4rem; border-bottom: 1px solid var(--line);
   }
   body[data-view="list"] .item:hover { background: var(--paper-3); }
+  body[data-view="list"] .item:active { transform: scale(.995); }
   body[data-view="list"] .item .thumb { display: none; }
 
   .item .name { display: flex; align-items: center; gap: .6rem; min-width: 0; }
@@ -228,10 +342,184 @@ __ICON__
   }
   body[data-view="list"] .item .more { position: static; opacity: .5; justify-self: end; }
   .item:hover .more { opacity: 1; }
-  .item .more:hover { background: var(--line); }
+  .item .more:hover { background: var(--line); transform: scale(1.08); }
+  .item .more:active { transform: scale(.92); }
 
   .empty { padding: 4rem 1.5rem; text-align: center; color: var(--faint); }
   .empty strong { display: block; font-size: 1rem; color: var(--muted); margin-bottom: .3rem; font-weight: 500; }
+
+  /* ------------------------------------------------------------- the timeline */
+  /* Everything below the crumbs and the toolbar is still `.items`, still full
+     of `.item` — the pick, the menu, the keyboard, Enter and Escape all keep
+     working unmodified. What changes is what an item *looks like* and what the
+     folder hands it: grid and list draw one level of the tree; the timeline
+     draws every document under it, because a folder doesn't have a day it
+     happened on and a document does. */
+  body[data-view="timeline"] .items { padding: .4rem 1.5rem 3rem 3rem; }
+  .tgroup {
+    position: relative; margin: 1.7rem 0 .5rem; padding-left: .1rem;
+    font-size: .72rem; text-transform: uppercase; letter-spacing: .08em;
+    color: var(--faint); font-weight: 600;
+  }
+  .tgroup:first-child { margin-top: .3rem; }
+  /* Scoped to the row's own class rather than the view attribute: a timeline
+     row is reused verbatim inside the Pulse detail panel below, and it has to
+     look like itself there too. */
+  .item.trow {
+    position: relative; display: flex; align-items: center; gap: .85rem;
+    padding: .5rem .6rem .5rem .1rem; border-radius: 10px;
+  }
+  .item.trow::before {
+    /* One continuous spine behind every row and every header, whichever
+       document is picked. A single element the height of the list rather than
+       a border per row, so it reads as one thread through time and not a
+       fence between entries. */
+    content: ''; position: absolute; left: -1.62rem; top: -.35rem; bottom: -.35rem; width: 2px;
+    background: var(--line);
+  }
+  .item.trow:hover { background: var(--paper-3); }
+  .item.trow .tdot {
+    position: absolute; left: -1.87rem; width: .55rem; height: .55rem; border-radius: 999px;
+    background: var(--accent-ink); box-shadow: 0 0 0 3px var(--paper-2);
+  }
+  .item.trow .tdot.marble-fresh {
+    animation: pulse-dot 2.2s var(--settle) infinite;
+  }
+  @keyframes pulse-dot {
+    0%, 100% { box-shadow: 0 0 0 3px var(--paper-2), 0 0 0 3px rgba(var(--accent-ink-rgb), 0); }
+    50% { box-shadow: 0 0 0 3px var(--paper-2), 0 0 0 7px rgba(var(--accent-ink-rgb), .28); }
+  }
+  .item.trow .ico { flex: 0 0 auto; display: flex; color: var(--folder); }
+  .item.trow[data-kind="doc"] .ico { color: var(--accent-ink); }
+  .item.trow .tname { min-width: 0; flex: 1 1 auto; display: flex; flex-direction: column; gap: .05rem; }
+  .item.trow .tname b {
+    font-weight: 500; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  }
+  .item.trow .tname small { color: var(--faint); font-size: .76rem; }
+  .item.trow .tmeta {
+    flex: 0 0 auto; color: var(--faint); font-size: .8rem; white-space: nowrap; font-variant-numeric: tabular-nums;
+  }
+  .item.trow .more { position: static; opacity: .5; }
+  .item.trow .thumb { display: none; }
+
+  /* ------------------------------------------------------------------ the map */
+  /* The shape of a folder rather than a manifest of it: what is here, how
+     folders relate to what holds them, and which of them is heavy — the same
+     bytes and node counts `weigh` already reports, spent on geometry instead
+     of a sentence. Nothing here is content; close the tab and reopen and it is
+     recomputed, same as the grid is. */
+  body[data-view="map"] .items { position: relative; overflow: hidden; padding: 0; }
+  .orbit-wrap { position: absolute; inset: 0; display: grid; place-items: center; }
+  .orbit-center {
+    position: relative; z-index: 2; display: flex; flex-direction: column; align-items: center;
+    justify-content: center; gap: .15rem; width: 7.5rem; height: 7.5rem; border-radius: 999px;
+    text-align: center; padding: .5rem; background: var(--card); border: 1px solid var(--line);
+    box-shadow: var(--shadow-lift); color: var(--muted);
+  }
+  .orbit-center .ico { color: var(--folder); }
+  .orbit-center .ico .glyph { width: 1.4rem; height: 1.4rem; }
+  .orbit-center b { color: var(--ink); font-weight: 500; font-size: .88rem; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .orbit-center small { color: var(--faint); font-size: .74rem; }
+  .ring {
+    position: absolute; top: 50%; left: 50%; border: 1px dashed var(--line); border-radius: 999px;
+    width: calc(var(--r) * 2); height: calc(var(--r) * 2); margin-left: calc(var(--r) * -1); margin-top: calc(var(--r) * -1);
+    opacity: .6; pointer-events: none;
+  }
+  /* The disk drifts, once around every few minutes — slow enough that it never
+     reads as "spinning", only as "not a photograph". `@property` is what lets
+     a child cancel a value its rotating ancestor is still animating: --spin is
+     declared an angle and marked to inherit, so every node downstream can read
+     the live value and subtract it back out to stay upright while its
+     *position* keeps revolving for free. Where a browser has never heard of
+     @property, --spin simply never becomes 360deg and the disk sits still —
+     a map that does not turn is still a map. */
+  @property --spin { syntax: '<angle>'; inherits: true; initial-value: 0deg; }
+  .orbit { position: absolute; inset: 0; transform: rotate(var(--spin)); animation: drift 240s linear infinite; }
+  @keyframes drift { to { --spin: 360deg; } }
+  .item.node {
+    position: absolute; top: 50%; left: 50%; width: var(--size); height: var(--size);
+    margin-left: calc(var(--size) / -2); margin-top: calc(var(--size) / -2);
+    transform: rotate(var(--angle)) translate(var(--radius)) rotate(calc(-1 * var(--angle) - var(--spin)));
+    display: flex; flex-direction: column; align-items: center; justify-content: center; gap: .25rem;
+    text-align: center; padding: .3rem; border-radius: 999px;
+    background: var(--card); border: 1px solid var(--line); box-shadow: var(--shadow);
+    opacity: var(--fresh, 1);
+  }
+  .item.node:hover { box-shadow: var(--shadow-lift); border-color: var(--accent-ink); z-index: 3; opacity: 1; }
+  .item.node:active { transform: rotate(var(--angle)) translate(var(--radius)) rotate(calc(-1 * var(--angle) - var(--spin))) scale(.94); }
+  .item.node .ico { color: var(--folder); }
+  .item.node[data-kind="doc"] .ico { color: var(--accent-ink); }
+  .item.node .ico .glyph { width: 1.2rem; height: 1.2rem; }
+  .item.node b {
+    font-weight: 500; font-size: .74rem; max-width: calc(var(--size) * 1.7); overflow: hidden;
+    text-overflow: ellipsis; white-space: nowrap; position: absolute; top: 100%; margin-top: .3rem;
+    color: var(--muted); background: color-mix(in srgb, var(--paper) 75%, transparent); padding: 0 .2rem; border-radius: 4px;
+  }
+  /* Present, not deleted: a node still needs Rename, Move, Pin, Trash — it
+     only needs them to stay out of the way of a shape that is mostly circle. */
+  .item.node .more {
+    position: absolute; top: -.3rem; right: -.3rem; width: 1.5rem; height: 1.5rem;
+    background: var(--card); border: 1px solid var(--line); opacity: 0;
+  }
+  .item.node:hover .more, .item.node:focus-within .more { opacity: 1; }
+  @media (prefers-reduced-motion: reduce) { .orbit { animation: none; } }
+
+  /* ---------------------------------------------------------------- the pulse */
+  /* A calendar of activity, one square per day — the same question the
+     timeline answers, asked the other way around. The timeline is for "what
+     did I touch"; this is for "when was I actually in here", which a list of
+     forty rows cannot show you at a glance and a grid of ninety squares can. */
+  body[data-view="pulse"] .items { padding: 1.4rem 1.6rem 2rem; }
+  .pulse-head { display: flex; align-items: baseline; justify-content: space-between; gap: 1rem; margin-bottom: 1rem; }
+  .pulse-head b { font-weight: 500; font-size: .95rem; }
+  .pulse-head span { color: var(--faint); font-size: .78rem; }
+  .pulse-grid { display: grid; grid-auto-flow: column; grid-template-rows: repeat(7, 1fr); gap: 3px; overflow-x: auto; padding-bottom: .3rem; }
+  .pulse-day {
+    width: 13px; height: 13px; border-radius: 3px; background: var(--paper-3);
+    cursor: pointer; position: relative;
+  }
+  .pulse-day[data-level="1"] { background: color-mix(in srgb, var(--accent-ink) 28%, var(--paper-3)); }
+  .pulse-day[data-level="2"] { background: color-mix(in srgb, var(--accent-ink) 55%, var(--paper-3)); }
+  .pulse-day[data-level="3"] { background: color-mix(in srgb, var(--accent-ink) 80%, var(--paper-3)); }
+  .pulse-day[data-level="4"] { background: var(--accent-ink); }
+  .pulse-day:hover { outline: 2px solid var(--accent-ink); outline-offset: 1px; }
+  .pulse-day.marble-picked { outline: 2px solid var(--ink); outline-offset: 1px; }
+  .pulse-legend { display: flex; align-items: center; gap: .3rem; margin-top: .6rem; color: var(--faint); font-size: .74rem; }
+  .pulse-legend i { width: 11px; height: 11px; border-radius: 3px; background: var(--paper-3); display: inline-block; }
+  .pulse-legend i[data-level="1"] { background: color-mix(in srgb, var(--accent-ink) 28%, var(--paper-3)); }
+  .pulse-legend i[data-level="2"] { background: color-mix(in srgb, var(--accent-ink) 55%, var(--paper-3)); }
+  .pulse-legend i[data-level="3"] { background: color-mix(in srgb, var(--accent-ink) 80%, var(--paper-3)); }
+  .pulse-legend i[data-level="4"] { background: var(--accent-ink); }
+  /* Left padding wide enough that a reused timeline row's spine and dot —
+     both positioned outside its own left edge — land inside the scroll
+     container instead of under the row before it. */
+  .pulse-detail { margin-top: 1.4rem; border-top: 1px solid var(--line); padding: .8rem 0 0 2rem; }
+  .pulse-detail h4 { margin: 0 0 .5rem; font-size: .82rem; font-weight: 500; color: var(--muted); }
+  .pulse-detail .empty { padding: 1rem 0; text-align: left; }
+
+  /* --------------------------------------------------------------- the weight */
+  /* The map answers "where" by shape; this answers "which ones" by rank —
+     the same numbers `weigh` reports, sorted worst-first so the one document
+     worth doing something about is always the top row. */
+  body[data-view="weight"] .items { padding: .5rem 1.4rem 2rem; }
+  body[data-view="weight"] .item {
+    position: relative; display: flex; align-items: center; gap: .85rem;
+    padding: .5rem 0; border-bottom: 1px solid var(--line);
+  }
+  body[data-view="weight"] .item:hover { background: var(--paper-3); }
+  .wrank { flex: 0 0 auto; width: 1.4rem; text-align: right; color: var(--faint); font-size: .78rem; font-variant-numeric: tabular-nums; }
+  .witem-ico { flex: 0 0 auto; display: flex; color: var(--folder); }
+  .item[data-kind="doc"] .witem-ico { color: var(--accent-ink); }
+  .wname { flex: 0 0 auto; width: 12rem; min-width: 0; }
+  .wname b { display: block; font-weight: 500; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .wname small { display: block; color: var(--faint); font-size: .76rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .wbar { flex: 1 1 auto; height: 8px; border-radius: 999px; background: var(--paper-3); overflow: hidden; min-width: 3rem; }
+  .wbar i {
+    display: block; height: 100%; border-radius: inherit; background: var(--accent-ink);
+    transform-origin: left; transform: scaleX(var(--w, 0)); transition: transform var(--t-slow) var(--settle);
+  }
+  .wmeta { flex: 0 0 auto; width: 6rem; text-align: right; color: var(--faint); font-size: .82rem; font-variant-numeric: tabular-nums; }
+  body[data-view="weight"] .item .more { position: static; opacity: .5; }
 
   /* ------------------------------------------------------------- the overlays */
   /* The New menu. It used to be a sheet across the foot of the window, which
@@ -239,14 +527,25 @@ __ICON__
      allows. Now it is a popover hung under the New button — the row menu's
      shape, with room for each starter to say what it is. Script places it from
      the button's rect; the look is here. */
+  /* Materialize rather than fade or `display` toggle: a popover that only
+     flips opacity reads as a layer that was already there, and `display: none`
+     gives a transition nothing to animate from. So it stays in the render
+     tree, unreachable and invisible when closed (`pointer-events: none`,
+     `opacity: 0`), and grows from the corner nearest the button that opened it
+     — `transform-origin` is set from script, once, per opening, the same idea
+     as anchoring a menu to its trigger. */
   .sheet {
-    position: fixed; z-index: 30; display: none;
+    position: fixed; z-index: 30; pointer-events: none;
     width: 19rem; max-width: calc(100vw - 1rem);
     max-height: calc(100vh - 5rem); overflow-y: auto;
-    background: var(--card); border: 1px solid var(--line); border-radius: 10px;
-    box-shadow: var(--shadow); padding: .4rem;
+    background: rgba(var(--card-rgb), .88); backdrop-filter: blur(24px) saturate(160%);
+    -webkit-backdrop-filter: blur(24px) saturate(160%);
+    border: 1px solid var(--line); border-radius: 14px;
+    box-shadow: var(--shadow-lift); padding: .4rem;
+    transform: scale(.94); opacity: 0;
+    transition: transform var(--t) var(--settle), opacity var(--t) var(--settle);
   }
-  .sheet[data-open="1"] { display: block; }
+  .sheet[data-open="1"] { pointer-events: auto; transform: none; opacity: 1; }
   .sheet p { margin: .25rem .55rem .4rem; color: var(--faint); font-size: .78rem; line-height: 1.4; }
   .starters { display: grid; grid-template-columns: repeat(auto-fill, minmax(11rem, 1fr)); gap: .7rem; }
   .starter {
@@ -266,47 +565,77 @@ __ICON__
   .sheet .starter .blurb { padding-left: 1.1rem; font-size: .76rem; }
 
   .menu {
-    position: fixed; z-index: 30; display: none; min-width: 12rem; padding: .35rem;
-    background: var(--card); border: 1px solid var(--line); border-radius: 10px; box-shadow: var(--shadow);
+    position: fixed; z-index: 30; pointer-events: none; min-width: 12rem; padding: .35rem;
+    background: rgba(var(--card-rgb), .9); backdrop-filter: blur(24px) saturate(160%);
+    -webkit-backdrop-filter: blur(24px) saturate(160%);
+    border: 1px solid var(--line); border-radius: 10px; box-shadow: var(--shadow-lift);
+    transform: scale(.94); opacity: 0;
+    transition: transform var(--t) var(--settle), opacity var(--t) var(--settle);
   }
-  .menu[data-open="1"] { display: block; }
+  .menu[data-open="1"] { pointer-events: auto; transform: none; opacity: 1; }
   .menu button {
     display: block; width: 100%; text-align: left; padding: .45rem .7rem;
     border: 0; border-radius: 6px; background: none; color: var(--ink); cursor: pointer; font-size: .88rem;
   }
   .menu button:hover { background: var(--paper-3); }
+  .menu button:active { transform: scale(.98); }
   .menu hr { border: 0; border-top: 1px solid var(--line); margin: .3rem 0; }
 
   .toast {
     position: fixed; left: 1.2rem; bottom: 1.2rem; z-index: 40;
-    padding: .65rem 1rem; border-radius: 8px; background: var(--ink); color: var(--paper);
-    font-size: .85rem; box-shadow: var(--shadow); opacity: 0; transform: translateY(.5rem);
-    transition: opacity .16s, transform .16s; pointer-events: none;
+    padding: .65rem 1rem; border-radius: 10px;
+    background: rgba(var(--card-rgb), .82); backdrop-filter: blur(20px) saturate(160%);
+    -webkit-backdrop-filter: blur(20px) saturate(160%);
+    border: 1px solid var(--line); color: var(--ink); font-weight: 500; letter-spacing: .003em;
+    font-size: .85rem; box-shadow: var(--shadow-lift); opacity: 0; transform: translateY(.4rem) scale(.98);
+    transition: opacity var(--t) var(--settle), transform var(--t) var(--settle); pointer-events: none;
   }
   .toast[data-open="1"] { opacity: 1; transform: none; }
 
   .ghost {
     position: fixed; z-index: 50; pointer-events: none; padding: .4rem .7rem;
     background: var(--card); border: 1px solid var(--accent-ink); border-radius: 8px;
-    box-shadow: var(--shadow); font-size: .85rem; display: none;
+    box-shadow: var(--shadow-lift); font-size: .85rem; opacity: 0; transform: scale(.9) rotate(-1deg);
+    transition: opacity var(--t-fast) var(--settle), transform var(--t-fast) var(--settle);
   }
-  .ghost[data-open="1"] { display: block; }
+  .ghost[data-open="1"] { opacity: 1; transform: none; }
 
   /* A file on its way in from outside. The overlay is the whole window because
      a drop anywhere lands in the folder you are looking at, and it takes no
      pointer events at all — otherwise it would be the thing every dragover
      found, and no row underneath it could ever be a target. */
   .drop {
-    position: fixed; inset: .4rem; z-index: 45; pointer-events: none; display: none;
+    position: fixed; inset: .4rem; z-index: 45; pointer-events: none; display: grid; place-items: center;
     border: 2px dashed var(--accent-ink); border-radius: var(--radius);
     background: color-mix(in srgb, var(--accent-soft) 72%, transparent);
+    opacity: 0; transform: scale(.99);
+    transition: opacity var(--t) var(--settle), transform var(--t) var(--settle);
   }
-  .drop[data-open="1"] { display: grid; place-items: center; }
+  .drop[data-open="1"] { opacity: 1; transform: none; }
   .drop b {
     padding: .6rem 1.1rem; border-radius: 999px; font-weight: 500;
     background: var(--card); border: 1px solid var(--accent-ink); color: var(--accent-ink);
     box-shadow: var(--shadow);
   }
+
+  /* The marquee. The rectangle is one div sized from the drag; the lasso is one
+     polyline in an SVG that covers the viewport at 1:1 pixels. Both take no
+     pointer events, so the rows underneath stay the thing the drag is measured
+     against. */
+  .band {
+    position: fixed; z-index: 35; display: none; pointer-events: none;
+    border: 1px solid var(--accent-ink); border-radius: 2px;
+    background: color-mix(in srgb, var(--accent-soft) 55%, transparent);
+  }
+  .band[data-open="1"] { display: block; }
+  .lasso { position: fixed; inset: 0; width: 100vw; height: 100vh; z-index: 35; display: none; pointer-events: none; }
+  .lasso[data-open="1"] { display: block; }
+  .lasso polyline {
+    fill: color-mix(in srgb, var(--accent-soft) 35%, transparent);
+    stroke: var(--accent-ink); stroke-width: 1.5; stroke-linejoin: round; stroke-linecap: round;
+  }
+  /* A drag that starts on empty space must not leave a text selection behind it. */
+  body.marble-marqueeing, body.marble-marqueeing * { user-select: none !important; }
 
   @media (max-width: 52rem) {
     .side { flex-basis: 4.5rem; }
@@ -377,8 +706,49 @@ __ICON__
       <button class="chip" id="up" data-marble-transient>Up</button>
       <span class="spacer"></span>
       <span class="toggle" data-marble-transient>
-        <button data-set-view="grid" title="Grid">▦</button>
-        <button data-set-view="list" title="List">☰</button>
+        <span class="thumb" aria-hidden="true"></span>
+        <button data-set-view="grid" title="Grid" aria-label="Grid">
+          <svg viewBox="0 0 16 16" aria-hidden="true"><g fill="currentColor">
+            <rect x="1.5" y="1.5" width="5.5" height="5.5" rx="1.3"/><rect x="9" y="1.5" width="5.5" height="5.5" rx="1.3"/>
+            <rect x="1.5" y="9" width="5.5" height="5.5" rx="1.3"/><rect x="9" y="9" width="5.5" height="5.5" rx="1.3"/>
+          </g></svg>
+        </button>
+        <button data-set-view="list" title="List" aria-label="List">
+          <svg viewBox="0 0 16 16" aria-hidden="true"><g fill="currentColor">
+            <rect x="1.5" y="2.5" width="13" height="2" rx="1"/><rect x="1.5" y="7" width="13" height="2" rx="1"/><rect x="1.5" y="11.5" width="13" height="2" rx="1"/>
+          </g></svg>
+        </button>
+        <button data-set-view="timeline" title="Timeline" aria-label="Timeline">
+          <svg viewBox="0 0 16 16" aria-hidden="true"><g fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round">
+            <path d="M3 1.5v13"/></g><g fill="currentColor">
+            <circle cx="3" cy="3.4" r="1.5"/><circle cx="3" cy="8" r="1.5"/><circle cx="3" cy="12.6" r="1.5"/>
+            <rect x="6.3" y="2.6" width="8.2" height="1.6" rx=".8" opacity=".85"/>
+            <rect x="6.3" y="7.2" width="6" height="1.6" rx=".8" opacity=".85"/>
+            <rect x="6.3" y="11.8" width="7.2" height="1.6" rx=".8" opacity=".85"/>
+          </g></svg>
+        </button>
+        <button data-set-view="map" title="Map" aria-label="Map">
+          <svg viewBox="0 0 16 16" aria-hidden="true"><g fill="none" stroke="currentColor" stroke-width="1.1" opacity=".6">
+            <circle cx="8" cy="8" r="6.2"/></g><g fill="currentColor">
+            <circle cx="8" cy="8" r="1.9"/><circle cx="13.2" cy="6" r="1.3"/><circle cx="4" cy="2.6" r="1.3"/><circle cx="3.2" cy="12.4" r="1.3"/>
+          </g></svg>
+        </button>
+        <button data-set-view="pulse" title="Pulse" aria-label="Pulse">
+          <svg viewBox="0 0 16 16" aria-hidden="true"><g fill="currentColor">
+            <rect x="1" y="1" width="3" height="3" rx=".6" opacity=".25"/><rect x="5" y="1" width="3" height="3" rx=".6" opacity=".9"/>
+            <rect x="9" y="1" width="3" height="3" rx=".6" opacity=".45"/><rect x="13" y="1" width="2.2" height="3" rx=".6" opacity=".7"/>
+            <rect x="1" y="5" width="3" height="3" rx=".6" opacity=".7"/><rect x="5" y="5" width="3" height="3" rx=".6" opacity=".25"/>
+            <rect x="9" y="5" width="3" height="3" rx=".6" opacity=".9"/><rect x="13" y="5" width="2.2" height="3" rx=".6" opacity=".45"/>
+            <rect x="1" y="9" width="3" height="3" rx=".6" opacity=".45"/><rect x="5" y="9" width="3" height="3" rx=".6" opacity=".7"/>
+            <rect x="9" y="9" width="3" height="3" rx=".6" opacity=".25"/><rect x="13" y="9" width="2.2" height="3" rx=".6" opacity=".9"/>
+          </g></svg>
+        </button>
+        <button data-set-view="weight" title="Weight" aria-label="Weight">
+          <svg viewBox="0 0 16 16" aria-hidden="true"><g fill="currentColor">
+            <rect x="1.3" y="9" width="3" height="6" rx=".8"/><rect x="6.5" y="5" width="3" height="10" rx=".8"/>
+            <rect x="11.7" y="1.5" width="3" height="13.5" rx=".8"/>
+          </g></svg>
+        </button>
       </span>
     </div>
 
@@ -408,6 +778,13 @@ __ICON__
 <div class="toast" id="toast" data-marble-transient></div>
 <div class="ghost" id="ghost" data-marble-transient></div>
 <div class="drop" id="drop" data-marble-transient><b></b></div>
+
+<!-- The marquee. A drag over empty space picks every row it covers; hold Option
+     and the same drag becomes a line, and every row the line crosses is picked.
+     Both are the page's answer to "which ones", so both are transient and
+     neither files an op. -->
+<div class="band" id="band" data-marble-transient></div>
+<svg class="lasso" id="lasso" data-marble-transient><polyline points=""></polyline></svg>
 
 <script>
   // The Drive's own behaviour.
@@ -485,24 +862,42 @@ __ICON__
 
       // ------------------------------------------------------------ the listing
 
-      // Which row is picked, held as a path rather than an element, because the
-      // listing is thrown away and rebuilt on every refresh and a reference
-      // would outlive the thing it referred to.
-      let picked = null;
+      // Which rows are picked, held as a set of paths rather than elements,
+      // because the listing is thrown away and rebuilt on every refresh and a
+      // reference would outlive the thing it referred to. One path or many —
+      // the area select fills it, a plain click narrows it to one.
+      let picked = new Set();
 
-      function pick(path) {
-        picked = path || null;
+      // Paints a set onto the listing without becoming the selection — the
+      // marquee uses this on every move, and commits with pick() on release.
+      function paint(set) {
         for (const el of items.querySelectorAll('.item')) {
-          el.classList.toggle('marble-picked', Boolean(picked) && el.dataset.path === picked);
+          el.classList.toggle('marble-picked', set.has(el.dataset.path));
         }
       }
+
+      function pick(paths) {
+        picked =
+          paths == null ? new Set()
+          : typeof paths === 'string' ? new Set([paths])
+          : new Set(paths);
+        paint(picked);
+      }
+
+      // A document's own weight, 0..1, against the heaviest thing in view —
+      // drawn as a bar under its thumbnail so "this one is bigger" is visible
+      // before you have opened either. Recomputed per draw against whatever
+      // is on screen, so it is a comparison within this folder, not an
+      // absolute scale that would make a small folder's biggest file look
+      // tiny next to the drive's biggest.
+      let heaviest = 1;
 
       function node(entry) {
         const el = document.createElement('div');
         el.className = 'item';
         el.dataset.kind = entry.kind;
         el.dataset.path = entry.path;
-        if (picked && entry.path === picked) el.classList.add('marble-picked');
+        if (picked.has(entry.path)) el.classList.add('marble-picked');
         el.innerHTML =
           '<span class="name"><span class="ico">' +
           iconFor(entry.kind) +
@@ -522,34 +917,61 @@ __ICON__
         el.querySelector('.owner').textContent = entry.kind === 'doc' ? entry.nodes + ' nodes' : '—';
         el.querySelector('.when').textContent = entry.modified ? ago(entry.modified) : '';
         el.querySelector('.size').textContent = entry.kind === 'doc' ? bytes(entry.bytes) : '';
-        el.querySelector('.thumb').innerHTML =
-          '<span class="big">' + iconFor(entry.kind) + '</span><span class="cap"></span>';
-        el.querySelector('.thumb .cap').textContent =
-          entry.kind === 'folder' ? 'folder' : leaf(entry.path) + '.mrbl';
+        fillThumb(el.querySelector('.thumb'), entry);
+        el.querySelector('.thumb').insertAdjacentHTML('beforeend', '<span class="weight"></span>');
+        el.querySelector('.thumb .weight').style.setProperty(
+          '--w', entry.kind === 'doc' ? Math.sqrt((entry.bytes ?? 0) / heaviest).toFixed(3) : 0,
+        );
         return el;
       }
 
-      function draw() {
-        if (!latest) return;
-        const folder = latest.children ?? [];
-        const matching = query
-          ? flatten(latest).filter((entry) =>
-              `${entry.title ?? ''} ${entry.path}`.toLowerCase().includes(query),
-            )
-          : folder;
+      // The tile. A document gets a real, scaled-down view of itself, mounted
+      // lazily as it nears the viewport; a folder gets a grid of its children
+      // coloured by kind. Both fall back to the glyph — the document until its
+      // frame loads, the folder if it holds nothing.
+      const peekObserver = new IntersectionObserver(
+        (entries) => {
+          for (const e of entries) {
+            if (!e.isIntersecting) continue;
+            const peek = e.target;
+            peekObserver.unobserve(peek);
+            const frame = document.createElement('iframe');
+            // Empty sandbox: the file renders, its own injected carrier script
+            // does not, and the frame gets an origin of its own. A preview is a
+            // picture, not a second live copy.
+            frame.setAttribute('sandbox', '');
+            frame.setAttribute('scrolling', 'no');
+            frame.setAttribute('tabindex', '-1');
+            frame.setAttribute('aria-hidden', 'true');
+            frame.loading = 'lazy';
+            frame.addEventListener('load', () => peek.classList.add('marble-is-loaded'));
+            frame.src = peek.dataset.src;
+            peek.append(frame);
+          }
+        },
+        { rootMargin: '250px' },
+      );
 
-        items.replaceChildren();
-        if (!matching.length) {
-          const empty = document.createElement('div');
-          empty.className = 'empty';
-          empty.innerHTML = query
-            ? '<strong>Nothing matches</strong>Try a different word.'
-            : '<strong>This folder is empty</strong>Press New to make something, or drop a .mrbl file in from anywhere.';
-          items.append(empty);
+      function fillThumb(thumb, entry) {
+        if (entry.kind === 'doc') {
+          thumb.innerHTML =
+            '<span class="peek"><span class="big">' + ICON.doc + '</span></span><span class="cap"></span>';
+          thumb.querySelector('.cap').textContent = entry.title || leaf(entry.path);
+          const peek = thumb.querySelector('.peek');
+          peek.dataset.src = marble.href(entry.path);
+          peekObserver.observe(peek);
           return;
         }
-        for (const entry of matching) items.append(node(entry));
-        if (picked && !items.querySelector('.item.marble-picked')) picked = null;
+        const kids = entry.children ?? [];
+        const cells =
+          kids
+            .slice(0, 9)
+            .map((k) => '<i class="cell ' + (k.kind === 'folder' ? 'is-folder' : 'is-doc') + '"></i>')
+            .join('') || '<i class="cell is-empty"></i>';
+        thumb.innerHTML = '<span class="mini">' + cells + '</span><span class="cap"></span>';
+        thumb.querySelector('.cap').textContent = kids.length
+          ? kids.length + (kids.length === 1 ? ' item' : ' items')
+          : 'empty';
       }
 
       const flatten = (folder, out = []) => {
@@ -559,6 +981,331 @@ __ICON__
         }
         return out;
       };
+
+      // A folder's own weight is the sum of what is inside it — `tree()` hands
+      // back the whole subtree, so this costs a walk that was already free.
+      const weightOf = (entry) =>
+        entry.kind === 'doc'
+          ? entry.bytes ?? 0
+          : flatten(entry).reduce((sum, e) => sum + (e.kind === 'doc' ? e.bytes ?? 0 : 0), 0);
+
+      const mode = () => document.body.getAttribute('data-view') || 'grid';
+
+      function draw() {
+        if (!latest) return;
+        const m = mode();
+        // Timeline and Pulse both ask "when" of documents specifically, so
+        // both look through the whole subtree rather than one level — a
+        // folder's own modified time is when someone last touched *it*, not a
+        // fact about what is inside it. Weight asks "how much", which a
+        // folder does have an answer to, so it goes recursive but keeps both
+        // kinds. Grid, List and Map all still show one level: what is here.
+        const docsBelow = () => flatten(latest).filter((entry) => entry.kind === 'doc');
+        const pool = query
+          ? flatten(latest).filter((entry) =>
+              `${entry.title ?? ''} ${entry.path}`.toLowerCase().includes(query),
+            )
+          : (m === 'timeline' || m === 'pulse') && view === 'drive'
+            ? docsBelow()
+            : m === 'weight' && view === 'drive'
+              ? flatten(latest)
+              : latest.children ?? [];
+
+        items.replaceChildren();
+        if (!pool.length) {
+          const empty = document.createElement('div');
+          empty.className = 'empty';
+          empty.innerHTML = query
+            ? '<strong>Nothing matches</strong>Try a different word.'
+            : '<strong>This folder is empty</strong>Press New to make something, or drop a .mrbl file in from anywhere.';
+          items.append(empty);
+          return;
+        }
+
+        heaviest = Math.max(1, ...pool.map((entry) => (entry.kind === 'doc' ? entry.bytes ?? 0 : 0)));
+
+        if (m === 'timeline') drawTimeline(pool);
+        else if (m === 'map') drawMap(pool);
+        else if (m === 'pulse') drawPulse(pool);
+        else if (m === 'weight') drawWeight(pool);
+        else {
+          pool.forEach((entry, i) => {
+            const el = node(entry);
+            el.style.animationDelay = Math.min(i * 16, 260) + 'ms';
+            items.append(el);
+          });
+        }
+        // Keep the selection to what is actually on screen — a refresh, a
+        // search or a folder change can retire a row that was picked.
+        const shown = new Set([...items.querySelectorAll('.item')].map((el) => el.dataset.path));
+        for (const path of [...picked]) if (!shown.has(path)) picked.delete(path);
+      }
+
+      // ------------------------------------------------------------- timeline
+
+      function bucketLabel(t) {
+        const day = (ms) => {
+          const d = new Date(ms);
+          return new Date(d.getFullYear(), d.getMonth(), d.getDate()).getTime();
+        };
+        const days = Math.round((day(Date.now()) - day(t)) / 86400000);
+        const d = new Date(t);
+        if (days <= 0) return 'Today';
+        if (days === 1) return 'Yesterday';
+        if (days < 7) return d.toLocaleDateString(undefined, { weekday: 'long' });
+        if (d.getFullYear() === new Date().getFullYear()) {
+          return days < 32
+            ? 'Earlier this month'
+            : d.toLocaleDateString(undefined, { month: 'long' });
+        }
+        return d.toLocaleDateString(undefined, { month: 'long', year: 'numeric' });
+      }
+
+      function timelineRow(entry, oldest, newest) {
+        const el = document.createElement('div');
+        el.className = 'item trow';
+        el.dataset.kind = entry.kind;
+        el.dataset.path = entry.path;
+        if (picked.has(entry.path)) el.classList.add('marble-picked');
+        el.innerHTML =
+          '<span class="tdot"></span><span class="ico"></span>' +
+          '<span class="tname"><b></b><small></small></span>' +
+          '<span class="tmeta"></span><button class="more" aria-label="More">⋮</button>';
+        el.querySelector('.ico').innerHTML = iconFor(entry.kind);
+        el.querySelector('b').textContent = entry.name ?? leaf(entry.path);
+        el.title = entry.title && entry.title !== entry.name ? entry.title : '';
+
+        const inFolder = entry.folder && entry.folder !== here ? entry.folder.replace(here ? here + '/' : '', '') : '';
+        el.querySelector('small').textContent = inFolder ? 'in ' + inFolder : '';
+
+        el.querySelector('.tmeta').textContent = entry.modified
+          ? ago(entry.modified) + (entry.kind === 'doc' ? ' · ' + bytes(entry.bytes) : '')
+          : '';
+
+        const span = Math.max(1, newest - oldest);
+        const fraction = Math.min(1, Math.max(0.3, (entry.modified - oldest) / span));
+        const dot = el.querySelector('.tdot');
+        dot.style.opacity = fraction.toFixed(2);
+        if (Date.now() - (entry.modified ?? 0) < 3600e3) dot.classList.add('marble-fresh');
+        return el;
+      }
+
+      // Newest first within each day, and each day heading only drawn once —
+      // the same grouping a photo library or a chat history uses, because
+      // "when did I touch this" is a question about days, not timestamps.
+      function drawTimeline(pool) {
+        const docs = [...pool].sort((a, b) => (b.modified ?? 0) - (a.modified ?? 0));
+        const oldest = Math.min(...docs.map((e) => e.modified ?? Date.now()));
+        const newest = Math.max(...docs.map((e) => e.modified ?? Date.now()));
+        let lastLabel = null;
+        docs.forEach((entry, i) => {
+          const label = bucketLabel(entry.modified ?? Date.now());
+          if (label !== lastLabel) {
+            lastLabel = label;
+            const h = document.createElement('h3');
+            h.className = 'tgroup';
+            h.textContent = label;
+            items.append(h);
+          }
+          const row = timelineRow(entry, oldest, newest);
+          row.style.animationDelay = Math.min(i * 14, 260) + 'ms';
+          items.append(row);
+        });
+      }
+
+      // ------------------------------------------------------------------ map
+
+      function mapNode(entry, weight, maxWeight, oldest, newest) {
+        const el = document.createElement('div');
+        el.className = 'item node';
+        el.dataset.kind = entry.kind;
+        el.dataset.path = entry.path;
+        if (picked.has(entry.path)) el.classList.add('marble-picked');
+        el.innerHTML = '<span class="ico"></span><b></b><button class="more" aria-label="More">⋮</button>';
+        el.querySelector('.ico').innerHTML = iconFor(entry.kind);
+        el.querySelector('b').textContent = entry.name ?? leaf(entry.path);
+        el.title = (entry.title && entry.title !== entry.name ? entry.title + ' — ' : '') +
+          (entry.kind === 'doc' ? bytes(entry.bytes) : bytes(weight) + ' inside') +
+          (entry.modified ? ' · ' + ago(entry.modified) : '');
+
+        const size = 42 + Math.sqrt(weight / Math.max(1, maxWeight)) * 46;
+        el.style.setProperty('--size', size.toFixed(0) + 'px');
+        const span = Math.max(1, newest - oldest);
+        const fresh = Math.min(1, Math.max(0.4, ((entry.modified ?? oldest) - oldest) / span));
+        el.style.setProperty('--fresh', fresh.toFixed(2));
+        return el;
+      }
+
+      // One ring of folders, one of documents, spread evenly by angle and
+      // nudged apart so the two rings don't line up radius-for-radius. Sized
+      // by weight rather than placed by it — position here answers "what kind
+      // is it", not "how big", because angle has no natural order to lend a
+      // size to and would just be lying with axes nobody drew.
+      function drawMap(children) {
+        // `translate()` resolves a percentage against the *moving element's*
+        // own box, not the container — a CSS Transforms rule that would have
+        // put every node a few px from center regardless of how big the map
+        // is. So the radius is measured in pixels, once per draw, against
+        // however much room `.items` actually has this time.
+        const box = items.getBoundingClientRect();
+        const half = Math.max(140, Math.min(box.width, box.height) / 2 - 40);
+        const r1 = Math.round(half * 0.52);
+        const r2 = Math.round(half * 0.94);
+
+        const wrap = document.createElement('div');
+        wrap.className = 'orbit-wrap';
+        wrap.innerHTML =
+          '<div class="ring" style="--r:' + r1 + 'px"></div><div class="ring" style="--r:' + r2 + 'px"></div>' +
+          '<div class="orbit-center"><span class="ico"></span><b></b><small></small></div>' +
+          '<div class="orbit"></div>';
+        const centerName = here ? leaf(here) : (document.querySelector('.brand h1').textContent.trim() || 'My Drive');
+        wrap.querySelector('.orbit-center .ico').innerHTML = iconFor('folder');
+        wrap.querySelector('.orbit-center b').textContent = centerName;
+        wrap.querySelector('.orbit-center small').textContent =
+          children.length + (children.length === 1 ? ' item' : ' items');
+
+        const folders = children.filter((c) => c.kind === 'folder');
+        const docs = children.filter((c) => c.kind === 'doc');
+        const weights = children.map((c) => weightOf(c));
+        const maxWeight = Math.max(1, ...weights);
+        const times = children.map((c) => c.modified ?? Date.now());
+        const oldest = Math.min(Date.now(), ...times);
+        const newest = Math.max(0, ...times);
+
+        const orbit = wrap.querySelector('.orbit');
+        const ring = (list, radiusPct, offset) => {
+          list.forEach((entry, i) => {
+            const angle = (360 / list.length) * i + offset;
+            const el = mapNode(entry, weightOf(entry), maxWeight, oldest, newest);
+            el.style.setProperty('--angle', angle.toFixed(1) + 'deg');
+            el.style.setProperty('--radius', radiusPct);
+            orbit.append(el);
+          });
+        };
+        if (folders.length) ring(folders, r1 + 'px', 0);
+        if (docs.length) ring(docs, r2 + 'px', 14);
+
+        items.append(wrap);
+      }
+
+      // ---------------------------------------------------------------- weight
+
+      // The map answers "where" by shape; this answers "which ones" by rank —
+      // the same numbers `weigh` reports, sorted worst-first so the one
+      // document actually worth doing something about is always the top row.
+      function drawWeight(pool) {
+        const ranked = pool
+          .map((entry) => ({ entry, w: weightOf(entry) }))
+          .sort((a, b) => b.w - a.w)
+          .slice(0, 300);
+        const max = Math.max(1, ...ranked.map((r) => r.w));
+
+        ranked.forEach(({ entry, w }, i) => {
+          const el = document.createElement('div');
+          el.className = 'item';
+          el.dataset.kind = entry.kind;
+          el.dataset.path = entry.path;
+          if (picked.has(entry.path)) el.classList.add('marble-picked');
+          el.innerHTML =
+            '<span class="wrank"></span><span class="witem-ico"></span>' +
+            '<span class="wname"><b></b><small></small></span>' +
+            '<span class="wbar"><i></i></span><span class="wmeta"></span>' +
+            '<button class="more" aria-label="More">⋮</button>';
+          el.querySelector('.wrank').textContent = i + 1 + '.';
+          el.querySelector('.witem-ico').innerHTML = iconFor(entry.kind);
+          el.querySelector('.wname b').textContent = entry.name ?? leaf(entry.path);
+          el.title = entry.title && entry.title !== entry.name ? entry.title : '';
+          const rel = entry.folder && entry.folder !== here ? entry.folder.replace(here ? here + '/' : '', '') : '';
+          el.querySelector('.wname small').textContent =
+            entry.kind === 'folder' ? (rel ? 'in ' + rel : 'folder') : rel ? 'in ' + rel : '';
+          el.querySelector('.wbar i').style.setProperty('--w', (w / max).toFixed(3));
+          el.querySelector('.wmeta').textContent = bytes(w);
+          el.style.animationDelay = Math.min(i * 10, 260) + 'ms';
+          items.append(el);
+        });
+      }
+
+      // ----------------------------------------------------------------- pulse
+
+      // A calendar of activity, one square per day — the timeline asked "what
+      // did I touch", this asks "when was I actually in here", which a list of
+      // rows cannot show at a glance and a grid of squares can.
+      function drawPulse(pool) {
+        const DAY = 86400000;
+        const startOfDay = (t) => {
+          const d = new Date(t);
+          return new Date(d.getFullYear(), d.getMonth(), d.getDate()).getTime();
+        };
+        const today = startOfDay(Date.now());
+
+        const byDay = new Map();
+        let oldest = today;
+        for (const entry of pool) {
+          if (!entry.modified) continue;
+          const day = startOfDay(entry.modified);
+          if (!byDay.has(day)) byDay.set(day, []);
+          byDay.get(day).push(entry);
+          if (day < oldest) oldest = day;
+        }
+
+        // Twenty weeks, GitHub-scale — enough to see a pattern, not so much
+        // that a drive's whole history is one illegible strip.
+        const spanDays = Math.min(20 * 7, Math.round((today - oldest) / DAY) + 1);
+        const firstDay = today - (spanDays - 1) * DAY;
+        const gridStart = firstDay - new Date(firstDay).getDay() * DAY;
+        const totalDays = Math.round((today - gridStart) / DAY) + 1;
+        const totalEdits = [...byDay.values()].reduce((sum, list) => sum + list.length, 0);
+
+        const wrap = document.createElement('div');
+        wrap.innerHTML =
+          '<div class="pulse-head"><b>Activity</b><span></span></div>' +
+          '<div class="pulse-grid"></div>' +
+          '<div class="pulse-legend"><span>Less</span>' +
+          '<i data-level="0"></i><i data-level="1"></i><i data-level="2"></i><i data-level="3"></i><i data-level="4"></i>' +
+          '<span>More</span></div>' +
+          '<div class="pulse-detail"></div>';
+        wrap.querySelector('.pulse-head span').textContent =
+          totalEdits + (totalEdits === 1 ? ' edit' : ' edits') + ' across ' + byDay.size + (byDay.size === 1 ? ' day' : ' days');
+
+        const grid = wrap.querySelector('.pulse-grid');
+        for (let i = 0; i < totalDays; i++) {
+          const day = gridStart + i * DAY;
+          if (day > today) break;
+          const entries = byDay.get(day) ?? [];
+          const level = !entries.length ? 0 : entries.length === 1 ? 1 : entries.length <= 3 ? 2 : entries.length <= 6 ? 3 : 4;
+          const cell = document.createElement('div');
+          cell.className = 'pulse-day';
+          cell.dataset.day = day;
+          cell.setAttribute('data-level', level);
+          cell.title =
+            new Date(day).toLocaleDateString(undefined, { weekday: 'short', month: 'short', day: 'numeric' }) +
+            ' — ' + (entries.length ? entries.length + (entries.length === 1 ? ' edit' : ' edits') : 'nothing');
+          grid.append(cell);
+        }
+
+        const detail = wrap.querySelector('.pulse-detail');
+        grid.addEventListener('click', (event) => {
+          const cell = event.target.closest('.pulse-day');
+          if (!cell) return;
+          for (const el of grid.querySelectorAll('.pulse-day')) el.classList.toggle('marble-picked', el === cell);
+          const day = Number(cell.dataset.day);
+          const entries = (byDay.get(day) ?? []).slice().sort((a, b) => b.modified - a.modified);
+          detail.replaceChildren();
+          const h = document.createElement('h4');
+          h.textContent = new Date(day).toLocaleDateString(undefined, { weekday: 'long', month: 'long', day: 'numeric' });
+          detail.append(h);
+          if (!entries.length) {
+            const empty = document.createElement('div');
+            empty.className = 'empty';
+            empty.innerHTML = 'Nothing touched this day.';
+            detail.append(empty);
+            return;
+          }
+          for (const entry of entries) detail.append(timelineRow(entry, day, day + DAY));
+        });
+
+        items.append(wrap);
+      }
 
       function drawCrumbs() {
         crumbs.replaceChildren();
@@ -591,7 +1338,7 @@ __ICON__
         for (const pin of document.querySelectorAll('#pins > .pin')) {
           const path = pin.dataset.path;
           pin.classList.toggle('marble-missing', Boolean(path) && known.size > 0 && !known.has(path));
-          pin.title = path ? 'Open ' + path : '';
+          pin.title = path ? 'Double-click to open ' + path : '';
         }
       }
 
@@ -689,13 +1436,19 @@ __ICON__
 
       // ----------------------------------------------------------- navigation
 
-      // Opening is a folder you go into or a document you leave for. Named once
-      // so the pointer and the keyboard commit to the same thing.
-      function openItem(item) {
+      // Opening is a folder you go into or a document you leave for — or, held
+      // open beside this one, a document you leave a tab running. Named once so
+      // the pointer, the keyboard and a modifier key all commit to the same
+      // thing rather than three routes that could drift apart.
+      function openItem(item, { newTab = false } = {}) {
         if (!item) return;
-        if (item.dataset.kind === 'folder') return go(item.dataset.path);
+        if (item.dataset.kind === 'folder') {
+          if (newTab) return window.open(location.pathname + '#/' + item.dataset.path, '_blank');
+          return go(item.dataset.path);
+        }
         if (view === 'trash') return say('Restore it first — it is in the trash.');
-        location.href = marble.href(item.dataset.path);
+        if (newTab) window.open(marble.href(item.dataset.path), '_blank');
+        else location.href = marble.href(item.dataset.path);
       }
 
       function go(path) {
@@ -728,15 +1481,33 @@ __ICON__
         if (Date.now() - dragged < 400) return;
         const item = event.target.closest('.item');
         if (!item) return pick(null);
-        pick(item.dataset.path);
         const more = event.target.closest('.more');
+        // Cmd or Shift adds and removes without disturbing the rest — the
+        // keyboard half of what the marquee does with a drag.
+        if (!more && (event.metaKey || event.ctrlKey || event.shiftKey)) {
+          const next = new Set(picked);
+          next.delete(item.dataset.path) || next.add(item.dataset.path);
+          return pick(next);
+        }
+        pick(item.dataset.path);
         if (more) openMenu(item, more);
       });
 
       items.addEventListener('dblclick', (event) => {
         if (Date.now() - dragged < 400) return;
         if (event.target.closest('.more')) return;
-        openItem(event.target.closest('.item'));
+        openItem(event.target.closest('.item'), { newTab: event.metaKey || event.ctrlKey });
+      });
+
+      // The middle button never fires a click at all — a browser reports it as
+      // `auxclick` — so a new tab on the wheel-click a mouse is for has to be
+      // heard separately rather than folded into the handler above.
+      items.addEventListener('auxclick', (event) => {
+        if (event.button !== 1) return;
+        const item = event.target.closest('.item');
+        if (!item || item.dataset.kind === 'folder') return;
+        event.preventDefault();
+        openItem(item, { newTab: true });
       });
 
       document.querySelector('#up').addEventListener('click', () => {
@@ -752,11 +1523,34 @@ __ICON__
         refresh();
       });
 
+      // A plain click on a pin focuses its label — the pin's name is
+      // `data-marble-editable`, and a click that also navigated would either
+      // unload the page before a keystroke landed (a document pin) or switch
+      // what the main pane is showing out from under you mid-edit (a folder
+      // pin). So opening moves to a double click, the same convention the
+      // listing already uses, and a plain click is free to just be a click.
       document.querySelector('#pins').addEventListener('click', (event) => {
         const pin = event.target.closest('.pin');
         if (!pin || !pin.dataset.path) return;
+        if (!event.metaKey && !event.ctrlKey) return;
         if (pin.dataset.kind === 'folder') return go(pin.dataset.path);
-        location.href = marble.href(pin.dataset.path);
+        window.open(marble.href(pin.dataset.path), '_blank');
+      });
+
+      document.querySelector('#pins').addEventListener('dblclick', (event) => {
+        const pin = event.target.closest('.pin');
+        if (!pin || !pin.dataset.path) return;
+        if (pin.dataset.kind === 'folder') return go(pin.dataset.path);
+        if (event.metaKey || event.ctrlKey) window.open(marble.href(pin.dataset.path), '_blank');
+        else location.href = marble.href(pin.dataset.path);
+      });
+
+      document.querySelector('#pins').addEventListener('auxclick', (event) => {
+        if (event.button !== 1) return;
+        const pin = event.target.closest('.pin');
+        if (!pin || !pin.dataset.path || pin.dataset.kind === 'folder') return;
+        event.preventDefault();
+        window.open(marble.href(pin.dataset.path), '_blank');
       });
 
       search.addEventListener('input', () => {
@@ -811,13 +1605,31 @@ __ICON__
           menu.append(button);
         };
 
+        // A menu on a row that is part of a larger selection speaks for the
+        // whole selection — Rename and Move to… stop making sense once there
+        // is more than one "it", so the bulk menu only offers what still does.
+        const bulk = !trashed && picked.size > 1 && picked.has(path);
+
         if (trashed) {
           add('Restore', async () => {
             await drive.restore(item.dataset.trashId);
             refresh();
           });
+        } else if (bulk) {
+          const paths = [...picked];
+          const docs = paths.filter((p) => !items.querySelector('.item[data-path="' + CSS.escape(p) + '"]')?.matches('[data-kind="folder"]'));
+          if (docs.length) {
+            add('Open ' + docs.length + ' in new tabs', () => {
+              for (const p of docs) window.open(marble.href(p), '_blank');
+            });
+          }
+          menu.append(document.createElement('hr'));
+          add('Move ' + paths.length + ' to trash', trashPicked);
         } else {
-          if (!isFolder) add('Open', () => (location.href = marble.href(path)));
+          if (!isFolder) {
+            add('Open', () => (location.href = marble.href(path)));
+            add('Open in new tab', () => window.open(marble.href(path), '_blank'));
+          }
           add('Rename…', async () => {
             const name = prompt('New name', leaf(path));
             if (!name || name === leaf(path)) return;
@@ -869,10 +1681,15 @@ __ICON__
         );
         if (typing) return;
         if (event.key === 'Enter') {
-          const item = picked && items.querySelector('.item.marble-picked');
+          if (picked.size !== 1) return;
+          const item = items.querySelector('.item.marble-picked');
           if (!item) return;
           event.preventDefault();
-          return openItem(item);
+          return openItem(item, { newTab: event.metaKey || event.ctrlKey });
+        }
+        if ((event.key === 'Backspace' || event.key === 'Delete') && picked.size && view !== 'trash') {
+          event.preventDefault();
+          return trashPicked();
         }
         if (event.key !== 'Escape') return;
         // Escape undoes the last thing you opened, one layer at a time: the row
@@ -882,6 +1699,18 @@ __ICON__
         sheet.removeAttribute('data-open');
         if (!layered) pick(null);
       });
+
+      // However many are picked, one press throws all of them away — to the
+      // trash, not to nowhere, so it costs nothing to be wrong about it.
+      async function trashPicked() {
+        const paths = [...picked];
+        pick(null);
+        const results = await Promise.allSettled(paths.map((path) => drive.remove(path)));
+        const failed = results.filter((r) => r.status === 'rejected').length;
+        refresh();
+        if (failed) say(failed + ' of ' + paths.length + ' could not be trashed');
+        else say(paths.length === 1 ? 'Moved to trash' : 'Moved ' + paths.length + ' to trash');
+      }
 
       // --------------------------------------------------------------- pinning
       //
@@ -930,6 +1759,12 @@ __ICON__
       let over = null;
 
       items.addEventListener('pointerdown', (event) => {
+        // Timeline and map show you the drive; grid and list are where you
+        // rearrange it. A map node's position is a `rotate/translate`, not a
+        // place a drop target can be read back from, and a timeline row has
+        // no folder under it to drop onto — "Move to…" in the row menu still
+        // reaches both.
+        if (mode() === 'timeline' || mode() === 'map') return;
         const item = event.target.closest('.item');
         if (!item || event.target.closest('.more') || view === 'trash') return;
         lifting = { item, x: event.clientX, y: event.clientY, moved: false };
@@ -980,6 +1815,130 @@ __ICON__
         } catch (err) {
           fail(err);
         }
+      });
+
+      // ------------------------------------------------------------ the marquee
+      //
+      // A drag that starts on empty space picks rows in bulk. Plain, it is a
+      // rectangle and every row it covers is picked. With Option held it is a
+      // line, and every row the line crosses is picked and stays picked — the
+      // "curve select" a rectangle cannot do around a bend. Neither files an
+      // op: a selection is where your attention is, and it dies with the tab.
+      //
+      // Pointer events, like every other drag here, so a finger can do it too.
+      // It starts only when the pointer went down on the container and not on
+      // a row, which is why it can share `#items` with the lift above.
+
+      const band = $('#band');
+      const lasso = $('#lasso');
+      const lassoLine = lasso.querySelector('polyline');
+      let marquee = null;
+
+      const inRect = (x, y, r) => x >= r.left && x <= r.right && y >= r.top && y <= r.bottom;
+
+      // Do the segments p→q and a→b cross? Enough for "the line went through
+      // this row" — collinear grazes are not worth the extra branch.
+      function segmentsCross(p, q, a, b) {
+        const side = (o, u, v) => (u.x - o.x) * (v.y - o.y) - (u.y - o.y) * (v.x - o.x);
+        const d1 = side(a, b, p);
+        const d2 = side(a, b, q);
+        const d3 = side(p, q, a);
+        const d4 = side(p, q, b);
+        return (d1 > 0) !== (d2 > 0) && (d3 > 0) !== (d4 > 0);
+      }
+
+      // Does the segment p→q touch the rectangle at all — an endpoint inside,
+      // or a crossing of any edge.
+      function segmentHitsRect(p, q, r) {
+        if (inRect(p.x, p.y, r) || inRect(q.x, q.y, r)) return true;
+        const c = [
+          { x: r.left, y: r.top },
+          { x: r.right, y: r.top },
+          { x: r.right, y: r.bottom },
+          { x: r.left, y: r.bottom },
+        ];
+        for (let i = 0; i < 4; i++) if (segmentsCross(p, q, c[i], c[(i + 1) % 4])) return true;
+        return false;
+      }
+
+      const rows = () => [...items.querySelectorAll('.item')];
+
+      // Everything picked before the drag plus everything the drag has caught.
+      const paintMarquee = () => paint(new Set([...marquee.base, ...marquee.caught]));
+
+      items.addEventListener('pointerdown', (event) => {
+        if (event.button) return;
+        if (event.target.closest('.item') || event.target.closest('.more')) return;
+        marquee = {
+          mode: event.altKey ? 'lasso' : 'rect',
+          x0: event.clientX,
+          y0: event.clientY,
+          points: [{ x: event.clientX, y: event.clientY }],
+          // Cmd or Shift keeps what was already picked and adds to it.
+          base: new Set(event.metaKey || event.ctrlKey || event.shiftKey ? picked : []),
+          caught: new Set(),
+          moved: false,
+        };
+      });
+
+      addEventListener('pointermove', (event) => {
+        if (!marquee) return;
+        if (!marquee.moved) {
+          if (Math.hypot(event.clientX - marquee.x0, event.clientY - marquee.y0) < 4) return;
+          marquee.moved = true;
+          document.body.classList.add('marble-marqueeing');
+        }
+
+        if (marquee.mode === 'rect') {
+          const left = Math.min(event.clientX, marquee.x0);
+          const top = Math.min(event.clientY, marquee.y0);
+          const width = Math.abs(event.clientX - marquee.x0);
+          const height = Math.abs(event.clientY - marquee.y0);
+          band.style.left = left + 'px';
+          band.style.top = top + 'px';
+          band.style.width = width + 'px';
+          band.style.height = height + 'px';
+          band.setAttribute('data-open', '1');
+          // The rectangle grows and shrinks, so what it covers is recomputed
+          // whole rather than accumulated.
+          marquee.caught = new Set();
+          const box = { left, top, right: left + width, bottom: top + height };
+          for (const el of rows()) {
+            const r = el.getBoundingClientRect();
+            if (r.left < box.right && r.right > box.left && r.top < box.bottom && r.bottom > box.top) {
+              marquee.caught.add(el.dataset.path);
+            }
+          }
+        } else {
+          const prev = marquee.points[marquee.points.length - 1];
+          const next = { x: event.clientX, y: event.clientY };
+          marquee.points.push(next);
+          lassoLine.setAttribute('points', marquee.points.map((p) => p.x + ',' + p.y).join(' '));
+          lasso.setAttribute('data-open', '1');
+          // The line only ever adds: once it has crossed a row, that row is
+          // caught for the rest of the gesture.
+          for (const el of rows()) {
+            if (marquee.caught.has(el.dataset.path)) continue;
+            if (segmentHitsRect(prev, next, el.getBoundingClientRect())) marquee.caught.add(el.dataset.path);
+          }
+        }
+
+        paintMarquee();
+      });
+
+      addEventListener('pointerup', () => {
+        if (!marquee) return;
+        const done = marquee;
+        marquee = null;
+        band.removeAttribute('data-open');
+        band.removeAttribute('style');
+        lasso.removeAttribute('data-open');
+        lassoLine.setAttribute('points', '');
+        document.body.classList.remove('marble-marqueeing');
+        if (!done.moved) return;
+        // The trailing click on the container would otherwise clear this.
+        dragged = Date.now();
+        pick(new Set([...done.base, ...done.caught]));
       });
 
       // -------------------------------------------------------------- the drops
@@ -1158,13 +2117,29 @@ __ICON__
 
       // ---------------------------------------------------------- the toggles
 
+      const toggle = document.querySelector('.toggle');
+      const thumb = toggle.querySelector('.thumb');
+
+      // The pill under the current segment. Measured off the button rather
+      // than computed from an index, so it is correct whether four segments
+      // are the same width or not, and doesn't have to change if a fifth ever
+      // joins them.
+      function positionThumb() {
+        const current = toggle.querySelector('[data-set-view="' + mode() + '"]');
+        if (!current) return;
+        thumb.style.width = current.offsetWidth + 'px';
+        thumb.style.transform = 'translateX(' + current.offsetLeft + 'px)';
+      }
+
       for (const button of document.querySelectorAll('[data-set-view]')) {
         button.addEventListener('click', () => {
           const next = button.dataset.setView;
           const id = marble.id(document.body);
           if (!id) return;
           // The page moves and the file is told, from the same value — composed
-          // here rather than read back off the element.
+          // here rather than read back off the element. Grid and list share a
+          // listing, so switching between them is free; timeline and map are a
+          // different shape of the same folder and have to be redrawn.
           const was = document.body.getAttribute('data-view');
           document.body.setAttribute('data-view', next);
           marble.record({
@@ -1172,8 +2147,15 @@ __ICON__
             undo: [{ type: 'setAttr', id, name: 'data-view', value: was }],
           });
           marble.op({ type: 'setAttr', id, name: 'data-view', value: next }, { immediate: true });
+          positionThumb();
+          if (was !== next) draw();
         });
       }
+
+      addEventListener('resize', () => {
+        positionThumb();
+        if (mode() === 'map') draw();
+      });
 
       // ---------------------------------------------------------- the listening
 
@@ -1192,6 +2174,7 @@ __ICON__
       });
 
       drawNav();
+      positionThumb();
       refresh();
     };
 
