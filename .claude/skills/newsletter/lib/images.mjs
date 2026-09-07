@@ -35,20 +35,36 @@ const TMP = fs.mkdtempSync(path.join(os.tmpdir(), 'nl-img-'));
 const cleanup = () => { try { fs.rmSync(TMP, { recursive: true, force: true }); } catch {} };
 process.on('exit', cleanup);
 
+// A real browser UA — Wikimedia and several CDNs 400/403 anything that looks
+// like a bot. We are fetching public images for a personal page, one at a time.
+const BROWSER_UA =
+  'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.4 Safari/605.1.15';
+
 async function fetchTo(src, dest) {
   if (/^https?:\/\//i.test(src)) {
+    let ref;
+    try { ref = new URL(src).origin + '/'; } catch {}
     const res = await fetch(src, {
-      headers: { 'User-Agent': 'bryans-bulletin/1.0', Accept: 'image/*' },
+      headers: {
+        'User-Agent': BROWSER_UA,
+        Accept: 'image/avif,image/webp,image/png,image/jpeg,*/*',
+        ...(ref ? { Referer: ref } : {}),
+      },
       redirect: 'follow',
     });
     if (!res.ok) throw new Error(`${res.status}`);
     const type = res.headers.get('content-type') || '';
-    if (!/^image\//i.test(type) && !/\.(png|jpe?g|webp|gif)$/i.test(src)) {
+    const isPdf = /application\/pdf/i.test(type) || /\.pdf($|\?)/i.test(src) || /arxiv\.org\/pdf\//i.test(src);
+    if (!isPdf && !/^image\//i.test(type) && !/\.(png|jpe?g|webp|gif)$/i.test(src)) {
       throw new Error(`not an image (${type})`);
     }
+    const len = Number(res.headers.get('content-length') || 0);
+    if (isPdf && len > 30 * 1024 * 1024) throw new Error(`pdf too large (${Math.round(len / 1e6)}MB)`);
     const buf = Buffer.from(await res.arrayBuffer());
     if (buf.length < 200) throw new Error('too small');
-    fs.writeFileSync(dest, buf);
+    // sips renders page 1 of a PDF, which is exactly the paper screenshot we want.
+    fs.writeFileSync(isPdf ? dest + '.pdf' : dest, buf);
+    if (isPdf) fs.renameSync(dest + '.pdf', dest);
   } else {
     if (!fs.existsSync(src)) throw new Error('no file');
     fs.copyFileSync(src, dest);

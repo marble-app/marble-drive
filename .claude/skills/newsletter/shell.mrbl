@@ -1,0 +1,304 @@
+<!doctype html>
+<html lang="en" data-marble="1">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="marble:capabilities" content="storage; net=none">
+<meta name="newsletter:date" content="__DATE__">
+<meta name="newsletter:palette" content="__PALETTE_NAME__">
+<title>Bryan's Bulletin</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='8' fill='%23222'/%3E%3Crect x='7' y='7' width='8' height='8' rx='2' fill='%23fff'/%3E%3Crect x='17' y='7' width='8' height='8' rx='2' fill='%23fff' opacity='.55'/%3E%3Crect x='7' y='17' width='8' height='8' rx='2' fill='%23fff' opacity='.55'/%3E%3Crect x='17' y='17' width='8' height='8' rx='2' fill='%23fff'/%3E%3C/svg%3E">
+__FONT__
+<style id="nl-base">
+__DESIGN__
+</style>
+__PALETTE__
+</head>
+<body>
+<main class="page" data-marble-id="nl-root">
+
+  <svg class="icon-sprite" width="0" height="0" data-marble-transient aria-hidden="true"><defs>
+    <symbol id="ic-gmail" viewBox="0 0 24 24"><path fill="#EA4335" d="M2 6.5 12 13l10-6.5V18a2 2 0 0 1-2 2h-2V9.8l-6 3.9-6-3.9V20H4a2 2 0 0 1-2-2z"/><path fill="#C5221F" d="M2 6.5V6a2 2 0 0 1 3.1-1.7L12 9l6.9-4.7A2 2 0 0 1 22 6v.5L12 13z"/></symbol>
+    <symbol id="ic-gcal" viewBox="0 0 24 24"><rect x="3" y="4.5" width="18" height="16" rx="2.5" fill="#fff" stroke="#4285F4" stroke-width="1.6"/><rect x="3" y="4.5" width="18" height="4.5" rx="2.5" fill="#4285F4"/><text x="12" y="17.5" font-family="ui-sans-serif,sans-serif" font-size="8" font-weight="700" fill="#4285F4" text-anchor="middle">31</text></symbol>
+    <symbol id="ic-notion" viewBox="0 0 24 24"><rect x="3" y="3" width="18" height="18" rx="3" fill="#fff" stroke="#111" stroke-width="1.4"/><path d="M8 8v8m0-8 8 8m0-8v8" stroke="#111" stroke-width="1.7" fill="none" stroke-linecap="round"/></symbol>
+    <symbol id="ic-slack" viewBox="0 0 24 24"><g><rect x="10.3" y="3" width="3.4" height="9.5" rx="1.7" fill="#36C5F0"/><rect x="3" y="10.3" width="9.5" height="3.4" rx="1.7" fill="#2EB67D"/><rect x="11.5" y="11.5" width="9.5" height="3.4" rx="1.7" fill="#ECB22E" transform="rotate(90 11.5 11.5)"/><rect x="10.3" y="11.5" width="3.4" height="9.5" rx="1.7" fill="#E01E5A"/></g></symbol>
+    <symbol id="ic-github" viewBox="0 0 24 24"><path fill="#181717" d="M12 2a10 10 0 0 0-3.16 19.49c.5.09.68-.22.68-.48v-1.7c-2.78.6-3.37-1.34-3.37-1.34-.45-1.16-1.11-1.47-1.11-1.47-.9-.62.07-.6.07-.6 1 .07 1.53 1.03 1.53 1.03.9 1.53 2.36 1.09 2.94.83.09-.65.35-1.09.63-1.34-2.22-.25-4.55-1.11-4.55-4.94 0-1.09.39-1.98 1.03-2.68-.1-.25-.45-1.27.1-2.65 0 0 .84-.27 2.75 1.02a9.5 9.5 0 0 1 5 0c1.91-1.29 2.75-1.02 2.75-1.02.55 1.38.2 2.4.1 2.65.64.7 1.03 1.59 1.03 2.68 0 3.84-2.34 4.68-4.57 4.93.36.31.68.92.68 1.85v2.74c0 .27.18.58.69.48A10 10 0 0 0 12 2z"/></symbol>
+    <symbol id="ic-arxiv" viewBox="0 0 24 24"><text x="12" y="17" font-family="ui-serif,Georgia,serif" font-size="13" font-weight="700" fill="#B31B1B" text-anchor="middle">arX</text></symbol>
+    <symbol id="ic-meteo" viewBox="0 0 24 24"><circle cx="9" cy="9" r="3.4" fill="#F6C445"/><path d="M6 16.5h11a3.2 3.2 0 0 0 0-6.4 4.6 4.6 0 0 0-8.9-1.2A3.4 3.4 0 0 0 6 16.5Z" fill="#8FB8DE"/></symbol>
+    <symbol id="ic-web" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9" fill="none" stroke="currentColor" stroke-width="1.6"/><path d="M3 12h18M12 3c3 3 3 15 0 18M12 3c-3 3-3 15 0 18" fill="none" stroke="currentColor" stroke-width="1.4"/></symbol>
+    <symbol id="ic-marble" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9" fill="none" stroke="currentColor" stroke-width="1.7"/><circle cx="9.5" cy="9.5" r="2.4" fill="currentColor"/></symbol>
+  </defs></svg>
+
+__BODY__
+
+</main>
+
+<template id="tpl-todo" data-marble-transient>
+  <li class="row todo" data-marble-removable>
+    <button class="chk" data-marble-transient data-act="done" aria-label="Toggle done"></button>
+    <div class="body">
+      <div class="title" data-marble-editable>New to-do</div>
+      <div class="note" data-marble-editable></div>
+    </div>
+    <div class="acts" data-marble-transient>
+      <button class="act act-pin" data-act="pin" title="Pin">&#9679;</button>
+      <button class="act act-snooze" data-act="snooze" title="Snooze to tomorrow">&#8250;</button>
+    </div>
+  </li>
+</template>
+
+<template id="tpl-news" data-marble-transient>
+  <div class="ncard no-img expandable" data-marble-removable>
+    <div class="nbody">
+      <h4 class="ntitle" data-marble-editable>New link</h4>
+      <div class="nmeta" data-marble-editable></div>
+      <div class="nwhy" data-marble-editable></div>
+      <button class="exp-toggle" data-marble-transient data-exp>more</button>
+      <div class="exp"><div class="exp-inner"><div class="abstract" data-marble-editable></div></div></div>
+      <div class="note" data-marble-editable></div>
+    </div>
+    <div class="acts" data-marble-transient>
+      <button class="act act-up" data-act="up" title="More like this">&#9650;</button>
+      <button class="act act-down" data-act="down" title="Less like this">&#9660;</button>
+      <button class="act act-save" data-act="save" title="Save to reading list">&#9733;</button>
+    </div>
+  </div>
+</template>
+
+<script>
+/* Bryan's Bulletin — its own behaviour. persist-both-halves: move the page,
+   then file one setAttr against the element's data-marble-id. Guarded on
+   window.marble so the file still opens as a plain page. */
+(() => {
+  const ROW = '.row, .ncard, .pcard, .mo';
+  function toggle(el, name, value) {
+    const on = value === undefined ? el.hasAttribute(name) : el.getAttribute(name) === value;
+    if (on) el.removeAttribute(name); else el.setAttribute(name, value === undefined ? '' : value);
+    const applied = el.hasAttribute(name) ? el.getAttribute(name) : null;
+    const id = window.marble && window.marble.id(el);
+    if (id) window.marble.op({ type: 'setAttr', id, name, value: applied });
+  }
+  function set(el, name, value) {
+    if (el.getAttribute(name) === value) return;
+    el.setAttribute(name, value);
+    const id = window.marble && window.marble.id(el);
+    if (id) window.marble.op({ type: 'setAttr', id, name, value });
+  }
+  document.addEventListener('click', (event) => {
+    const act = event.target.closest('[data-act]');
+    if (act) {
+      const row = act.closest(ROW);
+      if (!row) return;
+      switch (act.dataset.act) {
+        case 'done': return toggle(row, 'data-done');
+        case 'snooze': return toggle(row, 'data-snooze');
+        case 'pin': return toggle(row, 'data-pin');
+        case 'up': return toggle(row, 'data-vote', 'up');
+        case 'down': return toggle(row, 'data-vote', 'down');
+        case 'save': return toggle(row, 'data-saved');
+      }
+      return;
+    }
+    const exp = event.target.closest('[data-exp]');
+    if (exp) { const box = exp.closest('.expandable'); if (box) toggle(box, 'data-open'); return; }
+    const sv = event.target.closest('[data-setview]');
+    if (sv) { const box = sv.closest('.viewbox'); if (box) set(box, 'data-view', sv.dataset.setview); }
+  });
+
+  /* Reveal-on-scroll for browsers without animation-timeline. Adds a class the
+     stylesheet already knows; no layout is read or written per frame. */
+  if (!CSS.supports('animation-timeline: view()') && 'IntersectionObserver' in window
+      && !matchMedia('(prefers-reduced-motion: reduce)').matches) {
+    const io = new IntersectionObserver((entries) => {
+      for (const e of entries) if (e.isIntersecting) { e.target.classList.add('marble-seen'); io.unobserve(e.target); }
+    }, { rootMargin: '0px 0px -12% 0px' });
+    const arm = (root) => { for (const el of root.querySelectorAll('.reveal, .rail > .comp')) { el.classList.add('marble-armed'); io.observe(el); } };
+    const style = document.createElement('style');
+    style.setAttribute('data-marble-transient', '');
+    style.textContent = '.marble-armed{opacity:0;transform:translateY(18px);transition:opacity .5s cubic-bezier(.2,.8,.2,1),transform .5s cubic-bezier(.2,.8,.2,1)}'
+      + '.rail>.comp.marble-armed{transform:translateX(-14px)}'
+      + '.marble-armed.marble-seen{opacity:1;transform:none}';
+    document.head.append(style);
+    addEventListener('DOMContentLoaded', () => arm(document));
+    arm(document);
+  }
+})();
+</script>
+
+<script>
+(() => {
+  const begin = (marble) => {
+    const TRANSIENT = 'data-marble-transient';
+    const ID = 'data-marble-id';
+    const isTransient = (el) => el.hasAttribute(TRANSIENT);
+    const persistentChildren = (el) => [...el.children].filter((c) => !isTransient(c));
+    function nextPersistentSibling(el) { let s = el.nextElementSibling; while (s && isTransient(s)) s = s.nextElementSibling; return s; }
+    const roles = new WeakMap();
+    function claim(el, role) { const held = roles.get(el) ?? new Set(); if (held.has(role)) return false; held.add(role); roles.set(el, held); return true; }
+    const within = (root, sel) => [...(root.matches?.(sel) ? [root] : []), ...root.querySelectorAll(sel)];
+    const css = []; const wirers = []; const addressable = [];
+    function assignIdsIn(root) { for (const el of [root, ...root.querySelectorAll('*')]) { if (isTransient(el) || marble.id(el)) continue; if (el === root || el.matches(ADDRESSABLE)) el.setAttribute(ID, marble.newId()); } }
+    css.push(`
+      .marble-item { position: relative; }
+      .marble-item.marble-dragging { opacity: .4; }
+      .marble-grip { position: absolute; left: -1.35rem; top: .3rem; display: flex; flex-direction: column; gap: 2px; opacity: 0; transition: opacity .12s ease; }
+      .marble-item:hover > .marble-grip, .marble-grip:focus-within { opacity: 1; }
+      .marble-btn { width: 1.1rem; height: 1.1rem; padding: 0; border: 0; border-radius: 3px; background: none; color: currentColor; opacity: .35; font: 500 11px/1.1rem ui-monospace, Menlo, monospace; text-align: center; cursor: pointer; }
+      .marble-btn:hover { opacity: 1; background: rgba(127,127,127,.14); }
+    `);
+    function grip(item) {
+      let g = item.querySelector(':scope > .marble-grip');
+      if (!g) { g = document.createElement('div'); g.className = 'marble-grip'; g.setAttribute(TRANSIENT, ''); g.setAttribute('contenteditable', 'false'); item.prepend(g); item.classList.add('marble-item'); }
+      return g;
+    }
+    marble.pageOnly('contenteditable', 'spellcheck');
+    addressable.push('[data-marble-editable]');
+    wirers.push(wireEditable);
+    function wireEditable(root) {
+      for (const el of within(root, '[data-marble-editable]')) {
+        if (!claim(el, 'editable')) continue;
+        el.setAttribute('contenteditable', 'plaintext-only');
+        if (el.contentEditable !== 'plaintext-only') el.setAttribute('contenteditable', 'true');
+        el.spellcheck = false;
+        let prior = null;
+        el.addEventListener('focus', () => { prior = marble.text(el); });
+        el.addEventListener('input', () => {
+          const id = marble.id(el); const text = marble.text(el);
+          const op = { type: 'setText', id, text };
+          if (prior !== null && text !== prior) marble.record({ redo: [op], undo: [{ type: 'setText', id, text: prior }] }, { coalesce: true });
+          marble.op(op);
+        });
+        el.addEventListener('blur', () => { prior = null; marble.flush(); });
+        el.addEventListener('keydown', (e) => { if (e.key === 'Escape' || (e.key === 'Enter' && !e.shiftKey)) { e.preventDefault(); el.blur(); } });
+      }
+    }
+    css.push(`.marble-remove:hover { color: #b4544f; }`);
+    addressable.push('[data-marble-removable]');
+    wirers.push(wireRemovable);
+    function wireRemovable(root) {
+      for (const el of within(root, '[data-marble-removable]')) {
+        if (!claim(el, 'removable')) continue;
+        const b = document.createElement('button');
+        b.className = 'marble-btn marble-remove'; b.setAttribute(TRANSIENT, ''); b.setAttribute('aria-label', 'Delete'); b.title = 'Delete'; b.textContent = '×';
+        b.addEventListener('click', () => {
+          const id = marble.id(el); const inverse = marble.invert({ type: 'remove', id });
+          el.remove();
+          const op = { type: 'remove', id };
+          if (inverse) marble.record({ redo: [op], undo: [inverse] });
+          marble.op(op, { immediate: true });
+        });
+        grip(el).append(b);
+      }
+    }
+    css.push(`
+      .marble-handle { cursor: grab; touch-action: none; }
+      .marble-handle:active { cursor: grabbing; }
+      .marble-handle:focus-visible { opacity: 1; outline: 2px solid currentColor; outline-offset: 1px; }
+      body.marble-dragging-now, body.marble-dragging-now * { user-select: none !important; }
+    `);
+    addressable.push('[data-marble-sortable]', '[data-marble-sortable] > *');
+    wirers.push(wireSortable);
+    let dragging = null; let origin = null;
+    const group = (el) => el?.closest('[data-marble-sortable]')?.getAttribute('data-marble-sortable') ?? null;
+    const targetIn = (c, y) => persistentChildren(c).filter((k) => k !== dragging).find((k) => { const r = k.getBoundingClientRect(); return y < r.top + r.height / 2; }) ?? null;
+    function containerAt(x, y) {
+      const wanted = group(origin.parent);
+      let node = document.elementFromPoint(x, y);
+      while (node) { const c = node.closest?.('[data-marble-sortable]'); if (!c) return null; if (c.getAttribute('data-marble-sortable') === wanted) return c; node = c.parentElement; }
+      return null;
+    }
+    function wireSortableItem(item) {
+      if (!claim(item, 'sortable-item')) return;
+      const h = document.createElement('button');
+      h.className = 'marble-btn marble-handle'; h.setAttribute(TRANSIENT, ''); h.setAttribute('aria-label', 'Reorder'); h.title = 'Drag to reorder'; h.textContent = '⠿';
+      let lift = null;
+      const onMove = (e) => {
+        if (!lift) return; e.preventDefault();
+        const c = containerAt(e.clientX, e.clientY); if (!c) return;
+        const t = targetIn(c, e.clientY);
+        if (!(item.parentElement === c && t === nextPersistentSibling(item))) c.insertBefore(item, t);
+      };
+      const onUp = () => {
+        if (!lift) return; lift = null;
+        removeEventListener('pointermove', onMove); removeEventListener('pointerup', onUp); removeEventListener('pointercancel', onUp);
+        item.classList.remove('marble-dragging'); document.body.classList.remove('marble-dragging-now');
+        commitMove(); dragging = null; origin = null;
+      };
+      h.addEventListener('pointerdown', (e) => {
+        if (e.button !== undefined && e.button !== 0) return; e.preventDefault();
+        lift = true; dragging = item;
+        origin = { parent: item.parentElement, before: nextPersistentSibling(item) };
+        item.classList.add('marble-dragging'); document.body.classList.add('marble-dragging-now');
+        addEventListener('pointermove', onMove, { passive: false }); addEventListener('pointerup', onUp); addEventListener('pointercancel', onUp);
+      });
+      h.addEventListener('keydown', (e) => {
+        const up = e.key === 'ArrowUp'; const dn = e.key === 'ArrowDown';
+        if (!up && !dn) return;
+        const p = item.parentElement; const sib = persistentChildren(p); const at = sib.indexOf(item); const to = up ? at - 1 : at + 1;
+        if (to < 0 || to >= sib.length) return; e.preventDefault();
+        origin = { parent: p, before: nextPersistentSibling(item) }; dragging = item;
+        p.insertBefore(item, up ? sib[to] : sib[to].nextElementSibling);
+        commitMove(); dragging = null; origin = null; h.focus();
+      });
+      grip(item).prepend(h);
+    }
+    function wireSortable(root) { for (const c of within(root, '[data-marble-sortable]')) { for (const item of persistentChildren(c)) wireSortableItem(item); claim(c, 'sortable'); } }
+    function commitMove() {
+      const p = dragging.parentElement; const before = nextPersistentSibling(dragging);
+      if (p === origin.parent && before === origin.before) return;
+      const op = { type: 'move', id: marble.id(dragging), parentId: marble.id(p), beforeId: marble.id(before) };
+      const inv = { type: 'move', id: marble.id(dragging), parentId: marble.id(origin.parent), beforeId: marble.id(origin.before) };
+      marble.record({ redo: [op], undo: [inv] });
+      marble.op(op, { immediate: true });
+    }
+    wirers.push(wireAdders);
+    function wireAdders(root) {
+      for (const button of within(root, '[data-marble-add]')) {
+        if (!claim(button, 'adder')) continue;
+        button.addEventListener('click', () => {
+          const tpl = document.querySelector(button.dataset.marbleAdd);
+          const into = button.dataset.marbleInto;
+          const c = into === 'prev' ? button.previousElementSibling : document.querySelector(into);
+          const seed = tpl?.content?.firstElementChild;
+          if (!seed || !c) { console.error('[marble] add: missing template or container', button.dataset); return; }
+          const node = seed.cloneNode(true);
+          assignIdsIn(node);
+          const html = marble.source.outer(node);
+          c.append(node); marble.adopt(node);
+          const op = { type: 'insert', html, parentId: marble.id(c), beforeId: null };
+          const inv = marble.invert(op);
+          if (inv) marble.record({ redo: [op], undo: [inv] });
+          marble.op(op, { immediate: true });
+          node.querySelector('[data-marble-editable]')?.focus();
+        });
+      }
+    }
+    css.push(`
+      .marble-status { position: fixed; right: 1rem; bottom: 1rem; z-index: 9999; padding: .3rem .6rem; border-radius: 999px; font: 500 11px ui-monospace, Menlo, monospace; letter-spacing: .04em; pointer-events: none; opacity: 0; transition: opacity .25s ease; background: rgba(20,22,26,.92); color: #b7c0cc; border: 1px solid rgba(255,255,255,.12); }
+      .marble-status[data-state="saving"] { opacity: 1; }
+      .marble-status[data-state="saved"] { opacity: .55; }
+      .marble-status[data-state="error"] { opacity: 1; background: #46201f; color: #ff9b9b; }
+    `);
+    const status = document.createElement('div');
+    status.className = 'marble-status'; status.setAttribute(TRANSIENT, '');
+    document.body.append(status);
+    let statusTimer = null;
+    document.addEventListener('marble:status', ({ detail }) => {
+      status.dataset.state = detail.state;
+      status.textContent = detail.state === 'saving' ? 'saving…' : detail.state === 'saved' ? 'saved' : `error — ${detail.message}`;
+      clearTimeout(statusTimer);
+      if (detail.state === 'saved') statusTimer = setTimeout(() => (status.dataset.state = 'idle'), 1200);
+    });
+    const style = document.createElement('style');
+    style.setAttribute(TRANSIENT, ''); style.textContent = css.join('\n');
+    document.head.append(style);
+    const ADDRESSABLE = addressable.join(', ');
+    marble.address(document.querySelectorAll(ADDRESSABLE));
+    marble.register((root) => { for (const w of wirers) w(root); });
+  };
+  if (window.marble) begin(window.marble);
+  else addEventListener('marble:ready', (e) => begin(e.detail), { once: true });
+})();
+</script>
+</body>
+</html>

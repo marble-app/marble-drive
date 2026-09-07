@@ -27,3 +27,5 @@ The improvised markup+CSS for each day lives in that day's archived issue
 
 (none yet — first run starts the list)
 2026-09-07  Departure board — split-flap board; agenda as work "departing" through gates (CHI 10 Sep, Ai2, UIST), status = now/next/later.
+2026-09-07  Pinned to the board — agenda as pinned bulletin-board notes, Now/Next/Later columns, pushpin color = urgency (rebuild of the day).
+2026-09-07  The trellis — agenda as a garden trellis: 3 rails (Now/Next/Later), projects as pill-nodes coloured by thesis, forward-growth metaphor.

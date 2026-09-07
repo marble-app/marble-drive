@@ -26,25 +26,26 @@ const get = async (url, { text = false } = {}) => {
 // ------------------------------------------------------------------- weather
 
 const WMO = {
-  0: ['Clear', '☀'], 1: ['Mainly clear', '🌤'], 2: ['Partly cloudy', '⛅'], 3: ['Overcast', '☁'],
-  45: ['Fog', '🌫'], 48: ['Rime fog', '🌫'],
-  51: ['Light drizzle', '🌦'], 53: ['Drizzle', '🌦'], 55: ['Heavy drizzle', '🌧'],
-  56: ['Freezing drizzle', '🌧'], 57: ['Freezing drizzle', '🌧'],
-  61: ['Light rain', '🌦'], 63: ['Rain', '🌧'], 65: ['Heavy rain', '🌧'],
-  66: ['Freezing rain', '🌧'], 67: ['Freezing rain', '🌧'],
-  71: ['Light snow', '🌨'], 73: ['Snow', '🌨'], 75: ['Heavy snow', '❄'], 77: ['Snow grains', '🌨'],
-  80: ['Rain showers', '🌦'], 81: ['Rain showers', '🌧'], 82: ['Violent showers', '⛈'],
-  85: ['Snow showers', '🌨'], 86: ['Snow showers', '🌨'],
-  95: ['Thunderstorm', '⛈'], 96: ['Thunderstorm + hail', '⛈'], 99: ['Thunderstorm + hail', '⛈'],
+  0: ['Clear', '\u2600\uFE0F', 'clear'], 1: ['Mainly clear', '\uD83C\uDF24\uFE0F', 'clear'],
+  2: ['Partly cloudy', '\u26C5\uFE0F', 'partly'], 3: ['Overcast', '\u2601\uFE0F', 'cloudy'],
+  45: ['Fog', '\uD83C\uDF2B\uFE0F', 'fog'], 48: ['Rime fog', '\uD83C\uDF2B\uFE0F', 'fog'],
+  51: ['Light drizzle', '\uD83C\uDF26\uFE0F', 'rain'], 53: ['Drizzle', '\uD83C\uDF26\uFE0F', 'rain'], 55: ['Heavy drizzle', '\uD83C\uDF27\uFE0F', 'rain'],
+  56: ['Freezing drizzle', '\uD83C\uDF27\uFE0F', 'rain'], 57: ['Freezing drizzle', '\uD83C\uDF27\uFE0F', 'rain'],
+  61: ['Light rain', '\uD83C\uDF26\uFE0F', 'rain'], 63: ['Rain', '\uD83C\uDF27\uFE0F', 'rain'], 65: ['Heavy rain', '\uD83C\uDF27\uFE0F', 'rain'],
+  66: ['Freezing rain', '\uD83C\uDF27\uFE0F', 'rain'], 67: ['Freezing rain', '\uD83C\uDF27\uFE0F', 'rain'],
+  71: ['Light snow', '\uD83C\uDF28\uFE0F', 'snow'], 73: ['Snow', '\uD83C\uDF28\uFE0F', 'snow'], 75: ['Heavy snow', '\u2744\uFE0F', 'snow'], 77: ['Snow grains', '\uD83C\uDF28\uFE0F', 'snow'],
+  80: ['Rain showers', '\uD83C\uDF26\uFE0F', 'rain'], 81: ['Rain showers', '\uD83C\uDF27\uFE0F', 'rain'], 82: ['Violent showers', '\u26C8\uFE0F', 'storm'],
+  85: ['Snow showers', '\uD83C\uDF28\uFE0F', 'snow'], 86: ['Snow showers', '\uD83C\uDF28\uFE0F', 'snow'],
+  95: ['Thunderstorm', '\u26C8\uFE0F', 'storm'], 96: ['Thunderstorm + hail', '\u26C8\uFE0F', 'storm'], 99: ['Thunderstorm + hail', '\u26C8\uFE0F', 'storm'],
 };
-const wmo = (c) => WMO[c] || ['—', '·'];
+const wmo = (c) => WMO[c] || ['\u2014', '\u2753\uFE0F', 'cloudy'];
 
 async function oneCity(name, lat, lon) {
   const u = `https://api.open-meteo.com/v1/forecast?latitude=${lat}&longitude=${lon}` +
     `&current=temperature_2m,apparent_temperature,weather_code,is_day` +
     `&hourly=temperature_2m,weather_code,precipitation_probability` +
     `&daily=temperature_2m_max,temperature_2m_min,sunrise,sunset,precipitation_probability_max` +
-    `&timezone=auto&forecast_days=2&temperature_unit=celsius`;
+    `&timezone=auto&forecast_days=2&temperature_unit=fahrenheit&wind_speed_unit=mph`;
   const d = await get(u);
   const nowIso = d.current.time; // local
   const idx = d.hourly.time.findIndex((t) => t >= nowIso);
@@ -56,9 +57,10 @@ async function oneCity(name, lat, lon) {
     code: d.hourly.weather_code[from + i],
     label: wmo(d.hourly.weather_code[from + i])[0],
     glyph: wmo(d.hourly.weather_code[from + i])[1],
+    sky: wmo(d.hourly.weather_code[from + i])[2],
     pop: d.hourly.precipitation_probability?.[from + i] ?? null,
   }));
-  const [label, glyph] = wmo(d.current.weather_code);
+  const [label, glyph, sky] = wmo(d.current.weather_code);
   return {
     city: name,
     tz: d.timezone,
@@ -67,6 +69,7 @@ async function oneCity(name, lat, lon) {
       temp: Math.round(d.current.temperature_2m),
       feels: Math.round(d.current.apparent_temperature),
       code: d.current.weather_code, label, glyph,
+      sky: sky === 'clear' && !d.current.is_day ? 'clear-night' : sky,
       isDay: !!d.current.is_day,
     },
     today: {
@@ -75,6 +78,7 @@ async function oneCity(name, lat, lon) {
       sunrise: d.daily.sunrise[0], sunset: d.daily.sunset[0],
       popMax: d.daily.precipitation_probability_max?.[0] ?? null,
     },
+    unit: 'F',
     hourly,
   };
 }
@@ -145,14 +149,43 @@ async function arxiv() {
   };
 }
 
+// ----------------------------------------------------------------------- art
+
+// A public-domain painting for the masthead, from the Art Institute of Chicago
+// (open API, no key, CC0 images). Pass --q "<mood or theme>"; a few candidates
+// come back so the skill can pick one whose palette suits the day.
+async function art() {
+  const q = args.q || args._0 || 'landscape morning light';
+  const limit = Number(args.limit || 8);
+  const s = await get(
+    `https://api.artic.edu/api/v1/artworks/search?q=${encodeURIComponent(q)}` +
+    `&query[term][is_public_domain]=true&fields=id,title,artist_title,date_display,image_id,term_titles,colorfulness` +
+    `&limit=${limit}`,
+  );
+  const w = Number(args.width || 1600);
+  const picks = (s.data || [])
+    .filter((a) => a.image_id)
+    .map((a) => ({
+      id: a.id,
+      title: a.title,
+      artist: a.artist_title || 'Unknown',
+      date: a.date_display || '',
+      credit: [a.title, a.artist_title, a.date_display].filter(Boolean).join(', '),
+      iiifUrl: `https://www.artic.edu/iiif/2/${a.image_id}/full/${w},/0/default.jpg`,
+      page: `https://www.artic.edu/artworks/${a.id}`,
+    }));
+  return { query: q, fetchedAt: new Date().toISOString(), count: picks.length, picks };
+}
+
 // --------------------------------------------------------------------- main
 
 try {
   let out;
   if (cmd === 'weather') out = await weather();
   else if (cmd === 'arxiv') out = await arxiv();
+  else if (cmd === 'art') out = await art();
   else {
-    console.error('usage: sources.mjs weather | arxiv [--cat cs.HC] [--max 80] [--days 1]');
+    console.error('usage: sources.mjs weather | arxiv [--cat cs.HC] [--max 80] [--days 1] | art --q "<theme>" [--limit 8] [--width 1600]');
     process.exit(1);
   }
   console.log(JSON.stringify(out, null, 2));
