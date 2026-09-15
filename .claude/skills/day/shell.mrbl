@@ -4,9 +4,11 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <meta name="marble:capabilities" content="storage; net=none">
-<meta name="newsletter:date" content="__DATE__">
-<meta name="newsletter:palette" content="__PALETTE_NAME__">
-<title>Bryan's Bulletin</title>
+<meta name="day:date" content="__DATE__">
+<meta name="day:title" content="__TITLE__">
+<meta name="day:palette" content="__PALETTE_NAME__">
+<meta name="day:app" content="Bryan's Days">
+<title>__TITLE__</title>
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='8' fill='%23222'/%3E%3Crect x='7' y='7' width='8' height='8' rx='2' fill='%23fff'/%3E%3Crect x='17' y='7' width='8' height='8' rx='2' fill='%23fff' opacity='.55'/%3E%3Crect x='7' y='17' width='8' height='8' rx='2' fill='%23fff' opacity='.55'/%3E%3Crect x='17' y='17' width='8' height='8' rx='2' fill='%23fff'/%3E%3C/svg%3E">
 __FONT__
 <style id="nl-base">
@@ -37,7 +39,22 @@ __BODY__
   <li class="row todo" data-marble-removable>
     <button class="chk" data-marble-transient data-act="done" aria-label="Toggle done"></button>
     <div class="body">
-      <div class="title" data-marble-editable>New to-do</div>
+      <div class="title" data-marble-editable data-ph="New to-do"></div>
+      <div class="note" data-marble-editable></div>
+    </div>
+    <div class="acts" data-marble-transient>
+      <button class="act act-pin" data-act="pin" title="Pin">&#9679;</button>
+      <button class="act act-snooze" data-act="snooze" title="Snooze to tomorrow">&#8250;</button>
+    </div>
+  </li>
+</template>
+
+<template id="tpl-focus" data-marble-transient>
+  <li class="row focus" data-marble-removable>
+    <button class="chk" data-marble-transient data-act="done" aria-label="Toggle done"></button>
+    <div class="body">
+      <div class="title" data-marble-editable data-ph="New priority"></div>
+      <div class="why" data-marble-editable></div>
       <div class="note" data-marble-editable></div>
     </div>
     <div class="acts" data-marble-transient>
@@ -50,7 +67,7 @@ __BODY__
 <template id="tpl-news" data-marble-transient>
   <div class="ncard no-img expandable" data-marble-removable>
     <div class="nbody">
-      <h4 class="ntitle" data-marble-editable>New link</h4>
+      <h4 class="ntitle" data-marble-editable data-ph="New link"></h4>
       <div class="nmeta" data-marble-editable></div>
       <div class="nwhy" data-marble-editable></div>
       <button class="exp-toggle" data-marble-transient data-exp>more</button>
@@ -66,7 +83,7 @@ __BODY__
 </template>
 
 <script>
-/* Bryan's Bulletin — its own behaviour. persist-both-halves: move the page,
+/* Bryan's Days — its own behaviour. persist-both-halves: move the page,
    then file one setAttr against the element's data-marble-id. Guarded on
    window.marble so the file still opens as a plain page. */
 (() => {
@@ -99,10 +116,90 @@ __BODY__
       }
       return;
     }
+    /* An author name is a control. Clicking one marks that person as someone
+       Bryan knows, and marks EVERY instance of them on the page in the same
+       breath, so the answer to "do I know these people?" is consistent whether
+       they appear once or on four papers. harvest carries it to the next day. */
+    const au = event.target.closest('[data-au]');
+    if (au) {
+      const on = au.hasAttribute('data-known');
+      for (const el of document.querySelectorAll(`[data-au="${CSS.escape(au.dataset.au)}"]`)) {
+        if (el.hasAttribute('data-known') === on) toggle(el, 'data-known');
+      }
+      return;
+    }
+    /* A component's own expand chevron: the fuller reading of the same data,
+       opened in place. Filed as an attribute so the page reopens as left. */
+    const ce = event.target.closest('[data-comp-exp]');
+    if (ce) { const sec = ce.closest('.comp'); if (sec) toggle(sec, 'data-expanded'); return; }
     const exp = event.target.closest('[data-exp]');
     if (exp) { const box = exp.closest('.expandable'); if (box) toggle(box, 'data-open'); return; }
     const sv = event.target.closest('[data-setview]');
     if (sv) { const box = sv.closest('.viewbox'); if (box) set(box, 'data-view', sv.dataset.setview); }
+  });
+
+  /* Every control above changes a fact that lives in one attribute, and the
+     stylesheet reads that attribute to colour it. A screen reader reads none of
+     it: a starred row and an unstarred one are the same button with the same
+     name. So derive the announced state from the same attribute the CSS uses —
+     never a second copy anyone has to remember to update, just a reading of the
+     fact, re-taken whenever the fact changes.
+
+     This is also what makes undo honest. Mod+Z rewrites the attribute; the
+     observer below re-derives from it, so the button can never end up saying
+     "saved" about a row that no longer is. */
+  const ARIA = [
+    ['[data-act="done"]',   (b) => b.closest('[data-done]')   !== null],
+    ['[data-act="pin"]',    (b) => b.closest('[data-pin]')    !== null],
+    ['[data-act="save"]',   (b) => b.closest('[data-saved]')  !== null],
+    ['[data-act="snooze"]', (b) => b.closest('[data-snooze]') !== null],
+    ['[data-act="up"]',     (b) => b.closest('[data-vote="up"]')   !== null],
+    ['[data-act="down"]',   (b) => b.closest('[data-vote="down"]') !== null],
+    ['[data-au]',           (b) => b.hasAttribute('data-known')],
+  ];
+
+  function deriveAria(root = document) {
+    const scope = root.querySelectorAll ? root : document;
+    for (const [selector, on] of ARIA) {
+      for (const el of scope.querySelectorAll(selector)) el.setAttribute('aria-pressed', String(on(el)));
+    }
+    /* A view switcher: exactly one of the segment buttons is current. */
+    for (const box of scope.querySelectorAll('.viewbox')) {
+      const view = box.getAttribute('data-view');
+      for (const b of box.querySelectorAll('.seg [data-setview]')) {
+        b.setAttribute('aria-pressed', String(b.dataset.setview === view));
+      }
+    }
+    /* A chevron says whether the second reading is open, and what it opens. */
+    for (const sec of scope.querySelectorAll('.comp')) {
+      const chevron = sec.querySelector('[data-comp-exp]');
+      if (!chevron) continue;
+      chevron.setAttribute('aria-expanded', String(sec.hasAttribute('data-expanded')));
+      const more = sec.querySelector('.comp-more[data-marble-id]');
+      if (more) chevron.setAttribute('aria-controls', more.getAttribute('data-marble-id'));
+    }
+    for (const box of scope.querySelectorAll('.expandable')) {
+      const b = box.querySelector('[data-exp]');
+      if (b) b.setAttribute('aria-expanded', String(box.hasAttribute('data-open')));
+    }
+  }
+
+  /* These are readings of the file, never entries in it — so the carrier has to
+     be told before anything derives, and the carrier is injected after this
+     script has parsed. Declaring it only on `window.marble` here would be a
+     silent no-op under a host, and every derived aria attribute would be filed
+     into the document: the same fact in two places, which is the bug this whole
+     derivation exists to avoid. */
+  const pageOnly = (m) => m?.pageOnly('aria-pressed', 'aria-expanded', 'aria-controls');
+  pageOnly(window.marble);
+  addEventListener('marble:ready', (e) => { pageOnly(e.detail); deriveAria(); }, { once: true });
+  deriveAria();
+  /* Re-derive when a fact changes — a click here, a hand edit, an undo, or the
+     file being rewritten by tomorrow's run while the page is open. */
+  new MutationObserver(() => deriveAria()).observe(document.body, {
+    subtree: true, childList: true, attributes: true,
+    attributeFilter: ['data-done', 'data-pin', 'data-saved', 'data-snooze',
+                      'data-vote', 'data-known', 'data-view', 'data-expanded', 'data-open'],
   });
 
   /* Reveal-on-scroll for browsers without animation-timeline. Adds a class the
@@ -190,64 +287,167 @@ __BODY__
         grip(el).append(b);
       }
     }
+    /* Reordering, done physically. The row you grab stays under the finger and
+       its neighbours slide out of the way; nothing snaps. Three rules: track
+       1:1 from the grab point, FLIP the neighbours (move the DOM, then play
+       them from where they were to where they are), and start every animation
+       from the position the eye last saw rather than the layout box — that is
+       what lets a drag reverse halfway without a jump. */
+    const DRAG_EASE = 'cubic-bezier(.2, .8, .2, 1)';
+    const SLIDE_MS = 220, SETTLE_MS = 260, LIFT_PX = 4, EDGE_PX = 72;
+    const reduced = matchMedia('(prefers-reduced-motion: reduce)');
+    const sliding = new WeakMap();
     css.push(`
       .marble-handle { cursor: grab; touch-action: none; }
       .marble-handle:active { cursor: grabbing; }
       .marble-handle:focus-visible { opacity: 1; outline: 2px solid currentColor; outline-offset: 1px; }
+      .marble-dragging { position: relative; z-index: 40; will-change: transform; pointer-events: none; }
+      .marble-dragging .acts, .marble-dragging .marble-btn { opacity: 0; }
       body.marble-dragging-now, body.marble-dragging-now * { user-select: none !important; }
+      body.marble-dragging-now { cursor: grabbing; }
     `);
     addressable.push('[data-marble-sortable]', '[data-marble-sortable] > *');
     wirers.push(wireSortable);
-    let dragging = null; let origin = null;
+    let drag = null, edgeRaf = 0;
     const group = (el) => el?.closest('[data-marble-sortable]')?.getAttribute('data-marble-sortable') ?? null;
-    const targetIn = (c, y) => persistentChildren(c).filter((k) => k !== dragging).find((k) => { const r = k.getBoundingClientRect(); return y < r.top + r.height / 2; }) ?? null;
+    const rectsOf = (els) => new Map([...els].map((el) => [el, el.getBoundingClientRect()]));
+
+    /* `first` is read live, so an element already mid-slide is measured where it
+       looks — cancel only after that reading. */
+    function flip(first) {
+      if (reduced.matches) return;
+      for (const [el, from] of first) {
+        sliding.get(el)?.cancel();
+        const to = el.getBoundingClientRect();
+        const dx = from.left - to.left, dy = from.top - to.top;
+        if (Math.abs(dx) < 0.5 && Math.abs(dy) < 0.5) continue;
+        const anim = el.animate([{ transform: `translate(${dx}px, ${dy}px)` }, { transform: 'translate(0, 0)' }],
+          { duration: SLIDE_MS, easing: DRAG_EASE });
+        sliding.set(el, anim);
+        anim.finished.then(() => { if (sliding.get(el) === anim) sliding.delete(el); }, () => {});
+      }
+    }
+    /* The row's own slot moves as the list reorders around it, so the offset is
+       recomputed from where it actually sits — never accumulated. */
+    function follow() {
+      const box = drag.item.getBoundingClientRect();
+      drag.tx = drag.px - drag.grabX - (box.left - drag.tx);
+      drag.ty = drag.py - drag.grabY - (box.top - drag.ty);
+      drag.item.style.transform = `translate(${drag.tx}px, ${drag.ty}px)`;
+    }
     function containerAt(x, y) {
-      const wanted = group(origin.parent);
       let node = document.elementFromPoint(x, y);
-      while (node) { const c = node.closest?.('[data-marble-sortable]'); if (!c) return null; if (c.getAttribute('data-marble-sortable') === wanted) return c; node = c.parentElement; }
+      while (node) {
+        const c = node.closest?.('[data-marble-sortable]');
+        if (!c) return null;
+        if (c.getAttribute('data-marble-sortable') === drag.group) return c;
+        node = c.parentElement;
+      }
       return null;
+    }
+    function reorder() {
+      const c = containerAt(drag.px, drag.py) || drag.item.parentElement;
+      if (group(c) !== drag.group) return;
+      const before = persistentChildren(c).filter((k) => k !== drag.item)
+        .find((k) => { const r = k.getBoundingClientRect(); return drag.py < r.top + r.height / 2; }) ?? null;
+      if (drag.item.parentElement === c && before === nextPersistentSibling(drag.item)) return;
+      const affected = new Set([...persistentChildren(drag.item.parentElement), ...persistentChildren(c)]);
+      affected.delete(drag.item);
+      const first = rectsOf(affected);
+      c.insertBefore(drag.item, before);
+      flip(first);
+      follow();
+    }
+    /* Dragging to the edge scrolls the page, so a long list can be crossed
+       without letting go. */
+    function edgeScroll() {
+      edgeRaf = 0;
+      if (!drag?.lifted) return;
+      const over = drag.py - EDGE_PX, under = innerHeight - drag.py - EDGE_PX;
+      const dy = over < 0 ? Math.max(-22, (over / EDGE_PX) * 22)
+        : under < 0 ? Math.min(22, (-under / EDGE_PX) * 22) : 0;
+      if (dy) { scrollBy(0, dy); follow(); reorder(); }
+      edgeRaf = requestAnimationFrame(edgeScroll);
+    }
+    function settle(d) {
+      const land = () => {
+        d.item.style.transform = '';
+        d.item.classList.remove('marble-dragging');
+        sliding.delete(d.item);
+        commitMove(d);
+      };
+      if (reduced.matches || (!d.tx && !d.ty)) return land();
+      const thrown = Math.abs(d.vy) > 900;   /* a throw earns overshoot; a placement does not */
+      const anim = d.item.animate([{ transform: `translate(${d.tx}px, ${d.ty}px)` }, { transform: 'translate(0, 0)' }],
+        { duration: thrown ? 320 : SETTLE_MS, easing: thrown ? 'cubic-bezier(.2, .9, .25, 1.06)' : DRAG_EASE });
+      sliding.set(d.item, anim);
+      anim.finished.then(land, land);
     }
     function wireSortableItem(item) {
       if (!claim(item, 'sortable-item')) return;
       const h = document.createElement('button');
-      h.className = 'marble-btn marble-handle'; h.setAttribute(TRANSIENT, ''); h.setAttribute('aria-label', 'Reorder'); h.title = 'Drag to reorder'; h.textContent = '⠿';
-      let lift = null;
+      h.className = 'marble-btn marble-handle'; h.setAttribute(TRANSIENT, ''); h.setAttribute('aria-label', 'Reorder');
+      h.title = 'Drag to reorder, or focus and press the arrow keys'; h.textContent = '⠿';
       const onMove = (e) => {
-        if (!lift) return; e.preventDefault();
-        const c = containerAt(e.clientX, e.clientY); if (!c) return;
-        const t = targetIn(c, e.clientY);
-        if (!(item.parentElement === c && t === nextPersistentSibling(item))) c.insertBefore(item, t);
+        if (!drag || e.pointerId !== drag.pointerId) return;
+        e.preventDefault();
+        drag.px = e.clientX; drag.py = e.clientY;
+        if (!drag.lifted) {
+          if (Math.hypot(drag.px - drag.startX, drag.py - drag.startY) < LIFT_PX) return;
+          drag.lifted = true;
+          item.classList.add('marble-dragging');
+          document.body.classList.add('marble-dragging-now');
+          if (!edgeRaf) edgeRaf = requestAnimationFrame(edgeScroll);
+        }
+        const dt = e.timeStamp - drag.lastT;
+        if (dt > 0) drag.vy = ((e.clientY - drag.lastY) / dt) * 1000;
+        drag.lastT = e.timeStamp; drag.lastY = e.clientY;
+        follow(); reorder();
       };
-      const onUp = () => {
-        if (!lift) return; lift = null;
+      const onUp = (e) => {
+        if (!drag || (e && e.pointerId !== drag.pointerId)) return;
+        const d = drag; drag = null;
+        if (edgeRaf) { cancelAnimationFrame(edgeRaf); edgeRaf = 0; }
         removeEventListener('pointermove', onMove); removeEventListener('pointerup', onUp); removeEventListener('pointercancel', onUp);
-        item.classList.remove('marble-dragging'); document.body.classList.remove('marble-dragging-now');
-        commitMove(); dragging = null; origin = null;
+        document.body.classList.remove('marble-dragging-now');
+        if (d.lifted) settle(d);
       };
       h.addEventListener('pointerdown', (e) => {
-        if (e.button !== undefined && e.button !== 0) return; e.preventDefault();
-        lift = true; dragging = item;
-        origin = { parent: item.parentElement, before: nextPersistentSibling(item) };
-        item.classList.add('marble-dragging'); document.body.classList.add('marble-dragging-now');
-        addEventListener('pointermove', onMove, { passive: false }); addEventListener('pointerup', onUp); addEventListener('pointercancel', onUp);
+        if ((e.button !== undefined && e.button !== 0) || drag) return;
+        e.preventDefault();
+        sliding.get(item)?.cancel();      /* grabbing a settling row takes it from where it is now */
+        item.style.transform = '';
+        const box = item.getBoundingClientRect();
+        drag = { item, pointerId: e.pointerId, group: group(item.parentElement),
+          originParent: item.parentElement, originBefore: nextPersistentSibling(item),
+          grabX: e.clientX - box.left, grabY: e.clientY - box.top,
+          startX: e.clientX, startY: e.clientY, px: e.clientX, py: e.clientY,
+          tx: 0, ty: 0, vy: 0, lifted: false, lastT: e.timeStamp, lastY: e.clientY };
+        addEventListener('pointermove', onMove, { passive: false });
+        addEventListener('pointerup', onUp); addEventListener('pointercancel', onUp);
       });
       h.addEventListener('keydown', (e) => {
-        const up = e.key === 'ArrowUp'; const dn = e.key === 'ArrowDown';
+        const up = e.key === 'ArrowUp', dn = e.key === 'ArrowDown';
         if (!up && !dn) return;
-        const p = item.parentElement; const sib = persistentChildren(p); const at = sib.indexOf(item); const to = up ? at - 1 : at + 1;
-        if (to < 0 || to >= sib.length) return; e.preventDefault();
-        origin = { parent: p, before: nextPersistentSibling(item) }; dragging = item;
-        p.insertBefore(item, up ? sib[to] : sib[to].nextElementSibling);
-        commitMove(); dragging = null; origin = null; h.focus();
+        const p = item.parentElement, sib = persistentChildren(p), at = sib.indexOf(item);
+        const swap = sib[up ? at - 1 : at + 1];
+        if (!swap) return;
+        e.preventDefault();
+        const d = { item, originParent: p, originBefore: nextPersistentSibling(item) };
+        const first = rectsOf(sib);
+        p.insertBefore(item, up ? swap : nextPersistentSibling(swap));
+        flip(first);
+        commitMove(d); h.focus();
       });
       grip(item).prepend(h);
     }
     function wireSortable(root) { for (const c of within(root, '[data-marble-sortable]')) { for (const item of persistentChildren(c)) wireSortableItem(item); claim(c, 'sortable'); } }
-    function commitMove() {
-      const p = dragging.parentElement; const before = nextPersistentSibling(dragging);
-      if (p === origin.parent && before === origin.before) return;
-      const op = { type: 'move', id: marble.id(dragging), parentId: marble.id(p), beforeId: marble.id(before) };
-      const inv = { type: 'move', id: marble.id(dragging), parentId: marble.id(origin.parent), beforeId: marble.id(origin.before) };
+    /* Moving the element is the change; this only reports where it came to rest. */
+    function commitMove(d) {
+      const p = d.item.parentElement, before = nextPersistentSibling(d.item);
+      if (p === d.originParent && before === d.originBefore) return;
+      const op = { type: 'move', id: marble.id(d.item), parentId: marble.id(p), beforeId: marble.id(before) };
+      const inv = { type: 'move', id: marble.id(d.item), parentId: marble.id(d.originParent), beforeId: marble.id(d.originBefore) };
       marble.record({ redo: [op], undo: [inv] });
       marble.op(op, { immediate: true });
     }
@@ -297,7 +497,20 @@ __BODY__
     marble.register((root) => { for (const w of wirers) w(root); });
   };
   if (window.marble) begin(window.marble);
-  else addEventListener('marble:ready', (e) => begin(e.detail), { once: true });
+  else {
+    /* No host is a user-visible state, not just a guard. Without one every control
+       here still moves the page and then forgets, which is worse than a broken
+       button — the person believes they have done work. So say it once, in the
+       file's own voice. The delay is because a host may attach after this script
+       parses; marble:ready cancels the claim before anyone can read it. */
+    const declareReadonly = setTimeout(
+      () => document.body.setAttribute('data-marble-readonly', ''), 1500);
+    addEventListener('marble:ready', (e) => {
+      clearTimeout(declareReadonly);
+      document.body.removeAttribute('data-marble-readonly');
+      begin(e.detail);
+    }, { once: true });
+  }
 })();
 </script>
 </body>

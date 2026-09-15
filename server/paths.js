@@ -13,8 +13,14 @@ import path from 'node:path';
 export const DOC_EXT = '.mrbl';
 
 // Per segment, and the same shape Marble accepts for a whole flat name — so a
-// document that was addressable there is addressable here, at the root.
-const SEGMENT = /^[a-z0-9][a-z0-9._ -]*$/i;
+// document that was addressable there is addressable here, at the root, with
+// one addition: the apostrophe. It is in "Bryan's Days" and in half the folder
+// names a person would write for themselves, it is an ordinary character on
+// every filesystem this runs on, and refusing it made a folder that exists on
+// disk hold nothing the Drive could see. The straight quote only — a curly one
+// is a different character that looks the same, and two names that look alike
+// and address differently is worse than refusing one of them.
+const SEGMENT = /^[a-z0-9][a-z0-9._' -]*$/i;
 
 // Reserved because the store keeps its own bookkeeping under the drive root and
 // a document called `.marble` would be indistinguishable from it.
@@ -152,7 +158,11 @@ export function safeSegment(input) {
     // person means by it, and a folder of documents off a Mac is mostly this.
     .normalize('NFD')
     .replace(/[\u0300-\u036f]/g, '')
-    .replace(/[^a-z0-9._ -]+/gi, ' ')
+    // The apostrophe a word processor types is not the one the grammar takes.
+    // Folded rather than dropped, so "Bryan\u2019s Days" arrives as "Bryan's Days"
+    // instead of "Bryan s Days".
+    .replace(/[\u2018\u2019]/g, "'")
+    .replace(/[^a-z0-9._' -]+/gi, ' ')
     .replace(/\s+/g, ' ')
     // A leading dot is how the store hides its own bookkeeping, and the grammar
     // wants an alphanumeric first anyway — which is the same rule twice, so a

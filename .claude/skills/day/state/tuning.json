@@ -1,0 +1,19 @@
+{
+  "boost": [
+    "interactive visualization authoring",
+    "scientific communication",
+    "authoring tools",
+    "just-in-time interfaces",
+    "on-demand interfaces",
+    "disposable software",
+    "ephemeral interfaces",
+    "interface generators",
+    "future of HCI"
+  ],
+  "mute": [],
+  "watch": {
+    "_note": "Asked for on 14 Sep, naming Michael Bernstein's 'The Interface of Theseus' (arXiv 2609.06770, UIST Visions 2026): \"i want to be finding papers like these!!!\" `sources.mjs arxiv` queries these directly, so a watched author or a vision-track paper surfaces even when it was announced on a morning no issue read. Add an author whenever Bryan reacts to someone this way.",
+    "authors": ["Michael S. Bernstein"],
+    "comments": ["UIST Visions", "alt.chi", "position paper", "vision paper"]
+  }
+}

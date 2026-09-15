@@ -1,5 +1,5 @@
 /* ============================================================================
-   Bryan's Bulletin — design system.
+   Bryan's Days — design system.
    The stable substrate. build.mjs inlines this; the run composes components
    against it (see SKILL.md "Component spec"). Tokens come from the palette
    stylesheet injected after this one.
@@ -40,10 +40,11 @@ img { max-width: 100%; }
    running text, not by boxing the whole layout into a column. */
 .push-b, .nwhy, .mo-dek, .pwhy, .abstract, .masthead .sub, li.row .why { max-width: 72ch; }
 
-.masthead { display: flex; flex-wrap: wrap; align-items: baseline; gap: .4rem 1.2rem; margin-bottom: var(--s5); }
-.masthead .date { font: 600 .78rem/1 var(--font-mono); letter-spacing: .16em; text-transform: uppercase; color: var(--muted); }
-.masthead .greet { font: 500 1.55rem/1.1 var(--font-serif); letter-spacing: -.015em; }
-.masthead .sub { flex-basis: 100%; margin: .15rem 0 0; font-size: 1rem; color: var(--muted); max-width: 54rem; text-wrap: pretty; }
+/* Stacked, one thing per line, flush to the stream's left edge. */
+.masthead { display: grid; justify-items: start; gap: .5rem; }
+.masthead .date { font: 600 .74rem/1 var(--font-mono); letter-spacing: .16em; text-transform: uppercase; color: var(--faint); }
+.masthead .greet { font: 500 1.9rem/1.15 var(--font-serif); letter-spacing: -.02em; }
+.masthead .sub { margin: 0; font-size: 1rem; line-height: 1.55; color: var(--muted); text-wrap: pretty; }
 
 /* Two tracks, fixed from the start: a sticky column of widgets on the left and
    the stream you read down on the right. No transition, nothing that moves — the
@@ -54,6 +55,8 @@ img { max-width: 100%; }
 .rail, .tail { position: sticky; top: var(--s3); display: flex; flex-direction: column; gap: var(--s4); min-width: 0; }
 .tail { max-height: calc(100dvh - var(--s5)); }
 .tail > .comp { min-height: 0; }
+.comp { min-width: 0; }
+.wx-hrs { min-width: 0; max-width: 100%; }
 .stream { display: flex; flex-direction: column; gap: var(--s6); min-width: 0; }
 @media (max-width: 82rem) {
   .shell { grid-template-columns: clamp(14rem, 22vw, 17rem) minmax(0, 1fr); }
@@ -116,10 +119,15 @@ img { max-width: 100%; }
 .seg button:active { transform: scale(.94); }
 .viewbox .v { display: none; }
 .viewbox[data-view="tl"] .v-tl, .viewbox[data-view="list"] .v-list, .viewbox[data-view="cal"] .v-cal,
-.viewbox[data-view="top"] .v-top, .viewbox[data-view="men"] .v-men, .viewbox[data-view="women"] .v-women { display: block; animation: vin var(--dur) var(--ease) both; }
+.viewbox[data-view="t"] .v-t, .viewbox[data-view="l"] .v-l,
+.viewbox[data-view="top"] .v-top, .viewbox[data-view="men"] .v-men, .viewbox[data-view="women"] .v-women,
+.viewbox[data-view="week"] .v-week, .viewbox[data-view="niners"] .v-niners { display: block; animation: vin var(--dur) var(--ease) both; }
 .viewbox[data-view="tl"] .seg [data-setview="tl"], .viewbox[data-view="list"] .seg [data-setview="list"], .viewbox[data-view="cal"] .seg [data-setview="cal"],
+.viewbox[data-view="t"] .seg [data-setview="t"], .viewbox[data-view="l"] .seg [data-setview="l"],
 .viewbox[data-view="top"] .seg [data-setview="top"], .viewbox[data-view="men"] .seg [data-setview="men"],
-.viewbox[data-view="women"] .seg [data-setview="women"] { background: var(--cat, var(--accent)); color: var(--bg); }
+.viewbox[data-view="women"] .seg [data-setview="women"],
+.viewbox[data-view="week"] .seg [data-setview="week"],
+.viewbox[data-view="niners"] .seg [data-setview="niners"] { background: var(--cat, var(--accent)); color: var(--bg); }
 @keyframes vin { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: none; } }
 
 /* ------------------------------------------------------------- icons ------- */
@@ -148,23 +156,40 @@ img { max-width: 100%; }
 }
 
 .tip-l::after { left: 0; transform: translateX(0) translateY(4px); }
-.tip-l:hover::after { transform: translateX(0); }
+.tip-l:hover::after, .tip-l:focus-visible::after { transform: translateX(0); }
 .tip-r::after { left: auto; right: 0; transform: translateX(0) translateY(4px); }
-.tip-r:hover::after { transform: translateX(0); }
+.tip-r:hover::after, .tip-r:focus-visible::after { transform: translateX(0); }
 
 /* -------------------------------------------------------------- rows ------- */
 ol.list, ul.list { list-style: none; margin: 0; padding: 0; }
-li.row { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; gap: .6rem; align-items: start; padding: .6rem 0; border-top: 1px solid var(--line); transition: background var(--dur) var(--ease); }
-li.row:first-child { border-top: 0; padding-top: 0; }
-li.row:hover { background: color-mix(in srgb, var(--cat, var(--accent)) 6%, transparent); border-radius: 8px; }
-li.row .body { min-width: 0; }
-li.row .title { font-size: 1rem; line-height: 1.4; overflow-wrap: anywhere; }
-li.row .why { margin-top: .2rem; font-size: .88rem; line-height: 1.45; color: var(--muted); }
-li.row .meta { margin-top: .2rem; font: 500 .76rem/1.4 var(--font-mono); color: var(--muted); display: flex; flex-wrap: wrap; align-items: center; gap: .3rem .5rem; }
-li.row .note { margin-top: .25rem; font-size: .86rem; color: var(--muted); min-height: 1em; }
-li.row .note:empty::before { content: "note\2026"; color: var(--faint); }
+/* One row: control · body · actions. Everything that is chrome — the drag grip,
+   the note placeholder, the action buttons — stays out of the way until the
+   pointer is on the row, so a list at rest reads as a list and not as a control
+   panel. The row is padded and negatively margined so the hover tint has room
+   around the text without the text ever moving. */
+li.row { display: grid; grid-template-columns: 1.2rem minmax(0, 1fr) auto; gap: 0 .65rem;
+  align-items: start; padding: .55rem .6rem; margin-inline: -.6rem;
+  border-top: 1px solid var(--line); border-radius: 10px;
+  transition: background var(--dur) var(--ease); }
+li.row:first-child { border-top: 0; }
+li.row > .chk { grid-column: 1; }
+li.row > .body { grid-column: 2; min-width: 0; }
+li.row > .acts { grid-column: 3; }
+li.row:hover, li.row:focus-within { background: color-mix(in srgb, var(--cat, var(--accent)) 6%, transparent); }
+li.row .body { min-width: 0; display: grid; gap: .22rem; }
+li.row .title { font-size: 1rem; line-height: 1.45; overflow-wrap: break-word; }
+li.row .why { font-size: .88rem; line-height: 1.45; color: var(--muted); }
+li.row .meta { font: 500 .76rem/1.4 var(--font-mono); color: var(--muted); display: flex; flex-wrap: wrap; align-items: center; gap: .3rem .5rem; }
+li.row .note { font-size: .86rem; line-height: 1.45; color: var(--muted); }
+/* An empty note is somewhere to type, not a line of text. It says so only when
+   you are actually on the row. */
+li.row .title:empty::before, .ntitle:empty::before {
+  content: attr(data-ph); color: var(--faint); pointer-events: none; }
+li.row .note:empty::before { content: "note\2026"; color: var(--faint);
+  opacity: 0; transition: opacity var(--dur) var(--ease); }
+li.row:hover .note:empty::before, li.row .note:empty:focus::before { opacity: 1; }
 
-.chk { appearance: none; width: 1.2rem; height: 1.2rem; margin-top: .12rem; padding: 0; flex: none; border: 1.5px solid var(--faint); border-radius: 50%; background: none; cursor: pointer; color: var(--bg); font-size: .78rem; line-height: 1; transition: background var(--dur) var(--ease), border-color var(--dur) var(--ease), transform .1s var(--ease); }
+.chk { appearance: none; width: 1.2rem; height: 1.2rem; align-self: start; margin-top: .13rem; padding: 0; flex: none; border: 1.5px solid var(--faint); border-radius: 50%; background: none; cursor: pointer; color: var(--bg); font-size: .78rem; line-height: 1; transition: background var(--dur) var(--ease), border-color var(--dur) var(--ease), transform .1s var(--ease); }
 .chk:active { transform: scale(.9); }
 [data-done] .chk { background: var(--accent); border-color: var(--accent); }
 [data-done] .chk::after { content: "\2713"; }
@@ -173,7 +198,16 @@ li.row .note:empty::before { content: "note\2026"; color: var(--faint); }
 [data-snooze] .title::after { content: "  \00b7 tomorrow"; color: var(--faint); font-size: .8rem; }
 [data-pin] { background: color-mix(in srgb, var(--cat, var(--accent)) 8%, transparent); border-radius: 8px; }
 
-.acts { display: flex; gap: .05rem; align-items: start; }
+/* Actions fade in with the row. State you have already set — a vote, a save, a
+   pin — stays visible at rest, because that is information, not chrome. */
+.acts { display: flex; gap: .05rem; align-items: start;
+  opacity: 0; transition: opacity var(--dur) var(--ease); }
+li.row:hover .acts, li.row:focus-within .acts,
+.ncard:hover .acts, .ncard:focus-within .acts,
+.pcard:hover .acts, .pcard:focus-within .acts,
+.mo:hover .acts, .mo:focus-within .acts,
+[data-vote] .acts, [data-saved] .acts, [data-pin] .acts, [data-snooze] .acts { opacity: 1; }
+@media (prefers-reduced-motion: reduce) { .acts, li.row .note:empty::before { transition: none; } }
 .act { appearance: none; border: 0; background: none; cursor: pointer; color: var(--faint); font-size: .9rem; line-height: 1; padding: .18rem .26rem; border-radius: 6px; transition: color var(--dur) var(--ease), background var(--dur) var(--ease), transform .1s var(--ease); }
 .act:hover { color: var(--ink); background: color-mix(in srgb, var(--faint) 20%, transparent); }
 .act:active { transform: scale(.86); }
@@ -215,6 +249,10 @@ li.row .note:empty::before { content: "note\2026"; color: var(--faint); }
 .nthumb img, .pthumb img, .art-img img, .mo-img img { width: 100%; height: 100%; object-fit: cover; display: block; }
 .nbody { min-width: 0; }
 .ntitle { margin: 0; font: 600 1.05rem/1.32 var(--font-serif); overflow-wrap: anywhere; }
+/* A headline is the thing you read, not a link you are being sold. Ink, with the
+   accent kept for the hover — asked for on 8 Sep. Applies in both news views. */
+.ntitle a, .mo-title a { color: var(--ink); }
+.ntitle a:hover, .mo-title a:hover { color: var(--accent-ink); }
 .nmeta { margin-top: .25rem; font: 500 .76rem/1.5 var(--font-mono); color: var(--muted); display: flex; flex-wrap: wrap; gap: .3rem .6rem; align-items: center; }
 .nwhy { margin-top: .5rem; font-size: .95rem; line-height: 1.5; text-wrap: pretty; }
 .nwhy b { display: block; margin-bottom: .2rem; font: 600 .74rem/1 var(--font-sans); letter-spacing: .08em; text-transform: uppercase; color: var(--cat, var(--accent-ink)); }
@@ -229,6 +267,36 @@ li.row .note:empty::before { content: "note\2026"; color: var(--faint); }
 .ptitle { margin: 0; font: 600 .98rem/1.32 var(--font-serif); overflow-wrap: anywhere; }
 .pmeta { margin-top: .25rem; font: 500 .74rem/1.4 var(--font-mono); color: var(--muted); }
 .pdate { font: 600 .72rem/1 var(--font-mono); color: var(--muted); }
+/* What kind of research this is, at a glance. Colour carries the KIND — what the
+   paper produces, how it was done, what it is about — not the individual tag, so
+   a row of them reads as three categories rather than eight arbitrary colours. */
+.ptags { margin-top: .4rem; display: flex; flex-wrap: wrap; gap: .3rem; }
+.ptag { font: 600 .72rem/1 var(--font-sans); letter-spacing: .04em; padding: .28rem .46rem;
+  border-radius: 4px; white-space: nowrap; border: 1px solid transparent; }
+.ptag[data-kind="artifact"] { background: color-mix(in srgb, var(--accent) 16%, transparent);
+  color: var(--accent-ink); border-color: color-mix(in srgb, var(--accent) 32%, transparent); }
+.ptag[data-kind="method"] { background: color-mix(in srgb, var(--warm) 15%, transparent);
+  color: var(--warm); border-color: color-mix(in srgb, var(--warm) 30%, transparent); }
+.ptag[data-kind="topic"] { background: transparent; color: var(--muted);
+  border-color: var(--line); }
+/* Authors, in full — an et-al hides the one name being scanned for. Each is a
+   control: click to say you know them, and every paper they are on says so.
+   Unmarked names stay quiet muted text; the mark is the only colour here. */
+.pau { margin-top: .28rem; display: flex; flex-wrap: wrap; gap: .1rem .34rem; align-items: baseline; }
+.au { font: 500 .78rem/1.45 var(--font-mono); color: var(--muted); background: none;
+  border: 0; border-bottom: 1px solid transparent; padding: 0 0 .05rem; margin: 0;
+  cursor: pointer; text-align: left; border-radius: 0;
+  transition: color var(--dur) var(--ease), border-color var(--dur) var(--ease); }
+.au:not(:last-child)::after { content: ","; color: var(--faint); }
+.au:hover { color: var(--ink); border-bottom-color: var(--line); }
+.au:active { color: var(--accent-ink); }
+/* One focus ring for the small in-flow controls, so they cannot drift apart. */
+.au:focus-visible, .comp-exp:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.au[data-known] { color: var(--accent-ink); font-weight: 600;
+  border-bottom-color: color-mix(in srgb, var(--accent) 55%, transparent); }
+.au[data-known]:hover { border-bottom-color: var(--accent); }
+@media (prefers-reduced-motion: reduce) { .au { transition: none; } }
+
 .pwhy { margin-top: .4rem; font-size: .88rem; line-height: 1.45; }
 .pfoot, .mo-foot { margin-top: .5rem; display: flex; flex-wrap: wrap; gap: .4rem; align-items: center; }
 
@@ -265,15 +333,26 @@ li.row .note:empty::before { content: "note\2026"; color: var(--faint); }
 .wx-temp { font: 300 2.4rem/1 var(--font-serif); font-variant-numeric: tabular-nums; }
 .wx-temp sup { font-size: .8rem; color: var(--muted); vertical-align: .9em; margin-left: .1em; }
 .wx-txt { min-width: 0; }
+/* Fahrenheit is the number Bryan reads; Celsius is the one Zurich speaks. It sits
+   alongside, faded, so it informs without competing. */
+.wx-c { font: 500 .78rem/1 var(--font-mono); color: var(--faint); letter-spacing: .02em;
+  font-variant-numeric: tabular-nums; white-space: nowrap; }
+.wx-temp + .wx-c { align-self: flex-end; margin: 0 0 .45rem -.35rem; }
+.wx-hilo .wx-c { margin-left: .3rem; }
 .wx-cond { font-size: .95rem; }
 .wx-hilo { font-size: .8rem; color: var(--muted); }
 .wx-rest { margin: .5rem 0 0; font-size: .88rem; line-height: 1.45; color: var(--muted); text-wrap: pretty; }
-.wx-hrs { margin-top: .7rem; display: grid; grid-template-columns: repeat(7, minmax(0, 1fr)); gap: .3rem; }
-.wx-hr { text-align: center; min-width: 0; }
-.wx-hr .hh { font: 500 .74rem/1.4 var(--font-mono); color: var(--faint); }
-.wx-hr .he { font-size: 1.15rem; line-height: 1.3; }
-.wx-hr .ht { font: 600 .8rem/1.3 var(--font-sans); font-variant-numeric: tabular-nums; }
-.wx-block { border-radius: 12px; padding: var(--s3); }
+/* 48 hours, scrubbed sideways. This is the second sanctioned inner scroll (the
+   timeline's track is the first): the forecast is genuinely longer than the rail
+   is wide, and cutting it to fit is what the user asked us to stop doing. Named
+   `wx-track` so selfCheck can tell it apart from an accidental overflow. */
+.wx-hrs { margin-top: .7rem; overflow-x: auto; overflow-y: hidden;
+  scrollbar-width: thin; overscroll-behavior-x: contain;
+  scroll-snap-type: x proximity; -webkit-overflow-scrolling: touch;
+  -webkit-mask-image: linear-gradient(90deg, transparent 0, #000 .7rem, #000 calc(100% - .9rem), transparent 100%);
+          mask-image: linear-gradient(90deg, transparent 0, #000 .7rem, #000 calc(100% - .9rem), transparent 100%); }
+/* Where the day turns over: a hairline and the date read bottom-to-top. */
+.wx-block { border-radius: 12px; padding: var(--s3); min-width: 0; }
 /* The card takes on the sky. Low alpha so --ink stays legible in both themes. */
 .wx-block[data-sky="clear"]       { background: linear-gradient(165deg, color-mix(in srgb, #4EA3E6 20%, transparent), color-mix(in srgb, #F7C948 15%, transparent)); }
 .wx-block[data-sky="clear-night"] { background: linear-gradient(165deg, color-mix(in srgb, #2B3A6B 26%, transparent), color-mix(in srgb, #6E63A6 16%, transparent)); }
@@ -284,8 +363,6 @@ li.row .note:empty::before { content: "note\2026"; color: var(--faint); }
 .wx-block[data-sky="storm"]       { background: linear-gradient(165deg, color-mix(in srgb, #3B4356 28%, transparent), color-mix(in srgb, #6B5F8A 18%, transparent)); }
 .wx-block[data-sky="fog"]         { background: linear-gradient(165deg, color-mix(in srgb, #B8BEC4 24%, transparent), color-mix(in srgb, #DDE2E6 18%, transparent)); }
 @container (max-width: 17rem) {
-  .wx-hrs { grid-template-columns: repeat(4, minmax(0, 1fr)); }
-  .wx-hr:nth-child(n+5) { display: none; }
   .wx-temp { font-size: 2rem; }
 }
 
@@ -314,11 +391,24 @@ li.row .note:empty::before { content: "note\2026"; color: var(--faint); }
 .tly-tick .tly-when { font: 600 .74rem/1 var(--font-mono); color: var(--faint); letter-spacing: .05em; text-transform: uppercase; }
 .tly-tick .tly-dot { width: .32rem; height: .32rem; background: var(--line); box-shadow: none; }
 .tly-tick .tly-body { border-top: 1px dashed var(--line); height: 0; }
-.viewbox[data-view="s"] .tly-date { display: none; }
 
-li.keydate { grid-template-columns: 3.3rem minmax(0, 1fr); border-left: 3px solid var(--u, var(--faint)); padding-left: .7rem; border-radius: 0 8px 8px 0; }
-.when-pill { font: 700 .9rem/1 var(--font-sans); color: var(--u, var(--accent-ink)); font-variant-numeric: tabular-nums; white-space: nowrap; }
-.when-pill small { font-weight: 500; color: var(--muted); }
+/* The list view. No distortion, no spacing games — just what is next, in order.
+   The dot is the only thing carrying urgency, and it carries it as strength of
+   the one accent hue, so the column reads as a single fading gradient. */
+.kdlist { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; }
+.kd { display: grid; grid-template-columns: .6rem 2.4rem minmax(0, 1fr); gap: .55rem;
+  align-items: baseline; padding: .5rem 0; border-top: 1px solid var(--line);
+  transition: background var(--dur) var(--ease); }
+.kd:first-child { border-top: 0; }
+.kd:hover { background: color-mix(in srgb, var(--accent-soft) 60%, transparent); }
+.kd-dot { width: .6rem; height: .6rem; border-radius: 50%; background: var(--u, var(--faint));
+  align-self: center; justify-self: center; }
+.kd-when { font: 600 .82rem/1.3 var(--font-mono); color: var(--muted);
+  font-variant-numeric: tabular-nums; text-align: right; white-space: nowrap; }
+.kd-when small { font-weight: 500; color: var(--faint); margin-left: .1em; }
+.kd-body { min-width: 0; display: grid; gap: .1rem; }
+.kd-label { font: 500 .88rem/1.35 var(--font-sans); color: var(--ink); overflow-wrap: anywhere; }
+.kd-date { font: 500 .72rem/1.4 var(--font-mono); color: var(--faint); }
 
 /* -------------------------------------------------------------- bracket ---- */
 .bracket { display: flex; gap: 0; overflow-x: auto; padding-bottom: .4rem; align-items: stretch; }
@@ -340,6 +430,65 @@ li.keydate { grid-template-columns: 3.3rem minmax(0, 1fr); border-left: 3px soli
 .bkt-seed.win .bkt-nm { font-weight: 700; }
 .bkt-seed.win .bkt-face { box-shadow: 0 0 0 2px var(--cat, var(--accent)); }
 .uso-now { display: flex; flex-direction: column; gap: .5rem; }
+
+/* ------------------------------------------------------------------ nfl ---- */
+/* The slate. Each game is a two-line card so the eye compares scores down a
+   column, and the component sizes its own columns — a @container query, because
+   this can sit in the stream at full width or anywhere narrower. */
+.nfl-day + .nfl-day { margin-top: 1rem; }
+.nfl-dh { margin: 0 0 .45rem; font: 600 .72rem/1 var(--font-sans); letter-spacing: .1em; text-transform: uppercase; color: var(--faint); }
+.nfl-games, .ng-grid { display: grid; gap: .5rem; grid-template-columns: 1fr; }
+@container (min-width: 30rem) { .nfl-games { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+@container (min-width: 52rem) { .nfl-games { grid-template-columns: repeat(3, minmax(0, 1fr)); } }
+.nfl-g { border: 1px solid var(--line); border-radius: 11px; padding: .5rem .6rem; background: var(--panel); display: flex; flex-direction: column; gap: .2rem; }
+/* Bryan's team, marked where he can see it without reading every row. */
+.nfl-g.fav { border-color: var(--cat, var(--accent)); box-shadow: inset 3px 0 0 var(--cat, var(--accent)); }
+.nfl-t { display: flex; align-items: baseline; gap: .45rem; color: var(--muted); }
+.nfl-t.win { color: var(--ink); }
+.nfl-ab { font: 600 .76rem/1 var(--font-mono); color: var(--faint); width: 2.4rem; flex: none; letter-spacing: .04em; }
+.nfl-nm { flex: 1; min-width: 0; font-size: .92rem; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.nfl-t.win .nfl-nm { font-weight: 650; }
+.nfl-sc { font: 500 .95rem/1 var(--font-mono); font-variant-numeric: tabular-nums; }
+.nfl-t.win .nfl-sc { font-weight: 700; color: var(--cat, var(--accent)); }
+.nfl-st { margin-top: .15rem; display: flex; gap: .4rem; align-items: baseline; font: 500 .76rem/1.3 var(--font-mono); color: var(--faint); }
+.nfl-st.live { color: var(--warm); }
+.nfl-gn { color: var(--muted); font-family: var(--font-sans); font-size: .76rem; }
+
+/* One game, opened up. */
+.ng { display: block; }
+.ng-head { display: flex; align-items: center; justify-content: center; gap: 1.1rem; padding: .2rem 0 .6rem; }
+.ng-side { display: flex; align-items: baseline; gap: .55rem; color: var(--muted); }
+.ng-side.win { color: var(--ink); }
+.ng-tn { font: 600 1.05rem/1.2 var(--font-serif); }
+.ng-pts { font: 700 1.6rem/1 var(--font-mono); font-variant-numeric: tabular-nums; }
+.ng-side.win .ng-pts { color: var(--cat, var(--accent)); }
+.ng-vs { font: 500 .76rem/1 var(--font-mono); color: var(--faint); text-transform: uppercase; letter-spacing: .1em; }
+.ng-meta { margin: 0 0 .8rem; font-size: .86rem; line-height: 1.5; color: var(--muted); text-align: center; }
+
+@container (min-width: 34rem) { .ng-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+.ng-box { border: 1px solid var(--line); border-radius: 11px; padding: .6rem .7rem; background: var(--panel); }
+.ng-bt { margin: 0 0 .45rem; font: 600 .76rem/1 var(--font-sans); letter-spacing: .09em; text-transform: uppercase; color: var(--faint); }
+.ng-qt { width: 100%; border-collapse: collapse; font: 500 .82rem/1 var(--font-mono); font-variant-numeric: tabular-nums; }
+.ng-qt th, .ng-qt td { padding: .3rem .2rem; text-align: center; color: var(--muted); font-weight: 500; }
+.ng-qt thead th { font-size: .76rem; color: var(--faint); letter-spacing: .06em; }
+.ng-qt tbody th { text-align: left; color: var(--ink); font-weight: 600; }
+.ng-qt .ng-tot { color: var(--ink); font-weight: 700; border-left: 1px solid var(--line); }
+.ng-play { display: flex; gap: .5rem; align-items: baseline; font-size: .84rem; line-height: 1.4; }
+.ng-pq { font: 600 .76rem/1 var(--font-mono); color: var(--faint); width: 1.4rem; flex: none; }
+.ng-pw { font: 500 .76rem/1 var(--font-mono); color: var(--muted); white-space: nowrap; }
+.ng-stats { display: flex; flex-direction: column; gap: .45rem; }
+.ng-stat { display: grid; grid-template-columns: 1fr auto 5rem auto; gap: .45rem; align-items: center; }
+.ng-sl { font-size: .78rem; color: var(--muted); min-width: 0; }
+.ng-sv { font: 600 .78rem/1 var(--font-mono); font-variant-numeric: tabular-nums; color: var(--cat, var(--accent)); }
+.ng-sb { color: var(--faint); }
+.ng-bar { display: block; height: 5px; border-radius: 999px; background: color-mix(in srgb, var(--line) 70%, transparent); overflow: hidden; }
+.ng-bar i { display: block; height: 100%; border-radius: 999px; background: var(--cat, var(--accent)); }
+.ng-plays, .ng-lead { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: .35rem; }
+.ng-lrow { display: flex; gap: .5rem; align-items: baseline; font-size: .84rem; }
+.ng-lr { font: 600 .76rem/1 var(--font-sans); letter-spacing: .08em; text-transform: uppercase; color: var(--faint); width: 3.6rem; flex: none; }
+.ng-pt, .ng-ln { flex: 1; min-width: 0; color: var(--ink); }
+.ng-ll { font: 500 .74rem/1 var(--font-mono); color: var(--muted); white-space: nowrap; }
+.ng-next { margin: .8rem 0 0; padding-top: .6rem; border-top: 1px solid var(--line); font-size: .84rem; color: var(--muted); }
 
 /* ------------------------------------------------------------ art / push --- */
 .art-img { border-radius: 11px; overflow: hidden; aspect-ratio: 4 / 3; background: var(--bg); }
@@ -378,4 +527,167 @@ pre { white-space: pre-wrap; word-break: break-word; font: 12px/1.5 var(--font-m
 @media (prefers-contrast: more) {
   .comp.card { border-color: var(--muted); }
   .rel { outline: 1px solid currentColor; }
+  .ptag { outline: 1px solid currentColor; }
+  .au[data-known] { outline: 1px solid currentColor; outline-offset: 1px; }
+}
+
+/* ------------------------------------------------- the hourly strip, charted */
+/* The track has one column per hour and an explicit total width, so the chart
+   bands underneath — plain 100%-wide SVGs — line up with the hours above them
+   without a line of measuring script. The charts are stretched horizontally to
+   span 48 hours, which is correct for a curve and wrong for anything with its
+   own shape, so nothing but the curve lives inside them. */
+.wx-track { --wx-col: 2.5rem; width: calc(var(--wx-n, 48) * var(--wx-col)); display: block; }
+.wx-cells { display: grid; grid-template-columns: repeat(var(--wx-n, 48), var(--wx-col)); align-items: end; }
+.wx-hr { text-align: center; padding-bottom: .18rem; }
+.wx-hr .hh { font: 500 .74rem/1.4 var(--font-mono); color: var(--faint); }
+.wx-hr .he { font-size: 1.15rem; line-height: 1.3; }
+.wx-hr .ht { font: 600 .84rem/1.35 var(--font-sans); font-variant-numeric: tabular-nums; }
+/* Where one day becomes the next: a hairline and the day's name in place of the
+   hour, rather than a spacer column that would knock the chart out of register. */
+.wx-newday { border-left: 1px solid color-mix(in srgb, var(--ink) 16%, transparent); }
+.wx-newday .hh { color: var(--ink); font-weight: 600; }
+
+.wx-band { width: 100%; }
+.wx-band-t { margin-top: .1rem; }
+.wx-band-p { margin-top: .1rem; }
+.wxc { display: block; width: 100%; }
+.wxc-temp { height: 2.9rem; }
+.wxc-pop { height: 1.6rem; }
+.wxc-line { fill: none; stroke-width: 1.7; stroke-linejoin: round; stroke-linecap: round; }
+.wxc-area { stroke: none; }
+.wxc-temp .wxc-line { stroke: var(--accent-ink); }
+.wxc-temp .wxc-area { fill: color-mix(in srgb, var(--accent) 18%, transparent); }
+.wxc-pop .wxc-line { stroke: var(--c3, var(--accent-ink)); }
+.wxc-pop .wxc-area { fill: color-mix(in srgb, var(--c3, var(--accent)) 22%, transparent); }
+
+.wx-legend { display: flex; flex-wrap: wrap; gap: .3rem .9rem; margin-top: .45rem; }
+.wx-lg { display: inline-flex; align-items: center; gap: .32rem;
+  font: 500 .75rem/1 var(--font-sans); color: var(--muted); }
+.wx-lg::before { content: ""; width: .8rem; height: .18rem; border-radius: 999px; }
+.wx-lg-t::before { background: var(--accent-ink); }
+.wx-lg-p::before { background: var(--c3, var(--accent)); }
+
+/* --------------------------------------------------- weather, opened up */
+.wxm { display: grid; gap: var(--s3); }
+@container (min-width: 34rem) { .wxm { grid-template-columns: 1fr 1fr; } }
+.wxm-city { min-width: 0; }
+.wxm-h { margin: 0 0 .4rem; font: 600 .78rem/1 var(--font-sans); letter-spacing: .1em;
+  text-transform: uppercase; color: var(--muted); }
+.wxm-facts { display: flex; flex-wrap: wrap; gap: .3rem .9rem; margin-bottom: .7rem; }
+.wxm-facts span { font: 500 .8rem/1.4 var(--font-mono); color: var(--ink);
+  font-variant-numeric: tabular-nums; }
+.wxm-facts b { display: block; font: 600 .72rem/1.3 var(--font-sans); color: var(--faint);
+  letter-spacing: .04em; text-transform: uppercase; }
+
+.wxd { display: block; }
+.wxd-hd { font: 600 .72rem/1 var(--font-sans); letter-spacing: .1em; text-transform: uppercase;
+  color: var(--faint); padding-bottom: .4rem; border-bottom: 1px solid var(--line); }
+.wxd-row { display: grid; grid-template-columns: 2.9rem 2.1rem 2.2rem minmax(3rem, 1fr) 2.2rem;
+  align-items: center; gap: .45rem; padding: .42rem 0; border-bottom: 1px solid var(--line); }
+.wxd-row:last-child { border-bottom: 0; }
+.wxd-day { font: 600 .82rem/1.2 var(--font-sans); }
+.wxd-gl { font-size: 1rem; line-height: 1; text-align: center; }
+.wxd-pop { display: block; font: 600 .75rem/1.3 var(--font-mono); font-style: normal;
+  color: var(--c3, var(--accent-ink)); }
+.wxd-lo, .wxd-hi { font: 500 .82rem/1.2 var(--font-mono); font-variant-numeric: tabular-nums; }
+.wxd-lo { color: var(--faint); text-align: right; }
+.wxd-hi { color: var(--ink); text-align: right; }
+/* One shared scale across all ten rows: the bar says where this day sits in the
+   fortnight's range, which is the comparison the column exists to make. */
+.wxd-bar { height: .34rem; border-radius: 999px;
+  background: linear-gradient(to right,
+    var(--line) 0 var(--l), var(--accent) var(--l) var(--r), var(--line) var(--r) 100%); }
+
+/* ------------------------------------------------- a component, opened up */
+/* The chevron sits at the top right of the header and turns as it opens. The
+   panel is a second reading of the same data, not a different subject, so it
+   opens in place rather than taking over the page. */
+/* Marks a component that has a second reading behind the chevron. */
+.expandable-comp > .chead { position: relative; }
+.comp-exp { appearance: none; display: inline-flex; align-items: center; justify-content: center;
+  width: 1.5rem; height: 1.5rem; padding: 0; border: 0; border-radius: 5px; background: none;
+  color: var(--muted); cursor: pointer;
+  transition: background var(--dur) var(--ease), color var(--dur) var(--ease); }
+.comp-exp svg { width: 1rem; height: 1rem; fill: none; stroke: currentColor; stroke-width: 2;
+  stroke-linecap: round; stroke-linejoin: round;
+  transition: transform var(--dur) var(--ease); }
+.comp-exp:hover { background: color-mix(in srgb, var(--cat, var(--accent)) 14%, transparent); color: var(--ink); }
+.comp-exp:active { transform: scale(.92); }
+.comp[data-expanded] .comp-exp svg { transform: rotate(180deg); }
+.comp-more { display: none; margin-top: var(--s3); padding-top: var(--s3);
+  border-top: 1px solid var(--line); }
+.comp[data-expanded] .comp-more { display: block; }
+@media (prefers-reduced-motion: reduce) {
+  .comp-exp, .comp-exp svg { transition: none; }
+  .comp-exp:active { transform: none; }
+}
+
+/* ------------------------------------------------- the palette, opened up */
+.pal-more { display: block; }
+.pal-title { font: 600 .74rem/1 var(--font-sans); letter-spacing: .1em; text-transform: uppercase;
+  color: var(--faint); padding-bottom: .45rem; border-bottom: 1px solid var(--line); }
+.pal-row { display: grid; grid-template-columns: 1.5rem 5.2rem minmax(0, 1fr); align-items: center;
+  gap: .5rem; padding: .4rem 0; border-bottom: 1px solid var(--line); }
+.pal-row:last-of-type { border-bottom: 0; }
+.pal-sw { width: 1.5rem; height: 1.1rem; border-radius: 3px; border: 1px solid var(--line); }
+.pal-hex { font: 500 .78rem/1.3 var(--font-mono); color: var(--ink); text-transform: uppercase; }
+.pal-role { font-size: .78rem; line-height: 1.35; color: var(--muted); }
+.pal-note { margin: .55rem 0 0; font-size: .78rem; line-height: 1.45; color: var(--muted); }
+
+
+/* ============================================================ interaction ===
+   The floor every control in this document stands on, whoever is operating it.
+   A pointer is one input among three, and it is the only one the rules above
+   were written for: hover reveals what a keyboard cannot reach and a finger
+   cannot trigger at all, because a tap fires :hover on the same event that
+   already committed the action.
+
+   So: every reveal has a focus twin, every control has a focus ring, and on a
+   device with no hover the chrome is simply visible. Without the last block the
+   row actions, the save star and the vote arrows do not exist on an iPad. */
+
+/* -- 1. Focus is visible on everything that takes it. ---------------------- */
+.act:focus-visible,
+.seg button:focus-visible,
+.add:focus-visible,
+.kd:focus-visible,
+.tly-row:focus-visible,
+.tip:focus-visible,
+a:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+  border-radius: 5px;
+}
+
+/* -- 2. Anything revealed by a pointer is revealed by focus too. ----------- */
+li.row:has(:focus-visible) .acts,
+.ncard:has(:focus-visible) .acts,
+.pcard:has(:focus-visible) .acts,
+.mo:has(:focus-visible) .acts { opacity: 1; }
+
+.act:focus-visible { color: var(--ink); background: color-mix(in srgb, var(--faint) 20%, transparent); }
+.act-snooze:focus-visible { color: var(--warm); }
+.comp-exp:focus-visible { background: color-mix(in srgb, var(--cat, var(--accent)) 14%, transparent); color: var(--ink); }
+.au:focus-visible { color: var(--ink); border-bottom-color: var(--line); }
+.add:focus-visible { color: var(--accent-ink); }
+[data-marble-editable]:focus-visible { background: color-mix(in srgb, var(--accent-soft) 55%, transparent); }
+
+/* -- 3. Which view is current is announced, not only coloured. ------------- */
+.seg button[aria-pressed="true"] { color: var(--ink); background: var(--panel); }
+
+/* -- 4. A device with no hover gets the chrome outright. ------------------- */
+@media (hover: none) {
+  .acts { opacity: 1; }
+  .tip::after, .ic-wrap::after { display: none; }   /* a tip no tap can open is a lie */
+  .act, .seg button, .add, .comp-exp { min-width: 2.75rem; min-height: 2.75rem; }
+  .act { padding: .5rem; }
+}
+
+/* -- 5. With no host, the document says so once -- rather than accepting every
+      gesture and silently dropping it. One attribute, set in shell.mrbl, read
+      here; never a second copy of the fact. ---------------------------------- */
+[data-marble-readonly] .colophon::after {
+  content: ' · not saved — no host, so changes die with this tab';
+  color: var(--warm);
 }

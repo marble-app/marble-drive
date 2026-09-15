@@ -46,6 +46,16 @@ const HIDDEN = /^\./;
 const titleOf = (source, fallback) =>
   source.match(/<title>([^<]*)<\/title>/i)?.[1].trim() || fallback;
 
+// The day a document says it is about, or null for the documents that are not
+// about a day — which is most of them. A file name is the usual place to put a
+// date, but a name is free to become a title instead, and then the date has
+// nowhere else to live. So a document that cares states it in its own head and
+// the Drive believes the document over the filename.
+const dayOf = (source) =>
+  source.match(
+    /<meta[^>]+name="(?:day|newsletter):date"[^>]+content="(\d{4}-\d{2}-\d{2})"/i,
+  )?.[1] ?? null;
+
 // What a .mrbl document is worth measuring in — how much of it a hand or a model
 // can address. Kept identical to Marble's own count so two hosts agree.
 const nodesOf = (source) => (source.match(/data-marble-id="/g) ?? []).length;
@@ -98,6 +108,7 @@ export function createFsStore({ root }) {
       name,
       folder: parent,
       title: titleOf(source, titleize(name)),
+      day: dayOf(source),
       nodes: nodesOf(source),
       bytes: info.size,
       modified: info.mtimeMs,

@@ -14,7 +14,7 @@
 //   read(path)          → string|null
 //   has(path)           → boolean          a document is there
 //   hasFolder(path)     → boolean          a folder is there
-//   stat(path)          → entry|null       {kind,path,name,folder,title,nodes,bytes,modified}
+//   stat(path)          → entry|null       {kind,path,name,folder,title,day,nodes,bytes,modified,created}
 //   list({folder,recursive}) → entry[]     flat, newest first, folders included
 //   tree({folder})      → folder node with `children`
 //   write(path, source, {label, ops}) → {path, bytes, sha}

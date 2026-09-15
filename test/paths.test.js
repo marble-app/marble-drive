@@ -4,8 +4,10 @@ import test from 'node:test';
 import {
   docKey,
   isInside,
+  isValidPath,
   joinPath,
   parsePath,
+  PathError,
   resolveUnder,
   safePath,
   safeSegment,
@@ -120,4 +122,24 @@ test('a .mrbl and a .html are the same document under two names', () => {
   assert.equal(withoutDocExt('Notes.htm'), 'Notes');
   // Not every dot is an extension.
   assert.equal(withoutDocExt('weekly-notes.v2'), 'weekly-notes.v2');
+});
+
+// ----------------------------------------------------------- the apostrophe
+
+test("a name with an apostrophe in it is a name", () => {
+  // A folder called "Bryan's Days" exists on disk. Before this it parsed as a
+  // refusal, which meant the folder listed and everything inside it did not —
+  // the worst of the two answers, because nothing said why.
+  assert.equal(parsePath("Bryan's Days"), "Bryan's Days");
+  assert.equal(parsePath("Bryan's Days/a quiet tuesday"), "Bryan's Days/a quiet tuesday");
+  assert.ok(isValidPath("Bryan's Days/what the week asked for"));
+  // It is still a character in the middle of a name, not a way to start one.
+  assert.throws(() => parsePath("'quoted"), PathError);
+});
+
+test('a curly apostrophe folds to the one the grammar takes', () => {
+  // Two names that look identical and address differently would be worse than
+  // refusing one of them, so there is only ever one of these in a path.
+  assert.equal(safeSegment('Bryan’s Days'), "Bryan's Days");
+  assert.equal(safeSegment("Bryan's Days"), "Bryan's Days");
 });
