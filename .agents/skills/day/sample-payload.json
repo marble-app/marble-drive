@@ -1,0 +1,59 @@
+{
+  "_comment": "Example v2 payload for build.mjs assemble. The skill produces one like this each run from live data (weather/arxiv via lib/sources.mjs, images via lib/images.mjs). Smoke test: node lib/build.mjs assemble --payload sample-payload.json --dry-run",
+  "date": "2026-09-07",
+  "greeting": "Good morning, Bryan!",
+  "summary": [
+    "Deadline week: the CHI 2027 paper is the whole game until Thursday.",
+    "Two small cliffs in the way — the Figma Education plan lapses tomorrow, and CPT for Ai2 still needs a word with ISEO.",
+    "Below: weather for Zurich and San Diego, where the US Open stands, and today's cs.HC papers."
+  ],
+  "focus": [
+    { "title": "CHI 2027 paper — final push", "why": "Deadline Thu Sep 10. Everything else waits." },
+    { "title": "Sort the Figma Education plan", "why": "Lapses ~tomorrow." },
+    { "title": "Confirm CPT for Ai2 with ISEO", "why": "Internship starts Sep 28." }
+  ],
+  "todos": [
+    { "title": "Anthropic application", "source": "Calendar", "meta": "blocked out Sep 15" },
+    { "title": "Reply to Alex Wilf + two students", "source": "Email", "meta": "after the deadline", "snooze": true }
+  ],
+  "keyDates": [
+    { "label": "Figma Education plan expires", "date": "2026-09-08", "source": "gmail" },
+    { "label": "CHI 2027 paper deadline", "date": "2026-09-10", "source": "calendar" },
+    { "label": "Ai2 internship starts", "date": "2026-09-28", "source": "calendar" },
+    { "label": "UIST 2027 papers deadline (est.)", "date": "2027-04-02", "source": "web" }
+  ],
+  "weather": { "error": "run: node lib/sources.mjs weather" },
+  "usOpen": {
+    "asOf": "Mon, Sep 7",
+    "note": "Quarterfinals Sep 8–9; men's final Sun Sep 13.",
+    "men": { "rounds": [
+      { "name": "Round of 16", "matches": [
+        { "a": { "seed": "2", "name": "C. Alcaraz", "score": "6-4 6-3 6-4" }, "b": { "seed": "20", "name": "T. Paul" }, "winner": "a" }
+      ] },
+      { "name": "Quarterfinals · Sep 8–9", "matches": [
+        { "a": { "seed": "2", "name": "C. Alcaraz" }, "b": { "name": "B. Shelton" }, "winner": "" }
+      ] }
+    ], "champion": null },
+    "women": { "rounds": [
+      { "name": "Round of 16", "matches": [
+        { "a": { "seed": "1", "name": "A. Sabalenka", "score": "6-4 6-3" }, "b": { "name": "T. Townsend" }, "winner": "a" }
+      ] }
+    ], "champion": null }
+  },
+  "arxiv": { "error": "run: node lib/sources.mjs arxiv --max 70", "papers": [] },
+  "feed": {
+    "genui": [
+      { "tag": "arXiv", "title": "Example — a generative-UI paper", "url": "https://arxiv.org/abs/0000.00000", "meta": "Author et al. · arXiv", "published": "Sep 1, 2026", "why": "Thesis 1: the output is a space of interfaces, not one screen.", "abstract": "(summary) One or two sentences on what the paper does and why it matters to the vision." }
+    ],
+    "industry": [
+      { "tag": "blog", "title": "Example — an app builder ships something", "url": "https://example.com/post", "meta": "Company · Sep 2026", "published": "Sep 2026", "why": "Signal: a design pattern reaching mainstream tools.", "abstract": "(summary) What shipped and what it implies." }
+    ],
+    "hci": [
+      { "tag": "CHI'26", "title": "Example — a field study", "url": "https://doi.org/10.1145/0000001", "meta": "Author, Author · CHI 2026", "published": "Apr 2026", "why": "Field read on adoption.", "abstract": "(summary) Study and finding in a line." }
+    ]
+  },
+  "representation": {
+    "name": "Iceberg",
+    "html": "<style>.repr .berg{display:grid;gap:.4rem}.repr .berg div{border-radius:8px;padding:.6rem .8rem;font-size:.86rem}.repr .berg .above{background:var(--accent-soft);color:var(--ink)}.repr .berg .below{background:color-mix(in srgb,var(--line) 45%,transparent);color:var(--muted)}.repr .berg h4{margin:.2rem 0;font-size:.7rem;letter-spacing:.06em;text-transform:uppercase;color:var(--muted)}</style><div class=\"berg\" data-marble-id=\"ex-berg\"><h4 data-marble-id=\"ex-h1\">Above the waterline — this quarter</h4><div class=\"above\" data-marble-id=\"ex-above\" data-marble-editable>Doctoral Symposium position · Elicitive UIs outline · one Counter-affordances example</div><h4 data-marble-id=\"ex-h2\">Below — the mass it rests on</h4><div class=\"below\" data-marble-id=\"ex-below\" data-marble-editable>GenUI design principles · envisioning capability · Personal UX models · World Interface Models</div></div>"
+  }
+}

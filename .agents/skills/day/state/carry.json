@@ -1,0 +1,33 @@
+{
+  "_note": "To-dos Bryan typed into the page himself. These outlive one issue: every run re-includes them, gives them a keyDate once their date is known, and promotes them into focus as that date closes in. An item leaves this file only when it is ticked off. Written by `build.mjs carry`, which harvest runs.",
+  "items": [
+    {
+      "key": "own-book-flights-and-hotel-to-detroit",
+      "title": "Book Flights and Hotel to Detroit",
+      "note": "I need to do this right after my chi deadline",
+      "kind": "todo",
+      "origin": "bryan",
+      "date": "2026-11-02",
+      "after": "2026-09-10",
+      "resolved": "UIST 2026 is 2–5 Nov, Detroit. No UCSD travel funding (LOA Fa26) — self-funded, so book early.",
+      "anchor": "UIST 2026, Detroit — 2–5 Nov (Jacaranda poster)",
+      "addedOn": "2026-09-08",
+      "lastSeen": "2026-09-14",
+      "done": false
+    },
+    {
+      "key": "own-pick-seats-for-alaska-airlines-trip-to-nyc-with-irene",
+      "title": "Pick Seats for Alaska Airlines trip to NYC with Irene",
+      "note": "",
+      "kind": "focus",
+      "origin": "bryan",
+      "date": "2026-10-20",
+      "addedOn": "2026-09-14",
+      "lastSeen": "2026-09-14",
+      "done": false,
+      "resolved": "The NYC trip with Irene, 20–25 Oct 2026 (Notion: 'New York City (October 20~25, 2026)'); flights booked on Alaska Airlines — Bryan ticked 'Book Flights to NYC' on 14 Sep. No confirmation in bdmin@ucsd.edu, so no flight times on the timeline.",
+      "anchor": "New York City — 20–25 Oct, with Irene"
+    }
+  ],
+  "updated": "2026-09-14T12:55:47.885Z"
+}
