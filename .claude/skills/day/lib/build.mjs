@@ -647,6 +647,15 @@ function wxDaily(daily, unit) {
     `<div class="wxd-hd" data-marble-id="${mint()}">10-day forecast</div>${rows}</div>`;
 }
 
+// Where Bryan is is a fact about the week, not a constant, so `sources.mjs
+// weather --here <city> --away <city>` now returns an ordered pair and the first
+// one reads as "you are here". The old fixed Zurich/San Diego shape is still
+// accepted so past payloads keep rendering.
+function wxCities(w) {
+  if (Array.isArray(w.cities)) return w.cities.filter(Boolean);
+  return (w.here === 'sanDiego' ? [w.sanDiego, w.zurich] : [w.zurich, w.sanDiego]).filter(Boolean);
+}
+
 function rWeather(w) {
   if (!w || w.error) return `<p class="csub" data-marble-id="${mint()}">Weather unavailable this run.</p>`;
   const block = (c, here) => {
@@ -693,12 +702,7 @@ function rWeather(w) {
       `  </div>`,
     ].filter(Boolean).join('\n');
   };
-  // Which city is "here" is the payload's to say (weather.here: "zurich" | "sanDiego"),
-  // and that city reads first. It was fixed to Zurich, which would have gone on
-  // telling Bryan he was there after the trip ended on 13 Sep.
-  const blocks = w.here === "sanDiego"
-    ? [block(w.sanDiego, true), block(w.zurich, false)]
-    : [block(w.zurich, true), block(w.sanDiego, false)];
+  const blocks = wxCities(w).map((c, i) => block(c, i === 0));
   return `<div class="wx" data-marble-id="${mint()}">\n${blocks.join("\n")}\n</div>` +
     srcLine('Open-Meteo', 'https://open-meteo.com/', 'meteo');
 }
@@ -720,8 +724,7 @@ function rWeatherMore(w) {
       (c.today.popMax != null ? `<span data-marble-id="${mint()}"><b data-marble-id="${mint()}">Rain today</b>${c.today.popMax}%</span>` : '') +
       `</div>${wxDaily(c.daily, c.unit)}</div>`;
   };
-  const order = w.here === "sanDiego" ? [w.sanDiego, w.zurich] : [w.zurich, w.sanDiego];
-  return `<div class="wxm" data-marble-id="${mint()}">${order.map(one).join("")}</div>`;
+  return `<div class="wxm" data-marble-id="${mint()}">${wxCities(w).map(one).join("")}</div>`;
 }
 
 // The plain list: every date, in order, nothing distorted. The dot carries the
@@ -937,6 +940,111 @@ function rNflGame(g) {
     `</div>`;
 }
 
+// The season, which is a different object from the week. In September a record
+// is one game and tells you almost nothing; what a fan actually holds in his head
+// is the shape of what is coming — where the bye falls, which six games decide the
+// division, how the home and away legs are distributed. So the arc is the reading,
+// and the record is a caption on it rather than the headline.
+//
+// Eighteen cells for eighteen weeks, bye included as a real cell: a season has
+// eighteen weeks and seventeen games, and a strip that silently skips the gap
+// makes "no game that week" look like "not scheduled yet".
+function rNflSeasonArc(s) {
+  const cells = (s.weeks || []).map((w) => {
+    if (w.bye) {
+      return `<div class="sn-w sn-bye tip" data-tip="${escAttr(`Week ${w.week}\nBye — no game`)}" data-marble-id="${mint()}">` +
+        `<span class="sn-wk" data-marble-id="${mint()}">${w.week}</span>` +
+        `<span class="sn-op" data-marble-id="${mint()}">BYE</span>` +
+        `<span class="sn-rs" data-marble-id="${mint()}">—</span></div>`;
+    }
+    const isNext = s.next && w.week === s.next.week;
+    const cls = ['sn-w',
+      w.played ? (w.result === 'W' ? 'won' : 'lost') : 'ahead',
+      w.div ? 'div' : '', isNext ? 'next' : ''].filter(Boolean).join(' ');
+    // The meridiem is compressed, never dropped. A cell reading "10:00" for the
+    // Atlanta game is a 10am kickoff that looks like an evening one, and the whole
+    // point of the strip is being readable without opening anything.
+    const line = w.played ? `${w.result} ${w.us}–${w.them}`
+      : w.tbd ? 'TBD' : (w.kick || '').replace(/\s*([AP])M$/i, (_, g) => g.toLowerCase());
+    const tip = [`Week ${w.week} · ${w.home ? 'vs' : 'at'} ${w.oppName}`,
+      w.div ? 'NFC West — a division game' : null,
+      w.played ? `Final: 49ers ${w.us}, ${w.oppName} ${w.them}` : `${w.when} PT`,
+      isNext ? 'Next up' : null].filter(Boolean).join('\n');
+    return `<div class="${cls} tip" data-tip="${escAttr(tip)}" data-marble-id="${mint()}">` +
+      `<span class="sn-wk" data-marble-id="${mint()}">${w.week}</span>` +
+      `<span class="sn-op" data-marble-id="${mint()}">` +
+        `<i class="sn-ha" data-marble-id="${mint()}">${w.home ? '' : '@'}</i>${esc(w.opp)}</span>` +
+      `<span class="sn-rs" data-marble-id="${mint()}">${esc(line)}</span></div>`;
+  }).join('');
+  const legend = [
+    ['won', 'won'], ['lost', 'lost'], ['next', 'next up'],
+    ['div', 'decides the West'], ['bye', 'bye'],
+  ].map(([k, label]) =>
+    `<span class="sn-lg tip" data-tip="${escAttr(label)}" data-marble-id="${mint()}">` +
+    `<i class="sn-sw sn-${k}" data-marble-id="${mint()}"></i>${esc(label)}</span>`).join('');
+  return `<div class="sn-arc" data-marble-id="${mint()}">${cells}</div>` +
+    `<div class="sn-key" data-marble-id="${mint()}">${legend}</div>`;
+}
+
+// The record, and the one game that is actually next. Kept out of the view
+// switcher because it is the answer to both questions the segments ask.
+function rNflSeasonHead(s) {
+  const n = s.next || {};
+  const diff = `${s.diff > 0 ? '+' : ''}${s.diff}`;
+  const fig = (v, l, tip) =>
+    `<span class="sn-fig tip" data-tip="${escAttr(tip)}" data-marble-id="${mint()}">` +
+    `<b class="sn-fv" data-marble-id="${mint()}">${esc(String(v))}</b>` +
+    `<span class="sn-fl" data-marble-id="${mint()}">${esc(l)}</span></span>`;
+  return `<div class="sn-head" data-marble-id="${mint()}">` +
+    fig(s.record, 'record', `${s.played} of ${s.total} games played`) +
+    fig(diff, 'point diff', `Scored ${s.pf}, allowed ${s.pa}`) +
+    fig(s.total - s.played, 'games left', `The season is ${Math.round((s.played / s.total) * 100)}% run`) +
+    `</div>` +
+    // The label is its own element, so only the sentence is editable. An editable
+    // wrapper holding an addressed child turns one keystroke into a setText that
+    // eats the child, and a setText's inverse cannot put it back.
+    (n.week ? `<p class="sn-next" data-marble-id="${mint()}">` +
+      `<b class="sn-nx" data-marble-id="${mint()}">Next</b> ` +
+      `<span class="sn-nb" data-marble-id="${mint()}" data-marble-editable>` +
+        `${n.home ? '' : 'at '}${esc(n.oppName)} — ${esc(s.nextDay || '')}, ${esc(n.kick || 'TBD')} PT` +
+        (n.venue ? ` · ${esc(n.venue)}` : '') + `</span></p>` : '');
+}
+
+// The division, which is the only standing that matters in week two: point
+// differential is the tiebreak doing all the work while three teams sit at 1-0,
+// so it gets the bar and the record gets the number.
+function rNflWest(s) {
+  const rows = (s.west || []).map((t) => {
+    const span = Math.max(20, ...(s.west || []).map((x) => Math.abs(x.diff)));
+    const pct = Math.min(100, (Math.abs(t.diff) / span) * 100);   // of its own half
+    const tip = `${t.name} · ${t.record}\nScored ${t.pf}, allowed ${t.pa}\nDifferential ${t.diff > 0 ? '+' : ''}${t.diff}`;
+    const w = `${pct.toFixed(1)}%`;
+    return `<div class="sn-tm${t.us ? ' us' : ''} tip" data-tip="${escAttr(tip)}" data-marble-id="${mint()}">` +
+      `<span class="sn-tn" data-marble-id="${mint()}">${esc(t.name)}</span>` +
+      `<span class="sn-tr" data-marble-id="${mint()}">${esc(t.record)}</span>` +
+      `<span class="sn-tb" data-marble-id="${mint()}">` +
+        `<i class="sn-half sn-l" data-marble-id="${mint()}">` +
+          (t.diff < 0 ? `<b class="sn-tbar neg" style="width:${w}" data-marble-id="${mint()}"></b>` : '') + `</i>` +
+        `<i class="sn-half sn-r" data-marble-id="${mint()}">` +
+          (t.diff >= 0 ? `<b class="sn-tbar pos" style="width:${w}" data-marble-id="${mint()}"></b>` : '') + `</i>` +
+      `</span>` +
+      `<span class="sn-td" data-marble-id="${mint()}">${t.diff > 0 ? '+' : ''}${t.diff}</span></div>`;
+  }).join('');
+  return `<div class="sn-west" data-marble-id="${mint()}">${rows}</div>`;
+}
+
+// The arc read as dates rather than as shape — same games, spelled out.
+function rNflSeasonMore(s) {
+  const rows = (s.weeks || []).filter((w) => !w.bye && !w.played).map((w) =>
+    `<li class="sn-sr${w.div ? ' div' : ''}" data-marble-id="${mint()}">` +
+    `<span class="sn-sw2" data-marble-id="${mint()}">Wk ${w.week}</span>` +
+    `<span class="sn-so" data-marble-id="${mint()}">${w.home ? 'vs ' : 'at '}${esc(w.oppName)}</span>` +
+    `<span class="sn-sd" data-marble-id="${mint()}">${esc(w.tbd ? 'time TBD' : w.when + ' PT')}</span></li>`).join('');
+  return `<p class="sn-shape" data-marble-id="${mint()}">` +
+    `${s.homeCount} home, ${s.awayCount} away, ${s.divCount} against the West, bye in week ${s.byeWeek}.</p>` +
+    `<ul class="sn-sched" data-marble-id="${mint()}">${rows}</ul>`;
+}
+
 function rPalStrip(pal) {
   return `<span class="pal-chips" data-marble-id="${mint()}">${pal.swatches.slice(0, 4).map((h) => `<i class="tip" style="background:${escAttr(h)}" data-tip="${escAttr(h)}" data-marble-id="${mint()}"></i>`).join('')}</span>` +
     `<span class="pal-name" data-marble-id="${mint()}">${esc(pal.name)}</span>`;
@@ -944,8 +1052,8 @@ function rPalStrip(pal) {
 
 // ------------------------------------------------------------- composition ---
 
-const CAT = { focus: 'var(--warm)', push: 'var(--accent)', todos: 'var(--accent)', news: 'var(--c1)', papers: 'var(--c2)', weather: 'var(--c3)', calendar: 'var(--accent-ink)', usopen: 'var(--c4)', nfl: 'var(--c1)', art: 'var(--c4)', roadahead: 'var(--accent)', custom: 'var(--accent)' };
-const TITLE = { focus: 'Today, sharply', push: 'Push one thing forward', todos: 'To-dos', news: 'Worth your attention', papers: 'Fresh on arXiv · cs.HC', weather: 'Sky', calendar: 'The weeks ahead', usopen: 'US Open', nfl: 'NFL', art: "Today's colour", roadahead: 'The road ahead' };
+const CAT = { focus: 'var(--warm)', push: 'var(--accent)', todos: 'var(--accent)', news: 'var(--c1)', papers: 'var(--c2)', weather: 'var(--c3)', calendar: 'var(--accent-ink)', usopen: 'var(--c4)', nfl: 'var(--c1)', nflseason: 'var(--c1)', art: 'var(--c4)', roadahead: 'var(--accent)', custom: 'var(--accent)' };
+const TITLE = { focus: 'Today, sharply', push: 'Push one thing forward', todos: 'To-dos', news: 'Worth your attention', papers: 'Fresh on arXiv · cs.HC', weather: 'Sky', calendar: 'The weeks ahead', usopen: 'US Open', nfl: 'NFL', nflseason: 'The Niners\u2019 season', art: "Today's colour", roadahead: 'The road ahead' };
 
 function componentBody(type, node, P, prev, pal) {
   switch (type) {
@@ -1032,6 +1140,24 @@ function componentBody(type, node, P, prev, pal) {
           `<div class="v v-week" data-marble-id="${mint()}">${rNflWeek(n)}</div>\n` +
           `<div class="v v-niners" data-marble-id="${mint()}">${rNflGame(n.game)}</div>` +
           srcLine(n.sourceName || 'NFL.com — Week 1 scores', n.sourceUrl || 'https://www.nfl.com/scores/2026/week-1', 'web'),
+      };
+    }
+    case 'nflseason': {
+      const s = P.nflSeason || {};
+      if (s.error || !(s.weeks || []).length) {
+        return { html: `<p class="csub" data-marble-id="${mint()}">Season data unavailable.</p>` };
+      }
+      const view = node.view || prev.views.nflseason || 'arc';
+      return {
+        n: s.total - s.played, sub: s.sub, view, viewKey: 'nflseason',
+        seg: `<span class="seg" role="group" aria-label="Which reading of the season">` +
+          `<button data-setview="arc">The arc</button><button data-setview="west">The West</button></span>`,
+        html: rNflSeasonHead(s) +
+          `<div class="v v-arc" data-marble-id="${mint()}">${rNflSeasonArc(s)}</div>\n` +
+          `<div class="v v-west" data-marble-id="${mint()}">${rNflWest(s)}</div>` +
+          srcLine(s.sourceName || 'ESPN', s.sourceUrl || 'https://www.espn.com/nfl/team/schedule/_/name/sf', 'web'),
+        more: rNflSeasonMore(s),
+        moreTip: 'Every game still to come, with dates and kickoff times',
       };
     }
     case 'art': {
@@ -1275,6 +1401,18 @@ function selfCheck(html) {
   // in its name, so match the bare `scroll` class as a whole token.
   if (/class="(?:[^"]*\s)?scroll(?:\s[^"]*)?"/.test(html)) problems.push('a component uses inner vertical scrolling — not allowed');
   if (/overflow-y:\s*(auto|scroll)/.test(html.replace(/tl[xy]-scroll[\s\S]{0,400}?}/g, ''))) problems.push('overflow-y scrolling found outside the timeline track');
+  // A view name lives in three places: the segment button, the panel's class, and
+  // two selector lists in design.css. Miss the stylesheet and the segment still
+  // presses and still announces itself — it just shows nothing. That is the one
+  // breakage the orphan-class check cannot see, because every class does exist.
+  for (const v of new Set([...html.matchAll(/data-setview="([^"]+)"/g)].map((m) => m[1]))) {
+    if (!html.includes(`[data-view="${v}"] .v-${v}`)) {
+      problems.push(`view "${v}" has a segment button but no \`[data-view="${v}"] .v-${v}\` rule — the panel would never show`);
+    }
+    if (!html.includes(`[data-view="${v}"] .seg [data-setview="${v}"]`)) {
+      problems.push(`view "${v}" is never drawn as the pressed segment — add it to the .seg selector list in design.css`);
+    }
+  }
   return { ok: problems.length === 0, problems };
 }
 

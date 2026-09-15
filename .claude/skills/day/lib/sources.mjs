@@ -104,12 +104,48 @@ async function oneCity(name, lat, lon) {
   };
 }
 
-async function weather() {
-  const [zurich, sanDiego] = await Promise.all([
-    oneCity('Zurich', 47.3769, 8.5417),
-    oneCity('San Diego', 32.7157, -117.1611),
+// Where Bryan is changes every few weeks, so the two cities are arguments, not
+// constants. They were fixed to Zurich + San Diego, which kept reporting Zurich
+// after he flew home on 13 Sep. First city is where he is; second is the one he
+// is heading to or keeping an eye on.
+const GAZETTEER = {
+  zurich: ['Zurich', 47.3769, 8.5417],
+  sandiego: ['San Diego', 32.7157, -117.1611],
+  seattle: ['Seattle', 47.6062, -122.3321],
+  redmond: ['Redmond', 47.674, -122.1215],
+  newyork: ['New York', 40.7128, -74.006],
+  detroit: ['Detroit', 42.3314, -83.0458],
+  portland: ['Portland', 45.5152, -122.6784],
+  sanfrancisco: ['San Francisco', 37.7749, -122.4194],
+  sananselmo: ['San Anselmo', 37.97465, -122.56164],
+  lyon: ['Lyon', 45.764, 4.8357],
+};
+const cityKey = (s) => String(s || '').toLowerCase().replace(/[^a-z]/g, '');
+
+async function weather(argv = []) {
+  const arg = (flag, dflt) => {
+    const i = argv.indexOf(flag);
+    return i >= 0 && argv[i + 1] ? argv[i + 1] : dflt;
+  };
+  // The gazetteer is a fast path, not a gate. Bryan moves — Zurich to Seattle to
+  // San Anselmo inside a week, with a five-stop drive south still to come — and a
+  // city that needs a code edit before the weather is right is a city that shows
+  // the wrong weather. Anything unlisted is geocoded and used.
+  const pick = async (name) => {
+    const g = GAZETTEER[cityKey(name)];
+    if (g) return g;
+    const u = `https://geocoding-api.open-meteo.com/v1/search?name=${encodeURIComponent(name)}&count=1&language=en&format=json`;
+    const r = (await get(u).catch(() => null))?.results?.[0];
+    if (!r) throw new Error(`unknown city "${name}" — geocoding found nothing; add it to GAZETTEER in sources.mjs`);
+    return [r.name, r.latitude, r.longitude];
+  };
+  const [hereName, hereLat, hereLon] = await pick(arg('--here', 'sananselmo'));
+  const [awayName, awayLat, awayLon] = await pick(arg('--away', 'sandiego'));
+  const cities = await Promise.all([
+    oneCity(hereName, hereLat, hereLon),
+    oneCity(awayName, awayLat, awayLon),
   ]);
-  return { fetchedAt: new Date().toISOString(), zurich, sanDiego };
+  return { fetchedAt: new Date().toISOString(), cities };
 }
 
 // --------------------------------------------------------------------- arxiv
@@ -215,11 +251,24 @@ async function rssListing(cat) {
   }).filter((p) => p.id && !/^replace/.test(p.announceType));   // a revision is not news
 }
 
-// state/tuning.json -> watch: { authors: [...], comments: [...] }. Each is one
-// query of its own, so a vision paper does not have to win a relevance pass
-// against forty system papers to be seen.
+// state/tuning.json -> watch: { authors: [...], comments: [...], topics: [...] }.
+// Each is one query of its own, so a vision paper does not have to win a relevance
+// pass against forty system papers to be seen.
+//
+// `topics` deliberately searches all of cs, not `cat`. Solaris ("Towards Interfaces
+// That Are Generated, Not Coded") sat on arXiv for five weeks unseen because its
+// primary category is cs.CV — the cs.HC sweep was never going to find it, and the
+// papers Bryan most wants are exactly the ones filed outside his own listing.
 async function watchQueries(watch, sinceDay, cat) {
   const qs = [];
+  for (const phrase of watch.topics || []) {
+    const p = String(phrase).toLowerCase();
+    qs.push({
+      why: `topic: ${phrase}`,
+      q: `(ti:"${phrase}" OR abs:"${phrase}")${rangeFrom(sinceDay)}`,
+      keep: (r) => `${r.title} ${r.abstract || ''}`.toLowerCase().includes(p),
+    });
+  }
   for (const name of watch.authors || []) {
     const parts = String(name).trim().split(/\s+/);
     const last = parts[parts.length - 1];
@@ -348,11 +397,11 @@ async function art() {
 
 try {
   let out;
-  if (cmd === 'weather') out = await weather();
+  if (cmd === 'weather') out = await weather(process.argv.slice(3));
   else if (cmd === 'arxiv') out = await arxiv();
   else if (cmd === 'art') out = await art();
   else {
-    console.error('usage: sources.mjs weather | arxiv [--cat cs.HC] [--max 80] [--days 1] [--since YYYY-MM-DD] [--unseen] [--rss] | art --q "<theme>" [--limit 8] [--width 1600]');
+    console.error('usage: sources.mjs weather [--here <city>] [--away <city>] | arxiv [--cat cs.HC] [--max 80] [--days 1] [--since YYYY-MM-DD] [--unseen] [--rss] | art --q "<theme>" [--limit 8] [--width 1600]');
     process.exit(1);
   }
   console.log(JSON.stringify(out, null, 2));

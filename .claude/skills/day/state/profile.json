@@ -1,0 +1,31 @@
+{
+  "_note": "Standing facts about Bryan that every run should read before it guesses. These are things he stated outright, not things inferred from a sweep — so they outlive one issue the way carry.json items do. Update one only when he says it has changed.",
+
+  "location": {
+    "here": "San Anselmo",
+    "region": "Marin County, California",
+    "since": "2026-09-15",
+    "stability": "staying a while",
+    "away": "San Diego",
+    "_note": "Said on 15 Sep: \"i'm actually in san anselmo, marin. i'll be there for a while.\" This is what `sources.mjs weather --here` should be given. Before this he was read as Zurich (stale) and then Seattle. Anything not in GAZETTEER is geocoded automatically, so a new town needs no code change — only this field."
+  },
+
+  "nfl": {
+    "team": "San Francisco 49ers",
+    "abbr": "SF",
+    "division": "NFC West",
+    "espnSlug": "sf",
+    "since": "2026-09-15",
+    "_note": "Said on 15 Sep: \"i'm folliwng the niners.\" Drives the `nflseason` component: the arc is his team's season, and `The West` is his team's division. Rivals for the division view are the other three in NFC West — SEA, LAR, ARI.",
+    "place": "stream, every day",
+    "_placeNote": "Asked on 15 Sep, choosing it over game-weeks-only and over a rail widget: the season component runs in the stream every issue through the end of the regular season (wk 18, 10 Jan 2027). It is a season, so it changes weekly whether or not a game just happened."
+  },
+
+  "travel": {
+    "_note": "Confirmed 15 Sep: the Seattle legs of the drive south are off — he is in Marin and staying. Only the last leg remains. Do not re-add SEA departure dates from third-year.mrbl without asking.",
+    "remaining": [{ "label": "Marin → San Diego, the last leg", "date": "2026-09-25" }],
+    "dropped": ["Last day in Seattle (2026-09-18)", "Road trip south begins — SEA to San Diego (2026-09-19)"]
+  },
+
+  "updated": "2026-09-15"
+}

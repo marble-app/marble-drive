@@ -281,18 +281,28 @@ __ICON__
   }
   .item .thumb .peek.marble-is-loaded iframe { opacity: 1; }
   .item .thumb .peek.marble-is-loaded .big { display: none; }
-  /* A folder draws what it holds: one cell per child, coloured by kind, so
-     "mostly documents", "a nest of folders" and "empty" are all visible without
-     opening it. */
+  /* A folder draws what it holds: mini peeks of documents (same sandboxed
+     iframe trick as a doc tile), and a glyph for nested folders — so you see
+     the contents, not a kind map of blue and grey blocks. */
   .item .thumb .mini {
-    position: absolute; inset: 0 0 3px 0; padding: .55rem;
+    position: absolute; inset: 0 0 3px 0; padding: .4rem;
     display: grid; grid-template-columns: repeat(3, 1fr); grid-auto-rows: 1fr;
-    gap: .32rem; align-content: start;
+    gap: .28rem; align-content: stretch;
   }
-  .item .thumb .mini .cell { border-radius: 3px; background: var(--paper-3); min-height: .85rem; }
-  .item .thumb .mini .cell.is-doc { background: var(--accent); }
-  .item .thumb .mini .cell.is-folder { background: var(--folder); opacity: .45; }
-  .item .thumb .mini .cell.is-empty { grid-column: 1 / -1; background: none; }
+  .item .thumb .mini .cell {
+    border-radius: 4px; background: var(--paper-3); min-height: 0;
+    position: relative; overflow: hidden; display: grid; place-items: center;
+  }
+  .item .thumb .mini .cell.is-doc { background: var(--card); box-shadow: inset 0 0 0 1px var(--line); }
+  .item .thumb .mini .cell.is-folder {
+    background: color-mix(in srgb, var(--folder) 16%, var(--paper-2));
+    color: var(--folder);
+  }
+  .item .thumb .mini .cell.is-empty { grid-column: 1 / -1; background: none; box-shadow: none; }
+  .item .thumb .mini .mini-ico { display: flex; color: inherit; opacity: .72; z-index: 0; }
+  .item .thumb .mini .mini-ico .glyph { width: 1rem; height: 1rem; }
+  .item .thumb .mini .peek { inset: 0; background: var(--card); }
+  .item .thumb .mini .peek.marble-is-loaded .mini-ico { display: none; }
   .item .thumb .big { display: block; color: var(--folder); }
   .item[data-kind="doc"] .thumb .big { color: var(--accent-ink); }
   .item .thumb .big .glyph { width: 2.5rem; height: 2.5rem; }
@@ -301,6 +311,63 @@ __ICON__
     background: linear-gradient(transparent, var(--card) 55%);
     max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
   }
+
+  /* Folder tiles wear an identity; nested folders inherit it. The Drive chrome does not. */
+  .item[data-realm="research"] {
+    --accent: #7aab98; --accent-soft: #ecf3ef; --accent-ink: #2f6f5b;
+    --accent-ink-rgb: 47, 111, 91; --folder: #2f6f5b;
+    --realm-paper: #f7faf8; --realm-paper-2: #eef5f1; --realm-paper-3: #e4efe9;
+  }
+  .item[data-realm="fun"] {
+    --accent: #e08a6a; --accent-soft: #f8ebe6; --accent-ink: #c45c3e;
+    --accent-ink-rgb: 196, 92, 62; --folder: #c45c3e;
+    --realm-paper: #fdf7f4; --realm-paper-2: #f8ebe6; --realm-paper-3: #f0d8cf;
+  }
+  .item[data-realm="days"] {
+    --accent: #c4a35a; --accent-soft: #f3eee3; --accent-ink: #4d6a58;
+    --accent-ink-rgb: 77, 106, 88; --folder: #6f8f7d;
+    --realm-paper: #f7f4ec; --realm-paper-2: #f0ebe0; --realm-paper-3: #e6dfd0;
+  }
+  .item[data-realm="marble"] {
+    --accent: #9bb0c0; --accent-soft: #eef2f5; --accent-ink: #5f7385;
+    --accent-ink-rgb: 95, 115, 133; --folder: #7e91a3;
+    --realm-paper: #f4f7f9; --realm-paper-2: #e9eef3; --realm-paper-3: #dce4eb;
+  }
+  .item[data-realm="travel"] {
+    --accent: #7aa0b8; --accent-soft: #e8eef3; --accent-ink: #3d6b8a;
+    --accent-ink-rgb: 61, 107, 138; --folder: #3d6b8a;
+    --realm-paper: #f3f7fa; --realm-paper-2: #e8eef3; --realm-paper-3: #d5e2eb;
+  }
+  body[data-view="grid"] .item[data-realm] {
+    border-color: color-mix(in srgb, var(--accent-ink) 22%, var(--line));
+    background: linear-gradient(165deg, color-mix(in srgb, var(--accent-soft) 70%, var(--card)), var(--card));
+  }
+  body[data-view="grid"] .item[data-realm] .thumb {
+    border-color: color-mix(in srgb, var(--accent-ink) 18%, var(--line));
+    background: linear-gradient(160deg, var(--realm-paper) 0%, var(--realm-paper-2) 100%);
+  }
+  .item[data-realm] .name .ico { color: var(--folder); }
+  body[data-view="grid"] .item[data-realm="research"] .thumb {
+    background: linear-gradient(135deg, transparent 58%, color-mix(in srgb, var(--accent-ink) 12%, transparent) 58%), linear-gradient(160deg, #f7faf8, #dceee5);
+  }
+  body[data-view="grid"] .item[data-realm="fun"] .thumb {
+    background: radial-gradient(circle at 85% 15%, color-mix(in srgb, #f0a080 45%, transparent), transparent 42%), linear-gradient(160deg, #fdf7f4, #f3d5c8);
+  }
+  body[data-view="grid"] .item[data-realm="marble"] .thumb {
+    background: radial-gradient(circle at 34% 30%, #ffffff 0%, #e9eef3 48%, #cfd9e3 100%);
+  }
+  body[data-view="grid"] .item[data-realm="travel"] .thumb {
+    background: linear-gradient(180deg, color-mix(in srgb, #9ec4dc 55%, var(--realm-paper)) 0 38%, color-mix(in srgb, #3d6b8a 28%, var(--realm-paper-2)) 38% 52%, color-mix(in srgb, #c4a574 35%, var(--realm-paper)) 52% 100%);
+  }
+  body[data-view="grid"] .item[data-realm="days"] {
+    border-radius: 16px; background: linear-gradient(165deg, #f7f4ec, #efe8d8);
+    border-color: color-mix(in srgb, #6f8f7d 28%, var(--line));
+  }
+  body[data-view="grid"] .item[data-realm="days"] .thumb {
+    background: repeating-linear-gradient(transparent 0 1.35rem, color-mix(in srgb, #c4a35a 22%, transparent) 1.35rem calc(1.35rem + 1px)), linear-gradient(160deg, #fbf8f0, #efe6d4);
+    border-radius: 10px;
+  }
+
   body[data-view="list"] .items { padding: 0 0 2rem; }
   body[data-view="list"] .item {
     display: grid; gap: 1rem; align-items: center;
@@ -845,6 +912,20 @@ __ICON__
 
       const leaf = (path) => path.split('/').pop();
 
+      const REALMS = {
+        Research: 'research',
+        Fun: 'fun',
+        "Bryan's Days": 'days',
+        Marble: 'marble',
+        Travel: 'travel',
+      };
+      const realmOf = (path) => (path ? REALMS[path.split('/')[0]] || '' : '');
+      const stampRealm = (el, path) => {
+        const realm = el.dataset.kind === 'folder' ? realmOf(path) : '';
+        if (realm) el.dataset.realm = realm;
+        else delete el.dataset.realm;
+      };
+
       // A folder is drawn as a folder and a document as a window, because a
       // document here is an app you open. Written down once: the listing draws
       // these and so does a pin, and a pin is markup that goes in the file.
@@ -897,6 +978,7 @@ __ICON__
         el.className = 'item';
         el.dataset.kind = entry.kind;
         el.dataset.path = entry.path;
+        stampRealm(el, entry.path);
         if (picked.has(entry.path)) el.classList.add('marble-picked');
         el.innerHTML =
           '<span class="name"><span class="ico">' +
@@ -926,9 +1008,10 @@ __ICON__
       }
 
       // The tile. A document gets a real, scaled-down view of itself, mounted
-      // lazily as it nears the viewport; a folder gets a grid of its children
-      // coloured by kind. Both fall back to the glyph — the document until its
-      // frame loads, the folder if it holds nothing.
+      // lazily as it nears the viewport; a folder gets the same treatment for
+      // each document child (up to nine), with a glyph for nested folders.
+      // Both fall back to the glyph — the document until its frame loads, the
+      // folder if it holds nothing.
       const peekObserver = new IntersectionObserver(
         (entries) => {
           for (const e of entries) {
@@ -963,15 +1046,29 @@ __ICON__
           return;
         }
         const kids = entry.children ?? [];
+        const shown = kids.slice(0, 9);
         const cells =
-          kids
-            .slice(0, 9)
-            .map((k) => '<i class="cell ' + (k.kind === 'folder' ? 'is-folder' : 'is-doc') + '"></i>')
-            .join('') || '<i class="cell is-empty"></i>';
+          shown
+            .map((k) =>
+              k.kind === 'folder'
+                ? '<span class="cell is-folder"><span class="mini-ico">' + ICON.folder + '</span></span>'
+                : '<span class="cell is-doc"><span class="peek"><span class="mini-ico">' +
+                  ICON.doc +
+                  '</span></span></span>',
+            )
+            .join('') || '<span class="cell is-empty"></span>';
         thumb.innerHTML = '<span class="mini">' + cells + '</span><span class="cap"></span>';
         thumb.querySelector('.cap').textContent = kids.length
           ? kids.length + (kids.length === 1 ? ' item' : ' items')
           : 'empty';
+        const peeks = thumb.querySelectorAll('.peek');
+        let i = 0;
+        for (const k of shown) {
+          if (k.kind === 'folder') continue;
+          const peek = peeks[i++];
+          peek.dataset.src = marble.href(k.path);
+          peekObserver.observe(peek);
+        }
       }
 
       const flatten = (folder, out = []) => {
@@ -1066,6 +1163,7 @@ __ICON__
         el.className = 'item trow';
         el.dataset.kind = entry.kind;
         el.dataset.path = entry.path;
+        stampRealm(el, entry.path);
         if (picked.has(entry.path)) el.classList.add('marble-picked');
         el.innerHTML =
           '<span class="tdot"></span><span class="ico"></span>' +
@@ -1120,6 +1218,7 @@ __ICON__
         el.className = 'item node';
         el.dataset.kind = entry.kind;
         el.dataset.path = entry.path;
+        stampRealm(el, entry.path);
         if (picked.has(entry.path)) el.classList.add('marble-picked');
         el.innerHTML = '<span class="ico"></span><b></b><button class="more" aria-label="More">⋮</button>';
         el.querySelector('.ico').innerHTML = iconFor(entry.kind);
@@ -1205,6 +1304,7 @@ __ICON__
           el.className = 'item';
           el.dataset.kind = entry.kind;
           el.dataset.path = entry.path;
+          stampRealm(el, entry.path);
           if (picked.has(entry.path)) el.classList.add('marble-picked');
           el.innerHTML =
             '<span class="wrank"></span><span class="witem-ico"></span>' +

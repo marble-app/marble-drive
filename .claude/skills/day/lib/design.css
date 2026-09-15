@@ -35,7 +35,12 @@ h1, h2, h3, h4 { font-family: var(--font-serif); font-weight: 600; }
 img { max-width: 100%; }
 
 /* ---------------------------------------------------------------- shell ---- */
-.page { width: 100%; margin: 0; padding: clamp(1.2rem, 2.2vw, 2.4rem) clamp(1rem, 2.4vw, 2.6rem) 6rem; }
+/* overflow-x: clip, not hidden — a tooltip on an element near the right edge is
+   wider than the room left for it and was adding up to 100px of phantom
+   horizontal scroll to every issue at narrow widths. `clip` does not create a
+   scrollport, so the sticky rail and tail keep working. */
+.page { width: 100%; margin: 0; padding: clamp(1.2rem, 2.2vw, 2.4rem) clamp(1rem, 2.4vw, 2.6rem) 6rem;
+  overflow-x: clip; }
 /* The page fills the display; readability is protected by capping the measure of
    running text, not by boxing the whole layout into a column. */
 .push-b, .nwhy, .mo-dek, .pwhy, .abstract, .masthead .sub, li.row .why { max-width: 72ch; }
@@ -121,13 +126,16 @@ img { max-width: 100%; }
 .viewbox[data-view="tl"] .v-tl, .viewbox[data-view="list"] .v-list, .viewbox[data-view="cal"] .v-cal,
 .viewbox[data-view="t"] .v-t, .viewbox[data-view="l"] .v-l,
 .viewbox[data-view="top"] .v-top, .viewbox[data-view="men"] .v-men, .viewbox[data-view="women"] .v-women,
-.viewbox[data-view="week"] .v-week, .viewbox[data-view="niners"] .v-niners { display: block; animation: vin var(--dur) var(--ease) both; }
+.viewbox[data-view="week"] .v-week, .viewbox[data-view="niners"] .v-niners,
+.viewbox[data-view="arc"] .v-arc, .viewbox[data-view="west"] .v-west { display: block; animation: vin var(--dur) var(--ease) both; }
 .viewbox[data-view="tl"] .seg [data-setview="tl"], .viewbox[data-view="list"] .seg [data-setview="list"], .viewbox[data-view="cal"] .seg [data-setview="cal"],
 .viewbox[data-view="t"] .seg [data-setview="t"], .viewbox[data-view="l"] .seg [data-setview="l"],
 .viewbox[data-view="top"] .seg [data-setview="top"], .viewbox[data-view="men"] .seg [data-setview="men"],
 .viewbox[data-view="women"] .seg [data-setview="women"],
 .viewbox[data-view="week"] .seg [data-setview="week"],
-.viewbox[data-view="niners"] .seg [data-setview="niners"] { background: var(--cat, var(--accent)); color: var(--bg); }
+.viewbox[data-view="niners"] .seg [data-setview="niners"],
+.viewbox[data-view="arc"] .seg [data-setview="arc"],
+.viewbox[data-view="west"] .seg [data-setview="west"] { background: var(--cat, var(--accent)); color: var(--bg); }
 @keyframes vin { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: none; } }
 
 /* ------------------------------------------------------------- icons ------- */
@@ -489,6 +497,91 @@ li.row:hover .acts, li.row:focus-within .acts,
 .ng-pt, .ng-ln { flex: 1; min-width: 0; color: var(--ink); }
 .ng-ll { font: 500 .74rem/1 var(--font-mono); color: var(--muted); white-space: nowrap; }
 .ng-next { margin: .8rem 0 0; padding-top: .6rem; border-top: 1px solid var(--line); font-size: .84rem; color: var(--muted); }
+
+/* ------------------------------------------------------- the nfl season ---- */
+/* The arc is eighteen equal cells, never a scroller: the point of the strip is
+   that the whole season is in the eye at once, and a strip you have to drag is
+   just a list that lost its labels. It reflows instead. */
+.sn-head { display: flex; flex-wrap: wrap; gap: 1.4rem; padding: .1rem 0 .7rem; }
+.sn-fig { display: flex; flex-direction: column; gap: .1rem; }
+.sn-fv { font: 700 1.5rem/1 var(--font-mono); font-variant-numeric: tabular-nums; color: var(--ink); }
+.sn-fig:first-child .sn-fv { color: var(--cat, var(--accent)); }
+.sn-fl { font: 600 .75rem/1 var(--font-sans); letter-spacing: .09em; text-transform: uppercase; color: var(--faint); }
+.sn-next { margin: 0 0 .85rem; font-size: .88rem; line-height: 1.5; color: var(--muted); }
+.sn-nx { font: 600 .75rem/1 var(--font-sans); letter-spacing: .09em; text-transform: uppercase; color: var(--cat, var(--accent)); margin-right: .35rem; }
+.sn-nb { color: var(--muted); }
+
+/* Nine across, so eighteen weeks land as two even rows and the halves of the
+   season line up under each other. Narrower than that it reflows on its own. */
+.sn-arc { display: grid; grid-template-columns: repeat(auto-fit, minmax(4.3rem, 1fr)); gap: .3rem; }
+@container (min-width: 43rem) { .sn-arc { grid-template-columns: repeat(9, minmax(0, 1fr)); } }
+.sn-w { display: flex; flex-direction: column; align-items: center; gap: .15rem;
+  padding: .4rem .2rem .35rem; border: 1px solid var(--line); border-radius: 9px;
+  background: var(--panel); transition: transform var(--dur) var(--ease), border-color var(--dur) var(--ease); }
+.sn-w:hover { transform: translateY(-2px); border-color: var(--cat, var(--accent)); }
+.sn-wk { font: 600 .75rem/1 var(--font-mono); color: var(--faint); }
+.sn-op { font: 650 .85rem/1 var(--font-mono); color: var(--ink); letter-spacing: .02em; white-space: nowrap; }
+.sn-ha { font-style: normal; color: var(--faint); font-weight: 500; }
+.sn-rs { font: 500 .75rem/1 var(--font-mono); font-variant-numeric: tabular-nums; color: var(--muted); white-space: nowrap; }
+/* A division game is marked on the rim, not by its fill, so the mark survives
+   whatever the result colour does to the cell. */
+.sn-w.div { box-shadow: inset 0 3px 0 var(--cat, var(--accent)); }
+.sn-w.won { background: color-mix(in srgb, var(--accent) 16%, var(--panel)); border-color: color-mix(in srgb, var(--accent) 34%, var(--line)); }
+.sn-w.won .sn-rs { color: var(--accent-ink, var(--ink)); font-weight: 700; }
+.sn-w.lost { background: color-mix(in srgb, var(--warm) 15%, var(--panel)); border-color: color-mix(in srgb, var(--warm) 34%, var(--line)); }
+.sn-w.lost .sn-rs { color: var(--warm); font-weight: 700; }
+/* The legend swatch and the cell it explains are the same fact, so they are the
+   same rule — a legend that drifts from the thing it labels is worse than none. */
+.sn-w.next, .sn-sw.sn-next { border-color: var(--ink); box-shadow: 0 0 0 1px var(--ink); }
+.sn-w.next.div { box-shadow: 0 0 0 1px var(--ink), inset 0 3px 0 var(--cat, var(--accent)); }
+.sn-w.next .sn-rs { color: var(--ink); font-weight: 700; }
+.sn-w.ahead { color: var(--muted); }
+.sn-w.ahead .sn-op { color: var(--muted); }
+.sn-bye, .sn-sw.sn-bye { background: transparent; border-style: dashed; }
+.sn-bye .sn-op, .sn-bye .sn-rs { color: var(--faint); font-weight: 500; }
+
+.sn-key { display: flex; flex-wrap: wrap; gap: .1rem .9rem; margin-top: .6rem; }
+.sn-lg { display: inline-flex; align-items: center; gap: .32rem; font: 500 .75rem/1.7 var(--font-sans); color: var(--muted); }
+.sn-sw { width: .68rem; height: .68rem; border-radius: 3px; border: 1px solid var(--line); background: var(--panel);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--ink) 14%, transparent); }
+/* A swatch is a tenth the size of the cell it stands for, and a tint that reads
+   clearly across a whole cell disappears at 11px — so the key runs saturated
+   where the cell runs soft. Won and lost must never be two shades of one colour. */
+.sn-sw.sn-won { background: var(--accent); }
+.sn-sw.sn-lost { background: var(--warm); }
+.sn-sw.sn-div { background: var(--cat, var(--accent)); }
+
+.sn-west { display: flex; flex-direction: column; gap: .4rem; }
+.sn-tm { display: grid; grid-template-columns: 1fr 2.6rem 1fr 2.4rem; gap: .5rem; align-items: center; padding: .25rem 0; }
+.sn-tm.us .sn-tn { font-weight: 700; color: var(--ink); }
+.sn-tn { font-size: .88rem; color: var(--muted); min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.sn-tr, .sn-td { font: 600 .78rem/1 var(--font-mono); font-variant-numeric: tabular-nums; color: var(--muted); }
+.sn-td { text-align: right; }
+.sn-tm.us .sn-tr, .sn-tm.us .sn-td { color: var(--ink); }
+/* One centre line, differential either side of it: three teams at 1-0 are only
+   separated by points, so the bar is the standing and the record is the caption. */
+.sn-tb { display: grid; grid-template-columns: 1fr 1fr; height: 7px;
+  background: color-mix(in srgb, var(--line) 60%, transparent); border-radius: 999px; }
+.sn-half { display: flex; height: 100%; }
+.sn-l { justify-content: flex-end; }
+.sn-r { justify-content: flex-start; border-left: 1px solid var(--line); }
+.sn-tbar { display: block; height: 100%; border-radius: 999px; }
+.sn-tbar.pos { background: var(--cat, var(--accent)); }
+.sn-tbar.neg { background: color-mix(in srgb, var(--warm) 70%, transparent); }
+
+.sn-shape { margin: 0 0 .7rem; font-size: .86rem; color: var(--muted); }
+.sn-sched { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: .05rem; }
+.sn-sr { display: grid; grid-template-columns: 3rem 1fr auto; gap: .6rem; align-items: baseline;
+  padding: .3rem 0; border-top: 1px solid var(--line); font-size: .85rem; }
+.sn-sr.div .sn-so { font-weight: 650; color: var(--ink); }
+.sn-sr.div .sn-sw2 { color: var(--cat, var(--accent)); }
+.sn-sw2 { font: 600 .75rem/1 var(--font-mono); color: var(--faint); letter-spacing: .03em; }
+.sn-so { color: var(--muted); min-width: 0; }
+.sn-sd { font: 500 .74rem/1 var(--font-mono); color: var(--faint); white-space: nowrap; }
+@container (max-width: 30rem) {
+  .sn-sr { grid-template-columns: 2.6rem 1fr; }
+  .sn-sd { grid-column: 2; }
+}
 
 /* ------------------------------------------------------------ art / push --- */
 .art-img { border-radius: 11px; overflow: hidden; aspect-ratio: 4 / 3; background: var(--bg); }
