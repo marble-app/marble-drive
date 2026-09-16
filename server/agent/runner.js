@@ -279,19 +279,19 @@ export function createRunner({ store, tools, providers, workdir, origin, bridgeP
   }
 
   async function finish(turn, { status, error = null }) {
-    if (turn.status === 'finished') return;
-    turn.status = 'finished';
-    // From here, a tool call in flight can still finish — callTool checks
-    // this and refuses anything new — but we wait for the ones already
-    // running so their undo records and `ops.applied` counts land before
-    // the turn's own totals and closing event do.
+    // `finishing` — not `status` — is the once-only guard: the turn stays
+    // `status: 'running'`, and so stays counted by runningTurns(), for this
+    // entire function. Flip status away from 'running' any earlier and
+    // pump() reads the conversation's slot (or a maxRunning slot) as free
+    // while this turn is still draining an in-flight tool call or writing
+    // its own outcome — letting the next turn start, run, and finish first,
+    // so that when this turn's finish() finally gets to its own
+    // store.updateConversation, that (by-then-stale) write lands last and
+    // clobbers the next turn's fresher one.
+    if (turn.finishing) return;
     turn.finishing = true;
     for (const clear of turn.timers) clear();
     if (turn.inflight.size) await Promise.allSettled([...turn.inflight]);
-    if (turn.token) tokens.delete(turn.token);
-    live.delete(turn.id);
-    const idx = order.indexOf(turn.id);
-    if (idx !== -1) order.splice(idx, 1);
 
     const finishedAt = Date.now();
     if (turn.undo.length) await store.saveUndo(turn.id, turn.undo);
@@ -308,6 +308,13 @@ export function createRunner({ store, tools, providers, workdir, origin, bridgeP
       lastFinishedAt: finishedAt,
     });
     await emit(turn, { type: `turn.${status}`, applied: turn.applied, ...(error ? { error } : {}) });
+
+    // Only now does the turn actually give up its slot.
+    turn.status = status;
+    if (turn.token) tokens.delete(turn.token);
+    live.delete(turn.id);
+    const idx = order.indexOf(turn.id);
+    if (idx !== -1) order.splice(idx, 1);
     await pump().catch((err) => log.error(`[agents] ${err.message}`));
   }
 
@@ -320,7 +327,7 @@ export function createRunner({ store, tools, providers, workdir, origin, bridgeP
 
     async cancel(turnId) {
       const turn = live.get(turnId);
-      if (!turn) return false;
+      if (!turn || turn.finishing) return false;
       if (turn.status === 'queued') return this.dequeue(turnId);
       stop(turn, { status: 'cancelled', error: null });
       return true;

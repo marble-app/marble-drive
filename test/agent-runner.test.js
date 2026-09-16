@@ -336,3 +336,39 @@ test('published events land in call order, deltas included', async () => {
   assert.ok(deltaIdx > promptIdx, 'the delta arrived after the prompt echo that preceded it');
   await runner.close();
 });
+
+// --- Fix round 2: a finishing turn must keep occupying its slot. ---
+
+test('a finishing turn keeps its place until its own cleanup is actually done', async () => {
+  let release;
+  const gate = new Promise((resolve) => { release = resolve; });
+  const { store, runner } = await setup({
+    tools: {
+      call: async (name, input, turn) => {
+        await gate;
+        turn.undo.push({ path: 'd', kind: 'test' });
+        turn.onEvent({ type: 'ops.applied', path: 'd', count: 1 });
+        return { ok: true };
+      },
+    },
+  });
+  const { id } = await store.createConversation({ provider: 'fake' });
+  const first = await runner.send(id, { prompt: 'script:stall', context: { target: 'd' } });
+  const live = await until(() => (runner.running()[0]?.token ? runner.running()[0] : null));
+  runner.callTool(live.token, 'apply_ops', {}); // not awaited; blocked on the gate
+  assert.equal(await runner.cancel(first.turnId), true);
+
+  // Turn 1 is cancelled but still draining that call — it must still be
+  // occupying its conversation's slot, so turn 2 has to queue, not start.
+  const second = await runner.send(id, { prompt: 'script:hello', context: { target: 'd' } });
+  assert.equal(second.status, 'queued', 'turn 2 must wait for turn 1 to actually finish, not just look cancelled');
+
+  release();
+  const t1 = await finished(store, first.turnId);
+  const t2 = await finished(store, second.turnId);
+  assert.equal(t1.status, 'cancelled');
+  assert.equal(t2.status, 'completed');
+  assert.ok(t2.startedAt >= t1.finishedAt, "turn 2 only started once turn 1's cleanup actually finished");
+  assert.equal((await store.conversation(id)).lastOutcome, 'done', "turn 2's outcome is the one left standing, not turn 1's stale one");
+  await runner.close();
+});
