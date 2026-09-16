@@ -139,21 +139,49 @@ export async function createDrive(config, { log = console } = {}) {
 
   /** The one write path. Ops are checked against the document as it actually
    *  is and refused as a batch, a restore point is taken of what is being
-   *  replaced, and only then do the bytes move. */
-  async function applyOps(docPath, ops, { client = null } = {}) {
+   *  replaced, and only then do the bytes move.
+   *
+   *  `prepare` and `after` are for a writer that has to decide against the
+   *  document *as it is inside the queue* — an agent's precondition, and the
+   *  undo record it keeps. Nothing can land between them and the write. A
+   *  gesture passes neither. */
+  async function applyOps(docPath, ops, { client = null, prepare = null, after = null } = {}) {
     return enqueue(docPath, async () => {
       const source = await store.read(docPath);
       if (source === null) throw Object.assign(new Error(`no document "${docPath}"`), { status: 404 });
 
+      if (prepare) {
+        const planned = await prepare(source);
+        if (planned.refused) {
+          return { applied: 0, refused: planned.refused, bytes: bytesOf(source), sha: shaOf(source) };
+        }
+        ops = planned.ops;
+      }
+
       const next = guardOps(source, ops);
-      if (next === source) return { applied: 0, bytes: bytesOf(source), sha: shaOf(source) };
+      if (next === source) {
+        after?.(source, source);
+        return { applied: 0, bytes: bytesOf(source), sha: shaOf(source) };
+      }
 
       lastKnown.set(docPath, { source: next, client });
       pendingWrites.mark(docPath, shaOf(next));
       const written = await store.write(docPath, next, { label: 'ops', ops });
       await oplog.append(docPath, ops, { client: client ?? 'anon' });
+      after?.(source, next);
       return { applied: ops.length, ...written };
     });
+  }
+
+  /** Apply, then tell everybody else. The route and the agent tools both come
+   *  through here, so the echo rule lives in one place. */
+  async function writeOps(docPath, ops, options = {}) {
+    const result = await applyOps(docPath, ops, options);
+    if (result.applied) {
+      channels.toDocument(docPath, 'changed', { except: options.client ?? null });
+      channels.toDrive('changed', { path: docPath, bytes: result.bytes }, { except: options.client ?? null });
+    }
+    return result;
   }
 
   /** A document arriving from anywhere other than an op — created, restored,
@@ -269,13 +297,9 @@ export async function createDrive(config, { log = console } = {}) {
         const ops = JSON.parse((await readBody(req, config.maxBodyBytes)).toString('utf8'));
         if (!Array.isArray(ops)) return json(res, 400, { error: 'expected an array of ops' });
 
-        const result = await applyOps(docPath, ops, { client });
-        if (result.applied) {
-          // The echo is for the other tabs, the other devices, the other
-          // people, and the agent — never for whoever filed it.
-          channels.toDocument(docPath, 'changed', { except: client });
-          channels.toDrive('changed', { path: docPath, bytes: result.bytes }, { except: client });
-        }
+        // The echo is for the other tabs, the other devices, the other people,
+        // and the agent — never for whoever filed it.
+        const result = await writeOps(docPath, ops, { client });
         return json(res, 200, { ok: true, ...result });
       }
 
@@ -725,6 +749,8 @@ button{background:#738698;color:#fafaf7;border-color:#738698;cursor:pointer}p{co
     channels,
     gate,
     oplog,
+    writeOps,
+    createDocument: (docPath, source, { label = 'created' } = {}) => putDocument(docPath, source, { label }),
     config,
     seed,
     weigh,

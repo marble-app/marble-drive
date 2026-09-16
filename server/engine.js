@@ -37,7 +37,7 @@ const [patcher, guard, history, ops, intent, providers, scaffold, doctor] = awai
  *  served to a browser or spliced into a new document as text. */
 export const enginePath = (relative) => new URL(relative, ROOT).pathname;
 
-export const { applyOp, applyOps, knownIds } = patcher;
+export const { applyOp, applyOps, indexIds, knownIds, parseSource, sliceOf } = patcher;
 export const { guardOps } = guard;
 export const {
   bytesOf,
@@ -50,7 +50,9 @@ export const {
   writeAtomic,
 } = history;
 export const { OP_TYPES } = ops;
-export const { resolveIntent } = intent;
+// The agent tools read and check with the same functions the intent layer
+// does: an agent is a third writer, not a second opinion about what an op is.
+export const { collectSlices, repairOps, resolveIntent, validateOps } = intent;
 export const { chooseProvider, loadProvider } = providers;
 // The cut-point reader for `lib/affordances.js`. The gallery composes starters
 // out of those parts rather than keeping a fourth copy of them.
