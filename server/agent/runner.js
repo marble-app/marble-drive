@@ -20,6 +20,8 @@ import { summarize } from './store.js';
 const ENV_ALLOWLIST = ['PATH', 'HOME', 'USER', 'LOGNAME', 'SHELL', 'LANG', 'LC_ALL', 'TERM', 'TMPDIR'];
 const SELECTION_BUDGET = 6_000;
 const STDERR_TAIL = 4_000;
+// How long closing the host waits for its running turns to write their end.
+const CLOSE_GRACE_MS = 5_000;
 
 const pick = (env) => Object.fromEntries(ENV_ALLOWLIST.filter((k) => env[k] !== undefined).map((k) => [k, env[k]]));
 
@@ -103,6 +105,7 @@ export function createRunner({ store, tools, providers, workdir, origin, bridgeP
     }
 
     const record = await store.createTurn(conversationId, { prompt: String(prompt ?? ''), context: frozen });
+    let ended;
     const turn = {
       id: record.id,
       n: record.n,
@@ -124,8 +127,20 @@ export function createRunner({ store, tools, providers, workdir, origin, bridgeP
       timers: [],
       inflight: new Set(), // tool-call promises the bridge is still waiting on
       finishing: false, // true once finish() has started; new tool calls are refused
+      ended: new Promise((resolve) => { ended = resolve; }), // settles once the turn has left the runner
+      endTurn: () => ended(),
+      // Undo records are written as each batch applies, in the order they
+      // applied, not only when the turn ends: a crash, or a host closing
+      // under it, would otherwise leave applied ops nobody can take back.
+      undoSaved: Promise.resolve(),
       onEvent: (event) => {
-        if (event.type === 'ops.applied') turn.applied += event.count;
+        if (event.type === 'ops.applied') {
+          turn.applied += event.count;
+          const records = [...turn.undo];
+          turn.undoSaved = turn.undoSaved
+            .then(() => store.saveUndo(turn.id, records))
+            .catch((err) => log.error(`[agents] ${err.message}`));
+        }
         emit(turn, event).catch((err) => log.error(`[agents] ${err.message}`));
       },
     };
@@ -304,6 +319,7 @@ export function createRunner({ store, tools, providers, workdir, origin, bridgeP
     const applied = turn.applied;
     try {
       try {
+        await turn.undoSaved;
         if (turn.undo.length) await store.saveUndo(turn.id, turn.undo);
         await store.updateConversation(turn.conversationId, {
           running: false,
@@ -332,8 +348,21 @@ export function createRunner({ store, tools, providers, workdir, origin, bridgeP
       live.delete(turn.id);
       const idx = order.indexOf(turn.id);
       if (idx !== -1) order.splice(idx, 1);
+      turn.endTurn();
       await pump().catch((err) => log.error(`[agents] ${err.message}`));
     }
+  }
+
+  async function dequeue(turnId) {
+    const turn = live.get(turnId);
+    if (!turn || turn.status !== 'queued') return false;
+    live.delete(turnId);
+    const idx = order.indexOf(turnId);
+    if (idx !== -1) order.splice(idx, 1);
+    // Same rule as finish(): the terminal status is written last.
+    await emit(turn, { type: 'turn.removed' });
+    await store.updateTurn(turnId, { status: 'removed', finishedAt: Date.now() });
+    return true;
   }
 
   return {
@@ -346,22 +375,12 @@ export function createRunner({ store, tools, providers, workdir, origin, bridgeP
     async cancel(turnId) {
       const turn = live.get(turnId);
       if (!turn || turn.finishing) return false;
-      if (turn.status === 'queued') return this.dequeue(turnId);
+      if (turn.status === 'queued') return dequeue(turnId);
       stop(turn, { status: 'cancelled', error: null });
       return true;
     },
 
-    async dequeue(turnId) {
-      const turn = live.get(turnId);
-      if (!turn || turn.status !== 'queued') return false;
-      live.delete(turnId);
-      const idx = order.indexOf(turnId);
-      if (idx !== -1) order.splice(idx, 1);
-      // Same rule as finish(): the terminal status is written last.
-      await emit(turn, { type: 'turn.removed' });
-      await store.updateTurn(turnId, { status: 'removed', finishedAt: Date.now() });
-      return true;
-    },
+    dequeue,
 
     turnForToken: (token) => tokens.get(token) ?? null,
 
@@ -386,9 +405,25 @@ export function createRunner({ store, tools, providers, workdir, origin, bridgeP
 
     running: runningTurns,
 
+    /** Running turns end as cancelled, with their outcome written, before
+     *  this resolves — a serve that exits right after would otherwise leave
+     *  them reading `running` until the next boot calls them interrupted.
+     *  Queued turns stay queued on disk, and that boot interrupts them. A
+     *  turn that cannot finish within the grace period is left to it. */
     async close() {
       closed = true;
-      for (const turn of runningTurns()) turn.child?.kill('SIGKILL');
+      const ending = runningTurns().map((turn) => {
+        turn.cancelled ??= { status: 'cancelled', error: 'host closing' };
+        turn.child?.kill('SIGKILL');
+        return turn.ended;
+      });
+      if (!ending.length) return;
+      let timer;
+      const grace = new Promise((resolve) => {
+        timer = setTimeout(resolve, CLOSE_GRACE_MS);
+      });
+      await Promise.race([Promise.allSettled(ending), grace]);
+      clearTimeout(timer);
     },
   };
 }

@@ -490,3 +490,56 @@ test('once a turn reads as finished, its outcome and closing event are already s
   assert.ok(snapshots[1].undo, 'the undo record was saved before the status');
   await runner.close();
 });
+
+// --- Final review: applied work stays undoable if the host goes away. ---
+
+const applyingTools = {
+  call: async (name, input, turn) => {
+    turn.undo.push({ path: 'd', steps: [{ inverse: null, id: null, expect: null, absent: null }] });
+    turn.onEvent({ type: 'ops.applied', path: 'd', count: 1 });
+    return { ok: true };
+  },
+};
+
+test('an undo record is on disk as soon as a batch applies, while the turn is still running', async () => {
+  const { store, runner } = await setup({ tools: applyingTools });
+  const { id } = await store.createConversation({ provider: 'fake' });
+  const { turnId } = await runner.send(id, { prompt: 'script:stall', context: { target: 'd' } });
+  const live = await until(() => (runner.running()[0]?.token ? runner.running()[0] : null));
+  await runner.callTool(live.token, 'apply_ops', {});
+  await runner.callTool(live.token, 'apply_ops', {});
+  const records = await until(async () => {
+    const saved = await store.undoRecords(turnId);
+    return saved?.length === 2 ? saved : null;
+  }, 2_000);
+  assert.equal(records.length, 2);
+  assert.equal((await store.turn(turnId)).status, 'running', 'saved before the turn ended');
+  await runner.close();
+});
+
+test('close() ends a running turn as cancelled before it resolves', async () => {
+  const { store, runner } = await setup({ tools: applyingTools });
+  const { id } = await store.createConversation({ provider: 'fake' });
+  const { turnId } = await runner.send(id, { prompt: 'script:stall', context: { target: 'd' } });
+  const live = await until(() => (runner.running()[0]?.token ? runner.running()[0] : null));
+  await runner.callTool(live.token, 'apply_ops', {});
+  await runner.close();
+  const turn = await store.turn(turnId);
+  assert.equal(turn.status, 'cancelled', 'not left reading running for the next boot to call interrupted');
+  assert.equal(turn.error, 'host closing');
+  assert.equal(turn.applied, 1);
+  assert.ok(await store.undoRecords(turnId), 'its undo record was kept');
+  assert.equal((await store.conversation(id)).running, false);
+});
+
+test('cancel works on a queued turn when called without the runner as `this`', async () => {
+  const { store, runner } = await setup();
+  const { id } = await store.createConversation({ provider: 'fake' });
+  const running = await runner.send(id, { prompt: 'script:slow', context: { target: 'd' } });
+  const queued = await runner.send(id, { prompt: 'script:hello', context: { target: 'd' } });
+  const { cancel } = runner;
+  assert.equal(await cancel(queued.turnId), true);
+  assert.equal((await store.turn(queued.turnId)).status, 'removed');
+  await finished(store, running.turnId);
+  await runner.close();
+});
