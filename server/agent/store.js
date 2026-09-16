@@ -138,19 +138,35 @@ export function createAgentStore({ dir, defaultProvider = 'claude-subscription' 
     }
   }
 
+  async function settings() {
+    const saved = (await readJson(path.join(dir, 'settings.json'))) ?? {};
+    return { defaultProvider, models: {}, maxRunning: 3, ...saved };
+  }
+
+  async function saveSettings(patch) {
+    return serial('settings', async () => {
+      const next = { ...(await settings()), ...patch };
+      await writeJson(path.join(dir, 'settings.json'), next);
+      return next;
+    });
+  }
+
+  async function updateTurn(turnId, patch) {
+    return serial(`turn:${turnId}`, async () => {
+      const turn = await readJson(turnFile(turnId));
+      if (!turn) throw Object.assign(new Error(`no turn "${turnId}"`), { status: 404 });
+      const next = { ...turn, ...patch };
+      await writeJson(turnFile(turnId), next);
+      return next;
+    });
+  }
+
   return {
     ready: () => fsp.mkdir(dir, { recursive: true }),
 
-    async settings() {
-      const saved = (await readJson(path.join(dir, 'settings.json'))) ?? {};
-      return { defaultProvider, models: {}, maxRunning: 3, ...saved };
-    },
+    settings,
 
-    async saveSettings(patch) {
-      const next = { ...(await this.settings()), ...patch };
-      await writeJson(path.join(dir, 'settings.json'), next);
-      return next;
-    },
+    saveSettings,
 
     async createConversation({ provider, model = null, handoffFrom = null }) {
       const now = Date.now();
@@ -214,15 +230,7 @@ export function createAgentStore({ dir, defaultProvider = 'claude-subscription' 
 
     turn: (turnId) => readJson(turnFile(turnId)),
 
-    async updateTurn(turnId, patch) {
-      return serial(`turn:${turnId}`, async () => {
-        const turn = await readJson(turnFile(turnId));
-        if (!turn) throw Object.assign(new Error(`no turn "${turnId}"`), { status: 404 });
-        const next = { ...turn, ...patch };
-        await writeJson(turnFile(turnId), next);
-        return next;
-      });
-    },
+    updateTurn,
 
     turns,
 
@@ -240,7 +248,7 @@ export function createAgentStore({ dir, defaultProvider = 'claude-subscription' 
         for (const turn of await turns(id)) {
           if (turn.status !== 'queued' && turn.status !== 'running') continue;
           const finishedAt = Date.now();
-          interrupted.push(await this.updateTurn(turn.id, { status: 'interrupted', finishedAt }));
+          interrupted.push(await updateTurn(turn.id, { status: 'interrupted', finishedAt }));
           await appendEvent(id, { type: 'turn.interrupted', turn: turn.id });
           await updateConversation(id, {
             running: false,

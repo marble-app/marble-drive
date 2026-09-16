@@ -106,3 +106,28 @@ test('needs review: changes, failures and interruptions nobody has looked at', (
   assert.equal(needsReview({ ...base, lastOutcome: 'watchdog', lastReviewedAt: 50 }), true);
   assert.equal(summarize({ ...base, running: true, lastOutcome: 'changes' }).status, 'running');
 });
+
+test('destructured use works without this binding', async () => {
+  const { store } = await fresh();
+  const { saveSettings, settings, updateTurn, interruptUnfinished } = store;
+  await saveSettings({ defaultProvider: 'cursor' });
+  assert.equal((await settings()).defaultProvider, 'cursor');
+  const { id } = await store.createConversation({ provider: 'fake' });
+  const turn = await store.createTurn(id, { prompt: 'a', context: {} });
+  await updateTurn(turn.id, { status: 'running' });
+  assert.equal((await store.turn(turn.id)).status, 'running');
+  await store.updateConversation(id, { running: true });
+  const interrupted = await interruptUnfinished();
+  assert.equal(interrupted.length, 1);
+});
+
+test('concurrent saves both land', async () => {
+  const { store } = await fresh();
+  await Promise.all([
+    store.saveSettings({ defaultProvider: 'cursor' }),
+    store.saveSettings({ models: { cursor: 'composer-2.5' } }),
+  ]);
+  const saved = await store.settings();
+  assert.equal(saved.defaultProvider, 'cursor');
+  assert.equal(saved.models.cursor, 'composer-2.5');
+});
