@@ -18,6 +18,8 @@ import http from 'node:http';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
+import { agentsAllowed, createAgents } from './agent/index.js';
+import { builtInProviders } from './agent/providers/index.js';
 import { backupNow, scheduleBackups } from './backup.js';
 import { bytesOf, chooseProvider, enginePath, examine, guardOps, shaOf } from './engine.js';
 import { dataUri as iconUri, svg as iconSvg } from './favicon.js';
@@ -88,7 +90,7 @@ const RUNTIME = {
   'drive.js': () => path.join(REPO, 'runtime', 'drive.js'),
 };
 
-export async function createDrive(config, { log = console } = {}) {
+export async function createDrive(config, { log = console, agentProviders = null } = {}) {
   const store = createStore({ root: config.root });
   await store.ready();
 
@@ -197,7 +199,15 @@ export async function createDrive(config, { log = console } = {}) {
     return result;
   }
 
+  // Named once, and used both here and by the agents: a document arriving
+  // from outside an op, always through the same restore point and echo.
+  const createDocument = (docPath, source, { label = 'created' } = {}) => putDocument(docPath, source, { label });
+
   // ------------------------------------------------------------------- routes
+
+  // Set once the server exists, because the agents need to know where to tell
+  // their MCP bridge to call back. Null when agents are not allowed here.
+  let agents = null;
 
   const server = http.createServer(async (req, res) => {
     const url = new URL(req.url, `http://${req.headers.host ?? 'localhost'}`);
@@ -222,11 +232,20 @@ export async function createDrive(config, { log = console } = {}) {
       }
       if (route === '/favicon.ico') return send(res, 302, '', { Location: '/favicon.svg' });
       if (route === '/gate') return gateRoute(req, res, url);
+      // In front of the gate: the MCP bridge carries a turn's token, not the
+      // drive's secret, and the tool routes check that token themselves.
+      if (route === '/agent/tools' || route.startsWith('/agent/tools/')) {
+        // Awaited, so a refusal thrown inside reaches the catch below as a status.
+        return agents ? await agents.handleTools(req, res, url) : text(res, 404, 'not found');
+      }
       if (!gate.allows(req)) {
         if ((req.headers.accept ?? '').includes('text/html')) {
           return send(res, 302, '', { Location: `/gate?to=${encodeURIComponent(req.url)}` });
         }
         return json(res, 401, { error: 'this drive is closed', hint: 'POST /gate with the secret' });
+      }
+      if (route.startsWith('/agent/')) {
+        return agents ? await agents.handle(req, res, url) : text(res, 404, 'not found');
       }
 
       if (route === '/') {
@@ -556,6 +575,24 @@ export async function createDrive(config, { log = console } = {}) {
     }
   });
 
+  if (agentsAllowed(config).ok) {
+    agents = await createAgents({
+      config,
+      store,
+      writeOps,
+      createDocument,
+      // Where the bridge calls back: this server, on loopback, whatever port it
+      // ended up on.
+      origin: () => {
+        const address = server.address();
+        const loopback = address.family === 'IPv6' ? '[::1]' : '127.0.0.1';
+        return `http://${loopback}:${address.port}`;
+      },
+      providers: agentProviders ?? builtInProviders(),
+      log,
+    });
+  }
+
   // ------------------------------------------------------------------ helpers
 
   function gateRoute(req, res, url) {
@@ -750,7 +787,8 @@ button{background:#738698;color:#fafaf7;border-color:#738698;cursor:pointer}p{co
     gate,
     oplog,
     writeOps,
-    createDocument: (docPath, source, { label = 'created' } = {}) => putDocument(docPath, source, { label }),
+    agents,
+    createDocument,
     config,
     seed,
     weigh,
@@ -769,6 +807,7 @@ button{background:#738698;color:#fafaf7;border-color:#738698;cursor:pointer}p{co
       }
     },
     async close() {
+      await agents?.close();
       stopBackups();
       watcher.close();
       channels.close();
