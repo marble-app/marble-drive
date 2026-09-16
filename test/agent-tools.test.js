@@ -174,4 +174,16 @@ test('a path outside the drive is an error', async () => {
   assert.ok(result.error);
 });
 
+test('setInner that introduces new elements gets them minted ids, not left unaddressable', async () => {
+  const turn = await freshTurn();
+  await tools.call('read_document', { path: turn.target }, turn);
+  const result = await tools.call('apply_ops', {
+    path: turn.target, note: 'x',
+    ops: [{ type: 'setInner', id: 'q', html: '<li>New one</li><li>New two</li>' }],
+  }, turn);
+  assert.equal(result.applied, 1);
+  const stored = await drive.store.read(turn.target);
+  assert.doesNotMatch(stored, /<li>New/, 'every inserted <li> should have gotten a data-marble-id');
+});
+
 test.after(() => drive.close());

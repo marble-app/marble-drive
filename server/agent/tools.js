@@ -147,8 +147,12 @@ export function createTools({ store, writeOps, createDocument, buildStarter, gui
         prepare: async (source) => {
           let ops;
           try {
-            ops = repairOps(input.ops, source).ops;
-            ops = validateOps(ops, source, { slices: tagsOf(source), innerLimit: INNER_LIMIT });
+            // repairOps only knows a setInner payload's own tag — and so only
+            // mints ids into markup it is confident is markup — when it is
+            // handed the same slices validateOps checks against.
+            const slices = tagsOf(source);
+            ops = repairOps(input.ops, source, { slices }).ops;
+            ops = validateOps(ops, source, { slices, innerLimit: INNER_LIMIT });
           } catch (err) {
             return { refused: { reason: err.message, current: [] } };
           }
