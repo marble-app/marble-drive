@@ -242,4 +242,24 @@ test('a host with agents off answers 404 to all of it', async () => {
   await off.close();
 });
 
+test('a document changed outside Marble during a turn is flagged, with a way back', async () => {
+  const running = await start('script:wait', 'watched');
+  await until(() => drive.agents.runner.running().length === 1);
+
+  const file = path.join(ROOT, 'watched.mrbl');
+  const before = await fsp.readFile(file, 'utf8');
+  await fsp.writeFile(file, before.replace('Research Garden', 'Scribbled from outside'));
+
+  const { body } = await finished(running.conversationId, running.turnId);
+  const flagged = body.events.find((e) => e.type === 'watchdog');
+  assert.ok(flagged, 'the turn was flagged');
+  assert.equal(flagged.path, 'watched');
+  assert.equal(body.meta.lastOutcome, 'watchdog');
+  assert.equal(body.meta.needsReview, true);
+
+  const restored = await fetch(`${base}/restore?app=watched&sha=${flagged.sha}`, { method: 'POST' });
+  assert.equal(restored.status, 200);
+  assert.match(await drive.store.read('watched'), />Research Garden</);
+});
+
 test.after(() => drive.close());

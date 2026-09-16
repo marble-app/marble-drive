@@ -750,7 +750,14 @@ button{background:#738698;color:#fafaf7;border-color:#738698;cursor:pointer}p{co
     // when the edit is an agent rewriting more of the file than it meant to.
     // There is no way to capture this as it happens: an external write is only
     // ever observed after the fact.
-    if (prior) await store.mark(docPath, prior.source, 'pre-external');
+    if (prior) {
+      await store.mark(docPath, prior.source, 'pre-external');
+      // Every agent writes through ops, so an agent's own work never reaches
+      // this branch. Something changing a document from outside while a turn
+      // runs is flagged on that turn, with the restore point just taken, and
+      // left to a person: the likeliest outside writer is them, in an editor.
+      agents?.watchdog(docPath, shaOf(prior.source));
+    }
     lastKnown.set(docPath, { source: current, client: null });
     await store.thinHistory(docPath).catch(() => {});
     channels.toDocument(docPath, 'changed');

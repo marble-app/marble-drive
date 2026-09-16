@@ -16,6 +16,7 @@
 import { spawn } from 'node:child_process';
 import path from 'node:path';
 
+import { agentsAllowed } from '../server/agent/index.js';
 import { createDrive } from '../server/app.js';
 import { backupNow } from '../server/backup.js';
 import { config } from '../server/config.js';
@@ -116,6 +117,12 @@ async function serve() {
       provider
         ? `[drive] intents via ${provider}`
         : '[drive] no intent provider — direct manipulation works without one.',
+    );
+
+    console.log(
+      drive.agents
+        ? `[drive] agents on — conversations in ${path.join(config.root, '.marble', 'agents')}`
+        : `[drive] agents off — ${agentsAllowed(config).why}`,
     );
 
     if (config.open || flags.open) {
