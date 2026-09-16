@@ -58,7 +58,54 @@ release"; 5 is "the coding release"; 6 is "the reliability release".
   metadata — never inside whichever document happened to be open. Both the
   drawer (3) and `Agents.mrbl` (4) read it.
 
-### Decision: Claude writes through ops, not files
+### Decision: switchable agent providers
+
+A setting chooses which agent runs: **Claude (subscription)**, **Claude (API
+key)**, **Codex CLI**, **Cursor Agent CLI** — each when installed and signed in.
+Bryan has Claude and Cursor subscriptions; the ChatGPT account behind Codex is
+free.
+
+Shape: **one Marble MCP server** (`read_document`, `apply_ops`, …) that every
+provider loads, and **one small adapter per provider** that spawns the CLI, maps
+its stream to a common event shape (text, tool call, tool result, done, error),
+and records its session id. Ops, the merge rules and per-turn undo live in the
+MCP server, so they behave the same whichever agent runs.
+
+All four CLIs verified present on 2026-09-16:
+
+| provider | headless | resume | auth |
+|---|---|---|---|
+| Claude | `claude -p --output-format stream-json --verbose` (prompt on **stdin** — `--tools` is variadic and eats a trailing prompt arg) | `--resume`, `--session-id` | subscription: spawn with `ANTHROPIC_API_KEY` removed from env; API: leave it in |
+| Codex | `codex exec --json` | `codex exec resume <id>` | ChatGPT login |
+| Cursor | `cursor-agent -p --output-format stream-json --approve-mcps --trust --workspace <dir>` | `--resume <chatId>` | Cursor login; `--model` (default model hit plan limit; `composer-2.5` worked) |
+
+**Boundary spikes (2026-09-16), prompt asked each agent to call the MCP tool and
+then write a file with its own tools:**
+
+- **Claude — enforced.** `--tools ""` `--strict-mcp-config` `--mcp-config <f>`
+  `--allowedTools mcp__marble__<tool>`: MCP call succeeded; no write tool existed.
+- **Cursor — flags do NOT enforce.** `--mode ask` and `--sandbox enabled` both
+  let `editToolCall` write the file. **A project hook does enforce:**
+  `<workspace>/.cursor/hooks.json` →
+  `{"version":1,"hooks":{"preToolUse":[{"command":"…","failClosed":true}]}}`; the
+  hook reads `{tool_name, tool_input}` on stdin and prints
+  `{"permission":"allow"|"deny","user_message","agent_message"}`. MCP tools arrive
+  as `tool_name: "MCP:<tool>"`. Allowing only `MCP:*` rejected Read, the edit
+  (its pre-read), and Shell; the MCP call succeeded. `failClosed` makes a crashed
+  hook a deny. Note: cursor-agent also loads user-level `~/.cursor/hooks.json`
+  and Claude's project/user hooks.
+- **Codex — untested.** Turn failed: free-plan usage limit until 2026-10-15.
+  `-s read-only` (Seatbelt) should block writes and network, but its shell can
+  still *read* the whole disk. Codex loads MCP servers from the global
+  `~/.codex/config.toml` (context7 appeared) — the adapter must isolate config.
+
+**Every provider runs in an empty scratch workspace outside the drive**, so the
+drive is reachable only through MCP. **Watchdog for all providers:** a `.mrbl`
+change the watcher sees during a turn that did not come through ops is restored
+from the watcher's `pre-external` restore point and the turn is flagged "wrote
+outside Marble" in the drawer.
+
+### Decision: agents write through ops, not files
 
 Both writers — you and the agent — are op streams against `data-marble-id`
 addressed elements, through the same per-document `enqueue` in
