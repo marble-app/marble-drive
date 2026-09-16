@@ -372,3 +372,50 @@ test('a finishing turn keeps its place until its own cleanup is actually done', 
   assert.equal((await store.conversation(id)).lastOutcome, 'done', "turn 2's outcome is the one left standing, not turn 1's stale one");
   await runner.close();
 });
+
+// --- Fix round 3: a turn must leave the runner even when the store fails. ---
+
+test('a turn leaves the runner even when the store fails while finishing it', async () => {
+  const dir = await fsp.mkdtemp(path.join(os.tmpdir(), 'marble-runner-'));
+  const realStore = createAgentStore({ dir: path.join(dir, 'agents'), defaultProvider: 'fake' });
+  await realStore.ready();
+  const { id } = await realStore.createConversation({ provider: 'fake' });
+
+  let failedOnce = false;
+  const store = {
+    ...realStore,
+    async updateTurn(turnId, patch) {
+      if (!failedOnce && patch.finishedAt) {
+        failedOnce = true;
+        throw new Error('synthetic store failure');
+      }
+      return realStore.updateTurn(turnId, patch);
+    },
+  };
+
+  const runner = createRunner({
+    store,
+    tools: { call: async () => ({ ok: true }) },
+    providers: new Map([['fake', createFakeProvider({ scripts: SCRIPTS })]]),
+    workdir: path.join(dir, 'work'),
+    origin: () => 'http://127.0.0.1:1',
+    bridgePath: '/nonexistent/marble-mcp.js',
+    readDocument: async () => null,
+    publish: () => {},
+    limits: { maxRunning: 3, stallMs: 60_000, maxMs: 60_000, killGraceMs: 200 },
+    log: { log() {}, error() {} },
+  });
+  await runner.boot();
+
+  await runner.send(id, { prompt: 'script:hello', context: { target: 'd' } });
+  // The store write that would normally end the turn threw. It must not
+  // stay parked in the runner forever, holding its conversation (and a
+  // maxRunning slot) hostage.
+  await until(() => runner.running().length === 0);
+
+  const second = await runner.send(id, { prompt: 'script:hello', context: { target: 'd' } });
+  assert.equal(second.status, 'running', "the conversation's slot must be free for the next turn");
+  const t2 = await finished(realStore, second.turnId);
+  assert.equal(t2.status, 'completed');
+  await runner.close();
+});

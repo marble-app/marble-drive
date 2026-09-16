@@ -294,28 +294,34 @@ export function createRunner({ store, tools, providers, workdir, origin, bridgeP
     if (turn.inflight.size) await Promise.allSettled([...turn.inflight]);
 
     const finishedAt = Date.now();
-    if (turn.undo.length) await store.saveUndo(turn.id, turn.undo);
-    await store.updateTurn(turn.id, { status, finishedAt, error, applied: turn.applied, usage: turn.usage });
-    const outcome = turn.watchdog
-      ? 'watchdog'
-      : status === 'completed'
-        ? turn.applied ? 'changes' : 'done'
-        : status;
-    await store.updateConversation(turn.conversationId, {
-      running: false,
-      activity: status === 'completed' ? (turn.applied ? `Changed ${turn.applied} element(s)` : 'Answered') : error ?? status,
-      lastOutcome: outcome,
-      lastFinishedAt: finishedAt,
-    });
-    await emit(turn, { type: `turn.${status}`, applied: turn.applied, ...(error ? { error } : {}) });
-
-    // Only now does the turn actually give up its slot.
-    turn.status = status;
-    if (turn.token) tokens.delete(turn.token);
-    live.delete(turn.id);
-    const idx = order.indexOf(turn.id);
-    if (idx !== -1) order.splice(idx, 1);
-    await pump().catch((err) => log.error(`[agents] ${err.message}`));
+    try {
+      if (turn.undo.length) await store.saveUndo(turn.id, turn.undo);
+      await store.updateTurn(turn.id, { status, finishedAt, error, applied: turn.applied, usage: turn.usage });
+      const outcome = turn.watchdog
+        ? 'watchdog'
+        : status === 'completed'
+          ? turn.applied ? 'changes' : 'done'
+          : status;
+      await store.updateConversation(turn.conversationId, {
+        running: false,
+        activity: status === 'completed' ? (turn.applied ? `Changed ${turn.applied} element(s)` : 'Answered') : error ?? status,
+        lastOutcome: outcome,
+        lastFinishedAt: finishedAt,
+      });
+      await emit(turn, { type: `turn.${status}`, applied: turn.applied, ...(error ? { error } : {}) });
+    } finally {
+      // Whatever happened above — success, or one of those store writes
+      // throwing — the turn must actually leave the runner. Skip this and a
+      // failed write stores nothing but the in-memory turn stays forever
+      // `status: 'running'`, permanently holding its conversation's slot
+      // and a maxRunning slot hostage, with nothing left to sweep it.
+      turn.status = status;
+      if (turn.token) tokens.delete(turn.token);
+      live.delete(turn.id);
+      const idx = order.indexOf(turn.id);
+      if (idx !== -1) order.splice(idx, 1);
+      await pump().catch((err) => log.error(`[agents] ${err.message}`));
+    }
   }
 
   return {
