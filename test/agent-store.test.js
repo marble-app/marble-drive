@@ -131,3 +131,30 @@ test('concurrent saves both land', async () => {
   assert.equal(saved.defaultProvider, 'cursor');
   assert.equal(saved.models.cursor, 'composer-2.5');
 });
+
+// --- Final review: a crash mid-append must not keep the host from booting. ---
+
+test('a truncated last line in events.jsonl is skipped, and the log carries on after it', async () => {
+  const dir = await fsp.mkdtemp(path.join(os.tmpdir(), 'marble-agents-'));
+  const logged = [];
+  const store = createAgentStore({ dir, defaultProvider: 'fake', log: { log() {}, error: (m) => logged.push(m) } });
+  await store.ready();
+  const { id } = await store.createConversation({ provider: 'fake' });
+  await store.appendEvent(id, { type: 'user', text: 'hi' });
+  await store.appendEvent(id, { type: 'turn.queued' });
+  const turn = await store.createTurn(id, { prompt: 'hi', context: {} });
+  await store.updateTurn(turn.id, { status: 'running' });
+  // The host died halfway through writing event 3.
+  await fsp.appendFile(path.join(dir, id, 'events.jsonl'), '{"seq":3,"t":1,"type":"te');
+
+  // A fresh store, as a restarted host would make.
+  const restarted = createAgentStore({ dir, defaultProvider: 'fake', log: { log() {}, error: (m) => logged.push(m) } });
+  const interrupted = await restarted.interruptUnfinished();
+  assert.equal(interrupted.length, 1);
+  const next = await restarted.appendEvent(id, { type: 'text', text: 'after' });
+  assert.equal(next.seq, 4, 'numbering continues from the last valid event');
+  const events = await restarted.events(id);
+  assert.deepEqual(events.map((e) => e.type), ['user', 'turn.queued', 'turn.interrupted', 'text']);
+  assert.deepEqual(events.map((e) => e.seq), [1, 2, 3, 4]);
+  assert.equal(logged.filter((m) => /events\.jsonl/.test(m)).length, 1, 'logged once, not on every read');
+});

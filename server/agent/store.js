@@ -48,7 +48,7 @@ async function writeJson(file, value) {
   await fsp.rename(tmp, file);
 }
 
-export function createAgentStore({ dir, defaultProvider = 'claude-subscription' }) {
+export function createAgentStore({ dir, defaultProvider = 'claude-subscription', log = console }) {
   const convDir = (id) => path.join(dir, id);
   const metaFile = (id) => path.join(convDir(id), 'meta.json');
   const eventsFile = (id) => path.join(convDir(id), 'events.jsonl');
@@ -66,19 +66,37 @@ export function createAgentStore({ dir, defaultProvider = 'claude-subscription' 
     return next;
   };
 
-  async function events(id, { after = 0 } = {}) {
-    let text;
+  const eventsText = async (id) => {
     try {
-      text = await fsp.readFile(eventsFile(id), 'utf8');
+      return await fsp.readFile(eventsFile(id), 'utf8');
     } catch (err) {
-      if (err.code === 'ENOENT') return [];
+      if (err.code === 'ENOENT') return '';
       throw err;
     }
-    return text
-      .split('\n')
-      .filter(Boolean)
-      .map((line) => JSON.parse(line))
-      .filter((event) => event.seq > after);
+  };
+
+  // A host that dies halfway through an append leaves a line that is not
+  // JSON. It is skipped rather than thrown on — otherwise one torn line keeps
+  // the host from booting — and said once per conversation, not per read.
+  const torn = new Set();
+  function parseEvents(id, text) {
+    const out = [];
+    for (const line of text.split('\n')) {
+      if (!line) continue;
+      try {
+        out.push(JSON.parse(line));
+      } catch {
+        if (!torn.has(id)) {
+          torn.add(id);
+          log.error(`[agents] skipped a line of ${eventsFile(id)} that is not whole JSON`);
+        }
+      }
+    }
+    return out;
+  }
+
+  async function events(id, { after = 0 } = {}) {
+    return parseEvents(id, await eventsText(id)).filter((event) => event.seq > after);
   }
 
   async function conversation(id) {
@@ -98,12 +116,20 @@ export function createAgentStore({ dir, defaultProvider = 'claude-subscription' 
 
   async function appendEvent(id, event) {
     const stored = await serial(id, async () => {
-      if (!counters.has(id)) counters.set(id, (await events(id)).at(-1)?.seq ?? 0);
+      let lead = '';
+      if (!counters.has(id)) {
+        const text = await eventsText(id);
+        const seqs = parseEvents(id, text).map((e) => e.seq).filter(Number.isFinite);
+        counters.set(id, seqs.length ? Math.max(...seqs) : 0);
+        // A torn last line has no newline; start on a fresh one, or this
+        // event would be glued onto it and lost with it.
+        if (text && !text.endsWith('\n')) lead = '\n';
+      }
       const seq = counters.get(id) + 1;
       counters.set(id, seq);
       const line = { seq, t: Date.now(), ...event };
       await fsp.mkdir(convDir(id), { recursive: true });
-      await fsp.appendFile(eventsFile(id), `${JSON.stringify(line)}\n`);
+      await fsp.appendFile(eventsFile(id), `${lead}${JSON.stringify(line)}\n`);
       return line;
     });
     if (event.type === 'user') {

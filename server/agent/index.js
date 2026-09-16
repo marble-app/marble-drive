@@ -30,7 +30,7 @@ export function agentsAllowed(config) {
 }
 
 export async function createAgents({ config, store, writeOps, createDocument, origin, providers, log = console }) {
-  const agentStore = createAgentStore({ dir: path.join(store.marbleDir, 'agents'), defaultProvider: config.agentProvider });
+  const agentStore = createAgentStore({ dir: path.join(store.marbleDir, 'agents'), defaultProvider: config.agentProvider, log });
   await agentStore.ready();
   const settings = await agentStore.settings();
   const hub = createHub();
