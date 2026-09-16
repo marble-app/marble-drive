@@ -16,7 +16,7 @@ const SCRIPTS = {
   broken: [{ fail: 'You have hit your usage limit' }],
 };
 
-async function setup({ limits = {} } = {}) {
+async function setup({ limits = {}, tools } = {}) {
   const dir = await fsp.mkdtemp(path.join(os.tmpdir(), 'marble-runner-'));
   const store = createAgentStore({ dir: path.join(dir, 'agents'), defaultProvider: 'fake' });
   await store.ready();
@@ -24,7 +24,7 @@ async function setup({ limits = {} } = {}) {
   const toolCalls = [];
   const runner = createRunner({
     store,
-    tools: { call: async (name, input, turn) => { toolCalls.push({ name, input, turn: turn.id }); return { ok: true }; } },
+    tools: tools ?? { call: async (name, input, turn) => { toolCalls.push({ name, input, turn: turn.id }); return { ok: true }; } },
     providers: new Map([['fake', createFakeProvider({ scripts: SCRIPTS })]]),
     workdir: path.join(dir, 'work'),
     origin: () => 'http://127.0.0.1:1',
@@ -206,5 +206,133 @@ test('an unknown provider fails the turn instead of throwing', async () => {
   const turn = await finished(store, turnId);
   assert.equal(turn.status, 'failed');
   assert.match(turn.error, /no provider "gone"/);
+  await runner.close();
+});
+
+// --- Fix round 1: four review findings, each with its own test. ---
+
+test('an in-flight tool call finishes — with its undo record — before cancel ends the turn', async () => {
+  const { store, runner } = await setup({
+    tools: {
+      call: async (name, input, turn) => {
+        await new Promise((resolve) => setTimeout(resolve, 300));
+        turn.undo.push({ path: 'd', kind: 'test' });
+        turn.onEvent({ type: 'ops.applied', path: 'd', count: 1 });
+        return { ok: true };
+      },
+    },
+  });
+  const { id } = await store.createConversation({ provider: 'fake' });
+  const { turnId } = await runner.send(id, { prompt: 'script:stall', context: { target: 'd' } });
+  const live = await until(() => (runner.running()[0]?.token ? runner.running()[0] : null));
+  runner.callTool(live.token, 'apply_ops', {}); // deliberately not awaited — cancel races it
+  assert.equal(await runner.cancel(turnId), true);
+  const turn = await finished(store, turnId);
+  assert.equal(turn.status, 'cancelled');
+  assert.equal(turn.applied, 1, 'the in-flight call is allowed to finish and record what it applied');
+  assert.ok(await store.undoRecords(turnId), 'its undo record was saved');
+  const types = (await store.events(id)).map((e) => e.type);
+  assert.ok(types.indexOf('ops.applied') < types.indexOf('turn.cancelled'), 'the undo landed before the turn closed out');
+  await runner.close();
+});
+
+test('cancelling while the process is still starting up never spawns it', async () => {
+  const dir = await fsp.mkdtemp(path.join(os.tmpdir(), 'marble-runner-'));
+  const store = createAgentStore({ dir: path.join(dir, 'agents'), defaultProvider: 'slow-prepare' });
+  await store.ready();
+  let spawnCalled = false;
+  const provider = {
+    id: 'slow-prepare',
+    label: 'Slow',
+    detect: async () => ({ installed: true, signedIn: true, detail: '' }),
+    prepare: () => new Promise((resolve) => setTimeout(resolve, 300)),
+    spawn() {
+      spawnCalled = true;
+      return { command: process.execPath, args: ['-e', 'process.exit(0)'], env: {}, stdin: '' };
+    },
+    parse: () => [],
+  };
+  const runner = createRunner({
+    store,
+    tools: { call: async () => ({ ok: true }) },
+    providers: new Map([['slow-prepare', provider]]),
+    workdir: path.join(dir, 'work'),
+    origin: () => 'http://127.0.0.1:1',
+    bridgePath: '/nonexistent/marble-mcp.js',
+    readDocument: async () => null,
+    publish: () => {},
+    limits: { maxRunning: 3, stallMs: 60_000, maxMs: 60_000, killGraceMs: 200 },
+    log: { log() {}, error() {} },
+  });
+  await runner.boot();
+  const { id } = await store.createConversation({ provider: 'slow-prepare' });
+  // `send` doesn't return until `start` does, and `start` doesn't return
+  // until `prepare` does — so cancel has to race it, not follow it.
+  const sending = runner.send(id, { prompt: 'x', context: { target: 'd' } });
+  const live = await until(() => (runner.running()[0] ? runner.running()[0] : null));
+  assert.equal(await runner.cancel(live.id), true);
+  await sending;
+  const turn = await finished(store, live.id);
+  assert.equal(turn.status, 'cancelled');
+  assert.equal(spawnCalled, false, 'provider.spawn must never run once the turn is cancelled');
+  await runner.close();
+});
+
+test('a store error while starting fails only that turn; another conversation still runs', async () => {
+  const dir = await fsp.mkdtemp(path.join(os.tmpdir(), 'marble-runner-'));
+  const realStore = createAgentStore({ dir: path.join(dir, 'agents'), defaultProvider: 'fake' });
+  await realStore.ready();
+  const bad = await realStore.createConversation({ provider: 'fake' });
+  const good = await realStore.createConversation({ provider: 'fake' });
+
+  let armed = true;
+  const store = {
+    ...realStore,
+    async updateConversation(convId, patch) {
+      if (armed && convId === bad.id) {
+        armed = false;
+        throw new Error('synthetic store failure');
+      }
+      return realStore.updateConversation(convId, patch);
+    },
+  };
+
+  const runner = createRunner({
+    store,
+    tools: { call: async () => ({ ok: true }) },
+    providers: new Map([['fake', createFakeProvider({ scripts: SCRIPTS })]]),
+    workdir: path.join(dir, 'work'),
+    origin: () => 'http://127.0.0.1:1',
+    bridgePath: '/nonexistent/marble-mcp.js',
+    readDocument: async () => null,
+    publish: () => {},
+    limits: { maxRunning: 3, stallMs: 60_000, maxMs: 60_000, killGraceMs: 200 },
+    log: { log() {}, error() {} },
+  });
+  await runner.boot();
+
+  const badSend = await runner.send(bad.id, { prompt: 'script:hello', context: { target: 'd' } });
+  const goodSend = await runner.send(good.id, { prompt: 'script:hello', context: { target: 'd' } });
+
+  await finished(realStore, goodSend.turnId);
+  assert.equal((await realStore.turn(goodSend.turnId)).status, 'completed');
+  assert.ok(!runner.running().some((t) => t.id === badSend.turnId), 'the failed turn is no longer live');
+  await runner.close();
+});
+
+test('published events land in call order, deltas included', async () => {
+  const { store, runner, published } = await setup();
+  const { id } = await store.createConversation({ provider: 'fake' });
+  const { turnId } = await runner.send(id, { prompt: 'script:hello', context: { target: 'd' } });
+  await finished(store, turnId);
+  const mine = published.filter((p) => p.conversationId === id);
+  const seqs = mine.map((p) => p.event.seq).filter((s) => s !== undefined);
+  for (let i = 1; i < seqs.length; i += 1) {
+    assert.ok(seqs[i] > seqs[i - 1], `seq ${seqs[i]} did not follow ${seqs[i - 1]}`);
+  }
+  const promptIdx = mine.findIndex((p) => p.event.type === 'text' && p.event.text === 'prompt:script:hello');
+  const deltaIdx = mine.findIndex((p) => p.event.type === 'text.delta');
+  assert.ok(promptIdx !== -1 && deltaIdx !== -1, 'both events were published');
+  assert.ok(deltaIdx > promptIdx, 'the delta arrived after the prompt echo that preceded it');
   await runner.close();
 });

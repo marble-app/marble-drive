@@ -31,11 +31,32 @@ export function createRunner({ store, tools, providers, workdir, origin, bridgeP
 
   const runningTurns = () => [...live.values()].filter((t) => t.status === 'running');
 
+  // Every publish for a conversation — a stored event's, or a raw delta's —
+  // goes through this one chain, in the order it was called, the same way
+  // the store itself serializes appends. Without it, a delta (published the
+  // instant it arrives) can race ahead of the text event that logically
+  // came first but is still waiting on its own disk write.
+  const publishChains = new Map();
+  function chained(conversationId, task) {
+    const next = (publishChains.get(conversationId) ?? Promise.resolve()).then(task, task);
+    publishChains.set(conversationId, next.catch(() => {}));
+    return next;
+  }
+
   async function emit(turn, event) {
-    const stored = await store.appendEvent(turn.conversationId, { turn: turn.id, ...event });
-    const meta = await store.conversation(turn.conversationId);
-    publish(turn.conversationId, stored, meta ? summarize(meta) : null);
-    return stored;
+    return chained(turn.conversationId, async () => {
+      const stored = await store.appendEvent(turn.conversationId, { turn: turn.id, ...event });
+      const meta = await store.conversation(turn.conversationId);
+      publish(turn.conversationId, stored, meta ? summarize(meta) : null);
+      return stored;
+    });
+  }
+
+  /** finish(), wherever it's called from, never throws — a store error at the
+   *  end of a turn is logged, not left for whatever fire-and-forget caller
+   *  (the child's `close` handler, mainly) to crash on. */
+  function safeFinish(turn, outcome) {
+    return finish(turn, outcome).catch((err) => log.error(`[agents] ${err.message}`));
   }
 
   async function composePrompt(turn, meta) {
@@ -101,16 +122,22 @@ export function createRunner({ store, tools, providers, workdir, origin, bridgeP
       watchdog: false,
       stderr: '',
       timers: [],
+      inflight: new Set(), // tool-call promises the bridge is still waiting on
+      finishing: false, // true once finish() has started; new tool calls are refused
       onEvent: (event) => {
         if (event.type === 'ops.applied') turn.applied += event.count;
         emit(turn, event).catch((err) => log.error(`[agents] ${err.message}`));
       },
     };
-    live.set(turn.id, turn);
-    order.push(turn.id);
 
+    // Only listed once its `user`/`turn.queued` events are actually stored —
+    // otherwise a pump() running concurrently (another turn on the same
+    // conversation finishing right now) could start this one and store
+    // `turn.started` before the events that are supposed to precede it.
     await emit(turn, { type: 'user', text: turn.prompt, context: { viewing: frozen.viewing, target: frozen.target, selection: frozen.selection } });
     await emit(turn, { type: 'turn.queued' });
+    live.set(turn.id, turn);
+    order.push(turn.id);
     await pump();
     return { turnId: turn.id, status: turn.status };
   }
@@ -128,81 +155,88 @@ export function createRunner({ store, tools, providers, workdir, origin, bridgeP
 
   async function start(turn) {
     turn.status = 'running';
-    const meta = await store.conversation(turn.conversationId);
-    const provider = providers.get(meta.provider);
-    await store.updateTurn(turn.id, { status: 'running', startedAt: Date.now() });
-    await store.updateConversation(turn.conversationId, { running: true, activity: `Working on ${turn.target}` });
-    await emit(turn, { type: 'turn.started', provider: meta.provider });
-
-    if (!provider) return finish(turn, { status: 'failed', error: `no provider "${meta.provider}"` });
-
-    turn.token = crypto.randomBytes(32).toString('hex');
-    tokens.set(turn.token, turn);
-    const workspace = path.join(workdir, turn.conversationId);
-    const mcp = {
-      command: process.execPath,
-      args: [bridgePath],
-      env: { MARBLE_DRIVE_URL: origin(), MARBLE_AGENT_TOKEN: turn.token },
-    };
-
-    let spec;
     try {
+      const meta = await store.conversation(turn.conversationId);
+      const provider = providers.get(meta.provider);
+      await store.updateTurn(turn.id, { status: 'running', startedAt: Date.now() });
+      await store.updateConversation(turn.conversationId, { running: true, activity: `Working on ${turn.target}` });
+      await emit(turn, { type: 'turn.started', provider: meta.provider });
+
+      if (!provider) return safeFinish(turn, { status: 'failed', error: `no provider "${meta.provider}"` });
+
+      turn.token = crypto.randomBytes(32).toString('hex');
+      tokens.set(turn.token, turn);
+      const workspace = path.join(workdir, turn.conversationId);
+      const mcp = {
+        command: process.execPath,
+        args: [bridgePath],
+        env: { MARBLE_DRIVE_URL: origin(), MARBLE_AGENT_TOKEN: turn.token },
+      };
+
       await fsp.mkdir(workspace, { recursive: true });
       await provider.prepare?.({ workspace, mcp, meta });
-      spec = provider.spawn({
+      const prompt = await composePrompt(turn, meta);
+
+      // Cancel (or a host shutdown) can land anywhere in the awaits above,
+      // before there is any child to kill. Check here, the last point before
+      // a process would actually start, rather than leave it running unwanted.
+      if (turn.cancelled) return safeFinish(turn, turn.cancelled);
+      if (closed) return safeFinish(turn, { status: 'cancelled', error: 'host closing' });
+
+      const spec = provider.spawn({
         workspace,
         mcp,
-        prompt: await composePrompt(turn, meta),
+        prompt,
         resume: meta.providerSession,
         model: meta.model,
         env: { ...pick(process.env), ...mcp.env },
       });
-    } catch (err) {
-      return finish(turn, { status: 'failed', error: err.message });
-    }
 
-    const child = spawn(spec.command, spec.args, { cwd: workspace, env: spec.env, stdio: ['pipe', 'pipe', 'pipe'] });
-    turn.child = child;
-    child.stdin.on('error', () => {});
-    child.stdin.end(spec.stdin ?? '');
+      const child = spawn(spec.command, spec.args, { cwd: workspace, env: spec.env, stdio: ['pipe', 'pipe', 'pipe'] });
+      turn.child = child;
+      child.stdin.on('error', () => {});
+      child.stdin.end(spec.stdin ?? '');
 
-    const state = {};
-    let stall;
-    const resetStall = () => {
-      clearTimeout(stall);
-      stall = setTimeout(() => stop(turn, { status: 'failed', error: `stalled — no output for ${Math.round(limits.stallMs / 1000)} s` }), limits.stallMs);
-      stall.unref?.();
-    };
-    resetStall();
-    const cap = setTimeout(() => stop(turn, { status: 'cancelled', error: `took longer than ${Math.round(limits.maxMs / 60000)} min` }), limits.maxMs);
-    cap.unref?.();
-    turn.timers.push(() => clearTimeout(stall), () => clearTimeout(cap));
-
-    readline.createInterface({ input: child.stdout }).on('line', (line) => {
-      if (!line.trim()) return;
+      const state = {};
+      let stall;
+      const resetStall = () => {
+        clearTimeout(stall);
+        stall = setTimeout(() => stop(turn, { status: 'failed', error: `stalled — no output for ${Math.round(limits.stallMs / 1000)} s` }), limits.stallMs);
+        stall.unref?.();
+      };
       resetStall();
-      store.appendRaw(turn.id, line).catch(() => {});
-      let events = [];
-      try {
-        events = provider.parse(line, state);
-      } catch {
-        return;
-      }
-      for (const event of events) handle(turn, event);
-    });
-    child.stderr.on('data', (chunk) => {
-      turn.stderr = (turn.stderr + chunk).slice(-STDERR_TAIL);
-    });
-    child.on('error', (err) => {
-      turn.stderr = err.message;
-    });
-    child.on('close', (code) => {
-      const ok = code === 0 && turn.done?.ok !== false;
-      finish(turn, turn.cancelled ?? {
-        status: ok ? 'completed' : 'failed',
-        error: ok ? null : turn.done?.error ?? (turn.stderr.trim() || `exited with ${code}`),
+      const cap = setTimeout(() => stop(turn, { status: 'cancelled', error: `took longer than ${Math.round(limits.maxMs / 60000)} min` }), limits.maxMs);
+      cap.unref?.();
+      turn.timers.push(() => clearTimeout(stall), () => clearTimeout(cap));
+
+      readline.createInterface({ input: child.stdout }).on('line', (line) => {
+        if (!line.trim()) return;
+        resetStall();
+        store.appendRaw(turn.id, line).catch(() => {});
+        let events = [];
+        try {
+          events = provider.parse(line, state);
+        } catch {
+          return;
+        }
+        for (const event of events) handle(turn, event);
       });
-    });
+      child.stderr.on('data', (chunk) => {
+        turn.stderr = (turn.stderr + chunk).slice(-STDERR_TAIL);
+      });
+      child.on('error', (err) => {
+        turn.stderr = err.message;
+      });
+      child.on('close', (code) => {
+        const ok = code === 0 && turn.done?.ok !== false;
+        safeFinish(turn, turn.cancelled ?? {
+          status: ok ? 'completed' : 'failed',
+          error: ok ? null : turn.done?.error ?? (turn.stderr.trim() || `exited with ${code}`),
+        });
+      });
+    } catch (err) {
+      return safeFinish(turn, { status: 'failed', error: err.message });
+    }
   }
 
   function handle(turn, event) {
@@ -211,7 +245,9 @@ export function createRunner({ store, tools, providers, workdir, origin, bridgeP
         store.updateConversation(turn.conversationId, { providerSession: event.id }).catch(() => {});
         return;
       case 'text.delta':
-        publish(turn.conversationId, { turn: turn.id, ...event });
+        chained(turn.conversationId, () => {
+          publish(turn.conversationId, { turn: turn.id, ...event });
+        });
         return;
       case 'text':
       case 'tool.call':
@@ -229,10 +265,13 @@ export function createRunner({ store, tools, providers, workdir, origin, bridgeP
     }
   }
 
-  /** Ask a running process to stop, and make sure it does. */
+  /** Ask a running process to stop, and make sure it does — or, if it hasn't
+   *  spawned yet, just record the outcome: `start` checks it before spawning
+   *  and finishes the turn instead of launching a process nobody wants. */
   function stop(turn, outcome) {
-    if (!turn.child || turn.cancelled) return;
+    if (turn.cancelled) return;
     turn.cancelled = outcome;
+    if (!turn.child) return;
     turn.child.kill('SIGTERM');
     const kill = setTimeout(() => turn.child.kill('SIGKILL'), limits.killGraceMs);
     kill.unref?.();
@@ -242,10 +281,17 @@ export function createRunner({ store, tools, providers, workdir, origin, bridgeP
   async function finish(turn, { status, error = null }) {
     if (turn.status === 'finished') return;
     turn.status = 'finished';
+    // From here, a tool call in flight can still finish — callTool checks
+    // this and refuses anything new — but we wait for the ones already
+    // running so their undo records and `ops.applied` counts land before
+    // the turn's own totals and closing event do.
+    turn.finishing = true;
     for (const clear of turn.timers) clear();
+    if (turn.inflight.size) await Promise.allSettled([...turn.inflight]);
     if (turn.token) tokens.delete(turn.token);
     live.delete(turn.id);
-    order.splice(order.indexOf(turn.id), 1);
+    const idx = order.indexOf(turn.id);
+    if (idx !== -1) order.splice(idx, 1);
 
     const finishedAt = Date.now();
     if (turn.undo.length) await store.saveUndo(turn.id, turn.undo);
@@ -262,7 +308,7 @@ export function createRunner({ store, tools, providers, workdir, origin, bridgeP
       lastFinishedAt: finishedAt,
     });
     await emit(turn, { type: `turn.${status}`, applied: turn.applied, ...(error ? { error } : {}) });
-    await pump();
+    await pump().catch((err) => log.error(`[agents] ${err.message}`));
   }
 
   return {
@@ -284,7 +330,8 @@ export function createRunner({ store, tools, providers, workdir, origin, bridgeP
       const turn = live.get(turnId);
       if (!turn || turn.status !== 'queued') return false;
       live.delete(turnId);
-      order.splice(order.indexOf(turnId), 1);
+      const idx = order.indexOf(turnId);
+      if (idx !== -1) order.splice(idx, 1);
       await store.updateTurn(turnId, { status: 'removed', finishedAt: Date.now() });
       await emit(turn, { type: 'turn.removed' });
       return true;
@@ -294,8 +341,14 @@ export function createRunner({ store, tools, providers, workdir, origin, bridgeP
 
     async callTool(token, name, input) {
       const turn = tokens.get(token);
-      if (!turn) return null;
-      return tools.call(name, input, turn);
+      if (!turn || turn.finishing) return null;
+      const call = tools.call(name, input, turn);
+      turn.inflight.add(call);
+      try {
+        return await call;
+      } finally {
+        turn.inflight.delete(call);
+      }
     },
 
     watchdog(docPath, sha) {
