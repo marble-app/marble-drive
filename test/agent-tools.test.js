@@ -186,4 +186,39 @@ test('setInner that introduces new elements gets them minted ids, not left unadd
   assert.doesNotMatch(stored, /<li>New/, 'every inserted <li> should have gotten a data-marble-id');
 });
 
+const { undoTurn } = await import('../server/agent/undo.js');
+
+test('undo reverts the agent and keeps what a person changed afterwards', async () => {
+  const turn = await freshTurn();
+  await tools.call('read_document', { path: turn.target }, turn);
+  await tools.call('apply_ops', { path: turn.target, note: 'x', ops: [{ type: 'setText', id: 'h', text: 'Backlog' }] }, turn);
+  await tools.call('apply_ops', { path: turn.target, note: 'x', ops: [{ type: 'remove', id: 'q2' }] }, turn);
+  const inserted = await tools.call('apply_ops', {
+    path: turn.target, note: 'x', ops: [{ type: 'insert', html: '<li>Where?</li>', parentId: 'q', beforeId: null }],
+  }, turn);
+  const [newId] = inserted.introduced;
+
+  // The person rewrites the item the agent added.
+  await drive.writeOps(turn.target, [{ type: 'setText', id: newId, text: 'Where, and when?' }], { client: 'tab' });
+
+  const result = await undoTurn({ records: turn.undo, writeOps: drive.writeOps, client: `agent-undo:${turn.conversationId}` });
+  assert.deepEqual(result, { reverted: 2, kept: 1, errors: [] });
+
+  const after = await drive.store.read(turn.target);
+  assert.match(after, />Research Garden</);
+  assert.match(after, /data-marble-id="q2">How\?/);
+  assert.match(after, /Where, and when\?/, 'the person\'s edit survives');
+});
+
+test('undoing a turn whose document is gone reports it instead of throwing', async () => {
+  const result = await undoTurn({
+    records: [{ path: 'no-such-doc', steps: [{ inverse: { type: 'remove', id: 'x' }, id: 'x', expect: 'abc', absent: null }] }],
+    writeOps: drive.writeOps,
+    client: 'agent-undo:x',
+  });
+  assert.equal(result.reverted, 0);
+  assert.equal(result.kept, 1);
+  assert.match(result.errors[0], /no document/);
+});
+
 test.after(() => drive.close());
