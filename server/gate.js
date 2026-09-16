@@ -18,6 +18,14 @@ import crypto from 'node:crypto';
 
 const DAY = 24 * 60 * 60 * 1000;
 
+const LOOPBACK = new Set(['127.0.0.1', '::1', '::ffff:127.0.0.1']);
+
+/** Did this request reach the host over HTTPS? Only a proxy on this machine is
+ *  believed when it says so — Tailscale Serve terminates TLS and forwards to
+ *  loopback — because a header is a thing anybody can type. */
+const overHttps = (req) =>
+  LOOPBACK.has(req?.socket?.remoteAddress) && req.headers?.['x-forwarded-proto'] === 'https';
+
 const equal = (a, b) => {
   const left = Buffer.from(a ?? '', 'utf8');
   const right = Buffer.from(b ?? '', 'utf8');
@@ -79,20 +87,26 @@ export function createGate({ secret, cookieName = 'marble_drive', days = 30, sec
   /** The secret, offered once, exchanged for a cookie. */
   const accepts = (offered) => open || (Boolean(offered) && equal(offered, secret));
 
-  const cookieHeader = () =>
+  // Secure when it was asked for, and otherwise when this request arrived over
+  // HTTPS. One host is reached both ways: http://localhost at the desk and the
+  // tailnet's https address from the laptop. A Secure cookie over plain http is
+  // one Safari drops, even on localhost, so the flag follows the request.
+  const secureFor = (req) => secure || overHttps(req);
+
+  const cookieHeader = (req) =>
     [
       `${cookieName}=${issue()}`,
       'Path=/',
       'HttpOnly',
       'SameSite=Lax',
       `Max-Age=${Math.floor((days * DAY) / 1000)}`,
-      secure ? 'Secure' : null,
+      secureFor(req) ? 'Secure' : null,
     ]
       .filter(Boolean)
       .join('; ');
 
-  const clearHeader = () =>
-    `${cookieName}=; Path=/; HttpOnly; SameSite=Lax; Max-Age=0${secure ? '; Secure' : ''}`;
+  const clearHeader = (req) =>
+    `${cookieName}=; Path=/; HttpOnly; SameSite=Lax; Max-Age=0${secureFor(req) ? '; Secure' : ''}`;
 
   return { open, allows, accepts, issue, valid, cookieHeader, clearHeader, cookieName };
 }

@@ -6,6 +6,7 @@
 //   marble-drive icon [path]      give a document already in the drive its mark
 //   marble-drive weigh [path]     what the documents weigh, and how much is base64
 //   marble-drive backup           one backup, now
+//   marble-drive remote [on|off|status|check]   reach it from your own devices, over Tailscale
 //   marble-drive starters         what you can make
 //
 // Every one of these goes through the same store the host does, which is the
@@ -20,6 +21,7 @@ import { backupNow } from '../server/backup.js';
 import { config } from '../server/config.js';
 import { stamp, stamped } from '../server/favicon.js';
 import { build as buildStarter, list as listStarters } from '../server/gallery.js';
+import { check as checkRemote, serveOff, serveOn, serveStatus, tailnetUrl } from '../server/remote.js';
 import { splitPath, parsePath } from '../server/paths.js';
 import { seedDrive } from '../server/seed.js';
 import { createStore } from '../server/store/index.js';
@@ -59,11 +61,14 @@ switch (command) {
   case 'backup':
     await backup();
     break;
+  case 'remote':
+    await remote();
+    break;
   case 'starters':
     for (const starter of listStarters()) console.log(`${starter.id.padEnd(9)} ${starter.blurb}`);
     break;
   default:
-    fail(`no command "${command}" — there is: serve, new, icon, weigh, backup, starters`);
+    fail(`no command "${command}" — there is: serve, new, icon, weigh, backup, remote, starters`);
 }
 
 // ---------------------------------------------------------------------- serve
@@ -237,4 +242,47 @@ async function backup() {
   });
   if (!result.ok) fail(result.why ?? 'the backup command failed');
   console.log(`[drive] backup → ${result.target ?? result.command}${result.dropped ? `, ${result.dropped} swept` : ''}`);
+}
+
+// --------------------------------------------------------------------- remote
+
+/** Your own devices, through Tailscale Serve. The host itself is started the
+ *  usual way; this only points the tailnet's HTTPS address at it. */
+async function remote() {
+  const sub = args[0] ?? 'status';
+
+  if (sub === 'on') {
+    const result = await serveOn({ config });
+    if (result.problems) fail(`not serving yet:\n\n  - ${result.problems.join('\n  - ')}\n`);
+    if (result.enable) fail(`Serve is not enabled on this tailnet. An admin enables it once, here:\n\n  ${result.enable}\n`);
+    if (!result.ok) fail(result.error);
+    console.log(`[drive] on the tailnet at\n\n  ${result.url}\n`);
+    console.log(`[drive] forwarding to 127.0.0.1:${config.port} — start the host there if it is not running,`);
+    console.log('[drive] then: marble-drive remote check');
+    return;
+  }
+
+  if (sub === 'off') {
+    const result = await serveOff();
+    if (result.code !== 0) fail(result.output.trim());
+    console.log('[drive] off the tailnet');
+    return;
+  }
+
+  if (sub === 'status') {
+    console.log((await serveStatus()).output.trim());
+    return;
+  }
+
+  if (sub === 'check') {
+    if (!config.secret) fail('MARBLE_DRIVE_SECRET is unset, so there is no gate to check');
+    const url = typeof flags.url === 'string' ? flags.url : await tailnetUrl();
+    console.log(`[drive] checking ${url}\n`);
+    const results = await checkRemote({ url, secret: config.secret });
+    for (const c of results) console.log(`  ${c.ok ? '✓' : '✗'} ${c.name}${c.detail ? `  — ${c.detail}` : ''}`);
+    if (results.some((c) => !c.ok)) process.exit(1);
+    return;
+  }
+
+  fail(`no "remote ${sub}" — there is: on, off, status, check`);
 }

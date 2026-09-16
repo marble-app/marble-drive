@@ -1,0 +1,209 @@
+<style>
+  .timeline {
+    position: relative;
+    display: grid;
+    grid-template-columns: repeat(6, minmax(150px, 1fr));
+    gap: 14px;
+    margin: 30px 0 24px;
+    overflow-x: auto;
+    padding: 8px 2px 22px;
+  }
+  .timeline::before {
+    content: "";
+    position: absolute;
+    top: 42px;
+    left: 60px;
+    right: 60px;
+    height: 2px;
+    background: linear-gradient(90deg, #54ae83, #708ee8 35%, #b67be4 68%, #e17c8e);
+    opacity: .75;
+  }
+  .milestone {
+    position: relative;
+    display: flex;
+    flex-direction: column;
+    min-height: 310px;
+    padding: 68px 16px 16px;
+    border: 1px solid var(--border);
+    border-radius: 16px;
+    background: var(--surface);
+  }
+  .milestone::before {
+    content: attr(data-step);
+    position: absolute;
+    top: 20px;
+    left: 18px;
+    display: grid;
+    place-items: center;
+    width: 42px;
+    height: 42px;
+    border: 3px solid var(--surface);
+    border-radius: 50%;
+    background: var(--accent);
+    box-shadow: 0 0 0 1px var(--border);
+    color: white;
+    font-size: 13px;
+    font-weight: 800;
+    z-index: 1;
+  }
+  .milestone h3 {
+    margin: 0 0 8px;
+    font-size: 17px;
+  }
+  .milestone .result {
+    min-height: 48px;
+    margin: 0 0 13px;
+    color: var(--text-muted);
+    font-size: 12px;
+    line-height: 1.45;
+  }
+  .milestone ul {
+    display: grid;
+    gap: 7px;
+    margin: 0;
+    padding-left: 16px;
+    font-size: 12px;
+    line-height: 1.35;
+  }
+  .milestone .tag {
+    align-self: flex-start;
+    margin-top: auto;
+    padding: 5px 8px;
+    border-radius: 999px;
+    background: color-mix(in srgb, var(--accent) 12%, transparent);
+    color: var(--accent);
+    font-size: 10px;
+    font-weight: 750;
+    letter-spacing: .04em;
+    text-transform: uppercase;
+  }
+  .checkpoint {
+    border-color: color-mix(in srgb, var(--accent) 65%, var(--border));
+    box-shadow: 0 10px 30px color-mix(in srgb, var(--accent) 9%, transparent);
+  }
+  .decision-note {
+    display: grid;
+    grid-template-columns: auto 1fr;
+    gap: 12px;
+    align-items: start;
+    padding: 14px 16px;
+    border-left: 3px solid var(--accent);
+    border-radius: 8px;
+    background: color-mix(in srgb, var(--accent) 8%, var(--surface));
+  }
+  .decision-note strong { font-size: 12px; }
+  .decision-note p {
+    margin: 0;
+    color: var(--text-muted);
+    font-size: 12px;
+    line-height: 1.45;
+  }
+  .approval-row {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 14px;
+    margin-top: 24px;
+  }
+  .approval-row .option { margin: 0; }
+  @media (max-width: 800px) {
+    .approval-row { grid-template-columns: 1fr; }
+  }
+</style>
+
+<h2>MacBook Pro host · proposed build timeline</h2>
+<p class="subtitle">Ship remote access as its own useful release. Then add coding-agent powers behind a second, stricter boundary.</p>
+
+<div class="timeline">
+  <section class="milestone" data-step="Now">
+    <h3>Existing baseline</h3>
+    <p class="result">G0 and G1 already supply the network write loop, Drive interface, passphrase gate, Docker packaging, history, and backups.</p>
+    <ul>
+      <li>Files remain the source of truth</li>
+      <li>Browser and external edits reconcile live</li>
+      <li>No public tunnel configured yet</li>
+    </ul>
+    <span class="tag">Already built</span>
+  </section>
+
+  <section class="milestone checkpoint" data-step="1">
+    <h3>Personal remote Drive</h3>
+    <p class="result">Open Marble Drive from the MacBook Air anywhere and log in with one strong passphrase.</p>
+    <ul>
+      <li>MacBook Pro drive root</li>
+      <li>Tailscale Funnel HTTPS URL</li>
+      <li>Secure cookie and gate checks</li>
+      <li>Live-event stream tested remotely</li>
+    </ul>
+    <span class="tag">First usable release</span>
+  </section>
+
+  <section class="milestone" data-step="2">
+    <h3>Always-on operations</h3>
+    <p class="result">Make the laptop host recover without opening a terminal after ordinary restarts or failures.</p>
+    <ul>
+      <li>Automatic service and tunnel startup</li>
+      <li>Sleep and power-loss settings</li>
+      <li>Health check and useful logs</li>
+      <li>Off-device backup and restore drill</li>
+    </ul>
+    <span class="tag">Reliable host</span>
+  </section>
+
+  <section class="milestone" data-step="3">
+    <h3>Agent control plane</h3>
+    <p class="result">Submit and cancel coding tasks from a Marble document without exposing a raw shell endpoint.</p>
+    <ul>
+      <li>Authenticated job API</li>
+      <li>Agent session document inside Drive</li>
+      <li>Progress, tool calls, and audit log</li>
+      <li>One allowlisted repository per task</li>
+    </ul>
+    <span class="tag">No code execution yet</span>
+  </section>
+
+  <section class="milestone" data-step="4">
+    <h3>Isolated coding worker</h3>
+    <p class="result">Give the agent full coding tools inside a disposable worktree instead of the live checkout.</p>
+    <ul>
+      <li>One Git worktree and branch per task</li>
+      <li>Sandboxed commands and resource limits</li>
+      <li>Scoped environment variables</li>
+      <li>Tests, diff, cancel, and cleanup</li>
+    </ul>
+    <span class="tag">Machine boundary</span>
+  </section>
+
+  <section class="milestone checkpoint" data-step="5">
+    <h3>Live preview and promote</h3>
+    <p class="result">Watch the isolated interface change immediately, then move the finished result into the main repository.</p>
+    <ul>
+      <li>Private preview host per session</li>
+      <li>Authenticated proxy through Drive</li>
+      <li>Live updates without page reloads</li>
+      <li>Promote, reject, and one-step rollback</li>
+    </ul>
+    <span class="tag">Agent usable release</span>
+  </section>
+</div>
+
+<div class="decision-note">
+  <strong>Roadmap meaning</strong>
+  <p>The coding agent is a single-owner extension to today’s host. It does not complete G4 “local-first, desktop, agent as peer,” because the G4 synchronization protocol still remains future work.</p>
+</div>
+
+<div class="approval-row options">
+  <div class="option" data-choice="timeline-approved" onclick="toggleSelect(this)">
+    <div class="letter">✓</div>
+    <div class="content">
+      <h3>Use this build order</h3>
+      <p>Remote access first, reliability second, then the isolated coding-agent path.</p>
+    </div>
+  </div>
+  <div class="option" data-choice="timeline-revise" onclick="toggleSelect(this)">
+    <div class="letter">↺</div>
+    <div class="content">
+      <h3>Revise the order</h3>
+      <p>Keep the MacBook Pro host, but change which capability comes first.</p>
+    </div>
+  </div>
+</div>

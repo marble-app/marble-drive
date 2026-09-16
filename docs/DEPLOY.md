@@ -40,6 +40,56 @@ capability URLs and per-document policy are the next generation's work, and the
 vision is explicit that building identity now would be building it before
 knowing what sharing needs of it.
 
+## From your own devices: Tailscale Serve
+
+The drive stays on the machine it runs on, and your other devices reach it over
+your tailnet. Serve holds an HTTPS certificate for the machine's tailnet name
+and forwards to the host on loopback. Only devices signed in to your tailnet can
+resolve or reach that name, so the gate is the second lock rather than the only
+one. Funnel — the same thing, public — is deliberately not used: once an agent
+runs on this machine, a passphrase form on the open internet is the whole of
+what stands in front of it.
+
+In `.env.local` (git-ignored, loaded by `npm run dev` and `npm run remote`):
+
+```
+MARBLE_DRIVE_SECRET=…     openssl rand -base64 32
+PORT=4400
+HOST=127.0.0.1
+```
+
+```
+npm run dev                  the host, on 127.0.0.1:4400
+npm run remote on            point https://<machine>.<tailnet>.ts.net at it
+npm run remote check         what a device on the tailnet will see
+npm run remote status
+npm run remote off           this address only; anything else served is left alone
+```
+
+`remote on` refuses a host without a secret, without an explicit `PORT`, or
+listening on anything but loopback. The port matters because Serve's config
+lives in `tailscaled`: it survives restarts of the host and of the machine, and
+a host that stepped to the next free port would leave it pointing at whatever
+took this one.
+
+The first time, Serve may not be enabled on the tailnet. `remote on` prints the
+admin page that enables it; visit it once and run `remote on` again.
+
+`remote check` asks, from this machine, the four things you would otherwise
+find out on the laptop: `/health` answers, `/` without a cookie is sent to the
+gate, the secret opens it, and a live event stream's first frame arrives through
+the proxy (a buffered stream is a page that never hears an edit). Over https it
+also checks that the gate's cookie comes back `Secure`.
+
+The cookie is `Secure` per request: set when the request came from loopback
+with `X-Forwarded-Proto: https`, which is what Serve sends, and not set on
+`http://localhost` at the desk, where Safari would drop it. A forwarded-proto
+header from any other address is ignored. `MARBLE_DRIVE_SECURE_COOKIE=1` still
+means always.
+
+The tailnet identity headers Serve adds (`Tailscale-User-Login`) are not used
+for sign-in: anything else running on this machine can send them to loopback.
+
 ## HTTPS
 
 Terminate in front. Anything will do — Caddy is two lines:
@@ -90,7 +140,7 @@ host. There is no import step, because there was no export step.
 | | |
 |---|---|
 | `MARBLE_DRIVE_ROOT` | where the documents and the one `.marble/` live |
-| `PORT`, `HOST` | asking for a port by name means that port; not asking means the host will step to the next free one |
+| `PORT`, `HOST` | asking for a port by name means that port; not asking means the host will step to the next free one. `HOST` defaults to `127.0.0.1`; the image sets `0.0.0.0` |
 | `MARBLE_DRIVE_HOME` | the document `/` lands on. Default `drive` |
 | `MARBLE_DRIVE_MAX_BODY` | 16 MB. An ops batch, or a document |
 | `MARBLE_DRIVE_MAX_BLOB` | 64 MB |

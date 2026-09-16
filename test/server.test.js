@@ -129,6 +129,54 @@ test('a document three folders down is created, served and listed', async () => 
   assert.equal(tree.children.find((c) => c.path === 'work').children[0].path, 'work/q3');
 });
 
+// A file in a folder that is not a document. The Drive draws these quietly
+// rather than hiding them, and a thing you can see and cannot open is worse
+// than one you cannot see — so there is a route, and it is careful.
+test('a file that is not a document is in the tree and reachable', async () => {
+  await fsp.mkdir(path.join(ROOT, 'work/q3'), { recursive: true });
+  await fsp.writeFile(path.join(ROOT, 'work/q3/refs.bib'), '@article{a}');
+
+  const tree = await asJson(await get('/drive/tree?folder=work%2Fq3'));
+  const file = tree.children.find((c) => c.name === 'refs.bib');
+  assert.equal(file.kind, 'file');
+  assert.equal(file.ext, 'bib');
+  // `/docs` is the carrier's surface and it answers with documents, so a file
+  // arriving in the tree must not have arrived there too.
+  const docs = await asJson(await get('/docs'));
+  assert.equal(docs.some((entry) => entry.path.endsWith('.bib')), false);
+
+  const served = await get('/drive/file?path=work%2Fq3%2Frefs.bib');
+  assert.equal(served.status, 200);
+  assert.equal(await served.text(), '@article{a}');
+});
+
+test('a file is served under a type the browser will not execute', async () => {
+  // Text, and text only, for anything textual — a `.js` in a folder is
+  // something you read, and a type the browser runs would be a script on this
+  // origin with this drive's cookie.
+  await fsp.writeFile(path.join(ROOT, 'work/q3/tool.js'), 'alert(1)');
+  const js = await get('/drive/file?path=work%2Fq3%2Ftool.js');
+  assert.equal(js.headers.get('content-type'), 'text/plain; charset=utf-8');
+  assert.equal(js.headers.get('x-content-type-options'), 'nosniff');
+  assert.match(js.headers.get('content-security-policy'), /sandbox/);
+  assert.match(js.headers.get('content-disposition'), /^inline/);
+
+  // Not on the allowlist, so it is handed over rather than rendered. An SVG is
+  // the one that matters: it looks like a picture and can carry script.
+  await fsp.writeFile(path.join(ROOT, 'work/q3/logo.svg'), '<svg/>');
+  const svg = await get('/drive/file?path=work%2Fq3%2Flogo.svg');
+  assert.equal(svg.headers.get('content-type'), 'application/octet-stream');
+  assert.match(svg.headers.get('content-disposition'), /^attachment/);
+});
+
+test('the file route refuses a document, a folder and a way out of the drive', async () => {
+  assert.equal((await get('/drive/file?path=work%2Fq3%2Fnotes')).status, 404);
+  assert.equal((await get('/drive/file?path=work%2Fq3%2Fnotes.mrbl')).status, 400);
+  assert.equal((await get('/drive/file?path=work%2Fq3')).status, 404);
+  assert.equal((await get('/drive/file?path=..%2F..%2Fetc%2Fpasswd')).status, 400);
+  assert.equal((await get('/drive/file?path=.marble%2Ftrash.jsonl')).status, 400);
+});
+
 test('the loop: an op splices the file and the bytes on disk change', async () => {
   const page = await (await get('/a/work%2Fq3%2Fnotes')).text();
   const id = idIn(page, 'h1');
@@ -178,6 +226,29 @@ test('the echo reaches every other client and never the one that wrote', async (
   const heard = (frames) => frames.filter((frame) => frame.data === 'changed');
   assert.equal(heard(await mine.frames).length, 0, 'the writer is not reconciled against its own gesture');
   assert.equal(heard(await theirs.frames).length, 1, 'every other client is told');
+});
+
+test('a late second event for a save the host already made is not an edit from outside', async () => {
+  const doc = encodeURIComponent('work/q3/notes');
+  const page = await (await get('/a/work%2Fq3%2Fnotes')).text();
+  const id = idIn(page, 'h1');
+  await fetch(`${base}/ops?app=${doc}&client=c3`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify([{ type: 'setText', id, text: 'Settled title' }]),
+  });
+  // Long enough for the save's own event to settle and use up its mark.
+  await new Promise((resolve) => setTimeout(resolve, 300));
+
+  const writer = collect(`/events?app=${doc}&client=c3`, { want: 1, ms: 900 });
+  await writer.ready;
+  // What macOS does to a busy watcher: the same save, reported again, late.
+  // The bytes are the ones the host wrote, so nothing changed.
+  const file = path.join(ROOT, 'work/q3/notes.mrbl');
+  await fsp.writeFile(file, await fsp.readFile(file, 'utf8'));
+
+  const heard = (await writer.frames).filter((frame) => frame.data === 'changed');
+  assert.equal(heard.length, 0, 'the writer is not reconciled against its own save');
 });
 
 test('an edit from outside the host reaches the page, with the prior state kept', async () => {
@@ -369,6 +440,28 @@ test('a document made here carries its own mark, and the host has one for the re
   assert.match(served, /<link rel="icon" href="data:image\/svg\+xml,[^"]+">/);
   const taken = await (await get(`/drive/download?path=${encodeURIComponent(made)}`)).text();
   assert.match(taken, /<link rel="icon" href="data:image\/svg\+xml,/);
+});
+
+test('the gate cookie is Secure when the secret arrived through a local HTTPS proxy', async () => {
+  const closed = await createDrive(loadConfig({ ...process.env, MARBLE_DRIVE_SECRET: 'hunter2' }), {
+    log: quiet,
+  });
+  const shutPort = await new Promise((resolve) => {
+    closed.server.listen(0, '127.0.0.1', () => resolve(closed.server.address().port));
+  });
+  const offer = (headers = {}) =>
+    fetch(`http://127.0.0.1:${shutPort}/gate`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', ...headers },
+      body: JSON.stringify({ secret: 'hunter2' }),
+    });
+
+  // What Tailscale Serve looks like from here: loopback, saying https.
+  assert.match((await offer({ 'X-Forwarded-Proto': 'https' })).headers.get('set-cookie'), /; Secure/);
+  // And http://localhost at the desk still gets a cookie Safari will keep.
+  assert.doesNotMatch((await offer()).headers.get('set-cookie'), /Secure/);
+
+  await closed.close();
 });
 
 test('health answers before the gate, and the gate closes everything else', async () => {

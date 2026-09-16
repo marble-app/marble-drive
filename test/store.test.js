@@ -109,6 +109,72 @@ test('create refuses to overwrite', async () => {
   await assert.rejects(() => store.create('fresh', doc('Fresh')), /already exists/);
 });
 
+// ------------------------------------------------------- the third kind
+//
+// A folder holds the work and it holds what the work needed. The second is off
+// by default in `list` — every caller that says "documents" means documents —
+// and on in `tree`, which is what a Drive draws a folder from.
+
+test('a file that is not a document is listed only when asked for', async () => {
+  await fsp.mkdir(path.join(ROOT, 'paper'), { recursive: true });
+  await fsp.writeFile(path.join(ROOT, 'paper', 'refs.bib'), '@article{a}');
+  await fsp.writeFile(path.join(ROOT, 'paper', 'cover.png'), 'not really a png');
+  await store.write('paper/draft', doc('Draft'));
+
+  const documents = await store.list({ folder: 'paper' });
+  assert.deepEqual(documents.map((e) => e.path), ['paper/draft']);
+
+  const everything = await store.list({ folder: 'paper', files: true });
+  const file = everything.find((e) => e.path === 'paper/refs.bib');
+  assert.equal(file.kind, 'file');
+  // The extension stays in the path, because for a file that *is* the address.
+  assert.equal(file.name, 'refs.bib');
+  assert.equal(file.ext, 'bib');
+  assert.ok(file.bytes > 0);
+});
+
+test('the tree carries files, ordered behind the documents', async () => {
+  const paper = (await store.tree({ folder: 'paper' })).children;
+  assert.deepEqual(paper.map((e) => e.kind), ['doc', 'file', 'file']);
+});
+
+test('a file with no extension, and a name the grammar refuses', async () => {
+  await fsp.writeFile(path.join(ROOT, 'paper', 'Makefile'), 'all:');
+  // A leading dot is how the store hides its own bookkeeping, so a file named
+  // that way is not addressable and is left alone rather than listed.
+  await fsp.writeFile(path.join(ROOT, 'paper', '.hidden'), 'x');
+  const files = await store.list({ folder: 'paper', files: true });
+  assert.equal(files.find((e) => e.name === 'Makefile').ext, '');
+  assert.equal(files.some((e) => e.name === '.hidden'), false);
+});
+
+test('readRaw hands over a file, and refuses a document', async () => {
+  const file = await store.readRaw('paper/refs.bib');
+  assert.equal(file.ext, 'bib');
+  const bytes = [];
+  for await (const chunk of file.open()) bytes.push(chunk);
+  assert.equal(Buffer.concat(bytes).toString(), '@article{a}');
+
+  assert.equal(await store.readRaw('paper/draft'), null);
+  await assert.rejects(() => store.readRaw('paper/draft.mrbl'), /a document, not a file/);
+});
+
+test('a file can be renamed and trashed like anything else in the drive', async () => {
+  await store.move('paper/cover.png', 'paper/figure-one.png');
+  assert.equal(await store.hasFile('paper/figure-one.png'), true);
+  assert.equal(await store.hasFile('paper/cover.png'), false);
+  // Moving onto a name a file already has is refused, the same as for a
+  // document — a rename that overwrites is a delete nobody asked for.
+  await assert.rejects(() => store.move('paper/refs.bib', 'paper/figure-one.png'), /already exists/);
+
+  const entry = await store.trash('paper/figure-one.png');
+  assert.equal(entry.kind, 'file');
+  assert.equal(await store.hasFile('paper/figure-one.png'), false);
+  const back = await store.untrash(entry.id);
+  assert.equal(back.path, 'paper/figure-one.png');
+  assert.equal(await store.hasFile('paper/figure-one.png'), true);
+});
+
 test('every method refuses a path that leaves the drive', async () => {
   await assert.rejects(() => store.write('../escape', doc('No')), /not a folder|outside/);
   await assert.rejects(() => store.mkdir('../escape'), /not a folder|outside/);

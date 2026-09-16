@@ -298,6 +298,12 @@ __ICON__
     background: color-mix(in srgb, var(--folder) 16%, var(--paper-2));
     color: var(--folder);
   }
+  /* A material inside a folder, on that folder's tile: present, and flatter
+     than the documents beside it. */
+  .item .thumb .mini .cell.is-mat {
+    background: none; box-shadow: inset 0 0 0 1px var(--line); color: var(--faint);
+  }
+  .item .thumb .mini .cell.is-mat .mini-ico { opacity: .5; }
   .item .thumb .mini .cell.is-empty { grid-column: 1 / -1; background: none; box-shadow: none; }
   .item .thumb .mini .mini-ico { display: flex; color: inherit; opacity: .72; z-index: 0; }
   .item .thumb .mini .mini-ico .glyph { width: 1rem; height: 1rem; }
@@ -414,6 +420,91 @@ __ICON__
 
   .empty { padding: 4rem 1.5rem; text-align: center; color: var(--faint); }
   .empty strong { display: block; font-size: 1rem; color: var(--muted); margin-bottom: .3rem; font-weight: 500; }
+
+  /* --------------------------------------------------------- the materials */
+  /* Not everything in a folder is what the folder is *for*. A paper's folder
+     holds the paper and it also holds the bibliography, the cover images, and
+     the JSON some script reads — and a folder of nothing but those is the same
+     thing one level up. They are facts about the work rather than the work, so
+     they are drawn the way a footnote is drawn: below the rule, at a size you
+     read second, folded away until you ask.
+     Deliberately not a smaller tile. A tile at 80% is still a tile competing
+     for the same glance; what makes something secondary is being in a
+     different register, not a smaller one. So: no card, no preview, no folder
+     colour, no weight bar — none of the identity the drive spends on documents. */
+  .mats { grid-column: 1 / -1; margin: 1.4rem 0 0; }
+  body[data-view="list"] .mats { margin: 1.4rem 1.4rem 0; }
+  .mats-head {
+    display: flex; align-items: center; gap: .5rem; width: 100%;
+    padding: .4rem .1rem; border: 0; border-top: 1px solid var(--line);
+    background: none; color: var(--faint); font-size: .78rem; text-align: left;
+    cursor: pointer; border-radius: 0;
+  }
+  .mats-head:hover { color: var(--muted); }
+  .mats-head:focus-visible { outline: 2px solid var(--accent-ink); outline-offset: 2px; }
+  /* The folder holds nothing else, so there is nothing to fold this away from
+     and it is a label rather than a control. */
+  .mats-head.is-fixed { cursor: default; }
+  .mats-head.is-fixed:hover { color: var(--faint); }
+  .mats-head .caret {
+    flex: 0 0 auto; width: .6rem; display: block;
+    transition: transform var(--t) var(--settle);
+  }
+  .mats[data-open="1"] .mats-head .caret { transform: rotate(90deg); }
+  .mats-head .what { letter-spacing: .04em; text-transform: uppercase; font-weight: 600; }
+  .mats-head .how-much { color: var(--faint); font-weight: 400; text-transform: none; letter-spacing: 0; }
+  /* Closed is the default and it is not a hidden state — the count in the
+     header is the whole answer most of the time, which is what makes folding
+     it away honest rather than lossy. */
+  .mats-body { display: none; padding: .35rem 0 .2rem; }
+  .mats[data-open="1"] .mats-body { display: flex; flex-wrap: wrap; gap: .35rem .45rem; }
+  /* A material row is still an `.item` with a path and a kind on it, so the
+     pick, the marquee, the row menu, the drag and Enter all reach it without
+     knowing this strip exists. What `data-material` overrides is only how it
+     looks — and it is written by the same line that decides it, so the CSS
+     here and the tint stamp in script are reading one answer, not two. */
+  body[data-view="grid"] .item[data-material],
+  body[data-view="list"] .item[data-material] {
+    display: inline-flex; align-items: center; gap: .4rem;
+    padding: .22rem .3rem .22rem .5rem; margin: 0;
+    border: 1px solid transparent; border-radius: 999px;
+    background: var(--paper-2); color: var(--muted);
+    max-width: 20rem; min-width: 0; box-shadow: none; transform: none;
+  }
+  body[data-view="grid"] .item[data-material]:hover,
+  body[data-view="list"] .item[data-material]:hover {
+    background: var(--paper-3); border-color: var(--line); color: var(--ink);
+    box-shadow: none; transform: none;
+  }
+  .item[data-material] .thumb, .item[data-material] .row-meta { display: none; }
+  .item[data-material] .name { gap: .35rem; }
+  .item[data-material] .name b { font-weight: 400; font-size: .78rem; }
+  /* No realm, no tint, no accent. A material is grey inside a folder that is
+     bright green, because colour here is what says "this is one of the things
+     you came for". */
+  .item[data-material] .name .ico { color: var(--faint); }
+  .item[data-material] .name .ico .glyph { width: .9rem; height: .9rem; }
+  .item[data-material].marble-picked {
+    background: var(--accent-soft); border-color: var(--accent-ink);
+  }
+  .item[data-material].marble-picked .name b { color: var(--accent-ink); }
+  /* The extension of a file, or the count inside a folder — the one thing
+     about a material worth saying beyond its name, because it is what tells
+     you whether opening it shows a picture, hands you a download, or goes
+     somewhere. */
+  .item[data-material] .about {
+    flex: 0 0 auto; color: var(--faint); font-size: .66rem;
+    font-variant-numeric: tabular-nums; letter-spacing: .04em;
+  }
+  /* Held at a low opacity rather than revealed on hover: a menu you can only
+     find by having a pointer is a menu a touch screen and a keyboard do not
+     have, and this is the only way to rename or throw away a material. */
+  body[data-view="grid"] .item[data-material] .more,
+  body[data-view="list"] .item[data-material] .more {
+    position: static; opacity: .22; width: 1.05rem; height: 1.05rem; padding: 0;
+    line-height: 1; font-size: .72rem; flex: 0 0 auto; justify-self: auto;
+  }
+  .item[data-material]:hover .more, .item[data-material] .more:focus-visible { opacity: 1; }
 
   /* ------------------------------------------------------------- the timeline */
   /* Everything below the crumbs and the toolbar is still `.items`, still full
@@ -921,7 +1012,13 @@ __ICON__
       };
       const realmOf = (path) => (path ? REALMS[path.split('/')[0]] || '' : '');
       const stampRealm = (el, path) => {
-        const realm = el.dataset.kind === 'folder' ? realmOf(path) : '';
+        // Identity is for folders you came for. A folder of nothing but
+        // materials does not wear the realm's colour: being grey is most of how
+        // it stays out of the way. Read off the element rather than worked out
+        // again here, so the attribute the CSS matches on and the decision made
+        // in script are one answer.
+        const wears = el.dataset.kind === 'folder' && el.dataset.material !== '1';
+        const realm = wears ? realmOf(path) : '';
         if (realm) el.dataset.realm = realm;
         else delete el.dataset.realm;
       };
@@ -938,10 +1035,42 @@ __ICON__
           '<rect x="2.2" y="2.7" width="11.6" height="10.6" rx="2.1" fill="none" stroke="currentColor" stroke-width="1.3"/>' +
           '<path stroke="currentColor" stroke-width="1.3" d="M2.2 6.2h11.6"/>' +
           '<circle cx="4.6" cy="4.45" r=".78" fill="currentColor"/></svg>',
+        // A third shape, for a file this Drive does not open — a page with a
+        // folded corner, which is what every filesystem has drawn a plain file
+        // as for forty years. A document is a window because you go into it;
+        // this is a sheet because you only look at it.
+        file:
+          '<svg class="glyph" viewBox="0 0 16 16" aria-hidden="true" focusable="false">' +
+          '<path fill="none" stroke="currentColor" stroke-width="1.3" stroke-linejoin="round" ' +
+          'd="M3.4 2.3h5.1l4.1 4.1v7.3a1 1 0 0 1-1 1H3.4a1 1 0 0 1-1-1V3.3a1 1 0 0 1 1-1z"/>' +
+          '<path fill="none" stroke="currentColor" stroke-width="1.3" stroke-linejoin="round" d="M8.4 2.4v4.2h4.2"/></svg>',
       };
-      const iconFor = (kind) => (kind === 'folder' ? ICON.folder : ICON.doc);
+      const iconFor = (kind) =>
+        kind === 'folder' ? ICON.folder : kind === 'file' ? ICON.file : ICON.doc;
 
       // ------------------------------------------------------------ the listing
+
+      // Some of what a folder holds is the work, and some of it is what the
+      // work needed. A `.mrbl` is the work — it is a document this Drive
+      // opens. A file that is not one is the folder's own paperwork: the
+      // bibliography beside the paper, the cover images, the JSON a script
+      // reads. So is a folder that holds nothing but paperwork, all the way
+      // down. Those are facts *about* the folder rather than the point of it,
+      // and they are drawn accordingly — below the rule, folded away, in grey.
+      // Still listed, still openable, still renameable: a representation that
+      // hides a file is a representation that loses it.
+      //
+      // Asked of the tree the host handed over, so it is one derivation from
+      // one fact with nothing to keep in sync. Only in the drive view: the
+      // trash and Recent hand over entries with no `children`, and a folder
+      // whose contents are unknown is not a folder known to hold nothing.
+      const holdsDocs = (folder) =>
+        (folder.children ?? []).some(
+          (child) => child.kind === 'doc' || (child.kind === 'folder' && holdsDocs(child)),
+        );
+      const isMaterial = (entry) =>
+        view === 'drive' &&
+        (entry.kind === 'file' || (entry.kind === 'folder' && !holdsDocs(entry)));
 
       // Which rows are picked, held as a set of paths rather than elements,
       // because the listing is thrown away and rebuilt on every refresh and a
@@ -1007,6 +1136,94 @@ __ICON__
         return el;
       }
 
+      // A material, as a chip. Still an `.item` carrying a path and a kind, so
+      // the pick, the marquee, the drag, the row menu and Enter all reach it
+      // without knowing this strip exists — what it drops is the tile, the
+      // preview, the columns and the colour. Making it a different *element*
+      // would have meant teaching six handlers about a seventh kind of row.
+      function materialNode(entry) {
+        const el = document.createElement('div');
+        el.className = 'item';
+        el.dataset.kind = entry.kind;
+        el.dataset.path = entry.path;
+        el.dataset.material = '1';
+        stampRealm(el, entry.path);
+        if (picked.has(entry.path)) el.classList.add('marble-picked');
+        el.innerHTML =
+          '<span class="name"><span class="ico">' + iconFor(entry.kind) + '</span><b></b></span>' +
+          '<span class="about"></span>' +
+          '<button class="more" aria-label="More">\u22ee</button>';
+        el.querySelector('b').textContent = entry.name ?? leaf(entry.path);
+        // How much is in it, or what it is: the two forms the question "is this
+        // worth opening" takes for the two kinds that end up in here. The count
+        // is of what is directly inside, which is what a folder tile's caption
+        // counts too — one convention for "how many items", so a chip and a
+        // tile can be compared.
+        const inside = entry.kind === 'folder' ? (entry.children ?? []).length : 0;
+        el.querySelector('.about').textContent =
+          entry.kind === 'folder' ? String(inside) : (entry.ext || '').toUpperCase();
+        el.title =
+          entry.kind === 'folder'
+            ? inside + (inside === 1 ? ' item' : ' items') + ', none of them a document'
+            : [entry.name, bytes(entry.bytes ?? 0), entry.modified ? ago(entry.modified) : '']
+                .filter(Boolean)
+                .join(' \u00b7 ');
+        return el;
+      }
+
+      // Whether the materials are unfolded. The page's answer, like the
+      // selection: the listing is thrown away and rebuilt on every refresh so
+      // it cannot live on an element, and it is nobody else's business, so it
+      // is not an op. It survives navigating between folders on purpose —
+      // asking to see the materials is a way of working, not a fact about one
+      // folder.
+      let matsOpen = false;
+
+      // The footnote. One line saying how much is down here, and the chips
+      // behind it. `fixed` is the case where the folder holds nothing else:
+      // then the materials *are* the folder, so they are shown and there is no
+      // toggle, because a control that cannot change anything is worse than no
+      // control.
+      function materialStrip(mats, { fixed = false } = {}) {
+        const folders = mats.filter((entry) => entry.kind === 'folder').length;
+        const files = mats.length - folders;
+        const open = fixed || matsOpen;
+
+        const wrap = document.createElement('div');
+        wrap.className = 'mats';
+        wrap.dataset.open = open ? '1' : '0';
+        wrap.innerHTML =
+          (fixed
+            ? '<div class="mats-head is-fixed">'
+            : '<button class="mats-head" type="button" aria-expanded="' + (open ? 'true' : 'false') + '">') +
+          (fixed ? '' : '<span class="caret" aria-hidden="true">\u203a</span>') +
+          '<span class="what">Materials</span><span class="how-much"></span>' +
+          (fixed ? '</div>' : '</button>');
+
+        const count = (n, one, many) => n + ' ' + (n === 1 ? one : many);
+        wrap.querySelector('.how-much').textContent = [
+          folders && count(folders, 'folder', 'folders'),
+          files && count(files, 'file', 'files'),
+        ]
+          .filter(Boolean)
+          .join(' \u00b7 ');
+
+        const body = document.createElement('div');
+        body.className = 'mats-body';
+        for (const entry of mats) body.append(materialNode(entry));
+        wrap.append(body);
+
+        const head = wrap.querySelector('.mats-head');
+        if (!fixed) {
+          head.addEventListener('click', () => {
+            matsOpen = !matsOpen;
+            wrap.dataset.open = matsOpen ? '1' : '0';
+            head.setAttribute('aria-expanded', matsOpen ? 'true' : 'false');
+          });
+        }
+        return wrap;
+      }
+
       // The tile. A document gets a real, scaled-down view of itself, mounted
       // lazily as it nears the viewport; a folder gets the same treatment for
       // each document child (up to nine), with a glyph for nested folders.
@@ -1036,6 +1253,15 @@ __ICON__
       );
 
       function fillThumb(thumb, entry) {
+        // A file this Drive does not open cannot draw itself, and it has no
+        // contents to draw either. Only reachable from the trash, where a
+        // material is listed as itself rather than as a chip.
+        if (entry.kind === 'file') {
+          thumb.innerHTML =
+            '<span class="peek"><span class="big">' + ICON.file + '</span></span><span class="cap"></span>';
+          thumb.querySelector('.cap').textContent = (entry.ext || 'file').toUpperCase();
+          return;
+        }
         if (entry.kind === 'doc') {
           thumb.innerHTML =
             '<span class="peek"><span class="big">' + ICON.doc + '</span></span><span class="cap"></span>';
@@ -1046,15 +1272,23 @@ __ICON__
           return;
         }
         const kids = entry.children ?? [];
-        const shown = kids.slice(0, 9);
+        // Documents and folders first: a tile has room for nine cells and they
+        // should go to what the folder is for. A material gets a plain cell and
+        // never a peek — it has no page to show, and pointing a preview frame
+        // at a `.bib` drew a broken document at a real address.
+        const shown = [...kids]
+          .sort((a, b) => (a.kind === 'file' ? 1 : 0) - (b.kind === 'file' ? 1 : 0))
+          .slice(0, 9);
         const cells =
           shown
             .map((k) =>
               k.kind === 'folder'
                 ? '<span class="cell is-folder"><span class="mini-ico">' + ICON.folder + '</span></span>'
-                : '<span class="cell is-doc"><span class="peek"><span class="mini-ico">' +
-                  ICON.doc +
-                  '</span></span></span>',
+                : k.kind === 'file'
+                  ? '<span class="cell is-mat"><span class="mini-ico">' + ICON.file + '</span></span>'
+                  : '<span class="cell is-doc"><span class="peek"><span class="mini-ico">' +
+                    ICON.doc +
+                    '</span></span></span>',
             )
             .join('') || '<span class="cell is-empty"></span>';
         thumb.innerHTML = '<span class="mini">' + cells + '</span><span class="cap"></span>';
@@ -1064,7 +1298,7 @@ __ICON__
         const peeks = thumb.querySelectorAll('.peek');
         let i = 0;
         for (const k of shown) {
-          if (k.kind === 'folder') continue;
+          if (k.kind !== 'doc') continue;
           const peek = peeks[i++];
           peek.dataset.src = marble.href(k.path);
           peekObserver.observe(peek);
@@ -1109,7 +1343,20 @@ __ICON__
               : latest.children ?? [];
 
         items.replaceChildren();
-        if (!pool.length) {
+
+        // The split, once, before any lens draws: what the folder is for, and
+        // what the folder needed. Every lens below draws the first, and the
+        // second is appended in one place afterwards — so there is one answer
+        // to where a material goes rather than one per view.
+        const work = [];
+        const mats = [];
+        for (const entry of pool) (isMaterial(entry) ? mats : work).push(entry);
+        // A diagram is not a listing. The map places things by kind around a
+        // centre and the pulse counts edits per day; neither has a bottom to
+        // hang a footnote off, so in those two the materials stay out of it.
+        const footnote = mats.length && m !== 'map' && m !== 'pulse';
+
+        if (!work.length && !mats.length) {
           const empty = document.createElement('div');
           empty.className = 'empty';
           empty.innerHTML = query
@@ -1119,19 +1366,20 @@ __ICON__
           return;
         }
 
-        heaviest = Math.max(1, ...pool.map((entry) => (entry.kind === 'doc' ? entry.bytes ?? 0 : 0)));
+        heaviest = Math.max(1, ...work.map((entry) => (entry.kind === 'doc' ? entry.bytes ?? 0 : 0)));
 
-        if (m === 'timeline') drawTimeline(pool);
-        else if (m === 'map') drawMap(pool);
-        else if (m === 'pulse') drawPulse(pool);
-        else if (m === 'weight') drawWeight(pool);
+        if (m === 'timeline') drawTimeline(work);
+        else if (m === 'map') drawMap(work);
+        else if (m === 'pulse') drawPulse(work);
+        else if (m === 'weight') drawWeight(work);
         else {
-          pool.forEach((entry, i) => {
+          work.forEach((entry, i) => {
             const el = node(entry);
             el.style.animationDelay = Math.min(i * 16, 260) + 'ms';
             items.append(el);
           });
         }
+        if (footnote) items.append(materialStrip(mats, { fixed: !work.length }));
         // Keep the selection to what is actually on screen — a refresh, a
         // search or a folder change can retire a row that was picked.
         const shown = new Set([...items.querySelectorAll('.item')].map((el) => el.dataset.path));
@@ -1547,6 +1795,14 @@ __ICON__
           return go(item.dataset.path);
         }
         if (view === 'trash') return say('Restore it first — it is in the trash.');
+        // A material is not an app, so it always opens beside the Drive rather
+        // than in place of it: there would be nothing in there to come back
+        // with, and the host — not this document — is the one that decides
+        // whether a given file is shown or handed over as a download.
+        if (item.dataset.kind === 'file') {
+          window.open(drive.fileHref(item.dataset.path), '_blank');
+          return;
+        }
         if (newTab) window.open(marble.href(item.dataset.path), '_blank');
         else location.href = marble.href(item.dataset.path);
       }
@@ -1688,6 +1944,10 @@ __ICON__
       function openMenu(item, anchor) {
         const path = item.dataset.path;
         const isFolder = item.dataset.kind === 'folder';
+        // A file this Drive does not open. Rename, Move to… and the trash all
+        // still mean what they mean — the store moves any of the three kinds —
+        // but a copy and a pin are both about documents.
+        const isFile = item.dataset.kind === 'file';
         const trashed = view === 'trash';
         menu.replaceChildren();
 
@@ -1717,7 +1977,7 @@ __ICON__
           });
         } else if (bulk) {
           const paths = [...picked];
-          const docs = paths.filter((p) => !items.querySelector('.item[data-path="' + CSS.escape(p) + '"]')?.matches('[data-kind="folder"]'));
+          const docs = paths.filter((p) => items.querySelector('.item[data-path="' + CSS.escape(p) + '"]')?.matches('[data-kind="doc"]'));
           if (docs.length) {
             add('Open ' + docs.length + ' in new tabs', () => {
               for (const p of docs) window.open(marble.href(p), '_blank');
@@ -1726,7 +1986,9 @@ __ICON__
           menu.append(document.createElement('hr'));
           add('Move ' + paths.length + ' to trash', trashPicked);
         } else {
-          if (!isFolder) {
+          if (isFile) {
+            add('Open beside this', () => window.open(drive.fileHref(path), '_blank'));
+          } else if (!isFolder) {
             add('Open', () => (location.href = marble.href(path)));
             add('Open in new tab', () => window.open(marble.href(path), '_blank'));
           }
@@ -1743,8 +2005,10 @@ __ICON__
             await drive.move(path, [to.trim().replace(/^\/+|\/+$/g, ''), leaf(path)].filter(Boolean).join('/'));
             refresh();
           });
-          add(pinned(path) ? 'Unpin' : 'Pin to sidebar', () => togglePin(path, isFolder));
-          if (!isFolder) {
+          // A pin is a shortcut to something you go into or open, and neither
+          // is what a material is.
+          if (!isFile) add(pinned(path) ? 'Unpin' : 'Pin to sidebar', () => togglePin(path, isFolder));
+          if (!isFolder && !isFile) {
             add('Make a copy', async () => {
               await drive.create({ path: path + ' copy', copy: path });
               refresh();
@@ -1968,7 +2232,9 @@ __ICON__
 
       items.addEventListener('pointerdown', (event) => {
         if (event.button) return;
-        if (event.target.closest('.item') || event.target.closest('.more')) return;
+        // A press on a control is not a press on empty space — the materials
+        // header is a button that happens to live inside the listing.
+        if (event.target.closest('.item, .more, .mats-head')) return;
         marquee = {
           mode: event.altKey ? 'lasso' : 'rect',
           x0: event.clientX,

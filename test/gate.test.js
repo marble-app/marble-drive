@@ -60,3 +60,30 @@ test('Secure is set only when it was asked for', () => {
   assert.ok(!createGate({ secret: 'x' }).cookieHeader().includes('Secure'));
   assert.ok(createGate({ secret: 'x', secure: true }).cookieHeader().includes('Secure'));
 });
+
+// A request as Node hands it over: the peer is on the socket, not in a header.
+const arriving = (remoteAddress, headers = {}) => ({ headers, socket: { remoteAddress } });
+
+test('Secure follows the request when it came through a local HTTPS proxy', () => {
+  const gate = createGate({ secret: 'x' });
+  // Tailscale Serve terminates TLS and forwards to loopback, saying so.
+  for (const peer of ['127.0.0.1', '::1', '::ffff:127.0.0.1']) {
+    const req = arriving(peer, { 'x-forwarded-proto': 'https' });
+    assert.ok(gate.cookieHeader(req).includes('; Secure'), peer);
+    assert.ok(gate.clearHeader(req).includes('; Secure'), peer);
+  }
+  // Plain http://localhost keeps working, in Safari too, which drops a Secure
+  // cookie over http even on localhost.
+  assert.ok(!gate.cookieHeader(arriving('127.0.0.1')).includes('Secure'));
+});
+
+test('a forwarded-proto header from anywhere but loopback is not believed', () => {
+  const gate = createGate({ secret: 'x' });
+  const req = arriving('192.168.1.20', { 'x-forwarded-proto': 'https' });
+  assert.ok(!gate.cookieHeader(req).includes('Secure'));
+});
+
+test('asking for Secure still means always', () => {
+  const gate = createGate({ secret: 'x', secure: true });
+  assert.ok(gate.cookieHeader(arriving('127.0.0.1')).includes('; Secure'));
+});

@@ -1,0 +1,229 @@
+<style>
+  .flow-shell {
+    margin-top: 26px;
+    padding: 22px;
+    border: 1px solid var(--border);
+    border-radius: 18px;
+    background: var(--surface);
+  }
+  .flow-grid {
+    display: grid;
+    grid-template-columns: repeat(6, minmax(110px, 1fr));
+    gap: 22px;
+    align-items: stretch;
+  }
+  .flow-node {
+    position: relative;
+    min-height: 130px;
+    padding: 14px;
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    background: color-mix(in srgb, var(--surface-2) 80%, transparent);
+  }
+  .flow-node:not(:last-child)::after {
+    content: "→";
+    position: absolute;
+    top: 54px;
+    right: -19px;
+    color: var(--text-muted);
+    font-size: 18px;
+    font-weight: 700;
+  }
+  .flow-node .number {
+    display: grid;
+    place-items: center;
+    width: 24px;
+    height: 24px;
+    margin-bottom: 10px;
+    border-radius: 50%;
+    background: var(--accent);
+    color: white;
+    font-size: 10px;
+    font-weight: 800;
+  }
+  .flow-node h3 {
+    margin: 0 0 6px;
+    font-size: 13px;
+  }
+  .flow-node p {
+    margin: 0;
+    color: var(--text-muted);
+    font-size: 10px;
+    line-height: 1.45;
+  }
+  .code-chip {
+    display: inline-block;
+    margin-top: 8px;
+    padding: 4px 6px;
+    border-radius: 5px;
+    background: color-mix(in srgb, var(--accent) 10%, var(--surface));
+    color: var(--accent);
+    font: 650 8px/1.3 ui-monospace, monospace;
+  }
+  .navigation {
+    display: grid;
+    grid-template-columns: 1fr auto 1fr auto 1fr;
+    gap: 12px;
+    align-items: center;
+    margin-top: 18px;
+  }
+  .nav-state {
+    min-height: 138px;
+    padding: 15px;
+    border: 1px solid var(--border);
+    border-radius: 13px;
+    background: var(--surface);
+  }
+  .nav-state .label {
+    margin-bottom: 8px;
+  }
+  .nav-state h3 {
+    margin: 0 0 8px;
+    font-size: 14px;
+  }
+  .nav-state p {
+    margin: 4px 0;
+    color: var(--text-muted);
+    font-size: 11px;
+    line-height: 1.4;
+  }
+  .nav-arrow {
+    color: var(--text-muted);
+    font-size: 20px;
+  }
+  .locked {
+    color: #b66576 !important;
+    font-weight: 700;
+  }
+  .current {
+    color: #4c9070 !important;
+    font-weight: 700;
+  }
+  .rules {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 12px;
+    margin-top: 18px;
+  }
+  .rule {
+    padding: 13px;
+    border-left: 3px solid var(--accent);
+    border-radius: 8px;
+    background: color-mix(in srgb, var(--accent) 7%, var(--surface));
+  }
+  .rule strong {
+    display: block;
+    margin-bottom: 4px;
+    font-size: 11px;
+  }
+  .rule span {
+    color: var(--text-muted);
+    font-size: 10px;
+    line-height: 1.4;
+  }
+  .approval {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 14px;
+    margin-top: 22px;
+  }
+  .approval .option { margin: 0; }
+  @media (max-width: 960px) {
+    .flow-grid { grid-template-columns: repeat(3, 1fr); }
+    .flow-node:nth-child(3)::after { display: none; }
+    .navigation { grid-template-columns: 1fr; }
+    .nav-arrow { transform: rotate(90deg); text-align: center; }
+    .rules, .approval { grid-template-columns: 1fr; }
+  }
+</style>
+
+<h2>One agent turn · from drawer to live document</h2>
+<p class="subtitle">The conversation follows navigation. Each submitted turn keeps an immutable file target until that turn finishes.</p>
+
+<section class="flow-shell">
+  <div class="flow-grid">
+    <div class="flow-node">
+      <span class="number">1</span>
+      <h3>Drawer sends</h3>
+      <p>The prompt includes the active document path and selected Marble element source.</p>
+      <span class="code-chip">Research Garden.mrbl</span>
+    </div>
+    <div class="flow-node">
+      <span class="number">2</span>
+      <h3>Carrier transports</h3>
+      <p><code>window.marble.agent</code> sends a structured request through the authenticated host.</p>
+      <span class="code-chip">agent.send(turn)</span>
+    </div>
+    <div class="flow-node">
+      <span class="number">3</span>
+      <h3>Server captures</h3>
+      <p>The server locks the turn to its document path, checks the gate, and queues one writer.</p>
+      <span class="code-chip">turnContext frozen</span>
+    </div>
+    <div class="flow-node">
+      <span class="number">4</span>
+      <h3>Claude works</h3>
+      <p>Claude Code runs in restricted mode at the Drive root and streams structured progress.</p>
+      <span class="code-chip">claude -p · stream-json</span>
+    </div>
+    <div class="flow-node">
+      <span class="number">5</span>
+      <h3>File changes</h3>
+      <p>Claude edits the target `.mrbl` file directly. Bash and reads outside the Drive are unavailable.</p>
+      <span class="code-chip">file tools only</span>
+    </div>
+    <div class="flow-node">
+      <span class="number">6</span>
+      <h3>Page reconciles</h3>
+      <p>The existing watcher snapshots the old file, then patches the open page without a reload.</p>
+      <span class="code-chip">history → SSE → patch</span>
+    </div>
+  </div>
+</section>
+
+<h3 style="margin-top:28px">What happens when you navigate during a turn</h3>
+<div class="navigation">
+  <div class="nav-state">
+    <div class="label">Send</div>
+    <h3>Viewing Research Garden</h3>
+    <p class="current">Current context: Research Garden.mrbl</p>
+    <p>“Turn these questions into a backlog.”</p>
+  </div>
+  <div class="nav-arrow">→</div>
+  <div class="nav-state">
+    <div class="label">Navigate</div>
+    <h3>Open Reading List</h3>
+    <p class="locked">Claude is still editing Research Garden.mrbl</p>
+    <p>The same conversation drawer reconnects here.</p>
+  </div>
+  <div class="nav-arrow">→</div>
+  <div class="nav-state">
+    <div class="label">Next turn</div>
+    <h3>Viewing Reading List</h3>
+    <p class="current">New context: Reading List.mrbl</p>
+    <p>The next Send captures the new path.</p>
+  </div>
+</div>
+
+<div class="rules">
+  <div class="rule"><strong>Session follows you</strong><span>The same chat history reconnects when a new document loads.</span></div>
+  <div class="rule"><strong>Turn target never drifts</strong><span>Navigation cannot redirect work that is already running.</span></div>
+  <div class="rule"><strong>Target stays visible</strong><span>The drawer names both the page you see and the file Claude is editing.</span></div>
+</div>
+
+<div class="approval options">
+  <div class="option" data-choice="turn-flow-approved" onclick="toggleSelect(this)">
+    <div class="letter">✓</div>
+    <div class="content">
+      <h3>Use this interaction flow</h3>
+      <p>Continue to error handling, undo, and agent failure states.</p>
+    </div>
+  </div>
+  <div class="option" data-choice="turn-flow-revise" onclick="toggleSelect(this)">
+    <div class="letter">↺</div>
+    <div class="content">
+      <h3>Revise the flow</h3>
+      <p>Change how navigation, targeting, or live edits behave.</p>
+    </div>
+  </div>
+</div>

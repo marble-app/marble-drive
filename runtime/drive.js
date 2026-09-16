@@ -79,6 +79,13 @@
     // to take is only a promise if it is one click away.
     const downloadHref = (path) => `/drive/download?path=${encodeURIComponent(path)}`;
 
+    // Where a file that is not a document lives. `tree()` reports these as
+    // `kind: 'file'` and their path carries its extension, so this is the one
+    // address in the drive that is not a document's. The host decides what is
+    // safe to render and what is only safe to download; a document asking for
+    // the href is not making that call.
+    const fileHref = (path) => `/drive/file?path=${encodeURIComponent(path)}`;
+
     // ------------------------------------------------------------- the events
     //
     // One stream for the whole drive, and a document subscribes to it the way
@@ -159,6 +166,7 @@
       restore,
       weigh,
       downloadHref,
+      fileHref,
       on,
       resolveBlobs,
     };

@@ -30,6 +30,40 @@ The `.items` container is `data-marble-transient`. Its rows are drawn from
 listing would have two answers to "what is in this folder" and would show you
 the wrong one exactly when it mattered.
 
+## The work and the materials
+
+A folder holds two kinds of thing and only one of them is what you came for.
+
+A `.mrbl` is the work: a document the Drive opens. A file that is not one — the
+bibliography beside the paper, the cover images, the JSON a script reads — is the
+folder's own paperwork, and so is a folder that holds nothing but paperwork all
+the way down. `schemas/`, `corpus/`, `assets/`: real folders, with nothing in
+them this Drive can open.
+
+Those are drawn as **materials**: a single quiet line under the listing saying
+how much is down there, folded away, and behind it a row of grey chips. Not a
+tile at 80% — a tile at 80% is still a tile competing for the same glance, and
+what makes something secondary is being in a different register rather than a
+smaller one. So a material gets no card, no preview, no folder colour and no
+weight bar: none of the identity the Drive spends on documents.
+
+Three rules keep it honest.
+
+- **Nothing is hidden.** A material is still an `.item` with a path and a kind,
+  so the pick, the marquee, the drag, the row menu and Enter all reach it. It
+  can be opened, renamed, moved and trashed. A representation that hides a file
+  is a representation that loses it — which is what the Drive did before this,
+  by not listing non-documents at all.
+- **A folder of nothing but materials shows them.** Then the materials *are* the
+  folder, so they are unfolded and there is no toggle, because a control that
+  cannot change anything is worse than no control.
+- **It is derived, not stored.** `isMaterial` asks the tree the host handed
+  over. The one attribute it writes, `data-material`, is what both the CSS and
+  the colour stamp read, so there is one answer rather than two that can drift.
+
+The Map and the Pulse leave materials out entirely. Those are diagrams, not
+listings, and neither has a bottom to hang a footnote off.
+
 ## What that buys you
 
 Type over "Recent" and it is called something else, for good. Drag "Trash" above

@@ -58,7 +58,10 @@ export function loadConfig(env = process.env) {
     root,
     port: num('PORT', 4400),
     portIsExplicit: Boolean(str('PORT', null)),
-    host: str('HOST', '0.0.0.0'),
+    // Loopback. The way in from another device is a proxy on this machine —
+    // Tailscale Serve, see docs/DEPLOY.md — and a container, which has to
+    // listen on every interface to be reached at all, says so in its image.
+    host: str('HOST', '127.0.0.1'),
 
     // The document the Drive lands on. An ordinary document with no standing —
     // delete it and `/` falls back to whatever exists.

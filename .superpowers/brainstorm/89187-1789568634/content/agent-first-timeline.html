@@ -1,0 +1,225 @@
+<style>
+  .track {
+    display: grid;
+    grid-template-columns: repeat(7, minmax(158px, 1fr));
+    gap: 13px;
+    margin: 28px 0 22px;
+    overflow-x: auto;
+    padding: 8px 2px 24px;
+  }
+  .step {
+    position: relative;
+    display: flex;
+    flex-direction: column;
+    min-height: 330px;
+    padding: 58px 15px 15px;
+    border: 1px solid var(--border);
+    border-radius: 16px;
+    background: var(--surface);
+  }
+  .step::before {
+    content: attr(data-number);
+    position: absolute;
+    top: 15px;
+    left: 15px;
+    display: grid;
+    place-items: center;
+    width: 34px;
+    height: 34px;
+    border-radius: 50%;
+    background: var(--accent);
+    color: white;
+    font-size: 12px;
+    font-weight: 800;
+  }
+  .step:not(:last-child)::after {
+    content: "→";
+    position: absolute;
+    top: 23px;
+    right: -12px;
+    color: var(--text-muted);
+    font-size: 17px;
+    z-index: 2;
+  }
+  .step h3 {
+    min-height: 42px;
+    margin: 0 0 8px;
+    font-size: 16px;
+    line-height: 1.25;
+  }
+  .step p {
+    min-height: 64px;
+    margin: 0 0 12px;
+    color: var(--text-muted);
+    font-size: 12px;
+    line-height: 1.45;
+  }
+  .step ul {
+    display: grid;
+    gap: 7px;
+    margin: 0;
+    padding-left: 16px;
+    font-size: 11px;
+    line-height: 1.35;
+  }
+  .step .release {
+    align-self: flex-start;
+    margin-top: auto;
+    padding: 5px 8px;
+    border-radius: 999px;
+    background: color-mix(in srgb, var(--accent) 12%, transparent);
+    color: var(--accent);
+    font-size: 9px;
+    font-weight: 800;
+    letter-spacing: .04em;
+    text-transform: uppercase;
+  }
+  .primary {
+    border-color: color-mix(in srgb, var(--accent) 70%, var(--border));
+    box-shadow: 0 12px 30px color-mix(in srgb, var(--accent) 9%, transparent);
+  }
+  .permission-lane {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 14px;
+    margin: 18px 0;
+  }
+  .lane {
+    padding: 14px 16px;
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    background: var(--surface);
+  }
+  .lane h4 { margin: 0 0 6px; font-size: 13px; }
+  .lane p {
+    margin: 0;
+    color: var(--text-muted);
+    font-size: 12px;
+    line-height: 1.45;
+  }
+  .approval {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 14px;
+    margin-top: 22px;
+  }
+  .approval .option { margin: 0; }
+  @media (max-width: 780px) {
+    .permission-lane, .approval { grid-template-columns: 1fr; }
+  }
+</style>
+
+<h2>Revised timeline · agent interaction before operations</h2>
+<p class="subtitle">The first agent release edits Marble documents in place. Broader shell access arrives later behind worktree isolation.</p>
+
+<div class="track">
+  <section class="step" data-number="0">
+    <h3>Existing G0 + G1</h3>
+    <p>The Drive, file watcher, history, passphrase gate, and network editing loop already exist.</p>
+    <ul>
+      <li>External edits reconcile live</li>
+      <li>Every write has history</li>
+      <li>Drive itself is a `.mrbl` document</li>
+    </ul>
+    <span class="release">Built</span>
+  </section>
+
+  <section class="step primary" data-number="1">
+    <h3>Minimum remote access</h3>
+    <p>Reach the MacBook Pro from the MacBook Air through one public HTTPS address.</p>
+    <ul>
+      <li>Tailscale Funnel</li>
+      <li>Strong passphrase gate</li>
+      <li>Remote live-stream smoke test</li>
+    </ul>
+    <span class="release">Remote release</span>
+  </section>
+
+  <section class="step" data-number="2">
+    <h3>Agent bridge</h3>
+    <p>Marble Drive manages Claude Code as a job, not as a raw browser terminal.</p>
+    <ul>
+      <li><code>claude -p</code> adapter</li>
+      <li>Streaming JSON events</li>
+      <li>Resume by session ID</li>
+      <li>Cancel and audit log</li>
+    </ul>
+    <span class="release">Server capability</span>
+  </section>
+
+  <section class="step" data-number="3">
+    <h3>Universal agent drawer</h3>
+    <p>A reusable, document-owned side conversation can open in Drive or a Marble document.</p>
+    <ul>
+      <li><code>window.marble.agent</code> carrier API</li>
+      <li>Current file and selection context</li>
+      <li>Conversation history</li>
+      <li>Mobile full-screen form</li>
+    </ul>
+    <span class="release">Interaction release</span>
+  </section>
+
+  <section class="step primary" data-number="4">
+    <h3>Live `.mrbl` editing</h3>
+    <p>Claude creates files and edits the selected document inside the Drive root while you watch.</p>
+    <ul>
+      <li>File tools only at first</li>
+      <li>Access confined to Drive root</li>
+      <li>One active writer per document</li>
+      <li>History-backed undo</li>
+    </ul>
+    <span class="release">First agent release</span>
+  </section>
+
+  <section class="step" data-number="5">
+    <h3>Full coding tools</h3>
+    <p>Repository work and shell commands run in an isolated worktree with its own live preview.</p>
+    <ul>
+      <li>Allowlisted repositories</li>
+      <li>Task branch and worktree</li>
+      <li>Tests and resource limits</li>
+      <li>Promote or discard</li>
+    </ul>
+    <span class="release">Coding release</span>
+  </section>
+
+  <section class="step" data-number="6">
+    <h3>Always-on operations</h3>
+    <p>Automate recovery after reboots and failures once the complete personal workflow is useful.</p>
+    <ul>
+      <li>Service and tunnel auto-start</li>
+      <li>Sleep and power settings</li>
+      <li>Health and logs</li>
+      <li>Off-device restore drill</li>
+    </ul>
+    <span class="release">Reliability release</span>
+  </section>
+</div>
+
+<div class="permission-lane">
+  <div class="lane">
+    <h4>Early permission boundary</h4>
+    <p>Claude can read and write inside the Drive root. Bash and WebFetch are removed. The result is direct, live Marble authoring without general control of the Mac.</p>
+  </div>
+  <div class="lane">
+    <h4>Later permission boundary</h4>
+    <p>Shell tools exist only inside an isolated worktree. The main Drive receives a tested result, not every intermediate repository edit.</p>
+  </div>
+</div>
+
+<div class="approval options">
+  <div class="option" data-choice="agent-timeline-approved" onclick="toggleSelect(this)">
+    <div class="letter">✓</div>
+    <div class="content">
+      <h3>Use this revised order</h3>
+      <p>Design the universal agent drawer next.</p>
+    </div>
+  </div>
+  <div class="option" data-choice="agent-timeline-revise" onclick="toggleSelect(this)">
+    <div class="letter">↺</div>
+    <div class="content">
+      <h3>Revise again</h3>
+      <p>Change the agent permission split or milestone sequence.</p>
+    </div>
+  </div>
+</div>

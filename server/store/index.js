@@ -12,17 +12,21 @@
 //
 //   ready()                          make whatever the store needs to exist
 //   read(path)          → string|null
+//   readRaw(path)       → {path,name,ext,bytes,open()}|null   a file that is not a document
 //   has(path)           → boolean          a document is there
 //   hasFolder(path)     → boolean          a folder is there
+//   hasFile(path)       → boolean          something that is neither is there
 //   stat(path)          → entry|null       {kind,path,name,folder,title,day,nodes,bytes,modified,created}
-//   list({folder,recursive}) → entry[]     flat, newest first, folders included
-//   tree({folder})      → folder node with `children`
+//   list({folder,recursive,files}) → entry[]  flat, newest first, folders included;
+//                                            `files` adds kind:'file' for what is
+//                                            in the folder but is not a document
+//   tree({folder})      → folder node with `children`, files included
 //   write(path, source, {label, ops}) → {path, bytes, sha}
 //   mark(path, source, label)              a restore point for a state nobody replaced
 //   create(path, source)                   refuses to overwrite
 //   mkdir(path)
-//   move(from, to)                         documents and folders, history follows
-//   trash(path)         → {id, path, kind} recoverable
+//   move(from, to)                         all three kinds, history follows a document
+//   trash(path)         → {id, path, kind} recoverable, all three kinds
 //   listTrash()         → entry[]
 //   untrash(id, {to})
 //   history(path)       → checkpoint[]     newest first

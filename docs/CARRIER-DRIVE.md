@@ -38,6 +38,7 @@ The `k-tree` card is explicit that this is the shape of the change:
 | `marble.drive.restore(id, to)` | |
 | `marble.drive.weigh(path)` | bytes, nodes, and how much of it is base64 |
 | `marble.drive.downloadHref(path)` | one self-contained file, blobs inlined |
+| `marble.drive.fileHref(path)` | where a `kind: 'file'` entry lives — the one address in the drive that is not a document's, so its path carries its extension |
 | `marble.drive.on(event, fn)` | `created`, `changed`, `moved`, `trashed`, `restored`, `removed`, or `'*'` |
 | `marble.drive.resolveBlobs(root)` | resolve `data-marble-blob` to a source. Registered already; exposed for a document that inserts markup itself |
 | `marble.drive.client` | this page's id, so the Drive can ignore its own echoes |
@@ -47,6 +48,14 @@ The `k-tree` card is explicit that this is the shape of the change:
 **A document still names no route.** Every fetch in `runtime/drive.js` is the
 host's, not the file's. `templates/drive.mrbl` contains no path, and there is a
 test that says so.
+
+**The host decides what a file is safe to render.** `fileHref` hands back an
+address and nothing else. Whether the bytes behind it come back as a picture you
+look at or a download you save is the host's call, made against a short
+allowlist of types — because a file served under a type the browser executes is
+a script running on the drive's own origin with the drive's own cookie. A
+document asking for the href is deliberately not making that call, and could not
+make it correctly if it wanted to.
 
 **The blob resolution is page-only.** A document whose heavy bytes have been
 extracted carries `data-marble-blob="<hash>"` and a placeholder `src`. The

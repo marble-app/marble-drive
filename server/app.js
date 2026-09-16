@@ -36,6 +36,49 @@ import { watchDrive } from './watch.js';
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const REPO = path.resolve(HERE, '..');
 
+// What a file in the drive is allowed to be *rendered* as. An allowlist rather
+// than a table of every extension, because a drive holds whatever somebody put
+// in it and the default has to be the safe one: everything missing from here is
+// served as bytes to download. Text is `text/plain` even when it is code, so a
+// `.js` in a folder is something you read rather than something that runs.
+const INLINE_TYPES = {
+  png: 'image/png',
+  jpg: 'image/jpeg',
+  jpeg: 'image/jpeg',
+  gif: 'image/gif',
+  webp: 'image/webp',
+  avif: 'image/avif',
+  bmp: 'image/bmp',
+  pdf: 'application/pdf',
+  mp4: 'video/mp4',
+  webm: 'video/webm',
+  mov: 'video/quicktime',
+  mp3: 'audio/mpeg',
+  wav: 'audio/wav',
+  m4a: 'audio/mp4',
+  txt: 'text/plain; charset=utf-8',
+  md: 'text/plain; charset=utf-8',
+  json: 'text/plain; charset=utf-8',
+  jsonl: 'text/plain; charset=utf-8',
+  csv: 'text/plain; charset=utf-8',
+  tsv: 'text/plain; charset=utf-8',
+  bib: 'text/plain; charset=utf-8',
+  tex: 'text/plain; charset=utf-8',
+  yml: 'text/plain; charset=utf-8',
+  yaml: 'text/plain; charset=utf-8',
+  toml: 'text/plain; charset=utf-8',
+  ini: 'text/plain; charset=utf-8',
+  js: 'text/plain; charset=utf-8',
+  mjs: 'text/plain; charset=utf-8',
+  cjs: 'text/plain; charset=utf-8',
+  ts: 'text/plain; charset=utf-8',
+  py: 'text/plain; charset=utf-8',
+  sh: 'text/plain; charset=utf-8',
+  css: 'text/plain; charset=utf-8',
+  log: 'text/plain; charset=utf-8',
+  bak: 'text/plain; charset=utf-8',
+};
+
 const RUNTIME = {
   // Marble's carrier, served from the package. Not copied into this repo: two
   // copies of the contract is how two hosts stop rendering a file the same way.
@@ -389,6 +432,35 @@ export async function createDrive(config, { log = console } = {}) {
         return json(res, 200, { ok: true, ...entry });
       }
 
+      // A file in the drive that is not a document — the bibliography beside
+      // the paper, the cover image, the JSON a script reads. The Drive lists
+      // these quietly rather than hiding them, and a thing you can see and
+      // cannot open is worse than one you cannot see.
+      if (route === '/drive/file' && req.method === 'GET') {
+        const file = await store.readRaw(url.searchParams.get('path') ?? '');
+        if (!file) return text(res, 404, `no file "${url.searchParams.get('path')}"`);
+        const type = INLINE_TYPES[file.ext] ?? null;
+        res.writeHead(200, {
+          'Cache-Control': 'no-store',
+          'Content-Type': type ?? 'application/octet-stream',
+          'Content-Length': file.bytes,
+          // Two headers doing one job, because getting this wrong is a script
+          // running on the drive's own origin with the drive's own cookie.
+          // `nosniff` stops the browser deciding for itself that a .txt is
+          // HTML, and the sandbox policy makes it inert even if it decides
+          // anyway.
+          'X-Content-Type-Options': 'nosniff',
+          'Content-Security-Policy': "default-src 'none'; sandbox",
+          // Anything not on the allowlist is downloaded rather than rendered.
+          // The list is short on purpose: `.svg` is missing from it because an
+          // SVG can carry script, and it looks like a picture right up until
+          // it is one.
+          'Content-Disposition':
+            `${type ? 'inline' : 'attachment'}; filename="${file.name.replace(/["\\]/g, '')}"`,
+        });
+        return file.open().pipe(res);
+      }
+
       // ---------------------------------------------------------------- blobs
 
       if (route.startsWith('/blob/') && req.method === 'GET') {
@@ -469,7 +541,7 @@ export async function createDrive(config, { log = console } = {}) {
       return readJson(req, 4096)
         .then((body) => {
           if (!gate.accepts(body.secret)) return json(res, 401, { error: 'that is not the secret' });
-          return json(res, 200, { ok: true }, { 'Set-Cookie': gate.cookieHeader() });
+          return json(res, 200, { ok: true }, { 'Set-Cookie': gate.cookieHeader(req) });
         })
         .catch(() => json(res, 400, { error: 'expected {"secret":"…"}' }));
     }
@@ -581,6 +653,16 @@ button{background:#738698;color:#fafaf7;border-color:#738698;cursor:pointer}p{co
         lastKnown.delete(docPath);
         channels.toDrive('removed', { path: docPath });
       }
+      return;
+    }
+
+    if (prior?.source === current) {
+      // Nothing changed. A save can wake a busy watcher twice with the second
+      // wake landing after the first has settled and used up the write's mark —
+      // macOS does this under load — and the bytes are still the ones this
+      // host knows about. Announcing it would reconcile the tab that made the
+      // save against its own save. An outside edit that leaves the bytes as
+      // they were is not an edit either.
       return;
     }
 
