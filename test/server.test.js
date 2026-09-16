@@ -108,6 +108,17 @@ test('/ lands on the Drive, which is an ordinary document in the drive', async (
   assert.ok(!page.includes('<script src="/lib/'));
 });
 
+test('/today bookmarks whatever the day skill mirrored there most recently, falling back like / does', async () => {
+  const before = await get('/today');
+  assert.equal(before.status, 302);
+  assert.equal(before.headers.get('location'), '/a/drive');
+
+  await drive.store.write("Bryan's Days/today", '<html><body>today</body></html>', { label: 'seeded' });
+  const after = await get('/today');
+  assert.equal(after.status, 302);
+  assert.equal(after.headers.get('location'), `/a/${encodeURIComponent("Bryan's Days/today")}`);
+});
+
 test('the carrier and its Drive extension are both served', async () => {
   assert.match(await (await get('/runtime/marble.js')).text(), /window\.marble = \{/);
   assert.match(await (await get('/runtime/drive.js')).text(), /marble\.drive = \{/);

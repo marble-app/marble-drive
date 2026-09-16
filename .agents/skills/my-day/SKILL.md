@@ -1,6 +1,6 @@
 ---
-name: day
-description: Compose Bryan's Days — a personalized daily Marble document at drive/Bryan's Days/<the day's theme>.mrbl (mirrored to today.mrbl). Three reading streams (to-dos, news, papers) down the middle and a sticky rail of widgets (weather, weeks-ahead calendar, US Open bracket, palette/art) that reveals on scroll. Not a template: the run composes the day's layout from a component vocabulary against lib/design.css. Papers are scored against the research-vision doc. Uses the apple-design skill and a layout doctor. Use when Bryan runs /day or asks to build/refresh the day.
+name: my-day
+description: Compose Bryan's Days — a personalized daily Marble document at drive/Bryan's Days/<the day's theme>.mrbl (mirrored to today.mrbl). Three reading streams (to-dos, news, papers) down the middle and a sticky rail of widgets (weather, weeks-ahead calendar, US Open bracket, palette/art) that reveals on scroll. Not a template: the run composes the day's layout from a component vocabulary against lib/design.css. Papers are scored against the research-vision doc. Uses the apple-design skill and a layout doctor. Use when Bryan runs /my-day or asks to build/refresh the day.
 ---
 
 # Bryan's Days
@@ -66,11 +66,9 @@ Below 82rem the tail drops under the stream; below 62rem everything stacks.
 | `todos` | full to-do list, checkable/snoozable/pinnable | stream | |
 | `news` | **Reading** (cards, default) ⇄ **Front page** (mosaic) | stream | a main stream · `view: list\|cal` |
 | `papers` | today's arXiv cs.HC as a card grid | stream | a main stream |
-| `weather` | **where he is** + one away city, °F with °C alongside, **48 hours** scrubbed sideways under a temperature curve and a precipitation curve, sky-tinted; **expands** to a ten-day forecast | rail | cities come from `state/profile.json` — **never hardcode them here**; cites Open-Meteo |
+| `weather` | Zurich + San Diego, °F with °C alongside, **48 hours** scrubbed sideways under a temperature curve and a precipitation curve, sky-tinted; **expands** to a ten-day forecast | rail | cites Open-Meteo |
 | `calendar` | what's coming, two readings | **tail**, `card` | `view: t` Timeline \| `l` List |
 | `usopen` | Now / Men / Women, real bracket | **stream** | a draw needs width; never the rail |
-| `nfl` | one week's slate ⇄ one game in full | **stream** | `view: week\|niners` · use on a game day |
-| `nflseason` | **The arc** (18 weeks at once) ⇄ **The West** (division race) | **stream** | `view: arc\|west` · the season, not the week |
 | `art` | the day's painting + palette swatches; **expands** to the palette with hex values and roles | rail (last) | cites the museum |
 | `roadahead` | your authored representation | stream (last) | `card` |
 | `custom` | your own `html` | anywhere | same guards as the representation |
@@ -241,47 +239,9 @@ announced state, and a way back.
 
 # The run
 
-### 0. Read who and where he is
-
-```
-cat .claude/skills/day/state/profile.json
-```
-
-**Standing facts Bryan stated outright, which no sweep can tell you and no run may
-guess.** Read this before composing anything — it decides what the weather says
-and whose season the `nflseason` component is about.
-
-| field | today | what it drives |
-|---|---|---|
-| `location.here` | **San Anselmo**, Marin County | `sources.mjs weather --here`, and the "you are here" label |
-| `location.away` | San Diego | the second weather block |
-| `nfl.team` | **San Francisco 49ers** (`sf`, NFC West) | `nflseason` — the arc is his team, The West is his division |
-| `nfl.place` | stream, every day | where the season component sits |
-| `travel` | Seattle legs dropped 15 Sep | dates you must **not** re-add from `third-year.mrbl` |
-
-This file exists because the page showed him **Zurich's weather while he was
-sitting in Seattle**, for days, and then showed him Seattle's while he was in
-Marin. The city had been written into `sources.mjs` as a default and nothing ever
-asked. A fact about Bryan's life belongs in state, read every run, the same way
-`carry.json` holds a to-do he typed.
-
-Rules:
-
-1. **Never hardcode a city, a team, or a place he lives in a payload or a
-   renderer.** Read the field. If a run needs a fact that is not in the file and
-   not derivable, ask him and then write it down.
-2. **Update a field only when he says it changed**, and record the date and his
-   words in the neighbouring `_note`, so the next run can see when it was last
-   true rather than trusting it blindly.
-3. **`travel.dropped` is a do-not-resurrect list.** Those dates are still sitting
-   in `third-year.mrbl`, so the date sweep will find them again every morning.
-   Dropping a date he has cancelled is not the same as never having seen it.
-4. Anything not in `GAZETTEER` is geocoded on the fly, so a new town needs no code
-   change — only this file.
-
 ### 1. Read yesterday back
 ```
-node .claude/skills/day/lib/build.mjs readback drive/Bryan's Days/today.mrbl
+node .Codex/skills/my-day/lib/build.mjs readback drive/Bryan's Days/today.mrbl
 ```
 Gives per-item `done`/`snooze`/`pin`/`open`/`vote`/`saved`/`note` keyed by
 `data-key`, plus each viewbox's last `data-view`. Drop `done` to-dos, carry
@@ -294,29 +254,14 @@ own.
 
 ### 1b. Read what Bryan wrote down
 ```
-node .claude/skills/day/lib/build.mjs carry --list
+node .Codex/skills/my-day/lib/build.mjs carry --list
 ```
 `state/carry.json` is the standing list of to-dos Bryan added by hand. A to-do he
 typed is a fact about his life, not a row in one morning's file, so it outlives
 the issue. Every run must:
 
-1. **Re-include every open item**, and **pass its `key` from `carry.json`
-   verbatim**. This is the only thing that links the row back to the carried
-   item. A row with no `key` is keyed `slug(source + "|" + title)`, which can
-   never equal a carry key like `own-book-flights-and-hotel-to-detroit` — so the
-   item silently fails to match, `lastSeen` never advances, and a to-do Bryan
-   ticks off comes back the next morning as if he had never touched it. Matching
-   his title is not enough and never was. Keep his `title` and `note` as he wrote
-   them too, so the row still reads as his.
-
-   ```jsonc
-   { "key": "own-book-flights-and-hotel-to-detroit",      // from carry.json
-     "title": "Book Flights and Hotel to Detroit",         // his words
-     "note": "I need to do this right after my chi deadline" }
-   ```
-
-   The `key` travels with the item, not with the component — pass it whether the
-   item lands in `todos` or gets promoted into `focus`.
+1. **Re-include every open item** in `todos` — same `title` and `note`, so its
+   key is stable and its state carries.
 2. **Resolve what it implies, once.** "Book flights to NYC — right after my CHI
    deadline" has a real date behind it. Work it out from the rest of the sweep
    (the CHI deadline is 10 Sep, so this becomes actionable 11 Sep), write it into
@@ -332,7 +277,7 @@ Anything Bryan writes in a row's note is his instruction about that row. Read it
 
 ### 1c. Read what Bryan asked you to change
 ```
-node .claude/skills/day/lib/build.mjs feedback
+node .Codex/skills/my-day/lib/build.mjs feedback
 ```
 **Bryan does not file tickets against this dashboard. He types into it.** A note
 under a row, a to-do he adds himself, a thumbs-down — that is the bug report, and
@@ -409,19 +354,7 @@ Not "Tuesday" and not "Daily brief". The date is not lost: it lives in the file'
   it". A broadcast that he decides to act on becomes a **to-do** — and only earns
   a timeline row once he has actually committed. When in doubt, leave it out: a
   timeline he trusts at a glance is worth more than a complete one.
-- **profile** — `state/profile.json` first, before anything guesses. Standing facts
-  Bryan stated outright: **where he is** (`location.here`, which is what
-  `--here` takes) and **which team he follows** (`nfl`). He was shown Zurich's
-  weather while sitting in Seattle because the city was hardcoded; read the file
-  and that cannot recur. Update a field only when he says it changed.
-- **nfl / nflseason** — ESPN's public JSON, no key required:
-  `site.api.espn.com/apis/site/v2/sports/football/nfl/teams/<slug>/schedule` for the
-  season arc, `…/teams/<slug>` for each division rival's record. On a Tuesday the
-  season is the live reading and the week is finished — prefer `nflseason` and
-  leave `nfl` out rather than re-running a result a past issue already carried.
-- **weather** — `node lib/sources.mjs weather --here "<city>" --away "<city>"` →
-  straight into `payload.weather`. Cities come from `profile.json`; anything not in
-  `GAZETTEER` is geocoded automatically, so a new town needs no code change.
+- **weather** — `node lib/sources.mjs weather` → straight into `payload.weather`.
   Glyphs already carry U+FE0F so every condition renders in colour, and each
   block carries a `sky` class that paints the card with a condition-accurate
   gradient (clear / clear-night / partly / cloudy / rain / snow / storm / fog).
@@ -527,14 +460,14 @@ Then append a line to `representations/LOG.md`.
 ### 6. Compose + assemble
 Decide `layout`, write the payload, then:
 ```
-node .claude/skills/day/lib/build.mjs assemble --payload /tmp/nl.json
+node .Codex/skills/my-day/lib/build.mjs assemble --payload /tmp/nl.json
 ```
 It picks the palette, renders every component, inlines images, runs the
 self-check **and the layout doctor**, writes atomically, mirrors to `today.mrbl`.
 On failure it aborts — fix the composition or `design.css`, not the payload.
 
 ### 7. Look at it
-If the `claude-in-chrome` extension is connected: serve, screenshot at ~1512px
+If the `Codex-in-chrome` extension is connected: serve, screenshot at ~1512px
 and ~700px, and check for overlap, clipping, a rail taller than the viewport,
 components that look empty, or type that has gone tiny. Then **tab through it** —
 the first ten stops should reach real controls with a visible ring, and every
@@ -574,7 +507,7 @@ focus list, next date, top 3 links, a link to the doc. One column, ~600px.
   "summary": "one or two sentences",
   "palette": "Peacock & Sand",              // optional; omit to auto-rotate
   "layout": { "rail": [...], "stream": [...] },
-  "hero":   { "image": "<iiif url>", "credit": "Water Lily Pond, Claude Monet, 1900" },
+  "hero":   { "image": "<iiif url>", "credit": "Water Lily Pond, Codex Monet, 1900" },
   "push":   { "title": "...", "body": "2–3 sentences you actually drafted" },
   "focus":  [{ "title", "why", "source"? }],
   "todos":  [{ "title", "source", "meta"?, "note"?, "snooze"? }],
@@ -588,20 +521,6 @@ focus list, next date, top 3 links, a link to the doc. One column, ~600px.
                           "score":"6-4 6-3 6-4","photo":"<url>" },
                    "b": { "name":"T. Paul","country":"USA" }, "winner":"a" } ] } ] },
     "women": { … }
-  },
-  "nflSeason": {                              // from ESPN; see step 3 · `nflseason`
-    "team": "49ers", "record": "1-0", "played": 1, "total": 17,
-    "pf": 27, "pa": 7, "diff": 20, "byeWeek": 8,
-    "homeCount": 9, "awayCount": 8, "divCount": 6,
-    "nextDay": "Sunday, September 20",
-    "weeks": [ { "week": 1, "date": "2026-09-11", "home": false, "opp": "LAR",
-                 "oppName": "Rams", "div": true, "played": true, "result": "W",
-                 "us": 27, "them": 7, "when": "Fri, Sep 11, 5:15 PM", "venue": "…" },
-               { "week": 8, "bye": true } ],
-    "next": { "…one of weeks[], the first unplayed…": null },
-    "west": [ { "abbr": "SF", "name": "49ers", "record": "1-0",
-                "w": 1, "l": 0, "pf": 27, "pa": 7, "diff": 20, "us": true } ],
-    "sourceName": "ESPN — 49ers schedule and NFC West records", "sourceUrl": "…"
   },
   "arxiv": { "papers": [ { ...sources.mjs fields,
                            "authors": ["every author, in full — never abbreviated"],
@@ -624,9 +543,6 @@ to powers of two so the bracket connectors line up.
   the date lives in the `day:date` meta.
 - A to-do Bryan typed himself is never dropped. It lives in `state/carry.json`
   until he ticks it off — see step 1b.
-- Where Bryan is and which team he follows are read from `state/profile.json`
-  every run, never guessed and never written into a renderer. He spent days
-  looking at the weather for a city he had left — see step 0.
 - Never reuse a `data-marble-id`.
 - Authored markup: no script, no network, no external assets. Images arrive only
   as `data:` URIs.

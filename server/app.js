@@ -211,6 +211,17 @@ export async function createDrive(config, { log = console } = {}) {
         return text(res, 404, `no documents in ${config.root}\n\nmake one:  marble-drive new <name>\n`);
       }
 
+      if (route === '/today') {
+        // One address, bookmarked once, that always opens whatever a
+        // recurring skill built most recently — the skill's job is to keep
+        // `config.latestDoc` mirrored, not to hand out a fresh URL each day.
+        const landing = (await store.has(config.latestDoc))
+          ? config.latestDoc
+          : (await listDocs())[0]?.path;
+        if (landing) return send(res, 302, '', { Location: `/a/${encodeURIComponent(landing)}` });
+        return text(res, 404, `no documents in ${config.root}\n\nmake one:  marble-drive new <name>\n`);
+      }
+
       if (route.startsWith('/runtime/')) {
         const file = route.slice('/runtime/'.length);
         const resolve = Object.hasOwn(RUNTIME, file) ? RUNTIME[file] : null;

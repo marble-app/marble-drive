@@ -67,6 +67,11 @@ export function loadConfig(env = process.env) {
     // delete it and `/` falls back to whatever exists.
     home: str('MARBLE_DRIVE_HOME', 'drive'),
 
+    // `/today`'s bookmark: a stable address for whichever document a
+    // recurring skill keeps mirroring the latest run into. Same fallback as
+    // `/` — missing, it lands on whatever's newest instead of 404ing.
+    latestDoc: str('MARBLE_DRIVE_LATEST_DOC', "Bryan's Days/today"),
+
     // G0's gate. Unset means an open host, which is right for a laptop and
     // wrong for anything with a domain in front of it — so it says so, loudly,
     // once, at boot. On a multi-tenant host this same value is the session
