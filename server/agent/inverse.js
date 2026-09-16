@@ -13,7 +13,7 @@
 //     left alone instead of being rolled back over their work.
 
 import { applyOp, indexIds, parseSource } from '../engine.js';
-import { hashesOf } from './source.js';
+import { hashesOf, idsIn } from './source.js';
 
 const ID = 'data-marble-id';
 const TRANSIENT = 'data-marble-transient';
@@ -38,7 +38,21 @@ function placeOf(node) {
   return { parentId, beforeId: next ? attr(next, ID) : null };
 }
 
-const firstId = (html) => /^\s*<[a-zA-Z][^>]*\sdata-marble-id="([^"]+)"/.exec(html)?.[1] ?? null;
+/** The addressed elements an insert put in the document that nothing else it
+ *  put there contains — one for each top-level element of the payload. Read
+ *  from the document after the insert, not from the payload alone, so markup
+ *  the parser places by context (a row, an item) lands where it really did. */
+function insertedRoots(before, after, html) {
+  const existing = indexIds(parseSource(before));
+  const byId = indexIds(parseSource(after));
+  const added = new Set(idsIn(html).filter((id) => !existing.has(id) && byId.has(id)));
+  return [...added].filter((id) => {
+    for (let up = byId.get(id).parentNode; up; up = up.parentNode) {
+      if (isElement(up) && added.has(attr(up, ID))) return false;
+    }
+    return true;
+  });
+}
 
 function inverseOf(source, op) {
   const node = op.id ? indexIds(parseSource(source)).get(op.id) : null;
@@ -61,23 +75,31 @@ function inverseOf(source, op) {
       const place = node && placeOf(node);
       return place ? { type: 'move', id: op.id, ...place } : null;
     }
-    case 'insert': {
-      const id = firstId(op.html);
-      return id ? { type: 'remove', id } : null;
-    }
     default:
       return null;
   }
 }
 
-/** One undo step per op, in the order the ops apply. */
+/** One undo step per op, in the order the ops apply — except an insert, which
+ *  has one step per element it put at the top level. */
 export function inverseSteps(source, ops) {
   const steps = [];
   let current = source;
   for (const op of ops) {
+    if (op.type === 'insert') {
+      const before = current;
+      current = applyOp(current, op);
+      const roots = insertedRoots(before, current, op.html);
+      const expected = hashesOf(current, roots);
+      for (const id of roots) {
+        steps.push({ inverse: { type: 'remove', id }, id, expect: expected.get(id) ?? null, absent: null });
+      }
+      if (!roots.length) steps.push({ inverse: null, id: null, expect: null, absent: null });
+      continue;
+    }
     const inverse = inverseOf(current, op);
     current = applyOp(current, op);
-    const id = op.type === 'insert' ? firstId(op.html) : op.type === 'remove' ? null : op.id;
+    const id = op.type === 'remove' ? null : op.id;
     steps.push({
       inverse,
       id,

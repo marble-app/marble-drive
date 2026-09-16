@@ -84,3 +84,14 @@ test('an element whose parent has no id cannot be put back, and says so with a n
   const steps = inverseSteps(source, [{ type: 'remove', id: 'orphan' }]);
   assert.equal(steps[0].inverse, null);
 });
+
+test('an insert of several elements is undone by removing every one of them', () => {
+  const ops = [
+    { type: 'insert', html: '<li data-marble-id="n1">two</li><li data-marble-id="n2"><em data-marble-id="n2i">three</em></li>', parentId: 'u', beforeId: null },
+  ];
+  const steps = inverseSteps(SOURCE, ops);
+  assert.deepEqual(steps.map((s) => s.inverse), [{ type: 'remove', id: 'n1' }, { type: 'remove', id: 'n2' }]);
+  const after = run(SOURCE, ops);
+  assert.equal(steps[1].expect, hashesOf(after).get('n2'));
+  assert.deepEqual(order(undo(after, steps)), order(SOURCE));
+});

@@ -210,6 +210,19 @@ test('undo reverts the agent and keeps what a person changed afterwards', async 
   assert.match(after, /Where, and when\?/, 'the person\'s edit survives');
 });
 
+test('an insert of several elements is undone whole', async () => {
+  const turn = await freshTurn();
+  const inserted = await tools.call('apply_ops', {
+    path: turn.target, note: 'x', ops: [{ type: 'insert', html: '<li data-marble-id="a">two</li><li data-marble-id="bb">three</li>', parentId: 'q', beforeId: null }],
+  }, turn);
+  assert.equal(inserted.applied, 1);
+  assert.deepEqual(inserted.introduced, ['a', 'bb']);
+  const result = await undoTurn({ records: turn.undo, writeOps: drive.writeOps, client: `agent-undo:${turn.conversationId}` });
+  assert.deepEqual(result, { reverted: 2, kept: 0, errors: [] });
+  const after = await drive.store.read(turn.target);
+  assert.doesNotMatch(after, /two|three/);
+});
+
 test('undoing a turn whose document is gone reports it instead of throwing', async () => {
   const result = await undoTurn({
     records: [{ path: 'no-such-doc', steps: [{ inverse: { type: 'remove', id: 'x' }, id: 'x', expect: 'abc', absent: null }] }],
