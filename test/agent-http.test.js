@@ -153,6 +153,8 @@ test('the conversation stream replays what happened and follows what happens nex
   assert.equal(events[0].type, 'user', 'replayed from the start');
   assert.ok(events.some((e) => e.type === 'text.delta'), 'live deltas arrive');
   assert.ok(events.some((e) => e.type === 'turn.completed'));
+  const seqs = events.map((e) => e.seq).filter((seq) => seq !== undefined);
+  assert.deepEqual(seqs, seqs.map((_, i) => i + 1), 'every stored event exactly once, in order');
   await finished(conversationId, turnId);
 });
 

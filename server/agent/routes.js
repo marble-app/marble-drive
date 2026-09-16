@@ -61,6 +61,43 @@ export function createAgentRoutes({ store, runner, tools, hub, providers, writeO
     hub.publish(conversationId, event, meta ? summarize(meta) : null);
   }
 
+  /** Replay a conversation's transcript, then follow it live, with no event
+   *  lost or repeated at the seam. Subscribing first means anything published
+   *  while the transcript is read is held rather than missed; an event both
+   *  read and then published (appended just before the read, published just
+   *  after) is recognised by its seq and sent once. A reconnecting
+   *  EventSource says where it got to in `Last-Event-ID`. */
+  async function streamConversation(req, res, id, url) {
+    const resumeFrom = Number(req.headers['last-event-id'] ?? url.searchParams.get('after') ?? 0);
+    let last = Number.isFinite(resumeFrom) ? resumeFrom : 0;
+    let held = [];
+    const seqOf = (payload) => Number(/^id: (\d+)$/m.exec(payload)?.[1] ?? NaN);
+    const pass = (payload) => {
+      const seq = seqOf(payload);
+      if (Number.isFinite(seq)) {
+        if (seq <= last) return;
+        last = seq;
+      }
+      res.write(payload);
+    };
+    const listener = {
+      write(payload) {
+        if (held) held.push(payload);
+        else pass(payload);
+      },
+    };
+    const off = hub.subscribe(id, listener);
+    res.on('close', off);
+
+    const replay = await store.events(id, { after: last });
+    if (res.destroyed || res.writableEnded) return off();
+    for (const event of replay) pass(`id: ${event.seq}\ndata: ${JSON.stringify(event)}\n\n`);
+    const pending = held;
+    held = null;
+    for (const payload of pending) pass(payload);
+    return undefined;
+  }
+
   async function handle(req, res, url) {
     const route = url.pathname;
     const method = req.method;
@@ -177,12 +214,9 @@ export function createAgentRoutes({ store, runner, tools, hub, providers, writeO
       res.write(': connected\n\n');
       const id = url.searchParams.get('conversation');
       if (id && /^[0-9a-f]{12}$/.test(id)) {
-        for (const event of await store.events(id, { after: Number(url.searchParams.get('after') ?? 0) })) {
-          res.write(`id: ${event.seq}\ndata: ${JSON.stringify(event)}\n\n`);
-        }
-        req.on('close', hub.subscribe(id, res));
+        await streamConversation(req, res, id, url);
       } else {
-        req.on('close', hub.subscribe('*', res));
+        res.on('close', hub.subscribe('*', res));
       }
       return undefined;
     }
