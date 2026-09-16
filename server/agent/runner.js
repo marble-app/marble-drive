@@ -293,22 +293,34 @@ export function createRunner({ store, tools, providers, workdir, origin, bridgeP
     for (const clear of turn.timers) clear();
     if (turn.inflight.size) await Promise.allSettled([...turn.inflight]);
 
+    // Compute everything up front: the stored turn, the conversation, and
+    // the closing event all carry the same values.
     const finishedAt = Date.now();
+    const outcome = turn.watchdog
+      ? 'watchdog'
+      : status === 'completed'
+        ? turn.applied ? 'changes' : 'done'
+        : status;
+    const applied = turn.applied;
     try {
-      if (turn.undo.length) await store.saveUndo(turn.id, turn.undo);
-      await store.updateTurn(turn.id, { status, finishedAt, error, applied: turn.applied, usage: turn.usage });
-      const outcome = turn.watchdog
-        ? 'watchdog'
-        : status === 'completed'
-          ? turn.applied ? 'changes' : 'done'
-          : status;
-      await store.updateConversation(turn.conversationId, {
-        running: false,
-        activity: status === 'completed' ? (turn.applied ? `Changed ${turn.applied} element(s)` : 'Answered') : error ?? status,
-        lastOutcome: outcome,
-        lastFinishedAt: finishedAt,
-      });
-      await emit(turn, { type: `turn.${status}`, applied: turn.applied, ...(error ? { error } : {}) });
+      try {
+        if (turn.undo.length) await store.saveUndo(turn.id, turn.undo);
+        await store.updateConversation(turn.conversationId, {
+          running: false,
+          activity: status === 'completed' ? (applied ? `Changed ${applied} element(s)` : 'Answered') : error ?? status,
+          lastOutcome: outcome,
+          lastFinishedAt: finishedAt,
+        });
+        await emit(turn, { type: `turn.${status}`, applied, ...(error ? { error } : {}) });
+      } finally {
+        // The terminal status is the LAST store write. Anyone polling the
+        // turn (tests, GET /agent/conversations/:id, the UI) treats a
+        // terminal status as "done — read the rest now", so the undo record,
+        // the conversation's outcome, and the closing event must already be
+        // there when it appears. It is still written if one of those failed,
+        // so the stored turn is not left reading `running` forever.
+        await store.updateTurn(turn.id, { status, finishedAt, error, applied, usage: turn.usage });
+      }
     } finally {
       // Whatever happened above — success, or one of those store writes
       // throwing — the turn must actually leave the runner. Skip this and a
@@ -345,8 +357,9 @@ export function createRunner({ store, tools, providers, workdir, origin, bridgeP
       live.delete(turnId);
       const idx = order.indexOf(turnId);
       if (idx !== -1) order.splice(idx, 1);
-      await store.updateTurn(turnId, { status: 'removed', finishedAt: Date.now() });
+      // Same rule as finish(): the terminal status is written last.
       await emit(turn, { type: 'turn.removed' });
+      await store.updateTurn(turnId, { status: 'removed', finishedAt: Date.now() });
       return true;
     },
 

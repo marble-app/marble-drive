@@ -419,3 +419,74 @@ test('a turn leaves the runner even when the store fails while finishing it', as
   assert.equal(t2.status, 'completed');
   await runner.close();
 });
+
+// --- Fix round 4: a turn's terminal status is the last thing written. ---
+
+test('once a turn reads as finished, its outcome and closing event are already stored', async () => {
+  const dir = await fsp.mkdtemp(path.join(os.tmpdir(), 'marble-runner-'));
+  const realStore = createAgentStore({ dir: path.join(dir, 'agents'), defaultProvider: 'fake' });
+  await realStore.ready();
+  const { id } = await realStore.createConversation({ provider: 'fake' });
+
+  // The instant the runner writes a terminal status, record what a poller
+  // that saw that status would be able to read.
+  const snapshots = [];
+  const store = {
+    ...realStore,
+    async updateTurn(turnId, patch) {
+      if (patch.status && !['queued', 'running'].includes(patch.status)) {
+        snapshots.push({
+          status: patch.status,
+          types: (await realStore.events(id)).map((e) => e.type),
+          conversation: await realStore.conversation(id),
+          undo: await realStore.undoRecords(turnId),
+        });
+      }
+      return realStore.updateTurn(turnId, patch);
+    },
+  };
+
+  const runner = createRunner({
+    store,
+    tools: {
+      call: async (name, input, turn) => {
+        turn.undo.push({ path: 'd', kind: 'test' });
+        turn.onEvent({ type: 'ops.applied', path: 'd', count: 1 });
+        return { ok: true };
+      },
+    },
+    providers: new Map([['fake', createFakeProvider({ scripts: SCRIPTS })]]),
+    workdir: path.join(dir, 'work'),
+    origin: () => 'http://127.0.0.1:1',
+    bridgePath: '/nonexistent/marble-mcp.js',
+    readDocument: async () => null,
+    publish: () => {},
+    limits: { maxRunning: 3, stallMs: 60_000, maxMs: 60_000, killGraceMs: 200 },
+    log: { log() {}, error() {} },
+  });
+  await runner.boot();
+
+  // A completed turn, flagged by the watchdog.
+  const first = await runner.send(id, { prompt: 'script:slow', context: { target: 'd' } });
+  await until(() => runner.running().length === 1);
+  runner.watchdog('d', 'a'.repeat(64));
+  await finished(realStore, first.turnId);
+  assert.equal(snapshots.length, 1);
+  assert.equal(snapshots[0].status, 'completed');
+  assert.equal(snapshots[0].types.at(-1), 'turn.completed', 'the closing event was stored before the status');
+  assert.equal(snapshots[0].conversation.lastOutcome, 'watchdog', 'the outcome was stored before the status');
+  assert.equal(snapshots[0].conversation.running, false);
+
+  // A cancelled turn whose tool call applied something.
+  const second = await runner.send(id, { prompt: 'script:stall', context: { target: 'd' } });
+  const live = await until(() => (runner.running()[0]?.token ? runner.running()[0] : null));
+  await runner.callTool(live.token, 'apply_ops', {});
+  await runner.cancel(second.turnId);
+  await finished(realStore, second.turnId);
+  assert.equal(snapshots.length, 2);
+  assert.equal(snapshots[1].status, 'cancelled');
+  assert.equal(snapshots[1].types.at(-1), 'turn.cancelled');
+  assert.equal(snapshots[1].conversation.lastOutcome, 'cancelled');
+  assert.ok(snapshots[1].undo, 'the undo record was saved before the status');
+  await runner.close();
+});
