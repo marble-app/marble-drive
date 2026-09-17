@@ -16,7 +16,6 @@ import readline from 'node:readline';
 
 import { collectSlices } from '../engine.js';
 import { pickEnv } from './env.js';
-import { summarize } from './store.js';
 
 const SELECTION_BUDGET = 6_000;
 const STDERR_TAIL = 4_000;
@@ -47,7 +46,7 @@ export function createRunner({ store, tools, providers, workdir, origin, bridgeP
     return chained(turn.conversationId, async () => {
       const stored = await store.appendEvent(turn.conversationId, { turn: turn.id, ...event });
       const meta = await store.conversation(turn.conversationId);
-      publish(turn.conversationId, stored, meta ? summarize(meta) : null);
+      publish(turn.conversationId, stored, meta ? await store.summary(turn.conversationId) : null);
       return stored;
     });
   }

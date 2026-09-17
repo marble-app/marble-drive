@@ -26,6 +26,9 @@ export const summarize = (meta) => ({
   ...meta,
   status: meta.running ? 'running' : meta.lastOutcome ?? 'new',
   needsReview: needsReview(meta),
+  // Honest: listings never use status 'queued'. A waiting conversation is
+  // `running: false` with `queued: true` when a turn file is still queued.
+  queued: Boolean(meta.queued),
 });
 
 export const conversationOf = (turnId) => turnId.slice(0, turnId.lastIndexOf('-t'));
@@ -187,6 +190,13 @@ export function createAgentStore({ dir, defaultProvider = 'claude-subscription',
     });
   }
 
+  async function summary(id) {
+    const meta = await conversation(id);
+    if (!meta) return null;
+    const queued = (await turns(id)).some((t) => t.status === 'queued');
+    return summarize({ ...meta, queued });
+  }
+
   return {
     ready: () => fsp.mkdir(dir, { recursive: true }),
 
@@ -219,13 +229,14 @@ export function createAgentStore({ dir, defaultProvider = 'claude-subscription',
 
     conversation,
     updateConversation,
+    summary,
 
     async conversations({ archived = false } = {}) {
       const metas = (await Promise.all((await ids()).map((id) => conversation(id)))).filter(Boolean);
-      return metas
+      const wanted = metas
         .filter((meta) => Boolean(meta.archived) === Boolean(archived))
-        .sort((a, b) => b.updatedAt - a.updatedAt)
-        .map(summarize);
+        .sort((a, b) => b.updatedAt - a.updatedAt);
+      return Promise.all(wanted.map((meta) => summary(meta.id)));
     },
 
     appendEvent,

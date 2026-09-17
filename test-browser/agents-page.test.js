@@ -170,6 +170,95 @@ test('clicking a board card opens the conversation panel', async () => {
   await page.locator(`.conv[data-id="${id}"]`).waitFor();
   await page.keyboard.press('v');
   await page.locator(`.column .conv[data-id="${id}"]`).click();
-  await page.locator('.board-panel[data-open="true"] marble-conversation').waitFor();
-  assert.equal(await page.locator('.board-panel marble-conversation').getAttribute('conversation'), id);
+  await page.locator('.board-panel[data-open="true"]').waitFor();
+  assert.equal(await page.locator('marble-conversation').count(), 1, 'one conversation element');
+  assert.equal(await page.locator('.pane marble-conversation').getAttribute('conversation'), id);
+  assert.equal(await page.locator('.board-panel marble-conversation').count(), 0);
+});
+
+test('a queued conversation sits in Running, not Completed', async () => {
+  const { page } = await openAgents();
+  const waiting = await host.drive.agents.store.createConversation({ provider: 'fake' });
+  await host.drive.agents.store.createTurn(waiting.id, { prompt: 'later', context: { target: 'garden' } });
+  try {
+    await page.reload();
+    await page.waitForFunction(() => Boolean(window.marble?.agent && customElements.get('marble-conversation')));
+    await page.locator(`.conv[data-id="${waiting.id}"]`).waitFor();
+    await page.keyboard.press('v');
+    await page.waitForFunction(() => document.body.getAttribute('data-view') === 'board');
+    assert.equal(await page.locator(`.column[data-col="running"] .conv[data-id="${waiting.id}"]`).count(), 1);
+  } finally {
+    await host.drive.agents.store.updateConversation(waiting.id, { archived: true });
+    const leftover = await host.drive.agents.store.turns(waiting.id);
+    for (const turn of leftover) {
+      if (turn.status === 'queued') await host.drive.agents.store.updateTurn(turn.id, { status: 'removed', finishedAt: Date.now() });
+    }
+  }
+});
+
+test('toggling twice during FLIP keeps one node on the library', async () => {
+  const { page } = await openAgents();
+  const id = await page.evaluate(async () => {
+    const agent = window.marble.agent;
+    const id = await agent.start({ provider: 'fake' });
+    await agent.send(id, { prompt: 'script:rename', target: 'garden', viewing: 'Agents', selection: [] });
+    return id;
+  });
+  await page.locator(`.conv[data-id="${id}"]`).waitFor();
+  await page.keyboard.press('v');
+  await page.keyboard.press('v');
+  await page.waitForFunction(() => document.body.getAttribute('data-view') === 'library');
+  await page.waitForFunction((cid) => {
+    const el = document.querySelector(`.conv[data-id="${cid}"]`);
+    if (!el) return false;
+    const t = getComputedStyle(el).transform;
+    return !el.classList.contains('marble-flip') && (t === 'none' || t === 'matrix(1, 0, 0, 1, 0, 0)');
+  }, id);
+  assert.equal(await page.locator(`.conv[data-id="${id}"]`).count(), 1);
+  assert.equal(await page.locator(`#list .conv[data-id="${id}"]`).count(), 1);
+  const transform = await page.locator(`.conv[data-id="${id}"]`).evaluate((el) => getComputedStyle(el).transform);
+  assert.ok(transform === 'none' || transform === 'matrix(1, 0, 0, 1, 0, 0)');
+});
+
+test('toggling twice during a crossfade does not stick opacity', async () => {
+  const { page } = await openAgents({ reducedMotion: 'reduce' });
+  const id = await page.evaluate(async () => {
+    const agent = window.marble.agent;
+    const id = await agent.start({ provider: 'fake' });
+    await agent.send(id, { prompt: 'script:rename', target: 'garden', viewing: 'Agents', selection: [] });
+    return id;
+  });
+  await page.locator(`.conv[data-id="${id}"]`).waitFor();
+  await page.keyboard.press('v');
+  await page.keyboard.press('v');
+  await page.waitForFunction(() => document.body.getAttribute('data-view') === 'library');
+  await page.waitForFunction(() => !document.body.hasAttribute('data-crossfade'));
+  assert.equal(await page.locator('body').getAttribute('data-crossfade'), null);
+  const libOpacity = await page.locator('.library').evaluate((el) => getComputedStyle(el).opacity);
+  assert.equal(libOpacity, '1');
+  assert.equal(await page.locator(`#list .conv[data-id="${id}"]`).count(), 1);
+});
+
+test('opening the board panel does not clone the conversation on reconcile', async () => {
+  const { page } = await openAgents();
+  const id = await page.evaluate(async () => {
+    const agent = window.marble.agent;
+    const id = await agent.start({ provider: 'fake' });
+    await agent.send(id, { prompt: 'script:rename', target: 'garden', viewing: 'Agents', selection: [] });
+    return id;
+  });
+  await page.locator(`.conv[data-id="${id}"]`).waitFor();
+  await page.keyboard.press('v');
+  await page.locator(`.column .conv[data-id="${id}"]`).click();
+  await page.locator('.board-panel[data-open="true"]').waitFor();
+  const sameNode = await page.evaluate(() => {
+    const el = document.querySelector('marble-conversation');
+    window.marble.adopt(document.body);
+    return el === document.querySelector('marble-conversation')
+      && document.querySelectorAll('marble-conversation').length === 1
+      && Boolean(el.closest('.pane'));
+  });
+  assert.equal(sameNode, true);
+  assert.equal(await page.locator('.board-panel marble-conversation').count(), 0);
+  assert.equal(await page.locator('.pane marble-conversation').getAttribute('conversation'), id);
 });

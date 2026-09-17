@@ -77,8 +77,7 @@ export function createAgentRoutes({ store, runner, tools, hub, providers, writeO
   }
 
   async function publishSummary(conversationId, event) {
-    const meta = await store.conversation(conversationId);
-    hub.publish(conversationId, event, meta ? summarize(meta) : null);
+    hub.publish(conversationId, event, await store.summary(conversationId));
   }
 
   /** Replay a conversation's transcript, then follow it live, with no event
@@ -186,7 +185,7 @@ export function createAgentRoutes({ store, runner, tools, hub, providers, writeO
       }
       if (!turns && method === 'GET') {
         return json(res, 200, {
-          meta: summarize(meta),
+          meta: await store.summary(id),
           turns: await store.turns(id),
           events: await store.events(id, { after: Number(url.searchParams.get('after') ?? 0) }),
         });
@@ -197,7 +196,8 @@ export function createAgentRoutes({ store, runner, tools, hub, providers, writeO
         if (typeof body.archived === 'boolean') patch.archived = body.archived;
         if (body.reviewed === true) patch.lastReviewedAt = Date.now();
         if (typeof body.title === 'string' && body.title.trim()) patch.title = body.title.trim().slice(0, 120);
-        const next = summarize(await store.updateConversation(id, patch));
+        await store.updateConversation(id, patch);
+        const next = await store.summary(id);
         hub.publish(id, { type: 'meta' }, next);
         return json(res, 200, next);
       }

@@ -22,6 +22,7 @@ test('a conversation is created, read back and listed', async () => {
   assert.equal(listed.length, 1);
   assert.equal(listed[0].status, 'new');
   assert.equal(listed[0].needsReview, false);
+  assert.equal(listed[0].queued, false);
 });
 
 test('events are numbered in order even when appended at once, and the first message titles the conversation', async () => {
@@ -105,6 +106,30 @@ test('needs review: changes, failures and interruptions nobody has looked at', (
   assert.equal(needsReview({ ...base, lastOutcome: 'failed', lastReviewedAt: 150 }), false);
   assert.equal(needsReview({ ...base, lastOutcome: 'watchdog', lastReviewedAt: 50 }), true);
   assert.equal(summarize({ ...base, running: true, lastOutcome: 'changes' }).status, 'running');
+  assert.equal(summarize({ ...base }).queued, false);
+  assert.equal(summarize({ ...base, queued: true }).queued, true);
+  assert.equal(summarize({ ...base, queued: true }).status, 'new');
+});
+
+test('a conversation with a queued turn is listed as queued, even when it is not running', async () => {
+  const { store } = await fresh();
+  const running = await store.createConversation({ provider: 'fake' });
+  const waiting = await store.createConversation({ provider: 'fake' });
+  const active = await store.createTurn(running.id, { prompt: 'a', context: {} });
+  await store.updateTurn(active.id, { status: 'running' });
+  await store.updateConversation(running.id, { running: true });
+  const queued = await store.createTurn(waiting.id, { prompt: 'b', context: {} });
+  assert.equal(queued.status, 'queued');
+
+  const listed = await store.conversations();
+  const waitingSummary = listed.find((c) => c.id === waiting.id);
+  const runningSummary = listed.find((c) => c.id === running.id);
+  assert.equal(waitingSummary.running, false);
+  assert.equal(waitingSummary.queued, true);
+  assert.equal(waitingSummary.status, 'new');
+  assert.equal(runningSummary.queued, false);
+  assert.equal(runningSummary.status, 'running');
+  assert.equal((await store.summary(waiting.id)).queued, true);
 });
 
 test('destructured use works without this binding', async () => {
