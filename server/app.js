@@ -160,9 +160,20 @@ export async function createDrive(config, { log = console, agentProviders = null
         ops = planned.ops;
       }
 
+      // `after` is bookkeeping for a writer that has already won; it must not
+      // turn a write that landed (or a batch that changed nothing) into an
+      // error. A throw is logged, and the result stands.
+      const settle = (before, now) => {
+        try {
+          after?.(before, now);
+        } catch (err) {
+          log.error(`[drive] after-write hook for ${docPath} failed: ${err.message}`);
+        }
+      };
+
       const next = guardOps(source, ops);
       if (next === source) {
-        after?.(source, source);
+        settle(source, source);
         return { applied: 0, bytes: bytesOf(source), sha: shaOf(source) };
       }
 
@@ -170,7 +181,7 @@ export async function createDrive(config, { log = console, agentProviders = null
       pendingWrites.mark(docPath, shaOf(next));
       const written = await store.write(docPath, next, { label: 'ops', ops });
       await oplog.append(docPath, ops, { client: client ?? 'anon' });
-      after?.(source, next);
+      settle(source, next);
       return { applied: ops.length, ...written };
     });
   }

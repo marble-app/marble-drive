@@ -71,4 +71,23 @@ test('a gesture without hooks still writes the way it always did', async () => {
   assert.match(await drive.store.read('hooks-plain'), />Uno</);
 });
 
+test('a throwing after hook does not turn a write that landed into an error', async () => {
+  const errors = [];
+  const loud = await createDrive(loadConfig(), { log: { log() {}, error: (m) => errors.push(m) } });
+  try {
+    await loud.createDocument('hooks-after-throws', SOURCE, { label: 'test' });
+    const result = await loud.writeOps('hooks-after-throws', [{ type: 'setText', id: 'h1', text: 'Landed' }], {
+      client: 'agent:x',
+      after: () => {
+        throw new Error('ledger bug');
+      },
+    });
+    assert.equal(result.applied, 1);
+    assert.match(await loud.store.read('hooks-after-throws'), />Landed</);
+    assert.ok(errors.some((m) => /ledger bug/.test(m)), 'the failure is logged');
+  } finally {
+    await loud.close();
+  }
+});
+
 test.after(() => drive.close());
