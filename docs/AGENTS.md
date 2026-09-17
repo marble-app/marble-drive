@@ -120,6 +120,18 @@ Agent text is shown, never interpreted as HTML (`renderText` in
 `runtime/agent-ui.js`). Browser tests: `npm run test:browser`; screenshots:
 `node test-browser/screens.mjs <dir>`.
 
+## The Agents document
+
+A drive that has run `serve` at least once with this host gets an `Agents`
+document at the root, seeded the same way Drive is: written only if it is
+not already there. It is a library of every conversation and a board of
+the ones that are running, need review, or are done. `V` toggles the two.
+The drawer's **Open Agents** appears once that document exists.
+
+The page uses `window.marble.agent` and the same `<marble-conversation>`
+as the drawer (`<meta name="marble-agent" content="custom">`, so it does
+not wear a second launcher). Conversation rows are not stored in the file.
+
 ## Not yet
 
 - A turn's target does not follow a move, and a trashed target is not named as

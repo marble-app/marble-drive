@@ -103,4 +103,4 @@ Injected (with `runtime/agent-ui.js`, the drawer) only when the host runs agents
 | `marble.agent.current()` / `.remember(id)` | the conversation that follows you between pages |
 | `marble.agent.open(id)` / `.close()` | ask the drawer |
 
-A document that draws its own agent interface says `<meta name="marble-agent" content="custom">` and gets the API without the drawer.
+A document that draws its own agent interface says `<meta name="marble-agent" content="custom">`: the host still injects `agent-ui.js` so `<marble-conversation>` is available, but the drawer does not mount.
