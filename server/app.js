@@ -88,6 +88,10 @@ const RUNTIME = {
   // The Drive's extension to it. Everything a Drive needs that a single
   // document does not — see docs/CARRIER-DRIVE.md.
   'drive.js': () => path.join(REPO, 'runtime', 'drive.js'),
+  // Agents, when they are on: the client for /agent/* and the drawer that
+  // uses it. Served to every document; injected only when agents run here.
+  'agent.js': () => path.join(REPO, 'runtime', 'agent.js'),
+  'agent-ui.js': () => path.join(REPO, 'runtime', 'agent-ui.js'),
 };
 
 export async function createDrive(config, { log = console, agentProviders = null, agents: withAgents = true } = {}) {
@@ -123,9 +127,17 @@ export async function createDrive(config, { log = console, agentProviders = null
   // ------------------------------------------------------------------ serving
 
   const injectCarrier = (source, docPath) => {
-    const tags =
+    let tags =
       `<script src="/runtime/marble.js" data-marble-app="${escapeHtml(docPath)}" data-marble-transient></script>\n` +
       `<script src="/runtime/drive.js" data-marble-transient></script>`;
+    if (agents) {
+      tags += `\n<script src="/runtime/agent.js" data-marble-transient></script>`;
+      // A document that draws its own agent interface (Agents.mrbl) wants the
+      // client and not a second drawer on top of itself.
+      if (!/<meta\s+name="marble-agent"\s+content="custom"\s*\/?>/i.test(source)) {
+        tags += `\n<script src="/runtime/agent-ui.js" data-marble-transient></script>`;
+      }
+    }
     return source.includes('</body>')
       ? source.replace(/<\/body>/i, () => `${tags}\n</body>`)
       : source + tags;

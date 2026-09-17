@@ -156,6 +156,7 @@ export function createCursorProvider({
   return {
     id: 'cursor',
     label: 'Cursor',
+    defaultModel,
 
     async detect() {
       // The same allowlist a turn starts from, and the key a turn would get.

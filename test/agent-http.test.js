@@ -125,7 +125,7 @@ let edited = null;
 test('providers are listed, with the default marked', async () => {
   const { status, body } = await api('GET', '/agent/providers');
   assert.equal(status, 200);
-  assert.deepEqual(body, [{ id: 'fake', label: 'Fake', installed: true, signedIn: true, detail: 'scripted', default: true }]);
+  assert.deepEqual(body, [{ id: 'fake', label: 'Fake', defaultModel: null, installed: true, signedIn: true, detail: 'scripted', default: true }]);
 });
 
 test('an agent edits a document through the bridge, and the open tab hears it', async () => {
@@ -252,6 +252,9 @@ test('a host with agents off answers 404 to all of it', async () => {
   assert.equal(off.agents, null);
   assert.equal((await fetch(`http://127.0.0.1:${offPort}/agent/providers`)).status, 404);
   assert.equal((await fetch(`http://127.0.0.1:${offPort}/agent/tools`)).status, 404);
+  await off.createDocument('plain', SOURCE);
+  const plain = await (await fetch(`http://127.0.0.1:${offPort}/a/plain`)).text();
+  assert.ok(!plain.includes('/runtime/agent'), 'no agent scripts when agents are off');
   await off.close();
 });
 
@@ -371,6 +374,31 @@ test('a removed turn cannot be undone', async () => {
   assert.equal((await api('DELETE', `/agent/turns/${queued.body.turnId}`)).body.removed, true);
   assert.equal((await api('POST', `/agent/turns/${queued.body.turnId}/undo`)).status, 409);
   await finished(running.conversationId, running.turnId);
+});
+
+test("a document is served with the agent scripts after the Drive's, when agents are on", async () => {
+  const page = await (await fetch(`${base}/a/garden`)).text();
+  const drive = page.indexOf('/runtime/drive.js');
+  const api = page.indexOf('<script src="/runtime/agent.js" data-marble-transient></script>');
+  const ui = page.indexOf('<script src="/runtime/agent-ui.js" data-marble-transient></script>');
+  assert.ok(drive > 0 && api > drive && ui > api, 'drive.js, then agent.js, then agent-ui.js');
+  for (const file of ['agent.js', 'agent-ui.js']) {
+    const response = await fetch(`${base}/runtime/${file}`);
+    assert.equal(response.status, 200, file);
+    assert.match(response.headers.get('content-type'), /javascript/);
+  }
+});
+
+test('a document that presents agents itself gets the API but not the drawer', async () => {
+  await drive.createDocument('custom-agents', SOURCE.replace('<title>', '<meta name="marble-agent" content="custom"><title>'));
+  const page = await (await fetch(`${base}/a/custom-agents`)).text();
+  assert.ok(page.includes('/runtime/agent.js'));
+  assert.ok(!page.includes('/runtime/agent-ui.js'));
+});
+
+test('providers say which model they use unless told otherwise', async () => {
+  const { body } = await api('GET', '/agent/providers');
+  assert.equal(body[0].defaultModel, null, 'the fake provider has none');
 });
 
 test.after(() => drive.close());

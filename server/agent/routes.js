@@ -54,7 +54,7 @@ export function createAgentRoutes({ store, runner, tools, hub, providers, writeO
           setTimeout(() => resolve({ installed: false, signedIn: false, detail: 'detection timed out' }), DETECT_TIMEOUT).unref?.(),
         );
         const found = await Promise.race([provider.detect().catch((err) => ({ installed: false, signedIn: false, detail: err.message })), timeout]);
-        return { id: provider.id, label: provider.label, ...found };
+        return { id: provider.id, label: provider.label, defaultModel: provider.defaultModel ?? null, ...found };
       }),
     );
     detected = { at: Date.now(), list };

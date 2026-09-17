@@ -319,3 +319,8 @@ test('prepare refuses a hook command it could not quote safely', async () => {
   assert.equal(hooks.hooks.preToolUse[0].command, `"${process.execPath}" "/a/with space/hook.js"`);
   assert.deepEqual((await fsp.readdir(path.join(workspace, '.cursor'))).sort(), ['hooks.json', 'mcp.json'], 'no temp file left behind');
 });
+
+test('the provider names its default model, for the picker', () => {
+  assert.equal(createCursorProvider({ env: {} }).defaultModel, 'composer-2.5');
+  assert.equal(createCursorProvider({ env: {}, defaultModel: 'gpt-5.2' }).defaultModel, 'gpt-5.2');
+});
