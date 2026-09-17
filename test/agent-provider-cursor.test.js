@@ -14,6 +14,8 @@ import { TOOL_SCHEMAS } from '../server/agent/tools.js';
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const FIXTURES = path.join(HERE, 'fixtures', 'providers');
 const HOOK = path.join(HERE, '..', 'bin', 'marble-cursor-hook.js');
+// Never the machine's own ~/.cursor: a test must not depend on what is installed there.
+const NO_USER_DIR = path.join(os.tmpdir(), 'marble-cursor-no-user-dir');
 
 const parseAll = (name) => {
   const state = {};
@@ -142,7 +144,7 @@ test('a prompt starting with - comes after -- to avoid being parsed as an option
 test('prepare writes the MCP config privately, the fail-closed hook, and the instructions', async () => {
   const workspace = await fsp.mkdtemp(path.join(os.tmpdir(), 'marble-cursor-ws-'));
   const mcp = { command: '/usr/bin/node', args: ['/repo/bin/marble-mcp.js'], env: { MARBLE_DRIVE_URL: 'http://127.0.0.1:1', MARBLE_AGENT_TOKEN: 'tok' } };
-  await createCursorProvider({ hookPath: '/repo/bin/marble-cursor-hook.js' }).prepare({ workspace, mcp, meta: {} });
+  await createCursorProvider({ hookPath: '/repo/bin/marble-cursor-hook.js', userDir: NO_USER_DIR }).prepare({ workspace, mcp, meta: {} });
 
   const mcpFile = path.join(workspace, '.cursor', 'mcp.json');
   assert.deepEqual(JSON.parse(await fsp.readFile(mcpFile, 'utf8')), { mcpServers: { marble: mcp } });
@@ -160,12 +162,12 @@ test('prepare writes the MCP config privately, the fail-closed hook, and the ins
 test('detect: signed in, signed out, not installed', async () => {
   const exec = (answer) => async () => answer;
   assert.deepEqual(
-    await createCursorProvider({ exec: exec({ code: 0, stdout: '✓ Logged in as someone@example.com\n', stderr: '', missing: false }) }).detect(),
+    await createCursorProvider({ userDir: NO_USER_DIR, exec: exec({ code: 0, stdout: '✓ Logged in as someone@example.com\n', stderr: '', missing: false }) }).detect(),
     { installed: true, signedIn: true, detail: 'signed in as someone@example.com' },
   );
-  assert.equal((await createCursorProvider({ exec: exec({ code: 1, stdout: 'Not logged in', stderr: '', missing: false }) }).detect()).signedIn, false);
+  assert.equal((await createCursorProvider({ userDir: NO_USER_DIR, exec: exec({ code: 1, stdout: 'Not logged in', stderr: '', missing: false }) }).detect()).signedIn, false);
   assert.deepEqual(
-    await createCursorProvider({ exec: exec({ code: null, stdout: '', stderr: '', missing: true }) }).detect(),
+    await createCursorProvider({ userDir: NO_USER_DIR, exec: exec({ code: null, stdout: '', stderr: '', missing: true }) }).detect(),
     { installed: false, signedIn: false, detail: 'cursor-agent is not installed' },
   );
 });
@@ -222,4 +224,49 @@ test('the hook edge cases: trailing space, case sensitivity, near misses, junk',
   assert.equal(code, 0);
   assert.equal(answer.permission, 'deny', 'large junk input should be denied');
   assert.ok(answer.agent_message);
+});
+
+// --- Final review: Cursor cannot tell another MCP server's tool from Marble's. ---
+
+const userDirWith = async (contents) => {
+  const dir = await fsp.mkdtemp(path.join(os.tmpdir(), 'marble-cursor-user-'));
+  if (contents !== undefined) await fsp.writeFile(path.join(dir, 'mcp.json'), contents);
+  return dir;
+};
+const signedIn = async () => ({ code: 0, stdout: '✓ Logged in as someone@example.com\n', stderr: '', missing: false });
+const mcpForTest = { command: '/usr/bin/node', args: ['/repo/bin/marble-mcp.js'], env: { MARBLE_AGENT_TOKEN: 'tok' } };
+
+test('user-level MCP servers turn Cursor off: prepare refuses, detect says blocked', async () => {
+  const userDir = await userDirWith(JSON.stringify({ mcpServers: { docs: { command: 'x' } } }));
+  const provider = createCursorProvider({ userDir, exec: signedIn, env: {} });
+  const workspace = await fsp.mkdtemp(path.join(os.tmpdir(), 'marble-cursor-ws-'));
+  await assert.rejects(
+    provider.prepare({ workspace, mcp: mcpForTest, meta: {} }),
+    { message: 'Cursor has user-level MCP servers (docs) in ~/.cursor/mcp.json; Marble cannot tell their tools from its own, so Cursor turns are off until they are removed' },
+  );
+  assert.deepEqual(await provider.detect(), {
+    installed: true,
+    signedIn: false,
+    detail: 'blocked: user-level MCP servers in ~/.cursor/mcp.json (docs)',
+  });
+});
+
+test('no user-level MCP servers — absent, empty, or {} — leaves Cursor on', async () => {
+  for (const contents of [undefined, '', '  \n', '{}', '{"mcpServers":{}}']) {
+    const userDir = await userDirWith(contents);
+    const provider = createCursorProvider({ userDir, exec: signedIn, env: {}, hookPath: '/repo/bin/marble-cursor-hook.js' });
+    const workspace = await fsp.mkdtemp(path.join(os.tmpdir(), 'marble-cursor-ws-'));
+    await provider.prepare({ workspace, mcp: mcpForTest, meta: {} });
+    assert.equal((await provider.detect()).signedIn, true, JSON.stringify(contents));
+  }
+});
+
+test('a user-level mcp.json that cannot be read as JSON counts as servers present', async () => {
+  const userDir = await userDirWith('{ "mcpServers": { "docs": ');
+  const provider = createCursorProvider({ userDir, exec: signedIn, env: {} });
+  const workspace = await fsp.mkdtemp(path.join(os.tmpdir(), 'marble-cursor-ws-'));
+  await assert.rejects(provider.prepare({ workspace, mcp: mcpForTest, meta: {} }), /user-level MCP servers/);
+  const found = await provider.detect();
+  assert.equal(found.signedIn, false);
+  assert.match(found.detail, /^blocked: user-level MCP servers in ~\/\.cursor\/mcp\.json/);
 });

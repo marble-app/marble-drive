@@ -5,9 +5,16 @@
 // 2026-09-16 spike watched `--mode ask` and `--sandbox enabled` both let its
 // edit tool write a file. A hook can refuse, though, and Cursor asks this one
 // before every tool call. It allows Marble's tools by name and nothing else:
-// not the built-in tools, and not some other MCP server's tools that a user
-// config might have added. The workspace registers it with `failClosed`, so a
-// hook that crashes is a refusal too.
+// not the built-in tools, and not another MCP server's differently named tools.
+// The workspace registers it with `failClosed`, so a hook that crashes is a
+// refusal too.
+//
+// What it cannot do: tell two servers' tools apart. Cursor tells it
+// `tool_name: "MCP:read_document"` and nothing about which server that is
+// (live payload, 2026-09-17), so a user-level server with a tool of the same
+// name would be allowed. That is why the Cursor provider refuses to run while
+// ~/.cursor/mcp.json names any server. Whether a user-level ~/.cursor/hooks.json
+// runs alongside this hook, and how their answers combine, is unverified.
 
 const ALLOWED = new Set([
   'MCP:list_documents',

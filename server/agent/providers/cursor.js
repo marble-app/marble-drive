@@ -6,10 +6,18 @@
 // instructions live in the same workspace, which is outside the drive, so even
 // a tool that slipped past the hook would find nothing there worth touching.
 //
+// What the hook is told about a call is its name — `MCP:read_document` — and
+// not which server it belongs to (checked against a live payload, 2026-09-17).
+// `--approve-mcps` approves every server Cursor loads, and Cursor merges the
+// user's own ~/.cursor/mcp.json into ours, so a user server with a tool named
+// like one of Marble's would pass the hook. Until Cursor says which server a
+// call is for, a machine with user-level MCP servers runs no Cursor turns.
+//
 // The default model is composer-2.5: on 2026-09-16 Cursor's default model was
 // at its plan limit and composer-2.5 was not. A conversation's own model wins.
 
 import fsp from 'node:fs/promises';
+import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -18,6 +26,27 @@ import { runCommand } from './exec.js';
 
 const HOOK = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..', '..', 'bin', 'marble-cursor-hook.js');
 const SUMMARY = 200;
+
+/** The names of the MCP servers in the user's own Cursor config. An absent or
+ *  blank file has none; a file that cannot be read or parsed is not evidence
+ *  of none, so it answers as if it had some. */
+async function userMcpServers(userDir) {
+  let text;
+  try {
+    text = await fsp.readFile(path.join(userDir, 'mcp.json'), 'utf8');
+  } catch (err) {
+    return err.code === 'ENOENT' ? [] : ['unreadable mcp.json'];
+  }
+  if (!text.trim()) return [];
+  try {
+    const servers = JSON.parse(text)?.mcpServers;
+    if (servers == null) return [];
+    if (typeof servers !== 'object' || Array.isArray(servers)) return ['unreadable mcp.json'];
+    return Object.keys(servers);
+  } catch {
+    return ['unreadable mcp.json'];
+  }
+}
 
 /** One line of `cursor-agent -p --output-format stream-json --stream-partial-output`.
  *
@@ -113,7 +142,13 @@ export function parseCursorLine(line, state) {
   }
 }
 
-export function createCursorProvider({ exec = runCommand, env = process.env, defaultModel = 'composer-2.5', hookPath = HOOK } = {}) {
+export function createCursorProvider({
+  exec = runCommand,
+  env = process.env,
+  defaultModel = 'composer-2.5',
+  hookPath = HOOK,
+  userDir = path.join(os.homedir(), '.cursor'),
+} = {}) {
   return {
     id: 'cursor',
     label: 'Cursor',
@@ -121,6 +156,10 @@ export function createCursorProvider({ exec = runCommand, env = process.env, def
     async detect() {
       const probe = await exec('cursor-agent', ['status']);
       if (probe.missing) return { installed: false, signedIn: false, detail: 'cursor-agent is not installed' };
+      const servers = await userMcpServers(userDir);
+      if (servers.length) {
+        return { installed: true, signedIn: false, detail: `blocked: user-level MCP servers in ~/.cursor/mcp.json (${servers.join(', ')})` };
+      }
       const account = /Logged in as (\S+)/.exec(`${probe.stdout}\n${probe.stderr}`)?.[1];
       if (account) return { installed: true, signedIn: true, detail: `signed in as ${account}` };
       return {
@@ -131,6 +170,12 @@ export function createCursorProvider({ exec = runCommand, env = process.env, def
     },
 
     async prepare({ workspace, mcp }) {
+      const servers = await userMcpServers(userDir);
+      if (servers.length) {
+        throw new Error(
+          `Cursor has user-level MCP servers (${servers.join(', ')}) in ~/.cursor/mcp.json; Marble cannot tell their tools from its own, so Cursor turns are off until they are removed`,
+        );
+      }
       const dir = path.join(workspace, '.cursor');
       await fsp.mkdir(dir, { recursive: true });
 

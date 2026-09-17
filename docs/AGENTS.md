@@ -72,6 +72,14 @@ Nothing is reverted automatically: the likeliest outside writer is you.
 | `claude-api` | the same, with `ANTHROPIC_API_KEY` | the same |
 | `cursor` | `cursor-agent -p`, model `composer-2.5` unless the conversation names one, prompt passed after `--` (a dash-leading prompt would otherwise be parsed as a flag) | `.cursor/hooks.json` `preToolUse`, fail-closed, allowing only Marble's five tools (`bin/marble-cursor-hook.js`) |
 
+The Cursor hook sees a tool's name (`MCP:read_document`) but not which MCP
+server it belongs to, and `--approve-mcps` approves every server Cursor loads,
+including the user's own from `~/.cursor/mcp.json`. A user server with a tool
+named like one of Marble's would get past the hook, so while that file names any
+server (or cannot be parsed) `agents providers` shows Cursor as blocked and its
+turns fail before they start. Whether a user-level `~/.cursor/hooks.json` runs
+alongside the workspace hook, and how the two answers combine, is unverified.
+
 Every agent gets the same rules (`server/agent/instructions.js`). Each turn,
 `prepare` rewrites the workspace's MCP config with that turn's token (mode 600).
 
