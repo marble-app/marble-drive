@@ -10,6 +10,7 @@ test('the instructions name every tool and the rules the tools enforce', () => {
   assert.match(INSTRUCTIONS, /read before you edit/i);
   assert.match(INSTRUCTIONS, /refused/i);
   assert.match(INSTRUCTIONS, /data-marble-id/);
+  assert.ok(INSTRUCTIONS.includes('"type":"setText"'));
 });
 
 test('a probe reports what the command printed and how it exited', async () => {

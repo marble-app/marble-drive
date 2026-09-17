@@ -49,7 +49,7 @@ export const {
   shaOf,
   writeAtomic,
 } = history;
-export const { OP_TYPES } = ops;
+export const { OP, OP_TYPES } = ops;
 // The agent tools read and check with the same functions the intent layer
 // does: an agent is a third writer, not a second opinion about what an op is.
 export const { collectSlices, repairOps, resolveIntent, validateOps } = intent;

@@ -18,7 +18,7 @@
 
 import fsp from 'node:fs/promises';
 
-import { collectSlices, repairOps, validateOps } from '../engine.js';
+import { collectSlices, OP, repairOps, validateOps } from '../engine.js';
 import { parsePath, splitPath } from '../paths.js';
 import { inverseSteps } from './inverse.js';
 import { hashesOf, idsIn, tagsOf, topLevelIds } from './source.js';
@@ -49,14 +49,15 @@ export const TOOL_SCHEMAS = [
     description:
       'Change a document with Marble ops (setText, setInner, setAttr, insert, move, remove) addressed by data-marble-id. ' +
       'At most 24 ops per call. If an element changed since you read it, nothing applies and you get its current source: ' +
-      'rebuild your edit against that and call again. Inserted elements get ids minted for you.',
+      'rebuild your edit against that and call again. Inserted elements get ids minted for you. ' +
+      'Example op: {"type":"setText","id":"h1","text":"New title"}.',
     inputSchema: {
       type: 'object',
       required: ['path', 'note', 'ops'],
       properties: {
         path: { type: 'string' },
         note: { type: 'string', description: 'One sentence: what this change does.' },
-        ops: { type: 'array', items: { type: 'object' } },
+        ops: { type: 'array', items: OP, maxItems: 24 },
       },
     },
   },
