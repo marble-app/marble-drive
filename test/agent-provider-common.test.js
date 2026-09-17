@@ -7,7 +7,7 @@ import { runCommand } from '../server/agent/providers/exec.js';
 
 test('the instructions name every tool and the rules the tools enforce', () => {
   for (const { name } of TOOL_SCHEMAS) assert.ok(INSTRUCTIONS.includes(name), name);
-  assert.match(INSTRUCTIONS, /read .* before/i);
+  assert.match(INSTRUCTIONS, /read before you edit/i);
   assert.match(INSTRUCTIONS, /refused/i);
   assert.match(INSTRUCTIONS, /data-marble-id/);
 });
