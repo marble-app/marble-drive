@@ -34,6 +34,8 @@ export async function tryProvider({
   prompt = DEFAULT_PROMPT,
   model = null,
   timeoutMs = 180_000,
+  // A seam for tests only: a real run always wants the real createDrive.
+  createDriveImpl = createDrive,
 }) {
   if (!providers.has(providerId)) throw new Error(`no provider "${providerId}" — there is: ${[...providers.keys()].join(', ')}`);
 
@@ -54,7 +56,7 @@ export async function tryProvider({
       MARBLE_DRIVE_BACKUP_DIR: '',
       MARBLE_DRIVE_BACKUP_CMD: '',
     });
-    drive = await createDrive(config, { log: quiet, agentProviders: providers });
+    drive = await createDriveImpl(config, { log: quiet, agentProviders: providers });
     if (!drive.agents) throw new Error(`agents could not start: ${drive.agentsWhy}`);
     await drive.createDocument('garden', SOURCE, { label: 'try' });
 
@@ -101,7 +103,15 @@ export async function tryProvider({
       events: snapshot.events.map((e) => e.type),
     };
   } finally {
-    await drive?.close();
+    // A close that fails still must not leak the scratch directories — what a
+    // caller wants back is the turn's result (or its own error), not a report
+    // about the drive's own shutdown. So the failure is swallowed here, after
+    // giving close a chance to do whatever teardown it can.
+    try {
+      await drive?.close();
+    } catch {
+      // ignored: cleanup below still has to happen either way
+    }
     await fsp.rm(root, { recursive: true, force: true });
     await fsp.rm(workdir, { recursive: true, force: true });
   }

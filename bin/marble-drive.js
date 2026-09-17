@@ -320,11 +320,18 @@ async function agentsCommand() {
     const id = args[1];
     if (!id) fail('usage: marble-drive agents try <provider> [--prompt="…"] [--model=…]');
     console.log(`[drive] one real turn on ${id}, against a scratch drive — this uses that provider's quota\n`);
-    const result = await tryProvider({
-      providerId: id,
-      prompt: typeof flags.prompt === 'string' ? flags.prompt : undefined,
-      model: typeof flags.model === 'string' ? flags.model : null,
-    });
+    let result;
+    try {
+      result = await tryProvider({
+        providerId: id,
+        prompt: typeof flags.prompt === 'string' ? flags.prompt : undefined,
+        model: typeof flags.model === 'string' ? flags.model : null,
+      });
+    } catch (err) {
+      // An unknown provider, agents unable to start, or a turn that never
+      // finished: these are `fail`'s job to report, not a stack trace's.
+      fail(err.message);
+    }
     console.log(`  status    ${result.status}${result.error ? `  — ${result.error}` : ''}`);
     console.log(`  applied   ${result.applied} op(s)`);
     console.log(`  heading   ${result.heading}`);
