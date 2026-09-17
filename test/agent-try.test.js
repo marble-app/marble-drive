@@ -85,3 +85,20 @@ test('a try cleans up its scratch directories even when the drive fails to close
   const after = await scratchDirs();
   assert.deepEqual(after.filter((name) => !before.includes(name)), [], 'no marble-try-* directory should survive a failed close');
 });
+
+test('a try leaves MARBLE_APPS as it found it, set or unset', async () => {
+  const providers = new Map([['fake', createFakeProvider({ scripts: { hello: [{ say: 'hi' }] } })]]);
+  const saved = process.env.MARBLE_APPS;
+  try {
+    process.env.MARBLE_APPS = '/somewhere/apps';
+    await tryProvider({ providerId: 'fake', providers, prompt: 'script:hello' });
+    assert.equal(process.env.MARBLE_APPS, '/somewhere/apps');
+
+    delete process.env.MARBLE_APPS;
+    await tryProvider({ providerId: 'fake', providers, prompt: 'script:hello' });
+    assert.equal('MARBLE_APPS' in process.env, false);
+  } finally {
+    if (saved === undefined) delete process.env.MARBLE_APPS;
+    else process.env.MARBLE_APPS = saved;
+  }
+});

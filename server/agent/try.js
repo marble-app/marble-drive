@@ -42,6 +42,9 @@ export async function tryProvider({
   const root = await fsp.mkdtemp(path.join(os.tmpdir(), 'marble-try-drive-'));
   const workdir = await fsp.mkdtemp(path.join(os.tmpdir(), 'marble-try-work-'));
   let drive = null;
+  // loadConfig points MARBLE_APPS at the drive it loads, for the whole
+  // process; the scratch drive is gone after this, so put it back.
+  const apps = process.env.MARBLE_APPS;
 
   try {
     const config = loadConfig({
@@ -114,5 +117,7 @@ export async function tryProvider({
     }
     await fsp.rm(root, { recursive: true, force: true });
     await fsp.rm(workdir, { recursive: true, force: true });
+    if (apps === undefined) delete process.env.MARBLE_APPS;
+    else process.env.MARBLE_APPS = apps;
   }
 }
