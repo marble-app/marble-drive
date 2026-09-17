@@ -40,11 +40,16 @@ const CONVERSATION = /^\/agent\/conversations\/([0-9a-f]{12})(\/turns)?$/;
 const TURN = /^\/agent\/turns\/([0-9a-f]{12}-t\d+)(\/cancel|\/undo)?$/;
 const TOOL = /^\/agent\/tools\/([a-z_]+)$/;
 
-export function createAgentRoutes({ store, runner, tools, hub, providers, writeOps, maxBody, gated = false }) {
+export function createAgentRoutes({ store, runner, tools, hub, providers, writeOps, maxBody, gated = false, keys = null, skills = [] }) {
   let detected = null;
   // Turns being undone right now. The undoneAt check alone lets two requests
   // that arrive together both pass it before either has written.
   const undoing = new Set();
+
+  const publicSettings = async () => ({
+    ...(await store.settings()),
+    keys: keys ? await keys.flags() : { anthropic: false, cursor: false },
+  });
 
   async function detectAll() {
     if (detected && Date.now() - detected.at < DETECT_CACHE) return detected.list;
@@ -54,7 +59,11 @@ export function createAgentRoutes({ store, runner, tools, hub, providers, writeO
           setTimeout(() => resolve({ installed: false, signedIn: false, detail: 'detection timed out' }), DETECT_TIMEOUT).unref?.(),
         );
         const found = await Promise.race([provider.detect().catch((err) => ({ installed: false, signedIn: false, detail: err.message })), timeout]);
-        return { id: provider.id, label: provider.label, defaultModel: provider.defaultModel ?? null, ...found };
+        const models = typeof provider.listModels === 'function'
+          ? await provider.listModels().catch(() => [])
+          : Array.isArray(provider.models) ? provider.models : [];
+        const efforts = Array.isArray(provider.efforts) ? provider.efforts : [];
+        return { id: provider.id, label: provider.label, defaultModel: provider.defaultModel ?? null, models, efforts, ...found };
       }),
     );
     detected = { at: Date.now(), list };
@@ -130,16 +139,41 @@ export function createAgentRoutes({ store, runner, tools, hub, providers, writeO
       return json(res, 200, (await detectAll()).map((p) => ({ ...p, default: p.id === defaultProvider })));
     }
 
+    if (route === '/agent/skills' && method === 'GET') {
+      const list = typeof skills === 'function' ? await skills() : skills;
+      return json(res, 200, list.map(({ id, name, description }) => ({ id, name: name ?? id, description: description ?? '' })));
+    }
+
     if (route === '/agent/settings') {
-      if (method === 'GET') return json(res, 200, await store.settings());
+      if (method === 'GET') return json(res, 200, await publicSettings());
       if (method === 'PUT') {
         const body = await readJson(req, maxBody);
         const patch = {};
         if (typeof body.defaultProvider === 'string') patch.defaultProvider = body.defaultProvider;
-        if (body.models && typeof body.models === 'object') patch.models = { ...(await store.settings()).models, ...body.models };
+        if (body.models && typeof body.models === 'object') {
+          const models = { ...(await store.settings()).models };
+          for (const [id, model] of Object.entries(body.models)) {
+            if (typeof model !== 'string' || !model.trim()) delete models[id];
+            else models[id] = model.trim();
+          }
+          patch.models = models;
+        }
+        if (body.efforts && typeof body.efforts === 'object') {
+          const efforts = { ...(await store.settings()).efforts };
+          for (const [id, effort] of Object.entries(body.efforts)) {
+            if (typeof effort !== 'string' || !effort.trim()) delete efforts[id];
+            else efforts[id] = effort.trim();
+          }
+          patch.efforts = efforts;
+        }
         // Read when the host starts; a change applies after a restart.
         if (Number.isInteger(body.maxRunning) && body.maxRunning > 0) patch.maxRunning = body.maxRunning;
-        return json(res, 200, await store.saveSettings(patch));
+        if (Object.keys(patch).length) await store.saveSettings(patch);
+        if (keys && body.keys && typeof body.keys === 'object') {
+          await keys.write(body.keys);
+          detected = null;
+        }
+        return json(res, 200, await publicSettings());
       }
     }
 
@@ -152,10 +186,11 @@ export function createAgentRoutes({ store, runner, tools, hub, providers, writeO
         if (!providers.has(body.provider)) return json(res, 400, { error: `no provider "${body.provider}"` });
         const from = body.handoffFrom ? await store.conversation(body.handoffFrom) : null;
         if (body.handoffFrom && !from) return json(res, 404, { error: `no conversation "${body.handoffFrom}"` });
-        const { models } = await store.settings();
+        const { models, efforts } = await store.settings();
         const meta = await store.createConversation({
           provider: body.provider,
           model: body.model ?? models[body.provider] ?? null,
+          effort: body.effort ?? efforts?.[body.provider] ?? null,
           handoffFrom: from?.id ?? null,
         });
         if (from) {
@@ -196,6 +231,8 @@ export function createAgentRoutes({ store, runner, tools, hub, providers, writeO
         if (typeof body.archived === 'boolean') patch.archived = body.archived;
         if (body.reviewed === true) patch.lastReviewedAt = Date.now();
         if (typeof body.title === 'string' && body.title.trim()) patch.title = body.title.trim().slice(0, 120);
+        if (typeof body.model === 'string') patch.model = body.model.trim() || null;
+        if (typeof body.effort === 'string') patch.effort = body.effort.trim() || null;
         await store.updateConversation(id, patch);
         const next = await store.summary(id);
         hub.publish(id, { type: 'meta' }, next);

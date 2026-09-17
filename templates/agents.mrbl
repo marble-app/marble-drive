@@ -115,10 +115,15 @@ __ICON__
   .filter:hover, .filter:focus-visible { color: var(--ink); background: var(--paper-3); outline: none; }
   .filter[aria-pressed="true"] { color: var(--accent-ink); background: var(--accent-soft); }
   .new {
-    margin-left: auto; appearance: none; border: 1px solid var(--line); background: var(--ink);
+    appearance: none; border: 1px solid var(--line); background: var(--ink);
     color: var(--paper); padding: .35rem .85rem; border-radius: 999px; cursor: pointer; font-size: .85rem;
   }
   .new:hover, .new:focus-visible { box-shadow: var(--shadow); outline: none; }
+  .settings {
+    margin-left: auto; appearance: none; border: 1px solid var(--line); background: none;
+    color: var(--muted); padding: .35rem .85rem; border-radius: 999px; cursor: pointer; font-size: .85rem;
+  }
+  .settings:hover, .settings:focus-visible { color: var(--ink); background: var(--paper-3); outline: none; }
 
   .library, .board {
     grid-row: 2; grid-column: 1; min-height: 0; min-width: 0;
@@ -262,7 +267,7 @@ __ICON__
     }
   }
   @media (hover: none) {
-    .conv, .filter, .views button, .new, .inspector .actions button, .panel-close { min-height: 2.75rem; }
+    .conv, .filter, .views button, .new, .settings, .inspector .actions button, .panel-close { min-height: 2.75rem; }
   }
 </style>
 </head>
@@ -281,6 +286,7 @@ __ICON__
     <button type="button" class="filter" data-filter="review" aria-pressed="false" data-marble-id="__ID__">Review</button>
     <button type="button" class="filter" data-filter="archived" aria-pressed="false" data-marble-id="__ID__">Archived</button>
   </div>
+  <button type="button" class="settings" data-marble-id="__ID__">Settings</button>
   <button type="button" class="new" data-marble-id="__ID__">New</button>
 </header>
 
@@ -650,11 +656,11 @@ __ICON__
       if (actions.children.length) inspector.append(actions);
     };
 
-    const showEmpty = () => {
+    const showEmpty = (text = 'Select a conversation.') => {
       inspector.replaceChildren();
       const p = document.createElement('p');
       p.className = 'empty';
-      p.textContent = 'Select a conversation.';
+      p.textContent = text;
       inspector.append(p);
     };
 
@@ -781,11 +787,29 @@ __ICON__
     };
 
     const startNew = async () => {
-      if (!agent) return;
+      if (!agent) {
+        showEmpty('This host is not running agents. Restart with MARBLE_DRIVE_AGENTS=1.');
+        return;
+      }
+      if (!labels.size) {
+        try {
+          for (const provider of await agent.providers()) labels.set(provider.id, provider);
+        } catch (err) {
+          showEmpty(err.message);
+          return;
+        }
+      }
       const providers = [...labels.values()].filter((p) => p.installed && p.signedIn);
       const preferred = providers.find((p) => p.default) ?? providers[0];
-      if (!preferred) return;
-      await open(await agent.start({ provider: preferred.id }));
+      if (!preferred) {
+        showEmpty('No agent is ready on this machine. npm run agents -- providers says why.');
+        return;
+      }
+      try {
+        await open(await agent.start({ provider: preferred.id }));
+      } catch (err) {
+        showEmpty(err.message);
+      }
     };
 
     viewButtons.forEach((btn) => btn.addEventListener('click', () => setView(btn.dataset.view)));
@@ -794,6 +818,7 @@ __ICON__
       query = search.value.trim().toLowerCase();
       applyFilters();
     });
+    $('.settings').addEventListener('click', () => window.marble?.agent?.openSettings?.());
     $('.new').addEventListener('click', () => startNew());
     boardPanel.querySelector('.panel-close').addEventListener('click', () => closeBoardPanel());
     addEventListener('keydown', (event) => {
@@ -849,6 +874,11 @@ __ICON__
         await load();
         const saved = recalled(OPEN_KEY);
         if (saved) await open(saved);
+        addEventListener('marble:agent-settings-saved', async () => {
+          try {
+            for (const provider of await api.providers()) labels.set(provider.id, provider);
+          } catch { /* badges fall back to the provider id */ }
+        });
       };
       if (marble.agent) start(marble.agent);
       else addEventListener('marble:agent', (event) => start(event.detail), { once: true });

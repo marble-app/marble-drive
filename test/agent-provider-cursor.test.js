@@ -281,6 +281,19 @@ test('the detection probe gets the allowlisted environment it was given, never t
   await createCursorProvider({ userDir: NO_USER_DIR, exec, env: host }).detect();
   await createCursorProvider({ userDir: NO_USER_DIR, exec, env: { PATH: '/bin' } }).detect();
   assert.deepEqual(seen, [{ PATH: '/bin', HOME: '/h', CURSOR_API_KEY: 'ck' }, { PATH: '/bin' }]);
+
+  let key = null;
+  const late = createCursorProvider({
+    userDir: NO_USER_DIR,
+    exec,
+    env: { PATH: '/bin' },
+    secrets: () => (key ? { CURSOR_API_KEY: key } : {}),
+  });
+  await late.detect();
+  key = 'ck-from-file';
+  await late.detect();
+  assert.deepEqual(seen.at(-1), { PATH: '/bin', CURSOR_API_KEY: 'ck-from-file' });
+  assert.equal(late.spawn({ workspace: '/w', prompt: 'x' }).env.CURSOR_API_KEY, 'ck-from-file');
 });
 
 test('a lost chat is recognised by what the CLI says', () => {
@@ -323,4 +336,25 @@ test('prepare refuses a hook command it could not quote safely', async () => {
 test('the provider names its default model, for the picker', () => {
   assert.equal(createCursorProvider({ env: {} }).defaultModel, 'composer-2.5');
   assert.equal(createCursorProvider({ env: {}, defaultModel: 'gpt-5.2' }).defaultModel, 'gpt-5.2');
+  assert.deepEqual(createCursorProvider({ env: {} }).efforts, []);
+});
+
+test('cursor-agent models text becomes the picker list', async () => {
+  const { parseCursorModels } = await import('../server/agent/providers/cursor.js');
+  assert.deepEqual(
+    parseCursorModels('Available models\n\nauto - Auto (default)\ncomposer-2.5 - Composer 2.5\ngpt-5.3-codex-high - Codex 5.3 High\n'),
+    [
+      { id: 'auto', label: 'Auto' },
+      { id: 'composer-2.5', label: 'Composer 2.5' },
+      { id: 'gpt-5.3-codex-high', label: 'Codex 5.3 High' },
+    ],
+  );
+  const calls = [];
+  const exec = async (command, args) => {
+    calls.push({ command, args });
+    return { code: 0, stdout: 'composer-2.5 - Composer 2.5\n', stderr: '', missing: false };
+  };
+  const listed = await createCursorProvider({ userDir: NO_USER_DIR, exec, env: {} }).listModels();
+  assert.deepEqual(listed, [{ id: 'composer-2.5', label: 'Composer 2.5' }]);
+  assert.deepEqual(calls.at(-1), { command: 'cursor-agent', args: ['models'] });
 });

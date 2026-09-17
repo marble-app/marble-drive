@@ -169,7 +169,7 @@ export function createAgentStore({ dir, defaultProvider = 'claude-subscription',
 
   async function settings() {
     const saved = (await readJson(path.join(dir, 'settings.json'))) ?? {};
-    return { defaultProvider, models: {}, maxRunning: 3, ...saved };
+    return { defaultProvider, models: {}, efforts: {}, maxRunning: 3, ...saved };
   }
 
   async function saveSettings(patch) {
@@ -204,12 +204,13 @@ export function createAgentStore({ dir, defaultProvider = 'claude-subscription',
 
     saveSettings,
 
-    async createConversation({ provider, model = null, handoffFrom = null }) {
+    async createConversation({ provider, model = null, effort = null, handoffFrom = null }) {
       const now = Date.now();
       const meta = {
         id: crypto.randomBytes(6).toString('hex'),
         provider,
         model,
+        effort,
         title: null,
         createdAt: now,
         updatedAt: now,

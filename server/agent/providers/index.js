@@ -8,9 +8,9 @@
 import { createClaudeProvider } from './claude.js';
 import { createCursorProvider } from './cursor.js';
 
-export const builtInProviders = ({ env = process.env } = {}) =>
+export const builtInProviders = ({ env = process.env, secrets } = {}) =>
   new Map([
-    ['claude-subscription', createClaudeProvider({ auth: 'subscription', env })],
-    ['claude-api', createClaudeProvider({ auth: 'api', env })],
-    ['cursor', createCursorProvider({ env })],
+    ['claude-subscription', createClaudeProvider({ auth: 'subscription', env, secrets })],
+    ['claude-api', createClaudeProvider({ auth: 'api', env, secrets })],
+    ['cursor', createCursorProvider({ env, secrets })],
   ]);

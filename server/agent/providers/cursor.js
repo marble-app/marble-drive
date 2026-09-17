@@ -29,6 +29,17 @@ import { writePrivateFile } from './private-file.js';
 const HOOK = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..', '..', 'bin', 'marble-cursor-hook.js');
 const SUMMARY = 200;
 
+/** One line of `cursor-agent models`: `id - Label` or `id - Label (default)`. */
+export function parseCursorModels(text) {
+  const models = [];
+  for (const line of String(text ?? '').split('\n')) {
+    const match = /^(\S+)\s+-\s+(.+)$/.exec(line.trim());
+    if (!match) continue;
+    models.push({ id: match[1], label: match[2].replace(/\s*\(default\)\s*$/i, '').trim() });
+  }
+  return models;
+}
+
 /** The names of the MCP servers in the user's own Cursor config. An absent or
  *  blank file has none; a file that cannot be read or parsed is not evidence
  *  of none, so it answers as if it had some. */
@@ -149,19 +160,31 @@ export function parseCursorLine(line, state) {
 export function createCursorProvider({
   exec = runCommand,
   env = process.env,
+  secrets,
   defaultModel = 'composer-2.5',
   hookPath = HOOK,
   userDir = path.join(os.homedir(), '.cursor'),
 } = {}) {
+  const live = () => ({ ...env, ...(typeof secrets === 'function' ? secrets() : secrets ?? {}) });
+
   return {
     id: 'cursor',
     label: 'Cursor',
     defaultModel,
+    efforts: [],
+
+    async listModels() {
+      const probe = await exec('cursor-agent', ['models'], { env: pickEnv(live()) });
+      if (probe.missing || probe.code) return [{ id: defaultModel, label: defaultModel }];
+      const listed = parseCursorModels(probe.stdout);
+      return listed.length ? listed : [{ id: defaultModel, label: defaultModel }];
+    },
 
     async detect() {
       // The same allowlist a turn starts from, and the key a turn would get.
-      const probeEnv = pickEnv(env);
-      if (env.CURSOR_API_KEY) probeEnv.CURSOR_API_KEY = env.CURSOR_API_KEY;
+      const current = live();
+      const probeEnv = pickEnv(current);
+      if (current.CURSOR_API_KEY) probeEnv.CURSOR_API_KEY = current.CURSOR_API_KEY;
       const probe = await exec('cursor-agent', ['status'], { env: probeEnv });
       if (probe.missing) return { installed: false, signedIn: false, detail: 'cursor-agent is not installed' };
       const servers = await userMcpServers(userDir);
@@ -205,6 +228,7 @@ export function createCursorProvider({
     },
 
     spawn({ workspace, prompt, resume = null, model = null }) {
+      const current = live();
       const args = [
         '-p', '--output-format', 'stream-json', '--stream-partial-output', '--approve-mcps', '--trust',
         '--workspace', workspace, '--model', model ?? defaultModel,
@@ -214,7 +238,7 @@ export function createCursorProvider({
       return {
         command: 'cursor-agent',
         args,
-        env: env.CURSOR_API_KEY ? { CURSOR_API_KEY: env.CURSOR_API_KEY } : {},
+        env: current.CURSOR_API_KEY ? { CURSOR_API_KEY: current.CURSOR_API_KEY } : {},
         stdin: '',
       };
     },

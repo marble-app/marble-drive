@@ -346,3 +346,34 @@ test('board view survives a file reconcile that still says library', async () =>
   assert.equal(await page.locator('body').getAttribute('data-view'), 'board');
   assert.equal(await page.locator(`.column[data-col="review"] .conv[data-id="${id}"]`).count(), 1);
 });
+
+test('New starts a conversation with the default agent', async () => {
+  const { page } = await openAgents();
+  const before = await page.locator('#list .conv').count();
+  await page.locator('button.new').click();
+  await page.waitForFunction((n) => document.querySelectorAll('#list .conv').length > n, before);
+  const id = await page.locator('marble-conversation').getAttribute('conversation');
+  assert.ok(id, 'New must open the conversation it just started');
+  assert.equal(await page.locator(`.conv[data-id="${id}"]`).count(), 1);
+});
+
+test('Settings on the Agents page opens the agent settings panel', async () => {
+  const { page } = await openAgents();
+  await page.locator('button.settings').click();
+  const settings = page.locator('marble-agent-settings');
+  await settings.locator('h2', { hasText: 'Agent settings' }).waitFor();
+  assert.equal(await settings.getAttribute('data-open'), 'true');
+});
+
+test('New says why when this host is not running agents', async () => {
+  const off = await startDrive({ agents: false, documents: { garden: GARDEN, Agents: AGENTS } });
+  try {
+    const { page } = await off.newPage();
+    await page.goto(`${off.base}/a/Agents`);
+    await page.waitForFunction(() => Boolean(window.marble));
+    await page.locator('button.new').click();
+    assert.match(await page.locator('.inspector').textContent(), /not running agents/i);
+  } finally {
+    await off.close();
+  }
+});

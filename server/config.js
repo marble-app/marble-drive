@@ -123,6 +123,9 @@ export function loadConfig(env = process.env) {
     agentWorkdir: path.resolve(str('MARBLE_DRIVE_AGENT_WORKDIR', path.join(os.homedir(), '.cache', 'marble-drive', 'agents'))),
     agentStallMinutes: num('MARBLE_DRIVE_AGENT_STALL_MINUTES', 10),
     agentMaxMinutes: num('MARBLE_DRIVE_AGENT_MAX_MINUTES', 30),
+    // API keys the settings panel writes. Gitignored, and not under the drive
+    // root, so a backup of `.marble/` does not take them.
+    agentKeysFile: path.resolve(str('MARBLE_DRIVE_AGENT_KEYS', path.join(process.cwd(), '.agent-keys.local'))),
   };
 }
 

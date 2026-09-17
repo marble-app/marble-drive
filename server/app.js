@@ -19,7 +19,6 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 import { agentsAllowed, createAgents } from './agent/index.js';
-import { builtInProviders } from './agent/providers/index.js';
 import { backupNow, scheduleBackups } from './backup.js';
 import { bytesOf, chooseProvider, enginePath, examine, guardOps, shaOf } from './engine.js';
 import { dataUri as iconUri, svg as iconSvg } from './favicon.js';
@@ -622,7 +621,7 @@ export async function createDrive(config, { log = console, agentProviders = null
         const loopback = address.family === 'IPv6' ? '[::1]' : '127.0.0.1';
         return `http://${loopback}:${address.port}`;
       },
-      providers: agentProviders ?? builtInProviders(),
+      providers: agentProviders ?? null,
       log,
     }).catch((err) => {
       if (err.code !== 'EAGENTSHELD') throw err;

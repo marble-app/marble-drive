@@ -34,6 +34,7 @@ const quiet = { log() {}, error() {} };
 export async function startDrive({ scripts = {}, agents = true, documents = { garden: GARDEN } } = {}) {
   const root = await fsp.mkdtemp(path.join(os.tmpdir(), 'marble-browser-drive-'));
   const workdir = await fsp.mkdtemp(path.join(os.tmpdir(), 'marble-browser-work-'));
+  const keysFile = path.join(workdir, 'agent-keys.local');
   const config = loadConfig({
     ...process.env,
     MARBLE_DRIVE_ROOT: root,
@@ -43,6 +44,7 @@ export async function startDrive({ scripts = {}, agents = true, documents = { ga
     MARBLE_DRIVE_AGENTS: agents ? '1' : '',
     MARBLE_DRIVE_AGENT_PROVIDER: 'fake',
     MARBLE_DRIVE_AGENT_WORKDIR: workdir,
+    MARBLE_DRIVE_AGENT_KEYS: keysFile,
     MARBLE_DRIVE_BACKUP_DIR: '',
     MARBLE_DRIVE_BACKUP_CMD: '',
   });

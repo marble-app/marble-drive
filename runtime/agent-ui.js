@@ -159,6 +159,24 @@
     return node;
   };
 
+  const fillSelect = (select, items, { empty = 'Default', value = '' } = {}) => {
+    select.replaceChildren();
+    const blank = h('option', '', empty);
+    blank.value = '';
+    select.append(blank);
+    for (const item of items) {
+      const option = h('option', '', item.label ?? item);
+      option.value = item.id ?? item;
+      select.append(option);
+    }
+    if (value && ![...select.options].some((option) => option.value === value)) {
+      const extra = h('option', '', value);
+      extra.value = value;
+      select.append(extra);
+    }
+    select.value = value ?? '';
+  };
+
   const plural = (n, word) => `${n} ${word}${n === 1 ? '' : 's'}`;
   const seconds = (ms) => (ms < 60_000 ? `${Math.max(1, Math.round(ms / 1000))} s` : `${Math.round(ms / 60_000)} min`);
   const firstSentence = (text) => String(text ?? '').split(/(?<=[.!?—])\s/)[0].replace(/\s*—\s*$/, '');
@@ -220,9 +238,16 @@
     .queued-item button { font: inherit; border: 0; background: none; color: var(--muted); width: 22px; height: 22px; border-radius: 6px; cursor: pointer; }
     .queued-item button:hover { background: var(--line); }
     .composer { flex: none; padding: 8px 12px calc(12px + env(safe-area-inset-bottom, 0px)); border-top: 1px solid var(--line); display: flex; flex-direction: column; gap: 6px; }
-    .picker { display: flex; align-items: center; gap: 8px; font-size: 12px; color: var(--muted); }
+    .picker { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; font-size: 12px; color: var(--muted); }
     .picker[hidden] { display: none; }
-    .picker-select { font: inherit; color: var(--ink); background: var(--card); border: 1px solid var(--line); border-radius: 8px; padding: 4px 8px; }
+    .picker label { display: flex; align-items: center; gap: 6px; }
+    .picker-select, .picker-model, .effort-select { font: inherit; color: var(--ink); background: var(--card); border: 1px solid var(--line); border-radius: 8px; padding: 4px 8px; max-width: 12rem; }
+    .picker-agent[hidden], .picker-effort[hidden] { display: none; }
+    .slash { max-height: 12rem; overflow: auto; background: var(--card); border: 1px solid var(--line); border-radius: 12px; box-shadow: var(--shadow-lift); padding: 4px; }
+    .slash[hidden] { display: none; }
+    .slash button { display: flex; flex-direction: column; align-items: flex-start; gap: 1px; width: 100%; font: inherit; text-align: left; color: var(--ink); background: none; border: 0; border-radius: 8px; padding: 6px 8px; cursor: pointer; }
+    .slash button[aria-selected="true"], .slash button:hover { background: var(--accent-soft); }
+    .slash button small { color: var(--faint); font-size: 11px; }
     .context { display: flex; align-items: center; gap: 4px; align-self: flex-start; max-width: 100%; font-size: 11.5px; color: var(--muted); background: var(--paper-2); border-radius: 999px; padding: 2px 4px 2px 10px; }
     .context-text { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
     .context-clear { font: inherit; border: 0; background: none; color: var(--faint); width: 18px; height: 18px; border-radius: 50%; cursor: pointer; line-height: 1; }
@@ -257,7 +282,12 @@
         <div class="log" role="log" aria-live="polite" aria-label="Conversation"></div>
         <div class="queued" hidden></div>
         <form class="composer">
-          <label class="picker" hidden>Agent <select class="picker-select"></select></label>
+          <div class="picker" hidden>
+            <label class="picker-agent">Agent <select class="picker-select"></select></label>
+            <label>Model <select class="picker-model" aria-label="Model"></select></label>
+            <label class="picker-effort">Effort <select class="effort-select" aria-label="Effort"></select></label>
+          </div>
+          <div class="slash" hidden role="listbox" aria-label="Commands"></div>
           <div class="context"><span class="context-text"></span><button type="button" class="context-clear" aria-label="Don’t send the selection">×</button></div>
           <div class="row">
             <textarea rows="1" placeholder="Ask about this document…" aria-label="Message"></textarea>
@@ -269,7 +299,12 @@
       this.queuedEl = root.querySelector('.queued');
       this.form = root.querySelector('form');
       this.picker = root.querySelector('.picker');
+      this.agentLabel = root.querySelector('.picker-agent');
       this.pickerSelect = root.querySelector('.picker-select');
+      this.modelInput = root.querySelector('.picker-model');
+      this.effortLabel = root.querySelector('.picker-effort');
+      this.effortSelect = root.querySelector('.effort-select');
+      this.slash = root.querySelector('.slash');
       this.contextText = root.querySelector('.context-text');
       this.contextClear = root.querySelector('.context-clear');
       this.input = root.querySelector('textarea');
@@ -284,18 +319,28 @@
       this.off = null;
       this.skipSelection = false;
       this.sending = false;
+      this.slashItems = [];
+      this.slashIndex = 0;
+      this.skills = [];
 
+      this.pickerSelect.addEventListener('change', () => this.syncCatalog());
+      this.modelInput.addEventListener('change', () => this.persistCatalog());
+      this.effortSelect.addEventListener('change', () => this.persistCatalog());
       this.form.addEventListener('submit', (event) => {
         event.preventDefault();
         this.submit();
       });
       this.input.addEventListener('keydown', (event) => {
+        if (this.onSlashKey(event)) return;
         if (event.key === 'Enter' && !event.shiftKey && !event.isComposing) {
           event.preventDefault();
           this.submit();
         }
       });
-      this.input.addEventListener('input', () => this.autosize());
+      this.input.addEventListener('input', () => {
+        this.filterSlash();
+        this.autosize();
+      });
       this.stopButton.addEventListener('click', () => {
         if (this.running) this.api.cancel(this.running.turn).catch((err) => this.system(err.message, true));
       });
@@ -351,16 +396,21 @@
       this.loadedId = id;
       const token = Symbol('load');
       this.loading = token;
+      this.skills = await this.api?.skills?.().catch(() => []) ?? [];
 
       if (!id) {
         await this.showPicker(token);
         return;
       }
-      this.picker.hidden = true;
+      this.picker.hidden = false;
+      this.agentLabel.hidden = true;
       try {
-        const { meta } = await this.api.conversation(id);
+        const [{ meta }, providers] = await Promise.all([this.api.conversation(id), this.api.providers().catch(() => [])]);
         if (this.loading !== token) return;
         this.meta = meta;
+        this.providerList = providers;
+        this.pickerSelect.value = meta.provider;
+        this.syncCatalog({ model: meta.model, effort: meta.effort });
         this.dispatchEvent(new CustomEvent('meta', { detail: { meta }, bubbles: true, composed: true }));
       } catch (err) {
         if (this.loading === token) this.system(`This conversation could not be opened: ${err.message}`, true);
@@ -372,14 +422,17 @@
 
     async showPicker(token) {
       this.picker.hidden = false;
+      this.agentLabel.hidden = false;
       this.pickerSelect.replaceChildren();
       let providers = [];
       try {
         providers = await this.api.providers();
+        this.skills = await this.api.skills().catch(() => []);
       } catch (err) {
         if (this.loading === token) this.system(`Agents could not be listed: ${err.message}`, true);
       }
       if (this.loading !== token) return;
+      this.providerList = providers;
       const usable = providers.filter((p) => p.installed && p.signedIn);
       for (const provider of providers) {
         const ready = provider.installed && provider.signedIn;
@@ -391,7 +444,36 @@
       const preferred = usable.find((p) => p.default) ?? usable[0];
       if (preferred) this.pickerSelect.value = preferred.id;
       else this.system('No agent is ready on this machine. `npm run agents -- providers` says why.');
+      await this.syncCatalog();
       this.updateSendable();
+    }
+
+    currentProvider() {
+      const id = this.pickerSelect.value || this.meta?.provider;
+      return this.providerList?.find((p) => p.id === id) ?? null;
+    }
+
+    async syncCatalog({ model, effort } = {}) {
+      const provider = this.currentProvider();
+      let settings = {};
+      try {
+        settings = await this.api.settings();
+      } catch { /* defaults from the provider list */ }
+      const id = provider?.id;
+      fillSelect(this.modelInput, provider?.models ?? [], {
+        value: model ?? this.modelInput.value ?? settings.models?.[id] ?? '',
+      });
+      const efforts = provider?.efforts ?? [];
+      this.effortLabel.hidden = !efforts.length;
+      fillSelect(this.effortSelect, efforts.map((level) => ({ id: level, label: level })), {
+        value: effort ?? this.effortSelect.value ?? settings.efforts?.[id] ?? '',
+      });
+    }
+
+    persistCatalog() {
+      const id = this.getAttribute('conversation');
+      if (!id || !this.api?.update) return;
+      this.api.update(id, { model: this.modelInput.value, effort: this.effortSelect.value }).catch((err) => this.system(err.message, true));
     }
 
     // ---------------------------------------------------------- sending
@@ -418,8 +500,30 @@
     }
 
     async submit() {
-      const prompt = this.input.value.trim();
-      if (!prompt || this.sending) return;
+      const typed = this.input.value.trim();
+      if (!typed || this.sending) return;
+      const slash = this.matchSlash(typed);
+      if (slash?.kind === 'clear') {
+        this.hideSlash();
+        this.input.value = '';
+        this.api.remember(null);
+        this.removeAttribute('conversation');
+        this.dispatchEvent(new CustomEvent('conversation', { detail: { id: null }, bubbles: true, composed: true }));
+        this.load();
+        return;
+      }
+      if (slash?.kind === 'model' || slash?.kind === 'effort') {
+        this.hideSlash();
+        if (slash.kind === 'model') this.modelInput.value = slash.id;
+        else this.effortSelect.value = slash.id;
+        this.persistCatalog();
+        this.input.value = slash.rest;
+        this.autosize();
+        if (!slash.rest) return;
+      }
+      let prompt = typed;
+      if (slash?.kind === 'compact') prompt = '/compact';
+      if (slash?.kind === 'skill') prompt = `/${slash.id}${slash.rest ? ` ${slash.rest}` : ''}`;
       this.sending = true;
       this.updateSendable();
       try {
@@ -429,12 +533,18 @@
         if (!id) {
           const provider = this.pickerSelect.value;
           if (!provider) throw new Error('Choose an agent first.');
-          id = await this.api.start({ provider });
+          id = await this.api.start({
+            provider,
+            model: this.modelInput.value.trim() || null,
+            effort: this.effortSelect.value.trim() || null,
+          });
           this.setAttribute('conversation', id);
+          this.agentLabel.hidden = true;
           this.dispatchEvent(new CustomEvent('conversation', { detail: { id }, bubbles: true, composed: true }));
         }
         await this.api.send(id, { prompt, ...context });
         this.input.value = '';
+        this.hideSlash();
         this.skipSelection = false;
         this.updateContext();
       } catch (err) {
@@ -443,6 +553,110 @@
         this.sending = false;
         this.autosize();
       }
+    }
+
+    matchSlash(text) {
+      const hit = /^\/(\S+)(?:\s+([\s\S]*))?$/.exec(text);
+      if (!hit) return null;
+      const name = hit[1];
+      const rest = (hit[2] ?? '').trim();
+      if (name === 'clear') return { kind: 'clear' };
+      if (name === 'compact') return { kind: 'compact' };
+      const provider = this.currentProvider();
+      if (provider?.efforts?.includes(name) || (name === 'effort' && rest && provider?.efforts?.includes(rest))) {
+        return { kind: 'effort', id: name === 'effort' ? rest : name, rest: name === 'effort' ? '' : rest };
+      }
+      const model = provider?.models?.find((item) => item.id === name || item.label.toLowerCase() === name.toLowerCase());
+      if (model) return { kind: 'model', id: model.id, rest };
+      const skill = this.skills.find((item) => item.id === name);
+      if (skill) return { kind: 'skill', id: skill.id, rest };
+      return null;
+    }
+
+    slashQuery() {
+      const value = this.input.value;
+      if (!value.startsWith('/')) return null;
+      return value.slice(1).split(/\s/, 1)[0].toLowerCase();
+    }
+
+    filterSlash() {
+      const query = this.slashQuery();
+      if (query === null || /\s/.test(this.input.value)) {
+        this.hideSlash();
+        return;
+      }
+      const provider = this.currentProvider();
+      const items = [
+        { kind: 'clear', id: 'clear', label: 'Clear conversation', detail: 'Start a new one' },
+        { kind: 'compact', id: 'compact', label: 'Compact', detail: 'Shrink this conversation’s context' },
+        ...(provider?.efforts ?? []).map((level) => ({ kind: 'effort', id: level, label: `Effort: ${level}` })),
+        ...(provider?.models ?? []).map((model) => ({ kind: 'model', id: model.id, label: model.label, detail: 'Model' })),
+        ...this.skills.map((skill) => ({ kind: 'skill', id: skill.id, label: skill.name || skill.id, detail: skill.description })),
+      ].filter((item) => !query || item.id.toLowerCase().includes(query) || item.label.toLowerCase().includes(query));
+      this.slashItems = items;
+      this.slashIndex = 0;
+      this.renderSlash();
+    }
+
+    renderSlash() {
+      this.slash.replaceChildren();
+      if (!this.slashItems.length) {
+        this.slash.hidden = true;
+        return;
+      }
+      this.slash.hidden = false;
+      this.slashItems.forEach((item, index) => {
+        const button = h('button');
+        button.type = 'button';
+        button.setAttribute('role', 'option');
+        button.setAttribute('aria-selected', index === this.slashIndex ? 'true' : 'false');
+        button.append(h('span', '', item.kind === 'skill' ? `/${item.id}` : item.label));
+        if (item.detail) button.append(h('small', '', item.detail));
+        button.addEventListener('mousedown', (event) => {
+          event.preventDefault();
+          this.pickSlash(index);
+        });
+        this.slash.append(button);
+      });
+    }
+
+    pickSlash(index) {
+      const item = this.slashItems[index];
+      if (!item) return;
+      if (item.kind === 'skill') this.input.value = `/${item.id} `;
+      else if (item.kind === 'model' || item.kind === 'effort') this.input.value = `/${item.id}`;
+      else this.input.value = `/${item.id}`;
+      this.hideSlash();
+      this.autosize();
+      this.input.focus();
+      if (item.kind !== 'skill') this.submit();
+    }
+
+    hideSlash() {
+      this.slash.hidden = true;
+      this.slashItems = [];
+    }
+
+    onSlashKey(event) {
+      if (this.slash.hidden) return false;
+      if (event.key === 'Escape') {
+        event.preventDefault();
+        this.hideSlash();
+        return true;
+      }
+      if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
+        event.preventDefault();
+        const delta = event.key === 'ArrowDown' ? 1 : -1;
+        this.slashIndex = (this.slashIndex + delta + this.slashItems.length) % this.slashItems.length;
+        this.renderSlash();
+        return true;
+      }
+      if (event.key === 'Enter' && !event.shiftKey) {
+        event.preventDefault();
+        this.pickSlash(this.slashIndex);
+        return true;
+      }
+      return false;
     }
 
     // ---------------------------------------------------------- receiving
@@ -710,6 +924,204 @@
 
   customElements.define('marble-conversation', MarbleConversation);
 
+  // ------------------------------------------------------------ settings
+
+  const SETTINGS_CSS = `
+    :host { position: fixed; inset: 0; z-index: 2147483600; display: none; }
+    :host([data-open="true"]) { display: block; }
+    .backdrop { position: absolute; inset: 0; background: rgba(17, 17, 17, .28); }
+    .sheet { position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%);
+      width: min(440px, calc(100vw - 24px)); max-height: min(80vh, 640px); overflow: auto;
+      background: var(--card); color: var(--ink); border: 1px solid var(--line); border-radius: 16px;
+      box-shadow: var(--shadow-lift); padding: 18px 18px 16px; display: flex; flex-direction: column; gap: 14px; }
+    h2 { margin: 0; font-size: 16px; font-weight: 600; letter-spacing: -.02em; }
+    fieldset { border: 1px solid var(--line); border-radius: 12px; margin: 0; padding: 10px 12px 12px; display: flex; flex-direction: column; gap: 10px; }
+    legend { padding: 0 6px; color: var(--muted); font-size: 12px; }
+    .agent { display: grid; grid-template-columns: auto 1fr; gap: 4px 10px; align-items: center; }
+    .agent label { display: flex; align-items: center; gap: 8px; font-size: 13px; }
+    .agent .detail { grid-column: 2; color: var(--faint); font-size: 11.5px; }
+    .agent select { grid-column: 2; }
+    input[type="text"], input[type="password"], select { font: inherit; color: var(--ink); background: var(--paper-2); border: 1px solid var(--line); border-radius: 8px; padding: 6px 8px; width: 100%; box-sizing: border-box; }
+    .key { display: flex; gap: 6px; align-items: center; }
+    .key input { flex: 1; }
+    .actions { display: flex; justify-content: flex-end; gap: 8px; }
+    button { font: inherit; cursor: pointer; border-radius: 8px; padding: 6px 12px; border: 1px solid var(--line); background: var(--paper-2); color: var(--ink); }
+    button.save { background: var(--ink); color: var(--paper); border-color: var(--ink); }
+    button.link { border: 0; background: none; color: var(--muted); padding: 4px 6px; }
+    button.link[hidden] { display: none; }
+    .status { font-size: 12px; color: var(--faint); min-height: 1.2em; }
+    .status.error { color: var(--danger); }
+  `;
+
+  class MarbleAgentSettings extends HTMLElement {
+    constructor() {
+      super();
+      const root = this.attachShadow({ mode: 'open' });
+      root.innerHTML = `<style>${TOKENS}${SETTINGS_CSS}</style>
+        <div class="backdrop" part="backdrop"></div>
+        <div class="sheet" role="dialog" aria-labelledby="agent-settings-title" aria-modal="true">
+          <h2 id="agent-settings-title">Agent settings</h2>
+          <div class="body"></div>
+          <p class="status"></p>
+          <div class="actions">
+            <button type="button" class="close">Cancel</button>
+            <button type="button" class="save">Save</button>
+          </div>
+        </div>`;
+      this.body = root.querySelector('.body');
+      this.status = root.querySelector('.status');
+    }
+
+    get api() {
+      return window.marble?.agent;
+    }
+
+    connectedCallback() {
+      this.setAttribute('data-open', this.getAttribute('data-open') || 'false');
+      this.onOpen = () => this.open();
+      addEventListener('marble:agent-settings', this.onOpen);
+      this.shadowRoot.querySelector('.backdrop').addEventListener('click', () => this.close());
+      this.shadowRoot.querySelector('.close').addEventListener('click', () => this.close());
+      this.shadowRoot.querySelector('.save').addEventListener('click', () => this.save());
+      this.onKey = (event) => {
+        if (event.key === 'Escape' && this.getAttribute('data-open') === 'true') {
+          event.preventDefault();
+          event.stopPropagation();
+          this.close();
+        }
+      };
+      addEventListener('keydown', this.onKey, true);
+    }
+
+    disconnectedCallback() {
+      removeEventListener('marble:agent-settings', this.onOpen);
+      removeEventListener('keydown', this.onKey, true);
+    }
+
+    open() {
+      this.setAttribute('data-open', 'true');
+      this.fill();
+    }
+
+    close() {
+      this.setAttribute('data-open', 'false');
+    }
+
+    async fill() {
+      this.status.textContent = '';
+      this.status.classList.remove('error');
+      this.body.replaceChildren(h('p', 'status', 'Loading…'));
+      let providers = [];
+      let settings = { defaultProvider: '', models: {}, keys: { anthropic: false, cursor: false } };
+      try {
+        [providers, settings] = await Promise.all([this.api.providers(), this.api.settings()]);
+      } catch (err) {
+        this.body.replaceChildren();
+        this.status.textContent = err.message;
+        this.status.classList.add('error');
+        return;
+      }
+      const agents = document.createElement('fieldset');
+      agents.append(h('legend', '', 'Default agent and model'));
+      for (const provider of providers) {
+        const row = document.createElement('div');
+        row.className = 'agent';
+        const label = document.createElement('label');
+        const radio = document.createElement('input');
+        radio.type = 'radio';
+        radio.name = 'default';
+        radio.value = provider.id;
+        radio.checked = provider.default || provider.id === settings.defaultProvider;
+        radio.disabled = !(provider.installed && provider.signedIn);
+        label.append(radio, document.createTextNode(provider.label));
+        const detail = h('span', 'detail', provider.detail || (provider.installed ? '' : 'not installed'));
+        const model = document.createElement('select');
+        model.name = `model-${provider.id}`;
+        model.dataset.model = provider.id;
+        model.setAttribute('aria-label', `Model for ${provider.label}`);
+        fillSelect(model, provider.models ?? [], { value: settings.models?.[provider.id] ?? '' });
+        row.append(label, detail, model);
+        if (provider.efforts?.length) {
+          const effort = document.createElement('select');
+          effort.name = `effort-${provider.id}`;
+          effort.dataset.effort = provider.id;
+          effort.setAttribute('aria-label', `Effort for ${provider.label}`);
+          fillSelect(effort, provider.efforts.map((level) => ({ id: level, label: level })), {
+            value: settings.efforts?.[provider.id] ?? '',
+          });
+          row.append(effort);
+        }
+        agents.append(row);
+      }
+      const keys = document.createElement('fieldset');
+      keys.append(h('legend', '', 'API keys'));
+      keys.append(this.keyRow('anthropic', 'Claude API key', settings.keys?.anthropic));
+      keys.append(this.keyRow('cursor', 'Cursor API key', settings.keys?.cursor));
+      this.body.replaceChildren(agents, keys);
+    }
+
+    keyRow(name, label, set) {
+      const wrap = document.createElement('label');
+      wrap.append(document.createTextNode(label));
+      const row = document.createElement('div');
+      row.className = 'key';
+      const input = document.createElement('input');
+      input.type = 'password';
+      input.name = `key-${name}`;
+      input.autocomplete = 'off';
+      input.placeholder = set ? 'Set — paste to replace' : 'Not set';
+      const clear = document.createElement('button');
+      clear.type = 'button';
+      clear.className = 'link';
+      clear.textContent = 'Clear';
+      clear.hidden = !set;
+      clear.addEventListener('click', async () => {
+        try {
+          await this.api.saveSettings({ keys: { [name]: '' } });
+          dispatchEvent(new CustomEvent('marble:agent-settings-saved'));
+          await this.fill();
+        } catch (err) {
+          this.status.textContent = err.message;
+          this.status.classList.add('error');
+        }
+      });
+      row.append(input, clear);
+      wrap.append(row);
+      return wrap;
+    }
+
+    async save() {
+      this.status.classList.remove('error');
+      const defaultProvider = this.shadowRoot.querySelector('input[name="default"]:checked')?.value;
+      const models = {};
+      for (const input of this.shadowRoot.querySelectorAll('[data-model]')) {
+        models[input.dataset.model] = input.value.trim();
+      }
+      const efforts = {};
+      for (const input of this.shadowRoot.querySelectorAll('[data-effort]')) {
+        efforts[input.dataset.effort] = input.value.trim();
+      }
+      const patch = { models, efforts };
+      if (defaultProvider) patch.defaultProvider = defaultProvider;
+      const keys = {};
+      const anthropic = this.shadowRoot.querySelector('input[name="key-anthropic"]')?.value.trim();
+      const cursor = this.shadowRoot.querySelector('input[name="key-cursor"]')?.value.trim();
+      if (anthropic) keys.anthropic = anthropic;
+      if (cursor) keys.cursor = cursor;
+      if (Object.keys(keys).length) patch.keys = keys;
+      try {
+        await this.api.saveSettings(patch);
+        dispatchEvent(new CustomEvent('marble:agent-settings-saved'));
+        this.close();
+      } catch (err) {
+        this.status.textContent = err.message;
+        this.status.classList.add('error');
+      }
+    }
+  }
+
+  customElements.define('marble-agent-settings', MarbleAgentSettings);
+
   // ------------------------------------------------------------ the drawer
 
   const WIDTH = 420;
@@ -878,6 +1290,14 @@
       this.onCloseRequest = () => this.close();
       addEventListener('marble:agent-open', this.onOpenRequest);
       addEventListener('marble:agent-close', this.onCloseRequest);
+      this.onSettingsSaved = async () => {
+        try {
+          this.labels.clear();
+          for (const provider of await api.providers()) this.labels.set(provider.id, provider);
+          this.showMeta(this.meta);
+        } catch { /* labels stay as they were */ }
+      };
+      addEventListener('marble:agent-settings-saved', this.onSettingsSaved);
       this.onViewport = () => this.render();
       this.phone.addEventListener('change', this.onViewport);
       this.onOutside = (event) => {
@@ -909,6 +1329,7 @@
       removeEventListener('keydown', this.onKey, true);
       removeEventListener('marble:agent-open', this.onOpenRequest);
       removeEventListener('marble:agent-close', this.onCloseRequest);
+      removeEventListener('marble:agent-settings-saved', this.onSettingsSaved);
       this.phone.removeEventListener('change', this.onViewport);
       this.offSummaries?.();
       this.cancelMotion?.();
@@ -1167,6 +1588,10 @@
 
     async fillActions() {
       this.actions.replaceChildren();
+      this.item(this.actions, 'Settings', 'Default agent, model, and API keys', () => {
+        this.hideMenus();
+        this.api.openSettings();
+      });
       const id = this.view.getAttribute('conversation');
       const summary = id ? this.summaries.get(id) ?? this.meta : null;
       if (id) {
@@ -1200,7 +1625,6 @@
       } catch {
         // No listing, no link.
       }
-      if (!this.actions.children.length) this.actions.append(h('div', 'empty', 'Nothing to do yet.'));
     }
   }
 
@@ -1208,7 +1632,16 @@
 
   // ------------------------------------------------------------ mounting
 
+  const mountSettings = () => {
+    if (document.querySelector('marble-agent-settings')) return;
+    const el = document.createElement('marble-agent-settings');
+    el.setAttribute('data-marble-transient', '');
+    el.setAttribute('data-open', 'false');
+    document.body.append(el);
+  };
+
   const mount = () => {
+    mountSettings();
     if (document.querySelector('meta[name="marble-agent"][content="custom"]')) return;
     if (document.querySelector('marble-agent-drawer')) return;
     const drawer = document.createElement('marble-agent-drawer');

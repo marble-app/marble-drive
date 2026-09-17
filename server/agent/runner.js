@@ -22,7 +22,7 @@ const STDERR_TAIL = 4_000;
 // How long closing the host waits for its running turns to write their end.
 const CLOSE_GRACE_MS = 5_000;
 
-export function createRunner({ store, tools, providers, workdir, origin, bridgePath, readDocument, publish, limits, log = console }) {
+export function createRunner({ store, tools, providers, workdir, origin, bridgePath, readDocument, publish, limits, log = console, skills = [] }) {
   const live = new Map(); // turnId → live turn
   const order = []; // turnIds, in the order they were sent
   const tokens = new Map(); // token → live turn
@@ -190,7 +190,7 @@ export function createRunner({ store, tools, providers, workdir, origin, bridgeP
       };
 
       await fsp.mkdir(workspace, { recursive: true });
-      await provider.prepare?.({ workspace, mcp, meta });
+      await provider.prepare?.({ workspace, mcp, meta, skills });
       const prompt = await composePrompt(turn, meta);
 
       // Cancel (or a host shutdown) can land anywhere in the awaits above,
@@ -206,6 +206,7 @@ export function createRunner({ store, tools, providers, workdir, origin, bridgeP
         prompt,
         resume: meta.providerSession,
         model: meta.model,
+        effort: meta.effort,
         env: base,
       });
 

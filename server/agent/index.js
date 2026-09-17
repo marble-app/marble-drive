@@ -4,18 +4,24 @@
 
 import crypto from 'node:crypto';
 import fsp from 'node:fs/promises';
+import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 import { enginePath } from '../engine.js';
 import { build as buildStarter } from '../gallery.js';
 import { createHub } from './hub.js';
+import { createKeyStore } from './keys.js';
 import { createAgentRoutes } from './routes.js';
 import { createRunner } from './runner.js';
+import { listSkills, skillDirs } from './skills.js';
 import { createAgentStore } from './store.js';
 import { createTools } from './tools.js';
+import { builtInProviders } from './providers/index.js';
 
-const BRIDGE = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..', 'bin', 'marble-mcp.js');
+const HERE = path.dirname(fileURLToPath(import.meta.url));
+const BRIDGE = path.resolve(HERE, '..', '..', 'bin', 'marble-mcp.js');
+const REPO = path.resolve(HERE, '..', '..');
 const LOOPBACK_HOSTS = new Set(['127.0.0.1', '::1', 'localhost']);
 const ANY_HOST = new Set(['0.0.0.0', '::']);
 
@@ -34,6 +40,13 @@ export function agentsAllowed(config) {
   const outside = inside === '..' || inside.startsWith(`..${path.sep}`) || path.isAbsolute(inside);
   if (!outside) {
     return { ok: false, why: `MARBLE_DRIVE_AGENT_WORKDIR is inside the drive (${config.agentWorkdir}); put it where an agent's own tools find nothing` };
+  }
+  if (config.agentKeysFile) {
+    const keysInside = path.relative(config.root, config.agentKeysFile);
+    const keysOutside = keysInside === '..' || keysInside.startsWith(`..${path.sep}`) || path.isAbsolute(keysInside);
+    if (!keysOutside) {
+      return { ok: false, why: `MARBLE_DRIVE_AGENT_KEYS is inside the drive (${config.agentKeysFile}); put it where a backup of the drive does not take it` };
+    }
   }
   return { ok: true, why: null };
 }
@@ -103,6 +116,9 @@ async function boot({ config, store, writeOps, createDocument, origin, providers
   const agentStore = createAgentStore({ dir, defaultProvider: config.agentProvider, log });
   await agentStore.ready();
   const settings = await agentStore.settings();
+  const keys = createKeyStore({ file: config.agentKeysFile });
+  const liveProviders = providers ?? builtInProviders({ env: process.env, secrets: () => keys.asEnv() });
+  const skills = await listSkills(skillDirs({ home: os.homedir(), repo: REPO }));
   const hub = createHub();
   const tools = createTools({
     store,
@@ -114,7 +130,7 @@ async function boot({ config, store, writeOps, createDocument, origin, providers
   const runner = createRunner({
     store: agentStore,
     tools,
-    providers,
+    providers: liveProviders,
     workdir: config.agentWorkdir,
     origin,
     bridgePath: BRIDGE,
@@ -127,6 +143,7 @@ async function boot({ config, store, writeOps, createDocument, origin, providers
       killGraceMs: 3_000,
     },
     log,
+    skills,
   });
   await runner.boot();
 
@@ -135,10 +152,12 @@ async function boot({ config, store, writeOps, createDocument, origin, providers
     runner,
     tools,
     hub,
-    providers,
+    providers: liveProviders,
     writeOps,
     maxBody: config.maxBodyBytes,
     gated: Boolean(config.secret),
+    keys,
+    skills,
   });
 
   return {

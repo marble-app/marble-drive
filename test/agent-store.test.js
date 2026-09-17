@@ -91,9 +91,19 @@ test('archived conversations are listed only when asked for', async () => {
   assert.equal((await store.conversations({ archived: true })).length, 1);
 });
 
+test('a conversation keeps the model and effort it was started with', async () => {
+  const { store } = await fresh();
+  const meta = await store.createConversation({ provider: 'fake', model: 'm1', effort: 'high' });
+  assert.equal((await store.conversation(meta.id)).effort, 'high');
+  await store.updateConversation(meta.id, { model: 'm2', effort: 'low' });
+  const next = await store.conversation(meta.id);
+  assert.equal(next.model, 'm2');
+  assert.equal(next.effort, 'low');
+});
+
 test('settings have defaults and keep what was saved', async () => {
   const { store } = await fresh();
-  assert.deepEqual(await store.settings(), { defaultProvider: 'claude-subscription', models: {}, maxRunning: 3 });
+  assert.deepEqual(await store.settings(), { defaultProvider: 'claude-subscription', models: {}, efforts: {}, maxRunning: 3 });
   await store.saveSettings({ defaultProvider: 'cursor', models: { cursor: 'composer-2.5' } });
   assert.equal((await store.settings()).models.cursor, 'composer-2.5');
 });

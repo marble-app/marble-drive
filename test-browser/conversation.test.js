@@ -60,6 +60,32 @@ test('a new conversation picks an agent, sends on Enter, and becomes that conver
   assert.deepEqual(errors, []);
 });
 
+test('a new conversation can name its model from the picker', async () => {
+  const { page, view } = await mount();
+  await view.locator('select.picker-select').waitFor();
+  await view.locator('select.picker-model').selectOption('alt');
+  await view.locator('select.effort-select').selectOption('high');
+  const started = page.evaluate(() => new Promise((resolve) => document.querySelector('marble-conversation').addEventListener('conversation', (e) => resolve(e.detail.id), { once: true })));
+  await sendFrom(view, 'script:rename');
+  const id = await started;
+  await view.locator('.turn-footer[data-status="completed"]').waitFor();
+  const meta = await page.evaluate(async (conversation) => (await window.marble.agent.conversation(conversation)).meta, id);
+  assert.equal(meta.model, 'alt');
+  assert.equal(meta.effort, 'high');
+});
+
+test('typing / lists clear, compact, models, effort and skills', async () => {
+  const { view } = await mount();
+  await view.locator('select.picker-select').waitFor();
+  await view.locator('textarea').fill('/');
+  await view.locator('.slash').waitFor();
+  const listed = await view.locator('.slash').textContent();
+  assert.match(listed, /Clear conversation/);
+  assert.match(listed, /Compact/);
+  assert.match(listed, /Effort: high/);
+  assert.match(listed, /Alt/);
+});
+
 test('the transcript shows the agent’s words, its tool calls, and what changed', async () => {
   const { page } = await mount();
   const view = page.locator('body > marble-conversation');

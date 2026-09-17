@@ -7,10 +7,12 @@ import test from 'node:test';
 
 const ROOT = await fsp.mkdtemp(path.join(os.tmpdir(), 'marble-drive-agents-http-'));
 const WORK = await fsp.mkdtemp(path.join(os.tmpdir(), 'marble-drive-agents-work-'));
+const KEYS = path.join(WORK, 'agent-keys.local');
 process.env.MARBLE_DRIVE_ROOT = ROOT;
 process.env.MARBLE_APPS = ROOT;
 process.env.MARBLE_DRIVE_BACKUP_DIR = '';
 process.env.MARBLE_DRIVE_BACKUP_CMD = '';
+process.env.MARBLE_DRIVE_AGENT_KEYS = KEYS;
 
 const { createDrive } = await import('../server/app.js');
 const { loadConfig } = await import('../server/config.js');
@@ -45,6 +47,7 @@ const config = loadConfig({
   MARBLE_DRIVE_AGENTS: '1',
   MARBLE_DRIVE_AGENT_PROVIDER: 'fake',
   MARBLE_DRIVE_AGENT_WORKDIR: WORK,
+  MARBLE_DRIVE_AGENT_KEYS: KEYS,
 });
 const drive = await createDrive(config, {
   log: quiet,
@@ -125,7 +128,7 @@ let edited = null;
 test('providers are listed, with the default marked', async () => {
   const { status, body } = await api('GET', '/agent/providers');
   assert.equal(status, 200);
-  assert.deepEqual(body, [{ id: 'fake', label: 'Fake', defaultModel: null, installed: true, signedIn: true, detail: 'scripted', default: true }]);
+  assert.deepEqual(body, [{ id: 'fake', label: 'Fake', defaultModel: null, models: [{ id: 'fake', label: 'Fake' }, { id: 'alt', label: 'Alt' }], efforts: ['low', 'high'], installed: true, signedIn: true, detail: 'scripted', default: true }]);
 });
 
 test('an agent edits a document through the bridge, and the open tab hears it', async () => {
@@ -221,9 +224,50 @@ test('an unknown provider and a turn with no target are refused up front', async
 });
 
 test('settings are read and saved', async () => {
-  const saved = await api('PUT', '/agent/settings', { models: { fake: 'm1' } });
+  const saved = await api('PUT', '/agent/settings', { models: { fake: 'm1' }, efforts: { fake: 'high' } });
   assert.equal(saved.body.models.fake, 'm1');
+  assert.equal(saved.body.efforts.fake, 'high');
   assert.equal((await api('GET', '/agent/settings')).body.defaultProvider, 'fake');
+  assert.deepEqual((await api('GET', '/agent/settings')).body.keys, { anthropic: false, cursor: false });
+});
+
+test('a new conversation can name its effort, and a later patch changes model and effort', async () => {
+  const created = await api('POST', '/agent/conversations', { provider: 'fake', model: 'm-start', effort: 'high' });
+  assert.equal(created.body.effort, 'high');
+  assert.equal(created.body.model, 'm-start');
+  const patched = await api('PATCH', `/agent/conversations/${created.body.id}`, { model: 'm-later', effort: 'low' });
+  assert.equal(patched.status, 200);
+  assert.equal(patched.body.model, 'm-later');
+  assert.equal(patched.body.effort, 'low');
+});
+
+test('skills are listed without their bodies', async () => {
+  const { status, body } = await api('GET', '/agent/skills');
+  assert.equal(status, 200);
+  assert.ok(Array.isArray(body));
+  for (const skill of body) {
+    assert.equal(typeof skill.id, 'string');
+    assert.ok(!JSON.stringify(skill).includes('---\n'));
+  }
+});
+
+test('an API key is stored outside the drive and never returned', async () => {
+  const secret = 'sk-ant-test-secret-do-not-echo';
+  const saved = await api('PUT', '/agent/settings', { keys: { anthropic: secret }, defaultProvider: 'fake' });
+  assert.equal(saved.status, 200);
+  assert.equal(saved.body.keys.anthropic, true);
+  assert.equal(JSON.stringify(saved.body).includes(secret), false);
+  const got = await api('GET', '/agent/settings');
+  assert.equal(got.body.keys.anthropic, true);
+  assert.equal(got.body.defaultProvider, 'fake');
+  assert.equal(JSON.stringify(got.body).includes(secret), false);
+  assert.match(await fsp.readFile(KEYS, 'utf8'), /sk-ant-test-secret-do-not-echo/);
+  const underDrive = await fsp.readdir(ROOT, { recursive: true });
+  assert.equal(
+    underDrive.some((name) => String(name).includes('sk-ant-test-secret')),
+    false,
+    'the secret must not land under the drive root',
+  );
 });
 
 test('when agents are allowed, and when not', () => {
@@ -234,6 +278,8 @@ test('when agents are allowed, and when not', () => {
   assert.equal(agentsAllowed({ ...base, host: '0.0.0.0' }).ok, false);
   assert.equal(agentsAllowed({ ...base, host: '0.0.0.0', secret: 'x' }).ok, true);
   assert.match(agentsAllowed({ ...base, agentWorkdir: '/data/drive/.work' }).why, /inside the drive/);
+  assert.match(agentsAllowed({ ...base, agentKeysFile: '/data/drive/.agent-keys.local' }).why, /inside the drive/);
+  assert.equal(agentsAllowed({ ...base, agentKeysFile: '/cache/agent-keys.local' }).ok, true);
 });
 
 test('a workdir named like a parent is still inside the drive; a host bound where loopback cannot reach is refused', () => {

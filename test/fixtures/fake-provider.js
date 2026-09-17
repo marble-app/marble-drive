@@ -10,6 +10,8 @@ export function createFakeProvider({ scripts = {}, id = 'fake' } = {}) {
   return {
     id,
     label: 'Fake',
+    models: [{ id, label: 'Fake' }, { id: 'alt', label: 'Alt' }],
+    efforts: ['low', 'high'],
     detect: async () => ({ installed: true, signedIn: true, detail: 'scripted' }),
     lostSession: (error) => /no conversation found/i.test(error),
     spawn({ mcp, prompt, resume, env }) {

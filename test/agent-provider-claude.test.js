@@ -69,19 +69,23 @@ test('ids, labels, and the spawn verified by the spike', () => {
   assert.equal(api.id, 'claude-api');
   assert.equal(api.label, 'Claude (API key)');
 
-  const spec = sub.spawn({ workspace: '/w', prompt: 'Rename it', resume: 'sess-1', model: 'claude-haiku-4-5', env: { PATH: '/bin' } });
+  const spec = sub.spawn({ workspace: '/w', prompt: 'Rename it', resume: 'sess-1', model: 'claude-haiku-4-5', effort: 'high', env: { PATH: '/bin' } });
   assert.equal(spec.command, 'claude');
   assert.equal(spec.stdin, 'Rename it');
   assert.deepEqual(spec.args, [
     '-p', '--output-format', 'stream-json', '--verbose', '--include-partial-messages',
     '--tools', '', '--strict-mcp-config', '--mcp-config', path.join('/w', 'mcp.json'),
-    '--allowedTools', 'mcp__marble', '--setting-sources', 'project', '--disable-slash-commands',
-    '--append-system-prompt', INSTRUCTIONS, '--model', 'claude-haiku-4-5', '--resume', 'sess-1',
+    '--allowedTools', 'mcp__marble', '--setting-sources', 'project',
+    '--append-system-prompt', INSTRUCTIONS, '--model', 'claude-haiku-4-5', '--effort', 'high', '--resume', 'sess-1',
   ]);
   assert.ok(!spec.args.includes('--bare'));
+  assert.ok(!spec.args.includes('--disable-slash-commands'), 'skills and /compact need slash commands on');
   assert.deepEqual(spec.env, {}, 'the subscription never gets the API key');
   assert.deepEqual(api.spawn({ workspace: '/w', prompt: 'x', env: {} }).env, { ANTHROPIC_API_KEY: 'sk-test' });
   assert.ok(!sub.spawn({ workspace: '/w', prompt: 'x', env: {} }).args.includes('--resume'));
+  assert.ok(!sub.spawn({ workspace: '/w', prompt: 'x', env: {} }).args.includes('--effort'));
+  assert.deepEqual(sub.models.map((m) => m.id), ['sonnet', 'opus', 'haiku', 'fable']);
+  assert.deepEqual(sub.efforts, ['low', 'medium', 'high', 'xhigh', 'max']);
 });
 
 test('prepare writes the MCP config privately, with the turn\'s bridge', async () => {
@@ -114,6 +118,18 @@ test('detect: signed in, signed out, not installed, and the API key', async () =
   const installed = exec({ code: 0, stdout: '{}', stderr: '', missing: false });
   assert.equal((await createClaudeProvider({ auth: 'api', exec: installed, env: { ANTHROPIC_API_KEY: 'k' } }).detect()).signedIn, true);
   assert.equal((await createClaudeProvider({ auth: 'api', exec: installed, env: {} }).detect()).signedIn, false);
+
+  let key = null;
+  const late = createClaudeProvider({
+    auth: 'api',
+    exec: installed,
+    env: {},
+    secrets: () => (key ? { ANTHROPIC_API_KEY: key } : {}),
+  });
+  assert.equal((await late.detect()).signedIn, false);
+  key = 'sk-from-file';
+  assert.equal((await late.detect()).signedIn, true);
+  assert.equal(late.spawn({ workspace: '/w', prompt: 'x' }).env.ANTHROPIC_API_KEY, 'sk-from-file');
 });
 
 test('detection probes get the allowlisted environment, never the drive secret', async () => {

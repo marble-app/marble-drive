@@ -205,6 +205,33 @@ test('the recent menu switches conversations; new starts one; continue-in hands 
   assert.equal(await drawer.locator('.menu.actions [role="menuitem"]', { hasText: 'Archive' }).count(), 1);
 });
 
+test('Settings in the drawer saves the default model for new conversations', async () => {
+  await host.reset();
+  const { page, drawer, panel, view } = await visit();
+  await drawer.locator('.launcher').click();
+  await opened(panel);
+  await drawer.locator('button.more').click();
+  await drawer.locator('.menu.actions [role="menuitem"]', { hasText: 'Settings' }).click();
+  const settings = page.locator('marble-agent-settings');
+  await settings.locator('h2', { hasText: 'Agent settings' }).waitFor();
+  await settings.locator('select[name="model-fake"]').selectOption('alt');
+  await settings.locator('select[name="effort-fake"]').selectOption('high');
+  await settings.locator('button.save').click();
+  await page.waitForFunction(() => document.querySelector('marble-agent-settings')?.getAttribute('data-open') === 'false');
+  await drawer.locator('button.new').click();
+  const started = page.evaluate(() => new Promise((resolve) => {
+    document.querySelector('marble-agent-drawer').shadowRoot.querySelector('marble-conversation')
+      .addEventListener('conversation', (e) => resolve(e.detail.id), { once: true });
+  }));
+  await view.locator('textarea').fill('script:rename');
+  await view.locator('textarea').press('Enter');
+  const id = await started;
+  await view.locator('.turn-footer[data-status="completed"]').waitFor();
+  const meta = await page.evaluate(async (conversation) => (await window.marble.agent.conversation(conversation)).meta, id);
+  assert.equal(meta.model, 'alt');
+  assert.equal(meta.effort, 'high');
+});
+
 test('a document that draws its own agent interface gets no drawer', async () => {
   await host.drive.createDocument('custom', GARDEN.replace('<title>', '<meta name="marble-agent" content="custom"><title>'));
   const { page } = await host.newPage();

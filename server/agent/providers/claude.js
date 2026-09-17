@@ -19,6 +19,13 @@ import { runCommand } from './exec.js';
 import { writePrivateFile } from './private-file.js';
 
 const PREFIX = 'mcp__marble__';
+export const CLAUDE_MODELS = [
+  { id: 'sonnet', label: 'Sonnet' },
+  { id: 'opus', label: 'Opus' },
+  { id: 'haiku', label: 'Haiku' },
+  { id: 'fable', label: 'Fable' },
+];
+export const CLAUDE_EFFORTS = ['low', 'medium', 'high', 'xhigh', 'max'];
 const SUMMARY = 200;
 
 const toolName = (name) => (name.startsWith(PREFIX) ? name.slice(PREFIX.length) : name);
@@ -90,8 +97,9 @@ export function parseClaudeLine(line) {
   }
 }
 
-export function createClaudeProvider({ auth = 'subscription', exec = runCommand, env = process.env } = {}) {
+export function createClaudeProvider({ auth = 'subscription', exec = runCommand, env = process.env, secrets } = {}) {
   const api = auth === 'api';
+  const live = () => ({ ...env, ...(typeof secrets === 'function' ? secrets() : secrets ?? {}) });
 
   return {
     id: api ? 'claude-api' : 'claude-subscription',
@@ -100,14 +108,16 @@ export function createClaudeProvider({ auth = 'subscription', exec = runCommand,
     async detect() {
       // The same allowlist a turn starts from. Asked with a key in the
       // environment, the CLI answers about the key, so the subscription is
-      // asked without one.
-      const probeEnv = pickEnv(env);
-      if (api && env.ANTHROPIC_API_KEY) probeEnv.ANTHROPIC_API_KEY = env.ANTHROPIC_API_KEY;
+      // asked without one. `secrets` is read now, not at boot, so a key set
+      // in the settings panel is visible without a restart.
+      const current = live();
+      const probeEnv = pickEnv(current);
+      if (api && current.ANTHROPIC_API_KEY) probeEnv.ANTHROPIC_API_KEY = current.ANTHROPIC_API_KEY;
       const probe = await exec('claude', ['auth', 'status'], { env: probeEnv });
       if (probe.missing) return { installed: false, signedIn: false, detail: 'claude is not installed' };
 
       if (api) {
-        return env.ANTHROPIC_API_KEY
+        return current.ANTHROPIC_API_KEY
           ? { installed: true, signedIn: true, detail: 'ANTHROPIC_API_KEY is set' }
           : { installed: true, signedIn: false, detail: 'set ANTHROPIC_API_KEY to use Claude on the API' };
       }
@@ -128,30 +138,39 @@ export function createClaudeProvider({ auth = 'subscription', exec = runCommand,
       };
     },
 
-    async prepare({ workspace, mcp }) {
+    models: CLAUDE_MODELS,
+    efforts: CLAUDE_EFFORTS,
+
+    async prepare({ workspace, mcp, skills = [] }) {
       const config = { mcpServers: { marble: { command: mcp.command, args: mcp.args, env: mcp.env } } };
       // The token in here is good for one turn, and nobody else's business.
       await writePrivateFile(path.join(workspace, 'mcp.json'), JSON.stringify(config, null, 2));
+      if (skills.length) {
+        const { installSkills } = await import('../skills.js');
+        await installSkills(workspace, skills);
+      }
     },
 
-    spawn({ workspace, prompt, resume = null, model = null }) {
+    spawn({ workspace, prompt, resume = null, model = null, effort = null }) {
+      const current = live();
       const args = [
         '-p', '--output-format', 'stream-json', '--verbose', '--include-partial-messages',
         '--tools', '', '--strict-mcp-config', '--mcp-config', path.join(workspace, 'mcp.json'),
-        '--allowedTools', 'mcp__marble', '--setting-sources', 'project', '--disable-slash-commands',
+        '--allowedTools', 'mcp__marble', '--setting-sources', 'project',
         '--append-system-prompt', INSTRUCTIONS,
       ];
       if (model) args.push('--model', model);
+      if (effort) args.push('--effort', effort);
       if (resume) args.push('--resume', resume);
       // Without a key the CLI would fall back to the login, and bill the
       // subscription for a conversation someone chose to put on the API.
-      if (api && !env.ANTHROPIC_API_KEY) {
+      if (api && !current.ANTHROPIC_API_KEY) {
         throw new Error('ANTHROPIC_API_KEY is not set, so Claude (API key) cannot run — set it or choose Claude');
       }
       return {
         command: 'claude',
         args,
-        env: api ? { ANTHROPIC_API_KEY: env.ANTHROPIC_API_KEY } : {},
+        env: api ? { ANTHROPIC_API_KEY: current.ANTHROPIC_API_KEY } : {},
         stdin: prompt,
       };
     },

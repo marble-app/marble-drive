@@ -12,6 +12,11 @@ MARBLE_DRIVE_AGENTS=1
 MARBLE_DRIVE_AGENT_PROVIDER=claude-subscription
 ```
 
+API keys belong in `.agent-keys.local` (gitignored) or `MARBLE_DRIVE_AGENT_KEYS`,
+not in the drive and not in `.marble/`. The settings panel writes them there.
+`.env.local` can still hold `ANTHROPIC_API_KEY` / `CURSOR_API_KEY` for a host
+that has no panel-set key; both files are gitignored.
+
 Refused, with the reason printed at boot, on a multi-tenant host, on an
 ungated host that is not listening on loopback, and on a host bound to one
 address other than loopback (the MCP bridge calls back on loopback). One host
@@ -64,11 +69,16 @@ Nothing is reverted automatically: the likeliest outside writer is you.
 .marble/agents/<conversation>/raw/<turn>.jsonl
 ```
 
+Default agent, per-provider models, and effort live in `settings.json`. API keys do not:
+the settings panel writes them to `.agent-keys.local` (gitignored) or
+`MARBLE_DRIVE_AGENT_KEYS`. `GET /agent/settings` says whether a key is set, never
+the value. Backups of `.marble/` therefore do not take them.
+
 ## Providers
 
 | id | runs | boundary |
 |---|---|---|
-| `claude-subscription` | `claude -p`, prompt on stdin, no `ANTHROPIC_API_KEY` in its environment, so the CLI's login is used | `--tools ""` and `--strict-mcp-config`: it has no tool but Marble's |
+| `claude-subscription` | `claude -p`, prompt on stdin, `--model` / `--effort` from the conversation, skills copied into the workspace so `/skill-name` works | `--tools ""` and `--strict-mcp-config`: it has no tool but Marble's |
 | `claude-api` | the same, with `ANTHROPIC_API_KEY`; without it the turn fails rather than fall back to the login | the same |
 | `cursor` | `cursor-agent -p`, model `composer-2.5` unless the conversation names one, prompt passed after `--` (a dash-leading prompt would otherwise be parsed as a flag) | `.cursor/hooks.json` `preToolUse`, fail-closed, allowing only Marble's five tools (`bin/marble-cursor-hook.js`) |
 
@@ -115,6 +125,11 @@ The conversation you had open follows you from page to page. A turn keeps the
 document it started on: when you are looking at another page, the header says
 which file it is editing. Each finished turn shows what changed with **Undo
 turn**, and a turn the watchdog flagged offers **Restore**.
+
+**Settings** (the drawer's More menu, and a button on the Agents page) is where
+you pick the default agent, a model per agent, effort where the agent has it,
+and API keys. The composer keeps those as dropdowns, and `/` opens the same
+knobs plus skills, **Compact**, and **Clear conversation**.
 
 Agent text is shown, never interpreted as HTML (`renderText` in
 `runtime/agent-ui.js`). Browser tests: `npm run test:browser`; screenshots:
