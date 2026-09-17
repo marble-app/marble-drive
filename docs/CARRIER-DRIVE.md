@@ -92,13 +92,14 @@ Injected (with `runtime/agent-ui.js`, the drawer) only when the host runs agents
 | `marble.agent.providers()` | `[{id, label, installed, signedIn, detail, default, defaultModel}]` |
 | `marble.agent.conversations({archived})` / `.conversation(id)` | summaries / `{meta, turns, events}` |
 | `marble.agent.start({provider, model, handoffFrom})` | → conversation id |
-| `marble.agent.send(id, {prompt, target, viewing, selection})` | missing context comes from `context()` |
+| `marble.agent.send(id, {prompt, target, viewing, selection, also})` | missing context comes from `context()` |
 | `marble.agent.cancel(turn)` / `.undo(turn)` / `.dequeue(turn)` | |
 | `marble.agent.archive(id, bool)` / `.markReviewed(id)` / `.handoff(id, provider)` | |
 | `marble.agent.restore(path, sha)` | the watchdog's restore point |
 | `marble.agent.on(id \| '*', fn)` | a conversation's events (replayed, then live) / summaries; returns unsubscribe |
-| `marble.agent.context()` | `{viewing, target, selection}` — the selection survives focus moving into transient chrome |
+| `marble.agent.context()` | `{viewing, target, selection, also}` — viewing is this page; target is the aimed document, or this page if none; `also` is extra documents in view, not extra writable targets. The element selection survives focus moving into transient chrome |
 | `marble.agent.select(ids)` | for documents with their own selection model; `null` clears |
+| `marble.agent.aim(path, {also}?)` | the writable target while you stay on this page; `null` clears. Drive's listing `pick()` calls this so a picked document is what a turn writes, without opening it |
 | `marble.agent.current()` / `.remember(id)` | the conversation that follows you between pages |
 | `marble.agent.open(id)` / `.close()` | ask the drawer |
 

@@ -37,6 +37,11 @@
 
     let chosen = null;
     let remembered = [];
+    // Aimed at a document other than this page. Drive uses this so picking a
+    // row writes that file without leaving the listing. viewing stays this
+    // page; also is extra documents in view, not extra writable targets.
+    let aimed = null;
+    let alsoLooking = [];
 
     const elementOf = (node) => (node?.nodeType === Node.ELEMENT_NODE ? node : node?.parentElement ?? null);
 
@@ -70,8 +75,9 @@
 
     const context = () => ({
       viewing: marble.app,
-      target: marble.app,
+      target: aimed ?? marble.app,
       selection: [...(chosen ?? remembered)],
+      also: [...alsoLooking],
     });
 
     // ---------------------------------------------------------- the streams
@@ -146,7 +152,7 @@
       },
       handoff: (id, provider) => agent.start({ provider, handoffFrom: id }),
 
-      send(id, { prompt, target, viewing, selection } = {}) {
+      send(id, { prompt, target, viewing, selection, also } = {}) {
         const here = context();
         return ask(`/agent/conversations/${enc(id)}/turns`, {
           method: 'POST',
@@ -156,6 +162,7 @@
               target: target ?? here.target,
               viewing: viewing ?? here.viewing,
               selection: selection ?? here.selection,
+              also: also ?? here.also,
             },
           },
         });
@@ -172,6 +179,11 @@
       context,
       select(ids) {
         chosen = Array.isArray(ids) && ids.length ? [...ids] : null;
+        notify();
+      },
+      aim(path, { also } = {}) {
+        aimed = path || null;
+        alsoLooking = Array.isArray(also) ? [...also] : [];
         notify();
       },
 

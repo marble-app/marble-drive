@@ -166,6 +166,13 @@ test('the context chip shows the target and the selection, and can drop the sele
   assert.equal((await view.locator('.context-text').textContent()).trim(), 'garden');
 });
 
+test('the context chip names the aimed target and how many more are in view', async () => {
+  const { page, view } = await mount();
+  await page.evaluate(() => window.marble.agent.aim('notes', { also: ['reading', 'log'] }));
+  await view.locator('.context-text', { hasText: 'notes' }).waitFor();
+  assert.match((await view.locator('.context-text').textContent()).trim(), /\+ 2 more/);
+});
+
 test('shift+enter makes a new line instead of sending', async () => {
   const { view } = await mount();
   await view.locator('textarea').fill('one');

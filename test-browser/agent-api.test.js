@@ -115,7 +115,7 @@ test('each subscriber gets the sequenced history and continues with the live str
 test('context is this document and the addressed elements the person selected', async () => {
   const { page } = await open();
   const empty = await page.evaluate(() => window.marble.agent.context());
-  assert.deepEqual(empty, { viewing: 'garden', target: 'garden', selection: [] });
+  assert.deepEqual(empty, { viewing: 'garden', target: 'garden', selection: [], also: [] });
 
   await page.evaluate(() => {
     const range = document.createRange();
@@ -161,6 +161,49 @@ test('select() overrides the text selection until cleared', async () => {
     window.marble.agent.select(null);
     return window.marble.agent.context().selection;
   }), []);
+});
+
+test('aim() points the writable target at another document without leaving this page', async () => {
+  const { page } = await open();
+  const aimed = await page.evaluate(() => {
+    const heard = [];
+    addEventListener('marble:agent-context', () => heard.push(true));
+    window.marble.agent.aim('notes', { also: ['reading'] });
+    return { context: window.marble.agent.context(), heard: heard.length };
+  });
+  assert.equal(aimed.context.viewing, 'garden');
+  assert.equal(aimed.context.target, 'notes');
+  assert.deepEqual(aimed.context.also, ['reading']);
+  assert.ok(aimed.heard >= 1, 'aiming dispatches marble:agent-context');
+
+  const cleared = await page.evaluate(() => {
+    window.marble.agent.aim(null);
+    return window.marble.agent.context();
+  });
+  assert.equal(cleared.viewing, 'garden');
+  assert.equal(cleared.target, 'garden');
+  assert.deepEqual(cleared.also, []);
+});
+
+test('send() uses the aimed path as context.target', async () => {
+  const { page } = await open();
+  const target = await page.evaluate(async () => {
+    const agent = window.marble.agent;
+    agent.aim('notes');
+    const id = await agent.start({ provider: 'fake' });
+    const user = await new Promise((resolve) => {
+      const off = agent.on(id, (event) => {
+        if (event.type === 'user') {
+          off();
+          resolve(event.context);
+        }
+      });
+      agent.send(id, { prompt: 'script:followup' });
+    });
+    return user;
+  });
+  assert.equal(target.target, 'notes');
+  assert.equal(target.viewing, 'garden');
 });
 
 test('remember, current, open and close', async () => {

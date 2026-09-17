@@ -1092,6 +1092,20 @@ __ICON__
           : typeof paths === 'string' ? new Set([paths])
           : new Set(paths);
         paint(picked);
+        aimPicked();
+      }
+
+      // Folders and ordinary files are not agent targets. The first picked
+      // document is the writable one; the rest are also in view. Nothing
+      // document-shaped picked is the same as picking nothing: Drive itself.
+      function aimPicked() {
+        const agent = window.marble?.agent;
+        if (!agent?.aim) return;
+        const docs = [...picked].filter((p) =>
+          items.querySelector('.item[data-path="' + CSS.escape(p) + '"]')?.dataset.kind === 'doc',
+        );
+        const [first, ...rest] = docs;
+        agent.aim(first ?? null, { also: rest });
       }
 
       // A document's own weight, 0..1, against the heaviest thing in view —
@@ -1383,7 +1397,14 @@ __ICON__
         // Keep the selection to what is actually on screen — a refresh, a
         // search or a folder change can retire a row that was picked.
         const shown = new Set([...items.querySelectorAll('.item')].map((el) => el.dataset.path));
-        for (const path of [...picked]) if (!shown.has(path)) picked.delete(path);
+        let lost = false;
+        for (const path of [...picked]) {
+          if (!shown.has(path)) {
+            picked.delete(path);
+            lost = true;
+          }
+        }
+        if (lost) aimPicked();
       }
 
       // ------------------------------------------------------------- timeline
@@ -2040,8 +2061,12 @@ __ICON__
       addEventListener('keydown', (event) => {
         // A document in the drive is editable content, and Enter inside it is a
         // paragraph, not a command. Only the page's own chrome gets these keys.
-        const typing = event.target?.closest?.(
-          'input, textarea, select, [contenteditable="true"], [contenteditable=""], [data-marble-editable]',
+        // composedPath, not target: the agent composer lives in shadow DOM, and
+        // a retargeted Enter would otherwise open the picked document.
+        const typing = event.composedPath().some((node) =>
+          node.matches?.(
+            'input, textarea, select, [contenteditable="true"], [contenteditable=""], [data-marble-editable]',
+          ),
         );
         if (typing) return;
         if (event.key === 'Enter') {

@@ -408,9 +408,12 @@
     }
 
     updateContext() {
-      const { target, selection } = this.api?.context() ?? { target: '', selection: [] };
+      const { target, selection, also = [] } = this.api?.context() ?? { target: '', selection: [], also: [] };
       const count = this.skipSelection ? 0 : selection.length;
-      this.contextText.textContent = count ? `${target} · ${count} selected` : target;
+      const parts = [target];
+      if (count) parts.push(`${count} selected`);
+      if (also.length) parts.push(`+ ${also.length} more`);
+      this.contextText.textContent = parts.join(' · ');
       this.contextClear.hidden = !count;
     }
 
