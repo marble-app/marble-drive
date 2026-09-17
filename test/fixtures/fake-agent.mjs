@@ -69,6 +69,12 @@ for (const step of script) {
     if (step.as) vars[step.as] = body;
     out({ kind: 'result', callId, ok: !reply.result?.isError, summary: text.slice(0, 200) });
   }
+  // What a CLI says when asked to resume a session it no longer has.
+  if (step.lostWhenResumed && process.env.FAKE_RESUME) {
+    out({ kind: 'done', ok: false, error: step.lostWhenResumed });
+    bridge?.kill();
+    process.exit(1);
+  }
   if (step.fail) {
     out({ kind: 'done', ok: false, error: step.fail });
     bridge?.kill();

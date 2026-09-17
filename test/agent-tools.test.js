@@ -59,6 +59,13 @@ test('the schemas name exactly the five tools', () => {
   for (const t of TOOL_SCHEMAS) assert.equal(t.inputSchema.type, 'object');
 });
 
+test('apply_ops tells an agent the shape of an op, not just an object', () => {
+  const applyOps = TOOL_SCHEMAS.find((t) => t.name === 'apply_ops');
+  const items = applyOps.inputSchema.properties.ops.items;
+  assert.deepEqual(items.properties.type.enum, ['setText', 'setInner', 'setAttr', 'insert', 'move', 'remove']);
+  assert.ok(items.required.includes('type'));
+});
+
 test('an edit to an element never read is refused, and the refusal counts as a read', async () => {
   const turn = await freshTurn();
   const first = await tools.call('apply_ops', {

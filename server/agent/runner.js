@@ -15,15 +15,13 @@ import path from 'node:path';
 import readline from 'node:readline';
 
 import { collectSlices } from '../engine.js';
+import { pickEnv } from './env.js';
 import { summarize } from './store.js';
 
-const ENV_ALLOWLIST = ['PATH', 'HOME', 'USER', 'LOGNAME', 'SHELL', 'LANG', 'LC_ALL', 'TERM', 'TMPDIR'];
 const SELECTION_BUDGET = 6_000;
 const STDERR_TAIL = 4_000;
 // How long closing the host waits for its running turns to write their end.
 const CLOSE_GRACE_MS = 5_000;
-
-const pick = (env) => Object.fromEntries(ENV_ALLOWLIST.filter((k) => env[k] !== undefined).map((k) => [k, env[k]]));
 
 export function createRunner({ store, tools, providers, workdir, origin, bridgePath, readDocument, publish, limits, log = console }) {
   const live = new Map(); // turnId → live turn
@@ -119,6 +117,8 @@ export function createRunner({ store, tools, providers, workdir, origin, bridgeP
       token: null,
       child: null,
       cancelled: null,
+      provider: null,
+      resume: null, // the provider session this turn was started to resume
       done: null,
       usage: null,
       applied: 0,
@@ -178,6 +178,8 @@ export function createRunner({ store, tools, providers, workdir, origin, bridgeP
       await emit(turn, { type: 'turn.started', provider: meta.provider });
 
       if (!provider) return safeFinish(turn, { status: 'failed', error: `no provider "${meta.provider}"` });
+      turn.provider = provider;
+      turn.resume = meta.providerSession ?? null;
 
       turn.token = crypto.randomBytes(32).toString('hex');
       tokens.set(turn.token, turn);
@@ -198,7 +200,7 @@ export function createRunner({ store, tools, providers, workdir, origin, bridgeP
       if (turn.cancelled) return safeFinish(turn, turn.cancelled);
       if (closed) return safeFinish(turn, { status: 'cancelled', error: 'host closing' });
 
-      const base = { ...pick(process.env), ...mcp.env };
+      const base = { ...pickEnv(process.env), ...mcp.env };
       const spec = provider.spawn({
         workspace,
         mcp,
@@ -325,11 +327,26 @@ export function createRunner({ store, tools, providers, workdir, origin, bridgeP
         ? turn.applied ? 'changes' : 'done'
         : status;
     const applied = turn.applied;
+    // A CLI that has deleted the session this turn resumed will refuse every
+    // later resume the same way. Forget it, so the next message starts fresh
+    // instead of failing again; retrying this one is the person's call.
+    let lostSession = false;
+    if (status === 'failed' && turn.resume && error) {
+      try {
+        lostSession = Boolean(turn.provider?.lostSession?.(error));
+      } catch (err) {
+        log.error(`[agents] ${err.message}`);
+      }
+    }
+    if (lostSession) {
+      error = `${error} — the provider no longer has this conversation's session; the next message starts a new one`;
+    }
     try {
       try {
         await turn.undoSaved;
         if (turn.undo.length) await store.saveUndo(turn.id, turn.undo);
         await store.updateConversation(turn.conversationId, {
+          ...(lostSession ? { providerSession: null } : {}),
           running: false,
           activity: status === 'completed' ? (applied ? `Changed ${applied} element(s)` : 'Answered') : error ?? status,
           lastOutcome: outcome,

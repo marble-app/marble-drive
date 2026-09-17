@@ -7,6 +7,8 @@
 //   marble-drive weigh [path]     what the documents weigh, and how much is base64
 //   marble-drive backup           one backup, now
 //   marble-drive remote [on|off|status|check]   reach it from your own devices, over Tailscale
+//   marble-drive agents providers    which agent CLIs are installed and signed in
+//   marble-drive agents try <id>     one real turn against a scratch drive
 //   marble-drive starters         what you can make
 //
 // Every one of these goes through the same store the host does, which is the
@@ -19,6 +21,8 @@ import path from 'node:path';
 import { createDrive } from '../server/app.js';
 import { backupNow } from '../server/backup.js';
 import { config } from '../server/config.js';
+import { builtInProviders } from '../server/agent/providers/index.js';
+import { tryProvider } from '../server/agent/try.js';
 import { stamp, stamped } from '../server/favicon.js';
 import { build as buildStarter, list as listStarters } from '../server/gallery.js';
 import { check as checkRemote, serveOff, serveOn, serveStatus, tailnetUrl } from '../server/remote.js';
@@ -67,8 +71,11 @@ switch (command) {
   case 'starters':
     for (const starter of listStarters()) console.log(`${starter.id.padEnd(9)} ${starter.blurb}`);
     break;
+  case 'agents':
+    await agentsCommand();
+    break;
   default:
-    fail(`no command "${command}" — there is: serve, new, icon, weigh, backup, remote, starters`);
+    fail(`no command "${command}" — there is: serve, new, icon, weigh, backup, remote, agents, starters`);
 }
 
 // ---------------------------------------------------------------------- serve
@@ -291,4 +298,51 @@ async function remote() {
   }
 
   fail(`no "remote ${sub}" — there is: on, off, status, check`);
+}
+
+// --------------------------------------------------------------------- agents
+
+/** The agent CLIs on this machine, and a way to watch one work before trusting
+ *  it with a real drive. `try` spends that provider's quota on one small turn. */
+async function agentsCommand() {
+  const sub = args[0];
+
+  if (sub === 'providers') {
+    for (const provider of builtInProviders().values()) {
+      const found = await provider.detect();
+      const state = !found.installed ? 'not installed' : found.signedIn ? 'ready' : 'signed out';
+      console.log(`  ${provider.id.padEnd(20)} ${state.padEnd(14)} ${found.detail}`);
+    }
+    return;
+  }
+
+  if (sub === 'try') {
+    const id = args[1];
+    if (!id) fail('usage: marble-drive agents try <provider> [--prompt="…"] [--model=…]');
+    // Before the line about quota: a typo spends nothing, so it should not say it will.
+    const known = [...builtInProviders().keys()];
+    if (!known.includes(id)) fail(`no provider "${id}" — there is: ${known.join(', ')}`);
+    console.log(`[drive] one real turn on ${id}, against a scratch drive — this uses that provider's quota\n`);
+    let result;
+    try {
+      result = await tryProvider({
+        providerId: id,
+        prompt: typeof flags.prompt === 'string' ? flags.prompt : undefined,
+        model: typeof flags.model === 'string' ? flags.model : null,
+      });
+    } catch (err) {
+      // An unknown provider, agents unable to start, or a turn that never
+      // finished: these are `fail`'s job to report, not a stack trace's.
+      fail(err.message);
+    }
+    console.log(`  status    ${result.status}${result.error ? `  — ${result.error}` : ''}`);
+    console.log(`  applied   ${result.applied} op(s)`);
+    console.log(`  heading   ${result.heading}`);
+    if (result.costUsd !== null) console.log(`  cost      $${result.costUsd.toFixed(4)}`);
+    console.log(`  events    ${result.events.join(' → ')}`);
+    if (result.status !== 'completed') process.exit(1);
+    return;
+  }
+
+  fail(`no "agents ${sub ?? ''}" — there is: providers, try`);
 }

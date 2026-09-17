@@ -11,6 +11,7 @@ export function createFakeProvider({ scripts = {}, id = 'fake' } = {}) {
     id,
     label: 'Fake',
     detect: async () => ({ installed: true, signedIn: true, detail: 'scripted' }),
+    lostSession: (error) => /no conversation found/i.test(error),
     spawn({ mcp, prompt, resume, env }) {
       const name = /^script:(\S+)/.exec(prompt)?.[1];
       return {

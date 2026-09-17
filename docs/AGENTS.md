@@ -66,9 +66,43 @@ Nothing is reverted automatically: the likeliest outside writer is you.
 
 ## Providers
 
-A provider is `{ id, label, detect, prepare?, spawn, parse }` — see
-`server/agent/runner.js`. `test/fixtures/fake-provider.js` is the smallest
-complete one. Claude and Cursor adapters arrive in Plan 2.
+| id | runs | boundary |
+|---|---|---|
+| `claude-subscription` | `claude -p`, prompt on stdin, no `ANTHROPIC_API_KEY` in its environment, so the CLI's login is used | `--tools ""` and `--strict-mcp-config`: it has no tool but Marble's |
+| `claude-api` | the same, with `ANTHROPIC_API_KEY`; without it the turn fails rather than fall back to the login | the same |
+| `cursor` | `cursor-agent -p`, model `composer-2.5` unless the conversation names one, prompt passed after `--` (a dash-leading prompt would otherwise be parsed as a flag) | `.cursor/hooks.json` `preToolUse`, fail-closed, allowing only Marble's five tools (`bin/marble-cursor-hook.js`) |
+
+The Cursor hook sees a tool's name (`MCP:read_document`) but not which MCP
+server it belongs to, and `--approve-mcps` approves every server Cursor loads,
+including the user's own from `~/.cursor/mcp.json`. A user server with a tool
+named like one of Marble's would get past the hook, so while that file names any
+server (or cannot be parsed) `agents providers` shows Cursor as blocked and its
+turns fail before they start. Whether a user-level `~/.cursor/hooks.json` runs
+alongside the workspace hook, and how the two answers combine, is unverified.
+
+Every agent gets the same rules (`server/agent/instructions.js`). Each turn,
+`prepare` rewrites the workspace's MCP config with that turn's token (mode 600).
+
+The workspace is outside the drive, but it is not the only state a conversation
+leaves behind. Each CLI keeps its own record of every session under your home
+directory — `~/.claude/projects/…` for Claude, `~/.cursor/projects/…` for
+Cursor — and those transcripts contain whatever document content the agent read
+or wrote. Deleting a conversation in Marble does not remove them. Claude also
+still loads `CLAUDE.md` files from the workspace's parent directories: those can
+add instructions, but not tools, so the tool boundary above is unchanged.
+
+```
+npm run agents -- providers              what is installed and signed in
+npm run agents -- try claude-subscription one real turn on a scratch drive
+npm run agents -- try cursor --model=composer-2.5
+```
+
+A provider is `{ id, label, detect, prepare, spawn, parse }`, and optionally
+`lostSession(error)`: true when a resumed turn failed because the CLI no longer
+has the session. The runner then forgets the session, says so in the turn's
+error, and the next message starts a new one (it does not retry). A parser is
+tested against streams recorded from real runs in `test/fixtures/providers/`;
+record a new one when a CLI changes its output. Codex arrives in Plan 5.
 
 ## Not yet
 
