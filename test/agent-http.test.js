@@ -340,4 +340,27 @@ test('an ungated host answers the agent routes only to a page served as localhos
   assert.equal(await raw('GET', '/agent/settings', { Host: `[::1]:${port}` }), 200);
 });
 
+test('two undos of the same turn at once: one runs, the other is refused', async () => {
+  const again = await start('script:edit\nRename the heading');
+  assert.equal((await finished(again.conversationId, again.turnId)).turn.status, 'completed');
+  const [a, b] = await Promise.all([
+    api('POST', `/agent/turns/${again.turnId}/undo`),
+    api('POST', `/agent/turns/${again.turnId}/undo`),
+  ]);
+  assert.deepEqual([a.status, b.status].sort(), [200, 409]);
+  assert.match(await drive.store.read('garden'), />Research Garden</);
+  const { body } = await api('GET', `/agent/conversations/${again.conversationId}`);
+  assert.equal(body.events.filter((e) => e.type === 'turn.undone').length, 1);
+});
+
+test('a removed turn cannot be undone', async () => {
+  const running = await start('script:wait');
+  const queued = await api('POST', `/agent/conversations/${running.conversationId}/turns`, {
+    prompt: 'script:hello', context: { target: 'garden', selection: [] },
+  });
+  assert.equal((await api('DELETE', `/agent/turns/${queued.body.turnId}`)).body.removed, true);
+  assert.equal((await api('POST', `/agent/turns/${queued.body.turnId}/undo`)).status, 409);
+  await finished(running.conversationId, running.turnId);
+});
+
 test.after(() => drive.close());

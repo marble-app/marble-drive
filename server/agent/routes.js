@@ -42,6 +42,9 @@ const TOOL = /^\/agent\/tools\/([a-z_]+)$/;
 
 export function createAgentRoutes({ store, runner, tools, hub, providers, writeOps, maxBody, gated = false }) {
   let detected = null;
+  // Turns being undone right now. The undoneAt check alone lets two requests
+  // that arrive together both pass it before either has written.
+  const undoing = new Set();
 
   async function detectAll() {
     if (detected && Date.now() - detected.at < DETECT_CACHE) return detected.list;
@@ -209,18 +212,25 @@ export function createAgentRoutes({ store, runner, tools, hub, providers, writeO
         const turn = await store.turn(turnId);
         if (!turn) return json(res, 404, { error: `no turn "${turnId}"` });
         if (turn.status === 'queued' || turn.status === 'running') return json(res, 409, { error: 'the turn is still running' });
+        if (turn.status === 'removed') return json(res, 409, { error: 'this turn was removed before it ran' });
         if (turn.undoneAt) return json(res, 409, { error: 'this turn was already undone' });
-        const result = await undoTurn({
-          records: (await store.undoRecords(turnId)) ?? [],
-          writeOps,
-          client: `agent-undo:${turn.conversationId}`,
-        });
-        await store.updateTurn(turnId, { undoneAt: Date.now() });
-        await publishSummary(
-          turn.conversationId,
-          await store.appendEvent(turn.conversationId, { type: 'turn.undone', turn: turnId, reverted: result.reverted, kept: result.kept }),
-        );
-        return json(res, 200, result);
+        if (undoing.has(turnId)) return json(res, 409, { error: 'this turn is being undone' });
+        undoing.add(turnId);
+        try {
+          const result = await undoTurn({
+            records: (await store.undoRecords(turnId)) ?? [],
+            writeOps,
+            client: `agent-undo:${turn.conversationId}`,
+          });
+          await store.updateTurn(turnId, { undoneAt: Date.now() });
+          await publishSummary(
+            turn.conversationId,
+            await store.appendEvent(turn.conversationId, { type: 'turn.undone', turn: turnId, reverted: result.reverted, kept: result.kept }),
+          );
+          return json(res, 200, result);
+        } finally {
+          undoing.delete(turnId);
+        }
       }
     }
 
