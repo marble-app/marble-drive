@@ -23,7 +23,10 @@ const SUMMARY = 200;
  *
  *  Cursor sends a message as fragments and then the whole message again. The
  *  fragments are what a person watches arrive; the whole message is what the
- *  transcript keeps — once. `state.text` is the fragments so far. */
+ *  transcript keeps — once. Fragments have `timestamp_ms` but no `model_call_id`;
+ *  whole messages have `model_call_id`. `state.text` accumulates fragments.
+ *  On a fragment: append text, emit `text.delta`. On a whole message: emit
+ *  `{type:'text', text}` with the whole message's text, clear `state.text`. */
 export function parseCursorLine(line, state) {
   const e = JSON.parse(line);
   state.text ??= '';
@@ -42,12 +45,20 @@ export function parseCursorLine(line, state) {
     case 'assistant': {
       const text = (e.message?.content ?? []).filter((c) => c.type === 'text').map((c) => c.text).join('');
       if (!text) return [];
-      if (state.text && text === state.text) {
+
+      // Fragment: has timestamp_ms and no model_call_id.
+      // Whole message: has model_call_id or lacks timestamp_ms.
+      const isFragment = e.timestamp_ms != null && e.model_call_id == null;
+
+      if (isFragment) {
+        // Fragment: accumulate and emit as delta.
+        state.text += text;
+        return [{ type: 'text.delta', text }];
+      } else {
+        // Whole message: emit it, clear fragments.
         state.text = '';
         return [{ type: 'text', text }];
       }
-      state.text += text;
-      return [{ type: 'text.delta', text }];
     }
 
     case 'tool_call': {
@@ -142,7 +153,7 @@ export function createCursorProvider({ exec = runCommand, env = process.env, def
         '--workspace', workspace, '--model', model ?? defaultModel,
       ];
       if (resume) args.push('--resume', resume);
-      args.push(prompt);
+      args.push('--', prompt);
       return {
         command: 'cursor-agent',
         args,

@@ -60,12 +60,44 @@ test('a resumed turn keeps its session', () => {
 test('fragments with no closing message are still stored before the result', () => {
   const state = {};
   const lines = [
-    { type: 'assistant', message: { role: 'assistant', content: [{ type: 'text', text: 'Half' }] } },
-    { type: 'assistant', message: { role: 'assistant', content: [{ type: 'text', text: ' done' }] } },
+    { type: 'assistant', message: { role: 'assistant', content: [{ type: 'text', text: 'Half' }] }, timestamp_ms: 1000 },
+    { type: 'assistant', message: { role: 'assistant', content: [{ type: 'text', text: ' done' }] }, timestamp_ms: 1001 },
     { type: 'result', subtype: 'success', is_error: false, result: 'Half done', usage: { inputTokens: 1, outputTokens: 2 } },
   ];
   const events = lines.flatMap((l) => parseCursorLine(JSON.stringify(l), state));
   assert.deepEqual(brief(events), ['text:Half done', 'usage', 'done:true']);
+});
+
+test('fragments Yes+Yes with whole message YesYes: deltas then one text', () => {
+  const state = {};
+  const lines = [
+    { type: 'assistant', message: { role: 'assistant', content: [{ type: 'text', text: 'Yes' }] }, timestamp_ms: 1789616074003 },
+    { type: 'assistant', message: { role: 'assistant', content: [{ type: 'text', text: 'Yes' }] }, timestamp_ms: 1789616074004 },
+    { type: 'assistant', message: { role: 'assistant', content: [{ type: 'text', text: 'YesYes' }] }, model_call_id: 'mid-1', timestamp_ms: 1789616074005 },
+  ];
+  const events = lines.flatMap((l) => parseCursorLine(JSON.stringify(l), state));
+  const deltas = events.filter((e) => e.type === 'text.delta').map((e) => e.text);
+  const texts = events.filter((e) => e.type === 'text').map((e) => e.text);
+  assert.deepEqual(deltas, ['Yes', 'Yes']);
+  assert.deepEqual(texts, ['YesYes']);
+  assert.equal(deltas.join(''), 'YesYes');
+  assert.equal(texts.join(''), 'YesYes');
+});
+
+test('a whole message with no preceding fragments: one text', () => {
+  const state = {};
+  const line = { type: 'assistant', message: { role: 'assistant', content: [{ type: 'text', text: 'Hello' }] }, model_call_id: 'mid-1', timestamp_ms: 1789616074005 };
+  const events = parseCursorLine(JSON.stringify(line), state);
+  assert.deepEqual(brief(events), ['text:Hello']);
+});
+
+test('two consecutive identical whole messages: two text events', () => {
+  const state = {};
+  const line = { type: 'assistant', message: { role: 'assistant', content: [{ type: 'text', text: 'Same' }] }, model_call_id: 'mid-1', timestamp_ms: 1789616074005 };
+  const line2 = { type: 'assistant', message: { role: 'assistant', content: [{ type: 'text', text: 'Same' }] }, model_call_id: 'mid-2', timestamp_ms: 1789616074006 };
+  const events1 = parseCursorLine(JSON.stringify(line), state);
+  const events2 = parseCursorLine(JSON.stringify(line2), state);
+  assert.deepEqual(brief(events1.concat(events2)), ['text:Same', 'text:Same']);
 });
 
 test('a tool the hook blocked shows up as a failed call, with the reason', () => {
@@ -92,11 +124,19 @@ test('spawn is the verified invocation, with the default model and the prompt la
   assert.equal(spec.command, 'cursor-agent');
   assert.deepEqual(spec.args, [
     '-p', '--output-format', 'stream-json', '--stream-partial-output', '--approve-mcps', '--trust',
-    '--workspace', '/w', '--model', 'composer-2.5', '--resume', 'chat-1', 'Rename it',
+    '--workspace', '/w', '--model', 'composer-2.5', '--resume', 'chat-1', '--', 'Rename it',
   ]);
   assert.deepEqual(spec.env, {});
-  assert.equal(provider.spawn({ workspace: '/w', prompt: 'p', model: 'gpt-5.2', env: {} }).args.at(-2), 'gpt-5.2');
+  assert.equal(provider.spawn({ workspace: '/w', prompt: 'p', model: 'gpt-5.2', env: {} }).args.at(-3), 'gpt-5.2');
+  assert.equal(provider.spawn({ workspace: '/w', prompt: 'p', model: 'gpt-5.2', env: {} }).args.at(-1), 'p');
   assert.deepEqual(createCursorProvider({ env: { CURSOR_API_KEY: 'ck' } }).spawn({ workspace: '/w', prompt: 'p', env: {} }).env, { CURSOR_API_KEY: 'ck' });
+});
+
+test('a prompt starting with - comes after -- to avoid being parsed as an option', () => {
+  const provider = createCursorProvider({ env: {} });
+  const spec = provider.spawn({ workspace: '/w', prompt: '-1 reply with only the word ok', env: {} });
+  assert.equal(spec.args.at(-2), '--');
+  assert.equal(spec.args.at(-1), '-1 reply with only the word ok');
 });
 
 test('prepare writes the MCP config privately, the fail-closed hook, and the instructions', async () => {
@@ -155,4 +195,31 @@ test('the hook denies everything else, including other MCP servers and nonsense'
     assert.equal(answer.permission, 'deny', input);
     assert.ok(answer.agent_message);
   }
+});
+
+test('the hook edge cases: trailing space, case sensitivity, near misses, junk', () => {
+  // Trailing space in tool name
+  let { code, answer } = askHook(JSON.stringify({ tool_name: 'MCP:read_document ', tool_input: {} }));
+  assert.equal(code, 0);
+  assert.equal(answer.permission, 'deny', 'trailing space should be denied');
+  assert.ok(answer.agent_message);
+
+  // Case sensitivity - lowercase should be denied
+  ({ code, answer } = askHook(JSON.stringify({ tool_name: 'mcp:read_document', tool_input: {} })));
+  assert.equal(code, 0);
+  assert.equal(answer.permission, 'deny', 'lowercase should be denied');
+  assert.ok(answer.agent_message);
+
+  // Near miss - extra suffix
+  ({ code, answer } = askHook(JSON.stringify({ tool_name: 'MCP:read_document_extra', tool_input: {} })));
+  assert.equal(code, 0);
+  assert.equal(answer.permission, 'deny', 'near miss should be denied');
+  assert.ok(answer.agent_message);
+
+  // ~1 MB junk stdin
+  const junk = JSON.stringify({ tool_name: 'x'.repeat(1024 * 1024), tool_input: {} });
+  ({ code, answer } = askHook(junk));
+  assert.equal(code, 0);
+  assert.equal(answer.permission, 'deny', 'large junk input should be denied');
+  assert.ok(answer.agent_message);
 });
