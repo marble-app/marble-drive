@@ -8,12 +8,42 @@
     "disposable software",
     "ephemeral interfaces",
     "interface generators",
-    "future of HCI"
+    "future of HCI",
+    "multimodal interface generation",
+    "speech-driven interfaces",
+    "sketch to interface",
+    "voice input interfaces",
+    "interaction technique",
+    "interaction techniques",
+    "intelligent interaction technique",
+    "intelligent interaction techniques",
+    "multimodal interaction",
+    "realtime user interface",
+    "realtime UI generation",
+    "generative interaction",
+    "widget generation",
+    "decision model",
+    "structured decision",
+    "evaluation model",
+    "System One"
   ],
   "mute": [],
   "watch": {
-    "_note": "Asked for on 14 Sep, naming Michael Bernstein's 'The Interface of Theseus' (arXiv 2609.06770, UIST Visions 2026): \"i want to be finding papers like these!!!\" `sources.mjs arxiv` queries these directly, so a watched author or a vision-track paper surfaces even when it was announced on a morning no issue read. Add an author whenever Bryan reacts to someone this way.",
-    "authors": ["Michael S. Bernstein"],
-    "comments": ["UIST Visions", "alt.chi", "position paper", "vision paper"]
+    "_note": "Asked for on 14 Sep, naming Michael Bernstein's 'The Interface of Theseus' (arXiv 2609.06770, UIST Visions 2026): \"i want to be finding papers like these!!!\" `sources.mjs arxiv` queries these directly, so a watched author or a vision-track paper surfaces even when it was announced on a morning no issue read. Add an author whenever Bryan reacts to someone this way. Brad A. Myers added 17 Sep after 'Intelligent Interaction Techniques (IIxT) — Proposal' (arXiv 2609.16295) landed on his calendar — Bryan asked for more papers like it (position/proposal claims about making IxTs intelligent and multimodal, not another chat-window paper). 17 Sep also: tune news for big model drops (TypeSafe AI Jev) that change what realtime GenUI can assume — see sources.md Bucket 2b.",
+    "_topicsNote": "Added 15 Sep. `topics` searches title+abstract across all of cs.*, NOT just cs.HC, because the cs.HC listing is not where these papers live. Solaris ('Towards Interfaces That Are Generated, Not Coded', arXiv 2609.00776) was announced 1 Sep under cs.CV and went unseen for five weeks of daily sweeps — the single most on-topic paper of the period, invisible because of a category. The voice/sketch terms come from Bryan's 14 Sep note asking how a generated interface should be designed to afford being spoken or drawn to. IIxT terms added 17 Sep: Brad Myers' proposal is about the low-level reusable parts of UIs (menus, scrollbars, selection) becoming intelligent — a different grain than 'generative UI' alone.",
+    "authors": ["Michael S. Bernstein", "Brad A. Myers"],
+    "comments": ["UIST Visions", "alt.chi", "position paper", "vision paper", "proposal"],
+    "topics": [
+      "generative user interface",
+      "generated user interface",
+      "interface generation",
+      "malleable software",
+      "multimodal interface generation",
+      "interaction technique",
+      "interaction techniques",
+      "intelligent interaction",
+      "multimodal interaction technique",
+      "realtime user interface"
+    ]
   }
 }

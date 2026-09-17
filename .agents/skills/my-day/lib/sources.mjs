@@ -215,11 +215,24 @@ async function rssListing(cat) {
   }).filter((p) => p.id && !/^replace/.test(p.announceType));   // a revision is not news
 }
 
-// state/tuning.json -> watch: { authors: [...], comments: [...] }. Each is one
-// query of its own, so a vision paper does not have to win a relevance pass
-// against forty system papers to be seen.
+// state/tuning.json -> watch: { authors: [...], comments: [...], topics: [...] }.
+// Each is one query of its own, so a vision paper does not have to win a relevance
+// pass against forty system papers to be seen.
+//
+// `topics` deliberately searches all of cs, not `cat`. Solaris ("Towards Interfaces
+// That Are Generated, Not Coded") sat on arXiv for five weeks unseen because its
+// primary category is cs.CV — the cs.HC sweep was never going to find it, and the
+// papers Bryan most wants are exactly the ones filed outside his own listing.
 async function watchQueries(watch, sinceDay, cat) {
   const qs = [];
+  for (const phrase of watch.topics || []) {
+    const p = String(phrase).toLowerCase();
+    qs.push({
+      why: `topic: ${phrase}`,
+      q: `(ti:"${phrase}" OR abs:"${phrase}")${rangeFrom(sinceDay)}`,
+      keep: (r) => `${r.title} ${r.abstract || ''}`.toLowerCase().includes(p),
+    });
+  }
   for (const name of watch.authors || []) {
     const parts = String(name).trim().split(/\s+/);
     const last = parts[parts.length - 1];
@@ -274,7 +287,7 @@ async function arxiv() {
 
   const watch = (readState('tuning.json') || {}).watch || {};
   let watchHits = [];
-  if ((watch.authors || []).length || (watch.comments || []).length) {
+  if ((watch.authors || []).length || (watch.comments || []).length || (watch.topics || []).length) {
     if (via === 'rss') notes.push('watch list skipped: the export API is refusing requests — re-run later, or search the watched authors and tracks by hand');
     else {
       const watchSince = since || new Date(Date.now() - 45 * 86400000).toISOString().slice(0, 10);

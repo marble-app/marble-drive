@@ -8,7 +8,7 @@
 //
 // A starter is markup in `starters/` plus a list of the affordance parts it
 // needs. The parts come out of Marble's `lib/affordances.js` at build time,
-// with `lib/affordances.drive.js` overriding by name — so a document leaves
+// with `lib/affordances.drive.js` able to override by name — so a document leaves
 // here carrying its own copy of every behaviour it has, and no starter is a
 // dependency on this host.
 //

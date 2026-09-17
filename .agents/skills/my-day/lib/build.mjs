@@ -946,6 +946,9 @@ function rPalStrip(pal) {
 
 const CAT = { focus: 'var(--warm)', push: 'var(--accent)', todos: 'var(--accent)', news: 'var(--c1)', papers: 'var(--c2)', weather: 'var(--c3)', calendar: 'var(--accent-ink)', usopen: 'var(--c4)', nfl: 'var(--c1)', art: 'var(--c4)', roadahead: 'var(--accent)', custom: 'var(--accent)' };
 const TITLE = { focus: 'Today, sharply', push: 'Push one thing forward', todos: 'To-dos', news: 'Worth your attention', papers: 'Fresh on arXiv · cs.HC', weather: 'Sky', calendar: 'The weeks ahead', usopen: 'US Open', nfl: 'NFL', art: "Today's colour", roadahead: 'The road ahead' };
+// Reverse of TITLE, for issues built before `data-comp` existed on `<section>` 
+// -- sweepFeedback falls back to matching a component's header text against this.
+const TITLE_TO_TYPE = Object.fromEntries(Object.entries(TITLE).map(([type, t]) => [t, type]));
 
 function componentBody(type, node, P, prev, pal) {
   switch (type) {
@@ -1091,7 +1094,7 @@ function renderComponent(node, P, prev, pal) {
         : '') + `</div>\n`
     : '';
   const more = built.more ? `\n  <div class="comp-more" data-marble-id="${mint()}">${built.more}</div>` : '';
-  return `<section class="${cls}" data-marble-id="${mint()}" style="--cat: ${cat}"${viewAttrs}>\n${head}${built.html}${more}\n</section>`;
+  return `<section class="${cls}" data-comp="${escAttr(node.type)}" data-marble-id="${mint()}" style="--cat: ${cat}"${viewAttrs}>\n${head}${built.html}${more}\n</section>`;
 }
 
 const DEFAULT_LAYOUT = {
@@ -1361,12 +1364,19 @@ function sweepFeedback(opts = {}) {
     const title = stripTags((/<title>([\s\S]*?)<\/title>/.exec(html) || [, ''])[1]).trim();
 
     // Which component a note sits in, so a request can be read in context.
+    // `data-comp` names the type reliably; older issues built before it existed
+    // fall back to matching the header text against each type's default title —
+    // good enough for anything Bryan hasn't retitled.
     const sections = [];
     for (const m of html.matchAll(/<section class="comp\b[^"]*"[^>]*>/g)) {
+      const tag = m[0];
       const head = html.slice(m.index, m.index + 900);
-      sections.push({ at: m.index, name: stripTags((/<h2[^>]*>([\s\S]*?)<\/h2>/.exec(head) || [, ''])[1]).trim() });
+      const name = stripTags((/<h2[^>]*>([\s\S]*?)<\/h2>/.exec(head) || [, ''])[1]).trim();
+      const type = (/\bdata-comp="([^"]*)"/.exec(tag) || [, ''])[1] || TITLE_TO_TYPE[name] || '';
+      sections.push({ at: m.index, name, type });
     }
-    const compAt = (i) => { let n = ''; for (const sec of sections) { if (sec.at <= i) n = sec.name; else break; } return n; };
+    const sectionAt = (i) => { let s = { name: '', type: '' }; for (const sec of sections) { if (sec.at <= i) s = sec; else break; } return s; };
+    const READING_TYPES = new Set(['papers', 'news', 'feed']);
 
     // every note Bryan left, wherever it is
     for (const m of html.matchAll(/<div class="note"[^>]*>([\s\S]*?)<\/div>/g)) {
@@ -1377,7 +1387,8 @@ function sweepFeedback(opts = {}) {
       const id = fbId(text);
       const prev = found.get(id);
       if (prev) { if (date > prev.lastSeen) prev.lastSeen = date; prev.seenIn = Math.min(prev.seenIn + 1, 99); continue; }
-      found.set(id, { id, text, where: compAt(m.index) || 'somewhere in the page', on, firstSeen: date, lastSeen: date, seenIn: 1, issue: title, likely: FB_HINT.test(text) });
+      const sec = sectionAt(m.index);
+      found.set(id, { id, text, where: sec.name || 'somewhere in the page', component: sec.type, kind: READING_TYPES.has(sec.type) ? 'reading' : 'dashboard', on, firstSeen: date, lastSeen: date, seenIn: 1, issue: title, likely: FB_HINT.test(text) });
     }
     // and anything he thumbed down — not words, but a judgement worth reading
     for (const m of html.matchAll(/data-vote="down"[\s\S]{0,1400}?<(?:div|h4) class="(?:title|ntitle|ptitle)"[^>]*>([\s\S]*?)<\/(?:div|h4)>/g)) {
@@ -1385,7 +1396,8 @@ function sweepFeedback(opts = {}) {
       if (!on) continue;
       const id = fbId('down:' + on);
       if (found.has(id)) continue;
-      found.set(id, { id, text: `(thumbed down) ${on}`, where: compAt(m.index) || '', on, firstSeen: date, lastSeen: date, seenIn: 1, issue: title, likely: false, vote: 'down' });
+      const sec = sectionAt(m.index);
+      found.set(id, { id, text: `(thumbed down) ${on}`, where: sec.name || '', component: sec.type, kind: READING_TYPES.has(sec.type) ? 'reading' : 'dashboard', on, firstSeen: date, lastSeen: date, seenIn: 1, issue: title, likely: false, vote: 'down' });
     }
   }
   const all = [...found.values()].sort((a, b) => (b.likely - a.likely) || String(b.lastSeen).localeCompare(String(a.lastSeen)));

@@ -22,7 +22,7 @@ Two days with different content should produce genuinely different pages.
    star, chevron and view switch is a write to a file Bryan also opens in an
    editor. What that costs a control is set out there; the short version is
    §Interaction law below.
-3. `drive/Research/research-vision.mrbl` §02 (projects) + §05 (open questions) —
+3. `drive/Research/Research Vision Docs/Research Vision.mrbl` — the pool of ideas (theses, projects, open questions) —
    the yardstick for scoring every paper.
 
 ---
@@ -341,10 +341,18 @@ until now it sat in one morning's file and was never read again. This sweeps
 returns the rest, newest and most request-like first.
 
 Each entry carries `text` (his exact words), `where` (which component it was
-written in), `on` (the row it hangs off), `firstSeen`/`lastSeen`, and `likely` —
-a hint that it reads like a request rather than a private note. **`likely` is a
-sort order, not a filter.** Read all of them; he does not phrase things for a
-parser.
+written in), `component` (that component's type — `papers`, `news`, `focus`, …),
+`kind` (`'reading'` for `papers`/`news`/`feed`, `'dashboard'` otherwise), `on`
+(the row it hangs off), `firstSeen`/`lastSeen`, and `likely` — a hint that it
+reads like a request rather than a private note. **`kind` and `likely` are
+sort hints, not filters.** Read all of them; he does not phrase things for a
+parser, and a research idea can just as easily sit under a to-do row as a
+paper.
+
+**This step is for requests about the dashboard itself** — its behaviour,
+layout, or copy. A `kind: 'reading'` entry is almost always **1d's job, not
+this one** — skip ahead to it rather than trying to "act on" a paper
+annotation here.
 
 Every run must:
 
@@ -363,9 +371,60 @@ Every run must:
    the last round of feedback got lost.
 4. **Never edit his words** out of a past issue to make the list shorter.
 
-A note that is plainly not about the dashboard ("I need to do this right after my
-chi deadline") is an instruction about *that row* — honour it there, per step 1b,
-and leave it open in the sweep rather than marking it applied.
+A note that is plainly not about the dashboard but is a to-do ("I need to do
+this right after my chi deadline") is an instruction about *that row* —
+honour it there, per step 1b, and leave it open in the sweep rather than
+marking it applied. A note on a paper or article is step 1d's, below.
+
+### 1d. Papers, articles, and other reading notes — not dashboard feedback
+
+**"This is really relevant!!!" under a paper is not a request. It's Bryan
+deciding to keep something**, and until this step existed nothing did anything
+about it: the note isn't a to-do (1b is for rows Bryan wants *done*, not
+papers he wants *kept*), and it isn't a dashboard bug (1c's step 2 has no
+"change" to write and mark applied for it) — so it sat in the feedback sweep
+sight-unseen, sometimes for weeks, attached to a paper that had long since
+aged out of the arXiv grid and would never be re-shown to trigger a save.
+Real examples that were doing exactly this before this step existed: *"This is
+really relevant!!!"* and *"This one is very relevant!!! And I know these
+people"* on two different papers, both open since **11 and 9 Sep** respectively
+with nowhere to go.
+
+For every open entry from step 1c where `kind === 'reading'` (or that reads as
+one even when `kind` says `'dashboard'` — the classifier only looks at which
+component the note sits in, not what it says):
+
+1. **Identify the paper or article.** `on` names the row; if it's blank (the
+   title extraction can miss one — see the "I know these people" example,
+   where `on` came back empty), search `drive/Bryan's Days/*.mrbl` around
+   `firstSeen`'s date for the arXiv listing that issue carried, and match by
+   the surrounding text if you have to.
+2. **Read the note as what it is, not as a request:**
+   - **"Keep this" / enthusiasm / "I know these people"** — treat it exactly
+     like a ★-save (step 8): verify the citation from the real source, and add
+     it to `index.mrbl`'s reading list with a verified BibTeX block **and the
+     note itself** as the annotation next to it. Do this even though it was
+     never starred and even though the paper is gone from today's grid — the
+     note *is* the save.
+   - **A connection to a specific project or open question** ("this
+     contradicts §03 of Elicitive UIs", "cite this in related work") — fold it
+     into that document directly: `drive/Research/Research Vision Docs/Research Vision.mrbl`
+     §02/§05, or the relevant board/paper pill in
+     `drive/Research/CHI2027 - Elicitive UIs.mrbl`. Write it in Bryan's words,
+     not a paraphrase.
+   - **"I already know this" / already-familiar** — this is a personalization
+     signal, not a save or a citation. There's no destination for it yet
+     beyond not re-surfacing the same story; say so plainly in the report
+     rather than silently dropping it, so a future run can decide whether it
+     deserves one (e.g. folding into `state/tuning.json`).
+3. **Mark it applied** the same way 1c does, once it actually has a home:
+   ```
+   node lib/build.mjs feedback --apply <id> --change "filed into index.mrbl reading list"
+   ```
+   "Filed" means written and saved, not "understood" — the same rule as 1c.
+4. **Never let a paper note wait on a star that may never come.** The star was
+   always shorthand for "keep this"; a typed note saying so in as many words
+   means the same thing and gets the same treatment, today.
 
 ### 2. Voice, and naming the day
 `greeting` — one line. `summary` — one or two plain sentences about where the
@@ -548,14 +607,16 @@ node lib/build.mjs harvest drive/Bryan's Days/today.mrbl
 node lib/build.mjs check --file drive/Bryan's Days/today.mrbl
 MARBLE_APPS="$PWD/drive" node node_modules/@bdhmin/marble/bin/marble.js doctor drive/Bryan's Days/today.mrbl drive/Bryan's Days/index.mrbl
 ```
-Mark every request of Bryan's you actually acted on (step 1c):
+Mark every request of Bryan's you actually acted on (step 1c) and every reading
+note you filed (step 1d):
 ```
 node lib/build.mjs feedback --apply <id> --change "what changed, and where"
 ```
-Fold 👍/👎 into `state/tuning.json`; add newly ★-saved items to `index.mrbl`'s
-reading list with a verified BibTeX block. Report: palette, composition, counts,
-images, whether the screenshot pass ran, and **which of Bryan's open requests you
-applied and which you left open, quoting his words** — that list is the part he
+Fold 👍/👎 into `state/tuning.json`; add newly ★-saved items **and any papers
+filed via step 1d** to `index.mrbl`'s reading list with a verified BibTeX
+block. Report: palette, composition, counts, images, whether the screenshot
+pass ran, and **which of Bryan's open requests and reading notes you applied
+and which you left open, quoting his words** — that list is the part he
 cannot reconstruct for himself.
 
 ### 9. Email — only when asked
@@ -637,6 +698,10 @@ to powers of two so the bracket connectors line up.
   they get saved as a real to-do the moment Bryan forgets to delete them.
 - A request Bryan typed into a page is never silently dropped. It stays in
   `build.mjs feedback` until a run applies it and says so — see step 1c.
+- Neither is a note he left on a paper or article. It is never left waiting on
+  a star that may never come, or on a paper that may never be shown again — it
+  is filed into `index.mrbl` or `research-vision.mrbl` the run it is found,
+  see step 1d.
 - Controls announce their state, derived in `shell.mrbl` and never emitted as
   markup by `build.mjs`. Adding a control means adding its reading to
   `deriveAria`, not an `aria-*` attribute to a template string.

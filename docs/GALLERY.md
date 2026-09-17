@@ -14,7 +14,7 @@ A starter is markup in `starters/<id>.mrbl` plus a list of affordance parts in
 
 1. Marble's `lib/affordances.js` is read and cut at its `// ==== part: name ====`
    markers.
-2. `lib/affordances.drive.js` is read the same way, and **overrides by name**.
+2. `lib/affordances.drive.js` is read the same way, and **can override by name**. There is no override today.
 3. The parts the starter asked for — plus `shared` and `tail`, which open and
    close the closure, plus `grip` if anything needs a handle — are joined *in the
    base file's order*, because they are pieces of one closure.
@@ -26,17 +26,15 @@ from here, which is the point rather than a compromise: a host that shipped
 these would have decided what a drag looks like for every document it ever
 opened.
 
-## The one override
+## Overrides
 
-`lib/affordances.drive.js` replaces `sortable`. Marble's is built on the HTML5
-drag-and-drop API, which fires nothing for a finger — so reorder is the single
-gesture in the affordance library a phone cannot perform, which is the `k-touch`
-card. The replacement is pointer-driven, has a keyboard path (focus the handle,
-press the arrow keys), and sets `touch-action: none` so a drag does not scroll
-the page instead.
+`lib/affordances.drive.js` can replace a Marble part by name. There is no
+override today. The file once replaced `sortable` because Marble's used HTML5
+drag-and-drop, which a finger cannot fire; Marble's sortable is pointer-driven
+now, so a Drive-specific copy would only drift.
 
-Everything else is Marble's, unchanged. An override that Marble has no part for
-is a build error rather than a silently ignored file.
+An override that Marble has no part for is a build error rather than a silently
+ignored file.
 
 ## The seven
 

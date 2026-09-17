@@ -7,7 +7,7 @@ maintained from 👍/👎) rides on top of it: push `boost` terms into the queri
 drop anything matching a `mute` term.
 
 Anchor everything to the research vision in
-`drive/Research/research-vision.mrbl` — the four theses:
+`drive/Research/Research Vision Docs/Research Vision.mrbl` — the four theses:
 1. GenUI is a different design problem (design the space, not the screen)
 2. UI envisioning — imagination is the bottleneck
 3. Personal User Experiences — personal by construction
@@ -24,7 +24,9 @@ Queries (rotate, don't run all every day):
 
 - `arxiv.org/list/cs.HC/recent` — scan titles/abstracts for: generative UI,
   LLM-generated interface, malleable / tailorable / end-user software, adaptive
-  UI, preference elicitation, feedforward, UI optimization
+  UI, preference elicitation, feedforward, UI optimization, **interaction
+  technique / intelligent interaction / multimodal IxT** (Brad Myers' IIxT
+  proposal grain — widgets and gestures, not whole-app generation)
 - "generative UI" OR "generative interface" LLM  2026
 - "malleable software" OR "end-user programming" OR "tailorable interface"  new
 - "AI app builder" OR "prompt to app" OR "generative interface" research
@@ -59,6 +61,13 @@ not only that it shipped. File items from here into the `industry` bucket.
 
 - frontier model releases and the reaction to them: GPT-6, Claude, Gemini, Llama,
   open-weight drops — the capability claims **and** the pushback
+- **new model *classes***, not just bigger chat models — decision-only /
+  evaluation models (TypeSafe AI **Jev**, "System One"), structured-output
+  routers, sub-second inference stacks. Bryan asked 17 Sep to tune for these:
+  they change what **realtime UI generation** can assume (branching on typed
+  probabilities in 70–500ms instead of parsing prose). Watch Vercel AI Gateway
+  changelog, TypeSafe AI blog, The Decoder, HN, and Simon Willison when a drop
+  lands — same urgency as a frontier LLM release.
 - the informal benchmarks the field invents for itself (the "CUA Blender" /
   will-smith-spaghetti genre). These say more about what people believe a model
   can do than the official evals do.
@@ -121,6 +130,38 @@ counter-case to Theseus. When a vision has a serious rebuttal, run them together
 
 Why-line: the position it takes, and whether Bryan's theses agree with it, extend
 it, or hold the answer it leaves open.
+
+---
+
+## Papers like *Intelligent Interaction Techniques (IIxT)*
+
+Asked for on 17 Sep, naming Brad A. Myers, *Intelligent Interaction Techniques
+(IIxT) — Proposal*, arXiv 2609.16295: Bryan wants more papers **like this** —
+short proposals/positions about **generating or reinventing interaction
+techniques** (menus, scrollbars, selection, copy-paste), not another "chat is the
+UI" paper.
+
+What makes a paper "like this":
+
+- **The unit of design is the IxT, not the app.** Claims about making low-level,
+  reusable interaction primitives intelligent, multimodal, or generatively
+  composed — the building blocks out of which GUIs are designed.
+- **A proposal or position, not a user study.** Same grading rule as Theseus:
+  **Core** by default when it takes a real position on how interaction should
+  change under AI. `watch.comments` includes `proposal`.
+- **Brad A. Myers is on `watch.authors`.** Also watch researchers who cite his
+  *Pick, Click, Flick!* book or the IIxT framing; cross-listings in cs.AI are
+  common.
+- **Adjacent searches:** "interaction technique" + LLM; multimodal widgets;
+  intelligent menus/scrollbars/text entry; voice+gesture within a single IxT;
+  infrastructure for embeddable intelligent controls.
+
+Why-line: which IxTs it argues should exist, and how that connects to GenUI as
+a *design-of-building-blocks* problem vs a whole-screen generation problem.
+
+**News tie-in:** when a model class like Jev ships, ask whether it enables new
+IxTs (fast structured branching inside a live UI) — file under Bucket 2b with
+a why-line to thesis 1 (design the space) and this section.
 
 ---
 

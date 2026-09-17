@@ -323,7 +323,7 @@ async function arxiv() {
 
   const watch = (readState('tuning.json') || {}).watch || {};
   let watchHits = [];
-  if ((watch.authors || []).length || (watch.comments || []).length) {
+  if ((watch.authors || []).length || (watch.comments || []).length || (watch.topics || []).length) {
     if (via === 'rss') notes.push('watch list skipped: the export API is refusing requests — re-run later, or search the watched authors and tracks by hand');
     else {
       const watchSince = since || new Date(Date.now() - 45 * 86400000).toISOString().slice(0, 10);

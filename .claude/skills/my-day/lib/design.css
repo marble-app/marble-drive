@@ -39,7 +39,11 @@ img { max-width: 100%; }
    wider than the room left for it and was adding up to 100px of phantom
    horizontal scroll to every issue at narrow widths. `clip` does not create a
    scrollport, so the sticky rail and tail keep working. */
-.page { width: 100%; margin: 0; padding: clamp(1.2rem, 2.2vw, 2.4rem) clamp(1rem, 2.4vw, 2.6rem) 6rem;
+.page { width: 100%; margin: 0;
+  padding: calc(clamp(1.2rem, 2.2vw, 2.4rem) + env(safe-area-inset-top, 0px))
+           calc(clamp(1rem, 2.4vw, 2.6rem) + env(safe-area-inset-right, 0px))
+           calc(6rem + env(safe-area-inset-bottom, 0px))
+           calc(clamp(1rem, 2.4vw, 2.6rem) + env(safe-area-inset-left, 0px));
   overflow-x: clip; }
 /* The page fills the display; readability is protected by capping the measure of
    running text, not by boxing the whole layout into a column. */
@@ -382,7 +386,7 @@ li.row:hover .acts, li.row:focus-within .acts,
    cheating. build.mjs computes each row's margin either way; nothing is
    absolutely positioned, so nothing can overlap. */
 .tly-scroll { overflow-y: auto; overflow-x: hidden; max-height: calc(100dvh - 12rem);
-  padding-right: .35rem; scrollbar-width: thin;
+  padding-right: .35rem; scrollbar-width: thin; overscroll-behavior-y: contain;
   -webkit-mask-image: linear-gradient(180deg, transparent 0, #000 1.1rem, #000 calc(100% - 1.4rem), transparent 100%);
           mask-image: linear-gradient(180deg, transparent 0, #000 1.1rem, #000 calc(100% - 1.4rem), transparent 100%); }
 .tly { display: flex; flex-direction: column; padding: .3rem 0 .6rem;

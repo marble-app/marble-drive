@@ -2,14 +2,21 @@
 <html lang="en" data-marble="1">
 <head>
 <meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <meta name="marble:capabilities" content="storage; net=none">
 <meta name="day:date" content="__DATE__">
 <meta name="day:title" content="__TITLE__">
 <meta name="day:palette" content="__PALETTE_NAME__">
 <meta name="day:app" content="Bryan's Days">
+<meta name="theme-color" content="__THEME_LIGHT__" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="__THEME_DARK__" media="(prefers-color-scheme: dark)">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="Bryan's Days">
 <title>__TITLE__</title>
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='8' fill='%23222'/%3E%3Crect x='7' y='7' width='8' height='8' rx='2' fill='%23fff'/%3E%3Crect x='17' y='7' width='8' height='8' rx='2' fill='%23fff' opacity='.55'/%3E%3Crect x='7' y='17' width='8' height='8' rx='2' fill='%23fff' opacity='.55'/%3E%3Crect x='17' y='17' width='8' height='8' rx='2' fill='%23fff'/%3E%3C/svg%3E">
+<link rel="apple-touch-icon" href="__APPLE_TOUCH_ICON__">
 __FONT__
 <style id="nl-base">
 __DESIGN__
@@ -234,14 +241,21 @@ __BODY__
     function claim(el, role) { const held = roles.get(el) ?? new Set(); if (held.has(role)) return false; held.add(role); roles.set(el, held); return true; }
     const within = (root, sel) => [...(root.matches?.(sel) ? [root] : []), ...root.querySelectorAll(sel)];
     const css = []; const wirers = []; const addressable = [];
+    let live = false;
     function assignIdsIn(root) { for (const el of [root, ...root.querySelectorAll('*')]) { if (isTransient(el) || marble.id(el)) continue; if (el === root || el.matches(ADDRESSABLE)) el.setAttribute(ID, marble.newId()); } }
     css.push(`
       .marble-item { position: relative; }
-      .marble-item.marble-dragging { opacity: .4; }
-      .marble-grip { position: absolute; left: -1.35rem; top: .3rem; display: flex; flex-direction: column; gap: 2px; opacity: 0; transition: opacity .12s ease; }
-      .marble-item:hover > .marble-grip, .marble-grip:focus-within { opacity: 1; }
-      .marble-btn { width: 1.1rem; height: 1.1rem; padding: 0; border: 0; border-radius: 3px; background: none; color: currentColor; opacity: .35; font: 500 11px/1.1rem ui-monospace, Menlo, monospace; text-align: center; cursor: pointer; }
+      .marble-item.marble-dragging { z-index: 40; filter: drop-shadow(0 10px 22px rgba(0,0,0,.16)); }
+      .marble-grip { position: absolute; left: -1.45rem; top: .25rem; display: flex; flex-direction: column; align-items: center; gap: 1px; opacity: 0; transition: opacity .14s ease; }
+      .marble-item:hover > .marble-grip, .marble-item:focus-within > .marble-grip, .marble-item.marble-item-new > .marble-grip, .marble-grip:focus-within { opacity: 1; }
+      @media (hover: none) { .marble-grip { left: -1.9rem; opacity: .55; } }
+      @media (prefers-reduced-motion: reduce) { .marble-grip { transition: none; } }
+      .marble-btn { width: 1.25rem; height: 1.25rem; padding: 0; border: 0; border-radius: 4px; background: none; color: currentColor; opacity: .4; font: 500 12px/1.25rem ui-monospace, Menlo, monospace; text-align: center; cursor: pointer; }
       .marble-btn:hover { opacity: 1; background: rgba(127,127,127,.14); }
+      .marble-btn:focus-visible { opacity: 1; outline: 2px solid currentColor; outline-offset: 1px; }
+      .marble-btn:active { transform: scale(.92); }
+      @media (hover: none) { .marble-btn { width: 1.7rem; height: 1.7rem; font-size: 14px; line-height: 1.7rem; } }
+      @media (prefers-reduced-motion: reduce) { .marble-btn:active { transform: none; } }
     `);
     function grip(item) {
       let g = item.querySelector(':scope > .marble-grip');
@@ -440,8 +454,22 @@ __BODY__
         commitMove(d); h.focus();
       });
       grip(item).prepend(h);
+      if (live) { item.classList.add('marble-item-new'); setTimeout(() => item.classList.remove('marble-item-new'), 1600); }
     }
-    function wireSortable(root) { for (const c of within(root, '[data-marble-sortable]')) { for (const item of persistentChildren(c)) wireSortableItem(item); claim(c, 'sortable'); } }
+    function wireSortable(root) {
+      for (const c of within(root, '[data-marble-sortable]')) {
+        for (const item of persistentChildren(c)) wireSortableItem(item);
+        claim(c, 'sortable');
+      }
+      /* Newly inserted items are adopted as themselves. The sortable attribute
+         lives on the parent list, so the walk above never sees them — which is
+         why a new row could be deleted (that attribute is on the row) but not
+         reordered until the next full-document wire on refresh. */
+      if (root.nodeType === 1) {
+        const c = root.parentElement?.closest('[data-marble-sortable]');
+        if (c && persistentChildren(c).includes(root)) wireSortableItem(root);
+      }
+    }
     /* Moving the element is the change; this only reports where it came to rest. */
     function commitMove(d) {
       const p = d.item.parentElement, before = nextPersistentSibling(d.item);
@@ -494,7 +522,7 @@ __BODY__
     document.head.append(style);
     const ADDRESSABLE = addressable.join(', ');
     marble.address(document.querySelectorAll(ADDRESSABLE));
-    marble.register((root) => { for (const w of wirers) w(root); });
+    marble.register((root) => { for (const w of wirers) w(root); live = true; });
   };
   if (window.marble) begin(window.marble);
   else {

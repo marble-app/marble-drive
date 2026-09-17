@@ -56,7 +56,7 @@ What is here is everything to do with there being more than one folder:
 | `server/favicon.js` | the mark: one marble, bare for a document and tiled for the Drive, inline in the head of both |
 | `server/flatten.js` | blobs out of a document, and blobs back into it |
 | `server/backup.js` | the documents *and* the history, off the box |
-| `lib/affordances.drive.js` | one affordance overridden by name: a sortable a finger can use |
+| `lib/affordances.drive.js` | optional affordance overrides by name; none today |
 | `runtime/drive.js` | `marble.drive` — the carrier surface a Drive needs |
 | `templates/drive.mrbl` | the Drive, as a document |
 | `starters/` | seven answers to "what is a document", two of which typeset. A starter is one `.mrbl` file, or a folder of parts that are concatenated — which is how the two that typeset share one typesetter rather than carrying two copies of it |

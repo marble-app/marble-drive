@@ -77,6 +77,15 @@
     "2609-17301v1",
     "2609-17335v1",
     "2609-17455v1",
+    "2609-17959v1",
+    "2609-18060v1",
+    "2609-18062v1",
+    "2609-18065v1",
+    "2609-18186v1",
+    "2609-18483v1",
+    "2609-18690v1",
+    "2609-18709v1",
+    "2609-19125v1",
     "aiweekly-co-alerts-runway-unveils-solaris-an-interface-world-model-for-live-uis",
     "andonlabs-com-blog-why-we-built-pion",
     "arxiv-org-abs-2311-00382",
@@ -98,6 +107,7 @@
     "esso-dev-blog-posts-three-frontier-models-in-72-hours-what-changed-in-september-",
     "genuimeetshci-github-io-chi26-workshop",
     "github-com-greentfrapp-panel",
+    "lovable-dev-blog-series-c",
     "musthave-ai-runway-solaris-interface-world-model-production-test",
     "phrase-com-news-phrase-atlas-launch",
     "research-google-blog-generative-ui-a-rich-custom-visual-interactive-user-experie",
@@ -110,6 +120,7 @@
     "www-aljazeera-com-economy-2026-9-4-openai-unveils-gpt-6-astra-amid-rising-scruti",
     "www-apple-com-newsroom-2026-09-major-updates-for-apples-software-platforms-are-n",
     "www-blackhc-net-essays-future-of-software",
+    "www-copilotkit-ai-blog-introducing-webmcp-for-copilotkit",
     "www-figma-com-release-notes",
     "www-interactsoftware-com-news-introducing-conductor-and-cue",
     "www-openui-com-blog-oui-1",
@@ -121,5 +132,5 @@
     "www-techradar-com-ai-platforms-assistants-gpt-6-is-here-but-what-if-we-just-said",
     "www-theneuron-ai-news-claude-fable-5-1-cuts-agent-costs-and-safety-friction"
   ],
-  "updated": "2026-09-16T14:17:14.592Z"
+  "updated": "2026-09-17T13:38:54.317Z"
 }

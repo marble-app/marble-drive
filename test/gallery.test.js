@@ -25,12 +25,15 @@ test('the affordances are composed out of the Marble package, not copied', async
   assert.match(script.trimEnd(), /\}\)\(\);$/);
 });
 
-test('the drive overrides Marble\'s sortable with one a finger can use', async () => {
+test('composed sortable is pointer-driven and wires a child adopted into an existing list', async () => {
   const script = await composeScript(['sortable']);
   assert.match(script, /pointerdown/);
   assert.match(script, /touch-action: none/);
-  // And no trace of the drag-and-drop path it replaces.
+  // A finger never fires dragstart; Marble's sortable does not use it.
   assert.ok(!script.includes('dragstart'));
+  // Newly inserted items are adopted as themselves. The sortable attribute
+  // lives on the parent list, so wiring has to look up as well as down.
+  assert.match(script, /parentElement\?\.closest\('\[data-marble-sortable\]'\)/);
 });
 
 test('an unknown part is a build error, not a silently empty document', async () => {

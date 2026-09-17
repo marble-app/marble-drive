@@ -15,7 +15,7 @@ this is the map.
 | `k-back` | Backups off the box | `server/backup.js`. Documents *and* `.marble/history/` |
 | `k-hist` | Fold the two history trees into one | `server/config.js` points Marble's history at the drive root. One `.marble/` |
 | `k-ord` | Ops that can be ordered later | `server/oplog.js`. `client` and `seq` alongside `t` |
-| `k-touch` | Touch | `lib/affordances.drive.js` overrides `sortable`; every drag a finger can make is pointer-driven. The one exception is a file dragged in from outside the browser, which fires no pointer events and cannot be made by a finger — see [DRIVE-DOC.md](DRIVE-DOC.md) |
+| `k-touch` | Touch | Marble's sortable is pointer-driven, so a finger can reorder. The one exception is a file dragged in from outside the browser, which fires no pointer events and cannot be made by a finger — see [DRIVE-DOC.md](DRIVE-DOC.md) |
 | `k-wt` | Measure what a document weighs | `marble-drive weigh`, and `GET /drive/weigh` |
 
 ## G1 — The Drive
