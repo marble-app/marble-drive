@@ -1,11 +1,11 @@
-// What a brand new drive has in it.
+// What a brand new drive has in it after the host seeds it.
 //
-// Exactly one document, and it is the Drive itself. Not because a drive should
-// arrive full, but because the alternative is a host that serves a folder with
-// nothing in it and an address that 404s — and because the Drive being an
-// ordinary document in the drive is the claim this whole repo is making. You
-// can rename it, edit it, or throw it away; the host falls back to whatever
-// else is there.
+// The Drive document and the Agents library — each written only once if missing.
+// Not because a drive should arrive full, but because the alternative is a host
+// that serves a folder with nothing in it and an address that 404s — and because
+// the Drive being an ordinary document in the drive is the claim this whole repo
+// is making. You can rename either, edit it, or throw it away; the host falls
+// back to whatever else is there.
 
 import fsp from 'node:fs/promises';
 import path from 'node:path';
@@ -41,5 +41,20 @@ export async function buildDrive({ name = 'drive', title = 'My Drive' } = {}) {
 export async function seedDrive(store, { name = 'drive', title = 'My Drive' } = {}) {
   if (await store.has(name)) return { seeded: false, path: name };
   await store.write(name, await buildDrive({ name, title }), { label: 'seeded' });
+  return { seeded: true, path: name };
+}
+
+/** The Agents library page — custom chrome, so the drawer does not mount on it. */
+export async function buildAgents({ name = 'Agents', title = 'Agents' } = {}) {
+  const template = await fsp.readFile(path.join(REPO, 'templates', 'agents.mrbl'), 'utf8');
+  return template
+    .replaceAll('__TITLE__', title)
+    .replace('__ICON__', () => iconLink('doc'))
+    .replace(/__ID__/g, () => newId());
+}
+
+export async function seedAgents(store, { name = 'Agents', title = 'Agents' } = {}) {
+  if (await store.has(name)) return { seeded: false, path: name };
+  await store.write(name, await buildAgents({ name, title }), { label: 'seeded' });
   return { seeded: true, path: name };
 }

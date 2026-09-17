@@ -132,11 +132,9 @@ export async function createDrive(config, { log = console, agentProviders = null
       `<script src="/runtime/drive.js" data-marble-transient></script>`;
     if (agents) {
       tags += `\n<script src="/runtime/agent.js" data-marble-transient></script>`;
-      // A document that draws its own agent interface (Agents.mrbl) wants the
-      // client and not a second drawer on top of itself.
-      if (!/<meta\s+name="marble-agent"\s+content="custom"\s*\/?>/i.test(source)) {
-        tags += `\n<script src="/runtime/agent-ui.js" data-marble-transient></script>`;
-      }
+      // Custom meta skips the drawer mount in runtime/agent-ui.js, not this script —
+      // Agents.mrbl still needs <marble-conversation> without a second launcher.
+      tags += `\n<script src="/runtime/agent-ui.js" data-marble-transient></script>`;
     }
     return source.includes('</body>')
       ? source.replace(/<\/body>/i, () => `${tags}\n</body>`)

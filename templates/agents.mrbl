@@ -1,0 +1,14 @@
+<!doctype html>
+<html lang="en" data-marble="1">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="marble:capabilities" content="storage; net=none">
+<meta name="marble-agent" content="custom">
+<title>__TITLE__</title>
+__ICON__
+</head>
+<body data-marble-id="__ID__" data-view="library">
+  <marble-conversation data-marble-id="__ID__"></marble-conversation>
+</body>
+</html>

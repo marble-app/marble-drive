@@ -389,11 +389,11 @@ test("a document is served with the agent scripts after the Drive's, when agents
   }
 });
 
-test('a document that presents agents itself gets the API but not the drawer', async () => {
+test('a document that presents agents itself gets the API and the conversation element, not a second drawer script skip', async () => {
   await drive.createDocument('custom-agents', SOURCE.replace('<title>', '<meta name="marble-agent" content="custom"><title>'));
   const page = await (await fetch(`${base}/a/custom-agents`)).text();
   assert.ok(page.includes('/runtime/agent.js'));
-  assert.ok(!page.includes('/runtime/agent-ui.js'));
+  assert.ok(page.includes('/runtime/agent-ui.js'), 'custom chrome still needs <marble-conversation>');
 });
 
 test('providers say which model they use unless told otherwise', async () => {
