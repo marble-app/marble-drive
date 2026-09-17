@@ -14,6 +14,7 @@
 import fsp from 'node:fs/promises';
 import path from 'node:path';
 
+import { pickEnv } from '../env.js';
 import { INSTRUCTIONS } from '../instructions.js';
 import { runCommand } from './exec.js';
 
@@ -92,9 +93,11 @@ export function createClaudeProvider({ auth = 'subscription', exec = runCommand,
     label: api ? 'Claude (API key)' : 'Claude',
 
     async detect() {
-      const probeEnv = { ...env };
-      // Asked with a key in the environment, the CLI answers about the key.
-      if (!api) delete probeEnv.ANTHROPIC_API_KEY;
+      // The same allowlist a turn starts from. Asked with a key in the
+      // environment, the CLI answers about the key, so the subscription is
+      // asked without one.
+      const probeEnv = pickEnv(env);
+      if (api && env.ANTHROPIC_API_KEY) probeEnv.ANTHROPIC_API_KEY = env.ANTHROPIC_API_KEY;
       const probe = await exec('claude', ['auth', 'status'], { env: probeEnv });
       if (probe.missing) return { installed: false, signedIn: false, detail: 'claude is not installed' };
 

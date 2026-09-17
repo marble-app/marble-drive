@@ -270,3 +270,15 @@ test('a user-level mcp.json that cannot be read as JSON counts as servers presen
   assert.equal(found.signedIn, false);
   assert.match(found.detail, /^blocked: user-level MCP servers in ~\/\.cursor\/mcp\.json/);
 });
+
+test('the detection probe gets the allowlisted environment it was given, never the drive secret', async () => {
+  const seen = [];
+  const exec = async (command, args, options) => {
+    seen.push(options?.env);
+    return { code: 0, stdout: 'Logged in as a@b.c', stderr: '', missing: false };
+  };
+  const host = { PATH: '/bin', HOME: '/h', MARBLE_DRIVE_SECRET: 's3cret', CURSOR_API_KEY: 'ck', ANTHROPIC_API_KEY: 'k', GITHUB_TOKEN: 'g' };
+  await createCursorProvider({ userDir: NO_USER_DIR, exec, env: host }).detect();
+  await createCursorProvider({ userDir: NO_USER_DIR, exec, env: { PATH: '/bin' } }).detect();
+  assert.deepEqual(seen, [{ PATH: '/bin', HOME: '/h', CURSOR_API_KEY: 'ck' }, { PATH: '/bin' }]);
+});

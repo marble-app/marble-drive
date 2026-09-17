@@ -115,3 +115,22 @@ test('detect: signed in, signed out, not installed, and the API key', async () =
   assert.equal((await createClaudeProvider({ auth: 'api', exec: installed, env: { ANTHROPIC_API_KEY: 'k' } }).detect()).signedIn, true);
   assert.equal((await createClaudeProvider({ auth: 'api', exec: installed, env: {} }).detect()).signedIn, false);
 });
+
+test('detection probes get the allowlisted environment, never the drive secret', async () => {
+  const { ENV_ALLOWLIST } = await import('../server/agent/env.js');
+  const host = { PATH: '/bin', HOME: '/h', MARBLE_DRIVE_SECRET: 's3cret', ANTHROPIC_API_KEY: 'k', GITHUB_TOKEN: 'g', NODE_OPTIONS: '--x' };
+  const seen = [];
+  const exec = async (command, args, options) => {
+    seen.push(options?.env);
+    return { code: 0, stdout: '{"loggedIn": true}', stderr: '', missing: false };
+  };
+  await createClaudeProvider({ auth: 'subscription', exec, env: host }).detect();
+  await createClaudeProvider({ auth: 'api', exec, env: host }).detect();
+  await createClaudeProvider({ auth: 'api', exec, env: { PATH: '/bin' } }).detect();
+  assert.deepEqual(seen[0], { PATH: '/bin', HOME: '/h' });
+  assert.deepEqual(seen[1], { PATH: '/bin', HOME: '/h', ANTHROPIC_API_KEY: 'k' });
+  assert.deepEqual(seen[2], { PATH: '/bin' });
+  for (const env of seen) {
+    for (const key of Object.keys(env)) assert.ok(ENV_ALLOWLIST.includes(key) || key === 'ANTHROPIC_API_KEY', key);
+  }
+});

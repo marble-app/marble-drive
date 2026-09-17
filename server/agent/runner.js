@@ -15,15 +15,13 @@ import path from 'node:path';
 import readline from 'node:readline';
 
 import { collectSlices } from '../engine.js';
+import { pickEnv } from './env.js';
 import { summarize } from './store.js';
 
-const ENV_ALLOWLIST = ['PATH', 'HOME', 'USER', 'LOGNAME', 'SHELL', 'LANG', 'LC_ALL', 'TERM', 'TMPDIR'];
 const SELECTION_BUDGET = 6_000;
 const STDERR_TAIL = 4_000;
 // How long closing the host waits for its running turns to write their end.
 const CLOSE_GRACE_MS = 5_000;
-
-const pick = (env) => Object.fromEntries(ENV_ALLOWLIST.filter((k) => env[k] !== undefined).map((k) => [k, env[k]]));
 
 export function createRunner({ store, tools, providers, workdir, origin, bridgePath, readDocument, publish, limits, log = console }) {
   const live = new Map(); // turnId → live turn
@@ -198,7 +196,7 @@ export function createRunner({ store, tools, providers, workdir, origin, bridgeP
       if (turn.cancelled) return safeFinish(turn, turn.cancelled);
       if (closed) return safeFinish(turn, { status: 'cancelled', error: 'host closing' });
 
-      const base = { ...pick(process.env), ...mcp.env };
+      const base = { ...pickEnv(process.env), ...mcp.env };
       const spec = provider.spawn({
         workspace,
         mcp,

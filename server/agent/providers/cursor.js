@@ -21,6 +21,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
+import { pickEnv } from '../env.js';
 import { INSTRUCTIONS } from '../instructions.js';
 import { runCommand } from './exec.js';
 
@@ -154,7 +155,10 @@ export function createCursorProvider({
     label: 'Cursor',
 
     async detect() {
-      const probe = await exec('cursor-agent', ['status']);
+      // The same allowlist a turn starts from, and the key a turn would get.
+      const probeEnv = pickEnv(env);
+      if (env.CURSOR_API_KEY) probeEnv.CURSOR_API_KEY = env.CURSOR_API_KEY;
+      const probe = await exec('cursor-agent', ['status'], { env: probeEnv });
       if (probe.missing) return { installed: false, signedIn: false, detail: 'cursor-agent is not installed' };
       const servers = await userMcpServers(userDir);
       if (servers.length) {
