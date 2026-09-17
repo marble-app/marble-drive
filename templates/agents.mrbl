@@ -53,7 +53,7 @@ __ICON__
     margin: 0; background: var(--paper); color: var(--ink);
     font: 14px/1.5 "Google Sans", Roboto, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
     -webkit-font-smoothing: antialiased;
-    display: flex; flex-direction: column;
+    display: grid; grid-template-rows: auto minmax(0, 1fr); grid-template-columns: minmax(0, 1fr);
   }
   [data-marble-editable] { outline: none; border-radius: 4px; transition: background var(--t-fast) var(--snap); }
   [data-marble-editable]:hover, [data-marble-editable]:focus-within { background: var(--accent-soft); }
@@ -69,9 +69,16 @@ __ICON__
       animation-duration: .001ms !important; animation-iteration-count: 1 !important;
       transition-duration: .001ms !important; scroll-behavior: auto !important;
     }
+    /* Drive zeros every transition. This page's spec is a 150 ms opacity
+       crossfade on the two views, so those two have to win. */
+    .library, .board {
+      animation-duration: 150ms !important;
+      transition-duration: 150ms !important;
+    }
   }
 
   .topbar {
+    grid-row: 1; grid-column: 1;
     display: flex; align-items: center; gap: .75rem; flex: 0 0 auto; flex-wrap: wrap;
     padding: .55rem 1rem; border-bottom: 1px solid var(--line);
     background: rgba(var(--paper-rgb), .78); backdrop-filter: blur(20px) saturate(160%);
@@ -113,14 +120,18 @@ __ICON__
   }
   .new:hover, .new:focus-visible { box-shadow: var(--shadow); outline: none; }
 
-  .library, .board { flex: 1 1 auto; min-height: 0; }
+  .library, .board {
+    grid-row: 2; grid-column: 1; min-height: 0; min-width: 0;
+  }
   .library {
     display: grid; grid-template-columns: minmax(16rem, 22rem) minmax(0, 1fr) minmax(14rem, 18rem);
   }
   body[data-view="board"] .library { display: none; }
   body[data-view="library"] .board { display: none; }
+  body[data-crossfade] .library { display: grid; }
+  body[data-crossfade] .board { display: flex; }
   .board {
-    display: flex; gap: 1rem; padding: 1rem; overflow: auto;
+    display: flex; gap: 1rem; padding: 1rem; overflow: auto; position: relative;
   }
   .column {
     flex: 1 1 0; min-width: 14rem; display: flex; flex-direction: column; gap: .5rem;
@@ -129,6 +140,34 @@ __ICON__
   .column h2 {
     margin: 0; font-size: .75rem; font-weight: 500; letter-spacing: .06em;
     text-transform: uppercase; color: var(--faint);
+  }
+  .column .conv {
+    border-radius: 10px; background: var(--card); border: 1px solid var(--line);
+    padding: .65rem .75rem;
+  }
+  .conv.marble-flip,
+  .conv.marble-flip:active {
+    transition: none !important;
+    transform-origin: 0 0;
+    z-index: 6;
+    pointer-events: none;
+  }
+  .board-panel {
+    position: absolute; top: 0; right: 0; bottom: 0; width: 520px; max-width: 100%;
+    display: none; flex-direction: column; background: var(--card);
+    border-left: 1px solid var(--line); box-shadow: var(--shadow-lift); z-index: 8;
+  }
+  .board-panel[data-open="true"] { display: flex; }
+  .board-panel .panel-close {
+    appearance: none; border: 0; background: none; color: var(--muted);
+    padding: .55rem .9rem; cursor: pointer; font-size: .85rem; text-align: left;
+  }
+  .board-panel .panel-close:hover, .board-panel .panel-close:focus-visible {
+    color: var(--ink); outline: none;
+  }
+  .board-panel marble-conversation { flex: 1; min-height: 0; }
+  .board-panel .inspector {
+    flex: 0 1 12rem; max-height: 40%; border-left: 0; border-top: 1px solid var(--line);
   }
 
   .list {
@@ -198,9 +237,12 @@ __ICON__
     .library { grid-template-columns: 1fr; }
     .list { border-right: 0; border-bottom: 1px solid var(--line); max-height: 40vh; }
     .inspector { border-left: 0; border-top: 1px solid var(--line); }
+    .board { scroll-snap-type: x mandatory; }
+    .column { flex: 0 0 min(20rem, 85vw); scroll-snap-align: start; }
+    .board-panel { width: 100%; }
   }
   @media (hover: none) {
-    .conv, .filter, .views button, .new, .inspector .actions button { min-height: 2.75rem; }
+    .conv, .filter, .views button, .new, .inspector .actions button, .panel-close { min-height: 2.75rem; }
   }
 </style>
 </head>
@@ -233,15 +275,18 @@ __ICON__
 </div>
 
 <div class="board" data-marble-id="__ID__">
-  <section class="column" data-col="running" data-marble-transient>
-    <h2>Running</h2>
+  <section class="column" data-col="running" data-marble-id="__ID__" data-marble-transient>
+    <h2 data-marble-id="__ID__">Running</h2>
   </section>
-  <section class="column" data-col="review" data-marble-transient>
-    <h2>Needs review</h2>
+  <section class="column" data-col="review" data-marble-id="__ID__" data-marble-transient>
+    <h2 data-marble-id="__ID__">Needs review</h2>
   </section>
-  <section class="column" data-col="completed" data-marble-transient>
-    <h2>Completed</h2>
+  <section class="column" data-col="completed" data-marble-id="__ID__" data-marble-transient>
+    <h2 data-marble-id="__ID__">Completed</h2>
   </section>
+  <div class="board-panel" data-marble-id="__ID__">
+    <button type="button" class="panel-close" data-marble-id="__ID__">Close</button>
+  </div>
 </div>
 
 <script>
@@ -271,11 +316,20 @@ __ICON__
 
     const $ = (sel) => document.querySelector(sel);
     const list = $('#list');
+    const libraryEl = $('.library');
+    const boardEl = $('.board');
+    const pane = $('.pane');
     const inspector = $('.inspector');
     const convo = $('marble-conversation');
+    const boardPanel = $('.board-panel');
     const search = $('input.search');
     const viewButtons = [...document.querySelectorAll('.views [data-view]')];
     const filterButtons = [...document.querySelectorAll('button.filter')];
+    const reduceMotion = matchMedia('(prefers-reduced-motion: reduce)');
+    const narrowView = matchMedia('(max-width: 719px)');
+    const FLIP_MS = 420;
+    const FLIP_EASE = 'cubic-bezier(.2, .8, .2, 1)';
+    const STAGGER_MS = 18;
 
     const summaries = new Map();
     const nodes = new Map();
@@ -285,6 +339,8 @@ __ICON__
     let query = '';
     let openId = null;
     let inspectGen = 0;
+    let panelOpen = false;
+    let flipAnims = [];
 
     const statusOf = (summary) => {
       if (summary?.running || summary?.status === 'running') return 'running';
@@ -349,15 +405,95 @@ __ICON__
       el.querySelector('.age').textContent = age(summary.updatedAt);
     };
 
-    // Newest first. Task 3 will also send this node into a column; until then
-    // every conversation lives in the list, one element per id.
-    const place = (el) => {
+    const columnFor = (summary) => {
+      const status = statusOf(summary);
+      const col = (status === 'running' || summary?.status === 'queued')
+        ? 'running'
+        : status === 'review' ? 'review' : 'completed';
+      return document.querySelector(`.column[data-col="${col}"]`);
+    };
+
+    const placeIn = (el, parent) => {
       const updated = summaries.get(el.dataset.id)?.updatedAt ?? 0;
-      const before = [...list.children].find(
+      const siblings = [...parent.querySelectorAll(':scope > .conv')];
+      const before = siblings.find(
         (n) => n !== el && (summaries.get(n.dataset.id)?.updatedAt ?? 0) < updated,
       );
-      if (before) list.insertBefore(el, before);
-      else list.append(el);
+      if (before) parent.insertBefore(el, before);
+      else parent.append(el);
+    };
+
+    // One element per id. Library: newest-first in #list. Board: the column
+    // for its status. Archived stay in the Map and out of the columns.
+    const place = (el) => {
+      const summary = summaries.get(el.dataset.id);
+      const view = document.body.getAttribute('data-view') || 'library';
+      if (view === 'board') {
+        if (summary?.archived) {
+          el.remove();
+          return;
+        }
+        placeIn(el, columnFor(summary));
+        return;
+      }
+      placeIn(el, list);
+    };
+
+    const placeAll = () => {
+      for (const el of nodes.values()) place(el);
+    };
+
+    const boardOrder = () => [
+      ...document.querySelectorAll('.column[data-col="running"] > .conv'),
+      ...document.querySelectorAll('.column[data-col="review"] > .conv'),
+      ...document.querySelectorAll('.column[data-col="completed"] > .conv'),
+    ];
+
+    const captureRects = () => {
+      const rects = new Map();
+      for (const el of nodes.values()) {
+        if (!el.isConnected) continue;
+        rects.set(el, el.getBoundingClientRect());
+      }
+      return rects;
+    };
+
+    const cancelFlip = () => {
+      for (const anim of flipAnims) anim.cancel();
+      flipAnims = [];
+      for (const el of nodes.values()) el.classList.remove('marble-flip');
+    };
+
+    const dockConversation = (where) => {
+      if (where === 'panel') {
+        if (convo.parentElement !== boardPanel) boardPanel.append(convo);
+        if (inspector.parentElement !== boardPanel) boardPanel.append(inspector);
+      } else {
+        if (convo.parentElement !== pane) pane.append(convo);
+        if (inspector.parentElement !== libraryEl) libraryEl.append(inspector);
+      }
+    };
+
+    const openBoardPanel = () => {
+      panelOpen = true;
+      boardPanel.setAttribute('data-open', 'true');
+      dockConversation('panel');
+    };
+
+    const closeBoardPanel = () => {
+      panelOpen = false;
+      boardPanel.removeAttribute('data-open');
+      dockConversation('library');
+    };
+
+    const typingIn = () => {
+      const host = document.activeElement;
+      const inner = host?.shadowRoot?.activeElement ?? host;
+      if (!inner || inner === document.body || inner === document.documentElement) return false;
+      if (inner === search || inner.closest?.('input.search')) return true;
+      if (inner.isContentEditable) return true;
+      const tag = inner.tagName;
+      return tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT';
     };
 
     const upsert = (summary) => {
@@ -371,7 +507,10 @@ __ICON__
         el.dataset.id = summary.id;
         el.setAttribute('role', 'listitem');
         el.innerHTML = '<span class="dot" aria-hidden="true"></span><span class="body"><span class="title"></span><span class="meta"><span class="badge"></span><span class="activity"></span></span></span><span class="age"></span>';
-        el.addEventListener('click', () => open(el.dataset.id));
+        el.addEventListener('click', () => {
+          if ((document.body.getAttribute('data-view') || 'library') === 'board') openBoardPanel();
+          open(el.dataset.id);
+        });
         nodes.set(summary.id, el);
       }
       paintRow(el, summary);
@@ -519,11 +658,88 @@ __ICON__
       convo.focusInput?.();
     }
 
+    const playFlip = (first, ordered) => {
+      flipAnims = [];
+      ordered.forEach((el, index) => {
+        const from = first.get(el);
+        if (!from) return;
+        const to = el.getBoundingClientRect();
+        const dx = from.left - to.left;
+        const dy = from.top - to.top;
+        const sx = to.width ? from.width / to.width : 1;
+        const sy = to.height ? from.height / to.height : 1;
+        if (Math.abs(dx) < 0.5 && Math.abs(dy) < 0.5 && Math.abs(sx - 1) < 0.02 && Math.abs(sy - 1) < 0.02) return;
+        el.classList.add('marble-flip');
+        const anim = el.animate(
+          [
+            { transform: `translate(${dx}px, ${dy}px) scale(${sx}, ${sy})` },
+            { transform: 'none' },
+          ],
+          {
+            duration: FLIP_MS,
+            easing: FLIP_EASE,
+            delay: Math.min(index, 7) * STAGGER_MS,
+            fill: 'both',
+          },
+        );
+        flipAnims.push(anim);
+        anim.finished.then(() => {
+          el.classList.remove('marble-flip');
+          flipAnims = flipAnims.filter((a) => a !== anim);
+        }, () => {
+          el.classList.remove('marble-flip');
+        });
+      });
+    };
+
     const setView = (next) => {
       if (next !== 'library' && next !== 'board') return;
-      document.body.setAttribute('data-view', next);
       remember(VIEW_KEY, next);
-      deriveView();
+      const current = document.body.getAttribute('data-view') || 'library';
+      if (current === next) {
+        deriveView();
+        return;
+      }
+
+      const applyLayout = () => {
+        document.body.setAttribute('data-view', next);
+        deriveView();
+        if (next === 'library') closeBoardPanel();
+        placeAll();
+      };
+
+      if (reduceMotion.matches || narrowView.matches) {
+        cancelFlip();
+        document.body.setAttribute('data-crossfade', '1');
+        void document.body.offsetWidth;
+        applyLayout();
+        const incoming = next === 'board' ? boardEl : libraryEl;
+        const outgoing = next === 'board' ? libraryEl : boardEl;
+        const fadeIn = incoming.animate([{ opacity: 0 }, { opacity: 1 }], { duration: 150, fill: 'both' });
+        const fadeOut = outgoing.animate([{ opacity: 1 }, { opacity: 0 }], { duration: 150, fill: 'both' });
+        Promise.all([fadeIn.finished.catch(() => {}), fadeOut.finished.catch(() => {})]).then(() => {
+          document.body.removeAttribute('data-crossfade');
+          fadeIn.cancel();
+          fadeOut.cancel();
+        });
+        return;
+      }
+
+      // Visual rects include an in-flight transform, so this is current
+      // progress — not the layout box. Reverse those animations so they head
+      // back, then retarget a new FLIP at the new layout from that progress.
+      const first = captureRects();
+      if (flipAnims.length) {
+        for (const anim of flipAnims) {
+          try { anim.reverse(); }
+          catch { anim.playbackRate = -1; }
+        }
+      }
+      const staggerFromBoard = current === 'board' ? boardOrder() : null;
+      cancelFlip();
+      applyLayout();
+      const ordered = next === 'board' ? boardOrder() : (staggerFromBoard ?? [...list.querySelectorAll('.conv')]);
+      playFlip(first, ordered);
     };
 
     const loadArchived = async () => {
@@ -564,6 +780,16 @@ __ICON__
       applyFilters();
     });
     $('.new').addEventListener('click', () => startNew());
+    boardPanel.querySelector('.panel-close').addEventListener('click', () => closeBoardPanel());
+    addEventListener('keydown', (event) => {
+      if (event.key !== 'v' && event.key !== 'V') return;
+      if (event.metaKey || event.ctrlKey || event.altKey) return;
+      if (event.repeat) return;
+      if (typingIn()) return;
+      event.preventDefault();
+      const view = document.body.getAttribute('data-view') || 'library';
+      setView(view === 'board' ? 'library' : 'board');
+    });
 
     const restoreOpen = () => {
       // Re-set rather than open(): register runs once at boot with openId
@@ -571,6 +797,13 @@ __ICON__
       // restores it. focusInput on restore is a later polish.
       if (openId) convo.setAttribute('conversation', openId);
       paintOpen();
+      const view = document.body.getAttribute('data-view') || 'library';
+      if (view === 'board' && panelOpen) {
+        boardPanel.setAttribute('data-open', 'true');
+        dockConversation('panel');
+      } else {
+        dockConversation('library');
+      }
     };
 
     const boot = (marble) => {
@@ -579,7 +812,7 @@ __ICON__
       // into the file for everyone. conversation lives on an addressed
       // <marble-conversation>, so without this a patch strips it and a
       // source.outer of the pane writes it.
-      marble.pageOnly?.('data-view', 'aria-pressed', 'conversation');
+      marble.pageOnly?.('data-view', 'aria-pressed', 'conversation', 'data-open', 'data-crossfade');
       restoreView();
       deriveFilters();
       marble.register?.(() => {

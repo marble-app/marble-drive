@@ -118,3 +118,58 @@ test('the open conversation id is page-only and survives a reconcile', async () 
   });
   assert.equal(await view.getAttribute('conversation'), id);
 });
+
+test('V toggles library and board; the same conversation node moves', async () => {
+  const { page } = await openAgents();
+  const id = await page.evaluate(async () => {
+    const agent = window.marble.agent;
+    const id = await agent.start({ provider: 'fake' });
+    await agent.send(id, { prompt: 'script:rename', target: 'garden', viewing: 'Agents', selection: [] });
+    return id;
+  });
+  await page.locator(`.conv[data-id="${id}"]`).waitFor();
+  // send() returns when the turn is accepted. script:rename applies ops, so
+  // the card belongs in Needs review, not Completed, once it is no longer running.
+  await page.waitForFunction(() =>
+    [...document.querySelectorAll('.conv')].every((el) => el.dataset.status !== 'running'),
+  );
+  assert.equal(await page.locator('body').getAttribute('data-view'), 'library');
+  await page.keyboard.press('v');
+  await page.waitForFunction(() => document.body.getAttribute('data-view') === 'board');
+  assert.equal(await page.locator(`.column[data-col="review"] .conv[data-id="${id}"]`).count(), 1);
+  assert.equal(await page.locator(`.conv[data-id="${id}"]`).count(), 1, 'the row was moved, not cloned');
+  await page.keyboard.press('v');
+  await page.waitForFunction(() => document.body.getAttribute('data-view') === 'library');
+  assert.equal(await page.locator(`#list .conv[data-id="${id}"]`).count(), 1);
+});
+
+test('reduced motion crossfades and does not wait on a FLIP', async () => {
+  const { page } = await openAgents({ reducedMotion: 'reduce' });
+  // Start a conversation first so `.conv` exists; still assert no FLIP transform.
+  const id = await page.evaluate(async () => {
+    const agent = window.marble.agent;
+    const id = await agent.start({ provider: 'fake' });
+    await agent.send(id, { prompt: 'script:rename', target: 'garden', viewing: 'Agents', selection: [] });
+    return id;
+  });
+  await page.locator(`.conv[data-id="${id}"]`).waitFor();
+  await page.keyboard.press('v');
+  await page.waitForFunction(() => document.body.getAttribute('data-view') === 'board');
+  const transform = await page.locator('.conv').first().evaluate((el) => getComputedStyle(el).transform).catch(() => 'none');
+  assert.ok(transform === 'none' || transform === 'matrix(1, 0, 0, 1, 0, 0)' || transform == null);
+});
+
+test('clicking a board card opens the conversation panel', async () => {
+  const { page } = await openAgents();
+  const id = await page.evaluate(async () => {
+    const agent = window.marble.agent;
+    const id = await agent.start({ provider: 'fake' });
+    await agent.send(id, { prompt: 'script:rename', target: 'garden', viewing: 'Agents', selection: [] });
+    return id;
+  });
+  await page.locator(`.conv[data-id="${id}"]`).waitFor();
+  await page.keyboard.press('v');
+  await page.locator(`.column .conv[data-id="${id}"]`).click();
+  await page.locator('.board-panel[data-open="true"] marble-conversation').waitFor();
+  assert.equal(await page.locator('.board-panel marble-conversation').getAttribute('conversation'), id);
+});
