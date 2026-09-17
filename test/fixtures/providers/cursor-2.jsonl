@@ -1,0 +1,10 @@
+{"type":"system","subtype":"init","apiKeySource":"login","cwd":"/tmp/marble-agent-workspace","session_id":"248a44d2-e14c-463e-9779-7ad64c3beb2a","model":"Composer 2.5","permissionMode":"default"}
+{"type":"user","message":{"role":"user","content":[{"type":"text","text":"Reply with the single word: resumed"}]},"session_id":"248a44d2-e14c-463e-9779-7ad64c3beb2a"}
+{"type":"thinking","subtype":"delta","text":"The user requested a","session_id":"248a44d2-e14c-463e-9779-7ad64c3beb2a","timestamp_ms":1789616083545}
+{"type":"thinking","subtype":"delta","text":" single-word reply: ","session_id":"248a44d2-e14c-463e-9779-7ad64c3beb2a","timestamp_ms":1789616083547}
+{"type":"thinking","subtype":"delta","text":"\"resumed\".","session_id":"248a44d2-e14c-463e-9779-7ad64c3beb2a","timestamp_ms":1789616083547}
+{"type":"thinking","subtype":"completed","session_id":"248a44d2-e14c-463e-9779-7ad64c3beb2a","timestamp_ms":1789616083547}
+{"type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":"res"}]},"session_id":"248a44d2-e14c-463e-9779-7ad64c3beb2a","timestamp_ms":1789616083547}
+{"type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":"umed"}]},"session_id":"248a44d2-e14c-463e-9779-7ad64c3beb2a","timestamp_ms":1789616083547}
+{"type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":"resumed"}]},"session_id":"248a44d2-e14c-463e-9779-7ad64c3beb2a"}
+{"type":"result","subtype":"success","duration_ms":2067,"duration_api_ms":2067,"is_error":false,"result":"resumed","session_id":"248a44d2-e14c-463e-9779-7ad64c3beb2a","request_id":"30a3b5d9-1c59-445d-8101-aa3ec98a1fe4","usage":{"inputTokens":68,"outputTokens":23,"cacheReadTokens":18784,"cacheWriteTokens":0}}
