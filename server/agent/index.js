@@ -123,7 +123,16 @@ async function boot({ config, store, writeOps, createDocument, origin, providers
   });
   await runner.boot();
 
-  const routes = createAgentRoutes({ store: agentStore, runner, tools, hub, providers, writeOps, maxBody: config.maxBodyBytes });
+  const routes = createAgentRoutes({
+    store: agentStore,
+    runner,
+    tools,
+    hub,
+    providers,
+    writeOps,
+    maxBody: config.maxBodyBytes,
+    gated: Boolean(config.secret),
+  });
 
   return {
     handle: routes.handle,

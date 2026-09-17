@@ -4,8 +4,13 @@
 //     answers only this machine, and only the token of a turn that is running
 //     right now. It sits in front of the gate, because the bridge has the
 //     turn's token and not the drive's secret — which is the point.
+//     "This machine" means a loopback socket with no proxy in front of it:
+//     behind Tailscale Serve every peer arrives from 127.0.0.1, and only the
+//     forwarding headers tell them apart.
 //   - everything else is for the person, behind the gate like every other
-//     route, and a change also has to come from this origin.
+//     route, and a change also has to come from this origin. A host with no
+//     gate also has to be addressed as itself — localhost — or a page on any
+//     name that rebinds to 127.0.0.1 would count as this origin too.
 
 import { json, readJson } from '../http.js';
 import { parsePath } from '../paths.js';
@@ -14,16 +19,28 @@ import { summarize } from './store.js';
 import { undoTurn } from './undo.js';
 
 const LOOPBACK = new Set(['127.0.0.1', '::1', '::ffff:127.0.0.1']);
+const LOCAL_NAMES = new Set(['localhost', '127.0.0.1', '[::1]']);
+const FORWARDED = ['x-forwarded-for', 'x-forwarded-proto', 'x-forwarded-host'];
 const DETECT_TIMEOUT = 5_000;
 const DETECT_CACHE = 60_000;
 
 export const isLoopback = (req) => LOOPBACK.has(req.socket?.remoteAddress);
+export const isProxied = (req) => FORWARDED.some((name) => req.headers[name] !== undefined);
+
+/** The Host header's name, without its port. */
+const hostnameOf = (req) => {
+  try {
+    return new URL(`http://${req.headers.host ?? ''}`).hostname.toLowerCase();
+  } catch {
+    return '';
+  }
+};
 const bearer = (req) => (req.headers.authorization ?? '').replace(/^Bearer\s+/i, '');
 const CONVERSATION = /^\/agent\/conversations\/([0-9a-f]{12})(\/turns)?$/;
 const TURN = /^\/agent\/turns\/([0-9a-f]{12}-t\d+)(\/cancel|\/undo)?$/;
 const TOOL = /^\/agent\/tools\/([a-z_]+)$/;
 
-export function createAgentRoutes({ store, runner, tools, hub, providers, writeOps, maxBody }) {
+export function createAgentRoutes({ store, runner, tools, hub, providers, writeOps, maxBody, gated = false }) {
   let detected = null;
 
   async function detectAll() {
@@ -42,7 +59,7 @@ export function createAgentRoutes({ store, runner, tools, hub, providers, writeO
   }
 
   async function handleTools(req, res, url) {
-    if (!isLoopback(req)) return json(res, 403, { error: 'agent tools answer only on this machine' });
+    if (!isLoopback(req) || isProxied(req)) return json(res, 403, { error: 'agent tools answer only on this machine' });
     const token = bearer(req);
     if (!runner.turnForToken(token)) return json(res, 401, { error: 'no running turn holds that token' });
 
@@ -101,6 +118,9 @@ export function createAgentRoutes({ store, runner, tools, hub, providers, writeO
   async function handle(req, res, url) {
     const route = url.pathname;
     const method = req.method;
+    if (!gated && !LOCAL_NAMES.has(hostnameOf(req))) {
+      return json(res, 403, { error: 'an ungated drive answers agent routes only as localhost' });
+    }
     if (method !== 'GET' && !sameOrigin(req)) return json(res, 403, { error: 'a change has to come from this drive' });
 
     if (route === '/agent/providers' && method === 'GET') {

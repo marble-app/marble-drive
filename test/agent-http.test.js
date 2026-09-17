@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import fsp from 'node:fs/promises';
+import http from 'node:http';
 import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
@@ -304,6 +305,39 @@ test('a lock left by a host that is no longer running does not keep agents off',
   assert.ok(other.agents, 'the stale lock was taken over');
   await other.close();
   await assert.rejects(fsp.stat(path.join(root, '.marble', 'agents', 'host.lock')), { code: 'ENOENT' }, 'released on close');
+});
+
+// --- Final review: who counts as this machine, and which host a page came from. ---
+
+/** A raw request, for the headers fetch will not let a caller set. */
+const raw = (method, route, headers = {}) =>
+  new Promise((resolve, reject) => {
+    const req = http.request({ host: '127.0.0.1', port, method, path: route, headers }, (res) => {
+      res.resume();
+      res.on('end', () => resolve(res.statusCode));
+    });
+    req.on('error', reject);
+    req.end();
+  });
+
+test('a tool call that came through a proxy is refused, even with a live token', async () => {
+  const held = await start('script:hold');
+  const token = await until(() => drive.agents.runner.running().find((t) => t.id === held.turnId)?.token);
+  assert.equal(await raw('GET', '/agent/tools', { Authorization: `Bearer ${token}` }), 200);
+  for (const header of ['x-forwarded-for', 'x-forwarded-proto', 'x-forwarded-host']) {
+    assert.equal(await raw('GET', '/agent/tools', { Authorization: `Bearer ${token}`, [header]: '100.108.111.56' }), 403, header);
+  }
+  await api('POST', `/agent/turns/${held.turnId}/cancel`);
+  await finished(held.conversationId, held.turnId);
+});
+
+test('an ungated host answers the agent routes only to a page served as localhost', async () => {
+  assert.equal(await raw('GET', '/agent/settings', { Host: 'evil.example' }), 403);
+  assert.equal(await raw('GET', '/agent/settings', { Host: `evil.example:${port}` }), 403);
+  assert.equal(await raw('GET', '/agent/events', { Host: 'evil.example' }), 403);
+  assert.equal(await raw('GET', '/agent/settings', { Host: `127.0.0.1:${port}` }), 200);
+  assert.equal(await raw('GET', '/agent/settings', { Host: `localhost:${port}` }), 200);
+  assert.equal(await raw('GET', '/agent/settings', { Host: `[::1]:${port}` }), 200);
 });
 
 test.after(() => drive.close());
