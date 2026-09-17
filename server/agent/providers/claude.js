@@ -32,7 +32,10 @@ export function parseClaudeLine(line) {
     case 'system':
       return e.subtype === 'init' && e.session_id ? [{ type: 'session', id: e.session_id }] : [];
 
+    // A line with a parent_tool_use_id belongs to a subagent working inside a
+    // tool call, not to the turn itself.
     case 'stream_event': {
+      if (e.parent_tool_use_id) return [];
       const delta = e.event?.delta;
       return e.event?.type === 'content_block_delta' && delta?.type === 'text_delta' && delta.text
         ? [{ type: 'text.delta', text: delta.text }]
@@ -52,6 +55,7 @@ export function parseClaudeLine(line) {
     }
 
     case 'user': {
+      if (e.parent_tool_use_id) return [];
       const events = [];
       for (const block of e.message?.content ?? []) {
         if (block.type !== 'tool_result') continue;
@@ -74,7 +78,8 @@ export function parseClaudeLine(line) {
           inputTokens: usage.input_tokens ?? null,
           outputTokens: usage.output_tokens ?? null,
         },
-        e.is_error
+        // `error_max_turns` and friends arrive with is_error false.
+        e.is_error || e.subtype !== 'success'
           ? { type: 'done', ok: false, error: String(e.result || e.subtype || 'Claude reported an error') }
           : { type: 'done', ok: true },
       ];
@@ -139,10 +144,15 @@ export function createClaudeProvider({ auth = 'subscription', exec = runCommand,
       ];
       if (model) args.push('--model', model);
       if (resume) args.push('--resume', resume);
+      // Without a key the CLI would fall back to the login, and bill the
+      // subscription for a conversation someone chose to put on the API.
+      if (api && !env.ANTHROPIC_API_KEY) {
+        throw new Error('ANTHROPIC_API_KEY is not set, so Claude (API key) cannot run — set it or choose Claude');
+      }
       return {
         command: 'claude',
         args,
-        env: api && env.ANTHROPIC_API_KEY ? { ANTHROPIC_API_KEY: env.ANTHROPIC_API_KEY } : {},
+        env: api ? { ANTHROPIC_API_KEY: env.ANTHROPIC_API_KEY } : {},
         stdin: prompt,
       };
     },

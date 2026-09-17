@@ -140,3 +140,26 @@ test('a lost session is recognised by what the CLI says', () => {
   assert.equal(provider.lostSession('No conversation found with session ID: 3df910ef'), true);
   assert.equal(provider.lostSession('Claude AI usage limit reached|1789624200'), false);
 });
+
+test('Claude (API key) with no key refuses to start rather than use the login', () => {
+  const api = createClaudeProvider({ auth: 'api', env: { PATH: '/bin' } });
+  assert.throws(() => api.spawn({ workspace: '/w', prompt: 'x', env: {} }), {
+    message: 'ANTHROPIC_API_KEY is not set, so Claude (API key) cannot run — set it or choose Claude',
+  });
+  assert.deepEqual(createClaudeProvider({ auth: 'subscription', env: {} }).spawn({ workspace: '/w', prompt: 'x', env: {} }).env, {});
+});
+
+test('a result that is not a success ends the turn failed, even without is_error', () => {
+  const events = parseClaudeLine(JSON.stringify({ type: 'result', subtype: 'error_max_turns', is_error: false }));
+  assert.deepEqual(events.at(-1), { type: 'done', ok: false, error: 'error_max_turns' });
+  assert.deepEqual(parseClaudeLine(JSON.stringify({ type: 'result', subtype: 'success', is_error: false, result: 'ok' })).at(-1), { type: 'done', ok: true });
+});
+
+test('a subagent\'s deltas and tool results are not the turn\'s', () => {
+  const delta = { type: 'stream_event', parent_tool_use_id: 'toolu_1', event: { type: 'content_block_delta', delta: { type: 'text_delta', text: 'inner' } } };
+  const result = { type: 'user', parent_tool_use_id: 'toolu_1', message: { role: 'user', content: [{ type: 'tool_result', tool_use_id: 't9', content: 'inner' }] } };
+  assert.deepEqual(parseClaudeLine(JSON.stringify(delta)), []);
+  assert.deepEqual(parseClaudeLine(JSON.stringify(result)), []);
+  assert.equal(parseClaudeLine(JSON.stringify({ ...delta, parent_tool_use_id: null })).length, 1);
+  assert.equal(parseClaudeLine(JSON.stringify({ ...result, parent_tool_use_id: null })).length, 1);
+});
