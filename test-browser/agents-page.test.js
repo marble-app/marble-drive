@@ -262,3 +262,26 @@ test('opening the board panel does not clone the conversation on reconcile', asy
   assert.equal(await page.locator('.board-panel marble-conversation').count(), 0);
   assert.equal(await page.locator('.pane marble-conversation').getAttribute('conversation'), id);
 });
+
+test('the board panel does not overflow a narrow viewport', async () => {
+  const { page } = await openAgents({ viewport: { width: 390, height: 800 } });
+  const id = await page.evaluate(async () => {
+    const agent = window.marble.agent;
+    const id = await agent.start({ provider: 'fake' });
+    await agent.send(id, { prompt: 'script:rename', target: 'garden', viewing: 'Agents', selection: [] });
+    return id;
+  });
+  await page.locator(`.conv[data-id="${id}"]`).waitFor();
+  await page.keyboard.press('v');
+  await page.waitForFunction(() => document.body.getAttribute('data-view') === 'board');
+  await page.locator(`.column .conv[data-id="${id}"]`).click();
+  await page.locator('.board-panel[data-open="true"]').waitFor();
+  const box = await page.evaluate(() => {
+    const pane = document.querySelector('.pane').getBoundingClientRect();
+    const panel = document.querySelector('.board-panel').getBoundingClientRect();
+    return { pane: pane.width, panel: panel.width, vw: innerWidth };
+  });
+  assert.ok(box.pane <= box.vw + 1, `pane ${box.pane} wider than viewport ${box.vw}`);
+  assert.ok(box.panel <= box.vw + 1, `panel ${box.panel} wider than viewport ${box.vw}`);
+  assert.equal(await page.locator('marble-conversation').count(), 1);
+});

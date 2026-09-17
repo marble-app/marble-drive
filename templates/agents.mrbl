@@ -134,7 +134,7 @@ __ICON__
      a missing keyed child in .pane is cloned on reconcile. */
   body[data-view="board"][data-panel="open"] .library {
     display: grid;
-    grid-template-columns: minmax(0, 1fr) 520px;
+    grid-template-columns: minmax(0, 1fr) min(520px, 100%);
     grid-template-rows: minmax(0, 1fr) minmax(0, 40%);
     background: transparent;
     pointer-events: none;
@@ -144,11 +144,11 @@ __ICON__
     grid-column: 1; grid-row: 1 / -1; visibility: hidden;
   }
   body[data-view="board"][data-panel="open"] .pane {
-    grid-column: 2; grid-row: 1; pointer-events: auto;
+    grid-column: 2; grid-row: 1; pointer-events: auto; min-width: 0; max-width: 100%;
     box-shadow: var(--shadow-lift); padding-top: 2.4rem;
   }
   body[data-view="board"][data-panel="open"] .inspector {
-    grid-column: 2; grid-row: 2; pointer-events: auto;
+    grid-column: 2; grid-row: 2; pointer-events: auto; min-width: 0; max-width: 100%;
     border-left: 0; border-top: 1px solid var(--line); max-height: none;
   }
   .board {
@@ -257,6 +257,9 @@ __ICON__
     .board { scroll-snap-type: x mandatory; }
     .column { flex: 0 0 min(20rem, 85vw); scroll-snap-align: start; }
     .board-panel { width: 100%; }
+    body[data-view="board"][data-panel="open"] .library {
+      grid-template-columns: minmax(0, 1fr) minmax(0, 100%);
+    }
   }
   @media (hover: none) {
     .conv, .filter, .views button, .new, .inspector .actions button, .panel-close { min-height: 2.75rem; }
