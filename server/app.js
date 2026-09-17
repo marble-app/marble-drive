@@ -90,7 +90,7 @@ const RUNTIME = {
   'drive.js': () => path.join(REPO, 'runtime', 'drive.js'),
 };
 
-export async function createDrive(config, { log = console, agentProviders = null } = {}) {
+export async function createDrive(config, { log = console, agentProviders = null, agents: withAgents = true } = {}) {
   const store = createStore({ root: config.root });
   await store.ready();
 
@@ -208,6 +208,8 @@ export async function createDrive(config, { log = console, agentProviders = null
   // Set once the server exists, because the agents need to know where to tell
   // their MCP bridge to call back. Null when agents are not allowed here.
   let agents = null;
+  // Why `agents` is null, when it is — for the boot line.
+  let agentsWhy = withAgents ? agentsAllowed(config).why : 'not started for this command';
 
   const server = http.createServer(async (req, res) => {
     const url = new URL(req.url, `http://${req.headers.host ?? 'localhost'}`);
@@ -575,7 +577,7 @@ export async function createDrive(config, { log = console, agentProviders = null
     }
   });
 
-  if (agentsAllowed(config).ok) {
+  if (!agentsWhy) {
     agents = await createAgents({
       config,
       store,
@@ -590,6 +592,10 @@ export async function createDrive(config, { log = console, agentProviders = null
       },
       providers: agentProviders ?? builtInProviders(),
       log,
+    }).catch((err) => {
+      if (err.code !== 'EAGENTSHELD') throw err;
+      agentsWhy = err.message;
+      return null;
     });
   }
 
@@ -795,6 +801,7 @@ button{background:#738698;color:#fafaf7;border-color:#738698;cursor:pointer}p{co
     oplog,
     writeOps,
     agents,
+    agentsWhy,
     createDocument,
     config,
     seed,

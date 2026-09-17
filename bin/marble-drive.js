@@ -16,7 +16,6 @@
 import { spawn } from 'node:child_process';
 import path from 'node:path';
 
-import { agentsAllowed } from '../server/agent/index.js';
 import { createDrive } from '../server/app.js';
 import { backupNow } from '../server/backup.js';
 import { config } from '../server/config.js';
@@ -122,7 +121,7 @@ async function serve() {
     console.log(
       drive.agents
         ? `[drive] agents on — conversations in ${path.join(config.root, '.marble', 'agents')}`
-        : `[drive] agents off — ${agentsAllowed(config).why}`,
+        : `[drive] agents off — ${drive.agentsWhy}`,
     );
 
     if (config.open || flags.open) {
@@ -210,7 +209,7 @@ async function icon() {
 async function weigh() {
   const store = createStore({ root: config.root });
   await store.ready();
-  const drive = await createDrive(config, { log: { log() {}, error() {} } });
+  const drive = await createDrive(config, { log: { log() {}, error() {} }, agents: false });
 
   const wanted = args[0] ? parsePath(args[0], { allowRoot: false }) : null;
   const docs = wanted

@@ -264,4 +264,46 @@ test('a document changed outside Marble during a turn is flagged, with a way bac
   assert.match(await drive.store.read('watched'), />Research Garden</);
 });
 
+// --- Final review: one host runs agents on a drive; nothing else touches its turns. ---
+
+test('a second host on the same drive leaves the first one’s running turn alone, and runs no agents', async () => {
+  const held = await start('script:hold');
+  await until(() => drive.agents.runner.running().some((t) => t.id === held.turnId));
+
+  const second = await createDrive(config, {
+    log: quiet,
+    agentProviders: new Map([['fake', createFakeProvider({ scripts: SCRIPTS })]]),
+  });
+  assert.equal(second.agents, null);
+  assert.match(second.agentsWhy, new RegExp(`another host \\(pid ${process.pid}\\)`));
+  await second.close();
+
+  const utility = await createDrive(config, { log: quiet, agents: false });
+  assert.equal(utility.agents, null, 'a utility command never starts agents');
+  await utility.close();
+
+  const { body } = await api('GET', `/agent/conversations/${held.conversationId}`);
+  assert.equal(body.turns.find((t) => t.id === held.turnId).status, 'running', 'not marked interrupted');
+  assert.ok(!body.events.some((e) => e.type === 'turn.interrupted'));
+  assert.ok(await fsp.stat(path.join(ROOT, '.marble', 'agents', 'host.lock')), 'the first host still holds the drive');
+
+  await api('POST', `/agent/turns/${held.turnId}/cancel`);
+  await finished(held.conversationId, held.turnId);
+});
+
+test('a lock left by a host that is no longer running does not keep agents off', async () => {
+  const root = await fsp.mkdtemp(path.join(os.tmpdir(), 'marble-drive-agents-stale-'));
+  const { spawnSync } = await import('node:child_process');
+  const gone = spawnSync(process.execPath, ['-e', 'process.stdout.write(String(process.pid))']).stdout.toString();
+  await fsp.mkdir(path.join(root, '.marble', 'agents'), { recursive: true });
+  await fsp.writeFile(path.join(root, '.marble', 'agents', 'host.lock'), `${gone}\n`);
+  const other = await createDrive(loadConfig({ ...process.env, MARBLE_DRIVE_ROOT: root, MARBLE_DRIVE_AGENTS: '1', MARBLE_DRIVE_AGENT_WORKDIR: WORK }), {
+    log: quiet,
+    agentProviders: new Map([['fake', createFakeProvider({ scripts: SCRIPTS })]]),
+  });
+  assert.ok(other.agents, 'the stale lock was taken over');
+  await other.close();
+  await assert.rejects(fsp.stat(path.join(root, '.marble', 'agents', 'host.lock')), { code: 'ENOENT' }, 'released on close');
+});
+
 test.after(() => drive.close());
