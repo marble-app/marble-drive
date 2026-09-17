@@ -319,6 +319,9 @@ async function agentsCommand() {
   if (sub === 'try') {
     const id = args[1];
     if (!id) fail('usage: marble-drive agents try <provider> [--prompt="…"] [--model=…]');
+    // Before the line about quota: a typo spends nothing, so it should not say it will.
+    const known = [...builtInProviders().keys()];
+    if (!known.includes(id)) fail(`no provider "${id}" — there is: ${known.join(', ')}`);
     console.log(`[drive] one real turn on ${id}, against a scratch drive — this uses that provider's quota\n`);
     let result;
     try {

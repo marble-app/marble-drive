@@ -1,6 +1,8 @@
 import assert from 'node:assert/strict';
+import { spawnSync } from 'node:child_process';
 import fsp from 'node:fs/promises';
 import os from 'node:os';
+import path from 'node:path';
 import test from 'node:test';
 
 const { builtInProviders } = await import('../server/agent/providers/index.js');
@@ -101,4 +103,18 @@ test('a try leaves MARBLE_APPS as it found it, set or unset', async () => {
     if (saved === undefined) delete process.env.MARBLE_APPS;
     else process.env.MARBLE_APPS = saved;
   }
+});
+
+test('`agents try` with an unknown id names the real ones, and never claims to spend quota', async () => {
+  const cli = path.join(path.dirname(new URL(import.meta.url).pathname), '..', 'bin', 'marble-drive.js');
+  const root = await fsp.mkdtemp(path.join(os.tmpdir(), 'marble-cli-root-'));
+  const run = spawnSync(process.execPath, [cli, 'agents', 'try', 'nope'], {
+    encoding: 'utf8',
+    env: { PATH: process.env.PATH, HOME: process.env.HOME, MARBLE_DRIVE_ROOT: root },
+    timeout: 20_000,
+  });
+  await fsp.rm(root, { recursive: true, force: true });
+  assert.equal(run.status, 1);
+  assert.doesNotMatch(run.stdout, /quota/);
+  assert.match(run.stderr, /no provider "nope" — there is: claude-subscription, claude-api, cursor/);
 });
