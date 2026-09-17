@@ -104,6 +104,22 @@ error, and the next message starts a new one (it does not retry). A parser is
 tested against streams recorded from real runs in `test/fixtures/providers/`;
 record a new one when a CLI changes its output. Codex arrives in Plan 5.
 
+## The drawer
+
+Every document gets a launcher (bottom right, `⌘J`). The drawer slides over the
+page without changing its layout; **pin** docks it beside the page instead,
+with a transient stylesheet, so nothing about the document changes. Below 720 px
+it is a full-screen sheet. Drag the header away to dismiss it.
+
+The conversation you had open follows you from page to page. A turn keeps the
+document it started on: when you are looking at another page, the header says
+which file it is editing. Each finished turn shows what changed with **Undo
+turn**, and a turn the watchdog flagged offers **Restore**.
+
+Agent text is shown, never interpreted as HTML (`renderText` in
+`runtime/agent-ui.js`). Browser tests: `npm run test:browser`; screenshots:
+`node test-browser/screens.mjs <dir>`.
+
 ## Not yet
 
 - A turn's target does not follow a move, and a trashed target is not named as

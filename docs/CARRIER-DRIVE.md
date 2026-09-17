@@ -82,3 +82,24 @@ entitled to edit.
 
 Until then this file is the specification, and `runtime/drive.js` is the only
 implementation.
+
+## `marble.agent`
+
+Injected (with `runtime/agent-ui.js`, the drawer) only when the host runs agents — see [AGENTS.md](AGENTS.md). Its absence is the answer to "can I talk to an agent here".
+
+| call | |
+|---|---|
+| `marble.agent.providers()` | `[{id, label, installed, signedIn, detail, default, defaultModel}]` |
+| `marble.agent.conversations({archived})` / `.conversation(id)` | summaries / `{meta, turns, events}` |
+| `marble.agent.start({provider, model, handoffFrom})` | → conversation id |
+| `marble.agent.send(id, {prompt, target, viewing, selection})` | missing context comes from `context()` |
+| `marble.agent.cancel(turn)` / `.undo(turn)` / `.dequeue(turn)` | |
+| `marble.agent.archive(id, bool)` / `.markReviewed(id)` / `.handoff(id, provider)` | |
+| `marble.agent.restore(path, sha)` | the watchdog's restore point |
+| `marble.agent.on(id \| '*', fn)` | a conversation's events (replayed, then live) / summaries; returns unsubscribe |
+| `marble.agent.context()` | `{viewing, target, selection}` — the selection survives focus moving into transient chrome |
+| `marble.agent.select(ids)` | for documents with their own selection model; `null` clears |
+| `marble.agent.current()` / `.remember(id)` | the conversation that follows you between pages |
+| `marble.agent.open(id)` / `.close()` | ask the drawer |
+
+A document that draws its own agent interface says `<meta name="marble-agent" content="custom">` and gets the API without the drawer.
