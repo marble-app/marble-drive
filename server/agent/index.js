@@ -17,6 +17,7 @@ import { createTools } from './tools.js';
 
 const BRIDGE = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..', 'bin', 'marble-mcp.js');
 const LOOPBACK_HOSTS = new Set(['127.0.0.1', '::1', 'localhost']);
+const ANY_HOST = new Set(['0.0.0.0', '::']);
 
 export function agentsAllowed(config) {
   if (!config.agents) return { ok: false, why: 'MARBLE_DRIVE_AGENTS is not set' };
@@ -24,8 +25,14 @@ export function agentsAllowed(config) {
   if (!config.secret && !LOOPBACK_HOSTS.has(config.host)) {
     return { ok: false, why: `an ungated host on ${config.host} would let anyone who reaches it run agents on this machine` };
   }
+  // The bridge calls back on loopback. A host bound to one other address
+  // never hears it; one bound to every address does.
+  if (!LOOPBACK_HOSTS.has(config.host) && !ANY_HOST.has(config.host)) {
+    return { ok: false, why: `the agent bridge calls back on loopback, and a host bound only to ${config.host} would not answer it` };
+  }
   const inside = path.relative(config.root, config.agentWorkdir);
-  if (!inside.startsWith('..') && !path.isAbsolute(inside)) {
+  const outside = inside === '..' || inside.startsWith(`..${path.sep}`) || path.isAbsolute(inside);
+  if (!outside) {
     return { ok: false, why: `MARBLE_DRIVE_AGENT_WORKDIR is inside the drive (${config.agentWorkdir}); put it where an agent's own tools find nothing` };
   }
   return { ok: true, why: null };

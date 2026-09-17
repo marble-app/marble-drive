@@ -236,6 +236,16 @@ test('when agents are allowed, and when not', () => {
   assert.match(agentsAllowed({ ...base, agentWorkdir: '/data/drive/.work' }).why, /inside the drive/);
 });
 
+test('a workdir named like a parent is still inside the drive; a host bound where loopback cannot reach is refused', () => {
+  const base = { agents: true, multiTenant: false, secret: 'x', host: '127.0.0.1', root: '/data/drive', agentWorkdir: '/cache/agents' };
+  assert.match(agentsAllowed({ ...base, agentWorkdir: '/data/drive/..work' }).why, /inside the drive/);
+  assert.equal(agentsAllowed({ ...base, agentWorkdir: '/data/drive-work' }).ok, true);
+  assert.equal(agentsAllowed({ ...base, host: '::' }).ok, true);
+  assert.equal(agentsAllowed({ ...base, host: '::1' }).ok, true);
+  assert.equal(agentsAllowed({ ...base, host: 'localhost' }).ok, true);
+  assert.match(agentsAllowed({ ...base, host: '100.108.111.56' }).why ?? '', /loopback/);
+});
+
 test('a host with agents off answers 404 to all of it', async () => {
   const off = await createDrive(loadConfig({ ...process.env, MARBLE_DRIVE_AGENTS: '' }), { log: quiet });
   const offPort = await new Promise((resolve) => off.server.listen(0, '127.0.0.1', () => resolve(off.server.address().port)));
