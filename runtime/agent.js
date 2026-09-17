@@ -82,7 +82,7 @@
       let entry = streams.get(key);
       if (!entry) {
         const url = key === '*' ? '/agent/events?all=1' : `/agent/events?conversation=${enc(key)}`;
-        entry = { source: new EventSource(url), handlers: new Set() };
+        entry = { source: new EventSource(url), handlers: new Set(), history: key === '*' ? null : [] };
         const current = entry;
         const deliver = (message) => {
           let data;
@@ -91,6 +91,7 @@
           } catch {
             return;
           }
+          if (current.history) current.history.push(data);
           for (const handler of [...current.handlers]) handler(data);
         };
         if (key === '*') entry.source.addEventListener('summary', deliver);
@@ -98,6 +99,9 @@
         streams.set(key, entry);
       }
       entry.handlers.add(fn);
+      if (entry.history) {
+        for (const event of entry.history) fn(event);
+      }
       return () => {
         entry.handlers.delete(fn);
         if (entry.handlers.size === 0 && streams.get(key) === entry) {

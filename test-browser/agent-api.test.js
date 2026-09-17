@@ -9,6 +9,9 @@ const SCRIPTS = {
     { call: 'apply_ops', args: { path: 'garden', note: 'rename', ops: [{ type: 'setText', id: 'h', text: 'Backlog' }] } },
     { say: 'Renamed the heading.' },
   ],
+  followup: [
+    { say: 'The second reply.' },
+  ],
 };
 
 const host = await startDrive({ scripts: SCRIPTS });
@@ -56,6 +59,57 @@ test('start and send run a turn, and the stream replays and follows it', async (
   assert.deepEqual(stored.map((e) => e.seq), stored.map((_, i) => i + 1), 'every stored event once, in order');
   assert.equal(events.find((e) => e.type === 'user').context.target, 'garden', 'the target is this document');
   assert.match(await host.drive.store.read('garden'), />Backlog</);
+});
+
+test('each subscriber gets the sequenced history and continues with the live stream', async () => {
+  const { page } = await open();
+  const result = await page.evaluate(async () => {
+    const agent = window.marble.agent;
+    const id = await agent.start({ provider: 'fake' });
+    const first = [];
+    let firstCompleted;
+    const offFirst = agent.on(id, (event) => {
+      first.push(event);
+      if (event.type === 'turn.completed') firstCompleted?.(event);
+    });
+
+    const initialDone = new Promise((resolve) => { firstCompleted = resolve; });
+    await agent.send(id, { prompt: 'script:rename' });
+    await initialDone;
+
+    const initialSeqs = first.filter((event) => event.seq).map((event) => event.seq);
+    const initialLast = initialSeqs.at(-1);
+    const second = [];
+    let secondCompleted;
+    const nextFirstDone = new Promise((resolve) => {
+      firstCompleted = (event) => {
+        if (event.seq > initialLast) resolve(event.seq);
+      };
+    });
+    const nextSecondDone = new Promise((resolve) => { secondCompleted = resolve; });
+    const offSecond = agent.on(id, (event) => {
+      second.push(event);
+      if (event.type === 'turn.completed' && event.seq > initialLast) secondCompleted(event.seq);
+    });
+    const replayedSeqs = second.filter((event) => event.seq).map((event) => event.seq);
+
+    await agent.send(id, { prompt: 'script:followup' });
+    const [firstLiveSeq, secondLiveSeq] = await Promise.all([nextFirstDone, nextSecondDone]);
+    offSecond();
+    offFirst();
+    return {
+      initialSeqs,
+      replayedSeqs,
+      firstSeqs: first.filter((event) => event.seq).map((event) => event.seq),
+      secondSeqs: second.filter((event) => event.seq).map((event) => event.seq),
+      firstLiveSeq,
+      secondLiveSeq,
+    };
+  });
+
+  assert.deepEqual(result.replayedSeqs, result.initialSeqs, 'the second subscriber receives the completed history');
+  assert.deepEqual(result.secondSeqs, result.firstSeqs, 'both subscribers receive each sequenced event once and in order');
+  assert.equal(result.secondLiveSeq, result.firstLiveSeq, 'the second subscriber stays on the shared live stream');
 });
 
 test('context is this document and the addressed elements the person selected', async () => {
@@ -132,19 +186,26 @@ test('a failing call rejects with the host’s own words', async () => {
 
 test('the summary stream reports conversations changing', async () => {
   const { page } = await open();
-  const summary = await page.evaluate(async () => {
+  const ready = page.waitForResponse((response) => {
+    const url = new URL(response.url());
+    return url.pathname === '/agent/events' && url.searchParams.get('all') === '1' && response.status() === 200;
+  });
+  await page.evaluate(() => {
     const agent = window.marble.agent;
-    const heard = new Promise((resolve) => {
+    window.summaryForTest = new Promise((resolve) => {
       const off = agent.on('*', (s) => {
         off();
         resolve(s);
       });
     });
-    await new Promise((r) => setTimeout(r, 100));
-    const id = await agent.start({ provider: 'fake' });
-    agent.send(id, { prompt: 'script:rename' });
-    return heard;
   });
+  await ready;
+  await page.evaluate(async () => {
+    const agent = window.marble.agent;
+    const id = await agent.start({ provider: 'fake' });
+    await agent.send(id, { prompt: 'script:rename' });
+  });
+  const summary = await page.evaluate(() => window.summaryForTest);
   assert.ok(summary.id);
   assert.ok('needsReview' in summary);
 });
