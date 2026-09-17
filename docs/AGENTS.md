@@ -12,8 +12,16 @@ MARBLE_DRIVE_AGENTS=1
 MARBLE_DRIVE_AGENT_PROVIDER=claude-subscription
 ```
 
-Refused, with the reason printed at boot, on a multi-tenant host and on an
-ungated host that is not listening on loopback.
+Refused, with the reason printed at boot, on a multi-tenant host, on an
+ungated host that is not listening on loopback, and on a host bound to one
+address other than loopback (the MCP bridge calls back on loopback). One host
+runs agents on a drive at a time: it holds `.marble/agents/host.lock`, and a
+second `serve` on the same drive boots with agents off. Utility commands
+(`weigh`) never start them.
+
+An ungated host answers `/agent/*` only when addressed as `localhost`,
+`127.0.0.1` or `[::1]`, and `/agent/tools/*` refuses any request carrying
+`X-Forwarded-*` headers, since behind Tailscale Serve every peer is loopback.
 
 ## How a turn runs
 
@@ -61,3 +69,8 @@ Nothing is reverted automatically: the likeliest outside writer is you.
 A provider is `{ id, label, detect, prepare?, spawn, parse }` — see
 `server/agent/runner.js`. `test/fixtures/fake-provider.js` is the smallest
 complete one. Claude and Cursor adapters arrive in Plan 2.
+
+## Not yet
+
+- A turn's target does not follow a move, and a trashed target is not named as
+  such: both make `apply_ops` answer `no document "…"` (spec §6.1, deferred).
