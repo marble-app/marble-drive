@@ -24,6 +24,7 @@ import { fileURLToPath } from 'node:url';
 import { pickEnv } from '../env.js';
 import { INSTRUCTIONS } from '../instructions.js';
 import { runCommand } from './exec.js';
+import { writePrivateFile } from './private-file.js';
 
 const HOOK = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..', '..', 'bin', 'marble-cursor-hook.js');
 const SUMMARY = 200;
@@ -104,7 +105,9 @@ export function parseCursorLine(line, state) {
           {
             type: 'tool.call',
             name: mcp ? call.args?.toolName : kind.replace(/ToolCall$/, ''),
-            input: mcp ? call.args?.args ?? {} : call.args ?? {},
+            // A built-in call's args can be a whole file (an edit's contents),
+            // and the hook refused it anyway: a preview says what was tried.
+            input: mcp ? call.args?.args ?? {} : { preview: JSON.stringify(call.args ?? {}).slice(0, 500) },
             callId: e.call_id,
           },
         ];
@@ -180,13 +183,17 @@ export function createCursorProvider({
           `Cursor has user-level MCP servers (${servers.join(', ')}) in ~/.cursor/mcp.json; Marble cannot tell their tools from its own, so Cursor turns are off until they are removed`,
         );
       }
+      // Cursor runs this through a shell. Double quotes survive a space in a
+      // path; they do not make a quote, `$`, backtick or backslash inert.
+      for (const part of [process.execPath, hookPath]) {
+        if (/["$`\\]/.test(part)) throw new Error(`the Cursor hook command cannot be quoted safely: ${part}`);
+      }
       const dir = path.join(workspace, '.cursor');
       await fsp.mkdir(dir, { recursive: true });
 
       const mcpFile = path.join(dir, 'mcp.json');
       const config = { mcpServers: { marble: { command: mcp.command, args: mcp.args, env: mcp.env } } };
-      await fsp.writeFile(mcpFile, JSON.stringify(config, null, 2), { mode: 0o600 });
-      await fsp.chmod(mcpFile, 0o600);
+      await writePrivateFile(mcpFile, JSON.stringify(config, null, 2));
 
       const hooks = {
         version: 1,

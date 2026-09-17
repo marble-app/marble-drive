@@ -108,7 +108,7 @@ test('a tool the hook blocked shows up as a failed call, with the reason', () =>
   const completed = { type: 'tool_call', subtype: 'completed', call_id: 'c1', tool_call: { editToolCall: { args: { path: '/tmp/x.mrbl' }, result: { rejected: { path: '', reason: 'Marble agents can only use Marble tools' } } } } };
   const events = [started, completed].flatMap((l) => parseCursorLine(JSON.stringify(l), state));
   assert.deepEqual(events, [
-    { type: 'tool.call', name: 'edit', input: { path: '/tmp/x.mrbl' }, callId: 'c1' },
+    { type: 'tool.call', name: 'edit', input: { preview: '{"path":"/tmp/x.mrbl"}' }, callId: 'c1' },
     { type: 'tool.result', callId: 'c1', ok: false, summary: 'Marble agents can only use Marble tools' },
   ]);
 });
@@ -291,4 +291,31 @@ test('a lost chat is recognised by what the CLI says', () => {
   for (const said of ['You\'ve hit your usage limit', 'not found: model gpt-9', 'Chat failed\nfile not found']) {
     assert.equal(provider.lostSession(said), false, said);
   }
+});
+
+test('a built-in tool call keeps only a short preview of its input; an MCP call keeps all of it', () => {
+  const contents = 'x'.repeat(50_000);
+  const edit = { type: 'tool_call', subtype: 'started', call_id: 'c2', tool_call: { editToolCall: { args: { path: '/tmp/big.txt', contents } } } };
+  const [call] = parseCursorLine(JSON.stringify(edit), {});
+  assert.deepEqual(Object.keys(call.input), ['preview']);
+  assert.equal(call.input.preview, JSON.stringify({ path: '/tmp/big.txt', contents }).slice(0, 500));
+
+  const ops = [{ type: 'setText', id: 'h', text: contents }];
+  const mcp = { type: 'tool_call', subtype: 'started', call_id: 'c3', tool_call: { mcpToolCall: { args: { toolName: 'apply_ops', args: { path: 'garden', ops } } } } };
+  assert.deepEqual(parseCursorLine(JSON.stringify(mcp), {})[0].input, { path: 'garden', ops });
+});
+
+test('prepare refuses a hook command it could not quote safely', async () => {
+  const workspace = await fsp.mkdtemp(path.join(os.tmpdir(), 'marble-cursor-ws-'));
+  for (const hookPath of ['/a/$HOME/hook.js', '/a/`id`/hook.js', '/a/"q"/hook.js', '/a/b\\c/hook.js']) {
+    await assert.rejects(
+      createCursorProvider({ hookPath, userDir: NO_USER_DIR }).prepare({ workspace, mcp: mcpForTest, meta: {} }),
+      /cannot be quoted/,
+      hookPath,
+    );
+  }
+  await createCursorProvider({ hookPath: '/a/with space/hook.js', userDir: NO_USER_DIR }).prepare({ workspace, mcp: mcpForTest, meta: {} });
+  const hooks = JSON.parse(await fsp.readFile(path.join(workspace, '.cursor', 'hooks.json'), 'utf8'));
+  assert.equal(hooks.hooks.preToolUse[0].command, `"${process.execPath}" "/a/with space/hook.js"`);
+  assert.deepEqual((await fsp.readdir(path.join(workspace, '.cursor'))).sort(), ['hooks.json', 'mcp.json'], 'no temp file left behind');
 });

@@ -163,3 +163,15 @@ test('a subagent\'s deltas and tool results are not the turn\'s', () => {
   assert.equal(parseClaudeLine(JSON.stringify({ ...delta, parent_tool_use_id: null })).length, 1);
   assert.equal(parseClaudeLine(JSON.stringify({ ...result, parent_tool_use_id: null })).length, 1);
 });
+
+test('prepare replaces an existing, looser MCP config with a private one, and leaves nothing beside it', async () => {
+  const workspace = await fsp.mkdtemp(path.join(os.tmpdir(), 'marble-claude-ws-'));
+  const file = path.join(workspace, 'mcp.json');
+  await fsp.writeFile(file, '{"old": true}', { mode: 0o644 });
+  await fsp.chmod(file, 0o644);
+  const mcp = { command: '/usr/bin/node', args: [], env: { MARBLE_AGENT_TOKEN: 'tok2' } };
+  await createClaudeProvider().prepare({ workspace, mcp, meta: {} });
+  assert.equal((await fsp.stat(file)).mode & 0o777, 0o600);
+  assert.equal(JSON.parse(await fsp.readFile(file, 'utf8')).mcpServers.marble.env.MARBLE_AGENT_TOKEN, 'tok2');
+  assert.deepEqual(await fsp.readdir(workspace), ['mcp.json']);
+});

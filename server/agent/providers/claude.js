@@ -11,12 +11,12 @@
 // The two providers differ only in billing: the subscription gets no API key
 // in its environment, so the CLI uses the login; the API provider hands it one.
 
-import fsp from 'node:fs/promises';
 import path from 'node:path';
 
 import { pickEnv } from '../env.js';
 import { INSTRUCTIONS } from '../instructions.js';
 import { runCommand } from './exec.js';
+import { writePrivateFile } from './private-file.js';
 
 const PREFIX = 'mcp__marble__';
 const SUMMARY = 200;
@@ -131,8 +131,7 @@ export function createClaudeProvider({ auth = 'subscription', exec = runCommand,
     async prepare({ workspace, mcp }) {
       const config = { mcpServers: { marble: { command: mcp.command, args: mcp.args, env: mcp.env } } };
       // The token in here is good for one turn, and nobody else's business.
-      await fsp.writeFile(path.join(workspace, 'mcp.json'), JSON.stringify(config, null, 2), { mode: 0o600 });
-      await fsp.chmod(path.join(workspace, 'mcp.json'), 0o600);
+      await writePrivateFile(path.join(workspace, 'mcp.json'), JSON.stringify(config, null, 2));
     },
 
     spawn({ workspace, prompt, resume = null, model = null }) {
