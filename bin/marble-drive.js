@@ -118,6 +118,12 @@ async function serve() {
         : '[drive] no intent provider — direct manipulation works without one.',
     );
 
+    console.log(
+      drive.agents
+        ? `[drive] agents on — conversations in ${path.join(config.root, '.marble', 'agents')}`
+        : `[drive] agents off — ${drive.agentsWhy}`,
+    );
+
     if (config.open || flags.open) {
       const opener = process.platform === 'darwin' ? 'open' : process.platform === 'win32' ? 'start' : 'xdg-open';
       spawn(opener, [url], { stdio: 'ignore', detached: true }).unref();
@@ -203,7 +209,7 @@ async function icon() {
 async function weigh() {
   const store = createStore({ root: config.root });
   await store.ready();
-  const drive = await createDrive(config, { log: { log() {}, error() {} } });
+  const drive = await createDrive(config, { log: { log() {}, error() {} }, agents: false });
 
   const wanted = args[0] ? parsePath(args[0], { allowRoot: false }) : null;
   const docs = wanted

@@ -1,0 +1,41 @@
+// The provider adapter for `fake-agent.mjs`. Real adapters (Plan 2) have the
+// same five members; this one's stream format is simply the fake agent's own.
+
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
+
+const AGENT = path.join(path.dirname(fileURLToPath(import.meta.url)), 'fake-agent.mjs');
+
+export function createFakeProvider({ scripts = {}, id = 'fake' } = {}) {
+  return {
+    id,
+    label: 'Fake',
+    detect: async () => ({ installed: true, signedIn: true, detail: 'scripted' }),
+    spawn({ mcp, prompt, resume, env }) {
+      const name = /^script:(\S+)/.exec(prompt)?.[1];
+      return {
+        command: process.execPath,
+        args: [AGENT],
+        env: {
+          ...env,
+          FAKE_SCRIPT: JSON.stringify(scripts[name] ?? []),
+          FAKE_MCP: JSON.stringify(mcp),
+          FAKE_RESUME: resume ?? '',
+        },
+        stdin: prompt,
+      };
+    },
+    parse(line) {
+      const e = JSON.parse(line);
+      switch (e.kind) {
+        case 'session': return [{ type: 'session', id: e.id }];
+        case 'delta': return [{ type: 'text.delta', text: e.text }];
+        case 'text': return [{ type: 'text', text: e.text }];
+        case 'call': return [{ type: 'tool.call', name: e.name, input: e.input, callId: e.callId }];
+        case 'result': return [{ type: 'tool.result', callId: e.callId, ok: e.ok, summary: e.summary }];
+        case 'done': return [{ type: 'done', ok: e.ok, error: e.error }];
+        default: return [];
+      }
+    },
+  };
+}

@@ -18,6 +18,8 @@ import http from 'node:http';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
+import { agentsAllowed, createAgents } from './agent/index.js';
+import { builtInProviders } from './agent/providers/index.js';
 import { backupNow, scheduleBackups } from './backup.js';
 import { bytesOf, chooseProvider, enginePath, examine, guardOps, shaOf } from './engine.js';
 import { dataUri as iconUri, svg as iconSvg } from './favicon.js';
@@ -88,7 +90,7 @@ const RUNTIME = {
   'drive.js': () => path.join(REPO, 'runtime', 'drive.js'),
 };
 
-export async function createDrive(config, { log = console } = {}) {
+export async function createDrive(config, { log = console, agentProviders = null, agents: withAgents = true } = {}) {
   const store = createStore({ root: config.root });
   await store.ready();
 
@@ -139,21 +141,60 @@ export async function createDrive(config, { log = console } = {}) {
 
   /** The one write path. Ops are checked against the document as it actually
    *  is and refused as a batch, a restore point is taken of what is being
-   *  replaced, and only then do the bytes move. */
-  async function applyOps(docPath, ops, { client = null } = {}) {
+   *  replaced, and only then do the bytes move.
+   *
+   *  `prepare` and `after` are for a writer that has to decide against the
+   *  document *as it is inside the queue* — an agent's precondition, and the
+   *  undo record it keeps. Nothing can land between them and the write. A
+   *  gesture passes neither. */
+  async function applyOps(docPath, ops, { client = null, prepare = null, after = null } = {}) {
     return enqueue(docPath, async () => {
       const source = await store.read(docPath);
       if (source === null) throw Object.assign(new Error(`no document "${docPath}"`), { status: 404 });
 
+      if (prepare) {
+        const planned = await prepare(source);
+        if (planned.refused) {
+          return { applied: 0, refused: planned.refused, bytes: bytesOf(source), sha: shaOf(source) };
+        }
+        ops = planned.ops;
+      }
+
+      // `after` is bookkeeping for a writer that has already won; it must not
+      // turn a write that landed (or a batch that changed nothing) into an
+      // error. A throw is logged, and the result stands.
+      const settle = (before, now) => {
+        try {
+          after?.(before, now);
+        } catch (err) {
+          log.error(`[drive] after-write hook for ${docPath} failed: ${err.message}`);
+        }
+      };
+
       const next = guardOps(source, ops);
-      if (next === source) return { applied: 0, bytes: bytesOf(source), sha: shaOf(source) };
+      if (next === source) {
+        settle(source, source);
+        return { applied: 0, bytes: bytesOf(source), sha: shaOf(source) };
+      }
 
       lastKnown.set(docPath, { source: next, client });
       pendingWrites.mark(docPath, shaOf(next));
       const written = await store.write(docPath, next, { label: 'ops', ops });
       await oplog.append(docPath, ops, { client: client ?? 'anon' });
+      settle(source, next);
       return { applied: ops.length, ...written };
     });
+  }
+
+  /** Apply, then tell everybody else. The route and the agent tools both come
+   *  through here, so the echo rule lives in one place. */
+  async function writeOps(docPath, ops, options = {}) {
+    const result = await applyOps(docPath, ops, options);
+    if (result.applied) {
+      channels.toDocument(docPath, 'changed', { except: options.client ?? null });
+      channels.toDrive('changed', { path: docPath, bytes: result.bytes }, { except: options.client ?? null });
+    }
+    return result;
   }
 
   /** A document arriving from anywhere other than an op — created, restored,
@@ -169,7 +210,17 @@ export async function createDrive(config, { log = console } = {}) {
     return result;
   }
 
+  // Named once, and used both here and by the agents: a document arriving
+  // from outside an op, always through the same restore point and echo.
+  const createDocument = (docPath, source, { label = 'created' } = {}) => putDocument(docPath, source, { label });
+
   // ------------------------------------------------------------------- routes
+
+  // Set once the server exists, because the agents need to know where to tell
+  // their MCP bridge to call back. Null when agents are not allowed here.
+  let agents = null;
+  // Why `agents` is null, when it is — for the boot line.
+  let agentsWhy = withAgents ? agentsAllowed(config).why : 'not started for this command';
 
   const server = http.createServer(async (req, res) => {
     const url = new URL(req.url, `http://${req.headers.host ?? 'localhost'}`);
@@ -194,11 +245,20 @@ export async function createDrive(config, { log = console } = {}) {
       }
       if (route === '/favicon.ico') return send(res, 302, '', { Location: '/favicon.svg' });
       if (route === '/gate') return gateRoute(req, res, url);
+      // In front of the gate: the MCP bridge carries a turn's token, not the
+      // drive's secret, and the tool routes check that token themselves.
+      if (route === '/agent/tools' || route.startsWith('/agent/tools/')) {
+        // Awaited, so a refusal thrown inside reaches the catch below as a status.
+        return agents ? await agents.handleTools(req, res, url) : text(res, 404, 'not found');
+      }
       if (!gate.allows(req)) {
         if ((req.headers.accept ?? '').includes('text/html')) {
           return send(res, 302, '', { Location: `/gate?to=${encodeURIComponent(req.url)}` });
         }
         return json(res, 401, { error: 'this drive is closed', hint: 'POST /gate with the secret' });
+      }
+      if (route.startsWith('/agent/')) {
+        return agents ? await agents.handle(req, res, url) : text(res, 404, 'not found');
       }
 
       if (route === '/') {
@@ -280,13 +340,9 @@ export async function createDrive(config, { log = console } = {}) {
         const ops = JSON.parse((await readBody(req, config.maxBodyBytes)).toString('utf8'));
         if (!Array.isArray(ops)) return json(res, 400, { error: 'expected an array of ops' });
 
-        const result = await applyOps(docPath, ops, { client });
-        if (result.applied) {
-          // The echo is for the other tabs, the other devices, the other
-          // people, and the agent — never for whoever filed it.
-          channels.toDocument(docPath, 'changed', { except: client });
-          channels.toDrive('changed', { path: docPath, bytes: result.bytes }, { except: client });
-        }
+        // The echo is for the other tabs, the other devices, the other people,
+        // and the agent — never for whoever filed it.
+        const result = await writeOps(docPath, ops, { client });
         return json(res, 200, { ok: true, ...result });
       }
 
@@ -543,6 +599,28 @@ export async function createDrive(config, { log = console } = {}) {
     }
   });
 
+  if (!agentsWhy) {
+    agents = await createAgents({
+      config,
+      store,
+      writeOps,
+      createDocument,
+      // Where the bridge calls back: this server, on loopback, whatever port it
+      // ended up on.
+      origin: () => {
+        const address = server.address();
+        const loopback = address.family === 'IPv6' ? '[::1]' : '127.0.0.1';
+        return `http://${loopback}:${address.port}`;
+      },
+      providers: agentProviders ?? builtInProviders(),
+      log,
+    }).catch((err) => {
+      if (err.code !== 'EAGENTSHELD') throw err;
+      agentsWhy = err.message;
+      return null;
+    });
+  }
+
   // ------------------------------------------------------------------ helpers
 
   function gateRoute(req, res, url) {
@@ -700,7 +778,14 @@ button{background:#738698;color:#fafaf7;border-color:#738698;cursor:pointer}p{co
     // when the edit is an agent rewriting more of the file than it meant to.
     // There is no way to capture this as it happens: an external write is only
     // ever observed after the fact.
-    if (prior) await store.mark(docPath, prior.source, 'pre-external');
+    if (prior) {
+      await store.mark(docPath, prior.source, 'pre-external');
+      // Every agent writes through ops, so an agent's own work never reaches
+      // this branch. Something changing a document from outside while a turn
+      // runs is flagged on that turn, with the restore point just taken, and
+      // left to a person: the likeliest outside writer is them, in an editor.
+      agents?.watchdog(docPath, shaOf(prior.source));
+    }
     lastKnown.set(docPath, { source: current, client: null });
     await store.thinHistory(docPath).catch(() => {});
     channels.toDocument(docPath, 'changed');
@@ -736,6 +821,10 @@ button{background:#738698;color:#fafaf7;border-color:#738698;cursor:pointer}p{co
     channels,
     gate,
     oplog,
+    writeOps,
+    agents,
+    agentsWhy,
+    createDocument,
     config,
     seed,
     weigh,
@@ -754,6 +843,7 @@ button{background:#738698;color:#fafaf7;border-color:#738698;cursor:pointer}p{co
       }
     },
     async close() {
+      await agents?.close();
       stopBackups();
       watcher.close();
       channels.close();

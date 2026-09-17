@@ -3482,3 +3482,4 @@ git commit -m "Agents core: the watchdog, a boot line, and docs/AGENTS.md"
 - **Plan 3 — Drawer:** `runtime/agent.js` (`window.marble.agent`), `runtime/agent-ui.js` (`<marble-agent-drawer>`, `<marble-conversation>`), injection, watchdog Restore.
 - **Plan 4 — `Agents.mrbl`:** library ⇄ board with the FLIP toggle.
 - **Plan 5 — Codex:** adapter behind experimental; live verification when the quota returns (2026-10-15).
+- **Moved and trashed targets (spec §6.1), unassigned:** a turn's target follows a move, and a trashed target answers tool calls with "…was moved to the trash". Today both surface as `no document "…"`, and undo reports the steps as kept.

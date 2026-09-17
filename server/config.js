@@ -5,6 +5,7 @@
 // Drive can see and edit, which is a lovely idea and a terrible way to hold the
 // secret that guards it.
 
+import os from 'node:os';
 import path from 'node:path';
 
 export function loadConfig(env = process.env) {
@@ -110,6 +111,18 @@ export function loadConfig(env = process.env) {
     maxBlobBytes: num('MARBLE_DRIVE_MAX_BLOB', 64 * 1024 * 1024),
 
     open: bool('MARBLE_DRIVE_OPEN', false),
+
+    // Agents: Claude, Cursor or Codex running on this machine and editing the
+    // drive through Marble's tools. Off unless asked for, because it is a
+    // process on this machine acting for whoever got through the gate. See
+    // docs/AGENTS.md.
+    agents: bool('MARBLE_DRIVE_AGENTS', false),
+    agentProvider: str('MARBLE_DRIVE_AGENT_PROVIDER', 'claude-subscription'),
+    // Each conversation's scratch workspace. Deliberately not under the drive
+    // root: an agent's own tools should find nothing there worth touching.
+    agentWorkdir: path.resolve(str('MARBLE_DRIVE_AGENT_WORKDIR', path.join(os.homedir(), '.cache', 'marble-drive', 'agents'))),
+    agentStallMinutes: num('MARBLE_DRIVE_AGENT_STALL_MINUTES', 10),
+    agentMaxMinutes: num('MARBLE_DRIVE_AGENT_MAX_MINUTES', 30),
   };
 }
 

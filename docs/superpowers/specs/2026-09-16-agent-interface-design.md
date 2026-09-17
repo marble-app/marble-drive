@@ -230,6 +230,9 @@ queued → running → completed | failed | cancelled
 - **Target moved** mid-turn: the turn's target follows (the same path the
   `pendingWrites.move` already follows). **Target trashed:** tool calls return
   `{error: "…was moved to the trash"}` and the agent decides what to say.
+  *Deferred to a later plan* — neither is in the agents-core plan. Today a
+  moved or trashed target makes `apply_ops` return `no document "…"`, and
+  undoing the turn reports its steps as kept.
 - **Cancel.** `SIGTERM`, then `SIGKILL` after 3 s. Ops already applied are kept;
   the turn ends `cancelled` with Undo offered.
 - **Stall.** No output for 10 minutes ends the turn `failed: stalled`. A turn
