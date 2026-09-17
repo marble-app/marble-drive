@@ -285,3 +285,64 @@ test('the board panel does not overflow a narrow viewport', async () => {
   assert.ok(box.panel <= box.vw + 1, `panel ${box.panel} wider than viewport ${box.vw}`);
   assert.equal(await page.locator('marble-conversation').count(), 1);
 });
+
+test('opening a conversation clears needs-review', async () => {
+  // Earlier tests can leave a script:rename in flight. If that turn lands after
+  // reset(), garden is already Backlog and this rename applies nothing — so
+  // the row never needs review.
+  for (let n = 0; n < 200; n++) {
+    const listed = await host.drive.agents.store.conversations();
+    if (!listed.some((c) => c.running || c.queued)) break;
+    await new Promise((resolve) => setTimeout(resolve, 25));
+  }
+  const { page } = await openAgents();
+  await host.drive.createDocument('garden', GARDEN.replace('Research Garden', `Garden ${Date.now()}`), { label: 'fresh' });
+  const id = await page.evaluate(async () => {
+    const agent = window.marble.agent;
+    const id = await agent.start({ provider: 'fake' });
+    await agent.send(id, { prompt: 'script:rename', target: 'garden', viewing: 'Agents', selection: [] });
+    return id;
+  });
+  const row = page.locator(`.conv[data-id="${id}"]`);
+  await row.waitFor();
+  await page.locator(`.conv[data-id="${id}"]:not([data-status="running"])`).waitFor();
+  assert.equal(await row.getAttribute('data-status'), 'review');
+  await row.click();
+  await page.locator(`.conv[data-id="${id}"][data-status="completed"]`).waitFor();
+  await page.locator('button.filter[data-filter="review"]').click();
+  assert.equal(await page.locator(`.conv[data-id="${id}"]:not([hidden])`).count(), 0);
+});
+
+test('board view survives a file reconcile that still says library', async () => {
+  const { page } = await openAgents();
+  const id = await page.evaluate(async () => {
+    const agent = window.marble.agent;
+    const id = await agent.start({ provider: 'fake' });
+    await agent.send(id, { prompt: 'script:rename', target: 'garden', viewing: 'Agents', selection: [] });
+    return id;
+  });
+  await page.locator(`.conv[data-id="${id}"]`).waitFor();
+  await page.waitForFunction(() =>
+    [...document.querySelectorAll('.conv')].every((el) => el.dataset.status !== 'running'),
+  );
+  await page.keyboard.press('v');
+  await page.waitForFunction(() => document.body.getAttribute('data-view') === 'board');
+  assert.equal(await page.locator(`.column[data-col="review"] .conv[data-id="${id}"]`).count(), 1);
+
+  const filed = await page.evaluate(() => window.marble.source.outer(document.body));
+  assert.equal(filed.includes('data-view="board"'), false, 'board is page-only and must not be filed');
+  assert.match(AGENTS, /data-view="library"/);
+
+  // What patchFromFile does: copy the file's library onto the live body, then
+  // hand the body to registered wirers. Rows follow the snapped view into #list
+  // if placeAll ran before restoreView.
+  await page.evaluate((slice) => {
+    const next = new DOMParser().parseFromString(slice, 'text/html');
+    document.body.setAttribute('data-view', next.body.getAttribute('data-view') || 'library');
+    const list = document.querySelector('#list');
+    for (const el of [...document.querySelectorAll('.column .conv')]) list.append(el);
+    window.marble.adopt(document.body);
+  }, AGENTS);
+  assert.equal(await page.locator('body').getAttribute('data-view'), 'board');
+  assert.equal(await page.locator(`.column[data-col="review"] .conv[data-id="${id}"]`).count(), 1);
+});

@@ -666,6 +666,9 @@ __ICON__
       if (id && !summaries.has(id) && agent) {
         try { upsert((await agent.conversation(id)).meta); } catch { /* opened from a stale id */ }
       }
+      // Opening clears review (spec 6.3), same as the drawer. Skip when
+      // needsReview is already false so Mark reviewed does not PATCH twice.
+      if (id && summaries.get(id)?.needsReview) agent.markReviewed(id).catch(() => {});
       paintOpen();
       if (!id) { showEmpty(); return; }
       await fillInspector(id);
@@ -829,7 +832,10 @@ __ICON__
       restoreView();
       deriveFilters();
       marble.register?.(() => {
-        deriveView();
+        // pageOnly stops filing data-view; it does not stop syncAttrs copying
+        // the file's data-view="library" onto a live board session.
+        restoreView();
+        placeAll();
         deriveFilters();
         applyFilters();
         restoreOpen();
