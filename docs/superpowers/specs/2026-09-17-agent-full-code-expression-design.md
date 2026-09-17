@@ -153,19 +153,26 @@ After this change an agent's own work reaches that branch constantly, and the
 likeliest outside writer during a turn is the agent. Left alone, every turn
 would trip its own watchdog.
 
-**New rule.** While a turn is running, a change to a document in the drive is
-attributed to that turn: the runner records a `document.changed` event carrying the
-path and the restore point `store.mark(…, 'pre-external')` just took, and does
-not raise `watchdog`. When no turn is running, the branch behaves exactly as it
-does today.
+**New rule, and it turns on capability.** While a turn running at capability
+`full` is in flight, a change to a document in the drive is attributed to that
+turn: the runner records a `document.changed` event carrying the path and the
+restore point `store.mark(…, 'pre-external')` just took, and does not raise
+`watchdog`.
 
-The cost, stated: if you edit a document while a turn runs, your edit is
+A turn running at `documents` claims nothing. That agent writes only through
+ops, so the branch's original reasoning still holds exactly: a document changing
+from outside during its turn *is* an intrusion, and is still flagged. The
+watchdog is not weakened for the boundary it was written for — it is narrowed to
+the boundary where it still means something.
+
+The cost, stated: if you edit a document while a `full` turn runs, your edit is
 attributed to the agent. You do not lose it — it appears in that turn's change
 list with its restore point, which is the same affordance the watchdog offered,
-without calling it an alarm. This is the honest trade for a single-owner host:
-the alternative is flagging every turn, which trains you to ignore the flag.
+without calling it an alarm. This is the honest trade: the alternative is
+flagging every full turn, which trains you to ignore the flag.
 
-`needsReview` keeps `watchdog` as an outcome for the no-turn-running case.
+`needsReview` keeps `watchdog` as an outcome for both the no-turn-running case
+and every `documents` turn.
 
 ## 7. Undo, rebuilt on restore points
 
