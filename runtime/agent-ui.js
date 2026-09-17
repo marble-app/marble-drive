@@ -707,5 +707,514 @@
 
   customElements.define('marble-conversation', MarbleConversation);
 
+  // ------------------------------------------------------------ the drawer
+
+  const WIDTH = 420;
+  const PHONE = '(max-width: 719px)';
+  const OPEN_KEY = 'marble-agent:open';
+  const PIN_KEY = 'marble-agent:pinned';
+  const TOOLS = new Set(['button', 'select', 'textarea', 'input', 'a']);
+
+  const DRAWER_CSS = `
+    :host { position: fixed; inset: auto 0 0 auto; z-index: 2147483000; }
+    .launcher { position: fixed; right: calc(20px + env(safe-area-inset-right, 0px)); bottom: calc(20px + env(safe-area-inset-bottom, 0px));
+      width: 44px; height: 44px; border-radius: 50%; border: 1px solid var(--line); background: var(--card); color: var(--ink);
+      box-shadow: var(--shadow-lift); cursor: pointer; display: grid; place-items: center;
+      transition: transform 110ms var(--snap), opacity 200ms var(--settle); }
+    .launcher:hover { transform: translateY(-1px); }
+    .launcher:active { transform: scale(.92); transition-duration: 60ms; }
+    .launcher svg { width: 20px; height: 20px; }
+    .launcher-dot { position: absolute; top: 6px; right: 6px; width: 9px; height: 9px; border-radius: 50%; background: var(--accent-ink); box-shadow: 0 0 0 2px var(--card); }
+    .launcher-dot[hidden] { display: none; }
+    .launcher.running::after { content: ''; position: absolute; inset: -4px; border-radius: 50%; border: 2px solid transparent; border-top-color: var(--accent); animation: spin 1s linear infinite; }
+    :host([data-open-state="open"]) .launcher { opacity: 0; pointer-events: none; }
+
+    .panel { position: fixed; top: 0; right: 0; bottom: 0; width: ${WIDTH}px; max-width: 100vw; display: flex; flex-direction: column;
+      background: rgba(250, 250, 247, .86); -webkit-backdrop-filter: blur(24px) saturate(180%); backdrop-filter: blur(24px) saturate(180%);
+      border-left: 1px solid var(--line); box-shadow: -18px 0 40px rgba(74,66,52,.12);
+      transform: translateX(100%); will-change: transform; visibility: hidden; }
+    .panel[data-pinned="true"] { box-shadow: none; background: var(--paper); -webkit-backdrop-filter: none; backdrop-filter: none; }
+    @media (prefers-color-scheme: dark) { .panel { background: rgba(22, 24, 26, .86); box-shadow: -18px 0 40px rgba(0,0,0,.45); } .panel[data-pinned="true"] { background: var(--paper); } }
+    @media (prefers-reduced-transparency: reduce) { .panel { background: var(--paper); -webkit-backdrop-filter: none; backdrop-filter: none; } }
+
+    .bar { flex: none; display: flex; align-items: center; gap: 4px; padding: calc(10px + env(safe-area-inset-top, 0px)) 10px 8px 14px; touch-action: none; cursor: grab; user-select: none; }
+    .bar:active { cursor: grabbing; }
+    .grip { display: none; }
+    .title { min-width: 0; display: flex; align-items: center; gap: 4px; font: 600 14px/1.3 inherit; font-family: inherit; color: var(--ink); background: none; border: 0; padding: 6px 8px; margin-left: -8px; border-radius: 8px; cursor: pointer; }
+    .title:hover { background: var(--paper-2); }
+    .title-text { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .title svg { flex: none; color: var(--faint); }
+    .provider { flex: none; font-size: 11px; color: var(--muted); background: var(--paper-2); border-radius: 999px; padding: 1px 8px; }
+    .provider:empty { display: none; }
+    .spacer { flex: 1; }
+    .icon { flex: none; width: 30px; height: 30px; display: grid; place-items: center; border: 0; border-radius: 8px; background: none; color: var(--muted); cursor: pointer; transition: transform 110ms var(--snap), background 200ms var(--settle); }
+    .icon:hover { background: var(--paper-2); color: var(--ink); }
+    .icon:active { transform: scale(.92); }
+    .icon[aria-pressed="true"] { color: var(--accent-ink); background: var(--accent-soft); }
+    .where { flex: none; margin: 0 14px 6px; font-size: 12px; color: var(--muted); background: var(--accent-soft); border-radius: 8px; padding: 5px 10px; }
+    .where[hidden] { display: none; }
+
+    .menu { position: absolute; top: calc(52px + env(safe-area-inset-top, 0px)); left: 10px; right: 10px; z-index: 2; max-height: 60vh; overflow-y: auto;
+      background: var(--card); border: 1px solid var(--line); border-radius: 12px; box-shadow: var(--shadow-lift); padding: 6px; transform-origin: top left;
+      animation: menu-in 160ms var(--settle); }
+    .menu.actions { left: auto; width: 240px; transform-origin: top right; }
+    .menu[hidden] { display: none; }
+    .menu [role="menuitem"] { display: flex; flex-direction: column; align-items: flex-start; gap: 1px; width: 100%; text-align: left; font: inherit; color: var(--ink); background: none; border: 0; border-radius: 8px; padding: 7px 10px; cursor: pointer; }
+    .menu [role="menuitem"]:hover, .menu [role="menuitem"]:focus-visible { background: var(--paper-2); outline: none; }
+    .menu [role="menuitem"] small { font-size: 11.5px; color: var(--faint); }
+    .menu .empty { font-size: 12px; color: var(--faint); padding: 8px 10px; }
+
+    marble-conversation { flex: 1; min-height: 0; }
+
+    @media ${PHONE} {
+      .panel { top: 0; left: 0; width: 100vw; border-left: 0; transform: translateY(100%); }
+      .grip { display: block; position: absolute; top: calc(6px + env(safe-area-inset-top, 0px)); left: 50%; width: 36px; height: 4px; margin-left: -18px; border-radius: 2px; background: var(--line); }
+      .bar { padding-top: calc(18px + env(safe-area-inset-top, 0px)); }
+      .pin { display: none; }
+    }
+    @media (prefers-reduced-motion: reduce) {
+      .panel { transition: opacity 150ms linear; }
+      .launcher.running::after, .menu { animation: none; }
+    }
+    @keyframes spin { to { transform: rotate(360deg); } }
+    @keyframes menu-in { from { opacity: 0; transform: scale(.97); } to { opacity: 1; transform: none; } }
+  `;
+
+  const ICONS = {
+    launcher: '<svg viewBox="0 0 20 20" aria-hidden="true"><path d="M4 5.5A2.5 2.5 0 0 1 6.5 3h7A2.5 2.5 0 0 1 16 5.5v5a2.5 2.5 0 0 1-2.5 2.5H9l-3.5 3v-3H6.5A2.5 2.5 0 0 1 4 10.5z" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"/><path d="M7.5 8h5" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg>',
+    chevron: '<svg width="12" height="12" viewBox="0 0 12 12" aria-hidden="true"><path d="M3 4.5 6 7.5l3-3" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>',
+    plus: '<svg width="16" height="16" viewBox="0 0 16 16" aria-hidden="true"><path d="M8 3v10M3 8h10" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg>',
+    more: '<svg width="16" height="16" viewBox="0 0 16 16" aria-hidden="true"><circle cx="3.5" cy="8" r="1.3" fill="currentColor"/><circle cx="8" cy="8" r="1.3" fill="currentColor"/><circle cx="12.5" cy="8" r="1.3" fill="currentColor"/></svg>',
+    pin: '<svg width="16" height="16" viewBox="0 0 16 16" aria-hidden="true"><rect x="2.5" y="3" width="11" height="10" rx="2" fill="none" stroke="currentColor" stroke-width="1.5"/><path d="M9.5 3v10" stroke="currentColor" stroke-width="1.5"/></svg>',
+    close: '<svg width="16" height="16" viewBox="0 0 16 16" aria-hidden="true"><path d="M4 4l8 8M12 4l-8 8" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg>',
+  };
+
+  class MarbleAgentDrawer extends HTMLElement {
+    constructor() {
+      super();
+      const root = this.attachShadow({ mode: 'open' });
+      root.innerHTML = `<style>${TOKENS}${DRAWER_CSS}</style>
+        <button type="button" class="launcher" aria-label="Agent (⌘J)" aria-expanded="false">${ICONS.launcher}<span class="launcher-dot" hidden></span></button>
+        <aside class="panel" role="dialog" aria-label="Agent" data-open="false" data-pinned="false" inert>
+          <span class="grip" aria-hidden="true"></span>
+          <header class="bar">
+            <button type="button" class="title" aria-haspopup="menu" aria-expanded="false"><span class="title-text">New conversation</span>${ICONS.chevron}</button>
+            <span class="provider"></span>
+            <span class="spacer"></span>
+            <button type="button" class="icon new" aria-label="New conversation">${ICONS.plus}</button>
+            <button type="button" class="icon more" aria-label="More" aria-haspopup="menu" aria-expanded="false">${ICONS.more}</button>
+            <button type="button" class="icon pin" aria-label="Pin beside the page" aria-pressed="false">${ICONS.pin}</button>
+            <button type="button" class="icon close" aria-label="Close">${ICONS.close}</button>
+          </header>
+          <div class="where" hidden></div>
+          <div class="menu recent" role="menu" aria-label="Recent conversations" hidden></div>
+          <div class="menu actions" role="menu" aria-label="Conversation actions" hidden></div>
+          <marble-conversation></marble-conversation>
+        </aside>`;
+      this.launcher = root.querySelector('.launcher');
+      this.dot = root.querySelector('.launcher-dot');
+      this.panel = root.querySelector('.panel');
+      this.bar = root.querySelector('.bar');
+      this.titleButton = root.querySelector('.title');
+      this.titleText = root.querySelector('.title-text');
+      this.providerEl = root.querySelector('.provider');
+      this.where = root.querySelector('.where');
+      this.recent = root.querySelector('.menu.recent');
+      this.actions = root.querySelector('.menu.actions');
+      this.pinButton = root.querySelector('.pin');
+      this.view = root.querySelector('marble-conversation');
+
+      this.progress = 0;
+      this.cancelMotion = null;
+      this.isOpen = false;
+      this.pinned = false;
+      this.phone = matchMedia(PHONE);
+      this.reduced = matchMedia('(prefers-reduced-motion: reduce)');
+      this.summaries = new Map();
+      this.labels = new Map();
+    }
+
+    get api() {
+      return window.marble?.agent;
+    }
+
+    connectedCallback() {
+      const api = this.api;
+      this.pinned = api.storage.get(PIN_KEY) === '1';
+      const current = api.current();
+      if (current) this.view.setAttribute('conversation', current);
+
+      this.launcher.addEventListener('click', () => this.open());
+      this.root('.close').addEventListener('click', () => this.close());
+      this.root('.new').addEventListener('click', () => this.startNew());
+      this.pinButton.addEventListener('click', () => this.setPinned(!this.pinned));
+      this.titleButton.addEventListener('click', () => this.toggleMenu(this.recent, this.titleButton, () => this.fillRecent()));
+      this.root('.more').addEventListener('click', (event) => this.toggleMenu(this.actions, event.currentTarget, () => this.fillActions()));
+
+      this.view.addEventListener('conversation', (event) => {
+        api.remember(event.detail.id);
+      });
+      this.view.addEventListener('meta', (event) => this.showMeta(event.detail.meta));
+      this.view.addEventListener('running', (event) => this.showWhere(event.detail));
+
+      this.onKey = (event) => {
+        if ((event.metaKey || event.ctrlKey) && !event.altKey && !event.shiftKey && event.key.toLowerCase() === 'j') {
+          event.preventDefault();
+          if (this.isOpen) this.close();
+          else this.open();
+        } else if (event.key === 'Escape' && this.isOpen && this.shadowRoot.activeElement !== null) {
+          if (!this.recent.hidden || !this.actions.hidden) this.hideMenus();
+          else this.close();
+        }
+      };
+      addEventListener('keydown', this.onKey, true);
+      this.onOpenRequest = (event) => {
+        if (event.detail?.id) this.switchTo(event.detail.id);
+        this.open();
+      };
+      this.onCloseRequest = () => this.close();
+      addEventListener('marble:agent-open', this.onOpenRequest);
+      addEventListener('marble:agent-close', this.onCloseRequest);
+      this.onViewport = () => this.render();
+      this.phone.addEventListener('change', this.onViewport);
+      this.onOutside = (event) => {
+        if (!event.composedPath().some((node) => node === this.recent || node === this.actions || node === this.titleButton || node?.classList?.contains?.('more'))) this.hideMenus();
+      };
+      this.shadowRoot.addEventListener('pointerdown', this.onOutside);
+
+      this.bindDrag();
+
+      api.conversations().then((list) => {
+        for (const summary of list) this.summaries.set(summary.id, summary);
+        this.showLauncherState();
+      }).catch(() => {});
+      this.offSummaries = api.on('*', (summary) => {
+        this.summaries.set(summary.id, summary);
+        this.showLauncherState();
+        if (summary.id === this.view.getAttribute('conversation')) this.showMeta(summary);
+      });
+      api.providers().then((providers) => {
+        for (const provider of providers) this.labels.set(provider.id, provider);
+        this.showMeta(this.meta);
+      }).catch(() => {});
+
+      if (api.storage.get(OPEN_KEY) === '1') this.open({ animate: false });
+      else this.render();
+    }
+
+    disconnectedCallback() {
+      removeEventListener('keydown', this.onKey, true);
+      removeEventListener('marble:agent-open', this.onOpenRequest);
+      removeEventListener('marble:agent-close', this.onCloseRequest);
+      this.phone.removeEventListener('change', this.onViewport);
+      this.offSummaries?.();
+      this.cancelMotion?.();
+      this.dock(false);
+    }
+
+    root(selector) {
+      return this.shadowRoot.querySelector(selector);
+    }
+
+    // ---------------------------------------------------------- open, close
+
+    open({ animate = true } = {}) {
+      this.isOpen = true;
+      this.api.storage.set(OPEN_KEY, '1');
+      this.animateTo(1, { animate });
+      this.view.focusInput();
+      const id = this.view.getAttribute('conversation');
+      if (id && this.summaries.get(id)?.needsReview) this.api.markReviewed(id).catch(() => {});
+    }
+
+    close() {
+      this.isOpen = false;
+      this.api.storage.set(OPEN_KEY, '0');
+      this.hideMenus();
+      this.animateTo(0);
+      this.launcher.focus({ preventScroll: true });
+    }
+
+    animateTo(target, { animate = true, velocity = 0 } = {}) {
+      this.cancelMotion?.();
+      this.cancelMotion = null;
+      if (!animate || this.reduced.matches) {
+        this.progress = target;
+        this.render();
+        return;
+      }
+      this.cancelMotion = spring({
+        from: this.progress,
+        to: target,
+        velocity,
+        onFrame: (value) => {
+          this.progress = value;
+          this.render();
+        },
+        onDone: () => {
+          this.cancelMotion = null;
+        },
+      });
+      this.render();
+    }
+
+    render() {
+      const phone = this.phone.matches;
+      const p = Math.max(0, Math.min(1, this.progress));
+      const visible = this.isOpen || p > 0.001;
+      this.panel.dataset.open = String(this.isOpen);
+      this.panel.dataset.pinned = String(this.pinned && !phone);
+      this.panel.inert = !this.isOpen;
+      this.panel.style.visibility = visible ? 'visible' : 'hidden';
+      this.launcher.setAttribute('aria-expanded', String(this.isOpen));
+      this.toggleAttribute('data-open-state', false);
+      if (this.isOpen) this.setAttribute('data-open-state', 'open');
+      if (this.reduced.matches) {
+        this.panel.style.transform = 'none';
+        this.panel.style.opacity = this.isOpen ? '1' : '0';
+      } else {
+        this.panel.style.opacity = '';
+        this.panel.style.transform = phone ? `translateY(${(1 - p) * 100}%)` : `translateX(${(1 - p) * 100}%)`;
+      }
+      this.pinButton.setAttribute('aria-pressed', String(this.pinned));
+      this.dock(this.isOpen && this.pinned && !phone);
+    }
+
+    setPinned(pinned) {
+      this.pinned = pinned;
+      this.api.storage.set(PIN_KEY, pinned ? '1' : '0');
+      this.render();
+    }
+
+    /** Docking moves the page, which is the whole point of pinning — and is
+     *  done with a transient stylesheet, so nothing about the document changes. */
+    dock(on) {
+      const existing = document.getElementById('marble-agent-dock');
+      if (on && !existing) {
+        const style = document.createElement('style');
+        style.id = 'marble-agent-dock';
+        style.setAttribute('data-marble-transient', '');
+        style.textContent = `html { margin-inline-end: ${WIDTH}px !important; }`;
+        document.head.append(style);
+      } else if (!on && existing) {
+        existing.remove();
+      }
+    }
+
+    // ---------------------------------------------------------- dragging
+
+    bindDrag() {
+      let drag = null;
+      // A title click opens the recent menu; only the bar's empty space starts a drag.
+      this.titleButton.addEventListener('pointerdown', (event) => event.stopPropagation());
+      this.bar.addEventListener('pointerdown', (event) => {
+        if (!this.isOpen || event.button !== 0) return;
+        if (event.composedPath().some((node) => TOOLS.has(node?.localName) && node !== this.titleButton)) return;
+        drag = { id: event.pointerId, start: this.phone.matches ? event.clientY : event.clientX, moved: false, history: [] };
+        this.bar.setPointerCapture(event.pointerId);
+      });
+      this.bar.addEventListener('pointermove', (event) => {
+        if (!drag || event.pointerId !== drag.id) return;
+        const position = this.phone.matches ? event.clientY : event.clientX;
+        const distance = position - drag.start;
+        if (!drag.moved && Math.abs(distance) < 10) return;
+        if (!drag.moved) {
+          drag.moved = true;
+          this.cancelMotion?.();
+          this.cancelMotion = null;
+        }
+        const size = this.phone.matches ? innerHeight : WIDTH;
+        // Past the open edge the sheet resists rather than stops.
+        const offset = distance >= 0 ? distance : (distance * size * 0.55) / (size + 0.55 * Math.abs(distance)) ;
+        this.progress = 1 - offset / size;
+        drag.history.push({ position, t: event.timeStamp });
+        if (drag.history.length > 5) drag.history.shift();
+        this.render();
+      });
+      const release = (event) => {
+        if (!drag || event.pointerId !== drag.id) return;
+        const current = drag;
+        drag = null;
+        if (!current.moved) return;
+        // The click that ends a drag on the title is not a request for the menu.
+        this.suppressClick = true;
+        setTimeout(() => {
+          this.suppressClick = false;
+        }, 0);
+        const size = this.phone.matches ? innerHeight : WIDTH;
+        const [first, last] = [current.history[0], current.history.at(-1)];
+        const velocity = first && last && last.t > first.t ? ((last.position - first.position) / (last.t - first.t)) * 1000 : 0;
+        const offset = (1 - this.progress) * size;
+        const resting = offset + project(velocity);
+        if (resting > size / 2) {
+          this.isOpen = false;
+          this.api.storage.set(OPEN_KEY, '0');
+          this.animateTo(0, { velocity: -velocity / size });
+        } else {
+          this.animateTo(1, { velocity: -velocity / size });
+        }
+      };
+      this.bar.addEventListener('pointerup', release);
+      this.bar.addEventListener('pointercancel', release);
+      // A drag that ends on the title must not also open the recent menu.
+      this.titleButton.addEventListener('click', (event) => {
+        if (this.suppressClick) {
+          event.stopImmediatePropagation();
+          this.suppressClick = false;
+        }
+      }, true);
+    }
+
+    // ---------------------------------------------------------- content
+
+    startNew() {
+      this.hideMenus();
+      this.api.remember(null);
+      this.view.removeAttribute('conversation');
+      this.meta = null;
+      this.showMeta(null);
+      if (!this.isOpen) this.open();
+      else this.view.focusInput();
+    }
+
+    switchTo(id) {
+      this.hideMenus();
+      if (this.view.getAttribute('conversation') === id) return;
+      this.api.remember(id);
+      this.view.setAttribute('conversation', id);
+      if (this.summaries.get(id)?.needsReview && this.isOpen) this.api.markReviewed(id).catch(() => {});
+    }
+
+    showMeta(meta) {
+      if (meta !== undefined) this.meta = meta;
+      const current = this.meta && this.meta.id === this.view.getAttribute('conversation') ? this.meta : null;
+      this.titleText.textContent = current?.title || (this.view.getAttribute('conversation') ? 'Conversation' : 'New conversation');
+      this.providerEl.textContent = current ? this.labels.get(current.provider)?.label ?? current.provider : '';
+    }
+
+    showWhere(running) {
+      const target = running?.turn ? running.target : null;
+      const here = window.marble?.app;
+      if (target && target !== here) {
+        this.where.textContent = `Viewing ${here} · editing ${target}`;
+        this.where.hidden = false;
+      } else {
+        this.where.hidden = true;
+      }
+    }
+
+    showLauncherState() {
+      const list = [...this.summaries.values()].filter((s) => !s.archived);
+      this.launcher.classList.toggle('running', list.some((s) => s.status === 'running'));
+      const openId = this.isOpen ? this.view.getAttribute('conversation') : null;
+      this.dot.hidden = !list.some((s) => s.needsReview && s.id !== openId);
+    }
+
+    // ---------------------------------------------------------- menus
+
+    toggleMenu(menu, button, fill) {
+      const opening = menu.hidden;
+      this.hideMenus();
+      if (!opening) return;
+      menu.hidden = false;
+      button.setAttribute('aria-expanded', 'true');
+      fill();
+    }
+
+    hideMenus() {
+      for (const [menu, button] of [[this.recent, this.titleButton], [this.actions, this.root('.more')]]) {
+        menu.hidden = true;
+        button.setAttribute('aria-expanded', 'false');
+      }
+    }
+
+    item(menu, label, detail, onChoose) {
+      const button = h('button');
+      button.type = 'button';
+      button.setAttribute('role', 'menuitem');
+      button.append(h('span', '', label));
+      if (detail) button.append(h('small', '', detail));
+      button.addEventListener('click', () => {
+        this.hideMenus();
+        onChoose();
+      });
+      menu.append(button);
+      return button;
+    }
+
+    async fillRecent() {
+      this.recent.replaceChildren(h('div', 'empty', 'Loading…'));
+      let list = [];
+      try {
+        list = await this.api.conversations();
+      } catch (err) {
+        this.recent.replaceChildren(h('div', 'empty', err.message));
+        return;
+      }
+      this.recent.replaceChildren();
+      if (!list.length) this.recent.append(h('div', 'empty', 'No conversations yet.'));
+      for (const summary of list.slice(0, 20)) {
+        this.summaries.set(summary.id, summary);
+        const provider = this.labels.get(summary.provider)?.label ?? summary.provider;
+        const state = summary.status === 'running' ? 'Running' : summary.needsReview ? 'Needs review' : summary.activity || summary.status;
+        this.item(this.recent, summary.title || 'Untitled', `${provider} · ${state}`, () => this.switchTo(summary.id));
+      }
+      this.recent.querySelector('[role="menuitem"]')?.focus({ preventScroll: true });
+    }
+
+    async fillActions() {
+      this.actions.replaceChildren();
+      const id = this.view.getAttribute('conversation');
+      const summary = id ? this.summaries.get(id) ?? this.meta : null;
+      if (id) {
+        for (const provider of this.labels.values()) {
+          if (!provider.installed || !provider.signedIn || provider.id === summary?.provider) continue;
+          this.item(this.actions, `Continue in ${provider.label}`, 'A new conversation that knows what happened here', async () => {
+            try {
+              const next = await this.api.handoff(id, provider.id);
+              this.switchTo(next);
+            } catch (err) {
+              this.view.system(err.message, true);
+            }
+          });
+        }
+        this.item(this.actions, 'Archive conversation', 'Hidden from the list; nothing is deleted', async () => {
+          try {
+            await this.api.archive(id, true);
+            this.startNew();
+          } catch (err) {
+            this.view.system(err.message, true);
+          }
+        });
+      }
+      try {
+        const docs = await window.marble.docs();
+        if (docs.some((doc) => (doc.path ?? doc.name) === 'Agents')) {
+          this.item(this.actions, 'Open Agents', 'Every conversation, as a list or a board', () => {
+            location.href = window.marble.href('Agents');
+          });
+        }
+      } catch {
+        // No listing, no link.
+      }
+      if (!this.actions.children.length) this.actions.append(h('div', 'empty', 'Nothing to do yet.'));
+    }
+  }
+
+  customElements.define('marble-agent-drawer', MarbleAgentDrawer);
+
+  // ------------------------------------------------------------ mounting
+
+  const mount = () => {
+    if (document.querySelector('meta[name="marble-agent"][content="custom"]')) return;
+    if (document.querySelector('marble-agent-drawer')) return;
+    const drawer = document.createElement('marble-agent-drawer');
+    drawer.setAttribute('data-marble-transient', '');
+    document.body.append(drawer);
+  };
+
   window.marbleAgentUI = { renderText, spring, project, TOKENS };
+
+  if (window.marble?.agent) mount();
+  else addEventListener('marble:agent', mount, { once: true });
 })();

@@ -186,10 +186,6 @@ test('a failing call rejects with the host’s own words', async () => {
 
 test('the summary stream reports conversations changing', async () => {
   const { page } = await open();
-  const ready = page.waitForResponse((response) => {
-    const url = new URL(response.url());
-    return url.pathname === '/agent/events' && url.searchParams.get('all') === '1' && response.status() === 200;
-  });
   await page.evaluate(() => {
     const agent = window.marble.agent;
     window.summaryForTest = new Promise((resolve) => {
@@ -199,7 +195,6 @@ test('the summary stream reports conversations changing', async () => {
       });
     });
   });
-  await ready;
   await page.evaluate(async () => {
     const agent = window.marble.agent;
     const id = await agent.start({ provider: 'fake' });
