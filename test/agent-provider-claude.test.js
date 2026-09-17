@@ -134,3 +134,9 @@ test('detection probes get the allowlisted environment, never the drive secret',
     for (const key of Object.keys(env)) assert.ok(ENV_ALLOWLIST.includes(key) || key === 'ANTHROPIC_API_KEY', key);
   }
 });
+
+test('a lost session is recognised by what the CLI says', () => {
+  const provider = createClaudeProvider({ env: {} });
+  assert.equal(provider.lostSession('No conversation found with session ID: 3df910ef'), true);
+  assert.equal(provider.lostSession('Claude AI usage limit reached|1789624200'), false);
+});

@@ -282,3 +282,13 @@ test('the detection probe gets the allowlisted environment it was given, never t
   await createCursorProvider({ userDir: NO_USER_DIR, exec, env: { PATH: '/bin' } }).detect();
   assert.deepEqual(seen, [{ PATH: '/bin', HOME: '/h', CURSOR_API_KEY: 'ck' }, { PATH: '/bin' }]);
 });
+
+test('a lost chat is recognised by what the CLI says', () => {
+  const provider = createCursorProvider({ env: {}, userDir: NO_USER_DIR });
+  for (const said of ['Chat not found', 'Error: session abc does not exist', 'That conversation no longer exists']) {
+    assert.equal(provider.lostSession(said), true, said);
+  }
+  for (const said of ['You\'ve hit your usage limit', 'not found: model gpt-9', 'Chat failed\nfile not found']) {
+    assert.equal(provider.lostSession(said), false, said);
+  }
+});

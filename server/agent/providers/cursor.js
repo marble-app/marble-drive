@@ -212,5 +212,8 @@ export function createCursorProvider({
     },
 
     parse: (line, state) => parseCursorLine(line, state),
+
+    // `--resume` with a chat Cursor no longer has.
+    lostSession: (error) => /(chat|session|conversation)[^\n]*(not found|does not exist|no longer exists)/i.test(String(error ?? '')),
   };
 }

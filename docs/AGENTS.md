@@ -89,7 +89,10 @@ npm run agents -- try claude-subscription one real turn on a scratch drive
 npm run agents -- try cursor --model=composer-2.5
 ```
 
-A provider is `{ id, label, detect, prepare, spawn, parse }`. Its parser is
+A provider is `{ id, label, detect, prepare, spawn, parse }`, and optionally
+`lostSession(error)`: true when a resumed turn failed because the CLI no longer
+has the session. The runner then forgets the session, says so in the turn's
+error, and the next message starts a new one (it does not retry). Its parser is
 tested against streams recorded from real runs in `test/fixtures/providers/`;
 record a new one when a CLI changes its output. Codex arrives in Plan 5.
 

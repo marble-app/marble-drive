@@ -117,6 +117,8 @@ export function createRunner({ store, tools, providers, workdir, origin, bridgeP
       token: null,
       child: null,
       cancelled: null,
+      provider: null,
+      resume: null, // the provider session this turn was started to resume
       done: null,
       usage: null,
       applied: 0,
@@ -176,6 +178,8 @@ export function createRunner({ store, tools, providers, workdir, origin, bridgeP
       await emit(turn, { type: 'turn.started', provider: meta.provider });
 
       if (!provider) return safeFinish(turn, { status: 'failed', error: `no provider "${meta.provider}"` });
+      turn.provider = provider;
+      turn.resume = meta.providerSession ?? null;
 
       turn.token = crypto.randomBytes(32).toString('hex');
       tokens.set(turn.token, turn);
@@ -323,11 +327,26 @@ export function createRunner({ store, tools, providers, workdir, origin, bridgeP
         ? turn.applied ? 'changes' : 'done'
         : status;
     const applied = turn.applied;
+    // A CLI that has deleted the session this turn resumed will refuse every
+    // later resume the same way. Forget it, so the next message starts fresh
+    // instead of failing again; retrying this one is the person's call.
+    let lostSession = false;
+    if (status === 'failed' && turn.resume && error) {
+      try {
+        lostSession = Boolean(turn.provider?.lostSession?.(error));
+      } catch (err) {
+        log.error(`[agents] ${err.message}`);
+      }
+    }
+    if (lostSession) {
+      error = `${error} — the provider no longer has this conversation's session; the next message starts a new one`;
+    }
     try {
       try {
         await turn.undoSaved;
         if (turn.undo.length) await store.saveUndo(turn.id, turn.undo);
         await store.updateConversation(turn.conversationId, {
+          ...(lostSession ? { providerSession: null } : {}),
           running: false,
           activity: status === 'completed' ? (applied ? `Changed ${applied} element(s)` : 'Answered') : error ?? status,
           lastOutcome: outcome,

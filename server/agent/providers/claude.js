@@ -148,5 +148,8 @@ export function createClaudeProvider({ auth = 'subscription', exec = runCommand,
     },
 
     parse: (line) => parseClaudeLine(line),
+
+    // `--resume` with a session the CLI has deleted.
+    lostSession: (error) => /no conversation found/i.test(String(error ?? '')),
   };
 }

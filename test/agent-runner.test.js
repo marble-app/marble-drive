@@ -14,6 +14,7 @@ const SCRIPTS = {
   stall: [{ silent: 5_000 }],
   stubborn: [{ ignoreTerm: true }, { silent: 5_000 }],
   broken: [{ fail: 'You have hit your usage limit' }],
+  forgetful: [{ lostWhenResumed: 'No conversation found with session ID: x' }, { say: 'fresh' }],
 };
 
 async function setup({ limits = {}, tools } = {}) {
@@ -605,4 +606,40 @@ test('the process gets the allowlisted environment plus what the provider adds, 
     }
     await runner.close();
   }
+});
+
+test('a session the provider has lost is dropped, so the next turn starts a new one', async () => {
+  const { store, runner } = await setup();
+  const { id } = await store.createConversation({ provider: 'fake' });
+  const send = async () => finished(store, (await runner.send(id, { prompt: 'script:forgetful', context: { target: 'd' } })).turnId);
+
+  assert.equal((await send()).status, 'completed');
+  const lost = (await store.conversation(id)).providerSession;
+  assert.match(lost, /^fake-/);
+
+  const failed = await send();
+  assert.equal(failed.status, 'failed');
+  assert.equal(
+    failed.error,
+    'No conversation found with session ID: x — the provider no longer has this conversation\'s session; the next message starts a new one',
+  );
+  assert.equal((await store.conversation(id)).providerSession, null);
+
+  const next = await send();
+  assert.equal(next.status, 'completed', 'the next turn is not resumed, so it runs');
+  const fresh = (await store.conversation(id)).providerSession;
+  assert.match(fresh, /^fake-/);
+  assert.notEqual(fresh, lost);
+  await runner.close();
+});
+
+test('an ordinary failure on a resumed turn keeps the session', async () => {
+  const { store, runner } = await setup();
+  const { id } = await store.createConversation({ provider: 'fake' });
+  await finished(store, (await runner.send(id, { prompt: 'script:hello', context: { target: 'd' } })).turnId);
+  const session = (await store.conversation(id)).providerSession;
+  const failed = await finished(store, (await runner.send(id, { prompt: 'script:broken', context: { target: 'd' } })).turnId);
+  assert.equal(failed.error, 'You have hit your usage limit');
+  assert.equal((await store.conversation(id)).providerSession, session);
+  await runner.close();
 });
