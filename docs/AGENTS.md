@@ -66,9 +66,24 @@ Nothing is reverted automatically: the likeliest outside writer is you.
 
 ## Providers
 
-A provider is `{ id, label, detect, prepare?, spawn, parse }` — see
-`server/agent/runner.js`. `test/fixtures/fake-provider.js` is the smallest
-complete one. Claude and Cursor adapters arrive in Plan 2.
+| id | runs | boundary |
+|---|---|---|
+| `claude-subscription` | `claude -p`, prompt on stdin, no `ANTHROPIC_API_KEY` in its environment, so the CLI's login is used | `--tools ""` and `--strict-mcp-config`: it has no tool but Marble's |
+| `claude-api` | the same, with `ANTHROPIC_API_KEY` | the same |
+| `cursor` | `cursor-agent -p`, model `composer-2.5` unless the conversation names one, prompt passed after `--` (a dash-leading prompt would otherwise be parsed as a flag) | `.cursor/hooks.json` `preToolUse`, fail-closed, allowing only Marble's five tools (`bin/marble-cursor-hook.js`) |
+
+Every agent gets the same rules (`server/agent/instructions.js`). Each turn,
+`prepare` rewrites the workspace's MCP config with that turn's token (mode 600).
+
+```
+npm run agents -- providers              what is installed and signed in
+npm run agents -- try claude-subscription one real turn on a scratch drive
+npm run agents -- try cursor --model=composer-2.5
+```
+
+A provider is `{ id, label, detect, prepare, spawn, parse }`. Its parser is
+tested against streams recorded from real runs in `test/fixtures/providers/`;
+record a new one when a CLI changes its output. Codex arrives in Plan 5.
 
 ## Not yet
 
