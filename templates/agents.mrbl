@@ -7,8 +7,597 @@
 <meta name="marble-agent" content="custom">
 <title>__TITLE__</title>
 __ICON__
+<style>
+  /* Same tokens as Drive / the drawer: UIST warm in the light, Dusk after dark.
+     The Agents file is chrome, so it sits on the off-white paper the Drive uses. */
+  :root {
+    --ink: #111111;
+    --muted: #5a5a5a;
+    --faint: #8a8a8a;
+    --line: #ddd9cf;
+    --paper: #fafaf7;
+    --paper-2: #f3f1ea;
+    --paper-3: #eceae1;
+    --card: #ffffff;
+    --card-rgb: 255, 255, 255;
+    --paper-rgb: 250, 250, 247;
+    --accent: #9bb6cf;
+    --accent-soft: #f1f5f8;
+    --accent-ink: #738698;
+    --accent-ink-rgb: 115, 134, 152;
+    --danger: #b4533e;
+    --caution: #a07a2c;
+    --shadow: 0 1px 3px rgba(74,66,52,.12), 0 4px 8px rgba(74,66,52,.06);
+    --shadow-lift: 0 4px 10px rgba(74,66,52,.10), 0 14px 28px rgba(74,66,52,.12);
+    --radius: 12px;
+    --settle: cubic-bezier(.22, 1, .36, 1);
+    --snap: cubic-bezier(.4, 0, .2, 1);
+    --t-fast: 110ms;
+    --t: 200ms;
+    --t-slow: 340ms;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --ink: #e8e6e1; --muted: #a3a7ab; --faint: #71767a; --line: #2f3438;
+      --paper: #16181a; --paper-2: #1e2124; --paper-3: #262a2e; --card: #1c1f22;
+      --card-rgb: 28, 31, 34; --paper-rgb: 22, 24, 26;
+      --accent: #7fa8c9; --accent-soft: #1d2932; --accent-ink: #9dc0dc; --accent-ink-rgb: 157, 192, 220;
+      --danger: #e08a74; --caution: #d9b25e;
+      --shadow: 0 1px 3px rgba(0,0,0,.5), 0 4px 8px rgba(0,0,0,.3);
+      --shadow-lift: 0 6px 16px rgba(0,0,0,.45), 0 18px 36px rgba(0,0,0,.35);
+    }
+  }
+  * { box-sizing: border-box; }
+  html, body { height: 100%; }
+  body {
+    margin: 0; background: var(--paper); color: var(--ink);
+    font: 14px/1.5 "Google Sans", Roboto, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    -webkit-font-smoothing: antialiased;
+    display: flex; flex-direction: column;
+  }
+  [data-marble-editable] { outline: none; border-radius: 4px; transition: background var(--t-fast) var(--snap); }
+  [data-marble-editable]:hover, [data-marble-editable]:focus-within { background: var(--accent-soft); }
+  [data-marble-editable]:focus { background: var(--card); box-shadow: 0 0 0 1px var(--accent), 0 0 0 4px var(--accent-soft); }
+  button { font: inherit; }
+  button, .conv {
+    transition: transform var(--t-fast) var(--snap), background var(--t) var(--settle),
+      box-shadow var(--t) var(--settle), border-color var(--t) var(--settle), opacity var(--t) var(--settle);
+  }
+  button:active, .conv:active { transform: scale(.96); transition-duration: 60ms; }
+  @media (prefers-reduced-motion: reduce) {
+    *, *::before, *::after {
+      animation-duration: .001ms !important; animation-iteration-count: 1 !important;
+      transition-duration: .001ms !important; scroll-behavior: auto !important;
+    }
+  }
+
+  .topbar {
+    display: flex; align-items: center; gap: .75rem; flex: 0 0 auto; flex-wrap: wrap;
+    padding: .55rem 1rem; border-bottom: 1px solid var(--line);
+    background: rgba(var(--paper-rgb), .78); backdrop-filter: blur(20px) saturate(160%);
+    -webkit-backdrop-filter: blur(20px) saturate(160%);
+    position: relative; z-index: 5;
+  }
+  .topbar h1 { font-size: 1.15rem; font-weight: 500; margin: 0; letter-spacing: -.015em; }
+  .views {
+    display: inline-flex; border: 1px solid var(--line); border-radius: 999px;
+    padding: 2px; background: var(--paper-3);
+  }
+  .views button {
+    appearance: none; border: 0; background: none; color: var(--muted);
+    padding: .32rem .75rem; cursor: pointer; font-size: .85rem; border-radius: 999px;
+  }
+  body[data-view="library"] .views [data-view="library"],
+  body[data-view="board"] .views [data-view="board"] {
+    color: var(--accent-ink); background: var(--card); box-shadow: var(--shadow);
+  }
+  .views button:hover, .views button:focus-visible { color: var(--ink); outline: none; }
+  input.search {
+    flex: 1 1 12rem; min-width: 8rem; max-width: 28rem;
+    padding: .45rem .9rem; border: 1px solid transparent; border-radius: 999px;
+    background: var(--paper-3); color: var(--ink); font: inherit; outline: none;
+    transition: background var(--t) var(--settle), box-shadow var(--t) var(--settle);
+  }
+  input.search:hover, input.search:focus-visible { background: var(--card); }
+  input.search:focus { background: var(--card); border-color: var(--line); box-shadow: var(--shadow); }
+  .filters { display: flex; gap: .2rem; flex-wrap: wrap; }
+  .filter {
+    appearance: none; border: 0; background: none; color: var(--muted);
+    padding: .32rem .65rem; border-radius: 999px; cursor: pointer; font-size: .85rem;
+  }
+  .filter:hover, .filter:focus-visible { color: var(--ink); background: var(--paper-3); outline: none; }
+  .filter[aria-pressed="true"] { color: var(--accent-ink); background: var(--accent-soft); }
+  .new {
+    margin-left: auto; appearance: none; border: 1px solid var(--line); background: var(--ink);
+    color: var(--paper); padding: .35rem .85rem; border-radius: 999px; cursor: pointer; font-size: .85rem;
+  }
+  .new:hover, .new:focus-visible { box-shadow: var(--shadow); outline: none; }
+
+  .library, .board { flex: 1 1 auto; min-height: 0; }
+  .library {
+    display: grid; grid-template-columns: minmax(16rem, 22rem) minmax(0, 1fr) minmax(14rem, 18rem);
+  }
+  body[data-view="board"] .library { display: none; }
+  body[data-view="library"] .board { display: none; }
+  .board {
+    display: flex; gap: 1rem; padding: 1rem; overflow: auto;
+  }
+  .column {
+    flex: 1 1 0; min-width: 14rem; display: flex; flex-direction: column; gap: .5rem;
+    background: var(--paper-2); border: 1px solid var(--line); border-radius: var(--radius); padding: .7rem;
+  }
+  .column h2 {
+    margin: 0; font-size: .75rem; font-weight: 500; letter-spacing: .06em;
+    text-transform: uppercase; color: var(--faint);
+  }
+
+  .list {
+    min-height: 0; overflow-y: auto; border-right: 1px solid var(--line);
+    padding: .4rem 0; background: var(--paper);
+  }
+  .conv {
+    display: grid; grid-template-columns: 10px minmax(0, 1fr) auto; gap: .65rem; align-items: start;
+    width: 100%; text-align: left; appearance: none; border: 0; background: none;
+    color: inherit; padding: .55rem .9rem; cursor: pointer; border-radius: 0;
+  }
+  .conv:hover, .conv:focus-visible { background: var(--paper-3); outline: none; }
+  .conv.marble-open { background: var(--accent-soft); }
+  .conv .dot {
+    width: 7px; height: 7px; margin-top: .45rem; border-radius: 999px; background: var(--faint);
+  }
+  .conv[data-status="running"] .dot {
+    background: var(--accent-ink); box-shadow: 0 0 0 3px rgba(var(--accent-ink-rgb), .18);
+    animation: pulse 1.2s var(--snap) infinite;
+  }
+  .conv[data-status="review"] .dot { background: var(--caution); }
+  .conv .body { min-width: 0; display: flex; flex-direction: column; gap: .1rem; }
+  .conv .title { font-weight: 500; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .conv .meta { display: flex; gap: .4rem; min-width: 0; color: var(--muted); font-size: .78rem; }
+  .conv .badge {
+    flex: none; font-size: 11px; color: var(--muted); background: var(--paper-2);
+    border-radius: 999px; padding: 0 7px;
+  }
+  .conv .activity { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .conv .age { flex: none; font-size: .75rem; color: var(--faint); padding-top: .15rem; }
+  @keyframes pulse {
+    0%, 100% { box-shadow: 0 0 0 3px rgba(var(--accent-ink-rgb), .12); }
+    50% { box-shadow: 0 0 0 5px rgba(var(--accent-ink-rgb), .28); }
+  }
+
+  .pane {
+    min-width: 0; min-height: 0; display: flex; flex-direction: column;
+    background: var(--card);
+  }
+  .pane marble-conversation { flex: 1; min-height: 0; }
+
+  .inspector {
+    min-height: 0; overflow-y: auto; border-left: 1px solid var(--line);
+    padding: 1rem; background: var(--paper);
+    font-size: .85rem; color: var(--muted);
+  }
+  .inspector .empty { margin: 0; color: var(--faint); }
+  .inspector h2 {
+    margin: 0 0 .7rem; font-size: .95rem; font-weight: 500; color: var(--ink);
+  }
+  .inspector dl { margin: 0 0 1rem; display: grid; gap: .45rem; }
+  .inspector div { display: grid; gap: .1rem; }
+  .inspector dt { font-size: .72rem; letter-spacing: .04em; text-transform: uppercase; color: var(--faint); }
+  .inspector dd { margin: 0; color: var(--ink); }
+  .inspector a { color: var(--accent-ink); }
+  .inspector a:hover, .inspector a:focus-visible { color: var(--ink); }
+  .inspector .actions { display: flex; flex-wrap: wrap; gap: .4rem; }
+  .inspector .actions button {
+    appearance: none; border: 1px solid var(--line); background: var(--card); color: var(--ink);
+    padding: .3rem .7rem; border-radius: 8px; cursor: pointer; font-size: .82rem;
+  }
+  .inspector .actions button:hover, .inspector .actions button:focus-visible {
+    background: var(--paper-3); outline: none;
+  }
+
+  @media (max-width: 719px) {
+    .library { grid-template-columns: 1fr; }
+    .list { border-right: 0; border-bottom: 1px solid var(--line); max-height: 40vh; }
+    .inspector { border-left: 0; border-top: 1px solid var(--line); }
+  }
+  @media (hover: none) {
+    .conv, .filter, .views button, .new, .inspector .actions button { min-height: 2.75rem; }
+  }
+</style>
 </head>
 <body data-marble-id="__ID__" data-view="library">
-  <marble-conversation data-marble-id="__ID__"></marble-conversation>
+
+<header class="topbar" data-marble-id="__ID__">
+  <h1 data-marble-id="__ID__" data-marble-editable>__TITLE__</h1>
+  <div class="views" role="group" aria-label="View" data-marble-id="__ID__">
+    <button type="button" data-view="library" aria-pressed="true" data-marble-id="__ID__">List</button>
+    <button type="button" data-view="board" aria-pressed="false" data-marble-id="__ID__">Board</button>
+  </div>
+  <input class="search" type="search" placeholder="Search conversations" autocomplete="off" aria-label="Search conversations" data-marble-id="__ID__">
+  <div class="filters" role="group" aria-label="Filter" data-marble-id="__ID__">
+    <button type="button" class="filter" data-filter="all" aria-pressed="true" data-marble-id="__ID__">All</button>
+    <button type="button" class="filter" data-filter="running" aria-pressed="false" data-marble-id="__ID__">Running</button>
+    <button type="button" class="filter" data-filter="review" aria-pressed="false" data-marble-id="__ID__">Review</button>
+    <button type="button" class="filter" data-filter="archived" aria-pressed="false" data-marble-id="__ID__">Archived</button>
+  </div>
+  <button type="button" class="new" data-marble-id="__ID__">New</button>
+</header>
+
+<div class="library" data-marble-id="__ID__">
+  <div id="list" class="list" role="list" data-marble-id="__ID__" data-marble-transient></div>
+  <section class="pane" data-marble-id="__ID__">
+    <marble-conversation data-marble-id="__ID__"></marble-conversation>
+  </section>
+  <aside class="inspector" data-marble-id="__ID__" data-marble-transient>
+    <p class="empty">Select a conversation.</p>
+  </aside>
+</div>
+
+<div class="board" data-marble-id="__ID__">
+  <section class="column" data-col="running" data-marble-transient>
+    <h2>Running</h2>
+  </section>
+  <section class="column" data-col="review" data-marble-transient>
+    <h2>Needs review</h2>
+  </section>
+  <section class="column" data-col="completed" data-marble-transient>
+    <h2>Completed</h2>
+  </section>
+</div>
+
+<script>
+  // The Agents library. Rows, the open id, the filter and the search are the
+  // page's — never ops — so browsing does not rewrite this file. View and the
+  // open conversation are the two facts that should survive a reload, and the
+  // spec puts those in localStorage rather than in the document.
+  (() => {
+    const VIEW_KEY = 'marble-agents:view';
+    const OPEN_KEY = 'marble-agents:open';
+
+    const recalled = (key) => {
+      try { return localStorage.getItem(key); } catch { return null; }
+    };
+    const remember = (key, value) => {
+      try {
+        if (value == null) localStorage.removeItem(key);
+        else localStorage.setItem(key, value);
+      } catch { /* private browsing — the page still works; it just forgets */ }
+    };
+
+    const restoreView = () => {
+      const savedView = recalled(VIEW_KEY);
+      if (savedView === 'library' || savedView === 'board') document.body.setAttribute('data-view', savedView);
+      deriveView();
+    };
+
+    const $ = (sel) => document.querySelector(sel);
+    const list = $('#list');
+    const inspector = $('.inspector');
+    const convo = $('marble-conversation');
+    const search = $('input.search');
+    const viewButtons = [...document.querySelectorAll('.views [data-view]')];
+    const filterButtons = [...document.querySelectorAll('button.filter')];
+
+    const summaries = new Map();
+    const nodes = new Map();
+    const labels = new Map();
+    let agent = null;
+    let filter = 'all';
+    let query = '';
+    let openId = null;
+    let inspectGen = 0;
+
+    const statusOf = (summary) => {
+      if (summary?.running || summary?.status === 'running') return 'running';
+      if (summary?.needsReview) return 'review';
+      return 'completed';
+    };
+
+    const statusLabel = (summary) => {
+      const status = statusOf(summary);
+      if (status === 'running') return 'Running';
+      if (status === 'review') return 'Needs review';
+      return 'Completed';
+    };
+
+    const age = (t) => {
+      if (!t) return '';
+      const s = Math.max(0, (Date.now() - t) / 1000);
+      if (s < 3600) return Math.round(s / 60) + 'm';
+      if (s < 86400) return Math.round(s / 3600) + 'h';
+      return Math.round(s / 86400) + 'd';
+    };
+
+    const deriveView = () => {
+      const view = document.body.getAttribute('data-view') || 'library';
+      for (const btn of viewButtons) btn.setAttribute('aria-pressed', String(btn.dataset.view === view));
+    };
+
+    const deriveFilters = () => {
+      for (const btn of filterButtons) btn.setAttribute('aria-pressed', String(btn.dataset.filter === filter));
+    };
+
+    const matches = (summary) => {
+      if (!summary) return false;
+      const status = statusOf(summary);
+      if (filter === 'archived') {
+        if (!summary.archived) return false;
+      } else {
+        if (summary.archived) return false;
+        if (filter === 'running' && status !== 'running') return false;
+        if (filter === 'review' && status !== 'review') return false;
+      }
+      if (query) {
+        const hay = ((summary.title || '') + ' ' + (summary.activity || '')).toLowerCase();
+        if (!hay.includes(query)) return false;
+      }
+      return true;
+    };
+
+    const applyFilters = () => {
+      for (const [id, el] of nodes) el.hidden = !matches(summaries.get(id));
+    };
+
+    const paintOpen = () => {
+      for (const el of nodes.values()) el.classList.toggle('marble-open', el.dataset.id === openId);
+    };
+
+    const paintRow = (el, summary) => {
+      el.dataset.status = statusOf(summary);
+      el.querySelector('.title').textContent = summary.title || 'Untitled';
+      el.querySelector('.badge').textContent = labels.get(summary.provider)?.label ?? summary.provider ?? '';
+      el.querySelector('.activity').textContent = summary.activity || '';
+      el.querySelector('.age').textContent = age(summary.updatedAt);
+    };
+
+    // Newest first. Task 3 will also send this node into a column; until then
+    // every conversation lives in the list, one element per id.
+    const place = (el) => {
+      const updated = summaries.get(el.dataset.id)?.updatedAt ?? 0;
+      const before = [...list.children].find(
+        (n) => n !== el && (summaries.get(n.dataset.id)?.updatedAt ?? 0) < updated,
+      );
+      if (before) list.insertBefore(el, before);
+      else list.append(el);
+    };
+
+    const upsert = (summary) => {
+      if (!summary?.id) return;
+      summaries.set(summary.id, summary);
+      let el = nodes.get(summary.id);
+      if (!el) {
+        el = document.createElement('button');
+        el.type = 'button';
+        el.className = 'conv';
+        el.dataset.id = summary.id;
+        el.setAttribute('role', 'listitem');
+        el.innerHTML = '<span class="dot" aria-hidden="true"></span><span class="body"><span class="title"></span><span class="meta"><span class="badge"></span><span class="activity"></span></span></span><span class="age"></span>';
+        el.addEventListener('click', () => open(el.dataset.id));
+        nodes.set(summary.id, el);
+      }
+      paintRow(el, summary);
+      place(el);
+      el.hidden = !matches(summary);
+      el.classList.toggle('marble-open', summary.id === openId);
+      if (summary.id === openId) fillInspector(summary.id);
+    };
+
+    const lastTarget = (detail) => {
+      const events = detail.events ?? [];
+      for (let i = events.length - 1; i >= 0; i--) {
+        const target = events[i].context?.target;
+        if (events[i].type === 'user' && target) return target;
+      }
+      const turns = detail.turns ?? [];
+      for (let i = turns.length - 1; i >= 0; i--) {
+        const target = turns[i].context?.target;
+        if (target) return target;
+      }
+      return null;
+    };
+
+    const undoable = (turns) => {
+      for (let i = (turns ?? []).length - 1; i >= 0; i--) {
+        const turn = turns[i];
+        if (turn.status === 'completed' && turn.applied && !turn.undoneAt) return turn;
+      }
+      return null;
+    };
+
+    const fact = (parent, name, value) => {
+      if (!value) return;
+      const row = document.createElement('div');
+      const dt = document.createElement('dt');
+      dt.textContent = name;
+      const dd = document.createElement('dd');
+      if (value.nodeType) dd.append(value);
+      else dd.textContent = value;
+      row.append(dt, dd);
+      parent.append(row);
+    };
+
+    const fillInspector = async (id) => {
+      const gen = ++inspectGen;
+      const summary = summaries.get(id) ?? { id };
+      let detail = { meta: summary, turns: [], events: [] };
+      try {
+        if (agent) detail = await agent.conversation(id);
+      } catch (err) {
+        if (gen !== inspectGen) return;
+        inspector.replaceChildren();
+        const p = document.createElement('p');
+        p.className = 'empty';
+        p.textContent = err.message;
+        inspector.append(p);
+        return;
+      }
+      if (gen !== inspectGen || openId !== id) return;
+      const meta = detail.meta ?? summary;
+      inspector.replaceChildren();
+      const title = document.createElement('h2');
+      title.textContent = meta.title || 'Untitled';
+      inspector.append(title);
+      const dl = document.createElement('dl');
+      fact(dl, 'Status', statusLabel(meta));
+      fact(dl, 'Provider', labels.get(meta.provider)?.label ?? meta.provider);
+      fact(dl, 'Model', meta.model);
+      const target = lastTarget(detail);
+      if (target) {
+        const link = document.createElement('a');
+        link.textContent = target;
+        const href = window.marble?.href?.(target);
+        if (href) link.href = href;
+        fact(dl, 'Target', link);
+      }
+      fact(dl, 'Activity', meta.activity);
+      inspector.append(dl);
+
+      const actions = document.createElement('div');
+      actions.className = 'actions';
+      const turn = undoable(detail.turns);
+      if (turn) {
+        const undo = document.createElement('button');
+        undo.type = 'button';
+        undo.textContent = 'Undo';
+        undo.addEventListener('click', async () => {
+          try {
+            await agent.undo(turn.id);
+            fillInspector(id);
+          } catch (err) {
+            undo.textContent = err.message;
+          }
+        });
+        actions.append(undo);
+      }
+      if (meta.needsReview) {
+        const reviewed = document.createElement('button');
+        reviewed.type = 'button';
+        reviewed.textContent = 'Mark reviewed';
+        reviewed.addEventListener('click', async () => {
+          try { await agent.markReviewed(id); } catch (err) { reviewed.textContent = err.message; }
+        });
+        actions.append(reviewed);
+      }
+      const archive = document.createElement('button');
+      archive.type = 'button';
+      archive.textContent = meta.archived ? 'Unarchive' : 'Archive';
+      archive.addEventListener('click', async () => {
+        try { await agent.archive(id, !meta.archived); } catch (err) { archive.textContent = err.message; }
+      });
+      actions.append(archive);
+      for (const provider of labels.values()) {
+        if (!provider.installed || !provider.signedIn || provider.id === meta.provider) continue;
+        const handoff = document.createElement('button');
+        handoff.type = 'button';
+        handoff.textContent = 'Continue in ' + (provider.label ?? provider.id);
+        handoff.addEventListener('click', async () => {
+          try { await open(await agent.handoff(id, provider.id)); } catch (err) { handoff.textContent = err.message; }
+        });
+        actions.append(handoff);
+      }
+      if (actions.children.length) inspector.append(actions);
+    };
+
+    const showEmpty = () => {
+      inspector.replaceChildren();
+      const p = document.createElement('p');
+      p.className = 'empty';
+      p.textContent = 'Select a conversation.';
+      inspector.append(p);
+    };
+
+    async function open(id) {
+      openId = id;
+      remember(OPEN_KEY, id);
+      if (id) convo.setAttribute('conversation', id);
+      else convo.removeAttribute('conversation');
+      if (id && !summaries.has(id) && agent) {
+        try { upsert((await agent.conversation(id)).meta); } catch { /* opened from a stale id */ }
+      }
+      paintOpen();
+      if (!id) { showEmpty(); return; }
+      await fillInspector(id);
+      convo.focusInput?.();
+    }
+
+    const setView = (next) => {
+      if (next !== 'library' && next !== 'board') return;
+      document.body.setAttribute('data-view', next);
+      remember(VIEW_KEY, next);
+      deriveView();
+    };
+
+    const loadArchived = async () => {
+      if (!agent) return;
+      try {
+        for (const summary of await agent.conversations({ archived: true })) upsert(summary);
+      } catch { /* listing failed; the live stream still fills what it can */ }
+    };
+
+    const load = async () => {
+      if (!agent) return;
+      try {
+        for (const summary of await agent.conversations()) upsert(summary);
+        if (filter === 'archived') await loadArchived();
+      } catch { /* same as loadArchived */ }
+      applyFilters();
+    };
+
+    const setFilter = async (next) => {
+      filter = next;
+      deriveFilters();
+      if (next === 'archived') await loadArchived();
+      applyFilters();
+    };
+
+    const startNew = async () => {
+      if (!agent) return;
+      const providers = [...labels.values()].filter((p) => p.installed && p.signedIn);
+      const preferred = providers.find((p) => p.default) ?? providers[0];
+      if (!preferred) return;
+      await open(await agent.start({ provider: preferred.id }));
+    };
+
+    viewButtons.forEach((btn) => btn.addEventListener('click', () => setView(btn.dataset.view)));
+    filterButtons.forEach((btn) => btn.addEventListener('click', () => setFilter(btn.dataset.filter)));
+    search.addEventListener('input', () => {
+      query = search.value.trim().toLowerCase();
+      applyFilters();
+    });
+    $('.new').addEventListener('click', () => startNew());
+
+    const boot = (marble) => {
+      // View and aria-pressed are page chrome. Filing them would put this
+      // tab's List|Board and filter into the file for everyone.
+      marble.pageOnly?.('data-view', 'aria-pressed');
+      restoreView();
+      deriveFilters();
+      marble.register?.(() => {
+        deriveView();
+        deriveFilters();
+        applyFilters();
+        paintOpen();
+      });
+      const start = async (api) => {
+        agent = api;
+        try {
+          for (const provider of await api.providers()) labels.set(provider.id, provider);
+        } catch { /* badges fall back to the provider id */ }
+        api.on('*', upsert);
+        await load();
+        const saved = recalled(OPEN_KEY);
+        if (saved) await open(saved);
+      };
+      if (marble.agent) start(marble.agent);
+      else addEventListener('marble:agent', (event) => start(event.detail), { once: true });
+    };
+
+    if (window.marble) boot(window.marble);
+    else {
+      restoreView();
+      deriveFilters();
+      addEventListener('marble:ready', (event) => boot(event.detail), { once: true });
+    }
+  })();
+</script>
 </body>
 </html>
