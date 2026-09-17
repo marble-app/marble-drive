@@ -92,3 +92,29 @@ test('filters and search hide rows without deleting them', async () => {
   await page.locator('input.search').fill('');
   assert.ok((await page.locator('.conv:not([hidden])').count()) >= 1);
 });
+
+test('the open conversation id is page-only and survives a reconcile', async () => {
+  const { page } = await openAgents();
+  const id = await page.evaluate(async () => {
+    const agent = window.marble.agent;
+    const id = await agent.start({ provider: 'fake' });
+    await agent.send(id, { prompt: 'script:rename', target: 'garden', viewing: 'Agents', selection: [] });
+    return id;
+  });
+  await page.locator(`.conv[data-id="${id}"]`).click();
+  const view = page.locator('marble-conversation');
+  await view.locator('.turn-footer[data-status="completed"]').waitFor();
+  assert.equal(await view.getAttribute('conversation'), id);
+
+  const source = await page.evaluate(() => window.marble.source.outer(document.querySelector('marble-conversation')));
+  assert.equal(source.includes(`conversation="${id}"`), false);
+  assert.ok(!(await host.drive.store.read('Agents')).includes(`conversation="${id}"`));
+
+  // What patchFromFile does when the file has no conversation attr: strip it,
+  // then hand the body to registered wirers.
+  await page.evaluate(() => {
+    document.querySelector('marble-conversation').removeAttribute('conversation');
+    window.marble.adopt(document.body);
+  });
+  assert.equal(await view.getAttribute('conversation'), id);
+});

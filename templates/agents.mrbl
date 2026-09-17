@@ -565,17 +565,28 @@ __ICON__
     });
     $('.new').addEventListener('click', () => startNew());
 
+    const restoreOpen = () => {
+      // Re-set rather than open(): register runs once at boot with openId
+      // still null, and open(null) would wipe marble-agents:open before load
+      // restores it. focusInput on restore is a later polish.
+      if (openId) convo.setAttribute('conversation', openId);
+      paintOpen();
+    };
+
     const boot = (marble) => {
-      // View and aria-pressed are page chrome. Filing them would put this
-      // tab's List|Board and filter into the file for everyone.
-      marble.pageOnly?.('data-view', 'aria-pressed');
+      // View, pressed chrome, and the open id are this tab's. Filing them
+      // would put List|Board, the filter, and which conversation is open
+      // into the file for everyone. conversation lives on an addressed
+      // <marble-conversation>, so without this a patch strips it and a
+      // source.outer of the pane writes it.
+      marble.pageOnly?.('data-view', 'aria-pressed', 'conversation');
       restoreView();
       deriveFilters();
       marble.register?.(() => {
         deriveView();
         deriveFilters();
         applyFilters();
-        paintOpen();
+        restoreOpen();
       });
       const start = async (api) => {
         agent = api;
