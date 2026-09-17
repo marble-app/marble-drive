@@ -168,13 +168,15 @@ export function createTools({ store, writeOps, createDocument, buildStarter, gui
           }
           const blocked = [...new Set([...stale, ...unread])];
           if (blocked.length) {
-            for (const id of blocked) if (current.has(id)) ledger.set(id, current.get(id));
             const reason = stale.length
               ? `${stale.map((id) => `"${id}"`).join(', ')} changed since you read ${stale.length === 1 ? 'it' : 'them'} — nothing was applied. Here is the current source; rebuild the edit against it.`
               : `read ${unread.map((id) => `"${id}"`).join(', ')} before editing — nothing was applied. Here is the current source.`;
             const shown = collectSlices(source, blocked, { budget: REFUSAL_BUDGET });
+            // The refusal is a read of what it shows in full, and only that: an
+            // element cut to an outline, or left out for budget, is still unread.
+            remember(ledger, source, shown);
             return {
-              refused: { reason, current: shown.map(({ id, tag, html }) => ({ id, tag, html })) },
+              refused: { reason, current: shown.map(({ id, tag, html, shape }) => ({ id, tag, html, outline: Boolean(shape) })) },
             };
           }
 

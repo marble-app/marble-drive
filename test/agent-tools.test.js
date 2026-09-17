@@ -223,6 +223,29 @@ test('an insert of several elements is undone whole', async () => {
   assert.doesNotMatch(after, /two|three/);
 });
 
+test('a refusal only counts as a read for elements it showed in full', async () => {
+  const turn = await freshTurn();
+  const para = (id) => `<section data-marble-id="${id}">${Array.from({ length: 90 }, (_, i) => `<p data-marble-id="${id}p${i}">Paragraph ${i} of a long section, long enough to matter.</p>`).join('')}</section>`;
+  await drive.createDocument(turn.target, SOURCE.replace('</ul>', `</ul>${para('s1')}${para('s2')}`), { label: 'test' });
+  const ops = [{ type: 'setAttr', id: 's1', name: 'class', value: 'x' }, { type: 'setAttr', id: 's2', name: 'class', value: 'x' }];
+  const first = await tools.call('apply_ops', { path: turn.target, note: 'x', ops }, turn);
+  assert.equal(first.refused, true);
+  const whole = first.current.filter((c) => !c.outline).map((c) => c.id);
+  const outlined = ['s1', 's2'].filter((id) => !whole.includes(id));
+  assert.equal(outlined.length, 1, 'the two sections do not both fit the refusal budget whole');
+
+  const retryOutlined = await tools.call('apply_ops', {
+    path: turn.target, note: 'x', ops: ops.filter((op) => outlined.includes(op.id)),
+  }, turn);
+  assert.equal(retryOutlined.refused, true, 'an element shown only as an outline is still unread');
+  if (whole.length) {
+    const retryWhole = await tools.call('apply_ops', {
+      path: turn.target, note: 'x', ops: ops.filter((op) => whole.includes(op.id)),
+    }, turn);
+    assert.equal(retryWhole.applied, 1, 'an element shown in full is now read');
+  }
+});
+
 test('undoing a turn whose document is gone reports it instead of throwing', async () => {
   const result = await undoTurn({
     records: [{ path: 'no-such-doc', steps: [{ inverse: { type: 'remove', id: 'x' }, id: 'x', expect: 'abc', absent: null }] }],
