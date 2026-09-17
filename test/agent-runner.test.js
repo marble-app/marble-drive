@@ -543,3 +543,66 @@ test('cancel works on a queued turn when called without the runner as `this`', a
   await finished(store, running.turnId);
   await runner.close();
 });
+
+// --- Final review: the child's environment is the runner's to build. ---
+
+test('the process gets the allowlisted environment plus what the provider adds, and never the drive secret', async () => {
+  const dir = await fsp.mkdtemp(path.join(os.tmpdir(), 'marble-runner-'));
+  const store = createAgentStore({ dir: path.join(dir, 'agents'), defaultProvider: 'bare' });
+  await store.ready();
+  const printEnv = (id, env) => ({
+    id,
+    label: id,
+    detect: async () => ({ installed: true, signedIn: true, detail: '' }),
+    spawn: () => ({
+      command: process.execPath,
+      args: ['-e', 'process.stdout.write(JSON.stringify(process.env) + "\\n")'],
+      ...(env ? { env } : {}),
+      stdin: '',
+    }),
+    parse: (line) => [{ type: 'text', text: line }],
+  });
+  const runner = createRunner({
+    store,
+    tools: { call: async () => ({ ok: true }) },
+    providers: new Map([['bare', printEnv('bare', null)], ['extra', printEnv('extra', { MARBLE_DRIVE_SECRET: 'x', FOO: 'y' })]]),
+    workdir: path.join(dir, 'work'),
+    origin: () => 'http://127.0.0.1:1',
+    bridgePath: '/nonexistent/marble-mcp.js',
+    readDocument: async () => null,
+    publish: () => {},
+    limits: { maxRunning: 3, stallMs: 60_000, maxMs: 60_000, killGraceMs: 200 },
+    log: { log() {}, error() {} },
+  });
+  await runner.boot();
+
+  const saved = { secret: process.env.MARBLE_DRIVE_SECRET, foo: process.env.FOO, key: process.env.SOME_API_KEY };
+  process.env.MARBLE_DRIVE_SECRET = 'hunter2';
+  process.env.FOO = 'inherited';
+  process.env.SOME_API_KEY = 'sk-inherited';
+  const envOf = async (provider) => {
+    const { id } = await store.createConversation({ provider });
+    const { turnId } = await runner.send(id, { prompt: 'x', context: { target: 'd' } });
+    await finished(store, turnId);
+    return JSON.parse((await store.events(id)).find((e) => e.type === 'text').text);
+  };
+  try {
+    const bare = await envOf('bare');
+    assert.equal(bare.MARBLE_DRIVE_SECRET, undefined);
+    assert.equal(bare.FOO, undefined, 'nothing is inherited past the allowlist');
+    assert.equal(bare.SOME_API_KEY, undefined);
+    assert.equal(bare.PATH, process.env.PATH);
+    assert.equal(bare.MARBLE_AGENT_TOKEN.length, 64, 'the bridge still gets its token');
+
+    const extra = await envOf('extra');
+    assert.equal(extra.MARBLE_DRIVE_SECRET, undefined, 'not even when the provider asks for it');
+    assert.equal(extra.FOO, 'y');
+    assert.equal(extra.SOME_API_KEY, undefined);
+  } finally {
+    for (const [name, value] of [['MARBLE_DRIVE_SECRET', saved.secret], ['FOO', saved.foo], ['SOME_API_KEY', saved.key]]) {
+      if (value === undefined) delete process.env[name];
+      else process.env[name] = value;
+    }
+    await runner.close();
+  }
+});

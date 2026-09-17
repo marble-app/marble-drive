@@ -198,16 +198,24 @@ export function createRunner({ store, tools, providers, workdir, origin, bridgeP
       if (turn.cancelled) return safeFinish(turn, turn.cancelled);
       if (closed) return safeFinish(turn, { status: 'cancelled', error: 'host closing' });
 
+      const base = { ...pick(process.env), ...mcp.env };
       const spec = provider.spawn({
         workspace,
         mcp,
         prompt,
         resume: meta.providerSession,
         model: meta.model,
-        env: { ...pick(process.env), ...mcp.env },
+        env: base,
       });
 
-      const child = spawn(spec.command, spec.args, { cwd: workspace, env: spec.env, stdio: ['pipe', 'pipe', 'pipe'] });
+      // The runner builds the environment, not the provider: a provider that
+      // returns none gets the allowlist rather than Node's default of
+      // everything this host has, and the drive's secret never goes, whoever
+      // asks for it.
+      const env = { ...base, ...(spec.env ?? {}) };
+      delete env.MARBLE_DRIVE_SECRET;
+
+      const child = spawn(spec.command, spec.args, { cwd: workspace, env, stdio: ['pipe', 'pipe', 'pipe'] });
       turn.child = child;
       child.stdin.on('error', () => {});
       child.stdin.end(spec.stdin ?? '');
