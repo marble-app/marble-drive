@@ -703,6 +703,10 @@ __ICON__
   .board[data-stack] .column { flex: none; min-width: 0; overflow: visible; }
   .board[data-stack] .column h2 { position: sticky; top: -.7rem; }
   .board[data-stack] .rz-col { display: none !important; }
+  /* Ghosts of a view switch: each conversation's old shape, travelling to its
+     new one and dissolving into it. */
+  .vt-layer { position: fixed; inset: 0; z-index: 5; pointer-events: none; }
+  .vt-ghost { box-sizing: border-box; margin: 0 !important; }
   .conv.marble-flip,
   .conv.marble-flip:active {
     transition: none !important;
@@ -3588,6 +3592,7 @@ __ICON__
       for (const anim of flipAnims) anim.cancel();
       flipAnims = [];
       for (const el of nodes.values()) el.classList.remove('marble-flip');
+      clearMorph();
     };
 
     const shellFor = (view) => {
@@ -3648,6 +3653,93 @@ __ICON__
         for (const anim of el.getAnimations()) anim.cancel();
       }
       thaw();
+    };
+
+    // ---- The morph. A conversation is one object in four views, so a switch
+    // carries each one from the shape it had to the shape it will have: a
+    // ghost of the old element travels to the new element's rect and dissolves
+    // into it, while the new element fades up underneath. The shells still
+    // crossfade around them.
+    const representationsOf = (view) => {
+      const out = new Map();
+      const sel = view === 'folders' ? '.folder-rail .folder-tab[data-id]'
+        : view === 'focus' ? '.focus .focus-card[data-id]'
+          : view === 'board' ? '.column > .conv[data-id]' : '#list > .conv[data-id]';
+      for (const el of document.querySelectorAll(sel)) {
+        if (el.hidden || el.closest('[hidden]')) continue;
+        const r = el.getBoundingClientRect();
+        if (r.width > 0 && r.height > 0) out.set(el.dataset.id, el);
+      }
+      return out;
+    };
+
+    let vtLayer = null;
+    let morphAnims = [];
+    const clearMorph = () => {
+      for (const anim of morphAnims) anim.cancel();
+      morphAnims = [];
+      vtLayer?.remove();
+      vtLayer = null;
+    };
+
+    const morphViews = (current, next, applyLayout) => {
+      const stood = [...representationsOf(current)].map(([id, el]) => [id, el, el.getBoundingClientRect()]);
+      clearMorph();
+      vtLayer = document.createElement('div');
+      vtLayer.className = 'vt-layer';
+      vtLayer.setAttribute('data-marble-transient', '');
+      for (const [id, el, rect] of stood) {
+        const ghost = el.cloneNode(true);
+        ghost.classList.add('vt-ghost');
+        ghost.classList.remove('marble-flip', 'marble-open', 'marble-selected');
+        ghost.dataset.id = id;
+        ghost.removeAttribute('data-marble-id');
+        ghost.removeAttribute('tabindex');
+        ghost.removeAttribute('id');
+        ghost.setAttribute('aria-hidden', 'true');
+        ghost.querySelector('marble-conversation')?.remove();
+        for (const child of ghost.querySelectorAll('[data-marble-id]')) child.removeAttribute('data-marble-id');
+        Object.assign(ghost.style, {
+          position: 'fixed', left: `${rect.left}px`, top: `${rect.top}px`,
+          width: `${rect.width}px`, height: `${rect.height}px`,
+          transform: 'none', overflow: 'hidden', pointerEvents: 'none', zIndex: '',
+        });
+        vtLayer.append(ghost);
+      }
+      document.body.append(vtLayer);
+      applyLayout();
+      const after = representationsOf(next);
+      const order = [...after.keys()];
+      const gen = fadeGen;
+      for (const ghost of [...vtLayer.children]) {
+        const target = after.get(ghost.dataset.id);
+        if (!target) {
+          ghost.remove();
+          continue;
+        }
+        const to = target.getBoundingClientRect();
+        const delay = Math.min(Math.max(0, order.indexOf(ghost.dataset.id)), 7) * STAGGER_MS;
+        morphAnims.push(ghost.animate(
+          [
+            { left: ghost.style.left, top: ghost.style.top, width: ghost.style.width, height: ghost.style.height, opacity: 1, offset: 0 },
+            { opacity: 1, offset: 0.6 },
+            { left: `${to.left}px`, top: `${to.top}px`, width: `${to.width}px`, height: `${to.height}px`, opacity: 0, offset: 1 },
+          ],
+          { duration: FLIP_MS, easing: VT_EASE, delay, fill: 'both' },
+        ));
+        morphAnims.push(target.animate(
+          [{ opacity: 0 }, { opacity: 1, offset: 0.6 }, { opacity: 1 }],
+          { duration: FLIP_MS, easing: VT_EASE, delay, fill: 'both' },
+        ));
+      }
+      if (!vtLayer.children.length) {
+        clearMorph();
+        return;
+      }
+      Promise.all(morphAnims.map((anim) => anim.finished.catch(() => {}))).then(() => {
+        if (gen !== fadeGen) return;
+        clearMorph();
+      });
     };
 
     const openBoardPanel = () => {
@@ -5058,9 +5150,7 @@ __ICON__
         else stopFocusDecay();
       };
 
-      const crossfade = () => {
-        cancelFlip();
-        const gen = ++fadeGen;
+      const crossfadeWith = (layout, gen) => {
         cancelViewFades();
         document.body.setAttribute('data-crossfade', '1');
         const still = reduceMotion.matches;
@@ -5073,7 +5163,7 @@ __ICON__
         const incoming = nextParts.filter((el) => (el === pane && paneMoves) || !partsOf(current).includes(el));
         // Where each leaving part stood, read before the layout changes under it.
         const stood = outgoing.map((el) => [el, el.getBoundingClientRect()]);
-        applyLayout();
+        layout();
         // The List shell is hidden outright in Board; its leaving parts need it.
         if (stood.some(([el]) => el === list || el === pane) && next === 'board') libraryEl.classList.add('marble-vt-shell');
         const anims = [];
@@ -5104,8 +5194,21 @@ __ICON__
         });
       };
 
-      if (reduceMotion.matches || narrowView.matches || !isListBoard(current) || !isListBoard(next)) {
+      const crossfade = () => {
+        cancelFlip();
+        crossfadeWith(applyLayout, ++fadeGen);
+      };
+
+      if (reduceMotion.matches || narrowView.matches) {
         crossfade();
+        return;
+      }
+      if (!isListBoard(current) || !isListBoard(next)) {
+        // Every conversation on screen in both views morphs; the shells
+        // crossfade around them as before.
+        cancelFlip();
+        const gen = ++fadeGen;
+        morphViews(current, next, () => crossfadeWith(applyLayout, gen));
         return;
       }
 
