@@ -20,9 +20,10 @@ import { fileURLToPath } from 'node:url';
 
 import { agentsAllowed, createAgents } from './agent/index.js';
 import { backupNow, scheduleBackups } from './backup.js';
-import { bytesOf, chooseProvider, createTouched, enginePath, examine, guardOps, idsOfOps, mergeOps, mergeWrite, shaOf } from './engine.js';
+import { bytesOf, chooseProvider, enginePath, examine, guardOps, idsOfOps, mergeOps, mergeWrite, shaOf } from './engine.js';
 import { dataUri as iconUri, svg as iconSvg } from './favicon.js';
 import { blobsIn, extract, flatten } from './flatten.js';
+import { createTouched } from './touched.js';
 import { createGate } from './gate.js';
 import { escapeHtml, html, json, readBody, readJson, send, text } from './http.js';
 import { createIntents } from './intent-routes.js';
@@ -407,7 +408,8 @@ export async function createDrive(config, { log = console, agentProviders = null
         const client = url.searchParams.get('client');
         const body = JSON.parse((await readBody(req, config.maxBodyBytes)).toString('utf8'));
         const ids = Array.isArray(body?.ids) ? body.ids.map(String) : [];
-        sessionTouched.note(docPath, client, ids);
+        // Where a person is looking is not a claim on it. The frame is for the
+        // wash other tabs draw; conflicts come from writes (see applyOps).
         channels.toPresence(docPath, { client, ids }, { except: client });
         return json(res, 200, { ok: true });
       }

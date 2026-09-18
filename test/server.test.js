@@ -556,9 +556,64 @@ test('health answers before the gate, and the gate closes everything else', asyn
   await closed.close();
 });
 
-test('an outside write to a disjoint id both-applies next to a touched heading', async () => {
+// `you` claims an element by writing it. A write that changes nothing is not
+// noted (applyOps returns before it notes), so each claim below changes text.
+const youWrite = (doc, ops) =>
+  fetch(`${base}/ops?app=${doc}&client=you`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(ops),
+  });
+
+test('an outside write to a disjoint id both-applies next to a heading you wrote', async () => {
   const source = collabDoc('Hello');
   const made = await asJson(await put('', 'Collab Live.mrbl', source));
+  const doc = encodeURIComponent(made.path);
+
+  const wrote = await youWrite(doc, [{ type: 'setText', id: 'hc1', text: 'Hello!' }]);
+  assert.equal(wrote.status, 200);
+
+  const listening = collect(`/events?app=${doc}&client=you`, { want: 3, ms: 2500 });
+  await listening.ready;
+
+  const file = path.join(ROOT, `${made.path}.mrbl`);
+  const onDisk = await fsp.readFile(file, 'utf8');
+  await fsp.writeFile(file, onDisk.replace('</main>', '<p data-marble-id="pc1">Body</p>\n</main>'));
+
+  const frames = await listening.frames;
+  assert.ok(frames.some((frame) => frame.event === 'ops' || frame.data === 'changed'));
+
+  const after = await fsp.readFile(file, 'utf8');
+  assert.match(after, /<h1 data-marble-id="hc1"[^>]*>Hello!<\/h1>/);
+  assert.match(after, /<p data-marble-id="pc1">Body<\/p>/);
+  assert.doesNotMatch(after, /<marble-alt/);
+});
+
+test('an outside rewrite of a heading you wrote forks rather than clobbering', async () => {
+  const source = collabDoc('Yours');
+  const made = await asJson(await put('', 'Collab Fork.mrbl', source));
+  const doc = encodeURIComponent(made.path);
+
+  assert.equal((await youWrite(doc, [{ type: 'setText', id: 'hc1', text: 'Yours!' }])).status, 200);
+
+  const listening = collect(`/events?app=${doc}&client=you`, { want: 3, ms: 2500 });
+  await listening.ready;
+
+  const file = path.join(ROOT, `${made.path}.mrbl`);
+  const onDisk = await fsp.readFile(file, 'utf8');
+  assert.match(onDisk, />Yours!<\/h1>/);
+  await fsp.writeFile(file, onDisk.replace('>Yours!</h1>', '>Theirs</h1>'));
+
+  await listening.frames;
+  const after = await fsp.readFile(file, 'utf8');
+  assert.match(after, /<marble-alt data-marble-id="hc1"/);
+  assert.match(after, /Yours!/);
+  assert.match(after, /Theirs/);
+});
+
+test('an outside rewrite of a heading you only had your caret in applies cleanly', async () => {
+  const source = collabDoc('Looking');
+  const made = await asJson(await put('', 'Collab Look.mrbl', source));
   const doc = encodeURIComponent(made.path);
 
   const noted = await fetch(`${base}/presence?app=${doc}&client=you`, {
@@ -573,43 +628,15 @@ test('an outside write to a disjoint id both-applies next to a touched heading',
 
   const file = path.join(ROOT, `${made.path}.mrbl`);
   const onDisk = await fsp.readFile(file, 'utf8');
-  await fsp.writeFile(file, onDisk.replace('</main>', '<p data-marble-id="pc1">Body</p>\n</main>'));
-
-  const frames = await listening.frames;
-  assert.ok(frames.some((frame) => frame.event === 'ops' || frame.data === 'changed'));
-
-  const after = await fsp.readFile(file, 'utf8');
-  assert.match(after, /<h1 data-marble-id="hc1"[^>]*>Hello<\/h1>/);
-  assert.match(after, /<p data-marble-id="pc1">Body<\/p>/);
-  assert.doesNotMatch(after, /<marble-alt/);
-});
-
-test('an outside rewrite of a touched heading forks rather than clobbering', async () => {
-  const source = collabDoc('Yours');
-  const made = await asJson(await put('', 'Collab Fork.mrbl', source));
-  const doc = encodeURIComponent(made.path);
-
-  await fetch(`${base}/presence?app=${doc}&client=you`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ ids: ['hc1'] }),
-  });
-
-  const listening = collect(`/events?app=${doc}&client=you`, { want: 3, ms: 2500 });
-  await listening.ready;
-
-  const file = path.join(ROOT, `${made.path}.mrbl`);
-  const onDisk = await fsp.readFile(file, 'utf8');
   await fsp.writeFile(file, onDisk.replace(
-    '<h1 data-marble-id="hc1" data-marble-editable>Yours</h1>',
-    '<h1 data-marble-id="hc1" data-marble-editable>Theirs</h1>',
+    '<h1 data-marble-id="hc1" data-marble-editable>Looking</h1>',
+    '<h1 data-marble-id="hc1" data-marble-editable>Changed</h1>',
   ));
 
   await listening.frames;
   const after = await fsp.readFile(file, 'utf8');
-  assert.match(after, /<marble-alt data-marble-id="hc1"/);
-  assert.match(after, /Yours/);
-  assert.match(after, /Theirs/);
+  assert.doesNotMatch(after, /<marble-alt/, 'a caret is observation, not a claim');
+  assert.match(after, /<h1 data-marble-id="hc1"[^>]*>Changed<\/h1>/);
 });
 
 test.after(async () => {
