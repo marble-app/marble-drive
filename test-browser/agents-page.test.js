@@ -474,7 +474,10 @@ test('dragging a conversation shows a card that follows the pointer', async () =
   const card = page.locator('.dock-card');
   await card.waitFor();
   const pos = await card.boundingBox();
-  assert.ok(Math.abs(pos.x - (start.x + 80)) < 48, `card x ${pos.x} should follow pointer`);
+  const pointerX = start.x + 80;
+  const pointerY = start.y + 40;
+  assert.ok(pos.x <= pointerX && pointerX <= pos.x + pos.width + 8, `card x ${pos.x} w ${pos.width} should stay under pointer ${pointerX}`);
+  assert.ok(pos.y <= pointerY && pointerY <= pos.y + pos.height + 8, `card y ${pos.y} h ${pos.height} should stay under pointer ${pointerY}`);
   assert.equal(await page.locator(`#list .conv[data-id="${second}"]`).isVisible(), true);
   await page.mouse.up();
 });

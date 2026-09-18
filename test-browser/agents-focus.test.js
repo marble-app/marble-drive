@@ -83,6 +83,27 @@ test('arrows move Focus selection; Space previews without pinning', async () => 
   await page.waitForFunction((id) => document.querySelector(`.focus-card[data-id="${id}"]`)?.getAttribute('data-lod') === 'full', ids.b);
 });
 
+test('Focus folder chip can ungroup a card', async () => {
+  const { page } = await openAgents();
+  const ids = await page.evaluate(async () => {
+    const agent = window.marble.agent;
+    const a = await agent.start({ provider: 'fake' });
+    const b = await agent.start({ provider: 'fake' });
+    for (const row of await agent.conversations()) {
+      if (row.pinned) await agent.update(row.id, { pinned: false });
+    }
+    await agent.createFolder({ conversationIds: [a, b], name: 'CHI', color: 'fun' });
+    return { a };
+  });
+  await page.locator('.views [data-view="focus"]').click();
+  await page.locator(`.focus-card[data-id="${ids.a}"] .focus-folder`).click();
+  await page.locator('.focus-folder-menu [data-action="ungroup"]').click();
+  await page.waitForFunction((id) => {
+    const card = document.querySelector(`.focus-card[data-id="${id}"]`);
+    return Boolean(card) && !card.dataset.color;
+  }, ids.a);
+});
+
 test('dropping a card on another ungrouped card forms a basin', async () => {
   const { page } = await openAgents();
   const ids = await page.evaluate(async () => {
@@ -135,4 +156,78 @@ test('reduced motion pins without transform travel', async () => {
     });
   }));
   assert.equal(traveling, false);
+});
+
+test('with nothing pinned, Focus has no stage band and hides the live pane', async () => {
+  const { page } = await openAgents();
+  await page.evaluate(async () => {
+    const agent = window.marble.agent;
+    for (const row of await agent.conversations()) {
+      if (row.pinned) await agent.update(row.id, { pinned: false });
+    }
+    for (const title of ['alpha', 'beta', 'gamma']) {
+      const id = await agent.start({ provider: 'fake' });
+      await agent.update(id, { title });
+    }
+  });
+  await page.locator('.views [data-view="focus"]').click();
+  await page.waitForFunction(() => document.querySelectorAll('.focus-card').length >= 3);
+  const shape = await page.evaluate(() => {
+    const canvas = document.querySelector('.focus');
+    const tops = [...document.querySelectorAll('.focus-card')].map((card) => card.offsetTop);
+    return {
+      height: canvas.clientHeight,
+      top: Math.min(...tops),
+      paneShown: getComputedStyle(document.querySelector('.pane')).display !== 'none',
+    };
+  });
+  // A Full-sized band used to be reserved whether or not anything was pinned,
+  // which left the whole upper half of the canvas empty.
+  assert.ok(shape.top < shape.height * 0.25, `topmost card at ${shape.top} of ${shape.height}`);
+  assert.equal(shape.paneShown, false, 'the composer must not lie across an unpinned canvas');
+});
+
+test('Focus basins are regions that never overlap or leave the canvas', async () => {
+  const { page } = await openAgents();
+  await page.evaluate(async () => {
+    const agent = window.marble.agent;
+    for (const row of await agent.conversations()) {
+      if (row.pinned) await agent.update(row.id, { pinned: false });
+    }
+    const mk = async (title, target) => {
+      const id = await agent.start({ provider: 'fake' });
+      await agent.update(id, { title });
+      return id;
+    };
+    await agent.createFolder({ conversationIds: [await mk('a'), await mk('b')], name: 'One', color: 'research' });
+    await agent.createFolder({ conversationIds: [await mk('c'), await mk('d')], name: 'Two', color: 'fun' });
+  });
+  await page.locator('.views [data-view="focus"]').click();
+  await page.waitForFunction(() => document.querySelectorAll('.focus-basin').length >= 2);
+  const basins = await page.evaluate(() => [...document.querySelectorAll('.focus-basin')].map((b) => ({
+    x: b.offsetLeft, y: b.offsetTop, w: b.offsetWidth, h: b.offsetHeight,
+  })));
+  for (const basin of basins) {
+    assert.ok(basin.x >= 0 && basin.y >= 0, `basin off-canvas at ${basin.x},${basin.y}`);
+  }
+  for (let i = 0; i < basins.length; i += 1) {
+    for (let j = i + 1; j < basins.length; j += 1) {
+      const a = basins[i];
+      const b = basins[j];
+      const hit = a.x < b.x + b.w && b.x < a.x + a.w && a.y < b.y + b.h && b.y < a.y + a.h;
+      assert.equal(hit, false, 'two folders must not own the same pixels');
+    }
+  }
+});
+
+test('switching view eases out instead of the Web Animations linear default', async () => {
+  const { page } = await openAgents();
+  const easings = await page.evaluate(async () => {
+    const shells = () => [...document.querySelectorAll('.library, .board, .folders, .focus')];
+    document.querySelector('.views [data-view="folders"]').click();
+    await new Promise((resolve) => requestAnimationFrame(resolve));
+    return shells().flatMap((el) => el.getAnimations().map((anim) => anim.effect.getTiming().easing));
+  });
+  assert.ok(easings.length > 0, 'expected the view switch to animate');
+  assert.equal(easings.includes('linear'), false, `view switch still linear: ${easings.join(', ')}`);
 });

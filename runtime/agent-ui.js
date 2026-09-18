@@ -638,6 +638,17 @@
     return tags;
   };
 
+  /** A transcript event belongs to a conversation if it has no turn (meta /
+   *  handoff on this stream) or its turn id is this conversation's. Turn ids
+   *  are `${conversationId}-t${n}`. The hyphen is required so a neighbouring
+   *  id cannot prefix-match. */
+  function eventBelongsToConversation(event, conversationId) {
+    if (!conversationId) return false;
+    if (!event?.turn) return true;
+    const turn = String(event.turn);
+    return turn === conversationId || turn.startsWith(`${conversationId}-`);
+  }
+
   const TAG_CSS = `
     .tag, .chip {
       display: inline-flex; align-items: center; gap: 4px;
@@ -965,6 +976,16 @@
     :host([data-chrome="pane"]) .heading { display: none; }
     :host([data-chrome="pane"]) .mast:not(:has(.tag)) { display: none; }
     :host([data-chrome="pane"]) .mast { padding-top: 8px; }
+    /* A tile is a pane sharing the screen with others. The status line, the
+       workdir path and the agent/model pickers are all the same on every pane
+       in a folder, so four copies of them is four times the chrome and none of
+       the information. The transcript and a place to type survive; clicking
+       the tile promotes it, and the full chrome comes back with it. */
+    :host([data-chrome="tile"]) .heading,
+    :host([data-chrome="tile"]) .mast,
+    :host([data-chrome="tile"]) .statusline,
+    :host([data-chrome="tile"]) .setup { display: none; }
+    :host([data-chrome="tile"]) .composer { padding: 6px 8px; gap: 4px; }
     .heading { margin: 0; font: 500 15px/1.3 inherit; letter-spacing: -.015em; outline: none; min-height: 1.3em; border-radius: 6px; padding: 2px 4px; margin-left: -4px; }
     .heading:hover { background: var(--paper-2); }
     .heading:focus { background: var(--card); box-shadow: 0 0 0 1px var(--accent), 0 0 0 4px var(--accent-soft); }
@@ -1434,7 +1455,12 @@
         return;
       }
       await this.refreshChrome();
-      this.off = this.api.on(id, (event) => this.receive(event));
+      if (this.loading !== token) return;
+      this.off?.();
+      this.off = this.api.on(id, (event) => {
+        if (this.loading !== token) return;
+        this.receive(event);
+      });
       this.updateSendable();
     }
 
@@ -2114,6 +2140,8 @@
     // ---------------------------------------------------------- receiving
 
     receive(event) {
+      const id = this.getAttribute('conversation');
+      if (!eventBelongsToConversation(event, id)) return;
       if (event.seq) {
         if (event.seq <= this.seen) return;
         this.seen = event.seq;
@@ -3316,7 +3344,7 @@
     document.body.append(drawer);
   };
 
-  window.marbleAgentUI = { renderText, spring, project, TOKENS, conversationTags, TAG_CSS, fillMeters, usageAvailable, usageTone, formatReset, USAGE_CSS, pageTheme, applyPageTheme, fillRadios, fitPicker, fitPresets, sortProviders };
+  window.marbleAgentUI = { renderText, spring, project, TOKENS, conversationTags, eventBelongsToConversation, TAG_CSS, fillMeters, usageAvailable, usageTone, formatReset, USAGE_CSS, pageTheme, applyPageTheme, fillRadios, fitPicker, fitPresets, sortProviders };
 
   if (window.marble?.agent) mount();
   else addEventListener('marble:agent', mount, { once: true });

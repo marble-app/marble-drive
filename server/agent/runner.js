@@ -31,6 +31,12 @@ export function createRunner({ store, tools, providers, workdir, origin, bridgeP
 
   const runningTurns = () => [...live.values()].filter((t) => t.status === 'running');
 
+  const ownsPath = (turn, docPath) =>
+    turn.target === docPath
+    || turn.writable.has(docPath)
+    || turn.touched.has(docPath)
+    || turn.origins.has(docPath);
+
   // Every publish for a conversation — a stored event's, or a raw delta's —
   // goes through this one chain, in the order it was called, the same way
   // the store itself serializes appends. Without it, a delta (published the
@@ -69,6 +75,7 @@ export function createRunner({ store, tools, providers, workdir, origin, bridgeP
       `- The person is viewing: ${context.viewing ?? context.target}`,
       `- The document you may edit: ${context.target}`,
     ];
+    if (context.also?.length) lines.push(`- Also in view: ${context.also.join(', ')}`);
     if (context.selectionSource) lines.push('- They selected these elements:', '', context.selectionSource);
     if (meta.handoffFrom && turn.n === 1) {
       const brief = await handoffBrief(meta.handoffFrom);
@@ -93,6 +100,9 @@ export function createRunner({ store, tools, providers, workdir, origin, bridgeP
     if (!context?.target) throw Object.assign(new Error('a turn needs context.target'), { status: 400 });
 
     const frozen = { viewing: context.viewing ?? null, target: context.target, selection: context.selection ?? [] };
+    const also = [...new Set((Array.isArray(context.also) ? context.also : []).map((item) => String(item).trim()).filter(Boolean))]
+      .filter((doc) => doc !== frozen.target && doc !== frozen.viewing);
+    if (also.length) frozen.also = also;
     if (frozen.selection.length) {
       const source = await readDocument(frozen.target).catch(() => null);
       if (source) {
@@ -167,7 +177,7 @@ export function createRunner({ store, tools, providers, workdir, origin, bridgeP
     // otherwise a pump() running concurrently (another turn on the same
     // conversation finishing right now) could start this one and store
     // `turn.started` before the events that are supposed to precede it.
-    await emit(turn, { type: 'user', text: turn.prompt, context: { viewing: frozen.viewing, target: frozen.target, selection: frozen.selection } });
+    await emit(turn, { type: 'user', text: turn.prompt, context: { viewing: frozen.viewing, target: frozen.target, selection: frozen.selection, also: frozen.also ?? [] } });
     await emit(turn, { type: 'turn.queued' });
     live.set(turn.id, turn);
     order.push(turn.id);
@@ -484,6 +494,8 @@ export function createRunner({ store, tools, providers, workdir, origin, bridgeP
 
     watchdog(docPath, sha) {
       for (const turn of runningTurns()) {
+        if (turn.capability === 'full') continue;
+        if (docPath && !ownsPath(turn, docPath)) continue;
         turn.watchdog = true;
         turn.onEvent({ type: 'watchdog', path: docPath, sha });
       }
@@ -495,23 +507,27 @@ export function createRunner({ store, tools, providers, workdir, origin, bridgeP
      *  almost always that turn: it is recorded as the turn's work, with the
      *  restore point just taken, rather than flagged. A `documents` turn writes
      *  only through ops, so a change under it is what the watchdog was written
-     *  for and is left to it. Answers whether a turn took this one.
+     *  for and is left to it.
      *
-     *  The cost, accepted in spec §6: your own edit during a full turn is filed
-     *  under that turn. You do not lose it — it is in the turn's change list
-     *  with its restore point — but the turn gets the credit. Flagging every
-     *  full turn instead would make the flag noise. */
+     *  Two full turns must not share a write. Claim the turn that already
+     *  owns the path (target, created docs, earlier writes). If only one full
+     *  turn is running, it can write anywhere, so it still claims. Otherwise
+     *  leave the change unclaimed — a sibling conversation is not a writer.
+     *
+     *  Returns the claiming conversation id, or null.
+     *
+     *  The cost, accepted in spec §6 for a single full turn: your own edit
+     *  during that turn is filed under it. You do not lose it — it is in the
+     *  turn's change list with its restore point. */
     documentTouched(docPath, sha) {
-      let claimed = false;
-      for (const turn of runningTurns()) {
-        if (turn.capability !== 'full') continue;
-        if (!turn.touched.has(docPath)) {
-          turn.touched.set(docPath, turn.origins.get(docPath) ?? sha);
-        }
-        turn.onEvent({ type: 'document.changed', path: docPath, sha: turn.touched.get(docPath) });
-        claimed = true;
+      const full = runningTurns().filter((turn) => turn.capability === 'full');
+      const pick = full.find((turn) => ownsPath(turn, docPath)) ?? (full.length === 1 ? full[0] : null);
+      if (!pick) return null;
+      if (!pick.touched.has(docPath)) {
+        pick.touched.set(docPath, pick.origins.get(docPath) ?? sha);
       }
-      return claimed;
+      pick.onEvent({ type: 'document.changed', path: docPath, sha: pick.touched.get(docPath) });
+      return pick.conversationId;
     },
 
     running: runningTurns,

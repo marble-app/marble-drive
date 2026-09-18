@@ -774,6 +774,43 @@ test('a refused edit is shown as refused, not as an error', async () => {
   assert.match(await view.locator('.tool').first().textContent(), /Refused/);
 });
 
+test('events from another conversation are not painted into this view', async () => {
+  const { page, view } = await mount();
+  const check = await page.evaluate(() => {
+    const fn = window.marbleAgentUI.eventBelongsToConversation;
+    return {
+      exists: typeof fn === 'function',
+      own: fn?.({ turn: 'aaaaaaaaaaaa-t1' }, 'aaaaaaaaaaaa'),
+      other: fn?.({ turn: 'bbbbbbbbbbbb-t1' }, 'aaaaaaaaaaaa'),
+      prefix: fn?.({ turn: 'aaaaaaaaaaaab-t1' }, 'aaaaaaaaaaaa'),
+      meta: fn?.({ type: 'handoff' }, 'aaaaaaaaaaaa'),
+    };
+  });
+  assert.equal(check.exists, true);
+  assert.equal(check.own, true);
+  assert.equal(check.other, false);
+  assert.equal(check.prefix, false);
+  assert.equal(check.meta, true);
+
+  const ids = await page.evaluate(async () => {
+    const a = await window.marble.agent.start({ provider: 'fake' });
+    const b = await window.marble.agent.start({ provider: 'fake' });
+    return { a, b };
+  });
+  await view.evaluate((el, a) => el.setAttribute('conversation', a), ids.a);
+  await page.waitForFunction((a) => document.querySelector('body > marble-conversation')?.getAttribute('conversation') === a, ids.a);
+  await page.evaluate(async (a) => {
+    await window.marble.agent.send(a, { prompt: 'script:slow', target: 'garden', viewing: 'garden', selection: [] });
+  }, ids.a);
+  await view.locator('.msg.me').waitFor();
+  await view.evaluate((el, b) => el.setAttribute('conversation', b), ids.b);
+  await page.waitForFunction((b) => document.querySelector('body > marble-conversation')?.getAttribute('conversation') === b, ids.b);
+  await page.waitForTimeout(1800);
+  const painted = await view.evaluate((el) => el.shadowRoot.querySelector('.log')?.textContent ?? '');
+  assert.equal(painted.includes('script:slow'), false, 'the previous chat\'s prompt must not appear');
+  assert.equal(painted.includes('finally'), false, 'the previous chat\'s stream must not appear');
+});
+
 test('an existing conversation opens with its whole history', async () => {
   const id = await (async () => {
     const { page } = await mount();

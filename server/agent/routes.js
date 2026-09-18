@@ -266,6 +266,15 @@ export function createAgentRoutes({ store, runner, tools, hub, providers, writeO
           viewing: body.context.viewing ? parsePath(String(body.context.viewing)) : null,
           target: parsePath(String(body.context.target), { allowRoot: false }),
           selection: Array.isArray(body.context.selection) ? body.context.selection.map(String) : [],
+          also: Array.isArray(body.context.also)
+            ? [...new Set(body.context.also.map((item) => {
+              try {
+                return parsePath(String(item), { allowRoot: false });
+              } catch {
+                return '';
+              }
+            }).filter(Boolean))]
+            : [],
         };
         return json(res, 202, await runner.send(id, { prompt: String(body.prompt ?? ''), context }));
       }
@@ -400,7 +409,9 @@ export function createAgentRoutes({ store, runner, tools, hub, providers, writeO
         if (Number.isInteger(body.order)) patch.order = body.order;
         if (Array.isArray(body.openIds)) patch.openIds = body.openIds.map(String);
         try {
-          return json(res, 200, await store.updateFolder(folderId, patch));
+          const updated = await store.updateFolder(folderId, patch);
+          hub.publishFolders(await store.listFolders());
+          return json(res, 200, updated);
         } catch (err) {
           if (err.status === 404) return json(res, 404, { error: err.message });
           throw err;
@@ -409,6 +420,7 @@ export function createAgentRoutes({ store, runner, tools, hub, providers, writeO
       if (method === 'DELETE') {
         try {
           await store.deleteFolder(folderId);
+          hub.publishFolders(await store.listFolders());
           return json(res, 200, { removed: true });
         } catch (err) {
           if (err.status === 404) return json(res, 404, { error: err.message });

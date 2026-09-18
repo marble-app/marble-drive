@@ -273,6 +273,19 @@ test('an unknown provider and a turn with no target are refused up front', async
   assert.equal((await api('POST', `/agent/conversations/${body.id}/turns`, { prompt: 'x', context: {} })).status, 400);
 });
 
+test('a turn keeps other documents that were also in view', async () => {
+  const conversation = await api('POST', '/agent/conversations', { provider: 'fake' });
+  const id = conversation.body.id;
+  const sent = await api('POST', `/agent/conversations/${id}/turns`, {
+    prompt: 'script:edit',
+    context: { target: 'garden', viewing: 'garden', selection: [], also: ['watched', 'garden'] },
+  });
+  assert.equal(sent.status, 202);
+  const { body } = await finished(id, sent.body.turnId);
+  const user = body.events.find((e) => e.type === 'user');
+  assert.deepEqual(user.context.also, ['watched']);
+});
+
 test('settings are read and saved', async () => {
   const saved = await api('PUT', '/agent/settings', { models: { fake: 'm1' }, efforts: { fake: 'high' } });
   assert.equal(saved.body.models.fake, 'm1');

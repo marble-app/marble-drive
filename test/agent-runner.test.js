@@ -17,16 +17,24 @@ const SCRIPTS = {
   forgetful: [{ lostWhenResumed: 'No conversation found with session ID: x' }, { say: 'fresh' }],
 };
 
-async function setup({ limits = {}, tools, onLook } = {}) {
+async function setup({ limits = {}, tools, onLook, capability } = {}) {
   const dir = await fsp.mkdtemp(path.join(os.tmpdir(), 'marble-runner-'));
   const store = createAgentStore({ dir: path.join(dir, 'agents'), defaultProvider: 'fake' });
   await store.ready();
   const published = [];
   const toolCalls = [];
+  const provider = createFakeProvider({ scripts: SCRIPTS });
+  if (capability) provider.capability = capability;
+  const spawned = [];
+  const spawn = provider.spawn.bind(provider);
+  provider.spawn = (opts) => {
+    spawned.push(opts);
+    return spawn(opts);
+  };
   const runner = createRunner({
     store,
     tools: tools ?? { call: async (name, input, turn) => { toolCalls.push({ name, input, turn: turn.id }); return { ok: true }; } },
-    providers: new Map([['fake', createFakeProvider({ scripts: SCRIPTS })]]),
+    providers: new Map([['fake', provider]]),
     workdir: path.join(dir, 'work'),
     origin: () => 'http://127.0.0.1:1',
     bridgePath: '/nonexistent/marble-mcp.js',
@@ -37,7 +45,7 @@ async function setup({ limits = {}, tools, onLook } = {}) {
     onLook,
   });
   await runner.boot();
-  return { store, runner, published, toolCalls };
+  return { store, runner, published, toolCalls, spawned };
 }
 
 const until = async (check, ms = 5_000) => {
@@ -661,5 +669,61 @@ test('an ordinary failure on a resumed turn keeps the session', async () => {
   const failed = await finished(store, (await runner.send(id, { prompt: 'script:broken', context: { target: 'd' } })).turnId);
   assert.equal(failed.error, 'You have hit your usage limit');
   assert.equal((await store.conversation(id)).providerSession, session);
+  await runner.close();
+});
+
+test('a full turn\'s disk write is not recorded on a sibling full turn', async () => {
+  const sha = 'a'.repeat(64);
+  const { store, runner } = await setup({ capability: 'full' });
+  const notes = await store.createConversation({ provider: 'fake' });
+  const garden = await store.createConversation({ provider: 'fake' });
+  await runner.send(notes.id, { prompt: 'script:slow', context: { target: 'notes' } });
+  await runner.send(garden.id, { prompt: 'script:slow', context: { target: 'garden' } });
+  await until(() => runner.running().length === 2);
+
+  const claimed = runner.documentTouched('notes', sha);
+  assert.equal(claimed, notes.id);
+
+  await until(async () => (await store.events(notes.id)).some((e) => e.type === 'document.changed'));
+  const onNotes = (await store.events(notes.id)).filter((e) => e.type === 'document.changed');
+  const onGarden = (await store.events(garden.id)).filter((e) => e.type === 'document.changed' || e.type === 'watchdog');
+  assert.equal(onNotes.length, 1);
+  assert.equal(onNotes[0].path, 'notes');
+  assert.equal(onGarden.length, 0, 'the other conversation must not wear this write');
+
+  for (const turn of runner.running()) await runner.cancel(turn.id);
+  await runner.close();
+});
+
+test('an outside write flags only the documents turn that owns that path', async () => {
+  const sha = 'b'.repeat(64);
+  const { store, runner } = await setup();
+  const watched = await store.createConversation({ provider: 'fake' });
+  const other = await store.createConversation({ provider: 'fake' });
+  await runner.send(watched.id, { prompt: 'script:slow', context: { target: 'watched' } });
+  await runner.send(other.id, { prompt: 'script:slow', context: { target: 'garden' } });
+  await until(() => runner.running().length === 2);
+
+  runner.watchdog('watched', sha);
+
+  await until(async () => (await store.events(watched.id)).some((e) => e.type === 'watchdog'));
+  assert.ok((await store.events(watched.id)).some((e) => e.type === 'watchdog' && e.path === 'watched'));
+  assert.equal((await store.events(other.id)).some((e) => e.type === 'watchdog'), false);
+
+  for (const turn of runner.running()) await runner.cancel(turn.id);
+  await runner.close();
+});
+
+test('the composed prompt names other documents that are also in view', async () => {
+  const { store, runner, spawned } = await setup();
+  const { id } = await store.createConversation({ provider: 'fake' });
+  await finished(store, (await runner.send(id, {
+    prompt: 'script:hello',
+    context: { target: 'notes', viewing: 'reading', also: ['garden', 'board'] },
+  })).turnId);
+  const prompt = spawned[0]?.prompt ?? '';
+  assert.match(prompt, /The person is viewing: reading/);
+  assert.match(prompt, /The document you may edit: notes/);
+  assert.match(prompt, /Also in view: garden, board/);
   await runner.close();
 });

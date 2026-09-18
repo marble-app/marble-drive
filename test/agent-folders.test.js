@@ -72,3 +72,96 @@ test('nearestCard picks the nearest card in a 90 degree cone', () => {
   assert.equal(F().nearestCard(cards, 'o', 'up').id, 'up');
   assert.equal(F().nearestCard(cards, 'o', 'left'), null);
 });
+
+const SIZES = { digest: { w: 260, h: 132 }, chip: { w: 168, h: 56 } };
+
+const cards = (prefix, n, lod) =>
+  Array.from({ length: n }, (_, i) => ({ id: `${prefix}${i}`, lod }));
+
+const overlap = (a, b) =>
+  a.x < b.x + b.w && b.x < a.x + a.w && a.y < b.y + b.h && b.y < a.y + a.h;
+
+const inside = (rect, region) =>
+  rect.x >= region.x - 0.01 && rect.y >= region.y - 0.01 &&
+  rect.x + rect.w <= region.x + region.w + 0.01 &&
+  rect.y + rect.h <= region.y + region.h + 0.01;
+
+test('packRegions gives every folder a region that no other region touches', () => {
+  const { regions } = F().packRegions({
+    groups: [
+      { folderId: 'aaaaaaaaaaaa', cards: cards('a', 4, 'digest') },
+      { folderId: 'bbbbbbbbbbbb', cards: cards('b', 3, 'chip') },
+      { folderId: 'cccccccccccc', cards: cards('c', 2, 'digest') },
+      { folderId: null, cards: cards('u', 3, 'chip') },
+    ],
+    canvas: { w: 1440, h: 840 },
+    sizes: SIZES,
+  });
+  assert.equal(regions.length, 4);
+  for (let i = 0; i < regions.length; i += 1) {
+    for (let j = i + 1; j < regions.length; j += 1) {
+      assert.equal(overlap(regions[i], regions[j]), false, `${i} overlaps ${j}`);
+    }
+  }
+});
+
+test('packRegions keeps every card inside its own region', () => {
+  const groups = [
+    { folderId: 'aaaaaaaaaaaa', cards: [...cards('a', 3, 'digest'), ...cards('ac', 4, 'chip')] },
+    { folderId: 'bbbbbbbbbbbb', cards: cards('b', 5, 'digest') },
+    { folderId: null, cards: cards('u', 2, 'chip') },
+  ];
+  const { regions, rects } = F().packRegions({ groups, canvas: { w: 1440, h: 840 }, sizes: SIZES });
+  for (const group of groups) {
+    const region = regions.find((row) => row.folderId === group.folderId);
+    for (const card of group.cards) {
+      assert.ok(inside(rects[card.id], region), `${card.id} escaped its region`);
+    }
+  }
+});
+
+test('packRegions never places a region off the left or top edge', () => {
+  const { regions, height } = F().packRegions({
+    groups: [
+      { folderId: 'aaaaaaaaaaaa', cards: cards('a', 9, 'digest') },
+      { folderId: 'bbbbbbbbbbbb', cards: cards('b', 9, 'digest') },
+      { folderId: 'cccccccccccc', cards: cards('c', 9, 'digest') },
+    ],
+    canvas: { w: 900, h: 700 },
+    top: 40,
+    sizes: SIZES,
+  });
+  for (const region of regions) {
+    assert.ok(region.x >= 0, 'negative left');
+    assert.ok(region.y >= 40, 'above the stage');
+  }
+  // Too wide for one shelf, so it wraps and reports a taller field.
+  assert.ok(height > 700, `expected a scrolling field, got ${height}`);
+});
+
+test('packRegions orders a region by the stored drag hints', () => {
+  const { rects } = F().packRegions({
+    groups: [{
+      folderId: 'aaaaaaaaaaaa',
+      cards: [
+        { id: 'last', lod: 'digest', ox: 0.9, oy: 0.9 },
+        { id: 'first', lod: 'digest', ox: 0.1, oy: 0.1 },
+      ],
+    }],
+    canvas: { w: 1440, h: 840 },
+    sizes: SIZES,
+  });
+  assert.ok(rects.first.x < rects.last.x || rects.first.y < rects.last.y);
+});
+
+test('packRegions drops folders with no matching cards', () => {
+  const { regions } = F().packRegions({
+    groups: [
+      { folderId: 'aaaaaaaaaaaa', cards: [] },
+      { folderId: 'bbbbbbbbbbbb', cards: cards('b', 1, 'digest') },
+    ],
+    canvas: { w: 1440, h: 840 },
+    sizes: SIZES,
+  });
+  assert.deepEqual(regions.map((row) => row.folderId), ['bbbbbbbbbbbb']);
+});

@@ -869,7 +869,7 @@ button{background:#738698;color:#fafaf7;border-color:#738698;cursor:pointer}p{co
       const claimed = agents?.documentTouched(docPath, shaOf(prior.source));
       if (!claimed) agents?.watchdog(docPath, shaOf(prior.source));
 
-      const conv = agents?.running?.()?.find((turn) => turn.capability === 'full')?.conversationId;
+      const conv = typeof claimed === 'string' ? claimed : null;
       const merged = mergeWrite(prior.source, current, {
         touchedIds: sessionTouched.all(docPath),
         agent: conv ? `agent:${conv}` : 'agent',

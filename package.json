@@ -22,6 +22,7 @@
     "test:browser": "node --test --test-concurrency=1 --test-reporter=spec \"test-browser/*.test.js\""
   },
   "dependencies": {
-    "@bdhmin/marble": "file:../marble"
+    "@bdhmin/marble": "file:../marble",
+    "playwright": "^1.63.0"
   }
 }

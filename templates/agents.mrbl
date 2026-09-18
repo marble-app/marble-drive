@@ -30,8 +30,8 @@ __ICON__
     --shadow: 0 1px 3px rgba(74,66,52,.12), 0 4px 8px rgba(74,66,52,.06);
     --shadow-lift: 0 4px 10px rgba(74,66,52,.10), 0 14px 28px rgba(74,66,52,.12);
     --radius: 12px;
-    --settle: ease-out;
-    --snap: ease-out;
+    --settle: cubic-bezier(0.22, 0.61, 0.36, 1);
+    --snap: cubic-bezier(0.22, 0.61, 0.36, 1);
     --t-fast: 110ms;
     --t: 200ms;
     --t-slow: 340ms;
@@ -100,6 +100,7 @@ __ICON__
     border-radius: 999px; white-space: nowrap; font-weight: 500;
   }
   .seg button:hover, .seg button:focus-visible { color: var(--ink); outline: none; }
+  .seg button:active { color: var(--ink); background: var(--paper-2); }
   .seg button[aria-pressed="true"],
   body[data-view="library"] .views [data-view="library"],
   body[data-view="board"] .views [data-view="board"],
@@ -172,77 +173,146 @@ __ICON__
     padding: .4rem 0; background: var(--paper);
   }
   .folder-group[data-color="research"],
+  .conv[data-color="research"],
   .focus-card[data-color="research"],
   .focus-basin[data-color="research"] {
     --accent-ink-rgb: 47, 111, 91; --folder: #2f6f5b;
   }
   .folder-group[data-color="fun"],
+  .conv[data-color="fun"],
   .focus-card[data-color="fun"],
   .focus-basin[data-color="fun"] {
     --accent-ink-rgb: 196, 92, 62; --folder: #c45c3e;
   }
   .folder-group[data-color="days"],
+  .conv[data-color="days"],
   .focus-card[data-color="days"],
   .focus-basin[data-color="days"] {
     --accent-ink-rgb: 77, 106, 88; --folder: #6f8f7d;
   }
   .folder-group[data-color="marble"],
+  .conv[data-color="marble"],
   .focus-card[data-color="marble"],
   .focus-basin[data-color="marble"] {
     --accent-ink-rgb: 95, 115, 133; --folder: #7e91a3;
   }
   .folder-group[data-color="travel"],
+  .conv[data-color="travel"],
   .focus-card[data-color="travel"],
   .focus-basin[data-color="travel"] {
     --accent-ink-rgb: 61, 107, 138; --folder: #3d6b8a;
   }
   .folder-group[data-color="clay"],
+  .conv[data-color="clay"],
   .focus-card[data-color="clay"],
   .focus-basin[data-color="clay"] {
     --accent-ink-rgb: 107, 79, 58; --folder: #6b4f3a;
   }
   .folder-group[data-color="sage"],
+  .conv[data-color="sage"],
   .focus-card[data-color="sage"],
   .focus-basin[data-color="sage"] {
     --accent-ink-rgb: 61, 92, 74; --folder: #3d5c4a;
   }
   .folder-group[data-color="mist"],
+  .conv[data-color="mist"],
   .focus-card[data-color="mist"],
   .focus-basin[data-color="mist"] {
     --accent-ink-rgb: 61, 90, 112; --folder: #3d5a70;
   }
   .folder-group[data-color="ink"],
+  .conv[data-color="ink"],
   .focus-card[data-color="ink"],
   .focus-basin[data-color="ink"] {
     --accent-ink-rgb: 69, 76, 82; --folder: #454c52;
   }
   .folder-group[data-color="gold"],
+  .conv[data-color="gold"],
   .focus-card[data-color="gold"],
   .focus-basin[data-color="gold"] {
     --accent-ink-rgb: 109, 86, 48; --folder: #6d5630;
   }
-  .folder-group { margin: 0 0 .35rem; }
+  .folder-group { margin: 0 0 .35rem; position: relative; }
   .folder-header {
     appearance: none; border: 0; background: none; width: 100%;
     display: flex; align-items: center; gap: .45rem; padding: .35rem .75rem;
     font: inherit; font-size: .82rem; font-weight: 500; color: var(--ink); cursor: pointer;
-    text-align: left;
+    text-align: left; user-select: none;
   }
   .folder-header:hover, .folder-header:focus-visible { background: var(--paper-3); outline: none; }
+  .folder-header:focus-visible { box-shadow: inset 0 0 0 2px var(--accent); }
+  .folder-header:active, .folder-tab:active, .folder-new-chat:active { background: var(--paper-2); }
   .folder-group.marble-active .folder-header { background: color-mix(in srgb, var(--folder) 12%, var(--paper)); }
-  .folder-tick {
-    flex: none; width: .55rem; height: .55rem; border-radius: 2px;
-    background: var(--folder);
+  .folder-tick, .focus-folder {
+    appearance: none; border: 0; flex: none; width: .7rem; height: .7rem; border-radius: 3px;
+    background: var(--folder, var(--line)); padding: 0; cursor: pointer;
   }
+  .folder-tick:active, .focus-folder:active { filter: brightness(.92); }
+  .folder-tick:focus-visible, .focus-folder:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
   .folder-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .folder-name[contenteditable="true"],
+  .folder-name[contenteditable="plaintext-only"] {
+    overflow: visible; text-overflow: clip; user-select: text; background: var(--card);
+    box-shadow: 0 0 0 1px var(--accent); border-radius: 4px; padding: 0 .2rem;
+  }
+  .folder-palette {
+    position: absolute; z-index: 8; display: flex; flex-wrap: wrap; gap: .28rem;
+    width: 8.2rem; padding: .4rem; margin: .15rem 0 0 .75rem;
+    border: 1px solid var(--line); border-radius: .5rem;
+    background: rgba(var(--card-rgb), .92);
+    backdrop-filter: blur(16px) saturate(160%);
+    -webkit-backdrop-filter: blur(16px) saturate(160%);
+    box-shadow: var(--shadow-lift);
+  }
+  .folder-palette button {
+    appearance: none; border: 1px solid transparent; width: 1.05rem; height: 1.05rem;
+    border-radius: 4px; padding: 0; cursor: pointer;
+  }
+  .folder-palette button[aria-pressed="true"] { box-shadow: 0 0 0 2px var(--ink); }
+  .folder-palette button[data-color="research"] { background: #2f6f5b; }
+  .folder-palette button[data-color="fun"] { background: #c45c3e; }
+  .folder-palette button[data-color="days"] { background: #6f8f7d; }
+  .folder-palette button[data-color="marble"] { background: #7e91a3; }
+  .folder-palette button[data-color="travel"] { background: #3d6b8a; }
+  .folder-palette button[data-color="clay"] { background: #6b4f3a; }
+  .folder-palette button[data-color="sage"] { background: #3d5c4a; }
+  .folder-palette button[data-color="mist"] { background: #3d5a70; }
+  .folder-palette button[data-color="ink"] { background: #454c52; }
+  .folder-palette button[data-color="gold"] { background: #6d5630; }
   .folder-count { flex: none; font-size: .72rem; color: var(--faint); font-variant-numeric: tabular-nums; }
   .folder-tabs { display: flex; flex-direction: column; gap: 1px; padding: 0 0 .15rem; }
   .folder-tab {
-    appearance: none; border: 0; background: none; width: 100%;
-    padding: .28rem .75rem .28rem 1.65rem; font: inherit; font-size: .8rem;
+    appearance: none; background: none; width: 100%;
+    display: flex; flex-direction: column; gap: 1px;
+    padding: .34rem .75rem .34rem 1.55rem; font: inherit; font-size: .8rem;
     color: var(--muted); cursor: pointer; text-align: left;
-    overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+    overflow: hidden;
+    /* The folder's colour on the leading edge, so a tab still reads as a
+       member of its group once the header has scrolled away. */
+    border: 0; border-left: 2px solid transparent;
   }
+  .folder-group .folder-tab { border-left-color: color-mix(in srgb, var(--folder) 45%, transparent); }
+  .folder-tab .tab-top { display: flex; align-items: baseline; gap: .38rem; min-width: 0; }
+  .folder-tab .tab-title {
+    flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  }
+  .folder-tab .tab-age {
+    flex: none; font-size: .68rem; color: var(--faint); font-variant-numeric: tabular-nums;
+  }
+  .folder-tab .tab-target {
+    display: block; font-size: .68rem; color: var(--faint);
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+    padding-left: .8rem;
+  }
+  .folder-tab .tab-target:empty { display: none; }
+  .folder-tab .tab-dot {
+    flex: none; width: 6px; height: 6px; border-radius: 999px;
+    background: var(--faint); align-self: center;
+  }
+  .folder-tab[data-status="running"] .tab-dot { background: var(--accent-ink); }
+  .folder-tab[data-status="review"] .tab-dot { background: var(--caution); }
+  .folder-tab[data-outcome="failed"] .tab-dot,
+  .folder-tab[data-outcome="watchdog"] .tab-dot { background: var(--danger); }
   .folder-tab:hover, .folder-tab:focus-visible { color: var(--ink); background: var(--paper-3); outline: none; }
   .folder-tab.marble-open { color: var(--ink); background: color-mix(in srgb, var(--folder, var(--accent-ink)) 10%, var(--paper)); }
   .folder-ungrouped { margin-top: .25rem; padding-top: .35rem; border-top: 1px solid var(--line); }
@@ -277,7 +347,11 @@ __ICON__
   .folder-save-dismiss { color: var(--muted); }
   .focus-workspace { display: none; }
   .focus {
-    position: relative; overflow: hidden; background: var(--paper);
+    position: relative; overflow: auto; background: var(--paper);
+  }
+  .focus-empty {
+    position: absolute; inset: 0; display: grid; place-items: center;
+    margin: 0; color: var(--faint); font-size: .88rem; pointer-events: none;
   }
   .focus-card {
     position: absolute; display: flex; flex-direction: column;
@@ -285,7 +359,9 @@ __ICON__
     border: 1px solid var(--line); border-radius: 12px;
     background: var(--card); box-shadow: var(--shadow);
     color: var(--ink); touch-action: none;
+    will-change: transform;
   }
+  .focus-card:active { background: color-mix(in srgb, var(--paper-2) 70%, var(--card)); }
   .focus-card[data-lod="full"] { z-index: 3; }
   .focus-card[data-lod="digest"] { z-index: 2; }
   .focus-card[data-lod="chip"] {
@@ -295,7 +371,7 @@ __ICON__
   .focus-card[data-selected="true"] {
     box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent-ink) 70%, transparent), var(--shadow-lift);
   }
-  .focus-card.is-dragging { z-index: 10; box-shadow: var(--shadow-lift); }
+  .focus-card.marble-dragging { z-index: 10; box-shadow: var(--shadow-lift); }
   .focus-card-head {
     display: flex; align-items: center; gap: .4rem; flex: none;
     padding: .4rem .55rem; min-height: 2.1rem;
@@ -306,12 +382,36 @@ __ICON__
   .focus-card-model { flex: none; font-size: .68rem; color: var(--faint); max-width: 5rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .focus-card[data-lod="digest"] .focus-card-model,
   .focus-card[data-lod="full"] .focus-card-model { display: none; }
-  .focus-card-actions { display: none; flex: none; gap: .25rem; }
-  .focus-card:hover .focus-card-actions,
+  .focus-card-actions { display: none; flex: none; gap: .2rem; }
+  .focus-card[data-lod="digest"]:hover .focus-card-actions,
+  .focus-card[data-lod="full"]:hover .focus-card-actions,
   .focus-card:focus-within .focus-card-actions { display: flex; }
+  .focus-card[data-lod="chip"] .focus-folder,
+  .focus-card[data-lod="chip"] .focus-pin,
+  .focus-card[data-lod="chip"] .focus-keep,
+  .focus-card[data-lod="chip"] .focus-collapse,
+  .focus-card[data-lod="digest"] .focus-collapse { display: none; }
   @media (hover: none) {
-    .focus-card-actions { display: flex; }
+    .focus-card .focus-card-actions { display: flex; }
   }
+  .focus-folder-menu {
+    position: fixed; z-index: 13; display: flex; flex-direction: column;
+    min-width: 9.5rem; padding: .3rem;
+    border: 1px solid var(--line); border-radius: .5rem;
+    background: rgba(var(--card-rgb), .92);
+    backdrop-filter: blur(16px) saturate(160%);
+    -webkit-backdrop-filter: blur(16px) saturate(160%);
+    box-shadow: var(--shadow-lift);
+  }
+  .focus-folder-menu button {
+    appearance: none; border: 0; background: none; text-align: left;
+    padding: .32rem .5rem; font: inherit; font-size: .78rem; cursor: pointer;
+    border-radius: .3rem; color: var(--ink);
+  }
+  .focus-folder-menu button:hover, .focus-folder-menu button:focus-visible {
+    background: var(--paper-3); outline: none;
+  }
+  .focus-folder-menu button[aria-pressed="true"] { font-weight: 500; }
   .focus-card-actions button {
     appearance: none; border: 1px solid var(--line); background: var(--paper);
     color: var(--ink); border-radius: 999px; padding: .12rem .45rem;
@@ -321,11 +421,34 @@ __ICON__
     background: var(--accent-soft); outline: none;
   }
   .focus-card-body {
-    flex: 1; min-height: 0; padding: .45rem .6rem; font-size: .78rem; color: var(--muted);
-    overflow: hidden;
+    flex: 1; min-height: 0; padding: .4rem .6rem .5rem; overflow: hidden;
+    display: flex; flex-direction: column; gap: .12rem;
   }
   .focus-card[data-lod="chip"] .focus-card-body,
   .focus-card[data-lod="full"] .focus-card-body { display: none; }
+  .focus-card-body p { margin: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .focus-target { font-size: .72rem; color: var(--faint); letter-spacing: -.005em; }
+  .focus-activity { font-size: .78rem; color: var(--ink); }
+  .focus-foot {
+    margin-top: auto !important; display: flex; align-items: baseline; gap: .4rem;
+    font-size: .72rem; color: var(--faint);
+  }
+  .focus-status { font-weight: 500; color: var(--muted); text-transform: capitalize; }
+  .focus-age { font-variant-numeric: tabular-nums; margin-left: auto; }
+  /* One status vocabulary across the four views: a running chat is accented,
+     a failed one is an alarm, review is a caution. */
+  .focus-dot {
+    flex: none; width: 7px; height: 7px; border-radius: 999px; background: var(--faint);
+  }
+  .focus-card[data-status="running"] .focus-dot { background: var(--accent-ink); }
+  .focus-card[data-status="running"] .focus-status { color: var(--accent-ink); }
+  .focus-card[data-status="review"] .focus-dot { background: var(--caution); }
+  .focus-card[data-status="review"] .focus-status { color: var(--caution); }
+  .focus-card[data-outcome="failed"] .focus-dot,
+  .focus-card[data-outcome="watchdog"] .focus-dot { background: var(--danger); }
+  .focus-card[data-outcome="failed"] .focus-status,
+  .focus-card[data-outcome="watchdog"] .focus-status { color: var(--danger); }
+  .focus-card[data-lod="chip"] .focus-dot { display: none; }
   .focus-live { display: none; flex: 1; min-height: 0; min-width: 0; }
   .focus-card[data-lod="full"] .focus-live { display: block; }
   .focus-card[data-lod="full"] .focus-live marble-conversation { display: block; height: 100%; }
@@ -333,17 +456,30 @@ __ICON__
     position: absolute; z-index: 0; pointer-events: none; border-radius: 16px;
     background: color-mix(in srgb, var(--folder) 14%, var(--paper));
     border: 1px solid color-mix(in srgb, var(--folder) 28%, var(--line));
+    transition: left var(--t) var(--settle), top var(--t) var(--settle),
+      width var(--t) var(--settle), height var(--t) var(--settle);
   }
+  /* Loose chats share the basins' geometry so they sit on the same baseline,
+     and give up only the fill — the difference says "not filed" without
+     making them look dropped on the floor. */
+  .focus-basin[data-loose] {
+    background: none; border-style: dashed;
+    border-color: color-mix(in srgb, var(--line) 80%, transparent);
+  }
+  .focus-basin[data-loose] .focus-basin-name { color: var(--faint); }
   .focus-basin-name {
     pointer-events: auto; position: absolute; top: .4rem; left: .75rem;
     font-size: .72rem; font-weight: 500; color: var(--folder, var(--muted));
     border: 0; background: none; padding: 0; font: inherit; font-size: .72rem; font-weight: 500;
   }
   .focus-look {
-    position: fixed; z-index: 12; left: 50%; top: 12vh; transform: translateX(-50%);
-    width: min(36rem, calc(100vw - 2rem)); max-height: 70vh; overflow: auto;
+    position: fixed; z-index: 12;
+    width: min(28rem, calc(100vw - 2rem)); max-height: 70vh; overflow: auto;
     padding: 1rem 1.1rem; border: 1px solid var(--line); border-radius: 12px;
-    background: var(--card); box-shadow: var(--shadow-lift);
+    background: rgba(var(--card-rgb), .86);
+    backdrop-filter: blur(20px) saturate(160%);
+    -webkit-backdrop-filter: blur(20px) saturate(160%);
+    box-shadow: var(--shadow-lift);
   }
   .focus-look h3 { margin: 0 0 .35rem; font-size: 1rem; font-weight: 500; }
   .focus-look .look-meta { color: var(--muted); font-size: .8rem; margin: 0 0 .75rem; }
@@ -360,6 +496,13 @@ __ICON__
     .focus-card, .focus-look {
       animation-duration: 150ms !important;
       transition-duration: 150ms !important;
+    }
+  }
+  @media (prefers-reduced-transparency: reduce) {
+    .topbar, .focus-look, .folder-palette, .focus-folder-menu {
+      background: var(--card);
+      backdrop-filter: none;
+      -webkit-backdrop-filter: none;
     }
   }
   body[data-view="board"] .library,
@@ -426,16 +569,30 @@ __ICON__
     box-shadow: none; border-radius: 0; padding-top: 0; overflow: hidden;
   }
   .board {
-    display: flex; align-items: flex-start; gap: 1rem; padding: 1rem; overflow: auto; position: relative;
+    display: flex; align-items: stretch; gap: 1rem; padding: 1rem;
+    overflow: hidden; position: relative; min-height: 0;
   }
+  /* Columns are the full height of the board and scroll in place. A board that
+     scrolls as one leaves a short column trailing dead space beside a long one
+     that has run off the bottom of the window. */
   .column {
-    flex: 1 1 0; min-width: 14rem; min-height: 5.5rem; display: flex; flex-direction: column; gap: .5rem;
+    flex: 1 1 0; min-width: 14rem; min-height: 0; display: flex; flex-direction: column; gap: .5rem;
     background: var(--paper-2); border: 1px solid var(--line); border-radius: var(--radius); padding: .7rem;
+    overflow-y: auto; overscroll-behavior: contain;
   }
   .column h2 {
-    margin: 0; font-size: .75rem; font-weight: 500; letter-spacing: .06em;
+    position: sticky; top: -.7rem; z-index: 1;
+    display: flex; align-items: center; gap: .4rem;
+    margin: -.7rem -.7rem 0; padding: .7rem .7rem .4rem;
+    background: var(--paper-2);
+    font-size: .75rem; font-weight: 500; letter-spacing: .06em;
     text-transform: uppercase; color: var(--faint);
   }
+  .col-count {
+    margin-left: auto; font-size: .72rem; letter-spacing: 0; color: var(--faint);
+    font-variant-numeric: tabular-nums;
+  }
+  .col-count:empty { display: none; }
   /* No JS "is this column empty" flag to keep in sync — :has() derives it
      straight from the DOM, which is the one place the fact already lives. */
   .column:not(:has(> .conv:not([hidden])))::after {
@@ -478,6 +635,10 @@ __ICON__
   }
   .conv:hover, .conv:focus-visible { background: var(--paper-3); outline: none; }
   .conv.marble-open { background: var(--accent-soft); }
+  /* Folder colour on the leading edge, the same 2px rule the rail tab uses, so
+     a row is recognisable as a member of its group in List and Board too. */
+  .conv { border-left: 2px solid transparent; }
+  .conv[data-color] { border-left-color: color-mix(in srgb, var(--folder) 45%, transparent); }
   /* An author-level `display: grid` above beats the UA [hidden] rule, so a
      filtered-out row stays fully visible unless this re-asserts it. */
   .conv[hidden] { display: none; }
@@ -497,9 +658,37 @@ __ICON__
     background: var(--danger); box-shadow: 0 0 0 3px rgba(var(--accent-ink-rgb), 0);
     animation: none;
   }
-  .conv .body { min-width: 0; display: flex; flex-direction: column; gap: .1rem; }
+  /* Four facts, three lines: the agent's name shares the last line with the
+     activity instead of claiming a row of its own. */
+  .conv .body {
+    min-width: 0; display: grid; align-items: baseline;
+    grid-template-columns: auto minmax(0, 1fr);
+    grid-template-areas: "title title" "target target" "tags meta";
+    gap: .1rem .4rem;
+  }
+  .conv .title { grid-area: title; }
+  .conv .target { grid-area: target; }
+  .conv .tags { grid-area: tags; }
+  .conv .meta { grid-area: meta; }
   .conv .title { font-weight: 500; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-  .conv .tags { display: flex; flex-wrap: wrap; gap: 4px; margin-top: .2rem; }
+  .conv .target {
+    font-size: .72rem; color: var(--faint);
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  }
+  .conv .target:empty { display: none; }
+  .conv .tags:empty { display: none; }
+  .conv .tags { display: flex; flex-wrap: wrap; gap: 4px; }
+  /* The agent's name is the same on every row of a one-agent drive, so it is
+     context rather than a headline. It keeps its place — which conversation
+     ran on which CLI is worth knowing — but gives up the filled pill that made
+     it the loudest thing in the list. */
+  .conv .tag[data-kind="agent"] {
+    background: none !important; color: var(--faint) !important;
+    padding: 2px 0; font-weight: 400;
+  }
+  .conv .tag[data-kind="agent"] + .tag::before {
+    content: '·'; color: var(--faint); margin-right: 4px;
+  }
   .conv .tag {
     display: inline-flex; align-items: center; font-size: 11px; line-height: 1.3; font-weight: 500;
     padding: 2px 8px; border-radius: 999px; max-width: 100%;
@@ -810,6 +999,11 @@ __ICON__
     const FLIP_MS = 420;
     const FLIP_EASE = 'ease-out';
     const STAGGER_MS = 18;
+    // The one curve the whole page eases on. Web Animations defaults to
+    // linear when `easing` is omitted, which is what the view switch used to
+    // ship — name it here so no call site can forget it again.
+    const VIEW_MS = 200;
+    const VIEW_EASE = 'cubic-bezier(0.22, 0.61, 0.36, 1)';
 
     const summaries = new Map();
     const nodes = new Map();
@@ -835,9 +1029,35 @@ __ICON__
     const age = (t) => {
       if (!t) return '';
       const s = Math.max(0, (Date.now() - t) / 1000);
-      if (s < 3600) return Math.round(s / 60) + 'm';
+      // Under a minute rounded to '0m', which read as a broken clock on every
+      // freshly touched row.
+      if (s < 45) return 'now';
+      if (s < 3600) return Math.max(1, Math.round(s / 60)) + 'm';
       if (s < 86400) return Math.round(s / 3600) + 'h';
       return Math.round(s / 86400) + 'd';
+    };
+
+    /** True when every loaded conversation runs the same agent, so naming it on
+     *  each row would repeat one word down the whole list. */
+    const soloProvider = () => {
+      const seen = new Set();
+      for (const summary of summaries.values()) {
+        if (summary.provider) seen.add(summary.provider);
+        if (seen.size > 1) return false;
+      }
+      return true;
+    };
+
+    /** The last two path segments, extension dropped. A full drive path is too
+     *  long for a card, and its head repeats the folder the card already sits
+     *  in; the tail is the part that tells two rows apart. */
+    const tailOfTarget = (path) => {
+      if (!path) return '';
+      const parts = String(path).split('/').filter(Boolean);
+      const tail = parts.slice(-2);
+      if (!tail.length) return '';
+      tail[tail.length - 1] = tail[tail.length - 1].replace(/\.(mrbl|md|js|json|txt|html|css)$/i, '');
+      return tail.join('/');
     };
 
     const deriveView = () => {
@@ -912,6 +1132,17 @@ __ICON__
       for (const [id, el] of nodes) el.hidden = !matches(summaries.get(id));
       paintFolderRail();
       paintFocus();
+      paintColumnCounts();
+    };
+
+    /** The folder catalog arrives after the first listing has already painted
+     *  every row, so anything a row draws from it — its colour — has to be
+     *  asked for again once the catalog lands. */
+    const repaintRows = () => {
+      for (const [id, el] of nodes) {
+        const summary = summaries.get(id);
+        if (summary) paintRow(el, summary);
+      }
     };
 
     const paintOpen = () => {
@@ -924,6 +1155,9 @@ __ICON__
     const FULL_CAP = window.marbleAgentFolders?.FULL_CAP ?? 4;
     let folderCatalog = [];
     let activeFolderId = null;
+    // Pending header open, held for one double-click interval so a rename can
+    // cancel it before the rail repaints.
+    let openTimer = 0;
     let selectedIds = [];
     let selectAnchor = null;
     let workingSetIds = [];
@@ -1175,6 +1409,9 @@ __ICON__
     const bindFolderTabDrag = (tab, dragId) => {
       tab.addEventListener('pointerdown', (event) => {
         if (event.button !== 0) return;
+        const tabRect = tab.getBoundingClientRect();
+        let grabX = event.clientX - tabRect.left;
+        let grabY = event.clientY - tabRect.top;
         const origin = { x: event.clientX, y: event.clientY, started: false };
         let done = false;
         let card = null;
@@ -1184,7 +1421,7 @@ __ICON__
           if (!origin.started && Math.hypot(e.clientX - origin.x, e.clientY - origin.y) < 10) return;
           origin.started = true;
           if (!card) card = makeCard(dragId);
-          placeCard(card, e.clientX, e.clientY);
+          placeCard(card, e.clientX, e.clientY, grabX, grabY);
           paintFolderDrop(e.clientX, e.clientY, dragId);
         };
         const up = async (e) => {
@@ -1218,7 +1455,27 @@ __ICON__
       tab.className = 'folder-tab';
       tab.dataset.id = summary.id;
       tab.setAttribute('data-marble-transient', '');
-      tab.textContent = summary.title || 'Untitled';
+      // A tab used to be a bare title, which made the rail unscannable: no way
+      // to tell a finished chat from a running one, or two chats on the same
+      // project apart, without opening them.
+      tab.dataset.status = statusOf(summary);
+      if (summary.lastOutcome) tab.dataset.outcome = summary.lastOutcome;
+      const top = document.createElement('span');
+      top.className = 'tab-top';
+      const dot = document.createElement('span');
+      dot.className = 'tab-dot';
+      dot.setAttribute('aria-hidden', 'true');
+      const title = document.createElement('span');
+      title.className = 'tab-title';
+      title.textContent = summary.title || 'Untitled';
+      const when = document.createElement('span');
+      when.className = 'tab-age';
+      when.textContent = age(summary.updatedAt);
+      top.append(dot, title, when);
+      const where = document.createElement('span');
+      where.className = 'tab-target';
+      where.textContent = tailOfTarget(targets.get(summary.id) || summary.target || '');
+      tab.append(top, where);
       tab.classList.toggle('marble-open', summary.id === openId);
       tab.classList.toggle('marble-selected', selectedIds.includes(summary.id));
       tab.addEventListener('click', async (event) => {
@@ -1259,8 +1516,118 @@ __ICON__
       return tab;
     };
 
+    const FOLDER_COLOR_KEYS = window.marbleAgentFolders?.COLOR_KEYS ?? [
+      'research', 'fun', 'days', 'marble', 'travel', 'clay', 'sage', 'mist', 'ink', 'gold',
+    ];
+
+    const closeFolderPalettes = () => {
+      for (const el of document.querySelectorAll('.folder-palette, .focus-folder-menu')) el.remove();
+    };
+
+    const watchPaletteDismiss = () => {
+      const dismiss = (event) => {
+        if (event.target.closest?.('.folder-palette, .folder-tick, .focus-folder-menu, .focus-folder')) return;
+        closeFolderPalettes();
+        document.removeEventListener('pointerdown', dismiss, true);
+      };
+      document.addEventListener('pointerdown', dismiss, true);
+    };
+
+    const editFolderName = (name, folder) => {
+      if (!agent || !folder || name.isContentEditable) return;
+      const prev = folder.name || 'Group';
+      closeFolderPalettes();
+      name.setAttribute('contenteditable', 'true');
+      name.setAttribute('role', 'textbox');
+      name.focus();
+      const range = document.createRange();
+      range.selectNodeContents(name);
+      window.getSelection()?.removeAllRanges();
+      window.getSelection()?.addRange(range);
+      let closed = false;
+      const finish = async (commit) => {
+        if (closed) return;
+        closed = true;
+        name.removeEventListener('blur', onBlur);
+        name.removeEventListener('keydown', onKey);
+        const next = (name.textContent || '').trim().slice(0, 40);
+        name.removeAttribute('contenteditable');
+        name.removeAttribute('role');
+        if (!commit || !next || next === prev) {
+          name.textContent = prev;
+          return;
+        }
+        name.textContent = next;
+        const row = folderCatalog.find((item) => item.id === folder.id);
+        if (row) row.name = next;
+        folder.name = next;
+        try { await agent.updateFolder(folder.id, { name: next }); } catch {
+          name.textContent = prev;
+          folder.name = prev;
+          if (row) row.name = prev;
+        }
+      };
+      const onBlur = () => { finish(true); };
+      const onKey = (event) => {
+        if (event.key === 'Enter') {
+          event.preventDefault();
+          event.stopPropagation();
+          finish(true);
+          name.blur();
+        }
+        if (event.key === 'Escape') {
+          event.preventDefault();
+          event.stopPropagation();
+          finish(false);
+          name.blur();
+        }
+      };
+      name.addEventListener('keydown', onKey);
+      name.addEventListener('blur', onBlur);
+    };
+
+    const openFolderPalette = (group, folder) => {
+      closeFolderPalettes();
+      if (!agent || !folder) return;
+      const pal = document.createElement('div');
+      pal.className = 'folder-palette';
+      pal.setAttribute('role', 'listbox');
+      pal.setAttribute('aria-label', 'Folder color');
+      pal.setAttribute('data-marble-transient', '');
+      for (const key of FOLDER_COLOR_KEYS) {
+        const swatch = document.createElement('button');
+        swatch.type = 'button';
+        swatch.dataset.color = key;
+        swatch.setAttribute('aria-label', key);
+        swatch.setAttribute('aria-pressed', key === folder.color ? 'true' : 'false');
+        swatch.setAttribute('data-marble-transient', '');
+        swatch.addEventListener('click', async (event) => {
+          event.stopPropagation();
+          closeFolderPalettes();
+          const row = folderCatalog.find((item) => item.id === folder.id);
+          const prev = folder.color;
+          folder.color = key;
+          if (row) row.color = key;
+          group.dataset.color = key;
+          try { await agent.updateFolder(folder.id, { color: key }); } catch {
+            folder.color = prev;
+            if (row) row.color = prev;
+            group.dataset.color = prev || 'research';
+          }
+        });
+        pal.append(swatch);
+      }
+      group.append(pal);
+      watchPaletteDismiss();
+    };
+
     const paintFolderRail = () => {
       if (!folderRail) return;
+      // A repaint replaces every node in the rail. Doing that while a folder
+      // name is open for editing destroys the field mid-keystroke and loses
+      // what was typed, so a live rename holds the rail still; the blur that
+      // commits it repaints.
+      if (folderRail.querySelector('.folder-name[contenteditable]')) return;
       const save = folderSaveEl;
       folderRail.replaceChildren();
       const sorted = [...folderCatalog].sort((a, b) => (a.order ?? 0) - (b.order ?? 0));
@@ -1272,13 +1639,16 @@ __ICON__
         group.setAttribute('data-marble-transient', '');
         group.classList.toggle('marble-active', folder.id === activeFolderId);
 
-        const header = document.createElement('button');
-        header.type = 'button';
+        const header = document.createElement('div');
         header.className = 'folder-header';
+        header.setAttribute('role', 'group');
+        header.setAttribute('aria-label', folder.name || 'Group');
+        header.tabIndex = 0;
         header.setAttribute('data-marble-transient', '');
-        const tick = document.createElement('span');
+        const tick = document.createElement('button');
+        tick.type = 'button';
         tick.className = 'folder-tick';
-        tick.setAttribute('aria-hidden', 'true');
+        tick.setAttribute('aria-label', `Color ${folder.color || 'research'}`);
         tick.setAttribute('data-marble-transient', '');
         const name = document.createElement('span');
         name.className = 'folder-name';
@@ -1290,10 +1660,59 @@ __ICON__
         const tabs = railConversations(folder.id);
         count.textContent = tabs.length ? String(tabs.length) : '';
         header.append(tick, name, count);
-        header.addEventListener('click', async () => {
+        const activate = async () => {
           activeFolderId = folder.id;
+          // Mark it before awaiting the dock, not after: opening a folder loads
+          // up to four conversations, and the rail should answer the click on
+          // the frame it happened rather than when the last pane arrives.
+          for (const row of folderRail.querySelectorAll('.folder-group')) {
+            row.classList.toggle('marble-active', row.dataset.folderId === folder.id);
+          }
           await restoreFolderDock(folder);
-          paintFolderRail();
+        };
+        // Click opens, double-click renames — so the first click of a rename
+        // must not open, because opening repaints the rail and would pull the
+        // editable node out from under the second click. Hold the open for one
+        // double-click interval; the rename cancels it.
+        header.addEventListener('click', (event) => {
+          if (event.target.closest('.folder-tick, .folder-palette, .folder-name[contenteditable], .folder-name[contenteditable="plaintext-only"]')) return;
+          if (event.detail > 1) return;
+          clearTimeout(openTimer);
+          openTimer = setTimeout(() => { activate(); }, 220);
+        });
+        header.addEventListener('dblclick', (event) => {
+          if (event.target.closest('.folder-tick, .folder-palette')) return;
+          clearTimeout(openTimer);
+          event.preventDefault();
+        });
+        header.addEventListener('keydown', async (event) => {
+          if (event.target.closest('.folder-name[contenteditable], .folder-name[contenteditable="plaintext-only"]')) return;
+          if (event.key === 'Enter' || event.key === ' ') {
+            event.preventDefault();
+            await activate();
+            return;
+          }
+          // Renaming lost its click target, so it needs a key. F2 is what a
+          // file rail is expected to answer to.
+          if (event.key === 'F2') {
+            event.preventDefault();
+            editFolderName(name, folder);
+          }
+        });
+        tick.addEventListener('click', (event) => {
+          event.preventDefault();
+          event.stopPropagation();
+          openFolderPalette(group, folder);
+        });
+        // The name used to take the header's click and open an editor. It is
+        // `flex: 1`, so that swallowed almost the whole target: opening a
+        // folder — the reason this view exists — survived only in the few
+        // pixels beside the count. Rename is the rarer act, so it moves to
+        // double-click, which is what the Focus basin name already used.
+        name.addEventListener('dblclick', (event) => {
+          event.preventDefault();
+          event.stopPropagation();
+          editFolderName(name, folder);
         });
 
         const tabList = document.createElement('div');
@@ -1330,7 +1749,13 @@ __ICON__
       paintTabSelection();
     };
 
-    const FOCUS_LOD_MS = 400;
+    const FOCUS_RESPONSE = 0.4;
+    const FOCUS_DAMPING = 1;
+    const focusSprings = new WeakMap();
+    let lastFocusLods = '';
+    // The LOD each card was last painted at, so the layout pass can ask a card
+    // its size class without recomputing the cooling.
+    let lastLods = {};
 
     const matchingFocusItems = () => [...summaries.values()]
       .filter(matches)
@@ -1351,10 +1776,21 @@ __ICON__
       }
     };
 
+    /** Focus with nothing pinned has nowhere to put the live pane. Clearing its
+     *  inline position is not enough: the stylesheet still shows the library
+     *  shell in this view, so the composer and its provider pills used to lie
+     *  across the top of the canvas. Take it out of flow outright. */
+    const hideFocusPane = () => {
+      if (!pane) return;
+      clearFocusPane();
+      pane.style.display = 'none';
+    };
+
     const leaveFocusView = () => {
       clearFocusPane();
       for (const live of focusEl?.querySelectorAll('.focus-live') ?? []) live.replaceChildren();
       document.querySelector('.focus-look')?.remove();
+      closeFolderPalettes();
       focusLookId = null;
       stopFocusDecay();
       applyDock();
@@ -1372,7 +1808,7 @@ __ICON__
       focusDecayTimer = setInterval(() => {
         if (document.hidden) return;
         if ((document.body.getAttribute('data-view') || 'library') !== 'focus') return;
-        paintFocus();
+        paintFocus({ quiet: true });
       }, 1000);
     };
 
@@ -1381,40 +1817,133 @@ __ICON__
       return { w: Math.max(1, focusEl.clientWidth), h: Math.max(1, focusEl.clientHeight), left: r.left, top: r.top };
     };
 
-    const focusLodSize = (lod, fullCount, canvas) => {
-      if (lod === 'full') {
-        const cols = fullCount >= 3 ? 2 : Math.max(1, fullCount);
-        const rows = fullCount >= 3 ? 2 : 1;
-        return {
-          w: Math.min(canvas.w * 0.72, 920) / cols - (cols > 1 ? 8 : 0),
-          h: Math.min(canvas.h * 0.70, 720) / rows - (rows > 1 ? 8 : 0),
-        };
-      }
-      if (lod === 'digest') return { w: 280, h: 200 };
-      return { w: 168, h: 56 };
+    // Digest is sized to the four lines it actually shows. It used to be
+    // 280x200 holding three lines of run-on text, so every card read as a
+    // third-full box.
+    const focusLodSize = (lod) => (lod === 'digest' ? { w: 260, h: 132 } : { w: 168, h: 56 });
+
+    const STAGE_MARGIN = 16;
+
+    /** Fulls are tiled across the top. Two columns once there are three, so a
+     *  fourth pin squares the stage off rather than slivering it. */
+    const stageGrid = (fullCount) => ({
+      cols: fullCount >= 3 ? 2 : Math.max(1, fullCount),
+      rows: fullCount >= 3 ? 2 : 1,
+    });
+
+    const stageHeight = (fullCount, canvas) => {
+      if (!fullCount) return 0;
+      return Math.min(canvas.h * 0.52, 460) + STAGE_MARGIN;
     };
 
-    const defaultFocusRect = (lod, index, canvas, size, fullCount) => {
-      if (lod === 'full') {
-        const cols = fullCount >= 3 ? 2 : Math.max(1, fullCount);
-        const col = index % cols;
-        const row = Math.floor(index / cols);
-        const totalW = cols * size.w + (cols - 1) * 8;
-        const x = Math.max(16, (canvas.w - totalW) / 2) + col * (size.w + 8);
-        const y = 24 + row * (size.h + 8);
-        return { x, y, w: size.w, h: size.h };
-      }
-      if (lod === 'digest') {
-        const x = 24 + (index % 3) * (size.w + 8);
-        const y = Math.min(canvas.h * 0.42, canvas.h - size.h - 80) + Math.floor(index / 3) * (size.h + 8);
-        return { x, y, w: size.w, h: size.h };
-      }
+    const stageRect = (index, fullCount, canvas) => {
+      const gap = window.marbleAgentFolders?.GAP ?? 8;
+      const { cols, rows } = stageGrid(fullCount);
+      const band = Math.min(canvas.h * 0.52, 460);
+      const w = (canvas.w - 2 * STAGE_MARGIN - (cols - 1) * gap) / cols;
+      const h = (band - STAGE_MARGIN - (rows - 1) * gap) / rows;
       return {
-        x: 16 + index * (size.w + 8),
-        y: Math.max(16, canvas.h - size.h - 16),
-        w: size.w,
-        h: size.h,
+        x: STAGE_MARGIN + (index % cols) * (w + gap),
+        y: STAGE_MARGIN + Math.floor(index / cols) * (h + gap),
+        w,
+        h,
       };
+    };
+
+    /** What packRegions needs to know about a card: its size class, and the
+     *  stored drag position it should be ordered by inside its region. */
+    const fieldCard = (item) => ({
+      id: item.id,
+      lod: lastLods[item.id] === 'chip' ? 'chip' : 'digest',
+      ox: Number.isFinite(item.focusX) ? item.focusX : undefined,
+      oy: Number.isFinite(item.focusY) ? item.focusY : undefined,
+    });
+
+    const clampFocusRect = (rect, canvas) => ({
+      ...rect,
+      x: Math.min(Math.max(8, rect.x), Math.max(8, canvas.w - rect.w - 8)),
+      y: Math.min(Math.max(8, rect.y), Math.max(8, canvas.h - rect.h - 8)),
+    });
+
+    const rubberFocus = (value, min, max, dimension) => {
+      const fn = window.marbleAgentFolders?.rubberband;
+      if (value < min) return min + (fn ? fn(value - min, dimension) : (value - min) * 0.35);
+      if (value > max) return max + (fn ? fn(value - max, dimension) : (value - max) * 0.35);
+      return value;
+    };
+
+    const liveFocusBox = (card) => {
+      const canvasR = focusEl.getBoundingClientRect();
+      const box = card.getBoundingClientRect();
+      return {
+        x: box.left - canvasR.left + focusEl.scrollLeft,
+        y: box.top - canvasR.top + focusEl.scrollTop,
+        w: box.width,
+        h: box.height,
+      };
+    };
+
+    const stopCardSpring = (card) => {
+      const run = focusSprings.get(card);
+      if (run?.frame) cancelAnimationFrame(run.frame);
+      focusSprings.delete(card);
+      for (const anim of card.getAnimations()) anim.cancel();
+    };
+
+    const flattenCardMotion = (card) => {
+      const live = liveFocusBox(card);
+      stopCardSpring(card);
+      card.style.transform = '';
+      card.style.left = `${live.x}px`;
+      card.style.top = `${live.y}px`;
+      card.style.width = `${live.w}px`;
+      card.style.height = `${live.h}px`;
+      return live;
+    };
+
+    const springCardTo = (card, to, velocity = { x: 0, y: 0 }) => {
+      if (reduceMotion.matches) {
+        stopCardSpring(card);
+        card.style.left = `${to.x}px`;
+        card.style.top = `${to.y}px`;
+        card.style.width = `${to.w}px`;
+        card.style.height = `${to.h}px`;
+        card.animate([{ opacity: 0.55 }, { opacity: 1 }], { duration: 150, easing: 'ease-out' });
+        return;
+      }
+      const from = flattenCardMotion(card);
+      card.style.left = `${to.x}px`;
+      card.style.top = `${to.y}px`;
+      card.style.width = `${to.w}px`;
+      card.style.height = `${to.h}px`;
+      let x = from.x;
+      let y = from.y;
+      let vx = velocity.x;
+      let vy = velocity.y;
+      const om = (2 * Math.PI) / FOCUS_RESPONSE;
+      let last = performance.now();
+      const run = { frame: 0 };
+      const step = (now) => {
+        const dt = Math.min(0.032, (now - last) / 1000);
+        last = now;
+        const ax = -om * om * (x - to.x) - 2 * FOCUS_DAMPING * om * vx;
+        const ay = -om * om * (y - to.y) - 2 * FOCUS_DAMPING * om * vy;
+        vx += ax * dt;
+        vy += ay * dt;
+        x += vx * dt;
+        y += vy * dt;
+        card.style.transform = `translate(${x - to.x}px, ${y - to.y}px)`;
+        const settled = Math.hypot(x - to.x, y - to.y) < 0.5 && Math.hypot(vx, vy) < 12;
+        if (settled) {
+          card.style.transform = '';
+          focusSprings.delete(card);
+          layoutFocusPane(focusFullIds());
+          return;
+        }
+        run.frame = requestAnimationFrame(step);
+      };
+      run.frame = requestAnimationFrame(step);
+      focusSprings.set(card, run);
     };
 
     const paintFocusCard = (card, summary, lod) => {
@@ -1425,13 +1954,29 @@ __ICON__
       else delete card.dataset.color;
       const title = card.querySelector('.focus-card-title');
       if (title) title.textContent = summary.title || 'Untitled';
-      const body = card.querySelector('.focus-card-body');
-      if (body) {
-        const target = targets.get(summary.id) || summary.target || '';
-        body.textContent = [target, statusOf(summary), summary.activity || summary.lastOutcome || ''].filter(Boolean).join(' · ');
-      }
+      const status = statusOf(summary);
+      card.dataset.status = status;
+      if (summary.lastOutcome) card.dataset.outcome = summary.lastOutcome;
+      else delete card.dataset.outcome;
+      // Four addressable lines rather than one run-on string: the path says
+      // where, the activity says what, the footer says how it went and when.
+      const target = card.querySelector('.focus-target');
+      if (target) target.textContent = tailOfTarget(targets.get(summary.id) || summary.target || '');
+      const activity = card.querySelector('.focus-activity');
+      if (activity) activity.textContent = summary.activity || summary.lastOutcome || '';
+      const statusEl = card.querySelector('.focus-status');
+      if (statusEl) statusEl.textContent = status;
+      const ageEl = card.querySelector('.focus-age');
+      if (ageEl) ageEl.textContent = age(summary.updatedAt);
+      // A chip is a title and one tick of context. When every chat runs the
+      // same agent, naming it turns that tick into noise — show the age, which
+      // is the thing a cold card is actually being judged on.
       const model = card.querySelector('.focus-card-model');
-      if (model) model.textContent = labels.get(summary.provider)?.label || summary.model || '';
+      if (model) {
+        model.textContent = soloProvider()
+          ? age(summary.updatedAt)
+          : (labels.get(summary.provider)?.label || summary.model || '');
+      }
     };
 
     const layoutFocusPane = (fullIds) => {
@@ -1439,15 +1984,14 @@ __ICON__
       const stacked = focusEl.hasAttribute('data-stack') || narrowView.matches;
       const primary = (focusPrimaryId && fullIds.includes(focusPrimaryId)) ? focusPrimaryId : fullIds[0];
       if (!primary || stacked) {
-        clearFocusPane();
-        if (stacked) pane.style.visibility = 'hidden';
+        hideFocusPane();
         for (const live of focusEl.querySelectorAll('.focus-live')) live.replaceChildren();
         return;
       }
       const card = focusEl.querySelector(`.focus-card[data-id="${primary}"]`);
       const slot = card?.querySelector('.focus-live');
       if (!slot) {
-        clearFocusPane();
+        hideFocusPane();
         return;
       }
       const r = slot.getBoundingClientRect();
@@ -1482,26 +2026,15 @@ __ICON__
       }
     };
 
-    const animateFocusCard = (card, from, to) => {
-      card.style.left = `${to.x}px`;
-      card.style.top = `${to.y}px`;
-      card.style.width = `${to.w}px`;
-      card.style.height = `${to.h}px`;
-      if (reduceMotion.matches) {
-        card.animate([{ opacity: 0.55 }, { opacity: 1 }], { duration: 150, easing: 'ease-out' });
+    const animateFocusCard = (card, from, to, velocity) => {
+      if (!from) {
+        card.style.left = `${to.x}px`;
+        card.style.top = `${to.y}px`;
+        card.style.width = `${to.w}px`;
+        card.style.height = `${to.h}px`;
         return;
       }
-      if (!from) return;
-      const dx = from.x - to.x;
-      const dy = from.y - to.y;
-      if (Math.abs(dx) < 0.5 && Math.abs(dy) < 0.5 && Math.abs(from.w - to.w) < 0.5 && Math.abs(from.h - to.h) < 0.5) return;
-      card.animate(
-        [
-          { transform: `translate(${dx}px, ${dy}px)`, width: `${from.w}px`, height: `${from.h}px` },
-          { transform: 'none', width: `${to.w}px`, height: `${to.h}px` },
-        ],
-        { duration: FOCUS_LOD_MS, easing: 'ease-out' },
-      );
+      springCardTo(card, to, velocity);
     };
 
     const pinFocus = async (id, { keepOpen = false } = {}) => {
@@ -1547,9 +2080,7 @@ __ICON__
         focusSelectedIds = [id];
       }
       focusPrimaryId = id;
-      paintFocus();
-      const item = summaries.get(id);
-      if (agent && item) agent.update(id, { pinned: Boolean(item.pinned) }).catch(() => {});
+      paintFocus({ quiet: true });
     };
 
     const closeFocusLook = () => {
@@ -1583,23 +2114,34 @@ __ICON__
       }
       look.append(title, meta, list);
       document.body.append(look);
+      const card = focusEl?.querySelector(`.focus-card[data-id="${id}"]`);
+      const box = card?.getBoundingClientRect();
+      const width = Math.min(28 * 16, window.innerWidth - 32);
+      let left;
+      if (box) {
+        left = box.right + 12;
+        if (left + width > window.innerWidth - 16) left = box.left - width - 12;
+        left = Math.min(Math.max(16, left), window.innerWidth - width - 16);
+      } else {
+        left = Math.max(16, (window.innerWidth - width) / 2);
+      }
+      const top = box ? Math.min(Math.max(16, box.top), window.innerHeight - 120) : window.innerHeight * 0.12;
+      look.style.left = `${left}px`;
+      look.style.top = `${top}px`;
       focusLookId = id;
     };
 
-    const paintFocusBasins = () => {
+    /** A basin is the region the packer allocated, not the bounding box of
+     *  wherever its members happened to land. Hulls over a free layout
+     *  overlapped each other and ran off the canvas; a region cannot, because
+     *  the same pass placed the cards inside it. */
+    const paintFocusBasins = (regions = []) => {
       if (!focusEl) return;
       const stacked = focusEl.hasAttribute('data-stack') || narrowView.matches;
       const keep = new Set();
       if (!stacked) {
-        const groups = new Map();
-        for (const card of focusEl.querySelectorAll('.focus-card')) {
-          const folderId = summaries.get(card.dataset.id)?.folderId;
-          if (!folderId) continue;
-          const list = groups.get(folderId) ?? [];
-          list.push(card);
-          groups.set(folderId, list);
-        }
-        for (const [folderId, cards] of groups) {
+        for (const region of regions) {
+          const folderId = region.folderId ?? 'ungrouped';
           keep.add(folderId);
           const folder = folderCatalog.find((row) => row.id === folderId);
           let basin = focusEl.querySelector(`.focus-basin[data-folder-id="${folderId}"]`);
@@ -1610,29 +2152,36 @@ __ICON__
             basin.setAttribute('data-marble-transient', '');
             const name = document.createElement('button');
             name.type = 'button';
-            name.className = 'focus-basin-name';
+            name.className = 'focus-basin-name folder-name';
             name.setAttribute('data-marble-transient', '');
             name.addEventListener('click', () => {
               const ids = matchingFocusItems().filter((item) => item.folderId === folderId).map((item) => item.id);
               focusSelectedIds = ids;
               focusPrimaryId = ids[0] ?? focusPrimaryId;
-              paintFocus();
+              paintFocus({ quiet: true });
+            });
+            name.addEventListener('dblclick', (event) => {
+              event.preventDefault();
+              event.stopPropagation();
+              const row = folderCatalog.find((item) => item.id === folderId);
+              if (row) editFolderName(name, row);
             });
             basin.append(name);
             focusEl.insertBefore(basin, focusEl.querySelector('.focus-card'));
           }
           if (folder?.color) basin.dataset.color = folder.color;
+          else delete basin.dataset.color;
+          if (region.folderId) delete basin.dataset.loose;
+          else basin.dataset.loose = 'true';
           const name = basin.querySelector('.focus-basin-name');
-          if (name) name.textContent = folder?.name || 'Group';
-          const pad = 18;
-          const left = Math.min(...cards.map((card) => card.offsetLeft)) - pad;
-          const top = Math.min(...cards.map((card) => card.offsetTop)) - pad - 8;
-          const right = Math.max(...cards.map((card) => card.offsetLeft + card.offsetWidth)) + pad;
-          const bottom = Math.max(...cards.map((card) => card.offsetTop + card.offsetHeight)) + pad;
-          basin.style.left = `${left}px`;
-          basin.style.top = `${top}px`;
-          basin.style.width = `${Math.max(0, right - left)}px`;
-          basin.style.height = `${Math.max(0, bottom - top)}px`;
+          if (name) {
+            name.textContent = region.folderId ? (folder?.name || 'Group') : 'Ungrouped';
+            name.disabled = !region.folderId;
+          }
+          basin.style.left = `${region.x}px`;
+          basin.style.top = `${region.y}px`;
+          basin.style.width = `${Math.max(0, region.w)}px`;
+          basin.style.height = `${Math.max(0, region.h)}px`;
         }
       }
       for (const basin of [...focusEl.querySelectorAll('.focus-basin')]) {
@@ -1747,23 +2296,100 @@ __ICON__
       return false;
     };
 
+    const openFocusFolderMenu = (card) => {
+      closeFolderPalettes();
+      const id = card.dataset.id;
+      if (!id || !agent) return;
+      const current = summaries.get(id)?.folderId ?? null;
+      const menu = document.createElement('div');
+      menu.className = 'focus-folder-menu';
+      menu.setAttribute('role', 'menu');
+      menu.setAttribute('data-marble-transient', '');
+      const addItem = (label, attrs, onClick) => {
+        const btn = document.createElement('button');
+        btn.type = 'button';
+        btn.setAttribute('role', 'menuitem');
+        btn.setAttribute('data-marble-transient', '');
+        btn.textContent = label;
+        for (const [key, value] of Object.entries(attrs)) btn.setAttribute(key, value);
+        btn.addEventListener('click', async (event) => {
+          event.stopPropagation();
+          closeFolderPalettes();
+          await onClick();
+        });
+        menu.append(btn);
+      };
+      for (const folder of folderCatalog) {
+        addItem(folder.name || 'Group', {
+          'data-folder-id': folder.id,
+          'aria-pressed': folder.id === current ? 'true' : 'false',
+        }, async () => {
+          if (current === folder.id) return;
+          try { await agent.update(id, { folderId: folder.id }); } catch { /* stale */ }
+        });
+      }
+      addItem('Ungrouped', { 'data-action': 'ungroup', 'aria-pressed': current ? 'false' : 'true' }, async () => {
+        if (!current) return;
+        try { await agent.update(id, { folderId: null }); } catch { /* stale */ }
+      });
+      addItem('Save as folder', { 'data-action': 'save' }, async () => {
+        const ids = focusSelectedIds.includes(id) ? [...focusSelectedIds] : [id];
+        try { await agent.createFolder({ conversationIds: ids }); } catch { /* create failed */ }
+      });
+      document.body.append(menu);
+      const tick = card.querySelector('.focus-folder');
+      const box = (tick || card).getBoundingClientRect();
+      const width = menu.offsetWidth || 160;
+      let left = box.left;
+      if (left + width > window.innerWidth - 12) left = window.innerWidth - width - 12;
+      menu.style.left = `${Math.max(12, left)}px`;
+      menu.style.top = `${Math.min(box.bottom + 6, window.innerHeight - 80)}px`;
+      watchPaletteDismiss();
+    };
+
     const bindFocusCard = (card) => {
       card.addEventListener('pointerdown', (event) => {
         if (event.button !== 0) return;
         if (event.target.closest('button, a, input, textarea, marble-conversation')) return;
         const id = card.dataset.id;
-        const origin = { x: event.clientX, y: event.clientY, left: card.offsetLeft, top: card.offsetTop, id, started: false };
+        const live = liveFocusBox(card);
+        const origin = {
+          x: event.clientX,
+          y: event.clientY,
+          left: live.x,
+          top: live.y,
+          id,
+          started: false,
+          lastX: event.clientX,
+          lastY: event.clientY,
+          lastT: performance.now(),
+          vx: 0,
+          vy: 0,
+        };
         let done = false;
         card.setPointerCapture?.(event.pointerId);
         const move = (e) => {
           if (done) return;
           if (!origin.started && Math.hypot(e.clientX - origin.x, e.clientY - origin.y) < 10) return;
-          origin.started = true;
+          if (!origin.started) {
+            origin.started = true;
+            flattenCardMotion(card);
+          }
           focusSuppressClick = true;
-          card.classList.add('is-dragging');
+          card.classList.add('marble-dragging');
           card.style.zIndex = '10';
-          card.style.left = `${origin.left + (e.clientX - origin.x)}px`;
-          card.style.top = `${origin.top + (e.clientY - origin.y)}px`;
+          const canvas = focusCanvasBox();
+          const nextX = origin.left + (e.clientX - origin.x);
+          const nextY = origin.top + (e.clientY - origin.y);
+          card.style.left = `${rubberFocus(nextX, 8, canvas.w - card.offsetWidth - 8, canvas.w)}px`;
+          card.style.top = `${rubberFocus(nextY, 8, canvas.h - card.offsetHeight - 8, canvas.h)}px`;
+          const now = performance.now();
+          const dt = Math.max(8, now - origin.lastT) / 1000;
+          origin.vx = (e.clientX - origin.lastX) / dt;
+          origin.vy = (e.clientY - origin.lastY) / dt;
+          origin.lastX = e.clientX;
+          origin.lastY = e.clientY;
+          origin.lastT = now;
         };
         const up = async (e) => {
           if (done) return;
@@ -1774,7 +2400,7 @@ __ICON__
           document.removeEventListener('mouseup', up);
           document.removeEventListener('pointercancel', up);
           try { card.releasePointerCapture?.(e.pointerId); } catch { /* released */ }
-          card.classList.remove('is-dragging');
+          card.classList.remove('marble-dragging');
           if (!origin.started) return;
           const canvas = focusCanvasBox();
           const x = card.offsetLeft;
@@ -1783,7 +2409,7 @@ __ICON__
           const fy = canvas.h > card.offsetHeight ? y / (canvas.h - card.offsetHeight) : 0;
           const hit = hitFocusDrop(e.clientX, e.clientY, id);
           await applyFocusDrop(id, hit, fx, fy);
-          paintFocus();
+          paintFocus({ velocity: { x: origin.vx, y: origin.vy }, velocityId: id });
           setTimeout(() => { focusSuppressClick = false; }, 0);
         };
         document.addEventListener('pointermove', move);
@@ -1804,12 +2430,14 @@ __ICON__
       });
       card.addEventListener('pointerenter', () => {
         if (focusSuppressClick) return;
+        if (focusHoveredId === card.dataset.id) return;
         focusHoveredId = card.dataset.id;
-        paintFocus();
+        paintFocus({ quiet: true });
       });
       card.addEventListener('pointerleave', () => {
-        if (focusHoveredId === card.dataset.id) focusHoveredId = null;
-        if (!focusSuppressClick) paintFocus();
+        if (focusHoveredId !== card.dataset.id) return;
+        focusHoveredId = null;
+        if (!focusSuppressClick) paintFocus({ quiet: true });
       });
       card.querySelector('.focus-pin')?.addEventListener('click', (event) => {
         event.stopPropagation();
@@ -1823,6 +2451,10 @@ __ICON__
         event.stopPropagation();
         unpinFocus(card.dataset.id);
       });
+      card.querySelector('.focus-folder')?.addEventListener('click', (event) => {
+        event.stopPropagation();
+        openFocusFolderMenu(card);
+      });
     };
 
     const makeFocusCard = (summary) => {
@@ -1831,12 +2463,12 @@ __ICON__
       card.dataset.id = summary.id;
       card.setAttribute('data-marble-transient', '');
       card.tabIndex = 0;
-      card.innerHTML = '<header class="focus-card-head"><span class="focus-card-title"></span><span class="focus-card-model"></span><span class="focus-card-actions"><button type="button" class="focus-pin">Focus</button><button type="button" class="focus-keep">Keep open</button><button type="button" class="focus-collapse">Collapse</button></span></header><div class="focus-card-body"></div><div class="focus-live"></div>';
+      card.innerHTML = '<header class="focus-card-head"><button type="button" class="focus-folder" aria-label="Move to folder"></button><span class="focus-dot" aria-hidden="true"></span><span class="focus-card-title"></span><span class="focus-card-model"></span><span class="focus-card-actions"><button type="button" class="focus-pin">Focus</button><button type="button" class="focus-keep">Keep open</button><button type="button" class="focus-collapse">Collapse</button></span></header><div class="focus-card-body"><p class="focus-target"></p><p class="focus-activity"></p><p class="focus-foot"><span class="focus-status"></span><span class="focus-age"></span></p></div><div class="focus-live"></div>';
       bindFocusCard(card);
       return card;
     };
 
-    function paintFocus() {
+    function paintFocus(opts = {}) {
       if (!focusEl) return;
       const view = document.body.getAttribute('data-view') || 'library';
       if (view !== 'focus') return;
@@ -1846,7 +2478,7 @@ __ICON__
         focusLayoutQueued = true;
         requestAnimationFrame(() => {
           focusLayoutQueued = false;
-          paintFocus();
+          paintFocus(opts);
         });
         return;
       }
@@ -1868,6 +2500,24 @@ __ICON__
         })
         : Object.fromEntries(items.map((item) => [item.id, fullIds.includes(item.id) ? 'full' : 'digest']));
 
+      const lodKey = items.map((item) => `${item.id}:${lods[item.id]}:${focusSelectedIds.includes(item.id) ? 1 : 0}`).join('|');
+      const lodsChanged = lodKey !== lastFocusLods;
+      lastFocusLods = lodKey;
+      lastLods = lods;
+
+      let empty = focusEl.querySelector('.focus-empty');
+      if (!items.length) {
+        if (!empty) {
+          empty = document.createElement('p');
+          empty.className = 'focus-empty';
+          empty.setAttribute('data-marble-transient', '');
+          empty.textContent = 'Open a chat, then double-click it to pin Full.';
+          focusEl.append(empty);
+        }
+      } else {
+        empty?.remove();
+      }
+
       const seen = new Set();
       for (const item of items) {
         seen.add(item.id);
@@ -1879,7 +2529,10 @@ __ICON__
         paintFocusCard(card, item, lods[item.id] || 'digest');
       }
       for (const card of [...focusEl.querySelectorAll('.focus-card')]) {
-        if (!seen.has(card.dataset.id)) card.remove();
+        if (!seen.has(card.dataset.id)) {
+          stopCardSpring(card);
+          card.remove();
+        }
       }
 
       if (focusEl.hasAttribute('data-stack') || narrowView.matches) {
@@ -1888,44 +2541,73 @@ __ICON__
         return;
       }
 
-      const canvas = focusCanvasBox();
-      const lodCounts = { full: 0, digest: 0, chip: 0 };
-      const planned = [];
-      const layoutItems = [...items].sort((a, b) => (a.createdAt ?? a.updatedAt ?? 0) - (b.createdAt ?? b.updatedAt ?? 0));
-      for (const item of layoutItems) {
-        const lod = lods[item.id] || 'digest';
-        const index = lodCounts[lod] ?? 0;
-        lodCounts[lod] = index + 1;
-        const size = focusLodSize(lod, fullIds.length || 1, canvas);
-        const base = (Number.isFinite(item.focusX) && Number.isFinite(item.focusY))
-          ? {
-            x: item.focusX * Math.max(0, canvas.w - size.w),
-            y: item.focusY * Math.max(0, canvas.h - size.h),
-            w: size.w,
-            h: size.h,
-          }
-          : defaultFocusRect(lod, index, canvas, size, fullIds.length || 1);
-        planned.push({ ...base, id: item.id });
+      if (opts.quiet && !lodsChanged) {
+        for (const card of focusEl.querySelectorAll('.focus-card')) {
+          card.dataset.selected = focusSelectedIds.includes(card.dataset.id) ? 'true' : 'false';
+        }
+        layoutFocusPane(fullIds);
+        return;
       }
-      const separated = helpers?.separateRects ? helpers.separateRects(planned, helpers.GAP ?? 8) : planned;
-      const canvasR = focusEl.getBoundingClientRect();
-      separated.forEach((rect, i) => {
-        const id = planned[i].id;
-        const card = focusEl.querySelector(`.focus-card[data-id="${id}"]`);
-        if (!card) return;
-        const box = card.getBoundingClientRect();
-        const from = card.hasAttribute('data-placed')
-          ? { x: box.left - canvasR.left + focusEl.scrollLeft, y: box.top - canvasR.top + focusEl.scrollTop, w: box.width, h: box.height }
-          : null;
-        animateFocusCard(card, from, { x: rect.x, y: rect.y, w: rect.w, h: rect.h });
+
+      const canvas = focusCanvasBox();
+      const rects = {};
+
+      // The stage exists only when something is pinned. Passing `|| 1` here is
+      // what used to reserve a Full-sized band above an empty canvas and leave
+      // the top half of the view dead.
+      const stageH = fullIds.length ? stageHeight(fullIds.length, canvas) : 0;
+      fullIds.forEach((id, index) => {
+        Object.assign(rects, { [id]: stageRect(index, fullIds.length, canvas) });
+      });
+
+      // Group the unpinned cards by folder, catalog order, ungrouped last, so
+      // the packer can hand each folder a region of its own.
+      const fullSet = new Set(fullIds);
+      // Laid out oldest first, not newest first. The list sorts by recency, but
+      // a canvas that reorders itself every time a chat ticks destroys the
+      // spatial memory that makes Focus worth using — and arrow keys navigate
+      // by position, so the order on screen is the order they move through.
+      const field = items
+        .filter((item) => !fullSet.has(item.id))
+        .sort((a, b) => (a.createdAt ?? a.updatedAt ?? 0) - (b.createdAt ?? b.updatedAt ?? 0));
+      const groups = [];
+      for (const folder of folderCatalog) {
+        const members = field.filter((item) => item.folderId === folder.id);
+        if (members.length) groups.push({ folderId: folder.id, cards: members.map(fieldCard) });
+      }
+      const loose = field.filter((item) => !item.folderId || !folderCatalog.some((row) => row.id === item.folderId));
+      if (loose.length) groups.push({ folderId: null, cards: loose.map(fieldCard) });
+
+      let regions = [];
+      if (helpers?.packRegions) {
+        const packed = helpers.packRegions({
+          groups,
+          canvas,
+          top: stageH,
+          sizes: { digest: focusLodSize('digest'), chip: focusLodSize('chip') },
+          gap: helpers.GAP ?? 8,
+        });
+        regions = packed.regions;
+        Object.assign(rects, packed.rects);
+        // The field is a partition, so it can be taller than the viewport.
+        // Let the canvas scroll rather than cramming regions on top of one another.
+        focusEl.style.minHeight = `${Math.max(canvas.h, packed.height)}px`;
+      }
+
+      for (const item of items) {
+        const rect = rects[item.id];
+        if (!rect) continue;
+        const card = focusEl.querySelector(`.focus-card[data-id="${item.id}"]`);
+        if (!card || card.classList.contains('marble-dragging')) continue;
+        const from = card.hasAttribute('data-placed') ? liveFocusBox(card) : null;
+        const vel = opts.velocityId === item.id ? opts.velocity : { x: 0, y: 0 };
+        animateFocusCard(card, from, rect, vel);
         card.setAttribute('data-placed', '');
         const lod = card.dataset.lod;
-        if (!card.classList.contains('is-dragging')) {
-          card.style.zIndex = lod === 'full' ? '3' : lod === 'digest' ? '2' : '1';
-        }
-      });
+        card.style.zIndex = lod === 'full' ? '3' : lod === 'digest' ? '2' : '1';
+      }
       layoutFocusPane(fullIds);
-      paintFocusBasins();
+      paintFocusBasins(regions);
     }
 
     const paintRow = (el, summary) => {
@@ -1951,12 +2633,34 @@ __ICON__
       el.querySelector('.badge').textContent = '';
       el.querySelector('.activity').textContent = summary.activity || '';
       el.querySelector('.age').textContent = age(summary.updatedAt);
+      // The target is what tells two rows apart. It was in the data and on the
+      // pane header, but never in the list.
+      el.querySelector('.target').textContent = tailOfTarget(targets.get(summary.id) || summary.target || '');
+      const color = folderColorOf(summary.folderId);
+      if (color) el.dataset.color = color;
+      else delete el.dataset.color;
     };
 
     const columnFor = (summary) => {
       const status = statusOf(summary);
       const col = status === 'running' ? 'running' : status === 'review' ? 'review' : 'completed';
       return document.querySelector(`.column[data-col="${col}"]`);
+    };
+
+    /** Counts live on the headings, so a glance at the board says how much is
+     *  in each state without counting cards. */
+    const paintColumnCounts = () => {
+      for (const column of document.querySelectorAll('.column')) {
+        const n = column.querySelectorAll(':scope > .conv:not([hidden])').length;
+        const count = column.querySelector('h2 .col-count') ?? (() => {
+          const span = document.createElement('span');
+          span.className = 'col-count';
+          span.setAttribute('data-marble-transient', '');
+          column.querySelector('h2')?.append(span);
+          return span;
+        })();
+        count.textContent = n ? String(n) : '';
+      }
     };
 
     const placeIn = (el, parent) => {
@@ -1987,6 +2691,7 @@ __ICON__
 
     const placeAll = () => {
       for (const el of nodes.values()) place(el);
+      paintColumnCounts();
     };
 
     const boardOrder = () => [
@@ -2142,6 +2847,21 @@ __ICON__
       dock.extras.forEach((extra, index) => {
         const bar = pane.querySelector(`.dock-leaf:nth-child(${index + 1}) .dock-bar`);
         paintBar(bar, extra.id);
+      });
+      paintChrome();
+    };
+
+    /** Only the focused pane carries the status line, the workdir path and the
+     *  agent pickers. They are identical on every pane in a folder, so the
+     *  others would spend a third of their height repeating them. */
+    const paintChrome = () => {
+      if (!dock.extras.length) {
+        convo.setAttribute('data-chrome', 'pane');
+        return;
+      }
+      convo.setAttribute('data-chrome', dock.focus === 'primary' ? 'pane' : 'tile');
+      dock.extras.forEach((extra, index) => {
+        extra.el?.setAttribute('data-chrome', dock.focus === index ? 'pane' : 'tile');
       });
     };
 
@@ -2365,9 +3085,9 @@ __ICON__
       fillChrome(id);
     };
 
-    const placeCard = (card, clientX, clientY) => {
-      card.style.left = `${clientX - 16}px`;
-      card.style.top = `${clientY - 16}px`;
+    const placeCard = (card, clientX, clientY, grabX = 16, grabY = 16) => {
+      card.style.left = `${clientX - grabX}px`;
+      card.style.top = `${clientY - grabY}px`;
     };
 
     const makeCard = (id) => {
@@ -2392,6 +3112,9 @@ __ICON__
         if (event.button !== 0 || event.target.closest('a, input, textarea, button, .manage')) return;
         if (narrowView.matches || reduceMotion.matches) return;
         if (!document.body.hasAttribute('data-open')) return;
+        const src = el.getBoundingClientRect();
+        let grabX = event.clientX - src.left;
+        let grabY = event.clientY - src.top;
         const origin = { x: event.clientX, y: event.clientY, id: idOf(), started: false };
         if (!origin.id) return;
         let done = false;
@@ -2402,7 +3125,7 @@ __ICON__
           if (!origin.started && Math.hypot(e.clientX - origin.x, e.clientY - origin.y) < 8) return;
           origin.started = true;
           if (!card) card = makeCard(origin.id);
-          placeCard(card, e.clientX, e.clientY);
+          placeCard(card, e.clientX, e.clientY, grabX, grabY);
           paintDrop(e.clientX, e.clientY, origin.id);
         };
         const up = (e) => {
@@ -2530,7 +3253,7 @@ __ICON__
         el.dataset.id = summary.id;
         el.setAttribute('role', 'listitem');
         el.tabIndex = 0;
-        el.innerHTML = '<span class="dot" aria-hidden="true"></span><span class="body"><span class="title"></span><span class="tags"></span><span class="meta"><span class="badge"></span><span class="activity"></span></span></span><span class="age"></span><div class="manage"><button type="button" class="more" aria-label="Manage conversation" aria-haspopup="menu" aria-expanded="false"><svg width="16" height="16" viewBox="0 0 16 16" aria-hidden="true"><circle cx="3.5" cy="8" r="1.3" fill="currentColor"/><circle cx="8" cy="8" r="1.3" fill="currentColor"/><circle cx="12.5" cy="8" r="1.3" fill="currentColor"/></svg></button></div>';
+        el.innerHTML = '<span class="dot" aria-hidden="true"></span><span class="body"><span class="title"></span><span class="target"></span><span class="tags"></span><span class="meta"><span class="badge"></span><span class="activity"></span></span></span><span class="age"></span><div class="manage"><button type="button" class="more" aria-label="Manage conversation" aria-haspopup="menu" aria-expanded="false"><svg width="16" height="16" viewBox="0 0 16 16" aria-hidden="true"><circle cx="3.5" cy="8" r="1.3" fill="currentColor"/><circle cx="8" cy="8" r="1.3" fill="currentColor"/><circle cx="12.5" cy="8" r="1.3" fill="currentColor"/></svg></button></div>';
         const openRow = () => {
           if (suppressConvClick) return;
           if ((document.body.getAttribute('data-view') || 'library') === 'board') openBoardPanel();
@@ -2685,11 +3408,25 @@ __ICON__
         cancelViewFades();
         document.body.setAttribute('data-crossfade', '1');
         void document.body.offsetWidth;
-        applyLayout();
         const incoming = shellFor(next);
         const outgoing = shellFor(current);
-        const fadeIn = incoming.animate([{ opacity: 0 }, { opacity: 1 }], { duration: 150, fill: 'both' });
-        const fadeOut = outgoing.animate([{ opacity: 1 }, { opacity: 0 }], { duration: 150, fill: 'both' });
+        // The outgoing shell is started before applyLayout so it fades showing
+        // the layout it actually had. Starting it afterwards dissolves the new
+        // layout into itself, which reads as a flicker rather than a leave.
+        const fadeOut = outgoing.animate([{ opacity: 1 }, { opacity: 0 }], {
+          duration: reduceMotion.matches ? 150 : Math.round(VIEW_MS * 0.4),
+          easing: reduceMotion.matches ? 'linear' : VIEW_EASE,
+          fill: 'both',
+        });
+        applyLayout();
+        // Offset, not simultaneous: two shells crossing at 0.5 opacity let the
+        // page background show through the middle of every view switch.
+        const fadeIn = incoming.animate([{ opacity: 0 }, { opacity: 1 }], {
+          duration: reduceMotion.matches ? 150 : Math.round(VIEW_MS * 0.7),
+          delay: reduceMotion.matches ? 0 : Math.round(VIEW_MS * 0.3),
+          easing: reduceMotion.matches ? 'linear' : VIEW_EASE,
+          fill: 'both',
+        });
         Promise.all([fadeIn.finished.catch(() => {}), fadeOut.finished.catch(() => {})]).then(() => {
           if (gen !== fadeGen) return;
           document.body.removeAttribute('data-crossfade');
@@ -2900,6 +3637,7 @@ __ICON__
           if (payload?.folders) {
             folderCatalog = payload.folders;
             paintFolderRail();
+            repaintRows();
             paintFocus();
             return;
           }
@@ -2910,6 +3648,7 @@ __ICON__
           const listed = await api.folders();
           folderCatalog = listed.folders ?? [];
           paintFolderRail();
+          repaintRows();
         } catch { /* folders unavailable; rail stays empty */ }
         restoreDock();
         const saved = recalled(OPEN_KEY);
