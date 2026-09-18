@@ -97,3 +97,42 @@ test('dropping a card on another ungrouped card forms a basin', async () => {
   await page.locator(`.focus-card[data-id="${ids.a}"]`).dragTo(page.locator(`.focus-card[data-id="${ids.b}"]`));
   await page.locator('.focus-basin').waitFor();
 });
+
+test('narrow Focus is a stack and does not add extra panes', async () => {
+  const { page } = await openAgents({ viewport: { width: 500, height: 800 } });
+  await page.evaluate(async () => {
+    const agent = window.marble.agent;
+    await agent.start({ provider: 'fake' });
+    await agent.start({ provider: 'fake' });
+  });
+  await page.locator('.views [data-view="focus"]').click();
+  assert.equal(await page.locator('.focus[data-stack]').count(), 1);
+  assert.equal(await page.locator('.pane marble-conversation[data-marble-transient]').count(), 0);
+});
+
+test('reduced motion pins without transform travel', async () => {
+  const { page } = await openAgents({ reducedMotion: 'reduce' });
+  const ids = await page.evaluate(async () => {
+    const agent = window.marble.agent;
+    const a = await agent.start({ provider: 'fake' });
+    const b = await agent.start({ provider: 'fake' });
+    await agent.update(a, { title: 'first' });
+    await agent.update(b, { title: 'second' });
+    return { a, b };
+  });
+  await page.locator('.views [data-view="focus"]').click();
+  await page.locator(`.focus-card[data-id="${ids.b}"]`).dblclick();
+  await page.waitForFunction((id) => {
+    const el = document.querySelector(`.focus-card[data-id="${id}"]`);
+    return el?.getAttribute('data-lod') === 'full';
+  }, ids.b);
+  const traveling = await page.evaluate(() => [...document.querySelectorAll('.focus-card')].some((card) => {
+    const transform = getComputedStyle(card).transform;
+    if (!transform || transform === 'none') return false;
+    return [...card.getAnimations()].some((anim) => {
+      const keyframes = anim.effect?.getKeyframes?.() ?? [];
+      return keyframes.some((frame) => frame.transform && frame.transform !== 'none');
+    });
+  }));
+  assert.equal(traveling, false);
+});

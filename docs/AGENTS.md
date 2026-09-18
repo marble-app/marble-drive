@@ -223,18 +223,33 @@ Agent text is shown, never interpreted as HTML (`renderText` in
 
 A drive that has run `serve` at least once with this host gets an `Agents`
 document at the root, seeded the same way Drive is: written only if it is
-not already there. It is a library of every conversation and a board of
-the ones that are running, need review, or are done. `V` toggles the two.
-The drawer's **Open Agents** appears once that document exists.
+not already there. It is a library of conversations in four views: **List**,
+**Board**, **Folders**, and **Focus**. `V` cycles that order. The drawer's
+**Open Agents** appears once that document exists.
 
 The page uses `window.marble.agent` and the same `<marble-conversation>`
 as the drawer (`<meta name="marble-agent" content="custom">`, so it does
 not wear a second launcher). The topbar has three thin segmented bars on
-one row: **List / Board**, **CLI** (All plus each signed-in agent, so you
-can show only Claude, Cursor, or KIXLAB API), and **All / Running / Review /
-Archived**. Conversation rows are not stored in the file. Each row has a
-⋯ menu for **Archive** / **Unarchive**, **Mark reviewed**, **Undo last
-turn**, and **Continue in** another CLI. Archiving the open thread
+one row: **List / Board / Folders / Focus**, **CLI** (All plus each signed-in
+agent, so you can show only Claude, Cursor, or KIXLAB API), and **All /
+Running / Review / Archived**. Conversation rows are not stored in the file.
+
+**Folders** is a vertical tab strip. Groups sit on top, ungrouped last, and
+**New chat** is under that. A conversation belongs to at most one folder
+(`meta.folderId`). Drag a tab onto another tab to form a group; Shift-select
+and **Save as folder** names a working set of panes. Opening a group reuses
+the existing pane dock (at most four live conversations). The seeded
+`<marble-conversation>` is never reparented.
+
+**Focus** is a spatial canvas of rounded cards. Click selects. Double-click
+or Enter pins a chat **Full**; other Fulls become Digest. Shift-double-click
+or **Keep open** adds a Full without demoting the others, up to four. Cold
+Digests over the budget become Chips. Arrow keys move selection; Space opens
+a Quick Look preview without pinning. Folder membership draws as a colored
+basin. Narrow view stacks the cards and does not add extra panes.
+
+Each row has a ⋯ menu for **Archive** / **Unarchive**, **Mark reviewed**,
+**Undo last turn**, and **Continue in** another CLI. Archiving the open thread
 switches the pane to the next remaining conversation, or the newest one
 left; if none remain, the pane is empty. Archived threads leave All /
 Running / Review and show under **Archived**. Nothing is deleted.

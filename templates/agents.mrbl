@@ -1840,6 +1840,8 @@ __ICON__
       if (!focusEl) return;
       const view = document.body.getAttribute('data-view') || 'library';
       if (view !== 'focus') return;
+      if (narrowView.matches) focusEl.setAttribute('data-stack', '');
+      else focusEl.removeAttribute('data-stack');
       if (focusEl.clientWidth < 2 && !focusLayoutQueued) {
         focusLayoutQueued = true;
         requestAnimationFrame(() => {
@@ -2765,6 +2767,9 @@ __ICON__
 
     viewButtons.forEach((btn) => btn.addEventListener('click', () => setView(btn.dataset.view)));
     filterButtons.forEach((btn) => btn.addEventListener('click', () => setFilter(btn.dataset.filter)));
+    narrowView.addEventListener('change', () => {
+      if ((document.body.getAttribute('data-view') || 'library') === 'focus') paintFocus();
+    });
     cliEl?.addEventListener('click', (event) => {
       const btn = event.target.closest?.('[data-cli]');
       if (btn) setCli(btn.dataset.cli);
