@@ -16,3 +16,6 @@ backups/
 # path stores a gitlink to a branch that lives only on one laptop, and a
 # clone gets an empty directory it cannot fill.
 .claude/worktrees/
+
+# Local design-hook detector config (per machine)
+.impeccable/

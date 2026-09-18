@@ -133,6 +133,10 @@ export function loadConfig(env = process.env) {
 
     // Recursive Subquestions on Monitor. The key never lives in a document.
     typesafeApiKey: str('TYPESAFE_API_KEY', null),
+
+    // Fast GenUI: where Space₀ lives. Read-only to the host. Defaults to the
+    // Atlas the Design Pattern Generation build writes into the drive.
+    genuiAtlas: path.resolve(str('MARBLE_DRIVE_GENUI_ATLAS', path.join(root, 'Research', 'Design Pattern Generation', 'atlas.json'))),
   };
 }
 

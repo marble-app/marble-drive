@@ -10,6 +10,8 @@
 //   marble-drive agents providers    which agent CLIs are installed and signed in
 //   marble-drive agents try <id>     one real turn against a scratch drive
 //   marble-drive starters         what you can make
+//   marble-drive genui space <doc>       is this document an app space? every issue, or ok
+//   marble-drive genui decide <doc>      let Jev position it — --dry to look without writing, --verbose for the distributions
 //
 // Every one of these goes through the same store the host does, which is the
 // point: a command and a request are two callers of one seam, not two
@@ -74,8 +76,11 @@ switch (command) {
   case 'agents':
     await agentsCommand();
     break;
+  case 'genui':
+    await genuiCommand();
+    break;
   default:
-    fail(`no command "${command}" — there is: serve, new, icon, weigh, backup, remote, agents, starters`);
+    fail(`no command "${command}" — there is: serve, new, icon, weigh, backup, remote, agents, starters, genui`);
 }
 
 // ---------------------------------------------------------------------- serve
@@ -346,4 +351,122 @@ async function agentsCommand() {
   }
 
   fail(`no "agents ${sub ?? ''}" — there is: providers, try`);
+}
+
+// ---------------------------------------------------------------------- genui
+
+async function genuiCommand() {
+  const [sub, docArg] = args;
+  if (!sub || !['space', 'decide'].includes(sub)) fail('genui needs: space <doc> | decide <doc> [--dry] [--verbose] [--stop=N] [--context=JSON] [--request=…]');
+  if (!docArg) fail(`genui ${sub} needs a document path inside the drive, like "Research/TypeSafe AI/Spaces/49ers"`);
+  const { loadAtlas } = await import('../server/genui/atlas.js');
+  const { extractSpace, validateSpace } = await import('../server/genui/space.js');
+  const { decideDocument } = await import('../server/genui/decide.js');
+
+  const docPath = parsePath(docArg);
+  const atlas = await loadAtlas(config.genuiAtlas).catch((err) => fail(`could not read the Atlas at ${config.genuiAtlas}: ${err.message}`));
+  const store = createStore({ root: config.root });
+  await store.ready();
+  const source = await store.read(docPath);
+  if (source === null) fail(`no document "${docPath}" in ${config.root}`);
+
+  if (sub === 'space') {
+    const validation = validateSpace(source, atlas);
+    const space = extractSpace(source);
+    for (const instance of space.instances) {
+      console.log(`${instance.pattern}#${instance.name}  (${instance.decisions.length} decisions)`);
+      for (const d of instance.decisions) console.log(`  ${d.attr}=${d.current}   [${d.options.map((o) => o.slug).join(' | ')}]`);
+    }
+    if (validation.ok) console.log('ok');
+    else {
+      for (const issue of validation.issues) console.error(`${issue.kind}  ${issue.instance ?? '-'}.${issue.key ?? '-'}  ${issue.message}`);
+      process.exit(1);
+    }
+    return;
+  }
+
+  let context = {};
+  if (flags.context) {
+    try {
+      context = JSON.parse(String(flags.context));
+    } catch (err) {
+      fail(`--context must be JSON: ${err.message}`);
+    }
+  }
+  const { readStop } = await import('../server/typesafe/routes.js');
+  const stop = readStop(flags.stop);
+  const request = typeof flags.request === 'string' ? flags.request : null;
+  const dry = Boolean(flags.dry);
+
+  const print = (result) => {
+    // A near-uniform distribution is an authoring smell, not a gate problem:
+    // the options are indistinguishable from their glosses, or the dimension
+    // should not be live. TypeSafe's confidence is how concentrated the
+    // distribution is, so "flat" is a low confidence, whatever n is.
+    const FLAT = 0.15;
+    let flat = 0;
+    for (const d of result.decisions) {
+      const conf = d.confidence === null ? '  -  ' : d.confidence.toFixed(2);
+      const move = d.choice && d.choice !== d.current ? `→ ${d.choice}` : '';
+      const isFlat = d.confidence !== null && d.confidence < FLAT;
+      if (isFlat) flat += 1;
+      console.log(`${d.applied ? '→' : isFlat ? '≈' : ' '} ${conf}  ${d.id.padEnd(32)} ${d.current} ${move}  ${d.reason}${isFlat ? '  · flat' : ''}`);
+      if (flags.verbose && d.probabilities) {
+        for (const slug of d.options ?? Object.keys(d.probabilities)) {
+          const p = Number(d.probabilities[slug] ?? 0);
+          console.log(`           ${slug.padEnd(28)} ${'█'.repeat(Math.round(p * 24)).padEnd(24, '·')} ${p.toFixed(2)}`);
+        }
+      }
+    }
+    console.log(`${result.ops.length} change(s) in ${result.elapsedMs} ms${result.dry ? ' (dry — nothing written)' : ` · wrote ${result.applied}`}`);
+    if (flat) console.log(`${flat} decision(s) near-uniform (confidence < ${FLAT}) — sharpen the glosses, drop an option, or fix the value and remove the declaration.`);
+  };
+
+  // A write goes through the host when one is serving this drive: the host
+  // owns the write queue and the open tabs, and a disk write from beside it
+  // is an outside edit — the page would reload rather than move, and two
+  // writers would race the file. Only a dry look is answered locally.
+  if (!dry) {
+    const base = `http://${config.host}:${config.port}`;
+    let response = null;
+    try {
+      response = await fetch(`${base}/genui/decide`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ doc: docPath, context, stop, request }),
+      });
+    } catch {
+      response = null; // nothing listening: write locally below
+    }
+    if (response) {
+      if (response.status === 404) fail(`the host at ${base} is running code without /genui — restart it on this branch, or use --dry`);
+      if (response.status === 401) fail(`the host at ${base} is gated; decide from a document there, or stop the host and run this again`);
+      const body = await response.json().catch(() => ({}));
+      if (!response.ok) {
+        if (body.issues) for (const issue of body.issues) console.error(`${issue.kind}  ${issue.instance ?? '-'}.${issue.key ?? '-'}  ${issue.message}`);
+        fail(body.message || body.error || `host answered HTTP ${response.status}`);
+      }
+      print(body);
+      return;
+    }
+  }
+
+  if (!config.typesafeApiKey) fail('TYPESAFE_API_KEY is not set. Put it in .env.local.');
+  const result = await decideDocument({ source, atlas, apiKey: config.typesafeApiKey, context, stop, request }).catch((err) => {
+    if (err.issues) for (const issue of err.issues) console.error(`${issue.kind}  ${issue.instance ?? '-'}.${issue.key ?? '-'}  ${issue.message}`);
+    fail(err.message);
+  });
+  if (dry || !result.ops.length) {
+    print({ ...result, dry: true, applied: 0 });
+    return;
+  }
+  // No host is serving: this process is the one writer, so it writes the way
+  // the host would — through createDrive's writeOps — and closes.
+  const drive = await createDrive(config, { log: { log() {}, error: console.error }, agents: false });
+  try {
+    const written = await drive.writeOps(docPath, result.ops, { client: 'genui-cli' });
+    print({ ...result, dry: false, applied: written.applied ?? 0 });
+  } finally {
+    await drive.close();
+  }
 }

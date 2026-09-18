@@ -34,6 +34,7 @@ import { build as buildStarter, list as listStarters } from './gallery.js';
 import { createChannels } from './sse.js';
 import { createStore } from './store/index.js';
 import { createTypesafeHandler } from './typesafe/routes.js';
+import { createGenuiHandler } from './genui/routes.js';
 import { watchDrive } from './watch.js';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
@@ -116,7 +117,7 @@ export const rootRemoved = (priorSource, ops) => {
   return roots.size > 0 && (ops ?? []).some((op) => op?.type === 'remove' && roots.has(op.id));
 };
 
-export async function createDrive(config, { log = console, agentProviders = null, agents: withAgents = true, usage = null, usageHistory = null, typesafe: typesafeOpts = null, agentSandbox = null } = {}) {
+export async function createDrive(config, { log = console, agentProviders = null, agents: withAgents = true, usage = null, usageHistory = null, typesafe: typesafeOpts = null, genui: genuiOpts = null, agentSandbox = null } = {}) {
   const store = createStore({ root: config.root });
   await store.ready();
 
@@ -282,6 +283,20 @@ export async function createDrive(config, { log = console, agentProviders = null
     return result;
   }
 
+  // Fast GenUI: Jev positions a document inside the space its author wrote.
+  // Created here rather than beside `typesafe` because it writes, and the one
+  // write path is defined just above.
+  const genui = createGenuiHandler({
+    store,
+    atlasFile: config.genuiAtlas,
+    apiKey: config.typesafeApiKey,
+    writeOps,
+    marbleDir: store.marbleDir,
+    ask: genuiOpts?.ask,
+    log,
+    maxBodyBytes: config.maxBodyBytes,
+  });
+
   /** A document arriving from anywhere other than an op — created, restored,
    *  flattened. Same serialization, same restore point, same echo. */
   async function putDocument(docPath, source, { label, client = null, event = 'created' } = {}) {
@@ -357,6 +372,7 @@ export async function createDrive(config, { log = console, agentProviders = null
         return agents ? await agents.handle(req, res, url) : text(res, 404, 'not found');
       }
       if (await typesafe.handle(req, res, url)) return;
+      if (await genui.handle(req, res, url)) return;
 
       if (route === '/') {
         // Land on the Drive if it is there. It is an ordinary document with no
@@ -999,6 +1015,7 @@ button{background:#738698;color:#fafaf7;border-color:#738698;cursor:pointer}p{co
     gate,
     oplog,
     writeOps,
+    genui,
     agents,
     agentsWhy,
     createDocument,
