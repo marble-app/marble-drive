@@ -59,3 +59,41 @@ test('click selects a Focus card; double-click pins Full and demotes the previou
   const stillInPane = await page.evaluate(() => Boolean(document.querySelector('.pane > marble-conversation:not([data-marble-transient])')));
   assert.equal(stillInPane, true);
 });
+
+test('arrows move Focus selection; Space previews without pinning', async () => {
+  const { page } = await openAgents();
+  const ids = await page.evaluate(async () => {
+    const agent = window.marble.agent;
+    const a = await agent.start({ provider: 'fake' });
+    const b = await agent.start({ provider: 'fake' });
+    await agent.update(a, { title: 'left-card' });
+    await agent.update(b, { title: 'right-card' });
+    return { a, b };
+  });
+  await page.locator('.views [data-view="focus"]').click();
+  await page.locator(`.focus-card[data-id="${ids.a}"]`).click();
+  await page.keyboard.press('ArrowRight');
+  await page.waitForFunction(() => document.querySelector('.focus-card[data-selected="true"]')?.textContent.includes('right-card')
+    || document.querySelector('.focus-card[data-selected="true"]')?.dataset.id);
+  await page.keyboard.press('Space');
+  await page.locator('.focus-look').waitFor();
+  const pinned = await page.evaluate((id) => window.marble.agent.conversation(id), ids.b);
+  assert.equal((await pinned).meta.pinned, false);
+  await page.keyboard.press('Enter');
+  await page.waitForFunction((id) => document.querySelector(`.focus-card[data-id="${id}"]`)?.getAttribute('data-lod') === 'full', ids.b);
+});
+
+test('dropping a card on another ungrouped card forms a basin', async () => {
+  const { page } = await openAgents();
+  const ids = await page.evaluate(async () => {
+    const agent = window.marble.agent;
+    const a = await agent.start({ provider: 'fake' });
+    const b = await agent.start({ provider: 'fake' });
+    await agent.update(a, { title: 'a' });
+    await agent.update(b, { title: 'b' });
+    return { a, b };
+  });
+  await page.locator('.views [data-view="focus"]').click();
+  await page.locator(`.focus-card[data-id="${ids.a}"]`).dragTo(page.locator(`.focus-card[data-id="${ids.b}"]`));
+  await page.locator('.focus-basin').waitFor();
+});

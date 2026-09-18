@@ -1552,15 +1552,212 @@ __ICON__
       if (agent && item) agent.update(id, { pinned: Boolean(item.pinned) }).catch(() => {});
     };
 
+    const closeFocusLook = () => {
+      document.querySelector('.focus-look')?.remove();
+      focusLookId = null;
+    };
+
+    const openFocusLook = async (id) => {
+      if (!id || !agent) return;
+      closeFocusLook();
+      let detail = null;
+      try { detail = await agent.conversation(id); } catch { /* preview still shows summary */ }
+      const summary = detail?.meta ?? summaries.get(id) ?? {};
+      const look = document.createElement('div');
+      look.className = 'focus-look';
+      look.setAttribute('data-marble-transient', '');
+      look.setAttribute('role', 'dialog');
+      look.setAttribute('aria-label', 'Quick Look');
+      const title = document.createElement('h3');
+      title.textContent = summary.title || 'Untitled';
+      const meta = document.createElement('p');
+      meta.className = 'look-meta';
+      meta.textContent = [summary.target || targets.get(id) || '', statusOf(summary), summary.activity || ''].filter(Boolean).join(' · ');
+      const list = document.createElement('ul');
+      list.className = 'look-events';
+      const events = (detail?.events ?? []).slice(-8);
+      for (const row of events) {
+        const li = document.createElement('li');
+        li.textContent = row.type || row.text || '';
+        list.append(li);
+      }
+      look.append(title, meta, list);
+      document.body.append(look);
+      focusLookId = id;
+    };
+
+    const paintFocusBasins = () => {
+      if (!focusEl) return;
+      const stacked = focusEl.hasAttribute('data-stack') || narrowView.matches;
+      const keep = new Set();
+      if (!stacked) {
+        const groups = new Map();
+        for (const card of focusEl.querySelectorAll('.focus-card')) {
+          const folderId = summaries.get(card.dataset.id)?.folderId;
+          if (!folderId) continue;
+          const list = groups.get(folderId) ?? [];
+          list.push(card);
+          groups.set(folderId, list);
+        }
+        for (const [folderId, cards] of groups) {
+          keep.add(folderId);
+          const folder = folderCatalog.find((row) => row.id === folderId);
+          let basin = focusEl.querySelector(`.focus-basin[data-folder-id="${folderId}"]`);
+          if (!basin) {
+            basin = document.createElement('div');
+            basin.className = 'focus-basin';
+            basin.dataset.folderId = folderId;
+            basin.setAttribute('data-marble-transient', '');
+            const name = document.createElement('button');
+            name.type = 'button';
+            name.className = 'focus-basin-name';
+            name.setAttribute('data-marble-transient', '');
+            name.addEventListener('click', () => {
+              const ids = matchingFocusItems().filter((item) => item.folderId === folderId).map((item) => item.id);
+              focusSelectedIds = ids;
+              focusPrimaryId = ids[0] ?? focusPrimaryId;
+              paintFocus();
+            });
+            basin.append(name);
+            focusEl.insertBefore(basin, focusEl.querySelector('.focus-card'));
+          }
+          if (folder?.color) basin.dataset.color = folder.color;
+          const name = basin.querySelector('.focus-basin-name');
+          if (name) name.textContent = folder?.name || 'Group';
+          const pad = 18;
+          const left = Math.min(...cards.map((card) => card.offsetLeft)) - pad;
+          const top = Math.min(...cards.map((card) => card.offsetTop)) - pad - 8;
+          const right = Math.max(...cards.map((card) => card.offsetLeft + card.offsetWidth)) + pad;
+          const bottom = Math.max(...cards.map((card) => card.offsetTop + card.offsetHeight)) + pad;
+          basin.style.left = `${left}px`;
+          basin.style.top = `${top}px`;
+          basin.style.width = `${Math.max(0, right - left)}px`;
+          basin.style.height = `${Math.max(0, bottom - top)}px`;
+        }
+      }
+      for (const basin of [...focusEl.querySelectorAll('.focus-basin')]) {
+        if (!keep.has(basin.dataset.folderId)) basin.remove();
+      }
+    };
+
+    const hitFocusDrop = (clientX, clientY, skipId) => {
+      const stack = document.elementsFromPoint?.(clientX, clientY) ?? [document.elementFromPoint(clientX, clientY)];
+      for (const el of stack) {
+        const other = el?.closest?.('.focus-card[data-id]');
+        if (other?.dataset.id && other.dataset.id !== skipId) {
+          return { kind: 'card', id: other.dataset.id, folderId: summaries.get(other.dataset.id)?.folderId ?? null };
+        }
+      }
+      for (const basin of focusEl?.querySelectorAll('.focus-basin') ?? []) {
+        const r = basin.getBoundingClientRect();
+        if (clientX >= r.left && clientX <= r.right && clientY >= r.top && clientY <= r.bottom) {
+          return { kind: 'basin', folderId: basin.dataset.folderId };
+        }
+      }
+      return { kind: 'canvas' };
+    };
+
+    const applyFocusDrop = async (dragId, hit, fx, fy) => {
+      const drag = summaries.get(dragId);
+      if (agent && drag) {
+        drag.focusX = fx;
+        drag.focusY = fy;
+        try { await agent.update(dragId, { focusX: fx, focusY: fy }); } catch { /* stale */ }
+      }
+      if (!agent || !hit) return;
+      if (hit.kind === 'card') {
+        const targetFolder = hit.folderId;
+        const dragFolder = drag?.folderId ?? null;
+        if (!targetFolder && !dragFolder && hit.id !== dragId) {
+          try {
+            await agent.createFolder({ conversationIds: [dragId, hit.id] });
+            const listed = await agent.folders();
+            folderCatalog = listed.folders ?? folderCatalog;
+          } catch { /* create failed */ }
+          return;
+        }
+        if (targetFolder && targetFolder !== dragFolder) {
+          try { await agent.update(dragId, { folderId: targetFolder }); } catch { /* join failed */ }
+        }
+        return;
+      }
+      if (hit.kind === 'basin' && hit.folderId && drag?.folderId !== hit.folderId) {
+        try { await agent.update(dragId, { folderId: hit.folderId }); } catch { /* join failed */ }
+        return;
+      }
+      if (hit.kind === 'canvas' && drag?.folderId) {
+        try { await agent.update(dragId, { folderId: null }); } catch { /* ungroup failed */ }
+      }
+    };
+
+    const handleFocusKeys = (event) => {
+      if ((document.body.getAttribute('data-view') || 'library') !== 'focus') return false;
+      if (typingIn()) return false;
+      if (event.metaKey || event.ctrlKey || event.altKey) return false;
+      const arrows = { ArrowRight: 'right', ArrowLeft: 'left', ArrowUp: 'up', ArrowDown: 'down' };
+      if (arrows[event.key]) {
+        event.preventDefault();
+        const fromId = focusPrimaryId || focusSelectedIds[0];
+        if (!fromId || !focusEl) return true;
+        const cards = [...focusEl.querySelectorAll('.focus-card')].map((row) => {
+          const r = row.getBoundingClientRect();
+          return { id: row.dataset.id, cx: r.left + r.width / 2, cy: r.top + r.height / 2 };
+        });
+        const next = window.marbleAgentFolders?.nearestCard?.(cards, fromId, arrows[event.key]);
+        if (next) {
+          selectFocusCard(next.id, event);
+          if (focusLookId) openFocusLook(next.id);
+        }
+        return true;
+      }
+      if (event.key === ' ' || event.code === 'Space') {
+        event.preventDefault();
+        const id = focusPrimaryId || focusSelectedIds[0];
+        if (!id) return true;
+        const row = focusEl?.querySelector(`.focus-card[data-id="${id}"]`);
+        if (row?.dataset.lod === 'full' && !focusLookId) return true;
+        if (focusLookId === id) closeFocusLook();
+        else openFocusLook(id);
+        return true;
+      }
+      if (event.key === 'Enter') {
+        event.preventDefault();
+        const id = focusPrimaryId || focusSelectedIds[0];
+        if (!id) return true;
+        closeFocusLook();
+        pinFocus(id, { keepOpen: event.shiftKey });
+        return true;
+      }
+      if (event.key === 'Escape') {
+        event.preventDefault();
+        if (focusLookId) {
+          closeFocusLook();
+          return true;
+        }
+        const id = focusPrimaryId || focusSelectedIds[0];
+        if (id && summaries.get(id)?.pinned) {
+          unpinFocus(id);
+          return true;
+        }
+        focusSelectedIds = [];
+        focusPrimaryId = null;
+        paintFocus();
+        return true;
+      }
+      return false;
+    };
+
     const bindFocusCard = (card) => {
       card.addEventListener('pointerdown', (event) => {
         if (event.button !== 0) return;
         if (event.target.closest('button, a, input, textarea, marble-conversation')) return;
         const id = card.dataset.id;
         const origin = { x: event.clientX, y: event.clientY, left: card.offsetLeft, top: card.offsetTop, id, started: false };
-        card.setPointerCapture(event.pointerId);
+        let done = false;
+        card.setPointerCapture?.(event.pointerId);
         const move = (e) => {
-          if (Math.hypot(e.clientX - origin.x, e.clientY - origin.y) < 10 && !origin.started) return;
+          if (done) return;
+          if (!origin.started && Math.hypot(e.clientX - origin.x, e.clientY - origin.y) < 10) return;
           origin.started = true;
           focusSuppressClick = true;
           card.classList.add('is-dragging');
@@ -1569,9 +1766,14 @@ __ICON__
           card.style.top = `${origin.top + (e.clientY - origin.y)}px`;
         };
         const up = async (e) => {
-          try { card.releasePointerCapture(e.pointerId); } catch { /* released */ }
-          card.removeEventListener('pointermove', move);
-          card.removeEventListener('pointerup', up);
+          if (done) return;
+          done = true;
+          document.removeEventListener('pointermove', move);
+          document.removeEventListener('mousemove', move);
+          document.removeEventListener('pointerup', up);
+          document.removeEventListener('mouseup', up);
+          document.removeEventListener('pointercancel', up);
+          try { card.releasePointerCapture?.(e.pointerId); } catch { /* released */ }
           card.classList.remove('is-dragging');
           if (!origin.started) return;
           const canvas = focusCanvasBox();
@@ -1579,17 +1781,16 @@ __ICON__
           const y = card.offsetTop;
           const fx = canvas.w > card.offsetWidth ? x / (canvas.w - card.offsetWidth) : 0;
           const fy = canvas.h > card.offsetHeight ? y / (canvas.h - card.offsetHeight) : 0;
-          const item = summaries.get(id);
-          if (item) {
-            item.focusX = fx;
-            item.focusY = fy;
-          }
-          try { await agent?.update(id, { focusX: fx, focusY: fy }); } catch { /* stale */ }
+          const hit = hitFocusDrop(e.clientX, e.clientY, id);
+          await applyFocusDrop(id, hit, fx, fy);
           paintFocus();
           setTimeout(() => { focusSuppressClick = false; }, 0);
         };
-        card.addEventListener('pointermove', move);
-        card.addEventListener('pointerup', up);
+        document.addEventListener('pointermove', move);
+        document.addEventListener('mousemove', move);
+        document.addEventListener('pointerup', up);
+        document.addEventListener('mouseup', up);
+        document.addEventListener('pointercancel', up);
       });
       card.addEventListener('click', (event) => {
         if (focusSuppressClick) return;
@@ -1681,13 +1882,15 @@ __ICON__
 
       if (focusEl.hasAttribute('data-stack') || narrowView.matches) {
         layoutFocusPane(fullIds);
+        paintFocusBasins();
         return;
       }
 
       const canvas = focusCanvasBox();
       const lodCounts = { full: 0, digest: 0, chip: 0 };
       const planned = [];
-      for (const item of items) {
+      const layoutItems = [...items].sort((a, b) => (a.createdAt ?? a.updatedAt ?? 0) - (b.createdAt ?? b.updatedAt ?? 0));
+      for (const item of layoutItems) {
         const lod = lods[item.id] || 'digest';
         const index = lodCounts[lod] ?? 0;
         lodCounts[lod] = index + 1;
@@ -1720,6 +1923,7 @@ __ICON__
         }
       });
       layoutFocusPane(fullIds);
+      paintFocusBasins();
     }
 
     const paintRow = (el, summary) => {
@@ -2598,6 +2802,7 @@ __ICON__
         }
         return;
       }
+      if (handleFocusKeys(event)) return;
       if (event.key !== 'v' && event.key !== 'V') return;
       if (event.metaKey || event.ctrlKey || event.altKey) return;
       if (event.repeat) return;
@@ -2690,6 +2895,7 @@ __ICON__
           if (payload?.folders) {
             folderCatalog = payload.folders;
             paintFolderRail();
+            paintFocus();
             return;
           }
           if (payload?.id) upsert(payload);
