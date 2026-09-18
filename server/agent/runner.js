@@ -23,7 +23,7 @@ const STDERR_TAIL = 4_000;
 // How long closing the host waits for its running turns to write their end.
 const CLOSE_GRACE_MS = 5_000;
 
-export function createRunner({ store, tools, providers, workdir, origin, bridgePath, browserPath, readDocument, publish, limits, log = console, skills = [], driveRoot, power = '', sandbox = null, onLook = null }) {
+export function createRunner({ store, tools, providers, workdir, origin, bridgePath, browserPath, readDocument, publish, limits, log = console, skills = [], driveRoot, projects = null, power = '', sandbox = null, onLook = null }) {
   const live = new Map(); // turnId → live turn
   const order = []; // turnIds, in the order they were sent
   const tokens = new Map(); // token → live turn
@@ -65,18 +65,48 @@ export function createRunner({ store, tools, providers, workdir, origin, bridgeP
     return finish(turn, outcome).catch((err) => log.error(`[agents] ${err.message}`));
   }
 
-  async function composePrompt(turn, meta) {
+  /** The project a conversation works in, resolved now rather than at
+   *  creation: a project removed or moved later fails the next turn with a
+   *  plain reason instead of running somewhere else. */
+  async function resolveProject(meta) {
+    const id = meta.project || 'drive';
+    const project = projects ? await projects.find(id) : { id: 'drive', name: 'Drive', path: driveRoot, builtIn: true };
+    if (!project) throw new Error(`project "${id}" is not registered — pick another project for this conversation`);
+    // A host without a drive root (a bare runner in a test) has nothing to check.
+    if (project.path) {
+      try {
+        if (!(await fsp.stat(project.path)).isDirectory()) throw new Error('not a directory');
+      } catch {
+        throw new Error(`the project directory ${project.path} is missing`);
+      }
+    }
+    return project;
+  }
+
+  async function composePrompt(turn, meta, project) {
     const context = turn.context;
-    const lines = [
-      turn.prompt,
-      '',
-      '---',
-      'Context from Marble Drive:',
-      `- The person is viewing: ${context.viewing ?? context.target}`,
-      `- The document you may edit: ${context.target}`,
-    ];
-    if (context.also?.length) lines.push(`- Also in view: ${context.also.join(', ')}`);
+    const kind = project.id === 'drive' ? 'drive' : 'project';
+    const lines = [turn.prompt, '', '---'];
+    if (kind === 'drive') {
+      lines.push(
+        'Context from Marble Drive:',
+        `- The person is viewing: ${context.viewing ?? context.target}`,
+        `- The document you may edit: ${context.target}`,
+      );
+      if (context.also?.length) lines.push(`- Also in view: ${context.also.join(', ')}`);
+    } else {
+      // A project agent may edit anything in its project; the document is
+      // where the person was, not a constraint.
+      const viewing = context.viewing ?? context.target;
+      lines.push(
+        `Sent from Marble Drive. The person was viewing the document "${viewing}" (on disk at ${path.join(driveRoot ?? '', `${viewing}.mrbl`)}) when they sent this. Marble's document tools can read and edit it; use them only if the request is about that document.`,
+      );
+    }
     if (context.selectionSource) lines.push('- They selected these elements:', '', context.selectionSource);
+    const others = runningTurns().filter((t) => t.id !== turn.id && t.project?.id === project.id).length;
+    if (others) {
+      lines.push('', `${others} other agent conversation(s) are running in this project right now. Do not stash, reset, check out or discard changes you did not make.`);
+    }
     if (meta.handoffFrom && turn.n === 1) {
       const brief = await handoffBrief(meta.handoffFrom);
       if (brief) lines.unshift(`This continues an earlier conversation. What happened there:\n\n${brief}\n\n---\n`);
@@ -128,6 +158,7 @@ export function createRunner({ store, tools, providers, workdir, origin, bridgeP
       child: null,
       cancelled: null,
       provider: null,
+      project: null, // resolved at start; the cwd of a full turn
       resume: null, // the provider session this turn was started to resume
       done: null,
       usage: null,
@@ -231,6 +262,9 @@ export function createRunner({ store, tools, providers, workdir, origin, bridgeP
       await fsp.mkdir(workspace, { recursive: true });
       const capability = effectiveCapability(provider, { power });
       turn.capability = capability;
+      const project = await resolveProject(meta);
+      turn.project = project;
+      const kind = project.id === 'drive' ? 'drive' : 'project';
       const mcp = {
         command: process.execPath,
         args: [bridgePath],
@@ -245,8 +279,8 @@ export function createRunner({ store, tools, providers, workdir, origin, bridgeP
           }
         : null;
       if (browser) await fsp.rm(profile, { recursive: true, force: true });
-      await provider.prepare?.({ workspace, mcp, browser, meta, skills, capability });
-      const prompt = await composePrompt(turn, meta);
+      await provider.prepare?.({ workspace, mcp, browser, meta, skills, capability, kind, project });
+      const prompt = await composePrompt(turn, meta, project);
 
       // Cancel (or a host shutdown) can land anywhere in the awaits above,
       // before there is any child to kill. Check here, the last point before
@@ -265,7 +299,9 @@ export function createRunner({ store, tools, providers, workdir, origin, bridgeP
         mode: meta.mode,
         env: base,
         capability,
-        cwd: capability === 'full' ? driveRoot : null,
+        kind,
+        project,
+        cwd: capability === 'full' ? project.path : null,
       });
 
       // The runner builds the environment, not the provider: a provider that
@@ -295,9 +331,13 @@ export function createRunner({ store, tools, providers, workdir, origin, bridgeP
         stall.unref?.();
       };
       resetStall();
-      const cap = setTimeout(() => stop(turn, { status: 'cancelled', error: `took longer than ${Math.round(limits.maxMs / 60000)} min` }), limits.maxMs);
-      cap.unref?.();
-      turn.timers.push(() => clearTimeout(stall), () => clearTimeout(cap));
+      turn.timers.push(() => clearTimeout(stall));
+      // A cap is opt-in. A person stops a turn; a timer does not.
+      if (limits.maxMs > 0) {
+        const cap = setTimeout(() => stop(turn, { status: 'cancelled', error: `took longer than ${Math.round(limits.maxMs / 60000)} min` }), limits.maxMs);
+        cap.unref?.();
+        turn.timers.push(() => clearTimeout(cap));
+      }
 
       readline.createInterface({ input: child.stdout }).on('line', (line) => {
         if (!line.trim()) return;

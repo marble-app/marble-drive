@@ -12,6 +12,7 @@ import { enginePath, examine } from '../engine.js';
 import { build as buildStarter } from '../gallery.js';
 import { createHub } from './hub.js';
 import { createKeyStore } from './keys.js';
+import { findProject } from './projects.js';
 import { createAgentRoutes } from './routes.js';
 import { createRunner } from './runner.js';
 import { listSkills, skillDirs } from './skills.js';
@@ -131,12 +132,14 @@ async function boot({ config, store, writeOps, createDocument, origin, providers
     examine,
     onLook,
   });
+  const projects = { find: async (id) => findProject({ settings: await agentStore.settings(), root: config.root }, id) };
   const runner = createRunner({
     store: agentStore,
     tools,
     providers: liveProviders,
     workdir: config.agentWorkdir,
     driveRoot: config.root,
+    projects,
     power: config.agentPower,
     sandbox,
     origin,

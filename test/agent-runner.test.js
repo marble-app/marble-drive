@@ -15,12 +15,15 @@ const SCRIPTS = {
   stubborn: [{ ignoreTerm: true }, { silent: 5_000 }],
   broken: [{ fail: 'You have hit your usage limit' }],
   forgetful: [{ lostWhenResumed: 'No conversation found with session ID: x' }, { say: 'fresh' }],
+  noop: [{ say: 'done' }],
 };
 
-async function setup({ limits = {}, tools, onLook, capability } = {}) {
+async function setup({ limits = {}, tools, onLook, capability, projects = null } = {}) {
   const dir = await fsp.mkdtemp(path.join(os.tmpdir(), 'marble-runner-'));
   const store = createAgentStore({ dir: path.join(dir, 'agents'), defaultProvider: 'fake' });
   await store.ready();
+  const driveRoot = path.join(dir, 'drive');
+  await fsp.mkdir(driveRoot, { recursive: true });
   const published = [];
   const toolCalls = [];
   const provider = createFakeProvider({ scripts: SCRIPTS });
@@ -36,6 +39,8 @@ async function setup({ limits = {}, tools, onLook, capability } = {}) {
     tools: tools ?? { call: async (name, input, turn) => { toolCalls.push({ name, input, turn: turn.id }); return { ok: true }; } },
     providers: new Map([['fake', provider]]),
     workdir: path.join(dir, 'work'),
+    driveRoot,
+    projects: projects ?? { find: async (id) => (!id || id === 'drive' ? { id: 'drive', name: 'Drive', path: driveRoot, builtIn: true } : null) },
     origin: () => 'http://127.0.0.1:1',
     bridgePath: '/nonexistent/marble-mcp.js',
     readDocument: async () => '<html><body data-marble-id="b"><p data-marble-id="p">hi</p></body></html>',
@@ -725,5 +730,63 @@ test('the composed prompt names other documents that are also in view', async ()
   assert.match(prompt, /The person is viewing: reading/);
   assert.match(prompt, /The document you may edit: notes/);
   assert.match(prompt, /Also in view: garden, board/);
+  await runner.close();
+});
+
+test('a full turn runs in its project, and is told about the document only as context', async () => {
+  const repo = await fsp.mkdtemp(path.join(os.tmpdir(), 'marble-runner-repo-'));
+  const projects = { find: async (id) => (id === 'p1' ? { id: 'p1', name: 'Repo', path: repo, builtIn: false } : id === 'drive' || !id ? { id: 'drive', name: 'Drive', path: '/drive', builtIn: true } : null) };
+  const { store, runner, spawned } = await setup({ capability: 'full', projects });
+  const { id } = await store.createConversation({ provider: 'fake', project: 'p1' });
+  await runner.send(id, { prompt: 'script:noop', context: { target: 'garden', viewing: 'garden' } });
+  await until(async () => (await store.turn(`${id}-t1`)).status === 'completed');
+  const spawn = spawned.at(-1);
+  assert.equal(spawn.cwd, repo);
+  assert.equal(spawn.kind, 'project');
+  assert.equal(spawn.project.id, 'p1');
+  assert.match(spawn.prompt, /Sent from Marble Drive\. The person was viewing the document "garden"/);
+  assert.doesNotMatch(spawn.prompt, /The document you may edit/);
+  await runner.close();
+});
+
+test('a drive turn keeps the document context block', async () => {
+  const { store, runner, spawned } = await setup({ capability: 'full' });
+  const { id } = await store.createConversation({ provider: 'fake' });
+  await runner.send(id, { prompt: 'script:noop', context: { target: 'garden', viewing: 'garden' } });
+  await until(async () => (await store.turn(`${id}-t1`)).status === 'completed');
+  assert.equal(spawned.at(-1).kind, 'drive');
+  assert.match(spawned.at(-1).prompt, /The document you may edit: garden/);
+  await runner.close();
+});
+
+test('a conversation whose project is gone fails its turn plainly', async () => {
+  const { store, runner } = await setup({ capability: 'full' });
+  const { id } = await store.createConversation({ provider: 'fake', project: 'gone' });
+  await runner.send(id, { prompt: 'script:noop', context: { target: 'garden' } });
+  const turn = await until(async () => { const t = await store.turn(`${id}-t1`); return t.status === 'failed' ? t : null; });
+  assert.match(turn.error, /project "gone" is not registered/);
+  await runner.close();
+});
+
+test('a turn is told how many other conversations are running in its project, and not about other projects', async () => {
+  const { store, runner, spawned } = await setup({ capability: 'full' });
+  const a = await store.createConversation({ provider: 'fake' });
+  const b = await store.createConversation({ provider: 'fake' });
+  await runner.send(a.id, { prompt: 'script:slow', context: { target: 'one' } });
+  await until(() => runner.running().length === 1);
+  await runner.send(b.id, { prompt: 'script:noop', context: { target: 'two' } });
+  await until(() => spawned.length === 2);
+  assert.match(spawned[1].prompt, /1 other agent conversation\(s\) are running in this project right now/);
+  assert.doesNotMatch(spawned[0].prompt, /other agent conversation/);
+  for (const turn of runner.running()) await runner.cancel(turn.id);
+  await runner.close();
+});
+
+test('maxMs of zero never caps a turn', async () => {
+  const { store, runner } = await setup({ limits: { maxMs: 0 } });
+  const { id } = await store.createConversation({ provider: 'fake' });
+  await runner.send(id, { prompt: 'script:slow', context: { target: 'garden' } });
+  await until(async () => (await store.turn(`${id}-t1`)).status === 'completed', 8_000);
+  assert.equal((await store.turn(`${id}-t1`)).error, null);
   await runner.close();
 });
