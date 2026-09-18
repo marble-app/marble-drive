@@ -93,7 +93,9 @@ __ICON__
     padding: .55rem 1rem; border-bottom: 1px solid var(--line);
     background: rgba(var(--paper-rgb), .78); backdrop-filter: blur(20px) saturate(160%);
     -webkit-backdrop-filter: blur(20px) saturate(160%);
-    position: relative; z-index: 5;
+    /* Above the resize seams (6) and row menus (8, 9) that would otherwise
+       paint over the filter popover; below the fixed overlays (11 and up). */
+    position: relative; z-index: 10;
   }
   .topbar h1 { font-size: 1.15rem; font-weight: 500; margin: 0; letter-spacing: -.015em; }
   .toggles {
@@ -119,8 +121,45 @@ __ICON__
   body[data-view="focus"] .views [data-view="focus"] {
     color: var(--ink); background: var(--card); box-shadow: var(--shadow);
   }
+  /* Filter and search share one quiet control. The button is text on the bare
+     bar until it is hovered, open, or holding a filter — a filter you cannot
+     see must still say it is hiding rows, so the count is the one loud part. */
+  .filterbox { position: relative; flex: none; }
+  .filter-toggle {
+    appearance: none; border: 0; background: none; color: var(--faint);
+    display: inline-flex; align-items: center; gap: .35rem;
+    padding: .2rem .55rem; border-radius: 999px; cursor: pointer;
+    font: inherit; font-size: .75rem; font-weight: 500; line-height: 1.25;
+  }
+  .filter-toggle:hover, .filter-toggle:focus-visible,
+  .filterbox[data-open] .filter-toggle { color: var(--ink); background: var(--paper-3); outline: none; }
+  .filter-toggle[data-active] { color: var(--muted); }
+  .filter-count {
+    min-width: 1.05rem; height: 1.05rem; padding: 0 .3rem; box-sizing: border-box;
+    display: inline-flex; align-items: center; justify-content: center;
+    border-radius: 999px; background: var(--accent-ink); color: var(--paper);
+    font-size: .65rem; font-weight: 600; font-variant-numeric: tabular-nums;
+  }
+  .filter-count:empty { display: none; }
+  .filter-pop {
+    display: none; position: absolute; top: calc(100% + .45rem); left: 0; z-index: 6;
+    width: min(21rem, calc(100vw - 1.5rem)); box-sizing: border-box;
+    flex-direction: column; gap: .7rem; padding: .7rem;
+    background: var(--card); border: 1px solid var(--line); border-radius: 12px;
+    box-shadow: var(--shadow-lift);
+  }
+  .filterbox[data-open] .filter-pop { display: flex; }
+  .filter-row { display: flex; flex-direction: column; align-items: flex-start; gap: .3rem; min-width: 0; }
+  .filter-name { font-size: .72rem; font-weight: 500; color: var(--faint); letter-spacing: .01em; }
+  .filter-row .seg { max-width: 100%; overflow-x: auto; }
+  .filter-foot[hidden] { display: none; }
+  .filter-clear {
+    appearance: none; border: 0; background: none; padding: 0; cursor: pointer;
+    font: inherit; font-size: .75rem; color: var(--accent-ink);
+  }
+  .filter-clear:hover, .filter-clear:focus-visible { text-decoration: underline; outline: none; }
   input.search {
-    flex: 1 1 12rem; min-width: 8rem; max-width: 28rem;
+    width: 100%; box-sizing: border-box;
     padding: .45rem .9rem; border: 1px solid transparent; border-radius: 999px;
     background: var(--paper-3); color: var(--ink); font: inherit; outline: none;
     transition: background var(--t) var(--settle), box-shadow var(--t) var(--settle);
@@ -1051,15 +1090,21 @@ __ICON__
   }
 
   @media (max-width: 719px) {
-    /* Title + segmented bars + New stay on the first wrap; search gets
-       its own row. The three bars scroll sideways if they cannot fit. */
+    /* Title + the view bar + Filter + New stay on the first wrap. The bar
+       scrolls sideways if it cannot fit; the filter panel opens under the
+       whole header rather than under its button. */
     .topbar { row-gap: .5rem; padding: .5rem .75rem; }
     .topbar h1 { order: 1; font-size: 1.05rem; }
     .toggles { order: 2; flex: 1 1 auto; min-width: 0; overflow-x: auto; -webkit-overflow-scrolling: touch; padding-bottom: 1px; }
-    .usage { order: 3; margin-left: auto; }
-    .settings { order: 3; }
+    .filterbox { order: 2; position: static; }
+    .filter-pop { left: .75rem; right: .75rem; width: auto; }
+    .settings { order: 3; margin-left: auto; }
     .new { order: 4; }
-    input.search { order: 5; flex-basis: 100%; }
+    /* Three meters no longer fit beside the buttons: they take a row of their
+       own and the bars give way before the labels do. */
+    .usage { order: 5; flex: 1 1 100%; margin-left: 0; gap: .6rem; }
+    .usage .meter { flex: 1 1 0; }
+    .usage .meter-bar { width: auto; flex: 1 1 1.25rem; min-width: 1.25rem; }
 
     /* One pane at a time, not three squeezed into one screen. The library
        shows the list; opening a row swaps it for the conversation (with a
@@ -1068,7 +1113,6 @@ __ICON__
     .list { border-right: 0; max-height: none; height: 100%; }
     .pane { display: none; }
     body[data-open] .list { display: none; }
-    body[data-open] .filters { display: none; }
     body[data-open] .pane { display: grid; height: 65vh; min-height: 22rem; }
     body[data-open]:not([data-panel="open"]) .pane .back { display: flex; }
     .pane-hint { bottom: 7.5rem; }
@@ -1091,7 +1135,7 @@ __ICON__
     body[data-view="board"][data-panel="open"] .pane { height: auto; }
   }
   @media (hover: none) {
-    .conv, .seg button, .new, .settings, .conv .manage .more, .panel-close { min-height: 2.75rem; }
+    .conv, .seg button, .new, .settings, .filter-toggle, .conv .manage .more, .panel-close { min-height: 2.75rem; }
   }
 </style>
 </head>
@@ -1106,15 +1150,27 @@ __ICON__
       <button type="button" data-view="folders" aria-pressed="false" data-marble-id="__ID__">Folders</button>
       <button type="button" data-view="focus" aria-pressed="false" data-marble-id="__ID__">Focus</button>
     </div>
-    <div class="seg cli" role="group" aria-label="CLI" data-marble-transient></div>
-    <div class="seg filters" role="group" aria-label="Filter" data-marble-id="__ID__">
-      <button type="button" class="filter" data-filter="all" aria-pressed="true" data-marble-id="__ID__">All</button>
-      <button type="button" class="filter" data-filter="running" aria-pressed="false" data-marble-id="__ID__">Running</button>
-      <button type="button" class="filter" data-filter="review" aria-pressed="false" data-marble-id="__ID__">Review</button>
-      <button type="button" class="filter" data-filter="archived" aria-pressed="false" data-marble-id="__ID__">Archived</button>
+  </div>
+  <div class="filterbox" data-marble-id="__ID__">
+    <button type="button" class="filter-toggle" aria-haspopup="dialog" aria-expanded="false" data-marble-id="__ID__">Filter<span class="filter-count" data-marble-transient></span></button>
+    <div class="filter-pop" role="dialog" aria-label="Filter and search conversations" data-marble-id="__ID__">
+      <input class="search" type="search" placeholder="Search conversations" autocomplete="off" aria-label="Search conversations" data-marble-id="__ID__">
+      <div class="filter-row" data-marble-id="__ID__">
+        <span class="filter-name" data-marble-id="__ID__">Status</span>
+        <div class="seg filters" role="group" aria-label="Status" data-marble-id="__ID__">
+          <button type="button" class="filter" data-filter="all" aria-pressed="true" data-marble-id="__ID__">All</button>
+          <button type="button" class="filter" data-filter="running" aria-pressed="false" data-marble-id="__ID__">Running</button>
+          <button type="button" class="filter" data-filter="review" aria-pressed="false" data-marble-id="__ID__">Review</button>
+          <button type="button" class="filter" data-filter="archived" aria-pressed="false" data-marble-id="__ID__">Archived</button>
+        </div>
+      </div>
+      <div class="filter-row" data-marble-id="__ID__">
+        <span class="filter-name" data-marble-id="__ID__">Agent</span>
+        <div class="seg cli" role="group" aria-label="CLI" data-marble-transient></div>
+      </div>
+      <div class="filter-foot" data-marble-transient hidden></div>
     </div>
   </div>
-  <input class="search" type="search" placeholder="Search conversations" autocomplete="off" aria-label="Search conversations" data-marble-id="__ID__">
   <div class="usage" data-marble-transient role="group" aria-label="Usage remaining"></div>
   <button type="button" class="settings" data-marble-id="__ID__">Settings</button>
   <button type="button" class="new" data-marble-id="__ID__">New</button>
@@ -1204,6 +1260,10 @@ __ICON__
     const viewButtons = [...document.querySelectorAll('.views [data-view]')];
     const filterButtons = [...document.querySelectorAll('button.filter')];
     const cliEl = $('.cli');
+    const filterBox = $('.filterbox');
+    const filterToggle = $('.filter-toggle');
+    const filterCount = $('.filter-count');
+    const filterFoot = $('.filter-foot');
     const reduceMotion = matchMedia('(prefers-reduced-motion: reduce)');
     const narrowView = matchMedia('(max-width: 719px)');
     const FLIP_MS = 420;
@@ -1279,6 +1339,39 @@ __ICON__
       for (const btn of filterButtons) btn.setAttribute('aria-pressed', String(btn.dataset.filter === filter));
     };
 
+    // The filters live in a popover, so the closed button has to say when they
+    // are hiding rows. Count and tooltip sit in transient nodes; the active
+    // mark and aria-expanded are page-only, so none of it reaches the file.
+    const clearFilters = document.createElement('button');
+    clearFilters.type = 'button';
+    clearFilters.className = 'filter-clear';
+    clearFilters.textContent = 'Clear filters';
+    filterFoot.append(clearFilters);
+    let filterOpen = false;
+
+    const activeFilters = () => [
+      filter !== 'all' ? filter[0].toUpperCase() + filter.slice(1) : '',
+      cli !== 'all' ? (labels.get(cli)?.label || cli) : '',
+      query ? `\u201c${search.value.trim()}\u201d` : '',
+    ].filter(Boolean);
+
+    const paintFilterState = () => {
+      const active = activeFilters();
+      if (active.length) filterToggle.setAttribute('data-active', '');
+      else filterToggle.removeAttribute('data-active');
+      filterCount.textContent = active.length ? String(active.length) : '';
+      filterCount.title = active.length ? `Showing: ${active.join(', ')}` : '';
+      filterFoot.hidden = !active.length;
+    };
+
+    const setFilterOpen = (open, { focus = false } = {}) => {
+      filterOpen = open;
+      if (open) filterBox.setAttribute('data-open', '');
+      else filterBox.removeAttribute('data-open');
+      filterToggle.setAttribute('aria-expanded', String(open));
+      if (open && focus) search.focus();
+    };
+
     const deriveCli = () => {
       if (!cliEl) return;
       for (const btn of cliEl.querySelectorAll('[data-cli]')) {
@@ -1339,6 +1432,7 @@ __ICON__
     };
 
     const applyFilters = () => {
+      paintFilterState();
       for (const [id, el] of nodes) el.hidden = !matches(summaries.get(id));
       paintFolderRail();
       paintFocus();
@@ -4894,6 +4988,29 @@ __ICON__
       query = search.value.trim().toLowerCase();
       applyFilters();
     });
+    // Focus the search only where there is a keyboard to type on; on a phone
+    // it would throw the keyboard up over the list the person came to filter.
+    filterToggle.addEventListener('click', () => setFilterOpen(!filterOpen, { focus: matchMedia('(hover: hover)').matches }));
+    clearFilters.addEventListener('click', async () => {
+      search.value = '';
+      query = '';
+      cli = 'all';
+      remember(CLI_KEY, null);
+      deriveCli();
+      await setFilter('all');
+    });
+    document.addEventListener('pointerdown', (event) => {
+      if (filterOpen && !event.target.closest?.('.filterbox')) setFilterOpen(false);
+    });
+    filterBox.addEventListener('focusout', (event) => {
+      if (filterOpen && event.relatedTarget && !filterBox.contains(event.relatedTarget)) setFilterOpen(false);
+    });
+    filterBox.addEventListener('keydown', (event) => {
+      if (event.key !== 'Escape' || !filterOpen) return;
+      event.stopPropagation();
+      setFilterOpen(false);
+      filterToggle.focus();
+    });
     document.addEventListener('click', (event) => {
       if (!event.target.closest?.('.manage')) closeRowMenus();
     });
@@ -4924,6 +5041,11 @@ __ICON__
         return;
       }
       if (handleFocusKeys(event)) return;
+      if (event.key === '/' && !event.metaKey && !event.ctrlKey && !event.altKey && !event.repeat && !typingIn()) {
+        event.preventDefault();
+        setFilterOpen(true, { focus: true });
+        return;
+      }
       if (event.key !== 'v' && event.key !== 'V') return;
       if (event.metaKey || event.ctrlKey || event.altKey) return;
       if (event.repeat) return;
@@ -4989,7 +5111,7 @@ __ICON__
       // into the file for everyone. conversation lives on an addressed
       // <marble-conversation>, so without this a patch strips it and a
       // source.outer of the pane writes it.
-      marble.pageOnly?.('data-view', 'aria-pressed', 'conversation', 'data-open', 'data-crossfade', 'data-panel', 'data-dock', 'data-dock-primary', 'data-stack');
+      marble.pageOnly?.('data-view', 'aria-pressed', 'aria-expanded', 'data-active', 'conversation', 'data-open', 'data-crossfade', 'data-panel', 'data-dock', 'data-dock-primary', 'data-stack');
       restoreView();
       deriveFilters();
       marble.register?.(() => {
@@ -4999,6 +5121,8 @@ __ICON__
         placeAll();
         deriveFilters();
         applyFilters();
+        // The same patch strips the popover's page-only open state.
+        setFilterOpen(filterOpen);
         restoreOpen();
         // A patch strips the inline geometry the panes are placed by.
         layoutDock();

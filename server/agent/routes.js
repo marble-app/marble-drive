@@ -72,7 +72,7 @@ const publicMeter = (meter) => {
   return out;
 };
 
-export function createAgentRoutes({ store, runner, tools, hub, providers, writeOps, restore, maxBody, gated = false, keys = null, skills = [], usage = null, root = null }) {
+export function createAgentRoutes({ store, runner, tools, hub, providers, writeOps, restore, maxBody, gated = false, keys = null, skills = [], usage = null, usageHistory = null, root = null }) {
   let detected = null;
   // Turns being undone right now. The undoneAt check alone lets two requests
   // that arrive together both pass it before either has written.
@@ -200,6 +200,16 @@ export function createAgentRoutes({ store, runner, tools, hub, providers, writeO
         return json(res, 200, { meters });
       } catch {
         return json(res, 200, { meters: [] });
+      }
+    }
+
+    if (route === '/agent/usage/history' && method === 'GET') {
+      const weeks = Number(url.searchParams.get('weeks'));
+      try {
+        if (typeof usageHistory !== 'function') throw new Error('no history');
+        return json(res, 200, await usageHistory({ weeks: url.searchParams.get('weeks') && Number.isFinite(weeks) ? weeks : undefined }));
+      } catch {
+        return json(res, 200, { source: null, tz: null, from: null, to: null, days: [] });
       }
     }
 

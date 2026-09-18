@@ -145,6 +145,7 @@
       saveSettings: (patch) => ask('/agent/settings', { method: 'PUT', body: patch }),
       skills: (provider = null) => ask(provider ? `/agent/skills?provider=${enc(provider)}` : '/agent/skills'),
       usage: () => ask('/agent/usage'),
+      usageHistory: (weeks) => ask(weeks ? `/agent/usage/history?weeks=${enc(weeks)}` : '/agent/usage/history'),
       workspace: () => ask('/agent/workspace'),
       conversations: ({ archived = false } = {}) => ask(`/agent/conversations${archived ? '?archived=1' : ''}`),
       conversation: (id) => ask(`/agent/conversations/${enc(id)}`),
@@ -219,7 +220,7 @@
 
       open: (id = null) => dispatchEvent(new CustomEvent('marble:agent-open', { detail: { id } })),
       close: () => dispatchEvent(new CustomEvent('marble:agent-close')),
-      openSettings: () => dispatchEvent(new CustomEvent('marble:agent-settings')),
+      openSettings: (tab) => dispatchEvent(new CustomEvent('marble:agent-settings', { detail: { tab } })),
     };
 
     marble.agent = agent;

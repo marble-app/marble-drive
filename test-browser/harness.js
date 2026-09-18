@@ -31,6 +31,32 @@ export const GARDEN = `<!doctype html>
 
 const quiet = { log() {}, error() {} };
 
+// A deterministic history: `weeks` of days ending on a fixed Friday, active on
+// weekdays after week 3, with Fable only in the last 9 days. Days are what the
+// host sends (dense, oldest first), so the browser tests read exact values.
+export const usageHistoryStub = (weeks = 26) => {
+  const end = Date.UTC(2026, 8, 18);
+  const days = [];
+  for (let i = weeks * 7 - 1; i >= 0; i -= 1) {
+    const at = new Date(end - i * 86_400_000);
+    const date = at.toISOString().slice(0, 10);
+    const dow = at.getUTCDay();
+    const active = i < 60 && dow !== 0 && dow !== 6;
+    const messages = active ? 20 + ((i * 7) % 40) : 0;
+    const byModel = {};
+    if (messages) {
+      const fable = i < 9 ? Math.round(messages / 4) : 0;
+      const rest = messages - fable;
+      byModel.opus = { messages: Math.ceil(rest / 2), tokens: Math.ceil(rest / 2) * 1000 };
+      byModel.sonnet = { messages: Math.floor(rest / 2), tokens: Math.floor(rest / 2) * 800 };
+      if (fable) byModel.fable = { messages: fable, tokens: fable * 1200 };
+    }
+    const tokens = Object.values(byModel).reduce((sum, m) => sum + m.tokens, 0);
+    days.push({ date, messages, tokens, cacheRead: tokens * 30, byModel });
+  }
+  return { source: 'claude-code-local', tz: 'America/Los_Angeles', generatedAt: '2026-09-18T20:00:00.000Z', from: days[0].date, to: days.at(-1).date, days };
+};
+
 export async function startDrive({ scripts = {}, agents = true, documents = { garden: GARDEN } } = {}) {
   const root = await fsp.mkdtemp(path.join(os.tmpdir(), 'marble-browser-drive-'));
   const workdir = await fsp.mkdtemp(path.join(os.tmpdir(), 'marble-browser-work-'));
@@ -51,6 +77,7 @@ export async function startDrive({ scripts = {}, agents = true, documents = { ga
   const drive = await createDrive(config, {
     log: quiet,
     agentProviders: new Map([['fake', createFakeProvider({ scripts })]]),
+    usageHistory: async ({ weeks = 26 } = {}) => usageHistoryStub(weeks),
     usage: async () => ({
       meters: [
         {
@@ -64,6 +91,7 @@ export async function startDrive({ scripts = {}, agents = true, documents = { ga
           windows: [
             { id: '5h', label: 'Short-term', used: 23, left: 77, resetsAt: '2026-09-17T22:30:00Z', kind: 'quota' },
             { id: 'week', label: 'Weekly', used: 41, left: 59, resetsAt: '2026-09-20T10:59:59Z', kind: 'quota' },
+            { id: 'fable', label: 'Fable', used: 58, left: 42, resetsAt: '2026-09-21T10:59:59Z', kind: 'quota' },
           ],
         },
         {
