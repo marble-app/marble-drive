@@ -74,6 +74,7 @@ function fakeChromium() {
 
   return {
     launched,
+    persistent: [],
     pages,
     async launch(opts) {
       launched.push(opts);
@@ -94,6 +95,18 @@ function fakeChromium() {
         closed: false,
         contextOpts: null,
       };
+    },
+    async launchPersistentContext(dir, opts) {
+      this.persistent.push({ dir, opts });
+      const context = {
+        pages: () => pages.filter((p) => !p.closed),
+        async newPage() {
+          return makePage();
+        },
+        async close() {},
+      };
+      await context.newPage();
+      return context;
     },
   };
 }
@@ -128,6 +141,39 @@ test('http localhost is allowed', async () => {
   const result = await session.call('browser_navigate', { url: 'http://127.0.0.1:8765/Agents' });
   assert.equal(result.error, undefined);
   assert.equal(result.url, 'http://127.0.0.1:8765/Agents');
+  await session.close();
+});
+
+test('closing a tab before the selected one keeps the same page selected', async () => {
+  const chromium = fakeChromium();
+  const session = createBrowserSession({ chromium });
+  await session.call('browser_navigate', { url: 'https://a.example/' });
+  await session.call('browser_tabs', { action: 'new' });
+  await session.call('browser_navigate', { url: 'https://b.example/' });
+  await session.call('browser_tabs', { action: 'new' });
+  await session.call('browser_navigate', { url: 'https://c.example/' });
+  await session.call('browser_tabs', { action: 'select', index: 1 });
+  const after = await session.call('browser_tabs', { action: 'close', index: 0 });
+  assert.equal(after.tabs.length, 2);
+  assert.equal(after.selected, 0);
+  assert.equal(after.tabs[0].url, 'https://b.example/');
+  await session.close();
+});
+
+test('a profile dir uses launchPersistentContext and adopts the blank tab', async () => {
+  const chromium = fakeChromium();
+  const session = createBrowserSession({ chromium, userDataDir: '/tmp/marble-profile' });
+  const result = await session.call('browser_navigate', { url: 'https://example.com/' });
+  assert.equal(result.error, undefined);
+  assert.equal(chromium.persistent.length, 1);
+  assert.equal(chromium.persistent[0].dir, '/tmp/marble-profile');
+  assert.equal(chromium.persistent[0].opts.headless, true);
+  assert.deepEqual(chromium.persistent[0].opts.viewport, { width: 1280, height: 720 });
+  assert.equal(chromium.launched.length, 0);
+  assert.equal(chromium.pages.length, 1, 'the blank persistent tab is the one we navigated, not a second page');
+  const listed = await session.call('browser_tabs', { action: 'list' });
+  assert.equal(listed.tabs.length, 1);
+  assert.equal(listed.tabs[0].url, 'https://example.com/');
   await session.close();
 });
 

@@ -155,7 +155,10 @@ export function createBrowserSession({ chromium, userDataDir } = {}) {
     try {
       if (userDataDir && typeof engine.launchPersistentContext === 'function') {
         context = await engine.launchPersistentContext(userDataDir, { headless: true, viewport });
-        browser = { close: () => context.close() };
+        const persistent = context;
+        browser = { close: () => persistent.close() };
+        for (const page of persistent.pages?.() ?? []) tabs.push(page);
+        selected = 0;
       } else {
         browser = await engine.launch({ headless: true });
         context = await browser.newContext({ viewport });
@@ -205,6 +208,7 @@ export function createBrowserSession({ chromium, userDataDir } = {}) {
         }
         const [page] = tabs.splice(index, 1);
         await page.close();
+        if (index < selected) selected -= 1;
         if (selected >= tabs.length) selected = Math.max(0, tabs.length - 1);
         return list();
       }
@@ -214,6 +218,7 @@ export function createBrowserSession({ chromium, userDataDir } = {}) {
     async browser_navigate(input) {
       const url = httpUrl(input.url);
       if (!url) throw new Error('only http(s) URLs are allowed');
+      await ensureContext();
       const page = tabs.length ? current() : await openTab();
       await page.goto(url);
       return info(page);

@@ -61,6 +61,24 @@ test('a failed tool result is not ok', () => {
   assert.deepEqual(parseClaudeLine(line), [{ type: 'tool.result', callId: 't1', ok: false, summary: 'no document "x"' }]);
 });
 
+test('mcp__browser__ and mcp__marble__ prefixes both drop so the UI sees the tool name', () => {
+  const browser = JSON.stringify({
+    type: 'assistant',
+    message: { content: [{ type: 'tool_use', id: 't1', name: 'mcp__browser__browser_navigate', input: { url: 'https://example.com/' } }] },
+  });
+  const marble = JSON.stringify({
+    type: 'assistant',
+    message: { content: [{ type: 'tool_use', id: 't2', name: 'mcp__marble__read_document', input: { path: 'garden' } }] },
+  });
+  const native = JSON.stringify({
+    type: 'assistant',
+    message: { content: [{ type: 'tool_use', id: 't3', name: 'WebSearch', input: { query: 'x' } }] },
+  });
+  assert.equal(parseClaudeLine(browser)[0].name, 'browser_navigate');
+  assert.equal(parseClaudeLine(marble)[0].name, 'read_document');
+  assert.equal(parseClaudeLine(native)[0].name, 'WebSearch');
+});
+
 test('ids, labels, and the spawn verified by the spike', () => {
   const sub = createClaudeProvider({ auth: 'subscription', env: { ANTHROPIC_API_KEY: 'sk-test' } });
   const api = createClaudeProvider({ auth: 'api', env: { ANTHROPIC_API_KEY: 'sk-test' } });

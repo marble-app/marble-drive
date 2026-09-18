@@ -202,6 +202,7 @@ export function createRunner({ store, tools, providers, workdir, origin, bridgeP
       turn.token = crypto.randomBytes(32).toString('hex');
       tokens.set(turn.token, turn);
       const workspace = path.join(workdir, turn.conversationId);
+      await fsp.mkdir(workspace, { recursive: true });
       const capability = effectiveCapability(provider, { power });
       turn.capability = capability;
       const mcp = {
@@ -209,15 +210,15 @@ export function createRunner({ store, tools, providers, workdir, origin, bridgeP
         args: [bridgePath],
         env: { MARBLE_DRIVE_URL: origin(), MARBLE_AGENT_TOKEN: turn.token },
       };
+      const profile = path.join(workspace, 'browser-profile');
       const browser = capability === 'full' && browserPath
         ? {
             command: process.execPath,
             args: [browserPath],
-            env: { MARBLE_BROWSER_PROFILE: path.join(workspace, 'browser-profile') },
+            env: { MARBLE_BROWSER_PROFILE: profile },
           }
         : null;
-
-      await fsp.mkdir(workspace, { recursive: true });
+      if (browser) await fsp.rm(profile, { recursive: true, force: true });
       await provider.prepare?.({ workspace, mcp, browser, meta, skills, capability });
       const prompt = await composePrompt(turn, meta);
 

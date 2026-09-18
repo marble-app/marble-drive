@@ -19,7 +19,6 @@ import { instructionsFor } from '../instructions.js';
 import { runCommand } from './exec.js';
 import { writePrivateFile } from './private-file.js';
 
-const PREFIX = 'mcp__marble__';
 export const CLAUDE_MODELS = [
   { id: 'haiku', label: 'Haiku 4.5' },
   { id: 'sonnet', label: 'Sonnet 4.5' },
@@ -35,7 +34,7 @@ const FULL_TOOLS = 'Bash,Read,Write,Edit,Glob,Grep,TodoWrite,WebSearch,WebFetch'
 const FULL_SETTINGS = { permissions: { allow: [...FULL_TOOLS.split(','), 'mcp__browser'] } };
 const SUMMARY = 200;
 
-const toolName = (name) => (name.startsWith(PREFIX) ? name.slice(PREFIX.length) : name);
+const toolName = (name) => String(name ?? '').replace(/^mcp__[a-zA-Z0-9_-]+__/, '');
 const textOf = (content) =>
   Array.isArray(content) ? content.filter((b) => b.type === 'text').map((b) => b.text).join('') : String(content ?? '');
 

@@ -107,6 +107,29 @@ test('a full turn hands prepare a browser MCP spec; documents does not', async (
   }
 });
 
+test('a later full turn wipes cookies left in the conversation browser profile', async () => {
+  const full = await hostWith({ capability: 'full' });
+  try {
+    const conversation = await full.drive.agents.store.createConversation({ provider: 'fake' });
+    const send = () => full.drive.agents.runner.send(conversation.id, {
+      prompt: 'script:noop',
+      context: { target: 'notes', viewing: 'notes', selection: [] },
+    });
+    const wait = async (turnId) => until(async () => {
+      const turn = await full.drive.agents.store.turn(turnId);
+      return turn && !['queued', 'running'].includes(turn.status) ? turn : null;
+    });
+    await wait((await send()).turnId);
+    const profile = path.join(full.config.agentWorkdir, conversation.id, 'browser-profile');
+    await fsp.mkdir(profile, { recursive: true });
+    await fsp.writeFile(path.join(profile, 'Cookies'), 'stale');
+    await wait((await send()).turnId);
+    await assert.rejects(fsp.stat(path.join(profile, 'Cookies')), { code: 'ENOENT' });
+  } finally {
+    await full.drive.close();
+  }
+});
+
 test('a full provider is spawned rooted at the drive', async () => {
   const { drive, config, seen } = await hostWith({ capability: 'full' });
   try {

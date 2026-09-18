@@ -66,3 +66,16 @@ test('an unknown method is a JSON-RPC error', async () => {
   assert.equal(reply.error.code, -32601);
   child.kill();
 });
+
+test('ending stdin closes the process', async () => {
+  const { child } = startBridge();
+  child.stdin.end();
+  const code = await new Promise((resolve, reject) => {
+    const timer = setTimeout(() => reject(new Error('browser MCP did not exit after stdin ended')), 3_000);
+    child.on('close', (exit) => {
+      clearTimeout(timer);
+      resolve(exit);
+    });
+  });
+  assert.equal(code, 0);
+});
