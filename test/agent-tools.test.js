@@ -286,6 +286,25 @@ test('check_document reports the format\'s own invariants', async () => {
   assert.deepEqual(await checking.call('check_document', { path: 'nope' }, turn), { error: 'no document "nope"' });
 });
 
+test('reading a document outlines those ids for the page, without counting as a write', async () => {
+  const seen = [];
+  const looking = createTools({
+    store: drive.store,
+    writeOps: drive.writeOps,
+    createDocument: drive.createDocument,
+    buildStarter: build,
+    guidePath: enginePath('skills/build-in-marble/SKILL.md'),
+    examine: () => [],
+    onLook: (docPath, ids, client) => seen.push({ docPath, ids, client }),
+  });
+  const turn = await freshTurn();
+  await looking.call('read_document', { path: turn.target, ids: ['h'] }, turn);
+  assert.equal(seen.length, 1);
+  assert.equal(seen[0].docPath, turn.target);
+  assert.deepEqual(seen[0].ids, ['h']);
+  assert.equal(seen[0].client, `agent:${turn.conversationId}`);
+});
+
 test('check_document is offered to agents', () => {
   const checking = createTools({
     store: {}, writeOps: async () => ({}), createDocument: async () => {},

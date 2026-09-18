@@ -88,7 +88,7 @@ export const TOOL_SCHEMAS = [
   },
 ];
 
-export function createTools({ store, writeOps, createDocument, buildStarter, guidePath, examine }) {
+export function createTools({ store, writeOps, createDocument, buildStarter, guidePath, examine, onLook }) {
   // conversationId → docPath → Map<id, hash>
   const ledgers = new Map();
 
@@ -125,16 +125,20 @@ export function createTools({ store, writeOps, createDocument, buildStarter, gui
       const { docPath, source } = await readable(input);
       const ledger = ledgerFor(turn.conversationId, docPath);
       const ids = Array.isArray(input.ids) && input.ids.length ? input.ids.map(String) : null;
+      const client = turn?.conversationId ? `agent:${turn.conversationId}` : 'agent';
 
       // Small enough to hand over whole, which is also the one read that makes
       // every element in the document known.
       if (!ids && source.length <= READ_BUDGET) {
-        for (const [id, h] of hashesOf(source)) ledger.set(id, h);
+        const known = hashesOf(source);
+        for (const [id, h] of known) ledger.set(id, h);
+        onLook?.(docPath, [...known.keys()], client);
         return { path: docPath, whole: true, source };
       }
 
       const slices = collectSlices(source, ids ?? topLevelIds(source), { budget: READ_BUDGET });
       remember(ledger, source, slices);
+      onLook?.(docPath, slices.map((slice) => slice.id), client);
       return {
         path: docPath,
         whole: false,

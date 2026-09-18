@@ -96,7 +96,7 @@ async function claimHost(dir) {
   return { held: null, release: null, why: 'could not take host.lock' };
 }
 
-export async function createAgents({ config, store, writeOps, createDocument, origin, providers, log = console, usage = null, sandbox = null, restore = null }) {
+export async function createAgents({ config, store, writeOps, createDocument, origin, providers, log = console, usage = null, sandbox = null, restore = null, onLook = null }) {
   const dir = path.join(store.marbleDir, 'agents');
   const lock = await claimHost(dir);
   if (!lock.release) {
@@ -106,14 +106,14 @@ export async function createAgents({ config, store, writeOps, createDocument, or
     throw Object.assign(new Error(why), { code: 'EAGENTSHELD' });
   }
   try {
-    return await boot({ config, store, writeOps, createDocument, origin, providers, log, dir, lock, usage, sandbox, restore });
+    return await boot({ config, store, writeOps, createDocument, origin, providers, log, dir, lock, usage, sandbox, restore, onLook });
   } catch (err) {
     await lock.release();
     throw err;
   }
 }
 
-async function boot({ config, store, writeOps, createDocument, origin, providers, log, dir, lock, usage, sandbox = null, restore = null }) {
+async function boot({ config, store, writeOps, createDocument, origin, providers, log, dir, lock, usage, sandbox = null, restore = null, onLook = null }) {
   const agentStore = createAgentStore({ dir, defaultProvider: config.agentProvider, log });
   await agentStore.ready();
   const settings = await agentStore.settings();
@@ -128,6 +128,7 @@ async function boot({ config, store, writeOps, createDocument, origin, providers
     buildStarter,
     guidePath: enginePath('skills/build-in-marble/SKILL.md'),
     examine,
+    onLook,
   });
   const runner = createRunner({
     store: agentStore,
@@ -173,6 +174,7 @@ async function boot({ config, store, writeOps, createDocument, origin, providers
     handleTools: routes.handleTools,
     watchdog: (docPath, sha) => runner.watchdog(docPath, sha),
     documentTouched: (docPath, sha) => runner.documentTouched(docPath, sha),
+    running: () => runner.running(),
     store: agentStore,
     runner,
     async close() {

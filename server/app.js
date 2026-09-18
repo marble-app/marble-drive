@@ -20,7 +20,7 @@ import { fileURLToPath } from 'node:url';
 
 import { agentsAllowed, createAgents } from './agent/index.js';
 import { backupNow, scheduleBackups } from './backup.js';
-import { bytesOf, chooseProvider, enginePath, examine, guardOps, shaOf } from './engine.js';
+import { bytesOf, chooseProvider, createTouched, enginePath, examine, guardOps, idsOfOps, mergeOps, mergeWrite, shaOf } from './engine.js';
 import { dataUri as iconUri, svg as iconSvg } from './favicon.js';
 import { blobsIn, extract, flatten } from './flatten.js';
 import { createGate } from './gate.js';
@@ -92,6 +92,7 @@ const RUNTIME = {
   // uses it. Served to every document; injected only when agents run here.
   'agent.js': () => path.join(REPO, 'runtime', 'agent.js'),
   'agent-ui.js': () => path.join(REPO, 'runtime', 'agent-ui.js'),
+  'collab.js': () => path.join(REPO, 'runtime', 'collab.js'),
 };
 
 export async function createDrive(config, { log = console, agentProviders = null, agents: withAgents = true, usage = null, typesafe: typesafeOpts = null, agentSandbox = null } = {}) {
@@ -122,6 +123,7 @@ export async function createDrive(config, { log = console, agentProviders = null
   const queues = new Map();
   const lastKnown = new Map();
   const pendingWrites = createPendingWrites();
+  const sessionTouched = createTouched();
 
   const enqueue = (docPath, task) => {
     const next = (queues.get(docPath) ?? Promise.resolve()).then(task, task);
@@ -141,6 +143,7 @@ export async function createDrive(config, { log = console, agentProviders = null
       // Agents.mrbl still needs <marble-conversation> without a second launcher.
       tags += `\n<script src="/runtime/agent-ui.js" data-marble-transient></script>`;
     }
+    tags += `\n<script src="/runtime/collab.js" data-marble-transient></script>`;
     return source.includes('</body>')
       ? source.replace(/<\/body>/i, () => `${tags}\n</body>`)
       : source + tags;
@@ -186,18 +189,30 @@ export async function createDrive(config, { log = console, agentProviders = null
         }
       };
 
-      const next = guardOps(source, ops);
-      if (next === source) {
+      const next = (() => {
+        const others = sessionTouched.except(docPath, client);
+        if (others.length) {
+          const merged = mergeOps(source, ops, {
+            touchedIds: others,
+            agent: typeof client === 'string' && client.startsWith('agent:') ? client : 'agent',
+          });
+          if (merged.forks.length) return { html: merged.source, ops: merged.ops, forks: merged.forks };
+        }
+        return { html: guardOps(source, ops), ops, forks: [] };
+      })();
+
+      if (next.html === source) {
         settle(source, source);
-        return { applied: 0, bytes: bytesOf(source), sha: shaOf(source) };
+        return { applied: 0, bytes: bytesOf(source), sha: shaOf(source), ops: [], forks: [] };
       }
 
-      lastKnown.set(docPath, { source: next, client });
-      pendingWrites.mark(docPath, shaOf(next));
-      const written = await store.write(docPath, next, { label: 'ops', ops });
-      await oplog.append(docPath, ops, { client: client ?? 'anon' });
-      settle(source, next);
-      return { applied: ops.length, ...written };
+      lastKnown.set(docPath, { source: next.html, client });
+      pendingWrites.mark(docPath, shaOf(next.html));
+      const written = await store.write(docPath, next.html, { label: 'ops', ops: next.ops });
+      await oplog.append(docPath, next.ops, { client: client ?? 'anon' });
+      sessionTouched.note(docPath, client, idsOfOps(ops));
+      settle(source, next.html);
+      return { applied: next.ops.length, ops: next.ops, forks: next.forks, ...written };
     });
   }
 
@@ -206,8 +221,17 @@ export async function createDrive(config, { log = console, agentProviders = null
   async function writeOps(docPath, ops, options = {}) {
     const result = await applyOps(docPath, ops, options);
     if (result.applied) {
-      channels.toDocument(docPath, 'changed', { except: options.client ?? null });
+      const except = result.forks?.length ? null : (options.client ?? null);
+      channels.toDocument(docPath, 'changed', {
+        except,
+        ops: result.ops,
+        client: options.client ?? null,
+      });
       channels.toDrive('changed', { path: docPath, bytes: result.bytes }, { except: options.client ?? null });
+      const ids = idsOfOps(result.ops ?? []);
+      if (ids.length) {
+        channels.toPresence(docPath, { client: options.client ?? 'anon', ids, label: options.client ?? undefined }, { except });
+      }
     }
     return result;
   }
@@ -357,8 +381,27 @@ export async function createDrive(config, { log = console, agentProviders = null
         const off = url.searchParams.get('drive')
           ? channels.subscribeDrive(client)
           : channels.subscribeDoc(parsePath(url.searchParams.get('app'), { allowRoot: false }), client);
-        req.on('close', off);
+        req.on('close', () => {
+          off();
+          if (!url.searchParams.get('drive') && client.id) {
+            try {
+              sessionTouched.drop(parsePath(url.searchParams.get('app'), { allowRoot: false }), client.id);
+            } catch {
+              // A malformed app on a closing socket is not worth a 500.
+            }
+          }
+        });
         return;
+      }
+
+      if (route === '/presence' && req.method === 'POST') {
+        const docPath = parsePath(url.searchParams.get('app'), { allowRoot: false });
+        const client = url.searchParams.get('client');
+        const body = JSON.parse((await readBody(req, config.maxBodyBytes)).toString('utf8'));
+        const ids = Array.isArray(body?.ids) ? body.ids.map(String) : [];
+        sessionTouched.note(docPath, client, ids);
+        channels.toPresence(docPath, { client, ids }, { except: client });
+        return json(res, 200, { ok: true });
       }
 
       if (route === '/ops' && req.method === 'POST') {
@@ -635,6 +678,10 @@ export async function createDrive(config, { log = console, agentProviders = null
       log,
       usage,
       sandbox: agentSandbox ?? null,
+      onLook: (docPath, ids, client) => {
+        if (!ids?.length) return;
+        channels.toPresence(docPath, { client, ids, label: client });
+      },
     }).catch((err) => {
       if (err.code !== 'EAGENTSHELD') throw err;
       agentsWhy = err.message;
@@ -807,11 +854,40 @@ button{background:#738698;color:#fafaf7;border-color:#738698;cursor:pointer}p{co
       // editor, while a turn happens to be running.
       const claimed = agents?.documentTouched(docPath, shaOf(prior.source));
       if (!claimed) agents?.watchdog(docPath, shaOf(prior.source));
+
+      const conv = agents?.running?.()?.find((turn) => turn.capability === 'full')?.conversationId;
+      const merged = mergeWrite(prior.source, current, {
+        touchedIds: sessionTouched.all(docPath),
+        agent: conv ? `agent:${conv}` : 'agent',
+      });
+      if (merged.source !== current) {
+        lastKnown.set(docPath, { source: merged.source, client: null });
+        pendingWrites.mark(docPath, shaOf(merged.source));
+        await store.write(docPath, merged.source, { label: 'merge' });
+        await store.thinHistory(docPath).catch(() => {});
+        channels.toDocument(docPath, 'changed', { ops: merged.ops });
+        channels.toDrive('changed', { path: docPath });
+        const ids = idsOfOps(merged.ops);
+        if (ids.length) channels.toPresence(docPath, { client: conv ? `agent:${conv}` : 'agent', ids });
+        return;
+      }
+
+      const ops = merged.ops;
+      lastKnown.set(docPath, { source: current, client: null });
+      await store.thinHistory(docPath).catch(() => {});
+      channels.toDocument(docPath, 'changed', { ops: ops.length ? ops : null });
+      channels.toDrive('changed', { path: docPath });
+      const ids = idsOfOps(ops);
+      if (ids.length) {
+        channels.toPresence(docPath, { client: conv ? `agent:${conv}` : 'outside', ids });
+      }
+      return;
     }
+
     lastKnown.set(docPath, { source: current, client: null });
     await store.thinHistory(docPath).catch(() => {});
     channels.toDocument(docPath, 'changed');
-    channels.toDrive(prior ? 'changed' : 'created', { path: docPath });
+    channels.toDrive('created', { path: docPath });
   });
 
   /** What every document said before this host was watching it. Reading the

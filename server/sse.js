@@ -46,11 +46,26 @@ export function createChannels() {
     }
   }
 
-  /** The bare `changed` Marble's carrier listens for. */
-  function toDocument(docPath, event = 'changed', { except = null } = {}) {
-    for (const client of perDoc.get(docPath) ?? []) {
-      if (except && client.id === except) continue;
-      write(client, `data: ${event}\n\n`);
+  /** The bare `changed` Marble's carrier listens for. When `ops` is present,
+   *  a named `ops` event goes first so a new carrier can apply them without
+   *  throwing away undo; `changed` still follows so an old carrier refetches. */
+  function toDocument(docPath, event = 'changed', { except = null, ops = null, client = null } = {}) {
+    const opsFrame = ops?.length
+      ? `event: ops\ndata: ${JSON.stringify({ ops, client })}\n\n`
+      : null;
+    const changedFrame = `data: ${event}\n\n`;
+    for (const listener of perDoc.get(docPath) ?? []) {
+      if (except && listener.id === except) continue;
+      if (opsFrame) write(listener, opsFrame);
+      write(listener, changedFrame);
+    }
+  }
+
+  function toPresence(docPath, data, { except = null } = {}) {
+    const payload = `event: presence\ndata: ${JSON.stringify(data)}\n\n`;
+    for (const listener of perDoc.get(docPath) ?? []) {
+      if (except && listener.id === except) continue;
+      write(listener, payload);
     }
   }
 
@@ -77,6 +92,7 @@ export function createChannels() {
     subscribeDrive,
     toDocument,
     toDrive,
+    toPresence,
     get counts() {
       return { docs: perDoc.size, drive: drive.size };
     },

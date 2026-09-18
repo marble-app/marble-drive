@@ -104,6 +104,7 @@ test('/ lands on the Drive, which is an ordinary document in the drive', async (
   const page = await (await get('/a/drive')).text();
   assert.match(page, /<script src="\/runtime\/marble\.js" data-marble-app="drive"/);
   assert.match(page, /<script src="\/runtime\/drive\.js"/);
+  assert.match(page, /<script src="\/runtime\/collab\.js"/);
   // The host injects the carrier and nothing else — no affordance, no chrome.
   assert.ok(!page.includes('<script src="/lib/'));
 });
@@ -122,6 +123,7 @@ test('/today bookmarks whatever the day skill mirrored there most recently, fall
 test('the carrier and its Drive extension are both served', async () => {
   assert.match(await (await get('/runtime/marble.js')).text(), /window\.marble = \{/);
   assert.match(await (await get('/runtime/drive.js')).text(), /marble\.drive = \{/);
+  assert.match(await (await get('/runtime/collab.js')).text(), /marble-collab-host/);
   assert.equal((await get('/runtime/../server/app.js')).status, 404);
   assert.equal((await get('/runtime/nope.js')).status, 404);
 });
@@ -220,9 +222,9 @@ test('the op log records who filed it and their count of it', async () => {
 });
 
 test('the echo reaches every other client and never the one that wrote', async () => {
-  const doc = encodeURIComponent('work/q3/notes');
-  const page = await (await get('/a/work%2Fq3%2Fnotes')).text();
-  const id = idIn(page, 'h1');
+  const source = `<!doctype html>\n<html><head><title>Echo</title></head>\n<body data-marble-id="b">\n<h1 data-marble-id="h">Title</h1>\n</body></html>\n`;
+  const made = await asJson(await put('', 'Echo Live.mrbl', source));
+  const doc = encodeURIComponent(made.path);
 
   const mine = collect(`/events?app=${doc}&client=c1`, { want: 1, ms: 900 });
   const theirs = collect(`/events?app=${doc}&client=c2`, { want: 2, ms: 900 });
@@ -231,12 +233,42 @@ test('the echo reaches every other client and never the one that wrote', async (
   await fetch(`${base}/ops?app=${doc}&client=c1`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify([{ type: 'setText', id, text: 'A quieter title' }]),
+    body: JSON.stringify([{ type: 'setText', id: 'h', text: 'A quieter title' }]),
   });
 
   const heard = (frames) => frames.filter((frame) => frame.data === 'changed');
   assert.equal(heard(await mine.frames).length, 0, 'the writer is not reconciled against its own gesture');
-  assert.equal(heard(await theirs.frames).length, 1, 'every other client is told');
+  const theirsFrames = await theirs.frames;
+  assert.equal(heard(theirsFrames).length, 1, 'every other client is told');
+  const opsFrame = theirsFrames.find((frame) => frame.event === 'ops');
+  assert.ok(opsFrame, 'the echo is ops, not only changed');
+  assert.match(opsFrame.data, /"type":"setText"/);
+});
+
+test('presence is echoed to other tabs and never written into the file', async () => {
+  const source = `<!doctype html>\n<html><head><title>Here</title></head>\n<body data-marble-id="b">\n<h1 data-marble-id="h">Title</h1>\n</body></html>\n`;
+  const made = await asJson(await put('', 'Presence Live.mrbl', source));
+  const doc = encodeURIComponent(made.path);
+
+  const mine = collect(`/events?app=${doc}&client=you`, { want: 1, ms: 900 });
+  const theirs = collect(`/events?app=${doc}&client=them`, { want: 1, ms: 900 });
+  await Promise.all([mine.ready, theirs.ready]);
+
+  const noted = await fetch(`${base}/presence?app=${doc}&client=you`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ ids: ['h'] }),
+  });
+  assert.equal(noted.status, 200);
+
+  const theirsFrames = await theirs.frames;
+  const presence = theirsFrames.find((frame) => frame.event === 'presence');
+  assert.ok(presence);
+  assert.match(presence.data, /"h"/);
+  assert.equal((await mine.frames).filter((frame) => frame.event === 'presence').length, 0);
+
+  const stored = await fsp.readFile(path.join(ROOT, `${made.path}.mrbl`), 'utf8');
+  assert.doesNotMatch(stored, /marble-presence/);
 });
 
 test('a late second event for a save the host already made is not an edit from outside', async () => {
@@ -264,7 +296,7 @@ test('a late second event for a save the host already made is not an edit from o
 
 test('an edit from outside the host reaches the page, with the prior state kept', async () => {
   const doc = encodeURIComponent('work/q3/notes');
-  const listening = collect(`/events?app=${doc}&client=c9`, { want: 1, ms: 2500 });
+  const listening = collect(`/events?app=${doc}&client=c9`, { want: 3, ms: 2500 });
   await listening.ready;
 
   const file = path.join(ROOT, 'work/q3/notes.mrbl');
@@ -336,6 +368,10 @@ test('a copy is a copy of the bytes, because a document is one file', async () =
 const brought = (title, id = 'aa11bb22') =>
   `<!doctype html>\n<html lang="en" data-marble="1">\n<head><meta charset="utf-8"><title>${title}</title></head>\n` +
   `<body data-marble-id="body${id}">\n<h1 data-marble-id="${id}" data-marble-editable>${title}</h1>\n</body>\n</html>\n`;
+
+const collabDoc = (title) =>
+  `<!doctype html>\n<html lang="en" data-marble="1">\n<head><meta charset="utf-8"><title>${title}</title></head>\n` +
+  `<body data-marble-id="bodyc1">\n<main data-marble-id="rootc1">\n<h1 data-marble-id="hc1" data-marble-editable>${title}</h1>\n</main>\n</body>\n</html>\n`;
 
 test('a document dropped into the drive lands in the folder it was dropped on', async () => {
   const made = await asJson(await put('archive', 'Brought In.mrbl', brought('Brought In')));
@@ -518,6 +554,62 @@ test('health answers before the gate, and the gate closes everything else', asyn
   );
 
   await closed.close();
+});
+
+test('an outside write to a disjoint id both-applies next to a touched heading', async () => {
+  const source = collabDoc('Hello');
+  const made = await asJson(await put('', 'Collab Live.mrbl', source));
+  const doc = encodeURIComponent(made.path);
+
+  const noted = await fetch(`${base}/presence?app=${doc}&client=you`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ ids: ['hc1'] }),
+  });
+  assert.equal(noted.status, 200);
+
+  const listening = collect(`/events?app=${doc}&client=you`, { want: 3, ms: 2500 });
+  await listening.ready;
+
+  const file = path.join(ROOT, `${made.path}.mrbl`);
+  const onDisk = await fsp.readFile(file, 'utf8');
+  await fsp.writeFile(file, onDisk.replace('</main>', '<p data-marble-id="pc1">Body</p>\n</main>'));
+
+  const frames = await listening.frames;
+  assert.ok(frames.some((frame) => frame.event === 'ops' || frame.data === 'changed'));
+
+  const after = await fsp.readFile(file, 'utf8');
+  assert.match(after, /<h1 data-marble-id="hc1"[^>]*>Hello<\/h1>/);
+  assert.match(after, /<p data-marble-id="pc1">Body<\/p>/);
+  assert.doesNotMatch(after, /<marble-alt/);
+});
+
+test('an outside rewrite of a touched heading forks rather than clobbering', async () => {
+  const source = collabDoc('Yours');
+  const made = await asJson(await put('', 'Collab Fork.mrbl', source));
+  const doc = encodeURIComponent(made.path);
+
+  await fetch(`${base}/presence?app=${doc}&client=you`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ ids: ['hc1'] }),
+  });
+
+  const listening = collect(`/events?app=${doc}&client=you`, { want: 3, ms: 2500 });
+  await listening.ready;
+
+  const file = path.join(ROOT, `${made.path}.mrbl`);
+  const onDisk = await fsp.readFile(file, 'utf8');
+  await fsp.writeFile(file, onDisk.replace(
+    '<h1 data-marble-id="hc1" data-marble-editable>Yours</h1>',
+    '<h1 data-marble-id="hc1" data-marble-editable>Theirs</h1>',
+  ));
+
+  await listening.frames;
+  const after = await fsp.readFile(file, 'utf8');
+  assert.match(after, /<marble-alt data-marble-id="hc1"/);
+  assert.match(after, /Yours/);
+  assert.match(after, /Theirs/);
 });
 
 test.after(async () => {

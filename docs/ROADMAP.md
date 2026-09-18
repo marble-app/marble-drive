@@ -46,11 +46,16 @@ Being built on `worktree-multi-tenant-g2`. The plan and the disk layout are in
 Increment 1 lands the two hard-to-migrate modules and the config, imported by
 nothing — the same move the op log made with `client` and `seq`.
 
-**G3 — collaboration and versions.** Ops are broadcast as "something changed"
-rather than as ops, so a second tab refetches and reconciles rather than
-applying a move. The history exists and has no view. Both are the next
-generation's work, and both are cheaper for the op log carrying `client` and
-`seq` already.
+**G3 — collaboration and versions.** `.mrbl` files merge on `data-marble-id`.
+Disjoint writes both-apply; overlapping work (same id, or one write contains
+the other) forks into `<marble-alt>` instead of last-write-wins. The carrier
+echoes ops so a second tab can apply a move without throwing away undo, and
+still sends `changed` so an old carrier refetches. Drive draws presence,
+a flash on a disjoint apply, and approve / reject / merge on the fork.
+
+The spec is the Drive document
+[`Research/Marble/live-collaboration.mrbl`](../drive/Research/Marble/live-collaboration.mrbl).
+Package facts live in `@bdhmin/marble/collab`; Drive chrome is `runtime/collab.js`.
 
 **G4 — local-first, desktop, agent as peer.** `oplog.since()` is written and
 tested and nothing reads it. That is the shape the vision asked for: the two

@@ -13,15 +13,15 @@
 // the only file that changes.
 //
 // Resolved by file URL rather than by package specifier on purpose: the package
-// exports `./patcher` and little else today, and a file URL is not filtered by
-// an exports map. `@bdhmin/marble/package.json` *is* exported, which is what
-// gives us the package root to resolve against.
+// exports `./patcher` and `./collab`, but the carrier, history, and doctor are
+// still reached as files. `@bdhmin/marble/package.json` *is* exported, which is
+// what gives us the package root to resolve against.
 
 const ROOT = new URL('./', import.meta.resolve('@bdhmin/marble/package.json'));
 
 const load = (relative) => import(new URL(relative, ROOT).href);
 
-const [patcher, guard, history, ops, intent, providers, scaffold, doctor] = await Promise.all([
+const [patcher, guard, history, ops, intent, providers, scaffold, doctor, collab] = await Promise.all([
   load('server/patcher.js'),
   load('server/guard.js'),
   load('server/history.js'),
@@ -30,6 +30,7 @@ const [patcher, guard, history, ops, intent, providers, scaffold, doctor] = awai
   load('server/providers/index.js'),
   load('bin/scaffold.js'),
   load('scripts/doctor.js'),
+  load('server/collab.js'),
 ]);
 
 /** Absolute path to a file inside the Marble package — the carrier, the
@@ -60,3 +61,4 @@ export const { readParts } = scaffold;
 // The format's own invariants, asked of a document arriving from outside. The
 // alternative was a second opinion written here, which would drift.
 export const { examine } = doctor;
+export const { classifyOverlap, createTouched, diffSources, forkAlt, idsOfOps, mergeOps, mergeWrite } = collab;
