@@ -167,7 +167,7 @@ test('one pin and a small field fit without scrolling, and the pane takes the sl
   // preferred widths until the New-group slot touches the right edge.
   assert.ok(packed.stage.cols[0].w > F().PANE_MAX, 'the pane grows into the leftover width');
   assert.ok(packed.newGroup, 'the New-group slot is still offered');
-  assert.ok(Math.abs(packed.newGroup.x + packed.newGroup.w + MARGIN - CANVAS.w) < 1, 'the field reaches the right edge');
+  assert.ok(Math.abs(packed.newGroup.x + packed.newGroup.w + MARGIN - CANVAS.w) < 2, 'the field reaches the right edge');
 });
 
 test('a lone region fills its column, and the columns share a wide canvas', () => {
@@ -175,7 +175,7 @@ test('a lone region fills its column, and the columns share a wide canvas', () =
   const [region] = packed.regions;
   assert.ok(Math.abs(region.h - (CANVAS.h - 2 * MARGIN)) < 1, `a lone region is as tall as the canvas, not ${region.h}`);
   assert.ok(packed.colW > F().FIELD_MAX, `columns widen past FIELD_MAX to fill, got ${packed.colW}`);
-  assert.ok(Math.abs(packed.newGroup.x + packed.newGroup.w + MARGIN - CANVAS.w) < 1, 'the New-group slot sits at the edge');
+  assert.ok(Math.abs(packed.newGroup.x + packed.newGroup.w + MARGIN - CANVAS.w) < 2, 'the New-group slot sits at the edge');
   for (const card of region.cards) assert.ok(inside(card, region));
   assert.equal(region.cards[0].y, region.inner.y, 'cards stay at the top of a grown region');
 });

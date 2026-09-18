@@ -349,6 +349,11 @@
         stageW += toStageFill;
         if (subCols) fieldW += fill - toStageFill;
       }
+      // Whole pixels: a fractional rect renders soft and measures unsteady.
+      // The column takes a whole width; what rounding leaves goes to the
+      // stage, so the fill still reaches the edge.
+      if (subCols) fieldW = Math.floor((fieldW - fixed) / subCols) * subCols + fixed;
+      stageW = n ? room - bar - reserve - fieldW : 0;
     } else {
       const give = -spare;
       const stageGive = stageW - stageAt(paneMin);
@@ -358,7 +363,7 @@
       stageW -= stageGive * share;
       fieldW -= fieldGive * share;
     }
-    const colW = subCols ? Math.max(fieldMin, (fieldW - fixed) / subCols) : fieldPref;
+    const colW = subCols ? Math.max(fieldMin, Math.floor((fieldW - fixed) / subCols)) : fieldPref;
     if (!n) stageW = 0;
 
     const rects = {};
@@ -439,8 +444,9 @@
       const left = availH - content - (stacked.length - 1) * gap;
       if (left <= 0.01 || !content) continue;
       let y = top;
-      for (const region of stacked) {
-        const grown = region.h + left * (region.h / content);
+      for (const [index, region] of stacked.entries()) {
+        const last = index === stacked.length - 1;
+        const grown = last ? top + availH - y : Math.round(region.h + left * (region.h / content));
         const dy = y - region.y;
         region.y = y;
         region.h = grown;
