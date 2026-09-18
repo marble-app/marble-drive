@@ -712,6 +712,48 @@ __ICON__
   body[data-view="deck"] .folders, body[data-view="deck"] .focus { display: none; }
   body:not([data-view="deck"]) .deck { display: none; }
   body[data-view="deck"] .deck { display: block; overflow-y: auto; }
+
+  /* ---- Deck: what wants you, in order. Bands are a partition of the same
+     summaries every other view draws; nothing here is stored. */
+  .deck { padding: 0 0 6rem; -webkit-overflow-scrolling: touch; overscroll-behavior: contain; touch-action: pan-y; }
+  .band { border-bottom: 1px solid var(--line); }
+  .band-head { margin: 0; font-size: .72rem; letter-spacing: .06em; text-transform: uppercase; color: var(--faint); }
+  .band-toggle { display: flex; align-items: center; gap: .5rem; width: 100%; min-height: 2.75rem; padding: 0 1rem; font: inherit; color: inherit; background: none; border: 0; text-align: left; cursor: pointer; }
+  .band-toggle::after { content: '▾'; margin-left: auto; transition: transform var(--t) var(--settle); }
+  .band[data-collapsed] .band-toggle::after { transform: rotate(-90deg); }
+  .band[data-collapsed] .band-body { display: none; }
+  .band-count { font-variant-numeric: tabular-nums; color: var(--ink); }
+  .band-count:empty { display: none; }
+  .band[data-band="asks"] .band-count { color: var(--danger); }
+  .band[data-band="asks"]:not(:has(.deck-ask)) { display: none; }
+  .band-head[data-flash] { animation: band-flash 300ms var(--ease-out); }
+  @keyframes band-flash { from { background: var(--paper-2); } to { background: transparent; } }
+  /* Rows in a band are List rows with the leading colour and a taller hit. */
+  .deck .conv { margin: 0; border-radius: 0; min-height: 3.5rem; position: relative; touch-action: pan-y; background: var(--paper); }
+  .deck .band-body[role="list"]:empty::before { content: 'Nothing here'; display: block; padding: .5rem 1rem 1rem; color: var(--faint); font-size: .85rem; }
+  /* Ask cards page sideways, one per screen. */
+  .asks-rail { display: flex; gap: .75rem; padding: .25rem 1rem 1rem; overflow-x: auto; scroll-snap-type: x mandatory; -webkit-overflow-scrolling: touch; scrollbar-width: none; }
+  .asks-rail::-webkit-scrollbar { display: none; }
+  .deck-ask { flex: 0 0 calc(100% - 1rem); scroll-snap-align: center; border: 1px solid var(--line); border-radius: var(--pane-r); background: var(--card); box-shadow: var(--shadow); padding: .85rem 1rem 1rem; display: flex; flex-direction: column; gap: .5rem; min-width: 0; }
+  .deck-ask-head { display: flex; align-items: center; gap: .5rem; min-width: 0; }
+  .deck-ask-head .dot { flex: none; width: 8px; height: 8px; border-radius: 50%; background: var(--danger); }
+  .deck-ask-title { font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .deck-ask-target { font-size: .8rem; color: var(--faint); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .deck-peek { border-left: 2px solid var(--line); padding: .25rem .6rem; font-size: .82rem; color: var(--muted); display: grid; gap: .15rem; }
+  .deck-peek:empty { display: none; }
+  .deck-peek .peek-lead { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .deck-peek pre { margin: 0; font: .78rem/1.45 ui-monospace, SFMono-Regular, Menlo, monospace; white-space: pre-wrap; word-break: break-word; color: var(--ink); max-height: 8.5em; overflow: hidden; }
+  .deck-ask .ask { margin: 0; border: 0; padding: 0; background: none; box-shadow: none; }
+  .deck-ask .ask-actions { margin-top: .35rem; }
+  .deck-ask .ask-actions button, .deck-ask .ask-options button, .deck-ask .ask-other-text { min-height: 2.75rem; font-size: 1rem; }
+  .deck-ask .ask-actions .allow, .deck-ask .ask-actions .deny { flex: 1 1 0; }
+  .deck-ask-open { align-self: flex-end; font: inherit; font-size: .85rem; color: var(--accent-ink); background: none; border: 0; padding: .4rem .2rem; cursor: pointer; min-height: 2.75rem; }
+  /* A swipe on a review row: right completes the cheap action, left only
+     reveals the consequential one as a button. */
+  .deck .conv .swipe-undo { display: none; position: absolute; right: 0; top: 0; bottom: 0; width: 88px; border: 0; background: var(--caution); color: #fff; font: inherit; font-weight: 600; transform: translateX(100%); cursor: pointer; }
+  .deck .conv[data-swipe="undo"] .swipe-undo { display: block; }
+  .deck .conv[data-swipe="review"]::before { content: 'Reviewed'; position: absolute; left: -100%; top: 0; bottom: 0; width: 100%; display: flex; align-items: center; justify-content: flex-end; padding-right: 1rem; background: var(--accent-soft); color: var(--accent-ink); font-size: .8rem; }
+  @media (prefers-reduced-motion: reduce) { .band-head[data-flash] { animation: none; } }
   /* A part that is leaving stays on screen where it was, out of the flow, for as
      long as it takes to fade — then the layout it no longer belongs to
      forgets it. */
@@ -5410,6 +5452,178 @@ __ICON__
       } catch { /* listing failed; the live stream still fills what it can */ }
     };
 
+    // ---- Deck. Rows are the same .conv elements List draws, placed by band;
+    // asks are cards keyed by request, built by the drawer's own builder.
+    const asksRail = deckEl?.querySelector('.asks-rail');
+    const openAsks = new Map(); // requestId → { ask, card }
+    const BAND_KEY = 'marble-agents:bands';
+    const phone = () => window.marbleAgentPhone;
+
+    const bandBody = (band) => deckEl?.querySelector(`.band[data-band="${band}"] .band-body`);
+
+    const placeInBand = (el, summary, band) => {
+      const body = bandBody(band);
+      if (!body) return;
+      const cmp = phone().bandCompare(band);
+      const siblings = [...body.querySelectorAll(':scope > .conv')].filter((n) => n !== el);
+      const before = siblings.find((n) => cmp(summary, summaries.get(n.dataset.id) ?? {}) < 0);
+      if (before) body.insertBefore(el, before);
+      else body.append(el);
+    };
+
+    const paintBandCounts = () => {
+      for (const band of deckEl?.querySelectorAll('.band') ?? []) {
+        const n = band.dataset.band === 'asks'
+          ? band.querySelectorAll('.deck-ask').length
+          : band.querySelectorAll('.band-body > .conv:not([hidden])').length;
+        band.querySelector('.band-count').textContent = n ? String(n) : '';
+      }
+    };
+
+    placeInDeck = (el, summary) => {
+      const band = phone()?.bandOf(summary) ?? null;
+      if (!band) {
+        el.remove();
+      } else if (band === 'asks') {
+        // An asking conversation is its ask card; the row waits in its next band.
+        placeInBand(el, summary, summary.running ? 'running' : 'idle');
+      } else {
+        placeInBand(el, summary, band);
+      }
+      paintBandCounts();
+    };
+
+    const restoreBands = () => {
+      let saved = {};
+      try { saved = JSON.parse(recalled(BAND_KEY) || '{}'); } catch { saved = {}; }
+      for (const band of deckEl?.querySelectorAll('.band') ?? []) {
+        const collapsed = band.dataset.band in saved ? Boolean(saved[band.dataset.band]) : band.dataset.band === 'idle';
+        band.toggleAttribute('data-collapsed', collapsed);
+        band.querySelector('.band-toggle').setAttribute('aria-expanded', String(!collapsed));
+      }
+    };
+    const rememberBands = () => {
+      const state = {};
+      for (const band of deckEl?.querySelectorAll('.band') ?? []) state[band.dataset.band] = band.hasAttribute('data-collapsed');
+      remember(BAND_KEY, JSON.stringify(state));
+    };
+    restoreBands();
+    deckEl?.addEventListener('click', (event) => {
+      const toggle = event.target.closest('.band-toggle');
+      if (!toggle) return;
+      const band = toggle.closest('.band');
+      band.toggleAttribute('data-collapsed');
+      toggle.setAttribute('aria-expanded', String(!band.hasAttribute('data-collapsed')));
+      rememberBands();
+    });
+
+    // New work bumps the count and flashes the header; it does not take the
+    // screen from under a descending thumb.
+    const flashBand = (band) => {
+      const head = deckEl?.querySelector(`.band[data-band="${band}"] .band-head`);
+      if (!head) return;
+      head.removeAttribute('data-flash');
+      void head.offsetWidth;
+      head.setAttribute('data-flash', '');
+    };
+
+    const buildDeckAsk = (ask) => {
+      const helpers = window.marbleAgentUI;
+      const peek = phone().peekOf(ask.request);
+      const summary = summaries.get(ask.conversation);
+      const card = document.createElement('article');
+      card.className = 'deck-ask';
+      card.dataset.request = ask.requestId;
+      card.dataset.conversation = ask.conversation;
+      const head = document.createElement('div');
+      head.className = 'deck-ask-head';
+      head.innerHTML = '<span class="dot" aria-hidden="true"></span><span class="deck-ask-title"></span>';
+      head.querySelector('.deck-ask-title').textContent = summary?.title || ask.title || 'Untitled';
+      const target = document.createElement('div');
+      target.className = 'deck-ask-target';
+      target.textContent = tailOfTarget(summary?.target || ask.target || '');
+      const peekEl = document.createElement('div');
+      peekEl.className = 'deck-peek';
+      for (const lead of ask.lead ?? []) {
+        const line = document.createElement('div');
+        line.className = 'peek-lead';
+        line.textContent = lead.type === 'text' ? lead.text : `${lead.name} ${lead.input?.file_path ?? lead.input?.command ?? lead.input?.pattern ?? ''}`.trim();
+        peekEl.append(line);
+      }
+      if (peek.detail || peek.lines.length) {
+        const pre = document.createElement('pre');
+        pre.textContent = [peek.detail, ...peek.lines].filter(Boolean).join('\n');
+        peekEl.append(pre);
+      }
+      const submit = async (response) => {
+        // Optimistic: the card leaves now and comes back with a line if the
+        // answer is lost on the way.
+        removeDeckAsk(ask.requestId);
+        try {
+          await agent.answer(ask.turn, ask.requestId, response);
+        } catch (err) {
+          const back = buildDeckAsk(ask);
+          const note = document.createElement('div');
+          note.className = 'deck-ask-target';
+          note.textContent = `Not sent: ${err.message}`;
+          back.prepend(note);
+          addDeckAsk(ask, back);
+        }
+      };
+      const askCard = helpers.buildAskCard(ask.request, submit);
+      const openBtn = document.createElement('button');
+      openBtn.type = 'button';
+      openBtn.className = 'deck-ask-open';
+      openBtn.textContent = 'Open';
+      openBtn.addEventListener('click', () => open(ask.conversation));
+      card.append(head, target, peekEl, askCard, openBtn);
+      return card;
+    };
+
+    const addDeckAsk = (ask, card = buildDeckAsk(ask)) => {
+      if (!asksRail) return;
+      const existing = openAsks.get(ask.requestId);
+      existing?.card.remove();
+      openAsks.set(ask.requestId, { ask, card });
+      asksRail.append(card);
+      const band = asksRail.closest('.band');
+      if (!existing) {
+        if (band.hasAttribute('data-collapsed') && openAsks.size === 1) {
+          band.removeAttribute('data-collapsed');
+          band.querySelector('.band-toggle').setAttribute('aria-expanded', 'true');
+        } else flashBand('asks');
+      }
+      paintBandCounts();
+      paintAsksPill();
+    };
+
+    const removeDeckAsk = (requestId) => {
+      const entry = openAsks.get(requestId);
+      if (!entry) return;
+      entry.card.remove();
+      openAsks.delete(requestId);
+      paintBandCounts();
+      paintAsksPill();
+    };
+
+    const loadAsks = async () => {
+      if (!agent?.asks) return;
+      try {
+        const { asks } = await agent.asks();
+        const seen = new Set(asks.map((a) => a.requestId));
+        for (const id of [...openAsks.keys()]) if (!seen.has(id)) removeDeckAsk(id);
+        for (const ask of asks) if (!openAsks.has(ask.requestId)) addDeckAsk(ask);
+      } catch { /* the host predates the route; the rows still say Needs you */ }
+    };
+
+    paintDeck = () => {
+      if ((document.body.getAttribute('data-view') || 'library') !== 'deck') return;
+      for (const el of nodes.values()) place(el);
+      paintBandCounts();
+    };
+
+    let paintAsksPill = () => {};
+
     const load = async () => {
       if (!agent) return;
       try {
@@ -5417,6 +5631,7 @@ __ICON__
         if (filter === 'archived') await loadArchived();
       } catch { /* same as loadArchived */ }
       applyFilters();
+      await loadAsks();
     };
 
     const setFilter = async (next) => {
@@ -5629,10 +5844,18 @@ __ICON__
           const stateStyle = document.createElement('style');
           stateStyle.setAttribute('data-marble-transient', '');
           stateStyle.setAttribute('data-state-css', '');
-          stateStyle.textContent = (window.marbleAgentUI?.TAG_CSS ?? '') + (window.marbleAgentUI?.STATE_CSS ?? '');
+          stateStyle.textContent = (window.marbleAgentUI?.TAG_CSS ?? '') + (window.marbleAgentUI?.STATE_CSS ?? '') + (window.marbleAgentUI?.ASK_CSS ?? '');
           document.head.append(stateStyle);
         }
         api.on('*', (payload) => {
+          if (payload?.kind === 'ask') {
+            addDeckAsk({ ...payload, lead: payload.lead ?? [] });
+            return;
+          }
+          if (payload?.kind === 'ask.resolved') {
+            removeDeckAsk(payload.requestId);
+            return;
+          }
           if (payload?.folders) {
             folderCatalog = payload.folders;
             paintFolderRail();

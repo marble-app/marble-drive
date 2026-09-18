@@ -78,3 +78,38 @@ test('V cycles through five views and comes back', async () => {
   }
   assert.deepEqual(seen, ['board', 'folders', 'focus', 'deck', 'library']);
 });
+
+test('Deck: an asking conversation is a card in NEEDS YOU with a peek; Allow answers it optimistically', async () => {
+  const { page } = await openAgents();
+  const id = await page.evaluate(async () => {
+    const agent = window.marble.agent;
+    const id = await agent.start({ provider: 'fake' });
+    await agent.send(id, { prompt: 'script:permission', target: 'garden', viewing: 'Agents', selection: [] });
+    return id;
+  });
+  const card = page.locator('.deck [data-band="asks"] .deck-ask');
+  await card.waitFor();
+  assert.match(await card.locator('.deck-ask-title').textContent(), /script:permission|Untitled/);
+  assert.match(await card.locator('.deck-peek').textContent(), /rm -rf build/);
+  assert.match(await page.locator('.deck [data-band="asks"] .band-count').textContent(), /1/);
+  await card.locator('button.allow').click();
+  // Gone on tap, before the answer lands.
+  assert.equal(await page.locator('.deck-ask').count(), 0);
+  await page.locator(`.deck [data-band]:not([data-band="asks"]) .conv[data-id="${id}"]`).waitFor();
+});
+
+test('Deck: running, review and idle rows land in their bands with counts', async () => {
+  const { page } = await openAgents();
+  const ids = await page.evaluate(async () => {
+    const agent = window.marble.agent;
+    return [await agent.start({ provider: 'fake' }), await agent.start({ provider: 'fake' })];
+  });
+  await host.drive.agents.store.updateConversation(ids[0], { running: true, activity: 'reading' });
+  await host.drive.agents.store.updateConversation(ids[1], { lastOutcome: 'failed', lastFinishedAt: Date.now(), activity: 'boom' });
+  await page.reload();
+  await page.waitForFunction(() => document.querySelectorAll('.deck .conv').length >= 2);
+  assert.equal(await page.locator(`[data-band="running"] .conv[data-id="${ids[0]}"]`).count(), 1);
+  assert.equal(await page.locator(`[data-band="review"] .conv[data-id="${ids[1]}"]`).count(), 1);
+  assert.equal((await page.locator('[data-band="running"] .band-count').textContent()).trim(), '1');
+  assert.equal(await page.evaluate(() => document.querySelector('[data-band="idle"]').hasAttribute('data-collapsed')), true);
+});
