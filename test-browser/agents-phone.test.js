@@ -202,3 +202,23 @@ test('phone chrome: a one-row topbar, a thumb bar at the sill, 44pt controls, --
   await page.locator('.topbar .more').click();
   await page.locator('.sheet[data-kind="more"] button', { hasText: 'Focus' }).waitFor({ state: 'visible' });
 });
+
+test('tapping a Deck row opens the conversation full screen at the phone density; an edge swipe goes back', async () => {
+  const { page } = await openAgents();
+  const id = await page.evaluate(async () => window.marble.agent.start({ provider: 'fake' }));
+  await host.drive.agents.store.updateConversation(id, { running: true, activity: 'busy' });
+  await page.reload();
+  await page.locator(`.deck .conv[data-id="${id}"]`).click();
+  await page.waitForFunction(() => document.body.hasAttribute('data-open'));
+  await page.waitForTimeout(350);
+  const pane = await page.locator('.pane').boundingBox();
+  assert.ok(pane.width >= 392 && pane.height >= 700, `pane ${pane.width}x${pane.height}`);
+  assert.equal(await page.evaluate(() => document.querySelector('marble-conversation').getAttribute('data-chrome')), 'phone');
+  assert.equal(await page.locator('.deck').isVisible(), false);
+  await page.mouse.move(6, 400);
+  await page.mouse.down();
+  for (let x = 6; x < 220; x += 16) await page.mouse.move(x, 400);
+  await page.mouse.up();
+  await page.waitForFunction(() => !document.body.hasAttribute('data-open'));
+  assert.equal(await page.locator('.deck').isVisible(), true);
+});
