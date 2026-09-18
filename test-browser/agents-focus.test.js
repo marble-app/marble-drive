@@ -393,6 +393,11 @@ test('dragging a card to the stage pins it, and dragging it back off unpins it',
 
   const loose = await middleOf(page, '.focus-basin[data-folder-id="ungrouped"]');
   release = await dragTo(page, ids.a, { x: loose.x, y: loose.box.y + loose.box.height - 60 });
+  // Lifting the only pinned card collapses the stage, and the field slides
+  // left under the pointer. Aim at the basin where it is now, not where it was.
+  const now = await middleOf(page, '.focus-basin[data-folder-id="ungrouped"]');
+  await page.mouse.move(now.x, now.box.y + now.box.height - 60, { steps: 6 });
+  await page.locator('.focus-basin[data-folder-id="ungrouped"][data-drop="into"]').waitFor();
   await release();
   await until(page, async () => (await metaOf(page, ids.a))?.pinned === false, 'the card to unpin');
 });
@@ -456,4 +461,20 @@ test('Alt and an arrow move the card, so arranging is not pointer-only', async (
   }, ids);
   await page.keyboard.press('Alt+ArrowLeft');
   await page.waitForFunction((id) => document.querySelector(`.focus-card[data-id="${id}"]`)?.dataset.lod === 'full', ids.b);
+});
+
+test('a digest shows the same pills a row does; a chip keeps its dot and hides the rest', async () => {
+  const { page } = await openAgents();
+  const ids = await seedFocus(page, Array.from({ length: 7 }, (_, i) => ({ key: `c${i}`, title: `card ${i}` })));
+  await page.locator(`.focus-card[data-id="${ids.c0}"]`).click();
+  await page.waitForFunction((id) => document.querySelector(`.focus-card[data-id="${id}"]`)?.dataset.lod === 'digest', ids.c0);
+  const digest = page.locator(`.focus-card[data-id="${ids.c0}"]`);
+  assert.ok(await digest.locator('.tags .tag').count() >= 1, 'a digest carries pills');
+  const pill = await digest.locator('.tags .tag').first().evaluate((el) => getComputedStyle(el).borderRadius);
+  const rowPill = await page.evaluate(() => getComputedStyle(document.querySelector('#list .conv .tags .tag')).borderRadius);
+  assert.equal(pill, rowPill, 'same pill everywhere');
+  await page.waitForFunction(() => [...document.querySelectorAll('.focus-card')].some((el) => el.dataset.lod === 'chip'));
+  const chip = page.locator('.focus-card[data-lod="chip"]').first();
+  assert.equal(await chip.locator('.dot').evaluate((el) => getComputedStyle(el).display !== 'none'), true, 'a chip keeps its dot');
+  assert.equal(await chip.locator('.tags .tag').evaluateAll((els) => els.filter((el) => el.getClientRects().length > 0).length), 0, 'a chip hides the pills');
 });
