@@ -138,3 +138,41 @@ test('a REVIEW row swiped right is marked reviewed; swiped left it reveals Undo 
   // Idle starts collapsed, so the row is attached there, not shown.
   await page.locator(`[data-band="idle"] .conv[data-id="${id}"]`).waitFor({ state: 'attached' });
 });
+
+test('long-press on a row opens the actions sheet; dragging it down closes it', async () => {
+  const { page } = await openAgents();
+  const id = await page.evaluate(async () => window.marble.agent.start({ provider: 'fake' }));
+  await host.drive.agents.store.updateConversation(id, { running: true, activity: 'busy' });
+  await page.reload();
+  const row = page.locator(`.deck .conv[data-id="${id}"]`);
+  await row.waitFor();
+  const box = await row.boundingBox();
+  await page.mouse.move(box.x + 100, box.y + box.height / 2);
+  await page.mouse.down();
+  await page.waitForTimeout(520);
+  await page.mouse.up();
+  const sheet = page.locator('.sheet[data-kind="actions"]');
+  await sheet.waitFor({ state: 'visible' });
+  await page.waitForFunction(() => document.body.getAttribute('data-sheet') === 'actions');
+  assert.ok(await sheet.locator('button', { hasText: 'Archive' }).count());
+  assert.ok(await sheet.locator('button', { hasText: 'Stop' }).count());
+  const sb = await sheet.boundingBox();
+  await page.mouse.move(sb.x + sb.width / 2, sb.y + 10);
+  await page.mouse.down();
+  for (let y = 10; y < 300; y += 24) await page.mouse.move(sb.x + sb.width / 2, sb.y + y);
+  await page.mouse.up();
+  await page.waitForFunction(() => !document.body.hasAttribute('data-sheet'));
+});
+
+test('the new-conversation sheet starts a conversation and opens it', async () => {
+  const { page } = await openAgents();
+  await page.reload();
+  await page.waitForFunction(() => Boolean(window.marble?.agent));
+  await page.locator('.thumb-new').click();
+  const sheet = page.locator('.sheet[data-kind="new"]');
+  await sheet.waitFor({ state: 'visible' });
+  await sheet.locator('.sheet-prompt').fill('script:rename');
+  await sheet.locator('button.sheet-start').click();
+  await page.waitForFunction(() => document.body.hasAttribute('data-open'));
+  await page.waitForFunction(() => document.querySelectorAll('.deck .conv').length === 1);
+});

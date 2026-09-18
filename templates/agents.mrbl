@@ -755,6 +755,36 @@ __ICON__
   .deck .conv[data-swipe="undo"] > .swipe-undo { display: block; }
   .deck .conv[data-swipe="review"]::before { content: 'Reviewed'; position: absolute; inset: 0; z-index: 0; display: flex; align-items: center; padding-left: 1rem; background: var(--accent-soft); color: var(--accent-ink); font-size: .8rem; }
   @media (prefers-reduced-motion: reduce) { .band-head[data-flash] { animation: none; } }
+
+  /* ---- Sheets. A bottom sheet tracks the finger from where it was grabbed,
+     rubber-bands past the top, and commits by the sign of its velocity. */
+  .sheet-scrim { position: fixed; inset: 0; background: rgba(0,0,0,.28); z-index: 40; opacity: 0; transition: opacity 200ms var(--ease-out); }
+  .sheet-scrim[hidden] { display: none; }
+  body[data-sheet] .sheet-scrim { opacity: 1; }
+  .sheet { position: fixed; left: 0; right: 0; bottom: 0; z-index: 41; background: var(--paper); border-radius: var(--pane-r) var(--pane-r) 0 0; box-shadow: var(--shadow-lift); padding: 0 1rem calc(1rem + env(safe-area-inset-bottom, 0px)); max-height: 80vh; overflow-y: auto; transform: translateY(100%); touch-action: none; will-change: transform; }
+  .sheet[hidden] { display: none; }
+  .sheet-grip { width: 36px; height: 4px; border-radius: 2px; background: var(--line); margin: 8px auto 12px; }
+  .sheet-body { display: grid; gap: .5rem; }
+  .sheet-body h3 { margin: .25rem 0 .5rem; font-size: 1rem; }
+  .sheet-row { display: flex; align-items: center; gap: .6rem; width: 100%; min-height: 2.75rem; padding: 0 .75rem; font: inherit; font-size: 1rem; color: var(--ink); background: var(--card); border: 1px solid var(--line); border-radius: 10px; text-align: left; cursor: pointer; }
+  .sheet-row:active { background: var(--paper-2); }
+  .sheet-row[data-tone="danger"] { color: var(--danger); }
+  .sheet-prompt { min-height: 5.5rem; font: inherit; font-size: 17px; line-height: 1.45; padding: .6rem .75rem; border: 1px solid var(--line); border-radius: 10px; background: var(--card); color: var(--ink); resize: none; }
+  .sheet-start { min-height: 2.75rem; font: inherit; font-size: 1rem; font-weight: 600; color: #fff; background: var(--accent-ink); border: 0; border-radius: 10px; cursor: pointer; }
+  .sheet-start:active { transform: scale(.97); transition: transform 100ms ease-out; }
+  .sheet-seg { display: flex; gap: .35rem; flex-wrap: wrap; }
+  .sheet-seg:empty { display: none; }
+  .sheet-seg button { min-height: 2.5rem; padding: 0 .8rem; font: inherit; border: 1px solid var(--line); border-radius: 999px; background: var(--card); color: var(--ink); cursor: pointer; }
+  .sheet-seg button[aria-pressed="true"] { background: var(--accent-soft); border-color: var(--accent); color: var(--accent-ink); }
+  .fleet-meters { display: grid; gap: .5rem; }
+  .fleet-windows { display: grid; gap: .25rem; font-size: .85rem; color: var(--muted); }
+  body[data-sheet] .deck, body[data-sheet] .focus, body[data-sheet] .library { transform: scale(.96); transition: transform 200ms var(--ease-out); transform-origin: 50% 0; }
+  /* The thumb bar exists on a phone; the media block below shows it. */
+  .thumb { display: none; }
+  @media (prefers-reduced-motion: reduce) {
+    .sheet { transition: opacity 150ms linear; transform: none !important; }
+    body[data-sheet] .deck, body[data-sheet] .focus, body[data-sheet] .library { transform: none; }
+  }
   /* A part that is leaving stays on screen where it was, out of the flow, for as
      long as it takes to fade — then the layout it no longer belongs to
      forgets it. */
@@ -1183,6 +1213,16 @@ __ICON__
   }
 
   @media (max-width: 719px) {
+    :root { --vv-h: 100vh; --topbar-h: calc(2.75rem + env(safe-area-inset-top, 0px)); --thumb-h: calc(3.5rem + env(safe-area-inset-bottom, 0px)); }
+    /* The thumb bar: always at the sill, translucent, content scrolling under. */
+    .thumb { position: fixed; left: 0; right: 0; bottom: 0; z-index: 30; display: flex; align-items: center; gap: .5rem; height: var(--thumb-h); padding: 0 .75rem env(safe-area-inset-bottom, 0px) 1rem; background: rgba(var(--paper-rgb), .72); -webkit-backdrop-filter: blur(20px) saturate(180%); backdrop-filter: blur(20px) saturate(180%); border-top: 1px solid rgba(255,255,255,.4); }
+    .thumb::before { content: ''; position: absolute; left: 0; right: 0; bottom: 100%; height: 12px; background: linear-gradient(transparent, rgba(var(--paper-rgb), .9)); pointer-events: none; }
+    .thumb-field { flex: 1 1 auto; min-height: 2.75rem; text-align: left; font: inherit; color: var(--faint); background: var(--card); border: 1px solid var(--line); border-radius: 999px; padding: 0 1rem; cursor: pointer; }
+    .thumb-new { width: 2.75rem; height: 2.75rem; border-radius: 50%; border: 0; background: var(--accent-ink); color: #fff; font: inherit; font-size: 1.4rem; line-height: 1; cursor: pointer; }
+    .thumb-new:active, .thumb-field:active { transform: scale(.97); transition: transform 100ms ease-out; }
+    body[data-open] .thumb, body[data-view="focus"] .thumb,
+    body:not([data-view="deck"]):not([data-view="focus"]) .thumb { display: none; }
+    @media (prefers-reduced-transparency: reduce) { .thumb { background: var(--paper); -webkit-backdrop-filter: none; backdrop-filter: none; } }
     /* Title + the view bar + Filter + New stay on the first wrap. The bar
        scrolls sideways if it cannot fit; the filter panel opens under the
        whole header rather than under its button. */
@@ -1349,6 +1389,17 @@ __ICON__
     <div class="band-body" role="list" data-marble-transient></div>
   </section>
 </div>
+
+<!-- The thumb bar and the sheets: phone chrome, hidden at any other width. -->
+<div class="thumb" data-marble-id="__ID__">
+  <button type="button" class="thumb-field" data-marble-id="__ID__">Say something…</button>
+  <button type="button" class="thumb-new" aria-label="New conversation" data-marble-id="__ID__">+</button>
+</div>
+<div class="sheet-scrim" data-marble-transient hidden></div>
+<section class="sheet" role="dialog" aria-modal="true" data-marble-transient hidden>
+  <div class="sheet-grip" aria-hidden="true"></div>
+  <div class="sheet-body"></div>
+</section>
 
 <script>
   // The Agents library. Rows, the open id, the filter and the search are the
@@ -5642,7 +5693,238 @@ __ICON__
     };
 
     let paintAsksPill = () => {};
-    let openActions = () => {};
+
+    // ---- Sheets. One element, filled per kind; the body behind dims and
+    // steps back. A drag from anywhere that is not a control moves it 1:1.
+    const sheetEl = $('.sheet');
+    const scrimEl = $('.sheet-scrim');
+    const sheetBody = sheetEl?.querySelector('.sheet-body');
+    let sheetY = 0;
+    let sheetStop = null;
+    const sheetHeight = () => sheetEl?.getBoundingClientRect().height || 1;
+    const rubberband = (over, dim, c = 0.55) => (over * dim * c) / (dim + c * Math.abs(over));
+    const placeSheet = (y) => {
+      sheetY = y;
+      if (sheetEl) sheetEl.style.transform = `translateY(${y}px)`;
+    };
+    const springSheet = (to, velocity, done) => {
+      sheetStop?.();
+      if (reduceMotion.matches) {
+        placeSheet(to);
+        done?.();
+        return;
+      }
+      sheetStop = window.marbleAgentUI.spring({ from: sheetY, to, velocity, response: 0.3, damping: 0.8, onFrame: (y) => placeSheet(y), onDone: done });
+    };
+    const closeSheet = (velocity = 0) => {
+      if (!sheetEl || sheetEl.hidden) return;
+      document.body.removeAttribute('data-sheet');
+      springSheet(sheetHeight(), velocity, () => {
+        sheetEl.hidden = true;
+        scrimEl.hidden = true;
+        sheetBody.replaceChildren();
+      });
+    };
+    const openSheet = (kind, fill) => {
+      if (!sheetEl) return;
+      sheetStop?.();
+      sheetBody.replaceChildren();
+      sheetEl.dataset.kind = kind;
+      sheetEl.hidden = false;
+      scrimEl.hidden = false;
+      Promise.resolve(fill(sheetBody)).then(() => {
+        placeSheet(sheetHeight());
+        requestAnimationFrame(() => {
+          document.body.setAttribute('data-sheet', kind);
+          springSheet(0, 0);
+        });
+      });
+    };
+    scrimEl?.addEventListener('click', () => closeSheet());
+    (() => {
+      let grab = null;
+      let history = [];
+      sheetEl?.addEventListener('pointerdown', (event) => {
+        if (event.target.closest('button, input, textarea, select, a')) return;
+        sheetStop?.();
+        grab = { y: event.clientY, at: sheetY, id: event.pointerId };
+        history = [{ y: event.clientY, t: performance.now() }];
+        sheetEl.setPointerCapture(event.pointerId);
+      });
+      sheetEl?.addEventListener('pointermove', (event) => {
+        if (!grab) return;
+        const raw = grab.at + (event.clientY - grab.y);
+        placeSheet(raw < 0 ? rubberband(raw, sheetHeight()) : raw);
+        history.push({ y: event.clientY, t: performance.now() });
+        if (history.length > 6) history.shift();
+      });
+      const release = () => {
+        if (!grab) return;
+        grab = null;
+        const a = history[0];
+        const b = history[history.length - 1];
+        const velocity = b.t > a.t ? ((b.y - a.y) / (b.t - a.t)) * 1000 : 0;
+        // The sign of the velocity decides; only a still hand asks how far.
+        if (velocity > 40 || (Math.abs(velocity) <= 40 && sheetY > sheetHeight() * 0.5)) closeSheet(velocity);
+        else springSheet(0, velocity);
+      };
+      sheetEl?.addEventListener('pointerup', release);
+      sheetEl?.addEventListener('pointercancel', release);
+    })();
+
+    const sheetRow = (label, onTap, tone) => {
+      const b = document.createElement('button');
+      b.type = 'button';
+      b.className = 'sheet-row';
+      if (tone) b.dataset.tone = tone;
+      b.textContent = label;
+      b.addEventListener('click', async () => {
+        closeSheet();
+        try { await onTap(); } catch (err) { showEmpty(err.message); }
+      });
+      return b;
+    };
+
+    const runningTurnOf = async (id) => {
+      const { turns } = await agent.conversation(id);
+      return turns.find((t) => t.status === 'running' || t.status === 'queued') ?? null;
+    };
+
+    const openActions = (id) => {
+      const summary = summaries.get(id);
+      if (!summary || !agent) return;
+      openSheet('actions', (body) => {
+        const h3 = document.createElement('h3');
+        h3.textContent = summary.title || 'Untitled';
+        body.append(h3);
+        if (statusOf(summary) === 'running') {
+          body.append(sheetRow('Stop', async () => {
+            const t = await runningTurnOf(id);
+            if (t) await agent.cancel(t.id);
+          }, 'danger'));
+        }
+        body.append(sheetRow('Open', () => open(id)));
+        if (summary.needsReview) body.append(sheetRow('Mark reviewed', () => agent.markReviewed(id)));
+        body.append(sheetRow(summary.archived ? 'Unarchive' : 'Archive', () => agent.archive(id, !summary.archived)));
+        for (const folder of folderCatalog) {
+          if (folder.id === summary.folderId) continue;
+          body.append(sheetRow(`Move to ${folder.name}`, () => agent.update(id, { folderId: folder.id })));
+        }
+        if (summary.folderId) body.append(sheetRow('Remove from folder', () => agent.update(id, { folderId: null })));
+        for (const provider of [...labels.values()].filter((p) => p.installed && p.signedIn && p.id !== summary.provider)) {
+          body.append(sheetRow(`Continue in ${provider.label}`, async () => open(await agent.handoff(id, provider.id))));
+        }
+      });
+    };
+
+    const seg = (parent, items, chosen, onPick) => {
+      parent.replaceChildren();
+      for (const item of items) {
+        const b = document.createElement('button');
+        b.type = 'button';
+        b.textContent = item.label;
+        b.setAttribute('aria-pressed', String(item.id === chosen));
+        b.addEventListener('click', () => {
+          onPick(item.id);
+          seg(parent, items, item.id, onPick);
+        });
+        parent.append(b);
+      }
+    };
+
+    const openNewSheet = (text = '') => {
+      if (!agent) {
+        showEmpty('This host is not running agents. Restart with MARBLE_DRIVE_AGENTS=1.');
+        return;
+      }
+      openSheet('new', async (body) => {
+        const h3 = document.createElement('h3');
+        h3.textContent = 'New conversation';
+        const projects = document.createElement('div');
+        projects.className = 'sheet-seg';
+        projects.setAttribute('role', 'group');
+        projects.setAttribute('aria-label', 'Project');
+        const setups = document.createElement('div');
+        setups.className = 'sheet-seg';
+        setups.setAttribute('role', 'group');
+        setups.setAttribute('aria-label', 'Agent');
+        const prompt = document.createElement('textarea');
+        prompt.className = 'sheet-prompt';
+        prompt.placeholder = 'What should it do?';
+        prompt.value = text;
+        const start = document.createElement('button');
+        start.type = 'button';
+        start.className = 'sheet-start';
+        start.textContent = 'Start';
+        body.append(h3, projects, setups, prompt, start);
+        let projectId = 'drive';
+        let providerId = null;
+        try {
+          const listed = await agent.projects();
+          const rows = (Array.isArray(listed) ? listed : listed.projects ?? []).map((p) => ({ id: p.id, label: p.name ?? p.id }));
+          projectId = rows[0]?.id ?? 'drive';
+          if (rows.length > 1) seg(projects, rows, projectId, (id) => { projectId = id; });
+        } catch { /* the drive alone */ }
+        if (!labels.size) {
+          try {
+            for (const p of await agent.providers()) labels.set(p.id, p);
+          } catch { /* none */ }
+        }
+        const ready = [...labels.values()].filter((p) => p.installed && p.signedIn);
+        providerId = (ready.find((p) => p.default) ?? ready[0])?.id ?? null;
+        if (ready.length > 1) seg(setups, ready.map((p) => ({ id: p.id, label: p.label })), providerId, (id) => { providerId = id; });
+        start.addEventListener('click', async () => {
+          if (!providerId) {
+            showEmpty('No agent is ready on this machine. npm run agents -- providers says why.');
+            return;
+          }
+          const words = prompt.value.trim();
+          closeSheet();
+          try {
+            const id = await agent.start({ provider: providerId, project: projectId });
+            await open(id);
+            if (words) await agent.send(id, { prompt: words });
+          } catch (err) { showEmpty(err.message); }
+        });
+        prompt.focus();
+      });
+    };
+
+    const openFleetSheet = () => {
+      if (!agent) return;
+      openSheet('fleet', async (body) => {
+        const h3 = document.createElement('h3');
+        h3.textContent = 'Fleet';
+        const meters = document.createElement('div');
+        meters.className = 'fleet-meters';
+        const windows = document.createElement('div');
+        windows.className = 'fleet-windows';
+        body.append(h3, meters, windows);
+        try {
+          const usage = await agent.usage();
+          window.marbleAgentUI?.fillMeters?.(meters, usage.meters ?? []);
+          for (const meter of usage.meters ?? []) {
+            for (const w of meter.windows ?? []) {
+              const line = document.createElement('div');
+              line.textContent = `${meter.label} ${w.label}: ${w.used}% used${w.resetsAt ? ` · resets ${window.marbleAgentUI?.formatReset?.(w.resetsAt) ?? ''}` : ''}`;
+              windows.append(line);
+            }
+          }
+        } catch { meters.textContent = 'Usage unavailable'; }
+        const running = [...summaries.values()].filter((s) => statusOf(s) === 'running');
+        if (running.length) {
+          body.append(sheetRow(`Stop all running (${running.length})`, async () => {
+            for (const s of running) {
+              const t = await runningTurnOf(s.id);
+              if (t) await agent.cancel(t.id);
+            }
+          }, 'danger'));
+        }
+      });
+    };
+
+    $('.thumb-new')?.addEventListener('click', () => openNewSheet());
+    $('.thumb-field')?.addEventListener('click', () => openNewSheet());
 
     // ---- Deck gestures. A cheap, reversible action completes as a swipe;
     // a consequential one is revealed by a swipe and taken by a button. A
