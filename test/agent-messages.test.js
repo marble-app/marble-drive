@@ -21,6 +21,7 @@ test('text must be a non-empty string within the cap', () => {
 
 test('seconds clamp to [5, 300] and default to 120', () => {
   assert.equal(clampSeconds(undefined), 120);
+  assert.equal(clampSeconds(null), 120);
   assert.equal(clampSeconds('abc'), 120);
   assert.equal(clampSeconds(1), 5);
   assert.equal(clampSeconds(9000), 300);
@@ -42,7 +43,7 @@ test('messages render with who sent them, what they are about, and how to reply'
   ], titles);
   assert.match(text, /Message from the conversation "Bibliography" \(aaaaaaaaaaaa, claude-subscription\):/);
   assert.match(text, /Is the bib clean\?/);
-  assert.match(text, /About: Research\/CHI — h1, p2/);
+  assert.match(text, /\[About: Research\/CHI — h1, p2\]/);
   assert.match(text, /Reply with send_message to "aaaaaaaaaaaa" and inReplyTo "m1m1m1m1m1m1"\./);
   assert.match(text, /Message from the conversation "zzzzzzzzzzzz" \(zzzzzzzzzzzz, unknown\):/, 'an unknown sender is named by id');
   assert.match(text, /Second note/);

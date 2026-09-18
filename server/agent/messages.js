@@ -21,6 +21,7 @@ export function validateText(text) {
  *  tool timeout never fires first; the agent is told a timeout means
  *  "nothing yet". */
 export function clampSeconds(value) {
+  if (value === null || value === undefined) return WAIT_DEFAULT;
   const n = Number(value);
   if (!Number.isFinite(n)) return WAIT_DEFAULT;
   return Math.min(WAIT_MAX, Math.max(WAIT_MIN, Math.floor(n)));
@@ -46,7 +47,7 @@ export function renderMessages(messages, titles = new Map()) {
     ];
     if (m.about?.path) {
       const ids = Array.isArray(m.about.ids) && m.about.ids.length ? ` — ${m.about.ids.join(', ')}` : '';
-      lines.push(`About: ${m.about.path}${ids}`);
+      lines.push(`[About: ${m.about.path}${ids}]`);
     }
     lines.push(`Reply with send_message to "${m.from}" and inReplyTo "${m.id}".`);
     return lines.join('\n');
