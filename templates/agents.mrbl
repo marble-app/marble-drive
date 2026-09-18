@@ -121,6 +121,18 @@ __ICON__
   body[data-view="focus"] .views [data-view="focus"] {
     color: var(--ink); background: var(--card); box-shadow: var(--shadow);
   }
+  /* The view switch slides its pill, as the composer's segmented control does:
+     the same control looks the same and moves the same. Once the thumb exists
+     the buttons give up their own pill and sit over it. */
+  .views { position: relative; isolation: isolate; }
+  .views > button { position: relative; z-index: 1; }
+  .views:has(> .seg-thumb) > button[aria-pressed="true"] { background: none; box-shadow: none; }
+  .views .seg-thumb {
+    position: absolute; top: 1px; bottom: 1px; left: 0; width: 0; z-index: 0;
+    border-radius: 999px; background: var(--card); box-shadow: var(--shadow);
+    transition: transform 200ms var(--ease-out), width 200ms var(--ease-out);
+  }
+  @media (prefers-reduced-motion: reduce) { .views .seg-thumb { transition: none; } }
   /* Filter and search share one quiet control. The button is text on the bare
      bar until it is hovered, open, or holding a filter — a filter you cannot
      see must still say it is hiding rows, so the count is the one loud part. */
@@ -176,11 +188,25 @@ __ICON__
     color: var(--muted); padding: .35rem .85rem; border-radius: 999px; cursor: pointer; font-size: .85rem;
   }
   .settings:hover, .settings:focus-visible { color: var(--ink); background: var(--paper-3); outline: none; }
+  /* The meters are what gives when the row gets tight: the bars shrink, then
+     the percentages go, and Settings and New keep their place on the row. */
   .usage {
     display: flex; align-items: center; gap: .7rem; min-width: 0;
     margin-left: auto; user-select: none;
   }
   .meter { display: flex; align-items: center; gap: .4rem; min-width: 0; }
+  /* Above the phone the bar is one row: the meters are what gives when it
+     gets tight — bars shrink, then the percentages go — and Settings and New
+     keep their place. The phone gives the meters a row of their own instead. */
+  @media (min-width: 720px) {
+    .topbar { flex-wrap: nowrap; }
+    .topbar .usage { justify-content: flex-end; flex: 1 1 auto; }
+    .topbar .meter { flex: 0 1 auto; }
+    .topbar .usage .meter-bar { width: 5.5rem; flex: 0 1 5.5rem; min-width: 2rem; }
+  }
+  @media (min-width: 720px) and (max-width: 1099px) {
+    .topbar .usage .meter-pct { display: none; }
+  }
   .meter-label {
     font-size: 12.5px; font-weight: 500; color: var(--muted); letter-spacing: -.01em;
   }
@@ -434,6 +460,7 @@ __ICON__
     box-shadow: 0 0 0 2px var(--accent-ink), var(--shadow-lift);
   }
   .focus-card-head {
+    position: relative;
     display: flex; align-items: center; gap: .4rem; flex: none;
     padding: .4rem .55rem; min-height: 2.1rem;
     border-bottom: 1px solid var(--line); font-size: .8rem; font-weight: 500;
@@ -446,17 +473,26 @@ __ICON__
   /* A chip is a title, its dot and one tick of context: the age. */
   .focus-head-age { flex: none; font-size: .72rem; color: var(--faint); font-variant-numeric: tabular-nums; }
   .focus-card:not([data-lod="chip"]) .focus-head-age { display: none; }
-  .focus-card-actions { display: none; flex: none; gap: .2rem; }
+  /* The actions sit over the head's end and fade in, so a pointer crossing a
+     card never reflows it: the head keeps its height and the title its width. */
+  .focus-card-actions {
+    position: absolute; right: .45rem; top: 50%; transform: translateY(-50%);
+    display: flex; gap: .2rem; padding-left: .9rem;
+    background: linear-gradient(to right, transparent, var(--card) .8rem);
+    opacity: 0; visibility: hidden;
+    transition: opacity 120ms var(--ease-out), visibility 0s linear 120ms;
+  }
   .focus-card[data-lod="digest"]:hover .focus-card-actions,
   .focus-card[data-lod="full"]:hover .focus-card-actions,
-  .focus-card:focus-within .focus-card-actions { display: flex; }
+  .focus-card:focus-within .focus-card-actions { opacity: 1; visibility: visible; transition-delay: 0s; }
+  .focus-card[data-lod="chip"] .focus-card-actions { display: none; }
   .focus-card[data-lod="chip"] .focus-folder,
   .focus-card[data-lod="chip"] .focus-pin,
   .focus-card[data-lod="chip"] .focus-keep,
   .focus-card[data-lod="chip"] .focus-collapse,
   .focus-card[data-lod="digest"] .focus-collapse { display: none; }
   @media (hover: none) {
-    .focus-card .focus-card-actions { display: flex; }
+    .focus-card:not([data-lod="chip"]) .focus-card-actions { opacity: 1; visibility: visible; }
   }
   .focus-folder-menu {
     position: fixed; z-index: 13; display: flex; flex-direction: column;
@@ -772,7 +808,8 @@ __ICON__
   /* An author-level `display: grid` above beats the UA [hidden] rule, so a
      filtered-out row stays fully visible unless this re-asserts it. */
   .conv[hidden] { display: none; }
-  .conv .dot { margin-top: .42rem; }
+  /* Centred on the title's x-height, not its line box: measured, 14px/21px. */
+  .conv .dot { margin-top: .53rem; }
   .dock-bar .dot { margin-right: .1rem; }
   /* Four facts, three lines: the agent's name shares the last line with the
      activity instead of claiming a row of its own. */
@@ -811,6 +848,8 @@ __ICON__
   /* Provider is almost always the same one agent, so it rides in the meta
      line as plain text rather than competing for attention as its own pill. */
   .conv .badge { flex: none; max-width: 6em; }
+  .conv .badge:empty { display: none; }
+  .conv .tag[data-kind="agent"] { line-height: 1.4; }
   .conv .badge:not(:empty)::after { content: '\00b7'; margin-left: .35rem; color: var(--faint); }
   .conv .activity { flex: 1 1 auto; }
   .conv .age { flex: none; font-size: .75rem; color: var(--faint); padding-top: .15rem; }
@@ -910,11 +949,11 @@ __ICON__
   .dock-bar.marble-drop-swap { background: var(--accent-soft); box-shadow: inset 0 0 0 1px var(--accent); }
   .dock-grip { flex: none; color: var(--faint); }
   .dock-title {
-    flex: 1; min-width: 0; font-size: 12.5px; font-weight: 500; letter-spacing: -.01em;
+    flex: 1 1 auto; min-width: 6rem; font-size: 12.5px; font-weight: 500; letter-spacing: -.01em;
     overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
   }
   .dock-target {
-    flex: none; max-width: 9rem; font-size: 11.5px; color: var(--accent-ink);
+    flex: 0 1 auto; max-width: 9rem; min-width: 2rem; font-size: 11.5px; color: var(--accent-ink);
     overflow: hidden; text-overflow: ellipsis; white-space: nowrap; text-decoration: none;
   }
   .dock-target:hover, .dock-target:focus-visible { color: var(--ink); outline: none; }
@@ -1130,8 +1169,33 @@ __ICON__
     }
     body[data-view="board"][data-panel="open"] .pane { height: auto; }
   }
+  /* Keyboard focus is its own state: the hover look, plus a ring the pointer
+     never draws. One ring, everywhere a key can land. */
+  .seg button:focus-visible, .filter-toggle:focus-visible, .new:focus-visible, .settings:focus-visible,
+  .folder-tab:focus-visible, .folder-new-chat:focus-visible, .folder-tick:focus-visible,
+  .dock-close:focus-visible, .dock-split:focus-visible, .dock-target:focus-visible,
+  .focus-card-actions button:focus-visible, .focus-newgroup:focus-visible, .focus-basin-name:focus-visible,
+  .conv .manage .more:focus-visible, .conv .manage .menu button:focus-visible, .filter-clear:focus-visible {
+    outline: none; box-shadow: 0 0 0 2px var(--accent);
+  }
+  .conv:focus-visible { box-shadow: inset 0 0 0 2px var(--accent); }
+  /* A press answers on the way down, not on the way up. Colour only: a press
+     that scales is a pop, and the rows are not to pop. */
+  .conv:active, .folder-tab:active, .folder-new-chat:active, .settings:active, .filter-toggle:active,
+  .dock-close:active, .dock-split:active, .conv .manage .more:active, .focus-card-actions button:active,
+  .focus-newgroup:active:not(:disabled) { background: var(--paper-2); }
+  .new:active { filter: brightness(.9); }
+  /* Under a sticky heading, content slides beneath a soft edge rather than a
+     hard one — and only once there is something beneath it. */
+  .column h2::after {
+    content: ''; position: absolute; left: 0; right: 0; top: 100%; height: 12px; pointer-events: none;
+    background: linear-gradient(var(--paper-2), transparent); opacity: 0;
+    transition: opacity 160ms var(--ease-out);
+  }
+  .column[data-scrolled] h2::after { opacity: 1; }
   @media (hover: none) {
     .conv, .seg button, .new, .settings, .filter-toggle, .conv .manage .more { min-height: 2.75rem; }
+    .dock-close, .dock-split { min-width: 2.75rem; height: 100%; }
   }
 </style>
 </head>
@@ -1250,6 +1314,9 @@ __ICON__
       boardEl.toggleAttribute('data-stack', w > 0 && w < 3 * BOARD_MIN_COL + 2 * 16 + 32);
     };
     if (boardEl && 'ResizeObserver' in window) new ResizeObserver(fitBoard).observe(boardEl);
+    for (const column of document.querySelectorAll('.column')) {
+      column.addEventListener('scroll', () => column.toggleAttribute('data-scrolled', column.scrollTop > 0), { passive: true });
+    }
     const foldersEl = $('.folders');
     const folderRail = $('.folder-rail');
     const focusEl = $('.focus');
@@ -1342,7 +1409,29 @@ __ICON__
     const deriveView = () => {
       const view = document.body.getAttribute('data-view') || 'library';
       for (const btn of viewButtons) btn.setAttribute('aria-pressed', String(btn.dataset.view === view));
+      slideViewThumb();
     };
+
+    /** The pill under the pressed view. It is placed from the button's own
+     *  box, so a font or a label change moves it too. */
+    const slideViewThumb = () => {
+      const views = document.querySelector('.views');
+      const pressed = views?.querySelector('button[aria-pressed="true"]');
+      if (!views || !pressed) return;
+      let thumb = views.querySelector(':scope > .seg-thumb');
+      if (!thumb) {
+        thumb = document.createElement('span');
+        thumb.className = 'seg-thumb';
+        thumb.setAttribute('data-marble-transient', '');
+        thumb.setAttribute('aria-hidden', 'true');
+        views.prepend(thumb);
+        thumb.style.transition = 'none';
+        requestAnimationFrame(() => { thumb.style.transition = ''; });
+      }
+      thumb.style.transform = `translateX(${pressed.offsetLeft}px)`;
+      thumb.style.width = `${pressed.offsetWidth}px`;
+    };
+    if ('ResizeObserver' in window) new ResizeObserver(() => slideViewThumb()).observe(document.querySelector('.views') ?? document.body);
 
     const deriveFilters = () => {
       for (const btn of filterButtons) btn.setAttribute('aria-pressed', String(btn.dataset.filter === filter));
