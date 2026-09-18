@@ -1850,6 +1850,30 @@ __ICON__
       };
     };
 
+    /** The last resort when the layout helper is not on the page: one plain
+     *  wrapping row of cards, no regions. Never reached in a healthy load. */
+    const flowFieldCards = (groups, canvas, top) => {
+      const gap = 8;
+      const rects = {};
+      let x = 16;
+      let y = top + 16;
+      let rowH = 0;
+      for (const group of groups) {
+        for (const card of group.cards) {
+          const size = focusLodSize(card.lod);
+          if (x > 16 && x + size.w > canvas.w - 16) {
+            x = 16;
+            y += rowH + gap;
+            rowH = 0;
+          }
+          rects[card.id] = { x, y, w: size.w, h: size.h };
+          x += size.w + gap;
+          rowH = Math.max(rowH, size.h);
+        }
+      }
+      return { regions: [], rects, height: y + rowH + 16 };
+    };
+
     /** What packRegions needs to know about a card: its size class, and the
      *  stored drag position it should be ordered by inside its region. */
     const fieldCard = (item) => ({
@@ -2578,21 +2602,23 @@ __ICON__
       const loose = field.filter((item) => !item.folderId || !folderCatalog.some((row) => row.id === item.folderId));
       if (loose.length) groups.push({ folderId: null, cards: loose.map(fieldCard) });
 
-      let regions = [];
-      if (helpers?.packRegions) {
-        const packed = helpers.packRegions({
+      const packed = helpers?.packRegions
+        ? helpers.packRegions({
           groups,
           canvas,
           top: stageH,
           sizes: { digest: focusLodSize('digest'), chip: focusLodSize('chip') },
           gap: helpers.GAP ?? 8,
-        });
-        regions = packed.regions;
-        Object.assign(rects, packed.rects);
-        // The field is a partition, so it can be taller than the viewport.
-        // Let the canvas scroll rather than cramming regions on top of one another.
-        focusEl.style.minHeight = `${Math.max(canvas.h, packed.height)}px`;
-      }
+        })
+        // A stale cached copy of agent-folders.js would otherwise leave every
+        // field card without a rect, and an unplaced card stacks at the origin.
+        // Flow them instead: no basins, but nothing is lost.
+        : flowFieldCards(groups, canvas, stageH);
+      const regions = packed.regions;
+      Object.assign(rects, packed.rects);
+      // The field is a partition, so it can be taller than the viewport. Let
+      // the canvas scroll rather than cramming regions on top of one another.
+      focusEl.style.minHeight = `${Math.max(canvas.h, packed.height)}px`;
 
       for (const item of items) {
         const rect = rects[item.id];
@@ -2630,7 +2656,9 @@ __ICON__
           tags.append(span);
         }
       }
-      el.querySelector('.badge').textContent = '';
+      // A turn waiting on a permission prompt or a question is the one thing
+      // a glance at the list must not miss.
+      el.querySelector('.badge').textContent = summary.asking ? 'Needs you' : '';
       el.querySelector('.activity').textContent = summary.activity || '';
       el.querySelector('.age').textContent = age(summary.updatedAt);
       // The target is what tells two rows apart. It was in the data and on the

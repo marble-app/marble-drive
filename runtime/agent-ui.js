@@ -928,6 +928,21 @@
   const seconds = (ms) => (ms < 60_000 ? `${Math.max(1, Math.round(ms / 1000))} s` : `${Math.round(ms / 60_000)} min`);
   const firstSentence = (text) => String(text ?? '').split(/(?<=[.!?—])\s/)[0].replace(/\s*—\s*$/, '');
 
+  /** What to send back for an ask. `picks` is a Map question → Set of labels.
+   *  For a permission, `note === null` is Allow; any string is Deny with that
+   *  reason (or a stock one). */
+  function askResponse(kind, input, picks = new Map(), note = '') {
+    if (kind === 'question') {
+      const answers = {};
+      for (const q of input?.questions ?? []) {
+        const chosen = [...(picks.get(q.question) ?? [])];
+        if (chosen.length) answers[q.question] = q.multiSelect ? chosen.join(', ') : chosen[0];
+      }
+      return { behavior: 'allow', updatedInput: { ...input, answers } };
+    }
+    return note === null ? { behavior: 'allow' } : { behavior: 'deny', message: note || 'Denied from Marble' };
+  }
+
   function toolLabel(name, input = {}) {
     const where = input.path ? ` ${input.path}` : '';
     switch (name) {
@@ -1013,6 +1028,17 @@
     .tool[data-state="pending"]::before { background: var(--accent); animation: pulse 1.2s var(--snap) infinite; }
     .tool[data-state="done"]::before { background: var(--accent-ink); }
     .tool[data-state="refused"] { color: var(--caution); } .tool[data-state="refused"]::before { background: var(--caution); }
+    .ask { margin: 8px 0; padding: 10px 12px; border: 1px solid var(--line); border-radius: 10px; background: var(--paper-2, var(--paper)); display: grid; gap: 8px; }
+    .ask .ask-title { font-weight: 600; font-size: 13px; }
+    .ask pre { margin: 0; font-size: 12px; white-space: pre-wrap; word-break: break-word; }
+    .ask .ask-options { display: grid; gap: 4px; }
+    .ask .ask-options button { text-align: left; font: inherit; font-size: 12.5px; padding: 6px 8px; border: 1px solid var(--line); border-radius: 8px; background: none; color: inherit; cursor: pointer; }
+    .ask .ask-options button[aria-checked="true"] { border-color: var(--accent-ink); background: color-mix(in srgb, var(--accent-ink) 10%, transparent); }
+    .ask .ask-actions { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; }
+    .ask .ask-actions button { font: inherit; font-size: 12.5px; padding: 5px 10px; border-radius: 8px; border: 1px solid var(--line); background: none; color: inherit; cursor: pointer; }
+    .ask .ask-actions button.allow, .ask .ask-actions button.answer { background: var(--accent-ink); color: var(--paper); border-color: var(--accent-ink); }
+    .ask .ask-actions button:disabled { opacity: .5; cursor: default; }
+    .ask .deny-note { flex: 1; min-width: 8em; font: inherit; font-size: 12.5px; padding: 5px 8px; border: 1px solid var(--line); border-radius: 8px; background: none; color: inherit; }
     .tool[data-state="failed"] { color: var(--danger); } .tool[data-state="failed"]::before { background: var(--danger); }
     .turn-footer { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 10px; font-size: 12px; color: var(--faint); padding: 4px 2px 10px; }
     .turn-footer[data-status="failed"] .status { color: var(--danger); }
@@ -2204,6 +2230,14 @@
         case 'watchdog':
           this.record(turn).watchdog = event;
           break;
+        case 'ask':
+          this.endLive();
+          this.ask(turn, event);
+          break;
+        case 'ask.answered':
+        case 'ask.void':
+          this.askClosed(turn, event);
+          break;
         case 'turn.completed':
         case 'turn.failed':
         case 'turn.cancelled':
@@ -2223,8 +2257,110 @@
     }
 
     record(turn) {
-      if (!this.turns.has(turn)) this.turns.set(turn, { tools: new Map(), applies: [], applied: 0, footer: null });
+      if (!this.turns.has(turn)) this.turns.set(turn, { tools: new Map(), applies: [], applied: 0, footer: null, asks: new Map() });
       return this.turns.get(turn);
+    }
+
+    /** The process is waiting on the person: a permission prompt, or a
+     *  question with options. A card under the turn's last message, answered
+     *  once; the answer event (from any pane) removes it. */
+    ask(turn, event) {
+      const card = h('div', 'ask');
+      card.dataset.request = event.requestId;
+      card.dataset.kind = event.kind;
+      const submit = async (response) => {
+        for (const b of card.querySelectorAll('button')) b.disabled = true;
+        try {
+          await this.api.answer(turn, event.requestId, response);
+        } catch (err) {
+          for (const b of card.querySelectorAll('button')) b.disabled = false;
+          this.system(err.message, true);
+        }
+      };
+      if (event.kind === 'question') {
+        const picks = new Map();
+        for (const q of event.input?.questions ?? []) {
+          card.append(h('div', 'ask-title', q.question));
+          const list = h('div', 'ask-options');
+          list.setAttribute('role', q.multiSelect ? 'group' : 'radiogroup');
+          list.setAttribute('aria-label', q.question);
+          const set = new Set();
+          picks.set(q.question, set);
+          const buttons = (q.options ?? []).map((o, i) => {
+            const b = h('button', '', o.description ? `${o.label} — ${o.description}` : o.label);
+            b.type = 'button';
+            b.setAttribute('role', q.multiSelect ? 'checkbox' : 'radio');
+            b.setAttribute('aria-checked', 'false');
+            b.tabIndex = i === 0 ? 0 : -1;
+            b.addEventListener('click', () => {
+              if (!q.multiSelect) {
+                set.clear();
+                for (const x of buttons) x.setAttribute('aria-checked', 'false');
+              }
+              const on = b.getAttribute('aria-checked') !== 'true';
+              if (on) set.add(o.label);
+              else set.delete(o.label);
+              b.setAttribute('aria-checked', String(on));
+            });
+            b.addEventListener('keydown', (e) => {
+              const idx = buttons.indexOf(b);
+              if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+                e.preventDefault();
+                const next = buttons[(idx + (e.key === 'ArrowDown' ? 1 : buttons.length - 1)) % buttons.length];
+                for (const x of buttons) x.tabIndex = -1;
+                next.tabIndex = 0;
+                next.focus();
+              } else if (e.key === ' ') {
+                e.preventDefault();
+                b.click();
+              } else if (e.key === 'Enter') {
+                e.preventDefault();
+                if (!set.size) b.click();
+                submit(askResponse('question', event.input, picks));
+              }
+            });
+            return b;
+          });
+          list.append(...buttons);
+          card.append(list);
+        }
+        const actions = h('div', 'ask-actions');
+        const answer = h('button', 'answer', 'Answer');
+        answer.type = 'button';
+        answer.addEventListener('click', () => submit(askResponse('question', event.input, picks)));
+        actions.append(answer);
+        card.append(actions);
+      } else {
+        card.append(h('div', 'ask-title', `Allow ${event.displayName || event.tool}?`));
+        const detail = event.input?.command ?? event.input?.file_path ?? event.input?.path ?? event.input?.url ?? '';
+        if (detail) card.append(h('pre', '', String(detail)));
+        else card.append(h('div', 'tool', toolLabel(event.tool, event.input ?? {})));
+        const actions = h('div', 'ask-actions');
+        const allow = h('button', 'allow', 'Allow');
+        allow.type = 'button';
+        allow.addEventListener('click', () => submit(askResponse('permission', event.input, new Map(), null)));
+        const note = document.createElement('input');
+        note.className = 'deny-note';
+        note.placeholder = 'Why not? (optional)';
+        note.setAttribute('aria-label', 'Reason for denying');
+        const deny = h('button', 'deny', 'Deny');
+        deny.type = 'button';
+        deny.addEventListener('click', () => submit(askResponse('permission', event.input, new Map(), note.value.trim())));
+        actions.append(allow, deny, note);
+        card.append(actions);
+      }
+      this.record(turn).asks.set(event.requestId, card);
+      this.append(turn, card);
+      card.querySelector('button')?.focus({ preventScroll: true });
+    }
+
+    askClosed(turn, event) {
+      const record = this.record(turn);
+      const card = record.asks.get(event.requestId);
+      if (!card) return;
+      card.remove();
+      record.asks.delete(event.requestId);
+      if (event.type === 'ask.void' && event.why !== 'cancelled') this.system('The agent stopped waiting for that answer.');
     }
 
     forget(turn) {
@@ -3274,7 +3410,7 @@
       for (const summary of list.slice(0, 20)) {
         this.summaries.set(summary.id, summary);
         const provider = this.labels.get(summary.provider)?.label ?? summary.provider;
-        const state = summary.status === 'running' ? 'Running' : summary.needsReview ? 'Needs review' : summary.activity || summary.status;
+        const state = summary.asking ? 'Needs you' : summary.status === 'running' ? 'Running' : summary.needsReview ? 'Needs review' : summary.activity || summary.status;
         this.item(this.recent, summary.title || 'Untitled', `${provider} · ${state}`, () => this.switchTo(summary.id));
       }
       this.recent.querySelector('[role="menuitem"]')?.focus({ preventScroll: true });
@@ -3347,7 +3483,7 @@
     document.body.append(drawer);
   };
 
-  window.marbleAgentUI = { renderText, spring, project, TOKENS, conversationTags, eventBelongsToConversation, TAG_CSS, fillMeters, usageAvailable, usageTone, formatReset, USAGE_CSS, pageTheme, applyPageTheme, fillRadios, fitPicker, fitPresets, sortProviders };
+  window.marbleAgentUI = { renderText, spring, project, TOKENS, conversationTags, eventBelongsToConversation, askResponse, TAG_CSS, fillMeters, usageAvailable, usageTone, formatReset, USAGE_CSS, pageTheme, applyPageTheme, fillRadios, fitPicker, fitPresets, sortProviders };
 
   if (window.marble?.agent) mount();
   else addEventListener('marble:agent', mount, { once: true });

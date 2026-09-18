@@ -12,6 +12,7 @@ const SCRIPTS = {
     { call: 'apply_ops', args: { path: 'garden', note: 'rename', ops: [{ type: 'setText', id: 'h', text: 'Backlog' }] } },
     { say: 'Renamed the heading.' },
   ],
+  permission: [{ ask: { tool: 'Bash', input: { command: 'ls' } } }, { say: 'after' }],
 };
 
 const AGENTS_TEMPLATE = path.join(path.dirname(fileURLToPath(import.meta.url)), '..', 'templates', 'agents.mrbl');
@@ -779,4 +780,13 @@ test('New says why when this host is not running agents', async () => {
   } finally {
     await off.close();
   }
+});
+
+test('a conversation waiting on the person says Needs you', async () => {
+  const { page } = await openAgents();
+  await page.evaluate(async () => {
+    const id = await window.marble.agent.start({ provider: 'fake' });
+    await window.marble.agent.send(id, { prompt: 'script:permission', target: 'garden' });
+  });
+  await page.locator('.conv .badge', { hasText: 'Needs you' }).first().waitFor();
 });

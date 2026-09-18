@@ -12,6 +12,8 @@ const SCRIPTS = {
   hostile: [{ say: 'Try <img src=x onerror="window.__pwned=1"> and [bad](javascript:window.__pwned=1) and [good](https://example.com)' }],
   slow: [{ sleep: 1500 }, { say: 'finally' }],
   hold: [{ silent: 20_000 }],
+  permission: [{ ask: { tool: 'Bash', input: { command: 'rm -rf build' } } }, { say: 'after' }],
+  question: [{ ask: { tool: 'AskUserQuestion', input: { questions: [{ question: 'A or B?', header: 'Pick', options: [{ label: 'A' }, { label: 'B' }], multiSelect: false }] } } }],
   stale: [
     { call: 'apply_ops', args: { path: 'garden', note: 'unread', ops: [{ type: 'setText', id: 'p', text: 'x' }] } },
     { say: 'It was refused.' },
@@ -926,4 +928,34 @@ test('a document.changed event is listed as a document changed', async () => {
   assert.match(await view.locator('.tool[data-name="document.changed"]').textContent(), /garden/);
   assert.match(await view.locator('.tool[data-name="document.changed"]').textContent(), /document/i);
   assert.match(await view.locator('.statusline').textContent(), /1 document changed/);
+});
+
+test('a permission ask shows a card, and Allow answers it', async () => {
+  const { view, errors } = await mount();
+  await view.locator('input[name="agent"][value="fake"]').waitFor();
+  await sendFrom(view, 'script:permission');
+  const card = view.locator('.ask[data-kind="permission"]');
+  await card.waitFor();
+  assert.match(await card.textContent(), /Bash/);
+  assert.match(await card.textContent(), /rm -rf build/);
+  await card.locator('button.allow').click();
+  await view.locator('.turn-footer[data-status="completed"]').waitFor();
+  assert.equal(await view.locator('.ask').count(), 0);
+  await view.locator('.msg.agent', { hasText: 'answered:allow' }).waitFor();
+  assert.deepEqual(errors, []);
+});
+
+test('a question ask offers its options; arrows move, Enter answers with the label', async () => {
+  const { view, errors } = await mount();
+  await view.locator('input[name="agent"][value="fake"]').waitFor();
+  await sendFrom(view, 'script:question');
+  const card = view.locator('.ask[data-kind="question"]');
+  await card.waitFor();
+  assert.equal(await card.locator('[role="radio"]').count(), 2);
+  await card.locator('[role="radio"]').first().focus();
+  await card.locator('[role="radio"]').first().press('ArrowDown');
+  await card.locator('[role="radio"]').nth(1).press('Enter');
+  await view.locator('.turn-footer[data-status="completed"]').waitFor();
+  await view.locator('.msg.agent', { hasText: 'answered:allow:B' }).waitFor();
+  assert.deepEqual(errors, []);
 });
