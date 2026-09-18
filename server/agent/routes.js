@@ -39,6 +39,7 @@ const hostnameOf = (req) => {
 const bearer = (req) => (req.headers.authorization ?? '').replace(/^Bearer\s+/i, '');
 const CONVERSATION = /^\/agent\/conversations\/([0-9a-f]{12})(\/turns)?$/;
 const TURN = /^\/agent\/turns\/([0-9a-f]{12}-t\d+)(\/cancel|\/undo)?$/;
+const FOLDER = /^\/agent\/folders\/([0-9a-f]{12})$/;
 const TOOL = /^\/agent\/tools\/([a-z_]+)$/;
 
 const publicWindow = (window) => ({
@@ -292,6 +293,32 @@ export function createAgentRoutes({ store, runner, tools, hub, providers, writeO
             patch.providerSession = null;
           }
         }
+        if ('folderId' in body) {
+          if (body.folderId === null) {
+            patch.folderId = null;
+          } else if (typeof body.folderId === 'string' && /^[0-9a-f]{12}$/.test(body.folderId)) {
+            const { folders } = await store.listFolders();
+            if (!folders.some((folder) => folder.id === body.folderId)) {
+              return json(res, 400, { error: `no folder "${body.folderId}"` });
+            }
+            patch.folderId = body.folderId;
+          } else {
+            return json(res, 400, { error: 'folderId must be null or a folder id' });
+          }
+        }
+        if (typeof body.pinned === 'boolean') patch.pinned = body.pinned;
+        if ('focusX' in body) {
+          if (body.focusX !== null && typeof body.focusX !== 'number') {
+            return json(res, 400, { error: 'focusX must be a number or null' });
+          }
+          patch.focusX = body.focusX;
+        }
+        if ('focusY' in body) {
+          if (body.focusY !== null && typeof body.focusY !== 'number') {
+            return json(res, 400, { error: 'focusY must be a number or null' });
+          }
+          patch.focusY = body.focusY;
+        }
         await store.updateConversation(id, patch);
         const next = await store.summary(id);
         hub.publish(id, { type: 'meta' }, next);
@@ -329,6 +356,63 @@ export function createAgentRoutes({ store, runner, tools, hub, providers, writeO
           return json(res, 200, result);
         } finally {
           undoing.delete(turnId);
+        }
+      }
+    }
+
+    if (route === '/agent/folders') {
+      if (method === 'GET') return json(res, 200, await store.listFolders());
+      if (method === 'POST') {
+        const body = await readJson(req, maxBody);
+        const conversationIds = Array.isArray(body.conversationIds) ? body.conversationIds.map(String) : [];
+        try {
+          const folder = await store.createFolder({
+            conversationIds,
+            name: body.name,
+            color: body.color,
+          });
+          hub.publishFolders(await store.listFolders());
+          for (const cid of conversationIds) {
+            hub.publish(cid, { type: 'meta' }, await store.summary(cid));
+          }
+          return json(res, 201, folder);
+        } catch (err) {
+          if (err.status === 404) return json(res, 404, { error: err.message });
+          throw err;
+        }
+      }
+    }
+
+    if (route === '/agent/folders/working-set' && method === 'PUT') {
+      const body = await readJson(req, maxBody);
+      const ids = Array.isArray(body.ids) ? body.ids.map(String) : [];
+      return json(res, 200, await store.setWorkingSet(ids));
+    }
+
+    const folderRoute = FOLDER.exec(route);
+    if (folderRoute) {
+      const [, folderId] = folderRoute;
+      if (method === 'PATCH') {
+        const body = await readJson(req, maxBody);
+        const patch = {};
+        if (typeof body.name === 'string') patch.name = body.name;
+        if (typeof body.color === 'string') patch.color = body.color;
+        if (Number.isInteger(body.order)) patch.order = body.order;
+        if (Array.isArray(body.openIds)) patch.openIds = body.openIds.map(String);
+        try {
+          return json(res, 200, await store.updateFolder(folderId, patch));
+        } catch (err) {
+          if (err.status === 404) return json(res, 404, { error: err.message });
+          throw err;
+        }
+      }
+      if (method === 'DELETE') {
+        try {
+          await store.deleteFolder(folderId);
+          return json(res, 200, { removed: true });
+        } catch (err) {
+          if (err.status === 404) return json(res, 404, { error: err.message });
+          throw err;
         }
       }
     }

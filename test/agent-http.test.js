@@ -476,6 +476,26 @@ test('two undos of the same turn at once: one runs, the other is refused', async
   assert.equal(body.events.filter((e) => e.type === 'turn.undone').length, 1);
 });
 
+test('folders can be created, listed, joined, and dissolved over HTTP', async () => {
+  const a = await api('POST', '/agent/conversations', { provider: 'fake' });
+  const b = await api('POST', '/agent/conversations', { provider: 'fake' });
+  await api('PATCH', `/agent/conversations/${a.body.id}`, { title: 'A' });
+  const created = await api('POST', '/agent/folders', { conversationIds: [a.body.id, b.body.id], name: 'CHI', color: 'fun' });
+  assert.equal(created.status, 201);
+  assert.equal(created.body.name, 'CHI');
+  const listed = await api('GET', '/agent/folders');
+  assert.equal(listed.body.folders.length, 1);
+  const moved = await api('PATCH', `/agent/conversations/${a.body.id}`, { folderId: null });
+  assert.equal(moved.status, 200);
+  assert.equal(moved.body.folderId, null);
+});
+
+test('PATCH rejects an unknown folderId', async () => {
+  const created = await api('POST', '/agent/conversations', { provider: 'fake' });
+  const nope = await api('PATCH', `/agent/conversations/${created.body.id}`, { folderId: 'ffffffffffff' });
+  assert.equal(nope.status, 400);
+});
+
 test('a removed turn cannot be undone', async () => {
   const running = await start('script:wait');
   const queued = await api('POST', `/agent/conversations/${running.conversationId}/turns`, {
@@ -504,6 +524,7 @@ test('a document that presents agents itself gets the API and the conversation e
   const page = await (await fetch(`${base}/a/custom-agents`)).text();
   assert.ok(page.includes('/runtime/agent.js'));
   assert.ok(page.includes('/runtime/agent-ui.js'), 'custom chrome still needs <marble-conversation>');
+  assert.ok(page.includes('/runtime/agent-folders.js'), 'custom chrome still needs folder helpers');
 });
 
 test('providers say which model they use unless told otherwise', async () => {

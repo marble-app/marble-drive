@@ -92,6 +92,7 @@ const RUNTIME = {
   // uses it. Served to every document; injected only when agents run here.
   'agent.js': () => path.join(REPO, 'runtime', 'agent.js'),
   'agent-ui.js': () => path.join(REPO, 'runtime', 'agent-ui.js'),
+  'agent-folders.js': () => path.join(REPO, 'runtime', 'agent-folders.js'),
   'collab.js': () => path.join(REPO, 'runtime', 'collab.js'),
 };
 
@@ -142,6 +143,7 @@ export async function createDrive(config, { log = console, agentProviders = null
       // Custom meta skips the drawer mount in runtime/agent-ui.js, not this script —
       // Agents.mrbl still needs <marble-conversation> without a second launcher.
       tags += `\n<script src="/runtime/agent-ui.js" data-marble-transient></script>`;
+      tags += `\n<script src="/runtime/agent-folders.js" data-marble-transient></script>`;
     }
     tags += `\n<script src="/runtime/collab.js" data-marble-transient></script>`;
     return source.includes('</body>')

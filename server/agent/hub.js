@@ -33,6 +33,12 @@ export function createHub() {
     }
   }
 
+  function publishFolders(payload) {
+    for (const res of listeners.get('*') ?? []) {
+      write(res, `event: folders\ndata: ${JSON.stringify(payload)}\n\n`);
+    }
+  }
+
   const beat = setInterval(() => {
     for (const set of listeners.values()) for (const res of set) write(res, ': ping\n\n');
   }, KEEPALIVE);
@@ -41,6 +47,7 @@ export function createHub() {
   return {
     subscribe,
     publish,
+    publishFolders,
     close() {
       clearInterval(beat);
       listeners.clear();
