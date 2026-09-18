@@ -162,3 +162,36 @@ test('the focused pane is lit and the others dim, in every view', async () => {
   frames = await read();
   assert.equal(frames.filter((f) => f.focused).length, 1, 'still one lit pane on the board');
 });
+
+test('Alt-click opens a conversation beside the focused pane', async () => {
+  const { page } = await openAgents(2);
+  await page.locator('#list .conv').nth(1).click({ modifiers: ['Alt'] });
+  await page.waitForFunction(() => document.querySelectorAll('.dock-frame:not(.dock-ghost)').length === 2);
+  await page.waitForTimeout(700);
+  const rects = await cards(page);
+  assert.equal(overlaps(rects), false);
+  assert.equal(await page.locator('marble-conversation[conversation]').count(), 2);
+});
+
+test('split makes an empty pane, and the next row fills it', async () => {
+  const { page } = await openAgents(2);
+  await page.locator('.pane > .dock-bar .dock-split[data-side="right"]').click();
+  await page.waitForFunction(() => document.querySelectorAll('.dock-frame:not(.dock-ghost)').length === 2);
+  const empty = page.locator('.dock-frame.dock-leaf marble-conversation:not([conversation])');
+  assert.equal(await empty.count(), 1, 'the new pane is empty');
+  assert.equal(await page.locator('.dock-frame.dock-leaf[data-focused]').count(), 1, 'and focused');
+  await page.locator('#list .conv').nth(1).click();
+  await page.locator('.dock-frame.dock-leaf marble-conversation[conversation]').waitFor();
+  assert.equal(await page.locator('marble-conversation:not([conversation])').count(), 0);
+  await page.reload();
+  await page.waitForFunction(() => Boolean(window.marble?.agent));
+  await page.locator('.pane > marble-conversation[conversation]').waitFor();
+});
+
+test('split down stacks the empty pane under the pane', async () => {
+  const { page } = await openAgents(1);
+  await page.locator('.pane > .dock-bar .dock-split[data-side="bottom"]').click();
+  await page.waitForFunction(() => document.querySelectorAll('.dock-frame:not(.dock-ghost)').length === 2);
+  const [a, b] = await cards(page);
+  assert.ok(Math.abs(a.x - b.x) < 2 && a.y !== b.y, 'one above the other');
+});

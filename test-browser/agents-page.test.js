@@ -885,6 +885,8 @@ test('with no pane open, dragging a board card to the right edge opens it there'
   await page.locator(`.conv[data-id="${id}"]`).waitFor();
   await page.keyboard.press('v');
   await page.waitForFunction(() => document.body.getAttribute('data-view') === 'board');
+  // The switch FLIPs the card into its column; measure it once it has landed.
+  await page.waitForFunction((cid) => document.querySelector(`.column .conv[data-id="${cid}"]`)?.getAnimations().every((a) => a.playState !== 'running'), id);
   const row = await page.locator(`.column .conv[data-id="${id}"]`).boundingBox();
   const board = await page.locator('.board').boundingBox();
   await page.mouse.move(row.x + 40, row.y + 12);

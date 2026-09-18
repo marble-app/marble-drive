@@ -397,7 +397,20 @@ test('dragging a card to the stage pins it, and dragging it back off unpins it',
   // left under the pointer. Aim at the basin where it is now, not where it was.
   const now = await middleOf(page, '.focus-basin[data-folder-id="ungrouped"]');
   await page.mouse.move(now.x, now.box.y + now.box.height - 60, { steps: 6 });
-  await page.locator('.focus-basin[data-folder-id="ungrouped"][data-drop="into"]').waitFor();
+  try {
+    await page.locator('.focus-basin[data-folder-id="ungrouped"][data-drop="into"]').waitFor({ timeout: 4000 });
+  } catch {
+    const state = await page.evaluate(() => ({
+      basins: [...document.querySelectorAll('.focus-basin')].map((b) => [b.dataset.folderId, b.dataset.drop ?? null, JSON.stringify(b.getBoundingClientRect())]),
+      slot: document.querySelector('.focus-slot')?.getBoundingClientRect() ?? null,
+      newgroup: [document.querySelector('.focus-newgroup')?.dataset.drop ?? null, JSON.stringify(document.querySelector('.focus-newgroup')?.getBoundingClientRect())],
+      pinslot: document.querySelector('.focus-pinslot')?.dataset.drop ?? null,
+      cards: [...document.querySelectorAll('.focus-card')].map((c) => [c.dataset.id.slice(0, 4), c.dataset.lod, c.className, JSON.stringify(c.getBoundingClientRect())]),
+      arranging: document.querySelector('.focus')?.dataset.arranging ?? null,
+      scroll: [document.querySelector('.focus').scrollLeft, document.querySelector('.focus').scrollTop],
+    }));
+    throw new Error('basin never lit: ' + JSON.stringify(state) + ' aimed=' + JSON.stringify(now));
+  }
   await release();
   await until(page, async () => (await metaOf(page, ids.a))?.pinned === false, 'the card to unpin');
 });
