@@ -212,3 +212,36 @@ test('a truncated last line in events.jsonl is skipped, and the log carries on a
   assert.deepEqual(events.map((e) => e.seq), [1, 2, 3, 4]);
   assert.equal(logged.filter((m) => /events\.jsonl/.test(m)).length, 1, 'logged once, not on every read');
 });
+
+test('a folder is created with exclusive membership, unused color, and a name from targets', async () => {
+  const { store } = await fresh();
+  const a = await store.createConversation({ provider: 'fake' });
+  const b = await store.createConversation({ provider: 'fake' });
+  await store.updateConversation(a.id, { target: 'Research/Marble/uist' });
+  await store.updateConversation(b.id, { target: 'Research/Marble/notes' });
+  const folder = await store.createFolder({ conversationIds: [a.id, b.id] });
+  assert.match(folder.id, /^[0-9a-f]{12}$/);
+  assert.equal(folder.name, 'Marble');
+  assert.equal(folder.color, 'research');
+  assert.equal((await store.conversation(a.id)).folderId, folder.id);
+  assert.equal((await store.conversation(b.id)).folderId, folder.id);
+  assert.deepEqual(folder.openIds, [a.id, b.id]);
+});
+
+test('moving the last member out dissolves the folder', async () => {
+  const { store } = await fresh();
+  const a = await store.createConversation({ provider: 'fake' });
+  const folder = await store.createFolder({ conversationIds: [a.id], name: 'Solo', color: 'fun' });
+  await store.updateConversation(a.id, { folderId: null });
+  assert.equal((await store.listFolders()).folders.find((f) => f.id === folder.id), undefined);
+  assert.equal((await store.conversation(a.id)).folderId, null);
+});
+
+test('createConversation starts ungrouped and unpinned', async () => {
+  const { store } = await fresh();
+  const meta = await store.createConversation({ provider: 'fake' });
+  assert.equal(meta.folderId, null);
+  assert.equal(meta.pinned, false);
+  assert.equal(meta.focusX, null);
+  assert.equal(meta.lastInteractedAt, meta.createdAt);
+});

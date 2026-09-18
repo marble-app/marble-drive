@@ -16,6 +16,10 @@ import crypto from 'node:crypto';
 import fsp from 'node:fs/promises';
 import path from 'node:path';
 
+import '../../runtime/agent-folders.js';
+
+const folderLib = () => globalThis.marbleAgentFolders;
+
 const REVIEWABLE = new Set(['changes', 'failed', 'interrupted', 'watchdog']);
 
 export const needsReview = (meta) =>
@@ -32,6 +36,12 @@ export const summarize = (meta) => ({
 });
 
 export const conversationOf = (turnId) => turnId.slice(0, turnId.lastIndexOf('-t'));
+
+const clampFocus = (value) => {
+  if (value === null || value === undefined) return null;
+  if (typeof value !== 'number' || Number.isNaN(value)) return null;
+  return Math.min(1, Math.max(0, value));
+};
 
 const readJson = async (file, fallback = null) => {
   try {
@@ -58,6 +68,11 @@ export function createAgentStore({ dir, defaultProvider = 'claude-subscription',
   const turnFile = (turnId) => path.join(convDir(conversationOf(turnId)), 'turns', `${turnId}.json`);
   const undoFile = (turnId) => path.join(convDir(conversationOf(turnId)), 'turns', `${turnId}.undo.json`);
   const rawFile = (turnId) => path.join(convDir(conversationOf(turnId)), 'raw', `${turnId}.jsonl`);
+  const foldersFile = path.join(dir, 'folders.json');
+
+  const readFolders = async () => (await readJson(foldersFile)) ?? { folders: [], workingSetIds: [] };
+
+  const writeFolders = async (state) => writeJson(foldersFile, state);
 
   // One chain per conversation, so two events appended at once still get
   // consecutive numbers and land in the file in that order.
@@ -107,14 +122,56 @@ export function createAgentStore({ dir, defaultProvider = 'claude-subscription',
     return readJson(metaFile(id));
   }
 
+  async function hasFolderMembers(folderId) {
+    for (const cid of await ids()) {
+      const meta = await conversation(cid);
+      if (meta?.folderId === folderId) return true;
+    }
+    return false;
+  }
+
+  async function maybeDissolveFolder(previousFolderId) {
+    if (!previousFolderId) return;
+    return serial('folders', async () => {
+      if (await hasFolderMembers(previousFolderId)) return;
+      const state = await readFolders();
+      const dissolved = state.folders.find((folder) => folder.id === previousFolderId);
+      const dropIds = new Set(dissolved?.openIds ?? []);
+      state.folders = state.folders.filter((folder) => folder.id !== previousFolderId);
+      for (const folder of state.folders) {
+        folder.openIds = (folder.openIds ?? []).filter((openId) => !dropIds.has(openId));
+      }
+      await writeFolders(state);
+    });
+  }
+
   async function updateConversation(id, patch) {
-    return serial(`meta:${id}`, async () => {
+    const interactionFields = ['folderId', 'pinned', 'focusX', 'focusY'];
+    const folderIdPatched = 'folderId' in patch;
+    let previousFolderId;
+
+    const next = await serial(`meta:${id}`, async () => {
       const meta = await conversation(id);
       if (!meta) throw Object.assign(new Error(`no conversation "${id}"`), { status: 404 });
-      const next = { ...meta, ...patch, updatedAt: Date.now() };
-      await writeJson(metaFile(id), next);
-      return next;
+      if (folderIdPatched) previousFolderId = meta.folderId;
+
+      const processed = { ...patch };
+      if ('focusX' in processed) processed.focusX = clampFocus(processed.focusX);
+      if ('focusY' in processed) processed.focusY = clampFocus(processed.focusY);
+      if (interactionFields.some((field) => field in patch)) {
+        processed.lastInteractedAt = Date.now();
+      }
+
+      const updated = { ...meta, ...processed, updatedAt: Date.now() };
+      await writeJson(metaFile(id), updated);
+      return updated;
     });
+
+    if (folderIdPatched && previousFolderId) {
+      await maybeDissolveFolder(previousFolderId);
+    }
+
+    return next;
   }
 
   async function appendEvent(id, event) {
@@ -231,6 +288,11 @@ export function createAgentStore({ dir, defaultProvider = 'claude-subscription',
         lastFinishedAt: null,
         lastOutcome: null,
         lastReviewedAt: null,
+        folderId: null,
+        pinned: false,
+        focusX: null,
+        focusY: null,
+        lastInteractedAt: now,
       };
       await writeJson(metaFile(meta.id), meta);
       return meta;
@@ -239,6 +301,83 @@ export function createAgentStore({ dir, defaultProvider = 'claude-subscription',
     conversation,
     updateConversation,
     summary,
+
+    listFolders: readFolders,
+
+    async createFolder({ conversationIds, name, color }) {
+      const folderId = crypto.randomBytes(6).toString('hex');
+      const targets = [];
+      for (const cid of conversationIds) {
+        const meta = await conversation(cid);
+        if (!meta) throw Object.assign(new Error(`no conversation "${cid}"`), { status: 404 });
+        if (meta.target) targets.push(meta.target);
+      }
+
+      const { suggestName, nextColor, realmOf, FULL_CAP } = folderLib();
+      const folder = await serial('folders', async () => {
+        const state = await readFolders();
+        const existingColors = state.folders.map((row) => row.color);
+        let folderName = name;
+        if (folderName === undefined || folderName === null) folderName = suggestName(targets);
+        let folderColor = color;
+        if (folderColor === undefined || folderColor === null) {
+          const realm = targets.length ? realmOf(targets[0]) : '';
+          const used = new Set(existingColors);
+          folderColor = realm && !used.has(realm) ? realm : nextColor(existingColors);
+        }
+        const maxOrder = state.folders.reduce((max, row) => Math.max(max, row.order ?? 0), -1);
+        const row = {
+          id: folderId,
+          name: folderName,
+          color: folderColor,
+          openIds: conversationIds.slice(0, FULL_CAP),
+          order: maxOrder + 1,
+        };
+        state.folders.push(row);
+        await writeFolders(state);
+        return row;
+      });
+
+      for (const cid of conversationIds) {
+        await updateConversation(cid, { folderId });
+      }
+
+      return folder;
+    },
+
+    async updateFolder(id, patch) {
+      return serial('folders', async () => {
+        const state = await readFolders();
+        const index = state.folders.findIndex((row) => row.id === id);
+        if (index < 0) throw Object.assign(new Error(`no folder "${id}"`), { status: 404 });
+        state.folders[index] = { ...state.folders[index], ...patch };
+        await writeFolders(state);
+        return state.folders[index];
+      });
+    },
+
+    async deleteFolder(id) {
+      await serial('folders', async () => {
+        const state = await readFolders();
+        state.folders = state.folders.filter((row) => row.id !== id);
+        await writeFolders(state);
+      });
+      for (const cid of await ids()) {
+        const meta = await conversation(cid);
+        if (meta?.folderId === id) await updateConversation(cid, { folderId: null });
+      }
+      return readFolders();
+    },
+
+    async setWorkingSet(conversationIds) {
+      return serial('folders', async () => {
+        const state = await readFolders();
+        const existing = new Set(await ids());
+        state.workingSetIds = conversationIds.filter((id) => existing.has(id));
+        await writeFolders(state);
+        return state;
+      });
+    },
 
     async conversations({ archived = false } = {}) {
       const metas = (await Promise.all((await ids()).map((id) => conversation(id)))).filter(Boolean);
