@@ -792,3 +792,22 @@ test('a conversation waiting on the person says Needs you', async () => {
   });
   await page.locator('.conv .badge', { hasText: 'Needs you' }).first().waitFor();
 });
+
+test('stateOf is one vocabulary: waiting, working, failed, unseen, idle', async () => {
+  const { page } = await openAgents();
+  const states = await page.evaluate(() => {
+    const s = window.marbleAgentUI.stateOf;
+    return [
+      s({ asking: true, running: true }),
+      s({ running: true }),
+      s({ queued: true }),
+      s({ needsReview: true, lastOutcome: 'failed' }),
+      s({ needsReview: true, lastOutcome: 'watchdog' }),
+      s({ needsReview: true, lastOutcome: 'done' }),
+      s({ lastOutcome: 'done' }),
+      s({}),
+    ];
+  });
+  assert.deepEqual(states, ['waiting', 'working', 'working', 'failed', 'failed', 'unseen', 'idle', 'idle']);
+  assert.match(await page.evaluate(() => window.marbleAgentUI.STATE_CSS), /\[data-state="waiting"\] \.dot/);
+});
