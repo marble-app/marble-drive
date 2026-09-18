@@ -150,6 +150,7 @@ async function boot({ config, store, writeOps, createDocument, origin, providers
     },
     log,
     skills,
+    onLook,
   });
   await runner.boot();
 

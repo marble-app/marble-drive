@@ -171,8 +171,11 @@ test('list and guide', async () => {
   assert.ok(listed.documents.some((d) => d.path === turn.target));
   const guide = await tools.call('read_guide', {}, turn);
   assert.ok(guide.sections.includes('The op vocabulary'));
+  assert.ok(guide.sections.includes('Growing the open page'));
   const section = await tools.call('read_guide', { section: 'op vocabulary' }, turn);
   assert.match(section.text, /setInner/);
+  const grow = await tools.call('read_guide', { section: 'growing the open page' }, turn);
+  assert.match(grow.text, /insert a stub/i);
 });
 
 test('a path outside the drive is an error', async () => {
@@ -286,23 +289,52 @@ test('check_document reports the format\'s own invariants', async () => {
   assert.deepEqual(await checking.call('check_document', { path: 'nope' }, turn), { error: 'no document "nope"' });
 });
 
+const lookingTools = (onLook) => createTools({
+  store: drive.store,
+  writeOps: drive.writeOps,
+  createDocument: drive.createDocument,
+  buildStarter: build,
+  guidePath: enginePath('skills/build-in-marble/SKILL.md'),
+  examine: () => [],
+  onLook,
+});
+
 test('reading a document outlines those ids for the page, without counting as a write', async () => {
   const seen = [];
-  const looking = createTools({
-    store: drive.store,
-    writeOps: drive.writeOps,
-    createDocument: drive.createDocument,
-    buildStarter: build,
-    guidePath: enginePath('skills/build-in-marble/SKILL.md'),
-    examine: () => [],
-    onLook: (docPath, ids, client) => seen.push({ docPath, ids, client }),
-  });
+  const looking = lookingTools((docPath, ids, client, extra) => seen.push({ docPath, ids, client, extra }));
   const turn = await freshTurn();
   await looking.call('read_document', { path: turn.target, ids: ['h'] }, turn);
   assert.equal(seen.length, 1);
   assert.equal(seen[0].docPath, turn.target);
   assert.deepEqual(seen[0].ids, ['h']);
   assert.equal(seen[0].client, `agent:${turn.conversationId}`);
+  assert.equal(seen[0].extra?.phase, 'reading');
+});
+
+test('apply_ops tapes off the ids it is about to change', async () => {
+  const seen = [];
+  const looking = lookingTools((docPath, ids, client, extra) => seen.push({ docPath, ids, client, extra }));
+  const turn = await freshTurn();
+  await looking.call('read_document', { path: turn.target, ids: ['h'] }, turn);
+  seen.length = 0;
+  await looking.call('apply_ops', {
+    path: turn.target, note: 'rename the heading', ops: [{ type: 'setText', id: 'h', text: 'Backlog' }],
+  }, turn);
+  const writing = seen.find((s) => s.extra?.phase === 'writing');
+  assert.ok(writing, 'apply_ops should look before it writes');
+  assert.deepEqual(writing.ids, ['h']);
+  assert.equal(writing.extra.note, 'rename the heading');
+  assert.equal(writing.client, `agent:${turn.conversationId}`);
+});
+
+test('a refused apply_ops does not tape off the page', async () => {
+  const seen = [];
+  const looking = lookingTools((docPath, ids, client, extra) => seen.push({ docPath, ids, client, extra }));
+  const turn = await freshTurn();
+  await looking.call('apply_ops', {
+    path: turn.target, note: 'rename', ops: [{ type: 'setText', id: 'h', text: 'Backlog' }],
+  }, turn);
+  assert.equal(seen.length, 0);
 });
 
 test('check_document is offered to agents', () => {

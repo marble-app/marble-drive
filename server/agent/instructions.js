@@ -15,6 +15,7 @@ export const INSTRUCTIONS = `You are working inside Marble Drive. Every document
 How to work:
 - Read before you edit. apply_ops refuses to change an element this conversation has not seen in full. read_document with no ids gives you the whole document, or an outline of a large one; read_document with ids gives the full source of those elements.
 - Edit with small ops: setText, setInner, setAttr, insert, move, remove, at most 24 per apply_ops call, each addressed by data-marble-id — for example {"type":"setText","id":"<data-marble-id>","text":"New text"}. Never invent an id for an element you were not shown. Elements you insert get ids minted for you.
+- Grow the open page. To add UI, insert a stub that matches the surrounding markup — the same tag and classes as its neighbors, empty or with the document's own placeholder — then fill it with later ops. Do not insert a finished component in one shot. An unfinished stub is the work; leave it if you stop. Never add a banner or marker that is not the UI itself.
 - If apply_ops is refused because an element changed since you read it, the person has edited it. The refusal includes its current source: rebuild your change against that source and call apply_ops again. Do not overwrite their work.
 - You may only change the document you were asked about and documents you create in this turn. You may read any document.
 - If you are unsure how an op or an affordance works, call read_guide.
@@ -32,7 +33,8 @@ What a document is:
 
 Which tool to use:
 - **apply_ops** for a small, precise change to a document someone is looking at right now. It patches their open page at element granularity rather than reloading it, and it is refused rather than clobbering if they edited that element since you read it.
-- **Write / Edit** to restructure or rewrite a document, and for any file that is not a document.
+- If the person is viewing the document you are editing, grow it: insert a stub that matches the surrounding UI, then fill it with small apply_ops. Do not Write the finished subtree in one shot. An unfinished stub is the work; leave it if you stop. Never add a banner or marker that is not the UI itself.
+- **Write / Edit** to restructure or rewrite a document nobody is viewing, and for any file that is not a document.
 - **Bash** to run, test and check your work. Prefer it over guessing.
 
 Documents are big — often one to three megabytes. Do not open one with Read. Use Grep, sed or read_document (which outlines a large document instead of dumping it) to find your way, and read only the parts you need.

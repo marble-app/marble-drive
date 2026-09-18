@@ -16,6 +16,18 @@ test('the instructions name every tool and the rules the tools enforce', () => {
   assert.ok(INSTRUCTIONS.includes('"type":"setText"'));
 });
 
+test('a documents agent is told to insert a stub that matches the surrounding UI, then fill it', () => {
+  assert.match(INSTRUCTIONS, /insert a stub/i);
+  assert.match(INSTRUCTIONS, /surrounding/i);
+  assert.match(INSTRUCTIONS, /fill it/i);
+});
+
+test('a full agent grows a document the person is viewing instead of Writing the finished subtree', () => {
+  const full = instructionsFor('full');
+  assert.match(full, /person is viewing/i);
+  assert.match(full, /do not Write the finished/i);
+});
+
 test('a probe reports what the command printed and how it exited', async () => {
   const result = await runCommand(process.execPath, ['-e', 'console.log("hi"); console.error("there"); process.exit(3)']);
   assert.equal(result.code, 3);

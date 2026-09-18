@@ -23,7 +23,7 @@ const STDERR_TAIL = 4_000;
 // How long closing the host waits for its running turns to write their end.
 const CLOSE_GRACE_MS = 5_000;
 
-export function createRunner({ store, tools, providers, workdir, origin, bridgePath, readDocument, publish, limits, log = console, skills = [], driveRoot, power = '', sandbox = null }) {
+export function createRunner({ store, tools, providers, workdir, origin, bridgePath, readDocument, publish, limits, log = console, skills = [], driveRoot, power = '', sandbox = null, onLook = null }) {
   const live = new Map(); // turnId → live turn
   const order = []; // turnIds, in the order they were sent
   const tokens = new Map(); // token → live turn
@@ -186,6 +186,21 @@ export function createRunner({ store, tools, providers, workdir, origin, bridgeP
     }
   }
 
+  function look(turn, extra = {}) {
+    if (!onLook || !turn?.target) return;
+    const ids = Object.hasOwn(extra, 'ids')
+      ? extra.ids
+      : (Array.isArray(turn.context?.selection) ? turn.context.selection.map(String) : []);
+    const meta = {};
+    if (extra.phase) meta.phase = extra.phase;
+    if (extra.note) meta.note = extra.note;
+    try {
+      onLook(turn.target, ids, `agent:${turn.conversationId}`, Object.keys(meta).length ? meta : undefined);
+    } catch (err) {
+      log.error(`[agents] ${err.message}`);
+    }
+  }
+
   async function start(turn) {
     turn.status = 'running';
     try {
@@ -194,6 +209,7 @@ export function createRunner({ store, tools, providers, workdir, origin, bridgeP
       await store.updateTurn(turn.id, { status: 'running', startedAt: Date.now() });
       await store.updateConversation(turn.conversationId, { running: true, activity: `Working on ${turn.target}` });
       await emit(turn, { type: 'turn.started', provider: meta.provider });
+      look(turn, { phase: 'working' });
 
       if (!provider) return safeFinish(turn, { status: 'failed', error: `no provider "${meta.provider}"` });
       turn.provider = provider;
@@ -346,6 +362,7 @@ export function createRunner({ store, tools, providers, workdir, origin, bridgeP
     // clobbers the next turn's fresher one.
     if (turn.finishing) return;
     turn.finishing = true;
+    look(turn, { ids: [] });
     for (const clear of turn.timers) clear();
     if (turn.inflight.size) await Promise.allSettled([...turn.inflight]);
 

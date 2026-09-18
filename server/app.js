@@ -232,7 +232,13 @@ export async function createDrive(config, { log = console, agentProviders = null
       channels.toDrive('changed', { path: docPath, bytes: result.bytes }, { except: options.client ?? null });
       const ids = idsOfOps(result.ops ?? []);
       if (ids.length) {
-        channels.toPresence(docPath, { client: options.client ?? 'anon', ids, label: options.client ?? undefined }, { except });
+        const client = options.client ?? 'anon';
+        const payload = { client, ids, label: options.client ?? undefined };
+        if (String(client).startsWith('agent')) {
+          payload.phase = 'writing';
+          if (options.note) payload.note = options.note;
+        }
+        channels.toPresence(docPath, payload, { except });
       }
     }
     return result;
@@ -680,9 +686,15 @@ export async function createDrive(config, { log = console, agentProviders = null
       log,
       usage,
       sandbox: agentSandbox ?? null,
-      onLook: (docPath, ids, client) => {
-        if (!ids?.length) return;
-        channels.toPresence(docPath, { client, ids, label: client });
+      onLook: (docPath, ids, client, extra = {}) => {
+        if (!client) return;
+        channels.toPresence(docPath, {
+          client,
+          ids: Array.isArray(ids) ? ids : [],
+          label: extra.label ?? client,
+          ...(extra.phase ? { phase: extra.phase } : {}),
+          ...(extra.note ? { note: extra.note } : {}),
+        });
       },
     }).catch((err) => {
       if (err.code !== 'EAGENTSHELD') throw err;
@@ -870,7 +882,13 @@ button{background:#738698;color:#fafaf7;border-color:#738698;cursor:pointer}p{co
         channels.toDocument(docPath, 'changed', { ops: merged.ops });
         channels.toDrive('changed', { path: docPath });
         const ids = idsOfOps(merged.ops);
-        if (ids.length) channels.toPresence(docPath, { client: conv ? `agent:${conv}` : 'agent', ids });
+        if (ids.length) {
+          channels.toPresence(docPath, {
+            client: conv ? `agent:${conv}` : 'agent',
+            ids,
+            phase: 'writing',
+          });
+        }
         return;
       }
 
@@ -881,7 +899,12 @@ button{background:#738698;color:#fafaf7;border-color:#738698;cursor:pointer}p{co
       channels.toDrive('changed', { path: docPath });
       const ids = idsOfOps(ops);
       if (ids.length) {
-        channels.toPresence(docPath, { client: conv ? `agent:${conv}` : 'outside', ids });
+        const client = conv ? `agent:${conv}` : 'outside';
+        channels.toPresence(docPath, {
+          client,
+          ids,
+          ...(client.startsWith('agent') ? { phase: 'writing' } : {}),
+        });
       }
       return;
     }

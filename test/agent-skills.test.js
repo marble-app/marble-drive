@@ -4,7 +4,11 @@ import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
 
+import { fileURLToPath } from 'node:url';
+
 import { installSkills, listSkills } from '../server/agent/skills.js';
+
+const REPO_AGENT_SKILLS = path.join(path.dirname(fileURLToPath(import.meta.url)), '..', '.agents', 'skills');
 
 const skillDir = async (root, name, body) => {
   const dir = path.join(root, name);
@@ -22,6 +26,17 @@ test('listSkills reads name and description from each SKILL.md, and skips folder
   assert.equal(listed.length, 2);
   assert.equal(listed.find((s) => s.id === 'my-day').description, "Compose Bryan's Days");
   assert.equal(listed.find((s) => s.id === 'empty-name').description, '');
+});
+
+test('the drive ships growing-the-open-page so every agent workspace can load it', async () => {
+  const listed = await listSkills([REPO_AGENT_SKILLS]);
+  const grow = listed.find((s) => s.id === 'growing-the-open-page');
+  assert.ok(grow, 'repo .agents/skills/growing-the-open-page must exist');
+  assert.match(grow.description, /^Use when /);
+  const body = await fsp.readFile(path.join(grow.dir, 'SKILL.md'), 'utf8');
+  assert.match(body, /read_guide/);
+  assert.match(body, /Growing the open page/);
+  assert.doesNotMatch(body, /under construction/i);
 });
 
 test('installSkills copies each skill into the conversation workspace', async () => {

@@ -1,10 +1,10 @@
 // Drive's collaboration chrome. Transient, injected like the agent drawer.
 //
 // The package decides what landed: ops, a fork, a presence set. This file is
-// the look — a quiet outline while someone writes, a wash on a disjoint apply,
-// and Keep / Merge on a conflict <marble-alt>. Authoring alts (natures, drafts,
-// titles) keep the document's own switcher. Another host using @bdhmin/marble
-// draws something else against the same events.
+// the look — a quiet mark while an agent works, a wash on a person
+// sitting in an id, and Keep / Merge on a conflict <marble-alt>. Authoring
+// alts (natures, drafts, titles) keep the document's own switcher. Another
+// host using @bdhmin/marble draws something else against the same events.
 
 (() => {
   const TRANSIENT = 'data-marble-transient';
@@ -152,12 +152,156 @@
         outline-offset: 2px;
       }
 
+      .marble-zone-layer {
+        position: fixed;
+        inset: 0;
+        pointer-events: none;
+        z-index: 2147483000;
+      }
+      .marble-zone {
+        --zone-mark: color-mix(in srgb, var(--accent, #9bb6cf) 72%, var(--ink, #111));
+        --zone-arm: 15px;
+        --zone-hair: 1.5px;
+        position: fixed;
+        pointer-events: none;
+        box-sizing: border-box;
+        border: 0;
+        background-color: transparent;
+        background-image:
+          linear-gradient(var(--zone-mark), var(--zone-mark)),
+          linear-gradient(var(--zone-mark), var(--zone-mark)),
+          linear-gradient(var(--zone-mark), var(--zone-mark)),
+          linear-gradient(var(--zone-mark), var(--zone-mark)),
+          linear-gradient(var(--zone-mark), var(--zone-mark)),
+          linear-gradient(var(--zone-mark), var(--zone-mark)),
+          linear-gradient(var(--zone-mark), var(--zone-mark)),
+          linear-gradient(var(--zone-mark), var(--zone-mark));
+        background-size:
+          var(--zone-arm) var(--zone-hair), var(--zone-hair) var(--zone-arm),
+          var(--zone-arm) var(--zone-hair), var(--zone-hair) var(--zone-arm),
+          var(--zone-arm) var(--zone-hair), var(--zone-hair) var(--zone-arm),
+          var(--zone-arm) var(--zone-hair), var(--zone-hair) var(--zone-arm);
+        background-position:
+          top left, top left,
+          top right, top right,
+          bottom left, bottom left,
+          bottom right, bottom right;
+        background-repeat: no-repeat;
+        animation: marble-fade-in 220ms ${EASE} both;
+        transition:
+          top 180ms ${EASE},
+          left 180ms ${EASE},
+          width 180ms ${EASE},
+          height 180ms ${EASE};
+      }
+      .marble-zone-label {
+        pointer-events: auto;
+        position: absolute;
+        left: 0;
+        top: 100%;
+        margin-top: 8px;
+        display: flex;
+        align-items: center;
+        gap: .55rem;
+        max-width: min(100%, 28rem);
+        padding: 0;
+        border: 0;
+        background: none;
+        color: color-mix(in srgb, var(--ink, #111) 82%, var(--paper, #fff));
+        font: 500 12px/1.2 var(--ui-font, system-ui, sans-serif);
+        letter-spacing: -.012em;
+        white-space: nowrap;
+        user-select: none;
+        text-shadow:
+          0 0 10px var(--paper, #fff),
+          0 0 10px var(--paper, #fff);
+      }
+      .marble-zone-label span:not(.marble-zone-live) {
+        overflow: hidden;
+        text-overflow: ellipsis;
+      }
+      .marble-zone-live {
+        width: 7px;
+        height: 7px;
+        border-radius: 50%;
+        flex: none;
+        background: var(--zone-mark, color-mix(in srgb, var(--accent, #9bb6cf) 72%, var(--ink, #111)));
+        animation: marble-zone-breathe 2.8s ease-in-out infinite;
+      }
+      @keyframes marble-zone-breathe {
+        0%, 100% { opacity: .38; }
+        50% { opacity: 1; }
+      }
+      .marble-zone-tight > .marble-zone-label {
+        top: auto;
+        bottom: 2px;
+        margin-top: 0;
+      }
+      .marble-zone-page {
+        top: 20px;
+        left: 50%;
+        transform: translateX(-50%);
+        width: max-content;
+        max-width: min(28rem, calc(100vw - 32px));
+        height: auto;
+        background-image: none;
+      }
+      .marble-zone-page > .marble-zone-label {
+        position: static;
+        max-width: none;
+        margin: 0;
+      }
+      .marble-zone-label button,
+      .marble-zones-show {
+        appearance: none;
+        border: 0;
+        background: none;
+        color: color-mix(in srgb, var(--ink, #111) 52%, var(--paper, #fff));
+        cursor: pointer;
+        font: inherit;
+        letter-spacing: inherit;
+        padding: .35rem .15rem;
+        border-radius: 0;
+        flex: none;
+        text-shadow: inherit;
+      }
+      .marble-zone-label button:hover,
+      .marble-zones-show:hover {
+        color: color-mix(in srgb, var(--ink, #111) 88%, var(--paper, #fff));
+      }
+      .marble-zone-label button:active,
+      .marble-zones-show:active { opacity: .7; }
+      .marble-zone-label button:focus-visible,
+      .marble-zones-show:focus-visible {
+        outline: 2px solid var(--accent, #9bb6cf);
+        outline-offset: 3px;
+      }
+      .marble-zones-show {
+        position: fixed;
+        top: 20px;
+        right: 20px;
+        z-index: 2147483001;
+        pointer-events: auto;
+        color: color-mix(in srgb, var(--ink, #111) 72%, var(--paper, #fff));
+        font: 500 12px/1.2 var(--ui-font, system-ui, sans-serif);
+        letter-spacing: -.012em;
+        text-shadow:
+          0 0 10px var(--paper, #fff),
+          0 0 10px var(--paper, #fff);
+        animation: marble-fade-in 220ms ${EASE} both;
+      }
+
       @media (prefers-reduced-motion: reduce) {
         .marble-flash,
         .marble-fork,
-        .marble-fork.marble-fork-out { animation: none; }
+        .marble-fork.marble-fork-out,
+        .marble-zone,
+        .marble-zone-live,
+        .marble-zones-show { animation: none; }
+        .marble-zone-live { opacity: .7; }
         .marble-presence,
         .marble-presence-out,
+        .marble-zone,
         html.marble-collab-host marble-alt.marble-forked > [data-marble-alt],
         .marble-fork-seg button,
         .marble-fork-acts button { transition: none; }
@@ -166,6 +310,8 @@
       @media (prefers-reduced-transparency: reduce) {
         .marble-fork-seg { background: var(--paper-2, #f3f1ea); }
         .marble-presence { background-color: color-mix(in srgb, var(--accent, #9bb6cf) 28%, transparent); }
+        .marble-zone-label,
+        .marble-zones-show { text-shadow: none; }
       }
     `;
     document.head.append(style);
@@ -224,12 +370,120 @@
       flashes.set(el, setTimeout(() => el.classList.remove('marble-flash'), 480));
     }
 
+    const isAgent = (client) => String(client ?? '').startsWith('agent');
+    const hideKey = () => `marble-zones-off:${marble.app ?? location.pathname}`;
+    const zonesHidden = () => {
+      try { return sessionStorage.getItem(hideKey()) === '1'; } catch { return false; }
+    };
+    const setZonesHidden = (off) => {
+      try { sessionStorage.setItem(hideKey(), off ? '1' : '0'); } catch { /* private mode */ }
+      paintZones();
+    };
+
+    const skipTape = new Set(['HTML', 'BODY', 'HEAD', 'STYLE', 'SCRIPT', 'LINK', 'META', 'TITLE']);
+    function tapeTarget(els) {
+      const visible = els.filter((el) => {
+        if (skipTape.has(el.tagName)) return false;
+        const r = el.getBoundingClientRect();
+        return r.width > 0 || r.height > 0;
+      });
+      if (!visible.length) return null;
+      let node = visible[0];
+      for (let i = 1; i < visible.length; i++) {
+        while (node && !node.contains(visible[i])) node = node.parentElement;
+      }
+      if (!node || node === document.documentElement || node === document.body) return null;
+      return node;
+    }
+
+    function phaseLabel(detail) {
+      const note = String(detail.note ?? '').trim();
+      if (note) return note;
+      if (detail.phase === 'reading') return 'Reading';
+      if (detail.phase === 'writing') return 'Writing';
+      return 'Working';
+    }
+
+    const zoneLayer = document.createElement('div');
+    zoneLayer.className = 'marble-zone-layer';
+    zoneLayer.setAttribute(TRANSIENT, '');
+    zoneLayer.setAttribute('aria-live', 'polite');
+    document.documentElement.append(zoneLayer);
+
+    const showWork = document.createElement('button');
+    showWork.type = 'button';
+    showWork.className = 'marble-zones-show';
+    showWork.setAttribute(TRANSIENT, '');
+    showWork.textContent = 'Show work';
+    showWork.hidden = true;
+    showWork.addEventListener('click', () => setZonesHidden(false));
+    document.documentElement.append(showWork);
+
+    let placed = [];
+    function place(frame, el) {
+      const r = el.getBoundingClientRect();
+      const pad = 10;
+      Object.assign(frame.style, {
+        top: `${r.top - pad}px`,
+        left: `${r.left - pad}px`,
+        width: `${Math.max(24, r.width + pad * 2)}px`,
+        height: `${Math.max(24, r.height + pad * 2)}px`,
+      });
+      frame.classList.toggle('marble-zone-tight', r.bottom > innerHeight - 40);
+    }
+
+    function paintZones() {
+      placed = [];
+      zoneLayer.replaceChildren();
+      const live = [...presence.values()].filter((detail) => (
+        isAgent(detail.client) && (detail.ids?.length || detail.phase)
+      ));
+      const hidden = zonesHidden();
+      document.documentElement.classList.toggle('marble-zones-off', hidden);
+      if (!live.length) {
+        showWork.hidden = true;
+        return;
+      }
+      if (hidden) {
+        showWork.hidden = false;
+        return;
+      }
+      showWork.hidden = true;
+      for (const detail of live) {
+        const els = (detail.ids ?? []).map((id) => byId(id)).filter(Boolean);
+        const target = tapeTarget(els);
+        const frame = document.createElement('div');
+        frame.className = target ? 'marble-zone' : 'marble-zone marble-zone-page';
+        frame.setAttribute(TRANSIENT, '');
+        const label = document.createElement('div');
+        label.className = 'marble-zone-label';
+        const live = document.createElement('span');
+        live.className = 'marble-zone-live';
+        live.setAttribute('aria-hidden', 'true');
+        const text = document.createElement('span');
+        text.textContent = phaseLabel(detail);
+        const hide = document.createElement('button');
+        hide.type = 'button';
+        hide.textContent = 'Hide';
+        hide.setAttribute('aria-label', 'Hide construction zone');
+        hide.addEventListener('click', () => setZonesHidden(true));
+        label.append(live, text, hide);
+        frame.append(label);
+        zoneLayer.append(frame);
+        if (target) {
+          place(frame, target);
+          placed.push({ frame, target });
+        }
+      }
+    }
+
     const presence = new Map();
     const presenceOut = new WeakMap();
     function paintPresence() {
       const wanted = new Set();
-      for (const { ids } of presence.values()) {
-        for (const id of ids) if (id) wanted.add(id);
+      for (const detail of presence.values()) {
+        if (isAgent(detail.client)) continue;
+        for (const id of detail.ids ?? []) if (id) wanted.add(id);
       }
 
       for (const el of document.querySelectorAll('.marble-presence, .marble-presence-out')) {
@@ -252,9 +506,19 @@
 
     document.addEventListener('marble:presence', ({ detail }) => {
       if (!detail?.client) return;
-      if (!detail.ids?.length) presence.delete(detail.client);
-      else presence.set(detail.client, detail);
+      const ids = Array.isArray(detail.ids) ? detail.ids : [];
+      const live = ids.length || (isAgent(detail.client) && detail.phase);
+      if (live) presence.set(detail.client, { ...detail, ids });
+      else presence.delete(detail.client);
       paintPresence();
+      paintZones();
+    });
+
+    addEventListener('scroll', () => {
+      for (const { frame, target } of placed) place(frame, target);
+    }, true);
+    addEventListener('resize', () => {
+      for (const { frame, target } of placed) place(frame, target);
     });
 
     document.addEventListener('marble:ops', ({ detail }) => {

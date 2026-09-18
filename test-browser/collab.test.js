@@ -134,23 +134,86 @@ test('a remote op flashes the component it changed', async () => {
   assert.equal(await page.locator('[data-marble-id="p"]').evaluate((el) => el.classList.contains('marble-flash')), true);
 });
 
-test('presence outlines the id another writer is on, then fades out', async () => {
+test('person presence washes the id they are on, then fades out', async () => {
   await host.reset();
   const { page } = await host.newPage();
   await page.goto(`${host.base}/a/forked`);
   await page.waitForFunction(() => document.documentElement.classList.contains('marble-collab-host'));
   await page.evaluate(() => {
     document.dispatchEvent(new CustomEvent('marble:presence', {
-      detail: { client: 'agent:c1', ids: ['p'] },
+      detail: { client: 'person:c1', ids: ['p'] },
     }));
   });
   assert.equal(await page.locator('[data-marble-id="p"]').evaluate((el) => el.classList.contains('marble-presence')), true);
+  assert.equal(await page.locator('.marble-zone').count(), 0, 'people get a wash, not a construction zone');
+
+  await page.evaluate(() => {
+    document.dispatchEvent(new CustomEvent('marble:presence', {
+      detail: { client: 'person:c1', ids: [] },
+    }));
+  });
+  assert.equal(await page.locator('[data-marble-id="p"]').evaluate((el) => el.classList.contains('marble-presence-out')), true);
+  assert.equal(await page.locator('[data-marble-id="p"]').evaluate((el) => el.classList.contains('marble-presence')), false);
+});
+
+test('agent presence tapes off the region it is working on', async () => {
+  await host.reset();
+  const { page } = await host.newPage();
+  await page.goto(`${host.base}/a/forked`);
+  await page.waitForFunction(() => document.documentElement.classList.contains('marble-collab-host'));
+  await page.evaluate(() => {
+    document.dispatchEvent(new CustomEvent('marble:presence', {
+      detail: { client: 'agent:c1', ids: ['p'], phase: 'working' },
+    }));
+  });
+  const zone = page.locator('.marble-zone');
+  assert.equal(await zone.count(), 1);
+  assert.match(await zone.innerText(), /Working/);
+  assert.equal(
+    await page.locator('[data-marble-id="p"]').evaluate((el) => el.classList.contains('marble-presence')),
+    false,
+    'agent work is a construction zone, not a per-id wash',
+  );
 
   await page.evaluate(() => {
     document.dispatchEvent(new CustomEvent('marble:presence', {
       detail: { client: 'agent:c1', ids: [] },
     }));
   });
-  assert.equal(await page.locator('[data-marble-id="p"]').evaluate((el) => el.classList.contains('marble-presence-out')), true);
-  assert.equal(await page.locator('[data-marble-id="p"]').evaluate((el) => el.classList.contains('marble-presence')), false);
+  assert.equal(await page.locator('.marble-zone').count(), 0);
+});
+
+test('the construction label uses the apply_ops note, and Hide puts it away', async () => {
+  await host.reset();
+  const { page } = await host.newPage();
+  await page.goto(`${host.base}/a/forked`);
+  await page.waitForFunction(() => document.documentElement.classList.contains('marble-collab-host'));
+  await page.evaluate(() => {
+    document.dispatchEvent(new CustomEvent('marble:presence', {
+      detail: { client: 'agent:c1', ids: ['p'], phase: 'writing', note: 'rename the heading' },
+    }));
+  });
+  const zone = page.locator('.marble-zone');
+  assert.match(await zone.innerText(), /rename the heading/);
+
+  await page.getByRole('button', { name: 'Hide' }).click();
+  assert.equal(await page.locator('.marble-zone').count(), 0);
+  assert.equal(await page.getByRole('button', { name: 'Show work' }).count(), 1);
+
+  await page.getByRole('button', { name: 'Show work' }).click();
+  assert.equal(await page.locator('.marble-zone').count(), 1);
+});
+
+test('agent work with no ids is a page banner, not a box around the document', async () => {
+  await host.reset();
+  const { page } = await host.newPage();
+  await page.goto(`${host.base}/a/forked`);
+  await page.waitForFunction(() => document.documentElement.classList.contains('marble-collab-host'));
+  await page.evaluate(() => {
+    document.dispatchEvent(new CustomEvent('marble:presence', {
+      detail: { client: 'agent:c1', ids: [], phase: 'working' },
+    }));
+  });
+  assert.equal(await page.locator('.marble-zone-page').count(), 1);
+  assert.match(await page.locator('.marble-zone-page').innerText(), /Working/);
 });

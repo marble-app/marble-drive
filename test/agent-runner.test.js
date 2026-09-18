@@ -17,7 +17,7 @@ const SCRIPTS = {
   forgetful: [{ lostWhenResumed: 'No conversation found with session ID: x' }, { say: 'fresh' }],
 };
 
-async function setup({ limits = {}, tools } = {}) {
+async function setup({ limits = {}, tools, onLook } = {}) {
   const dir = await fsp.mkdtemp(path.join(os.tmpdir(), 'marble-runner-'));
   const store = createAgentStore({ dir: path.join(dir, 'agents'), defaultProvider: 'fake' });
   await store.ready();
@@ -34,6 +34,7 @@ async function setup({ limits = {}, tools } = {}) {
     publish: (conversationId, event) => published.push({ conversationId, event }),
     limits: { maxRunning: 3, stallMs: 60_000, maxMs: 60_000, killGraceMs: 200, ...limits },
     log: { log() {}, error() {} },
+    onLook,
   });
   await runner.boot();
   return { store, runner, published, toolCalls };
@@ -69,6 +70,23 @@ test('a turn runs, streams into the transcript, and completes', async () => {
   assert.ok(published.some((p) => p.event.type === 'text.delta'), 'deltas are published live');
   assert.ok(!(await store.events(id)).some((e) => e.type === 'text.delta'), 'and never stored');
   assert.match((await store.conversation(id)).providerSession, /^fake-/);
+  await runner.close();
+});
+
+test('a turn tapes off the selection while it runs, then clears it', async () => {
+  const looks = [];
+  const { store, runner } = await setup({
+    onLook: (doc, ids, client, extra) => looks.push({ doc, ids, client, extra }),
+  });
+  const { id } = await store.createConversation({ provider: 'fake' });
+  const { turnId } = await runner.send(id, { prompt: 'script:hello', context: { target: 'notes', selection: ['p'] } });
+  await until(() => looks.some((look) => look.extra?.phase === 'working'));
+  const start = looks.find((look) => look.extra?.phase === 'working');
+  assert.equal(start.doc, 'notes');
+  assert.deepEqual(start.ids, ['p']);
+  assert.equal(start.client, `agent:${id}`);
+  await finished(store, turnId);
+  assert.ok(looks.some((look) => look.ids.length === 0 && !look.extra?.phase), 'turn end clears the zone');
   await runner.close();
 });
 

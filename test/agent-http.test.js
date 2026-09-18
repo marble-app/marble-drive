@@ -183,7 +183,18 @@ test('an agent edits a document through the bridge, and the open tab hears it', 
     assert.ok(types.includes(type), type);
   }
   assert.equal(body.meta.needsReview, true);
-  assert.ok((await heard).includes('changed'));
+  const framesSeen = await heard;
+  assert.ok(framesSeen.includes('changed'));
+  const presence = framesSeen.flatMap((s) => {
+    try {
+      const payload = JSON.parse(s);
+      return payload?.client ? [payload] : [];
+    } catch {
+      return [];
+    }
+  });
+  assert.ok(presence.some((p) => p.phase === 'writing' && p.ids?.includes('h')), 'apply_ops tapes the heading');
+  assert.ok(presence.some((p) => p.phase === 'reading' || p.phase === 'working'), 'the turn announced itself before the write');
 });
 
 test('the conversation stream replays what happened and follows what happens next', async () => {

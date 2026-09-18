@@ -18,7 +18,7 @@
 
 import fsp from 'node:fs/promises';
 
-import { collectSlices, OP, repairOps, validateOps } from '../engine.js';
+import { collectSlices, idsOfOps, OP, repairOps, validateOps } from '../engine.js';
 import { parsePath, splitPath } from '../paths.js';
 import { inverseSteps } from './inverse.js';
 import { hashesOf, idsIn, tagsOf, topLevelIds } from './source.js';
@@ -132,13 +132,13 @@ export function createTools({ store, writeOps, createDocument, buildStarter, gui
       if (!ids && source.length <= READ_BUDGET) {
         const known = hashesOf(source);
         for (const [id, h] of known) ledger.set(id, h);
-        onLook?.(docPath, [...known.keys()], client);
+        onLook?.(docPath, [...known.keys()], client, { phase: 'reading' });
         return { path: docPath, whole: true, source };
       }
 
       const slices = collectSlices(source, ids ?? topLevelIds(source), { budget: READ_BUDGET });
       remember(ledger, source, slices);
-      onLook?.(docPath, slices.map((slice) => slice.id), client);
+      onLook?.(docPath, slices.map((slice) => slice.id), client, { phase: 'reading' });
       return {
         path: docPath,
         whole: false,
@@ -160,6 +160,7 @@ export function createTools({ store, writeOps, createDocument, buildStarter, gui
 
       const result = await writeOps(docPath, [], {
         client: `agent:${turn.conversationId}`,
+        note: input.note,
         prepare: async (source) => {
           let ops;
           try {
@@ -198,6 +199,10 @@ export function createTools({ store, writeOps, createDocument, buildStarter, gui
 
           steps = inverseSteps(source, ops);
           introduced = ops.filter((op) => op.type === 'insert').flatMap((op) => idsIn(op.html));
+          onLook?.(docPath, idsOfOps(ops), `agent:${turn.conversationId}`, {
+            phase: 'writing',
+            note: input.note,
+          });
           return { ops };
         },
         after: (_before, next) => {
