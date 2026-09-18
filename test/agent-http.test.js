@@ -601,3 +601,12 @@ test('POST /agent/turns/:id/answer answers an open ask once', async () => {
   assert.equal((await api('POST', `/agent/turns/${conv.id}-t1/answer`, { requestId: ask.requestId, response: { behavior: 'allow' } })).status, 409);
   assert.equal((await api('POST', `/agent/turns/${conv.id}-t9/answer`, { requestId: 'x', response: {} })).status, 409);
 });
+
+test('GET /agent/skills prefers what the CLI reported for that provider', async () => {
+  await drive.agents.store.saveSettings({ skills: { fake: [{ id: 'superpowers:brainstorming', name: 'superpowers:brainstorming', description: 'Design first' }] } });
+  const forFake = await api('GET', '/agent/skills?provider=fake');
+  assert.deepEqual(forFake.body, [{ id: 'superpowers:brainstorming', name: 'superpowers:brainstorming', description: 'Design first' }]);
+  const plain = await api('GET', '/agent/skills');
+  assert.equal(plain.status, 200);
+  assert.ok(Array.isArray(plain.body));
+});

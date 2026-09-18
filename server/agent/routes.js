@@ -174,6 +174,10 @@ export function createAgentRoutes({ store, runner, tools, hub, providers, writeO
     }
 
     if (route === '/agent/skills' && method === 'GET') {
+      // What the CLI itself reported last time it ran beats a directory scan.
+      const provider = url.searchParams.get('provider');
+      const recorded = provider ? (await store.settings()).skills?.[provider] : null;
+      if (Array.isArray(recorded) && recorded.length) return json(res, 200, recorded);
       const list = typeof skills === 'function' ? await skills() : skills;
       return json(res, 200, list.map(({ id, name, description }) => ({ id, name: name ?? id, description: description ?? '' })));
     }

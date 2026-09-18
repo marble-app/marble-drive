@@ -143,7 +143,7 @@
       providers: () => ask('/agent/providers'),
       settings: () => ask('/agent/settings'),
       saveSettings: (patch) => ask('/agent/settings', { method: 'PUT', body: patch }),
-      skills: () => ask('/agent/skills'),
+      skills: (provider = null) => ask(provider ? `/agent/skills?provider=${enc(provider)}` : '/agent/skills'),
       usage: () => ask('/agent/usage'),
       workspace: () => ask('/agent/workspace'),
       conversations: ({ archived = false } = {}) => ask(`/agent/conversations${archived ? '?archived=1' : ''}`),

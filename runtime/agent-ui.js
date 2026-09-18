@@ -1580,6 +1580,9 @@
 
     async syncCatalog({ model, effort } = {}) {
       const provider = this.currentProvider();
+      if (provider?.id && this.api?.skills) {
+        this.skills = await this.api.skills(provider.id).catch(() => this.skills ?? []);
+      }
       let settings = {};
       try {
         settings = await this.api.settings();
