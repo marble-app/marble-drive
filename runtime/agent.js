@@ -100,8 +100,10 @@
           if (current.history) current.history.push(data);
           for (const handler of [...current.handlers]) handler(data);
         };
-        if (key === '*') entry.source.addEventListener('summary', deliver);
-        else entry.source.onmessage = deliver;
+        if (key === '*') {
+          entry.source.addEventListener('summary', deliver);
+          entry.source.addEventListener('folders', deliver);
+        } else entry.source.onmessage = deliver;
         streams.set(key, entry);
       }
       entry.handlers.add(fn);
@@ -180,6 +182,12 @@
       archive: (id, archived = true) => ask(`/agent/conversations/${enc(id)}`, { method: 'PATCH', body: { archived } }),
       markReviewed: (id) => ask(`/agent/conversations/${enc(id)}`, { method: 'PATCH', body: { reviewed: true } }),
       restore: (docPath, sha) => ask(`/restore?app=${enc(docPath)}&sha=${enc(sha)}`, { method: 'POST' }),
+
+      folders: () => ask('/agent/folders'),
+      createFolder: (body) => ask('/agent/folders', { method: 'POST', body }),
+      updateFolder: (id, patch) => ask(`/agent/folders/${enc(id)}`, { method: 'PATCH', body: patch }),
+      deleteFolder: (id) => ask(`/agent/folders/${enc(id)}`, { method: 'DELETE' }),
+      saveWorkingSet: (ids) => ask('/agent/folders/working-set', { method: 'PUT', body: { ids } }),
 
       on,
       context,
