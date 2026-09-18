@@ -44,8 +44,8 @@ async function mount(id = null) {
 }
 
 const sendFrom = async (view, text) => {
-  await view.locator('textarea').fill(text);
-  await view.locator('textarea').press('Enter');
+  await view.locator('.editor').fill(text);
+  await view.locator('.editor').press('Enter');
 };
 
 test('a new conversation picks an agent, sends on Enter, and becomes that conversation', async () => {
@@ -640,7 +640,7 @@ test('Shift+Tab cycles the CLI mode', async () => {
   const { page, view } = await mount();
   await view.locator('.status-mode').waitFor();
   assert.match(await view.locator('.status-mode').textContent(), /Default/);
-  await view.locator('textarea').press('Shift+Tab');
+  await view.locator('.editor').press('Shift+Tab');
   assert.match(await view.locator('.status-mode').textContent(), /Plan/);
   await view.locator('input[name="model"][value="alt"]').check();
   const started = page.evaluate(() => new Promise((resolve) => document.querySelector('marble-conversation').addEventListener('conversation', (e) => resolve(e.detail.id), { once: true })));
@@ -654,7 +654,7 @@ test('Shift+Tab cycles the CLI mode', async () => {
 test('typing / lists clear, compact, models, effort and skills', async () => {
   const { view } = await mount();
   await view.locator('input[name="agent"][value="fake"]').waitFor();
-  await view.locator('textarea').fill('/');
+  await view.locator('.editor').fill('/');
   await view.locator('.slash').waitFor();
   const listed = await view.locator('.slash').textContent();
   assert.match(listed, /Clear conversation/);
@@ -695,11 +695,11 @@ test('the conversation title can be edited', async () => {
 test('Tab on a slash command turns it into a chip', async () => {
   const { view } = await mount();
   await view.locator('input[name="agent"][value="fake"]').waitFor();
-  await view.locator('textarea').fill('/comp');
+  await view.locator('.editor').fill('/comp');
   await view.locator('.slash').waitFor();
-  await view.locator('textarea').press('Tab');
+  await view.locator('.editor').press('Tab');
   assert.match(await view.locator('.chip').textContent(), /Compact/i);
-  assert.equal(await view.locator('textarea').inputValue(), '');
+  assert.equal(await view.locator('.editor').evaluate((el) => el.value), '');
   assert.equal(await view.locator('.slash').isVisible(), false);
 });
 
@@ -855,10 +855,10 @@ test('the context chip names the aimed target and how many more are in view', as
 
 test('shift+enter makes a new line instead of sending', async () => {
   const { view } = await mount();
-  await view.locator('textarea').fill('one');
-  await view.locator('textarea').press('Shift+Enter');
-  await view.locator('textarea').pressSequentially('two');
-  assert.equal(await view.locator('textarea').inputValue(), 'one\ntwo');
+  await view.locator('.editor').fill('one');
+  await view.locator('.editor').press('Shift+Enter');
+  await view.locator('.editor').pressSequentially('two');
+  assert.equal(await view.locator('.editor').evaluate((el) => el.value), 'one\ntwo');
   assert.equal(await view.locator('.msg.me').count(), 0);
 });
 

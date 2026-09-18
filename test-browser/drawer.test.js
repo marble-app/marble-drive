@@ -68,9 +68,9 @@ test('⌘J and Ctrl+J toggle it, Escape closes it, and opening focuses the compo
   await opened(panel);
   await page.waitForFunction(() => {
     const view = document.querySelector('marble-agent-drawer').shadowRoot.querySelector('marble-conversation');
-    return view.shadowRoot.activeElement?.tagName === 'TEXTAREA';
+    return view.shadowRoot.activeElement?.classList.contains('editor');
   });
-  await view.locator('textarea').press('Escape');
+  await view.locator('.editor').press('Escape');
   await panel.locator('xpath=self::*[@data-open="false"]').waitFor();
   await page.keyboard.press('Control+j');
   await opened(panel);
@@ -83,8 +83,8 @@ test('a conversation from the drawer edits the page, and follows you to the next
   const { page, drawer, panel, view } = await visit();
   await drawer.locator('.launcher').click();
   await opened(panel);
-  await view.locator('textarea').fill('script:rename');
-  await view.locator('textarea').press('Enter');
+  await view.locator('.editor').fill('script:rename');
+  await view.locator('.editor').press('Enter');
   await view.locator('.turn-footer[data-status="completed"]').waitFor();
   await page.locator('h1', { hasText: 'Backlog' }).waitFor();
   await drawer.locator('.title-text', { hasText: 'script:rename' }).waitFor();
@@ -102,8 +102,8 @@ test('the header names the file being edited when you are looking at another pag
   await drawer.locator('.launcher').click();
   await opened(panel);
   await drawer.locator('button.new').click();
-  await view.locator('textarea').fill('script:hold');
-  await view.locator('textarea').press('Enter');
+  await view.locator('.editor').fill('script:hold');
+  await view.locator('.editor').press('Enter');
   await view.locator('button.stop').waitFor({ state: 'visible' });
 
   await page.goto(`${host.base}/a/reading`);
@@ -258,8 +258,8 @@ test('the launcher shows a dot for work nobody has looked at, until you open it'
   });
   await drawer.locator('.launcher').click();
   await drawer.locator('button.new').click();
-  await view.locator('textarea').fill('script:rename');
-  await view.locator('textarea').press('Enter');
+  await view.locator('.editor').fill('script:rename');
+  await view.locator('.editor').press('Enter');
   await view.locator('.turn-footer[data-status="completed"]').waitFor();
   await drawer.locator('button.close').click();
 
@@ -343,8 +343,8 @@ test('Settings in the drawer saves the default model for new conversations', asy
     document.querySelector('marble-agent-drawer').shadowRoot.querySelector('marble-conversation')
       .addEventListener('conversation', (e) => resolve(e.detail.id), { once: true });
   }));
-  await view.locator('textarea').fill('script:rename');
-  await view.locator('textarea').press('Enter');
+  await view.locator('.editor').fill('script:rename');
+  await view.locator('.editor').press('Enter');
   const id = await started;
   await view.locator('.turn-footer[data-status="completed"]').waitFor();
   const meta = await page.evaluate(async (conversation) => (await window.marble.agent.conversation(conversation)).meta, id);

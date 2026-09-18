@@ -38,7 +38,7 @@ const pasteText = (view, text) =>
   view.evaluate((el, value) => {
     const data = new DataTransfer();
     data.setData('text/plain', value);
-    const input = el.shadowRoot.querySelector('textarea');
+    const input = el.shadowRoot.querySelector('.editor');
     input.focus();
     return !input.dispatchEvent(new ClipboardEvent('paste', { clipboardData: data, bubbles: true, cancelable: true }));
   }, text);
@@ -48,7 +48,7 @@ const pasteImage = (view, base64) =>
     const bytes = Uint8Array.from(atob(b64), (c) => c.charCodeAt(0));
     const data = new DataTransfer();
     data.items.add(new File([bytes], 'shot.png', { type: 'image/png' }));
-    const input = el.shadowRoot.querySelector('textarea');
+    const input = el.shadowRoot.querySelector('.editor');
     input.focus();
     input.dispatchEvent(new ClipboardEvent('paste', { clipboardData: data, bubbles: true, cancelable: true }));
   }, base64);
@@ -67,10 +67,10 @@ const sentFrom = async (page, view, typed) => {
   const started = page.evaluate(() => new Promise((resolve) => {
     document.querySelector('marble-conversation').addEventListener('conversation', (e) => resolve(e.detail.id), { once: true });
   }));
-  if (typed) await view.locator('textarea').fill(typed);
+  if (typed) await view.locator('.editor').fill(typed);
   // Enter rather than the button: the drawer sits over the same corner of the
   // page this test mounts the view in.
-  await view.locator('textarea').press('Enter');
+  await view.locator('.editor').press('Enter');
   return started;
 };
 
@@ -78,7 +78,7 @@ test('a long paste becomes a card instead of filling the box', async () => {
   const { view, errors } = await mount();
   const swallowed = await pasteText(view, LONG);
   assert.equal(swallowed, true, 'the composer should take the paste');
-  assert.equal(await view.locator('textarea').inputValue(), '');
+  assert.equal(await view.locator('.editor').evaluate((el) => el.value), '');
   const card = view.locator('.attach[data-kind="text"]');
   await card.waitFor();
   assert.match(await card.textContent(), /Pasted text/);

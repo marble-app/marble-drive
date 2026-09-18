@@ -1202,8 +1202,10 @@
     .chip-remove { font: inherit; border: 0; background: none; color: inherit; opacity: .55; width: 16px; height: 16px; border-radius: 50%; cursor: pointer; line-height: 1; padding: 0; }
     .chip-remove:hover { opacity: 1; background: color-mix(in srgb, currentColor 12%, transparent); }
     .row-input { display: flex; align-items: flex-end; gap: 8px; }
-    textarea { flex: 1; font: inherit; color: var(--ink); background: none; border: 0; outline: none; resize: none; max-height: 160px; padding: 4px 0; }
-    textarea::placeholder { color: var(--faint); }
+    .editor { flex: 1; min-width: 0; font: inherit; color: var(--ink); outline: none; max-height: 160px; overflow-y: auto; padding: 4px 0; white-space: pre-wrap; overflow-wrap: anywhere; }
+    .editor[data-empty]::after { content: attr(data-placeholder); color: var(--faint); pointer-events: none; }
+    .editor ul, .editor ol { margin: 2px 0; padding-left: 1.25em; }
+    .editor li { margin: 0; }
     .send, .stop { flex: none; width: 32px; height: 32px; border-radius: 50%; border: 0; cursor: pointer; display: grid; place-items: center; transition: opacity 200ms var(--settle); }
     .send { background: var(--accent-ink); color: var(--paper); }
     .send:disabled { opacity: .35; cursor: default; }
@@ -1332,6 +1334,206 @@
   const SEND_ICON = '<svg width="16" height="16" viewBox="0 0 16 16" aria-hidden="true"><path d="M8 13V3M3.5 7.5 8 3l4.5 4.5" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>';
   const STOP_ICON = '<svg width="12" height="12" viewBox="0 0 12 12" aria-hidden="true"><rect x="1.5" y="1.5" width="9" height="9" rx="2" fill="currentColor"/></svg>';
 
+  // ------------------------------------------------------------ the editor
+
+  // A contenteditable box whose value is the Markdown the agent will read:
+  // lines, `- item` lists, and a token for each chip. The DOM is kept to text
+  // nodes, <br>, <ul>/<ol>/<li> and .ichip spans; a browser or a paste may add
+  // a <div>, which reads as a line.
+  const LIST_LINE = /^(?:([-*])|(\d+)\.) (.*)$/;
+
+  function serializeEditor(root) {
+    let chips = 0;
+    const out = [];
+    const endsLine = () => !out.length || out.at(-1).endsWith('\n');
+    const walk = (node) => {
+      for (const child of node.childNodes) {
+        if (child.nodeType === Node.TEXT_NODE) {
+          out.push(child.data.replace(/ /g, ' '));
+          continue;
+        }
+        if (child.nodeType !== Node.ELEMENT_NODE) continue;
+        const tag = child.tagName;
+        if (tag === 'BR') { out.push('\n'); continue; }
+        if (child.classList.contains('ichip')) {
+          const kind = child.dataset.kind;
+          if (kind === 'image') out.push(`[image ${(chips += 1)}]`);
+          else if (kind === 'text') out.push(`[pasted text ${(chips += 1)}]`);
+          continue;
+        }
+        if (tag === 'UL' || tag === 'OL') {
+          if (!endsLine()) out.push('\n');
+          let n = 0;
+          for (const item of child.children) {
+            if (item.tagName !== 'LI') continue;
+            n += 1;
+            const from = out.length;
+            walk(item);
+            const inner = out.splice(from).join('').replace(/\n+$/, '');
+            // An empty bullet is a place to type, not a line to send.
+            if (!inner.trim()) { n -= 1; continue; }
+            out.push(`${tag === 'UL' ? '-' : `${n}.`} ${inner}\n`);
+          }
+          continue;
+        }
+        if (tag === 'DIV' || tag === 'P') {
+          if (!endsLine()) out.push('\n');
+          walk(child);
+          if (!endsLine()) out.push('\n');
+          continue;
+        }
+        walk(child);
+      }
+    };
+    walk(root);
+    return out.join('').replace(/\n$/, '');
+  }
+
+  function fillEditor(root, text) {
+    root.replaceChildren();
+    let list = null;
+    for (const line of String(text ?? '').replace(/\r\n/g, '\n').split('\n')) {
+      const hit = LIST_LINE.exec(line);
+      if (hit) {
+        const tag = hit[1] ? 'UL' : 'OL';
+        if (!list || list.tagName !== tag) {
+          list = document.createElement(tag);
+          root.append(list);
+        }
+        const item = document.createElement('li');
+        item.textContent = hit[3];
+        list.append(item);
+        continue;
+      }
+      list = null;
+      const last = root.lastChild;
+      if (last && last.tagName !== 'UL' && last.tagName !== 'OL') root.append(document.createElement('br'));
+      // A trailing space would collapse; the agent gets a plain space back.
+      if (line) root.append(document.createTextNode(line.replace(/ $/, ' ')));
+    }
+  }
+
+  const selectionIn = (root) => {
+    const sel = root.getRootNode().getSelection?.() ?? document.getSelection();
+    if (!sel?.rangeCount) return null;
+    const range = sel.getRangeAt(0);
+    return root.contains(range.startContainer) ? { sel, range } : null;
+  };
+
+  function placeCaret(node, offset = null) {
+    const sel = node.getRootNode().getSelection?.() ?? document.getSelection();
+    const range = document.createRange();
+    if (offset === null) {
+      range.selectNodeContents(node);
+      range.collapse(false);
+    } else {
+      range.setStart(node, offset);
+      range.collapse(true);
+    }
+    sel.removeAllRanges();
+    sel.addRange(range);
+  }
+
+  /** The text of the current line up to the caret. */
+  const closestItem = (root) => {
+    const at = selectionIn(root);
+    const node = at?.range.startContainer;
+    const el = node?.nodeType === Node.ELEMENT_NODE ? node : node?.parentElement;
+    const item = el?.closest('li');
+    return item && root.contains(item) ? item : null;
+  };
+
+  /** The text of the current line up to the caret — inside an item, the
+   *  item's own text, without the marker the list would print for it. */
+  function caretLine(root) {
+    const at = selectionIn(root);
+    if (!at) return '';
+    const item = closestItem(root);
+    const range = document.createRange();
+    range.setStart(item ?? root, 0);
+    range.setEnd(at.range.startContainer, at.range.startOffset);
+    const text = item ? range.cloneContents().textContent.replace(/ /g, ' ') : serializeEditor(range.cloneContents());
+    return text.split('\n').pop();
+  }
+
+  const itemEmpty = (item) => !item.textContent.replace(/ /g, ' ').trim() && !item.querySelector('.ichip');
+
+  /** `- ` or `1. ` typed at the start of a line becomes a list with one item.
+   *  Typed inside an item that holds nothing else (the empty item a
+   *  select-all-delete leaves behind), it makes that item the list asked for. */
+  function startListAt(root, marker, item = null) {
+    const at = selectionIn(root);
+    if (!at) return false;
+    const { sel } = at;
+    for (let n = 0; n < marker.length; n += 1) sel.modify('extend', 'backward', 'character');
+    sel.getRangeAt(0).deleteContents();
+    const tag = marker === '1.' ? 'ol' : 'ul';
+    if (item) {
+      let list = item.parentElement;
+      if (list.tagName.toLowerCase() !== tag && list.children.length === 1) {
+        const next = document.createElement(tag);
+        list.replaceWith(next);
+        next.append(item);
+        list = next;
+      }
+      if (!item.childNodes.length) item.append(document.createElement('br'));
+      placeCaret(item, 0);
+      return true;
+    }
+    const list = document.createElement(tag);
+    const fresh = document.createElement('li');
+    fresh.append(document.createElement('br'));
+    list.append(fresh);
+    const here = sel.getRangeAt(0);
+    here.collapse(true);
+    // A leading <br> is the line break before this line; the list stands in
+    // for the line, so the break stays and the list follows it.
+    here.insertNode(list);
+    placeCaret(fresh, 0);
+    return true;
+  }
+
+  /** Shift+Enter inside an item: split it, or leave the list from an empty one. */
+  function continueList(root, item) {
+    const list = item.parentElement;
+    if (itemEmpty(item)) {
+      const br = document.createElement('br');
+      list.after(br);
+      const after = document.createTextNode('');
+      br.after(after);
+      item.remove();
+      if (!list.children.length) list.remove();
+      placeCaret(after, 0);
+      return;
+    }
+    const at = selectionIn(root);
+    const next = document.createElement('li');
+    if (at) {
+      const rest = at.range;
+      rest.setEnd(item, item.childNodes.length);
+      next.append(rest.extractContents());
+    }
+    if (!next.childNodes.length) next.append(document.createElement('br'));
+    item.after(next);
+    placeCaret(next, 0);
+  }
+
+  /** Backspace on an empty item: drop the item, and the list when it is alone. */
+  function leaveList(root, item) {
+    const list = item.parentElement;
+    const only = list.children.length === 1;
+    const index = [...list.children].indexOf(item);
+    item.remove();
+    if (only) {
+      const mark = document.createTextNode('');
+      list.replaceWith(mark);
+      placeCaret(mark, 0);
+      return;
+    }
+    if (index === 0) placeCaret(list.firstElementChild, 0);
+    else placeCaret(list.children[index - 1]);
+  }
+
   class MarbleConversation extends HTMLElement {
     static get observedAttributes() {
       return ['conversation'];
@@ -1391,7 +1593,7 @@
             <div class="attachments" hidden></div>
             <div class="chips" hidden></div>
             <div class="row-input">
-              <textarea rows="1" placeholder="Ask about this document…" aria-label="Message"></textarea>
+              <div class="editor" contenteditable="true" role="textbox" aria-multiline="true" aria-label="Message" data-placeholder="Ask about this document…" data-empty></div>
               <button type="button" class="stop" hidden aria-label="Stop">${STOP_ICON}</button>
               <button type="submit" class="send" aria-label="Send" disabled>${SEND_ICON}</button>
             </div>
@@ -1429,7 +1631,11 @@
       this.peekClose = root.querySelector('.peek-close');
       this.contextText = root.querySelector('.context-text');
       this.contextClear = root.querySelector('.context-clear');
-      this.input = root.querySelector('textarea');
+      this.input = root.querySelector('.editor');
+      Object.defineProperty(this.input, 'value', {
+        get: () => serializeEditor(this.input),
+        set: (text) => this.setValue(text),
+      });
       this.sendButton = root.querySelector('.send');
       this.stopButton = root.querySelector('.stop');
 
@@ -1514,6 +1720,34 @@
         if (event.key === 'Enter' && !event.shiftKey && !event.isComposing) {
           event.preventDefault();
           this.submit();
+          return;
+        }
+        if (event.key === 'Enter' && event.shiftKey) {
+          event.preventDefault();
+          const item = closestItem(this.input);
+          if (item) continueList(this.input, item);
+          else document.execCommand('insertLineBreak');
+          this.onEdited();
+          return;
+        }
+        if (event.key === ' ') {
+          const line = caretLine(this.input);
+          const item = closestItem(this.input);
+          const marker = line === '-' || line === '*' || line === '1.';
+          if (marker && (!item || item.textContent.replace(/ /g, ' ').trim() === line)) {
+            event.preventDefault();
+            startListAt(this.input, line, item);
+            this.onEdited();
+          }
+          return;
+        }
+        if (event.key === 'Backspace') {
+          const item = closestItem(this.input);
+          if (item && itemEmpty(item)) {
+            event.preventDefault();
+            leaveList(this.input, item);
+            this.onEdited();
+          }
         }
       });
       this.heading.addEventListener('keydown', (event) => {
@@ -1535,7 +1769,7 @@
       this.heading.addEventListener('blur', () => this.commitTitle());
       this.input.addEventListener('input', () => {
         this.filterSlash();
-        this.autosize();
+        this.onEdited();
       });
 
       // A screenshot and a page of pasted log are the two things that arrive
@@ -2166,10 +2400,23 @@
       this.sendButton.disabled = this.sending || noAgent || !canSend;
     }
 
-    autosize() {
-      this.input.style.height = 'auto';
-      this.input.style.height = `${Math.min(160, this.input.scrollHeight)}px`;
+    /** What follows any change to the box: the empty marker and the send button. */
+    onEdited() {
+      // A bullet with nothing in it is still something on screen: no placeholder over it.
+      const empty = !this.input.value && !this.input.querySelector('.ichip[data-key], li');
+      this.input.toggleAttribute('data-empty', empty);
       this.updateSendable();
+    }
+
+    setValue(text) {
+      fillEditor(this.input, text);
+      if (this.shadowRoot.activeElement === this.input) placeCaret(this.input);
+      this.onEdited();
+    }
+
+    /** Kept for the callers that grew up with a textarea; the box sizes itself. */
+    autosize() {
+      this.onEdited();
     }
 
     updateContext() {

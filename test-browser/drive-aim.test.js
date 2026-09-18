@@ -33,8 +33,8 @@ async function openDrive() {
 const sendFromDrawer = async (drawer, view, text) => {
   await drawer.locator('.launcher').click();
   await drawer.locator('aside.panel[data-open="true"]').waitFor();
-  await view.locator('textarea').fill(text);
-  await view.locator('textarea').press('Enter');
+  await view.locator('.editor').fill(text);
+  await view.locator('.editor').press('Enter');
   await view.locator('.msg.me').waitFor();
 };
 
