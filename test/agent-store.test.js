@@ -178,6 +178,21 @@ test('destructured use works without this binding', async () => {
   assert.equal(interrupted.length, 1);
 });
 
+test('a new turn defaults to queue dispatch and a conversation defaults to sending individually', async () => {
+  const { store } = await fresh();
+  const { id } = await store.createConversation({ provider: 'fake' });
+  assert.equal((await store.conversation(id)).queueCombine, false);
+  const turn = await store.createTurn(id, { prompt: 'a', context: { target: 'doc' } });
+  assert.equal(turn.dispatch, 'queue');
+  assert.equal(turn.behind, false);
+  assert.equal(turn.bundle, null);
+  const steered = await store.createTurn(id, {
+    prompt: 'b', context: { target: 'doc' }, dispatch: 'steer', behind: true,
+  });
+  assert.equal(steered.dispatch, 'steer');
+  assert.equal(steered.behind, true);
+});
+
 test('concurrent saves both land', async () => {
   const { store } = await fresh();
   await Promise.all([

@@ -356,6 +356,7 @@ export function createAgentStore({ dir, defaultProvider = 'claude-subscription',
         focusX: null,
         focusY: null,
         lastInteractedAt: now,
+        queueCombine: false,
       };
       await writeJson(metaFile(meta.id), meta);
       return meta;
@@ -453,7 +454,7 @@ export function createAgentStore({ dir, defaultProvider = 'claude-subscription',
     appendEvent,
     events,
 
-    async createTurn(id, { prompt, context }) {
+    async createTurn(id, { prompt, context, dispatch = 'queue', behind = false, bundle = null }) {
       return serial(`turns:${id}`, async () => {
         const n = (await turns(id)).length + 1;
         const turn = {
@@ -463,6 +464,9 @@ export function createAgentStore({ dir, defaultProvider = 'claude-subscription',
           status: 'queued',
           prompt,
           context,
+          dispatch,
+          behind,
+          bundle,
           createdAt: Date.now(),
           startedAt: null,
           finishedAt: null,
