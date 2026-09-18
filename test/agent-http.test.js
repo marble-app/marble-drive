@@ -588,6 +588,27 @@ test('a removed turn cannot be undone', async () => {
   await finished(running.conversationId, running.turnId);
 });
 
+test('a turn can be sent as steer and a queued turn can be patched', async () => {
+  const running = await start('script:wait');
+  const queued = await api('POST', `/agent/conversations/${running.conversationId}/turns`, {
+    prompt: 'later', context: { target: 'garden', selection: [] }, dispatch: 'steer',
+  });
+  assert.equal(queued.status, 202);
+  const edited = await api('PATCH', `/agent/turns/${queued.body.turnId}`, { prompt: 'later still' });
+  assert.equal(edited.status, 200);
+  assert.equal(edited.body.prompt, 'later still');
+  const steered = await api('PATCH', `/agent/turns/${queued.body.turnId}`, { dispatch: 'steer' });
+  assert.equal(steered.body.dispatch, 'steer');
+  const bad = await api('POST', `/agent/conversations/${running.conversationId}/turns`, {
+    prompt: 'x', context: { target: 'garden', selection: [] }, dispatch: 'yell',
+  });
+  assert.equal(bad.status, 400);
+  const combine = await api('PATCH', `/agent/conversations/${running.conversationId}`, { queueCombine: true });
+  assert.equal(combine.body.queueCombine, true);
+  await api('POST', `/agent/turns/${running.turnId}/cancel`);
+  await api('DELETE', `/agent/turns/${queued.body.turnId}`);
+});
+
 test("a document is served with the agent scripts after the Drive's, when agents are on", async () => {
   const page = await (await fetch(`${base}/a/garden`)).text();
   const drive = page.indexOf('/runtime/drive.js');

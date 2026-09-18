@@ -42,6 +42,7 @@ const hostnameOf = (req) => {
 const bearer = (req) => (req.headers.authorization ?? '').replace(/^Bearer\s+/i, '');
 const CONVERSATION = /^\/agent\/conversations\/([0-9a-f]{12})(\/turns)?$/;
 const TURN = /^\/agent\/turns\/([0-9a-f]{12}-t\d+)(\/cancel|\/undo|\/answer)?$/;
+const DISPATCH = new Set(['queue', 'steer', 'interrupt']);
 const FOLDER = /^\/agent\/folders\/([0-9a-f]{12})$/;
 const UPLOAD = /^\/agent\/uploads\/([0-9a-f]{16}\.(?:png|jpg|gif|webp))$/;
 const PROJECT = /^\/agent\/projects\/([0-9a-f]{12}|drive)$/;
@@ -329,6 +330,9 @@ export function createAgentRoutes({ store, runner, tools, hub, providers, writeO
       if (turns && method === 'POST') {
         const body = await readJson(req, maxBody);
         if (!body.context?.target) return json(res, 400, { error: 'a turn needs context.target' });
+        if (body.dispatch !== undefined && !DISPATCH.has(body.dispatch)) {
+          return json(res, 400, { error: 'dispatch must be queue, steer, or interrupt' });
+        }
         const context = {
           viewing: body.context.viewing ? parsePath(String(body.context.viewing)) : null,
           target: parsePath(String(body.context.target), { allowRoot: false }),
@@ -343,7 +347,11 @@ export function createAgentRoutes({ store, runner, tools, hub, providers, writeO
             }).filter(Boolean))]
             : [],
         };
-        return json(res, 202, await runner.send(id, { prompt: String(body.prompt ?? ''), context }));
+        return json(res, 202, await runner.send(id, {
+          prompt: String(body.prompt ?? ''),
+          context,
+          dispatch: body.dispatch,
+        }));
       }
       if (!turns && method === 'GET') {
         return json(res, 200, {
@@ -395,9 +403,11 @@ export function createAgentRoutes({ store, runner, tools, hub, providers, writeO
           }
           patch.focusY = body.focusY;
         }
+        if (typeof body.queueCombine === 'boolean') patch.queueCombine = body.queueCombine;
         await store.updateConversation(id, patch);
+        if (body.queueCombine === true) await runner.kick(id);
         const next = await store.summary(id);
-        hub.publish(id, { type: 'meta' }, next);
+        hub.publish(id, { type: 'meta', queueCombine: (await store.conversation(id)).queueCombine }, next);
         return json(res, 200, next);
       }
     }
@@ -405,6 +415,16 @@ export function createAgentRoutes({ store, runner, tools, hub, providers, writeO
     const turnRoute = TURN.exec(route);
     if (turnRoute) {
       const [, turnId, action] = turnRoute;
+      if (!action && method === 'PATCH') {
+        const body = await readJson(req, maxBody);
+        const turn = await store.turn(turnId);
+        if (!turn) return json(res, 404, { error: `no turn "${turnId}"` });
+        try {
+          return json(res, 200, await runner.patchQueued(turnId, body));
+        } catch (err) {
+          return json(res, err.status ?? 500, { error: err.message });
+        }
+      }
       if (!action && method === 'DELETE') return json(res, 200, { removed: await runner.dequeue(turnId) });
       if (action === '/cancel' && method === 'POST') return json(res, 200, { cancelled: await runner.cancel(turnId) });
       if (action === '/answer' && method === 'POST') {

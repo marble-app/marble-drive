@@ -668,6 +668,18 @@ export function createRunner({ store, tools, providers, workdir, origin, bridgeP
         await pump();
       }
     }
+    return store.turn(turnId);
+  }
+
+  async function kick(conversationId) {
+    const meta = await store.conversation(conversationId);
+    if (!meta?.queueCombine) return;
+    const effective = batchDispatch(queuedFor(conversationId));
+    if (effective === 'interrupt') {
+      const running = liveFor(conversationId).find((t) => t.status === 'running');
+      if (running) await cancel(running.id);
+    }
+    await pump();
   }
 
   return {
@@ -682,6 +694,8 @@ export function createRunner({ store, tools, providers, workdir, origin, bridgeP
     dequeue,
 
     patchQueued,
+
+    kick,
 
     turnForToken: (token) => tokens.get(token) ?? null,
 

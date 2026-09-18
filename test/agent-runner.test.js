@@ -961,7 +961,8 @@ test('patchQueued edits a waiting prompt and cycles dispatch', async () => {
   await runner.patchQueued(second.turnId, { prompt: 'script:hello' });
   assert.equal((await store.turn(second.turnId)).prompt, 'script:hello');
   assert.ok((await store.events(id)).some((e) => e.type === 'user.edited' && e.text === 'script:hello'));
-  await runner.patchQueued(second.turnId, { dispatch: 'steer' });
+  const steered = await runner.patchQueued(second.turnId, { dispatch: 'steer' });
+  assert.equal(steered.dispatch, 'steer');
   assert.equal((await store.turn(second.turnId)).dispatch, 'steer');
   await runner.cancel(first.turnId);
   await finished(store, first.turnId);

@@ -171,21 +171,22 @@
       },
       handoff: (id, provider) => agent.start({ provider, handoffFrom: id }),
 
-      send(id, { prompt, target, viewing, selection, also } = {}) {
+      send(id, { prompt, target, viewing, selection, also, dispatch } = {}) {
         const here = context();
-        return ask(`/agent/conversations/${enc(id)}/turns`, {
-          method: 'POST',
-          body: {
-            prompt,
-            context: {
-              target: target ?? here.target,
-              viewing: viewing ?? here.viewing,
-              selection: selection ?? here.selection,
-              also: also ?? here.also,
-            },
+        const body = {
+          prompt,
+          context: {
+            target: target ?? here.target,
+            viewing: viewing ?? here.viewing,
+            selection: selection ?? here.selection,
+            also: also ?? here.also,
           },
-        });
+        };
+        if (dispatch) body.dispatch = dispatch;
+        return ask(`/agent/conversations/${enc(id)}/turns`, { method: 'POST', body });
       },
+
+      patchTurn: (turnId, patch) => ask(`/agent/turns/${enc(turnId)}`, { method: 'PATCH', body: patch }),
 
       cancel: (turnId) => ask(`/agent/turns/${enc(turnId)}/cancel`, { method: 'POST' }),
       answer: (turnId, requestId, response) => ask(`/agent/turns/${enc(turnId)}/answer`, { method: 'POST', body: { requestId, response } }),
