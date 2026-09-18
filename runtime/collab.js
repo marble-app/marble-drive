@@ -434,6 +434,7 @@
 
     function paintZones() {
       placed = [];
+      sizes?.disconnect();
       zoneLayer.replaceChildren();
       const live = [...presence.values()].filter((detail) => (
         isAgent(detail.client) && (detail.ids?.length || detail.phase)
@@ -473,6 +474,7 @@
         if (target) {
           place(frame, target);
           placed.push({ frame, target });
+          sizes?.observe(target);
         }
       }
     }
@@ -514,12 +516,27 @@
       paintZones();
     });
 
-    addEventListener('scroll', () => {
+    // The page reflows under a zone whenever anyone types — and the person's
+    // own edits never come back as ops or presence — so the page itself is
+    // what says a target moved. A target that is gone (removed, or replaced
+    // under the same id) is found again from the presence map.
+    let relayout = 0;
+    function relayoutZones() {
+      relayout = 0;
+      if (placed.some(({ target }) => !target.isConnected)) return paintZones();
       for (const { frame, target } of placed) place(frame, target);
-    }, true);
-    addEventListener('resize', () => {
-      for (const { frame, target } of placed) place(frame, target);
-    });
+    }
+    function scheduleRelayout() {
+      if (!placed.length || relayout) return;
+      relayout = requestAnimationFrame(relayoutZones);
+    }
+    addEventListener('scroll', scheduleRelayout, true);
+    addEventListener('resize', scheduleRelayout);
+    new MutationObserver((records) => {
+      // Our own frames move too; only the document's mutations count.
+      if (records.some(({ target }) => !zoneLayer.contains(target) && target !== showWork)) scheduleRelayout();
+    }).observe(document.documentElement, { subtree: true, childList: true, characterData: true, attributes: true });
+    const sizes = typeof ResizeObserver === 'function' ? new ResizeObserver(scheduleRelayout) : null;
 
     document.addEventListener('marble:ops', ({ detail }) => {
       const ops = detail?.ops ?? [];

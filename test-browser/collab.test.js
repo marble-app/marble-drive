@@ -36,9 +36,19 @@ const AUTHORED = `<!doctype html>
 </body></html>
 `;
 
+const TYPING = `<!doctype html>
+<html><head><meta charset="utf-8"><title>Typing</title>
+<style>body { font: 16px/1.5 Georgia, serif; margin: 40px; }</style>
+</head>
+<body data-marble-id="b">
+  <h1 data-marble-id="h" contenteditable="true">Head</h1>
+  <p data-marble-id="p">A paragraph the agent is on.</p>
+</body></html>
+`;
+
 const host = await startDrive({
   agents: true,
-  documents: { forked: FORKED, authored: AUTHORED },
+  documents: { forked: FORKED, authored: AUTHORED, typing: TYPING },
 });
 test.after(() => host.close());
 
@@ -202,6 +212,65 @@ test('the construction label uses the apply_ops note, and Hide puts it away', as
 
   await page.getByRole('button', { name: 'Show work' }).click();
   assert.equal(await page.locator('.marble-zone').count(), 1);
+});
+
+const zoneTop = (page) => page.locator('.marble-zone').evaluate((el) => el.getBoundingClientRect().top);
+const targetTop = (page, id) => page.locator(`[data-marble-id="${id}"]`).evaluate((el) => el.getBoundingClientRect().top);
+
+test('the construction zone follows its target when the person’s own typing moves it', async () => {
+  await host.reset();
+  const { page } = await host.newPage();
+  await page.goto(`${host.base}/a/typing`);
+  await page.waitForFunction(() => document.documentElement.classList.contains('marble-collab-host'));
+  await page.evaluate(() => {
+    document.dispatchEvent(new CustomEvent('marble:presence', {
+      detail: { client: 'agent:c1', ids: ['p'], phase: 'writing', note: 'grow the page' },
+    }));
+  });
+  await page.locator('.marble-zone').waitFor();
+  const before = await zoneTop(page);
+
+  // The person's own edits never come back as ops or presence, so nothing
+  // but the page itself says the target moved.
+  await page.click('[data-marble-id="h"]');
+  await page.keyboard.press('End');
+  await page.keyboard.type(' ' + 'words '.repeat(120));
+  await page.waitForTimeout(300);
+
+  const target = await targetTop(page, 'p');
+  const after = await zoneTop(page);
+  assert.ok(target - before > 300, `the target moved (${before} → ${target})`);
+  assert.ok(Math.abs(after - (target - 10)) < 2, `zone top ${after} should sit 10px above the target at ${target}`);
+});
+
+test('the construction zone finds its target again after it is replaced', async () => {
+  await host.reset();
+  const { page } = await host.newPage();
+  await page.goto(`${host.base}/a/typing`);
+  await page.waitForFunction(() => document.documentElement.classList.contains('marble-collab-host'));
+  await page.evaluate(() => {
+    document.dispatchEvent(new CustomEvent('marble:presence', {
+      detail: { client: 'agent:c1', ids: ['p'], phase: 'writing' },
+    }));
+  });
+  await page.locator('.marble-zone').waitFor();
+
+  // Applied locally so no presence frame arrives to repaint the zone for us.
+  await page.evaluate(() => {
+    window.marble.apply({ type: 'remove', id: 'p' });
+    window.marble.apply({
+      type: 'insert',
+      html: '<div data-marble-id="tall" style="height:400px"></div><p data-marble-id="p">Back again.</p>',
+      parentId: 'b',
+      beforeId: null,
+    });
+  });
+  await page.waitForTimeout(300);
+
+  const target = await targetTop(page, 'p');
+  const after = await zoneTop(page);
+  assert.ok(target > 300, `the new target sits low on the page (${target})`);
+  assert.ok(Math.abs(after - (target - 10)) < 2, `zone top ${after} should sit 10px above the target at ${target}`);
 });
 
 test('agent work with no ids is a page banner, not a box around the document', async () => {
