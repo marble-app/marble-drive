@@ -99,6 +99,22 @@ const RUNTIME = {
   'collab.js': () => path.join(REPO, 'runtime', 'collab.js'),
 };
 
+/** The ids a document's html, head and body carry. */
+const rootIds = (source) => {
+  const ids = new Set();
+  for (const m of String(source ?? '').matchAll(/<(?:html|head|body)\b[^>]*\sdata-marble-id="([^"]+)"/g)) ids.add(m[1]);
+  return ids;
+};
+
+/** True when `ops` would take a document's html, head or body out of a page.
+ *  Defence in depth: marble's diff matches those three by tag since b9c1045,
+ *  so a regeneration with fresh ids diffs as their children; a host on an
+ *  older marble still gets a reload here rather than an emptied tab. */
+export const rootRemoved = (priorSource, ops) => {
+  const roots = rootIds(priorSource);
+  return roots.size > 0 && (ops ?? []).some((op) => op?.type === 'remove' && roots.has(op.id));
+};
+
 export async function createDrive(config, { log = console, agentProviders = null, agents: withAgents = true, usage = null, usageHistory = null, typesafe: typesafeOpts = null, agentSandbox = null } = {}) {
   const store = createStore({ root: config.root });
   await store.ready();
@@ -907,12 +923,16 @@ button{background:#738698;color:#fafaf7;border-color:#738698;cursor:pointer}p{co
           : sessionTouched.all(docPath),
         agent: conv ? `agent:${conv}` : 'agent',
       });
+      // A remove of the document's own root is never sent as an op: applied
+      // by an open tab it empties the page, and the tab's write-back then
+      // puts a head-only file on disk (seen 2026-09-18). It is a reload.
+      const ops = rootRemoved(prior.source, merged.ops) ? null : merged.ops;
       if (merged.source !== current) {
         lastKnown.set(docPath, { source: merged.source, client: null });
         pendingWrites.mark(docPath, shaOf(merged.source));
         await store.write(docPath, merged.source, { label: 'merge' });
         await store.thinHistory(docPath).catch(() => {});
-        channels.toDocument(docPath, 'changed', { ops: merged.ops });
+        channels.toDocument(docPath, 'changed', { ops });
         channels.toDrive('changed', { path: docPath });
         const ids = idsOfOps(merged.ops);
         if (ids.length) {
@@ -925,12 +945,11 @@ button{background:#738698;color:#fafaf7;border-color:#738698;cursor:pointer}p{co
         return;
       }
 
-      const ops = merged.ops;
       lastKnown.set(docPath, { source: current, client: null });
       await store.thinHistory(docPath).catch(() => {});
-      channels.toDocument(docPath, 'changed', { ops: ops.length ? ops : null });
+      channels.toDocument(docPath, 'changed', { ops: ops?.length ? ops : null });
       channels.toDrive('changed', { path: docPath });
-      const ids = idsOfOps(ops);
+      const ids = idsOfOps(merged.ops);
       if (ids.length) {
         const client = conv ? `agent:${conv}` : 'outside';
         channels.toPresence(docPath, {
