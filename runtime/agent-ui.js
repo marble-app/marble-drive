@@ -1217,6 +1217,9 @@
 
   const CONVERSATION_CSS = `
     :host { display: flex; flex-direction: column; min-height: 0; background: var(--paper); overflow: visible; }
+    /* In a pane, focus moving is a change of light, not a cut. Only there: a
+       lone conversation takes the page's palette the instant it mounts. */
+    :host([data-focused]) { transition: background-color 200ms var(--settle), opacity 200ms var(--settle); }
     .mast { flex: none; padding: 10px 18px 8px; border-bottom: 1px solid var(--line); display: flex; flex-direction: column; gap: 6px; background: var(--paper); }
     .mast[hidden] { display: none; }
     :host([data-chrome="pane"]) .heading { display: none; }
@@ -1231,6 +1234,8 @@
     /* A pane that is not the focused one steps back: the page dims its
        surface, and the transcript loses a little colour with it. */
     :host([data-focused="false"]) .log { filter: saturate(.85); }
+    :host([data-focused]) .log { transition: filter 200ms var(--settle); }
+    :host([data-focused]) .mast, :host([data-focused]) .composer { transition: background-color 200ms var(--settle); }
     .heading { margin: 0; font: 500 15px/1.3 inherit; letter-spacing: -.015em; outline: none; min-height: 1.3em; border-radius: 6px; padding: 2px 4px; margin-left: -4px; }
     .heading:hover { background: var(--paper-2); }
     .heading:focus { background: var(--card); box-shadow: 0 0 0 1px var(--accent), 0 0 0 4px var(--accent-soft); }
@@ -1547,7 +1552,7 @@
     .tool-group-body[hidden] { display: none; }
 
     @keyframes pulse { 0%, 100% { opacity: .35; } 50% { opacity: 1; } }
-    @media (prefers-reduced-motion: reduce) { .tool::before, .turn-footer .pulse { animation: none; } .seg-thumb { transition: none; } }
+    @media (prefers-reduced-motion: reduce) { :host, .log, .mast, .composer { transition: none; } .tool::before, .turn-footer .pulse { animation: none; } .seg-thumb { transition: none; } }
   `;
 
   // ------------------------------------------------------- pasted attachments

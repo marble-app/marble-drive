@@ -163,6 +163,28 @@ test('the focused pane is lit and the others dim, in every view', async () => {
   assert.equal(frames.filter((f) => f.focused).length, 1, 'still one lit pane on the board');
 });
 
+test('focus moving between panes is a transition, not a cut', async () => {
+  const { page } = await openAgents(2);
+  await dragOnto(page, 1, 'P', 'right');
+  const props = await page.evaluate(() => {
+    const frame = document.querySelector('.dock-frame.dock-leaf[data-focused]');
+    const bar = frame.querySelector('.dock-bar');
+    const view = frame.querySelector('marble-conversation');
+    const log = view.shadowRoot.querySelector('.log');
+    return {
+      bar: getComputedStyle(bar).transitionProperty,
+      view: getComputedStyle(view).transitionProperty,
+      log: getComputedStyle(log).transitionProperty,
+      duration: getComputedStyle(bar).transitionDuration,
+    };
+  });
+  assert.match(props.bar, /background-color/);
+  assert.match(props.view, /opacity/);
+  assert.match(props.view, /background-color/);
+  assert.match(props.log, /filter/);
+  assert.notEqual(props.duration, '0s');
+});
+
 test('Alt-click opens a conversation beside the focused pane', async () => {
   const { page } = await openAgents(2);
   await page.locator('#list .conv').nth(1).click({ modifiers: ['Alt'] });
