@@ -2597,7 +2597,7 @@ __ICON__
       if (zone.kind === 'stage') {
         const slot = helpers.stageSlotAt(pack.stage, point, gap);
         const index = drop(pack.stage.cols, slot.index);
-        return { column: 'stage', index, key: `stage:${index}` };
+        return { column: 'stage', index, key: `stage:${index}`, edge: slot.x };
       }
 
       const region = zone.region;
@@ -2617,6 +2617,7 @@ __ICON__
         folderId: region.folderId ?? null,
         index,
         key: `folder:${region.folderId ?? 'loose'}:${index}`,
+        edge: slot.y,
       };
     };
 
@@ -2649,10 +2650,11 @@ __ICON__
     /** One gesture, every case: a card picked up and dropped in a slot. The
      *  page has already moved — this is the half that files it. */
     const commitFocusDrop = async (ids, target) => {
-      if (!agent || !ids.length || !target) return;
-      const patch = async (id, body) => {
-        try { await agent.update(id, body); } catch { /* stale */ }
-      };
+      if (!agent || !ids.length || !target) return [];
+      // Local state moves now; the PATCHes are handed back so the page can
+      // paint the drop before a single round trip completes.
+      const writes = [];
+      const patch = async (id, body) => { writes.push([id, body]); };
 
       if (target.column === 'new' || target.merge) {
         const members = target.merge ? [...ids, target.merge] : [...ids];
@@ -2661,7 +2663,7 @@ __ICON__
           const listed = await agent.folders();
           folderCatalog = listed.folders ?? folderCatalog;
         } catch { /* create failed */ }
-        return;
+        return [];
       }
 
       const layout = focusColumnsOf(matchingFocusItems(), null);
@@ -2687,7 +2689,7 @@ __ICON__
           await patch(row.id, { focusY: row.focusY });
         }
         focusPrimaryId = ids[0];
-        return;
+        return writes;
       }
 
       const folderId = target.folderId ?? null;
@@ -2709,7 +2711,10 @@ __ICON__
       for (const row of focusRankPatches(rest, ids, target.index ?? rest.length)) {
         await patch(row.id, { focusY: row.focusY });
       }
+      return writes;
     };
+
+    const fileFocusWrites = (writes) => Promise.all((writes ?? []).map(([id, body]) => agent.update(id, body).catch(() => {})));
 
     /** The keyboard's half of rearranging. Alt with an arrow moves the card
      *  itself, through the same drop rules the pointer uses, so no state the
@@ -2724,10 +2729,11 @@ __ICON__
       if (at < 0) return;
       const here = zones[at];
       const index = here.ids.indexOf(id);
+      let writes = [];
       if (dir === 'up' || dir === 'down') {
         if (dir === 'up' && index <= 0) return;
         if (dir === 'down' && index >= here.ids.length - 1) return;
-        await commitFocusDrop([id], {
+        writes = await commitFocusDrop([id], {
           column: here.column,
           folderId: here.folderId,
           index: dir === 'up' ? index - 1 : index + 1,
@@ -2735,7 +2741,7 @@ __ICON__
       } else {
         const to = zones[at + (dir === 'left' ? -1 : 1)];
         if (!to) return;
-        await commitFocusDrop([id], {
+        writes = await commitFocusDrop([id], {
           column: to.column,
           folderId: to.folderId,
           index: Math.min(index, to.ids.length),
@@ -2744,6 +2750,7 @@ __ICON__
       focusSelectedIds = [id];
       focusPrimaryId = id;
       paintFocus();
+      await fileFocusWrites(writes);
     };
 
     const handleFocusKeys = (event) => {
@@ -2942,7 +2949,9 @@ __ICON__
 
         const aim = () => {
           if (!focusDrag) return;
-          const next = focusTargetAt(focusPoint(focusDrag.point.x, focusDrag.point.y));
+          const point = focusPoint(focusDrag.point.x, focusDrag.point.y);
+          const steady = window.marbleAgentFolders?.steadySlot;
+          const next = steady ? steady(focusDrag.target, focusTargetAt(point), point) : focusTargetAt(point);
           if ((next?.key ?? '') === (focusDrag.target?.key ?? '')) return;
           focusDrag.target = next;
           focusDrag.pending = next && !next.merge && next.column !== 'new'
@@ -3026,9 +3035,10 @@ __ICON__
           const target = cancelled ? null : drag.target;
           const speed = velocity();
           paintFocusSlot(focusPack, null);
-          if (target) await commitFocusDrop(drag.ids, target);
+          const writes = target ? await commitFocusDrop(drag.ids, target) : [];
           paintFocus({ velocity: speed, velocityId: drag.lead });
           setTimeout(() => { focusSuppressClick = false; }, 0);
+          await fileFocusWrites(writes);
         };
 
         const up = (e) => {

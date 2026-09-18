@@ -272,3 +272,19 @@ test('byRank is stable, so an untouched column keeps the order it came in', () =
   ]);
   assert.deepEqual(out.map((row) => row.id), ['a', 'b', 'c', 'd']);
 });
+
+test('assignLods does not promote a hovered card — hover informs, selection commits', () => {
+  const cards = Array.from({ length: 8 }, (_, i) => ({ id: `c${i}`, lastInteractedAt: 0, updatedAt: 0 }));
+  const cold = F().assignLods(cards, { fullIds: [], selectedIds: [], hoveredId: 'c7', now: 1e12 });
+  const plain = F().assignLods(cards, { fullIds: [], selectedIds: [], hoveredId: null, now: 1e12 });
+  assert.deepEqual(cold, plain);
+});
+
+test('steadySlot holds the current slot while the pointer hovers a midline', () => {
+  const prev = { column: 'folder', folderId: 'a', key: 'folder:a:2', index: 2, edge: 300 };
+  const flip = { column: 'folder', folderId: 'a', key: 'folder:a:3', index: 3, edge: 300 };
+  assert.equal(F().steadySlot(prev, flip, { y: 305 }), prev, 'within the band, the old answer stands');
+  assert.equal(F().steadySlot(prev, flip, { y: 312 }), flip, 'past it, the new one wins');
+  assert.equal(F().steadySlot(prev, { column: 'folder', folderId: 'b', key: 'folder:b:0', index: 0, edge: 40 }, { y: 305 }).key, 'folder:b:0', 'a different column is never held');
+  assert.equal(F().steadySlot(null, flip, { y: 305 }), flip);
+});

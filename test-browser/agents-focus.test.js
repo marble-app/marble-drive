@@ -530,3 +530,21 @@ test('selecting a chip grows it with an animation, not a snap', async () => {
   const duration = await grew;
   assert.ok(duration >= 200 && duration <= 400, `height animates (${duration}ms)`);
 });
+
+test('a drop springs home before the PATCH round trip completes', async () => {
+  const { page } = await openAgents();
+  const ids = await seedFocus(page, [{ key: 'a', title: 'first' }, { key: 'b', title: 'second' }, { key: 'c', title: 'third' }]);
+  await page.evaluate(() => {
+    const agent = window.marble.agent;
+    const real = agent.update.bind(agent);
+    window.__slow = [];
+    agent.update = (id, body) => new Promise((resolve) => { window.__slow.push(() => resolve(real(id, body))); });
+  });
+  const target = await page.locator(`.focus-card[data-id="${ids.a}"]`).boundingBox();
+  const release = await dragTo(page, ids.c, { x: target.x + target.width / 2, y: target.y + 6 });
+  await release();
+  await page.waitForTimeout(600);
+  const order = await page.evaluate(() => [...document.querySelectorAll('.focus-card')].sort((p, q) => p.getBoundingClientRect().top - q.getBoundingClientRect().top).map((el) => el.dataset.id));
+  assert.equal(order[0], ids.c, 'the card is in its slot while the PATCH is still pending');
+  await page.evaluate(() => { for (const go of window.__slow) go(); });
+});

@@ -465,6 +465,18 @@
     return { index, x, y: stage.y, h: stage.h };
   };
 
+  /** A slot answer near the boundary that produced the last one is the same
+   *  answer. Without this, a pointer resting on a card's midline opens and
+   *  closes the gap on every pixel. */
+  const steadySlot = (prev, next, point, band = 8) => {
+    if (!prev || !next) return next;
+    if (prev.column !== next.column || (prev.folderId ?? null) !== (next.folderId ?? null)) return next;
+    if (Math.abs((next.index ?? 0) - (prev.index ?? 0)) !== 1) return next;
+    if (!Number.isFinite(prev.edge)) return next;
+    const axis = prev.column === 'stage' ? point.x : point.y;
+    return Math.abs(axis - prev.edge) <= band ? prev : next;
+  };
+
   globalThis.marbleAgentFolders = {
     COLOR_KEYS,
     REALMS,
@@ -495,5 +507,6 @@
     packFocus,
     slotAt,
     stageSlotAt,
+    steadySlot,
   };
 })();
