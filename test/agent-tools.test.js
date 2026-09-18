@@ -54,9 +54,48 @@ async function freshTurn(conversationId = `c${++n}`) {
 
 test('the schemas name the marble tools', () => {
   assert.deepEqual(TOOL_SCHEMAS.map((t) => t.name).sort(), [
-    'apply_ops', 'check_document', 'create_document', 'list_documents', 'read_document', 'read_guide',
+    'apply_ops', 'check_document', 'create_document', 'list_agents', 'list_documents', 'read_document', 'read_guide', 'send_message', 'wait_for_reply',
   ]);
   for (const t of TOOL_SCHEMAS) assert.equal(t.inputSchema.type, 'object');
+});
+
+test('the messaging tools delegate to the host and pass the turn through', async () => {
+  const seen = [];
+  const messaging = {
+    peers: async (turn) => { seen.push(['peers', turn.conversationId]); return { agents: [] }; },
+    deliver: async (turn, input) => { seen.push(['deliver', turn.conversationId, input]); return { messageId: 'm', delivered: 'turn', to: { id: input.to, title: null } }; },
+    wait: async (turn, seconds) => { seen.push(['wait', turn.conversationId, seconds]); return { timeout: true }; },
+  };
+  const t = createTools({
+    store: drive.store, writeOps: drive.writeOps, createDocument: drive.createDocument,
+    buildStarter: build, guidePath: enginePath('skills/build-in-marble/SKILL.md'), messaging,
+  });
+  const turn = await freshTurn();
+  assert.deepEqual(await t.call('list_agents', {}, turn), { agents: [] });
+  assert.equal((await t.call('send_message', { to: 'b', text: 'hi', about: { path: 'garden', ids: ['h'] } }, turn)).messageId, 'm');
+  assert.deepEqual(await t.call('wait_for_reply', { seconds: 30 }, turn), { timeout: true });
+  assert.deepEqual(seen, [
+    ['peers', turn.conversationId],
+    ['deliver', turn.conversationId, { to: 'b', text: 'hi', about: { path: 'garden', ids: ['h'] }, inReplyTo: null }],
+    ['wait', turn.conversationId, 30],
+  ]);
+});
+
+test('without a messaging host the tools say so instead of throwing', async () => {
+  const turn = await freshTurn();
+  assert.match((await tools.call('list_agents', {}, turn)).error, /not available/);
+  assert.match((await tools.call('send_message', { to: 'b', text: 'x' }, turn)).error, /not available/);
+  assert.match((await tools.call('wait_for_reply', {}, turn)).error, /not available/);
+});
+
+test('send_message and wait_for_reply describe the caps and the meaning of a timeout', () => {
+  const send = TOOL_SCHEMAS.find((t) => t.name === 'send_message');
+  const wait = TOOL_SCHEMAS.find((t) => t.name === 'wait_for_reply');
+  assert.deepEqual(send.inputSchema.required, ['to', 'text']);
+  assert.equal(send.inputSchema.properties.text.maxLength, 4000);
+  assert.match(send.description, /12/);
+  assert.equal(wait.inputSchema.properties.seconds.maximum, 300);
+  assert.match(wait.description, /nothing/i);
 });
 
 test('apply_ops tells an agent the shape of an op, not just an object', () => {

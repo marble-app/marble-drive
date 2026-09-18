@@ -123,6 +123,10 @@ async function boot({ config, store, writeOps, createDocument, origin, providers
   const liveProviders = providers ?? builtInProviders({ env: process.env, secrets: () => keys.asEnv() });
   const skills = await listSkills(skillDirs({ home: os.homedir(), repo: REPO }));
   const hub = createHub();
+  // Late-bound: the runner needs the tools, and the tools need the runner's
+  // messaging. `messaging` is created empty here, handed to the tools, and
+  // filled in once the runner exists — see below.
+  const messaging = {};
   const tools = createTools({
     store,
     writeOps,
@@ -131,6 +135,7 @@ async function boot({ config, store, writeOps, createDocument, origin, providers
     guidePath: enginePath('skills/build-in-marble/SKILL.md'),
     examine,
     onLook,
+    messaging,
   });
   const projects = { find: async (id) => findProject({ settings: await agentStore.settings(), root: config.root }, id) };
   const runner = createRunner({
@@ -163,6 +168,16 @@ async function boot({ config, store, writeOps, createDocument, origin, providers
       forgetWriter?.(`agent-undo:${conversationId}`);
     },
   });
+
+  // Three functions by name, not the runner itself, so tools stay testable
+  // with a stub. Bound before boot, because boot may start delivery turns
+  // whose agents call these tools immediately.
+  Object.assign(messaging, {
+    peers: (turn) => runner.peers(turn),
+    deliver: (turn, input) => runner.deliver(turn, input),
+    wait: (turn, seconds) => runner.wait(turn, seconds),
+  });
+
   await runner.boot();
 
   const routes = createAgentRoutes({
