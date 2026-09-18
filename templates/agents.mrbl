@@ -30,8 +30,8 @@ __ICON__
     --shadow: 0 1px 3px rgba(74,66,52,.12), 0 4px 8px rgba(74,66,52,.06);
     --shadow-lift: 0 4px 10px rgba(74,66,52,.10), 0 14px 28px rgba(74,66,52,.12);
     --radius: 12px;
-    --settle: cubic-bezier(.22, 1, .36, 1);
-    --snap: cubic-bezier(.4, 0, .2, 1);
+    --settle: ease-out;
+    --snap: ease-out;
     --t-fast: 110ms;
     --t: 200ms;
     --t-slow: 340ms;
@@ -60,10 +60,9 @@ __ICON__
   [data-marble-editable]:focus { background: var(--card); box-shadow: 0 0 0 1px var(--accent), 0 0 0 4px var(--accent-soft); }
   button { font: inherit; }
   button, .conv {
-    transition: transform var(--t-fast) var(--snap), background var(--t) var(--settle),
+    transition: background var(--t) var(--settle),
       box-shadow var(--t) var(--settle), border-color var(--t) var(--settle), opacity var(--t) var(--settle);
   }
-  button:active, .conv:active { transform: scale(.96); transition-duration: 60ms; }
   @media (prefers-reduced-motion: reduce) {
     *, *::before, *::after {
       animation-duration: .001ms !important; animation-iteration-count: 1 !important;
@@ -78,7 +77,7 @@ __ICON__
   }
 
   .topbar {
-    grid-row: 1; grid-column: 1;
+    grid-row: 1; grid-column: 1 / -1;
     display: flex; align-items: center; gap: .75rem; flex: 0 0 auto; flex-wrap: wrap;
     padding: .55rem 1rem; border-bottom: 1px solid var(--line);
     background: rgba(var(--paper-rgb), .78); backdrop-filter: blur(20px) saturate(160%);
@@ -86,19 +85,26 @@ __ICON__
     position: relative; z-index: 5;
   }
   .topbar h1 { font-size: 1.15rem; font-weight: 500; margin: 0; letter-spacing: -.015em; }
-  .views {
-    display: inline-flex; border: 1px solid var(--line); border-radius: 999px;
-    padding: 2px; background: var(--paper-3);
+  .toggles {
+    display: flex; align-items: center; gap: .35rem; flex: none;
+    min-width: 0; flex-wrap: nowrap;
   }
-  .views button {
+  .seg {
+    display: inline-flex; align-items: stretch; flex: none;
+    border: 1px solid var(--line); border-radius: 999px;
+    padding: 1px; background: var(--paper-3);
+  }
+  .seg button {
     appearance: none; border: 0; background: none; color: var(--muted);
-    padding: .32rem .75rem; cursor: pointer; font-size: .85rem; border-radius: 999px;
+    padding: .12rem .55rem; cursor: pointer; font-size: .75rem; line-height: 1.25;
+    border-radius: 999px; white-space: nowrap; font-weight: 500;
   }
+  .seg button:hover, .seg button:focus-visible { color: var(--ink); outline: none; }
+  .seg button[aria-pressed="true"],
   body[data-view="library"] .views [data-view="library"],
   body[data-view="board"] .views [data-view="board"] {
-    color: var(--accent-ink); background: var(--card); box-shadow: var(--shadow);
+    color: var(--ink); background: var(--card); box-shadow: var(--shadow);
   }
-  .views button:hover, .views button:focus-visible { color: var(--ink); outline: none; }
   input.search {
     flex: 1 1 12rem; min-width: 8rem; max-width: 28rem;
     padding: .45rem .9rem; border: 1px solid transparent; border-radius: 999px;
@@ -107,65 +113,100 @@ __ICON__
   }
   input.search:hover, input.search:focus-visible { background: var(--card); }
   input.search:focus { background: var(--card); border-color: var(--line); box-shadow: var(--shadow); }
-  .filters { display: flex; gap: .2rem; flex-wrap: wrap; }
-  .filter {
-    appearance: none; border: 0; background: none; color: var(--muted);
-    padding: .32rem .65rem; border-radius: 999px; cursor: pointer; font-size: .85rem;
-  }
-  .filter:hover, .filter:focus-visible { color: var(--ink); background: var(--paper-3); outline: none; }
-  .filter[aria-pressed="true"] { color: var(--accent-ink); background: var(--accent-soft); }
   .new {
     appearance: none; border: 1px solid var(--line); background: var(--ink);
     color: var(--paper); padding: .35rem .85rem; border-radius: 999px; cursor: pointer; font-size: .85rem;
   }
   .new:hover, .new:focus-visible { box-shadow: var(--shadow); outline: none; }
   .settings {
-    margin-left: auto; appearance: none; border: 1px solid var(--line); background: none;
+    appearance: none; border: 1px solid var(--line); background: none;
     color: var(--muted); padding: .35rem .85rem; border-radius: 999px; cursor: pointer; font-size: .85rem;
   }
   .settings:hover, .settings:focus-visible { color: var(--ink); background: var(--paper-3); outline: none; }
+  .usage {
+    display: flex; align-items: center; gap: .7rem; min-width: 0;
+    margin-left: auto; user-select: none;
+  }
+  .meter { display: flex; align-items: center; gap: .4rem; min-width: 0; }
+  .meter-label {
+    font-size: 12.5px; font-weight: 500; color: var(--muted); letter-spacing: -.01em;
+  }
+  .meter-bar {
+    display: block; width: 5.5rem; height: 8px; flex: none;
+    border-radius: 999px; background: var(--paper-3);
+    box-shadow: inset 0 0 0 1px var(--line); overflow: hidden;
+  }
+  .meter-bar i {
+    display: block; height: 100%; width: 0;
+    background: var(--accent-ink); border-radius: inherit;
+    transition: width var(--t) var(--settle), background var(--t) var(--settle);
+  }
+  .meter[data-tone="blue"] .meter-bar i { background: var(--accent-ink); }
+  .meter[data-tone="yellow"] .meter-bar i { background: #c4a02a; }
+  .meter[data-tone="orange"] .meter-bar i { background: #c46a28; }
+  .meter[data-tone="red"] .meter-bar i { background: var(--danger); }
+  .meter[data-tone="unavailable"] .meter-label,
+  .meter[data-tone="unavailable"] .meter-pct { color: var(--faint); }
+  .meter[data-tone="unavailable"] .meter-bar { background: var(--paper-2); }
+  .meter[data-tone="unavailable"] .meter-bar i { width: 0 !important; background: var(--faint); }
+  .meter-pct {
+    font-size: 12.5px; font-weight: 500; font-variant-numeric: tabular-nums;
+    color: var(--ink); min-width: 2.35em;
+  }
+  @media (prefers-color-scheme: dark) {
+    .meter[data-tone="yellow"] .meter-bar i { background: #e0c056; }
+    .meter[data-tone="orange"] .meter-bar i { background: #e08a4a; }
+  }
 
   .library, .board {
     grid-row: 2; grid-column: 1; min-height: 0; min-width: 0;
   }
   .library {
-    display: grid; grid-template-columns: minmax(16rem, 22rem) minmax(0, 1fr) minmax(14rem, 18rem);
+    display: grid; grid-template-columns: minmax(16rem, 22rem) minmax(0, 1fr);
   }
   body[data-view="board"] .library { display: none; }
   body[data-view="library"] .board { display: none; }
   body[data-crossfade] .library { display: grid; }
   body[data-crossfade] .board { display: flex; }
-  /* Overlay the pane on the board. Do not reparent <marble-conversation> —
-     a missing keyed child in .pane is cloned on reconcile. */
+  /* Board + an open conversation is a split: kanban left, pane right.
+     Do not reparent <marble-conversation> — a missing keyed child in .pane
+     is cloned on reconcile. */
+  body[data-view="board"][data-panel="open"] {
+    grid-template-columns: minmax(0, 1fr) minmax(18rem, min(38vw, 28rem));
+  }
+  body[data-view="board"][data-panel="open"] .board {
+    grid-column: 1; grid-row: 2; min-width: 0;
+  }
   body[data-view="board"][data-panel="open"] .library {
     display: grid;
-    grid-template-columns: minmax(0, 1fr) min(520px, 100%);
-    grid-template-rows: minmax(0, 1fr) minmax(0, 40%);
-    background: transparent;
-    pointer-events: none;
-    z-index: 8;
+    grid-column: 2; grid-row: 2;
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-rows: minmax(0, 1fr);
+    background: var(--card);
+    border-left: 1px solid var(--line);
+    min-width: 0;
+    z-index: 2;
   }
-  body[data-view="board"][data-panel="open"] .list {
-    grid-column: 1; grid-row: 1 / -1; visibility: hidden;
-  }
+  body[data-view="board"][data-panel="open"] .list { display: none; }
   body[data-view="board"][data-panel="open"] .pane {
-    grid-column: 2; grid-row: 1; pointer-events: auto; min-width: 0; max-width: 100%;
-    box-shadow: var(--shadow-lift); padding-top: 2.4rem;
-  }
-  body[data-view="board"][data-panel="open"] .inspector {
-    grid-column: 2; grid-row: 2; pointer-events: auto; min-width: 0; max-width: 100%;
-    border-left: 0; border-top: 1px solid var(--line); max-height: none;
+    grid-column: 1; grid-row: 1; min-width: 0; max-width: none;
+    box-shadow: none; border-radius: 0; padding-top: 0; overflow: hidden;
   }
   .board {
-    display: flex; gap: 1rem; padding: 1rem; overflow: auto; position: relative;
+    display: flex; align-items: flex-start; gap: 1rem; padding: 1rem; overflow: auto; position: relative;
   }
   .column {
-    flex: 1 1 0; min-width: 14rem; display: flex; flex-direction: column; gap: .5rem;
+    flex: 1 1 0; min-width: 14rem; min-height: 5.5rem; display: flex; flex-direction: column; gap: .5rem;
     background: var(--paper-2); border: 1px solid var(--line); border-radius: var(--radius); padding: .7rem;
   }
   .column h2 {
     margin: 0; font-size: .75rem; font-weight: 500; letter-spacing: .06em;
     text-transform: uppercase; color: var(--faint);
+  }
+  /* No JS "is this column empty" flag to keep in sync — :has() derives it
+     straight from the DOM, which is the one place the fact already lives. */
+  .column:not(:has(> .conv:not([hidden])))::after {
+    content: 'Nothing here'; font-size: .82rem; color: var(--faint); padding: .1rem .05rem;
   }
   .column .conv {
     border-radius: 10px; background: var(--card); border: 1px solid var(--line);
@@ -179,14 +220,15 @@ __ICON__
     pointer-events: none;
   }
   .board-panel {
-    position: absolute; top: 0; right: 0; width: 520px; max-width: 100%;
-    display: none; z-index: 9; pointer-events: none;
+    position: absolute; top: 0; right: 0; width: auto; max-width: 100%;
+    display: none; z-index: 9;
   }
   .board-panel[data-open="true"] { display: block; }
   .board-panel .panel-close {
-    appearance: none; border: 0; background: none; color: var(--muted);
-    padding: .55rem .9rem; cursor: pointer; font-size: .85rem; text-align: left;
-    pointer-events: auto;
+    appearance: none; border: 0; background: rgba(var(--card-rgb), .9); backdrop-filter: blur(8px);
+    color: var(--muted); width: 2rem; height: 2rem; margin: .6rem; border-radius: 999px;
+    cursor: pointer; display: flex; align-items: center; justify-content: center;
+    pointer-events: auto; box-shadow: var(--shadow);
   }
   .board-panel .panel-close:hover, .board-panel .panel-close:focus-visible {
     color: var(--ink); outline: none;
@@ -197,77 +239,227 @@ __ICON__
     padding: .4rem 0; background: var(--paper);
   }
   .conv {
-    display: grid; grid-template-columns: 10px minmax(0, 1fr) auto; gap: .65rem; align-items: start;
+    display: grid; grid-template-columns: 10px minmax(0, 1fr) auto auto; gap: .65rem; align-items: start;
     width: 100%; text-align: left; appearance: none; border: 0; background: none;
     color: inherit; padding: .55rem .9rem; cursor: pointer; border-radius: 0;
   }
   .conv:hover, .conv:focus-visible { background: var(--paper-3); outline: none; }
   .conv.marble-open { background: var(--accent-soft); }
+  /* An author-level `display: grid` above beats the UA [hidden] rule, so a
+     filtered-out row stays fully visible unless this re-asserts it. */
+  .conv[hidden] { display: none; }
   .conv .dot {
-    width: 7px; height: 7px; margin-top: .45rem; border-radius: 999px; background: var(--faint);
+    width: 8px; height: 8px; margin-top: .42rem; border-radius: 999px; background: var(--faint);
+    flex: none;
   }
   .conv[data-status="running"] .dot {
     background: var(--accent-ink); box-shadow: 0 0 0 3px rgba(var(--accent-ink-rgb), .18);
     animation: pulse 1.2s var(--snap) infinite;
   }
   .conv[data-status="review"] .dot { background: var(--caution); }
+  /* A failed or watchdog-flagged turn is not merely "worth a look" like a
+     normal change set — it needs the same alarm color the turn footer uses. */
+  .conv[data-status="review"][data-outcome="failed"] .dot,
+  .conv[data-status="review"][data-outcome="watchdog"] .dot {
+    background: var(--danger); box-shadow: 0 0 0 3px rgba(var(--accent-ink-rgb), 0);
+    animation: none;
+  }
   .conv .body { min-width: 0; display: flex; flex-direction: column; gap: .1rem; }
   .conv .title { font-weight: 500; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-  .conv .meta { display: flex; gap: .4rem; min-width: 0; color: var(--muted); font-size: .78rem; }
-  .conv .badge {
-    flex: none; font-size: 11px; color: var(--muted); background: var(--paper-2);
-    border-radius: 999px; padding: 0 7px;
+  .conv .tags { display: flex; flex-wrap: wrap; gap: 4px; margin-top: .2rem; }
+  .conv .tag {
+    display: inline-flex; align-items: center; font-size: 11px; line-height: 1.3; font-weight: 500;
+    padding: 2px 8px; border-radius: 999px; max-width: 100%;
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
   }
-  .conv .activity { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .conv .tag[data-hue="0"] { background: #e4edf4; color: #3d5a70; }
+  .conv .tag[data-hue="1"] { background: #f0e6dc; color: #6b4f3a; }
+  .conv .tag[data-hue="2"] { background: #e4efe8; color: #3d5c4a; }
+  .conv .tag[data-hue="3"] { background: #f3ead8; color: #6d5630; }
+  .conv .tag[data-hue="4"] { background: #eee4ee; color: #5c4560; }
+  .conv .tag[data-hue="5"] { background: #e6e8ea; color: #454c52; }
+  @media (prefers-color-scheme: dark) {
+    .conv .tag[data-hue="0"] { background: #243038; color: #9dc0dc; }
+    .conv .tag[data-hue="1"] { background: #322820; color: #e0c4a8; }
+    .conv .tag[data-hue="2"] { background: #1f2c26; color: #a8c9b6; }
+    .conv .tag[data-hue="3"] { background: #322c1e; color: #d9c08a; }
+    .conv .tag[data-hue="4"] { background: #2c2430; color: #c8b0c8; }
+    .conv .tag[data-hue="5"] { background: #26282a; color: #b4b8bc; }
+  }
+  .conv .meta { display: flex; gap: .35rem; min-width: 0; color: var(--muted); font-size: .78rem; }
+  .conv .meta > * { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  /* Provider is almost always the same one agent, so it rides in the meta
+     line as plain text rather than competing for attention as its own pill. */
+  .conv .badge { flex: none; max-width: 6em; }
+  .conv .badge:not(:empty)::after { content: '\00b7'; margin-left: .35rem; color: var(--faint); }
+  .conv .activity { flex: 1 1 auto; }
   .conv .age { flex: none; font-size: .75rem; color: var(--faint); padding-top: .15rem; }
+  .conv .manage { position: relative; flex: none; }
+  .conv .manage .more {
+    appearance: none; border: 0; background: none; color: var(--faint); cursor: pointer;
+    width: 28px; height: 28px; margin: -.25rem -.35rem 0 0; border-radius: 8px;
+    display: grid; place-items: center;
+  }
+  .conv .manage .more:hover, .conv .manage .more:focus-visible { color: var(--ink); background: var(--paper-3); outline: none; }
+  .conv .manage .more[aria-expanded="true"] { color: var(--ink); background: var(--paper-3); }
+  .conv .manage .menu {
+    position: absolute; right: 0; top: calc(100% + 4px); z-index: 8; min-width: 11.5rem;
+    background: var(--card); border: 1px solid var(--line); border-radius: 10px;
+    box-shadow: var(--shadow-lift); padding: 4px;
+  }
+  .conv .manage .menu button {
+    display: block; width: 100%; text-align: left; appearance: none; border: 0; background: none;
+    color: var(--ink); font: inherit; font-size: .82rem; padding: .4rem .65rem; border-radius: 8px; cursor: pointer;
+  }
+  .conv .manage .menu button:hover, .conv .manage .menu button:focus-visible { background: var(--paper-2); outline: none; }
   @keyframes pulse {
     0%, 100% { box-shadow: 0 0 0 3px rgba(var(--accent-ink-rgb), .12); }
     50% { box-shadow: 0 0 0 5px rgba(var(--accent-ink-rgb), .28); }
   }
 
   .pane {
-    min-width: 0; min-height: 0; display: flex; flex-direction: column;
+    position: relative; min-width: 0; min-height: 0;
+    display: grid; grid-template-rows: auto minmax(0, 1fr); grid-template-columns: minmax(0, 1fr);
     background: var(--card);
   }
-  .pane marble-conversation { flex: 1; min-height: 0; }
-
-  .inspector {
-    min-height: 0; overflow-y: auto; border-left: 1px solid var(--line);
-    padding: 1rem; background: var(--paper);
-    font-size: .85rem; color: var(--muted);
+  .pane[data-dock="row"] {
+    grid-template-columns: var(--dock-a, 1fr) 5px var(--dock-b, 1fr);
+    grid-template-rows: auto minmax(0, 1fr);
   }
-  .inspector .empty { margin: 0; color: var(--faint); }
-  .inspector h2 {
-    margin: 0 0 .7rem; font-size: .95rem; font-weight: 500; color: var(--ink);
+  .pane[data-dock="col"] {
+    grid-template-rows: auto var(--dock-a, 1fr) 5px var(--dock-b, 1fr);
+    grid-template-columns: minmax(0, 1fr);
   }
-  .inspector dl { margin: 0 0 1rem; display: grid; gap: .45rem; }
-  .inspector div { display: grid; gap: .1rem; }
-  .inspector dt { font-size: .72rem; letter-spacing: .04em; text-transform: uppercase; color: var(--faint); }
-  .inspector dd { margin: 0; color: var(--ink); }
-  .inspector a { color: var(--accent-ink); }
-  .inspector a:hover, .inspector a:focus-visible { color: var(--ink); }
-  .inspector .actions { display: flex; flex-wrap: wrap; gap: .4rem; }
-  .inspector .actions button {
-    appearance: none; border: 1px solid var(--line); background: var(--card); color: var(--ink);
-    padding: .3rem .7rem; border-radius: 8px; cursor: pointer; font-size: .82rem;
+  .pane[data-dock="col"][data-dock-primary="end"] {
+    grid-template-rows: var(--dock-a, 1fr) 5px auto var(--dock-b, 1fr);
   }
-  .inspector .actions button:hover, .inspector .actions button:focus-visible {
-    background: var(--paper-3); outline: none;
+  .pane > .dock-bar { grid-column: 1; grid-row: 1; min-width: 0; }
+  .pane > marble-conversation:not([data-marble-transient]) {
+    grid-column: 1; grid-row: 2; min-width: 0; min-height: 0;
   }
+  .pane[data-dock="row"] > .dock-bar { grid-column: 1; grid-row: 1; }
+  .pane[data-dock="row"] > marble-conversation:not([data-marble-transient]) { grid-column: 1; grid-row: 2; }
+  .pane[data-dock="row"][data-dock-primary="end"] > .dock-bar { grid-column: 3; }
+  .pane[data-dock="row"][data-dock-primary="end"] > marble-conversation:not([data-marble-transient]) { grid-column: 3; }
+  .pane[data-dock="col"] > .dock-bar { grid-row: 1; grid-column: 1; }
+  .pane[data-dock="col"] > marble-conversation:not([data-marble-transient]) { grid-row: 2; grid-column: 1; }
+  .pane[data-dock="col"][data-dock-primary="end"] > .dock-bar { grid-row: 3; }
+  .pane[data-dock="col"][data-dock-primary="end"] > marble-conversation:not([data-marble-transient]) { grid-row: 4; }
+  .dock-gutter { background: var(--line); cursor: col-resize; z-index: 2; }
+  .pane[data-dock="row"] > .dock-gutter { grid-column: 2; grid-row: 1 / -1; }
+  .pane[data-dock="col"] > .dock-gutter { grid-row: 3; grid-column: 1; cursor: row-resize; }
+  .pane[data-dock="col"][data-dock-primary="end"] > .dock-gutter { grid-row: 2; }
+  .dock-extras { min-width: 0; min-height: 0; display: flex; flex-direction: column; }
+  .pane[data-dock="row"] > .dock-extras { grid-column: 3; grid-row: 1 / -1; }
+  .pane[data-dock="row"][data-dock-primary="end"] > .dock-extras { grid-column: 1; }
+  .pane[data-dock="col"] > .dock-extras { grid-row: 4; grid-column: 1; }
+  .pane[data-dock="col"][data-dock-primary="end"] > .dock-extras { grid-row: 1; }
+  .dock-leaf { flex: 1; min-height: 0; min-width: 0; display: flex; flex-direction: column; position: relative; }
+  .dock-leaf + .dock-leaf { border-top: 1px solid var(--line); }
+  .dock-leaf marble-conversation { flex: 1; min-height: 0; height: 100%; }
+  .dock-bar {
+    display: flex; align-items: center; gap: .45rem;
+    min-height: 2.15rem; padding: .2rem .45rem .2rem .55rem;
+    border-bottom: 1px solid var(--line); background: var(--paper-2);
+    cursor: grab; user-select: none; min-width: 0;
+  }
+  .dock-bar:active { cursor: grabbing; }
+  .dock-bar.marble-drop-swap { background: var(--accent-soft); box-shadow: inset 0 0 0 1px var(--accent); }
+  .dock-grip { flex: none; color: var(--faint); }
+  .dock-title {
+    flex: 1; min-width: 0; font-size: 12.5px; font-weight: 500; letter-spacing: -.01em;
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  }
+  .dock-target {
+    flex: none; max-width: 9rem; font-size: 11.5px; color: var(--accent-ink);
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap; text-decoration: none;
+  }
+  .dock-target:hover, .dock-target:focus-visible { color: var(--ink); outline: none; }
+  .dock-target[hidden] { display: none; }
+  .dock-close {
+    appearance: none; border: 0; background: none; flex: none;
+    color: var(--muted); width: 1.55rem; height: 1.55rem; border-radius: 8px; cursor: pointer;
+    display: grid; place-items: center;
+  }
+  .dock-close:hover, .dock-close:focus-visible { color: var(--ink); background: var(--paper-3); outline: none; }
+  body:not([data-open]) .pane > .dock-bar { display: none; }
+  .dock-card {
+    position: fixed; z-index: 40; pointer-events: none; width: 16.5rem;
+    padding: .65rem .8rem; background: var(--card); border: 1px solid var(--line);
+    border-radius: 12px; box-shadow: var(--shadow-lift);
+  }
+  .dock-card .dock-title { display: block; font-size: 13px; font-weight: 500; }
+  .dock-card .dock-target { display: block; max-width: none; color: var(--muted); margin-top: .15rem; }
+  .pane.marble-drop-right::after, .pane.marble-drop-left::after,
+  .pane.marble-drop-top::after, .pane.marble-drop-bottom::after {
+    content: ''; position: absolute; z-index: 6; pointer-events: none;
+    background: rgba(var(--accent-ink-rgb), .16);
+    transition: opacity 160ms ease-out;
+  }
+  .pane.marble-drop-right::after { top: 0; right: 0; bottom: 0; width: 22%; }
+  .pane.marble-drop-left::after { top: 0; left: 0; bottom: 0; width: 22%; }
+  .pane.marble-drop-top::after { top: 0; left: 0; right: 0; height: 22%; }
+  .pane.marble-drop-bottom::after { bottom: 0; left: 0; right: 0; height: 22%; }
+  .pane marble-conversation { min-height: 0; }
+  /* The composer is always live — even with nothing picked, typing below
+     starts a conversation — so the hint sits above it, not over it. */
+  .pane-hint {
+    position: absolute; inset: 0; bottom: 6.5rem; display: none; z-index: 1;
+    flex-direction: column; align-items: center; justify-content: center; gap: .6rem;
+    color: var(--faint); text-align: center; padding: 0 2rem; pointer-events: none;
+  }
+  .pane-hint p { margin: 0; font-size: .88rem; max-width: 22rem; }
+  body:not([data-open]) .pane-hint { display: flex; }
+  .pane .back {
+    display: none; position: absolute; top: .6rem; left: .6rem; z-index: 2;
+    appearance: none; border: 0; background: rgba(var(--paper-rgb), .85); backdrop-filter: blur(8px);
+    color: var(--ink); width: 2rem; height: 2rem; border-radius: 999px; cursor: pointer;
+    align-items: center; justify-content: center; box-shadow: var(--shadow);
+  }
+  .pane .back:hover, .pane .back:focus-visible { background: var(--card); outline: none; }
 
   @media (max-width: 719px) {
-    .library { grid-template-columns: 1fr; }
-    .list { border-right: 0; border-bottom: 1px solid var(--line); max-height: 40vh; }
-    .inspector { border-left: 0; border-top: 1px solid var(--line); }
+    /* Title + segmented bars + New stay on the first wrap; search gets
+       its own row. The three bars scroll sideways if they cannot fit. */
+    .topbar { row-gap: .5rem; padding: .5rem .75rem; }
+    .topbar h1 { order: 1; font-size: 1.05rem; }
+    .toggles { order: 2; flex: 1 1 auto; min-width: 0; overflow-x: auto; -webkit-overflow-scrolling: touch; padding-bottom: 1px; }
+    .usage { order: 3; margin-left: auto; }
+    .settings { order: 3; }
+    .new { order: 4; }
+    input.search { order: 5; flex-basis: 100%; }
+
+    /* One pane at a time, not three squeezed into one screen. The library
+       shows the list; opening a row swaps it for the conversation (with a
+       back button) and its details, scrolling together. */
+    .library { display: block; overflow-y: auto; }
+    .list { border-right: 0; max-height: none; height: 100%; }
+    .pane { display: none; }
+    body[data-open] .list { display: none; }
+    body[data-open] .filters { display: none; }
+    body[data-open] .pane { display: grid; height: 65vh; min-height: 22rem; }
+    body[data-open]:not([data-panel="open"]) .pane .back { display: flex; }
+    .pane-hint { bottom: 7.5rem; }
+
     .board { scroll-snap-type: x mandatory; }
     .column { flex: 0 0 min(20rem, 85vw); scroll-snap-align: start; }
-    .board-panel { width: 100%; }
-    body[data-view="board"][data-panel="open"] .library {
-      grid-template-columns: minmax(0, 1fr) minmax(0, 100%);
+    .board-panel { width: auto; }
+    body[data-view="board"][data-panel="open"] {
+      grid-template-columns: minmax(0, 1fr);
     }
+    body[data-view="board"][data-panel="open"] .board {
+      display: flex; grid-column: 1; height: 0; min-height: 0; padding: 0; overflow: visible;
+      pointer-events: none;
+    }
+    body[data-view="board"][data-panel="open"] .column { display: none; }
+    body[data-view="board"][data-panel="open"] .board-panel { pointer-events: auto; }
+    body[data-view="board"][data-panel="open"] .library {
+      grid-column: 1; grid-template-columns: minmax(0, 1fr);
+    }
+    body[data-view="board"][data-panel="open"] .pane { height: auto; }
   }
   @media (hover: none) {
-    .conv, .filter, .views button, .new, .settings, .inspector .actions button, .panel-close { min-height: 2.75rem; }
+    .conv, .seg button, .new, .settings, .conv .manage .more, .panel-close { min-height: 2.75rem; }
   }
 </style>
 </head>
@@ -275,17 +467,21 @@ __ICON__
 
 <header class="topbar" data-marble-id="__ID__">
   <h1 data-marble-id="__ID__" data-marble-editable>__TITLE__</h1>
-  <div class="views" role="group" aria-label="View" data-marble-id="__ID__">
-    <button type="button" data-view="library" aria-pressed="true" data-marble-id="__ID__">List</button>
-    <button type="button" data-view="board" aria-pressed="false" data-marble-id="__ID__">Board</button>
+  <div class="toggles" data-marble-id="__ID__">
+    <div class="seg views" role="group" aria-label="View" data-marble-id="__ID__">
+      <button type="button" data-view="library" aria-pressed="true" data-marble-id="__ID__">List</button>
+      <button type="button" data-view="board" aria-pressed="false" data-marble-id="__ID__">Board</button>
+    </div>
+    <div class="seg cli" role="group" aria-label="CLI" data-marble-transient></div>
+    <div class="seg filters" role="group" aria-label="Filter" data-marble-id="__ID__">
+      <button type="button" class="filter" data-filter="all" aria-pressed="true" data-marble-id="__ID__">All</button>
+      <button type="button" class="filter" data-filter="running" aria-pressed="false" data-marble-id="__ID__">Running</button>
+      <button type="button" class="filter" data-filter="review" aria-pressed="false" data-marble-id="__ID__">Review</button>
+      <button type="button" class="filter" data-filter="archived" aria-pressed="false" data-marble-id="__ID__">Archived</button>
+    </div>
   </div>
   <input class="search" type="search" placeholder="Search conversations" autocomplete="off" aria-label="Search conversations" data-marble-id="__ID__">
-  <div class="filters" role="group" aria-label="Filter" data-marble-id="__ID__">
-    <button type="button" class="filter" data-filter="all" aria-pressed="true" data-marble-id="__ID__">All</button>
-    <button type="button" class="filter" data-filter="running" aria-pressed="false" data-marble-id="__ID__">Running</button>
-    <button type="button" class="filter" data-filter="review" aria-pressed="false" data-marble-id="__ID__">Review</button>
-    <button type="button" class="filter" data-filter="archived" aria-pressed="false" data-marble-id="__ID__">Archived</button>
-  </div>
+  <div class="usage" data-marble-transient role="group" aria-label="Usage remaining"></div>
   <button type="button" class="settings" data-marble-id="__ID__">Settings</button>
   <button type="button" class="new" data-marble-id="__ID__">New</button>
 </header>
@@ -293,11 +489,15 @@ __ICON__
 <div class="library" data-marble-id="__ID__">
   <div id="list" class="list" role="list" data-marble-id="__ID__" data-marble-transient></div>
   <section class="pane" data-marble-id="__ID__">
-    <marble-conversation data-marble-id="__ID__"></marble-conversation>
+    <button type="button" class="back" data-marble-id="__ID__" aria-label="Back to conversations">
+      <svg viewBox="0 0 20 20" width="18" height="18" aria-hidden="true"><path d="M12.5 4.5 7 10l5.5 5.5" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg>
+    </button>
+    <div class="pane-hint" data-marble-transient>
+      <svg viewBox="0 0 32 32" width="30" height="30" aria-hidden="true"><circle cx="16" cy="16" r="13" fill="none" stroke="currentColor" stroke-width="1.4" opacity=".35"/><path d="M10 17c2.5 4 9.5 4 12 0" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg>
+      <p>Pick a conversation, or ask below to start one.</p>
+    </div>
+    <marble-conversation data-marble-id="__ID__" data-chrome="pane"></marble-conversation>
   </section>
-  <aside class="inspector" data-marble-id="__ID__" data-marble-transient>
-    <p class="empty">Select a conversation.</p>
-  </aside>
 </div>
 
 <div class="board" data-marble-id="__ID__">
@@ -311,7 +511,9 @@ __ICON__
     <h2 data-marble-id="__ID__">Completed</h2>
   </section>
   <div class="board-panel" data-marble-id="__ID__">
-    <button type="button" class="panel-close" data-marble-id="__ID__">Close</button>
+    <button type="button" class="panel-close" data-marble-id="__ID__" aria-label="Close">
+      <svg viewBox="0 0 20 20" width="14" height="14" aria-hidden="true"><path d="M5 5l10 10M15 5 5 15" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg>
+    </button>
   </div>
 </div>
 
@@ -323,6 +525,8 @@ __ICON__
   (() => {
     const VIEW_KEY = 'marble-agents:view';
     const OPEN_KEY = 'marble-agents:open';
+    const DOCK_KEY = 'marble-agents:dock';
+    const CLI_KEY = 'marble-agents:cli';
 
     const recalled = (key) => {
       try { return localStorage.getItem(key); } catch { return null; }
@@ -344,41 +548,38 @@ __ICON__
     const list = $('#list');
     const libraryEl = $('.library');
     const boardEl = $('.board');
-    const inspector = $('.inspector');
     const convo = $('marble-conversation');
+    const pane = $('.pane');
     const boardPanel = $('.board-panel');
     const search = $('input.search');
     const viewButtons = [...document.querySelectorAll('.views [data-view]')];
     const filterButtons = [...document.querySelectorAll('button.filter')];
+    const cliEl = $('.cli');
     const reduceMotion = matchMedia('(prefers-reduced-motion: reduce)');
     const narrowView = matchMedia('(max-width: 719px)');
     const FLIP_MS = 420;
-    const FLIP_EASE = 'cubic-bezier(.2, .8, .2, 1)';
+    const FLIP_EASE = 'ease-out';
     const STAGGER_MS = 18;
 
     const summaries = new Map();
     const nodes = new Map();
     const labels = new Map();
+    const targets = new Map();
     let agent = null;
     let filter = 'all';
+    let cli = recalled(CLI_KEY) || 'all';
     let query = '';
     let openId = null;
-    let inspectGen = 0;
     let panelOpen = false;
     let flipAnims = [];
     let fadeGen = 0;
+    let dock = { dir: 'row', primary: 'start', extras: [], sizes: [0.58, 0.42], focus: 'primary' };
+    let suppressConvClick = false;
 
     const statusOf = (summary) => {
       if (summary?.running || summary?.status === 'running' || summary?.queued) return 'running';
       if (summary?.needsReview) return 'review';
       return 'completed';
-    };
-
-    const statusLabel = (summary) => {
-      const status = statusOf(summary);
-      if (status === 'running') return 'Running';
-      if (status === 'review') return 'Needs review';
-      return 'Completed';
     };
 
     const age = (t) => {
@@ -398,6 +599,46 @@ __ICON__
       for (const btn of filterButtons) btn.setAttribute('aria-pressed', String(btn.dataset.filter === filter));
     };
 
+    const deriveCli = () => {
+      if (!cliEl) return;
+      for (const btn of cliEl.querySelectorAll('[data-cli]')) {
+        btn.setAttribute('aria-pressed', String(btn.dataset.cli === cli));
+      }
+    };
+
+    const fillCli = () => {
+      if (!cliEl) return;
+      const order = ['claude-subscription', 'cursor', 'claude-api'];
+      const ready = [...labels.values()]
+        .filter((provider) => provider.installed && provider.signedIn)
+        .sort((a, b) => {
+          const rank = (id) => {
+            const index = order.indexOf(id);
+            return index < 0 ? order.length + 1 : index;
+          };
+          return rank(a.id) - rank(b.id) || String(a.id).localeCompare(String(b.id));
+        });
+      if (cli !== 'all' && !ready.some((provider) => provider.id === cli)) cli = 'all';
+      cliEl.replaceChildren();
+      const add = (id, label) => {
+        const btn = document.createElement('button');
+        btn.type = 'button';
+        btn.dataset.cli = id;
+        btn.setAttribute('aria-pressed', String(cli === id));
+        btn.textContent = label;
+        cliEl.append(btn);
+      };
+      add('all', 'All');
+      for (const provider of ready) add(provider.id, provider.label);
+    };
+
+    const setCli = (next) => {
+      cli = next || 'all';
+      remember(CLI_KEY, cli === 'all' ? null : cli);
+      deriveCli();
+      applyFilters();
+    };
+
     const matches = (summary) => {
       if (!summary) return false;
       const status = statusOf(summary);
@@ -409,9 +650,11 @@ __ICON__
         if (filter === 'review' && status !== 'review') return false;
       }
       if (query) {
-        const hay = ((summary.title || '') + ' ' + (summary.activity || '')).toLowerCase();
+        const tags = (window.marbleAgentUI?.conversationTags?.(summary, labels) ?? []).map((tag) => tag.label);
+        const hay = [summary.title, summary.activity, summary.target, summary.model, summary.effort, summary.provider, ...tags].filter(Boolean).join(' ').toLowerCase();
         if (!hay.includes(query)) return false;
       }
+      if (cli !== 'all' && summary.provider !== cli) return false;
       return true;
     };
 
@@ -425,8 +668,25 @@ __ICON__
 
     const paintRow = (el, summary) => {
       el.dataset.status = statusOf(summary);
+      // A finer signal than the three-way status bucket, purely for the dot's
+      // color — failed/watchdog reads as an alarm, not just "take a look".
+      if (summary.lastOutcome) el.dataset.outcome = summary.lastOutcome;
+      else delete el.dataset.outcome;
       el.querySelector('.title').textContent = summary.title || 'Untitled';
-      el.querySelector('.badge').textContent = labels.get(summary.provider)?.label ?? summary.provider ?? '';
+      const tags = el.querySelector('.tags');
+      if (tags) {
+        tags.replaceChildren();
+        for (const tag of (window.marbleAgentUI?.conversationTags?.(summary, labels) ?? [])) {
+          const span = document.createElement('span');
+          span.className = 'tag';
+          span.dataset.kind = tag.kind;
+          span.dataset.hue = String(tag.hue);
+          span.textContent = tag.label;
+          if (tag.title) span.title = tag.title;
+          tags.append(span);
+        }
+      }
+      el.querySelector('.badge').textContent = '';
       el.querySelector('.activity').textContent = summary.activity || '';
       el.querySelector('.age').textContent = age(summary.updatedAt);
     };
@@ -506,38 +766,107 @@ __ICON__
       document.body.removeAttribute('data-panel');
     };
 
-    const typingIn = () => {
-      const host = document.activeElement;
-      const inner = host?.shadowRoot?.activeElement ?? host;
-      if (!inner || inner === document.body || inner === document.documentElement) return false;
-      if (inner === search || inner.closest?.('input.search')) return true;
-      if (inner.isContentEditable) return true;
-      const tag = inner.tagName;
-      return tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT';
+    const rememberDock = () => {
+      remember(DOCK_KEY, JSON.stringify({
+        dir: dock.dir,
+        primary: dock.primary,
+        extras: dock.extras.map((extra) => extra.id),
+        sizes: dock.sizes,
+        focus: dock.focus,
+        file: convo.getAttribute('conversation'),
+      }));
     };
 
-    const upsert = (summary) => {
-      if (!summary?.id) return;
-      summaries.set(summary.id, summary);
-      let el = nodes.get(summary.id);
-      if (!el) {
-        el = document.createElement('button');
-        el.type = 'button';
-        el.className = 'conv';
-        el.dataset.id = summary.id;
-        el.setAttribute('role', 'listitem');
-        el.innerHTML = '<span class="dot" aria-hidden="true"></span><span class="body"><span class="title"></span><span class="meta"><span class="badge"></span><span class="activity"></span></span></span><span class="age"></span>';
-        el.addEventListener('click', () => {
-          if ((document.body.getAttribute('data-view') || 'library') === 'board') openBoardPanel();
-          open(el.dataset.id);
-        });
-        nodes.set(summary.id, el);
+    const BAR_MARKUP = `<svg class="dock-grip" viewBox="0 0 10 14" width="10" height="14" aria-hidden="true"><circle cx="3" cy="3" r="1.15" fill="currentColor"/><circle cx="7" cy="3" r="1.15" fill="currentColor"/><circle cx="3" cy="7" r="1.15" fill="currentColor"/><circle cx="7" cy="7" r="1.15" fill="currentColor"/><circle cx="3" cy="11" r="1.15" fill="currentColor"/><circle cx="7" cy="11" r="1.15" fill="currentColor"/></svg><span class="dock-title"></span><a class="dock-target" hidden></a><button type="button" class="dock-close" aria-label="Close pane"><svg viewBox="0 0 20 20" width="12" height="12" aria-hidden="true"><path d="M5 5l10 10M15 5 5 15" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg></button>`;
+
+    const dropSide = (clientX, clientY) => {
+      const r = pane.getBoundingClientRect();
+      if (clientX < r.left || clientX > r.right || clientY < r.top || clientY > r.bottom) return null;
+      const x = (clientX - r.left) / r.width;
+      const y = (clientY - r.top) / r.height;
+      const edge = 0.22;
+      if (x > 1 - edge) return 'right';
+      if (x < edge) return 'left';
+      if (y < edge) return 'top';
+      if (y > 1 - edge) return 'bottom';
+      return 'center';
+    };
+
+    const hitBar = (clientX, clientY, skipId) => {
+      for (const bar of pane.querySelectorAll('.dock-bar')) {
+        if (skipId && bar.dataset.id === skipId) continue;
+        const r = bar.getBoundingClientRect();
+        if (clientX >= r.left && clientX <= r.right && clientY >= r.top && clientY <= r.bottom) return bar;
       }
-      paintRow(el, summary);
-      place(el);
-      el.hidden = !matches(summary);
-      el.classList.toggle('marble-open', summary.id === openId);
-      if (summary.id === openId) fillInspector(summary.id);
+      return null;
+    };
+
+    const paintDrop = (clientX, clientY, skipId) => {
+      pane.classList.remove('marble-drop-right', 'marble-drop-left', 'marble-drop-top', 'marble-drop-bottom');
+      for (const bar of pane.querySelectorAll('.dock-bar')) bar.classList.remove('marble-drop-swap');
+      if (clientX == null) return;
+      const bar = hitBar(clientX, clientY, skipId);
+      if (bar) {
+        bar.classList.add('marble-drop-swap');
+        return;
+      }
+      const side = dropSide(clientX, clientY);
+      if (side && side !== 'center') pane.classList.add(`marble-drop-${side}`);
+    };
+
+    const slotOf = (id) => {
+      if (!id) return null;
+      if (convo.getAttribute('conversation') === id) return 'primary';
+      const index = dock.extras.findIndex((item) => item.id === id);
+      return index >= 0 ? index : null;
+    };
+
+    const writeSlot = (slot, id) => {
+      if (slot === 'primary') {
+        if (id) convo.setAttribute('conversation', id);
+        else convo.removeAttribute('conversation');
+        return;
+      }
+      if (typeof slot === 'number' && dock.extras[slot]) dock.extras[slot].id = id;
+    };
+
+    const focusSlot = (slot, id) => {
+      dock.focus = slot;
+      openId = id;
+      if (id) {
+        remember(OPEN_KEY, id);
+        document.body.setAttribute('data-open', 'true');
+      }
+      rememberDock();
+      paintOpen();
+    };
+
+    const paintBar = (bar, id) => {
+      if (!bar) return;
+      bar.dataset.id = id || '';
+      const summary = summaries.get(id) ?? {};
+      bar.querySelector('.dock-title').textContent = summary.title || 'Untitled';
+      const link = bar.querySelector('.dock-target');
+      const target = targets.get(id) || summary.target || '';
+      if (target) {
+        link.hidden = false;
+        link.textContent = target;
+        const href = window.marble?.href?.(target);
+        if (href) link.href = href;
+        else link.removeAttribute('href');
+      } else {
+        link.hidden = true;
+        link.textContent = '';
+        link.removeAttribute('href');
+      }
+    };
+
+    const paintBars = () => {
+      paintBar(pane.querySelector(':scope > .dock-bar'), convo.getAttribute('conversation'));
+      dock.extras.forEach((extra, index) => {
+        const bar = pane.querySelector(`.dock-leaf:nth-child(${index + 1}) .dock-bar`);
+        paintBar(bar, extra.id);
+      });
     };
 
     const lastTarget = (detail) => {
@@ -554,6 +883,400 @@ __ICON__
       return null;
     };
 
+    const fillChrome = async (id) => {
+      ensurePrimaryBar();
+      paintBars();
+      if (!id || !agent) return;
+      try {
+        const detail = await agent.conversation(id);
+        const target = lastTarget(detail) ?? detail.meta?.target;
+        if (target) targets.set(id, target);
+      } catch { /* header still has the title */ }
+      if (openId !== id && convo.getAttribute('conversation') !== id && !dock.extras.some((item) => item.id === id)) return;
+      paintBars();
+    };
+
+    const makeBar = (slot) => {
+      const bar = document.createElement('div');
+      bar.className = 'dock-bar';
+      bar.dataset.slot = String(slot);
+      bar.setAttribute('data-marble-transient', '');
+      bar.innerHTML = BAR_MARKUP;
+      bar.querySelector('.dock-close').addEventListener('click', (event) => {
+        event.stopPropagation();
+        closeSlot(bar.dataset.slot === 'primary' ? 'primary' : Number(bar.dataset.slot));
+      });
+      bar.addEventListener('pointerdown', (event) => {
+        if (event.target.closest('a, button')) return;
+        const id = bar.dataset.id;
+        if (!id) return;
+        focusSlot(bar.dataset.slot === 'primary' ? 'primary' : Number(bar.dataset.slot), id);
+      });
+      bindPaneDrag(bar, () => bar.dataset.id);
+      return bar;
+    };
+
+    const ensurePrimaryBar = () => {
+      convo.setAttribute('data-chrome', 'pane');
+      let bar = pane.querySelector(':scope > .dock-bar');
+      if (!bar) {
+        bar = makeBar('primary');
+        convo.before(bar);
+      }
+      bar.dataset.slot = 'primary';
+      return bar;
+    };
+
+    const closeSlot = (slot) => {
+      if (slot === 'primary') {
+        if (dock.extras.length) {
+          const next = dock.extras[0];
+          convo.setAttribute('conversation', next.id);
+          dock.extras = dock.extras.slice(1);
+          focusSlot('primary', next.id);
+          applyDock();
+          fillChrome(next.id);
+        } else {
+          open(null);
+        }
+        return;
+      }
+      dock.extras = dock.extras.filter((_, index) => index !== slot);
+      if (dock.focus === slot) dock.focus = 'primary';
+      else if (typeof dock.focus === 'number' && dock.focus > slot) dock.focus -= 1;
+      rememberDock();
+      applyDock();
+      const stay = dock.focus === 'primary' ? convo.getAttribute('conversation') : dock.extras[dock.focus]?.id;
+      if (stay) {
+        openId = stay;
+        remember(OPEN_KEY, stay);
+        paintOpen();
+      }
+    };
+
+    const applyDock = () => {
+      ensurePrimaryBar();
+      const extras = pane.querySelector('.dock-extras');
+      const gutter = pane.querySelector('.dock-gutter');
+      if (!dock.extras.length) {
+        pane.removeAttribute('data-dock');
+        pane.removeAttribute('data-dock-primary');
+        gutter?.remove();
+        extras?.remove();
+        pane.style.removeProperty('--dock-a');
+        pane.style.removeProperty('--dock-b');
+        paintBars();
+        return;
+      }
+      pane.setAttribute('data-dock', dock.dir);
+      pane.setAttribute('data-dock-primary', dock.primary);
+      pane.style.setProperty('--dock-a', `${dock.sizes[0]}fr`);
+      pane.style.setProperty('--dock-b', `${dock.sizes[1]}fr`);
+      let split = gutter;
+      if (!split) {
+        split = document.createElement('div');
+        split.className = 'dock-gutter';
+        split.setAttribute('data-marble-transient', '');
+        split.addEventListener('pointerdown', (event) => {
+          if (event.button !== 0) return;
+          event.preventDefault();
+          split.setPointerCapture(event.pointerId);
+          const vertical = dock.dir === 'col';
+          const box = pane.getBoundingClientRect();
+          const move = (e) => {
+            const t = vertical ? (e.clientY - box.top) / box.height : (e.clientX - box.left) / box.width;
+            const a = Math.min(0.8, Math.max(0.2, t));
+            dock.sizes = [a, 1 - a];
+            pane.style.setProperty('--dock-a', `${dock.sizes[0]}fr`);
+            pane.style.setProperty('--dock-b', `${dock.sizes[1]}fr`);
+          };
+          const up = (e) => {
+            split.releasePointerCapture(e.pointerId);
+            split.removeEventListener('pointermove', move);
+            split.removeEventListener('pointerup', up);
+            rememberDock();
+          };
+          split.addEventListener('pointermove', move);
+          split.addEventListener('pointerup', up);
+        });
+        pane.append(split);
+      }
+      let host = extras;
+      if (!host) {
+        host = document.createElement('div');
+        host.className = 'dock-extras';
+        host.setAttribute('data-marble-transient', '');
+        pane.append(host);
+      }
+      host.replaceChildren();
+      dock.extras.forEach((extra, index) => {
+        const leaf = document.createElement('div');
+        leaf.className = 'dock-leaf';
+        const bar = makeBar(index);
+        const view = document.createElement('marble-conversation');
+        view.setAttribute('data-marble-transient', '');
+        view.setAttribute('data-chrome', 'pane');
+        if (extra.id) view.setAttribute('conversation', extra.id);
+        extra.el = view;
+        leaf.addEventListener('pointerdown', () => {
+          if (!extra.id) return;
+          focusSlot(index, extra.id);
+          fillChrome(extra.id);
+        });
+        leaf.append(bar, view);
+        host.append(leaf);
+        paintBar(bar, extra.id);
+      });
+      paintBars();
+    };
+
+    const swapIds = (a, b) => {
+      const sa = slotOf(a);
+      const sb = slotOf(b);
+      if (sa == null || sb == null || sa === sb) return false;
+      writeSlot(sa, b);
+      writeSlot(sb, a);
+      focusSlot(sb, a);
+      rememberDock();
+      applyDock();
+      fillChrome(a);
+      fillChrome(b);
+      return true;
+    };
+
+    const splitWith = (id, side) => {
+      if (narrowView.matches || reduceMotion.matches) {
+        open(id);
+        return;
+      }
+      const dir = (side === 'left' || side === 'right') ? 'row' : 'col';
+      const primary = (side === 'right' || side === 'bottom') ? 'start' : 'end';
+      if (slotOf(id) != null) {
+        dock.dir = dir;
+        dock.primary = primary;
+        focusSlot(slotOf(id), id);
+        rememberDock();
+        applyDock();
+        fillChrome(id);
+        return;
+      }
+      if (!dock.extras.length) {
+        dock.dir = dir;
+        dock.primary = primary;
+        dock.extras = [{ id }];
+        dock.sizes = [0.58, 0.42];
+        dock.focus = 0;
+      } else if (dock.extras.length < 3) {
+        dock.extras.push({ id });
+        dock.focus = dock.extras.length - 1;
+      } else {
+        dock.extras[dock.extras.length - 1].id = id;
+        dock.focus = dock.extras.length - 1;
+      }
+      rememberDock();
+      applyDock();
+      openId = id;
+      remember(OPEN_KEY, id);
+      paintOpen();
+      fillChrome(id);
+    };
+
+    const placeCard = (card, clientX, clientY) => {
+      card.style.left = `${clientX - 16}px`;
+      card.style.top = `${clientY - 16}px`;
+    };
+
+    const makeCard = (id) => {
+      const card = document.createElement('div');
+      card.className = 'dock-card';
+      card.setAttribute('data-marble-transient', '');
+      const summary = summaries.get(id) ?? {};
+      const title = document.createElement('span');
+      title.className = 'dock-title';
+      title.textContent = summary.title || 'Untitled';
+      const target = document.createElement('span');
+      target.className = 'dock-target';
+      target.textContent = targets.get(id) || summary.target || '';
+      card.append(title);
+      if (target.textContent) card.append(target);
+      document.body.append(card);
+      return card;
+    };
+
+    const bindPaneDrag = (el, idOf) => {
+      el.addEventListener('pointerdown', (event) => {
+        if (event.button !== 0 || event.target.closest('a, input, textarea, button, .manage')) return;
+        if (narrowView.matches || reduceMotion.matches) return;
+        if (!document.body.hasAttribute('data-open')) return;
+        const origin = { x: event.clientX, y: event.clientY, id: idOf(), started: false };
+        if (!origin.id) return;
+        let done = false;
+        let card = null;
+        el.setPointerCapture?.(event.pointerId);
+        const move = (e) => {
+          if (done) return;
+          if (!origin.started && Math.hypot(e.clientX - origin.x, e.clientY - origin.y) < 8) return;
+          origin.started = true;
+          if (!card) card = makeCard(origin.id);
+          placeCard(card, e.clientX, e.clientY);
+          paintDrop(e.clientX, e.clientY, origin.id);
+        };
+        const up = (e) => {
+          if (done) return;
+          done = true;
+          document.removeEventListener('pointermove', move);
+          document.removeEventListener('mousemove', move);
+          document.removeEventListener('pointerup', up);
+          document.removeEventListener('mouseup', up);
+          document.removeEventListener('pointercancel', up);
+          try { el.releasePointerCapture?.(e.pointerId); } catch { /* already released */ }
+          card?.remove();
+          paintDrop(null);
+          if (!origin.started) return;
+          suppressConvClick = true;
+          setTimeout(() => { suppressConvClick = false; }, 0);
+          const over = hitBar(e.clientX, e.clientY, origin.id);
+          if (over?.dataset.id) {
+            if (!swapIds(origin.id, over.dataset.id)) open(origin.id);
+            return;
+          }
+          const side = dropSide(e.clientX, e.clientY);
+          if (side && side !== 'center') splitWith(origin.id, side);
+          else open(origin.id);
+        };
+        document.addEventListener('pointermove', move);
+        document.addEventListener('mousemove', move);
+        document.addEventListener('pointerup', up);
+        document.addEventListener('mouseup', up);
+        document.addEventListener('pointercancel', up);
+      });
+    };
+
+    const bindConvDrag = (el) => bindPaneDrag(el, () => el.dataset.id);
+
+    const typingIn = () => {
+      const host = document.activeElement;
+      const inner = host?.shadowRoot?.activeElement ?? host;
+      if (!inner || inner === document.body || inner === document.documentElement) return false;
+      if (inner === search || inner.closest?.('input.search')) return true;
+      if (inner.isContentEditable) return true;
+      const tag = inner.tagName;
+      return tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT';
+    };
+
+    const closeRowMenus = () => {
+      for (const menu of document.querySelectorAll('.conv .manage .menu')) menu.remove();
+      for (const btn of document.querySelectorAll('.conv .manage .more')) btn.setAttribute('aria-expanded', 'false');
+    };
+
+    const successorOf = (id) => {
+      const view = document.body.getAttribute('data-view') || 'library';
+      const order = view === 'board'
+        ? boardOrder()
+        : [...list.querySelectorAll(':scope > .conv')];
+      const alive = (el) => {
+        const summary = summaries.get(el.dataset.id);
+        return Boolean(summary) && !summary.archived && el.dataset.id !== id;
+      };
+      const idx = order.findIndex((el) => el.dataset.id === id);
+      if (idx >= 0) {
+        for (let i = idx + 1; i < order.length; i++) if (alive(order[i])) return order[i].dataset.id;
+        for (let i = idx - 1; i >= 0; i--) if (alive(order[i])) return order[i].dataset.id;
+      }
+      return order.find(alive)?.dataset.id ?? null;
+    };
+
+    const archiveConversation = async (id) => {
+      const summary = summaries.get(id);
+      const filing = !summary?.archived;
+      const wasOpen = openId === id;
+      const nextId = filing && wasOpen ? successorOf(id) : openId;
+      const meta = await agent.archive(id, filing);
+      upsert(meta);
+      if (wasOpen && meta.archived) await open(nextId);
+    };
+
+    const fillRowMenu = async (el) => {
+      closeRowMenus();
+      const id = el.dataset.id;
+      const summary = summaries.get(id);
+      const more = el.querySelector('.more');
+      const menu = document.createElement('div');
+      menu.className = 'menu';
+      menu.setAttribute('role', 'menu');
+      const add = (label, act, run) => {
+        const btn = document.createElement('button');
+        btn.type = 'button';
+        btn.dataset.act = act;
+        btn.setAttribute('role', 'menuitem');
+        btn.textContent = label;
+        btn.addEventListener('click', async (event) => {
+          event.stopPropagation();
+          closeRowMenus();
+          try { await run(); } catch (err) { btn.textContent = err.message; }
+        });
+        menu.append(btn);
+      };
+      add(summary?.archived ? 'Unarchive' : 'Archive', summary?.archived ? 'unarchive' : 'archive', () => archiveConversation(id));
+      if (summary?.needsReview) {
+        add('Mark reviewed', 'reviewed', () => agent.markReviewed(id));
+      }
+      el.querySelector('.manage').append(menu);
+      more?.setAttribute('aria-expanded', 'true');
+      let detail = null;
+      try { if (agent) detail = await agent.conversation(id); } catch { /* archive still works */ }
+      if (!menu.isConnected) return;
+      const turn = undoable(detail?.turns);
+      if (turn) add('Undo last turn', 'undo', async () => { await agent.undo(turn.id); if (openId === id) fillChrome(id); });
+      for (const provider of labels.values()) {
+        if (!provider.installed || !provider.signedIn || provider.id === summary?.provider) continue;
+        add('Continue in ' + (provider.label ?? provider.id), 'handoff-' + provider.id, async () => {
+          await open(await agent.handoff(id, provider.id));
+        });
+      }
+    };
+
+    const upsert = (summary) => {
+      if (!summary?.id) return;
+      summaries.set(summary.id, summary);
+      let el = nodes.get(summary.id);
+      if (!el) {
+        el = document.createElement('div');
+        el.className = 'conv';
+        el.dataset.id = summary.id;
+        el.setAttribute('role', 'listitem');
+        el.tabIndex = 0;
+        el.innerHTML = '<span class="dot" aria-hidden="true"></span><span class="body"><span class="title"></span><span class="tags"></span><span class="meta"><span class="badge"></span><span class="activity"></span></span></span><span class="age"></span><div class="manage"><button type="button" class="more" aria-label="Manage conversation" aria-haspopup="menu" aria-expanded="false"><svg width="16" height="16" viewBox="0 0 16 16" aria-hidden="true"><circle cx="3.5" cy="8" r="1.3" fill="currentColor"/><circle cx="8" cy="8" r="1.3" fill="currentColor"/><circle cx="12.5" cy="8" r="1.3" fill="currentColor"/></svg></button></div>';
+        const openRow = () => {
+          if (suppressConvClick) return;
+          if ((document.body.getAttribute('data-view') || 'library') === 'board') openBoardPanel();
+          open(el.dataset.id);
+        };
+        el.addEventListener('click', (event) => {
+          if (event.target.closest('.manage')) return;
+          openRow();
+        });
+        el.addEventListener('keydown', (event) => {
+          if (event.target.closest('.manage')) return;
+          if (event.key !== 'Enter' && event.key !== ' ') return;
+          event.preventDefault();
+          openRow();
+        });
+        el.querySelector('.more').addEventListener('click', (event) => {
+          event.stopPropagation();
+          if (el.querySelector('.manage .menu')) closeRowMenus();
+          else fillRowMenu(el);
+        });
+        bindConvDrag(el);
+        nodes.set(summary.id, el);
+      }
+      paintRow(el, summary);
+      place(el);
+      el.hidden = !matches(summary);
+      el.classList.toggle('marble-open', summary.id === openId);
+      if (summary.id === openId) fillChrome(summary.id);
+    };
+
     const undoable = (turns) => {
       for (let i = (turns ?? []).length - 1; i >= 0; i--) {
         const turn = turns[i];
@@ -562,123 +1285,58 @@ __ICON__
       return null;
     };
 
-    const fact = (parent, name, value) => {
-      if (!value) return;
-      const row = document.createElement('div');
-      const dt = document.createElement('dt');
-      dt.textContent = name;
-      const dd = document.createElement('dd');
-      if (value.nodeType) dd.append(value);
-      else dd.textContent = value;
-      row.append(dt, dd);
-      parent.append(row);
-    };
-
-    const fillInspector = async (id) => {
-      const gen = ++inspectGen;
-      const summary = summaries.get(id) ?? { id };
-      let detail = { meta: summary, turns: [], events: [] };
-      try {
-        if (agent) detail = await agent.conversation(id);
-      } catch (err) {
-        if (gen !== inspectGen) return;
-        inspector.replaceChildren();
-        const p = document.createElement('p');
-        p.className = 'empty';
-        p.textContent = err.message;
-        inspector.append(p);
-        return;
-      }
-      if (gen !== inspectGen || openId !== id) return;
-      const meta = detail.meta ?? summary;
-      inspector.replaceChildren();
-      const title = document.createElement('h2');
-      title.textContent = meta.title || 'Untitled';
-      inspector.append(title);
-      const dl = document.createElement('dl');
-      fact(dl, 'Status', statusLabel(meta));
-      fact(dl, 'Provider', labels.get(meta.provider)?.label ?? meta.provider);
-      fact(dl, 'Model', meta.model);
-      const target = lastTarget(detail);
-      if (target) {
-        const link = document.createElement('a');
-        link.textContent = target;
-        const href = window.marble?.href?.(target);
-        if (href) link.href = href;
-        fact(dl, 'Target', link);
-      }
-      fact(dl, 'Activity', meta.activity);
-      inspector.append(dl);
-
-      const actions = document.createElement('div');
-      actions.className = 'actions';
-      const turn = undoable(detail.turns);
-      if (turn) {
-        const undo = document.createElement('button');
-        undo.type = 'button';
-        undo.textContent = 'Undo';
-        undo.addEventListener('click', async () => {
-          try {
-            await agent.undo(turn.id);
-            fillInspector(id);
-          } catch (err) {
-            undo.textContent = err.message;
-          }
-        });
-        actions.append(undo);
-      }
-      if (meta.needsReview) {
-        const reviewed = document.createElement('button');
-        reviewed.type = 'button';
-        reviewed.textContent = 'Mark reviewed';
-        reviewed.addEventListener('click', async () => {
-          try { await agent.markReviewed(id); } catch (err) { reviewed.textContent = err.message; }
-        });
-        actions.append(reviewed);
-      }
-      const archive = document.createElement('button');
-      archive.type = 'button';
-      archive.textContent = meta.archived ? 'Unarchive' : 'Archive';
-      archive.addEventListener('click', async () => {
-        try { await agent.archive(id, !meta.archived); } catch (err) { archive.textContent = err.message; }
-      });
-      actions.append(archive);
-      for (const provider of labels.values()) {
-        if (!provider.installed || !provider.signedIn || provider.id === meta.provider) continue;
-        const handoff = document.createElement('button');
-        handoff.type = 'button';
-        handoff.textContent = 'Continue in ' + (provider.label ?? provider.id);
-        handoff.addEventListener('click', async () => {
-          try { await open(await agent.handoff(id, provider.id)); } catch (err) { handoff.textContent = err.message; }
-        });
-        actions.append(handoff);
-      }
-      if (actions.children.length) inspector.append(actions);
-    };
-
-    const showEmpty = (text = 'Select a conversation.') => {
-      inspector.replaceChildren();
-      const p = document.createElement('p');
-      p.className = 'empty';
-      p.textContent = text;
-      inspector.append(p);
+    const showEmpty = (text = 'Pick a conversation, or ask below to start one.') => {
+      const hint = pane.querySelector('.pane-hint p');
+      if (hint) hint.textContent = text;
     };
 
     async function open(id) {
+      if (id) {
+        const existing = slotOf(id);
+        if (existing != null) {
+          focusSlot(existing, id);
+          if (!summaries.has(id) && agent) {
+            try { upsert((await agent.conversation(id)).meta); } catch { /* opened from a stale id */ }
+          }
+          if (summaries.get(id)?.needsReview) agent.markReviewed(id).catch(() => {});
+          await fillChrome(id);
+          const focused = existing === 'primary' ? convo : dock.extras[existing]?.el;
+          focused?.focusInput?.();
+          return;
+        }
+      }
       openId = id;
       remember(OPEN_KEY, id);
-      if (id) convo.setAttribute('conversation', id);
-      else convo.removeAttribute('conversation');
+      if (id) document.body.setAttribute('data-open', 'true');
+      else document.body.removeAttribute('data-open');
+      if (!id) {
+        convo.removeAttribute('conversation');
+        dock.extras = [];
+        dock.focus = 'primary';
+        rememberDock();
+        applyDock();
+      } else if (typeof dock.focus === 'number' && dock.extras[dock.focus]) {
+        dock.extras[dock.focus].id = id;
+        dock.extras[dock.focus].el?.setAttribute('conversation', id);
+        rememberDock();
+        applyDock();
+      } else {
+        convo.setAttribute('conversation', id);
+        dock.focus = 'primary';
+      }
       if (id && !summaries.has(id) && agent) {
         try { upsert((await agent.conversation(id)).meta); } catch { /* opened from a stale id */ }
       }
-      // Opening clears review (spec 6.3), same as the drawer. Skip when
-      // needsReview is already false so Mark reviewed does not PATCH twice.
       if (id && summaries.get(id)?.needsReview) agent.markReviewed(id).catch(() => {});
       paintOpen();
-      if (!id) { showEmpty(); return; }
-      await fillInspector(id);
-      convo.focusInput?.();
+      ensurePrimaryBar();
+      if (!id) {
+        showEmpty();
+        return;
+      }
+      await fillChrome(id);
+      const focused = typeof dock.focus === 'number' ? dock.extras[dock.focus]?.el : convo;
+      focused?.focusInput?.();
     }
 
     const playFlip = (first, ordered) => {
@@ -800,7 +1458,8 @@ __ICON__
         }
       }
       const providers = [...labels.values()].filter((p) => p.installed && p.signedIn);
-      const preferred = providers.find((p) => p.default) ?? providers[0];
+      const preferred = (cli !== 'all' ? providers.find((p) => p.id === cli) : null)
+        ?? providers.find((p) => p.default) ?? providers[0];
       if (!preferred) {
         showEmpty('No agent is ready on this machine. npm run agents -- providers says why.');
         return;
@@ -814,12 +1473,31 @@ __ICON__
 
     viewButtons.forEach((btn) => btn.addEventListener('click', () => setView(btn.dataset.view)));
     filterButtons.forEach((btn) => btn.addEventListener('click', () => setFilter(btn.dataset.filter)));
+    cliEl?.addEventListener('click', (event) => {
+      const btn = event.target.closest?.('[data-cli]');
+      if (btn) setCli(btn.dataset.cli);
+    });
     search.addEventListener('input', () => {
       query = search.value.trim().toLowerCase();
       applyFilters();
     });
+    document.addEventListener('click', (event) => {
+      if (!event.target.closest?.('.manage')) closeRowMenus();
+    });
     $('.settings').addEventListener('click', () => window.marble?.agent?.openSettings?.());
     $('.new').addEventListener('click', () => startNew());
+    $('.pane .back').addEventListener('click', () => open(null));
+    convo.addEventListener('pointerdown', () => {
+      if (!dock.extras.length) return;
+      dock.focus = 'primary';
+      const id = convo.getAttribute('conversation');
+      if (!id) return;
+      openId = id;
+      remember(OPEN_KEY, id);
+      rememberDock();
+      paintOpen();
+      fillChrome(id);
+    });
     boardPanel.querySelector('.panel-close').addEventListener('click', () => closeBoardPanel());
     addEventListener('keydown', (event) => {
       if (event.key !== 'v' && event.key !== 'V') return;
@@ -835,7 +1513,8 @@ __ICON__
       // Re-set rather than open(): register runs once at boot with openId
       // still null, and open(null) would wipe marble-agents:open before load
       // restores it. focusInput on restore is a later polish.
-      if (openId) convo.setAttribute('conversation', openId);
+      if (openId) document.body.setAttribute('data-open', 'true');
+      else document.body.removeAttribute('data-open');
       paintOpen();
       const view = document.body.getAttribute('data-view') || 'library';
       if (view === 'board' && panelOpen) {
@@ -845,6 +1524,32 @@ __ICON__
         boardPanel.removeAttribute('data-open');
         document.body.removeAttribute('data-panel');
       }
+      restoreDock();
+    };
+
+    const restoreDock = () => {
+      let fileId = openId;
+      if (narrowView.matches || reduceMotion.matches) {
+        dock.extras = [];
+      } else {
+        const raw = recalled(DOCK_KEY);
+        if (raw) {
+          try {
+            const saved = JSON.parse(raw);
+            dock.dir = saved.dir === 'col' ? 'col' : 'row';
+            dock.primary = saved.primary === 'end' ? 'end' : 'start';
+            dock.sizes = Array.isArray(saved.sizes) && saved.sizes.length === 2 ? saved.sizes : [0.58, 0.42];
+            dock.extras = (saved.extras ?? []).filter(Boolean).slice(0, 3).map((id) => ({ id }));
+            dock.focus = saved.focus === 'primary' || typeof saved.focus === 'number' ? saved.focus : 'primary';
+            if (saved.file) fileId = saved.file;
+          } catch {
+            dock.extras = [];
+          }
+        }
+      }
+      if (fileId) convo.setAttribute('conversation', fileId);
+      else convo.removeAttribute('conversation');
+      applyDock();
     };
 
     const boot = (marble) => {
@@ -853,7 +1558,7 @@ __ICON__
       // into the file for everyone. conversation lives on an addressed
       // <marble-conversation>, so without this a patch strips it and a
       // source.outer of the pane writes it.
-      marble.pageOnly?.('data-view', 'aria-pressed', 'conversation', 'data-open', 'data-crossfade', 'data-panel');
+      marble.pageOnly?.('data-view', 'aria-pressed', 'conversation', 'data-open', 'data-crossfade', 'data-panel', 'data-dock', 'data-dock-primary');
       restoreView();
       deriveFilters();
       marble.register?.(() => {
@@ -870,14 +1575,17 @@ __ICON__
         try {
           for (const provider of await api.providers()) labels.set(provider.id, provider);
         } catch { /* badges fall back to the provider id */ }
+        fillCli();
         api.on('*', upsert);
         await load();
+        restoreDock();
         const saved = recalled(OPEN_KEY);
         if (saved) await open(saved);
         addEventListener('marble:agent-settings-saved', async () => {
           try {
             for (const provider of await api.providers()) labels.set(provider.id, provider);
           } catch { /* badges fall back to the provider id */ }
+          fillCli();
         });
       };
       if (marble.agent) start(marble.agent);

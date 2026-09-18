@@ -137,7 +137,13 @@ export function createAgentStore({ dir, defaultProvider = 'claude-subscription',
     });
     if (event.type === 'user') {
       const meta = await conversation(id);
-      if (meta && !meta.title) await updateConversation(id, { title: String(event.text ?? '').trim().slice(0, 60) });
+      if (meta) {
+        const patch = {};
+        if (!meta.title) patch.title = String(event.text ?? '').trim().slice(0, 60);
+        const target = event.context?.target;
+        if (typeof target === 'string' && target && target !== meta.target) patch.target = target;
+        if (Object.keys(patch).length) await updateConversation(id, patch);
+      }
     }
     return stored;
   }
@@ -204,14 +210,16 @@ export function createAgentStore({ dir, defaultProvider = 'claude-subscription',
 
     saveSettings,
 
-    async createConversation({ provider, model = null, effort = null, handoffFrom = null }) {
+    async createConversation({ provider, model = null, effort = null, mode = null, handoffFrom = null }) {
       const now = Date.now();
       const meta = {
         id: crypto.randomBytes(6).toString('hex'),
         provider,
         model,
         effort,
+        mode,
         title: null,
+        target: null,
         createdAt: now,
         updatedAt: now,
         archived: false,

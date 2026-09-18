@@ -38,6 +38,63 @@ const openAgents = async (options = {}) => {
   return { page, errors };
 };
 
+test('the topbar shows used usage for Claude and Cursor', async () => {
+  const { page } = await openAgents();
+  const claude = page.locator('.usage .meter[data-id="claude-subscription"]');
+  const cursor = page.locator('.usage .meter[data-id="cursor"]');
+  await claude.waitFor();
+  assert.match(await claude.textContent(), /23%/);
+  assert.match(await cursor.textContent(), /19%/);
+  const fill = await claude.locator('.meter-bar i').evaluate((el) => el.style.width);
+  assert.equal(fill, '23%');
+  assert.equal(await claude.getAttribute('data-tone'), 'blue');
+});
+
+test('a Claude meter with no progress reads as unavailable', async () => {
+  const { page } = await openAgents();
+  await page.locator('.usage .meter[data-id="claude-subscription"]').waitFor();
+  await page.evaluate(() => {
+    window.marbleAgentUI.fillMeters(document.querySelector('header.topbar > .usage'), [
+      { id: 'claude-subscription', label: 'Claude', available: false, used: null, detail: 'Unavailable' },
+      { id: 'cursor', label: 'Cursor', used: 19 },
+    ]);
+  });
+  const claude = page.locator('.usage .meter[data-id="claude-subscription"]');
+  assert.equal(await claude.getAttribute('data-tone'), 'unavailable');
+  assert.match(await claude.textContent(), /Unavailable/i);
+  assert.equal((await page.locator('.usage .meter[data-id="cursor"] .meter-pct').textContent()).trim(), '19%');
+});
+
+test('usage meters color by how much has been used', async () => {
+  const { page } = await openAgents();
+  const tones = await page.evaluate(() => {
+    const fn = window.marbleAgentUI.usageTone;
+    return [0, 49, 50, 74, 75, 89, 90, 100].map((n) => [n, fn(n)]);
+  });
+  assert.deepEqual(tones, [
+    [0, 'blue'], [49, 'blue'],
+    [50, 'yellow'], [74, 'yellow'],
+    [75, 'orange'], [89, 'orange'],
+    [90, 'red'], [100, 'red'],
+  ]);
+});
+
+test('hovering a topbar meter shows when that bar resets', async () => {
+  const { page } = await openAgents();
+  const claude = page.locator('.usage .meter[data-id="claude-subscription"]');
+  await claude.waitFor();
+  await claude.hover();
+  const tip = page.locator('#marble-usage-tip');
+  await tip.waitFor();
+  assert.match(await tip.textContent(), /reset/i);
+  const text = await page.evaluate(() => {
+    const now = new Date(2026, 8, 17, 12, 0, 0);
+    const reset = new Date(2026, 8, 17, 15, 30, 0);
+    return window.marbleAgentUI.formatReset(reset.toISOString(), now);
+  });
+  assert.match(text, /today/i);
+});
+
 test('the Agents page has no drawer and lists a conversation', async () => {
   const { page, errors } = await openAgents();
   assert.equal(await page.locator('marble-agent-drawer').count(), 0);
@@ -52,7 +109,65 @@ test('the Agents page has no drawer and lists a conversation', async () => {
   assert.deepEqual(errors, []);
 });
 
-test('clicking a row opens it in the conversation pane and the inspector', async () => {
+test('a conversation row tags the agent and the model, not the Agents page', async () => {
+  const { page } = await openAgents();
+  const id = await page.evaluate(async () => {
+    const agent = window.marble.agent;
+    const id = await agent.start({ provider: 'fake', model: 'alt', effort: 'high' });
+    await agent.send(id, { prompt: 'script:rename', target: 'garden', viewing: 'Agents', selection: [] });
+    return id;
+  });
+  const row = page.locator(`.conv[data-id="${id}"]`);
+  await row.locator('.tag[data-kind="agent"]', { hasText: 'Fake' }).waitFor();
+  assert.equal((await row.locator('.tag[data-kind="model"]').textContent()).trim(), 'Alt • high');
+  assert.equal(await row.locator('.tag[data-kind="doc"]').count(), 0);
+});
+
+test('conversation tags name Claude and KIXLAB API', async () => {
+  const { page } = await openAgents();
+  const tags = await page.evaluate(() => {
+    const labels = new Map([
+      ['claude-subscription', {
+        id: 'claude-subscription',
+        label: 'Claude',
+        models: [{ id: 'sonnet', label: 'Sonnet' }],
+      }],
+      ['claude-api', {
+        id: 'claude-api',
+        label: 'KIXLAB API',
+        models: [{ id: 'opus', label: 'Opus' }],
+      }],
+    ]);
+    const of = (summary) => window.marbleAgentUI.conversationTags(summary, labels)
+      .map((tag) => ({ kind: tag.kind, label: tag.label }));
+    return {
+      subscription: of({ target: 'Agents', provider: 'claude-subscription', model: 'sonnet', effort: 'high' }),
+      api: of({ provider: 'claude-api', model: 'opus', effort: 'max' }),
+      alias: of({ provider: 'claude-subscription', model: 'claude-sonnet-4-5', effort: 'high' }),
+    };
+  });
+  assert.deepEqual(tags.subscription, [
+    { kind: 'agent', label: 'Claude' },
+    { kind: 'model', label: 'Sonnet • high' },
+  ]);
+  assert.deepEqual(tags.api, [
+    { kind: 'agent', label: 'KIXLAB API' },
+    { kind: 'model', label: 'Opus • max' },
+  ]);
+  assert.deepEqual(tags.alias, [
+    { kind: 'agent', label: 'Claude' },
+    { kind: 'model', label: 'Sonnet • high' },
+  ]);
+});
+
+test('the library has no inspector column', async () => {
+  const { page } = await openAgents();
+  assert.equal(await page.locator('.inspector').count(), 0);
+  const tracks = await page.locator('.library').evaluate((el) => getComputedStyle(el).gridTemplateColumns.split(' ').filter(Boolean).length);
+  assert.equal(tracks, 2);
+});
+
+test('clicking a row opens it in the conversation pane and a header names the target', async () => {
   const { page } = await openAgents();
   const id = await page.evaluate(async () => {
     const agent = window.marble.agent;
@@ -61,10 +176,100 @@ test('clicking a row opens it in the conversation pane and the inspector', async
     return id;
   });
   await page.locator(`.conv[data-id="${id}"]`).click();
-  const view = page.locator('marble-conversation');
+  const view = page.locator('.pane > marble-conversation');
   await view.locator('.turn-footer[data-status="completed"]').waitFor();
   assert.equal(await view.getAttribute('conversation'), id);
-  assert.match(await page.locator('.inspector').textContent(), /garden|Fake|script:rename/i);
+  const bar = page.locator('.pane > .dock-bar');
+  await bar.waitFor();
+  assert.match(await bar.locator('.dock-title').textContent(), /\S/);
+  assert.match(await bar.locator('.dock-target').textContent(), /garden/i);
+});
+
+test('pressing a row does not pop it with a scale animation', async () => {
+  const { page } = await openAgents();
+  const pops = await page.evaluate(() => {
+    const css = [...document.querySelectorAll('style')].map((el) => el.textContent).join('\n');
+    return /:active[^{}]*\{[^}]*transform:\s*scale/.test(css);
+  });
+  assert.equal(pops, false);
+});
+
+test('a row archives a conversation and opens the next remaining one', async () => {
+  const { page } = await openAgents();
+  const ids = await page.evaluate(async () => {
+    const agent = window.marble.agent;
+    const older = await agent.start({ provider: 'fake' });
+    await agent.send(older, { prompt: 'script:rename', target: 'garden', viewing: 'Agents', selection: [] });
+    const newer = await agent.start({ provider: 'fake' });
+    await agent.send(newer, { prompt: 'script:rename', target: 'garden', viewing: 'Agents', selection: [] });
+    return { older, newer };
+  });
+  const newerRow = page.locator(`.conv[data-id="${ids.newer}"]`);
+  const olderRow = page.locator(`.conv[data-id="${ids.older}"]`);
+  await newerRow.waitFor();
+  await olderRow.waitFor();
+  await newerRow.locator('.title').click();
+  await page.waitForFunction((id) => document.querySelector('marble-conversation')?.getAttribute('conversation') === id, ids.newer);
+  assert.equal(await page.locator('.dock-bar button', { hasText: 'Archive' }).count(), 0, 'archive lives on the row, not the pane header');
+  await newerRow.locator('.manage .more').click();
+  await newerRow.locator('[data-act="archive"]').click();
+  await page.waitForFunction((id) => document.querySelector(`.conv[data-id="${id}"]`)?.hidden === true, ids.newer);
+  assert.equal(await page.locator('marble-conversation').getAttribute('conversation'), ids.older);
+  await page.locator('.filter[data-filter="archived"]').click();
+  await page.waitForFunction((id) => {
+    const el = document.querySelector(`.conv[data-id="${id}"]`);
+    return Boolean(el) && !el.hidden;
+  }, ids.newer);
+});
+
+test('the topbar has three thin segmented bars, including CLI', async () => {
+  const { page } = await openAgents();
+  await page.locator('.toggles .seg.cli').waitFor();
+  assert.equal(await page.locator('.toggles > .seg').count(), 3);
+  await page.locator('.cli [data-cli="all"]').waitFor();
+  await page.locator('.cli [data-cli="fake"]').waitFor();
+  const css = await page.locator('.views [data-view="library"]').evaluate((el) => {
+    const s = getComputedStyle(el);
+    const track = getComputedStyle(el.parentElement);
+    return {
+      bg: s.backgroundColor.replace(/\s/g, ''),
+      pad: parseFloat(s.paddingTop),
+      radius: track.borderRadius,
+    };
+  });
+  assert.equal(css.bg, 'rgb(255,255,255)');
+  assert.ok(css.pad <= 6, `selected pill should be thin, padding-top ${css.pad}`);
+  assert.ok(Number.parseFloat(css.radius) >= 20, css.radius);
+});
+
+test('the CLI bar hides conversations from the other agent', async () => {
+  const { page } = await openAgents();
+  const id = await page.evaluate(async () => {
+    const agent = window.marble.agent;
+    const id = await agent.start({ provider: 'fake' });
+    await agent.send(id, { prompt: 'script:rename', target: 'garden', viewing: 'Agents', selection: [] });
+    return id;
+  });
+  const row = page.locator(`.conv[data-id="${id}"]`);
+  await row.waitFor();
+  await page.locator('.cli [data-cli="fake"]').click();
+  assert.equal(await row.isHidden(), false);
+  await page.evaluate(() => {
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    btn.className = 'cli-filter';
+    btn.dataset.cli = 'cursor';
+    btn.setAttribute('aria-pressed', 'false');
+    btn.textContent = 'Cursor';
+    document.querySelector('.cli').append(btn);
+  });
+  await page.locator('.cli [data-cli="cursor"]').click();
+  await page.waitForFunction((conversation) => document.querySelector(`.conv[data-id="${conversation}"]`)?.hidden, id);
+  await page.locator('.cli [data-cli="all"]').click();
+  await page.waitForFunction((conversation) => {
+    const el = document.querySelector(`.conv[data-id="${conversation}"]`);
+    return el && !el.hidden;
+  }, id);
 });
 
 test('filters and search hide rows without deleting them', async () => {
@@ -174,6 +379,161 @@ test('clicking a board card opens the conversation panel', async () => {
   assert.equal(await page.locator('marble-conversation').count(), 1, 'one conversation element');
   assert.equal(await page.locator('.pane marble-conversation').getAttribute('conversation'), id);
   assert.equal(await page.locator('.board-panel marble-conversation').count(), 0);
+});
+
+test('opening a conversation on the board splits beside the kanban, it does not cover it', async () => {
+  const { page } = await openAgents();
+  const id = await page.evaluate(async () => {
+    const agent = window.marble.agent;
+    const id = await agent.start({ provider: 'fake' });
+    await agent.send(id, { prompt: 'script:rename', target: 'garden', viewing: 'Agents', selection: [] });
+    return id;
+  });
+  await page.locator(`.conv[data-id="${id}"]`).waitFor();
+  await page.keyboard.press('v');
+  await page.waitForFunction(() => document.body.getAttribute('data-view') === 'board');
+  await page.locator(`.column .conv[data-id="${id}"]`).click();
+  await page.locator('.board-panel[data-open="true"]').waitFor();
+  const geometry = await page.evaluate(() => {
+    const board = document.querySelector('.board').getBoundingClientRect();
+    const pane = document.querySelector('.pane').getBoundingClientRect();
+    const col = document.querySelector('.column').getBoundingClientRect();
+    return {
+      boardWidth: board.width,
+      paneLeft: pane.left,
+      boardRight: board.right,
+      colVisible: col.width > 40 && col.height > 40,
+      colNotCovered: col.right <= pane.left + 2,
+    };
+  });
+  assert.ok(geometry.boardWidth > 120, `board only ${geometry.boardWidth}px wide`);
+  assert.ok(geometry.paneLeft >= geometry.boardRight - 2, `pane at ${geometry.paneLeft} covers board ending ${geometry.boardRight}`);
+  assert.equal(geometry.colVisible, true);
+  assert.equal(geometry.colNotCovered, true);
+});
+
+test('dragging a conversation onto the pane edge opens a second pane', async () => {
+  const { page } = await openAgents();
+  const [first, second] = await page.evaluate(async () => {
+    const agent = window.marble.agent;
+    const first = await agent.start({ provider: 'fake' });
+    await agent.send(first, { prompt: 'script:rename', target: 'garden', viewing: 'Agents', selection: [] });
+    const second = await agent.start({ provider: 'fake' });
+    await agent.send(second, { prompt: 'script:rename', target: 'garden', viewing: 'Agents', selection: [] });
+    return [first, second];
+  });
+  await page.locator(`.conv[data-id="${first}"]`).click();
+  await page.locator(`.pane marble-conversation[conversation="${first}"]`).waitFor();
+  const box = await page.locator('.pane').boundingBox();
+  const row = page.locator(`#list .conv[data-id="${second}"]`);
+  await row.hover();
+  await page.mouse.down();
+  await page.mouse.move(box.x + box.width - 10, box.y + box.height / 2, { steps: 12 });
+  await page.mouse.up();
+  await page.waitForFunction(() => document.querySelectorAll('marble-conversation').length === 2);
+  const ids = await page.locator('marble-conversation').evaluateAll((els) => els.map((el) => el.getAttribute('conversation')));
+  assert.ok(ids.includes(first) && ids.includes(second), `panes were ${ids.join(', ')}`);
+  const extra = page.locator('.pane marble-conversation[data-marble-transient]');
+  assert.equal(await extra.count(), 1);
+  assert.equal(await extra.getAttribute('conversation'), second);
+  assert.equal(await page.locator(`#list .conv[data-id="${second}"]`).count(), 1);
+  assert.equal(await page.locator(`#list .conv[data-id="${second}"]`).isVisible(), true);
+});
+
+test('dragging a conversation shows a card that follows the pointer', async () => {
+  const { page } = await openAgents();
+  const [first, second] = await page.evaluate(async () => {
+    const agent = window.marble.agent;
+    const first = await agent.start({ provider: 'fake' });
+    await agent.send(first, { prompt: 'script:rename', target: 'garden', viewing: 'Agents', selection: [] });
+    const second = await agent.start({ provider: 'fake' });
+    await agent.send(second, { prompt: 'script:rename', target: 'garden', viewing: 'Agents', selection: [] });
+    return [first, second];
+  });
+  await page.locator(`.conv[data-id="${first}"]`).click();
+  await page.locator(`.pane marble-conversation[conversation="${first}"]`).waitFor();
+  const row = page.locator(`#list .conv[data-id="${second}"]`);
+  const start = await row.boundingBox();
+  await row.hover();
+  await page.mouse.down();
+  await page.mouse.move(start.x + 80, start.y + 40, { steps: 10 });
+  const card = page.locator('.dock-card');
+  await card.waitFor();
+  const pos = await card.boundingBox();
+  assert.ok(Math.abs(pos.x - (start.x + 80)) < 48, `card x ${pos.x} should follow pointer`);
+  assert.equal(await page.locator(`#list .conv[data-id="${second}"]`).isVisible(), true);
+  await page.mouse.up();
+});
+
+test('dropping a pane header onto another header swaps the chats', async () => {
+  const { page } = await openAgents();
+  const [first, second] = await page.evaluate(async () => {
+    const agent = window.marble.agent;
+    const first = await agent.start({ provider: 'fake' });
+    await agent.send(first, { prompt: 'script:rename', target: 'garden', viewing: 'Agents', selection: [] });
+    const second = await agent.start({ provider: 'fake' });
+    await agent.send(second, { prompt: 'script:rename', target: 'garden', viewing: 'Agents', selection: [] });
+    return [first, second];
+  });
+  await page.locator(`.conv[data-id="${first}"]`).click();
+  await page.locator(`.pane > marble-conversation[conversation="${first}"]`).waitFor();
+  const box = await page.locator('.pane').boundingBox();
+  const row = page.locator(`#list .conv[data-id="${second}"]`);
+  await row.hover();
+  await page.mouse.down();
+  await page.mouse.move(box.x + box.width - 10, box.y + box.height / 2, { steps: 12 });
+  await page.mouse.up();
+  await page.locator('.pane marble-conversation[data-marble-transient]').waitFor();
+  const extraBar = page.locator('.dock-leaf .dock-bar');
+  const primaryBar = page.locator('.pane > .dock-bar');
+  const dest = await primaryBar.boundingBox();
+  await extraBar.hover();
+  await page.mouse.down();
+  await page.mouse.move(dest.x + dest.width / 2, dest.y + dest.height / 2, { steps: 12 });
+  await page.mouse.up();
+  await page.waitForFunction((ids) => {
+    const primary = document.querySelector('.pane > marble-conversation')?.getAttribute('conversation');
+    const extra = document.querySelector('.pane marble-conversation[data-marble-transient]')?.getAttribute('conversation');
+    return primary === ids[1] && extra === ids[0];
+  }, [first, second]);
+});
+
+test('a conversation only occupies one pane', async () => {
+  const { page } = await openAgents();
+  const [first, second] = await page.evaluate(async () => {
+    const agent = window.marble.agent;
+    const first = await agent.start({ provider: 'fake' });
+    await agent.send(first, { prompt: 'script:rename', target: 'garden', viewing: 'Agents', selection: [] });
+    const second = await agent.start({ provider: 'fake' });
+    await agent.send(second, { prompt: 'script:rename', target: 'garden', viewing: 'Agents', selection: [] });
+    return [first, second];
+  });
+  await page.locator(`.conv[data-id="${first}"]`).click();
+  await page.locator(`.pane > marble-conversation[conversation="${first}"]`).waitFor();
+  const box = await page.locator('.pane').boundingBox();
+  await page.locator(`#list .conv[data-id="${second}"]`).hover();
+  await page.mouse.down();
+  await page.mouse.move(box.x + box.width - 10, box.y + box.height / 2, { steps: 12 });
+  await page.mouse.up();
+  await page.locator('.pane marble-conversation[data-marble-transient]').waitFor();
+  await page.locator(`#list .conv[data-id="${first}"]`).hover();
+  await page.mouse.down();
+  await page.mouse.move(box.x + box.width - 10, box.y + box.height / 2, { steps: 12 });
+  await page.mouse.up();
+  const ids = await page.locator('.pane marble-conversation').evaluateAll((els) => els.map((el) => el.getAttribute('conversation')).filter(Boolean));
+  assert.equal(new Set(ids).size, ids.length, `duplicate panes: ${ids.join(', ')}`);
+});
+
+test('pane layout motion uses ease-out', async () => {
+  const { page } = await openAgents();
+  const easing = await page.evaluate(() => {
+    const css = [...document.querySelectorAll('style')].map((el) => el.textContent).join('\n');
+    const flip = /FLIP_EASE\s*=\s*['"]([^'"]+)['"]/.exec(css + (document.querySelector('.library + .board + script, script:last-of-type')?.textContent ?? ''));
+    const scripts = [...document.querySelectorAll('script')].map((el) => el.textContent).join('\n');
+    const fromScript = /FLIP_EASE\s*=\s*['"]([^'"]+)['"]/.exec(scripts);
+    return fromScript?.[1] ?? flip?.[1] ?? '';
+  });
+  assert.match(easing, /ease-out/);
 });
 
 test('a queued conversation sits in Running, not Completed', async () => {
@@ -365,6 +725,26 @@ test('Settings on the Agents page opens the agent settings panel', async () => {
   assert.equal(await settings.getAttribute('data-open'), 'true');
 });
 
+test('the settings sheet has a Usage tab with Claude short-term and weekly bars', async () => {
+  const { page } = await openAgents();
+  await page.locator('button.settings').click();
+  const settings = page.locator('marble-agent-settings');
+  await settings.locator('[role="tab"]', { hasText: 'Usage' }).click();
+  const short = settings.locator('.meter[data-id="5h"]');
+  const week = settings.locator('.meter[data-id="week"]');
+  const other = settings.locator('.meter[data-id="api"]');
+  await short.waitFor();
+  assert.match(await short.textContent(), /Short-term/);
+  assert.match(await short.textContent(), /23%/);
+  await week.waitFor();
+  assert.match(await week.textContent(), /Weekly/);
+  assert.match(await week.textContent(), /41%/);
+  assert.match(await week.locator('.reset').textContent(), /reset/i);
+  await other.waitFor();
+  assert.match(await other.textContent(), /100%/);
+  assert.equal(await settings.locator('.meter[data-id="claude_code"]').count(), 0);
+});
+
 test('New says why when this host is not running agents', async () => {
   const off = await startDrive({ agents: false, documents: { garden: GARDEN, Agents: AGENTS } });
   try {
@@ -372,7 +752,7 @@ test('New says why when this host is not running agents', async () => {
     await page.goto(`${off.base}/a/Agents`);
     await page.waitForFunction(() => Boolean(window.marble));
     await page.locator('button.new').click();
-    assert.match(await page.locator('.inspector').textContent(), /not running agents/i);
+    assert.match(await page.locator('.pane-hint').textContent(), /not running agents/i);
   } finally {
     await off.close();
   }

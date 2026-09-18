@@ -3,6 +3,22 @@ import test from 'node:test';
 
 import { GARDEN, startDrive } from './harness.js';
 
+const FOREST = `<!doctype html>
+<html><head><meta charset="utf-8"><title>Forest</title>
+<style>
+  :root {
+    --paper: #1a3a2a; --ink: #e8f0e4; --muted: #a8c4b0; --line: #2f5644;
+    --card: #214532; --accent-ink: #8fbf9a;
+  }
+  body { font: 16px/1.5 Georgia, serif; margin: 40px; background: #1a3a2a; color: #e8f0e4; }
+</style>
+</head>
+<body data-marble-id="b">
+  <h1 data-marble-id="h">Forest</h1>
+  <p data-marble-id="p">Green.</p>
+</body></html>
+`;
+
 const SCRIPTS = {
   rename: [
     { call: 'read_document', args: { path: 'garden' } },
@@ -14,7 +30,11 @@ const SCRIPTS = {
 
 const host = await startDrive({
   scripts: SCRIPTS,
-  documents: { garden: GARDEN, reading: GARDEN.replace('Research Garden', 'Reading List').replace('<title>Garden', '<title>Reading') },
+  documents: {
+    garden: GARDEN,
+    reading: GARDEN.replace('Research Garden', 'Reading List').replace('<title>Garden', '<title>Reading'),
+    forest: FOREST,
+  },
 });
 test.after(() => host.close());
 
@@ -117,6 +137,73 @@ test('overlay leaves the page’s layout alone; pinning docks it, and it stays t
   assert.equal(await host.drive.store.read('garden'), GARDEN);
 });
 
+async function dragResize(page, drawer, dx) {
+  const handle = drawer.locator('.resize');
+  await handle.waitFor({ timeout: 5000 });
+  const box = await handle.boundingBox();
+  const x = box.x + box.width / 2;
+  const y = box.y + Math.min(80, box.height / 2);
+  await page.mouse.move(x, y);
+  await page.mouse.down();
+  await page.mouse.move(x + dx, y, { steps: 8 });
+  await page.mouse.up();
+}
+
+test('the overlay sidebar can be resized without reflowing the page', async () => {
+  const { page, drawer, panel } = await visit();
+  await drawer.locator('.launcher').click();
+  await opened(panel);
+  await page.waitForTimeout(400);
+  const pageWidth = await page.evaluate(() => document.documentElement.clientWidth);
+  const before = await panel.evaluate((el) => el.getBoundingClientRect().width);
+  await dragResize(page, drawer, -120);
+  const after = await panel.evaluate((el) => el.getBoundingClientRect().width);
+  assert.ok(after > before + 80, `overlay should grow, ${before} → ${after}`);
+  assert.equal(await page.evaluate(() => document.documentElement.clientWidth), pageWidth, 'overlay does not reflow');
+  assert.equal(await page.evaluate(() => getComputedStyle(document.documentElement).marginRight), '0px');
+});
+
+test('a pinned sidebar resize docks the page by the new width', async () => {
+  const { page, drawer, panel } = await visit();
+  await drawer.locator('.launcher').click();
+  await opened(panel);
+  await drawer.locator('button.pin').click();
+  await panel.locator('xpath=self::*[@data-pinned="true"]').waitFor();
+  await page.waitForTimeout(200);
+  await dragResize(page, drawer, -80);
+  const width = await panel.evaluate((el) => Math.round(el.getBoundingClientRect().width));
+  assert.ok(width > 460, `pinned panel should grow past 420, got ${width}`);
+  assert.equal(await page.evaluate(() => getComputedStyle(document.documentElement).marginRight), `${width}px`);
+});
+
+test('overlay and pinned widths are remembered separately', async () => {
+  const { page, drawer, panel } = await visit();
+  await drawer.locator('.launcher').click();
+  await opened(panel);
+  await page.waitForTimeout(400);
+  await dragResize(page, drawer, -100);
+  const overlay = await panel.evaluate((el) => Math.round(el.getBoundingClientRect().width));
+
+  await drawer.locator('button.pin').click();
+  await panel.locator('xpath=self::*[@data-pinned="true"]').waitFor();
+  await page.waitForTimeout(200);
+  const afterPin = await panel.evaluate((el) => Math.round(el.getBoundingClientRect().width));
+  assert.equal(afterPin, 420, 'pin starts from its own stored width, not the overlay’s');
+  await dragResize(page, drawer, 80);
+  const pinned = await panel.evaluate((el) => Math.round(el.getBoundingClientRect().width));
+  assert.ok(pinned < 400, `pinned should shrink, got ${pinned}`);
+
+  await drawer.locator('button.pin').click();
+  await panel.locator('xpath=self::*[@data-pinned="false"]').waitFor();
+  await page.waitForTimeout(200);
+  assert.equal(await panel.evaluate((el) => Math.round(el.getBoundingClientRect().width)), overlay);
+
+  await drawer.locator('button.pin').click();
+  await panel.locator('xpath=self::*[@data-pinned="true"]').waitFor();
+  await page.waitForTimeout(200);
+  assert.equal(await panel.evaluate((el) => Math.round(el.getBoundingClientRect().width)), pinned);
+});
+
 test('on a phone the drawer is a full-screen sheet, and pinning is not offered', async () => {
   const { page, drawer, panel } = await visit('garden', { viewport: { width: 390, height: 844 } });
   await drawer.locator('.launcher').click();
@@ -124,6 +211,7 @@ test('on a phone the drawer is a full-screen sheet, and pinning is not offered',
   const box = await panel.boundingBox();
   assert.ok(Math.abs(box.width - 390) < 2 && Math.abs(box.height - 844) < 2, JSON.stringify(box));
   assert.equal(await drawer.locator('button.pin').isVisible(), false);
+  assert.equal(await drawer.locator('.resize').isVisible(), false);
 });
 
 test('dragging the header away past halfway dismisses it; a small drag springs back', async () => {
@@ -205,6 +293,38 @@ test('the recent menu switches conversations; new starts one; continue-in hands 
   assert.equal(await drawer.locator('.menu.actions [role="menuitem"]', { hasText: 'Archive' }).count(), 1);
 });
 
+test('archiving from the drawer opens another live conversation', async () => {
+  await host.reset();
+  const { page, drawer, panel, view } = await visit();
+  await drawer.locator('.launcher').click();
+  await opened(panel);
+  const ids = await page.evaluate(async () => {
+    const agent = window.marble.agent;
+    const older = await agent.start({ provider: 'fake' });
+    await agent.send(older, { prompt: 'script:rename', target: 'garden', viewing: 'garden', selection: [] });
+    const newer = await agent.start({ provider: 'fake' });
+    await agent.send(newer, { prompt: 'script:rename', target: 'garden', viewing: 'garden', selection: [] });
+    return { older, newer };
+  });
+  await drawer.locator('button.title').click();
+  await drawer.locator('.menu.recent [role="menuitem"]').nth(1).waitFor();
+  await drawer.locator('.menu.recent [role="menuitem"]').first().click();
+  const openedId = await page.waitForFunction((ids) => {
+    const view = document.querySelector('marble-agent-drawer')?.shadowRoot?.querySelector('marble-conversation');
+    const id = view?.getAttribute('conversation');
+    return id === ids.newer || id === ids.older ? id : null;
+  }, ids);
+  const current = await openedId.jsonValue();
+  const other = current === ids.newer ? ids.older : ids.newer;
+  await drawer.locator('button.more').click();
+  await drawer.locator('.menu.actions [role="menuitem"]', { hasText: 'Archive' }).click();
+  await page.waitForFunction((id) => {
+    const view = document.querySelector('marble-agent-drawer')?.shadowRoot?.querySelector('marble-conversation');
+    return view?.getAttribute('conversation') === id;
+  }, other);
+  assert.equal(await view.getAttribute('conversation'), other);
+});
+
 test('Settings in the drawer saves the default model for new conversations', async () => {
   await host.reset();
   const { page, drawer, panel, view } = await visit();
@@ -230,6 +350,23 @@ test('Settings in the drawer saves the default model for new conversations', asy
   const meta = await page.evaluate(async (conversation) => (await window.marble.agent.conversation(conversation)).meta, id);
   assert.equal(meta.model, 'alt');
   assert.equal(meta.effort, 'high');
+});
+
+test('the drawer panel wears the document’s paper', async () => {
+  const { drawer, panel } = await visit('forest');
+  await drawer.locator('.launcher').click();
+  await opened(panel);
+  const bg = await panel.evaluate((el) => getComputedStyle(el).backgroundColor);
+  const rgb = bg.match(/rgba?\(\s*(\d+)\s*,\s*(\d+)\s*,\s*(\d+)/);
+  const srgb = bg.match(/color\(srgb\s+([\d.]+)\s+([\d.]+)\s+([\d.]+)/);
+  const [r, g, b] = rgb
+    ? [Number(rgb[1]), Number(rgb[2]), Number(rgb[3])]
+    : srgb
+      ? [Number(srgb[1]) * 255, Number(srgb[2]) * 255, Number(srgb[3]) * 255]
+      : [];
+  assert.ok(r != null, `panel background should be a color, got ${bg}`);
+  assert.ok(r < 50 && g > 40 && g < 80 && b < 60, `panel should be forest green, got ${bg}`);
+  assert.ok(!(r > 200 && g > 200 && b > 200), 'panel must not stay Drive cream');
 });
 
 test('a document that draws its own agent interface gets no drawer', async () => {

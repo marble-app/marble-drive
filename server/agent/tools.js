@@ -75,9 +75,20 @@ export const TOOL_SCHEMAS = [
     description: 'Read the guide to building in Marble. Without a section: the list of sections.',
     inputSchema: { type: 'object', properties: { section: { type: 'string' } } },
   },
+  {
+    name: 'check_document',
+    description:
+      'Check a document against the format\'s own invariants — the ids and structure Marble needs to address it. ' +
+      'Call this after rewriting a document with your own tools. No findings means it is well formed.',
+    inputSchema: {
+      type: 'object',
+      required: ['path'],
+      properties: { path: { type: 'string' } },
+    },
+  },
 ];
 
-export function createTools({ store, writeOps, createDocument, buildStarter, guidePath }) {
+export function createTools({ store, writeOps, createDocument, buildStarter, guidePath, examine }) {
   // conversationId → docPath → Map<id, hash>
   const ledgers = new Map();
 
@@ -225,6 +236,14 @@ export function createTools({ store, writeOps, createDocument, buildStarter, gui
       const wanted = String(input.section).toLowerCase();
       const found = parts.find((p) => p.title.toLowerCase().includes(wanted));
       return found ? { section: found.title, text: found.text } : { error: `no section matching "${input.section}"` };
+    },
+
+    async check_document(input) {
+      const { docPath, source } = await readable(input);
+      // The same question `app.js` asks of a document arriving from outside,
+      // asked on demand — a full agent rewriting a file is a document arriving
+      // from outside, it just happens to be one we started.
+      return { path: docPath, findings: examine(`${splitPath(docPath).name}.mrbl`, source) ?? [] };
     },
   };
 

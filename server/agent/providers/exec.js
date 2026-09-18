@@ -4,26 +4,42 @@
 
 import { spawn } from 'node:child_process';
 
-export function runCommand(command, args = [], { timeout = 5_000, env = process.env } = {}) {
+export function runCommand(command, args = [], { timeout = 5_000, env = process.env, signal, onStdout } = {}) {
   return new Promise((resolve) => {
     let stdout = '';
     let stderr = '';
     let settled = false;
     let timer = null;
+    let child = null;
 
     const finish = (result) => {
       if (settled) return;
       settled = true;
       clearTimeout(timer);
+      signal?.removeEventListener('abort', onAbort);
       resolve({ stdout, stderr, ...result });
     };
 
-    let child;
+    const onAbort = () => {
+      try {
+        child?.kill('SIGKILL');
+      } catch {
+        // already gone
+      }
+      finish({ code: null, missing: false, aborted: true });
+    };
+
+    if (signal?.aborted) {
+      return finish({ code: null, missing: false, aborted: true });
+    }
+
     try {
       child = spawn(command, args, { env, stdio: ['ignore', 'pipe', 'pipe'] });
     } catch (err) {
       return finish({ code: null, missing: err.code === 'ENOENT', error: err.message });
     }
+
+    signal?.addEventListener('abort', onAbort, { once: true });
 
     timer = setTimeout(() => {
       child.kill('SIGKILL');
@@ -33,6 +49,7 @@ export function runCommand(command, args = [], { timeout = 5_000, env = process.
 
     child.stdout.on('data', (chunk) => {
       stdout += chunk;
+      onStdout?.(chunk);
     });
     child.stderr.on('data', (chunk) => {
       stderr += chunk;

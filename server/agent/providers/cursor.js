@@ -2,9 +2,11 @@
 //
 // Cursor cannot be told to drop its own tools, so the boundary is a hook
 // (bin/marble-cursor-hook.js) that Cursor consults before every call, written
-// into the conversation's workspace with `failClosed`. The MCP config and the
-// instructions live in the same workspace, which is outside the drive, so even
-// a tool that slipped past the hook would find nothing there worth touching.
+// into the conversation's workspace with `failClosed`. At capability `full`
+// the hook allows those tools; `--add-dir` points them at the drive; cwd is
+// the drive so the shell starts there. The MCP config, the hook and AGENTS.md
+// stay in the conversation workspace, outside the drive, so the turn token
+// never lands in a document.
 //
 // What the hook is told about a call is its name — `MCP:read_document` — and
 // not which server it belongs to (checked against a live payload, 2026-09-17).
@@ -21,8 +23,9 @@ import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
+import { CURSOR_MODES, groupCursorModels, resolveCursorModel } from '../catalog.js';
 import { pickEnv } from '../env.js';
-import { INSTRUCTIONS } from '../instructions.js';
+import { instructionsFor } from '../instructions.js';
 import { runCommand } from './exec.js';
 import { writePrivateFile } from './private-file.js';
 
@@ -170,8 +173,14 @@ export function createCursorProvider({
   return {
     id: 'cursor',
     label: 'Cursor',
+    // Cursor has no `--restricted`. The drive is an extra `--add-dir`; the
+    // conversation workspace still holds the turn token and the hook. The hook
+    // allows Cursor's own tools at `full` and still refuses another MCP server.
+    capability: 'full',
     defaultModel,
     efforts: [],
+    modes: CURSOR_MODES,
+    groupModels: groupCursorModels,
 
     async listModels() {
       const probe = await exec('cursor-agent', ['models'], { env: pickEnv(live()) });
@@ -200,7 +209,7 @@ export function createCursorProvider({
       };
     },
 
-    async prepare({ workspace, mcp }) {
+    async prepare({ workspace, mcp, capability = 'documents' }) {
       const servers = await userMcpServers(userDir);
       if (servers.length) {
         throw new Error(
@@ -219,20 +228,33 @@ export function createCursorProvider({
       const config = { mcpServers: { marble: { command: mcp.command, args: mcp.args, env: mcp.env } } };
       await writePrivateFile(mcpFile, JSON.stringify(config, null, 2));
 
+      const cap = capability === 'full' ? 'full' : 'documents';
       const hooks = {
         version: 1,
-        hooks: { preToolUse: [{ command: `"${process.execPath}" "${hookPath}"`, failClosed: true }] },
+        hooks: {
+          preToolUse: [{
+            command: `MARBLE_CURSOR_CAPABILITY=${cap} "${process.execPath}" "${hookPath}"`,
+            failClosed: true,
+          }],
+        },
       };
       await fsp.writeFile(path.join(dir, 'hooks.json'), JSON.stringify(hooks, null, 2));
-      await fsp.writeFile(path.join(workspace, 'AGENTS.md'), INSTRUCTIONS);
+      await fsp.writeFile(path.join(workspace, 'AGENTS.md'), instructionsFor(capability));
     },
 
-    spawn({ workspace, prompt, resume = null, model = null }) {
+    spawn({ workspace, prompt, resume = null, model = null, effort = null, mode = null, capability = 'documents', cwd = null }) {
       const current = live();
+      const full = capability === 'full' && cwd;
       const args = [
         '-p', '--output-format', 'stream-json', '--stream-partial-output', '--approve-mcps', '--trust',
-        '--workspace', workspace, '--model', model ?? defaultModel,
+        '--workspace', workspace,
+        ...(full ? ['--add-dir', cwd] : []),
+        '--model', resolveCursorModel(model, effort, defaultModel),
       ];
+      const run = mode || 'agent';
+      if (run === 'plan' || run === 'ask') args.push('--mode', run);
+      else if (run === 'review') args.push('--auto-review');
+      else args.push('--yolo');
       if (resume) args.push('--resume', resume);
       args.push('--', prompt);
       return {
@@ -240,6 +262,7 @@ export function createCursorProvider({
         args,
         env: current.CURSOR_API_KEY ? { CURSOR_API_KEY: current.CURSOR_API_KEY } : {},
         stdin: '',
+        ...(full ? { cwd } : {}),
       };
     },
 

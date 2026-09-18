@@ -67,7 +67,7 @@ test('ids, labels, and the spawn verified by the spike', () => {
   assert.equal(sub.id, 'claude-subscription');
   assert.equal(sub.label, 'Claude');
   assert.equal(api.id, 'claude-api');
-  assert.equal(api.label, 'Claude (API key)');
+  assert.equal(api.label, 'KIXLAB API');
 
   const spec = sub.spawn({ workspace: '/w', prompt: 'Rename it', resume: 'sess-1', model: 'claude-haiku-4-5', effort: 'high', env: { PATH: '/bin' } });
   assert.equal(spec.command, 'claude');
@@ -84,8 +84,18 @@ test('ids, labels, and the spawn verified by the spike', () => {
   assert.deepEqual(api.spawn({ workspace: '/w', prompt: 'x', env: {} }).env, { ANTHROPIC_API_KEY: 'sk-test' });
   assert.ok(!sub.spawn({ workspace: '/w', prompt: 'x', env: {} }).args.includes('--resume'));
   assert.ok(!sub.spawn({ workspace: '/w', prompt: 'x', env: {} }).args.includes('--effort'));
-  assert.deepEqual(sub.models.map((m) => m.id), ['sonnet', 'opus', 'haiku', 'fable']);
+  assert.deepEqual(sub.models.map((m) => m.id), ['haiku', 'sonnet', 'opus', 'fable']);
+  assert.deepEqual(sub.models.map((m) => m.label), ['Haiku 4.5', 'Sonnet 4.5', 'Opus 4.1', 'Fable 5']);
   assert.deepEqual(sub.efforts, ['low', 'medium', 'high', 'xhigh', 'max']);
+  assert.deepEqual(sub.modes.map((m) => m.id), ['default', 'acceptEdits', 'plan', 'bypassPermissions']);
+
+  const planned = sub.spawn({ workspace: '/w', prompt: 'x', mode: 'plan', env: {} });
+  assert.ok(planned.args.includes('--permission-mode'));
+  assert.equal(planned.args[planned.args.indexOf('--permission-mode') + 1], 'plan');
+  const bypass = sub.spawn({ workspace: '/w', prompt: 'x', mode: 'bypassPermissions', env: {} });
+  assert.ok(bypass.args.includes('--permission-mode'));
+  assert.ok(bypass.args.includes('--allow-dangerously-skip-permissions'));
+  assert.ok(!sub.spawn({ workspace: '/w', prompt: 'x', env: {} }).args.includes('--permission-mode'));
 });
 
 test('prepare writes the MCP config privately, with the turn\'s bridge', async () => {
@@ -160,7 +170,7 @@ test('a lost session is recognised by what the CLI says', () => {
 test('Claude (API key) with no key refuses to start rather than use the login', () => {
   const api = createClaudeProvider({ auth: 'api', env: { PATH: '/bin' } });
   assert.throws(() => api.spawn({ workspace: '/w', prompt: 'x', env: {} }), {
-    message: 'ANTHROPIC_API_KEY is not set, so Claude (API key) cannot run — set it or choose Claude',
+    message: 'ANTHROPIC_API_KEY is not set, so KIXLAB API cannot run — set it or choose Claude',
   });
   assert.deepEqual(createClaudeProvider({ auth: 'subscription', env: {} }).spawn({ workspace: '/w', prompt: 'x', env: {} }).env, {});
 });
@@ -180,6 +190,20 @@ test('a subagent\'s deltas and tool results are not the turn\'s', () => {
   assert.equal(parseClaudeLine(JSON.stringify({ ...result, parent_tool_use_id: null })).length, 1);
 });
 
+test('each capability is told the truth about its own tools', async () => {
+  const { instructionsFor, INSTRUCTIONS } = await import('../server/agent/instructions.js');
+
+  assert.equal(instructionsFor('documents'), INSTRUCTIONS);
+  assert.match(instructionsFor('documents'), /There are no file or shell tools/);
+
+  const full = instructionsFor('full');
+  assert.doesNotMatch(full, /There are no file or shell tools/);
+  assert.match(full, /data-marble-id/, 'a full agent still has to keep ids');
+  assert.match(full, /apply_ops/, 'ops are still the right tool for a live document');
+  assert.match(full, /Grep/, 'it must be steered off Read on a 3 MB document');
+  assert.match(full, /check_document/);
+});
+
 test('prepare replaces an existing, looser MCP config with a private one, and leaves nothing beside it', async () => {
   const workspace = await fsp.mkdtemp(path.join(os.tmpdir(), 'marble-claude-ws-'));
   const file = path.join(workspace, 'mcp.json');
@@ -190,4 +214,53 @@ test('prepare replaces an existing, looser MCP config with a private one, and le
   assert.equal((await fsp.stat(file)).mode & 0o777, 0o600);
   assert.equal(JSON.parse(await fsp.readFile(file, 'utf8')).mcpServers.marble.env.MARBLE_AGENT_TOKEN, 'tok2');
   assert.deepEqual(await fsp.readdir(workspace), ['mcp.json']);
+});
+
+test('a full-capability spawn is confined, tooled, and prompt-free', async () => {
+  const { instructionsFor } = await import('../server/agent/instructions.js');
+  const sub = createClaudeProvider({ auth: 'subscription', env: {} });
+  assert.equal(sub.capability, 'full');
+
+  const spec = sub.spawn({
+    workspace: '/w', prompt: 'Rewrite it', capability: 'full', cwd: '/drive', env: { PATH: '/bin' },
+  });
+
+  assert.equal(spec.cwd, '/drive', 'a full agent runs in the drive, not the workspace');
+  assert.deepEqual(spec.args, [
+    '-p', '--output-format', 'stream-json', '--verbose', '--include-partial-messages',
+    '--restricted',
+    '--tools', 'Bash,Read,Write,Edit,Glob,Grep,TodoWrite',
+    '--settings', path.join('/w', 'settings.json'),
+    '--permission-prompts', 'none',
+    '--strict-mcp-config', '--mcp-config', path.join('/w', 'mcp.json'),
+    '--append-system-prompt', instructionsFor('full'),
+  ]);
+  assert.ok(!spec.args.includes('--setting-sources'), '--restricted already sheds this machine settings');
+  assert.ok(!spec.args.includes('--dangerously-skip-permissions'));
+});
+
+test('a documents-capability spawn is exactly what it was before', () => {
+  const sub = createClaudeProvider({ auth: 'subscription', env: {} });
+  const before = sub.spawn({ workspace: '/w', prompt: 'x', env: {} });
+  const asked = sub.spawn({ workspace: '/w', prompt: 'x', capability: 'documents', cwd: '/drive', env: {} });
+  assert.deepEqual(asked.args, before.args, 'the old boundary is untouched by the new one');
+  assert.ok(asked.args.includes('--tools') && asked.args[asked.args.indexOf('--tools') + 1] === '');
+  assert.equal(asked.cwd, undefined, 'a documents agent still runs in its empty workspace');
+});
+
+test('prepare writes a private settings.json only for a full turn', async () => {
+  const workspace = await fsp.mkdtemp(path.join(os.tmpdir(), 'marble-full-'));
+  const mcp = { command: 'node', args: ['/bridge.js'], env: { MARBLE_AGENT_TOKEN: 't' } };
+
+  await createClaudeProvider().prepare({ workspace, mcp, meta: {}, capability: 'full' });
+  const file = path.join(workspace, 'settings.json');
+  const stat = await fsp.stat(file);
+  assert.equal(stat.mode & 0o777, 0o600);
+  assert.deepEqual(JSON.parse(await fsp.readFile(file, 'utf8')), {
+    permissions: { allow: ['Bash', 'Read', 'Write', 'Edit', 'Glob', 'Grep', 'TodoWrite'] },
+  });
+
+  const other = await fsp.mkdtemp(path.join(os.tmpdir(), 'marble-docs-'));
+  await createClaudeProvider().prepare({ workspace: other, mcp, meta: {}, capability: 'documents' });
+  await assert.rejects(fsp.stat(path.join(other, 'settings.json')), { code: 'ENOENT' });
 });

@@ -51,6 +51,36 @@ export async function startDrive({ scripts = {}, agents = true, documents = { ga
   const drive = await createDrive(config, {
     log: quiet,
     agentProviders: new Map([['fake', createFakeProvider({ scripts })]]),
+    usage: async () => ({
+      meters: [
+        {
+          id: 'claude-subscription',
+          label: 'Claude',
+          used: 23,
+          left: 77,
+          window: '5h',
+          resetsAt: '2026-09-17T22:30:00Z',
+          detail: '5h 23% used · week 41% used',
+          windows: [
+            { id: '5h', label: 'Short-term', used: 23, left: 77, resetsAt: '2026-09-17T22:30:00Z', kind: 'quota' },
+            { id: 'week', label: 'Weekly', used: 41, left: 59, resetsAt: '2026-09-20T10:59:59Z', kind: 'quota' },
+          ],
+        },
+        {
+          id: 'cursor',
+          label: 'Cursor',
+          used: 19,
+          left: 81,
+          window: 'plan',
+          resetsAt: '1789861494000',
+          detail: 'Cursor models 12% used · Other 100% used',
+          windows: [
+            { id: 'auto', label: 'Cursor models', used: 12, left: 88, resetsAt: '1789861494000', kind: 'quota' },
+            { id: 'api', label: 'Other models', used: 100, left: 0, resetsAt: '1789861494000', kind: 'quota' },
+          ],
+        },
+      ],
+    }),
   });
   for (const [docPath, source] of Object.entries(documents)) await drive.createDocument(docPath, source, { label: 'test' });
   const port = await new Promise((resolve) => drive.server.listen(0, '127.0.0.1', () => resolve(drive.server.address().port)));

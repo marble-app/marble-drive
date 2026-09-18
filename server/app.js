@@ -32,6 +32,7 @@ import { PathError, joinPath, parsePath, safePath, safeSegment, splitPath, witho
 import { build as buildStarter, list as listStarters } from './gallery.js';
 import { createChannels } from './sse.js';
 import { createStore } from './store/index.js';
+import { createTypesafeHandler } from './typesafe/routes.js';
 import { watchDrive } from './watch.js';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
@@ -93,7 +94,7 @@ const RUNTIME = {
   'agent-ui.js': () => path.join(REPO, 'runtime', 'agent-ui.js'),
 };
 
-export async function createDrive(config, { log = console, agentProviders = null, agents: withAgents = true } = {}) {
+export async function createDrive(config, { log = console, agentProviders = null, agents: withAgents = true, usage = null, typesafe: typesafeOpts = null, agentSandbox = null } = {}) {
   const store = createStore({ root: config.root });
   await store.ready();
 
@@ -106,6 +107,11 @@ export async function createDrive(config, { log = console, agentProviders = null
     secure: config.secureCookie,
   });
   const intents = createIntents({ store, log });
+  const typesafe = createTypesafeHandler({
+    apiKey: config.typesafeApiKey,
+    maxBodyBytes: config.maxBodyBytes,
+    ...(typesafeOpts ?? {}),
+  });
 
   // Writes are serialized per document. `lastKnown` holds the last content this
   // host is sure about and which client put it there, and it answers what the
@@ -223,6 +229,17 @@ export async function createDrive(config, { log = console, agentProviders = null
   // from outside an op, always through the same restore point and echo.
   const createDocument = (docPath, source, { label = 'created' } = {}) => putDocument(docPath, source, { label });
 
+  async function restoreDocument(docPath, sha, { client = null } = {}) {
+    const wanted = await store.snapshot(docPath, sha);
+    if (wanted === null) {
+      throw Object.assign(new Error(`no checkpoint ${String(sha).slice(0, 12)}`), { status: 404 });
+    }
+    const current = await store.read(docPath);
+    if (wanted === current) return { ok: true, sha, restored: false };
+    await putDocument(docPath, wanted, { label: 'before-restore', event: 'changed', client });
+    return { ok: true, sha, restored: true, bytes: bytesOf(wanted) };
+  }
+
   // ------------------------------------------------------------------- routes
 
   // Set once the server exists, because the agents need to know where to tell
@@ -269,6 +286,7 @@ export async function createDrive(config, { log = console, agentProviders = null
       if (route.startsWith('/agent/')) {
         return agents ? await agents.handle(req, res, url) : text(res, 404, 'not found');
       }
+      if (await typesafe.handle(req, res, url)) return;
 
       if (route === '/') {
         // Land on the Drive if it is there. It is an ordinary document with no
@@ -364,16 +382,7 @@ export async function createDrive(config, { log = console, agentProviders = null
         const docPath = parsePath(url.searchParams.get('app'), { allowRoot: false });
         const sha = url.searchParams.get('sha');
         if (!/^[0-9a-f]{64}$/.test(sha ?? '')) return json(res, 400, { error: 'bad checkpoint' });
-
-        const wanted = await store.snapshot(docPath, sha);
-        if (wanted === null) return json(res, 404, { error: `no checkpoint ${sha.slice(0, 12)}` });
-        const current = await store.read(docPath);
-        if (wanted === current) return json(res, 200, { ok: true, sha, restored: false });
-
-        // Deliberately not claimed as one client's write: every tab, including
-        // the one that asked, is showing a document that just moved wholesale.
-        await putDocument(docPath, wanted, { label: 'before-restore', event: 'changed' });
-        return json(res, 200, { ok: true, sha, restored: true, bytes: bytesOf(wanted) });
+        return json(res, 200, await restoreDocument(docPath, sha));
       }
 
       if (route === '/intents' && req.method === 'GET') {
@@ -614,6 +623,7 @@ export async function createDrive(config, { log = console, agentProviders = null
       store,
       writeOps,
       createDocument,
+      restore: restoreDocument,
       // Where the bridge calls back: this server, on loopback, whatever port it
       // ended up on.
       origin: () => {
@@ -623,6 +633,8 @@ export async function createDrive(config, { log = console, agentProviders = null
       },
       providers: agentProviders ?? null,
       log,
+      usage,
+      sandbox: agentSandbox ?? null,
     }).catch((err) => {
       if (err.code !== 'EAGENTSHELD') throw err;
       agentsWhy = err.message;
@@ -789,11 +801,12 @@ button{background:#738698;color:#fafaf7;border-color:#738698;cursor:pointer}p{co
     // ever observed after the fact.
     if (prior) {
       await store.mark(docPath, prior.source, 'pre-external');
-      // Every agent writes through ops, so an agent's own work never reaches
-      // this branch. Something changing a document from outside while a turn
-      // runs is flagged on that turn, with the restore point just taken, and
-      // left to a person: the likeliest outside writer is them, in an editor.
-      agents?.watchdog(docPath, shaOf(prior.source));
+      // A full agent writes with its own file tools, so an agent's own work
+      // reaches this branch constantly and a running turn claims it (spec §6).
+      // What nobody claims is what this branch was written for: you, in an
+      // editor, while a turn happens to be running.
+      const claimed = agents?.documentTouched(docPath, shaOf(prior.source));
+      if (!claimed) agents?.watchdog(docPath, shaOf(prior.source));
     }
     lastKnown.set(docPath, { source: current, client: null });
     await store.thinHistory(docPath).catch(() => {});

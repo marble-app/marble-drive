@@ -118,6 +118,9 @@ export function loadConfig(env = process.env) {
     // docs/AGENTS.md.
     agents: bool('MARBLE_DRIVE_AGENTS', false),
     agentProvider: str('MARBLE_DRIVE_AGENT_PROVIDER', 'claude-subscription'),
+    // One switch that holds every provider down to the 2026-09-16 boundary,
+    // whatever each adapter declares. The rollback, if a full turn goes wrong.
+    agentPower: str('MARBLE_DRIVE_AGENT_POWER', ''),
     // Each conversation's scratch workspace. Deliberately not under the drive
     // root: an agent's own tools should find nothing there worth touching.
     agentWorkdir: path.resolve(str('MARBLE_DRIVE_AGENT_WORKDIR', path.join(os.homedir(), '.cache', 'marble-drive', 'agents'))),
@@ -126,6 +129,9 @@ export function loadConfig(env = process.env) {
     // API keys the settings panel writes. Gitignored, and not under the drive
     // root, so a backup of `.marble/` does not take them.
     agentKeysFile: path.resolve(str('MARBLE_DRIVE_AGENT_KEYS', path.join(process.cwd(), '.agent-keys.local'))),
+
+    // Recursive Subquestions on Monitor. The key never lives in a document.
+    typesafeApiKey: str('TYPESAFE_API_KEY', null),
   };
 }
 

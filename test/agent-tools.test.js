@@ -52,9 +52,9 @@ async function freshTurn(conversationId = `c${++n}`) {
   };
 }
 
-test('the schemas name exactly the five tools', () => {
+test('the schemas name the marble tools', () => {
   assert.deepEqual(TOOL_SCHEMAS.map((t) => t.name).sort(), [
-    'apply_ops', 'create_document', 'list_documents', 'read_document', 'read_guide',
+    'apply_ops', 'check_document', 'create_document', 'list_documents', 'read_document', 'read_guide',
   ]);
   for (const t of TOOL_SCHEMAS) assert.equal(t.inputSchema.type, 'object');
 });
@@ -262,6 +262,36 @@ test('undoing a turn whose document is gone reports it instead of throwing', asy
   assert.equal(result.reverted, 0);
   assert.equal(result.kept, 1);
   assert.match(result.errors[0], /no document/);
+});
+
+test('check_document reports the format\'s own invariants', async () => {
+  const sources = new Map([['notes', '<h1 data-marble-id="h1">Hi</h1>']]);
+  const checking = createTools({
+    store: { read: async (p) => sources.get(p) ?? null, has: async (p) => sources.has(p), list: async () => [] },
+    writeOps: async () => ({ applied: 0 }),
+    createDocument: async () => {},
+    buildStarter: async () => '',
+    guidePath: '/dev/null',
+    examine: (name, source) => (source.includes('data-marble-id') ? [] : [{ level: 'error', message: 'no ids' }]),
+  });
+  const turn = { conversationId: 'c1', target: 'notes', writable: new Set(['notes']), undo: [], onEvent() {} };
+
+  assert.deepEqual(await checking.call('check_document', { path: 'notes' }, turn), { path: 'notes', findings: [] });
+
+  sources.set('notes', '<h1>Hi</h1>');
+  const bad = await checking.call('check_document', { path: 'notes' }, turn);
+  assert.equal(bad.findings.length, 1);
+  assert.match(bad.findings[0].message, /no ids/);
+
+  assert.deepEqual(await checking.call('check_document', { path: 'nope' }, turn), { error: 'no document "nope"' });
+});
+
+test('check_document is offered to agents', () => {
+  const checking = createTools({
+    store: {}, writeOps: async () => ({}), createDocument: async () => {},
+    buildStarter: async () => '', guidePath: '/dev/null', examine: () => [],
+  });
+  assert.ok(checking.schemas.some((s) => s.name === 'check_document'));
 });
 
 test.after(() => drive.close());

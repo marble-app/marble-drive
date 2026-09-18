@@ -1,31 +1,36 @@
 // Claude Code as a Marble agent.
 //
-// The invocation is the one the 2026-09-16 spike proved: no built-in tools at
-// all (`--tools ""`), only the marble MCP server (`--strict-mcp-config`), no
-// user settings, hooks or CLAUDE.md from this machine (`--setting-sources
-// project` over an empty workspace), and the prompt on stdin, because
-// `--tools` takes a list and would swallow a trailing prompt as one of its
-// values. `--bare` would also shed settings, but it skips the keychain the
-// subscription login lives in.
+// Two invocations, one per capability. A `documents` turn is the 2026-09-16
+// spike: no built-in tools (`--tools ""`), only the marble MCP server, no user
+// settings (`--setting-sources project` over an empty workspace), prompt on
+// stdin. A `full` turn is the 2026-09-17 one: `--restricted` confines the file
+// tools to the working directory (the drive), `--tools` names the CLI's own
+// belt, and `--settings` plus `--permission-prompts none` keep a headless turn
+// from hanging on a prompt nobody can answer.
 //
 // The two providers differ only in billing: the subscription gets no API key
 // in its environment, so the CLI uses the login; the API provider hands it one.
 
 import path from 'node:path';
 
+import { CLAUDE_MODES } from '../catalog.js';
 import { pickEnv } from '../env.js';
-import { INSTRUCTIONS } from '../instructions.js';
+import { instructionsFor } from '../instructions.js';
 import { runCommand } from './exec.js';
 import { writePrivateFile } from './private-file.js';
 
 const PREFIX = 'mcp__marble__';
 export const CLAUDE_MODELS = [
-  { id: 'sonnet', label: 'Sonnet' },
-  { id: 'opus', label: 'Opus' },
-  { id: 'haiku', label: 'Haiku' },
-  { id: 'fable', label: 'Fable' },
+  { id: 'haiku', label: 'Haiku 4.5' },
+  { id: 'sonnet', label: 'Sonnet 4.5' },
+  { id: 'opus', label: 'Opus 4.1' },
+  { id: 'fable', label: 'Fable 5' },
 ];
 export const CLAUDE_EFFORTS = ['low', 'medium', 'high', 'xhigh', 'max'];
+// Named once. `--restricted` confines these to the working directory; Bash is
+// in the list because `--restricted` drops code-running tools unless it is.
+const FULL_TOOLS = 'Bash,Read,Write,Edit,Glob,Grep,TodoWrite';
+const FULL_SETTINGS = { permissions: { allow: FULL_TOOLS.split(',') } };
 const SUMMARY = 200;
 
 const toolName = (name) => (name.startsWith(PREFIX) ? name.slice(PREFIX.length) : name);
@@ -103,7 +108,8 @@ export function createClaudeProvider({ auth = 'subscription', exec = runCommand,
 
   return {
     id: api ? 'claude-api' : 'claude-subscription',
-    label: api ? 'Claude (API key)' : 'Claude',
+    label: api ? 'KIXLAB API' : 'Claude',
+    capability: 'full',
 
     async detect() {
       // The same allowlist a turn starts from. Asked with a key in the
@@ -140,38 +146,69 @@ export function createClaudeProvider({ auth = 'subscription', exec = runCommand,
 
     models: CLAUDE_MODELS,
     efforts: CLAUDE_EFFORTS,
+    modes: CLAUDE_MODES,
 
-    async prepare({ workspace, mcp, skills = [] }) {
+    async prepare({ workspace, mcp, skills = [], capability = 'documents' }) {
       const config = { mcpServers: { marble: { command: mcp.command, args: mcp.args, env: mcp.env } } };
       // The token in here is good for one turn, and nobody else's business.
       await writePrivateFile(path.join(workspace, 'mcp.json'), JSON.stringify(config, null, 2));
+      // `--restricted` refuses bypassPermissions and ignores this machine's
+      // settings, so the only way a headless turn never stops on a prompt is
+      // an allow-list it is handed explicitly.
+      if (capability === 'full') {
+        await writePrivateFile(path.join(workspace, 'settings.json'), JSON.stringify(FULL_SETTINGS, null, 2));
+      }
       if (skills.length) {
         const { installSkills } = await import('../skills.js');
         await installSkills(workspace, skills);
       }
     },
 
-    spawn({ workspace, prompt, resume = null, model = null, effort = null }) {
+    spawn({ workspace, prompt, resume = null, model = null, effort = null, mode = null, capability = 'documents', cwd = null }) {
       const current = live();
+      const full = capability === 'full';
       const args = [
         '-p', '--output-format', 'stream-json', '--verbose', '--include-partial-messages',
-        '--tools', '', '--strict-mcp-config', '--mcp-config', path.join(workspace, 'mcp.json'),
-        '--allowedTools', 'mcp__marble', '--setting-sources', 'project',
-        '--append-system-prompt', INSTRUCTIONS,
+        ...(full
+          ? [
+              // Confines the file tools to the working directory — the drive —
+              // and ignores this machine's user, project and local settings,
+              // which is what `--setting-sources project` was here for.
+              '--restricted',
+              '--tools', FULL_TOOLS,
+              '--settings', path.join(workspace, 'settings.json'),
+              // Anything the allow-list does not cover is denied, not left
+              // hanging: nobody is here to answer a prompt.
+              '--permission-prompts', 'none',
+              '--strict-mcp-config', '--mcp-config', path.join(workspace, 'mcp.json'),
+            ]
+          : [
+              '--tools', '', '--strict-mcp-config', '--mcp-config', path.join(workspace, 'mcp.json'),
+              '--allowedTools', 'mcp__marble', '--setting-sources', 'project',
+            ]),
+        '--append-system-prompt', instructionsFor(capability),
       ];
       if (model) args.push('--model', model);
       if (effort) args.push('--effort', effort);
+      if (mode && mode !== 'default') {
+        args.push('--permission-mode', mode);
+        if (mode === 'bypassPermissions') args.push('--allow-dangerously-skip-permissions');
+      }
       if (resume) args.push('--resume', resume);
       // Without a key the CLI would fall back to the login, and bill the
       // subscription for a conversation someone chose to put on the API.
       if (api && !current.ANTHROPIC_API_KEY) {
-        throw new Error('ANTHROPIC_API_KEY is not set, so Claude (API key) cannot run — set it or choose Claude');
+        throw new Error('ANTHROPIC_API_KEY is not set, so KIXLAB API cannot run — set it or choose Claude');
       }
       return {
         command: 'claude',
         args,
         env: api ? { ANTHROPIC_API_KEY: current.ANTHROPIC_API_KEY } : {},
         stdin: prompt,
+        // A full agent works in the drive. A documents agent keeps its empty
+        // workspace, where its own tools — if any ever got through — find
+        // nothing.
+        ...(full && cwd ? { cwd } : {}),
       };
     },
 

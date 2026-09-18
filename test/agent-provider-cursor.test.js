@@ -7,7 +7,7 @@ import path from 'node:path';
 import test from 'node:test';
 import { fileURLToPath } from 'node:url';
 
-import { INSTRUCTIONS } from '../server/agent/instructions.js';
+import { FULL_INSTRUCTIONS, INSTRUCTIONS } from '../server/agent/instructions.js';
 import { createCursorProvider, parseCursorLine } from '../server/agent/providers/cursor.js';
 import { TOOL_SCHEMAS } from '../server/agent/tools.js';
 
@@ -122,16 +122,35 @@ test('spawn is the verified invocation, with the default model and the prompt la
   const provider = createCursorProvider({ env: {} });
   assert.equal(provider.id, 'cursor');
   assert.equal(provider.label, 'Cursor');
+  assert.equal(provider.capability, 'full');
   const spec = provider.spawn({ workspace: '/w', prompt: 'Rename it', resume: 'chat-1', model: null, env: {} });
   assert.equal(spec.command, 'cursor-agent');
   assert.deepEqual(spec.args, [
     '-p', '--output-format', 'stream-json', '--stream-partial-output', '--approve-mcps', '--trust',
-    '--workspace', '/w', '--model', 'composer-2.5', '--resume', 'chat-1', '--', 'Rename it',
+    '--workspace', '/w', '--model', 'composer-2.5', '--yolo', '--resume', 'chat-1', '--', 'Rename it',
   ]);
   assert.deepEqual(spec.env, {});
-  assert.equal(provider.spawn({ workspace: '/w', prompt: 'p', model: 'gpt-5.2', env: {} }).args.at(-3), 'gpt-5.2');
-  assert.equal(provider.spawn({ workspace: '/w', prompt: 'p', model: 'gpt-5.2', env: {} }).args.at(-1), 'p');
+  const named = provider.spawn({ workspace: '/w', prompt: 'p', model: 'gpt-5.2', env: {} });
+  assert.equal(named.args[named.args.indexOf('--model') + 1], 'gpt-5.2');
+  assert.equal(named.args.at(-1), 'p');
   assert.deepEqual(createCursorProvider({ env: { CURSOR_API_KEY: 'ck' } }).spawn({ workspace: '/w', prompt: 'p', env: {} }).env, { CURSOR_API_KEY: 'ck' });
+});
+
+test('Cursor spawn composes family+effort and the Shift+Tab mode flags', () => {
+  const provider = createCursorProvider({ env: {} });
+  assert.deepEqual(provider.modes.map((m) => m.id), ['agent', 'plan', 'ask', 'review']);
+  const grok = provider.spawn({
+    workspace: '/w', prompt: 'p', model: 'cursor-grok-4.6', effort: 'xhigh', mode: 'agent', env: {},
+  });
+  assert.equal(grok.args[grok.args.indexOf('--model') + 1], 'cursor-grok-4.6-xhigh');
+  assert.ok(grok.args.includes('--yolo'));
+  const plan = provider.spawn({ workspace: '/w', prompt: 'p', model: 'composer-2.5', mode: 'plan', env: {} });
+  assert.equal(plan.args[plan.args.indexOf('--mode') + 1], 'plan');
+  assert.ok(!plan.args.includes('--yolo'));
+  const ask = provider.spawn({ workspace: '/w', prompt: 'p', mode: 'ask', env: {} });
+  assert.equal(ask.args[ask.args.indexOf('--mode') + 1], 'ask');
+  const review = provider.spawn({ workspace: '/w', prompt: 'p', mode: 'review', env: {} });
+  assert.ok(review.args.includes('--auto-review'));
 });
 
 test('a prompt starting with - comes after -- to avoid being parsed as an option', () => {
@@ -139,6 +158,28 @@ test('a prompt starting with - comes after -- to avoid being parsed as an option
   const spec = provider.spawn({ workspace: '/w', prompt: '-1 reply with only the word ok', env: {} });
   assert.equal(spec.args.at(-2), '--');
   assert.equal(spec.args.at(-1), '-1 reply with only the word ok');
+});
+
+test('a full-capability spawn sees the drive as an extra root and runs there', () => {
+  const provider = createCursorProvider({ env: {} });
+  const spec = provider.spawn({
+    workspace: '/w', prompt: 'Rewrite it', capability: 'full', cwd: '/drive', env: {},
+  });
+  assert.equal(spec.cwd, '/drive');
+  const workspaceAt = spec.args.indexOf('--workspace');
+  assert.equal(spec.args[workspaceAt + 1], '/w', 'hooks and the turn token stay outside the drive');
+  const addAt = spec.args.indexOf('--add-dir');
+  assert.ok(addAt >= 0, 'the drive is an extra workspace root');
+  assert.equal(spec.args[addAt + 1], '/drive');
+});
+
+test('a documents-capability spawn is exactly what it was before', () => {
+  const provider = createCursorProvider({ env: {} });
+  const before = provider.spawn({ workspace: '/w', prompt: 'x', env: {} });
+  const asked = provider.spawn({ workspace: '/w', prompt: 'x', capability: 'documents', cwd: '/drive', env: {} });
+  assert.deepEqual(asked.args, before.args);
+  assert.equal(asked.cwd, undefined);
+  assert.equal(asked.args.includes('--add-dir'), false);
 });
 
 test('prepare writes the MCP config privately, the fail-closed hook, and the instructions', async () => {
@@ -159,6 +200,17 @@ test('prepare writes the MCP config privately, the fail-closed hook, and the ins
   assert.equal(await fsp.readFile(path.join(workspace, 'AGENTS.md'), 'utf8'), INSTRUCTIONS);
 });
 
+test('a full-capability prepare tells the hook and writes the full instructions', async () => {
+  const workspace = await fsp.mkdtemp(path.join(os.tmpdir(), 'marble-cursor-full-'));
+  const mcp = { command: '/usr/bin/node', args: ['/repo/bin/marble-mcp.js'], env: { MARBLE_DRIVE_URL: 'http://127.0.0.1:1', MARBLE_AGENT_TOKEN: 'tok' } };
+  await createCursorProvider({ hookPath: '/repo/bin/marble-cursor-hook.js', userDir: NO_USER_DIR })
+    .prepare({ workspace, mcp, meta: {}, capability: 'full' });
+
+  const hooks = JSON.parse(await fsp.readFile(path.join(workspace, '.cursor', 'hooks.json'), 'utf8'));
+  assert.match(hooks.hooks.preToolUse[0].command, /MARBLE_CURSOR_CAPABILITY=full/);
+  assert.equal(await fsp.readFile(path.join(workspace, 'AGENTS.md'), 'utf8'), FULL_INSTRUCTIONS);
+});
+
 test('detect: signed in, signed out, not installed', async () => {
   const exec = (answer) => async () => answer;
   assert.deepEqual(
@@ -172,8 +224,12 @@ test('detect: signed in, signed out, not installed', async () => {
   );
 });
 
-const askHook = (input) => {
-  const run = spawnSync(process.execPath, [HOOK], { input, encoding: 'utf8' });
+const askHook = (input, env = {}) => {
+  const run = spawnSync(process.execPath, [HOOK], {
+    input,
+    encoding: 'utf8',
+    env: { ...process.env, MARBLE_CURSOR_CAPABILITY: '', ...env },
+  });
   return { code: run.status, answer: JSON.parse(run.stdout) };
 };
 
@@ -197,6 +253,19 @@ test('the hook denies everything else, including other MCP servers and nonsense'
     assert.equal(answer.permission, 'deny', input);
     assert.ok(answer.agent_message);
   }
+});
+
+test('a full-capability hook allows Cursor\'s own tools and still refuses foreign MCP', () => {
+  const env = { MARBLE_CURSOR_CAPABILITY: 'full' };
+  for (const name of ['Shell', 'Write', 'Read', 'Edit', 'Grep', 'Glob']) {
+    assert.equal(
+      askHook(JSON.stringify({ tool_name: name, tool_input: {} }), env).answer.permission,
+      'allow',
+      name,
+    );
+  }
+  assert.equal(askHook(JSON.stringify({ tool_name: 'MCP:read_document', tool_input: {} }), env).answer.permission, 'allow');
+  assert.equal(askHook(JSON.stringify({ tool_name: 'MCP:github_create_issue', tool_input: {} }), env).answer.permission, 'deny');
 });
 
 test('the hook edge cases: trailing space, case sensitivity, near misses, junk', () => {
@@ -329,7 +398,10 @@ test('prepare refuses a hook command it could not quote safely', async () => {
   }
   await createCursorProvider({ hookPath: '/a/with space/hook.js', userDir: NO_USER_DIR }).prepare({ workspace, mcp: mcpForTest, meta: {} });
   const hooks = JSON.parse(await fsp.readFile(path.join(workspace, '.cursor', 'hooks.json'), 'utf8'));
-  assert.equal(hooks.hooks.preToolUse[0].command, `"${process.execPath}" "/a/with space/hook.js"`);
+  assert.equal(
+    hooks.hooks.preToolUse[0].command,
+    `MARBLE_CURSOR_CAPABILITY=documents "${process.execPath}" "/a/with space/hook.js"`,
+  );
   assert.deepEqual((await fsp.readdir(path.join(workspace, '.cursor'))).sort(), ['hooks.json', 'mcp.json'], 'no temp file left behind');
 });
 

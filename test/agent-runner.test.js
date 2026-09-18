@@ -511,9 +511,11 @@ test('an undo record is on disk as soon as a batch applies, while the turn is st
   await runner.callTool(live.token, 'apply_ops', {});
   const records = await until(async () => {
     const saved = await store.undoRecords(turnId);
-    return saved?.length === 2 ? saved : null;
+    const steps = Array.isArray(saved) ? saved : saved?.steps;
+    return steps?.length === 2 ? saved : null;
   }, 2_000);
-  assert.equal(records.length, 2);
+  const steps = Array.isArray(records) ? records : records.steps;
+  assert.equal(steps.length, 2);
   assert.equal((await store.turn(turnId)).status, 'running', 'saved before the turn ended');
   await runner.close();
 });

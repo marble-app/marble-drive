@@ -5,6 +5,7 @@
 // happens. The runner cannot tell it from the real thing, which is the point.
 
 import { spawn } from 'node:child_process';
+import fsp from 'node:fs/promises';
 import readline from 'node:readline';
 
 const script = JSON.parse(process.env.FAKE_SCRIPT ?? '[]');
@@ -68,6 +69,12 @@ for (const step of script) {
     const body = JSON.parse(text);
     if (step.as) vars[step.as] = body;
     out({ kind: 'result', callId, ok: !reply.result?.isError, summary: text.slice(0, 200) });
+  }
+  // What a full agent does that a documents agent cannot: write the file
+  // itself, with no op and no bridge. The host hears it from the watcher.
+  if (step.write) {
+    await fsp.writeFile(step.write.file, step.write.text);
+    out({ kind: 'text', text: `wrote ${step.write.file}` });
   }
   // What a CLI says when asked to resume a session it no longer has.
   if (step.lostWhenResumed && process.env.FAKE_RESUME) {

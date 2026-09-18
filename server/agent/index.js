@@ -8,7 +8,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-import { enginePath } from '../engine.js';
+import { enginePath, examine } from '../engine.js';
 import { build as buildStarter } from '../gallery.js';
 import { createHub } from './hub.js';
 import { createKeyStore } from './keys.js';
@@ -18,6 +18,7 @@ import { listSkills, skillDirs } from './skills.js';
 import { createAgentStore } from './store.js';
 import { createTools } from './tools.js';
 import { builtInProviders } from './providers/index.js';
+import { cachedUsage, collectUsage } from './usage.js';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const BRIDGE = path.resolve(HERE, '..', '..', 'bin', 'marble-mcp.js');
@@ -95,7 +96,7 @@ async function claimHost(dir) {
   return { held: null, release: null, why: 'could not take host.lock' };
 }
 
-export async function createAgents({ config, store, writeOps, createDocument, origin, providers, log = console }) {
+export async function createAgents({ config, store, writeOps, createDocument, origin, providers, log = console, usage = null, sandbox = null, restore = null }) {
   const dir = path.join(store.marbleDir, 'agents');
   const lock = await claimHost(dir);
   if (!lock.release) {
@@ -105,14 +106,14 @@ export async function createAgents({ config, store, writeOps, createDocument, or
     throw Object.assign(new Error(why), { code: 'EAGENTSHELD' });
   }
   try {
-    return await boot({ config, store, writeOps, createDocument, origin, providers, log, dir, lock });
+    return await boot({ config, store, writeOps, createDocument, origin, providers, log, dir, lock, usage, sandbox, restore });
   } catch (err) {
     await lock.release();
     throw err;
   }
 }
 
-async function boot({ config, store, writeOps, createDocument, origin, providers, log, dir, lock }) {
+async function boot({ config, store, writeOps, createDocument, origin, providers, log, dir, lock, usage, sandbox = null, restore = null }) {
   const agentStore = createAgentStore({ dir, defaultProvider: config.agentProvider, log });
   await agentStore.ready();
   const settings = await agentStore.settings();
@@ -126,12 +127,16 @@ async function boot({ config, store, writeOps, createDocument, origin, providers
     createDocument,
     buildStarter,
     guidePath: enginePath('skills/build-in-marble/SKILL.md'),
+    examine,
   });
   const runner = createRunner({
     store: agentStore,
     tools,
     providers: liveProviders,
     workdir: config.agentWorkdir,
+    driveRoot: config.root,
+    power: config.agentPower,
+    sandbox,
     origin,
     bridgePath: BRIDGE,
     readDocument: (docPath) => store.read(docPath),
@@ -154,16 +159,20 @@ async function boot({ config, store, writeOps, createDocument, origin, providers
     hub,
     providers: liveProviders,
     writeOps,
+    restore,
     maxBody: config.maxBodyBytes,
     gated: Boolean(config.secret),
     keys,
     skills,
+    usage: usage ?? cachedUsage(() => collectUsage()),
+    root: config.root,
   });
 
   return {
     handle: routes.handle,
     handleTools: routes.handleTools,
     watchdog: (docPath, sha) => runner.watchdog(docPath, sha),
+    documentTouched: (docPath, sha) => runner.documentTouched(docPath, sha),
     store: agentStore,
     runner,
     async close() {

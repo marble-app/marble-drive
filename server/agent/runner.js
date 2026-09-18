@@ -14,7 +14,8 @@ import fsp from 'node:fs/promises';
 import path from 'node:path';
 import readline from 'node:readline';
 
-import { collectSlices } from '../engine.js';
+import { collectSlices, shaOf } from '../engine.js';
+import { effectiveCapability } from './capability.js';
 import { pickEnv } from './env.js';
 
 const SELECTION_BUDGET = 6_000;
@@ -22,7 +23,7 @@ const STDERR_TAIL = 4_000;
 // How long closing the host waits for its running turns to write their end.
 const CLOSE_GRACE_MS = 5_000;
 
-export function createRunner({ store, tools, providers, workdir, origin, bridgePath, readDocument, publish, limits, log = console, skills = [] }) {
+export function createRunner({ store, tools, providers, workdir, origin, bridgePath, readDocument, publish, limits, log = console, skills = [], driveRoot, power = '', sandbox = null }) {
   const live = new Map(); // turnId → live turn
   const order = []; // turnIds, in the order they were sent
   const tokens = new Map(); // token → live turn
@@ -122,6 +123,13 @@ export function createRunner({ store, tools, providers, workdir, origin, bridgeP
       usage: null,
       applied: 0,
       watchdog: false,
+      // docPath → the restore point taken before this turn first changed it.
+      // First write wins: undo wants where the document started, not its last step.
+      touched: new Map(),
+      // path → sha of the document as this turn found it. A later file write's
+      // `prior` is post-ops if the turn already filed ops, which is the wrong
+      // restore; undo wants this instead.
+      origins: new Map(),
       stderr: '',
       timers: [],
       inflight: new Set(), // tool-call promises the bridge is still waiting on
@@ -133,16 +141,27 @@ export function createRunner({ store, tools, providers, workdir, origin, bridgeP
       // under it, would otherwise leave applied ops nobody can take back.
       undoSaved: Promise.resolve(),
       onEvent: (event) => {
-        if (event.type === 'ops.applied') {
-          turn.applied += event.count;
-          const records = [...turn.undo];
+        if (event.type === 'ops.applied') turn.applied += event.count;
+        if (event.type === 'ops.applied' || event.type === 'document.changed') {
+          // Written as each batch or write lands, in order, not only when the
+          // turn ends: a crash would otherwise leave changes nobody can take
+          // back. `restores` is where the document started, so undo of a
+          // document written both ways is one restore, not a restore and a
+          // replay.
+          const record = {
+            steps: [...turn.undo],
+            restores: [...turn.touched].map(([docPath, sha]) => ({ path: docPath, sha })),
+          };
           turn.undoSaved = turn.undoSaved
-            .then(() => store.saveUndo(turn.id, records))
+            .then(() => store.saveUndo(turn.id, record))
             .catch((err) => log.error(`[agents] ${err.message}`));
         }
         emit(turn, event).catch((err) => log.error(`[agents] ${err.message}`));
       },
     };
+
+    const originSource = await readDocument(frozen.target).catch(() => null);
+    if (originSource != null) turn.origins.set(frozen.target, shaOf(originSource));
 
     // Only listed once its `user`/`turn.queued` events are actually stored —
     // otherwise a pump() running concurrently (another turn on the same
@@ -190,7 +209,9 @@ export function createRunner({ store, tools, providers, workdir, origin, bridgeP
       };
 
       await fsp.mkdir(workspace, { recursive: true });
-      await provider.prepare?.({ workspace, mcp, meta, skills });
+      const capability = effectiveCapability(provider, { power });
+      turn.capability = capability;
+      await provider.prepare?.({ workspace, mcp, meta, skills, capability });
       const prompt = await composePrompt(turn, meta);
 
       // Cancel (or a host shutdown) can land anywhere in the awaits above,
@@ -207,7 +228,10 @@ export function createRunner({ store, tools, providers, workdir, origin, bridgeP
         resume: meta.providerSession,
         model: meta.model,
         effort: meta.effort,
+        mode: meta.mode,
         env: base,
+        capability,
+        cwd: capability === 'full' ? driveRoot : null,
       });
 
       // The runner builds the environment, not the provider: a provider that
@@ -217,7 +241,14 @@ export function createRunner({ store, tools, providers, workdir, origin, bridgeP
       const env = { ...base, ...(spec.env ?? {}) };
       delete env.MARBLE_DRIVE_SECRET;
 
-      const child = spawn(spec.command, spec.args, { cwd: workspace, env, stdio: ['pipe', 'pipe', 'pipe'] });
+      // A full agent's own tools are confined to its working directory, so the
+      // working directory is the boundary: the drive for a full turn, the empty
+      // workspace for every other. The seam below is where an OS sandbox goes
+      // when one is written (spec §10.1); until then it is null and this is a
+      // plain spawn.
+      const cwd = spec.cwd ?? workspace;
+      const launch = sandbox ? sandbox({ command: spec.command, args: spec.args, cwd }) : spec;
+      const child = spawn(launch.command, launch.args, { cwd, env, stdio: ['pipe', 'pipe', 'pipe'] });
       turn.child = child;
       child.stdin.on('error', () => {});
       child.stdin.end(spec.stdin ?? '');
@@ -344,7 +375,12 @@ export function createRunner({ store, tools, providers, workdir, origin, bridgeP
     try {
       try {
         await turn.undoSaved;
-        if (turn.undo.length) await store.saveUndo(turn.id, turn.undo);
+        if (turn.undo.length || turn.touched.size) {
+          await store.saveUndo(turn.id, {
+            steps: [...turn.undo],
+            restores: [...turn.touched].map(([docPath, sha]) => ({ path: docPath, sha })),
+          });
+        }
         await store.updateConversation(turn.conversationId, {
           ...(lostSession ? { providerSession: null } : {}),
           running: false,
@@ -426,6 +462,31 @@ export function createRunner({ store, tools, providers, workdir, origin, bridgeP
         turn.watchdog = true;
         turn.onEvent({ type: 'watchdog', path: docPath, sha });
       }
+    },
+
+    /** A document changed on disk without this host writing it.
+     *
+     *  A `full` turn has its own file tools, so while one is running this is
+     *  almost always that turn: it is recorded as the turn's work, with the
+     *  restore point just taken, rather than flagged. A `documents` turn writes
+     *  only through ops, so a change under it is what the watchdog was written
+     *  for and is left to it. Answers whether a turn took this one.
+     *
+     *  The cost, accepted in spec §6: your own edit during a full turn is filed
+     *  under that turn. You do not lose it — it is in the turn's change list
+     *  with its restore point — but the turn gets the credit. Flagging every
+     *  full turn instead would make the flag noise. */
+    documentTouched(docPath, sha) {
+      let claimed = false;
+      for (const turn of runningTurns()) {
+        if (turn.capability !== 'full') continue;
+        if (!turn.touched.has(docPath)) {
+          turn.touched.set(docPath, turn.origins.get(docPath) ?? sha);
+        }
+        turn.onEvent({ type: 'document.changed', path: docPath, sha: turn.touched.get(docPath) });
+        claimed = true;
+      }
+      return claimed;
     },
 
     running: runningTurns,

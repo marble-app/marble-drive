@@ -15,8 +15,9 @@
 import { json, readJson } from '../http.js';
 import { parsePath } from '../paths.js';
 import { sameOrigin } from '../sessions.js';
+import { driveWhere, pickCursorPickerModels, sortProviders } from './catalog.js';
 import { summarize } from './store.js';
-import { undoTurn } from './undo.js';
+import { normalizeUndo, undoTurn } from './undo.js';
 
 const LOOPBACK = new Set(['127.0.0.1', '::1', '::ffff:127.0.0.1']);
 const LOCAL_NAMES = new Set(['localhost', '127.0.0.1', '[::1]']);
@@ -40,7 +41,32 @@ const CONVERSATION = /^\/agent\/conversations\/([0-9a-f]{12})(\/turns)?$/;
 const TURN = /^\/agent\/turns\/([0-9a-f]{12}-t\d+)(\/cancel|\/undo)?$/;
 const TOOL = /^\/agent\/tools\/([a-z_]+)$/;
 
-export function createAgentRoutes({ store, runner, tools, hub, providers, writeOps, maxBody, gated = false, keys = null, skills = [] }) {
+const publicWindow = (window) => ({
+  id: String(window?.id ?? ''),
+  label: String(window?.label ?? ''),
+  used: Number(window?.used) || 0,
+  left: Number(window?.left) || 0,
+  resetsAt: window?.resetsAt ?? null,
+  kind: window?.kind === 'share' ? 'share' : 'quota',
+});
+
+const publicMeter = (meter) => {
+  const out = {
+    id: String(meter?.id ?? ''),
+    label: String(meter?.label ?? ''),
+    used: Number(meter?.used) || 0,
+    left: Number(meter?.left) || 0,
+    window: meter?.window == null ? '' : String(meter.window),
+    resetsAt: meter?.resetsAt ?? null,
+    detail: String(meter?.detail ?? ''),
+  };
+  if (Array.isArray(meter?.windows) && meter.windows.length) {
+    out.windows = meter.windows.map(publicWindow).filter((item) => item.id);
+  }
+  return out;
+};
+
+export function createAgentRoutes({ store, runner, tools, hub, providers, writeOps, restore, maxBody, gated = false, keys = null, skills = [], usage = null, root = null }) {
   let detected = null;
   // Turns being undone right now. The undoneAt check alone lets two requests
   // that arrive together both pass it before either has written.
@@ -59,15 +85,18 @@ export function createAgentRoutes({ store, runner, tools, hub, providers, writeO
           setTimeout(() => resolve({ installed: false, signedIn: false, detail: 'detection timed out' }), DETECT_TIMEOUT).unref?.(),
         );
         const found = await Promise.race([provider.detect().catch((err) => ({ installed: false, signedIn: false, detail: err.message })), timeout]);
-        const models = typeof provider.listModels === 'function'
+        const listed = typeof provider.listModels === 'function'
           ? await provider.listModels().catch(() => [])
           : Array.isArray(provider.models) ? provider.models : [];
+        let models = typeof provider.groupModels === 'function' ? provider.groupModels(listed) : listed;
+        if (provider.id === 'cursor') models = pickCursorPickerModels(models);
         const efforts = Array.isArray(provider.efforts) ? provider.efforts : [];
-        return { id: provider.id, label: provider.label, defaultModel: provider.defaultModel ?? null, models, efforts, ...found };
+        const modes = Array.isArray(provider.modes) ? provider.modes : [];
+        return { id: provider.id, label: provider.label, defaultModel: provider.defaultModel ?? null, models, efforts, modes, ...found };
       }),
     );
-    detected = { at: Date.now(), list };
-    return list;
+    detected = { at: Date.now(), list: sortProviders(list) };
+    return detected.list;
   }
 
   async function handleTools(req, res, url) {
@@ -144,6 +173,26 @@ export function createAgentRoutes({ store, runner, tools, hub, providers, writeO
       return json(res, 200, list.map(({ id, name, description }) => ({ id, name: name ?? id, description: description ?? '' })));
     }
 
+    if (route === '/agent/workspace' && method === 'GET') {
+      if (!root) return json(res, 200, { path: '', branch: null });
+      try {
+        return json(res, 200, await driveWhere(root));
+      } catch {
+        return json(res, 200, { path: String(root), branch: null });
+      }
+    }
+
+    if (route === '/agent/usage' && method === 'GET') {
+      if (typeof usage !== 'function') return json(res, 200, { meters: [] });
+      try {
+        const body = await usage();
+        const meters = Array.isArray(body?.meters) ? body.meters.map(publicMeter).filter((meter) => meter.id) : [];
+        return json(res, 200, { meters });
+      } catch {
+        return json(res, 200, { meters: [] });
+      }
+    }
+
     if (route === '/agent/settings') {
       if (method === 'GET') return json(res, 200, await publicSettings());
       if (method === 'PUT') {
@@ -191,6 +240,7 @@ export function createAgentRoutes({ store, runner, tools, hub, providers, writeO
           provider: body.provider,
           model: body.model ?? models[body.provider] ?? null,
           effort: body.effort ?? efforts?.[body.provider] ?? null,
+          mode: typeof body.mode === 'string' && body.mode.trim() ? body.mode.trim() : null,
           handoffFrom: from?.id ?? null,
         });
         if (from) {
@@ -233,6 +283,15 @@ export function createAgentRoutes({ store, runner, tools, hub, providers, writeO
         if (typeof body.title === 'string' && body.title.trim()) patch.title = body.title.trim().slice(0, 120);
         if (typeof body.model === 'string') patch.model = body.model.trim() || null;
         if (typeof body.effort === 'string') patch.effort = body.effort.trim() || null;
+        if (typeof body.mode === 'string') patch.mode = body.mode.trim() || null;
+        if (typeof body.provider === 'string') {
+          const next = body.provider.trim();
+          if (!providers.has(next)) return json(res, 400, { error: `no provider "${next}"` });
+          if (next !== meta.provider) {
+            patch.provider = next;
+            patch.providerSession = null;
+          }
+        }
         await store.updateConversation(id, patch);
         const next = await store.summary(id);
         hub.publish(id, { type: 'meta' }, next);
@@ -254,9 +313,12 @@ export function createAgentRoutes({ store, runner, tools, hub, providers, writeO
         if (undoing.has(turnId)) return json(res, 409, { error: 'this turn is being undone' });
         undoing.add(turnId);
         try {
+          const saved = normalizeUndo(await store.undoRecords(turnId));
           const result = await undoTurn({
-            records: (await store.undoRecords(turnId)) ?? [],
+            records: saved.steps,
+            restores: saved.restores,
             writeOps,
+            restore,
             client: `agent-undo:${turn.conversationId}`,
           });
           await store.updateTurn(turnId, { undoneAt: Date.now() });

@@ -25,11 +25,11 @@ agent cannot rewrite a document — only file ≤24 ops per call, each keyed to 
 3 MB. It cannot touch a file that is not a `.mrbl`. It cannot run anything, so it
 can never tell whether the code it just wrote works.
 
-**In scope:** the Claude providers, the spawn, the tools, attribution, undo,
+**In scope:** the Claude and Cursor providers, the spawn, the tools, attribution, undo,
 format invariants, instructions, docs and tests.
 
-**Out of scope:** git worktrees per conversation; Cursor and Codex at full
-capability (§9); an OS-level sandbox (§10.1, deferred with reasons).
+**Out of scope:** git worktrees per conversation; Codex (unwritten);
+an OS-level sandbox (§10.1, deferred with reasons).
 
 ## 2. What changes, in one picture
 
@@ -232,13 +232,12 @@ Providers gain a declared capability:
 | `full` | native toolbelt rooted at the drive (§4) |
 | `documents` | the 2026-09-16 boundary: MCP tools only |
 
-`claude-subscription` and `claude-api` ship at `full`. `cursor` stays at
-`documents`: its boundary is a `preToolUse` hook that sees a tool's name but not
-its server, and giving it parity means deleting that hook and relying on
-`cursor-agent`'s own confinement, which has not been verified. Codex is still
-unwritten. The drawer and settings panel say which capability a conversation is
-running at, so "why can Claude do this and Cursor not" is answerable from the
-UI.
+`claude-subscription`, `claude-api` and `cursor` ship at `full`. A provider that
+declares nothing is `full` too, so an adapter added later sees the drive without
+opting in. A provider that cannot offer file tools declares `documents`. Codex
+is still unwritten and will inherit `full` when it lands.
+
+The drawer and settings panel say which capability a conversation is running at.
 
 `MARBLE_DRIVE_AGENT_POWER=documents` forces every provider down to `documents`.
 
@@ -296,7 +295,9 @@ the lock for; survive its turn (the token dies with it).
   turn's change list is explicitly a list of *documents* changed, and the drawer
   labels it that way rather than implying completeness.
 - **A concurrent human edit is attributed to the running turn** (§6).
-- **Cursor stays at `documents`** (§9).
+- **Cursor's file tools are not confined the way Claude's are.** `--add-dir`
+  lets them see the drive; it does not stop them reading a path above it.
+  `MARBLE_DRIVE_AGENT_POWER=documents` is the rollback.
 - **A turn's target still does not follow a move**, and a trashed target is
   still not named as such — inherited from the 2026-09-16 design, unchanged.
 - **Turns get slower and cost more.** A toolbelt invites exploration. `stallMs`

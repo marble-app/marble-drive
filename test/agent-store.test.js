@@ -39,6 +39,16 @@ test('events are numbered in order even when appended at once, and the first mes
   assert.equal((await store.conversation(id)).title, 'Turn the open questions into a sortable research backlog, pl');
 });
 
+test('a user event records the document the conversation is editing', async () => {
+  const { store } = await fresh();
+  const { id } = await store.createConversation({ provider: 'fake' });
+  await store.appendEvent(id, { type: 'user', text: 'hello', context: { target: 'notes/garden' } });
+  assert.equal((await store.conversation(id)).target, 'notes/garden');
+  assert.equal((await store.summary(id)).target, 'notes/garden');
+  await store.appendEvent(id, { type: 'user', text: 'again', context: { target: 'inbox' } });
+  assert.equal((await store.conversation(id)).target, 'inbox');
+});
+
 test('turns are numbered per conversation and updated in place', async () => {
   const { store } = await fresh();
   const { id } = await store.createConversation({ provider: 'fake' });
@@ -99,6 +109,15 @@ test('a conversation keeps the model and effort it was started with', async () =
   const next = await store.conversation(meta.id);
   assert.equal(next.model, 'm2');
   assert.equal(next.effort, 'low');
+});
+
+test('a conversation keeps the CLI mode Shift+Tab picked', async () => {
+  const { store } = await fresh();
+  const meta = await store.createConversation({ provider: 'cursor', model: 'cursor-grok-4.6', effort: 'xhigh', mode: 'plan' });
+  assert.equal((await store.conversation(meta.id)).mode, 'plan');
+  await store.updateConversation(meta.id, { mode: 'ask' });
+  assert.equal((await store.conversation(meta.id)).mode, 'ask');
+  assert.equal((await store.summary(meta.id)).mode, 'ask');
 });
 
 test('settings have defaults and keep what was saved', async () => {

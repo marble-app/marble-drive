@@ -142,14 +142,17 @@
       settings: () => ask('/agent/settings'),
       saveSettings: (patch) => ask('/agent/settings', { method: 'PUT', body: patch }),
       skills: () => ask('/agent/skills'),
+      usage: () => ask('/agent/usage'),
+      workspace: () => ask('/agent/workspace'),
       conversations: ({ archived = false } = {}) => ask(`/agent/conversations${archived ? '?archived=1' : ''}`),
       conversation: (id) => ask(`/agent/conversations/${enc(id)}`),
       update: (id, patch) => ask(`/agent/conversations/${enc(id)}`, { method: 'PATCH', body: patch }),
 
-      async start({ provider, model = null, effort = null, handoffFrom = null } = {}) {
+      async start({ provider, model = null, effort = null, mode = null, handoffFrom = null } = {}) {
         const body = { provider };
         if (model) body.model = model;
         if (effort) body.effort = effort;
+        if (mode) body.mode = mode;
         if (handoffFrom) body.handoffFrom = handoffFrom;
         return (await ask('/agent/conversations', { method: 'POST', body })).id;
       },

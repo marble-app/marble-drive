@@ -49,9 +49,21 @@ const config = loadConfig({
   MARBLE_DRIVE_AGENT_WORKDIR: WORK,
   MARBLE_DRIVE_AGENT_KEYS: KEYS,
 });
+const USAGE = {
+  meters: [{
+    id: 'claude-subscription',
+    label: 'Claude',
+    used: 23,
+    left: 77,
+    window: '5h',
+    resetsAt: '2026-09-17T22:30:00Z',
+    detail: '5h 23% used · week 41% used',
+  }],
+};
 const drive = await createDrive(config, {
   log: quiet,
   agentProviders: new Map([['fake', createFakeProvider({ scripts: SCRIPTS })]]),
+  usage: async () => USAGE,
 });
 await drive.createDocument('garden', SOURCE);
 await drive.createDocument('watched', SOURCE);
@@ -128,7 +140,33 @@ let edited = null;
 test('providers are listed, with the default marked', async () => {
   const { status, body } = await api('GET', '/agent/providers');
   assert.equal(status, 200);
-  assert.deepEqual(body, [{ id: 'fake', label: 'Fake', defaultModel: null, models: [{ id: 'fake', label: 'Fake' }, { id: 'alt', label: 'Alt' }], efforts: ['low', 'high'], installed: true, signedIn: true, detail: 'scripted', default: true }]);
+  assert.deepEqual(body, [{
+    id: 'fake',
+    label: 'Fake',
+    defaultModel: null,
+    models: [{ id: 'fake', label: 'Fake' }, { id: 'alt', label: 'Alt' }],
+    efforts: ['low', 'high'],
+    modes: [{ id: 'default', label: 'Default' }, { id: 'plan', label: 'Plan' }],
+    installed: true,
+    signedIn: true,
+    detail: 'scripted',
+    default: true,
+  }]);
+});
+
+test('the workspace where-line is the drive path and git branch', async () => {
+  const { status, body } = await api('GET', '/agent/workspace');
+  assert.equal(status, 200);
+  assert.equal(typeof body.path, 'string');
+  assert.ok(body.path.length > 1);
+  assert.ok(body.branch === null || typeof body.branch === 'string');
+});
+
+test('usage is used percent per signed-in agent, never a secret', async () => {
+  const { status, body } = await api('GET', '/agent/usage');
+  assert.equal(status, 200);
+  assert.deepEqual(body, USAGE);
+  assert.equal(JSON.stringify(body).includes('sk-'), false);
 });
 
 test('an agent edits a document through the bridge, and the open tab hears it', async () => {
@@ -198,7 +236,8 @@ test('tools answer only a running turn’s token, and the token dies with the tu
   const held = await start('script:hold');
   const token = await until(() => drive.agents.runner.running()[0]?.token);
   const listed = await api('GET', '/agent/tools', null, { Authorization: `Bearer ${token}` });
-  assert.equal(listed.body.tools.length, 5);
+  assert.equal(listed.body.tools.length, 6);
+  assert.ok(listed.body.tools.some((tool) => tool.name === 'check_document'));
 
   const cancelled = await api('POST', `/agent/turns/${held.turnId}/cancel`);
   assert.deepEqual(cancelled.body, { cancelled: true });
@@ -239,6 +278,31 @@ test('a new conversation can name its effort, and a later patch changes model an
   assert.equal(patched.status, 200);
   assert.equal(patched.body.model, 'm-later');
   assert.equal(patched.body.effort, 'low');
+});
+
+test('a conversation can name and later change its CLI mode', async () => {
+  const created = await api('POST', '/agent/conversations', { provider: 'fake', mode: 'plan' });
+  assert.equal(created.body.mode, 'plan');
+  const patched = await api('PATCH', `/agent/conversations/${created.body.id}`, { mode: 'default' });
+  assert.equal(patched.status, 200);
+  assert.equal(patched.body.mode, 'default');
+});
+
+test('a conversation can change its CLI', async () => {
+  const created = await api('POST', '/agent/conversations', { provider: 'fake', model: 'm-start' });
+  const patched = await api('PATCH', `/agent/conversations/${created.body.id}`, { provider: 'fake', model: 'alt' });
+  assert.equal(patched.status, 200);
+  assert.equal(patched.body.provider, 'fake');
+  assert.equal(patched.body.model, 'alt');
+  const nope = await api('PATCH', `/agent/conversations/${created.body.id}`, { provider: 'nope' });
+  assert.equal(nope.status, 400);
+});
+
+test('a conversation title can be renamed', async () => {
+  const created = await api('POST', '/agent/conversations', { provider: 'fake' });
+  const patched = await api('PATCH', `/agent/conversations/${created.body.id}`, { title: '  Backlog pass  ' });
+  assert.equal(patched.status, 200);
+  assert.equal(patched.body.title, 'Backlog pass');
 });
 
 test('skills are listed without their bodies', async () => {
@@ -306,7 +370,7 @@ test('a host with agents off answers 404 to all of it', async () => {
 
 test('a document changed outside Marble during a turn is flagged, with a way back', async () => {
   const running = await start('script:wait', 'watched');
-  await until(() => drive.agents.runner.running().length === 1);
+  await until(() => drive.agents.runner.running().some((turn) => turn.id === running.turnId));
 
   const file = path.join(ROOT, 'watched.mrbl');
   const before = await fsp.readFile(file, 'utf8');
