@@ -146,7 +146,6 @@
         font-weight: 600;
       }
 
-      .marble-fork button:active { transform: scale(0.97); }
       .marble-fork button:focus-visible {
         outline: 2px solid var(--accent, #9bb6cf);
         outline-offset: 2px;
@@ -305,7 +304,6 @@
         html.marble-collab-host marble-alt.marble-forked > [data-marble-alt],
         .marble-fork-seg button,
         .marble-fork-acts button { transition: none; }
-        .marble-fork button:active { transform: none; }
       }
       @media (prefers-reduced-transparency: reduce) {
         .marble-fork-seg { background: var(--paper-2, #f3f1ea); }
