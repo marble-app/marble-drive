@@ -2556,15 +2556,21 @@ __ICON__
       const dragIds = focusDrag?.ids ?? [];
       const drop = (list, index) => index - list.slice(0, index).filter((row) => dragIds.includes(row.id)).length;
 
+      // A stage holding nothing but the cards in the air is an empty stage: a
+      // pinned card reads full width, so while it is being dragged off it
+      // covers the very columns it could be dropped on, and a zone test that
+      // counted it would answer "stage" everywhere.
+      const stageStays = pack.stage.cols.filter((row) => !dragIds.includes(row.id));
+
       // With nothing pinned there is no stage column to aim at, so the left
       // edge of the canvas is one. It overlays rather than reserves: a column
       // that appears the moment you lift a card would shove the whole field
       // 300px sideways, and a gesture that moves the target is not a gesture.
-      if (!pack.stage.cols.length && point.x - focusEl.scrollLeft < FOCUS_RAIL) {
+      if (!stageStays.length && point.x - focusEl.scrollLeft < FOCUS_RAIL) {
         return { column: 'stage', index: 0, key: 'stage:0' };
       }
       const zones = [];
-      if (pack.stage.w > 0) zones.push({ kind: 'stage', x: pack.stage.x, w: pack.stage.w });
+      if (pack.stage.w > 0 && stageStays.length) zones.push({ kind: 'stage', x: pack.stage.x, w: pack.stage.w });
       for (const region of pack.regions) zones.push({ kind: 'folder', region, x: region.x, w: region.w });
       if (pack.newGroup) zones.push({ kind: 'new', x: pack.newGroup.x, w: pack.newGroup.w });
       if (!zones.length) return null;
@@ -5199,16 +5205,34 @@ __ICON__
       window.marble.op({ type: 'setAttr', id, name: 'style', value: style || null });
     };
 
-    const drag = (handle, begin) => {
+    // Two presses close together are the reset. It is read here rather than
+    // from a `dblclick` because the `preventDefault` below — which stops the
+    // text selection a drag would otherwise smear across the page — also stops
+    // the compat mouse events a dblclick is assembled from, so that event
+    // never arrives on a seam.
+    const DOUBLE_MS = 400;
+
+    const drag = (handle, begin, reset) => {
+      // -Infinity, not 0: `timeStamp` counts from the page load, so a first
+      // press in the opening moments would otherwise read as a second one.
+      let last = -Infinity;
       handle.addEventListener('pointerdown', (event) => {
         if (event.button !== 0) return;
         event.preventDefault();
         handle.focus({ preventScroll: true });
+        const quick = event.timeStamp - last < DOUBLE_MS;
+        last = event.timeStamp;
+        if (quick && reset) {
+          last = -Infinity;  // a third press starts a fresh pair, not another reset
+          reset();
+          return;
+        }
         const gesture = begin();
+        let moved = false;
         handle.setPointerCapture?.(event.pointerId);
         handle.setAttribute('data-dragging', '');
         document.documentElement.classList.add('marble-resizing');
-        const move = (e) => gesture.to(e.clientX);
+        const move = (e) => { moved = true; gesture.to(e.clientX); };
         const up = (e) => {
           handle.releasePointerCapture?.(e.pointerId);
           handle.removeEventListener('pointermove', move);
@@ -5216,12 +5240,14 @@ __ICON__
           handle.removeEventListener('pointercancel', up);
           handle.removeAttribute('data-dragging');
           document.documentElement.classList.remove('marble-resizing');
-          gesture.done();
+          // A press that never moved is not a resize. Writing the width here
+          // would snap the seam to wherever the pointer sat and file that as
+          // an edit — including on the first press of a reset.
+          if (moved) gesture.done();
         };
         handle.addEventListener('pointermove', move);
         handle.addEventListener('pointerup', up);
         handle.addEventListener('pointercancel', up);
-        gesture.to(event.clientX);
       });
     };
 
@@ -5264,12 +5290,12 @@ __ICON__
         paint(body, spec.prop, Math.round(clamp(px, spec.min(), spec.max())) + 'px');
         say();
       };
-      drag(handle, () => ({ to: (clientX) => put(spec.at(clientX)), done: () => file(body) }));
-      handle.addEventListener('dblclick', () => {
+      const reset = () => {
         paint(body, spec.prop, null);
         file(body);
         say();
-      });
+      };
+      drag(handle, () => ({ to: (clientX) => put(spec.at(clientX)), done: () => file(body) }), reset);
       handle.addEventListener('focus', say);
       handle.addEventListener('keydown', (event) => {
         const step = (event.shiftKey ? BIG_NUDGE : NUDGE) * (spec.sign ?? 1);
@@ -5352,8 +5378,7 @@ __ICON__
           to: (clientX) => share(clientX - a.left - gap / 2, usable),
           done: () => file(board),
         };
-      });
-      handle.addEventListener('dblclick', () => { reset(); file(board); });
+      }, () => { reset(); file(board); });
       handle.addEventListener('focus', say);
       handle.addEventListener('keydown', (event) => {
         const a = left.getBoundingClientRect();

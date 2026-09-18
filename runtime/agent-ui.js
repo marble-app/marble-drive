@@ -1128,6 +1128,7 @@
       opacity: 0;
     }
     .statusline { display: flex; flex-direction: column; gap: 1px; padding: 2px 2px 4px; }
+    .statusline[hidden] { display: none; }
     .status-main { display: flex; align-items: baseline; gap: 10px; min-width: 0; }
     .status-who { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--ink); font-weight: 500; font-size: 12.5px; letter-spacing: -.01em; }
     .status-mode { flex: none; font: inherit; font-size: 12.5px; font-weight: 500; color: var(--accent-ink); background: none; border: 0; padding: 0; cursor: pointer; }
@@ -1415,6 +1416,7 @@
       this.projectBox = root.querySelector('[data-seg="project"]');
       this.projectLabel = root.querySelector('.picker-project');
       this.also = root.querySelector('.also');
+      this.modelLabel = root.querySelector('.picker-models');
       this.modelBox = root.querySelector('[data-seg="model"]');
       this.effortLabel = root.querySelector('.picker-effort');
       this.effortBox = root.querySelector('[data-seg="effort"]');
@@ -1688,9 +1690,6 @@
     }
 
     async showPicker(token) {
-      this.setup.hidden = false;
-      this.picker.hidden = false;
-      this.agentLabel.hidden = false;
       let providers = [];
       try {
         providers = await this.api.providers();
@@ -1709,6 +1708,13 @@
       this.mode = this.currentProvider()?.modes?.[0]?.id ?? '';
       await this.syncCatalog();
       this.paintPresets({ initial: true });
+      // Only now: an agent, a project, a model and an effort to choose between.
+      // Revealing the row before this point showed empty pills and a blank
+      // status line, and fitPicker measured a row that had nothing in it yet.
+      this.setup.hidden = false;
+      this.picker.hidden = false;
+      this.agentLabel.hidden = false;
+      this.fitSetup();
       await this.loadChrome();
       if (this.loading !== token) return;
       const current = radioValue(this.shadowRoot, 'agent');
@@ -1866,6 +1872,7 @@
         modelValue = split.family;
       }
       const lockClaude = this.claudeUnavailable() && String(id ?? '').startsWith('claude');
+      this.modelLabel.hidden = !models.length;
       fillRadios(this.modelBox, 'model', models, {
         empty: String(id ?? '').startsWith('claude') ? null : 'Default',
         value: modelValue,
