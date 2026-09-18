@@ -1,9 +1,10 @@
 // Drive's collaboration chrome. Transient, injected like the agent drawer.
 //
 // The package decides what landed: ops, a fork, a presence set. This file is
-// the look — outlines on the component that is being written, a flash on a
-// disjoint apply, and the three verbs on a <marble-alt>. Another host using
-// @bdhmin/marble draws something else against the same events.
+// the look — a quiet outline while someone writes, a wash on a disjoint apply,
+// and Keep / Merge on a conflict <marble-alt>. Authoring alts (natures, drafts,
+// titles) keep the document's own switcher. Another host using @bdhmin/marble
+// draws something else against the same events.
 
 (() => {
   const TRANSIENT = 'data-marble-transient';
@@ -11,6 +12,7 @@
   const ALT = 'data-marble-alt';
   const ACTIVE = 'data-marble-active';
   const BY = 'data-marble-by';
+  const EASE = 'var(--settle, cubic-bezier(.22, 1, .36, 1))';
 
   const attach = (marble) => {
     if (document.documentElement.classList.contains('marble-collab-host')) return;
@@ -20,45 +22,155 @@
     const style = document.createElement('style');
     style.setAttribute(TRANSIENT, '');
     style.textContent = `
-      html.marble-collab-host .marble-alts { display: none; }
-      html.marble-collab-host marble-alt > [data-marble-alt] { display: none; }
-      html.marble-collab-host marble-alt > .marble-alt-shown { display: block; }
-      .marble-presence {
-        outline: 2px solid var(--accent, #9bb6cf);
-        outline-offset: 3px;
+      html.marble-collab-host marble-alt.marble-forked .marble-alts { display: none; }
+
+      html.marble-collab-host marble-alt.marble-forked {
+        display: grid;
+        grid-template-columns: minmax(0, 1fr);
       }
+      html.marble-collab-host marble-alt.marble-forked > [data-marble-alt] {
+        grid-area: 1 / 1;
+        opacity: 0;
+        visibility: hidden;
+        pointer-events: none;
+      }
+      html.marble-collab-host marble-alt.marble-forked.marble-fork-live > [data-marble-alt] {
+        transition: opacity 180ms ${EASE}, visibility 180ms ${EASE};
+      }
+      html.marble-collab-host marble-alt.marble-forked > .marble-alt-shown {
+        opacity: 1;
+        visibility: visible;
+        pointer-events: auto;
+      }
+      html.marble-collab-host marble-alt.marble-forked > .marble-fork {
+        grid-area: 2 / 1;
+      }
+
+      .marble-presence,
+      .marble-presence-out {
+        border-radius: 4px;
+        transition: background-color 220ms ${EASE};
+      }
+      .marble-presence {
+        background-color: color-mix(in srgb, var(--accent, #9bb6cf) 22%, transparent);
+      }
+      .marble-presence-out {
+        background-color: transparent;
+      }
+
       .marble-flash {
-        animation: marble-flash .9s var(--settle, ease) 1;
+        animation: marble-flash 480ms ${EASE} 1;
       }
       @keyframes marble-flash {
-        from { box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent, #9bb6cf) 55%, transparent); }
-        to { box-shadow: 0 0 0 0 transparent; }
+        0% { box-shadow: 0 0 0 0 transparent; }
+        18% { box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent, #9bb6cf) 42%, transparent); }
+        100% { box-shadow: 0 0 0 0 transparent; }
       }
-      @media (prefers-reduced-motion: reduce) {
-        .marble-flash { animation: none; }
-      }
+
       .marble-fork {
-        display: flex; flex-wrap: wrap; gap: .35rem; align-items: center;
+        display: flex;
+        flex-wrap: wrap;
+        align-items: center;
+        gap: .5rem .85rem;
         margin-top: .55rem;
-        font: 500 12px/1 var(--ui-font, system-ui, sans-serif);
+        font: 500 12px/1.2 var(--ui-font, system-ui, sans-serif);
+        letter-spacing: -.01em;
+        animation: marble-fade-in 200ms ${EASE} both;
       }
-      .marble-fork button {
-        appearance: none; border: 1px solid var(--line, #ddd9cf);
-        background: var(--paper, #fafaf7); color: var(--ink, #111);
-        padding: .32rem .7rem; border-radius: 999px; cursor: pointer;
+      @keyframes marble-fade-in {
+        from { opacity: 0; }
+        to { opacity: 1; }
+      }
+      .marble-fork.marble-fork-out {
+        animation: marble-fade-out 160ms ${EASE} both;
+      }
+      @keyframes marble-fade-out {
+        from { opacity: 1; }
+        to { opacity: 0; }
+      }
+
+      .marble-fork-seg {
+        display: inline-flex;
+        padding: 2px;
+        gap: 0;
+        border-radius: 999px;
+        background: color-mix(in srgb, var(--ink, #111) 7%, transparent);
+      }
+      .marble-fork-seg button {
+        appearance: none;
+        border: 0;
+        background: none;
+        color: var(--muted, #5a5a5a);
+        padding: .34rem .78rem;
+        border-radius: 999px;
+        cursor: pointer;
         font: inherit;
+        transition:
+          color 180ms ${EASE},
+          background 180ms ${EASE},
+          box-shadow 180ms ${EASE},
+          transform 90ms ${EASE};
       }
-      .marble-fork button:hover { background: var(--paper-2, #f3f1ea); }
+      .marble-fork-seg button:hover { color: var(--ink, #111); }
+      .marble-fork-seg button[aria-pressed="true"] {
+        background: var(--paper, #fff);
+        color: var(--ink, #111);
+        box-shadow: 0 1px 2px color-mix(in srgb, var(--ink, #111) 14%, transparent);
+      }
+
+      .marble-fork-acts {
+        display: inline-flex;
+        align-items: center;
+        gap: .1rem;
+      }
+      .marble-fork-acts button {
+        appearance: none;
+        border: 0;
+        background: none;
+        color: var(--muted, #5a5a5a);
+        padding: .34rem .55rem;
+        border-radius: 7px;
+        cursor: pointer;
+        font: inherit;
+        transition:
+          color 180ms ${EASE},
+          background 180ms ${EASE},
+          transform 90ms ${EASE};
+      }
+      .marble-fork-acts button:hover {
+        color: var(--ink, #111);
+        background: color-mix(in srgb, var(--ink, #111) 6%, transparent);
+      }
+      .marble-fork-acts .marble-fork-keep {
+        color: var(--ink, #111);
+        font-weight: 600;
+      }
+
+      .marble-fork button:active { transform: scale(0.97); }
       .marble-fork button:focus-visible {
-        outline: 2px solid var(--accent, #9bb6cf); outline-offset: 2px;
+        outline: 2px solid var(--accent, #9bb6cf);
+        outline-offset: 2px;
       }
-      .marble-fork button[aria-pressed="true"] {
-        background: var(--ink, #111); color: var(--paper, #fafaf7); border-color: var(--ink, #111);
+
+      @media (prefers-reduced-motion: reduce) {
+        .marble-flash,
+        .marble-fork,
+        .marble-fork.marble-fork-out { animation: none; }
+        .marble-presence,
+        .marble-presence-out,
+        html.marble-collab-host marble-alt.marble-forked > [data-marble-alt],
+        .marble-fork-seg button,
+        .marble-fork-acts button { transition: none; }
+        .marble-fork button:active { transform: none; }
       }
-      .marble-fork button.marble-fork-reject { color: var(--danger, #b4533e); }
+      @media (prefers-reduced-transparency: reduce) {
+        .marble-fork-seg { background: var(--paper-2, #f3f1ea); }
+        .marble-presence { background-color: color-mix(in srgb, var(--accent, #9bb6cf) 28%, transparent); }
+      }
     `;
     document.head.append(style);
 
+    const reducedMotion = () => matchMedia('(prefers-reduced-motion: reduce)').matches;
     const byId = (id) => marble.byId(id);
     const persistentChildren = (el) => [...el.children].filter((c) => !c.hasAttribute(TRANSIENT));
     const nextPersistent = (el) => {
@@ -66,6 +178,15 @@
       while (sibling && sibling.hasAttribute(TRANSIENT)) sibling = sibling.nextElementSibling;
       return sibling;
     };
+    const altsIn = (root) => [
+      ...(root.matches?.('marble-alt') ? [root] : []),
+      ...root.querySelectorAll?.('marble-alt') ?? [],
+    ];
+
+    const isConflict = (alt) => persistentChildren(alt).some((el) => {
+      const by = el.getAttribute(BY) ?? '';
+      return by === 'person' || by.startsWith('agent');
+    });
 
     const labelOf = (version) => {
       const by = version.getAttribute(BY) ?? '';
@@ -77,16 +198,17 @@
     };
 
     function deriveAlts(root = document) {
-      const alts = [
-        ...(root.matches?.('marble-alt') ? [root] : []),
-        ...root.querySelectorAll?.('marble-alt') ?? [],
-      ];
-      for (const alt of alts) {
+      for (const alt of altsIn(root)) {
         const versions = persistentChildren(alt);
         const active = alt.getAttribute(ACTIVE);
         const current = versions.find((el) => el.getAttribute(ALT) === active) ?? versions[0];
+        const conflict = alt.classList.contains('marble-forked');
         for (const version of versions) {
-          version.classList.toggle('marble-alt-shown', version === current);
+          const shown = version === current;
+          version.classList.toggle('marble-alt-shown', shown);
+          if (!conflict) continue;
+          version.toggleAttribute('inert', !shown);
+          version.setAttribute('aria-hidden', String(!shown));
         }
       }
     }
@@ -95,16 +217,36 @@
     function flash(id) {
       const el = byId(id);
       if (!el) return;
+      el.classList.remove('marble-flash');
+      void el.offsetWidth;
       el.classList.add('marble-flash');
       clearTimeout(flashes.get(el));
-      flashes.set(el, setTimeout(() => el.classList.remove('marble-flash'), 900));
+      flashes.set(el, setTimeout(() => el.classList.remove('marble-flash'), 480));
     }
 
     const presence = new Map();
+    const presenceOut = new WeakMap();
     function paintPresence() {
-      for (const el of document.querySelectorAll('.marble-presence')) el.classList.remove('marble-presence');
+      const wanted = new Set();
       for (const { ids } of presence.values()) {
-        for (const id of ids) byId(id)?.classList.add('marble-presence');
+        for (const id of ids) if (id) wanted.add(id);
+      }
+
+      for (const el of document.querySelectorAll('.marble-presence, .marble-presence-out')) {
+        const id = marble.id(el);
+        if (wanted.has(id)) continue;
+        el.classList.remove('marble-presence');
+        el.classList.add('marble-presence-out');
+        clearTimeout(presenceOut.get(el));
+        presenceOut.set(el, setTimeout(() => el.classList.remove('marble-presence-out'), 240));
+      }
+
+      for (const id of wanted) {
+        const el = byId(id);
+        if (!el) continue;
+        clearTimeout(presenceOut.get(el));
+        el.classList.remove('marble-presence-out');
+        el.classList.add('marble-presence');
       }
     }
 
@@ -178,10 +320,17 @@
         ops.push({ type: 'setAttr', id, name: ACTIVE, value: keepName });
       }
       for (const node of doomed) ops.push({ type: 'remove', id: marble.id(node) });
-      play(ops).then(() => {
+      const commit = () => play(ops).then(() => {
         if (persistentChildren(alt).length <= 1) unwrapAlt(alt);
         else deriveAlts(alt);
       });
+      const bar = alt.querySelector(':scope > .marble-fork');
+      if (bar && !reducedMotion()) {
+        bar.classList.add('marble-fork-out');
+        setTimeout(commit, 160);
+      } else {
+        commit();
+      }
     }
 
     function askMerge(alt) {
@@ -202,19 +351,34 @@
     }
 
     function wireFork(alt) {
-      if (!alt || alt.tagName !== 'MARBLE-ALT' || alt.querySelector(':scope > .marble-fork')) return;
+      if (!alt || alt.tagName !== 'MARBLE-ALT' || !isConflict(alt)) return;
       const versions = persistentChildren(alt);
       if (versions.length < 2) return;
+      alt.classList.add('marble-forked');
+      deriveAlts(alt);
+      requestAnimationFrame(() => {
+        requestAnimationFrame(() => alt.classList.add('marble-fork-live'));
+      });
+      if (alt.querySelector(':scope > .marble-fork')) return;
 
       const bar = document.createElement('div');
       bar.className = 'marble-fork';
       bar.setAttribute(TRANSIENT, '');
       bar.setAttribute('contenteditable', 'false');
 
+      const seg = document.createElement('div');
+      seg.className = 'marble-fork-seg';
+      seg.setAttribute('role', 'group');
+      seg.setAttribute('aria-label', 'Version');
+
+      const acts = document.createElement('div');
+      acts.className = 'marble-fork-acts';
+
       const render = () => {
         const kids = persistentChildren(alt);
         const active = alt.getAttribute(ACTIVE);
-        bar.replaceChildren();
+        seg.replaceChildren();
+        acts.replaceChildren();
         for (const version of kids) {
           const name = version.getAttribute(ALT);
           const button = document.createElement('button');
@@ -232,30 +396,25 @@
             deriveAlts(alt);
             render();
           });
-          bar.append(button);
+          seg.append(button);
         }
-        const approve = document.createElement('button');
-        approve.type = 'button';
-        approve.textContent = 'Approve';
-        approve.addEventListener('click', () => {
-          const agent = kids.find((el) => labelOf(el) === 'Agent') ?? kids[1];
-          resolve(alt, agent?.getAttribute(ALT));
-        });
-        const reject = document.createElement('button');
-        reject.type = 'button';
-        reject.className = 'marble-fork-reject';
-        reject.textContent = 'Reject';
-        reject.addEventListener('click', () => {
-          const yours = kids.find((el) => labelOf(el) === 'You') ?? kids[0];
-          resolve(alt, yours?.getAttribute(ALT));
+        const keep = document.createElement('button');
+        keep.type = 'button';
+        keep.className = 'marble-fork-keep';
+        keep.textContent = 'Keep this';
+        keep.addEventListener('click', () => {
+          resolve(alt, alt.getAttribute(ACTIVE) ?? kids[0]?.getAttribute(ALT));
         });
         const merge = document.createElement('button');
         merge.type = 'button';
-        merge.textContent = 'Ask another agent to merge';
+        merge.textContent = 'Merge';
+        merge.setAttribute('aria-label', 'Ask another agent to merge these versions');
+        merge.title = 'Ask another agent to merge';
         merge.addEventListener('click', () => askMerge(alt));
-        bar.append(approve, reject, merge);
+        acts.append(keep, merge);
       };
 
+      bar.append(seg, acts);
       alt.append(bar);
       render();
       new MutationObserver(render).observe(alt, { attributes: true, attributeFilter: [ACTIVE], childList: true });
@@ -263,11 +422,7 @@
 
     marble.register((root) => {
       deriveAlts(root);
-      const alts = [
-        ...(root.matches?.('marble-alt') ? [root] : []),
-        ...root.querySelectorAll?.('marble-alt') ?? [],
-      ];
-      for (const alt of alts) wireFork(alt);
+      for (const alt of altsIn(root)) wireFork(alt);
     });
   };
 
