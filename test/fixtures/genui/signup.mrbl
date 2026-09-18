@@ -1,0 +1,141 @@
+<!doctype html>
+<html lang="en" data-marble="1">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Sign up</title>
+<style data-marble-id="css">
+:root { --ink: #191d21; --muted: #5a656f; --line: #e4e6e8; --paper: #fbfaf8; --card: #fff; --accent: #1c5cab; --accent-soft: #eaf1fa; }
+* { box-sizing: border-box; }
+body { margin: 0; background: var(--paper); color: var(--ink); font: 15px/1.5 system-ui, sans-serif; padding: 24px; }
+h1 { font: 600 24px/1.2 ui-serif, Georgia, serif; margin: 0 0 4px; }
+.lede { color: var(--muted); margin: 0 0 18px; }
+h2, h3, p { margin: 0; }
+label { display: block; font-size: 13px; color: var(--muted); }
+input { font: inherit; color: inherit; background: var(--card); border: 1px solid var(--line); border-radius: 6px; padding: 8px 10px; width: 100%; }
+.field { display: grid; gap: 4px; margin-bottom: 12px; position: relative; }
+button { font: inherit; }
+
+/* ---- wizard#signup ---- */
+#signup { max-width: 640px; display: grid; gap: 18px; position: relative; }
+#signup[data-progress="none"] .steps { display: none; }
+#signup[data-progress="stepper-with-titles"] .steps { display: block; }
+#signup[data-progress="stepper-with-titles"] .bar { display: none; }
+#signup[data-progress="percentage-bar"] .steps ol { display: none; }
+#signup[data-progress="percentage-bar"] .bar { display: block; }
+.bar { display: none; height: 6px; background: var(--line); border-radius: 3px; overflow: hidden; }
+.bar i { display: block; width: 25%; height: 100%; background: var(--accent); }
+
+#signup[data-density="one-thing-per-page"] .step + .step { display: none; }
+#signup[data-density="grouped-questions"] .step + .step { display: block; }
+
+#signup[data-presentation="full-page"] { margin: 0; }
+#signup[data-presentation="modal"] { position: fixed; inset: 8% 15%; z-index: 10; background: var(--card); padding: 24px; border-radius: 10px; box-shadow: 0 20px 60px rgba(0,0,0,.25); overflow: auto; }
+#signup[data-presentation="modal"]::before { content: ""; position: fixed; inset: 0; background: rgba(0,0,0,.35); z-index: -1; }
+#signup[data-presentation="inline-accordion"] .step + .step { display: block; }
+#signup[data-presentation="inline-accordion"] .step + .step .field { display: none; }
+#signup[data-presentation="inline-accordion"] .step + .step h3 { color: var(--muted); }
+
+#signup[data-review="no-review"] .review { display: none; }
+#signup[data-review="summary-page-with-change-links"] .review { display: block; }
+
+#signup[data-labels="top-aligned"] .field { grid-template-columns: 1fr; }
+#signup[data-labels="left-aligned"] .field { grid-template-columns: 140px 1fr; align-items: center; }
+#signup[data-labels="floating-label"] .field label { position: absolute; left: 10px; top: -7px; background: var(--card); padding: 0 4px; font-size: 11px; }
+#signup[data-labels="floating-label"] .field input { padding-top: 12px; }
+
+/* ---- stepper#steps ---- */
+.steps ol { list-style: none; margin: 0; padding: 0; display: flex; gap: 12px; }
+.steps li { display: flex; gap: 6px; align-items: baseline; color: var(--muted); font-size: 13px; }
+.steps li.current { color: var(--accent); font-weight: 600; }
+.steps .n { font: 600 11px/1 ui-monospace, monospace; border: 1px solid currentColor; border-radius: 999px; padding: 3px 6px; }
+.steps .entered { display: none; font-size: 12px; color: var(--muted); }
+.steps[data-form="horizontal"] ol { flex-direction: row; }
+.steps[data-form="vertical-with-content"] ol { flex-direction: column; gap: 6px; }
+.steps[data-form="compact-count"] ol li:not(.current) { display: none; }
+.steps[data-form="compact-count"] ol li.current .t::after { content: " of 4"; font-weight: 400; color: var(--muted); }
+.steps[data-labels="numbers-only"] .t { display: none; }
+.steps[data-labels="titles"] .t { display: inline; }
+.steps[data-labels="titles-with-entered-values"] .entered { display: inline; }
+.steps[data-labels="titles-with-entered-values"] .t { display: inline; }
+
+.step { background: var(--card); border: 1px solid var(--line); border-radius: 8px; padding: 16px 18px; }
+.step h3 { font-size: 16px; margin-bottom: 10px; }
+.actions { display: flex; gap: 8px; justify-content: flex-end; }
+.actions button { padding: 8px 14px; border-radius: 6px; border: 1px solid var(--line); background: var(--card); }
+.actions button.primary { background: var(--accent); color: #fff; border-color: var(--accent); }
+.review { background: var(--accent-soft); border: 1px solid var(--accent); border-radius: 8px; padding: 14px 16px; }
+.review dl { display: grid; grid-template-columns: 120px 1fr auto; gap: 4px 10px; font-size: 14px; }
+.review dt { color: var(--muted); }
+.review dd { margin: 0; }
+.review a { color: var(--accent); font-size: 13px; }
+@media (max-width: 720px) { #signup[data-presentation="modal"] { inset: 4%; } }
+</style>
+</head>
+<body data-marble-id="body" data-genui-request="A sign-up flow for a team workspace: account, workspace name, invite teammates, plan.">
+<h1 data-marble-id="h1">Create your workspace</h1>
+<p class="lede" data-marble-id="lede">Four short steps.</p>
+
+<section id="signup" data-marble-id="signup"
+  data-genui="wizard#signup"
+  data-genui-about="Four steps: account, workspace, teammates, plan; no branching"
+  data-progress="stepper-with-titles"
+  data-genui-progress="none | stepper-with-titles | percentage-bar"
+  data-density="one-thing-per-page"
+  data-genui-density="one-thing-per-page | grouped-questions"
+  data-presentation="full-page"
+  data-genui-presentation="full-page | modal | inline-accordion"
+  data-review="summary-page-with-change-links"
+  data-genui-review="no-review | summary-page-with-change-links"
+  data-labels="top-aligned"
+  data-genui-labels="top-aligned | left-aligned | floating-label">
+
+  <nav class="steps" data-marble-id="steps" data-genui="stepper#steps"
+    data-genui-about="The four step names with the current one marked"
+    data-form="horizontal" data-genui-form="horizontal | vertical-with-content | compact-count"
+    data-labels="titles" data-genui-labels="numbers-only | titles | titles-with-entered-values">
+    <div class="bar" data-marble-id="bar"><i data-marble-id="bar-fill"></i></div>
+    <ol data-marble-id="steps-list">
+      <li class="current" data-marble-id="s1"><span class="n" data-marble-id="s1n">1</span><span class="t" data-marble-id="s1t">Account</span><span class="entered" data-marble-id="s1e">—</span></li>
+      <li data-marble-id="s2"><span class="n" data-marble-id="s2n">2</span><span class="t" data-marble-id="s2t">Workspace</span><span class="entered" data-marble-id="s2e">—</span></li>
+      <li data-marble-id="s3"><span class="n" data-marble-id="s3n">3</span><span class="t" data-marble-id="s3t">Teammates</span><span class="entered" data-marble-id="s3e">—</span></li>
+      <li data-marble-id="s4"><span class="n" data-marble-id="s4n">4</span><span class="t" data-marble-id="s4t">Plan</span><span class="entered" data-marble-id="s4e">—</span></li>
+    </ol>
+  </nav>
+
+  <form class="step" data-marble-id="step-1">
+    <h3 data-marble-id="step-1h">Your account</h3>
+    <div class="field" data-marble-id="f-name"><label for="name" data-marble-id="f-name-l">Full name</label><input id="name" data-marble-id="f-name-i" type="text" autocomplete="name"></div>
+    <div class="field" data-marble-id="f-email"><label for="email" data-marble-id="f-email-l">Work email</label><input id="email" data-marble-id="f-email-i" type="email" autocomplete="email"></div>
+    <div class="field" data-marble-id="f-pass"><label for="pass" data-marble-id="f-pass-l">Password</label><input id="pass" data-marble-id="f-pass-i" type="password" autocomplete="new-password"></div>
+    <div class="actions" data-marble-id="step-1a"><button type="button" class="primary" data-marble-id="step-1n">Continue</button></div>
+  </form>
+  <form class="step" data-marble-id="step-2">
+    <h3 data-marble-id="step-2h">Your workspace</h3>
+    <div class="field" data-marble-id="f-ws"><label for="ws" data-marble-id="f-ws-l">Workspace name</label><input id="ws" data-marble-id="f-ws-i" type="text"></div>
+    <div class="field" data-marble-id="f-url"><label for="url" data-marble-id="f-url-l">URL</label><input id="url" data-marble-id="f-url-i" type="text" placeholder="acme"></div>
+    <div class="actions" data-marble-id="step-2a"><button type="button" data-marble-id="step-2b">Back</button><button type="button" class="primary" data-marble-id="step-2n">Continue</button></div>
+  </form>
+  <form class="step" data-marble-id="step-3">
+    <h3 data-marble-id="step-3h">Invite teammates</h3>
+    <div class="field" data-marble-id="f-inv"><label for="inv" data-marble-id="f-inv-l">Emails, comma separated</label><input id="inv" data-marble-id="f-inv-i" type="text"></div>
+    <div class="actions" data-marble-id="step-3a"><button type="button" data-marble-id="step-3b">Back</button><button type="button" class="primary" data-marble-id="step-3n">Continue</button></div>
+  </form>
+  <form class="step" data-marble-id="step-4">
+    <h3 data-marble-id="step-4h">Choose a plan</h3>
+    <div class="field" data-marble-id="f-plan"><label for="plan" data-marble-id="f-plan-l">Plan</label><input id="plan" data-marble-id="f-plan-i" type="text" value="Team — $12 / seat / month"></div>
+    <div class="actions" data-marble-id="step-4a"><button type="button" data-marble-id="step-4b">Back</button><button type="button" class="primary" data-marble-id="step-4n">Review</button></div>
+  </form>
+
+  <aside class="review" data-marble-id="review">
+    <h3 data-marble-id="review-h">Review</h3>
+    <dl data-marble-id="review-dl">
+      <dt data-marble-id="r1k">Account</dt><dd data-marble-id="r1v">—</dd><a data-marble-id="r1c" href="#step-1">Change</a>
+      <dt data-marble-id="r2k">Workspace</dt><dd data-marble-id="r2v">—</dd><a data-marble-id="r2c" href="#step-2">Change</a>
+      <dt data-marble-id="r3k">Teammates</dt><dd data-marble-id="r3v">—</dd><a data-marble-id="r3c" href="#step-3">Change</a>
+      <dt data-marble-id="r4k">Plan</dt><dd data-marble-id="r4v">Team</dd><a data-marble-id="r4c" href="#step-4">Change</a>
+    </dl>
+  </aside>
+</section>
+</body>
+</html>

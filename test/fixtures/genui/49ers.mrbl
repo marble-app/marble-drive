@@ -1,0 +1,160 @@
+<!doctype html>
+<html lang="en" data-marble="1">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>49ers</title>
+<style data-marble-id="css">
+:root { --ink: #191d21; --muted: #5a656f; --line: #e4e6e8; --paper: #fbfaf8; --card: #fff; --accent: #aa0000; --gold: #b3995d; }
+* { box-sizing: border-box; }
+body { margin: 0; background: var(--paper); color: var(--ink); font: 15px/1.5 system-ui, sans-serif; padding: 24px; }
+h1 { font: 600 24px/1.2 ui-serif, Georgia, serif; margin: 0 0 4px; }
+.lede { color: var(--muted); margin: 0 0 18px; }
+h2, h3, p { margin: 0; }
+
+/* ---- overview–detail#games: the facts live on the section, the CSS reads them ---- */
+#games { position: relative; display: grid; gap: 16px; }
+#games[data-open-in="side-by-side"] { grid-template-columns: 1.4fr 1fr; }
+#games[data-open-in="side-by-side"] .detail { position: sticky; top: 16px; align-self: start; }
+#games[data-open-in="pop-up"] .detail { position: fixed; inset: 10% 20%; z-index: 10; box-shadow: 0 20px 60px rgba(0,0,0,.25); }
+#games[data-open-in="pop-up"]::before { content: ""; position: fixed; inset: 0; background: rgba(0,0,0,.35); z-index: 9; }
+#games[data-open-in="new-page"] .overview { display: none; }
+#games[data-open-in="new-page"] .detail { max-width: 640px; }
+#games[data-open-in="new-page"] .back { display: inline-block; }
+.back { display: none; margin-bottom: 10px; color: var(--accent); }
+
+.overview { display: grid; gap: 10px; }
+#games[data-overview-type="grid"] .overview { grid-template-columns: repeat(auto-fill, minmax(180px, 1fr)); }
+#games[data-overview-type="list"] .overview { grid-template-columns: 1fr; }
+#games[data-overview-type="table"] .overview { grid-template-columns: 1fr; gap: 0; }
+#games[data-overview-type="table"] .card { border-radius: 0; border-bottom: 0; }
+#games[data-overview-type="table"] .card:last-child { border-bottom: 1px solid var(--line); }
+
+#games[data-detail-multiplicity="one-at-a-time"] .detail + .detail { display: none; }
+#games[data-detail-multiplicity="many-at-a-time"] .detail + .detail { display: block; }
+
+#games[data-attribute-placement="identity"] .card .record { display: none; }
+#games[data-attribute-placement="identity"] .card .venue { display: none; }
+#games[data-attribute-placement="identity-record"] .card .venue { display: none; }
+#games[data-attribute-placement="everything"] .card .record,
+#games[data-attribute-placement="everything"] .card .venue { display: block; }
+
+/* ---- card#game-card: its own facts, on the template card and every stamped copy ---- */
+.card { background: var(--card); border: 1px solid var(--line); border-radius: 8px; padding: 12px 14px; display: grid; gap: 4px; }
+.card[data-shape="vertical"] { grid-template-columns: 1fr; }
+.card[data-shape="horizontal"] { grid-template-columns: auto 1fr; align-items: center; column-gap: 12px; }
+.card[data-shape="compact-tile"] { padding: 8px 10px; font-size: 13px; }
+.card[data-media="none"] .logo { display: none; }
+.card[data-media="side-thumbnail"] .logo { display: block; width: 36px; height: 36px; border-radius: 6px; background: var(--gold); }
+.card[data-actions="none"] .act { display: none; }
+.card[data-actions="one-primary-action"] .act { display: inline-block; margin-top: 6px; color: var(--accent); }
+.card[data-target="whole-card"] { cursor: pointer; }
+.card[data-target="title-only"] .title { cursor: pointer; text-decoration: underline; }
+.title { font-weight: 600; }
+.when, .record, .venue { color: var(--muted); font-size: 13px; }
+
+.detail { background: var(--card); border: 1px solid var(--line); border-radius: 8px; padding: 16px 18px; }
+.detail h3 { font-size: 18px; margin-bottom: 8px; }
+.detail dl { display: grid; grid-template-columns: 110px 1fr; gap: 4px 10px; font-size: 14px; }
+.detail dt { color: var(--muted); }
+.detail dd { margin: 0; }
+@media (max-width: 720px) { #games[data-open-in="side-by-side"] { grid-template-columns: 1fr; } }
+</style>
+</head>
+<body data-marble-id="body" data-genui-request="Create a UI widget that shows San Francisco 49ers games — upcoming and recent — and how the 49ers are doing against each opponent.">
+<h1 data-marble-id="h1">49ers</h1>
+<p class="lede" data-marble-id="lede">Upcoming and recent games, and the series record against each opponent.</p>
+
+<section id="games" data-marble-id="games"
+  data-genui="overview-detail#games"
+  data-genui-about="Upcoming and recent 49ers games; opening one shows the full box and the series record against that opponent"
+  data-open-in="side-by-side"
+  data-genui-open-in="side-by-side | pop-up | new-page"
+  data-overview-type="grid"
+  data-genui-overview-type="grid | list | table"
+  data-detail-multiplicity="one-at-a-time"
+  data-genui-detail-multiplicity="one-at-a-time | many-at-a-time"
+  data-attribute-placement="identity-record"
+  data-genui-attribute-placement="identity: opponent and date only on the card | identity-record: opponent, date, and the series record on the card | everything: opponent, date, series record, and venue on the card">
+
+  <div class="overview" data-marble-id="overview">
+    <article class="card" data-marble-id="g1" data-genui="card#game-card"
+      data-genui-about="One game: opponent, date, series record, venue"
+      data-shape="vertical" data-genui-shape="vertical | horizontal | compact-tile"
+      data-media="side-thumbnail" data-genui-media="none | side-thumbnail"
+      data-actions="none" data-genui-actions="none | one-primary-action"
+      data-target="whole-card" data-genui-target="whole-card | title-only">
+      <span class="logo" data-marble-id="g1l"></span>
+      <div data-marble-id="g1b">
+        <p class="title" data-marble-id="g1t">vs Seahawks</p>
+        <p class="when" data-marble-id="g1w">Sun Sep 21 · 1:25 PM</p>
+        <p class="record" data-marble-id="g1r">Series 3–1 last four</p>
+        <p class="venue" data-marble-id="g1v">Levi's Stadium</p>
+        <a class="act" data-marble-id="g1a" href="#">Tickets</a>
+      </div>
+    </article>
+    <article class="card" data-marble-id="g2" data-shape="vertical" data-media="side-thumbnail" data-actions="none" data-target="whole-card">
+      <span class="logo" data-marble-id="g2l"></span>
+      <div data-marble-id="g2b">
+        <p class="title" data-marble-id="g2t">at Rams</p>
+        <p class="when" data-marble-id="g2w">Thu Sep 25 · 5:15 PM</p>
+        <p class="record" data-marble-id="g2r">Series 2–2 last four</p>
+        <p class="venue" data-marble-id="g2v">SoFi Stadium</p>
+        <a class="act" data-marble-id="g2a" href="#">Tickets</a>
+      </div>
+    </article>
+    <article class="card" data-marble-id="g3" data-shape="vertical" data-media="side-thumbnail" data-actions="none" data-target="whole-card">
+      <span class="logo" data-marble-id="g3l"></span>
+      <div data-marble-id="g3b">
+        <p class="title" data-marble-id="g3t">vs Cardinals</p>
+        <p class="when" data-marble-id="g3w">Sun Oct 5 · 1:05 PM</p>
+        <p class="record" data-marble-id="g3r">Series 4–0 last four</p>
+        <p class="venue" data-marble-id="g3v">Levi's Stadium</p>
+        <a class="act" data-marble-id="g3a" href="#">Tickets</a>
+      </div>
+    </article>
+    <article class="card" data-marble-id="g4" data-shape="vertical" data-media="side-thumbnail" data-actions="none" data-target="whole-card">
+      <span class="logo" data-marble-id="g4l"></span>
+      <div data-marble-id="g4b">
+        <p class="title" data-marble-id="g4t">W 27–17 vs Saints</p>
+        <p class="when" data-marble-id="g4w">Sun Sep 14</p>
+        <p class="record" data-marble-id="g4r">Series 3–1 last four</p>
+        <p class="venue" data-marble-id="g4v">Levi's Stadium</p>
+        <a class="act" data-marble-id="g4a" href="#">Recap</a>
+      </div>
+    </article>
+    <article class="card" data-marble-id="g5" data-shape="vertical" data-media="side-thumbnail" data-actions="none" data-target="whole-card">
+      <span class="logo" data-marble-id="g5l"></span>
+      <div data-marble-id="g5b">
+        <p class="title" data-marble-id="g5t">L 20–24 at Vikings</p>
+        <p class="when" data-marble-id="g5w">Sun Sep 7</p>
+        <p class="record" data-marble-id="g5r">Series 1–3 last four</p>
+        <p class="venue" data-marble-id="g5v">U.S. Bank Stadium</p>
+        <a class="act" data-marble-id="g5a" href="#">Recap</a>
+      </div>
+    </article>
+    <article class="card" data-marble-id="g6" data-shape="vertical" data-media="side-thumbnail" data-actions="none" data-target="whole-card">
+      <span class="logo" data-marble-id="g6l"></span>
+      <div data-marble-id="g6b">
+        <p class="title" data-marble-id="g6t">W 31–13 vs Jets</p>
+        <p class="when" data-marble-id="g6w">Mon Sep 1</p>
+        <p class="record" data-marble-id="g6r">Series 2–2 last four</p>
+        <p class="venue" data-marble-id="g6v">Levi's Stadium</p>
+        <a class="act" data-marble-id="g6a" href="#">Recap</a>
+      </div>
+    </article>
+  </div>
+
+  <aside class="detail" data-marble-id="detail">
+    <a class="back" data-marble-id="back" href="#">← All games</a>
+    <h3 data-marble-id="dt">vs Seahawks</h3>
+    <dl data-marble-id="dl">
+      <dt data-marble-id="d1k">When</dt><dd data-marble-id="d1v">Sun Sep 21 · 1:25 PM</dd>
+      <dt data-marble-id="d2k">Where</dt><dd data-marble-id="d2v">Levi's Stadium</dd>
+      <dt data-marble-id="d3k">Series</dt><dd data-marble-id="d3v">49ers 3–1 in the last four; 49ers won the last meeting 24–20</dd>
+      <dt data-marble-id="d4k">Line</dt><dd data-marble-id="d4v">49ers −3.5</dd>
+    </dl>
+  </aside>
+</section>
+</body>
+</html>

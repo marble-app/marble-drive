@@ -1,0 +1,166 @@
+<!doctype html>
+<html lang="en" data-marble="1">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>On-call</title>
+<style data-marble-id="css">
+:root { --ink: #191d21; --muted: #5a656f; --line: #e4e6e8; --paper: #fbfaf8; --card: #fff; --accent: #1c5cab; --bad: #d03b3b; --good: #0ca30c; }
+* { box-sizing: border-box; }
+body { margin: 0; background: var(--paper); color: var(--ink); font: 15px/1.5 system-ui, sans-serif; padding: 24px; }
+h1 { font: 600 24px/1.2 ui-serif, Georgia, serif; margin: 0 0 4px; }
+.lede { color: var(--muted); margin: 0 0 18px; }
+h2, h3, p, figure { margin: 0; }
+
+/* ---- dashboard#ops ---- */
+#ops { display: grid; gap: 16px; }
+.tiles { display: grid; gap: 10px; }
+#ops[data-arrangement="fixed-grid"] .tiles { grid-template-columns: repeat(4, 1fr); }
+#ops[data-arrangement="single-scrolling-column"] .tiles { grid-template-columns: 1fr; }
+#ops[data-arrangement="story-layout"] .tiles { grid-template-columns: 1fr 1fr; }
+#ops[data-arrangement="story-layout"] .chart { order: -1; }
+#ops[data-arrangement="story-layout"] .story { display: block; }
+.story { display: none; color: var(--muted); max-width: 60ch; }
+
+#ops[data-density="a-few-glanceable-tiles"] .tile { padding: 16px 18px; }
+#ops[data-density="dense-wall"] .tile { padding: 6px 8px; font-size: 12px; }
+#ops[data-density="dense-wall"] .tile .value { font-size: 20px; }
+
+#ops[data-alerting="none"] .tile.over { border-color: var(--line); }
+#ops[data-alerting="threshold-colours"] .tile.over { border-color: var(--bad); box-shadow: inset 3px 0 0 var(--bad); }
+#ops[data-alerting="alerts-on-panels"] .tile.over .alert { display: inline-block; }
+.alert { display: none; font: 600 10px/1 system-ui; letter-spacing: .08em; text-transform: uppercase; color: var(--bad); border: 1px solid var(--bad); border-radius: 3px; padding: 2px 5px; }
+
+#ops[data-linking="independent"] .filters { display: none; }
+#ops[data-linking="global-filters"] .filters { display: flex; gap: 8px; }
+.filters { color: var(--muted); font-size: 13px; }
+.filters span { border: 1px solid var(--line); border-radius: 999px; padding: 2px 10px; background: var(--card); }
+
+/* ---- stat-tile#kpi ---- */
+.tile { background: var(--card); border: 1px solid var(--line); border-radius: 8px; display: grid; gap: 2px; position: relative; }
+.label { color: var(--muted); font-size: 12px; letter-spacing: .04em; text-transform: uppercase; }
+.value { font: 600 28px/1.1 ui-serif, Georgia, serif; }
+.delta { font-size: 13px; color: var(--good); }
+.delta.down { color: var(--bad); }
+.spark { height: 26px; }
+.spark path { fill: none; stroke: var(--accent); stroke-width: 1.5; }
+.breakdown { display: none; position: absolute; left: 0; right: 0; top: 100%; z-index: 2; background: var(--card); border: 1px solid var(--line); border-radius: 6px; padding: 8px 10px; font-size: 12px; color: var(--muted); }
+.tile[data-encoding="number-only"] .delta,
+.tile[data-encoding="number-only"] .spark { display: none; }
+.tile[data-encoding="signed-change-with-arrow"] .delta { display: block; }
+.tile[data-encoding="signed-change-with-arrow"] .spark { display: none; }
+.tile[data-encoding="sparkline"] .spark { display: block; }
+.tile[data-encoding="sparkline"] .delta { display: none; }
+.tile[data-drill="none"] { cursor: default; }
+.tile[data-drill="open-a-detail-chart"] { cursor: pointer; }
+.tile[data-drill="open-a-detail-chart"] .label::after { content: " ↗"; color: var(--accent); }
+.tile[data-drill="breakdown-on-hover"]:hover .breakdown,
+.tile[data-drill="breakdown-on-hover"]:focus-within .breakdown { display: block; }
+
+/* ---- chart#trend ---- */
+.chart { background: var(--card); border: 1px solid var(--line); border-radius: 8px; padding: 14px 16px; }
+.chart figcaption { color: var(--muted); font-size: 13px; margin-bottom: 8px; }
+.chart svg { width: 100%; height: auto; display: block; }
+.chart .line { fill: none; stroke: var(--accent); stroke-width: 2; }
+.chart .area { fill: rgba(28, 92, 171, .18); stroke: var(--accent); stroke-width: 1.5; }
+.chart .bars rect { fill: var(--accent); }
+.chart .agg { fill: none; stroke: var(--accent); stroke-width: 2.5; stroke-linecap: round; }
+.chart .facet-b { display: none; }
+.chart[data-mark-type="lines"] .area, .chart[data-mark-type="lines"] .bars { display: none; }
+.chart[data-mark-type="bars"] .line, .chart[data-mark-type="bars"] .area { display: none; }
+.chart[data-mark-type="areas"] .line, .chart[data-mark-type="areas"] .bars { display: none; }
+.chart[data-faceting="single-plot"] .facet-b { display: none; }
+.chart[data-faceting="small-multiples"] .facet-b { display: block; }
+.chart[data-faceting="small-multiples"] .facets { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+.chart[data-adaptation="fixed-desktop-chart"] { min-width: 560px; overflow-x: auto; }
+.chart[data-adaptation="reflow-for-narrow-screens"] { min-width: 0; }
+.chart[data-adaptation="aggregate-when-dense"] .line, .chart[data-adaptation="aggregate-when-dense"] .area, .chart[data-adaptation="aggregate-when-dense"] .bars { display: none; }
+.chart[data-adaptation="aggregate-when-dense"] .agg { display: block; }
+.agg { display: none; }
+@media (max-width: 720px) {
+  .chart[data-adaptation="reflow-for-narrow-screens"] svg { aspect-ratio: 3 / 2; }
+  #ops[data-arrangement="fixed-grid"] .tiles { grid-template-columns: 1fr 1fr; }
+}
+</style>
+</head>
+<body data-marble-id="body" data-genui-request="A dashboard for the on-call engineer: error rate, p95 latency, open incidents, and the last 24 hours of traffic.">
+<h1 data-marble-id="h1">On-call</h1>
+<p class="lede" data-marble-id="lede">Four numbers and the day's traffic, for whoever has the pager.</p>
+
+<section id="ops" data-marble-id="ops"
+  data-genui="dashboard#ops"
+  data-genui-about="Four operational numbers and one traffic chart for whoever is on call"
+  data-arrangement="fixed-grid"
+  data-genui-arrangement="fixed-grid | single-scrolling-column | story-layout"
+  data-density="a-few-glanceable-tiles"
+  data-genui-density="a-few-glanceable-tiles | dense-wall"
+  data-alerting="threshold-colours"
+  data-genui-alerting="none | threshold-colours | alerts-on-panels"
+  data-linking="independent"
+  data-genui-linking="independent | global-filters">
+
+  <div class="filters" data-marble-id="filters">
+    <span data-marble-id="f1">Last 24h</span>
+    <span data-marble-id="f2">us-west-2</span>
+    <span data-marble-id="f3">All services</span>
+  </div>
+  <p class="story" data-marble-id="story">Traffic is normal for a Thursday. Error rate crossed 1% at 03:10 when the payments pool restarted; it has been under threshold since 03:40. One incident is open.</p>
+
+  <div class="tiles" data-marble-id="tiles">
+    <article class="tile over" data-marble-id="k1" data-genui="stat-tile#kpi"
+      data-genui-about="One number with its label; error rate, p95 latency, open incidents, requests per minute"
+      data-encoding="signed-change-with-arrow" data-genui-encoding="number-only | signed-change-with-arrow | sparkline"
+      data-drill="none" data-genui-drill="none | open-a-detail-chart | breakdown-on-hover" tabindex="0">
+      <p class="label" data-marble-id="k1l">Error rate <span class="alert" data-marble-id="k1al">alert</span></p>
+      <p class="value" data-marble-id="k1v">1.3%</p>
+      <p class="delta down" data-marble-id="k1d">▲ 0.4 pts vs yesterday</p>
+      <svg class="spark" data-marble-id="k1s" viewBox="0 0 100 26" aria-hidden="true"><path d="M0 20 L12 18 L24 19 L36 14 L48 15 L60 6 L72 9 L84 12 L100 11"/></svg>
+      <div class="breakdown" data-marble-id="k1b">payments 0.9% · search 0.3% · other 0.1%</div>
+    </article>
+    <article class="tile" data-marble-id="k2" data-encoding="signed-change-with-arrow" data-drill="none" tabindex="0">
+      <p class="label" data-marble-id="k2l">p95 latency <span class="alert" data-marble-id="k2al">alert</span></p>
+      <p class="value" data-marble-id="k2v">412 ms</p>
+      <p class="delta" data-marble-id="k2d">▼ 18 ms vs yesterday</p>
+      <svg class="spark" data-marble-id="k2s" viewBox="0 0 100 26" aria-hidden="true"><path d="M0 12 L12 13 L24 10 L36 11 L48 9 L60 14 L72 12 L84 10 L100 9"/></svg>
+      <div class="breakdown" data-marble-id="k2b">api 380 ms · web 412 ms · batch 1.2 s</div>
+    </article>
+    <article class="tile" data-marble-id="k3" data-encoding="signed-change-with-arrow" data-drill="none" tabindex="0">
+      <p class="label" data-marble-id="k3l">Open incidents <span class="alert" data-marble-id="k3al">alert</span></p>
+      <p class="value" data-marble-id="k3v">1</p>
+      <p class="delta" data-marble-id="k3d">— same as yesterday</p>
+      <svg class="spark" data-marble-id="k3s" viewBox="0 0 100 26" aria-hidden="true"><path d="M0 20 L30 20 L30 8 L70 8 L70 20 L100 20"/></svg>
+      <div class="breakdown" data-marble-id="k3b">INC-2291 payments pool restart · sev2 · 3h open</div>
+    </article>
+    <article class="tile" data-marble-id="k4" data-encoding="signed-change-with-arrow" data-drill="none" tabindex="0">
+      <p class="label" data-marble-id="k4l">Requests / min <span class="alert" data-marble-id="k4al">alert</span></p>
+      <p class="value" data-marble-id="k4v">48.2k</p>
+      <p class="delta" data-marble-id="k4d">▲ 3% vs last Thursday</p>
+      <svg class="spark" data-marble-id="k4s" viewBox="0 0 100 26" aria-hidden="true"><path d="M0 18 L12 16 L24 12 L36 8 L48 6 L60 7 L72 9 L84 11 L100 10"/></svg>
+      <div class="breakdown" data-marble-id="k4b">web 31k · mobile 14k · partners 3k</div>
+    </article>
+  </div>
+
+  <figure class="chart" data-marble-id="trend" data-genui="chart#trend"
+    data-genui-about="Requests per minute over the last 24 hours, one point per five minutes"
+    data-mark-type="lines" data-genui-mark-type="bars | lines | areas"
+    data-faceting="single-plot" data-genui-faceting="single-plot | small-multiples"
+    data-adaptation="fixed-desktop-chart" data-genui-adaptation="fixed-desktop-chart | reflow-for-narrow-screens | aggregate-when-dense">
+    <figcaption data-marble-id="trend-cap">Requests per minute, last 24 hours</figcaption>
+    <div class="facets" data-marble-id="facets">
+      <svg class="facet-a" data-marble-id="trend-svg" viewBox="0 0 600 160" aria-label="Traffic over 24 hours">
+        <path class="line" d="M0 120 L50 118 L100 122 L150 110 L200 90 L250 70 L300 60 L350 55 L400 62 L450 58 L500 66 L550 72 L600 70"/>
+        <path class="area" d="M0 120 L50 118 L100 122 L150 110 L200 90 L250 70 L300 60 L350 55 L400 62 L450 58 L500 66 L550 72 L600 70 L600 160 L0 160 Z"/>
+        <g class="bars"><rect x="5" y="120" width="40" height="40"/><rect x="55" y="118" width="40" height="42"/><rect x="105" y="122" width="40" height="38"/><rect x="155" y="110" width="40" height="50"/><rect x="205" y="90" width="40" height="70"/><rect x="255" y="70" width="40" height="90"/><rect x="305" y="60" width="40" height="100"/><rect x="355" y="55" width="40" height="105"/><rect x="405" y="62" width="40" height="98"/><rect x="455" y="58" width="40" height="102"/><rect x="505" y="66" width="40" height="94"/><rect x="555" y="72" width="40" height="88"/></g>
+        <path class="agg" d="M0 120 L150 110 L300 60 L450 58 L600 70"/>
+      </svg>
+      <svg class="facet-b" data-marble-id="trend-svg-b" viewBox="0 0 600 160" aria-label="Errors over 24 hours">
+        <path class="line" d="M0 140 L100 138 L200 135 L250 60 L300 130 L400 138 L500 136 L600 137"/>
+        <path class="area" d="M0 140 L100 138 L200 135 L250 60 L300 130 L400 138 L500 136 L600 137 L600 160 L0 160 Z"/>
+        <g class="bars"><rect x="5" y="140" width="90" height="20"/><rect x="105" y="138" width="90" height="22"/><rect x="205" y="60" width="90" height="100"/><rect x="305" y="130" width="90" height="30"/><rect x="405" y="138" width="90" height="22"/><rect x="505" y="136" width="90" height="24"/></g>
+        <path class="agg" d="M0 140 L250 60 L600 137"/>
+      </svg>
+    </div>
+  </figure>
+</section>
+</body>
+</html>
