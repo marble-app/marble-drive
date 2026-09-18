@@ -95,10 +95,11 @@ const RUNTIME = {
   'agent-ui.js': () => path.join(REPO, 'runtime', 'agent-ui.js'),
   'agent-folders.js': () => path.join(REPO, 'runtime', 'agent-folders.js'),
   'choice-question.js': () => path.join(REPO, 'runtime', 'choice-question.js'),
+  'agent-usage-charts.js': () => path.join(REPO, 'runtime', 'agent-usage-charts.js'),
   'collab.js': () => path.join(REPO, 'runtime', 'collab.js'),
 };
 
-export async function createDrive(config, { log = console, agentProviders = null, agents: withAgents = true, usage = null, typesafe: typesafeOpts = null, agentSandbox = null } = {}) {
+export async function createDrive(config, { log = console, agentProviders = null, agents: withAgents = true, usage = null, usageHistory = null, typesafe: typesafeOpts = null, agentSandbox = null } = {}) {
   const store = createStore({ root: config.root });
   await store.ready();
 
@@ -156,6 +157,7 @@ export async function createDrive(config, { log = console, agentProviders = null
       // Agents.mrbl still needs <marble-conversation> without a second launcher.
       tags += `\n<script src="/runtime/agent-ui.js" data-marble-transient></script>`;
       tags += `\n<script src="/runtime/agent-folders.js" data-marble-transient></script>`;
+      tags += `\n<script src="/runtime/agent-usage-charts.js" data-marble-transient></script>`;
     }
     tags += `\n<script src="/runtime/collab.js" data-marble-transient></script>`;
     return source.includes('</body>')
@@ -710,6 +712,7 @@ export async function createDrive(config, { log = console, agentProviders = null
       providers: agentProviders ?? null,
       log,
       usage,
+      usageHistory,
       sandbox: agentSandbox ?? null,
       onLook: (docPath, ids, client, extra = {}) => {
         if (!client) return;

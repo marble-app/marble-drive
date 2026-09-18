@@ -68,6 +68,85 @@ test('Claude settings windows are short-term and weekly, not extra shares', () =
   assert.equal(meter.windows.every((window) => window.kind === 'quota'), true);
 });
 
+// The shape Anthropic actually returns (captured 2026-09-18): per-model weekly
+// limits are `weekly_scoped` entries in `limits`, named by scope.model.
+const scoped = (name, percent, resetsAt = '2026-09-20T11:00:00+00:00') => ({
+  kind: 'weekly_scoped', group: 'weekly', percent, severity: 'normal', resets_at: resetsAt, is_active: false,
+  scope: { model: { id: null, display_name: name }, surface: null },
+});
+
+test('Claude usage carries a Fable window from the weekly_scoped limit named Fable', () => {
+  const meter = parseClaudeUsage({
+    five_hour: { utilization: 44, resets_at: '2026-09-18T20:30:00+00:00' },
+    seven_day: { utilization: 9, resets_at: '2026-09-20T11:00:00+00:00' },
+    seven_day_sonnet: null,
+    nimbus_quill: { utilization: 0, resets_at: null },
+    limits: [
+      { kind: 'session', group: 'session', percent: 44, resets_at: '2026-09-18T20:30:00+00:00', scope: null, is_active: true },
+      { kind: 'weekly_all', group: 'weekly', percent: 9, resets_at: '2026-09-20T11:00:00+00:00', scope: null, is_active: false },
+      scoped('Fable', 12.4),
+    ],
+  });
+  assert.deepEqual(meter.windows.map((window) => `${window.id} ${window.label} ${window.used}`), [
+    '5h Short-term 44',
+    'week Weekly 9',
+    'fable Fable 12',
+  ]);
+  const fable = meter.windows.find((window) => window.id === 'fable');
+  assert.equal(fable.left, 88);
+  assert.equal(fable.resetsAt, '2026-09-20T11:00:00+00:00');
+  assert.equal(fable.kind, 'quota');
+  // The compact Claude meter is still the 5-hour window.
+  assert.equal(meter.used, 44);
+});
+
+test('a scoped limit for another model is not Fable, and the name match ignores case', () => {
+  const other = parseClaudeUsage({
+    five_hour: { utilization: 10 }, seven_day: { utilization: 40 },
+    limits: [scoped('Sonnet', 77)],
+  });
+  assert.equal(other.windows.some((window) => window.id === 'fable'), false);
+  const loud = parseClaudeUsage({
+    five_hour: { utilization: 10 }, seven_day: { utilization: 40 },
+    limits: [scoped('SONNET', 77), scoped('FABLE', 5)],
+  });
+  assert.equal(loud.windows.find((window) => window.id === 'fable').used, 5);
+});
+
+test('a versioned or renamed Fable scope still counts: the match is on the name, not the exact kind', () => {
+  const named = parseClaudeUsage({
+    five_hour: { utilization: 10 }, seven_day: { utilization: 40 },
+    limits: [scoped('Fable 5.1', 33)],
+  });
+  assert.equal(named.windows.find((window) => window.id === 'fable').used, 33);
+  const kind = parseClaudeUsage({
+    five_hour: { utilization: 10 }, seven_day: { utilization: 40 },
+    limits: [{ ...scoped('Fable', 21), kind: 'weekly_model' }],
+  });
+  assert.equal(kind.windows.find((window) => window.id === 'fable').used, 21);
+  const group = parseClaudeUsage({
+    five_hour: { utilization: 10 }, seven_day: { utilization: 40 },
+    limits: [{ ...scoped('Fable', 17), kind: 'scoped_model' }],
+  });
+  assert.equal(group.windows.find((window) => window.id === 'fable').used, 17, 'group: weekly is enough');
+  // A model that merely contains the letters is not Fable.
+  const other = parseClaudeUsage({
+    five_hour: { utilization: 10 }, seven_day: { utilization: 40 },
+    limits: [scoped('Unfabled', 9), { ...scoped('Fable', 9), group: 'session', kind: 'session' }],
+  });
+  assert.equal(other.windows.some((window) => window.id === 'fable'), false);
+});
+
+test('Claude usage has no Fable window when there is no limits array, or the percent is missing', () => {
+  const none = parseClaudeUsage({ five_hour: { utilization: 10 }, seven_day: { utilization: 40 } });
+  assert.equal(none.windows.some((window) => window.id === 'fable'), false);
+  const junk = parseClaudeUsage({
+    five_hour: { utilization: 10 }, seven_day: { utilization: 40 },
+    limits: [null, 'x', { kind: 'weekly_scoped', scope: null }, { ...scoped('Fable', 0), percent: null }],
+  });
+  assert.equal(junk.windows.some((window) => window.id === 'fable'), false);
+});
+
 test('Cursor usage is used percent of the Cursor-models pool', () => {
   const meter = parseCursorUsage({
     billingCycleEnd: '1789861494000',

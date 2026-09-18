@@ -74,10 +74,17 @@ const USAGE = {
     detail: '5h 23% used · week 41% used',
   }],
 };
+// Echoes what the route asked for, so the test can see the weeks it was given.
+let failHistory = false;
+const usageHistory = async ({ weeks } = {}) => {
+  if (failHistory) throw new Error('scan failed');
+  return { source: 'claude-code-local', tz: 'UTC', from: '2026-09-18', to: '2026-09-18', asked: weeks ?? null, days: [{ date: '2026-09-18', messages: 3, tokens: 90, cacheRead: 9, byModel: {} }] };
+};
 const drive = await createDrive(config, {
   log: quiet,
   agentProviders: new Map([['fake', createFakeProvider({ scripts: SCRIPTS })]]),
   usage: async () => USAGE,
+  usageHistory,
 });
 await drive.createDocument('garden', SOURCE);
 await drive.createDocument('watched', SOURCE);
@@ -181,6 +188,26 @@ test('usage is used percent per signed-in agent, never a secret', async () => {
   assert.equal(status, 200);
   assert.deepEqual(body, USAGE);
   assert.equal(JSON.stringify(body).includes('sk-'), false);
+});
+
+test('usage history is the host\'s daily counts, with the weeks the page asked for', async () => {
+  const some = await api('GET', '/agent/usage/history?weeks=8');
+  assert.equal(some.status, 200);
+  assert.equal(some.body.asked, 8);
+  assert.equal(some.body.days[0].messages, 3);
+  assert.equal((await api('GET', '/agent/usage/history')).body.asked, null);
+  assert.equal((await api('GET', '/agent/usage/history?weeks=abc')).body.asked, null);
+});
+
+test('a failing history scan is an empty history, not an error', async () => {
+  failHistory = true;
+  try {
+    const { status, body } = await api('GET', '/agent/usage/history');
+    assert.equal(status, 200);
+    assert.deepEqual(body.days, []);
+  } finally {
+    failHistory = false;
+  }
 });
 
 test('an agent edits a document through the bridge, and the open tab hears it', async () => {
@@ -537,6 +564,7 @@ test('an ungated host answers the agent routes only to a page served as localhos
   assert.equal(await raw('GET', '/agent/settings', { Host: 'evil.example' }), 403);
   assert.equal(await raw('GET', '/agent/settings', { Host: `evil.example:${port}` }), 403);
   assert.equal(await raw('GET', '/agent/events', { Host: 'evil.example' }), 403);
+  assert.equal(await raw('GET', '/agent/usage/history', { Host: 'evil.example' }), 403);
   assert.equal(await raw('GET', '/agent/settings', { Host: `127.0.0.1:${port}` }), 200);
   assert.equal(await raw('GET', '/agent/settings', { Host: `localhost:${port}` }), 200);
   assert.equal(await raw('GET', '/agent/settings', { Host: `[::1]:${port}` }), 200);

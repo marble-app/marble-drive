@@ -4,7 +4,7 @@ import path from 'node:path';
 import test from 'node:test';
 import { fileURLToPath } from 'node:url';
 
-import { GARDEN, startDrive } from './harness.js';
+import { GARDEN, startDrive, usageHistoryStub } from './harness.js';
 
 const SCRIPTS = {
   rename: [
@@ -13,6 +13,7 @@ const SCRIPTS = {
     { say: 'Renamed the heading.' },
   ],
   permission: [{ ask: { tool: 'Bash', input: { command: 'ls' } } }, { say: 'after' }],
+  answer: [{ say: 'Just an answer.' }],
 };
 
 const AGENTS_TEMPLATE = path.join(path.dirname(fileURLToPath(import.meta.url)), '..', 'templates', 'agents.mrbl');
@@ -39,6 +40,12 @@ const openAgents = async (options = {}) => {
   return { page, errors };
 };
 
+// Filters and search live in a popover off the Filter button.
+const openFilters = async (page) => {
+  if (await page.locator('.filterbox[data-open]').count() === 0) await page.locator('.filter-toggle').click();
+  await page.locator('.filter-pop').waitFor({ state: 'visible' });
+};
+
 test('the topbar shows used usage for Claude and Cursor', async () => {
   const { page } = await openAgents();
   const claude = page.locator('.usage .meter[data-id="claude-subscription"]');
@@ -49,6 +56,45 @@ test('the topbar shows used usage for Claude and Cursor', async () => {
   const fill = await claude.locator('.meter-bar i').evaluate((el) => el.style.width);
   assert.equal(fill, '23%');
   assert.equal(await claude.getAttribute('data-tone'), 'blue');
+});
+
+test('the topbar shows a Fable slider beside Claude', async () => {
+  const { page } = await openAgents();
+  const fable = page.locator('.usage .meter[data-id="fable"]');
+  await fable.waitFor();
+  assert.match(await fable.textContent(), /Fable/);
+  assert.match(await fable.textContent(), /58%/);
+  assert.equal(await fable.locator('.meter-bar i').evaluate((el) => el.style.width), '58%');
+  assert.equal(await fable.getAttribute('data-tone'), 'yellow');
+  await fable.hover();
+  assert.match(await page.locator('#marble-usage-tip').textContent(), /reset/i);
+  // Claude stays the 5-hour bar, and Fable is not counted as a second Claude.
+  assert.equal(await page.locator('.usage .meter[data-id="claude-subscription"] .meter-pct').textContent(), '23%');
+});
+
+test('the topbar has no Fable slider when there is no Fable usage', async () => {
+  const { page } = await openAgents();
+  await page.locator('.usage .meter[data-id="claude-subscription"]').waitFor();
+  await page.evaluate(() => {
+    window.marbleAgentUI.fillMeters(document.querySelector('header.topbar > .usage'), [
+      { id: 'claude-subscription', label: 'Claude', used: 23, windows: [{ id: '5h', label: 'Short-term', used: 23, kind: 'quota' }] },
+    ]);
+  });
+  assert.equal(await page.locator('.usage .meter[data-id="fable"]').count(), 0);
+});
+
+test('three usage meters do not overlap on a phone', async () => {
+  const { page } = await openAgents({ viewport: { width: 360, height: 700 } });
+  await page.locator('.usage .meter[data-id="fable"]').waitFor();
+  const boxes = await page.locator('.usage .meter').evaluateAll((els) => els.map((el) => {
+    const r = el.getBoundingClientRect();
+    return { id: el.dataset.id, left: r.left, right: r.right, scroll: el.scrollWidth > el.clientWidth + 1 };
+  }));
+  assert.equal(boxes.length, 3);
+  for (let i = 1; i < boxes.length; i += 1) {
+    assert.ok(boxes[i].left >= boxes[i - 1].right - 0.5, `${boxes[i - 1].id} overlaps ${boxes[i].id}`);
+  }
+  assert.ok(boxes.every((box) => box.right <= 360 && !box.scroll), 'meters stay inside the phone');
 });
 
 test('a Claude meter with no progress reads as unavailable', async () => {
@@ -216,6 +262,7 @@ test('a row archives a conversation and opens the next remaining one', async () 
   await newerRow.locator('[data-act="archive"]').click();
   await page.waitForFunction((id) => document.querySelector(`.conv[data-id="${id}"]`)?.hidden === true, ids.newer);
   assert.equal(await page.locator('marble-conversation').getAttribute('conversation'), ids.older);
+  await openFilters(page);
   await page.locator('.filter[data-filter="archived"]').click();
   await page.waitForFunction((id) => {
     const el = document.querySelector(`.conv[data-id="${id}"]`);
@@ -223,10 +270,12 @@ test('a row archives a conversation and opens the next remaining one', async () 
   }, ids.newer);
 });
 
-test('the topbar has three thin segmented bars, including CLI', async () => {
+test('the topbar keeps one thin view bar; the CLI bar lives in the filter popover', async () => {
   const { page } = await openAgents();
-  await page.locator('.toggles .seg.cli').waitFor();
-  assert.equal(await page.locator('.toggles > .seg').count(), 3);
+  assert.equal(await page.locator('.toggles > .seg').count(), 1);
+  assert.equal(await page.locator('header.topbar input.search:visible').count(), 0);
+  await openFilters(page);
+  await page.locator('.filter-pop .seg.cli').waitFor();
   await page.locator('.cli [data-cli="all"]').waitFor();
   await page.locator('.cli [data-cli="fake"]').waitFor();
   const css = await page.locator('.views [data-view="library"]').evaluate((el) => {
@@ -253,6 +302,7 @@ test('the CLI bar hides conversations from the other agent', async () => {
   });
   const row = page.locator(`.conv[data-id="${id}"]`);
   await row.waitFor();
+  await openFilters(page);
   await page.locator('.cli [data-cli="fake"]').click();
   assert.equal(await row.isHidden(), false);
   await page.evaluate(() => {
@@ -273,6 +323,69 @@ test('the CLI bar hides conversations from the other agent', async () => {
   }, id);
 });
 
+test('the filter popover is closed and quiet until it is used', async () => {
+  const { page } = await openAgents();
+  const toggle = page.locator('.filter-toggle');
+  await toggle.waitFor();
+  assert.equal(await page.locator('.filter-pop').isVisible(), false);
+  assert.equal(await toggle.getAttribute('aria-expanded'), 'false');
+  // Not salient: no border, no fill, and dimmer than the Settings button.
+  const look = await page.evaluate(() => {
+    const t = getComputedStyle(document.querySelector('.filter-toggle'));
+    const s = getComputedStyle(document.querySelector('button.settings'));
+    return { border: t.borderTopWidth, bg: t.backgroundColor, tc: t.color, sc: s.color };
+  });
+  assert.equal(look.border, '0px');
+  assert.match(look.bg, /rgba\(0, 0, 0, 0\)|transparent/);
+  assert.notEqual(look.tc, look.sc);
+  assert.equal(await page.locator('.filter-count').isVisible(), false);
+  await toggle.click();
+  await page.locator('.filter-pop').waitFor({ state: 'visible' });
+  assert.equal(await toggle.getAttribute('aria-expanded'), 'true');
+});
+
+test('an active filter or search shows a count on the closed button, and Clear resets it', async () => {
+  const { page } = await openAgents();
+  await page.locator('#list .conv').first().waitFor();
+  await openFilters(page);
+  await page.locator('button.filter[data-filter="review"]').click();
+  await page.locator('input.search').fill('nope-nope');
+  await page.locator('.filter-toggle').click();
+  await page.locator('.filter-pop').waitFor({ state: 'hidden' });
+  assert.equal((await page.locator('.filter-count').textContent()).trim(), '2');
+  assert.match(await page.locator('.filter-count').getAttribute('title'), /Review.*nope-nope/);
+  assert.equal(await page.locator('.filter-toggle').getAttribute('data-active'), '');
+  await openFilters(page);
+  await page.locator('.filter-clear').click();
+  assert.equal(await page.locator('input.search').inputValue(), '');
+  assert.equal(await page.locator('button.filter[data-filter="all"]').getAttribute('aria-pressed'), 'true');
+  assert.equal(await page.locator('.filter-count').textContent(), '');
+  assert.equal(await page.locator('.filter-toggle').getAttribute('data-active'), null);
+  assert.ok((await page.locator('.conv:not([hidden])').count()) >= 1);
+});
+
+test('/ opens the filters on the search box and Escape closes them', async () => {
+  const { page } = await openAgents();
+  await page.locator('#list .conv').first().waitFor();
+  await page.locator('body').click({ position: { x: 5, y: 300 } });
+  await page.keyboard.press('/');
+  await page.locator('.filter-pop').waitFor({ state: 'visible' });
+  assert.equal(await page.evaluate(() => document.activeElement?.matches('input.search')), true);
+  // Typing in the search box is typing, not a shortcut: V must not switch views.
+  await page.keyboard.type('v');
+  assert.equal(await page.evaluate(() => document.body.getAttribute('data-view')), 'library');
+  await page.keyboard.press('Escape');
+  await page.locator('.filter-pop').waitFor({ state: 'hidden' });
+  assert.equal(await page.evaluate(() => document.activeElement?.classList.contains('filter-toggle')), true);
+});
+
+test('clicking outside closes the filter popover', async () => {
+  const { page } = await openAgents();
+  await openFilters(page);
+  await page.locator('h1').click();
+  await page.locator('.filter-pop').waitFor({ state: 'hidden' });
+});
+
 test('filters and search hide rows without deleting them', async () => {
   const { page } = await openAgents();
   await page.evaluate(async () => {
@@ -290,6 +403,7 @@ test('filters and search hide rows without deleting them', async () => {
   await page.waitForFunction(() =>
     [...document.querySelectorAll('.conv')].every((el) => el.dataset.status !== 'running'),
   );
+  await openFilters(page);
   await page.locator('button.filter[data-filter="running"]').click();
   assert.equal(await page.locator('.conv:not([hidden])').count(), 0);
   await page.locator('button.filter[data-filter="all"]').click();
@@ -390,10 +504,18 @@ test('clicking a board card opens the conversation panel', async () => {
   await page.locator(`.conv[data-id="${id}"]`).waitFor();
   await page.keyboard.press('v');
   await page.locator(`.column .conv[data-id="${id}"]`).click();
-  await page.locator('.board-panel[data-open="true"]').waitFor();
+  await page.waitForFunction(() => document.body.getAttribute('data-panel') === 'open');
   assert.equal(await page.locator('marble-conversation').count(), 1, 'one conversation element');
   assert.equal(await page.locator('.pane marble-conversation').getAttribute('conversation'), id);
-  assert.equal(await page.locator('.board-panel marble-conversation').count(), 0);
+  const paneShape = await page.evaluate(() => {
+    const pane = document.querySelector('.pane');
+    const cs = getComputedStyle(pane, '::before');
+    return { radius: parseFloat(cs.borderRadius), bar: Boolean(document.querySelector('.pane > .dock-bar:not([hidden])')) };
+  });
+  assert.ok(paneShape.radius >= 12, `board pane is rounded, radius ${paneShape.radius}`);
+  assert.equal(paneShape.bar, true, 'the pane carries its bar');
+  await page.locator('.pane > .dock-bar .dock-close').click();
+  await page.waitForFunction(() => !document.body.hasAttribute('data-panel'));
 });
 
 test('opening a conversation on the board splits beside the kanban, it does not cover it', async () => {
@@ -408,7 +530,7 @@ test('opening a conversation on the board splits beside the kanban, it does not 
   await page.keyboard.press('v');
   await page.waitForFunction(() => document.body.getAttribute('data-view') === 'board');
   await page.locator(`.column .conv[data-id="${id}"]`).click();
-  await page.locator('.board-panel[data-open="true"]').waitFor();
+  await page.waitForFunction(() => document.body.getAttribute('data-panel') === 'open');
   const geometry = await page.evaluate(() => {
     const board = document.querySelector('.board').getBoundingClientRect();
     const pane = document.querySelector('.pane').getBoundingClientRect();
@@ -634,7 +756,7 @@ test('opening the board panel does not clone the conversation on reconcile', asy
   await page.locator(`.conv[data-id="${id}"]`).waitFor();
   await page.keyboard.press('v');
   await page.locator(`.column .conv[data-id="${id}"]`).click();
-  await page.locator('.board-panel[data-open="true"]').waitFor();
+  await page.waitForFunction(() => document.body.getAttribute('data-panel') === 'open');
   const sameNode = await page.evaluate(() => {
     const el = document.querySelector('marble-conversation');
     window.marble.adopt(document.body);
@@ -643,7 +765,6 @@ test('opening the board panel does not clone the conversation on reconcile', asy
       && Boolean(el.closest('.pane'));
   });
   assert.equal(sameNode, true);
-  assert.equal(await page.locator('.board-panel marble-conversation').count(), 0);
   assert.equal(await page.locator('.pane marble-conversation').getAttribute('conversation'), id);
 });
 
@@ -659,14 +780,12 @@ test('the board panel does not overflow a narrow viewport', async () => {
   await page.keyboard.press('v');
   await page.waitForFunction(() => document.body.getAttribute('data-view') === 'board');
   await page.locator(`.column .conv[data-id="${id}"]`).click();
-  await page.locator('.board-panel[data-open="true"]').waitFor();
+  await page.waitForFunction(() => document.body.getAttribute('data-panel') === 'open');
   const box = await page.evaluate(() => {
     const pane = document.querySelector('.pane').getBoundingClientRect();
-    const panel = document.querySelector('.board-panel').getBoundingClientRect();
-    return { pane: pane.width, panel: panel.width, vw: innerWidth };
+    return { pane: pane.width, vw: innerWidth };
   });
   assert.ok(box.pane <= box.vw + 1, `pane ${box.pane} wider than viewport ${box.vw}`);
-  assert.ok(box.panel <= box.vw + 1, `panel ${box.panel} wider than viewport ${box.vw}`);
   assert.equal(await page.locator('marble-conversation').count(), 1);
 });
 
@@ -693,6 +812,7 @@ test('opening a conversation clears needs-review', async () => {
   assert.equal(await row.getAttribute('data-status'), 'review');
   await row.click();
   await page.locator(`.conv[data-id="${id}"][data-status="completed"]`).waitFor();
+  await openFilters(page);
   await page.locator('button.filter[data-filter="review"]').click();
   assert.equal(await page.locator(`.conv[data-id="${id}"]:not([hidden])`).count(), 0);
 });
@@ -768,7 +888,175 @@ test('the settings sheet has a Usage tab with Claude short-term and weekly bars'
   assert.match(await week.locator('.reset').textContent(), /reset/i);
   await other.waitFor();
   assert.match(await other.textContent(), /100%/);
+  const fable = settings.locator('.meter[data-id="fable"]');
+  await fable.waitFor();
+  assert.match(await fable.textContent(), /Fable/);
+  assert.match(await fable.textContent(), /58%/);
+  assert.match(await fable.locator('.reset').textContent(), /reset/i);
   assert.equal(await settings.locator('.meter[data-id="claude_code"]').count(), 0);
+});
+
+// ---------------------------------------------------------------- usage history
+
+const HISTORY = usageHistoryStub(26);
+const FIRST_ACTIVE = HISTORY.days.findIndex((day) => day.messages > 0);
+const SHOWN = HISTORY.days.length - FIRST_ACTIVE;
+// The grid never shows fewer than 12 weeks, even when activity began later.
+const CELLS = Math.max(SHOWN, 12 * 7);
+// Weekly bars start at the first week with activity, up to the last 12.
+const weekStart = (date) => {
+  const d = new Date(`${date}T00:00:00Z`);
+  return Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate() - d.getUTCDay());
+};
+const WEEKS = Math.min(12, (weekStart(HISTORY.to) - weekStart(HISTORY.days[FIRST_ACTIVE].date)) / (7 * 86_400_000) + 1);
+
+const openUsage = async (options = {}, { routes } = {}) => {
+  const { page } = await openAgents(options);
+  if (routes) await routes(page);
+  await page.locator('button.settings').click();
+  const settings = page.locator('marble-agent-settings');
+  await settings.locator('[role="tab"]', { hasText: 'Usage' }).click();
+  return { page, settings };
+};
+
+test('the Usage tab draws one heatmap cell per day, brighter for busier days', async () => {
+  const { settings } = await openUsage();
+  const cells = settings.locator('.uh-cell');
+  await cells.first().waitFor();
+  assert.equal(await cells.count(), CELLS);
+  assert.equal(await cells.last().getAttribute('data-date'), '2026-09-18');
+  const levels = await cells.evaluateAll((els) => els.map((el) => Number(el.dataset.level)));
+  assert.ok(levels.includes(0) && levels.includes(4), 'quiet days are level 0, the busiest reach level 4');
+  const busiest = HISTORY.days.reduce((best, day) => (day.tokens > best.tokens ? day : best));
+  assert.equal(await settings.locator(`.uh-cell[data-date="${busiest.date}"]`).getAttribute('data-level'), '4');
+  const sunday = HISTORY.days.at(-6);
+  assert.equal(await settings.locator(`.uh-cell[data-date="${sunday.date}"]`).getAttribute('data-level'), '0');
+  assert.ok((await settings.locator('.uh-month').count()) >= 2);
+});
+
+test('hovering or focusing a day says what happened, and arrow keys move between days', async () => {
+  const { page, settings } = await openUsage();
+  const last = settings.locator('.uh-cell[data-date="2026-09-18"]');
+  await last.hover();
+  const tip = settings.locator('.uh-tip');
+  await tip.waitFor({ state: 'visible' });
+  const text = await tip.textContent();
+  assert.match(text, /Fri, Sep 18/);
+  assert.match(text, /19\.6k tokens/);
+  assert.match(text, /20 messages/);
+  assert.match(text, /Fable 31%/);
+  await page.mouse.move(2, 2);
+  await tip.waitFor({ state: 'hidden' });
+  await last.focus();
+  await tip.waitFor({ state: 'visible' });
+  await page.keyboard.press('ArrowLeft');
+  assert.equal(await settings.locator('.uh-cell:focus').getAttribute('data-date'), '2026-09-11');
+  await page.keyboard.press('ArrowDown');
+  assert.equal(await settings.locator('.uh-cell:focus').getAttribute('data-date'), '2026-09-12');
+  assert.equal(await settings.locator('.uh-cell[tabindex="0"]').count(), 1, 'one tab stop, not one per day');
+});
+
+test('the model chips and the metric toggle change what the heatmap counts', async () => {
+  const { settings } = await openUsage();
+  await settings.locator('.uh-cell').first().waitFor();
+  const lit = () => settings.locator('.uh-cell:not([data-level="0"])').count();
+  const all = await lit();
+  await settings.locator('.uh-chip', { hasText: 'Fable' }).click();
+  assert.equal(await lit(), 7, 'only the days with Fable usage stay lit');
+  assert.equal(await settings.locator('.uh-chip', { hasText: 'Fable' }).getAttribute('aria-pressed'), 'true');
+  await settings.locator('.uh-metric button', { hasText: 'Messages' }).click();
+  await settings.locator('.uh-cell[data-date="2026-09-18"]').hover();
+  assert.match(await settings.locator('.uh-tip').textContent(), /5 messages/);
+  await settings.locator('.uh-chip', { hasText: 'All' }).click();
+  assert.equal(await lit(), all);
+  assert.equal(await settings.locator('.uh-chip', { hasText: 'Haiku' }).count(), 0, 'no chip for a model with no usage');
+});
+
+test('summary tiles read this week against last, streaks and active days', async () => {
+  const { settings } = await openUsage();
+  await settings.locator('.uh-tile').first().waitFor();
+  assert.equal(await settings.locator('.uh-tile').count(), 6);
+  const tile = (name) => settings.locator('.uh-tile-label', { hasText: new RegExp(`^${name}$`) }).locator('xpath=..');
+  assert.match(await tile('Last 7 days').textContent(), /(Up|Down) \d+% vs the 7 days before/);
+  assert.match(await tile('Current streak').textContent(), /5 days/);
+  assert.match(await tile('Active days').textContent(), new RegExp(`44 of ${SHOWN}`));
+  assert.match(await tile('Busiest day').textContent(), /[A-Z][a-z]{2} \d+/);
+});
+
+test('weekly bars are stacked by model, labelled, and have a table view', async () => {
+  const { settings } = await openUsage();
+  await settings.locator('.uh-bar').first().waitFor();
+  assert.equal(await settings.locator('.uh-bar').count(), WEEKS, 'no empty weeks before the first activity');
+  assert.ok((await settings.locator('.uh-seg').count()) >= WEEKS);
+  assert.match(await settings.locator('.uh-seg').last().getAttribute('data-tip'), /(Opus|Sonnet|Fable)/);
+  // The light-mode aqua and yellow are under 3:1, so the model shares are always spelled out.
+  const legend = await settings.locator('.uh-legend').textContent();
+  assert.match(legend, /Opus \d+%/);
+  assert.match(legend, /Sonnet \d+%/);
+  assert.match(legend, /Fable \d+%/);
+  await settings.locator('.uh-view button', { hasText: 'Table' }).click();
+  assert.equal(await settings.locator('.uh-table tbody tr').count(), WEEKS);
+  assert.equal(await settings.locator('.uh-bar').first().isVisible(), false);
+});
+
+test('the sheet is wider on the Usage tab, and the live limit bars are still there', async () => {
+  const { page, settings } = await openUsage();
+  await settings.locator('.uh-cell').first().waitFor();
+  const usageWidth = (await settings.locator('.sheet').boundingBox()).width;
+  await settings.locator('[role="tab"]', { hasText: 'Settings' }).click();
+  const settingsWidth = (await settings.locator('.sheet').boundingBox()).width;
+  assert.ok(usageWidth > settingsWidth + 200, `${usageWidth} should be well over ${settingsWidth}`);
+  await settings.locator('[role="tab"]', { hasText: 'Usage' }).click();
+  await settings.locator('.meter[data-id="fable"]').waitFor();
+  assert.equal(await page.locator('marble-agent-settings').getAttribute('data-open'), 'true');
+});
+
+test('clicking a header meter opens the Usage tab', async () => {
+  const { page } = await openAgents();
+  await page.locator('.usage .meter[data-id="fable"]').click();
+  const settings = page.locator('marble-agent-settings');
+  await settings.locator('[role="tab"][data-tab="usage"][aria-selected="true"]').waitFor();
+  await settings.locator('.uh-cell').first().waitFor();
+});
+
+test('an empty history and a failed one each say so in one line, and the limits still render', async () => {
+  const empty = await openUsage({}, {
+    routes: (page) => page.route('**/agent/usage/history*', (route) => route.fulfill({
+      json: { ...HISTORY, days: HISTORY.days.map((day) => ({ ...day, messages: 0, tokens: 0, cacheRead: 0, byModel: {} })) },
+    })),
+  });
+  await empty.settings.locator('.uh-empty').waitFor();
+  assert.match(await empty.settings.locator('.uh-empty').textContent(), /No Claude Code activity/);
+  assert.equal(await empty.settings.locator('.uh-cell').count(), 0);
+  await empty.settings.locator('.meter[data-id="5h"]').waitFor();
+
+  const failed = await openUsage({}, { routes: (page) => page.route('**/agent/usage/history*', (route) => route.fulfill({ status: 500, body: 'no' })) });
+  await failed.settings.locator('.uh-empty').waitFor();
+  assert.match(await failed.settings.locator('.uh-empty').textContent(), /Couldn.t read usage history/);
+  await failed.settings.locator('.meter[data-id="5h"]').waitFor();
+});
+
+test('on a phone the Usage tab does not scroll sideways', async () => {
+  const { page, settings } = await openUsage({ viewport: { width: 360, height: 740 } });
+  await settings.locator('.uh-cell').first().waitFor();
+  const overflow = await page.evaluate(() => {
+    const sheet = document.querySelector('marble-agent-settings').shadowRoot.querySelector('.sheet');
+    return { page: document.documentElement.scrollWidth, sheet: sheet.scrollWidth - sheet.clientWidth };
+  });
+  assert.ok(overflow.page <= 360, `page is ${overflow.page}px wide`);
+  assert.ok(overflow.sheet <= 1, `sheet overflows by ${overflow.sheet}px`);
+});
+
+test('the chart colours follow the light or dark palette that was validated', async () => {
+  for (const [colorScheme, opus, level4] of [['light', '#2a78d6', '#104281'], ['dark', '#3987e5', '#86b6ef']]) {
+    const { settings } = await openUsage({ colorScheme });
+    await settings.locator('.uh').waitFor();
+    const got = await settings.locator('.uh').evaluate((el) => {
+      const cs = getComputedStyle(el);
+      return [cs.getPropertyValue('--uh-opus').trim(), cs.getPropertyValue('--uh-l4').trim()];
+    });
+    assert.deepEqual(got, [opus, level4], colorScheme);
+  }
 });
 
 test('New says why when this host is not running agents', async () => {
@@ -791,4 +1079,152 @@ test('a conversation waiting on the person says Needs you', async () => {
     await window.marble.agent.send(id, { prompt: 'script:permission', target: 'garden' });
   });
   await page.locator('.conv .badge', { hasText: 'Needs you' }).first().waitFor();
+});
+
+test('stateOf is one vocabulary: waiting, working, failed, unseen, idle', async () => {
+  const { page } = await openAgents();
+  const states = await page.evaluate(() => {
+    const s = window.marbleAgentUI.stateOf;
+    return [
+      s({ asking: true, running: true }),
+      s({ running: true }),
+      s({ queued: true }),
+      s({ needsReview: true, lastOutcome: 'failed' }),
+      s({ needsReview: true, lastOutcome: 'watchdog' }),
+      s({ needsReview: true, lastOutcome: 'done' }),
+      s({ lastOutcome: 'done' }),
+      s({}),
+    ];
+  });
+  assert.deepEqual(states, ['waiting', 'working', 'working', 'failed', 'failed', 'unseen', 'idle', 'idle']);
+  assert.match(await page.evaluate(() => window.marbleAgentUI.STATE_CSS), /\[data-state="waiting"\] \.dot/);
+});
+
+test('an answered turn sits in Needs review until it is opened', async () => {
+  const { page } = await openAgents();
+  const id = await page.evaluate(async () => {
+    const agent = window.marble.agent;
+    const id = await agent.start({ provider: 'fake' });
+    await agent.send(id, { prompt: 'script:answer', target: 'garden', viewing: 'Agents', selection: [] });
+    return id;
+  });
+  await page.locator(`.conv[data-id="${id}"][data-status="review"]`).waitFor();
+  assert.equal(await page.locator(`.conv[data-id="${id}"]`).getAttribute('data-state'), 'unseen');
+  await page.keyboard.press('v');
+  await page.locator(`.column[data-col="review"] .conv[data-id="${id}"]`).waitFor();
+  await page.locator(`.column .conv[data-id="${id}"]`).click();
+  await page.locator(`.conv[data-id="${id}"][data-status="completed"]`).waitFor();
+  assert.equal(await page.locator(`.conv[data-id="${id}"]`).getAttribute('data-state'), 'idle');
+});
+
+test('a conversation waiting on the person sits first in Needs review, marked waiting', async () => {
+  const { page } = await openAgents();
+  const ids = await page.evaluate(async () => {
+    const agent = window.marble.agent;
+    const done = await agent.start({ provider: 'fake' });
+    await agent.send(done, { prompt: 'script:answer', target: 'garden', viewing: 'Agents', selection: [] });
+    const asking = await agent.start({ provider: 'fake' });
+    await agent.send(asking, { prompt: 'script:permission', target: 'garden', viewing: 'Agents', selection: [] });
+    return { done, asking };
+  });
+  await page.locator(`.conv[data-id="${ids.asking}"][data-state="waiting"]`).waitFor();
+  await page.locator(`.conv[data-id="${ids.done}"][data-state="unseen"]`).waitFor();
+  await page.keyboard.press('v');
+  await page.waitForFunction(() => document.body.getAttribute('data-view') === 'board');
+  const order = await page.evaluate(() => [...document.querySelectorAll('.column[data-col="review"] > .conv:not([hidden])')].map((el) => el.dataset.id));
+  assert.equal(order[0], ids.asking, 'waiting first');
+  assert.ok(order.includes(ids.done));
+  assert.equal(await page.locator(`.column[data-col="running"] .conv[data-id="${ids.asking}"]`).count(), 0);
+});
+
+test('a turn that finishes while its pane is focused is already seen', async () => {
+  const { page } = await openAgents();
+  const id = await page.evaluate(async () => {
+    const id = await window.marble.agent.start({ provider: 'fake' });
+    await window.marble.agent.update(id, { title: 'watched' });
+    return id;
+  });
+  await page.locator(`.conv[data-id="${id}"]`).click();
+  await page.locator(`.pane marble-conversation[conversation="${id}"]`).waitFor();
+  await page.evaluate((cid) => window.marble.agent.send(cid, { prompt: 'script:answer', target: 'garden', viewing: 'Agents', selection: [] }), id);
+  // waitForFunction takes an async predicate's Promise as truthy, so poll here.
+  for (let n = 0; n < 200; n += 1) {
+    if (await page.evaluate(async (cid) => Boolean((await window.marble.agent.conversation(cid)).meta.lastFinishedAt), id)) break;
+    await page.waitForTimeout(25);
+  }
+  await page.waitForTimeout(400);
+  assert.equal(await page.locator(`.conv[data-id="${id}"]`).getAttribute('data-status'), 'completed');
+});
+
+test('with no pane open, dragging a board card to the right edge opens it there', async () => {
+  const { page } = await openAgents();
+  const id = await page.evaluate(async () => {
+    const agent = window.marble.agent;
+    const id = await agent.start({ provider: 'fake' });
+    await agent.update(id, { title: 'to dock' });
+    return id;
+  });
+  await page.locator(`.conv[data-id="${id}"]`).waitFor();
+  await page.keyboard.press('v');
+  await page.waitForFunction(() => document.body.getAttribute('data-view') === 'board');
+  // The switch FLIPs the card into its column; measure it once it has landed.
+  await page.waitForFunction((cid) => document.querySelector(`.column .conv[data-id="${cid}"]`)?.getAnimations().every((a) => a.playState !== 'running'), id);
+  const row = await page.locator(`.column .conv[data-id="${id}"]`).boundingBox();
+  const board = await page.locator('.board').boundingBox();
+  await page.mouse.move(row.x + 40, row.y + 12);
+  await page.mouse.down();
+  await page.mouse.move(row.x + 80, row.y + 40, { steps: 3 });
+  await page.mouse.move(board.x + board.width - 30, board.y + board.height / 2, { steps: 10 });
+  await page.locator('.board-dockzone[data-drop]').waitFor();
+  await page.mouse.up();
+  await page.waitForFunction(() => document.body.getAttribute('data-panel') === 'open');
+  assert.equal(await page.locator('.pane marble-conversation').getAttribute('conversation'), id);
+});
+
+test('a thin board stacks its columns and scrolls as one', async () => {
+  const { page } = await openAgents({ viewport: { width: 980, height: 800 } });
+  const id = await page.evaluate(async () => {
+    const agent = window.marble.agent;
+    const id = await agent.start({ provider: 'fake' });
+    await agent.update(id, { title: 'stacked' });
+    return id;
+  });
+  await page.locator(`.conv[data-id="${id}"]`).waitFor();
+  await page.keyboard.press('v');
+  await page.waitForFunction(() => document.body.getAttribute('data-view') === 'board');
+  assert.equal(await page.locator('.board[data-stack]').count(), 0, 'wide enough for three columns');
+  await page.locator(`.column .conv[data-id="${id}"]`).click();
+  await page.waitForFunction(() => document.body.getAttribute('data-panel') === 'open');
+  await page.locator('.board[data-stack]').waitFor();
+  const cols = await page.evaluate(() => [...document.querySelectorAll('.column')].map((c) => c.getBoundingClientRect()).map((r) => ({ x: Math.round(r.x), y: Math.round(r.y) })));
+  assert.ok(cols[0].x === cols[1].x && cols[1].x === cols[2].x, 'one column of three');
+  assert.ok(cols[0].y < cols[1].y && cols[1].y < cols[2].y, 'stacked in order');
+});
+
+test('a card changing column animates into place', async () => {
+  const { page } = await openAgents();
+  const id = await page.evaluate(async () => {
+    const agent = window.marble.agent;
+    const id = await agent.start({ provider: 'fake' });
+    await agent.update(id, { title: 'mover' });
+    return id;
+  });
+  await page.locator(`.conv[data-id="${id}"]`).waitFor();
+  await page.keyboard.press('v');
+  await page.waitForFunction(() => document.body.getAttribute('data-view') === 'board');
+  await page.waitForFunction((cid) => document.querySelector(`.column .conv[data-id="${cid}"]`)?.getAnimations().every((a) => a.playState !== 'running'), id);
+  const moved = page.evaluate((cid) => new Promise((resolve, reject) => {
+    const el = document.querySelector(`.conv[data-id="${cid}"]`);
+    const start = performance.now();
+    const tick = () => {
+      const anim = el.getAnimations().find((a) => a.playState === 'running' && a.effect?.getKeyframes?.().some((k) => k.transform));
+      if (anim && el.closest('.column')?.dataset.col !== 'completed') resolve(anim.effect.getTiming().duration);
+      else if (performance.now() - start > 8000) reject(new Error('no column move animation'));
+      else requestAnimationFrame(tick);
+    };
+    tick();
+  }), id);
+  await page.evaluate((cid) => window.marble.agent.send(cid, { prompt: 'script:answer', target: 'garden', viewing: 'Agents', selection: [] }), id);
+  const duration = await moved;
+  assert.ok(duration > 0 && duration <= 420, `column move animates (${duration}ms)`);
 });

@@ -40,6 +40,18 @@ const CLAUDE_QUOTAS = [
   ['seven_day', 'week', 'Weekly'],
 ];
 
+// Per-model weekly limits are entries in `limits` (kind `weekly_scoped`, group
+// `weekly`), named by scope.model.display_name; there is no top-level
+// seven_day_fable key. The name is matched as a word ("Fable", "Fable 5.1"),
+// and the weekly group by prefix, so a renamed kind or a versioned model does
+// not silently drop the slider. A missing array, a null scope or a missing
+// percent is simply no window.
+const fableLimit = (data) => (Array.isArray(data?.limits) ? data.limits : []).find((limit) => (
+  [limit?.kind, limit?.group].some((field) => /^weekly/.test(String(field ?? '')))
+  && /\bfable\b/i.test(String(limit.scope?.model?.display_name ?? ''))
+  && limit.percent != null && clampPct(limit.percent) != null
+)) ?? null;
+
 export function parseClaudeUsage(data) {
   const five = clampPct(data?.five_hour?.utilization);
   const week = clampPct(data?.seven_day?.utilization);
@@ -56,6 +68,8 @@ export function parseClaudeUsage(data) {
   const windows = CLAUDE_QUOTAS
     .map(([key, id, label]) => windowOf(id, label, clampPct(data?.[key]?.utilization), data?.[key]?.resets_at))
     .filter(Boolean);
+  const fable = fableLimit(data);
+  if (fable) windows.push(windowOf('fable', 'Fable', clampPct(fable.percent), fable.resets_at));
   return {
     id: 'claude-subscription',
     label: 'Claude',

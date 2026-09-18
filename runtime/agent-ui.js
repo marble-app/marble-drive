@@ -715,13 +715,45 @@
     }
   `;
 
+  /** Five words for what a conversation is doing, shared by every view. The
+   *  dot is the only thing that reads them; its colours are the same tokens
+   *  the status buckets already use. */
+  const stateOf = (summary) => {
+    if (summary?.asking) return 'waiting';
+    if (summary?.running || summary?.queued || summary?.status === 'running') return 'working';
+    if (summary?.needsReview) {
+      return summary.lastOutcome === 'failed' || summary.lastOutcome === 'watchdog' ? 'failed' : 'unseen';
+    }
+    return 'idle';
+  };
+
+  const STATE_CSS = `
+    .dot {
+      flex: none; width: 8px; height: 8px; border-radius: 999px;
+      background: var(--faint); box-sizing: border-box;
+    }
+    [data-state="idle"] .dot { background: transparent; border: 1.5px solid var(--faint); }
+    [data-state="unseen"] .dot { background: var(--ink); }
+    [data-state="failed"] .dot { background: var(--danger); }
+    [data-state="working"] .dot { background: var(--accent-ink); animation: dot-breathe 1.6s ease-in-out infinite; }
+    [data-state="waiting"] .dot { background: var(--caution); animation: dot-ring 1.8s ease-out infinite; }
+    @keyframes dot-breathe { 0%, 100% { opacity: 1; } 50% { opacity: .45; } }
+    @keyframes dot-ring {
+      0% { box-shadow: 0 0 0 0 color-mix(in srgb, var(--caution) 55%, transparent); }
+      70%, 100% { box-shadow: 0 0 0 7px transparent; }
+    }
+    @media (prefers-reduced-motion: reduce) {
+      [data-state="working"] .dot, [data-state="waiting"] .dot { animation: none; }
+    }
+  `;
+
   const USAGE_CSS = `
     .usage {
       display: flex; align-items: center; gap: .7rem; min-width: 0;
       user-select: none;
     }
     .meter {
-      display: flex; align-items: center; gap: .4rem; min-width: 0;
+      display: flex; align-items: center; gap: .4rem; min-width: 0; cursor: pointer;
     }
     .meter-label {
       font-size: 12.5px; font-weight: 500; color: var(--muted); letter-spacing: -.01em;
@@ -861,12 +893,27 @@
       if (meter && host.contains(meter)) placeTip(meter);
     });
     host.addEventListener('pointerleave', hideTip);
+    // A meter is a summary; the Usage tab is where the rest of it lives.
+    host.addEventListener('click', (event) => {
+      if (event.target.closest?.('.meter')) window.marble?.agent?.openSettings?.('usage');
+    });
   };
+
+  // The strip shows one slider per provider, plus Fable's weekly window beside
+  // Claude's. Its id is 'fable', not 'claude-*': the composer finds the Claude
+  // meter by that prefix. The popup reads the window off the Claude meter.
+  const compactMeters = (meters) => (meters ?? []).flatMap((meter) => {
+    const fable = usageAvailable(meter) ? (meter.windows ?? []).find((item) => item.id === 'fable') : null;
+    if (!fable) return [meter];
+    return [meter, {
+      id: 'fable', label: fable.label, available: true, used: fable.used, left: fable.left, window: 'week', resetsAt: fable.resetsAt,
+    }];
+  });
 
   const fillMeters = (host, meters) => {
     if (!host) return;
     host.replaceChildren();
-    for (const meter of meters ?? []) {
+    for (const meter of compactMeters(meters)) {
       const ready = usageAvailable(meter);
       const used = ready ? Math.max(0, Math.min(100, Number(meter.used) || 0)) : 0;
       const el = h('div', 'meter');
@@ -1181,6 +1228,9 @@
     :host([data-chrome="tile"]) .composer { padding: 4px 8px 8px; }
     :host([data-chrome="tile"]) .log { padding: 6px 12px 12px; }
     :host([data-chrome="tile"]) .mast { padding: 6px 12px 6px; }
+    /* A pane that is not the focused one steps back: the page dims its
+       surface, and the transcript loses a little colour with it. */
+    :host([data-focused="false"]) .log { filter: saturate(.85); }
     .heading { margin: 0; font: 500 15px/1.3 inherit; letter-spacing: -.015em; outline: none; min-height: 1.3em; border-radius: 6px; padding: 2px 4px; margin-left: -4px; }
     .heading:hover { background: var(--paper-2); }
     .heading:focus { background: var(--card); box-shadow: 0 0 0 1px var(--accent), 0 0 0 4px var(--accent-soft); }
@@ -3934,6 +3984,8 @@
       width: min(460px, calc(100vw - 24px)); max-height: min(80vh, 640px); overflow: auto;
       background: var(--card); color: var(--ink); border: 1px solid var(--line); border-radius: 16px;
       box-shadow: var(--shadow-lift); padding: 18px 18px 16px; display: flex; flex-direction: column; gap: 14px; }
+    .sheet[data-tab="usage"] { width: min(880px, calc(100vw - 24px)); max-height: min(90vh, 900px); }
+    .usage-history { margin-top: 4px; padding-top: 16px; border-top: 1px solid var(--line); }
     h2 { margin: 0; font-size: 16px; font-weight: 600; letter-spacing: -.02em; }
     .tabs { display: inline-flex; align-self: start; border: 1px solid var(--line); border-radius: 999px; padding: 2px; background: var(--paper-3); }
     .tabs button { appearance: none; border: 0; background: none; color: var(--muted); padding: .28rem .75rem; cursor: pointer; font: inherit; font-size: .85rem; border-radius: 999px; }
@@ -4025,7 +4077,7 @@
     connectedCallback() {
       this.unwatchTheme = watchPageTheme(this);
       this.setAttribute('data-open', this.getAttribute('data-open') || 'false');
-      this.onOpen = () => this.open();
+      this.onOpen = (event) => this.open(event?.detail?.tab);
       addEventListener('marble:agent-settings', this.onOpen);
       this.shadowRoot.querySelector('.backdrop').addEventListener('click', () => this.close());
       this.closeButton.addEventListener('click', () => this.close());
@@ -4051,7 +4103,8 @@
       removeEventListener('keydown', this.onKey, true);
     }
 
-    open() {
+    open(tab) {
+      if (tab) this.tab = tab === 'usage' ? 'usage' : 'settings';
       this.setAttribute('data-open', 'true');
       this.fill();
     }
@@ -4068,6 +4121,7 @@
       }
       this.body.hidden = this.tab !== 'settings';
       this.usagePane.hidden = this.tab !== 'usage';
+      this.shadowRoot.querySelector('.sheet').dataset.tab = this.tab;
       this.saveButton.hidden = this.tab === 'usage';
       this.closeButton.textContent = this.tab === 'usage' ? 'Close' : 'Cancel';
     }
@@ -4180,6 +4234,30 @@
       projects.append(add);
       this.body.replaceChildren(agents, keys, projects);
       fillUsageDetail(this.usagePane, usage.meters ?? []);
+      this.loadHistory();
+    }
+
+    // The daily picture under the live limits. It is its own request so a slow
+    // or failed scan never holds up the limit bars above it.
+    async loadHistory() {
+      const charts = window.marbleUsageCharts;
+      if (!charts || !this.api?.usageHistory) return;
+      if (!this.shadowRoot.querySelector('style.uh-css')) {
+        const style = document.createElement('style');
+        style.className = 'uh-css';
+        style.textContent = charts.CSS;
+        this.shadowRoot.append(style);
+      }
+      const token = (this.historyToken = (this.historyToken ?? 0) + 1);
+      const host = h('section', 'usage-history');
+      this.usagePane.append(host);
+      charts.renderLoading(host);
+      try {
+        const history = await this.api.usageHistory(26);
+        if (token === this.historyToken) charts.render(host, history);
+      } catch {
+        if (token === this.historyToken) charts.renderMessage(host, "Couldn't read usage history.");
+      }
     }
 
     keyRow(name, label, set) {
@@ -4887,7 +4965,7 @@
     document.body.append(drawer);
   };
 
-  window.marbleAgentUI = { renderText, spring, project, TOKENS, conversationTags, eventBelongsToConversation, askResponse, TAG_CSS, fillMeters, usageAvailable, usageTone, formatReset, USAGE_CSS, pageTheme, applyPageTheme, fillRadios, fitPicker, fitPresets, sortProviders };
+  window.marbleAgentUI = { stateOf, STATE_CSS, renderText, spring, project, TOKENS, conversationTags, eventBelongsToConversation, askResponse, TAG_CSS, fillMeters, usageAvailable, usageTone, formatReset, USAGE_CSS, pageTheme, applyPageTheme, fillRadios, fitPicker, fitPresets, sortProviders };
   Object.assign(window.marbleAgentUI, { collapseToolRows, toolShortName });
 
   if (window.marble?.agent) mount();
