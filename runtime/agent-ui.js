@@ -986,42 +986,83 @@
     return note === null ? { behavior: 'allow' } : { behavior: 'deny', message: note || 'Denied from Marble' };
   }
 
+  // Kept identical to TOOL_ALIASES in runtime/choice-question.js, which is
+  // the node-tested copy; this file is a classic script and cannot import it.
+  const SHORT_NAMES = new Map([
+    ['shell', 'Shell'], ['bash', 'Shell'], ['read_document', 'Read'], ['read', 'Read'],
+    ['apply_ops', 'Edit'], ['edit', 'Edit'], ['updatetodos', 'Todos'], ['todowrite', 'Todos'], ['task', 'Task'],
+  ]);
+  const toolShortName = (name) => {
+    if (!name) return 'Tool';
+    const alias = SHORT_NAMES.get(String(name).toLowerCase());
+    if (alias) return alias;
+    const segment = String(name).split(/[/:]/).pop() || '';
+    return segment ? segment.charAt(0).toUpperCase() + segment.slice(1) : 'Tool';
+  };
+  const tail = (p) => String(p ?? '').replace(/\/+$/, '').split('/').pop() || String(p ?? '');
+  const trimTo = (s, n = 60) => {
+    const one = String(s ?? '').replace(/\s+/g, ' ').trim();
+    return one.length > n ? `${one.slice(0, n - 1)}…` : one;
+  };
+  const hostOf = (url) => { try { return new URL(url).host; } catch { return String(url ?? ''); } };
+  const firstString = (input) => Object.values(input ?? {}).find((v) => typeof v === 'string' && v.trim()) ?? '';
+
+  /** One line per call: a verb, and the thing it touched. `source` is what a
+   *  folded run lists; `short` is the kind it counts by. */
   function toolLabel(name, input = {}) {
     const where = input.path ? ` ${input.path}` : '';
+    const short = toolShortName(name);
+    const out = (label, source = '') => ({ label, short, source });
     switch (name) {
       case 'read_document':
-        return `Read${where}${Array.isArray(input.ids) && input.ids.length ? ` · ${plural(input.ids.length, 'element')}` : ''}`;
+        return out(`Read${where}${Array.isArray(input.ids) && input.ids.length ? ` · ${plural(input.ids.length, 'element')}` : ''}`, input.path ?? '');
       case 'apply_ops':
-        return `Editing${where}${input.note ? ` — ${input.note}` : ''}`;
-      case 'list_documents':
-        return 'Listed documents';
-      case 'create_document':
-        return `Creating${where}`;
-      case 'read_guide':
-        return input.section ? `Read the guide · ${input.section}` : 'Read the guide';
-      case 'check_document':
-        return `Check${where}`;
-      case 'browser_navigate':
-        return input.url ? `Open ${input.url}` : 'Open page';
-      case 'browser_snapshot':
-        return 'Snapshot page';
-      case 'browser_click':
-        return input.ref ? `Click ${input.ref}` : 'Click';
-      case 'browser_type':
-        return 'Type in page';
-      case 'browser_tabs':
-        return input.action === 'new' ? 'New tab' : input.action === 'close' ? 'Close tab' : 'Tabs';
-      case 'browser_take_screenshot':
-        return 'Screenshot';
-      case 'browser_close':
-        return 'Close browser';
-      case 'browser_navigate_back':
-        return 'Back';
+        return out(`Editing${where}${input.note ? ` — ${input.note}` : ''}`, input.path ?? '');
+      case 'list_documents': return out('Listed documents');
+      case 'create_document': return out(`Creating${where}`, input.path ?? '');
+      case 'read_guide': return out(input.section ? `Read the guide · ${input.section}` : 'Read the guide', input.section ?? '');
+      case 'check_document': return out(`Check${where}`, input.path ?? '');
+      case 'browser_navigate': return out(input.url ? `Open ${input.url}` : 'Open page', hostOf(input.url));
+      case 'browser_snapshot': return out('Snapshot page');
+      case 'browser_click': return out(input.ref ? `Click ${input.ref}` : 'Click', input.ref ?? '');
+      case 'browser_type': return out('Type in page');
+      case 'browser_tabs': return out(input.action === 'new' ? 'New tab' : input.action === 'close' ? 'Close tab' : 'Tabs');
+      case 'browser_take_screenshot': return out('Screenshot');
+      case 'browser_close': return out('Close browser');
+      case 'browser_navigate_back': return out('Back');
       case 'WebSearch':
-      case 'web_search':
-        return input.search_term || input.query ? `Search ${input.search_term || input.query}` : 'Web search';
-      default:
-        return `Tried ${name}`;
+      case 'web_search': {
+        const q = input.search_term || input.query || '';
+        return out(q ? `Search ${q}` : 'Web search', q);
+      }
+      case 'Bash':
+      case 'Shell':
+      case 'shell': {
+        const what = trimTo(input.description || input.command || input.cmd || '');
+        return out(what ? `Ran ${what}` : 'Ran a command', what);
+      }
+      case 'Read':
+      case 'read_file': { const t = tail(input.file_path ?? input.path); return out(`Read ${t}`, t); }
+      case 'Grep': {
+        const p = trimTo(input.pattern, 40);
+        return out(`Grep ${p}${input.path ? ` in ${tail(input.path)}` : ''}`, p);
+      }
+      case 'Glob': { const p = trimTo(input.pattern, 40); return out(`Glob ${p}`, p); }
+      case 'Edit':
+      case 'MultiEdit':
+      case 'NotebookEdit': { const t = tail(input.file_path ?? input.notebook_path); return out(`Edited ${t}`, t); }
+      case 'Write': { const t = tail(input.file_path); return out(`Wrote ${t}`, t); }
+      case 'LS': { const t = tail(input.path); return out(`Listed ${t}`, t); }
+      case 'WebFetch': { const hst = hostOf(input.url); return out(`Fetched ${hst}`, hst); }
+      case 'Task':
+      case 'Agent': { const d = trimTo(input.description || input.prompt || ''); return out(d ? `Agent · ${d}` : 'Agent', d); }
+      case 'TodoWrite':
+      case 'updateTodos': return out('Updated todos');
+      case 'Skill': return out(`Skill /${input.skill ?? input.name ?? ''}`, input.skill ?? '');
+      default: {
+        const arg = trimTo(firstString(input));
+        return out(arg ? `${short} ${arg}` : short, arg);
+      }
     }
   }
 
@@ -3169,7 +3210,7 @@
         card.append(h('div', 'ask-title', `Allow ${event.displayName || event.tool}?`));
         const detail = event.input?.command ?? event.input?.file_path ?? event.input?.path ?? event.input?.url ?? '';
         if (detail) card.append(h('pre', '', String(detail)));
-        else card.append(h('div', 'tool', toolLabel(event.tool, event.input ?? {})));
+        else card.append(h('div', 'tool', toolLabel(event.tool, event.input ?? {}).label));
         const actions = h('div', 'ask-actions');
         const allow = h('button', 'allow', 'Allow');
         allow.type = 'button';
@@ -3243,9 +3284,12 @@
     }
 
     toolCall(turn, event) {
-      const row = h('div', 'tool', toolLabel(event.name, event.input));
+      const { label, short, source } = toolLabel(event.name, event.input);
+      const row = h('div', 'tool', label);
       row.dataset.state = 'pending';
       row.dataset.name = event.name;
+      row.dataset.short = short;
+      if (source) row.dataset.source = source;
       const record = this.record(turn);
       record.tools.set(event.callId, row);
       if (event.name === 'apply_ops') record.applies.push({ row, path: event.input?.path });

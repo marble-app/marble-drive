@@ -21,6 +21,15 @@ const SCRIPTS = {
     { call: 'apply_ops', args: { path: 'garden', note: 'unread', ops: [{ type: 'setText', id: 'p', text: 'x' }] } },
     { say: 'It was refused.' },
   ],
+  tools: [
+    { tool: 'Bash', input: { command: 'node --test test/agent-runner.test.js', description: 'Run the runner tests' } },
+    { tool: 'Read', input: { file_path: '/Users/x/marble-drive/test-browser/harness.js' } },
+    { tool: 'Read', input: { file_path: '/Users/x/marble-drive/templates/agents.mrbl' } },
+    { tool: 'Grep', input: { pattern: 'packFocus', path: '/Users/x/marble-drive/runtime' } },
+    { tool: 'Bash', input: { command: 'git diff --stat' } },
+    { tool: 'Edit', input: { file_path: '/Users/x/marble-drive/runtime/agent-ui.js' } },
+    { say: 'Six calls later.' },
+  ],
 };
 
 const host = await startDrive({ scripts: SCRIPTS });
@@ -737,6 +746,21 @@ test('the transcript shows the agent’s words, its tool calls, and what changed
   assert.match(await tools.nth(1).textContent(), /Edited 1 element in garden/);
   assert.equal(await tools.nth(1).getAttribute('data-state'), 'done');
   assert.match(await view.locator('.turn-footer').last().textContent(), /Changed 1 element/);
+});
+
+test('a CLI tool row names what it touched, never "Tried"', async () => {
+  const { view } = await mount();
+  await sendFrom(view, 'script:tools');
+  await view.locator('.turn-footer[data-status="completed"]').waitFor();
+  const rows = view.locator('.tool');
+  assert.match(await rows.nth(0).textContent(), /^Ran Run the runner tests$/);
+  assert.match(await rows.nth(1).textContent(), /^Read harness\.js$/);
+  assert.match(await rows.nth(3).textContent(), /^Grep packFocus in runtime$/);
+  assert.match(await rows.nth(4).textContent(), /^Ran git diff --stat$/);
+  assert.match(await rows.nth(5).textContent(), /^Edited agent-ui\.js$/);
+  assert.equal(await rows.nth(1).getAttribute('data-short'), 'Read');
+  assert.equal(await rows.nth(1).getAttribute('data-source'), 'harness.js');
+  assert.equal(await view.locator('.tool', { hasText: 'Tried' }).count(), 0);
 });
 
 test('undo reverts the turn and says so', async () => {
