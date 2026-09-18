@@ -73,8 +73,9 @@ test('picker providers are Claude, Cursor, then KIXLAB API', () => {
 });
 
 test('Shift+Tab walks each CLI’s modes and wraps', () => {
-  assert.equal(nextMode(CLAUDE_MODES, 'default'), 'acceptEdits');
-  assert.equal(nextMode(CLAUDE_MODES, 'bypassPermissions'), 'default');
+  assert.equal(nextMode(CLAUDE_MODES, 'auto'), 'acceptEdits');
+  assert.equal(nextMode(CLAUDE_MODES, 'bypassPermissions'), 'auto');
+  assert.equal(nextMode(CLAUDE_MODES, 'default'), 'auto', 'a mode from before auto existed steps onto the wheel');
   assert.equal(nextMode(CURSOR_MODES, 'agent'), 'plan');
   assert.equal(nextMode(CURSOR_MODES, 'review'), 'agent');
   assert.equal(CURSOR_MODES[0].label, 'Run Everything');

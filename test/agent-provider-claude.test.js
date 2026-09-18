@@ -9,6 +9,8 @@ import { fileURLToPath } from 'node:url';
 import { INSTRUCTIONS } from '../server/agent/instructions.js';
 import { createClaudeProvider, parseClaudeLine } from '../server/agent/providers/claude.js';
 
+const instructionsModule = await import('../server/agent/instructions.js');
+
 const FIXTURES = path.join(path.dirname(fileURLToPath(import.meta.url)), 'fixtures', 'providers');
 const stream = (name) => fs.readFileSync(path.join(FIXTURES, `${name}.jsonl`), 'utf8').trim().split('\n');
 const parseAll = (name) => stream(name).flatMap((line) => parseClaudeLine(line));
@@ -79,7 +81,7 @@ test('mcp__browser__ and mcp__marble__ prefixes both drop so the UI sees the too
   assert.equal(parseClaudeLine(native)[0].name, 'WebSearch');
 });
 
-test('ids, labels, and the spawn verified by the spike', () => {
+test('ids, labels, catalog, and the documents spawn', () => {
   const sub = createClaudeProvider({ auth: 'subscription', env: { ANTHROPIC_API_KEY: 'sk-test' } });
   const api = createClaudeProvider({ auth: 'api', env: { ANTHROPIC_API_KEY: 'sk-test' } });
   assert.equal(sub.id, 'claude-subscription');
@@ -90,30 +92,20 @@ test('ids, labels, and the spawn verified by the spike', () => {
   const spec = sub.spawn({ workspace: '/w', prompt: 'Rename it', resume: 'sess-1', model: 'claude-haiku-4-5', effort: 'high', env: { PATH: '/bin' } });
   assert.equal(spec.command, 'claude');
   assert.equal(spec.stdin, 'Rename it');
+  assert.ok(!spec.stdinOpen, 'a documents turn closes stdin after the prompt as before');
   assert.deepEqual(spec.args, [
     '-p', '--output-format', 'stream-json', '--verbose', '--include-partial-messages',
     '--tools', '', '--strict-mcp-config', '--mcp-config', path.join('/w', 'mcp.json'),
     '--allowedTools', 'mcp__marble', '--setting-sources', 'project',
     '--append-system-prompt', INSTRUCTIONS, '--model', 'claude-haiku-4-5', '--effort', 'high', '--resume', 'sess-1',
   ]);
-  assert.ok(!spec.args.includes('--bare'));
-  assert.ok(!spec.args.includes('--disable-slash-commands'), 'skills and /compact need slash commands on');
   assert.deepEqual(spec.env, {}, 'the subscription never gets the API key');
   assert.deepEqual(api.spawn({ workspace: '/w', prompt: 'x', env: {} }).env, { ANTHROPIC_API_KEY: 'sk-test' });
   assert.ok(!sub.spawn({ workspace: '/w', prompt: 'x', env: {} }).args.includes('--resume'));
-  assert.ok(!sub.spawn({ workspace: '/w', prompt: 'x', env: {} }).args.includes('--effort'));
   assert.deepEqual(sub.models.map((m) => m.id), ['haiku', 'sonnet', 'opus', 'fable']);
-  assert.deepEqual(sub.models.map((m) => m.label), ['Haiku 4.5', 'Sonnet 4.5', 'Opus 4.1', 'Fable 5']);
+  assert.deepEqual(sub.models.map((m) => m.label), ['Haiku 4.5', 'Sonnet 5', 'Opus 5', 'Fable 5.1']);
   assert.deepEqual(sub.efforts, ['low', 'medium', 'high', 'xhigh', 'max']);
-  assert.deepEqual(sub.modes.map((m) => m.id), ['default', 'acceptEdits', 'plan', 'bypassPermissions']);
-
-  const planned = sub.spawn({ workspace: '/w', prompt: 'x', mode: 'plan', env: {} });
-  assert.ok(planned.args.includes('--permission-mode'));
-  assert.equal(planned.args[planned.args.indexOf('--permission-mode') + 1], 'plan');
-  const bypass = sub.spawn({ workspace: '/w', prompt: 'x', mode: 'bypassPermissions', env: {} });
-  assert.ok(bypass.args.includes('--permission-mode'));
-  assert.ok(bypass.args.includes('--allow-dangerously-skip-permissions'));
-  assert.ok(!sub.spawn({ workspace: '/w', prompt: 'x', env: {} }).args.includes('--permission-mode'));
+  assert.deepEqual(sub.modes.map((m) => m.id), ['auto', 'acceptEdits', 'plan', 'manual', 'bypassPermissions']);
 });
 
 test('prepare writes the MCP config privately, with the turn\'s bridge', async () => {
@@ -208,20 +200,24 @@ test('a subagent\'s deltas and tool results are not the turn\'s', () => {
   assert.equal(parseClaudeLine(JSON.stringify({ ...result, parent_tool_use_id: null })).length, 1);
 });
 
-test('each capability is told the truth about its own tools', async () => {
-  const { instructionsFor, INSTRUCTIONS } = await import('../server/agent/instructions.js');
+test('each capability and project kind gets its own instructions', () => {
+  const { instructionsFor, INSTRUCTIONS: DOCS, DRIVE_INSTRUCTIONS, PROJECT_INSTRUCTIONS } = instructionsModule;
+  assert.equal(instructionsFor('documents'), DOCS);
+  assert.equal(instructionsFor('documents', 'project'), DOCS, 'a documents agent never sees a project');
+  assert.match(DOCS, /There are no file or shell tools/);
 
-  assert.equal(instructionsFor('documents'), INSTRUCTIONS);
-  assert.match(instructionsFor('documents'), /There are no file or shell tools/);
+  assert.equal(instructionsFor('full'), DRIVE_INSTRUCTIONS);
+  assert.equal(instructionsFor('full', 'drive'), DRIVE_INSTRUCTIONS);
+  assert.doesNotMatch(DRIVE_INSTRUCTIONS, /reach nothing outside/);
+  assert.match(DRIVE_INSTRUCTIONS, /data-marble-id/);
+  assert.match(DRIVE_INSTRUCTIONS, /apply_ops/);
+  assert.match(DRIVE_INSTRUCTIONS, /Grep/);
+  assert.match(DRIVE_INSTRUCTIONS, /check_document/);
 
-  const full = instructionsFor('full');
-  assert.doesNotMatch(full, /There are no file or shell tools/);
-  assert.match(full, /data-marble-id/, 'a full agent still has to keep ids');
-  assert.match(full, /apply_ops/, 'ops are still the right tool for a live document');
-  assert.match(full, /Grep/, 'it must be steered off Read on a 3 MB document');
-  assert.match(full, /check_document/);
-  assert.match(full, /WebSearch/);
-  assert.match(full, /browser_navigate/);
+  assert.equal(instructionsFor('full', 'project'), PROJECT_INSTRUCTIONS);
+  assert.match(PROJECT_INSTRUCTIONS, /usual coding agent/);
+  assert.match(PROJECT_INSTRUCTIONS, /apply_ops/);
+  assert.ok(PROJECT_INSTRUCTIONS.length < DRIVE_INSTRUCTIONS.length, 'a project agent needs less telling');
 });
 
 test('prepare replaces an existing, looser MCP config with a private one, and leaves nothing beside it', async () => {
@@ -236,56 +232,83 @@ test('prepare replaces an existing, looser MCP config with a private one, and le
   assert.deepEqual(await fsp.readdir(workspace), ['mcp.json']);
 });
 
-test('a full-capability spawn is confined, tooled, and prompt-free', async () => {
-  const { instructionsFor } = await import('../server/agent/instructions.js');
+test('a full-capability spawn is the terminal\'s, with Marble added and prompts routed to stdin', () => {
   const sub = createClaudeProvider({ auth: 'subscription', env: {} });
-  assert.equal(sub.capability, 'full');
-
-  const spec = sub.spawn({
-    workspace: '/w', prompt: 'Rewrite it', capability: 'full', cwd: '/drive', env: { PATH: '/bin' },
-  });
-
-  assert.equal(spec.cwd, '/drive', 'a full agent runs in the drive, not the workspace');
+  const { DRIVE_INSTRUCTIONS, PROJECT_INSTRUCTIONS } = instructionsModule;
+  const spec = sub.spawn({ workspace: '/w', prompt: 'Rewrite it', capability: 'full', kind: 'drive', cwd: '/drive', env: { PATH: '/bin' } });
+  assert.equal(spec.cwd, '/drive');
+  assert.equal(spec.stdinOpen, true);
   assert.deepEqual(spec.args, [
-    '-p', '--output-format', 'stream-json', '--verbose', '--include-partial-messages',
-    '--restricted',
-    '--tools', 'Bash,Read,Write,Edit,Glob,Grep,TodoWrite,WebSearch,WebFetch',
-    '--settings', path.join('/w', 'settings.json'),
-    '--permission-prompts', 'none',
-    '--strict-mcp-config', '--mcp-config', path.join('/w', 'mcp.json'),
-    '--append-system-prompt', instructionsFor('full'),
+    '-p', '--output-format', 'stream-json', '--input-format', 'stream-json', '--verbose', '--include-partial-messages',
+    '--permission-mode', 'auto',
+    '--permission-prompts', 'host', '--permission-prompt-tool', 'stdio',
+    '--mcp-config', path.join('/w', 'mcp.json'),
+    '--append-system-prompt', DRIVE_INSTRUCTIONS,
   ]);
-  assert.ok(!spec.args.includes('--setting-sources'), '--restricted already sheds this machine settings');
-  assert.ok(!spec.args.includes('--dangerously-skip-permissions'));
+  for (const gone of ['--restricted', '--tools', '--settings', '--strict-mcp-config', '--setting-sources', '--model', '--effort']) {
+    assert.ok(!spec.args.includes(gone), `${gone} must not be passed`);
+  }
+  const lines = spec.stdin.trim().split('\n').map((line) => JSON.parse(line));
+  assert.deepEqual(lines[0], { type: 'control_request', request_id: 'marble-init', request: { subtype: 'initialize', hooks: {} } });
+  assert.deepEqual(lines[1], { type: 'user', message: { role: 'user', content: 'Rewrite it' } });
+
+  const project = sub.spawn({ workspace: '/w', prompt: 'x', capability: 'full', kind: 'project', cwd: '/repo', model: 'fable', effort: 'high', resume: 's1', mode: 'manual', env: {} });
+  assert.equal(project.args[project.args.indexOf('--append-system-prompt') + 1], PROJECT_INSTRUCTIONS);
+  assert.equal(project.args[project.args.indexOf('--permission-mode') + 1], 'manual');
+  assert.deepEqual(project.args.slice(-6), ['--model', 'fable', '--effort', 'high', '--resume', 's1']);
+
+  const legacy = sub.spawn({ workspace: '/w', prompt: 'x', capability: 'full', kind: 'drive', cwd: '/drive', mode: 'default', env: {} });
+  assert.equal(legacy.args[legacy.args.indexOf('--permission-mode') + 1], 'auto', 'a stored default mode runs as auto');
+  const bypass = sub.spawn({ workspace: '/w', prompt: 'x', capability: 'full', kind: 'drive', cwd: '/drive', mode: 'bypassPermissions', env: {} });
+  assert.ok(bypass.args.includes('--allow-dangerously-skip-permissions'));
 });
 
 test('a documents-capability spawn is exactly what it was before', () => {
   const sub = createClaudeProvider({ auth: 'subscription', env: {} });
   const before = sub.spawn({ workspace: '/w', prompt: 'x', env: {} });
-  const asked = sub.spawn({ workspace: '/w', prompt: 'x', capability: 'documents', cwd: '/drive', env: {} });
+  const asked = sub.spawn({ workspace: '/w', prompt: 'x', capability: 'documents', kind: 'drive', cwd: '/drive', env: {} });
   assert.deepEqual(asked.args, before.args, 'the old boundary is untouched by the new one');
   assert.ok(asked.args.includes('--tools') && asked.args[asked.args.indexOf('--tools') + 1] === '');
   assert.equal(asked.cwd, undefined, 'a documents agent still runs in its empty workspace');
 });
 
-test('a full-capability prepare writes the browser MCP server and private settings', async () => {
-  const workspace = await fsp.mkdtemp(path.join(os.tmpdir(), 'marble-full-'));
+test('a full-capability prepare writes only a private mcp.json, with the browser server, and no settings file', async () => {
+  const sub = createClaudeProvider({ auth: 'subscription', env: {} });
+  const workspace = await fsp.mkdtemp(path.join(os.tmpdir(), 'marble-claude-full-'));
   const mcp = { command: 'node', args: ['/bridge.js'], env: { MARBLE_AGENT_TOKEN: 't' } };
-  const browser = { command: 'node', args: ['/browser.js'], env: { MARBLE_BROWSER_PROFILE: '/w/browser-profile' } };
-
-  await createClaudeProvider().prepare({ workspace, mcp, browser, meta: {}, capability: 'full' });
-  const file = path.join(workspace, 'settings.json');
-  const stat = await fsp.stat(file);
-  assert.equal(stat.mode & 0o777, 0o600);
-  assert.deepEqual(JSON.parse(await fsp.readFile(file, 'utf8')), {
-    permissions: { allow: ['Bash', 'Read', 'Write', 'Edit', 'Glob', 'Grep', 'TodoWrite', 'WebSearch', 'WebFetch', 'mcp__browser'] },
-  });
+  const browser = { command: 'node', args: ['/browser.js'], env: { MARBLE_BROWSER_PROFILE: '/p' } };
+  await sub.prepare({ workspace, mcp, browser, capability: 'full', kind: 'drive' });
   const mcpFile = JSON.parse(await fsp.readFile(path.join(workspace, 'mcp.json'), 'utf8'));
   assert.deepEqual(mcpFile.mcpServers.marble, mcp);
   assert.deepEqual(mcpFile.mcpServers.browser, browser);
+  assert.equal((await fsp.stat(path.join(workspace, 'mcp.json'))).mode & 0o777, 0o600);
+  await assert.rejects(fsp.stat(path.join(workspace, 'settings.json')), { code: 'ENOENT' });
+});
 
-  const other = await fsp.mkdtemp(path.join(os.tmpdir(), 'marble-docs-'));
-  await createClaudeProvider().prepare({ workspace: other, mcp, browser, meta: {}, capability: 'documents' });
-  await assert.rejects(fsp.stat(path.join(other, 'settings.json')), { code: 'ENOENT' });
-  assert.deepEqual(JSON.parse(await fsp.readFile(path.join(other, 'mcp.json'), 'utf8')), { mcpServers: { marble: mcp } });
+test('a permission prompt on stdout becomes an ask, the initialize reply becomes a catalog, and init lists skills', () => {
+  const ask = parseClaudeLine(JSON.stringify({
+    type: 'control_request', request_id: 'r1',
+    request: { subtype: 'can_use_tool', tool_name: 'AskUserQuestion', display_name: 'AskUserQuestion', input: { questions: [] }, tool_use_id: 'tu1', requires_user_interaction: true },
+  }));
+  assert.deepEqual(ask, [{ type: 'ask', requestId: 'r1', tool: 'AskUserQuestion', displayName: 'AskUserQuestion', input: { questions: [] }, interactive: true }]);
+
+  const bash = parseClaudeLine(JSON.stringify({
+    type: 'control_request', request_id: 'r2',
+    request: { subtype: 'can_use_tool', tool_name: 'Bash', input: { command: 'rm -rf build' }, tool_use_id: 'tu2' },
+  }));
+  assert.equal(bash[0].displayName, 'Bash');
+  assert.equal(bash[0].interactive, false);
+
+  const catalog = parseClaudeLine(JSON.stringify({
+    type: 'control_response',
+    response: { subtype: 'success', request_id: 'marble-init', response: { commands: [{ name: 'apple-design', description: 'Apple UI' }, { name: 'superpowers:brainstorming', description: 'Design first' }] } },
+  }));
+  assert.deepEqual(catalog, [{ type: 'catalog', skills: [{ id: 'apple-design', name: 'apple-design', description: 'Apple UI' }, { id: 'superpowers:brainstorming', name: 'superpowers:brainstorming', description: 'Design first' }] }]);
+  assert.deepEqual(parseClaudeLine(JSON.stringify({ type: 'control_response', response: { subtype: 'success', request_id: 'other' } })), []);
+
+  const init = parseClaudeLine(JSON.stringify({ type: 'system', subtype: 'init', session_id: 's', slash_commands: ['compact', 'apple-design'], agents: ['Explore'] }));
+  assert.deepEqual(init, [
+    { type: 'session', id: 's' },
+    { type: 'catalog', skills: [{ id: 'compact', name: 'compact', description: '' }, { id: 'apple-design', name: 'apple-design', description: '' }], agents: ['Explore'] },
+  ]);
 });

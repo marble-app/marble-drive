@@ -3,10 +3,12 @@
 // Two invocations, one per capability. A `documents` turn is the 2026-09-16
 // spike: no built-in tools (`--tools ""`), only the marble MCP server, no user
 // settings (`--setting-sources project` over an empty workspace), prompt on
-// stdin. A `full` turn is the 2026-09-17 one: `--restricted` confines the file
-// tools to the working directory (the drive), `--tools` names the CLI's own
-// belt, and `--settings` plus `--permission-prompts none` keep a headless turn
-// from hanging on a prompt nobody can answer.
+// stdin. A `full` turn is the 2026-09-18 one: the CLI exactly as the terminal
+// runs it — the person's own settings, plugins, skills, hooks, memory, MCP
+// servers and subagents — with Marble's MCP server added by `--mcp-config`,
+// the working directory set to the conversation's project, and permission
+// prompts routed back to Marble over stream-json stdin so the person can
+// answer them from the drawer.
 //
 // The two providers differ only in billing: the subscription gets no API key
 // in its environment, so the CLI uses the login; the API provider hands it one.
@@ -21,29 +23,57 @@ import { writePrivateFile } from './private-file.js';
 
 export const CLAUDE_MODELS = [
   { id: 'haiku', label: 'Haiku 4.5' },
-  { id: 'sonnet', label: 'Sonnet 4.5' },
-  { id: 'opus', label: 'Opus 4.1' },
-  { id: 'fable', label: 'Fable 5' },
+  { id: 'sonnet', label: 'Sonnet 5' },
+  { id: 'opus', label: 'Opus 5' },
+  { id: 'fable', label: 'Fable 5.1' },
 ];
 export const CLAUDE_EFFORTS = ['low', 'medium', 'high', 'xhigh', 'max'];
-// Named once. `--restricted` confines file tools to the working directory;
-// Bash, WebSearch and WebFetch stay in the list because `--restricted` drops
-// them unless they are named. `mcp__browser` is the Marble-owned Playwright
-// server, allowed in settings rather than `--tools`.
-const FULL_TOOLS = 'Bash,Read,Write,Edit,Glob,Grep,TodoWrite,WebSearch,WebFetch';
-const FULL_SETTINGS = { permissions: { allow: [...FULL_TOOLS.split(','), 'mcp__browser'] } };
+// The request id Marble gives the stream-json initialize handshake. Its reply
+// carries the CLI's own skills list.
+export const INIT_REQUEST_ID = 'marble-init';
 const SUMMARY = 200;
 
 const toolName = (name) => String(name ?? '').replace(/^mcp__[a-zA-Z0-9_-]+__/, '');
 const textOf = (content) =>
   Array.isArray(content) ? content.filter((b) => b.type === 'text').map((b) => b.text).join('') : String(content ?? '');
+const skill = (name, description = '') => ({ id: String(name), name: String(name), description: String(description ?? '') });
 
 /** One line of `claude -p --output-format stream-json` as the runner's events. */
 export function parseClaudeLine(line) {
   const e = JSON.parse(line);
   switch (e.type) {
-    case 'system':
-      return e.subtype === 'init' && e.session_id ? [{ type: 'session', id: e.session_id }] : [];
+    case 'system': {
+      if (e.subtype !== 'init') return [];
+      const events = [];
+      if (e.session_id) events.push({ type: 'session', id: e.session_id });
+      const names = Array.isArray(e.slash_commands) ? e.slash_commands : [];
+      if (names.length) {
+        events.push({ type: 'catalog', skills: names.map((name) => skill(name)), agents: Array.isArray(e.agents) ? e.agents : [] });
+      }
+      return events;
+    }
+
+    // The CLI needs the person: a permission prompt, or AskUserQuestion.
+    case 'control_request': {
+      const r = e.request ?? {};
+      if (r.subtype !== 'can_use_tool') return [];
+      return [{
+        type: 'ask',
+        requestId: e.request_id,
+        tool: r.tool_name,
+        displayName: r.display_name ?? r.tool_name,
+        input: r.input ?? {},
+        interactive: Boolean(r.requires_user_interaction),
+      }];
+    }
+
+    // The answer to our initialize handshake lists the CLI's skills with
+    // descriptions; any other reply is bookkeeping.
+    case 'control_response': {
+      const r = e.response ?? {};
+      if (r.request_id !== INIT_REQUEST_ID || !Array.isArray(r.response?.commands)) return [];
+      return [{ type: 'catalog', skills: r.response.commands.map((c) => skill(c.name, c.description)) }];
+    }
 
     // A line with a parent_tool_use_id belongs to a subagent working inside a
     // tool call, not to the turn itself.
@@ -149,65 +179,62 @@ export function createClaudeProvider({ auth = 'subscription', exec = runCommand,
     efforts: CLAUDE_EFFORTS,
     modes: CLAUDE_MODES,
 
-    async prepare({ workspace, mcp, browser = null, skills = [], capability = 'documents' }) {
+    async prepare({ workspace, mcp, browser = null, capability = 'documents' }) {
       const config = { mcpServers: { marble: { command: mcp.command, args: mcp.args, env: mcp.env } } };
       if (capability === 'full' && browser) config.mcpServers.browser = browser;
       // The token in here is good for one turn, and nobody else's business.
       await writePrivateFile(path.join(workspace, 'mcp.json'), JSON.stringify(config, null, 2));
-      // `--restricted` refuses bypassPermissions and ignores this machine's
-      // settings, so the only way a headless turn never stops on a prompt is
-      // an allow-list it is handed explicitly.
-      if (capability === 'full') {
-        await writePrivateFile(path.join(workspace, 'settings.json'), JSON.stringify(FULL_SETTINGS, null, 2));
-      }
-      if (skills.length) {
-        const { installSkills } = await import('../skills.js');
-        await installSkills(workspace, skills);
-      }
     },
 
-    spawn({ workspace, prompt, resume = null, model = null, effort = null, mode = null, capability = 'documents', cwd = null }) {
+    spawn({ workspace, prompt, resume = null, model = null, effort = null, mode = null, capability = 'documents', kind = 'drive', cwd = null }) {
       const current = live();
       const full = capability === 'full';
-      const args = [
-        '-p', '--output-format', 'stream-json', '--verbose', '--include-partial-messages',
-        ...(full
-          ? [
-              // Confines the file tools to the working directory — the drive —
-              // and ignores this machine's user, project and local settings,
-              // which is what `--setting-sources project` was here for.
-              '--restricted',
-              '--tools', FULL_TOOLS,
-              '--settings', path.join(workspace, 'settings.json'),
-              // Anything the allow-list does not cover is denied, not left
-              // hanging: nobody is here to answer a prompt.
-              '--permission-prompts', 'none',
-              '--strict-mcp-config', '--mcp-config', path.join(workspace, 'mcp.json'),
-            ]
-          : [
-              '--tools', '', '--strict-mcp-config', '--mcp-config', path.join(workspace, 'mcp.json'),
-              '--allowedTools', 'mcp__marble', '--setting-sources', 'project',
-            ]),
-        '--append-system-prompt', instructionsFor(capability),
-      ];
-      if (model) args.push('--model', model);
-      if (effort) args.push('--effort', effort);
-      if (mode && mode !== 'default') {
+      // A conversation from before modes had `auto` stored `default`.
+      const permission = !mode || mode === 'default' ? 'auto' : mode;
+      const args = full
+        ? [
+            '-p', '--output-format', 'stream-json', '--input-format', 'stream-json', '--verbose', '--include-partial-messages',
+            // The person's own mode; whatever it would prompt for comes to us on stdout.
+            '--permission-mode', permission,
+            '--permission-prompts', 'host', '--permission-prompt-tool', 'stdio',
+            // Marble's server is added to whatever the person configured, not swapped for it.
+            '--mcp-config', path.join(workspace, 'mcp.json'),
+            '--append-system-prompt', instructionsFor('full', kind),
+          ]
+        : [
+            '-p', '--output-format', 'stream-json', '--verbose', '--include-partial-messages',
+            '--tools', '', '--strict-mcp-config', '--mcp-config', path.join(workspace, 'mcp.json'),
+            '--allowedTools', 'mcp__marble', '--setting-sources', 'project',
+            '--append-system-prompt', instructionsFor('documents'),
+          ];
+      if (full && permission === 'bypassPermissions') args.push('--allow-dangerously-skip-permissions');
+      if (!full && mode && mode !== 'default') {
         args.push('--permission-mode', mode);
         if (mode === 'bypassPermissions') args.push('--allow-dangerously-skip-permissions');
       }
+      // No model or effort means the person's own settings.json — the terminal default.
+      if (model) args.push('--model', model);
+      if (effort) args.push('--effort', effort);
       if (resume) args.push('--resume', resume);
       // Without a key the CLI would fall back to the login, and bill the
       // subscription for a conversation someone chose to put on the API.
       if (api && !current.ANTHROPIC_API_KEY) {
         throw new Error('ANTHROPIC_API_KEY is not set, so KIXLAB API cannot run — set it or choose Claude');
       }
+      // A full turn speaks stream-json: the initialize handshake first (it is
+      // what makes AskUserQuestion available and answers with the skills
+      // list), then the prompt as a user message. stdin stays open for the
+      // control responses that answer prompts.
+      const stdin = full
+        ? `${JSON.stringify({ type: 'control_request', request_id: INIT_REQUEST_ID, request: { subtype: 'initialize', hooks: {} } })}\n${JSON.stringify({ type: 'user', message: { role: 'user', content: prompt } })}\n`
+        : prompt;
       return {
         command: 'claude',
         args,
         env: api ? { ANTHROPIC_API_KEY: current.ANTHROPIC_API_KEY } : {},
-        stdin: prompt,
-        // A full agent works in the drive. A documents agent keeps its empty
+        stdin,
+        ...(full ? { stdinOpen: true } : {}),
+        // A full agent works in its project. A documents agent keeps its empty
         // workspace, where its own tools — if any ever got through — find
         // nothing.
         ...(full && cwd ? { cwd } : {}),

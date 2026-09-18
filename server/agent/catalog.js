@@ -8,9 +8,10 @@ import path from 'node:path';
 import { runCommand } from './providers/exec.js';
 
 export const CLAUDE_MODES = [
-  { id: 'default', label: 'Default' },
+  { id: 'auto', label: 'Auto' },
   { id: 'acceptEdits', label: 'Accept edits' },
   { id: 'plan', label: 'Plan' },
+  { id: 'manual', label: 'Ask me' },
   { id: 'bypassPermissions', label: 'Bypass permissions' },
 ];
 

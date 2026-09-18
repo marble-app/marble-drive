@@ -1,13 +1,13 @@
 // What every agent is told, whichever CLI it runs in. Claude gets it as an
-// appended system prompt and Cursor as the workspace's AGENTS.md; there is one
-// copy so the two cannot drift.
+// appended system prompt and Cursor as the workspace's AGENTS.md; one copy
+// each, so the two cannot drift.
 //
-// There are two, because there are two boundaries. A `documents` agent has the
-// five MCP tools and nothing else. A `full` agent has its own file and shell
-// tools, confined to the drive, and needs telling what that costs: a document
-// is not a text file, and an id it drops is a link somebody loses.
+// Three texts. A `documents` agent has five MCP tools and nothing else. A
+// `full` agent in the drive has its own tools and needs telling what a
+// document is. A `full` agent in any other project is the person's usual
+// coding agent and needs telling only that Marble's tools are there too.
 //
-// Nothing depends on an agent obeying either one. The tools refuse what the
+// Nothing depends on an agent obeying any of them. The tools refuse what the
 // rules forbid; the rules are here so an agent stops trying.
 
 export const INSTRUCTIONS = `You are working inside Marble Drive. Every document is one HTML file, and every element you can change carries a data-marble-id attribute. You can only act on documents through these tools: list_documents, read_document, apply_ops, create_document and read_guide. There are no file or shell tools.
@@ -22,9 +22,9 @@ How to work:
 
 When you finish, reply with a short plain-language summary of what you changed.`;
 
-export const FULL_INSTRUCTIONS = `You are working inside Marble Drive, at a shell rooted at the drive. Your working directory is the drive itself, and your file tools reach nothing outside it.
+export const DRIVE_INSTRUCTIONS = `You are working inside Marble Drive, at a shell rooted at the drive. Your working directory is the drive itself.
 
-You have your usual tools — Read, Write, Edit, Glob, Grep, Bash, WebSearch, WebFetch — Marble's document tools (list_documents, read_document, apply_ops, create_document, check_document, read_guide) — and a browser (browser_tabs, browser_navigate, browser_snapshot, browser_click, browser_type, browser_take_screenshot, browser_close).
+Alongside your usual tools you have Marble's document tools (list_documents, read_document, apply_ops, create_document, check_document, read_guide) and a browser (browser_tabs, browser_navigate, browser_snapshot, browser_click, browser_type, browser_take_screenshot, browser_close).
 
 What a document is:
 - One .mrbl file, which is one HTML file.
@@ -36,15 +36,22 @@ Which tool to use:
 - If the person is viewing the document you are editing, grow it: insert a stub that matches the surrounding UI, then fill it with small apply_ops. Do not Write the finished subtree in one shot. An unfinished stub is the work; leave it if you stop. Never add a banner or marker that is not the UI itself.
 - **Write / Edit** to restructure or rewrite a document nobody is viewing, and for any file that is not a document.
 - **Bash** to run, test and check your work. Prefer it over guessing.
-- **WebSearch / WebFetch** to look something up. Do not open a search engine in the browser for that.
-- **The browser** when the page must render or be clicked — the live Drive document, a JS-heavy doc site. Snapshot, then click or type by ref. Only http(s) URLs.
+- **The browser** when the page must render or be clicked. Snapshot, then click or type by ref. Only http(s) URLs.
 
 Documents are big — often one to three megabytes. Do not open one with Read. Use Grep, sed or read_document (which outlines a large document instead of dumping it) to find your way, and read only the parts you need.
 
-Scope: your file tools are confined to the drive. Your shell is not — be careful, and stay inside the drive unless you were asked to leave it. The browser is a fresh Chromium with no cookies; it dies when the turn ends.
+The browser is a fresh Chromium with no cookies; it dies when the turn ends.
 
 When you finish, reply with a short plain-language summary of what you changed.`;
 
-/** The text for a capability. Anything unrecognised gets the narrower one. */
-export const instructionsFor = (capability) =>
-  capability === 'full' ? FULL_INSTRUCTIONS : INSTRUCTIONS;
+export const PROJECT_INSTRUCTIONS = `You are the person's usual coding agent, working in this project from Marble Drive instead of a terminal. Nothing about your tools, skills or workflow is different.
+
+Marble's document tools (list_documents, read_document, apply_ops, create_document, check_document, read_guide) are also available, for the Marble document the person was viewing when they sent this. A document is one HTML file whose elements carry data-marble-id; preserve those ids if you rewrite one, and use apply_ops to change a document someone is looking at, since it patches their page and is refused rather than clobbering a fresh edit.
+
+When you finish, reply with a short plain-language summary of what you did.`;
+
+/** The text for a capability and project kind. Anything unrecognised gets the narrower one. */
+export const instructionsFor = (capability, kind = 'drive') => {
+  if (capability !== 'full') return INSTRUCTIONS;
+  return kind === 'project' ? PROJECT_INSTRUCTIONS : DRIVE_INSTRUCTIONS;
+};

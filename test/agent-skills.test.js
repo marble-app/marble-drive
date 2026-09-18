@@ -6,7 +6,7 @@ import test from 'node:test';
 
 import { fileURLToPath } from 'node:url';
 
-import { installSkills, listSkills } from '../server/agent/skills.js';
+import { listSkills } from '../server/agent/skills.js';
 
 const REPO_AGENT_SKILLS = path.join(path.dirname(fileURLToPath(import.meta.url)), '..', '.agents', 'skills');
 
@@ -39,12 +39,3 @@ test('the drive ships growing-the-open-page so every agent workspace can load it
   assert.doesNotMatch(body, /under construction/i);
 });
 
-test('installSkills copies each skill into the conversation workspace', async () => {
-  const src = await fsp.mkdtemp(path.join(os.tmpdir(), 'marble-skills-src-'));
-  const workspace = await fsp.mkdtemp(path.join(os.tmpdir(), 'marble-skills-ws-'));
-  await skillDir(src, 'my-day', '---\nname: my-day\ndescription: day\n---\nbody\n');
-  const skills = await listSkills([src]);
-  await installSkills(workspace, skills);
-  const copied = path.join(workspace, '.claude', 'skills', 'my-day', 'SKILL.md');
-  assert.match(await fsp.readFile(copied, 'utf8'), /body/);
-});

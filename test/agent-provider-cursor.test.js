@@ -7,7 +7,7 @@ import path from 'node:path';
 import test from 'node:test';
 import { fileURLToPath } from 'node:url';
 
-import { FULL_INSTRUCTIONS, INSTRUCTIONS } from '../server/agent/instructions.js';
+import { DRIVE_INSTRUCTIONS, INSTRUCTIONS, PROJECT_INSTRUCTIONS } from '../server/agent/instructions.js';
 import { createCursorProvider, parseCursorLine } from '../server/agent/providers/cursor.js';
 import { BROWSER_TOOLS } from '../server/agent/browser.js';
 import { TOOL_SCHEMAS } from '../server/agent/tools.js';
@@ -213,7 +213,10 @@ test('a full-capability prepare writes the browser MCP server and the full instr
 
   const hooks = JSON.parse(await fsp.readFile(path.join(workspace, '.cursor', 'hooks.json'), 'utf8'));
   assert.match(hooks.hooks.preToolUse[0].command, /MARBLE_CURSOR_CAPABILITY=full/);
-  assert.equal(await fsp.readFile(path.join(workspace, 'AGENTS.md'), 'utf8'), FULL_INSTRUCTIONS);
+  assert.equal(await fsp.readFile(path.join(workspace, 'AGENTS.md'), 'utf8'), DRIVE_INSTRUCTIONS);
+  await createCursorProvider({ hookPath: '/repo/bin/marble-cursor-hook.js', userDir: NO_USER_DIR })
+    .prepare({ workspace, mcp, browser, meta: {}, capability: 'full', kind: 'project' });
+  assert.equal(await fsp.readFile(path.join(workspace, 'AGENTS.md'), 'utf8'), PROJECT_INSTRUCTIONS, 'a project agent gets the short text');
   const mcpFile = JSON.parse(await fsp.readFile(path.join(workspace, '.cursor', 'mcp.json'), 'utf8'));
   assert.deepEqual(mcpFile.mcpServers.marble, mcp);
   assert.deepEqual(mcpFile.mcpServers.browser, browser);

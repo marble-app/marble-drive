@@ -1,5 +1,5 @@
-// Skills the composer `/` menu can name, and that a Claude turn can load from
-// its workspace. They live on the machine (`~/.claude/skills`, this repo's
+// Skills the composer `/` menu can name before a turn has reported the CLI's
+// own list. They live on the machine (`~/.claude/skills`, this repo's
 // `.claude/skills`, …), not in the drive — a skill is how the person talks to
 // the agent, not a document.
 
@@ -42,14 +42,6 @@ export async function listSkills(dirs) {
     }
   }
   return found;
-}
-
-export async function installSkills(workspace, skills, { into = path.join('.claude', 'skills') } = {}) {
-  const destRoot = path.join(workspace, into);
-  await fsp.mkdir(destRoot, { recursive: true });
-  for (const skill of skills) {
-    await fsp.cp(skill.dir, path.join(destRoot, skill.id), { recursive: true });
-  }
 }
 
 export function skillDirs({ home = process.env.HOME, repo } = {}) {

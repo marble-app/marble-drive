@@ -210,7 +210,7 @@ export function createCursorProvider({
       };
     },
 
-    async prepare({ workspace, mcp, browser = null, capability = 'documents' }) {
+    async prepare({ workspace, mcp, browser = null, capability = 'documents', kind = 'drive' }) {
       const servers = await userMcpServers(userDir);
       if (servers.length) {
         throw new Error(
@@ -241,7 +241,7 @@ export function createCursorProvider({
         },
       };
       await fsp.writeFile(path.join(dir, 'hooks.json'), JSON.stringify(hooks, null, 2));
-      await fsp.writeFile(path.join(workspace, 'AGENTS.md'), instructionsFor(capability));
+      await fsp.writeFile(path.join(workspace, 'AGENTS.md'), instructionsFor(capability, kind));
     },
 
     spawn({ workspace, prompt, resume = null, model = null, effort = null, mode = null, capability = 'documents', cwd = null }) {

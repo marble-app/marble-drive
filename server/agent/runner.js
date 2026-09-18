@@ -321,7 +321,10 @@ export function createRunner({ store, tools, providers, workdir, origin, bridgeP
       const child = spawn(launch.command, launch.args, { cwd, env, stdio: ['pipe', 'pipe', 'pipe'] });
       turn.child = child;
       child.stdin.on('error', () => {});
-      child.stdin.end(spec.stdin ?? '');
+      // A provider that answers prompts mid-turn keeps stdin open; finish()
+      // closes it. Every other CLI reads to EOF before it starts.
+      if (spec.stdinOpen) child.stdin.write(spec.stdin ?? '');
+      else child.stdin.end(spec.stdin ?? '');
 
       const state = {};
       let stall;
@@ -369,10 +372,26 @@ export function createRunner({ store, tools, providers, workdir, origin, bridgeP
     }
   }
 
+  /** The CLI's own list of skills, kept per provider so the composer's `/`
+   *  menu shows what the terminal would. Descriptions come from the
+   *  initialize reply; names alone from init keep an older description. */
+  function recordCatalog(turn, event) {
+    const provider = turn.provider?.id;
+    if (!provider || !Array.isArray(event.skills) || !event.skills.length) return;
+    store.settings().then((settings) => {
+      const old = new Map((settings.skills?.[provider] ?? []).map((s) => [s.id, s]));
+      const next = event.skills.map((s) => ({ id: s.id, name: s.name ?? s.id, description: s.description || old.get(s.id)?.description || '' }));
+      return store.saveSettings({ skills: { ...(settings.skills ?? {}), [provider]: next } });
+    }).catch((err) => log.error(`[agents] ${err.message}`));
+  }
+
   function handle(turn, event) {
     switch (event.type) {
       case 'session':
         store.updateConversation(turn.conversationId, { providerSession: event.id }).catch(() => {});
+        return;
+      case 'catalog':
+        recordCatalog(turn, event);
         return;
       case 'text.delta':
         chained(turn.conversationId, () => {
@@ -422,6 +441,11 @@ export function createRunner({ store, tools, providers, workdir, origin, bridgeP
     turn.finishing = true;
     look(turn, { ids: [] });
     for (const clear of turn.timers) clear();
+    try {
+      turn.child?.stdin?.end();
+    } catch {
+      // Already gone.
+    }
     if (turn.inflight.size) await Promise.allSettled([...turn.inflight]);
 
     // Compute everything up front: the stored turn, the conversation, and
