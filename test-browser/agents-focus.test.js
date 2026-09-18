@@ -393,29 +393,15 @@ test('dragging a card to the stage pins it, and dragging it back off unpins it',
   // The pin springs the card into the stage; press it once it has landed.
   await page.waitForTimeout(500);
 
+  // A pin is a pane now, so it leaves the stage by its bar: dragged into the
+  // field, it is unpinned where it lands.
+  const bar = await page.locator('.pane .dock-bar[data-key="P"]').boundingBox();
+  await page.mouse.move(bar.x + bar.width / 2, bar.y + bar.height / 2);
+  await page.mouse.down();
+  await page.mouse.move(bar.x + bar.width / 2 + 30, bar.y + 40, { steps: 3 });
   const loose = await middleOf(page, '.focus-basin[data-folder-id="ungrouped"]');
-  release = await dragTo(page, ids.a, { x: loose.x, y: loose.box.y + loose.box.height - 10 });
-  // Lifting the only pinned card collapses the stage, and the field slides
-  // left under the pointer. Aim at the basin where it is now, not where it
-  // was — and at its bottom pad: a region is as tall as its cards, so its
-  // middle is a card, and squarely on a card means "make a folder".
-  const now = await middleOf(page, '.focus-basin[data-folder-id="ungrouped"]');
-  await page.mouse.move(now.x, now.box.y + now.box.height - 10, { steps: 6 });
-  try {
-    await page.locator('.focus-basin[data-folder-id="ungrouped"][data-drop="into"]').waitFor({ timeout: 4000 });
-  } catch {
-    const state = await page.evaluate(() => ({
-      basins: [...document.querySelectorAll('.focus-basin')].map((b) => [b.dataset.folderId, b.dataset.drop ?? null, JSON.stringify(b.getBoundingClientRect())]),
-      slot: document.querySelector('.focus-slot')?.getBoundingClientRect() ?? null,
-      newgroup: [document.querySelector('.focus-newgroup')?.dataset.drop ?? null, JSON.stringify(document.querySelector('.focus-newgroup')?.getBoundingClientRect())],
-      pinslot: document.querySelector('.focus-pinslot')?.dataset.drop ?? null,
-      cards: [...document.querySelectorAll('.focus-card')].map((c) => [c.dataset.id.slice(0, 4), c.dataset.lod, c.className, JSON.stringify(c.getBoundingClientRect())]),
-      arranging: document.querySelector('.focus')?.dataset.arranging ?? null,
-      scroll: [document.querySelector('.focus').scrollLeft, document.querySelector('.focus').scrollTop],
-    }));
-    throw new Error('basin never lit: ' + JSON.stringify(state) + ' aimed=' + JSON.stringify(now));
-  }
-  await release();
+  await page.mouse.move(loose.x, loose.box.y + loose.box.height - 10, { steps: 8 });
+  await page.mouse.up();
   await until(page, async () => (await metaOf(page, ids.a))?.pinned === false, 'the card to unpin');
 });
 
@@ -573,4 +559,55 @@ test('two two-card folders share a field column, one above the other', async () 
   await page.locator(`.focus-basin[data-folder-id="${lower.id}"][data-drop="into"]`).waitFor();
   await release();
   await until(page, async () => (await metaOf(page, ids.a1))?.folderId === (await metaOf(page, ids.b1))?.folderId, 'a1 to join B');
+});
+
+test('pinning makes a pane in the stage, and a second pin sits beside it by default', async () => {
+  const { page } = await openAgents();
+  const ids = await seedFocus(page, [{ key: 'a', title: 'first' }, { key: 'b', title: 'second' }, { key: 'c', title: 'loose' }]);
+  await page.locator(`.focus-card[data-id="${ids.a}"]`).dblclick();
+  await page.locator(`.pane marble-conversation[conversation="${ids.a}"]`).waitFor();
+  await page.waitForTimeout(500);
+  await page.locator(`.focus-card[data-id="${ids.b}"]`).dblclick({ modifiers: ['Shift'] });
+  await page.waitForFunction(() => document.querySelectorAll('.pane .dock-frame:not(.dock-ghost)').length === 2);
+  await page.waitForTimeout(700);
+  const frames = await page.evaluate(() => [...document.querySelectorAll('.pane .dock-frame:not(.dock-ghost)')].map((f) => { const r = f.getBoundingClientRect(); return { x: Math.round(r.x), y: Math.round(r.y), h: Math.round(r.height) }; }));
+  assert.equal(frames[0].y, frames[1].y, 'side by side: ' + JSON.stringify(frames));
+  assert.ok(frames[0].h > 400, 'a conversation is a tall thing');
+  assert.equal(await page.locator('.pane .dock-frame[data-focused]').count(), 1);
+});
+
+test('dropping a card on the bottom band of a stage pane stacks it under', async () => {
+  const { page } = await openAgents();
+  const ids = await seedFocus(page, [{ key: 'a', title: 'first' }, { key: 'b', title: 'second' }]);
+  await page.locator(`.focus-card[data-id="${ids.a}"]`).dblclick();
+  await page.locator(`.pane marble-conversation[conversation="${ids.a}"]`).waitFor();
+  await page.waitForTimeout(500);
+  const paneBox = await page.locator('.pane').boundingBox();
+  const release = await dragTo(page, ids.b, { x: paneBox.x + paneBox.width / 2, y: paneBox.y + paneBox.height * 0.92 });
+  await page.locator('.pane .dock-ghost').waitFor();
+  await release();
+  await page.waitForFunction(() => document.querySelectorAll('.pane .dock-frame:not(.dock-ghost):not(.marble-leaving)').length === 2);
+  await page.waitForTimeout(700);
+  const frames = await page.evaluate(() => [...document.querySelectorAll('.pane .dock-frame:not(.dock-ghost)')].map((f) => { const r = f.getBoundingClientRect(); return { x: Math.round(r.x), y: Math.round(r.y) }; }));
+  assert.equal(frames[0].x, frames[1].x, 'one column: ' + JSON.stringify(frames));
+  assert.notEqual(frames[0].y, frames[1].y, 'stacked');
+  await until(page, async () => (await metaOf(page, ids.b))?.pinned === true, 'b to be pinned');
+  const stageW = await page.evaluate(() => document.querySelector('.pane').getBoundingClientRect().width);
+  assert.ok(stageW <= 560 + 2, `two stacked pins take one column's width (${stageW})`);
+});
+
+test('the Focus arrangement and the List arrangement do not overwrite each other', async () => {
+  const { page } = await openAgents();
+  const ids = await seedFocus(page, [{ key: 'a', title: 'first' }, { key: 'b', title: 'second' }]);
+  await page.locator(`.focus-card[data-id="${ids.a}"]`).dblclick();
+  await page.locator(`.pane marble-conversation[conversation="${ids.a}"]`).waitFor();
+  await page.waitForTimeout(500);
+  await page.locator(`.focus-card[data-id="${ids.b}"]`).dblclick({ modifiers: ['Shift'] });
+  await page.waitForFunction(() => document.querySelectorAll('.pane .dock-frame:not(.dock-ghost)').length === 2);
+  await page.locator('.views [data-view="library"]').click();
+  await page.waitForFunction(() => document.body.getAttribute('data-view') === 'library');
+  await page.waitForTimeout(700);
+  assert.equal(await page.locator('.pane .dock-frame:not(.dock-ghost):not(.marble-leaving)').count(), 0, 'List is one pane');
+  await page.locator('.views [data-view="focus"]').click();
+  await page.waitForFunction(() => document.querySelectorAll('.pane .dock-frame:not(.dock-ghost)').length === 2);
 });
