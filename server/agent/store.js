@@ -67,6 +67,7 @@ export function createAgentStore({ dir, defaultProvider = 'claude-subscription',
   const convDir = (id) => path.join(dir, id);
   const metaFile = (id) => path.join(convDir(id), 'meta.json');
   const eventsFile = (id) => path.join(convDir(id), 'events.jsonl');
+  const inboxFile = (id) => path.join(convDir(id), 'inbox.jsonl');
   const turnFile = (turnId) => path.join(convDir(conversationOf(turnId)), 'turns', `${turnId}.json`);
   const undoFile = (turnId) => path.join(convDir(conversationOf(turnId)), 'turns', `${turnId}.undo.json`);
   const rawFile = (turnId) => path.join(convDir(conversationOf(turnId)), 'raw', `${turnId}.jsonl`);
@@ -319,6 +320,27 @@ export function createAgentStore({ dir, defaultProvider = 'claude-subscription',
     }
   }
 
+  async function readInbox(id) {
+    let text;
+    try {
+      text = await fsp.readFile(inboxFile(id), 'utf8');
+    } catch (err) {
+      if (err.code === 'ENOENT') return [];
+      throw err;
+    }
+    const messages = [];
+    for (const line of text.split('\n')) {
+      if (!line.trim()) continue;
+      try {
+        messages.push(JSON.parse(line));
+      } catch {
+        // A torn last line from a crash mid-append. The message it held is
+        // lost; the ones before it are not.
+      }
+    }
+    return messages;
+  }
+
   return {
     ready: () => fsp.mkdir(dir, { recursive: true }),
 
@@ -473,6 +495,43 @@ export function createAgentStore({ dir, defaultProvider = 'claude-subscription',
         };
         await writeJson(turnFile(turn.id), turn);
         return turn;
+      });
+    },
+
+    /** A message between two conversations. Pure: minted here, stored by
+     *  appendInbox and by the events each side records. */
+    createMessage({ from, to, text, about = null, inReplyTo = null, hop = 0 }) {
+      return {
+        id: crypto.randomBytes(6).toString('hex'),
+        from,
+        to,
+        text: String(text),
+        about: about ?? null,
+        inReplyTo: inReplyTo ?? null,
+        hop: Number(hop) || 0,
+        t: Date.now(),
+      };
+    },
+
+    // The inbox is the one queue for messages to a conversation. Who empties
+    // it — a turn that is waiting, a turn that is starting, or a delivery turn
+    // the runner starts — is the runner's business; here it is a file.
+    async appendInbox(id, message) {
+      await serial(`inbox:${id}`, async () => {
+        await fsp.mkdir(convDir(id), { recursive: true });
+        await fsp.appendFile(inboxFile(id), `${JSON.stringify(message)}\n`);
+      });
+    },
+
+    async inbox(id) {
+      return serial(`inbox:${id}`, () => readInbox(id));
+    },
+
+    async takeInbox(id) {
+      return serial(`inbox:${id}`, async () => {
+        const messages = await readInbox(id);
+        if (messages.length) await fsp.rm(inboxFile(id), { force: true });
+        return messages;
       });
     },
 
