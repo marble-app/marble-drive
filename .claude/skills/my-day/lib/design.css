@@ -293,20 +293,21 @@ li.row:hover .acts, li.row:focus-within .acts,
   border-color: var(--line); }
 /* Authors, in full — an et-al hides the one name being scanned for. Each is a
    control: click to say you know them, and every paper they are on says so.
-   Unmarked names stay quiet muted text; the mark is the only colour here. */
-.pau { margin-top: .28rem; display: flex; flex-wrap: wrap; gap: .1rem .34rem; align-items: baseline; }
-.au { font: 500 .78rem/1.45 var(--font-mono); color: var(--muted); background: none;
-  border: 0; border-bottom: 1px solid transparent; padding: 0 0 .05rem; margin: 0;
+   This is a byline, not a chip row: real commas in the markup, wrapping like a
+   sentence. Unmarked names stay quiet muted text; the mark is the only colour. */
+.pau { margin-top: .32rem; font: 500 .8rem/1.55 var(--font-sans); color: var(--muted); }
+.au { display: inline; font: inherit; font-weight: 500; color: inherit; background: none;
+  border: 0; border-bottom: 1px solid transparent; padding: 0; margin: 0;
   cursor: pointer; text-align: left; border-radius: 0;
   transition: color var(--dur) var(--ease), border-color var(--dur) var(--ease); }
-.au:not(:last-child)::after { content: ","; color: var(--faint); }
 .au:hover { color: var(--ink); border-bottom-color: var(--line); }
 .au:active { color: var(--accent-ink); }
 /* One focus ring for the small in-flow controls, so they cannot drift apart. */
 .au:focus-visible, .comp-exp:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 .au[data-known] { color: var(--accent-ink); font-weight: 600;
   border-bottom-color: color-mix(in srgb, var(--accent) 55%, transparent); }
-.au[data-known]:hover { border-bottom-color: var(--accent); }
+.au[data-known]:hover, .au[data-known]:focus-visible { color: var(--accent-ink);
+  border-bottom-color: var(--accent); }
 @media (prefers-reduced-motion: reduce) { .au { transition: none; } }
 
 .pwhy { margin-top: .4rem; font-size: .88rem; line-height: 1.45; }
@@ -387,6 +388,7 @@ li.row:hover .acts, li.row:focus-within .acts,
    absolutely positioned, so nothing can overlap. */
 .tly-scroll { overflow-y: auto; overflow-x: hidden; max-height: calc(100dvh - 12rem);
   padding-right: .35rem; scrollbar-width: thin; overscroll-behavior-y: contain;
+  -webkit-overflow-scrolling: touch;
   -webkit-mask-image: linear-gradient(180deg, transparent 0, #000 1.1rem, #000 calc(100% - 1.4rem), transparent 100%);
           mask-image: linear-gradient(180deg, transparent 0, #000 1.1rem, #000 calc(100% - 1.4rem), transparent 100%); }
 .tly { display: flex; flex-direction: column; padding: .3rem 0 .6rem;
@@ -746,6 +748,8 @@ pre { white-space: pre-wrap; word-break: break-word; font: 12px/1.5 var(--font-m
 
 /* -- 1. Focus is visible on everything that takes it. ---------------------- */
 .act:focus-visible,
+.chk:focus-visible,
+.wx-hrs:focus-visible,
 .seg button:focus-visible,
 .add:focus-visible,
 .kd:focus-visible,

@@ -86,6 +86,16 @@
     "2609-18690v1",
     "2609-18709v1",
     "2609-19125v1",
+    "2609-19596v1",
+    "2609-19839v1",
+    "2609-19870v1",
+    "2609-20055v1",
+    "2609-20059v1",
+    "2609-20143v1",
+    "2609-20481v1",
+    "2609-20658v1",
+    "2609-20719v1",
+    "2609-20768v1",
     "aiweekly-co-alerts-runway-unveils-solaris-an-interface-world-model-for-live-uis",
     "andonlabs-com-blog-why-we-built-pion",
     "arxiv-org-abs-2311-00382",
@@ -105,9 +115,11 @@
     "dl-acm-org-doi-10-1145-3654777-3676326",
     "dl-acm-org-doi-full-10-1145-3811427-3811490",
     "esso-dev-blog-posts-three-frontier-models-in-72-hours-what-changed-in-september-",
+    "flaviocopes-com-jev",
     "genuimeetshci-github-io-chi26-workshop",
     "github-com-greentfrapp-panel",
     "lovable-dev-blog-series-c",
+    "magica-com-news-runway-solaris-interface-world-model",
     "musthave-ai-runway-solaris-interface-world-model-production-test",
     "phrase-com-news-phrase-atlas-launch",
     "research-google-blog-generative-ui-a-rich-custom-visual-interactive-user-experie",
@@ -115,6 +127,7 @@
     "simonw-substack-com-p-gpt-6-astra-claude-fable-51-and-yet",
     "thehackernews-com-2026-09-gpt-6-astra-scores-100-on-exploitbench-html",
     "thenewstack-io-gpt6-astra-developer-access-delayed",
+    "typesafe-ai-blog-introducing-system-one-models-and-jev",
     "winbuzzer-com-2026-09-04-gpt-6-astra-arrives-with-major-gains-staged-access-and-",
     "withcapsule-app",
     "www-aljazeera-com-economy-2026-9-4-openai-unveils-gpt-6-astra-amid-rising-scruti",
@@ -132,5 +145,5 @@
     "www-techradar-com-ai-platforms-assistants-gpt-6-is-here-but-what-if-we-just-said",
     "www-theneuron-ai-news-claude-fable-5-1-cuts-agent-costs-and-safety-friction"
   ],
-  "updated": "2026-09-17T13:38:54.317Z"
+  "updated": "2026-09-18T16:02:01.971Z"
 }

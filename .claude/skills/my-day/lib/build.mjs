@@ -19,6 +19,7 @@ import path from 'node:path';
 import crypto from 'node:crypto';
 import { execFileSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
+import { harvestKnownAuthors, knownAuthorSet, rAuthors as renderAuthors } from './authors.mjs';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const SKILL = path.resolve(HERE, '..');
@@ -516,26 +517,15 @@ function rTags(list) {
 // someone he knows, and from then on every paper that person appears on wears
 // the mark. The page files a setAttr for the click, harvest folds it into
 // state/authors.json, and the next morning's build renders it already lit.
-const auSlug = (name) => String(name || '').normalize('NFKD').replace(/[\u0300-\u036f]/g, '')
-  .toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
-
 function loadKnownAuthors() {
   try {
     const j = JSON.parse(fs.readFileSync(DEFAULTS.authors, 'utf8'));
-    return new Map(Object.entries(j.known || {}).map(([k, v]) => [k, v && v.name ? v.name : k]));
-  } catch { return new Map(); }
+    return knownAuthorSet(j.known);
+  } catch { return new Set(); }
 }
 
 function rAuthors(authors, known) {
-  const list = (Array.isArray(authors) ? authors : String(authors || '').split(/,\s*/)).map((a) => String(a).trim()).filter(Boolean);
-  if (!list.length) return '';
-  const chips = list.map((name) => {
-    const sl = auSlug(name);
-    const yes = known.has(sl);
-    return `<button class="au tip" type="button" data-marble-transient data-au="${escAttr(sl)}"${yes ? ' data-known' : ''}` +
-      ` data-tip="${escAttr(yes ? `${name}\nYou marked this one as someone you know.\nClick to unmark.` : `${name}\nClick if you know them — every paper they appear on will show it.`)}">${esc(name)}</button>`;
-  }).join('');
-  return `<div class="pau" data-marble-id="${mint()}">${chips}</div>`;
+  return renderAuthors(authors, known, mint);
 }
 
 function rPapers(arxiv, prev) {
@@ -1407,7 +1397,7 @@ function selfCheck(html) {
   // deliberately horizontal track (the timeline) is a different thing and says so
   // in its name, so match the bare `scroll` class as a whole token.
   if (/class="(?:[^"]*\s)?scroll(?:\s[^"]*)?"/.test(html)) problems.push('a component uses inner vertical scrolling — not allowed');
-  if (/overflow-y:\s*(auto|scroll)/.test(html.replace(/tl[xy]-scroll[\s\S]{0,400}?}/g, ''))) problems.push('overflow-y scrolling found outside the timeline track');
+  if (/overflow-y:\s*(auto|scroll)/.test(html.replace(/tl[xy]-scroll[\s\S]{0,900}?}/g, ''))) problems.push('overflow-y scrolling found outside the timeline track');
   // A view name lives in three places: the segment button, the panel's class, and
   // two selector lists in design.css. Miss the stylesheet and the segment still
   // presses and still announces itself — it just shows nothing. That is the one
@@ -1430,17 +1420,15 @@ function harvestAuthors(file) {
   try { html = fs.readFileSync(file, 'utf8'); } catch { return { added: 0, total: 0 }; }
   let state = { _note: 'Authors Bryan marked as people he knows, by clicking their name on a paper. Every future issue renders them already marked. Written by \`build.mjs harvest\`.', known: {}, updated: null };
   try { state = JSON.parse(fs.readFileSync(DEFAULTS.authors, 'utf8')); } catch {}
-  state.known = state.known || {};
-  let added = 0;
-  for (const m of html.matchAll(/<button class="au[^"]*"[^>]*data-au="([^"]*)"([^>]*)>([\s\S]*?)<\/button>/g)) {
-    if (!/\bdata-known\b/.test(m[2])) continue;
-    const sl = m[1]; if (!sl) continue;
-    if (!state.known[sl]) { state.known[sl] = { name: stripTags(m[3]).trim() || sl, markedOn: todayYmd() }; added++; }
-  }
-  state.updated = new Date().toISOString();
+  const before = knownAuthorSet(state.known);
+  const next = harvestKnownAuthors(html, state, { today: todayYmd() });
+  next.updated = new Date().toISOString();
   fs.mkdirSync(path.dirname(DEFAULTS.authors), { recursive: true });
-  fs.writeFileSync(DEFAULTS.authors, JSON.stringify(state, null, 2) + '\n');
-  return { added, total: Object.keys(state.known).length };
+  fs.writeFileSync(DEFAULTS.authors, JSON.stringify(next, null, 2) + '\n');
+  const after = knownAuthorSet(next.known);
+  let added = 0;
+  for (const sl of after) if (!before.has(sl)) added++;
+  return { added, total: after.size };
 }
 
 function harvest(args) {

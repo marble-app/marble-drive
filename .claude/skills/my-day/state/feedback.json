@@ -42,7 +42,19 @@
       "from": "2026-09-14",
       "appliedOn": "2026-09-17",
       "change": "Already tracked as a standing to-do — 'arXiv the GenUI design position paper' carries forward in focus/todos each issue until Bryan ticks it done."
+    },
+    "86a14b2a": {
+      "text": "remind me about this in the next newsletter",
+      "from": "2026-09-18",
+      "appliedOn": "2026-09-18",
+      "change": "Promoted Email Michael Bernstein into today's focus, quoting the reminder you typed: remind me about this in the next newsletter."
+    },
+    "94a3c0ab": {
+      "text": "Typed as-is from yesterday — unclear what this refers to; delete it if it was a stray keystroke, or say more.",
+      "from": "2026-09-17",
+      "appliedOn": "2026-09-18",
+      "change": "Dropped the stray 17 Sep to-do titled update. It was not in carry.json and is not on today's list."
     }
   },
-  "updated": "2026-09-17T13:13:01.020Z"
+  "updated": "2026-09-18T16:02:15.830Z"
 }

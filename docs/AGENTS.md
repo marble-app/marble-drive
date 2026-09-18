@@ -283,12 +283,31 @@ and **Save as folder** names a working set of panes. Opening a group reuses
 the existing pane dock (at most four live conversations). The seeded
 `<marble-conversation>` is never reparented.
 
-**Focus** is a spatial canvas of rounded cards. Click selects. Double-click
-or Enter pins a chat **Full**; other Fulls become Digest. Shift-double-click
-or **Keep open** adds a Full without demoting the others, up to four. Cold
-Digests over the budget become Chips. Arrow keys move selection; Space opens
-a Quick Look preview without pinning. Folder membership draws as a colored
-basin. Narrow view stacks the cards and does not add extra panes.
+**Click a group header to open it**; **double-click its name** (or `F2`) to
+rename. The name fills the header, so taking the click for renaming left
+opening the folder reachable only beside the count. A rename holds the rail
+still until it commits, and the open is held for one double-click interval so
+the first click of a rename does not repaint the field away.
+
+A rail tab carries its status dot, target and age, and its folder's colour on
+the leading edge. In a folder's workspace only the focused pane keeps the full
+composer chrome; the others fall back to transcript plus input, because the
+status line and pickers are the same on all of them.
+
+**Focus** is a spatial canvas of rounded cards, laid out as a partition. A
+**stage** across the top holds the Fulls and exists only when something is
+pinned; below it the **field** divides into one region per folder, with
+ungrouped last, and cards pack inside their own region. Regions never
+overlap, so a basin is a container rather than a bounding box. Dragging a
+card into another region changes its folder; `focusX` / `focusY` order it
+within its own. Cards lay out oldest-first so the canvas does not reshuffle
+whenever a chat ticks.
+
+Click selects. Double-click or Enter pins a chat **Full**; other Fulls become
+Digest. Shift-double-click or **Keep open** adds a Full without demoting the
+others, up to four. Cold Digests over the budget become Chips. Arrow keys
+move selection; Space opens a Quick Look preview without pinning. Narrow view
+stacks the cards and does not add extra panes.
 
 Each row has a ⋯ menu for **Archive** / **Unarchive**, **Mark reviewed**,
 **Undo last turn**, and **Continue in** another CLI. Archiving the open thread
