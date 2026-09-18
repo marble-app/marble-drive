@@ -26,6 +26,12 @@ const openAgents = async (options = {}) => {
   const { page, errors } = await host.newPage(options);
   await page.goto(`${host.base}/a/Agents`);
   await page.waitForFunction(() => Boolean(window.marble?.agent && customElements.get('marble-conversation')));
+  await page.evaluate(async () => {
+    try {
+      const { folders } = await window.marble.agent.folders();
+      for (const row of folders) await window.marble.agent.deleteFolder(row.id);
+    } catch { /* fresh agent */ }
+  });
   return { page, errors };
 };
 
@@ -60,4 +66,47 @@ test('Folders rail groups conversations and New chat lands ungrouped', async () 
   assert.match(await page.locator('.folder-group[data-color="research"]').textContent(), /outline spec/);
   await page.locator('.folder-new-chat').click();
   await page.waitForFunction(() => document.querySelectorAll('.folder-ungrouped .folder-tab').length >= 1);
+});
+
+test('dropping a tab on another tab creates a folder', async () => {
+  const { page } = await openAgents();
+  const ids = await page.evaluate(async () => {
+    const agent = window.marble.agent;
+    const a = await agent.start({ provider: 'fake' });
+    const b = await agent.start({ provider: 'fake' });
+    await agent.update(a, { title: 'alpha' });
+    await agent.update(b, { title: 'beta' });
+    return { a, b };
+  });
+  await page.locator('.views [data-view="folders"]').click();
+  const alpha = page.locator(`.folder-tab[data-id="${ids.a}"]`);
+  const beta = page.locator(`.folder-tab[data-id="${ids.b}"]`);
+  await alpha.waitFor();
+  await alpha.dragTo(beta);
+  await page.locator('.folder-group').waitFor();
+  const listed = await page.evaluate(() => window.marble.agent.folders());
+  assert.equal((await listed).folders.length, 1);
+});
+
+test('Save as folder persists a shift-selected working set; Not now does not', async () => {
+  const { page } = await openAgents();
+  const ids = await page.evaluate(async () => {
+    const agent = window.marble.agent;
+    const a = await agent.start({ provider: 'fake' });
+    const b = await agent.start({ provider: 'fake' });
+    await agent.update(a, { title: 'one' });
+    await agent.update(b, { title: 'two' });
+    return { a, b };
+  });
+  await page.locator('.views [data-view="folders"]').click();
+  await page.locator(`.folder-tab[data-id="${ids.a}"]`).click();
+  await page.locator(`.folder-tab[data-id="${ids.b}"]`).click({ modifiers: ['Shift'] });
+  await page.locator('.folder-save').waitFor();
+  await page.locator('.folder-save-dismiss').click();
+  let listed = await page.evaluate(() => window.marble.agent.folders());
+  assert.equal((await listed).folders.length, 0);
+  await page.locator(`.folder-tab[data-id="${ids.b}"]`).click({ modifiers: ['Shift'] });
+  await page.locator('.folder-save-confirm').click();
+  listed = await page.evaluate(() => window.marble.agent.folders());
+  assert.equal((await listed).folders.length, 1);
 });

@@ -236,6 +236,25 @@ __ICON__
     color: var(--muted); cursor: pointer; text-align: left;
   }
   .folder-new-chat:hover, .folder-new-chat:focus-visible { color: var(--ink); background: var(--paper-3); outline: none; }
+  .folder-tab.marble-selected { color: var(--ink); background: color-mix(in srgb, var(--accent-ink) 8%, var(--paper)); }
+  .folder-tab.marble-drop-target, .folder-header.marble-drop-target {
+    outline: 2px solid color-mix(in srgb, var(--accent-ink) 40%, transparent);
+    outline-offset: -2px;
+  }
+  .folder-save {
+    margin: .5rem .75rem 0; padding: .55rem .65rem; border: 1px solid var(--line);
+    border-radius: .45rem; background: var(--paper-2); display: flex; flex-direction: column; gap: .45rem;
+  }
+  .folder-save input {
+    width: 100%; box-sizing: border-box; padding: .35rem .45rem; font: inherit; font-size: .8rem;
+    border: 1px solid var(--line); border-radius: .3rem; background: var(--paper);
+  }
+  .folder-save-confirm, .folder-save-dismiss {
+    appearance: none; border: 0; background: none; padding: .3rem 0; font: inherit; font-size: .78rem;
+    cursor: pointer; text-align: left;
+  }
+  .folder-save-confirm { color: var(--accent-ink); font-weight: 500; }
+  .folder-save-dismiss { color: var(--muted); }
   .focus-workspace {
     min-height: 0; display: flex; flex-direction: column; gap: .5rem; padding: 1rem;
   }
@@ -789,6 +808,12 @@ __ICON__
     const FULL_CAP = window.marbleAgentFolders?.FULL_CAP ?? 4;
     let folderCatalog = [];
     let activeFolderId = null;
+    let selectedIds = [];
+    let selectAnchor = null;
+    let workingSetIds = [];
+    let folderSaveEl = null;
+    let lastFolderGesture = null;
+    let suppressFolderClick = false;
 
     const railConversations = (folderId) => [...summaries.values()]
       .filter((summary) => (folderId ? summary.folderId === folderId : !summary.folderId))
@@ -807,6 +832,263 @@ __ICON__
       else await open(null);
     };
 
+    const railTabIds = () => [...(folderRail?.querySelectorAll('.folder-tab[data-id]') ?? [])].map((tab) => tab.dataset.id);
+
+    const paintTabSelection = () => {
+      for (const tab of folderRail?.querySelectorAll('.folder-tab') ?? []) {
+        tab.classList.toggle('marble-selected', selectedIds.includes(tab.dataset.id));
+      }
+    };
+
+    const hideFolderSave = () => {
+      folderSaveEl?.remove();
+      folderSaveEl = null;
+    };
+
+    const suggestFolderName = (ids) => {
+      const paths = ids.map((id) => targets.get(id) || summaries.get(id)?.target || '').filter(Boolean);
+      return window.marbleAgentFolders?.suggestName?.(paths) ?? 'Group';
+    };
+
+    const tileWorkingSet = async (ids) => {
+      const capped = ids.slice(0, FULL_CAP);
+      workingSetIds = capped;
+      if (agent) {
+        try { await agent.saveWorkingSet(capped); } catch { /* stale ids */ }
+      }
+      activeFolderId = null;
+      dock.extras = capped.slice(1).map((id) => ({ id }));
+      dock.focus = 'primary';
+      rememberDock();
+      applyDock();
+      if (capped[0]) await open(capped[0]);
+      paintFolderRail();
+    };
+
+    const showFolderSave = (ids) => {
+      hideFolderSave();
+      if (!folderRail || ids.length < 2) return;
+      const suggested = suggestFolderName(ids);
+      const pop = document.createElement('div');
+      pop.className = 'folder-save';
+      pop.setAttribute('data-marble-transient', '');
+      const input = document.createElement('input');
+      input.type = 'text';
+      input.placeholder = suggested;
+      input.setAttribute('data-marble-transient', '');
+      const confirm = document.createElement('button');
+      confirm.type = 'button';
+      confirm.className = 'folder-save-confirm';
+      confirm.setAttribute('data-marble-transient', '');
+      confirm.textContent = 'Save as folder';
+      const dismiss = document.createElement('button');
+      dismiss.type = 'button';
+      dismiss.className = 'folder-save-dismiss';
+      dismiss.setAttribute('data-marble-transient', '');
+      dismiss.textContent = 'Not now';
+      confirm.addEventListener('click', async () => {
+        const name = input.value.trim() || suggested;
+        try {
+          const folder = await agent.createFolder({ conversationIds: [...ids], name });
+          lastFolderGesture = {
+            inverse: async () => {
+              try { await agent.deleteFolder(folder.id); } catch { /* already gone */ }
+            },
+          };
+          selectedIds = [];
+          selectAnchor = null;
+          hideFolderSave();
+        } catch { /* create failed */ }
+      });
+      dismiss.addEventListener('click', () => hideFolderSave());
+      pop.append(input, confirm, dismiss);
+      folderRail.append(pop);
+      folderSaveEl = pop;
+    };
+
+    const handleTabSelect = async (id, event) => {
+      const order = railTabIds();
+      if (event.shiftKey && selectAnchor && order.includes(selectAnchor)) {
+        const a = order.indexOf(selectAnchor);
+        const b = order.indexOf(id);
+        if (a >= 0 && b >= 0) {
+          const [lo, hi] = a < b ? [a, b] : [b, a];
+          selectedIds = order.slice(lo, hi + 1);
+        } else {
+          selectedIds = [id];
+        }
+      } else if (event.metaKey || event.ctrlKey) {
+        selectedIds = selectedIds.includes(id)
+          ? selectedIds.filter((row) => row !== id)
+          : [...selectedIds, id];
+        selectAnchor = id;
+      } else {
+        selectedIds = [id];
+        selectAnchor = id;
+      }
+      paintTabSelection();
+      if (selectedIds.length >= 2) {
+        await tileWorkingSet(selectedIds);
+        showFolderSave(selectedIds);
+      } else {
+        hideFolderSave();
+      }
+    };
+
+    const paintFolderDrop = (clientX, clientY, skipId) => {
+      for (const el of folderRail?.querySelectorAll('.marble-drop-target') ?? []) {
+        el.classList.remove('marble-drop-target');
+      }
+      if (clientX == null) return;
+      const hit = hitFolderDrop(clientX, clientY, skipId);
+      if (hit?.el) hit.el.classList.add('marble-drop-target');
+    };
+
+    const hitFolderDrop = (clientX, clientY, skipId) => {
+      const el = document.elementFromPoint(clientX, clientY);
+      const tab = el?.closest?.('.folder-tab[data-id]');
+      if (tab?.dataset.id && tab.dataset.id !== skipId) {
+        const group = tab.closest('.folder-group');
+        const inUngrouped = Boolean(tab.closest('.folder-ungrouped'));
+        return {
+          kind: 'tab',
+          el: tab,
+          targetId: tab.dataset.id,
+          folderId: group && !inUngrouped ? group.dataset.folderId : null,
+        };
+      }
+      const header = el?.closest?.('.folder-header');
+      if (header) {
+        const group = header.closest('.folder-group');
+        if (group?.dataset.folderId) {
+          return { kind: 'header', el: header, folderId: group.dataset.folderId };
+        }
+      }
+      if (pane) {
+        const r = pane.getBoundingClientRect();
+        if (clientX >= r.left && clientX <= r.right && clientY >= r.top && clientY <= r.bottom) {
+          return { kind: 'pane', el: pane };
+        }
+      }
+      return null;
+    };
+
+    const applyFolderDrop = async (dragId, hit) => {
+      if (!agent || !hit) return;
+      const dragSummary = summaries.get(dragId);
+      const dragFolderId = dragSummary?.folderId ?? null;
+      if (hit.kind === 'tab') {
+        const targetId = hit.targetId;
+        if (targetId === dragId) return;
+        if (hit.folderId) {
+          const prev = dragFolderId;
+          try {
+            await agent.update(dragId, { folderId: hit.folderId });
+            lastFolderGesture = {
+              inverse: async () => { try { await agent.update(dragId, { folderId: prev }); } catch { /* stale */ } },
+            };
+          } catch { /* move failed */ }
+          return;
+        }
+        if (dragFolderId) {
+          try {
+            await agent.update(dragId, { folderId: null });
+            lastFolderGesture = {
+              inverse: async () => { try { await agent.update(dragId, { folderId: dragFolderId }); } catch { /* stale */ } },
+            };
+          } catch { /* ungroup failed */ }
+          return;
+        }
+        try {
+          const folder = await agent.createFolder({ conversationIds: [dragId, targetId] });
+          lastFolderGesture = {
+            inverse: async () => { try { await agent.deleteFolder(folder.id); } catch { /* already gone */ } },
+          };
+        } catch { /* create failed */ }
+        return;
+      }
+      if (hit.kind === 'header' && hit.folderId) {
+        const prev = dragFolderId;
+        try {
+          await agent.update(dragId, { folderId: hit.folderId });
+          lastFolderGesture = {
+            inverse: async () => { try { await agent.update(dragId, { folderId: prev }); } catch { /* stale */ } },
+          };
+        } catch { /* move failed */ }
+        return;
+      }
+      if (hit.kind === 'pane') {
+        if (activeFolderId) {
+          const prev = dragFolderId;
+          try {
+            await agent.update(dragId, { folderId: activeFolderId });
+            lastFolderGesture = {
+              inverse: async () => { try { await agent.update(dragId, { folderId: prev }); } catch { /* stale */ } },
+            };
+            const folder = folderCatalog.find((row) => row.id === activeFolderId);
+            if (folder) {
+              let openIds = [...(folder.openIds ?? [])];
+              if (!openIds.includes(dragId)) {
+                openIds.push(dragId);
+                if (openIds.length > FULL_CAP) openIds = openIds.slice(-FULL_CAP);
+                try { await agent.updateFolder(activeFolderId, { openIds }); } catch { /* stale folder */ }
+              }
+            }
+          } catch { /* join failed */ }
+          return;
+        }
+        if (workingSetIds.length) {
+          const ids = [...workingSetIds];
+          if (!ids.includes(dragId)) ids.push(dragId);
+          workingSetIds = ids.slice(0, FULL_CAP);
+          try {
+            await agent.saveWorkingSet(workingSetIds);
+            await tileWorkingSet(workingSetIds);
+          } catch { /* save failed */ }
+        }
+      }
+    };
+
+    const bindFolderTabDrag = (tab, dragId) => {
+      tab.addEventListener('pointerdown', (event) => {
+        if (event.button !== 0) return;
+        const origin = { x: event.clientX, y: event.clientY, started: false };
+        let done = false;
+        let card = null;
+        tab.setPointerCapture?.(event.pointerId);
+        const move = (e) => {
+          if (done) return;
+          if (!origin.started && Math.hypot(e.clientX - origin.x, e.clientY - origin.y) < 10) return;
+          origin.started = true;
+          if (!card) card = makeCard(dragId);
+          placeCard(card, e.clientX, e.clientY);
+          paintFolderDrop(e.clientX, e.clientY, dragId);
+        };
+        const up = async (e) => {
+          if (done) return;
+          done = true;
+          document.removeEventListener('pointermove', move);
+          document.removeEventListener('mousemove', move);
+          document.removeEventListener('pointerup', up);
+          document.removeEventListener('mouseup', up);
+          document.removeEventListener('pointercancel', up);
+          try { tab.releasePointerCapture?.(e.pointerId); } catch { /* already released */ }
+          card?.remove();
+          paintFolderDrop(null);
+          if (!origin.started) return;
+          suppressFolderClick = true;
+          setTimeout(() => { suppressFolderClick = false; }, 0);
+          const hit = hitFolderDrop(e.clientX, e.clientY, dragId);
+          await applyFolderDrop(dragId, hit);
+        };
+        document.addEventListener('pointermove', move);
+        document.addEventListener('mousemove', move);
+        document.addEventListener('pointerup', up);
+        document.addEventListener('mouseup', up);
+        document.addEventListener('pointercancel', up);
+      });
+    };
+
     const makeFolderTab = (summary, folderId) => {
       const tab = document.createElement('button');
       tab.type = 'button';
@@ -815,7 +1097,18 @@ __ICON__
       tab.setAttribute('data-marble-transient', '');
       tab.textContent = summary.title || 'Untitled';
       tab.classList.toggle('marble-open', summary.id === openId);
-      tab.addEventListener('click', async () => {
+      tab.classList.toggle('marble-selected', selectedIds.includes(summary.id));
+      tab.addEventListener('click', async (event) => {
+        if (suppressFolderClick) return;
+        if (event.shiftKey || event.metaKey || event.ctrlKey) {
+          event.preventDefault();
+          await handleTabSelect(summary.id, event);
+          return;
+        }
+        selectAnchor = summary.id;
+        selectedIds = [summary.id];
+        paintTabSelection();
+        hideFolderSave();
         if (folderId) {
           activeFolderId = folderId;
           await open(summary.id);
@@ -839,17 +1132,20 @@ __ICON__
           paintFolderRail();
         }
       });
+      bindFolderTabDrag(tab, summary.id);
       return tab;
     };
 
     const paintFolderRail = () => {
       if (!folderRail) return;
+      const save = folderSaveEl;
       folderRail.replaceChildren();
       const sorted = [...folderCatalog].sort((a, b) => (a.order ?? 0) - (b.order ?? 0));
       for (const folder of sorted) {
         const group = document.createElement('section');
         group.className = 'folder-group';
         group.dataset.color = folder.color || 'research';
+        group.dataset.folderId = folder.id;
         group.setAttribute('data-marble-transient', '');
         group.classList.toggle('marble-active', folder.id === activeFolderId);
 
@@ -907,6 +1203,8 @@ __ICON__
       newChat.textContent = '+ New chat';
       newChat.addEventListener('click', () => startNew());
       folderRail.append(newChat);
+      if (save) folderRail.append(save);
+      paintTabSelection();
     };
 
     const paintRow = (el, summary) => {
@@ -1762,6 +2060,16 @@ __ICON__
     });
     boardPanel.querySelector('.panel-close').addEventListener('click', () => closeBoardPanel());
     addEventListener('keydown', (event) => {
+      if ((event.metaKey || event.ctrlKey) && event.key === 'z' && !event.shiftKey) {
+        if (typingIn()) return;
+        if (lastFolderGesture?.inverse) {
+          event.preventDefault();
+          const inverse = lastFolderGesture.inverse;
+          lastFolderGesture = null;
+          inverse().catch(() => {});
+        }
+        return;
+      }
       if (event.key !== 'v' && event.key !== 'V') return;
       if (event.metaKey || event.ctrlKey || event.altKey) return;
       if (event.repeat) return;
@@ -1834,6 +2142,18 @@ __ICON__
       });
       const start = async (api) => {
         agent = api;
+        let folderPending = null;
+        const trackFolderOp = (op) => {
+          const pending = Promise.resolve(op()).finally(() => {
+            if (folderPending === pending) folderPending = null;
+          });
+          folderPending = pending;
+          return pending;
+        };
+        const listFolders = api.folders.bind(api);
+        const origCreateFolder = api.createFolder.bind(api);
+        api.folders = () => (folderPending ? folderPending.then(() => listFolders()) : listFolders());
+        api.createFolder = (body) => trackFolderOp(() => origCreateFolder(body));
         try {
           for (const provider of await api.providers()) labels.set(provider.id, provider);
         } catch { /* badges fall back to the provider id */ }
