@@ -362,32 +362,53 @@
       x += stageW + gap;
     }
 
+    // A region is as tall as what it holds. Regions pack down a field column
+    // and start the next column when the canvas runs out — so two small
+    // folders share a column instead of each taking a tall, mostly empty one.
     const regions = [];
+    let colIndex = 0;
+    let colX = x;
+    let colTop = top;
+    let colWidth = 0;
     for (const group of shaped) {
       const w = group.stacks.length * colW + (group.stacks.length - 1) * gap + 2 * PAD;
+      const tallest = group.stacks.reduce((best, stack) => {
+        const stacked = stack.reduce((n, card) => n + cardHeight(card, sizes) + gap, 0) - gap;
+        return Math.max(best, stacked);
+      }, 0);
+      const h = Math.min(availH, Math.max(0, tallest) + NAME_H + 2 * PAD);
+      if (regions.length && colTop + h > top + availH + 0.01) {
+        colIndex += 1;
+        colX += colWidth + gap;
+        colTop = top;
+        colWidth = 0;
+      }
       const region = {
         folderId: group.folderId,
-        x,
-        y: top,
+        x: colX,
+        y: colTop,
         w,
-        h: availH,
-        inner: { x: x + PAD, y: top + PAD + NAME_H, w: w - 2 * PAD, h: innerH },
+        h,
+        col: colIndex,
+        inner: { x: colX + PAD, y: colTop + PAD + NAME_H, w: w - 2 * PAD, h: h - NAME_H - 2 * PAD },
         cards: [],
       };
       group.stacks.forEach((stack, si) => {
-        const cx = x + PAD + si * (colW + gap);
-        let cy = top + PAD + NAME_H;
+        const cx = colX + PAD + si * (colW + gap);
+        let cy = colTop + PAD + NAME_H;
         for (const card of stack) {
-          const h = cardHeight(card, sizes);
-          const rect = { id: card.id, x: cx, y: cy, w: colW, h };
+          const ch = cardHeight(card, sizes);
+          const rect = { id: card.id, x: cx, y: cy, w: colW, h: ch };
           region.cards.push(rect);
           rects[card.id] = { x: rect.x, y: rect.y, w: rect.w, h: rect.h };
-          cy += h + gap;
+          cy += ch + gap;
         }
       });
       regions.push(region);
-      x += w + gap;
+      colTop += h + gap;
+      colWidth = Math.max(colWidth, w);
     }
+    if (regions.length) x = colX + colWidth + gap;
 
     // Making a folder is otherwise undiscoverable — you have to guess that one
     // card dropped on another means something. A column you can see says it.
@@ -446,6 +467,22 @@
       }
     }
     return { index, over, x: column.x, w: column.w, y };
+  };
+
+  /** The region under a point, with the gap as tolerance — else the nearest,
+   *  so a drop below the last region in a column still has somewhere to go. */
+  const regionAt = (pack, point, gap = GAP) => {
+    const regions = pack?.regions ?? [];
+    if (!regions.length) return null;
+    const hit = regions.find((r) => (
+      point.x >= r.x - gap && point.x <= r.x + r.w + gap && point.y >= r.y - gap && point.y <= r.y + r.h + gap
+    ));
+    if (hit) return hit;
+    const dist = (r) => Math.hypot(
+      Math.max(r.x - point.x, 0, point.x - (r.x + r.w)),
+      Math.max(r.y - point.y, 0, point.y - (r.y + r.h)),
+    );
+    return regions.reduce((best, r) => (dist(r) < dist(best) ? r : best), regions[0]);
   };
 
   /** The same question for the stage, where the slots run left to right. */
@@ -508,5 +545,6 @@
     slotAt,
     stageSlotAt,
     steadySlot,
+    regionAt,
   };
 })();
