@@ -40,6 +40,7 @@ const SCRIPTS = {
   ],
   wait: [{ sleep: 2500 }, { say: 'waited' }],
   hold: [{ silent: 20_000 }],
+  permission: [{ ask: { tool: 'Bash', input: { command: 'rm -rf build' } } }, { say: 'after' }],
 };
 
 const config = loadConfig({
@@ -586,4 +587,17 @@ test('projects: the drive is listed first, a directory can be added once and rem
   assert.equal((await api('DELETE', `/agent/projects/${added.body.id}`)).status, 200);
   assert.equal((await api('DELETE', `/agent/projects/${added.body.id}`)).status, 404);
   assert.equal((await api('GET', '/agent/projects')).body.length, 1);
+});
+
+test('POST /agent/turns/:id/answer answers an open ask once', async () => {
+  const conv = (await api('POST', '/agent/conversations', { provider: 'fake' })).body;
+  await api('POST', `/agent/conversations/${conv.id}/turns`, { prompt: 'script:permission', context: { target: 'garden' } });
+  const ask = await until(async () => (await drive.agents.store.events(conv.id)).find((e) => e.type === 'ask'));
+  assert.equal((await api('GET', `/agent/conversations/${conv.id}`)).body.meta.asking, true);
+  assert.equal((await api('POST', `/agent/turns/${conv.id}-t1/answer`, { requestId: 'nope', response: {} })).status, 404);
+  const ok = await api('POST', `/agent/turns/${conv.id}-t1/answer`, { requestId: ask.requestId, response: { behavior: 'allow' } });
+  assert.equal(ok.status, 200);
+  assert.deepEqual(ok.body, { answered: true });
+  assert.equal((await api('POST', `/agent/turns/${conv.id}-t1/answer`, { requestId: ask.requestId, response: { behavior: 'allow' } })).status, 409);
+  assert.equal((await api('POST', `/agent/turns/${conv.id}-t9/answer`, { requestId: 'x', response: {} })).status, 409);
 });

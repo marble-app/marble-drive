@@ -29,7 +29,9 @@ export function createFakeProvider({ scripts = {}, id = 'fake' } = {}) {
           FAKE_MCP: JSON.stringify(mcp),
           FAKE_RESUME: resume ?? '',
         },
-        stdin: prompt,
+        stdin: `${prompt}\n`,
+        // Asks are answered on stdin while the turn runs.
+        stdinOpen: true,
       };
     },
     parse(line) {
@@ -40,6 +42,7 @@ export function createFakeProvider({ scripts = {}, id = 'fake' } = {}) {
         case 'text': return [{ type: 'text', text: e.text }];
         case 'call': return [{ type: 'tool.call', name: e.name, input: e.input, callId: e.callId }];
         case 'result': return [{ type: 'tool.result', callId: e.callId, ok: e.ok, summary: e.summary }];
+        case 'ask': return [{ type: 'ask', requestId: e.requestId, tool: e.tool, displayName: e.tool, input: e.input, interactive: e.tool === 'AskUserQuestion' }];
         case 'done': return [{ type: 'done', ok: e.ok, error: e.error }];
         default: return [];
       }

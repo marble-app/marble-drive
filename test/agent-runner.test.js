@@ -16,6 +16,8 @@ const SCRIPTS = {
   broken: [{ fail: 'You have hit your usage limit' }],
   forgetful: [{ lostWhenResumed: 'No conversation found with session ID: x' }, { say: 'fresh' }],
   noop: [{ say: 'done' }],
+  permission: [{ ask: { tool: 'Bash', input: { command: 'rm -rf build' } } }, { say: 'after' }],
+  question: [{ ask: { tool: 'AskUserQuestion', input: { questions: [{ question: 'A or B?', header: 'Pick', options: [{ label: 'A' }, { label: 'B' }], multiSelect: false }] } } }],
 };
 
 async function setup({ limits = {}, tools, onLook, capability, projects = null } = {}) {
@@ -788,5 +790,63 @@ test('maxMs of zero never caps a turn', async () => {
   await runner.send(id, { prompt: 'script:slow', context: { target: 'garden' } });
   await until(async () => (await store.turn(`${id}-t1`)).status === 'completed', 8_000);
   assert.equal((await store.turn(`${id}-t1`)).error, null);
+  await runner.close();
+});
+
+test('an ask is stored, marks the conversation asking, and an answer reaches the process', async () => {
+  const { store, runner } = await setup({ capability: 'full' });
+  const { id } = await store.createConversation({ provider: 'fake' });
+  await runner.send(id, { prompt: 'script:permission', context: { target: 'garden' } });
+  const ask = await until(async () => (await store.events(id)).find((e) => e.type === 'ask'));
+  assert.equal(ask.kind, 'permission');
+  assert.equal(ask.tool, 'Bash');
+  assert.deepEqual(ask.input, { command: 'rm -rf build' });
+  assert.equal((await store.summary(id)).asking, true);
+
+  await runner.answer(`${id}-t1`, ask.requestId, { behavior: 'allow' });
+  await until(async () => (await store.turn(`${id}-t1`)).status === 'completed');
+  const events = await store.events(id);
+  assert.ok(events.some((e) => e.type === 'ask.answered' && e.requestId === ask.requestId));
+  assert.ok(events.some((e) => e.type === 'text' && e.text === 'answered:allow'));
+  assert.equal((await store.summary(id)).asking, false);
+  await assert.rejects(runner.answer(`${id}-t1`, ask.requestId, { behavior: 'allow' }), { status: 409 });
+  await runner.close();
+});
+
+test('a question is an ask of kind question and its answer carries the chosen labels', async () => {
+  const { store, runner } = await setup({ capability: 'full' });
+  const { id } = await store.createConversation({ provider: 'fake' });
+  await runner.send(id, { prompt: 'script:question', context: { target: 'garden' } });
+  const ask = await until(async () => (await store.events(id)).find((e) => e.type === 'ask'));
+  assert.equal(ask.kind, 'question');
+  await runner.answer(`${id}-t1`, ask.requestId, { behavior: 'allow', updatedInput: { ...ask.input, answers: { 'A or B?': 'B' } } });
+  await until(async () => (await store.events(id)).some((e) => e.type === 'text' && e.text === 'answered:allow:B'));
+  await runner.close();
+});
+
+test('a turn waiting on an ask is not a stall', async () => {
+  const { store, runner } = await setup({ capability: 'full', limits: { stallMs: 400 } });
+  const { id } = await store.createConversation({ provider: 'fake' });
+  await runner.send(id, { prompt: 'script:permission', context: { target: 'garden' } });
+  const ask = await until(async () => (await store.events(id)).find((e) => e.type === 'ask'));
+  await new Promise((r) => setTimeout(r, 900));
+  assert.equal((await store.turn(`${id}-t1`)).status, 'running', 'still waiting for the person');
+  await runner.answer(`${id}-t1`, ask.requestId, { behavior: 'deny', message: 'no' });
+  await until(async () => (await store.turn(`${id}-t1`)).status === 'completed');
+  await runner.close();
+});
+
+test('cancelling a turn denies its open ask and voids it', async () => {
+  const { store, runner } = await setup({ capability: 'full' });
+  const { id } = await store.createConversation({ provider: 'fake' });
+  await runner.send(id, { prompt: 'script:permission', context: { target: 'garden' } });
+  const ask = await until(async () => (await store.events(id)).find((e) => e.type === 'ask'));
+  await runner.cancel(`${id}-t1`);
+  await until(async () => (await store.turn(`${id}-t1`)).status === 'cancelled');
+  const voided = (await store.events(id)).find((e) => e.type === 'ask.void');
+  assert.equal(voided.requestId, ask.requestId);
+  assert.equal(voided.why, 'cancelled');
+  assert.equal((await store.summary(id)).asking, false);
+  await assert.rejects(runner.answer(`${id}-t1`, ask.requestId, { behavior: 'allow' }), { status: 409 });
   await runner.close();
 });

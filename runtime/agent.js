@@ -182,6 +182,7 @@
       },
 
       cancel: (turnId) => ask(`/agent/turns/${enc(turnId)}/cancel`, { method: 'POST' }),
+      answer: (turnId, requestId, response) => ask(`/agent/turns/${enc(turnId)}/answer`, { method: 'POST', body: { requestId, response } }),
       undo: (turnId) => ask(`/agent/turns/${enc(turnId)}/undo`, { method: 'POST' }),
       dequeue: (turnId) => ask(`/agent/turns/${enc(turnId)}`, { method: 'DELETE' }),
       archive: (id, archived = true) => ask(`/agent/conversations/${enc(id)}`, { method: 'PATCH', body: { archived } }),

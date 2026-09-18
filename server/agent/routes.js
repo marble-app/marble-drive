@@ -41,7 +41,7 @@ const hostnameOf = (req) => {
 };
 const bearer = (req) => (req.headers.authorization ?? '').replace(/^Bearer\s+/i, '');
 const CONVERSATION = /^\/agent\/conversations\/([0-9a-f]{12})(\/turns)?$/;
-const TURN = /^\/agent\/turns\/([0-9a-f]{12}-t\d+)(\/cancel|\/undo)?$/;
+const TURN = /^\/agent\/turns\/([0-9a-f]{12}-t\d+)(\/cancel|\/undo|\/answer)?$/;
 const FOLDER = /^\/agent\/folders\/([0-9a-f]{12})$/;
 const PROJECT = /^\/agent\/projects\/([0-9a-f]{12}|drive)$/;
 const TOOL = /^\/agent\/tools\/([a-z_]+)$/;
@@ -382,6 +382,18 @@ export function createAgentRoutes({ store, runner, tools, hub, providers, writeO
       const [, turnId, action] = turnRoute;
       if (!action && method === 'DELETE') return json(res, 200, { removed: await runner.dequeue(turnId) });
       if (action === '/cancel' && method === 'POST') return json(res, 200, { cancelled: await runner.cancel(turnId) });
+      if (action === '/answer' && method === 'POST') {
+        const body = await readJson(req, maxBody);
+        if (typeof body.requestId !== 'string' || !body.requestId) return json(res, 400, { error: 'requestId is required' });
+        if (!body.response || typeof body.response !== 'object') return json(res, 400, { error: 'response is required' });
+        try {
+          await runner.answer(turnId, body.requestId, body.response);
+          return json(res, 200, { answered: true });
+        } catch (err) {
+          if (err.status) return json(res, err.status, { error: err.message });
+          throw err;
+        }
+      }
       if (action === '/undo' && method === 'POST') {
         const turn = await store.turn(turnId);
         if (!turn) return json(res, 404, { error: `no turn "${turnId}"` });

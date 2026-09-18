@@ -159,6 +159,9 @@ export function createRunner({ store, tools, providers, workdir, origin, bridgeP
       cancelled: null,
       provider: null,
       project: null, // resolved at start; the cwd of a full turn
+      asks: new Map(), // requestId → { closed }: prompts the process is waiting on
+      holdStall: null,
+      resumeStall: null,
       resume: null, // the provider session this turn was started to resume
       done: null,
       usage: null,
@@ -328,11 +331,15 @@ export function createRunner({ store, tools, providers, workdir, origin, bridgeP
 
       const state = {};
       let stall;
+      const openAsks = () => [...turn.asks.values()].filter((a) => !a.closed).length;
       const resetStall = () => {
         clearTimeout(stall);
+        if (openAsks()) return; // waiting on the person is not a stall
         stall = setTimeout(() => stop(turn, { status: 'failed', error: `stalled — no output for ${Math.round(limits.stallMs / 1000)} s` }), limits.stallMs);
         stall.unref?.();
       };
+      turn.holdStall = () => clearTimeout(stall);
+      turn.resumeStall = resetStall;
       resetStall();
       turn.timers.push(() => clearTimeout(stall));
       // A cap is opt-in. A person stops a turn; a timer does not.
@@ -393,6 +400,15 @@ export function createRunner({ store, tools, providers, workdir, origin, bridgeP
       case 'catalog':
         recordCatalog(turn, event);
         return;
+      case 'ask': {
+        const kind = event.tool === 'AskUserQuestion' ? 'question' : 'permission';
+        turn.asks.set(event.requestId, { closed: false });
+        turn.holdStall?.();
+        chained(turn.conversationId, () => store.updateConversation(turn.conversationId, { asking: true }))
+          .then(() => emit(turn, { ...event, kind }))
+          .catch((err) => log.error(`[agents] ${err.message}`));
+        return;
+      }
       case 'text.delta':
         chained(turn.conversationId, () => {
           publish(turn.conversationId, { turn: turn.id, ...event });
@@ -414,6 +430,24 @@ export function createRunner({ store, tools, providers, workdir, origin, bridgeP
     }
   }
 
+  const writeControl = (turn, requestId, response) => {
+    try {
+      turn.child?.stdin?.write(`${JSON.stringify({ type: 'control_response', response: { subtype: 'success', request_id: requestId, response } })}\n`);
+    } catch {
+      // The process is gone; finish() voids the ask.
+    }
+  };
+
+  /** Close every open ask: deny it to the process (if asked to) and void it in the log. */
+  async function voidAsks(turn, why, { deny = false } = {}) {
+    for (const [requestId, ask] of turn.asks) {
+      if (ask.closed) continue;
+      ask.closed = true;
+      if (deny) writeControl(turn, requestId, { behavior: 'deny', message: `Turn ${why} from Marble` });
+      await emit(turn, { type: 'ask.void', requestId, why });
+    }
+  }
+
   /** Ask a running process to stop, and make sure it does — or, if it hasn't
    *  spawned yet, just record the outcome: `start` checks it before spawning
    *  and finishes the turn instead of launching a process nobody wants. */
@@ -421,6 +455,7 @@ export function createRunner({ store, tools, providers, workdir, origin, bridgeP
     if (turn.cancelled) return;
     turn.cancelled = outcome;
     if (!turn.child) return;
+    voidAsks(turn, 'cancelled', { deny: true }).catch((err) => log.error(`[agents] ${err.message}`));
     turn.child.kill('SIGTERM');
     const kill = setTimeout(() => turn.child.kill('SIGKILL'), limits.killGraceMs);
     kill.unref?.();
@@ -441,6 +476,7 @@ export function createRunner({ store, tools, providers, workdir, origin, bridgeP
     turn.finishing = true;
     look(turn, { ids: [] });
     for (const clear of turn.timers) clear();
+    await voidAsks(turn, 'ended').catch((err) => log.error(`[agents] ${err.message}`));
     try {
       turn.child?.stdin?.end();
     } catch {
@@ -483,6 +519,7 @@ export function createRunner({ store, tools, providers, workdir, origin, bridgeP
         await store.updateConversation(turn.conversationId, {
           ...(lostSession ? { providerSession: null } : {}),
           running: false,
+          asking: false,
           activity: status === 'completed' ? (applied ? `Changed ${applied} element(s)` : 'Answered') : error ?? status,
           lastOutcome: outcome,
           lastFinishedAt: finishedAt,
@@ -543,6 +580,22 @@ export function createRunner({ store, tools, providers, workdir, origin, bridgeP
     dequeue,
 
     turnForToken: (token) => tokens.get(token) ?? null,
+
+    /** The person's answer to a prompt the process is waiting on. */
+    async answer(turnId, requestId, response) {
+      const turn = live.get(turnId);
+      if (!turn || turn.status !== 'running' || turn.finishing) throw Object.assign(new Error('the turn is not running'), { status: 409 });
+      const ask = turn.asks.get(requestId);
+      if (!ask) throw Object.assign(new Error(`no ask "${requestId}" on this turn`), { status: 404 });
+      if (ask.closed) throw Object.assign(new Error('this ask was already answered'), { status: 409 });
+      ask.closed = true;
+      writeControl(turn, requestId, response);
+      const stillOpen = [...turn.asks.values()].some((a) => !a.closed);
+      if (!stillOpen) await store.updateConversation(turn.conversationId, { asking: false });
+      await emit(turn, { type: 'ask.answered', requestId, response });
+      if (!stillOpen) turn.resumeStall?.();
+      return true;
+    },
 
     async callTool(token, name, input) {
       const turn = tokens.get(token);

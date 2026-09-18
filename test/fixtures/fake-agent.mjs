@@ -13,8 +13,27 @@ const mcp = process.env.FAKE_MCP ? JSON.parse(process.env.FAKE_MCP) : null;
 const out = (value) => process.stdout.write(`${JSON.stringify(value)}\n`);
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
-let prompt = '';
-for await (const chunk of process.stdin) prompt += chunk;
+// The first line is the prompt (its later lines are context and ignored).
+// Anything after that which parses as a control_response answers an ask.
+const stdin = readline.createInterface({ input: process.stdin });
+const answers = [];
+let waiter = null;
+let prompt = null;
+let promptReady;
+const promptSeen = new Promise((resolve) => { promptReady = resolve; });
+stdin.on('line', (line) => {
+  if (prompt === null) {
+    prompt = line;
+    promptReady();
+    return;
+  }
+  let msg;
+  try { msg = JSON.parse(line); } catch { return; }
+  if (msg?.type !== 'control_response') return;
+  if (waiter) { const w = waiter; waiter = null; w(msg); } else answers.push(msg);
+});
+const nextAnswer = () => (answers.length ? Promise.resolve(answers.shift()) : new Promise((resolve) => { waiter = resolve; }));
+await promptSeen;
 
 let bridge = null;
 let nextId = 1;
@@ -59,6 +78,15 @@ for (const step of script) {
     out({ kind: 'text', text: step.say });
   }
   if (step.sleep) await sleep(step.sleep);
+  // What a CLI does when it needs the person: print the prompt, wait for the
+  // answer on stdin, say what it got.
+  if (step.ask) {
+    const requestId = `ask-${nextId++}`;
+    out({ kind: 'ask', requestId, tool: step.ask.tool, input: step.ask.input ?? {} });
+    const msg = await nextAnswer();
+    const r = msg.response?.response ?? {};
+    out({ kind: 'text', text: `answered:${r.behavior}${r.updatedInput?.answers ? ':' + Object.values(r.updatedInput.answers).join(',') : ''}` });
+  }
   if (step.silent) await sleep(step.silent);
   if (step.call) {
     const callId = `call-${nextId}`;
