@@ -176,3 +176,29 @@ test('the new-conversation sheet starts a conversation and opens it', async () =
   await page.waitForFunction(() => document.body.hasAttribute('data-open'));
   await page.waitForFunction(() => document.querySelectorAll('.deck .conv').length === 1);
 });
+
+test('phone chrome: a one-row topbar, a thumb bar at the sill, 44pt controls, --vv-h, and install meta', async () => {
+  const { page } = await openAgents();
+  await page.reload();
+  await page.waitForFunction(() => Boolean(window.marble?.agent));
+  const top = await page.locator('.topbar').boundingBox();
+  assert.ok(top.height <= 60, `topbar ${top.height}`);
+  assert.equal(await page.locator('.topbar .more').isVisible(), true);
+  assert.equal(await page.locator('.topbar .toggles').isVisible(), false);
+  const thumb = await page.locator('.thumb').boundingBox();
+  assert.ok(thumb.y + thumb.height >= 852 - 1, `thumb ends at ${thumb.y + thumb.height}`);
+  for (const sel of ['.thumb-new', '.thumb-field', '.band[data-band="running"] .band-toggle', '.topbar .more']) {
+    const box = await page.locator(sel).first().boundingBox();
+    assert.ok(box && box.height >= 44, `${sel} is ${box?.height}`);
+  }
+  const vv = await page.evaluate(() => getComputedStyle(document.documentElement).getPropertyValue('--vv-h').trim());
+  assert.match(vv, /^\d+px$/);
+  assert.equal(await page.evaluate(() => document.querySelector('meta[name="apple-mobile-web-app-capable"]')?.content), 'yes');
+  assert.match(await page.evaluate(() => document.querySelector('meta[name="viewport"]').content), /viewport-fit=cover/);
+  // The usage ring reads the worst meter.
+  await page.locator('.topbar .usage-dot:not([hidden])').waitFor();
+  assert.match(await page.locator('.topbar .usage-dot').getAttribute('title'), /\d+%/);
+  // ⋯ lists the views.
+  await page.locator('.topbar .more').click();
+  await page.locator('.sheet[data-kind="more"] button', { hasText: 'Focus' }).waitFor({ state: 'visible' });
+});
