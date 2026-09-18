@@ -27,10 +27,12 @@ export const CLAUDE_MODELS = [
   { id: 'fable', label: 'Fable 5' },
 ];
 export const CLAUDE_EFFORTS = ['low', 'medium', 'high', 'xhigh', 'max'];
-// Named once. `--restricted` confines these to the working directory; Bash is
-// in the list because `--restricted` drops code-running tools unless it is.
-const FULL_TOOLS = 'Bash,Read,Write,Edit,Glob,Grep,TodoWrite';
-const FULL_SETTINGS = { permissions: { allow: FULL_TOOLS.split(',') } };
+// Named once. `--restricted` confines file tools to the working directory;
+// Bash, WebSearch and WebFetch stay in the list because `--restricted` drops
+// them unless they are named. `mcp__browser` is the Marble-owned Playwright
+// server, allowed in settings rather than `--tools`.
+const FULL_TOOLS = 'Bash,Read,Write,Edit,Glob,Grep,TodoWrite,WebSearch,WebFetch';
+const FULL_SETTINGS = { permissions: { allow: [...FULL_TOOLS.split(','), 'mcp__browser'] } };
 const SUMMARY = 200;
 
 const toolName = (name) => (name.startsWith(PREFIX) ? name.slice(PREFIX.length) : name);
@@ -148,8 +150,9 @@ export function createClaudeProvider({ auth = 'subscription', exec = runCommand,
     efforts: CLAUDE_EFFORTS,
     modes: CLAUDE_MODES,
 
-    async prepare({ workspace, mcp, skills = [], capability = 'documents' }) {
+    async prepare({ workspace, mcp, browser = null, skills = [], capability = 'documents' }) {
       const config = { mcpServers: { marble: { command: mcp.command, args: mcp.args, env: mcp.env } } };
+      if (capability === 'full' && browser) config.mcpServers.browser = browser;
       // The token in here is good for one turn, and nobody else's business.
       await writePrivateFile(path.join(workspace, 'mcp.json'), JSON.stringify(config, null, 2));
       // `--restricted` refuses bypassPermissions and ignores this machine's

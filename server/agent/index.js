@@ -22,6 +22,7 @@ import { cachedUsage, collectUsage } from './usage.js';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const BRIDGE = path.resolve(HERE, '..', '..', 'bin', 'marble-mcp.js');
+const BROWSER = path.resolve(HERE, '..', '..', 'bin', 'marble-browser-mcp.js');
 const REPO = path.resolve(HERE, '..', '..');
 const LOOPBACK_HOSTS = new Set(['127.0.0.1', '::1', 'localhost']);
 const ANY_HOST = new Set(['0.0.0.0', '::']);
@@ -140,6 +141,7 @@ async function boot({ config, store, writeOps, createDocument, origin, providers
     sandbox,
     origin,
     bridgePath: BRIDGE,
+    browserPath: BROWSER,
     readDocument: (docPath) => store.read(docPath),
     publish: hub.publish,
     limits: {

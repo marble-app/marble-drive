@@ -23,7 +23,7 @@ const STDERR_TAIL = 4_000;
 // How long closing the host waits for its running turns to write their end.
 const CLOSE_GRACE_MS = 5_000;
 
-export function createRunner({ store, tools, providers, workdir, origin, bridgePath, readDocument, publish, limits, log = console, skills = [], driveRoot, power = '', sandbox = null }) {
+export function createRunner({ store, tools, providers, workdir, origin, bridgePath, browserPath, readDocument, publish, limits, log = console, skills = [], driveRoot, power = '', sandbox = null }) {
   const live = new Map(); // turnId → live turn
   const order = []; // turnIds, in the order they were sent
   const tokens = new Map(); // token → live turn
@@ -202,16 +202,23 @@ export function createRunner({ store, tools, providers, workdir, origin, bridgeP
       turn.token = crypto.randomBytes(32).toString('hex');
       tokens.set(turn.token, turn);
       const workspace = path.join(workdir, turn.conversationId);
+      const capability = effectiveCapability(provider, { power });
+      turn.capability = capability;
       const mcp = {
         command: process.execPath,
         args: [bridgePath],
         env: { MARBLE_DRIVE_URL: origin(), MARBLE_AGENT_TOKEN: turn.token },
       };
+      const browser = capability === 'full' && browserPath
+        ? {
+            command: process.execPath,
+            args: [browserPath],
+            env: { MARBLE_BROWSER_PROFILE: path.join(workspace, 'browser-profile') },
+          }
+        : null;
 
       await fsp.mkdir(workspace, { recursive: true });
-      const capability = effectiveCapability(provider, { power });
-      turn.capability = capability;
-      await provider.prepare?.({ workspace, mcp, meta, skills, capability });
+      await provider.prepare?.({ workspace, mcp, browser, meta, skills, capability });
       const prompt = await composePrompt(turn, meta);
 
       // Cancel (or a host shutdown) can land anywhere in the awaits above,
