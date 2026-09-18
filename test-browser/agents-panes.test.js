@@ -140,3 +140,25 @@ test('a seam between nested panes resizes only its own split', async () => {
   assert.equal(Math.round(other(after).w), Math.round(other(before).w), 'the pane across the other seam is untouched');
   assert.equal(overlaps(after), false);
 });
+
+test('the focused pane is lit and the others dim, in every view', async () => {
+  const { page } = await openAgents(2);
+  await dragOnto(page, 1, 'P', 'right');
+  const read = () => page.evaluate(() => [...document.querySelectorAll('.dock-frame:not(.dock-ghost)')].map((f) => ({
+    key: f.dataset.key, focused: f.hasAttribute('data-focused'), bg: getComputedStyle(f).backgroundColor,
+  })));
+  let frames = await read();
+  assert.equal(frames.filter((f) => f.focused).length, 1, 'exactly one lit pane');
+  const lit = frames.find((f) => f.focused);
+  const dim = frames.find((f) => !f.focused);
+  assert.notEqual(lit.bg, dim.bg, 'the dim pane has a different surface');
+  // The primary's bar sits on the pane, not inside its frame; bars carry the key.
+  await page.locator(`.dock-bar[data-key="${dim.key}"]`).click();
+  frames = await read();
+  assert.equal(frames.find((f) => f.key === dim.key).focused, true, 'clicking a bar focuses it');
+  // A bar click puts the caret in that pane's composer, so V would type there.
+  await page.locator('.views [data-view="board"]').click();
+  await page.waitForFunction(() => document.body.getAttribute('data-view') === 'board');
+  frames = await read();
+  assert.equal(frames.filter((f) => f.focused).length, 1, 'still one lit pane on the board');
+});

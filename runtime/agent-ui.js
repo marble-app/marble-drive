@@ -1037,6 +1037,9 @@
     :host([data-chrome="tile"]) .statusline,
     :host([data-chrome="tile"]) .setup { display: none; }
     :host([data-chrome="tile"]) .composer { padding: 6px 8px; gap: 4px; }
+    /* A pane that is not the focused one steps back: the page dims its
+       surface, and the transcript loses a little colour with it. */
+    :host([data-focused="false"]) .log { filter: saturate(.85); }
     .heading { margin: 0; font: 500 15px/1.3 inherit; letter-spacing: -.015em; outline: none; min-height: 1.3em; border-radius: 6px; padding: 2px 4px; margin-left: -4px; }
     .heading:hover { background: var(--paper-2); }
     .heading:focus { background: var(--card); box-shadow: 0 0 0 1px var(--accent), 0 0 0 4px var(--accent-soft); }
