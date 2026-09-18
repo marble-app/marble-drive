@@ -676,6 +676,38 @@
     }
   `;
 
+  /** Five words for what a conversation is doing, shared by every view. The
+   *  dot is the only thing that reads them; its colours are the same tokens
+   *  the status buckets already use. */
+  const stateOf = (summary) => {
+    if (summary?.asking) return 'waiting';
+    if (summary?.running || summary?.queued || summary?.status === 'running') return 'working';
+    if (summary?.needsReview) {
+      return summary.lastOutcome === 'failed' || summary.lastOutcome === 'watchdog' ? 'failed' : 'unseen';
+    }
+    return 'idle';
+  };
+
+  const STATE_CSS = `
+    .dot {
+      flex: none; width: 8px; height: 8px; border-radius: 999px;
+      background: var(--faint); box-sizing: border-box;
+    }
+    [data-state="idle"] .dot { background: transparent; border: 1.5px solid var(--faint); }
+    [data-state="unseen"] .dot { background: var(--ink); }
+    [data-state="failed"] .dot { background: var(--danger); }
+    [data-state="working"] .dot { background: var(--accent-ink); animation: dot-breathe 1.6s ease-in-out infinite; }
+    [data-state="waiting"] .dot { background: var(--caution); animation: dot-ring 1.8s ease-out infinite; }
+    @keyframes dot-breathe { 0%, 100% { opacity: 1; } 50% { opacity: .45; } }
+    @keyframes dot-ring {
+      0% { box-shadow: 0 0 0 0 color-mix(in srgb, var(--caution) 55%, transparent); }
+      70%, 100% { box-shadow: 0 0 0 7px transparent; }
+    }
+    @media (prefers-reduced-motion: reduce) {
+      [data-state="working"] .dot, [data-state="waiting"] .dot { animation: none; }
+    }
+  `;
+
   const USAGE_CSS = `
     .usage {
       display: flex; align-items: center; gap: .7rem; min-width: 0;
@@ -1020,6 +1052,9 @@
     :host([data-chrome="tile"]) .statusline,
     :host([data-chrome="tile"]) .setup { display: none; }
     :host([data-chrome="tile"]) .composer { padding: 6px 8px; gap: 4px; }
+    /* A pane that is not the focused one steps back: the page dims its
+       surface, and the transcript loses a little colour with it. */
+    :host([data-focused="false"]) .log { filter: saturate(.85); }
     .heading { margin: 0; font: 500 15px/1.3 inherit; letter-spacing: -.015em; outline: none; min-height: 1.3em; border-radius: 6px; padding: 2px 4px; margin-left: -4px; }
     .heading:hover { background: var(--paper-2); }
     .heading:focus { background: var(--card); box-shadow: 0 0 0 1px var(--accent), 0 0 0 4px var(--accent-soft); }
@@ -4048,7 +4083,7 @@
     document.body.append(drawer);
   };
 
-  window.marbleAgentUI = { renderText, spring, project, TOKENS, conversationTags, eventBelongsToConversation, askResponse, TAG_CSS, fillMeters, usageAvailable, usageTone, formatReset, USAGE_CSS, pageTheme, applyPageTheme, fillRadios, fitPicker, fitPresets, sortProviders };
+  window.marbleAgentUI = { stateOf, STATE_CSS, renderText, spring, project, TOKENS, conversationTags, eventBelongsToConversation, askResponse, TAG_CSS, fillMeters, usageAvailable, usageTone, formatReset, USAGE_CSS, pageTheme, applyPageTheme, fillRadios, fitPicker, fitPresets, sortProviders };
 
   if (window.marble?.agent) mount();
   else addEventListener('marble:agent', mount, { once: true });

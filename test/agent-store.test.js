@@ -133,7 +133,10 @@ test('settings have defaults and keep what was saved', async () => {
 test('needs review: changes, failures and interruptions nobody has looked at', () => {
   const base = { lastFinishedAt: 100, lastReviewedAt: null, running: false };
   assert.equal(needsReview({ ...base, lastOutcome: 'changes' }), true);
-  assert.equal(needsReview({ ...base, lastOutcome: 'done' }), false);
+  // An answered turn is something the person has not read yet. 'done' used to
+  // fall straight through to Completed, which left the review column empty.
+  assert.equal(needsReview({ ...base, lastOutcome: 'done' }), true);
+  assert.equal(needsReview({ ...base, lastOutcome: 'done', lastReviewedAt: base.lastFinishedAt }), false);
   assert.equal(needsReview({ ...base, lastOutcome: 'cancelled' }), false);
   assert.equal(needsReview({ ...base, lastOutcome: 'failed', lastReviewedAt: 150 }), false);
   assert.equal(needsReview({ ...base, lastOutcome: 'watchdog', lastReviewedAt: 50 }), true);

@@ -130,13 +130,11 @@ test('a pinned Full is a full-height column, not a band across the top', () => {
 
 test('the field never starts above the stage it sits beside', () => {
   const { stage, regions } = pack({ fulls: [{ id: 'f0' }], groups: FIELD });
-  for (const region of regions) {
-    assert.ok(region.x >= stage.x + stage.w, 'a folder column overlapped the stage');
-    assert.equal(Math.round(region.y), Math.round(stage.y), 'the field is beside, not below');
-  }
+  for (const region of regions) assert.ok(region.x >= stage.x + stage.w, 'a folder column overlapped the stage');
+  assert.equal(Math.round(regions[0].y), Math.round(stage.y), 'the field is beside, not below');
 });
 
-test('a deep folder wraps into a second sub-column, never a second row', () => {
+test('a deep folder wraps into a second sub-column', () => {
   const { regions } = pack({ groups: [{ folderId: 'deep', cards: cards('d', 12, 'digest') }] });
   const region = regions[0];
   const columns = new Set(region.cards.map((card) => Math.round(card.x)));
@@ -271,4 +269,61 @@ test('byRank is stable, so an untouched column keeps the order it came in', () =
     { id: 'c' }, { id: 'd' }, { id: 'b', oy: 0.6 }, { id: 'a', oy: 0.2 },
   ]);
   assert.deepEqual(out.map((row) => row.id), ['a', 'b', 'c', 'd']);
+});
+
+test('assignLods does not promote a hovered card — hover informs, selection commits', () => {
+  const cards = Array.from({ length: 8 }, (_, i) => ({ id: `c${i}`, lastInteractedAt: 0, updatedAt: 0 }));
+  const cold = F().assignLods(cards, { fullIds: [], selectedIds: [], hoveredId: 'c7', now: 1e12 });
+  const plain = F().assignLods(cards, { fullIds: [], selectedIds: [], hoveredId: null, now: 1e12 });
+  assert.deepEqual(cold, plain);
+});
+
+test('steadySlot holds the current slot while the pointer hovers a midline', () => {
+  const prev = { column: 'folder', folderId: 'a', key: 'folder:a:2', index: 2, edge: 300 };
+  const flip = { column: 'folder', folderId: 'a', key: 'folder:a:3', index: 3, edge: 300 };
+  assert.equal(F().steadySlot(prev, flip, { y: 305 }), prev, 'within the band, the old answer stands');
+  assert.equal(F().steadySlot(prev, flip, { y: 312 }), flip, 'past it, the new one wins');
+  assert.equal(F().steadySlot(prev, { column: 'folder', folderId: 'b', key: 'folder:b:0', index: 0, edge: 40 }, { y: 305 }).key, 'folder:b:0', 'a different column is never held');
+  assert.equal(F().steadySlot(null, flip, { y: 305 }), flip);
+});
+
+test('two small folders sit one above the other, not in two mostly-empty columns', () => {
+  const two = [
+    { folderId: 'aaaaaaaaaaaa', cards: cards('a', 2, 'digest') },
+    { folderId: 'bbbbbbbbbbbb', cards: cards('b', 2, 'digest') },
+  ];
+  const { regions } = pack({ groups: two });
+  assert.equal(regions.length, 2);
+  assert.equal(Math.round(regions[0].x), Math.round(regions[1].x), 'same field column');
+  assert.ok(regions[1].y >= regions[0].y + regions[0].h, 'the second sits below the first');
+  assert.ok(regions[0].h < CANVAS.h * 0.6, 'a region is as tall as its content');
+  assert.equal(regions[0].col, 0);
+  assert.equal(regions[1].col, 0);
+});
+
+test('a region that does not fit under the previous one starts the next field column', () => {
+  const groups = [
+    { folderId: 'aaaaaaaaaaaa', cards: cards('a', 4, 'digest') },
+    { folderId: 'bbbbbbbbbbbb', cards: cards('b', 4, 'digest') },
+    { folderId: null, cards: cards('u', 1, 'chip') },
+  ];
+  const { regions } = pack({ groups });
+  assert.ok(regions[1].x > regions[0].x || regions[1].y >= regions[0].y + regions[0].h);
+  for (let i = 0; i < regions.length; i += 1) {
+    for (let j = i + 1; j < regions.length; j += 1) assert.equal(overlap(regions[i], regions[j]), false, `${i} overlaps ${j}`);
+  }
+  assert.equal(regions.at(-1).folderId, null, 'ungrouped is last');
+  for (const region of regions) assert.ok(region.y + region.h <= CANVAS.h, 'nothing runs past the canvas');
+});
+
+test('regionAt answers the region under a point, else the nearest', () => {
+  const two = [
+    { folderId: 'aaaaaaaaaaaa', cards: cards('a', 2, 'digest') },
+    { folderId: 'bbbbbbbbbbbb', cards: cards('b', 2, 'digest') },
+  ];
+  const packed = pack({ groups: two });
+  const [a, b] = packed.regions;
+  assert.equal(F().regionAt(packed, { x: a.x + 5, y: a.y + 5 }).folderId, a.folderId);
+  assert.equal(F().regionAt(packed, { x: b.x + 5, y: b.y + b.h + 200 }).folderId, b.folderId, 'below everything → nearest');
+  assert.equal(F().regionAt({ regions: [] }, { x: 0, y: 0 }), null);
 });

@@ -390,10 +390,18 @@ test('dragging a card to the stage pins it, and dragging it back off unpins it',
   await release();
   await page.waitForFunction((id) => document.querySelector(`.focus-card[data-id="${id}"]`)?.dataset.lod === 'full', ids.a);
   assert.equal(await page.locator('.focus-pinslot').count(), 0, 'and take it away again');
+  // The pin springs the card into the stage; press it once it has landed.
+  await page.waitForTimeout(500);
 
+  // A pin is a pane now, so it leaves the stage by its bar: dragged into the
+  // field, it is unpinned where it lands.
+  const bar = await page.locator('.pane .dock-bar[data-key="P"]').boundingBox();
+  await page.mouse.move(bar.x + bar.width / 2, bar.y + bar.height / 2);
+  await page.mouse.down();
+  await page.mouse.move(bar.x + bar.width / 2 + 30, bar.y + 40, { steps: 3 });
   const loose = await middleOf(page, '.focus-basin[data-folder-id="ungrouped"]');
-  release = await dragTo(page, ids.a, { x: loose.x, y: loose.box.y + loose.box.height - 60 });
-  await release();
+  await page.mouse.move(loose.x, loose.box.y + loose.box.height - 10, { steps: 8 });
+  await page.mouse.up();
   await until(page, async () => (await metaOf(page, ids.a))?.pinned === false, 'the card to unpin');
 });
 
@@ -456,4 +464,150 @@ test('Alt and an arrow move the card, so arranging is not pointer-only', async (
   }, ids);
   await page.keyboard.press('Alt+ArrowLeft');
   await page.waitForFunction((id) => document.querySelector(`.focus-card[data-id="${id}"]`)?.dataset.lod === 'full', ids.b);
+});
+
+test('a digest shows the same pills a row does; a chip keeps its dot and hides the rest', async () => {
+  const { page } = await openAgents();
+  const ids = await seedFocus(page, Array.from({ length: 7 }, (_, i) => ({ key: `c${i}`, title: `card ${i}` })));
+  await page.locator(`.focus-card[data-id="${ids.c0}"]`).click();
+  await page.waitForFunction((id) => document.querySelector(`.focus-card[data-id="${id}"]`)?.dataset.lod === 'digest', ids.c0);
+  const digest = page.locator(`.focus-card[data-id="${ids.c0}"]`);
+  assert.ok(await digest.locator('.tags .tag').count() >= 1, 'a digest carries pills');
+  const pill = await digest.locator('.tags .tag').first().evaluate((el) => getComputedStyle(el).borderRadius);
+  const rowPill = await page.evaluate(() => getComputedStyle(document.querySelector('#list .conv .tags .tag')).borderRadius);
+  assert.equal(pill, rowPill, 'same pill everywhere');
+  await page.waitForFunction(() => [...document.querySelectorAll('.focus-card')].some((el) => el.dataset.lod === 'chip'));
+  const chip = page.locator('.focus-card[data-lod="chip"]').first();
+  assert.equal(await chip.locator('.dot').evaluate((el) => getComputedStyle(el).display !== 'none'), true, 'a chip keeps its dot');
+  assert.equal(await chip.locator('.tags .tag').evaluateAll((els) => els.filter((el) => el.getClientRects().length > 0).length), 0, 'a chip hides the pills');
+});
+
+test('hovering a chip lifts it without resizing it or moving its neighbours', async () => {
+  const { page } = await openAgents();
+  await seedFocus(page, Array.from({ length: 7 }, (_, i) => ({ key: `c${i}`, title: `card ${i}` })));
+  await page.waitForFunction(() => [...document.querySelectorAll('.focus-card')].some((el) => el.dataset.lod === 'chip'));
+  await page.waitForTimeout(500);
+  const chip = page.locator('.focus-card[data-lod="chip"]').first();
+  const before = await page.evaluate(() => [...document.querySelectorAll('.focus-card')].map((el) => [el.dataset.id, Math.round(el.getBoundingClientRect().top), Math.round(el.getBoundingClientRect().height)]));
+  await chip.hover();
+  await page.waitForTimeout(300);
+  const after = await page.evaluate(() => [...document.querySelectorAll('.focus-card')].map((el) => [el.dataset.id, Math.round(el.getBoundingClientRect().top), Math.round(el.getBoundingClientRect().height)]));
+  assert.deepEqual(after, before, 'nothing moved or grew');
+  assert.equal(await chip.getAttribute('data-lod'), 'chip');
+});
+
+test('selecting a chip grows it with an animation, not a snap', async () => {
+  const { page } = await openAgents();
+  await seedFocus(page, Array.from({ length: 7 }, (_, i) => ({ key: `c${i}`, title: `card ${i}` })));
+  await page.waitForFunction(() => [...document.querySelectorAll('.focus-card')].some((el) => el.dataset.lod === 'chip'));
+  await page.waitForTimeout(500);
+  const chip = page.locator('.focus-card[data-lod="chip"]').first();
+  const id = await chip.getAttribute('data-id');
+  const grew = page.evaluate((cid) => new Promise((resolve, reject) => {
+    const el = document.querySelector(`.focus-card[data-id="${cid}"]`);
+    const start = performance.now();
+    const tick = () => {
+      const anim = el.getAnimations().find((a) => a.effect?.getKeyframes?.().some((k) => 'height' in k));
+      if (anim) resolve(anim.effect.getTiming().duration);
+      else if (performance.now() - start > 4000) reject(new Error('no size animation'));
+      else requestAnimationFrame(tick);
+    };
+    tick();
+  }), id);
+  await chip.click();
+  const duration = await grew;
+  assert.ok(duration >= 200 && duration <= 400, `height animates (${duration}ms)`);
+});
+
+test('a drop springs home before the PATCH round trip completes', async () => {
+  const { page } = await openAgents();
+  const ids = await seedFocus(page, [{ key: 'a', title: 'first' }, { key: 'b', title: 'second' }, { key: 'c', title: 'third' }]);
+  await page.evaluate(() => {
+    const agent = window.marble.agent;
+    const real = agent.update.bind(agent);
+    window.__slow = [];
+    agent.update = (id, body) => new Promise((resolve) => { window.__slow.push(() => resolve(real(id, body))); });
+  });
+  const target = await page.locator(`.focus-card[data-id="${ids.a}"]`).boundingBox();
+  const release = await dragTo(page, ids.c, { x: target.x + target.width / 2, y: target.y + 6 });
+  await release();
+  await page.waitForTimeout(600);
+  const order = await page.evaluate(() => [...document.querySelectorAll('.focus-card')].sort((p, q) => p.getBoundingClientRect().top - q.getBoundingClientRect().top).map((el) => el.dataset.id));
+  assert.equal(order[0], ids.c, 'the card is in its slot while the PATCH is still pending');
+  await page.evaluate(() => { for (const go of window.__slow) go(); });
+});
+
+test('two two-card folders share a field column, one above the other', async () => {
+  // Two two-digest regions are ~360px each; a 720px viewport cannot stack them.
+  const { page } = await openAgents({ viewport: { width: 1280, height: 1000 } });
+  const ids = await seedFocus(page, [
+    { key: 'a1', title: 'a one' }, { key: 'a2', title: 'a two' },
+    { key: 'b1', title: 'b one' }, { key: 'b2', title: 'b two' },
+  ]);
+  await page.evaluate(async (seeded) => {
+    await window.marble.agent.createFolder({ conversationIds: [seeded.a1, seeded.a2], name: 'A' });
+    await window.marble.agent.createFolder({ conversationIds: [seeded.b1, seeded.b2], name: 'B' });
+  }, ids);
+  await page.waitForFunction(() => document.querySelectorAll('.focus-basin[data-folder-id]:not([data-loose])').length === 2);
+  await page.waitForTimeout(500);
+  const basins = await page.evaluate(() => [...document.querySelectorAll('.focus-basin:not([data-loose])')].map((b) => { const r = b.getBoundingClientRect(); return { id: b.dataset.folderId, x: Math.round(r.x), y: Math.round(r.y), h: Math.round(r.height) }; }));
+  assert.equal(basins[0].x, basins[1].x, 'same column: ' + JSON.stringify(basins));
+  assert.ok(basins[1].y >= basins[0].y + basins[0].h, 'stacked');
+  // And a drop into the lower basin still joins that folder.
+  const lower = basins[1];
+  const release = await dragTo(page, ids.a1, { x: lower.x + 60, y: lower.y + lower.h - 30 });
+  await page.locator(`.focus-basin[data-folder-id="${lower.id}"][data-drop="into"]`).waitFor();
+  await release();
+  await until(page, async () => (await metaOf(page, ids.a1))?.folderId === (await metaOf(page, ids.b1))?.folderId, 'a1 to join B');
+});
+
+test('pinning makes a pane in the stage, and a second pin sits beside it by default', async () => {
+  const { page } = await openAgents();
+  const ids = await seedFocus(page, [{ key: 'a', title: 'first' }, { key: 'b', title: 'second' }, { key: 'c', title: 'loose' }]);
+  await page.locator(`.focus-card[data-id="${ids.a}"]`).dblclick();
+  await page.locator(`.pane marble-conversation[conversation="${ids.a}"]`).waitFor();
+  await page.waitForTimeout(500);
+  await page.locator(`.focus-card[data-id="${ids.b}"]`).dblclick({ modifiers: ['Shift'] });
+  await page.waitForFunction(() => document.querySelectorAll('.pane .dock-frame:not(.dock-ghost)').length === 2);
+  await page.waitForTimeout(700);
+  const frames = await page.evaluate(() => [...document.querySelectorAll('.pane .dock-frame:not(.dock-ghost)')].map((f) => { const r = f.getBoundingClientRect(); return { x: Math.round(r.x), y: Math.round(r.y), h: Math.round(r.height) }; }));
+  assert.equal(frames[0].y, frames[1].y, 'side by side: ' + JSON.stringify(frames));
+  assert.ok(frames[0].h > 400, 'a conversation is a tall thing');
+  assert.equal(await page.locator('.pane .dock-frame[data-focused]').count(), 1);
+});
+
+test('dropping a card on the bottom band of a stage pane stacks it under', async () => {
+  const { page } = await openAgents();
+  const ids = await seedFocus(page, [{ key: 'a', title: 'first' }, { key: 'b', title: 'second' }]);
+  await page.locator(`.focus-card[data-id="${ids.a}"]`).dblclick();
+  await page.locator(`.pane marble-conversation[conversation="${ids.a}"]`).waitFor();
+  await page.waitForTimeout(500);
+  const paneBox = await page.locator('.pane').boundingBox();
+  const release = await dragTo(page, ids.b, { x: paneBox.x + paneBox.width / 2, y: paneBox.y + paneBox.height * 0.92 });
+  await page.locator('.pane .dock-ghost').waitFor();
+  await release();
+  await page.waitForFunction(() => document.querySelectorAll('.pane .dock-frame:not(.dock-ghost):not(.marble-leaving)').length === 2);
+  await page.waitForTimeout(700);
+  const frames = await page.evaluate(() => [...document.querySelectorAll('.pane .dock-frame:not(.dock-ghost)')].map((f) => { const r = f.getBoundingClientRect(); return { x: Math.round(r.x), y: Math.round(r.y) }; }));
+  assert.equal(frames[0].x, frames[1].x, 'one column: ' + JSON.stringify(frames));
+  assert.notEqual(frames[0].y, frames[1].y, 'stacked');
+  await until(page, async () => (await metaOf(page, ids.b))?.pinned === true, 'b to be pinned');
+  const stageW = await page.evaluate(() => document.querySelector('.pane').getBoundingClientRect().width);
+  assert.ok(stageW <= 560 + 2, `two stacked pins take one column's width (${stageW})`);
+});
+
+test('the Focus arrangement and the List arrangement do not overwrite each other', async () => {
+  const { page } = await openAgents();
+  const ids = await seedFocus(page, [{ key: 'a', title: 'first' }, { key: 'b', title: 'second' }]);
+  await page.locator(`.focus-card[data-id="${ids.a}"]`).dblclick();
+  await page.locator(`.pane marble-conversation[conversation="${ids.a}"]`).waitFor();
+  await page.waitForTimeout(500);
+  await page.locator(`.focus-card[data-id="${ids.b}"]`).dblclick({ modifiers: ['Shift'] });
+  await page.waitForFunction(() => document.querySelectorAll('.pane .dock-frame:not(.dock-ghost)').length === 2);
+  await page.locator('.views [data-view="library"]').click();
+  await page.waitForFunction(() => document.body.getAttribute('data-view') === 'library');
+  await page.waitForTimeout(700);
+  assert.equal(await page.locator('.pane .dock-frame:not(.dock-ghost):not(.marble-leaving)').count(), 0, 'List is one pane');
+  await page.locator('.views [data-view="focus"]').click();
+  await page.waitForFunction(() => document.querySelectorAll('.pane .dock-frame:not(.dock-ghost)').length === 2);
 });

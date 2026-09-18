@@ -355,14 +355,7 @@ __ICON__
     padding-left: .8rem;
   }
   .folder-tab .tab-target:empty { display: none; }
-  .folder-tab .tab-dot {
-    flex: none; width: 6px; height: 6px; border-radius: 999px;
-    background: var(--faint); align-self: center;
-  }
-  .folder-tab[data-status="running"] .tab-dot { background: var(--accent-ink); }
-  .folder-tab[data-status="review"] .tab-dot { background: var(--caution); }
-  .folder-tab[data-outcome="failed"] .tab-dot,
-  .folder-tab[data-outcome="watchdog"] .tab-dot { background: var(--danger); }
+  .folder-tab .tab-dot { align-self: center; }
   .folder-tab:hover, .folder-tab:focus-visible { color: var(--ink); background: var(--paper-3); outline: none; }
   .folder-tab.marble-open { color: var(--ink); background: color-mix(in srgb, var(--folder, var(--accent-ink)) 10%, var(--paper)); }
   .folder-ungrouped { margin-top: .25rem; padding-top: .35rem; border-top: 1px solid var(--line); }
@@ -430,7 +423,11 @@ __ICON__
      transition on left/top — a transition here would lag the finger and the
      card would stop matching the slot it is about to be filed into. */
   .focus-card.marble-dragging { z-index: 40; box-shadow: var(--shadow-lift); cursor: grabbing; }
-  .focus-card[data-lift="lead"] { transform: scale(1.02); }
+  /* Hover lifts; it never resizes. The lift is a variable so the spring's
+     own transform can carry it. */
+  .focus-card { --lift: 1; transition: box-shadow 160ms var(--ease-out); }
+  .focus-card:hover { box-shadow: var(--shadow-lift); }
+  .focus-card[data-lift="lead"] { --lift: 1.02; transform: scale(var(--lift)); }
   .focus-card[data-lift="follow"] { opacity: .8; }
   /* What a release would join, rather than slot beside. */
   .focus-card[data-drop="merge"] {
@@ -443,9 +440,12 @@ __ICON__
   }
   .focus-card[data-lod="chip"] .focus-card-head { border-bottom: 0; }
   .focus-card-title { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-  .focus-card-model { flex: none; font-size: .68rem; color: var(--faint); max-width: 5rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-  .focus-card[data-lod="digest"] .focus-card-model,
-  .focus-card[data-lod="full"] .focus-card-model { display: none; }
+  .focus-tags { margin: 0 0 .1rem; flex-wrap: nowrap; overflow: hidden; }
+  .focus-tags:empty { display: none; }
+  .focus-card[data-lod="chip"] .focus-tags { display: none; }
+  /* A chip is a title, its dot and one tick of context: the age. */
+  .focus-head-age { flex: none; font-size: .72rem; color: var(--faint); font-variant-numeric: tabular-nums; }
+  .focus-card:not([data-lod="chip"]) .focus-head-age { display: none; }
   .focus-card-actions { display: none; flex: none; gap: .2rem; }
   .focus-card[data-lod="digest"]:hover .focus-card-actions,
   .focus-card[data-lod="full"]:hover .focus-card-actions,
@@ -499,27 +499,14 @@ __ICON__
   }
   .focus-status { font-weight: 500; color: var(--muted); text-transform: capitalize; }
   .focus-age { font-variant-numeric: tabular-nums; margin-left: auto; }
-  /* One status vocabulary across the four views: a running chat is accented,
-     a failed one is an alarm, review is a caution. */
-  .focus-dot {
-    flex: none; width: 7px; height: 7px; border-radius: 999px; background: var(--faint);
-  }
-  .focus-card[data-status="running"] .focus-dot { background: var(--accent-ink); }
+  /* The dot is STATE_CSS's; only the status word is coloured here. */
   .focus-card[data-status="running"] .focus-status { color: var(--accent-ink); }
-  .focus-card[data-status="review"] .focus-dot { background: var(--caution); }
   .focus-card[data-status="review"] .focus-status { color: var(--caution); }
-  .focus-card[data-outcome="failed"] .focus-dot,
-  .focus-card[data-outcome="watchdog"] .focus-dot { background: var(--danger); }
   .focus-card[data-outcome="failed"] .focus-status,
   .focus-card[data-outcome="watchdog"] .focus-status { color: var(--danger); }
-  .focus-card[data-lod="chip"] .focus-dot { display: none; }
-  .focus[data-arranging] .focus-card[data-lod="full"] .focus-live:empty { display: none; }
-  .focus[data-arranging] .focus-card[data-lod="full"]:has(.focus-live:empty) .focus-card-body {
-    display: flex;
-  }
-  .focus-live { display: none; flex: 1; min-height: 0; min-width: 0; }
-  .focus-card[data-lod="full"] .focus-live { display: block; }
-  .focus-card[data-lod="full"] .focus-live marble-conversation { display: block; height: 100%; }
+  /* A pin's card sits under its pane. While a drag is on, the pane stays
+     where it is and the pin in the air reads as a digest. */
+  .focus[data-arranging] .focus-card[data-lod="full"] .focus-card-body { display: flex; }
   .focus-basin {
     position: absolute; z-index: 0; pointer-events: none; border-radius: 16px;
     background: color-mix(in srgb, var(--folder) 14%, var(--paper));
@@ -644,15 +631,26 @@ __ICON__
   }
   body[data-view="focus"] .library #list { display: none; }
   body[data-view="focus"] .library .pane { pointer-events: auto; }
-  body[data-view="focus"] .dock-bar,
-  body[data-view="focus"] .dock-stage,
   body[data-view="focus"] .pane-hint,
   body[data-view="focus"] .pane > .back {
     display: none !important;
   }
+  /* The stage is the pane tree: each pin is a card with its bar, and the
+     pane itself is transparent so a lone pin's card shows through. */
   body[data-view="focus"] .pane {
-    grid-template-rows: minmax(0, 1fr);
-    background: var(--card);
+    background: transparent; isolation: isolate; --dock-gap: 8px;
+  }
+  body[data-view="focus"] .pane:not([data-dock])::before {
+    content: ''; z-index: -1; grid-column: 1; grid-row: 1 / -1;
+    border: 1px solid var(--line); border-radius: var(--pane-r);
+    background: var(--paper); box-shadow: var(--shadow);
+  }
+  body[data-view="focus"] .pane > .dock-bar,
+  body[data-view="focus"] .dock-frame .dock-bar {
+    background: transparent; border-radius: var(--pane-r) var(--pane-r) 0 0; padding-left: .8rem;
+  }
+  body[data-view="focus"] .pane > marble-conversation:not([data-marble-transient]) {
+    border-radius: 0 0 var(--pane-r) var(--pane-r); overflow: hidden;
   }
   body[data-view="library"] .board,
   body[data-view="library"] .folders,
@@ -689,20 +687,21 @@ __ICON__
   body[data-view="board"][data-panel="open"] .board {
     grid-column: 1; grid-row: 2; min-width: 0;
   }
+  /* The same pane List draws — rounded, shadowed, with its bar — set beside
+     the kanban with the board's own gutter. */
   body[data-view="board"][data-panel="open"] .library {
     display: grid;
     grid-column: 2; grid-row: 2;
     grid-template-columns: minmax(0, 1fr);
     grid-template-rows: minmax(0, 1fr);
-    background: var(--card);
-    border-left: 1px solid var(--line);
+    background: transparent;
+    padding: var(--pane-gap) var(--pane-gap) var(--pane-gap) 0;
     min-width: 0;
     z-index: 2;
   }
   body[data-view="board"][data-panel="open"] .list { display: none; }
   body[data-view="board"][data-panel="open"] .pane {
-    grid-column: 1; grid-row: 1; min-width: 0; max-width: none;
-    box-shadow: none; border-radius: 0; padding-top: 0; overflow: hidden;
+    grid-column: 1; grid-row: 1; min-width: 0; max-width: none; overflow: hidden;
   }
   .board {
     display: flex; align-items: stretch; gap: 1rem; padding: 1rem;
@@ -738,26 +737,21 @@ __ICON__
     border-radius: 10px; background: var(--card); border: 1px solid var(--line);
     padding: .65rem .75rem;
   }
+  /* Too thin for three abreast — one column of three stages, scrolling as one. */
+  .board[data-stack] { flex-direction: column; overflow-y: auto; overflow-x: hidden; gap: .75rem; }
+  .board[data-stack] .column { flex: none; min-width: 0; overflow: visible; }
+  .board[data-stack] .column h2 { position: sticky; top: -.7rem; }
+  .board[data-stack] .rz-col { display: none !important; }
+  /* Ghosts of a view switch: each conversation's old shape, travelling to its
+     new one and dissolving into it. */
+  .vt-layer { position: fixed; inset: 0; z-index: 5; pointer-events: none; }
+  .vt-ghost { box-sizing: border-box; margin: 0 !important; }
   .conv.marble-flip,
   .conv.marble-flip:active {
     transition: none !important;
     transform-origin: 0 0;
     z-index: 6;
     pointer-events: none;
-  }
-  .board-panel {
-    position: absolute; top: 0; right: 0; width: auto; max-width: 100%;
-    display: none; z-index: 9;
-  }
-  .board-panel[data-open="true"] { display: block; }
-  .board-panel .panel-close {
-    appearance: none; border: 0; background: rgba(var(--card-rgb), .9); backdrop-filter: blur(8px);
-    color: var(--muted); width: 2rem; height: 2rem; margin: .6rem; border-radius: 999px;
-    cursor: pointer; display: flex; align-items: center; justify-content: center;
-    pointer-events: auto; box-shadow: var(--shadow);
-  }
-  .board-panel .panel-close:hover, .board-panel .panel-close:focus-visible {
-    color: var(--ink); outline: none;
   }
 
   .list {
@@ -778,22 +772,8 @@ __ICON__
   /* An author-level `display: grid` above beats the UA [hidden] rule, so a
      filtered-out row stays fully visible unless this re-asserts it. */
   .conv[hidden] { display: none; }
-  .conv .dot {
-    width: 8px; height: 8px; margin-top: .42rem; border-radius: 999px; background: var(--faint);
-    flex: none;
-  }
-  .conv[data-status="running"] .dot {
-    background: var(--accent-ink); box-shadow: 0 0 0 3px rgba(var(--accent-ink-rgb), .18);
-    animation: pulse 1.2s var(--snap) infinite;
-  }
-  .conv[data-status="review"] .dot { background: var(--caution); }
-  /* A failed or watchdog-flagged turn is not merely "worth a look" like a
-     normal change set — it needs the same alarm color the turn footer uses. */
-  .conv[data-status="review"][data-outcome="failed"] .dot,
-  .conv[data-status="review"][data-outcome="watchdog"] .dot {
-    background: var(--danger); box-shadow: 0 0 0 3px rgba(var(--accent-ink-rgb), 0);
-    animation: none;
-  }
+  .conv .dot { margin-top: .42rem; }
+  .dock-bar .dot { margin-right: .1rem; }
   /* Four facts, three lines: the agent's name shares the last line with the
      activity instead of claiming a row of its own. */
   .conv .body {
@@ -825,25 +805,7 @@ __ICON__
   .conv .tag[data-kind="agent"] + .tag::before {
     content: '·'; color: var(--faint); margin-right: 4px;
   }
-  .conv .tag {
-    display: inline-flex; align-items: center; font-size: 11px; line-height: 1.3; font-weight: 500;
-    padding: 2px 8px; border-radius: 999px; max-width: 100%;
-    overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
-  }
-  .conv .tag[data-hue="0"] { background: #e4edf4; color: #3d5a70; }
-  .conv .tag[data-hue="1"] { background: #f0e6dc; color: #6b4f3a; }
-  .conv .tag[data-hue="2"] { background: #e4efe8; color: #3d5c4a; }
-  .conv .tag[data-hue="3"] { background: #f3ead8; color: #6d5630; }
-  .conv .tag[data-hue="4"] { background: #eee4ee; color: #5c4560; }
-  .conv .tag[data-hue="5"] { background: #e6e8ea; color: #454c52; }
-  @media (prefers-color-scheme: dark) {
-    .conv .tag[data-hue="0"] { background: #243038; color: #9dc0dc; }
-    .conv .tag[data-hue="1"] { background: #322820; color: #e0c4a8; }
-    .conv .tag[data-hue="2"] { background: #1f2c26; color: #a8c9b6; }
-    .conv .tag[data-hue="3"] { background: #322c1e; color: #d9c08a; }
-    .conv .tag[data-hue="4"] { background: #2c2430; color: #c8b0c8; }
-    .conv .tag[data-hue="5"] { background: #26282a; color: #b4b8bc; }
-  }
+  .tags { display: flex; flex-wrap: wrap; gap: 4px; }
   .conv .meta { display: flex; gap: .35rem; min-width: 0; color: var(--muted); font-size: .78rem; }
   .conv .meta > * { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   /* Provider is almost always the same one agent, so it rides in the meta
@@ -899,7 +861,8 @@ __ICON__
   .dock-frame, .dock-gutter {
     transition: left var(--t-room) var(--ease-out), top var(--t-room) var(--ease-out),
       width var(--t-room) var(--ease-out), height var(--t-room) var(--ease-out),
-      opacity 260ms var(--ease-out), transform 360ms var(--ease-out);
+      opacity 260ms var(--ease-out), transform 360ms var(--ease-out),
+      background-color 200ms var(--ease-out);
   }
   .pane.marble-noanim, .pane.marble-noanim *, .pane.marble-docksizing, .pane.marble-docksizing * { transition: none !important; }
   .dock-frame {
@@ -909,6 +872,17 @@ __ICON__
     background: var(--paper); box-shadow: var(--shadow);
   }
   .dock-frame[data-key="P"] { z-index: 0; pointer-events: none; }
+  /* The pane you are in is the lit one; its neighbours step back onto the
+     paper so there is never a question of where typing goes. */
+  .pane[data-dock] .dock-frame[data-focused] { background: var(--card); }
+  .pane[data-dock] .dock-frame:not([data-focused]) { background: var(--paper); }
+  .pane[data-dock] .dock-frame:not([data-focused]) .dock-bar { background: var(--paper-2); color: var(--muted); }
+  .pane[data-dock] .dock-frame:not([data-focused]) marble-conversation { opacity: .86; }
+  .pane[data-dock] > .dock-bar:not([data-focused]) { background: var(--paper-2); color: var(--muted); }
+  .pane[data-dock] > marble-conversation:not([data-marble-transient])[data-focused="false"] { opacity: .86; }
+  .dock-bar[data-focused] { box-shadow: inset 0 -1px 0 var(--accent); }
+  .dock-frame .dock-bar { transition: background-color 200ms var(--ease-out), color 200ms var(--ease-out); }
+  .dock-frame marble-conversation { transition: opacity 200ms var(--ease-out); }
   .dock-frame marble-conversation { flex: 1; min-height: 0; height: 100%; }
   .dock-frame.marble-entering { opacity: 0; transform: scale(.97); }
   .dock-frame.marble-leaving { opacity: 0; transform: scale(.97); pointer-events: none; z-index: 0; }
@@ -951,6 +925,25 @@ __ICON__
     display: grid; place-items: center;
   }
   .dock-close:hover, .dock-close:focus-visible { color: var(--ink); background: var(--paper-3); outline: none; }
+  .dock-split {
+    appearance: none; border: 0; background: none; flex: none;
+    color: var(--faint); width: 1.4rem; height: 1.4rem; border-radius: 8px; cursor: pointer;
+    display: grid; place-items: center;
+  }
+  .dock-split:hover, .dock-split:focus-visible { color: var(--ink); background: var(--paper-3); outline: none; }
+  /* Where a dragged card opens when the board has no pane yet. */
+  .board-dockzone {
+    position: absolute; top: 1rem; right: 1rem; bottom: 1rem; width: min(38vw, 28rem); z-index: 4;
+    display: grid; place-items: center; pointer-events: none;
+    border: 1.5px dashed color-mix(in srgb, var(--accent-ink) 45%, transparent); border-radius: var(--pane-r);
+    background: color-mix(in srgb, var(--accent-ink) 6%, var(--paper));
+    color: var(--accent-ink); font-size: .8rem;
+    transition: background-color 160ms var(--ease-out), border-color 160ms var(--ease-out);
+  }
+  .board-dockzone[data-drop] {
+    border-color: var(--accent-ink);
+    background: color-mix(in srgb, var(--accent-ink) 12%, var(--paper));
+  }
   body:not([data-open]) .pane > .dock-bar { display: none; }
   /* The chat in your hand. It lifts when it is picked up and settles small
      once it is over somewhere it will dock, so the pane — not the card — is
@@ -1037,14 +1030,16 @@ __ICON__
     body[data-view="folders"] .library { padding: var(--pane-gap); column-gap: var(--pane-gap); }
     body[data-view="folders"] .folders { padding: var(--pane-gap); column-gap: var(--pane-gap); }
     body[data-view="library"] .pane,
-    body[data-view="folders"] .pane {
+    body[data-view="folders"] .pane,
+    body[data-view="board"] .pane {
       background: transparent; isolation: isolate; --dock-gap: var(--pane-gap);
     }
     /* Alone, the primary chat is a bar and a conversation in two grid rows, so
        its card is a third thing behind both. With company it gets a card in the
        stage like every other pane. */
     body[data-view="library"] .pane:not([data-dock])::before,
-    body[data-view="folders"] .pane:not([data-dock])::before {
+    body[data-view="folders"] .pane:not([data-dock])::before,
+    body[data-view="board"] .pane:not([data-dock])::before {
       content: ''; z-index: -1; grid-column: 1; grid-row: 1 / -1;
       border: 1px solid var(--line); border-radius: var(--pane-r);
       background: var(--paper); box-shadow: var(--shadow);
@@ -1052,12 +1047,15 @@ __ICON__
     body[data-view="library"] .pane > .dock-bar,
     body[data-view="folders"] .pane > .dock-bar,
     body[data-view="library"] .dock-frame .dock-bar,
-    body[data-view="folders"] .dock-frame .dock-bar {
+    body[data-view="folders"] .dock-frame .dock-bar,
+    body[data-view="board"] .pane > .dock-bar,
+    body[data-view="board"] .dock-frame .dock-bar {
       background: transparent; border-radius: var(--pane-r) var(--pane-r) 0 0;
       padding-left: .8rem;
     }
     body[data-view="library"] .pane > marble-conversation:not([data-marble-transient]),
-    body[data-view="folders"] .pane > marble-conversation:not([data-marble-transient]) {
+    body[data-view="folders"] .pane > marble-conversation:not([data-marble-transient]),
+    body[data-view="board"] .pane > marble-conversation:not([data-marble-transient]) {
       border-radius: 0 0 var(--pane-r) var(--pane-r); overflow: hidden;
     }
 
@@ -1119,7 +1117,6 @@ __ICON__
 
     .board { scroll-snap-type: x mandatory; }
     .column { flex: 0 0 min(20rem, 85vw); scroll-snap-align: start; }
-    .board-panel { width: auto; }
     body[data-view="board"][data-panel="open"] {
       grid-template-columns: minmax(0, 1fr);
     }
@@ -1128,14 +1125,13 @@ __ICON__
       pointer-events: none;
     }
     body[data-view="board"][data-panel="open"] .column { display: none; }
-    body[data-view="board"][data-panel="open"] .board-panel { pointer-events: auto; }
     body[data-view="board"][data-panel="open"] .library {
       grid-column: 1; grid-template-columns: minmax(0, 1fr);
     }
     body[data-view="board"][data-panel="open"] .pane { height: auto; }
   }
   @media (hover: none) {
-    .conv, .seg button, .new, .settings, .filter-toggle, .conv .manage .more, .panel-close { min-height: 2.75rem; }
+    .conv, .seg button, .new, .settings, .filter-toggle, .conv .manage .more { min-height: 2.75rem; }
   }
 </style>
 </head>
@@ -1200,11 +1196,6 @@ __ICON__
   <section class="column" data-col="completed" data-marble-id="__ID__" data-marble-transient>
     <h2 data-marble-id="__ID__">Completed</h2>
   </section>
-  <div class="board-panel" data-marble-id="__ID__">
-    <button type="button" class="panel-close" data-marble-id="__ID__" aria-label="Close">
-      <svg viewBox="0 0 20 20" width="14" height="14" aria-hidden="true"><path d="M5 5l10 10M15 5 5 15" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg>
-    </button>
-  </div>
 </div>
 
 <div class="folders" data-marble-id="__ID__">
@@ -1250,12 +1241,20 @@ __ICON__
     const list = $('#list');
     const libraryEl = $('.library');
     const boardEl = $('.board');
+    // Three columns need three times their floor. The board's width is what
+    // the pane leaves it, not the viewport, so this is measured, not queried.
+    const BOARD_MIN_COL = 14 * 16;
+    const fitBoard = () => {
+      if (!boardEl) return;
+      const w = boardEl.clientWidth;
+      boardEl.toggleAttribute('data-stack', w > 0 && w < 3 * BOARD_MIN_COL + 2 * 16 + 32);
+    };
+    if (boardEl && 'ResizeObserver' in window) new ResizeObserver(fitBoard).observe(boardEl);
     const foldersEl = $('.folders');
     const folderRail = $('.folder-rail');
     const focusEl = $('.focus');
     const convo = $('marble-conversation');
     const pane = $('.pane');
-    const boardPanel = $('.board-panel');
     const search = $('input.search');
     const viewButtons = [...document.querySelectorAll('.views [data-view]')];
     const filterButtons = [...document.querySelectorAll('button.filter')];
@@ -1287,14 +1286,24 @@ __ICON__
     let panelOpen = false;
     let flipAnims = [];
     let fadeGen = 0;
-    let dock = { tree: null, extras: [], focus: 'primary' };
+    // One pane tree per kind of view: the page's (List, Folders, Board) and
+    // the Focus stage's. `dock` is whichever the current view reads.
+    const docks = {
+      page: { tree: null, extras: [], focus: 'primary', file: null, open: null },
+      focus: { tree: null, extras: [], focus: 'primary', file: null, open: null, saved: null },
+    };
+    const dockFor = (view) => (view === 'focus' ? docks.focus : docks.page);
+    let dock = docks.page;
     let suppressConvClick = false;
 
     const statusOf = (summary) => {
+      // Waiting on the person is the one thing Running must not hide.
+      if (summary?.asking) return 'review';
       if (summary?.running || summary?.status === 'running' || summary?.queued) return 'running';
       if (summary?.needsReview) return 'review';
       return 'completed';
     };
+    const stateOf = (summary) => window.marbleAgentUI?.stateOf?.(summary) ?? 'idle';
 
     const age = (t) => {
       if (!t) return '';
@@ -1780,11 +1789,12 @@ __ICON__
       // to tell a finished chat from a running one, or two chats on the same
       // project apart, without opening them.
       tab.dataset.status = statusOf(summary);
+      tab.dataset.state = stateOf(summary);
       if (summary.lastOutcome) tab.dataset.outcome = summary.lastOutcome;
       const top = document.createElement('span');
       top.className = 'tab-top';
       const dot = document.createElement('span');
-      dot.className = 'tab-dot';
+      dot.className = 'tab-dot dot';
       dot.setAttribute('aria-hidden', 'true');
       const title = document.createElement('span');
       title.className = 'tab-title';
@@ -1801,6 +1811,11 @@ __ICON__
       tab.classList.toggle('marble-selected', selectedIds.includes(summary.id));
       tab.addEventListener('click', async (event) => {
         if (suppressFolderClick) return;
+        if (event.altKey) {
+          event.preventDefault();
+          await openBeside(summary.id);
+          return;
+        }
         if (event.shiftKey || event.metaKey || event.ctrlKey) {
           event.preventDefault();
           await handleTabSelect(summary.id, event);
@@ -2113,12 +2128,108 @@ __ICON__
     const leaveFocusView = () => {
       endFocusDrag();
       clearFocusPane();
-      for (const live of focusEl?.querySelectorAll('.focus-live') ?? []) live.replaceChildren();
       document.querySelector('.focus-look')?.remove();
       closeFolderPalettes();
       focusLookId = null;
       stopFocusDecay();
-      applyDock();
+    };
+
+    /** Focus keeps its own pane tree. Leaving a view parks what the primary
+     *  chat was showing; entering one restores it, so arranging the stage
+     *  never rearranges List, and the other way round. */
+    const swapDock = (next) => {
+      const want = dockFor(next);
+      if (want === dock) return;
+      dock.file = convo.getAttribute('conversation') || null;
+      dock.open = openId;
+      dock = want;
+      if (dock.file) convo.setAttribute('conversation', dock.file);
+      else convo.removeAttribute('conversation');
+      openId = dock.open ?? null;
+      if (openId) document.body.setAttribute('data-open', 'true');
+      else document.body.removeAttribute('data-open');
+      paintOpen();
+    };
+
+    /** How many columns the stage's tree spreads across: what its width is
+     *  negotiated for. Two pins stacked take one column. */
+    const stageColumns = (tree) => {
+      if (!tree) return 1;
+      const xs = new Set([...layoutOf(tree).leaves.values()].map((r) => Math.round(r.x * 1000)));
+      return Math.max(1, xs.size);
+    };
+
+    /** The stage reads left to right, top to bottom off the pane tree, which
+     *  is the arrangement the person made; rank only orders pins nobody has
+     *  arranged yet. */
+    const orderStageByDock = (ids) => {
+      if (dock !== docks.focus || !dock.tree) return ids;
+      const leaves = layoutOf(dock.tree).leaves;
+      const keyOf = (id) => (convo.getAttribute('conversation') === id ? PRIMARY : dock.extras.find((extra) => extra.id === id)?.key);
+      const at = (id) => leaves.get(keyOf(id)) ?? null;
+      return [...ids].sort((a, b) => {
+        const ra = at(a);
+        const rb = at(b);
+        if (!ra || !rb) return (ra ? 0 : 1) - (rb ? 0 : 1);
+        return (ra.x - rb.x) || (ra.y - rb.y);
+      });
+    };
+
+    /** The pane tree holds exactly the pins. Pins come from the store; the
+     *  arrangement is the person's, so a pin that arrives is split beside the
+     *  focused pane and a pin that leaves closes up, as a pane would. */
+    const syncStageDock = (pinned) => {
+      if (dock !== docks.focus) return;
+      const have = [convo.getAttribute('conversation'), ...dock.extras.map((extra) => extra.id)].filter(Boolean);
+      const same = have.length === pinned.length && have.every((id) => pinned.includes(id));
+      if (same) {
+        if (focusPrimaryId && pinned.includes(focusPrimaryId)) {
+          const slot = slotOf(focusPrimaryId);
+          if (slot != null && slot !== dock.focus) {
+            dock.focus = slot;
+            openId = focusPrimaryId;
+            paintChrome();
+          }
+        }
+        return;
+      }
+      let primary = convo.getAttribute('conversation');
+      if (!pinned.includes(primary)) {
+        const next = dock.extras.find((extra) => pinned.includes(extra.id)) ?? null;
+        if (next && dock.tree) {
+          dock.tree = removeLeaf(dock.tree, PRIMARY);
+          if (dock.tree) renameLeaf(dock.tree, next.key, PRIMARY);
+        }
+        if (next) dock.extras = dock.extras.filter((extra) => extra !== next);
+        primary = next?.id ?? pinned[0] ?? null;
+      }
+      for (const extra of dock.extras) {
+        if (!pinned.includes(extra.id) && dock.tree && extra.key) dock.tree = removeLeaf(dock.tree, extra.key);
+      }
+      dock.extras = dock.extras.filter((extra) => pinned.includes(extra.id) && extra.id !== primary);
+      for (const id of pinned) {
+        if (id === primary || dock.extras.some((extra) => extra.id === id)) continue;
+        dock.extras.push({ id });
+      }
+      if (primary) convo.setAttribute('conversation', primary);
+      else convo.removeAttribute('conversation');
+      normalizeExtras();
+      const keys = [PRIMARY, ...dock.extras.map((extra) => extra.key)];
+      // A stage arranged before a reload comes back if it names these very pins.
+      if (dock.saved?.tree && dock.extras.length) {
+        const keyOfId = new Map([[primary, PRIMARY], ...dock.extras.map((extra) => [extra.id, extra.key])]);
+        const tree = savedToTree(dock.saved.tree, keyOfId);
+        const have2 = tree ? treeLeaves(tree) : [];
+        if (tree && have2.length === keys.length && keys.every((key) => have2.includes(key))) dock.tree = tree;
+      }
+      dock.saved = null;
+      dock.tree = dock.extras.length ? reconcileTree(dock.tree, keys) : null;
+      const wanted = focusPrimaryId && pinned.includes(focusPrimaryId) ? slotOf(focusPrimaryId) : null;
+      dock.focus = wanted ?? (typeof dock.focus === 'number' && dock.extras[dock.focus] ? dock.focus : 'primary');
+      openId = (dock.focus === 'primary' ? primary : dock.extras[dock.focus]?.id) ?? primary ?? null;
+      if (primary) document.body.setAttribute('data-open', 'true');
+      else document.body.removeAttribute('data-open');
+      rememberDock();
     };
 
     const stopFocusDecay = () => {
@@ -2156,7 +2267,7 @@ __ICON__
     // Digest is sized to the four lines it actually shows, a chip to its one.
     // Only the heights are the card's: a field card takes its width from the
     // column it sits in, so a chip is a short row and not a ragged edge.
-    const focusLodSize = (lod) => (lod === 'digest' ? { w: 260, h: 132 } : { w: 168, h: 56 });
+    const focusLodSize = (lod) => (lod === 'digest' ? { w: 260, h: 148 } : { w: 168, h: 56 });
 
     /** The layout that is currently on screen. A drop reads its slots from
      *  here rather than re-measuring the DOM, so a card lands exactly where
@@ -2272,7 +2383,7 @@ __ICON__
         vy += ay * dt;
         x += vx * dt;
         y += vy * dt;
-        card.style.transform = `translate(${x - to.x}px, ${y - to.y}px)`;
+        card.style.transform = `translate(${x - to.x}px, ${y - to.y}px) scale(var(--lift, 1))`;
         const settled = Math.hypot(x - to.x, y - to.y) < 0.5 && Math.hypot(vx, vy) < 12;
         if (settled) {
           card.style.transform = '';
@@ -2296,6 +2407,7 @@ __ICON__
       if (title) title.textContent = summary.title || 'Untitled';
       const status = statusOf(summary);
       card.dataset.status = status;
+      card.dataset.state = stateOf(summary);
       if (summary.lastOutcome) card.dataset.outcome = summary.lastOutcome;
       else delete card.dataset.outcome;
       // Four addressable lines rather than one run-on string: the path says
@@ -2306,70 +2418,46 @@ __ICON__
       if (activity) activity.textContent = summary.activity || summary.lastOutcome || '';
       const statusEl = card.querySelector('.focus-status');
       if (statusEl) statusEl.textContent = status;
-      const ageEl = card.querySelector('.focus-age');
-      if (ageEl) ageEl.textContent = age(summary.updatedAt);
-      // A chip is a title and one tick of context. When every chat runs the
-      // same agent, naming it turns that tick into noise — show the age, which
-      // is the thing a cold card is actually being judged on.
-      const model = card.querySelector('.focus-card-model');
-      if (model) {
-        model.textContent = soloProvider()
-          ? age(summary.updatedAt)
-          : (labels.get(summary.provider)?.label || summary.model || '');
+      for (const ageEl of card.querySelectorAll('.age')) ageEl.textContent = age(summary.updatedAt);
+      // The same pills a list row wears. A chip hides them; it never restyles them.
+      const tags = card.querySelector('.focus-tags');
+      if (tags) {
+        tags.replaceChildren();
+        for (const tag of (window.marbleAgentUI?.conversationTags?.(summary, labels) ?? [])) {
+          const span = document.createElement('span');
+          span.className = 'tag';
+          span.dataset.kind = tag.kind;
+          span.dataset.hue = String(tag.hue);
+          span.textContent = tag.label;
+          if (tag.title) span.title = tag.title;
+          tags.append(span);
+        }
       }
     };
 
+    /** The pane sits over the stage rect the packer negotiated, and the pane
+     *  tree lays the pins out inside it. Nothing pinned, or the phone's
+     *  stacked list, and it is off the canvas entirely. */
     const layoutFocusPane = (fullIds) => {
       if (!pane || !focusEl) return;
-      // A `position: fixed` pane cannot chase a spring. It stands down for the
-      // length of a gesture and the Full it covers shows its digest instead.
-      if (focusDrag) {
-        hideFocusPane();
-        return;
-      }
       const stacked = focusEl.hasAttribute('data-stack') || narrowView.matches;
-      const primary = (focusPrimaryId && fullIds.includes(focusPrimaryId)) ? focusPrimaryId : fullIds[0];
-      if (!primary || stacked) {
-        hideFocusPane();
-        for (const live of focusEl.querySelectorAll('.focus-live')) live.replaceChildren();
-        return;
-      }
-      const card = focusEl.querySelector(`.focus-card[data-id="${primary}"]`);
-      const slot = card?.querySelector('.focus-live');
-      if (!slot) {
+      const stage = focusPack?.stage;
+      if (!fullIds.length || stacked || !stage || !(stage.w > 0)) {
         hideFocusPane();
         return;
       }
-      const r = slot.getBoundingClientRect();
+      const box = focusEl.getBoundingClientRect();
       pane.style.visibility = '';
       pane.style.display = 'grid';
       pane.style.position = 'fixed';
-      pane.style.left = `${r.left}px`;
-      pane.style.top = `${r.top}px`;
-      pane.style.width = `${Math.max(0, r.width)}px`;
-      pane.style.height = `${Math.max(0, r.height)}px`;
+      pane.style.left = `${box.left + stage.x - focusEl.scrollLeft}px`;
+      pane.style.top = `${box.top + stage.y - focusEl.scrollTop}px`;
+      pane.style.width = `${Math.max(0, stage.w)}px`;
+      pane.style.height = `${Math.max(0, stage.h)}px`;
       pane.style.zIndex = '6';
-      pane.style.borderRadius = '0 0 12px 12px';
-      pane.style.overflow = 'hidden';
+      pane.style.overflow = 'visible';
       pane.style.pointerEvents = 'auto';
-      if (convo.getAttribute('conversation') !== primary) convo.setAttribute('conversation', primary);
-      pane.querySelector('.dock-stage')?.replaceChildren();
-      for (const id of fullIds) {
-        const host = focusEl.querySelector(`.focus-card[data-id="${id}"] .focus-live`);
-        if (!host) continue;
-        if (id === primary || reduceMotion.matches) {
-          host.replaceChildren();
-          continue;
-        }
-        let extra = host.querySelector('marble-conversation');
-        if (!extra) {
-          extra = document.createElement('marble-conversation');
-          extra.setAttribute('data-marble-transient', '');
-          extra.setAttribute('data-chrome', 'pane');
-          host.append(extra);
-        }
-        extra.setAttribute('conversation', id);
-      }
+      applyDock();
     };
 
     const animateFocusCard = (card, from, to, velocity) => {
@@ -2380,7 +2468,20 @@ __ICON__
         card.style.height = `${to.h}px`;
         return;
       }
+      const resized = Math.abs(from.w - to.w) > 0.5 || Math.abs(from.h - to.h) > 0.5;
       springCardTo(card, to, velocity);
+      // Position springs; a size change eases, and the body's lines fade in
+      // behind it rather than snapping from three to one.
+      if (resized && !reduceMotion.matches) {
+        card.animate(
+          [{ width: `${from.w}px`, height: `${from.h}px` }, { width: `${to.w}px`, height: `${to.h}px` }],
+          { duration: 280, easing: 'cubic-bezier(0.22, 0.61, 0.36, 1)' },
+        );
+        card.querySelector('.focus-card-body')?.animate(
+          [{ opacity: 0 }, { opacity: 1 }],
+          { duration: 160, delay: 120, fill: 'backwards' },
+        );
+      }
     };
 
     const pinFocus = async (id, { keepOpen = false } = {}) => {
@@ -2620,7 +2721,7 @@ __ICON__
      *  the card is about to become. */
     const paintFocusSlot = (pack, target) => {
       const lead = focusDrag?.lead;
-      const rect = target && !target.merge && target.column !== 'new' && lead
+      const rect = target && !target.merge && !target.plan && target.column !== 'new' && lead
         ? pack?.rects?.[lead]
         : null;
       let el = focusEl.querySelector('.focus-slot');
@@ -2643,7 +2744,7 @@ __ICON__
     /** Where a release would land, read off the layout that put the cards
      *  there. Indexes come back in the column's own terms — the cards that are
      *  not in the air — because that is what a drop is filed against. */
-    const focusTargetAt = (point) => {
+    const focusTargetAt = (point, client = null) => {
       const pack = focusPack;
       const helpers = window.marbleAgentFolders;
       if (!pack || !helpers?.slotAt) return null;
@@ -2663,23 +2764,28 @@ __ICON__
       if (!stageStays.length && point.x - focusEl.scrollLeft < FOCUS_RAIL) {
         return { column: 'stage', index: 0, key: 'stage:0' };
       }
-      const zones = [];
-      if (pack.stage.w > 0 && stageStays.length) zones.push({ kind: 'stage', x: pack.stage.x, w: pack.stage.w });
-      for (const region of pack.regions) zones.push({ kind: 'folder', region, x: region.x, w: region.w });
-      if (pack.newGroup) zones.push({ kind: 'new', x: pack.newGroup.x, w: pack.newGroup.w });
-      if (!zones.length) return null;
       const gap = window.marbleAgentFolders?.GAP ?? 8;
-      let zone = zones.find((row) => point.x >= row.x - gap && point.x <= row.x + row.w + gap);
-      if (!zone) zone = point.x < zones[0].x ? zones[0] : zones[zones.length - 1];
-
-      if (zone.kind === 'new') return { column: 'new', key: 'new' };
-      if (zone.kind === 'stage') {
+      // The stage and the New group column are bands across the full height;
+      // a folder is a rect, since regions now sit above and below each other.
+      const within = (r) => point.x >= r.x - gap && point.x <= r.x + r.w + gap;
+      if (pack.stage.w > 0 && stageStays.length && within(pack.stage)) {
+        // The stage is the pane tree: the pane says where a drop would split
+        // and opens the room for it, exactly as a row dragged onto a pane does.
+        const lead = focusDrag?.lead;
+        const plan = client && lead ? paintDrop(client.x, client.y, lead).plan : null;
+        if (plan && plan.mode === 'split') {
+          return { column: 'stage', plan, key: `stage:${plan.root ? '*' : plan.target}:${plan.side}` };
+        }
+        endDrop(false);
         const slot = helpers.stageSlotAt(pack.stage, point, gap);
         const index = drop(pack.stage.cols, slot.index);
-        return { column: 'stage', index, key: `stage:${index}` };
+        return { column: 'stage', index, key: `stage:${index}`, edge: slot.x };
       }
-
-      const region = zone.region;
+      if (pack.newGroup && within(pack.newGroup)) return { column: 'new', key: 'new' };
+      const region = helpers.regionAt
+        ? helpers.regionAt(pack, point, gap)
+        : (pack.regions.find(within) ?? pack.regions[pack.regions.length - 1] ?? null);
+      if (!region) return null;
       const slot = helpers.slotAt(region, point, gap);
       const over = slot.over && !dragIds.includes(slot.over) ? slot.over : null;
       const loose = region.folderId === null;
@@ -2696,6 +2802,7 @@ __ICON__
         folderId: region.folderId ?? null,
         index,
         key: `folder:${region.folderId ?? 'loose'}:${index}`,
+        edge: slot.y,
       };
     };
 
@@ -2728,10 +2835,11 @@ __ICON__
     /** One gesture, every case: a card picked up and dropped in a slot. The
      *  page has already moved — this is the half that files it. */
     const commitFocusDrop = async (ids, target) => {
-      if (!agent || !ids.length || !target) return;
-      const patch = async (id, body) => {
-        try { await agent.update(id, body); } catch { /* stale */ }
-      };
+      if (!agent || !ids.length || !target) return [];
+      // Local state moves now; the PATCHes are handed back so the page can
+      // paint the drop before a single round trip completes.
+      const writes = [];
+      const patch = async (id, body) => { writes.push([id, body]); };
 
       if (target.column === 'new' || target.merge) {
         const members = target.merge ? [...ids, target.merge] : [...ids];
@@ -2740,11 +2848,30 @@ __ICON__
           const listed = await agent.folders();
           folderCatalog = listed.folders ?? folderCatalog;
         } catch { /* create failed */ }
-        return;
+        return [];
       }
 
       const layout = focusColumnsOf(matchingFocusItems(), null);
 
+      if (target.column === 'stage' && target.plan) {
+        // Dropped on a pane's edge: the pane tree places it, exactly as a row
+        // dragged onto a pane is placed. The stage still holds four.
+        const staged = layout.stage.filter((id) => !ids.includes(id));
+        for (const id of staged.slice(Math.max(0, FULL_CAP - ids.length))) {
+          const item = summaries.get(id);
+          if (item) item.pinned = false;
+          await patch(id, { pinned: false });
+        }
+        for (const id of ids) {
+          const item = summaries.get(id);
+          if (item?.pinned) continue;
+          if (item) item.pinned = true;
+          await patch(id, { pinned: true });
+        }
+        focusPrimaryId = ids[0];
+        dockAt(ids[0], target.plan);
+        return writes;
+      }
       if (target.column === 'stage') {
         const staged = layout.stage.filter((id) => !ids.includes(id));
         // The stage holds four. A fifth pin retires the rightmost, which is
@@ -2766,7 +2893,7 @@ __ICON__
           await patch(row.id, { focusY: row.focusY });
         }
         focusPrimaryId = ids[0];
-        return;
+        return writes;
       }
 
       const folderId = target.folderId ?? null;
@@ -2788,7 +2915,10 @@ __ICON__
       for (const row of focusRankPatches(rest, ids, target.index ?? rest.length)) {
         await patch(row.id, { focusY: row.focusY });
       }
+      return writes;
     };
+
+    const fileFocusWrites = (writes) => Promise.all((writes ?? []).map(([id, body]) => agent.update(id, body).catch(() => {})));
 
     /** The keyboard's half of rearranging. Alt with an arrow moves the card
      *  itself, through the same drop rules the pointer uses, so no state the
@@ -2803,10 +2933,11 @@ __ICON__
       if (at < 0) return;
       const here = zones[at];
       const index = here.ids.indexOf(id);
+      let writes = [];
       if (dir === 'up' || dir === 'down') {
         if (dir === 'up' && index <= 0) return;
         if (dir === 'down' && index >= here.ids.length - 1) return;
-        await commitFocusDrop([id], {
+        writes = await commitFocusDrop([id], {
           column: here.column,
           folderId: here.folderId,
           index: dir === 'up' ? index - 1 : index + 1,
@@ -2814,7 +2945,7 @@ __ICON__
       } else {
         const to = zones[at + (dir === 'left' ? -1 : 1)];
         if (!to) return;
-        await commitFocusDrop([id], {
+        writes = await commitFocusDrop([id], {
           column: to.column,
           folderId: to.folderId,
           index: Math.min(index, to.ids.length),
@@ -2823,6 +2954,7 @@ __ICON__
       focusSelectedIds = [id];
       focusPrimaryId = id;
       paintFocus();
+      await fileFocusWrites(writes);
     };
 
     const handleFocusKeys = (event) => {
@@ -2947,9 +3079,10 @@ __ICON__
 
     const focusCardEl = (id) => focusEl?.querySelector(`.focus-card[data-id="${id}"]`);
 
-    const endFocusDrag = () => {
+    const endFocusDrag = ({ hold = false } = {}) => {
       const drag = focusDrag;
       if (!drag) return null;
+      endDrop(hold);
       if (drag.frame) cancelAnimationFrame(drag.frame);
       focusDrag = null;
       delete focusEl.dataset.arranging;
@@ -3021,7 +3154,11 @@ __ICON__
 
         const aim = () => {
           if (!focusDrag) return;
-          const next = focusTargetAt(focusPoint(focusDrag.point.x, focusDrag.point.y));
+          const point = focusPoint(focusDrag.point.x, focusDrag.point.y);
+          const steady = window.marbleAgentFolders?.steadySlot;
+          const fresh = focusTargetAt(point, focusDrag.point);
+          const next = steady ? steady(focusDrag.target, fresh, point) : fresh;
+          if (focusDrag.target?.plan && !next?.plan) endDrop(false);
           if ((next?.key ?? '') === (focusDrag.target?.key ?? '')) return;
           focusDrag.target = next;
           focusDrag.pending = next && !next.merge && next.column !== 'new'
@@ -3067,9 +3204,6 @@ __ICON__
             : [id];
           focusDrag = { ids, lead: id, target: null, pending: null, point: { ...origin }, frame: 0 };
           focusEl.dataset.arranging = '1';
-          // A fixed pane cannot chase a spring, so it stands down for the
-          // length of the gesture and the Full shows its digest instead.
-          if (pane) pane.style.visibility = 'hidden';
           for (const row of ids) {
             const el = focusCardEl(row);
             if (!el) continue;
@@ -3100,14 +3234,15 @@ __ICON__
           if (done) return;
           done = true;
           detach();
-          const drag = endFocusDrag();
+          const drag = endFocusDrag({ hold: !cancelled && Boolean(focusDrag?.target?.plan) });
           if (!drag) return;
           const target = cancelled ? null : drag.target;
           const speed = velocity();
           paintFocusSlot(focusPack, null);
-          if (target) await commitFocusDrop(drag.ids, target);
+          const writes = target ? await commitFocusDrop(drag.ids, target) : [];
           paintFocus({ velocity: speed, velocityId: drag.lead });
           setTimeout(() => { focusSuppressClick = false; }, 0);
+          await fileFocusWrites(writes);
         };
 
         const up = (e) => {
@@ -3149,6 +3284,10 @@ __ICON__
       card.addEventListener('click', (event) => {
         if (focusSuppressClick) return;
         if (event.target.closest('button, a, input, textarea, marble-conversation')) return;
+        if (event.altKey) {
+          openBeside(card.dataset.id);
+          return;
+        }
         selectFocusCard(card.dataset.id, event);
       });
       card.addEventListener('dblclick', (event) => {
@@ -3156,16 +3295,14 @@ __ICON__
         event.preventDefault();
         pinFocus(card.dataset.id, { keepOpen: event.shiftKey });
       });
+      // Hover is remembered for Quick Look, and nothing else: a card that
+      // grew under the pointer pushed its column and the pointer off itself.
       card.addEventListener('pointerenter', () => {
         if (focusSuppressClick) return;
-        if (focusHoveredId === card.dataset.id) return;
         focusHoveredId = card.dataset.id;
-        paintFocus({ quiet: true });
       });
       card.addEventListener('pointerleave', () => {
-        if (focusHoveredId !== card.dataset.id) return;
-        focusHoveredId = null;
-        if (!focusSuppressClick) paintFocus({ quiet: true });
+        if (focusHoveredId === card.dataset.id) focusHoveredId = null;
       });
       card.querySelector('.focus-pin')?.addEventListener('click', (event) => {
         event.stopPropagation();
@@ -3191,7 +3328,7 @@ __ICON__
       card.dataset.id = summary.id;
       card.setAttribute('data-marble-transient', '');
       card.tabIndex = 0;
-      card.innerHTML = '<header class="focus-card-head"><button type="button" class="focus-folder" aria-label="Move to folder"></button><span class="focus-dot" aria-hidden="true"></span><span class="focus-card-title"></span><span class="focus-card-model"></span><span class="focus-card-actions"><button type="button" class="focus-pin">Focus</button><button type="button" class="focus-keep">Keep open</button><button type="button" class="focus-collapse">Collapse</button></span></header><div class="focus-card-body"><p class="focus-target"></p><p class="focus-activity"></p><p class="focus-foot"><span class="focus-status"></span><span class="focus-age"></span></p></div><div class="focus-live"></div>';
+      card.innerHTML = '<header class="focus-card-head"><button type="button" class="focus-folder" aria-label="Move to folder"></button><span class="focus-dot dot" aria-hidden="true"></span><span class="focus-card-title title"></span><span class="age focus-head-age"></span><span class="focus-card-actions"><button type="button" class="focus-pin">Focus</button><button type="button" class="focus-keep">Keep open</button><button type="button" class="focus-collapse">Collapse</button></span></header><div class="focus-card-body"><p class="tags focus-tags"></p><p class="focus-target target"></p><p class="focus-activity activity"></p><p class="focus-foot"><span class="focus-status status-word"></span><span class="focus-age age"></span></p></div>';
       bindFocusCard(card);
       return card;
     };
@@ -3200,11 +3337,11 @@ __ICON__
      *  folder in catalog order with the loose one last. `pending` is a drag's
      *  placement applied as if it had already been filed, which is what lets
      *  the field open a real gap under the card before you let go. */
-    const focusColumnsOf = (items, pending) => {
-      const dragging = new Set(pending?.ids ?? []);
+    /** The pins, capped, by rank then recency — the set the stage holds. */
+    const pinnedIdsOf = (items) => {
       const rank = (item) => (Number.isFinite(item.focusY) ? item.focusY : Infinity);
-      const stage = items
-        .filter((item) => item.pinned && !dragging.has(item.id))
+      return items
+        .filter((item) => item.pinned)
         .sort((a, b) => {
           const ar = rank(a);
           const br = rank(b);
@@ -3213,6 +3350,16 @@ __ICON__
         })
         .slice(0, FULL_CAP)
         .map((item) => item.id);
+    };
+
+    const focusColumnsOf = (items, pending) => {
+      // A card in the air is out of every column for the whole drag, not only
+      // once it has a slot: a pinned card that left the stage each time the
+      // target said "folder" and came back when it said "new" made the field
+      // jump under the pointer.
+      const dragging = new Set(pending?.ids ?? focusDrag?.ids ?? []);
+      const rank = (item) => (Number.isFinite(item.focusY) ? item.focusY : Infinity);
+      const stage = orderStageByDock(pinnedIdsOf(items)).filter((id) => !dragging.has(id));
       const staged = new Set(stage);
       // Laid out oldest first, not newest first. The list sorts by recency,
       // but a canvas that reorders itself every time a chat ticks destroys the
@@ -3289,6 +3436,7 @@ __ICON__
       }
       const helpers = window.marbleAgentFolders;
       const items = matchingFocusItems();
+      syncStageDock(pinnedIdsOf(items));
       const layout = focusColumnsOf(items, focusDrag?.pending ?? null);
       const fullIds = layout.stage;
       const lods = helpers?.assignLods
@@ -3301,7 +3449,7 @@ __ICON__
         })), {
           fullIds,
           selectedIds: focusSelectedIds,
-          hoveredId: focusHoveredId,
+          hoveredId: null,
           now: Date.now(),
         })
         : Object.fromEntries(items.map((item) => [item.id, fullIds.includes(item.id) ? 'full' : 'digest']));
@@ -3361,7 +3509,8 @@ __ICON__
       }
 
       const canvas = focusCanvasBox();
-      const fulls = fullIds.map((id) => ({ id }));
+      // The stage is as many columns wide as its tree spreads across.
+      const fulls = Array.from({ length: fullIds.length ? stageColumns(dock.tree) : 0 }, (_, i) => ({ id: `stage:${i}` }));
       const groups = layout.columns
         .filter((column) => column.ids.length || (column.folderId === null && focusDrag))
         .map((column) => ({
@@ -3391,6 +3540,19 @@ __ICON__
         // Flow them into plain columns instead: no slots, but nothing is lost.
         : flowFieldColumns(fulls, groups, canvas);
       focusPack = pack;
+      // Pins sit under their panes: each Full card takes its leaf's rect, so
+      // a drag shows a digest where the pane is.
+      if (fullIds.length && pack.stage.w > 0) {
+        const leaves = layoutOf(dock.tree ?? leafNode(PRIMARY)).leaves;
+        for (const id of fullIds) {
+          const key = convo.getAttribute('conversation') === id ? PRIMARY : dock.extras.find((extra) => extra.id === id)?.key;
+          const r = leaves.get(key) ?? { x: 0, y: 0, w: 1, h: 1 };
+          pack.rects[id] = {
+            x: pack.stage.x + r.x * pack.stage.w, y: pack.stage.y + r.y * pack.stage.h,
+            w: r.w * pack.stage.w, h: r.h * pack.stage.h,
+          };
+        }
+      }
       sizeFocusExtent(pack);
 
       for (const item of items) {
@@ -3411,6 +3573,7 @@ __ICON__
 
     const paintRow = (el, summary) => {
       el.dataset.status = statusOf(summary);
+      el.dataset.state = stateOf(summary);
       // A finer signal than the three-way status bucket, purely for the dot's
       // color — failed/watchdog reads as an alarm, not just "take a look".
       if (summary.lastOutcome) el.dataset.outcome = summary.lastOutcome;
@@ -3465,11 +3628,20 @@ __ICON__
     };
 
     const placeIn = (el, parent) => {
-      const updated = summaries.get(el.dataset.id)?.updatedAt ?? 0;
+      // Newest first everywhere; in Needs review, whatever is waiting on the
+      // person comes before whatever merely finished.
+      const review = parent.dataset?.col === 'review';
+      const keyOf = (id) => {
+        const s = summaries.get(id);
+        return [review && s?.asking ? 0 : 1, -(review ? (s?.lastFinishedAt ?? s?.updatedAt ?? 0) : (s?.updatedAt ?? 0))];
+      };
+      const mine = keyOf(el.dataset.id);
       const siblings = [...parent.querySelectorAll(':scope > .conv')];
-      const before = siblings.find(
-        (n) => n !== el && (summaries.get(n.dataset.id)?.updatedAt ?? 0) < updated,
-      );
+      const before = siblings.find((n) => {
+        if (n === el) return false;
+        const k = keyOf(n.dataset.id);
+        return k[0] > mine[0] || (k[0] === mine[0] && k[1] > mine[1]);
+      });
       if (before) parent.insertBefore(el, before);
       else parent.append(el);
     };
@@ -3514,6 +3686,7 @@ __ICON__
       for (const anim of flipAnims) anim.cancel();
       flipAnims = [];
       for (const el of nodes.values()) el.classList.remove('marble-flip');
+      clearMorph();
     };
 
     const shellFor = (view) => {
@@ -3576,15 +3749,100 @@ __ICON__
       thaw();
     };
 
+    // ---- The morph. A conversation is one object in four views, so a switch
+    // carries each one from the shape it had to the shape it will have: a
+    // ghost of the old element travels to the new element's rect and dissolves
+    // into it, while the new element fades up underneath. The shells still
+    // crossfade around them.
+    const representationsOf = (view) => {
+      const out = new Map();
+      const sel = view === 'folders' ? '.folder-rail .folder-tab[data-id]'
+        : view === 'focus' ? '.focus .focus-card[data-id]'
+          : view === 'board' ? '.column > .conv[data-id]' : '#list > .conv[data-id]';
+      for (const el of document.querySelectorAll(sel)) {
+        if (el.hidden || el.closest('[hidden]')) continue;
+        const r = el.getBoundingClientRect();
+        if (r.width > 0 && r.height > 0) out.set(el.dataset.id, el);
+      }
+      return out;
+    };
+
+    let vtLayer = null;
+    let morphAnims = [];
+    const clearMorph = () => {
+      for (const anim of morphAnims) anim.cancel();
+      morphAnims = [];
+      vtLayer?.remove();
+      vtLayer = null;
+    };
+
+    const morphViews = (current, next, applyLayout) => {
+      const stood = [...representationsOf(current)].map(([id, el]) => [id, el, el.getBoundingClientRect()]);
+      clearMorph();
+      vtLayer = document.createElement('div');
+      vtLayer.className = 'vt-layer';
+      vtLayer.setAttribute('data-marble-transient', '');
+      for (const [id, el, rect] of stood) {
+        const ghost = el.cloneNode(true);
+        ghost.classList.add('vt-ghost');
+        ghost.classList.remove('marble-flip', 'marble-open', 'marble-selected');
+        ghost.dataset.id = id;
+        ghost.removeAttribute('data-marble-id');
+        ghost.removeAttribute('tabindex');
+        ghost.removeAttribute('id');
+        ghost.setAttribute('aria-hidden', 'true');
+        ghost.querySelector('marble-conversation')?.remove();
+        for (const child of ghost.querySelectorAll('[data-marble-id]')) child.removeAttribute('data-marble-id');
+        Object.assign(ghost.style, {
+          position: 'fixed', left: `${rect.left}px`, top: `${rect.top}px`,
+          width: `${rect.width}px`, height: `${rect.height}px`,
+          transform: 'none', overflow: 'hidden', pointerEvents: 'none', zIndex: '',
+        });
+        vtLayer.append(ghost);
+      }
+      document.body.append(vtLayer);
+      applyLayout();
+      const after = representationsOf(next);
+      const order = [...after.keys()];
+      const gen = fadeGen;
+      for (const ghost of [...vtLayer.children]) {
+        const target = after.get(ghost.dataset.id);
+        if (!target) {
+          ghost.remove();
+          continue;
+        }
+        const to = target.getBoundingClientRect();
+        const delay = Math.min(Math.max(0, order.indexOf(ghost.dataset.id)), 7) * STAGGER_MS;
+        morphAnims.push(ghost.animate(
+          [
+            { left: ghost.style.left, top: ghost.style.top, width: ghost.style.width, height: ghost.style.height, opacity: 1, offset: 0 },
+            { opacity: 1, offset: 0.6 },
+            { left: `${to.left}px`, top: `${to.top}px`, width: `${to.width}px`, height: `${to.height}px`, opacity: 0, offset: 1 },
+          ],
+          { duration: FLIP_MS, easing: VT_EASE, delay, fill: 'both' },
+        ));
+        morphAnims.push(target.animate(
+          [{ opacity: 0 }, { opacity: 1, offset: 0.6 }, { opacity: 1 }],
+          { duration: FLIP_MS, easing: VT_EASE, delay, fill: 'both' },
+        ));
+      }
+      if (!vtLayer.children.length) {
+        clearMorph();
+        return;
+      }
+      Promise.all(morphAnims.map((anim) => anim.finished.catch(() => {}))).then(() => {
+        if (gen !== fadeGen) return;
+        clearMorph();
+      });
+    };
+
     const openBoardPanel = () => {
       panelOpen = true;
-      boardPanel.setAttribute('data-open', 'true');
       document.body.setAttribute('data-panel', 'open');
     };
 
     const closeBoardPanel = () => {
       panelOpen = false;
-      boardPanel.removeAttribute('data-open');
       document.body.removeAttribute('data-panel');
     };
 
@@ -3770,7 +4028,13 @@ __ICON__
       return next;
     };
 
-    const treeToSaved = (n) => (n.leaf ? idOfKey(n.leaf) : { dir: n.dir, sizes: n.sizes, kids: n.kids.map(treeToSaved) });
+    const idOfKeyIn = (record, key) => {
+      if (key === PRIMARY) return record === dock ? convo.getAttribute('conversation') : (record.file ?? null);
+      return record.extras.find((extra) => extra.key === key)?.id ?? null;
+    };
+    const treeToSaved = (n, record = dock) => (n.leaf
+      ? idOfKeyIn(record, n.leaf)
+      : { dir: n.dir, sizes: n.sizes, kids: n.kids.map((kid) => treeToSaved(kid, record)) });
     const savedToTree = (saved, keyOfId) => {
       if (typeof saved === 'string') {
         const key = keyOfId.get(saved);
@@ -3783,18 +4047,23 @@ __ICON__
       return splitNode(saved.dir, kids, sizes && sizes.every((size) => size > 0) ? sizes : null);
     };
 
-    const rememberDock = () => {
-      const tree = dock.tree ? treeToSaved(dock.tree) : null;
-      remember(DOCK_KEY, JSON.stringify({
-        v: 2,
+    // An empty pane is not remembered: a tree naming a leaf that will not
+    // come back is no tree at all, so it is dropped with the pane.
+    const savedDock = (record) => {
+      const hollow = record.extras.some((extra) => !extra.id);
+      const tree = record.tree && !hollow ? treeToSaved(record.tree, record) : null;
+      return {
         tree: tree && !JSON.stringify(tree).includes('null') ? tree : null,
-        extras: dock.extras.map((extra) => extra.id),
-        focus: dock.focus,
-        file: convo.getAttribute('conversation'),
-      }));
+        extras: record.extras.filter((extra) => extra.id).map((extra) => extra.id),
+        focus: record.focus,
+        file: record === dock ? convo.getAttribute('conversation') : (record.file ?? null),
+      };
+    };
+    const rememberDock = () => {
+      remember(DOCK_KEY, JSON.stringify({ v: 3, page: savedDock(docks.page), focus: savedDock(docks.focus) }));
     };
 
-    const BAR_MARKUP = `<svg class="dock-grip" viewBox="0 0 10 14" width="10" height="14" aria-hidden="true"><circle cx="3" cy="3" r="1.15" fill="currentColor"/><circle cx="7" cy="3" r="1.15" fill="currentColor"/><circle cx="3" cy="7" r="1.15" fill="currentColor"/><circle cx="7" cy="7" r="1.15" fill="currentColor"/><circle cx="3" cy="11" r="1.15" fill="currentColor"/><circle cx="7" cy="11" r="1.15" fill="currentColor"/></svg><span class="dock-title"></span><a class="dock-target" hidden></a><button type="button" class="dock-close" aria-label="Close pane"><svg viewBox="0 0 20 20" width="12" height="12" aria-hidden="true"><path d="M5 5l10 10M15 5 5 15" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg></button>`;
+    const BAR_MARKUP = `<span class="dot" aria-hidden="true"></span><svg class="dock-grip" viewBox="0 0 10 14" width="10" height="14" aria-hidden="true"><circle cx="3" cy="3" r="1.15" fill="currentColor"/><circle cx="7" cy="3" r="1.15" fill="currentColor"/><circle cx="3" cy="7" r="1.15" fill="currentColor"/><circle cx="7" cy="7" r="1.15" fill="currentColor"/><circle cx="3" cy="11" r="1.15" fill="currentColor"/><circle cx="7" cy="11" r="1.15" fill="currentColor"/></svg><span class="dock-title"></span><a class="dock-target" hidden></a><button type="button" class="dock-split" data-side="right" aria-label="Split right" title="Split right"><svg viewBox="0 0 16 16" width="12" height="12" aria-hidden="true"><rect x="2" y="3" width="12" height="10" rx="2" fill="none" stroke="currentColor" stroke-width="1.4"/><path d="M8 3v10" stroke="currentColor" stroke-width="1.4"/></svg></button><button type="button" class="dock-split" data-side="bottom" aria-label="Split down" title="Split down"><svg viewBox="0 0 16 16" width="12" height="12" aria-hidden="true"><rect x="2" y="3" width="12" height="10" rx="2" fill="none" stroke="currentColor" stroke-width="1.4"/><path d="M2 8h12" stroke="currentColor" stroke-width="1.4"/></svg></button><button type="button" class="dock-close" aria-label="Close pane"><svg viewBox="0 0 20 20" width="12" height="12" aria-hidden="true"><path d="M5 5l10 10M15 5 5 15" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg></button>`;
 
     // ---- The stage. With more than one pane the pane element becomes a stage:
     // every leaf is a card placed by percentages and a pixel gap, so a change to
@@ -4098,9 +4367,34 @@ __ICON__
 
     /** The one answer paint and drop both read, so what was previewed is what
      *  happens. `plan` is null when nothing about the layout would change. */
+    const currentView = () => document.body.getAttribute('data-view') || 'library';
+
+    /** With no pane open on the board, the rightmost band of the kanban is
+     *  where a dragged card opens. Drawn only for the length of a drag. */
+    const dockZone = () => {
+      let zone = boardEl.querySelector(':scope > .board-dockzone');
+      if (!zone) {
+        zone = document.createElement('div');
+        zone.className = 'board-dockzone';
+        zone.setAttribute('data-marble-transient', '');
+        zone.setAttribute('aria-hidden', 'true');
+        zone.innerHTML = '<span>Open here</span>';
+        boardEl.append(zone);
+      }
+      return zone;
+    };
+    const removeDockZone = () => boardEl.querySelector(':scope > .board-dockzone')?.remove();
+    const inDockZone = (clientX, clientY) => {
+      const b = boardEl.getBoundingClientRect();
+      return clientX >= b.right - b.width * 0.12 && clientX <= b.right && clientY >= b.top && clientY <= b.bottom;
+    };
+
     const resolveDrop = (clientX, clientY, id, { rail = false } = {}) => {
       const none = { plan: null };
       if (clientX == null) return none;
+      if (currentView() === 'board' && !document.body.hasAttribute('data-panel')) {
+        return inDockZone(clientX, clientY) ? { plan: { mode: 'fill', zone: true } } : none;
+      }
       const box = pane.getBoundingClientRect();
       if (clientX < box.left || clientX > box.right || clientY < box.top || clientY > box.bottom) return none;
       const hasPane = document.body.hasAttribute('data-open') && convo.getAttribute('conversation');
@@ -4163,6 +4457,13 @@ __ICON__
       roomLive = clientX != null;
       const plan = res.plan;
       const mode = plan?.mode ?? null;
+      if (clientX != null && currentView() === 'board' && !document.body.hasAttribute('data-panel')) {
+        const zone = dockZone();
+        if (plan?.zone) zone.setAttribute('data-drop', '');
+        else zone.removeAttribute('data-drop');
+      } else {
+        removeDockZone();
+      }
       pane.classList.toggle('marble-drop-fill', mode === 'fill');
       const dimmed = mode === 'replace' ? plan.target : null;
       pane.classList.toggle('marble-replace-primary', dimmed === PRIMARY);
@@ -4193,6 +4494,7 @@ __ICON__
      *  chat; anything else folds the room back. */
     const endDrop = (docks) => {
       roomLive = false;
+      removeDockZone();
       intentKey = null;
       clearTimeout(intentTimer);
       pane.classList.remove('marble-drop-fill', 'marble-replace-primary');
@@ -4200,6 +4502,8 @@ __ICON__
       for (const bar of pane.querySelectorAll('.dock-bar')) bar.classList.remove('marble-drop-swap');
       closeRoom({ hold: docks });
     };
+
+    const focusedPaneId = () => (dock.focus === 'primary' ? convo.getAttribute('conversation') : dock.extras[dock.focus]?.id) ?? null;
 
     const slotOf = (id) => {
       if (!id) return null;
@@ -4226,13 +4530,16 @@ __ICON__
       }
       rememberDock();
       paintOpen();
+      paintChrome();
+      if (dock === docks.focus && id) focusPrimaryId = id;
     };
 
     const paintBar = (bar, id) => {
       if (!bar) return;
       bar.dataset.id = id || '';
       const summary = summaries.get(id) ?? {};
-      bar.querySelector('.dock-title').textContent = summary.title || 'Untitled';
+      bar.dataset.state = stateOf(summary);
+      bar.querySelector('.dock-title').textContent = summary.title || (id ? 'Untitled' : 'Empty pane');
       const link = bar.querySelector('.dock-target');
       const target = targets.get(id) || summary.target || '';
       if (target) {
@@ -4257,14 +4564,29 @@ __ICON__
     /** Only the focused pane carries the status line, the workdir path and the
      *  agent pickers. They are identical on every pane in a folder, so the
      *  others would spend a third of their height repeating them. */
+    /** The pane you are in is the lit one; its neighbours step back onto the
+     *  paper, so there is never a question of where typing goes. */
     const paintChrome = () => {
-      if (!dock.extras.length) {
-        convo.setAttribute('data-chrome', 'pane');
-        return;
-      }
-      convo.setAttribute('data-chrome', dock.focus === 'primary' ? 'pane' : 'tile');
+      const focusedKey = dock.focus === 'primary' ? PRIMARY : dock.extras[dock.focus]?.key;
+      const primaryOn = !dock.extras.length || focusedKey === PRIMARY;
+      const mark = (el, on) => {
+        if (!el) return;
+        if (on) el.setAttribute('data-focused', '');
+        else el.removeAttribute('data-focused');
+      };
+      mark(pane, primaryOn);
+      mark(primaryFrame, primaryOn);
+      mark(pane.querySelector(':scope > .dock-bar'), primaryOn);
+      convo.setAttribute('data-focused', String(primaryOn));
+      convo.setAttribute('data-chrome', primaryOn ? 'pane' : 'tile');
+      // `extra.el` is the chat itself; its card and bar are the leaf's.
       dock.extras.forEach((extra, index) => {
-        extra.el?.setAttribute('data-chrome', dock.focus === index ? 'pane' : 'tile');
+        const on = dock.focus === index;
+        const leaf = leafEls.get(extra.key);
+        mark(leaf?.el, on);
+        mark(leaf?.bar, on);
+        extra.el?.setAttribute('data-focused', String(on));
+        extra.el?.setAttribute('data-chrome', on ? 'pane' : 'tile');
       });
     };
 
@@ -4305,6 +4627,12 @@ __ICON__
         event.stopPropagation();
         closeSlot(slotOfKey(bar.dataset.key));
       });
+      for (const button of bar.querySelectorAll('.dock-split')) {
+        button.addEventListener('click', (event) => {
+          event.stopPropagation();
+          splitEmpty(bar.dataset.key, button.dataset.side);
+        });
+      }
       bar.addEventListener('pointerdown', (event) => {
         if (event.target.closest('a, button')) return;
         const id = bar.dataset.id;
@@ -4342,6 +4670,7 @@ __ICON__
           applyDock();
           fillChrome(next.id);
         } else {
+          if ((document.body.getAttribute('data-view') || 'library') === 'board') closeBoardPanel();
           open(null);
         }
         return;
@@ -4389,7 +4718,9 @@ __ICON__
       const claimed = new Set(dock.extras.map((extra) => extra.key).filter(Boolean));
       for (const extra of dock.extras) {
         if (extra.key) continue;
-        const match = [...leafEls].find(([key, rec]) => !claimed.has(key) && rec.view.getAttribute('conversation') === extra.id);
+        const match = extra.id
+          ? [...leafEls].find(([key, rec]) => !claimed.has(key) && rec.view.getAttribute('conversation') === extra.id)
+          : null;
         extra.key = match ? match[0] : newKey();
         claimed.add(extra.key);
       }
@@ -4446,8 +4777,9 @@ __ICON__
       clearTimeout(collapseTimer);
       const handOver = takeRoom();
       const view = document.body.getAttribute('data-view') || 'library';
-      const animated = view !== 'focus' && !reduceMotion.matches && !narrowView.matches;
-      if (view === 'focus') {
+      const animated = !reduceMotion.matches && !narrowView.matches;
+      if (view === 'focus' && pane.style.display === 'none') {
+        // Nothing pinned: the pane is off the canvas, and there is nothing to lay out.
         handOver?.ghost.remove();
         leaveTreeMode();
         paintBars();
@@ -4516,10 +4848,33 @@ __ICON__
       fillChrome(id);
     };
 
+    /** Alt-click anywhere: the chat lands beside the focused pane, on the
+     *  pane's longer side. With nothing open it just opens. */
+    const openBeside = async (id) => {
+      if (!id) return;
+      const hasPane = document.body.hasAttribute('data-open') && convo.getAttribute('conversation');
+      if (!hasPane || narrowView.matches || reduceMotion.matches || slotOf(id) != null) return open(id);
+      const target = dock.focus === 'primary' ? PRIMARY : (dock.extras[dock.focus]?.key ?? PRIMARY);
+      dockAt(id, { target, side: restingSide(target) });
+    };
+
+    /** A pane with nothing in it yet: the hint and a composer. Starting a chat
+     *  there fills it, and so does clicking a row while it is the focused pane. */
+    const splitEmpty = (key, side) => {
+      const k = newKey();
+      dock.extras.push({ key: k, id: null });
+      dock.tree = insertBeside(cloneTree(treeOf()), key, side, k);
+      dock.focus = slotOfKey(k);
+      rememberDock();
+      applyDock();
+      paintOpen();
+    };
+
     /** What a drop does, by what resolveDrop said it would. */
     const dropOnto = (id, res) => {
       const plan = res?.plan;
       if (!plan || plan.mode === 'fill') {
+        if (plan?.zone) openBoardPanel();
         open(id);
         return;
       }
@@ -4565,7 +4920,9 @@ __ICON__
       el.addEventListener('pointerdown', (event) => {
         if (event.button !== 0 || event.target.closest('a, input, textarea, button, .manage')) return;
         if (narrowView.matches || reduceMotion.matches) return;
-        if (!document.body.hasAttribute('data-open')) return;
+        // With nothing open there is nowhere to dock — except on the board,
+        // where the drag itself is what opens the pane.
+        if (!document.body.hasAttribute('data-open') && currentView() !== 'board') return;
         const src = el.getBoundingClientRect();
         let grabX = event.clientX - src.left;
         let grabY = event.clientY - src.top;
@@ -4606,6 +4963,21 @@ __ICON__
           if (!origin.started) return;
           suppressConvClick = true;
           setTimeout(() => { suppressConvClick = false; }, 0);
+          // A pane dragged off the Focus stage lands in the field: it is
+          // unpinned there, and joins whatever folder it was dropped in.
+          if (currentView() === 'focus' && !res?.plan && focusEl && slotOf(origin.id) != null) {
+            const box = focusEl.getBoundingClientRect();
+            if (e.clientX >= box.left && e.clientX <= box.right && e.clientY >= box.top && e.clientY <= box.bottom) {
+              const target = focusTargetAt(focusPoint(e.clientX, e.clientY), null);
+              if (target && target.column !== 'stage') {
+                commitFocusDrop([origin.id], target).then((writes) => {
+                  paintFocus();
+                  return fileFocusWrites(writes);
+                });
+                return;
+              }
+            }
+          }
           dropOnto(origin.id, res);
         };
         document.addEventListener('pointermove', move);
@@ -4711,20 +5083,24 @@ __ICON__
         el.setAttribute('role', 'listitem');
         el.tabIndex = 0;
         el.innerHTML = '<span class="dot" aria-hidden="true"></span><span class="body"><span class="title"></span><span class="target"></span><span class="tags"></span><span class="meta"><span class="badge"></span><span class="activity"></span></span></span><span class="age"></span><div class="manage"><button type="button" class="more" aria-label="Manage conversation" aria-haspopup="menu" aria-expanded="false"><svg width="16" height="16" viewBox="0 0 16 16" aria-hidden="true"><circle cx="3.5" cy="8" r="1.3" fill="currentColor"/><circle cx="8" cy="8" r="1.3" fill="currentColor"/><circle cx="12.5" cy="8" r="1.3" fill="currentColor"/></svg></button></div>';
-        const openRow = () => {
+        const openRow = (event) => {
           if (suppressConvClick) return;
           if ((document.body.getAttribute('data-view') || 'library') === 'board') openBoardPanel();
+          if (event?.altKey) {
+            openBeside(el.dataset.id);
+            return;
+          }
           open(el.dataset.id);
         };
         el.addEventListener('click', (event) => {
           if (event.target.closest('.manage')) return;
-          openRow();
+          openRow(event);
         });
         el.addEventListener('keydown', (event) => {
           if (event.target.closest('.manage')) return;
           if (event.key !== 'Enter' && event.key !== ' ') return;
           event.preventDefault();
-          openRow();
+          openRow(event);
         });
         el.querySelector('.more').addEventListener('click', (event) => {
           event.stopPropagation();
@@ -4735,7 +5111,13 @@ __ICON__
         nodes.set(summary.id, el);
       }
       paintRow(el, summary);
+      // A card changing column visibly makes room: the same FLIP the view
+      // switch plays, shorter and unstaggered.
+      const wasIn = el.parentElement;
+      const onBoard = (document.body.getAttribute('data-view') || 'library') === 'board';
+      const first = onBoard && wasIn && !reduceMotion.matches ? captureRects() : null;
       place(el);
+      if (first && el.parentElement !== wasIn) playFlip(first, boardOrder(), { duration: 240, stagger: 0 });
       el.hidden = !matches(summary);
       el.classList.toggle('marble-open', summary.id === openId);
       if (summary.id === openId) fillChrome(summary.id);
@@ -4806,7 +5188,7 @@ __ICON__
       focused?.focusInput?.();
     }
 
-    const playFlip = (first, ordered) => {
+    const playFlip = (first, ordered, { duration = FLIP_MS, stagger = STAGGER_MS } = {}) => {
       flipAnims = [];
       ordered.forEach((el, index) => {
         const from = first.get(el);
@@ -4824,9 +5206,9 @@ __ICON__
             { transform: 'none' },
           ],
           {
-            duration: FLIP_MS,
+            duration,
             easing: FLIP_EASE,
-            delay: Math.min(index, 7) * STAGGER_MS,
+            delay: Math.min(index, 7) * stagger,
             fill: 'both',
           },
         );
@@ -4852,19 +5234,17 @@ __ICON__
       const applyLayout = () => {
         document.body.setAttribute('data-view', next);
         deriveView();
-        // Focus draws its own panes; every other view draws the stage.
+        if (current === 'focus' && next !== 'focus') leaveFocusView();
+        swapDock(next);
         applyDock();
         if (next === 'library') closeBoardPanel();
-        if (current === 'focus' && next !== 'focus') leaveFocusView();
         placeAll();
         paintFocus();
         if (next === 'focus') startFocusDecay();
         else stopFocusDecay();
       };
 
-      const crossfade = () => {
-        cancelFlip();
-        const gen = ++fadeGen;
+      const crossfadeWith = (layout, gen) => {
         cancelViewFades();
         document.body.setAttribute('data-crossfade', '1');
         const still = reduceMotion.matches;
@@ -4877,7 +5257,7 @@ __ICON__
         const incoming = nextParts.filter((el) => (el === pane && paneMoves) || !partsOf(current).includes(el));
         // Where each leaving part stood, read before the layout changes under it.
         const stood = outgoing.map((el) => [el, el.getBoundingClientRect()]);
-        applyLayout();
+        layout();
         // The List shell is hidden outright in Board; its leaving parts need it.
         if (stood.some(([el]) => el === list || el === pane) && next === 'board') libraryEl.classList.add('marble-vt-shell');
         const anims = [];
@@ -4908,8 +5288,21 @@ __ICON__
         });
       };
 
-      if (reduceMotion.matches || narrowView.matches || !isListBoard(current) || !isListBoard(next)) {
+      const crossfade = () => {
+        cancelFlip();
+        crossfadeWith(applyLayout, ++fadeGen);
+      };
+
+      if (reduceMotion.matches || narrowView.matches) {
         crossfade();
+        return;
+      }
+      if (!isListBoard(current) || !isListBoard(next)) {
+        // Every conversation on screen in both views morphs; the shells
+        // crossfade around them as before.
+        cancelFlip();
+        const gen = ++fadeGen;
+        morphViews(current, next, () => crossfadeWith(applyLayout, gen));
         return;
       }
 
@@ -5028,7 +5421,6 @@ __ICON__
       paintOpen();
       fillChrome(id);
     });
-    boardPanel.querySelector('.panel-close').addEventListener('click', () => closeBoardPanel());
     addEventListener('keydown', (event) => {
       if ((event.metaKey || event.ctrlKey) && event.key === 'z' && !event.shiftKey) {
         if (typingIn()) return;
@@ -5064,10 +5456,8 @@ __ICON__
       paintOpen();
       const view = document.body.getAttribute('data-view') || 'library';
       if (view === 'board' && panelOpen) {
-        boardPanel.setAttribute('data-open', 'true');
         document.body.setAttribute('data-panel', 'open');
       } else {
-        boardPanel.removeAttribute('data-open');
         document.body.removeAttribute('data-panel');
       }
       restoreDock();
@@ -5081,7 +5471,9 @@ __ICON__
         const raw = recalled(DOCK_KEY);
         if (raw) {
           try {
-            const saved = JSON.parse(raw);
+            const parsed = JSON.parse(raw);
+            const saved = parsed.v === 3 ? (parsed.page ?? {}) : parsed;
+            docks.focus.saved = parsed.v === 3 ? (parsed.focus ?? null) : null;
             if (saved.file) fileId = saved.file;
             dock.extras = (saved.extras ?? []).filter(Boolean).map((id) => ({ key: newKey(), id }));
             dock.focus = saved.focus === 'primary' || typeof saved.focus === 'number' ? saved.focus : 'primary';
@@ -5103,6 +5495,7 @@ __ICON__
       if (fileId) convo.setAttribute('conversation', fileId);
       else convo.removeAttribute('conversation');
       applyDock();
+      if ((document.body.getAttribute('data-view') || 'library') === 'focus') swapDock('focus');
     };
 
     const boot = (marble) => {
@@ -5145,6 +5538,15 @@ __ICON__
           for (const provider of await api.providers()) labels.set(provider.id, provider);
         } catch { /* badges fall back to the provider id */ }
         fillCli();
+        // The dot and the pills are styled once, in the runtime, and every
+        // view on this page wears that one style.
+        if (!document.head.querySelector('style[data-state-css]')) {
+          const stateStyle = document.createElement('style');
+          stateStyle.setAttribute('data-marble-transient', '');
+          stateStyle.setAttribute('data-state-css', '');
+          stateStyle.textContent = (window.marbleAgentUI?.TAG_CSS ?? '') + (window.marbleAgentUI?.STATE_CSS ?? '');
+          document.head.append(stateStyle);
+        }
         api.on('*', (payload) => {
           if (payload?.folders) {
             folderCatalog = payload.folders;
@@ -5153,7 +5555,17 @@ __ICON__
             paintFocus();
             return;
           }
-          if (payload?.id) upsert(payload);
+          if (!payload?.id) return;
+          // A chat you are already watching does not fall back into Needs
+          // review the moment it finishes.
+          const prev = summaries.get(payload.id);
+          const finished = prev?.running && !payload.running && payload.lastFinishedAt;
+          if (finished && payload.needsReview && document.visibilityState === 'visible' && focusedPaneId() === payload.id) {
+            api.markReviewed(payload.id).catch(() => {});
+            upsert({ ...payload, needsReview: false });
+            return;
+          }
+          upsert(payload);
         });
         await load();
         try {

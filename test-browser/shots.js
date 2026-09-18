@@ -39,6 +39,8 @@ const SEED = [
 const out = process.argv.find((arg) => !arg.startsWith('-') && arg.endsWith('shots')) ?? process.argv[2];
 const outDir = out && !out.startsWith('--') ? out : '/tmp/agent-shots';
 const narrow = process.argv.includes('--narrow');
+// A board squeezed by its pane: `--stack` opens the first card at 980px.
+const stack = process.argv.includes('--stack');
 const dark = process.argv.includes('--dark');
 // Focus without a pin is only half the view. `--pin N` stages the first N.
 const pinArg = process.argv.find((arg) => arg.startsWith('--pin'));
@@ -50,7 +52,7 @@ const host = await startDrive({ documents: { garden: GARDEN, Agents: await sourc
 const store = host.drive.agents.store;
 
 const { page } = await host.newPage({
-  viewport: narrow ? { width: 700, height: 900 } : { width: 1440, height: 900 },
+  viewport: narrow ? { width: 700, height: 900 } : stack ? { width: 980, height: 900 } : { width: 1440, height: 900 },
   colorScheme: dark ? 'dark' : 'light',
 });
 await page.goto(`${host.base}/a/Agents`);
@@ -94,6 +96,12 @@ const shoot = async (view, name = view) => {
 
 await shoot('library', 'list');
 await shoot('board');
+if (stack) {
+  await page.locator('.column .conv').first().click();
+  await page.waitForFunction(() => document.body.getAttribute('data-panel') === 'open');
+  await page.waitForTimeout(700);
+  await page.screenshot({ path: path.join(outDir, 'board-stack.png') });
+}
 await shoot('folders');
 await shoot('focus');
 

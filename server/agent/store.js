@@ -20,7 +20,7 @@ import '../../runtime/agent-folders.js';
 
 const folderLib = () => globalThis.marbleAgentFolders;
 
-const REVIEWABLE = new Set(['changes', 'failed', 'interrupted', 'watchdog']);
+const REVIEWABLE = new Set(['changes', 'done', 'failed', 'interrupted', 'watchdog']);
 
 export const needsReview = (meta) =>
   REVIEWABLE.has(meta.lastOutcome) &&
