@@ -557,3 +557,33 @@ test('providers say which model they use unless told otherwise', async () => {
 });
 
 test.after(() => drive.close());
+
+test('projects: the drive is listed first, a directory can be added once and removed, and the drive cannot', async () => {
+  const repo = await fsp.mkdtemp(path.join(WORK, 'repo-'));
+  const listed = await api('GET', '/agent/projects');
+  assert.equal(listed.status, 200);
+  assert.equal(listed.body[0].id, 'drive');
+  assert.equal(listed.body[0].path, ROOT);
+
+  const added = await api('POST', '/agent/projects', { name: 'Repo', path: repo });
+  assert.equal(added.status, 201);
+  assert.match(added.body.id, /^[0-9a-f]{12}$/);
+  assert.equal(added.body.path, repo);
+  const again = await api('POST', '/agent/projects', { name: 'Other name', path: `${repo}/` });
+  assert.equal(again.status, 200, 'the same path is the same project');
+  assert.equal(again.body.id, added.body.id);
+
+  assert.equal((await api('POST', '/agent/projects', { name: 'x', path: 'relative' })).status, 400);
+  assert.equal((await api('POST', '/agent/projects', { name: 'x', path: ROOT })).status, 400);
+
+  const conv = await api('POST', '/agent/conversations', { provider: 'fake', project: added.body.id });
+  assert.equal(conv.status, 201);
+  assert.equal(conv.body.project, added.body.id);
+  assert.equal((await api('POST', '/agent/conversations', { provider: 'fake', project: 'nope' })).status, 400);
+  assert.equal((await api('POST', '/agent/conversations', { provider: 'fake' })).body.project, 'drive');
+
+  assert.equal((await api('DELETE', '/agent/projects/drive')).status, 400);
+  assert.equal((await api('DELETE', `/agent/projects/${added.body.id}`)).status, 200);
+  assert.equal((await api('DELETE', `/agent/projects/${added.body.id}`)).status, 404);
+  assert.equal((await api('GET', '/agent/projects')).body.length, 1);
+});

@@ -12,10 +12,13 @@
 //     gate also has to be addressed as itself — localhost — or a page on any
 //     name that rebinds to 127.0.0.1 would count as this origin too.
 
+import crypto from 'node:crypto';
+
 import { json, readJson } from '../http.js';
 import { parsePath } from '../paths.js';
 import { sameOrigin } from '../sessions.js';
 import { driveWhere, pickCursorPickerModels, sortProviders } from './catalog.js';
+import { findProject, listProjects, validateProjectPath } from './projects.js';
 import { summarize } from './store.js';
 import { normalizeUndo, undoTurn } from './undo.js';
 
@@ -40,6 +43,7 @@ const bearer = (req) => (req.headers.authorization ?? '').replace(/^Bearer\s+/i,
 const CONVERSATION = /^\/agent\/conversations\/([0-9a-f]{12})(\/turns)?$/;
 const TURN = /^\/agent\/turns\/([0-9a-f]{12}-t\d+)(\/cancel|\/undo)?$/;
 const FOLDER = /^\/agent\/folders\/([0-9a-f]{12})$/;
+const PROJECT = /^\/agent\/projects\/([0-9a-f]{12}|drive)$/;
 const TOOL = /^\/agent\/tools\/([a-z_]+)$/;
 
 const publicWindow = (window) => ({
@@ -227,6 +231,39 @@ export function createAgentRoutes({ store, runner, tools, hub, providers, writeO
       }
     }
 
+    if (route === '/agent/projects') {
+      if (method === 'GET') return json(res, 200, listProjects({ settings: await store.settings(), root }));
+      if (method === 'POST') {
+        const body = await readJson(req, maxBody);
+        let resolved;
+        try {
+          resolved = await validateProjectPath(body.path, { root });
+        } catch (err) {
+          if (err.status === 400) return json(res, 400, { error: err.message });
+          throw err;
+        }
+        const settings = await store.settings();
+        const existing = (settings.projects ?? []).find((p) => p.path === resolved);
+        if (existing) return json(res, 200, { ...existing, builtIn: false });
+        const project = {
+          id: crypto.randomBytes(6).toString('hex'),
+          name: String(body.name ?? '').trim().slice(0, 80) || resolved.split('/').filter(Boolean).pop(),
+          path: resolved,
+        };
+        await store.saveSettings({ projects: [...(settings.projects ?? []), project] });
+        return json(res, 201, { ...project, builtIn: false });
+      }
+    }
+    const projectRoute = PROJECT.exec(route);
+    if (projectRoute && method === 'DELETE') {
+      const id = projectRoute[1];
+      if (id === 'drive') return json(res, 400, { error: 'the drive is always a project' });
+      const settings = await store.settings();
+      if (!(settings.projects ?? []).some((p) => p.id === id)) return json(res, 404, { error: `no project "${id}"` });
+      await store.saveSettings({ projects: settings.projects.filter((p) => p.id !== id) });
+      return json(res, 200, { removed: true });
+    }
+
     if (route === '/agent/conversations') {
       if (method === 'GET') {
         return json(res, 200, await store.conversations({ archived: url.searchParams.get('archived') === '1' }));
@@ -236,13 +273,18 @@ export function createAgentRoutes({ store, runner, tools, hub, providers, writeO
         if (!providers.has(body.provider)) return json(res, 400, { error: `no provider "${body.provider}"` });
         const from = body.handoffFrom ? await store.conversation(body.handoffFrom) : null;
         if (body.handoffFrom && !from) return json(res, 404, { error: `no conversation "${body.handoffFrom}"` });
-        const { models, efforts } = await store.settings();
+        const settings = await store.settings();
+        const { models, efforts } = settings;
+        const projectId = typeof body.project === 'string' && body.project.trim() ? body.project.trim() : settings.defaultProject || 'drive';
+        const project = findProject({ settings, root }, projectId);
+        if (!project) return json(res, 400, { error: `no project "${projectId}"` });
         const meta = await store.createConversation({
           provider: body.provider,
           model: body.model ?? models[body.provider] ?? null,
           effort: body.effort ?? efforts?.[body.provider] ?? null,
           mode: typeof body.mode === 'string' && body.mode.trim() ? body.mode.trim() : null,
           handoffFrom: from?.id ?? null,
+          project: project.id,
         });
         if (from) {
           await store.updateConversation(from.id, { handoffTo: meta.id });

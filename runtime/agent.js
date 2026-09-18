@@ -150,12 +150,17 @@
       conversation: (id) => ask(`/agent/conversations/${enc(id)}`),
       update: (id, patch) => ask(`/agent/conversations/${enc(id)}`, { method: 'PATCH', body: patch }),
 
-      async start({ provider, model = null, effort = null, mode = null, handoffFrom = null } = {}) {
+      projects: () => ask('/agent/projects'),
+      addProject: (body) => ask('/agent/projects', { method: 'POST', body }),
+      removeProject: (id) => ask(`/agent/projects/${enc(id)}`, { method: 'DELETE' }),
+
+      async start({ provider, model = null, effort = null, mode = null, handoffFrom = null, project = null } = {}) {
         const body = { provider };
         if (model) body.model = model;
         if (effort) body.effort = effort;
         if (mode) body.mode = mode;
         if (handoffFrom) body.handoffFrom = handoffFrom;
+        if (project) body.project = project;
         return (await ask('/agent/conversations', { method: 'POST', body })).id;
       },
       handoff: (id, provider) => agent.start({ provider, handoffFrom: id }),
