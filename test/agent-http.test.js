@@ -329,7 +329,7 @@ test('tools answer only a running turn’s token, and the token dies with the tu
   const held = await start('script:hold');
   const token = await until(() => drive.agents.runner.running()[0]?.token);
   const listed = await api('GET', '/agent/tools', null, { Authorization: `Bearer ${token}` });
-  assert.equal(listed.body.tools.length, 6);
+  assert.equal(listed.body.tools.length, 9);
   assert.ok(listed.body.tools.some((tool) => tool.name === 'check_document'));
 
   const cancelled = await api('POST', `/agent/turns/${held.turnId}/cancel`);
