@@ -21,6 +21,7 @@ const ask = async ({ state, questions }) => {
   const pick = (id, q) => {
     if (id === 'games.openIn') return phone ? 'pop-up' : 'side-by-side';
     if (id === 'games.overviewType') return phone ? 'list' : 'grid';
+    if (id === 'game-card.shape') return phone ? 'horizontal' : 'vertical';
     if (id === 'ops.arrangement') return phone ? 'single-scrolling-column' : 'fixed-grid';
     return Object.keys(q.criteria)[0];
   };
@@ -53,12 +54,17 @@ test('a decide moves the open page without a reload, and a re-decide moves it ba
   assert.equal(await games.getAttribute('data-overview-type'), 'list');
   assert.equal(await page.evaluate(() => window.__notReloaded === true), true, 'the page did not reload');
   assert.equal(await page.evaluate(() => getComputedStyle(document.querySelector('#games .detail')).position), 'fixed');
+  // The card role moved every card, not the first one: the fact lives on the
+  // container and each stamped card derives from it.
+  const columnsPerCard = () => page.evaluate(() => [...document.querySelectorAll('#games .card')].map((c) => getComputedStyle(c).gridTemplateColumns.split(' ').length));
+  assert.deepEqual(await columnsPerCard(), [2, 2, 2, 2, 2, 2]);
 
   const desktop = await decide('Spaces/49ers', { viewport: 'desktop', items: 6 });
   assert.ok(moved(desktop, 'games.openIn') && moved(desktop, 'games.overviewType'), 'and moved back');
   await page.waitForFunction(() => document.querySelector('#games')?.getAttribute('data-open-in') === 'side-by-side');
   assert.equal(await games.getAttribute('data-overview-type'), 'grid');
   assert.equal(await page.evaluate(() => getComputedStyle(document.querySelector('#games .detail')).position), 'sticky');
+  assert.deepEqual(await columnsPerCard(), [1, 1, 1, 1, 1, 1]);
 
   const again = await decide('Spaces/49ers', { viewport: 'desktop', items: 6 });
   assert.equal(again.applied, 0, 'nothing to change is nothing written');

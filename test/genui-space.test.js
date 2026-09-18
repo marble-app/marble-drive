@@ -42,7 +42,9 @@ test('extractSpace reads the request, both instances, their facts, options and n
   assert.equal(placement.options[1].gloss, 'opponent, date, and the series record on the card');
 
   assert.equal(card.name, 'game-card');
-  assert.equal(card.marbleId, 'g1');
+  // A repeated role's root is the container of its stamped items: one fact
+  // there, every card derives from it. Never the first card.
+  assert.equal(card.marbleId, 'overview');
   assert.equal(card.pattern, 'card');
   assert.equal(card.parent, 'games');
   assert.deepEqual(card.decisions.map((d) => d.key), ['shape', 'media', 'actions', 'target']);

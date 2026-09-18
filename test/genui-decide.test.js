@@ -97,5 +97,6 @@ test('decideDocument on the dashboard fixture: nine decisions across three insta
   assert.equal(result.decisions.length, 9);
   assert.deepEqual([...new Set(result.decisions.map((d) => d.instance))], ['ops', 'kpi', 'trend']);
   assert.ok(result.ops.some((op) => op.id === 'ops' && op.name === 'data-arrangement' && op.value === 'story-layout'));
+  assert.ok(result.ops.some((op) => op.id === 'tiles' && op.name === 'data-drill'), 'the tile role writes to the container that holds every tile');
   assert.ok(result.ops.some((op) => op.id === 'trend' && op.name === 'data-mark-type' && op.value === 'areas'));
 });

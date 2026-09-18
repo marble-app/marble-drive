@@ -102,7 +102,7 @@ test('POST /genui/decide writes the applied positions into the file and records 
 
     const written = await drive.store.read('Spaces/49ers');
     assert.match(written, /id="games"[^>]*data-open-in="pop-up"/s);
-    assert.match(written, /data-marble-id="g1"[^>]*data-shape="horizontal"/s);
+    assert.match(written, /data-marble-id="overview"[^>]*data-shape="horizontal"/s);
 
     const record = await fsp.readFile(path.join(drive.store.marbleDir, 'Spaces%2F49ers.genui.jsonl'), 'utf8');
     const lines = record.trim().split('\n').map((l) => JSON.parse(l));

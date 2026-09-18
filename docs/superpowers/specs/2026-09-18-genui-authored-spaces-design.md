@@ -75,6 +75,7 @@ A document is an app space when it contains at least one **instance root**. Ever
 ```
 
 - `data-genui="<atlas-id>#<instance-name>"` — which Atlas entry this instance is, and a name unique in the document. Nested instances (a card inside the grid) are their own roots: `data-genui="card#game-card"`.
+- **A repeated role's root is the container that holds its stamped items** — the `.overview` that holds the cards, the `.tiles` that hold the tiles — never the first item. The fact is written once there and every item derives from it through CSS (`.overview[data-shape="horizontal"] .card {…}`). Monitor's rule, made literal: sixteen games are one Card instance. Putting the fact on the first card and copying it to its siblings is the same-fact-twice bug the doctrine names, and a decide would move one card.
 - `data-genui-about` — one authored sentence: what this instance shows. Goes into Jev's state. Optional but the skill always writes it.
 - **The fact:** for each live sub-dimension, `data-<key>="<slug>"` on the root. `<key>` is the Atlas sub-dimension key in kebab case (`openIn` → `open-in`). This is the one place the current position lives; CSS and any script derive from it. It is what `setAttr` changes.
 - **The declaration:** `data-genui-<key>="<slug>[: gloss] | <slug>[: gloss] | …"`. A slug that matches an Atlas variation name (slugified) needs no gloss — the Atlas gloss is used. A slug that does not (an authored preset for a `sel: many` sub-dimension, e.g. density) must carry one. Two or more options, or the sub-dimension is not live.

@@ -21,7 +21,12 @@ Atlas dimensions are live here and implement their variations.
 1. **Instance roots.** Each pattern instance is one element with
    `data-genui="<atlas-id>#<name>"` and a `data-marble-id`. Nested instances
    (a card inside a grid, a stepper inside a wizard) are their own roots.
-   Names are unique in the file.
+   Names are unique in the file. **A repeated role's root is the container
+   that holds its stamped items** — the `.overview` holding the cards, the
+   `.tiles` holding the tiles, the `.channels` holding the rows — never the
+   first item. Write the fact once there; every item derives from it
+   (`.overview[data-shape="horizontal"] .card {…}`). Sixteen games are one
+   Card instance. Never copy a fact onto siblings.
 2. **One sentence about it:** `data-genui-about="…"` — what this instance shows.
 3. **Facts:** for each design decision you want Jev to make, one attribute on
    the root: `data-<key>="<slug>"`, where `<key>` is the Atlas sub-dimension key
@@ -34,7 +39,8 @@ Atlas dimensions are live here and implement their variations.
    `slug: gloss`, and the gloss must say what a person would see.
    Two or more options, or it is not a decision — fix one value and do not declare it.
 5. **Implement every option.** A CSS rule containing `[data-<key>="<slug>"]`,
-   scoped under the root (`#games[data-open-in="pop-up"] .detail {…}`), or a
+   scoped under the root (`#games[data-open-in="pop-up"] .detail {…}`,
+   `.overview[data-shape="horizontal"] .card {…}`), or a
    `<marble-alt>` under the root with a `data-marble-alt="<slug>"` child per
    option. Unimplemented options are refused by the validator.
 6. **Bind content by role; never author content strings the data supplies.**

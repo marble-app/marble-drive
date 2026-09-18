@@ -41,15 +41,15 @@ h2, h3, p { margin: 0; }
 
 /* ---- card#game-card: its own facts, on the template card and every stamped copy ---- */
 .card { background: var(--card); border: 1px solid var(--line); border-radius: 8px; padding: 12px 14px; display: grid; gap: 4px; }
-.card[data-shape="vertical"] { grid-template-columns: 1fr; }
-.card[data-shape="horizontal"] { grid-template-columns: auto 1fr; align-items: center; column-gap: 12px; }
-.card[data-shape="compact-tile"] { padding: 8px 10px; font-size: 13px; }
-.card[data-media="none"] .logo { display: none; }
-.card[data-media="side-thumbnail"] .logo { display: block; width: 36px; height: 36px; border-radius: 6px; background: var(--gold); }
-.card[data-actions="none"] .act { display: none; }
-.card[data-actions="one-primary-action"] .act { display: inline-block; margin-top: 6px; color: var(--accent); }
-.card[data-target="whole-card"] { cursor: pointer; }
-.card[data-target="title-only"] .title { cursor: pointer; text-decoration: underline; }
+.overview[data-shape="vertical"] .card { grid-template-columns: 1fr; }
+.overview[data-shape="horizontal"] .card { grid-template-columns: auto 1fr; align-items: center; column-gap: 12px; }
+.overview[data-shape="compact-tile"] .card { padding: 8px 10px; font-size: 13px; }
+.overview[data-media="none"] .card .logo { display: none; }
+.overview[data-media="side-thumbnail"] .card .logo { display: block; width: 36px; height: 36px; border-radius: 6px; background: var(--gold); }
+.overview[data-actions="none"] .card .act { display: none; }
+.overview[data-actions="one-primary-action"] .card .act { display: inline-block; margin-top: 6px; color: var(--accent); }
+.overview[data-target="whole-card"] .card { cursor: pointer; }
+.overview[data-target="title-only"] .card .title { cursor: pointer; text-decoration: underline; }
 .title { font-weight: 600; }
 .when, .record, .venue { color: var(--muted); font-size: 13px; }
 
@@ -77,13 +77,18 @@ h2, h3, p { margin: 0; }
   data-attribute-placement="identity-record"
   data-genui-attribute-placement="identity: opponent and date only on the card | identity-record: opponent, date, and the series record on the card | everything: opponent, date, series record, and venue on the card">
 
-  <div class="overview" data-marble-id="overview">
-    <article class="card" data-marble-id="g1" data-genui="card#game-card"
-      data-genui-about="One game: opponent, date, series record, venue"
-      data-shape="vertical" data-genui-shape="vertical | horizontal | compact-tile"
-      data-media="side-thumbnail" data-genui-media="none | side-thumbnail"
-      data-actions="none" data-genui-actions="none | one-primary-action"
-      data-target="whole-card" data-genui-target="whole-card | title-only">
+  <div class="overview" data-marble-id="overview"
+    data-genui="card#game-card"
+    data-genui-about="One game: opponent, date, series record, venue"
+    data-shape="vertical"
+    data-genui-shape="vertical | horizontal | compact-tile"
+    data-media="side-thumbnail"
+    data-genui-media="none | side-thumbnail"
+    data-actions="none"
+    data-genui-actions="none | one-primary-action"
+    data-target="whole-card"
+    data-genui-target="whole-card | title-only">
+    <article class="card" data-marble-id="g1">
       <span class="logo" data-marble-id="g1l"></span>
       <div data-marble-id="g1b">
         <p class="title" data-marble-id="g1t">vs Seahawks</p>
@@ -93,7 +98,7 @@ h2, h3, p { margin: 0; }
         <a class="act" data-marble-id="g1a" href="#">Tickets</a>
       </div>
     </article>
-    <article class="card" data-marble-id="g2" data-shape="vertical" data-media="side-thumbnail" data-actions="none" data-target="whole-card">
+    <article class="card" data-marble-id="g2">
       <span class="logo" data-marble-id="g2l"></span>
       <div data-marble-id="g2b">
         <p class="title" data-marble-id="g2t">at Rams</p>
@@ -103,7 +108,7 @@ h2, h3, p { margin: 0; }
         <a class="act" data-marble-id="g2a" href="#">Tickets</a>
       </div>
     </article>
-    <article class="card" data-marble-id="g3" data-shape="vertical" data-media="side-thumbnail" data-actions="none" data-target="whole-card">
+    <article class="card" data-marble-id="g3">
       <span class="logo" data-marble-id="g3l"></span>
       <div data-marble-id="g3b">
         <p class="title" data-marble-id="g3t">vs Cardinals</p>
@@ -113,7 +118,7 @@ h2, h3, p { margin: 0; }
         <a class="act" data-marble-id="g3a" href="#">Tickets</a>
       </div>
     </article>
-    <article class="card" data-marble-id="g4" data-shape="vertical" data-media="side-thumbnail" data-actions="none" data-target="whole-card">
+    <article class="card" data-marble-id="g4">
       <span class="logo" data-marble-id="g4l"></span>
       <div data-marble-id="g4b">
         <p class="title" data-marble-id="g4t">W 27–17 vs Saints</p>
@@ -123,7 +128,7 @@ h2, h3, p { margin: 0; }
         <a class="act" data-marble-id="g4a" href="#">Recap</a>
       </div>
     </article>
-    <article class="card" data-marble-id="g5" data-shape="vertical" data-media="side-thumbnail" data-actions="none" data-target="whole-card">
+    <article class="card" data-marble-id="g5">
       <span class="logo" data-marble-id="g5l"></span>
       <div data-marble-id="g5b">
         <p class="title" data-marble-id="g5t">L 20–24 at Vikings</p>
@@ -133,7 +138,7 @@ h2, h3, p { margin: 0; }
         <a class="act" data-marble-id="g5a" href="#">Recap</a>
       </div>
     </article>
-    <article class="card" data-marble-id="g6" data-shape="vertical" data-media="side-thumbnail" data-actions="none" data-target="whole-card">
+    <article class="card" data-marble-id="g6">
       <span class="logo" data-marble-id="g6l"></span>
       <div data-marble-id="g6b">
         <p class="title" data-marble-id="g6t">W 31–13 vs Jets</p>
