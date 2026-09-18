@@ -391,10 +391,18 @@ test('clicking a board card opens the conversation panel', async () => {
   await page.locator(`.conv[data-id="${id}"]`).waitFor();
   await page.keyboard.press('v');
   await page.locator(`.column .conv[data-id="${id}"]`).click();
-  await page.locator('.board-panel[data-open="true"]').waitFor();
+  await page.waitForFunction(() => document.body.getAttribute('data-panel') === 'open');
   assert.equal(await page.locator('marble-conversation').count(), 1, 'one conversation element');
   assert.equal(await page.locator('.pane marble-conversation').getAttribute('conversation'), id);
-  assert.equal(await page.locator('.board-panel marble-conversation').count(), 0);
+  const paneShape = await page.evaluate(() => {
+    const pane = document.querySelector('.pane');
+    const cs = getComputedStyle(pane, '::before');
+    return { radius: parseFloat(cs.borderRadius), bar: Boolean(document.querySelector('.pane > .dock-bar:not([hidden])')) };
+  });
+  assert.ok(paneShape.radius >= 12, `board pane is rounded, radius ${paneShape.radius}`);
+  assert.equal(paneShape.bar, true, 'the pane carries its bar');
+  await page.locator('.pane > .dock-bar .dock-close').click();
+  await page.waitForFunction(() => !document.body.hasAttribute('data-panel'));
 });
 
 test('opening a conversation on the board splits beside the kanban, it does not cover it', async () => {
@@ -409,7 +417,7 @@ test('opening a conversation on the board splits beside the kanban, it does not 
   await page.keyboard.press('v');
   await page.waitForFunction(() => document.body.getAttribute('data-view') === 'board');
   await page.locator(`.column .conv[data-id="${id}"]`).click();
-  await page.locator('.board-panel[data-open="true"]').waitFor();
+  await page.waitForFunction(() => document.body.getAttribute('data-panel') === 'open');
   const geometry = await page.evaluate(() => {
     const board = document.querySelector('.board').getBoundingClientRect();
     const pane = document.querySelector('.pane').getBoundingClientRect();
@@ -635,7 +643,7 @@ test('opening the board panel does not clone the conversation on reconcile', asy
   await page.locator(`.conv[data-id="${id}"]`).waitFor();
   await page.keyboard.press('v');
   await page.locator(`.column .conv[data-id="${id}"]`).click();
-  await page.locator('.board-panel[data-open="true"]').waitFor();
+  await page.waitForFunction(() => document.body.getAttribute('data-panel') === 'open');
   const sameNode = await page.evaluate(() => {
     const el = document.querySelector('marble-conversation');
     window.marble.adopt(document.body);
@@ -644,7 +652,6 @@ test('opening the board panel does not clone the conversation on reconcile', asy
       && Boolean(el.closest('.pane'));
   });
   assert.equal(sameNode, true);
-  assert.equal(await page.locator('.board-panel marble-conversation').count(), 0);
   assert.equal(await page.locator('.pane marble-conversation').getAttribute('conversation'), id);
 });
 
@@ -660,14 +667,12 @@ test('the board panel does not overflow a narrow viewport', async () => {
   await page.keyboard.press('v');
   await page.waitForFunction(() => document.body.getAttribute('data-view') === 'board');
   await page.locator(`.column .conv[data-id="${id}"]`).click();
-  await page.locator('.board-panel[data-open="true"]').waitFor();
+  await page.waitForFunction(() => document.body.getAttribute('data-panel') === 'open');
   const box = await page.evaluate(() => {
     const pane = document.querySelector('.pane').getBoundingClientRect();
-    const panel = document.querySelector('.board-panel').getBoundingClientRect();
-    return { pane: pane.width, panel: panel.width, vw: innerWidth };
+    return { pane: pane.width, vw: innerWidth };
   });
   assert.ok(box.pane <= box.vw + 1, `pane ${box.pane} wider than viewport ${box.vw}`);
-  assert.ok(box.panel <= box.vw + 1, `panel ${box.panel} wider than viewport ${box.vw}`);
   assert.equal(await page.locator('marble-conversation').count(), 1);
 });
 
@@ -867,4 +872,27 @@ test('a turn that finishes while its pane is focused is already seen', async () 
   }
   await page.waitForTimeout(400);
   assert.equal(await page.locator(`.conv[data-id="${id}"]`).getAttribute('data-status'), 'completed');
+});
+
+test('with no pane open, dragging a board card to the right edge opens it there', async () => {
+  const { page } = await openAgents();
+  const id = await page.evaluate(async () => {
+    const agent = window.marble.agent;
+    const id = await agent.start({ provider: 'fake' });
+    await agent.update(id, { title: 'to dock' });
+    return id;
+  });
+  await page.locator(`.conv[data-id="${id}"]`).waitFor();
+  await page.keyboard.press('v');
+  await page.waitForFunction(() => document.body.getAttribute('data-view') === 'board');
+  const row = await page.locator(`.column .conv[data-id="${id}"]`).boundingBox();
+  const board = await page.locator('.board').boundingBox();
+  await page.mouse.move(row.x + 40, row.y + 12);
+  await page.mouse.down();
+  await page.mouse.move(row.x + 80, row.y + 40, { steps: 3 });
+  await page.mouse.move(board.x + board.width - 30, board.y + board.height / 2, { steps: 10 });
+  await page.locator('.board-dockzone[data-drop]').waitFor();
+  await page.mouse.up();
+  await page.waitForFunction(() => document.body.getAttribute('data-panel') === 'open');
+  assert.equal(await page.locator('.pane marble-conversation').getAttribute('conversation'), id);
 });
