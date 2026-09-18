@@ -390,6 +390,8 @@ test('dragging a card to the stage pins it, and dragging it back off unpins it',
   await release();
   await page.waitForFunction((id) => document.querySelector(`.focus-card[data-id="${id}"]`)?.dataset.lod === 'full', ids.a);
   assert.equal(await page.locator('.focus-pinslot').count(), 0, 'and take it away again');
+  // The pin springs the card into the stage; press it once it has landed.
+  await page.waitForTimeout(500);
 
   const loose = await middleOf(page, '.focus-basin[data-folder-id="ungrouped"]');
   release = await dragTo(page, ids.a, { x: loose.x, y: loose.box.y + loose.box.height - 60 });
@@ -490,4 +492,41 @@ test('a digest shows the same pills a row does; a chip keeps its dot and hides t
   const chip = page.locator('.focus-card[data-lod="chip"]').first();
   assert.equal(await chip.locator('.dot').evaluate((el) => getComputedStyle(el).display !== 'none'), true, 'a chip keeps its dot');
   assert.equal(await chip.locator('.tags .tag').evaluateAll((els) => els.filter((el) => el.getClientRects().length > 0).length), 0, 'a chip hides the pills');
+});
+
+test('hovering a chip lifts it without resizing it or moving its neighbours', async () => {
+  const { page } = await openAgents();
+  await seedFocus(page, Array.from({ length: 7 }, (_, i) => ({ key: `c${i}`, title: `card ${i}` })));
+  await page.waitForFunction(() => [...document.querySelectorAll('.focus-card')].some((el) => el.dataset.lod === 'chip'));
+  await page.waitForTimeout(500);
+  const chip = page.locator('.focus-card[data-lod="chip"]').first();
+  const before = await page.evaluate(() => [...document.querySelectorAll('.focus-card')].map((el) => [el.dataset.id, Math.round(el.getBoundingClientRect().top), Math.round(el.getBoundingClientRect().height)]));
+  await chip.hover();
+  await page.waitForTimeout(300);
+  const after = await page.evaluate(() => [...document.querySelectorAll('.focus-card')].map((el) => [el.dataset.id, Math.round(el.getBoundingClientRect().top), Math.round(el.getBoundingClientRect().height)]));
+  assert.deepEqual(after, before, 'nothing moved or grew');
+  assert.equal(await chip.getAttribute('data-lod'), 'chip');
+});
+
+test('selecting a chip grows it with an animation, not a snap', async () => {
+  const { page } = await openAgents();
+  await seedFocus(page, Array.from({ length: 7 }, (_, i) => ({ key: `c${i}`, title: `card ${i}` })));
+  await page.waitForFunction(() => [...document.querySelectorAll('.focus-card')].some((el) => el.dataset.lod === 'chip'));
+  await page.waitForTimeout(500);
+  const chip = page.locator('.focus-card[data-lod="chip"]').first();
+  const id = await chip.getAttribute('data-id');
+  const grew = page.evaluate((cid) => new Promise((resolve, reject) => {
+    const el = document.querySelector(`.focus-card[data-id="${cid}"]`);
+    const start = performance.now();
+    const tick = () => {
+      const anim = el.getAnimations().find((a) => a.effect?.getKeyframes?.().some((k) => 'height' in k));
+      if (anim) resolve(anim.effect.getTiming().duration);
+      else if (performance.now() - start > 4000) reject(new Error('no size animation'));
+      else requestAnimationFrame(tick);
+    };
+    tick();
+  }), id);
+  await chip.click();
+  const duration = await grew;
+  assert.ok(duration >= 200 && duration <= 400, `height animates (${duration}ms)`);
 });

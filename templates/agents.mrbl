@@ -384,7 +384,11 @@ __ICON__
      transition on left/top — a transition here would lag the finger and the
      card would stop matching the slot it is about to be filed into. */
   .focus-card.marble-dragging { z-index: 40; box-shadow: var(--shadow-lift); cursor: grabbing; }
-  .focus-card[data-lift="lead"] { transform: scale(1.02); }
+  /* Hover lifts; it never resizes. The lift is a variable so the spring's
+     own transform can carry it. */
+  .focus-card { --lift: 1; transition: box-shadow 160ms var(--ease-out); }
+  .focus-card:hover { box-shadow: var(--shadow-lift); }
+  .focus-card[data-lift="lead"] { --lift: 1.02; transform: scale(var(--lift)); }
   .focus-card[data-lift="follow"] { opacity: .8; }
   /* What a release would join, rather than slot beside. */
   .focus-card[data-drop="merge"] {
@@ -2171,7 +2175,7 @@ __ICON__
         vy += ay * dt;
         x += vx * dt;
         y += vy * dt;
-        card.style.transform = `translate(${x - to.x}px, ${y - to.y}px)`;
+        card.style.transform = `translate(${x - to.x}px, ${y - to.y}px) scale(var(--lift, 1))`;
         const settled = Math.hypot(x - to.x, y - to.y) < 0.5 && Math.hypot(vx, vy) < 12;
         if (settled) {
           card.style.transform = '';
@@ -2284,7 +2288,20 @@ __ICON__
         card.style.height = `${to.h}px`;
         return;
       }
+      const resized = Math.abs(from.w - to.w) > 0.5 || Math.abs(from.h - to.h) > 0.5;
       springCardTo(card, to, velocity);
+      // Position springs; a size change eases, and the body's lines fade in
+      // behind it rather than snapping from three to one.
+      if (resized && !reduceMotion.matches) {
+        card.animate(
+          [{ width: `${from.w}px`, height: `${from.h}px` }, { width: `${to.w}px`, height: `${to.h}px` }],
+          { duration: 280, easing: 'cubic-bezier(0.22, 0.61, 0.36, 1)' },
+        );
+        card.querySelector('.focus-card-body')?.animate(
+          [{ opacity: 0 }, { opacity: 1 }],
+          { duration: 160, delay: 120, fill: 'backwards' },
+        );
+      }
     };
 
     const pinFocus = async (id, { keepOpen = false } = {}) => {
@@ -3064,16 +3081,14 @@ __ICON__
         event.preventDefault();
         pinFocus(card.dataset.id, { keepOpen: event.shiftKey });
       });
+      // Hover is remembered for Quick Look, and nothing else: a card that
+      // grew under the pointer pushed its column and the pointer off itself.
       card.addEventListener('pointerenter', () => {
         if (focusSuppressClick) return;
-        if (focusHoveredId === card.dataset.id) return;
         focusHoveredId = card.dataset.id;
-        paintFocus({ quiet: true });
       });
       card.addEventListener('pointerleave', () => {
-        if (focusHoveredId !== card.dataset.id) return;
-        focusHoveredId = null;
-        if (!focusSuppressClick) paintFocus({ quiet: true });
+        if (focusHoveredId === card.dataset.id) focusHoveredId = null;
       });
       card.querySelector('.focus-pin')?.addEventListener('click', (event) => {
         event.stopPropagation();
@@ -3109,7 +3124,11 @@ __ICON__
      *  placement applied as if it had already been filed, which is what lets
      *  the field open a real gap under the card before you let go. */
     const focusColumnsOf = (items, pending) => {
-      const dragging = new Set(pending?.ids ?? []);
+      // A card in the air is out of every column for the whole drag, not only
+      // once it has a slot: a pinned card that left the stage each time the
+      // target said "folder" and came back when it said "new" made the field
+      // jump under the pointer.
+      const dragging = new Set(pending?.ids ?? focusDrag?.ids ?? []);
       const rank = (item) => (Number.isFinite(item.focusY) ? item.focusY : Infinity);
       const stage = items
         .filter((item) => item.pinned && !dragging.has(item.id))
@@ -3209,7 +3228,7 @@ __ICON__
         })), {
           fullIds,
           selectedIds: focusSelectedIds,
-          hoveredId: focusHoveredId,
+          hoveredId: null,
           now: Date.now(),
         })
         : Object.fromEntries(items.map((item) => [item.id, fullIds.includes(item.id) ? 'full' : 'digest']));

@@ -58,7 +58,7 @@
   };
 
   const assignLods = (cards, ctx) => {
-    const { fullIds, selectedIds, hoveredId, now } = ctx;
+    const { fullIds, selectedIds, now } = ctx;
     const fullSet = new Set(fullIds);
     const selectedSet = new Set(selectedIds);
     const lods = {};
@@ -72,9 +72,11 @@
         continue;
       }
 
+      // Hover informs; selection commits. A card that grew under the pointer
+      // pushed its column, which moved the pointer off it, which shrank it
+      // again — so `hoveredId` is read for nothing here.
       const alwaysDigest =
         selectedSet.has(card.id) ||
-        card.id === hoveredId ||
         card.running ||
         card.needsReview;
 
