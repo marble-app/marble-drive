@@ -2584,23 +2584,20 @@ __ICON__
       if (!stageStays.length && point.x - focusEl.scrollLeft < FOCUS_RAIL) {
         return { column: 'stage', index: 0, key: 'stage:0' };
       }
-      const zones = [];
-      if (pack.stage.w > 0 && stageStays.length) zones.push({ kind: 'stage', x: pack.stage.x, w: pack.stage.w });
-      for (const region of pack.regions) zones.push({ kind: 'folder', region, x: region.x, w: region.w });
-      if (pack.newGroup) zones.push({ kind: 'new', x: pack.newGroup.x, w: pack.newGroup.w });
-      if (!zones.length) return null;
       const gap = window.marbleAgentFolders?.GAP ?? 8;
-      let zone = zones.find((row) => point.x >= row.x - gap && point.x <= row.x + row.w + gap);
-      if (!zone) zone = point.x < zones[0].x ? zones[0] : zones[zones.length - 1];
-
-      if (zone.kind === 'new') return { column: 'new', key: 'new' };
-      if (zone.kind === 'stage') {
+      // The stage and the New group column are bands across the full height;
+      // a folder is a rect, since regions now sit above and below each other.
+      const within = (r) => point.x >= r.x - gap && point.x <= r.x + r.w + gap;
+      if (pack.stage.w > 0 && stageStays.length && within(pack.stage)) {
         const slot = helpers.stageSlotAt(pack.stage, point, gap);
         const index = drop(pack.stage.cols, slot.index);
         return { column: 'stage', index, key: `stage:${index}`, edge: slot.x };
       }
-
-      const region = zone.region;
+      if (pack.newGroup && within(pack.newGroup)) return { column: 'new', key: 'new' };
+      const region = helpers.regionAt
+        ? helpers.regionAt(pack, point, gap)
+        : (pack.regions.find(within) ?? pack.regions[pack.regions.length - 1] ?? null);
+      if (!region) return null;
       const slot = helpers.slotAt(region, point, gap);
       const over = slot.over && !dragIds.includes(slot.over) ? slot.over : null;
       const loose = region.folderId === null;

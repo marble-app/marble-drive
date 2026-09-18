@@ -394,11 +394,13 @@ test('dragging a card to the stage pins it, and dragging it back off unpins it',
   await page.waitForTimeout(500);
 
   const loose = await middleOf(page, '.focus-basin[data-folder-id="ungrouped"]');
-  release = await dragTo(page, ids.a, { x: loose.x, y: loose.box.y + loose.box.height - 60 });
+  release = await dragTo(page, ids.a, { x: loose.x, y: loose.box.y + loose.box.height - 10 });
   // Lifting the only pinned card collapses the stage, and the field slides
-  // left under the pointer. Aim at the basin where it is now, not where it was.
+  // left under the pointer. Aim at the basin where it is now, not where it
+  // was — and at its bottom pad: a region is as tall as its cards, so its
+  // middle is a card, and squarely on a card means "make a folder".
   const now = await middleOf(page, '.focus-basin[data-folder-id="ungrouped"]');
-  await page.mouse.move(now.x, now.box.y + now.box.height - 60, { steps: 6 });
+  await page.mouse.move(now.x, now.box.y + now.box.height - 10, { steps: 6 });
   try {
     await page.locator('.focus-basin[data-folder-id="ungrouped"][data-drop="into"]').waitFor({ timeout: 4000 });
   } catch {
@@ -547,4 +549,28 @@ test('a drop springs home before the PATCH round trip completes', async () => {
   const order = await page.evaluate(() => [...document.querySelectorAll('.focus-card')].sort((p, q) => p.getBoundingClientRect().top - q.getBoundingClientRect().top).map((el) => el.dataset.id));
   assert.equal(order[0], ids.c, 'the card is in its slot while the PATCH is still pending');
   await page.evaluate(() => { for (const go of window.__slow) go(); });
+});
+
+test('two two-card folders share a field column, one above the other', async () => {
+  // Two two-digest regions are ~360px each; a 720px viewport cannot stack them.
+  const { page } = await openAgents({ viewport: { width: 1280, height: 1000 } });
+  const ids = await seedFocus(page, [
+    { key: 'a1', title: 'a one' }, { key: 'a2', title: 'a two' },
+    { key: 'b1', title: 'b one' }, { key: 'b2', title: 'b two' },
+  ]);
+  await page.evaluate(async (seeded) => {
+    await window.marble.agent.createFolder({ conversationIds: [seeded.a1, seeded.a2], name: 'A' });
+    await window.marble.agent.createFolder({ conversationIds: [seeded.b1, seeded.b2], name: 'B' });
+  }, ids);
+  await page.waitForFunction(() => document.querySelectorAll('.focus-basin[data-folder-id]:not([data-loose])').length === 2);
+  await page.waitForTimeout(500);
+  const basins = await page.evaluate(() => [...document.querySelectorAll('.focus-basin:not([data-loose])')].map((b) => { const r = b.getBoundingClientRect(); return { id: b.dataset.folderId, x: Math.round(r.x), y: Math.round(r.y), h: Math.round(r.height) }; }));
+  assert.equal(basins[0].x, basins[1].x, 'same column: ' + JSON.stringify(basins));
+  assert.ok(basins[1].y >= basins[0].y + basins[0].h, 'stacked');
+  // And a drop into the lower basin still joins that folder.
+  const lower = basins[1];
+  const release = await dragTo(page, ids.a1, { x: lower.x + 60, y: lower.y + lower.h - 30 });
+  await page.locator(`.focus-basin[data-folder-id="${lower.id}"][data-drop="into"]`).waitFor();
+  await release();
+  await until(page, async () => (await metaOf(page, ids.a1))?.folderId === (await metaOf(page, ids.b1))?.folderId, 'a1 to join B');
 });
