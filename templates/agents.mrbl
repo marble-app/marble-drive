@@ -6050,6 +6050,16 @@ __ICON__
     };
     $('.topbar .more')?.addEventListener('click', openMore);
 
+    // Ages tick on one clock, only while the page is showing.
+    const paintAges = () => {
+      for (const [id, el] of nodes) {
+        if (el.hidden || !el.isConnected) continue;
+        const summary = summaries.get(id);
+        if (summary) el.querySelector('.age').textContent = age(summary.updatedAt);
+      }
+    };
+    setInterval(() => { if (document.visibilityState === 'visible') paintAges(); }, 30_000);
+
     // ---- Back by the edge. 1:1 from the left edge; commit by the sign of
     // the velocity at release, and the pane leaves the way it came.
     (() => {
@@ -6673,6 +6683,17 @@ __ICON__
           repaintRows();
         } catch { /* folders unavailable; rail stays empty */ }
         restoreDock();
+        // Hidden: close the streams. Visible again: reopen them and resync,
+        // because whatever happened while away was never streamed.
+        document.addEventListener('visibilitychange', async () => {
+          if (document.visibilityState === 'hidden') {
+            api.suspend?.();
+            return;
+          }
+          api.resume?.();
+          await load();
+          paintAges();
+        });
         const saved = recalled(OPEN_KEY);
         if (saved) await open(saved);
         addEventListener('marble:agent-settings-saved', async () => {

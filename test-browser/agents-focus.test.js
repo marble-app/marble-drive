@@ -127,15 +127,19 @@ test('dropping a card on another ungrouped card forms a basin', async () => {
   await page.locator('.focus-basin').waitFor();
 });
 
-test('narrow Focus is a stack and does not add extra panes', async () => {
+test('narrow Focus is the phone column and does not add extra panes', async () => {
   const { page } = await openAgents({ viewport: { width: 500, height: 800 } });
   await page.evaluate(async () => {
     const agent = window.marble.agent;
     await agent.start({ provider: 'fake' });
     await agent.start({ provider: 'fake' });
   });
-  await page.locator('.views [data-view="focus"]').click();
-  assert.equal(await page.locator('.focus[data-stack]').count(), 1);
+  // The view bar is behind ⋯ at this width; the stored view opens Focus.
+  await page.evaluate(() => localStorage.setItem('marble-agents:view', 'focus'));
+  await page.reload();
+  await page.waitForFunction(() => document.querySelectorAll('.focus[data-phone] .focus-card').length === 2);
+  assert.equal(await page.locator('.focus[data-phone]').count(), 1);
+  assert.equal(await page.locator('.focus[data-stack]').count(), 0);
   assert.equal(await page.locator('.pane marble-conversation[data-marble-transient]').count(), 0);
 });
 

@@ -296,3 +296,24 @@ test('phone Focus: less room demotes the neighbours and keeps the Full', async (
   assert.ok(full.height >= 112, `full is ${full.height}`);
   assert.equal(await page.evaluate(() => document.querySelectorAll('.focus-card[data-lod="full"]').length), 1);
 });
+
+test('going hidden closes the streams; coming back reopens them and resyncs', async () => {
+  const { page } = await openAgents();
+  const id = await page.evaluate(async () => window.marble.agent.start({ provider: 'fake' }));
+  await host.drive.agents.store.updateConversation(id, { running: true, activity: 'busy' });
+  await page.reload();
+  await page.locator(`.deck .conv[data-id="${id}"]`).waitFor();
+  assert.ok((await page.evaluate(() => window.marble.agent.streamsOpen())) >= 1);
+  await page.evaluate(() => {
+    Object.defineProperty(document, 'visibilityState', { value: 'hidden', configurable: true });
+    document.dispatchEvent(new Event('visibilitychange'));
+  });
+  assert.equal(await page.evaluate(() => window.marble.agent.streamsOpen()), 0);
+  await host.drive.agents.store.updateConversation(id, { title: 'Renamed while away' });
+  await page.evaluate(() => {
+    Object.defineProperty(document, 'visibilityState', { value: 'visible', configurable: true });
+    document.dispatchEvent(new Event('visibilitychange'));
+  });
+  await page.waitForFunction((id) => document.querySelector(`.conv[data-id="${id}"] .title`)?.textContent === 'Renamed while away', id);
+  assert.ok((await page.evaluate(() => window.marble.agent.streamsOpen())) >= 1);
+});
