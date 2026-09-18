@@ -171,6 +171,71 @@ __ICON__
     display: none; min-height: 0; overflow-y: auto; border-right: 1px solid var(--line);
     padding: .4rem 0; background: var(--paper);
   }
+  .folder-group[data-color="research"] {
+    --accent-ink-rgb: 47, 111, 91; --folder: #2f6f5b;
+  }
+  .folder-group[data-color="fun"] {
+    --accent-ink-rgb: 196, 92, 62; --folder: #c45c3e;
+  }
+  .folder-group[data-color="days"] {
+    --accent-ink-rgb: 77, 106, 88; --folder: #6f8f7d;
+  }
+  .folder-group[data-color="marble"] {
+    --accent-ink-rgb: 95, 115, 133; --folder: #7e91a3;
+  }
+  .folder-group[data-color="travel"] {
+    --accent-ink-rgb: 61, 107, 138; --folder: #3d6b8a;
+  }
+  .folder-group[data-color="clay"] {
+    --accent-ink-rgb: 107, 79, 58; --folder: #6b4f3a;
+  }
+  .folder-group[data-color="sage"] {
+    --accent-ink-rgb: 61, 92, 74; --folder: #3d5c4a;
+  }
+  .folder-group[data-color="mist"] {
+    --accent-ink-rgb: 61, 90, 112; --folder: #3d5a70;
+  }
+  .folder-group[data-color="ink"] {
+    --accent-ink-rgb: 69, 76, 82; --folder: #454c52;
+  }
+  .folder-group[data-color="gold"] {
+    --accent-ink-rgb: 109, 86, 48; --folder: #6d5630;
+  }
+  .folder-group { margin: 0 0 .35rem; }
+  .folder-header {
+    appearance: none; border: 0; background: none; width: 100%;
+    display: flex; align-items: center; gap: .45rem; padding: .35rem .75rem;
+    font: inherit; font-size: .82rem; font-weight: 500; color: var(--ink); cursor: pointer;
+    text-align: left;
+  }
+  .folder-header:hover, .folder-header:focus-visible { background: var(--paper-3); outline: none; }
+  .folder-group.marble-active .folder-header { background: color-mix(in srgb, var(--folder) 12%, var(--paper)); }
+  .folder-tick {
+    flex: none; width: .55rem; height: .55rem; border-radius: 2px;
+    background: var(--folder);
+  }
+  .folder-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .folder-count { flex: none; font-size: .72rem; color: var(--faint); font-variant-numeric: tabular-nums; }
+  .folder-tabs { display: flex; flex-direction: column; gap: 1px; padding: 0 0 .15rem; }
+  .folder-tab {
+    appearance: none; border: 0; background: none; width: 100%;
+    padding: .28rem .75rem .28rem 1.65rem; font: inherit; font-size: .8rem;
+    color: var(--muted); cursor: pointer; text-align: left;
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  }
+  .folder-tab:hover, .folder-tab:focus-visible { color: var(--ink); background: var(--paper-3); outline: none; }
+  .folder-tab.marble-open { color: var(--ink); background: color-mix(in srgb, var(--folder, var(--accent-ink)) 10%, var(--paper)); }
+  .folder-ungrouped { margin-top: .25rem; padding-top: .35rem; border-top: 1px solid var(--line); }
+  .folder-ungrouped-label {
+    padding: .2rem .75rem; font-size: .68rem; font-weight: 500; letter-spacing: .04em;
+    text-transform: uppercase; color: var(--faint);
+  }
+  .folder-new-chat {
+    appearance: none; border: 0; background: none; width: 100%;
+    padding: .45rem .75rem; margin-top: .15rem; font: inherit; font-size: .8rem;
+    color: var(--muted); cursor: pointer; text-align: left;
+  }
+  .folder-new-chat:hover, .folder-new-chat:focus-visible { color: var(--ink); background: var(--paper-3); outline: none; }
   .focus-workspace {
     min-height: 0; display: flex; flex-direction: column; gap: .5rem; padding: 1rem;
   }
@@ -193,9 +258,10 @@ __ICON__
   body[data-view="folders"] .library {
     display: grid; grid-template-columns: minmax(16rem, 22rem) minmax(0, 1fr);
   }
+  body[data-view="folders"] .folders { pointer-events: none; }
   body[data-view="folders"] .library #list { display: none; }
   body[data-view="folders"] .library .pane { grid-column: 2; }
-  body[data-view="folders"] .folder-rail { display: block; grid-column: 1; }
+  body[data-view="folders"] .folder-rail { display: block; grid-column: 1; pointer-events: auto; }
   body[data-view="focus"] .focus { display: grid; }
   body[data-crossfade] .library { display: grid; }
   body[data-crossfade] .board { display: flex; }
@@ -596,6 +662,7 @@ __ICON__
     const libraryEl = $('.library');
     const boardEl = $('.board');
     const foldersEl = $('.folders');
+    const folderRail = $('.folder-rail');
     const focusEl = $('.focus');
     const convo = $('marble-conversation');
     const pane = $('.pane');
@@ -709,10 +776,137 @@ __ICON__
 
     const applyFilters = () => {
       for (const [id, el] of nodes) el.hidden = !matches(summaries.get(id));
+      paintFolderRail();
     };
 
     const paintOpen = () => {
       for (const el of nodes.values()) el.classList.toggle('marble-open', el.dataset.id === openId);
+      for (const tab of folderRail?.querySelectorAll('.folder-tab') ?? []) {
+        tab.classList.toggle('marble-open', tab.dataset.id === openId);
+      }
+    };
+
+    const FULL_CAP = window.marbleAgentFolders?.FULL_CAP ?? 4;
+    let folderCatalog = [];
+    let activeFolderId = null;
+
+    const railConversations = (folderId) => [...summaries.values()]
+      .filter((summary) => (folderId ? summary.folderId === folderId : !summary.folderId))
+      .filter(matches)
+      .sort((a, b) => (b.updatedAt ?? 0) - (a.updatedAt ?? 0));
+
+    const restoreFolderDock = async (folder) => {
+      const ids = [...(folder.openIds ?? [])].filter((id) => summaries.has(id)).slice(0, FULL_CAP);
+      const members = railConversations(folder.id).map((summary) => summary.id);
+      const resolved = ids.length ? ids : members.slice(0, FULL_CAP);
+      dock.extras = [];
+      dock.focus = 'primary';
+      if (resolved.length > 1) dock.extras = resolved.slice(1).map((id) => ({ id }));
+      applyDock();
+      if (resolved[0]) await open(resolved[0]);
+      else await open(null);
+    };
+
+    const makeFolderTab = (summary, folderId) => {
+      const tab = document.createElement('button');
+      tab.type = 'button';
+      tab.className = 'folder-tab';
+      tab.dataset.id = summary.id;
+      tab.setAttribute('data-marble-transient', '');
+      tab.textContent = summary.title || 'Untitled';
+      tab.classList.toggle('marble-open', summary.id === openId);
+      tab.addEventListener('click', async () => {
+        if (folderId) {
+          activeFolderId = folderId;
+          await open(summary.id);
+          const folder = folderCatalog.find((row) => row.id === folderId);
+          if (folder && agent) {
+            let openIds = [...(folder.openIds ?? [])];
+            if (!openIds.includes(summary.id)) {
+              openIds.push(summary.id);
+              if (openIds.length > FULL_CAP) openIds = openIds.slice(-FULL_CAP);
+              try { await agent.updateFolder(folderId, { openIds }); } catch { /* stale folder */ }
+            }
+          }
+          paintFolderRail();
+        } else {
+          activeFolderId = null;
+          dock.extras = [];
+          dock.focus = 'primary';
+          rememberDock();
+          applyDock();
+          await open(summary.id);
+          paintFolderRail();
+        }
+      });
+      return tab;
+    };
+
+    const paintFolderRail = () => {
+      if (!folderRail) return;
+      folderRail.replaceChildren();
+      const sorted = [...folderCatalog].sort((a, b) => (a.order ?? 0) - (b.order ?? 0));
+      for (const folder of sorted) {
+        const group = document.createElement('section');
+        group.className = 'folder-group';
+        group.dataset.color = folder.color || 'research';
+        group.setAttribute('data-marble-transient', '');
+        group.classList.toggle('marble-active', folder.id === activeFolderId);
+
+        const header = document.createElement('button');
+        header.type = 'button';
+        header.className = 'folder-header';
+        header.setAttribute('data-marble-transient', '');
+        const tick = document.createElement('span');
+        tick.className = 'folder-tick';
+        tick.setAttribute('aria-hidden', 'true');
+        tick.setAttribute('data-marble-transient', '');
+        const name = document.createElement('span');
+        name.className = 'folder-name';
+        name.setAttribute('data-marble-transient', '');
+        name.textContent = folder.name || 'Group';
+        const count = document.createElement('span');
+        count.className = 'folder-count';
+        count.setAttribute('data-marble-transient', '');
+        const tabs = railConversations(folder.id);
+        count.textContent = tabs.length ? String(tabs.length) : '';
+        header.append(tick, name, count);
+        header.addEventListener('click', async () => {
+          activeFolderId = folder.id;
+          await restoreFolderDock(folder);
+          paintFolderRail();
+        });
+
+        const tabList = document.createElement('div');
+        tabList.className = 'folder-tabs';
+        tabList.setAttribute('data-marble-transient', '');
+        for (const summary of tabs) tabList.append(makeFolderTab(summary, folder.id));
+
+        group.append(header, tabList);
+        folderRail.append(group);
+      }
+
+      const ungrouped = document.createElement('section');
+      ungrouped.className = 'folder-ungrouped';
+      ungrouped.setAttribute('data-marble-transient', '');
+      const label = document.createElement('div');
+      label.className = 'folder-ungrouped-label';
+      label.setAttribute('data-marble-transient', '');
+      label.textContent = 'ungrouped';
+      const ungroupedTabs = document.createElement('div');
+      ungroupedTabs.className = 'folder-tabs';
+      ungroupedTabs.setAttribute('data-marble-transient', '');
+      for (const summary of railConversations(null)) ungroupedTabs.append(makeFolderTab(summary, null));
+      ungrouped.append(label, ungroupedTabs);
+      folderRail.append(ungrouped);
+
+      const newChat = document.createElement('button');
+      newChat.type = 'button';
+      newChat.className = 'folder-new-chat';
+      newChat.setAttribute('data-marble-transient', '');
+      newChat.textContent = '+ New chat';
+      newChat.addEventListener('click', () => startNew());
+      folderRail.append(newChat);
     };
 
     const paintRow = (el, summary) => {
@@ -1338,6 +1532,7 @@ __ICON__
       el.hidden = !matches(summary);
       el.classList.toggle('marble-open', summary.id === openId);
       if (summary.id === openId) fillChrome(summary.id);
+      paintFolderRail();
     };
 
     const undoable = (turns) => {
@@ -1643,8 +1838,20 @@ __ICON__
           for (const provider of await api.providers()) labels.set(provider.id, provider);
         } catch { /* badges fall back to the provider id */ }
         fillCli();
-        api.on('*', upsert);
+        api.on('*', (payload) => {
+          if (payload?.folders) {
+            folderCatalog = payload.folders;
+            paintFolderRail();
+            return;
+          }
+          if (payload?.id) upsert(payload);
+        });
         await load();
+        try {
+          const listed = await api.folders();
+          folderCatalog = listed.folders ?? [];
+          paintFolderRail();
+        } catch { /* folders unavailable; rail stays empty */ }
         restoreDock();
         const saved = recalled(OPEN_KEY);
         if (saved) await open(saved);

@@ -43,3 +43,21 @@ test('marble.agent can create and list a folder', async () => {
   assert.equal(result.listed.folders.length, 1);
   assert.equal(result.aFolder, result.folder.id);
 });
+
+test('Folders rail groups conversations and New chat lands ungrouped', async () => {
+  const { page } = await openAgents();
+  await page.evaluate(async () => {
+    const agent = window.marble.agent;
+    const a = await agent.start({ provider: 'fake' });
+    const b = await agent.start({ provider: 'fake' });
+    await agent.update(a, { title: 'outline spec' });
+    await agent.update(b, { title: 'figure pass' });
+    await agent.createFolder({ conversationIds: [a, b], name: 'Research', color: 'research' });
+    window.__ids = { a, b };
+  });
+  await page.locator('.views [data-view="folders"]').click();
+  await page.locator('.folder-group[data-color="research"]', { hasText: 'Research' }).waitFor();
+  assert.match(await page.locator('.folder-group[data-color="research"]').textContent(), /outline spec/);
+  await page.locator('.folder-new-chat').click();
+  await page.waitForFunction(() => document.querySelectorAll('.folder-ungrouped .folder-tab').length >= 1);
+});
