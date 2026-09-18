@@ -24,6 +24,11 @@ runs agents on a drive at a time: it holds `.marble/agents/host.lock`, and a
 second `serve` on the same drive boots with agents off. Utility commands
 (`weigh`) never start them.
 
+`MARBLE_DRIVE_AGENT_MAX_MINUTES` is `0` by default — no cap; a turn ends when
+the agent finishes or you press Stop. `MARBLE_DRIVE_AGENT_STALL_MINUTES`
+(30) ends a turn whose process prints nothing for that long and is not
+waiting on you.
+
 An ungated host answers `/agent/*` only when addressed as `localhost`,
 `127.0.0.1` or `[::1]`, and `/agent/tools/*` refuses any request carrying
 `X-Forwarded-*` headers, since behind Tailscale Serve every peer is loopback.
@@ -55,39 +60,64 @@ POST /agent/conversations/:id/turns {prompt, context:{target, viewing, selection
 ## What a full agent can do
 
 Every provider runs at capability `full` unless it declares `documents` or
-`MARBLE_DRIVE_AGENT_POWER=documents` is set. A new adapter that does not name a
-capability therefore sees the drive. `claude-subscription`, `claude-api` and
-`cursor` all ship at `full`.
+`MARBLE_DRIVE_AGENT_POWER=documents` is set.
 
-Claude's own tools — `Read`, `Write`, `Edit`, `Glob`, `Grep`, `Bash`,
-`TodoWrite`, `WebSearch`, `WebFetch` — run with the drive as the working
-directory, alongside Marble's document tools and a Marble-owned browser MCP
-(`bin/marble-browser-mcp.js`: headless Chromium, empty profile, http(s) only).
-`--restricted` confines the **file** tools to the drive; a `Read` above it is
-refused by the CLI itself. It does **not** confine `Bash` or the browser: an
-agent's shell can reach the whole machine, as yours can, and the browser can
-open any http(s) URL. That is stated rather than fixed — the enforcement that
-would close the shell is platform-specific and is its own project. The spawn
-goes through a `sandbox` seam in the runner so it can be closed without
-touching any provider.
+A `full` Claude turn is the terminal's: `claude -p` with **no** `--restricted`
+and no tool allowlist, so your user settings, plugins, skills, `CLAUDE.md`,
+hooks, memory, MCP servers, subagents and permission rules all load exactly
+as they do when you type `claude` yourself. Marble's document MCP server and
+its browser MCP are added with `--mcp-config`, never in place of yours. The
+working directory is the conversation's **project** (below). Permission
+prompts and `AskUserQuestion` are routed to Marble (`--permission-prompts
+host --permission-prompt-tool stdio`) and appear in the drawer as cards you
+answer; the permission mode (`auto` by default, or `acceptEdits`, `plan`,
+`manual`, `bypassPermissions`) decides what gets asked.
 
-Cursor has no `--restricted`. Its file tools are pointed at the drive with
-`--add-dir`; the shell's cwd is the drive; `--sandbox disabled` lets native
-`WebSearch` / `WebFetch` and the browser reach the network. The conversation
-workspace still holds the turn token, the MCP config and the hook. The hook
-allows Cursor's own tools at `full`, Marble's document tools, and Marble's
-`MCP:browser_*` tools. It still refuses another MCP server. Cursor's shell is
-not confined either.
-
-`MARBLE_DRIVE_AGENT_POWER=documents` holds every provider down to the tools-only
+This is exactly as capable, and as powerful, as the terminal: the agent runs
+as you, with your configuration, on your machine. Its shell and file tools
+reach whatever yours do. The turn token is still per turn and
+`MARBLE_DRIVE_SECRET` is still withheld from the child.
+`MARBLE_DRIVE_AGENT_POWER=documents` is the rollback to the tools-only
 boundary.
+
+Cursor's file tools are pointed at the project with `--add-dir`; the shell's
+cwd is the project; `--sandbox disabled` lets its native `WebSearch` /
+`WebFetch` and the browser reach the network. Cursor has no host-answered
+prompt channel, so it runs `--yolo` and asks its questions in text.
 
 The drawer on a document and the Agents page start the same runner. A turn's
 *target* is the page you asked from; its *tools* are not smaller there.
 
 Undo covers documents. An asset or script an agent writes is not watched by the
-host, so it is neither listed in the turn's changes nor restorable — keep the
-drive under git or `backups/`.
+host, so it is neither listed in the turn's changes nor restorable — in a code
+project, git is the undo.
+
+## Projects
+
+A conversation works in a project: the drive (always present, id `drive`) or
+a directory you register once in the settings panel (`POST /agent/projects
+{ name, path }`; absolute, existing, a directory, not the drive or its
+`.marble`). The picker on a new conversation chooses it; it cannot change
+afterwards. A full turn's cwd is the project path, so the CLI's own session
+files and memory land where the terminal's do — `claude --resume` in a
+terminal can pick up a Marble conversation. A removed or missing project
+fails the next turn with a plain message.
+
+Every turn's prompt says how many other conversations are running in the
+same project and tells the agent not to stash, reset or discard changes it
+did not make. Marble does not create git worktrees per conversation; the
+skills you already use decide that.
+
+## Asks
+
+When the CLI needs the person — a permission prompt in `manual` or `auto`
+mode, or `AskUserQuestion` — the runner records an `ask` event and the
+conversation is marked `asking` (**Needs you** on the Agents page). The
+drawer shows a card: Allow / Deny with an optional note, or the question's
+options. `POST /agent/turns/:id/answer { requestId, response }` sends the
+reply into the process. The stall timer is suspended while an ask is open;
+Stop denies it; a process that ends first voids it. There is no timeout on
+you.
 
 ## What the watchdog is for
 
@@ -108,7 +138,9 @@ itself, so the same disk change is recorded as that turn's work
 .marble/agents/<conversation>/raw/<turn>.jsonl
 ```
 
-Default agent, per-provider models, and effort live in `settings.json`. API keys do not:
+Default agent, per-provider models and effort, registered projects and the
+default project, and the skills each CLI last reported live in `settings.json`.
+API keys do not:
 the settings panel writes them to `.agent-keys.local` (gitignored) or
 `MARBLE_DRIVE_AGENT_KEYS`. `GET /agent/settings` says whether a key is set, never
 the value. Backups of `.marble/` therefore do not take them.
@@ -117,7 +149,7 @@ the value. Backups of `.marble/` therefore do not take them.
 
 | id | runs | boundary |
 |---|---|---|
-| `claude-subscription` | `claude -p`, prompt on stdin, `--model` / `--effort` from the conversation, skills copied into the workspace so `/skill-name` works | `full`: `--restricted`, cwd the drive, `Read`/`Write`/`Edit`/`Glob`/`Grep`/`Bash`/`TodoWrite`/`WebSearch`/`WebFetch` plus Marble's document MCP and browser MCP |
+| `claude-subscription` | `claude -p --input-format stream-json`, the initialize handshake then the prompt on stdin, `--model` / `--effort` from the conversation (none means your own settings), `--permission-mode` from the conversation (`auto` unless picked) | `full`: the terminal's own configuration, cwd the project, every built-in tool, plus Marble's document MCP and browser MCP; prompts and questions come back to the drawer |
 | `claude-api` | the same, with `ANTHROPIC_API_KEY`; without it the turn fails rather than fall back to the login | the same |
 | `cursor` | `cursor-agent -p`, model `composer-2.5` unless the conversation names one, prompt passed after `--` (a dash-leading prompt would otherwise be parsed as a flag) | `full`: `--add-dir` the drive, `--sandbox disabled`, cwd the drive, hook allows Cursor's own tools, Marble's document tools, and Marble's `MCP:browser_*` (`bin/marble-cursor-hook.js`) |
 
