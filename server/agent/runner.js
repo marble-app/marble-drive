@@ -247,10 +247,13 @@ export function createRunner({ store, tools, providers, workdir, origin, bridgeP
 
   async function start(turn) {
     turn.status = 'running';
+    // The moment the turn's base is taken: a person's edits before it are
+    // history the turn reads; edits after it are concurrent with its writes.
+    turn.startedAt = Date.now();
     try {
       const meta = await store.conversation(turn.conversationId);
       const provider = providers.get(meta.provider);
-      await store.updateTurn(turn.id, { status: 'running', startedAt: Date.now() });
+      await store.updateTurn(turn.id, { status: 'running', startedAt: turn.startedAt });
       await store.updateConversation(turn.conversationId, { running: true, activity: `Working on ${turn.target}` });
       await emit(turn, { type: 'turn.started', provider: meta.provider });
       look(turn, { phase: 'working' });

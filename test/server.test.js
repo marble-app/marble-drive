@@ -611,6 +611,33 @@ test('an outside rewrite of a heading you wrote forks rather than clobbering', a
   assert.match(after, /Theirs/);
 });
 
+test('an undo neither forks against your edit nor leaves a claim behind', async () => {
+  const source = collabDoc('Original');
+  const made = await asJson(await put('', 'Collab Undo.mrbl', source));
+  const doc = encodeURIComponent(made.path);
+  const write = (client, text) =>
+    fetch(`${base}/ops?app=${doc}&client=${encodeURIComponent(client)}`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify([{ type: 'setText', id: 'hc1', text }]),
+    });
+
+  // You edited it; an agent's undo puts it back. The undo's own hash check is
+  // its conflict guard (server/agent/undo.js), so the host does not fork it.
+  assert.equal((await write('you', 'Yours!')).status, 200);
+  const undone = await asJson(await write('agent-undo:zz', 'Original'));
+  assert.equal(undone.applied, 1);
+  let after = await fsp.readFile(path.join(ROOT, `${made.path}.mrbl`), 'utf8');
+  assert.doesNotMatch(after, /<marble-alt/, 'an undo is a retraction, not a second version');
+  assert.match(after, />Original<\/h1>/);
+
+  // And the undo left no claim: your next edit lands, it does not fork.
+  assert.equal((await write('you', 'Yours again')).status, 200);
+  after = await fsp.readFile(path.join(ROOT, `${made.path}.mrbl`), 'utf8');
+  assert.doesNotMatch(after, /<marble-alt/, 'an undo does not claim what it restored');
+  assert.match(after, />Yours again<\/h1>/);
+});
+
 test('an outside rewrite of a heading you only had your caret in applies cleanly', async () => {
   const source = collabDoc('Looking');
   const made = await asJson(await put('', 'Collab Look.mrbl', source));
