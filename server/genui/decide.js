@@ -23,6 +23,7 @@ export function answersToOps(space, answers, { stop = 0.75 } = {}) {
         instance: instance.name,
         key: decision.key,
         current,
+        options: decision.options.map((o) => o.slug),
         choice: null,
         confidence: null,
         probabilities: null,

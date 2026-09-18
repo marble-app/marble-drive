@@ -22,6 +22,7 @@ test('an applied decision is one setAttr on the instance root with the slug', ()
   assert.equal(d.instance, 'games');
   assert.equal(d.key, 'openIn');
   assert.equal(d.probabilities['pop-up'], 0.9);
+  assert.deepEqual(d.options, ['side-by-side', 'pop-up', 'new-page']);
 });
 
 test('below the stop threshold keeps the authored default', () => {
