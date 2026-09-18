@@ -396,12 +396,22 @@
       return node;
     }
 
+    // The note is written as a sentence ("Rename the heading."); after
+    // "Agent ·" it reads as a clause, so it loses its capital and its period —
+    // unless the first word is all capitals, which is a name, not a sentence.
+    function asClause(note) {
+      const text = note.replace(/\.\s*$/, '');
+      const first = text.match(/^\S+/)?.[0] ?? '';
+      if (first && first === first.toUpperCase() && /[A-Z]/.test(first)) return text;
+      return text.charAt(0).toLowerCase() + text.slice(1);
+    }
+
     function phaseLabel(detail) {
       const note = String(detail.note ?? '').trim();
-      if (note) return note;
-      if (detail.phase === 'reading') return 'Reading';
-      if (detail.phase === 'writing') return 'Writing';
-      return 'Working';
+      if (note) return `Agent · ${asClause(note)}`;
+      if (detail.phase === 'reading') return 'Agent · reading';
+      if (detail.phase === 'writing') return 'Agent · writing';
+      return 'Agent · working';
     }
 
     const zoneLayer = document.createElement('div');

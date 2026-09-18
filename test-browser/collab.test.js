@@ -178,7 +178,7 @@ test('agent presence tapes off the region it is working on', async () => {
   });
   const zone = page.locator('.marble-zone');
   assert.equal(await zone.count(), 1);
-  assert.match(await zone.innerText(), /Working/);
+  assert.match(await zone.innerText(), /Agent · working/);
   assert.equal(
     await page.locator('[data-marble-id="p"]').evaluate((el) => el.classList.contains('marble-presence')),
     false,
@@ -200,11 +200,11 @@ test('the construction label uses the apply_ops note, and Hide puts it away', as
   await page.waitForFunction(() => document.documentElement.classList.contains('marble-collab-host'));
   await page.evaluate(() => {
     document.dispatchEvent(new CustomEvent('marble:presence', {
-      detail: { client: 'agent:c1', ids: ['p'], phase: 'writing', note: 'rename the heading' },
+      detail: { client: 'agent:c1', ids: ['p'], phase: 'writing', note: 'Rename the heading.' },
     }));
   });
   const zone = page.locator('.marble-zone');
-  assert.match(await zone.innerText(), /rename the heading/);
+  assert.match(await zone.innerText(), /Agent · rename the heading(?!\.)/);
 
   await page.getByRole('button', { name: 'Hide' }).click();
   assert.equal(await page.locator('.marble-zone').count(), 0);
@@ -284,5 +284,22 @@ test('agent work with no ids is a page banner, not a box around the document', a
     }));
   });
   assert.equal(await page.locator('.marble-zone-page').count(), 1);
-  assert.match(await page.locator('.marble-zone-page').innerText(), /Working/);
+  assert.match(await page.locator('.marble-zone-page').innerText(), /Agent · working/);
+});
+
+test('the construction label keeps an all-caps first word and names the phase without a note', async () => {
+  await host.reset();
+  const { page } = await host.newPage();
+  await page.goto(`${host.base}/a/forked`);
+  await page.waitForFunction(() => document.documentElement.classList.contains('marble-collab-host'));
+  const labelFor = async (detail) => {
+    await page.evaluate((d) => {
+      document.dispatchEvent(new CustomEvent('marble:presence', { detail: d }));
+    }, { client: 'agent:c1', ids: ['p'], ...detail });
+    return (await page.locator('.marble-zone-label').innerText()).replace(/\s*Hide\s*$/, '').trim();
+  };
+  assert.equal(await labelFor({ phase: 'writing', note: 'PDF export gets a footer.' }), 'Agent · PDF export gets a footer');
+  assert.equal(await labelFor({ phase: 'reading' }), 'Agent · reading');
+  assert.equal(await labelFor({ phase: 'writing' }), 'Agent · writing');
+  assert.equal(await labelFor({ phase: 'working' }), 'Agent · working');
 });
