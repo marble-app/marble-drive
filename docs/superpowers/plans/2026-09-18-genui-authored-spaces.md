@@ -2239,7 +2239,7 @@ Co-Authored-By: Claude Fable 5.1 <noreply@anthropic.com>"
 ### Task 9: Stage A — the author skill
 
 **Files:**
-- Create: `agent/skills/genui-author/SKILL.md`
+- Create: `.agents/skills/genui-author/SKILL.md`
 - Test: manual (one real agent turn, spends subscription — **Bryan runs this**); the acceptance is `marble-drive genui space` printing `ok` on what the agent wrote.
 
 **Interfaces:**
@@ -2247,7 +2247,7 @@ Co-Authored-By: Claude Fable 5.1 <noreply@anthropic.com>"
 
 - [ ] **Step 1: Write the skill**
 
-`agent/skills/genui-author/SKILL.md`:
+`.agents/skills/genui-author/SKILL.md`:
 
 ```markdown
 ---
@@ -2330,7 +2330,7 @@ From Agents.mrbl, in the Marble Drive project, a conversation: *"Use genui-autho
 - [ ] **Step 4: Commit**
 
 ```bash
-git add agent/skills/genui-author/SKILL.md
+git add .agents/skills/genui-author/SKILL.md
 git commit -m "genui: the author skill — Stage A is an agent turn that writes an app space and checks it.
 
 Co-Authored-By: Claude Fable 5.1 <noreply@anthropic.com>"

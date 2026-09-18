@@ -146,7 +146,7 @@ Created in `createDrive` beside `createTypesafeHandler`, handed `{ store, atlas,
 
 ## 5. Stage A — the author skill
 
-`agent/skills/genui-author/SKILL.md`, loaded by the existing Claude agent (the `full` provider in `server/agent/providers/claude.js`). No new LLM plumbing: the agent already has the marble MCP, the `build-in-marble` skill, projects, streaming, and permission prompts routed to the drawer.
+`.agents/skills/genui-author/SKILL.md`, loaded by the existing Claude agent (the `full` provider in `server/agent/providers/claude.js`). No new LLM plumbing: the agent already has the marble MCP, the `build-in-marble` skill, projects, streaming, and permission prompts routed to the drawer.
 
 The skill says, in order:
 
@@ -217,7 +217,7 @@ server/config.js  genuiAtlas path                                           (one
 bin/marble-drive.js   `genui space <file>` and `genui decide <file> [--dry] [--stop N] [--context JSON]`
                   — the same modules, no host needed; what the author skill and a person at a
                   terminal use. `.env`/`.env.local` are loaded the way `npm run dev` loads them.
-agent/skills/genui-author/SKILL.md
+.agents/skills/genui-author/SKILL.md
 test/fixtures/genui/{49ers,metrics,signup}.mrbl, atlas.mini.json   (mini atlas cut from the real one by tools/genui-mini-atlas.mjs)
 tools/genui-mini-atlas.mjs                                            cut the entries the fixtures use out of atlas.json
 test/genui-{space,questions,decide,http}.test.js
