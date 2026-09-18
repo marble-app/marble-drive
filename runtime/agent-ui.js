@@ -448,14 +448,28 @@
     syncSegCurrent(box);
     requestAnimationFrame(() => slideThumb(box, { animate: false }));
   };
+  /** When even every segment folded into a dropdown does not fit beside the
+   *  bar's buttons, the setup takes its own line. Set here, cleared by
+   *  fitSetup before each pass, so a wider box gets its one row back. */
+  const wrapBarFor = (node) => {
+    const bar = node.closest('.bar');
+    if (!bar || bar.dataset.wrap) return false;
+    bar.dataset.wrap = '1';
+    return true;
+  };
   const fitPicker = (picker) => {
     if (!picker || picker.hidden) return;
     const segs = [...picker.querySelectorAll('.seg-opts')].filter((box) => !box.closest('.seg')?.hidden);
+    const overflowed = () => picker.scrollWidth > picker.clientWidth + 1;
     for (const box of segs) box.classList.remove('is-drop', 'is-open');
     for (const box of [...segs].reverse()) {
-      if (picker.scrollWidth <= picker.clientWidth + 1) break;
+      if (!overflowed()) break;
       box.classList.add('is-drop');
       syncSegCurrent(box);
+    }
+    if (overflowed() && wrapBarFor(picker)) {
+      fitPicker(picker);
+      return;
     }
     for (const box of segs) {
       syncSegCurrent(box);
@@ -530,7 +544,17 @@
         if (visible(chip)) pack(chip);
       }
     }
+    if (overflowed() && wrapBarFor(track)) {
+      fitPresets(track);
+      return;
+    }
     if (!track.querySelector(':scope > .preset input:checked') && menu.querySelector('input:checked')) {
+      // Even the chosen setup had to go into the menu: the row is too short
+      // for a capsule at all. On its own line it may keep the name in view.
+      if (wrapBarFor(track)) {
+        fitPresets(track);
+        return;
+      }
       const span = menu.querySelector('input:checked + span');
       if (span) {
         more.replaceChildren(span.cloneNode(true));
@@ -574,10 +598,6 @@
     if (!ids.length) return current ?? '';
     const index = ids.indexOf(current);
     return ids[(index < 0 ? 0 : index + 1) % ids.length];
-  };
-  const filesEditedLabel = (n) => {
-    const count = Number(n) || 0;
-    return `${count} document${count === 1 ? '' : 's'} changed`;
   };
   const splitCursorModel = (id) => {
     if (!id) return { family: '', effort: '' };
@@ -1014,16 +1034,12 @@
     :host([data-chrome="pane"]) .heading { display: none; }
     :host([data-chrome="pane"]) .mast:not(:has(.tag)) { display: none; }
     :host([data-chrome="pane"]) .mast { padding-top: 8px; }
-    /* A tile is a pane sharing the screen with others. The status line, the
-       workdir path and the agent/model pickers are all the same on every pane
-       in a folder, so four copies of them is four times the chrome and none of
-       the information. The transcript and a place to type survive; clicking
-       the tile promotes it, and the full chrome comes back with it. */
-    :host([data-chrome="tile"]) .heading,
-    :host([data-chrome="tile"]) .mast,
-    :host([data-chrome="tile"]) .statusline,
-    :host([data-chrome="tile"]) .setup { display: none; }
-    :host([data-chrome="tile"]) .composer { padding: 6px 8px; gap: 4px; }
+    /* A tile is a pane sharing the screen with others. It keeps its mast and
+       its bar — two panes side by side should both say what they are — and
+       only gives up padding. */
+    :host([data-chrome="tile"]) .composer { padding: 4px 8px 8px; }
+    :host([data-chrome="tile"]) .log { padding: 6px 12px 12px; }
+    :host([data-chrome="tile"]) .mast { padding: 6px 12px 6px; }
     .heading { margin: 0; font: 500 15px/1.3 inherit; letter-spacing: -.015em; outline: none; min-height: 1.3em; border-radius: 6px; padding: 2px 4px; margin-left: -4px; }
     .heading:hover { background: var(--paper-2); }
     .heading:focus { background: var(--card); box-shadow: 0 0 0 1px var(--accent), 0 0 0 4px var(--accent-soft); }
@@ -1080,10 +1096,12 @@
     .queued-item span { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
     .queued-item button { font: inherit; border: 0; background: none; color: var(--muted); width: 22px; height: 22px; border-radius: 6px; cursor: pointer; }
     .queued-item button:hover { background: var(--line); }
-    .composer { flex: none; padding: 8px 12px calc(12px + env(safe-area-inset-bottom, 0px)); border-top: 1px solid var(--line); display: flex; flex-direction: column; gap: 6px; background: var(--paper); }
+    .composer { flex: none; padding: 6px 10px calc(10px + env(safe-area-inset-bottom, 0px)); border-top: 1px solid var(--line); display: flex; flex-direction: column; gap: 6px; background: var(--paper); }
     .picker { display: flex; flex-flow: row nowrap; align-items: center; gap: 6px; font-size: 12px; color: var(--muted); overflow: visible; flex: 0 0 auto; width: fit-content; max-width: 100%; min-width: 0; }
     .picker[hidden] { display: none; }
-    .setup { display: flex; flex-wrap: wrap; align-items: center; justify-content: flex-start; gap: 6px; width: 100%; min-width: 0; position: relative; z-index: 3; }
+    /* The setup takes what the buttons leave, so a crowded picker folds its
+       trailing segments into dropdowns instead of wrapping the bar. */
+    .setup { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; flex: 1 1 0; min-width: 0; position: relative; z-index: 3; }
     .setup[hidden] { display: none; }
     .presets {
       display: inline-flex; flex-wrap: nowrap; align-items: center; gap: 0;
@@ -1146,14 +1164,13 @@
       box-shadow: 0 1px 2px color-mix(in srgb, var(--ink) 12%, transparent);
       opacity: 0;
     }
-    .statusline { display: flex; flex-direction: column; gap: 1px; padding: 2px 2px 4px; }
-    .statusline[hidden] { display: none; }
-    .status-main { display: flex; align-items: baseline; gap: 10px; min-width: 0; }
-    .status-who { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--ink); font-weight: 500; font-size: 12.5px; letter-spacing: -.01em; }
-    .status-mode { flex: none; font: inherit; font-size: 12.5px; font-weight: 500; color: var(--accent-ink); background: none; border: 0; padding: 0; cursor: pointer; }
-    .status-mode:hover { color: var(--ink); }
-    .status-mode[hidden] { display: none; }
-    .status-where { font-size: 11.5px; color: var(--faint); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .bar { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; min-height: 28px; min-width: 0; }
+    .bar-space { flex: 0 0 0; }
+    .bar[data-wrap] .setup { flex-basis: 100%; }
+    .mode { flex: none; font: inherit; font-size: 11px; font-weight: 500; color: var(--accent-ink); background: none; border: 0; padding: 3px 6px; border-radius: 999px; cursor: pointer; }
+    .mode:hover { color: var(--ink); background: var(--paper-2); }
+    .mode[hidden] { display: none; }
+    .dispatch[hidden] { display: none; }
     .seg { border: 0; margin: 0; padding: 0; min-width: 0; display: flex; flex: none; align-items: center; position: relative; }
     .seg legend {
       position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0, 0, 0, 0); border: 0;
@@ -1226,18 +1243,17 @@
     .ichip-name, .context-text { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
     .context-clear { font: inherit; border: 0; background: none; color: var(--faint); width: 16px; height: 16px; border-radius: 50%; cursor: pointer; line-height: 1; padding: 0; }
     .context-clear:hover { background: var(--line); color: var(--ink); }
-    .row { display: flex; flex-direction: column; align-items: stretch; gap: 6px; background: var(--card); border: 1px solid var(--line); border-radius: 14px; padding: 8px 8px 8px 12px; transition: border-color 200ms var(--settle), box-shadow 200ms var(--settle); }
+    .row { display: flex; flex-direction: column; align-items: stretch; gap: 4px; background: var(--card); border: 1px solid var(--line); border-radius: 14px; padding: 8px 8px 6px 12px; transition: border-color 200ms var(--settle), box-shadow 200ms var(--settle); }
     .row:focus-within { border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-soft); }
     .chips { display: flex; flex-wrap: wrap; gap: 4px; }
     .chips[hidden] { display: none; }
     .chip-remove { font: inherit; border: 0; background: none; color: inherit; opacity: .55; width: 16px; height: 16px; border-radius: 50%; cursor: pointer; line-height: 1; padding: 0; }
     .chip-remove:hover { opacity: 1; background: color-mix(in srgb, currentColor 12%, transparent); }
-    .row-input { display: flex; align-items: flex-end; gap: 8px; }
     .editor { flex: 1; min-width: 0; font: inherit; color: var(--ink); outline: none; max-height: 160px; overflow-y: auto; padding: 4px 0; white-space: pre-wrap; overflow-wrap: anywhere; }
     .editor[data-empty]::after { content: attr(data-placeholder); color: var(--faint); pointer-events: none; }
     .editor ul, .editor ol { margin: 2px 0; padding-left: 1.25em; }
     .editor li { margin: 0; }
-    .send, .stop { flex: none; width: 32px; height: 32px; border-radius: 50%; border: 0; cursor: pointer; display: grid; place-items: center; transition: opacity 200ms var(--settle); }
+    .send, .stop { flex: none; width: 28px; height: 28px; border-radius: 50%; border: 0; cursor: pointer; display: grid; place-items: center; transition: opacity 200ms var(--settle); }
     .send { background: var(--accent-ink); color: var(--paper); }
     .send:disabled { opacity: .35; cursor: default; }
     .stop { background: var(--paper-2); color: var(--ink); }
@@ -1573,35 +1589,6 @@
         <div class="log" role="log" aria-live="polite" aria-label="Conversation"></div>
         <div class="queued" hidden></div>
         <form class="composer">
-          <div class="statusline" hidden>
-            <div class="status-main">
-              <span class="status-who"></span>
-              <button type="button" class="status-mode" hidden></button>
-            </div>
-            <div class="status-where"></div>
-          </div>
-          <div class="setup" hidden>
-            <div class="presets" role="radiogroup" aria-label="Saved setups" hidden></div>
-            <button type="button" class="custom-toggle" aria-expanded="false" hidden>Custom</button>
-            <div class="picker">
-            <fieldset class="seg picker-agent">
-              <legend>CLI</legend>
-              <div class="seg-opts" data-seg="agent"></div>
-            </fieldset>
-            <fieldset class="seg picker-project">
-              <legend>Project</legend>
-              <div class="seg-opts" data-seg="project"></div>
-            </fieldset>
-            <fieldset class="seg picker-models">
-              <legend>Model</legend>
-              <div class="seg-opts" data-seg="model"></div>
-            </fieldset>
-            <fieldset class="seg picker-effort">
-              <legend>Effort</legend>
-              <div class="seg-opts" data-seg="effort"></div>
-            </fieldset>
-            </div>
-          </div>
           <div class="slash" hidden role="listbox" aria-label="Commands"></div>
           <div class="peek" hidden>
             <div class="peek-head">
@@ -1612,8 +1599,21 @@
           </div>
           <div class="row">
             <div class="chips" hidden></div>
-            <div class="row-input">
-              <div class="editor" contenteditable="true" role="textbox" aria-multiline="true" aria-label="Message" data-placeholder="Ask about this document…" data-empty></div>
+            <div class="editor" contenteditable="true" role="textbox" aria-multiline="true" aria-label="Message" data-placeholder="Ask about this document…" data-empty></div>
+            <div class="bar">
+              <div class="setup" hidden>
+                <div class="presets" role="radiogroup" aria-label="Saved setups" hidden></div>
+                <button type="button" class="custom-toggle" aria-expanded="false" hidden>Custom</button>
+                <div class="picker">
+                  <fieldset class="seg picker-agent"><legend>CLI</legend><div class="seg-opts" data-seg="agent"></div></fieldset>
+                  <fieldset class="seg picker-project"><legend>Project</legend><div class="seg-opts" data-seg="project"></div></fieldset>
+                  <fieldset class="seg picker-models"><legend>Model</legend><div class="seg-opts" data-seg="model"></div></fieldset>
+                  <fieldset class="seg picker-effort"><legend>Effort</legend><div class="seg-opts" data-seg="effort"></div></fieldset>
+                </div>
+              </div>
+              <button type="button" class="mode" hidden aria-label="CLI mode — click or Shift+Tab to change"></button>
+              <span class="bar-space"></span>
+              <div class="dispatch" hidden role="radiogroup" aria-label="How to send while a turn runs"></div>
               <button type="button" class="stop" hidden aria-label="Stop">${STOP_ICON}</button>
               <button type="submit" class="send" aria-label="Send" disabled>${SEND_ICON}</button>
             </div>
@@ -1629,10 +1629,9 @@
       this.presetsEl = root.querySelector('.presets');
       this.customToggle = root.querySelector('.custom-toggle');
       this.picker = root.querySelector('.picker');
-      this.statusline = root.querySelector('.statusline');
-      this.statusWho = root.querySelector('.status-who');
-      this.statusMode = root.querySelector('.status-mode');
-      this.statusWhere = root.querySelector('.status-where');
+      this.bar = root.querySelector('.bar');
+      this.modeButton = root.querySelector('.mode');
+      this.dispatchEl = root.querySelector('.dispatch');
       this.agentLabel = root.querySelector('.picker-agent');
       this.agentBox = root.querySelector('[data-seg="agent"]');
       this.projectBox = root.querySelector('[data-seg="project"]');
@@ -1675,7 +1674,6 @@
       this.editedFiles = new Set();
       this.usageMeters = [];
       this.usageLoaded = false;
-      this.where = { path: '', branch: null };
       this.customOpen = false;
 
       this.picker.addEventListener('change', (event) => {
@@ -1716,7 +1714,7 @@
       this.shadowRoot.addEventListener('keydown', (event) => {
         if (event.key === 'Escape') closeSegMenus(this.shadowRoot);
       });
-      this.statusMode.addEventListener('click', () => this.cycleMode());
+      this.modeButton.addEventListener('click', () => this.cycleMode());
       this.form.addEventListener('submit', (event) => {
         event.preventDefault();
         this.submit();
@@ -2304,6 +2302,8 @@
 
     fitSetup() {
       requestAnimationFrame(() => {
+        // One row first; the fits below wrap the bar only if they must.
+        delete this.bar.dataset.wrap;
         if (!this.picker?.hidden) fitPicker(this.picker);
         fitPresets(this.presetsEl);
       });
@@ -2318,12 +2318,8 @@
 
     async loadChrome() {
       try {
-        const [usage, where] = await Promise.all([
-          this.api.usage?.().catch(() => ({ meters: [] })),
-          this.api.workspace?.().catch(() => ({ path: '', branch: null })),
-        ]);
+        const usage = await this.api.usage?.().catch(() => ({ meters: [] }));
         this.usageMeters = usage?.meters ?? [];
-        this.where = where ?? { path: '', branch: null };
       } catch {
         this.usageMeters = [];
       }
@@ -2337,29 +2333,14 @@
       this.paintStatus();
     }
 
+    /** The bar's only status: which mode the CLI runs in. Agent, model and
+     *  project are the mast's tags; what changed is each turn's footer. */
     paintStatus() {
       const provider = this.currentProvider();
-      const ready = Boolean(provider || this.meta?.provider);
-      this.statusline.hidden = !ready;
-      if (!ready) return;
-      const family = this.currentModel();
-      const effortId = radioValue(this.shadowRoot, 'effort');
-      const nested = (family?.efforts ?? []).find((item) => item.id === effortId);
-      const effortLabel = nested?.label || effortId || '';
-      const who = [provider?.label || this.meta?.provider, family?.label, effortLabel].filter(Boolean).join(' ');
-      const meter = this.usageMeters.find((item) => item.id === provider?.id);
-      const bits = [who];
-      if (usageAvailable(meter)) bits.push(`${meter.used}%`);
-      else if (meter && !usageAvailable(meter) && String(provider?.id ?? '').startsWith('claude')) bits.push('unavailable');
-      bits.push(filesEditedLabel(this.editedFiles.size));
-      this.statusWho.textContent = bits.join(' · ');
       const modes = provider?.modes ?? [];
       const mode = modes.find((item) => item.id === this.mode) ?? modes[0];
-      this.statusMode.hidden = !mode;
-      this.statusMode.textContent = mode?.label ?? '';
-      const where = [this.where?.path, this.where?.branch].filter(Boolean).join(' · ');
-      this.statusWhere.textContent = where;
-      this.statusWhere.hidden = !where;
+      this.modeButton.hidden = !mode;
+      this.modeButton.textContent = mode?.label ?? '';
     }
 
     paintMast() {

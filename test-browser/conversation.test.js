@@ -43,6 +43,12 @@ async function mount(id = null) {
   return { page, errors, view: page.locator('body > marble-conversation') };
 }
 
+/** Pick a radio in the setup. A folded segment keeps its radios in a closed
+ *  menu, so this clicks the input itself rather than looking for it. */
+const pick = (view, name, value) => view.evaluate((el, [n, v]) => {
+  el.shadowRoot.querySelector(`input[name="${n}"][value="${v}"]`).click();
+}, [name, value]);
+
 const sendFrom = async (view, text) => {
   await view.locator('.editor').fill(text);
   await view.locator('.editor').press('Enter');
@@ -177,7 +183,9 @@ test('saved setups hug their labels instead of stretching across the composer', 
   });
   assert.deepEqual(names.names, ['Sonnet High', 'Opus Extra High']);
   assert.ok(names.presets <= names.pills + 12, `presets ${names.presets} should hug pills ${names.pills}, not setup ${names.setup}`);
-  assert.ok(names.presets < names.setup - 80, `presets ${names.presets} should not fill setup ${names.setup}`);
+  // The setup shares its row with the mode and send buttons now, so the
+  // margin is what Custom takes, not the old empty half of the composer.
+  assert.ok(names.presets < names.setup - 40, `presets ${names.presets} should not fill setup ${names.setup}`);
 });
 
 const presetGeometry = (el) => {
@@ -611,9 +619,9 @@ test('CLI, model, and effort sit on one segmented row', async () => {
 
 test('a new conversation can name its model from the picker', async () => {
   const { page, view } = await mount();
-  await view.locator('input[name="model"][value="alt"]').waitFor();
-  await view.locator('input[name="model"][value="alt"]').check();
-  await view.locator('input[name="effort"][value="high"]').check();
+  await view.locator('input[name="model"][value="alt"]').waitFor({ state: 'attached' });
+  await pick(view, 'model', 'alt');
+  await pick(view, 'effort', 'high');
   const started = page.evaluate(() => new Promise((resolve) => document.querySelector('marble-conversation').addEventListener('conversation', (e) => resolve(e.detail.id), { once: true })));
   await sendFrom(view, 'script:rename');
   const id = await started;
@@ -623,26 +631,36 @@ test('a new conversation can name its model from the picker', async () => {
   assert.equal(meta.effort, 'high');
 });
 
-test('the composer status names the CLI, documents changed, mode, and where', async () => {
+test('the composer is one card: text, then a bar with the setup, the mode and send', async () => {
   const { view } = await mount();
-  await view.locator('.statusline').waitFor();
-  const before = await view.locator('.statusline').textContent();
-  assert.match(before, /Fake/);
-  assert.match(before, /0 documents changed/);
-  assert.match(before, /Default/);
+  await view.locator('.row .bar .setup .picker').waitFor();
+  assert.equal(await view.locator('.statusline').count(), 0);
+  assert.equal(await view.locator('.status-where').count(), 0);
+  const mode = view.locator('.row .bar button.mode');
+  assert.match(await mode.textContent(), /Default/);
+  const [barBox, sendBox] = await Promise.all([view.locator('.bar').boundingBox(), view.locator('.send').boundingBox()]);
+  assert.ok(sendBox.y >= barBox.y && sendBox.y + sendBox.height <= barBox.y + barBox.height + 1, 'send sits in the bar');
+  const height = await view.locator('.composer').evaluate((el) => el.getBoundingClientRect().height);
+  assert.ok(height < 120, `composer is ${height}px tall`);
+});
+
+test('a tile keeps its mast and its bar', async () => {
+  const { page, view } = await mount();
   await sendFrom(view, 'script:rename');
   await view.locator('.turn-footer[data-status="completed"]').waitFor();
-  const after = await view.locator('.statusline').textContent();
-  assert.match(after, /1 document changed/);
+  await view.evaluate((el) => el.setAttribute('data-chrome', 'tile'));
+  assert.equal(await view.locator('.mast').isVisible(), true);
+  assert.equal(await view.locator('.bar .setup').isVisible(), true);
+  await page.close();
 });
 
 test('Shift+Tab cycles the CLI mode', async () => {
   const { page, view } = await mount();
-  await view.locator('.status-mode').waitFor();
-  assert.match(await view.locator('.status-mode').textContent(), /Default/);
+  await view.locator('button.mode').waitFor();
+  assert.match(await view.locator('button.mode').textContent(), /Default/);
   await view.locator('.editor').press('Shift+Tab');
-  assert.match(await view.locator('.status-mode').textContent(), /Plan/);
-  await view.locator('input[name="model"][value="alt"]').check();
+  assert.match(await view.locator('button.mode').textContent(), /Plan/);
+  await pick(view, 'model', 'alt');
   const started = page.evaluate(() => new Promise((resolve) => document.querySelector('marble-conversation').addEventListener('conversation', (e) => resolve(e.detail.id), { once: true })));
   await sendFrom(view, 'script:rename');
   const id = await started;
@@ -932,7 +950,6 @@ test('a document.changed event is listed as a document changed', async () => {
   await view.locator('.tool[data-name="document.changed"]').waitFor();
   assert.match(await view.locator('.tool[data-name="document.changed"]').textContent(), /garden/);
   assert.match(await view.locator('.tool[data-name="document.changed"]').textContent(), /document/i);
-  assert.match(await view.locator('.statusline').textContent(), /1 document changed/);
 });
 
 test('a permission ask shows a card, and Allow answers it', async () => {
@@ -972,9 +989,9 @@ test('a new conversation is started in the picked project, and the mast names it
   // Registered from the page so the request is same-origin, like the settings panel's.
   const repo = await page.evaluate((p) => window.marble.agent.addProject({ name: 'Repo', path: p }), dir);
   await view.evaluate((el) => el.fillProjects());
-  await view.locator('input[name="project"][value="drive"]').waitFor();
+  await view.locator('input[name="project"][value="drive"]').waitFor({ state: 'attached' });
   assert.equal(await view.locator('input[name="project"][value="drive"]').isChecked(), true);
-  await view.locator(`input[name="project"][value="${repo.id}"]`).check();
+  await pick(view, 'project', repo.id);
   const started = page.evaluate(() => new Promise((resolve) => document.querySelector('marble-conversation').addEventListener('conversation', (e) => resolve(e.detail.id), { once: true })));
   await sendFrom(view, 'script:rename');
   const id = await started;
