@@ -171,34 +171,54 @@ __ICON__
     display: none; min-height: 0; overflow-y: auto; border-right: 1px solid var(--line);
     padding: .4rem 0; background: var(--paper);
   }
-  .folder-group[data-color="research"] {
+  .folder-group[data-color="research"],
+  .focus-card[data-color="research"],
+  .focus-basin[data-color="research"] {
     --accent-ink-rgb: 47, 111, 91; --folder: #2f6f5b;
   }
-  .folder-group[data-color="fun"] {
+  .folder-group[data-color="fun"],
+  .focus-card[data-color="fun"],
+  .focus-basin[data-color="fun"] {
     --accent-ink-rgb: 196, 92, 62; --folder: #c45c3e;
   }
-  .folder-group[data-color="days"] {
+  .folder-group[data-color="days"],
+  .focus-card[data-color="days"],
+  .focus-basin[data-color="days"] {
     --accent-ink-rgb: 77, 106, 88; --folder: #6f8f7d;
   }
-  .folder-group[data-color="marble"] {
+  .folder-group[data-color="marble"],
+  .focus-card[data-color="marble"],
+  .focus-basin[data-color="marble"] {
     --accent-ink-rgb: 95, 115, 133; --folder: #7e91a3;
   }
-  .folder-group[data-color="travel"] {
+  .folder-group[data-color="travel"],
+  .focus-card[data-color="travel"],
+  .focus-basin[data-color="travel"] {
     --accent-ink-rgb: 61, 107, 138; --folder: #3d6b8a;
   }
-  .folder-group[data-color="clay"] {
+  .folder-group[data-color="clay"],
+  .focus-card[data-color="clay"],
+  .focus-basin[data-color="clay"] {
     --accent-ink-rgb: 107, 79, 58; --folder: #6b4f3a;
   }
-  .folder-group[data-color="sage"] {
+  .folder-group[data-color="sage"],
+  .focus-card[data-color="sage"],
+  .focus-basin[data-color="sage"] {
     --accent-ink-rgb: 61, 92, 74; --folder: #3d5c4a;
   }
-  .folder-group[data-color="mist"] {
+  .folder-group[data-color="mist"],
+  .focus-card[data-color="mist"],
+  .focus-basin[data-color="mist"] {
     --accent-ink-rgb: 61, 90, 112; --folder: #3d5a70;
   }
-  .folder-group[data-color="ink"] {
+  .folder-group[data-color="ink"],
+  .focus-card[data-color="ink"],
+  .focus-basin[data-color="ink"] {
     --accent-ink-rgb: 69, 76, 82; --folder: #454c52;
   }
-  .folder-group[data-color="gold"] {
+  .folder-group[data-color="gold"],
+  .focus-card[data-color="gold"],
+  .focus-basin[data-color="gold"] {
     --accent-ink-rgb: 109, 86, 48; --folder: #6d5630;
   }
   .folder-group { margin: 0 0 .35rem; }
@@ -255,17 +275,112 @@ __ICON__
   }
   .folder-save-confirm { color: var(--accent-ink); font-weight: 500; }
   .folder-save-dismiss { color: var(--muted); }
-  .focus-workspace {
-    min-height: 0; display: flex; flex-direction: column; gap: .5rem; padding: 1rem;
+  .focus-workspace { display: none; }
+  .focus {
+    position: relative; overflow: hidden; background: var(--paper);
   }
-  .focus-workspace h2 {
-    margin: 0; font-size: .75rem; font-weight: 500; letter-spacing: .06em;
-    text-transform: uppercase; color: var(--faint);
+  .focus-card {
+    position: absolute; display: flex; flex-direction: column;
+    min-width: 0; min-height: 0; overflow: hidden;
+    border: 1px solid var(--line); border-radius: 12px;
+    background: var(--card); box-shadow: var(--shadow);
+    color: var(--ink); touch-action: none;
+  }
+  .focus-card[data-lod="full"] { z-index: 3; }
+  .focus-card[data-lod="digest"] { z-index: 2; }
+  .focus-card[data-lod="chip"] {
+    z-index: 1;
+    border-left: 3px solid var(--folder, var(--line));
+  }
+  .focus-card[data-selected="true"] {
+    box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent-ink) 70%, transparent), var(--shadow-lift);
+  }
+  .focus-card.is-dragging { z-index: 10; box-shadow: var(--shadow-lift); }
+  .focus-card-head {
+    display: flex; align-items: center; gap: .4rem; flex: none;
+    padding: .4rem .55rem; min-height: 2.1rem;
+    border-bottom: 1px solid var(--line); font-size: .8rem; font-weight: 500;
+  }
+  .focus-card[data-lod="chip"] .focus-card-head { border-bottom: 0; }
+  .focus-card-title { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .focus-card-model { flex: none; font-size: .68rem; color: var(--faint); max-width: 5rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .focus-card[data-lod="digest"] .focus-card-model,
+  .focus-card[data-lod="full"] .focus-card-model { display: none; }
+  .focus-card-actions { display: none; flex: none; gap: .25rem; }
+  .focus-card:hover .focus-card-actions,
+  .focus-card:focus-within .focus-card-actions { display: flex; }
+  @media (hover: none) {
+    .focus-card-actions { display: flex; }
+  }
+  .focus-card-actions button {
+    appearance: none; border: 1px solid var(--line); background: var(--paper);
+    color: var(--ink); border-radius: 999px; padding: .12rem .45rem;
+    font: inherit; font-size: .68rem; cursor: pointer; white-space: nowrap;
+  }
+  .focus-card-actions button:hover, .focus-card-actions button:focus-visible {
+    background: var(--accent-soft); outline: none;
+  }
+  .focus-card-body {
+    flex: 1; min-height: 0; padding: .45rem .6rem; font-size: .78rem; color: var(--muted);
+    overflow: hidden;
+  }
+  .focus-card[data-lod="chip"] .focus-card-body,
+  .focus-card[data-lod="full"] .focus-card-body { display: none; }
+  .focus-live { display: none; flex: 1; min-height: 0; min-width: 0; }
+  .focus-card[data-lod="full"] .focus-live { display: block; }
+  .focus-card[data-lod="full"] .focus-live marble-conversation { display: block; height: 100%; }
+  .focus-basin {
+    position: absolute; z-index: 0; pointer-events: none; border-radius: 16px;
+    background: color-mix(in srgb, var(--folder) 14%, var(--paper));
+    border: 1px solid color-mix(in srgb, var(--folder) 28%, var(--line));
+  }
+  .focus-basin-name {
+    pointer-events: auto; position: absolute; top: .4rem; left: .75rem;
+    font-size: .72rem; font-weight: 500; color: var(--folder, var(--muted));
+    border: 0; background: none; padding: 0; font: inherit; font-size: .72rem; font-weight: 500;
+  }
+  .focus-look {
+    position: fixed; z-index: 12; left: 50%; top: 12vh; transform: translateX(-50%);
+    width: min(36rem, calc(100vw - 2rem)); max-height: 70vh; overflow: auto;
+    padding: 1rem 1.1rem; border: 1px solid var(--line); border-radius: 12px;
+    background: var(--card); box-shadow: var(--shadow-lift);
+  }
+  .focus-look h3 { margin: 0 0 .35rem; font-size: 1rem; font-weight: 500; }
+  .focus-look .look-meta { color: var(--muted); font-size: .8rem; margin: 0 0 .75rem; }
+  .focus-look .look-events { margin: 0; padding-left: 1.1rem; color: var(--ink); font-size: .85rem; }
+  .focus[data-stack] { overflow: auto; display: flex; flex-direction: column; gap: .65rem; padding: .75rem; }
+  .focus[data-stack] .focus-card {
+    position: relative; left: auto !important; top: auto !important;
+    width: auto !important; height: auto !important; flex: none;
+  }
+  .focus[data-stack] .focus-card[data-lod="full"] { min-height: 18rem; }
+  .focus[data-stack] .focus-card[data-lod="digest"] { min-height: 7rem; }
+  .focus[data-stack] .focus-basin { display: none; }
+  @media (prefers-reduced-motion: reduce) {
+    .focus-card, .focus-look {
+      animation-duration: 150ms !important;
+      transition-duration: 150ms !important;
+    }
   }
   body[data-view="board"] .library,
-  body[data-view="focus"] .library,
   body[data-view="focus"] .board,
   body[data-view="focus"] .folders { display: none; }
+  body[data-view="focus"] .library {
+    display: block; background: transparent; pointer-events: none; overflow: visible;
+  }
+  body[data-view="focus"] .library #list { display: none; }
+  body[data-view="focus"] .library .pane { pointer-events: auto; }
+  body[data-view="focus"] .dock-bar,
+  body[data-view="focus"] .dock-gutter,
+  body[data-view="focus"] .dock-extras,
+  body[data-view="focus"] .pane-hint,
+  body[data-view="focus"] .pane > .back {
+    display: none !important;
+  }
+  body[data-view="focus"] .pane {
+    grid-template-rows: minmax(0, 1fr);
+    background: var(--card);
+  }
   body[data-view="library"] .board,
   body[data-view="library"] .folders,
   body[data-view="library"] .focus { display: none; }
@@ -281,7 +396,7 @@ __ICON__
   body[data-view="folders"] .library #list { display: none; }
   body[data-view="folders"] .library .pane { grid-column: 2; }
   body[data-view="folders"] .folder-rail { display: block; grid-column: 1; pointer-events: auto; }
-  body[data-view="focus"] .focus { display: grid; }
+  body[data-view="focus"] .focus { display: block; }
   body[data-crossfade] .library { display: grid; }
   body[data-crossfade] .board { display: flex; }
   body[data-crossfade] .folders { display: grid; }
@@ -796,6 +911,7 @@ __ICON__
     const applyFilters = () => {
       for (const [id, el] of nodes) el.hidden = !matches(summaries.get(id));
       paintFolderRail();
+      paintFocus();
     };
 
     const paintOpen = () => {
@@ -814,6 +930,13 @@ __ICON__
     let folderSaveEl = null;
     let lastFolderGesture = null;
     let suppressFolderClick = false;
+    let focusSelectedIds = [];
+    let focusPrimaryId = null;
+    let focusHoveredId = null;
+    let focusLookId = null;
+    let focusSuppressClick = false;
+    let focusDecayTimer = null;
+    let focusLayoutQueued = false;
 
     const railConversations = (folderId) => [...summaries.values()]
       .filter((summary) => (folderId ? summary.folderId === folderId : !summary.folderId))
@@ -1207,6 +1330,398 @@ __ICON__
       paintTabSelection();
     };
 
+    const FOCUS_LOD_MS = 400;
+
+    const matchingFocusItems = () => [...summaries.values()]
+      .filter(matches)
+      .sort((a, b) => (b.updatedAt ?? 0) - (a.updatedAt ?? 0));
+
+    const focusFullIds = () => matchingFocusItems()
+      .filter((item) => item.pinned)
+      .sort((a, b) => (b.lastInteractedAt ?? 0) - (a.lastInteractedAt ?? 0))
+      .slice(0, FULL_CAP)
+      .map((item) => item.id);
+
+    const folderColorOf = (folderId) => folderCatalog.find((row) => row.id === folderId)?.color || '';
+
+    const clearFocusPane = () => {
+      if (!pane) return;
+      for (const prop of ['position', 'left', 'top', 'width', 'height', 'z-index', 'border-radius', 'overflow', 'display', 'pointer-events', 'visibility']) {
+        pane.style.removeProperty(prop);
+      }
+    };
+
+    const leaveFocusView = () => {
+      clearFocusPane();
+      for (const live of focusEl?.querySelectorAll('.focus-live') ?? []) live.replaceChildren();
+      document.querySelector('.focus-look')?.remove();
+      focusLookId = null;
+      stopFocusDecay();
+      applyDock();
+    };
+
+    const stopFocusDecay = () => {
+      if (focusDecayTimer) {
+        clearInterval(focusDecayTimer);
+        focusDecayTimer = null;
+      }
+    };
+
+    const startFocusDecay = () => {
+      stopFocusDecay();
+      focusDecayTimer = setInterval(() => {
+        if (document.hidden) return;
+        if ((document.body.getAttribute('data-view') || 'library') !== 'focus') return;
+        paintFocus();
+      }, 1000);
+    };
+
+    const focusCanvasBox = () => {
+      const r = focusEl.getBoundingClientRect();
+      return { w: Math.max(1, focusEl.clientWidth), h: Math.max(1, focusEl.clientHeight), left: r.left, top: r.top };
+    };
+
+    const focusLodSize = (lod, fullCount, canvas) => {
+      if (lod === 'full') {
+        const cols = fullCount >= 3 ? 2 : Math.max(1, fullCount);
+        const rows = fullCount >= 3 ? 2 : 1;
+        return {
+          w: Math.min(canvas.w * 0.72, 920) / cols - (cols > 1 ? 8 : 0),
+          h: Math.min(canvas.h * 0.70, 720) / rows - (rows > 1 ? 8 : 0),
+        };
+      }
+      if (lod === 'digest') return { w: 280, h: 200 };
+      return { w: 168, h: 56 };
+    };
+
+    const defaultFocusRect = (lod, index, canvas, size, fullCount) => {
+      if (lod === 'full') {
+        const cols = fullCount >= 3 ? 2 : Math.max(1, fullCount);
+        const col = index % cols;
+        const row = Math.floor(index / cols);
+        const totalW = cols * size.w + (cols - 1) * 8;
+        const x = Math.max(16, (canvas.w - totalW) / 2) + col * (size.w + 8);
+        const y = 24 + row * (size.h + 8);
+        return { x, y, w: size.w, h: size.h };
+      }
+      if (lod === 'digest') {
+        const x = 24 + (index % 3) * (size.w + 8);
+        const y = Math.min(canvas.h * 0.42, canvas.h - size.h - 80) + Math.floor(index / 3) * (size.h + 8);
+        return { x, y, w: size.w, h: size.h };
+      }
+      return {
+        x: 16 + index * (size.w + 8),
+        y: Math.max(16, canvas.h - size.h - 16),
+        w: size.w,
+        h: size.h,
+      };
+    };
+
+    const paintFocusCard = (card, summary, lod) => {
+      card.dataset.lod = lod;
+      card.dataset.selected = focusSelectedIds.includes(summary.id) ? 'true' : 'false';
+      const color = folderColorOf(summary.folderId);
+      if (color) card.dataset.color = color;
+      else delete card.dataset.color;
+      const title = card.querySelector('.focus-card-title');
+      if (title) title.textContent = summary.title || 'Untitled';
+      const body = card.querySelector('.focus-card-body');
+      if (body) {
+        const target = targets.get(summary.id) || summary.target || '';
+        body.textContent = [target, statusOf(summary), summary.activity || summary.lastOutcome || ''].filter(Boolean).join(' · ');
+      }
+      const model = card.querySelector('.focus-card-model');
+      if (model) model.textContent = labels.get(summary.provider)?.label || summary.model || '';
+    };
+
+    const layoutFocusPane = (fullIds) => {
+      if (!pane || !focusEl) return;
+      const stacked = focusEl.hasAttribute('data-stack') || narrowView.matches;
+      const primary = (focusPrimaryId && fullIds.includes(focusPrimaryId)) ? focusPrimaryId : fullIds[0];
+      if (!primary || stacked) {
+        clearFocusPane();
+        if (stacked) pane.style.visibility = 'hidden';
+        for (const live of focusEl.querySelectorAll('.focus-live')) live.replaceChildren();
+        return;
+      }
+      const card = focusEl.querySelector(`.focus-card[data-id="${primary}"]`);
+      const slot = card?.querySelector('.focus-live');
+      if (!slot) {
+        clearFocusPane();
+        return;
+      }
+      const r = slot.getBoundingClientRect();
+      pane.style.visibility = '';
+      pane.style.display = 'grid';
+      pane.style.position = 'fixed';
+      pane.style.left = `${r.left}px`;
+      pane.style.top = `${r.top}px`;
+      pane.style.width = `${Math.max(0, r.width)}px`;
+      pane.style.height = `${Math.max(0, r.height)}px`;
+      pane.style.zIndex = '6';
+      pane.style.borderRadius = '0 0 12px 12px';
+      pane.style.overflow = 'hidden';
+      pane.style.pointerEvents = 'auto';
+      if (convo.getAttribute('conversation') !== primary) convo.setAttribute('conversation', primary);
+      pane.querySelector('.dock-extras')?.replaceChildren();
+      for (const id of fullIds) {
+        const host = focusEl.querySelector(`.focus-card[data-id="${id}"] .focus-live`);
+        if (!host) continue;
+        if (id === primary || reduceMotion.matches) {
+          host.replaceChildren();
+          continue;
+        }
+        let extra = host.querySelector('marble-conversation');
+        if (!extra) {
+          extra = document.createElement('marble-conversation');
+          extra.setAttribute('data-marble-transient', '');
+          extra.setAttribute('data-chrome', 'pane');
+          host.append(extra);
+        }
+        extra.setAttribute('conversation', id);
+      }
+    };
+
+    const animateFocusCard = (card, from, to) => {
+      card.style.left = `${to.x}px`;
+      card.style.top = `${to.y}px`;
+      card.style.width = `${to.w}px`;
+      card.style.height = `${to.h}px`;
+      if (reduceMotion.matches) {
+        card.animate([{ opacity: 0.55 }, { opacity: 1 }], { duration: 150, easing: 'ease-out' });
+        return;
+      }
+      if (!from) return;
+      const dx = from.x - to.x;
+      const dy = from.y - to.y;
+      if (Math.abs(dx) < 0.5 && Math.abs(dy) < 0.5 && Math.abs(from.w - to.w) < 0.5 && Math.abs(from.h - to.h) < 0.5) return;
+      card.animate(
+        [
+          { transform: `translate(${dx}px, ${dy}px)`, width: `${from.w}px`, height: `${from.h}px` },
+          { transform: 'none', width: `${to.w}px`, height: `${to.h}px` },
+        ],
+        { duration: FOCUS_LOD_MS, easing: 'ease-out' },
+      );
+    };
+
+    const pinFocus = async (id, { keepOpen = false } = {}) => {
+      if (!agent || !id) return;
+      const pinned = matchingFocusItems().filter((item) => item.pinned);
+      if (!keepOpen) {
+        for (const item of pinned) {
+          if (item.id === id) continue;
+          item.pinned = false;
+          try { await agent.update(item.id, { pinned: false }); } catch { /* stale */ }
+        }
+      } else if (!pinned.some((item) => item.id === id) && pinned.length >= FULL_CAP) {
+        const oldest = [...pinned].sort((a, b) => (a.lastInteractedAt ?? 0) - (b.lastInteractedAt ?? 0))[0];
+        if (oldest) {
+          oldest.pinned = false;
+          try { await agent.update(oldest.id, { pinned: false }); } catch { /* stale */ }
+        }
+      }
+      const target = summaries.get(id);
+      if (target) target.pinned = true;
+      try { await agent.update(id, { pinned: true }); } catch { /* stale */ }
+      if (!focusSelectedIds.includes(id)) focusSelectedIds = [id];
+      focusPrimaryId = id;
+      paintFocus();
+    };
+
+    const unpinFocus = async (id) => {
+      if (!agent || !id) return;
+      const item = summaries.get(id);
+      if (item) item.pinned = false;
+      try { await agent.update(id, { pinned: false }); } catch { /* stale */ }
+      paintFocus();
+    };
+
+    const selectFocusCard = (id, event) => {
+      if (event?.metaKey || event?.ctrlKey) {
+        focusSelectedIds = focusSelectedIds.includes(id)
+          ? focusSelectedIds.filter((row) => row !== id)
+          : [...focusSelectedIds, id];
+      } else if (event?.shiftKey && focusPrimaryId && focusPrimaryId !== id) {
+        if (!focusSelectedIds.includes(id)) focusSelectedIds = [...focusSelectedIds, id];
+      } else {
+        focusSelectedIds = [id];
+      }
+      focusPrimaryId = id;
+      paintFocus();
+      const item = summaries.get(id);
+      if (agent && item) agent.update(id, { pinned: Boolean(item.pinned) }).catch(() => {});
+    };
+
+    const bindFocusCard = (card) => {
+      card.addEventListener('pointerdown', (event) => {
+        if (event.button !== 0) return;
+        if (event.target.closest('button, a, input, textarea, marble-conversation')) return;
+        const id = card.dataset.id;
+        const origin = { x: event.clientX, y: event.clientY, left: card.offsetLeft, top: card.offsetTop, id, started: false };
+        card.setPointerCapture(event.pointerId);
+        const move = (e) => {
+          if (Math.hypot(e.clientX - origin.x, e.clientY - origin.y) < 10 && !origin.started) return;
+          origin.started = true;
+          focusSuppressClick = true;
+          card.classList.add('is-dragging');
+          card.style.zIndex = '10';
+          card.style.left = `${origin.left + (e.clientX - origin.x)}px`;
+          card.style.top = `${origin.top + (e.clientY - origin.y)}px`;
+        };
+        const up = async (e) => {
+          try { card.releasePointerCapture(e.pointerId); } catch { /* released */ }
+          card.removeEventListener('pointermove', move);
+          card.removeEventListener('pointerup', up);
+          card.classList.remove('is-dragging');
+          if (!origin.started) return;
+          const canvas = focusCanvasBox();
+          const x = card.offsetLeft;
+          const y = card.offsetTop;
+          const fx = canvas.w > card.offsetWidth ? x / (canvas.w - card.offsetWidth) : 0;
+          const fy = canvas.h > card.offsetHeight ? y / (canvas.h - card.offsetHeight) : 0;
+          const item = summaries.get(id);
+          if (item) {
+            item.focusX = fx;
+            item.focusY = fy;
+          }
+          try { await agent?.update(id, { focusX: fx, focusY: fy }); } catch { /* stale */ }
+          paintFocus();
+          setTimeout(() => { focusSuppressClick = false; }, 0);
+        };
+        card.addEventListener('pointermove', move);
+        card.addEventListener('pointerup', up);
+      });
+      card.addEventListener('click', (event) => {
+        if (focusSuppressClick) return;
+        if (event.target.closest('button, a, input, textarea, marble-conversation')) return;
+        selectFocusCard(card.dataset.id, event);
+      });
+      card.addEventListener('dblclick', (event) => {
+        if (event.target.closest('button, a, input, textarea, marble-conversation')) return;
+        event.preventDefault();
+        pinFocus(card.dataset.id, { keepOpen: event.shiftKey });
+      });
+      card.addEventListener('pointerenter', () => {
+        if (focusSuppressClick) return;
+        focusHoveredId = card.dataset.id;
+        paintFocus();
+      });
+      card.addEventListener('pointerleave', () => {
+        if (focusHoveredId === card.dataset.id) focusHoveredId = null;
+        if (!focusSuppressClick) paintFocus();
+      });
+      card.querySelector('.focus-pin')?.addEventListener('click', (event) => {
+        event.stopPropagation();
+        pinFocus(card.dataset.id);
+      });
+      card.querySelector('.focus-keep')?.addEventListener('click', (event) => {
+        event.stopPropagation();
+        pinFocus(card.dataset.id, { keepOpen: true });
+      });
+      card.querySelector('.focus-collapse')?.addEventListener('click', (event) => {
+        event.stopPropagation();
+        unpinFocus(card.dataset.id);
+      });
+    };
+
+    const makeFocusCard = (summary) => {
+      const card = document.createElement('article');
+      card.className = 'focus-card';
+      card.dataset.id = summary.id;
+      card.setAttribute('data-marble-transient', '');
+      card.tabIndex = 0;
+      card.innerHTML = '<header class="focus-card-head"><span class="focus-card-title"></span><span class="focus-card-model"></span><span class="focus-card-actions"><button type="button" class="focus-pin">Focus</button><button type="button" class="focus-keep">Keep open</button><button type="button" class="focus-collapse">Collapse</button></span></header><div class="focus-card-body"></div><div class="focus-live"></div>';
+      bindFocusCard(card);
+      return card;
+    };
+
+    function paintFocus() {
+      if (!focusEl) return;
+      const view = document.body.getAttribute('data-view') || 'library';
+      if (view !== 'focus') return;
+      if (focusEl.clientWidth < 2 && !focusLayoutQueued) {
+        focusLayoutQueued = true;
+        requestAnimationFrame(() => {
+          focusLayoutQueued = false;
+          paintFocus();
+        });
+        return;
+      }
+      const helpers = window.marbleAgentFolders;
+      const items = matchingFocusItems();
+      const fullIds = focusFullIds();
+      const lods = helpers?.assignLods
+        ? helpers.assignLods(items.map((item) => ({
+          id: item.id,
+          running: statusOf(item) === 'running',
+          needsReview: Boolean(item.needsReview),
+          lastInteractedAt: item.lastInteractedAt,
+          updatedAt: item.updatedAt,
+        })), {
+          fullIds,
+          selectedIds: focusSelectedIds,
+          hoveredId: focusHoveredId,
+          now: Date.now(),
+        })
+        : Object.fromEntries(items.map((item) => [item.id, fullIds.includes(item.id) ? 'full' : 'digest']));
+
+      const seen = new Set();
+      for (const item of items) {
+        seen.add(item.id);
+        let card = focusEl.querySelector(`.focus-card[data-id="${item.id}"]`);
+        if (!card) {
+          card = makeFocusCard(item);
+          focusEl.append(card);
+        }
+        paintFocusCard(card, item, lods[item.id] || 'digest');
+      }
+      for (const card of [...focusEl.querySelectorAll('.focus-card')]) {
+        if (!seen.has(card.dataset.id)) card.remove();
+      }
+
+      if (focusEl.hasAttribute('data-stack') || narrowView.matches) {
+        layoutFocusPane(fullIds);
+        return;
+      }
+
+      const canvas = focusCanvasBox();
+      const lodCounts = { full: 0, digest: 0, chip: 0 };
+      const planned = [];
+      for (const item of items) {
+        const lod = lods[item.id] || 'digest';
+        const index = lodCounts[lod] ?? 0;
+        lodCounts[lod] = index + 1;
+        const size = focusLodSize(lod, fullIds.length || 1, canvas);
+        const base = (Number.isFinite(item.focusX) && Number.isFinite(item.focusY))
+          ? {
+            x: item.focusX * Math.max(0, canvas.w - size.w),
+            y: item.focusY * Math.max(0, canvas.h - size.h),
+            w: size.w,
+            h: size.h,
+          }
+          : defaultFocusRect(lod, index, canvas, size, fullIds.length || 1);
+        planned.push({ ...base, id: item.id });
+      }
+      const separated = helpers?.separateRects ? helpers.separateRects(planned, helpers.GAP ?? 8) : planned;
+      const canvasR = focusEl.getBoundingClientRect();
+      separated.forEach((rect, i) => {
+        const id = planned[i].id;
+        const card = focusEl.querySelector(`.focus-card[data-id="${id}"]`);
+        if (!card) return;
+        const box = card.getBoundingClientRect();
+        const from = card.hasAttribute('data-placed')
+          ? { x: box.left - canvasR.left + focusEl.scrollLeft, y: box.top - canvasR.top + focusEl.scrollTop, w: box.width, h: box.height }
+          : null;
+        animateFocusCard(card, from, { x: rect.x, y: rect.y, w: rect.w, h: rect.h });
+        card.setAttribute('data-placed', '');
+        const lod = card.dataset.lod;
+        if (!card.classList.contains('is-dragging')) {
+          card.style.zIndex = lod === 'full' ? '3' : lod === 'digest' ? '2' : '1';
+        }
+      });
+      layoutFocusPane(fullIds);
+    }
+
     const paintRow = (el, summary) => {
       el.dataset.status = statusOf(summary);
       // A finer signal than the three-way status bucket, purely for the dot's
@@ -1513,6 +2028,14 @@ __ICON__
       ensurePrimaryBar();
       const extras = pane.querySelector('.dock-extras');
       const gutter = pane.querySelector('.dock-gutter');
+      if ((document.body.getAttribute('data-view') || 'library') === 'focus') {
+        extras?.replaceChildren();
+        gutter?.remove();
+        pane.removeAttribute('data-dock');
+        pane.removeAttribute('data-dock-primary');
+        paintBars();
+        return;
+      }
       if (!dock.extras.length) {
         pane.removeAttribute('data-dock');
         pane.removeAttribute('data-dock-primary');
@@ -1831,6 +2354,7 @@ __ICON__
       el.classList.toggle('marble-open', summary.id === openId);
       if (summary.id === openId) fillChrome(summary.id);
       paintFolderRail();
+      paintFocus();
     };
 
     const undoable = (turns) => {
@@ -1942,7 +2466,11 @@ __ICON__
         document.body.setAttribute('data-view', next);
         deriveView();
         if (next === 'library') closeBoardPanel();
+        if (current === 'focus' && next !== 'focus') leaveFocusView();
         placeAll();
+        paintFocus();
+        if (next === 'focus') startFocusDecay();
+        else stopFocusDecay();
       };
 
       const crossfade = () => {
@@ -2128,7 +2656,7 @@ __ICON__
       // into the file for everyone. conversation lives on an addressed
       // <marble-conversation>, so without this a patch strips it and a
       // source.outer of the pane writes it.
-      marble.pageOnly?.('data-view', 'aria-pressed', 'conversation', 'data-open', 'data-crossfade', 'data-panel', 'data-dock', 'data-dock-primary');
+      marble.pageOnly?.('data-view', 'aria-pressed', 'conversation', 'data-open', 'data-crossfade', 'data-panel', 'data-dock', 'data-dock-primary', 'data-stack');
       restoreView();
       deriveFilters();
       marble.register?.(() => {
