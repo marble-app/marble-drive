@@ -331,10 +331,24 @@
     let fieldW = fieldAt(fieldPref);
     const spare = room - bar - stageW - fieldW;
     if (spare >= 0) {
-      // Slack goes to the conversations, then to the columns, then to air.
+      // Slack goes to the conversations, then to the columns — and what is
+      // left after both reach their preferred maximum is not air: it is
+      // shared between them in proportion, so a wide screen is filled edge
+      // to edge. The New-group slot is set aside first, so the fill does
+      // not swallow the one column that says a folder can be made.
       const toStage = n ? Math.min(spare, stageAt(paneMax) - stageW) : 0;
       stageW += toStage;
-      fieldW += subCols ? Math.min(spare - toStage, fieldAt(fieldMax) - fieldW) : 0;
+      const toField = subCols ? Math.min(spare - toStage, fieldAt(fieldMax) - fieldW) : 0;
+      fieldW += toField;
+      const air = spare - toStage - toField;
+      const reserve = shaped.length && air >= NEW_W + gap ? NEW_W + gap : 0;
+      const fill = air - reserve;
+      if (fill > 0 && (n || subCols)) {
+        const total = stageW + fieldW;
+        const toStageFill = n ? (subCols ? fill * (stageW / total) : fill) : 0;
+        stageW += toStageFill;
+        if (subCols) fieldW += fill - toStageFill;
+      }
     } else {
       const give = -spare;
       const stageGive = stageW - stageAt(paneMin);
@@ -377,7 +391,12 @@
         return Math.max(best, stacked);
       }, 0);
       const h = Math.min(availH, Math.max(0, tallest) + NAME_H + 2 * PAD);
-      if (regions.length && colTop + h > top + availH + 0.01) {
+      // While a card is in the air, the loose region is a landing zone: the
+      // lifted card is counted in it, and tucked under a folder it would
+      // shrink that folder under the pointer (regions share their column's
+      // height). It opens its own column for the length of the drag.
+      const landing = newGroup === 'always' && group.folderId === null;
+      if (regions.length && (landing || colTop + h > top + availH + 0.01)) {
         colIndex += 1;
         colX += colWidth + gap;
         colTop = top;
@@ -410,13 +429,38 @@
     }
     if (regions.length) x = colX + colWidth + gap;
 
+    // A field column is as tall as the canvas. Regions in it are placed by
+    // their content, then share what the column has left, in proportion —
+    // cards keep their size and stay at the top; the region's box grows.
+    const columns = new Map();
+    for (const region of regions) columns.set(region.col, [...(columns.get(region.col) ?? []), region]);
+    for (const stacked of columns.values()) {
+      const content = stacked.reduce((sum, region) => sum + region.h, 0);
+      const left = availH - content - (stacked.length - 1) * gap;
+      if (left <= 0.01 || !content) continue;
+      let y = top;
+      for (const region of stacked) {
+        const grown = region.h + left * (region.h / content);
+        const dy = y - region.y;
+        region.y = y;
+        region.h = grown;
+        region.inner.y += dy;
+        region.inner.h = grown - NAME_H - 2 * PAD;
+        for (const card of region.cards) {
+          card.y += dy;
+          rects[card.id].y += dy;
+        }
+        y += grown + gap;
+      }
+    }
+
     // Making a folder is otherwise undiscoverable — you have to guess that one
     // card dropped on another means something. A column you can see says it.
     // It is drawn in the room the columns did not take, so it costs the
     // conversations nothing; `newGroup: 'always'` overrides that for the
     // length of a drag, when it is the thing being aimed at.
     const wantsNew = regions.length && (newGroup === 'always'
-      || margin + room - x >= NEW_W);
+      || margin + room - x >= NEW_W - 0.5);
     const newSlot = wantsNew ? { x, y: top, w: NEW_W, h: availH } : null;
     if (newSlot) x += NEW_W + gap;
 

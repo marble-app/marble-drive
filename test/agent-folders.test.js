@@ -88,6 +88,7 @@ const inside = (rect, region) =>
   rect.y + rect.h <= region.y + region.h + 0.01;
 
 const pack = (opts) => F().packFocus({ canvas: CANVAS, sizes: SIZES, ...opts });
+const MARGIN = 16;
 
 const FIELD = [
   { folderId: 'aaaaaaaaaaaa', cards: cards('a', 4, 'digest') },
@@ -162,7 +163,21 @@ test('one pin and a small field fit without scrolling, and the pane takes the sl
   const packed = pack({ fulls: [{ id: 'f0' }], groups: [FIELD[0]] });
   assert.equal(packed.width, CANVAS.w);
   assert.ok(packed.stage.cols[0].w >= F().PANE_PREF, 'slack belongs to the conversation');
-  assert.ok(packed.stage.cols[0].w <= F().PANE_MAX);
+  // Nothing is left as air: the pane and the column grow past their
+  // preferred widths until the New-group slot touches the right edge.
+  assert.ok(packed.stage.cols[0].w > F().PANE_MAX, 'the pane grows into the leftover width');
+  assert.ok(packed.newGroup, 'the New-group slot is still offered');
+  assert.ok(Math.abs(packed.newGroup.x + packed.newGroup.w + MARGIN - CANVAS.w) < 1, 'the field reaches the right edge');
+});
+
+test('a lone region fills its column, and the columns share a wide canvas', () => {
+  const packed = pack({ groups: [FIELD[0]] });
+  const [region] = packed.regions;
+  assert.ok(Math.abs(region.h - (CANVAS.h - 2 * MARGIN)) < 1, `a lone region is as tall as the canvas, not ${region.h}`);
+  assert.ok(packed.colW > F().FIELD_MAX, `columns widen past FIELD_MAX to fill, got ${packed.colW}`);
+  assert.ok(Math.abs(packed.newGroup.x + packed.newGroup.w + MARGIN - CANVAS.w) < 1, 'the New-group slot sits at the edge');
+  for (const card of region.cards) assert.ok(inside(card, region));
+  assert.equal(region.cards[0].y, region.inner.y, 'cards stay at the top of a grown region');
 });
 
 test('packFocus orders a column by the stored rank', () => {
@@ -296,7 +311,8 @@ test('two small folders sit one above the other, not in two mostly-empty columns
   assert.equal(regions.length, 2);
   assert.equal(Math.round(regions[0].x), Math.round(regions[1].x), 'same field column');
   assert.ok(regions[1].y >= regions[0].y + regions[0].h, 'the second sits below the first');
-  assert.ok(regions[0].h < CANVAS.h * 0.6, 'a region is as tall as its content');
+  assert.ok(regions[0].h < CANVAS.h * 0.6, 'the column is shared, not taken by the first');
+  assert.ok(Math.abs(regions[1].y + regions[1].h - (CANVAS.h - MARGIN)) < 1, 'together they fill the column');
   assert.equal(regions[0].col, 0);
   assert.equal(regions[1].col, 0);
 });

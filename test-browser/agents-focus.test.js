@@ -583,6 +583,7 @@ test('dropping a card on the bottom band of a stage pane stacks it under', async
   await page.locator(`.pane marble-conversation[conversation="${ids.a}"]`).waitFor();
   await page.waitForTimeout(500);
   const paneBox = await page.locator('.pane').boundingBox();
+  const widthBefore = paneBox.width;
   const release = await dragTo(page, ids.b, { x: paneBox.x + paneBox.width / 2, y: paneBox.y + paneBox.height * 0.92 });
   await page.locator('.pane .dock-ghost').waitFor();
   await release();
@@ -592,8 +593,14 @@ test('dropping a card on the bottom band of a stage pane stacks it under', async
   assert.equal(frames[0].x, frames[1].x, 'one column: ' + JSON.stringify(frames));
   assert.notEqual(frames[0].y, frames[1].y, 'stacked');
   await until(page, async () => (await metaOf(page, ids.b))?.pinned === true, 'b to be pinned');
-  const stageW = await page.evaluate(() => document.querySelector('.pane').getBoundingClientRect().width);
-  assert.ok(stageW <= 560 + 2, `two stacked pins take one column's width (${stageW})`);
+  // Stacked, the two pins are one column, and with no field left that column
+  // is the whole canvas: the stage fills what the field does not take.
+  const { stageW, canvasW } = await page.evaluate(() => ({
+    stageW: document.querySelector('.pane').getBoundingClientRect().width,
+    canvasW: document.querySelector('.focus').clientWidth,
+  }));
+  assert.ok(stageW > widthBefore, `the stage grew into the room the field gave up (${stageW} vs ${widthBefore})`);
+  assert.ok(Math.abs(stageW - (canvasW - 32)) < 2, `one column fills the canvas (${stageW} of ${canvasW})`);
 });
 
 test('the Focus arrangement and the List arrangement do not overwrite each other', async () => {
