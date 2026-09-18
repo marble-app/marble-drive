@@ -92,7 +92,7 @@ button { font: inherit; }
 
   <nav class="steps" data-marble-id="steps" data-genui="stepper#steps"
     data-genui-about="The four step names with the current one marked"
-    data-form="horizontal" data-genui-form="horizontal | vertical-with-content | compact-count"
+    data-form="horizontal" data-genui-form="horizontal: all four step names in one row across the top, for wide screens | vertical-with-content: the steps stacked down the left, one per line, when there is room beside the fields | compact-count: only 'Step 2 of 4', no names, for narrow screens or a modal"
     data-labels="titles" data-genui-labels="numbers-only | titles | titles-with-entered-values">
     <div class="bar" data-marble-id="bar"><i data-marble-id="bar-fill"></i></div>
     <ol data-marble-id="steps-list">

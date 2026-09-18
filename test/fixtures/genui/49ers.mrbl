@@ -85,7 +85,7 @@ h2, h3, p { margin: 0; }
     data-media="side-thumbnail"
     data-genui-media="none | side-thumbnail"
     data-actions="none"
-    data-genui-actions="none | one-primary-action"
+    data-genui-actions="none: the card is only a way to open the game; nothing on it to press | one-primary-action: a Tickets or Recap button on every card, for people who act without opening"
     data-target="whole-card"
     data-genui-target="whole-card | title-only">
     <article class="card" data-marble-id="g1">

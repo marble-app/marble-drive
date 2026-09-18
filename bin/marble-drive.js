@@ -11,7 +11,7 @@
 //   marble-drive agents try <id>     one real turn against a scratch drive
 //   marble-drive starters         what you can make
 //   marble-drive genui space <doc>       is this document an app space? every issue, or ok
-//   marble-drive genui decide <doc>      let Jev position it — --dry to look without writing
+//   marble-drive genui decide <doc>      let Jev position it — --dry to look without writing, --verbose for the distributions
 //
 // Every one of these goes through the same store the host does, which is the
 // point: a command and a request are two callers of one seam, not two
@@ -357,7 +357,7 @@ async function agentsCommand() {
 
 async function genuiCommand() {
   const [sub, docArg] = args;
-  if (!sub || !['space', 'decide'].includes(sub)) fail('genui needs: space <doc> | decide <doc> [--dry] [--stop=N] [--context=JSON] [--request=…]');
+  if (!sub || !['space', 'decide'].includes(sub)) fail('genui needs: space <doc> | decide <doc> [--dry] [--verbose] [--stop=N] [--context=JSON] [--request=…]');
   if (!docArg) fail(`genui ${sub} needs a document path inside the drive, like "Research/TypeSafe AI/Spaces/49ers"`);
   const { loadAtlas } = await import('../server/genui/atlas.js');
   const { extractSpace, validateSpace } = await import('../server/genui/space.js');
@@ -406,12 +406,27 @@ async function genuiCommand() {
     if (err.issues) for (const issue of err.issues) console.error(`${issue.kind}  ${issue.instance ?? '-'}.${issue.key ?? '-'}  ${issue.message}`);
     fail(err.message);
   });
+  // A near-uniform distribution is an authoring smell, not a gate problem:
+  // the options are indistinguishable from their glosses, or the dimension
+  // should not be live. TypeSafe's confidence is how concentrated the
+  // distribution is, so "flat" is a low confidence, whatever n is.
+  const FLAT = 0.15;
+  let flat = 0;
   for (const d of result.decisions) {
     const conf = d.confidence === null ? '  -  ' : d.confidence.toFixed(2);
     const move = d.choice && d.choice !== d.current ? `→ ${d.choice}` : '';
-    console.log(`${d.applied ? '→' : ' '} ${conf}  ${d.id.padEnd(32)} ${d.current} ${move}  ${d.reason}`);
+    const isFlat = d.confidence !== null && d.confidence < FLAT;
+    if (isFlat) flat += 1;
+    console.log(`${d.applied ? '→' : isFlat ? '≈' : ' '} ${conf}  ${d.id.padEnd(32)} ${d.current} ${move}  ${d.reason}${isFlat ? '  · flat' : ''}`);
+    if (flags.verbose && d.probabilities) {
+      for (const slug of d.options ?? Object.keys(d.probabilities)) {
+        const p = Number(d.probabilities[slug] ?? 0);
+        console.log(`           ${slug.padEnd(28)} ${'█'.repeat(Math.round(p * 24)).padEnd(24, '·')} ${p.toFixed(2)}`);
+      }
+    }
   }
   console.log(`${result.ops.length} change(s) in ${result.elapsedMs} ms${flags.dry ? ' (dry — nothing written)' : ''}`);
+  if (flat) console.log(`${flat} decision(s) near-uniform (confidence < ${FLAT}) — sharpen the glosses, drop an option, or fix the value and remove the declaration.`);
   if (flags.dry || !result.ops.length) return;
   const drive = await createDrive(config, { log: { log() {}, error: console.error } });
   try {
