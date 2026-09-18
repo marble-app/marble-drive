@@ -70,7 +70,7 @@ __ICON__
     }
     /* Drive zeros every transition. This page's spec is a 150 ms opacity
        crossfade on the two views, so those two have to win. */
-    .library, .board {
+    .library, .board, .folders, .focus {
       animation-duration: 150ms !important;
       transition-duration: 150ms !important;
     }
@@ -102,7 +102,9 @@ __ICON__
   .seg button:hover, .seg button:focus-visible { color: var(--ink); outline: none; }
   .seg button[aria-pressed="true"],
   body[data-view="library"] .views [data-view="library"],
-  body[data-view="board"] .views [data-view="board"] {
+  body[data-view="board"] .views [data-view="board"],
+  body[data-view="folders"] .views [data-view="folders"],
+  body[data-view="focus"] .views [data-view="focus"] {
     color: var(--ink); background: var(--card); box-shadow: var(--shadow);
   }
   input.search {
@@ -158,16 +160,47 @@ __ICON__
     .meter[data-tone="orange"] .meter-bar i { background: #e08a4a; }
   }
 
-  .library, .board {
+  .library, .board, .folders, .focus {
     grid-row: 2; grid-column: 1; min-height: 0; min-width: 0;
   }
   .library {
     display: grid; grid-template-columns: minmax(16rem, 22rem) minmax(0, 1fr);
   }
-  body[data-view="board"] .library { display: none; }
-  body[data-view="library"] .board { display: none; }
+  .folders, .focus { display: none; }
+  .folder-rail {
+    display: none; min-height: 0; overflow-y: auto; border-right: 1px solid var(--line);
+    padding: .4rem 0; background: var(--paper);
+  }
+  .focus-workspace {
+    min-height: 0; display: flex; flex-direction: column; gap: .5rem; padding: 1rem;
+  }
+  .focus-workspace h2 {
+    margin: 0; font-size: .75rem; font-weight: 500; letter-spacing: .06em;
+    text-transform: uppercase; color: var(--faint);
+  }
+  body[data-view="board"] .library,
+  body[data-view="focus"] .library,
+  body[data-view="focus"] .board,
+  body[data-view="focus"] .folders { display: none; }
+  body[data-view="library"] .board,
+  body[data-view="library"] .folders,
+  body[data-view="library"] .focus { display: none; }
+  body[data-view="board"] .folders,
+  body[data-view="board"] .focus { display: none; }
+  body[data-view="folders"] .board,
+  body[data-view="folders"] .focus { display: none; }
+  body[data-view="folders"] .folders,
+  body[data-view="folders"] .library {
+    display: grid; grid-template-columns: minmax(16rem, 22rem) minmax(0, 1fr);
+  }
+  body[data-view="folders"] .library #list { display: none; }
+  body[data-view="folders"] .library .pane { grid-column: 2; }
+  body[data-view="folders"] .folder-rail { display: block; grid-column: 1; }
+  body[data-view="focus"] .focus { display: grid; }
   body[data-crossfade] .library { display: grid; }
   body[data-crossfade] .board { display: flex; }
+  body[data-crossfade] .folders { display: grid; }
+  body[data-crossfade] .focus { display: grid; }
   /* Board + an open conversation is a split: kanban left, pane right.
      Do not reparent <marble-conversation> — a missing keyed child in .pane
      is cloned on reconcile. */
@@ -471,6 +504,8 @@ __ICON__
     <div class="seg views" role="group" aria-label="View" data-marble-id="__ID__">
       <button type="button" data-view="library" aria-pressed="true" data-marble-id="__ID__">List</button>
       <button type="button" data-view="board" aria-pressed="false" data-marble-id="__ID__">Board</button>
+      <button type="button" data-view="folders" aria-pressed="false" data-marble-id="__ID__">Folders</button>
+      <button type="button" data-view="focus" aria-pressed="false" data-marble-id="__ID__">Focus</button>
     </div>
     <div class="seg cli" role="group" aria-label="CLI" data-marble-transient></div>
     <div class="seg filters" role="group" aria-label="Filter" data-marble-id="__ID__">
@@ -517,6 +552,16 @@ __ICON__
   </div>
 </div>
 
+<div class="folders" data-marble-id="__ID__">
+  <aside class="folder-rail" data-marble-id="__ID__" aria-label="Folders"></aside>
+</div>
+
+<div class="focus" data-marble-id="__ID__">
+  <section class="focus-workspace" data-marble-id="__ID__">
+    <h2 data-marble-id="__ID__">Focus</h2>
+  </section>
+</div>
+
 <script>
   // The Agents library. Rows, the open id, the filter and the search are the
   // page's — never ops — so browsing does not rewrite this file. View and the
@@ -538,9 +583,11 @@ __ICON__
       } catch { /* private browsing — the page still works; it just forgets */ }
     };
 
+    const VIEW_ORDER = ['library', 'board', 'folders', 'focus'];
+
     const restoreView = () => {
       const savedView = recalled(VIEW_KEY);
-      if (savedView === 'library' || savedView === 'board') document.body.setAttribute('data-view', savedView);
+      if (VIEW_ORDER.includes(savedView)) document.body.setAttribute('data-view', savedView);
       deriveView();
     };
 
@@ -548,6 +595,8 @@ __ICON__
     const list = $('#list');
     const libraryEl = $('.library');
     const boardEl = $('.board');
+    const foldersEl = $('.folders');
+    const focusEl = $('.focus');
     const convo = $('marble-conversation');
     const pane = $('.pane');
     const boardPanel = $('.board-panel');
@@ -748,8 +797,22 @@ __ICON__
       for (const el of nodes.values()) el.classList.remove('marble-flip');
     };
 
+    const shellFor = (view) => {
+      if (view === 'board') return boardEl;
+      if (view === 'folders') return foldersEl;
+      if (view === 'focus') return focusEl;
+      return libraryEl;
+    };
+
+    const nextView = (view) => {
+      const index = VIEW_ORDER.indexOf(view);
+      return VIEW_ORDER[(index + 1) % VIEW_ORDER.length];
+    };
+
+    const isListBoard = (view) => view === 'library' || view === 'board';
+
     const cancelViewFades = () => {
-      for (const el of [libraryEl, boardEl]) {
+      for (const el of [libraryEl, boardEl, foldersEl, focusEl]) {
         for (const anim of el.getAnimations()) anim.cancel();
       }
     };
@@ -1374,7 +1437,7 @@ __ICON__
     };
 
     const setView = (next) => {
-      if (next !== 'library' && next !== 'board') return;
+      if (!VIEW_ORDER.includes(next)) return;
       remember(VIEW_KEY, next);
       const current = document.body.getAttribute('data-view') || 'library';
       if (current === next) {
@@ -1389,15 +1452,15 @@ __ICON__
         placeAll();
       };
 
-      if (reduceMotion.matches || narrowView.matches) {
+      const crossfade = () => {
         cancelFlip();
         const gen = ++fadeGen;
         cancelViewFades();
         document.body.setAttribute('data-crossfade', '1');
         void document.body.offsetWidth;
         applyLayout();
-        const incoming = next === 'board' ? boardEl : libraryEl;
-        const outgoing = next === 'board' ? libraryEl : boardEl;
+        const incoming = shellFor(next);
+        const outgoing = shellFor(current);
         const fadeIn = incoming.animate([{ opacity: 0 }, { opacity: 1 }], { duration: 150, fill: 'both' });
         const fadeOut = outgoing.animate([{ opacity: 1 }, { opacity: 0 }], { duration: 150, fill: 'both' });
         Promise.all([fadeIn.finished.catch(() => {}), fadeOut.finished.catch(() => {})]).then(() => {
@@ -1406,6 +1469,10 @@ __ICON__
           fadeIn.cancel();
           fadeOut.cancel();
         });
+      };
+
+      if (reduceMotion.matches || narrowView.matches || !isListBoard(current) || !isListBoard(next)) {
+        crossfade();
         return;
       }
 
@@ -1506,7 +1573,7 @@ __ICON__
       if (typingIn()) return;
       event.preventDefault();
       const view = document.body.getAttribute('data-view') || 'library';
-      setView(view === 'board' ? 'library' : 'board');
+      setView(nextView(view));
     });
 
     const restoreOpen = () => {

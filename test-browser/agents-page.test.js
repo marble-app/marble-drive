@@ -324,6 +324,20 @@ test('the open conversation id is page-only and survives a reconcile', async () 
   assert.equal(await view.getAttribute('conversation'), id);
 });
 
+test('V cycles List, Board, Folders, Focus and does not file the view', async () => {
+  const { page } = await openAgents();
+  await page.keyboard.press('v');
+  await page.waitForFunction(() => document.body.getAttribute('data-view') === 'board');
+  await page.keyboard.press('v');
+  await page.waitForFunction(() => document.body.getAttribute('data-view') === 'folders');
+  await page.keyboard.press('v');
+  await page.waitForFunction(() => document.body.getAttribute('data-view') === 'focus');
+  await page.keyboard.press('v');
+  await page.waitForFunction(() => document.body.getAttribute('data-view') === 'library');
+  const filed = await page.evaluate(() => window.marble.source.outer(document.body));
+  assert.equal(filed.includes('data-view="focus"'), false, 'focus is page-only and must not be filed');
+});
+
 test('V toggles library and board; the same conversation node moves', async () => {
   const { page } = await openAgents();
   const id = await page.evaluate(async () => {
@@ -343,7 +357,7 @@ test('V toggles library and board; the same conversation node moves', async () =
   await page.waitForFunction(() => document.body.getAttribute('data-view') === 'board');
   assert.equal(await page.locator(`.column[data-col="review"] .conv[data-id="${id}"]`).count(), 1);
   assert.equal(await page.locator(`.conv[data-id="${id}"]`).count(), 1, 'the row was moved, not cloned');
-  await page.keyboard.press('v');
+  await page.locator('.views [data-view="library"]').click();
   await page.waitForFunction(() => document.body.getAttribute('data-view') === 'library');
   assert.equal(await page.locator(`#list .conv[data-id="${id}"]`).count(), 1);
 });
@@ -567,6 +581,9 @@ test('toggling twice during FLIP keeps one node on the library', async () => {
   await page.locator(`.conv[data-id="${id}"]`).waitFor();
   await page.keyboard.press('v');
   await page.keyboard.press('v');
+  await page.waitForFunction(() => document.body.getAttribute('data-view') === 'folders');
+  await page.keyboard.press('v');
+  await page.keyboard.press('v');
   await page.waitForFunction(() => document.body.getAttribute('data-view') === 'library');
   await page.waitForFunction((cid) => {
     const el = document.querySelector(`.conv[data-id="${cid}"]`);
@@ -589,6 +606,9 @@ test('toggling twice during a crossfade does not stick opacity', async () => {
     return id;
   });
   await page.locator(`.conv[data-id="${id}"]`).waitFor();
+  await page.keyboard.press('v');
+  await page.keyboard.press('v');
+  await page.waitForFunction(() => document.body.getAttribute('data-view') === 'folders');
   await page.keyboard.press('v');
   await page.keyboard.press('v');
   await page.waitForFunction(() => document.body.getAttribute('data-view') === 'library');
