@@ -182,7 +182,9 @@ export function createAgentStore({ dir, defaultProvider = 'claude-subscription',
       if (!counters.has(id)) {
         const text = await eventsText(id);
         const seqs = parseEvents(id, text).map((e) => e.seq).filter(Number.isFinite);
-        counters.set(id, seqs.length ? Math.max(...seqs) : 0);
+        // A fold, not a spread: a long conversation has more events than fit
+        // in one call's worth of arguments.
+        counters.set(id, seqs.reduce((top, seq) => (seq > top ? seq : top), 0));
         // A torn last line has no newline; start on a fresh one, or this
         // event would be glued onto it and lost with it.
         if (text && !text.endsWith('\n')) lead = '\n';
@@ -262,10 +264,68 @@ export function createAgentStore({ dir, defaultProvider = 'claude-subscription',
     return summarize({ ...meta, queued });
   }
 
+  // ------------------------------------------------------------------ uploads
+  //
+  // An image pasted into a composer has to become a file before an agent can
+  // look at it: every provider is a CLI reading the disk, not an API taking
+  // base64. They live beside the conversations, under `.marble/`, so the backup
+  // that already copies that folder carries them, and so an agent handed the
+  // path can read it without being let anywhere new.
+
+  const uploadsDir = path.join(dir, 'uploads');
+  const KINDS = new Map([
+    ['image/png', 'png'],
+    ['image/jpeg', 'jpg'],
+    ['image/gif', 'gif'],
+    ['image/webp', 'webp'],
+  ]);
+
+  const uploadPath = (name) => {
+    // The name is ours — minted below — so anything else is someone trying a
+    // path, and gets nothing.
+    if (!/^[0-9a-f]{16}\.(png|jpg|gif|webp)$/.test(String(name))) return null;
+    return path.join(uploadsDir, name);
+  };
+
+  async function saveUpload({ type, data, name = '' }) {
+    const ext = KINDS.get(String(type));
+    if (!ext) throw Object.assign(new Error(`${type} is not an image this drive keeps`), { status: 400 });
+    const bytes = Buffer.from(String(data ?? ''), 'base64');
+    if (!bytes.length) throw Object.assign(new Error('that image arrived empty'), { status: 400 });
+    const file = `${crypto.randomBytes(8).toString('hex')}.${ext}`;
+    await fsp.mkdir(uploadsDir, { recursive: true });
+    await fsp.writeFile(path.join(uploadsDir, file), bytes);
+    return {
+      file,
+      type,
+      bytes: bytes.length,
+      name: String(name).slice(0, 120),
+      path: path.join(uploadsDir, file),
+    };
+  }
+
+  async function readUpload(name) {
+    const file = uploadPath(name);
+    if (!file) return null;
+    const ext = file.split('.').pop();
+    try {
+      return {
+        bytes: await fsp.readFile(file),
+        type: [...KINDS].find(([, kind]) => kind === ext)?.[0] ?? 'application/octet-stream',
+      };
+    } catch (err) {
+      if (err.code === 'ENOENT') return null;
+      throw err;
+    }
+  }
+
   return {
     ready: () => fsp.mkdir(dir, { recursive: true }),
 
     settings,
+
+    saveUpload,
+    readUpload,
 
     saveSettings,
 

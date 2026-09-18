@@ -660,6 +660,8 @@ export async function createDrive(config, { log = console, agentProviders = null
       return text(res, 404, 'not found');
     } catch (err) {
       if (!(err instanceof PathError)) log.error(`[drive] ${req.method} ${route} — ${err.message}`);
+      // A refusal explains itself; a crash needs the stack to be found.
+      if (!(err instanceof PathError) && !err.status && err.stack) log.error(err.stack);
       if (res.headersSent) return res.end();
       return json(res, err.status ?? 400, {
         error: err.message,
@@ -675,6 +677,10 @@ export async function createDrive(config, { log = console, agentProviders = null
       writeOps,
       createDocument,
       restore: restoreDocument,
+      // An agent's turn ending is the end of its claim on what it touched. Kept
+      // for the life of the process, a turn's touches forked every later edit
+      // near them — the person against an agent that finished an hour ago.
+      forgetWriter: (client) => sessionTouched.forget?.(client),
       // Where the bridge calls back: this server, on loopback, whatever port it
       // ended up on.
       origin: () => {
@@ -870,8 +876,11 @@ button{background:#738698;color:#fafaf7;border-color:#738698;cursor:pointer}p{co
       if (!claimed) agents?.watchdog(docPath, shaOf(prior.source));
 
       const conv = typeof claimed === 'string' ? claimed : null;
+      // The claiming turn's own earlier ops are not another writer's work:
+      // counted, an agent that inserted a block by op and then rewrote it
+      // with its file tools forked against itself.
       const merged = mergeWrite(prior.source, current, {
-        touchedIds: sessionTouched.all(docPath),
+        touchedIds: conv ? sessionTouched.except(docPath, `agent:${conv}`) : sessionTouched.all(docPath),
         agent: conv ? `agent:${conv}` : 'agent',
       });
       if (merged.source !== current) {

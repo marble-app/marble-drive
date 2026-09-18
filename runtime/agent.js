@@ -150,6 +150,12 @@
       conversation: (id) => ask(`/agent/conversations/${enc(id)}`),
       update: (id, patch) => ask(`/agent/conversations/${enc(id)}`, { method: 'PATCH', body: patch }),
 
+      // An image pasted or dropped into a composer. It is kept as a file
+      // because that is the only form every provider can open — each one is a
+      // CLI reading the disk — so what comes back is a path, and the turn
+      // carries the path rather than the bytes.
+      upload: ({ name = '', type, data }) => ask('/agent/uploads', { method: 'POST', body: { name, type, data } }),
+
       projects: () => ask('/agent/projects'),
       addProject: (body) => ask('/agent/projects', { method: 'POST', body }),
       removeProject: (id) => ask(`/agent/projects/${enc(id)}`, { method: 'DELETE' }),

@@ -98,7 +98,7 @@ async function claimHost(dir) {
   return { held: null, release: null, why: 'could not take host.lock' };
 }
 
-export async function createAgents({ config, store, writeOps, createDocument, origin, providers, log = console, usage = null, sandbox = null, restore = null, onLook = null }) {
+export async function createAgents({ config, store, writeOps, createDocument, origin, providers, log = console, usage = null, sandbox = null, restore = null, onLook = null, forgetWriter = null }) {
   const dir = path.join(store.marbleDir, 'agents');
   const lock = await claimHost(dir);
   if (!lock.release) {
@@ -108,14 +108,14 @@ export async function createAgents({ config, store, writeOps, createDocument, or
     throw Object.assign(new Error(why), { code: 'EAGENTSHELD' });
   }
   try {
-    return await boot({ config, store, writeOps, createDocument, origin, providers, log, dir, lock, usage, sandbox, restore, onLook });
+    return await boot({ config, store, writeOps, createDocument, origin, providers, log, dir, lock, usage, sandbox, restore, onLook, forgetWriter });
   } catch (err) {
     await lock.release();
     throw err;
   }
 }
 
-async function boot({ config, store, writeOps, createDocument, origin, providers, log, dir, lock, usage, sandbox = null, restore = null, onLook = null }) {
+async function boot({ config, store, writeOps, createDocument, origin, providers, log, dir, lock, usage, sandbox = null, restore = null, onLook = null, forgetWriter = null }) {
   const agentStore = createAgentStore({ dir, defaultProvider: config.agentProvider, log });
   await agentStore.ready();
   const settings = await agentStore.settings();
@@ -156,6 +156,12 @@ async function boot({ config, store, writeOps, createDocument, origin, providers
     log,
     skills,
     onLook,
+    // A turn's ops were filed as `agent:<id>` and its undo as `agent-undo:<id>`;
+    // both are that conversation, and both are done when the turn is.
+    onFinish: (conversationId) => {
+      forgetWriter?.(`agent:${conversationId}`);
+      forgetWriter?.(`agent-undo:${conversationId}`);
+    },
   });
   await runner.boot();
 

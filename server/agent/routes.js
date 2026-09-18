@@ -14,7 +14,7 @@
 
 import crypto from 'node:crypto';
 
-import { json, readJson } from '../http.js';
+import { json, readJson, send } from '../http.js';
 import { parsePath } from '../paths.js';
 import { sameOrigin } from '../sessions.js';
 import { driveWhere, pickCursorPickerModels, sortProviders } from './catalog.js';
@@ -43,6 +43,7 @@ const bearer = (req) => (req.headers.authorization ?? '').replace(/^Bearer\s+/i,
 const CONVERSATION = /^\/agent\/conversations\/([0-9a-f]{12})(\/turns)?$/;
 const TURN = /^\/agent\/turns\/([0-9a-f]{12}-t\d+)(\/cancel|\/undo|\/answer)?$/;
 const FOLDER = /^\/agent\/folders\/([0-9a-f]{12})$/;
+const UPLOAD = /^\/agent\/uploads\/([0-9a-f]{16}\.(?:png|jpg|gif|webp))$/;
 const PROJECT = /^\/agent\/projects\/([0-9a-f]{12}|drive)$/;
 const TOOL = /^\/agent\/tools\/([a-z_]+)$/;
 
@@ -233,6 +234,26 @@ export function createAgentRoutes({ store, runner, tools, hub, providers, writeO
         }
         return json(res, 200, await publicSettings());
       }
+    }
+
+    // An image pasted or dropped into a composer. It becomes a file because
+    // that is the only thing every provider can look at — each one is a CLI
+    // reading the disk — and the turn carries its path, not its bytes.
+    if (route === '/agent/uploads' && method === 'POST') {
+      const body = await readJson(req, maxBody);
+      try {
+        const saved = await store.saveUpload({ type: body.type, data: body.data, name: body.name });
+        return json(res, 201, { ...saved, url: `/agent/uploads/${saved.file}` });
+      } catch (err) {
+        if (err.status === 400) return json(res, 400, { error: err.message });
+        throw err;
+      }
+    }
+    const uploaded = UPLOAD.exec(route);
+    if (uploaded && method === 'GET') {
+      const found = await store.readUpload(uploaded[1]);
+      if (!found) return json(res, 404, { error: 'no such upload' });
+      return send(res, 200, found.bytes, { 'Content-Type': found.type });
     }
 
     if (route === '/agent/projects') {

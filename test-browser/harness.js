@@ -92,6 +92,9 @@ export async function startDrive({ scripts = {}, agents = true, documents = { ga
     base,
     async reset() {
       for (const [docPath, source] of Object.entries(documents)) await drive.createDocument(docPath, source, { label: 'reset' });
+      // The composer remembers the model a person picks, so one test's pick is
+      // the next test's default. A reset drive has not picked anything yet.
+      await drive.agents?.store.saveSettings({ models: {}, efforts: {} });
     },
     async newPage({ viewport = { width: 1280, height: 800 }, reducedMotion = 'no-preference', colorScheme = 'light' } = {}) {
       const context = await browser.newContext({ viewport, reducedMotion, colorScheme });

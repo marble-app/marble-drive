@@ -23,7 +23,7 @@ const STDERR_TAIL = 4_000;
 // How long closing the host waits for its running turns to write their end.
 const CLOSE_GRACE_MS = 5_000;
 
-export function createRunner({ store, tools, providers, workdir, origin, bridgePath, browserPath, readDocument, publish, limits, log = console, skills = [], driveRoot, projects = null, power = '', sandbox = null, onLook = null }) {
+export function createRunner({ store, tools, providers, workdir, origin, bridgePath, browserPath, readDocument, publish, limits, log = console, skills = [], driveRoot, projects = null, power = '', sandbox = null, onLook = null, onFinish = null }) {
   const live = new Map(); // turnId → live turn
   const order = []; // turnIds, in the order they were sent
   const tokens = new Map(); // token → live turn
@@ -557,6 +557,14 @@ export function createRunner({ store, tools, providers, workdir, origin, bridgeP
       turn.status = status;
       if (turn.token) tokens.delete(turn.token);
       live.delete(turn.id);
+      // The writer is done: whatever the host remembers it touching is no
+      // longer being worked on. Told after the turn has left the runner, so
+      // the host cannot see a still-running turn with nothing to its name.
+      try {
+        onFinish?.(turn.conversationId);
+      } catch (err) {
+        log.error(`[agents] ${err.message}`);
+      }
       const idx = order.indexOf(turn.id);
       if (idx !== -1) order.splice(idx, 1);
       turn.endTurn();

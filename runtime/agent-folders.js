@@ -188,174 +188,279 @@
     return out;
   };
 
+
   const PAD = 18;
   const NAME_H = 20;
   const MARGIN = 16;
 
-  /** Lay the field out as a partition, not a hull.
+  // A conversation is a tall thing, so the canvas spends its height on the
+  // conversation and its width on rank. These are the widths a column is
+  // allowed to take; heights are always the whole canvas.
+  const PANE_MIN = 300;
+  const PANE_PREF = 420;
+  const PANE_MAX = 560;
+  const FIELD_MIN = 196;
+  const FIELD_PREF = 260;
+  const FIELD_MAX = 320;
+  // The trailing column that makes a folder of whatever is dropped on it. It
+  // is a chip wide, and it is what the field's leftover room is for.
+  const NEW_W = 168;
+
+  const clamp = (value, lo, hi) => Math.max(lo, Math.min(hi, value));
+
+  /** Rank order inside a column. An unranked card sorts last and keeps the
+   *  order it came in, so a conversation that starts while you are working
+   *  joins the bottom of its column and moves nothing above it. */
+  const byRank = (cards) => [...cards].sort((a, b) => {
+    const ay = Number.isFinite(a.oy) ? a.oy : Infinity;
+    const by = Number.isFinite(b.oy) ? b.oy : Infinity;
+    if (ay !== by) return ay - by;
+    const ax = Number.isFinite(a.ox) ? a.ox : Infinity;
+    const bx = Number.isFinite(b.ox) ? b.ox : Infinity;
+    return ax === bx ? 0 : ax - bx;
+  });
+
+  /** The rank a card needs to sit at `index` among `keys` — the midpoint of
+   *  its neighbours, which is one PATCH rather than a renumbered column.
    *
-   *  A basin used to be the bounding box of members that a free pack had
-   *  scattered, so two folders could own the same pixels. Here each folder is
-   *  given a region and its cards are packed inside it, which makes the box a
-   *  container by construction: regions are laid on shelves left to right and
-   *  wrap, so they cannot intersect.
+   *  `null` means there is no midpoint to take: a neighbour is unranked, or
+   *  the two of them are closer together than a float can usefully split. The
+   *  caller answers that by numbering the whole column with `ranks`. */
+  const rankFor = (keys, index) => {
+    const prev = index > 0 ? keys[index - 1] : undefined;
+    const next = index < keys.length ? keys[index] : undefined;
+    if (index > 0 && !Number.isFinite(prev)) return null;
+    if (index < keys.length && !Number.isFinite(next)) return null;
+    const lo = index > 0 ? prev : 0;
+    const hi = index < keys.length ? next : 1;
+    if (!(hi - lo > 1e-4)) return null;
+    return (lo + hi) / 2;
+  };
+
+  /** Ranks for a column of `count`, strictly inside (0, 1) — the store clamps
+   *  the field to [0,1], so a rank is a fraction and never an index. */
+  const ranks = (count) => Array.from({ length: count }, (_, i) => (i + 1) / (count + 1));
+
+  const cardHeight = (card, sizes) => (card.lod === 'chip'
+    ? (sizes?.chip?.h ?? 56)
+    : (sizes?.digest?.h ?? 132));
+
+  /** Lay the canvas out as one row of full-height columns.
    *
-   *  `groups` is `[{ folderId, cards: [{ id, lod, ox, oy }] }]` in the order
-   *  they should appear; pass the ungrouped one (folderId null) last. `ox` and
-   *  `oy` are a card's stored focusX/focusY, used only to order cards within
-   *  their own region — dragging inside a region reorders, dragging across
-   *  regions is what changes the folder.
+   *  Ranking runs left to right — stage first, then a region per folder in
+   *  catalog order with the loose one last — because top to bottom is the
+   *  axis a conversation needs for itself. Cards fill a region downward and
+   *  wrap into a second sub-column of the same region rather than into a
+   *  second row of regions: a second row would put rank back on the vertical
+   *  axis, which is the fault this shape exists to fix.
    *
-   *  Returns `{ regions, rects, height }`, all in canvas coordinates. */
-  const packRegions = ({ groups, canvas, top = 0, sizes, gap = GAP, margin = MARGIN }) => {
-    const dw = sizes?.digest?.w ?? 260;
+   *  `fulls` is `[{ id }]` already in stage order. `groups` is
+   *  `[{ folderId, cards: [{ id, lod, ox, oy }] }]`, loose one last. Returns
+   *  every rect in canvas coordinates, plus the regions and the stage — which
+   *  is where hit-testing reads its slots from, so a drop lands where the
+   *  layout put things rather than where a second measurement thinks they are. */
+  const packFocus = ({
+    fulls = [],
+    groups = [],
+    canvas,
+    sizes,
+    gap = GAP,
+    margin = MARGIN,
+    range = {},
+    newGroup = 'auto',
+  }) => {
     const dh = sizes?.digest?.h ?? 132;
-    const cw = sizes?.chip?.w ?? 168;
-    const ch = sizes?.chip?.h ?? 56;
-    const room = Math.max(dw + 2 * PAD, canvas.w - 2 * margin);
+    const paneMin = range.paneMin ?? PANE_MIN;
+    const panePref = range.panePref ?? PANE_PREF;
+    const paneMax = range.paneMax ?? PANE_MAX;
+    const fieldMin = range.fieldMin ?? FIELD_MIN;
+    const fieldPref = range.fieldPref ?? FIELD_PREF;
+    const fieldMax = range.fieldMax ?? FIELD_MAX;
 
-    const measured = groups.map((group) => {
-      // Ungrouped gets the same geometry as a folder — pad and a name line —
-      // so its cards sit on the same baseline. Only the fill differs, which is
-      // what says "these are loose" without making them look dropped.
-      const pad = PAD;
-      const nameH = NAME_H;
+    const height = Math.max(canvas.h, dh + NAME_H + 2 * PAD + 2 * margin);
+    const top = margin;
+    const availH = height - 2 * margin;
+    const innerH = availH - NAME_H - 2 * PAD;
 
-      // Stable: cards never dragged share a key and keep the order they came
-      // in (recency), while a card dragged upward sorts above them.
-      const cards = [...group.cards].sort((a, b) => {
-        const ay = Number.isFinite(a.oy) ? a.oy : 0.5;
-        const by = Number.isFinite(b.oy) ? b.oy : 0.5;
-        if (ay !== by) return ay - by;
-        const ax = Number.isFinite(a.ox) ? a.ox : 0.5;
-        const bx = Number.isFinite(b.ox) ? b.ox : 0.5;
-        return ax - bx;
-      });
-      const digests = cards.filter((card) => card.lod !== 'chip');
-      const chips = cards.filter((card) => card.lod === 'chip');
-
-      return { folderId: group.folderId, pad, nameH, digests, chips };
-    }).filter((group) => group.digests.length || group.chips.length);
-
-    // Columns are a fair share of the shelf, then a greedy top-up. A blind
-    // `sqrt` shape squares each group in isolation, which stacks three cards
-    // into an L when they would have fitted in one readable row — and arrow
-    // keys navigate by position, so the shape decides how they move.
-    const unit = (group) => (group.digests.length ? dw : cw) + gap;
-    const widthOf = (group, cols) => cols * unit(group) - gap + 2 * group.pad;
-    const rowsOf = (group, cols) => {
-      const digestRows = group.digests.length ? Math.ceil(group.digests.length / cols) : 0;
-      const chipCols = group.digests.length
-        ? Math.max(1, Math.floor((cols * unit(group)) / (cw + gap)))
-        : cols;
-      const chipRows = group.chips.length ? Math.ceil(group.chips.length / chipCols) : 0;
-      return digestRows + chipRows;
-    };
-
-    const share = measured.length ? (room - (measured.length - 1) * gap) / measured.length : room;
-    const cols = measured.map((group) => {
-      const want = group.digests.length || group.chips.length;
-      const fits = Math.floor((share - 2 * group.pad + gap) / unit(group));
-      return Math.max(1, Math.min(want, fits));
-    });
-    let used = measured.reduce((sum, group, i) => sum + widthOf(group, cols[i]) + gap, 0) - gap;
-    // Spend whatever the shelf has left on the group that is stacking deepest.
-    for (let pass = 0; pass < 12; pass += 1) {
-      let best = -1;
-      let bestRows = 0;
-      for (let i = 0; i < measured.length; i += 1) {
-        const want = measured[i].digests.length || measured[i].chips.length;
-        if (cols[i] >= want) continue;
-        if (used + unit(measured[i]) > room) continue;
-        const gain = rowsOf(measured[i], cols[i]) - rowsOf(measured[i], cols[i] + 1);
-        if (gain > 0 && rowsOf(measured[i], cols[i]) > bestRows) {
-          bestRows = rowsOf(measured[i], cols[i]);
-          best = i;
+    // Shape before width. How deep a region stacks is a question about card
+    // heights alone, so the sub-column count is settled before a single width
+    // is negotiated — which is what lets the negotiation be one pass.
+    const shaped = [];
+    for (const group of groups) {
+      const cards = byRank(group.cards ?? []);
+      // An empty column is normally nothing to draw, but the loose one has to
+      // stay while a card is in the air — leaving a folder needs somewhere to
+      // land, and `keep` is how the caller says so.
+      if (!cards.length && !group.keep) continue;
+      const stacks = [[]];
+      let used = 0;
+      for (const card of cards) {
+        const h = cardHeight(card, sizes);
+        if (used && used + h > innerH) {
+          stacks.push([]);
+          used = 0;
         }
+        stacks[stacks.length - 1].push(card);
+        used += h + gap;
       }
-      if (best < 0) break;
-      cols[best] += 1;
-      used += unit(measured[best]);
+      shaped.push({ folderId: group.folderId ?? null, stacks });
     }
 
-    measured.forEach((group, i) => {
-      const n = cols[i];
-      group.digestCols = group.digests.length ? n : 0;
-      const contentW = n * unit(group) - gap;
-      group.chipCols = Math.max(1, Math.floor((contentW + gap) / (cw + gap)));
-      const digestRows = group.digestCols ? Math.ceil(group.digests.length / group.digestCols) : 0;
-      const chipRows = group.chips.length ? Math.ceil(group.chips.length / group.chipCols) : 0;
-      let contentH = 0;
-      if (digestRows) contentH += digestRows * (dh + gap);
-      if (chipRows) contentH += chipRows * (ch + gap);
-      group.contentW = contentW;
-      group.w = contentW + 2 * group.pad;
-      group.h = Math.max(0, contentH - gap) + 2 * group.pad + group.nameH;
-    });
+    const subCols = shaped.reduce((n, group) => n + group.stacks.length, 0);
+    // Everything in the field's width that is not a column: the pads, the gaps
+    // between sub-columns, and the gaps between regions.
+    const fixed = shaped.reduce((n, group) => n + (group.stacks.length - 1) * gap + 2 * PAD, 0)
+      + Math.max(0, shaped.length - 1) * gap;
 
-    // Shelve first, place second. Regions on a shelf share its height, and any
-    // height the canvas has left over is split between the shelves — a
-    // partition that hugs its contents reads as debris along the top edge,
-    // while equal blocks read as a deliberate division of the space. Cards can
-    // only be placed once the shelf a region sits on knows how tall it is.
-    const shelves = [];
-    let shelf = { groups: [], w: margin };
-    for (const group of measured) {
-      if (shelf.groups.length && shelf.w + group.w > canvas.w - margin) {
-        shelves.push(shelf);
-        shelf = { groups: [], w: margin };
-      }
-      shelf.groups.push(group);
-      shelf.w += group.w + gap;
-    }
-    if (shelf.groups.length) shelves.push(shelf);
+    const room = Math.max(0, canvas.w - 2 * margin);
+    const n = fulls.length;
+    const bar = (n && subCols) ? gap : 0;
 
-    for (const row of shelves) {
-      row.h = row.groups.reduce((max, group) => Math.max(max, group.h), 0);
+    // Neither side outranks the other when the canvas is tight: both start
+    // from what they want, and a deficit is shared in proportion to how much
+    // each has to give. Giving the stage its fill first letterboxes the field
+    // at two pins; giving the field its fill first pins a conversation at its
+    // floor while chips sit at their preferred width. Where a floor cannot be
+    // met the floor wins and the canvas scrolls — a conversation is never
+    // squeezed below reading width.
+    const stageAt = (w) => (n ? n * w + (n - 1) * gap : 0);
+    const fieldAt = (w) => (subCols ? subCols * w + fixed : 0);
+    let stageW = stageAt(panePref);
+    let fieldW = fieldAt(fieldPref);
+    const spare = room - bar - stageW - fieldW;
+    if (spare >= 0) {
+      // Slack goes to the conversations, then to the columns, then to air.
+      const toStage = n ? Math.min(spare, stageAt(paneMax) - stageW) : 0;
+      stageW += toStage;
+      fieldW += subCols ? Math.min(spare - toStage, fieldAt(fieldMax) - fieldW) : 0;
+    } else {
+      const give = -spare;
+      const stageGive = stageW - stageAt(paneMin);
+      const fieldGive = fieldW - fieldAt(fieldMin);
+      const total = stageGive + fieldGive;
+      const share = total > 0 ? Math.min(1, give / total) : 0;
+      stageW -= stageGive * share;
+      fieldW -= fieldGive * share;
     }
-    const natural = shelves.reduce((sum, row) => sum + row.h + gap, 0) - gap;
-    const slack = shelves.length
-      ? Math.max(0, (canvas.h - top - 2 * margin - natural) / shelves.length)
-      : 0;
+    const colW = subCols ? Math.max(fieldMin, (fieldW - fixed) / subCols) : fieldPref;
+    if (!n) stageW = 0;
+
+    const rects = {};
+    const stage = { x: margin, y: top, w: stageW, h: availH, cols: [] };
+    let x = margin;
+
+    if (n) {
+      const cw = (stageW - (n - 1) * gap) / n;
+      fulls.forEach((full, i) => {
+        const id = full?.id ?? full;
+        const rect = { id, x: x + i * (cw + gap), y: top, w: cw, h: availH };
+        stage.cols.push(rect);
+        rects[id] = { x: rect.x, y: rect.y, w: rect.w, h: rect.h };
+      });
+      x += stageW + gap;
+    }
 
     const regions = [];
-    const rects = {};
-    let y = top + margin;
-
-    for (const row of shelves) {
-      let x = margin;
-      const h = row.h + slack;
-      for (const group of row.groups) {
-        regions.push({ folderId: group.folderId, x, y, w: group.w, h });
-
-        const cx = x + group.pad;
-        const cy = y + group.pad + group.nameH;
-        group.digests.forEach((card, i) => {
-          rects[card.id] = {
-            x: cx + (i % group.digestCols) * (dw + gap),
-            y: cy + Math.floor(i / group.digestCols) * (dh + gap),
-            w: dw,
-            h: dh,
-          };
-        });
-        const digestH = group.digestCols
-          ? Math.ceil(group.digests.length / group.digestCols) * (dh + gap)
-          : 0;
-        group.chips.forEach((card, i) => {
-          rects[card.id] = {
-            x: cx + (i % group.chipCols) * (cw + gap),
-            y: cy + digestH + Math.floor(i / group.chipCols) * (ch + gap),
-            w: cw,
-            h: ch,
-          };
-        });
-
-        x += group.w + gap;
-      }
-      y += h + gap;
+    for (const group of shaped) {
+      const w = group.stacks.length * colW + (group.stacks.length - 1) * gap + 2 * PAD;
+      const region = {
+        folderId: group.folderId,
+        x,
+        y: top,
+        w,
+        h: availH,
+        inner: { x: x + PAD, y: top + PAD + NAME_H, w: w - 2 * PAD, h: innerH },
+        cards: [],
+      };
+      group.stacks.forEach((stack, si) => {
+        const cx = x + PAD + si * (colW + gap);
+        let cy = top + PAD + NAME_H;
+        for (const card of stack) {
+          const h = cardHeight(card, sizes);
+          const rect = { id: card.id, x: cx, y: cy, w: colW, h };
+          region.cards.push(rect);
+          rects[card.id] = { x: rect.x, y: rect.y, w: rect.w, h: rect.h };
+          cy += h + gap;
+        }
+      });
+      regions.push(region);
+      x += w + gap;
     }
 
-    return { regions, rects, height: shelves.length ? y - gap + margin : top + margin };
+    // Making a folder is otherwise undiscoverable — you have to guess that one
+    // card dropped on another means something. A column you can see says it.
+    // It is drawn in the room the columns did not take, so it costs the
+    // conversations nothing; `newGroup: 'always'` overrides that for the
+    // length of a drag, when it is the thing being aimed at.
+    const wantsNew = regions.length && (newGroup === 'always'
+      || margin + room - x >= NEW_W);
+    const newSlot = wantsNew ? { x, y: top, w: NEW_W, h: availH } : null;
+    if (newSlot) x += NEW_W + gap;
+
+    const placed = n || regions.length;
+    return {
+      stage,
+      regions,
+      newGroup: newSlot,
+      rects,
+      colW,
+      width: placed ? Math.max(canvas.w, x - gap + margin) : Math.max(canvas.w, 2 * margin),
+      height,
+    };
+  };
+
+  /** Where a point lands in a region: which slot the drop would insert at, and
+   *  the bar to draw for it. `over` is the card the point sits squarely on,
+   *  which is the only reading that can mean "make a folder of these two". */
+  const slotAt = (region, point, gap = GAP) => {
+    const inner = region.inner;
+    if (!region.cards.length) {
+      return { index: 0, over: null, x: inner.x, w: inner.w, y: inner.y };
+    }
+
+    const columns = [];
+    for (const card of region.cards) {
+      let column = columns.find((row) => Math.abs(row.x - card.x) < 1);
+      if (!column) {
+        column = { x: card.x, w: card.w, cards: [] };
+        columns.push(column);
+      }
+      column.cards.push(card);
+    }
+    const column = columns.reduce((best, row) => (
+      Math.abs(point.x - (row.x + row.w / 2)) < Math.abs(point.x - (best.x + best.w / 2)) ? row : best
+    ), columns[0]);
+
+    const last = column.cards[column.cards.length - 1];
+    let index = region.cards.indexOf(last) + 1;
+    let y = last.y + last.h + gap / 2;
+    let over = null;
+    for (const card of column.cards) {
+      if (point.y >= card.y + card.h * 0.28 && point.y <= card.y + card.h * 0.72) over = card.id;
+      if (point.y < card.y + card.h / 2) {
+        index = region.cards.indexOf(card);
+        y = card.y - gap / 2;
+        break;
+      }
+    }
+    return { index, over, x: column.x, w: column.w, y };
+  };
+
+  /** The same question for the stage, where the slots run left to right. */
+  const stageSlotAt = (stage, point, gap = GAP) => {
+    if (!stage.cols.length) return { index: 0, x: stage.x, y: stage.y, h: stage.h };
+    const last = stage.cols[stage.cols.length - 1];
+    let index = stage.cols.length;
+    let x = last.x + last.w + gap / 2;
+    for (let i = 0; i < stage.cols.length; i += 1) {
+      const col = stage.cols[i];
+      if (point.x < col.x + col.w / 2) {
+        index = i;
+        x = col.x - gap / 2;
+        break;
+      }
+    }
+    return { index, x, y: stage.y, h: stage.h };
   };
 
   globalThis.marbleAgentFolders = {
@@ -368,6 +473,13 @@
     PAD,
     NAME_H,
     MARGIN,
+    PANE_MIN,
+    PANE_PREF,
+    PANE_MAX,
+    FIELD_MIN,
+    FIELD_PREF,
+    FIELD_MAX,
+    NEW_W,
     realmOf,
     suggestName,
     nextColor,
@@ -375,6 +487,11 @@
     nearestCard,
     rubberband,
     separateRects,
-    packRegions,
+    byRank,
+    rankFor,
+    ranks,
+    packFocus,
+    slotAt,
+    stageSlotAt,
   };
 })();

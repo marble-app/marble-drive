@@ -21,7 +21,7 @@ const SCRIPTS = {
   question: [{ ask: { tool: 'AskUserQuestion', input: { questions: [{ question: 'A or B?', header: 'Pick', options: [{ label: 'A' }, { label: 'B' }], multiSelect: false }] } } }],
 };
 
-async function setup({ limits = {}, tools, onLook, capability, projects = null } = {}) {
+async function setup({ limits = {}, tools, onLook, capability, projects = null, onFinish = null } = {}) {
   const dir = await fsp.mkdtemp(path.join(os.tmpdir(), 'marble-runner-'));
   const store = createAgentStore({ dir: path.join(dir, 'agents'), defaultProvider: 'fake' });
   await store.ready();
@@ -51,6 +51,7 @@ async function setup({ limits = {}, tools, onLook, capability, projects = null }
     limits: { maxRunning: 3, stallMs: 60_000, maxMs: 60_000, killGraceMs: 200, ...limits },
     log: { log() {}, error() {} },
     onLook,
+    onFinish,
   });
   await runner.boot();
   return { store, runner, published, toolCalls, spawned };
@@ -86,6 +87,16 @@ test('a turn runs, streams into the transcript, and completes', async () => {
   assert.ok(published.some((p) => p.event.type === 'text.delta'), 'deltas are published live');
   assert.ok(!(await store.events(id)).some((e) => e.type === 'text.delta'), 'and never stored');
   assert.match((await store.conversation(id)).providerSession, /^fake-/);
+  await runner.close();
+});
+
+test('a finished turn tells the host to forget what that writer touched', async () => {
+  const released = [];
+  const { store, runner } = await setup({ onFinish: (conversationId) => released.push(conversationId) });
+  const { id } = await store.createConversation({ provider: 'fake' });
+  const { turnId } = await runner.send(id, { prompt: 'script:hello', context: { target: 'notes', selection: ['p'] } });
+  await finished(store, turnId);
+  assert.deepEqual(released, [id]);
   await runner.close();
 });
 

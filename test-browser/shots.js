@@ -40,6 +40,9 @@ const out = process.argv.find((arg) => !arg.startsWith('-') && arg.endsWith('sho
 const outDir = out && !out.startsWith('--') ? out : '/tmp/agent-shots';
 const narrow = process.argv.includes('--narrow');
 const dark = process.argv.includes('--dark');
+// Focus without a pin is only half the view. `--pin N` stages the first N.
+const pinArg = process.argv.find((arg) => arg.startsWith('--pin'));
+const pins = pinArg ? Number(pinArg.split('=')[1] ?? 1) || 1 : 0;
 
 await fsp.mkdir(outDir, { recursive: true });
 
@@ -73,6 +76,11 @@ for (const row of SEED) {
 }
 for (const [name, ids] of byFolder) {
   await store.createFolder({ conversationIds: ids, name, color: null });
+}
+
+const seeded = [...byFolder.values()].flat();
+for (let i = 0; i < pins && i < seeded.length; i += 1) {
+  await store.updateConversation(seeded[i], { pinned: true, focusY: (i + 1) / (pins + 1) });
 }
 
 await page.reload();

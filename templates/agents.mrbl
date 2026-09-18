@@ -35,9 +35,19 @@ __ICON__
     --t-fast: 110ms;
     --t: 200ms;
     --t-slow: 340ms;
+    /* Panes are cards on a well, the way Apple's window panes are: the gap is
+       the divider. One ease-out for everything that moves into or out of place
+       — it decelerates hard, so the last third of a move is a quiet settle. */
+    --well: #efece3;
+    --pane-r: 16px;
+    --pane-gap: 10px;
+    --ease-out: cubic-bezier(0.22, 1, 0.36, 1);
+    --t-room: 520ms;
+    --bar-h: 2.25rem;
   }
   @media (prefers-color-scheme: dark) {
     :root {
+      --well: #101214;
       --ink: #e8e6e1; --muted: #a3a7ab; --faint: #71767a; --line: #2f3438;
       --paper: #16181a; --paper-2: #1e2124; --paper-3: #262a2e; --card: #1c1f22;
       --card-rgb: 28, 31, 34; --paper-rgb: 22, 24, 26;
@@ -51,6 +61,7 @@ __ICON__
   html, body { height: 100%; }
   body {
     margin: 0; background: var(--paper); color: var(--ink);
+    transition: background-color var(--t-room) var(--ease-out);
     font: 14px/1.5 "Google Sans", Roboto, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
     -webkit-font-smoothing: antialiased;
     display: grid; grid-template-rows: auto minmax(0, 1fr); grid-template-columns: minmax(0, 1fr);
@@ -362,6 +373,11 @@ __ICON__
     will-change: transform;
   }
   .focus-card:active { background: color-mix(in srgb, var(--paper-2) 70%, var(--card)); }
+  .focus-card:focus-visible { outline: none; box-shadow: 0 0 0 2px var(--accent), var(--shadow-lift); }
+  /* A card is dragged from anywhere on it, except a Full, which is mostly a
+     live transcript — there the header is the handle. */
+  .focus-card[data-lod="digest"], .focus-card[data-lod="chip"] { cursor: grab; }
+  .focus-card[data-lod="full"] .focus-card-head { cursor: grab; }
   .focus-card[data-lod="full"] { z-index: 3; }
   .focus-card[data-lod="digest"] { z-index: 2; }
   .focus-card[data-lod="chip"] {
@@ -371,7 +387,16 @@ __ICON__
   .focus-card[data-selected="true"] {
     box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent-ink) 70%, transparent), var(--shadow-lift);
   }
-  .focus-card.marble-dragging { z-index: 10; box-shadow: var(--shadow-lift); }
+  /* Lifted: the card leaves the page and tracks the pointer 1:1. No
+     transition on left/top — a transition here would lag the finger and the
+     card would stop matching the slot it is about to be filed into. */
+  .focus-card.marble-dragging { z-index: 40; box-shadow: var(--shadow-lift); cursor: grabbing; }
+  .focus-card[data-lift="lead"] { transform: scale(1.02); }
+  .focus-card[data-lift="follow"] { opacity: .8; }
+  /* What a release would join, rather than slot beside. */
+  .focus-card[data-drop="merge"] {
+    box-shadow: 0 0 0 2px var(--accent-ink), var(--shadow-lift);
+  }
   .focus-card-head {
     display: flex; align-items: center; gap: .4rem; flex: none;
     padding: .4rem .55rem; min-height: 2.1rem;
@@ -449,6 +474,10 @@ __ICON__
   .focus-card[data-outcome="failed"] .focus-status,
   .focus-card[data-outcome="watchdog"] .focus-status { color: var(--danger); }
   .focus-card[data-lod="chip"] .focus-dot { display: none; }
+  .focus[data-arranging] .focus-card[data-lod="full"] .focus-live:empty { display: none; }
+  .focus[data-arranging] .focus-card[data-lod="full"]:has(.focus-live:empty) .focus-card-body {
+    display: flex;
+  }
   .focus-live { display: none; flex: 1; min-height: 0; min-width: 0; }
   .focus-card[data-lod="full"] .focus-live { display: block; }
   .focus-card[data-lod="full"] .focus-live marble-conversation { display: block; height: 100%; }
@@ -467,11 +496,67 @@ __ICON__
     border-color: color-mix(in srgb, var(--line) 80%, transparent);
   }
   .focus-basin[data-loose] .focus-basin-name { color: var(--faint); }
+  .focus-basin[data-drop="into"] {
+    border-color: color-mix(in srgb, var(--folder, var(--accent-ink)) 60%, var(--line));
+    background: color-mix(in srgb, var(--folder, var(--accent-ink)) 22%, var(--paper));
+  }
+  .focus-basin[data-loose][data-drop="into"] {
+    border-style: solid;
+    border-color: color-mix(in srgb, var(--accent-ink) 45%, var(--line));
+    background: color-mix(in srgb, var(--accent-ink) 7%, var(--paper));
+  }
   .focus-basin-name {
-    pointer-events: auto; position: absolute; top: .4rem; left: .75rem;
+    pointer-events: auto; position: absolute; top: .5rem; left: 18px;
     font-size: .72rem; font-weight: 500; color: var(--folder, var(--muted));
     border: 0; background: none; padding: 0; font: inherit; font-size: .72rem; font-weight: 500;
   }
+  /* Where the card would land, drawn at the rect the layout already reserved
+     for it: a gap in a folder column, or the full-height column a pin becomes. */
+  .focus-slot {
+    position: absolute; z-index: 4; pointer-events: none; border-radius: 12px;
+    border: 2px dashed color-mix(in srgb, var(--accent-ink) 55%, transparent);
+    background: color-mix(in srgb, var(--accent-ink) 6%, transparent);
+    transition: left var(--t) var(--settle), top var(--t) var(--settle),
+      width var(--t) var(--settle), height var(--t) var(--settle);
+  }
+  /* Making a folder had no affordance at all — you had to guess that one card
+     dropped on another meant something. A column you can see says it, and a
+     real button means the keyboard can say it too. */
+  .focus-newgroup {
+    position: absolute; z-index: 1; appearance: none; padding: 0; font: inherit;
+    display: flex; flex-direction: column; align-items: center; justify-content: center;
+    gap: .3rem; border-radius: 16px; background: none; color: var(--faint);
+    border: 1px dashed color-mix(in srgb, var(--line) 85%, transparent);
+    cursor: pointer;
+  }
+  .focus-newgroup:disabled { cursor: default; }
+  .focus-newgroup:hover:not(:disabled), .focus-newgroup:focus-visible {
+    color: var(--ink); border-color: var(--accent); outline: none;
+    background: color-mix(in srgb, var(--accent-ink) 5%, transparent);
+  }
+  .focus-newgroup[data-drop="into"] {
+    color: var(--accent-ink); border-style: solid; border-color: var(--accent-ink);
+    background: color-mix(in srgb, var(--accent-ink) 10%, transparent);
+  }
+  .focus-newgroup-mark { font-size: 1.15rem; line-height: 1; }
+  .focus-newgroup-label { font-size: .72rem; }
+  /* With nothing pinned there is no stage column to aim at, so a drag
+     reserves one. It exists only while a card is in the air. */
+  .focus-pinslot {
+    position: fixed; z-index: 11; display: grid; place-items: center;
+    pointer-events: none; font-size: .68rem; letter-spacing: .04em;
+    text-transform: uppercase; color: var(--faint); writing-mode: vertical-rl;
+    border-right: 1px dashed color-mix(in srgb, var(--accent-ink) 35%, transparent);
+    background: linear-gradient(to right, color-mix(in srgb, var(--accent-ink) 9%, transparent), transparent);
+  }
+  .focus-pinslot[data-drop="into"] {
+    border-right: 2px solid var(--accent-ink); color: var(--accent-ink);
+    background: linear-gradient(to right, color-mix(in srgb, var(--accent-ink) 22%, transparent), transparent);
+  }
+  /* Absolutely positioned cards do not reliably push a scroll container out on
+     both axes, and a min-height on the canvas would grow the grid row instead
+     of its contents. This block is the extent, and nothing else. */
+  .focus-extent { position: absolute; left: 0; top: 0; pointer-events: none; }
   .focus-look {
     position: fixed; z-index: 12;
     width: min(28rem, calc(100vw - 2rem)); max-height: 70vh; overflow: auto;
@@ -488,7 +573,12 @@ __ICON__
   .focus[data-stack] .focus-card {
     position: relative; left: auto !important; top: auto !important;
     width: auto !important; height: auto !important; flex: none;
+    touch-action: auto; cursor: default;
   }
+  .focus[data-stack] .focus-slot,
+  .focus[data-stack] .focus-newgroup,
+  .focus[data-stack] .focus-pinslot,
+  .focus[data-stack] .focus-extent { display: none; }
   .focus[data-stack] .focus-card[data-lod="full"] { min-height: 18rem; }
   .focus[data-stack] .focus-card[data-lod="digest"] { min-height: 7rem; }
   .focus[data-stack] .focus-basin { display: none; }
@@ -497,6 +587,8 @@ __ICON__
       animation-duration: 150ms !important;
       transition-duration: 150ms !important;
     }
+    .focus-basin, .focus-slot { transition: none; }
+    .focus-card[data-lift="lead"] { transform: none; }
   }
   @media (prefers-reduced-transparency: reduce) {
     .topbar, .focus-look, .folder-palette, .focus-folder-menu {
@@ -514,8 +606,7 @@ __ICON__
   body[data-view="focus"] .library #list { display: none; }
   body[data-view="focus"] .library .pane { pointer-events: auto; }
   body[data-view="focus"] .dock-bar,
-  body[data-view="focus"] .dock-gutter,
-  body[data-view="focus"] .dock-extras,
+  body[data-view="focus"] .dock-stage,
   body[data-view="focus"] .pane-hint,
   body[data-view="focus"] .pane > .back {
     display: none !important;
@@ -540,10 +631,16 @@ __ICON__
   body[data-view="folders"] .library .pane { grid-column: 2; }
   body[data-view="folders"] .folder-rail { display: block; grid-column: 1; pointer-events: auto; }
   body[data-view="focus"] .focus { display: block; }
-  body[data-crossfade] .library { display: grid; }
-  body[data-crossfade] .board { display: flex; }
-  body[data-crossfade] .folders { display: grid; }
-  body[data-crossfade] .focus { display: grid; }
+  /* A part that is leaving stays on screen where it was, out of the flow, for as
+     long as it takes to fade — then the layout it no longer belongs to
+     forgets it. */
+  .list.marble-vt-out { display: block !important; }
+  .folders.marble-vt-out { display: grid !important; }
+  .board.marble-vt-out { display: flex !important; }
+  .focus.marble-vt-out { display: block !important; }
+  .pane.marble-vt-out { display: grid !important; }
+  .library.marble-vt-shell { display: grid !important; }
+  .library.marble-vt-shell > :not(.marble-vt-out) { visibility: hidden; }
   /* Board + an open conversation is a split: kanban left, pane right.
      Do not reparent <marble-conversation> — a missing keyed child in .pane
      is cloned on reconcile. */
@@ -743,45 +840,56 @@ __ICON__
     position: relative; min-width: 0; min-height: 0;
     display: grid; grid-template-rows: auto minmax(0, 1fr); grid-template-columns: minmax(0, 1fr);
     background: var(--card);
-  }
-  .pane[data-dock="row"] {
-    grid-template-columns: var(--dock-a, 1fr) 5px var(--dock-b, 1fr);
-    grid-template-rows: auto minmax(0, 1fr);
-  }
-  .pane[data-dock="col"] {
-    grid-template-rows: auto var(--dock-a, 1fr) 5px var(--dock-b, 1fr);
-    grid-template-columns: minmax(0, 1fr);
-  }
-  .pane[data-dock="col"][data-dock-primary="end"] {
-    grid-template-rows: var(--dock-a, 1fr) 5px auto var(--dock-b, 1fr);
+    --dock-gap: 5px;
   }
   .pane > .dock-bar { grid-column: 1; grid-row: 1; min-width: 0; }
   .pane > marble-conversation:not([data-marble-transient]) {
     grid-column: 1; grid-row: 2; min-width: 0; min-height: 0;
   }
-  .pane[data-dock="row"] > .dock-bar { grid-column: 1; grid-row: 1; }
-  .pane[data-dock="row"] > marble-conversation:not([data-marble-transient]) { grid-column: 1; grid-row: 2; }
-  .pane[data-dock="row"][data-dock-primary="end"] > .dock-bar { grid-column: 3; }
-  .pane[data-dock="row"][data-dock-primary="end"] > marble-conversation:not([data-marble-transient]) { grid-column: 3; }
-  .pane[data-dock="col"] > .dock-bar { grid-row: 1; grid-column: 1; }
-  .pane[data-dock="col"] > marble-conversation:not([data-marble-transient]) { grid-row: 2; grid-column: 1; }
-  .pane[data-dock="col"][data-dock-primary="end"] > .dock-bar { grid-row: 3; }
-  .pane[data-dock="col"][data-dock-primary="end"] > marble-conversation:not([data-marble-transient]) { grid-row: 4; }
-  .dock-gutter { background: var(--line); cursor: col-resize; z-index: 2; }
-  .pane[data-dock="row"] > .dock-gutter { grid-column: 2; grid-row: 1 / -1; }
-  .pane[data-dock="col"] > .dock-gutter { grid-row: 3; grid-column: 1; cursor: row-resize; }
-  .pane[data-dock="col"][data-dock-primary="end"] > .dock-gutter { grid-row: 2; }
-  .dock-extras { min-width: 0; min-height: 0; display: flex; flex-direction: column; }
-  .pane[data-dock="row"] > .dock-extras { grid-column: 3; grid-row: 1 / -1; }
-  .pane[data-dock="row"][data-dock-primary="end"] > .dock-extras { grid-column: 1; }
-  .pane[data-dock="col"] > .dock-extras { grid-row: 4; grid-column: 1; }
-  .pane[data-dock="col"][data-dock-primary="end"] > .dock-extras { grid-row: 1; }
-  .dock-leaf { flex: 1; min-height: 0; min-width: 0; display: flex; flex-direction: column; position: relative; }
-  .dock-leaf + .dock-leaf { border-top: 1px solid var(--line); }
-  .dock-leaf marble-conversation { flex: 1; min-height: 0; height: 100%; }
+  /* Two or more panes: the pane becomes a stage. Every chat is a card placed by
+     percentages and a pixel gap, so a change to the layout is only new numbers
+     and the browser eases each card to them. The primary chat is the keyed
+     element and cannot move into its card, so it is placed over it. */
+  .dock-stage { position: absolute; inset: 0; pointer-events: none; }
+  .pane[data-dock] > .dock-bar,
+  .pane[data-dock] > marble-conversation:not([data-marble-transient]) {
+    position: absolute; z-index: 2; margin: 0; min-width: 0; min-height: 0;
+  }
+  .pane > .dock-bar,
+  .pane > marble-conversation:not([data-marble-transient]),
+  .dock-frame, .dock-gutter {
+    transition: left var(--t-room) var(--ease-out), top var(--t-room) var(--ease-out),
+      width var(--t-room) var(--ease-out), height var(--t-room) var(--ease-out),
+      opacity 260ms var(--ease-out), transform 360ms var(--ease-out);
+  }
+  .pane.marble-noanim, .pane.marble-noanim *, .pane.marble-docksizing, .pane.marble-docksizing * { transition: none !important; }
+  .dock-frame {
+    position: absolute; z-index: 1; display: flex; flex-direction: column;
+    min-width: 0; min-height: 0; overflow: hidden; pointer-events: auto;
+    border: 1px solid var(--line); border-radius: var(--pane-r);
+    background: var(--paper); box-shadow: var(--shadow);
+  }
+  .dock-frame[data-key="P"] { z-index: 0; pointer-events: none; }
+  .dock-frame marble-conversation { flex: 1; min-height: 0; height: 100%; }
+  .dock-frame.marble-entering { opacity: 0; transform: scale(.97); }
+  .dock-frame.marble-leaving { opacity: 0; transform: scale(.97); pointer-events: none; z-index: 0; }
+  /* The seam between two panes is the gap. It is invisible until you reach for it. */
+  .dock-gutter { position: absolute; z-index: 3; pointer-events: auto; touch-action: none; }
+  .dock-gutter[data-dir="row"] { cursor: col-resize; }
+  .dock-gutter[data-dir="col"] { cursor: row-resize; }
+  .dock-gutter[data-dir="row"]::before { content: ''; position: absolute; inset: 0 -4px; }
+  .dock-gutter[data-dir="col"]::before { content: ''; position: absolute; inset: -4px 0; }
+  .dock-gutter::after {
+    content: ''; position: absolute; left: 50%; top: 50%; border-radius: 999px;
+    background: var(--faint); opacity: 0;
+    transition: opacity 200ms var(--ease-out), transform 260ms var(--ease-out);
+  }
+  .dock-gutter[data-dir="row"]::after { width: 4px; height: 36px; transform: translate(-50%, -50%) scaleY(.6); }
+  .dock-gutter[data-dir="col"]::after { width: 36px; height: 4px; transform: translate(-50%, -50%) scaleX(.6); }
+  .dock-gutter:hover::after, .pane.marble-docksizing .dock-gutter::after { opacity: .55; transform: translate(-50%, -50%); }
   .dock-bar {
-    display: flex; align-items: center; gap: .45rem;
-    min-height: 2.15rem; padding: .2rem .45rem .2rem .55rem;
+    display: flex; align-items: center; gap: .45rem; flex: none;
+    height: var(--bar-h); padding: 0 .45rem 0 .55rem; box-sizing: border-box;
     border-bottom: 1px solid var(--line); background: var(--paper-2);
     cursor: grab; user-select: none; min-width: 0;
   }
@@ -805,23 +913,64 @@ __ICON__
   }
   .dock-close:hover, .dock-close:focus-visible { color: var(--ink); background: var(--paper-3); outline: none; }
   body:not([data-open]) .pane > .dock-bar { display: none; }
+  /* The chat in your hand. It lifts when it is picked up and settles small
+     once it is over somewhere it will dock, so the pane — not the card — is
+     what you are looking at when you let go. */
   .dock-card {
     position: fixed; z-index: 40; pointer-events: none; width: 16.5rem;
     padding: .65rem .8rem; background: var(--card); border: 1px solid var(--line);
-    border-radius: 12px; box-shadow: var(--shadow-lift);
+    border-radius: 14px; box-shadow: var(--shadow-lift);
+    transform-origin: var(--grab-x, 16px) var(--grab-y, 16px);
+    animation: card-lift 240ms var(--ease-out) both;
+    transition: transform 320ms var(--ease-out), opacity 240ms var(--ease-out);
   }
+  .dock-card.marble-docking { transform: scale(.86); opacity: .82; }
+  @keyframes card-lift { from { transform: scale(.94); opacity: 0; } }
   .dock-card .dock-title { display: block; font-size: 13px; font-weight: 500; }
   .dock-card .dock-target { display: block; max-width: none; color: var(--muted); margin-top: .15rem; }
-  .pane.marble-drop-right::after, .pane.marble-drop-left::after,
-  .pane.marble-drop-top::after, .pane.marble-drop-bottom::after {
-    content: ''; position: absolute; z-index: 6; pointer-events: none;
-    background: rgba(var(--accent-ink-rgb), .16);
-    transition: opacity 160ms ease-out;
+  .marble-lifted { opacity: .4; }
+  .marble-dragging-chat, .marble-dragging-chat * {
+    user-select: none !important; -webkit-user-select: none !important; cursor: grabbing !important;
   }
-  .pane.marble-drop-right::after { top: 0; right: 0; bottom: 0; width: 22%; }
-  .pane.marble-drop-left::after { top: 0; left: 0; bottom: 0; width: 22%; }
-  .pane.marble-drop-top::after { top: 0; left: 0; right: 0; height: 22%; }
-  .pane.marble-drop-bottom::after { bottom: 0; left: 0; right: 0; height: 22%; }
+  /* Where it will land. The ghost is a real leaf in the layout, so the room it
+     asks for is made by the same numbers the real chat will take. */
+  .pane .dock-frame.dock-ghost {
+    align-items: center; justify-content: center; gap: .55rem; pointer-events: none;
+    border: 1.5px dashed color-mix(in srgb, var(--accent-ink) 50%, transparent);
+    background: color-mix(in srgb, var(--accent-ink) 7%, var(--paper)); box-shadow: none;
+  }
+  .dock-ghost > * { animation: ghost-in 420ms var(--ease-out) 120ms both; transition: opacity 160ms var(--ease-out); }
+  .dock-ghost.marble-leaving { opacity: .0; }
+  .dock-ghost.marble-leaving > * { opacity: 0; animation: none; }
+  .dock-ghost-tab {
+    display: inline-flex; align-items: center; gap: .45rem; max-width: 86%;
+    padding: .35rem .7rem; border-radius: 999px; background: var(--card);
+    border: 1px solid var(--line); box-shadow: var(--shadow); font-size: 12.5px; font-weight: 500;
+  }
+  .dock-ghost-tab span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .dock-ghost p { margin: 0; font-size: .75rem; color: var(--accent-ink); }
+  /* Handed over on drop: the real chat is under it, so it dissolves rather than
+     the slot popping into a conversation. */
+  .pane .dock-frame.dock-ghost.marble-dissolve {
+    position: absolute; inset: 0; left: 0; top: 0; width: auto; height: auto; z-index: 5;
+    border-radius: inherit; animation: ghost-out 340ms var(--ease-out) both; transition: none;
+  }
+  .dock-ghost.marble-dissolve > * { animation: none; }
+  @keyframes ghost-in { from { opacity: 0; transform: translateY(6px) scale(.96); } }
+  @keyframes ghost-out { to { opacity: 0; } }
+  /* Nothing makes room when the drop replaces — the chat that is about to go
+     steps back instead. */
+  .pane.marble-replace-primary > marble-conversation:not([data-marble-transient]),
+  .pane.marble-replace-primary > .dock-bar,
+  .dock-frame.marble-replace {
+    opacity: .42; transform: scale(.985);
+  }
+  .pane.marble-drop-fill::after {
+    content: ''; position: absolute; inset: 0; z-index: 6; pointer-events: none;
+    border-radius: inherit; background: rgba(var(--accent-ink-rgb), .06);
+    box-shadow: inset 0 0 0 2px rgba(var(--accent-ink-rgb), .35);
+    animation: ghost-in 240ms var(--ease-out) both;
+  }
   .pane marble-conversation { min-height: 0; }
   /* The composer is always live — even with nothing picked, typing below
      starts a conversation — so the hint sits above it, not over it. */
@@ -839,6 +988,67 @@ __ICON__
     align-items: center; justify-content: center; box-shadow: var(--shadow);
   }
   .pane .back:hover, .pane .back:focus-visible { background: var(--card); outline: none; }
+
+  /* Cards on a well. Only where the panes live (List and Folders) and only
+     where there is room; a phone gets one pane at a time, edge to edge. */
+  @media (min-width: 720px) {
+    body[data-view="library"],
+    body[data-view="folders"] { background: var(--well); }
+    body[data-view="library"] .library,
+    body[data-view="folders"] .library { padding: var(--pane-gap); column-gap: var(--pane-gap); }
+    body[data-view="folders"] .folders { padding: var(--pane-gap); column-gap: var(--pane-gap); }
+    body[data-view="library"] .pane,
+    body[data-view="folders"] .pane {
+      background: transparent; isolation: isolate; --dock-gap: var(--pane-gap);
+    }
+    /* Alone, the primary chat is a bar and a conversation in two grid rows, so
+       its card is a third thing behind both. With company it gets a card in the
+       stage like every other pane. */
+    body[data-view="library"] .pane:not([data-dock])::before,
+    body[data-view="folders"] .pane:not([data-dock])::before {
+      content: ''; z-index: -1; grid-column: 1; grid-row: 1 / -1;
+      border: 1px solid var(--line); border-radius: var(--pane-r);
+      background: var(--paper); box-shadow: var(--shadow);
+    }
+    body[data-view="library"] .pane > .dock-bar,
+    body[data-view="folders"] .pane > .dock-bar,
+    body[data-view="library"] .dock-frame .dock-bar,
+    body[data-view="folders"] .dock-frame .dock-bar {
+      background: transparent; border-radius: var(--pane-r) var(--pane-r) 0 0;
+      padding-left: .8rem;
+    }
+    body[data-view="library"] .pane > marble-conversation:not([data-marble-transient]),
+    body[data-view="folders"] .pane > marble-conversation:not([data-marble-transient]) {
+      border-radius: 0 0 var(--pane-r) var(--pane-r); overflow: hidden;
+    }
+
+    body[data-view="folders"] .folder-rail,
+    body[data-view="library"] .list {
+      border: 1px solid var(--line); border-radius: var(--pane-r);
+      background: var(--paper); box-shadow: var(--shadow); padding: .5rem;
+    }
+    body[data-view="folders"] .folder-header,
+    body[data-view="folders"] .folder-new-chat,
+    body[data-view="folders"] .folder-tab { border-radius: 10px; }
+    body[data-view="folders"] .folder-tabs { gap: 2px; padding: 2px 0 .3rem; }
+    body[data-view="folders"] .folder-group { margin-bottom: .2rem; }
+    body[data-view="folders"] .folder-ungrouped { margin-top: .35rem; border-top-color: transparent; }
+    body[data-view="folders"] .folder-group .folder-tab,
+    body[data-view="library"] .list .conv[data-color] {
+      border-left: 0;
+      background-image: linear-gradient(color-mix(in srgb, var(--folder) 55%, transparent), color-mix(in srgb, var(--folder) 55%, transparent));
+      background-repeat: no-repeat; background-size: 3px calc(100% - 16px); background-position: .55rem center;
+    }
+    body[data-view="library"] .list .conv { border-left: 0; border-radius: 10px; padding-left: 1.1rem; }
+    body[data-view="folders"] .folder-tab.marble-drop-target,
+    body[data-view="folders"] .folder-header.marble-drop-target {
+      outline: none; background-color: color-mix(in srgb, var(--accent-ink) 9%, transparent);
+      box-shadow: inset 0 0 0 2px color-mix(in srgb, var(--accent-ink) 42%, transparent);
+    }
+    /* The seams sit in the gap now, not on a card edge. */
+    body[data-view="library"] .rz-list,
+    body[data-view="folders"] .rz-rail { margin-left: calc(var(--pane-gap) * 1.5); }
+  }
 
   @media (max-width: 719px) {
     /* Title + segmented bars + New stay on the first wrap; search gets
@@ -1017,7 +1227,7 @@ __ICON__
     let panelOpen = false;
     let flipAnims = [];
     let fadeGen = 0;
-    let dock = { dir: 'row', primary: 'start', extras: [], sizes: [0.58, 0.42], focus: 'primary' };
+    let dock = { tree: null, extras: [], focus: 'primary' };
     let suppressConvClick = false;
 
     const statusOf = (summary) => {
@@ -1182,6 +1392,7 @@ __ICON__
       const members = railConversations(folder.id).map((summary) => summary.id);
       const resolved = ids.length ? ids : members.slice(0, FULL_CAP);
       dock.extras = [];
+      dock.tree = null;
       dock.focus = 'primary';
       if (resolved.length > 1) dock.extras = resolved.slice(1).map((id) => ({ id }));
       applyDock();
@@ -1215,6 +1426,7 @@ __ICON__
       }
       activeFolderId = null;
       dock.extras = capped.slice(1).map((id) => ({ id }));
+      dock.tree = null;
       dock.focus = 'primary';
       rememberDock();
       applyDock();
@@ -1292,13 +1504,21 @@ __ICON__
       }
     };
 
-    const paintFolderDrop = (clientX, clientY, skipId) => {
+    const clearFolderDrop = () => {
       for (const el of folderRail?.querySelectorAll('.marble-drop-target') ?? []) {
         el.classList.remove('marble-drop-target');
       }
-      if (clientX == null) return;
-      const hit = hitFolderDrop(clientX, clientY, skipId);
+    };
+
+    /** Over a tab or a header the rail answers; over the pane the pane makes
+     *  room, exactly as it does for a row dragged from the list. */
+    const paintFolderDrop = (clientX, clientY, skipId) => {
+      clearFolderDrop();
+      const hit = clientX == null ? null : hitFolderDrop(clientX, clientY, skipId);
+      if (hit?.kind === 'pane') return paintDrop(clientX, clientY, skipId, { rail: true });
+      paintDrop(null);
       if (hit?.el) hit.el.classList.add('marble-drop-target');
+      return null;
     };
 
     const hitFolderDrop = (clientX, clientY, skipId) => {
@@ -1330,7 +1550,7 @@ __ICON__
       return null;
     };
 
-    const applyFolderDrop = async (dragId, hit) => {
+    const applyFolderDrop = async (dragId, hit, drop = null) => {
       if (!agent || !hit) return;
       const dragSummary = summaries.get(dragId);
       const dragFolderId = dragSummary?.folderId ?? null;
@@ -1375,6 +1595,9 @@ __ICON__
         return;
       }
       if (hit.kind === 'pane') {
+        // The pane already showed where this lands, so put it there first and
+        // let the folder bookkeeping catch up behind it.
+        dropOnto(dragId, drop);
         if (activeFolderId) {
           const prev = dragFolderId;
           try {
@@ -1395,13 +1618,8 @@ __ICON__
           return;
         }
         if (workingSetIds.length) {
-          const ids = [...workingSetIds];
-          if (!ids.includes(dragId)) ids.push(dragId);
-          workingSetIds = ids.slice(0, FULL_CAP);
-          try {
-            await agent.saveWorkingSet(workingSetIds);
-            await tileWorkingSet(workingSetIds);
-          } catch { /* save failed */ }
+          workingSetIds = paneIds();
+          try { await agent.saveWorkingSet(workingSetIds); } catch { /* save failed */ }
         }
       }
     };
@@ -1420,9 +1638,14 @@ __ICON__
           if (done) return;
           if (!origin.started && Math.hypot(e.clientX - origin.x, e.clientY - origin.y) < 10) return;
           origin.started = true;
-          if (!card) card = makeCard(dragId);
+          if (!card) {
+            card = makeCard(dragId, grabX, grabY);
+            tab.classList.add('marble-lifted');
+            document.body.classList.add('marble-dragging-chat');
+          }
           placeCard(card, e.clientX, e.clientY, grabX, grabY);
-          paintFolderDrop(e.clientX, e.clientY, dragId);
+          const res = paintFolderDrop(e.clientX, e.clientY, dragId);
+          card.classList.toggle('marble-docking', Boolean(res?.plan && res.plan.mode !== 'fill'));
         };
         const up = async (e) => {
           if (done) return;
@@ -1433,13 +1656,17 @@ __ICON__
           document.removeEventListener('mouseup', up);
           document.removeEventListener('pointercancel', up);
           try { tab.releasePointerCapture?.(e.pointerId); } catch { /* already released */ }
+          tab.classList.remove('marble-lifted');
+          document.body.classList.remove('marble-dragging-chat');
+          const hit = origin.started ? hitFolderDrop(e.clientX, e.clientY, dragId) : null;
+          const drop = hit?.kind === 'pane' ? resolveDrop(e.clientX, e.clientY, dragId, { rail: true }) : null;
           card?.remove();
-          paintFolderDrop(null);
+          clearFolderDrop();
+          endDrop(drop?.plan?.mode === 'split');
           if (!origin.started) return;
           suppressFolderClick = true;
           setTimeout(() => { suppressFolderClick = false; }, 0);
-          const hit = hitFolderDrop(e.clientX, e.clientY, dragId);
-          await applyFolderDrop(dragId, hit);
+          await applyFolderDrop(dragId, hit, drop);
         };
         document.addEventListener('pointermove', move);
         document.addEventListener('mousemove', move);
@@ -1505,6 +1732,7 @@ __ICON__
         } else {
           activeFolderId = null;
           dock.extras = [];
+          dock.tree = null;
           dock.focus = 'primary';
           rememberDock();
           applyDock();
@@ -1761,11 +1989,13 @@ __ICON__
       .filter(matches)
       .sort((a, b) => (b.updatedAt ?? 0) - (a.updatedAt ?? 0));
 
-    const focusFullIds = () => matchingFocusItems()
-      .filter((item) => item.pinned)
-      .sort((a, b) => (b.lastInteractedAt ?? 0) - (a.lastInteractedAt ?? 0))
-      .slice(0, FULL_CAP)
-      .map((item) => item.id);
+    // The stage is a column like any other, so what orders it is rank — a
+    // pane dragged left stays left. Recency only breaks a tie between panes
+    // nobody has ever arranged.
+    const focusFullIds = () => focusColumnsOf(matchingFocusItems(), null).stage;
+
+    // How wide the left edge reads as "pin this" when there is no stage.
+    const FOCUS_RAIL = 48;
 
     const folderColorOf = (folderId) => folderCatalog.find((row) => row.id === folderId)?.color || '';
 
@@ -1787,6 +2017,7 @@ __ICON__
     };
 
     const leaveFocusView = () => {
+      endFocusDrag();
       clearFocusPane();
       for (const live of focusEl?.querySelectorAll('.focus-live') ?? []) live.replaceChildren();
       document.querySelector('.focus-look')?.remove();
@@ -1807,6 +2038,7 @@ __ICON__
       stopFocusDecay();
       focusDecayTimer = setInterval(() => {
         if (document.hidden) return;
+        if (focusDrag) return;
         if ((document.body.getAttribute('data-view') || 'library') !== 'focus') return;
         paintFocus({ quiet: true });
       }, 1000);
@@ -1817,77 +2049,67 @@ __ICON__
       return { w: Math.max(1, focusEl.clientWidth), h: Math.max(1, focusEl.clientHeight), left: r.left, top: r.top };
     };
 
-    // Digest is sized to the four lines it actually shows. It used to be
-    // 280x200 holding three lines of run-on text, so every card read as a
-    // third-full box.
-    const focusLodSize = (lod) => (lod === 'digest' ? { w: 260, h: 132 } : { w: 168, h: 56 });
-
-    const STAGE_MARGIN = 16;
-
-    /** Fulls are tiled across the top. Two columns once there are three, so a
-     *  fourth pin squares the stage off rather than slivering it. */
-    const stageGrid = (fullCount) => ({
-      cols: fullCount >= 3 ? 2 : Math.max(1, fullCount),
-      rows: fullCount >= 3 ? 2 : 1,
-    });
-
-    const stageHeight = (fullCount, canvas) => {
-      if (!fullCount) return 0;
-      return Math.min(canvas.h * 0.52, 460) + STAGE_MARGIN;
-    };
-
-    const stageRect = (index, fullCount, canvas) => {
-      const gap = window.marbleAgentFolders?.GAP ?? 8;
-      const { cols, rows } = stageGrid(fullCount);
-      const band = Math.min(canvas.h * 0.52, 460);
-      const w = (canvas.w - 2 * STAGE_MARGIN - (cols - 1) * gap) / cols;
-      const h = (band - STAGE_MARGIN - (rows - 1) * gap) / rows;
+    /** A client point in canvas coordinates — the space the packer works in,
+     *  which scrolls under the viewport once the columns outrun it. */
+    const focusPoint = (clientX, clientY) => {
+      const box = focusEl.getBoundingClientRect();
       return {
-        x: STAGE_MARGIN + (index % cols) * (w + gap),
-        y: STAGE_MARGIN + Math.floor(index / cols) * (h + gap),
-        w,
-        h,
+        x: clientX - box.left + focusEl.scrollLeft,
+        y: clientY - box.top + focusEl.scrollTop,
       };
     };
 
-    /** The last resort when the layout helper is not on the page: one plain
-     *  wrapping row of cards, no regions. Never reached in a healthy load. */
-    const flowFieldCards = (groups, canvas, top) => {
+    // Digest is sized to the four lines it actually shows, a chip to its one.
+    // Only the heights are the card's: a field card takes its width from the
+    // column it sits in, so a chip is a short row and not a ragged edge.
+    const focusLodSize = (lod) => (lod === 'digest' ? { w: 260, h: 132 } : { w: 168, h: 56 });
+
+    /** The layout that is currently on screen. A drop reads its slots from
+     *  here rather than re-measuring the DOM, so a card lands exactly where
+     *  the insertion bar said it would even while the springs are still
+     *  running. */
+    let focusPack = null;
+    let focusDrag = null;
+
+    /** The last resort when the layout helper is not on the page: one column
+     *  per group, no slots, no stage. Never reached in a healthy load. */
+    const flowFieldColumns = (fulls, groups, canvas) => {
       const gap = 8;
       const rects = {};
+      const regions = [];
       let x = 16;
-      let y = top + 16;
-      let rowH = 0;
+      const h = Math.max(120, canvas.h - 32);
       for (const group of groups) {
+        const region = {
+          folderId: group.folderId,
+          x,
+          y: 16,
+          w: 296,
+          h,
+          inner: { x: x + 18, y: 54, w: 260, h: h - 38 },
+          cards: [],
+        };
+        let y = 54;
         for (const card of group.cards) {
-          const size = focusLodSize(card.lod);
-          if (x > 16 && x + size.w > canvas.w - 16) {
-            x = 16;
-            y += rowH + gap;
-            rowH = 0;
-          }
-          rects[card.id] = { x, y, w: size.w, h: size.h };
-          x += size.w + gap;
-          rowH = Math.max(rowH, size.h);
+          const size = focusLodSize(card.lod === 'chip' ? 'chip' : 'digest');
+          const rect = { id: card.id, x: x + 18, y, w: 260, h: size.h };
+          region.cards.push(rect);
+          rects[card.id] = { x: rect.x, y: rect.y, w: rect.w, h: rect.h };
+          y += size.h + gap;
         }
+        regions.push(region);
+        x += region.w + gap;
       }
-      return { regions: [], rects, height: y + rowH + 16 };
+      return {
+        stage: { x: 16, y: 16, w: 0, h, cols: [] },
+        regions,
+        newGroup: null,
+        rects,
+        colW: 260,
+        width: Math.max(canvas.w, x + 16),
+        height: Math.max(canvas.h, h + 32),
+      };
     };
-
-    /** What packRegions needs to know about a card: its size class, and the
-     *  stored drag position it should be ordered by inside its region. */
-    const fieldCard = (item) => ({
-      id: item.id,
-      lod: lastLods[item.id] === 'chip' ? 'chip' : 'digest',
-      ox: Number.isFinite(item.focusX) ? item.focusX : undefined,
-      oy: Number.isFinite(item.focusY) ? item.focusY : undefined,
-    });
-
-    const clampFocusRect = (rect, canvas) => ({
-      ...rect,
-      x: Math.min(Math.max(8, rect.x), Math.max(8, canvas.w - rect.w - 8)),
-      y: Math.min(Math.max(8, rect.y), Math.max(8, canvas.h - rect.h - 8)),
-    });
 
     const rubberFocus = (value, min, max, dimension) => {
       const fn = window.marbleAgentFolders?.rubberband;
@@ -2005,6 +2227,12 @@ __ICON__
 
     const layoutFocusPane = (fullIds) => {
       if (!pane || !focusEl) return;
+      // A `position: fixed` pane cannot chase a spring. It stands down for the
+      // length of a gesture and the Full it covers shows its digest instead.
+      if (focusDrag) {
+        hideFocusPane();
+        return;
+      }
       const stacked = focusEl.hasAttribute('data-stack') || narrowView.matches;
       const primary = (focusPrimaryId && fullIds.includes(focusPrimaryId)) ? focusPrimaryId : fullIds[0];
       if (!primary || stacked) {
@@ -2031,7 +2259,7 @@ __ICON__
       pane.style.overflow = 'hidden';
       pane.style.pointerEvents = 'auto';
       if (convo.getAttribute('conversation') !== primary) convo.setAttribute('conversation', primary);
-      pane.querySelector('.dock-extras')?.replaceChildren();
+      pane.querySelector('.dock-stage')?.replaceChildren();
       for (const id of fullIds) {
         const host = focusEl.querySelector(`.focus-card[data-id="${id}"] .focus-live`);
         if (!host) continue;
@@ -2159,115 +2387,357 @@ __ICON__
      *  wherever its members happened to land. Hulls over a free layout
      *  overlapped each other and ran off the canvas; a region cannot, because
      *  the same pass placed the cards inside it. */
-    const paintFocusBasins = (regions = []) => {
+    /** A basin is the column the packer allocated, full height, so it is a
+     *  target you cannot miss and it cannot overlap its neighbours — the same
+     *  pass placed the cards inside it. The two dashed columns beside them are
+     *  the drop targets that have no cards to stand for them: where a pin goes
+     *  when nothing is pinned yet, and what makes a folder. */
+    const paintFocusBasins = (pack) => {
       if (!focusEl) return;
       const stacked = focusEl.hasAttribute('data-stack') || narrowView.matches;
+      const regions = (!stacked && pack?.regions) || [];
+      const target = focusDrag?.target ?? null;
       const keep = new Set();
-      if (!stacked) {
-        for (const region of regions) {
-          const folderId = region.folderId ?? 'ungrouped';
-          keep.add(folderId);
-          const folder = folderCatalog.find((row) => row.id === folderId);
-          let basin = focusEl.querySelector(`.focus-basin[data-folder-id="${folderId}"]`);
-          if (!basin) {
-            basin = document.createElement('div');
-            basin.className = 'focus-basin';
-            basin.dataset.folderId = folderId;
-            basin.setAttribute('data-marble-transient', '');
-            const name = document.createElement('button');
-            name.type = 'button';
-            name.className = 'focus-basin-name folder-name';
-            name.setAttribute('data-marble-transient', '');
-            name.addEventListener('click', () => {
-              const ids = matchingFocusItems().filter((item) => item.folderId === folderId).map((item) => item.id);
-              focusSelectedIds = ids;
-              focusPrimaryId = ids[0] ?? focusPrimaryId;
-              paintFocus({ quiet: true });
-            });
-            name.addEventListener('dblclick', (event) => {
-              event.preventDefault();
-              event.stopPropagation();
-              const row = folderCatalog.find((item) => item.id === folderId);
-              if (row) editFolderName(name, row);
-            });
-            basin.append(name);
-            focusEl.insertBefore(basin, focusEl.querySelector('.focus-card'));
-          }
-          if (folder?.color) basin.dataset.color = folder.color;
-          else delete basin.dataset.color;
-          if (region.folderId) delete basin.dataset.loose;
-          else basin.dataset.loose = 'true';
-          const name = basin.querySelector('.focus-basin-name');
-          if (name) {
-            name.textContent = region.folderId ? (folder?.name || 'Group') : 'Ungrouped';
-            name.disabled = !region.folderId;
-          }
-          basin.style.left = `${region.x}px`;
-          basin.style.top = `${region.y}px`;
-          basin.style.width = `${Math.max(0, region.w)}px`;
-          basin.style.height = `${Math.max(0, region.h)}px`;
+      for (const region of regions) {
+        const folderId = region.folderId ?? 'ungrouped';
+        keep.add(folderId);
+        const folder = folderCatalog.find((row) => row.id === folderId);
+        let basin = focusEl.querySelector(`.focus-basin[data-folder-id="${folderId}"]`);
+        if (!basin) {
+          basin = document.createElement('div');
+          basin.className = 'focus-basin';
+          basin.dataset.folderId = folderId;
+          basin.setAttribute('data-marble-transient', '');
+          const name = document.createElement('button');
+          name.type = 'button';
+          name.className = 'focus-basin-name folder-name';
+          name.setAttribute('data-marble-transient', '');
+          name.addEventListener('click', () => {
+            const ids = matchingFocusItems().filter((item) => item.folderId === folderId).map((item) => item.id);
+            focusSelectedIds = ids;
+            focusPrimaryId = ids[0] ?? focusPrimaryId;
+            paintFocus({ quiet: true });
+          });
+          name.addEventListener('dblclick', (event) => {
+            event.preventDefault();
+            event.stopPropagation();
+            const row = folderCatalog.find((item) => item.id === folderId);
+            if (row) editFolderName(name, row);
+          });
+          basin.append(name);
+          focusEl.insertBefore(basin, focusEl.querySelector('.focus-card'));
         }
+        if (folder?.color) basin.dataset.color = folder.color;
+        else delete basin.dataset.color;
+        if (region.folderId) delete basin.dataset.loose;
+        else basin.dataset.loose = 'true';
+        if (target?.column === 'folder' && (target.folderId ?? null) === (region.folderId ?? null)) {
+          basin.dataset.drop = 'into';
+        } else delete basin.dataset.drop;
+        const name = basin.querySelector('.focus-basin-name');
+        if (name) {
+          name.textContent = region.folderId ? (folder?.name || 'Group') : 'Ungrouped';
+          name.disabled = !region.folderId;
+        }
+        basin.style.left = `${region.x}px`;
+        basin.style.top = `${region.y}px`;
+        basin.style.width = `${Math.max(0, region.w)}px`;
+        basin.style.height = `${Math.max(0, region.h)}px`;
       }
       for (const basin of [...focusEl.querySelectorAll('.focus-basin')]) {
         if (!keep.has(basin.dataset.folderId)) basin.remove();
       }
+      paintFocusNewGroup(pack?.newGroup ?? null, target);
+      paintFocusPinSlot(pack, target);
+      paintFocusSlot(pack, target);
     };
 
-    const hitFocusDrop = (clientX, clientY, skipId) => {
-      const stack = document.elementsFromPoint?.(clientX, clientY) ?? [document.elementFromPoint(clientX, clientY)];
-      for (const el of stack) {
-        const other = el?.closest?.('.focus-card[data-id]');
-        if (other?.dataset.id && other.dataset.id !== skipId) {
-          return { kind: 'card', id: other.dataset.id, folderId: summaries.get(other.dataset.id)?.folderId ?? null };
-        }
+    /** Making a folder is otherwise undiscoverable — you would have to guess
+     *  that one card dropped on another means something. It is a real button
+     *  as well as a drop target, so the keyboard can reach it too. */
+    const paintFocusNewGroup = (slot, target) => {
+      let el = focusEl.querySelector('.focus-newgroup');
+      if (!slot) {
+        el?.remove();
+        return;
       }
-      for (const basin of focusEl?.querySelectorAll('.focus-basin') ?? []) {
-        const r = basin.getBoundingClientRect();
-        if (clientX >= r.left && clientX <= r.right && clientY >= r.top && clientY <= r.bottom) {
-          return { kind: 'basin', folderId: basin.dataset.folderId };
-        }
-      }
-      return { kind: 'canvas' };
-    };
-
-    const applyFocusDrop = async (dragId, hit, fx, fy) => {
-      const drag = summaries.get(dragId);
-      if (agent && drag) {
-        drag.focusX = fx;
-        drag.focusY = fy;
-        try { await agent.update(dragId, { focusX: fx, focusY: fy }); } catch { /* stale */ }
-      }
-      if (!agent || !hit) return;
-      if (hit.kind === 'card') {
-        const targetFolder = hit.folderId;
-        const dragFolder = drag?.folderId ?? null;
-        if (!targetFolder && !dragFolder && hit.id !== dragId) {
+      if (!el) {
+        el = document.createElement('button');
+        el.type = 'button';
+        el.className = 'focus-newgroup';
+        el.setAttribute('data-marble-transient', '');
+        el.innerHTML = '<span class="focus-newgroup-mark" aria-hidden="true">+</span><span class="focus-newgroup-label">New group</span>';
+        el.addEventListener('click', async (event) => {
+          event.stopPropagation();
+          const ids = focusSelectedIds.length ? [...focusSelectedIds] : [];
+          if (!ids.length || !agent) return;
           try {
-            await agent.createFolder({ conversationIds: [dragId, hit.id] });
+            await agent.createFolder({ conversationIds: ids });
             const listed = await agent.folders();
             folderCatalog = listed.folders ?? folderCatalog;
           } catch { /* create failed */ }
-          return;
-        }
-        if (targetFolder && targetFolder !== dragFolder) {
-          try { await agent.update(dragId, { folderId: targetFolder }); } catch { /* join failed */ }
-        }
+          paintFocus();
+        });
+        focusEl.append(el);
+      }
+      el.disabled = !focusSelectedIds.length && !focusDrag;
+      el.title = focusDrag ? 'Drop here to make a folder' : 'Make a folder of the selected chats';
+      if (target?.column === 'new') el.dataset.drop = 'into';
+      else delete el.dataset.drop;
+      el.style.left = `${slot.x}px`;
+      el.style.top = `${slot.y}px`;
+      el.style.width = `${Math.max(0, slot.w)}px`;
+      el.style.height = `${Math.max(0, slot.h)}px`;
+    };
+
+    /** The rail that stands in for an empty stage, drawn over the canvas's
+     *  left edge rather than reserved inside it. Only while a card is in the
+     *  air, and only while there is no real stage column to aim at. */
+    const paintFocusPinSlot = (pack, target) => {
+      // What the rail stands in for is an empty stage, so it asks the model
+      // and not the pack — once a drag aims at it the pack has a column, and
+      // the rail would blink out at the moment of contact.
+      const wanted = Boolean(focusDrag)
+        && !focusColumnsOf(matchingFocusItems(), null).stage.length;
+      let el = document.querySelector('.focus-pinslot');
+      if (!wanted) {
+        el?.remove();
         return;
       }
-      if (hit.kind === 'basin' && hit.folderId && drag?.folderId !== hit.folderId) {
-        try { await agent.update(dragId, { folderId: hit.folderId }); } catch { /* join failed */ }
+      if (!el) {
+        el = document.createElement('div');
+        el.className = 'focus-pinslot';
+        el.setAttribute('data-marble-transient', '');
+        el.innerHTML = '<span>Pin</span>';
+        document.body.append(el);
+      }
+      if (target?.column === 'stage') el.dataset.drop = 'into';
+      else delete el.dataset.drop;
+      const box = focusEl.getBoundingClientRect();
+      el.style.left = `${box.left}px`;
+      el.style.top = `${box.top}px`;
+      el.style.width = `${FOCUS_RAIL}px`;
+      el.style.height = `${box.height}px`;
+    };
+
+    /** The slot the card would land in, drawn at the rect the layout already
+     *  reserved for it. An outline rather than a line: for a field drop it is
+     *  the gap that just opened, for a stage drop it is the full-height column
+     *  the card is about to become. */
+    const paintFocusSlot = (pack, target) => {
+      const lead = focusDrag?.lead;
+      const rect = target && !target.merge && target.column !== 'new' && lead
+        ? pack?.rects?.[lead]
+        : null;
+      let el = focusEl.querySelector('.focus-slot');
+      if (!rect) {
+        el?.remove();
         return;
       }
-      if (hit.kind === 'canvas' && drag?.folderId) {
-        try { await agent.update(dragId, { folderId: null }); } catch { /* ungroup failed */ }
+      if (!el) {
+        el = document.createElement('div');
+        el.className = 'focus-slot';
+        el.setAttribute('data-marble-transient', '');
+        focusEl.append(el);
       }
+      el.style.left = `${rect.x}px`;
+      el.style.top = `${rect.y}px`;
+      el.style.width = `${Math.max(0, rect.w)}px`;
+      el.style.height = `${Math.max(0, rect.h)}px`;
+    };
+
+    /** Where a release would land, read off the layout that put the cards
+     *  there. Indexes come back in the column's own terms — the cards that are
+     *  not in the air — because that is what a drop is filed against. */
+    const focusTargetAt = (point) => {
+      const pack = focusPack;
+      const helpers = window.marbleAgentFolders;
+      if (!pack || !helpers?.slotAt) return null;
+      const dragIds = focusDrag?.ids ?? [];
+      const drop = (list, index) => index - list.slice(0, index).filter((row) => dragIds.includes(row.id)).length;
+
+      // With nothing pinned there is no stage column to aim at, so the left
+      // edge of the canvas is one. It overlays rather than reserves: a column
+      // that appears the moment you lift a card would shove the whole field
+      // 300px sideways, and a gesture that moves the target is not a gesture.
+      if (!pack.stage.cols.length && point.x - focusEl.scrollLeft < FOCUS_RAIL) {
+        return { column: 'stage', index: 0, key: 'stage:0' };
+      }
+      const zones = [];
+      if (pack.stage.w > 0) zones.push({ kind: 'stage', x: pack.stage.x, w: pack.stage.w });
+      for (const region of pack.regions) zones.push({ kind: 'folder', region, x: region.x, w: region.w });
+      if (pack.newGroup) zones.push({ kind: 'new', x: pack.newGroup.x, w: pack.newGroup.w });
+      if (!zones.length) return null;
+      const gap = window.marbleAgentFolders?.GAP ?? 8;
+      let zone = zones.find((row) => point.x >= row.x - gap && point.x <= row.x + row.w + gap);
+      if (!zone) zone = point.x < zones[0].x ? zones[0] : zones[zones.length - 1];
+
+      if (zone.kind === 'new') return { column: 'new', key: 'new' };
+      if (zone.kind === 'stage') {
+        const slot = helpers.stageSlotAt(pack.stage, point, gap);
+        const index = drop(pack.stage.cols, slot.index);
+        return { column: 'stage', index, key: `stage:${index}` };
+      }
+
+      const region = zone.region;
+      const slot = helpers.slotAt(region, point, gap);
+      const over = slot.over && !dragIds.includes(slot.over) ? slot.over : null;
+      const loose = region.folderId === null;
+      const single = dragIds.length === 1 ? summaries.get(dragIds[0]) : null;
+      // Two loose cards have no folder to insert into, so squarely on top of
+      // one means "make a folder of these two". Inside a folder it would mean
+      // nothing, so the band is not offered there.
+      if (over && loose && single && !single.folderId) {
+        return { column: 'folder', folderId: null, merge: over, key: `merge:${over}` };
+      }
+      const index = drop(region.cards, slot.index);
+      return {
+        column: 'folder',
+        folderId: region.folderId ?? null,
+        index,
+        key: `folder:${region.folderId ?? 'loose'}:${index}`,
+      };
+    };
+
+    /** The ranks a drop has to file. One PATCH when the neighbours leave a
+     *  midpoint to take, a renumbered column when they do not — which is the
+     *  first rearrangement of a column, and nothing after it. */
+    const focusRankPatches = (rest, ids, index) => {
+      const helpers = window.marbleAgentFolders;
+      const at = Math.max(0, Math.min(index, rest.length));
+      const keys = rest.map((id) => summaries.get(id)?.focusY);
+      const single = ids.length === 1 ? helpers?.rankFor?.(keys, at) : null;
+      if (single !== null && single !== undefined) {
+        const item = summaries.get(ids[0]);
+        if (item) item.focusY = single;
+        return [{ id: ids[0], focusY: single }];
+      }
+      const next = [...rest.slice(0, at), ...ids, ...rest.slice(at)];
+      const values = helpers?.ranks?.(next.length)
+        ?? next.map((_, i) => (i + 1) / (next.length + 1));
+      const out = [];
+      next.forEach((id, i) => {
+        const item = summaries.get(id);
+        if (item?.focusY === values[i]) return;
+        if (item) item.focusY = values[i];
+        out.push({ id, focusY: values[i] });
+      });
+      return out;
+    };
+
+    /** One gesture, every case: a card picked up and dropped in a slot. The
+     *  page has already moved — this is the half that files it. */
+    const commitFocusDrop = async (ids, target) => {
+      if (!agent || !ids.length || !target) return;
+      const patch = async (id, body) => {
+        try { await agent.update(id, body); } catch { /* stale */ }
+      };
+
+      if (target.column === 'new' || target.merge) {
+        const members = target.merge ? [...ids, target.merge] : [...ids];
+        try {
+          await agent.createFolder({ conversationIds: members });
+          const listed = await agent.folders();
+          folderCatalog = listed.folders ?? folderCatalog;
+        } catch { /* create failed */ }
+        return;
+      }
+
+      const layout = focusColumnsOf(matchingFocusItems(), null);
+
+      if (target.column === 'stage') {
+        const staged = layout.stage.filter((id) => !ids.includes(id));
+        // The stage holds four. A fifth pin retires the rightmost, which is
+        // the one the person themselves ranked least important.
+        const room = Math.max(0, FULL_CAP - ids.length);
+        const rest = staged.slice(0, room);
+        for (const id of staged.slice(room)) {
+          const item = summaries.get(id);
+          if (item) item.pinned = false;
+          await patch(id, { pinned: false });
+        }
+        for (const id of ids) {
+          const item = summaries.get(id);
+          if (item?.pinned) continue;
+          if (item) item.pinned = true;
+          await patch(id, { pinned: true });
+        }
+        for (const row of focusRankPatches(rest, ids, target.index ?? rest.length)) {
+          await patch(row.id, { focusY: row.focusY });
+        }
+        focusPrimaryId = ids[0];
+        return;
+      }
+
+      const folderId = target.folderId ?? null;
+      const column = layout.columns.find((row) => (row.folderId ?? null) === folderId)?.ids ?? [];
+      const rest = column.filter((id) => !ids.includes(id));
+      for (const id of ids) {
+        const item = summaries.get(id);
+        const body = {};
+        if (item?.pinned) {
+          body.pinned = false;
+          item.pinned = false;
+        }
+        if ((item?.folderId ?? null) !== folderId) {
+          body.folderId = folderId;
+          if (item) item.folderId = folderId;
+        }
+        if (Object.keys(body).length) await patch(id, body);
+      }
+      for (const row of focusRankPatches(rest, ids, target.index ?? rest.length)) {
+        await patch(row.id, { focusY: row.focusY });
+      }
+    };
+
+    /** The keyboard's half of rearranging. Alt with an arrow moves the card
+     *  itself, through the same drop rules the pointer uses, so no state the
+     *  pointer can reach is out of reach here. */
+    const moveFocusCard = async (id, dir) => {
+      const layout = focusColumnsOf(matchingFocusItems(), null);
+      const zones = [
+        { column: 'stage', folderId: null, ids: layout.stage },
+        ...layout.columns.map((row) => ({ column: 'folder', folderId: row.folderId, ids: row.ids })),
+      ];
+      const at = zones.findIndex((zone) => zone.ids.includes(id));
+      if (at < 0) return;
+      const here = zones[at];
+      const index = here.ids.indexOf(id);
+      if (dir === 'up' || dir === 'down') {
+        if (dir === 'up' && index <= 0) return;
+        if (dir === 'down' && index >= here.ids.length - 1) return;
+        await commitFocusDrop([id], {
+          column: here.column,
+          folderId: here.folderId,
+          index: dir === 'up' ? index - 1 : index + 1,
+        });
+      } else {
+        const to = zones[at + (dir === 'left' ? -1 : 1)];
+        if (!to) return;
+        await commitFocusDrop([id], {
+          column: to.column,
+          folderId: to.folderId,
+          index: Math.min(index, to.ids.length),
+        });
+      }
+      focusSelectedIds = [id];
+      focusPrimaryId = id;
+      paintFocus();
     };
 
     const handleFocusKeys = (event) => {
       if ((document.body.getAttribute('data-view') || 'library') !== 'focus') return false;
       if (typingIn()) return false;
-      if (event.metaKey || event.ctrlKey || event.altKey) return false;
       const arrows = { ArrowRight: 'right', ArrowLeft: 'left', ArrowUp: 'up', ArrowDown: 'down' };
+      // Alt with an arrow moves the card rather than the selection, through
+      // the same drop rules the pointer uses. Arranging is not pointer-only.
+      if (event.altKey && !event.metaKey && !event.ctrlKey && arrows[event.key]) {
+        event.preventDefault();
+        const id = focusPrimaryId || focusSelectedIds[0];
+        if (id) moveFocusCard(id, arrows[event.key]);
+        return true;
+      }
+      if (event.metaKey || event.ctrlKey || event.altKey) return false;
       if (arrows[event.key]) {
         event.preventDefault();
         const fromId = focusPrimaryId || focusSelectedIds[0];
@@ -2371,76 +2841,210 @@ __ICON__
       watchPaletteDismiss();
     };
 
+    // How deep into the canvas's margin a drag has to reach before the canvas
+    // starts travelling under it.
+    const FOCUS_EDGE = 56;
+
+    const focusCardEl = (id) => focusEl?.querySelector(`.focus-card[data-id="${id}"]`);
+
+    const endFocusDrag = () => {
+      const drag = focusDrag;
+      if (!drag) return null;
+      if (drag.frame) cancelAnimationFrame(drag.frame);
+      focusDrag = null;
+      delete focusEl.dataset.arranging;
+      for (const id of drag.ids) {
+        const el = focusCardEl(id);
+        if (!el) continue;
+        el.classList.remove('marble-dragging');
+        delete el.dataset.lift;
+      }
+      for (const el of focusEl.querySelectorAll('.focus-card[data-drop]')) delete el.dataset.drop;
+      document.querySelector('.focus-pinslot')?.remove();
+      return drag;
+    };
+
     const bindFocusCard = (card) => {
       card.addEventListener('pointerdown', (event) => {
         if (event.button !== 0) return;
         if (event.target.closest('button, a, input, textarea, marble-conversation')) return;
+        // The phone layout is a scrolling list, not a canvas. Nothing to
+        // rearrange, and a drag here would fight the scroll.
+        if (focusEl?.hasAttribute('data-stack') || narrowView.matches) return;
         const id = card.dataset.id;
-        const live = liveFocusBox(card);
-        const origin = {
-          x: event.clientX,
-          y: event.clientY,
-          left: live.x,
-          top: live.y,
-          id,
-          started: false,
-          lastX: event.clientX,
-          lastY: event.clientY,
-          lastT: performance.now(),
-          vx: 0,
-          vy: 0,
+        const box = card.getBoundingClientRect();
+        const grab = {
+          fx: box.width ? (event.clientX - box.left) / box.width : 0.5,
+          fy: box.height ? (event.clientY - box.top) / box.height : 0.5,
         };
+        const origin = { x: event.clientX, y: event.clientY };
+        const samples = [{ x: event.clientX, y: event.clientY, t: performance.now() }];
         let done = false;
         card.setPointerCapture?.(event.pointerId);
+
+        const track = (e) => {
+          const now = performance.now();
+          const last = samples[samples.length - 1];
+          // Pointer and mouse events arrive as a pair; one sample per move.
+          if (last && now - last.t < 4 && e.clientX === last.x && e.clientY === last.y) return false;
+          samples.push({ x: e.clientX, y: e.clientY, t: now });
+          if (samples.length > 6) samples.shift();
+          return true;
+        };
+
+        const velocity = () => {
+          const last = samples[samples.length - 1];
+          const first = samples.find((row) => last.t - row.t < 120) ?? samples[0];
+          const dt = Math.max(16, last.t - first.t) / 1000;
+          return { x: (last.x - first.x) / dt, y: (last.y - first.y) / dt };
+        };
+
+        /** The card tracks the pointer 1:1 from where it was grabbed, and the
+         *  rest of a selection tucks in behind it. Positions are canvas
+         *  coordinates, so an auto-scroll moves the card with the canvas. */
+        const place = () => {
+          if (!focusDrag) return;
+          const size = focusLodSize('digest');
+          const point = focusPoint(focusDrag.point.x, focusDrag.point.y);
+          const w = Math.max(focusEl.clientWidth, focusEl.scrollWidth);
+          const h = Math.max(focusEl.clientHeight, focusEl.scrollHeight);
+          focusDrag.ids.forEach((row, i) => {
+            const el = focusCardEl(row);
+            if (!el) return;
+            el.style.width = `${size.w}px`;
+            el.style.height = `${size.h}px`;
+            el.style.left = `${rubberFocus(point.x - grab.fx * size.w + i * 7, 8, w - size.w - 8, w)}px`;
+            el.style.top = `${rubberFocus(point.y - grab.fy * size.h + i * 7, 8, h - size.h - 8, h)}px`;
+            el.style.zIndex = String(40 - i);
+          });
+        };
+
+        const aim = () => {
+          if (!focusDrag) return;
+          const next = focusTargetAt(focusPoint(focusDrag.point.x, focusDrag.point.y));
+          if ((next?.key ?? '') === (focusDrag.target?.key ?? '')) return;
+          focusDrag.target = next;
+          focusDrag.pending = next && !next.merge && next.column !== 'new'
+            ? { ids: focusDrag.ids, column: next.column, folderId: next.folderId, index: next.index }
+            : null;
+          for (const el of focusEl.querySelectorAll('.focus-card[data-drop]')) delete el.dataset.drop;
+          if (next?.merge) {
+            const el = focusCardEl(next.merge);
+            if (el) el.dataset.drop = 'merge';
+          }
+          // The gap opens here: the field is re-packed with the card already
+          // in its slot, and everything below it springs down to make room.
+          paintFocus();
+          place();
+        };
+
+        const travel = () => {
+          if (!focusDrag || done) return;
+          const box = focusEl.getBoundingClientRect();
+          const { x, y } = focusDrag.point;
+          let dx = 0;
+          let dy = 0;
+          if (x < box.left + FOCUS_EDGE) dx = -(1 - Math.max(0, x - box.left) / FOCUS_EDGE);
+          else if (x > box.right - FOCUS_EDGE) dx = 1 - Math.max(0, box.right - x) / FOCUS_EDGE;
+          if (y < box.top + FOCUS_EDGE) dy = -(1 - Math.max(0, y - box.top) / FOCUS_EDGE);
+          else if (y > box.bottom - FOCUS_EDGE) dy = 1 - Math.max(0, box.bottom - y) / FOCUS_EDGE;
+          if (dx || dy) {
+            const before = { x: focusEl.scrollLeft, y: focusEl.scrollTop };
+            focusEl.scrollLeft += dx * 24;
+            focusEl.scrollTop += dy * 24;
+            if (focusEl.scrollLeft !== before.x || focusEl.scrollTop !== before.y) {
+              place();
+              aim();
+            }
+          }
+          focusDrag.frame = requestAnimationFrame(travel);
+        };
+
+        const begin = () => {
+          focusSuppressClick = true;
+          const ids = focusSelectedIds.includes(id) && focusSelectedIds.length > 1
+            ? [id, ...focusSelectedIds.filter((row) => row !== id)]
+            : [id];
+          focusDrag = { ids, lead: id, target: null, pending: null, point: { ...origin }, frame: 0 };
+          focusEl.dataset.arranging = '1';
+          // A fixed pane cannot chase a spring, so it stands down for the
+          // length of the gesture and the Full shows its digest instead.
+          if (pane) pane.style.visibility = 'hidden';
+          for (const row of ids) {
+            const el = focusCardEl(row);
+            if (!el) continue;
+            stopCardSpring(el);
+            flattenCardMotion(el);
+            el.classList.add('marble-dragging');
+            el.dataset.lift = row === id ? 'lead' : 'follow';
+          }
+          paintFocus();
+          place();
+          aim();
+          focusDrag.frame = requestAnimationFrame(travel);
+        };
+
         const move = (e) => {
           if (done) return;
-          if (!origin.started && Math.hypot(e.clientX - origin.x, e.clientY - origin.y) < 10) return;
-          if (!origin.started) {
-            origin.started = true;
-            flattenCardMotion(card);
+          if (!track(e)) return;
+          if (!focusDrag) {
+            if (Math.hypot(e.clientX - origin.x, e.clientY - origin.y) < 10) return;
+            begin();
           }
-          focusSuppressClick = true;
-          card.classList.add('marble-dragging');
-          card.style.zIndex = '10';
-          const canvas = focusCanvasBox();
-          const nextX = origin.left + (e.clientX - origin.x);
-          const nextY = origin.top + (e.clientY - origin.y);
-          card.style.left = `${rubberFocus(nextX, 8, canvas.w - card.offsetWidth - 8, canvas.w)}px`;
-          card.style.top = `${rubberFocus(nextY, 8, canvas.h - card.offsetHeight - 8, canvas.h)}px`;
-          const now = performance.now();
-          const dt = Math.max(8, now - origin.lastT) / 1000;
-          origin.vx = (e.clientX - origin.lastX) / dt;
-          origin.vy = (e.clientY - origin.lastY) / dt;
-          origin.lastX = e.clientX;
-          origin.lastY = e.clientY;
-          origin.lastT = now;
+          focusDrag.point = { x: e.clientX, y: e.clientY };
+          place();
+          aim();
         };
-        const up = async (e) => {
+
+        const finish = async (cancelled) => {
           if (done) return;
           done = true;
+          detach();
+          const drag = endFocusDrag();
+          if (!drag) return;
+          const target = cancelled ? null : drag.target;
+          const speed = velocity();
+          paintFocusSlot(focusPack, null);
+          if (target) await commitFocusDrop(drag.ids, target);
+          paintFocus({ velocity: speed, velocityId: drag.lead });
+          setTimeout(() => { focusSuppressClick = false; }, 0);
+        };
+
+        const up = (e) => {
+          if (!focusDrag) {
+            done = true;
+            detach();
+            return;
+          }
+          if (e && track(e)) focusDrag.point = { x: e.clientX, y: e.clientY };
+          finish(false);
+        };
+
+        const keys = (e) => {
+          if (e.key !== 'Escape') return;
+          e.preventDefault();
+          e.stopPropagation();
+          finish(true);
+        };
+
+        function detach() {
           document.removeEventListener('pointermove', move);
           document.removeEventListener('mousemove', move);
           document.removeEventListener('pointerup', up);
           document.removeEventListener('mouseup', up);
-          document.removeEventListener('pointercancel', up);
-          try { card.releasePointerCapture?.(e.pointerId); } catch { /* released */ }
-          card.classList.remove('marble-dragging');
-          if (!origin.started) return;
-          const canvas = focusCanvasBox();
-          const x = card.offsetLeft;
-          const y = card.offsetTop;
-          const fx = canvas.w > card.offsetWidth ? x / (canvas.w - card.offsetWidth) : 0;
-          const fy = canvas.h > card.offsetHeight ? y / (canvas.h - card.offsetHeight) : 0;
-          const hit = hitFocusDrop(e.clientX, e.clientY, id);
-          await applyFocusDrop(id, hit, fx, fy);
-          paintFocus({ velocity: { x: origin.vx, y: origin.vy }, velocityId: id });
-          setTimeout(() => { focusSuppressClick = false; }, 0);
-        };
+          document.removeEventListener('pointercancel', cancel);
+          document.removeEventListener('keydown', keys, true);
+          try { card.releasePointerCapture?.(event.pointerId); } catch { /* released */ }
+        }
+
+        const cancel = () => finish(true);
+
         document.addEventListener('pointermove', move);
         document.addEventListener('mousemove', move);
         document.addEventListener('pointerup', up);
         document.addEventListener('mouseup', up);
-        document.addEventListener('pointercancel', up);
+        document.addEventListener('pointercancel', cancel);
+        document.addEventListener('keydown', keys, true);
       });
       card.addEventListener('click', (event) => {
         if (focusSuppressClick) return;
@@ -2492,6 +3096,83 @@ __ICON__
       return card;
     };
 
+    /** The canvas as columns: the stage in rank order, then a column per
+     *  folder in catalog order with the loose one last. `pending` is a drag's
+     *  placement applied as if it had already been filed, which is what lets
+     *  the field open a real gap under the card before you let go. */
+    const focusColumnsOf = (items, pending) => {
+      const dragging = new Set(pending?.ids ?? []);
+      const rank = (item) => (Number.isFinite(item.focusY) ? item.focusY : Infinity);
+      const stage = items
+        .filter((item) => item.pinned && !dragging.has(item.id))
+        .sort((a, b) => {
+          const ar = rank(a);
+          const br = rank(b);
+          if (ar !== br) return ar - br;
+          return (b.lastInteractedAt ?? 0) - (a.lastInteractedAt ?? 0);
+        })
+        .slice(0, FULL_CAP)
+        .map((item) => item.id);
+      const staged = new Set(stage);
+      // Laid out oldest first, not newest first. The list sorts by recency,
+      // but a canvas that reorders itself every time a chat ticks destroys the
+      // spatial memory that makes Focus worth using — and the keyboard moves
+      // through the order on screen.
+      const field = items
+        .filter((item) => !staged.has(item.id) && !dragging.has(item.id))
+        .sort((a, b) => (a.createdAt ?? a.updatedAt ?? 0) - (b.createdAt ?? b.updatedAt ?? 0));
+      const order = (list) => [...list].sort((a, b) => {
+        const ar = rank(a);
+        const br = rank(b);
+        return ar === br ? 0 : ar - br;
+      });
+      const columns = [];
+      for (const folder of folderCatalog) {
+        const members = order(field.filter((item) => item.folderId === folder.id));
+        if (members.length) columns.push({ folderId: folder.id, ids: members.map((item) => item.id) });
+      }
+      const loose = order(field.filter((item) => (
+        !item.folderId || !folderCatalog.some((row) => row.id === item.folderId)
+      )));
+      columns.push({ folderId: null, ids: loose.map((item) => item.id) });
+
+      if (pending && dragging.size) {
+        const ids = [...dragging];
+        if (pending.column === 'stage') {
+          stage.splice(Math.max(0, Math.min(pending.index ?? stage.length, stage.length)), 0, ...ids);
+        } else {
+          const folderId = pending.folderId ?? null;
+          let column = columns.find((row) => (row.folderId ?? null) === folderId);
+          if (!column) {
+            column = { folderId, ids: [] };
+            columns.splice(Math.max(0, columns.length - 1), 0, column);
+          }
+          column.ids.splice(Math.max(0, Math.min(pending.index ?? column.ids.length, column.ids.length)), 0, ...ids);
+        }
+      }
+      return { stage, columns };
+    };
+
+    /** The canvas's scroll extent. Absolute children cannot be relied on to
+     *  push a scroll container out on both axes, and `min-height` on the
+     *  canvas itself would grow the grid row instead of its contents. */
+    const sizeFocusExtent = (pack) => {
+      let el = focusEl.querySelector('.focus-extent');
+      if (!pack) {
+        el?.remove();
+        return;
+      }
+      if (!el) {
+        el = document.createElement('div');
+        el.className = 'focus-extent';
+        el.setAttribute('data-marble-transient', '');
+        el.setAttribute('aria-hidden', 'true');
+        focusEl.prepend(el);
+      }
+      el.style.width = `${Math.round(pack.width)}px`;
+      el.style.height = `${Math.round(pack.height)}px`;
+    };
+
     function paintFocus(opts = {}) {
       if (!focusEl) return;
       const view = document.body.getAttribute('data-view') || 'library';
@@ -2508,7 +3189,8 @@ __ICON__
       }
       const helpers = window.marbleAgentFolders;
       const items = matchingFocusItems();
-      const fullIds = focusFullIds();
+      const layout = focusColumnsOf(items, focusDrag?.pending ?? null);
+      const fullIds = layout.stage;
       const lods = helpers?.assignLods
         ? helpers.assignLods(items.map((item) => ({
           id: item.id,
@@ -2523,6 +3205,9 @@ __ICON__
           now: Date.now(),
         })
         : Object.fromEntries(items.map((item) => [item.id, fullIds.includes(item.id) ? 'full' : 'digest']));
+      // A card in the air is a card, whatever it is about to become: the gap
+      // the field opens is the size of the thing you are holding.
+      for (const id of focusDrag?.ids ?? []) lods[id] = 'digest';
 
       const lodKey = items.map((item) => `${item.id}:${lods[item.id]}:${focusSelectedIds.includes(item.id) ? 1 : 0}`).join('|');
       const lodsChanged = lodKey !== lastFocusLods;
@@ -2560,12 +3245,14 @@ __ICON__
       }
 
       if (focusEl.hasAttribute('data-stack') || narrowView.matches) {
+        focusPack = null;
+        sizeFocusExtent(null);
         layoutFocusPane(fullIds);
-        paintFocusBasins();
+        paintFocusBasins(null);
         return;
       }
 
-      if (opts.quiet && !lodsChanged) {
+      if (opts.quiet && !lodsChanged && !focusDrag) {
         for (const card of focusEl.querySelectorAll('.focus-card')) {
           card.dataset.selected = focusSelectedIds.includes(card.dataset.id) ? 'true' : 'false';
         }
@@ -2574,54 +3261,40 @@ __ICON__
       }
 
       const canvas = focusCanvasBox();
-      const rects = {};
+      const fulls = fullIds.map((id) => ({ id }));
+      const groups = layout.columns
+        .filter((column) => column.ids.length || (column.folderId === null && focusDrag))
+        .map((column) => ({
+          folderId: column.folderId,
+          keep: true,
+          cards: column.ids.map((id, index) => ({
+            id,
+            lod: lods[id] === 'chip' ? 'chip' : 'digest',
+            // The column is already in rank order, so hand the packer the
+            // order rather than the stored ranks — a card in the air has a
+            // stale rank and would sort back where it came from.
+            oy: index,
+          })),
+        }));
 
-      // The stage exists only when something is pinned. Passing `|| 1` here is
-      // what used to reserve a Full-sized band above an empty canvas and leave
-      // the top half of the view dead.
-      const stageH = fullIds.length ? stageHeight(fullIds.length, canvas) : 0;
-      fullIds.forEach((id, index) => {
-        Object.assign(rects, { [id]: stageRect(index, fullIds.length, canvas) });
-      });
-
-      // Group the unpinned cards by folder, catalog order, ungrouped last, so
-      // the packer can hand each folder a region of its own.
-      const fullSet = new Set(fullIds);
-      // Laid out oldest first, not newest first. The list sorts by recency, but
-      // a canvas that reorders itself every time a chat ticks destroys the
-      // spatial memory that makes Focus worth using — and arrow keys navigate
-      // by position, so the order on screen is the order they move through.
-      const field = items
-        .filter((item) => !fullSet.has(item.id))
-        .sort((a, b) => (a.createdAt ?? a.updatedAt ?? 0) - (b.createdAt ?? b.updatedAt ?? 0));
-      const groups = [];
-      for (const folder of folderCatalog) {
-        const members = field.filter((item) => item.folderId === folder.id);
-        if (members.length) groups.push({ folderId: folder.id, cards: members.map(fieldCard) });
-      }
-      const loose = field.filter((item) => !item.folderId || !folderCatalog.some((row) => row.id === item.folderId));
-      if (loose.length) groups.push({ folderId: null, cards: loose.map(fieldCard) });
-
-      const packed = helpers?.packRegions
-        ? helpers.packRegions({
+      const pack = helpers?.packFocus
+        ? helpers.packFocus({
+          fulls,
           groups,
           canvas,
-          top: stageH,
           sizes: { digest: focusLodSize('digest'), chip: focusLodSize('chip') },
           gap: helpers.GAP ?? 8,
+          newGroup: focusDrag ? 'always' : 'auto',
         })
         // A stale cached copy of agent-folders.js would otherwise leave every
-        // field card without a rect, and an unplaced card stacks at the origin.
-        // Flow them instead: no basins, but nothing is lost.
-        : flowFieldCards(groups, canvas, stageH);
-      const regions = packed.regions;
-      Object.assign(rects, packed.rects);
-      // The field is a partition, so it can be taller than the viewport. Let
-      // the canvas scroll rather than cramming regions on top of one another.
-      focusEl.style.minHeight = `${Math.max(canvas.h, packed.height)}px`;
+        // card without a rect, and an unplaced card stacks at the origin.
+        // Flow them into plain columns instead: no slots, but nothing is lost.
+        : flowFieldColumns(fulls, groups, canvas);
+      focusPack = pack;
+      sizeFocusExtent(pack);
 
       for (const item of items) {
-        const rect = rects[item.id];
+        const rect = pack.rects[item.id];
         if (!rect) continue;
         const card = focusEl.querySelector(`.focus-card[data-id="${item.id}"]`);
         if (!card || card.classList.contains('marble-dragging')) continue;
@@ -2633,7 +3306,7 @@ __ICON__
         card.style.zIndex = lod === 'full' ? '3' : lod === 'digest' ? '2' : '1';
       }
       layoutFocusPane(fullIds);
-      paintFocusBasins(regions);
+      paintFocusBasins(pack);
     }
 
     const paintRow = (el, summary) => {
@@ -2757,10 +3430,50 @@ __ICON__
 
     const isListBoard = (view) => view === 'library' || view === 'board';
 
+    // ---- View switches. What leaves is held where it was and fades as it goes;
+    // what arrives eases in from the side the view lives on. Anything both views
+    // share (the pane between List and Folders) is not touched at all, so it
+    // stays put while the rail and the list trade places around it.
+    const VT_OUT_MS = 240;
+    const VT_IN_MS = 560;
+    const VT_EASE = 'cubic-bezier(0.22, 1, 0.36, 1)';
+    let frozen = [];
+    const FROZEN_PROPS = ['position', 'left', 'top', 'width', 'height', 'margin', 'z-index', 'pointer-events'];
+
+    const partsOf = (view) => {
+      if (view === 'folders') return [foldersEl, pane];
+      if (view === 'board') return [boardEl];
+      if (view === 'focus') return [focusEl, pane];
+      return [list, pane];
+    };
+
+    const thaw = () => {
+      for (const el of frozen) {
+        el.classList.remove('marble-vt-out');
+        for (const prop of FROZEN_PROPS) el.style.removeProperty(prop);
+      }
+      frozen = [];
+      libraryEl.classList.remove('marble-vt-shell');
+    };
+
+    const freeze = (el, rect) => {
+      el.classList.add('marble-vt-out');
+      el.style.setProperty('position', 'fixed');
+      el.style.setProperty('left', `${rect.left}px`);
+      el.style.setProperty('top', `${rect.top}px`);
+      el.style.setProperty('width', `${rect.width}px`);
+      el.style.setProperty('height', `${rect.height}px`);
+      el.style.setProperty('margin', '0');
+      el.style.setProperty('z-index', '4');
+      el.style.setProperty('pointer-events', 'none');
+      frozen.push(el);
+    };
+
     const cancelViewFades = () => {
-      for (const el of [libraryEl, boardEl, foldersEl, focusEl]) {
+      for (const el of [libraryEl, boardEl, foldersEl, focusEl, list, pane]) {
         for (const anim of el.getAnimations()) anim.cancel();
       }
+      thaw();
     };
 
     const openBoardPanel = () => {
@@ -2775,12 +3488,207 @@ __ICON__
       document.body.removeAttribute('data-panel');
     };
 
+    // ---- The pane tree. Panes split the way iTerm's do: any pane can be split on
+    // any side, and the halves split again, without end. The layout is a tree.
+    // A leaf is a slot — 'P' is the primary chat, e1, e2… are the others — and a
+    // split lays its kids out along one axis in shares that sum to one. Keys
+    // name slots, not conversations, so a chat can be swapped or replaced in
+    // place without the layout noticing.
+    const PRIMARY = 'P';
+    const EPS = 1e-4;
+    let nodeSeq = 0;
+    let keySeq = 0;
+    const newKey = () => `e${++keySeq}`;
+    const leafNode = (key) => ({ leaf: key });
+    const splitNode = (dir, kids, sizes) => ({ id: ++nodeSeq, dir, kids, sizes: sizes ?? kids.map(() => 1 / kids.length) });
+    const cloneTree = (n) => (n.leaf ? { leaf: n.leaf } : { id: n.id, dir: n.dir, kids: n.kids.map(cloneTree), sizes: [...n.sizes] });
+    const treeLeaves = (n, out = []) => {
+      if (n.leaf) out.push(n.leaf);
+      else n.kids.forEach((kid) => treeLeaves(kid, out));
+      return out;
+    };
+    const findNode = (n, id) => {
+      if (!n || n.leaf) return null;
+      if (n.id === id) return n;
+      for (const kid of n.kids) {
+        const hit = findNode(kid, id);
+        if (hit) return hit;
+      }
+      return null;
+    };
+    const findLeaf = (n, key, parent = null, index = -1) => {
+      if (n.leaf) return n.leaf === key ? { node: n, parent, index } : null;
+      for (let i = 0; i < n.kids.length; i++) {
+        const hit = findLeaf(n.kids[i], key, n, i);
+        if (hit) return hit;
+      }
+      return null;
+    };
+    const SIDE = { left: ['row', 0], right: ['row', 1], top: ['col', 0], bottom: ['col', 1] };
+
+    /** Split `target`'s space in two and give one half to `key`. Beside a
+     *  neighbour on the same axis it joins them as a sibling instead of nesting
+     *  a split inside a split. */
+    const insertBeside = (root, target, side, key) => {
+      const [dir, after] = SIDE[side];
+      const hit = findLeaf(root, target);
+      if (!hit) return root;
+      const fresh = leafNode(key);
+      const { node, parent, index } = hit;
+      if (parent && parent.dir === dir) {
+        const half = parent.sizes[index] / 2;
+        parent.sizes[index] = half;
+        parent.kids.splice(index + after, 0, fresh);
+        parent.sizes.splice(index + after, 0, half);
+        return root;
+      }
+      const pair = splitNode(dir, after ? [node, fresh] : [fresh, node], [0.5, 0.5]);
+      if (!parent) return pair;
+      parent.kids[index] = pair;
+      return root;
+    };
+
+    /** Split the whole workspace, not one pane: the new chat spans the edge. */
+    const insertAtRoot = (root, side, key) => {
+      const [dir, after] = SIDE[side];
+      const fresh = leafNode(key);
+      if (root.dir === dir) {
+        const share = 1 / (root.kids.length + 1);
+        root.sizes = root.sizes.map((size) => size * (1 - share));
+        root.kids.splice(after ? root.kids.length : 0, 0, fresh);
+        root.sizes.splice(after ? root.sizes.length : 0, 0, share);
+        return root;
+      }
+      return splitNode(dir, after ? [root, fresh] : [fresh, root], after ? [0.7, 0.3] : [0.3, 0.7]);
+    };
+
+    const flatten = (n) => {
+      for (let i = 0; i < n.kids.length; i++) {
+        const kid = n.kids[i];
+        if (kid.leaf || kid.dir !== n.dir) continue;
+        const share = n.sizes[i];
+        n.kids.splice(i, 1, ...kid.kids);
+        n.sizes.splice(i, 1, ...kid.sizes.map((size) => size * share));
+        i += kid.kids.length - 1;
+      }
+    };
+
+    /** Take a leaf out. Its share flows to its neighbours in proportion, and a
+     *  split left with one kid dissolves into it. */
+    const removeLeaf = (n, key) => {
+      if (n.leaf) return n.leaf === key ? null : n;
+      const kids = [];
+      const sizes = [];
+      n.kids.forEach((kid, i) => {
+        const kept = removeLeaf(kid, key);
+        if (kept) {
+          kids.push(kept);
+          sizes.push(n.sizes[i]);
+        }
+      });
+      if (!kids.length) return null;
+      if (kids.length === 1) return kids[0];
+      const total = sizes.reduce((a, b) => a + b, 0);
+      n.kids = kids;
+      n.sizes = sizes.map((size) => size / total);
+      flatten(n);
+      return n;
+    };
+
+    const renameLeaf = (n, from, to) => {
+      if (n.leaf) {
+        if (n.leaf === from) n.leaf = to;
+        return;
+      }
+      n.kids.forEach((kid) => renameLeaf(kid, from, to));
+    };
+
+    /** A tidy arrangement for a set of panes nobody placed by hand: side by
+     *  side for two, then a grid that stays close to square. */
+    const defaultTree = (keys) => {
+      const n = keys.length;
+      if (n === 1) return leafNode(keys[0]);
+      if (n === 2) return splitNode('row', keys.map(leafNode));
+      if (n === 3) return splitNode('row', [leafNode(keys[0]), splitNode('col', [leafNode(keys[1]), leafNode(keys[2])])]);
+      const cols = Math.ceil(Math.sqrt(n));
+      const per = Math.ceil(n / cols);
+      const columns = [];
+      for (let i = 0; i < n; i += per) {
+        const slice = keys.slice(i, i + per).map(leafNode);
+        columns.push(slice.length === 1 ? slice[0] : splitNode('col', slice));
+      }
+      return columns.length === 1 ? columns[0] : splitNode('row', columns);
+    };
+
+    /** Where every leaf sits, as fractions of the pane, and where the seams
+     *  between kids fall. */
+    const layoutOf = (root) => {
+      const leaves = new Map();
+      const seams = [];
+      const walk = (n, x, y, w, h) => {
+        if (n.leaf) {
+          leaves.set(n.leaf, { x, y, w, h });
+          return;
+        }
+        let at = 0;
+        n.kids.forEach((kid, i) => {
+          const share = n.sizes[i];
+          if (n.dir === 'row') walk(kid, x + w * at, y, w * share, h);
+          else walk(kid, x, y + h * at, w, h * share);
+          at += share;
+          if (i < n.kids.length - 1) seams.push({ node: n, index: i, dir: n.dir, x, y, w, h, at });
+        });
+      };
+      walk(root, 0, 0, 1, 1);
+      return { leaves, seams };
+    };
+
+    const treeOf = () => dock.tree ?? leafNode(PRIMARY);
+    const slotOfKey = (key) => (key === PRIMARY ? 'primary' : dock.extras.findIndex((extra) => extra.key === key));
+    const idOfKey = (key) => (key === PRIMARY ? convo.getAttribute('conversation') : (dock.extras.find((extra) => extra.key === key)?.id ?? null));
+    const paneIds = () => [convo.getAttribute('conversation'), ...dock.extras.map((extra) => extra.id)].filter(Boolean);
+
+    /** Bring a remembered tree in line with the panes that exist now: leaves that
+     *  went are taken out, panes nobody placed are split off the focused one. */
+    const reconcileTree = (tree, keys) => {
+      if (keys.length <= 1) return null;
+      if (!tree) return defaultTree(keys);
+      let next = cloneTree(tree);
+      const have = new Set(treeLeaves(next));
+      for (const key of have) {
+        if (!keys.includes(key)) next = removeLeaf(next, key);
+        if (!next) return defaultTree(keys);
+      }
+      const box = pane.getBoundingClientRect();
+      for (const key of keys) {
+        if (have.has(key)) continue;
+        const focused = dock.focus === 'primary' ? PRIMARY : dock.extras[dock.focus]?.key;
+        const target = treeLeaves(next).includes(focused) ? focused : treeLeaves(next).at(-1);
+        const r = layoutOf(next).leaves.get(target);
+        next = insertBeside(next, target, r && r.w * box.width < r.h * box.height ? 'bottom' : 'right', key);
+      }
+      return next;
+    };
+
+    const treeToSaved = (n) => (n.leaf ? idOfKey(n.leaf) : { dir: n.dir, sizes: n.sizes, kids: n.kids.map(treeToSaved) });
+    const savedToTree = (saved, keyOfId) => {
+      if (typeof saved === 'string') {
+        const key = keyOfId.get(saved);
+        return key ? leafNode(key) : null;
+      }
+      if (!saved || !Array.isArray(saved.kids) || saved.kids.length < 2 || (saved.dir !== 'row' && saved.dir !== 'col')) return null;
+      const kids = saved.kids.map((kid) => savedToTree(kid, keyOfId));
+      if (kids.some((kid) => !kid)) return null;
+      const sizes = Array.isArray(saved.sizes) && saved.sizes.length === kids.length ? saved.sizes.map(Number) : null;
+      return splitNode(saved.dir, kids, sizes && sizes.every((size) => size > 0) ? sizes : null);
+    };
+
     const rememberDock = () => {
+      const tree = dock.tree ? treeToSaved(dock.tree) : null;
       remember(DOCK_KEY, JSON.stringify({
-        dir: dock.dir,
-        primary: dock.primary,
+        v: 2,
+        tree: tree && !JSON.stringify(tree).includes('null') ? tree : null,
         extras: dock.extras.map((extra) => extra.id),
-        sizes: dock.sizes,
         focus: dock.focus,
         file: convo.getAttribute('conversation'),
       }));
@@ -2788,39 +3696,409 @@ __ICON__
 
     const BAR_MARKUP = `<svg class="dock-grip" viewBox="0 0 10 14" width="10" height="14" aria-hidden="true"><circle cx="3" cy="3" r="1.15" fill="currentColor"/><circle cx="7" cy="3" r="1.15" fill="currentColor"/><circle cx="3" cy="7" r="1.15" fill="currentColor"/><circle cx="7" cy="7" r="1.15" fill="currentColor"/><circle cx="3" cy="11" r="1.15" fill="currentColor"/><circle cx="7" cy="11" r="1.15" fill="currentColor"/></svg><span class="dock-title"></span><a class="dock-target" hidden></a><button type="button" class="dock-close" aria-label="Close pane"><svg viewBox="0 0 20 20" width="12" height="12" aria-hidden="true"><path d="M5 5l10 10M15 5 5 15" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg></button>`;
 
-    const dropSide = (clientX, clientY) => {
-      const r = pane.getBoundingClientRect();
-      if (clientX < r.left || clientX > r.right || clientY < r.top || clientY > r.bottom) return null;
-      const x = (clientX - r.left) / r.width;
-      const y = (clientY - r.top) / r.height;
-      const edge = 0.22;
-      if (x > 1 - edge) return 'right';
-      if (x < edge) return 'left';
-      if (y < edge) return 'top';
-      if (y > 1 - edge) return 'bottom';
-      return 'center';
+    // ---- The stage. With more than one pane the pane element becomes a stage:
+    // every leaf is a card placed by percentages and a pixel gap, so a change to
+    // the tree is just new numbers and the browser eases every card to them.
+    const GEOM = ['left', 'top', 'width', 'height'];
+    let stageEl = null;
+    let primaryFrame = null;
+    const leafEls = new Map();
+    const gutterEls = new Map();
+    const pct = (v) => Math.round(v * 10000) / 100;
+
+    const dockGap = () => {
+      const gap = parseFloat(getComputedStyle(pane).getPropertyValue('--dock-gap'));
+      return Number.isFinite(gap) ? gap : 8;
     };
 
-    const hitBar = (clientX, clientY, skipId) => {
-      for (const bar of pane.querySelectorAll('.dock-bar')) {
-        if (skipId && bar.dataset.id === skipId) continue;
-        const r = bar.getBoundingClientRect();
-        if (clientX >= r.left && clientX <= r.right && clientY >= r.top && clientY <= r.bottom) return bar;
+    const makeFrame = (key) => {
+      const el = document.createElement('div');
+      el.className = 'dock-frame';
+      el.dataset.key = key;
+      el.setAttribute('data-marble-transient', '');
+      return el;
+    };
+
+    /** Lay the pane out as a stage without moving anything: the primary chat
+     *  alone, exactly where the grid had it. */
+    const enterTreeMode = () => {
+      if (pane.getAttribute('data-dock') === 'tree' && stageEl?.isConnected) return;
+      stageEl?.remove();
+      leafEls.clear();
+      gutterEls.clear();
+      stageEl = document.createElement('div');
+      stageEl.className = 'dock-stage';
+      stageEl.setAttribute('data-marble-transient', '');
+      primaryFrame = makeFrame(PRIMARY);
+      stageEl.append(primaryFrame);
+      pane.append(stageEl);
+      pane.classList.add('marble-noanim');
+      pane.setAttribute('data-dock', 'tree');
+      layoutDock(leafNode(PRIMARY));
+      void pane.offsetWidth;
+      pane.classList.remove('marble-noanim');
+    };
+
+    const leaveTreeMode = () => {
+      clearTimeout(collapseTimer);
+      stageEl?.remove();
+      stageEl = null;
+      primaryFrame = null;
+      leafEls.clear();
+      gutterEls.clear();
+      for (const extra of dock.extras) extra.el = null;
+      pane.removeAttribute('data-dock');
+      for (const el of pane.querySelectorAll(':scope > .dock-bar, :scope > marble-conversation:not([data-marble-transient])')) {
+        for (const prop of GEOM) el.style.removeProperty(prop);
       }
-      return null;
     };
 
-    const paintDrop = (clientX, clientY, skipId) => {
-      pane.classList.remove('marble-drop-right', 'marble-drop-left', 'marble-drop-top', 'marble-drop-bottom');
-      for (const bar of pane.querySelectorAll('.dock-bar')) bar.classList.remove('marble-drop-swap');
-      if (clientX == null) return;
-      const bar = hitBar(clientX, clientY, skipId);
-      if (bar) {
-        bar.classList.add('marble-drop-swap');
+    const frameFor = (key) => (key === PRIMARY ? primaryFrame : (leafEls.get(key)?.el ?? (room && key === room.ghostKey ? room.ghost : null)));
+
+    const layoutDock = (tree = treeOf(), extraRects = null) => {
+      if (pane.getAttribute('data-dock') !== 'tree' || !stageEl) return;
+      const gap = dockGap();
+      const half = gap / 2;
+      const { leaves, seams } = layoutOf(tree);
+      if (extraRects) for (const [key, rect] of extraRects) leaves.set(key, rect);
+      for (const [key, r] of leaves) {
+        const iL = r.x > EPS ? half : 0;
+        const iT = r.y > EPS ? half : 0;
+        const iR = r.x + r.w < 1 - EPS ? half : 0;
+        const iB = r.y + r.h < 1 - EPS ? half : 0;
+        const el = frameFor(key);
+        if (el) {
+          el.style.left = `calc(${pct(r.x)}% + ${iL}px)`;
+          el.style.top = `calc(${pct(r.y)}% + ${iT}px)`;
+          el.style.width = `calc(${pct(r.w)}% - ${iL + iR}px)`;
+          el.style.height = `calc(${pct(r.h)}% - ${iT + iB}px)`;
+        }
+        if (key !== PRIMARY) continue;
+        // The primary chat is the keyed element in the pane, so it cannot be
+        // moved into its card; it is placed to sit on top of it instead.
+        const bar = pane.querySelector(':scope > .dock-bar');
+        const view = pane.querySelector(':scope > marble-conversation:not([data-marble-transient])');
+        if (bar) {
+          bar.style.left = `calc(${pct(r.x)}% + ${iL + 1}px)`;
+          bar.style.top = `calc(${pct(r.y)}% + ${iT + 1}px)`;
+          bar.style.width = `calc(${pct(r.w)}% - ${iL + iR + 2}px)`;
+          bar.style.height = 'var(--bar-h)';
+        }
+        if (view) {
+          view.style.left = `calc(${pct(r.x)}% + ${iL + 1}px)`;
+          view.style.top = `calc(${pct(r.y)}% + ${iT + 1}px + var(--bar-h))`;
+          view.style.width = `calc(${pct(r.w)}% - ${iL + iR + 2}px)`;
+          view.style.height = `calc(${pct(r.h)}% - ${iT + iB + 2}px - var(--bar-h))`;
+        }
+      }
+      const live = new Set();
+      for (const seam of seams) {
+        const gkey = `${seam.node.id}:${seam.index}`;
+        live.add(gkey);
+        let g = gutterEls.get(gkey);
+        if (!g) {
+          g = makeGutter(seam.node.id, seam.index);
+          gutterEls.set(gkey, g);
+          stageEl.append(g);
+        }
+        g.dataset.dir = seam.dir;
+        if (seam.dir === 'row') {
+          g.style.left = `calc(${pct(seam.x + seam.w * seam.at)}% - ${half}px)`;
+          g.style.top = `${pct(seam.y)}%`;
+          g.style.width = `${gap}px`;
+          g.style.height = `${pct(seam.h)}%`;
+        } else {
+          g.style.top = `calc(${pct(seam.y + seam.h * seam.at)}% - ${half}px)`;
+          g.style.left = `${pct(seam.x)}%`;
+          g.style.height = `${gap}px`;
+          g.style.width = `${pct(seam.w)}%`;
+        }
+      }
+      for (const [gkey, g] of gutterEls) {
+        if (live.has(gkey)) continue;
+        g.remove();
+        gutterEls.delete(gkey);
+      }
+    };
+
+    /** The seam between two kids follows the pointer, in shares of the split it
+     *  belongs to, and never squeezes either side below a usable width. */
+    const makeGutter = (nodeId, index) => {
+      const g = document.createElement('div');
+      g.className = 'dock-gutter';
+      g.setAttribute('data-marble-transient', '');
+      g.addEventListener('pointerdown', (event) => {
+        if (event.button !== 0 || !dock.tree) return;
+        const node = findNode(dock.tree, nodeId);
+        const seam = layoutOf(dock.tree).seams.find((s) => s.node.id === nodeId && s.index === index);
+        if (!node || !seam) return;
+        event.preventDefault();
+        g.setPointerCapture(event.pointerId);
+        pane.classList.add('marble-docksizing');
+        const box = pane.getBoundingClientRect();
+        const vertical = node.dir === 'col';
+        const start = vertical ? seam.y : seam.x;
+        const len = vertical ? seam.h : seam.w;
+        const total = vertical ? box.height : box.width;
+        const before = node.sizes.slice(0, index).reduce((a, b) => a + b, 0);
+        const pair = node.sizes[index] + node.sizes[index + 1];
+        const min = Math.min(pair * 0.4, Math.max(0.03, 160 / Math.max(1, len * total)));
+        const move = (e) => {
+          const pos = vertical ? (e.clientY - box.top) / box.height : (e.clientX - box.left) / box.width;
+          const a = Math.min(pair - min, Math.max(min, (pos - start) / len - before));
+          node.sizes[index] = a;
+          node.sizes[index + 1] = pair - a;
+          layoutDock();
+        };
+        const up = (e) => {
+          try { g.releasePointerCapture(e.pointerId); } catch { /* already released */ }
+          g.removeEventListener('pointermove', move);
+          g.removeEventListener('pointerup', up);
+          g.removeEventListener('pointercancel', up);
+          pane.classList.remove('marble-docksizing');
+          rememberDock();
+        };
+        g.addEventListener('pointermove', move);
+        g.addEventListener('pointerup', up);
+        g.addEventListener('pointercancel', up);
+      });
+      return g;
+    };
+
+    // ---- Making room. While a chat is dragged over a pane, the tree gets a
+    // ghost leaf where it would land and every card eases to its new share, so
+    // the drop is something you watch happen before you do it. Dropping hands
+    // the ghost's place to the real chat, unchanged.
+    const ROOM_MS = 520;
+    let room = null;
+    let roomLive = false;
+    let collapseTimer = 0;
+    let intentKey = null;
+    let intentTimer = 0;
+
+    const collapsedRect = (r, side) => {
+      if (side === 'right') return { x: r.x + r.w, y: r.y, w: 0, h: r.h };
+      if (side === 'left') return { x: r.x, y: r.y, w: 0, h: r.h };
+      if (side === 'bottom') return { x: r.x, y: r.y + r.h, w: r.w, h: 0 };
+      return { x: r.x, y: r.y, w: r.w, h: 0 };
+    };
+    const seamRect = (tree, plan) => (plan.root ? null : layoutOf(tree).leaves.get(plan.target)) ?? { x: 0, y: 0, w: 1, h: 1 };
+    const roomKey = (plan) => `${plan.root ? '*' : plan.target}:${plan.side}`;
+
+    const makeGhost = (id) => {
+      const ghost = makeFrame('ghost');
+      ghost.classList.add('dock-ghost');
+      ghost.setAttribute('aria-hidden', 'true');
+      const tab = document.createElement('div');
+      tab.className = 'dock-ghost-tab';
+      tab.innerHTML = '<svg class="dock-grip" viewBox="0 0 10 14" width="9" height="13" aria-hidden="true"><circle cx="3" cy="3" r="1.15" fill="currentColor"/><circle cx="7" cy="3" r="1.15" fill="currentColor"/><circle cx="3" cy="7" r="1.15" fill="currentColor"/><circle cx="7" cy="7" r="1.15" fill="currentColor"/><circle cx="3" cy="11" r="1.15" fill="currentColor"/><circle cx="7" cy="11" r="1.15" fill="currentColor"/></svg><span></span>';
+      tab.querySelector('span').textContent = summaries.get(id)?.title || 'Untitled';
+      const hint = document.createElement('p');
+      hint.textContent = 'Release to open here';
+      ghost.append(tab, hint);
+      return ghost;
+    };
+
+    const buildRoom = (plan, id, wasEntered = false) => {
+      const base = treeOf();
+      const ghostKey = newKey();
+      const tree = plan.root
+        ? insertAtRoot(cloneTree(base), plan.side, ghostKey)
+        : insertBeside(cloneTree(base), plan.target, plan.side, ghostKey);
+      const entered = wasEntered || pane.getAttribute('data-dock') !== 'tree';
+      if (pane.getAttribute('data-dock') !== 'tree') enterTreeMode();
+      const ghost = makeGhost(id);
+      stageEl.append(ghost);
+      room = { key: roomKey(plan), plan, ghost, ghostKey, tree, entered, closing: false, held: false, timer: 0 };
+      // Born as a sliver on the seam it is opening, then every card eases to its
+      // share of the new layout.
+      ghost.style.transition = 'none';
+      layoutDock(base, new Map([[ghostKey, collapsedRect(seamRect(base, plan), plan.side)]]));
+      void ghost.offsetWidth;
+      ghost.style.removeProperty('transition');
+      layoutDock(tree);
+    };
+
+    const finishRoom = (r) => {
+      if (room !== r) return;
+      room = null;
+      r.ghost.remove();
+      if (r.entered && !dock.tree && !dock.extras.length) leaveTreeMode();
+    };
+
+    const foldRoom = () => {
+      const r = room;
+      if (!r || r.closing) return;
+      r.closing = true;
+      clearTimeout(r.timer);
+      r.ghost.classList.add('marble-leaving');
+      const base = treeOf();
+      layoutDock(base, new Map([[r.ghostKey, collapsedRect(seamRect(base, r.plan), r.plan.side)]]));
+      r.timer = setTimeout(() => finishRoom(r), ROOM_MS + 40);
+    };
+
+    /** Put the layout back, animated. `hold` is a drop: keep the slot open until
+     *  the real chat has been given it, and fold it only if nothing does. */
+    const closeRoom = ({ hold = false } = {}) => {
+      const r = room;
+      if (!r) return;
+      if (hold) {
+        r.held = true;
+        clearTimeout(r.timer);
+        r.timer = setTimeout(foldRoom, 2400);
         return;
       }
-      const side = dropSide(clientX, clientY);
-      if (side && side !== 'center') pane.classList.add(`marble-drop-${side}`);
+      foldRoom();
+    };
+
+    const openRoom = (plan, id) => {
+      if (room && room.key === roomKey(plan)) {
+        if (room.closing) {
+          // Back over the same edge before it finished folding: reopen from
+          // wherever it got to rather than waiting.
+          room.closing = false;
+          clearTimeout(room.timer);
+          room.ghost.classList.remove('marble-leaving');
+          layoutDock(room.tree);
+        }
+        return;
+      }
+      if (room) {
+        // A different edge: the old slot fades where it stands while every card
+        // eases toward the new layout from wherever it is — no waiting for the
+        // last move to finish.
+        const old = room;
+        clearTimeout(old.timer);
+        room = null;
+        old.ghost.classList.add('marble-leaving');
+        setTimeout(() => old.ghost.remove(), 300);
+        buildRoom(plan, id, old.entered);
+        return;
+      }
+      buildRoom(plan, id);
+    };
+
+    /** applyDock is about to lay the real panes out. Hand over the slot (if a
+     *  drop is holding one) so the chat can take it from the ghost. */
+    const takeRoom = () => {
+      const r = room;
+      if (!r) return null;
+      clearTimeout(r.timer);
+      room = null;
+      return r;
+    };
+
+    /** Where a chat lands when the pointer has no edge to say: beside the pane,
+     *  along whichever way it is longer. */
+    const restingSide = (key) => {
+      const r = layoutOf(treeOf()).leaves.get(key);
+      const box = pane.getBoundingClientRect();
+      return r && r.w * box.width < r.h * box.height ? 'bottom' : 'right';
+    };
+
+    /** The one answer paint and drop both read, so what was previewed is what
+     *  happens. `plan` is null when nothing about the layout would change. */
+    const resolveDrop = (clientX, clientY, id, { rail = false } = {}) => {
+      const none = { plan: null };
+      if (clientX == null) return none;
+      const box = pane.getBoundingClientRect();
+      if (clientX < box.left || clientX > box.right || clientY < box.top || clientY > box.bottom) return none;
+      const hasPane = document.body.hasAttribute('data-open') && convo.getAttribute('conversation');
+      if (!hasPane) return { plan: { mode: 'fill' } };
+      if (narrowView.matches || reduceMotion.matches) {
+        // No room to make, and no motion to make it with: a drop replaces.
+        return { plan: { mode: 'replace', target: dock.focus === 'primary' ? PRIMARY : (dock.extras[dock.focus]?.key ?? PRIMARY) } };
+      }
+      const slot = slotOf(id);
+      const sourceKey = slot == null ? null : (slot === 'primary' ? PRIMARY : dock.extras[slot]?.key);
+      const tree = treeOf();
+      const { leaves } = layoutOf(tree);
+      const px = (r) => ({
+        left: box.left + r.x * box.width, top: box.top + r.y * box.height,
+        width: r.w * box.width, height: r.h * box.height,
+      });
+      let target = null;
+      let rect = null;
+      for (const [key, r] of leaves) {
+        const p = px(r);
+        if (clientX >= p.left && clientX <= p.left + p.width && clientY >= p.top && clientY <= p.top + p.height) {
+          target = key;
+          rect = p;
+          break;
+        }
+      }
+      if (!target) return none;
+      // A docked chat dragged by its bar and dropped on another bar changes places.
+      const down = clientY - rect.top;
+      if (sourceKey && sourceKey !== target && down > 10 && down < 38) return { plan: { mode: 'swap', target } };
+      // The outer band splits the whole workspace rather than one pane.
+      if (leaves.size > 1) {
+        const band = 12;
+        const dist = { left: clientX - box.left, right: box.right - clientX, top: clientY - box.top, bottom: box.bottom - clientY };
+        const nearest = Object.keys(dist).reduce((x, y) => (dist[x] <= dist[y] ? x : y));
+        if (dist[nearest] < band) return { plan: { mode: 'split', root: true, side: nearest } };
+      }
+      if (target === sourceKey) return none;
+      const d = {
+        left: (clientX - rect.left) / rect.width,
+        right: (rect.left + rect.width - clientX) / rect.width,
+        top: (clientY - rect.top) / rect.height,
+        bottom: (rect.top + rect.height - clientY) / rect.height,
+      };
+      let side = Object.keys(d).reduce((a, b) => (d[a] <= d[b] ? a : b));
+      const open = room && !room.closing && !room.plan.root && room.plan.target === target ? room.plan.side : null;
+      // Wider once an edge is open, so a pointer resting on its boundary does
+      // not make the room flicker.
+      const edge = open && d[open] < 0.34 ? 0.34 : 0.25;
+      if (open && d[open] < 0.34) side = open;
+      const isEdge = d[side] < edge;
+      if (isEdge) return { plan: { mode: 'split', target, side } };
+      if (rail) return { plan: { mode: 'split', target, side: restingSide(target) } };
+      if (narrowView.matches || reduceMotion.matches || !sourceKey) return { plan: { mode: 'replace', target } };
+      return { plan: { mode: 'swap', target } };
+    };
+
+    const paintDrop = (clientX, clientY, id, opts = {}) => {
+      const res = resolveDrop(clientX, clientY, id, opts);
+      roomLive = clientX != null;
+      const plan = res.plan;
+      const mode = plan?.mode ?? null;
+      pane.classList.toggle('marble-drop-fill', mode === 'fill');
+      const dimmed = mode === 'replace' ? plan.target : null;
+      pane.classList.toggle('marble-replace-primary', dimmed === PRIMARY);
+      for (const frame of pane.querySelectorAll('.dock-frame')) frame.classList.toggle('marble-replace', dimmed != null && frame.dataset.key === dimmed);
+      for (const bar of pane.querySelectorAll('.dock-bar')) bar.classList.toggle('marble-drop-swap', mode === 'swap' && bar.dataset.key === plan.target);
+      if (mode === 'split') {
+        // A moment of intent before the layout moves, so crossing an edge on
+        // the way somewhere else does not flash a slot open.
+        const key = roomKey(plan);
+        if (room && room.key === key) {
+          intentKey = key;
+          clearTimeout(intentTimer);
+          openRoom(plan, id);
+        } else if (intentKey !== key) {
+          intentKey = key;
+          clearTimeout(intentTimer);
+          intentTimer = setTimeout(() => { if (roomLive && intentKey === key) openRoom(plan, id); }, room ? 70 : 130);
+        }
+      } else {
+        intentKey = null;
+        clearTimeout(intentTimer);
+        closeRoom();
+      }
+      return res;
+    };
+
+    /** The drag is over. A drop that will dock keeps its slot open for the real
+     *  chat; anything else folds the room back. */
+    const endDrop = (docks) => {
+      roomLive = false;
+      intentKey = null;
+      clearTimeout(intentTimer);
+      pane.classList.remove('marble-drop-fill', 'marble-replace-primary');
+      for (const frame of pane.querySelectorAll('.dock-frame.marble-replace')) frame.classList.remove('marble-replace');
+      for (const bar of pane.querySelectorAll('.dock-bar')) bar.classList.remove('marble-drop-swap');
+      closeRoom({ hold: docks });
     };
 
     const slotOf = (id) => {
@@ -2872,10 +4150,7 @@ __ICON__
 
     const paintBars = () => {
       paintBar(pane.querySelector(':scope > .dock-bar'), convo.getAttribute('conversation'));
-      dock.extras.forEach((extra, index) => {
-        const bar = pane.querySelector(`.dock-leaf:nth-child(${index + 1}) .dock-bar`);
-        paintBar(bar, extra.id);
-      });
+      for (const extra of dock.extras) paintBar(leafEls.get(extra.key)?.bar, extra.id);
       paintChrome();
     };
 
@@ -2920,21 +4195,21 @@ __ICON__
       paintBars();
     };
 
-    const makeBar = (slot) => {
+    const makeBar = (key) => {
       const bar = document.createElement('div');
       bar.className = 'dock-bar';
-      bar.dataset.slot = String(slot);
+      bar.dataset.key = key;
       bar.setAttribute('data-marble-transient', '');
       bar.innerHTML = BAR_MARKUP;
       bar.querySelector('.dock-close').addEventListener('click', (event) => {
         event.stopPropagation();
-        closeSlot(bar.dataset.slot === 'primary' ? 'primary' : Number(bar.dataset.slot));
+        closeSlot(slotOfKey(bar.dataset.key));
       });
       bar.addEventListener('pointerdown', (event) => {
         if (event.target.closest('a, button')) return;
         const id = bar.dataset.id;
         if (!id) return;
-        focusSlot(bar.dataset.slot === 'primary' ? 'primary' : Number(bar.dataset.slot), id);
+        focusSlot(slotOfKey(bar.dataset.key), id);
       });
       bindPaneDrag(bar, () => bar.dataset.id);
       return bar;
@@ -2944,17 +4219,23 @@ __ICON__
       convo.setAttribute('data-chrome', 'pane');
       let bar = pane.querySelector(':scope > .dock-bar');
       if (!bar) {
-        bar = makeBar('primary');
+        bar = makeBar(PRIMARY);
         convo.before(bar);
       }
-      bar.dataset.slot = 'primary';
+      bar.dataset.key = PRIMARY;
       return bar;
     };
 
     const closeSlot = (slot) => {
       if (slot === 'primary') {
         if (dock.extras.length) {
+          // The chat that takes over the primary element keeps its own place in
+          // the layout; the primary's old place is what closes up.
           const next = dock.extras[0];
+          if (dock.tree) {
+            dock.tree = removeLeaf(dock.tree, PRIMARY);
+            if (dock.tree) renameLeaf(dock.tree, next.key, PRIMARY);
+          }
           convo.setAttribute('conversation', next.id);
           dock.extras = dock.extras.slice(1);
           focusSlot('primary', next.id);
@@ -2965,7 +4246,10 @@ __ICON__
         }
         return;
       }
+      if (slot == null || slot < 0) return;
+      const gone = dock.extras[slot];
       dock.extras = dock.extras.filter((_, index) => index !== slot);
+      if (dock.tree && gone) dock.tree = removeLeaf(dock.tree, gone.key);
       if (dock.focus === slot) dock.focus = 'primary';
       else if (typeof dock.focus === 'number' && dock.focus > slot) dock.focus -= 1;
       rememberDock();
@@ -2978,87 +4262,117 @@ __ICON__
       }
     };
 
+    const makeLeaf = (extra) => {
+      const el = makeFrame(extra.key);
+      el.classList.add('dock-leaf');
+      const bar = makeBar(extra.key);
+      const view = document.createElement('marble-conversation');
+      view.setAttribute('data-marble-transient', '');
+      view.setAttribute('data-chrome', 'pane');
+      if (extra.id) view.setAttribute('conversation', extra.id);
+      el.addEventListener('pointerdown', () => {
+        const slot = slotOfKey(extra.key);
+        const current = dock.extras[slot];
+        if (!current?.id) return;
+        focusSlot(slot, current.id);
+        fillChrome(current.id);
+      });
+      el.append(bar, view);
+      const rec = { el, bar, view };
+      leafEls.set(extra.key, rec);
+      return rec;
+    };
+
+    /** Callers that replace the list with bare ids get their keys here, and keep
+     *  the live pane that already shows the same conversation. */
+    const normalizeExtras = () => {
+      const claimed = new Set(dock.extras.map((extra) => extra.key).filter(Boolean));
+      for (const extra of dock.extras) {
+        if (extra.key) continue;
+        const match = [...leafEls].find(([key, rec]) => !claimed.has(key) && rec.view.getAttribute('conversation') === extra.id);
+        extra.key = match ? match[0] : newKey();
+        claimed.add(extra.key);
+      }
+    };
+
+    /** Bring the cards in the stage in line with dock.extras. */
+    const syncLeaves = (animated, handOver) => {
+      const ghostKey = handOver && !handOver.closing && handOver.held ? handOver.ghostKey : null;
+      for (const extra of dock.extras) {
+        let rec = leafEls.get(extra.key);
+        if (!rec) {
+          rec = makeLeaf(extra);
+          stageEl.append(rec.el);
+          if (animated && extra.key !== ghostKey) {
+            rec.el.classList.add('marble-entering');
+            requestAnimationFrame(() => requestAnimationFrame(() => rec.el.classList.remove('marble-entering')));
+          }
+        } else if ((extra.id || '') !== (rec.view.getAttribute('conversation') || '')) {
+          if (extra.id) rec.view.setAttribute('conversation', extra.id);
+          else rec.view.removeAttribute('conversation');
+        }
+        extra.el = rec.view;
+      }
+      const keys = new Set(dock.extras.map((extra) => extra.key));
+      for (const [key, rec] of leafEls) {
+        if (keys.has(key)) continue;
+        leafEls.delete(key);
+        if (animated) {
+          rec.el.classList.add('marble-leaving');
+          setTimeout(() => rec.el.remove(), ROOM_MS + 60);
+        } else {
+          rec.el.remove();
+        }
+      }
+      if (!handOver) return;
+      const rec = ghostKey ? leafEls.get(ghostKey) : null;
+      if (!rec) {
+        handOver.ghost.remove();
+        return;
+      }
+      // The ghost stays over the new chat and dissolves, so what arrives is the
+      // slot filling in, not a swap.
+      const ghost = handOver.ghost;
+      ghost.removeAttribute('style');
+      ghost.className = 'dock-frame dock-ghost marble-dissolve';
+      rec.el.append(ghost);
+      const drop = () => ghost.remove();
+      ghost.addEventListener('animationend', drop, { once: true });
+      setTimeout(drop, 700);
+    };
+
     const applyDock = () => {
       ensurePrimaryBar();
-      const extras = pane.querySelector('.dock-extras');
-      const gutter = pane.querySelector('.dock-gutter');
-      if ((document.body.getAttribute('data-view') || 'library') === 'focus') {
-        extras?.replaceChildren();
-        gutter?.remove();
-        pane.removeAttribute('data-dock');
-        pane.removeAttribute('data-dock-primary');
+      clearTimeout(collapseTimer);
+      const handOver = takeRoom();
+      const view = document.body.getAttribute('data-view') || 'library';
+      const animated = view !== 'focus' && !reduceMotion.matches && !narrowView.matches;
+      if (view === 'focus') {
+        handOver?.ghost.remove();
+        leaveTreeMode();
         paintBars();
         return;
       }
-      if (!dock.extras.length) {
-        pane.removeAttribute('data-dock');
-        pane.removeAttribute('data-dock-primary');
-        gutter?.remove();
-        extras?.remove();
-        pane.style.removeProperty('--dock-a');
-        pane.style.removeProperty('--dock-b');
+      normalizeExtras();
+      dock.tree = reconcileTree(dock.tree, [PRIMARY, ...dock.extras.map((extra) => extra.key)]);
+      if (!dock.tree) {
+        // Down to one pane: fold the others away, then hand the layout back to
+        // the grid, which puts the primary chat exactly where the stage had it.
+        if (pane.getAttribute('data-dock') === 'tree') {
+          syncLeaves(animated, handOver);
+          layoutDock(leafNode(PRIMARY));
+          if (animated) collapseTimer = setTimeout(() => { if (!dock.extras.length) leaveTreeMode(); }, ROOM_MS + 60);
+          else leaveTreeMode();
+        } else {
+          handOver?.ghost.remove();
+        }
         paintBars();
         return;
       }
-      pane.setAttribute('data-dock', dock.dir);
-      pane.setAttribute('data-dock-primary', dock.primary);
-      pane.style.setProperty('--dock-a', `${dock.sizes[0]}fr`);
-      pane.style.setProperty('--dock-b', `${dock.sizes[1]}fr`);
-      let split = gutter;
-      if (!split) {
-        split = document.createElement('div');
-        split.className = 'dock-gutter';
-        split.setAttribute('data-marble-transient', '');
-        split.addEventListener('pointerdown', (event) => {
-          if (event.button !== 0) return;
-          event.preventDefault();
-          split.setPointerCapture(event.pointerId);
-          const vertical = dock.dir === 'col';
-          const box = pane.getBoundingClientRect();
-          const move = (e) => {
-            const t = vertical ? (e.clientY - box.top) / box.height : (e.clientX - box.left) / box.width;
-            const a = Math.min(0.8, Math.max(0.2, t));
-            dock.sizes = [a, 1 - a];
-            pane.style.setProperty('--dock-a', `${dock.sizes[0]}fr`);
-            pane.style.setProperty('--dock-b', `${dock.sizes[1]}fr`);
-          };
-          const up = (e) => {
-            split.releasePointerCapture(e.pointerId);
-            split.removeEventListener('pointermove', move);
-            split.removeEventListener('pointerup', up);
-            rememberDock();
-          };
-          split.addEventListener('pointermove', move);
-          split.addEventListener('pointerup', up);
-        });
-        pane.append(split);
-      }
-      let host = extras;
-      if (!host) {
-        host = document.createElement('div');
-        host.className = 'dock-extras';
-        host.setAttribute('data-marble-transient', '');
-        pane.append(host);
-      }
-      host.replaceChildren();
-      dock.extras.forEach((extra, index) => {
-        const leaf = document.createElement('div');
-        leaf.className = 'dock-leaf';
-        const bar = makeBar(index);
-        const view = document.createElement('marble-conversation');
-        view.setAttribute('data-marble-transient', '');
-        view.setAttribute('data-chrome', 'pane');
-        if (extra.id) view.setAttribute('conversation', extra.id);
-        extra.el = view;
-        leaf.addEventListener('pointerdown', () => {
-          if (!extra.id) return;
-          focusSlot(index, extra.id);
-          fillChrome(extra.id);
-        });
-        leaf.append(bar, view);
-        host.append(leaf);
-        paintBar(bar, extra.id);
-      });
+      const fresh = pane.getAttribute('data-dock') !== 'tree';
+      if (fresh) enterTreeMode();
+      syncLeaves(animated, handOver);
+      layoutDock(dock.tree);
       paintBars();
     };
 
@@ -3076,41 +4390,51 @@ __ICON__
       return true;
     };
 
-    const splitWith = (id, side) => {
-      if (narrowView.matches || reduceMotion.matches) {
-        open(id);
-        return;
-      }
-      const dir = (side === 'left' || side === 'right') ? 'row' : 'col';
-      const primary = (side === 'right' || side === 'bottom') ? 'start' : 'end';
-      if (slotOf(id) != null) {
-        dock.dir = dir;
-        dock.primary = primary;
-        focusSlot(slotOf(id), id);
-        rememberDock();
-        applyDock();
-        fillChrome(id);
-        return;
-      }
-      if (!dock.extras.length) {
-        dock.dir = dir;
-        dock.primary = primary;
-        dock.extras = [{ id }];
-        dock.sizes = [0.58, 0.42];
-        dock.focus = 0;
-      } else if (dock.extras.length < 3) {
-        dock.extras.push({ id });
-        dock.focus = dock.extras.length - 1;
+    /** Put `id` beside a pane (or beside the whole workspace). A chat already in
+     *  a pane is moved; anything else gets a pane of its own. */
+    const dockAt = (id, plan) => {
+      const slot = slotOf(id);
+      let tree = cloneTree(treeOf());
+      let key;
+      if (slot != null) {
+        key = slot === 'primary' ? PRIMARY : dock.extras[slot].key;
+        if (plan.target === key) return;
+        tree = removeLeaf(tree, key);
+        if (!tree) return;
       } else {
-        dock.extras[dock.extras.length - 1].id = id;
-        dock.focus = dock.extras.length - 1;
+        key = room && !room.closing && room.held ? room.ghostKey : newKey();
+        dock.extras.push({ key, id });
       }
+      dock.tree = plan.root ? insertAtRoot(tree, plan.side, key) : insertBeside(tree, plan.target, plan.side, key);
+      dock.focus = slotOfKey(key);
       rememberDock();
       applyDock();
       openId = id;
       remember(OPEN_KEY, id);
+      document.body.setAttribute('data-open', 'true');
       paintOpen();
       fillChrome(id);
+    };
+
+    /** What a drop does, by what resolveDrop said it would. */
+    const dropOnto = (id, res) => {
+      const plan = res?.plan;
+      if (!plan || plan.mode === 'fill') {
+        open(id);
+        return;
+      }
+      if (plan.mode === 'split') {
+        dockAt(id, plan);
+        return;
+      }
+      if (plan.mode === 'swap') {
+        const other = idOfKey(plan.target);
+        if (!other || !swapIds(id, other)) open(id);
+        return;
+      }
+      const slot = slotOfKey(plan.target);
+      if (slot != null && slot !== -1) dock.focus = slot;
+      open(id);
     };
 
     const placeCard = (card, clientX, clientY, grabX = 16, grabY = 16) => {
@@ -3118,10 +4442,12 @@ __ICON__
       card.style.top = `${clientY - grabY}px`;
     };
 
-    const makeCard = (id) => {
+    const makeCard = (id, grabX = 16, grabY = 16) => {
       const card = document.createElement('div');
       card.className = 'dock-card';
       card.setAttribute('data-marble-transient', '');
+      card.style.setProperty('--grab-x', `${grabX}px`);
+      card.style.setProperty('--grab-y', `${grabY}px`);
       const summary = summaries.get(id) ?? {};
       const title = document.createElement('span');
       title.className = 'dock-title';
@@ -3152,9 +4478,14 @@ __ICON__
           if (done) return;
           if (!origin.started && Math.hypot(e.clientX - origin.x, e.clientY - origin.y) < 8) return;
           origin.started = true;
-          if (!card) card = makeCard(origin.id);
+          if (!card) {
+            card = makeCard(origin.id, grabX, grabY);
+            el.classList.add('marble-lifted');
+            document.body.classList.add('marble-dragging-chat');
+          }
           placeCard(card, e.clientX, e.clientY, grabX, grabY);
-          paintDrop(e.clientX, e.clientY, origin.id);
+          const res = paintDrop(e.clientX, e.clientY, origin.id);
+          card.classList.toggle('marble-docking', Boolean(res.plan && res.plan.mode !== 'fill'));
         };
         const up = (e) => {
           if (done) return;
@@ -3165,19 +4496,17 @@ __ICON__
           document.removeEventListener('mouseup', up);
           document.removeEventListener('pointercancel', up);
           try { el.releasePointerCapture?.(e.pointerId); } catch { /* already released */ }
+          el.classList.remove('marble-lifted');
+          document.body.classList.remove('marble-dragging-chat');
+          // Resolved before the room is put away, so a drop lands where the
+          // preview showed it — including the wider edge an open side keeps.
+          const res = origin.started ? resolveDrop(e.clientX, e.clientY, origin.id) : null;
           card?.remove();
-          paintDrop(null);
+          endDrop(res?.plan?.mode === 'split');
           if (!origin.started) return;
           suppressConvClick = true;
           setTimeout(() => { suppressConvClick = false; }, 0);
-          const over = hitBar(e.clientX, e.clientY, origin.id);
-          if (over?.dataset.id) {
-            if (!swapIds(origin.id, over.dataset.id)) open(origin.id);
-            return;
-          }
-          const side = dropSide(e.clientX, e.clientY);
-          if (side && side !== 'center') splitWith(origin.id, side);
-          else open(origin.id);
+          dropOnto(origin.id, res);
         };
         document.addEventListener('pointermove', move);
         document.addEventListener('mousemove', move);
@@ -3349,6 +4678,7 @@ __ICON__
       if (!id) {
         convo.removeAttribute('conversation');
         dock.extras = [];
+        dock.tree = null;
         dock.focus = 'primary';
         rememberDock();
         applyDock();
@@ -3422,6 +4752,8 @@ __ICON__
       const applyLayout = () => {
         document.body.setAttribute('data-view', next);
         deriveView();
+        // Focus draws its own panes; every other view draws the stage.
+        applyDock();
         if (next === 'library') closeBoardPanel();
         if (current === 'focus' && next !== 'focus') leaveFocusView();
         placeAll();
@@ -3435,31 +4767,44 @@ __ICON__
         const gen = ++fadeGen;
         cancelViewFades();
         document.body.setAttribute('data-crossfade', '1');
-        void document.body.offsetWidth;
-        const incoming = shellFor(next);
-        const outgoing = shellFor(current);
-        // The outgoing shell is started before applyLayout so it fades showing
-        // the layout it actually had. Starting it afterwards dissolves the new
-        // layout into itself, which reads as a flicker rather than a leave.
-        const fadeOut = outgoing.animate([{ opacity: 1 }, { opacity: 0 }], {
-          duration: reduceMotion.matches ? 150 : Math.round(VIEW_MS * 0.4),
-          easing: reduceMotion.matches ? 'linear' : VIEW_EASE,
-          fill: 'both',
-        });
+        const still = reduceMotion.matches;
+        const dir = Math.sign(VIEW_ORDER.indexOf(next) - VIEW_ORDER.indexOf(current)) || 1;
+        // The pane moves (or is rebuilt in a card) whenever Focus is involved;
+        // between List and Folders it stays exactly where it is.
+        const paneMoves = current === 'focus' || next === 'focus';
+        const nextParts = partsOf(next);
+        const outgoing = partsOf(current).filter((el) => !nextParts.includes(el) && !(el === pane && paneMoves));
+        const incoming = nextParts.filter((el) => (el === pane && paneMoves) || !partsOf(current).includes(el));
+        // Where each leaving part stood, read before the layout changes under it.
+        const stood = outgoing.map((el) => [el, el.getBoundingClientRect()]);
         applyLayout();
-        // Offset, not simultaneous: two shells crossing at 0.5 opacity let the
-        // page background show through the middle of every view switch.
-        const fadeIn = incoming.animate([{ opacity: 0 }, { opacity: 1 }], {
-          duration: reduceMotion.matches ? 150 : Math.round(VIEW_MS * 0.7),
-          delay: reduceMotion.matches ? 0 : Math.round(VIEW_MS * 0.3),
-          easing: reduceMotion.matches ? 'linear' : VIEW_EASE,
-          fill: 'both',
+        // The List shell is hidden outright in Board; its leaving parts need it.
+        if (stood.some(([el]) => el === list || el === pane) && next === 'board') libraryEl.classList.add('marble-vt-shell');
+        const anims = [];
+        const slide = (x) => (still ? {} : { transform: `translate3d(${x}px, 0, 0) scale(.992)` });
+        for (const [el, rect] of stood) {
+          freeze(el, rect);
+          anims.push(el.animate([{ opacity: 1, transform: 'none' }, { opacity: 0, ...slide(-dir * 14) }], {
+            duration: still ? 150 : VT_OUT_MS,
+            easing: still ? 'linear' : VT_EASE,
+            fill: 'both',
+          }));
+        }
+        incoming.forEach((el, index) => {
+          anims.push(el.animate([{ opacity: 0, ...slide(dir * 18) }, { opacity: 1, transform: 'none' }], {
+            duration: still ? 150 : VT_IN_MS,
+            // Offset, not simultaneous: the leaving part clears first, so the
+            // page background never shows through the middle of a switch.
+            delay: still ? 0 : 70 + index * 50,
+            easing: still ? 'linear' : VT_EASE,
+            fill: 'both',
+          }));
         });
-        Promise.all([fadeIn.finished.catch(() => {}), fadeOut.finished.catch(() => {})]).then(() => {
+        Promise.all(anims.map((anim) => anim.finished.catch(() => {}))).then(() => {
           if (gen !== fadeGen) return;
           document.body.removeAttribute('data-crossfade');
-          fadeIn.cancel();
-          fadeOut.cancel();
+          for (const anim of anims) anim.cancel();
+          thaw();
         });
       };
 
@@ -3602,21 +4947,28 @@ __ICON__
 
     const restoreDock = () => {
       let fileId = openId;
-      if (narrowView.matches || reduceMotion.matches) {
-        dock.extras = [];
-      } else {
+      dock.extras = [];
+      dock.tree = null;
+      if (!narrowView.matches && !reduceMotion.matches) {
         const raw = recalled(DOCK_KEY);
         if (raw) {
           try {
             const saved = JSON.parse(raw);
-            dock.dir = saved.dir === 'col' ? 'col' : 'row';
-            dock.primary = saved.primary === 'end' ? 'end' : 'start';
-            dock.sizes = Array.isArray(saved.sizes) && saved.sizes.length === 2 ? saved.sizes : [0.58, 0.42];
-            dock.extras = (saved.extras ?? []).filter(Boolean).slice(0, 3).map((id) => ({ id }));
-            dock.focus = saved.focus === 'primary' || typeof saved.focus === 'number' ? saved.focus : 'primary';
             if (saved.file) fileId = saved.file;
+            dock.extras = (saved.extras ?? []).filter(Boolean).map((id) => ({ key: newKey(), id }));
+            dock.focus = saved.focus === 'primary' || typeof saved.focus === 'number' ? saved.focus : 'primary';
+            if (typeof dock.focus === 'number' && !dock.extras[dock.focus]) dock.focus = 'primary';
+            if (saved.tree) {
+              const keyOfId = new Map([[fileId, PRIMARY], ...dock.extras.map((extra) => [extra.id, extra.key])]);
+              const tree = savedToTree(saved.tree, keyOfId);
+              const want = [PRIMARY, ...dock.extras.map((extra) => extra.key)];
+              const have = tree ? treeLeaves(tree) : [];
+              // A layout that no longer matches its panes is discarded, not repaired.
+              if (tree && have.length === want.length && want.every((key) => have.includes(key))) dock.tree = tree;
+            }
           } catch {
             dock.extras = [];
+            dock.tree = null;
           }
         }
       }
@@ -3642,6 +4994,8 @@ __ICON__
         deriveFilters();
         applyFilters();
         restoreOpen();
+        // A patch strips the inline geometry the panes are placed by.
+        layoutDock();
       });
       const start = async (api) => {
         agent = api;
@@ -3698,6 +5052,328 @@ __ICON__
       deriveFilters();
       addEventListener('marble:ready', (event) => boot(event.detail), { once: true });
     }
+  })();
+</script>
+<style data-marble-id="rzcss7a1">
+  /* Resizable bars and columns.
+     A width is a fact, so it is written once — a custom property on the element
+     whose layout it describes — and the track, the handle's position and the
+     handle's label all derive from that one property. The floors below are a
+     guard against a hand-edit that would make the page ungrabbable; the range a
+     drag actually offers is in the script. */
+  .library {
+    position: relative;
+    --list-track: max(6rem, var(--list-w, 20rem));
+    --rail-track: max(6rem, var(--rail-w, 20rem));
+    grid-template-columns: var(--list-track) minmax(0, 1fr);
+  }
+  .folders {
+    position: relative;
+    --rail-track: max(6rem, var(--rail-w, 20rem));
+  }
+  body[data-view="folders"] .folders,
+  body[data-view="folders"] .library {
+    grid-template-columns: var(--rail-track) minmax(0, 1fr);
+  }
+  /* The open conversation keeps the proportion it always had until somebody
+     drags it, and never takes more of the window than the board can spare —
+     a fixed width here collapses the board to nothing on a phone. */
+  body { --panel-track: min(var(--panel-w, min(38vw, 28rem)), 78vw); }
+  body[data-view="board"][data-panel="open"] {
+    grid-template-columns: minmax(0, 1fr) minmax(18rem, var(--panel-track));
+  }
+
+  /* The seam itself: a wide invisible grab strip, a hairline that says where
+     the edge is, and a grip that says it is a handle before you touch it.
+     pointer-events is spelled out because the Folders shell hands them past. */
+  .rz {
+    position: absolute; top: 0; bottom: 0; width: 12px; z-index: 6;
+    transform: translateX(-50%);
+    display: none; padding: 0; border: 0; background: none;
+    cursor: col-resize; touch-action: none; pointer-events: auto;
+  }
+  .rz::before, .rz-col::after {
+    content: ''; position: absolute; top: 0; bottom: 0; left: 50%; width: 2px;
+    transform: translateX(-50%); border-radius: 999px;
+    background: var(--accent); opacity: 0;
+    transition: opacity var(--t) var(--settle);
+  }
+  .rz::after {
+    content: ''; position: absolute; top: 50%; left: 50%; width: 4px; height: 26px;
+    transform: translate(-50%, -50%); border-radius: 999px;
+    background: var(--line); opacity: 0;
+    transition: opacity var(--t) var(--settle), background var(--t) var(--settle);
+  }
+  .rz:hover::before, .rz:focus-visible::before, .rz[data-dragging]::before,
+  .rz:hover::after, .rz:focus-visible::after, .rz[data-dragging]::after { opacity: 1; }
+  .rz[data-dragging]::after { background: var(--accent); }
+  .rz:focus-visible, .rz-col:focus-visible { outline: none; }
+  body[data-view="library"] .rz-list,
+  body[data-view="folders"] .rz-rail,
+  body[data-view="board"][data-panel="open"] .rz-panel { display: block; }
+  .rz-list { left: var(--list-track); }
+  .rz-rail { left: var(--rail-track); }
+  .rz-panel { left: 0; }
+
+  /* Board columns share the row, so their widths are shares of it rather than
+     pixel sizes — which is what keeps them sane when the window changes. */
+  .board { --col-running: 1; --col-review: 1; --col-completed: 1; }
+  .board > .column[data-col="running"] { flex-grow: var(--col-running); }
+  .board > .column[data-col="review"] { flex-grow: var(--col-review); }
+  .board > .column[data-col="completed"] { flex-grow: var(--col-completed); }
+  .rz-col {
+    flex: 0 0 0px; align-self: stretch; position: relative;
+    margin-inline: -.5rem; padding: 0; border: 0; background: none;
+    cursor: col-resize; touch-action: none; pointer-events: auto; z-index: 4;
+  }
+  .rz-col::before {
+    content: ''; position: absolute; top: 0; bottom: 0; left: 50%; width: 16px;
+    transform: translateX(-50%);
+  }
+  .rz-col::after { top: .4rem; bottom: .4rem; }
+  .rz-col:hover::after, .rz-col:focus-visible::after, .rz-col[data-dragging]::after { opacity: 1; }
+
+  /* While a seam is moving, the whole page is the drag — not the text under it. */
+  .marble-resizing, .marble-resizing * { cursor: col-resize !important; user-select: none !important; }
+  /* Nothing hovers on a touch screen, so the grips simply stay visible. */
+  @media (hover: none) { .rz::after, .rz-col::after { opacity: .55; } }
+  /* One column of everything: there is no seam left to drag. */
+  @media (max-width: 719px) { .rz, .rz-col { display: none !important; } }
+</style>
+  <script data-marble-id="rzjs7a1x">
+  // Drag the seam beside a bar, or between two board columns. The width is
+  // written into the file on release — one op per gesture, never one per frame
+  // — so the layout you leave is the layout the next tab opens with.
+  (() => {
+    const body = document.body;
+    const library = document.querySelector('.library');
+    const folders = document.querySelector('.folders');
+    const board = document.querySelector('.board');
+    if (!library || !folders || !board || library.querySelector('.rz-list')) return;
+
+    const MIN_COL = 176;
+    const NUDGE = 16;
+    const BIG_NUDGE = 48;
+    const clamp = (value, low, high) => Math.min(Math.max(low, value), Math.max(low, high));
+    const round = (n) => String(Math.round(n * 1000) / 1000);
+
+    // The inline custom properties are the record. Seeded from the file once,
+    // so the attribute this composes never depends on the browser's own
+    // serialization of what the page has been doing since.
+    const carried = new WeakMap();
+    const stateOf = (el) => {
+      let state = carried.get(el);
+      if (state) return state;
+      const props = new Map();
+      const foreign = [];
+      for (const part of (el.getAttribute('style') || '').split(';')) {
+        const at = part.indexOf(':');
+        if (at < 0) continue;
+        const name = part.slice(0, at).trim();
+        if (!name) continue;
+        const value = part.slice(at + 1).trim();
+        if (name.startsWith('--')) props.set(name, value);
+        else foreign.push(name + ': ' + value);
+      }
+      state = { props, foreign };
+      carried.set(el, state);
+      return state;
+    };
+
+    const paint = (el, name, value) => {
+      const { props } = stateOf(el);
+      if (value == null) {
+        props.delete(name);
+        el.style.removeProperty(name);
+      } else {
+        props.set(name, value);
+        el.style.setProperty(name, value);
+      }
+    };
+
+    const file = (el) => {
+      const { props, foreign } = stateOf(el);
+      const style = [...foreign, ...[...props].map(([name, value]) => name + ': ' + value)].join('; ');
+      const id = window.marble?.id?.(el);
+      if (!id) return;  // no host: the seams still drag, the page just forgets
+      window.marble.op({ type: 'setAttr', id, name: 'style', value: style || null });
+    };
+
+    const drag = (handle, begin) => {
+      handle.addEventListener('pointerdown', (event) => {
+        if (event.button !== 0) return;
+        event.preventDefault();
+        handle.focus({ preventScroll: true });
+        const gesture = begin();
+        handle.setPointerCapture?.(event.pointerId);
+        handle.setAttribute('data-dragging', '');
+        document.documentElement.classList.add('marble-resizing');
+        const move = (e) => gesture.to(e.clientX);
+        const up = (e) => {
+          handle.releasePointerCapture?.(e.pointerId);
+          handle.removeEventListener('pointermove', move);
+          handle.removeEventListener('pointerup', up);
+          handle.removeEventListener('pointercancel', up);
+          handle.removeAttribute('data-dragging');
+          document.documentElement.classList.remove('marble-resizing');
+          gesture.done();
+        };
+        handle.addEventListener('pointermove', move);
+        handle.addEventListener('pointerup', up);
+        handle.addEventListener('pointercancel', up);
+        gesture.to(event.clientX);
+      });
+    };
+
+    // A keyboard nudge is a gesture too, but a held arrow key is a hundred of
+    // them and the file should hear one.
+    const settle = (el) => {
+      let timer = null;
+      return () => {
+        clearTimeout(timer);
+        timer = setTimeout(() => file(el), 350);
+      };
+    };
+
+    const separator = (className, label) => {
+      const el = document.createElement('div');
+      el.className = className;
+      el.setAttribute('data-marble-transient', '');
+      el.setAttribute('role', 'separator');
+      el.setAttribute('aria-orientation', 'vertical');
+      el.setAttribute('tabindex', '0');
+      el.setAttribute('aria-label', label);
+      el.title = 'Drag to resize · double-click to reset';
+      return el;
+    };
+
+    // ------------------------------------------------------------- the bars
+
+    const bar = (spec) => {
+      const handle = separator('rz ' + spec.className, spec.label);
+      const later = settle(body);
+      const read = () => spec.read(handle);
+      const say = () => {
+        const now = Math.round(read());
+        handle.setAttribute('aria-valuenow', String(now));
+        handle.setAttribute('aria-valuemin', String(Math.round(spec.min())));
+        handle.setAttribute('aria-valuemax', String(Math.round(spec.max())));
+        handle.setAttribute('aria-valuetext', now + ' pixels wide');
+      };
+      const put = (px) => {
+        paint(body, spec.prop, Math.round(clamp(px, spec.min(), spec.max())) + 'px');
+        say();
+      };
+      drag(handle, () => ({ to: (clientX) => put(spec.at(clientX)), done: () => file(body) }));
+      handle.addEventListener('dblclick', () => {
+        paint(body, spec.prop, null);
+        file(body);
+        say();
+      });
+      handle.addEventListener('focus', say);
+      handle.addEventListener('keydown', (event) => {
+        const step = (event.shiftKey ? BIG_NUDGE : NUDGE) * (spec.sign ?? 1);
+        if (event.key === 'ArrowLeft') put(read() - step);
+        else if (event.key === 'ArrowRight') put(read() + step);
+        else if (event.key === 'Home') { paint(body, spec.prop, null); say(); }
+        else return;
+        event.preventDefault();
+        later();
+      });
+      spec.host.append(handle);
+      return say;
+    };
+
+    const bars = [
+      bar({
+        host: library, className: 'rz-list', label: 'Width of the conversation list',
+        prop: '--list-w',
+        min: () => 224, max: () => Math.min(innerWidth * 0.5, 704),
+        read: (handle) => handle.offsetLeft,
+        at: (clientX) => clientX - library.getBoundingClientRect().left,
+      }),
+      bar({
+        host: folders, className: 'rz-rail', label: 'Width of the folder rail',
+        prop: '--rail-w',
+        min: () => 192, max: () => Math.min(innerWidth * 0.5, 640),
+        read: (handle) => handle.offsetLeft,
+        at: (clientX) => clientX - folders.getBoundingClientRect().left,
+      }),
+      bar({
+        host: library, className: 'rz-panel', label: 'Width of the open conversation',
+        prop: '--panel-w', sign: -1,
+        min: () => 288, max: () => Math.min(innerWidth * 0.7, 832),
+        read: () => library.getBoundingClientRect().width,
+        at: (clientX) => library.getBoundingClientRect().right - clientX,
+      }),
+    ];
+
+    // ------------------------------------------------------ the board seams
+
+    const columnAt = (col) => board.querySelector('.column[data-col="' + col + '"]');
+    const nameOf = (column) => (column.querySelector('h2')?.firstChild?.textContent || column.dataset.col).trim();
+    const growOf = (col) => Number(stateOf(board).props.get('--col-' + col)) || 1;
+
+    const seam = (leftCol, rightCol) => {
+      const left = columnAt(leftCol);
+      const right = columnAt(rightCol);
+      if (!left || !right) return null;
+      const handle = separator('rz-col', 'Share of the board between ' + nameOf(left) + ' and ' + nameOf(right));
+      const later = settle(board);
+      const say = () => {
+        const total = growOf(leftCol) + growOf(rightCol);
+        const pct = Math.round((growOf(leftCol) / total) * 100);
+        handle.setAttribute('aria-valuenow', String(pct));
+        handle.setAttribute('aria-valuemin', '0');
+        handle.setAttribute('aria-valuemax', '100');
+        handle.setAttribute('aria-valuetext', pct + '% to ' + nameOf(left));
+      };
+      // Columns are flex-basis 0, so a width is a share of the pair rather than
+      // a pixel count — which is what keeps the board sane when the window moves.
+      const share = (width, usable) => {
+        if (usable <= MIN_COL * 2) return;
+        const total = growOf(leftCol) + growOf(rightCol);
+        const grow = total * (clamp(width, MIN_COL, usable - MIN_COL) / usable);
+        paint(board, '--col-' + leftCol, round(grow));
+        paint(board, '--col-' + rightCol, round(total - grow));
+        say();
+      };
+      const reset = () => {
+        paint(board, '--col-' + leftCol, null);
+        paint(board, '--col-' + rightCol, null);
+        say();
+      };
+      drag(handle, () => {
+        const a = left.getBoundingClientRect();
+        const b = right.getBoundingClientRect();
+        const gap = Math.max(0, b.left - a.right);
+        const usable = a.width + b.width;
+        return {
+          to: (clientX) => share(clientX - a.left - gap / 2, usable),
+          done: () => file(board),
+        };
+      });
+      handle.addEventListener('dblclick', () => { reset(); file(board); });
+      handle.addEventListener('focus', say);
+      handle.addEventListener('keydown', (event) => {
+        const a = left.getBoundingClientRect();
+        const usable = a.width + right.getBoundingClientRect().width;
+        const step = event.shiftKey ? BIG_NUDGE : NUDGE;
+        if (event.key === 'ArrowLeft') share(a.width - step, usable);
+        else if (event.key === 'ArrowRight') share(a.width + step, usable);
+        else if (event.key === 'Home') reset();
+        else return;
+        event.preventDefault();
+        later();
+      });
+      board.insertBefore(handle, right);
+      return say;
+    };
+
+    const seams = [seam('running', 'review'), seam('review', 'completed')].filter(Boolean);
+    const announce = () => { for (const say of [...bars, ...seams]) say(); };
+    announce();
+    addEventListener('resize', announce);
   })();
 </script>
 </body>

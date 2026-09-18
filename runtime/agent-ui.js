@@ -1208,9 +1208,125 @@
     .send:disabled { opacity: .35; cursor: default; }
     .stop { background: var(--paper-2); color: var(--ink); }
     .stop[hidden] { display: none; }
+
+    /* Attachments. A wall of pasted text and a screenshot are both things you
+       want to send and neither is something you want to read back in a
+       one-line box, so each becomes a card: a name, a size, a glance at the
+       contents, and a way to open it or take it off again. The same card is
+       what the sent message shows, because the message is the same thing. */
+    .attachments { display: flex; flex-wrap: wrap; gap: 6px; }
+    .attachments[hidden] { display: none; }
+    .attach-wrap { position: relative; display: flex; }
+    .attach {
+      display: block; width: 172px; padding: 0; overflow: hidden;
+      font: inherit; text-align: left; color: var(--ink);
+      background: var(--paper-2); border: 1px solid var(--line); border-radius: 10px;
+      cursor: pointer;
+      transition: border-color 160ms var(--settle), box-shadow 160ms var(--settle), background 160ms var(--settle);
+    }
+    .attach:hover, .attach:focus-visible { border-color: var(--accent); box-shadow: var(--shadow-lift); outline: none; }
+    /* Pressed is a shade, never a scale: nothing in this composer pops. */
+    .attach:active { background: var(--paper-3); }
+    .attach[data-kind="image"] { width: 124px; }
+    .attach-head { display: flex; align-items: baseline; gap: 5px; padding: 7px 9px 0; }
+    .attach-name { font-size: 11.5px; font-weight: 500; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .attach-meta { flex: none; font-size: 10.5px; color: var(--faint); font-variant-numeric: tabular-nums; }
+    .attach-peek {
+      display: block; height: 42px; overflow: hidden; padding: 4px 9px 8px;
+      font: 10px/1.5 ui-monospace, SFMono-Regular, Menlo, monospace;
+      color: var(--muted); white-space: pre;
+      -webkit-mask-image: linear-gradient(to bottom, #000 45%, transparent);
+      mask-image: linear-gradient(to bottom, #000 45%, transparent);
+    }
+    .attach-shot { display: block; width: 100%; height: 76px; object-fit: cover; background: var(--paper-3); }
+    .attach-remove {
+      position: absolute; top: -6px; right: -6px; width: 19px; height: 19px;
+      display: grid; place-items: center; padding: 0; line-height: 1;
+      font: inherit; font-size: 12px; color: var(--muted);
+      background: var(--card); border: 1px solid var(--line); border-radius: 50%;
+      cursor: pointer; opacity: 0; transition: opacity 160ms var(--settle), color 160ms var(--settle);
+    }
+    .attach-wrap:hover .attach-remove, .attach-wrap:focus-within .attach-remove { opacity: 1; }
+    .attach-remove:hover, .attach-remove:focus-visible { color: var(--danger); outline: none; opacity: 1; }
+    @media (hover: none) { .attach-remove { opacity: 1; } }
+
+    /* Opening a card does not take you anywhere: the whole of it unfolds
+       above the box you were typing in, and Escape puts it back. */
+    .peek {
+      display: flex; flex-direction: column; gap: 6px; max-height: 42vh;
+      padding: 8px 10px; background: var(--card);
+      border: 1px solid var(--line); border-radius: 12px; box-shadow: var(--shadow-lift);
+    }
+    .peek[hidden] { display: none; }
+    .peek-head { display: flex; align-items: center; gap: 8px; font-size: 11.5px; color: var(--faint); }
+    .peek-title { color: var(--ink); font-weight: 500; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .peek-close {
+      margin-left: auto; flex: none; width: 22px; height: 22px; padding: 0; line-height: 1;
+      font: inherit; color: var(--muted); background: none; border: 0; border-radius: 6px; cursor: pointer;
+    }
+    .peek-close:hover, .peek-close:focus-visible { background: var(--paper-2); color: var(--ink); outline: none; }
+    .peek-body {
+      margin: 0; overflow: auto; overscroll-behavior: contain;
+      font: 11.5px/1.6 ui-monospace, SFMono-Regular, Menlo, monospace;
+      color: var(--ink); white-space: pre-wrap; overflow-wrap: anywhere;
+    }
+    .peek-body img { display: block; max-width: 100%; border-radius: 8px; }
+
+    /* Dragging an image over the composer says where it will land. */
+    .composer.is-dropping .row { border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-soft); }
+    .msg.me .attachments { margin-bottom: 6px; }
+    .msg.me .attach { background: var(--card); }
+    .msg-text { display: block; }
+
     @keyframes pulse { 0%, 100% { opacity: .35; } 50% { opacity: 1; } }
     @media (prefers-reduced-motion: reduce) { .tool::before, .turn-footer .pulse { animation: none; } .seg-thumb { transition: none; } }
   `;
+
+  // ------------------------------------------------------- pasted attachments
+
+  // Long enough that it would bury the box you are typing in.
+  const PASTE_LINES = 12;
+  const PASTE_CHARS = 900;
+  const IMAGE_TYPES = new Set(['image/png', 'image/jpeg', 'image/gif', 'image/webp']);
+  const MAX_IMAGE = 8 * 1024 * 1024;
+
+  const sizeOf = (bytes) => {
+    if (bytes < 1024) return `${bytes} B`;
+    if (bytes < 1024 * 1024) return `${Math.round(bytes / 1024)} KB`;
+    return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+  };
+
+  const escAttr = (value) =>
+    String(value ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+  const unescAttr = (value) =>
+    String(value ?? '').replace(/&quot;/g, '"').replace(/&gt;/g, '>').replace(/&lt;/g, '<').replace(/&amp;/g, '&');
+
+  // An attachment travels inside the prompt, tagged, so the agent reads it as
+  // a named block rather than as the person's own sentence — and so the sent
+  // message can be shown back as the same cards the composer had.
+  const PASTED = /<pasted-(text|image)\b([^>]*)>([\s\S]*?)<\/pasted-\1>\n?/g;
+
+  function splitPasted(text) {
+    const blocks = [];
+    const rest = String(text ?? '')
+      .replace(PASTED, (_whole, kind, raw, inner) => {
+        const attrs = Object.fromEntries(
+          [...String(raw).matchAll(/([a-z-]+)="([^"]*)"/g)].map((match) => [match[1], unescAttr(match[2])]),
+        );
+        blocks.push({ ...attrs, kind, text: inner.replace(/^\n/, '').replace(/\n$/, '') });
+        return '';
+      })
+      .trim();
+    return { blocks, rest };
+  }
+
+  const asBase64 = (file) =>
+    new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onerror = () => reject(new Error(`${file.name || 'that image'} could not be read`));
+      reader.onload = () => resolve(String(reader.result).split(',')[1] ?? '');
+      reader.readAsDataURL(file);
+    });
 
   const SEND_ICON = '<svg width="16" height="16" viewBox="0 0 16 16" aria-hidden="true"><path d="M8 13V3M3.5 7.5 8 3l4.5 4.5" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>';
   const STOP_ICON = '<svg width="12" height="12" viewBox="0 0 12 12" aria-hidden="true"><rect x="1.5" y="1.5" width="9" height="9" rx="2" fill="currentColor"/></svg>';
@@ -1262,8 +1378,16 @@
             </div>
           </div>
           <div class="slash" hidden role="listbox" aria-label="Commands"></div>
+          <div class="peek" hidden>
+            <div class="peek-head">
+              <span class="peek-title"></span>
+              <button type="button" class="peek-close" aria-label="Close">×</button>
+            </div>
+            <div class="peek-body"></div>
+          </div>
           <div class="context"><span class="context-text"></span><button type="button" class="context-clear" aria-label="Don’t send the selection">×</button></div>
           <div class="row">
+            <div class="attachments" hidden></div>
             <div class="chips" hidden></div>
             <div class="row-input">
               <textarea rows="1" placeholder="Ask about this document…" aria-label="Message"></textarea>
@@ -1296,6 +1420,11 @@
       this.effortBox = root.querySelector('[data-seg="effort"]');
       this.slash = root.querySelector('.slash');
       this.chipsEl = root.querySelector('.chips');
+      this.attachmentsEl = root.querySelector('.row > .attachments');
+      this.peek = root.querySelector('.peek');
+      this.peekTitle = root.querySelector('.peek-title');
+      this.peekBody = root.querySelector('.peek-body');
+      this.peekClose = root.querySelector('.peek-close');
       this.contextText = root.querySelector('.context-text');
       this.contextClear = root.querySelector('.context-clear');
       this.input = root.querySelector('textarea');
@@ -1314,6 +1443,8 @@
       this.slashIndex = 0;
       this.skills = [];
       this.composerChips = [];
+      this.attachments = [];
+      this.attachSeq = 0;
       this.savedTitle = '';
       this.mode = '';
       this.editedFiles = new Set();
@@ -1404,6 +1535,34 @@
         this.filterSlash();
         this.autosize();
       });
+
+      // A screenshot and a page of pasted log are the two things that arrive
+      // through the clipboard and do not belong in a one-line box.
+      this.input.addEventListener('paste', (event) => this.takePaste(event));
+      this.form.addEventListener('dragover', (event) => {
+        if (![...(event.dataTransfer?.types ?? [])].includes('Files')) return;
+        event.preventDefault();
+        this.form.classList.add('is-dropping');
+      });
+      this.form.addEventListener('dragleave', (event) => {
+        if (event.target === this.form || !this.form.contains(event.relatedTarget)) {
+          this.form.classList.remove('is-dropping');
+        }
+      });
+      this.form.addEventListener('drop', (event) => {
+        const files = [...(event.dataTransfer?.files ?? [])].filter((file) => file.type.startsWith('image/'));
+        this.form.classList.remove('is-dropping');
+        if (!files.length) return;
+        event.preventDefault();
+        for (const file of files) this.attachImage(file);
+      });
+      this.peekClose.addEventListener('click', () => this.closePeek());
+      this.shadowRoot.addEventListener('keydown', (event) => {
+        if (event.key === 'Escape' && !this.peek.hidden) {
+          event.stopPropagation();
+          this.closePeek();
+        }
+      });
       this.stopButton.addEventListener('click', () => {
         if (this.running) this.api.cancel(this.running.turn).catch((err) => this.system(err.message, true));
       });
@@ -1460,6 +1619,7 @@
       this.queuedEl.hidden = true;
       this.composerChips = this.composerChips.filter((chip) => chip.kind === 'model' || chip.kind === 'effort');
       this.renderChips();
+      this.clearAttachments();
       this.seen = 0;
       this.turns.clear();
       this.prompts.clear();
@@ -1690,8 +1850,16 @@
       } catch { /* defaults from the provider list */ }
       const id = provider?.id;
       const models = this.pickerModels(provider);
-      let modelValue = model ?? radioValue(this.shadowRoot, 'model') ?? settings.models?.[id] ?? '';
-      let effortValue = effort ?? radioValue(this.shadowRoot, 'effort') ?? settings.efforts?.[id] ?? '';
+      // A started conversation keeps the model it was started with. A composer
+      // with no conversation yet opens on the last model this person chose —
+      // which is what `settings.models` holds, and what the next conversation
+      // the host starts will be given. (radioValue answers '' rather than
+      // undefined when nothing is checked, so `??` would never reach here.)
+      const fresh = !this.getAttribute('conversation');
+      let modelValue = model ?? radioValue(this.shadowRoot, 'model') ?? '';
+      if (!modelValue && fresh) modelValue = settings.models?.[id] ?? '';
+      let effortValue = effort ?? radioValue(this.shadowRoot, 'effort') ?? '';
+      if (!effortValue && fresh) effortValue = settings.efforts?.[id] ?? '';
       const split = splitCursorModel(modelValue);
       if (split.family && models.some((item) => item.id === split.family)) {
         if (!effortValue) effortValue = split.effort;
@@ -1732,8 +1900,26 @@
       if (this.meta) this.meta = { ...this.meta, model, effort, ...(provider ? { provider } : {}) };
       this.paintTags();
       this.paintStatus();
+      this.rememberPick(provider, model, effort);
       if (!id || !this.api?.update) return;
       this.api.update(id, { model, effort, ...(provider ? { provider } : {}) }).catch((err) => this.system(err.message, true));
+    }
+
+    /** The agent and model a person just chose are the ones they will want on
+     *  the next conversation too, so a pick in any composer is also the host's
+     *  default — the same setting the Settings panel writes, and the one
+     *  `POST /agent/conversations` fills a new conversation from. Only a pick
+     *  reaches here: loading a conversation syncs the picker without persisting
+     *  it, so opening an old conversation never moves the default. */
+    rememberPick(provider, model, effort) {
+      if (!provider || !this.api?.saveSettings) return;
+      this.api
+        .saveSettings({
+          defaultProvider: provider,
+          models: { [provider]: model ?? '' },
+          efforts: { [provider]: effort ?? '' },
+        })
+        .catch(() => { /* the conversation itself still has the pick */ });
     }
 
     persistMode() {
@@ -1968,6 +2154,7 @@
     updateSendable() {
       const noAgent = !this.getAttribute('conversation') && !radioValue(this.shadowRoot, 'agent');
       const canSend = Boolean(this.input.value.trim())
+        || this.attachments.length > 0
         || this.composerChips.some((chip) => chip.kind === 'skill' || chip.kind === 'compact');
       this.sendButton.disabled = this.sending || noAgent || !canSend;
     }
@@ -2017,17 +2204,21 @@
       }
       const skillChips = this.composerChips.filter((chip) => chip.kind === 'skill');
       const compactChip = this.composerChips.some((chip) => chip.kind === 'compact');
-      if (!typed && !skillChips.length && !compactChip) return;
+      if (!typed && !skillChips.length && !compactChip && !this.attachments.length) return;
 
       let prompt = typed;
       if (compactChip || slash?.kind === 'compact') prompt = '/compact';
       else if (slash?.kind === 'skill') prompt = `/${slash.id}${slash.rest ? ` ${slash.rest}` : ''}`;
       else if (skillChips.length) prompt = `${skillChips.map((chip) => `/${chip.id}`).join(' ')}${typed ? ` ${typed}` : ''}`.trim();
-      if (!prompt) return;
+      if (!prompt && !this.attachments.length) return;
 
       this.sending = true;
       this.updateSendable();
       try {
+        // Attachments lead, because a long quotation read before the question
+        // about it is the way round that a model answers well.
+        const packed = await this.packAttachments();
+        if (packed) prompt = `${packed}\n\n${prompt}`.trimEnd();
         const context = this.api.context();
         if (this.skipSelection) context.selection = [];
         let id = this.getAttribute('conversation');
@@ -2062,6 +2253,7 @@
         }
         await this.api.send(id, { prompt, ...context });
         this.input.value = '';
+        this.clearAttachments();
         this.composerChips = this.composerChips.filter((chip) => chip.kind === 'model' || chip.kind === 'effort');
         this.renderChips();
         this.hideSlash();
@@ -2214,6 +2406,192 @@
       this.updateSendable();
     }
 
+    // ------------------------------------------------------- attachments
+
+    /** A paste is an attachment when it is an image, or when it is more text
+     *  than the box can show at once. Anything shorter is just typing. */
+    takePaste(event) {
+      const data = event.clipboardData;
+      if (!data) return;
+      const images = [...(data.files ?? [])].filter((file) => file.type.startsWith('image/'));
+      if (images.length) {
+        event.preventDefault();
+        for (const file of images) this.attachImage(file);
+        return;
+      }
+      const text = data.getData('text/plain') ?? '';
+      if (text.length <= PASTE_CHARS && text.split('\n').length <= PASTE_LINES) return;
+      event.preventDefault();
+      this.attachText(text);
+    }
+
+    attachText(text) {
+      const lines = text.split('\n');
+      this.attachments.push({
+        key: `a${(this.attachSeq += 1)}`,
+        kind: 'text',
+        name: 'Pasted text',
+        text,
+        lines: lines.length,
+        bytes: new Blob([text]).size,
+        peek: lines.slice(0, 4).join('\n'),
+      });
+      this.renderAttachments();
+      this.focusInput();
+    }
+
+    attachImage(file) {
+      if (!IMAGE_TYPES.has(file.type)) {
+        this.system(`${file.name || 'That file'} is a ${file.type || 'kind of file'} this drive does not keep.`, true);
+        return;
+      }
+      if (file.size > MAX_IMAGE) {
+        this.system(`${file.name || 'That image'} is ${sizeOf(file.size)} — larger than the ${sizeOf(MAX_IMAGE)} an image can be.`, true);
+        return;
+      }
+      this.attachments.push({
+        key: `a${(this.attachSeq += 1)}`,
+        kind: 'image',
+        name: file.name || 'Pasted image',
+        type: file.type,
+        bytes: file.size,
+        file,
+        src: URL.createObjectURL(file),
+      });
+      this.renderAttachments();
+      this.focusInput();
+    }
+
+    dropAttachment(item) {
+      if (item.src) URL.revokeObjectURL(item.src);
+      this.attachments = this.attachments.filter((other) => other !== item);
+      this.renderAttachments();
+      if (this.peekItem === item) this.closePeek();
+      this.focusInput();
+    }
+
+    clearAttachments() {
+      for (const item of this.attachments) {
+        if (item.src) URL.revokeObjectURL(item.src);
+      }
+      this.attachments = [];
+      this.closePeek();
+      this.renderAttachments();
+    }
+
+    renderAttachments() {
+      if (!this.attachmentsEl) return;
+      this.attachmentsEl.replaceChildren();
+      this.attachmentsEl.hidden = !this.attachments.length;
+      for (const item of this.attachments) {
+        const wrap = h('div', 'attach-wrap');
+        const remove = h('button', 'attach-remove', '×');
+        remove.type = 'button';
+        remove.setAttribute('aria-label', `Remove ${item.name}`);
+        remove.addEventListener('click', () => this.dropAttachment(item));
+        wrap.append(this.attachCard(item), remove);
+        this.attachmentsEl.append(wrap);
+      }
+      this.updateSendable();
+    }
+
+    /** The same card for a paste waiting to be sent and for one already sent:
+     *  a name, how much of it there is, and a glance at what is inside. */
+    attachCard(item) {
+      const card = h('button', 'attach');
+      card.type = 'button';
+      card.dataset.kind = item.kind;
+      if (item.kind === 'image') {
+        const shot = h('img', 'attach-shot');
+        shot.src = item.src ?? item.url ?? '';
+        shot.alt = item.name;
+        shot.loading = 'lazy';
+        card.append(shot);
+      }
+      const head = h('div', 'attach-head');
+      head.append(h('span', 'attach-name', item.name));
+      head.append(h('span', 'attach-meta', item.kind === 'image' ? sizeOf(item.bytes ?? 0) : `${item.lines} lines`));
+      card.append(head);
+      if (item.kind === 'text') card.append(h('pre', 'attach-peek', item.peek ?? item.text.split('\n').slice(0, 4).join('\n')));
+      card.setAttribute('aria-label', `${item.name}, ${item.kind === 'image' ? sizeOf(item.bytes ?? 0) : `${item.lines} lines`} — open`);
+      card.addEventListener('click', () => this.openPeek(item));
+      return card;
+    }
+
+    openPeek(item) {
+      this.peekItem = item;
+      this.peekTitle.textContent = item.kind === 'image'
+        ? `${item.name} · ${sizeOf(item.bytes ?? 0)}`
+        : `${item.name} · ${item.lines ?? item.text.split('\n').length} lines`;
+      if (item.kind === 'image') {
+        const full = h('img', '');
+        full.src = item.src ?? item.url ?? '';
+        full.alt = item.name;
+        this.peekBody.replaceChildren(full);
+      } else {
+        this.peekBody.replaceChildren(document.createTextNode(item.text ?? ''));
+      }
+      this.peek.hidden = false;
+      this.peekBody.scrollTop = 0;
+      this.peekClose.focus({ preventScroll: true });
+    }
+
+    closePeek() {
+      if (this.peek.hidden) return;
+      this.peek.hidden = true;
+      this.peekItem = null;
+      this.peekBody.replaceChildren();
+    }
+
+    /** Images become files on the host first — every provider is a CLI reading
+     *  the disk, so a path is the only thing all of them can open. */
+    async packAttachments() {
+      const blocks = [];
+      for (const [index, item] of this.attachments.entries()) {
+        const at = index + 1;
+        if (item.kind === 'text') {
+          blocks.push(`<pasted-text index="${at}" lines="${item.lines}" chars="${item.text.length}">\n${item.text}\n</pasted-text>`);
+          continue;
+        }
+        if (!item.saved) {
+          item.saved = await this.api.upload({
+            name: item.name,
+            type: item.type,
+            data: await asBase64(item.file),
+          });
+        }
+        const { path, url, name, bytes } = item.saved;
+        blocks.push(
+          `<pasted-image index="${at}" name="${escAttr(name || item.name)}" bytes="${bytes}" path="${escAttr(path)}" url="${escAttr(url)}"></pasted-image>`,
+        );
+      }
+      return blocks.join('\n\n');
+    }
+
+    /** What a sent message looks like: its attachments as the cards they were,
+     *  then whatever the person actually typed around them. */
+    userMessage(text) {
+      const { blocks, rest } = splitPasted(text);
+      const node = h('div', 'msg me');
+      if (blocks.length) {
+        const strip = h('div', 'attachments');
+        for (const block of blocks) {
+          strip.append(this.attachCard({
+            kind: block.kind,
+            name: block.name || (block.kind === 'image' ? 'Pasted image' : 'Pasted text'),
+            url: block.url,
+            text: block.text,
+            lines: Number(block.lines) || (block.text ? block.text.split('\n').length : 0),
+            bytes: Number(block.bytes ?? block.chars) || 0,
+          }));
+        }
+        node.append(strip);
+      }
+      const body = blocks.length ? rest : text;
+      if (body) node.append(h('span', 'msg-text', body));
+      return node;
+    }
+
     hideSlash() {
       this.slash.hidden = true;
       this.slashItems = [];
@@ -2258,20 +2636,24 @@
       const stuck = this.logEl.scrollHeight - this.logEl.scrollTop - this.logEl.clientHeight < 48;
       const turn = event.turn;
       switch (event.type) {
-        case 'user':
+        case 'user': {
           this.endLive();
-          this.prompts.set(turn, event.text);
+          // What was typed, not what was attached: a title and a queue row are
+          // both one line, and a pasted file would be all of it.
+          const said = splitPasted(event.text).rest || String(event.text ?? '');
+          this.prompts.set(turn, said);
           this.record(turn).target = event.context?.target ?? null;
           if (event.context?.target || event.text) {
             this.meta = {
               ...(this.meta ?? {}),
               target: event.context?.target ?? this.meta?.target,
-              title: this.meta?.title || String(event.text ?? '').trim().slice(0, 60),
+              title: this.meta?.title || said.trim().slice(0, 60),
             };
             this.paintMast();
           }
-          this.append(turn, h('div', 'msg me', event.text));
+          this.append(turn, this.userMessage(event.text));
           break;
+        }
         case 'turn.queued':
           this.queue(turn, true);
           break;

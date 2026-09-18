@@ -714,7 +714,9 @@ test('board view survives a file reconcile that still says library', async () =>
   assert.equal(await page.locator(`.column[data-col="review"] .conv[data-id="${id}"]`).count(), 1);
 
   const filed = await page.evaluate(() => window.marble.source.outer(document.body));
-  assert.equal(filed.includes('data-view="board"'), false, 'board is page-only and must not be filed');
+  // The body's own attribute, not the bytes under it: a stylesheet in the
+  // page may perfectly well name the view it styles.
+  assert.doesNotMatch(filed.slice(0, filed.indexOf('>') + 1), /data-view="board"/, 'board is page-only and must not be filed');
   assert.match(AGENTS, /data-view="library"/);
 
   // What patchFromFile does: copy the file's library onto the live body, then
