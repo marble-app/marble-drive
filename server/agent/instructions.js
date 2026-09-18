@@ -55,3 +55,6 @@ export const instructionsFor = (capability, kind = 'drive') => {
   if (capability !== 'full') return INSTRUCTIONS;
   return kind === 'project' ? PROJECT_INSTRUCTIONS : DRIVE_INSTRUCTIONS;
 };
+
+/** Added to a turn's prompt when other conversations exist in its project. */
+export const MESSAGING_INSTRUCTIONS = `Other conversations are working in this project. list_agents shows them; send_message sends one a note, and wait_for_reply waits for an answer (a timeout means nothing has arrived yet — call it again or move on). Message another agent to ask a question or hand something over, not to narrate. Shared state belongs in a document both of you can read. Do not reply to a reply unless you have something new to say.`;
