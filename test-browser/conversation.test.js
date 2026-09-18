@@ -16,7 +16,7 @@ const SCRIPTS = {
   slow: [{ sleep: 1500 }, { say: 'finally' }],
   hold: [{ silent: 20_000 }],
   permission: [{ ask: { tool: 'Bash', input: { command: 'rm -rf build' } } }, { say: 'after' }],
-  question: [{ ask: { tool: 'AskUserQuestion', input: { questions: [{ question: 'A or B?', header: 'Pick', options: [{ label: 'A' }, { label: 'B' }], multiSelect: false }] } } }],
+  question: [{ ask: { tool: 'AskUserQuestion', input: { questions: [{ question: 'A or B?', header: 'Pick', options: [{ label: 'A', description: 'the first way' }, { label: 'B', description: 'the second' }], multiSelect: false }] } } }],
   stale: [
     { call: 'apply_ops', args: { path: 'garden', note: 'unread', ops: [{ type: 'setText', id: 'p', text: 'x' }] } },
     { say: 'It was refused.' },
@@ -1022,19 +1022,47 @@ test('a permission ask shows a card, and Allow answers it', async () => {
   assert.deepEqual(errors, []);
 });
 
-test('a question ask offers its options; arrows move, Enter answers with the label', async () => {
+test('a question ask lists numbered options with descriptions; arrows, digits and Enter answer', async () => {
   const { view, errors } = await mount();
-  await view.locator('input[name="agent"][value="fake"]').waitFor();
   await sendFrom(view, 'script:question');
   const card = view.locator('.ask[data-kind="question"]');
   await card.waitFor();
-  assert.equal(await card.locator('[role="radio"]').count(), 2);
-  await card.locator('[role="radio"]').first().focus();
-  await card.locator('[role="radio"]').first().press('ArrowDown');
-  await card.locator('[role="radio"]').nth(1).press('Enter');
+  const options = card.locator('[role="radio"]');
+  assert.equal(await options.count(), 3, 'two options and Other');
+  assert.equal(await options.nth(0).locator('kbd').textContent(), '1');
+  assert.equal(await options.nth(0).locator('b').textContent(), 'A');
+  assert.equal(await options.nth(0).locator('small').textContent(), 'the first way');
+  assert.match(await options.nth(2).textContent(), /Other/);
+  await options.first().focus();
+  await options.first().press('ArrowDown');
+  await options.nth(1).press('Enter');
   await view.locator('.turn-footer[data-status="completed"]').waitFor();
   await view.locator('.msg.agent', { hasText: 'answered:allow:B' }).waitFor();
   assert.deepEqual(errors, []);
+});
+
+test('Other on a question takes a typed answer', async () => {
+  const { view } = await mount();
+  await sendFrom(view, 'script:question');
+  const card = view.locator('.ask[data-kind="question"]');
+  await card.waitFor();
+  await card.locator('.ask-other').click();
+  const text = card.locator('.ask-other-text');
+  await text.waitFor({ state: 'visible' });
+  await text.fill('neither, do C');
+  await text.press('Enter');
+  await view.locator('.msg.agent', { hasText: 'answered:allow:neither, do C' }).waitFor();
+});
+
+test('a digit picks an option', async () => {
+  const { view } = await mount();
+  await sendFrom(view, 'script:question');
+  const card = view.locator('.ask[data-kind="question"]');
+  await card.waitFor();
+  await card.locator('[role="radio"]').first().press('2');
+  assert.equal(await card.locator('[role="radio"]').nth(1).getAttribute('aria-checked'), 'true');
+  await card.locator('button.answer').click();
+  await view.locator('.msg.agent', { hasText: 'answered:allow:B' }).waitFor();
 });
 
 test('a new conversation is started in the picked project, and the mast names it', async () => {

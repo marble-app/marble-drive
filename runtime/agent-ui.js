@@ -974,6 +974,9 @@
   /** What to send back for an ask. `picks` is a Map question → Set of labels.
    *  For a permission, `note === null` is Allow; any string is Deny with that
    *  reason (or a stock one). */
+  // A pick that stands for "the typed answer" until the response is built.
+  const OTHER = Symbol('other');
+
   function askResponse(kind, input, picks = new Map(), note = '') {
     if (kind === 'question') {
       const answers = {};
@@ -1194,12 +1197,22 @@
     .tool[data-state="refused"] { color: var(--caution); } .tool[data-state="refused"]::before { background: var(--caution); }
     .mast .also { font-size: 11.5px; color: var(--faint); margin-top: 2px; }
     .mast .also[hidden] { display: none; }
-    .ask { margin: 8px 0; padding: 10px 12px; border: 1px solid var(--line); border-radius: 10px; background: var(--paper-2, var(--paper)); display: grid; gap: 8px; }
+    .ask { margin: 8px 0; padding: 10px 12px; border: 1px solid var(--line); border-radius: 12px; background: var(--card); display: grid; gap: 10px; box-shadow: 0 1px 2px color-mix(in srgb, var(--ink) 6%, transparent); }
+    .ask .ask-q { display: grid; gap: 6px; }
     .ask .ask-title { font-weight: 600; font-size: 13px; }
-    .ask pre { margin: 0; font-size: 12px; white-space: pre-wrap; word-break: break-word; }
-    .ask .ask-options { display: grid; gap: 4px; }
-    .ask .ask-options button { text-align: left; font: inherit; font-size: 12.5px; padding: 6px 8px; border: 1px solid var(--line); border-radius: 8px; background: none; color: inherit; cursor: pointer; }
+    .ask pre { margin: 0; font: 12px/1.5 ui-monospace, SFMono-Regular, Menlo, monospace; white-space: pre-wrap; word-break: break-word; background: var(--paper-2); padding: 6px 8px; border-radius: 8px; }
+    .ask .ask-options { display: grid; gap: 3px; }
+    .ask .ask-options button {
+      display: grid; grid-template-columns: 18px 1fr; column-gap: 8px; align-items: baseline; text-align: left;
+      font: inherit; font-size: 12.5px; padding: 6px 8px; border: 1px solid transparent; border-radius: 8px; background: none; color: inherit; cursor: pointer;
+    }
+    .ask .ask-options button:hover, .ask .ask-options button:focus-visible { background: var(--paper-2); outline: none; }
     .ask .ask-options button[aria-checked="true"] { border-color: var(--accent-ink); background: color-mix(in srgb, var(--accent-ink) 10%, transparent); }
+    .ask .ask-options kbd { font: 11px/1.4 inherit; color: var(--faint); text-align: center; border: 1px solid var(--line); border-radius: 4px; }
+    .ask .ask-options b { font-weight: 500; }
+    .ask .ask-options small { grid-column: 2; color: var(--muted); font-size: 11.5px; }
+    .ask .ask-other-text { font: inherit; font-size: 12.5px; padding: 5px 8px; border: 1px solid var(--line); border-radius: 8px; background: none; color: inherit; margin-left: 26px; }
+    .ask .ask-other-text[hidden] { display: none; }
     .ask .ask-actions { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; }
     .ask .ask-actions button { font: inherit; font-size: 12.5px; padding: 5px 10px; border-radius: 8px; border: 1px solid var(--line); background: none; color: inherit; cursor: pointer; }
     .ask .ask-actions button.allow, .ask .ask-actions button.answer { background: var(--accent-ink); color: var(--paper); border-color: var(--accent-ink); }
@@ -3255,56 +3268,107 @@
       };
       if (event.kind === 'question') {
         const picks = new Map();
-        for (const q of event.input?.questions ?? []) {
-          card.append(h('div', 'ask-title', q.question));
+        const questions = event.input?.questions ?? [];
+        // One answer covers every question; each question's Other text is
+        // folded into its picks just before the response is built.
+        const resolveOther = [];
+        let answer = () => {};
+        for (const q of questions) {
+          const block = h('div', 'ask-q');
+          block.append(h('div', 'ask-title', q.question));
           const list = h('div', 'ask-options');
           list.setAttribute('role', q.multiSelect ? 'group' : 'radiogroup');
           list.setAttribute('aria-label', q.question);
           const set = new Set();
           picks.set(q.question, set);
-          const buttons = (q.options ?? []).map((o, i) => {
-            const b = h('button', '', o.description ? `${o.label} — ${o.description}` : o.label);
+          const other = document.createElement('input');
+          other.className = 'ask-other-text';
+          other.hidden = true;
+          other.placeholder = 'Type an answer';
+          other.setAttribute('aria-label', 'Your own answer');
+          const options = [
+            ...(q.options ?? []).map((o) => ({ label: o.label, description: o.description ?? '' })),
+            { label: 'Other…', description: '', other: true },
+          ];
+          const buttons = options.map((o, i) => {
+            const b = h('button', o.other ? 'ask-other' : '');
             b.type = 'button';
             b.setAttribute('role', q.multiSelect ? 'checkbox' : 'radio');
             b.setAttribute('aria-checked', 'false');
             b.tabIndex = i === 0 ? 0 : -1;
-            b.addEventListener('click', () => {
-              if (!q.multiSelect) {
-                set.clear();
-                for (const x of buttons) x.setAttribute('aria-checked', 'false');
+            b.append(h('kbd', '', String(i + 1)), h('b', '', o.label));
+            if (o.description) b.append(h('small', '', o.description));
+            return b;
+          });
+          const choose = (b, o) => {
+            if (!q.multiSelect) {
+              set.clear();
+              for (const x of buttons) x.setAttribute('aria-checked', 'false');
+            }
+            const on = b.getAttribute('aria-checked') !== 'true';
+            b.setAttribute('aria-checked', String(on));
+            if (o.other) {
+              other.hidden = !on;
+              set.delete(OTHER);
+              if (on) {
+                set.add(OTHER);
+                other.focus();
               }
-              const on = b.getAttribute('aria-checked') !== 'true';
-              if (on) set.add(o.label);
-              else set.delete(o.label);
-              b.setAttribute('aria-checked', String(on));
-            });
+              return;
+            }
+            if (on) set.add(o.label);
+            else set.delete(o.label);
+          };
+          resolveOther.push(() => {
+            if (!set.has(OTHER)) return;
+            set.delete(OTHER);
+            if (other.value.trim()) set.add(other.value.trim());
+          });
+          buttons.forEach((b, i) => {
+            const o = options[i];
+            b.addEventListener('click', () => choose(b, o));
             b.addEventListener('keydown', (e) => {
-              const idx = buttons.indexOf(b);
+              const digit = /^[1-9]$/.test(e.key) ? Number(e.key) - 1 : -1;
               if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
                 e.preventDefault();
-                const next = buttons[(idx + (e.key === 'ArrowDown' ? 1 : buttons.length - 1)) % buttons.length];
+                const next = buttons[(i + (e.key === 'ArrowDown' ? 1 : buttons.length - 1)) % buttons.length];
                 for (const x of buttons) x.tabIndex = -1;
                 next.tabIndex = 0;
                 next.focus();
               } else if (e.key === ' ') {
                 e.preventDefault();
-                b.click();
+                choose(b, o);
+              } else if (digit >= 0 && buttons[digit]) {
+                e.preventDefault();
+                choose(buttons[digit], options[digit]);
+                buttons[digit].focus();
               } else if (e.key === 'Enter') {
                 e.preventDefault();
-                if (!set.size) b.click();
-                submit(askResponse('question', event.input, picks));
+                if (!set.size) choose(b, o);
+                if (o.other && !other.value.trim()) return;
+                answer();
               }
             });
-            return b;
           });
-          list.append(...buttons);
-          card.append(list);
+          other.addEventListener('keydown', (e) => {
+            if (e.key === 'Enter') {
+              e.preventDefault();
+              answer();
+            }
+          });
+          list.append(...buttons, other);
+          block.append(list);
+          card.append(block);
         }
+        answer = () => {
+          for (const fold of resolveOther) fold();
+          submit(askResponse('question', event.input, picks));
+        };
         const actions = h('div', 'ask-actions');
-        const answer = h('button', 'answer', 'Answer');
-        answer.type = 'button';
-        answer.addEventListener('click', () => submit(askResponse('question', event.input, picks)));
-        actions.append(answer);
+        const answerButton = h('button', 'answer', 'Answer');
+        answerButton.type = 'button';
+        answerButton.addEventListener('click', () => answer());
+        actions.append(answerButton);
         card.append(actions);
       } else {
         card.append(h('div', 'ask-title', `Allow ${event.displayName || event.tool}?`));
