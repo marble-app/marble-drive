@@ -1069,6 +1069,19 @@
     }
   }
 
+  // ------------------------------------------------------------ prose questions
+
+  // The parser lives in runtime/choice-question.js so node can test it; this
+  // classic script loads it once, the first time a turn finishes.
+  let choiceModule = null;
+  const loadChoice = () => {
+    choiceModule ??= import('/runtime/choice-question.js').then((mod) => {
+      Object.assign(window.marbleAgentUI, { parseChoiceQuestion: mod.parseChoiceQuestion });
+      return mod;
+    }).catch(() => null);
+    return choiceModule;
+  };
+
   // ------------------------------------------------------------ tool runs
 
   const foldable = (node) => node?.classList?.contains('tool') && node.dataset.state === 'done';
@@ -1455,6 +1468,13 @@
 
     /* A run of finished calls folds to one line: how many, of what kind,
        touching what. The row still running stays out, under it. */
+    .choice-ask { display: grid; gap: 3px; margin: -4px 0 10px; padding: 8px; border: 1px solid var(--line); border-radius: 12px; background: var(--card); }
+    .choice-ask button { display: grid; grid-template-columns: 22px 1fr; column-gap: 8px; align-items: baseline; text-align: left; font: inherit; font-size: 12.5px; padding: 5px 8px; border: 1px solid transparent; border-radius: 8px; background: none; color: inherit; cursor: pointer; }
+    .choice-ask button:hover, .choice-ask button:focus-visible { background: var(--paper-2); outline: none; }
+    .choice-ask button[aria-checked="true"] { border-color: var(--accent-ink); background: color-mix(in srgb, var(--accent-ink) 10%, transparent); }
+    .choice-ask kbd { font: 11px/1.4 inherit; color: var(--faint); text-align: center; border: 1px solid var(--line); border-radius: 4px; }
+    .choice-ask b { font-weight: 500; }
+    .choice-ask .choice-send { display: inline-flex; justify-self: start; grid-template-columns: none; margin-top: 4px; padding: 4px 10px; border-color: var(--line); }
     .tool-group { display: flex; flex-direction: column; margin: 1px 0; }
     .tool-group-head {
       display: flex; align-items: baseline; gap: 8px; min-width: 0; width: 100%;
@@ -2715,6 +2735,11 @@
           this.dispatchEvent(new CustomEvent('conversation', { detail: { id }, bubbles: true, composed: true }));
         }
         await this.api.send(id, { prompt, ...context });
+        // A reply in the person's own words answers the question too.
+        for (const record of this.turns.values()) {
+          record.choice?.remove();
+          record.choice = null;
+        }
         this.input.value = '';
         this.clearAttachments();
         this.composerChips = this.composerChips.filter((chip) => chip.kind === 'model' || chip.kind === 'effort');
@@ -3433,12 +3458,97 @@
       if (this.live && this.live.turn === turn) {
         this.live.node.classList.remove('live');
         this.live.node.replaceChildren(renderText(text));
+        this.record(turn).lastText = { text, node: this.live.node };
         this.live = null;
         return;
       }
       const node = h('div', 'msg agent');
       node.append(renderText(text));
       this.append(turn, node);
+      this.record(turn).lastText = { text, node };
+    }
+
+    /** A finished turn whose last words were a question with lettered or
+     *  numbered options gets a picker under them. */
+    async offerChoices(turn) {
+      const record = this.turns.get(turn);
+      if (!record?.lastText?.node?.isConnected || record.choice) return;
+      const mod = await loadChoice();
+      const parsed = mod?.parseChoiceQuestion(record.lastText.text);
+      if (!parsed || !record.lastText.node.isConnected || record.choice) return;
+      record.choice = this.choicePicker(parsed, () => {
+        record.choice?.remove();
+        record.choice = null;
+      });
+      record.lastText.node.after(record.choice);
+    }
+
+    choicePicker({ question, options, multiHint }, done) {
+      const group = h('div', 'choice-ask');
+      group.setAttribute('role', 'group');
+      group.setAttribute('aria-label', question);
+      const chosen = new Set();
+      const buttons = options.map((o, i) => {
+        const b = h('button');
+        b.type = 'button';
+        b.setAttribute('role', multiHint ? 'checkbox' : 'radio');
+        b.setAttribute('aria-checked', 'false');
+        b.tabIndex = i === 0 ? 0 : -1;
+        b.append(h('kbd', '', o.key), h('b', '', o.label));
+        return b;
+      });
+      const toggle = (i) => {
+        const b = buttons[i];
+        if (!multiHint) {
+          chosen.clear();
+          for (const x of buttons) x.setAttribute('aria-checked', 'false');
+        }
+        const on = b.getAttribute('aria-checked') !== 'true';
+        b.setAttribute('aria-checked', String(on));
+        if (on) chosen.add(i);
+        else chosen.delete(i);
+      };
+      const send = async (fallback) => {
+        if (!chosen.size && fallback != null) toggle(fallback);
+        const picked = [...chosen].sort((a, b) => a - b).map((i) => options[i]);
+        if (!picked.length) return;
+        this.input.value = `${picked.map((o) => o.key).join(', ')} — ${picked.map((o) => o.label).join('; ')}`;
+        await this.submit();
+        if (!this.input.value) done();
+      };
+      buttons.forEach((b, i) => {
+        b.addEventListener('click', () => toggle(i));
+        b.addEventListener('dblclick', () => send(i));
+        b.addEventListener('keydown', (e) => {
+          const key = options.findIndex((o) => o.key.toLowerCase() === e.key.toLowerCase());
+          if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+            e.preventDefault();
+            const next = buttons[(i + (e.key === 'ArrowDown' ? 1 : buttons.length - 1)) % buttons.length];
+            for (const x of buttons) x.tabIndex = -1;
+            next.tabIndex = 0;
+            next.focus();
+          } else if (e.key === ' ') {
+            e.preventDefault();
+            toggle(i);
+          } else if (e.key === 'Enter') {
+            e.preventDefault();
+            send(i);
+          } else if (e.key === 'Escape') {
+            e.preventDefault();
+            chosen.clear();
+            for (const x of buttons) x.setAttribute('aria-checked', 'false');
+          } else if (e.key.length === 1 && key >= 0) {
+            e.preventDefault();
+            toggle(key);
+            buttons[key].focus();
+          }
+        });
+      });
+      const sendButton = h('button', 'choice-send', 'Send');
+      sendButton.type = 'button';
+      sendButton.addEventListener('click', () => send(null));
+      group.append(...buttons, sendButton);
+      return group;
     }
 
     endLive() {
@@ -3621,6 +3731,7 @@
         footer.append(restore);
       }
       if (this.running?.turn === turn) this.setRunning(null);
+      this.offerChoices(turn);
     }
 
     undone(turn, event) {

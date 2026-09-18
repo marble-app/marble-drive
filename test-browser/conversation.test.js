@@ -21,6 +21,7 @@ const SCRIPTS = {
     { call: 'apply_ops', args: { path: 'garden', note: 'unread', ops: [{ type: 'setText', id: 'p', text: 'x' }] } },
     { say: 'It was refused.' },
   ],
+  choice: [{ say: 'Two ways to lay this out. Which do you want?\n\nA) Side by side\nB) Stacked' }],
   tools: [
     { tool: 'Bash', input: { command: 'node --test test/agent-runner.test.js', description: 'Run the runner tests' } },
     { tool: 'Read', input: { file_path: '/Users/x/marble-drive/test-browser/harness.js' } },
@@ -1063,6 +1064,29 @@ test('a digit picks an option', async () => {
   assert.equal(await card.locator('[role="radio"]').nth(1).getAttribute('aria-checked'), 'true');
   await card.locator('button.answer').click();
   await view.locator('.msg.agent', { hasText: 'answered:allow:B' }).waitFor();
+});
+
+test('a question asked in prose gets a picker under it, and Enter sends the keys', async () => {
+  const { page, view } = await mount();
+  await sendFrom(view, 'script:choice');
+  await view.locator('.turn-footer[data-status="completed"]').waitFor();
+  const picker = view.locator('.choice-ask');
+  await picker.waitFor();
+  assert.equal(await picker.getAttribute('aria-label'), 'Two ways to lay this out. Which do you want?');
+  const options = picker.locator('[role="radio"]');
+  assert.equal(await options.count(), 2);
+  assert.equal(await options.nth(1).locator('kbd').textContent(), 'B');
+  await options.first().focus();
+  await options.first().press('ArrowDown');
+  await options.nth(1).press(' ');
+  const sent = page.evaluate(() => new Promise((resolve) => {
+    document.querySelector('marble-conversation').addEventListener('running', (e) => { if (e.detail.turn) resolve(); }, { once: true });
+  }));
+  await options.nth(1).press('Enter');
+  await sent;
+  await view.locator('.msg.me').nth(1).waitFor();
+  assert.match((await view.locator('.msg.me').nth(1).textContent()).trim(), /^B — Stacked$/);
+  await view.locator('.choice-ask').waitFor({ state: 'detached' });
 });
 
 test('a new conversation is started in the picked project, and the mast names it', async () => {
