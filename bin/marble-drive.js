@@ -10,6 +10,8 @@
 //   marble-drive agents providers    which agent CLIs are installed and signed in
 //   marble-drive agents try <id>     one real turn against a scratch drive
 //   marble-drive starters         what you can make
+//   marble-drive genui space <doc>       is this document an app space? every issue, or ok
+//   marble-drive genui decide <doc>      let Jev position it — --dry to look without writing
 //
 // Every one of these goes through the same store the host does, which is the
 // point: a command and a request are two callers of one seam, not two
@@ -74,8 +76,11 @@ switch (command) {
   case 'agents':
     await agentsCommand();
     break;
+  case 'genui':
+    await genuiCommand();
+    break;
   default:
-    fail(`no command "${command}" — there is: serve, new, icon, weigh, backup, remote, agents, starters`);
+    fail(`no command "${command}" — there is: serve, new, icon, weigh, backup, remote, agents, starters, genui`);
 }
 
 // ---------------------------------------------------------------------- serve
@@ -346,4 +351,73 @@ async function agentsCommand() {
   }
 
   fail(`no "agents ${sub ?? ''}" — there is: providers, try`);
+}
+
+// ---------------------------------------------------------------------- genui
+
+async function genuiCommand() {
+  const [sub, docArg] = args;
+  if (!sub || !['space', 'decide'].includes(sub)) fail('genui needs: space <doc> | decide <doc> [--dry] [--stop=N] [--context=JSON] [--request=…]');
+  if (!docArg) fail(`genui ${sub} needs a document path inside the drive, like "Research/TypeSafe AI/Spaces/49ers"`);
+  const { loadAtlas } = await import('../server/genui/atlas.js');
+  const { extractSpace, validateSpace } = await import('../server/genui/space.js');
+  const { decideDocument } = await import('../server/genui/decide.js');
+
+  const docPath = parsePath(docArg);
+  const atlas = await loadAtlas(config.genuiAtlas).catch((err) => fail(`could not read the Atlas at ${config.genuiAtlas}: ${err.message}`));
+  const store = createStore({ root: config.root });
+  await store.ready();
+  const source = await store.read(docPath);
+  if (source === null) fail(`no document "${docPath}" in ${config.root}`);
+
+  if (sub === 'space') {
+    const validation = validateSpace(source, atlas);
+    const space = extractSpace(source);
+    for (const instance of space.instances) {
+      console.log(`${instance.pattern}#${instance.name}  (${instance.decisions.length} decisions)`);
+      for (const d of instance.decisions) console.log(`  ${d.attr}=${d.current}   [${d.options.map((o) => o.slug).join(' | ')}]`);
+    }
+    if (validation.ok) console.log('ok');
+    else {
+      for (const issue of validation.issues) console.error(`${issue.kind}  ${issue.instance ?? '-'}.${issue.key ?? '-'}  ${issue.message}`);
+      process.exit(1);
+    }
+    return;
+  }
+
+  if (!config.typesafeApiKey) fail('TYPESAFE_API_KEY is not set. Put it in .env.local.');
+  let context = {};
+  if (flags.context) {
+    try {
+      context = JSON.parse(String(flags.context));
+    } catch (err) {
+      fail(`--context must be JSON: ${err.message}`);
+    }
+  }
+  const stop = flags.stop !== undefined ? Number(flags.stop) : 0.75;
+  const result = await decideDocument({
+    source,
+    atlas,
+    apiKey: config.typesafeApiKey,
+    context,
+    stop,
+    request: typeof flags.request === 'string' ? flags.request : null,
+  }).catch((err) => {
+    if (err.issues) for (const issue of err.issues) console.error(`${issue.kind}  ${issue.instance ?? '-'}.${issue.key ?? '-'}  ${issue.message}`);
+    fail(err.message);
+  });
+  for (const d of result.decisions) {
+    const conf = d.confidence === null ? '  -  ' : d.confidence.toFixed(2);
+    const move = d.choice && d.choice !== d.current ? `→ ${d.choice}` : '';
+    console.log(`${d.applied ? '→' : ' '} ${conf}  ${d.id.padEnd(32)} ${d.current} ${move}  ${d.reason}`);
+  }
+  console.log(`${result.ops.length} change(s) in ${result.elapsedMs} ms${flags.dry ? ' (dry — nothing written)' : ''}`);
+  if (flags.dry || !result.ops.length) return;
+  const drive = await createDrive(config, { log: { log() {}, error: console.error } });
+  try {
+    const written = await drive.writeOps(docPath, result.ops, { client: 'genui-cli' });
+    console.log(`wrote ${written.applied} op(s) to ${docPath}`);
+  } finally {
+    await drive.close();
+  }
 }
