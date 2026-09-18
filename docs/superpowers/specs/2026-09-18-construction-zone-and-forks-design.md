@@ -75,6 +75,10 @@ Implementation:
   - A person's write, or an unclaimed outside write: no `since` — the other side is an agent whose set is already scoped to its turn (it is forgotten at turn end), or another person, where the old rule stands.
 - Socket close and `forgetWriter` unchanged.
 
+**(c) An undo neither forks nor claims.** Found while implementing (b): an undo writes as `agent-undo:<conv>` *after* its turn has ended, so `forgetWriter` never clears it — its claim on every element it restored lived forever, and forked the person's next edit to any of them. It also went through the fork check itself, where each of its steps is already guarded by the hash the agent left (`server/agent/undo.js`: an element edited since is skipped, not forked). So `applyOps` treats `agent-undo:` clients as a retraction: no `mergeOps`, no `note()`.
+
+A test that had passed by accident — `two undos of the same turn at once` in `test/agent-http.test.js` — surfaced this. Its heading was already `Backlog` when it ran, so the agent's rename changed nothing and recorded no undo step; the stale undo claim then forced a fork whose text happened to satisfy the assertion. The test now resets its document first.
+
 **Why not a TTL.** A time-to-live makes a fork depend on how fast the person types; the turn boundary is the thing that actually defines "could the agent have seen this".
 
 **Why writes are still remembered past the turn.** Two turns can overlap on one document (two conversations). A person's edit during turn A is also concurrent with turn B if B started before it. The timestamp handles both; the set itself is only trimmed by socket close, as today.

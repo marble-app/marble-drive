@@ -20,9 +20,10 @@ import { fileURLToPath } from 'node:url';
 
 import { agentsAllowed, createAgents } from './agent/index.js';
 import { backupNow, scheduleBackups } from './backup.js';
-import { bytesOf, chooseProvider, createTouched, enginePath, examine, guardOps, idsOfOps, mergeOps, mergeWrite, shaOf } from './engine.js';
+import { bytesOf, chooseProvider, enginePath, examine, guardOps, idsOfOps, mergeOps, mergeWrite, shaOf } from './engine.js';
 import { dataUri as iconUri, svg as iconSvg } from './favicon.js';
 import { blobsIn, extract, flatten } from './flatten.js';
+import { createTouched } from './touched.js';
 import { createGate } from './gate.js';
 import { escapeHtml, html, json, readBody, readJson, send, text } from './http.js';
 import { createIntents } from './intent-routes.js';
@@ -126,6 +127,16 @@ export async function createDrive(config, { log = console, agentProviders = null
   const pendingWrites = createPendingWrites();
   const sessionTouched = createTouched();
 
+  // A person's edits are concurrent with an agent's write only if they landed
+  // after that agent's turn began: the turn read the document as its base,
+  // and anything before the base is history it has already seen.
+  const sinceFor = (client) => {
+    const conv = typeof client === 'string' && client.startsWith('agent:') ? client.slice('agent:'.length) : null;
+    if (!conv) return undefined;
+    const turn = agents?.running?.().find((t) => t.conversationId === conv);
+    return turn?.startedAt;
+  };
+
   const enqueue = (docPath, task) => {
     const next = (queues.get(docPath) ?? Promise.resolve()).then(task, task);
     queues.set(docPath, next.catch(() => {}));
@@ -191,8 +202,14 @@ export async function createDrive(config, { log = console, agentProviders = null
         }
       };
 
+      // An undo is a retraction, not a write of its own: each of its steps runs
+      // only if the element is still what the agent left (undo.js), which is
+      // the conflict check it needs. So it neither forks nor claims — and it
+      // happens after the turn that would have forgotten its claim has ended.
+      const isUndo = typeof client === 'string' && client.startsWith('agent-undo:');
+
       const next = (() => {
-        const others = sessionTouched.except(docPath, client);
+        const others = isUndo ? [] : sessionTouched.except(docPath, client, { since: sinceFor(client) });
         if (others.length) {
           const merged = mergeOps(source, ops, {
             touchedIds: others,
@@ -212,7 +229,7 @@ export async function createDrive(config, { log = console, agentProviders = null
       pendingWrites.mark(docPath, shaOf(next.html));
       const written = await store.write(docPath, next.html, { label: 'ops', ops: next.ops });
       await oplog.append(docPath, next.ops, { client: client ?? 'anon' });
-      sessionTouched.note(docPath, client, idsOfOps(ops));
+      if (!isUndo) sessionTouched.note(docPath, client, idsOfOps(ops));
       settle(source, next.html);
       return { applied: next.ops.length, ops: next.ops, forks: next.forks, ...written };
     });
@@ -407,7 +424,8 @@ export async function createDrive(config, { log = console, agentProviders = null
         const client = url.searchParams.get('client');
         const body = JSON.parse((await readBody(req, config.maxBodyBytes)).toString('utf8'));
         const ids = Array.isArray(body?.ids) ? body.ids.map(String) : [];
-        sessionTouched.note(docPath, client, ids);
+        // Where a person is looking is not a claim on it. The frame is for the
+        // wash other tabs draw; conflicts come from writes (see applyOps).
         channels.toPresence(docPath, { client, ids }, { except: client });
         return json(res, 200, { ok: true });
       }
@@ -880,7 +898,9 @@ button{background:#738698;color:#fafaf7;border-color:#738698;cursor:pointer}p{co
       // counted, an agent that inserted a block by op and then rewrote it
       // with its file tools forked against itself.
       const merged = mergeWrite(prior.source, current, {
-        touchedIds: conv ? sessionTouched.except(docPath, `agent:${conv}`) : sessionTouched.all(docPath),
+        touchedIds: conv
+          ? sessionTouched.except(docPath, `agent:${conv}`, { since: sinceFor(`agent:${conv}`) })
+          : sessionTouched.all(docPath),
         agent: conv ? `agent:${conv}` : 'agent',
       });
       if (merged.source !== current) {

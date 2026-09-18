@@ -38,6 +38,19 @@ const SCRIPTS = {
     { call: 'apply_ops', args: { path: 'garden', note: 'rename', ops: [{ type: 'setText', id: 'h', text: 'Backlog' }] } },
     { say: 'Renamed the heading.' },
   ],
+  // The two timing tests below work in their own document so the garden
+  // stays as the undo tests expect it.
+  orchard: [
+    { call: 'read_document', args: { path: 'orchard' } },
+    { call: 'apply_ops', args: { path: 'orchard', note: 'rename', ops: [{ type: 'setText', id: 'h', text: 'Backlog' }] } },
+    { say: 'Renamed the heading.' },
+  ],
+  orchardLate: [
+    { sleep: 600 },
+    { call: 'read_document', args: { path: 'orchard' } },
+    { call: 'apply_ops', args: { path: 'orchard', note: 'rename', ops: [{ type: 'setText', id: 'h', text: 'Backlog' }] } },
+    { say: 'Renamed late.' },
+  ],
   wait: [{ sleep: 2500 }, { say: 'waited' }],
   hold: [{ silent: 20_000 }],
   permission: [{ ask: { tool: 'Bash', input: { command: 'rm -rf build' } } }, { say: 'after' }],
@@ -196,6 +209,47 @@ test('an agent edits a document through the bridge, and the open tab hears it', 
   });
   assert.ok(presence.some((p) => p.phase === 'writing' && p.ids?.includes('h')), 'apply_ops tapes the heading');
   assert.ok(presence.some((p) => p.phase === 'reading' || p.phase === 'working'), 'the turn announced itself before the write');
+});
+
+const freshOrchard = () => drive.store.write('orchard', SOURCE.replace('Garden', 'Orchard'), { label: 'test' });
+
+const personWrites = (ops, client = 'you') =>
+  fetch(`${base}/ops?app=orchard&client=${client}`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(ops),
+  });
+
+test('an edit you made before the turn began does not fork the agent’s rewrite', async () => {
+  await freshOrchard();
+  assert.equal((await personWrites([{ type: 'setText', id: 'h', text: 'Mine' }])).status, 200);
+  await new Promise((resolve) => setTimeout(resolve, 20));
+
+  const run = await start('script:orchard\nRename the heading', 'orchard');
+  const { turn } = await finished(run.conversationId, run.turnId);
+  assert.equal(turn.status, 'completed');
+
+  const after = await drive.store.read('orchard');
+  assert.doesNotMatch(after, /<marble-alt/, 'the agent read your version before writing; that is not a conflict');
+  assert.match(after, />Backlog</);
+});
+
+test('an edit you made while the turn ran forks the agent’s rewrite', async () => {
+  await freshOrchard();
+  const run = await start('script:orchardLate\nRename the heading', 'orchard');
+  await until(async () => {
+    const { body } = await api('GET', `/agent/conversations/${run.conversationId}`);
+    return body.turns.find((t) => t.id === run.turnId)?.status === 'running' ? true : null;
+  });
+  assert.equal((await personWrites([{ type: 'setText', id: 'h', text: 'Mine' }])).status, 200);
+
+  const { turn } = await finished(run.conversationId, run.turnId);
+  assert.equal(turn.status, 'completed');
+
+  const after = await drive.store.read('orchard');
+  assert.match(after, /<marble-alt data-marble-id="h"/, 'both of you changed it during the turn');
+  assert.match(after, /Mine/);
+  assert.match(after, /Backlog/);
 });
 
 test('the conversation stream replays what happened and follows what happens next', async () => {
@@ -489,6 +543,9 @@ test('an ungated host answers the agent routes only to a page served as localhos
 });
 
 test('two undos of the same turn at once: one runs, the other is refused', async () => {
+  // An earlier test leaves the heading at Backlog; a rename to Backlog then
+  // changes nothing, records no undo step, and there is nothing to revert.
+  await drive.store.write('garden', SOURCE, { label: 'test' });
   const again = await start('script:edit\nRename the heading');
   assert.equal((await finished(again.conversationId, again.turnId)).turn.status, 'completed');
   const [a, b] = await Promise.all([

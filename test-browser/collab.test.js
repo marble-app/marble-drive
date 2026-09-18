@@ -52,7 +52,7 @@ const host = await startDrive({
 });
 test.after(() => host.close());
 
-test('a conflict fork shows You, Agent, Keep this, and Merge', async () => {
+test('a conflict fork says why it is there, and shows You, Agent, Keep this, and Ask an agent to combine', async () => {
   await host.reset();
   const { page, errors } = await host.newPage();
   await page.goto(`${host.base}/a/forked`);
@@ -61,11 +61,34 @@ test('a conflict fork shows You, Agent, Keep this, and Merge', async () => {
   await bar.waitFor();
 
   const labels = await bar.locator('button').allTextContents();
-  assert.deepEqual(labels.map((t) => t.trim()), ['You', 'Agent', 'Keep this', 'Merge']);
+  assert.deepEqual(labels.map((t) => t.trim()), ['You', 'Agent', 'Keep this', 'Ask an agent to combine']);
+  assert.equal(await bar.locator('.marble-fork-why').textContent(), 'You and the agent both changed this.');
   assert.equal(await bar.getByRole('button', { name: 'Approve' }).count(), 0);
   assert.equal(await bar.getByRole('button', { name: 'Reject' }).count(), 0);
   assert.equal(await page.locator('h1.marble-alt-shown').textContent(), 'Yours');
   assert.deepEqual(errors.filter((message) => !/favicon/.test(message)), []);
+});
+
+test('Ask an agent to combine hands both versions to the agent drawer', async () => {
+  await host.reset();
+  const { page } = await host.newPage();
+  await page.goto(`${host.base}/a/forked`);
+  await page.waitForFunction(() => document.documentElement.classList.contains('marble-collab-host'));
+  await page.locator('marble-alt > .marble-fork').waitFor();
+  await page.evaluate(() => {
+    window.__agent = { selected: null, aimed: null, opened: 0 };
+    window.marble.agent = {
+      select: (ids) => { window.__agent.selected = ids; },
+      aim: (app) => { window.__agent.aimed = app; },
+      current: () => null,
+      send: () => {},
+      open: () => { window.__agent.opened += 1; },
+    };
+  });
+  await page.getByRole('button', { name: 'Ask an agent to combine both versions' }).click();
+  const seen = await page.evaluate(() => window.__agent);
+  assert.deepEqual(seen.selected, ['hy', 'ha']);
+  assert.equal(seen.opened, 1);
 });
 
 test('Keep this commits the version that is showing', async () => {
@@ -178,7 +201,7 @@ test('agent presence tapes off the region it is working on', async () => {
   });
   const zone = page.locator('.marble-zone');
   assert.equal(await zone.count(), 1);
-  assert.match(await zone.innerText(), /Working/);
+  assert.match(await zone.innerText(), /Agent · working/);
   assert.equal(
     await page.locator('[data-marble-id="p"]').evaluate((el) => el.classList.contains('marble-presence')),
     false,
@@ -200,11 +223,11 @@ test('the construction label uses the apply_ops note, and Hide puts it away', as
   await page.waitForFunction(() => document.documentElement.classList.contains('marble-collab-host'));
   await page.evaluate(() => {
     document.dispatchEvent(new CustomEvent('marble:presence', {
-      detail: { client: 'agent:c1', ids: ['p'], phase: 'writing', note: 'rename the heading' },
+      detail: { client: 'agent:c1', ids: ['p'], phase: 'writing', note: 'Rename the heading.' },
     }));
   });
   const zone = page.locator('.marble-zone');
-  assert.match(await zone.innerText(), /rename the heading/);
+  assert.match(await zone.innerText(), /Agent · rename the heading(?!\.)/);
 
   await page.getByRole('button', { name: 'Hide' }).click();
   assert.equal(await page.locator('.marble-zone').count(), 0);
@@ -284,5 +307,22 @@ test('agent work with no ids is a page banner, not a box around the document', a
     }));
   });
   assert.equal(await page.locator('.marble-zone-page').count(), 1);
-  assert.match(await page.locator('.marble-zone-page').innerText(), /Working/);
+  assert.match(await page.locator('.marble-zone-page').innerText(), /Agent · working/);
+});
+
+test('the construction label keeps an all-caps first word and names the phase without a note', async () => {
+  await host.reset();
+  const { page } = await host.newPage();
+  await page.goto(`${host.base}/a/forked`);
+  await page.waitForFunction(() => document.documentElement.classList.contains('marble-collab-host'));
+  const labelFor = async (detail) => {
+    await page.evaluate((d) => {
+      document.dispatchEvent(new CustomEvent('marble:presence', { detail: d }));
+    }, { client: 'agent:c1', ids: ['p'], ...detail });
+    return (await page.locator('.marble-zone-label').innerText()).replace(/\s*Hide\s*$/, '').trim();
+  };
+  assert.equal(await labelFor({ phase: 'writing', note: 'PDF export gets a footer.' }), 'Agent · PDF export gets a footer');
+  assert.equal(await labelFor({ phase: 'reading' }), 'Agent · reading');
+  assert.equal(await labelFor({ phase: 'writing' }), 'Agent · writing');
+  assert.equal(await labelFor({ phase: 'working' }), 'Agent · working');
 });

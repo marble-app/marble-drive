@@ -57,6 +57,22 @@ POST /agent/conversations/:id/turns {prompt, context:{target, viewing, selection
   agent, and says how much it kept. A document rewritten with file tools is
   restored to its pre-turn snapshot.
 
+## While an agent works
+
+A corner-marked frame on the page is where the agent is, and its label says
+what it is doing — `Agent · reading`, or the note it gave its edit
+(`Agent · rename the heading`). It follows the element as the page reflows,
+and *Hide* puts it away for the session (*Show work* brings it back).
+
+Being on the page is not a claim on it. Where your caret is has no bearing on
+what the agent may change; only an edit you made **after its turn began**
+counts as a conflict with an edit of the same element by the agent. When that
+happens, nothing is overwritten: the element becomes two versions with a bar
+above — *You* and *Agent* to look at each, *Keep this* to settle on the one
+showing, and *Ask an agent to combine* to send both to an agent that writes a
+third. A turn's ending forgets what it touched, and an undo claims nothing it
+restores, so an agent's claims never outlive its work.
+
 ## What a full agent can do
 
 Every provider runs at capability `full` unless it declares `documents` or
