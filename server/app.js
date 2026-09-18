@@ -94,6 +94,7 @@ const RUNTIME = {
   'agent.js': () => path.join(REPO, 'runtime', 'agent.js'),
   'agent-ui.js': () => path.join(REPO, 'runtime', 'agent-ui.js'),
   'agent-folders.js': () => path.join(REPO, 'runtime', 'agent-folders.js'),
+  'agent-phone.js': () => path.join(REPO, 'runtime', 'agent-phone.js'),
   'choice-question.js': () => path.join(REPO, 'runtime', 'choice-question.js'),
   'agent-usage-charts.js': () => path.join(REPO, 'runtime', 'agent-usage-charts.js'),
   'collab.js': () => path.join(REPO, 'runtime', 'collab.js'),
@@ -173,6 +174,7 @@ export async function createDrive(config, { log = console, agentProviders = null
       // Agents.mrbl still needs <marble-conversation> without a second launcher.
       tags += `\n<script src="/runtime/agent-ui.js" data-marble-transient></script>`;
       tags += `\n<script src="/runtime/agent-folders.js" data-marble-transient></script>`;
+      tags += `\n<script src="/runtime/agent-phone.js" data-marble-transient></script>`;
       tags += `\n<script src="/runtime/agent-usage-charts.js" data-marble-transient></script>`;
     }
     tags += `\n<script src="/runtime/collab.js" data-marble-transient></script>`;

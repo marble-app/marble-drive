@@ -441,7 +441,7 @@ test('the open conversation id is page-only and survives a reconcile', async () 
   assert.equal(await view.getAttribute('conversation'), id);
 });
 
-test('V cycles List, Board, Folders, Focus and does not file the view', async () => {
+test('V cycles List, Board, Folders, Focus, Deck and does not file the view', async () => {
   const { page } = await openAgents();
   await page.keyboard.press('v');
   await page.waitForFunction(() => document.body.getAttribute('data-view') === 'board');
@@ -449,6 +449,8 @@ test('V cycles List, Board, Folders, Focus and does not file the view', async ()
   await page.waitForFunction(() => document.body.getAttribute('data-view') === 'folders');
   await page.keyboard.press('v');
   await page.waitForFunction(() => document.body.getAttribute('data-view') === 'focus');
+  await page.keyboard.press('v');
+  await page.waitForFunction(() => document.body.getAttribute('data-view') === 'deck');
   await page.keyboard.press('v');
   await page.waitForFunction(() => document.body.getAttribute('data-view') === 'library');
   const filed = await page.evaluate(() => window.marble.source.outer(document.body));

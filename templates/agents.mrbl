@@ -118,7 +118,8 @@ __ICON__
   body[data-view="library"] .views [data-view="library"],
   body[data-view="board"] .views [data-view="board"],
   body[data-view="folders"] .views [data-view="folders"],
-  body[data-view="focus"] .views [data-view="focus"] {
+  body[data-view="focus"] .views [data-view="focus"],
+  body[data-view="deck"] .views [data-view="deck"] {
     color: var(--ink); background: var(--card); box-shadow: var(--shadow);
   }
   /* The view switch slides its pill, as the composer's segmented control does:
@@ -706,6 +707,11 @@ __ICON__
   body[data-view="folders"] .library .pane { grid-column: 2; }
   body[data-view="folders"] .folder-rail { display: block; grid-column: 1; pointer-events: auto; }
   body[data-view="focus"] .focus { display: block; }
+  /* Deck is the fifth view: the same rows, partitioned by what wants you. */
+  body[data-view="deck"] .library, body[data-view="deck"] .board,
+  body[data-view="deck"] .folders, body[data-view="deck"] .focus { display: none; }
+  body:not([data-view="deck"]) .deck { display: none; }
+  body[data-view="deck"] .deck { display: block; overflow-y: auto; }
   /* A part that is leaving stays on screen where it was, out of the flow, for as
      long as it takes to fade — then the layout it no longer belongs to
      forgets it. */
@@ -1216,6 +1222,7 @@ __ICON__
       <button type="button" data-view="board" aria-pressed="false" data-marble-id="__ID__">Board</button>
       <button type="button" data-view="folders" aria-pressed="false" data-marble-id="__ID__">Folders</button>
       <button type="button" data-view="focus" aria-pressed="false" data-marble-id="__ID__">Focus</button>
+      <button type="button" data-view="deck" aria-pressed="false" data-marble-id="__ID__">Deck</button>
     </div>
   </div>
   <div class="filterbox" data-marble-id="__ID__">
@@ -1279,6 +1286,27 @@ __ICON__
   </section>
 </div>
 
+<!-- Deck: the same conversations, partitioned by how much they want you.
+     Bands are a projection of what the summary stream already says. -->
+<div class="deck" data-marble-id="__ID__">
+  <section class="band" data-band="asks" data-marble-id="__ID__">
+    <h2 class="band-head" data-marble-id="__ID__"><button type="button" class="band-toggle" aria-expanded="true" data-marble-id="__ID__">Needs you<span class="band-count" data-marble-transient></span></button></h2>
+    <div class="band-body asks-rail" data-marble-transient></div>
+  </section>
+  <section class="band" data-band="running" data-marble-id="__ID__">
+    <h2 class="band-head" data-marble-id="__ID__"><button type="button" class="band-toggle" aria-expanded="true" data-marble-id="__ID__">Running<span class="band-count" data-marble-transient></span></button></h2>
+    <div class="band-body" role="list" data-marble-transient></div>
+  </section>
+  <section class="band" data-band="review" data-marble-id="__ID__">
+    <h2 class="band-head" data-marble-id="__ID__"><button type="button" class="band-toggle" aria-expanded="true" data-marble-id="__ID__">Review<span class="band-count" data-marble-transient></span></button></h2>
+    <div class="band-body" role="list" data-marble-transient></div>
+  </section>
+  <section class="band" data-band="idle" data-collapsed data-marble-id="__ID__">
+    <h2 class="band-head" data-marble-id="__ID__"><button type="button" class="band-toggle" aria-expanded="false" data-marble-id="__ID__">Idle<span class="band-count" data-marble-transient></span></button></h2>
+    <div class="band-body" role="list" data-marble-transient></div>
+  </section>
+</div>
+
 <script>
   // The Agents library. Rows, the open id, the filter and the search are the
   // page's — never ops — so browsing does not rewrite this file. View and the
@@ -1300,11 +1328,14 @@ __ICON__
       } catch { /* private browsing — the page still works; it just forgets */ }
     };
 
-    const VIEW_ORDER = ['library', 'board', 'folders', 'focus'];
+    const VIEW_ORDER = ['library', 'board', 'folders', 'focus', 'deck'];
 
     const restoreView = () => {
       const savedView = recalled(VIEW_KEY);
       if (VIEW_ORDER.includes(savedView)) document.body.setAttribute('data-view', savedView);
+      // A phone with no stored view opens on Deck: what wants you, not where
+      // things live. A stored preference is honoured at any width.
+      else if (matchMedia('(max-width: 719px)').matches) document.body.setAttribute('data-view', 'deck');
       deriveView();
     };
 
@@ -1327,6 +1358,9 @@ __ICON__
     const foldersEl = $('.folders');
     const folderRail = $('.folder-rail');
     const focusEl = $('.focus');
+    const deckEl = $('.deck');
+    let placeInDeck = () => {};
+    let paintDeck = () => {};
     const convo = $('marble-conversation');
     const pane = $('.pane');
     const search = $('input.search');
@@ -1339,6 +1373,11 @@ __ICON__
     const filterFoot = $('.filter-foot');
     const reduceMotion = matchMedia('(prefers-reduced-motion: reduce)');
     const narrowView = matchMedia('(max-width: 719px)');
+    // One flag for the scripts that branch on the phone; the stylesheet uses
+    // the same query directly.
+    const syncPhone = () => document.body.toggleAttribute('data-phone', narrowView.matches);
+    syncPhone();
+    narrowView.addEventListener('change', syncPhone);
     const FLIP_MS = 420;
     const FLIP_EASE = 'ease-out';
     const STAGGER_MS = 18;
@@ -3753,6 +3792,10 @@ __ICON__
     const place = (el) => {
       const summary = summaries.get(el.dataset.id);
       const view = document.body.getAttribute('data-view') || 'library';
+      if (view === 'deck') {
+        placeInDeck(el, summary);
+        return;
+      }
       if (view === 'board') {
         if (summary?.archived) {
           el.remove();
@@ -3794,6 +3837,7 @@ __ICON__
       if (view === 'board') return boardEl;
       if (view === 'folders') return foldersEl;
       if (view === 'focus') return focusEl;
+      if (view === 'deck') return deckEl;
       return libraryEl;
     };
 
@@ -5294,6 +5338,7 @@ __ICON__
         if (next === 'library') closeBoardPanel();
         placeAll();
         paintFocus();
+        paintDeck();
         if (next === 'focus') startFocusDecay();
         else stopFocusDecay();
       };
