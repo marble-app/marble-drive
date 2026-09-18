@@ -13,6 +13,7 @@ const SCRIPTS = {
     { say: 'Renamed the heading.' },
   ],
   permission: [{ ask: { tool: 'Bash', input: { command: 'ls' } } }, { say: 'after' }],
+  answer: [{ say: 'Just an answer.' }],
 };
 
 const AGENTS_TEMPLATE = path.join(path.dirname(fileURLToPath(import.meta.url)), '..', 'templates', 'agents.mrbl');
@@ -810,4 +811,60 @@ test('stateOf is one vocabulary: waiting, working, failed, unseen, idle', async 
   });
   assert.deepEqual(states, ['waiting', 'working', 'working', 'failed', 'failed', 'unseen', 'idle', 'idle']);
   assert.match(await page.evaluate(() => window.marbleAgentUI.STATE_CSS), /\[data-state="waiting"\] \.dot/);
+});
+
+test('an answered turn sits in Needs review until it is opened', async () => {
+  const { page } = await openAgents();
+  const id = await page.evaluate(async () => {
+    const agent = window.marble.agent;
+    const id = await agent.start({ provider: 'fake' });
+    await agent.send(id, { prompt: 'script:answer', target: 'garden', viewing: 'Agents', selection: [] });
+    return id;
+  });
+  await page.locator(`.conv[data-id="${id}"][data-status="review"]`).waitFor();
+  assert.equal(await page.locator(`.conv[data-id="${id}"]`).getAttribute('data-state'), 'unseen');
+  await page.keyboard.press('v');
+  await page.locator(`.column[data-col="review"] .conv[data-id="${id}"]`).waitFor();
+  await page.locator(`.column .conv[data-id="${id}"]`).click();
+  await page.locator(`.conv[data-id="${id}"][data-status="completed"]`).waitFor();
+  assert.equal(await page.locator(`.conv[data-id="${id}"]`).getAttribute('data-state'), 'idle');
+});
+
+test('a conversation waiting on the person sits first in Needs review, marked waiting', async () => {
+  const { page } = await openAgents();
+  const ids = await page.evaluate(async () => {
+    const agent = window.marble.agent;
+    const done = await agent.start({ provider: 'fake' });
+    await agent.send(done, { prompt: 'script:answer', target: 'garden', viewing: 'Agents', selection: [] });
+    const asking = await agent.start({ provider: 'fake' });
+    await agent.send(asking, { prompt: 'script:permission', target: 'garden', viewing: 'Agents', selection: [] });
+    return { done, asking };
+  });
+  await page.locator(`.conv[data-id="${ids.asking}"][data-state="waiting"]`).waitFor();
+  await page.locator(`.conv[data-id="${ids.done}"][data-state="unseen"]`).waitFor();
+  await page.keyboard.press('v');
+  await page.waitForFunction(() => document.body.getAttribute('data-view') === 'board');
+  const order = await page.evaluate(() => [...document.querySelectorAll('.column[data-col="review"] > .conv:not([hidden])')].map((el) => el.dataset.id));
+  assert.equal(order[0], ids.asking, 'waiting first');
+  assert.ok(order.includes(ids.done));
+  assert.equal(await page.locator(`.column[data-col="running"] .conv[data-id="${ids.asking}"]`).count(), 0);
+});
+
+test('a turn that finishes while its pane is focused is already seen', async () => {
+  const { page } = await openAgents();
+  const id = await page.evaluate(async () => {
+    const id = await window.marble.agent.start({ provider: 'fake' });
+    await window.marble.agent.update(id, { title: 'watched' });
+    return id;
+  });
+  await page.locator(`.conv[data-id="${id}"]`).click();
+  await page.locator(`.pane marble-conversation[conversation="${id}"]`).waitFor();
+  await page.evaluate((cid) => window.marble.agent.send(cid, { prompt: 'script:answer', target: 'garden', viewing: 'Agents', selection: [] }), id);
+  // waitForFunction takes an async predicate's Promise as truthy, so poll here.
+  for (let n = 0; n < 200; n += 1) {
+    if (await page.evaluate(async (cid) => Boolean((await window.marble.agent.conversation(cid)).meta.lastFinishedAt), id)) break;
+    await page.waitForTimeout(25);
+  }
+  await page.waitForTimeout(400);
+  assert.equal(await page.locator(`.conv[data-id="${id}"]`).getAttribute('data-status'), 'completed');
 });
