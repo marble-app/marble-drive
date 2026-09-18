@@ -113,3 +113,28 @@ test('Deck: running, review and idle rows land in their bands with counts', asyn
   assert.equal((await page.locator('[data-band="running"] .band-count').textContent()).trim(), '1');
   assert.equal(await page.evaluate(() => document.querySelector('[data-band="idle"]').hasAttribute('data-collapsed')), true);
 });
+
+test('a REVIEW row swiped right is marked reviewed; swiped left it reveals Undo and does not undo', async () => {
+  const { page } = await openAgents();
+  const id = await page.evaluate(async () => window.marble.agent.start({ provider: 'fake' }));
+  await host.drive.agents.store.updateConversation(id, { lastOutcome: 'changes', lastFinishedAt: Date.now(), activity: 'done' });
+  await page.reload();
+  const row = page.locator(`[data-band="review"] .conv[data-id="${id}"]`);
+  await row.waitFor();
+  const box = await row.boundingBox();
+  const y = box.y + box.height / 2;
+  // Left: reveal only.
+  await page.mouse.move(box.x + 300, y);
+  await page.mouse.down();
+  for (let x = 300; x > 140; x -= 20) await page.mouse.move(box.x + x, y);
+  await page.mouse.up();
+  await page.locator(`.conv[data-id="${id}"] .swipe-undo`).waitFor({ state: 'visible' });
+  assert.equal(await page.evaluate((id) => document.querySelector(`.conv[data-id="${id}"]`).closest('.band').dataset.band, id), 'review');
+  // Right: reviewed.
+  await page.mouse.move(box.x + 40, y);
+  await page.mouse.down();
+  for (let x = 40; x < 260; x += 20) await page.mouse.move(box.x + x, y);
+  await page.mouse.up();
+  // Idle starts collapsed, so the row is attached there, not shown.
+  await page.locator(`[data-band="idle"] .conv[data-id="${id}"]`).waitFor({ state: 'attached' });
+});

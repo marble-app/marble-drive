@@ -714,6 +714,7 @@ test('toggling twice during FLIP keeps one node on the library', async () => {
   await page.waitForFunction(() => document.body.getAttribute('data-view') === 'folders');
   await page.keyboard.press('v');
   await page.keyboard.press('v');
+  await page.keyboard.press('v');
   await page.waitForFunction(() => document.body.getAttribute('data-view') === 'library');
   await page.waitForFunction((cid) => {
     const el = document.querySelector(`.conv[data-id="${cid}"]`);
@@ -739,6 +740,7 @@ test('toggling twice during a crossfade does not stick opacity', async () => {
   await page.keyboard.press('v');
   await page.keyboard.press('v');
   await page.waitForFunction(() => document.body.getAttribute('data-view') === 'folders');
+  await page.keyboard.press('v');
   await page.keyboard.press('v');
   await page.keyboard.press('v');
   await page.waitForFunction(() => document.body.getAttribute('data-view') === 'library');
@@ -774,6 +776,10 @@ test('opening the board panel does not clone the conversation on reconcile', asy
 
 test('the board panel does not overflow a narrow viewport', async () => {
   const { page } = await openAgents({ viewport: { width: 390, height: 800 } });
+  // A phone opens on Deck; this test is about the Board at that width.
+  await page.evaluate(() => localStorage.setItem('marble-agents:view', 'library'));
+  await page.reload();
+  await page.waitForFunction(() => Boolean(window.marble?.agent && customElements.get('marble-conversation')));
   const id = await page.evaluate(async () => {
     const agent = window.marble.agent;
     const id = await agent.start({ provider: 'fake' });

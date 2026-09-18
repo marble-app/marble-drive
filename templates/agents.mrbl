@@ -750,9 +750,10 @@ __ICON__
   .deck-ask-open { align-self: flex-end; font: inherit; font-size: .85rem; color: var(--accent-ink); background: none; border: 0; padding: .4rem .2rem; cursor: pointer; min-height: 2.75rem; }
   /* A swipe on a review row: right completes the cheap action, left only
      reveals the consequential one as a button. */
-  .deck .conv .swipe-undo { display: none; position: absolute; right: 0; top: 0; bottom: 0; width: 88px; border: 0; background: var(--caution); color: #fff; font: inherit; font-weight: 600; transform: translateX(100%); cursor: pointer; }
-  .deck .conv[data-swipe="undo"] .swipe-undo { display: block; }
-  .deck .conv[data-swipe="review"]::before { content: 'Reviewed'; position: absolute; left: -100%; top: 0; bottom: 0; width: 100%; display: flex; align-items: center; justify-content: flex-end; padding-right: 1rem; background: var(--accent-soft); color: var(--accent-ink); font-size: .8rem; }
+  .deck .conv > * { position: relative; z-index: 1; transform: translateX(var(--swipe-x, 0px)); }
+  .deck .conv > .swipe-undo { display: none; position: absolute; z-index: 0; right: 0; top: 0; bottom: 0; width: 88px; border: 0; background: var(--caution); color: #fff; font: inherit; font-weight: 600; transform: none; cursor: pointer; }
+  .deck .conv[data-swipe="undo"] > .swipe-undo { display: block; }
+  .deck .conv[data-swipe="review"]::before { content: 'Reviewed'; position: absolute; inset: 0; z-index: 0; display: flex; align-items: center; padding-left: 1rem; background: var(--accent-soft); color: var(--accent-ink); font-size: .8rem; }
   @media (prefers-reduced-motion: reduce) { .band-head[data-flash] { animation: none; } }
   /* A part that is leaving stays on screen where it was, out of the flow, for as
      long as it takes to fade — then the layout it no longer belongs to
@@ -5248,6 +5249,24 @@ __ICON__
           else fillRowMenu(el);
         });
         bindConvDrag(el);
+        // Behind a Deck row: the consequential action a left swipe reveals.
+        const undoBtn = document.createElement('button');
+        undoBtn.type = 'button';
+        undoBtn.className = 'swipe-undo';
+        undoBtn.textContent = 'Undo turn';
+        undoBtn.setAttribute('data-marble-transient', '');
+        undoBtn.addEventListener('click', async (event) => {
+          event.stopPropagation();
+          el.removeAttribute('data-swipe');
+          el.style.removeProperty('--swipe-x');
+          try {
+            const { turns } = await agent.conversation(el.dataset.id);
+            const last = undoable(turns);
+            if (last) await agent.undo(last.id);
+          } catch (err) { showEmpty(err.message); }
+        });
+        el.append(undoBtn);
+        attachDeckGestures(el);
         nodes.set(summary.id, el);
       }
       paintRow(el, summary);
@@ -5623,6 +5642,126 @@ __ICON__
     };
 
     let paintAsksPill = () => {};
+    let openActions = () => {};
+
+    // ---- Deck gestures. A cheap, reversible action completes as a swipe;
+    // a consequential one is revealed by a swipe and taken by a button. A
+    // long press asks what to do.
+    const SWIPE_COMMIT = 96;
+    const SWIPE_REVEAL = 88;
+    const LONG_PRESS_MS = 400;
+    const attachDeckGestures = (el) => {
+      let start = null;
+      let axis = null;
+      let pressTimer = 0;
+      let dx = 0;
+      let history = [];
+      let stop = null;
+      let justSwiped = false;
+      const inDeck = () => el.closest('.band-body') != null;
+      // The row's content slides; the row itself stays put with the action
+      // behind it, so what a swipe reveals is inside the row's own box.
+      const slide = (x) => {
+        dx = x;
+        if (x) el.style.setProperty('--swipe-x', `${x}px`);
+        else el.style.removeProperty('--swipe-x');
+      };
+      const settle = (to, velocity = 0) => {
+        stop?.();
+        if (reduceMotion.matches) {
+          slide(to);
+          return;
+        }
+        stop = window.marbleAgentUI.spring({ from: dx, to, velocity, response: 0.3, onFrame: slide });
+      };
+      el.addEventListener('pointerdown', (event) => {
+        if (!inDeck() || event.target.closest('.manage, .swipe-undo')) return;
+        stop?.();
+        start = { x: event.clientX, y: event.clientY, id: event.pointerId, base: dx };
+        axis = null;
+        history = [{ x: event.clientX, t: performance.now() }];
+        pressTimer = setTimeout(() => {
+          pressTimer = 0;
+          start = null;
+          suppressConvClick = true;
+          setTimeout(() => { suppressConvClick = false; }, 400);
+          openActions(el.dataset.id);
+        }, LONG_PRESS_MS);
+      });
+      el.addEventListener('pointermove', (event) => {
+        if (!start) return;
+        const mx = event.clientX - start.x;
+        const my = event.clientY - start.y;
+        if (!axis) {
+          if (Math.hypot(mx, my) < 10) return;
+          clearTimeout(pressTimer);
+          pressTimer = 0;
+          axis = Math.abs(mx) > Math.abs(my) ? 'x' : 'y';
+          if (axis === 'x') el.setPointerCapture(start.id);
+          else {
+            start = null;
+            return;
+          }
+        }
+        event.preventDefault();
+        suppressConvClick = true;
+        const band = el.closest('.band')?.dataset.band;
+        const canRight = band === 'review';
+        const canLeft = band === 'review' || band === 'idle';
+        let x = start.base + mx;
+        if ((x > 0 && !canRight) || (x < 0 && !canLeft)) x *= 0.25;
+        slide(x);
+        el.dataset.swipe = x > 0 ? 'review' : 'undo';
+        history.push({ x: event.clientX, t: performance.now() });
+        if (history.length > 6) history.shift();
+      });
+      const end = () => {
+        clearTimeout(pressTimer);
+        pressTimer = 0;
+        if (!start) return;
+        const was = start;
+        start = null;
+        if (axis !== 'x') return;
+        try { el.releasePointerCapture(was.id); } catch { /* not captured */ }
+        justSwiped = true;
+        setTimeout(() => { suppressConvClick = false; justSwiped = false; }, 0);
+        const first = history[0];
+        const last = history[history.length - 1];
+        const velocity = last.t > first.t ? ((last.x - first.x) / (last.t - first.t)) * 1000 : 0;
+        const projected = dx + window.marbleAgentUI.project(velocity);
+        if (projected > SWIPE_COMMIT && el.closest('.band')?.dataset.band === 'review') {
+          const id = el.dataset.id;
+          const summary = summaries.get(id);
+          el.removeAttribute('data-swipe');
+          settle(0, velocity);
+          if (summary) upsert({ ...summary, needsReview: false }); // optimistic
+          agent.markReviewed(id).catch(() => { if (summary) upsert({ ...summary, needsReview: true }); });
+          return;
+        }
+        if (projected < -SWIPE_REVEAL) {
+          el.dataset.swipe = 'undo';
+          settle(-SWIPE_REVEAL - 8, velocity);
+          return;
+        }
+        el.removeAttribute('data-swipe');
+        settle(0, velocity);
+      };
+      el.addEventListener('pointerup', end);
+      el.addEventListener('pointercancel', end);
+      // The click that ends a swipe is not a tap. A tap on a revealed row
+      // puts it back rather than opening it.
+      el.addEventListener('click', (event) => {
+        if (event.target.closest('.swipe-undo')) return;
+        if (justSwiped) {
+          event.stopPropagation();
+          return;
+        }
+        if (!dx) return;
+        event.stopPropagation();
+        el.removeAttribute('data-swipe');
+        settle(0);
+      }, true);
+    };
 
     const load = async () => {
       if (!agent) return;
