@@ -623,8 +623,12 @@
     return String(id);
   };
 
-  const conversationTags = (summary, labels) => {
+  const conversationTags = (summary, labels, projects = null) => {
     const tags = [];
+    // The drive is the default and goes unsaid; any other project is named.
+    if (summary?.project && summary.project !== 'drive') {
+      tags.push({ kind: 'project', label: projects?.get?.(summary.project)?.name ?? summary.project, hue: 200 });
+    }
     const agent = providerLabel(summary, labels);
     if (agent) {
       tags.push({ kind: 'agent', label: agent, hue: providerHue(summary.provider) });
@@ -1028,6 +1032,8 @@
     .tool[data-state="pending"]::before { background: var(--accent); animation: pulse 1.2s var(--snap) infinite; }
     .tool[data-state="done"]::before { background: var(--accent-ink); }
     .tool[data-state="refused"] { color: var(--caution); } .tool[data-state="refused"]::before { background: var(--caution); }
+    .mast .also { font-size: 11.5px; color: var(--faint); margin-top: 2px; }
+    .mast .also[hidden] { display: none; }
     .ask { margin: 8px 0; padding: 10px 12px; border: 1px solid var(--line); border-radius: 10px; background: var(--paper-2, var(--paper)); display: grid; gap: 8px; }
     .ask .ask-title { font-weight: 600; font-size: 13px; }
     .ask pre { margin: 0; font-size: 12px; white-space: pre-wrap; word-break: break-word; }
@@ -1221,6 +1227,7 @@
         <header class="mast" hidden>
           <h2 class="heading" contenteditable="plaintext-only" spellcheck="false" aria-label="Conversation title"></h2>
           <div class="tags"></div>
+          <div class="also" hidden></div>
         </header>
         <div class="log" role="log" aria-live="polite" aria-label="Conversation"></div>
         <div class="queued" hidden></div>
@@ -1239,6 +1246,10 @@
             <fieldset class="seg picker-agent">
               <legend>CLI</legend>
               <div class="seg-opts" data-seg="agent"></div>
+            </fieldset>
+            <fieldset class="seg picker-project">
+              <legend>Project</legend>
+              <div class="seg-opts" data-seg="project"></div>
             </fieldset>
             <fieldset class="seg picker-models">
               <legend>Model</legend>
@@ -1277,6 +1288,9 @@
       this.statusWhere = root.querySelector('.status-where');
       this.agentLabel = root.querySelector('.picker-agent');
       this.agentBox = root.querySelector('[data-seg="agent"]');
+      this.projectBox = root.querySelector('[data-seg="project"]');
+      this.projectLabel = root.querySelector('.picker-project');
+      this.also = root.querySelector('.also');
       this.modelBox = root.querySelector('[data-seg="model"]');
       this.effortLabel = root.querySelector('.picker-effort');
       this.effortBox = root.querySelector('[data-seg="effort"]');
@@ -1423,6 +1437,8 @@
       this.unwatchTheme = null;
       removeEventListener('marble:agent-context', this.onContext);
       this.off?.();
+      this.offAll?.();
+      this.offAll = null;
       this.off = null;
     }
 
@@ -1465,10 +1481,17 @@
       }
       this.setup.hidden = false;
       this.agentLabel.hidden = false;
+      // A started conversation keeps its project; the picker is for new ones.
+      this.projectLabel.hidden = true;
       try {
-        const [{ meta }, providers] = await Promise.all([this.api.conversation(id), this.api.providers().catch(() => [])]);
+        const [{ meta }, providers, projects] = await Promise.all([
+          this.api.conversation(id),
+          this.api.providers().catch(() => []),
+          this.api.projects?.().catch(() => []) ?? [],
+        ]);
         if (this.loading !== token) return;
         this.meta = meta;
+        this.projectList = projects;
         this.providerList = sortProviders(providers);
         this.mode = meta.mode || '';
         this.fillAgents(meta.provider);
@@ -1487,6 +1510,20 @@
         if (this.loading !== token) return;
         this.receive(event);
       });
+      this.offAll?.();
+      this.others = new Map();
+      this.offAll = this.api.on('*', (summary) => {
+        if (this.loading !== token || !summary?.id) return;
+        this.others.set(summary.id, summary);
+        this.paintAlso();
+      });
+      // The stream only carries changes; a turn already running and silent
+      // would otherwise go uncounted until it spoke.
+      this.api.conversations?.().then((list) => {
+        if (this.loading !== token) return;
+        for (const summary of list ?? []) if (!this.others.has(summary.id)) this.others.set(summary.id, summary);
+        this.paintAlso();
+      }).catch(() => {});
       this.updateSendable();
     }
 
@@ -1506,6 +1543,8 @@
       const usable = this.providerList.filter((p) => p.installed && p.signedIn);
       const fallback = usable.find((p) => p.default) ?? usable[0];
       this.fillAgents(fallback?.id ?? '');
+      await this.fillProjects();
+      if (this.loading !== token) return;
       if (!fallback) this.system('No agent is ready on this machine. `npm run agents -- providers` says why.');
       this.mode = this.currentProvider()?.modes?.[0]?.id ?? '';
       await this.syncCatalog();
@@ -1556,6 +1595,42 @@
     presetDisabled(preset) {
       if (!preset) return true;
       return this.claudeUnavailable() && this.presetProviderIds(preset).some((id) => String(id).startsWith('claude'));
+    }
+
+    /** The projects a new conversation can start in: the drive first, then
+     *  whatever the settings panel registered. The `project` attribute (the
+     *  drawer sets `drive`) or `settings.defaultProject` picks the default. */
+    async fillProjects(value = null) {
+      let projects = [];
+      try {
+        projects = await this.api.projects();
+      } catch {
+        projects = [{ id: 'drive', name: 'Drive' }];
+      }
+      this.projectList = projects;
+      let wanted = value ?? this.getAttribute('project');
+      if (!wanted) {
+        try {
+          wanted = (await this.api.settings()).defaultProject;
+        } catch { /* the drive */ }
+      }
+      wanted = projects.some((p) => p.id === wanted) ? wanted : 'drive';
+      fillRadios(this.projectBox, 'project', projects.map((p) => ({ id: p.id, label: p.name })), { empty: null, value: wanted });
+      this.projectLabel.hidden = false;
+      this.fitSetup();
+    }
+
+    /** Other conversations running in this conversation's project right now. */
+    paintAlso() {
+      if (!this.also) return;
+      const id = this.getAttribute('conversation');
+      const mine = this.meta?.project ?? 'drive';
+      const rows = [...(this.others?.values() ?? [])]
+        .filter((s) => s.id !== id && !s.archived && (s.project ?? 'drive') === mine && (s.status === 'running' || s.running));
+      this.also.hidden = !rows.length;
+      this.also.textContent = rows.length
+        ? `Also working here: ${rows.length} — ${rows.map((s) => s.title || 'Untitled').join(', ')}`
+        : '';
     }
 
     fillAgents(value) {
@@ -1863,7 +1938,8 @@
         effort: radioValue(this.shadowRoot, 'effort') || this.meta?.effort,
       };
       this.tagsEl.replaceChildren();
-      for (const tag of conversationTags(summary, labels)) {
+      const projects = new Map((this.projectList ?? []).map((p) => [p.id, p]));
+      for (const tag of conversationTags(summary, labels, projects)) {
         const el = h('span', 'tag', tag.label);
         el.dataset.kind = tag.kind;
         el.dataset.hue = String(tag.hue);
@@ -1959,14 +2035,17 @@
           const provider = radioValue(this.shadowRoot, 'agent');
           if (!provider) throw new Error('Choose an agent first.');
           const picks = this.catalogPicks();
+          const project = radioValue(this.shadowRoot, 'project') || 'drive';
           id = await this.api.start({
             provider,
             model: picks.model,
             effort: picks.effort,
             mode: picks.mode,
+            project,
           });
           this.setAttribute('conversation', id);
           this.agentLabel.hidden = false;
+          this.projectLabel.hidden = true;
           this.fillAgents(provider);
           this.meta = {
             id,
@@ -1974,6 +2053,7 @@
             model: picks.model,
             effort: picks.effort,
             mode: picks.mode,
+            project,
             title: null,
           };
           this.paintMast();
@@ -2596,6 +2676,11 @@
     .agent select { grid-column: 2; }
     input[type="text"], input[type="password"], select { font: inherit; color: var(--ink); background: var(--paper-2); border: 1px solid var(--line); border-radius: 8px; padding: 6px 8px; width: 100%; box-sizing: border-box; }
     .key { display: flex; gap: 6px; align-items: center; }
+    .hint { margin: 0 0 6px; font-size: 12px; color: var(--muted); }
+    .project { display: flex; gap: 8px; align-items: baseline; flex-wrap: wrap; }
+    .project code { font-size: 11.5px; color: var(--faint); overflow-wrap: anywhere; }
+    .project-add { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 6px; }
+    .project-add input { flex: 1; min-width: 8em; }
     .key input { flex: 1; }
     .actions { display: flex; justify-content: flex-end; gap: 8px; }
     button { font: inherit; cursor: pointer; border-radius: 8px; padding: 6px 12px; border: 1px solid var(--line); background: var(--paper-2); color: var(--ink); }
@@ -2774,7 +2859,55 @@
       keys.append(h('legend', '', 'API keys'));
       keys.append(this.keyRow('anthropic', 'Claude API key', settings.keys?.anthropic));
       keys.append(this.keyRow('cursor', 'Cursor API key', settings.keys?.cursor));
-      this.body.replaceChildren(agents, keys);
+      const projects = document.createElement('fieldset');
+      projects.append(h('legend', '', 'Projects'));
+      projects.append(h('p', 'hint', 'A full agent runs with your own Claude Code (or Cursor) configuration — your plugins, skills, hooks, MCP servers and permission rules — in the project you choose. It is exactly as capable, and as powerful, as the terminal.'));
+      let list = [];
+      try {
+        list = await this.api.projects();
+      } catch { /* listed as none */ }
+      for (const p of list) {
+        const row = h('div', 'project');
+        row.append(h('span', 'name', p.name), h('code', 'path', p.path));
+        if (!p.builtIn) {
+          const remove = h('button', 'link', 'Remove');
+          remove.type = 'button';
+          remove.addEventListener('click', async () => {
+            try {
+              await this.api.removeProject(p.id);
+              await this.fill();
+            } catch (err) {
+              this.status.textContent = err.message;
+              this.status.classList.add('error');
+            }
+          });
+          row.append(remove);
+        }
+        projects.append(row);
+      }
+      const add = h('div', 'project-add');
+      const name = document.createElement('input');
+      name.placeholder = 'Name';
+      name.name = 'project-name';
+      name.setAttribute('aria-label', 'Project name');
+      const dir = document.createElement('input');
+      dir.placeholder = '/absolute/path/to/repo';
+      dir.name = 'project-path';
+      dir.setAttribute('aria-label', 'Project path');
+      const button = h('button', 'link', 'Add project');
+      button.type = 'button';
+      button.addEventListener('click', async () => {
+        try {
+          await this.api.addProject({ name: name.value.trim(), path: dir.value.trim() });
+          await this.fill();
+        } catch (err) {
+          this.status.textContent = err.message;
+          this.status.classList.add('error');
+        }
+      });
+      add.append(name, dir, button);
+      projects.append(add);
+      this.body.replaceChildren(agents, keys, projects);
       fillUsageDetail(this.usagePane, usage.meters ?? []);
     }
 
@@ -2954,7 +3087,7 @@
           <div class="where" hidden></div>
           <div class="menu recent" role="menu" aria-label="Recent conversations" hidden></div>
           <div class="menu actions" role="menu" aria-label="Conversation actions" hidden></div>
-          <marble-conversation></marble-conversation>
+          <marble-conversation project="drive"></marble-conversation>
         </aside>`;
       this.launcher = root.querySelector('.launcher');
       this.dot = root.querySelector('.launcher-dot');

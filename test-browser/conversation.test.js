@@ -1,4 +1,7 @@
 import assert from 'node:assert/strict';
+import fsp from 'node:fs/promises';
+import os from 'node:os';
+import path from 'node:path';
 import test from 'node:test';
 
 import { startDrive } from './harness.js';
@@ -958,4 +961,36 @@ test('a question ask offers its options; arrows move, Enter answers with the lab
   await view.locator('.turn-footer[data-status="completed"]').waitFor();
   await view.locator('.msg.agent', { hasText: 'answered:allow:B' }).waitFor();
   assert.deepEqual(errors, []);
+});
+
+test('a new conversation is started in the picked project, and the mast names it', async () => {
+  const { page, view } = await mount();
+  await view.locator('input[name="agent"][value="fake"]').waitFor();
+  const dir = await fsp.mkdtemp(path.join(os.tmpdir(), 'marble-browser-repo-'));
+  // Registered from the page so the request is same-origin, like the settings panel's.
+  const repo = await page.evaluate((p) => window.marble.agent.addProject({ name: 'Repo', path: p }), dir);
+  await view.evaluate((el) => el.fillProjects());
+  await view.locator('input[name="project"][value="drive"]').waitFor();
+  assert.equal(await view.locator('input[name="project"][value="drive"]').isChecked(), true);
+  await view.locator(`input[name="project"][value="${repo.id}"]`).check();
+  const started = page.evaluate(() => new Promise((resolve) => document.querySelector('marble-conversation').addEventListener('conversation', (e) => resolve(e.detail.id), { once: true })));
+  await sendFrom(view, 'script:rename');
+  const id = await started;
+  const meta = await page.evaluate((cid) => window.marble.agent.conversation(cid).then((r) => r.meta), id);
+  assert.equal(meta.project, repo.id);
+  await view.locator('.tag[data-kind="project"]', { hasText: 'Repo' }).waitFor();
+  assert.equal(await view.locator('.picker-project').isVisible(), false, 'a started conversation cannot change project');
+});
+
+test('the mast counts other conversations running in the same project', async () => {
+  const { page, view } = await mount();
+  await view.locator('input[name="agent"][value="fake"]').waitFor();
+  const other = await page.evaluate(async () => {
+    const id = await window.marble.agent.start({ provider: 'fake', project: 'drive' });
+    await window.marble.agent.send(id, { prompt: 'script:hold', target: 'garden' });
+    return id;
+  });
+  await sendFrom(view, 'script:slow');
+  await view.locator('.mast .also', { hasText: 'Also working here: 1' }).waitFor();
+  await page.evaluate((id) => window.marble.agent.cancel(`${id}-t1`), other);
 });
