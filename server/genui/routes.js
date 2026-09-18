@@ -7,24 +7,12 @@ import fsp from 'node:fs/promises';
 import path from 'node:path';
 
 import { json, readJson } from '../http.js';
-import { docKey } from '../paths.js';
+import { docKey, parsePath, PathError } from '../paths.js';
 import { explainTypesafeFailure } from '../typesafe/client.js';
+import { noKeyFailure, readStop } from '../typesafe/routes.js';
 import { loadAtlas } from './atlas.js';
 import { decideDocument } from './decide.js';
 import { extractSpace, validateSpace } from './space.js';
-
-function noKeyFailure() {
-  return explainTypesafeFailure({
-    status: 503,
-    message: 'TYPESAFE_API_KEY is not set. Put it in .env.local and restart the host.',
-  });
-}
-
-function readStop(value, fallback = 0.75) {
-  const n = Number(value);
-  if (!Number.isFinite(n)) return fallback;
-  return n > 1 ? n / 100 : n;
-}
 
 export function createGenuiHandler({
   store,
@@ -58,17 +46,32 @@ export function createGenuiHandler({
     }
   };
 
-  const readDoc = async (docPath, res) => {
-    if (!docPath) {
-      json(res, 400, { error: 'which document? pass doc=<path>' });
-      return null;
+  // A path arrives from a query string or a JSON body, and the same document
+  // must land in the same write queue and the same channel whichever way it
+  // was spelled — so it goes through parsePath like every other write route.
+  const readDoc = async (raw, res) => {
+    let docPath;
+    try {
+      docPath = parsePath(raw, { allowRoot: false });
+    } catch (err) {
+      if (err instanceof PathError) {
+        json(res, 400, { error: raw ? err.message : 'which document? pass doc=<path>' });
+        return null;
+      }
+      throw err;
     }
     const source = await store.read(docPath);
     if (source === null) {
       json(res, 404, { error: `no document "${docPath}"` });
       return null;
     }
-    return source;
+    return { docPath, source };
+  };
+
+  // A response whose socket has gone is not a place to write an error.
+  const reply = (res, status, body) => {
+    if (res.destroyed || res.writableEnded || res.headersSent) return;
+    json(res, status, body);
   };
 
   return {
@@ -77,12 +80,11 @@ export function createGenuiHandler({
       const route = url.pathname;
 
       if (route === '/genui/space' && req.method === 'GET') {
-        const docPath = url.searchParams.get('doc') ?? '';
-        const source = await readDoc(docPath, res);
-        if (source === null) return true;
+        const doc = await readDoc(url.searchParams.get('doc') ?? '', res);
+        if (doc === null) return true;
         try {
           const index = await atlas();
-          json(res, 200, { doc: docPath, space: extractSpace(source), validation: validateSpace(source, index) });
+          json(res, 200, { doc: doc.docPath, space: extractSpace(doc.source), validation: validateSpace(doc.source, index) });
         } catch (err) {
           json(res, err.status ?? 500, { error: err.message });
         }
@@ -95,15 +97,21 @@ export function createGenuiHandler({
           return true;
         }
         const body = await readJson(req, maxBodyBytes);
-        const docPath = String(body.doc ?? '').trim();
-        const source = await readDoc(docPath, res);
-        if (source === null) return true;
+        const doc = await readDoc(body.doc ?? '', res);
+        if (doc === null) return true;
+        const { docPath, source } = doc;
         const dry = body.dry === true;
         const stop = readStop(body.stop);
         const context = body.context && typeof body.context === 'object' ? body.context : {};
         const request = typeof body.request === 'string' && body.request.trim() ? body.request.trim() : null;
+
+        // The client going away cancels the TypeSafe request — but not a write
+        // that has already been decided, and never after the run finished.
         const ac = new AbortController();
-        res.on('close', () => ac.abort());
+        let finished = false;
+        res.on('close', () => {
+          if (!finished) ac.abort();
+        });
         try {
           const index = await atlas();
           const result = await decideDocument({
@@ -116,6 +124,7 @@ export function createGenuiHandler({
             signal: ac.signal,
             ...(ask ? { ask } : {}),
           });
+          finished = true;
           let applied = 0;
           if (!dry && result.ops.length) {
             const written = await writeOps(docPath, result.ops, { client: 'genui' });
@@ -134,13 +143,16 @@ export function createGenuiHandler({
             usage: result.usage,
           };
           await record(docPath, { at: new Date().toISOString(), ...out });
-          json(res, 200, out);
+          reply(res, 200, out);
         } catch (err) {
-          if (err.status === 422 && err.issues) {
-            json(res, 422, { error: err.message, issues: err.issues });
+          finished = true;
+          if (err.code === 'CANCELLED' || ac.signal.aborted) {
+            await record(docPath, { at: new Date().toISOString(), doc: docPath, dry, stop, context, cancelled: true });
+            reply(res, 499, { kind: 'cancelled', title: 'Stopped.', message: 'The decide was cancelled.' });
+          } else if (err.status === 422 && err.issues) {
+            reply(res, 422, { error: err.message, issues: err.issues });
           } else {
-            const explained = explainTypesafeFailure(err);
-            json(res, err.status ?? 500, { error: err.message, ...explained });
+            reply(res, err.status ?? 500, { error: err.message, ...explainTypesafeFailure(err) });
           }
         }
         return true;

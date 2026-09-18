@@ -100,3 +100,9 @@ test('decideDocument on the dashboard fixture: nine decisions across three insta
   assert.ok(result.ops.some((op) => op.id === 'tiles' && op.name === 'data-drill'), 'the tile role writes to the container that holds every tile');
   assert.ok(result.ops.some((op) => op.id === 'trend' && op.name === 'data-mark-type' && op.value === 'areas'));
 });
+
+test('a valid choice with a missing or non-numeric confidence throws — the contract changed, not the answer', () => {
+  assert.throws(() => answersToOps(space, { 'games.openIn': { type: 'choice', choice: 'pop-up' } }), (err) => err.status === 502 && /confidence/.test(err.message));
+  assert.throws(() => answersToOps(space, { 'games.openIn': { type: 'choice', choice: 'pop-up', confidence: '0.9' } }), (err) => err.status === 502);
+  assert.throws(() => answersToOps(space, { 'games.openIn': { type: 'choice', choice: 'pop-up', confidence: 1.4 } }), (err) => err.status === 502);
+});

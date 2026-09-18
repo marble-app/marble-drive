@@ -385,7 +385,6 @@ async function genuiCommand() {
     return;
   }
 
-  if (!config.typesafeApiKey) fail('TYPESAFE_API_KEY is not set. Put it in .env.local.');
   let context = {};
   if (flags.context) {
     try {
@@ -394,44 +393,79 @@ async function genuiCommand() {
       fail(`--context must be JSON: ${err.message}`);
     }
   }
-  const stop = flags.stop !== undefined ? Number(flags.stop) : 0.75;
-  const result = await decideDocument({
-    source,
-    atlas,
-    apiKey: config.typesafeApiKey,
-    context,
-    stop,
-    request: typeof flags.request === 'string' ? flags.request : null,
-  }).catch((err) => {
+  const { readStop } = await import('../server/typesafe/routes.js');
+  const stop = readStop(flags.stop);
+  const request = typeof flags.request === 'string' ? flags.request : null;
+  const dry = Boolean(flags.dry);
+
+  const print = (result) => {
+    // A near-uniform distribution is an authoring smell, not a gate problem:
+    // the options are indistinguishable from their glosses, or the dimension
+    // should not be live. TypeSafe's confidence is how concentrated the
+    // distribution is, so "flat" is a low confidence, whatever n is.
+    const FLAT = 0.15;
+    let flat = 0;
+    for (const d of result.decisions) {
+      const conf = d.confidence === null ? '  -  ' : d.confidence.toFixed(2);
+      const move = d.choice && d.choice !== d.current ? `→ ${d.choice}` : '';
+      const isFlat = d.confidence !== null && d.confidence < FLAT;
+      if (isFlat) flat += 1;
+      console.log(`${d.applied ? '→' : isFlat ? '≈' : ' '} ${conf}  ${d.id.padEnd(32)} ${d.current} ${move}  ${d.reason}${isFlat ? '  · flat' : ''}`);
+      if (flags.verbose && d.probabilities) {
+        for (const slug of d.options ?? Object.keys(d.probabilities)) {
+          const p = Number(d.probabilities[slug] ?? 0);
+          console.log(`           ${slug.padEnd(28)} ${'█'.repeat(Math.round(p * 24)).padEnd(24, '·')} ${p.toFixed(2)}`);
+        }
+      }
+    }
+    console.log(`${result.ops.length} change(s) in ${result.elapsedMs} ms${result.dry ? ' (dry — nothing written)' : ` · wrote ${result.applied}`}`);
+    if (flat) console.log(`${flat} decision(s) near-uniform (confidence < ${FLAT}) — sharpen the glosses, drop an option, or fix the value and remove the declaration.`);
+  };
+
+  // A write goes through the host when one is serving this drive: the host
+  // owns the write queue and the open tabs, and a disk write from beside it
+  // is an outside edit — the page would reload rather than move, and two
+  // writers would race the file. Only a dry look is answered locally.
+  if (!dry) {
+    const base = `http://${config.host}:${config.port}`;
+    let response = null;
+    try {
+      response = await fetch(`${base}/genui/decide`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ doc: docPath, context, stop, request }),
+      });
+    } catch {
+      response = null; // nothing listening: write locally below
+    }
+    if (response) {
+      if (response.status === 404) fail(`the host at ${base} is running code without /genui — restart it on this branch, or use --dry`);
+      if (response.status === 401) fail(`the host at ${base} is gated; decide from a document there, or stop the host and run this again`);
+      const body = await response.json().catch(() => ({}));
+      if (!response.ok) {
+        if (body.issues) for (const issue of body.issues) console.error(`${issue.kind}  ${issue.instance ?? '-'}.${issue.key ?? '-'}  ${issue.message}`);
+        fail(body.message || body.error || `host answered HTTP ${response.status}`);
+      }
+      print(body);
+      return;
+    }
+  }
+
+  if (!config.typesafeApiKey) fail('TYPESAFE_API_KEY is not set. Put it in .env.local.');
+  const result = await decideDocument({ source, atlas, apiKey: config.typesafeApiKey, context, stop, request }).catch((err) => {
     if (err.issues) for (const issue of err.issues) console.error(`${issue.kind}  ${issue.instance ?? '-'}.${issue.key ?? '-'}  ${issue.message}`);
     fail(err.message);
   });
-  // A near-uniform distribution is an authoring smell, not a gate problem:
-  // the options are indistinguishable from their glosses, or the dimension
-  // should not be live. TypeSafe's confidence is how concentrated the
-  // distribution is, so "flat" is a low confidence, whatever n is.
-  const FLAT = 0.15;
-  let flat = 0;
-  for (const d of result.decisions) {
-    const conf = d.confidence === null ? '  -  ' : d.confidence.toFixed(2);
-    const move = d.choice && d.choice !== d.current ? `→ ${d.choice}` : '';
-    const isFlat = d.confidence !== null && d.confidence < FLAT;
-    if (isFlat) flat += 1;
-    console.log(`${d.applied ? '→' : isFlat ? '≈' : ' '} ${conf}  ${d.id.padEnd(32)} ${d.current} ${move}  ${d.reason}${isFlat ? '  · flat' : ''}`);
-    if (flags.verbose && d.probabilities) {
-      for (const slug of d.options ?? Object.keys(d.probabilities)) {
-        const p = Number(d.probabilities[slug] ?? 0);
-        console.log(`           ${slug.padEnd(28)} ${'█'.repeat(Math.round(p * 24)).padEnd(24, '·')} ${p.toFixed(2)}`);
-      }
-    }
+  if (dry || !result.ops.length) {
+    print({ ...result, dry: true, applied: 0 });
+    return;
   }
-  console.log(`${result.ops.length} change(s) in ${result.elapsedMs} ms${flags.dry ? ' (dry — nothing written)' : ''}`);
-  if (flat) console.log(`${flat} decision(s) near-uniform (confidence < ${FLAT}) — sharpen the glosses, drop an option, or fix the value and remove the declaration.`);
-  if (flags.dry || !result.ops.length) return;
-  const drive = await createDrive(config, { log: { log() {}, error: console.error } });
+  // No host is serving: this process is the one writer, so it writes the way
+  // the host would — through createDrive's writeOps — and closes.
+  const drive = await createDrive(config, { log: { log() {}, error: console.error }, agents: false });
   try {
     const written = await drive.writeOps(docPath, result.ops, { client: 'genui-cli' });
-    console.log(`wrote ${written.applied} op(s) to ${docPath}`);
+    print({ ...result, dry: false, applied: written.applied ?? 0 });
   } finally {
     await drive.close();
   }

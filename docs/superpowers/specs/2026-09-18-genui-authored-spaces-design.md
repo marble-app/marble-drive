@@ -87,8 +87,8 @@ A document is an app space when it contains at least one **instance root**. Ever
 
 Each declared option must be reachable from the fact:
 
-- **CSS:** a rule in any of the document's stylesheets whose selector contains `[data-<key>="<slug>"]` (the validator checks presence, not scoping — scoping the rule under the root is the author's job and is what the skill writes), or
-- **Markup:** a `<marble-alt>` under the root whose `data-marble-active` is derived from the fact, with a `data-marble-alt="<slug>"` child per option.
+- **CSS:** a rule in any of the document's stylesheets whose selector contains `[data-<key>="<slug>"]`, the value spelled exactly as the slug (attribute selectors match bytes; a rule written `"Pop Up"` never matches the `pop-up` Jev writes, and the validator says so). The validator checks presence, not scoping — a selector cannot be tied to an instance in general, so scoping the rule under the root is the author's job and is what the skill writes. Known limit: two instances that declare the same key satisfy each other's CSS check.
+- **Markup:** a `<marble-alt>` *under this root* whose `data-marble-active` is derived from the fact, with a `data-marble-alt="<slug>"` child per option. An alternative under another instance implements nothing here.
 
 The validator (§4.1) enforces: every declared slug is implemented by one of these; the current value is a declared slug; no live sub-dimension has fewer than two options; instance names are unique; the Atlas id exists and the key is a sub-dimension of that entry (or of an entry it `specializes`).
 

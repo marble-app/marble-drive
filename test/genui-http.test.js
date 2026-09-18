@@ -135,3 +135,24 @@ test('POST /genui/decide on an invalid space is 422 with issues; on an unknown d
     assert.equal(missing.status, 404);
   });
 });
+
+test('a doc path spelled with slashes lands in the same document, queue and record', async () => {
+  const ask = fakeAsk((id, q) => (id === 'games.openIn' ? 'new-page' : firstOption(id, q)));
+  await withDrive(loadConfig(openEnv({ TYPESAFE_API_KEY: 'tsk_test' })), { genui: { ask } }, async (base, drive) => {
+    // The tests share one .marble/, so count the record's growth, not its size.
+    const recordFile = path.join(drive.store.marbleDir, 'Spaces%2F49ers.genui.jsonl');
+    const lines = async () => (await fsp.readFile(recordFile, 'utf8').catch(() => '')).trim().split('\n').filter(Boolean);
+    const before = (await lines()).length;
+    const body = await (await post(base, { doc: '/Spaces/49ers/' })).json();
+    assert.equal(body.doc, 'Spaces/49ers');
+    assert.match(await drive.store.read('Spaces/49ers'), /id="games"[^>]*data-open-in="new-page"/s);
+    const after = await lines();
+    assert.equal(after.length, before + 1, 'one record under the normalized key, not a second file under the raw spelling');
+    assert.equal(JSON.parse(after.at(-1)).doc, 'Spaces/49ers');
+    assert.equal(await fsp.access(path.join(drive.store.marbleDir, '%2FSpaces%2F49ers%2F.genui.jsonl')).then(() => true, () => false), false);
+    const bad = await post(base, { doc: '../etc' });
+    assert.equal(bad.status, 400);
+    const space = await fetch(`${base}/genui/space?doc=${encodeURIComponent('/Spaces/49ers/')}`);
+    assert.equal((await space.json()).doc, 'Spaces/49ers');
+  });
+});

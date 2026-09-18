@@ -5,6 +5,7 @@
 // repo's gateWithRepair: a wrong-shaped answer is a bug to see, not data to
 // smooth over. No LLM is imported here, on purpose.
 
+import { parseSource } from '../engine.js';
 import { askSystemOne } from '../typesafe/client.js';
 import { slug } from './atlas.js';
 import { buildQuestions, questionId } from './questions.js';
@@ -41,8 +42,16 @@ export function answersToOps(space, answers, { stop = 0.75 } = {}) {
         throw err;
       }
       const confidence = Number(answer.confidence);
+      if (typeof answer.confidence !== 'number' || !Number.isFinite(confidence) || confidence < 0 || confidence > 1) {
+        // Same posture as an off-menu choice: a confidence that is missing or
+        // not a probability is the API contract changing under us, not a
+        // low-confidence answer to smooth into "kept".
+        const err = new Error(`TypeSafe answered ${id} with confidence ${JSON.stringify(answer.confidence)}; expected a number in [0, 1]`);
+        err.status = 502;
+        throw err;
+      }
       row.choice = choice;
-      row.confidence = Number.isFinite(confidence) ? confidence : 0;
+      row.confidence = confidence;
       row.probabilities = answer.probabilities && typeof answer.probabilities === 'object' ? answer.probabilities : null;
       if (choice === current) row.reason = 'kept-unchanged';
       else if (row.confidence < stop) row.reason = 'kept-low-confidence';
@@ -68,14 +77,16 @@ export async function decideDocument({
   ask = askSystemOne,
 } = {}) {
   const started = performance.now();
-  const validation = validateSpace(source, atlas);
+  // Parse once; validate and extract walk the same tree.
+  const tree = parseSource(String(source ?? ''));
+  const validation = validateSpace(tree, atlas);
   if (!validation.ok) {
     const err = new Error(`the document is not a valid app space (${validation.issues.length} issue(s))`);
     err.status = 422;
     err.issues = validation.issues;
     throw err;
   }
-  const space = extractSpace(source);
+  const space = extractSpace(tree);
   const { state, questions } = buildQuestions(space, atlas, { request, context });
   const response = await ask({ apiKey, state, questions, signal });
   const answers = response?.answers ?? {};

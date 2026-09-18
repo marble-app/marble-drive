@@ -7,13 +7,13 @@ import { LLM_MODEL, complete as defaultComplete, repairWithLlm, shapeWithLlm, sp
 import { cloneTree, runPipeline } from './pipeline.js';
 import { gateWithRepair } from './repair.js';
 
-function readStop(value, fallback = 0.75) {
+export function readStop(value, fallback = 0.75) {
   const n = Number(value);
   if (!Number.isFinite(n)) return fallback;
   return n > 1 ? n / 100 : n;
 }
 
-function noKeyFailure() {
+export function noKeyFailure() {
   return explainRunFailure({
     status: 503,
     message: 'TYPESAFE_API_KEY is not set. Put it in .env.local and restart the host.',

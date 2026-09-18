@@ -129,3 +129,25 @@ test('validateSpace: a <marble-alt> under the root implements options too', () =
     </marble-alt></section>`);
   assert.deepEqual(kinds(alt), []);
 });
+
+test('validateSpace: a CSS value is matched exactly — "Pop Up" does not implement pop-up', () => {
+  const loose = doc('<section data-marble-id="a" data-genui="overview-detail#o" data-open-in="pop-up" data-genui-open-in="pop-up | popover"></section>', '[data-open-in="Pop Up"]{} [data-open-in="popover"]{}');
+  assert.deepEqual(kinds(loose), ['unimplemented-option']);
+});
+
+test('validateSpace: a <marble-alt> under another instance implements nothing here', () => {
+  const elsewhere = doc(`<section data-marble-id="a" data-genui="card#c" data-media="none" data-genui-media="none | top-image"></section>
+    <section data-marble-id="b" data-genui="card#d">
+      <marble-alt data-marble-id="m" data-marble-active="none">
+        <span data-marble-id="m0" data-marble-alt="none"></span>
+        <span data-marble-id="m1" data-marble-alt="top-image"></span>
+      </marble-alt></section>`);
+  assert.deepEqual(kinds(elsewhere), ['unimplemented-option', 'unimplemented-option']);
+});
+
+test('extractSpace and validateSpace accept an already-parsed tree', async () => {
+  const { parseSource } = await import('../server/engine.js');
+  const tree = parseSource(FIXTURE);
+  assert.equal(extractSpace(tree).instances.length, 2);
+  assert.equal(validateSpace(tree, atlas).ok, true);
+});

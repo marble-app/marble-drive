@@ -11,6 +11,9 @@ const ID = 'data-marble-id';
 const META = new Set(['data-genui-about', 'data-genui-request']);
 
 const isElement = (node) => typeof node?.tagName === 'string';
+// A caller that already parsed the document (decideDocument validates and
+// extracts in one breath) hands the tree in; a string is parsed here.
+const treeOf = (source) => (typeof source === 'string' ? parseSource(source) : source ?? parseSource(''));
 const attr = (node, name) => node.attrs?.find((a) => a.name === name)?.value ?? null;
 
 function* walk(node, ancestors = []) {
@@ -57,7 +60,7 @@ function decisionsOf(node) {
 }
 
 export function extractSpace(source) {
-  const tree = parseSource(String(source ?? ''));
+  const tree = treeOf(source);
   let request = null;
   for (const { node } of walk(tree)) {
     if (node.tagName === 'body') {
@@ -79,35 +82,44 @@ export function extractSpace(source) {
   return { request: request?.trim() || null, instances };
 }
 
-function implementedIn(tree) {
-  // Every `[data-<key>="<slug>"]` any stylesheet selects, plus every
-  // data-marble-alt value under a <marble-alt>, keyed "attr=slug".
+function cssImplemented(tree) {
+  // Every `[data-<key>="<value>"]` any stylesheet selects, keyed "attr=value"
+  // with the value exactly as written: an attribute selector matches bytes,
+  // so a rule spelled "Pop Up" never matches the slug "pop-up" Jev writes.
   const found = new Set();
-  const css = [];
+  const re = /\[\s*(data-[a-z0-9-]+)\s*=\s*["']([^"']*)["']\s*\]/g;
   for (const { node } of walk(tree)) {
-    if (node.tagName === 'style') css.push(textOf(node));
-    if (node.tagName === 'marble-alt') {
-      for (const { node: child } of walk(node)) {
-        const alt = attr(child, 'data-marble-alt');
-        if (alt !== null) found.add(`alt=${slug(alt)}`);
-      }
+    if (node.tagName !== 'style') continue;
+    for (const m of textOf(node).matchAll(re)) found.add(`${m[1]}=${m[2]}`);
+  }
+  return found;
+}
+
+function altsUnder(root) {
+  // data-marble-alt values under <marble-alt>s inside THIS root. An
+  // alternative under another instance implements nothing here.
+  const found = new Set();
+  for (const { node } of walk(root)) {
+    if (node.tagName !== 'marble-alt') continue;
+    for (const { node: child } of walk(node)) {
+      const alt = attr(child, 'data-marble-alt');
+      if (alt !== null) found.add(alt);
     }
   }
-  const re = /\[\s*(data-[a-z0-9-]+)\s*=\s*["']([^"']*)["']\s*\]/g;
-  for (const sheet of css) for (const m of sheet.matchAll(re)) found.add(`${m[1]}=${slug(m[2])}`);
   return found;
 }
 
 export function validateSpace(source, atlas) {
-  const tree = parseSource(String(source ?? ''));
+  const tree = treeOf(source);
   const issues = [];
   const push = (instance, key, kind, message) => issues.push({ instance, key, kind, message });
   const found = roots(tree);
   if (!found.length) push(null, null, 'no-instances', 'no element carries data-genui');
-  const implemented = implementedIn(tree);
+  const css = cssImplemented(tree);
   const names = new Map();
 
   for (const { node, value } of found) {
+    const alts = altsUnder(node);
     const [patternRaw, nameRaw] = value.split('#');
     const pattern = (patternRaw ?? '').trim();
     const name = (nameRaw ?? '').trim();
@@ -135,7 +147,7 @@ export function validateSpace(source, atlas) {
         if (option.gloss === null && !sub.vars.has(option.slug)) {
           push(name, key, 'missing-gloss', `"${option.slug}" is not an Atlas variation of ${key}; a preset needs "slug: gloss"`);
         }
-        if (!implemented.has(`${factAttr}=${option.slug}`) && !implemented.has(`alt=${option.slug}`)) {
+        if (!css.has(`${factAttr}=${option.slug}`) && !alts.has(option.slug)) {
           push(name, key, 'unimplemented-option', `no [${factAttr}="${option.slug}"] rule and no data-marble-alt="${option.slug}" implements it`);
         }
       }
