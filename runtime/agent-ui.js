@@ -1066,6 +1066,90 @@
     }
   }
 
+  // ------------------------------------------------------------ tool runs
+
+  const foldable = (node) => node?.classList?.contains('tool') && node.dataset.state === 'done';
+
+  /** `Shell ×2 · Read harness.js, agents.mrbl +1 · Grep packFocus`. */
+  function groupLabel(rows) {
+    const kinds = new Map();
+    for (const row of rows) {
+      const short = row.dataset.short || 'Tool';
+      const entry = kinds.get(short) ?? { n: 0, sources: [] };
+      entry.n += 1;
+      // A command is too long to be a summary; a file or a pattern is one.
+      const source = short === 'Shell' ? '' : row.dataset.source;
+      if (source && !entry.sources.includes(source)) entry.sources.push(source);
+      kinds.set(short, entry);
+    }
+    return [...kinds].map(([short, { n, sources }]) => {
+      const named = sources.slice(0, 2).join(', ');
+      const more = sources.length > 2 ? ` +${sources.length - 2}` : '';
+      const count = n > 1 ? ` ×${n}` : '';
+      return `${short}${count}${named ? ` ${named}${more}` : ''}`;
+    }).join(' · ');
+  }
+
+  function makeGroup(rows) {
+    const group = h('div', 'tool-group');
+    group.dataset.open = 'false';
+    const head = h('button', 'tool-group-head');
+    head.type = 'button';
+    head.setAttribute('aria-expanded', 'false');
+    head.append(h('span', 'tool-group-count'), h('span', 'tool-group-kinds'));
+    const body = h('div', 'tool-group-body');
+    body.hidden = true;
+    head.addEventListener('click', () => {
+      const open = group.dataset.open !== 'true';
+      group.dataset.open = String(open);
+      head.setAttribute('aria-expanded', String(open));
+      body.hidden = !open;
+    });
+    group.append(head, body);
+    rows[0].before(group);
+    for (const row of rows) body.append(row);
+    return group;
+  }
+
+  function paintGroup(group) {
+    const rows = [...group.querySelectorAll(':scope > .tool-group-body > .tool')];
+    group.querySelector('.tool-group-count').textContent = `${rows.length} steps`;
+    const kinds = group.querySelector('.tool-group-kinds');
+    kinds.textContent = groupLabel(rows);
+    group.querySelector('.tool-group-head').title = kinds.textContent;
+  }
+
+  /** Fold every run of two or more finished rows in `nodes` (siblings, in
+   *  order). A finished row right after a group joins it. Pending, failed and
+   *  refused rows stand alone and end a run. */
+  function collapseToolRows(nodes) {
+    let run = [];
+    let group = null;
+    const flush = () => {
+      if (group) {
+        for (const row of run) group.querySelector('.tool-group-body').append(row);
+        paintGroup(group);
+      } else if (run.length >= 2) {
+        paintGroup(makeGroup(run));
+      }
+      run = [];
+      group = null;
+    };
+    for (const node of nodes) {
+      if (node.classList?.contains('tool-group')) {
+        flush();
+        group = node;
+        continue;
+      }
+      if (foldable(node)) {
+        run.push(node);
+        continue;
+      }
+      flush();
+    }
+    flush();
+  }
+
   // ------------------------------------------------------------ the view
 
   const CONVERSATION_CSS = `
@@ -1355,6 +1439,22 @@
     .msg.me .msg-text p { margin: 0 0 .4em; } .msg.me .msg-text p:last-child { margin-bottom: 0; }
     .msg.me .msg-text ul, .msg.me .msg-text ol { margin: .2em 0 .4em; padding-left: 1.25em; }
     .msg.me .attachments { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 6px; }
+
+    /* A run of finished calls folds to one line: how many, of what kind,
+       touching what. The row still running stays out, under it. */
+    .tool-group { display: flex; flex-direction: column; margin: 1px 0; }
+    .tool-group-head {
+      display: flex; align-items: baseline; gap: 8px; min-width: 0; width: 100%;
+      font: inherit; font-size: 12.5px; color: var(--muted); text-align: left;
+      background: none; border: 0; padding: 1px 2px; border-radius: 6px; cursor: pointer;
+    }
+    .tool-group-head::before { content: ''; flex: none; width: 0; height: 0; border-top: 4px solid transparent; border-bottom: 4px solid transparent; border-left: 5px solid var(--faint); transform: translateY(-1px); transition: transform 120ms var(--settle); }
+    .tool-group[data-open="true"] .tool-group-head::before { transform: rotate(90deg) translateX(-1px); }
+    .tool-group-head:hover { background: var(--paper-2); color: var(--ink); }
+    .tool-group-count { flex: none; color: var(--ink); font-weight: 500; }
+    .tool-group-kinds { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .tool-group-body { display: flex; flex-direction: column; padding-left: 13px; }
+    .tool-group-body[hidden] { display: none; }
 
     @keyframes pulse { 0%, 100% { opacity: .35; } 50% { opacity: 1; } }
     @media (prefers-reduced-motion: reduce) { .tool::before, .turn-footer .pulse { animation: none; } .seg-thumb { transition: none; } }
@@ -3296,11 +3396,30 @@
       this.append(turn, row);
     }
 
+    /** The nodes that belong to a turn: everything between the previous
+     *  turn's footer (or the top) and this turn's footer. */
+    turnNodes(turn) {
+      const record = this.turns.get(turn);
+      if (!record?.footer?.isConnected) return [];
+      const nodes = [];
+      let at = record.footer.previousSibling;
+      while (at && !at.classList?.contains('turn-footer')) {
+        nodes.unshift(at);
+        at = at.previousSibling;
+      }
+      return nodes;
+    }
+
+    regroup(turn) {
+      collapseToolRows(this.turnNodes(turn));
+    }
+
     toolResult(turn, event) {
       const row = this.record(turn).tools.get(event.callId);
       if (!row || row.dataset.state === 'refused') return;
       if (row.dataset.state === 'pending' && event.ok && row.dataset.name !== 'apply_ops') {
         row.dataset.state = 'done';
+        this.regroup(turn);
         return;
       }
       if (!event.ok) {
@@ -3312,6 +3431,7 @@
       } else if (row.dataset.state === 'pending') {
         row.dataset.state = 'done';
       }
+      this.regroup(turn);
     }
 
     pendingApply(turn, path) {
@@ -3329,6 +3449,7 @@
       if (!apply) return;
       apply.row.dataset.state = 'done';
       apply.row.textContent = `Edited ${plural(event.count, 'element')} in ${event.path}`;
+      this.regroup(turn);
     }
 
     documentChanged(turn, event) {
@@ -3343,6 +3464,7 @@
       row.dataset.name = 'document.changed';
       row.append(renderText(`Changed document ${event.path}`));
       this.append(turn, row);
+      this.regroup(turn);
     }
 
     opsRefused(turn, event) {
@@ -3351,6 +3473,7 @@
       apply.row.dataset.state = 'refused';
       apply.row.textContent = `Refused — ${firstSentence(event.reason)}`;
       apply.row.title = event.reason ?? '';
+      this.regroup(turn);
     }
 
     queue(turn, present) {
@@ -3387,6 +3510,7 @@
     }
 
     finish(turn, event) {
+      this.regroup(turn);
       const record = this.record(turn);
       const status = event.type.slice('turn.'.length);
       const footer = this.footer(turn, status);
@@ -4416,6 +4540,7 @@
   };
 
   window.marbleAgentUI = { renderText, spring, project, TOKENS, conversationTags, eventBelongsToConversation, askResponse, TAG_CSS, fillMeters, usageAvailable, usageTone, formatReset, USAGE_CSS, pageTheme, applyPageTheme, fillRadios, fitPicker, fitPresets, sortProviders };
+  Object.assign(window.marbleAgentUI, { collapseToolRows, toolShortName });
 
   if (window.marble?.agent) mount();
   else addEventListener('marble:agent', mount, { once: true });

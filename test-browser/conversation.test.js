@@ -741,6 +741,8 @@ test('the transcript shows the agent’s words, its tool calls, and what changed
   assert.equal(await agent.locator('li').count(), 2);
   assert.equal(await view.locator('.msg.agent.live').count(), 0, 'the streamed text was replaced by the final text');
 
+  // Both calls finished, so they fold; open the fold to read them.
+  await view.locator('.tool-group-head').click();
   const tools = view.locator('.tool');
   assert.match(await tools.nth(0).textContent(), /Read garden/);
   assert.match(await tools.nth(1).textContent(), /Edited 1 element in garden/);
@@ -761,6 +763,35 @@ test('a CLI tool row names what it touched, never "Tried"', async () => {
   assert.equal(await rows.nth(1).getAttribute('data-short'), 'Read');
   assert.equal(await rows.nth(1).getAttribute('data-source'), 'harness.js');
   assert.equal(await view.locator('.tool', { hasText: 'Tried' }).count(), 0);
+});
+
+test('finished tool rows fold into one line that counts by kind and names sources', async () => {
+  const { view } = await mount();
+  await sendFrom(view, 'script:tools');
+  await view.locator('.turn-footer[data-status="completed"]').waitFor();
+  const group = view.locator('.tool-group');
+  assert.equal(await group.count(), 1);
+  const head = group.locator('.tool-group-head');
+  assert.match(await head.locator('.tool-group-count').textContent(), /^6 steps$/);
+  const kinds = await head.locator('.tool-group-kinds').textContent();
+  assert.match(kinds, /Shell ×2 · /);
+  assert.match(kinds, /Read ×2 harness\.js, agents\.mrbl/);
+  assert.match(kinds, /Grep packFocus/);
+  assert.match(kinds, /Edit agent-ui\.js/);
+  assert.equal(await head.getAttribute('aria-expanded'), 'false');
+  assert.equal(await group.locator('.tool').first().isVisible(), false);
+  await head.click();
+  assert.equal(await head.getAttribute('aria-expanded'), 'true');
+  assert.equal(await group.locator('.tool').first().isVisible(), true);
+  assert.equal(await group.locator('.tool').count(), 6);
+});
+
+test('a refused edit stays out of the fold', async () => {
+  const { view } = await mount();
+  await sendFrom(view, 'script:stale');
+  await view.locator('.turn-footer[data-status="completed"]').waitFor();
+  assert.equal(await view.locator('.tool-group').count(), 0);
+  assert.equal(await view.locator('.tool[data-state="refused"]').isVisible(), true);
 });
 
 test('undo reverts the turn and says so', async () => {
