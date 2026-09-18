@@ -12,6 +12,7 @@ const SCRIPTS = {
   hello: [{ say: 'Hello from the fake agent' }],
   slow: [{ sleep: 600 }, { say: 'done sleeping' }],
   stall: [{ silent: 5_000 }],
+  hold: [{ silent: 20_000 }],
   stubborn: [{ ignoreTerm: true }, { silent: 5_000 }],
   broken: [{ fail: 'You have hit your usage limit' }],
   forgetful: [{ lostWhenResumed: 'No conversation found with session ID: x' }, { say: 'fresh' }],
@@ -870,5 +871,100 @@ test('a process that waits for more input after its result is ended by the runne
   const turn = await finished(store, `${id}-t1`);
   assert.equal(turn.status, 'completed');
   assert.equal(turn.error, null);
+  await runner.close();
+});
+
+test('a steer that waited wraps the model prompt, not the user event', async () => {
+  const { store, runner } = await setup();
+  const { id } = await store.createConversation({ provider: 'fake' });
+  const first = await runner.send(id, { prompt: 'script:slow', context: { target: 'd' } });
+  const second = await runner.send(id, { prompt: 'script:hello\nkeep going', context: { target: 'd' }, dispatch: 'steer' });
+  assert.equal((await store.turn(second.turnId)).dispatch, 'steer');
+  assert.equal((await store.turn(second.turnId)).behind, true);
+  await finished(store, first.turnId);
+  await finished(store, second.turnId);
+  const user = (await store.events(id)).find((e) => e.turn === second.turnId && e.type === 'user');
+  assert.equal(user.text, 'script:hello\nkeep going');
+  const echoed = (await store.events(id)).find((e) => e.turn === second.turnId && e.type === 'text');
+  assert.match(echoed.text, /^prompt:While you were working I added this note/);
+  await runner.close();
+});
+
+test('idle steer does not wrap', async () => {
+  const { store, runner } = await setup();
+  const { id } = await store.createConversation({ provider: 'fake' });
+  const { turnId } = await runner.send(id, { prompt: 'script:hello', context: { target: 'd' }, dispatch: 'steer' });
+  await finished(store, turnId);
+  assert.equal((await store.turn(turnId)).behind, false);
+  const echoed = (await store.events(id)).find((e) => e.type === 'text');
+  assert.equal(echoed.text, 'prompt:script:hello');
+  await runner.close();
+});
+
+test('interrupt cancels the running turn then starts the next', async () => {
+  const { store, runner } = await setup();
+  const { id } = await store.createConversation({ provider: 'fake' });
+  const first = await runner.send(id, { prompt: 'script:hold', context: { target: 'd' } });
+  await until(() => runner.running().length === 1);
+  const second = await runner.send(id, { prompt: 'script:hello', context: { target: 'd' }, dispatch: 'interrupt' });
+  await finished(store, first.turnId);
+  await finished(store, second.turnId);
+  assert.equal((await store.turn(first.turnId)).status, 'cancelled');
+  assert.equal((await store.turn(second.turnId)).status, 'completed');
+  await runner.close();
+});
+
+test('queueCombine merges queued prompts onto the first turn', async () => {
+  const { store, runner } = await setup();
+  const { id } = await store.createConversation({ provider: 'fake' });
+  await store.updateConversation(id, { queueCombine: true });
+  const first = await runner.send(id, { prompt: 'script:slow', context: { target: 'd' } });
+  const a = await runner.send(id, { prompt: 'alpha note', context: { target: 'd' } });
+  const b = await runner.send(id, { prompt: 'script:hello', context: { target: 'd' } });
+  await finished(store, first.turnId);
+  await finished(store, a.turnId);
+  assert.equal((await store.turn(b.turnId)).status, 'combined');
+  assert.deepEqual((await store.turn(a.turnId)).bundle, ['alpha note', 'script:hello']);
+  const echoed = (await store.events(id)).find((e) => e.turn === a.turnId && e.type === 'text');
+  assert.equal(echoed.text, 'prompt:1. alpha note');
+  assert.ok((await store.events(id)).some((e) => e.type === 'turn.combined' && e.turn === b.turnId));
+  const userA = (await store.events(id)).find((e) => e.turn === a.turnId && e.type === 'user');
+  const userB = (await store.events(id)).find((e) => e.turn === b.turnId && e.type === 'user');
+  assert.equal(userA.text, 'alpha note');
+  assert.equal(userB.text, 'script:hello');
+  await runner.close();
+});
+
+test('combined interrupt cancels running and does not steer-wrap', async () => {
+  const { store, runner } = await setup();
+  const { id } = await store.createConversation({ provider: 'fake' });
+  await store.updateConversation(id, { queueCombine: true });
+  const first = await runner.send(id, { prompt: 'script:hold', context: { target: 'd' } });
+  await until(() => runner.running().length === 1);
+  const a = await runner.send(id, { prompt: 'one', context: { target: 'd' } });
+  const b = await runner.send(id, { prompt: 'script:hello', context: { target: 'd' }, dispatch: 'interrupt' });
+  await finished(store, first.turnId);
+  await finished(store, a.turnId);
+  assert.equal((await store.turn(first.turnId)).status, 'cancelled');
+  assert.equal((await store.turn(b.turnId)).status, 'combined');
+  const echoed = (await store.events(id)).find((e) => e.turn === a.turnId && e.type === 'text');
+  assert.equal(echoed.text, 'prompt:1. one');
+  await runner.close();
+});
+
+test('patchQueued edits a waiting prompt and cycles dispatch', async () => {
+  const { store, runner } = await setup();
+  const { id } = await store.createConversation({ provider: 'fake' });
+  const first = await runner.send(id, { prompt: 'script:hold', context: { target: 'd' } });
+  await until(() => runner.running().length === 1);
+  const second = await runner.send(id, { prompt: 'later', context: { target: 'd' } });
+  await runner.patchQueued(second.turnId, { prompt: 'script:hello' });
+  assert.equal((await store.turn(second.turnId)).prompt, 'script:hello');
+  assert.ok((await store.events(id)).some((e) => e.type === 'user.edited' && e.text === 'script:hello'));
+  await runner.patchQueued(second.turnId, { dispatch: 'steer' });
+  assert.equal((await store.turn(second.turnId)).dispatch, 'steer');
+  await runner.cancel(first.turnId);
+  await finished(store, first.turnId);
+  await finished(store, second.turnId);
   await runner.close();
 });

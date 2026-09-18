@@ -22,6 +22,8 @@ const SELECTION_BUDGET = 6_000;
 const STDERR_TAIL = 4_000;
 // How long closing the host waits for its running turns to write their end.
 const CLOSE_GRACE_MS = 5_000;
+const STEER_NOTE = 'While you were working I added this note. Treat it as course-correction.';
+const DISPATCH = new Set(['queue', 'steer', 'interrupt']);
 
 export function createRunner({ store, tools, providers, workdir, origin, bridgePath, browserPath, readDocument, publish, limits, log = console, skills = [], driveRoot, projects = null, power = '', sandbox = null, onLook = null, onFinish = null }) {
   const live = new Map(); // turnId → live turn
@@ -36,6 +38,17 @@ export function createRunner({ store, tools, providers, workdir, origin, bridgeP
     || turn.writable.has(docPath)
     || turn.touched.has(docPath)
     || turn.origins.has(docPath);
+  function liveFor(conversationId) {
+    return [...live.values()].filter((t) => t.conversationId === conversationId);
+  }
+  function queuedFor(conversationId) {
+    return order.map((id) => live.get(id)).filter((t) => t && t.conversationId === conversationId && t.status === 'queued');
+  }
+  function batchDispatch(turns) {
+    if (turns.some((t) => t.dispatch === 'interrupt')) return 'interrupt';
+    if (turns.some((t) => t.dispatch === 'steer')) return 'steer';
+    return 'queue';
+  }
 
   // Every publish for a conversation — a stored event's, or a raw delta's —
   // goes through this one chain, in the order it was called, the same way
@@ -86,7 +99,13 @@ export function createRunner({ store, tools, providers, workdir, origin, bridgeP
   async function composePrompt(turn, meta, project) {
     const context = turn.context;
     const kind = project.id === 'drive' ? 'drive' : 'project';
-    const lines = [turn.prompt, '', '---'];
+    let body = Array.isArray(turn.bundle)
+      ? turn.bundle.map((text, i) => `${i + 1}. ${text}`).join('\n')
+      : turn.prompt;
+    if (turn.dispatch === 'steer' && turn.behind) {
+      body = `${STEER_NOTE}\n\n${body}`;
+    }
+    const lines = [body, '', '---'];
     if (kind === 'drive') {
       lines.push(
         'Context from Marble Drive:',
@@ -124,10 +143,12 @@ export function createRunner({ store, tools, providers, workdir, origin, bridgeP
     return lines.join('\n').slice(-8_000);
   }
 
-  async function send(conversationId, { prompt, context }) {
+  async function send(conversationId, { prompt, context, dispatch }) {
     const meta = await store.conversation(conversationId);
     if (!meta) throw Object.assign(new Error(`no conversation "${conversationId}"`), { status: 404 });
     if (!context?.target) throw Object.assign(new Error('a turn needs context.target'), { status: 400 });
+    dispatch = DISPATCH.has(dispatch) ? dispatch : 'queue';
+    const behind = liveFor(conversationId).some((t) => t.status === 'queued' || t.status === 'running');
 
     const frozen = { viewing: context.viewing ?? null, target: context.target, selection: context.selection ?? [] };
     const also = [...new Set((Array.isArray(context.also) ? context.also : []).map((item) => String(item).trim()).filter(Boolean))]
@@ -142,13 +163,16 @@ export function createRunner({ store, tools, providers, workdir, origin, bridgeP
       }
     }
 
-    const record = await store.createTurn(conversationId, { prompt: String(prompt ?? ''), context: frozen });
+    const record = await store.createTurn(conversationId, { prompt: String(prompt ?? ''), context: frozen, dispatch, behind });
     let ended;
     const turn = {
       id: record.id,
       n: record.n,
       conversationId,
       prompt: record.prompt,
+      dispatch: record.dispatch,
+      behind: record.behind,
+      bundle: record.bundle,
       context: frozen,
       target: frozen.target,
       writable: new Set([frozen.target]),
@@ -212,9 +236,14 @@ export function createRunner({ store, tools, providers, workdir, origin, bridgeP
     // conversation finishing right now) could start this one and store
     // `turn.started` before the events that are supposed to precede it.
     await emit(turn, { type: 'user', text: turn.prompt, context: { viewing: frozen.viewing, target: frozen.target, selection: frozen.selection, also: frozen.also ?? [] } });
-    await emit(turn, { type: 'turn.queued' });
+    await emit(turn, { type: 'turn.queued', dispatch: turn.dispatch });
     live.set(turn.id, turn);
     order.push(turn.id);
+    const effective = meta.queueCombine ? batchDispatch(queuedFor(conversationId)) : turn.dispatch;
+    if (effective === 'interrupt') {
+      const running = liveFor(conversationId).find((t) => t.status === 'running' && t.id !== turn.id);
+      if (running) await cancel(running.id);
+    }
     await pump();
     return { turnId: turn.id, status: turn.status };
   }
@@ -245,7 +274,26 @@ export function createRunner({ store, tools, providers, workdir, origin, bridgeP
     }
   }
 
+  async function mergeQueued(conversationId) {
+    if (!(await store.conversation(conversationId)).queueCombine) return;
+    const waiting = queuedFor(conversationId);
+    if (waiting.length < 2) return;
+    const survivor = waiting[0];
+    survivor.bundle = waiting.map((t) => t.prompt);
+    survivor.dispatch = batchDispatch(waiting);
+    await store.updateTurn(survivor.id, { bundle: survivor.bundle, dispatch: survivor.dispatch });
+    for (const extra of waiting.slice(1)) {
+      live.delete(extra.id);
+      const idx = order.indexOf(extra.id);
+      if (idx !== -1) order.splice(idx, 1);
+      await emit(extra, { type: 'turn.combined' });
+      await store.updateTurn(extra.id, { status: 'combined', finishedAt: Date.now() });
+    }
+  }
+
   async function start(turn) {
+    await mergeQueued(turn.conversationId);
+    if (!live.has(turn.id) || turn.status !== 'queued') return;
     turn.status = 'running';
     // The moment the turn's base is taken: a person's edits before it are
     // history the turn reads; edits after it are concurrent with its writes.
@@ -587,6 +635,41 @@ export function createRunner({ store, tools, providers, workdir, origin, bridgeP
     return true;
   }
 
+  async function cancel(turnId) {
+    const turn = live.get(turnId);
+    if (!turn || turn.finishing) return false;
+    if (turn.status === 'queued') return dequeue(turnId);
+    stop(turn, { status: 'cancelled', error: null });
+    return true;
+  }
+
+  async function patchQueued(turnId, { prompt, dispatch } = {}) {
+    const turn = live.get(turnId);
+    if (!turn || turn.status !== 'queued') {
+      throw Object.assign(new Error('turn is not queued'), { status: 409 });
+    }
+    if (prompt !== undefined) {
+      const next = String(prompt).trim();
+      if (!next) throw Object.assign(new Error('prompt is empty'), { status: 400 });
+      turn.prompt = next;
+      await store.updateTurn(turnId, { prompt: next });
+      await emit(turn, { type: 'user.edited', text: next });
+    }
+    if (dispatch !== undefined) {
+      if (!DISPATCH.has(dispatch)) throw Object.assign(new Error('bad dispatch'), { status: 400 });
+      turn.dispatch = dispatch;
+      await store.updateTurn(turnId, { dispatch });
+      await emit(turn, { type: 'turn.dispatch', dispatch });
+      const meta = await store.conversation(turn.conversationId);
+      const effective = meta.queueCombine ? batchDispatch(queuedFor(turn.conversationId)) : turn.dispatch;
+      if (effective === 'interrupt') {
+        const running = liveFor(turn.conversationId).find((t) => t.status === 'running');
+        if (running) await cancel(running.id);
+        await pump();
+      }
+    }
+  }
+
   return {
     async boot() {
       await store.interruptUnfinished();
@@ -594,15 +677,11 @@ export function createRunner({ store, tools, providers, workdir, origin, bridgeP
 
     send,
 
-    async cancel(turnId) {
-      const turn = live.get(turnId);
-      if (!turn || turn.finishing) return false;
-      if (turn.status === 'queued') return dequeue(turnId);
-      stop(turn, { status: 'cancelled', error: null });
-      return true;
-    },
+    cancel,
 
     dequeue,
+
+    patchQueued,
 
     turnForToken: (token) => tokens.get(token) ?? null,
 
