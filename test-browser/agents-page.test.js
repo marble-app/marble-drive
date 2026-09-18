@@ -898,3 +898,51 @@ test('with no pane open, dragging a board card to the right edge opens it there'
   await page.waitForFunction(() => document.body.getAttribute('data-panel') === 'open');
   assert.equal(await page.locator('.pane marble-conversation').getAttribute('conversation'), id);
 });
+
+test('a thin board stacks its columns and scrolls as one', async () => {
+  const { page } = await openAgents({ viewport: { width: 980, height: 800 } });
+  const id = await page.evaluate(async () => {
+    const agent = window.marble.agent;
+    const id = await agent.start({ provider: 'fake' });
+    await agent.update(id, { title: 'stacked' });
+    return id;
+  });
+  await page.locator(`.conv[data-id="${id}"]`).waitFor();
+  await page.keyboard.press('v');
+  await page.waitForFunction(() => document.body.getAttribute('data-view') === 'board');
+  assert.equal(await page.locator('.board[data-stack]').count(), 0, 'wide enough for three columns');
+  await page.locator(`.column .conv[data-id="${id}"]`).click();
+  await page.waitForFunction(() => document.body.getAttribute('data-panel') === 'open');
+  await page.locator('.board[data-stack]').waitFor();
+  const cols = await page.evaluate(() => [...document.querySelectorAll('.column')].map((c) => c.getBoundingClientRect()).map((r) => ({ x: Math.round(r.x), y: Math.round(r.y) })));
+  assert.ok(cols[0].x === cols[1].x && cols[1].x === cols[2].x, 'one column of three');
+  assert.ok(cols[0].y < cols[1].y && cols[1].y < cols[2].y, 'stacked in order');
+});
+
+test('a card changing column animates into place', async () => {
+  const { page } = await openAgents();
+  const id = await page.evaluate(async () => {
+    const agent = window.marble.agent;
+    const id = await agent.start({ provider: 'fake' });
+    await agent.update(id, { title: 'mover' });
+    return id;
+  });
+  await page.locator(`.conv[data-id="${id}"]`).waitFor();
+  await page.keyboard.press('v');
+  await page.waitForFunction(() => document.body.getAttribute('data-view') === 'board');
+  await page.waitForFunction((cid) => document.querySelector(`.column .conv[data-id="${cid}"]`)?.getAnimations().every((a) => a.playState !== 'running'), id);
+  const moved = page.evaluate((cid) => new Promise((resolve, reject) => {
+    const el = document.querySelector(`.conv[data-id="${cid}"]`);
+    const start = performance.now();
+    const tick = () => {
+      const anim = el.getAnimations().find((a) => a.playState === 'running' && a.effect?.getKeyframes?.().some((k) => k.transform));
+      if (anim && el.closest('.column')?.dataset.col !== 'completed') resolve(anim.effect.getTiming().duration);
+      else if (performance.now() - start > 8000) reject(new Error('no column move animation'));
+      else requestAnimationFrame(tick);
+    };
+    tick();
+  }), id);
+  await page.evaluate((cid) => window.marble.agent.send(cid, { prompt: 'script:answer', target: 'garden', viewing: 'Agents', selection: [] }), id);
+  const duration = await moved;
+  assert.ok(duration > 0 && duration <= 420, `column move animates (${duration}ms)`);
+});

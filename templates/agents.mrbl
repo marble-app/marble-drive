@@ -687,6 +687,11 @@ __ICON__
     border-radius: 10px; background: var(--card); border: 1px solid var(--line);
     padding: .65rem .75rem;
   }
+  /* Too thin for three abreast — one column of three stages, scrolling as one. */
+  .board[data-stack] { flex-direction: column; overflow-y: auto; overflow-x: hidden; gap: .75rem; }
+  .board[data-stack] .column { flex: none; min-width: 0; overflow: visible; }
+  .board[data-stack] .column h2 { position: sticky; top: -.7rem; }
+  .board[data-stack] .rz-col { display: none !important; }
   .conv.marble-flip,
   .conv.marble-flip:active {
     transition: none !important;
@@ -1165,6 +1170,15 @@ __ICON__
     const list = $('#list');
     const libraryEl = $('.library');
     const boardEl = $('.board');
+    // Three columns need three times their floor. The board's width is what
+    // the pane leaves it, not the viewport, so this is measured, not queried.
+    const BOARD_MIN_COL = 14 * 16;
+    const fitBoard = () => {
+      if (!boardEl) return;
+      const w = boardEl.clientWidth;
+      boardEl.toggleAttribute('data-stack', w > 0 && w < 3 * BOARD_MIN_COL + 2 * 16 + 32);
+    };
+    if (boardEl && 'ResizeObserver' in window) new ResizeObserver(fitBoard).observe(boardEl);
     const foldersEl = $('.folders');
     const folderRail = $('.folder-rail');
     const focusEl = $('.focus');
@@ -4730,7 +4744,13 @@ __ICON__
         nodes.set(summary.id, el);
       }
       paintRow(el, summary);
+      // A card changing column visibly makes room: the same FLIP the view
+      // switch plays, shorter and unstaggered.
+      const wasIn = el.parentElement;
+      const onBoard = (document.body.getAttribute('data-view') || 'library') === 'board';
+      const first = onBoard && wasIn && !reduceMotion.matches ? captureRects() : null;
       place(el);
+      if (first && el.parentElement !== wasIn) playFlip(first, boardOrder(), { duration: 240, stagger: 0 });
       el.hidden = !matches(summary);
       el.classList.toggle('marble-open', summary.id === openId);
       if (summary.id === openId) fillChrome(summary.id);
@@ -4801,7 +4821,7 @@ __ICON__
       focused?.focusInput?.();
     }
 
-    const playFlip = (first, ordered) => {
+    const playFlip = (first, ordered, { duration = FLIP_MS, stagger = STAGGER_MS } = {}) => {
       flipAnims = [];
       ordered.forEach((el, index) => {
         const from = first.get(el);
@@ -4819,9 +4839,9 @@ __ICON__
             { transform: 'none' },
           ],
           {
-            duration: FLIP_MS,
+            duration,
             easing: FLIP_EASE,
-            delay: Math.min(index, 7) * STAGGER_MS,
+            delay: Math.min(index, 7) * stagger,
             fill: 'both',
           },
         );
