@@ -834,23 +834,25 @@ test('an existing conversation opens with its whole history', async () => {
 
 test('the context chip shows the target and the selection, and can drop the selection', async () => {
   const { page, view } = await mount();
-  assert.equal((await view.locator('.context-text').textContent()).trim(), 'garden');
+  const chip = view.locator('.editor .ichip[data-kind="context"]');
+  assert.equal((await chip.locator('.context-text').textContent()).trim(), 'garden');
   await page.evaluate(() => {
     const range = document.createRange();
     range.selectNodeContents(document.querySelector('[data-marble-id="h"]'));
     getSelection().removeAllRanges();
     getSelection().addRange(range);
   });
-  await view.locator('.context-text', { hasText: '1 selected' }).waitFor();
-  await view.locator('.context-clear').click();
-  assert.equal((await view.locator('.context-text').textContent()).trim(), 'garden');
+  await chip.locator('.context-text', { hasText: '1 selected' }).waitFor();
+  await chip.locator('.context-clear').click();
+  assert.equal(await chip.count(), 0);
 });
 
 test('the context chip names the aimed target and how many more are in view', async () => {
   const { page, view } = await mount();
   await page.evaluate(() => window.marble.agent.aim('notes', { also: ['reading', 'log'] }));
-  await view.locator('.context-text', { hasText: 'notes' }).waitFor();
-  assert.match((await view.locator('.context-text').textContent()).trim(), /\+ 2 more/);
+  const text = view.locator('.editor .ichip[data-kind="context"] .context-text');
+  await text.filter({ hasText: 'notes' }).waitFor();
+  assert.match((await text.textContent()).trim(), /\+ 2 more/);
 });
 
 test('shift+enter makes a new line instead of sending', async () => {

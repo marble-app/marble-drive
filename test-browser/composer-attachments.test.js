@@ -67,36 +67,46 @@ const sentFrom = async (page, view, typed) => {
   const started = page.evaluate(() => new Promise((resolve) => {
     document.querySelector('marble-conversation').addEventListener('conversation', (e) => resolve(e.detail.id), { once: true });
   }));
-  if (typed) await view.locator('.editor').fill(typed);
-  // Enter rather than the button: the drawer sits over the same corner of the
-  // page this test mounts the view in.
-  await view.locator('.editor').press('Enter');
+  const editor = view.locator('.editor');
+  if (typed) {
+    // Typed after the chip, not filled over it: a fill would take the chip out.
+    await editor.evaluate((el) => {
+      const range = document.createRange();
+      range.selectNodeContents(el);
+      range.collapse(false);
+      const sel = el.getRootNode().getSelection();
+      sel.removeAllRanges();
+      sel.addRange(range);
+    });
+    await editor.pressSequentially(typed);
+  }
+  await editor.press('Enter');
   return started;
 };
 
-test('a long paste becomes a card instead of filling the box', async () => {
+test('a long paste becomes a chip in the text instead of filling the box', async () => {
   const { view, errors } = await mount();
   const swallowed = await pasteText(view, LONG);
   assert.equal(swallowed, true, 'the composer should take the paste');
-  assert.equal(await view.locator('.editor').evaluate((el) => el.value), '');
-  const card = view.locator('.attach[data-kind="text"]');
-  await card.waitFor();
-  assert.match(await card.textContent(), /Pasted text/);
-  assert.match(await card.textContent(), /60 lines/);
+  const chip = view.locator('.editor .ichip[data-kind="text"]');
+  await chip.waitFor();
+  assert.match(await chip.textContent(), /Pasted text/);
+  assert.match(await chip.textContent(), /60 lines/);
+  assert.equal(await view.locator('.editor').evaluate((el) => el.value), '[pasted text 1] ');
   assert.deepEqual(errors, []);
 });
 
 test('a short paste is just typing', async () => {
   const { view } = await mount();
   const swallowed = await pasteText(view, 'a couple of words');
-  assert.equal(swallowed, false, 'a short paste must reach the textarea');
-  assert.equal(await view.locator('.attach').count(), 0);
+  assert.equal(swallowed, false, 'a short paste must reach the editor');
+  assert.equal(await view.locator('.ichip[data-key]').count(), 0);
 });
 
-test('opening a card shows the whole thing, and Escape puts it back', async () => {
+test('opening a chip shows the whole thing, and Escape puts it back', async () => {
   const { view } = await mount();
   await pasteText(view, LONG);
-  await view.locator('.attach[data-kind="text"]').click();
+  await view.locator('.editor .ichip[data-kind="text"]').click();
   const body = view.locator('.peek-body');
   await body.waitFor();
   assert.match(await view.locator('.peek-title').textContent(), /60 lines/);
@@ -105,16 +115,16 @@ test('opening a card shows the whole thing, and Escape puts it back', async () =
   await view.locator('.peek').waitFor({ state: 'hidden' });
 });
 
-test('taking a card off leaves nothing to send', async () => {
+test('deleting the chip from the text leaves nothing to send', async () => {
   const { view } = await mount();
   await pasteText(view, LONG);
   assert.equal(await view.locator('.send').isDisabled(), false);
-  await view.locator('.attach-remove').click();
-  assert.equal(await view.locator('.attach').count(), 0);
+  await view.locator('.editor').fill('');
+  assert.equal(await view.locator('.ichip[data-key]').count(), 0);
   assert.equal(await view.locator('.send').isDisabled(), true);
 });
 
-test('a sent paste travels as a tagged block and comes back as the same card', async () => {
+test('a sent paste travels as a tagged block with a token in the text, and comes back as the same chip', async () => {
   const { page, view, errors } = await mount();
   await pasteText(view, LONG);
   const id = await sentFrom(page, view, 'what is wrong with this log?');
@@ -122,19 +132,19 @@ test('a sent paste travels as a tagged block and comes back as the same card', a
   const prompt = await promptOf(id);
   assert.match(prompt, /^<pasted-text index="1" lines="60" chars="\d+">\n/);
   assert.match(prompt, /line 60: the quick brown fox[\s\S]*<\/pasted-text>/);
-  assert.match(prompt, /what is wrong with this log\?$/);
+  assert.match(prompt, /\[pasted text 1\] what is wrong with this log\?$/);
 
-  const card = view.locator('.msg.me .attach[data-kind="text"]');
-  await card.waitFor();
-  assert.match(await view.locator('.msg.me .msg-text').textContent(), /^what is wrong with this log\?$/);
-  assert.doesNotMatch(await view.locator('.msg.me .msg-text').textContent(), /pasted-text/);
+  const chip = view.locator('.msg.me .ichip[data-kind="text"]');
+  await chip.waitFor();
+  assert.match(await view.locator('.msg.me').textContent(), /what is wrong with this log\?$/);
+  assert.doesNotMatch(await view.locator('.msg.me').textContent(), /pasted-text|\[pasted text/);
   assert.deepEqual(errors, []);
 });
 
 test('a pasted image becomes a file the agent is given the path to', async () => {
   const { page, view, errors } = await mount();
   await pasteImage(view, PNG);
-  const shot = view.locator('.attach[data-kind="image"] .attach-shot');
+  const shot = view.locator('.editor .ichip[data-kind="image"] .ichip-shot');
   await shot.waitFor();
   assert.equal(await shot.evaluate((el) => el.src.startsWith('blob:')), true);
 
@@ -145,6 +155,7 @@ test('a pasted image becomes a file the agent is given the path to', async () =>
   assert.match(path, /\.marble\/agents\/uploads\/[0-9a-f]{16}\.png$/);
   assert.equal((await fsp.readFile(path)).length, Buffer.from(PNG, 'base64').length);
   assert.match(prompt, /name="shot\.png"/);
+  assert.match(prompt, /\[image 1\] what is in this\?$/);
   assert.deepEqual(errors, []);
 });
 
@@ -152,11 +163,22 @@ test('the sent image is shown back from the host, not from the dead blob', async
   const { page, view } = await mount();
   await pasteImage(view, PNG);
   await sentFrom(page, view, 'look');
-  const src = await view.locator('.msg.me .attach-shot').getAttribute('src');
+  const src = await view.locator('.msg.me .ichip-shot').getAttribute('src');
   assert.match(src, /^\/agent\/uploads\/[0-9a-f]{16}\.png$/);
   const response = await page.request.get(`${host.base}${src}`);
   assert.equal(response.status(), 200);
   assert.equal(response.headers()['content-type'], 'image/png');
+});
+
+test('chips are numbered in the order they sit in the text', async () => {
+  const { page, view } = await mount();
+  await pasteImage(view, PNG);
+  await pasteText(view, LONG);
+  const id = await sentFrom(page, view, 'both');
+  const prompt = await promptOf(id);
+  assert.match(prompt, /^<pasted-image index="1"/);
+  assert.match(prompt, /<pasted-text index="2"/);
+  assert.match(prompt, /\[image 1\] \[pasted text 2\] both$/);
 });
 
 test('an upload route only answers for a name it minted', async () => {

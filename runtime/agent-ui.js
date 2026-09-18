@@ -1190,10 +1190,22 @@
     .slash button { display: flex; flex-direction: column; align-items: flex-start; gap: 1px; width: 100%; font: inherit; text-align: left; color: var(--ink); background: none; border: 0; border-radius: 8px; padding: 6px 8px; cursor: pointer; }
     .slash button[aria-selected="true"], .slash button:hover { background: var(--accent-soft); }
     .slash button small { color: var(--faint); font-size: 11px; }
-    .context { display: flex; align-items: center; gap: 4px; align-self: flex-start; max-width: 100%; font-size: 11.5px; color: var(--muted); background: var(--paper-2); border-radius: 999px; padding: 2px 4px 2px 10px; }
-    .context-text { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-    .context-clear { font: inherit; border: 0; background: none; color: var(--faint); width: 18px; height: 18px; border-radius: 50%; cursor: pointer; line-height: 1; }
-    .context-clear[hidden] { display: none; }
+    /* A chip in the text: a pasted thing, or the document the message is
+       about. Non-editable, so the caret steps over it and Backspace takes it
+       out whole. */
+    .ichip {
+      display: inline-flex; align-items: center; gap: 5px; vertical-align: -3px; max-width: 100%;
+      margin: 0 1px; padding: 1px 8px 1px 6px; border-radius: 999px;
+      font-size: 11.5px; font-weight: 500; line-height: 1.5; color: var(--muted);
+      background: var(--paper-2); border: 1px solid var(--line); cursor: pointer; user-select: none;
+      transition: border-color 160ms var(--settle), background 160ms var(--settle);
+    }
+    .ichip:hover { border-color: var(--accent); background: var(--card); }
+    .ichip[data-kind="context"] { padding-right: 3px; margin-right: 5px; cursor: default; }
+    .ichip[data-kind="context"]:hover { border-color: var(--line); background: var(--paper-2); }
+    .ichip-shot { width: 22px; height: 22px; border-radius: 6px; object-fit: cover; background: var(--paper-3); margin-left: -3px; }
+    .ichip-name, .context-text { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .context-clear { font: inherit; border: 0; background: none; color: var(--faint); width: 16px; height: 16px; border-radius: 50%; cursor: pointer; line-height: 1; padding: 0; }
     .context-clear:hover { background: var(--line); color: var(--ink); }
     .row { display: flex; flex-direction: column; align-items: stretch; gap: 6px; background: var(--card); border: 1px solid var(--line); border-radius: 14px; padding: 8px 8px 8px 12px; transition: border-color 200ms var(--settle), box-shadow 200ms var(--settle); }
     .row:focus-within { border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-soft); }
@@ -1212,14 +1224,8 @@
     .stop { background: var(--paper-2); color: var(--ink); }
     .stop[hidden] { display: none; }
 
-    /* Attachments. A wall of pasted text and a screenshot are both things you
-       want to send and neither is something you want to read back in a
-       one-line box, so each becomes a card: a name, a size, a glance at the
-       contents, and a way to open it or take it off again. The same card is
-       what the sent message shows, because the message is the same thing. */
-    .attachments { display: flex; flex-wrap: wrap; gap: 6px; }
-    .attachments[hidden] { display: none; }
-    .attach-wrap { position: relative; display: flex; }
+    /* The card a pasted thing opens into (the peek), and the fallback strip
+       for an old message whose text has no token for its block. */
     .attach {
       display: block; width: 172px; padding: 0; overflow: hidden;
       font: inherit; text-align: left; color: var(--ink);
@@ -1242,17 +1248,6 @@
       mask-image: linear-gradient(to bottom, #000 45%, transparent);
     }
     .attach-shot { display: block; width: 100%; height: 76px; object-fit: cover; background: var(--paper-3); }
-    .attach-remove {
-      position: absolute; top: -6px; right: -6px; width: 19px; height: 19px;
-      display: grid; place-items: center; padding: 0; line-height: 1;
-      font: inherit; font-size: 12px; color: var(--muted);
-      background: var(--card); border: 1px solid var(--line); border-radius: 50%;
-      cursor: pointer; opacity: 0; transition: opacity 160ms var(--settle), color 160ms var(--settle);
-    }
-    .attach-wrap:hover .attach-remove, .attach-wrap:focus-within .attach-remove { opacity: 1; }
-    .attach-remove:hover, .attach-remove:focus-visible { color: var(--danger); outline: none; opacity: 1; }
-    @media (hover: none) { .attach-remove { opacity: 1; } }
-
     /* Opening a card does not take you anywhere: the whole of it unfolds
        above the box you were typing in, and Escape puts it back. */
     .peek {
@@ -1308,6 +1303,9 @@
   // a named block rather than as the person's own sentence — and so the sent
   // message can be shown back as the same cards the composer had.
   const PASTED = /<pasted-(text|image)\b([^>]*)>([\s\S]*?)<\/pasted-\1>\n?/g;
+  // The token a chip leaves in the text, so the person can point at it and the
+  // agent can match it to the block above.
+  const TOKEN = /\[(image|pasted text) (\d+)\]/g;
 
   function splitPasted(text) {
     const blocks = [];
@@ -1349,7 +1347,8 @@
     const walk = (node) => {
       for (const child of node.childNodes) {
         if (child.nodeType === Node.TEXT_NODE) {
-          out.push(child.data.replace(/ /g, ' '));
+          // An empty node (what a deletion leaves) is not a line.
+          if (child.data) out.push(child.data.replace(/ /g, ' '));
           continue;
         }
         if (child.nodeType !== Node.ELEMENT_NODE) continue;
@@ -1588,9 +1587,7 @@
             </div>
             <div class="peek-body"></div>
           </div>
-          <div class="context"><span class="context-text"></span><button type="button" class="context-clear" aria-label="Don’t send the selection">×</button></div>
           <div class="row">
-            <div class="attachments" hidden></div>
             <div class="chips" hidden></div>
             <div class="row-input">
               <div class="editor" contenteditable="true" role="textbox" aria-multiline="true" aria-label="Message" data-placeholder="Ask about this document…" data-empty></div>
@@ -1624,13 +1621,10 @@
       this.effortBox = root.querySelector('[data-seg="effort"]');
       this.slash = root.querySelector('.slash');
       this.chipsEl = root.querySelector('.chips');
-      this.attachmentsEl = root.querySelector('.row > .attachments');
       this.peek = root.querySelector('.peek');
       this.peekTitle = root.querySelector('.peek-title');
       this.peekBody = root.querySelector('.peek-body');
       this.peekClose = root.querySelector('.peek-close');
-      this.contextText = root.querySelector('.context-text');
-      this.contextClear = root.querySelector('.context-clear');
       this.input = root.querySelector('.editor');
       Object.defineProperty(this.input, 'value', {
         get: () => serializeEditor(this.input),
@@ -1771,6 +1765,8 @@
         this.filterSlash();
         this.onEdited();
       });
+      this.input.addEventListener('focus', () => this.settleCaret());
+      this.input.addEventListener('beforeinput', () => this.settleCaret());
 
       // A screenshot and a page of pasted log are the two things that arrive
       // through the clipboard and do not belong in a one-line box.
@@ -1801,10 +1797,6 @@
       });
       this.stopButton.addEventListener('click', () => {
         if (this.running) this.api.cancel(this.running.turn).catch((err) => this.system(err.message, true));
-      });
-      this.contextClear.addEventListener('click', () => {
-        this.skipSelection = true;
-        this.updateContext();
       });
       this.onContext = () => {
         this.skipSelection = false;
@@ -1856,6 +1848,8 @@
       this.composerChips = this.composerChips.filter((chip) => chip.kind === 'model' || chip.kind === 'effort');
       this.renderChips();
       this.clearAttachments();
+      this.skipSelection = false;
+      this.updateContext();
       this.seen = 0;
       this.turns.clear();
       this.prompts.clear();
@@ -2400,16 +2394,42 @@
       this.sendButton.disabled = this.sending || noAgent || !canSend;
     }
 
-    /** What follows any change to the box: the empty marker and the send button. */
+    /** What follows any change to the box: the attachment list, the empty
+     *  marker and the send button. */
     onEdited() {
+      this.syncChips();
       // A bullet with nothing in it is still something on screen: no placeholder over it.
-      const empty = !this.input.value && !this.input.querySelector('.ichip[data-key], li');
+      const empty = !this.input.value.trim() && !this.attachments.length && !this.input.querySelector('li');
       this.input.toggleAttribute('data-empty', empty);
       this.updateSendable();
     }
 
+    /** Setting the text keeps the chips: a token in the new text becomes the
+     *  chip it named, and the document chip stays at the front. */
     setValue(text) {
+      const before = this.orderedAttachments();
+      const context = this.input.querySelector('.ichip[data-kind="context"]');
       fillEditor(this.input, text);
+      const walker = document.createTreeWalker(this.input, NodeFilter.SHOW_TEXT);
+      const nodes = [];
+      for (let node = walker.nextNode(); node; node = walker.nextNode()) {
+        TOKEN.lastIndex = 0;
+        if (TOKEN.test(node.data)) nodes.push(node);
+      }
+      for (const node of nodes) {
+        const frag = document.createDocumentFragment();
+        let last = 0;
+        TOKEN.lastIndex = 0;
+        for (let m = TOKEN.exec(node.data); m; m = TOKEN.exec(node.data)) {
+          frag.append(node.data.slice(last, m.index));
+          const item = before[Number(m[2]) - 1];
+          frag.append(item ? this.attachChip(item) : m[0]);
+          last = m.index + m[0].length;
+        }
+        frag.append(node.data.slice(last));
+        node.replaceWith(frag);
+      }
+      if (context) this.input.prepend(context);
       if (this.shadowRoot.activeElement === this.input) placeCaret(this.input);
       this.onEdited();
     }
@@ -2419,14 +2439,42 @@
       this.onEdited();
     }
 
+    /** The document chip: what this message is about, at the front of the
+     *  text. Taking it out sends without the selection; the document itself
+     *  still travels, because a turn cannot exist without one. */
     updateContext() {
       const { target, selection, also = [] } = this.api?.context() ?? { target: '', selection: [], also: [] };
+      let chip = this.input.querySelector('.ichip[data-kind="context"]');
+      if (!chip && !this.skipSelection && target) {
+        chip = this.contextChip();
+        this.input.prepend(chip);
+        this.settleCaret();
+      }
+      if (!chip) return;
       const count = this.skipSelection ? 0 : selection.length;
       const parts = [target];
       if (count) parts.push(`${count} selected`);
       if (also.length) parts.push(`+ ${also.length} more`);
-      this.contextText.textContent = parts.join(' · ');
-      this.contextClear.hidden = !count;
+      chip.querySelector('.context-text').textContent = parts.join(' · ');
+      this.onEdited();
+    }
+
+    contextChip() {
+      const chip = h('span', 'ichip');
+      chip.contentEditable = 'false';
+      chip.dataset.kind = 'context';
+      chip.append(h('span', 'context-text'));
+      const clear = h('button', 'context-clear', '×');
+      clear.type = 'button';
+      clear.setAttribute('aria-label', 'Don’t send the selection');
+      clear.addEventListener('click', () => {
+        chip.remove();
+        this.skipSelection = true;
+        this.onEdited();
+        this.focusInput();
+      });
+      chip.append(clear);
+      return chip;
     }
 
     async submit() {
@@ -2681,7 +2729,7 @@
 
     attachText(text) {
       const lines = text.split('\n');
-      this.attachments.push({
+      const item = {
         key: `a${(this.attachSeq += 1)}`,
         kind: 'text',
         name: 'Pasted text',
@@ -2689,8 +2737,9 @@
         lines: lines.length,
         bytes: new Blob([text]).size,
         peek: lines.slice(0, 4).join('\n'),
-      });
-      this.renderAttachments();
+      };
+      this.attachments.push(item);
+      this.insertChip(this.attachChip(item));
       this.focusInput();
     }
 
@@ -2703,7 +2752,7 @@
         this.system(`${file.name || 'That image'} is ${sizeOf(file.size)} — larger than the ${sizeOf(MAX_IMAGE)} an image can be.`, true);
         return;
       }
-      this.attachments.push({
+      const item = {
         key: `a${(this.attachSeq += 1)}`,
         kind: 'image',
         name: file.name || 'Pasted image',
@@ -2711,42 +2760,95 @@
         bytes: file.size,
         file,
         src: URL.createObjectURL(file),
-      });
-      this.renderAttachments();
+      };
+      this.attachments.push(item);
+      this.insertChip(this.attachChip(item));
       this.focusInput();
     }
 
     dropAttachment(item) {
-      if (item.src) URL.revokeObjectURL(item.src);
-      this.attachments = this.attachments.filter((other) => other !== item);
-      this.renderAttachments();
-      if (this.peekItem === item) this.closePeek();
+      this.input.querySelector(`.ichip[data-key="${CSS.escape(item.key)}"]`)?.remove();
+      this.onEdited();
       this.focusInput();
     }
 
     clearAttachments() {
-      for (const item of this.attachments) {
-        if (item.src) URL.revokeObjectURL(item.src);
-      }
-      this.attachments = [];
+      for (const chip of this.input.querySelectorAll('.ichip[data-key]')) chip.remove();
       this.closePeek();
-      this.renderAttachments();
+      this.onEdited();
     }
 
-    renderAttachments() {
-      if (!this.attachmentsEl) return;
-      this.attachmentsEl.replaceChildren();
-      this.attachmentsEl.hidden = !this.attachments.length;
-      for (const item of this.attachments) {
-        const wrap = h('div', 'attach-wrap');
-        const remove = h('button', 'attach-remove', '×');
-        remove.type = 'button';
-        remove.setAttribute('aria-label', `Remove ${item.name}`);
-        remove.addEventListener('click', () => this.dropAttachment(item));
-        wrap.append(this.attachCard(item), remove);
-        this.attachmentsEl.append(wrap);
+    /** The chip a pasted thing is shown as, in the box and in the sent bubble. */
+    attachChip(item) {
+      const chip = h('span', 'ichip');
+      chip.contentEditable = 'false';
+      chip.dataset.kind = item.kind;
+      if (item.key) chip.dataset.key = item.key;
+      chip.setAttribute('role', 'button');
+      chip.tabIndex = -1;
+      if (item.kind === 'image') {
+        const shot = h('img', 'ichip-shot');
+        shot.src = item.src ?? item.url ?? '';
+        shot.alt = '';
+        chip.append(shot, h('span', 'ichip-name', item.name));
+        chip.setAttribute('aria-label', `${item.name}, ${sizeOf(item.bytes ?? 0)} — open`);
+      } else {
+        chip.append(h('span', 'ichip-name', `Pasted text · ${item.lines} lines`));
+        chip.setAttribute('aria-label', `Pasted text, ${item.lines} lines — open`);
       }
-      this.updateSendable();
+      chip.addEventListener('click', () => this.openPeek(item));
+      return chip;
+    }
+
+    /** At the caret when the box has it, else at the end. A space follows so
+     *  typing carries on after the chip. */
+    insertChip(chip) {
+      this.settleCaret();
+      const at = selectionIn(this.input);
+      const space = document.createTextNode(' ');
+      if (at) {
+        at.range.deleteContents();
+        at.range.insertNode(space);
+        at.range.insertNode(chip);
+      } else {
+        this.input.append(chip, space);
+      }
+      placeCaret(space, 1);
+      this.onEdited();
+    }
+
+    /** The document chip is always first: a caret in front of it is moved
+     *  behind it, so nothing typed or pasted lands ahead of it. */
+    settleCaret() {
+      const context = this.input.firstChild;
+      if (!context?.classList?.contains('ichip') || context.dataset.kind !== 'context') return;
+      const at = selectionIn(this.input);
+      // A selection that starts in front of the chip is a selection over it
+      // (select-all); deleting or replacing that takes the chip too, on purpose.
+      if (!at || !at.range.collapsed) return;
+      const { range } = at;
+      const before = range.startContainer === this.input && range.startOffset === 0;
+      if (before || context.contains(range.startContainer)) placeCaret(this.input, 1);
+    }
+
+    /** The list follows the box: a chip that is gone is an attachment that
+     *  is gone, whichever key took it out. */
+    syncChips() {
+      const keys = new Set([...this.input.querySelectorAll('.ichip[data-key]')].map((chip) => chip.dataset.key));
+      for (const item of this.attachments) {
+        if (keys.has(item.key)) continue;
+        if (item.src) URL.revokeObjectURL(item.src);
+        if (this.peekItem === item) this.closePeek();
+      }
+      this.attachments = this.attachments.filter((item) => keys.has(item.key));
+      if (!this.input.querySelector('.ichip[data-kind="context"]')) this.skipSelection = true;
+    }
+
+    /** Attachments in the order their chips sit in the text, which is the
+     *  order the blocks are numbered in. */
+    orderedAttachments() {
+      const byKey = new Map(this.attachments.map((item) => [item.key, item]));
+      return [...this.input.querySelectorAll('.ichip[data-key]')].map((chip) => byKey.get(chip.dataset.key)).filter(Boolean);
     }
 
     /** The same card for a paste waiting to be sent and for one already sent:
@@ -2801,7 +2903,7 @@
      *  the disk, so a path is the only thing all of them can open. */
     async packAttachments() {
       const blocks = [];
-      for (const [index, item] of this.attachments.entries()) {
+      for (const [index, item] of this.orderedAttachments().entries()) {
         const at = index + 1;
         if (item.kind === 'text') {
           blocks.push(`<pasted-text index="${at}" lines="${item.lines}" chars="${item.text.length}">\n${item.text}\n</pasted-text>`);
