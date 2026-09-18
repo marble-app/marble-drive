@@ -52,7 +52,7 @@ const host = await startDrive({
 });
 test.after(() => host.close());
 
-test('a conflict fork shows You, Agent, Keep this, and Merge', async () => {
+test('a conflict fork says why it is there, and shows You, Agent, Keep this, and Ask an agent to combine', async () => {
   await host.reset();
   const { page, errors } = await host.newPage();
   await page.goto(`${host.base}/a/forked`);
@@ -61,11 +61,34 @@ test('a conflict fork shows You, Agent, Keep this, and Merge', async () => {
   await bar.waitFor();
 
   const labels = await bar.locator('button').allTextContents();
-  assert.deepEqual(labels.map((t) => t.trim()), ['You', 'Agent', 'Keep this', 'Merge']);
+  assert.deepEqual(labels.map((t) => t.trim()), ['You', 'Agent', 'Keep this', 'Ask an agent to combine']);
+  assert.equal(await bar.locator('.marble-fork-why').textContent(), 'You and the agent both changed this.');
   assert.equal(await bar.getByRole('button', { name: 'Approve' }).count(), 0);
   assert.equal(await bar.getByRole('button', { name: 'Reject' }).count(), 0);
   assert.equal(await page.locator('h1.marble-alt-shown').textContent(), 'Yours');
   assert.deepEqual(errors.filter((message) => !/favicon/.test(message)), []);
+});
+
+test('Ask an agent to combine hands both versions to the agent drawer', async () => {
+  await host.reset();
+  const { page } = await host.newPage();
+  await page.goto(`${host.base}/a/forked`);
+  await page.waitForFunction(() => document.documentElement.classList.contains('marble-collab-host'));
+  await page.locator('marble-alt > .marble-fork').waitFor();
+  await page.evaluate(() => {
+    window.__agent = { selected: null, aimed: null, opened: 0 };
+    window.marble.agent = {
+      select: (ids) => { window.__agent.selected = ids; },
+      aim: (app) => { window.__agent.aimed = app; },
+      current: () => null,
+      send: () => {},
+      open: () => { window.__agent.opened += 1; },
+    };
+  });
+  await page.getByRole('button', { name: 'Ask an agent to combine both versions' }).click();
+  const seen = await page.evaluate(() => window.__agent);
+  assert.deepEqual(seen.selected, ['hy', 'ha']);
+  assert.equal(seen.opened, 1);
 });
 
 test('Keep this commits the version that is showing', async () => {

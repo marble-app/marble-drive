@@ -77,6 +77,11 @@
         letter-spacing: -.01em;
         animation: marble-fade-in 200ms ${EASE} both;
       }
+      .marble-fork-why {
+        flex-basis: 100%;
+        color: var(--muted, #5a5a5a);
+        margin-bottom: -.15rem;
+      }
       @keyframes marble-fade-in {
         from { opacity: 0; }
         to { opacity: 1; }
@@ -657,6 +662,11 @@
       bar.setAttribute(TRANSIENT, '');
       bar.setAttribute('contenteditable', 'false');
 
+      // Why the bar is here at all, before what to do about it.
+      const why = document.createElement('div');
+      why.className = 'marble-fork-why';
+      why.textContent = 'You and the agent both changed this.';
+
       const seg = document.createElement('div');
       seg.className = 'marble-fork-seg';
       seg.setAttribute('role', 'group');
@@ -698,14 +708,15 @@
         });
         const merge = document.createElement('button');
         merge.type = 'button';
-        merge.textContent = 'Merge';
-        merge.setAttribute('aria-label', 'Ask another agent to merge these versions');
-        merge.title = 'Ask another agent to merge';
+        // It does not merge; it hands both versions to an agent for a third.
+        merge.textContent = 'Ask an agent to combine';
+        merge.setAttribute('aria-label', 'Ask an agent to combine both versions');
+        merge.title = 'Sends both versions to an agent, which writes a third';
         merge.addEventListener('click', () => askMerge(alt));
         acts.append(keep, merge);
       };
 
-      bar.append(seg, acts);
+      bar.append(why, seg, acts);
       alt.append(bar);
       render();
       new MutationObserver(render).observe(alt, { attributes: true, attributeFilter: [ACTIVE], childList: true });
