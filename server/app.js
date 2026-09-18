@@ -94,6 +94,7 @@ const RUNTIME = {
   'agent.js': () => path.join(REPO, 'runtime', 'agent.js'),
   'agent-ui.js': () => path.join(REPO, 'runtime', 'agent-ui.js'),
   'agent-folders.js': () => path.join(REPO, 'runtime', 'agent-folders.js'),
+  'choice-question.js': () => path.join(REPO, 'runtime', 'choice-question.js'),
   'collab.js': () => path.join(REPO, 'runtime', 'collab.js'),
 };
 

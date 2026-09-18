@@ -620,6 +620,7 @@ test("a document is served with the agent scripts after the Drive's, when agents
     assert.equal(response.status, 200, file);
     assert.match(response.headers.get('content-type'), /javascript/);
   }
+  assert.equal((await fetch(`${base}/runtime/choice-question.js`)).status, 200);
 });
 
 test('a document that presents agents itself gets the API and the conversation element, not a second drawer script skip', async () => {
