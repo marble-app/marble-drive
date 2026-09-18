@@ -280,9 +280,11 @@ test('the topbar keeps one thin view bar; the CLI bar lives in the filter popove
   await page.locator('.cli [data-cli="fake"]').waitFor();
   const css = await page.locator('.views [data-view="library"]').evaluate((el) => {
     const s = getComputedStyle(el);
+    // The pressed pill is the sliding thumb when the switch has one.
+    const pill = getComputedStyle(el.parentElement.querySelector(':scope > .seg-thumb') ?? el);
     const track = getComputedStyle(el.parentElement);
     return {
-      bg: s.backgroundColor.replace(/\s/g, ''),
+      bg: pill.backgroundColor.replace(/\s/g, ''),
       pad: parseFloat(s.paddingTop),
       radius: track.borderRadius,
     };
