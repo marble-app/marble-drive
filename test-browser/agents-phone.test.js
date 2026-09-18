@@ -222,3 +222,77 @@ test('tapping a Deck row opens the conversation full screen at the phone density
   await page.waitForFunction(() => !document.body.hasAttribute('data-open'));
   assert.equal(await page.locator('.deck').isVisible(), true);
 });
+
+const seedTwelve = async (page) => {
+  const ids = await page.evaluate(async () => {
+    const agent = window.marble.agent;
+    const out = [];
+    for (let i = 0; i < 12; i += 1) out.push(await agent.start({ provider: 'fake' }));
+    return out;
+  });
+  for (const [i, id] of ids.entries()) {
+    await host.drive.agents.store.updateConversation(id, { title: `Chat ${i}`, target: `Research/${i}.mrbl`, activity: 'idle', createdAt: 1000 + i });
+  }
+  return ids;
+};
+
+const openPhoneFocus = async (page) => {
+  await page.evaluate(() => localStorage.setItem('marble-agents:view', 'focus'));
+  await page.reload();
+  await page.waitForFunction(() => document.querySelectorAll('.focus[data-phone] .focus-card').length === 12);
+  await page.waitForFunction(() => !document.querySelector('.focus').hasAttribute('data-settling'));
+};
+
+test('phone Focus: one Full, digests beside it, chips beyond, slivers at the ends; the pane overlays the Full', async () => {
+  const { page } = await openAgents();
+  await seedTwelve(page);
+  await openPhoneFocus(page);
+  const lods = await page.evaluate(() => [...document.querySelectorAll('.focus-card')].map((c) => c.dataset.lod));
+  assert.equal(lods.filter((l) => l === 'full').length, 1, lods.join(','));
+  assert.ok(lods.includes('digest') && lods.includes('chip') && lods.includes('sliver'), lods.join(','));
+  const full = await page.locator('.focus-card[data-lod="full"]').boundingBox();
+  const pane = await page.locator('.pane').boundingBox();
+  assert.ok(Math.abs(full.y - pane.y) < 2 && Math.abs(full.height - pane.height) < 2, `pane ${pane.y}/${pane.height} vs full ${full.y}/${full.height}`);
+  assert.ok(full.height > 300, `full is ${full.height}`);
+});
+
+test('phone Focus: dragging the stack keeps the grabbed card under the pointer, and a release snaps to one Full', async () => {
+  const { page } = await openAgents();
+  const ids = await seedTwelve(page);
+  await openPhoneFocus(page);
+  const before = await page.evaluate(() => document.querySelector('.focus-card[data-lod="full"]').dataset.id);
+  const digest = page.locator('.focus-card[data-lod="digest"]').last();
+  const grabbedId = await digest.getAttribute('data-id');
+  const box = await digest.boundingBox();
+  const offset = 20;
+  const grabY = box.y + offset;
+  await page.mouse.move(200, grabY);
+  await page.mouse.down();
+  const drift = [];
+  for (let y = grabY; y > grabY - 220; y -= 20) {
+    await page.mouse.move(200, y);
+    const top = (await page.locator(`.focus-card[data-id="${grabbedId}"]`).boundingBox()).y;
+    drift.push(Math.abs((y - offset) - top));
+  }
+  assert.ok(Math.max(...drift.slice(1)) < 4, `card drifted ${Math.max(...drift)}px`);
+  await page.mouse.up();
+  await page.waitForFunction(() => document.querySelectorAll('.focus-card[data-lod="full"]').length === 1 && !document.querySelector('.focus').hasAttribute('data-settling'));
+  const after = await page.evaluate(() => document.querySelector('.focus-card[data-lod="full"]').dataset.id);
+  assert.notEqual(after, before);
+  assert.ok(ids.includes(after));
+  assert.equal(await page.evaluate(() => document.querySelector('marble-conversation').getAttribute('conversation')), after);
+});
+
+test('phone Focus: less room demotes the neighbours and keeps the Full', async () => {
+  const { page } = await openAgents();
+  await seedTwelve(page);
+  await openPhoneFocus(page);
+  const tall = await page.evaluate(() => document.querySelectorAll('.focus-card[data-lod="digest"]').length);
+  await page.setViewportSize({ width: 393, height: 500 });
+  await page.waitForTimeout(150);
+  const short = await page.evaluate(() => document.querySelectorAll('.focus-card[data-lod="digest"]').length);
+  assert.ok(short <= tall);
+  const full = await page.locator('.focus-card[data-lod="full"]').boundingBox();
+  assert.ok(full.height >= 112, `full is ${full.height}`);
+  assert.equal(await page.evaluate(() => document.querySelectorAll('.focus-card[data-lod="full"]').length), 1);
+});

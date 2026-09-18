@@ -639,6 +639,21 @@ __ICON__
   .focus-look h3 { margin: 0 0 .35rem; font-size: 1rem; font-weight: 500; }
   .focus-look .look-meta { color: var(--muted); font-size: .8rem; margin: 0 0 .75rem; }
   .focus-look .look-events { margin: 0; padding-left: 1.1rem; color: var(--ink); font-size: .85rem; }
+  /* ---- Focus on a phone: one column, one scalar. A card's size is its
+     distance from the one in your hand; the pane sits over the Full. */
+  .focus[data-phone] { position: relative; overflow: hidden; height: calc(var(--vv-h, 100vh) - var(--topbar-h, 2.75rem)); touch-action: none; padding: 0; }
+  .focus[data-phone] .focus-card { position: absolute; left: .75rem; right: .75rem; width: auto; margin: 0; overflow: hidden; border-radius: 12px; transition: none; transform: none; }
+  .focus[data-phone] .focus-card[data-lod="sliver"] { border-radius: 4px 4px 0 0; box-shadow: none; }
+  .focus[data-phone] .focus-card[data-lod="sliver"] .focus-card-head,
+  .focus[data-phone] .focus-card[data-lod="sliver"] .focus-card-body { opacity: 0; }
+  .focus[data-phone] .focus-card[data-lod="chip"] .focus-card-body { display: none; }
+  .focus[data-phone] .focus-card[data-lod="full"] .focus-card-body { opacity: .5; }
+  .focus[data-phone] .focus-card-actions, .focus[data-phone] .focus-slot, .focus[data-phone] .focus-newgroup,
+  .focus[data-phone] .focus-pinslot, .focus[data-phone] .focus-extent, .focus[data-phone] .focus-basin,
+  .focus[data-phone] .focus-empty { display: none; }
+  .focus[data-phone] .focus-card-head { min-height: 44px; }
+  .focus[data-phone][data-settling] .focus-card { pointer-events: none; }
+  @media (prefers-reduced-motion: reduce) { .focus[data-phone] .focus-card { transition: opacity 150ms linear; } }
   .focus[data-stack] { overflow: auto; display: flex; flex-direction: column; gap: .65rem; padding: .75rem; }
   .focus[data-stack] .focus-card {
     position: relative; left: auto !important; top: auto !important;
@@ -2699,7 +2714,9 @@ __ICON__
      *  stacked list, and it is off the canvas entirely. */
     const layoutFocusPane = (fullIds) => {
       if (!pane || !focusEl) return;
-      const stacked = focusEl.hasAttribute('data-stack') || narrowView.matches;
+      // The phone places the pane itself, over the Full of its column.
+      if (narrowView.matches) return;
+      const stacked = focusEl.hasAttribute('data-stack');
       const stage = focusPack?.stage;
       if (!fullIds.length || stacked || !stage || !(stage.w > 0)) {
         hideFocusPane();
@@ -3548,6 +3565,8 @@ __ICON__
       });
       card.addEventListener('click', (event) => {
         if (focusSuppressClick) return;
+        // On a phone the stack's own pointer handler answers a tap.
+        if (narrowView.matches) return;
         if (event.target.closest('button, a, input, textarea, marble-conversation')) return;
         if (event.altKey) {
           openBeside(card.dataset.id);
@@ -3556,6 +3575,7 @@ __ICON__
         selectFocusCard(card.dataset.id, event);
       });
       card.addEventListener('dblclick', (event) => {
+        if (narrowView.matches) return;
         if (event.target.closest('button, a, input, textarea, marble-conversation')) return;
         event.preventDefault();
         pinFocus(card.dataset.id, { keepOpen: event.shiftKey });
@@ -3689,8 +3709,11 @@ __ICON__
       if (!focusEl) return;
       const view = document.body.getAttribute('data-view') || 'library';
       if (view !== 'focus') return;
-      if (narrowView.matches) focusEl.setAttribute('data-stack', '');
-      else focusEl.removeAttribute('data-stack');
+      // A phone lays Focus out as a fisheye column; the stacked fallback is
+      // no longer used at any width.
+      focusEl.removeAttribute('data-stack');
+      if (narrowView.matches) focusEl.setAttribute('data-phone', '');
+      else focusEl.removeAttribute('data-phone');
       if (focusEl.clientWidth < 2 && !focusLayoutQueued) {
         focusLayoutQueued = true;
         requestAnimationFrame(() => {
@@ -3757,11 +3780,11 @@ __ICON__
         }
       }
 
-      if (focusEl.hasAttribute('data-stack') || narrowView.matches) {
+      if (narrowView.matches) {
         focusPack = null;
         sizeFocusExtent(null);
-        layoutFocusPane(fullIds);
         paintFocusBasins(null);
+        layoutPhoneFocus(items, { keepFocal: Boolean(opts.quiet) });
         return;
       }
 
@@ -6075,6 +6098,200 @@ __ICON__
       };
       pane?.addEventListener('pointerup', release);
       pane?.addEventListener('pointercancel', release);
+    })();
+
+    // ---- Focus on a phone. `phoneFocal` is a float index into the stack's
+    // order; the fisheye in agent-phone.js turns it into every card's box.
+    // The card you grab stays under your finger; a release projects the
+    // flick, snaps to the nearest card and springs there.
+    let phoneFocal = 0;
+    let phoneOrder = [];
+    let phoneStop = null;
+    const phoneHelpers = () => window.marbleAgentPhone;
+    const phoneRoom = () => focusEl?.clientHeight ?? 0;
+    const phoneStackOrder = (items) => focusColumnsOf(items, null).columns.flatMap((c) => c.ids);
+
+    const layoutPhoneFocus = (items, opts = {}) => {
+      if (!focusEl) return;
+      const order = phoneStackOrder(items);
+      const changedOrder = order.join('|') !== phoneOrder.join('|');
+      phoneOrder = order;
+      if (!order.length) {
+        hideFocusPane();
+        return;
+      }
+      if (changedOrder && !opts.keepFocal) {
+        const want = openId && order.includes(openId) ? order.indexOf(openId) : Math.round(Math.min(phoneFocal, order.length - 1));
+        phoneFocal = Math.max(0, want);
+      } else if (phoneFocal > order.length - 1) {
+        phoneFocal = order.length - 1;
+      }
+      placePhoneStack();
+    };
+
+    const placePhoneStack = () => {
+      const helpers = phoneHelpers();
+      if (!helpers || !focusEl) return;
+      const cards = helpers.fisheye(phoneOrder.length, phoneFocal, phoneRoom());
+      let fullRect = null;
+      phoneOrder.forEach((id, i) => {
+        const card = focusEl.querySelector(`.focus-card[data-id="${id}"]`);
+        if (!card) return;
+        const c = cards[i];
+        stopCardSpring(card);
+        card.style.left = '';
+        card.style.width = '';
+        card.style.transform = '';
+        card.style.top = `${c.top}px`;
+        card.style.height = `${c.height}px`;
+        card.style.zIndex = c.lod === 'full' ? '3' : c.lod === 'sliver' ? '1' : '2';
+        card.dataset.lod = c.lod;
+        if (c.lod === 'full') fullRect = c;
+      });
+      layoutPhonePane(fullRect);
+    };
+
+    const layoutPhonePane = (rect) => {
+      if (!pane || !focusEl) return;
+      if (!rect) {
+        hideFocusPane();
+        return;
+      }
+      const box = focusEl.getBoundingClientRect();
+      pane.style.visibility = '';
+      pane.style.display = 'grid';
+      pane.style.position = 'fixed';
+      pane.style.left = `${box.left + 12}px`;
+      pane.style.top = `${box.top + rect.top}px`;
+      pane.style.width = `${Math.max(0, box.width - 24)}px`;
+      pane.style.height = `${Math.max(0, rect.height)}px`;
+      pane.style.zIndex = '6';
+      pane.style.borderRadius = '12px';
+      pane.style.overflow = 'hidden';
+      pane.style.pointerEvents = 'auto';
+      applyDock();
+      const id = phoneOrder[Math.round(phoneFocal)];
+      if (id && convo.getAttribute('conversation') !== id && !focusEl.hasAttribute('data-settling')) retargetPhonePane(id);
+    };
+
+    /** The pane retargets when the spring lands on a different card, and
+     *  materializes rather than cuts. */
+    const retargetPhonePane = (id) => {
+      open(id);
+      if (reduceMotion.matches) return;
+      pane.animate([{ opacity: 0, filter: 'blur(8px)' }, { opacity: 1, filter: 'blur(0)' }], { duration: 200, easing: 'cubic-bezier(0.22, 1, 0.36, 1)' });
+    };
+
+    const settlePhoneTo = (target, velocity = 0, { damping = 1 } = {}) => {
+      if (!focusEl) return;
+      const n = phoneOrder.length;
+      if (!n) return;
+      const to = Math.max(0, Math.min(n - 1, target));
+      focusEl.setAttribute('data-settling', '');
+      phoneStop?.();
+      const land = () => {
+        focusEl.removeAttribute('data-settling');
+        pane.style.opacity = '';
+        placePhoneStack();
+      };
+      if (reduceMotion.matches) {
+        phoneFocal = to;
+        land();
+        pane.animate([{ opacity: 0.4 }, { opacity: 1 }], { duration: 150 });
+        return;
+      }
+      let state = { x: phoneFocal, v: velocity };
+      let last = performance.now();
+      let frame = 0;
+      const step = (now) => {
+        state = phoneHelpers().stepSpring(state, to, (now - last) / 1000, { damping, response: 0.4 });
+        last = now;
+        phoneFocal = state.x;
+        placePhoneStack();
+        pane.style.opacity = String(Math.max(0, 1 - Math.min(1, 3 * Math.abs(phoneFocal - to))));
+        if (state.settled) {
+          land();
+          return;
+        }
+        frame = requestAnimationFrame(step);
+      };
+      frame = requestAnimationFrame(step);
+      phoneStop = () => cancelAnimationFrame(frame);
+    };
+
+    const settlePhone = (velocityCards) => {
+      const helpers = phoneHelpers();
+      const projected = phoneFocal + helpers.project(velocityCards);
+      const target = Math.round(projected);
+      // Bounce only when the gesture carried the stack at least one card.
+      const damping = Math.abs(projected - phoneFocal) >= 1 ? 0.8 : 1;
+      settlePhoneTo(target, velocityCards, { damping });
+    };
+
+    (() => {
+      let grab = null;
+      let history = [];
+      let pressTimer = 0;
+      focusEl?.addEventListener('pointerdown', (event) => {
+        if (!narrowView.matches) return;
+        if (pane?.contains(event.target)) return;
+        const helpers = phoneHelpers();
+        if (!helpers || !phoneOrder.length) return;
+        const card = event.target.closest('.focus-card');
+        phoneStop?.();
+        focusEl.removeAttribute('data-settling');
+        const index = card ? phoneOrder.indexOf(card.dataset.id) : Math.round(phoneFocal);
+        const cardTop = card ? parseFloat(card.style.top) || 0 : 0;
+        const y = event.clientY - focusEl.getBoundingClientRect().top;
+        grab = { index: Math.max(0, index), offset: y - cardTop, id: event.pointerId, startFocal: phoneFocal, moved: false, cardId: card?.dataset.id ?? null };
+        history = [{ f: phoneFocal, t: performance.now() }];
+        focusEl.setPointerCapture(event.pointerId);
+        clearTimeout(pressTimer);
+        pressTimer = setTimeout(() => {
+          pressTimer = 0;
+          if (grab && !grab.moved && grab.cardId) {
+            const id = grab.cardId;
+            grab = null;
+            openActions(id);
+          }
+        }, LONG_PRESS_MS);
+      });
+      focusEl?.addEventListener('pointermove', (event) => {
+        if (!grab) return;
+        const y = event.clientY - focusEl.getBoundingClientRect().top;
+        const next = phoneHelpers().focalFor(grab.index, y - grab.offset, phoneOrder.length, phoneRoom());
+        if (!grab.moved && Math.abs(next - grab.startFocal) > 0.02) {
+          grab.moved = true;
+          clearTimeout(pressTimer);
+          pressTimer = 0;
+        }
+        if (!grab.moved) return;
+        phoneFocal = next;
+        placePhoneStack();
+        pane.style.opacity = String(Math.max(0, 1 - Math.min(1, 3 * Math.abs(phoneFocal - grab.startFocal))));
+        history.push({ f: phoneFocal, t: performance.now() });
+        if (history.length > 6) history.shift();
+      });
+      const release = () => {
+        clearTimeout(pressTimer);
+        pressTimer = 0;
+        if (!grab) return;
+        const was = grab;
+        grab = null;
+        try { focusEl.releasePointerCapture(was.id); } catch { /* not captured */ }
+        const a = history[0];
+        const b = history[history.length - 1];
+        const velocity = b.t > a.t ? ((b.f - a.f) / (b.t - a.t)) * 1000 : 0;
+        if (!was.moved) {
+          // A tap: spring to that card.
+          const index = was.cardId ? phoneOrder.indexOf(was.cardId) : -1;
+          if (index >= 0 && index !== Math.round(phoneFocal)) settlePhoneTo(index);
+          return;
+        }
+        settlePhone(velocity);
+      };
+      focusEl?.addEventListener('pointerup', release);
+      focusEl?.addEventListener('pointercancel', release);
     })();
 
     // ---- Deck gestures. A cheap, reversible action completes as a swipe;
