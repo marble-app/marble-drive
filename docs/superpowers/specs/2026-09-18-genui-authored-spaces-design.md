@@ -1,7 +1,7 @@
 # Fast GenUI — Authored Spaces, Jev Decisions
 
 **Date:** 2026-09-18
-**Status:** Design written; awaiting Bryan's review before the implementation plan
+**Status:** Implemented 2026-09-18 on branch `genui-authored-spaces` (worktree `.claude/worktrees/genui-authored-spaces`); Stage B, CLI, inspector and skill in place; first real-model decides 244–312 ms across three spaces. The running host needs a restart on this branch before `/genui/*` exists there.
 **Supersedes for steady state:** the Recursive Subquestions loop in `server/typesafe/pipeline.js` (kept; see §11)
 **Depends on:** Pattern Atlas (`drive/Research/Design Pattern Generation/`, 119 entries, 680 sub-dimensions, `schemas/*.schema.json`), TypeSafe client (`server/typesafe/client.js`), the Drive's one write path (`writeOps` in `server/app.js`)
 
@@ -178,7 +178,7 @@ Nothing in Stage B is specific to overview–detail: the extractor, validator, q
 |---|---|---|---|---|
 | `49ers.mrbl` | browse-collections | `overview-detail#games`, `card#game-card` | 8 | Monitor's Wave 0; a nested component; a `sel: many` preset |
 | `metrics.mrbl` | monitor, analyze | `dashboard#ops`, `stat-tile#kpi`, `chart#trend` | 9 | A pattern that is not overview–detail; a variation-triggered child (`widgets` includes charts → a chart instance) |
-| `signup.mrbl` | enter-data | `wizard#signup`, `stepper#steps` | 8 | A key inherited through `specializes` (`wizard` → `form`: `labels`), so the codebook resolves up the chain on a real entry |
+| `signup.mrbl` | enter-data | `wizard#signup`, `stepper#steps` | 7 | A key inherited through `specializes` (`wizard` → `form`: `labels`), so the codebook resolves up the chain on a real entry |
 
 All three are tracked under `test/fixtures/genui/` and seeded into `drive/Research/TypeSafe AI/Spaces/` for the inspector. The mini Atlas the tests use is **cut from the real `atlas.json`** by a script, not typed by hand, so the keys and glosses are the codebook's own.
 
