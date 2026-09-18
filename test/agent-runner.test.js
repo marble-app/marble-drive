@@ -16,6 +16,7 @@ const SCRIPTS = {
   broken: [{ fail: 'You have hit your usage limit' }],
   forgetful: [{ lostWhenResumed: 'No conversation found with session ID: x' }, { say: 'fresh' }],
   noop: [{ say: 'done' }],
+  linger: [{ say: 'done' }, { lingerUntilEof: true }],
   permission: [{ ask: { tool: 'Bash', input: { command: 'rm -rf build' } } }, { say: 'after' }],
   question: [{ ask: { tool: 'AskUserQuestion', input: { questions: [{ question: 'A or B?', header: 'Pick', options: [{ label: 'A' }, { label: 'B' }], multiSelect: false }] } } }],
 };
@@ -848,5 +849,15 @@ test('cancelling a turn denies its open ask and voids it', async () => {
   assert.equal(voided.why, 'cancelled');
   assert.equal((await store.summary(id)).asking, false);
   await assert.rejects(runner.answer(`${id}-t1`, ask.requestId, { behavior: 'allow' }), { status: 409 });
+  await runner.close();
+});
+
+test('a process that waits for more input after its result is ended by the runner', async () => {
+  const { store, runner } = await setup({ capability: 'full', limits: { stallMs: 60_000 } });
+  const { id } = await store.createConversation({ provider: 'fake' });
+  await runner.send(id, { prompt: 'script:linger', context: { target: 'garden' } });
+  const turn = await finished(store, `${id}-t1`);
+  assert.equal(turn.status, 'completed');
+  assert.equal(turn.error, null);
   await runner.close();
 });

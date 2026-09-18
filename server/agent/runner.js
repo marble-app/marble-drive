@@ -326,6 +326,7 @@ export function createRunner({ store, tools, providers, workdir, origin, bridgeP
       child.stdin.on('error', () => {});
       // A provider that answers prompts mid-turn keeps stdin open; finish()
       // closes it. Every other CLI reads to EOF before it starts.
+      turn.stdinOpen = Boolean(spec.stdinOpen);
       if (spec.stdinOpen) child.stdin.write(spec.stdin ?? '');
       else child.stdin.end(spec.stdin ?? '');
 
@@ -425,6 +426,19 @@ export function createRunner({ store, tools, providers, workdir, origin, bridgeP
         return;
       case 'done':
         turn.done = event;
+        // A CLI reading stream-json waits for the next message after its
+        // result, so the turn is over only once we close its stdin. If it
+        // still lingers, it is stopped rather than left counted as running.
+        if (turn.stdinOpen) {
+          try {
+            turn.child?.stdin?.end();
+          } catch {
+            // Already gone.
+          }
+          const linger = setTimeout(() => turn.child?.kill('SIGTERM'), limits.killGraceMs * 3);
+          linger.unref?.();
+          turn.timers.push(() => clearTimeout(linger));
+        }
         return;
       default:
     }

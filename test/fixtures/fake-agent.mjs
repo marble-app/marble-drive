@@ -123,4 +123,7 @@ for (const step of script) {
 
 out({ kind: 'done', ok: true });
 bridge?.kill();
+// What a CLI reading stream-json does after its result: wait for more input,
+// and leave only when stdin closes.
+if (script.some((step) => step.lingerUntilEof)) await new Promise((resolve) => stdin.on('close', resolve));
 process.exit(0);
