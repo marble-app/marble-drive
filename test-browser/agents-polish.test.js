@@ -37,7 +37,9 @@ const openAgents = async (options = {}) => {
 test('hovering a Focus card shows its actions without moving anything', async () => {
   const { page } = await openAgents();
   await page.locator('.views [data-view="focus"]').click();
-  await page.waitForFunction(() => document.querySelectorAll('.focus-card[data-lod="digest"]').length >= 1 && !document.querySelector('.vt-layer'));
+  // Once the switch is over: the arriving canvas eases in at a hair under
+  // full scale, and a measurement taken inside that would move on its own.
+  await page.waitForFunction(() => document.querySelectorAll('.focus-card[data-lod="digest"]').length >= 1 && !document.querySelector('.vt-layer') && !document.body.hasAttribute('data-crossfade'));
   await page.waitForTimeout(500);
   const card = page.locator('.focus-card[data-lod="digest"]').first();
   const measure = () => card.evaluate((el) => ({

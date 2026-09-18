@@ -39,45 +39,62 @@ const openAgents = async () => {
   return { page, ids };
 };
 
-/** Switch and catch the layer while it is up. */
+/** Switch, and read the page the moment the switch is under way. */
 const switchAndCatch = async (page, view) => {
   await page.evaluate((v) => { document.querySelector(`.views [data-view="${v}"]`).click(); }, view);
   return page.evaluate(() => new Promise((resolve, reject) => {
     const start = performance.now();
     const tick = () => {
-      const layer = document.querySelector('.vt-layer');
-      if (layer && layer.children.length) {
-        resolve([...layer.children].map((g) => ({ id: g.dataset.id, anims: g.getAnimations().length })));
-      } else if (performance.now() - start > 3000) reject(new Error('no morph layer appeared'));
+      if (document.body.hasAttribute('data-crossfade')) {
+        resolve({
+          frozen: [...document.querySelectorAll('.marble-vt-out')].map((el) => el.id || el.className.split(' ')[0]),
+          snapshots: document.querySelectorAll('.vt-layer .vt-snapshot').length,
+          perCard: document.querySelectorAll('.vt-layer [data-id], .vt-ghost').length,
+          flying: [...document.querySelectorAll('.conv, .focus-card, .folder-tab')].filter((el) => el.getAnimations().length || el.classList.contains('marble-flip')).length,
+        });
+      } else if (performance.now() - start > 3000) reject(new Error('no crossfade started'));
       else requestAnimationFrame(tick);
     };
     tick();
   }));
 };
 
-test('List to Focus morphs each row into its card', async () => {
-  const { page, ids } = await openAgents();
-  const ghosts = await switchAndCatch(page, 'focus');
-  assert.deepEqual(ghosts.map((g) => g.id).sort(), [...ids].sort());
-  assert.ok(ghosts.every((g) => g.anims >= 1));
-  await page.waitForFunction(() => !document.querySelector('.vt-layer'), null, { timeout: 3000 });
+const settled = (page) => page.waitForFunction(() => !document.body.hasAttribute('data-crossfade') && !document.querySelector('.vt-layer, .marble-vt-out'), null, { timeout: 4000 });
+
+test('List to Focus fades the list out and the canvas in; no row or card flies', async () => {
+  const { page } = await openAgents();
+  const caught = await switchAndCatch(page, 'focus');
+  assert.ok(caught.frozen.includes('list'), `the list is held where it stood: ${caught.frozen}`);
+  assert.equal(caught.perCard, 0, 'no ghost per conversation');
+  assert.equal(caught.flying, 0, 'no row or card animates on its own');
+  await settled(page);
   const landed = await page.evaluate(() => [...document.querySelectorAll('.focus-card')].map((el) => getComputedStyle(el).opacity));
+  assert.equal(landed.length, 3);
   assert.ok(landed.every((o) => o === '1'), `cards land opaque: ${landed}`);
 });
 
-test('Focus to Folders morphs each card into its tab, and a switch mid-switch leaves no layer', async () => {
-  const { page, ids } = await openAgents();
-  await page.locator('.views [data-view="focus"]').click();
-  await page.waitForFunction(() => document.querySelectorAll('.focus-card').length === 3 && !document.querySelector('.vt-layer'));
-  const ghosts = await switchAndCatch(page, 'folders');
-  assert.deepEqual(ghosts.map((g) => g.id).sort(), [...ids].sort());
-  await page.evaluate(() => document.querySelector('.views [data-view="board"]').click());
-  await page.waitForFunction(() => !document.querySelector('.vt-layer'), null, { timeout: 3000 });
-  assert.equal(await page.locator('.vt-ghost').count(), 0);
+test('List to Board leaves as a snapshot of the list, and the rows themselves do not fly', async () => {
+  const { page } = await openAgents();
+  const caught = await switchAndCatch(page, 'board');
+  assert.equal(caught.snapshots, 1, 'one snapshot, of the list');
+  assert.equal(caught.flying, 0, 'rows are placed, not flown');
+  await settled(page);
   assert.equal(await page.locator('.column .conv').count(), 3);
+  assert.equal(await page.locator('.vt-snapshot').count(), 0);
 });
 
-test('reduced motion crossfades without ghosts', async () => {
+test('a switch mid-switch leaves no layer and no frozen shell behind', async () => {
+  const { page } = await openAgents();
+  await page.locator('.views [data-view="focus"]').click();
+  await settled(page);
+  await switchAndCatch(page, 'folders');
+  await page.evaluate(() => document.querySelector('.views [data-view="board"]').click());
+  await settled(page);
+  assert.equal(await page.locator('.column .conv').count(), 3);
+  assert.equal(await page.locator('.marble-vt-out, .vt-layer').count(), 0);
+});
+
+test('reduced motion crossfades without a layer', async () => {
   const { page } = await openAgents();
   await page.emulateMedia({ reducedMotion: 'reduce' });
   await page.evaluate(() => document.querySelector('.views [data-view="focus"]').click());

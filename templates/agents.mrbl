@@ -783,7 +783,7 @@ __ICON__
   /* Ghosts of a view switch: each conversation's old shape, travelling to its
      new one and dissolving into it. */
   .vt-layer { position: fixed; inset: 0; z-index: 5; pointer-events: none; }
-  .vt-ghost { box-sizing: border-box; margin: 0 !important; }
+  .vt-snapshot { box-sizing: border-box; margin: 0 !important; }
   .conv.marble-flip,
   .conv.marble-flip:active {
     transition: none !important;
@@ -3788,7 +3788,6 @@ __ICON__
       for (const anim of flipAnims) anim.cancel();
       flipAnims = [];
       for (const el of nodes.values()) el.classList.remove('marble-flip');
-      clearMorph();
     };
 
     const shellFor = (view) => {
@@ -3802,8 +3801,6 @@ __ICON__
       const index = VIEW_ORDER.indexOf(view);
       return VIEW_ORDER[(index + 1) % VIEW_ORDER.length];
     };
-
-    const isListBoard = (view) => view === 'library' || view === 'board';
 
     // ---- View switches. What leaves is held where it was and fades as it goes;
     // what arrives eases in from the side the view lives on. Anything both views
@@ -3849,96 +3846,51 @@ __ICON__
         for (const anim of el.getAnimations()) anim.cancel();
       }
       thaw();
+      clearSnapshots();
     };
 
-    // ---- The morph. A conversation is one object in four views, so a switch
-    // carries each one from the shape it had to the shape it will have: a
-    // ghost of the old element travels to the new element's rect and dissolves
-    // into it, while the new element fades up underneath. The shells still
-    // crossfade around them.
-    const representationsOf = (view) => {
-      const out = new Map();
-      const sel = view === 'folders' ? '.folder-rail .folder-tab[data-id]'
-        : view === 'focus' ? '.focus .focus-card[data-id]'
-          : view === 'board' ? '.column > .conv[data-id]' : '#list > .conv[data-id]';
-      for (const el of document.querySelectorAll(sel)) {
-        if (el.hidden || el.closest('[hidden]')) continue;
-        const r = el.getBoundingClientRect();
-        if (r.width > 0 && r.height > 0) out.set(el.dataset.id, el);
-      }
-      return out;
-    };
-
+    // ---- Leaving shells that would empty out. List and Board show the same
+    // row nodes, so when one gives way to the other its rows are re-parented
+    // by the new layout and the leaving shell would fade as an empty frame.
+    // Those two leave as a snapshot: a clone held where the shell stood,
+    // fading, while the real rows take their new places underneath. Nothing
+    // per conversation moves — a switch is the big parts trading places.
+    const SHARES_ROWS = new Set(['library', 'board']);
     let vtLayer = null;
-    let morphAnims = [];
-    const clearMorph = () => {
-      for (const anim of morphAnims) anim.cancel();
-      morphAnims = [];
+    const clearSnapshots = () => {
       vtLayer?.remove();
       vtLayer = null;
     };
-
-    const morphViews = (current, next, applyLayout) => {
-      const stood = [...representationsOf(current)].map(([id, el]) => [id, el, el.getBoundingClientRect()]);
-      clearMorph();
-      vtLayer = document.createElement('div');
-      vtLayer.className = 'vt-layer';
-      vtLayer.setAttribute('data-marble-transient', '');
-      for (const [id, el, rect] of stood) {
-        const ghost = el.cloneNode(true);
-        ghost.classList.add('vt-ghost');
-        ghost.classList.remove('marble-flip', 'marble-open', 'marble-selected');
-        ghost.dataset.id = id;
-        ghost.removeAttribute('data-marble-id');
-        ghost.removeAttribute('tabindex');
-        ghost.removeAttribute('id');
-        ghost.setAttribute('aria-hidden', 'true');
-        ghost.querySelector('marble-conversation')?.remove();
-        for (const child of ghost.querySelectorAll('[data-marble-id]')) child.removeAttribute('data-marble-id');
-        Object.assign(ghost.style, {
-          position: 'fixed', left: `${rect.left}px`, top: `${rect.top}px`,
-          width: `${rect.width}px`, height: `${rect.height}px`,
-          transform: 'none', overflow: 'hidden', pointerEvents: 'none', zIndex: '',
-        });
-        vtLayer.append(ghost);
-      }
-      document.body.append(vtLayer);
-      applyLayout();
-      const after = representationsOf(next);
-      const order = [...after.keys()];
-      const gen = fadeGen;
-      for (const ghost of [...vtLayer.children]) {
-        const target = after.get(ghost.dataset.id);
-        if (!target) {
-          ghost.remove();
-          continue;
-        }
-        const to = target.getBoundingClientRect();
-        const delay = Math.min(Math.max(0, order.indexOf(ghost.dataset.id)), 7) * STAGGER_MS;
-        morphAnims.push(ghost.animate(
-          [
-            { left: ghost.style.left, top: ghost.style.top, width: ghost.style.width, height: ghost.style.height, opacity: 1, offset: 0 },
-            { opacity: 1, offset: 0.6 },
-            { left: `${to.left}px`, top: `${to.top}px`, width: `${to.width}px`, height: `${to.height}px`, opacity: 0, offset: 1 },
-          ],
-          { duration: FLIP_MS, easing: VT_EASE, delay, fill: 'both' },
-        ));
-        morphAnims.push(target.animate(
-          [{ opacity: 0 }, { opacity: 1, offset: 0.6 }, { opacity: 1 }],
-          { duration: FLIP_MS, easing: VT_EASE, delay, fill: 'both' },
-        ));
-      }
-      if (!vtLayer.children.length) {
-        clearMorph();
-        return;
-      }
-      Promise.all(morphAnims.map((anim) => anim.finished.catch(() => {}))).then(() => {
-        if (gen !== fadeGen) return;
-        clearMorph();
+    const snapshot = (el, rect) => {
+      const ghost = el.cloneNode(true);
+      ghost.classList.add('vt-snapshot');
+      ghost.classList.remove('marble-vt-out');
+      ghost.removeAttribute('data-marble-id');
+      ghost.removeAttribute('id');
+      ghost.setAttribute('aria-hidden', 'true');
+      for (const live of ghost.querySelectorAll('marble-conversation')) live.remove();
+      for (const child of ghost.querySelectorAll('[data-marble-id]')) child.removeAttribute('data-marble-id');
+      for (const child of ghost.querySelectorAll('[id]')) child.removeAttribute('id');
+      // A picture of the rows, not the rows: nothing in it is addressable.
+      for (const child of ghost.querySelectorAll('[data-id]')) child.removeAttribute('data-id');
+      Object.assign(ghost.style, {
+        position: 'fixed', left: `${rect.left}px`, top: `${rect.top}px`,
+        width: `${rect.width}px`, height: `${rect.height}px`,
+        margin: '0', transform: 'none', overflow: 'hidden', pointerEvents: 'none', zIndex: '',
       });
+      if (!vtLayer) {
+        vtLayer = document.createElement('div');
+        vtLayer.className = 'vt-layer';
+        vtLayer.setAttribute('data-marble-transient', '');
+        document.body.append(vtLayer);
+      }
+      vtLayer.append(ghost);
+      return ghost;
     };
 
     const openBoardPanel = () => {
+      // A pane still fading out of the List would sit fixed over the board.
+      if (frozen.includes(pane)) cancelViewFades();
       panelOpen = true;
       document.body.setAttribute('data-panel', 'open');
     };
@@ -5359,13 +5311,17 @@ __ICON__
         const incoming = nextParts.filter((el) => (el === pane && paneMoves) || !partsOf(current).includes(el));
         // Where each leaving part stood, read before the layout changes under it.
         const stood = outgoing.map((el) => [el, el.getBoundingClientRect()]);
+        // A shell whose rows the next view takes leaves as a snapshot, taken
+        // before the layout moves them.
+        const swapsRows = SHARES_ROWS.has(current) && SHARES_ROWS.has(next);
+        const leaving = stood.map(([el, rect]) => [swapsRows && (el === list || el === boardEl) ? snapshot(el, rect) : el, rect, el]);
         layout();
-        // The List shell is hidden outright in Board; its leaving parts need it.
-        if (stood.some(([el]) => el === list || el === pane) && next === 'board') libraryEl.classList.add('marble-vt-shell');
+        // The List shell is hidden outright in Board; a leaving pane needs it.
+        if (stood.some(([el]) => el === pane) && next === 'board') libraryEl.classList.add('marble-vt-shell');
         const anims = [];
         const slide = (x) => (still ? {} : { transform: `translate3d(${x}px, 0, 0) scale(.992)` });
-        for (const [el, rect] of stood) {
-          freeze(el, rect);
+        for (const [el, rect, real] of leaving) {
+          if (el === real) freeze(el, rect);
           anims.push(el.animate([{ opacity: 1, transform: 'none' }, { opacity: 0, ...slide(-dir * 14) }], {
             duration: still ? 150 : VT_OUT_MS,
             easing: still ? 'linear' : VT_EASE,
@@ -5387,6 +5343,7 @@ __ICON__
           document.body.removeAttribute('data-crossfade');
           for (const anim of anims) anim.cancel();
           thaw();
+          clearSnapshots();
         });
       };
 
@@ -5395,29 +5352,10 @@ __ICON__
         crossfadeWith(applyLayout, ++fadeGen);
       };
 
-      if (reduceMotion.matches || narrowView.matches) {
-        crossfade();
-        return;
-      }
-      if (!isListBoard(current) || !isListBoard(next)) {
-        // Every conversation on screen in both views morphs; the shells
-        // crossfade around them as before.
-        cancelFlip();
-        const gen = ++fadeGen;
-        morphViews(current, next, () => crossfadeWith(applyLayout, gen));
-        return;
-      }
-
-      // Visual rects include an in-flight transform, so this is current
-      // progress. Cancel the old FLIP and retarget from that snapshot —
-      // reverse-to-completion would rewind and fight the new layout.
-      const first = captureRects();
-      const staggerFromBoard = current === 'board' ? boardOrder() : null;
-      cancelFlip();
-      cancelViewFades();
-      applyLayout();
-      const ordered = next === 'board' ? boardOrder() : (staggerFromBoard ?? [...list.querySelectorAll('.conv')]);
-      playFlip(first, ordered);
+      // Every switch is the big parts trading places. No conversation flies
+      // from one shape to another: what the person asked for is a room that
+      // changes, not a hundred small things that move.
+      crossfade();
     };
 
     const loadArchived = async () => {
