@@ -33,6 +33,8 @@ export const summarize = (meta) => ({
   // Honest: listings never use status 'queued'. A waiting conversation is
   // `running: false` with `queued: true` when a turn file is still queued.
   queued: Boolean(meta.queued),
+  // A running turn is waiting on the person: a permission prompt or a question.
+  asking: Boolean(meta.asking),
 });
 
 export const conversationOf = (turnId) => turnId.slice(0, turnId.lastIndexOf('-t'));
@@ -232,7 +234,7 @@ export function createAgentStore({ dir, defaultProvider = 'claude-subscription',
 
   async function settings() {
     const saved = (await readJson(path.join(dir, 'settings.json'))) ?? {};
-    return { defaultProvider, models: {}, efforts: {}, maxRunning: 3, ...saved };
+    return { defaultProvider, models: {}, efforts: {}, maxRunning: 3, projects: [], defaultProject: 'drive', skills: {}, ...saved };
   }
 
   async function saveSettings(patch) {
@@ -267,7 +269,7 @@ export function createAgentStore({ dir, defaultProvider = 'claude-subscription',
 
     saveSettings,
 
-    async createConversation({ provider, model = null, effort = null, mode = null, handoffFrom = null }) {
+    async createConversation({ provider, model = null, effort = null, mode = null, handoffFrom = null, project = 'drive' }) {
       const now = Date.now();
       const meta = {
         id: crypto.randomBytes(6).toString('hex'),
@@ -275,6 +277,7 @@ export function createAgentStore({ dir, defaultProvider = 'claude-subscription',
         model,
         effort,
         mode,
+        project,
         title: null,
         target: null,
         createdAt: now,

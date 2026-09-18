@@ -122,7 +122,10 @@ test('a conversation keeps the CLI mode Shift+Tab picked', async () => {
 
 test('settings have defaults and keep what was saved', async () => {
   const { store } = await fresh();
-  assert.deepEqual(await store.settings(), { defaultProvider: 'claude-subscription', models: {}, efforts: {}, maxRunning: 3 });
+  assert.deepEqual(await store.settings(), {
+    defaultProvider: 'claude-subscription', models: {}, efforts: {}, maxRunning: 3,
+    projects: [], defaultProject: 'drive', skills: {},
+  });
   await store.saveSettings({ defaultProvider: 'cursor', models: { cursor: 'composer-2.5' } });
   assert.equal((await store.settings()).models.cursor, 'composer-2.5');
 });
@@ -244,4 +247,15 @@ test('createConversation starts ungrouped and unpinned', async () => {
   assert.equal(meta.pinned, false);
   assert.equal(meta.focusX, null);
   assert.equal(meta.lastInteractedAt, meta.createdAt);
+});
+
+test('a conversation belongs to the drive project unless told otherwise, and a summary says whether it is asking', async () => {
+  const { store } = await fresh();
+  const plain = await store.createConversation({ provider: 'fake' });
+  assert.equal(plain.project, 'drive');
+  const repo = await store.createConversation({ provider: 'fake', project: 'aabbccddeeff' });
+  assert.equal(repo.project, 'aabbccddeeff');
+  assert.equal((await store.summary(plain.id)).asking, false);
+  await store.updateConversation(plain.id, { asking: true });
+  assert.equal((await store.summary(plain.id)).asking, true);
 });
