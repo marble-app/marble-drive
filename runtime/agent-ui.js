@@ -129,7 +129,26 @@
 
   const INLINE = /(`[^`\n]+`)|(\*\*[^*\n]+\*\*)|(\*[^*\s][^*\n]*\*)|(\[[^\]\n]+\]\((https?:\/\/[^\s)]+)\))/g;
 
-  function inline(parent, text) {
+  /** Inline marks, and — when a `chip` hook is given — the `[image n]` /
+   *  `[pasted text n]` tokens a sent message carries, as the chips they name. */
+  function inline(parent, text, chip = null) {
+    if (!chip) {
+      inlineMarks(parent, text);
+      return;
+    }
+    let last = 0;
+    TOKEN.lastIndex = 0;
+    for (let m = TOKEN.exec(text); m; m = TOKEN.exec(text)) {
+      const node = chip(m[1], Number(m[2]));
+      if (!node) continue;
+      inlineMarks(parent, text.slice(last, m.index));
+      parent.append(node);
+      last = m.index + m[0].length;
+    }
+    inlineMarks(parent, text.slice(last));
+  }
+
+  function inlineMarks(parent, text) {
     let last = 0;
     INLINE.lastIndex = 0;
     for (let match = INLINE.exec(text); match; match = INLINE.exec(text)) {
@@ -162,7 +181,7 @@
   const NUMBERED = /^\s*\d+[.)]\s+(.*)$/;
   const FENCE = /^\s*```/;
 
-  function renderText(text) {
+  function renderText(text, { chip = null } = {}) {
     const out = document.createDocumentFragment();
     const lines = String(text ?? '').replace(/\r\n/g, '\n').split('\n');
     let i = 0;
@@ -184,7 +203,7 @@
         const list = document.createElement(kind === BULLET ? 'ul' : 'ol');
         for (; i < lines.length && kind.test(lines[i]); i += 1) {
           const item = document.createElement('li');
-          inline(item, kind.exec(lines[i])[1]);
+          inline(item, kind.exec(lines[i])[1], chip);
           list.append(item);
         }
         out.append(list);
@@ -198,7 +217,7 @@
       let first = true;
       for (; i < lines.length && lines[i].trim() && !FENCE.test(lines[i]) && !BULLET.test(lines[i]) && !NUMBERED.test(lines[i]); i += 1) {
         if (!first) paragraph.append(document.createElement('br'));
-        inline(paragraph, lines[i]);
+        inline(paragraph, lines[i], chip);
         first = false;
       }
       out.append(paragraph);
@@ -1275,6 +1294,10 @@
     .msg.me .attachments { margin-bottom: 6px; }
     .msg.me .attach { background: var(--card); }
     .msg-text { display: block; }
+    .msg.me .msg-text { white-space: normal; }
+    .msg.me .msg-text p { margin: 0 0 .4em; } .msg.me .msg-text p:last-child { margin-bottom: 0; }
+    .msg.me .msg-text ul, .msg.me .msg-text ol { margin: .2em 0 .4em; padding-left: 1.25em; }
+    .msg.me .attachments { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 6px; }
 
     @keyframes pulse { 0%, 100% { opacity: .35; } 50% { opacity: 1; } }
     @media (prefers-reduced-motion: reduce) { .tool::before, .turn-footer .pulse { animation: none; } .seg-thumb { transition: none; } }
@@ -1799,7 +1822,10 @@
         if (this.running) this.api.cancel(this.running.turn).catch((err) => this.system(err.message, true));
       });
       this.onContext = () => {
-        this.skipSelection = false;
+        // A new selection is a reason to offer the chip again; a selection
+        // merely clearing (the click that took the chip out does that) is not.
+        const { selection = [] } = this.api?.context() ?? {};
+        if (selection.length) this.skipSelection = false;
         this.updateContext();
       };
     }
@@ -2929,22 +2955,32 @@
     userMessage(text) {
       const { blocks, rest } = splitPasted(text);
       const node = h('div', 'msg me');
-      if (blocks.length) {
+      const items = blocks.map((block) => ({
+        kind: block.kind,
+        name: block.name || (block.kind === 'image' ? 'Pasted image' : 'Pasted text'),
+        url: block.url,
+        text: block.text,
+        lines: Number(block.lines) || (block.text ? block.text.split('\n').length : 0),
+        bytes: Number(block.bytes ?? block.chars) || 0,
+      }));
+      const shown = new Set();
+      const chip = (_kind, n) => {
+        const item = items[n - 1];
+        if (!item) return null;
+        shown.add(item);
+        return this.attachChip(item);
+      };
+      const body = h('div', 'msg-text');
+      body.append(renderText(blocks.length ? rest : text, { chip }));
+      node.append(body);
+      // A block the text never names (a message from before chips were
+      // inline) still shows, as a card under the words.
+      const unnamed = items.filter((item) => !shown.has(item));
+      if (unnamed.length) {
         const strip = h('div', 'attachments');
-        for (const block of blocks) {
-          strip.append(this.attachCard({
-            kind: block.kind,
-            name: block.name || (block.kind === 'image' ? 'Pasted image' : 'Pasted text'),
-            url: block.url,
-            text: block.text,
-            lines: Number(block.lines) || (block.text ? block.text.split('\n').length : 0),
-            bytes: Number(block.bytes ?? block.chars) || 0,
-          }));
-        }
+        for (const item of unnamed) strip.append(this.attachCard(item));
         node.append(strip);
       }
-      const body = blocks.length ? rest : text;
-      if (body) node.append(h('span', 'msg-text', body));
       return node;
     }
 
