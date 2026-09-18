@@ -103,6 +103,19 @@
         if (key === '*') {
           entry.source.addEventListener('summary', deliver);
           entry.source.addEventListener('folders', deliver);
+          // An ask opening or closing anywhere, for a list that would
+          // otherwise need every conversation's stream to know.
+          for (const kind of ['ask', 'ask.resolved']) {
+            entry.source.addEventListener(kind, (message) => {
+              let data;
+              try {
+                data = JSON.parse(message.data);
+              } catch {
+                return;
+              }
+              for (const handler of [...current.handlers]) handler({ kind, ...data });
+            });
+          }
         } else entry.source.onmessage = deliver;
         streams.set(key, entry);
       }
@@ -145,6 +158,7 @@
       saveSettings: (patch) => ask('/agent/settings', { method: 'PUT', body: patch }),
       skills: (provider = null) => ask(provider ? `/agent/skills?provider=${enc(provider)}` : '/agent/skills'),
       usage: () => ask('/agent/usage'),
+      asks: () => ask('/agent/asks'),
       usageHistory: (weeks) => ask(weeks ? `/agent/usage/history?weeks=${enc(weeks)}` : '/agent/usage/history'),
       workspace: () => ask('/agent/workspace'),
       conversations: ({ archived = false } = {}) => ask(`/agent/conversations${archived ? '?archived=1' : ''}`),

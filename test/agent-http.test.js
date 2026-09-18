@@ -717,3 +717,26 @@ test('GET /agent/skills prefers what the CLI reported for that provider', async 
   assert.equal(plain.status, 200);
   assert.ok(Array.isArray(plain.body));
 });
+
+test('GET /agent/asks lists open asks with a lead, and the * stream announces them', async () => {
+  // An `ask` frame carries the request; an `ask.resolved` frame only names it.
+  const stream = frames('/agent/events?all=1', (seen) => seen.some((d) => d.includes('"requestId"') && !d.includes('"request"')));
+  const conv = (await api('POST', '/agent/conversations', { provider: 'fake' })).body;
+  await api('POST', `/agent/conversations/${conv.id}/turns`, { prompt: 'script:permission', context: { target: 'garden' } });
+  const ask = await until(async () => (await drive.agents.store.events(conv.id)).find((e) => e.type === 'ask'));
+  const listed = (await api('GET', '/agent/asks')).body.asks;
+  assert.equal(listed.length, 1);
+  assert.equal(listed[0].conversation, conv.id);
+  assert.equal(listed[0].turn, `${conv.id}-t1`);
+  assert.equal(listed[0].requestId, ask.requestId);
+  assert.equal(listed[0].request.kind, 'permission');
+  assert.deepEqual(listed[0].request.input, { command: 'rm -rf build' });
+  assert.ok(Array.isArray(listed[0].lead));
+  assert.equal(listed[0].title, 'script:permission');
+  await api('POST', `/agent/turns/${conv.id}-t1/answer`, { requestId: ask.requestId, response: { behavior: 'allow' } });
+  const seen = await stream;
+  assert.ok(seen.some((d) => d.includes('"request"') && d.includes(ask.requestId)), 'an ask frame with the request');
+  assert.ok(seen.some((d) => !d.includes('"request"') && d.includes(ask.requestId)), 'an ask.resolved frame');
+  assert.equal((await api('GET', '/agent/asks')).body.asks.length, 0);
+  await finished(conv.id, `${conv.id}-t1`);
+});
