@@ -652,6 +652,10 @@ __ICON__
   .focus[data-phone] .focus-pinslot, .focus[data-phone] .focus-extent, .focus[data-phone] .focus-basin,
   .focus[data-phone] .focus-empty { display: none; }
   .focus[data-phone] .focus-card-head { min-height: 44px; }
+  /* A digest has four lines of room: the provider tag and the folder tick
+     are not among them on a phone. */
+  .focus[data-phone] .focus-folder, .focus[data-phone] .focus-tags { display: none; }
+  .focus[data-phone] .focus-card-body { padding-top: 0; }
   .focus[data-phone][data-settling] .focus-card { pointer-events: none; }
   @media (prefers-reduced-motion: reduce) { .focus[data-phone] .focus-card { transition: opacity 150ms linear; } }
   .focus[data-stack] { overflow: auto; display: flex; flex-direction: column; gap: .65rem; padding: .75rem; }
@@ -1284,6 +1288,8 @@ __ICON__
     body[data-open] .pane { display: grid; position: fixed; left: 0; right: 0; top: var(--topbar-h); height: calc(var(--vv-h) - var(--topbar-h)); min-height: 0; z-index: 20; background: var(--paper); will-change: transform; }
     body[data-view="deck"][data-open] .deck { display: none; }
     body[data-view="deck"][data-open] .library { display: block; }
+    /* Splitting panes is a desk gesture; a phone shows one. */
+    .pane .dock-split { display: none; }
     body[data-open]:not([data-panel="open"]) .pane .back { display: flex; }
     .pane-hint { bottom: 7.5rem; }
 
@@ -1327,7 +1333,8 @@ __ICON__
   }
   .column[data-scrolled] h2::after { opacity: 1; }
   @media (hover: none) {
-    .conv, .seg button, .new, .settings, .filter-toggle, .conv .manage .more { min-height: 2.75rem; }
+    .conv, .seg button, .new, .settings, .filter-toggle, .conv .manage .more,
+    .topbar button, .thumb button, .band-toggle, .sheet-row, .deck-ask-open { min-height: 2.75rem; }
     .dock-close, .dock-split { min-width: 2.75rem; height: 100%; }
   }
 </style>

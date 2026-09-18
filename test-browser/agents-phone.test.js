@@ -317,3 +317,30 @@ test('going hidden closes the streams; coming back reopens them and resyncs', as
   await page.waitForFunction((id) => document.querySelector(`.conv[data-id="${id}"] .title`)?.textContent === 'Renamed while away', id);
   assert.ok((await page.evaluate(() => window.marble.agent.streamsOpen())) >= 1);
 });
+
+test('reduced motion: a Focus step runs no transform animation', async () => {
+  const { page } = await openAgents({ reducedMotion: 'reduce' });
+  await seedTwelve(page);
+  await openPhoneFocus(page);
+  const target = page.locator('.focus-card[data-lod="digest"]').first();
+  const box = await target.boundingBox();
+  await page.mouse.click(box.x + 40, box.y + 12);
+  await page.waitForTimeout(60);
+  const animating = await page.evaluate(() => document.getAnimations().some((a) => (a.effect?.getKeyframes?.() ?? []).some((k) => 'transform' in k)));
+  assert.equal(animating, false);
+  await page.waitForFunction(() => !document.querySelector('.focus').hasAttribute('data-settling'));
+  assert.equal(await page.evaluate(() => document.querySelectorAll('.focus-card[data-lod="full"]').length), 1);
+});
+
+test('every phone control is at least 44pt tall', async () => {
+  const { page } = await openAgents();
+  const id = await page.evaluate(async () => window.marble.agent.start({ provider: 'fake' }));
+  await host.drive.agents.store.updateConversation(id, { running: true, activity: 'busy' });
+  await page.reload();
+  await page.locator('.deck .conv').first().waitFor();
+  const short = await page.evaluate(() => [...document.querySelectorAll('.topbar button, .thumb button, .band-toggle, .deck .conv')]
+    .filter((el) => el.offsetParent !== null)
+    .map((el) => [el.className, Math.round(el.getBoundingClientRect().height)])
+    .filter(([, h]) => h < 44));
+  assert.deepEqual(short, []);
+});
