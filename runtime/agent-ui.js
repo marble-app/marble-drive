@@ -932,6 +932,25 @@
         return input.section ? `Read the guide · ${input.section}` : 'Read the guide';
       case 'check_document':
         return `Check${where}`;
+      case 'browser_navigate':
+        return input.url ? `Open ${input.url}` : 'Open page';
+      case 'browser_snapshot':
+        return 'Snapshot page';
+      case 'browser_click':
+        return input.ref ? `Click ${input.ref}` : 'Click';
+      case 'browser_type':
+        return 'Type in page';
+      case 'browser_tabs':
+        return input.action === 'new' ? 'New tab' : input.action === 'close' ? 'Close tab' : 'Tabs';
+      case 'browser_take_screenshot':
+        return 'Screenshot';
+      case 'browser_close':
+        return 'Close browser';
+      case 'browser_navigate_back':
+        return 'Back';
+      case 'WebSearch':
+      case 'web_search':
+        return input.search_term || input.query ? `Search ${input.search_term || input.query}` : 'Web search';
       default:
         return `Tried ${name}`;
     }

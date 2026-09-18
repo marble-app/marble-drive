@@ -31,6 +31,7 @@ const until = async (check, ms = 5_000) => {
 async function hostWith({ capability, power = '', sandbox = null } = {}) {
   const root = await fsp.mkdtemp(path.join(ROOT, 'd-'));
   const seen = [];
+  const prepared = [];
   const scripts = { noop: [{ say: 'done' }] };
   const provider = createFakeProvider({ scripts });
   if (capability === null) delete provider.capability;
@@ -40,6 +41,9 @@ async function hostWith({ capability, power = '', sandbox = null } = {}) {
     seen.push({ capability: opts.capability, cwd: opts.cwd });
     const spec = spawn(opts);
     return opts.capability === 'full' && opts.cwd ? { ...spec, cwd: opts.cwd } : spec;
+  };
+  provider.prepare = async (opts) => {
+    prepared.push({ capability: opts.capability, browser: opts.browser ?? null });
   };
 
   const config = loadConfig({
@@ -57,7 +61,7 @@ async function hostWith({ capability, power = '', sandbox = null } = {}) {
   });
   await new Promise((resolve) => drive.server.listen(0, '127.0.0.1', resolve));
   await drive.createDocument('notes', SOURCE);
-  return { drive, config, seen, root, scripts, port: drive.server.address().port };
+  return { drive, config, seen, prepared, root, scripts, port: drive.server.address().port };
 }
 
 /** Run one turn and wait for it to leave the runner. */
@@ -79,6 +83,52 @@ async function runTurnWithScript(drive, scripts, script) {
   scripts[name] = script;
   return runTurn(drive, `script:${name}`);
 }
+
+test('a full turn hands prepare a browser MCP spec; documents does not', async () => {
+  const full = await hostWith({ capability: 'full' });
+  try {
+    await runTurn(full.drive);
+    assert.equal(full.prepared.length, 1);
+    assert.equal(full.prepared[0].capability, 'full');
+    assert.equal(full.prepared[0].browser.command, process.execPath);
+    assert.match(full.prepared[0].browser.args[0], /marble-browser-mcp\.js$/);
+    assert.match(full.prepared[0].browser.env.MARBLE_BROWSER_PROFILE, /browser-profile$/);
+  } finally {
+    await full.drive.close();
+  }
+
+  const docs = await hostWith({ capability: 'documents' });
+  try {
+    await runTurn(docs.drive);
+    assert.equal(docs.prepared[0].capability, 'documents');
+    assert.equal(docs.prepared[0].browser, null);
+  } finally {
+    await docs.drive.close();
+  }
+});
+
+test('a later full turn wipes cookies left in the conversation browser profile', async () => {
+  const full = await hostWith({ capability: 'full' });
+  try {
+    const conversation = await full.drive.agents.store.createConversation({ provider: 'fake' });
+    const send = () => full.drive.agents.runner.send(conversation.id, {
+      prompt: 'script:noop',
+      context: { target: 'notes', viewing: 'notes', selection: [] },
+    });
+    const wait = async (turnId) => until(async () => {
+      const turn = await full.drive.agents.store.turn(turnId);
+      return turn && !['queued', 'running'].includes(turn.status) ? turn : null;
+    });
+    await wait((await send()).turnId);
+    const profile = path.join(full.config.agentWorkdir, conversation.id, 'browser-profile');
+    await fsp.mkdir(profile, { recursive: true });
+    await fsp.writeFile(path.join(profile, 'Cookies'), 'stale');
+    await wait((await send()).turnId);
+    await assert.rejects(fsp.stat(path.join(profile, 'Cookies')), { code: 'ENOENT' });
+  } finally {
+    await full.drive.close();
+  }
+});
 
 test('a full provider is spawned rooted at the drive', async () => {
   const { drive, config, seen } = await hostWith({ capability: 'full' });

@@ -60,18 +60,23 @@ capability therefore sees the drive. `claude-subscription`, `claude-api` and
 `cursor` all ship at `full`.
 
 Claude's own tools — `Read`, `Write`, `Edit`, `Glob`, `Grep`, `Bash`,
-`TodoWrite` — run with the drive as the working directory, alongside Marble's
-tools. `--restricted` confines the **file** tools to the drive; a `Read` above
-it is refused by the CLI itself. It does **not** confine `Bash`: an agent's
-shell can reach the whole machine, as yours can. That is stated rather than
-fixed — the enforcement that would close it is platform-specific and is its own
-project. The spawn goes through a `sandbox` seam in the runner so it can be
-closed without touching any provider.
+`TodoWrite`, `WebSearch`, `WebFetch` — run with the drive as the working
+directory, alongside Marble's document tools and a Marble-owned browser MCP
+(`bin/marble-browser-mcp.js`: headless Chromium, empty profile, http(s) only).
+`--restricted` confines the **file** tools to the drive; a `Read` above it is
+refused by the CLI itself. It does **not** confine `Bash` or the browser: an
+agent's shell can reach the whole machine, as yours can, and the browser can
+open any http(s) URL. That is stated rather than fixed — the enforcement that
+would close the shell is platform-specific and is its own project. The spawn
+goes through a `sandbox` seam in the runner so it can be closed without
+touching any provider.
 
 Cursor has no `--restricted`. Its file tools are pointed at the drive with
-`--add-dir`; the shell's cwd is the drive; the conversation workspace still
-holds the turn token, the MCP config and the hook. The hook allows Cursor's own
-tools at `full` and still refuses another MCP server's tools. Cursor's shell is
+`--add-dir`; the shell's cwd is the drive; `--sandbox disabled` lets native
+`WebSearch` / `WebFetch` and the browser reach the network. The conversation
+workspace still holds the turn token, the MCP config and the hook. The hook
+allows Cursor's own tools at `full`, Marble's document tools, and Marble's
+`MCP:browser_*` tools. It still refuses another MCP server. Cursor's shell is
 not confined either.
 
 `MARBLE_DRIVE_AGENT_POWER=documents` holds every provider down to the tools-only
@@ -112,17 +117,22 @@ the value. Backups of `.marble/` therefore do not take them.
 
 | id | runs | boundary |
 |---|---|---|
-| `claude-subscription` | `claude -p`, prompt on stdin, `--model` / `--effort` from the conversation, skills copied into the workspace so `/skill-name` works | `full`: `--restricted`, cwd the drive, `Read`/`Write`/`Edit`/`Glob`/`Grep`/`Bash`/`TodoWrite` plus Marble's MCP tools |
+| `claude-subscription` | `claude -p`, prompt on stdin, `--model` / `--effort` from the conversation, skills copied into the workspace so `/skill-name` works | `full`: `--restricted`, cwd the drive, `Read`/`Write`/`Edit`/`Glob`/`Grep`/`Bash`/`TodoWrite`/`WebSearch`/`WebFetch` plus Marble's document MCP and browser MCP |
 | `claude-api` | the same, with `ANTHROPIC_API_KEY`; without it the turn fails rather than fall back to the login | the same |
-| `cursor` | `cursor-agent -p`, model `composer-2.5` unless the conversation names one, prompt passed after `--` (a dash-leading prompt would otherwise be parsed as a flag) | `full`: `--add-dir` the drive, cwd the drive, hook allows Cursor's own tools plus Marble's MCP tools (`bin/marble-cursor-hook.js`) |
+| `cursor` | `cursor-agent -p`, model `composer-2.5` unless the conversation names one, prompt passed after `--` (a dash-leading prompt would otherwise be parsed as a flag) | `full`: `--add-dir` the drive, `--sandbox disabled`, cwd the drive, hook allows Cursor's own tools, Marble's document tools, and Marble's `MCP:browser_*` (`bin/marble-cursor-hook.js`) |
 
 The Cursor hook sees a tool's name (`MCP:read_document`) but not which MCP
 server it belongs to, and `--approve-mcps` approves every server Cursor loads,
 including the user's own from `~/.cursor/mcp.json`. A user server with a tool
-named like one of Marble's would get past the hook, so while that file names any
-server (or cannot be parsed) `agents providers` shows Cursor as blocked and its
-turns fail before they start. Whether a user-level `~/.cursor/hooks.json` runs
-alongside the workspace hook, and how the two answers combine, is unverified.
+named like one of Marble's — or like `browser_tabs` — would get past the hook,
+so while that file names any server (or cannot be parsed) `agents providers`
+shows Cursor as blocked and its turns fail before they start. Whether a
+user-level `~/.cursor/hooks.json` runs alongside the workspace hook, and how
+the two answers combine, is unverified.
+
+The browser MCP uses Playwright from `@bdhmin/marble`. If Chromium is not
+installed, a browser tool returns an error telling you to run
+`npx playwright install chromium`.
 
 Every agent gets the same rules (`server/agent/instructions.js`). Each turn,
 `prepare` rewrites the workspace's MCP config with that turn's token (mode 600).

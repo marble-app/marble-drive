@@ -9,6 +9,7 @@ import { fileURLToPath } from 'node:url';
 
 import { FULL_INSTRUCTIONS, INSTRUCTIONS } from '../server/agent/instructions.js';
 import { createCursorProvider, parseCursorLine } from '../server/agent/providers/cursor.js';
+import { BROWSER_TOOLS } from '../server/agent/browser.js';
 import { TOOL_SCHEMAS } from '../server/agent/tools.js';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
@@ -160,7 +161,7 @@ test('a prompt starting with - comes after -- to avoid being parsed as an option
   assert.equal(spec.args.at(-1), '-1 reply with only the word ok');
 });
 
-test('a full-capability spawn sees the drive as an extra root and runs there', () => {
+test('a full-capability spawn sees the drive as an extra root, runs there, and disables the sandbox', () => {
   const provider = createCursorProvider({ env: {} });
   const spec = provider.spawn({
     workspace: '/w', prompt: 'Rewrite it', capability: 'full', cwd: '/drive', env: {},
@@ -171,6 +172,9 @@ test('a full-capability spawn sees the drive as an extra root and runs there', (
   const addAt = spec.args.indexOf('--add-dir');
   assert.ok(addAt >= 0, 'the drive is an extra workspace root');
   assert.equal(spec.args[addAt + 1], '/drive');
+  const sandboxAt = spec.args.indexOf('--sandbox');
+  assert.ok(sandboxAt >= 0);
+  assert.equal(spec.args[sandboxAt + 1], 'disabled');
 });
 
 test('a documents-capability spawn is exactly what it was before', () => {
@@ -200,15 +204,19 @@ test('prepare writes the MCP config privately, the fail-closed hook, and the ins
   assert.equal(await fsp.readFile(path.join(workspace, 'AGENTS.md'), 'utf8'), INSTRUCTIONS);
 });
 
-test('a full-capability prepare tells the hook and writes the full instructions', async () => {
+test('a full-capability prepare writes the browser MCP server and the full instructions', async () => {
   const workspace = await fsp.mkdtemp(path.join(os.tmpdir(), 'marble-cursor-full-'));
   const mcp = { command: '/usr/bin/node', args: ['/repo/bin/marble-mcp.js'], env: { MARBLE_DRIVE_URL: 'http://127.0.0.1:1', MARBLE_AGENT_TOKEN: 'tok' } };
+  const browser = { command: '/usr/bin/node', args: ['/repo/bin/marble-browser-mcp.js'], env: { MARBLE_BROWSER_PROFILE: '/w/browser-profile' } };
   await createCursorProvider({ hookPath: '/repo/bin/marble-cursor-hook.js', userDir: NO_USER_DIR })
-    .prepare({ workspace, mcp, meta: {}, capability: 'full' });
+    .prepare({ workspace, mcp, browser, meta: {}, capability: 'full' });
 
   const hooks = JSON.parse(await fsp.readFile(path.join(workspace, '.cursor', 'hooks.json'), 'utf8'));
   assert.match(hooks.hooks.preToolUse[0].command, /MARBLE_CURSOR_CAPABILITY=full/);
   assert.equal(await fsp.readFile(path.join(workspace, 'AGENTS.md'), 'utf8'), FULL_INSTRUCTIONS);
+  const mcpFile = JSON.parse(await fsp.readFile(path.join(workspace, '.cursor', 'mcp.json'), 'utf8'));
+  assert.deepEqual(mcpFile.mcpServers.marble, mcp);
+  assert.deepEqual(mcpFile.mcpServers.browser, browser);
 });
 
 test('detect: signed in, signed out, not installed', async () => {
@@ -257,7 +265,7 @@ test('the hook denies everything else, including other MCP servers and nonsense'
 
 test('a full-capability hook allows Cursor\'s own tools and still refuses foreign MCP', () => {
   const env = { MARBLE_CURSOR_CAPABILITY: 'full' };
-  for (const name of ['Shell', 'Write', 'Read', 'Edit', 'Grep', 'Glob']) {
+  for (const name of ['Shell', 'Write', 'Read', 'Edit', 'Grep', 'Glob', 'WebSearch', 'WebFetch']) {
     assert.equal(
       askHook(JSON.stringify({ tool_name: name, tool_input: {} }), env).answer.permission,
       'allow',
@@ -266,6 +274,19 @@ test('a full-capability hook allows Cursor\'s own tools and still refuses foreig
   }
   assert.equal(askHook(JSON.stringify({ tool_name: 'MCP:read_document', tool_input: {} }), env).answer.permission, 'allow');
   assert.equal(askHook(JSON.stringify({ tool_name: 'MCP:github_create_issue', tool_input: {} }), env).answer.permission, 'deny');
+});
+
+test('a full-capability hook allows exactly Marble\'s browser tools, not evaluate', () => {
+  const env = { MARBLE_CURSOR_CAPABILITY: 'full' };
+  for (const name of BROWSER_TOOLS) {
+    assert.equal(
+      askHook(JSON.stringify({ tool_name: `MCP:${name}`, tool_input: {} }), env).answer.permission,
+      'allow',
+      name,
+    );
+  }
+  assert.equal(askHook(JSON.stringify({ tool_name: 'MCP:browser_evaluate', tool_input: {} }), env).answer.permission, 'deny');
+  assert.equal(askHook(JSON.stringify({ tool_name: 'MCP:browser_tabs', tool_input: {} })).answer.permission, 'deny');
 });
 
 test('the hook edge cases: trailing space, case sensitivity, near misses, junk', () => {

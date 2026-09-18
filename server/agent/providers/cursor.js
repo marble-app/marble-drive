@@ -175,7 +175,8 @@ export function createCursorProvider({
     label: 'Cursor',
     // Cursor has no `--restricted`. The drive is an extra `--add-dir`; the
     // conversation workspace still holds the turn token and the hook. The hook
-    // allows Cursor's own tools at `full` and still refuses another MCP server.
+    // allows Cursor's own tools at `full`, Marble's document tools, and Marble's
+    // browser MCP. Another MCP server is still refused.
     capability: 'full',
     defaultModel,
     efforts: [],
@@ -209,7 +210,7 @@ export function createCursorProvider({
       };
     },
 
-    async prepare({ workspace, mcp, capability = 'documents' }) {
+    async prepare({ workspace, mcp, browser = null, capability = 'documents' }) {
       const servers = await userMcpServers(userDir);
       if (servers.length) {
         throw new Error(
@@ -226,6 +227,7 @@ export function createCursorProvider({
 
       const mcpFile = path.join(dir, 'mcp.json');
       const config = { mcpServers: { marble: { command: mcp.command, args: mcp.args, env: mcp.env } } };
+      if (capability === 'full' && browser) config.mcpServers.browser = browser;
       await writePrivateFile(mcpFile, JSON.stringify(config, null, 2));
 
       const cap = capability === 'full' ? 'full' : 'documents';
@@ -248,7 +250,7 @@ export function createCursorProvider({
       const args = [
         '-p', '--output-format', 'stream-json', '--stream-partial-output', '--approve-mcps', '--trust',
         '--workspace', workspace,
-        ...(full ? ['--add-dir', cwd] : []),
+        ...(full ? ['--add-dir', cwd, '--sandbox', 'disabled'] : []),
         '--model', resolveCursorModel(model, effort, defaultModel),
       ];
       const run = mode || 'agent';

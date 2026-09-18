@@ -61,6 +61,24 @@ test('a failed tool result is not ok', () => {
   assert.deepEqual(parseClaudeLine(line), [{ type: 'tool.result', callId: 't1', ok: false, summary: 'no document "x"' }]);
 });
 
+test('mcp__browser__ and mcp__marble__ prefixes both drop so the UI sees the tool name', () => {
+  const browser = JSON.stringify({
+    type: 'assistant',
+    message: { content: [{ type: 'tool_use', id: 't1', name: 'mcp__browser__browser_navigate', input: { url: 'https://example.com/' } }] },
+  });
+  const marble = JSON.stringify({
+    type: 'assistant',
+    message: { content: [{ type: 'tool_use', id: 't2', name: 'mcp__marble__read_document', input: { path: 'garden' } }] },
+  });
+  const native = JSON.stringify({
+    type: 'assistant',
+    message: { content: [{ type: 'tool_use', id: 't3', name: 'WebSearch', input: { query: 'x' } }] },
+  });
+  assert.equal(parseClaudeLine(browser)[0].name, 'browser_navigate');
+  assert.equal(parseClaudeLine(marble)[0].name, 'read_document');
+  assert.equal(parseClaudeLine(native)[0].name, 'WebSearch');
+});
+
 test('ids, labels, and the spawn verified by the spike', () => {
   const sub = createClaudeProvider({ auth: 'subscription', env: { ANTHROPIC_API_KEY: 'sk-test' } });
   const api = createClaudeProvider({ auth: 'api', env: { ANTHROPIC_API_KEY: 'sk-test' } });
@@ -202,6 +220,8 @@ test('each capability is told the truth about its own tools', async () => {
   assert.match(full, /apply_ops/, 'ops are still the right tool for a live document');
   assert.match(full, /Grep/, 'it must be steered off Read on a 3 MB document');
   assert.match(full, /check_document/);
+  assert.match(full, /WebSearch/);
+  assert.match(full, /browser_navigate/);
 });
 
 test('prepare replaces an existing, looser MCP config with a private one, and leaves nothing beside it', async () => {
@@ -229,7 +249,7 @@ test('a full-capability spawn is confined, tooled, and prompt-free', async () =>
   assert.deepEqual(spec.args, [
     '-p', '--output-format', 'stream-json', '--verbose', '--include-partial-messages',
     '--restricted',
-    '--tools', 'Bash,Read,Write,Edit,Glob,Grep,TodoWrite',
+    '--tools', 'Bash,Read,Write,Edit,Glob,Grep,TodoWrite,WebSearch,WebFetch',
     '--settings', path.join('/w', 'settings.json'),
     '--permission-prompts', 'none',
     '--strict-mcp-config', '--mcp-config', path.join('/w', 'mcp.json'),
@@ -248,19 +268,24 @@ test('a documents-capability spawn is exactly what it was before', () => {
   assert.equal(asked.cwd, undefined, 'a documents agent still runs in its empty workspace');
 });
 
-test('prepare writes a private settings.json only for a full turn', async () => {
+test('a full-capability prepare writes the browser MCP server and private settings', async () => {
   const workspace = await fsp.mkdtemp(path.join(os.tmpdir(), 'marble-full-'));
   const mcp = { command: 'node', args: ['/bridge.js'], env: { MARBLE_AGENT_TOKEN: 't' } };
+  const browser = { command: 'node', args: ['/browser.js'], env: { MARBLE_BROWSER_PROFILE: '/w/browser-profile' } };
 
-  await createClaudeProvider().prepare({ workspace, mcp, meta: {}, capability: 'full' });
+  await createClaudeProvider().prepare({ workspace, mcp, browser, meta: {}, capability: 'full' });
   const file = path.join(workspace, 'settings.json');
   const stat = await fsp.stat(file);
   assert.equal(stat.mode & 0o777, 0o600);
   assert.deepEqual(JSON.parse(await fsp.readFile(file, 'utf8')), {
-    permissions: { allow: ['Bash', 'Read', 'Write', 'Edit', 'Glob', 'Grep', 'TodoWrite'] },
+    permissions: { allow: ['Bash', 'Read', 'Write', 'Edit', 'Glob', 'Grep', 'TodoWrite', 'WebSearch', 'WebFetch', 'mcp__browser'] },
   });
+  const mcpFile = JSON.parse(await fsp.readFile(path.join(workspace, 'mcp.json'), 'utf8'));
+  assert.deepEqual(mcpFile.mcpServers.marble, mcp);
+  assert.deepEqual(mcpFile.mcpServers.browser, browser);
 
   const other = await fsp.mkdtemp(path.join(os.tmpdir(), 'marble-docs-'));
-  await createClaudeProvider().prepare({ workspace: other, mcp, meta: {}, capability: 'documents' });
+  await createClaudeProvider().prepare({ workspace: other, mcp, browser, meta: {}, capability: 'documents' });
   await assert.rejects(fsp.stat(path.join(other, 'settings.json')), { code: 'ENOENT' });
+  assert.deepEqual(JSON.parse(await fsp.readFile(path.join(other, 'mcp.json'), 'utf8')), { mcpServers: { marble: mcp } });
 });
