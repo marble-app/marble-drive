@@ -1241,12 +1241,19 @@
     .turn-footer .watch { color: var(--caution); }
     .system { align-self: center; font-size: 12px; color: var(--faint); text-align: center; max-width: 90%; padding: 8px 0; }
     .system.error { color: var(--danger); }
-    .queued { display: flex; flex-direction: column; gap: 4px; padding: 0 18px 6px; }
+    .queued { display: flex; flex-direction: column; gap: 4px; }
     .queued[hidden] { display: none; }
-    .queued-item { display: flex; align-items: center; gap: 8px; font-size: 12px; color: var(--muted); background: var(--paper-2); border-radius: 8px; padding: 4px 4px 4px 10px; }
-    .queued-item span { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-    .queued-item button { font: inherit; border: 0; background: none; color: var(--muted); width: 22px; height: 22px; border-radius: 6px; cursor: pointer; }
-    .queued-item button:hover { background: var(--line); }
+    .queued-bar { display: flex; align-items: center; align-self: flex-start; background: var(--paper-3); border: 1px solid var(--line); border-radius: 999px; padding: 1px; }
+    .queued-bar[hidden] { display: none; }
+    .queued-bar button { font: inherit; font-size: 11px; font-weight: 500; border: 0; background: none; color: var(--muted); padding: 3px 9px; border-radius: 999px; cursor: pointer; }
+    .queued-bar button[aria-pressed="true"] { color: var(--ink); background: var(--card); box-shadow: 0 1px 2px color-mix(in srgb, var(--ink) 12%, transparent); }
+    .queued-item { display: flex; align-items: center; gap: 8px; font-size: 12px; color: var(--muted); background: var(--paper-2); border: 1px solid var(--line); border-radius: 10px; padding: 3px 4px 3px 6px; }
+    .queued-dispatch { flex: none; font: inherit; font-size: 11px; font-weight: 500; color: var(--accent-ink); background: var(--card); border: 1px solid var(--line); border-radius: 999px; padding: 1px 8px; cursor: pointer; }
+    .queued-item[data-dispatch="interrupt"] .queued-dispatch { color: var(--caution); }
+    .queued-text { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; cursor: text; border-radius: 6px; padding: 2px 4px; outline: none; }
+    .queued-text[contenteditable] { white-space: normal; background: var(--card); box-shadow: 0 0 0 1px var(--accent); color: var(--ink); }
+    .queued-item button.dequeue { font: inherit; border: 0; background: none; color: var(--muted); width: 22px; height: 22px; border-radius: 6px; cursor: pointer; flex: none; }
+    .queued-item button.dequeue:hover { background: var(--line); }
     .composer { flex: none; padding: 6px 10px calc(10px + env(safe-area-inset-bottom, 0px)); border-top: 1px solid var(--line); display: flex; flex-direction: column; gap: 6px; background: var(--paper); }
     .picker { display: flex; flex-flow: row nowrap; align-items: center; gap: 6px; font-size: 12px; color: var(--muted); overflow: visible; flex: 0 0 auto; width: fit-content; max-width: 100%; min-width: 0; }
     .picker[hidden] { display: none; }
@@ -1761,7 +1768,6 @@
           <div class="also" hidden></div>
         </header>
         <div class="log" role="log" aria-live="polite" aria-label="Conversation"></div>
-        <div class="queued" hidden></div>
         <form class="composer">
           <div class="slash" hidden role="listbox" aria-label="Commands"></div>
           <div class="peek" hidden>
@@ -1770,6 +1776,12 @@
               <button type="button" class="peek-close" aria-label="Close">×</button>
             </div>
             <div class="peek-body"></div>
+          </div>
+          <div class="queued" hidden data-combine="0">
+            <div class="queued-bar" hidden role="group" aria-label="How queued prompts are sent">
+              <button type="button" class="queued-individually" aria-pressed="true">Send individually</button>
+              <button type="button" class="queued-together" aria-pressed="false">Send as one prompt</button>
+            </div>
           </div>
           <div class="row">
             <div class="chips" hidden></div>
@@ -1795,6 +1807,9 @@
         </form>`;
       this.logEl = root.querySelector('.log');
       this.queuedEl = root.querySelector('.queued');
+      this.queuedBar = root.querySelector('.queued-bar');
+      this.queuedIndividually = root.querySelector('.queued-individually');
+      this.queuedTogether = root.querySelector('.queued-together');
       this.form = root.querySelector('form');
       this.mast = root.querySelector('.mast');
       this.heading = root.querySelector('.heading');
@@ -1889,6 +1904,14 @@
         if (event.key === 'Escape') closeSegMenus(this.shadowRoot);
       });
       this.modeButton.addEventListener('click', () => this.cycleMode());
+      this.queuedIndividually.addEventListener('click', () => this.setQueueCombine(false));
+      this.queuedTogether.addEventListener('click', () => this.setQueueCombine(true));
+      // How the next send behaves while a turn runs; the same three modes a
+      // queued row can be set to afterwards.
+      this.dispatchEl.classList.add('seg-opts');
+      fillRadios(this.dispatchEl, 'dispatch', [
+        { id: 'queue', label: 'Queue' }, { id: 'steer', label: 'Steer' }, { id: 'interrupt', label: 'Interrupt' },
+      ], { empty: null, value: 'queue' });
       this.form.addEventListener('submit', (event) => {
         event.preventDefault();
         this.submit();
@@ -1908,7 +1931,9 @@
         }
         if (event.key === 'Enter' && !event.shiftKey && !event.isComposing) {
           event.preventDefault();
-          this.submit();
+          // ⌘Enter is always a steer while a turn runs; Enter takes the bar's choice.
+          const steer = event.metaKey || event.ctrlKey;
+          this.submit(steer && this.running ? { dispatch: 'steer' } : {});
           return;
         }
         if (event.key === 'Enter' && event.shiftKey) {
@@ -2023,8 +2048,10 @@
       removeEventListener('marble:agent-context', this.onContext);
       this.off?.();
       this.offAll?.();
+      this.offQueue?.();
       this.offAll = null;
       this.off = null;
+      this.offQueue = null;
     }
 
     attributeChangedCallback(_name, before, after) {
@@ -2040,9 +2067,13 @@
     async load() {
       this.off?.();
       this.off = null;
+      this.offQueue?.();
+      this.offQueue = null;
       this.logEl.replaceChildren();
-      this.queuedEl.replaceChildren();
+      for (const item of this.queuedEl.querySelectorAll('.queued-item')) item.remove();
       this.queuedEl.hidden = true;
+      this.queuedBar.hidden = true;
+      this.applyQueueCombine(false);
       this.composerChips = this.composerChips.filter((chip) => chip.kind === 'model' || chip.kind === 'effort');
       this.renderChips();
       this.clearAttachments();
@@ -2079,6 +2110,7 @@
         ]);
         if (this.loading !== token) return;
         this.meta = meta;
+        this.applyQueueCombine(Boolean(meta.queueCombine));
         this.projectList = projects;
         this.providerList = sortProviders(providers);
         this.mode = meta.mode || '';
@@ -2097,6 +2129,10 @@
       this.off = this.api.on(id, (event) => {
         if (this.loading !== token) return;
         this.receive(event);
+      });
+      this.offQueue = this.api.on(id, (event) => {
+        if (this.loading !== token) return;
+        this.receiveQueue(event);
       });
       this.offAll?.();
       this.others = new Map();
@@ -2658,8 +2694,9 @@
       return chip;
     }
 
-    async submit() {
+    async submit({ dispatch = null } = {}) {
       if (this.sending) return;
+      const mode = dispatch ?? (this.running ? radioValue(this.shadowRoot, 'dispatch') || 'queue' : 'queue');
       let typed = this.input.value.trim();
       const slash = this.matchSlash(typed);
       if (slash?.kind === 'clear') {
@@ -2734,7 +2771,7 @@
           this.paintPresets();
           this.dispatchEvent(new CustomEvent('conversation', { detail: { id }, bubbles: true, composed: true }));
         }
-        await this.api.send(id, { prompt, ...context });
+        await this.api.send(id, { prompt, dispatch: mode, ...context });
         // A reply in the person's own words answers the question too.
         for (const record of this.turns.values()) {
           record.choice?.remove();
@@ -3434,6 +3471,7 @@
 
     /** Entries of a turn go above its footer, so the footer stays last. */
     append(turn, node) {
+      if (turn && node.classList?.contains('msg')) node.dataset.turn = turn;
       const footer = turn ? this.turns.get(turn)?.footer : null;
       if (footer?.isConnected) this.logEl.insertBefore(node, footer);
       else this.logEl.append(node);
@@ -3650,23 +3688,153 @@
       this.regroup(turn);
     }
 
+    /** The queue's own events, beside the transcript's: a row's mode, an
+     *  edited prompt, a row folded into a batch. */
+    receiveQueue(event) {
+      const id = this.getAttribute('conversation');
+      if (!eventBelongsToConversation(event, id)) return;
+      const turn = event.turn;
+      switch (event.type) {
+        case 'turn.queued':
+          this.record(turn).dispatch = event.dispatch ?? 'queue';
+          // The transcript's handler makes the row; paint its mode once it has.
+          queueMicrotask(() => {
+            const row = this.queuedRow(turn);
+            if (row) this.paintQueuedDispatch(row, this.record(turn).dispatch);
+          });
+          break;
+        case 'turn.dispatch': {
+          this.record(turn).dispatch = event.dispatch;
+          const row = this.queuedRow(turn);
+          if (row) this.paintQueuedDispatch(row, event.dispatch);
+          break;
+        }
+        case 'user.edited': {
+          this.prompts.set(turn, event.text);
+          const text = this.queuedRow(turn)?.querySelector('.queued-text');
+          if (text && !text.isContentEditable) text.textContent = event.text;
+          const bubble = this.logEl.querySelector(`.msg.me[data-turn="${CSS.escape(turn)}"]`);
+          if (bubble) {
+            const next = this.userMessage(event.text);
+            next.dataset.turn = turn;
+            bubble.replaceWith(next);
+          }
+          break;
+        }
+        case 'turn.combined':
+          this.queue(turn, false);
+          break;
+        default:
+      }
+    }
+
+    queuedRow(turn) {
+      return this.queuedEl.querySelector(`.queued-item[data-turn="${CSS.escape(turn)}"]`);
+    }
+
     queue(turn, present) {
-      const existing = this.queuedEl.querySelector(`[data-turn="${CSS.escape(turn)}"]`);
+      const existing = this.queuedRow(turn);
       if (!present) {
         existing?.remove();
       } else if (!existing) {
         const item = h('div', 'queued-item');
         item.dataset.turn = turn;
-        item.append(h('span', '', `Queued: ${this.prompts.get(turn) ?? ''}`));
+        const dispatch = h('button', 'queued-dispatch');
+        dispatch.type = 'button';
+        dispatch.addEventListener('click', () => this.cycleQueuedDispatch(item, turn));
+        const text = h('span', 'queued-text', this.prompts.get(turn) ?? '');
+        text.addEventListener('click', () => this.editQueuedPrompt(item, turn));
         const remove = h('button', 'dequeue', '×');
         remove.type = 'button';
         remove.setAttribute('aria-label', 'Remove from the queue');
+        remove.addEventListener('mousedown', () => { item.dataset.skipSave = '1'; });
         remove.addEventListener('click', () => this.api.dequeue(turn).catch((err) => this.system(err.message, true)));
-        item.append(remove);
+        item.append(dispatch, text, remove);
+        this.paintQueuedDispatch(item, this.record(turn).dispatch ?? 'queue');
         this.queuedEl.append(item);
       }
-      this.queuedEl.hidden = !this.queuedEl.children.length;
+      const n = this.queuedEl.querySelectorAll('.queued-item').length;
+      this.queuedEl.hidden = n === 0;
+      this.queuedBar.hidden = n < 2;
       // A queued turn's message stays in the log; only the queue row goes.
+    }
+
+    applyQueueCombine(on) {
+      this.queuedEl.dataset.combine = on ? '1' : '0';
+      this.queuedIndividually.setAttribute('aria-pressed', on ? 'false' : 'true');
+      this.queuedTogether.setAttribute('aria-pressed', on ? 'true' : 'false');
+    }
+
+    setQueueCombine(on) {
+      const id = this.getAttribute('conversation');
+      const was = this.queuedEl.dataset.combine === '1';
+      this.applyQueueCombine(on);
+      if (!id || !this.api?.update) return;
+      this.api.update(id, { queueCombine: on }).catch((err) => {
+        this.applyQueueCombine(was);
+        this.system(err.message, true);
+      });
+    }
+
+    paintQueuedDispatch(item, mode) {
+      const next = mode === 'steer' || mode === 'interrupt' ? mode : 'queue';
+      item.dataset.dispatch = next;
+      const button = item.querySelector('.queued-dispatch');
+      const label = { queue: 'Queue', steer: 'Steer', interrupt: 'Interrupt' }[next];
+      button.textContent = label;
+      button.setAttribute('aria-label', `${label} — click to change how this prompt is sent`);
+    }
+
+    cycleQueuedDispatch(item, turn) {
+      const prev = item.dataset.dispatch || 'queue';
+      const next = { queue: 'steer', steer: 'interrupt', interrupt: 'queue' }[prev];
+      this.paintQueuedDispatch(item, next);
+      this.api.patchTurn(turn, { dispatch: next }).catch((err) => {
+        this.paintQueuedDispatch(item, prev);
+        this.system(err.message, true);
+      });
+    }
+
+    /** Click the text to change it in place: Enter or leaving saves, Escape
+     *  and the × put it back. */
+    editQueuedPrompt(item, turn) {
+      const text = item.querySelector('.queued-text');
+      if (!text || text.isContentEditable) return;
+      const before = this.prompts.get(turn) ?? text.textContent;
+      text.contentEditable = 'plaintext-only';
+      text.textContent = before;
+      text.focus();
+      placeCaret(text);
+      let done = false;
+      const finish = (save) => {
+        if (done) return;
+        done = true;
+        text.removeAttribute('contenteditable');
+        const next = text.textContent.replace(/\s+/g, ' ').trim();
+        if (!save || item.dataset.skipSave || !next || next === before) {
+          delete item.dataset.skipSave;
+          text.textContent = before;
+          return;
+        }
+        this.prompts.set(turn, next);
+        this.api.patchTurn(turn, { prompt: next }).catch((err) => {
+          this.prompts.set(turn, before);
+          text.textContent = before;
+          this.system(err.message, true);
+        });
+      };
+      text.addEventListener('keydown', (event) => {
+        if (event.key === 'Enter') {
+          event.preventDefault();
+          event.stopPropagation();
+          finish(true);
+        }
+        if (event.key === 'Escape') {
+          event.preventDefault();
+          finish(false);
+        }
+      });
+      text.addEventListener('blur', () => finish(true), { once: true });
     }
 
     footer(turn, status) {
@@ -3745,6 +3913,9 @@
     setRunning(turn) {
       this.running = turn ? { turn, target: this.turns.get(turn)?.target ?? null } : null;
       this.stopButton.hidden = !turn;
+      this.dispatchEl.hidden = !turn;
+      if (!turn) setRadioValue(this.shadowRoot, 'dispatch', 'queue');
+      else requestAnimationFrame(() => slideThumb(this.dispatchEl, { animate: false }));
       this.dispatchEvent(new CustomEvent('running', { detail: this.running ?? { turn: null }, bubbles: true, composed: true }));
     }
   }

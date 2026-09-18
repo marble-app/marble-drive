@@ -844,6 +844,64 @@ test('a second message while one runs is queued, and can be removed', async () =
   assert.equal(await view.locator('.turn-footer').count(), 1, 'only the first turn ran');
 });
 
+test('queued rows show their mode, cycle it, and can be edited', async () => {
+  const { page, view } = await mount();
+  await sendFrom(view, 'script:hold');
+  await view.locator('button.stop').waitFor({ state: 'visible' });
+  await sendFrom(view, 'later');
+  const row = view.locator('.queued-item');
+  await row.waitFor();
+  assert.equal(await row.getAttribute('data-dispatch'), 'queue');
+  assert.match(await row.locator('.queued-dispatch').textContent(), /Queue/);
+  await row.locator('.queued-dispatch').click();
+  await page.waitForFunction(() => document.querySelector('body > marble-conversation').shadowRoot.querySelector('.queued-item').dataset.dispatch === 'steer');
+  await row.locator('.queued-text').click();
+  const edit = row.locator('.queued-text[contenteditable]');
+  await edit.waitFor();
+  await edit.fill('later, but shorter');
+  await edit.press('Enter');
+  await row.locator('.queued-text', { hasText: 'later, but shorter' }).waitFor();
+  const id = await page.evaluate(() => document.querySelector('body > marble-conversation').getAttribute('conversation'));
+  await page.waitForFunction(async (cid) => (await window.marble.agent.conversation(cid)).turns[1]?.prompt === 'later, but shorter', id);
+  const turns = await host.drive.agents.store.turns(id);
+  assert.equal(turns[1].dispatch, 'steer');
+});
+
+test('two queued rows show the batch switch, and it is saved on the conversation', async () => {
+  const { page, view } = await mount();
+  await sendFrom(view, 'script:hold');
+  await view.locator('button.stop').waitFor({ state: 'visible' });
+  await sendFrom(view, 'one');
+  await view.locator('.queued-item').waitFor();
+  assert.equal(await view.locator('.queued-bar').isVisible(), false);
+  await sendFrom(view, 'two');
+  await view.locator('.queued-bar').waitFor({ state: 'visible' });
+  await view.locator('.queued-together').click();
+  const id = await page.evaluate(() => document.querySelector('body > marble-conversation').getAttribute('conversation'));
+  await page.waitForFunction(async (cid) => (await window.marble.agent.conversation(cid)).meta.queueCombine === true, id);
+  assert.equal(await view.locator('.queued').getAttribute('data-combine'), '1');
+});
+
+test('while a turn runs the bar offers queue, steer and interrupt, and ⌘Enter steers', async () => {
+  const { page, view } = await mount();
+  assert.equal(await view.locator('.bar .dispatch').isVisible(), false);
+  await sendFrom(view, 'script:hold');
+  await view.locator('button.stop').waitFor({ state: 'visible' });
+  await view.locator('.bar .dispatch').waitFor({ state: 'visible' });
+  await pick(view, 'dispatch', 'interrupt');
+  await view.locator('.editor').fill('now');
+  await view.locator('.editor').press('Enter');
+  const id = await page.evaluate(() => document.querySelector('body > marble-conversation').getAttribute('conversation'));
+  await page.waitForFunction(async (cid) => (await window.marble.agent.conversation(cid)).turns.some((t) => t.dispatch === 'interrupt'), id);
+  await view.locator('.turn-footer[data-status="cancelled"]').waitFor();
+  await view.locator('.turn-footer[data-status="completed"]').waitFor();
+  await sendFrom(view, 'script:hold');
+  await view.locator('button.stop').waitFor({ state: 'visible' });
+  await view.locator('.editor').fill('nudge');
+  await view.locator('.editor').press('Meta+Enter');
+  await page.waitForFunction(async (cid) => (await window.marble.agent.conversation(cid)).turns.some((t) => t.dispatch === 'steer'), id);
+});
+
 test('a refused edit is shown as refused, not as an error', async () => {
   const { page } = await mount();
   const view = page.locator('body > marble-conversation');
