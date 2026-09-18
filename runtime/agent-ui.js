@@ -3916,6 +3916,8 @@
       this.dispatchEl.hidden = !turn;
       if (!turn) setRadioValue(this.shadowRoot, 'dispatch', 'queue');
       else requestAnimationFrame(() => slideThumb(this.dispatchEl, { animate: false }));
+      // The chooser takes room from the setup; refit it, or wrap the bar.
+      this.fitSetup();
       this.dispatchEvent(new CustomEvent('running', { detail: this.running ?? { turn: null }, bubbles: true, composed: true }));
     }
   }

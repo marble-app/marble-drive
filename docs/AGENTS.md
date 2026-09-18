@@ -130,8 +130,12 @@ When the CLI needs the person — a permission prompt in `manual` or `auto`
 mode, or `AskUserQuestion` — the runner records an `ask` event and the
 conversation is marked `asking` (**Needs you** on the Agents page). The
 drawer shows a card: Allow / Deny with an optional note, or the question's
-options. `POST /agent/turns/:id/answer { requestId, response }` sends the
-reply into the process. The stall timer is suspended while an ask is open;
+options as numbered rows with their descriptions and an **Other…** row for
+your own words (↑ ↓ move, a digit or Space picks, Enter answers). A question
+the agent asks in prose — a `?` line followed by `A)` / `1.` / `- [ ]`
+options — gets the same kind of picker under the message, and Enter sends
+the chosen keys and labels as the reply. `POST /agent/turns/:id/answer
+{ requestId, response }` sends an ask's reply into the process. The stall timer is suspended while an ask is open;
 Stop denies it; a process that ends first voids it. There is no timeout on
 you.
 
@@ -244,10 +248,12 @@ on Agents shows that reset as a short tooltip.
 
 **Settings** (the drawer's More menu, and a button on the Agents page) is where
 you pick the default agent, a model per agent, effort where the agent has it,
-and API keys. The composer has a status line like the CLIs themselves
-(`Cursor Grok Extra High · 12% · 1 document changed` with the mode on the
-right, and the drive path · branch underneath). Under that, saved setups
-are the main toggles when Claude or Cursor is signed in: Anthropic or
+and API keys. The composer is one card: the text, then a bar under it with
+the setup on the left and the mode, Stop and Send on the right. Agent, model
+and project are the mast's tags; what a turn changed is its footer; there is
+no status line. The setup shrinks first (segments fold into dropdowns, the
+capsule packs into More) and takes its own line only when even that does not
+fit. Saved setups are the main toggles when Claude or Cursor is signed in: Anthropic or
 Cursor mark plus a short **model + effort** name (Sonnet High, Opus Extra
 High, Grok High, Grok Extra High). Those presets stay clickable on an
 existing thread, so you can switch from Claude to Cursor (or back) without
@@ -268,7 +274,35 @@ next turn is spawned with the matching flag (`--permission-mode`, `--yolo`,
 **Compact**, and **Clear conversation**. **Tab** on a highlighted slash
 row turns it into a chip in the composer (a removable tag); Enter keeps
 the previous complete-and-run behavior. Prompts are changelog entries on
-paper, not inverted chat bubbles. The conversation mast has an editable
+paper, not inverted chat bubbles.
+
+The box you type in is an editor, not a textarea. `- ` (or `* `, `1. `) at
+the start of a line starts a list; Shift+Enter makes the next item, or a
+plain newline outside a list, and on an empty item leaves the list; Enter
+sends. The document the message is about leads the text as a chip
+(`garden · 2 selected`); its × drops the selection, and the chip comes back
+for the next message. A pasted screenshot or a long paste (over 12 lines or
+900 characters) becomes a chip at the caret, so it can be pointed at in the
+sentence; the prompt carries each as a tagged block at the top
+(`<pasted-image index="1" …>`) and a token where the chip stood
+(`[image 1]`), numbered in the order they sit in the text. Backspace,
+select-all-delete and cut take a chip out like any character. The sent
+bubble shows the same chips in the same places and renders the lists.
+
+While a turn runs, the bar offers **Queue**, **Steer** and **Interrupt**
+for the next send (⌘Enter is always steer). Queued prompts are rows above
+the box, each with its mode (click it to cycle), its text (click to edit
+in place) and ×. Two or more rows show **Send individually** / **Send as
+one prompt**, which is `queueCombine` on the conversation: as one prompt,
+the queue fires as a numbered list on a single turn. A steer that waited
+is wrapped for the model as course-correction; an interrupt cancels the
+running turn first.
+
+In the transcript, a tool row says what it touched (`Read harness.js`,
+`Grep packFocus in runtime`, `Ran the runner tests`), and a run of two or
+more finished rows folds into one line — `6 steps · Shell ×2 · Read ×2
+harness.js, agents.mrbl · Grep packFocus` — that opens on click. The row
+still running, and any failed or refused row, stays out of the fold. The conversation mast has an editable
 title and tags for the agent (`Claude`, `KIXLAB API`) and for
 model • effort (`Sonnet 4.5 • high`). On Agents, the title and the
 target document live on the pane header instead of a right-hand inspector.
@@ -306,9 +340,8 @@ still until it commits, and the open is held for one double-click interval so
 the first click of a rename does not repaint the field away.
 
 A rail tab carries its status dot, target and age, and its folder's colour on
-the leading edge. In a folder's workspace only the focused pane keeps the full
-composer chrome; the others fall back to transcript plus input, because the
-status line and pickers are the same on all of them.
+the leading edge. Every pane in a folder's workspace keeps its mast and its
+composer bar; a tile only gives up padding.
 
 **Focus** is a spatial canvas of rounded cards, laid out as a partition. A
 **stage** across the top holds the Fulls and exists only when something is
