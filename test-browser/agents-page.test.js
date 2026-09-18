@@ -83,18 +83,21 @@ test('the topbar has no Fable slider when there is no Fable usage', async () => 
   assert.equal(await page.locator('.usage .meter[data-id="fable"]').count(), 0);
 });
 
-test('three usage meters do not overlap on a phone', async () => {
+test('on a phone the meters are one ring in the topbar and a Fleet sheet that stays inside the screen', async () => {
   const { page } = await openAgents({ viewport: { width: 360, height: 700 } });
-  await page.locator('.usage .meter[data-id="fable"]').waitFor();
-  const boxes = await page.locator('.usage .meter').evaluateAll((els) => els.map((el) => {
+  await page.reload();
+  await page.locator('.topbar .usage-dot:not([hidden])').waitFor();
+  assert.equal(await page.locator('.usage .meter').filter({ visible: true }).count(), 0, 'no meter strip on a phone');
+  await page.locator('.topbar .usage-dot').click();
+  const sheet = page.locator('.sheet[data-kind="fleet"]');
+  await sheet.locator('.meter[data-id="fable"]').waitFor();
+  const boxes = await sheet.locator('.meter').evaluateAll((els) => els.map((el) => {
     const r = el.getBoundingClientRect();
-    return { id: el.dataset.id, left: r.left, right: r.right, scroll: el.scrollWidth > el.clientWidth + 1 };
+    return { id: el.dataset.id, right: r.right, scroll: el.scrollWidth > el.clientWidth + 1 };
   }));
   assert.equal(boxes.length, 3);
-  for (let i = 1; i < boxes.length; i += 1) {
-    assert.ok(boxes[i].left >= boxes[i - 1].right - 0.5, `${boxes[i - 1].id} overlaps ${boxes[i].id}`);
-  }
   assert.ok(boxes.every((box) => box.right <= 360 && !box.scroll), 'meters stay inside the phone');
+  assert.ok((await page.evaluate(() => document.documentElement.scrollWidth)) <= 360);
 });
 
 test('a Claude meter with no progress reads as unavailable', async () => {
@@ -923,7 +926,9 @@ const WEEKS = Math.min(12, (weekStart(HISTORY.to) - weekStart(HISTORY.days[FIRST
 const openUsage = async (options = {}, { routes } = {}) => {
   const { page } = await openAgents(options);
   if (routes) await routes(page);
-  await page.locator('button.settings').click();
+  // On a phone the Settings button is behind ⋯; the carrier opens it directly.
+  if (await page.locator('button.settings').isVisible()) await page.locator('button.settings').click();
+  else await page.evaluate(() => window.marble.agent.openSettings());
   const settings = page.locator('marble-agent-settings');
   await settings.locator('[role="tab"]', { hasText: 'Usage' }).click();
   return { page, settings };
