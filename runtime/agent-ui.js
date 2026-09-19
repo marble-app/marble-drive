@@ -269,6 +269,11 @@
   /** Where a released gesture would come to rest (Apple's projection). */
   const project = (velocity, rate = 0.998) => ((velocity / 1000) * rate) / (1 - rate);
 
+  /** Past a boundary, things resist rather than stop: the further you drag, the
+   *  less of the drag the thing takes. A hard stop reads as frozen. */
+  const rubberband = (overshoot, dimension, constant = 0.55) =>
+    (overshoot * dimension * constant) / (dimension + constant * Math.abs(overshoot));
+
   // ------------------------------------------------------------ helpers
 
   const h = (tag, className, text) => {
@@ -1665,10 +1670,10 @@
     :host([data-chrome="tile"]) .composer { --edge: 8px; padding: 4px var(--edge) 8px; }
     :host([data-chrome="tile"]) .log { padding: 6px 12px 12px; }
     :host([data-chrome="tile"]) .mast { padding: 6px 12px 6px; }
-    /* A phone shows one conversation, full screen. The mast folds to a line,
-       the transcript takes the width, and type is the size a thumb reads. */
-    :host([data-chrome="phone"]) .mast { padding: 6px 14px 6px; gap: 2px; }
-    :host([data-chrome="phone"]) .heading { font-size: 15px; }
+    /* A phone shows one conversation, full screen. The mast folds to one line
+       — the fold and the thumb-sized controls are at the foot of this sheet,
+       after the rules they override — the transcript takes the width, and
+       type is the size a thumb reads. */
     :host([data-chrome="phone"]) .log { padding: 8px 14px 12px; font-size: 17px; line-height: 1.45; }
     :host([data-chrome="phone"]) .composer { --edge: 10px; padding: 6px var(--edge) calc(8px + env(safe-area-inset-bottom, 0px)); }
     :host([data-chrome="phone"]) .msg { max-width: none; }
@@ -1738,8 +1743,13 @@
     .tool[data-state="pending"]::before { background: var(--accent); animation: pulse 1.2s var(--snap) infinite; }
     .tool[data-state="done"]::before { background: var(--accent-ink); }
     .tool[data-state="refused"] { color: var(--caution); } .tool[data-state="refused"]::before { background: var(--caution); }
+    /* A line of text you can tap. It is a button because on a phone it opens
+       the list of who else is in here — everywhere else it is just the line,
+       so none of the UA's button chrome comes with it. */
+    .also { appearance: none; -webkit-appearance: none; border: 0; background: none; padding: 0; margin: 0; font: inherit; text-align: left; cursor: default; }
     .mast .also { font-size: 11.5px; color: var(--faint); margin-top: 2px; }
     .mast .also[hidden] { display: none; }
+    .also-short { display: none; }
     /* Where this conversation's hands are. It wears the agent's own violet —
        the same one the construction zone draws itself in on the document — so
        the row and the box on the page are visibly one thing, and neither is
@@ -2345,6 +2355,161 @@
     .tool-group-body { display: flex; flex-direction: column; padding-left: 13px; }
     .tool-group-body[hidden] { display: none; }
 
+    /* ----------------------------------------------------------- the phone
+       Last in the sheet because every rule here overrides one above it. A
+       phone is one conversation, full screen, under a topbar that is already
+       the conversation's header: the title, the status and the ⋯ are up
+       there. So the mast keeps only what the topbar has no room for — where
+       the work lands, what it runs as, who else is in there — on one 36px
+       line, and the composer's settings fold into a single chip. */
+    :host([data-chrome="phone"]) .mast {
+      flex-direction: row; align-items: center; gap: 8px;
+      box-sizing: border-box; min-height: 36px; max-height: 36px; padding: 4px 14px;
+    }
+    /* The title is in the topbar. Two of them is one too many. */
+    :host([data-chrome="phone"]) .heading { display: none; }
+    :host([data-chrome="phone"]) .mast-meta { flex: 1 1 auto; flex-wrap: nowrap; gap: 8px; }
+    :host([data-chrome="phone"]) .tags { flex-wrap: nowrap; overflow: hidden; }
+    :host([data-chrome="phone"]) .zone-jump { align-self: center; flex: none; max-width: 40%; margin-top: 0; }
+    /* 44pt of thumb on a line of 13px type: the padding is the target and the
+       negative margin hands the height back to the row, so the mast is still
+       one 36px line and the link is still something a finger can hit. */
+    :host([data-chrome="phone"]) .target-jump {
+      box-sizing: border-box; min-height: 44px; font-size: 13px;
+      padding: 0 8px; margin: -8px -8px;
+    }
+    /* "Also working here: 3 — a, b, c" wraps to two lines and is most of the
+       mast. The count is the fact; the names are a tap away, in the page's own
+       sheet, because the page is what can open one of them. */
+    :host([data-chrome="phone"]) .mast .also {
+      flex: none; display: inline-flex; align-items: center; box-sizing: border-box;
+      min-height: 44px; padding: 0 2px; margin: -8px 0; cursor: pointer;
+    }
+    :host([data-chrome="phone"]) .mast .also[hidden] { display: none; }
+    :host([data-chrome="phone"]) .also-long { display: none; }
+    :host([data-chrome="phone"]) .also-short {
+      display: inline-flex; align-items: center; height: 22px; padding: 0 9px;
+      border-radius: 999px; background: var(--paper-2); box-shadow: inset 0 0 0 1px var(--line);
+      color: var(--muted); font-size: 11.5px; font-weight: 500; white-space: nowrap;
+    }
+    :host([data-chrome="phone"]) .also:active .also-short { background: var(--paper-3); transition: background-color 100ms ease-out; }
+    /* The setup row is a line of 21px words; a thumb cannot hit any of them.
+       It folds into one chip that says what this turn will run as, and comes
+       back as a sheet when you tap it. */
+    :host([data-chrome="phone"]) .bar > .setup, :host([data-chrome="phone"]) .bar > .mode { display: none; }
+    /* A 40pt chip in a 44pt target: the weight the eye wants and the box a
+       thumb needs are not the same rectangle. */
+    :host([data-chrome="phone"]) .setup-chip {
+      order: -1; display: inline-flex; align-items: center;
+      flex: 0 1 auto; min-width: 0; max-width: 72%;
+      box-sizing: border-box; height: 44px; padding: 0; margin: 0;
+      appearance: none; border: 0; background: none; box-shadow: none; cursor: pointer;
+      font: inherit; font-size: 14px; font-weight: 500; color: var(--muted);
+    }
+    :host([data-chrome="phone"]) .setup-chip-what {
+      display: block; box-sizing: border-box; height: 40px; line-height: 40px; padding: 0 14px;
+      border-radius: 999px; background: var(--paper-2); box-shadow: inset 0 0 0 1px var(--line);
+    }
+    :host([data-chrome="phone"]) .setup-chip:active .setup-chip-what { background: var(--paper-3); transition: background-color 100ms ease-out; }
+    .setup-chip { display: none; }
+    .setup-chip[hidden] { display: none; }
+    .setup-chip-what { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    /* 44 × 44 of target around a 32px disc: the geometry a finger needs and
+       the weight the eye wants are not the same box. */
+    :host([data-chrome="phone"]) .send, :host([data-chrome="phone"]) .stop {
+      position: relative; width: 44px; height: 44px; background: none; box-shadow: none;
+    }
+    :host([data-chrome="phone"]) .send::before, :host([data-chrome="phone"]) .stop::before {
+      content: ''; position: absolute; left: 6px; top: 6px; width: 32px; height: 32px;
+      border-radius: 50%; transition: background-color 180ms var(--settle), box-shadow 180ms var(--settle);
+    }
+    :host([data-chrome="phone"]) .send > *, :host([data-chrome="phone"]) .stop > * { position: relative; z-index: 1; }
+    :host([data-chrome="phone"]) .send::before { box-shadow: inset 0 0 0 1px var(--line); }
+    :host([data-chrome="phone"]) .send:not(:disabled) { background: none; }
+    :host([data-chrome="phone"]) .send:not(:disabled)::before { background: var(--ink); box-shadow: none; }
+    :host([data-chrome="phone"]) .send:not(:disabled):active::before { background: color-mix(in srgb, var(--ink) 68%, var(--paper)); }
+    :host([data-chrome="phone"]) .stop { background: none; }
+    :host([data-chrome="phone"]) .stop::before { background: var(--paper-2); box-shadow: inset 0 0 0 1px var(--line); }
+    :host([data-chrome="phone"]) .stop:active::before { background: var(--paper-3); }
+    :host([data-chrome="phone"]) .commit { gap: 2px; }
+    :host([data-chrome="phone"]) .editor { min-height: 44px; font-size: 17px; padding: 10px 0; }
+    :host([data-chrome="phone"]) .attach { min-height: 44px; }
+    /* The sheet the chip opens. It is inside the shadow root because the
+       controls in it are this conversation's own — moved, never rebuilt, so a
+       pick made down here is the pick the composer already had. It reads --kb
+       because a sheet that the keyboard covers is a sheet you cannot use. */
+    .setup-scrim {
+      position: fixed; inset: 0; z-index: 40; background: rgba(0, 0, 0, .28);
+      opacity: calc(1 - var(--at, 1));
+    }
+    .setup-scrim[hidden] { display: none; }
+    .setup-sheet {
+      position: fixed; left: 0; right: 0; bottom: var(--kb, 0px); z-index: 41;
+      display: flex; flex-direction: column; box-sizing: border-box;
+      max-height: min(calc(var(--vv-h, 100vh) * .72), 520px); overflow-y: auto; overscroll-behavior: contain;
+      touch-action: pan-y;
+      padding: 0 16px calc(16px + env(safe-area-inset-bottom, 0px));
+      background: var(--card); color: var(--ink);
+      border-radius: 18px 18px 0 0;
+      box-shadow: 0 -1px 0 var(--line), 0 -18px 44px rgba(0, 0, 0, .18);
+      transform: translateY(calc(var(--at, 1) * 100%));
+      will-change: transform;
+    }
+    .setup-sheet[hidden] { display: none; }
+    .setup-handle { flex: none; display: grid; place-items: center; height: 28px; touch-action: none; cursor: grab; }
+    .setup-grip { width: 36px; height: 5px; border-radius: 999px; background: var(--line); }
+    .setup-sheet-head { flex: none; font-size: 17px; font-weight: 600; letter-spacing: -.01em; padding: 2px 0 10px; }
+    .setup-sheet-body { display: flex; flex-direction: column; gap: 14px; }
+    /* The mode is the bar's, not the setup row's, so it comes down here under
+       a name of its own rather than as one more loose word. */
+    .setup-sheet-mode { display: flex; flex-direction: column; align-items: flex-start; gap: 6px; padding-top: 14px; }
+    .setup-sheet-mode[hidden] { display: none; }
+    .setup-sheet-legend { font-size: 12px; font-weight: 600; letter-spacing: .05em; text-transform: uppercase; color: var(--faint); }
+    /* Everything in the sheet is a 44pt row. The scrubber is a desk gesture on
+       a control too small to be one here, and the chip already says where it
+       would have landed. */
+    :host([data-chrome="phone"]) .setup-sheet .setup { display: flex; flex-direction: column; align-items: stretch; gap: 14px; }
+    :host([data-chrome="phone"]) .setup-sheet .setup-row { flex-wrap: wrap; align-items: center; gap: 10px; }
+    :host([data-chrome="phone"]) .setup-sheet .scrub { display: none; }
+    :host([data-chrome="phone"]) .setup-sheet .picker { display: flex; flex-direction: column; align-items: stretch; gap: 14px; }
+    :host([data-chrome="phone"]) .setup-sheet .seg { display: block; width: 100%; }
+    :host([data-chrome="phone"]) .setup-sheet .seg legend {
+      position: static; width: auto; height: auto; clip: auto; margin: 0 0 6px; padding: 0; overflow: visible;
+      font-size: 12px; font-weight: 600; letter-spacing: .05em; text-transform: uppercase; color: var(--faint);
+    }
+    :host([data-chrome="phone"]) .setup-sheet .seg-opts, :host([data-chrome="phone"]) .setup-sheet .presets { display: flex; flex-wrap: wrap; width: auto; gap: 8px; }
+    :host([data-chrome="phone"]) .setup-sheet .seg-opts span,
+    :host([data-chrome="phone"]) .setup-sheet .preset span,
+    /* Only when it is standing in for a folded segment: a trigger that is not
+       is-drop is a control this sheet has the room to show in full. */
+    :host([data-chrome="phone"]) .setup-sheet .seg-opts.is-drop .seg-current,
+    :host([data-chrome="phone"]) .setup-sheet .presets-more,
+    :host([data-chrome="phone"]) .setup-sheet .custom-toggle,
+    :host([data-chrome="phone"]) .setup-sheet .mode {
+      box-sizing: border-box; display: inline-flex; align-items: center; justify-content: center;
+      min-height: 44px; min-width: 44px; padding: 0 16px; border-radius: 12px;
+      font-size: 15px; background: var(--paper-2); box-shadow: inset 0 0 0 1px var(--line);
+    }
+    :host([data-chrome="phone"]) .setup-sheet .seg-opts input:checked + span,
+    :host([data-chrome="phone"]) .setup-sheet .preset input:checked + span {
+      background: var(--accent-soft); box-shadow: inset 0 0 0 1px var(--accent); color: var(--ink);
+    }
+    :host([data-chrome="phone"]) .setup-sheet .mode { color: var(--accent-ink); align-self: flex-start; margin-top: 0; }
+    /* Hidden still means hidden: these selectors are heavier than the [hidden]
+       rules they sit under, so they have to say it themselves. */
+    :host([data-chrome="phone"]) .setup-sheet .setup[hidden],
+    :host([data-chrome="phone"]) .setup-sheet .picker[hidden],
+    :host([data-chrome="phone"]) .setup-sheet .seg[hidden],
+    :host([data-chrome="phone"]) .setup-sheet .presets[hidden],
+    :host([data-chrome="phone"]) .setup-sheet .presets-more[hidden],
+    :host([data-chrome="phone"]) .setup-sheet .custom-toggle[hidden],
+    :host([data-chrome="phone"]) .setup-sheet .mode[hidden] { display: none; }
+    @media (prefers-reduced-motion: reduce) {
+      /* No slide and no scrim wipe: the sheet arrives by crossfade. */
+      .setup-sheet { transform: none; opacity: calc(1 - var(--at, 1)); transition: opacity 150ms ease; }
+      .setup-scrim { transition: opacity 150ms ease; }
+    }
+
     @keyframes pulse { 0%, 100% { opacity: .35; } 50% { opacity: 1; } }
     @media (prefers-reduced-motion: reduce) { :host, .log, .mast, .composer { transition: none; } .tool::before, .turn-footer .pulse { animation: none; } .seg-thumb { transition: none; } }
   `;
@@ -2615,7 +2780,11 @@
 
   class MarbleConversation extends HTMLElement {
     static get observedAttributes() {
-      return ['conversation'];
+      // The chrome is the page's word for how much room this conversation
+      // has. It is watched because the phone's fold is not only CSS: the
+      // setup sheet holds nodes that belong back in the bar at any other
+      // density, and a pane that stops being a phone has to get them back.
+      return ['conversation', 'data-chrome'];
     }
 
     constructor() {
@@ -2633,7 +2802,10 @@
             <span class="zone-what"></span>
             <span class="zone-go" aria-hidden="true">→</span>
           </button>
-          <div class="also" hidden></div>
+          <button type="button" class="also" hidden>
+            <span class="also-long"></span>
+            <span class="also-short"></span>
+          </button>
         </header>
         <div class="log" role="log" aria-live="polite" aria-label="Conversation"></div>
         <form class="composer">
@@ -2661,6 +2833,7 @@
               </div>
             </div>
             <div class="bar">
+              <button type="button" class="setup-chip" hidden aria-haspopup="dialog" aria-expanded="false"><span class="setup-chip-what"></span></button>
               <div class="setup" hidden>
                 <div class="setup-row">
                   <div class="presets" role="radiogroup" aria-label="Saved setups" hidden></div>
@@ -2680,7 +2853,14 @@
               <button type="button" class="mode" hidden aria-label="CLI mode — click or Shift+Tab to change"></button>
             </div>
           </div>
-        </form>`;
+        </form>
+        <div class="setup-scrim" hidden></div>
+        <section class="setup-sheet" role="dialog" aria-modal="true" aria-label="Setup" hidden>
+          <div class="setup-handle"><span class="setup-grip" aria-hidden="true"></span></div>
+          <div class="setup-sheet-head">Setup</div>
+          <div class="setup-sheet-body"></div>
+          <div class="setup-sheet-mode" hidden><span class="setup-sheet-legend">Mode</span></div>
+        </section>`;
       this.logEl = root.querySelector('.log');
       this.queuedEl = root.querySelector('.queued');
       this.queuedBar = root.querySelector('.queued-bar');
@@ -2708,6 +2888,19 @@
       this.projectBox = root.querySelector('[data-seg="project"]');
       this.projectLabel = root.querySelector('.picker-project');
       this.also = root.querySelector('.also');
+      this.alsoLong = root.querySelector('.also-long');
+      this.alsoShort = root.querySelector('.also-short');
+      this.also.addEventListener('click', () => this.announceWorkingHere());
+      this.setupChip = root.querySelector('.setup-chip');
+      this.setupChipWhat = root.querySelector('.setup-chip-what');
+      this.setupSheet = root.querySelector('.setup-sheet');
+      this.setupScrim = root.querySelector('.setup-scrim');
+      this.setupSheetBody = root.querySelector('.setup-sheet-body');
+      this.setupSheetMode = root.querySelector('.setup-sheet-mode');
+      this.setupHandle = root.querySelector('.setup-handle');
+      this.sheetAt = 1;
+      this.sheetWanted = false;
+      this.armSetupSheet();
       this.zoneJump = root.querySelector('.zone-jump');
       this.zoneWhat = root.querySelector('.zone-what');
       this.zone = null;
@@ -2936,6 +3129,7 @@
 
     disconnectedCallback() {
       this.closeScrub?.({ commit: false });
+      this.restoreSetup?.();
       this.fitObserver?.disconnect();
       this.fitObserver = null;
       this.unwatchTheme?.();
@@ -2949,7 +3143,15 @@
       this.offQueue = null;
     }
 
-    attributeChangedCallback(_name, before, after) {
+    attributeChangedCallback(name, before, after) {
+      if (name === 'data-chrome') {
+        // The sheet is a phone's answer. At any other density the row belongs
+        // in the bar, and leaving it in a hidden sheet would take the pickers
+        // off the screen with it.
+        if (after !== 'phone') this.restoreSetup?.();
+        this.paintSetupChip?.();
+        return;
+      }
       if (this.isConnected && before !== after && after !== this.loadedId) this.load();
     }
 
@@ -3159,16 +3361,39 @@
     }
 
     /** Other conversations running in this conversation's project right now. */
-    paintAlso() {
-      if (!this.also) return;
+    workingHere() {
       const id = this.getAttribute('conversation');
       const mine = this.meta?.project ?? 'drive';
-      const rows = [...(this.others?.values() ?? [])]
+      return [...(this.others?.values() ?? [])]
         .filter((s) => s.id !== id && !s.archived && (s.project ?? 'drive') === mine && (s.status === 'running' || s.running));
+    }
+
+    /** One fact, two readings. A desk has the room to name them; a phone mast
+     *  is one line, so it carries the count and the names are a tap away.
+     *  Both are drawn every time and the density picks which one shows, so
+     *  the line never has to be rebuilt when a pane becomes a phone. */
+    paintAlso() {
+      if (!this.also) return;
+      const rows = this.workingHere();
+      const names = rows.map((s) => s.title || 'New Chat');
       this.also.hidden = !rows.length;
-      this.also.textContent = rows.length
-        ? `Also working here: ${rows.length} — ${rows.map((s) => s.title || 'New Chat').join(', ')}`
-        : '';
+      this.alsoLong.textContent = rows.length ? `Also working here: ${rows.length} — ${names.join(', ')}` : '';
+      this.alsoShort.textContent = rows.length ? `+${rows.length} here` : '';
+      this.also.title = names.join(', ');
+      this.also.setAttribute('aria-label', rows.length ? `Also working here: ${names.join(', ')}` : '');
+    }
+
+    /** The page owns the list, because the page is what can open one of them:
+     *  a tap on the count says who they are and lets the page put them in its
+     *  own actions sheet. */
+    announceWorkingHere() {
+      const rows = this.workingHere();
+      if (!rows.length) return;
+      this.dispatchEvent(new CustomEvent('marble:agent-working-here', {
+        bubbles: true,
+        composed: true,
+        detail: { ids: rows.map((s) => s.id), names: rows.map((s) => s.title || 'New Chat') },
+      }));
     }
 
     fillAgents(value) {
@@ -3389,6 +3614,7 @@
       }
       this.customToggle.setAttribute('aria-expanded', String(this.customOpen));
       this.picker.hidden = presets.length > 0 && !this.customOpen;
+      this.paintSetupChip();
       this.fitSetup();
     }
 
@@ -3628,6 +3854,172 @@
       });
     }
 
+    // ------------------------------------------------------ the setup sheet
+    //
+    // On a phone the whole setup row — two pickers, a scrubber and the mode —
+    // is a line of 21px words, none of which a thumb can hit. It folds into
+    // one chip that says what the next turn will run as, and comes back as a
+    // sheet from the bottom when you tap it. The sheet holds the *same* nodes,
+    // moved there and moved back: nothing is rebuilt, so a pick made down here
+    // is a pick the composer already had, and the desk's row is untouched.
+
+    /** What the row says, in the two words a thumb has room for. The mode
+     *  rides along only when it is not the one the CLI would have chosen —
+     *  the chip is for what is unusual about this turn. */
+    setupChipLabel() {
+      const provider = this.currentProvider();
+      const modes = provider?.modes ?? [];
+      const mode = modes.find((item) => item.id === this.mode);
+      const parts = [provider?.label || 'Agent', this.matchingPreset()?.name || this.currentModel()?.label || 'Custom'];
+      if (mode && modes[0] && mode.id !== modes[0].id) parts.push(mode.label);
+      return parts.join(' · ');
+    }
+
+    paintSetupChip() {
+      if (!this.setupChip) return;
+      // The chip stands for the row, so it is there exactly when the row is:
+      // nothing to configure, nothing to open.
+      this.setupChip.hidden = Boolean(this.setup?.hidden) && !this.sheetWanted;
+      if (this.setupSheetMode) this.setupSheetMode.hidden = Boolean(this.modeButton?.hidden);
+      const label = this.setupChipLabel();
+      this.setupChipWhat.textContent = label;
+      this.setupChip.setAttribute('aria-label', `Setup: ${label}`);
+    }
+
+    armSetupSheet() {
+      this.setupChip.addEventListener('click', () => this.toggleSetupSheet());
+      this.setupScrim.addEventListener('click', () => this.closeSetupSheet());
+      this.setupSheet.addEventListener('keydown', (event) => {
+        if (event.key !== 'Escape') return;
+        event.stopPropagation();
+        this.closeSetupSheet();
+      });
+      // A sheet a finger drives: 1:1 down the screen from wherever it was
+      // grabbed, resisting past the top, and the decision on release is the
+      // direction the finger was going, not where it happened to stop.
+      const grab = { id: null, from: 0, y: 0, v: 0, t: 0 };
+      this.setupHandle.addEventListener('pointerdown', (event) => {
+        if (grab.id !== null) return;
+        grab.id = event.pointerId;
+        grab.from = this.sheetAt;
+        grab.y = event.clientY;
+        grab.v = 0;
+        grab.t = event.timeStamp;
+        this.stopSheetSpring?.();
+        this.stopSheetSpring = null;
+        this.setupHandle.setPointerCapture(event.pointerId);
+        event.preventDefault();
+      });
+      this.setupHandle.addEventListener('pointermove', (event) => {
+        if (grab.id !== event.pointerId) return;
+        const height = this.setupSheet.offsetHeight || 1;
+        const over = grab.from + (event.clientY - grab.y) / height;
+        this.setSheetAt(Math.min(1, over < 0 ? -rubberband(-over * height, height) / height : over));
+        const dt = event.timeStamp - grab.t;
+        if (dt > 0) grab.v = ((event.clientY - grab.y) / dt) * 1000;
+        grab.y = event.clientY;
+        grab.t = event.timeStamp;
+      });
+      const release = (event) => {
+        if (grab.id !== event.pointerId) return;
+        grab.id = null;
+        if (this.setupHandle.hasPointerCapture?.(event.pointerId)) this.setupHandle.releasePointerCapture(event.pointerId);
+        const drifting = Math.abs(grab.v) < 60;
+        if (drifting ? this.sheetAt > 0.5 : grab.v > 0) this.closeSetupSheet({ velocity: grab.v });
+        else this.openSetupSheet({ velocity: grab.v });
+      };
+      this.setupHandle.addEventListener('pointerup', release);
+      this.setupHandle.addEventListener('pointercancel', release);
+    }
+
+    /** 0 is open, 1 is gone. One number, read by the transform and the scrim
+     *  together, so a drag moves both in step. */
+    setSheetAt(at) {
+      this.sheetAt = at;
+      this.setupSheet.style.setProperty('--at', String(at));
+      this.setupScrim.style.setProperty('--at', String(at));
+    }
+
+    springSheet(to, velocity = 0, done) {
+      this.stopSheetSpring?.();
+      this.stopSheetSpring = null;
+      if (reduceMotion()) {
+        // No slide: the CSS crossfades, and the sheet is only really gone
+        // once that fade is over.
+        this.setSheetAt(to);
+        if (done) setTimeout(done, 150);
+        return;
+      }
+      const height = this.setupSheet.offsetHeight || 1;
+      this.stopSheetSpring = spring({
+        from: this.sheetAt,
+        to,
+        velocity: velocity / height,
+        // A drawer, Apple's values: it carries the flick that threw it.
+        damping: 0.8,
+        response: 0.3,
+        onFrame: (value) => this.setSheetAt(value),
+        onDone: () => {
+          this.stopSheetSpring = null;
+          done?.();
+        },
+      });
+    }
+
+    toggleSetupSheet() {
+      if (this.sheetWanted) this.closeSetupSheet();
+      else this.openSetupSheet();
+    }
+
+    openSetupSheet({ velocity = 0 } = {}) {
+      if (!this.setupSheet || this.setup?.hidden) return;
+      const first = !this.sheetWanted;
+      this.sheetWanted = true;
+      if (this.setupSheet.hidden) {
+        this.setupHome = document.createComment('setup');
+        this.setup.replaceWith(this.setupHome);
+        this.modeHome = document.createComment('mode');
+        this.modeButton.replaceWith(this.modeHome);
+        this.setupSheetBody.append(this.setup);
+        this.setupSheetMode.append(this.modeButton);
+        this.setupScrim.hidden = false;
+        this.setupSheet.hidden = false;
+        this.setSheetAt(1);
+        // Measured where it will actually be shown: fitting the pickers while
+        // they were display:none read every segment as overflowing nothing.
+        this.fitSetup();
+      }
+      if (first) this.setupChip.setAttribute('aria-expanded', 'true');
+      this.springSheet(0, velocity);
+    }
+
+    closeSetupSheet({ velocity = 0 } = {}) {
+      if (!this.sheetWanted) return;
+      this.sheetWanted = false;
+      this.setupChip?.setAttribute('aria-expanded', 'false');
+      this.springSheet(1, velocity, () => this.restoreSetup());
+    }
+
+    /** The row goes back where it came from. Called when the sheet has
+     *  finished leaving, and outright when this stops being a phone or leaves
+     *  the page, because the bar is where those nodes live. */
+    restoreSetup() {
+      if (!this.setupHome) return;
+      this.sheetWanted = false;
+      this.stopSheetSpring?.();
+      this.stopSheetSpring = null;
+      closeSegMenus(this.shadowRoot);
+      this.setupSheet.hidden = true;
+      this.setupScrim.hidden = true;
+      this.setSheetAt(1);
+      this.setupHome.replaceWith(this.setup);
+      this.modeHome.replaceWith(this.modeButton);
+      this.setupHome = null;
+      this.modeHome = null;
+      this.setupChip?.setAttribute('aria-expanded', 'false');
+      this.fitSetup();
+    }
+
     cycleMode() {
       const modes = this.currentProvider()?.modes ?? [];
       if (!modes.length) return;
@@ -3659,6 +4051,7 @@
       const mode = modes.find((item) => item.id === this.mode) ?? modes[0];
       this.modeButton.hidden = !mode;
       this.modeButton.textContent = mode?.label ?? '';
+      this.paintSetupChip();
     }
 
     paintMast() {

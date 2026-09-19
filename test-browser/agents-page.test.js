@@ -113,13 +113,16 @@ test('on a phone the meters are one ring in the topbar and a Fleet sheet that st
   assert.equal(await page.locator('.usage .meter').filter({ visible: true }).count(), 0, 'no meter strip on a phone');
   await page.locator('.topbar .usage-dot').click();
   const sheet = page.locator('.sheet[data-kind="fleet"]');
-  await sheet.locator('.meter[data-id="fable"]').waitFor();
-  const boxes = await sheet.locator('.meter').evaluateAll((els) => els.map((el) => {
+  // One row per usage window now, in place of the meter strip the sheet used
+  // to repeat in text underneath.
+  await sheet.locator('.fleet-row').first().waitFor();
+  const boxes = await sheet.locator('.fleet-row').evaluateAll((els) => els.map((el) => {
     const r = el.getBoundingClientRect();
-    return { id: el.dataset.id, right: r.right, scroll: el.scrollWidth > el.clientWidth + 1 };
+    return { name: el.querySelector('.fleet-name')?.textContent ?? '', right: r.right, scroll: el.scrollWidth > el.clientWidth + 1 };
   }));
-  assert.equal(boxes.length, 2, 'Claude and Fable');
-  assert.ok(boxes.every((box) => box.right <= 360 && !box.scroll), 'meters stay inside the phone');
+  assert.ok(boxes.length >= 2, `a row per window, not ${boxes.length}`);
+  assert.ok(boxes.some((box) => /fable/i.test(box.name)), `no Fable window: ${boxes.map((b) => b.name).join(' / ')}`);
+  assert.ok(boxes.every((box) => box.right <= 360 && !box.scroll), 'the rows stay inside the phone');
   assert.ok((await page.evaluate(() => document.documentElement.scrollWidth)) <= 360);
 });
 
@@ -263,13 +266,30 @@ test('clicking a row opens it in the conversation pane and the mast names the ta
   assert.match(await link.getAttribute('href'), /garden/i);
 });
 
+/** A press answers in colour on anything shaped like a row. Things shaped like
+ *  buttons — the topbar cluster, the ⊕, a sheet's Start — do give a little on
+ *  a touch screen (the phone polish pass, F1); rows still never pop. */
 test('pressing a row does not pop it with a scale animation', async () => {
   const { page } = await openAgents();
   const pops = await page.evaluate(() => {
-    const css = [...document.querySelectorAll('style')].map((el) => el.textContent).join('\n');
-    return /:active[^{}]*\{[^}]*transform:\s*scale/.test(css);
+    const ROW = /\.conv(?![\w.-]|\s+\.manage)|\.focus-card|\.sheet-row|\.fleet-row|\.band-toggle|\.folder-tab/;
+    const bad = [];
+    const walk = (rules) => {
+      for (const rule of rules) {
+        if (rule.cssRules) { walk(rule.cssRules); continue; }
+        if (!rule.selectorText?.includes(':active')) continue;
+        if (!/scale/.test(rule.style?.transform ?? '')) continue;
+        for (const one of rule.selectorText.split(',')) {
+          if (one.includes(':active') && ROW.test(one)) bad.push(one.trim());
+        }
+      }
+    };
+    for (const sheet of document.styleSheets) {
+      try { walk(sheet.cssRules); } catch { /* a sheet from elsewhere */ }
+    }
+    return bad;
   });
-  assert.equal(pops, false);
+  assert.deepEqual(pops, []);
 });
 
 test('a row archives a conversation and opens the next remaining one', async () => {
@@ -377,7 +397,7 @@ test('the filter popover is closed and quiet until it is used', async () => {
   assert.equal(await toggle.getAttribute('aria-expanded'), 'true');
 });
 
-test('an active filter or search shows a count on the closed button, and Clear resets it', async () => {
+test('an active filter or search marks the closed button, and Clear resets it', async () => {
   const { page } = await openAgents();
   await page.locator('#list .conv').first().waitFor();
   await openFilters(page);
@@ -385,14 +405,17 @@ test('an active filter or search shows a count on the closed button, and Clear r
   await page.locator('input.search').fill('nope-nope');
   await page.locator('.filter-toggle').click();
   await page.locator('.filter-pop').waitFor({ state: 'hidden' });
-  assert.equal((await page.locator('.filter-count').textContent()).trim(), '2');
-  assert.match(await page.locator('.filter-count').getAttribute('title'), /Review.*nope-nope/);
+  // A dot, not a digit: a count on the button reads as a notification to go
+  // and clear, and the idle cut keeps one filter on by default.
+  assert.equal(await page.locator('.filter-count').isVisible(), true);
+  assert.equal((await page.locator('.filter-count').textContent()).trim(), '');
+  assert.match(await page.locator('.filter-toggle').getAttribute('title'), /Review.*nope-nope/);
   assert.equal(await page.locator('.filter-toggle').getAttribute('data-active'), '');
   await openFilters(page);
   await page.locator('.filter-clear').click();
   assert.equal(await page.locator('input.search').inputValue(), '');
   assert.equal(await page.locator('button.filter[data-filter="all"]').getAttribute('aria-pressed'), 'true');
-  assert.equal(await page.locator('.filter-count').textContent(), '');
+  assert.equal(await page.locator('.filter-count').isVisible(), false);
   assert.equal(await page.locator('.filter-toggle').getAttribute('data-active'), null);
   assert.ok((await page.locator('.conv:not([hidden])').count()) >= 1);
 });

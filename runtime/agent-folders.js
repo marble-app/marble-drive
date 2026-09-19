@@ -240,12 +240,13 @@
   // That ratio as the stage's share of the two sides together, which is the
   // form the seam between them is dragged in: φ/(1+φ), a hair under 62%.
   const GOLDEN_SPLIT = 1 / (1 + 1 / PHI);
-  // How far a hand may take that seam. Neither end is a floor — the floors
-  // below still hold — it is only that a split past these is not a split, it
-  // is one side asking to be closed, and closing a side is a different
-  // gesture than sizing it.
+  // How far a hand may take that seam. The low end is a stop and not a floor:
+  // the panes keep reading width whatever it says. The high end is all the way
+  // — a field asked for nothing folds its groups into the rail and the stage
+  // has the canvas — because closing the field by dragging the seam onto it is
+  // the same gesture as sizing it, only finished.
   const SPLIT_MIN = 0.12;
-  const SPLIT_MAX = 0.92;
+  const SPLIT_MAX = 0.98;
 
   const clamp = (value, lo, hi) => Math.max(lo, Math.min(hi, value));
 
@@ -326,19 +327,20 @@
    *  them, flagged `piled`) and the stage — which is where hit-testing reads
    *  its slots from, so a drop lands where the layout put things rather than
    *  where a second measurement thinks they are. */
-  const packFocus = ({
-    fulls = [],
-    groups = [],
-    canvas,
-    sizes,
-    gap = GAP,
-    margin = MARGIN,
-    range = {},
-    newGroup = 'auto',
-    piled = [],
-    opened = [],
-    split = null,
-  }) => {
+  const packFocus = (options = {}) => {
+    const {
+      fulls = [],
+      groups = [],
+      canvas,
+      sizes,
+      gap = GAP,
+      margin = MARGIN,
+      range = {},
+      newGroup = 'auto',
+      piled = [],
+      opened = [],
+      split = null,
+    } = options;
     const dh = sizes?.digest?.h ?? 161;
     const paneMin = range.paneMin ?? PANE_MIN;
     const panePref = range.panePref ?? PANE_PREF;
@@ -430,6 +432,24 @@
 
     const room = Math.max(0, canvas.w - 2 * margin);
     const n = fulls.length;
+    // Where the seam between the two sides has been dragged to, if it has.
+    // Read before the folding below, because a hand on the seam is one of the
+    // two things that folds a group.
+    //
+    // A hand's split is **where the seam stands, as a fraction of the canvas**
+    // — the stage's end of it, so the number reads the same way φ does and an
+    // old file still means what it said. It is deliberately not the stage's
+    // share of the two sides: that span shrinks by a rail's width the moment a
+    // group folds, so the same number meant two different places either side
+    // of a fold, and a drag across one landed the seam thirty pixels from the
+    // finger before correcting itself on the next move. Measured against the
+    // whole canvas, which nothing the seam does can change, the mapping from a
+    // split to a position is exact and the same on both sides of every fold.
+    const bias = Number.isFinite(split) ? clamp(split, SPLIT_MIN, SPLIT_MAX) : null;
+    // Where that puts the seam, and what it leaves the field: the seam stands
+    // in the middle of the bar between the two sides, and the rail stands to
+    // the field's left, so both come off the top before the field is measured.
+    const handSeamX = bias == null ? null : margin + (1 - bias) * room;
 
     // ---- What folds. The canvas never scrolls sideways: a focused chat is
     // worth more than a column of cards, so when the stage cannot stand at
@@ -498,13 +518,44 @@
       const seam = (n && info.subCols) ? gap : 0;
       return stageFloor + seam + fieldFloorOf(info) + railMetrics(list).span <= room + 0.5;
     };
-    let shape = shapeField(open);
-    while (!fits(shape, folded) && order.length) {
+    // What the field looked like before either loop ran, and the order the
+    // loops eat through it in — `stops` below replays them to find every
+    // shape the field can take, and both lists are about to be spent.
+    const baseOpen = [...open];
+    const baseFolded = [...folded];
+    const foldOrder = [...order];
+    const fold = () => {
       const victim = order.shift();
       open = open.filter((group) => group !== victim);
       folded.push(victim);
       shape = shapeField(open);
+    };
+    let shape = shapeField(open);
+    while (!fits(shape, folded) && order.length) fold();
+    // How many folds the canvas itself insisted on. Nothing can put these
+    // back, so the seam's travel starts here.
+    const forced = foldOrder.length - order.length;
+
+    // A hand on the seam is the other thing that folds a group. The loop
+    // above folds what the canvas has no room for; this one folds what the
+    // hand has no room for. Dragging the seam left is asking for a smaller
+    // field, and a field with nothing left to give answers by folding a
+    // group rather than by refusing to move: FIELD_MIN is still the tightest
+    // a column is read at, but arriving there costs a group its column
+    // instead of costing the gesture its travel. Drag back and the fold comes
+    // undone, because nothing here is remembered — the shape is recomputed
+    // from the ask on every pass.
+    const fieldAsk = (info, list) => (info.subCols
+      ? handSeamX - margin - railMetrics(list).span - gap / 2
+      : 0);
+    // A hair under the floor is the floor. The ask arrives as a share rounded
+    // to a thousandth, so it lands a pixel either side of where it was aimed,
+    // and a pixel is not a reason to fold a group away.
+    const FOLD_SLACK = 2;
+    if (bias != null && n) {
+      while (order.length && fieldAsk(shape, folded) + FOLD_SLACK < fieldFloorOf(shape)) fold();
     }
+
     // The piles read in catalog order, not in the order things happened to
     // fold: a pile that jumped seats every time its neighbour folded would be
     // a row you cannot learn.
@@ -530,16 +581,17 @@
     const fieldAt = (w) => (subCols ? subCols * w + fixed : 0);
     let stageW = stageAt(panePref);
     let fieldW = fieldAt(fieldPref);
-    // Where the seam between the two sides has been dragged to, if it has.
-    const bias = Number.isFinite(split) ? clamp(split, SPLIT_MIN, SPLIT_MAX) : null;
     // A split somebody asked for, honoured inside the floors alone: the
     // ceilings are only what each side would like, and the seam is somebody
-    // saying what they would like instead.
+    // saying what they would like instead. The field is what is left of the
+    // canvas to the left of the seam once the rail and half the bar are off
+    // it, which is the one measurement that does not move when a group folds.
     const byHand = (usable) => {
       const floorS = Math.min(stageAt(paneMin), usable);
       const floorF = Math.max(0, Math.min(fieldAt(fieldMin), usable - floorS));
-      const w = clamp(usable * bias, floorS, Math.max(floorS, usable - floorF));
-      return [w, usable - w];
+      const want = handSeamX - margin - railSpan - gap / 2;
+      const f = clamp(want, floorF, Math.max(floorF, usable - floorS));
+      return [usable - f, f];
     };
     const spare = usableRoom - bar - stageW - fieldW;
     if (bias != null && n && subCols) {
@@ -855,6 +907,100 @@
     placeStage(x);
     if (n) x += stageW + gap;
 
+    // The middle of the bar between the field's side of the canvas and the
+    // stage: where the seam is drawn, and the coordinate `stops` speaks in.
+    // With every group folded there is no field left to end and the bar is
+    // the gap the rail already carries.
+    const seamX = subCols ? margin + railSpan + fieldW + gap / 2 : margin + railSpan - gap / 2;
+
+    /** Where the seam has somewhere to stand, as seam-x, low to high.
+     *
+     *  The field's width is not a continuum. A column reads between FIELD_MIN
+     *  and FIELD_MAX and nowhere else, and a group either holds a column or
+     *  is a pile in the rail — so between one shape of the field and the next
+     *  there are only a handful of widths that mean anything. These are them:
+     *  for every shape the field can still take, the width its columns read
+     *  tightest at, the width they ask for, and the width they stop widening
+     *  at. The last of them is the field folded away altogether, which is a
+     *  rail and no columns.
+     *
+     *  φ is in the list too, taken from a pack with no hand on it rather than
+     *  computed a second way, so the place the seam rests is a place it can
+     *  also be dropped.
+     *
+     *  Lazy, and priced accordingly: it replays the fold order and packs the
+     *  canvas once more, which is a thing to do when a hand comes down on the
+     *  seam and not on every frame of the drag it starts. */
+    const stops = () => {
+      const kept = [];
+      const add = (at, rank) => {
+        if (!Number.isFinite(at)) return;
+        kept.push({ at, rank });
+      };
+      // The travel starts at the shape the canvas already insisted on, so the
+      // folds it forced are folded here too. Starting from every group open
+      // instead — which is what `baseOpen` is — priced the first shapes at a
+      // floor no canvas could pay, and every one of them fell off the end of
+      // the list. A field with anything already folded was left with a stop
+      // or two out of a dozen, a `min` hundreds of pixels above the rail it
+      // can actually fold to, and therefore a whole leftward drag spent
+      // inside a rubber band.
+      const already = foldOrder.slice(0, forced);
+      let openK = baseOpen.filter((group) => !already.includes(group));
+      const foldedK = [...baseFolded, ...already];
+      let ceiling = Infinity;  // the floor of the shape one fold back
+      // The one stretch of the travel with nothing in it. Every shape of the
+      // field covers a run of widths — its floor up to the floor of the shape
+      // before — and the runs meet, so the travel is continuous all the way
+      // down to the last column. Under that there is only the rail, which is
+      // one width and not a run: between the narrowest column the field can
+      // show and the rail it folds to, there is no width at all.
+      let hollow = null;
+      for (let k = forced; k <= foldOrder.length; k += 1) {
+        if (k > forced) {
+          const victim = foldOrder[k - 1];
+          openK = openK.filter((group) => group !== victim);
+          foldedK.push(victim);
+        }
+        const shapeK = shapeField(openK);
+        const span = railMetrics(foldedK).span;
+        const edge = (w) => margin + span + (shapeK.subCols ? shapeK.subCols * w + shapeK.fixed : 0);
+        const floorK = edge(fieldMin);
+        if (!shapeK.subCols) {
+          // No columns left: the seam stands in the bar the rail carries.
+          const shut = margin + span - gap / 2;
+          add(shut, 1);
+          if (Number.isFinite(ceiling)) hollow = [shut, ceiling + gap / 2];
+          break;
+        }
+        // A width only counts while the shape that offers it is the shape the
+        // packer would choose, which is up to the floor of the shape before.
+        for (const [w, rank] of [[fieldMin, 1], [fieldPref, 2], [fieldMax, 1]]) {
+          const at = edge(w);
+          if (at < ceiling - 0.5) add(at + gap / 2, rank);
+        }
+        ceiling = floorK;
+      }
+      // Where the layout puts the seam when nobody is holding it.
+      const rest = split == null ? seamX : packFocus({ ...options, split: null }).seamX;
+      add(rest, 3);
+      // Two stops a few pixels apart are one stop, and the one that means
+      // more keeps the place: φ over a preferred width over a floor.
+      kept.sort((a, b) => a.at - b.at || b.rank - a.rank);
+      const at = [];
+      for (const stop of kept) {
+        const last = at.length - 1;
+        if (last >= 0 && stop.at - at[last] < 14) continue;
+        at.push(stop.at);
+      }
+      // The ends of the travel. Past the low one there is no field left to
+      // fold; past the high one the stage is at reading width, which the seam
+      // does not cross.
+      const low = at.length ? at[0] : seamX;
+      const high = margin + room - stageAt(paneMin) - gap / 2;
+      return { at: at.filter((v) => v <= high + 0.5), min: low, max: Math.max(low, high), hollow };
+    };
+
     return {
       stage,
       // Piles stand in the same list as the regions they are the folded form
@@ -867,7 +1013,19 @@
       // rather than re-measuring the canvas, so what it moves is the split
       // the layout actually used — floors, rounding and all.
       field: subCols ? { x: margin + railSpan, y: top, w: fieldW, h: availH } : null,
-      split: (n && subCols && stageW + fieldW > 0) ? stageW / (stageW + fieldW) : null,
+      // The rail is the field's folded half, so the seam stands to the right
+      // of both of them: `fieldEdge` is where that half ends.
+      railSpan,
+      fieldEdge: margin + railSpan + fieldW,
+      seamX,
+      stops,
+      // Where the seam ended up, in the unit a hand sets it in: its distance
+      // from the right edge of the canvas, over the canvas. A field folded
+      // away to its rail still has one — the rail is what is left of the
+      // field — and with nothing at all on that side there is no seam and no
+      // split.
+      split: (n && (subCols || piles.length)) ? (1 - (seamX - margin) / room) : null,
+      room,
       newGroup: newSlot,
       rects,
       colW,

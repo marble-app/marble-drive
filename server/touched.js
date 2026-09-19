@@ -40,10 +40,16 @@ export function createTouched() {
       }
     },
 
-    except(doc, client, { since = 0 } = {}) {
+    // `agentsOnly`: count only what agents touched. A fork is a person against
+    // an agent; two tabs of the same person writing one id are two writes, not
+    // a conflict — and the second tab is not "the agent" (seen 2026-09-19: the
+    // Agents page filing its Focus split from a fresh tab forked the whole
+    // Focus view against the tab before it).
+    except(doc, client, { since = 0, agentsOnly = false } = {}) {
       const union = new Set();
       for (const [who, times] of clientsOf(doc)) {
         if (sameWriter(who, client)) continue;
+        if (agentsOnly && conversationOf(who) === null) continue;
         for (const [id, at] of times) if (at >= since) union.add(id);
       }
       return [...union];

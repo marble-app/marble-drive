@@ -45,9 +45,11 @@ const asker = await page.evaluate(async () => { const a = window.marble.agent; c
 await store.updateConversation(asker, { title: 'Rebuild the site', target: 'Marble/site' });
 await page.waitForTimeout(600);
 
-const closeSheet = async () => { const vis = await page.locator('.sheet-scrim').isVisible().catch(() => false); if (vis) await page.locator('.sheet-scrim').click(); await page.waitForTimeout(450); };
+// Tap the scrim near the top of the screen: a tall sheet owns the middle.
+const closeSheet = async () => { const vis = await page.locator('.sheet-scrim').isVisible().catch(() => false); if (vis) await page.mouse.click(196, 40); await page.waitForTimeout(450); };
 const shot = async (name) => { await page.waitForTimeout(450); await page.screenshot({ path: path.join(out, `${name}.png`) }); console.log('shot', name); };
-const view = async (v) => { await page.evaluate((v) => localStorage.setItem('marble-agents:view', v), v); await page.reload(); await page.waitForFunction(() => document.querySelectorAll('.conv').length >= 10); await page.waitForTimeout(600); };
+// A view shot is of the view, so the remembered conversation is let go first.
+const view = async (v) => { await page.evaluate((v) => { localStorage.setItem('marble-agents:view', v); localStorage.removeItem('marble-agents:open'); }, v); await page.reload(); await page.waitForFunction(() => document.querySelectorAll('.conv').length >= 10); await page.waitForTimeout(600); };
 const longPress = async (loc) => { const b = await loc.boundingBox(); await page.mouse.move(b.x + 120, b.y + b.height / 2); await page.mouse.down(); await page.waitForTimeout(520); await page.mouse.up(); };
 
 await view('deck');
@@ -76,7 +78,9 @@ await closeSheet();
 await page.locator('.deck [data-band="review"] .conv .manage .more').first().click().catch(() => {}); await shot('09-row-menu');
 await page.keyboard.press('Escape'); await page.waitForTimeout(200);
 // open the conversation with a transcript
-await page.locator(`.deck .conv[data-id="${talker}"]`).click({ force: true }).catch(async () => { await page.evaluate((id) => { const el = document.querySelector(`.conv[data-id="${id}"]`); el?.scrollIntoView(); el?.click(); }, talker); });
+// The swipe above may have filed this row into a folded band, where a real
+// tap cannot reach it; the shot wants the transcript, so ask the row to open.
+await page.evaluate((id) => { const el = document.querySelector(`.conv[data-id="${id}"]`); el?.scrollIntoView(); el?.click(); }, talker);
 await page.waitForFunction(() => document.body.hasAttribute('data-open')); await shot('10-open-transcript');
 // composer More
 await page.evaluate(() => document.querySelector('marble-conversation')?.shadowRoot?.querySelector('.composer .more')?.click()); await shot('11-composer-more');

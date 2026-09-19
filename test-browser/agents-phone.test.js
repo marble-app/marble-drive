@@ -90,7 +90,9 @@ test('Deck: an asking conversation is a card in NEEDS YOU with a peek; Allow ans
   const card = page.locator('.deck [data-band="asks"] .deck-ask');
   await card.waitFor();
   assert.match(await card.locator('.deck-ask-title').textContent(), /script:permission|New Chat/);
-  assert.match(await card.locator('.deck-peek').textContent(), /rm -rf build/);
+  // The command is on the card once, in the ask's own detail box: the peek
+  // stopped repeating it in the polish pass (B4).
+  assert.equal((await card.textContent()).split('rm -rf build').length - 1, 1);
   assert.match(await page.locator('.deck [data-band="asks"] .band-count').textContent(), /1/);
   await card.locator('button.allow').click();
   // Gone on tap, before the answer lands.
@@ -179,8 +181,13 @@ test('the new-conversation sheet starts a conversation and opens it', async () =
 
 test('phone chrome: a one-row topbar, a thumb bar at the sill, 44pt controls, --vv-h, and install meta', async () => {
   const { page } = await openAgents();
+  // An empty band hides itself now (B8), so the band head this measures has
+  // to have something in it.
+  const running = await page.evaluate(async () => window.marble.agent.start({ provider: 'fake' }));
+  await host.drive.agents.store.updateConversation(running, { running: true, activity: 'busy' });
   await page.reload();
   await page.waitForFunction(() => Boolean(window.marble?.agent));
+  await page.locator('.band[data-band="running"] .conv').first().waitFor();
   const top = await page.locator('.topbar').boundingBox();
   assert.ok(top.height <= 60, `topbar ${top.height}`);
   assert.equal(await page.locator('.topbar .more').isVisible(), true);
@@ -252,7 +259,10 @@ test('phone Focus: one Full, digests beside it, chips beyond, slivers at the end
   assert.ok(lods.includes('digest') && lods.includes('chip') && lods.includes('sliver'), lods.join(','));
   const full = await page.locator('.focus-card[data-lod="full"]').boundingBox();
   const pane = await page.locator('.pane').boundingBox();
-  assert.ok(Math.abs(full.y - pane.y) < 2 && Math.abs(full.height - pane.height) < 2, `pane ${pane.y}/${pane.height} vs full ${full.y}/${full.height}`);
+  // The pane fills the Full slot below the card's own head: since the polish
+  // pass (D4) the card is the header, so the top 44px of the slot stays the
+  // card's — dot · title · age — and the pane takes the rest.
+  assert.ok(Math.abs((pane.y - full.y) - 44) < 2 && Math.abs((full.height - pane.height) - 44) < 2, `pane ${pane.y}/${pane.height} vs full ${full.y}/${full.height}`);
   assert.ok(full.height > 300, `full is ${full.height}`);
 });
 
@@ -345,9 +355,10 @@ test('every phone control is at least 44pt tall', async () => {
   assert.deepEqual(short, []);
 });
 
-/** Phone chrome shows the mast heading, where the old `pane` chrome hid it. So
- *  the bar has to give up its title here for the same reason it does in a dock,
- *  or a phone names one conversation twice in the little room it has. */
+/** One name on the screen. It used to be the mast's heading, with the pane's
+ *  bar giving up its title to make room; since the polish pass (A1/E1) the
+ *  topbar is the open conversation's header, so the name is up there and the
+ *  mast — folded to one line — does not say it a second time. */
 test('a phone pane names itself once', async () => {
   const { page } = await openAgents();
   const id = await page.evaluate(async () => window.marble.agent.start({ provider: 'fake' }));
@@ -364,10 +375,11 @@ test('a phone pane names itself once', async () => {
       && el.getBoundingClientRect().width > 0;
     const convo = document.querySelector('marble-conversation[conversation]');
     const heading = convo?.shadowRoot?.querySelector('.heading');
+    const topbarTitle = document.querySelector('.topbar .phone-title');
     return {
       chrome: convo?.getAttribute('data-chrome') ?? null,
       headingShown: shown(heading),
-      headingText: (heading?.textContent ?? '').trim(),
+      topbarTitle: shown(topbarTitle) ? topbarTitle.textContent.trim() : '',
       barTitles: [...document.querySelectorAll('.dock-bar .dock-title')]
         .filter(shown)
         .map((el) => el.textContent.trim())
@@ -376,11 +388,11 @@ test('a phone pane names itself once', async () => {
   });
 
   assert.equal(shot.chrome, 'phone', 'expected phone chrome');
-  assert.ok(shot.headingShown, 'the phone pane hid its heading');
-  assert.ok(shot.headingText.length > 0, 'the phone heading was empty');
+  assert.ok(!shot.headingShown, 'the phone mast still carries the title the topbar shows');
+  assert.equal(shot.topbarTitle, 'a phone chat', 'the topbar is the open conversation’s header');
   assert.deepEqual(
     shot.barTitles,
     [],
-    `a phone bar still carries a title beside the heading: ${JSON.stringify(shot.barTitles)}`,
+    `a phone bar still carries a title beside the topbar's: ${JSON.stringify(shot.barTitles)}`,
   );
 });

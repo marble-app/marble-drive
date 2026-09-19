@@ -48,3 +48,12 @@ test('note ignores a missing client and empty ids; drop and forget clear', () =>
   assert.deepEqual(t.all('doc'), []);
   assert.deepEqual(t.all('two'), []);
 });
+
+test('agentsOnly leaves other people out of the union', () => {
+  const t = createTouched();
+  t.note('doc', 'tab-one', ['a']);
+  t.note('doc', 'agent:c1', ['b']);
+  t.note('doc', 'agent-undo:c2', ['c']);
+  assert.deepEqual(t.except('doc', 'tab-two', { agentsOnly: true }).sort(), ['b', 'c']);
+  assert.deepEqual(t.except('doc', 'tab-two').sort(), ['a', 'b', 'c']);
+});

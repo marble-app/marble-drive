@@ -244,7 +244,12 @@ export async function createDrive(config, { log = console, agentProviders = null
       const isUndo = typeof client === 'string' && client.startsWith('agent-undo:');
 
       const next = (() => {
-        const others = isUndo ? [] : sessionTouched.except(docPath, client, { since: sinceFor(client) });
+        // A person's write can only conflict with an agent's: another tab of
+        // theirs that touched the same id is not a second author.
+        const isAgentWrite = typeof client === 'string' && client.startsWith('agent:');
+        const others = isUndo
+          ? []
+          : sessionTouched.except(docPath, client, { since: sinceFor(client), agentsOnly: !isAgentWrite });
         if (others.length) {
           const merged = mergeOps(source, ops, {
             touchedIds: others,

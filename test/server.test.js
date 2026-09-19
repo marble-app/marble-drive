@@ -666,6 +666,28 @@ test('an outside rewrite of a heading you only had your caret in applies cleanly
   assert.match(after, /<h1 data-marble-id="hc1"[^>]*>Changed<\/h1>/);
 });
 
+test('two of your own tabs writing the same attribute do not fork each other', async () => {
+  // The Agents page files its Focus split on the .focus element from whichever
+  // tab last dragged the seam. Two tabs are two clients, and a fork is a
+  // person-against-agent thing: a second tab's write is not "the agent".
+  const source = collabDoc('Split');
+  const made = await asJson(await put('', 'Collab Tabs.mrbl', source));
+  const doc = encodeURIComponent(made.path);
+  const write = (client, value) =>
+    fetch(`${base}/ops?app=${doc}&client=${encodeURIComponent(client)}`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify([{ type: 'setAttr', id: 'hc1', name: 'data-split', value }]),
+    });
+
+  assert.equal((await write('tab-one', '0.6')).status, 200);
+  const second = await asJson(await write('tab-two', '0.7'));
+  assert.deepEqual(second.forks, [], 'a person writing after another person is a write, not a conflict');
+  const after = await fsp.readFile(path.join(ROOT, `${made.path}.mrbl`), 'utf8');
+  assert.doesNotMatch(after, /<marble-alt/);
+  assert.match(after, /<h1[^>]*data-split="0.7"[^>]*>Split<\/h1>/);
+});
+
 test.after(async () => {
   await drive.close();
   await fsp.rm(ROOT, { recursive: true, force: true });

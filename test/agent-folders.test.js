@@ -425,13 +425,141 @@ test('the seam outranks the preferred widths but not the floors', () => {
   const tall = F().packFocus({ ...SEAM, split: 0.85 });
   assert.ok(tall.stage.cols[0].w > F().PANE_MAX, `and the stage passes PANE_MAX, got ${tall.stage.cols[0].w}`);
 
-  // Floors are not what the seam is for: a side squeezed past its own is a
-  // side you cannot read.
-  const squeezed = F().packFocus({ ...SEAM, split: 0.99 });
+  // A column still never goes under the width it is read at — but the floor
+  // is a step and not a wall: see the fold tests below for what the field
+  // does when the seam arrives at it.
+  const squeezed = F().packFocus({ ...SEAM, split: 0.8 });
   assert.ok(squeezed.colW >= F().FIELD_MIN - 1, `the field keeps its floor, got ${squeezed.colW}`);
   const shoved = F().packFocus({ ...SEAM, split: 0 });
   assert.ok(shoved.stage.cols[0].w >= F().PANE_MIN - 1, `a pane keeps reading width, got ${shoved.stage.cols[0].w}`);
   assert.ok(Math.abs(shoved.stage.x + shoved.stage.w + MARGIN - 1400) < 2, 'and the row still ends at the edge');
+});
+
+// ---- The seam has no floor under it: the field folds instead.
+
+// Three groups, one pin, a canvas with room for all of it — so every fold
+// below is the seam's doing and not the canvas's.
+const FOLDS = { canvas: { w: 1440, h: 810 }, sizes: SIZES, fulls: [{ id: 'f0' }], groups: FIELD, newGroup: 'never' };
+const fieldEndOf = (packed) => packed.fieldEdge;
+
+test('dragging the seam onto the field folds a group rather than refusing to move', () => {
+  const rest = F().packFocus(FOLDS);
+  assert.equal(rest.piles.length, 0, 'nothing folds on its own at this width');
+  let last = fieldEndOf(rest);
+  // Walk the seam in: every step takes width off the field, and the field
+  // answers by folding, never by standing still.
+  for (const asked of [0.7, 0.78, 0.86, 0.94, 0.98]) {
+    const packed = F().packFocus({ ...FOLDS, split: asked });
+    const now = fieldEndOf(packed);
+    assert.ok(now < last + 0.5, `the field should keep giving way: ${last} → ${now} at ${asked}`);
+    assert.ok(packed.colW >= F().FIELD_MIN - 1, `and a column it still shows is readable, got ${packed.colW}`);
+    assert.ok(packed.stage.cols[0].w >= F().PANE_MIN - 1, 'the pane keeps reading width throughout');
+    last = now;
+  }
+  const shut = F().packFocus({ ...FOLDS, split: F().SPLIT_MAX });
+  assert.equal(shut.field, null, 'at the end of the travel there is no field left');
+  assert.equal(shut.piles.length, FIELD.length, 'every group is a pile in the rail');
+  assert.ok(Math.abs(shut.stage.x + shut.stage.w + MARGIN - 1440) < 2, 'and the stage has the rest of the canvas');
+});
+
+test('a fold the seam asked for comes undone when the seam goes back', () => {
+  const shut = F().packFocus({ ...FOLDS, split: F().SPLIT_MAX });
+  assert.equal(shut.piles.length, FIELD.length);
+  // Nothing about the fold is remembered: the same options without the hand
+  // are the same layout as before anybody touched it.
+  const back = F().packFocus(FOLDS);
+  assert.equal(back.piles.length, 0, 'the piles come back out as columns');
+  assert.ok(Math.abs(back.split - F().GOLDEN_SPLIT) < 0.01, 'and the balance is φ again');
+});
+
+test('the stops are the places the seam can stand, and it can stand on each of them', () => {
+  const rest = F().packFocus(FOLDS);
+  const stops = rest.stops();
+  assert.ok(stops.at.length >= 3, `a seam with travel has stops, got ${stops.at.length}`);
+  for (let i = 1; i < stops.at.length; i += 1) {
+    assert.ok(stops.at[i] > stops.at[i - 1], 'they read low to high');
+  }
+  assert.ok(Math.abs(stops.at[0] - stops.min) < 0.01, 'the lowest is the end of the travel');
+  assert.ok(stops.at.some((at) => Math.abs(at - rest.seamX) < 2), 'φ is one of them');
+  assert.ok(stops.max > stops.min, 'and the travel runs the other way too');
+
+  // Each stop, asked for the way the page asks for it — a seam-x turned into a
+  // split against the canvas, filed to a thousandth — is a place the seam
+  // actually lands, and it lands there in **one** pass. This is the whole
+  // reason the split is measured against the canvas and not against the two
+  // sides: a rail arriving under the gesture changes the span of the two
+  // sides, so the same number meant two places, and a drag across a fold put
+  // the seam tens of pixels from the finger until the next move corrected it.
+  const splitFor = (sx) => Math.round((1 - (sx - MARGIN) / rest.room) * 1000) / 1000;
+  for (const at of stops.at) {
+    const packed = F().packFocus({ ...FOLDS, split: splitFor(at) });
+    assert.ok(Math.abs(packed.seamX - at) < 3, `stop ${Math.round(at)} landed at ${Math.round(packed.seamX)}`);
+  }
+
+  // And anywhere between two stops, not just on them: what the seam is asked
+  // for is where the seam goes, for every width the field can actually take.
+  for (let sx = stops.at[1]; sx < stops.max; sx += 17) {
+    const packed = F().packFocus({ ...FOLDS, split: splitFor(sx) });
+    assert.ok(Math.abs(packed.seamX - sx) < 4, `asked ${Math.round(sx)}, stands at ${Math.round(packed.seamX)}`);
+  }
+});
+
+test('a field the canvas already folded still has its whole travel', () => {
+  // The shape that started this: two pins and a field far too big for the
+  // canvas — thirty-three loose chats, fifteen in a folder — so the packer
+  // has folded some of it before any hand touches the seam. The stops are
+  // read from the shape the canvas settled on. Read from every group open
+  // instead, the first shapes price themselves at a floor no canvas can pay,
+  // fall off the end of the list, and leave the seam a `min` hundreds of
+  // pixels above the rail it can actually fold to — which is a leftward drag
+  // spent entirely inside a rubber band, moving a fifth as far as the hand.
+  const heavy = {
+    canvas: { w: 1440, h: 810 },
+    sizes: SIZES,
+    fulls: [{ id: 'p0' }, { id: 'p1' }],
+    groups: [
+      { folderId: 'f1', cards: cards('a', 15, 'digest') },
+      { folderId: 'f2', cards: cards('b', 3, 'digest') },
+      { folderId: null, cards: cards('u', 33, 'chip') },
+    ],
+    newGroup: 'never',
+  };
+  const rest = F().packFocus(heavy);
+  assert.ok(rest.piles.length > 0, 'the canvas folded some of this field on its own');
+  const stops = F().packFocus(heavy).stops();
+  assert.ok(stops.at.length >= 3, `the seam keeps its stops, got ${stops.at.length}`);
+  assert.ok(stops.min < rest.seamX - 200, `the travel reaches the rail, not ${Math.round(stops.min)}`);
+  assert.ok(stops.hollow, 'and the hollow is still reported');
+
+  // Every width across the travel is honoured, which is what makes the drag
+  // 1:1. A `min` that is wrong is invisible until you measure this.
+  const splitFor = (sx) => Math.round((1 - (sx - MARGIN) / rest.room) * 1000) / 1000;
+  for (let sx = stops.hollow[1]; sx < stops.max; sx += 23) {
+    const packed = F().packFocus({ ...heavy, split: splitFor(sx) });
+    assert.ok(Math.abs(packed.seamX - sx) < 4, `asked ${Math.round(sx)}, stands at ${Math.round(packed.seamX)}`);
+  }
+});
+
+test('the travel has one hollow in it, and the packer says where', () => {
+  const rest = F().packFocus(FOLDS);
+  const { at, hollow } = rest.stops();
+  assert.ok(hollow, 'a field that can fold away has a hollow under its last column');
+  assert.ok(Math.abs(hollow[0] - at[0]) < 0.01, 'the low side is the folded rail');
+  assert.ok(Math.abs(hollow[1] - at[1]) < 0.01, 'the high side is the narrowest column');
+  // Nothing stands in between: ask for the middle of it and the layout
+  // answers with one end or the other, never with the width asked for.
+  const middle = (hollow[0] + hollow[1]) / 2;
+  const packed = F().packFocus({ ...FOLDS, split: 1 - (middle - MARGIN) / rest.room });
+  assert.ok(Math.abs(packed.seamX - hollow[0]) < 2, `the middle of the hollow lands at ${Math.round(packed.seamX)}`);
+});
+
+test('the seam still has somewhere to stand once the field is folded away', () => {
+  const shut = F().packFocus({ ...FOLDS, split: F().SPLIT_MAX });
+  assert.equal(shut.field, null);
+  assert.ok(shut.split > 0, 'the pack still answers with a split, so the seam is still drawn');
+  assert.ok(shut.seamX < shut.stage.x + 0.01, 'it stands left of the stage');
+  assert.ok(shut.seamX > MARGIN, 'and right of the rail it belongs to');
+  assert.ok(shut.stops().at.length > 1, 'with the widths to come back to still in the list');
 });
 
 test('a tight canvas answers the seam with what it has', () => {
