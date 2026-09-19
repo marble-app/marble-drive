@@ -1147,6 +1147,31 @@ __ICON__
   }
   .dock-card.marble-docking { transform: scale(.86); opacity: .82; }
   @keyframes card-lift { from { transform: scale(.94); opacity: 0; } }
+  /* The bands a drop can land in, drawn on the pane they belong to. Every band
+     is faintly there so the shape of the choice is legible at a glance, and the
+     one under the pointer is lit — the whole point is that an edge has extent
+     you can see before you cross it. Under the drag's own card and the stage
+     slot, over the panes. */
+  .dock-zones { position: fixed; z-index: 10; pointer-events: none; }
+  .dock-zone {
+    position: absolute; border-radius: 10px;
+    border: 1px dashed color-mix(in srgb, var(--accent-ink) 22%, transparent);
+    background: color-mix(in srgb, var(--accent-ink) 3%, transparent);
+    transition: background-color 120ms var(--ease-out), border-color 120ms var(--ease-out);
+  }
+  .dock-zone[data-side="centre"] { border-radius: 12px; }
+  .dock-zone[data-live] {
+    border: 2px solid color-mix(in srgb, var(--accent-ink) 62%, transparent);
+    background: color-mix(in srgb, var(--accent-ink) 14%, transparent);
+  }
+  /* A root split takes the whole workspace, so its lit band is the one strip
+     that says so and the rest stay out of the way. */
+  .dock-zones[data-root] .dock-zone:not([data-live]) { display: none; }
+  .dock-zones[data-root] .dock-zone[data-live] {
+    border-radius: var(--pane-r);
+    background: color-mix(in srgb, var(--accent-ink) 20%, transparent);
+  }
+  @media (prefers-reduced-motion: reduce) { .dock-zone { transition: none; } }
   .dock-card .dock-title { display: block; font-size: 13px; font-weight: 500; }
   .dock-card .dock-target { display: block; max-width: none; color: var(--muted); margin-top: .15rem; }
   .marble-lifted { opacity: .4; }
@@ -3421,6 +3446,9 @@ __ICON__
       document.querySelector('.focus-pinslot')?.remove();
       document.querySelector('.focus-stageslot')?.remove();
       document.querySelector('.focus-newgroup')?.remove();
+      // Held open for the length of the drag by endDrop, so it comes down here
+      // — after focusDrag is cleared, or the guard there would keep it.
+      document.querySelector('.dock-zones')?.remove();
       return drag;
     };
 
@@ -4569,6 +4597,26 @@ __ICON__
      *  folds. Wide enough that the pane's unpainted border is not a cliff,
      *  narrow enough that leaving for the field still means leaving. */
     const ROOM_KEEP = 56;
+    /** The band along a pane's edge that reads as "split along here". A share
+     *  of the pane's short side with a pixel floor, because a fraction alone
+     *  makes a small pane's bands too thin to hit and a huge pane's absurd; and
+     *  capped under half, so the centre never disappears. `ROOT_BAND` is the
+     *  strip at the workspace's own edge, which splits everything rather than
+     *  one pane — it was 12px, which is not a target. `HOLD` widens whichever
+     *  band is already open. */
+    const BAND_SHARE = 0.22;
+    const BAND_MIN = 72;
+    const BAND_MAX_SHARE = 0.45;
+    const ROOT_BAND = 28;
+    const HOLD = 1.35;
+    const bandsOf = (rect) => {
+      const px = Math.max(BAND_MIN, Math.min(rect.width, rect.height) * BAND_SHARE);
+      return {
+        px,
+        x: Math.min(px / rect.width, BAND_MAX_SHARE),
+        y: Math.min(px / rect.height, BAND_MAX_SHARE),
+      };
+    };
     let room = null;
     let roomLive = false;
     let collapseTimer = 0;
@@ -4770,13 +4818,12 @@ __ICON__
       if (!target) return none;
       // A docked chat dragged by its bar and dropped on another bar changes places.
       const down = clientY - rect.top;
-      if (sourceKey && sourceKey !== target && down > 10 && down < 38) return { plan: { mode: 'swap', target } };
+      if (sourceKey && sourceKey !== target && down > 10 && down < 38) return { plan: { mode: 'swap', target }, rect, box };
       // The outer band splits the whole workspace rather than one pane.
       if (leaves.size > 1) {
-        const band = 12;
         const dist = { left: clientX - box.left, right: box.right - clientX, top: clientY - box.top, bottom: box.bottom - clientY };
         const nearest = Object.keys(dist).reduce((x, y) => (dist[x] <= dist[y] ? x : y));
-        if (dist[nearest] < band) return { plan: { mode: 'split', root: true, side: nearest } };
+        if (dist[nearest] < ROOT_BAND) return { plan: { mode: 'split', root: true, side: nearest }, rect: null, box };
       }
       if (target === sourceKey) return none;
       const d = {
@@ -4787,15 +4834,85 @@ __ICON__
       };
       let side = Object.keys(d).reduce((a, b) => (d[a] <= d[b] ? a : b));
       const open = room && !room.closing && !room.plan.root && room.plan.target === target ? room.plan.side : null;
-      // Wider once an edge is open, so a pointer resting on its boundary does
-      // not make the room flicker.
-      const edge = open && d[open] < 0.34 ? 0.34 : 0.25;
-      if (open && d[open] < 0.34) side = open;
-      const isEdge = d[side] < edge;
-      if (isEdge) return { plan: { mode: 'split', target, side } };
-      if (rail) return { plan: { mode: 'split', target, side: restingSide(target) } };
-      if (narrowView.matches || reduceMotion.matches || !sourceKey) return { plan: { mode: 'replace', target } };
-      return { plan: { mode: 'swap', target } };
+      // The same numbers the bands are drawn with, so what you aim at is what
+      // you were shown. Wider once an edge is open, so a pointer resting on a
+      // boundary does not make the room flicker.
+      const bands = bandsOf(rect);
+      const reach = (which) => (which === 'left' || which === 'right' ? bands.x : bands.y);
+      if (open && d[open] < reach(open) * HOLD) side = open;
+      const isEdge = d[side] < reach(side) * (side === open ? HOLD : 1);
+      if (isEdge) return { plan: { mode: 'split', target, side }, rect, box };
+      if (rail) return { plan: { mode: 'split', target, side: restingSide(target) }, rect, box };
+      if (narrowView.matches || reduceMotion.matches || !sourceKey) return { plan: { mode: 'replace', target }, rect, box };
+      return { plan: { mode: 'swap', target }, rect, box };
+    };
+
+    /** The bands, drawn on the thing they belong to. A drop used to be aimed at
+     *  a target with no extent: the split bands were a quarter of a pane and the
+     *  workspace strip was twelve pixels, and neither was painted, so the only
+     *  way to find an edge was to cross it and watch what happened. These are
+     *  the same rects `bandsOf` hit-tests, and the one under the pointer is lit,
+     *  so the answer is on screen before the release rather than after it. */
+    const paintPaneZones = (res, plan, live) => {
+      const rect = plan?.root ? res.box : res.rect;
+      // Over a pane at all is enough to draw them: the bands are there so you
+      // can see where the edges are before you reach one, not only once you are
+      // in one. Which band is lit is a separate question, and the answer is
+      // sometimes none of them.
+      const wanted = live !== false && Boolean(rect);
+      let host = document.querySelector('.dock-zones');
+      if (!wanted) {
+        host?.remove();
+        return;
+      }
+      if (!host) {
+        host = document.createElement('div');
+        host.className = 'dock-zones';
+        host.setAttribute('data-marble-transient', '');
+        host.setAttribute('aria-hidden', 'true');
+        for (const side of ['left', 'right', 'top', 'bottom', 'centre']) {
+          const band = document.createElement('div');
+          band.className = 'dock-zone';
+          band.dataset.side = side;
+          host.append(band);
+        }
+        document.body.append(host);
+      }
+      // A root split belongs to the whole workspace, so its bands are drawn on
+      // the workspace and read as one strip rather than four quarters.
+      if (plan?.root) host.setAttribute('data-root', '');
+      else host.removeAttribute('data-root');
+      host.style.left = `${Math.round(rect.left)}px`;
+      host.style.top = `${Math.round(rect.top)}px`;
+      host.style.width = `${Math.round(rect.width)}px`;
+      host.style.height = `${Math.round(rect.height)}px`;
+      const px = plan?.root ? ROOT_BAND : bandsOf(rect).px;
+      // Only a split lights a band, and only the band it would split along. A
+      // pane's middle is not a fifth way to split it: for a card coming off the
+      // field it means "stand beside the stage here", which `.focus-stageslot`
+      // is already drawing. Lighting a centre would name a drop that is not the
+      // one about to happen.
+      const litSide = plan?.mode === 'split' ? plan.side : null;
+      for (const band of host.querySelectorAll('.dock-zone')) {
+        const side = band.dataset.side;
+        const lit = side === litSide;
+        if (lit) band.setAttribute('data-live', '');
+        else band.removeAttribute('data-live');
+        const inset = `${Math.round(px)}px`;
+        if (side === 'centre') {
+          Object.assign(band.style, { left: inset, right: inset, top: inset, bottom: inset, width: '', height: '' });
+        } else if (side === 'left' || side === 'right') {
+          Object.assign(band.style, {
+            left: side === 'left' ? '0px' : '', right: side === 'right' ? '0px' : '',
+            top: '0px', bottom: '0px', width: inset, height: '',
+          });
+        } else {
+          Object.assign(band.style, {
+            top: side === 'top' ? '0px' : '', bottom: side === 'bottom' ? '0px' : '',
+            left: '0px', right: '0px', height: inset, width: '',
+          });
+        }
+      }
     };
 
     const paintDrop = (clientX, clientY, id, opts = {}) => {
@@ -4803,6 +4920,7 @@ __ICON__
       roomLive = clientX != null;
       const plan = res.plan;
       const mode = plan?.mode ?? null;
+      paintPaneZones(res, plan, clientX == null ? false : undefined);
       if (clientX != null && currentView() === 'board' && !document.body.hasAttribute('data-panel')) {
         const zone = dockZone();
         if (plan?.zone) zone.setAttribute('data-drop', '');
@@ -4841,6 +4959,12 @@ __ICON__
     const endDrop = (docks) => {
       roomLive = false;
       removeDockZone();
+      // Not while a card is still in the air. `focusTargetAt` calls endDrop for
+      // any plan that is not a split — which is most of the stage — so clearing
+      // the bands here wiped them the same frame they were painted, and the one
+      // thing they exist to do is stay visible for the length of the drag.
+      // A focus drag takes them down in `endFocusDrag`, with its other chrome.
+      if (!focusDrag) document.querySelector('.dock-zones')?.remove();
       intentKey = null;
       clearTimeout(intentTimer);
       pane.classList.remove('marble-drop-fill', 'marble-replace-primary');

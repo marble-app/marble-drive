@@ -761,3 +761,99 @@ test('a region being aimed at changes in a way you can actually see', async () =
     );
   }
 });
+
+/** The bands a pane splits along were 25% of it and 12px at the workspace edge,
+ *  and nothing drew any of them: you aimed at a target you could not see. */
+test('a pane paints the bands a drop lands in, big enough to aim at', async () => {
+  const { page } = await openAgents({ viewport: { width: 1440, height: 900 } });
+  const ids = await page.evaluate(async () => {
+    const agent = window.marble.agent;
+    const made = [];
+    for (const title of ['one', 'two', 'three']) {
+      const id = await agent.start({ provider: 'fake' });
+      await agent.update(id, { title });
+      made.push(id);
+    }
+    await agent.update(made[0], { pinned: true });
+    await agent.update(made[1], { pinned: true });
+    return { dragged: made[2] };
+  });
+  await page.locator('.views [data-view="focus"]').click();
+  await page.locator(`.focus-card[data-id="${ids.dragged}"]`).waitFor();
+  await page.waitForFunction(() => document.querySelectorAll('.dock-frame:not(.dock-ghost)').length === 2);
+  await page.waitForTimeout(700);
+
+  // The leftmost leaf, so its right edge is an interior seam rather than the
+  // workspace edge — which has a band of its own.
+  const geom = await page.evaluate(() => {
+    const p = document.querySelector('.pane').getBoundingClientRect();
+    const frames = [...document.querySelectorAll('.dock-frame:not(.dock-ghost)')]
+      .map((f) => f.getBoundingClientRect())
+      .sort((a, b) => a.x - b.x)
+      .map((r) => ({ x: Math.round(r.x), y: Math.round(r.y), w: Math.round(r.width), h: Math.round(r.height) }));
+    return { pane: { x: p.x, y: p.y, w: p.width, h: p.height }, frames };
+  });
+  // Aimed in the pane's own coordinates, which is the space the drop resolver
+  // hit-tests in: it maps each leaf's fractional rect onto the pane's box. A
+  // frame's painted rect is inset from that, so aiming by frame geometry can
+  // miss the leaf it belongs to.
+  const leaf = { x: geom.pane.x, y: geom.pane.y, w: geom.pane.w / 2, h: geom.pane.h };
+
+  const zones = () => page.evaluate(() => {
+    const host = document.querySelector('.dock-zones');
+    if (!host) {
+      return {
+        missing: true,
+        ghosts: document.querySelectorAll('.dock-ghost').length,
+        paneClass: document.querySelector('.pane')?.className ?? null,
+        stageslot: Boolean(document.querySelector('.focus-stageslot')),
+        frames: document.querySelectorAll('.dock-frame:not(.dock-ghost)').length,
+        dragging: document.querySelectorAll('.focus-card.marble-dragging').length,
+      };
+    }
+    const bands = [...host.querySelectorAll('[data-side]')].map((el) => {
+      const r = el.getBoundingClientRect();
+      return {
+        side: el.dataset.side,
+        live: el.hasAttribute('data-live'),
+        w: Math.round(r.width),
+        h: Math.round(r.height),
+      };
+    });
+    return { bands, live: bands.filter((b) => b.live).map((b) => b.side) };
+  });
+
+  const from = await page.locator(`.focus-card[data-id="${ids.dragged}"]`).boundingBox();
+  await page.mouse.move(from.x + from.width / 2, from.y + 14);
+  await page.mouse.down();
+  await page.mouse.move(from.x + from.width / 2 + 24, from.y + 30, { steps: 4 });
+
+  // The middle first, which is not a split at all. It has to come first: once a
+  // split opens room, the ghost leaf takes part of the stage and every frame
+  // moves, so coordinates measured before the drag no longer point at the pane
+  // they were measured from.
+  await page.mouse.move(leaf.x + leaf.w * 0.5, leaf.y + leaf.h * 0.5, { steps: 12 });
+  await page.waitForTimeout(400);
+  const atMiddle = await zones();
+
+  // Then just inside that leaf's right edge: a split to the right of it.
+  await page.mouse.move(leaf.x + leaf.w - 24, leaf.y + leaf.h * 0.5, { steps: 10 });
+  await page.waitForTimeout(400);
+  const atRight = await zones();
+
+  await page.mouse.up();
+  await page.waitForTimeout(400);
+  const afterDrop = await zones();
+
+  assert.ok(!atRight.missing, `no bands were painted while dragging over a pane: ${JSON.stringify(atRight)}`);
+  assert.deepEqual(atRight.live, ['right'], `the right band was not the lit one: ${JSON.stringify(atRight)}`);
+  const right = atRight.bands.find((b) => b.side === 'right');
+  assert.ok(right.w >= 72, `the right band is ${right.w}px wide — too thin to aim at`);
+  // Over the middle the bands are still drawn — that is how you see where the
+  // edges are before reaching one — but none is lit, because a card off the
+  // field dropped in a pane's middle does not split it.
+  assert.ok(!atMiddle.missing, `the bands vanished over a pane's middle: ${JSON.stringify(atMiddle)}`);
+  assert.deepEqual(atMiddle.live, [], `a band lit for a drop that is not a split: ${JSON.stringify(atMiddle)}`);
+  assert.equal(atMiddle.bands.length, 5, 'expected four bands and a centre');
+  assert.ok(afterDrop.missing, 'the bands outlived the drag');
+});
