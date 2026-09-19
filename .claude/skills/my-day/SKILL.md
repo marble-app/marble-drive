@@ -70,13 +70,17 @@ Below 82rem the tail drops under the stream; below 62rem everything stacks.
 | `calendar` | what's coming, two readings | **tail**, `card` | `view: t` Timeline \| `l` List |
 | `usopen` | Now / Men / Women, real bracket | **stream** | a draw needs width; never the rail |
 | `nfl` | one week's slate ⇄ one game in full | **stream** | `view: week\|niners` · use on a game day |
-| `nflseason` | **The arc** (18 weeks at once) ⇄ **The West** (division race) | **stream** | `view: arc\|west` · the season, not the week |
+| `nflseason` | **The arc** (18 weeks at once) ⇄ **The West** (division race) ⇄ **The league** (all 32, by division) | **stream** | `view: arc\|west\|league` · the season, not the week |
 | `art` | the day's painting + palette swatches; **expands** to the palette with hex values and roles | rail (last) | cites the museum |
 | `roadahead` | your authored representation | stream (last) | `card` |
 | `custom` | your own `html` | anywhere | same guards as the representation |
 
 Per-node keys: `type`, `treatment`, `title` (override; `null` hides the header),
 `cat` (override the category colour), plus `view` / `weeks` where noted.
+
+How each of these becomes screens in the story — whose rows are units and whose
+whole component is one — is §The story below, and it needs nothing from you per
+run beyond the order.
 
 **View state.** Components with a segmented control remember which view Bryan last
 chose and reopen there. Setting `view` on the layout node *overrides* that — use it
@@ -140,6 +144,49 @@ The composition is expected to change:
   `papers` ≤ 12. Cut by relevance, not by truncation. **`focus` has no cap** — it
   is the list of what genuinely has to happen today, and some days that is one
   thing and some days it is six. Never pad it to a number.
+
+### The story — the same day, read as screens
+
+On a phone Bryan can read the day two ways, and a segmented control at the top
+switches between them. **Page** is everything above: the stream, scrolled.
+**Story** is the day as full-screen cards — tap the right to go on, tap the left
+to go back, swipe up to reach the live component, an end card when he is done.
+Which one he chose is filed on the document and reopens that way tomorrow.
+
+You do not build the story. `build.mjs` cuts the day into **units** and the page
+packs them against the real screen. What you decide is what deserves a screen of
+its own, and what order the day reads in.
+
+- **A unit is the smallest thing the story never splits.** A row, a news card, a
+  paper, or a whole widget. A screen holds units from **one group only** — a
+  to-do and a paper never share one.
+- **Standing alone is earned, and mostly automatic.** A row gets its own screen
+  when its note is a list, is 160 characters or more, or the row totals 320.
+  Papers stand alone at Adjacent and above; news at relevance 3. Short rows pack
+  — focus 3 to a screen, todos 5, news 3, papers 3.
+- **Promote by hand with `"storyOwn": true`** on any item. Use it for the one
+  to-do he has to read in full, or a Tangential paper you want him to meet alone.
+- **`layout.story` is optional** and takes `{ "order": ["weather", "focus", …],
+  "skip": ["nflseason"] }`. The default order is cover → weather → the to-do
+  components → the calendar → the rest of the stream → the painting → end.
+  Override it when the day has a shape: a game day leads with the season, a
+  deadline day leads with `focus`.
+- **A multi-view component contributes one view**, the one that reads top to
+  bottom on a phone: news → Reading, calendar → List, `nflseason` → The arc,
+  `usopen` → Now, `nfl` → The week. Nothing per-run changes that.
+- **A component's chevron panel is not in the story.** It is a second reading,
+  and swiping up is where second readings live.
+- **A screen is one thought.** The assemble report carries
+  `story: { units, screens }`. Aim for **15 to 30**. Past 40 the build says so
+  on stderr, and the fix is editorial — cut by relevance, the same thing the
+  volume caps above already ask of you. Never pad a thin day: a nine-screen
+  story is a fine morning.
+
+What the story is not allowed to do: **file anything but the reading mode.** A
+glance screen is a picture of the document — clones with no id, no
+`contenteditable` and no controls — so nothing it shows can be edited by
+accident. Swipe up and the real component is there with every control it always
+had. That is the whole safety argument, and it is why glance carries no buttons.
 
 ---
 
@@ -478,6 +525,29 @@ Not "Tuesday" and not "Daily brief". The date is not lost: it lives in the file'
   season arc, `…/teams/<slug>` for each division rival's record. On a Tuesday the
   season is the live reading and the week is finished — prefer `nflseason` and
   leave `nfl` out rather than re-running a result a past issue already carried.
+
+  **The league** takes `nflSeason.league` — all eight divisions, from
+  `node lib/sources.mjs nflstandings --us <his abbr>`, where the abbr comes from
+  `profile.json` and never from a literal. Pass it and the third segment appears;
+  leave it out and the component is the two views it always was.
+  Every team carries its crest: beside the name in **The league** and **The
+  West**, and after the abbreviation in **The arc** — following it rather than
+  replacing it, because three letters read at any size and the crest is what the
+  eye finds first. `build.mjs` reads them straight from `lib/nfl-logos.json` by
+  abbreviation, so a renderer only ever needs `LAR` and a payload never carries
+  93 KB of base64. Every crest takes `alt=""`: the team is named beside it in all
+  three views, and a reader that announces both goes through every row twice.
+  The pack is 32 PNGs as `data:` URIs, 48px, ~92 KB for the whole league,
+  committed in the skill. Do **not** fetch a logo per run: the document is
+  `net=none` so they have to be inlined anyway, the day's image budget (~30) is
+  for the papers, and a crest does not change. `sources.mjs nfllogos --refresh`
+  is the only thing that rewrites the pack — a rebrand, a new team, a size change.
+
+  `nflSeason.leagueNote` is one sentence on what the table means *this* week — in
+  September a record is a coin-flip and the differential is the whole standing,
+  and the note is what stops him reading the record column as if it said
+  something. It is a different question from The West, which is why it is a
+  segment and not more rows in that one.
 - **weather** — `node lib/sources.mjs weather --here "<city>" --away "<city>"` →
   straight into `payload.weather`. Cities come from `profile.json`; anything not in
   `GAZETTEER` is geocoded automatically, so a new town needs no code change.
@@ -601,6 +671,14 @@ segment, star and chevron should report its state. Fix and rebuild. If the
 extension isn't available, say so in the report — the static doctor is the only
 gate that ran.
 
+**Then the phone.** Screenshot at 393 × 852 with `#story` on the URL, which opens
+the story at any width, and walk every screen. Three things to look for, none of
+which the static gate can see: a clamped screen that is really two thoughts and
+should have been two units; a screen carrying one short line, which means a group
+boundary or a ceiling cost you a screen for nothing; and type that has gone small
+because a component was built for the stream's width and is now reading at a
+phone's.
+
 ### 8. Harvest + verify
 ```
 node lib/build.mjs harvest drive/Bryan's Days/today.mrbl
@@ -634,11 +712,12 @@ focus list, next date, top 3 links, a link to the doc. One column, ~600px.
   "greeting": "Good morning, Bryan.",
   "summary": "one or two sentences",
   "palette": "Peacock & Sand",              // optional; omit to auto-rotate
-  "layout": { "rail": [...], "stream": [...] },
+  "layout": { "rail": [...], "stream": [...],
+              "story": { "order": ["weather","focus","todos"], "skip": ["nflseason"] } },
   "hero":   { "image": "<iiif url>", "credit": "Water Lily Pond, Claude Monet, 1900" },
   "push":   { "title": "...", "body": "2–3 sentences you actually drafted" },
-  "focus":  [{ "title", "why", "source"? }],
-  "todos":  [{ "title", "source", "meta"?, "note"?, "snooze"? }],
+  "focus":  [{ "title", "why", "source"?, "storyOwn"? }],
+  "todos":  [{ "title", "source", "meta"?, "note"?, "snooze"?, "storyOwn"? }],
   "keyDates": [{ "label", "date": "YYYY-MM-DD", "source"? }],
   "weather": <sources.mjs weather> | { "error": "..." },  // °F; °C is rendered alongside for you
   "usOpen": {
@@ -662,6 +741,11 @@ focus list, next date, top 3 links, a link to the doc. One column, ~600px.
     "next": { "…one of weeks[], the first unplayed…": null },
     "west": [ { "abbr": "SF", "name": "49ers", "record": "1-0",
                 "w": 1, "l": 0, "pf": 27, "pa": 7, "diff": 20, "us": true } ],
+    "league": [ { "conf": "NFC", "div": "NFC West",
+                  "teams": [ { "abbr": "SF", "name": "49ers", "record": "1-0",
+                               "pf": 27, "pa": 7, "diff": 20,
+                               "home": "0-0", "road": "1-0", "us": true } ] } ],
+    "leagueNote": "one sentence on what the table means this week",
     "sourceName": "ESPN — 49ers schedule and NFC West records", "sourceUrl": "…"
   },
   "arxiv": { "papers": [ { ...sources.mjs fields,
@@ -692,6 +776,10 @@ to powers of two so the bracket connectors line up.
 - Authored markup: no script, no network, no external assets. Images arrive only
   as `data:` URIs.
 - Verify citations. Score papers. Never invent a link or a time.
+- Team crests are read from `lib/nfl-logos.json` by `build.mjs`, by abbreviation,
+  never fetched per run and never charged to the image budget. A team missing from
+  the pack renders an empty cell of the same width, so a column keeps its
+  alignment and the strip keeps its rhythm — never a broken image.
 - Author lists are never abbreviated, and every paper carries `tags`.
 - A newly added row arrives **empty**, with its prompt drawn by the stylesheet
   (`:empty::before` on `data-ph`). Never ship placeholder words as real text —
@@ -705,4 +793,7 @@ to powers of two so the bracket connectors line up.
 - Controls announce their state, derived in `shell.mrbl` and never emitted as
   markup by `build.mjs`. Adding a control means adding its reading to
   `deriveAria`, not an `aria-*` attribute to a template string.
+- The story files nothing but `data-read`. Glance is a picture of the document —
+  no ids, no editables, no controls — and hold is the page itself. A control that
+  needs to exist in the story is a control that belongs in the component.
 - If a check fails after a write, restore from `drive/.marble/history/`.

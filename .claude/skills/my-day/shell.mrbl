@@ -227,6 +227,699 @@ __BODY__
     arm(document);
   }
 })();
+
+(() => {
+  /* ---------------------------------------------------------------- story ---
+     A day has two readings. The page is the one you scroll. This is the other:
+     on a phone the day becomes screens — tap right to go on, tap left to go
+     back, swipe up to reach the thing itself, and an end card when you are
+     done.
+
+     Two halves, and the split is the whole design. The BUILD decides the
+     editorial half and writes it into the file as `data-story*`: what becomes a
+     unit, what has to be read on its own, what order the day reads in. This
+     decides the geometry, because only a phone knows how tall a screen is — it
+     measures real clones at the real width and packs them.
+
+     A glance screen is a PICTURE of the document, never the document: every
+     clone loses its id, its contenteditable and its controls, so nothing the
+     story shows can be edited by accident and nothing it does can be filed.
+     The live element is one swipe away, which is where every control already
+     lives. The only thing the story ever writes is which reading he chose. */
+
+  const PHONE = matchMedia('(max-width: 62rem)');
+  const REDUCED = matchMedia('(prefers-reduced-motion: reduce)');
+  const root = document.querySelector('main.page');
+  if (!root) return;
+
+  const SHEET = `
+    .story { position: fixed; inset: 0; z-index: 90; display: flex; flex-direction: column;
+      background: var(--bg); color: var(--ink); touch-action: none; overscroll-behavior: contain;
+      padding: env(safe-area-inset-top, 0px) env(safe-area-inset-right, 0px)
+               env(safe-area-inset-bottom, 0px) env(safe-area-inset-left, 0px); }
+    .story[hidden] { display: none; }
+    .story-bar { flex: none; display: flex; gap: 3px; padding: .6rem var(--s4) .4rem; }
+    .story-seg { flex: 1 1 0; min-width: 0; height: 2.5px; border-radius: 999px;
+      background: color-mix(in srgb, var(--faint) 32%, transparent); }
+    .story-seg[data-on] { background: var(--segcat, var(--accent)); }
+    .story-kick { flex: none; display: flex; align-items: center; gap: .5rem;
+      padding: 0 var(--s4) .4rem; min-width: 0; }
+    .story-label { min-width: 0; display: flex; align-items: center; gap: .45rem;
+      font: 600 .72rem/1 var(--font-sans); letter-spacing: .12em; text-transform: uppercase;
+      color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .story-label::before { content: ""; flex: none; width: .5rem; height: .5rem;
+      border-radius: 50%; background: var(--segcat, var(--accent)); }
+    .story-of { margin-left: auto; flex: none; font: 600 .72rem/1 var(--font-mono); color: var(--faint); }
+    .story-x { appearance: none; border: 0; background: none; cursor: pointer; flex: none;
+      color: var(--muted); font: 500 1rem/1 var(--font-sans); border-radius: 8px;
+      min-width: 2.75rem; min-height: 2.75rem; }
+    .story-track { position: relative; flex: 1 1 auto; min-height: 0; overflow: hidden; }
+    .story-screen { position: absolute; inset: 0; display: flex; flex-direction: column;
+      justify-content: center; padding: 0 var(--s4); will-change: transform; }
+    .story-stack { display: flex; flex-direction: column; gap: var(--s4); min-width: 0; }
+    .story-stack > .story-unit + .story-unit { border-top: 1px solid var(--line); }
+    .story-screen[data-clamped] .story-stack { max-height: 100%; overflow: hidden;
+      mask-image: linear-gradient(to bottom, #000 76%, transparent 100%);
+      -webkit-mask-image: linear-gradient(to bottom, #000 76%, transparent 100%); }
+    .story-unit { min-width: 0; }
+    .story-unit.comp { padding: 0; background: none; border: 0; }
+    .story-unit.comp.card, .story-unit.comp.tint { padding: var(--s4); }
+    .story-unit li.row { grid-template-columns: minmax(0, 1fr); padding: 0; margin-inline: 0;
+      border-top: 0; background: none; }
+    .story-unit li.row .title, .story-unit .ntitle, .story-unit .ptitle { font-size: 1.2rem; line-height: 1.3; }
+    .story-unit li.row .note, .story-unit li.row .why { font-size: .95rem; }
+    .story-unit .csrc { font-size: .72rem; }
+    .story-zone { position: absolute; top: 0; bottom: 0; z-index: 2; appearance: none;
+      border: 0; padding: 0; background: none; cursor: pointer; }
+    .story-zone[data-dir="prev"] { left: 0; width: 35%; }
+    .story-zone[data-dir="next"] { right: 0; width: 65%; }
+    .story-zone[data-press] { background: color-mix(in srgb, var(--ink) 4%, transparent); }
+    .story-foot { flex: none; display: flex; justify-content: center; padding: .3rem 0 .8rem; }
+    .story-open { appearance: none; border: 0; background: none; cursor: pointer; color: var(--muted);
+      display: flex; flex-direction: column; align-items: center; gap: .1rem; border-radius: 10px;
+      font: 500 .74rem/1.2 var(--font-sans); min-height: 2.75rem; padding: .2rem 1rem; }
+    .story-open[hidden] { display: none; }
+    .story-chev { font: 500 1rem/1 var(--font-mono); }
+    .story-gauge > .story-unit + .story-unit { border-top: 0; }
+    .story-gauge { position: absolute; left: 0; top: 0; width: 100%; box-sizing: border-box;
+      padding: 0 var(--s4); visibility: hidden; pointer-events: none;
+      display: flex; flex-direction: column; gap: var(--s4); }
+    .story-cover .greet { font-size: 2.1rem; }
+    .story-count { margin: .7rem 0 0; font: 500 .74rem/1 var(--font-mono); color: var(--faint); }
+    .story-end h2 { margin: 0 0 .5rem; font: 500 1.9rem/1.15 var(--font-serif); letter-spacing: -.02em; }
+    .story-end p { margin: 0; font-size: .92rem; line-height: 1.5; color: var(--muted); }
+    .story-acts { display: flex; flex-wrap: wrap; gap: .5rem; margin-top: var(--s4); }
+    .story-btn { appearance: none; cursor: pointer; border: 1px solid var(--line);
+      background: var(--panel); color: var(--ink); border-radius: 999px;
+      font: 600 .82rem/1 var(--font-sans); padding: .75rem 1.1rem; min-height: 2.75rem; }
+    .story-read { display: flex; justify-content: flex-end; margin-bottom: var(--s4); }
+    .story-read .seg button[aria-pressed="true"] { background: var(--accent); color: var(--bg); }
+    .story-return { position: fixed; left: 0; right: 0; top: 0; z-index: 80;
+      padding-top: env(safe-area-inset-top, 0px); touch-action: none;
+      background: color-mix(in srgb, var(--bg) 72%, transparent);
+      backdrop-filter: blur(20px) saturate(180%);
+      -webkit-backdrop-filter: blur(20px) saturate(180%);
+      border-bottom: 1px solid var(--line); }
+    .story-return[hidden] { display: none; }
+    .story-back { appearance: none; border: 0; background: none; cursor: pointer; width: 100%;
+      color: var(--ink); font: 600 .8rem/1 var(--font-sans); text-align: left;
+      padding: .95rem var(--s4); min-height: 2.75rem; }
+    .story-zone:focus-visible, .story-open:focus-visible, .story-x:focus-visible,
+    .story-btn:focus-visible, .story-back:focus-visible, .story-read button:focus-visible {
+      outline: 2px solid var(--accent); outline-offset: -2px; border-radius: 8px; }
+    @media (prefers-reduced-transparency: reduce) {
+      .story-return { background: var(--bg); backdrop-filter: none; -webkit-backdrop-filter: none; }
+    }
+    @media (prefers-reduced-motion: reduce) {
+      .story-screen { transition: opacity .2s ease; }
+    }
+  `;
+
+  const S = { on: false, hold: false, cur: 0, dx: 0, dy: 0, screens: [], units: [] };
+  const mounted = new Map();
+  let sheet = null, overlay = null, track = null, gauge = null, bar = null, segs = [];
+  let label = null, of = null, openBtn = null, word = null, ret = null, retBtn = null;
+  let toggle = null, cancelX = null, cancelY = null, suppressClick = false, heldEl = null;
+
+  function ensureSheet() {
+    if (sheet) return;
+    sheet = document.createElement('style');
+    sheet.setAttribute('data-marble-transient', '');
+    sheet.textContent = SHEET;
+    document.head.append(sheet);
+  }
+  const el = (tag, cls, text) => {
+    const n = document.createElement(tag);
+    if (cls) n.className = cls;
+    if (text != null) n.textContent = text;
+    n.setAttribute('data-marble-transient', '');
+    return n;
+  };
+  const clamp = (n, a, b) => Math.max(a, Math.min(b, n));
+
+  /* -- what the day is made of -------------------------------------------- */
+
+  function collect() {
+    const secs = [...document.querySelectorAll('.comp[data-story-seq]')]
+      .sort((a, b) => Number(a.dataset.storySeq) - Number(b.dataset.storySeq));
+    const out = [];
+    for (const sec of secs) {
+      const mode = sec.dataset.story;
+      if (mode === 'skip') continue;
+      const cat = (sec.style.getPropertyValue('--cat') || '').trim() || 'var(--accent)';
+      const head = sec.querySelector('.chead h2');
+      const name = (sec.dataset.storyLabel || (head ? head.textContent : '') || '').trim();
+      if (mode === 'items') {
+        const view = sec.dataset.storyView;
+        const scope = view ? sec.querySelector('.v-' + view) : sec;
+        if (!scope) continue;
+        const pack = Math.max(1, Number(sec.dataset.storyPack) || 1);
+        const subs = [...scope.querySelectorAll('.nsub')];
+        for (const node of scope.querySelectorAll('li.row, .pcard, .ncard')) {
+          const sub = node.closest('.nsub');
+          const h3 = sub ? sub.querySelector('h3') : null;
+          out.push({
+            el: node, sec, cat, pack,
+            group: sec.dataset.comp + (sub ? ':' + subs.indexOf(sub) : ''),
+            label: ((sub && h3 ? h3.textContent : name) || '').trim(),
+            own: node.hasAttribute('data-story-own'),
+          });
+        }
+      } else {
+        out.push({
+          el: sec, sec, cat, pack: 1, whole: true, own: true,
+          group: 'c' + sec.dataset.storySeq, label: name,
+        });
+      }
+    }
+    return out;
+  }
+
+  /* A screen is read, not operated. Everything that exists to be pressed comes
+     out, and with it every handle the carrier could take hold of. */
+  const STRIP = '.acts, .chk, .add, .exp-toggle, .exp, .seg, .comp-exp, .comp-more,'
+    + ' .marble-grip, .chead .right, [data-marble-transient]';
+  function shot(u) {
+    const node = u.el.cloneNode(true);
+    node.classList.add('story-unit');
+    node.classList.remove('reveal', 'marble-armed', 'marble-seen', 'marble-item');
+    if (u.whole) {
+      /* One component, one reading: the phone gets the view that reads top to
+         bottom, whichever one the desktop tab happens to be left on. */
+      if (u.sec.dataset.storyView) node.setAttribute('data-view', u.sec.dataset.storyView);
+      const chead = node.querySelector('.chead');
+      if (chead) chead.remove();   /* the kicker above the track is the header now */
+    }
+    for (const k of node.querySelectorAll(STRIP)) k.remove();
+    for (const n of [node, ...node.querySelectorAll('*')]) {
+      n.removeAttribute('data-marble-id');
+      n.removeAttribute('contenteditable');
+      n.removeAttribute('spellcheck');
+      n.removeAttribute('tabindex');
+      n.removeAttribute('id');
+      n.removeAttribute('aria-pressed');
+      /* A link in a glance would navigate on the tap that meant "next". */
+      if (n.tagName === 'A') { n.removeAttribute('href'); n.removeAttribute('target'); }
+    }
+    for (const n of node.querySelectorAll('.note, .why')) if (!n.textContent.trim()) n.remove();
+    return node;
+  }
+
+  /* -- packing ------------------------------------------------------------- */
+
+  /* The measuring column and a real screen must space units identically, or the
+     packer fills a screen the screen cannot hold. So read the gap rather than
+     guess it: one number, taken from the stylesheet that draws it. */
+  const gapOf = () => parseFloat(getComputedStyle(gauge).rowGap) || 20;
+  function repack(keep) {
+    if (!S.on) return;
+    S.units = collect();
+    const H = track.clientHeight;
+    const GAP = gapOf() + 1;   /* + the hairline between two units */
+    gauge.textContent = '';
+    const nodes = S.units.map((u) => { const n = shot(u); gauge.append(n); return n; });
+    const hs = nodes.map((n) => n.getBoundingClientRect().height);
+    for (const n of nodes) n.remove();
+
+    const screens = [{ kind: 'cover', group: 'cover', label: '', cat: 'var(--accent)', units: [] }];
+    let open = null, used = 0;
+    S.units.forEach((u, i) => {
+      const h = hs[i];
+      /* One group per screen, never past the ceiling, never past the glass. */
+      const fits = open && !open.kind && open.group === u.group && !u.own && !open.own
+        && open.units.length < u.pack && used + GAP + h <= H;
+      if (!fits) {
+        open = { group: u.group, label: u.label, cat: u.cat, units: [], own: u.own };
+        screens.push(open);
+        used = 0;
+      }
+      open.units.push(Object.assign({}, u, { node: nodes[i] }));
+      used += (open.units.length > 1 ? GAP : 0) + h;
+      /* Taller than the glass even alone: clamp it and say where the rest is.
+         A unit is never split — that is what makes it a unit. */
+      if (h > H) open.clamped = true;
+    });
+    screens.push({ kind: 'end', group: 'end', label: '', cat: 'var(--accent)', units: [] });
+    S.screens = screens;
+
+    let cur = clamp(S.cur, 0, screens.length - 1);
+    if (keep) {
+      const found = screens.findIndex((s) => s.units.some((u) => u.el === keep));
+      if (found >= 0) cur = found;
+    }
+    S.cur = cur;
+    S.dx = 0; S.dy = 0;
+    drawBar();
+    for (const [, n] of mounted) n.remove();
+    mounted.clear();
+    mountWindow();
+    chrome();
+  }
+
+  function mount(i) {
+    if (i < 0 || i >= S.screens.length || mounted.has(i)) return;
+    const s = S.screens[i];
+    const scr = el('div', 'story-screen');
+    if (s.clamped) scr.setAttribute('data-clamped', '');
+    const stack = el('div', 'story-stack');
+    if (s.kind === 'cover') stack.append(coverNode());
+    else if (s.kind === 'end') stack.append(endNode());
+    else for (const u of s.units) stack.append(u.node);
+    scr.append(stack);
+    track.append(scr);
+    mounted.set(i, scr);
+  }
+  /* Three screens live at a time — the one you are reading and the two you
+     could be reading next — so a forty-screen day costs three screens of DOM. */
+  function mountWindow() {
+    for (const [i, n] of [...mounted]) if (Math.abs(i - S.cur) > 1) { n.remove(); mounted.delete(i); }
+    mount(S.cur - 1); mount(S.cur); mount(S.cur + 1);
+    /* Two of the three are only mounted so a drag has something to drag to.
+       Which one is actually being read is a fact, so it is written down. */
+    for (const [i, n] of mounted) {
+      if (i === S.cur) n.setAttribute('data-cur', ''); else n.removeAttribute('data-cur');
+    }
+    place();
+  }
+  function place() {
+    const W = track.clientWidth, H = track.clientHeight;
+    for (const [i, n] of mounted) {
+      const x = (i - S.cur) * W + S.dx;
+      const y = i === S.cur ? S.dy : 0;
+      n.style.transform = 'translate3d(' + x + 'px,' + y + 'px,0)';
+      n.style.opacity = (i === S.cur && S.dy < 0) ? String(Math.max(0, 1 + S.dy / (H * 0.9))) : '1';
+    }
+  }
+  function drawBar() {
+    bar.textContent = '';
+    segs = [];
+    for (const s of S.screens) {
+      const seg = el('span', 'story-seg');
+      seg.style.setProperty('--segcat', s.cat);
+      bar.append(seg);
+      segs.push(seg);
+    }
+  }
+  function chrome() {
+    const s = S.screens[S.cur] || { label: '', cat: 'var(--accent)' };
+    segs.forEach((seg, i) => {
+      if (i <= S.cur) seg.setAttribute('data-on', ''); else seg.removeAttribute('data-on');
+    });
+    label.textContent = s.kind === 'cover' ? 'Today' : s.kind === 'end' ? 'The end' : s.label;
+    label.style.setProperty('--segcat', s.cat);
+    of.textContent = (S.cur + 1) + ' / ' + S.screens.length;
+    openBtn.hidden = !!s.kind;
+    const scr = mounted.get(S.cur);
+    word.textContent = (scr && scr.hasAttribute('data-clamped')) ? 'swipe up for all of it' : 'Open';
+  }
+
+  function coverNode() {
+    const m = document.querySelector('.masthead');
+    const node = m ? shot({ el: m }) : el('div', 'story-unit');
+    node.classList.add('story-cover');
+    const n = el('p', 'story-count', S.screens.length + ' screens');
+    node.append(n);
+    return node;
+  }
+  function endNode() {
+    const node = el('div', 'story-unit story-end');
+    node.append(el('h2', '', "That's your day."));
+    const colophon = document.querySelector('.colophon');
+    node.append(el('p', '', colophon ? colophon.textContent.replace(/\s+/g, ' ').trim() : ''));
+    const acts = el('div', 'story-acts');
+    const page = el('button', 'story-btn', 'Read as a page');
+    page.addEventListener('click', () => leave());
+    const again = el('button', 'story-btn', 'Start over');
+    again.addEventListener('click', () => go(0, 0));
+    acts.append(page, again);
+    node.append(acts);
+    return node;
+  }
+
+  /* -- motion -------------------------------------------------------------- */
+
+  /* A spring in the two parameters a designer reasons with: response is how
+     fast it reaches the target, damping is how much it overshoots (1 = not at
+     all). It starts from where the thing actually is and from the velocity it
+     actually has, which is what makes it interruptible — grab a moving screen
+     and it re-targets instead of jumping. */
+  function spring(from, to, v0, damping, response, onFrame, onDone) {
+    const w = (2 * Math.PI) / response;
+    let x = from - to, v = v0, last = performance.now(), raf = 0;
+    raf = requestAnimationFrame(function step(now) {
+      const dt = Math.min((now - last) / 1000, 1 / 30);
+      last = now;
+      v += (-w * w * x - 2 * damping * w * v) * dt;
+      x += v * dt;
+      if (Math.abs(x) < 0.4 && Math.abs(v) < 24) { onFrame(to); if (onDone) onDone(); return; }
+      onFrame(to + x);
+      raf = requestAnimationFrame(step);
+    });
+    return () => cancelAnimationFrame(raf);
+  }
+  /* Where a flick is going, not where the finger left off — the same
+     exponential decay a scroll view uses. */
+  const project = (v) => (v / 1000) * 0.998 / 0.002;
+  /* An edge resists progressively instead of stopping dead. */
+  const rubber = (over, dim) => (over * dim * 0.55) / (dim + 0.55 * Math.abs(over));
+
+  function go(target, v0) {
+    const t = clamp(target, 0, S.screens.length - 1);
+    if (cancelX) { cancelX(); cancelX = null; }
+    S.dx += (t - S.cur) * track.clientWidth;
+    S.cur = t;
+    mountWindow();
+    chrome();
+    if (REDUCED.matches) {
+      S.dx = 0;
+      place();
+      const n = mounted.get(S.cur);
+      if (n) { n.style.opacity = '0'; requestAnimationFrame(() => { n.style.opacity = '1'; }); }
+      return;
+    }
+    if (Math.abs(S.dx) < 0.5) { S.dx = 0; place(); return; }
+    overlay.dataset.moving = '1';
+    cancelX = spring(S.dx, 0, v0 || 0, Math.abs(v0 || 0) > 900 ? 0.8 : 1.0, 0.35,
+      (val) => { S.dx = val; place(); },
+      () => { cancelX = null; delete overlay.dataset.moving; });
+  }
+  function springY(to, v0) {
+    if (cancelY) { cancelY(); cancelY = null; }
+    if (REDUCED.matches) { S.dy = to; place(); return; }
+    overlay.dataset.moving = '1';
+    cancelY = spring(S.dy, to, v0 || 0, 0.8, 0.3,
+      (val) => { S.dy = val; place(); },
+      () => { cancelY = null; delete overlay.dataset.moving; });
+  }
+
+  /* -- hold: the picture gives way to the thing ---------------------------- */
+
+  function hold(v0) {
+    const s = S.screens[S.cur];
+    if (!s || s.kind || !s.units.length) { springY(0, v0); return; }
+    const u = s.units[0];
+    heldEl = u.el;
+    S.hold = true;
+    ret.hidden = false;
+    retBtn.textContent = '↓ ' + (s.label || 'the day') + ' · back to the story';
+    const barH = ret.getBoundingClientRect().height;
+    const land = () => {
+      overlay.hidden = true;
+      S.dy = 0;
+      place();
+      const y = u.sec.getBoundingClientRect().top + scrollY - barH - 8;
+      /* `instant`, not `auto`: the document sets `scroll-behavior: smooth`, and
+         `auto` inherits it — the page would go on sliding after the screen had
+         already risen, which is a second animation nobody asked for. The swipe
+         was the transition. */
+      scrollTo({ top: Math.max(0, y), behavior: 'instant' });
+      root.inert = false;
+      retBtn.focus({ preventScroll: true });
+    };
+    if (REDUCED.matches) { land(); return; }
+    if (cancelY) { cancelY(); cancelY = null; }
+    overlay.dataset.moving = '1';
+    cancelY = spring(S.dy, -track.clientHeight, v0 || 0, 0.8, 0.3,
+      (val) => { S.dy = val; place(); },
+      () => { cancelY = null; delete overlay.dataset.moving; land(); });
+  }
+  function unhold() {
+    if (!S.hold) return;
+    S.hold = false;
+    ret.hidden = true;
+    overlay.hidden = false;
+    root.inert = true;
+    /* He may have ticked something while he was down there. The glance is
+       rebuilt from the document, so it can never disagree with it. */
+    repack(heldEl);
+    if (REDUCED.matches) return;
+    S.dy = -track.clientHeight;
+    place();
+    springY(0, 0);
+  }
+
+  /* -- gestures ------------------------------------------------------------ */
+
+  let g = null;
+  function onDown(e) {
+    if (!S.on || S.hold) return;
+    if (cancelX) { cancelX(); cancelX = null; }
+    if (cancelY) { cancelY(); cancelY = null; }
+    delete overlay.dataset.moving;
+    g = { id: e.pointerId, x0: e.clientX, y0: e.clientY, px: e.clientX, py: e.clientY,
+          t: e.timeStamp, vx: 0, vy: 0, axis: null };
+    suppressClick = false;
+    /* Feedback on the press, not on the round trip. */
+    const zone = e.target.closest ? e.target.closest('.story-zone') : null;
+    if (zone) zone.setAttribute('data-press', '');
+  }
+  function onMove(e) {
+    if (!g || e.pointerId !== g.id) return;
+    const dt = e.timeStamp - g.t;
+    if (dt > 0) {
+      g.vx = ((e.clientX - g.px) / dt) * 1000;
+      g.vy = ((e.clientY - g.py) / dt) * 1000;
+    }
+    g.px = e.clientX; g.py = e.clientY; g.t = e.timeStamp;
+    const ddx = e.clientX - g.x0, ddy = e.clientY - g.y0;
+    if (!g.axis) {
+      /* Both gestures are watched from the first move; the loser is cancelled
+         once the intent is clear, and 10px is where it becomes clear. */
+      if (Math.hypot(ddx, ddy) < 10) return;
+      g.axis = Math.abs(ddx) > Math.abs(ddy) ? 'x' : 'y';
+      suppressClick = true;
+      /* Capture only now that this is a drag. Capturing on the press would
+         retarget the click to the track, and the tap zones — the whole of the
+         keyboard-and-screen-reader path, and the ordinary way to turn a page —
+         would stop firing. */
+      try { track.setPointerCapture(g.id); } catch {}
+      for (const z of track.querySelectorAll('[data-press]')) z.removeAttribute('data-press');
+    }
+    const W = track.clientWidth, H = track.clientHeight;
+    if (g.axis === 'x') {
+      const edge = (S.cur === 0 && ddx > 0) || (S.cur === S.screens.length - 1 && ddx < 0);
+      S.dx = edge ? rubber(ddx, W) : ddx;
+    } else {
+      S.dy = ddy < 0 ? ddy : rubber(ddy, H);
+    }
+    place();
+  }
+  function onUp(e) {
+    if (!g || e.pointerId !== g.id) return;
+    for (const z of track.querySelectorAll('[data-press]')) z.removeAttribute('data-press');
+    const axis = g.axis, vx = g.vx, vy = g.vy;
+    const W = track.clientWidth, H = track.clientHeight;
+    g = null;
+    if (!axis) return;             /* a tap: the zone's own click decides */
+    if (axis === 'x') {
+      const landing = S.dx + project(vx);
+      go(S.cur - Math.round(clamp(landing / W, -1, 1)), vx);
+    } else {
+      const landing = S.dy + project(vy);
+      if (landing < -H * 0.3) hold(vy); else springY(0, vy);
+    }
+    requestAnimationFrame(() => { suppressClick = false; });
+  }
+
+  /* -- the overlay --------------------------------------------------------- */
+
+  function build() {
+    ensureSheet();
+    overlay = el('div', 'story');
+    overlay.hidden = true;
+    overlay.setAttribute('role', 'region');
+    overlay.setAttribute('aria-label', 'Today, screen by screen');
+    bar = el('div', 'story-bar');
+    const kick = el('div', 'story-kick');
+    kick.setAttribute('aria-live', 'polite');
+    label = el('span', 'story-label');
+    of = el('span', 'story-of');
+    const x = el('button', 'story-x', '✕');
+    x.setAttribute('aria-label', 'Read as a page');
+    x.addEventListener('click', () => leave());
+    kick.append(label, of, x);
+
+    track = el('div', 'story-track');
+    gauge = el('div', 'story-gauge');
+    track.append(gauge);
+    for (const [dir, name] of [['prev', 'Previous screen'], ['next', 'Next screen']]) {
+      const z = el('button', 'story-zone');
+      z.dataset.dir = dir;
+      z.setAttribute('aria-label', name);
+      z.addEventListener('click', () => {
+        if (suppressClick) return;
+        go(S.cur + (dir === 'next' ? 1 : -1), 0);
+      });
+      track.append(z);
+    }
+    track.addEventListener('pointerdown', onDown);
+    track.addEventListener('pointermove', onMove);
+    track.addEventListener('pointerup', onUp);
+    track.addEventListener('pointercancel', onUp);
+
+    const foot = el('div', 'story-foot');
+    openBtn = el('button', 'story-open');
+    openBtn.append(el('span', 'story-chev', '⌃'));
+    word = el('span', 'story-word', 'Open');
+    openBtn.append(word);
+    openBtn.addEventListener('click', () => hold(0));
+    foot.append(openBtn);
+
+    overlay.append(bar, kick, track, foot);
+    document.body.append(overlay);
+
+    ret = el('div', 'story-return');
+    ret.hidden = true;
+    retBtn = el('button', 'story-back', '');
+    retBtn.addEventListener('click', () => unhold());
+    ret.append(retBtn);
+    /* The way back is also a gesture: pull the bar down and the story returns
+       along the path it left by. */
+    let rd = null;
+    ret.addEventListener('pointerdown', (e) => { rd = e.clientY; });
+    ret.addEventListener('pointermove', (e) => {
+      if (rd != null && e.clientY - rd > 30) { rd = null; unhold(); }
+    });
+    ret.addEventListener('pointerup', () => { rd = null; });
+    document.body.append(ret);
+  }
+
+  /* -- entering and leaving ------------------------------------------------ */
+
+  function enter(at) {
+    if (S.on) return;
+    if (!overlay) build();
+    S.on = true;
+    S.cur = 0; S.dx = 0; S.dy = 0;
+    overlay.hidden = false;
+    root.inert = true;
+    repack(null);
+    if (at) {
+      const i = S.screens.findIndex((s) => s.units.some((u) => u.sec === at));
+      if (i > 0) { S.cur = i; mountWindow(); chrome(); }
+    }
+    watch();
+    syncToggle();
+  }
+  function leave() {
+    if (!S.on) return;
+    S.on = false;
+    S.hold = false;
+    if (cancelX) { cancelX(); cancelX = null; }
+    if (cancelY) { cancelY(); cancelY = null; }
+    overlay.hidden = true;
+    ret.hidden = true;
+    root.inert = false;
+    for (const [, n] of mounted) n.remove();
+    mounted.clear();
+    unwatch();
+    file('page');
+    syncToggle();
+  }
+
+  /* The screens are measured, so anything that changes a measurement — the
+     document being edited, the phone turning, a font arriving — repacks. The
+     observer is on the shell, never on the body, so the overlay's own comings
+     and goings cannot feed it. */
+  let mo = null, tid = 0;
+  const keepEl = () => {
+    const s = S.screens[S.cur];
+    return s && s.units[0] ? s.units[0].el : null;
+  };
+  const bump = () => {
+    clearTimeout(tid);
+    tid = setTimeout(() => { if (S.on && !S.hold) repack(keepEl()); }, 250);
+  };
+  function watch() {
+    const shell = document.querySelector('.shell') || root;
+    mo = new MutationObserver(bump);
+    mo.observe(shell, {
+      subtree: true, childList: true, characterData: true, attributes: true,
+      attributeFilter: ['data-done', 'data-snooze', 'data-pin', 'data-vote',
+                        'data-saved', 'data-open', 'data-view', 'data-expanded'],
+    });
+    addEventListener('resize', bump);
+    addEventListener('orientationchange', bump);
+    addEventListener('load', bump);
+    if (document.fonts && document.fonts.ready) document.fonts.ready.then(bump);
+  }
+  function unwatch() {
+    if (mo) { mo.disconnect(); mo = null; }
+    removeEventListener('resize', bump);
+    removeEventListener('orientationchange', bump);
+    removeEventListener('load', bump);
+    clearTimeout(tid);
+  }
+
+  /* -- the toggle, and the fact it files ----------------------------------- */
+
+  /* Which reading he chose is a fact about the day, so it goes in the file and
+     reopens the way he left it. Never localStorage: there is no third case. */
+  function file(v) {
+    if (root.getAttribute('data-read') === v) return;
+    root.setAttribute('data-read', v);
+    const id = window.marble && window.marble.id(root);
+    if (id) window.marble.op({ type: 'setAttr', id, name: 'data-read', value: v });
+  }
+  /* Where the story should pick him up. At the top of the page that is the
+     cover — he has not read anything yet. Scrolled down, it is whatever he was
+     looking at, so the switch does not lose his place. */
+  const current = () => {
+    const m = document.querySelector('.masthead');
+    if (m && m.getBoundingClientRect().bottom > 0) return null;
+    for (const sec of document.querySelectorAll('.comp[data-story-seq]')) {
+      if (sec.getBoundingClientRect().bottom > 0) return sec;
+    }
+    return null;
+  };
+  function syncToggle() {
+    if (!PHONE.matches) {
+      if (toggle) { toggle.remove(); toggle = null; }
+      return;
+    }
+    if (!toggle) {
+      ensureSheet();
+      toggle = el('div', 'story-read');
+      const seg = el('span', 'seg');
+      seg.setAttribute('role', 'group');
+      seg.setAttribute('aria-label', 'How to read today');
+      for (const [v, t] of [['page', 'Page'], ['story', 'Story']]) {
+        const b = el('button', '', t);
+        b.dataset.setread = v;
+        b.addEventListener('click', () => {
+          if (v === 'story') { file('story'); enter(current()); } else leave();
+        });
+        seg.append(b);
+      }
+      toggle.append(seg);
+      root.prepend(toggle);
+    }
+    for (const b of toggle.querySelectorAll('[data-setread]')) {
+      b.setAttribute('aria-pressed', String((b.dataset.setread === 'story') === S.on));
+    }
+  }
+
+  addEventListener('keydown', (e) => {
+    if (!S.on) return;
+    if (S.hold) { if (e.key === 'Escape') { e.preventDefault(); unhold(); } return; }
+    if (e.key === 'ArrowRight') { e.preventDefault(); go(S.cur + 1, 0); }
+    else if (e.key === 'ArrowLeft') { e.preventDefault(); go(S.cur - 1, 0); }
+    else if (e.key === 'ArrowUp' || e.key === 'Enter') { e.preventDefault(); hold(0); }
+    else if (e.key === 'Escape') { e.preventDefault(); leave(); }
+  });
+
+  syncToggle();
+  PHONE.addEventListener('change', () => { if (!PHONE.matches && S.on) leave(); syncToggle(); });
+
+  /* The hash reaches the story at any width, for a screenshot pass and for a
+     test. It is never filed — only the toggle files. */
+  const wanted = () => location.hash === '#story'
+    || (PHONE.matches && root.getAttribute('data-read') === 'story');
+  const start = () => { if (wanted()) enter(null); };
+  if (document.readyState === 'loading') addEventListener('DOMContentLoaded', start);
+  else start();
+  addEventListener('hashchange', () => { if (wanted()) enter(null); else if (location.hash !== '#story' && S.on) leave(); });
+})();
 </script>
 
 <script>

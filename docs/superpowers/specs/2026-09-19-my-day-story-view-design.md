@@ -363,3 +363,27 @@ payload block gains `storyOwn` on items and `layout.story`; the invariants gain
 - Reordering rows from inside hold beyond what the page already does.
 - The `/today` route (memory: `my-day-ios-request`, part 4). Unrelated, still open.
 - Haptics. The Vibration API is unsupported on iOS Safari; nothing to design.
+
+## Amendments (made during implementation, 2026-09-19)
+
+Two things in this spec turned out to be wrong about where code goes. Both were
+changed while building; the design they describe is unchanged.
+
+1. **Story CSS ships in a runtime-injected transient sheet, not `design.css`**
+   (§5 said `design.css`). The layout doctor fails the build on
+   `position: absolute` or `fixed` for any selector outside its safe list, and
+   the overlay is necessarily fixed. The doctor deliberately skips
+   `<style data-marble-transient>` blocks, which is also the honest home for it:
+   the overlay is chrome the page invents at read time and never document
+   content, so it should not sit in the design system at all.
+2. **The over-40-screens warning is printed by `assemble`, not the layout
+   doctor** (§4.4). The doctor parses a built file and has no character model;
+   `assemble` has the payload and already computes the estimate.
+
+One thing the build found that the spec did not anticipate:
+
+3. **A fourth attribute, `data-story-seq`,** carries the order. The default
+   story order is not DOM order (the weather is in the rail, the calendar in the
+   tail), so the page cannot derive it. `data-story-pack` carries the ceiling for
+   the same reason — a ceiling is editorial, and the page should not hold a
+   second copy of the component vocabulary.
