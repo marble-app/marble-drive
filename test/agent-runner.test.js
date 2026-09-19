@@ -6,6 +6,7 @@ import path from 'node:path';
 import test from 'node:test';
 import { fileURLToPath } from 'node:url';
 
+import { MAX_HOP } from '../server/agent/messages.js';
 import { createRunner } from '../server/agent/runner.js';
 import { createAgentStore } from '../server/agent/store.js';
 import { createTools } from '../server/agent/tools.js';
@@ -49,7 +50,7 @@ const SCRIPTS = {
   linger2: [{ sleep: 1500 }, { say: 'done lingering' }],
 };
 
-async function setup({ limits = {}, tools, realTools = null, onLook, capability, projects = null, onFinish = null, publishAsk = undefined, origin = () => 'http://127.0.0.1:1' } = {}) {
+async function setup({ limits = {}, tools, realTools = null, onLook, capability, projects = null, onFinish = null, publishAsk = undefined, onPublish = null, origin = () => 'http://127.0.0.1:1' } = {}) {
   const dir = await fsp.mkdtemp(path.join(os.tmpdir(), 'marble-runner-'));
   const store = createAgentStore({ dir: path.join(dir, 'agents'), defaultProvider: 'fake' });
   await store.ready();
@@ -75,7 +76,13 @@ async function setup({ limits = {}, tools, realTools = null, onLook, capability,
     origin,
     bridgePath: path.join(HERE, '..', 'bin', 'marble-mcp.js'),
     readDocument: async () => '<html><body data-marble-id="b"><p data-marble-id="p">hi</p></body></html>',
-    publish: (conversationId, event) => published.push({ conversationId, event }),
+    // `onPublish` is how a test makes the host fail underneath a turn: a
+    // throw here reaches `send` through `emit`, which is the one unguarded
+    // await in the path a delivery turn takes.
+    publish: (conversationId, event) => {
+      published.push({ conversationId, event });
+      onPublish?.(conversationId, event);
+    },
     publishAsk,
     limits: { maxRunning: 3, stallMs: 60_000, maxMs: 60_000, killGraceMs: 200, ...limits },
     log: { log() {}, error() {} },
@@ -290,8 +297,8 @@ test('wait_for_reply times out with a plain answer and the turn goes on', async 
   const turn = await finished(store, turnId, 20_000);
   assert.equal(turn.status, 'completed');
   const results = (await store.events(a.id)).filter((e) => e.type === 'tool.result').map((e) => e.summary);
-  // The bridge pretty-prints tool results, so the key and its value are
-  // separated by a space on the wire: match the pair, not one spelling of it.
+  // The bridge answers with pretty-printed JSON (bin/marble-mcp.js), so the
+  // key and its value are a space apart, not run together.
   assert.ok(results.some((s) => /"timeout":\s*true/.test(s)), 'the wait reported a timeout');
   await runner.close();
 });
@@ -1258,6 +1265,231 @@ test('patchQueued edits a waiting prompt and cycles dispatch', async () => {
   await runner.cancel(first.turnId);
   await finished(store, first.turnId);
   await finished(store, second.turnId);
+  await runner.close();
+});
+
+// --- Fix round 1 (task 3 review): a message is delivered exactly once and never lost. ---
+
+test('two messages delivered to the same idle conversation at once start exactly one turn', async () => {
+  const { store, runner } = await setupMessaging();
+  const a1 = await store.createConversation({ provider: 'fake' });
+  const a2 = await store.createConversation({ provider: 'fake' });
+  const b = await store.createConversation({ provider: 'fake' });
+  const turnA1 = { conversationId: a1.id, target: 'd', sent: 0, project: { id: 'drive' } };
+  const turnA2 = { conversationId: a2.id, target: 'd', sent: 0, project: { id: 'drive' } };
+  // Both calls see `b` idle and race for it, the same way finish()'s
+  // fire-and-forget inbox check and a concurrent deliver do in production.
+  // `startDelivery`'s takeInbox is serialized per conversation, so exactly
+  // one of the two calls actually starts a turn; the loser must not fall
+  // back to the single message it was handed, or `b` gets two turns for one
+  // delivery.
+  const [r1, r2] = await Promise.all([
+    runner.deliver(turnA1, { to: b.id, text: 'first message' }),
+    runner.deliver(turnA2, { to: b.id, text: 'second message' }),
+  ]);
+  assert.ok(!r1.error, r1.error);
+  assert.ok(!r2.error, r2.error);
+  const bTurns = await store.turns(b.id);
+  assert.equal(bTurns.length, 1, 'exactly one turn was started on b, not two');
+  await finished(store, bTurns[0].id);
+  const user = (await store.events(b.id)).find((e) => e.type === 'user');
+  assert.match(user.text, /first message/);
+  assert.match(user.text, /second message/);
+  await runner.close();
+});
+
+test('a turn cancelled before its process spawns hands its taken inbox back rather than losing it', async () => {
+  const dir = await fsp.mkdtemp(path.join(os.tmpdir(), 'marble-runner-'));
+  const store = createAgentStore({ dir: path.join(dir, 'agents'), defaultProvider: 'slow-prepare' });
+  await store.ready();
+  const provider = {
+    id: 'slow-prepare',
+    label: 'Slow',
+    detect: async () => ({ installed: true, signedIn: true, detail: '' }),
+    prepare: () => new Promise((resolve) => setTimeout(resolve, 300)),
+    spawn() {
+      return { command: process.execPath, args: ['-e', 'process.exit(0)'], env: {}, stdin: '' };
+    },
+    parse: () => [],
+  };
+  const runner = createRunner({
+    store,
+    tools: { call: async () => ({ ok: true }) },
+    providers: new Map([['slow-prepare', provider]]),
+    workdir: path.join(dir, 'work'),
+    origin: () => 'http://127.0.0.1:1',
+    bridgePath: '/nonexistent/marble-mcp.js',
+    readDocument: async () => null,
+    publish: () => {},
+    limits: { maxRunning: 3, stallMs: 60_000, maxMs: 60_000, killGraceMs: 200 },
+    log: { log() {}, error() {} },
+  });
+  await runner.boot();
+
+  const { id } = await store.createConversation({ provider: 'slow-prepare' });
+  await store.appendInbox(id, store.createMessage({ from: 'somebody', to: id, text: 'left waiting' }));
+
+  // `send` doesn't return until `start` does, and `start` doesn't return until
+  // `prepare` does (300ms) — so cancel lands well before composePrompt() even
+  // runs, and composePrompt() runs (taking the inbox) before `start` next
+  // checks `turn.cancelled`. That is exactly the window the fix covers: the
+  // turn took the messages in composePrompt() but is cancelled before any
+  // process — and so any chance to act on them — exists.
+  const sending = runner.send(id, { prompt: 'x', context: { target: 'd' } });
+  const live = await until(() => (runner.running()[0] ? runner.running()[0] : null));
+  assert.equal(await runner.cancel(live.id), true);
+  await sending;
+  const turn = await finished(store, live.id);
+  assert.equal(turn.status, 'cancelled');
+
+  // The message must not be lost: finish() hands it back to the inbox, and
+  // the pending-inbox check right after queues a delivery turn for it.
+  const delivery = await until(async () => (await store.turns(id))[1] ?? null);
+  await finished(store, delivery.id);
+  const user = (await store.events(id)).filter((e) => e.type === 'user')[1];
+  assert.match(user.text, /left waiting/);
+  assert.deepEqual(await store.inbox(id), []);
+  await runner.close();
+});
+
+// --- Fix round 2 (whole-branch review): every taker of the inbox hands back
+// what it cannot act on, and a thread's hop follows the turn. ---
+
+test('a wait woken by the end of its turn hands its messages back instead of eating them', async () => {
+  const { store, runner } = await setupMessaging();
+  const a = await store.createConversation({ provider: 'fake' });
+  const b = await store.createConversation({ provider: 'fake' });
+  // Parked through the runner's own surface rather than by a scripted agent:
+  // the window this covers is the one finish() opens between `turn.waiter?.()`
+  // and its own inbox check, and a real process cannot be made to reach it on
+  // a schedule — the agent's MCP bridge holds its stdio open until the wait
+  // answers, so the child never closes while a wait is parked. What is left to
+  // pin down is the contract, and the turn below is the turn finish() hands to
+  // it: finishing, with a wait still parked on it.
+  const turn = { id: null, conversationId: a.id, target: 'd', sent: 0, project: { id: 'drive' }, waiter: null, finishing: false };
+  const parked = runner.wait(turn, 60);
+  await until(() => Boolean(turn.waiter));
+  await store.appendInbox(a.id, store.createMessage({ from: b.id, to: a.id, text: 'landed as the turn died' }));
+  // finish()'s order exactly: the turn is finishing, and then the wait wakes.
+  // Before the fix that wait took the message and answered a process already
+  // dying, so finish()'s inbox check found nothing and nobody ever read it.
+  turn.finishing = true;
+  turn.waiter();
+  assert.deepEqual(await parked, { timeout: true }, 'a dying turn is told nothing arrived');
+  assert.deepEqual(
+    (await store.inbox(a.id)).map((m) => m.text),
+    ['landed as the turn died'],
+    'the message is back in the inbox, for the delivery turn finish() queues next',
+  );
+  await runner.close();
+});
+
+test('removing the queued turn that would have carried the inbox still delivers it', async () => {
+  const { store, runner } = await setupMessaging({ limits: { maxRunning: 1 } });
+  const a = await store.createConversation({ provider: 'fake' });
+  const b = await store.createConversation({ provider: 'fake' });
+  const hog = await store.createConversation({ provider: 'fake' });
+  const busy = await runner.send(hog.id, { prompt: 'script:linger2', context: { target: 'd' } });
+  await until(() => runner.running().some((t) => t.conversationId === hog.id));
+  // The one slot is taken, so b's turn is queued and nothing of b's is
+  // running: that queued turn is the only thing that would have carried b's
+  // inbox in at start, and removing it used to strand the message forever.
+  const queued = await runner.send(b.id, { prompt: 'script:noop', context: { target: 'd' } });
+  assert.equal(queued.status, 'queued');
+  const asA = { conversationId: a.id, target: 'd', sent: 0, project: { id: 'drive' } };
+  assert.equal((await runner.deliver(asA, { to: b.id, text: 'do not strand me' })).delivered, 'inbox');
+  assert.equal(await runner.dequeue(queued.turnId), true);
+  await finished(store, busy.turnId);
+
+  const delivery = await until(async () => (await store.turns(b.id)).find((t) => t.id !== queued.turnId) ?? null);
+  await finished(store, delivery.id);
+  const carried = (await store.events(b.id)).filter((e) => e.type === 'user').find((e) => /do not strand me/.test(e.text));
+  assert.ok(carried, 'the removed turn did not take the message with it');
+  assert.equal((await store.turns(b.id)).length, 2, 'exactly one further turn');
+  assert.deepEqual(await store.inbox(b.id), []);
+  await runner.close();
+});
+
+test('a reply that never passes inReplyTo still counts against the hop cap', async () => {
+  const { store, runner } = await setupMessaging();
+  const a = await store.createConversation({ provider: 'fake' });
+  const b = await store.createConversation({ provider: 'fake' });
+  const asTurn = (conversationId, from = null) => ({ conversationId, target: 'd', sent: 0, project: { id: 'drive' }, from });
+  // a opens the thread with no parent at all: hop 0.
+  const opening = await runner.deliver(asTurn(a.id), { to: b.id, text: 'opening' });
+  assert.ok(opening.messageId, opening.error);
+  // From here on each side answers the message its own turn was started by,
+  // and never names it: the thread is carried on the turn (`turn.from`), so
+  // the count keeps going instead of restarting at 0 on every reply.
+  let parent = { conversation: a.id, messageId: opening.messageId, hop: 0 };
+  let me = b.id;
+  let to = a.id;
+  for (let hop = 1; hop <= MAX_HOP; hop++) {
+    const reply = await runner.deliver(asTurn(me, parent), { to, text: `reply ${hop}` });
+    assert.ok(reply.messageId, `hop ${hop} is allowed (${reply.error})`);
+    parent = { conversation: me, messageId: reply.messageId, hop };
+    [me, to] = [to, me];
+  }
+  const refused = await runner.deliver(asTurn(me, parent), { to, text: 'one too many' });
+  assert.match(refused.error, new RegExp(`${MAX_HOP} replies deep`));
+  await runner.close();
+});
+
+test('a conversation a message wakes for the first time is named after the sender', async () => {
+  const { store, runner } = await setupMessaging();
+  const a = await store.createConversation({ provider: 'fake' });
+  const b = await store.createConversation({ provider: 'fake' });
+  await store.updateConversation(a.id, { title: 'Ay' });
+  await store.updateConversation(b.id, { target: 'bees' });
+  const { turnId } = await runner.send(a.id, { prompt: 'script:sendone', context: { target: 'd' } });
+  await finished(store, turnId);
+  const bTurn = await until(async () => (await store.turns(b.id))[0] ?? null);
+  await finished(store, bTurn.id);
+  // Without this the store names the conversation after the first 60
+  // characters of the rendered message, which reads as a quotation of itself.
+  assert.equal((await store.conversation(b.id)).title, 'Message from Ay');
+  await runner.close();
+});
+
+test('a delivery turn that throws while starting leaves the message in the inbox', async () => {
+  const failing = { id: null };
+  const { store, runner } = await setupMessaging({
+    onPublish: (conversationId) => {
+      if (conversationId === failing.id) throw new Error('the host fell over mid-send');
+    },
+  });
+  const a = await store.createConversation({ provider: 'fake' });
+  const b = await store.createConversation({ provider: 'fake' });
+  await store.updateConversation(b.id, { target: 'bees' });
+  failing.id = b.id; // every event written for b now throws, so `send` does
+  const asA = { conversationId: a.id, target: 'd', sent: 0, project: { id: 'drive' } };
+  const result = await runner.deliver(asA, { to: b.id, text: 'still queued' });
+  assert.ok(result.messageId, result.error);
+  assert.equal(result.delivered, 'inbox', 'the sender is told it was queued, not handed a failure');
+  assert.deepEqual((await store.inbox(b.id)).map((m) => m.text), ['still queued'], 'the message is back in the inbox');
+  await runner.close();
+});
+
+test('a message for a conversation with a turn queued rides in on that turn', async () => {
+  const { store, runner, spawned } = await setupMessaging();
+  const a = await store.createConversation({ provider: 'fake' });
+  const b = await store.createConversation({ provider: 'fake' });
+  const first = await runner.send(b.id, { prompt: 'script:linger2', context: { target: 'd' } });
+  await until(() => runner.running().some((t) => t.conversationId === b.id));
+  const second = await runner.send(b.id, { prompt: 'script:noop', context: { target: 'd' } });
+  assert.equal(second.status, 'queued');
+  const asA = { conversationId: a.id, target: 'd', sent: 0, project: { id: 'drive' } };
+  assert.equal((await runner.deliver(asA, { to: b.id, text: 'read me when you get there' })).delivered, 'inbox');
+  await finished(store, first.turnId);
+  assert.equal((await finished(store, second.turnId, 20_000)).status, 'completed');
+
+  const message = (await store.events(b.id)).find((e) => e.type === 'message' && e.turn === second.turnId);
+  assert.equal(message.delivered, 'inbox');
+  assert.equal(message.text, 'read me when you get there');
+  const prompt = spawned.map((o) => o.prompt).find((p) => /read me when you get there/.test(p));
+  assert.match(prompt, /Messages that arrived while you were away/);
+  assert.equal((await store.turns(b.id)).length, 2, 'the queued turn carried it; no third turn');
+  assert.deepEqual(await store.inbox(b.id), []);
   await runner.close();
 });
 

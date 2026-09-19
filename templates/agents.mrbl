@@ -5518,6 +5518,13 @@ __ICON__
       focused?.focusInput?.();
     }
 
+    // A from-bubble's sender name opens that conversation, wherever the
+    // click happened to land — a pane, a tile, or the primary view.
+    document.addEventListener('marble-agent:open', (event) => {
+      const id = event.detail?.id;
+      if (id) open(id).catch(() => {});
+    });
+
     const playFlip = (first, ordered, { duration = FLIP_MS, stagger = STAGGER_MS } = {}) => {
       flipAnims = [];
       ordered.forEach((el, index) => {

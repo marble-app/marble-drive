@@ -146,6 +146,37 @@ stream (`/agent/events?all=1`) carries `event: ask` when one opens and
 `event: ask.resolved` when it closes, so a list can know without holding
 every conversation's stream. The Agents page's Deck is built on both.
 
+## Messages
+
+Agents in one project can talk to each other. Three tools, on every
+provider, through the bridge:
+
+- `list_agents` — the other non-archived conversations in this project, with
+  what each is doing: `idle`, `queued`, `running`, `waiting` (parked in
+  `wait_for_reply`) or `asking`.
+- `send_message { to, text, about?, inReplyTo? }` — text up to 4000
+  characters, optionally about a document and some ids. Returns the message
+  id and how it was delivered: `turn` (the receiver was idle and its turn
+  started), `live` (the receiver was waiting and got it at once) or `inbox`
+  (the receiver is busy and reads it when its turn ends).
+- `wait_for_reply { seconds? }` — waits up to 300 s (default 120) for
+  messages. A timeout is a plain `{ timeout: true }`: nothing yet.
+
+The inbox (`<conversation>/inbox.jsonl`) is the one queue. Whatever turn
+starts next on that conversation takes it — a queued turn, a turn the
+message itself starts, or a delivery turn the runner queues when a turn ends
+with messages waiting. A host that restarts with messages waiting delivers
+them at boot. A turn that a message started works in the receiver's own
+document, else the document the message is about, else the sender's.
+
+Caps: 12 sends per turn, 8 replies per thread, same project only, never to
+yourself or an archived conversation. Delivery turns take ordinary
+`maxRunning` slots. Nothing here asks the person: a message never raises
+Needs you, and the Agents page shows it as a bubble naming the sender, whose
+name opens that conversation.
+
+Design: [`superpowers/specs/2026-09-18-agent-messaging-design.md`](superpowers/specs/2026-09-18-agent-messaging-design.md).
+
 ## What the watchdog is for
 
 A `documents` agent writes only through ops, so a document changing on disk
@@ -160,6 +191,7 @@ itself, so the same disk change is recorded as that turn's work
 .marble/agents/settings.json
 .marble/agents/<conversation>/meta.json
 .marble/agents/<conversation>/events.jsonl
+.marble/agents/<conversation>/inbox.jsonl  messages waiting for the next turn
 .marble/agents/<conversation>/turns/<turn>.json
 .marble/agents/<conversation>/turns/<turn>.undo.json
 .marble/agents/<conversation>/raw/<turn>.jsonl

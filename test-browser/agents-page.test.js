@@ -14,6 +14,11 @@ const SCRIPTS = {
   ],
   permission: [{ ask: { tool: 'Bash', input: { command: 'ls' } } }, { say: 'after' }],
   answer: [{ say: 'Just an answer.' }],
+  sendone: [
+    { call: 'list_agents', args: {}, as: 'peers' },
+    { call: 'send_message', args: { to: { $ref: 'peers.agents.0.id' }, text: 'ping from a' }, as: 'sent' },
+    { say: 'sent' },
+  ],
 };
 
 const AGENTS_TEMPLATE = path.join(path.dirname(fileURLToPath(import.meta.url)), '..', 'templates', 'agents.mrbl');
@@ -1242,4 +1247,28 @@ test('a card changing column animates into place', async () => {
   await page.evaluate((cid) => window.marble.agent.send(cid, { prompt: 'script:answer', target: 'garden', viewing: 'Agents', selection: [] }), id);
   const duration = await moved;
   assert.ok(duration > 0 && duration <= 420, `column move animates (${duration}ms)`);
+});
+
+test('a message from another agent renders as a from-bubble that opens the sender', async () => {
+  const { page, errors } = await openAgents();
+  const ids = await page.evaluate(async () => {
+    const agent = window.marble.agent;
+    const a = await agent.start({ provider: 'fake' });
+    const b = await agent.start({ provider: 'fake' });
+    await agent.update(a, { title: 'Sender' });
+    await agent.send(a, { prompt: 'script:sendone', target: 'garden', viewing: 'Agents', selection: [] });
+    return { a, b };
+  });
+  // Open b once its turn exists; the delivery turn's user event carries `from`.
+  await page.locator(`.conv[data-id="${ids.b}"]`).waitFor();
+  await page.locator(`.conv[data-id="${ids.b}"]`).click();
+  const bubble = page.locator('marble-conversation .msg.me.from-agent').first();
+  await bubble.waitFor({ timeout: 15_000 });
+  assert.match(await bubble.locator('.from').textContent(), /Sender/);
+  assert.match(await bubble.locator('.msg-text').textContent(), /ping from a/);
+  await bubble.locator('.from').click();
+  await page.waitForFunction((id) => document.querySelector('marble-conversation')?.getAttribute('conversation') === id, ids.a);
+  const sent = page.locator('marble-conversation .system', { hasText: /Sent to/ }).first();
+  await sent.waitFor();
+  assert.deepEqual(errors, []);
 });

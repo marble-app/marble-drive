@@ -1372,6 +1372,14 @@
       white-space: pre-wrap; border: 1px solid var(--line);
     }
     .msg.me:first-child { margin-top: 4px; }
+    /* A bubble that another agent wrote, not the person: same paper, marked
+       down its edge so the transcript reads as one column with a visible
+       seam where someone else spoke. */
+    .msg.me.from-agent { border-left: 2px solid var(--accent-ink); }
+    /* The whole row opens the sending conversation, not just the name in it. */
+    .msg.me .from { display: block; font-size: 12px; color: var(--muted); margin-bottom: 2px; cursor: pointer; }
+    .msg.me .from button { all: unset; cursor: pointer; text-decoration: underline; text-decoration-color: var(--line); }
+    .msg.me .from button:hover { color: var(--ink); }
     .msg.agent { align-self: stretch; color: var(--ink); padding: 2px 2px 10px; }
     .msg.agent.live { color: var(--muted); white-space: pre-wrap; }
     .msg.agent p { margin: 0 0 .5em; } .msg.agent p:last-child { margin-bottom: 0; }
@@ -3447,9 +3455,24 @@
 
     /** What a sent message looks like: its attachments as the cards they were,
      *  then whatever the person actually typed around them. */
-    userMessage(text) {
+    userMessage(text, from = null) {
       const { blocks, rest } = splitPasted(text);
       const node = h('div', 'msg me');
+      if (from) {
+        node.classList.add('from-agent');
+        const who = h('span', 'from');
+        const open = h('button', '', from.title || from.conversation);
+        open.type = 'button';
+        open.title = 'Open that conversation';
+        // The button carries the name for a11y (focusable, reads as a label),
+        // but the whole row is the click target: a block-level "From" line is
+        // wider than its text, and a click past the name should still open it.
+        who.addEventListener('click', () => {
+          this.dispatchEvent(new CustomEvent('marble-agent:open', { bubbles: true, composed: true, detail: { id: from.conversation } }));
+        });
+        who.append('From ', open);
+        node.append(who);
+      }
       const items = blocks.map((block) => ({
         kind: block.kind,
         name: block.name || (block.kind === 'image' ? 'Pasted image' : 'Pasted text'),
@@ -3534,11 +3557,11 @@
             this.meta = {
               ...(this.meta ?? {}),
               target: event.context?.target ?? this.meta?.target,
-              title: this.meta?.title || said.trim().slice(0, 60),
+              title: this.meta?.title || (event.from ? `From ${event.from.title || event.from.conversation}` : said.trim().slice(0, 60)),
             };
             this.paintMast();
           }
-          this.append(turn, this.userMessage(event.text));
+          this.append(turn, this.userMessage(event.text, event.from ?? null));
           break;
         }
         case 'turn.queued':
@@ -3599,6 +3622,13 @@
           break;
         case 'handoff':
           this.system(event.from ? 'Continued from an earlier conversation.' : 'Continued in a new conversation.');
+          break;
+        case 'message':
+          this.endLive();
+          this.append(turn, this.userMessage(event.text, { conversation: event.from, title: event.fromTitle }));
+          break;
+        case 'message.sent':
+          this.system(`Sent to ${event.toTitle || event.to}${event.delivered === 'turn' ? ' — started their turn' : event.delivered === 'live' ? ' — they were waiting' : ' — they will read it when their turn ends'}`);
           break;
         default:
       }
