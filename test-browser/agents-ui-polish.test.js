@@ -404,3 +404,79 @@ test('dragging onto the stage previews a column, not the whole stage', async () 
     `the drop preview is ${Math.round(preview.slot.w)}px wide against a ${Math.round(preview.stageW)}px stage — it covers the whole thing`,
   );
 });
+
+// ------------------------------------------------------------ one title each
+
+/** A dock used to name every conversation twice: 12.5px in the bar and 15px in
+ *  the mast right beneath it, the lower one larger. The heading wins, because
+ *  it is the one you can type in. */
+test('a docked pane names itself once — the heading, not the bar', async () => {
+  const { page } = await openAgents();
+  await openTwoPanes(page);
+
+  const shot = await page.evaluate(() => {
+    const px = (el, prop) => (el ? parseFloat(getComputedStyle(el)[prop]) : null);
+    const shown = (el) => Boolean(el)
+      && getComputedStyle(el).display !== 'none'
+      && el.getBoundingClientRect().width > 0;
+    return {
+      bars: [...document.querySelectorAll('.dock-bar')].map((bar) => {
+        const title = bar.querySelector('.dock-title');
+        return { shown: shown(title), text: (title?.textContent ?? '').trim() };
+      }),
+      headings: [...document.querySelectorAll('marble-conversation[data-chrome="tile"]')].map((convo) => {
+        const heading = convo.shadowRoot.querySelector('.heading');
+        return {
+          shown: shown(heading),
+          text: (heading?.textContent ?? '').trim(),
+          size: px(heading, 'fontSize'),
+        };
+      }),
+    };
+  });
+
+  assert.equal(shot.headings.length, 2, 'expected two tile-chrome panes');
+  for (const heading of shot.headings) {
+    assert.ok(heading.shown, 'a docked pane hid its heading');
+    assert.ok(heading.text.length > 0, 'a docked pane had an empty heading');
+    assert.ok(heading.size <= 13.01, `a docked heading is ${heading.size}px — 13px or smaller was asked for`);
+  }
+  const named = shot.bars.filter((bar) => bar.shown && bar.text.length > 0);
+  assert.deepEqual(
+    named,
+    [],
+    `${named.length} of ${shot.bars.length} bars still carry a title beside the heading: ${JSON.stringify(named)}`,
+  );
+});
+
+/** A lone pane has no heading — the `pane` chrome rule hides it — so its bar is
+ *  the only thing naming it and keeps the title. Smaller, not gone. */
+test('a lone pane keeps its bar title, and it is smaller', async () => {
+  const { page } = await openAgents();
+  await page.evaluate(async () => {
+    const agent = window.marble.agent;
+    const id = await agent.start({ provider: 'fake' });
+    await agent.update(id, { title: 'the only chat' });
+  });
+  await page.locator('#list .conv').first().click();
+  await page.locator('.pane > marble-conversation[conversation]').waitFor();
+  await page.locator('.pane > .dock-bar .dock-title').waitFor();
+  await page.waitForTimeout(300);
+
+  const shot = await page.evaluate(() => {
+    const bar = document.querySelector('.pane > .dock-bar .dock-title');
+    const convo = document.querySelector('.pane > marble-conversation[conversation]');
+    const heading = convo?.shadowRoot?.querySelector('.heading');
+    return {
+      barText: (bar?.textContent ?? '').trim(),
+      barShown: Boolean(bar) && getComputedStyle(bar).display !== 'none',
+      barSize: bar ? parseFloat(getComputedStyle(bar).fontSize) : null,
+      headingShown: Boolean(heading) && getComputedStyle(heading).display !== 'none',
+    };
+  });
+
+  assert.ok(shot.barShown, 'a lone pane hid the one title it has');
+  assert.match(shot.barText, /\S/, 'a lone pane had an empty bar title');
+  assert.ok(shot.barSize <= 11.51, `a lone bar title is ${shot.barSize}px — 11.5px or smaller was asked for`);
+  assert.ok(!shot.headingShown, 'a lone pane showed a heading as well as its bar title');
+});

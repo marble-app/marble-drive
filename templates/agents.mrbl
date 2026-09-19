@@ -1070,9 +1070,19 @@ __ICON__
   .dock-bar.marble-drop-swap { background: var(--accent-soft); box-shadow: inset 0 0 0 1px var(--accent); }
   .dock-grip { flex: none; color: var(--faint); }
   .dock-title {
-    flex: 1 1 auto; min-width: 6rem; font-size: 12.5px; font-weight: 500; letter-spacing: -.01em;
+    flex: 1 1 auto; min-width: 6rem; font-size: 11.5px; font-weight: 500; letter-spacing: -.01em;
     overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
   }
+  /* One title per pane. A lone pane has no mast heading — the conversation's
+     `pane` chrome hides it — so the bar is the only thing naming it. In a dock
+     the heading comes back, and a bar title beside it names the same
+     conversation twice, the lower one larger. The heading wins there: it is
+     the one you can type in, and a bar-only title would cost renaming a chat
+     from its pane. `data-titles` carries the dock's own chrome, so the
+     condition here is exactly the one that governs the heading — and not
+     `data-dock="tree"`, which a drag's ghost sets while the dock still holds
+     one pane, and which would leave that pane with no title at all. */
+  .pane[data-titles="tile"] .dock-title { display: none; }
   .dock-target {
     flex: 0 1 auto; max-width: 9rem; min-width: 2rem; font-size: 11.5px; color: var(--accent-ink);
     overflow: hidden; text-overflow: ellipsis; white-space: nowrap; text-decoration: none;
@@ -4880,6 +4890,12 @@ __ICON__
       mark(pane.querySelector(':scope > .dock-bar'), primaryOn);
       convo.setAttribute('data-focused', String(primaryOn));
       convo.setAttribute('data-chrome', chrome);
+      // Whether a bar carries a title is the same question as whether the mast
+      // shows a heading, so the stage wears the answer and the CSS reads it
+      // once. Every bar in a dock is governed together — hiding the title in
+      // the frames alone would leave the dock named in the primary's bar and
+      // nowhere else.
+      pane.setAttribute('data-titles', chrome);
       // `extra.el` is the chat itself; its card and bar are the leaf's.
       dock.extras.forEach((extra, index) => {
         const on = dock.focus === index;

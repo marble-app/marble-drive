@@ -1358,7 +1358,11 @@
     :host([data-focused="false"]) .log { filter: saturate(.85); }
     :host([data-focused]) .log { transition: filter 200ms var(--settle); }
     :host([data-focused]) .mast, :host([data-focused]) .composer { transition: background-color 200ms var(--settle); }
-    .heading { margin: 0; font: 500 15px/1.3 inherit; letter-spacing: -.015em; outline: none; min-height: 1.3em; border-radius: 6px; padding: 2px 4px; margin-left: -4px; }
+    /* Longhands, not the font shorthand: "inherit" is a CSS-wide keyword and
+       cannot stand in for one component of it, so "font: 500 15px/1.3 inherit"
+       was dropped whole and this h2 rendered at the UA's 1.5em bold — 21px,
+       which is what read as "the title is too big". */
+    .heading { margin: 0; font-weight: 500; font-size: 13px; line-height: 1.3; letter-spacing: -.015em; outline: none; min-height: 1.3em; border-radius: 6px; padding: 2px 4px; margin-left: -4px; }
     .heading:hover { background: var(--paper-2); }
     .heading:focus { background: var(--card); box-shadow: 0 0 0 1px var(--accent), 0 0 0 4px var(--accent-soft); }
     .tags { display: flex; flex-wrap: wrap; gap: 4px; }
