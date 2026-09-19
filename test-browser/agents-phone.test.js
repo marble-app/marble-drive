@@ -89,7 +89,7 @@ test('Deck: an asking conversation is a card in NEEDS YOU with a peek; Allow ans
   });
   const card = page.locator('.deck [data-band="asks"] .deck-ask');
   await card.waitFor();
-  assert.match(await card.locator('.deck-ask-title').textContent(), /script:permission|Untitled/);
+  assert.match(await card.locator('.deck-ask-title').textContent(), /script:permission|New Chat/);
   assert.match(await card.locator('.deck-peek').textContent(), /rm -rf build/);
   assert.match(await page.locator('.deck [data-band="asks"] .band-count').textContent(), /1/);
   await card.locator('button.allow').click();

@@ -161,36 +161,27 @@
         inset: 0;
         pointer-events: none;
         z-index: 2147483000;
+        /* An agent is not a feature of the app it is working in, so its frame
+           does not borrow the document's accent — a box in the app's own colour
+           reads as a piece of the app. One violet, the same on every document,
+           outside the vocabulary every accent here is drawn from (muted blue,
+           sage, terracotta, gold): someone else's hands, not a control.
+
+           Dark mode here is per-document, not per-OS, so the violet is carried
+           toward the document's own ink — darker on light paper, lighter on
+           dark, the same hue either way. */
+        --zone-mark: color-mix(in srgb, #6d55d4 78%, var(--ink, #111));
+        --zone-fill: color-mix(in srgb, var(--zone-mark) 12%, transparent);
       }
       .marble-zone {
-        --zone-mark: color-mix(in srgb, var(--accent, #9bb6cf) 72%, var(--ink, #111));
-        --zone-arm: 15px;
-        --zone-hair: 1.5px;
         position: fixed;
+        /* The wash is over the work, and the work is still yours: nothing in the
+           frame takes a click. Only the label does. */
         pointer-events: none;
         box-sizing: border-box;
-        border: 0;
-        background-color: transparent;
-        background-image:
-          linear-gradient(var(--zone-mark), var(--zone-mark)),
-          linear-gradient(var(--zone-mark), var(--zone-mark)),
-          linear-gradient(var(--zone-mark), var(--zone-mark)),
-          linear-gradient(var(--zone-mark), var(--zone-mark)),
-          linear-gradient(var(--zone-mark), var(--zone-mark)),
-          linear-gradient(var(--zone-mark), var(--zone-mark)),
-          linear-gradient(var(--zone-mark), var(--zone-mark)),
-          linear-gradient(var(--zone-mark), var(--zone-mark));
-        background-size:
-          var(--zone-arm) var(--zone-hair), var(--zone-hair) var(--zone-arm),
-          var(--zone-arm) var(--zone-hair), var(--zone-hair) var(--zone-arm),
-          var(--zone-arm) var(--zone-hair), var(--zone-hair) var(--zone-arm),
-          var(--zone-arm) var(--zone-hair), var(--zone-hair) var(--zone-arm);
-        background-position:
-          top left, top left,
-          top right, top right,
-          bottom left, bottom left,
-          bottom right, bottom right;
-        background-repeat: no-repeat;
+        border: 1.5px solid var(--zone-mark);
+        border-radius: 10px;
+        background-color: var(--zone-fill);
         animation: marble-fade-in 220ms ${EASE} both;
         transition:
           top 180ms ${EASE},
@@ -198,27 +189,29 @@
           width 180ms ${EASE},
           height 180ms ${EASE};
       }
+      /* The label belongs to the box, so it is made of the box: same colour, a
+         pill hung off its bottom-left corner. It used to be bare text kept
+         legible by a paper text-shadow, which floated free of anything. */
       .marble-zone-label {
         pointer-events: auto;
         position: absolute;
-        left: 0;
+        left: -1.5px;
         top: 100%;
-        margin-top: 8px;
+        margin-top: 6px;
         display: flex;
         align-items: center;
-        gap: .55rem;
-        max-width: min(100%, 28rem);
-        padding: 0;
-        border: 0;
-        background: none;
-        color: color-mix(in srgb, var(--ink, #111) 82%, var(--paper, #fff));
+        gap: .45rem;
+        max-width: min(calc(100% + 3px), 30rem);
+        padding: .26rem .5rem .26rem .58rem;
+        border: 1px solid color-mix(in srgb, var(--zone-mark) 34%, transparent);
+        border-radius: 999px;
+        background: color-mix(in srgb, var(--zone-mark) 12%, var(--paper, #fff));
+        color: color-mix(in srgb, var(--zone-mark) 62%, var(--ink, #111));
+        box-shadow: 0 1px 3px color-mix(in srgb, var(--ink, #111) 12%, transparent);
         font: 500 12px/1.2 var(--ui-font, system-ui, sans-serif);
         letter-spacing: -.012em;
         white-space: nowrap;
         user-select: none;
-        text-shadow:
-          0 0 10px var(--paper, #fff),
-          0 0 10px var(--paper, #fff);
       }
       .marble-zone-label span:not(.marble-zone-live) {
         overflow: hidden;
@@ -229,7 +222,7 @@
         height: 7px;
         border-radius: 50%;
         flex: none;
-        background: var(--zone-mark, color-mix(in srgb, var(--accent, #9bb6cf) 72%, var(--ink, #111)));
+        background: var(--zone-mark, #6d55d4);
         animation: marble-zone-breathe 2.8s ease-in-out infinite;
       }
       @keyframes marble-zone-breathe {
@@ -238,49 +231,45 @@
       }
       .marble-zone-tight > .marble-zone-label {
         top: auto;
-        bottom: 2px;
+        bottom: 4px;
         margin-top: 0;
       }
-      .marble-zone-page {
-        top: 20px;
-        left: 50%;
-        transform: translateX(-50%);
-        width: max-content;
-        max-width: min(28rem, calc(100vw - 32px));
-        height: auto;
-        background-image: none;
+      .marble-zone-label button {
+        appearance: none;
+        border: 0;
+        background: none;
+        color: color-mix(in srgb, var(--zone-mark) 52%, var(--ink, #111));
+        cursor: pointer;
+        font: inherit;
+        letter-spacing: inherit;
+        padding: .12rem .34rem;
+        border-radius: 999px;
+        flex: none;
       }
-      .marble-zone-page > .marble-zone-label {
-        position: static;
-        max-width: none;
-        margin: 0;
+      /* One hairline between what the zone says and what you can do about it. */
+      .marble-zone-label button:first-of-type {
+        margin-left: .18rem;
+        border-left: 1px solid color-mix(in srgb, var(--zone-mark) 26%, transparent);
+        border-radius: 0 999px 999px 0;
+        padding-left: .44rem;
       }
-      .marble-zone-label button,
+      .marble-zone-label button:hover {
+        color: var(--zone-mark);
+        background: color-mix(in srgb, var(--zone-mark) 16%, transparent);
+      }
+      .marble-zone-label button:active { opacity: .7; }
+      .marble-zone-label button:focus-visible {
+        outline: 2px solid var(--zone-mark);
+        outline-offset: 2px;
+      }
+      /* Nothing is on the page to belong to, so this stays what it was:
+         quiet text in the corner, kept legible by a halo of paper. */
       .marble-zones-show {
         appearance: none;
         border: 0;
         background: none;
-        color: color-mix(in srgb, var(--ink, #111) 52%, var(--paper, #fff));
-        cursor: pointer;
-        font: inherit;
-        letter-spacing: inherit;
         padding: .35rem .15rem;
-        border-radius: 0;
-        flex: none;
-        text-shadow: inherit;
-      }
-      .marble-zone-label button:hover,
-      .marble-zones-show:hover {
-        color: color-mix(in srgb, var(--ink, #111) 88%, var(--paper, #fff));
-      }
-      .marble-zone-label button:active,
-      .marble-zones-show:active { opacity: .7; }
-      .marble-zone-label button:focus-visible,
-      .marble-zones-show:focus-visible {
-        outline: 2px solid var(--accent, #9bb6cf);
-        outline-offset: 3px;
-      }
-      .marble-zones-show {
+        cursor: pointer;
         position: fixed;
         top: 20px;
         right: 20px;
@@ -293,6 +282,14 @@
           0 0 10px var(--paper, #fff),
           0 0 10px var(--paper, #fff);
         animation: marble-fade-in 220ms ${EASE} both;
+      }
+      .marble-zones-show:hover {
+        color: color-mix(in srgb, var(--ink, #111) 92%, var(--paper, #fff));
+      }
+      .marble-zones-show:active { opacity: .7; }
+      .marble-zones-show:focus-visible {
+        outline: 2px solid var(--zone-mark, #6d55d4);
+        outline-offset: 3px;
       }
 
       @media (prefers-reduced-motion: reduce) {
@@ -313,7 +310,8 @@
       @media (prefers-reduced-transparency: reduce) {
         .marble-fork-seg { background: var(--paper-2, #f3f1ea); }
         .marble-presence { background-color: color-mix(in srgb, var(--accent, #9bb6cf) 28%, transparent); }
-        .marble-zone-label,
+        /* The wash goes; the box stays. Where the agent is must still be said. */
+        .marble-zone { background-color: transparent; }
         .marble-zones-show { text-shadow: none; }
       }
     `;
@@ -417,6 +415,70 @@
       return 'Agent · working';
     }
 
+    // A zone is drawn by a client named `agent:<conversation>`; an undo writes
+    // as `agent-undo:<conversation>` and draws none, so only the first form is
+    // ever a chat you could be taken to.
+    const conversationOf = (client) => {
+      const name = String(client ?? '');
+      return name.startsWith('agent:') ? name.slice('agent:'.length) || null : null;
+    };
+
+    // Where a conversation is read depends on where you are standing. A page
+    // that hosts its own conversation UI says so with this meta — it is the
+    // same flag that keeps the dock from mounting there — and already listens
+    // for `marble-agent:open` to put a chat on its stage. Everywhere else, the
+    // dock on the right is the place a conversation opens.
+    const hostsConversations = () =>
+      Boolean(document.querySelector('meta[name="marble-agent"][content="custom"]'));
+
+    function openConversation(id) {
+      if (!id) return;
+      if (hostsConversations()) {
+        document.dispatchEvent(new CustomEvent('marble-agent:open', { bubbles: true, composed: true, detail: { id } }));
+        return;
+      }
+      marble.agent?.open?.(id);
+    }
+
+    // The other direction: a conversation pointing back at its zone. A document
+    // that builds its own body from script has none of these ids at first
+    // paint, so this keeps looking for a beat before giving up.
+    function jumpTo(ids) {
+      let tries = 0;
+      const land = () => {
+        const targets = ids.map(byId).filter(Boolean);
+        if (!targets.length) {
+          if (tries++ < 20) setTimeout(land, 150);
+          return;
+        }
+        (tapeTarget(targets) ?? targets[0]).scrollIntoView({
+          block: 'center',
+          behavior: reducedMotion() ? 'auto' : 'smooth',
+        });
+        for (const el of targets) flash(marble.id(el));
+      };
+      land();
+    }
+
+    // The conversation was reading another document, so getting here was a
+    // navigation, and the ids rode in the hash.
+    function jumpToHash() {
+      const match = /^#at=(.+)$/.exec(location.hash);
+      if (!match) return;
+      const ids = match[1].split(',').map(decodeURIComponent).filter(Boolean);
+      // The hash is an instruction, not an address: it is spent on arrival.
+      history.replaceState(null, '', location.pathname + location.search);
+      jumpTo(ids);
+    }
+    jumpToHash();
+    addEventListener('hashchange', jumpToHash);
+    // Already on the document: the conversation asks for the scroll directly,
+    // rather than leaving a hash in the history to get back past.
+    addEventListener('marble:jump-to', ({ detail }) => {
+      const ids = (detail?.ids ?? []).map(String).filter(Boolean);
+      if (ids.length) jumpTo(ids);
+    });
+
     const zoneLayer = document.createElement('div');
     zoneLayer.className = 'marble-zone-layer';
     zoneLayer.setAttribute(TRANSIENT, '');
@@ -445,16 +507,30 @@
       frame.classList.toggle('marble-zone-tight', r.bottom > innerHeight - 40);
     }
 
+    // A zone points: it says the work is *here*. Work with nothing to point at —
+    // no ids, ids that are not on this page, or a spread so wide the only
+    // element containing it is the body — used to become a banner floating over
+    // the top of the page, which is not a zone but an ambient status line, and
+    // one the app's own chrome (the agent rows, the dock) already carries. No
+    // target, no zone.
+    function zonesToPaint() {
+      const zones = [];
+      for (const detail of presence.values()) {
+        if (!isAgent(detail.client)) continue;
+        const target = tapeTarget((detail.ids ?? []).map((id) => byId(id)).filter(Boolean));
+        if (target) zones.push({ detail, target });
+      }
+      return zones;
+    }
+
     function paintZones() {
       placed = [];
       sizes?.disconnect();
       zoneLayer.replaceChildren();
-      const live = [...presence.values()].filter((detail) => (
-        isAgent(detail.client) && (detail.ids?.length || detail.phase)
-      ));
+      const zones = zonesToPaint();
       const hidden = zonesHidden();
       document.documentElement.classList.toggle('marble-zones-off', hidden);
-      if (!live.length) {
+      if (!zones.length) {
         showWork.hidden = true;
         return;
       }
@@ -463,32 +539,41 @@
         return;
       }
       showWork.hidden = true;
-      for (const detail of live) {
-        const els = (detail.ids ?? []).map((id) => byId(id)).filter(Boolean);
-        const target = tapeTarget(els);
+      for (const { detail, target } of zones) {
         const frame = document.createElement('div');
-        frame.className = target ? 'marble-zone' : 'marble-zone marble-zone-page';
+        frame.className = 'marble-zone';
         frame.setAttribute(TRANSIENT, '');
         const label = document.createElement('div');
         label.className = 'marble-zone-label';
-        const live = document.createElement('span');
-        live.className = 'marble-zone-live';
-        live.setAttribute('aria-hidden', 'true');
+        const dot = document.createElement('span');
+        dot.className = 'marble-zone-live';
+        dot.setAttribute('aria-hidden', 'true');
         const text = document.createElement('span');
         text.textContent = phaseLabel(detail);
+        label.append(dot, text);
+        // Saying work is happening and giving you nowhere to go with that is
+        // half a signal. The zone knows which conversation drew it, so it can
+        // hand you the chat.
+        const conversation = conversationOf(detail.client);
+        if (conversation) {
+          const open = document.createElement('button');
+          open.type = 'button';
+          open.textContent = 'Open chat';
+          open.setAttribute('aria-label', 'Open the conversation working here');
+          open.addEventListener('click', () => openConversation(conversation));
+          label.append(open);
+        }
         const hide = document.createElement('button');
         hide.type = 'button';
         hide.textContent = 'Hide';
         hide.setAttribute('aria-label', 'Hide construction zone');
         hide.addEventListener('click', () => setZonesHidden(true));
-        label.append(live, text, hide);
+        label.append(hide);
         frame.append(label);
         zoneLayer.append(frame);
-        if (target) {
-          place(frame, target);
-          placed.push({ frame, target });
-          sizes?.observe(target);
-        }
+        place(frame, target);
+        placed.push({ frame, target });
+        sizes?.observe(target);
       }
     }
 
@@ -522,12 +607,36 @@
     document.addEventListener('marble:presence', ({ detail }) => {
       if (!detail?.client) return;
       const ids = Array.isArray(detail.ids) ? detail.ids : [];
-      const live = ids.length || (isAgent(detail.client) && detail.phase);
-      if (live) presence.set(detail.client, { ...detail, ids });
+      // Ids are the whole of it now: an agent that names none has no zone to
+      // draw, and keeping it here would only be state nothing reads.
+      if (ids.length) presence.set(detail.client, { ...detail, ids });
       else presence.delete(detail.client);
       paintPresence();
       paintZones();
     });
+
+    // A presence frame is broadcast once, to whoever was listening. This file
+    // is the last of several script tags, and the stream is opened in the
+    // first — so a page that opens while an agent is mid-turn can have missed
+    // the frame before this listener existed. Which is exactly the page a
+    // conversation's "take me to the work" opens. So ask.
+    if (marble.app) {
+      fetch(`/presence?app=${encodeURIComponent(marble.app)}`, { cache: 'no-store' })
+        .then((r) => (r.ok ? r.json() : null))
+        .then((body) => {
+          let landed = false;
+          for (const frame of body?.frames ?? []) {
+            // Anything that arrived while this was in flight is newer.
+            if (!frame?.client || presence.has(frame.client) || !frame.ids?.length) continue;
+            presence.set(frame.client, frame);
+            landed = true;
+          }
+          if (landed) paintZones();
+        })
+        .catch(() => {
+          // No standing zone is the same answer as a host that cannot say.
+        });
+    }
 
     // The page reflows under a zone whenever anyone types — and the person's
     // own edits never come back as ops or presence — so the page itself is

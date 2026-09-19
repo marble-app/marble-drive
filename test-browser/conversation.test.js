@@ -4,7 +4,7 @@ import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
 
-import { startDrive } from './harness.js';
+import { GARDEN, startDrive } from './harness.js';
 
 const SCRIPTS = {
   rename: [
@@ -22,6 +22,20 @@ const SCRIPTS = {
     { say: 'It was refused.' },
   ],
   choice: [{ say: 'Two ways to lay this out. Which do you want?\n\nA) Side by side\nB) Stacked' }],
+  // A write, then a pause: long enough to read the construction zone the write
+  // drew, and the row in the mast that points at it.
+  building: [
+    { call: 'read_document', args: { path: 'garden' } },
+    { call: 'apply_ops', args: { path: 'garden', note: 'rename the heading', ops: [{ type: 'setText', id: 'h', text: 'Backlog' }] } },
+    { sleep: 2000 },
+    { say: 'done' },
+  ],
+  elsewhere: [
+    { call: 'read_document', args: { path: 'atlas' } },
+    { call: 'apply_ops', args: { path: 'atlas', note: 'rename the heading', ops: [{ type: 'setText', id: 'h', text: 'Backlog' }] } },
+    { sleep: 6000 },
+    { say: 'done' },
+  ],
   tools: [
     { tool: 'Bash', input: { command: 'node --test test/agent-runner.test.js', description: 'Run the runner tests' } },
     { tool: 'Read', input: { file_path: '/Users/x/marble-drive/test-browser/harness.js' } },
@@ -31,9 +45,27 @@ const SCRIPTS = {
     { tool: 'Edit', input: { file_path: '/Users/x/marble-drive/runtime/agent-ui.js' } },
     { say: 'Six calls later.' },
   ],
+  // One command somebody refused and one that merely fell over. They arrive
+  // the same way; the drawer has to tell them apart.
+  refusals: [
+    {
+      tool: 'Bash',
+      input: { command: 'grep -rn usage server', description: 'Find the usage wiring' },
+      ok: false,
+      denied: true,
+      summary: 'Permission for this action was denied by the Claude Code auto mode classifier. Reason: [Credential Exploration].',
+    },
+    {
+      tool: 'Bash',
+      input: { command: 'node /tmp/repro.mjs', description: 'Reproduce the crash' },
+      ok: false,
+      summary: "Exit code 1\nError [ERR_MODULE_NOT_FOUND]: Cannot find package 'playwright'",
+    },
+    { say: 'One refused, one broken.' },
+  ],
 };
 
-const host = await startDrive({ scripts: SCRIPTS });
+const host = await startDrive({ scripts: SCRIPTS, documents: { garden: GARDEN, atlas: GARDEN } });
 test.after(() => host.close());
 
 /** A page with a bare <marble-conversation> in it — the drawer is not needed to test the view. */
@@ -439,6 +471,456 @@ test('unavailable Claude usage prefers Cursor and disables Claude presets', asyn
   assert.equal(flags.grokDisabled, false);
 });
 
+// A meter the host could not fetch at all is not a meter that says zero left.
+// When the CLI keeps its login somewhere the host cannot read, the strip has
+// no Claude slider — and that used to grey out every Claude model, leaving a
+// signed-in person with nothing to pick.
+test('a signed-in Claude with no usage meter keeps its models pickable', async () => {
+  const { view } = await mount();
+  await view.locator('input[name="agent"][value="fake"]').waitFor();
+  const flags = await view.evaluate(async (el) => {
+    el.providerList = [
+      {
+        id: 'claude-subscription',
+        label: 'Claude',
+        installed: true,
+        signedIn: true,
+        default: true,
+        models: [{ id: 'sonnet', label: 'Sonnet 5' }, { id: 'opus', label: 'Opus 5' }, { id: 'fable', label: 'Fable 5.1' }],
+        efforts: ['high', 'xhigh'],
+        modes: [{ id: 'default', label: 'Default' }],
+      },
+    ];
+    el.usageMeters = [];
+    await el.loadChrome();
+    el.usageMeters = [];
+    const usable = el.providerList.filter((item) => item.installed && item.signedIn);
+    el.fillAgents(el.preferredProvider(usable)?.id);
+    await el.syncCatalog();
+    el.paintPresets({ initial: true });
+    const presets = [...el.shadowRoot.querySelectorAll('input[name="preset"]')];
+    return {
+      preferred: el.preferredProvider(usable)?.id,
+      claudeDisabled: el.shadowRoot.querySelector('input[name="agent"][value="claude-subscription"]')?.disabled ?? false,
+      presetIds: presets.map((input) => input.value),
+      disabledPresets: presets.filter((input) => input.disabled).map((input) => input.value),
+      disabledModels: [...el.shadowRoot.querySelectorAll('input[name="model"]')]
+        .filter((input) => input.disabled).map((input) => input.value),
+    };
+  });
+  assert.equal(flags.preferred, 'claude-subscription');
+  assert.equal(flags.claudeDisabled, false);
+  assert.ok(flags.presetIds.includes('sonnet-high'), `expected Claude presets, got ${flags.presetIds.join(',')}`);
+  assert.deepEqual(flags.disabledPresets, []);
+  assert.deepEqual(flags.disabledModels, []);
+});
+
+/** Two conversations side by side in one page — the arrangement that let two
+ *  setup sheets stand open at once, one per chat, floating over the same
+ *  document. Each is narrow enough to leave the middle of the window empty,
+ *  so a click at 640 lands on the page and on neither of them. */
+async function mountPair() {
+  await host.reset();
+  const { page, errors } = await host.newPage();
+  await page.goto(`${host.base}/a/garden`);
+  await page.waitForFunction(() => Boolean(window.marble?.agent && customElements.get('marble-conversation')));
+  await page.evaluate(() => {
+    for (const side of ['left', 'right']) {
+      const el = document.createElement('marble-conversation');
+      el.setAttribute('data-marble-transient', '');
+      el.dataset.side = side;
+      el.style.cssText = `position:fixed;top:0;width:320px;height:100vh;${side}:0;`;
+      document.body.append(el);
+    }
+  });
+  const view = (side) => page.locator(`body > marble-conversation[data-side="${side}"]`);
+  return { page, errors, left: view('left'), right: view('right') };
+}
+
+/** Give a view a Claude it can build setups from, and pack them into the ••• */
+const withSetups = (view) => view.evaluate(async (el) => {
+  el.providerList = [{
+    id: 'claude-subscription',
+    label: 'Claude',
+    installed: true,
+    signedIn: true,
+    default: true,
+    models: [{ id: 'sonnet', label: 'Sonnet 5' }, { id: 'opus', label: 'Opus 5' }, { id: 'fable', label: 'Fable 5.1' }],
+    efforts: ['high', 'xhigh'],
+    modes: [{ id: 'default', label: 'Default' }],
+  }];
+  el.usageMeters = [];
+  el.fillAgents('claude-subscription');
+  await el.syncCatalog();
+  el.paintPresets({ initial: true });
+  el.fitSetup();
+});
+
+const segOpen = (view) => view.evaluate((el) => Boolean(el.shadowRoot.querySelector('.presets.is-open')));
+
+/** The dock's own arrangement: two chats absolutely placed over one pane at
+ *  z-index 2, so each is its own stacking context and a later sibling paints
+ *  over the whole of an earlier one. `cover` is the side that paints on top,
+ *  which is the side appended last. */
+async function mountDock({ cover = 'left' } = {}) {
+  await host.reset();
+  const { page, errors } = await host.newPage();
+  await page.goto(`${host.base}/a/garden`);
+  await page.waitForFunction(() => Boolean(window.marble?.agent && customElements.get('marble-conversation')));
+  await page.evaluate((top) => {
+    const pane = document.createElement('div');
+    pane.style.cssText = 'position:fixed;inset:0;background:#fff;';
+    document.body.append(pane);
+    for (const side of [top === 'left' ? 'right' : 'left', top]) {
+      const el = document.createElement('marble-conversation');
+      el.setAttribute('data-marble-transient', '');
+      el.dataset.side = side;
+      el.style.cssText = `position:absolute;z-index:2;top:0;height:100%;width:49%;${side}:0;background:#fff;`;
+      pane.append(el);
+    }
+  }, cover);
+  const view = (side) => page.locator(`marble-conversation[data-side="${side}"]`);
+  return { page, errors, left: view('left'), right: view('right') };
+}
+
+test('an open sheet is not painted over by the chat in the next pane', async () => {
+  // The sheet hangs left off its trigger, so the right chat's sheet reaches
+  // under the left one — and the left one is the sibling that paints on top.
+  const { page, left, right } = await mountDock({ cover: 'left' });
+  await left.locator('input[name="agent"][value="fake"]').waitFor();
+  await withSetups(left);
+  await withSetups(right);
+  await right.locator('.presets-more').click();
+  await right.locator('.presets-menu').waitFor({ state: 'visible' });
+
+  const hit = await page.evaluate(() => {
+    const owner = document.querySelector('marble-conversation[data-side="right"]');
+    const neighbour = document.querySelector('marble-conversation[data-side="left"]');
+    const menu = owner.shadowRoot.querySelector('.presets-menu');
+    const box = menu.getBoundingClientRect();
+    const next = neighbour.getBoundingClientRect();
+    // A point inside the sheet that also falls inside the neighbouring chat.
+    const x = Math.round(Math.min(box.left + 6, next.right - 6));
+    const y = Math.round(box.top + box.height / 2);
+    return {
+      overlaps: box.left < next.right,
+      // elementFromPoint retargets to the shadow host, so the sheet reads as
+      // its own conversation — what matters is which conversation answers.
+      topmost: document.elementFromPoint(x, y)?.dataset?.side ?? null,
+    };
+  });
+  assert.equal(hit.overlaps, true, 'the sheet has to reach under the other pane for this to test anything');
+  assert.equal(hit.topmost, 'right', 'the chat next door painted over the open sheet');
+});
+
+test('a raised sheet still lands where its trigger is, at the right size', async () => {
+  const { left } = await mountDock({ cover: 'left' });
+  await left.locator('input[name="agent"][value="fake"]').waitFor();
+  await withSetups(left);
+  await left.locator('.presets-more').click();
+  await left.locator('.presets-menu').waitFor({ state: 'visible' });
+  const placed = await left.evaluate(async (el) => {
+    const menu = el.shadowRoot.querySelector('.presets-menu');
+    await Promise.all(menu.getAnimations().map((animation) => animation.finished.catch(() => {})));
+    const box = menu.getBoundingClientRect();
+    const trigger = el.shadowRoot.querySelector('.presets-more').getBoundingClientRect();
+    const style = getComputedStyle(menu);
+    return {
+      // The popover UA sheet centres [popover] in the viewport with an auto
+      // margin and paints it in system colours; both have to be overridden.
+      margin: style.margin,
+      width: Math.round(box.width),
+      left: Math.round(box.left),
+      // This trigger sits near the window's left edge, so the sheet cannot
+      // hang right-aligned off it — floatMenu clamps it to the 8px pad. A
+      // popover left to the UA would sit in the middle of the window instead.
+      viewport: innerWidth,
+      overlapsTrigger: box.left <= trigger.right + 1 && box.right >= trigger.left - 1,
+      above: box.bottom <= Math.round(trigger.top),
+      rows: el.shadowRoot.querySelectorAll('.presets-menu .preset').length,
+    };
+  });
+  assert.equal(placed.margin, '0px', 'the UA popover margin would centre it in the window');
+  assert.equal(placed.left, 8, 'it is clamped to the window pad, not centred in the top layer');
+  assert.ok(placed.left < placed.viewport / 4, 'and nowhere near the middle');
+  assert.ok(placed.overlapsTrigger, 'it still hangs off its own trigger');
+  assert.ok(placed.above, 'and still opens above it');
+  assert.ok(placed.width > 100 && placed.width < 360, `and keeps its own width, got ${placed.width}px`);
+  assert.equal(placed.rows, 4);
+});
+
+test('only one setup sheet is open on the page, whichever chat opened it', async () => {
+  const { page, left, right } = await mountPair();
+  await left.locator('input[name="agent"][value="fake"]').waitFor();
+  await withSetups(left);
+  await withSetups(right);
+
+  await left.locator('.presets-more').click();
+  assert.deepEqual([await segOpen(left), await segOpen(right)], [true, false]);
+
+  // The bug: a pointerdown in the pane next door never reached the first
+  // conversation's shadow root, so its sheet stayed up beside the new one.
+  await right.locator('.presets-more').click();
+  assert.deepEqual([await segOpen(left), await segOpen(right)], [false, true], 'opening one sheet must close the other');
+
+  // And a click on the page behind them, which is in no shadow root at all.
+  await page.mouse.click(640, 400);
+  assert.deepEqual([await segOpen(left), await segOpen(right)], [false, false], 'a click outside must close the open sheet');
+
+  await right.locator('.presets-more').click();
+  assert.equal(await segOpen(right), true);
+  await page.keyboard.press('Escape');
+  assert.equal(await segOpen(right), false, 'Escape closes it from anywhere too');
+
+  // Queue / Steer / Interrupt is the same kind of sheet — a folded .seg-opts —
+  // and it has to take its turn with the setups rather than stack on them.
+  const dispatchOpen = () => right.evaluate((el) => el.dispatchEl.classList.contains('is-open'));
+  await left.locator('.presets-more').click();
+  assert.equal(await segOpen(left), true);
+  await right.evaluate((el) => { el.dispatchEl.hidden = false; });
+  await right.locator('.dispatch .seg-current').click();
+  assert.equal(await segOpen(left), false, 'a dispatch sheet closes an open setup sheet a pane away');
+  assert.equal(await dispatchOpen(), true);
+  await page.mouse.click(640, 400);
+  assert.equal(await dispatchOpen(), false, 'and it dismisses on an outside click like the rest');
+});
+
+test('the setup sheet grows in and shrinks out instead of blinking', async () => {
+  const { left } = await mountPair();
+  await left.locator('input[name="agent"][value="fake"]').waitFor();
+  await withSetups(left);
+  await left.locator('.presets-more').waitFor();
+
+  const shut = await left.evaluate((el) => {
+    const menu = el.shadowRoot.querySelector('.presets-menu');
+    const style = getComputedStyle(menu);
+    return { display: style.display, opacity: style.opacity, transform: style.transform, transition: style.transitionProperty };
+  });
+  assert.equal(shut.display, 'none');
+  assert.equal(shut.opacity, '0');
+  // `transform` resolves to `none` on a display:none element whatever the
+  // rule says, so the shut sheet's own resting size is not readable here —
+  // the mid-entry checks below are what prove it grows.
+  assert.ok(shut.transition.includes('display'), `display has to transition for a display:none sheet to animate at all — got ${shut.transition}`);
+  assert.ok(shut.transition.includes('transform'), `and transform, to grow — got ${shut.transition}`);
+
+  // Read the transitions themselves rather than sampling a value at some
+  // frame: what the sheet's opacity happens to be two frames in is a race,
+  // but "a 150ms fade from 0 to 1 is running on it" is not.
+  const running = (view) => view.evaluate((el) => el.shadowRoot.querySelector('.presets-menu').getAnimations().map((animation) => {
+    const property = animation.transitionProperty ?? '';
+    const frames = animation.effect?.getKeyframes?.() ?? [];
+    return {
+      property,
+      duration: animation.effect?.getTiming?.().duration ?? 0,
+      from: String(frames[0]?.[property] ?? ''),
+      to: String(frames.at(-1)?.[property] ?? ''),
+    };
+  }));
+  const opening = await left.evaluate(async (el) => {
+    el.shadowRoot.querySelector('.presets-more').click();
+    await new Promise(requestAnimationFrame);
+    await new Promise(requestAnimationFrame);
+  }).then(() => running(left));
+  const fadeIn = opening.find((item) => item.property === 'opacity');
+  const growIn = opening.find((item) => item.property === 'transform');
+  assert.ok(fadeIn, `expected a running fade, got ${opening.map((i) => i.property).join(',') || 'nothing'}`);
+  assert.ok(growIn, `expected a running grow, got ${opening.map((i) => i.property).join(',') || 'nothing'}`);
+  assert.ok(fadeIn.duration > 0, 'the fade has to take time');
+  assert.equal(fadeIn.from, '0', 'it enters from nothing — @starting-style is what supplies that');
+  assert.equal(fadeIn.to, '1');
+  assert.notEqual(growIn.from, 'none', 'and enters at a size it has to grow out of');
+
+  await left.locator('.presets-menu').waitFor({ state: 'visible' });
+  const settled = await left.evaluate(async (el) => {
+    const menu = el.shadowRoot.querySelector('.presets-menu');
+    await Promise.all(menu.getAnimations().map((animation) => animation.finished.catch(() => {})));
+    const style = getComputedStyle(menu);
+    return { opacity: style.opacity, transform: style.transform, position: style.position };
+  });
+  assert.equal(settled.opacity, '1');
+  assert.equal(settled.transform, 'none', 'it lands at rest, not a shade off');
+  // It has to stay fixed while it leaves, or the fade plays back at the anchor.
+  assert.equal(settled.position, 'fixed');
+  const leaving = await left.evaluate(async (el) => {
+    const menu = el.shadowRoot.querySelector('.presets-menu');
+    el.shadowRoot.querySelector('.presets-more').click();
+    await new Promise(requestAnimationFrame);
+    await new Promise(requestAnimationFrame);
+    const style = getComputedStyle(menu);
+    return { display: style.display, position: style.position };
+  });
+  assert.equal(leaving.display, 'flex', 'it is still on screen while it leaves');
+  // The bug this guards: unfloating on the same frame as the close strips
+  // `position: fixed` and teleports the sheet back to its anchor, so the
+  // fade-out plays somewhere else on the screen.
+  assert.equal(leaving.position, 'fixed', 'it must not snap back to its anchor mid-exit');
+  const fadeOut = (await running(left)).find((item) => item.property === 'opacity');
+  assert.ok(fadeOut, 'expected a running fade out');
+  assert.equal(fadeOut.to, '0');
+});
+
+test('a setup row under the pointer lights up, and eases into it', async () => {
+  const { left } = await mountPair();
+  await left.locator('input[name="agent"][value="fake"]').waitFor();
+  await withSetups(left);
+  await left.locator('.presets-more').click();
+  // The label, not the span: the radio is stretched over the row to take the
+  // click, and the span is pointer-events: none behind it. Hovering the label
+  // is what a pointer actually does, and what the rule reads.
+  const row = left.locator('.presets-menu .preset', { hasText: 'Sonnet High' });
+  await row.waitFor();
+  const before = await row.evaluate((label) => getComputedStyle(label.querySelector('span')).backgroundColor);
+  await row.hover();
+  // Reading the colour straight after the hover reads it at t=0 of the fade,
+  // which is the colour it is leaving. Let the transition finish, and take
+  // the proof that it eased from the transition itself.
+  const settled = await row.evaluate(async (label) => {
+    const span = label.querySelector('span');
+    const easing = span.getAnimations().map((animation) => animation.transitionProperty ?? '');
+    await Promise.all(span.getAnimations().map((animation) => animation.finished.catch(() => {})));
+    return { easing, fill: getComputedStyle(span).backgroundColor };
+  });
+  assert.ok(settled.easing.includes('background-color'), `the fill has to ease in, got ${settled.easing.join(',') || 'a snap'}`);
+  assert.notEqual(settled.fill, before, 'hovering a row has to paint it');
+  assert.notEqual(settled.fill, 'rgba(0, 0, 0, 0)');
+});
+
+const scrub = (view) => view.evaluate((el) => ({
+  open: el.scrubIsOpen(),
+  at: el.scrubAt ?? null,
+  stops: (el.scrubPresets ?? []).map((preset) => preset.id),
+  now: el.shadowRoot.querySelector('.scrub-now')?.textContent.trim() ?? '',
+  labels: [...el.shadowRoot.querySelectorAll('.scrub-stop')].map((stop) => [
+    stop.querySelector('b').textContent,
+    stop.querySelector('i').textContent,
+  ].join(' · ')),
+  marked: [...el.shadowRoot.querySelectorAll('.scrub-stop')].findIndex((stop) => stop.classList.contains('is-at')),
+  setup: el.shadowRoot.querySelector('.presets-more')?.textContent.trim() ?? '',
+}));
+
+const hold = async (page) => {
+  await page.keyboard.down('Control');
+  await page.keyboard.down('Alt');
+};
+const release = async (page) => {
+  await page.keyboard.up('Alt');
+  await page.keyboard.up('Control');
+};
+
+test('holding the two modifiers raises the setups as a stepped scrubber', async () => {
+  const { page, left } = await mountDock({ cover: 'left' });
+  await left.locator('input[name="agent"][value="fake"]').waitFor();
+  await withSetups(left);
+  await left.locator('.presets-more').waitFor();
+  await left.locator('.editor').click();
+  assert.equal((await scrub(left)).open, false, 'nothing is up before the keys go down');
+
+  await hold(page);
+  const up = await scrub(left);
+  assert.equal(up.open, true);
+  assert.deepEqual(up.stops, ['fable-high', 'opus-xhigh', 'opus-high', 'sonnet-high'], 'one stop per setup you can pick');
+  // Model over effort, so four names fit on one line at pane width.
+  assert.deepEqual(up.labels, ['Fable 5.1 · High', 'Opus · Extra High', 'Opus · High', 'Sonnet · High']);
+  assert.equal(up.marked, up.at, 'the stop it starts on is the one marked');
+  assert.ok(up.now.includes('Fable 5.1 High'), `the one you are on is named above, got "${up.now}"`);
+
+  // Raised, not just floated: it has the pane next door to clear as well.
+  assert.equal(
+    await left.evaluate((el) => el.shadowRoot.querySelector('.scrub').matches(':popover-open')),
+    true,
+  );
+  await release(page);
+});
+
+test('the arrows walk the scrubber while the modifiers are held, and stop at the ends', async () => {
+  const { page, left } = await mountDock({ cover: 'left' });
+  await left.locator('input[name="agent"][value="fake"]').waitFor();
+  await withSetups(left);
+  await left.locator('.presets-more').waitFor();
+  await left.locator('.editor').click();
+  await hold(page);
+  const start = (await scrub(left)).at;
+
+  await page.keyboard.press('ArrowRight');
+  await page.keyboard.press('ArrowRight');
+  const moved = await scrub(left);
+  assert.equal(moved.at, start + 2);
+  assert.equal(moved.marked, start + 2, 'the mark follows');
+  assert.ok(moved.now.includes('Opus High'), `got "${moved.now}"`);
+
+  // A timeline has ends; holding an arrow down comes to rest, it does not cycle.
+  for (let i = 0; i < 5; i += 1) await page.keyboard.press('ArrowRight');
+  assert.equal((await scrub(left)).at, moved.stops.length - 1, 'the right end holds');
+  for (let i = 0; i < 9; i += 1) await page.keyboard.press('ArrowLeft');
+  assert.equal((await scrub(left)).at, 0, 'and so does the left');
+
+  // The knob and the fill are where the mark is, not still at the start.
+  const geometry = await left.evaluate((el) => {
+    const root = el.shadowRoot;
+    return { fill: root.querySelector('.scrub-fill').style.width, knob: root.querySelector('.scrub-knob').style.transform };
+  });
+  assert.equal(geometry.fill, '0px');
+  assert.equal(geometry.knob, 'translateX(0px)');
+  await release(page);
+});
+
+test('letting the modifiers go commits the setup the scrubber landed on', async () => {
+  const { page, left } = await mountDock({ cover: 'left' });
+  await left.locator('input[name="agent"][value="fake"]').waitFor();
+  await withSetups(left);
+  await left.locator('.presets-more').waitFor();
+  await left.locator('.editor').click();
+  const before = (await scrub(left)).setup;
+
+  await hold(page);
+  await page.keyboard.press('ArrowRight');
+  await page.keyboard.press('ArrowRight');
+  await release(page);
+  await left.locator('.presets-more', { hasText: 'Opus High' }).waitFor();
+  const after = await scrub(left);
+  assert.equal(after.open, false, 'the scrubber goes down with the keys');
+  assert.notEqual(after.setup, before);
+  assert.equal(after.setup, 'Opus High');
+  assert.equal(
+    await left.evaluate((el) => el.shadowRoot.querySelector('input[name="model"]:checked')?.value),
+    'opus',
+    'and the picker underneath followed it',
+  );
+});
+
+test('Escape drops the scrubber without changing the setup', async () => {
+  const { page, left } = await mountDock({ cover: 'left' });
+  await left.locator('input[name="agent"][value="fake"]').waitFor();
+  await withSetups(left);
+  await left.locator('.presets-more').waitFor();
+  await left.locator('.editor').click();
+  const before = (await scrub(left)).setup;
+
+  await hold(page);
+  await page.keyboard.press('ArrowRight');
+  await page.keyboard.press('Escape');
+  assert.equal((await scrub(left)).open, false);
+  await release(page);
+  assert.equal((await scrub(left)).setup, before, 'a cancelled scrub commits nothing');
+});
+
+test('the scrubber belongs to the chat that has focus', async () => {
+  const { page, left, right } = await mountDock({ cover: 'left' });
+  await left.locator('input[name="agent"][value="fake"]').waitFor();
+  await withSetups(left);
+  await withSetups(right);
+  await right.locator('.editor').click();
+
+  await hold(page);
+  assert.deepEqual(
+    [(await scrub(left)).open, (await scrub(right)).open],
+    [false, true],
+    'the keys go to the chat being written in, not to every pane on the page',
+  );
+  await release(page);
+});
+
 test('saved setups collapse the custom picker until Custom is opened', async () => {
   const { view } = await mount();
   await view.locator('input[name="agent"][value="fake"]').waitFor();
@@ -779,6 +1261,31 @@ test('finished tool rows fold into one line that counts by kind and names source
   assert.equal(await head.getAttribute('aria-expanded'), 'true');
   assert.equal(await group.locator('.tool').first().isVisible(), true);
   assert.equal(await group.locator('.tool').count(), 6);
+});
+
+// Calling both "Blocked: Bash" read as a drive with no access, when most of
+// them were the agent tripping over its own shell. Only a refusal is a
+// decision, and only a decision gets the word.
+test('a refused command says Blocked, a broken one says Failed, and both keep their label', async () => {
+  const { view } = await mount();
+  await sendFrom(view, 'script:refusals');
+  await view.locator('.turn-footer[data-status="completed"]').waitFor();
+
+  const blocked = view.locator('.tool[data-state="refused"]');
+  const failed = view.locator('.tool[data-state="failed"]');
+  assert.equal(await blocked.count(), 1);
+  assert.equal(await failed.count(), 1);
+
+  // The label of the step survives, so the row still says which command it was.
+  assert.equal(await blocked.textContent(), 'Blocked: Ran Find the usage wiring');
+  assert.equal(await failed.textContent(), 'Failed: Ran Reproduce the crash');
+
+  // Why, on hover.
+  assert.match(await blocked.getAttribute('title'), /auto mode classifier/);
+  assert.match(await failed.getAttribute('title'), /ERR_MODULE_NOT_FOUND/);
+
+  // Neither folds away: an unfinished row ends a run.
+  assert.equal(await view.locator('.tool-group').count(), 0);
 });
 
 test('a refused edit stays out of the fold', async () => {
@@ -1220,4 +1727,38 @@ test('the mast counts other conversations running in the same project', async ()
   await sendFrom(view, 'script:slow');
   await view.locator('.mast .also', { hasText: 'Also working here: 1' }).waitFor();
   await page.evaluate((id) => window.marble.agent.cancel(`${id}-t1`), other);
+});
+
+test('a running conversation says where its hands are, and the row goes when the turn does', async () => {
+  const { view, errors } = await mount();
+  await view.locator('input[name="agent"][value="fake"]').waitFor();
+  await sendFrom(view, 'script:building');
+
+  const row = view.locator('.zone-jump');
+  await row.waitFor();
+  assert.equal((await view.locator('.zone-what').textContent()).trim(), 'Building here');
+
+  await view.locator('.turn-footer[data-status="completed"]').waitFor();
+  await row.waitFor({ state: 'hidden' });
+  assert.deepEqual(errors, []);
+});
+
+test('the row names the other document, and pressing it opens that document at the work', async () => {
+  const { page, view } = await mount();
+  await view.locator('input[name="agent"][value="fake"]').waitFor();
+  // Reading one document, working in another: the case the row exists for.
+  await page.evaluate(() => window.marble.agent.aim('atlas'));
+  await sendFrom(view, 'script:elsewhere');
+
+  await view.locator('.zone-jump').waitFor();
+  assert.equal((await view.locator('.zone-what').textContent()).trim(), 'Building in atlas');
+
+  await view.locator('.zone-jump').click();
+  await page.waitForURL(/\/a\/atlas/);
+  await page.waitForFunction(() => document.documentElement.classList.contains('marble-collab-host'));
+  assert.equal(await page.evaluate(() => location.hash), '', 'the hash is spent on arrival');
+  // The tab arrived after the frame was broadcast, and is caught up on joining:
+  // landing on the page the agent is in and seeing no box would read as broken.
+  await page.locator('.marble-zone').waitFor();
+  assert.match(await page.locator('.marble-zone-label').innerText(), /Agent · rename the heading/);
 });

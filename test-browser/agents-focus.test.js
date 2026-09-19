@@ -325,8 +325,10 @@ test('a pinned conversation is a full-height column beside the field, not a band
   // "Focus fills the screen" asks for. What matters is that it is a column of
   // the field's own height, checked above and beside it, checked below.
   assert.ok(shape.full.w < shape.canvasH * 1.2, `Full ${shape.full.w} is a band, not a column`);
-  // Rank reads across, so the field sits beside the stage and not under it.
-  assert.ok(shape.other.x > shape.full.x + shape.full.w - 1, 'the field slid under the stage');
+  // Rank reads across and rises rightward, so the field sits beside the stage
+  // — to its left — and never under it.
+  assert.ok(shape.full.x > shape.other.x + 1, 'the stage is not at the right-hand end');
+  assert.ok(shape.other.x < shape.full.x + 1, 'the field slid under the stage');
   assert.ok(Math.abs(shape.other.y - shape.full.y) < 60, 'the field started below the stage');
 });
 
@@ -406,7 +408,8 @@ test('dragging a card to the stage pins it, and dragging it back off unpins it',
     { key: 'b', title: 'stays loose' },
   ]);
   const canvas = await page.locator('.focus').boundingBox();
-  let release = await dragTo(page, ids.a, { x: canvas.x + 10, y: canvas.y + canvas.height / 2 });
+  // An empty stage rails along the right edge — the edge a stage stands at.
+  let release = await dragTo(page, ids.a, { x: canvas.x + canvas.width - 10, y: canvas.y + canvas.height / 2 });
   assert.equal(await page.locator('.focus-pinslot').count(), 1, 'an empty stage must offer a slot to aim at');
   await release();
   await page.waitForFunction((id) => document.querySelector(`.focus-card[data-id="${id}"]`)?.dataset.lod === 'full', ids.a);

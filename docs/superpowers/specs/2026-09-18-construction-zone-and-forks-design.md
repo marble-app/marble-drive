@@ -25,7 +25,7 @@ The zone was positioned once, when the agent's presence frame arrived, and re-po
 
 ## 3. How it works today
 
-- **Zone.** `runner.js` and `tools.js` call `onLook(docPath, ids, client, {phase, note})`; `app.js` broadcasts it as a `presence` frame; `collab.js` draws one frame per agent client around the smallest element containing all its ids, or a page banner when there are no ids. Label = `note`, else `Reading` / `Writing` / `Working`.
+- **Zone.** `runner.js` and `tools.js` call `onLook(docPath, ids, client, {phase, note})`; `app.js` broadcasts it as a `presence` frame; `collab.js` draws one frame per agent client around the smallest element containing all its ids. An agent whose ids resolve to nothing on this page draws nothing — see the 2026-09-19 note below. Label = `note`, else `Reading` / `Writing` / `Working`.
 - **Touched ids.** `server/app.js` keeps one `createTouched()` registry per document and client. It is fed by (a) every write's ids and (b) every presence POST — which the runtime sends on `focusin`, i.e. wherever the person's caret lands. **`note()` accumulates**; a client's set is only dropped when its event socket closes, or (for agents) when the turn ends via `forgetWriter`.
 - **Forks.** When a write's ids overlap another client's touched set (same element, or ancestor/descendant), `mergeOps` / `mergeWrite` wraps that element in a `<marble-alt>` with a `you` and an `agent` version. `collab.js` skins that as the fork bar.
 
@@ -39,7 +39,6 @@ The label reads **`Agent · <what it is doing>`**.
 
 - With a note: `Agent · rename the heading`. The note is shown with its first letter lowercased (unless the first word is all capitals, e.g. an acronym) and one trailing period removed, so the tool's "One sentence: what this change does" lands as a clause.
 - Without a note: `Agent · reading`, `Agent · writing`, `Agent · working`.
-- The page banner (no ids) uses the same text; it already has no frame.
 
 `Agent` matches the word already used on the fork bar. Naming the conversation (its title) would be better still but the title is not on the wire; see §8.
 
@@ -89,7 +88,7 @@ A test that had passed by accident — `two undos of the same turn at once` in `
 
 ## 5. What does not change
 
-- Zone geometry, the page banner, *Hide* / *Show work*, reduced-motion and reduced-transparency handling.
+- Zone geometry, *Hide* / *Show work*, reduced-motion and reduced-transparency handling.
 - How forks are detected inside the package (`classifyOverlap`, `forkAlt`, `mergeWrite`), and that conflicts are wrapped rather than overwritten.
 - *Keep this* and version switching, including undo.
 - The `apply_ops` tool schema. Agents keep writing one-sentence notes.
@@ -124,7 +123,7 @@ Server:
 
 | Decision | Why |
 |---|---|
-| Prefix `Agent ·` rather than change how agents write notes | Robust to any provider's phrasing; zero prompt cost; the page-banner and no-note cases get the same shape for free. |
+| Prefix `Agent ·` rather than change how agents write notes | Robust to any provider's phrasing; zero prompt cost; the no-note case gets the same shape for free. |
 | Lowercase the first letter and strip one period | Notes are written as sentences; shown as a clause after `·` they read naturally. Guard all-caps first words so `PDF export` stays `PDF`. |
 | Rename *Merge* rather than make it merge | An automatic merge of two arbitrary HTML subtrees is a research problem, not a button. The honest name is the fix. |
 | Context line is fixed text, not "You and *Writing plan* both changed this" | The conversation title is not in the presence or fork payload. Plumbing it is a separate, small change (runner `meta.label`) — worth doing later for both the zone and the bar, not blocking this. |
@@ -134,3 +133,25 @@ Server:
 | No auto-resolve of forks when the turn ends | A fork is the person's decision; the bar waits for them. |
 
 Out of scope, noted for later: naming the agent in labels; the observation that `apply_ops`'s read-before-write ledger already prevents the agent clobbering edits it has not seen, which means many forks *against the agent* are belt-and-braces — a future spec could relax fork detection for ledgered writes and keep it only for file-tool writes.
+
+## 9. Amendment, 2026-09-19 — the page banner is gone
+
+A zone points. Its whole claim is *here*: corner marks around an element, a
+label hanging off it, both following that element as the page reflows. Work
+with nothing to point at had been falling back to a pill fixed at the top of
+the page — `.marble-zone-page`, no frame, centred over whatever chrome was
+underneath it. On a page whose subject is agents, that pill sat above the
+header announcing "Agent · working" to someone already looking at a list of
+working agents: an ambient status line wearing a zone's clothes, duplicating
+what the app's own chrome carries, and belonging to no part of the layout.
+
+`paintZones` now resolves a target first and skips any presence that has none:
+no ids, ids that are not on this page, or a spread so wide that the only
+element containing all of it is the body. The `.marble-zone-page` rules and the
+phase-only branch of the presence map went with it — an agent that names no ids
+is simply dropped from `presence`, because nothing reads it any more.
+
+What this gives up: an agent editing far-apart elements at once (common
+ancestor `body`) shows no zone rather than a banner. That is the right trade.
+An app that wants to say "agents are working" should say it in its own chrome,
+where it can say *which* ones; the overlay's job is only to point.

@@ -204,6 +204,32 @@
   const FIELD_MIN = 196;
   const FIELD_PREF = 260;
   const FIELD_MAX = 320;
+  // A pile is a group folded down to a tab in a rail: its name turned on its
+  // side so the tab can be a finger wide, and nothing else but a count. It is
+  // the last thing the field gives up before the canvas would have to scroll,
+  // and it is deliberately tiny — a group you are not working in should cost
+  // the stage almost nothing. Laid flat it cost 152px of width to use 30px of
+  // an 800px column; turned on its side it costs 34 and uses all of it.
+  const PILE_W = 34;
+  // The shortest a tab may be before the rail drops to its smallest form. A
+  // name turned sideways needs a run of pixels to be a word rather than an
+  // ellipsis; below that the entry keeps only what a group cannot do without,
+  // which is its colour and how much is in it.
+  const PILE_MIN_H = 64;
+  // The smallest an entry gets: a square in the group's colour with its count
+  // inside. No name at all — at this size the colour is the name.
+  const PILE_DOT = 26;
+  // What the rail widens to when you open an entry. One field column's floor,
+  // paid once however many entries you open — opening is meant to be a peek,
+  // not a promotion.
+  const PILE_OPEN_W = 196;
+  // A closed entry inside an opened rail: a menu row, so its name reads the
+  // right way up next to the one you opened.
+  const PILE_ROW_H = 26;
+  // Once every group is a pile and the stage still will not fit, the panes
+  // themselves go under reading width rather than the canvas scrolling: the
+  // person asked for this many at once and the screen is the budget.
+  const PANE_FLOOR = 168;
   // The trailing column that makes a folder of whatever is dropped on it. It
   // is a chip wide, and it is what the field's leftover room is for.
   const NEW_W = 168;
@@ -253,18 +279,35 @@
 
   /** Lay the canvas out as one row of full-height columns.
    *
-   *  Ranking runs left to right — stage first, then a region per folder in
-   *  catalog order with the loose one last — because top to bottom is the
-   *  axis a conversation needs for itself. Cards fill a region downward and
-   *  wrap into a second sub-column of the same region rather than into a
-   *  second row of regions: a second row would put rank back on the vertical
-   *  axis, which is the fault this shape exists to fix.
+   *  Ranking runs left to right and rises as it goes: a region per folder in
+   *  catalog order with the loose one last, then the stage at the right edge.
+   *  What you are not working on is passed over on the way in, and the pins
+   *  you are working in are the last thing the row says — the same direction
+   *  the language reads, so the eye ends where the attention belongs. Top to
+   *  bottom stays the axis a conversation needs for itself: cards fill a
+   *  region downward and wrap into a second sub-column of the same region
+   *  rather than into a second row of regions, since a second row would put
+   *  rank back on the vertical axis, which is the fault this shape exists to
+   *  fix.
+   *
+   *  The row never runs off the canvas. Where it would, the field folds: a
+   *  group at a time turns into a pile — a folder with a name and a count, in
+   *  a rail at the left edge — until what is left fits beside the stage. A
+   *  group's `weight` is what the fold order reads (the caller passes
+   *  recency, so the stalest goes first); Ungrouped has none and folds before
+   *  any real folder. `piled` names groups the caller has already folded, and
+   *  `opened` names groups the person opened by hand, which the loop may
+   *  never fold.
+   *  Past that there is nothing left to give and the panes themselves go
+   *  under reading width, down to `PANE_FLOOR`, because a screenful of
+   *  conversations is what was asked for and the screen is the budget.
    *
    *  `fulls` is `[{ id }]` already in stage order. `groups` is
-   *  `[{ folderId, cards: [{ id, lod, ox, oy }] }]`, loose one last. Returns
-   *  every rect in canvas coordinates, plus the regions and the stage — which
-   *  is where hit-testing reads its slots from, so a drop lands where the
-   *  layout put things rather than where a second measurement thinks they are. */
+   *  `[{ folderId, weight, cards: [{ id, lod, ox, oy }] }]`, loose one last.
+   *  Returns every rect in canvas coordinates, plus the regions (piles among
+   *  them, flagged `piled`) and the stage — which is where hit-testing reads
+   *  its slots from, so a drop lands where the layout put things rather than
+   *  where a second measurement thinks they are. */
   const packFocus = ({
     fulls = [],
     groups = [],
@@ -274,6 +317,8 @@
     margin = MARGIN,
     range = {},
     newGroup = 'auto',
+    piled = [],
+    opened = [],
   }) => {
     const dh = sizes?.digest?.h ?? 161;
     const paneMin = range.paneMin ?? PANE_MIN;
@@ -291,42 +336,46 @@
     // Shape before width. How deep a region stacks is a question about card
     // heights alone, so the sub-column count is settled before a single width
     // is negotiated — which is what lets the negotiation be one pass.
-    const shaped = [];
-    for (const group of groups) {
-      const cards = byRank(group.cards ?? []);
-      // An empty column is normally nothing to draw, but the loose one has to
-      // stay while a card is in the air — leaving a folder needs somewhere to
-      // land, and `keep` is how the caller says so.
-      if (!cards.length && !group.keep) continue;
-      const stacks = [[]];
-      let used = 0;
-      for (const card of cards) {
-        const h = cardHeight(card, sizes);
-        if (used && used + h > innerH) {
-          stacks.push([]);
-          used = 0;
+    //
+    // It runs over whichever groups are still expanded, because piling one is
+    // the field's last concession and the loop below has to be able to ask
+    // "and what if this one folded?" without a second layout pass.
+    const shapeField = (list) => {
+      const shaped = [];
+      for (const group of list) {
+        const cards = byRank(group.cards ?? []);
+        // An empty column is normally nothing to draw, but the loose one has to
+        // stay while a card is in the air — leaving a folder needs somewhere to
+        // land, and `keep` is how the caller says so.
+        if (!cards.length && !group.keep) continue;
+        const stacks = [[]];
+        let used = 0;
+        for (const card of cards) {
+          const h = cardHeight(card, sizes);
+          if (used && used + h > innerH) {
+            stacks.push([]);
+            used = 0;
+          }
+          stacks[stacks.length - 1].push(card);
+          used += h + gap;
         }
-        stacks[stacks.length - 1].push(card);
-        used += h + gap;
+        shaped.push({ folderId: group.folderId ?? null, stacks });
       }
-      shaped.push({ folderId: group.folderId ?? null, stacks });
-    }
 
-    // Which field column each region lands in, settled before any width is
-    // negotiated. Nothing here depends on width — a region's height is its
-    // cards' heights — so the two passes cannot disagree, and the width the
-    // field asks for is the width it will actually occupy. Sizing the field as
-    // though every sub-column stood side by side was what left a band of dead
-    // canvas down the right whenever two regions shared a column.
-    const regionH = (group) => {
-      const tallest = group.stacks.reduce((best, stack) => {
-        const stacked = stack.reduce((sum, card) => sum + cardHeight(card, sizes) + gap, 0) - gap;
-        return Math.max(best, stacked);
-      }, 0);
-      return Math.min(availH, Math.max(0, tallest) + NAME_H + 2 * PAD);
-    };
-    const fieldCols = [];
-    {
+      // Which field column each region lands in, settled before any width is
+      // negotiated. Nothing here depends on width — a region's height is its
+      // cards' heights — so the two passes cannot disagree, and the width the
+      // field asks for is the width it will actually occupy. Sizing the field as
+      // though every sub-column stood side by side was what left a band of dead
+      // canvas down the right whenever two regions shared a column.
+      const regionH = (group) => {
+        const tallest = group.stacks.reduce((best, stack) => {
+          const stacked = stack.reduce((sum, card) => sum + cardHeight(card, sizes) + gap, 0) - gap;
+          return Math.max(best, stacked);
+        }, 0);
+        return Math.min(availH, Math.max(0, tallest) + NAME_H + 2 * PAD);
+      };
+      const fieldCols = [];
       let colTop = top;
       for (const group of shaped) {
         const h = regionH(group);
@@ -339,41 +388,130 @@
         // New-group affordance is drawn as an overlay rather than packed.
         const landing = (newGroup === 'always' || newGroup === 'rail') && group.folderId === null;
         if (fieldCols.length && (landing || colTop + h > top + availH + 0.01)) {
-          fieldCols.push([]);
+          fieldCols.push({ groups: [] });
           colTop = top;
         } else if (!fieldCols.length) {
-          fieldCols.push([]);
+          fieldCols.push({ groups: [] });
         }
-        fieldCols[fieldCols.length - 1].push(group);
+        fieldCols[fieldCols.length - 1].groups.push(group);
         group.col = fieldCols.length - 1;
         group.h = h;
         colTop += h + gap;
       }
-    }
-    // A field column is as wide as the widest region standing in it.
-    const colStacks = fieldCols.map((column) => column.reduce((most, group) => Math.max(most, group.stacks.length), 0));
-    const subCols = colStacks.reduce((n, stacks) => n + stacks, 0);
-    // Everything in the field's width that is not a column: the pads, the gaps
-    // between sub-columns, and the gaps between field columns.
-    const fixed = colStacks.reduce((n, stacks) => n + (stacks - 1) * gap + 2 * PAD, 0)
-      + Math.max(0, fieldCols.length - 1) * gap;
+
+      // A field column is as wide as the widest region standing in it.
+      const colStacks = fieldCols.map((column) => column.groups.reduce((most, group) => Math.max(most, group.stacks.length), 0));
+      const subCols = colStacks.reduce((n, stacks) => n + stacks, 0);
+      // Everything in the field's width that is not a sub-column: the pads,
+      // the gaps between sub-columns, and the gaps between field columns.
+      const fixed = colStacks.reduce((n, stacks) => n + (stacks - 1) * gap + 2 * PAD, 0)
+        + Math.max(0, fieldCols.length - 1) * gap;
+      return { shaped, fieldCols, colStacks, subCols, fixed };
+    };
 
     const room = Math.max(0, canvas.w - 2 * margin);
     const n = fulls.length;
+
+    // ---- What folds. The canvas never scrolls sideways: a focused chat is
+    // worth more than a column of cards, so when the stage cannot stand at
+    // reading width the field gives up groups one at a time, each folding
+    // into a pile — a folder with a name and a count — until the row fits.
+    //
+    // Which group folds first is `weight`: the caller passes recency, so the
+    // group nothing has happened in all day is the one that disappears, and
+    // opening a pile (which sets its weight to now) keeps it open and folds
+    // something else instead. Ungrouped has no weight of its own, so it folds
+    // before any real folder — it is the junk drawer, and the screenshot that
+    // asked for this had it eating half the canvas.
+    const pileKey = (group) => group.folderId ?? null;
+    const asked = new Set(piled.map((key) => key ?? null));
+    const drawable = groups.filter((group) => (group.cards ?? []).length || group.keep);
+    let open = drawable.filter((group) => !asked.has(pileKey(group)));
+    const folded = drawable.filter((group) => asked.has(pileKey(group)));
+    // Ungrouped has no weight of its own and folds before any real folder.
+    const weightOf = (group) => (Number.isFinite(group.weight)
+      ? group.weight
+      : (group.folderId == null ? -Infinity : 0));
+    // Least valuable first: the order the loop eats through. A group you have
+    // opened is not spared — it folds like any other and is drawn expanded
+    // inside the rail, which is what makes opening one cheap.
+    const order = [...open].sort((a, b) => weightOf(a) - weightOf(b));
+
+    // ---- The rail is a menu of what the canvas had no room for, and it has
+    // three forms, each one smaller than the last:
+    //
+    //   open  — you clicked an entry. The rail widens once, to one field
+    //           column's floor, and the entry you opened lists its chats under
+    //           its name. Everything else in the rail becomes a menu row.
+    //   tab   — nothing open, and every entry can have a readable run of
+    //           height. Names turn a quarter turn; the tabs divide the canvas
+    //           between them.
+    //   dot   — too many entries for that. All a group keeps is its colour and
+    //           its count, in a square.
+    //
+    // `held` is what you opened. An opened group is still folded — that is the
+    // point: opening is a peek inside the rail, not a promotion back to a
+    // column of its own.
+    const held = new Set(opened.map((key) => key ?? null));
+    const chipH = sizes?.chip?.h ?? 56;
+    const dotPerCol = Math.max(1, Math.floor((availH + gap) / (PILE_DOT + gap)));
+    const railMetrics = (list) => {
+      if (!list.length) return { form: 'none', w: 0, cols: 0, span: 0 };
+      if (list.some((group) => held.has(pileKey(group)))) {
+        return { form: 'open', w: PILE_OPEN_W, cols: 1, span: PILE_OPEN_W + gap };
+      }
+      if (list.length * (PILE_MIN_H + gap) - gap <= availH + 0.5) {
+        return { form: 'tab', w: PILE_W, cols: 1, span: PILE_W + gap };
+      }
+      const cols = Math.ceil(list.length / dotPerCol);
+      return { form: 'dot', w: PILE_DOT, cols, span: cols * PILE_DOT + cols * gap };
+    };
+
+    // One fold at a time until the row fits. A single fold does not always buy
+    // width — two groups sharing a column, one of them folded, leaves the
+    // column exactly as wide as it was — but the next one does, when the last
+    // region leaves and the column goes with it. So the loop does not ask
+    // whether a fold pays; it keeps going until the row fits or there is
+    // nothing left to fold.
+    const stageFloor = n ? n * paneMin + (n - 1) * gap : 0;
+    const fieldFloorOf = (info) => (info.subCols ? info.subCols * fieldMin + info.fixed : 0);
+    const fits = (info, list) => {
+      const seam = (n && info.subCols) ? gap : 0;
+      return stageFloor + seam + fieldFloorOf(info) + railMetrics(list).span <= room + 0.5;
+    };
+    let shape = shapeField(open);
+    while (!fits(shape, folded) && order.length) {
+      const victim = order.shift();
+      open = open.filter((group) => group !== victim);
+      folded.push(victim);
+      shape = shapeField(open);
+    }
+    // The piles read in catalog order, not in the order things happened to
+    // fold: a pile that jumped seats every time its neighbour folded would be
+    // a row you cannot learn.
+    folded.sort((a, b) => drawable.indexOf(a) - drawable.indexOf(b));
+
+    const { shaped, fieldCols, colStacks, subCols, fixed } = shape;
+    const rail = railMetrics(folded);
+    const railSpan = rail.span;
     const bar = (n && subCols) ? gap : 0;
 
     // Neither side outranks the other when the canvas is tight: both start
     // from what they want, and a deficit is shared in proportion to how much
     // each has to give. Giving the stage its fill first letterboxes the field
     // at two pins; giving the field its fill first pins a conversation at its
-    // floor while chips sit at their preferred width. Where a floor cannot be
-    // met the floor wins and the canvas scrolls — a conversation is never
-    // squeezed below reading width.
+    // floor while chips sit at their preferred width. The loop above has
+    // already folded whatever had to fold for both floors to be meetable, so
+    // this is a negotiation between two sides that both fit.
+    // What is left of the canvas once the rail has taken its width. The rail
+    // is not negotiable — it is the compacted form of a thing that already
+    // lost its negotiation — but at a finger wide it is barely a cost.
+    const usableRoom = Math.max(0, room - railSpan);
     const stageAt = (w) => (n ? n * w + (n - 1) * gap : 0);
     const fieldAt = (w) => (subCols ? subCols * w + fixed : 0);
     let stageW = stageAt(panePref);
     let fieldW = fieldAt(fieldPref);
-    const spare = room - bar - stageW - fieldW;
+    const spare = usableRoom - bar - stageW - fieldW;
     if (spare >= 0) {
       // What is left once both sides stand at their ceiling is the air the
       // New-group column may be set aside from. Room set aside for it only
@@ -385,7 +523,7 @@
       const air = spare - (stageAt(paneMax) - stageW) - (fieldAt(fieldMax) - fieldW);
       const packsNew = newGroup === 'always' || newGroup === 'auto';
       const reserve = packsNew && shaped.length && air >= NEW_W + gap ? NEW_W + gap : 0;
-      const usable = room - bar - reserve;
+      const usable = usableRoom - bar - reserve;
       if (n && subCols) {
         // Stage against field is a golden split of the usable width — the
         // stage φ, the field 1 — inside the floors and ceilings. A side held
@@ -412,7 +550,7 @@
       // The column takes a whole width; what rounding leaves goes to the
       // stage, so the fill still reaches the edge.
       if (subCols) fieldW = Math.floor((fieldW - fixed) / subCols) * subCols + fixed;
-      stageW = n ? room - bar - reserve - fieldW : 0;
+      stageW = n ? usableRoom - bar - reserve - fieldW : 0;
     } else {
       const give = -spare;
       const stageGive = stageW - stageAt(paneMin);
@@ -422,49 +560,187 @@
       stageW -= stageGive * share;
       fieldW -= fieldGive * share;
     }
-    const colW = subCols ? Math.max(fieldMin, Math.floor((fieldW - fixed) / subCols)) : fieldPref;
+    // The canvas does not scroll sideways, so nothing may end up wider than
+    // it. Everything the field could fold has folded by now, so the shortfall
+    // — if there is one at all — is the stage's: the panes go under reading
+    // width, down to PANE_FLOOR, rather than the row running off the screen.
+    // Past that floor too there is nothing left to give and the panes simply
+    // share what the canvas has.
+    const ceiling = Math.max(0, usableRoom - bar);
+    if (stageW + fieldW > ceiling + 0.5) {
+      const over = stageW + fieldW - ceiling;
+      const stageGive = Math.max(0, stageW - stageAt(PANE_FLOOR));
+      const take = Math.min(over, stageGive);
+      stageW -= take;
+      if (over - take > 0.5) {
+        const left = over - take;
+        const fieldGive = Math.max(0, fieldW - fieldAt(0));
+        const off = Math.min(left, fieldGive);
+        fieldW -= off;
+        stageW = Math.max(0, ceiling - fieldW);
+      }
+    }
+    const colW = subCols ? Math.max(0, Math.floor((fieldW - fixed) / subCols)) : fieldPref;
     if (!n) stageW = 0;
 
     const rects = {};
     const stage = { x: margin, y: top, w: stageW, h: availH, cols: [] };
+    // The field is laid first, from the left margin; the stage is placed after
+    // it, against the right edge. The widths either side gets were negotiated
+    // above and do not depend on which end they stand at — only the running
+    // `x` does, so the stage waits its turn.
     let x = margin;
+    const stageSpan = n ? stageW + gap : 0;
 
-    if (n) {
+    // ---- The rail, at the very left. Rank rises to the right and a folded
+    // group is the least of what the canvas is showing, so it stands at the
+    // low end. Every entry is a region like any other — it has a box, it takes
+    // a drop, it wears its folder's colour. What differs is how much of itself
+    // it gets to show.
+    const piles = [];
+    const railRegions = [];
+    if (folded.length) {
+      const entry = (group) => ({
+        folderId: group.folderId ?? null,
+        count: (group.cards ?? []).length,
+        ids: (group.cards ?? []).map((card) => card.id),
+      });
+
+      if (rail.form === 'open') {
+        // A menu with one section unrolled. Closed entries take a row each;
+        // what is left is shared between the entries you opened, and each
+        // shows as many of its chats as its share has room for. More than that
+        // and the count on its header is the rest of the answer — opening is a
+        // peek, and a peek that pushed the panes under reading width would be
+        // the thing this is trying not to be.
+        const openOnes = folded.filter((group) => held.has(pileKey(group)));
+        const shut = folded.length - openOnes.length;
+        const spare = availH - shut * (PILE_ROW_H + gap);
+        const share = openOnes.length ? (spare - (openOnes.length - 1) * gap) / openOnes.length : 0;
+        let y = top;
+        for (const group of folded) {
+          const open2 = held.has(pileKey(group));
+          const base = entry(group);
+          if (!open2) {
+            piles.push({
+              ...base,
+              piled: true,
+              form: 'row',
+              x, y, w: rail.w, h: PILE_ROW_H,
+              col: -1,
+              inner: { x, y, w: rail.w, h: PILE_ROW_H },
+              cards: [],
+            });
+            y += PILE_ROW_H + gap;
+            continue;
+          }
+          const cards = byRank(group.cards ?? []);
+          const room2 = Math.max(NAME_H + PAD, Math.min(share, NAME_H + PAD + cards.length * (chipH + gap)));
+          const fitRows = Math.max(0, Math.floor((room2 - NAME_H - PAD + gap) / (chipH + gap)));
+          const shown = cards.slice(0, fitRows);
+          const h = NAME_H + PAD + (shown.length ? shown.length * (chipH + gap) - gap : 0);
+          const region = {
+            folderId: group.folderId ?? null,
+            opened: true,
+            count: cards.length,
+            hidden: cards.length - shown.length,
+            // What did not fit has no seat, so the caller must know to hide
+            // it — an unplaced card keeps whatever rect it had last.
+            hiddenIds: cards.slice(shown.length).map((card) => card.id),
+            x, y, w: rail.w, h,
+            col: -1,
+            inner: { x: x + PAD / 2, y: y + NAME_H, w: rail.w - PAD, h: h - NAME_H },
+            cards: [],
+          };
+          let cy = y + NAME_H;
+          for (const card of shown) {
+            const rect = { id: card.id, x: x + PAD / 2, y: cy, w: rail.w - PAD, h: chipH };
+            region.cards.push(rect);
+            rects[card.id] = { x: rect.x, y: rect.y, w: rect.w, h: rect.h };
+            cy += chipH + gap;
+          }
+          railRegions.push(region);
+          y += h + gap;
+        }
+      } else if (rail.form === 'tab') {
+        // Tabs turned on their side, dividing the canvas's height between
+        // them, so the rail is full from top to bottom.
+        const th = (availH - (folded.length - 1) * gap) / folded.length;
+        folded.forEach((group, i) => {
+          const py = top + i * (th + gap);
+          piles.push({
+            ...entry(group),
+            piled: true,
+            form: 'tab',
+            x, y: py, w: rail.w, h: th,
+            col: -1,
+            inner: { x, y: py, w: rail.w, h: th },
+            cards: [],
+          });
+        });
+      } else {
+        // Squares. Too many groups for any of them to have a readable run of
+        // height, so the name goes and the colour carries it, with the count
+        // inside. Spaced to fill the rail rather than stacked at the top.
+        const perCol = Math.min(dotPerCol, Math.ceil(folded.length / rail.cols));
+        folded.forEach((group, i) => {
+          const col = Math.floor(i / perCol);
+          const inCol = i % perCol;
+          const tally = Math.min(perCol, folded.length - col * perCol);
+          const step = tally > 1
+            ? Math.max(PILE_DOT + gap, (availH - PILE_DOT) / (tally - 1))
+            : 0;
+          const px = x + col * (PILE_DOT + gap);
+          const py = top + inCol * step;
+          piles.push({
+            ...entry(group),
+            piled: true,
+            form: 'dot',
+            x: px, y: py, w: PILE_DOT, h: PILE_DOT,
+            col: -1 - col,
+            inner: { x: px, y: py, w: PILE_DOT, h: PILE_DOT },
+            cards: [],
+          });
+        });
+      }
+      x += railSpan;
+    }
+
+    const placeStage = (at) => {
+      if (!n) return;
+      stage.x = at;
       const cw = (stageW - (n - 1) * gap) / n;
       fulls.forEach((full, i) => {
         const id = full?.id ?? full;
-        const rect = { id, x: x + i * (cw + gap), y: top, w: cw, h: availH };
+        const rect = { id, x: at + i * (cw + gap), y: top, w: cw, h: availH };
         stage.cols.push(rect);
         rects[id] = { x: rect.x, y: rect.y, w: rect.w, h: rect.h };
       });
-      x += stageW + gap;
-    }
+    };
 
     // A region is as tall as what it holds, and stands in the field column the
     // pass above put it in — so two small folders share a column instead of
     // each taking a tall, mostly empty one. Every region in a column is as
     // wide as the column, which is the width that column was paid for.
     const regions = [];
+    const colWidths = colStacks.map((stacks) => stacks * colW + (stacks - 1) * gap + 2 * PAD);
     const colXs = [];
     {
       let at = x;
-      for (const [index, stacks] of colStacks.entries()) {
+      for (const [index, w] of colWidths.entries()) {
         colXs.push(at);
-        at += stacks * colW + (stacks - 1) * gap + 2 * PAD + (index < colStacks.length - 1 ? gap : 0);
+        at += w + (index < colWidths.length - 1 ? gap : 0);
       }
     }
     let colIndex = 0;
     let colX = x;
     let colTop = top;
-    let colWidth = 0;
     for (const group of shaped) {
-      const stacks = colStacks[group.col] ?? group.stacks.length;
-      const w = stacks * colW + (stacks - 1) * gap + 2 * PAD;
+      const w = colWidths[group.col] ?? (group.stacks.length * colW + (group.stacks.length - 1) * gap + 2 * PAD);
       const h = group.h;
       if (group.col !== colIndex) {
         colIndex = group.col;
         colTop = top;
-        colWidth = 0;
       }
       colX = colXs[group.col] ?? colX;
       const region = {
@@ -490,9 +766,8 @@
       });
       regions.push(region);
       colTop += h + gap;
-      colWidth = Math.max(colWidth, w);
     }
-    if (regions.length) x = colXs[colXs.length - 1] + colWidth + gap;
+    if (colXs.length) x = colXs[colXs.length - 1] + colWidths[colWidths.length - 1] + gap;
 
     // A field column is as tall as the canvas. Regions in it are placed by
     // their content, then share what the column has left, in proportion —
@@ -500,13 +775,14 @@
     const columns = new Map();
     for (const region of regions) columns.set(region.col, [...(columns.get(region.col) ?? []), region]);
     for (const stacked of columns.values()) {
+      const roomH = availH;
       const content = stacked.reduce((sum, region) => sum + region.h, 0);
-      const left = availH - content - (stacked.length - 1) * gap;
+      const left = roomH - content - (stacked.length - 1) * gap;
       if (left <= 0.01 || !content) continue;
       let y = top;
-      for (const [index, region] of stacked.entries()) {
-        const last = index === stacked.length - 1;
-        const grown = last ? top + availH - y : Math.round(region.h + left * (region.h / content));
+      for (const [i, region] of stacked.entries()) {
+        const last = i === stacked.length - 1;
+        const grown = last ? top + roomH - y : Math.round(region.h + left * (region.h / content));
         const dy = y - region.y;
         region.y = y;
         region.h = grown;
@@ -531,19 +807,29 @@
     // canvas edge: a column reserved only for the length of a drag shoves the
     // whole field sideways the instant you lift a card, and a gesture that
     // moves its own target is not a gesture.
-    const wantsNew = newGroup !== 'never' && newGroup !== 'rail' && regions.length
-      && (newGroup === 'always' || margin + room - x >= NEW_W - 0.5);
+    // The room left over is measured against what the stage still has to be
+    // given, since the stage is placed after this and not before it.
+    const wantsNew = newGroup !== 'never' && newGroup !== 'rail' && (regions.length || piles.length)
+      && (newGroup === 'always' || margin + room - x - stageSpan >= NEW_W - 0.5);
     const newSlot = wantsNew ? { x, y: top, w: NEW_W, h: availH } : null;
     if (newSlot) x += NEW_W + gap;
 
-    const placed = n || regions.length;
+    placeStage(x);
+    if (n) x += stageW + gap;
+
     return {
       stage,
-      regions,
+      // Piles stand in the same list as the regions they are the folded form
+      // of: a basin is painted from this, a drop is hit-tested against it, and
+      // neither cares how big the box is.
+      regions: [...piles, ...railRegions, ...regions],
+      piles,
       newGroup: newSlot,
       rects,
       colW,
-      width: placed ? Math.max(canvas.w, x - gap + margin) : Math.max(canvas.w, 2 * margin),
+      // The canvas never scrolls sideways. Everything above is a negotiation
+      // to make that true; this is only where it is stated.
+      width: Math.max(canvas.w, 2 * margin),
       height,
     };
   };
@@ -647,6 +933,12 @@
     FIELD_PREF,
     FIELD_MAX,
     NEW_W,
+    PILE_W,
+    PILE_MIN_H,
+    PILE_DOT,
+    PILE_OPEN_W,
+    PILE_ROW_H,
+    PANE_FLOOR,
     PHI,
     realmOf,
     suggestName,

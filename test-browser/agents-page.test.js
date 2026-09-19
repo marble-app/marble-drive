@@ -160,7 +160,7 @@ test('the Agents page has no drawer and lists a conversation', async () => {
     return id;
   });
   await page.locator(`.conv[data-id="${id}"]`).waitFor();
-  assert.match(await page.locator(`.conv[data-id="${id}"] .title`).textContent(), /script:rename|Untitled/);
+  assert.match(await page.locator(`.conv[data-id="${id}"] .title`).textContent(), /script:rename|New Chat/);
   assert.deepEqual(errors, []);
 });
 

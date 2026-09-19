@@ -133,9 +133,11 @@ test('a pinned Full is a full-height column, not a band across the top', () => {
   assert.equal(Math.round(stage.cols[0].y), Math.round(stage.cols[1].y), 'one row');
 });
 
-test('the field never starts above the stage it sits beside', () => {
+test('the field stands to the left of the stage, never above it', () => {
   const { stage, regions } = pack({ fulls: [{ id: 'f0' }], groups: FIELD });
-  for (const region of regions) assert.ok(region.x >= stage.x + stage.w, 'a folder column overlapped the stage');
+  // Priority rises to the right: folders first, the pins at the far edge.
+  for (const region of regions) assert.ok(region.x + region.w <= stage.x + 0.01, 'a folder column overlapped the stage');
+  assert.ok(stage.x > regions[0].x, 'the stage is the right-hand end of the row');
   assert.equal(Math.round(regions[0].y), Math.round(stage.y), 'the field is beside, not below');
 });
 
@@ -156,11 +158,156 @@ test('every field card spans its column, so a chip is a row and not a ragged edg
   }
 });
 
-test('the canvas scrolls sideways rather than pinning a conversation below reading width', () => {
+test('the field folds into piles rather than letting the canvas scroll sideways', () => {
   const four = pack({ fulls: cards('f', 4, 'full'), groups: FIELD });
-  for (const col of four.stage.cols) assert.ok(col.w >= F().PANE_MIN);
-  assert.ok(four.width > CANVAS.w, 'four pins and three folders should scroll');
+  for (const col of four.stage.cols) assert.ok(col.w >= F().PANE_MIN, `a pane went under reading width at ${col.w}`);
+  assert.equal(four.width, CANVAS.w, 'the canvas never scrolls sideways');
   assert.equal(four.height, CANVAS.h, 'and never scroll vertically');
+  // Three folders cannot stand beside four conversations on a 1440 canvas, so
+  // they fold: each becomes a pile, and the stage gets the width they were in.
+  assert.equal(four.piles.length, 3, 'every group folded to make room');
+  assert.equal(four.regions.filter((region) => !region.piled).length, 0);
+  const railH = four.piles.reduce((sum, pile) => sum + pile.h, 0) + (four.piles.length - 1) * F().GAP;
+  for (const pile of four.piles) {
+    assert.equal(pile.w, F().PILE_W, 'a pile is a tab, a finger wide');
+    assert.ok(pile.h >= F().PILE_MIN_H, `a tab is never shorter than a word, got ${Math.round(pile.h)}`);
+    assert.ok(pile.x + pile.w <= four.stage.x, 'a pile is the low end of the row');
+  }
+  // The rail is full from top to bottom: the tabs divide the canvas's height
+  // between them rather than sitting in a stack with white space under it.
+  assert.ok(Math.abs(railH - (CANVAS.h - 2 * MARGIN)) < 2, `the rail left white space: ${Math.round(railH)}`);
+  assert.deepEqual(four.piles.map((pile) => pile.folderId), ['aaaaaaaaaaaa', 'bbbbbbbbbbbb', null],
+    'the rail reads in catalog order, whatever order things folded in');
+});
+
+test('a group with recent work stays open while a stale one folds', () => {
+  const packed = F().packFocus({
+    canvas: { w: 1000, h: 810 },
+    sizes: SIZES,
+    fulls: cards('f', 2, 'full'),
+    groups: [
+      { ...FIELD[0], weight: 10 },
+      { ...FIELD[1], weight: 5_000 },
+      { ...FIELD[2], weight: 900 },
+    ],
+  });
+  assert.equal(packed.width, 1000);
+  const open = packed.regions.filter((region) => !region.piled).map((region) => region.folderId);
+  assert.ok(open.includes('bbbbbbbbbbbb'), 'the heaviest group is the last one standing');
+  assert.ok(packed.piles.some((pile) => pile.folderId === 'aaaaaaaaaaaa'), 'the lightest folded first');
+});
+
+test('a folded group costs a tab of width, not a column', () => {
+  // The shape of the complaint: one open group and one big folded one. Laid
+  // flat, the folded one charged the stage a whole column to use thirty pixels
+  // of it. On its side it is a tab, and the stage keeps the rest.
+  const groups = [
+    { folderId: 'polish000000', cards: cards('p', 4, 'digest'), weight: 9e12 },
+    { folderId: null, cards: cards('u', 23, 'chip') },
+  ];
+  const packed = F().packFocus({ canvas: { w: 1600, h: 810 }, sizes: SIZES, fulls: cards('f', 4, 'full'), groups });
+  assert.equal(packed.piles.length, 1, 'Ungrouped folded');
+  const [pile] = packed.piles;
+  const open = packed.regions.filter((region) => !region.piled);
+  assert.equal(open.length, 1);
+  const [region] = open;
+  assert.equal(pile.w, F().PILE_W);
+  assert.ok(pile.w < 40, 'a tab is a finger wide');
+  // Full height, and standing to the left of everything else in the row.
+  assert.ok(Math.abs(pile.h - (810 - 2 * MARGIN)) < 2, 'one tab fills the rail');
+  assert.ok(pile.x + pile.w <= region.x + 0.5, 'the rail is the low end of the row');
+  assert.ok(pile.x + pile.w <= packed.stage.x);
+
+  // And a group held open is not a column either: the rail widens once, to one
+  // field column's floor, and the entry lists its chats inside it.
+  const apart = F().packFocus({
+    canvas: { w: 1600, h: 810 }, sizes: SIZES, fulls: cards('f', 4, 'full'), groups, opened: [null],
+  });
+  const unrolled = apart.regions.find((r) => r.opened && r.folderId === null);
+  assert.ok(unrolled, 'the opened group is drawn, expanded, in the rail');
+  assert.equal(unrolled.w, F().PILE_OPEN_W, 'the rail widened to exactly one column floor');
+  assert.ok(unrolled.cards.length > 0, 'and it lists its chats');
+  assert.ok(unrolled.x + unrolled.w <= apart.stage.x, 'still at the low end of the row');
+  // Opening costs the stage the rail's widening and nothing else — it is a
+  // peek, not a promotion back to a column of its own.
+  assert.ok(apart.stage.w >= packed.stage.w - (F().PILE_OPEN_W - F().PILE_W) - 2,
+    `opening cost more than the rail's widening (${Math.round(packed.stage.w)} → ${Math.round(apart.stage.w)})`);
+});
+
+test('an opened entry lists what fits and says how much it did not', () => {
+  const groups = [{ folderId: null, cards: cards('u', 40, 'chip') }];
+  const packed = F().packFocus({
+    canvas: { w: 1200, h: 810 }, sizes: SIZES, fulls: cards('f', 3, 'full'), groups, opened: [null],
+  });
+  const [unrolled] = packed.regions.filter((region) => region.opened);
+  assert.ok(unrolled, 'opened');
+  assert.equal(unrolled.count, 40);
+  assert.ok(unrolled.cards.length > 0 && unrolled.cards.length < 40, 'shows what fits');
+  assert.equal(unrolled.hidden, 40 - unrolled.cards.length, 'and counts what it could not');
+  assert.equal(unrolled.hiddenIds.length, unrolled.hidden, 'naming every card it did not seat');
+  // Nothing it drew ran off the bottom of the canvas.
+  for (const card of unrolled.cards) assert.ok(card.y + card.h <= 810 - MARGIN + 1, 'a row escaped the rail');
+  assert.equal(packed.width, 1200);
+});
+
+test('too many groups for tabs and each becomes a square with its count', () => {
+  const groups = Array.from({ length: 18 }, (_, i) => (
+    { folderId: `f${String(i).padStart(11, '0')}`, cards: cards(`g${i}`, i + 1, 'digest') }
+  ));
+  const packed = F().packFocus({ canvas: { w: 1100, h: 810 }, sizes: SIZES, fulls: cards('f', 3, 'full'), groups });
+  assert.equal(packed.piles.length, 18, 'every group folded');
+  for (const pile of packed.piles) {
+    assert.equal(pile.form, 'dot', 'eighteen tabs cannot each have a readable run of height');
+    assert.equal(pile.w, F().PILE_DOT);
+    assert.equal(pile.h, F().PILE_DOT);
+    assert.ok(pile.count > 0, 'and a square carries its count');
+  }
+  // The squares spread down the rail rather than stacking at the top: the
+  // white space under a short stack was the complaint that started this.
+  const ys = packed.piles.map((pile) => pile.y).sort((a, b) => a - b);
+  assert.ok(ys[ys.length - 1] + F().PILE_DOT > 810 - 2 * MARGIN - F().PILE_DOT,
+    'the rail should be full top to bottom');
+  // And a square costs less width than a tab did.
+  assert.ok(F().PILE_DOT < F().PILE_W);
+  assert.equal(packed.width, 1100);
+});
+
+test('many piles stack down one column rather than across several', () => {
+  const groups = Array.from({ length: 6 }, (_, i) => ({ folderId: `f${i}${'0'.repeat(11 - String(i).length)}`, cards: cards(`g${i}`, 3, 'digest') }));
+  const packed = F().packFocus({ canvas: { w: 1200, h: 810 }, sizes: SIZES, fulls: cards('f', 3, 'full'), groups });
+  assert.ok(packed.piles.length >= 2, 'the canvas is tight enough to fold several');
+  const xs = new Set(packed.piles.map((pile) => Math.round(pile.x)));
+  assert.equal(xs.size, 1, `piles should share one column, stood in ${xs.size}`);
+  const stacked = [...packed.piles].sort((a, b) => a.y - b.y);
+  for (let i = 1; i < stacked.length; i += 1) {
+    const above = stacked[i - 1];
+    assert.ok(stacked[i].y >= above.y + above.h - 0.5, 'and not overlap');
+  }
+  const railH = stacked.reduce((sum, pile) => sum + pile.h, 0) + (stacked.length - 1) * F().GAP;
+  assert.ok(Math.abs(railH - (810 - 2 * MARGIN)) < 2, 'and fill the rail top to bottom');
+  assert.equal(packed.width, 1200);
+});
+
+test('a group the person opened is never folded, however tight the canvas', () => {
+  const tight = { canvas: { w: 900, h: 810 }, sizes: SIZES, fulls: cards('f', 3, 'full'), groups: FIELD };
+  const shut = F().packFocus(tight);
+  assert.equal(shut.piles.length, 3, 'left alone, three pins on a 900px canvas fold everything');
+  // Held open, the shortfall comes off the panes instead — which is the whole
+  // point: the person said they wanted to see this group.
+  const held = F().packFocus({ ...tight, opened: [null] });
+  assert.ok(held.regions.some((region) => region.folderId === null && !region.piled), 'Ungrouped stayed open');
+  assert.ok(!held.piles.some((pile) => pile.folderId === null), 'and is not also a pile');
+  assert.equal(held.width, 900, 'and the canvas still does not scroll');
+  assert.ok(held.stage.cols[0].w < shut.stage.cols[0].w, 'the panes paid for it');
+});
+
+test('an explicitly folded group is a pile even on a canvas with room to spare', () => {
+  const packed = pack({ groups: [FIELD[0], FIELD[1]], piled: ['aaaaaaaaaaaa'] });
+  assert.equal(packed.piles.length, 1);
+  assert.equal(packed.piles[0].folderId, 'aaaaaaaaaaaa');
+  assert.equal(packed.piles[0].count, 4, 'a pile counts what it swallowed');
+  assert.equal(packed.piles[0].cards.length, 0, 'and stands nothing up');
+  for (const card of FIELD[0].cards) assert.equal(packed.rects[card.id], undefined, 'a piled card has no seat');
 });
 
 test('one pin and a small field fit without scrolling, and the pane takes the slack', () => {
@@ -171,7 +318,8 @@ test('one pin and a small field fit without scrolling, and the pane takes the sl
   // preferred widths until the New-group slot touches the right edge.
   assert.ok(packed.stage.cols[0].w > F().PANE_MAX, 'the pane grows into the leftover width');
   assert.ok(packed.newGroup, 'the New-group slot is still offered');
-  assert.ok(Math.abs(packed.newGroup.x + packed.newGroup.w + MARGIN - CANVAS.w) < 2, 'the field reaches the right edge');
+  assert.ok(packed.newGroup.x + packed.newGroup.w <= packed.stage.x + 0.01, 'it belongs to the field, so it stays left of the stage');
+  assert.ok(Math.abs(packed.stage.x + packed.stage.w + MARGIN - CANVAS.w) < 2, 'the stage reaches the right edge');
 });
 
 test('PHI is the golden ratio, and the digest card is a golden rectangle', () => {
@@ -185,7 +333,7 @@ test('at rest the stage stands against the field in the golden ratio', () => {
   const [region] = packed.regions;
   const ratio = packed.stage.w / region.w;
   assert.ok(Math.abs(ratio - F().PHI) / F().PHI < 0.01, `stage/field should be φ, got ${ratio}`);
-  assert.ok(Math.abs(packed.newGroup.x + packed.newGroup.w + MARGIN - 1400) < 2, 'and the canvas is still filled to the edge');
+  assert.ok(Math.abs(packed.stage.x + packed.stage.w + MARGIN - 1400) < 2, 'and the canvas is still filled to the edge');
 });
 
 test('the golden split holds with two pins and a field that wraps', () => {
@@ -204,11 +352,29 @@ test('floors win over the golden ratio when the canvas is tight', () => {
   assert.ok(tight.colW >= F().FIELD_MIN);
   assert.equal(tight.width, 1100, 'it fits without scrolling');
   assert.ok(tight.stage.w / tight.regions[0].w > F().PHI * 1.2, 'the ratio gave way to the floors');
-  // Tighter still: both at their floors, and the canvas scrolls.
+  // Tighter still: the field folds away altogether, and a rail of tabs costs
+  // so little that two panes still stand at reading width on a 700px canvas.
   const tighter = F().packFocus({ canvas: { w: 700, h: 810 }, sizes: SIZES, fulls: [{ id: 'f0' }, { id: 'f1' }], groups: [FIELD[0]] });
-  for (const col of tighter.stage.cols) assert.ok(Math.abs(col.w - F().PANE_MIN) < 1);
-  assert.equal(tighter.colW, F().FIELD_MIN);
-  assert.ok(tighter.width > 700, 'the floors win and the canvas scrolls');
+  assert.equal(tighter.piles.length, 1, 'the folder folded');
+  assert.equal(tighter.width, 700, 'and the canvas still does not scroll');
+  for (const col of tighter.stage.cols) assert.ok(col.w >= F().PANE_MIN, `a pane at ${Math.round(col.w)}`);
+  assert.ok(tighter.stage.x + tighter.stage.w <= 700 - MARGIN + 1, 'and the row ends at the edge');
+
+  // Past even that: three panes on a 700px canvas cannot all read, and the
+  // panes — not the canvas — take the shortfall, down to PANE_FLOOR.
+  const crushed = F().packFocus({ canvas: { w: 700, h: 810 }, sizes: SIZES, fulls: cards('f', 3, 'full'), groups: [FIELD[0]] });
+  assert.equal(crushed.width, 700, 'still no sideways scroll');
+  for (const col of crushed.stage.cols) {
+    assert.ok(col.w < F().PANE_MIN, 'three panes on a 700px canvas go under reading width');
+    assert.ok(col.w >= F().PANE_FLOOR - 1, `never under PANE_FLOOR, got ${Math.round(col.w)}`);
+  }
+  // Past PANE_FLOOR too there is nothing left to give: the panes share what
+  // the canvas has and the row still ends at the edge. (`maxStageColumns`
+  // keeps the real stage from ever asking for this many columns at this
+  // width; the packer answers anyway rather than overflowing.)
+  const hopeless = F().packFocus({ canvas: { w: 700, h: 810 }, sizes: SIZES, fulls: cards('f', 6, 'full'), groups: [FIELD[0]] });
+  assert.equal(hopeless.width, 700);
+  assert.ok(hopeless.stage.x + hopeless.stage.w <= 700 - MARGIN + 1, 'and the row ends at the edge');
 });
 
 test('a lone region fills its column, and the columns share a wide canvas', () => {

@@ -216,14 +216,19 @@ __ICON__
     .topbar { flex-wrap: nowrap; }
     .topbar .usage { justify-content: flex-end; flex: 1 1 auto; }
     .topbar .meter { flex: 0 1 auto; }
-    .topbar .usage .meter-bar { width: 5.5rem; flex: 0 1 5.5rem; min-width: 2rem; }
+    .topbar .usage .meter-bar { width: 5.5rem; flex: 0 1 5.5rem; min-width: 1.25rem; }
   }
   @media (min-width: 720px) and (max-width: 1099px) {
     .topbar .usage .meter-pct { display: none; }
   }
   .meter-label {
     font-size: 12.5px; font-weight: 500; color: var(--muted); letter-spacing: -.01em;
+    min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
   }
+  /* The last step of that cascade. Without it the labels are the one thing on
+     the row that cannot give, so past a certain width they simply ran into the
+     next meter's bar. */
+  @media (min-width: 720px) { .topbar .usage .meter-label { flex: 0 1 auto; } }
   .meter-bar {
     display: block; width: 5.5rem; height: 8px; flex: none;
     border-radius: 999px; background: var(--paper-3);
@@ -493,8 +498,12 @@ __ICON__
   .rail-menu button[data-tone="quiet"] { color: var(--muted); }
   .rail-menu button[data-tone="quiet"]:hover { color: var(--ink); }
   .focus-workspace { display: none; }
+  /* Never sideways. Focus is one screen: what will not fit beside the panes
+     you asked for compacts until it does — cards to chips, groups to piles —
+     and a row that ran off the right edge was the layout refusing to make
+     that choice. Down is still allowed; a column of cards is a column. */
   .focus {
-    position: relative; overflow: auto; background: var(--paper);
+    position: relative; overflow: hidden auto; background: var(--paper);
   }
   .focus-empty {
     position: absolute; inset: 0; display: grid; place-items: center;
@@ -659,6 +668,133 @@ __ICON__
     background: color-mix(in srgb, var(--accent-ink) 10%, var(--paper));
     box-shadow: inset 0 0 0 2px color-mix(in srgb, var(--accent-ink) 55%, transparent);
   }
+  /* A group folded down to a tab, because the stage wanted its width. Laid
+     flat it was a 152px box using 30px of an 800px column — a column's worth
+     of width to say one word, and white space under it for the rest of the
+     canvas. Turned on its side it is a finger wide, full height, and the
+     whole rail reads as one vertical menu of what you are not working on. */
+  .focus-basin[data-pile] {
+    pointer-events: auto; cursor: pointer; overflow: hidden;
+    display: flex; flex-direction: column; align-items: center;
+    gap: .35rem; padding: .4rem 0 .45rem; border-radius: 9px;
+    background: color-mix(in srgb, var(--folder, var(--line)) 16%, var(--paper-2));
+    border-color: color-mix(in srgb, var(--folder, var(--line)) 42%, var(--line));
+  }
+  /* The colour reads across the top of the tab, where a folder's tab would be. */
+  .focus-basin[data-pile]::before {
+    content: ''; position: absolute; left: 6px; right: 6px; top: 0; height: 3px;
+    border-radius: 0 0 2px 2px;
+    background: color-mix(in srgb, var(--folder, var(--muted)) 70%, transparent);
+  }
+  .focus-basin[data-pile]:hover {
+    background: color-mix(in srgb, var(--folder, var(--line)) 26%, var(--card));
+    border-color: color-mix(in srgb, var(--folder, var(--accent-ink)) 55%, var(--line));
+  }
+  /* Loose chats keep their dashed edge when they fold — the fold says "not
+     enough room", not "filed". */
+  .focus-basin[data-loose][data-pile] {
+    border-style: dashed; background: var(--paper-2);
+  }
+  /* The name is the tab. Turned a quarter turn it runs the length of the rail,
+     which is what lets the rail be a finger wide; it takes all the height the
+     count and the button do not, and ellipsises rather than wrapping. */
+  .focus-basin[data-pile] .focus-basin-name {
+    position: static; top: auto; left: auto;
+    writing-mode: vertical-rl; flex: 1; min-height: 0; min-width: 0;
+    /* Only the tab is rotated; see the row and square forms below. */
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+    text-align: left; cursor: pointer; color: var(--ink);
+    padding: 0; letter-spacing: .01em;
+  }
+  .focus-basin[data-loose][data-pile] .focus-basin-name { color: var(--muted); }
+  .focus-basin-count {
+    display: none; flex: none; padding: 0 .28rem; min-width: 1.05rem;
+    border-radius: 999px; text-align: center;
+    font-size: .62rem; font-variant-numeric: tabular-nums; line-height: 1.55;
+    color: var(--muted); background: color-mix(in srgb, var(--folder, var(--line)) 26%, var(--card));
+  }
+  .focus-basin[data-pile] .focus-basin-count:not(:empty) { display: block; order: -1; }
+
+  /* ---- The rail's other two forms.
+
+     A square. Too many groups for any of them to have a readable run of
+     height, so the name goes entirely and the colour carries it, with the
+     count inside. It is the smallest a group gets and still says something. */
+  .focus-basin[data-pile="dot"] {
+    padding: 0; border-radius: 7px; gap: 0;
+    justify-content: center;
+    background: color-mix(in srgb, var(--folder, var(--line)) 42%, var(--paper-2));
+    border-color: color-mix(in srgb, var(--folder, var(--line)) 62%, var(--line));
+  }
+  .focus-basin[data-pile="dot"]::before { display: none; }
+  .focus-basin[data-pile="dot"] .focus-basin-name { display: none; }
+  .focus-basin[data-pile="dot"] .focus-basin-count:not(:empty) {
+    order: 0; background: none; padding: 0; min-width: 0;
+    font-size: .68rem; font-weight: 500; line-height: 1;
+    color: color-mix(in srgb, var(--folder, var(--muted)) 55%, var(--ink));
+  }
+  .focus-basin[data-pile="dot"]:hover {
+    background: color-mix(in srgb, var(--folder, var(--line)) 62%, var(--card));
+  }
+  /* A square is 26px of room for exactly one thing, and that thing is the
+     count. The lens button still occupies flex space at opacity 0, which was
+     enough to shove the count out of the box and under `overflow: hidden` —
+     so at this size it is not in the layout at all. The mode pill in the top
+     bar is where Focus/Unfocus lives when the rail is this small. */
+  .focus-basin[data-pile="dot"] .focus-basin-focus { display: none; }
+  .focus-basin[data-loose][data-pile="dot"] { background: var(--paper-3); }
+
+  /* A menu row, inside a rail that has been opened. The rail is wide enough
+     for a name the right way up, so nothing is rotated here. */
+  .focus-basin[data-pile="row"] {
+    flex-direction: row; align-items: center; gap: .35rem;
+    padding: 0 .4rem; border-radius: 7px;
+  }
+  .focus-basin[data-pile="row"]::before {
+    left: 0; right: auto; top: 5px; bottom: 5px; height: auto; width: 3px;
+    border-radius: 0 2px 2px 0;
+  }
+  .focus-basin[data-pile="row"] .focus-basin-name {
+    writing-mode: horizontal-tb; flex: 1; min-width: 0; min-height: 0;
+    padding-left: .3rem;
+  }
+  .focus-basin[data-pile="row"] .focus-basin-count:not(:empty) { order: 0; }
+  .focus-basin[data-pile="row"] .focus-basin-focus { writing-mode: horizontal-tb; padding: 0 .4rem; }
+
+  /* An opened entry: the group you clicked, unrolled inside the rail. It is a
+     section of a menu, not a column of the field — its name sits on one line
+     at the top and its chats are the rows under it. */
+  .focus-basin[data-opened] {
+    pointer-events: auto; border-radius: 9px;
+    background: color-mix(in srgb, var(--folder, var(--line)) 10%, var(--paper-2));
+    border-color: color-mix(in srgb, var(--folder, var(--line)) 38%, var(--line));
+  }
+  .focus-basin[data-opened] .focus-basin-name {
+    top: .3rem; left: .5rem; cursor: pointer;
+  }
+  .focus-basin[data-opened] .focus-basin-count:not(:empty) {
+    display: block; position: absolute; top: .28rem; right: .4rem;
+  }
+  /* What the peek could not fit. The badge says how many there are; this says
+     how many of them are not on screen. */
+  .focus-basin[data-opened][data-more]::after {
+    content: '+' attr(data-more); position: absolute; right: .45rem; bottom: .25rem;
+    font-size: .62rem; color: var(--faint); font-variant-numeric: tabular-nums;
+  }
+  /* Folded, the group's one remaining word is whether it is the lens. A tab is
+     too narrow to read a button across, so that turns too, and it sits at the
+     foot of the rail where the eye ends. It shows on hover, or stays for good
+     while it reads Unfocus, because then it is saying something. */
+  .focus-basin[data-pile] .focus-basin-focus {
+    position: static; top: auto; left: auto !important; flex: none;
+    writing-mode: vertical-rl; padding: .35rem 0; max-height: 5rem;
+    overflow: hidden; border-radius: 999px;
+  }
+  .focus-basin[data-pile]:hover .focus-basin-focus { opacity: 1; transition-delay: 0s; }
+  .focus-basin-count { transition: opacity 120ms var(--ease-out); }
+  /* A chat in a folded group has no seat on the canvas — the pile stands for
+     the whole of it. The element stays so that opening the pile is a paint. */
+  .focus-card[data-piled] { display: none; }
   .focus-basin-name {
     pointer-events: auto; position: absolute; top: .5rem; left: 18px;
     font-size: .72rem; font-weight: 500; color: var(--folder, var(--muted));
@@ -680,24 +816,18 @@ __ICON__
   .focus-basin-focus:hover, .focus-basin-focus:focus-visible { background: var(--accent-soft); color: var(--ink); outline: none; }
   .focus-basin-focus[aria-pressed="true"] { color: var(--ink); border-color: color-mix(in srgb, var(--folder, var(--line)) 60%, var(--line)); }
   @media (hover: none) { .focus-basin-focus { opacity: 1; } }
-  /* Which set holds the stage: Pinned, Active, or one Group. A segmented
-     pill at the canvas's top-right — the top-left is under the pane whenever
-     anything is staged. Over the field's cards, under the pane and the look. */
-  .focus-modes {
-    position: absolute; top: 8px; right: 8px; z-index: 5;
-    display: inline-flex; align-items: center; gap: 1px; padding: 2px;
-    border: 1px solid var(--line); border-radius: 999px; background: var(--paper);
-    box-shadow: var(--shadow); font-size: .72rem;
-  }
+  /* Which set holds the stage: Pinned, Active, or one Group. It sits in the
+     top bar beside the view switch and wears the same segmented control:
+     choosing what Focus stages is chrome for the page, not furniture on the
+     canvas, so the canvas keeps its corner and its whole field. It is shown
+     only in Focus, because it only means anything there. */
+  .focus-modes { position: relative; }
   .focus-modes[hidden] { display: none; }
+  body:not([data-view="focus"]) .focus-modes, body[data-phone] .focus-modes { display: none; }
   .focus-modes > button {
-    appearance: none; border: 0; background: none; color: var(--muted);
-    display: inline-flex; align-items: center; gap: .3rem; max-width: 10rem;
-    border-radius: 999px; padding: .12rem .5rem; font: inherit; font-size: .72rem;
-    cursor: pointer; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+    display: inline-flex; align-items: center; gap: .3rem; max-width: 9rem;
+    overflow: hidden; text-overflow: ellipsis;
   }
-  .focus-modes > button:hover, .focus-modes > button:focus-visible { background: var(--accent-soft); color: var(--ink); outline: none; }
-  .focus-modes > button[aria-pressed="true"] { background: var(--paper-3); color: var(--ink); font-weight: 500; }
   .focus-modes > button[data-color]::before {
     content: ''; flex: none; width: .5rem; height: .5rem; border-radius: 2px;
     background: var(--folder, var(--line));
@@ -726,8 +856,8 @@ __ICON__
   .focus-modes-tick { flex: none; width: .55rem; height: .55rem; border-radius: 2px; background: var(--folder, var(--line)); }
   .focus-modes-none { padding: .32rem .5rem; font-size: .78rem; color: var(--faint); white-space: nowrap; }
   /* Under a lens, what is off the stage is dim: the stage is the only lit thing. */
-  .focus[data-mode="active"]:not([data-phone]) .focus-card[data-lod="chip"]:not(.marble-dragging),
-  .focus[data-mode="group"]:not([data-phone]) .focus-card[data-lod="chip"]:not(.marble-dragging) { opacity: .55; }
+  .focus[data-mode="active"][data-staged="true"]:not([data-phone]) .focus-card[data-lod="chip"]:not(.marble-dragging),
+  .focus[data-mode="group"][data-staged="true"]:not([data-phone]) .focus-card[data-lod="chip"]:not(.marble-dragging) { opacity: .55; }
   /* Where the card would land, drawn at the rect the layout already reserved
      for it: a gap in a folder column, or the full-height column a pin becomes. */
   .focus-slot {
@@ -791,7 +921,7 @@ __ICON__
   .focus[data-phone] .focus-card[data-lod="full"] .focus-card-body { opacity: .5; }
   .focus[data-phone] .focus-card-actions, .focus[data-phone] .focus-slot, .focus[data-phone] .focus-newgroup,
   .focus[data-phone] .focus-pinslot, .focus[data-phone] .focus-extent, .focus[data-phone] .focus-basin,
-  .focus[data-phone] .focus-empty, .focus[data-phone] .focus-modes { display: none; }
+  .focus[data-phone] .focus-empty { display: none; }
   .focus[data-phone] .focus-card-head { min-height: 44px; }
   /* A digest has four lines of room: the provider tag and the folder tick
      are not among them on a phone. */
@@ -2334,7 +2464,7 @@ __ICON__
       dot.setAttribute('aria-hidden', 'true');
       const title = document.createElement('span');
       title.className = 'tab-title';
-      title.textContent = summary.title || 'Untitled';
+      title.textContent = summary.title || 'New Chat';
       const when = document.createElement('span');
       when.className = 'tab-age';
       when.textContent = age(summary.updatedAt);
@@ -2665,7 +2795,7 @@ __ICON__
         selectAnchor = tab.dataset.id;
         paintTabSelection();
         const one = ids.length === 1;
-        head(one ? (summaries.get(ids[0])?.title || 'Untitled') : `${ids.length} chats`);
+        head(one ? (summaries.get(ids[0])?.title || 'New Chat') : `${ids.length} chats`);
         add(one ? 'New folder from this chat' : `New folder from ${ids.length} chats`, () => makeFolderFrom(ids));
         const homes = ids.map((id) => summaries.get(id)?.folderId ?? null);
         const elsewhere = [...folderCatalog]
@@ -2879,7 +3009,7 @@ __ICON__
     // nobody has ever arranged.
     const focusFullIds = () => focusColumnsOf(matchingFocusItems(), null).stage;
 
-    // How wide the left edge reads as "pin this" when there is no stage.
+    // How wide the right edge reads as "pin this" when there is no stage.
     const FOCUS_RAIL = 48;
 
     const folderColorOf = (folderId) => folderCatalog.find((row) => row.id === folderId)?.color || '';
@@ -2920,7 +3050,63 @@ __ICON__
       if (focusMode.startsWith('group:') && !focusModeFolder()) setFocusMode('pinned', { quiet: true });
     };
 
+    // ---- Piles. A group the canvas has no room for folds into a folder: a
+    // tab, a name and a count, standing in a rail down the low end of the row.
+    // Which group folds is the packer's call, and it only folds what it must
+    // to keep the stage at reading width without the canvas scrolling
+    // sideways. `weight` is how it chooses — recency, so the group nothing has
+    // happened in is the one that disappears — and `focusOpened` is the
+    // override: a group you opened by hand is never the loop's to fold, so
+    // the width comes off the panes instead. Clicking its name folds it back.
+    let focusOpened = new Set();
+
+    // A basin is addressed by `data-folder-id`, where the loose one is the
+    // string 'ungrouped'; the packer knows it as `null`. One convention in the
+    // set, converted here, or an opened Ungrouped pile folds straight back.
+    const pileKeyOf = (id) => (id === 'ungrouped' ? null : id);
+    const toggleFocusPile = (id, open) => {
+      const key = pileKeyOf(id);
+      if (open) focusOpened.add(key);
+      else focusOpened.delete(key);
+      paintFocus();
+    };
+
     const isActiveChat = (item) => statusOf(item) === 'running' || Boolean(item.asking) || Boolean(item.needsReview);
+
+    // ---- Active's holdover. A chat stops being active the moment you click
+    // into it — reading a finished turn is reviewing it, which clears Needs
+    // review — so a stage that held only what is live threw a chat off the
+    // instant you went to read it. Being looked at is the worst reason to be
+    // relegated.
+    //
+    // So the Active stage is a generation of work, not a live query: it keeps
+    // everything that has been active since the last time new work arrived,
+    // and a chat entering the active set is what starts the next generation.
+    // `activeHeld` is what is staged but no longer live; `activeLive` is what
+    // was live at the last settle, so an id in the one and not the other is
+    // the arrival that sweeps. Nothing here is stored: leave Active and the
+    // generation is forgotten, like the mode itself.
+    let activeHeld = new Set();
+    let activeLive = new Set();
+
+    const settleActiveStage = (items) => {
+      if (effectiveFocusMode() !== 'active') {
+        activeHeld = new Set();
+        activeLive = new Set();
+        return;
+      }
+      const live = new Set(items.filter(isActiveChat).map((item) => item.id));
+      const arrived = [...live].some((id) => !activeLive.has(id));
+      // New work takes the stage and what is finished with steps off. This is
+      // the only thing that relegates: your own attention never does.
+      if (arrived) activeHeld = new Set();
+      for (const id of activeLive) if (!live.has(id)) activeHeld.add(id);
+      // A chat that is live again is not being held, and a chat that has been
+      // archived is not anywhere. Held ids are kept even while a search hides
+      // them, so clearing the filter gives the stage back.
+      for (const id of [...activeHeld]) if (live.has(id) || !summaries.has(id)) activeHeld.delete(id);
+      activeLive = live;
+    };
     const isLiveChat = (item) => statusOf(item) === 'running' || Boolean(item.asking);
     const recencyOf = (item) => Math.max(item.lastInteractedAt ?? 0, item.updatedAt ?? 0);
 
@@ -2929,14 +3115,15 @@ __ICON__
       const mode = effectiveFocusMode();
       if (mode === 'pinned') return pinnedIdsOf(items);
       if (mode === 'active') {
-        const active = items
-          .filter(isActiveChat)
-          .sort((a, b) => (b.updatedAt ?? 0) - (a.updatedAt ?? 0));
-        if (active.length) return active.slice(0, FULL_CAP).map((item) => item.id);
-        // Nothing active: the most recent chat holds the stage so the pane is
-        // never blank.
-        const latest = [...items].sort((a, b) => (b.updatedAt ?? 0) - (a.updatedAt ?? 0))[0];
-        return latest ? [latest.id] : [];
+        // Nothing active stages nothing. Drafting the most recent chat onto
+        // the stage kept the pane from being blank, but it was the page
+        // deciding what you were working on — and it hid the answer the mode
+        // already gives when the work is done: the whole canvas, in the order
+        // things last changed.
+        return items
+          .filter((item) => isActiveChat(item) || activeHeld.has(item.id))
+          .sort((a, b) => recencyOf(b) - recencyOf(a))
+          .map((item) => item.id);
       }
       const folder = focusModeFolder();
       return items
@@ -2947,7 +3134,6 @@ __ICON__
           if (al !== bl) return al - bl;
           return recencyOf(b) - recencyOf(a);
         })
-        .slice(0, FULL_CAP)
         .map((item) => item.id);
     };
 
@@ -3003,14 +3189,16 @@ __ICON__
 
     /** The segmented pill that names the mode. Built once as transient
      *  chrome; each paint only refreshes which segment is pressed and what the
-     *  Group segment says. It rests at the canvas's top-right: the top-left is
-     *  under the pane whenever anything is staged. */
+     *  Group segment says. It lives in the top bar next to the view switch,
+     *  so it costs the canvas nothing; the stylesheet shows it in Focus only. */
     const paintFocusModes = (items) => {
       if (!focusEl) return;
-      let pill = focusEl.querySelector('.focus-modes');
+      const toggles = document.querySelector('.topbar .toggles');
+      if (!toggles) return;
+      let pill = toggles.querySelector('.focus-modes');
       if (!pill) {
         pill = document.createElement('div');
-        pill.className = 'focus-modes';
+        pill.className = 'seg focus-modes';
         pill.setAttribute('role', 'group');
         pill.setAttribute('aria-label', 'Focus mode');
         pill.setAttribute('data-marble-transient', '');
@@ -3031,11 +3219,7 @@ __ICON__
           });
           pill.append(btn);
         }
-        // A pointer that lands on the pill is not a click on the canvas: it
-        // must neither clear the selection nor start a drag under the pill.
-        pill.addEventListener('pointerdown', (event) => event.stopPropagation());
-        pill.addEventListener('dblclick', (event) => event.stopPropagation());
-        focusEl.append(pill);
+        toggles.append(pill);
       }
       pill.hidden = !items.length;
       const mode = effectiveFocusMode();
@@ -3347,7 +3531,7 @@ __ICON__
       if (color) card.dataset.color = color;
       else delete card.dataset.color;
       const title = card.querySelector('.focus-card-title');
-      if (title) title.textContent = summary.title || 'Untitled';
+      if (title) title.textContent = summary.title || 'New Chat';
       const status = statusOf(summary);
       card.dataset.status = status;
       card.dataset.state = stateOf(summary);
@@ -3440,13 +3624,9 @@ __ICON__
           item.pinned = false;
           try { await agent.update(item.id, { pinned: false }); } catch { /* stale */ }
         }
-      } else if (!pinned.some((item) => item.id === id) && pinned.length >= FULL_CAP) {
-        const oldest = [...pinned].sort((a, b) => (a.lastInteractedAt ?? 0) - (b.lastInteractedAt ?? 0))[0];
-        if (oldest) {
-          oldest.pinned = false;
-          try { await agent.update(oldest.id, { pinned: false }); } catch { /* stale */ }
-        }
       }
+      // Keeping one open never retires another. The stage has no ceiling: what
+      // is on it is what you put there, and it comes off when you take it off.
       const target = summaries.get(id);
       if (target) target.pinned = true;
       try { await agent.update(id, { pinned: true }); } catch { /* stale */ }
@@ -3455,13 +3635,38 @@ __ICON__
       paintFocus();
     };
 
+    /** A chat leaves the stage — collapsed from its card, or closed as a
+     *  pane. Leaving is the person taking over, so it also settles what the
+     *  stage is: under a lens the chats still on it become the pins, in the
+     *  order they sit, and the mode yields to pinned. Nothing is promoted
+     *  into the room that frees up — becoming focused is a manual act, and
+     *  only the arrangement closes up. */
     const unpinFocus = async (id) => {
       if (!agent || !id) return;
+      // Read the stage under the lens still in force, before the mode
+      // yields: these are the panes the person can see staying.
+      const stay = effectiveFocusMode() === 'pinned' ? [] : focusFullIds().filter((row) => row !== id);
       setFocusMode('pinned', { quiet: true });
+      const writes = [[id, { pinned: false }]];
       const item = summaries.get(id);
       if (item) item.pinned = false;
-      try { await agent.update(id, { pinned: false }); } catch { /* stale */ }
+      stay.forEach((row, index) => {
+        const chat = summaries.get(row);
+        const body = {};
+        if (!chat?.pinned) {
+          if (chat) chat.pinned = true;
+          body.pinned = true;
+        }
+        const rank = (index + 1) / (stay.length + 1);
+        if (chat && chat.focusY !== rank) {
+          chat.focusY = rank;
+          body.focusY = rank;
+        }
+        if (Object.keys(body).length) writes.push([row, body]);
+      });
+      if (focusPrimaryId === id) focusPrimaryId = stay[0] ?? null;
       paintFocus();
+      await fileFocusWrites(writes);
     };
 
     const selectFocusCard = (id, event) => {
@@ -3495,7 +3700,7 @@ __ICON__
       look.setAttribute('role', 'dialog');
       look.setAttribute('aria-label', 'Quick Look');
       const title = document.createElement('h3');
-      title.textContent = summary.title || 'Untitled';
+      title.textContent = summary.title || 'New Chat';
       const meta = document.createElement('p');
       meta.className = 'look-meta';
       meta.textContent = [summary.target || targets.get(id) || '', statusOf(summary), summary.activity || ''].filter(Boolean).join(' · ');
@@ -3556,6 +3761,19 @@ __ICON__
           name.className = 'focus-basin-name folder-name';
           name.setAttribute('data-marble-transient', '');
           name.addEventListener('click', () => {
+            // A pile is a group folded away to give the stage its width, and
+            // clicking it is the one thing it is for: open it, and keep it
+            // open. Clicking the name of a group you opened that way folds it
+            // back — the same target, so the two halves of the toggle are one
+            // thing. Every other group's name still selects its members.
+            if (basin.hasAttribute('data-pile')) {
+              toggleFocusPile(folderId, true);
+              return;
+            }
+            if (focusOpened.has(pileKeyOf(folderId))) {
+              toggleFocusPile(folderId, false);
+              return;
+            }
             const ids = matchingFocusItems().filter((item) => item.folderId === folderId).map((item) => item.id);
             focusSelectedIds = ids;
             focusPrimaryId = ids[0] ?? focusPrimaryId;
@@ -3581,19 +3799,47 @@ __ICON__
             setFocusMode(focusModeFolder()?.id === folderId ? 'pinned' : `group:${folderId}`);
           });
           basin.append(focusBtn);
+          // How many chats the fold swallowed. A pile that did not say so
+          // would be a folder you have to open to find out whether it matters.
+          const count = document.createElement('span');
+          count.className = 'focus-basin-count';
+          count.setAttribute('data-marble-transient', '');
+          count.setAttribute('aria-hidden', 'true');
+          basin.append(count);
           focusEl.insertBefore(basin, focusEl.querySelector('.focus-card'));
         }
         if (folder?.color) basin.dataset.color = folder.color;
         else delete basin.dataset.color;
         if (region.folderId) delete basin.dataset.loose;
         else basin.dataset.loose = 'true';
+        const piled = Boolean(region.piled);
+        // Three forms, smallest last: a menu row inside an opened rail, a tab
+        // turned on its side, and a square with nothing in it but a count.
+        if (piled) basin.dataset.pile = region.form ?? 'tab';
+        else delete basin.dataset.pile;
+        // A group you opened: still in the rail, but unrolled, with its chats
+        // listed under its name.
+        basin.toggleAttribute('data-opened', Boolean(region.opened));
+        // What would not fit in the peek. The badge says how many there are
+        // altogether; this says how many of them you are not looking at.
+        if (region.hidden) basin.dataset.more = String(region.hidden);
+        else delete basin.dataset.more;
+        const count = basin.querySelector('.focus-basin-count');
+        if (count) count.textContent = (piled || region.opened) && region.count ? String(region.count) : '';
         if (target?.column === 'folder' && (target.folderId ?? null) === (region.folderId ?? null)) {
           basin.dataset.drop = 'into';
         } else delete basin.dataset.drop;
         const name = basin.querySelector('.focus-basin-name');
         if (name) {
           name.textContent = region.folderId ? (folder?.name || 'Group') : 'Ungrouped';
-          name.disabled = !region.folderId;
+          // A pile's name is its handle, whether or not the group has one to
+          // rename — Ungrouped folds like any other and has to open again.
+          // Ungrouped has no name to rename, so its button is normally inert
+          // — unless it is a pile to open, or a group you opened and may now
+          // fold back. Both halves of that toggle need a live target.
+          name.disabled = !region.folderId && !piled && !focusOpened.has(region.folderId ?? null);
+          if (piled && basin.dataset.pile === 'dot') name.textContent = '';
+          name.title = piled ? 'Open this group' : (focusOpened.has(region.folderId ?? null) ? 'Fold this group away' : '');
         }
         const focusBtn = basin.querySelector('.focus-basin-focus');
         if (focusBtn) {
@@ -3629,8 +3875,9 @@ __ICON__
     };
 
     /** The rail that stands in for an empty stage, drawn over the canvas's
-     *  left edge rather than reserved inside it. Only while a card is in the
-     *  air, and only while there is no real stage column to aim at. */
+     *  right edge rather than reserved inside it — the edge a real stage
+     *  stands at. Only while a card is in the air, and only while there is no
+     *  real stage column to aim at. */
     const paintFocusPinSlot = (pack, target) => {
       // What the rail stands in for is an empty stage, so it asks the model
       // and not the pack — once a drag aims at it the pack has a column, and
@@ -3652,7 +3899,7 @@ __ICON__
       if (target?.column === 'stage') el.dataset.drop = 'into';
       else delete el.dataset.drop;
       const box = focusEl.getBoundingClientRect();
-      el.style.left = `${box.left}px`;
+      el.style.left = `${box.right - FOCUS_RAIL}px`;
       el.style.top = `${box.top}px`;
       el.style.width = `${FOCUS_RAIL}px`;
       el.style.height = `${box.height}px`;
@@ -3731,11 +3978,13 @@ __ICON__
       // counted it would answer "stage" everywhere.
       const stageStays = pack.stage.cols.filter((row) => !dragIds.includes(row.id));
 
-      // With nothing pinned there is no stage column to aim at, so the left
-      // edge of the canvas is one. It overlays rather than reserves: a column
-      // that appears the moment you lift a card would shove the whole field
-      // 300px sideways, and a gesture that moves the target is not a gesture.
-      if (!stageStays.length && point.x - focusEl.scrollLeft < FOCUS_RAIL) {
+      // With nothing pinned there is no stage column to aim at, so the right
+      // edge of the canvas is one — the end the stage stands at once it has
+      // something on it. It overlays rather than reserves: a column that
+      // appears the moment you lift a card would shove the whole field 300px
+      // sideways, and a gesture that moves the target is not a gesture.
+      if (!stageStays.length
+        && point.x - focusEl.scrollLeft > focusEl.clientWidth - FOCUS_RAIL) {
         return { column: 'stage', index: 0, key: 'stage:0' };
       }
       const gap = window.marbleAgentFolders?.GAP ?? 8;
@@ -3829,13 +4078,8 @@ __ICON__
 
       if (target.column === 'stage' && target.plan) {
         // Dropped on a pane's edge: the pane tree places it, exactly as a row
-        // dragged onto a pane is placed. The stage still holds four.
-        const staged = layout.stage.filter((id) => !ids.includes(id));
-        for (const id of staged.slice(Math.max(0, FULL_CAP - ids.length))) {
-          const item = summaries.get(id);
-          if (item) item.pinned = false;
-          await patch(id, { pinned: false });
-        }
+        // dragged onto a pane is placed. Nothing already on the stage leaves
+        // to make room — the stage has no ceiling.
         for (const id of ids) {
           const item = summaries.get(id);
           if (item?.pinned) continue;
@@ -3847,16 +4091,9 @@ __ICON__
         return writes;
       }
       if (target.column === 'stage') {
-        const staged = layout.stage.filter((id) => !ids.includes(id));
-        // The stage holds four. A fifth pin retires the rightmost, which is
-        // the one the person themselves ranked least important.
-        const room = Math.max(0, FULL_CAP - ids.length);
-        const rest = staged.slice(0, room);
-        for (const id of staged.slice(room)) {
-          const item = summaries.get(id);
-          if (item) item.pinned = false;
-          await patch(id, { pinned: false });
-        }
+        // Everything already staged stays staged: a new pin joins the stage
+        // rather than pushing the least-ranked one off it.
+        const rest = layout.stage.filter((id) => !ids.includes(id));
         for (const id of ids) {
           const item = summaries.get(id);
           if (item?.pinned) continue;
@@ -3948,7 +4185,7 @@ __ICON__
         event.preventDefault();
         const fromId = focusPrimaryId || focusSelectedIds[0];
         if (!fromId || !focusEl) return true;
-        const cards = [...focusEl.querySelectorAll('.focus-card')].map((row) => {
+        const cards = [...focusEl.querySelectorAll('.focus-card:not([data-piled])')].map((row) => {
           const r = row.getBoundingClientRect();
           return { id: row.dataset.id, cx: r.left + r.width / 2, cy: r.top + r.height / 2 };
         });
@@ -4322,7 +4559,12 @@ __ICON__
      *  folder in catalog order with the loose one last. `pending` is a drag's
      *  placement applied as if it had already been filed, which is what lets
      *  the field open a real gap under the card before you let go. */
-    /** The pins, capped, by rank then recency — the set the stage holds. */
+    /** The pins, by rank then recency — the set the stage holds. There is no
+     *  ceiling on it. A cap of four meant the fifth thing you focused quietly
+     *  unfocused the first, which is the page deciding what you are working
+     *  on; the stage now holds as many as you put on it and the canvas makes
+     *  room by compacting everything you did not (see `packFocus`). Pins
+     *  leave the stage when you take them off it, and not before. */
     const pinnedIdsOf = (items) => {
       const rank = (item) => (Number.isFinite(item.focusY) ? item.focusY : Infinity);
       return items
@@ -4333,7 +4575,6 @@ __ICON__
           if (ar !== br) return ar - br;
           return (b.lastInteractedAt ?? 0) - (a.lastInteractedAt ?? 0);
         })
-        .slice(0, FULL_CAP)
         .map((item) => item.id);
     };
 
@@ -4353,15 +4594,27 @@ __ICON__
       const field = items
         .filter((item) => !staged.has(item.id) && !dragging.has(item.id))
         .sort((a, b) => (a.createdAt ?? a.updatedAt ?? 0) - (b.createdAt ?? b.updatedAt ?? 0));
+      // Under Active the field is not arranged, it is ranked: the chat that
+      // last changed stands at the top of its group and stale work sinks, so
+      // what finished while you were away is the first thing in every column.
+      // Every other mode keeps the order you dragged things into, because
+      // there the spatial memory is the point.
+      const byRecency = effectiveFocusMode() === 'active';
       const order = (list) => [...list].sort((a, b) => {
+        if (byRecency) return recencyOf(b) - recencyOf(a);
         const ar = rank(a);
         const br = rank(b);
         return ar === br ? 0 : ar - br;
       });
+      // A lens stages every member of its group, which empties that group's
+      // column — and with the column goes the basin, which is where Unfocus
+      // lives. So the lens group keeps its place in the row whatever happens
+      // to be left in it; with nothing left it is drawn as a pile.
+      const lensId = focusModeFolder()?.id ?? null;
       const columns = [];
       for (const folder of folderCatalog) {
         const members = order(field.filter((item) => item.folderId === folder.id));
-        if (members.length) columns.push({ folderId: folder.id, ids: members.map((item) => item.id) });
+        if (members.length || folder.id === lensId) columns.push({ folderId: folder.id, ids: members.map((item) => item.id) });
       }
       const loose = order(field.filter((item) => (
         !item.folderId || !folderCatalog.some((row) => row.id === item.folderId)
@@ -4392,6 +4645,7 @@ __ICON__
       let el = focusEl.querySelector('.focus-extent');
       if (!pack) {
         el?.remove();
+        lastFocusExtent = 0;
         return;
       }
       if (!el) {
@@ -4403,6 +4657,29 @@ __ICON__
       }
       el.style.width = `${Math.round(pack.width)}px`;
       el.style.height = `${Math.round(pack.height)}px`;
+      anchorFocusScroll(pack);
+    };
+
+    /** The stage is the right-hand end of the row, so a canvas too wide for
+     *  its viewport hides the very thing the row builds up to. It rests at its
+     *  right end instead: you scroll back to the field, never forward to the
+     *  panes.
+     *
+     *  Only when the extent itself changed, and never mid-drag. The quiet
+     *  repaint runs every second — re-anchoring on each one would take the
+     *  scroll away from whoever had just moved it — and a drag that scrolled
+     *  the canvas would be a gesture that moves its own target. */
+    let lastFocusExtent = 0;
+    const anchorFocusScroll = (pack) => {
+      const width = Math.round(pack.width);
+      const changed = width !== lastFocusExtent;
+      lastFocusExtent = width;
+      if (!changed || focusDrag || !(pack.stage?.w > 0)) return;
+      const over = width - focusEl.clientWidth;
+      if (over <= 0) return;
+      // Already looking at the whole stage: leave the scroll where it is.
+      if (focusEl.scrollLeft + focusEl.clientWidth >= pack.stage.x + pack.stage.w - 0.5) return;
+      focusEl.scrollLeft = over;
     };
 
     function paintFocus(opts = {}) {
@@ -4425,6 +4702,9 @@ __ICON__
       const helpers = window.marbleAgentFolders;
       const items = matchingFocusItems();
       const mode = effectiveFocusMode();
+      // Before anything asks what the stage holds: Active's generation is
+      // settled once per paint, and every reader sees the same answer.
+      settleActiveStage(items);
       focusEl.dataset.mode = mode;
       if (mode === 'group') focusEl.dataset.modeFolder = focusModeFolder().id;
       else delete focusEl.dataset.modeFolder;
@@ -4446,9 +4726,19 @@ __ICON__
         })
         : Object.fromEntries(items.map((item) => [item.id, fullIds.includes(item.id) ? 'full' : 'digest']));
       // A lens deprioritises everything it does not stage: off the stage,
-      // every card is a chip, so the stage reads as the only lit thing.
-      if (mode !== 'pinned') {
+      // every card is a chip, so the stage reads as the only lit thing. With
+      // nothing staged there is no "off the stage" to dim — Active with
+      // nothing running is the whole canvas, lit, newest first.
+      focusEl.dataset.staged = fullIds.length ? 'true' : 'false';
+      if (mode !== 'pinned' && fullIds.length) {
         for (const item of items) if (!fullIds.includes(item.id)) lods[item.id] = 'chip';
+      }
+      // A chat listed inside an opened rail entry is a row in a menu: the rail
+      // lays it out at chip height, so the card has to agree.
+      if (focusOpened.size) {
+        for (const item of items) {
+          if (focusOpened.has(item.folderId ?? null) && !fullIds.includes(item.id)) lods[item.id] = 'chip';
+        }
       }
       // A card in the air is a card, whatever it is about to become: the gap
       // the field opens is the size of the thing you are holding.
@@ -4509,11 +4799,32 @@ __ICON__
       const canvas = focusCanvasBox();
       // The stage is as many columns wide as its tree spreads across.
       const fulls = Array.from({ length: fullIds.length ? stageColumns(dock.tree) : 0 }, (_, i) => ({ id: `stage:${i}` }));
+      // Recency per group, for the packer's fold order. Ungrouped is given no
+      // weight at all unless it has been opened by hand: it is the junk
+      // drawer, and it folds before any real folder does.
+      const weightOf = (folderId) => {
+        if (!folderId) return undefined;
+        return items.reduce((most, item) => (
+          (item.folderId ?? null) === folderId ? Math.max(most, recencyOf(item)) : most
+        ), 0);
+      };
+      // A group kept in the row with nothing standing in it is a pile by
+      // definition: there is nothing for a full-height column to hold.
+      const emptied = layout.columns
+        .filter((column) => column.folderId && !column.ids.length)
+        .map((column) => column.folderId);
+      // `lensId` is a real folder id or nothing. It must not be compared as
+      // `?? null`: the loose column's folderId *is* null, so under the pinned
+      // mode that kept an empty Ungrouped column alive and the stage never got
+      // the width the field had given up.
+      const lensId = focusModeFolder()?.id ?? '';
       const groups = layout.columns
-        .filter((column) => column.ids.length || (column.folderId === null && focusDrag))
+        .filter((column) => column.ids.length || (lensId && column.folderId === lensId)
+          || (column.folderId === null && focusDrag))
         .map((column) => ({
           folderId: column.folderId,
           keep: true,
+          weight: weightOf(column.folderId),
           cards: column.ids.map((id, index) => ({
             id,
             lod: lods[id] === 'chip' ? 'chip' : 'digest',
@@ -4540,6 +4851,8 @@ __ICON__
           // `'rail'` still marks a drag for the packer, which keeps the loose
           // region in a column of its own while a card is in the air.
           newGroup: focusDrag ? 'rail' : 'never',
+          piled: emptied,
+          opened: [...focusOpened],
         })
         // A stale cached copy of agent-folders.js would otherwise leave every
         // card without a rect, and an unplaced card stacks at the origin.
@@ -4582,6 +4895,22 @@ __ICON__
       }
       sizeFocusExtent(pack);
 
+      // A card in a folded group has no seat on the canvas; the pile stands
+      // for the whole of it. It keeps its element so that opening the pile is
+      // a paint and not a rebuild.
+      const piledIds = new Set();
+      for (const pile of pack.piles ?? []) for (const id of pile.ids ?? []) piledIds.add(id);
+      // An opened entry is a peek: what did not fit in its share of the rail
+      // has no seat either, and an unplaced card keeps its last rect.
+      for (const region of pack.regions ?? []) for (const id of region.hiddenIds ?? []) piledIds.add(id);
+      // Never the card in your hand. A drag aimed at a pile files the card
+      // into a folded group for the length of the drag, and hiding what you
+      // are holding because of where you are pointing is not a thing to do.
+      for (const id of focusDrag?.ids ?? []) piledIds.delete(id);
+      for (const card of focusEl.querySelectorAll('.focus-card')) {
+        card.toggleAttribute('data-piled', piledIds.has(card.dataset.id));
+      }
+
       for (const item of items) {
         const rect = pack.rects[item.id];
         if (!rect) continue;
@@ -4606,7 +4935,7 @@ __ICON__
       // color — failed/watchdog reads as an alarm, not just "take a look".
       if (summary.lastOutcome) el.dataset.outcome = summary.lastOutcome;
       else delete el.dataset.outcome;
-      el.querySelector('.title').textContent = summary.title || 'Untitled';
+      el.querySelector('.title').textContent = summary.title || 'New Chat';
       const tags = el.querySelector('.tags');
       if (tags) {
         tags.replaceChildren();
@@ -4946,18 +5275,27 @@ __ICON__
     };
 
     /** A tidy arrangement for a set of panes nobody placed by hand: side by
-     *  side for two, then a grid that stays close to square. */
-    const defaultTree = (keys) => {
+     *  side for two, then a grid that stays close to square. `maxCols` is the
+     *  Focus stage's ceiling on width — past it the grid grows downward, so
+     *  ten pins on a laptop are two rows of five and not a row of ten nobody
+     *  could read. */
+    const defaultTree = (keys, maxCols = Infinity) => {
       const n = keys.length;
+      const cap = Math.max(1, Math.min(maxCols, n));
       if (n === 1) return leafNode(keys[0]);
-      if (n === 2) return splitNode('row', keys.map(leafNode));
-      if (n === 3) return splitNode('row', [leafNode(keys[0]), splitNode('col', [leafNode(keys[1]), leafNode(keys[2])])]);
-      const cols = Math.ceil(Math.sqrt(n));
-      const per = Math.ceil(n / cols);
+      if (n === 2 && cap >= 2) return splitNode('row', keys.map(leafNode));
+      if (n === 3 && cap >= 2) return splitNode('row', [leafNode(keys[0]), splitNode('col', [leafNode(keys[1]), leafNode(keys[2])])]);
+      const cols = Math.min(cap, Math.ceil(Math.sqrt(n)));
       const columns = [];
-      for (let i = 0; i < n; i += per) {
-        const slice = keys.slice(i, i + per).map(leafNode);
-        columns.push(slice.length === 1 ? slice[0] : splitNode('col', slice));
+      // Spread the remainder rather than filling each column to `ceil(n/cols)`
+      // and leaving the last with what is left: ten panes in four columns are
+      // 3+3+2+2, not 3+3+3+1 with one lone pane down the right edge.
+      let taken = 0;
+      for (let c = 0; c < cols; c += 1) {
+        const size = Math.ceil((n - taken) / (cols - c));
+        const slice = keys.slice(taken, taken + size).map(leafNode);
+        taken += size;
+        if (slice.length) columns.push(slice.length === 1 ? slice[0] : splitNode('col', slice));
       }
       return columns.length === 1 ? columns[0] : splitNode('row', columns);
     };
@@ -4990,24 +5328,64 @@ __ICON__
     const idOfKey = (key) => (key === PRIMARY ? convo.getAttribute('conversation') : (dock.extras.find((extra) => extra.key === key)?.id ?? null));
     const paneIds = () => [convo.getAttribute('conversation'), ...dock.extras.map((extra) => extra.id)].filter(Boolean);
 
+    /** How many columns the Focus stage may spread across before a pane would
+     *  be too narrow to read. The canvas does not scroll sideways, so this is
+     *  the real ceiling on the shape of the stage — not on how much is on it.
+     *  Past it the stage grows downward: a fifth pin stacks under a column
+     *  rather than opening a fifth one. The rail of piles is subtracted
+     *  because the field folds down to it but never below it. */
+    const maxStageColumns = () => {
+      const helpers = window.marbleAgentFolders;
+      const gap = helpers?.GAP ?? 5;
+      const margin = helpers?.MARGIN ?? 8;
+      const paneMin = helpers?.PANE_MIN ?? 300;
+      const rail = (helpers?.PILE_W ?? 152) + gap;
+      const room = Math.max(0, (focusEl?.clientWidth || 0) - 2 * margin - rail);
+      return Math.max(1, Math.floor((room + gap) / (paneMin + gap)));
+    };
+
+    /** The leaf a new pin stacks under once the stage is as wide as it goes:
+     *  the bottom of whichever column holds the fewest panes, so the grid
+     *  stays even instead of one column growing a tower. */
+    const shortestStageLeaf = (tree) => {
+      const leaves = [...layoutOf(tree).leaves.entries()]
+        .map(([key, r]) => ({ key, x: Math.round(r.x * 1000), y: r.y }));
+      if (!leaves.length) return null;
+      const columns = new Map();
+      for (const leaf of leaves) columns.set(leaf.x, [...(columns.get(leaf.x) ?? []), leaf]);
+      let best = null;
+      for (const column of columns.values()) {
+        if (!best || column.length < best.length) best = column;
+      }
+      return best ? [...best].sort((a, b) => b.y - a.y)[0].key : null;
+    };
+
     /** Bring a remembered tree in line with the panes that exist now: leaves that
      *  went are taken out, panes nobody placed are split off the focused one.
      *  On the Focus stage they are instead a new column on the right — a chat
-     *  started while Focus is open is a column, never a pane under a pane. */
+     *  started while Focus is open is a column, never a pane under a pane —
+     *  until the row is as wide as the canvas allows, after which the stage
+     *  grows downward instead. */
     const reconcileTree = (tree, keys) => {
       if (keys.length <= 1) return null;
-      if (!tree) return defaultTree(keys);
+      const cap = dock === docks.focus ? maxStageColumns() : Infinity;
+      if (!tree) return defaultTree(keys, cap);
       let next = cloneTree(tree);
       const have = new Set(treeLeaves(next));
       for (const key of have) {
         if (!keys.includes(key)) next = removeLeaf(next, key);
-        if (!next) return defaultTree(keys);
+        if (!next) return defaultTree(keys, cap);
       }
       const box = pane.getBoundingClientRect();
       for (const key of keys) {
         if (have.has(key)) continue;
         if (dock === docks.focus) {
-          next = insertAtRoot(next, 'right', key);
+          if (stageColumns(next) < cap) {
+            next = insertAtRoot(next, 'right', key);
+            continue;
+          }
+          const under = shortestStageLeaf(next);
+          next = under ? insertBeside(next, under, 'bottom', key) : insertAtRoot(next, 'right', key);
           continue;
         }
         const focused = dock.focus === 'primary' ? PRIMARY : dock.extras[dock.focus]?.key;
@@ -5288,7 +5666,7 @@ __ICON__
       const tab = document.createElement('div');
       tab.className = 'dock-ghost-tab';
       tab.innerHTML = '<svg class="dock-grip" viewBox="0 0 10 14" width="9" height="13" aria-hidden="true"><circle cx="3" cy="3" r="1.15" fill="currentColor"/><circle cx="7" cy="3" r="1.15" fill="currentColor"/><circle cx="3" cy="7" r="1.15" fill="currentColor"/><circle cx="7" cy="7" r="1.15" fill="currentColor"/><circle cx="3" cy="11" r="1.15" fill="currentColor"/><circle cx="7" cy="11" r="1.15" fill="currentColor"/></svg><span></span>';
-      tab.querySelector('span').textContent = summaries.get(id)?.title || 'Untitled';
+      tab.querySelector('span').textContent = summaries.get(id)?.title || 'New Chat';
       const hint = document.createElement('p');
       hint.textContent = 'Release to open here';
       ghost.append(tab, hint);
@@ -5618,6 +5996,27 @@ __ICON__
 
     const focusedPaneId = () => (dock.focus === 'primary' ? convo.getAttribute('conversation') : dock.extras[dock.focus]?.id) ?? null;
 
+    /** Are you looking at this chat? It is in the pane you are focused in —
+     *  a Focus stage pane or a dock pane, they are the same dock — and this
+     *  tab is the one in front. */
+    const watching = (id) => Boolean(id) && document.visibilityState === 'visible' && focusedPaneId() === id;
+
+    /** Reading a finished turn is reviewing it. Being focused in the pane the
+     *  answer landed in is reading it, so *Needs review* is not also a box to
+     *  tick by hand: the chat you are sitting in never asks you to confirm
+     *  you saw what you are looking at. Only a finished turn has anything to
+     *  have been seen — `needsReview` is set by an outcome, so nothing here
+     *  has to ask again whether the job is done.
+     *
+     *  Cleared locally first: the dot goes out under the pointer, and the
+     *  server's no is what puts it back. */
+    const markSeen = (id) => {
+      const summary = summaries.get(id);
+      if (!agent || !summary?.needsReview || !watching(id)) return;
+      upsert({ ...summary, needsReview: false });
+      agent.markReviewed(id).catch(() => upsert(summary));
+    };
+
     const slotOf = (id) => {
       if (!id) return null;
       if (convo.getAttribute('conversation') === id) return 'primary';
@@ -5645,6 +6044,7 @@ __ICON__
       paintOpen();
       paintChrome();
       if (dock === docks.focus && id) focusPrimaryId = id;
+      markSeen(id);
     };
 
     const paintBar = (bar, id) => {
@@ -5663,7 +6063,7 @@ __ICON__
         tick.hidden = !color;
         tick.title = color ? (folderCatalog.find((row) => row.id === summary.folderId)?.name || 'Group') : '';
       }
-      bar.querySelector('.dock-title').textContent = summary.title || (id ? 'Untitled' : 'Empty pane');
+      bar.querySelector('.dock-title').textContent = summary.title || (id ? 'New Chat' : 'Empty pane');
       const link = bar.querySelector('.dock-target');
       const target = targets.get(id) || summary.target || '';
       if (target) {
@@ -5802,7 +6202,7 @@ __ICON__
       return bar;
     };
 
-    const closeSlot = (slot) => {
+    const closePaneSlot = (slot) => {
       if (slot === 'primary') {
         if (dock.extras.length) {
           // The chat that takes over the primary element keeps its own place in
@@ -5837,6 +6237,36 @@ __ICON__
         remember(OPEN_KEY, stay);
         paintOpen();
       }
+    };
+
+    /** On the Focus stage a pane and its chat's place on the stage are the
+     *  same thing, so closing the pane is that chat leaving the stage. The
+     *  pane goes first and the rest close up around it; then the pin goes,
+     *  or the pins would still name it and the next paint would seat it
+     *  again at the end of the row — which is what used to shuffle the
+     *  panes beside it up into the gap. */
+    const closeSlot = (slot) => {
+      const leaving = dock === docks.focus
+        ? (slot === 'primary' ? convo.getAttribute('conversation') : dock.extras[slot]?.id)
+        : null;
+      // A chat started from New and never used is not a chat yet, and
+      // closing its pane says so: it is discarded rather than left behind
+      // as an empty row called New Chat. Anything the person put in — a
+      // sent prompt, or words still sitting unsent in the box — makes it
+      // theirs, and then the close button only takes it off the stage.
+      // Asked here, before the pane goes, because the box is in the pane.
+      const started = Boolean(leaving) && (
+        Boolean(summaries.get(leaving)?.title)
+        || Boolean((slot === 'primary' ? convo : dock.extras[slot]?.el)?.drafting)
+      );
+      closePaneSlot(slot);
+      if (!leaving) return;
+      unpinFocus(leaving).catch(() => {}).then(() => {
+        if (started || !agent) return null;
+        // The host refuses a chat that holds anything, whatever this page
+        // believes; a refusal just leaves it off the stage.
+        return agent.discard(leaving).then(() => forget(leaving), () => {});
+      });
     };
 
     const makeLeaf = (extra) => {
@@ -6075,7 +6505,7 @@ __ICON__
       const summary = summaries.get(id) ?? {};
       const title = document.createElement('span');
       title.className = 'dock-title';
-      title.textContent = summary.title || 'Untitled';
+      title.textContent = summary.title || 'New Chat';
       const target = document.createElement('span');
       target.className = 'dock-target';
       target.textContent = targets.get(id) || summary.target || '';
@@ -6315,6 +6745,29 @@ __ICON__
       paintFocus();
     };
 
+    /** A chat that is gone from the drive rather than filed away: its row,
+     *  its card, its pane and everything this page remembers of it go too.
+     *  Archiving hides a chat and keeps it; this is for the one case where
+     *  there was never anything to keep. */
+    const forget = (id) => {
+      if (!id) return;
+      const slot = slotOf(id);
+      if (slot != null) closePaneSlot(slot);
+      summaries.delete(id);
+      targets.delete(id);
+      nodes.get(id)?.remove();
+      nodes.delete(id);
+      if (focusLookId === id) closeFocusLook();
+      focusSelectedIds = focusSelectedIds.filter((row) => row !== id);
+      if (focusPrimaryId === id) focusPrimaryId = null;
+      if (openId === id) {
+        openId = null;
+        remember(OPEN_KEY, null);
+      }
+      paintFolderRail();
+      paintFocus();
+    };
+
     const undoable = (turns) => {
       for (let i = (turns ?? []).length - 1; i >= 0; i--) {
         const turn = turns[i];
@@ -6336,7 +6789,7 @@ __ICON__
           if (!summaries.has(id) && agent) {
             try { upsert((await agent.conversation(id)).meta); } catch { /* opened from a stale id */ }
           }
-          if (summaries.get(id)?.needsReview) agent.markReviewed(id).catch(() => {});
+          markSeen(id);
           await fillChrome(id);
           const focused = existing === 'primary' ? convo : dock.extras[existing]?.el;
           focused?.focusInput?.();
@@ -6374,7 +6827,7 @@ __ICON__
       if (id && !summaries.has(id) && agent) {
         try { upsert((await agent.conversation(id)).meta); } catch { /* opened from a stale id */ }
       }
-      if (id && summaries.get(id)?.needsReview) agent.markReviewed(id).catch(() => {});
+      markSeen(id);
       paintOpen();
       ensurePrimaryBar();
       if (!id) {
@@ -6439,7 +6892,7 @@ __ICON__
       const applyLayout = () => {
         document.body.setAttribute('data-view', next);
         deriveView();
-        if (current === 'focus' && next !== 'focus') leaveFocusView();
+        if (current === 'focus' && next !== 'focus') { leaveFocusView(); closeFocusModesMenu(); }
         swapDock(next);
         applyDock();
         if (next === 'library') closeBoardPanel();
@@ -6448,6 +6901,9 @@ __ICON__
         paintDeck();
         if (next === 'focus') startFocusDecay();
         else stopFocusDecay();
+        // The dock you switched into may have been holding a finished answer
+        // the whole time. Arriving in front of it is seeing it.
+        markSeen(focusedPaneId());
       };
 
       const crossfadeWith = (layout, gen) => {
@@ -6603,7 +7059,7 @@ __ICON__
       const head = document.createElement('div');
       head.className = 'deck-ask-head';
       head.innerHTML = '<span class="dot" aria-hidden="true"></span><span class="deck-ask-title"></span>';
-      head.querySelector('.deck-ask-title').textContent = summary?.title || ask.title || 'Untitled';
+      head.querySelector('.deck-ask-title').textContent = summary?.title || ask.title || 'New Chat';
       const target = document.createElement('div');
       target.className = 'deck-ask-target';
       target.textContent = tailOfTarget(summary?.target || ask.target || '');
@@ -6790,7 +7246,7 @@ __ICON__
       if (!summary || !agent) return;
       openSheet('actions', (body) => {
         const h3 = document.createElement('h3');
-        h3.textContent = summary.title || 'Untitled';
+        h3.textContent = summary.title || 'New Chat';
         body.append(h3);
         if (statusOf(summary) === 'running') {
           body.append(sheetRow('Stop', async () => {
@@ -7653,11 +8109,15 @@ __ICON__
             return;
           }
           if (!payload?.id) return;
-          // A chat you are already watching does not fall back into Needs
-          // review the moment it finishes.
-          const prev = summaries.get(payload.id);
-          const finished = prev?.running && !payload.running && payload.lastFinishedAt;
-          if (finished && payload.needsReview && document.visibilityState === 'visible' && focusedPaneId() === payload.id) {
+          // A discarded chat arrives as its id and nothing else.
+          if (payload.removed) {
+            forget(payload.id);
+            return;
+          }
+          // A chat you are watching does not fall back into Needs review the
+          // moment it finishes. Pre-empted on the way in rather than cleared
+          // after, so the dot never blinks on and straight back off.
+          if (payload.needsReview && watching(payload.id)) {
             api.markReviewed(payload.id).catch(() => {});
             upsert({ ...payload, needsReview: false });
             return;

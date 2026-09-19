@@ -306,13 +306,50 @@
       current.hidden = !box.classList.contains('is-drop');
     }
   };
+  /** These sheets are popovers, which is how they get out from under the chat
+   *  next door. Fixed positioning escapes the pane's clip but not its paint
+   *  order: the dock places every conversation as `position: absolute;
+   *  z-index: 2`, so each one is its own stacking context and the sheet's
+   *  z-index only ever competes inside the chat that opened it. A later
+   *  sibling covers the whole subtree, fixed children included. The top layer
+   *  is above every stacking context on the page by definition, and a popover
+   *  gets there while staying in its own shadow root — so the markup, the
+   *  styles, the radios and the listeners are all untouched.
+   *
+   *  `manual`, not `auto`: auto popovers light-dismiss on their own schedule
+   *  and would fight armSegDismiss, which already closes these correctly and
+   *  knows about the trigger. An engine without popovers keeps the old
+   *  behaviour, which is right everywhere except under a second pane. */
+  const asPopover = (menu) => {
+    if (menu && 'popover' in menu && menu.popover !== 'manual') menu.popover = 'manual';
+    return menu;
+  };
+  const inTopLayer = (menu) => {
+    try {
+      return Boolean(menu?.matches?.(':popover-open'));
+    } catch {
+      return false;
+    }
+  };
+  const raiseMenu = (menu) => {
+    if (!menu?.showPopover || inTopLayer(menu)) return;
+    try {
+      menu.showPopover();
+    } catch { /* not connected, or no popover on this engine */ }
+  };
+  const dropMenu = (menu) => {
+    if (!menu?.hidePopover || !inTopLayer(menu)) return;
+    try {
+      menu.hidePopover();
+    } catch { /* already gone */ }
+  };
   /** A menu inside a pane is inside that pane's `overflow: hidden`, so an
    *  absolutely positioned one gets its edges shaved off by the frame — which
    *  is what clipped the first letter of every setup. Fixed positioning leaves
    *  the clip behind; the position has to be measured, and clamped so the menu
    *  never hangs off the window either. Called on open, and cleared on close so
    *  the sheet goes back to its own stylesheet. */
-  const floatMenu = (anchor, menu) => {
+  const floatMenu = (anchor, menu, { align = 'end', hug = true } = {}) => {
     if (!anchor || !menu) return;
     menu.style.position = 'fixed';
     menu.style.bottom = 'auto';
@@ -323,32 +360,182 @@
     const a = anchor.getBoundingClientRect();
     // The sheet's `min-width: max(100%, …)` resolves against the containing
     // block, which once fixed is the viewport — so it has to be told what
-    // 100% means out here, or the menu spans the window.
-    menu.style.minWidth = `${Math.max(Math.round(a.width), 176)}px`;
+    // 100% means out here, or the menu spans the window. A sheet that does
+    // not hug its trigger keeps its own width instead.
+    menu.style.minWidth = hug ? `${Math.max(Math.round(a.width), 176)}px` : '';
     menu.style.width = 'max-content';
     menu.style.maxWidth = `${Math.round(Math.min(innerWidth - 16, 360))}px`;
-    const m = menu.getBoundingClientRect();
+    // The layout box, not a client rect: this runs on the frame the sheet
+    // starts growing, and a client rect carries the entry transform with it —
+    // the menu would be measured 4% small and placed a few pixels off, then
+    // slide to the wrong resting spot. offsetWidth/Height have no transform.
+    const m = { width: menu.offsetWidth, height: menu.offsetHeight };
     const pad = 8;
     // Above the trigger when there is room, below when there is not.
     const above = a.top - pad - m.height;
     const top = above >= pad ? above : Math.min(a.bottom + pad, innerHeight - pad - m.height);
-    const left = Math.min(Math.max(pad, a.right - m.width), innerWidth - pad - m.width);
+    const want = align === 'center' ? a.left + a.width / 2 - m.width / 2 : a.right - m.width;
+    const left = Math.min(Math.max(pad, want), innerWidth - pad - m.width);
     menu.style.top = `${Math.max(pad, Math.round(top))}px`;
     menu.style.left = `${Math.round(left)}px`;
     menu.style.maxHeight = `${Math.round(Math.max(120, innerHeight - 2 * pad))}px`;
+    // It grows out of the control that opened it: the origin is the trigger's
+    // middle, on the edge the sheet actually opened from. A sheet that scales
+    // up from its own centre reads as a thing that appeared; one that scales
+    // up from the button reads as that button opening.
+    const originX = Math.round(Math.min(Math.max(a.left + a.width / 2 - left, 0), m.width));
+    menu.style.transformOrigin = `${originX}px ${above >= pad ? '100%' : '0%'}`;
   };
   const unfloatMenu = (menu) => {
     if (!menu) return;
-    for (const prop of ['position', 'top', 'left', 'right', 'bottom', 'maxHeight', 'minWidth', 'width', 'maxWidth']) menu.style[prop] = '';
+    for (const prop of ['position', 'top', 'left', 'right', 'bottom', 'maxHeight', 'minWidth', 'width', 'maxWidth', 'transformOrigin']) menu.style[prop] = '';
+  };
+  /** How long the sheet takes to leave, in ms — the exit half of the rules
+   *  under `.seg-menu`. Only the unfloat delay reads it; the animation itself
+   *  is CSS, and shortening it there without changing this only unfloats a
+   *  little late. */
+  const MENU_MS = 180;
+  const segMenuOf = (box) => box?.querySelector(':scope > .seg-menu, :scope > .presets-menu') ?? null;
+  const segTriggerOf = (box) => box?.querySelector(':scope > .seg-current, :scope > .presets-more') ?? null;
+  /** The one sheet open on this page, if any. Page-wide and not per
+   *  conversation on purpose: every one of these is fixed-positioned and
+   *  floats over every pane, so two open at once — one per chat — are two
+   *  menus over one document with no way to say which a click belongs to.
+   *  A pointerdown inside one conversation's shadow root never reaches
+   *  another's, so no conversation can police this for itself. */
+  let openSeg = null;
+  let segDismissArmed = false;
+  const armSegDismiss = () => {
+    if (segDismissArmed || typeof document === 'undefined') return;
+    segDismissArmed = true;
+    // Capture on the document: pointer and key events are composed, so one
+    // listener here sees every click in every conversation, in the drawer,
+    // and in the page behind them. Out here `event.target` has retargeted to
+    // the host element — composedPath() is the only honest way to ask whether
+    // the click landed inside the sheet that is open.
+    document.addEventListener('pointerdown', (event) => {
+      if (!openSeg) return;
+      const path = event.composedPath?.() ?? [];
+      if (path.includes(openSeg.menu) || path.includes(openSeg.trigger)) return;
+      closeOpenSeg();
+    }, true);
+    document.addEventListener('keydown', (event) => {
+      if (event.key === 'Escape') closeOpenSeg();
+    }, true);
+    // A menu left hanging over a window you have tabbed away from is a menu
+    // nobody asked for when they come back.
+    addEventListener('blur', () => closeOpenSeg());
+  };
+
+  /** Hold ⌃⌥ and the setups come up as a scrubber; the arrows walk it; letting
+   *  go commits. Held on the module rather than per conversation for the same
+   *  reason the dismiss is: the keys have to be heard wherever focus is, and
+   *  only one scrubber may be up at a time.
+   *
+   *  Two shortcuts share this pair and neither is ours to win. ⌃⌥ is
+   *  VoiceOver's own modifier on macOS, so with VoiceOver running the arrows
+   *  move its cursor and never reach the page. On a European keyboard layout
+   *  AltGr reports as ctrl+alt, so typing one of its characters raises the
+   *  scrubber for as long as the key is down. Both are the cost of the
+   *  gesture the shortcut is; changing either means changing the pair. */
+  let scrubOpen = null;
+  let scrubArmed = false;
+  let lastFocusedChat = null;
+  /** The chat a ⌃⌥ belongs to. Focus inside an open shadow root retargets to
+   *  the host, so a composer being typed in reads as its own conversation.
+   *  Failing that, the last one that held focus — you often click out onto
+   *  the canvas between writing and choosing, and the keys should still go
+   *  where you were. Failing that, the only chat on the page, which is the
+   *  drawer and the single pane. Two idle chats and no history is the one
+   *  case with no answer, and it does nothing rather than guess. */
+  const scrubTarget = () => {
+    if (scrubOpen) return scrubOpen;
+    const active = document.activeElement;
+    if (active?.tagName === 'MARBLE-CONVERSATION') return active;
+    if (lastFocusedChat?.isConnected) return lastFocusedChat;
+    const all = document.querySelectorAll('marble-conversation');
+    return all.length === 1 ? all[0] : null;
+  };
+  const armScrubKeys = () => {
+    if (scrubArmed || typeof document === 'undefined') return;
+    scrubArmed = true;
+    document.addEventListener('focusin', (event) => {
+      const chat = (event.composedPath?.() ?? []).find((node) => node?.tagName === 'MARBLE-CONVERSATION');
+      if (chat) lastFocusedChat = chat;
+    }, true);
+    document.addEventListener('keydown', (event) => {
+      if (event.metaKey || !event.ctrlKey || !event.altKey) return;
+      const arrow = event.key === 'ArrowLeft' || event.key === 'ArrowRight';
+      // Anything else held with the pair is somebody else's shortcut.
+      if (!arrow && event.key !== 'Control' && event.key !== 'Alt') return;
+      const target = scrubTarget();
+      if (!target?.openScrub?.()) return;
+      if (!arrow) return;
+      // Or the caret walks the prompt underneath while the scrubber moves.
+      event.preventDefault();
+      event.stopPropagation();
+      target.moveScrub(event.key === 'ArrowRight' ? 1 : -1);
+    }, true);
+    document.addEventListener('keyup', (event) => {
+      if (!scrubOpen) return;
+      if (!event.ctrlKey || !event.altKey) scrubOpen.closeScrub();
+    }, true);
+    document.addEventListener('keydown', (event) => {
+      if (scrubOpen && event.key === 'Escape') scrubOpen.closeScrub({ commit: false });
+    }, true);
+    // Tabbing away never delivers the keyup, so without this the scrubber is
+    // still up — and still holding the keys down — when you come back.
+    addEventListener('blur', () => scrubOpen?.closeScrub());
+  };
+  const collapseSegBox = (box) => {
+    if (!box) return;
+    if (openSeg?.box === box) openSeg = null;
+    if (!box.classList.contains('is-open')) return;
+    box.classList.remove('is-open');
+    segTriggerOf(box)?.setAttribute('aria-expanded', 'false');
+    const menu = segMenuOf(box);
+    if (!menu) return;
+    // Fixed while it is open, and it has to stay fixed until it has finished
+    // leaving: stripping the geometry on the same frame teleports the sheet
+    // back to its anchor and plays the fade somewhere else on the screen.
+    // The same goes for the top layer, which is why `overlay` is in the
+    // transition — the browser holds the sheet up there until the fade ends.
+    clearTimeout(menu._unfloat);
+    const settle = () => {
+      if (box.classList.contains('is-open')) return;
+      dropMenu(menu);
+      unfloatMenu(menu);
+    };
+    if (reduceMotion()) settle();
+    else menu._unfloat = setTimeout(settle, MENU_MS + 60);
   };
   const closeSegMenus = (root) => {
     const host = root?.querySelectorAll ? root : root?.shadowRoot;
     if (!host) return;
-    for (const box of host.querySelectorAll('.seg-opts.is-open, .presets.is-open')) {
-      box.classList.remove('is-open');
-      box.querySelector('.seg-current, .presets-more')?.setAttribute('aria-expanded', 'false');
-      unfloatMenu(box.querySelector(':scope > .seg-menu, :scope > .presets-menu'));
+    for (const box of host.querySelectorAll('.seg-opts.is-open, .presets.is-open')) collapseSegBox(box);
+  };
+  const closeOpenSeg = () => collapseSegBox(openSeg?.box);
+  const openSegBox = (box) => {
+    if (!box) return;
+    const trigger = segTriggerOf(box);
+    const menu = segMenuOf(box);
+    closeOpenSeg();
+    closeSegMenus(box.getRootNode());
+    box.classList.add('is-open');
+    trigger?.setAttribute('aria-expanded', 'true');
+    if (menu) {
+      clearTimeout(menu._unfloat);
+      // Into the top layer first: floatMenu measures the sheet, and it can
+      // only be measured once it is rendered somewhere.
+      raiseMenu(menu);
+      floatMenu(trigger, menu);
     }
+    openSeg = { box, menu, trigger };
+    armSegDismiss();
+  };
+  const toggleSegBox = (box) => {
+    if (box?.classList.contains('is-open')) collapseSegBox(box);
+    else openSegBox(box);
   };
   const reduceMotion = () => typeof matchMedia === 'function' && matchMedia('(prefers-reduced-motion: reduce)').matches;
   const ensureThumb = (track) => {
@@ -465,7 +652,7 @@
     current.setAttribute('aria-haspopup', 'listbox');
     current.setAttribute('aria-expanded', 'false');
     current.hidden = true;
-    const menu = document.createElement('div');
+    const menu = asPopover(document.createElement('div'));
     menu.className = 'seg-menu';
     menu.setAttribute('role', 'listbox');
     let selected = list.some((item) => item.id === (value ?? '')) ? (value ?? '') : list[0]?.id ?? '';
@@ -486,12 +673,7 @@
     current.addEventListener('click', (event) => {
       event.preventDefault();
       event.stopPropagation();
-      const open = !box.classList.contains('is-open');
-      closeSegMenus(box.getRootNode());
-      box.classList.toggle('is-open', open);
-      current.setAttribute('aria-expanded', String(open));
-      if (open) floatMenu(current, menu);
-      else unfloatMenu(menu);
+      toggleSegBox(box);
     });
     armSeg(box);
     syncSegCurrent(box);
@@ -521,7 +703,10 @@
     if (!picker || picker.hidden) return;
     const segs = [...picker.querySelectorAll('.seg-opts')].filter((box) => !box.closest('.seg')?.hidden);
     const overflowed = () => picker.scrollWidth > picker.clientWidth + 1;
-    for (const box of segs) box.classList.remove('is-drop', 'is-open');
+    for (const box of segs) {
+      collapseSegBox(box);
+      box.classList.remove('is-drop');
+    }
     for (const box of [...segs].reverse()) {
       if (!overflowed()) break;
       box.classList.add('is-drop');
@@ -550,17 +735,12 @@
       more.addEventListener('click', (event) => {
         event.preventDefault();
         event.stopPropagation();
-        const open = !track.classList.contains('is-open');
-        closeSegMenus(track.getRootNode());
-        track.classList.toggle('is-open', open);
-        more.setAttribute('aria-expanded', String(open));
-        if (open) floatMenu(more, menu);
-        else unfloatMenu(menu);
+        toggleSegBox(track);
       });
       track.append(more);
     }
     if (!menu) {
-      menu = document.createElement('div');
+      menu = asPopover(document.createElement('div'));
       menu.className = 'presets-menu';
       menu.setAttribute('role', 'listbox');
       track.append(menu);
@@ -579,9 +759,13 @@
     more.hidden = true;
     more.classList.remove('is-current');
     more.innerHTML = MORE_ICON;
-    more.setAttribute('aria-expanded', 'false');
     more.setAttribute('aria-label', 'More setups');
-    track.classList.remove('is-packed', 'is-open');
+    // Through the close rather than by dropping the class: a repaint with the
+    // sheet open has to take it out of the top layer too, or it lingers up
+    // there invisible and the next open thinks it is already raised.
+    collapseSegBox(track);
+    more.setAttribute('aria-expanded', 'false');
+    track.classList.remove('is-packed');
     const overflowed = () => track.scrollWidth > track.clientWidth + 1;
     // A row of setups laid out as capsules is a row of decisions competing
     // with the one that matters, which is the prompt. The setup you are on is
@@ -681,6 +865,16 @@
     { id: 'sonnet-high', provider: 'claude-subscription', model: 'sonnet', effort: 'high', name: 'Sonnet High', brand: 'anthropic' },
     { id: 'grok-xhigh', provider: 'cursor', model: 'cursor-grok-4.6', effort: 'xhigh', name: 'Grok Extra High', brand: 'cursor' },
   ];
+  const EFFORT_WORD = { low: 'Low', medium: 'Medium', high: 'High', xhigh: 'Extra High', max: 'Max' };
+  /** A preset's name with its effort taken off the end, so a scrubber stop can
+   *  set the model over the effort on two tight lines. "Opus Extra High" is
+   *  "Opus" over "Extra High"; a name that does not end in its own effort is
+   *  left whole. */
+  const presetHead = (preset) => {
+    const word = EFFORT_WORD[preset?.effort] ?? '';
+    const name = String(preset?.name ?? '');
+    return word && name.endsWith(` ${word}`) ? name.slice(0, -(word.length + 1)) : name;
+  };
   const nextMode = (modes, current) => {
     const ids = (modes ?? []).map((item) => item.id);
     if (!ids.length) return current ?? '';
@@ -1405,6 +1599,31 @@
     .tool[data-state="refused"] { color: var(--caution); } .tool[data-state="refused"]::before { background: var(--caution); }
     .mast .also { font-size: 11.5px; color: var(--faint); margin-top: 2px; }
     .mast .also[hidden] { display: none; }
+    /* Where this conversation's hands are. It wears the agent's own violet —
+       the same one the construction zone draws itself in on the document — so
+       the row and the box on the page are visibly one thing, and neither is
+       mistaken for a control of the app's. */
+    .zone-jump {
+      --zone-mark: color-mix(in srgb, #6d55d4 78%, var(--ink));
+      align-self: flex-start; display: inline-flex; align-items: center; gap: 6px;
+      max-width: 100%; margin-top: 1px; padding: 3px 9px 3px 8px;
+      appearance: none; cursor: pointer;
+      border: 1px solid color-mix(in srgb, var(--zone-mark) 30%, transparent);
+      border-radius: 999px;
+      background: color-mix(in srgb, var(--zone-mark) 10%, transparent);
+      color: color-mix(in srgb, var(--zone-mark) 64%, var(--ink));
+      font: 500 11.5px/1.3 inherit; letter-spacing: -.01em; text-align: left;
+      transition: background-color .13s var(--snap), color .13s var(--snap);
+    }
+    .zone-jump[hidden] { display: none; }
+    .zone-jump:hover { background: color-mix(in srgb, var(--zone-mark) 18%, transparent); color: var(--zone-mark); }
+    .zone-jump:focus-visible { outline: 2px solid var(--zone-mark); outline-offset: 2px; }
+    .zone-jump .zone-live { flex: none; width: 6px; height: 6px; border-radius: 50%; background: var(--zone-mark); animation: pulse 1.2s var(--snap) infinite; }
+    .zone-jump .zone-what { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .zone-jump .zone-go { flex: none; opacity: .72; }
+    /* A pane hides its mast when there is nothing on it; a live zone is something. */
+    :host([data-chrome="pane"]) .mast:not([hidden]):has(.zone-jump:not([hidden])) { display: flex; }
+    @media (prefers-reduced-motion: reduce) { .zone-jump .zone-live { animation: none; } }
     ${ASK_CSS}
     .tool[data-state="failed"] { color: var(--danger); } .tool[data-state="failed"]::before { background: var(--danger); }
     .turn-footer { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 10px; font-size: 12px; color: var(--faint); padding: 4px 2px 10px; }
@@ -1490,6 +1709,7 @@
     }
     .presets-more:not(.is-current) { width: 28px; }
     .presets-more:hover, .presets.is-open .presets-more { color: var(--ink); background: var(--paper-2); }
+    .presets-more, .seg-current, .custom-toggle, .mode { transition: background-color .13s var(--snap), color .13s var(--snap); }
     .presets-more[hidden] { display: none; }
     .presets-more.is-current {
       width: auto; max-width: 100%; min-width: 0; height: auto;
@@ -1504,16 +1724,91 @@
     .presets-more span { display: inline-flex; align-items: center; gap: 5px; min-width: 0; font-size: 11px; font-weight: 500; white-space: nowrap; padding: 0; background: none; border-radius: 0; box-shadow: none; width: auto; }
     .presets-more.is-current span { overflow: hidden; }
     .presets-more .brand { width: 11px; height: 11px; flex: none; }
+    /* margin and color reset the popover UA sheet, which centres [popover] in
+       the viewport with an auto margin and paints it in system colours. */
     .presets-menu {
       display: none; position: absolute; bottom: calc(100% + 6px); top: auto; right: 0; left: auto; z-index: 12;
+      margin: 0; color: inherit; width: auto; height: auto;
       min-width: max(100%, 11rem); max-height: min(16rem, 45vh); overflow: auto; flex-direction: column; gap: 1px; padding: 5px;
       background: color-mix(in srgb, var(--card) 92%, transparent); border: 1px solid var(--line); border-radius: 14px;
       box-shadow: var(--shadow-lift); backdrop-filter: blur(16px); -webkit-backdrop-filter: blur(16px);
+      opacity: 0; transform: translateY(4px) scale(.96); transform-origin: 50% 100%;
+      transition: opacity .12s var(--snap), transform .12s var(--snap), display .12s allow-discrete, overlay .12s allow-discrete;
     }
-    .presets.is-open .presets-menu { display: flex; }
+    .presets.is-open .presets-menu {
+      display: flex; opacity: 1; transform: none;
+      transition: opacity .15s var(--settle), transform .19s var(--settle), display .19s allow-discrete, overlay .19s allow-discrete;
+    }
+    @starting-style {
+      .presets.is-open .presets-menu { opacity: 0; transform: translateY(4px) scale(.96); }
+    }
     .presets-menu .preset { width: 100%; }
-    .presets-menu .preset span { width: 100%; border-radius: 9px; padding: 7px 10px; justify-content: flex-start; }
+    .presets-menu .preset span {
+      width: 100%; border-radius: 9px; padding: 7px 10px; justify-content: flex-start;
+      transition: background-color .13s var(--snap), color .13s var(--snap);
+    }
     .presets-menu input:checked + span { background: var(--paper-2); }
+    /* The row under the pointer says so. The span is pointer-events: none so
+       the radio underneath can take the click, which is why the hover is read
+       off the label rather than the span. */
+    .presets-menu .preset:hover input:not(:disabled) + span { background: var(--paper-2); color: var(--ink); }
+    .presets-menu .preset:hover input:checked + span { background: var(--paper-3); }
+    /* ⌃⌥ raises the same setups as a scrubber. A menu is for reading a list
+       and picking out of it; this is for moving along one, which is what a
+       held modifier and two arrows are. So it is a line with stops on it and
+       the one you are on named above — the choice as a position, not as a
+       row of options, and the same four names either way.
+       Absolutely positioned pieces inside a flex track: the rail spans dot
+       centre to dot centre, which is half a stop in from each end, and the
+       knob and fill are moved in pixels off that same origin (paintScrub
+       measures the track) so both animate on transform and width rather than
+       on a calc nobody can interpolate. */
+    .scrub {
+      display: none; position: fixed; z-index: 13;
+      margin: 0; color: inherit; width: auto; height: auto;
+      flex-direction: column; gap: 9px; padding: 11px 14px 9px; overflow: visible;
+      background: color-mix(in srgb, var(--card) 94%, transparent);
+      border: 1px solid var(--line); border-radius: 16px;
+      box-shadow: var(--shadow-lift); backdrop-filter: blur(16px); -webkit-backdrop-filter: blur(16px);
+      opacity: 0; transform: translateY(6px) scale(.94); transform-origin: 50% 100%;
+      transition: opacity .12s var(--snap), transform .12s var(--snap), display .12s allow-discrete, overlay .12s allow-discrete;
+    }
+    .scrub.is-open {
+      display: flex; opacity: 1; transform: none;
+      transition: opacity .16s var(--settle), transform .22s var(--settle), display .22s allow-discrete, overlay .22s allow-discrete;
+    }
+    @starting-style {
+      .scrub.is-open { opacity: 0; transform: translateY(6px) scale(.94); }
+    }
+    .scrub-now {
+      display: flex; align-items: center; justify-content: center; gap: 6px;
+      font-size: 13px; font-weight: 600; color: var(--ink); white-space: nowrap;
+    }
+    .scrub-now .brand { width: 13px; height: 13px; flex: none; }
+    .scrub-track { position: relative; display: flex; align-items: flex-start; min-width: 252px; }
+    .scrub-rail, .scrub-fill { position: absolute; top: 3px; height: 2px; border-radius: 2px; left: calc(50% / var(--n)); }
+    .scrub-rail { right: calc(50% / var(--n)); background: var(--paper-3); }
+    .scrub-fill { width: 0; background: var(--accent); transition: width .24s var(--settle); }
+    .scrub-knob {
+      position: absolute; top: 0; left: calc(50% / var(--n)); margin-left: -4px;
+      width: 8px; height: 8px; border-radius: 999px; background: var(--ink);
+      box-shadow: 0 0 0 3px color-mix(in srgb, var(--card) 85%, transparent);
+      transition: transform .24s var(--settle);
+    }
+    .scrub-stop { flex: 1 1 0; min-width: 0; display: flex; flex-direction: column; align-items: center; gap: 7px; padding: 0 3px; }
+    .scrub-dot { width: 4px; height: 4px; margin-top: 2px; border-radius: 999px; background: var(--paper-3); transition: background-color .16s var(--snap); }
+    /* The knob is standing on it. */
+    .scrub-stop.is-at .scrub-dot { background: transparent; }
+    .scrub-name { display: flex; flex-direction: column; align-items: center; gap: 1px; min-width: 0; }
+    .scrub-name b { font-size: 11px; font-weight: 500; color: var(--muted); white-space: nowrap; transition: color .16s var(--snap); }
+    .scrub-name i { font-size: 10px; font-style: normal; color: var(--faint); white-space: nowrap; transition: color .16s var(--snap); }
+    .scrub-stop.is-at .scrub-name b { color: var(--ink); font-weight: 600; }
+    .scrub-stop.is-at .scrub-name i { color: var(--muted); }
+    .scrub-hint { font-size: 10px; color: var(--faint); text-align: center; }
+    @media (prefers-reduced-motion: reduce) {
+      .scrub, .scrub.is-open { transition: none; transform: none; }
+      .scrub-fill, .scrub-knob { transition: none; }
+    }
     .custom-toggle {
       appearance: none; border: 0; background: none; color: var(--muted);
       font: inherit; font-size: 11px; font-weight: 500; padding: 3px 6px; border-radius: 7px; cursor: pointer; flex: none;
@@ -1565,7 +1860,18 @@
       display: flex; flex-wrap: nowrap; gap: 0; flex: none; position: relative; isolation: isolate;
       background: none; border: 0; border-radius: 0; padding: 0;
     }
-    .seg-menu { display: flex; flex-wrap: nowrap; gap: 0; }
+    /* This element is two things: the segmented row you see when the picker
+       has room, and the sheet it folds into when it does not. Only the sheet
+       is ever raised, but the popover attribute is on it either way — so the
+       row has to undo the [popover] UA sheet in full. Left alone it is a
+       fixed, centred, bordered box in system colours, taken out of flow,
+       which is what stopped fitPicker from ever seeing the picker overflow.
+       The is-drop rules further down put the sheet's own box back. */
+    .seg-menu {
+      display: flex; flex-wrap: nowrap; gap: 0;
+      position: static; inset: auto; margin: 0; padding: 0; border: 0;
+      width: auto; height: auto; overflow: visible; background: none; color: inherit;
+    }
     .seg-current {
       display: none; appearance: none; border: 0; background: none; color: var(--ink);
       padding: 3px 6px; border-radius: 7px; font: inherit; font-size: 11px; font-weight: 500;
@@ -1579,16 +1885,40 @@
     }
     .seg-opts.is-drop { overflow: visible; padding: 1px; }
     .seg-opts.is-drop .seg-current { display: inline-flex; }
+    /* A sheet is a thing that arrives, not a thing that blinks on: it grows a
+       little out of the control that opened it (floatMenu sets the origin)
+       and shrinks back into it on the way out, a touch quicker than it came.
+       Transitioning display itself is what lets a display: none menu animate
+       at all, and @starting-style is the state it enters from; a browser with
+       neither still shows and hides it, which is where this started. */
     .seg-opts.is-drop .seg-menu {
-      display: none; position: absolute; bottom: calc(100% + 6px); top: auto; left: 0; z-index: 12;
+      display: none; position: absolute; bottom: calc(100% + 6px); top: auto; left: 0; right: auto; z-index: 12;
+      margin: 0; color: inherit;
       min-width: max(100%, 10.5rem); max-height: min(16rem, 45vh); overflow: auto; flex-direction: column; gap: 1px; padding: 5px;
       background: color-mix(in srgb, var(--card) 92%, transparent); border: 1px solid var(--line); border-radius: 14px;
       box-shadow: var(--shadow-lift); backdrop-filter: blur(16px); -webkit-backdrop-filter: blur(16px);
+      opacity: 0; transform: translateY(4px) scale(.96); transform-origin: 50% 100%;
+      transition: opacity .12s var(--snap), transform .12s var(--snap), display .12s allow-discrete, overlay .12s allow-discrete;
     }
     .seg:last-child .seg-opts.is-drop .seg-menu { left: auto; right: 0; }
-    .seg-opts.is-drop.is-open .seg-menu { display: flex; }
+    .seg-opts.is-drop.is-open .seg-menu {
+      display: flex; opacity: 1; transform: none;
+      transition: opacity .15s var(--settle), transform .19s var(--settle), display .19s allow-discrete, overlay .19s allow-discrete;
+    }
+    @starting-style {
+      .seg-opts.is-drop.is-open .seg-menu { opacity: 0; transform: translateY(4px) scale(.96); }
+    }
+    /* Nothing should crawl for someone who asked it not to: the sheet still
+       opens and closes, it just does it on one frame. */
+    @media (prefers-reduced-motion: reduce) {
+      .seg-opts.is-drop .seg-menu, .seg-opts.is-drop.is-open .seg-menu,
+      .presets-menu, .presets.is-open .presets-menu { transition: none; transform: none; }
+    }
     .seg-opts.is-drop .seg-menu label { width: 100%; }
-    .seg-opts.is-drop .seg-menu span { width: 100%; border-radius: 9px; padding: 7px 10px; justify-content: space-between; }
+    .seg-opts.is-drop .seg-menu span {
+      width: 100%; border-radius: 9px; padding: 7px 10px; justify-content: space-between;
+      transition: background-color .13s var(--snap), color .13s var(--snap);
+    }
     .seg-opts.is-drop input:checked + span::after {
       content: ''; width: 5px; height: 9px; margin-right: 2px;
       border-right: 1.6px solid var(--ink); border-bottom: 1.6px solid var(--ink);
@@ -1606,6 +1936,8 @@
     .seg-opts input:checked + span { color: var(--ink); background: transparent; box-shadow: none; font-weight: 600; }
     .seg-opts.is-drop .seg-thumb { display: none; }
     .seg-opts.is-drop input:checked + span { box-shadow: none; background: var(--paper-2); }
+    .seg-opts.is-drop .seg-menu label:hover input:not(:disabled) + span { background: var(--paper-2); color: var(--ink); }
+    .seg-opts.is-drop .seg-menu label:hover input:checked + span { background: var(--paper-3); }
     .seg-opts input:focus-visible + span { box-shadow: 0 0 0 3px var(--accent-soft); }
     .seg-opts input:disabled + span { opacity: .45; cursor: default; }
     .seg[hidden] { display: none; }
@@ -2082,6 +2414,11 @@
         <header class="mast" hidden>
           <h2 class="heading" contenteditable="plaintext-only" spellcheck="false" aria-label="Conversation title"></h2>
           <div class="tags"></div>
+          <button type="button" class="zone-jump" hidden>
+            <span class="zone-live" aria-hidden="true"></span>
+            <span class="zone-what"></span>
+            <span class="zone-go" aria-hidden="true">→</span>
+          </button>
           <div class="also" hidden></div>
         </header>
         <div class="log" role="log" aria-live="polite" aria-label="Conversation"></div>
@@ -2114,6 +2451,7 @@
                 <div class="setup-row">
                   <div class="presets" role="radiogroup" aria-label="Saved setups" hidden></div>
                   <button type="button" class="custom-toggle" aria-expanded="false" hidden>Custom</button>
+                  <div class="scrub" role="slider" aria-label="Model setup" aria-valuemin="0" tabindex="-1"></div>
                 </div>
                 <div class="picker">
                   <fieldset class="seg picker-agent"><legend>CLI</legend><div class="seg-opts" data-seg="agent"></div></fieldset>
@@ -2143,6 +2481,7 @@
       this.selectionEl = root.querySelector('.selection');
       this.setupRow = root.querySelector('.setup-row');
       this.customToggle = root.querySelector('.custom-toggle');
+      this.scrubEl = asPopover(root.querySelector('.scrub'));
       this.picker = root.querySelector('.picker');
       this.bar = root.querySelector('.bar');
       this.modeButton = root.querySelector('.mode');
@@ -2152,6 +2491,10 @@
       this.projectBox = root.querySelector('[data-seg="project"]');
       this.projectLabel = root.querySelector('.picker-project');
       this.also = root.querySelector('.also');
+      this.zoneJump = root.querySelector('.zone-jump');
+      this.zoneWhat = root.querySelector('.zone-what');
+      this.zone = null;
+      this.zoneJump.addEventListener('click', () => this.goToZone());
       this.modelLabel = root.querySelector('.picker-models');
       this.modelBox = root.querySelector('[data-seg="model"]');
       this.effortLabel = root.querySelector('.picker-effort');
@@ -2189,7 +2532,6 @@
       this.mode = '';
       this.editedFiles = new Set();
       this.usageMeters = [];
-      this.usageLoaded = false;
       this.customOpen = false;
 
       this.picker.addEventListener('change', (event) => {
@@ -2224,12 +2566,9 @@
         slideThumb(this.presetsEl, { animate: true });
         if (preset) this.applyPreset(preset);
       });
-      this.shadowRoot.addEventListener('pointerdown', (event) => {
-        if (!event.target.closest?.('.seg-opts, .presets')) closeSegMenus(this.shadowRoot);
-      });
-      this.shadowRoot.addEventListener('keydown', (event) => {
-        if (event.key === 'Escape') closeSegMenus(this.shadowRoot);
-      });
+      // Dismissal is not this conversation's business: a click in the pane
+      // next door has to close this menu too, and a listener on this shadow
+      // root never hears one. armSegDismiss handles both from the document.
       this.modeButton.addEventListener('click', () => this.cycleMode());
       this.queuedIndividually.addEventListener('click', () => this.setQueueCombine(false));
       this.queuedTogether.addEventListener('click', () => this.setQueueCombine(true));
@@ -2304,7 +2643,7 @@
         }
         if (event.key === 'Escape') {
           event.preventDefault();
-          this.heading.textContent = this.savedTitle || 'Untitled';
+          this.heading.textContent = this.savedTitle || 'New Chat';
           this.heading.blur();
         }
       });
@@ -2369,6 +2708,7 @@
     }
 
     connectedCallback() {
+      armScrubKeys();
       this.unwatchTheme = watchPageTheme(this);
       addEventListener('marble:agent-context', this.onContext);
       this.updateContext();
@@ -2378,6 +2718,7 @@
     }
 
     disconnectedCallback() {
+      this.closeScrub?.({ commit: false });
       this.fitObserver?.disconnect();
       this.fitObserver = null;
       this.unwatchTheme?.();
@@ -2475,7 +2816,9 @@
       this.others = new Map();
       this.offAll = this.api.on('*', (summary) => {
         if (this.loading !== token || !summary?.id) return;
-        this.others.set(summary.id, summary);
+        // A discarded chat sends its id and nothing else.
+        if (summary.removed) this.others.delete(summary.id);
+        else this.others.set(summary.id, summary);
         this.paintAlso();
       });
       // The stream only carries changes; a turn already running and silent
@@ -2545,7 +2888,11 @@
       if (!signedIn) return false;
       const meter = this.claudeMeter();
       if (meter) return !usageAvailable(meter);
-      return Boolean(this.usageLoaded);
+      // No meter at all is not knowing, and not knowing is not being out.
+      // The host reads the quota from a credential it may simply not find;
+      // greying out every Claude model over a percent nobody could fetch
+      // takes the drive away from a person who is signed in and has quota.
+      return false;
     }
 
     disabledAgentIds() {
@@ -2594,7 +2941,7 @@
         .filter((s) => s.id !== id && !s.archived && (s.project ?? 'drive') === mine && (s.status === 'running' || s.running));
       this.also.hidden = !rows.length;
       this.also.textContent = rows.length
-        ? `Also working here: ${rows.length} — ${rows.map((s) => s.title || 'Untitled').join(', ')}`
+        ? `Also working here: ${rows.length} — ${rows.map((s) => s.title || 'New Chat').join(', ')}`
         : '';
     }
 
@@ -2847,6 +3194,129 @@
       this.paintPresets();
     }
 
+    /** The stops, in order. A setup you cannot pick is not a stop: landing on
+     *  one and letting go would be a no-op the scrubber had promised. */
+    scrubStops() {
+      return this.availablePresets().filter((preset) => !this.presetDisabled(preset));
+    }
+
+    buildScrub() {
+      const presets = this.scrubStops();
+      this.scrubPresets = presets;
+      const ids = presets.map((preset) => preset.id).join(',');
+      if (this.scrubEl.dataset.ids === ids) return presets;
+      this.scrubEl.dataset.ids = ids;
+      this.scrubEl.style.setProperty('--n', String(presets.length));
+      this.scrubEl.setAttribute('aria-valuemax', String(Math.max(0, presets.length - 1)));
+      const track = h('div', 'scrub-track');
+      track.append(h('div', 'scrub-rail'), h('div', 'scrub-fill'), h('div', 'scrub-knob'));
+      for (const preset of presets) {
+        const stop = h('div', 'scrub-stop');
+        const name = h('div', 'scrub-name');
+        const head = document.createElement('b');
+        head.textContent = presetHead(preset);
+        const tail = document.createElement('i');
+        tail.textContent = EFFORT_WORD[preset.effort] ?? preset.effort ?? '';
+        name.append(head, tail);
+        stop.append(h('div', 'scrub-dot'), name);
+        track.append(stop);
+      }
+      this.scrubEl.replaceChildren(h('div', 'scrub-now'), track, h('div', 'scrub-hint', '← →  while you hold ⌃⌥'));
+      return presets;
+    }
+
+    scrubIsOpen() {
+      return Boolean(this.scrubEl?.classList.contains('is-open'));
+    }
+
+    /** True when the scrubber is up and the arrows are its to take. */
+    openScrub() {
+      if (this.scrubIsOpen()) return true;
+      if (this.setup?.hidden || !this.scrubEl) return false;
+      const presets = this.buildScrub();
+      // One stop is a line with nowhere to go.
+      if (presets.length < 2) return false;
+      closeOpenSeg();
+      const match = this.matchingPreset();
+      const at = presets.findIndex((preset) => preset.id === match?.id);
+      this.scrubFrom = at < 0 ? 0 : at;
+      this.scrubAt = this.scrubFrom;
+      this.scrubEl.classList.add('is-open');
+      raiseMenu(this.scrubEl);
+      // Centred over the whole bar and keeping its own width: a scrubber hung
+      // off the ••• would sit in the corner it came from, and this is about
+      // the prompt, which is the middle.
+      floatMenu(this.bar, this.scrubEl, { align: 'center', hug: false });
+      this.paintScrub({ animate: false });
+      scrubOpen = this;
+      return true;
+    }
+
+    paintScrub({ animate = true } = {}) {
+      const presets = this.scrubPresets ?? [];
+      const at = Math.min(Math.max(0, this.scrubAt ?? 0), presets.length - 1);
+      const preset = presets[at];
+      if (!preset) return;
+      const track = this.scrubEl.querySelector('.scrub-track');
+      const fill = this.scrubEl.querySelector('.scrub-fill');
+      const knob = this.scrubEl.querySelector('.scrub-knob');
+      const now = this.scrubEl.querySelector('.scrub-now');
+      [...this.scrubEl.querySelectorAll('.scrub-stop')].forEach((stop, index) => {
+        stop.classList.toggle('is-at', index === at);
+      });
+      // BRAND is this file's own constant, not anything an agent said.
+      now.innerHTML = BRAND[preset.brand] ?? '';
+      now.append(document.createTextNode(preset.name));
+      // Dot centre to dot centre: the track less one stop's width.
+      const span = Math.max(0, track.clientWidth * (1 - 1 / Math.max(1, presets.length)));
+      const atPx = Math.round(span * (presets.length > 1 ? at / (presets.length - 1) : 0));
+      if (!animate) {
+        fill.style.transition = 'none';
+        knob.style.transition = 'none';
+      }
+      fill.style.width = `${atPx}px`;
+      knob.style.transform = `translateX(${atPx}px)`;
+      if (!animate) {
+        // Flush the jump, then hand the transitions back for the arrows.
+        void this.scrubEl.offsetWidth;
+        fill.style.transition = '';
+        knob.style.transition = '';
+      }
+      this.scrubEl.setAttribute('aria-valuenow', String(at));
+      this.scrubEl.setAttribute('aria-valuetext', preset.name);
+    }
+
+    /** Stops at the ends rather than wrapping: a timeline has two of them,
+     *  and holding an arrow down should come to rest, not cycle. */
+    moveScrub(delta) {
+      const presets = this.scrubPresets ?? [];
+      if (!this.scrubIsOpen() || presets.length < 2) return;
+      const next = Math.min(presets.length - 1, Math.max(0, (this.scrubAt ?? 0) + delta));
+      if (next === this.scrubAt) return;
+      this.scrubAt = next;
+      this.paintScrub();
+    }
+
+    /** Letting go is the decision. Applying on every arrow would persist the
+     *  setup — a write per step — for choices you were only scrubbing past. */
+    closeScrub({ commit = true } = {}) {
+      if (!this.scrubIsOpen()) return;
+      this.scrubEl.classList.remove('is-open');
+      if (scrubOpen === this) scrubOpen = null;
+      const chosen = commit && this.scrubAt !== this.scrubFrom
+        ? (this.scrubPresets ?? [])[this.scrubAt]
+        : null;
+      clearTimeout(this.scrubEl._unfloat);
+      const settle = () => {
+        if (this.scrubIsOpen()) return;
+        dropMenu(this.scrubEl);
+        unfloatMenu(this.scrubEl);
+      };
+      if (reduceMotion()) settle();
+      else this.scrubEl._unfloat = setTimeout(settle, MENU_MS + 60);
+      if (chosen) this.applyPreset(chosen);
+    }
+
     fitSetup() {
       requestAnimationFrame(() => {
         // One row first; the fits below wrap the bar only if they must.
@@ -2871,7 +3341,6 @@
       } catch {
         this.usageMeters = [];
       }
-      this.usageLoaded = true;
     }
 
     async refreshChrome() {
@@ -2899,10 +3368,43 @@
         this.tagsEl.replaceChildren();
         return;
       }
-      const title = this.meta?.title || 'Untitled';
+      const title = this.meta?.title || 'New Chat';
       this.savedTitle = title;
       if (this.shadowRoot.activeElement !== this.heading) this.heading.textContent = title;
       this.paintTags();
+    }
+
+    /** The construction zone this conversation is drawing, or null. One row in
+     *  the mast: a live dot, where the work is, and an arrow that goes there.
+     *  It is the only thing in a chat that points back out at the document. */
+    showZone(zone) {
+      this.zone = zone && Array.isArray(zone.ids) && zone.ids.length ? zone : null;
+      this.zoneJump.hidden = !this.zone;
+      if (!this.zone) {
+        this.dispatchEvent(new CustomEvent('zone', { detail: { zone: null }, bubbles: true, composed: true }));
+        return;
+      }
+      const here = this.zone.path === window.marble?.app;
+      this.zoneWhat.textContent = here ? 'Building here' : `Building in ${this.zone.path}`;
+      this.zoneJump.title = here
+        ? 'Scroll to what the agent is working on'
+        : `Open ${this.zone.path} at what the agent is working on`;
+      this.zoneJump.setAttribute('aria-label', this.zoneJump.title);
+      this.dispatchEvent(new CustomEvent('zone', { detail: { zone: this.zone }, bubbles: true, composed: true }));
+    }
+
+    /** Same document: scroll to it. Another document: the jump is a navigation,
+     *  and the ids ride in the hash so collab.js can land you on them. */
+    goToZone() {
+      const zone = this.zone;
+      if (!zone) return;
+      const at = zone.ids.map(encodeURIComponent).join(',');
+      if (zone.path !== window.marble?.app) {
+        location.href = `/a/${encodeURIComponent(zone.path)}#at=${at}`;
+        return;
+      }
+      // Already here: no navigation, and no hash to leave in the history.
+      dispatchEvent(new CustomEvent('marble:jump-to', { detail: { ids: [...zone.ids] } }));
     }
 
     paintTags() {
@@ -2929,7 +3431,7 @@
       if (!id) return;
       const next = this.heading.textContent.replace(/\s+/g, ' ').trim();
       if (!next) {
-        this.heading.textContent = this.savedTitle || 'Untitled';
+        this.heading.textContent = this.savedTitle || 'New Chat';
         return;
       }
       if (next === this.savedTitle) return;
@@ -2947,6 +3449,18 @@
         || this.attachments.length > 0
         || this.composerChips.some((chip) => chip.kind === 'skill' || chip.kind === 'compact');
       this.sendButton.disabled = this.sending || noAgent || !canSend;
+    }
+
+    /** Whether the person has started a message here: the same test the send
+     *  button makes, asked from outside. A chat nobody has typed into is a
+     *  chat nobody would miss — it is what lets closing a brand-new pane
+     *  discard it instead of filing it. The document chip does not count;
+     *  the page put that there, not the person. */
+    get drafting() {
+      if (this.sending) return true;
+      return Boolean(this.input?.value.trim())
+        || this.attachments.length > 0
+        || this.composerChips.some((chip) => chip.kind === 'skill' || chip.kind === 'compact');
     }
 
     /** What follows any change to the box: the attachment list, the empty
@@ -3650,6 +4164,11 @@
         case 'ops.applied':
           this.opsApplied(turn, event);
           break;
+        // The construction zone this turn is drawing on its document, sent here
+        // too because the chat may be read from another page entirely.
+        case 'zone':
+          this.showZone(event.ids?.length ? event : null);
+          break;
         case 'document.changed':
           this.documentChanged(turn, event);
           break;
@@ -3996,6 +4515,9 @@
       row.dataset.state = 'pending';
       row.dataset.name = event.name;
       row.dataset.short = short;
+      // Kept so a refusal or a failure can say which step it was, instead of
+      // replacing the label with the bare tool name.
+      row.dataset.was = label;
       if (source) row.dataset.source = source;
       const record = this.record(turn);
       record.tools.set(event.callId, row);
@@ -4030,10 +4552,18 @@
         return;
       }
       if (!event.ok) {
-        row.dataset.state = 'failed';
+        // "Blocked" is a claim about a decision someone made, so only a
+        // refusal gets to make it. A command that exited 1 — a typo, a
+        // missing module, a test that failed — is the agent's own business
+        // and says "Failed". Calling both "Blocked" read as a drive with no
+        // access when most of it was the agent tripping over its own shell.
+        const denied = Boolean(event.denied);
+        row.dataset.state = denied ? 'refused' : 'failed';
         row.title = event.summary ?? '';
         if (!['list_documents', 'read_document', 'apply_ops', 'create_document', 'read_guide', 'check_document'].includes(row.dataset.name)) {
-          row.textContent = `Blocked: ${row.dataset.name}`;
+          // The label already says what the step was ("Ran the runner tests");
+          // keep it, because what was refused is the useful half.
+          row.textContent = `${denied ? 'Blocked' : 'Failed'}: ${row.dataset.was ?? row.dataset.name}`;
         }
       } else if (row.dataset.state === 'pending') {
         row.dataset.state = 'done';
@@ -4306,6 +4836,9 @@
     }
 
     setRunning(turn) {
+      // Nothing is running, so nothing is being worked on: the zone on the
+      // document is already gone and the row that points at it goes with it.
+      if (!turn) this.showZone(null);
       this.running = turn ? { turn, target: this.turns.get(turn)?.target ?? null } : null;
       this.stopButton.hidden = !turn;
       this.dispatchEl.hidden = !turn;
@@ -4523,6 +5056,14 @@
           });
           row.append(effort);
         }
+        if (provider.modes?.length) {
+          const mode = document.createElement('select');
+          mode.name = `mode-${provider.id}`;
+          mode.dataset.mode = provider.id;
+          mode.setAttribute('aria-label', `Permission mode for ${provider.label}`);
+          fillSelect(mode, provider.modes, { value: settings.modes?.[provider.id] ?? '' });
+          row.append(mode);
+        }
         agents.append(row);
       }
       const keys = document.createElement('fieldset');
@@ -4531,7 +5072,7 @@
       keys.append(this.keyRow('cursor', 'Cursor API key', settings.keys?.cursor));
       const projects = document.createElement('fieldset');
       projects.append(h('legend', '', 'Projects'));
-      projects.append(h('p', 'hint', 'A full agent runs with your own Claude Code (or Cursor) configuration — your plugins, skills, hooks, MCP servers and permission rules — in the project you choose. It is exactly as capable, and as powerful, as the terminal.'));
+      projects.append(h('p', 'hint', 'A full agent runs with your own Claude Code (or Cursor) configuration — your plugins, skills, hooks, MCP servers and permission rules — in the project you choose. It is exactly as capable, and as powerful, as the terminal. What it may run is decided there, not here: in Auto, Claude Code\u2019s classifier refuses some commands outright, and the cure is a permission rule in your own settings.'));
       let list = [];
       try {
         list = await this.api.projects();
@@ -4646,7 +5187,11 @@
       for (const input of this.shadowRoot.querySelectorAll('[data-effort]')) {
         efforts[input.dataset.effort] = input.value.trim();
       }
-      const patch = { models, efforts };
+      const modes = {};
+      for (const input of this.shadowRoot.querySelectorAll('[data-mode]')) {
+        modes[input.dataset.mode] = input.value.trim();
+      }
+      const patch = { models, efforts, modes };
       if (defaultProvider) patch.defaultProvider = defaultProvider;
       const keys = {};
       const anthropic = this.shadowRoot.querySelector('input[name="key-anthropic"]')?.value.trim();
@@ -4835,7 +5380,17 @@
         api.remember(event.detail.id);
       });
       this.view.addEventListener('meta', (event) => this.showMeta(event.detail.meta));
-      this.view.addEventListener('running', (event) => this.showWhere(event.detail));
+      this.view.addEventListener('running', (event) => {
+        this.lastRunning = event.detail;
+        this.showWhere(event.detail);
+      });
+      // The mast's zone row says where the work is and takes you there. This
+      // header's line says only where it is; while the better one is up, it
+      // stands down rather than saying the same thing worse.
+      this.view.addEventListener('zone', (event) => {
+        this.zoneUp = Boolean(event.detail?.zone);
+        this.showWhere(this.lastRunning);
+      });
 
       this.onKey = (event) => {
         if ((event.metaKey || event.ctrlKey) && !event.altKey && !event.shiftKey && event.key.toLowerCase() === 'j') {
@@ -4883,6 +5438,11 @@
         this.showLauncherState();
       }).catch(() => {});
       this.offSummaries = api.on('*', (summary) => {
+        if (summary?.removed) {
+          this.summaries.delete(summary.id);
+          this.showLauncherState();
+          return;
+        }
         this.summaries.set(summary.id, summary);
         this.showLauncherState();
         if (summary.id === this.view.getAttribute('conversation')) this.showMeta(summary);
@@ -5179,7 +5739,9 @@
     showWhere(running) {
       const target = running?.turn ? running.target : null;
       const here = window.marble?.app;
-      if (target && target !== here) {
+      if (this.zoneUp) {
+        this.where.hidden = true;
+      } else if (target && target !== here) {
         this.where.textContent = `Viewing ${here} · editing ${target}`;
         this.where.hidden = false;
       } else {
@@ -5241,7 +5803,7 @@
         this.summaries.set(summary.id, summary);
         const provider = this.labels.get(summary.provider)?.label ?? summary.provider;
         const state = summary.asking ? 'Needs you' : summary.status === 'running' ? 'Running' : summary.needsReview ? 'Needs review' : summary.activity || summary.status;
-        this.item(this.recent, summary.title || 'Untitled', `${provider} · ${state}`, () => this.switchTo(summary.id));
+        this.item(this.recent, summary.title || 'New Chat', `${provider} · ${state}`, () => this.switchTo(summary.id));
       }
       this.recent.querySelector('[role="menuitem"]')?.focus({ preventScroll: true });
     }
