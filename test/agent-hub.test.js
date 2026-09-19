@@ -115,3 +115,18 @@ test('Last-Event-ID is where a reconnecting stream replays from', async () => {
   assert.deepEqual(res.ids(), [3]);
   hub.close();
 });
+
+test('publishAsk writes ask and ask.resolved to the summary listeners only', () => {
+  const hub = createHub();
+  const all = fakeRes();
+  const one = fakeRes();
+  hub.subscribe('*', all);
+  hub.subscribe(CONV, one);
+  hub.publishAsk('ask', { conversation: CONV, requestId: 'r1' });
+  hub.publishAsk('ask.resolved', { conversation: CONV, requestId: 'r1' });
+  const written = all.chunks.join('');
+  assert.match(written, /event: ask\ndata: {"conversation":"abcdef012345","requestId":"r1"}/);
+  assert.match(written, /event: ask\.resolved\n/);
+  assert.equal(one.chunks.join(''), '');
+  hub.close();
+});

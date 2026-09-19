@@ -22,7 +22,7 @@ const SCRIPTS = {
   question: [{ ask: { tool: 'AskUserQuestion', input: { questions: [{ question: 'A or B?', header: 'Pick', options: [{ label: 'A' }, { label: 'B' }], multiSelect: false }] } } }],
 };
 
-async function setup({ limits = {}, tools, onLook, capability, projects = null, onFinish = null } = {}) {
+async function setup({ limits = {}, tools, onLook, capability, projects = null, onFinish = null, publishAsk = undefined } = {}) {
   const dir = await fsp.mkdtemp(path.join(os.tmpdir(), 'marble-runner-'));
   const store = createAgentStore({ dir: path.join(dir, 'agents'), defaultProvider: 'fake' });
   await store.ready();
@@ -49,6 +49,7 @@ async function setup({ limits = {}, tools, onLook, capability, projects = null, 
     bridgePath: '/nonexistent/marble-mcp.js',
     readDocument: async () => '<html><body data-marble-id="b"><p data-marble-id="p">hi</p></body></html>',
     publish: (conversationId, event) => published.push({ conversationId, event }),
+    publishAsk,
     limits: { maxRunning: 3, stallMs: 60_000, maxMs: 60_000, killGraceMs: 200, ...limits },
     log: { log() {}, error() {} },
     onLook,
@@ -967,5 +968,28 @@ test('patchQueued edits a waiting prompt and cycles dispatch', async () => {
   await runner.cancel(first.turnId);
   await finished(store, first.turnId);
   await finished(store, second.turnId);
+  await runner.close();
+});
+
+test('openAsks lists an open ask with its request, and forgets it once answered', async () => {
+  const asks = [];
+  const { store, runner } = await setup({ capability: 'full', publishAsk: (kind, payload) => asks.push({ kind, ...payload }) });
+  const { id } = await store.createConversation({ provider: 'fake' });
+  await runner.send(id, { prompt: 'script:permission', context: { target: 'garden' } });
+  const ask = await until(async () => (await store.events(id)).find((e) => e.type === 'ask'));
+  await until(() => asks.length);
+  const open = runner.openAsks();
+  assert.equal(open.length, 1);
+  assert.equal(open[0].conversation, id);
+  assert.equal(open[0].turn, `${id}-t1`);
+  assert.equal(open[0].requestId, ask.requestId);
+  assert.equal(open[0].request.tool, 'Bash');
+  assert.equal(open[0].request.kind, 'permission');
+  assert.ok(open[0].since > 0);
+  assert.deepEqual(asks.map((a) => a.kind), ['ask']);
+  await runner.answer(`${id}-t1`, ask.requestId, { behavior: 'allow' });
+  assert.equal(runner.openAsks().length, 0);
+  assert.deepEqual(asks.map((a) => a.kind), ['ask', 'ask.resolved']);
+  await until(async () => (await store.turn(`${id}-t1`)).status === 'completed');
   await runner.close();
 });
