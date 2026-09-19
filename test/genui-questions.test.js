@@ -12,7 +12,7 @@ const space = extractSpace(FIXTURE);
 
 test('one Choice per decision, ids are instance.key', () => {
   const { questions } = buildQuestions(space, atlas, { context: {} });
-  assert.deepEqual(Object.keys(questions), [
+  assert.deepEqual(Object.keys(questions).filter((k) => !k.startsWith('requested.')), [
     'games.openIn', 'games.overviewType', 'games.detailMultiplicity', 'games.attributePlacement',
     'game-card.shape', 'game-card.media', 'game-card.actions', 'game-card.target',
   ]);
@@ -74,4 +74,13 @@ test('the wizard fixture asks form\'s labels question through specializes, with 
   assert.deepEqual(Object.keys(q.criteria), ['top-aligned', 'left-aligned', 'floating-label']);
   assert.ok(questions['steps.labels'], 'the stepper has its own labels question');
   assert.notEqual(questions['steps.labels'].instructions.dimension, q.instructions.dimension);
+});
+
+test('every decision also asks what the person requested, with none first', () => {
+  const { questions } = buildQuestions(space, atlas, { context: { signals: ['show me a table'] } });
+  const q = questions['requested.games.overviewType'];
+  assert.ok(q);
+  assert.deepEqual(Object.keys(q.criteria), ['none', 'grid', 'list', 'table']);
+  assert.match(q.instructions.ask, /explicitly ask/);
+  assert.equal(Object.keys(questions).filter((k) => k.startsWith('requested.')).length, 8);
 });

@@ -83,14 +83,20 @@ A document is an app space when it contains at least one **instance root**. Ever
 - **Key rule:** the attribute name is the Atlas sub-dimension key in kebab case (`openIn` → `data-open-in`, `overviewType` → `data-overview-type`); the reverse mapping is unambiguous because Atlas keys are camelCase without digits.
 - Optionally, `data-genui-request="<the originating prompt>"` on `<body>`, so a document can be re-decided without the caller restating the request. The author skill always writes it.
 
-### 3.2 Implementation of options
+### 3.2 Implementation of options — CSS, and the result is plain web UI
 
-Each declared option must be reachable from the fact:
+**A generated document is ordinary HTML/CSS/JS, not a Marble document** (decided 2026-09-18). It is served and moved by the Marble host but uses none of Marble's components or affordances — no `<marble-alt>`, no `data-marble-editable`/`-choose`/`-toggle`/`-step`, no affordance script, no `window.marble`. The one Marble attribute it carries is `data-marble-id` on each instance root: the address the host writes to. GenUI.mrbl, Decide.mrbl and Monitor.mrbl are Marble documents; what they generate is not.
 
-- **CSS:** a rule in any of the document's stylesheets whose selector contains `[data-<key>="<slug>"]`, the value spelled exactly as the slug (attribute selectors match bytes; a rule written `"Pop Up"` never matches the `pop-up` Jev writes, and the validator says so). The validator checks presence, not scoping — a selector cannot be tied to an instance in general, so scoping the rule under the root is the author's job and is what the skill writes. Known limit: two instances that declare the same key satisfy each other's CSS check.
-- **Markup:** a `<marble-alt>` *under this root* whose `data-marble-active` is derived from the fact, with a `data-marble-alt="<slug>"` child per option. An alternative under another instance implements nothing here.
+So each declared option is implemented one way: a rule in any of the document's stylesheets whose selector contains `[data-<key>="<slug>"]`, the value spelled exactly as the slug (attribute selectors match bytes; a rule written `"Pop Up"` never matches the `pop-up` Jev writes, and the validator says so). Every alternative is built into the markup and the attribute chooses which shows. The validator checks presence, not scoping — a selector cannot be tied to an instance in general, so scoping the rule under the root is the author's job and is what the skill writes. Known limit: two instances that declare the same key satisfy each other's CSS check.
 
-The validator (§4.1) enforces: every declared slug is implemented by one of these; the current value is a declared slug; no live sub-dimension has fewer than two options; instance names are unique; the Atlas id exists and the key is a sub-dimension of that entry (or of an entry it `specializes`).
+The validator (§4.1) enforces: every declared slug has such a rule; the current value is a declared slug; no live sub-dimension has fewer than two options; instance names are unique; the Atlas id exists and the key is a sub-dimension of that entry (or of an entry it `specializes`); an `excludes` declaration (§3.4) names only declared keys and slugs.
+
+### 3.4 Requests, pins and exclusions (the 2026-09-18 review fixes)
+
+- **A request outranks a prior.** For each decision the decide asks a second Choice in the same request — *which of these options, if any, did the person explicitly ask for?* with `none` — over the same state. If it names an option at or above the stop threshold, that option is applied whatever the preference Choice said (`reason: requested`). Zero extra round trips.
+- **Pins.** `data-genui-pin="open-in overview-type"` on a root lists keys the decide must not move (`reason: pinned`). Written by `POST /genui/pin { doc, instance, key, pinned }` through `writeOps`, or by hand.
+- **Exclusions.** `data-genui-excludes="key:slug + key:slug | …"` on a root: pairs of options across that instance's dimensions that cannot both hold. After gating, if a pair would hold, the lower-confidence of the two moves is dropped (`reason: excluded`); a pair already true in the authored defaults is the author's problem and the validator says so.
+- **A signal with nowhere to land.** When a re-decide driven by a new signal applies nothing, the page says so and offers **Extend** (the author skill's extend mode, editing the space in place) rather than staying silent.
 
 ### 3.3 What is not in the contract
 

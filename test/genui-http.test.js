@@ -58,7 +58,7 @@ const answer = (choice, confidence = 0.9) => ({ type: 'choice', choice, confiden
 const fakeAsk = (pick) => async ({ questions }) => ({
   model: 'fake',
   usage: { input_tokens: 5, output_tokens: 1 },
-  answers: Object.fromEntries(Object.keys(questions).map((id) => [id, answer(pick(id, questions[id]))])),
+  answers: Object.fromEntries(Object.keys(questions).map((id) => [id, answer(id.startsWith('requested.') ? 'none' : pick(id, questions[id]))])),
 });
 const firstOption = (id, q) => Object.keys(q.criteria)[0];
 
@@ -190,5 +190,22 @@ test('POST /genui/root without a key is 503', async () => {
   await withDrive(loadConfig(openEnv({ TYPESAFE_API_KEY: '' })), {}, async (base) => {
     const response = await fetch(`${base}/genui/root`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ request: 'anything' }) });
     assert.equal(response.status, 503);
+  });
+});
+
+test('POST /genui/pin writes the pin into the space and the next decide honours it', async () => {
+  const ask = fakeAsk((id, q) => (id === 'games.openIn' ? 'pop-up' : id.startsWith('requested.') ? 'none' : Object.keys(q.criteria)[0]));
+  await withDrive(loadConfig(openEnv({ TYPESAFE_API_KEY: 'tsk_test' })), { genui: { ask } }, async (base, drive) => {
+    const pin = await (await fetch(`${base}/genui/pin`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ doc: 'Spaces/49ers', instance: 'games', key: 'openIn' }) })).json();
+    assert.deepEqual(pin.pins, ['openIn']);
+    const tag = () => drive.store.read('Spaces/49ers').then((src) => src.match(/<section[^>]*data-genui="overview-detail#games"[^>]*>/)[0]);
+    assert.match(await tag(), /data-genui-pin="open-in"/);
+    const body = await (await post(base, { doc: 'Spaces/49ers' })).json();
+    assert.equal(body.decisions.find((d) => d.id === 'games.openIn').reason, 'pinned');
+    assert.doesNotMatch(await tag(), /data-open-in="pop-up"/);
+    const unpin = await (await fetch(`${base}/genui/pin`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ doc: 'Spaces/49ers', instance: 'games', key: 'openIn', pinned: false }) })).json();
+    assert.deepEqual(unpin.pins, []);
+    const bad = await fetch(`${base}/genui/pin`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ doc: 'Spaces/49ers', instance: 'games', key: 'colour' }) });
+    assert.equal(bad.status, 400);
   });
 });

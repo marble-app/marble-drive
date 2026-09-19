@@ -56,12 +56,13 @@ test('decideDocument runs the whole fast path with a fake gate and never imports
     return {
       model: 'fake',
       usage: { input_tokens: 10, output_tokens: 1 },
-      answers: Object.fromEntries(Object.keys(questions).map((id) => [id, answer(id === 'games.openIn' ? 'pop-up' : Object.keys(questions[id].criteria)[0], 0.9)])),
+      answers: Object.fromEntries(Object.keys(questions).map((id) => [id, answer(id.startsWith('requested.') ? 'none' : id === 'games.openIn' ? 'pop-up' : Object.keys(questions[id].criteria)[0], 0.9)])),
     };
   };
   const result = await decideDocument({ source: FIXTURE, atlas, apiKey: 'tsk', context: { viewport: 'phone' }, ask });
   assert.equal(seen.length, 1, 'one request');
-  assert.equal(Object.keys(seen[0].questions).length, 8);
+  assert.equal(Object.keys(seen[0].questions).filter((k) => !k.startsWith('requested.')).length, 8);
+  assert.equal(Object.keys(seen[0].questions).filter((k) => k.startsWith('requested.')).length, 8, 'and a requested twin for each');
   assert.deepEqual(seen[0].state.context, { viewport: 'phone' });
   assert.equal(result.validation.ok, true);
   assert.ok(result.ops.some((op) => op.name === 'data-open-in' && op.value === 'pop-up'));
@@ -90,7 +91,7 @@ test('decideDocument on the dashboard fixture: nine decisions across three insta
   let asked = 0;
   const ask = async ({ questions }) => {
     asked += 1;
-    return { answers: Object.fromEntries(Object.keys(questions).map((id) => [id, answer(Object.keys(questions[id].criteria).at(-1), 0.8)])) };
+    return { answers: Object.fromEntries(Object.keys(questions).map((id) => [id, answer(id.startsWith('requested.') ? 'none' : Object.keys(questions[id].criteria).at(-1), 0.8)])) };
   };
   const result = await decideDocument({ source, atlas, apiKey: 'tsk', ask });
   assert.equal(asked, 1);
@@ -105,4 +106,39 @@ test('a valid choice with a missing or non-numeric confidence throws — the con
   assert.throws(() => answersToOps(space, { 'games.openIn': { type: 'choice', choice: 'pop-up' } }), (err) => err.status === 502 && /confidence/.test(err.message));
   assert.throws(() => answersToOps(space, { 'games.openIn': { type: 'choice', choice: 'pop-up', confidence: '0.9' } }), (err) => err.status === 502);
   assert.throws(() => answersToOps(space, { 'games.openIn': { type: 'choice', choice: 'pop-up', confidence: 1.4 } }), (err) => err.status === 502);
+});
+
+const asked = (choice, confidence = 0.9) => ({ type: 'choice', choice, confidence, probabilities: { [choice]: confidence } });
+
+test('a request outranks the prior: a low-confidence preference still moves when the person asked for it', () => {
+  const { ops, decisions } = answersToOps(space, {
+    'games.overviewType': answer('grid', 0.6),
+    'requested.games.overviewType': asked('table', 0.92),
+  }, { stop: 0.75 });
+  assert.deepEqual(ops, [{ type: 'setAttr', id: 'games', name: 'data-overview-type', value: 'table' }]);
+  const d = decisions.find((x) => x.id === 'games.overviewType');
+  assert.equal(d.reason, 'requested');
+  assert.equal(d.requested, 'table');
+  // An uncertain "they asked" is no request.
+  const weak = answersToOps(space, { 'games.overviewType': answer('list', 0.6), 'requested.games.overviewType': asked('table', 0.4) }, { stop: 0.75 });
+  assert.deepEqual(weak.ops, []);
+  assert.equal(weak.decisions.find((x) => x.id === 'games.overviewType').reason, 'kept-low-confidence');
+});
+
+test('a pinned decision never moves, whatever Jev or the person said', () => {
+  const pinned = extractSpace(FIXTURE.replace('data-genui="overview-detail#games"', 'data-genui="overview-detail#games" data-genui-pin="open-in"'));
+  const { ops, decisions } = answersToOps(pinned, { 'games.openIn': answer('pop-up', 0.99), 'requested.games.openIn': asked('pop-up', 0.99) }, { stop: 0.75 });
+  assert.deepEqual(ops, []);
+  assert.equal(decisions.find((x) => x.id === 'games.openIn').reason, 'pinned');
+});
+
+test('an exclusion drops the weaker of two moves that cannot both hold', () => {
+  const ex = extractSpace(FIXTURE.replace('data-genui="overview-detail#games"', 'data-genui="overview-detail#games" data-genui-excludes="open-in:new-page + overview-type:table"'));
+  const { ops, decisions } = answersToOps(ex, { 'games.openIn': answer('new-page', 0.8), 'games.overviewType': answer('table', 0.9) }, { stop: 0.75 });
+  assert.deepEqual(ops.map((o) => o.name), ['data-overview-type']);
+  assert.equal(decisions.find((x) => x.id === 'games.openIn').reason, 'excluded');
+  // Only one side moved and the other is already the default: the pair holds, the move is dropped.
+  const one = answersToOps(extractSpace(FIXTURE.replace('data-genui="overview-detail#games"', 'data-genui="overview-detail#games" data-overview-type="table" data-genui-excludes="open-in:new-page + overview-type:table"')), { 'games.openIn': answer('new-page', 0.95) }, { stop: 0.75 });
+  assert.deepEqual(one.ops, []);
+  assert.equal(one.decisions.find((x) => x.id === 'games.openIn').reason, 'excluded');
 });

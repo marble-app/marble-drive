@@ -3,7 +3,8 @@ import fsp from 'node:fs/promises';
 import test from 'node:test';
 
 import { loadAtlas } from '../server/genui/atlas.js';
-import { extractSpace, parseDeclaration, validateSpace } from '../server/genui/space.js';
+import * as spaceModule from '../server/genui/space.js';
+const { extractSpace, parseDeclaration, validateSpace } = spaceModule;
 
 const FIXTURE = await fsp.readFile(new URL('./fixtures/genui/49ers.mrbl', import.meta.url), 'utf8');
 const atlas = await loadAtlas(new URL('./fixtures/genui/atlas.mini.json', import.meta.url));
@@ -121,13 +122,13 @@ test('validateSpace: fewer than two options, a preset without a gloss, an unimpl
   assert.deepEqual(kinds(wrongCurrent), ['current-not-declared']);
 });
 
-test('validateSpace: a <marble-alt> under the root implements options too', () => {
+test('validateSpace: a generated document is plain web UI — a <marble-alt> is not an implementation', () => {
   const alt = doc(`<section data-marble-id="a" data-genui="card#c" data-media="none" data-genui-media="none | top-image">
     <marble-alt data-marble-id="m" data-marble-active="none">
       <span data-marble-id="m0" data-marble-alt="none"></span>
-      <img data-marble-id="m1" data-marble-alt="top-image">
+      <span data-marble-id="m1" data-marble-alt="top-image"></span>
     </marble-alt></section>`);
-  assert.deepEqual(kinds(alt), []);
+  assert.deepEqual(kinds(alt), ['unimplemented-option', 'unimplemented-option']);
 });
 
 test('validateSpace: a CSS value is matched exactly — "Pop Up" does not implement pop-up', () => {
@@ -135,19 +136,31 @@ test('validateSpace: a CSS value is matched exactly — "Pop Up" does not implem
   assert.deepEqual(kinds(loose), ['unimplemented-option']);
 });
 
-test('validateSpace: a <marble-alt> under another instance implements nothing here', () => {
-  const elsewhere = doc(`<section data-marble-id="a" data-genui="card#c" data-media="none" data-genui-media="none | top-image"></section>
-    <section data-marble-id="b" data-genui="card#d">
-      <marble-alt data-marble-id="m" data-marble-active="none">
-        <span data-marble-id="m0" data-marble-alt="none"></span>
-        <span data-marble-id="m1" data-marble-alt="top-image"></span>
-      </marble-alt></section>`);
-  assert.deepEqual(kinds(elsewhere), ['unimplemented-option', 'unimplemented-option']);
-});
 
 test('extractSpace and validateSpace accept an already-parsed tree', async () => {
   const { parseSource } = await import('../server/engine.js');
   const tree = parseSource(FIXTURE);
   assert.equal(extractSpace(tree).instances.length, 2);
   assert.equal(validateSpace(tree, atlas).ok, true);
+});
+
+test('pins and excludes are read off the root and validated against its declarations', () => {
+  const { parseExcludes, parsePins } = spaceModule;
+  assert.deepEqual(parsePins('open-in overview-type'), ['openIn', 'overviewType']);
+  assert.deepEqual(parseExcludes('open-in:new-page + overview-type:table | shape:vertical + media:none'), [
+    [{ key: 'openIn', slug: 'new-page' }, { key: 'overviewType', slug: 'table' }],
+    [{ key: 'shape', slug: 'vertical' }, { key: 'media', slug: 'none' }],
+  ]);
+  const pinned = FIXTURE.replace('data-genui="overview-detail#games"', 'data-genui="overview-detail#games" data-genui-pin="open-in" data-genui-excludes="open-in:new-page + overview-type:table"');
+  const space = extractSpace(pinned);
+  assert.deepEqual(space.instances[0].pins, ['openIn']);
+  assert.equal(space.instances[0].excludes.length, 1);
+  assert.deepEqual(validateSpace(pinned, atlas).issues, []);
+
+  const badPin = FIXTURE.replace('data-genui="overview-detail#games"', 'data-genui="overview-detail#games" data-genui-pin="colour"');
+  assert.deepEqual(kinds(badPin), ['unknown-pin']);
+  const badEx = FIXTURE.replace('data-genui="overview-detail#games"', 'data-genui="overview-detail#games" data-genui-excludes="open-in:tooltip + overview-type:table"');
+  assert.deepEqual(kinds(badEx), ['unknown-exclude']);
+  const defaultEx = FIXTURE.replace('data-genui="overview-detail#games"', 'data-genui="overview-detail#games" data-genui-excludes="open-in:side-by-side + overview-type:grid"');
+  assert.deepEqual(kinds(defaultEx), ['excluded-default']);
 });

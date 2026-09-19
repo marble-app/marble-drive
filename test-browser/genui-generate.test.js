@@ -110,3 +110,36 @@ test('prompt → pattern → authored space → decided → shown; a follow-up r
   } catch (err) { await dump(err.message.split('\n')[0]); throw err; }
   await page.context().close();
 });
+
+test('a pin holds a decision against Jev; a signal with nowhere to land says so and offers Extend', async () => {
+  const { page, errors } = await host.newPage({ viewport: { width: 1400, height: 1000 } });
+  await page.goto(`${host.base}/a/GenUI`);
+  await page.waitForFunction(() => Boolean(window.marble?.agent));
+  await page.waitForFunction(() => /dashboard#ops/.test(document.querySelector('#tree')?.textContent || ''));
+
+  // Pin arrangement where it is (single-scrolling-column after the first test), then
+  // remove the train signal: without the pin Jev would move it back to fixed-grid.
+  const row = page.locator('#tree .row', { has: page.locator('.k', { hasText: /^arrangement$/ }) }).first();
+  await row.locator('.pin').click();
+  await page.waitForFunction(() => document.querySelector('#tree .row[data-pinned="yes"] .k')?.textContent === 'arrangement');
+  await page.locator('.signals li .x').first().click();
+  await page.locator('#redecide').click();
+  await page.waitForFunction(() => document.querySelector('#tree .row[data-pinned="yes"]')?.getAttribute('data-reason') === 'pinned');
+  const frame = page.frameLocator('#stage-body iframe');
+  assert.equal(await frame.locator('#ops').getAttribute('data-arrangement'), 'single-scrolling-column', 'pinned: the page did not move back');
+
+  // A signal the fake ignores changes nothing: the page says so and offers Extend.
+  await page.locator('#signal-new').click();
+  await page.keyboard.type('mute everything for an hour');
+  await page.keyboard.press('Enter');
+  await page.waitForFunction(() => /Nothing in this space can express/.test(document.querySelector('#tree')?.textContent || ''));
+  assert.ok(await page.locator('#extend').isVisible());
+
+  // Unpin: the next decide moves it again.
+  await page.locator('#tree .row[data-pinned="yes"] .pin').click();
+  await page.waitForFunction(() => !document.querySelector('#tree .row[data-pinned="yes"]'));
+  await page.locator('#redecide').click();
+  await frame.locator('#ops[data-arrangement="fixed-grid"]').waitFor();
+  assert.deepEqual(errors, []);
+  await page.context().close();
+});

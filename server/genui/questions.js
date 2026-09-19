@@ -7,6 +7,8 @@
 export const questionId = (instance, decision) => `${instance.name}.${decision.key}`;
 
 const ASK = 'Choose the best first show for this instance given request and context. Options are the only variations this app implements.';
+const ASKED = 'Which of these options, if any, did the person explicitly ask for or clearly describe in the request or in context.signals? Choose none unless they named it or described it unmistakably. This is about what they said, not what would be best.';
+export const requestedId = (instance, decision) => `requested.${instance.name}.${decision.key}`;
 
 export function buildQuestions(space, atlas, { request = null, context = {} } = {}) {
   const byName = new Map(space.instances.map((i) => [i.name, i]));
@@ -42,6 +44,19 @@ export function buildQuestions(space, atlas, { request = null, context = {} } = 
           ask: ASK,
         },
         criteria,
+      };
+      // A request outranks a prior: asked in the same round trip, consumed by
+      // the gate only when it names an option.
+      questions[requestedId(instance, decision)] = {
+        type: 'choice',
+        instructions: {
+          instance: instance.name,
+          pattern: entry?.name ?? instance.pattern,
+          dimension: sub.dim.q ?? sub.dim.name,
+          subdimension: sub.sub.name,
+          ask: ASKED,
+        },
+        criteria: { none: 'The person did not ask for any of these.', ...criteria },
       };
     }
   }

@@ -150,6 +150,30 @@ export function createGenuiHandler({
         return true;
       }
 
+      // A pin: a decision the decide must not move. Written into the space
+      // through the one write path, so the open page sees it and the next
+      // decide honours it. No model involved.
+      if (route === '/genui/pin' && req.method === 'POST') {
+        const body = await readJson(req, maxBodyBytes);
+        const doc = await readDoc(body.doc ?? '', res);
+        if (doc === null) return true;
+        const space = extractSpace(doc.source);
+        const instance = space.instances.find((i) => i.name === String(body.instance ?? ''));
+        const decision = instance?.decisions.find((d) => d.key === String(body.key ?? ''));
+        if (!instance || !decision) {
+          json(res, 400, { error: `no decision ${body.instance ?? '?'}.${body.key ?? '?'} in "${doc.docPath}"` });
+          return true;
+        }
+        const pins = new Set(instance.pins);
+        if (body.pinned === false) pins.delete(decision.key);
+        else pins.add(decision.key);
+        const kebab = (k) => k.replace(/([a-z0-9])([A-Z])/g, '$1-$2').toLowerCase();
+        const value = [...pins].map(kebab).join(' ');
+        const written = await writeOps(doc.docPath, [{ type: 'setAttr', id: instance.marbleId, name: 'data-genui-pin', value: value || null }], { client: 'genui' });
+        json(res, 200, { doc: doc.docPath, instance: instance.name, pins: [...pins], applied: written.applied ?? 0 });
+        return true;
+      }
+
       if (route === '/genui/decide' && req.method === 'POST') {
         if (!apiKey) {
           json(res, 503, { ...noKeyFailure(), error: noKeyFailure().message });

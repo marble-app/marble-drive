@@ -92,6 +92,16 @@ button:focus-visible, [data-marble-editable]:focus-visible { outline: 2px solid 
 .row[data-reason="applied"] .k::after { content: " ✓"; color: var(--accent); }
 .row[data-reason="kept-low-confidence"] .c { color: var(--warn); }
 .row[data-moved="yes"] { background: var(--accent-soft); margin: 0 -12px; padding-left: 12px; padding-right: 12px; }
+.row[data-reason="requested"] .k::after { content: " ✓ asked"; color: var(--accent); font-weight: 500; }
+.row[data-reason="kept-requested"] .k::after { content: " · asked"; color: var(--muted); font-weight: 500; }
+.row[data-reason="excluded"] .c { color: var(--warn); }
+.row[data-reason="pinned"] .v, .row[data-reason="pinned"] .c { color: var(--faint); }
+.row .side { display: flex; gap: 6px; align-items: center; justify-content: flex-end; }
+.row .pin { width: 1.6rem; height: 1.6rem; border-radius: 4px; color: var(--faint); font-size: 12px; line-height: 1; }
+.row .pin:hover { background: var(--sunk); color: var(--ink); }
+.row[data-pinned="yes"] .pin { color: var(--accent); }
+.landing { margin: 0 0 10px; padding: 10px 12px; background: var(--accent-soft); border: 1px solid var(--accent); border-radius: var(--r); font-size: 13px; color: var(--accent-ink); display: grid; gap: 8px; }
+.landing .btn { justify-self: start; }
 .row .bars { grid-column: 1 / -1; display: none; flex-direction: column; gap: 3px; margin-top: 4px; }
 .row[data-bars="yes"] .bars { display: flex; }
 .bar { display: grid; grid-template-columns: 9rem 1fr 30px; gap: 8px; align-items: center; font-size: 11px; color: var(--muted); }
@@ -116,7 +126,8 @@ button:focus-visible, [data-marble-editable]:focus-visible { outline: 2px solid 
 </style>
 </head>
 <body data-marble-id="body" data-space="" data-root="" data-run=""
-  data-author-prompt="Use the genui-author skill. Root pattern: {root} ({name}) — Jev chose it at {confidence} for this request. Write the app space to &quot;{doc}&quot; (a document path inside the drive; create it, do not edit another). Prompt, verbatim: &quot;{request}&quot;. Validate with `node bin/marble-drive.js genui space &quot;{doc}&quot;` until it prints ok, then stop. Do not run a decide.">
+  data-author-prompt="Use the genui-author skill. Root pattern: {root} ({name}) — Jev chose it at {confidence} for this request. Write the app space to &quot;{doc}&quot; (a document path inside the drive; create it, do not edit another). Prompt, verbatim: &quot;{request}&quot;. Validate with `node bin/marble-drive.js genui space &quot;{doc}&quot;` until it prints ok, then stop. Do not run a decide."
+  data-extend-prompt="Use the genui-author skill, in its extend mode. The app space at &quot;{doc}&quot; already exists; edit it in place — keep every existing fact, declaration and pin untouched. Add one live dimension or one option so that this can be expressed: &quot;{signal}&quot;. Implement it in CSS, declare it, then validate with `node bin/marble-drive.js genui space &quot;{doc}&quot;` until it prints ok, and stop. Do not run a decide.">
   <header class="mast" data-marble-id="mast">
     <div data-marble-id="mast-t">
       <span class="kicker" data-marble-id="kicker">TypeSafe AI · GenUI</span>
@@ -753,9 +764,10 @@ button:focus-visible, [data-marble-editable]:focus-visible { outline: 2px solid 
     n.append(head, bodyEl);
     return { n, head, body: bodyEl };
   };
-  const decisionRow = (d, prev) => {
+  const decisionRow = (d, prev, pinned = false) => {
     const r = el('div', 'row');
     r.setAttribute('data-reason', d.reason ?? '');
+    r.setAttribute('data-pinned', pinned ? 'yes' : 'no');
     // Applied means the host wrote it this run — that is what "moved" is.
     r.setAttribute('data-moved', d.applied ? 'yes' : 'no');
     void prev;
@@ -764,7 +776,16 @@ button:focus-visible, [data-marble-editable]:focus-visible { outline: 2px solid 
     if (d.choice && d.choice !== d.current && d.applied) { v.append(`${d.current} → `); v.append(Object.assign(el('b', null, d.choice))); }
     else if (d.choice && d.choice !== d.current) { v.append(Object.assign(el('b', null, d.current))); v.append(` (${d.choice} at ${(d.confidence ?? 0).toFixed(2)}, kept)`); }
     else v.append(Object.assign(el('b', null, d.current ?? '–')));
-    r.append(v, el('span', 'c', d.confidence == null ? '' : d.confidence.toFixed(2)));
+    const side = el('span', 'side');
+    side.append(el('span', 'c', d.confidence == null ? '' : d.confidence.toFixed(2)));
+    const pin = el('button', 'pin', pinned ? '📌' : '📍');
+    pin.type = 'button';
+    pin.title = pinned ? 'Pinned: Jev leaves this alone. Click to unpin.' : 'Pin: keep this where it is.';
+    pin.setAttribute('aria-pressed', pinned ? 'true' : 'false');
+    pin.setAttribute('aria-label', `${pinned ? 'Unpin' : 'Pin'} ${d.key}`);
+    pin.addEventListener('click', (event) => { event.stopPropagation(); togglePin(d.instance ?? d.instanceName, d.key, !pinned); });
+    side.append(pin);
+    r.append(v, side);
     r.append(bars(d.options, d.probabilities));
     r.addEventListener('click', () => r.setAttribute('data-bars', r.getAttribute('data-bars') === 'yes' ? 'no' : 'yes'));
     return r;
@@ -774,6 +795,17 @@ button:focus-visible, [data-marble-editable]:focus-visible { outline: 2px solid 
     if (!last.root && !last.space && !run) {
       tree.append(el('p', 'empty-tree', 'Nothing decided yet. Ask for something above.'));
       return;
+    }
+    if (last.landing) {
+      // The signal had nowhere to land: no live dimension can express it.
+      const note = el('div', 'landing');
+      note.append(el('span', null, `Nothing in this space can express “${last.landing}”. Jev moved nothing.`));
+      const btn = el('button', 'btn', 'Extend the space for it');
+      btn.type = 'button';
+      btn.id = 'extend';
+      btn.addEventListener('click', () => extend(last.landing));
+      note.append(btn);
+      tree.append(note);
     }
     if (last.root) {
       const { n, body: b } = node('L0', `Pattern · ${last.root.name ?? last.root.choice}`, { conf: last.root.confidence, open: false });
@@ -785,7 +817,7 @@ button:focus-visible, [data-marble-editable]:focus-visible { outline: 2px solid 
       tree.append(n);
     }
     if (run) {
-      const { n, body: b } = node('—', 'Authoring', { state: run.state, open: true });
+      const { n, body: b } = node('—', run.extending ? 'Extending the space' : 'Authoring', { state: run.state, open: true });
       const steps = el('p', 'steps');
       steps.append(`${run.steps} step${run.steps === 1 ? '' : 's'} · `);
       steps.append(Object.assign(el('span', 'last', run.last || (run.state === 'running' ? 'starting up' : ''))));
@@ -802,7 +834,7 @@ button:focus-visible, [data-marble-editable]:focus-visible { outline: 2px solid 
         for (const d of inst.decisions) {
           const id = `${inst.name}.${d.key}`;
           const answered = decided.get(id) ?? { key: d.key, current: d.current, options: d.options.map((o) => o.slug), reason: '' };
-          b.append(decisionRow(answered, prevMap ? prevMap.get(id) ?? null : undefined));
+          b.append(decisionRow({ ...answered, instanceName: inst.name }, prevMap ? prevMap.get(id) ?? null : undefined, (inst.pins ?? []).includes(d.key)));
         }
         for (const kid of last.space.instances.filter((c) => c.parent === inst.name)) {
           const wrap = el('div', 'kid');
@@ -849,7 +881,7 @@ button:focus-visible, [data-marble-editable]:focus-visible { outline: 2px solid 
   }
 
   // ---- deciding (one TypeSafe request)
-  async function decide({ quiet = false } = {}) {
+  async function decide({ quiet = false, signal = null } = {}) {
     const doc = fact('data-space');
     if (!doc) return;
     $('redecide').disabled = true;
@@ -858,6 +890,7 @@ button:focus-visible, [data-marble-editable]:focus-visible { outline: 2px solid 
       const out = await api('/genui/decide', { doc, request: promptText() || undefined, context: contextOf() });
       last.prev = last.decisions;
       last.decisions = out.decisions;
+      last.landing = signal && !out.applied ? signal : null;
       ms(`${out.elapsedMs} ms · ${out.applied ? `moved ${out.applied}` : 'nothing to move'}`);
       drawTree();
     } catch (err) {
@@ -911,6 +944,7 @@ button:focus-visible, [data-marble-editable]:focus-visible { outline: 2px solid 
         stopWatching();
         drawTree();
         try {
+          last.doc = null;
           await loadSpace(doc);
           run = null;
           setFact('data-run', '');
@@ -927,6 +961,40 @@ button:focus-visible, [data-marble-editable]:focus-visible { outline: 2px solid 
       }
       drawTree();
     });
+  }
+
+  async function togglePin(instance, key, pinned) {
+    const doc = fact('data-space');
+    if (!doc || !instance) return;
+    try {
+      await api('/genui/pin', { doc, instance, key, pinned });
+      const data = await api(`/genui/space?doc=${enc(doc)}`);
+      last.space = data.space;
+      drawTree();
+    } catch (err) {
+      showError(err);
+    }
+  }
+
+  // Extend: the same agent, editing the existing space in place for one
+  // signal. The slow path, but not a fresh start — positions and pins stay.
+  async function extend(signal) {
+    const doc = fact('data-space');
+    const agent = window.marble?.agent;
+    if (!doc || !signal) return;
+    if (!agent) { showError(new Error('Extending needs the Drive host with agents on.')); return; }
+    stopWatching();
+    last.landing = null;
+    const [projectId, providerId] = await Promise.all([project(agent), provider(agent)]);
+    const id = await agent.start({ provider: providerId, project: projectId });
+    run = { id, steps: 0, last: '', state: 'starting', why: '', extending: true };
+    setFact('data-run', `${id} ${doc}`);
+    drawTree();
+    watch(id, doc);
+    agent.update?.(id, { title: `GenUI · extend · ${signal.slice(0, 32)}` }).catch?.(() => {});
+    const fill = { doc, signal: signal.replace(/"/g, '\u201d') };
+    const prompt = fact('data-extend-prompt').replace(/\{(doc|signal)\}/g, (_, k) => fill[k]);
+    await agent.send(id, { prompt, target: doc, viewing: window.marble?.app ?? null, selection: [], also: [] });
   }
 
   async function freeName(base) {
@@ -1020,8 +1088,9 @@ button:focus-visible, [data-marble-editable]:focus-visible { outline: 2px solid 
   $('signal-new').addEventListener('keydown', (event) => {
     if (event.key !== 'Enter' || event.shiftKey) return;
     event.preventDefault();
-    addSignal($('signal-new').textContent);
-    if (fact('data-space')) decide();
+    const said = $('signal-new').textContent.trim();
+    addSignal(said);
+    if (fact('data-space')) decide({ signal: said });
   });
   byId('prompt').addEventListener('keydown', (event) => {
     if (event.key !== 'Enter' || event.shiftKey) return;

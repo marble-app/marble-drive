@@ -1,14 +1,15 @@
 // The app-space contract, read back off a document. One fact, one place: the
 // current position of every decision is the attribute CSS reads; which
 // variations this app implements is one declaration line the validator holds
-// honest against the stylesheet and the <marble-alt>s.
+// honest against the stylesheet. A generated document is plain web UI: its
+// options are CSS keyed on the fact, never Marble components.
 
 import { parseSource } from '../engine.js';
 import { camel, slug } from './atlas.js';
 
 const GENUI = 'data-genui';
 const ID = 'data-marble-id';
-const META = new Set(['data-genui-about', 'data-genui-request']);
+const META = new Set(['data-genui-about', 'data-genui-request', 'data-genui-pin', 'data-genui-excludes']);
 
 const isElement = (node) => typeof node?.tagName === 'string';
 // A caller that already parsed the document (decideDocument validates and
@@ -59,6 +60,21 @@ function decisionsOf(node) {
   return out;
 }
 
+// "open-in:new-page + overview-type:table | presentation:modal + density:grouped-questions"
+export function parseExcludes(value) {
+  return String(value ?? '')
+    .split('|')
+    .map((pair) => pair.split('+').map((side) => side.trim()).filter(Boolean))
+    .filter((sides) => sides.length === 2)
+    .map((sides) => sides.map((side) => {
+      const cut = side.indexOf(':');
+      const kebabKey = cut < 0 ? side : side.slice(0, cut);
+      return { key: camel(kebabKey.trim()), slug: cut < 0 ? '' : slug(side.slice(cut + 1)) };
+    }));
+}
+
+export const parsePins = (value) => String(value ?? '').split(/[\s,]+/).map((k) => k.trim()).filter(Boolean).map((k) => camel(k));
+
 export function extractSpace(source) {
   const tree = treeOf(source);
   let request = null;
@@ -77,6 +93,8 @@ export function extractSpace(source) {
       about: attr(node, 'data-genui-about'),
       parent: parentRoot ? (attr(parentRoot, GENUI).split('#')[1] ?? '').trim() || null : null,
       decisions: decisionsOf(node),
+      pins: parsePins(attr(node, 'data-genui-pin')),
+      excludes: parseExcludes(attr(node, 'data-genui-excludes')),
     };
   });
   return { request: request?.trim() || null, instances };
@@ -95,19 +113,6 @@ function cssImplemented(tree) {
   return found;
 }
 
-function altsUnder(root) {
-  // data-marble-alt values under <marble-alt>s inside THIS root. An
-  // alternative under another instance implements nothing here.
-  const found = new Set();
-  for (const { node } of walk(root)) {
-    if (node.tagName !== 'marble-alt') continue;
-    for (const { node: child } of walk(node)) {
-      const alt = attr(child, 'data-marble-alt');
-      if (alt !== null) found.add(alt);
-    }
-  }
-  return found;
-}
 
 export function validateSpace(source, atlas) {
   const tree = treeOf(source);
@@ -119,7 +124,6 @@ export function validateSpace(source, atlas) {
   const names = new Map();
 
   for (const { node, value } of found) {
-    const alts = altsUnder(node);
     const [patternRaw, nameRaw] = value.split('#');
     const pattern = (patternRaw ?? '').trim();
     const name = (nameRaw ?? '').trim();
@@ -147,12 +151,27 @@ export function validateSpace(source, atlas) {
         if (option.gloss === null && !sub.vars.has(option.slug)) {
           push(name, key, 'missing-gloss', `"${option.slug}" is not an Atlas variation of ${key}; a preset needs "slug: gloss"`);
         }
-        if (!css.has(`${factAttr}=${option.slug}`) && !alts.has(option.slug)) {
-          push(name, key, 'unimplemented-option', `no [${factAttr}="${option.slug}"] rule and no data-marble-alt="${option.slug}" implements it`);
+        if (!css.has(`${factAttr}=${option.slug}`)) {
+          push(name, key, 'unimplemented-option', `no [${factAttr}="${option.slug}"] rule implements it`);
         }
       }
       if (current === null || !options.some((o) => o.slug === slug(current))) {
         push(name, key, 'current-not-declared', `${factAttr}="${current}" is not one of: ${options.map((o) => o.slug).join(', ')}`);
+      }
+    }
+    const decisions = decisionsOf(node);
+    const byKey = new Map(decisions.map((d) => [d.key, d]));
+    for (const key of parsePins(attr(node, 'data-genui-pin'))) {
+      if (!byKey.has(key)) push(name, key, 'unknown-pin', `data-genui-pin names "${key}", which is not a declared decision here`);
+    }
+    for (const pair of parseExcludes(attr(node, 'data-genui-excludes'))) {
+      const bad = pair.find((side) => !byKey.has(side.key) || !byKey.get(side.key).options.some((o) => o.slug === side.slug));
+      if (bad) {
+        push(name, bad.key, 'unknown-exclude', `data-genui-excludes names ${bad.key}:${bad.slug}, which is not a declared option here`);
+        continue;
+      }
+      if (pair.every((side) => slug(byKey.get(side.key).current ?? '') === side.slug)) {
+        push(name, pair[0].key, 'excluded-default', `the authored defaults already hold ${pair.map((p) => `${p.key}:${p.slug}`).join(' + ')}, which data-genui-excludes forbids`);
       }
     }
   }
