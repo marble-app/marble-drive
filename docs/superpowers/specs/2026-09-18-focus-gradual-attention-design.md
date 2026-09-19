@@ -1,10 +1,14 @@
 # Focus — gradual attention
 
-> Status: **part built**, 2026-09-18, on `focus-gradual-attention`. Built: §6.1
-> the painted bands, §6.2 the room that holds, §6.3's ring, §9 one title per
-> pane. **Not started: §2 the ladder, §3 attention, §4 the budget and seam, §5
-> one column order, §7 menus, §8 titles a session writes for itself.** Those six
-> are unimplemented design, not shipped behaviour — read this as a plan for them.
+> Status: **part built**. Merged to main 2026-09-18 at `9cd3d4c`, and
+> `drive/Agents.mrbl` re-patched to match.
+>
+> **Built and shipped:** §6.1 the painted bands, §6.2 the room that holds,
+> §6.3's ring, §9 one title per pane.
+>
+> **Not started:** §2 the ladder, §3 attention, §4 the budget and seam, §5 one
+> column order, §7 menus, §8 titles a session writes for itself. Those six are
+> unimplemented design, not shipped behaviour — read them as a plan.
 >
 > Extends
 > `2026-09-18-agents-focus-columns-design.md`, which shipped the column shape
@@ -18,6 +22,47 @@ reparent the file's `<marble-conversation>` (reconcile would clone it).
 Built on `f7a6689`, which settled field-column assignment before width
 negotiation, retuned `GAP` 5 / `PAD` 10 / `MARGIN` 8, and removed the
 New-group column.
+
+## 0. Picking this up cold
+
+Everything needed is in this file and in the repo; nothing lives only in a
+session transcript. Read §1 first — the nine complaints and their measured
+causes — then the section you are building.
+
+**References are grep anchors, not line numbers.** Line numbers in this file
+went stale within hours the first time, because the agent-messaging merge and
+the built sections moved every one of them by up to 350 lines. Anything written
+as ``(grep `foo`)`` means: search for that string, do not trust a position.
+
+**Suggested order, and why.** §7 menus and §8 titles are self-contained, touch
+no layout code, and are the two a person feels immediately — §7 is pure UI
+against folder endpoints that already exist (`createFolder`, `updateFolder`,
+`deleteFolder`, and `deleteFolder` already ungroups members rather than
+deleting chats). §2, §3, §4 and §5 are one connected piece of work on the
+packer and should be done together, in that order, in their own session. §5 is
+the risky one and carries a capability loss stated in §5.1 — do not start it
+without reading that.
+
+**Before changing drag or layout behaviour, reproduce first.** Three hypotheses
+about §6.2 were wrong before the fourth was right; holding still, jittering
+eleven pixels and the root band all behave correctly, and only drifting outward
+past the pane's border reproduces. A throwaway probe test under `test-browser/`
+that dumps a timeline of DOM state is the cheapest way to find the real
+condition. Delete the probe before committing.
+
+**Two live traps.** `font: <weight> <size>/<lh> inherit` is invalid CSS — the
+whole declaration is dropped, which is how `.heading` rendered at 21px bold
+serif while the source said 15px. Bare `font: inherit` is fine. And
+`templates/agents.mrbl` is the tracked template while `drive/Agents.mrbl` is
+the live gitignored copy with real ids: edit and test the template, and let
+whoever owns the live-doc pass re-patch it — `patch` cannot do that job, for
+reasons recorded in the project's memory.
+
+**Verification.** `node --test "test/**/*.test.js"` (658 passing at `9cd3d4c`)
+and, for this area, `test-browser/agents-focus.test.js`,
+`agents-ui-polish.test.js`, `agents-phone.test.js`, `agents-panes.test.js`. A
+handful of browser tests fail only under full-suite load and pass alone — check
+`uptime` before calling one a regression.
 
 ## 1. Why
 
@@ -37,7 +82,7 @@ it in steps.**
 - Split bands are 25% of a pane (34% once open) and the root band is **12px**,
   and none of them is painted. You aim at an invisible target.
 - A drag into a folder or the loose column shows no reaction. Not because it is
-  unwired — `templates/agents.mrbl:2936` has set `data-drop="into"` since the
+  unwired — `templates/agents.mrbl` (grep `basin.dataset.drop = 'into'`) has set `data-drop="into"` since the
   columns spec — but because, measured, the reaction is a **6% shift in
   background and a 1px border tint** on a region 1424 × 533. It is below the
   threshold of noticing.
@@ -260,7 +305,7 @@ New field: `color` on conversation meta, `null` meaning "inherit the folder's".
 
 ## 8. Titles a session writes for itself
 
-`server/agent/store.js:203` sets `title` to the first 60 characters of the
+`server/agent/store.js` (grep `patch.title = String(event.text`) sets `title` to the first 60 characters of the
 first user message and never revisits it.
 
 New `server/agent/title.js`. `titleFor(id)` builds a digest of the session —
@@ -278,7 +323,7 @@ Two triggers:
 
 1. **After the first user message** — so the title is read from the whole
    prompt rather than its first 60 characters, which is the ask.
-2. **On `onFinish`** (`server/agent/runner.js:615`, the hook already exists) —
+2. **On `onFinish`** (`server/agent/runner.js`, grep `onFinish?.(`, the hook already exists) —
    so a conversation renames itself when the work is done.
 
 Serialised per conversation through the store's existing `serial`, one in
@@ -290,7 +335,7 @@ from a first message is `'auto'`, so the first real title replaces it.
 
 ## 9. One title per pane
 
-`templates/agents.mrbl:4669` sets `chrome = dock.extras.length ? 'tile' :
+`templates/agents.mrbl` (grep `const chrome = narrowView`) sets `chrome = dock.extras.length ? 'tile' :
 'pane'`, and `:host([data-chrome="pane"]) .heading { display: none }` matches
 only `pane`. So a dock with extras keeps its mast heading **and** its bar
 title: every conversation in a multi-pane dock names itself twice, 12.5px in
@@ -309,14 +354,14 @@ quieting something is not permission to reduce what it can do.
 
 The condition is the dock's, not the frame's. `BAR_MARKUP` fills `.dock-title`
 for `.pane > .dock-bar` as well as every `.dock-frame` bar
-(`templates/agents.mrbl:4638`), so hiding it in frames alone would leave a dock
+(`templates/agents.mrbl`, grep `.dock-title').textContent`), so hiding it in frames alone would leave a dock
 naming itself in the first pane's bar and nowhere else. Both are governed by
 the same thing that sets the chrome: `dock.extras.length`.
 
 This keeps four existing assertions green rather than rewriting them —
-`agents-polish.test.js:129` (bar title ≥ 6rem) and `agents-page.test.js:231`
+`agents-polish.test.js` (bar title ≥ 6rem) and `agents-page.test.js`
 (bar title non-empty) both measure the lone-pane path, and
-`agents-ui-polish.test.js:202`/`:250` assert every pane in a dock shows its
+`agents-ui-polish.test.js` assert every pane in a dock shows its
 heading, which is the direction this takes.
 
 ## 10. Where it lands
