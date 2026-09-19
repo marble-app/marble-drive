@@ -237,6 +237,15 @@
   // inside the floors and ceilings above. Between panes nobody outranks
   // anybody; it is the two sides of the canvas that stand in ratio.
   const PHI = (1 + Math.sqrt(5)) / 2;
+  // That ratio as the stage's share of the two sides together, which is the
+  // form the seam between them is dragged in: φ/(1+φ), a hair under 62%.
+  const GOLDEN_SPLIT = 1 / (1 + 1 / PHI);
+  // How far a hand may take that seam. Neither end is a floor — the floors
+  // below still hold — it is only that a split past these is not a split, it
+  // is one side asking to be closed, and closing a side is a different
+  // gesture than sizing it.
+  const SPLIT_MIN = 0.12;
+  const SPLIT_MAX = 0.92;
 
   const clamp = (value, lo, hi) => Math.max(lo, Math.min(hi, value));
 
@@ -302,6 +311,15 @@
    *  under reading width, down to `PANE_FLOOR`, because a screenful of
    *  conversations is what was asked for and the screen is the budget.
    *
+   *  `split` is where the seam between the stage and the field stands, as the
+   *  stage's share of the two of them together. Null — nobody has touched it —
+   *  is `GOLDEN_SPLIT`. A number is a hand on the seam, and a hand outranks
+   *  the preferred widths: the ceilings stop applying, so the field may be
+   *  dragged wider than a column ever asks to be and the panes wider than
+   *  reading width. The floors still hold, because a side squeezed past its
+   *  floor is a side you cannot read, which is not what dragging a seam is
+   *  for.
+   *
    *  `fulls` is `[{ id }]` already in stage order. `groups` is
    *  `[{ folderId, weight, cards: [{ id, lod, ox, oy }] }]`, loose one last.
    *  Returns every rect in canvas coordinates, plus the regions (piles among
@@ -319,6 +337,7 @@
     newGroup = 'auto',
     piled = [],
     opened = [],
+    split = null,
   }) => {
     const dh = sizes?.digest?.h ?? 161;
     const paneMin = range.paneMin ?? PANE_MIN;
@@ -511,8 +530,26 @@
     const fieldAt = (w) => (subCols ? subCols * w + fixed : 0);
     let stageW = stageAt(panePref);
     let fieldW = fieldAt(fieldPref);
+    // Where the seam between the two sides has been dragged to, if it has.
+    const bias = Number.isFinite(split) ? clamp(split, SPLIT_MIN, SPLIT_MAX) : null;
+    // A split somebody asked for, honoured inside the floors alone: the
+    // ceilings are only what each side would like, and the seam is somebody
+    // saying what they would like instead.
+    const byHand = (usable) => {
+      const floorS = Math.min(stageAt(paneMin), usable);
+      const floorF = Math.max(0, Math.min(fieldAt(fieldMin), usable - floorS));
+      const w = clamp(usable * bias, floorS, Math.max(floorS, usable - floorF));
+      return [w, usable - w];
+    };
     const spare = usableRoom - bar - stageW - fieldW;
-    if (spare >= 0) {
+    if (bias != null && n && subCols) {
+      // A hand on the seam spends the whole row: no New-group column is set
+      // aside out of width that was asked for by name.
+      const usable = usableRoom - bar;
+      [stageW, fieldW] = byHand(usable);
+      fieldW = Math.max(0, Math.floor((fieldW - fixed) / subCols) * subCols + fixed);
+      stageW = usable - fieldW;
+    } else if (spare >= 0) {
       // What is left once both sides stand at their ceiling is the air the
       // New-group column may be set aside from. Room set aside for it only
       // when there is going to be one in the pack: held open at rest it is a
@@ -530,8 +567,9 @@
         // at its ceiling hands what it cannot take to the other, stage first.
         // Past both ceilings together the ceilings say nothing (a wide screen
         // is filled edge to edge, not left as air), and the split is φ
-        // exactly.
-        const want = usable / (1 + 1 / PHI);
+        // exactly. This is the split until a hand moves the seam; after that
+        // the branch above has already answered.
+        const want = usable * GOLDEN_SPLIT;
         if (usable > stageAt(paneMax) + fieldAt(fieldMax)) {
           stageW = want;
           fieldW = usable - want;
@@ -824,6 +862,12 @@
       // neither cares how big the box is.
       regions: [...piles, ...railRegions, ...regions],
       piles,
+      // The expanded field as one box, and where the seam between it and the
+      // stage ended up standing. A seam dragged by hand reads both from here
+      // rather than re-measuring the canvas, so what it moves is the split
+      // the layout actually used — floors, rounding and all.
+      field: subCols ? { x: margin + railSpan, y: top, w: fieldW, h: availH } : null,
+      split: (n && subCols && stageW + fieldW > 0) ? stageW / (stageW + fieldW) : null,
       newGroup: newSlot,
       rects,
       colW,
@@ -940,6 +984,9 @@
     PILE_ROW_H,
     PANE_FLOOR,
     PHI,
+    GOLDEN_SPLIT,
+    SPLIT_MIN,
+    SPLIT_MAX,
     realmOf,
     suggestName,
     nextColor,

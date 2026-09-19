@@ -14,6 +14,7 @@ import { createHub } from './hub.js';
 import { createKeyStore } from './keys.js';
 import { findProject } from './projects.js';
 import { createAgentRoutes } from './routes.js';
+import { nameConversation } from './namer.js';
 import { createRunner } from './runner.js';
 import { listSkills, skillDirs } from './skills.js';
 import { createAgentStore } from './store.js';
@@ -184,6 +185,15 @@ async function boot({ config, store, writeOps, createDocument, origin, providers
     log,
     skills,
     onLook: look,
+    // Who names a new chat once its first turn is over. Null switches naming
+    // off entirely — a host running fabricated providers should not be
+    // spawning a real CLI to write labels.
+    // Naming always runs on the login, never on a key: pickEnv hands the CLI
+    // the same bare environment a subscription turn gets, so a label can
+    // never be billed to somebody's API account.
+    nameConversation: config.agentNaming
+      ? (input) => nameConversation({ ...input, model: config.agentNamingModel })
+      : null,
     // A turn's ops were filed as `agent:<id>` and its undo as `agent-undo:<id>`;
     // both are that conversation, and both are done when the turn is.
     onFinish: (conversationId) => {

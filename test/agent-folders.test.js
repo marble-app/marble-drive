@@ -377,6 +377,85 @@ test('floors win over the golden ratio when the canvas is tight', () => {
   assert.ok(hopeless.stage.x + hopeless.stage.w <= 700 - MARGIN + 1, 'and the row ends at the edge');
 });
 
+// ---- The seam between the stage and the field. φ is only where it rests.
+
+// `newGroup: 'never'` is what the Focus view asks for: no New-group column,
+// so the bar between the two sides is the seam and nothing else.
+const SEAM = { canvas: { w: 1400, h: 810 }, sizes: SIZES, fulls: [{ id: 'f0' }], groups: [FIELD[0]], newGroup: 'never' };
+const splitOf = (packed) => packed.stage.w / (packed.stage.w + packed.field.w);
+
+test('the pack says where the seam stands, and at rest that is φ', () => {
+  const packed = F().packFocus(SEAM);
+  assert.ok(Math.abs(F().GOLDEN_SPLIT - 0.6180339887) < 1e-9, 'the golden split is φ/(1+φ)');
+  assert.ok(Math.abs(packed.split - F().GOLDEN_SPLIT) < 0.01, `at rest the seam is at φ, got ${packed.split}`);
+  assert.ok(Math.abs(splitOf(packed) - packed.split) < 0.01, 'and the reported split is the one the boxes were given');
+  assert.ok(Math.abs(packed.field.x - MARGIN) < 0.01, 'the field starts at the left margin');
+  assert.ok(Math.abs(packed.field.x + packed.field.w + F().GAP - packed.stage.x) < 0.01, 'and the bar between them is one gap');
+});
+
+test('a hand on the seam replaces the golden split', () => {
+  for (const asked of [0.35, 0.5, 0.75]) {
+    const packed = F().packFocus({ ...SEAM, split: asked });
+    assert.ok(Math.abs(splitOf(packed) - asked) < 0.02, `asked ${asked}, got ${splitOf(packed)}`);
+    assert.ok(Math.abs(packed.stage.x + packed.stage.w + MARGIN - 1400) < 2, 'the canvas is still filled to the edge');
+  }
+});
+
+test('the split is a ratio, so a column arriving in the field does not move it', () => {
+  // The field gains and loses columns as chats start and stop — Working is a
+  // whole column that comes and goes. A seam set as a share of the canvas
+  // stays where it was put: what changes is how the field spends its width,
+  // not how much of it there is.
+  const one = F().packFocus({ ...SEAM, split: 0.45 });
+  const two = F().packFocus({ ...SEAM, groups: [FIELD[0], FIELD[1]], split: 0.45 });
+  assert.ok(Math.abs(splitOf(two) - splitOf(one)) < 0.02, `${splitOf(one)} → ${splitOf(two)}`);
+  assert.ok(two.colW < one.colW, 'the second column is paid for out of the field, not out of the stage');
+  // Until the columns cannot both be read: the floor is per column, so it
+  // rises with them, and past that the stage is what gives.
+  const many = F().packFocus({ ...SEAM, groups: FIELD, split: 0.92 });
+  assert.ok(many.colW >= F().FIELD_MIN - 1, `every column keeps its floor, got ${many.colW}`);
+  assert.ok(Math.abs(many.stage.x + many.stage.w + MARGIN - 1400) < 2, 'and the row still ends at the edge');
+});
+
+test('the seam outranks the preferred widths but not the floors', () => {
+  // Dragged toward the stage, the field passes the width a column ever asks
+  // for — a ceiling is what a side would like, and this is being told.
+  const wide = F().packFocus({ ...SEAM, split: 0.3 });
+  assert.ok(wide.colW > F().FIELD_MAX, `the field passes FIELD_MAX, got ${wide.colW}`);
+  const tall = F().packFocus({ ...SEAM, split: 0.85 });
+  assert.ok(tall.stage.cols[0].w > F().PANE_MAX, `and the stage passes PANE_MAX, got ${tall.stage.cols[0].w}`);
+
+  // Floors are not what the seam is for: a side squeezed past its own is a
+  // side you cannot read.
+  const squeezed = F().packFocus({ ...SEAM, split: 0.99 });
+  assert.ok(squeezed.colW >= F().FIELD_MIN - 1, `the field keeps its floor, got ${squeezed.colW}`);
+  const shoved = F().packFocus({ ...SEAM, split: 0 });
+  assert.ok(shoved.stage.cols[0].w >= F().PANE_MIN - 1, `a pane keeps reading width, got ${shoved.stage.cols[0].w}`);
+  assert.ok(Math.abs(shoved.stage.x + shoved.stage.w + MARGIN - 1400) < 2, 'and the row still ends at the edge');
+});
+
+test('a tight canvas answers the seam with what it has', () => {
+  // Both floors together are most of the canvas, so the seam has almost no
+  // travel — but it never overflows and never crosses a floor.
+  const tight = F().packFocus({ canvas: { w: 1100, h: 810 }, sizes: SIZES, fulls: [{ id: 'f0' }, { id: 'f1' }], groups: [FIELD[0]], split: 0.2 });
+  assert.equal(tight.width, 1100, 'it fits without scrolling');
+  assert.ok(tight.colW >= F().FIELD_MIN - 1, `the field keeps its floor, got ${tight.colW}`);
+  for (const col of tight.stage.cols) assert.ok(col.w >= F().PANE_MIN - 1, `a pane keeps reading width, got ${col.w}`);
+  assert.ok(tight.stage.x + tight.stage.w <= 1100 - MARGIN + 1, 'and the row ends at the edge');
+});
+
+test('the seam is a fraction, and anything else is no seam at all', () => {
+  const rest = F().packFocus(SEAM).stage.w;
+  for (const junk of [null, undefined, NaN, Infinity, 'wide']) {
+    assert.ok(Math.abs(F().packFocus({ ...SEAM, split: junk }).stage.w - rest) < 0.01, `${junk} is not a split`);
+  }
+  // With nothing on the other side there is no seam to answer to.
+  const noField = F().packFocus({ ...SEAM, groups: [], split: 0.2 });
+  assert.equal(noField.field, null);
+  assert.equal(noField.split, null);
+  assert.ok(Math.abs(noField.stage.x + noField.stage.w + MARGIN - 1400) < 2, 'the stage takes the whole canvas');
+});
+
 test('a lone region fills its column, and the columns share a wide canvas', () => {
   const packed = pack({ groups: [FIELD[0]] });
   const [region] = packed.regions;

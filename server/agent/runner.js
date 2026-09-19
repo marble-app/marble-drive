@@ -27,7 +27,7 @@ const CLOSE_GRACE_MS = 5_000;
 const STEER_NOTE = 'While you were working I added this note. Treat it as course-correction.';
 const DISPATCH = new Set(['queue', 'steer', 'interrupt']);
 
-export function createRunner({ store, tools, providers, workdir, origin, bridgePath, browserPath, readDocument, publish, publishAsk = () => {}, limits, log = console, skills = [], driveRoot, projects = null, power = '', sandbox = null, onLook = null, onFinish = null }) {
+export function createRunner({ store, tools, providers, workdir, origin, bridgePath, browserPath, readDocument, publish, publishAsk = () => {}, limits, log = console, skills = [], driveRoot, projects = null, power = '', sandbox = null, onLook = null, onFinish = null, nameConversation = null }) {
   const live = new Map(); // turnId → live turn
   const order = []; // turnIds, in the order they were sent
   const tokens = new Map(); // token → live turn
@@ -124,6 +124,33 @@ export function createRunner({ store, tools, providers, workdir, origin, bridgeP
       publish(turn.conversationId, stored, meta ? await store.summary(turn.conversationId) : null);
       return stored;
     });
+  }
+
+  // ------------------------------------------------------------------ naming
+  //
+  // The name a chat wears is a placeholder until this runs: the first sixty
+  // characters of the prompt. Once the turn is over there is a question and
+  // an answer to read, so a small model is asked for a real title.
+  //
+  // Fire-and-forget, after the turn has already ended: naming spawns a CLI of
+  // its own, and no turn should be held open a second longer for the sake of
+  // a label. Once per conversation per host — a name that could not be got is
+  // not worth asking for again at the end of every turn.
+  const naming = new Set();
+  async function nameIfUnnamed(turn) {
+    if (!nameConversation) return; // a host that does not name chats
+    const id = turn.conversationId;
+    if (naming.has(id)) return;
+    const meta = await store.conversation(id);
+    if (!meta?.titleAuto) return; // named by the person, or nothing to replace
+    naming.add(id);
+    const title = await nameConversation({ prompt: turn.prompt, reply: turn.said.join('\n\n'), log });
+    if (!title) return;
+    // Renamed while we were asking: what the person typed outranks this.
+    const still = await store.conversation(id);
+    if (!still?.titleAuto || still.title !== meta.title) return;
+    await store.updateConversation(id, { title, titleAuto: false });
+    publish(id, { type: 'meta' }, await store.summary(id));
   }
 
   /** finish(), wherever it's called from, never throws — a store error at the
@@ -281,6 +308,7 @@ export function createRunner({ store, tools, providers, workdir, origin, bridgeP
       // restore; undo wants this instead.
       origins: new Map(),
       stderr: '',
+      said: [], // the agent's own text, for naming the chat
       timers: [],
       inflight: new Set(), // tool-call promises the bridge is still waiting on
       sent: 0, // messages this turn has sent; capped
@@ -296,6 +324,10 @@ export function createRunner({ store, tools, providers, workdir, origin, bridgeP
       // under it, would otherwise leave applied ops nobody can take back.
       undoSaved: Promise.resolve(),
       onEvent: (event) => {
+        // Kept for the namer: what the agent actually said, which is half of
+        // what a good title is made of. Capped — a title needs a paragraph,
+        // not a transcript.
+        if (event.type === 'text' && event.text && turn.said.length < 4) turn.said.push(String(event.text));
         if (event.type === 'ops.applied') turn.applied += event.count;
         if (event.type === 'ops.applied' || event.type === 'document.changed') {
           // Written as each batch or write lands, in order, not only when the
@@ -369,7 +401,7 @@ export function createRunner({ store, tools, providers, workdir, origin, bridgeP
     // A conversation that exists only because someone wrote to it has no name
     // yet. Say where it came from, so the board is not a row of blank titles.
     if (!meta.title) {
-      await store.updateConversation(conversationId, { title: `Message from ${sender?.title || first.from}` });
+      await store.updateConversation(conversationId, { title: `Message from ${sender?.title || first.from}`, titleAuto: true });
     }
     try {
       return await send(conversationId, {
@@ -773,6 +805,7 @@ export function createRunner({ store, tools, providers, workdir, origin, bridgeP
       } catch (err) {
         log.error(`[agents] ${err.message}`);
       }
+      nameIfUnnamed(turn).catch((err) => log.error(`[agents] naming ${turn.conversationId}: ${err.message}`));
       const idx = order.indexOf(turn.id);
       if (idx !== -1) order.splice(idx, 1);
       // This turn took the inbox in composePrompt() but never got to act on

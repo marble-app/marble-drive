@@ -67,6 +67,7 @@ const SCRIPTS = {
 const config = loadConfig({
   ...process.env,
   MARBLE_DRIVE_AGENTS: '1',
+  MARBLE_DRIVE_AGENT_NAMING: '0',
   MARBLE_DRIVE_AGENT_PROVIDER: 'fake',
   MARBLE_DRIVE_AGENT_WORKDIR: WORK,
   MARBLE_DRIVE_AGENT_KEYS: KEYS,
@@ -437,6 +438,7 @@ test('a conversation title can be renamed', async () => {
   const patched = await api('PATCH', `/agent/conversations/${created.body.id}`, { title: '  Backlog pass  ' });
   assert.equal(patched.status, 200);
   assert.equal(patched.body.title, 'Backlog pass');
+  assert.equal(patched.body.titleAuto, false, 'a name someone typed is theirs to keep');
 });
 
 test('skills are listed without their bodies', async () => {
@@ -555,7 +557,7 @@ test('a lock left by a host that is no longer running does not keep agents off',
   const gone = spawnSync(process.execPath, ['-e', 'process.stdout.write(String(process.pid))']).stdout.toString();
   await fsp.mkdir(path.join(root, '.marble', 'agents'), { recursive: true });
   await fsp.writeFile(path.join(root, '.marble', 'agents', 'host.lock'), `${gone}\n`);
-  const other = await createDrive(loadConfig({ ...process.env, MARBLE_DRIVE_ROOT: root, MARBLE_DRIVE_AGENTS: '1', MARBLE_DRIVE_AGENT_WORKDIR: WORK }), {
+  const other = await createDrive(loadConfig({ ...process.env, MARBLE_DRIVE_ROOT: root, MARBLE_DRIVE_AGENTS: '1', MARBLE_DRIVE_AGENT_NAMING: '0', MARBLE_DRIVE_AGENT_WORKDIR: WORK }), {
     log: quiet,
     agentProviders: new Map([['fake', createFakeProvider({ scripts: SCRIPTS })]]),
   });

@@ -40,6 +40,10 @@
       -webkit-font-smoothing: antialiased;
     }
     @media (prefers-color-scheme: dark) {
+      .scrub {
+        --e-low: #8b9096; --e-medium: #7d9dc4; --e-high: #5d9bf0;
+        --e-xhigh: #8a7ff0; --e-max: #c07ff0;
+      }
       :host {
         --ink: #e8e6e1; --muted: #a3a7ab; --faint: #71767a; --line: #2f3438;
         --placeholder: #8d9296;
@@ -374,7 +378,9 @@
     // Above the trigger when there is room, below when there is not.
     const above = a.top - pad - m.height;
     const top = above >= pad ? above : Math.min(a.bottom + pad, innerHeight - pad - m.height);
-    const want = align === 'center' ? a.left + a.width / 2 - m.width / 2 : a.right - m.width;
+    const want = align === 'center' ? a.left + a.width / 2 - m.width / 2
+      : align === 'start' ? a.left
+        : a.right - m.width;
     const left = Math.min(Math.max(pad, want), innerWidth - pad - m.width);
     menu.style.top = `${Math.max(pad, Math.round(top))}px`;
     menu.style.left = `${Math.round(left)}px`;
@@ -438,6 +444,12 @@
    *  AltGr reports as ctrl+alt, so typing one of its characters raises the
    *  scrubber for as long as the key is down. Both are the cost of the
    *  gesture the shortcut is; changing either means changing the pair. */
+  const SCRUB_KEYS = {
+    ArrowLeft: { axis: 'model', delta: -1 },
+    ArrowRight: { axis: 'model', delta: 1 },
+    ArrowDown: { axis: 'effort', delta: -1 },
+    ArrowUp: { axis: 'effort', delta: 1 },
+  };
   let scrubOpen = null;
   let scrubArmed = false;
   let lastFocusedChat = null;
@@ -465,16 +477,18 @@
     }, true);
     document.addEventListener('keydown', (event) => {
       if (event.metaKey || !event.ctrlKey || !event.altKey) return;
-      const arrow = event.key === 'ArrowLeft' || event.key === 'ArrowRight';
+      // Sideways is the model, up and down is how hard it works.
+      const step = SCRUB_KEYS[event.key];
       // Anything else held with the pair is somebody else's shortcut.
-      if (!arrow && event.key !== 'Control' && event.key !== 'Alt') return;
+      if (!step && event.key !== 'Control' && event.key !== 'Alt') return;
       const target = scrubTarget();
       if (!target?.openScrub?.()) return;
-      if (!arrow) return;
+      if (!step) return;
       // Or the caret walks the prompt underneath while the scrubber moves.
       event.preventDefault();
       event.stopPropagation();
-      target.moveScrub(event.key === 'ArrowRight' ? 1 : -1);
+      if (step.axis === 'model') target.moveScrub(step.delta);
+      else target.tuneScrub(step.delta);
     }, true);
     document.addEventListener('keyup', (event) => {
       if (!scrubOpen) return;
@@ -486,6 +500,62 @@
     // Tabbing away never delivers the keyup, so without this the scrubber is
     // still up — and still holding the keys down — when you come back.
     addEventListener('blur', () => scrubOpen?.closeScrub());
+  };
+  /** A shortcut nobody can see is a shortcut nobody uses, and a line of help
+   *  standing permanently under the bar would cost more than it teaches. So
+   *  it waits: rest on the setup button long enough to have been looking for
+   *  something, and the keys are named. Moving on takes it away.
+   *  Raised like the sheets are, for the same reason — it has the pane next
+   *  door to clear. */
+  const HINT_DELAY = 750;
+  let hintEl = null;
+  const hideHint = () => {
+    if (!hintEl) return;
+    const tip = hintEl;
+    hintEl = null;
+    tip.classList.remove('is-open');
+    clearTimeout(tip._unfloat);
+    tip._unfloat = setTimeout(() => {
+      if (tip.classList.contains('is-open')) return;
+      dropMenu(tip);
+      unfloatMenu(tip);
+    }, reduceMotion() ? 0 : MENU_MS + 60);
+  };
+  const showHint = (anchor, tip) => {
+    if (!anchor?.isConnected || hintEl === tip) return;
+    hideHint();
+    hintEl = tip;
+    tip.classList.add('is-open');
+    clearTimeout(tip._unfloat);
+    raiseMenu(tip);
+    // Left edges together, not centred: a tip wider than the little button it
+    // describes would otherwise hang off the pane beside it.
+    floatMenu(anchor, tip, { align: 'start', hug: false });
+  };
+  /** Hook a trigger up to its own tip. The tip lives beside the trigger so it
+   *  keeps the conversation's styles; only the top layer is borrowed. */
+  const armHint = (anchor, text) => {
+    if (!anchor || anchor.dataset.hinted) return;
+    anchor.dataset.hinted = '1';
+    const tip = asPopover(h('div', 'keytip'));
+    tip.setAttribute('role', 'tooltip');
+    tip.textContent = text;
+    anchor.after(tip);
+    let timer = null;
+    const cancel = () => {
+      clearTimeout(timer);
+      timer = null;
+      if (hintEl === tip) hideHint();
+    };
+    anchor.addEventListener('pointerenter', (event) => {
+      // A finger has no hover, and a tip it cannot dismiss would sit there.
+      if (event.pointerType === 'touch') return;
+      clearTimeout(timer);
+      timer = setTimeout(() => showHint(anchor, tip), HINT_DELAY);
+    });
+    anchor.addEventListener('pointerleave', cancel);
+    anchor.addEventListener('pointerdown', cancel);
+    anchor.addEventListener('blur', cancel);
   };
   const collapseSegBox = (box) => {
     if (!box) return;
@@ -738,6 +808,7 @@
         toggleSegBox(track);
       });
       track.append(more);
+      armHint(more, 'Hold ⌃⌥ · ← → model, ↑ ↓ effort');
     }
     if (!menu) {
       menu = asPopover(document.createElement('div'));
@@ -859,13 +930,52 @@
     cursor: '<svg class="brand" viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" d="M3.2 2.4 20.6 12 11.4 13.7 9.5 21.6z"/></svg>',
   };
   const PRESETS = [
+    // Opus Extra High is not a setup of its own any more: the scrubber tunes
+    // effort on its own axis, so it is Opus with one press of ↑.
     { id: 'fable-high', provider: 'claude-subscription', model: 'fable', effort: 'high', name: 'Fable 5.1 High', brand: 'anthropic' },
-    { id: 'opus-xhigh', provider: 'claude-subscription', model: 'opus', effort: 'xhigh', name: 'Opus Extra High', brand: 'anthropic' },
     { id: 'opus-high', provider: 'claude-subscription', model: 'opus', effort: 'high', name: 'Opus High', brand: 'anthropic' },
     { id: 'sonnet-high', provider: 'claude-subscription', model: 'sonnet', effort: 'high', name: 'Sonnet High', brand: 'anthropic' },
     { id: 'grok-xhigh', provider: 'cursor', model: 'cursor-grok-4.6', effort: 'xhigh', name: 'Grok Extra High', brand: 'cursor' },
   ];
   const EFFORT_WORD = { low: 'Low', medium: 'Medium', high: 'High', xhigh: 'Extra High', max: 'Max' };
+  /** Every effort word stacked in one grid cell, only the current one lit.
+   *  Two things fall out of that. The cell is always as wide as the longest
+   *  word, so "Low" and "Extra High" take the same room and the model name
+   *  beside them never shifts — which is what it did when this was one span
+   *  being rewritten. And both words are on screen at the switch, so the old
+   *  one can leave while the new one arrives instead of blinking. */
+  const effortStack = (efforts, className = 'scrub-effort') => {
+    const stack = h('span', className);
+    for (const id of efforts ?? []) {
+      const word = h('i', `e-${id}`, EFFORT_WORD[id] ?? id);
+      word.dataset.effort = id;
+      stack.append(word);
+    }
+    return stack;
+  };
+  /** Light a stack or a gauge at `effort`. A stack lights exactly one child;
+   *  a gauge lights every bar up to it, so `steps` says which those are. */
+  const lightEffort = (el, effort, steps = null) => {
+    if (!el) return;
+    el.dataset.at = effort ?? '';
+    const upto = steps ? steps.indexOf(effort) : -1;
+    [...el.children].forEach((child, index) => {
+      child.classList.toggle('is-on', steps ? index <= upto : child.dataset.effort === effort);
+    });
+  };
+  /** Five bars, lit to the effort. `--i` staggers them so the gauge fills
+   *  along its length rather than all at once. */
+  const effortGauge = (efforts) => {
+    const gauge = h('span', 'scrub-gauge');
+    (efforts ?? []).forEach((id, index) => {
+      const bar = h('i', `e-${id}`);
+      bar.dataset.effort = id;
+      bar.style.setProperty('--i', String(index));
+      bar.style.height = `${3 + index * 1.6}px`;
+      gauge.append(bar);
+    });
+    return gauge;
+  };
   /** A preset's name with its effort taken off the end, so a scrubber stop can
    *  set the model over the effort on two tight lines. "Opus Extra High" is
    *  "Opus" over "Extra High"; a name that does not end in its own effort is
@@ -1181,16 +1291,25 @@
     });
   };
 
-  // The strip shows one slider per provider, plus Fable's weekly window beside
-  // Claude's. Its id is 'fable', not 'claude-*': the composer finds the Claude
-  // meter by that prefix. The popup reads the window off the Claude meter.
-  const compactMeters = (meters) => (meters ?? []).flatMap((meter) => {
-    const fable = usageAvailable(meter) ? (meter.windows ?? []).find((item) => item.id === 'fable') : null;
-    if (!fable) return [meter];
-    return [meter, {
-      id: 'fable', label: fable.label, available: true, used: fable.used, left: fable.left, window: 'week', resetsAt: fable.resetsAt,
-    }];
-  });
+  // The strip is two sliders and always two: Claude's own window and Fable's
+  // beside it. They are the pair you spend, so they are the pair that belongs
+  // in the chrome — every other provider keeps its meters in Settings › Usage
+  // and in the phone's Fleet sheet. Drawing both even when the host cannot
+  // read one is the point: a slider that disappears takes the row's shape with
+  // it, and "no Claude bar" reads as "no usage" rather than "not known".
+  // Fable's id is 'fable', not 'claude-*': the composer finds the Claude meter
+  // by that prefix. The popup reads the window off the Claude meter.
+  const claudeMeterOf = (meters) => (meters ?? [])
+    .find((meter) => meter?.id === 'claude-subscription' || String(meter?.id ?? '').startsWith('claude'));
+
+  const compactMeters = (meters) => {
+    const claude = claudeMeterOf(meters)
+      ?? { id: 'claude-subscription', label: 'Claude', available: false, detail: 'Unavailable' };
+    const fable = usageAvailable(claude) ? (claude.windows ?? []).find((item) => item.id === 'fable') : null;
+    return [claude, fable ? {
+      id: 'fable', label: fable.label || 'Fable', available: true, used: fable.used, left: fable.left, window: 'week', resetsAt: fable.resetsAt,
+    } : { id: 'fable', label: 'Fable', available: false, detail: 'Unavailable' }];
+  };
 
   const fillMeters = (host, meters) => {
     if (!host) return;
@@ -1567,6 +1686,28 @@
     .heading:focus { background: var(--card); box-shadow: 0 0 0 1px var(--accent), 0 0 0 4px var(--accent-soft); }
     .tags { display: flex; flex-wrap: wrap; gap: 4px; }
     .tags:empty { display: none; }
+    /* Tags and the document this chat is working in share one line: they are
+       the same kind of fact about the conversation — what it is running as,
+       and where it lands. The link wraps to its own line before it truncates
+       away, so a deep path is still readable. */
+    .mast-meta { display: flex; align-items: center; flex-wrap: wrap; gap: 4px 8px; min-width: 0; }
+    /* A way out of this chat, so it wears a link's colour and the arrow that
+       leaves its box. It is the document the agent is working in — the one
+       name in the mast that is somewhere else. */
+    .target-jump {
+      display: inline-flex; align-items: center; gap: 4px; min-width: 0; max-width: 100%;
+      font-size: 11.5px; line-height: 1.35; color: var(--accent-ink); text-decoration: none;
+      padding: 1px 5px; margin: -1px -5px; border-radius: 6px;
+      transition: background-color .13s var(--snap), color .13s var(--snap);
+    }
+    .target-jump[hidden] { display: none; }
+    .target-jump .target-what { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .target-jump .target-out { flex: none; display: inline-flex; opacity: .7; }
+    .target-jump .target-out[hidden] { display: none; }
+    .target-jump:hover, .target-jump:focus-visible { background: var(--paper-2); color: var(--ink); outline: none; }
+    .target-jump:hover .target-out, .target-jump:focus-visible .target-out { opacity: 1; }
+    /* A pane hides its mast when there is nothing on it; the target is something. */
+    :host([data-chrome="pane"]) .mast:not([hidden]):has(.target-jump:not([hidden])) { display: flex; }
     ${TAG_CSS}
     .log { flex: 1; min-height: 0; overflow-y: auto; padding: 8px 18px 16px; display: flex; flex-direction: column; gap: 0; overscroll-behavior: contain; }
     .msg { max-width: none; overflow-wrap: anywhere; }
@@ -1766,10 +1907,10 @@
     .scrub {
       display: none; position: fixed; z-index: 13;
       margin: 0; color: inherit; width: auto; height: auto;
-      flex-direction: column; gap: 9px; padding: 11px 14px 9px; overflow: visible;
-      background: color-mix(in srgb, var(--card) 94%, transparent);
-      border: 1px solid var(--line); border-radius: 16px;
-      box-shadow: var(--shadow-lift); backdrop-filter: blur(16px); -webkit-backdrop-filter: blur(16px);
+      flex-direction: column; gap: 7px; padding: 8px 12px 7px; overflow: visible;
+      background: var(--card);
+      border: 1px solid var(--line); border-radius: 11px;
+      box-shadow: var(--shadow-rest);
       opacity: 0; transform: translateY(6px) scale(.94); transform-origin: 50% 100%;
       transition: opacity .12s var(--snap), transform .12s var(--snap), display .12s allow-discrete, overlay .12s allow-discrete;
     }
@@ -1781,33 +1922,99 @@
       .scrub.is-open { opacity: 0; transform: translateY(6px) scale(.94); }
     }
     .scrub-now {
-      display: flex; align-items: center; justify-content: center; gap: 6px;
-      font-size: 13px; font-weight: 600; color: var(--ink); white-space: nowrap;
+      display: flex; align-items: center; justify-content: center; gap: 5px;
+      font-size: 11px; white-space: nowrap; line-height: 1.3;
     }
-    .scrub-now .brand { width: 13px; height: 13px; flex: none; }
-    .scrub-track { position: relative; display: flex; align-items: flex-start; min-width: 252px; }
-    .scrub-rail, .scrub-fill { position: absolute; top: 3px; height: 2px; border-radius: 2px; left: calc(50% / var(--n)); }
+    .scrub-model { display: inline-flex; align-items: center; gap: 4px; font-weight: 600; color: var(--ink); }
+    .scrub-model .brand { width: 11px; height: 11px; flex: none; }
+    /* Effort has a colour, and the colour is the scale: grey at the bottom,
+       through a true blue, into indigo, and out at a weighted purple. The
+       word, the bars beside it and the word under each model name all read
+       from the same five, so "how hard" is one thing you learn once. */
+    .scrub {
+      --e-low: #8a8a8a; --e-medium: #5b7fa6; --e-high: #2f6fd0;
+      --e-xhigh: #4b3fbd; --e-max: #7b2fb8;
+    }
+    .scrub [data-at="low"] { --e: var(--e-low); --e-weight: 500; }
+    .scrub [data-at="medium"] { --e: var(--e-medium); --e-weight: 500; }
+    .scrub [data-at="high"] { --e: var(--e-high); --e-weight: 600; }
+    .scrub [data-at="xhigh"] { --e: var(--e-xhigh); --e-weight: 600; }
+    .scrub [data-at="max"] { --e: var(--e-max); --e-weight: 700; }
+    /* Every word of the scale in one grid cell, so the cell is as wide as the
+       longest of them whichever is showing and the model name beside it never
+       moves — which is what it did when this was one span being rewritten.
+       Both words are also on screen at the switch, so the one being replaced
+       can sink out while the new one rises in. */
+    .scrub-effort, .scrub-stop-effort { display: inline-grid; justify-items: center; align-items: center; }
+    .scrub-effort[hidden], .scrub-stop-effort[hidden] { display: none; }
+    .scrub-effort > i, .scrub-stop-effort > i {
+      grid-area: 1 / 1; font-style: normal; white-space: nowrap;
+      color: var(--e, var(--muted));
+      /* The words that are not showing still size the cell, and they hold it
+         at the heaviest weight on the scale. Bolder text is wider text, so
+         without this the cell breathed by a pixel as the weight animated and
+         the model name walked along with it. */
+      font-weight: 700;
+      opacity: 0; transform: translateY(3px);
+      transition: opacity .16s var(--settle), transform .18s var(--settle),
+        color .2s var(--snap), font-weight .2s var(--snap);
+    }
+    .scrub-effort > i.is-on, .scrub-stop-effort > i.is-on {
+      opacity: 1; transform: none; font-weight: var(--e-weight, 500);
+    }
+    .scrub-stop-effort > i { font-size: 9px; }
+    /* A stop you are not on still says what it is remembering, but quietly:
+       at full strength a purple Max two stops away pulls harder than the
+       choice you are actually making. */
+    .scrub-stop-effort { opacity: .5; transition: opacity .16s var(--snap); }
+    .scrub-stop.is-at .scrub-stop-effort { opacity: 1; }
+    /* The second axis, said in the smallest thing that can say it: five bars,
+       filled to where the effort is. Up and down are legible from a shape
+       that already means more and less; a line of prose would be louder than
+       the control. They light along their length rather than all at once. */
+    .scrub-gauge { display: inline-flex; align-items: flex-end; gap: 1px; height: 11px; margin-left: 1px; }
+    .scrub-gauge[hidden] { display: none; }
+    .scrub-gauge > i {
+      width: 2px; border-radius: 1px; background: var(--paper-3);
+      transition: background-color .2s var(--snap) calc(var(--i, 0) * 22ms);
+    }
+    .scrub-gauge > i.is-on { background: var(--e, var(--accent-ink)); }
+    .scrub-track { position: relative; display: flex; align-items: flex-start; min-width: 198px; }
+    .scrub-rail, .scrub-fill { position: absolute; top: 2px; height: 2px; border-radius: 2px; left: calc(50% / var(--n)); }
     .scrub-rail { right: calc(50% / var(--n)); background: var(--paper-3); }
     .scrub-fill { width: 0; background: var(--accent); transition: width .24s var(--settle); }
     .scrub-knob {
-      position: absolute; top: 0; left: calc(50% / var(--n)); margin-left: -4px;
-      width: 8px; height: 8px; border-radius: 999px; background: var(--ink);
-      box-shadow: 0 0 0 3px color-mix(in srgb, var(--card) 85%, transparent);
+      position: absolute; top: -1px; left: calc(50% / var(--n)); margin-left: -3px;
+      width: 6px; height: 6px; border-radius: 999px; background: var(--ink);
+      box-shadow: 0 0 0 2.5px var(--card);
       transition: transform .24s var(--settle);
     }
-    .scrub-stop { flex: 1 1 0; min-width: 0; display: flex; flex-direction: column; align-items: center; gap: 7px; padding: 0 3px; }
-    .scrub-dot { width: 4px; height: 4px; margin-top: 2px; border-radius: 999px; background: var(--paper-3); transition: background-color .16s var(--snap); }
+    .scrub-stop { flex: 1 1 0; min-width: 0; display: flex; flex-direction: column; align-items: center; gap: 4px; padding: 0 3px; }
+    .scrub-dot { width: 4px; height: 4px; margin-top: 1px; border-radius: 999px; background: var(--paper-3); transition: background-color .16s var(--snap); }
     /* The knob is standing on it. */
     .scrub-stop.is-at .scrub-dot { background: transparent; }
-    .scrub-name { display: flex; flex-direction: column; align-items: center; gap: 1px; min-width: 0; }
-    .scrub-name b { font-size: 11px; font-weight: 500; color: var(--muted); white-space: nowrap; transition: color .16s var(--snap); }
-    .scrub-name i { font-size: 10px; font-style: normal; color: var(--faint); white-space: nowrap; transition: color .16s var(--snap); }
-    .scrub-stop.is-at .scrub-name b { color: var(--ink); font-weight: 600; }
-    .scrub-stop.is-at .scrub-name i { color: var(--muted); }
-    .scrub-hint { font-size: 10px; color: var(--faint); text-align: center; }
+    .scrub-name { font-size: 10px; font-weight: 500; color: var(--faint); white-space: nowrap; transition: color .16s var(--snap); }
+    .scrub-stop.is-at .scrub-name { color: var(--ink); }
+    .keytip {
+      display: none; position: fixed; z-index: 14;
+      margin: 0; width: auto; height: auto; overflow: visible;
+      padding: 4px 8px; border: 1px solid var(--line); border-radius: 7px;
+      background: var(--card); color: var(--muted); box-shadow: var(--shadow-rest);
+      font-size: 10px; font-weight: 500; white-space: nowrap; pointer-events: none;
+      opacity: 0; transform: translateY(3px); transform-origin: 50% 100%;
+      transition: opacity .1s var(--snap), transform .1s var(--snap), display .1s allow-discrete, overlay .1s allow-discrete;
+    }
+    .keytip.is-open {
+      display: block; opacity: 1; transform: none;
+      transition: opacity .14s var(--settle), transform .14s var(--settle), display .14s allow-discrete, overlay .14s allow-discrete;
+    }
+    @starting-style {
+      .keytip.is-open { opacity: 0; transform: translateY(3px); }
+    }
     @media (prefers-reduced-motion: reduce) {
       .scrub, .scrub.is-open { transition: none; transform: none; }
       .scrub-fill, .scrub-knob { transition: none; }
+      .keytip, .keytip.is-open { transition: none; transform: none; }
     }
     .custom-toggle {
       appearance: none; border: 0; background: none; color: var(--muted);
@@ -2200,6 +2407,10 @@
     return mark;
   };
   const STOP_ICON = '<svg width="12" height="12" viewBox="0 0 12 12" aria-hidden="true"><rect x="1.5" y="1.5" width="9" height="9" rx="2" fill="currentColor"/></svg>';
+  /** The arrow leaving its box: the one glyph that says a name is a way out of
+   *  this chat and into another document. Drawn at the mast's type size so it
+   *  sits on the same line as the tags beside it. */
+  const OUT_ICON = '<svg width="11" height="11" viewBox="0 0 16 16" aria-hidden="true"><path d="M6.5 3.5H3.5v9h9v-3" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/><path d="M9.5 3.5h3v3M12.5 3.5 7.5 8.5" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>';
 
   // ------------------------------------------------------------ the editor
 
@@ -2413,7 +2624,10 @@
       root.innerHTML = `<style>${TOKENS}${CONVERSATION_CSS}</style>
         <header class="mast" hidden>
           <h2 class="heading" contenteditable="plaintext-only" spellcheck="false" aria-label="Conversation title"></h2>
-          <div class="tags"></div>
+          <div class="mast-meta">
+            <div class="tags"></div>
+            <a class="target-jump" hidden><span class="target-what"></span><span class="target-out" aria-hidden="true">${OUT_ICON}</span></a>
+          </div>
           <button type="button" class="zone-jump" hidden>
             <span class="zone-live" aria-hidden="true"></span>
             <span class="zone-what"></span>
@@ -2476,6 +2690,9 @@
       this.mast = root.querySelector('.mast');
       this.heading = root.querySelector('.heading');
       this.tagsEl = root.querySelector('.tags');
+      this.targetJump = root.querySelector('.target-jump');
+      this.targetWhat = root.querySelector('.target-what');
+      this.targetOut = root.querySelector('.target-out');
       this.setup = root.querySelector('.setup');
       this.presetsEl = root.querySelector('.presets');
       this.selectionEl = root.querySelector('.selection');
@@ -2819,6 +3036,15 @@
         // A discarded chat sends its id and nothing else.
         if (summary.removed) this.others.delete(summary.id);
         else this.others.set(summary.id, summary);
+        // This chat's own row: the host names a new chat once its first turn
+        // is over, and the mast should say so without a reload. paintMast
+        // leaves the heading alone while it has the caret, so a rename
+        // arriving mid-edit cannot take the words out from under someone.
+        if (summary.id === id && !summary.removed && summary.title && summary.title !== this.meta?.title) {
+          this.meta = { ...(this.meta ?? {}), ...summary };
+          this.paintMast();
+          this.dispatchEvent(new CustomEvent('meta', { detail: { meta: this.meta }, bubbles: true, composed: true }));
+        }
         this.paintAlso();
       });
       // The stream only carries changes; a turn already running and silent
@@ -3179,7 +3405,9 @@
       }
     }
 
-    async applyPreset(preset) {
+    /** `effort` overrides the setup's own, which is how the scrubber commits a
+     *  model the person tuned up or down off its resting effort. */
+    async applyPreset(preset, { effort = null } = {}) {
       if (this.presetDisabled(preset)) return;
       const provider = this.resolvePresetProvider(preset);
       if (!provider) return;
@@ -3188,16 +3416,27 @@
         this.fillAgents(provider.id);
         this.mode = this.currentProvider()?.modes?.[0]?.id ?? this.mode;
       }
-      await this.syncCatalog({ model: this.resolvePresetModel(preset, provider), effort: preset.effort });
+      await this.syncCatalog({ model: this.resolvePresetModel(preset, provider), effort: effort ?? preset.effort });
       this.persistCatalog();
       if (switched) this.persistMode();
       this.paintPresets();
     }
 
-    /** The stops, in order. A setup you cannot pick is not a stop: landing on
-     *  one and letting go would be a no-op the scrubber had promised. */
+    /** The stops, weakest first. A slider is pushed right to turn something
+     *  up, so the strongest setup belongs at the right end — the menu reads
+     *  top-down and keeps its own order, which is a list, not a dial.
+     *  A setup you cannot pick is not a stop: landing on one and letting go
+     *  would be a no-op the scrubber had promised. */
     scrubStops() {
-      return this.availablePresets().filter((preset) => !this.presetDisabled(preset));
+      return this.availablePresets().filter((preset) => !this.presetDisabled(preset)).reverse();
+    }
+
+    /** The efforts the stop you are on can be tuned through, weakest first.
+     *  Cursor bakes effort into the model id and reports none, so there is
+     *  nothing to tune there and the gauge says so by not being there. */
+    scrubEfforts(preset) {
+      const provider = this.resolvePresetProvider(preset ?? this.scrubPresets?.[this.scrubAt ?? 0]);
+      return provider?.efforts ?? [];
     }
 
     buildScrub() {
@@ -3208,20 +3447,23 @@
       this.scrubEl.dataset.ids = ids;
       this.scrubEl.style.setProperty('--n', String(presets.length));
       this.scrubEl.setAttribute('aria-valuemax', String(Math.max(0, presets.length - 1)));
+      // Every word and every bar is built once and then only lit, never
+      // rewritten: swapping textContent would resize the row under the model
+      // name and cross-fading needs both words present at the same time.
+      const efforts = this.scrubEfforts(presets[0]);
+      const now = h('div', 'scrub-now');
+      now.append(h('span', 'scrub-model'), effortStack(efforts), effortGauge(efforts));
       const track = h('div', 'scrub-track');
       track.append(h('div', 'scrub-rail'), h('div', 'scrub-fill'), h('div', 'scrub-knob'));
       for (const preset of presets) {
         const stop = h('div', 'scrub-stop');
-        const name = h('div', 'scrub-name');
-        const head = document.createElement('b');
-        head.textContent = presetHead(preset);
-        const tail = document.createElement('i');
-        tail.textContent = EFFORT_WORD[preset.effort] ?? preset.effort ?? '';
-        name.append(head, tail);
-        stop.append(h('div', 'scrub-dot'), name);
+        const name = h('span', 'scrub-name', presetHead(preset));
+        // Each model's own effort, under its own name: the second axis is
+        // remembered per model, and this is where you can see that.
+        stop.append(h('div', 'scrub-dot'), name, effortStack(this.scrubEfforts(preset), 'scrub-stop-effort'));
         track.append(stop);
       }
-      this.scrubEl.replaceChildren(h('div', 'scrub-now'), track, h('div', 'scrub-hint', '← →  while you hold ⌃⌥'));
+      this.scrubEl.replaceChildren(now, track);
       return presets;
     }
 
@@ -3238,9 +3480,27 @@
       if (presets.length < 2) return false;
       closeOpenSeg();
       const match = this.matchingPreset();
-      const at = presets.findIndex((preset) => preset.id === match?.id);
+      let at = presets.findIndex((preset) => preset.id === match?.id);
+      if (at < 0) {
+        // No setup matches exactly, which is what a tuned effort leaves
+        // behind — Opus at Max is no chip. The model alone still says which
+        // stop you are standing on, and the gauge says the rest.
+        const model = radioValue(this.shadowRoot, 'model');
+        at = presets.findIndex((preset) => this.resolvePresetModel(preset, this.resolvePresetProvider(preset)) === model);
+      }
       this.scrubFrom = at < 0 ? 0 : at;
       this.scrubAt = this.scrubFrom;
+      // Effort is remembered per model, not carried across: turning Opus up
+      // is a thing you meant about Opus, and arriving at Sonnet with it still
+      // raised is a setting nobody asked for. Every other stop starts at its
+      // own resting effort; the one you are on starts at the effort actually
+      // set, so ⌃⌥ on Opus at Extra High does not quietly turn it down.
+      this.scrubTuned = new Map(presets.map((preset) => [preset.id, preset.effort]));
+      const here = presets[this.scrubAt];
+      const efforts = this.scrubEfforts(here);
+      const current = radioValue(this.shadowRoot, 'effort');
+      if (here) this.scrubTuned.set(here.id, efforts.includes(current) ? current : here.effort ?? efforts[0] ?? '');
+      this.scrubFromEffort = this.scrubEffort();
       this.scrubEl.classList.add('is-open');
       raiseMenu(this.scrubEl);
       // Centred over the whole bar and keeping its own width: a scrubber hung
@@ -3260,13 +3520,32 @@
       const track = this.scrubEl.querySelector('.scrub-track');
       const fill = this.scrubEl.querySelector('.scrub-fill');
       const knob = this.scrubEl.querySelector('.scrub-knob');
-      const now = this.scrubEl.querySelector('.scrub-now');
       [...this.scrubEl.querySelectorAll('.scrub-stop')].forEach((stop, index) => {
         stop.classList.toggle('is-at', index === at);
       });
       // BRAND is this file's own constant, not anything an agent said.
-      now.innerHTML = BRAND[preset.brand] ?? '';
-      now.append(document.createTextNode(preset.name));
+      const model = this.scrubEl.querySelector('.scrub-model');
+      model.innerHTML = BRAND[preset.brand] ?? '';
+      model.append(document.createTextNode(presetHead(preset)));
+      // Light the word and the bars rather than rewriting them: the stack is
+      // already as wide as its longest word, so nothing beside it moves, and
+      // the word being replaced is still there to leave while the new one
+      // arrives. `data-at` carries the level to the colour scale.
+      const efforts = this.scrubEfforts(preset);
+      const here = this.scrubEffort();
+      const step = efforts.indexOf(here);
+      const effortEl = this.scrubEl.querySelector('.scrub-effort');
+      const gauge = this.scrubEl.querySelector('.scrub-gauge');
+      effortEl.hidden = step < 0;
+      gauge.hidden = step < 0;
+      this.scrubEl.dataset.at = step < 0 ? '' : here;
+      lightEffort(effortEl, here);
+      lightEffort(gauge, here, efforts);
+      // Each stop wears the effort it is remembering, so moving away and back
+      // is visibly the same setting rather than a guess.
+      [...this.scrubEl.querySelectorAll('.scrub-stop')].forEach((stop, index) => {
+        lightEffort(stop.querySelector('.scrub-stop-effort'), this.scrubTuned?.get(presets[index]?.id));
+      });
       // Dot centre to dot centre: the track less one stop's width.
       const span = Math.max(0, track.clientWidth * (1 - 1 / Math.max(1, presets.length)));
       const atPx = Math.round(span * (presets.length > 1 ? at / (presets.length - 1) : 0));
@@ -3283,7 +3562,13 @@
         knob.style.transition = '';
       }
       this.scrubEl.setAttribute('aria-valuenow', String(at));
-      this.scrubEl.setAttribute('aria-valuetext', preset.name);
+      this.scrubEl.setAttribute('aria-valuetext', [presetHead(preset), EFFORT_WORD[here] ?? here].filter(Boolean).join(', '));
+    }
+
+    /** The effort remembered for the stop the scrubber is on. */
+    scrubEffort(index = this.scrubAt) {
+      const preset = (this.scrubPresets ?? [])[index ?? 0];
+      return preset ? this.scrubTuned?.get(preset.id) ?? preset.effort ?? '' : '';
     }
 
     /** Stops at the ends rather than wrapping: a timeline has two of them,
@@ -3294,6 +3579,22 @@
       const next = Math.min(presets.length - 1, Math.max(0, (this.scrubAt ?? 0) + delta));
       if (next === this.scrubAt) return;
       this.scrubAt = next;
+      // Nothing to carry over: the stop you arrive at wears whatever effort
+      // it was left at, which is its own.
+      this.paintScrub();
+    }
+
+    /** The other axis, and only for the model it is pointing at. Same shape
+     *  as moveScrub, and the same ends. */
+    tuneScrub(delta) {
+      if (!this.scrubIsOpen()) return;
+      const preset = (this.scrubPresets ?? [])[this.scrubAt ?? 0];
+      const efforts = this.scrubEfforts(preset);
+      if (!preset || efforts.length < 2) return;
+      const step = efforts.indexOf(this.scrubEffort());
+      const next = Math.min(efforts.length - 1, Math.max(0, (step < 0 ? 0 : step) + delta));
+      if (efforts[next] === this.scrubEffort()) return;
+      this.scrubTuned.set(preset.id, efforts[next]);
       this.paintScrub();
     }
 
@@ -3303,9 +3604,9 @@
       if (!this.scrubIsOpen()) return;
       this.scrubEl.classList.remove('is-open');
       if (scrubOpen === this) scrubOpen = null;
-      const chosen = commit && this.scrubAt !== this.scrubFrom
-        ? (this.scrubPresets ?? [])[this.scrubAt]
-        : null;
+      const effort = this.scrubEffort();
+      const moved = this.scrubAt !== this.scrubFrom || effort !== this.scrubFromEffort;
+      const chosen = commit && moved ? (this.scrubPresets ?? [])[this.scrubAt] : null;
       clearTimeout(this.scrubEl._unfloat);
       const settle = () => {
         if (this.scrubIsOpen()) return;
@@ -3314,7 +3615,7 @@
       };
       if (reduceMotion()) settle();
       else this.scrubEl._unfloat = setTimeout(settle, MENU_MS + 60);
-      if (chosen) this.applyPreset(chosen);
+      if (chosen) this.applyPreset(chosen, { effort: effort || null });
     }
 
     fitSetup() {
@@ -3366,12 +3667,32 @@
       if (!id) {
         this.heading.textContent = '';
         this.tagsEl.replaceChildren();
+        this.paintTarget();
         return;
       }
       const title = this.meta?.title || 'New Chat';
       this.savedTitle = title;
       if (this.shadowRoot.activeElement !== this.heading) this.heading.textContent = title;
       this.paintTags();
+      this.paintTarget();
+    }
+
+    /** The document this chat is working in, named in the mast beside the
+     *  model it runs on. It used to ride in the pane's bar, which is the
+     *  pane's own furniture — status, group, split, close. Where the work
+     *  lands is a fact about the conversation, so it belongs on the line that
+     *  already carries them, and it is drawn as the link it is. */
+    paintTarget() {
+      const target = this.meta?.target || '';
+      this.targetJump.hidden = !target;
+      this.targetWhat.textContent = target;
+      const href = target ? window.marble?.href?.(target) : '';
+      if (href) this.targetJump.href = href;
+      else this.targetJump.removeAttribute('href');
+      // No href, nowhere to go: the name still says where the work lands, but
+      // the arrow would be promising a jump that would not happen.
+      this.targetOut.hidden = !href;
+      this.targetJump.title = target ? (href ? `Open ${target}` : target) : '';
     }
 
     /** The construction zone this conversation is drawing, or null. One row in
@@ -5864,10 +6185,32 @@
     document.body.append(el);
   };
 
+  // ⌘⇧O is New chat, the chord the CLI and the desktop app use. The Agents
+  // page answers it in its own script, where the Focus stage and the folders
+  // are in scope; this is the fallback for a page whose script predates that,
+  // and it presses the page's own New button so both routes do exactly the
+  // same thing. A page that has the chord says so in `marbleAgentNewChatKey`,
+  // and then nothing here fires.
+  let newChatKeyBound = false;
+  const bindNewChatKey = () => {
+    if (newChatKeyBound) return;
+    newChatKeyBound = true;
+    addEventListener('keydown', (event) => {
+      if (window.marbleAgentNewChatKey) return;
+      if (!(event.metaKey || event.ctrlKey) || !event.shiftKey || event.altKey || event.repeat) return;
+      if (event.code !== 'KeyO' && String(event.key).toLowerCase() !== 'o') return;
+      const button = document.querySelector('header.topbar .new');
+      if (!button) return;
+      event.preventDefault();
+      button.click();
+    });
+  };
+
   const mount = () => {
     mountSettings();
     const pageUsage = document.querySelector('header.topbar > .usage');
     if (pageUsage) watchUsage(pageUsage);
+    bindNewChatKey();
     if (document.querySelector('meta[name="marble-agent"][content="custom"]')) return;
     if (document.querySelector('marble-agent-drawer')) return;
     const drawer = document.createElement('marble-agent-drawer');

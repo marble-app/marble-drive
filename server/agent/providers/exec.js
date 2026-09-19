@@ -4,7 +4,7 @@
 
 import { spawn } from 'node:child_process';
 
-export function runCommand(command, args = [], { timeout = 5_000, env = process.env, signal, onStdout } = {}) {
+export function runCommand(command, args = [], { timeout = 5_000, env = process.env, cwd = undefined, signal, onStdout } = {}) {
   return new Promise((resolve) => {
     let stdout = '';
     let stderr = '';
@@ -34,7 +34,7 @@ export function runCommand(command, args = [], { timeout = 5_000, env = process.
     }
 
     try {
-      child = spawn(command, args, { env, stdio: ['ignore', 'pipe', 'pipe'] });
+      child = spawn(command, args, { env, ...(cwd ? { cwd } : {}), stdio: ['ignore', 'pipe', 'pipe'] });
     } catch (err) {
       return finish({ code: null, missing: err.code === 'ENOENT', error: err.message });
     }

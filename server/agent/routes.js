@@ -428,7 +428,12 @@ export function createAgentRoutes({ store, runner, tools, hub, providers, writeO
         const patch = {};
         if (typeof body.archived === 'boolean') patch.archived = body.archived;
         if (body.reviewed === true) patch.lastReviewedAt = Date.now();
-        if (typeof body.title === 'string' && body.title.trim()) patch.title = body.title.trim().slice(0, 120);
+        // A name someone typed is theirs. Clearing `titleAuto` is what stops
+        // the namer from writing over it after the next turn.
+        if (typeof body.title === 'string' && body.title.trim()) {
+          patch.title = body.title.trim().slice(0, 120);
+          patch.titleAuto = false;
+        }
         if (typeof body.model === 'string') patch.model = body.model.trim() || null;
         if (typeof body.effort === 'string') patch.effort = body.effort.trim() || null;
         if (typeof body.mode === 'string') patch.mode = body.mode.trim() || null;

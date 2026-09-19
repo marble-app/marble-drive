@@ -51,13 +51,15 @@ const openFilters = async (page) => {
   await page.locator('.filter-pop').waitFor({ state: 'visible' });
 };
 
-test('the topbar shows used usage for Claude and Cursor', async () => {
+// The strip is two sliders and only two — Claude and Fable, the pair you
+// spend. Every other provider keeps its meters in Settings › Usage.
+test('the topbar shows used usage for Claude, and no other provider', async () => {
   const { page } = await openAgents();
   const claude = page.locator('.usage .meter[data-id="claude-subscription"]');
-  const cursor = page.locator('.usage .meter[data-id="cursor"]');
   await claude.waitFor();
   assert.match(await claude.textContent(), /23%/);
-  assert.match(await cursor.textContent(), /19%/);
+  assert.equal(await page.locator('.usage .meter[data-id="cursor"]').count(), 0, 'Cursor is not on the strip');
+  assert.equal(await page.locator('header.topbar .usage .meter').count(), 2, 'two sliders, no more');
   const fill = await claude.locator('.meter-bar i').evaluate((el) => el.style.width);
   assert.equal(fill, '23%');
   assert.equal(await claude.getAttribute('data-tone'), 'blue');
@@ -77,7 +79,9 @@ test('the topbar shows a Fable slider beside Claude', async () => {
   assert.equal(await page.locator('.usage .meter[data-id="claude-subscription"] .meter-pct').textContent(), '23%');
 });
 
-test('the topbar has no Fable slider when there is no Fable usage', async () => {
+// A slider that vanishes takes the row's shape with it, and reads as "none
+// left" rather than "not known". So the pair is always drawn, greyed.
+test('the Fable slider stays, greyed, when there is no Fable usage to show', async () => {
   const { page } = await openAgents();
   await page.locator('.usage .meter[data-id="claude-subscription"]').waitFor();
   await page.evaluate(() => {
@@ -85,7 +89,21 @@ test('the topbar has no Fable slider when there is no Fable usage', async () => 
       { id: 'claude-subscription', label: 'Claude', used: 23, windows: [{ id: '5h', label: 'Short-term', used: 23, kind: 'quota' }] },
     ]);
   });
-  assert.equal(await page.locator('.usage .meter[data-id="fable"]').count(), 0);
+  const fable = page.locator('.usage .meter[data-id="fable"]');
+  assert.equal(await fable.count(), 1);
+  assert.equal(await fable.getAttribute('data-tone'), 'unavailable');
+});
+
+test('a host with no usage at all still shows the two sliders', async () => {
+  const { page } = await openAgents();
+  await page.locator('.usage .meter[data-id="claude-subscription"]').waitFor();
+  await page.evaluate(() => {
+    window.marbleAgentUI.fillMeters(document.querySelector('header.topbar > .usage'), []);
+  });
+  assert.deepEqual(
+    await page.locator('header.topbar .usage .meter').evaluateAll((els) => els.map((el) => [el.dataset.id, el.dataset.tone])),
+    [['claude-subscription', 'unavailable'], ['fable', 'unavailable']],
+  );
 });
 
 test('on a phone the meters are one ring in the topbar and a Fleet sheet that stays inside the screen', async () => {
@@ -100,7 +118,7 @@ test('on a phone the meters are one ring in the topbar and a Fleet sheet that st
     const r = el.getBoundingClientRect();
     return { id: el.dataset.id, right: r.right, scroll: el.scrollWidth > el.clientWidth + 1 };
   }));
-  assert.equal(boxes.length, 3);
+  assert.equal(boxes.length, 2, 'Claude and Fable');
   assert.ok(boxes.every((box) => box.right <= 360 && !box.scroll), 'meters stay inside the phone');
   assert.ok((await page.evaluate(() => document.documentElement.scrollWidth)) <= 360);
 });
@@ -117,7 +135,7 @@ test('a Claude meter with no progress reads as unavailable', async () => {
   const claude = page.locator('.usage .meter[data-id="claude-subscription"]');
   assert.equal(await claude.getAttribute('data-tone'), 'unavailable');
   assert.match(await claude.textContent(), /Unavailable/i);
-  assert.equal((await page.locator('.usage .meter[data-id="cursor"] .meter-pct').textContent()).trim(), '19%');
+  assert.equal(await page.locator('.usage .meter[data-id="cursor"]').count(), 0, 'and Cursor is not on the strip');
 });
 
 test('usage meters color by how much has been used', async () => {
@@ -222,7 +240,7 @@ test('the library has no inspector column', async () => {
   assert.equal(tracks, 2);
 });
 
-test('clicking a row opens it in the conversation pane and a header names the target', async () => {
+test('clicking a row opens it in the conversation pane and the mast names the target', async () => {
   const { page } = await openAgents();
   const id = await page.evaluate(async () => {
     const agent = window.marble.agent;
@@ -237,7 +255,12 @@ test('clicking a row opens it in the conversation pane and a header names the ta
   const bar = page.locator('.pane > .dock-bar');
   await bar.waitFor();
   assert.match(await bar.locator('.dock-title').textContent(), /\S/);
-  assert.match(await bar.locator('.dock-target').textContent(), /garden/i);
+  // Where the work lands is the mast's, beside the model — not the bar's.
+  assert.equal(await bar.locator('.dock-target').count(), 0);
+  const link = view.locator('.target-jump');
+  await link.waitFor();
+  assert.match(await link.locator('.target-what').textContent(), /garden/i);
+  assert.match(await link.getAttribute('href'), /garden/i);
 });
 
 test('pressing a row does not pop it with a scale animation', async () => {

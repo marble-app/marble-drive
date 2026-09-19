@@ -32,6 +32,16 @@ on how many conversations run at once; set it only to hold a small machine
 down. A conversation still runs one turn at a time, so a prompt waits only
 behind that conversation's own turn.
 
+A new chat is named twice. The first prompt lands as a placeholder — sixty
+characters of what was typed, minus the composer's attachment markup — so no
+row on the board is ever blank while the turn runs. When that turn ends, a
+small model (`MARBLE_DRIVE_AGENT_NAMING_MODEL`, `haiku`) reads the question
+and the answer and writes a short title over it. Naming runs on the login,
+never on an API key, from an empty directory with no tools and none of your
+settings; it never blocks or fails a turn, and a chat is asked about once,
+not once per turn. A title you type yourself is never written over. Set
+`MARBLE_DRIVE_AGENT_NAMING=0` to keep the placeholder.
+
 An ungated host answers `/agent/*` only when addressed as `localhost`,
 `127.0.0.1` or `[::1]`, and `/agent/tools/*` refuses any request carrying
 `X-Forwarded-*` headers, since behind Tailscale Serve every peer is loopback.
@@ -352,13 +362,16 @@ document it started on: when you are looking at another page, the header says
 which file it is editing. Each finished turn shows what changed with **Undo
 turn**, and a turn the watchdog flagged offers **Restore**.
 
-The Agents topbar and the drawer header show Claude and Cursor usage as a
-compact percent meter (`GET /agent/usage`). The host reads the CLI tokens
-from the macOS keychain and asks each vendor; it never returns those
-tokens. A meter is omitted when that CLI is not signed in. If Claude is
-signed in but its usage fetch fails, the meter still appears as
-**Unavailable** (grey, no fill) instead of disappearing. API-key-only
-Claude has no subscription window, so it does not appear. The number and
+The Agents topbar and the drawer header show usage as two compact percent
+sliders and only two (`GET /agent/usage`): **Claude** and **Fable**, the pair
+you spend. Every other provider — Cursor included — keeps its meters in
+Settings › **Usage** and in the phone's Fleet sheet. The host reads the CLI
+tokens from the macOS keychain and asks each vendor; it never returns those
+tokens. Both sliders are always drawn: one the host cannot read reads
+**Unavailable** (grey, no fill) rather than disappearing, because a slider
+that vanishes takes the row's shape with it and reads as "none left" instead
+of "not known". API-key-only Claude has no subscription window, so it reads
+Unavailable too. The number and
 the fill are how much has been used, filling toward 100%. The bar is blue
 below 50%, yellow from 50%, orange from 75%, and red from 90%. Cursor's
 meter is the Auto + Composer pool (the dashboard's Cursor-models bar), not
@@ -439,7 +452,9 @@ Agent text is shown, never interpreted as HTML (`renderText` in
 A drive that has run `serve` at least once with this host gets an `Agents`
 document at the root, seeded the same way Drive is: written only if it is
 not already there. It is a library of conversations in five views: **List**,
-**Board**, **Folders**, **Focus**, and **Deck**. `V` cycles that order. The
+**Board**, **Folders**, **Focus**, and **Deck**. `V` cycles that order.
+`⌘⇧O` starts a new chat from anywhere on the page — the same thing **New**
+does, and it keeps working while the caret is in a composer. The
 drawer's **Open Agents** appears once that document exists.
 
 The page uses `window.marble.agent` and the same `<marble-conversation>`

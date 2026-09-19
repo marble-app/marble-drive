@@ -36,7 +36,22 @@ test('events are numbered in order even when appended at once, and the first mes
   const events = await store.events(id);
   assert.deepEqual(events.map((e) => e.seq), [1, 2, 3]);
   assert.deepEqual((await store.events(id, { after: 2 })).map((e) => e.seq), [3]);
-  assert.equal((await store.conversation(id)).title, 'Turn the open questions into a sortable research backlog, pl');
+  const meta = await store.conversation(id);
+  assert.equal(meta.title, 'Turn the open questions into a sortable research backlog, pl');
+  assert.equal(meta.titleAuto, true, 'a placeholder says so, so the namer may replace it');
+});
+
+test('a prompt that is only an attachment leaves no placeholder to show', async () => {
+  const { store } = await fresh();
+  const { id } = await store.createConversation({ provider: 'fake' });
+  assert.equal((await store.conversation(id)).titleAuto, false);
+  await store.appendEvent(id, {
+    type: 'user',
+    text: '<pasted-image index="1" name="shot.png" bytes="12" path="/x" url="/y"></pasted-image>',
+  });
+  const meta = await store.conversation(id);
+  assert.equal(meta.title, null, 'the row says New Chat until the namer answers');
+  assert.equal(meta.titleAuto, true);
 });
 
 test('a user event records the document the conversation is editing', async () => {

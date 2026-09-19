@@ -17,6 +17,7 @@ import fsp from 'node:fs/promises';
 import path from 'node:path';
 
 import '../../runtime/agent-folders.js';
+import { fallbackTitle } from './namer.js';
 
 const folderLib = () => globalThis.marbleAgentFolders;
 
@@ -201,7 +202,14 @@ export function createAgentStore({ dir, defaultProvider = 'claude-subscription',
       const meta = await conversation(id);
       if (meta) {
         const patch = {};
-        if (!meta.title) patch.title = String(event.text ?? '').trim().slice(0, 60);
+        // A placeholder, marked as one: the board needs a row now, and the
+        // namer replaces it once the turn has an answer to read.
+        if (!meta.title) {
+          // A prompt that was nothing but an attachment leaves no quotation
+          // worth showing; the row stays "New Chat" until the namer answers.
+          patch.title = fallbackTitle(event.text) || null;
+          patch.titleAuto = true;
+        }
         const target = event.context?.target;
         if (typeof target === 'string' && target && target !== meta.target) patch.target = target;
         if (Object.keys(patch).length) await updateConversation(id, patch);
@@ -365,6 +373,7 @@ export function createAgentStore({ dir, defaultProvider = 'claude-subscription',
         mode,
         project,
         title: null,
+        titleAuto: false,
         target: null,
         createdAt: now,
         updatedAt: now,

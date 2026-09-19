@@ -50,6 +50,7 @@ async function hostWith({ capability, power = '', sandbox = null } = {}) {
     ...process.env,
     MARBLE_DRIVE_ROOT: root,
     MARBLE_DRIVE_AGENTS: '1',
+    MARBLE_DRIVE_AGENT_NAMING: '0',
     MARBLE_DRIVE_AGENT_PROVIDER: 'fake',
     MARBLE_DRIVE_AGENT_WORKDIR: await fsp.mkdtemp(path.join(WORK, 'w-')),
     MARBLE_DRIVE_AGENT_POWER: power,

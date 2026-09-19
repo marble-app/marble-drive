@@ -195,28 +195,9 @@ test('Alt-click opens a conversation beside the focused pane', async () => {
   assert.equal(await page.locator('marble-conversation[conversation]').count(), 2);
 });
 
-test('split makes an empty pane, and the next row fills it', async () => {
-  const { page } = await openAgents(2);
-  await page.locator('.pane > .dock-bar .dock-split[data-side="right"]').click();
-  await page.waitForFunction(() => document.querySelectorAll('.dock-frame:not(.dock-ghost)').length === 2);
-  const empty = page.locator('.dock-frame.dock-leaf marble-conversation:not([conversation])');
-  assert.equal(await empty.count(), 1, 'the new pane is empty');
-  assert.equal(await page.locator('.dock-frame.dock-leaf[data-focused]').count(), 1, 'and focused');
-  await page.locator('#list .conv').nth(1).click();
-  await page.locator('.dock-frame.dock-leaf marble-conversation[conversation]').waitFor();
-  assert.equal(await page.locator('marble-conversation:not([conversation])').count(), 0);
-  await page.reload();
-  await page.waitForFunction(() => Boolean(window.marble?.agent));
-  await page.locator('.pane > marble-conversation[conversation]').waitFor();
-});
-
-test('split down stacks the empty pane under the pane', async () => {
-  const { page } = await openAgents(1);
-  await page.locator('.pane > .dock-bar .dock-split[data-side="bottom"]').click();
-  await page.waitForFunction(() => document.querySelectorAll('.dock-frame:not(.dock-ghost)').length === 2);
-  const [a, b] = await cards(page);
-  assert.ok(Math.abs(a.x - b.x) < 2 && a.y !== b.y, 'one above the other');
-});
+// The bar's two split buttons are gone, and they were the only control that
+// made an empty pane, so the tests that drove them went with them. splitEmpty
+// still stands in the page; whatever replaces the buttons brings its own test.
 
 test('a patch landing mid-drag leaves the room standing', async () => {
   // Agents write to the Agents document while it is being used, and every
@@ -309,4 +290,28 @@ test('the chat eases back when the room folds, it does not snap', async () => {
   await page.mouse.up();
   await page.waitForTimeout(400);
   assert.deepEqual(errors, []);
+});
+
+test('right-clicking a pane clears the room down to that one chat', async () => {
+  const { page } = await openAgents(3);
+  await page.locator('#list .conv').nth(1).click({ modifiers: ['Alt'] });
+  await page.waitForFunction(() => document.querySelectorAll('.dock-frame:not(.dock-ghost)').length === 2);
+  await page.locator('#list .conv').nth(2).click({ modifiers: ['Alt'] });
+  await page.waitForFunction(() => document.querySelectorAll('marble-conversation[conversation]').length === 3);
+  await page.waitForTimeout(600);
+  // Keep a pane that is not the primary: the primary closing promotes an
+  // extra into its element, which is where a key-based close would go wrong.
+  const leaf = page.locator('.dock-frame .dock-bar').last();
+  const kept = await leaf.evaluate((el) => el.dataset.id);
+  await leaf.click({ button: 'right', position: { x: 60, y: 12 } });
+  await page.locator('.rail-menu').waitFor();
+  await page.locator('.rail-menu button', { hasText: 'Close the other 2 panes' }).click();
+  await page.waitForFunction(() => document.querySelectorAll('marble-conversation[conversation]').length === 1);
+  await page.waitForTimeout(400);
+  assert.equal(await page.locator('.pane > marble-conversation').getAttribute('conversation'), kept);
+  assert.equal(await page.locator('.dock-frame:not(.dock-ghost)').count(), 0, 'the dock is one pane again');
+  // A lone pane has no others to clear, and does not say so.
+  await page.locator('.pane > .dock-bar').click({ button: 'right', position: { x: 120, y: 12 } });
+  await page.locator('.rail-menu').waitFor();
+  assert.equal(await page.locator('.rail-menu button', { hasText: /^Close the other/ }).count(), 0);
 });
