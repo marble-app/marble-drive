@@ -21,6 +21,7 @@ import fsp from 'node:fs/promises';
 import { collectSlices, idsOfOps, OP, repairOps, validateOps } from '../engine.js';
 import { parsePath, splitPath } from '../paths.js';
 import { inverseSteps } from './inverse.js';
+import { MAX_SENDS, MAX_TEXT, WAIT_DEFAULT, WAIT_MAX, WAIT_MIN } from './messages.js';
 import { hashesOf, idsIn, tagsOf, topLevelIds } from './source.js';
 
 const READ_BUDGET = 24_000;
@@ -86,9 +87,48 @@ export const TOOL_SCHEMAS = [
       properties: { path: { type: 'string' } },
     },
   },
+  {
+    name: 'list_agents',
+    description:
+      'List the other agent conversations working in this project: id, title, provider, the document each works on, ' +
+      'and its status (idle, queued, running, waiting for a reply, asking the person). Use an id with send_message.',
+    inputSchema: { type: 'object', properties: {} },
+  },
+  {
+    name: 'send_message',
+    description:
+      'Send a message to another agent conversation in this project. If it is idle, this starts its turn; if it is busy, ' +
+      `it reads the message when its current turn ends or when it calls wait_for_reply. At most ${MAX_SENDS} messages per turn; ` +
+      'a thread of replies stops after 8. Returns the message id and how it was delivered. To answer a message, pass its id as inReplyTo.',
+    inputSchema: {
+      type: 'object',
+      required: ['to', 'text'],
+      properties: {
+        to: { type: 'string', description: 'The conversation id, from list_agents or from the message you are answering.' },
+        text: { type: 'string', maxLength: MAX_TEXT },
+        about: {
+          type: 'object',
+          required: ['path'],
+          properties: { path: { type: 'string' }, ids: { type: 'array', items: { type: 'string' } } },
+          description: 'The document, and optionally the elements, this message is about.',
+        },
+        inReplyTo: { type: 'string', description: 'The id of the message you are answering.' },
+      },
+    },
+  },
+  {
+    name: 'wait_for_reply',
+    description:
+      `Wait up to \`seconds\` (default ${WAIT_DEFAULT}, at most ${WAIT_MAX}) for messages from other agents. Returns them as soon as one arrives. ` +
+      'A timeout means nothing has arrived yet: call again if you are still waiting, or move on.',
+    inputSchema: {
+      type: 'object',
+      properties: { seconds: { type: 'integer', minimum: WAIT_MIN, maximum: WAIT_MAX } },
+    },
+  },
 ];
 
-export function createTools({ store, writeOps, createDocument, buildStarter, guidePath, examine, onLook }) {
+export function createTools({ store, writeOps, createDocument, buildStarter, guidePath, examine, onLook, messaging = null }) {
   // conversationId → docPath → Map<id, hash>
   const ledgers = new Map();
 
@@ -253,6 +293,29 @@ export function createTools({ store, writeOps, createDocument, buildStarter, gui
       // asked on demand — a full agent rewriting a file is a document arriving
       // from outside, it just happens to be one we started.
       return { path: docPath, findings: examine(`${splitPath(docPath).name}.mrbl`, source) ?? [] };
+    },
+
+    // Messaging lives on the runner, which is created after the tools; the
+    // host fills `messaging` in once it exists. Until then, and on a host
+    // without agents, these answer plainly.
+    async list_agents(_input, turn) {
+      if (!messaging?.peers) return { error: 'messaging is not available on this host' };
+      return messaging.peers(turn);
+    },
+
+    async send_message(input, turn) {
+      if (!messaging?.deliver) return { error: 'messaging is not available on this host' };
+      return messaging.deliver(turn, {
+        to: input.to,
+        text: input.text,
+        about: input.about ?? null,
+        inReplyTo: input.inReplyTo ?? null,
+      });
+    },
+
+    async wait_for_reply(input, turn) {
+      if (!messaging?.wait) return { error: 'messaging is not available on this host' };
+      return messaging.wait(turn, input.seconds);
     },
   };
 
