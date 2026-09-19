@@ -187,7 +187,7 @@ function sliceTag(chunk, tag) {
 }
 
 function readback(file) {
-  if (!file || !fs.existsSync(file)) return { exists: false, date: null, rows: {}, views: {}, expanded: {} };
+  if (!file || !fs.existsSync(file)) return { exists: false, date: null, read: null, rows: {}, views: {}, expanded: {} };
   const html = fs.readFileSync(file, 'utf8');
   const dateM = /<meta name="(?:day|newsletter):date" content="([^"]*)">/.exec(html);
   const views = {};
@@ -257,7 +257,10 @@ function readback(file) {
       done: /\bdata-done\b/.test(m[2]), snooze: /\bdata-snooze\b/.test(m[2]),
     });
   }
-  return { exists: true, date: dateM ? dateM[1] : null, views, expanded, rows, added };
+  // The reading mode is filed on the root the same way a component's view is
+  // filed on its section, so tomorrow's issue opens the way he reads.
+  const readM = /<main class="page"[^>]*\sdata-read="(page|story)"/.exec(html);
+  return { exists: true, date: dateM ? dateM[1] : null, read: readM ? readM[1] : null, views, expanded, rows, added };
 }
 
 // ---------------------------------------------------- what Bryan wrote down ---
@@ -396,7 +399,7 @@ function rChecklist(items, prev, klass) {
     const flags = (t.done ? ' data-done' : '') + (t.snooze ? ' data-snooze' : '') + (t.pin ? ' data-pin' : '');
     const meta = [t.source ? icon(t.source) : '', t.meta ? `<span data-marble-id="${mint()}">${esc(t.meta)}</span>` : ''].filter(Boolean).join(' ');
     return [
-      `  <li class="row ${klass}" data-marble-id="${mint()}" data-key="${escAttr(key)}" data-marble-removable${flags}>`,
+      `  <li class="row ${klass}" data-marble-id="${mint()}" data-key="${escAttr(key)}" data-marble-removable${flags}${storyOwnAttr(storyOwnRow(t, note))}>`,
       `    <button class="chk" data-marble-transient data-act="done" aria-label="Toggle done"></button>`,
       `    <div class="body">`,
       `      <div class="title" data-marble-editable>${esc(title)}</div>`,
@@ -424,7 +427,7 @@ function rNewsCards(items, prev) {
       const flags = (vote ? ` data-vote="${escAttr(vote)}"` : '') + (saved ? ' data-saved' : '') + (open ? ' data-open' : '');
       const hasMore = it.abstract || it.authors;
       return [
-        `  <div class="ncard expandable${th ? '' : ' no-img'}" data-marble-id="${mint()}" data-key="${escAttr(key)}" data-marble-removable${flags}>`,
+        `  <div class="ncard expandable${th ? '' : ' no-img'}" data-marble-id="${mint()}" data-key="${escAttr(key)}" data-marble-removable${flags}${storyOwnAttr(it.storyOwn === true || r === 3)}>`,
         th ? `    ${th}` : '',
         `    <div class="nbody" data-marble-id="${mint()}">`,
         `      <h4 class="ntitle" data-marble-id="${mint()}">${url ? `<a href="${escAttr(url)}" target="_blank" rel="noopener">${esc(title)}</a>` : esc(title)}</h4>`,
@@ -542,7 +545,7 @@ function rPapers(arxiv, prev) {
     const th = thumb(p.image || p.pdfUrl || (p.id ? `https://arxiv.org/pdf/${p.id}` : ''), 'pthumb', 460);
     const tagHtml = rTags(p.tags);
     return [
-      `  <div class="pcard expandable" data-marble-id="${mint()}" data-key="${escAttr(key)}" data-marble-removable${flags}>`,
+      `  <div class="pcard expandable" data-marble-id="${mint()}" data-key="${escAttr(key)}" data-marble-removable${flags}${storyOwnAttr(p.storyOwn === true || (r ?? 0) >= 2)}>`,
       th ? `    ${th}` : '',
       `    <h4 class="ptitle" data-marble-id="${mint()}"><a href="${escAttr(p.absUrl || ('https://arxiv.org/abs/' + p.id))}" target="_blank" rel="noopener">${esc(title)}</a></h4>`,
       rAuthors(authors, known),
@@ -964,7 +967,8 @@ function rNflSeasonArc(s) {
     return `<div class="${cls} tip" data-tip="${escAttr(tip)}" data-marble-id="${mint()}">` +
       `<span class="sn-wk" data-marble-id="${mint()}">${w.week}</span>` +
       `<span class="sn-op" data-marble-id="${mint()}">` +
-        `<i class="sn-ha" data-marble-id="${mint()}">${w.home ? '' : '@'}</i>${esc(w.opp)}</span>` +
+        `<i class="sn-ha" data-marble-id="${mint()}">${w.home ? '' : '@'}</i>` +
+        esc(w.opp) + rCrest(w.opp) + `</span>` +
       `<span class="sn-rs" data-marble-id="${mint()}">${esc(line)}</span></div>`;
   }).join('');
   const legend = [
@@ -1011,6 +1015,7 @@ function rNflWest(s) {
     const tip = `${t.name} · ${t.record}\nScored ${t.pf}, allowed ${t.pa}\nDifferential ${t.diff > 0 ? '+' : ''}${t.diff}`;
     const w = `${pct.toFixed(1)}%`;
     return `<div class="sn-tm${t.us ? ' us' : ''} tip" data-tip="${escAttr(tip)}" data-marble-id="${mint()}">` +
+      rCrest(t.abbr) +
       `<span class="sn-tn" data-marble-id="${mint()}">${esc(t.name)}</span>` +
       `<span class="sn-tr" data-marble-id="${mint()}">${esc(t.record)}</span>` +
       `<span class="sn-tb" data-marble-id="${mint()}">` +
@@ -1022,6 +1027,82 @@ function rNflWest(s) {
       `<span class="sn-td" data-marble-id="${mint()}">${t.diff > 0 ? '+' : ''}${t.diff}</span></div>`;
   }).join('');
   return `<div class="sn-west" data-marble-id="${mint()}">${rows}</div>`;
+}
+
+// The crests, read once from the pack that ships with the skill. They are
+// already data: URIs, so this costs no network and none of the day's image
+// budget, and it means a renderer only ever needs a team's abbreviation — the
+// arc knows `LAR` and nothing else about the Rams.
+const CRESTS = (() => {
+  try { return JSON.parse(fs.readFileSync(path.join(HERE, 'nfl-logos.json'), 'utf8')).logos || {}; }
+  catch { return {}; }
+})();
+
+// `alt` is always empty: every place a crest appears, the team is named beside
+// it — the full name in a standings row, the abbreviation in the week strip —
+// and a screen reader that announces both reads every row twice. The crest is
+// there to be recognised at a glance, not to carry the only copy of a fact.
+//
+// A team missing from the pack still gets an element, so a grid column keeps its
+// width and the strip keeps its rhythm.
+function rCrest(abbr, alt = '') {
+  const src = CRESTS[abbr];
+  if (!src) return `<i class="crest" data-marble-id="${mint()}"></i>`;
+  return `<img class="crest" src="${escAttr(src)}" alt="${escAttr(alt)}"` +
+    ` width="48" height="48" data-marble-id="${mint()}">`;
+}
+
+// The other seven divisions. Bryan follows one team, and the West view answers
+// how that team is placed; this one answers the question he actually asked —
+// how is everybody else doing. It is a different question, so it is a third
+// segment rather than more rows in the second.
+//
+// In week two a record is nearly noise: twenty-nine of thirty-two teams are
+// 1-0 or 0-1, and reading the column down tells you almost nothing. The
+// differential is the whole standing this early, so it is the tint — the
+// reading you get without focusing — and the number beside it is the caption.
+// The West is left in its place in the NFC rather than cut out to avoid
+// repeating the other view; a conference with a hole in it is not a league.
+function rNflLeague(s) {
+  const groups = s.league || [];
+  if (!groups.length) return '';
+  const span = Math.max(20, ...groups.flatMap((g) => (g.teams || []).map((t) => Math.abs(t.diff || 0))));
+  const division = (g) => {
+    const rows = (g.teams || []).map((t, i) => {
+      const sign = `${t.diff > 0 ? '+' : ''}${t.diff}`;
+      const cls = ['sl-r', t.diff >= 0 ? 'pos' : 'neg', i === 0 ? 'lead' : '', t.us ? 'us' : '']
+        .filter(Boolean).join(' ');
+      const tip = [`${t.name} · ${t.record}`,
+        `Scored ${t.pf}, allowed ${t.pa} — differential ${sign}`,
+        t.home ? `Home ${t.home} · Away ${t.road}` : null,
+        i === 0 ? `Top of the ${g.div}` : null,
+        t.us ? 'Your team' : null].filter(Boolean).join('\n');
+      const d = Math.min(1, Math.abs(t.diff || 0) / span).toFixed(2);
+      return `<div class="${cls} tip" data-tip="${escAttr(tip)}" style="--d: ${d}" data-marble-id="${mint()}">` +
+        rCrest(t.abbr) +
+        `<span class="sl-tn" data-marble-id="${mint()}">${esc(t.name)}</span>` +
+        `<span class="sl-tr" data-marble-id="${mint()}">${esc(t.record)}</span>` +
+        `<span class="sl-td" data-marble-id="${mint()}">${esc(sign)}</span></div>`;
+    }).join('');
+    return `<div class="sl-div" data-marble-id="${mint()}">` +
+      `<h4 class="sl-dh" data-marble-id="${mint()}">${esc(g.div)}</h4>` +
+      `<div class="sl-rows" data-marble-id="${mint()}">${rows}</div></div>`;
+  };
+  const conf = (abbr, label) => {
+    const divs = groups.filter((g) => g.conf === abbr).map(division).join('');
+    return divs ? `<div class="sl-conf" data-marble-id="${mint()}">` +
+      `<h3 class="sl-ch" data-marble-id="${mint()}">${esc(label)}</h3>` +
+      `<div class="sl-grid" data-marble-id="${mint()}">${divs}</div></div>` : '';
+  };
+  const legend = [['pos', 'outscoring'], ['neg', 'outscored'], ['lead', 'top of its division']]
+    .map(([k, label]) =>
+      `<span class="sn-lg tip" data-tip="${escAttr(label)}" data-marble-id="${mint()}">` +
+      `<i class="sn-sw sl-sw-${k}" data-marble-id="${mint()}"></i>${esc(label)}</span>`).join('');
+  return (s.leagueNote
+    ? `<p class="sl-note" data-marble-id="${mint()}" data-marble-editable>${esc(s.leagueNote)}</p>` : '') +
+    `<div class="sl-league" data-marble-id="${mint()}">` +
+      conf('AFC', 'American Football Conference') + conf('NFC', 'National Football Conference') +
+    `</div><div class="sn-key" data-marble-id="${mint()}">${legend}</div>`;
 }
 
 // The arc read as dates rather than as shape — same games, spelled out.
@@ -1043,11 +1124,147 @@ function rPalStrip(pal) {
 
 // ------------------------------------------------------------- composition ---
 
+// A view switcher is a control the file owns, not chrome the page draws, so it
+// is addressed like everything else. It used to live inside the header's
+// `data-marble-transient` span, which made it unreachable by `apply_ops` *and*
+// undeliverable by a file write: a tab open when a fourth segment was added
+// could never be handed the button, and sat toggling between the two it had.
+// Transient is for what the page invents — a drag ghost, a status pill — not
+// for a button whose whole state is an attribute in the file.
+const segment = (label, items) =>
+  `<span class="seg" role="group" aria-label="${escAttr(label)}" data-marble-id="${mint()}">` +
+  items.map(([view, text]) =>
+    `<button data-setview="${escAttr(view)}" data-marble-id="${mint()}">${esc(text)}</button>`).join('') +
+  `</span>`;
+
 const CAT = { focus: 'var(--warm)', push: 'var(--accent)', todos: 'var(--accent)', news: 'var(--c1)', papers: 'var(--c2)', weather: 'var(--c3)', calendar: 'var(--accent-ink)', usopen: 'var(--c4)', nfl: 'var(--c1)', nflseason: 'var(--c1)', art: 'var(--c4)', roadahead: 'var(--accent)', custom: 'var(--accent)' };
 const TITLE = { focus: 'Today, sharply', push: 'Push one thing forward', todos: 'To-dos', news: 'Worth your attention', papers: 'Fresh on arXiv · cs.HC', weather: 'Sky', calendar: 'The weeks ahead', usopen: 'US Open', nfl: 'NFL', nflseason: 'The Niners\u2019 season', art: "Today's colour", roadahead: 'The road ahead' };
 // Reverse of TITLE, for issues built before `data-comp` existed on `<section>` 
 // -- sweepFeedback falls back to matching a component's header text against this.
 const TITLE_TO_TYPE = Object.fromEntries(Object.entries(TITLE).map(([type, t]) => [t, type]));
+
+// ------------------------------------------------------------------ story ---
+// How a component becomes screens when the day is read as a story. `items`
+// means its rows or cards are the units; `unit` means the whole component is
+// one screen; `view` names the one reading that travels, because a phone reads
+// the news as Reading and the dates as a List.
+//
+// The build decides the editorial half — what splits, what stands alone, what
+// order the day reads in — and the page decides geometry, because only the page
+// knows how tall a screen is. Nothing here is a second copy of the markup: it is
+// attributes on the elements that already exist, so the two readings cannot
+// drift apart.
+const STORY = {
+  focus:     { mode: 'items', pack: 3 },
+  todos:     { mode: 'items', pack: 5 },
+  news:      { mode: 'items', pack: 3, view: 'list' },
+  papers:    { mode: 'items', pack: 3 },
+  push:      { mode: 'unit' },
+  weather:   { mode: 'unit' },
+  calendar:  { mode: 'unit', view: 'l' },
+  usopen:    { mode: 'unit', view: 'top' },
+  nfl:       { mode: 'unit', view: 'week' },
+  nflseason: { mode: 'unit', view: 'arc' },
+  art:       { mode: 'unit' },
+  roadahead: { mode: 'unit' },
+  custom:    { mode: 'unit' },
+};
+// Cover, then the window; then what has to happen today and the dates behind
+// it; then the reading; the painting last, full screen, before the end card.
+const STORY_RANK = { weather: 10, focus: 20, push: 20, todos: 20, calendar: 30, art: 50 };
+
+// A row Bryan can take in at a glance shares a screen with its neighbours. One
+// he has to actually read — a note he typed as a list, or a paragraph — gets the
+// screen to itself. The thresholds are measured against every issue written so
+// far: his notes run from 13 to 2,462 characters, and the lists start at five
+// lines.
+function storyOwnRow(t, note) {
+  if (t.storyOwn === true) return true;
+  const n = String(note == null ? '' : note);
+  if (/\n/.test(n)) return true;
+  if (n.length >= 160) return true;
+  return (String(t.title || '') + String(t.why || '') + n).length >= 320;
+}
+const storyOwnAttr = (on) => (on ? ' data-story-own' : '');
+
+// Stamp each layout node with its story decision, so renderComponent can read
+// it back off the node it is handed. Nodes are the run's own payload objects.
+function planStory(layout, P) {
+  const cfg = (P.layout && P.layout.story) || {};
+  const skip = new Set(cfg.skip || []);
+  const order = Array.isArray(cfg.order) ? cfg.order : null;
+  // A named order leads; anything the run did not name keeps its default
+  // position behind the named ones rather than being dropped.
+  const rank = (t) => {
+    if (order) { const i = order.indexOf(t); if (i >= 0) return i; return 100 + (STORY_RANK[t] ?? 40); }
+    return STORY_RANK[t] ?? 40;
+  };
+  const nodes = [...(layout.rail || layout.deck || []), ...(layout.stream || []), ...(layout.tail || [])];
+  const live = [];
+  for (const n of nodes) {
+    const s = STORY[n.type];
+    // Never a screen of nothing: a component with no content is not a reading.
+    const empty = n.type === 'push' && !((P.push || {}).title);
+    n.__storySeq = 0;
+    if (!s || skip.has(n.type) || n.story === false || empty) { n.__story = 'skip'; continue; }
+    n.__story = s.mode;
+    n.__storyPack = s.pack || 1;
+    n.__storyView = s.view || null;
+    live.push(n);
+  }
+  live.map((n, i) => ({ n, i }))
+    .sort((a, b) => rank(a.n.type) - rank(b.n.type) || a.i - b.i)
+    .forEach(({ n }, k) => { n.__storySeq = k + 1; });
+}
+
+// Roughly how many screens the day just composed will be. The build cannot
+// measure a phone, so it counts characters — a unit's share of one screen — and
+// packs by the same two rules the page uses: one group per screen, and the
+// ceiling. It is an estimate for the run to read, never a layout decision.
+const storyShare = (chars) => (chars < 80 ? 0.2 : chars < 200 ? 0.25 : chars < 450 ? 0.5 : 1);
+// The same units the page will find, counted from the payload instead of the
+// DOM, and grouped, because a screen never mixes two groups.
+function storyUnitsOf(type, P) {
+  const chars = (...xs) => xs.filter(Boolean).join(' ').length;
+  if (type === 'focus' || type === 'todos') {
+    return [(P[type] || []).filter((t) => String(t.title || '').trim()).map((t) => ({
+      own: storyOwnRow(t, t.note), chars: chars(t.title, t.why, t.note),
+    }))];
+  }
+  if (type === 'papers') {
+    return [((P.arxiv || {}).papers || []).filter((p) => String(p.title || '').trim()).map((p) => ({
+      own: p.storyOwn === true || (relOf(p) ?? 0) >= 2,
+      chars: chars(p.title, (p.authors || []).join(', '), p.why),
+    }))];
+  }
+  if (type === 'news') {
+    const f = P.feed || {};
+    return ['genui', 'industry', 'hci']
+      .map((k) => (f[k] || []).filter((it) => String(it.title || '').trim())
+        .map((it) => ({ own: it.storyOwn === true || relOf(it) === 3, chars: chars(it.title, it.meta, it.why) })))
+      .filter((g) => g.length);
+  }
+  return [];
+}
+function storyEstimate(layout, P) {
+  const nodes = [...(layout.rail || layout.deck || []), ...(layout.stream || []), ...(layout.tail || [])]
+    .filter((n) => n.__storySeq).sort((a, b) => a.__storySeq - b.__storySeq);
+  let units = 0, screens = 2;   // the cover and the end card
+  for (const n of nodes) {
+    if (n.__story !== 'items') { units += 1; screens += 1; continue; }
+    for (const list of storyUnitsOf(n.type, P)) {
+      let used = 0, count = 0, open = false;
+      for (const u of list) {
+        units += 1;
+        const share = u.own ? 1 : storyShare(u.chars);
+        if (!open || u.own || count >= n.__storyPack || used + share > 1.0001) {
+          screens += 1; used = share; count = 1; open = !u.own;
+        } else { used += share; count += 1; }
+      }
+    }
+  }
+  return { units, screens };
+}
 
 function componentBody(type, node, P, prev, pal) {
   switch (type) {
@@ -1075,7 +1292,7 @@ function componentBody(type, node, P, prev, pal) {
       const view = node.view || prev.views.news || 'cal';
       return {
         n: total, view, viewKey: 'news',
-        seg: `<span class="seg" role="group" aria-label="How to read the news"><button data-setview="list">Reading</button><button data-setview="cal">Front page</button></span>`,
+        seg: segment('How to read the news', [['list', 'Reading'], ['cal', 'Front page']]),
         html: `<div class="v v-list" data-marble-id="${mint()}">${subs}</div>\n` +
           `<div class="v v-cal" data-marble-id="${mint()}">${rNewsMosaic(f, prev)}</div>`,
       };
@@ -1103,7 +1320,7 @@ function componentBody(type, node, P, prev, pal) {
       const n = (P.keyDates || []).filter((d) => daysUntil(d.date, P.date) >= 0).length;
       return {
         n, view, viewKey: 'calendar',
-        seg: `<span class="seg" role="group" aria-label="How to read what is coming"><button data-setview="t">Timeline</button><button data-setview="l">List</button></span>`,
+        seg: segment('How to read what is coming', [['t', 'Timeline'], ['l', 'List']]),
         html: `<div class="v v-t" data-marble-id="${mint()}">${rTimelineY(P.keyDates, P.date, 'c')}</div>\n` +
               `<div class="v v-l" data-marble-id="${mint()}">${rKeyDatesList(P.keyDates, P.date)}</div>`,
       };
@@ -1114,7 +1331,7 @@ function componentBody(type, node, P, prev, pal) {
       const view = node.view || prev.views.usopen || 'top';
       return {
         view, viewKey: 'usopen',
-        seg: `<span class="seg" role="group" aria-label="Which draw"><button data-setview="top">Now</button><button data-setview="men">Men</button><button data-setview="women">Women</button></span>`,
+        seg: segment('Which draw', [['top', 'Now'], ['men', 'Men'], ['women', 'Women']]),
         html: (u.note ? `<p class="csub" data-marble-id="${mint()}">${esc(u.note)}</p>\n` : '') +
           `<div class="v v-top" data-marble-id="${mint()}">${rUsoNow(u)}</div>\n` +
           `<div class="v v-men" data-marble-id="${mint()}">${rBracket(u.men)}</div>\n` +
@@ -1129,7 +1346,7 @@ function componentBody(type, node, P, prev, pal) {
       const done = (n.days || []).flatMap((d) => d.games || []).filter((g) => g.winner).length;
       return {
         n: done || undefined, sub: n.sub, view, viewKey: 'nfl',
-        seg: `<span class="seg" role="group" aria-label="Which reading of the week"><button data-setview="week">The week</button><button data-setview="niners">Niners</button></span>`,
+        seg: segment('Which reading of the week', [['week', 'The week'], ['niners', 'Niners']]),
         html: (n.note ? `<p class="csub" data-marble-id="${mint()}">${esc(n.note)}</p>\n` : '') +
           `<div class="v v-week" data-marble-id="${mint()}">${rNflWeek(n)}</div>\n` +
           `<div class="v v-niners" data-marble-id="${mint()}">${rNflGame(n.game)}</div>` +
@@ -1144,11 +1361,15 @@ function componentBody(type, node, P, prev, pal) {
       const view = node.view || prev.views.nflseason || 'arc';
       return {
         n: s.total - s.played, sub: s.sub, view, viewKey: 'nflseason',
-        seg: `<span class="seg" role="group" aria-label="Which reading of the season">` +
-          `<button data-setview="arc">The arc</button><button data-setview="west">The West</button></span>`,
+        seg: segment('Which reading of the season', [
+          ['arc', 'The arc'], ['west', 'The West'],
+          ...((s.league || []).length ? [['league', 'The league']] : []),
+        ]),
         html: rNflSeasonHead(s) +
           `<div class="v v-arc" data-marble-id="${mint()}">${rNflSeasonArc(s)}</div>\n` +
-          `<div class="v v-west" data-marble-id="${mint()}">${rNflWest(s)}</div>` +
+          `<div class="v v-west" data-marble-id="${mint()}">${rNflWest(s)}</div>\n` +
+          ((s.league || []).length
+            ? `<div class="v v-league" data-marble-id="${mint()}">${rNflLeague(s)}</div>` : '') +
           srcLine(s.sourceName || 'ESPN', s.sourceUrl || 'https://www.espn.com/nfl/team/schedule/_/name/sf', 'web'),
         more: rNflSeasonMore(s),
         moreTip: 'Every game still to come, with dates and kickoff times',
@@ -1200,18 +1421,27 @@ function renderComponent(node, P, prev, pal) {
   const cls = ['comp', treatment, 'reveal', built.view ? 'viewbox' : '', built.more ? 'expandable-comp' : ''].filter(Boolean).join(' ');
   const viewAttrs = (built.view ? ` data-view="${escAttr(built.view)}" data-view-key="${escAttr(built.viewKey)}"` : '')
     + (built.more ? ` data-exp-key="${escAttr(expKey)}"${isOpen ? ' data-expanded' : ''}` : '');
+  // How this component reads in the story. A skipped one still says so, because
+  // "no attribute" would be indistinguishable from an issue built before the
+  // story existed, and the page must be able to tell those apart.
+  const storyAttrs = (node.__story && node.__story !== 'skip' && node.__storySeq)
+    ? ` data-story="${escAttr(node.__story)}" data-story-seq="${node.__storySeq}"`
+      + ` data-story-pack="${node.__storyPack || 1}"`
+      + (node.__storyView ? ` data-story-view="${escAttr(node.__storyView)}"` : '')
+      + (node.storyLabel ? ` data-story-label="${escAttr(node.storyLabel)}"` : '')
+    : ' data-story="skip"';
   const head = title
     ? `  <div class="chead"><h2 data-marble-id="${mint()}">${esc(title)}</h2>` +
       (built.n ? `<span class="n" data-marble-id="${mint()}">${built.n}</span>` : '') +
       (built.sub ? `<span class="n" data-marble-id="${mint()}">${esc(built.sub)}</span>` : '') +
       (built.seg || built.more
-        ? `<span class="right" data-marble-transient>${built.seg || ''}${built.more
-            ? `<button class="comp-exp tip" data-comp-exp aria-label="Show more detail" data-tip="${escAttr(built.moreTip || 'More detail')}"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 9l6 6 6-6"/></svg></button>`
+        ? `<span class="right" data-marble-id="${mint()}">${built.seg || ''}${built.more
+            ? `<button class="comp-exp tip" data-comp-exp aria-label="Show more detail" data-tip="${escAttr(built.moreTip || 'More detail')}" data-marble-id="${mint()}"><svg viewBox="0 0 24 24" aria-hidden="true" data-marble-id="${mint()}"><path d="M6 9l6 6 6-6"/></svg></button>`
             : ''}</span>`
         : '') + `</div>\n`
     : '';
   const more = built.more ? `\n  <div class="comp-more" data-marble-id="${mint()}">${built.more}</div>` : '';
-  return `<section class="${cls}" data-comp="${escAttr(node.type)}" data-marble-id="${mint()}" style="--cat: ${cat}"${viewAttrs}>\n${head}${built.html}${more}\n</section>`;
+  return `<section class="${cls}" data-comp="${escAttr(node.type)}" data-marble-id="${mint()}" style="--cat: ${cat}"${viewAttrs}${storyAttrs}>\n${head}${built.html}${more}\n</section>`;
 }
 
 const DEFAULT_LAYOUT = {
@@ -1290,6 +1520,7 @@ function assemble(args) {
 
   if (P.representation) guardHtml(P.representation.html, 'representation.html');
   const layout = P.layout && (P.layout.rail || P.layout.stream) ? P.layout : DEFAULT_LAYOUT;
+  planStory(layout, P);
   for (const n of [...(layout.rail || layout.deck || []), ...(layout.stream || []), ...(layout.tail || [])]) if (n.type === 'custom') guardHtml(n.html, `custom component "${n.title || ''}"`);
 
   const picked = pickPalette(date, P.palette);
@@ -1338,6 +1569,10 @@ function assemble(args) {
   const fontCss = fs.existsSync(DEFAULTS.fontCss) ? fs.readFileSync(DEFAULTS.fontCss, 'utf8') : '';
   html = html.replace('__FONT__', fontCss ? `<style id="nl-font">\n${fontCss}\n</style>` : '<style id="nl-font"></style>');
   html = html.replace('__PALETTE__', paletteStyle(pal));
+  // Which of the two readings Bryan last chose on a narrow screen. It is a fact
+  // about the day, so it lives in the file and reopens the way he left it —
+  // never localStorage, which would make him choose again every morning.
+  html = html.replace('__READ__', prev.read ? ` data-read="${escAttr(prev.read)}"` : '');
   html = html.replace('__BODY__', body);
 
   const check = selfCheck(html);
@@ -1352,6 +1587,7 @@ function assemble(args) {
       news: ['genui', 'industry', 'hci'].reduce((s, k) => s + ((P.feed || {})[k] || []).length, 0),
       papers: ((P.arxiv || {}).papers || []).length,
     },
+    story: storyEstimate(layout, P),
     imagesInlined, bytes: Buffer.byteLength(html), carriedForward: Object.keys(prev.rows).length,
   };
   if (args['dry-run']) { console.log(JSON.stringify({ dryRun: true, ...out }, null, 2)); return; }
@@ -1359,13 +1595,22 @@ function assemble(args) {
   fs.mkdirSync(DEFAULTS.dir, { recursive: true });
   const tmp = `${outPath}.tmp-${process.pid}`;
   fs.writeFileSync(tmp, html); fs.renameSync(tmp, outPath);
-  fs.copyFileSync(outPath, DEFAULTS.stable);
+  // `--out` names a target that is not the day's issue — a trial build, a
+  // fixture — so it must not touch the tab Bryan has open.
+  if (!args.out) fs.copyFileSync(outPath, DEFAULTS.stable);
   const after = fs.readFileSync(outPath, 'utf8');
   const re = selfCheck(after);
   if (!re.ok) die(`file on disk failed re-check:\n  - ${re.problems.join('\n  - ')}`);
 
   try { execFileSync('node', [DEFAULTS.layoutTool, outPath], { stdio: ['ignore', 'pipe', 'pipe'] }); }
   catch (e) { console.error(((e.stdout || '') + (e.stderr || '')).toString()); die('layout doctor found problems — fix design.css / the renderers.'); }
+
+  // A story is a sitting, not an inbox. Over forty screens the fix is editorial
+  // — cut by relevance, which the volume caps already ask of the run.
+  if (out.story.screens > 40) {
+    console.error(`[day] story: ~${out.story.screens} screens from ${out.story.units} units — long for one sitting. `
+      + 'Cut by relevance (SKILL.md \u00a7Adapting to the day), not by truncation.');
+  }
 
   if (picked.recorded) {
     fs.mkdirSync(path.dirname(DEFAULTS.paletteState), { recursive: true });
