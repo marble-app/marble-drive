@@ -12,6 +12,7 @@ import { explainTypesafeFailure } from '../typesafe/client.js';
 import { noKeyFailure, readStop } from '../typesafe/routes.js';
 import { loadAtlas } from './atlas.js';
 import { decideDocument } from './decide.js';
+import { decideRoot } from './root.js';
 import { extractSpace, validateSpace } from './space.js';
 
 export function createGenuiHandler({
@@ -87,6 +88,64 @@ export function createGenuiHandler({
           json(res, 200, { doc: doc.docPath, space: extractSpace(doc.source), validation: validateSpace(doc.source, index) });
         } catch (err) {
           json(res, err.status ?? 500, { error: err.message });
+        }
+        return true;
+      }
+
+      // Every document that is an app space: what a generator can reopen.
+      // Only files whose bytes carry the attribute are parsed.
+      if (route === '/genui/spaces' && req.method === 'GET') {
+        try {
+          const docs = (await store.list({ recursive: true })).filter((e) => e.kind === 'doc');
+          const spaces = [];
+          for (const doc of docs) {
+            const source = await store.read(doc.path);
+            if (!source || !source.includes('data-genui=')) continue;
+            const space = extractSpace(source);
+            if (!space.instances.length) continue;
+            spaces.push({
+              path: doc.path,
+              request: space.request,
+              instances: space.instances.length,
+              decisions: space.instances.reduce((n, i) => n + i.decisions.length, 0),
+            });
+          }
+          json(res, 200, spaces);
+        } catch (err) {
+          json(res, err.status ?? 500, { error: err.message });
+        }
+        return true;
+      }
+
+      // L0: which root pattern. The prompt is the state; the Atlas definitions
+      // are the glosses; the LLM then authors a space for the one Jev chose.
+      if (route === '/genui/root' && req.method === 'POST') {
+        if (!apiKey) {
+          json(res, 503, { ...noKeyFailure(), error: noKeyFailure().message });
+          return true;
+        }
+        const body = await readJson(req, maxBodyBytes);
+        const ac = new AbortController();
+        let finished = false;
+        res.on('close', () => {
+          if (!finished) ac.abort();
+        });
+        try {
+          const index = await atlas();
+          const out = await decideRoot({
+            atlas: index,
+            apiKey,
+            request: body.request,
+            context: body.context && typeof body.context === 'object' ? body.context : {},
+            signal: ac.signal,
+            ...(ask ? { ask } : {}),
+          });
+          finished = true;
+          reply(res, 200, out);
+        } catch (err) {
+          finished = true;
+          if (err.code === 'CANCELLED' || ac.signal.aborted) reply(res, 499, { kind: 'cancelled', title: 'Stopped.', message: 'The root decision was cancelled.' });
+          else reply(res, err.status ?? 500, { error: err.message, ...(err.status === 400 ? {} : explainTypesafeFailure(err)) });
         }
         return true;
       }
