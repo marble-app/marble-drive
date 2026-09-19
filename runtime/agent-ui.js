@@ -1311,7 +1311,11 @@
     }
     .ask .ask-options button:hover, .ask .ask-options button:focus-visible { background: var(--paper-2); outline: none; }
     .ask .ask-options button[aria-checked="true"] { border-color: var(--accent-ink); background: color-mix(in srgb, var(--accent-ink) 10%, transparent); }
-    .ask .ask-options kbd { font: 11px/1.4 inherit; color: var(--faint); text-align: center; border: 1px solid var(--line); border-radius: 4px; }
+    /* Longhands, not the shorthand: inherit is a CSS-wide keyword and cannot
+       stand in for the family component, so "font: 11px/1.4 inherit" is invalid
+       and the whole declaration is dropped — these kbds were rendering at the
+       UA's 14px monospace default, not 11px in the UI's own face. */
+    .ask .ask-options kbd { font-family: inherit; font-size: 11px; line-height: 1.4; color: var(--faint); text-align: center; border: 1px solid var(--line); border-radius: 4px; }
     .ask .ask-options b { font-weight: 500; }
     .ask .ask-options small { grid-column: 2; color: var(--muted); font-size: 11.5px; }
     .ask .ask-other-text { font: inherit; font-size: 12.5px; padding: 5px 8px; border: 1px solid var(--line); border-radius: 8px; background: none; color: inherit; margin-left: 26px; }
