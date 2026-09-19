@@ -1,0 +1,1088 @@
+<!doctype html>
+<html lang="en" data-marble="1">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="marble:capabilities" content="storage">
+<title>GenUI</title>
+<style data-marble-id="css">
+/* TypeSafe AI — the same research-file language as Monitor and Decide:
+   warm paper, cobalt accent, serif titles, hairline cards. This page is the
+   product, not the notebook: one prompt, one tree, one living UI. */
+:root {
+  --ink: #191d21; --ink-2: #39424b; --muted: #5a656f; --faint: #8d97a1;
+  --line: #e4e6e8; --hair: rgba(25, 29, 33, .09);
+  --paper: #fbfaf8; --card: #ffffff; --sunk: #f4f2ee;
+  --accent: #1c5cab; --accent-soft: #eaf1fa; --accent-ink: #184f95;
+  --good: #0ca30c; --warn: #fab219; --critical: #d03b3b;
+  --r: 9px; --r-2: 5px;
+  --serif: ui-serif, "Iowan Old Style", Palatino, Georgia, serif;
+  --sans: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  --mono: ui-monospace, "SF Mono", Menlo, monospace;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --ink: #e7eaed; --ink-2: #c4cdd4; --muted: #9ba6b1; --faint: #6d7984;
+    --line: #2c3238; --hair: rgba(255, 255, 255, .10);
+    --paper: #141719; --card: #1a1e21; --sunk: #202528;
+    --accent: #6fa8ea; --accent-soft: #1b2733; --accent-ink: #8fc0f2;
+  }
+}
+* { box-sizing: border-box; }
+body { margin: 0; background: var(--paper); color: var(--ink); font: 15px/1.55 var(--sans); -webkit-font-smoothing: antialiased; min-height: 100vh; display: grid; grid-template-rows: auto auto 1fr; }
+h1, h2, h3 { margin: 0; font-family: var(--serif); font-weight: 600; letter-spacing: -.014em; }
+p { margin: 0; }
+button { font: inherit; color: inherit; background: none; border: 0; cursor: pointer; }
+button:focus-visible, [data-marble-editable]:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+[data-marble-editable] { outline: none; border-radius: var(--r-2); }
+[data-marble-editable]:hover { background: color-mix(in srgb, var(--accent) 7%, transparent); }
+[data-marble-editable]:focus { background: var(--card); box-shadow: 0 0 0 1px var(--accent), 0 0 0 4px var(--accent-soft); }
+[data-ph]:empty::before { content: attr(data-ph); color: var(--faint); }
+
+.kicker { font: 600 10px/1 var(--sans); letter-spacing: .16em; text-transform: uppercase; color: var(--accent); }
+.mast { padding: 22px 28px 0; display: flex; gap: 18px; align-items: baseline; }
+.mast h1 { font-size: 22px; }
+.mast .lede { color: var(--muted); font-size: 13.4px; }
+
+.ask { padding: 14px 28px 12px; display: grid; gap: 10px; border-bottom: 1px solid var(--hair); }
+.prompt-row { display: grid; grid-template-columns: 1fr auto auto; gap: 8px; align-items: stretch; }
+.prompt { min-height: 2.75rem; padding: 9px 12px; background: var(--card); border: 1px solid var(--hair); border-radius: var(--r); font-size: 15.5px; line-height: 1.5; }
+.btn { min-height: 2.75rem; padding: 0 16px; border-radius: var(--r-2); font: 600 13.5px/1.3 var(--sans); background: var(--sunk); color: var(--ink-2); border: 1px solid var(--hair); white-space: nowrap; }
+.btn:hover { background: var(--accent-soft); color: var(--accent-ink); border-color: var(--accent); }
+.btn.primary { background: var(--accent); color: #fff; border-color: var(--accent); }
+.btn.primary:hover { filter: brightness(1.08); color: #fff; }
+.btn[disabled] { opacity: .45; cursor: default; filter: none; }
+.signal-row { display: grid; grid-template-columns: auto auto 1fr auto; gap: 8px; align-items: center; }
+.signal-row .label { font: 600 10px/2.75rem var(--sans); letter-spacing: .12em; text-transform: uppercase; color: var(--faint); }
+.signals { display: flex; flex-wrap: wrap; gap: 6px; margin: 0; padding: 0; list-style: none; align-items: center; min-height: 2.75rem; }
+.signals:empty { display: none; }
+.signals li { display: inline-flex; align-items: center; gap: 4px; padding: 5px 6px 5px 10px; background: var(--card); border: 1px solid var(--hair); border-radius: 999px; font-size: 13px; }
+.signals li .x { width: 1.6rem; height: 1.6rem; border-radius: 999px; color: var(--faint); font-size: 14px; line-height: 1; }
+.signals li .x:hover { background: var(--sunk); color: var(--critical); }
+.signal-row .new { display: block; min-height: 2rem; padding: 6px 12px; border: 1px dashed var(--hair); border-radius: 999px; font-size: 13px; outline: none; }
+.signal-row .new:focus { border-style: solid; border-color: var(--accent); background: var(--card); }
+
+.work { display: grid; grid-template-columns: 380px 1fr; min-height: 0; }
+.tree { border-right: 1px solid var(--hair); overflow: auto; padding: 14px 16px 40px; }
+.stage { display: grid; grid-template-rows: auto 1fr; min-height: 0; background: var(--sunk); }
+.stage-bar { display: flex; gap: 10px; align-items: center; padding: 8px 14px; font: 12px/1.4 var(--mono); color: var(--muted); border-bottom: 1px solid var(--hair); background: var(--paper); }
+.stage-bar .space { color: var(--ink-2); }
+.stage-bar .ms { margin-left: auto; }
+.stage-bar a { color: var(--accent-ink); text-decoration: none; }
+.stage iframe { width: 100%; height: 100%; min-height: 60vh; border: 0; background: var(--card); }
+.stage .empty { display: grid; place-items: center; color: var(--faint); font-style: italic; padding: 40px; }
+
+.node { margin: 0 0 10px; background: var(--card); border: 1px solid var(--hair); border-radius: var(--r); overflow: hidden; }
+.node > .head { display: flex; align-items: baseline; gap: 8px; padding: 10px 12px; cursor: pointer; }
+.node > .head .lvl { font: 600 10px/1 var(--mono); letter-spacing: .08em; color: var(--accent); min-width: 2.2rem; }
+.node > .head h3 { font-size: 14.5px; flex: 1; }
+.node > .head .conf { font: 600 12px/1 var(--mono); color: var(--ink-2); }
+.node > .head .state { font: 600 10.5px/1 var(--sans); color: var(--faint); }
+.node[data-open="no"] > .body { display: none; }
+.node > .head::before { content: "▾"; color: var(--faint); font-size: 11px; }
+.node[data-open="no"] > .head::before { content: "▸"; }
+.node > .body { border-top: 1px solid var(--hair); padding: 8px 12px 10px; }
+.node .kid { margin: 10px 0 0 10px; }
+.row { display: grid; grid-template-columns: 1fr auto; gap: 2px 10px; padding: 7px 0; border-top: 1px solid var(--hair); }
+.row:first-child { border-top: 0; }
+.row .k { font: 600 12.5px/1.3 var(--mono); }
+.row .v { font-size: 12.5px; color: var(--muted); }
+.row .v b { color: var(--ink-2); font-weight: 600; }
+.row .c { font: 600 12px/1.3 var(--mono); color: var(--ink-2); text-align: right; }
+.row[data-reason="applied"] .k::after { content: " ✓"; color: var(--accent); }
+.row[data-reason="kept-low-confidence"] .c { color: var(--warn); }
+.row[data-moved="yes"] { background: var(--accent-soft); margin: 0 -12px; padding-left: 12px; padding-right: 12px; }
+.row .bars { grid-column: 1 / -1; display: none; flex-direction: column; gap: 3px; margin-top: 4px; }
+.row[data-bars="yes"] .bars { display: flex; }
+.bar { display: grid; grid-template-columns: 9rem 1fr 30px; gap: 8px; align-items: center; font-size: 11px; color: var(--muted); }
+.bar .track { height: 6px; background: var(--sunk); border-radius: 3px; overflow: hidden; }
+.bar .fill { display: block; height: 100%; background: var(--accent); border-radius: 3px; }
+.bar .n { font: 600 10.5px/1 var(--mono); color: var(--ink-2); text-align: right; }
+.steps { font-size: 12.5px; color: var(--muted); }
+.steps .last { color: var(--ink-2); }
+.note { font-size: 12.5px; color: var(--muted); }
+.issues { color: var(--critical); font: 12px/1.5 var(--mono); white-space: pre-wrap; }
+.empty-tree { color: var(--faint); font-style: italic; font-size: 13.4px; padding: 8px 2px; }
+
+@media (max-width: 960px) {
+  .work { grid-template-columns: 1fr; }
+  .tree { border-right: 0; border-bottom: 1px solid var(--hair); max-height: 45vh; }
+  .prompt-row { grid-template-columns: 1fr; }
+  .signal-row { grid-template-columns: 1fr; }
+}
+@media (prefers-reduced-motion: no-preference) {
+  .row[data-moved="yes"] { transition: background .4s; }
+}
+</style>
+</head>
+<body data-marble-id="body" data-space="" data-root="" data-run=""
+  data-author-prompt="Use the genui-author skill. Root pattern: {root} ({name}) — Jev chose it at {confidence} for this request. Write the app space to &quot;{doc}&quot; (a document path inside the drive; create it, do not edit another). Prompt, verbatim: &quot;{request}&quot;. Validate with `node bin/marble-drive.js genui space &quot;{doc}&quot;` until it prints ok, then stop. Do not run a decide.">
+  <header class="mast" data-marble-id="mast">
+    <div data-marble-id="mast-t">
+      <span class="kicker" data-marble-id="kicker">TypeSafe AI · GenUI</span>
+      <h1 data-marble-id="h1" data-marble-editable>Ask for an interface</h1>
+    </div>
+    <p class="lede" data-marble-id="lede" data-marble-editable>Jev picks the pattern, an agent writes the space, Jev decides every dimension inside it, and the UI shows. Say more and it re-decides.</p>
+  </header>
+
+  <section class="ask" data-marble-id="ask">
+    <div class="prompt-row" data-marble-id="prompt-row">
+      <p class="prompt" data-marble-id="prompt" data-marble-editable data-ph="What do you want? e.g. a dashboard for the on-call engineer: error rate, p95 latency, open incidents, last 24h of traffic"></p>
+      <button type="button" class="btn primary" id="generate" data-marble-transient>Generate</button>
+      <button type="button" class="btn" id="regenerate" data-marble-transient disabled>Regenerate</button>
+    </div>
+    <div class="signal-row" data-marble-id="signal-row">
+      <span class="label" data-marble-id="signal-lbl">Then</span>
+      <ul class="signals" data-marble-id="signals"></ul>
+      <span class="new" id="signal-new" data-marble-transient contenteditable="plaintext-only" role="textbox" aria-label="Say more" data-ph="say more — “make it denser”, “I’m on the train” — Enter to re-decide"></span>
+      <button type="button" class="btn" id="redecide" data-marble-transient disabled>Re-decide</button>
+    </div>
+  </section>
+
+  <div class="work" data-marble-id="work">
+    <aside class="tree" data-marble-id="tree-col">
+      <div id="tree" data-marble-transient><p class="empty-tree">Nothing decided yet. Ask for something above.</p></div>
+    </aside>
+    <main class="stage" data-marble-id="stage">
+      <div class="stage-bar" data-marble-transient>
+        <span class="space" id="stage-space">no space yet</span>
+        <a id="stage-open" href="#" hidden>open ↗</a>
+        <span class="ms" id="stage-ms"></span>
+      </div>
+      <div id="stage-body" data-marble-transient><div class="empty">The generated UI will show here, live.</div></div>
+    </main>
+  </div>
+
+  <template id="signal-tpl" data-marble-transient><li data-marble-editable></li></template>
+
+<script data-marble-id="affordance">
+(() => {
+  const begin = (marble) => {
+    const TRANSIENT = 'data-marble-transient';
+    const ID = 'data-marble-id';
+
+    const isTransient = (el) => el.hasAttribute(TRANSIENT);
+    const persistentChildren = (el) => [...el.children].filter((c) => !isTransient(c));
+
+    function nextPersistentSibling(el) {
+      let sibling = el.nextElementSibling;
+      while (sibling && isTransient(sibling)) sibling = sibling.nextElementSibling;
+      return sibling;
+    }
+
+    // An element can hold several roles at once — a beat is both editable and a
+    // sortable item — so wiring is tracked per role, not per element.
+    const roles = new WeakMap();
+    function claim(el, role) {
+      const held = roles.get(el) ?? new Set();
+      if (held.has(role)) return false;
+      held.add(role);
+      roles.set(el, held);
+      return true;
+    }
+
+    const within = (root, selector) => [
+      ...(root.matches?.(selector) ? [root] : []),
+      ...root.querySelectorAll(selector),
+    ];
+
+    // Each part contributes its own styling, its own wiring pass, and the
+    // selector for what it makes touchable — so removing a part removes all
+    // three and nothing dangles.
+    const css = [];
+    const wirers = [];
+    const addressable = [];
+    // False during the first register pass (the document as it loaded), true
+    // afterwards. A row that is wired later is a row that just arrived, and
+    // its chrome should say so rather than waiting for a hover.
+    let live = false;
+
+    // A subtree that isn't in the document yet can't be addressed by path, so
+    // it carries its ids with it — they are serialized into the insert op.
+    function assignIdsIn(root) {
+      for (const el of [root, ...root.querySelectorAll('*')]) {
+        if (isTransient(el) || marble.id(el)) continue;
+        if (el === root || el.matches(ADDRESSABLE)) el.setAttribute(ID, marble.newId());
+      }
+    }
+
+    // These live in the page and never in the file, which the carrier has no
+    // way to know until it is told.
+    marble.pageOnly('contenteditable', 'spellcheck');
+    addressable.push('[data-marble-editable]');
+    wirers.push(wireEditable);
+
+    function wireEditable(root) {
+      for (const el of within(root, '[data-marble-editable]')) {
+        if (!claim(el, 'editable')) continue;
+
+        // plaintext-only keeps the browser from injecting <div> and <br> soup
+        // on Enter, so textContent stays the whole truth and setText is safe.
+        el.setAttribute('contenteditable', 'plaintext-only');
+        if (el.contentEditable !== 'plaintext-only') el.setAttribute('contenteditable', 'true');
+        el.spellcheck = false;
+
+        // One undo step per edit session: prior text is captured on focus, and
+        // keystrokes coalesce against that same entry until blur.
+        let prior = null;
+        el.addEventListener('focus', () => {
+          prior = marble.text(el);
+        });
+        el.addEventListener('input', () => {
+          const id = marble.id(el);
+          const text = marble.text(el);
+          const op = { type: 'setText', id, text };
+          if (prior !== null && text !== prior) {
+            marble.record(
+              { redo: [op], undo: [{ type: 'setText', id, text: prior }] },
+              { coalesce: true },
+            );
+          }
+          marble.op(op);
+        });
+        el.addEventListener('blur', () => {
+          prior = null;
+          marble.flush();
+        });
+
+        // Most editable nodes here are a heading or a single line, where Enter
+        // means "done" and a newline buried in the text is a mistake you can't
+        // see. Shift-Enter still breaks the line where a break is wanted.
+        el.addEventListener('keydown', (event) => {
+          if (event.key === 'Escape' || (event.key === 'Enter' && !event.shiftKey)) {
+            event.preventDefault();
+            el.blur();
+          }
+        });
+      }
+    }
+
+    // Five interactions that every real document turned out to need and, before
+    // they were named, hand-rolled — a checkable row, a view switcher, a
+    // disclosure, a counter, a note. Hand-rolled they were written well only if
+    // whoever wrote it remembered to, which is why the corpus has 177 hover
+    // rules and 8 focus-visible ones. Named, they are written well once.
+    //
+    // All five share one shape. The fact lives in **one attribute on one target**
+    // and everything else is derived from it: the appearance by the document's
+    // CSS, the announced state by the wiring below, and both re-derived from a
+    // MutationObserver so an undo, a hand edit, or another tab writing the file
+    // can never leave the two disagreeing.
+    //
+    //   data-marble-of="<selector>"  the target, via closest(). Default: itself.
+
+    marble.pageOnly('aria-pressed', 'aria-expanded', 'aria-current', 'aria-disabled', 'tabindex', 'role');
+
+    // The target has to be in the file before an op can name it.
+    function resolve(el) {
+      const selector = el.getAttribute('data-marble-of');
+      const node = selector ? el.closest(selector) : el;
+      if (!node) return null;
+      if (!marble.id(node)) marble.address([node]);
+      return marble.id(node) ? node : null;
+    }
+
+    // One attribute, one op, and its inverse — the whole of what these five do.
+    function setAttr(node, name, value) {
+      const id = marble.id(node);
+      if (!id) return;
+      const prior = node.getAttribute(name);
+      node.setAttribute(name, value);
+      const op = { type: 'setAttr', id, name, value };
+      marble.record({ redo: [op], undo: [{ type: 'setAttr', id, name, value: prior }] });
+      marble.op(op, { immediate: true });
+    }
+
+    const observe = (node, name, sync) =>
+      new MutationObserver(sync).observe(node, { attributes: true, attributeFilter: [name] });
+
+    // A <button> is focusable, announces itself, and fires on Enter and Space
+    // for free. Anything else needs all four of tabindex, role, the keys, and
+    // the ARIA state, or it is furniture with a cursor.
+    function control(el, role) {
+      if (!(el instanceof HTMLButtonElement)) {
+        if (!el.hasAttribute('tabindex')) el.setAttribute('tabindex', '0');
+        if (!el.hasAttribute('role')) el.setAttribute('role', role);
+        el.addEventListener('keydown', (event) => {
+          if (event.key !== 'Enter' && event.key !== ' ') return;
+          event.preventDefault();
+          el.click();
+        });
+      }
+      // The sentence that tells the intent layer what this is for is also the
+      // only description a screen reader has, when the control is a bare glyph.
+      const instruction = el.getAttribute('data-marble-instruction');
+      if (instruction && !el.hasAttribute('aria-label') && !marble.text(el).trim()) {
+        el.setAttribute('aria-label', instruction);
+      }
+    }
+
+    // ---- toggle: data-marble-toggle="data-done:yes|no"
+
+    addressable.push('[data-marble-toggle]');
+    wirers.push(wireToggle);
+
+    function wireToggle(root) {
+      for (const el of within(root, '[data-marble-toggle]')) {
+        if (!claim(el, 'toggle')) continue;
+        const spec = el.getAttribute('data-marble-toggle') || '';
+        const cut = spec.indexOf(':');
+        const name = spec.slice(0, cut).trim();
+        const [on, off] = spec.slice(cut + 1).split('|').map((v) => v.trim());
+        const node = resolve(el);
+        if (!name || !on || off === undefined || !node) continue;
+
+        control(el, 'button');
+        const sync = () => el.setAttribute('aria-pressed', String(node.getAttribute(name) === on));
+        sync();
+        observe(node, name, sync);
+        el.addEventListener('click', () => {
+          setAttr(node, name, node.getAttribute(name) === on ? off : on);
+          sync();
+        });
+      }
+    }
+
+    // ---- choose: one of a set is current
+    //
+    //   <span data-marble-choose="data-view" data-marble-of=".comp">
+    //     <button data-marble-value="list">Reading</button>
+    //     <button data-marble-value="cal">Front page</button>
+    //   </span>
+
+    addressable.push('[data-marble-choose]');
+    wirers.push(wireChoose);
+
+    function wireChoose(root) {
+      for (const box of within(root, '[data-marble-choose]')) {
+        if (!claim(box, 'choose')) continue;
+        const name = (box.getAttribute('data-marble-choose') || '').trim();
+        const node = resolve(box);
+        const options = [...box.querySelectorAll('[data-marble-value]')];
+        if (!name || !node || !options.length) continue;
+
+        if (!box.hasAttribute('role')) box.setAttribute('role', 'group');
+        const sync = () => {
+          const current = node.getAttribute(name);
+          for (const option of options) {
+            option.setAttribute('aria-pressed', String(option.getAttribute('data-marble-value') === current));
+          }
+        };
+        for (const option of options) {
+          control(option, 'button');
+          option.addEventListener('click', () => {
+            setAttr(node, name, option.getAttribute('data-marble-value'));
+            sync();
+          });
+        }
+        sync();
+        observe(node, name, sync);
+
+        // A segmented control is one stop on the tab ring and the arrows move
+        // within it — what every other segmented control on the platform does.
+        box.addEventListener('keydown', (event) => {
+          const step = event.key === 'ArrowRight' || event.key === 'ArrowDown' ? 1
+            : event.key === 'ArrowLeft' || event.key === 'ArrowUp' ? -1 : 0;
+          const at = options.indexOf(document.activeElement);
+          if (!step || at < 0) return;
+          event.preventDefault();
+          options[(at + step + options.length) % options.length].focus();
+        });
+      }
+    }
+
+    // ---- expand: a second reading, in place
+
+    addressable.push('[data-marble-expand]');
+    wirers.push(wireExpand);
+
+    function wireExpand(root) {
+      for (const el of within(root, '[data-marble-expand]')) {
+        if (!claim(el, 'expand')) continue;
+        const node = resolve(el);
+        if (!node) continue;
+        const NAME = 'data-expanded';
+
+        control(el, 'button');
+        const panel = el.getAttribute('data-marble-controls');
+        const panelId = panel && marble.id(document.querySelector(panel));
+        if (panelId) el.setAttribute('aria-controls', panelId);
+
+        const sync = () => el.setAttribute('aria-expanded', String(node.getAttribute(NAME) === 'yes'));
+        sync();
+        observe(node, NAME, sync);
+        el.addEventListener('click', () => {
+          setAttr(node, NAME, node.getAttribute(NAME) === 'yes' ? 'no' : 'yes');
+          sync();
+        });
+      }
+    }
+
+    // ---- step: data-marble-step="data-weeks:1:12" data-marble-by="-1"
+
+    addressable.push('[data-marble-step]');
+    wirers.push(wireStep);
+
+    function wireStep(root) {
+      for (const el of within(root, '[data-marble-step]')) {
+        if (!claim(el, 'step')) continue;
+        const [name, min, max] = (el.getAttribute('data-marble-step') || '').split(':').map((v) => v.trim());
+        const node = resolve(el);
+        const low = Number(min);
+        const high = Number(max);
+        const by = Number(el.getAttribute('data-marble-by') || 1);
+        if (!name || !node || !Number.isFinite(low) || !Number.isFinite(high)) continue;
+
+        control(el, 'button');
+        const at = () => {
+          const now = Number(node.getAttribute(name));
+          return Number.isFinite(now) ? now : low;
+        };
+        // A stepper at its bound stays where it is and says so, rather than
+        // going quiet and leaving you pressing a live-looking button.
+        const sync = () => {
+          const blocked = at() + by < low || at() + by > high;
+          el.setAttribute('aria-disabled', String(blocked));
+          el.classList.toggle('marble-at-end', blocked);
+        };
+        sync();
+        observe(node, name, sync);
+        el.addEventListener('click', () => {
+          const next = Math.min(high, Math.max(low, at() + by));
+          if (next === at()) return;
+          setAttr(node, name, String(next));
+          sync();
+        });
+      }
+    }
+
+    // ---- note: say something about a row without changing the row
+    //
+    // The annotation is ordinary content in the file, so it is addressable,
+    // editable, greppable and diffable — which is what turns a note from a
+    // comment into an instruction a later run can act on.
+
+    css.push(`
+      .marble-note:hover, .marble-note:focus-visible { color: #6f8fb0; }
+      [data-marble-note-body] { margin: .25rem 0 0; }
+      [data-marble-note-body]:empty::before {
+        content: attr(data-ph); opacity: .4; font-style: italic;
+      }
+    `);
+    addressable.push('[data-marble-note]');
+    wirers.push(wireNote);
+
+    function wireNote(root) {
+      for (const el of within(root, '[data-marble-note]')) {
+        if (!claim(el, 'note')) continue;
+
+        const button = document.createElement('button');
+        button.className = 'marble-btn marble-note';
+        button.setAttribute(TRANSIENT, '');
+        button.setAttribute('aria-label', 'Add a note');
+        button.title = 'Add a note';
+        button.textContent = '✎';
+        button.addEventListener('click', () => {
+          let body = el.querySelector(':scope > [data-marble-note-body]');
+          if (!body) {
+            const id = marble.newId();
+            const op = {
+              type: 'insert',
+              parentId: marble.id(el),
+              beforeId: null,
+              html: `<p data-marble-id="${id}" data-marble-note-body data-marble-editable data-ph="Note"></p>`,
+            };
+            // apply adopts what it inserts, so the note is editable on arrival.
+            marble.apply(op);
+            marble.op(op);
+            marble.record({ redo: [op], undo: [{ type: 'remove', id }] });
+            body = marble.byId(id);
+          }
+          body?.focus();
+        });
+        grip(el).append(button);
+      }
+    }
+
+    // The carrier records an inverse for every gesture above. Until something
+    // draws a way to reach it, that history is a correct, complete, unreachable
+    // thing — which is what half the documents in the corpus shipped.
+    //
+    // This is also what a confirm dialog is for, done better. A dialog asks
+    // before every delete and trains people to dismiss it; a reversal offered
+    // where the loss happened costs nothing until you need it.
+
+    css.push(`
+      .marble-reversal {
+        position: fixed; left: 1rem; bottom: 1rem; z-index: 9999;
+        display: flex; align-items: center; gap: .6rem;
+        padding: .45rem .5rem .45rem .8rem; border-radius: 8px;
+        font: 500 12px/1.3 system-ui, sans-serif;
+        background: rgba(20, 22, 26, .94); color: #dfe4ea;
+        border: 1px solid rgba(255,255,255,.12);
+        box-shadow: 0 6px 24px rgba(0,0,0,.3);
+        opacity: 0; transform: translateY(4px);
+        transition: opacity .18s ease, transform .18s ease;
+        pointer-events: none;
+      }
+      .marble-reversal[data-open] { opacity: 1; transform: none; pointer-events: auto; }
+      .marble-reversal button {
+        border: 0; border-radius: 5px; padding: .25rem .55rem; cursor: pointer;
+        font: 600 12px system-ui, sans-serif;
+        background: rgba(255,255,255,.14); color: #fff;
+      }
+      .marble-reversal button:hover { background: rgba(255,255,255,.24); }
+      .marble-reversal button:focus-visible { outline: 2px solid #8ab4f8; outline-offset: 2px; }
+      @media (prefers-reduced-motion: reduce) {
+        .marble-reversal { transition: opacity .18s ease; transform: none; }
+      }
+    `);
+
+    const reversal = document.createElement('div');
+    reversal.className = 'marble-reversal';
+    reversal.setAttribute(TRANSIENT, '');
+    // Announced when it appears, so the offer is not pointer-only.
+    reversal.setAttribute('role', 'status');
+    const reversalText = document.createElement('span');
+    const reversalButton = document.createElement('button');
+    reversalButton.textContent = 'Undo';
+    reversal.append(reversalText, reversalButton);
+    document.body.append(reversal);
+
+    let reversalTimer = null;
+    function offerUndo(label) {
+      reversalText.textContent = label;
+      reversal.setAttribute('data-open', '');
+      clearTimeout(reversalTimer);
+      reversalTimer = setTimeout(() => reversal.removeAttribute('data-open'), 7000);
+    }
+    reversalButton.addEventListener('click', () => {
+      reversal.removeAttribute('data-open');
+      if (marble.canUndo) marble.undo();
+      syncHistory();
+    });
+
+    // Whether there is a way back is a live fact about the document, so it is
+    // derived into a marble- class like any other — never mirrored into a
+    // variable a script has to remember to update.
+    function syncHistory() {
+      document.body.classList.toggle('marble-can-undo', !!marble.canUndo);
+      document.body.classList.toggle('marble-can-redo', !!marble.canRedo);
+    }
+    addEventListener('pointerup', syncHistory, true);
+    addEventListener('keyup', syncHistory, true);
+    wirers.push(syncHistory);
+
+    // Undo/redo is a carrier capability; binding the keys is the app's call,
+    // same as drawing a save indicator. Native inputs keep the browser's own
+    // undo — marble editables preventDefault so the stacks do not fight.
+    addEventListener('keydown', (event) => {
+      const mod = event.metaKey || event.ctrlKey;
+      if (!mod || event.altKey) return;
+      const key = event.key.toLowerCase();
+      const isUndo = key === 'z' && !event.shiftKey;
+      const isRedo = (key === 'z' && event.shiftKey) || key === 'y';
+      if (!isUndo && !isRedo) return;
+
+      const target = event.target;
+      if (
+        target instanceof HTMLInputElement ||
+        target instanceof HTMLTextAreaElement ||
+        (target instanceof HTMLElement &&
+          target.isContentEditable &&
+          !target.hasAttribute('data-marble-editable') &&
+          !target.closest('[data-marble-editable]'))
+      ) {
+        return;
+      }
+
+      // A staged proposal is not history yet — Mod+Z discards it instead.
+      if (isUndo && typeof marble.discardStaged === 'function' && marble.discardStaged()) {
+        event.preventDefault();
+        return;
+      }
+
+      if (isUndo && marble.canUndo) {
+        event.preventDefault();
+        marble.undo();
+      } else if (isRedo && marble.canRedo) {
+        event.preventDefault();
+        marble.redo();
+      }
+    });
+
+    // The carrier reports whether a change reached the file; drawing that is
+    // the app's call, and an app that wants no save indicator deletes this.
+
+    css.push(`
+      .marble-status {
+        position: fixed; right: 1rem; bottom: 1rem; z-index: 9999;
+        padding: .3rem .6rem; border-radius: 999px;
+        font: 500 11px ui-monospace, SFMono-Regular, Menlo, monospace;
+        letter-spacing: .04em; pointer-events: none;
+        opacity: 0; transition: opacity .25s ease;
+        background: rgba(20, 22, 26, .92); color: #b7c0cc; border: 1px solid rgba(255,255,255,.12);
+      }
+      .marble-status[data-state="saving"] { opacity: 1; }
+      .marble-status[data-state="saved"]  { opacity: .55; }
+      .marble-status[data-state="error"]  { opacity: 1; background: #46201f; color: #ff9b9b; }
+    `);
+
+    const status = document.createElement('div');
+    status.className = 'marble-status';
+    status.setAttribute(TRANSIENT, '');
+    document.body.append(status);
+
+    let statusTimer = null;
+    document.addEventListener('marble:status', ({ detail }) => {
+      status.dataset.state = detail.state;
+      status.textContent =
+        detail.state === 'saving'
+          ? 'saving…'
+          : detail.state === 'saved'
+            ? 'saved'
+            : `error — ${detail.message}`;
+      clearTimeout(statusTimer);
+      if (detail.state === 'saved') {
+        statusTimer = setTimeout(() => (status.dataset.state = 'idle'), 1200);
+      }
+    });
+
+    const style = document.createElement('style');
+    style.setAttribute(TRANSIENT, '');
+    style.textContent = css.join('\n');
+    document.head.append(style);
+
+    // Anything a hand can act on has to be addressable in the file first.
+    const ADDRESSABLE = addressable.join(', ');
+    marble.address(document.querySelectorAll(ADDRESSABLE));
+
+    // Runs now over the document as it stands, and again over anything that
+    // arrives later — an insert, an accepted proposal, an edit made to the file
+    // in another window.
+    marble.register((root) => {
+      for (const wirer of wirers) wirer(root);
+      live = true;
+    });
+  };
+
+  // The carrier is injected after the document has been parsed, so this waits
+  // rather than the other way round. No carrier, no affordances: the document
+  // is still a page you can read, it just isn't one you can change.
+  if (window.marble) begin(window.marble);
+  else addEventListener('marble:ready', (event) => begin(event.detail), { once: true });
+})();
+</script>
+
+  <script data-marble-id="pagejs">
+(() => {
+  const body = document.body;
+  const $ = (id) => document.getElementById(id);
+  const byId = (id) => document.querySelector(`[data-marble-id="${id}"]`);
+  const el = (tag, cls, text) => {
+    const n = document.createElement(tag);
+    if (cls) n.className = cls;
+    if (text !== undefined) n.textContent = text;
+    return n;
+  };
+  const enc = encodeURIComponent;
+  const slug = (s) => String(s ?? '').toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '');
+
+  // ---- facts: on <body>, written through the carrier
+  const fact = (name) => body.getAttribute(name) || '';
+  const setFact = (name, value) => {
+    body.setAttribute(name, value ?? '');
+    const id = window.marble?.id(body);
+    if (id) window.marble.op({ type: 'setAttr', id, name, value: value ?? '' });
+  };
+  const promptText = () => (byId('prompt')?.textContent || '').trim();
+  // A chip's text is its own text nodes; the derived × is chrome, not content.
+  const chipText = (li) => [...li.childNodes].filter((n) => n.nodeType === Node.TEXT_NODE).map((n) => n.textContent).join('').trim();
+  const signalsList = () => [...byId('signals').querySelectorAll('li')].map(chipText).filter(Boolean);
+
+  // ---- state that is not a fact: what Jev last said (a record the host keeps)
+  let last = { root: null, decisions: null, space: null, elapsed: null, doc: null };
+  let run = null;        // { id, steps, last, state }
+  let runOff = null;
+
+  const viewportOf = () => {
+    const w = $('stage-body')?.clientWidth || window.innerWidth;
+    return w < 720 ? 'phone' : w < 1100 ? 'tablet' : 'desktop';
+  };
+  const contextOf = () => ({ viewport: viewportOf(), signals: signalsList() });
+
+  const api = async (path, body) => {
+    const res = await fetch(path, body ? { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) } : undefined);
+    const data = await res.json().catch(() => ({}));
+    if (res.status === 404 && !data.error) throw new Error('the host is running code without /genui — restart it');
+    if (!res.ok) {
+      const err = new Error(data.message || data.error || `HTTP ${res.status}`);
+      err.issues = data.issues;
+      err.kind = data.kind;
+      throw err;
+    }
+    return data;
+  };
+
+  // ---- the tree
+  const tree = $('tree');
+  const bars = (options, probs) => {
+    const box = el('div', 'bars');
+    for (const s of options ?? []) {
+      const p = Number(probs?.[s] ?? 0);
+      const bar = el('div', 'bar');
+      bar.append(el('span', null, s));
+      const track = el('span', 'track');
+      const fill = el('i', 'fill');
+      fill.style.width = `${Math.round(p * 100)}%`;
+      track.append(fill);
+      bar.append(track, el('span', 'n', p.toFixed(2)));
+      box.append(bar);
+    }
+    return box;
+  };
+  const node = (lvl, title, { conf = null, state = '', open = true } = {}) => {
+    const n = el('article', 'node');
+    n.setAttribute('data-open', open ? 'yes' : 'no');
+    const head = el('div', 'head');
+    head.append(el('span', 'lvl', lvl), el('h3', null, title));
+    if (state) head.append(el('span', 'state', state));
+    if (conf !== null) head.append(el('span', 'conf', Number(conf).toFixed(2)));
+    head.addEventListener('click', () => n.setAttribute('data-open', n.getAttribute('data-open') === 'no' ? 'yes' : 'no'));
+    const bodyEl = el('div', 'body');
+    n.append(head, bodyEl);
+    return { n, head, body: bodyEl };
+  };
+  const decisionRow = (d, prev) => {
+    const r = el('div', 'row');
+    r.setAttribute('data-reason', d.reason ?? '');
+    // Applied means the host wrote it this run — that is what "moved" is.
+    r.setAttribute('data-moved', d.applied ? 'yes' : 'no');
+    void prev;
+    r.append(el('span', 'k', d.key));
+    const v = el('span', 'v');
+    if (d.choice && d.choice !== d.current && d.applied) { v.append(`${d.current} → `); v.append(Object.assign(el('b', null, d.choice))); }
+    else if (d.choice && d.choice !== d.current) { v.append(Object.assign(el('b', null, d.current))); v.append(` (${d.choice} at ${(d.confidence ?? 0).toFixed(2)}, kept)`); }
+    else v.append(Object.assign(el('b', null, d.current ?? '–')));
+    r.append(v, el('span', 'c', d.confidence == null ? '' : d.confidence.toFixed(2)));
+    r.append(bars(d.options, d.probabilities));
+    r.addEventListener('click', () => r.setAttribute('data-bars', r.getAttribute('data-bars') === 'yes' ? 'no' : 'yes'));
+    return r;
+  };
+  const drawTree = () => {
+    tree.replaceChildren();
+    if (!last.root && !last.space && !run) {
+      tree.append(el('p', 'empty-tree', 'Nothing decided yet. Ask for something above.'));
+      return;
+    }
+    if (last.root) {
+      const { n, body: b } = node('L0', `Pattern · ${last.root.name ?? last.root.choice}`, { conf: last.root.confidence, open: false });
+      b.append(bars(last.root.options.map((o) => o.id), last.root.probabilities));
+      tree.append(n);
+    } else if (fact('data-root')) {
+      const { n, body: b } = node('L0', `Pattern · ${fact('data-root')}`, { state: 'from file', open: false });
+      b.append(el('p', 'note', 'Decided in an earlier run. Regenerate to ask again.'));
+      tree.append(n);
+    }
+    if (run) {
+      const { n, body: b } = node('—', 'Authoring', { state: run.state, open: true });
+      const steps = el('p', 'steps');
+      steps.append(`${run.steps} step${run.steps === 1 ? '' : 's'} · `);
+      steps.append(Object.assign(el('span', 'last', run.last || (run.state === 'running' ? 'starting up' : ''))));
+      b.append(steps);
+      if (run.why) b.append(el('p', 'issues', run.why));
+      tree.append(n);
+    }
+    if (last.space) {
+      const byName = new Map(last.space.instances.map((i) => [i.name, i]));
+      const decided = new Map((last.decisions ?? []).map((d) => [d.id, d]));
+      const prevMap = last.prev ? new Map(last.prev.map((d) => [d.id, d])) : null;
+      const draw = (inst, depth) => {
+        const { n, body: b } = node(depth === 0 ? 'L1' : 'L2', `${inst.pattern}#${inst.name}`, { open: true });
+        for (const d of inst.decisions) {
+          const id = `${inst.name}.${d.key}`;
+          const answered = decided.get(id) ?? { key: d.key, current: d.current, options: d.options.map((o) => o.slug), reason: '' };
+          b.append(decisionRow(answered, prevMap ? prevMap.get(id) ?? null : undefined));
+        }
+        for (const kid of last.space.instances.filter((c) => c.parent === inst.name)) {
+          const wrap = el('div', 'kid');
+          wrap.append(draw(kid, depth + 1));
+          b.append(wrap);
+        }
+        return n;
+      };
+      for (const root of last.space.instances.filter((i) => !i.parent)) tree.append(draw(root, 0));
+      void byName;
+    }
+  };
+
+  // ---- the stage
+  const showSpace = (doc) => {
+    const stage = $('stage-body');
+    $('stage-space').textContent = doc || 'no space yet';
+    const open = $('stage-open');
+    if (doc && window.marble?.href) { open.href = window.marble.href(doc); open.hidden = false; }
+    else open.hidden = true;
+    if (!doc) { stage.replaceChildren(Object.assign(el('div', 'empty', 'The generated UI will show here, live.'))); return; }
+    let frame = stage.querySelector('iframe');
+    const src = window.marble?.href ? window.marble.href(doc) : `/a/${enc(doc)}`;
+    if (!frame) { frame = document.createElement('iframe'); frame.title = 'The generated interface'; stage.replaceChildren(frame); }
+    if (frame.getAttribute('src') !== src) frame.src = src;
+  };
+  const ms = (text) => { $('stage-ms').textContent = text || ''; };
+
+  // ---- loading a space (no TypeSafe cost)
+  async function loadSpace(doc) {
+    const data = await api(`/genui/space?doc=${enc(doc)}`);
+    if (!data.validation.ok) {
+      const err = new Error('the authored document is not a valid app space');
+      err.issues = data.validation.issues;
+      throw err;
+    }
+    last.space = data.space;
+    last.doc = doc;
+    setFact('data-space', doc);
+    showSpace(doc);
+    $('redecide').disabled = false;
+    $('regenerate').disabled = false;
+    drawTree();
+  }
+
+  // ---- deciding (one TypeSafe request)
+  async function decide({ quiet = false } = {}) {
+    const doc = fact('data-space');
+    if (!doc) return;
+    $('redecide').disabled = true;
+    ms(quiet ? '' : 'deciding…');
+    try {
+      const out = await api('/genui/decide', { doc, request: promptText() || undefined, context: contextOf() });
+      last.prev = last.decisions;
+      last.decisions = out.decisions;
+      ms(`${out.elapsedMs} ms · ${out.applied ? `moved ${out.applied}` : 'nothing to move'}`);
+      drawTree();
+    } catch (err) {
+      ms('');
+      showError(err);
+    } finally {
+      $('redecide').disabled = false;
+    }
+  }
+
+  const showError = (err) => {
+    const box = el('div', 'node');
+    const b = el('div', 'body');
+    b.append(el('p', 'issues', err.issues ? err.issues.map((i) => `${i.kind}  ${i.instance ?? '-'}.${i.key ?? '-'}  ${i.message}`).join('\n') : err.message));
+    box.append(b);
+    tree.prepend(box);
+  };
+
+  // ---- generating (L0, then the agent, then the first decide)
+  const stopWatching = () => { runOff?.(); runOff = null; };
+  const STEP_WORDS = {
+    Read: 'Reading', Write: 'Writing', Edit: 'Editing', Bash: 'Running', Glob: 'Looking through files', Grep: 'Searching',
+    Skill: 'Opening a skill', read_document: 'Reading', apply_ops: 'Editing', create_document: 'Writing', check_document: 'Checking',
+  };
+  const stepOf = (event) => {
+    if (event.type === 'tool.call') {
+      const input = event.input ?? {};
+      const word = STEP_WORDS[event.name] ?? event.name;
+      const where = input.file_path || input.path || input.pattern;
+      const said = input.description || input.command;
+      if (where) return `${word} ${String(where).split('/').pop()}`;
+      if (said) return `${word} ${String(said).split('\n')[0].slice(0, 60)}`;
+      return word;
+    }
+    if (event.type === 'text' && String(event.text ?? '').trim()) return String(event.text).trim().split('\n')[0].slice(0, 90);
+    return '';
+  };
+  const OVER = /^turn\.(?!started$|queued$)/;
+
+  function watch(id, doc) {
+    const agent = window.marble?.agent;
+    if (!agent || runOff) return;
+    runOff = agent.on(id, async (event) => {
+      if (!run || run.id !== id) return;
+      const step = stepOf(event);
+      if (step) { run.last = step; run.steps += 1; }
+      if (event.type === 'turn.started') run.state = 'running';
+      if (OVER.test(event.type)) {
+        run.state = event.type === 'turn.completed' ? 'done' : 'stopped';
+        run.why = event.error || '';
+        stopWatching();
+        drawTree();
+        try {
+          await loadSpace(doc);
+          run = null;
+          setFact('data-run', '');
+          drawTree();
+          await decide();
+        } catch (err) {
+          run.state = 'stopped';
+          run.why = err.issues ? `The run ended without a valid space:\n${err.issues.map((i) => `${i.kind}  ${i.message}`).join('\n')}` : err.message;
+          drawTree();
+          $('regenerate').disabled = false;
+        }
+        $('generate').disabled = false;
+        return;
+      }
+      drawTree();
+    });
+  }
+
+  async function freeName(base) {
+    // One listing, no probing 404s: the spaces that exist, then the first
+    // name not among them.
+    let taken = new Set();
+    try { taken = new Set((await api('/genui/spaces')).map((s) => s.path)); } catch { /* no host: the name is only a suggestion */ }
+    for (let n = 0; n < 50; n += 1) {
+      const candidate = n ? `${base}-${n + 1}` : base;
+      if (!taken.has(candidate)) return candidate;
+    }
+    return `${base}-${Date.now().toString(36).slice(-4)}`;
+  }
+
+  async function project(agent) {
+    const found = (await agent.projects()).find((p) => p.name.trim().toLowerCase() === 'marble drive');
+    if (!found) throw new Error('No project called “Marble Drive” — that is where the genui-author skill lives. Add it in the agent settings.');
+    return found.id;
+  }
+  async function provider(agent) {
+    const ready = (await agent.providers()).filter((p) => p.installed && p.signedIn);
+    const pick = ready.find((p) => p.default) ?? ready[0];
+    if (!pick) throw new Error('No agent on this machine is installed and signed in yet.');
+    return pick.id;
+  }
+
+  async function generate({ again = false } = {}) {
+    const prompt = promptText();
+    if (!prompt) { byId('prompt')?.focus(); return; }
+    const agent = window.marble?.agent;
+    if (!agent) { showError(new Error('Generating needs the Drive host with agents on.')); return; }
+    $('generate').disabled = true;
+    $('regenerate').disabled = true;
+    stopWatching();
+    run = null;
+    last = { root: null, decisions: null, space: null, elapsed: null, doc: null };
+    setFact('data-space', '');
+    showSpace('');
+    drawTree();
+    const request = again && signalsList().length ? `${prompt}\n\nAlso: ${signalsList().join('; ')}` : prompt;
+    try {
+      ms('choosing a pattern…');
+      last.root = await api('/genui/root', { request, context: { viewport: viewportOf() } });
+      setFact('data-root', last.root.choice);
+      drawTree();
+      ms('');
+      // A readable name from the prompt; a suffix only when it is taken.
+      const doc = await freeName(`Spaces/${slug(prompt.split(/\s+/).slice(0, 6).join(' ')) || 'space'}`);
+      const [projectId, providerId] = await Promise.all([project(agent), provider(agent)]);
+      const id = await agent.start({ provider: providerId, project: projectId });
+      run = { id, steps: 0, last: '', state: 'starting', why: '' };
+      setFact('data-run', `${id} ${doc}`);
+      drawTree();
+      watch(id, doc);
+      agent.update?.(id, { title: `GenUI · ${prompt.slice(0, 40)}` }).catch?.(() => {});
+      // The authoring prompt is a fact on <body>: editable in the file, and
+      // what a test aims at a scripted agent.
+      const fill = { root: last.root.choice, name: last.root.name, confidence: last.root.confidence.toFixed(2), doc, request: request.replace(/"/g, '”') };
+      const authorPrompt = fact('data-author-prompt').replace(/\{(root|name|confidence|doc|request)\}/g, (_, k) => fill[k]);
+      await agent.send(id, { prompt: authorPrompt, target: doc, viewing: window.marble?.app ?? null, selection: [], also: [] });
+    } catch (err) {
+      run = null;
+      setFact('data-run', '');
+      showError(err);
+      $('generate').disabled = false;
+      $('regenerate').disabled = Boolean(!fact('data-space'));
+    }
+  }
+
+  // ---- signals: facts in a list, one op per change
+  function addSignal(text) {
+    const value = String(text ?? '').trim();
+    if (!value) return;
+    const list = byId('signals');
+    const id = window.marble?.newId?.() ?? `s${Date.now().toString(36)}`;
+    const html = `<li data-marble-id="${id}" data-marble-editable>${value.replace(/[&<>]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;' }[c]))}</li>`;
+    const op = { type: 'insert', parentId: window.marble?.id(list) ?? 'signals', beforeId: null, html };
+    if (window.marble?.apply) { window.marble.apply(op); window.marble.op(op); }
+    else { list.insertAdjacentHTML('beforeend', html); }
+    $('signal-new').textContent = '';
+    deriveSignals();
+  }
+  byId('signals').addEventListener('click', (event) => {
+    const x = event.target.closest('.x');
+    if (!x) return;
+    const li = x.closest('li');
+    const id = window.marble?.id(li);
+    li.remove();
+    if (id) window.marble.op({ type: 'remove', id });
+  });
+  $('signal-new').addEventListener('keydown', (event) => {
+    if (event.key !== 'Enter' || event.shiftKey) return;
+    event.preventDefault();
+    addSignal($('signal-new').textContent);
+    if (fact('data-space')) decide();
+  });
+  byId('prompt').addEventListener('keydown', (event) => {
+    if (event.key !== 'Enter' || event.shiftKey) return;
+    event.preventDefault();
+    generate();
+  });
+  $('generate').addEventListener('click', () => generate());
+  $('regenerate').addEventListener('click', () => generate({ again: true }));
+  $('redecide').addEventListener('click', () => decide());
+  addEventListener('resize', () => { /* viewport is read at decide time */ });
+
+  // A chip's × is page chrome, not content: derived onto every persisted
+  // signal, so a reload (which drops transient nodes) grows them back.
+  function deriveSignals(root = document) {
+    for (const li of root.querySelectorAll?.('.signals li') ?? []) {
+      if (li.querySelector('.x')) continue;
+      const x = el('button', 'x', '×');
+      x.type = 'button';
+      x.setAttribute('data-marble-transient', '');
+      x.setAttribute('aria-label', 'Remove');
+      li.append(x);
+    }
+  }
+
+  // ---- the facts drive the page: on load, and whenever they change under it
+  // (the carrier replays queued ops after a reload; another tab may decide).
+  let syncing = null;
+  function sync() {
+    const doc = fact('data-space');
+    const running = fact('data-run');
+    if (running && !doc && !run) {
+      const [id, target] = running.split(' ');
+      run = { id, steps: 0, last: 'catching up', state: 'running', why: '' };
+      $('generate').disabled = true;
+      drawTree();
+      watch(id, target);
+      return;
+    }
+    if (doc && last.doc !== doc && !syncing) {
+      syncing = loadSpace(doc)
+        .then(() => { last.doc = doc; $('regenerate').disabled = false; })
+        .catch(showError)
+        .finally(() => { syncing = null; });
+      return;
+    }
+    if (!doc && !running && !run && (last.space || last.doc)) {
+      last = { root: null, decisions: null, space: null, elapsed: null, doc: null };
+      showSpace('');
+      drawTree();
+    }
+  }
+  function boot() {
+    deriveSignals();
+    window.marble?.register?.(deriveSignals);
+    new MutationObserver(() => sync()).observe(body, { attributes: true, attributeFilter: ['data-space', 'data-run'] });
+    sync();
+    if (!fact('data-space') && !fact('data-run')) drawTree();
+  }
+  if (window.marble) boot();
+  else addEventListener('marble:ready', boot, { once: true });
+})();
+  </script>
+</body>
+</html>

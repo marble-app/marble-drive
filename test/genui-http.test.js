@@ -156,3 +156,39 @@ test('a doc path spelled with slashes lands in the same document, queue and reco
     assert.equal((await space.json()).doc, 'Spaces/49ers');
   });
 });
+
+test('POST /genui/root decides the pattern from the prompt; GET /genui/spaces lists app spaces only', async () => {
+  const ask = async ({ questions }) => {
+    assert.deepEqual(Object.keys(questions), ['root']);
+    return { answers: { root: { type: 'choice', choice: 'dashboard', confidence: 0.81, probabilities: { dashboard: 0.81, chart: 0.19 } } } };
+  };
+  await withDrive(loadConfig(openEnv({ TYPESAFE_API_KEY: 'tsk_test' })), { genui: { ask } }, async (base, drive) => {
+    await drive.createDocument('garden', '<!doctype html><html><body data-marble-id="b"><p data-marble-id="p">no space here</p></body></html>', { label: 'test' });
+    const root = await (await fetch(`${base}/genui/root`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ request: 'error rate, p95 latency, open incidents', context: { viewport: 'desktop' } }),
+    })).json();
+    assert.equal(root.choice, 'dashboard');
+    assert.equal(root.name, 'Dashboard');
+    assert.equal(root.confidence, 0.81);
+    assert.ok(root.options.some((o) => o.id === 'overview-detail'));
+
+    const empty = await fetch(`${base}/genui/root`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ request: '' }) });
+    assert.equal(empty.status, 400);
+
+    // The tests share one drive, so other spaces may be listed; the garden never is.
+    const spaces = await (await fetch(`${base}/genui/spaces`)).json();
+    assert.ok(!spaces.some((s) => s.path === 'garden'));
+    const niners = spaces.find((s) => s.path === 'Spaces/49ers');
+    assert.equal(niners.instances, 2);
+    assert.equal(niners.decisions, 8);
+    assert.match(niners.request, /49ers/);
+  });
+});
+
+test('POST /genui/root without a key is 503', async () => {
+  await withDrive(loadConfig(openEnv({ TYPESAFE_API_KEY: '' })), {}, async (base) => {
+    const response = await fetch(`${base}/genui/root`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ request: 'anything' }) });
+    assert.equal(response.status, 503);
+  });
+});
