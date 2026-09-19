@@ -234,62 +234,34 @@ const presetGeometry = (el) => {
   };
 };
 
-test('a crowded saved-setup capsule stays one row and keeps the selected chip inside', async () => {
+test('saved setups collapse to the one you are on, at every width', async () => {
   const { view } = await mount();
   await view.locator('input[name="agent"][value="fake"]').waitFor();
-  await installNamedSetups(view, { model: 'cursor-grok-4.6', effort: 'xhigh', width: 320 });
-  const geometry = await view.evaluate((el) => {
-    const presets = el.shadowRoot.querySelector('.presets');
-    const track = presets.getBoundingClientRect();
-    const inside = (node) => {
-      const box = node.getBoundingClientRect();
-      if (!box.width || !box.height) return true;
-      return box.top >= track.top - 1.5
-        && box.bottom <= track.bottom + 1.5
-        && box.left >= track.left - 1.5
-        && box.right <= track.right + 1.5;
-    };
-    const chips = [...el.shadowRoot.querySelectorAll('.preset')].map((node) => {
-      const input = node.querySelector('input');
-      const box = node.getBoundingClientRect();
+  await installNamedSetups(view, { model: 'cursor-grok-4.6', effort: 'xhigh' });
+  // A row of capsules for a choice made rarely outweighed the prompt above it,
+  // and had to be packed and re-packed at every width to fit. One word cannot
+  // overflow, so the fitting problem is gone rather than solved.
+  for (const width of [1100, 620, 460, 300]) {
+    await view.evaluate((el, w) => { el.style.width = `${w}px`; el.fitSetup(); }, width);
+    await view.evaluate(() => new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r))));
+    const shape = await view.evaluate((el) => {
+      const sr = el.shadowRoot;
+      const track = sr.querySelector('.presets');
+      const more = track.querySelector('.presets-more');
       return {
-        id: input.value,
-        checked: input.checked,
-        visible: box.width > 0 && box.height > 0,
-        inside: inside(node),
+        height: Math.round(track.getBoundingClientRect().height),
+        onTrack: track.querySelectorAll(':scope > .preset').length,
+        inMenu: sr.querySelectorAll('.presets-menu .preset').length,
+        trigger: more.textContent.replace(/\s+/g, ' ').trim(),
+        fill: getComputedStyle(more).backgroundColor,
       };
     });
-    const more = el.shadowRoot.querySelector('.presets-more');
-    return {
-      height: track.height,
-      chips,
-      more: Boolean(more) && !more.hidden && more.getBoundingClientRect().width > 0,
-    };
-  });
-  assert.ok(geometry.height < 36, `capsule should stay one row, height ${geometry.height}`);
-  const selected = geometry.chips.find((chip) => chip.checked);
-  assert.equal(selected?.id, 'grok-xhigh');
-  assert.equal(selected.visible, true);
-  assert.equal(selected.inside, true);
-  assert.ok(geometry.chips.filter((chip) => chip.visible).every((chip) => chip.inside), 'visible chips must stay inside the capsule');
-  assert.equal(geometry.more, true, 'overflow should collapse into More');
-  await view.locator('.presets-more').click();
-  assert.equal(await view.locator('.presets-menu .preset').count(), geometry.chips.filter((chip) => !chip.visible).length);
-  await view.locator('input[name="preset"][value="grok-high"]').click({ force: true });
-  assert.equal(await view.locator('input[name="preset"][value="grok-high"]').isChecked(), true);
-});
-
-test('a narrow saved-setup capsule paints the selected name once', async () => {
-  const { view } = await mount();
-  await view.locator('input[name="agent"][value="fake"]').waitFor();
-  await installNamedSetups(view, { model: 'cursor-grok-4.6', effort: 'xhigh', width: 160 });
-  const dump = await view.evaluate(presetGeometry);
-  assert.ok(dump.height < 36, `capsule should stay one row, height ${dump.height}`);
-  assert.ok(dump.width > 80, `capsule should hug the selected name, not a 28px nub (${dump.width})`);
-  assert.equal(dump.names.length, 1, `selected name painted ${dump.names.length} times: ${JSON.stringify(dump)}`);
-  assert.equal(dump.clashes.length, 0, `overlapping labels: ${JSON.stringify(dump.clashes)}`);
-  const name = dump.names[0];
-  assert.ok(name.width <= dump.width + 2, `name ${name.width} must fit in capsule ${dump.width}`);
+    assert.equal(shape.onTrack, 0, `width ${width}: nothing should sit on the track`);
+    assert.ok(shape.inMenu >= 4, `width ${width}: every setup lives in the menu, got ${shape.inMenu}`);
+    assert.ok(shape.height < 32, `width ${width}: one row, got ${shape.height}`);
+    assert.match(shape.trigger, /Grok Extra High/, `width ${width}: the trigger names the setup you are on`);
+    assert.match(shape.fill, /rgba\(0, 0, 0, 0\)/, `width ${width}: the trigger is a word, not a capsule`);
+  }
 });
 
 test('Custom keeps the Claude model sliders visible after picking a preset', async () => {
@@ -333,7 +305,9 @@ test('Custom keeps the Claude model sliders visible after picking a preset', asy
   });
   await view.locator('.custom-toggle').click();
   assert.equal(await view.locator('.picker').isVisible(), true);
-  await view.locator('input[name="preset"][value="opus-xhigh"]').click({ force: true });
+  // The setups live in the trigger's menu now, so open it to reach them.
+  await view.locator('.presets-more').click();
+  await view.locator('.presets-menu input[name="preset"][value="opus-xhigh"]').click({ force: true });
   await page.waitForFunction(() => {
     const el = document.querySelector('body > marble-conversation');
     return el?.shadowRoot.querySelector('input[name="model"]:checked')?.value === 'opus';
@@ -616,14 +590,19 @@ test('CLI, model, and effort sit on one segmented row', async () => {
   await view.evaluate((el) => new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve))));
   const selected = await view.locator('input[name="agent"][value="fake"] + span').evaluate((el) => {
     const s = getComputedStyle(el);
-    return { color: s.color.replace(/\s/g, ''), pad: parseFloat(s.paddingTop) };
+    return { color: s.color.replace(/\s/g, ''), pad: parseFloat(s.paddingTop), weight: s.fontWeight };
   });
-  const thumb = await view.locator('.picker-agent .seg-thumb').evaluate((el) => {
-    const s = getComputedStyle(el);
-    return { bg: s.backgroundColor.replace(/\s/g, ''), opacity: s.opacity };
+  // No sliding capsule behind the choice any more — the chosen segment says so
+  // in the type, which is the whole point of the quiet bar.
+  assert.equal(await view.locator('.picker-agent .seg-thumb').evaluate((el) => getComputedStyle(el).display), 'none');
+  const tone = await view.evaluate((el) => {
+    const cs = getComputedStyle(el);
+    const paint = (v) => { const d = document.createElement('div'); d.style.color = v; el.shadowRoot.append(d); const c = getComputedStyle(d).color.replace(/\s/g, ''); d.remove(); return c; };
+    return { ink: paint(cs.getPropertyValue('--ink')), muted: paint(cs.getPropertyValue('--muted')) };
   });
-  assert.equal(thumb.bg, 'rgb(255,255,255)');
-  assert.equal(thumb.opacity, '1');
+  assert.equal(selected.color, tone.ink, 'the chosen segment carries full ink');
+  assert.notEqual(selected.color, tone.muted, 'the chosen segment must not look like its neighbours');
+  assert.ok(Number(selected.weight) >= 600, `chosen segment should be heavier, got ${selected.weight}`);
   assert.ok(selected.pad <= 6, `composer pill should be thin, padding-top ${selected.pad}`);
 });
 
@@ -641,17 +620,32 @@ test('a new conversation can name its model from the picker', async () => {
   assert.equal(meta.effort, 'high');
 });
 
-test('the composer is one card: text, then a bar with the setup, the mode and send', async () => {
+test('the composer is two registers: the message with its send, then a settings bar', async () => {
   const { view } = await mount();
   await view.locator('.row .bar .setup .picker').waitFor();
   assert.equal(await view.locator('.statusline').count(), 0);
   assert.equal(await view.locator('.status-where').count(), 0);
   const mode = view.locator('.row .bar button.mode');
   assert.match(await mode.textContent(), /Default/);
-  const [barBox, sendBox] = await Promise.all([view.locator('.bar').boundingBox(), view.locator('.send').boundingBox()]);
-  assert.ok(sendBox.y >= barBox.y && sendBox.y + sendBox.height <= barBox.y + barBox.height + 1, 'send sits in the bar');
+  // Send belongs to the field it sends, not to the settings strip. In the bar
+  // it made the strip impossible to balance — crushed in a narrow pane, and
+  // stranded past a wide gap in a wide one.
+  const [fieldBox, barBox, sendBox] = await Promise.all([
+    view.locator('.field').boundingBox(),
+    view.locator('.bar').boundingBox(),
+    view.locator('.send').boundingBox(),
+  ]);
+  assert.ok(
+    sendBox.y >= fieldBox.y - 1 && sendBox.y + sendBox.height <= fieldBox.y + fieldBox.height + 1,
+    'send sits with the message, in the field',
+  );
+  assert.ok(sendBox.y + sendBox.height <= barBox.y + 1, 'send sits above the settings bar');
+  // The bar reaches the full width of the card, so the mode label lands on the
+  // right edge rather than against a button that used to sit there.
+  const modeBox = await mode.boundingBox();
+  assert.ok(barBox.x + barBox.width - (modeBox.x + modeBox.width) < 14, 'the mode label holds the right edge');
   const height = await view.locator('.composer').evaluate((el) => el.getBoundingClientRect().height);
-  assert.ok(height < 120, `composer is ${height}px tall`);
+  assert.ok(height < 130, `composer is ${height}px tall`);
 });
 
 test('a tile keeps its mast and its bar', async () => {
@@ -964,27 +958,37 @@ test('an existing conversation opens with its whole history', async () => {
   assert.match(await view.locator('.msg.agent').last().textContent(), /Backlog/);
 });
 
-test('the context chip shows the target and the selection, and can drop the selection', async () => {
+test('the document is never a pill in the text, and the bar says when a selection rides along', async () => {
   const { page, view } = await mount();
-  const chip = view.locator('.editor .ichip[data-kind="context"]');
-  assert.equal((await chip.locator('.context-text').textContent()).trim(), 'garden');
+  // The pane's own bar names the document; naming it again inside the prose
+  // was the same fact twice, and a pill the caret had to step over.
+  assert.equal(await view.locator('.editor .ichip').count(), 0);
+  assert.equal(await view.locator('.selection').isVisible(), false);
+
   await page.evaluate(() => {
     const range = document.createRange();
     range.selectNodeContents(document.querySelector('[data-marble-id="h"]'));
     getSelection().removeAllRanges();
     getSelection().addRange(range);
   });
-  await chip.locator('.context-text', { hasText: '1 selected' }).waitFor();
-  await chip.locator('.context-clear').click();
-  assert.equal(await chip.count(), 0);
+  const pill = view.locator('.bar .selection');
+  await pill.filter({ hasText: '1 selected' }).waitFor();
+  // Still nothing in the text.
+  assert.equal(await view.locator('.editor .ichip').count(), 0);
+  await pill.locator('.selection-clear').click();
+  await page.waitForFunction(() => {
+    const el = document.querySelector('marble-conversation').shadowRoot.querySelector('.selection');
+    return el?.hidden === true;
+  });
 });
 
-test('the context chip names the aimed target and how many more are in view', async () => {
+test('aiming at another document does not put anything in the message', async () => {
   const { page, view } = await mount();
   await page.evaluate(() => window.marble.agent.aim('notes', { also: ['reading', 'log'] }));
-  const text = view.locator('.editor .ichip[data-kind="context"] .context-text');
-  await text.filter({ hasText: 'notes' }).waitFor();
-  assert.match((await text.textContent()).trim(), /\+ 2 more/);
+  await page.waitForTimeout(200);
+  // Where the turn is aimed is the pane's business, not the prose's.
+  assert.equal(await view.locator('.editor .ichip').count(), 0);
+  assert.equal(await view.locator('.editor').evaluate((el) => el.value), '');
 });
 
 test('shift+enter makes a new line instead of sending', async () => {

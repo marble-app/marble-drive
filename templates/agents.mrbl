@@ -14,7 +14,7 @@ __ICON__
     --ink: #111111;
     --muted: #5a5a5a;
     --faint: #8a8a8a;
-    --line: #ddd9cf;
+    --line: #e6e2d8;
     --paper: #fafaf7;
     --paper-2: #f3f1ea;
     --paper-3: #eceae1;
@@ -27,8 +27,8 @@ __ICON__
     --accent-ink-rgb: 115, 134, 152;
     --danger: #b4533e;
     --caution: #a07a2c;
-    --shadow: 0 1px 3px rgba(74,66,52,.12), 0 4px 8px rgba(74,66,52,.06);
-    --shadow-lift: 0 4px 10px rgba(74,66,52,.10), 0 14px 28px rgba(74,66,52,.12);
+    --shadow: 0 1px 2px rgba(74,66,52,.05), 0 2px 4px rgba(74,66,52,.03);
+    --shadow-lift: 0 2px 6px rgba(74,66,52,.07), 0 8px 18px rgba(74,66,52,.08);
     --radius: 12px;
     --settle: cubic-bezier(0.22, 0.61, 0.36, 1);
     --snap: cubic-bezier(0.22, 0.61, 0.36, 1);
@@ -39,8 +39,13 @@ __ICON__
        the divider. One ease-out for everything that moves into or out of place
        — it decelerates hard, so the last third of a move is a quiet settle. */
     --well: #efece3;
+    /* The pane you are typing in sits a shade deeper in the paper than its
+       neighbours. One step, not a spotlight: focus should be findable without
+       anything having to appear or disappear to say so. */
+    --pane-rest: #fafaf7;
+    --pane-lit: #f1efe6;
     --pane-r: 16px;
-    --pane-gap: 10px;
+    --pane-gap: 5px;
     --ease-out: cubic-bezier(0.22, 1, 0.36, 1);
     --t-room: 520ms;
     --bar-h: 2.25rem;
@@ -48,13 +53,14 @@ __ICON__
   @media (prefers-color-scheme: dark) {
     :root {
       --well: #101214;
-      --ink: #e8e6e1; --muted: #a3a7ab; --faint: #71767a; --line: #2f3438;
+      --ink: #e8e6e1; --muted: #a3a7ab; --faint: #71767a; --line: #272c30;
       --paper: #16181a; --paper-2: #1e2124; --paper-3: #262a2e; --card: #1c1f22;
+      --pane-rest: #16181a; --pane-lit: #0e1012;
       --card-rgb: 28, 31, 34; --paper-rgb: 22, 24, 26;
       --accent: #7fa8c9; --accent-soft: #1d2932; --accent-ink: #9dc0dc; --accent-ink-rgb: 157, 192, 220;
       --danger: #e08a74; --caution: #d9b25e;
-      --shadow: 0 1px 3px rgba(0,0,0,.5), 0 4px 8px rgba(0,0,0,.3);
-      --shadow-lift: 0 6px 16px rgba(0,0,0,.45), 0 18px 36px rgba(0,0,0,.35);
+      --shadow: 0 1px 2px rgba(0,0,0,.28), 0 2px 5px rgba(0,0,0,.18);
+      --shadow-lift: 0 3px 10px rgba(0,0,0,.32), 0 10px 22px rgba(0,0,0,.26);
     }
   }
   * { box-sizing: border-box; }
@@ -581,27 +587,20 @@ __ICON__
     transition: left var(--t) var(--settle), top var(--t) var(--settle),
       width var(--t) var(--settle), height var(--t) var(--settle);
   }
-  /* Making a folder had no affordance at all — you had to guess that one card
-     dropped on another meant something. A column you can see says it, and a
-     real button means the keyboard can say it too. */
-  .focus-newgroup {
-    position: absolute; z-index: 1; appearance: none; padding: 0; font: inherit;
-    display: flex; flex-direction: column; align-items: center; justify-content: center;
-    gap: .3rem; border-radius: 16px; background: none; color: var(--faint);
-    border: 1px dashed color-mix(in srgb, var(--line) 85%, transparent);
-    cursor: pointer;
-  }
-  .focus-newgroup:disabled { cursor: default; }
-  .focus-newgroup:hover:not(:disabled), .focus-newgroup:focus-visible {
-    color: var(--ink); border-color: var(--accent); outline: none;
-    background: color-mix(in srgb, var(--accent-ink) 5%, transparent);
-  }
-  .focus-newgroup[data-drop="into"] {
-    color: var(--accent-ink); border-style: solid; border-color: var(--accent-ink);
+  /* A pinned card's seat is under its pane. The pane paints it, so the card
+     does not — it stays in the layout as the rect a drag springs from and
+     returns to, and nothing of it reaches the glass. */
+  .focus-card[data-seated] { visibility: hidden; }
+  /* Where a new pane would open on the stage. Fixed and over the panes: the
+     canvas that carries .focus-slot sits underneath them, so a stage landing
+     drawn there would be hidden by the very panes it is opening between. */
+  .focus-stageslot {
+    position: fixed; z-index: 11; pointer-events: none; border-radius: var(--pane-r);
+    border: 2px dashed color-mix(in srgb, var(--accent-ink) 60%, transparent);
     background: color-mix(in srgb, var(--accent-ink) 10%, transparent);
+    transition: left var(--t) var(--settle), top var(--t) var(--settle),
+      width var(--t) var(--settle), height var(--t) var(--settle);
   }
-  .focus-newgroup-mark { font-size: 1.15rem; line-height: 1; }
-  .focus-newgroup-label { font-size: .72rem; }
   /* With nothing pinned there is no stage column to aim at, so a drag
      reserves one. It exists only while a card is in the air. */
   .focus-pinslot {
@@ -638,7 +637,6 @@ __ICON__
     touch-action: auto; cursor: default;
   }
   .focus[data-stack] .focus-slot,
-  .focus[data-stack] .focus-newgroup,
   .focus[data-stack] .focus-pinslot,
   .focus[data-stack] .focus-extent { display: none; }
   .focus[data-stack] .focus-card[data-lod="full"] { min-height: 18rem; }
@@ -676,7 +674,7 @@ __ICON__
   /* The stage is the pane tree: each pin is a card with its bar, and the
      pane itself is transparent so a lone pin's card shows through. */
   body[data-view="focus"] .pane {
-    background: transparent; isolation: isolate; --dock-gap: 8px;
+    background: transparent; isolation: isolate; --dock-gap: 4px;
   }
   body[data-view="focus"] .pane:not([data-dock])::before {
     content: ''; z-index: -1; grid-column: 1; grid-row: 1 / -1;
@@ -882,7 +880,7 @@ __ICON__
     position: relative; min-width: 0; min-height: 0;
     display: grid; grid-template-rows: auto minmax(0, 1fr); grid-template-columns: minmax(0, 1fr);
     background: var(--card);
-    --dock-gap: 5px;
+    --dock-gap: 3px;
   }
   .pane > .dock-bar { grid-column: 1; grid-row: 1; min-width: 0; }
   .pane > marble-conversation:not([data-marble-transient]) {
@@ -913,14 +911,23 @@ __ICON__
     background: var(--paper); box-shadow: var(--shadow);
   }
   .dock-frame[data-key="P"] { z-index: 0; pointer-events: none; }
-  /* The pane you are in is the lit one; its neighbours step back onto the
-     paper so there is never a question of where typing goes. */
-  .pane[data-dock] .dock-frame[data-focused] { background: var(--card); }
-  .pane[data-dock] .dock-frame:not([data-focused]) { background: var(--paper); }
-  .pane[data-dock] .dock-frame:not([data-focused]) .dock-bar { background: var(--paper-2); color: var(--muted); }
-  .pane[data-dock] .dock-frame:not([data-focused]) marble-conversation { opacity: .86; }
-  .pane[data-dock] > .dock-bar:not([data-focused]) { background: var(--paper-2); color: var(--muted); }
-  .pane[data-dock] > marble-conversation:not([data-marble-transient])[data-focused="false"] { opacity: .86; }
+  /* The pane you are in is the one that sits a shade deeper in the paper; its
+     neighbours stay level with it. Focus is a change of colour and nothing
+     else — it used to light the focused pane white and take its title away
+     with it, and a pane that loses its name when you click into it reads as a
+     pane that broke. The bar has no colour of its own here so that the whole
+     card, chrome and transcript together, moves as one surface. */
+  .pane[data-dock] .dock-frame { background: var(--pane-rest); }
+  .pane[data-dock] .dock-frame[data-focused] {
+    background: var(--pane-lit); --conv-surface: var(--pane-lit);
+  }
+  .pane[data-dock][data-focused] > marble-conversation:not([data-marble-transient]) {
+    --conv-surface: var(--pane-lit);
+  }
+  .pane[data-dock] .dock-frame .dock-bar,
+  .pane[data-dock] > .dock-bar { background: transparent; }
+  .pane[data-dock] .dock-frame:not([data-focused]) .dock-bar,
+  .pane[data-dock] > .dock-bar:not([data-focused]) { color: var(--muted); }
   .dock-bar[data-focused] { box-shadow: inset 0 -1px 0 var(--accent); }
   /* Focus moving between panes is a change of light, not a cut: the bar and
      the transcript ease between lit and stepped-back. (Not the frame itself:
@@ -1181,7 +1188,7 @@ __ICON__
   .seg button:focus-visible, .filter-toggle:focus-visible, .new:focus-visible, .settings:focus-visible,
   .folder-tab:focus-visible, .folder-new-chat:focus-visible, .folder-tick:focus-visible,
   .dock-close:focus-visible, .dock-split:focus-visible, .dock-target:focus-visible,
-  .focus-card-actions button:focus-visible, .focus-newgroup:focus-visible, .focus-basin-name:focus-visible,
+  .focus-card-actions button:focus-visible, .focus-basin-name:focus-visible,
   .conv .manage .more:focus-visible, .conv .manage .menu button:focus-visible, .filter-clear:focus-visible {
     outline: none; box-shadow: 0 0 0 2px var(--accent);
   }
@@ -1190,7 +1197,6 @@ __ICON__
      that scales is a pop, and the rows are not to pop. */
   .conv:active, .folder-tab:active, .folder-new-chat:active, .settings:active, .filter-toggle:active,
   .dock-close:active, .dock-split:active, .conv .manage .more:active, .focus-card-actions button:active,
-  .focus-newgroup:active:not(:disabled) { background: var(--paper-2); }
   .new:active { filter: brightness(.9); }
   /* Under a sticky heading, content slides beneath a soft edge rather than a
      hard one — and only once there is something beneath it. */
@@ -2738,47 +2744,20 @@ __ICON__
       for (const basin of [...focusEl.querySelectorAll('.focus-basin')]) {
         if (!keep.has(basin.dataset.folderId)) basin.remove();
       }
-      paintFocusNewGroup(pack?.newGroup ?? null, target);
+      paintFocusNewGroup();
       paintFocusPinSlot(pack, target);
       paintFocusSlot(pack, target);
     };
 
-    /** Making a folder is otherwise undiscoverable — you would have to guess
-     *  that one card dropped on another means something. It is a real button
-     *  as well as a drop target, so the keyboard can reach it too. */
-    const paintFocusNewGroup = (slot, target) => {
-      let el = focusEl.querySelector('.focus-newgroup');
-      if (!slot) {
-        el?.remove();
-        return;
-      }
-      if (!el) {
-        el = document.createElement('button');
-        el.type = 'button';
-        el.className = 'focus-newgroup';
-        el.setAttribute('data-marble-transient', '');
-        el.innerHTML = '<span class="focus-newgroup-mark" aria-hidden="true">+</span><span class="focus-newgroup-label">New group</span>';
-        el.addEventListener('click', async (event) => {
-          event.stopPropagation();
-          const ids = focusSelectedIds.length ? [...focusSelectedIds] : [];
-          if (!ids.length || !agent) return;
-          try {
-            await agent.createFolder({ conversationIds: ids });
-            const listed = await agent.folders();
-            folderCatalog = listed.folders ?? folderCatalog;
-          } catch { /* create failed */ }
-          paintFocus();
-        });
-        focusEl.append(el);
-      }
-      el.disabled = !focusSelectedIds.length && !focusDrag;
-      el.title = focusDrag ? 'Drop here to make a folder' : 'Make a folder of the selected chats';
-      if (target?.column === 'new') el.dataset.drop = 'into';
-      else delete el.dataset.drop;
-      el.style.left = `${slot.x}px`;
-      el.style.top = `${slot.y}px`;
-      el.style.width = `${Math.max(0, slot.w)}px`;
-      el.style.height = `${Math.max(0, slot.h)}px`;
+    /** There is no New-group column any more: at rest it was a button that
+     *  would not press and cost the field a column's width; reserved only for
+     *  a drag it moved the whole field the moment you lifted a card; and once
+     *  the field fills the canvas there is no edge left to rail it along. A
+     *  folder is made by dropping one card squarely on another, or from "Save
+     *  as folder" on a card's menu. This only clears one that an older copy of
+     *  a served document left behind. */
+    const paintFocusNewGroup = () => {
+      document.querySelector('.focus-newgroup')?.remove();
     };
 
     /** The rail that stands in for an empty stage, drawn over the canvas's
@@ -2811,12 +2790,43 @@ __ICON__
       el.style.height = `${box.height}px`;
     };
 
+    /** Where a pane would open. The stage belongs to the dock, so a card only
+     *  proposed for it has no rect in the pack — it used to fall back to the
+     *  whole stage, which drew a dashed box the size of every pane at once and
+     *  said nothing about where the drop would go. This is the seam instead,
+     *  and it is fixed and above the panes because the canvas the field's slot
+     *  is drawn on lies underneath them. */
+    const paintFocusStageSlot = (pack, target) => {
+      const wanted = Boolean(focusDrag) && target?.column === 'stage' && !target.plan
+        && Number.isFinite(target.edge) && pack?.stage?.w > 0;
+      let el = document.querySelector('.focus-stageslot');
+      if (!wanted) {
+        el?.remove();
+        return;
+      }
+      if (!el) {
+        el = document.createElement('div');
+        el.className = 'focus-stageslot';
+        el.setAttribute('data-marble-transient', '');
+        document.body.append(el);
+      }
+      const box = focusEl.getBoundingClientRect();
+      // As wide as the column the stage would divide into once it holds one
+      // more pane, so the preview is the size of the thing being made.
+      const share = pack.stage.w / ((pack.stage.cols?.length ?? 0) + 1);
+      const width = Math.max(56, Math.min(share, pack.colW ?? share));
+      el.style.left = `${Math.round(box.left + target.edge - focusEl.scrollLeft - width / 2)}px`;
+      el.style.top = `${Math.round(box.top + pack.stage.y - focusEl.scrollTop)}px`;
+      el.style.width = `${Math.round(width)}px`;
+      el.style.height = `${Math.round(pack.stage.h)}px`;
+    };
+
     /** The slot the card would land in, drawn at the rect the layout already
      *  reserved for it. An outline rather than a line: for a field drop it is
-     *  the gap that just opened, for a stage drop it is the full-height column
-     *  the card is about to become. */
+     *  the gap that just opened, for a stage drop it is the seam above. */
     const paintFocusSlot = (pack, target) => {
       const lead = focusDrag?.lead;
+      paintFocusStageSlot(pack, target);
       const rect = target && !target.merge && !target.plan && target.column !== 'new' && lead
         ? pack?.rects?.[lead]
         : null;
@@ -3190,6 +3200,8 @@ __ICON__
       }
       for (const el of focusEl.querySelectorAll('.focus-card[data-drop]')) delete el.dataset.drop;
       document.querySelector('.focus-pinslot')?.remove();
+      document.querySelector('.focus-stageslot')?.remove();
+      document.querySelector('.focus-newgroup')?.remove();
       return drag;
     };
 
@@ -3635,7 +3647,15 @@ __ICON__
           canvas,
           sizes: { digest: focusLodSize('digest'), chip: focusLodSize('chip') },
           gap: helpers.GAP ?? 8,
-          newGroup: focusDrag ? 'always' : 'auto',
+          // No New-group column, ever. Standing there at rest it was a button
+          // that would not press and cost the field a column's width; reserved
+          // only for a drag it shoved the whole field sideways the moment you
+          // lifted a card; and once the field fills the canvas there is no edge
+          // left to rail it along. A folder is made by dropping one card
+          // squarely on another, or by "Save as folder" on a card's menu.
+          // `'rail'` still marks a drag for the packer, which keeps the loose
+          // region in a column of its own while a card is in the air.
+          newGroup: focusDrag ? 'rail' : 'never',
         })
         // A stale cached copy of agent-folders.js would otherwise leave every
         // card without a rect, and an unplaced card stacks at the origin.
@@ -3643,16 +3663,37 @@ __ICON__
         : flowFieldColumns(fulls, groups, canvas);
       focusPack = pack;
       // Pins sit under their panes: each Full card takes its leaf's rect, so
-      // a drag shows a digest where the pane is.
+      // a drag shows a digest where the pane is. It takes the frame's rect and
+      // not the raw leaf — the dock insets each leaf by half a gap on every
+      // inside edge, and a card laid out without that inset is four pixels
+      // proud of the pane meant to cover it, which is all it takes to read as
+      // a second pane sitting behind the first.
+      // A card whose pane is on top of it is scaffolding, not a picture: the
+      // pane is the real thing and the card only holds the rect a drag springs
+      // from. Left painting, any disagreement between the two layouts — a
+      // scroll the fixed pane did not follow, a frame that had not settled —
+      // shows up as a second title bar above the first. So it does not paint.
+      const seated = new Set();
       if (fullIds.length && pack.stage.w > 0) {
         const leaves = layoutOf(dock.tree ?? leafNode(PRIMARY)).leaves;
+        const half = dockGap() / 2;
         for (const id of fullIds) {
           const key = convo.getAttribute('conversation') === id ? PRIMARY : dock.extras.find((extra) => extra.id === id)?.key;
-          const r = leaves.get(key) ?? { x: 0, y: 0, w: 1, h: 1 };
+          // A card the drag has only proposed for the stage has no leaf yet.
+          // Its landing is drawn by paintFocusSlot; the whole stage is not it.
+          const r = key ? leaves.get(key) : null;
+          if (!r) continue;
+          const iL = r.x > EPS ? half : 0;
+          const iT = r.y > EPS ? half : 0;
+          const iR = r.x + r.w < 1 - EPS ? half : 0;
+          const iB = r.y + r.h < 1 - EPS ? half : 0;
           pack.rects[id] = {
-            x: pack.stage.x + r.x * pack.stage.w, y: pack.stage.y + r.y * pack.stage.h,
-            w: r.w * pack.stage.w, h: r.h * pack.stage.h,
+            x: pack.stage.x + r.x * pack.stage.w + iL,
+            y: pack.stage.y + r.y * pack.stage.h + iT,
+            w: Math.max(0, r.w * pack.stage.w - iL - iR),
+            h: Math.max(0, r.h * pack.stage.h - iT - iB),
           };
+          seated.add(id);
         }
       }
       sizeFocusExtent(pack);
@@ -3666,6 +3707,7 @@ __ICON__
         const vel = opts.velocityId === item.id ? opts.velocity : { x: 0, y: 0 };
         animateFocusCard(card, from, rect, vel);
         card.setAttribute('data-placed', '');
+        card.toggleAttribute('data-seated', seated.has(item.id));
         const lod = card.dataset.lod;
         card.style.zIndex = lod === 'full' ? '3' : lod === 'digest' ? '2' : '1';
       }
@@ -4615,14 +4657,16 @@ __ICON__
       paintChrome();
     };
 
-    /** Only the focused pane carries the status line, the workdir path and the
-     *  agent pickers. They are identical on every pane in a folder, so the
-     *  others would spend a third of their height repeating them. */
-    /** The pane you are in is the lit one; its neighbours step back onto the
-     *  paper, so there is never a question of where typing goes. */
+    /** The pane you are in is the one a shade deeper in the paper; its
+     *  neighbours stay exactly as they were. Focus changes colour and nothing
+     *  else, so every pane sharing a dock wears the same chrome whether or not
+     *  it holds the caret — a title that vanished when you clicked into a pane
+     *  read as the pane losing its name. A lone pane keeps the roomier `pane`
+     *  chrome, where its bar is the only thing saying what it is. */
     const paintChrome = () => {
       const focusedKey = dock.focus === 'primary' ? PRIMARY : dock.extras[dock.focus]?.key;
       const primaryOn = !dock.extras.length || focusedKey === PRIMARY;
+      const chrome = dock.extras.length ? 'tile' : 'pane';
       const mark = (el, on) => {
         if (!el) return;
         if (on) el.setAttribute('data-focused', '');
@@ -4632,7 +4676,7 @@ __ICON__
       mark(primaryFrame, primaryOn);
       mark(pane.querySelector(':scope > .dock-bar'), primaryOn);
       convo.setAttribute('data-focused', String(primaryOn));
-      convo.setAttribute('data-chrome', primaryOn ? 'pane' : 'tile');
+      convo.setAttribute('data-chrome', chrome);
       // `extra.el` is the chat itself; its card and bar are the leaf's.
       dock.extras.forEach((extra, index) => {
         const on = dock.focus === index;
@@ -4640,7 +4684,7 @@ __ICON__
         mark(leaf?.el, on);
         mark(leaf?.bar, on);
         extra.el?.setAttribute('data-focused', String(on));
-        extra.el?.setAttribute('data-chrome', on ? 'pane' : 'tile');
+        extra.el?.setAttribute('data-chrome', chrome);
       });
     };
 

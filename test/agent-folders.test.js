@@ -88,7 +88,9 @@ const inside = (rect, region) =>
   rect.y + rect.h <= region.y + region.h + 0.01;
 
 const pack = (opts) => F().packFocus({ canvas: CANVAS, sizes: SIZES, ...opts });
-const MARGIN = 16;
+// The canvas margin is the module's to decide; a copy here goes stale the
+// first time the layout is tightened.
+const MARGIN = F().MARGIN;
 
 const FIELD = [
   { folderId: 'aaaaaaaaaaaa', cards: cards('a', 4, 'digest') },

@@ -314,7 +314,13 @@ test('a pinned conversation is a full-height column beside the field, not a band
   }, ids);
   // The old stage was min(h * .52, 460) tall and spanned the canvas.
   assert.ok(shape.full.h > shape.canvasH * 0.9, `Full only ${shape.full.h} of ${shape.canvasH}`);
-  assert.ok(shape.full.w < shape.canvasH, 'a conversation should be taller than it is wide here');
+  // It used to be taller than wide here too, but only because a dead New-group
+  // column stood in the leftover width and kept it narrow. That column is gone
+  // — it is drawn as a rail while a card is in the air now — so with a single
+  // pin and one loose chat the pane takes the slack it leaves, which is what
+  // "Focus fills the screen" asks for. What matters is that it is a column of
+  // the field's own height, checked above and beside it, checked below.
+  assert.ok(shape.full.w < shape.canvasH * 1.2, `Full ${shape.full.w} is a band, not a column`);
   // Rank reads across, so the field sits beside the stage and not under it.
   assert.ok(shape.other.x > shape.full.x + shape.full.w - 1, 'the field slid under the stage');
   assert.ok(Math.abs(shape.other.y - shape.full.y) < 60, 'the field started below the stage');
@@ -340,8 +346,19 @@ test('dragging a card into another folder’s column joins that folder', async (
   });
   await page.locator('.views [data-view="focus"]').click();
   await page.waitForFunction(() => document.querySelectorAll('.focus-basin').length >= 2);
+  // Aim at the basin as it stands once the card is in the air. The field no
+  // longer moves when you lift one, so this is the same rect either way — but
+  // the loose region joins the canvas for the drag and takes the foot of a
+  // column, so the bottom edge is no longer Two's to give.
+  const box = await page.locator(`.focus-card[data-id="${ids.move}"]`).boundingBox();
+  await page.mouse.move(box.x + box.width / 2, box.y + 14);
+  await page.mouse.down();
+  await page.mouse.move(box.x + box.width / 2 + 16, box.y + 26, { steps: 3 });
+  await page.waitForTimeout(200);
   const target = await middleOf(page, `.focus-basin[data-folder-id="${ids.to}"]`);
-  const release = await dragTo(page, ids.move, { x: target.x, y: target.box.y + target.box.height - 80 });
+  await page.mouse.move(target.x, target.y, { steps: 10 });
+  await page.mouse.move(target.x, target.y);
+  const release = async () => { await page.mouse.up(); };
   assert.equal(await page.locator('.focus-slot').count(), 1, 'the slot it will land in must be drawn');
   assert.equal(await page.locator(`.focus-basin[data-folder-id="${ids.to}"][data-drop="into"]`).count(), 1);
   await release();
@@ -405,18 +422,30 @@ test('dragging a card to the stage pins it, and dragging it back off unpins it',
   await until(page, async () => (await metaOf(page, ids.a))?.pinned === false, 'the card to unpin');
 });
 
-test('dropping on the New group column makes a folder', async () => {
+test('there is no New group column, at rest, under a selection or on a lift', async () => {
   const { page } = await openAgents();
   const ids = await seedFocus(page, [
     { key: 'a', title: 'alpha' },
     { key: 'b', title: 'beta' },
   ]);
-  await page.locator('.focus-newgroup').waitFor();
-  const slot = await middleOf(page, '.focus-newgroup');
-  const release = await dragTo(page, ids.a, slot);
-  assert.equal(await page.locator('.focus-newgroup[data-drop="into"]').count(), 1);
-  await release();
-  await until(page, async () => Boolean((await metaOf(page, ids.a))?.folderId), 'a folder to be made');
+  // At rest it was a column that could not be pressed and cost the field its
+  // width; raised only for a drag it moved the whole canvas the moment you
+  // lifted a card. Folders are made by dropping one card squarely on another
+  // (covered above) or from "Save as folder" on a card's menu.
+  assert.equal(await page.locator('.focus-newgroup').count(), 0, 'at rest');
+  await page.locator(`.focus-card[data-id="${ids.a}"]`).click();
+  await page.waitForTimeout(300);
+  assert.equal(await page.locator('.focus-newgroup').count(), 0, 'under a selection');
+
+  const box = await page.locator(`.focus-card[data-id="${ids.a}"]`).boundingBox();
+  await page.mouse.move(box.x + box.width / 2, box.y + 14);
+  await page.mouse.down();
+  await page.mouse.move(box.x + box.width / 2 + 16, box.y + 26, { steps: 3 });
+  await page.waitForTimeout(250);
+  assert.equal(await page.locator('.focus-newgroup').count(), 0, 'on a lift');
+  await page.keyboard.press('Escape');
+  await page.mouse.up();
+  assert.ok(ids.b, 'seeded');
 });
 
 test('Escape cancels a drag and files nothing', async () => {
@@ -595,12 +624,17 @@ test('dropping a card on the bottom band of a stage pane stacks it under', async
   await until(page, async () => (await metaOf(page, ids.b))?.pinned === true, 'b to be pinned');
   // Stacked, the two pins are one column, and with no field left that column
   // is the whole canvas: the stage fills what the field does not take.
-  const { stageW, canvasW } = await page.evaluate(() => ({
+  const { stageW, canvasW, margin } = await page.evaluate(() => ({
     stageW: document.querySelector('.pane').getBoundingClientRect().width,
     canvasW: document.querySelector('.focus').clientWidth,
+    // The canvas margin belongs to the layout module, not to this file.
+    margin: window.marbleAgentFolders?.MARGIN ?? 8,
   }));
   assert.ok(stageW > widthBefore, `the stage grew into the room the field gave up (${stageW} vs ${widthBefore})`);
-  assert.ok(Math.abs(stageW - (canvasW - 32)) < 2, `one column fills the canvas (${stageW} of ${canvasW})`);
+  assert.ok(
+    Math.abs(stageW - (canvasW - 2 * margin)) < 2,
+    `one column fills the canvas (${stageW} of ${canvasW}, margin ${margin})`,
+  );
 });
 
 test('the Focus arrangement and the List arrangement do not overwrite each other', async () => {

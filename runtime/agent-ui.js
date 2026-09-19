@@ -22,6 +22,9 @@
   const TOKENS = `
     :host {
       --ink: #111111; --muted: #5a5a5a; --faint: #8a8a8a; --line: #ddd9cf;
+      /* Read, not glanced at: the faint tone the chrome uses for marks does
+         not clear 4.5:1, and a placeholder is body text until you type. */
+      --placeholder: #767676;
       --paper: #fafaf7; --paper-2: #f3f1ea; --paper-3: #eceae1; --card: #ffffff;
       --accent: #9bb6cf; --accent-soft: #f1f5f8; --accent-ink: #738698;
       --danger: #b4533e; --caution: #a07a2c;
@@ -35,6 +38,7 @@
     @media (prefers-color-scheme: dark) {
       :host {
         --ink: #e8e6e1; --muted: #a3a7ab; --faint: #71767a; --line: #2f3438;
+        --placeholder: #8d9296;
         --paper: #16181a; --paper-2: #1e2124; --paper-3: #262a2e; --card: #1c1f22;
         --accent: #7fa8c9; --accent-soft: #1d2932; --accent-ink: #9dc0dc;
         --danger: #e08a74; --caution: #d9b25e;
@@ -295,12 +299,48 @@
       current.hidden = !box.classList.contains('is-drop');
     }
   };
+  /** A menu inside a pane is inside that pane's `overflow: hidden`, so an
+   *  absolutely positioned one gets its edges shaved off by the frame — which
+   *  is what clipped the first letter of every setup. Fixed positioning leaves
+   *  the clip behind; the position has to be measured, and clamped so the menu
+   *  never hangs off the window either. Called on open, and cleared on close so
+   *  the sheet goes back to its own stylesheet. */
+  const floatMenu = (anchor, menu) => {
+    if (!anchor || !menu) return;
+    menu.style.position = 'fixed';
+    menu.style.bottom = 'auto';
+    menu.style.top = '0px';
+    menu.style.left = '0px';
+    menu.style.right = 'auto';
+    menu.style.maxHeight = '';
+    const a = anchor.getBoundingClientRect();
+    // The sheet's `min-width: max(100%, …)` resolves against the containing
+    // block, which once fixed is the viewport — so it has to be told what
+    // 100% means out here, or the menu spans the window.
+    menu.style.minWidth = `${Math.max(Math.round(a.width), 176)}px`;
+    menu.style.width = 'max-content';
+    menu.style.maxWidth = `${Math.round(Math.min(innerWidth - 16, 360))}px`;
+    const m = menu.getBoundingClientRect();
+    const pad = 8;
+    // Above the trigger when there is room, below when there is not.
+    const above = a.top - pad - m.height;
+    const top = above >= pad ? above : Math.min(a.bottom + pad, innerHeight - pad - m.height);
+    const left = Math.min(Math.max(pad, a.right - m.width), innerWidth - pad - m.width);
+    menu.style.top = `${Math.max(pad, Math.round(top))}px`;
+    menu.style.left = `${Math.round(left)}px`;
+    menu.style.maxHeight = `${Math.round(Math.max(120, innerHeight - 2 * pad))}px`;
+  };
+  const unfloatMenu = (menu) => {
+    if (!menu) return;
+    for (const prop of ['position', 'top', 'left', 'right', 'bottom', 'maxHeight', 'minWidth', 'width', 'maxWidth']) menu.style[prop] = '';
+  };
   const closeSegMenus = (root) => {
     const host = root?.querySelectorAll ? root : root?.shadowRoot;
     if (!host) return;
     for (const box of host.querySelectorAll('.seg-opts.is-open, .presets.is-open')) {
       box.classList.remove('is-open');
       box.querySelector('.seg-current, .presets-more')?.setAttribute('aria-expanded', 'false');
+      unfloatMenu(box.querySelector(':scope > .seg-menu, :scope > .presets-menu'));
     }
   };
   const reduceMotion = () => typeof matchMedia === 'function' && matchMedia('(prefers-reduced-motion: reduce)').matches;
@@ -443,6 +483,8 @@
       closeSegMenus(box.getRootNode());
       box.classList.toggle('is-open', open);
       current.setAttribute('aria-expanded', String(open));
+      if (open) floatMenu(current, menu);
+      else unfloatMenu(menu);
     });
     armSeg(box);
     syncSegCurrent(box);
@@ -455,6 +497,17 @@
     const bar = node.closest('.bar');
     if (!bar || bar.dataset.wrap) return false;
     bar.dataset.wrap = '1';
+    return true;
+  };
+  /** The last thing to give. Saved setups and the Custom toggle ride together
+   *  so that a squeeze folds the track rather than stranding one word on a row
+   *  of its own — but in a pane narrow enough that the track cannot hold even
+   *  the chosen setup's name beside Custom, the name is worth more than the
+   *  line, and Custom steps below. Cleared by fitSetup before each pass. */
+  const wrapRowFor = (node) => {
+    const row = node.closest('.setup-row');
+    if (!row || row.dataset.wrap) return false;
+    row.dataset.wrap = '1';
     return true;
   };
   const fitPicker = (picker) => {
@@ -494,6 +547,8 @@
         closeSegMenus(track.getRootNode());
         track.classList.toggle('is-open', open);
         more.setAttribute('aria-expanded', String(open));
+        if (open) floatMenu(more, menu);
+        else unfloatMenu(menu);
       });
       track.append(more);
     }
@@ -521,6 +576,24 @@
     more.setAttribute('aria-label', 'More setups');
     track.classList.remove('is-packed', 'is-open');
     const overflowed = () => track.scrollWidth > track.clientWidth + 1;
+    // A row of setups laid out as capsules is a row of decisions competing
+    // with the one that matters, which is the prompt. The setup you are on is
+    // a word; the rest are a menu away. It also ends the packing problem for
+    // good — one word cannot overflow, at any pane width.
+    const all = [...track.querySelectorAll(':scope > .preset')];
+    if (all.length) {
+      more.hidden = false;
+      track.classList.add('is-packed');
+      for (const chip of all) menu.append(chip);
+      const span = menu.querySelector('input:checked + span') ?? menu.querySelector('span');
+      if (span) {
+        more.replaceChildren(span.cloneNode(true));
+        more.classList.add('is-current');
+        more.setAttribute('aria-label', `Setup: ${span.textContent.trim()}`);
+      }
+      slideThumb(track, { animate: false });
+      return;
+    }
     if (!overflowed()) {
       slideThumb(track, { animate: false });
       return;
@@ -555,6 +628,11 @@
         fitPresets(track);
         return;
       }
+      // Still nothing but a nub. Custom is the only thing left to move.
+      if (wrapRowFor(track)) {
+        fitPresets(track);
+        return;
+      }
       const span = menu.querySelector('input:checked + span');
       if (span) {
         more.replaceChildren(span.cloneNode(true));
@@ -584,7 +662,9 @@
     return [auto, best].filter(Boolean);
   };
   const BRAND = {
-    anthropic: '<svg class="brand" viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" d="M17.304 3.541h-3.672L20.51 20.459H24L17.304 3.541zM6.696 3.541 0 20.459h3.543l1.39-3.386h7.044l1.39 3.386h3.543L10.352 3.541H6.696zm-.503 10.224 2.283-5.605 2.282 5.605H6.193z"/></svg>',
+    // Claude's own mark, not Anthropic's wordmark A: these name a model you
+    // are about to talk to, not the company that made it.
+    anthropic: '<svg class="brand" viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" d="M12 1.6c.5 0 .9.4.9.9v6.06l4.29-4.28a.9.9 0 0 1 1.27 1.27l-4.28 4.29h6.06a.9.9 0 0 1 0 1.8h-6.06l4.28 4.29a.9.9 0 1 1-1.27 1.27l-4.29-4.28v6.06a.9.9 0 0 1-1.8 0v-6.06l-4.29 4.28a.9.9 0 0 1-1.27-1.27l4.28-4.29H3.76a.9.9 0 0 1 0-1.8h6.06L5.54 5.55a.9.9 0 0 1 1.27-1.27l4.29 4.28V2.5c0-.5.4-.9.9-.9z"/></svg>',
     cursor: '<svg class="brand" viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" d="M3.2 2.4 20.6 12 11.4 13.7 9.5 21.6z"/></svg>',
   };
   const PRESETS = [
@@ -695,7 +775,7 @@
   const TAG_CSS = `
     .tag, .chip {
       display: inline-flex; align-items: center; gap: 4px;
-      font-size: 11px; line-height: 1.3; font-weight: 500;
+      font-size: 11.5px; line-height: 1.35; font-weight: 500;
       padding: 2px 8px; border-radius: 999px; max-width: 100%;
       overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
     }
@@ -1216,11 +1296,14 @@
   // ------------------------------------------------------------ the view
 
   const CONVERSATION_CSS = `
-    :host { display: flex; flex-direction: column; min-height: 0; background: var(--paper); overflow: visible; }
+    /* --conv-surface is the page's handle on this conversation's paper: a
+       pane sets it to tint the whole card — chrome, transcript and composer
+       together — when focus lands on it. Unset, it is the page's own paper. */
+    :host { display: flex; flex-direction: column; min-height: 0; background: var(--conv-surface, var(--paper)); overflow: visible; }
     /* In a pane, focus moving is a change of light, not a cut. Only there: a
        lone conversation takes the page's palette the instant it mounts. */
     :host([data-focused]) { transition: background-color 200ms var(--settle), opacity 200ms var(--settle); }
-    .mast { flex: none; padding: 10px 18px 8px; border-bottom: 1px solid var(--line); display: flex; flex-direction: column; gap: 6px; background: var(--paper); }
+    .mast { flex: none; padding: 10px 18px 8px; border-bottom: 1px solid var(--line); display: flex; flex-direction: column; gap: 6px; background: var(--conv-surface, var(--paper)); }
     .mast[hidden] { display: none; }
     :host([data-chrome="pane"]) .heading { display: none; }
     :host([data-chrome="pane"]) .mast:not(:has(.tag)) { display: none; }
@@ -1309,18 +1392,30 @@
     .queued-text[contenteditable] { white-space: normal; background: var(--card); box-shadow: 0 0 0 1px var(--accent); color: var(--ink); }
     .queued-item button.dequeue { font: inherit; border: 0; background: none; color: var(--muted); width: 22px; height: 22px; border-radius: 6px; cursor: pointer; flex: none; }
     .queued-item button.dequeue:hover { background: var(--line); }
-    .composer { flex: none; padding: 6px 10px calc(10px + env(safe-area-inset-bottom, 0px)); border-top: 1px solid var(--line); display: flex; flex-direction: column; gap: 6px; background: var(--paper); }
+    /* No padding above — the rule is the edge, and the space over it was
+       doubling it. The space below stays: the drawer's launcher floats in the
+       bottom-right corner of the page, and the send button is the last thing
+       that should end up underneath it. */
+    .composer { flex: none; padding: 0 10px calc(10px + env(safe-area-inset-bottom, 0px)); border-top: 1px solid var(--line); display: flex; flex-direction: column; gap: 6px; background: var(--conv-surface, var(--paper)); }
     .picker { display: flex; flex-flow: row nowrap; align-items: center; gap: 6px; font-size: 12px; color: var(--muted); overflow: visible; flex: 0 0 auto; width: fit-content; max-width: 100%; min-width: 0; }
     .picker[hidden] { display: none; }
     /* The setup takes what the buttons leave, so a crowded picker folds its
-       trailing segments into dropdowns instead of wrapping the bar. */
+       trailing segments into dropdowns instead of wrapping the bar. It may
+       wrap — on a phone-width pane the pickers genuinely want their own line —
+       but the saved setups and the Custom toggle wrap as one thing. Left to
+       themselves they came apart under a squeeze, and Custom alone on a second
+       row was a line of bar spent on a word: what should give there is the
+       track, which has a ••• to fold into and a fitter that knows when. */
     .setup { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; flex: 1 1 0; min-width: 0; position: relative; z-index: 3; }
     .setup[hidden] { display: none; }
+    .setup-row { display: flex; flex-wrap: nowrap; align-items: center; gap: 6px; flex: 0 1 auto; min-width: 0; }
+    .setup-row[data-wrap] { flex-wrap: wrap; }
+    .setup-row:not(:has(> :not([hidden]))) { display: none; }
     .presets {
       display: inline-flex; flex-wrap: nowrap; align-items: center; gap: 0;
       flex: 0 1 auto; width: max-content; max-width: 100%; min-width: 0;
       position: relative; isolation: isolate;
-      background: var(--paper-3); border: 1px solid var(--line); border-radius: 999px; padding: 1px;
+      background: none; border: 0; border-radius: 0; padding: 0;
     }
     .presets[hidden] { display: none; }
     .preset { position: relative; display: inline-flex; align-items: center; cursor: pointer; margin: 0; z-index: 1; flex: none; }
@@ -1334,25 +1429,25 @@
     .preset input:disabled + span { opacity: .45; cursor: default; }
     .preset .brand { width: 11px; height: 11px; flex: none; }
     .presets-more {
-      appearance: none; border: 0; background: transparent; color: var(--muted);
-      font: inherit; min-width: 28px; height: 22px; padding: 0; border-radius: 999px;
+      appearance: none; border: 0; background: none; color: var(--ink);
+      font: inherit; min-width: 28px; height: 22px; padding: 0 6px; border-radius: 7px;
       cursor: pointer; flex: none; display: inline-flex; align-items: center; justify-content: center;
       position: relative; z-index: 1;
     }
     .presets-more:not(.is-current) { width: 28px; }
-    .presets-more:hover, .presets.is-open .presets-more { color: var(--ink); background: var(--card); }
+    .presets-more:hover, .presets.is-open .presets-more { color: var(--ink); background: var(--paper-2); }
     .presets-more[hidden] { display: none; }
     .presets-more.is-current {
       width: auto; max-width: 100%; min-width: 0; height: auto;
-      padding: 3px 8px 3px 9px; gap: 6px; color: var(--ink);
-      background: var(--card); box-shadow: 0 1px 2px color-mix(in srgb, var(--ink) 12%, transparent);
+      padding: 3px 6px; gap: 5px; color: var(--ink);
+      background: none; box-shadow: none;
     }
     .presets-more.is-current::after {
       content: ''; width: 0; height: 0; flex: none;
       border-left: 3.5px solid transparent; border-right: 3.5px solid transparent;
       border-top: 4px solid var(--muted);
     }
-    .presets-more span { display: inline-flex; align-items: center; gap: 5px; min-width: 0; font-size: 11px; font-weight: 500; white-space: nowrap; }
+    .presets-more span { display: inline-flex; align-items: center; gap: 5px; min-width: 0; font-size: 11px; font-weight: 500; white-space: nowrap; padding: 0; background: none; border-radius: 0; box-shadow: none; width: auto; }
     .presets-more.is-current span { overflow: hidden; }
     .presets-more .brand { width: 11px; height: 11px; flex: none; }
     .presets-menu {
@@ -1366,21 +1461,38 @@
     .presets-menu .preset span { width: 100%; border-radius: 9px; padding: 7px 10px; justify-content: flex-start; }
     .presets-menu input:checked + span { background: var(--paper-2); }
     .custom-toggle {
-      appearance: none; border: 1px solid var(--line); background: var(--paper-2); color: var(--muted);
-      font: inherit; font-size: 11px; font-weight: 500; padding: 3px 10px; border-radius: 999px; cursor: pointer; flex: none;
+      appearance: none; border: 0; background: none; color: var(--muted);
+      font: inherit; font-size: 11px; font-weight: 500; padding: 3px 6px; border-radius: 7px; cursor: pointer; flex: none;
     }
-    .custom-toggle[aria-expanded="true"] { color: var(--ink); background: var(--card); border-color: color-mix(in srgb, var(--ink) 18%, var(--line)); }
+    .custom-toggle:hover { color: var(--ink); background: var(--paper-2); }
+    .custom-toggle[aria-expanded="true"] { color: var(--ink); background: var(--paper-2); }
     .custom-toggle[hidden] { display: none; }
-    .seg-thumb {
-      position: absolute; left: 0; top: 0; z-index: 0; pointer-events: none;
-      border-radius: 999px; background: var(--card);
-      box-shadow: 0 1px 2px color-mix(in srgb, var(--ink) 12%, transparent);
-      opacity: 0;
+    /* Nothing is a capsule any more, so there is no capsule to slide inside. */
+    .seg-thumb { display: none; }
+    /* The settings strip. Now that the send button is not standing in it, the
+       bar owns its whole width honestly: setups from the left edge, mode at
+       the right, and the hairline above saying these configure the next turn
+       rather than belonging to the message. */
+    .bar {
+      display: flex; flex-wrap: wrap; align-items: center; gap: 6px;
+      min-height: 28px; min-width: 0;
+      border-top: 1px solid color-mix(in srgb, var(--line) 70%, transparent);
+      margin: 0 -10px; padding: 5px 10px 0;
     }
-    .bar { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; min-height: 28px; min-width: 0; }
-    .bar-space { flex: 0 0 0; }
+    /* Nothing to configure — no provider, no modes — so there is no strip and
+       no rule floating under the message. */
+    .bar:not(:has(> :not([hidden]):not(.bar-space))) { display: none; }
+    /* Everything after the spacer is the send end of the bar. On one row the
+       setup already pushes it to the right edge; on the second row a wrapped
+       setup leaves behind, the spacer is what holds it there. */
+    .bar-space { flex: 0 0 0; min-width: 0; }
     .bar[data-wrap] .setup { flex-basis: 100%; }
-    .mode { flex: none; font: inherit; font-size: 11px; font-weight: 500; color: var(--accent-ink); background: none; border: 0; padding: 3px 6px; border-radius: 999px; cursor: pointer; }
+    .bar[data-wrap] .bar-space { flex: 1 1 0; }
+    /* Pinned to the setup's first row rather than centred against it: when
+       Custom opens a second row of pickers, a centred label floats in the
+       gutter beside them instead of sitting on a line with anything. The 2px
+       is what centres it against a single row, so one rule serves both. */
+    .mode { flex: none; align-self: flex-start; margin-top: 2px; font: inherit; font-size: 11px; font-weight: 500; color: var(--accent-ink); background: none; border: 0; padding: 3px 6px; border-radius: 999px; cursor: pointer; }
     .mode:hover { color: var(--ink); background: var(--paper-2); }
     .mode[hidden] { display: none; }
     .dispatch[hidden] { display: none; }
@@ -1388,17 +1500,23 @@
     .seg legend {
       position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0, 0, 0, 0); border: 0;
     }
+    /* The settings bar is a line of words, not a row of capsules. Marble's
+       chrome had a fill, a border and a radius on every control in it, so five
+       rarely-touched choices carried more weight than the prompt above them.
+       What is left is the label, its state, and a chevron where there is more.
+       The fills come back only where a control has to look pressable in place:
+       the Custom toggle when it is open, and the send button when it is armed. */
     .seg-opts {
       display: flex; flex-wrap: nowrap; gap: 0; flex: none; position: relative; isolation: isolate;
-      background: var(--paper-3); border: 1px solid var(--line); border-radius: 999px; padding: 1px;
+      background: none; border: 0; border-radius: 0; padding: 0;
     }
     .seg-menu { display: flex; flex-wrap: nowrap; gap: 0; }
     .seg-current {
-      display: none; appearance: none; border: 0; background: var(--card); color: var(--ink);
-      padding: 2px 8px 2px 10px; border-radius: 999px; font: inherit; font-size: 11px; font-weight: 500;
-      cursor: pointer; align-items: center; gap: 6px;
-      box-shadow: 0 1px 2px color-mix(in srgb, var(--ink) 12%, transparent);
+      display: none; appearance: none; border: 0; background: none; color: var(--ink);
+      padding: 3px 6px; border-radius: 7px; font: inherit; font-size: 11px; font-weight: 500;
+      cursor: pointer; align-items: center; gap: 5px;
     }
+    .seg-current:hover, .seg-opts.is-open .seg-current { background: var(--paper-2); }
     .seg-current::after {
       content: ''; width: 0; height: 0;
       border-left: 3.5px solid transparent; border-right: 3.5px solid transparent;
@@ -1428,7 +1546,9 @@
       border: 0; background: transparent; color: var(--muted); font-size: 11px; font-weight: 500; white-space: nowrap;
       position: relative; z-index: 1; pointer-events: none;
     }
-    .seg-opts input:checked + span { color: var(--ink); background: transparent; box-shadow: none; }
+    /* With no sliding capsule behind it, the chosen segment says so in the
+       type: full ink against its muted neighbours, and a shade heavier. */
+    .seg-opts input:checked + span { color: var(--ink); background: transparent; box-shadow: none; font-weight: 600; }
     .seg-opts.is-drop .seg-thumb { display: none; }
     .seg-opts.is-drop input:checked + span { box-shadow: none; background: var(--paper-2); }
     .seg-opts input:focus-visible + span { box-shadow: 0 0 0 3px var(--accent-soft); }
@@ -1442,34 +1562,100 @@
     /* A chip in the text: a pasted thing, or the document the message is
        about. Non-editable, so the caret steps over it and Backspace takes it
        out whole. */
+    /* Every chip is the same object whatever it carries. An inline-flex box
+       takes its baseline from its first item, so a chip holding a thumbnail
+       took it from the image and one holding words took it from the words —
+       two chips on the same line of prose, five pixels apart in height and ten
+       apart in position. A fixed height and vertical-align: middle make the
+       box's alignment a property of the chip rather than of its contents. */
     .ichip {
-      display: inline-flex; align-items: center; gap: 5px; vertical-align: -3px; max-width: 100%;
-      margin: 0 1px; padding: 1px 8px 1px 6px; border-radius: 999px;
-      font-size: 11.5px; font-weight: 500; line-height: 1.5; color: var(--muted);
+      display: inline-flex; align-items: center; gap: 5px; max-width: 100%;
+      height: 20px; box-sizing: border-box; vertical-align: middle;
+      margin: 0 1px; padding: 0 4px 0 6px; border-radius: 999px;
+      font-size: 12px; font-weight: 500; line-height: 1; color: var(--muted);
       background: var(--paper-2); border: 1px solid var(--line); cursor: pointer; user-select: none;
       transition: border-color 160ms var(--settle), background 160ms var(--settle);
     }
     .ichip:hover { border-color: var(--accent); background: var(--card); }
-    .ichip[data-kind="context"] { padding-right: 3px; margin-right: 5px; cursor: default; }
-    .ichip[data-kind="context"]:hover { border-color: var(--line); background: var(--paper-2); }
-    .ichip-shot { width: 22px; height: 22px; border-radius: 6px; object-fit: cover; background: var(--paper-3); margin-left: -3px; }
-    .ichip-name, .context-text { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-    .context-clear { font: inherit; border: 0; background: none; color: var(--faint); width: 16px; height: 16px; border-radius: 50%; cursor: pointer; line-height: 1; padding: 0; }
-    .context-clear:hover { background: var(--line); color: var(--ink); }
-    .row { display: flex; flex-direction: column; align-items: stretch; gap: 4px; background: var(--card); border: 1px solid var(--line); border-radius: 14px; padding: 8px 8px 6px 12px; transition: border-color 200ms var(--settle), box-shadow 200ms var(--settle); }
-    .row:focus-within { border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-soft); }
-    .chips { display: flex; flex-wrap: wrap; gap: 4px; }
+    /* Inside the chip's height, not setting it. */
+    .ichip-shot { width: 14px; height: 14px; border-radius: 4px; object-fit: cover; background: var(--paper-3); flex: none; margin-left: -2px; }
+    /* What stands in for a thumbnail that has no source to load, or whose blob
+       went away with the page that made it. An <img> with an empty src resolves
+       to the document and paints the browser's broken-image glyph, which is
+       how a restored draft came back showing a torn page. */
+    .ichip-mark { width: 14px; height: 14px; border-radius: 4px; flex: none; margin-left: -2px; background: var(--paper-3); display: grid; place-items: center; color: var(--faint); }
+    .ichip-mark svg { width: 9px; height: 9px; }
+    .ichip-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .ichip-clear { font: inherit; font-size: 12px; border: 0; background: none; color: var(--faint); width: 15px; height: 15px; border-radius: 50%; cursor: pointer; line-height: 1; padding: 0; flex: none; display: grid; place-items: center; }
+    .ichip-clear:hover { background: var(--line); color: var(--ink); }
+    /* The one thing the document pill said that the pane's bar does not: that
+       the next turn carries a selection, and that you can decide it should not. */
+    .selection { display: inline-flex; align-items: center; gap: 1px; flex: none; height: 22px; padding: 0 2px 0 6px; border-radius: 7px; font-size: 11px; font-weight: 500; color: var(--accent-ink); background: none; }
+    .selection:hover { background: var(--paper-2); }
+    .selection[hidden] { display: none; }
+    .selection-clear { font: inherit; font-size: 12px; border: 0; background: none; color: inherit; width: 15px; height: 15px; border-radius: 50%; cursor: pointer; line-height: 1; padding: 0; opacity: .7; display: grid; place-items: center; }
+    .selection-clear:hover { opacity: 1; background: color-mix(in srgb, var(--accent) 35%, transparent); }
+    /* Two registers, not three strips. The message — what you attached, the
+       document it is about, the words, and the button that sends them — is one
+       field. What the next turn is configured with is a strip under it. The
+       scale below is what says so: 4px inside a group, 10px between them, and
+       a hairline where the meaning changes. Everything used to be 4–6px, so
+       nothing grouped and the box had to do the separating itself. */
+    /* No card around the input. The composer already has an edge — the rule
+       that separates it from the transcript — and drawing a second box inside
+       it made the prompt look like a thing parked in a slot rather than the
+       floor of the pane. What used to be the card's padding is the composer's
+       now, so nothing moved except the border that was drawing it. */
+    .row {
+      --sp-1: 4px; --sp-2: 0px;
+      display: flex; flex-direction: column; align-items: stretch;
+      background: none; border: 0; border-radius: 0; padding: 0;
+    }
+    /* The send button holds the end of the last line rather than living in the
+       toolbar. In the toolbar it made the strip impossible to balance: crushed
+       against five setups in a narrow pane, stranded past a wide gap in a wide
+       one. Here it is where the sentence ends. */
+    .field {
+      display: grid; grid-template-columns: minmax(0, 1fr) auto;
+      grid-template-areas: "chips chips" "editor commit";
+      align-items: end; column-gap: var(--sp-1); row-gap: 6px;
+      padding: 8px 0;
+    }
+    .chips { grid-area: chips; display: flex; flex-wrap: wrap; gap: var(--sp-1); }
     .chips[hidden] { display: none; }
+    .commit { grid-area: commit; display: flex; align-items: center; gap: var(--sp-1); }
     .chip-remove { font: inherit; border: 0; background: none; color: inherit; opacity: .55; width: 16px; height: 16px; border-radius: 50%; cursor: pointer; line-height: 1; padding: 0; }
     .chip-remove:hover { opacity: 1; background: color-mix(in srgb, currentColor 12%, transparent); }
-    .editor { flex: 1; min-width: 0; font: inherit; color: var(--ink); outline: none; max-height: 160px; overflow-y: auto; padding: 4px 0; white-space: pre-wrap; overflow-wrap: anywhere; }
-    .editor[data-empty]::after { content: attr(data-placeholder); color: var(--faint); pointer-events: none; }
+    .editor {
+      grid-area: editor; min-width: 0; font: inherit; color: var(--ink); outline: none;
+      max-height: 160px; overflow-y: auto; padding: 2px 0; white-space: pre-wrap; overflow-wrap: anywhere;
+      /* The parts nobody draws still belong to the design. */
+      caret-color: var(--accent-ink);
+    }
+    .editor ::selection, .editor::selection { background: var(--accent-soft); color: var(--ink); }
+    /* A placeholder is read, so it clears 4.5:1 rather than sitting at the
+       faint tone the rest of the chrome uses for marks you only glance at. */
+    .editor[data-empty]::after { content: attr(data-placeholder); color: var(--placeholder, var(--muted)); pointer-events: none; }
     .editor ul, .editor ol { margin: 2px 0; padding-left: 1.25em; }
     .editor li { margin: 0; }
-    .send, .stop { flex: none; width: 28px; height: 28px; border-radius: 50%; border: 0; cursor: pointer; display: grid; place-items: center; transition: opacity 200ms var(--settle); }
-    .send { background: var(--accent-ink); color: var(--paper); }
-    .send:disabled { opacity: .35; cursor: default; }
-    .stop { background: var(--paper-2); color: var(--ink); }
+    .send, .stop {
+      flex: none; width: 28px; height: 28px; border-radius: 50%; border: 0; cursor: pointer;
+      display: grid; place-items: center;
+      transition: background-color 180ms var(--settle), color 180ms var(--settle),
+        box-shadow 180ms var(--settle);
+    }
+    /* Nothing to send yet, so the button is only an outline. When there is, it
+       fills — the state change is the affordance, and it means the muted disc
+       that used to read as disabled while it was live is gone. Pressing shifts
+       the fill and never the geometry: a control that pops under the finger
+       moves something the person did not move. */
+    .send { background: none; color: var(--faint); box-shadow: inset 0 0 0 1px var(--line); }
+    .send:disabled { cursor: default; }
+    .send:not(:disabled) { background: var(--ink); color: var(--paper); box-shadow: none; }
+    .send:not(:disabled):hover { background: color-mix(in srgb, var(--ink) 82%, var(--paper)); }
+    .send:not(:disabled):active { background: color-mix(in srgb, var(--ink) 68%, var(--paper)); }
+    .stop { background: var(--paper-2); color: var(--ink); box-shadow: inset 0 0 0 1px var(--line); }
+    .stop:hover { background: var(--paper-3); }
     .stop[hidden] { display: none; }
 
     /* The card a pasted thing opens into (the peek), and the fallback strip
@@ -1605,6 +1791,13 @@
     });
 
   const SEND_ICON = '<svg width="16" height="16" viewBox="0 0 16 16" aria-hidden="true"><path d="M8 13V3M3.5 7.5 8 3l4.5 4.5" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>';
+  /** What a chip shows where a thumbnail cannot be drawn: a picture, in the
+   *  same stroke as the rest of the icons, rather than a browser glyph. */
+  const imageMark = () => {
+    const mark = h('span', 'ichip-mark');
+    mark.innerHTML = '<svg viewBox="0 0 16 16" aria-hidden="true"><rect x="1.4" y="2.6" width="13.2" height="10.8" rx="2" fill="none" stroke="currentColor" stroke-width="1.6"/><path d="M1.6 11.2 5.4 7.8l3.1 2.6 2.3-1.9 3.6 3" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg>';
+    return mark;
+  };
   const STOP_ICON = '<svg width="12" height="12" viewBox="0 0 12 12" aria-hidden="true"><rect x="1.5" y="1.5" width="9" height="9" rx="2" fill="currentColor"/></svg>';
 
   // ------------------------------------------------------------ the editor
@@ -1839,12 +2032,20 @@
             </div>
           </div>
           <div class="row">
-            <div class="chips" hidden></div>
-            <div class="editor" contenteditable="true" role="textbox" aria-multiline="true" aria-label="Message" data-placeholder="Ask about this document…" data-empty></div>
+            <div class="field">
+              <div class="chips" hidden></div>
+              <div class="editor" contenteditable="true" role="textbox" aria-multiline="true" aria-label="Message" data-placeholder="Ask about this document…" data-empty></div>
+              <div class="commit">
+                <button type="button" class="stop" hidden aria-label="Stop">${STOP_ICON}</button>
+                <button type="submit" class="send" aria-label="Send" disabled>${SEND_ICON}</button>
+              </div>
+            </div>
             <div class="bar">
               <div class="setup" hidden>
-                <div class="presets" role="radiogroup" aria-label="Saved setups" hidden></div>
-                <button type="button" class="custom-toggle" aria-expanded="false" hidden>Custom</button>
+                <div class="setup-row">
+                  <div class="presets" role="radiogroup" aria-label="Saved setups" hidden></div>
+                  <button type="button" class="custom-toggle" aria-expanded="false" hidden>Custom</button>
+                </div>
                 <div class="picker">
                   <fieldset class="seg picker-agent"><legend>CLI</legend><div class="seg-opts" data-seg="agent"></div></fieldset>
                   <fieldset class="seg picker-project"><legend>Project</legend><div class="seg-opts" data-seg="project"></div></fieldset>
@@ -1852,11 +2053,10 @@
                   <fieldset class="seg picker-effort"><legend>Effort</legend><div class="seg-opts" data-seg="effort"></div></fieldset>
                 </div>
               </div>
-              <button type="button" class="mode" hidden aria-label="CLI mode — click or Shift+Tab to change"></button>
+              <div class="selection" hidden></div>
               <span class="bar-space"></span>
               <div class="dispatch" hidden role="radiogroup" aria-label="How to send while a turn runs"></div>
-              <button type="button" class="stop" hidden aria-label="Stop">${STOP_ICON}</button>
-              <button type="submit" class="send" aria-label="Send" disabled>${SEND_ICON}</button>
+              <button type="button" class="mode" hidden aria-label="CLI mode — click or Shift+Tab to change"></button>
             </div>
           </div>
         </form>`;
@@ -1871,6 +2071,8 @@
       this.tagsEl = root.querySelector('.tags');
       this.setup = root.querySelector('.setup');
       this.presetsEl = root.querySelector('.presets');
+      this.selectionEl = root.querySelector('.selection');
+      this.setupRow = root.querySelector('.setup-row');
       this.customToggle = root.querySelector('.custom-toggle');
       this.picker = root.querySelector('.picker');
       this.bar = root.querySelector('.bar');
@@ -1963,10 +2165,16 @@
       this.queuedTogether.addEventListener('click', () => this.setQueueCombine(true));
       // How the next send behaves while a turn runs; the same three modes a
       // queued row can be set to afterwards.
+      // Three words of segmented pill for a choice you make rarely, sitting
+      // beside the prompt you are actually writing. One word and a menu.
       this.dispatchEl.classList.add('seg-opts');
       fillRadios(this.dispatchEl, 'dispatch', [
         { id: 'queue', label: 'Queue' }, { id: 'steer', label: 'Steer' }, { id: 'interrupt', label: 'Interrupt' },
       ], { empty: null, value: 'queue' });
+      // After fillRadios, which clears the mode along with the children.
+      this.dispatchEl.classList.add('is-drop');
+      armSeg(this.dispatchEl);
+      syncSegCurrent(this.dispatchEl);
       this.form.addEventListener('submit', (event) => {
         event.preventDefault();
         this.submit();
@@ -2074,8 +2282,8 @@
         if (this.running) this.api.cancel(this.running.turn).catch((err) => this.system(err.message, true));
       });
       this.onContext = () => {
-        // A new selection is a reason to offer the chip again; a selection
-        // merely clearing (the click that took the chip out does that) is not.
+        // A new selection is a reason to offer it again; a selection merely
+        // clearing (which dismissing it does) is not.
         const { selection = [] } = this.api?.context() ?? {};
         if (selection.length) this.skipSelection = false;
         this.updateContext();
@@ -2569,6 +2777,7 @@
       requestAnimationFrame(() => {
         // One row first; the fits below wrap the bar only if they must.
         delete this.bar.dataset.wrap;
+        delete this.setupRow?.dataset.wrap;
         if (!this.picker?.hidden) fitPicker(this.picker);
         fitPresets(this.presetsEl);
       });
@@ -2680,7 +2889,6 @@
      *  chip it named, and the document chip stays at the front. */
     setValue(text) {
       const before = this.orderedAttachments();
-      const context = this.input.querySelector('.ichip[data-kind="context"]');
       fillEditor(this.input, text);
       const walker = document.createTreeWalker(this.input, NodeFilter.SHOW_TEXT);
       const nodes = [];
@@ -2701,7 +2909,6 @@
         frag.append(node.data.slice(last));
         node.replaceWith(frag);
       }
-      if (context) this.input.prepend(context);
       if (this.shadowRoot.activeElement === this.input) placeCaret(this.input);
       this.onEdited();
     }
@@ -2711,42 +2918,35 @@
       this.onEdited();
     }
 
-    /** The document chip: what this message is about, at the front of the
-     *  text. Taking it out sends without the selection; the document itself
-     *  still travels, because a turn cannot exist without one. */
+    /** What this message carries besides the words. The document it is about
+     *  travels either way — a turn cannot exist without one — and the pane's
+     *  own bar already names it, so naming it a second time inside the prose
+     *  was one fact written twice, and a pill the caret had to step over every
+     *  time the box was empty. What is left worth saying is the selection,
+     *  which is a real choice about the next turn: it shows in the settings
+     *  bar with the rest of them, only when there is one. */
     updateContext() {
-      const { target, selection, also = [] } = this.api?.context() ?? { target: '', selection: [], also: [] };
-      let chip = this.input.querySelector('.ichip[data-kind="context"]');
-      if (!chip && !this.skipSelection && target) {
-        chip = this.contextChip();
-        this.input.prepend(chip);
-        this.settleCaret();
-      }
-      if (!chip) return;
+      if (!this.selectionEl) return;
+      const { selection = [] } = this.api?.context() ?? {};
       const count = this.skipSelection ? 0 : selection.length;
-      const parts = [target];
-      if (count) parts.push(`${count} selected`);
-      if (also.length) parts.push(`+ ${also.length} more`);
-      chip.querySelector('.context-text').textContent = parts.join(' · ');
-      this.onEdited();
-    }
-
-    contextChip() {
-      const chip = h('span', 'ichip');
-      chip.contentEditable = 'false';
-      chip.dataset.kind = 'context';
-      chip.append(h('span', 'context-text'));
-      const clear = h('button', 'context-clear', '×');
+      this.selectionEl.hidden = !count;
+      if (!count) {
+        this.fitSetup();
+        return;
+      }
+      this.selectionEl.replaceChildren();
+      const label = h('span', 'selection-text', `${count} selected`);
+      const clear = h('button', 'selection-clear', '×');
       clear.type = 'button';
       clear.setAttribute('aria-label', 'Don’t send the selection');
       clear.addEventListener('click', () => {
-        chip.remove();
         this.skipSelection = true;
-        this.onEdited();
+        this.updateContext();
         this.focusInput();
       });
-      chip.append(clear);
-      return chip;
+      this.selectionEl.append(label, clear);
+      this.selectionEl.title = `Sending ${count} selected line${count === 1 ? '' : 's'} from the document`;
+      this.fitSetup();
     }
 
     async submit({ dispatch = null } = {}) {
@@ -3065,16 +3265,41 @@
       chip.setAttribute('role', 'button');
       chip.tabIndex = -1;
       if (item.kind === 'image') {
-        const shot = h('img', 'ichip-shot');
-        shot.src = item.src ?? item.url ?? '';
-        shot.alt = '';
-        chip.append(shot, h('span', 'ichip-name', item.name));
+        // Only when there is something to load. A chip rebuilt from a restored
+        // draft has no blob left, and an <img> with an empty src paints the
+        // browser's broken-image glyph — a torn page where a picture should be.
+        const source = item.src ?? item.url ?? '';
+        if (source) {
+          const shot = h('img', 'ichip-shot');
+          shot.src = source;
+          shot.alt = '';
+          // A blob URL outlives nothing; if it has gone, fall back rather than
+          // leave the glyph standing.
+          shot.addEventListener('error', () => shot.replaceWith(imageMark()), { once: true });
+          chip.append(shot);
+        } else {
+          chip.append(imageMark());
+        }
+        chip.append(h('span', 'ichip-name', item.name));
         chip.setAttribute('aria-label', `${item.name}, ${sizeOf(item.bytes ?? 0)} — open`);
       } else {
         chip.append(h('span', 'ichip-name', `Pasted text · ${item.lines} lines`));
         chip.setAttribute('aria-label', `Pasted text, ${item.lines} lines — open`);
       }
       chip.addEventListener('click', () => this.openPeek(item));
+      // The document chip can be taken off with its ×, so an attachment can
+      // too. Backspacing over it worked and said so to nobody.
+      if (item.key) {
+        const clear = h('button', 'ichip-clear', '×');
+        clear.type = 'button';
+        clear.setAttribute('aria-label', `Remove ${item.name}`);
+        clear.addEventListener('click', (event) => {
+          event.preventDefault();
+          event.stopPropagation();
+          this.dropAttachment(item);
+        });
+        chip.append(clear);
+      }
       return chip;
     }
 
@@ -3119,7 +3344,6 @@
         if (this.peekItem === item) this.closePeek();
       }
       this.attachments = this.attachments.filter((item) => keys.has(item.key));
-      if (!this.input.querySelector('.ichip[data-kind="context"]')) this.skipSelection = true;
     }
 
     /** Attachments in the order their chips sit in the text, which is the
@@ -4339,8 +4563,11 @@
   const TOOLS = new Set(['button', 'select', 'textarea', 'input', 'a']);
 
   const DRAWER_CSS = `
-    :host { position: fixed; inset: auto 0 0 auto; z-index: 2147483000; }
-    .launcher { position: fixed; right: calc(20px + env(safe-area-inset-right, 0px)); bottom: calc(20px + env(safe-area-inset-bottom, 0px));
+    /* The host is an anchor for two fixed children, not a surface: left
+       clickable it swallows whatever sits in the bottom-right corner of the
+       page behind it — which is where a composer's send and stop buttons are. */
+    :host { position: fixed; inset: auto 0 0 auto; z-index: 2147483000; pointer-events: none; }
+    .launcher { pointer-events: auto; position: fixed; right: calc(20px + env(safe-area-inset-right, 0px)); bottom: calc(20px + env(safe-area-inset-bottom, 0px));
       width: 44px; height: 44px; border-radius: 50%; border: 1px solid var(--line); background: var(--card); color: var(--ink);
       box-shadow: var(--shadow-lift); cursor: pointer; display: grid; place-items: center;
       transition: opacity 200ms var(--settle); }
@@ -4350,7 +4577,7 @@
     .launcher.running::after { content: ''; position: absolute; inset: -4px; border-radius: 50%; border: 2px solid transparent; border-top-color: var(--accent); animation: spin 1s linear infinite; }
     :host([data-open-state="open"]) .launcher { opacity: 0; pointer-events: none; }
 
-    .panel { position: fixed; top: 0; right: 0; bottom: 0; width: ${WIDTH}px; max-width: 100vw; display: flex; flex-direction: column;
+    .panel { pointer-events: auto; position: fixed; top: 0; right: 0; bottom: 0; width: ${WIDTH}px; max-width: 100vw; display: flex; flex-direction: column;
       box-sizing: border-box;
       background: color-mix(in srgb, var(--paper) 86%, transparent); -webkit-backdrop-filter: blur(24px) saturate(180%); backdrop-filter: blur(24px) saturate(180%);
       border-left: 1px solid var(--line); box-shadow: -18px 0 40px color-mix(in srgb, var(--ink) 12%, transparent);

@@ -26,7 +26,7 @@
   const CHIP_COOL_MS = 45_000;
   const DIGEST_BUDGET = 4;
   const FULL_CAP = 4;
-  const GAP = 8;
+  const GAP = 5;
 
   const realmOf = (path) => (path ? REALMS[path.split('/')[0]] || '' : '');
 
@@ -191,9 +191,9 @@
   };
 
 
-  const PAD = 18;
+  const PAD = 10;
   const NAME_H = 20;
-  const MARGIN = 16;
+  const MARGIN = 8;
 
   // A conversation is a tall thing, so the canvas spends its height on the
   // conversation and its width on rank. These are the widths a column is
@@ -308,11 +308,51 @@
       shaped.push({ folderId: group.folderId ?? null, stacks });
     }
 
-    const subCols = shaped.reduce((n, group) => n + group.stacks.length, 0);
+    // Which field column each region lands in, settled before any width is
+    // negotiated. Nothing here depends on width — a region's height is its
+    // cards' heights — so the two passes cannot disagree, and the width the
+    // field asks for is the width it will actually occupy. Sizing the field as
+    // though every sub-column stood side by side was what left a band of dead
+    // canvas down the right whenever two regions shared a column.
+    const regionH = (group) => {
+      const tallest = group.stacks.reduce((best, stack) => {
+        const stacked = stack.reduce((sum, card) => sum + cardHeight(card, sizes) + gap, 0) - gap;
+        return Math.max(best, stacked);
+      }, 0);
+      return Math.min(availH, Math.max(0, tallest) + NAME_H + 2 * PAD);
+    };
+    const fieldCols = [];
+    {
+      let colTop = top;
+      for (const group of shaped) {
+        const h = regionH(group);
+        // While a card is in the air the loose region is a landing zone and
+        // opens its own column — the same rule the layout below follows.
+        // While a card is in the air the loose region is a landing zone: it
+        // opens its own column so that a folder it would otherwise tuck under
+        // does not shrink under the pointer aiming at it (regions share their
+        // column's height). `'rail'` is a drag too — it only says the
+        // New-group affordance is drawn as an overlay rather than packed.
+        const landing = (newGroup === 'always' || newGroup === 'rail') && group.folderId === null;
+        if (fieldCols.length && (landing || colTop + h > top + availH + 0.01)) {
+          fieldCols.push([]);
+          colTop = top;
+        } else if (!fieldCols.length) {
+          fieldCols.push([]);
+        }
+        fieldCols[fieldCols.length - 1].push(group);
+        group.col = fieldCols.length - 1;
+        group.h = h;
+        colTop += h + gap;
+      }
+    }
+    // A field column is as wide as the widest region standing in it.
+    const colStacks = fieldCols.map((column) => column.reduce((most, group) => Math.max(most, group.stacks.length), 0));
+    const subCols = colStacks.reduce((n, stacks) => n + stacks, 0);
     // Everything in the field's width that is not a column: the pads, the gaps
-    // between sub-columns, and the gaps between regions.
-    const fixed = shaped.reduce((n, group) => n + (group.stacks.length - 1) * gap + 2 * PAD, 0)
-      + Math.max(0, shaped.length - 1) * gap;
+    // between sub-columns, and the gaps between field columns.
+    const fixed = colStacks.reduce((n, stacks) => n + (stacks - 1) * gap + 2 * PAD, 0)
+      + Math.max(0, fieldCols.length - 1) * gap;
 
     const room = Math.max(0, canvas.w - 2 * margin);
     const n = fulls.length;
@@ -334,14 +374,19 @@
       // Slack goes to the conversations, then to the columns — and what is
       // left after both reach their preferred maximum is not air: it is
       // shared between them in proportion, so a wide screen is filled edge
-      // to edge. The New-group slot is set aside first, so the fill does
-      // not swallow the one column that says a folder can be made.
+      // to edge.
       const toStage = n ? Math.min(spare, stageAt(paneMax) - stageW) : 0;
       stageW += toStage;
       const toField = subCols ? Math.min(spare - toStage, fieldAt(fieldMax) - fieldW) : 0;
       fieldW += toField;
       const air = spare - toStage - toField;
-      const reserve = shaped.length && air >= NEW_W + gap ? NEW_W + gap : 0;
+      // Room set aside for the New-group column, but only when there is going
+      // to be one in the pack. Held open at rest it is a strip of dead canvas
+      // down the right that nothing ever stands in; held open only for a drag
+      // it moves the whole field the moment you lift a card. `'rail'` is
+      // neither — the caller overlays it — so it reserves nothing.
+      const packsNew = newGroup === 'always' || newGroup === 'auto';
+      const reserve = packsNew && shaped.length && air >= NEW_W + gap ? NEW_W + gap : 0;
       const fill = air - reserve;
       if (fill > 0 && (n || subCols)) {
         const total = stageW + fieldW;
@@ -381,32 +426,33 @@
       x += stageW + gap;
     }
 
-    // A region is as tall as what it holds. Regions pack down a field column
-    // and start the next column when the canvas runs out — so two small
-    // folders share a column instead of each taking a tall, mostly empty one.
+    // A region is as tall as what it holds, and stands in the field column the
+    // pass above put it in — so two small folders share a column instead of
+    // each taking a tall, mostly empty one. Every region in a column is as
+    // wide as the column, which is the width that column was paid for.
     const regions = [];
+    const colXs = [];
+    {
+      let at = x;
+      for (const [index, stacks] of colStacks.entries()) {
+        colXs.push(at);
+        at += stacks * colW + (stacks - 1) * gap + 2 * PAD + (index < colStacks.length - 1 ? gap : 0);
+      }
+    }
     let colIndex = 0;
     let colX = x;
     let colTop = top;
     let colWidth = 0;
     for (const group of shaped) {
-      const w = group.stacks.length * colW + (group.stacks.length - 1) * gap + 2 * PAD;
-      const tallest = group.stacks.reduce((best, stack) => {
-        const stacked = stack.reduce((n, card) => n + cardHeight(card, sizes) + gap, 0) - gap;
-        return Math.max(best, stacked);
-      }, 0);
-      const h = Math.min(availH, Math.max(0, tallest) + NAME_H + 2 * PAD);
-      // While a card is in the air, the loose region is a landing zone: the
-      // lifted card is counted in it, and tucked under a folder it would
-      // shrink that folder under the pointer (regions share their column's
-      // height). It opens its own column for the length of the drag.
-      const landing = newGroup === 'always' && group.folderId === null;
-      if (regions.length && (landing || colTop + h > top + availH + 0.01)) {
-        colIndex += 1;
-        colX += colWidth + gap;
+      const stacks = colStacks[group.col] ?? group.stacks.length;
+      const w = stacks * colW + (stacks - 1) * gap + 2 * PAD;
+      const h = group.h;
+      if (group.col !== colIndex) {
+        colIndex = group.col;
         colTop = top;
         colWidth = 0;
       }
+      colX = colXs[group.col] ?? colX;
       const region = {
         folderId: group.folderId,
         x: colX,
@@ -432,7 +478,7 @@
       colTop += h + gap;
       colWidth = Math.max(colWidth, w);
     }
-    if (regions.length) x = colX + colWidth + gap;
+    if (regions.length) x = colXs[colXs.length - 1] + colWidth + gap;
 
     // A field column is as tall as the canvas. Regions in it are placed by
     // their content, then share what the column has left, in proportion —
@@ -464,9 +510,15 @@
     // card dropped on another means something. A column you can see says it.
     // It is drawn in the room the columns did not take, so it costs the
     // conversations nothing; `newGroup: 'always'` overrides that for the
-    // length of a drag, when it is the thing being aimed at.
-    const wantsNew = regions.length && (newGroup === 'always'
-      || margin + room - x >= NEW_W - 0.5);
+    // length of a drag, when it is the thing being aimed at. `'never'` is for
+    // when it could not be used: an unclickable column is furniture, not an
+    // affordance, and the field would rather have the width.
+    // `'rail'` means the caller draws it themselves, as an overlay at the
+    // canvas edge: a column reserved only for the length of a drag shoves the
+    // whole field sideways the instant you lift a card, and a gesture that
+    // moves its own target is not a gesture.
+    const wantsNew = newGroup !== 'never' && newGroup !== 'rail' && regions.length
+      && (newGroup === 'always' || margin + room - x >= NEW_W - 0.5);
     const newSlot = wantsNew ? { x, y: top, w: NEW_W, h: availH } : null;
     if (newSlot) x += NEW_W + gap;
 

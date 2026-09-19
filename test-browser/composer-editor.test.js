@@ -113,20 +113,19 @@ test('a sent list arrives as Markdown and reads back as a list', async () => {
   assert.equal(await valueOf(view), '');
 });
 
-test('the document chip leads the message and can be taken out', async () => {
+test('the document travels without a pill in the text, and the selection can be dropped', async () => {
   const { page, view } = await mount();
-  const chip = view.locator('.editor .ichip[data-kind="context"]');
-  await chip.waitFor();
-  assert.equal((await chip.locator('.context-text').textContent()).trim(), 'garden');
+  // Nothing in the message but the message.
+  assert.equal(await view.locator('.editor .ichip').count(), 0);
   await page.evaluate(() => {
     const range = document.createRange();
     range.selectNodeContents(document.querySelector('[data-marble-id="h"]'));
     getSelection().removeAllRanges();
     getSelection().addRange(range);
   });
-  await chip.locator('.context-text', { hasText: '1 selected' }).waitFor();
-  await chip.locator('.context-clear').click();
-  assert.equal(await view.locator('.editor .ichip[data-kind="context"]').count(), 0);
+  const pill = view.locator('.bar .selection');
+  await pill.filter({ hasText: '1 selected' }).waitFor();
+  await pill.locator('.selection-clear').click();
   await view.locator('.editor').pressSequentially('script:note');
   const started = page.evaluate(() => new Promise((resolve) => {
     document.querySelector('marble-conversation').addEventListener('conversation', (e) => resolve(e.detail.id), { once: true });
@@ -135,8 +134,11 @@ test('the document chip leads the message and can be taken out', async () => {
   const id = await started;
   await view.locator('.turn-footer[data-status="completed"]').waitFor();
   const user = (await host.drive.agents.store.events(id)).find((e) => e.type === 'user');
+  // The document still travels — a turn cannot exist without one — and only
+  // the selection was dropped. That is the whole of what the pill decided.
   assert.equal(user.context.target, 'garden');
   assert.deepEqual(user.context.selection, []);
-  // The next message gets the chip back.
-  await view.locator('.editor .ichip[data-kind="context"]').waitFor();
+  // And the message itself carried no pill text into the prompt.
+  const turns = await host.drive.agents.store.turns(id);
+  assert.match(turns[0].prompt, /^script:note/);
 });
