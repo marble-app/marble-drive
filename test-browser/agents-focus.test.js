@@ -656,3 +656,108 @@ test('the Focus arrangement and the List arrangement do not overwrite each other
   await page.locator('.views [data-view="focus"]').click();
   await page.waitForFunction(() => document.querySelectorAll('.pane .dock-frame:not(.dock-ghost)').length === 2);
 });
+
+// ---------------------------------------------------------- holding a target
+
+/** The pane's bounding box was a cliff: room opened for a split, and two pixels
+ *  past the edge — an edge nothing paints — `resolveDrop` fell out of bounds and
+ *  the room vanished. Aiming "at the bottom" lands exactly there. */
+test('room opened for a split survives the pointer drifting past the pane edge', async () => {
+  // Pinned: the bands are fractions of the pane, so the geometry is the test.
+  const { page } = await openAgents({ viewport: { width: 1440, height: 900 } });
+  const ids = await page.evaluate(async () => {
+    const agent = window.marble.agent;
+    const made = [];
+    for (const title of ['one', 'two', 'three']) {
+      const id = await agent.start({ provider: 'fake' });
+      await agent.update(id, { title });
+      made.push(id);
+    }
+    await agent.update(made[0], { pinned: true });
+    await agent.update(made[1], { pinned: true });
+    return { dragged: made[2] };
+  });
+  await page.locator('.views [data-view="focus"]').click();
+  await page.locator(`.focus-card[data-id="${ids.dragged}"]`).waitFor();
+  await page.waitForTimeout(700);
+
+  const from = await page.locator(`.focus-card[data-id="${ids.dragged}"]`).boundingBox();
+  const pane = await page.locator('.pane').boundingBox();
+  const bottom = pane.y + pane.height;
+  const ghosts = () => page.evaluate(() => document.querySelectorAll('.dock-ghost:not(.marble-leaving)').length);
+
+  await page.mouse.move(from.x + from.width / 2, from.y + 14);
+  await page.mouse.down();
+  await page.mouse.move(from.x + from.width / 2 + 24, from.y + 30, { steps: 4 });
+  await page.mouse.move(pane.x + pane.width * 0.5, bottom - 6, { steps: 12 });
+  await page.waitForTimeout(350);
+  assert.equal(await ghosts(), 1, 'no room opened inside the bottom band');
+
+  // Outward, past the pane's own border, the way a hand aiming at the very
+  // bottom of the screen does.
+  const held = [];
+  for (const dy of [2, 6, 12, 20]) {
+    await page.mouse.move(pane.x + pane.width * 0.5, bottom + dy);
+    await page.waitForTimeout(180);
+    held.push({ dy, ghosts: await ghosts() });
+  }
+  // Far enough out is a different intention, and there the room should go.
+  await page.mouse.move(pane.x + pane.width * 0.5, bottom + 160);
+  await page.waitForTimeout(300);
+  const farOut = await ghosts();
+  await page.mouse.up();
+  await page.waitForTimeout(400);
+
+  assert.deepEqual(
+    held.filter((row) => row.ghosts !== 1),
+    [],
+    `the room folded while the pointer was still at the pane's edge: ${JSON.stringify(held)}`,
+  );
+  assert.equal(farOut, 0, 'the room stayed open with the pointer well away from the pane');
+});
+
+/** The reaction was wired but imperceptible: a 6% background shift and a 1px
+ *  border tint on a region hundreds of pixels across reads as nothing at all. */
+test('a region being aimed at changes in a way you can actually see', async () => {
+  const { page } = await openAgents();
+  const ids = await page.evaluate(async () => {
+    const agent = window.marble.agent;
+    const made = [];
+    for (const title of ['a', 'b', 'c', 'd']) {
+      const id = await agent.start({ provider: 'fake' });
+      await agent.update(id, { title });
+      made.push(id);
+    }
+    await agent.createFolder({ conversationIds: [made[0], made[1]], name: 'Grouped' });
+    return { dragged: made[3] };
+  });
+  await page.locator('.views [data-view="focus"]').click();
+  await page.locator(`.focus-card[data-id="${ids.dragged}"]`).waitFor();
+  await page.waitForTimeout(700);
+
+  const reaction = await page.evaluate(() => {
+    const read = (b) => {
+      const s = getComputedStyle(b);
+      return { ring: s.boxShadow, width: parseFloat(s.borderTopWidth), bg: s.backgroundColor };
+    };
+    const out = {};
+    for (const basin of document.querySelectorAll('.focus-basin')) {
+      const key = basin.hasAttribute('data-loose') ? 'loose' : 'folder';
+      const was = basin.dataset.drop ?? null;
+      delete basin.dataset.drop;
+      const off = read(basin);
+      basin.dataset.drop = 'into';
+      const on = read(basin);
+      if (was) basin.dataset.drop = was; else delete basin.dataset.drop;
+      out[key] = { off, on };
+    }
+    return out;
+  });
+
+  for (const [which, { off, on }] of Object.entries(reaction)) {
+    assert.ok(
+      on.ring !== off.ring && on.ring !== 'none',
+      `the ${which} region gains no ring when aimed at (${off.ring} → ${on.ring})`,
+    );
+  }
+});

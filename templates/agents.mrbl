@@ -572,14 +572,28 @@ __ICON__
     border-color: color-mix(in srgb, var(--line) 80%, transparent);
   }
   .focus-basin[data-loose] .focus-basin-name { color: var(--faint); }
+  /* What a release would join. A tint and a 1px border were the whole reaction
+     before, which on a region hundreds of pixels across is a change nobody can
+     see — the complaint was that a drag into a group showed no reaction at all,
+     and it was right: the reaction was below the threshold of noticing. A ring
+     drawn inside the edge is what carries it, because a ring reads at any size
+     the region happens to be; the tint only supports it. */
   .focus-basin[data-drop="into"] {
-    border-color: color-mix(in srgb, var(--folder, var(--accent-ink)) 60%, var(--line));
-    background: color-mix(in srgb, var(--folder, var(--accent-ink)) 22%, var(--paper));
+    border-color: color-mix(in srgb, var(--folder, var(--accent-ink)) 70%, var(--line));
+    background: color-mix(in srgb, var(--folder, var(--accent-ink)) 26%, var(--paper));
+    box-shadow: inset 0 0 0 2px color-mix(in srgb, var(--folder, var(--accent-ink)) 62%, transparent);
   }
+  .focus-basin[data-drop="into"] .focus-basin-name {
+    color: color-mix(in srgb, var(--folder, var(--accent-ink)) 85%, var(--ink));
+  }
+  /* Loose chats give up the fill at rest, so the ring is the whole of their
+     reaction — and it closes the dashed edge, which says "this is a place to
+     land" in the same move. */
   .focus-basin[data-loose][data-drop="into"] {
     border-style: solid;
-    border-color: color-mix(in srgb, var(--accent-ink) 45%, var(--line));
-    background: color-mix(in srgb, var(--accent-ink) 7%, var(--paper));
+    border-color: color-mix(in srgb, var(--accent-ink) 55%, var(--line));
+    background: color-mix(in srgb, var(--accent-ink) 10%, var(--paper));
+    box-shadow: inset 0 0 0 2px color-mix(in srgb, var(--accent-ink) 55%, transparent);
   }
   .focus-basin-name {
     pointer-events: auto; position: absolute; top: .5rem; left: 18px;
@@ -4551,6 +4565,10 @@ __ICON__
     // the drop is something you watch happen before you do it. Dropping hands
     // the ghost's place to the real chat, unchanged.
     const ROOM_MS = 520;
+    /** How far past the pane a pointer may drift before the room it opened
+     *  folds. Wide enough that the pane's unpainted border is not a cliff,
+     *  narrow enough that leaving for the field still means leaving. */
+    const ROOM_KEEP = 56;
     let room = null;
     let roomLive = false;
     let collapseTimer = 0;
@@ -4708,7 +4726,23 @@ __ICON__
         return inDockZone(clientX, clientY) ? { plan: { mode: 'fill', zone: true } } : none;
       }
       const box = pane.getBoundingClientRect();
-      if (clientX < box.left || clientX > box.right || clientY < box.top || clientY > box.bottom) return none;
+      if (clientX < box.left || clientX > box.right || clientY < box.top || clientY > box.bottom) {
+        // The pane's border was a cliff. A drop aimed at the very bottom or the
+        // very side of the stage sits within a pixel or two of it, nothing
+        // paints it, and crossing it by 2px took the whole room away — which is
+        // the "the space closes back in while I am still dragging" fault.
+        //
+        // A room already open therefore holds while the pointer is only just
+        // outside: what you opened stays open until you mean something else,
+        // and KEEP is how far "just outside" reaches. Only an open room gets
+        // this — outside the pane with nothing open is still nothing, so a
+        // drag that never reached the stage cannot conjure a split from beyond
+        // its edge.
+        const held = room && !room.closing
+          && clientX >= box.left - ROOM_KEEP && clientX <= box.right + ROOM_KEEP
+          && clientY >= box.top - ROOM_KEEP && clientY <= box.bottom + ROOM_KEEP;
+        return held ? { plan: room.plan } : none;
+      }
       const hasPane = document.body.hasAttribute('data-open') && convo.getAttribute('conversation');
       if (!hasPane) return { plan: { mode: 'fill' } };
       if (narrowView.matches || reduceMotion.matches) {
