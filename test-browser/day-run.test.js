@@ -13,9 +13,19 @@ import test from 'node:test';
 
 import { startDrive } from './harness.js';
 
-const SOURCE = await fsp
-  .readFile(new URL('../drive/drive.mrbl', import.meta.url), 'utf8')
-  .catch(() => null);
+// Parked 2026-09-18 at Bryan's request, to be settled later. The subject here
+// is the day-runner button, which lives in `drive/drive.mrbl` and not in
+// `templates/drive.mrbl` — so this file can only ever be green on the one
+// machine whose gitignored drive has that button, and a checkout carrying an
+// older drive.mrbl fails rather than skips, because the prompt swap below
+// silently finds nothing to replace. Flip PARKED to false to bring it back,
+// or better, move the button into the template and delete this line.
+const PARKED = true;
+const SOURCE = PARKED
+  ? null
+  : await fsp
+    .readFile(new URL('../drive/drive.mrbl', import.meta.url), 'utf8')
+    .catch(() => null);
 
 const pad = (n) => String(n).padStart(2, '0');
 const now = new Date();
@@ -44,7 +54,9 @@ const SCRIPTS = {
 };
 
 if (!SOURCE) {
-  test('the days folder can write the day it is missing', { skip: 'no drive/drive.mrbl in this checkout' }, () => {});
+  test('the days folder can write the day it is missing', {
+    skip: PARKED ? 'parked: the day-runner lives in the gitignored drive, not in templates/drive.mrbl' : 'no drive/drive.mrbl in this checkout',
+  }, () => {});
 } else {
   const host = await startDrive({
     scripts: SCRIPTS,
