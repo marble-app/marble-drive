@@ -139,6 +139,13 @@ the chosen keys and labels as the reply. `POST /agent/turns/:id/answer
 Stop denies it; a process that ends first voids it. There is no timeout on
 you.
 
+`GET /agent/asks` lists every open ask across conversations — the request,
+the turn, and a `lead` of the last two things the agent said or did before
+it asked — derived from the runner's live turns, not stored. The summary
+stream (`/agent/events?all=1`) carries `event: ask` when one opens and
+`event: ask.resolved` when it closes, so a list can know without holding
+every conversation's stream. The Agents page's Deck is built on both.
+
 ## Messages
 
 Agents in one project can talk to each other. Three tools, on every
@@ -347,9 +354,9 @@ Agent text is shown, never interpreted as HTML (`renderText` in
 
 A drive that has run `serve` at least once with this host gets an `Agents`
 document at the root, seeded the same way Drive is: written only if it is
-not already there. It is a library of conversations in four views: **List**,
-**Board**, **Folders**, and **Focus**. `V` cycles that order. The drawer's
-**Open Agents** appears once that document exists.
+not already there. It is a library of conversations in five views: **List**,
+**Board**, **Folders**, **Focus**, and **Deck**. `V` cycles that order. The
+drawer's **Open Agents** appears once that document exists.
 
 The page uses `window.marble.agent` and the same `<marble-conversation>`
 as the drawer (`<meta name="marble-agent" content="custom">`, so it does
@@ -389,6 +396,48 @@ Digest. Shift-double-click or **Keep open** adds a Full without demoting the
 others, up to four. Cold Digests over the budget become Chips. Arrow keys
 move selection; Space opens a Quick Look preview without pinning. Narrow view
 stacks the cards and does not add extra panes.
+
+**Deck** orders by how much a conversation wants you, not where it lives:
+four bands — **Needs you**, **Running**, **Review**, **Idle** — each a
+projection of the same summaries every other view draws. Nothing is stored
+for it. An open ask is a card in the first band with a **peek** (the tool
+and its argument, the last two things the agent said or did, a diff's first
+six lines) so it can be answered without opening anything; the answer is
+optimistic, and a lost one comes back with a line saying so. A new ask
+bumps the band's count and flashes its header rather than taking the
+screen. Idle starts collapsed; band state is tab-local. On a phone a
+review row swiped right is marked reviewed; swiped left it only reveals
+**Undo turn** as a button. A long press on any row opens an actions sheet
+(Stop, Open, Mark reviewed, Archive, Move to folder, Continue in…).
+Consequential answers are buttons, never completed gestures.
+
+**On a phone** (under 720 px) Deck is the default view when none is
+stored, and the chrome is a phone's: a one-row topbar with the document's
+title, an **asks pill** (open asks, on every view; tapping it goes to
+Deck), a ring for the worst signed-in meter (tapping it opens the
+**Fleet** sheet: every window, and **Stop all running**), and **⋯** for
+Filter, Settings and the other views; a translucent **thumb bar** at the
+sill that starts a new conversation (project, agent, prompt). A tapped row
+takes the screen at a phone density, enters from the right, and leaves by
+a swipe from the left edge. Sheets track the finger, rubber-band at the
+top, and commit by the sign of the velocity at release. The keyboard is
+read from `visualViewport` into one variable, `--vv-h`, that every phone
+layout uses. The document declares its own installability in its `<head>`
+(`apple-mobile-web-app-capable` and friends), so Safari's **Add to Home
+Screen** opens it without browser chrome; the host ships nothing for it.
+A backgrounded page closes its event streams and resyncs on return.
+
+**Focus on a phone** is one column held by one number: the card in your
+hand is Full (the live pane sits over it), the next is a four-line digest,
+the one beyond a chip, and everything further a 10 px sliver, with sizes
+interpolated between as you drag. The card you grab stays under your
+finger; a release projects the flick, snaps to the nearest card and springs
+there (damping 1, or 0.8 when the flick carried at least one card). A tap
+springs to that card; a long press opens the actions sheet. Less room —
+the keyboard — demotes the neighbours and keeps the Full. Order is the
+desk's: folders in catalog order, oldest first, stable. Not on the phone:
+keep-open, Quick Look, cooling, and dragging between regions (**Move to
+folder** is on the sheet).
 
 Each row has a ⋯ menu for **Archive** / **Unarchive**, **Mark reviewed**,
 **Undo last turn**, and **Continue in** another CLI. Archiving the open thread

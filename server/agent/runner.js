@@ -27,7 +27,7 @@ const CLOSE_GRACE_MS = 5_000;
 const STEER_NOTE = 'While you were working I added this note. Treat it as course-correction.';
 const DISPATCH = new Set(['queue', 'steer', 'interrupt']);
 
-export function createRunner({ store, tools, providers, workdir, origin, bridgePath, browserPath, readDocument, publish, limits, log = console, skills = [], driveRoot, projects = null, power = '', sandbox = null, onLook = null, onFinish = null }) {
+export function createRunner({ store, tools, providers, workdir, origin, bridgePath, browserPath, readDocument, publish, publishAsk = () => {}, limits, log = console, skills = [], driveRoot, projects = null, power = '', sandbox = null, onLook = null, onFinish = null }) {
   const live = new Map(); // turnId → live turn
   const order = []; // turnIds, in the order they were sent
   const tokens = new Map(); // token → live turn
@@ -602,10 +602,15 @@ export function createRunner({ store, tools, providers, workdir, origin, bridgeP
         return;
       case 'ask': {
         const kind = event.tool === 'AskUserQuestion' ? 'question' : 'permission';
-        turn.asks.set(event.requestId, { closed: false });
+        const request = { ...event, kind };
+        const since = Date.now();
+        turn.asks.set(event.requestId, { closed: false, request, since });
         turn.holdStall?.();
         chained(turn.conversationId, () => store.updateConversation(turn.conversationId, { asking: true }))
-          .then(() => emit(turn, { ...event, kind }))
+          .then(async () => {
+            await emit(turn, request);
+            publishAsk('ask', { conversation: turn.conversationId, turn: turn.id, requestId: event.requestId, request, since });
+          })
           .catch((err) => log.error(`[agents] ${err.message}`));
         return;
       }
@@ -658,6 +663,7 @@ export function createRunner({ store, tools, providers, workdir, origin, bridgeP
       ask.closed = true;
       if (deny) writeControl(turn, requestId, { behavior: 'deny', message: `Turn ${why} from Marble` });
       await emit(turn, { type: 'ask.void', requestId, why });
+      publishAsk('ask.resolved', { conversation: turn.conversationId, requestId });
     }
   }
 
@@ -892,8 +898,22 @@ export function createRunner({ store, tools, providers, workdir, origin, bridgeP
       const stillOpen = [...turn.asks.values()].some((a) => !a.closed);
       if (!stillOpen) await store.updateConversation(turn.conversationId, { asking: false });
       await emit(turn, { type: 'ask.answered', requestId, response });
+      publishAsk('ask.resolved', { conversation: turn.conversationId, requestId });
       if (!stillOpen) turn.resumeStall?.();
       return true;
+    },
+
+    /** Every ask a running turn is waiting on, across conversations. Derived
+     *  from the live turns; nothing is stored for it. */
+    openAsks: () => {
+      const out = [];
+      for (const turn of live.values()) {
+        for (const [requestId, ask] of turn.asks) {
+          if (ask.closed) continue;
+          out.push({ conversation: turn.conversationId, turn: turn.id, requestId, request: ask.request, since: ask.since });
+        }
+      }
+      return out.sort((a, b) => a.since - b.since);
     },
 
     /** The other conversations in this turn's project, with what each is

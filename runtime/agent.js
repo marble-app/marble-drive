@@ -83,27 +83,50 @@
     // ---------------------------------------------------------- the streams
 
     const streams = new Map();
+    // A backgrounded page closes its streams and reopens them on return: a
+    // phone suspends constantly, and a dead EventSource nobody reconnected
+    // is how a page comes to feel broken.
+    let suspended = false;
+
+    const openStream = (key, entry) => {
+      const url = key === '*' ? '/agent/events?all=1' : `/agent/events?conversation=${enc(key)}`;
+      const source = new EventSource(url);
+      const current = entry;
+      const deliver = (message) => {
+        let data;
+        try {
+          data = JSON.parse(message.data);
+        } catch {
+          return;
+        }
+        if (current.history) current.history.push(data);
+        for (const handler of [...current.handlers]) handler(data);
+      };
+      if (key === '*') {
+        source.addEventListener('summary', deliver);
+        source.addEventListener('folders', deliver);
+        // An ask opening or closing anywhere, for a list that would
+        // otherwise need every conversation's stream to know.
+        for (const kind of ['ask', 'ask.resolved']) {
+          source.addEventListener(kind, (message) => {
+            let data;
+            try {
+              data = JSON.parse(message.data);
+            } catch {
+              return;
+            }
+            for (const handler of [...current.handlers]) handler({ kind, ...data });
+          });
+        }
+      } else source.onmessage = deliver;
+      entry.source = source;
+    };
 
     function on(key, fn) {
       let entry = streams.get(key);
       if (!entry) {
-        const url = key === '*' ? '/agent/events?all=1' : `/agent/events?conversation=${enc(key)}`;
-        entry = { source: new EventSource(url), handlers: new Set(), history: key === '*' ? null : [] };
-        const current = entry;
-        const deliver = (message) => {
-          let data;
-          try {
-            data = JSON.parse(message.data);
-          } catch {
-            return;
-          }
-          if (current.history) current.history.push(data);
-          for (const handler of [...current.handlers]) handler(data);
-        };
-        if (key === '*') {
-          entry.source.addEventListener('summary', deliver);
-          entry.source.addEventListener('folders', deliver);
-        } else entry.source.onmessage = deliver;
+        entry = { source: null, handlers: new Set(), history: key === '*' ? null : [] };
+        if (!suspended) openStream(key, entry);
         streams.set(key, entry);
       }
       entry.handlers.add(fn);
@@ -113,11 +136,27 @@
       return () => {
         entry.handlers.delete(fn);
         if (entry.handlers.size === 0 && streams.get(key) === entry) {
-          entry.source.close();
+          entry.source?.close();
           streams.delete(key);
         }
       };
     }
+
+    function suspend() {
+      suspended = true;
+      for (const entry of streams.values()) {
+        entry.source?.close();
+        entry.source = null;
+      }
+    }
+
+    function resume() {
+      if (!suspended) return;
+      suspended = false;
+      for (const [key, entry] of streams) if (!entry.source) openStream(key, entry);
+    }
+
+    const streamsOpen = () => [...streams.values()].filter((entry) => entry.source).length;
 
     // ------------------------------------------------------------- the rest
 
@@ -145,6 +184,7 @@
       saveSettings: (patch) => ask('/agent/settings', { method: 'PUT', body: patch }),
       skills: (provider = null) => ask(provider ? `/agent/skills?provider=${enc(provider)}` : '/agent/skills'),
       usage: () => ask('/agent/usage'),
+      asks: () => ask('/agent/asks'),
       usageHistory: (weeks) => ask(weeks ? `/agent/usage/history?weeks=${enc(weeks)}` : '/agent/usage/history'),
       workspace: () => ask('/agent/workspace'),
       conversations: ({ archived = false } = {}) => ask(`/agent/conversations${archived ? '?archived=1' : ''}`),
@@ -204,6 +244,9 @@
       saveWorkingSet: (ids) => ask('/agent/folders/working-set', { method: 'PUT', body: { ids } }),
 
       on,
+      suspend,
+      resume,
+      streamsOpen,
       context,
       select(ids) {
         chosen = Array.isArray(ids) && ids.length ? [...ids] : null;

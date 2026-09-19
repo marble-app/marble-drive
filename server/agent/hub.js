@@ -39,6 +39,14 @@ export function createHub() {
     }
   }
 
+  /** An ask opened or closed somewhere. Lists want to know without holding
+   *  every conversation's stream. */
+  function publishAsk(kind, payload) {
+    for (const res of listeners.get('*') ?? []) {
+      write(res, `event: ${kind}\ndata: ${JSON.stringify(payload)}\n\n`);
+    }
+  }
+
   const beat = setInterval(() => {
     for (const set of listeners.values()) for (const res of set) write(res, ': ping\n\n');
   }, KEEPALIVE);
@@ -48,6 +56,7 @@ export function createHub() {
     subscribe,
     publish,
     publishFolders,
+    publishAsk,
     close() {
       clearInterval(beat);
       listeners.clear();

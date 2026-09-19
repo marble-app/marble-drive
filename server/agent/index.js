@@ -153,6 +153,7 @@ async function boot({ config, store, writeOps, createDocument, origin, providers
     browserPath: BROWSER,
     readDocument: (docPath) => store.read(docPath),
     publish: hub.publish,
+    publishAsk: hub.publishAsk,
     limits: {
       maxRunning: settings.maxRunning,
       stallMs: config.agentStallMinutes * 60_000,

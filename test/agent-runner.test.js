@@ -39,11 +39,18 @@ const SCRIPTS = {
     { call: 'wait_for_reply', args: { seconds: 5 }, as: 'reply' },
     { say: 'waited' },
   ],
+  // The receiver: replies to the first message in its prompt. The fake cannot
+  // parse its prompt, so it lists peers and answers the first one it sees.
+  replyfirst: [
+    { call: 'list_agents', args: {}, as: 'peers' },
+    { call: 'send_message', args: { to: { $ref: 'peers.agents.0.id' }, text: 'answer' }, as: 'sent' },
+    { say: 'replied' },
+  ],
   // Long enough to still be running when a message arrives.
   linger2: [{ sleep: 1500 }, { say: 'done lingering' }],
 };
 
-async function setup({ limits = {}, tools, realTools = null, onLook, capability, projects = null, onFinish = null, onPublish = null, origin = () => 'http://127.0.0.1:1' } = {}) {
+async function setup({ limits = {}, tools, realTools = null, onLook, capability, projects = null, onFinish = null, publishAsk = undefined, onPublish = null, origin = () => 'http://127.0.0.1:1' } = {}) {
   const dir = await fsp.mkdtemp(path.join(os.tmpdir(), 'marble-runner-'));
   const store = createAgentStore({ dir: path.join(dir, 'agents'), defaultProvider: 'fake' });
   await store.ready();
@@ -76,6 +83,7 @@ async function setup({ limits = {}, tools, realTools = null, onLook, capability,
       published.push({ conversationId, event });
       onPublish?.(conversationId, event);
     },
+    publishAsk,
     limits: { maxRunning: 3, stallMs: 60_000, maxMs: 60_000, killGraceMs: 200, ...limits },
     log: { log() {}, error() {} },
     onLook,
@@ -1482,5 +1490,28 @@ test('a message for a conversation with a turn queued rides in on that turn', as
   assert.match(prompt, /Messages that arrived while you were away/);
   assert.equal((await store.turns(b.id)).length, 2, 'the queued turn carried it; no third turn');
   assert.deepEqual(await store.inbox(b.id), []);
+  await runner.close();
+});
+
+test('openAsks lists an open ask with its request, and forgets it once answered', async () => {
+  const asks = [];
+  const { store, runner } = await setup({ capability: 'full', publishAsk: (kind, payload) => asks.push({ kind, ...payload }) });
+  const { id } = await store.createConversation({ provider: 'fake' });
+  await runner.send(id, { prompt: 'script:permission', context: { target: 'garden' } });
+  const ask = await until(async () => (await store.events(id)).find((e) => e.type === 'ask'));
+  await until(() => asks.length);
+  const open = runner.openAsks();
+  assert.equal(open.length, 1);
+  assert.equal(open[0].conversation, id);
+  assert.equal(open[0].turn, `${id}-t1`);
+  assert.equal(open[0].requestId, ask.requestId);
+  assert.equal(open[0].request.tool, 'Bash');
+  assert.equal(open[0].request.kind, 'permission');
+  assert.ok(open[0].since > 0);
+  assert.deepEqual(asks.map((a) => a.kind), ['ask']);
+  await runner.answer(`${id}-t1`, ask.requestId, { behavior: 'allow' });
+  assert.equal(runner.openAsks().length, 0);
+  assert.deepEqual(asks.map((a) => a.kind), ['ask', 'ask.resolved']);
+  await until(async () => (await store.turn(`${id}-t1`)).status === 'completed');
   await runner.close();
 });
