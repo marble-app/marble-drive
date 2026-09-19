@@ -148,8 +148,12 @@ export function createRunner({ store, tools, providers, workdir, origin, bridgeP
       lines.push('', `${others} other agent conversation(s) are running in this project right now. Do not stash, reset, check out or discard changes you did not make.`);
     }
     // Messages that arrived while this conversation was busy or asleep ride in
-    // on whatever turn starts next, so no message waits for a person.
+    // on whatever turn starts next, so no message waits for a person. Kept on
+    // the turn too: if this turn never gets to act on them — cancelled before
+    // its process spawns, the host closing, `start()` throwing below — finish()
+    // hands them back to the inbox rather than losing them.
     const arrived = await store.takeInbox(turn.conversationId);
+    turn.arrived = arrived;
     if (arrived.length) {
       for (const m of arrived) {
         await emit(turn, { type: 'message', messageId: m.id, from: m.from, fromTitle: (await store.conversation(m.from))?.title ?? null, text: m.text, about: m.about, delivered: 'inbox' });
@@ -251,6 +255,7 @@ export function createRunner({ store, tools, providers, workdir, origin, bridgeP
       sent: 0, // messages this turn has sent; capped
       waiter: null, // resolve() of a wait_for_reply parked on this turn
       from, // { conversation, title, provider } when a message started this turn
+      arrived: null, // messages composePrompt() took from the inbox; handed back in finish() if this turn never got to act on them
       finishing: false, // true once finish() has started; new tool calls are refused
       ended: new Promise((resolve) => { ended = resolve; }), // settles once the turn has left the runner
       endTurn: () => ended(),
@@ -304,8 +309,12 @@ export function createRunner({ store, tools, providers, workdir, origin, bridgeP
   }
 
   /** Start a turn on an idle conversation carrying the messages in its inbox.
-   *  Returns the send result, or null when the conversation is gone or has no
-   *  document to work in. */
+   *  Returns the send result, or null when the conversation is gone, has no
+   *  document to work in, or another caller already claimed the inbox (two
+   *  `startDelivery`s can race for the same idle conversation — finish()'s
+   *  fire-and-forget check and a concurrent `deliver` — and only the one that
+   *  actually takes messages may start a turn; the other must not fall back
+   *  to the `messages` it was handed, or that batch is delivered twice). */
   async function startDelivery(conversationId, messages, fallbackTarget = null) {
     const meta = await store.conversation(conversationId);
     if (!meta) return null;
@@ -316,10 +325,10 @@ export function createRunner({ store, tools, providers, workdir, origin, bridgeP
       return null;
     }
     const taken = await store.takeInbox(conversationId);
-    const batch = taken.length ? taken : messages;
+    if (!taken.length) return null; // someone else already took these
     const sender = await store.conversation(first.from);
     return send(conversationId, {
-      prompt: renderMessages(batch, await titlesOf(batch.map((m) => m.from))),
+      prompt: renderMessages(taken, await titlesOf(taken.map((m) => m.from))),
       context: { target },
       from: { conversation: first.from, title: sender?.title ?? null, provider: sender?.provider ?? null },
     });
@@ -699,6 +708,15 @@ export function createRunner({ store, tools, providers, workdir, origin, bridgeP
       }
       const idx = order.indexOf(turn.id);
       if (idx !== -1) order.splice(idx, 1);
+      // This turn took the inbox in composePrompt() but never got to act on
+      // it — cancelled before its process spawned, the host closing, `start()`
+      // throwing before spawn. Hand the messages back rather than lose them;
+      // the check just below then queues a delivery turn for them (or, when
+      // `closed`, the next boot recovers them).
+      if (!turn.child && turn.arrived?.length) {
+        for (const m of turn.arrived) await store.appendInbox(turn.conversationId, m);
+        turn.arrived = null;
+      }
       // Anything that arrived for this conversation while it was running and
       // was not taken by a wait rides in on a delivery turn. At most one: the
       // next turn to start takes the whole inbox.
@@ -889,13 +907,21 @@ export function createRunner({ store, tools, providers, workdir, origin, bridgeP
       turn.holdStall?.();
       let timer;
       const woke = await new Promise((resolve) => {
-        turn.waiter = () => resolve(true);
-        timer = setTimeout(() => resolve(false), ms);
+        turn.waiter = () => {
+          turn.waiter = null; // a deliver racing the timeout must not report `live` to a turn that already gave up
+          resolve(true);
+        };
+        timer = setTimeout(() => {
+          turn.waiter = null;
+          resolve(false);
+        }, ms);
         timer.unref?.();
       });
       clearTimeout(timer);
-      turn.waiter = null;
-      turn.resumeStall?.();
+      // finish() may have woken this wait (turn.waiter?.() in its cleanup) —
+      // in which case the turn is already ending and a fresh stall timer here
+      // would outlive it. Only re-arm the stall when this turn is still going.
+      if (!turn.finishing) turn.resumeStall?.();
       if (!woke) return { timeout: true };
       const messages = await take();
       return messages.length ? { messages } : { timeout: true };

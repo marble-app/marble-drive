@@ -38,13 +38,6 @@ const SCRIPTS = {
     { call: 'wait_for_reply', args: { seconds: 5 }, as: 'reply' },
     { say: 'waited' },
   ],
-  // The receiver: replies to the first message in its prompt. The fake cannot
-  // parse its prompt, so it lists peers and answers the first one it sees.
-  replyfirst: [
-    { call: 'list_agents', args: {}, as: 'peers' },
-    { call: 'send_message', args: { to: { $ref: 'peers.agents.0.id' }, text: 'answer' }, as: 'sent' },
-    { say: 'replied' },
-  ],
   // Long enough to still be running when a message arrives.
   linger2: [{ sleep: 1500 }, { say: 'done lingering' }],
 };
@@ -1257,5 +1250,89 @@ test('patchQueued edits a waiting prompt and cycles dispatch', async () => {
   await runner.cancel(first.turnId);
   await finished(store, first.turnId);
   await finished(store, second.turnId);
+  await runner.close();
+});
+
+// --- Fix round 1 (task 3 review): a message is delivered exactly once and never lost. ---
+
+test('two messages delivered to the same idle conversation at once start exactly one turn', async () => {
+  const { store, runner } = await setupMessaging();
+  const a1 = await store.createConversation({ provider: 'fake' });
+  const a2 = await store.createConversation({ provider: 'fake' });
+  const b = await store.createConversation({ provider: 'fake' });
+  const turnA1 = { conversationId: a1.id, target: 'd', sent: 0, project: { id: 'drive' } };
+  const turnA2 = { conversationId: a2.id, target: 'd', sent: 0, project: { id: 'drive' } };
+  // Both calls see `b` idle and race for it, the same way finish()'s
+  // fire-and-forget inbox check and a concurrent deliver do in production.
+  // `startDelivery`'s takeInbox is serialized per conversation, so exactly
+  // one of the two calls actually starts a turn; the loser must not fall
+  // back to the single message it was handed, or `b` gets two turns for one
+  // delivery.
+  const [r1, r2] = await Promise.all([
+    runner.deliver(turnA1, { to: b.id, text: 'first message' }),
+    runner.deliver(turnA2, { to: b.id, text: 'second message' }),
+  ]);
+  assert.ok(!r1.error, r1.error);
+  assert.ok(!r2.error, r2.error);
+  const bTurns = await store.turns(b.id);
+  assert.equal(bTurns.length, 1, 'exactly one turn was started on b, not two');
+  await finished(store, bTurns[0].id);
+  const user = (await store.events(b.id)).find((e) => e.type === 'user');
+  assert.match(user.text, /first message/);
+  assert.match(user.text, /second message/);
+  await runner.close();
+});
+
+test('a turn cancelled before its process spawns hands its taken inbox back rather than losing it', async () => {
+  const dir = await fsp.mkdtemp(path.join(os.tmpdir(), 'marble-runner-'));
+  const store = createAgentStore({ dir: path.join(dir, 'agents'), defaultProvider: 'slow-prepare' });
+  await store.ready();
+  const provider = {
+    id: 'slow-prepare',
+    label: 'Slow',
+    detect: async () => ({ installed: true, signedIn: true, detail: '' }),
+    prepare: () => new Promise((resolve) => setTimeout(resolve, 300)),
+    spawn() {
+      return { command: process.execPath, args: ['-e', 'process.exit(0)'], env: {}, stdin: '' };
+    },
+    parse: () => [],
+  };
+  const runner = createRunner({
+    store,
+    tools: { call: async () => ({ ok: true }) },
+    providers: new Map([['slow-prepare', provider]]),
+    workdir: path.join(dir, 'work'),
+    origin: () => 'http://127.0.0.1:1',
+    bridgePath: '/nonexistent/marble-mcp.js',
+    readDocument: async () => null,
+    publish: () => {},
+    limits: { maxRunning: 3, stallMs: 60_000, maxMs: 60_000, killGraceMs: 200 },
+    log: { log() {}, error() {} },
+  });
+  await runner.boot();
+
+  const { id } = await store.createConversation({ provider: 'slow-prepare' });
+  await store.appendInbox(id, store.createMessage({ from: 'somebody', to: id, text: 'left waiting' }));
+
+  // `send` doesn't return until `start` does, and `start` doesn't return until
+  // `prepare` does (300ms) — so cancel lands well before composePrompt() even
+  // runs, and composePrompt() runs (taking the inbox) before `start` next
+  // checks `turn.cancelled`. That is exactly the window the fix covers: the
+  // turn took the messages in composePrompt() but is cancelled before any
+  // process — and so any chance to act on them — exists.
+  const sending = runner.send(id, { prompt: 'x', context: { target: 'd' } });
+  const live = await until(() => (runner.running()[0] ? runner.running()[0] : null));
+  assert.equal(await runner.cancel(live.id), true);
+  await sending;
+  const turn = await finished(store, live.id);
+  assert.equal(turn.status, 'cancelled');
+
+  // The message must not be lost: finish() hands it back to the inbox, and
+  // the pending-inbox check right after queues a delivery turn for it.
+  const delivery = await until(async () => (await store.turns(id))[1] ?? null);
+  await finished(store, delivery.id);
+  const user = (await store.events(id)).filter((e) => e.type === 'user')[1];
+  assert.match(user.text, /left waiting/);
+  assert.deepEqual(await store.inbox(id), []);
   await runner.close();
 });
