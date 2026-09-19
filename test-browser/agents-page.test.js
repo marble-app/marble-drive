@@ -617,7 +617,9 @@ test('dragging a conversation shows a card that follows the pointer', async () =
   await page.mouse.up();
 });
 
-test('dropping a pane header onto another header swaps the chats', async () => {
+// A swap moves the panes, not the chats: the frames trade places and each
+// chat stays in the frame it was in, which is what the drag previewed.
+test('dropping a pane header onto another header trades the panes\' places', async () => {
   const { page } = await openAgents();
   const [first, second] = await page.evaluate(async () => {
     const agent = window.marble.agent;
@@ -646,7 +648,9 @@ test('dropping a pane header onto another header swaps the chats', async () => {
   await page.waitForFunction((ids) => {
     const primary = document.querySelector('.pane > marble-conversation')?.getAttribute('conversation');
     const extra = document.querySelector('.pane marble-conversation[data-marble-transient]')?.getAttribute('conversation');
-    return primary === ids[1] && extra === ids[0];
+    const pFrame = document.querySelector('.pane .dock-frame[data-key="P"]')?.getBoundingClientRect();
+    const leaf = document.querySelector('.pane .dock-leaf:not(.dock-ghost)')?.getBoundingClientRect();
+    return primary === ids[0] && extra === ids[1] && pFrame && leaf && pFrame.left > leaf.left + 10;
   }, [first, second]);
 });
 

@@ -3,8 +3,10 @@
 > Status: **part built**. Merged to main 2026-09-18 at `9cd3d4c`, and
 > `drive/Agents.mrbl` re-patched to match.
 >
-> **Built and shipped:** §6.1 the painted bands, §6.2 the room that holds,
-> §6.3's ring, §9 one title per pane.
+> **Built and shipped:** §6.1's band *sizes*, §6.2 the room that holds,
+> §6.3's ring, §9 one title per pane. Painting the bands was built twice and
+> taken back twice on 2026-09-18; §6.1 records why, and the answer is settled:
+> they are not drawn.
 >
 > **Not started:** §2 the ladder, §3 attention, §4 the budget and seam, §5 one
 > column order, §7 menus, §8 titles a session writes for itself. Those six are
@@ -234,16 +236,39 @@ something enforces it, dragging a pane through the field has to fail.
 
 ## 6. A drag that shows its work
 
-### 6.1 Painted thresholds
+### 6.1 Thresholds worth hitting — *sizes implemented, painting rejected*
 
-The hovered pane paints its five zones — four bands and a centre — as tinted
-regions, the live one lit. A band is 22% of the pane's short side with a 72px
-floor, so it is a target at any pane size. The root band goes 12px → 28px and
-paints an edge strip along the whole canvas edge. A drop that makes a new
-column paints a full-height seam bar at the column boundary.
+A band is 22% of the pane's short side with a 72px floor, so it is a target at
+any pane size, and the root band goes 12px → 28px. Hysteresis — an open edge
+widens to 34% — is measured against it. That part shipped and stands.
 
-Hysteresis stays as it is in kind — an open edge widens to 34% — but is
-measured against the **painted** band, so what widens is what you can see.
+**The painting did not, twice.** It is worth writing down what each attempt
+got right, because both were reasonable and both were wrong.
+
+1. *Four full-edge rectangles, dashed outline each, the live one lit.* It put
+   a grid of dashed boxes and a glowing strip over the whole workspace for the
+   length of every drag: **"the glowing indicator for the drop area when i
+   drag panes — i don't want to see this."** It was also wrong about the
+   corners, since a drop takes the *nearest* edge and rectangles claim each
+   corner twice.
+2. *The true regions, quietly.* Tint only — 4%, 11% lit, no outlines, a
+   hairline of paper between neighbours — and in the shape a drop actually
+   resolves to: four wedges cut along the lines where two distances are equal,
+   plus the pinwheel they leave in the middle, tiling the pane exactly once,
+   with an open edge painting the widened band it really holds. Honest, and
+   much softer. Still rejected, for the shape rather than the weight: **"that
+   angular view feels way too sharp and harsh. let's just remove it."**
+
+The lesson is not "draw them lighter" — attempt 2 was already light. It is
+that a pane being cut up at all, however faintly, is more furniture than this
+drag needs. **The room is the preview.** The space opening where the chat will
+land answers "where will this go" in the place the answer matters, and
+anything drawn on top of it is answering the same question twice. Nothing is
+painted over the panes during a drag.
+
+The bands remain as hit targets (`bandsOf`, `ROOT_BAND`, `HOLD`). Guarded by
+"a drag over a pane paints no bands over it" in
+`test-browser/agents-focus.test.js`.
 
 ### 6.2 Room stays open — *implemented*
 
@@ -265,6 +290,21 @@ is still nothing, so a drag that never reached the stage cannot conjure a split
 from beyond its edge. `endDrop` inside hit-testing is left alone — with the
 split branch returning first it no longer fires on this path, and one change at
 a time is how the cause stays legible.
+
+Two more ways the room failed to hold, both found 2026-09-18 and both fixed.
+**A document patch tore it down.** Agents write to `Agents.mrbl` while it is
+open, and every write ran the page's `marble.register` hook, which rebuilds the
+dock from committed state — mid-drag that called `leaveTreeMode` and removed
+the stage the panes and the ghost were standing on. `dragLive()` now stands
+`restoreDock` down for the length of a gesture, and the hook re-lays the room's
+tree rather than the committed one. **The chat did not ease back.** The primary
+chat is laid over its card rather than placed inside it, and two later
+selectors — `.pane[data-dock] > .dock-bar` and its `marble-conversation` —
+carried colour-only transitions that replaced the geometry transition outright.
+Every card animated; the one thing being watched jumped. Read from outside as
+"it makes space, but it doesn't animate back": the ghost eased shut behind a
+chat that had already arrived. Both selectors now carry `--t-room` on
+`left/top/width/height` as well.
 
 ### 6.3 Groups and piles react — *partly implemented*
 

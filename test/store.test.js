@@ -104,6 +104,42 @@ test('deleting is recoverable, and restoring beside a name that was retaken', as
   assert.equal((await store.listTrash()).length, 0);
 });
 
+test('a folder goes to the trash whole, and comes back whole', async () => {
+  await store.write('box/one', doc('One'));
+  await store.write('box/deep/two', doc('Two'));
+  await fsp.writeFile(path.join(ROOT, 'box', 'refs.bib'), '@article{a,title={A}}');
+
+  const entry = await store.trash('box');
+  assert.equal(entry.kind, 'folder');
+  assert.equal(await store.hasFolder('box'), false);
+  assert.equal(await store.has('box/deep/two'), false);
+
+  // What a row in the trash has to draw. A folder that reports nothing is a
+  // folder that draws as empty, which reads as "restoring this gives back
+  // nothing" — and the bytes are right there under .marble/trash.
+  const [listed] = (await store.listTrash()).filter((item) => item.id === entry.id);
+  assert.equal(listed.items, 3);
+  // Folders first, then documents, then everything else: the order a tile
+  // draws its cells in.
+  assert.deepEqual(listed.kinds, ['folder', 'doc', 'file']);
+
+  const back = await store.untrash(entry.id);
+  assert.equal(back.path, 'box');
+  assert.match(await store.read('box/one'), /hello/);
+  assert.match(await store.read('box/deep/two'), /hello/);
+  assert.equal(await store.hasFile('box/refs.bib'), true);
+});
+
+test('a trashed document still says how big it is and what it is called', async () => {
+  await store.write('measured', doc('Measured'));
+  const entry = await store.trash('measured');
+  const [listed] = (await store.listTrash()).filter((item) => item.id === entry.id);
+  assert.equal(listed.title, 'Measured');
+  assert.equal(listed.nodes, 2);
+  assert.ok(listed.bytes > 0);
+  await store.untrash(entry.id);
+});
+
 test('create refuses to overwrite', async () => {
   await store.create('fresh', doc('Fresh'));
   await assert.rejects(() => store.create('fresh', doc('Fresh')), /already exists/);

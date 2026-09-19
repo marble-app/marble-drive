@@ -44,6 +44,11 @@ import { createBlobs } from './blobs.js';
 
 const HIDDEN = /^\./;
 
+// Folders, then documents, then everything else: the order a Drive shows a
+// folder in, and the order a tile draws its cells in. One of these, because
+// the trash draws the same cells from the same order.
+const KIND_RANK = { folder: 0, doc: 1, file: 2 };
+
 /** The extension, lowercased, without the dot. `''` for a name that has none —
  *  and for `Makefile`, whose only dot is nowhere, not at position zero. */
 export const extOf = (name) => {
@@ -255,10 +260,9 @@ export function createFsStore({ root }) {
     }
     // Folders, then documents, then everything else, each newest first — the
     // order a Drive shows, and the order of how much the folder is about them.
-    const RANK = { folder: 0, doc: 1, file: 2 };
     const order = (node) => {
       node.children.sort((a, b) =>
-        a.kind === b.kind ? b.modified - a.modified : RANK[a.kind] - RANK[b.kind],
+        a.kind === b.kind ? b.modified - a.modified : KIND_RANK[a.kind] - KIND_RANK[b.kind],
       );
       for (const child of node.children) if (child.kind === 'folder') order(child);
     };
@@ -410,7 +414,52 @@ export function createFsStore({ root }) {
         // A truncated last line is what an interrupted append looks like.
       }
     }
-    return [...entries.values()].reverse();
+    return Promise.all([...entries.values()].reverse().map(describe));
+  }
+
+  /**
+   * A journal line says where something came from. A row also has to say what
+   * it *is* — how big, how many nodes, what is inside — and until it did, a
+   * trashed folder drew as "empty", which reads as "restoring this gives you
+   * back nothing". The bytes are still sitting under `.marble/trash/<id>`, so
+   * this is a question the store can answer; it just has to walk a tree that
+   * is deliberately outside the addressable one.
+   *
+   * A folder reports kinds and a count rather than children, on purpose.
+   * Nothing in the trash has an address, so handing back child paths would be
+   * handing the Drive a list of links to nowhere. Nine kinds, because nine is
+   * what a tile has room for.
+   */
+  async function describe(entry) {
+    const at = path.join(trashDir, entry.kind === 'doc' ? `${entry.id}${DOC_EXT}` : entry.id);
+    const { name } = splitPath(entry.path);
+
+    if (entry.kind === 'doc') {
+      const [info, source] = await Promise.all([
+        fsp.stat(at).catch(() => null),
+        fsp.readFile(at, 'utf8').catch(() => null),
+      ]);
+      return {
+        ...entry,
+        bytes: info?.size ?? 0,
+        nodes: source === null ? 0 : nodesOf(source),
+        title: source === null ? titleize(name) : titleOf(source, titleize(name)),
+      };
+    }
+
+    if (entry.kind === 'file') {
+      const info = await fsp.stat(at).catch(() => null);
+      return { ...entry, bytes: info?.size ?? 0, ext: extOf(name) };
+    }
+
+    const inside = await fsp.readdir(at, { withFileTypes: true }).catch(() => []);
+    const kinds = inside
+      .filter((child) => !HIDDEN.test(child.name))
+      .map((child) =>
+        child.isDirectory() ? 'folder' : child.name.endsWith(DOC_EXT) ? 'doc' : 'file',
+      )
+      .sort((a, b) => KIND_RANK[a] - KIND_RANK[b]);
+    return { ...entry, items: kinds.length, kinds: kinds.slice(0, 9) };
   }
 
   async function untrash(id, { to = null } = {}) {

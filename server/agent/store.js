@@ -448,11 +448,18 @@ export function createAgentStore({ dir, defaultProvider = 'claude-subscription',
         state.folders = state.folders.filter((row) => row.id !== id);
         await writeFolders(state);
       });
+      // Which chats came loose, so the caller can say so. A folder going away
+      // changes every member's meta, and a client that is told only about the
+      // folder has a chat filed under a group that no longer exists.
+      const freed = [];
       for (const cid of await ids()) {
         const meta = await conversation(cid);
-        if (meta?.folderId === id) await updateConversation(cid, { folderId: null });
+        if (meta?.folderId === id) {
+          await updateConversation(cid, { folderId: null });
+          freed.push(cid);
+        }
       }
-      return readFolders();
+      return { ...(await readFolders()), freed };
     },
 
     async setWorkingSet(conversationIds) {

@@ -554,8 +554,9 @@ export function createAgentRoutes({ store, runner, tools, hub, providers, writeO
       }
       if (method === 'DELETE') {
         try {
-          await store.deleteFolder(folderId);
+          const { freed = [] } = await store.deleteFolder(folderId);
           hub.publishFolders(await store.listFolders());
+          for (const cid of freed) hub.publish(cid, { type: 'meta' }, await store.summary(cid));
           return json(res, 200, { removed: true });
         } catch (err) {
           if (err.status === 404) return json(res, 404, { error: err.message });

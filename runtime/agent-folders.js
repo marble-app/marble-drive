@@ -207,6 +207,10 @@
   // The trailing column that makes a folder of whatever is dropped on it. It
   // is a chip wide, and it is what the field's leftover room is for.
   const NEW_W = 168;
+  // The stage against the field: a golden split of whatever the canvas has,
+  // inside the floors and ceilings above. Between panes nobody outranks
+  // anybody; it is the two sides of the canvas that stand in ratio.
+  const PHI = (1 + Math.sqrt(5)) / 2;
 
   const clamp = (value, lo, hi) => Math.max(lo, Math.min(hi, value));
 
@@ -245,7 +249,7 @@
 
   const cardHeight = (card, sizes) => (card.lod === 'chip'
     ? (sizes?.chip?.h ?? 56)
-    : (sizes?.digest?.h ?? 132));
+    : (sizes?.digest?.h ?? 161));
 
   /** Lay the canvas out as one row of full-height columns.
    *
@@ -271,7 +275,7 @@
     range = {},
     newGroup = 'auto',
   }) => {
-    const dh = sizes?.digest?.h ?? 132;
+    const dh = sizes?.digest?.h ?? 161;
     const paneMin = range.paneMin ?? PANE_MIN;
     const panePref = range.panePref ?? PANE_PREF;
     const paneMax = range.paneMax ?? PANE_MAX;
@@ -371,28 +375,38 @@
     let fieldW = fieldAt(fieldPref);
     const spare = room - bar - stageW - fieldW;
     if (spare >= 0) {
-      // Slack goes to the conversations, then to the columns — and what is
-      // left after both reach their preferred maximum is not air: it is
-      // shared between them in proportion, so a wide screen is filled edge
-      // to edge.
-      const toStage = n ? Math.min(spare, stageAt(paneMax) - stageW) : 0;
-      stageW += toStage;
-      const toField = subCols ? Math.min(spare - toStage, fieldAt(fieldMax) - fieldW) : 0;
-      fieldW += toField;
-      const air = spare - toStage - toField;
-      // Room set aside for the New-group column, but only when there is going
-      // to be one in the pack. Held open at rest it is a strip of dead canvas
-      // down the right that nothing ever stands in; held open only for a drag
-      // it moves the whole field the moment you lift a card. `'rail'` is
-      // neither — the caller overlays it — so it reserves nothing.
+      // What is left once both sides stand at their ceiling is the air the
+      // New-group column may be set aside from. Room set aside for it only
+      // when there is going to be one in the pack: held open at rest it is a
+      // strip of dead canvas down the right that nothing ever stands in; held
+      // open only for a drag it moves the whole field the moment you lift a
+      // card. `'rail'` is neither — the caller overlays it — so it reserves
+      // nothing.
+      const air = spare - (stageAt(paneMax) - stageW) - (fieldAt(fieldMax) - fieldW);
       const packsNew = newGroup === 'always' || newGroup === 'auto';
       const reserve = packsNew && shaped.length && air >= NEW_W + gap ? NEW_W + gap : 0;
-      const fill = air - reserve;
-      if (fill > 0 && (n || subCols)) {
-        const total = stageW + fieldW;
-        const toStageFill = n ? (subCols ? fill * (stageW / total) : fill) : 0;
-        stageW += toStageFill;
-        if (subCols) fieldW += fill - toStageFill;
+      const usable = room - bar - reserve;
+      if (n && subCols) {
+        // Stage against field is a golden split of the usable width — the
+        // stage φ, the field 1 — inside the floors and ceilings. A side held
+        // at its ceiling hands what it cannot take to the other, stage first.
+        // Past both ceilings together the ceilings say nothing (a wide screen
+        // is filled edge to edge, not left as air), and the split is φ
+        // exactly.
+        const want = usable / (1 + 1 / PHI);
+        if (usable > stageAt(paneMax) + fieldAt(fieldMax)) {
+          stageW = want;
+          fieldW = usable - want;
+        } else {
+          stageW = clamp(want, stageAt(paneMin), stageAt(paneMax));
+          fieldW = clamp(usable - stageW, fieldAt(fieldMin), fieldAt(fieldMax));
+          stageW = clamp(usable - fieldW, stageAt(paneMin), stageAt(paneMax));
+          fieldW = clamp(usable - stageW, fieldAt(fieldMin), fieldAt(fieldMax));
+        }
+      } else if (n) {
+        stageW = usable;
+      } else if (subCols) {
+        fieldW = usable;
       }
       // Whole pixels: a fractional rect renders soft and measures unsteady.
       // The column takes a whole width; what rounding leaves goes to the
@@ -633,6 +647,7 @@
     FIELD_PREF,
     FIELD_MAX,
     NEW_W,
+    PHI,
     realmOf,
     suggestName,
     nextColor,

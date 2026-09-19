@@ -73,7 +73,9 @@ test('nearestCard picks the nearest card in a 90 degree cone', () => {
   assert.equal(F().nearestCard(cards, 'o', 'left'), null);
 });
 
-const SIZES = { digest: { w: 260, h: 132 }, chip: { w: 168, h: 56 } };
+// The digest card is a golden rectangle; `focusLodSize` in the template
+// names the same 260 × 161, and the packer falls back to it.
+const SIZES = { digest: { w: 260, h: 161 }, chip: { w: 168, h: 56 } };
 const CANVAS = { w: 1440, h: 810 };
 
 const cards = (prefix, n, lod) =>
@@ -170,6 +172,43 @@ test('one pin and a small field fit without scrolling, and the pane takes the sl
   assert.ok(packed.stage.cols[0].w > F().PANE_MAX, 'the pane grows into the leftover width');
   assert.ok(packed.newGroup, 'the New-group slot is still offered');
   assert.ok(Math.abs(packed.newGroup.x + packed.newGroup.w + MARGIN - CANVAS.w) < 2, 'the field reaches the right edge');
+});
+
+test('PHI is the golden ratio, and the digest card is a golden rectangle', () => {
+  assert.ok(Math.abs(F().PHI - 1.6180339887) < 1e-9);
+  assert.ok(Math.abs(SIZES.digest.w / SIZES.digest.h - F().PHI) < 0.01);
+});
+
+test('at rest the stage stands against the field in the golden ratio', () => {
+  // One pin, one sub-column, a canvas wide enough that neither floor binds.
+  const packed = F().packFocus({ canvas: { w: 1400, h: 810 }, sizes: SIZES, fulls: [{ id: 'f0' }], groups: [FIELD[0]] });
+  const [region] = packed.regions;
+  const ratio = packed.stage.w / region.w;
+  assert.ok(Math.abs(ratio - F().PHI) / F().PHI < 0.01, `stage/field should be φ, got ${ratio}`);
+  assert.ok(Math.abs(packed.newGroup.x + packed.newGroup.w + MARGIN - 1400) < 2, 'and the canvas is still filled to the edge');
+});
+
+test('the golden split holds with two pins and a field that wraps', () => {
+  const packed = F().packFocus({ canvas: { w: 2400, h: 810 }, sizes: SIZES, fulls: [{ id: 'f0' }, { id: 'f1' }], groups: [FIELD[0], FIELD[1]] });
+  const field = packed.regions.reduce((most, region) => Math.max(most, region.x + region.w), 0) - packed.regions[0].x;
+  const ratio = packed.stage.w / field;
+  assert.ok(Math.abs(ratio - F().PHI) / F().PHI < 0.02, `stage/field should be about φ, got ${ratio}`);
+  for (const col of packed.stage.cols) assert.ok(Math.abs(col.w - packed.stage.cols[0].w) < 1, 'panes on the stage share evenly');
+});
+
+test('floors win over the golden ratio when the canvas is tight', () => {
+  // Two pins and one sub-column at 1100 wide: both preferred widths do not
+  // fit, so the deficit is shared and neither side goes below its floor.
+  const tight = F().packFocus({ canvas: { w: 1100, h: 810 }, sizes: SIZES, fulls: [{ id: 'f0' }, { id: 'f1' }], groups: [FIELD[0]] });
+  for (const col of tight.stage.cols) assert.ok(col.w >= F().PANE_MIN, `a pane is never below reading width, got ${col.w}`);
+  assert.ok(tight.colW >= F().FIELD_MIN);
+  assert.equal(tight.width, 1100, 'it fits without scrolling');
+  assert.ok(tight.stage.w / tight.regions[0].w > F().PHI * 1.2, 'the ratio gave way to the floors');
+  // Tighter still: both at their floors, and the canvas scrolls.
+  const tighter = F().packFocus({ canvas: { w: 700, h: 810 }, sizes: SIZES, fulls: [{ id: 'f0' }, { id: 'f1' }], groups: [FIELD[0]] });
+  for (const col of tighter.stage.cols) assert.ok(Math.abs(col.w - F().PANE_MIN) < 1);
+  assert.equal(tighter.colW, F().FIELD_MIN);
+  assert.ok(tighter.width > 700, 'the floors win and the canvas scrolls');
 });
 
 test('a lone region fills its column, and the columns share a wide canvas', () => {

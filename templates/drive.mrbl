@@ -746,9 +746,13 @@ __ICON__
   }
   .menu[data-open="1"] { pointer-events: auto; transform: none; opacity: 1; }
   .menu button {
-    display: block; width: 100%; text-align: left; padding: .45rem .7rem;
+    display: flex; align-items: center; gap: 1.2rem; width: 100%; text-align: left; padding: .45rem .7rem;
     border: 0; border-radius: 6px; background: none; color: var(--ink); cursor: pointer; font-size: .88rem;
   }
+  /* The key that would have done it without the menu. A shortcut nobody is
+     told about is a shortcut nobody has: the menu is where you look when you
+     do not know, so it is the only place the key can be learned. */
+  .menu button .key { margin-left: auto; color: var(--muted); font-size: .95em; }
   .menu button:hover { background: var(--paper-3); }
   .menu button:active { transform: scale(.98); }
   .menu hr { border: 0; border-top: 1px solid var(--line); margin: .3rem 0; }
@@ -1141,6 +1145,10 @@ __ICON__
         el.className = 'item';
         el.dataset.kind = entry.kind;
         el.dataset.path = entry.path;
+        // What the trash calls it, which is the only handle Restore has:
+        // the path a trashed row shows is where it came from and does not
+        // resolve any more.
+        if (entry.trashId) el.dataset.trashId = entry.trashId;
         stampRealm(el, entry.path);
         if (picked.has(entry.path)) el.classList.add('marble-picked');
         el.innerHTML =
@@ -1159,7 +1167,13 @@ __ICON__
         // where the two are allowed to disagree after a rename.
         el.querySelector('b').textContent = entry.name ?? leaf(entry.path);
         el.title = entry.title && entry.title !== entry.name ? entry.title : '';
-        el.querySelector('.owner').textContent = entry.kind === 'doc' ? entry.nodes + ' nodes' : '—';
+        // A trashed folder is the one folder that says how much is in it in
+        // words: the trash has no tile in list view, and "how much comes back"
+        // is the only question a row in there is asked.
+        el.querySelector('.owner').textContent =
+          entry.kind === 'doc' ? entry.nodes + ' nodes'
+          : entry.items != null ? entry.items + (entry.items === 1 ? ' item' : ' items')
+          : '—';
         el.querySelector('.when').textContent = entry.modified ? ago(entry.modified) : '';
         el.querySelector('.size').textContent = entry.kind === 'doc' ? bytes(entry.bytes) : '';
         fillThumb(el.querySelector('.thumb'), entry);
@@ -1313,12 +1327,20 @@ __ICON__
         const shown = [...kids]
           .sort((a, b) => (a.kind === 'file' ? 1 : 0) - (b.kind === 'file' ? 1 : 0))
           .slice(0, 9);
+        // A folder in the trash hands over no children — nothing inside it has
+        // an address any more — but contents unknown is not contents none, and
+        // drawing it "empty" said restoring it would give back nothing. The
+        // host sends the kinds and the count instead, so the same cells get
+        // drawn from those; none of them gets a peek, because there is no page
+        // at the other end to show.
+        const drawn = entry.children ? shown.map((k) => k.kind) : entry.kinds ?? [];
+        const inside = entry.children ? kids.length : entry.items ?? 0;
         const cells =
-          shown
-            .map((k) =>
-              k.kind === 'folder'
+          drawn
+            .map((kind) =>
+              kind === 'folder'
                 ? '<span class="cell is-folder"><span class="mini-ico">' + ICON.folder + '</span></span>'
-                : k.kind === 'file'
+                : kind === 'file'
                   ? '<span class="cell is-mat"><span class="mini-ico">' + ICON.file + '</span></span>'
                   : '<span class="cell is-doc"><span class="peek"><span class="mini-ico">' +
                     ICON.doc +
@@ -1326,8 +1348,8 @@ __ICON__
             )
             .join('') || '<span class="cell is-empty"></span>';
         thumb.innerHTML = '<span class="mini">' + cells + '</span><span class="cap"></span>';
-        thumb.querySelector('.cap').textContent = kids.length
-          ? kids.length + (kids.length === 1 ? ' item' : ' items')
+        thumb.querySelector('.cap').textContent = inside
+          ? inside + (inside === 1 ? ' item' : ' items')
           : 'empty';
         const peeks = thumb.querySelectorAll('.peek');
         let i = 0;
@@ -1774,13 +1796,22 @@ __ICON__
         }
       }
 
+      // A trashed thing, as a row. The path is where it *came from* — it does
+      // not resolve any more, which is why `trashId` travels with it: the id is
+      // the only handle Restore has. Everything else the host measured out of
+      // `.marble/trash`, so a row in here is as truthful as a row anywhere
+      // else: its real size, its real node count, and for a folder, how many
+      // things are inside and what kinds they are.
       const asTrash = (entry) => ({
         kind: entry.kind,
         path: entry.path,
-        title: leaf(entry.path),
+        title: entry.title || leaf(entry.path),
         modified: entry.t,
-        bytes: 0,
-        nodes: 0,
+        bytes: entry.bytes ?? 0,
+        nodes: entry.nodes ?? 0,
+        ext: entry.ext,
+        items: entry.items,
+        kinds: entry.kinds,
         trashId: entry.id,
       });
 
@@ -1903,7 +1934,12 @@ __ICON__
           next.delete(item.dataset.path) || next.add(item.dataset.path);
           return pick(next);
         }
-        pick(item.dataset.path);
+        // A row menu opened on a row that is already part of a selection
+        // speaks for the whole selection — see `openMenu`. Narrowing to the
+        // row first made that branch unreachable: "these four" can only be
+        // asked from one of the four, and the asking threw the other three
+        // away before the menu was built.
+        if (!more || !picked.has(item.dataset.path)) pick(item.dataset.path);
         if (more) openMenu(item, more);
       });
 
@@ -2019,9 +2055,15 @@ __ICON__
         const trashed = view === 'trash';
         menu.replaceChildren();
 
-        const add = (label, fn) => {
+        const add = (label, fn, key = '') => {
           const button = document.createElement('button');
-          button.textContent = label;
+          button.append(label);
+          if (key) {
+            const hint = document.createElement('span');
+            hint.className = 'key';
+            hint.textContent = key;
+            button.append(hint);
+          }
           button.addEventListener('click', async () => {
             menu.removeAttribute('data-open');
             try {
@@ -2052,12 +2094,14 @@ __ICON__
             });
           }
           menu.append(document.createElement('hr'));
-          add('Move ' + paths.length + ' to trash', trashPicked);
+          // The hint is derived from the same question the key asks, so the
+          // menu cannot end up promising a key that would refuse.
+          add('Move ' + paths.length + ' to trash', trashPicked, foldersPicked() ? '' : '⌫');
         } else {
           if (isFile) {
             add('Open beside this', () => window.open(drive.fileHref(path), '_blank'));
           } else if (!isFolder) {
-            add('Open', () => (location.href = marble.href(path)));
+            add('Open', () => (location.href = marble.href(path)), '⏎');
             add('Open in new tab', () => window.open(marble.href(path), '_blank'));
           }
           add('Rename…', async () => {
@@ -2087,7 +2131,7 @@ __ICON__
           add('Move to trash', async () => {
             await drive.remove(path);
             refresh();
-          });
+          }, isFolder ? '' : '⌫');
         }
 
         const box = anchor.getBoundingClientRect();
@@ -2125,6 +2169,12 @@ __ICON__
         }
         if ((event.key === 'Backspace' || event.key === 'Delete') && picked.size && view !== 'trash') {
           event.preventDefault();
+          // A folder leaves with everything inside it, and a keystroke is not
+          // enough of a decision for that. Nothing in the selection goes, not
+          // even the documents in it: a key that deletes some of what is
+          // picked is worse than a key that deletes none of it. The ⋮ menu
+          // still throws a folder away, deliberately, and says so here.
+          if (foldersPicked()) return say('Delete a folder from its ⋮ menu.');
           return trashPicked();
         }
         if (event.key !== 'Escape') return;
@@ -2135,6 +2185,16 @@ __ICON__
         sheet.removeAttribute('data-open');
         if (!layered) pick(null);
       });
+
+      // Is any of what is picked a folder? Asked of the listing rather than
+      // kept alongside the selection, because the listing is the one that
+      // knows what a path is — the same reason `picked` holds paths.
+      const foldersPicked = () =>
+        [...picked].some(
+          (path) =>
+            items.querySelector('.item[data-path="' + CSS.escape(path) + '"]')?.dataset.kind ===
+            'folder',
+        );
 
       // However many are picked, one press throws all of them away — to the
       // trash, not to nowhere, so it costs nothing to be wrong about it.

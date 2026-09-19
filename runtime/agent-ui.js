@@ -29,6 +29,10 @@
       --accent: #9bb6cf; --accent-soft: #f1f5f8; --accent-ink: #738698;
       --danger: #b4533e; --caution: #a07a2c;
       --shadow-lift: 0 4px 10px rgba(74,66,52,.10), 0 14px 28px rgba(74,66,52,.12);
+      /* Lift is for a thing held above the page — a menu, a peek. Rest is for
+         a thing lying on it: the composer's card is a millimetre off the
+         paper, not a floor above it. */
+      --shadow-rest: 0 1px 2px rgba(74,66,52,.06), 0 6px 16px rgba(74,66,52,.08);
       --settle: cubic-bezier(.22, 1, .36, 1); --snap: cubic-bezier(.4, 0, .2, 1);
       --radius: 12px;
       font: 14px/1.5 var(--ui-font, "Google Sans", Roboto, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif);
@@ -43,6 +47,7 @@
         --accent: #7fa8c9; --accent-soft: #1d2932; --accent-ink: #9dc0dc;
         --danger: #e08a74; --caution: #d9b25e;
         --shadow-lift: 0 6px 16px rgba(0,0,0,.45), 0 18px 36px rgba(0,0,0,.35);
+        --shadow-rest: 0 1px 2px rgba(0,0,0,.40), 0 8px 20px rgba(0,0,0,.28);
       }
     }
   `;
@@ -670,9 +675,10 @@
     cursor: '<svg class="brand" viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" d="M3.2 2.4 20.6 12 11.4 13.7 9.5 21.6z"/></svg>',
   };
   const PRESETS = [
-    { id: 'sonnet-high', provider: 'claude-subscription', model: 'sonnet', effort: 'high', name: 'Sonnet High', brand: 'anthropic' },
+    { id: 'fable-high', provider: 'claude-subscription', model: 'fable', effort: 'high', name: 'Fable 5.1 High', brand: 'anthropic' },
     { id: 'opus-xhigh', provider: 'claude-subscription', model: 'opus', effort: 'xhigh', name: 'Opus Extra High', brand: 'anthropic' },
-    { id: 'grok-high', provider: 'cursor', model: 'cursor-grok-4.6', effort: 'high', name: 'Grok High', brand: 'cursor' },
+    { id: 'opus-high', provider: 'claude-subscription', model: 'opus', effort: 'high', name: 'Opus High', brand: 'anthropic' },
+    { id: 'sonnet-high', provider: 'claude-subscription', model: 'sonnet', effort: 'high', name: 'Sonnet High', brand: 'anthropic' },
     { id: 'grok-xhigh', provider: 'cursor', model: 'cursor-grok-4.6', effort: 'xhigh', name: 'Grok Extra High', brand: 'cursor' },
   ];
   const nextMode = (modes, current) => {
@@ -1343,7 +1349,7 @@
     /* A tile is a pane sharing the screen with others. It keeps its mast and
        its bar — two panes side by side should both say what they are — and
        only gives up padding. */
-    :host([data-chrome="tile"]) .composer { padding: 4px 8px 8px; }
+    :host([data-chrome="tile"]) .composer { --edge: 8px; padding: 4px var(--edge) 8px; }
     :host([data-chrome="tile"]) .log { padding: 6px 12px 12px; }
     :host([data-chrome="tile"]) .mast { padding: 6px 12px 6px; }
     /* A phone shows one conversation, full screen. The mast folds to a line,
@@ -1351,7 +1357,7 @@
     :host([data-chrome="phone"]) .mast { padding: 6px 14px 6px; gap: 2px; }
     :host([data-chrome="phone"]) .heading { font-size: 15px; }
     :host([data-chrome="phone"]) .log { padding: 8px 14px 12px; font-size: 17px; line-height: 1.45; }
-    :host([data-chrome="phone"]) .composer { padding: 6px 10px calc(8px + env(safe-area-inset-bottom, 0px)); }
+    :host([data-chrome="phone"]) .composer { --edge: 10px; padding: 6px var(--edge) calc(8px + env(safe-area-inset-bottom, 0px)); }
     :host([data-chrome="phone"]) .msg { max-width: none; }
     /* A pane that is not the focused one steps back: the page dims its
        surface, and the transcript loses a little colour with it. */
@@ -1410,24 +1416,41 @@
     .turn-footer .watch { color: var(--caution); }
     .system { align-self: center; font-size: 12px; color: var(--faint); text-align: center; max-width: 90%; padding: 8px 0; }
     .system.error { color: var(--danger); }
-    .queued { display: flex; flex-direction: column; gap: 4px; }
+    /* Prompts waiting their turn hover over the composer rather than pushing
+       it down the pane. The box you are typing in must not move because
+       something you already sent is still queued, so the stack lifts off the
+       top of the card, lined up with its sides and casting the same shadow. */
+    .queued {
+      position: absolute; left: var(--edge); right: var(--edge); bottom: 100%; z-index: 2;
+      display: flex; flex-direction: column; gap: 4px;
+      /* About five rows, then it scrolls: a long queue floating over a short
+         pane would otherwise reach up past the mast and out of the card. */
+      max-height: min(40vh, 190px); overflow-y: auto; overscroll-behavior: contain;
+      /* Padding the scroller keeps it from cutting the rows' shadows off at
+         its own edges; the negative margin puts the rows back on the card's. */
+      padding: 6px; margin: 0 -6px;
+    }
     .queued[hidden] { display: none; }
-    .queued-bar { display: flex; align-items: center; align-self: flex-start; background: var(--paper-3); border: 1px solid var(--line); border-radius: 999px; padding: 1px; }
+    .queued-bar { display: flex; align-items: center; align-self: flex-start; background: var(--paper-3); border: 1px solid var(--line); border-radius: 999px; padding: 1px; box-shadow: var(--shadow-rest); }
     .queued-bar[hidden] { display: none; }
     .queued-bar button { font: inherit; font-size: 11px; font-weight: 500; border: 0; background: none; color: var(--muted); padding: 3px 9px; border-radius: 999px; cursor: pointer; }
     .queued-bar button[aria-pressed="true"] { color: var(--ink); background: var(--card); box-shadow: 0 1px 2px color-mix(in srgb, var(--ink) 12%, transparent); }
-    .queued-item { display: flex; align-items: center; gap: 8px; font-size: 12px; color: var(--muted); background: var(--paper-2); border: 1px solid var(--line); border-radius: 10px; padding: 3px 4px 3px 6px; }
-    .queued-dispatch { flex: none; font: inherit; font-size: 11px; font-weight: 500; color: var(--accent-ink); background: var(--card); border: 1px solid var(--line); border-radius: 999px; padding: 1px 8px; cursor: pointer; }
+    .queued-item { display: flex; align-items: center; gap: 8px; font-size: 12px; color: var(--muted); background: var(--card); border: 1px solid var(--line); border-radius: 12px; padding: 3px 4px 3px 6px; box-shadow: var(--shadow-rest); }
+    .queued-dispatch { flex: none; font: inherit; font-size: 11px; font-weight: 500; color: var(--accent-ink); background: var(--paper-2); border: 1px solid var(--line); border-radius: 999px; padding: 1px 8px; cursor: pointer; }
     .queued-item[data-dispatch="interrupt"] .queued-dispatch { color: var(--caution); }
     .queued-text { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; cursor: text; border-radius: 6px; padding: 2px 4px; outline: none; }
-    .queued-text[contenteditable] { white-space: normal; background: var(--card); box-shadow: 0 0 0 1px var(--accent); color: var(--ink); }
+    .queued-text[contenteditable] { white-space: normal; background: var(--paper-2); box-shadow: 0 0 0 1px var(--accent); color: var(--ink); }
     .queued-item button.dequeue { font: inherit; border: 0; background: none; color: var(--muted); width: 22px; height: 22px; border-radius: 6px; cursor: pointer; flex: none; }
     .queued-item button.dequeue:hover { background: var(--line); }
-    /* No padding above — the rule is the edge, and the space over it was
-       doubling it. The space below stays: the drawer's launcher floats in the
-       bottom-right corner of the page, and the send button is the last thing
-       that should end up underneath it. */
-    .composer { flex: none; padding: 0 10px calc(10px + env(safe-area-inset-bottom, 0px)); border-top: 1px solid var(--line); display: flex; flex-direction: column; gap: 6px; background: var(--conv-surface, var(--paper)); }
+    /* The rule across the top is gone. A pane already draws one under its
+       mast, and a second one here fenced the composer off as a strip of chrome
+       — what ends the transcript now is the card itself, over a short fade
+       where the log runs under it. --edge is how far that card is held off the
+       pane's sides, so the floating queue can line up with it. The space below
+       stays: the drawer's launcher floats in the bottom-right corner of the
+       page, and the send button is the last thing that should end up under it. */
+    .composer { --edge: 10px; position: relative; flex: none; padding: 6px var(--edge) calc(var(--edge) + env(safe-area-inset-bottom, 0px)); display: flex; flex-direction: column; gap: 6px; background: var(--conv-surface, var(--paper)); }
+    .composer::before { content: ''; position: absolute; left: 0; right: 0; bottom: 100%; height: 14px; pointer-events: none; background: linear-gradient(to top, var(--conv-surface, var(--paper)), transparent); }
     .picker { display: flex; flex-flow: row nowrap; align-items: center; gap: 6px; font-size: 12px; color: var(--muted); overflow: visible; flex: 0 0 auto; width: fit-content; max-width: 100%; min-width: 0; }
     .picker[hidden] { display: none; }
     /* The setup takes what the buttons leave, so a crowded picker folds its
@@ -1502,13 +1525,14 @@
     .seg-thumb { display: none; }
     /* The settings strip. Now that the send button is not standing in it, the
        bar owns its whole width honestly: setups from the left edge, mode at
-       the right, and the hairline above saying these configure the next turn
-       rather than belonging to the message. */
+       the right. The hairline that used to run above it is gone with the one
+       over the composer — being outside the card is what says these configure
+       the next turn rather than belonging to the message, and a rule under a
+       floating card only puts it back on a shelf. */
     .bar {
       display: flex; flex-wrap: wrap; align-items: center; gap: 6px;
       min-height: 28px; min-width: 0;
-      border-top: 1px solid color-mix(in srgb, var(--line) 70%, transparent);
-      margin: 0 -10px; padding: 5px 10px 0;
+      padding: 6px 0 0;
     }
     /* Nothing to configure — no provider, no modes — so there is no strip and
        no rule floating under the message. */
@@ -1629,14 +1653,9 @@
     /* Two registers, not three strips. The message — what you attached, the
        document it is about, the words, and the button that sends them — is one
        field. What the next turn is configured with is a strip under it. The
-       scale below is what says so: 4px inside a group, 10px between them, and
-       a hairline where the meaning changes. Everything used to be 4–6px, so
-       nothing grouped and the box had to do the separating itself. */
-    /* No card around the input. The composer already has an edge — the rule
-       that separates it from the transcript — and drawing a second box inside
-       it made the prompt look like a thing parked in a slot rather than the
-       floor of the pane. What used to be the card's padding is the composer's
-       now, so nothing moved except the border that was drawing it. */
+       scale below is what says so: 4px inside a group, and the card's own edge
+       where the meaning changes. Everything used to be 4–6px, so nothing
+       grouped and the box had to do the separating itself. */
     .row {
       --sp-1: 4px; --sp-2: 0px;
       display: flex; flex-direction: column; align-items: stretch;
@@ -1646,20 +1665,39 @@
        toolbar. In the toolbar it made the strip impossible to balance: crushed
        against five setups in a narrow pane, stranded past a wide gap in a wide
        one. Here it is where the sentence ends. */
+    /* The message is a card that floats on the pane: rounded, held off its
+       sides, lifted just enough to throw a shadow. The settings stay on the
+       floor under it — outside the card is what tells you they belong to the
+       next turn and not to what you are writing.
+       Two things used to make the box look top-heavy, both of them space that
+       only existed above the text. The grid keeps its chips row even when
+       there are no chips, so its row-gap was 6px of nothing over every line
+       ever typed; the gap is the chips' margin now, and it goes when they do.
+       And the editor was shorter than the send button beside it, so ending the
+       row bottom-aligned pushed the text down off its own padding — a
+       min-height the size of that button is what makes the two sides match. */
     .field {
       display: grid; grid-template-columns: minmax(0, 1fr) auto;
       grid-template-areas: "chips chips" "editor commit";
-      align-items: end; column-gap: var(--sp-1); row-gap: 6px;
-      padding: 8px 0;
+      align-items: end; column-gap: var(--sp-1); row-gap: 0;
+      padding: 8px 10px;
+      background: var(--card); border: 1px solid var(--line); border-radius: 16px;
+      box-shadow: var(--shadow-rest);
+      transition: border-color 160ms var(--settle), box-shadow 160ms var(--settle);
     }
-    .chips { grid-area: chips; display: flex; flex-wrap: wrap; gap: var(--sp-1); }
+    /* Where the caret is, said quietly. */
+    .field:focus-within { border-color: color-mix(in srgb, var(--accent) 55%, var(--line)); }
+    .chips { grid-area: chips; display: flex; flex-wrap: wrap; gap: var(--sp-1); margin-bottom: 6px; }
     .chips[hidden] { display: none; }
     .commit { grid-area: commit; display: flex; align-items: center; gap: var(--sp-1); }
     .chip-remove { font: inherit; border: 0; background: none; color: inherit; opacity: .55; width: 16px; height: 16px; border-radius: 50%; cursor: pointer; line-height: 1; padding: 0; }
     .chip-remove:hover { opacity: 1; background: color-mix(in srgb, currentColor 12%, transparent); }
     .editor {
       grid-area: editor; min-width: 0; font: inherit; color: var(--ink); outline: none;
-      max-height: 160px; overflow-y: auto; padding: 2px 0; white-space: pre-wrap; overflow-wrap: anywhere;
+      max-height: 160px; overflow-y: auto; white-space: pre-wrap; overflow-wrap: anywhere;
+      /* As tall as the send button, so one line of type sits on the middle of
+         the card instead of at the bottom of a taller row. */
+      box-sizing: border-box; min-height: 28px; padding: 3px 0;
       /* The parts nobody draws still belong to the design. */
       caret-color: var(--accent-ink);
     }
@@ -1736,7 +1774,7 @@
     .peek-body img { display: block; max-width: 100%; border-radius: 8px; }
 
     /* Dragging an image over the composer says where it will land. */
-    .composer.is-dropping .row { border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-soft); }
+    .composer.is-dropping .field { border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-soft); }
     .msg.me .attachments { margin-bottom: 6px; }
     .msg.me .attach { background: var(--card); }
     .msg-text { display: block; }
@@ -2139,6 +2177,7 @@
       this.running = null;
       this.off = null;
       this.skipSelection = false;
+      this.composing = false;
       this.sending = false;
       this.slashItems = [];
       this.slashIndex = 0;
@@ -2281,6 +2320,10 @@
       });
       this.input.addEventListener('focus', () => this.settleCaret());
       this.input.addEventListener('beforeinput', () => this.settleCaret());
+      // An IME holds the DOM it is composing into. Nothing tidies the box
+      // while it does.
+      this.input.addEventListener('compositionstart', () => { this.composing = true; });
+      this.input.addEventListener('compositionend', () => { this.composing = false; this.onEdited(); });
 
       // A screenshot and a page of pasted log are the two things that arrive
       // through the clipboard and do not belong in a one-line box.
@@ -2912,6 +2955,16 @@
       this.syncChips();
       // A bullet with nothing in it is still something on screen: no placeholder over it.
       const empty = !this.input.value.trim() && !this.attachments.length && !this.input.querySelector('li');
+      // Emptying the box by hand does not empty it: the browser keeps a <br>
+      // behind as somewhere to put the caret, and the placeholder is an
+      // ::after, so it drew on the line under that — a box twice as tall as a
+      // line with the prompt sitting at the bottom of it. An empty box holds
+      // its placeholder and nothing else.
+      if (empty && this.input.firstChild && !this.composing) {
+        const focused = this.shadowRoot.activeElement === this.input;
+        this.input.replaceChildren();
+        if (focused) placeCaret(this.input, 0);
+      }
       this.input.toggleAttribute('data-empty', empty);
       this.updateSendable();
     }

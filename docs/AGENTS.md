@@ -293,8 +293,8 @@ and project are the mast's tags; what a turn changed is its footer; there is
 no status line. The setup shrinks first (segments fold into dropdowns, the
 capsule packs into More) and takes its own line only when even that does not
 fit. Saved setups are the main toggles when Claude or Cursor is signed in: Anthropic or
-Cursor mark plus a short **model + effort** name (Sonnet High, Opus Extra
-High, Grok High, Grok Extra High). Those presets stay clickable on an
+Cursor mark plus a short **model + effort** name (Fable 5.1 High, Opus Extra
+High, Opus High, Sonnet High, Grok Extra High). Those presets stay clickable on an
 existing thread, so you can switch from Claude to Cursor (or back) without
 starting a new conversation. The next turn uses the new CLI and does not
 resume the previous CLI's session. A new conversation still prefers the

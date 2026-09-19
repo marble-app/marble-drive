@@ -222,3 +222,115 @@ test('a rail tab carries its status, target and age, not just a title', async ()
   assert.equal((await tab.locator('.tab-title').textContent()).trim(), 'figure pass');
   assert.ok((await tab.locator('.tab-age').textContent()).trim().length > 0);
 });
+
+test('right-clicking a selected tab offers a folder made from the whole selection', async () => {
+  const { page } = await openAgents();
+  const ids = await page.evaluate(async () => {
+    const agent = window.marble.agent;
+    const a = await agent.start({ provider: 'fake' });
+    const b = await agent.start({ provider: 'fake' });
+    await agent.update(a, { title: 'one' });
+    await agent.update(b, { title: 'two' });
+    return { a, b };
+  });
+  await page.locator('.views [data-view="folders"]').click();
+  await page.locator(`.folder-tab[data-id="${ids.a}"]`).click();
+  await page.locator(`.folder-tab[data-id="${ids.b}"]`).click({ modifiers: ['Meta'] });
+  await page.locator(`.folder-tab[data-id="${ids.a}"]`).click({ button: 'right' });
+  await page.locator('.rail-menu').waitFor();
+  assert.equal((await page.locator('.rail-menu-head').first().textContent()).trim(), '2 chats');
+  await page.locator('.rail-menu button', { hasText: 'New folder from 2 chats' }).click();
+  await page.waitForFunction(async () => (await window.marble.agent.folders()).folders.length === 1);
+  const listed = await page.evaluate(() => window.marble.agent.folders());
+  assert.equal(listed.folders.length, 1);
+  const members = await page.evaluate(async (pair) => {
+    const agent = window.marble.agent;
+    return [(await agent.conversation(pair.a)).meta.folderId, (await agent.conversation(pair.b)).meta.folderId];
+  }, ids);
+  assert.equal(members[0], listed.folders[0].id);
+  assert.equal(members[1], listed.folders[0].id);
+  // The folder it just made is waiting for a name.
+  await page.locator('.folder-name[contenteditable]').waitFor();
+  await page.keyboard.press('Escape');
+});
+
+test('right-clicking empty rail space makes an empty folder, named on the spot', async () => {
+  const { page } = await openAgents();
+  await page.locator('.views [data-view="folders"]').click();
+  await page.locator('.folder-ungrouped-label').click({ button: 'right' });
+  await page.locator('.rail-menu').waitFor();
+  assert.equal((await page.locator('.rail-menu-head').first().textContent()).trim(), 'Folders');
+  await page.locator('.rail-menu button', { hasText: 'New folder' }).click();
+  await page.locator('.folder-group').waitFor();
+  const listed = await page.evaluate(() => window.marble.agent.folders());
+  assert.equal(listed.folders.length, 1);
+  const name = page.locator('.folder-name[contenteditable]');
+  await name.waitFor();
+  await page.keyboard.type('CHI 2027');
+  await page.keyboard.press('Enter');
+  await page.waitForFunction(async () => (await window.marble.agent.folders()).folders[0]?.name === 'CHI 2027');
+});
+
+test('dragging a selection opens a new-folder well, and dropping in it groups them', async () => {
+  const { page } = await openAgents();
+  const ids = await page.evaluate(async () => {
+    const agent = window.marble.agent;
+    const a = await agent.start({ provider: 'fake' });
+    const b = await agent.start({ provider: 'fake' });
+    await agent.update(a, { title: 'alpha' });
+    await agent.update(b, { title: 'beta' });
+    return { a, b };
+  });
+  await page.locator('.views [data-view="folders"]').click();
+  await page.locator(`.folder-tab[data-id="${ids.a}"]`).click();
+  await page.locator(`.folder-tab[data-id="${ids.b}"]`).click({ modifiers: ['Meta'] });
+  const tab = page.locator(`.folder-tab[data-id="${ids.a}"]`);
+  const box = await tab.boundingBox();
+  await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
+  await page.mouse.down();
+  await page.mouse.move(box.x + box.width / 2 + 30, box.y + box.height / 2 + 30, { steps: 8 });
+  const well = page.locator('.folder-well');
+  await well.waitFor();
+  assert.match(await well.textContent(), /from these 2 chats/);
+  await page.waitForFunction(() => document.querySelector('.folder-well')?.dataset.open === 'true');
+  const wellBox = await well.boundingBox();
+  await page.mouse.move(wellBox.x + wellBox.width / 2, wellBox.y + wellBox.height / 2, { steps: 8 });
+  await page.waitForSelector('.folder-well.marble-drop-target');
+  await page.mouse.up();
+  await page.waitForFunction(async () => (await window.marble.agent.folders()).folders.length === 1);
+  const members = await page.evaluate(async (pair) => {
+    const agent = window.marble.agent;
+    return [(await agent.conversation(pair.a)).meta.folderId, (await agent.conversation(pair.b)).meta.folderId];
+  }, ids);
+  assert.ok(members[0]);
+  assert.equal(members[0], members[1]);
+  // The well is the drag's, not the file's: it goes when the drag does.
+  await page.waitForFunction(() => !document.querySelector('.folder-well'));
+});
+
+test('right-clicking a folder header ungroups it without losing the chats', async () => {
+  const { page } = await openAgents();
+  const ids = await page.evaluate(async () => {
+    const agent = window.marble.agent;
+    const a = await agent.start({ provider: 'fake' });
+    const b = await agent.start({ provider: 'fake' });
+    await agent.createFolder({ conversationIds: [a, b], name: 'Research', color: 'research' });
+    return { a, b };
+  });
+  await page.locator('.views [data-view="folders"]').click();
+  await page.locator('.folder-header').first().click({ button: 'right' });
+  await page.locator('.rail-menu').waitFor();
+  assert.equal((await page.locator('.rail-menu-head').first().textContent()).trim(), 'Research');
+  await page.locator('.rail-menu button', { hasText: 'Ungroup folder' }).click();
+  await page.waitForFunction(async () => (await window.marble.agent.folders()).folders.length === 0);
+  const homes = await page.evaluate(async (pair) => {
+    const agent = window.marble.agent;
+    return [(await agent.conversation(pair.a)).meta.folderId, (await agent.conversation(pair.b)).meta.folderId];
+  }, ids);
+  assert.deepEqual(homes, [null, null]);
+  await page.waitForFunction(
+    (pair) => [pair.a, pair.b].every((id) => document.querySelector(`.folder-ungrouped .folder-tab[data-id="${id}"]`)),
+    ids,
+  );
+  assert.equal(await page.locator('.folder-group').count(), 0);
+});

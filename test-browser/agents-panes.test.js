@@ -217,3 +217,96 @@ test('split down stacks the empty pane under the pane', async () => {
   const [a, b] = await cards(page);
   assert.ok(Math.abs(a.x - b.x) < 2 && a.y !== b.y, 'one above the other');
 });
+
+test('a patch landing mid-drag leaves the room standing', async () => {
+  // Agents write to the Agents document while it is being used, and every
+  // write reaches the page as a patch. The dock lives in the page, not in the
+  // file, so a patch has nothing to say about it — but the page used to
+  // rebuild the dock from scratch on every one, which took the stage, the
+  // ghost and the room out from under a pointer that was still holding them.
+  const { page, errors } = await openAgents(3);
+  const row = await page.locator('#list .conv').nth(1).boundingBox();
+  const box = await page.evaluate(() => {
+    const r = document.querySelector('.pane').getBoundingClientRect();
+    return { x: r.x, y: r.y, w: r.width, h: r.height };
+  });
+  await page.mouse.move(row.x + 60, row.y + 15);
+  await page.mouse.down();
+  await page.mouse.move(row.x + 100, row.y + 30, { steps: 3 });
+  await page.mouse.move(box.x + box.w * 0.5, box.y + box.h * 0.92, { steps: 10 });
+  await page.locator('.dock-ghost').waitFor();
+  await page.waitForTimeout(700);
+  const opened = await page.evaluate(() => document.querySelector('.dock-ghost').getBoundingClientRect().height);
+  assert.ok(opened > 100, 'the room opened before the patch');
+
+  await page.evaluate(() => window.marble.patch());
+  await page.waitForTimeout(600);
+  const held = await page.evaluate(() => {
+    const ghost = document.querySelector('.dock-ghost');
+    return {
+      ghost: ghost ? Math.round(ghost.getBoundingClientRect().height) : null,
+      dock: document.querySelector('.pane').getAttribute('data-dock'),
+      stage: Boolean(document.querySelector('.dock-stage')),
+      open: document.querySelector('.pane marble-conversation')?.getAttribute('conversation') ?? null,
+    };
+  });
+  assert.equal(held.stage, true, 'the stage is still there');
+  assert.equal(held.dock, 'tree');
+  assert.ok(held.ghost > 100, `the room is still open (ghost ${held.ghost}px)`);
+  // Standing the dock rebuild down for the length of a drag must not cost the
+  // pane the chat it is showing.
+  assert.ok(held.open, 'the open chat is still in its pane');
+
+  // And the drop the preview promised still happens.
+  await page.mouse.up();
+  await page.waitForFunction(() => document.querySelectorAll('.dock-frame:not(.dock-ghost)').length === 2);
+  const rects = await cards(page);
+  assert.equal(overlaps(rects), false);
+  assert.deepEqual(errors, []);
+});
+
+test('the chat eases back when the room folds, it does not snap', async () => {
+  // The primary chat is not inside its card — it is laid over it, positioned by
+  // the same numbers. Two later rules gave it a colour-only transition, which
+  // replaced the geometry one outright, so a room opening or folding moved every
+  // card and jumped the one thing you are looking at. Watched as "it makes space
+  // but it doesn't animate back": the ghost eased shut behind a chat that had
+  // already finished.
+  const { page, errors } = await openAgents(3);
+  const row = await page.locator('#list .conv').nth(1).boundingBox();
+  const box = await page.evaluate(() => { const r = document.querySelector('.pane').getBoundingClientRect(); return { x: r.x, y: r.y, w: r.width, h: r.height }; });
+  await page.mouse.move(row.x + 60, row.y + 15);
+  await page.mouse.down();
+  await page.mouse.move(row.x + 100, row.y + 30, { steps: 3 });
+  await page.mouse.move(box.x + box.w * 0.92, box.y + box.h * 0.5, { steps: 10 });
+  await page.locator('.dock-ghost').waitFor();
+  await page.waitForTimeout(700);
+
+  const sample = () => page.evaluate(() => {
+    window.__widths = [];
+    const stop = performance.now() + 700;
+    const tick = () => {
+      const el = document.querySelector('.pane > marble-conversation:not([data-marble-transient])');
+      if (el) window.__widths.push(Math.round(el.getBoundingClientRect().width));
+      if (performance.now() < stop) requestAnimationFrame(tick);
+    };
+    tick();
+  });
+
+  // Off the edge band and into the pane's middle: the room folds.
+  await sample();
+  await page.mouse.move(box.x + box.w * 0.5, box.y + box.h * 0.5, { steps: 8 });
+  await page.waitForTimeout(900);
+  const widths = await page.evaluate(() => window.__widths);
+  const from = widths[0];
+  const to = widths[widths.length - 1];
+  assert.ok(to - from > 200, `the chat did not grow back (${from} -> ${to})`);
+  // A snap is two values with nothing between them. An eased return spends
+  // frames in the middle of the journey.
+  const between = widths.filter((w) => w > from + 40 && w < to - 40).length;
+  assert.ok(between >= 8, `the chat jumped back instead of easing (${between} in-between frames across ${widths.length}: ${widths.slice(0, 12).join(',')}…)`);
+
+  await page.mouse.up();
+  await page.waitForTimeout(400);
+  assert.deepEqual(errors, []);
+});

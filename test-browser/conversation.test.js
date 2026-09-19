@@ -191,7 +191,7 @@ test('saved setups hug their labels instead of stretching across the composer', 
       names: [...el.shadowRoot.querySelectorAll('.preset span')].map((node) => node.textContent.trim()),
     };
   });
-  assert.deepEqual(names.names, ['Sonnet High', 'Opus Extra High']);
+  assert.deepEqual(names.names, ['Fable 5.1 High', 'Opus Extra High', 'Opus High', 'Sonnet High']);
   assert.ok(names.presets <= names.pills + 12, `presets ${names.presets} should hug pills ${names.pills}, not setup ${names.setup}`);
   // The setup shares its row with the mode and send buttons now, so the
   // margin is what Custom takes, not the old empty half of the composer.
@@ -359,15 +359,15 @@ test('Cursor presets stay enabled on a Claude conversation', async () => {
     await el.syncCatalog({ model: 'sonnet', effort: 'high' });
     el.paintPresets({ initial: true });
     await el.applyPreset({
-      id: 'grok-high',
+      id: 'grok-xhigh',
       provider: 'cursor',
       model: 'cursor-grok-4.6',
-      effort: 'high',
-      name: 'Grok High',
+      effort: 'xhigh',
+      name: 'Grok Extra High',
       brand: 'cursor',
     });
     return {
-      grokDisabled: el.shadowRoot.querySelector('input[name="preset"][value="grok-high"]')?.disabled ?? true,
+      grokDisabled: el.shadowRoot.querySelector('input[name="preset"][value="grok-xhigh"]')?.disabled ?? true,
       agent: el.shadowRoot.querySelector('input[name="agent"]:checked')?.value,
       model: el.shadowRoot.querySelector('input[name="model"]:checked')?.value,
       effort: el.shadowRoot.querySelector('input[name="effort"]:checked')?.value,
@@ -376,7 +376,7 @@ test('Cursor presets stay enabled on a Claude conversation', async () => {
   assert.equal(flags.grokDisabled, false);
   assert.equal(flags.agent, 'cursor');
   assert.equal(flags.model, 'cursor-grok-4.6');
-  assert.equal(flags.effort, 'high');
+  assert.equal(flags.effort, 'xhigh');
 });
 
 test('spent Claude usage prefers Cursor for a new conversation', async () => {
@@ -429,7 +429,7 @@ test('unavailable Claude usage prefers Cursor and disables Claude presets', asyn
       agent: el.shadowRoot.querySelector('input[name="agent"]:checked')?.value,
       claudeDisabled: el.shadowRoot.querySelector('input[name="agent"][value="claude-subscription"]')?.disabled ?? false,
       sonnetDisabled: el.shadowRoot.querySelector('input[name="preset"][value="sonnet-high"]')?.disabled ?? false,
-      grokDisabled: el.shadowRoot.querySelector('input[name="preset"][value="grok-high"]')?.disabled ?? true,
+      grokDisabled: el.shadowRoot.querySelector('input[name="preset"][value="grok-xhigh"]')?.disabled ?? true,
     };
   });
   assert.equal(flags.preferred, 'cursor');
@@ -529,7 +529,7 @@ test('Claude and Cursor presets become the main toggles', async () => {
     el.paintPresets({ initial: true });
     return [...el.shadowRoot.querySelectorAll('.preset span')].map((node) => node.textContent.trim());
   });
-  assert.deepEqual(names, ['Sonnet High', 'Opus Extra High', 'Grok High', 'Grok Extra High']);
+  assert.deepEqual(names, ['Fable 5.1 High', 'Opus Extra High', 'Opus High', 'Sonnet High', 'Grok Extra High']);
   assert.equal(await view.locator('.presets').isVisible(), true);
   assert.equal(await view.locator('.picker').isVisible(), false);
   assert.equal(await view.locator('input[name="preset"][value="sonnet-high"]').isChecked(), true);
@@ -844,7 +844,25 @@ test('queued rows show their mode, cycle it, and can be edited', async () => {
   await view.locator('button.stop').waitFor({ state: 'visible' });
   await sendFrom(view, 'later');
   const row = view.locator('.queued-item');
-  await row.waitFor();
+  // Instrumented, because this wait is one of the ones that loses its 30s
+  // budget on a loaded machine: on failure say whether the row was never made
+  // (nothing queued) or was made and drew nothing (the floating stack).
+  await row.waitFor().catch(async (err) => {
+    const seen = await view.evaluate((el) => {
+      const r = el.shadowRoot;
+      const q = r.querySelector('.queued');
+      const box = (n) => { const b = n.getBoundingClientRect(); return [b.width, b.height, b.top].map((v) => Math.round(v)); };
+      return {
+        queuedHidden: q.hidden,
+        queued: box(q),
+        rows: [...r.querySelectorAll('.queued-item')].map(box),
+        running: !r.querySelector('.stop').hidden,
+        turns: r.querySelectorAll('.turn-footer').length,
+        sent: r.querySelectorAll('.msg.me').length,
+      };
+    });
+    throw new Error(`queued row never showed: ${JSON.stringify(seen)} — ${err.message}`);
+  });
   assert.equal(await row.getAttribute('data-dispatch'), 'queue');
   assert.match(await row.locator('.queued-dispatch').textContent(), /Queue/);
   await row.locator('.queued-dispatch').click();
@@ -998,6 +1016,27 @@ test('shift+enter makes a new line instead of sending', async () => {
   await view.locator('.editor').pressSequentially('two');
   assert.equal(await view.locator('.editor').evaluate((el) => el.value), 'one\ntwo');
   assert.equal(await view.locator('.msg.me').count(), 0);
+});
+
+// Emptying the box left the browser's <br> in it, and the placeholder — an
+// ::after — drew on the line under that: a card twice as tall as a line with
+// the prompt at the bottom of it. A box you have emptied is a box you have
+// not yet typed in.
+test('a box emptied by hand is the same height as one never typed in', async () => {
+  const { view } = await mount();
+  const editor = view.locator('.editor');
+  const height = () => view.locator('.field').evaluate((el) => el.getBoundingClientRect().height);
+  const fresh = await height();
+  await editor.click();
+  await editor.pressSequentially('hello there');
+  await editor.press('ControlOrMeta+a');
+  await editor.press('Backspace');
+  await editor.evaluate((el) => el.hasAttribute('data-empty'));
+  assert.equal(await editor.innerHTML(), '', 'nothing is left in an empty box');
+  assert.equal(await height(), fresh, 'the card is the height it started at');
+  // And the caret is still in it: an empty box you cannot type in is worse.
+  await editor.pressSequentially('again');
+  assert.equal(await editor.evaluate((el) => el.value), 'again');
 });
 
 test('the drawer shows used usage for Claude and Cursor', async () => {
