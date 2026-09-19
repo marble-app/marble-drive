@@ -17,6 +17,8 @@ import readline from 'node:readline';
 import { collectSlices, shaOf } from '../engine.js';
 import { effectiveCapability } from './capability.js';
 import { pickEnv } from './env.js';
+import { MAX_HOP, MAX_SENDS, clampSeconds, pickTarget, renderMessages, validateText } from './messages.js';
+import { MESSAGING_INSTRUCTIONS } from './instructions.js';
 
 const SELECTION_BUDGET = 6_000;
 const STDERR_TAIL = 4_000;
@@ -60,6 +62,25 @@ export function createRunner({ store, tools, providers, workdir, origin, bridgeP
     const next = (publishChains.get(conversationId) ?? Promise.resolve()).then(task, task);
     publishChains.set(conversationId, next.catch(() => {}));
     return next;
+  }
+
+  // messageId → { hop, from, to } for every message this host has sent. The
+  // hop cap reads the parent from here; a parent minted before a restart is
+  // unknown and starts a fresh thread, which is the lenient side to err on.
+  const threads = new Map();
+
+  async function recordSent(turn, message, receiver, delivered) {
+    if (!turn.id) return; // a synthetic turn in a test has no transcript to write
+    await emit(turn, {
+      type: 'message.sent',
+      messageId: message.id,
+      to: message.to,
+      toTitle: receiver.title,
+      text: message.text,
+      about: message.about,
+      inReplyTo: message.inReplyTo,
+      delivered,
+    });
   }
 
   async function emit(turn, event) {
@@ -126,6 +147,16 @@ export function createRunner({ store, tools, providers, workdir, origin, bridgeP
     if (others) {
       lines.push('', `${others} other agent conversation(s) are running in this project right now. Do not stash, reset, check out or discard changes you did not make.`);
     }
+    // Messages that arrived while this conversation was busy or asleep ride in
+    // on whatever turn starts next, so no message waits for a person.
+    const arrived = await store.takeInbox(turn.conversationId);
+    if (arrived.length) {
+      for (const m of arrived) {
+        await emit(turn, { type: 'message', messageId: m.id, from: m.from, fromTitle: (await store.conversation(m.from))?.title ?? null, text: m.text, about: m.about, delivered: 'inbox' });
+      }
+      lines.push('', 'Messages that arrived while you were away:', '', renderMessages(arrived, await titlesOf(arrived.map((m) => m.from))));
+    }
+    if (await hasPeers(turn.conversationId, project.id)) lines.push('', MESSAGING_INSTRUCTIONS);
     if (meta.handoffFrom && turn.n === 1) {
       const brief = await handoffBrief(meta.handoffFrom);
       if (brief) lines.unshift(`This continues an earlier conversation. What happened there:\n\n${brief}\n\n---\n`);
@@ -143,7 +174,23 @@ export function createRunner({ store, tools, providers, workdir, origin, bridgeP
     return lines.join('\n').slice(-8_000);
   }
 
-  async function send(conversationId, { prompt, context, dispatch }) {
+  async function titlesOf(ids) {
+    const titles = new Map();
+    for (const id of new Set(ids)) {
+      const meta = await store.conversation(id);
+      if (meta) titles.set(id, { title: meta.title, provider: meta.provider });
+    }
+    return titles;
+  }
+
+  async function projectPeers(conversationId, projectId) {
+    const all = await store.conversations({ archived: false });
+    return all.filter((c) => c.id !== conversationId && (c.project ?? 'drive') === projectId);
+  }
+
+  const hasPeers = async (conversationId, projectId) => (await projectPeers(conversationId, projectId)).length > 0;
+
+  async function send(conversationId, { prompt, context, dispatch, from = null }) {
     const meta = await store.conversation(conversationId);
     if (!meta) throw Object.assign(new Error(`no conversation "${conversationId}"`), { status: 404 });
     if (!context?.target) throw Object.assign(new Error('a turn needs context.target'), { status: 400 });
@@ -201,6 +248,9 @@ export function createRunner({ store, tools, providers, workdir, origin, bridgeP
       stderr: '',
       timers: [],
       inflight: new Set(), // tool-call promises the bridge is still waiting on
+      sent: 0, // messages this turn has sent; capped
+      waiter: null, // resolve() of a wait_for_reply parked on this turn
+      from, // { conversation, title, provider } when a message started this turn
       finishing: false, // true once finish() has started; new tool calls are refused
       ended: new Promise((resolve) => { ended = resolve; }), // settles once the turn has left the runner
       endTurn: () => ended(),
@@ -235,7 +285,12 @@ export function createRunner({ store, tools, providers, workdir, origin, bridgeP
     // otherwise a pump() running concurrently (another turn on the same
     // conversation finishing right now) could start this one and store
     // `turn.started` before the events that are supposed to precede it.
-    await emit(turn, { type: 'user', text: turn.prompt, context: { viewing: frozen.viewing, target: frozen.target, selection: frozen.selection, also: frozen.also ?? [] } });
+    await emit(turn, {
+      type: 'user',
+      text: turn.prompt,
+      context: { viewing: frozen.viewing, target: frozen.target, selection: frozen.selection, also: frozen.also ?? [] },
+      ...(from ? { from } : {}),
+    });
     await emit(turn, { type: 'turn.queued', dispatch: turn.dispatch });
     live.set(turn.id, turn);
     order.push(turn.id);
@@ -246,6 +301,28 @@ export function createRunner({ store, tools, providers, workdir, origin, bridgeP
     }
     await pump();
     return { turnId: turn.id, status: turn.status };
+  }
+
+  /** Start a turn on an idle conversation carrying the messages in its inbox.
+   *  Returns the send result, or null when the conversation is gone or has no
+   *  document to work in. */
+  async function startDelivery(conversationId, messages, fallbackTarget = null) {
+    const meta = await store.conversation(conversationId);
+    if (!meta) return null;
+    const first = messages[0];
+    const target = pickTarget({ receiver: meta, about: first?.about, senderTarget: fallbackTarget });
+    if (!target) {
+      log.error(`[agents] a message for ${conversationId} has no document to start a turn in; left in its inbox`);
+      return null;
+    }
+    const taken = await store.takeInbox(conversationId);
+    const batch = taken.length ? taken : messages;
+    const sender = await store.conversation(first.from);
+    return send(conversationId, {
+      prompt: renderMessages(batch, await titlesOf(batch.map((m) => m.from))),
+      context: { target },
+      from: { conversation: first.from, title: sender?.title ?? null, provider: sender?.provider ?? null },
+    });
   }
 
   async function pump() {
@@ -302,7 +379,10 @@ export function createRunner({ store, tools, providers, workdir, origin, bridgeP
       const meta = await store.conversation(turn.conversationId);
       const provider = providers.get(meta.provider);
       await store.updateTurn(turn.id, { status: 'running', startedAt: turn.startedAt });
-      await store.updateConversation(turn.conversationId, { running: true, activity: `Working on ${turn.target}` });
+      await store.updateConversation(turn.conversationId, {
+        running: true,
+        activity: turn.from ? `Message from ${turn.from.title || turn.from.conversation}` : `Working on ${turn.target}`,
+      });
       await emit(turn, { type: 'turn.started', provider: meta.provider });
       look(turn, { phase: 'working' });
 
@@ -541,6 +621,7 @@ export function createRunner({ store, tools, providers, workdir, origin, bridgeP
     turn.finishing = true;
     look(turn, { ids: [] });
     for (const clear of turn.timers) clear();
+    turn.waiter?.(); // a wait parked on this turn returns now; the tool call is in `inflight` and drains below
     await voidAsks(turn, 'ended').catch((err) => log.error(`[agents] ${err.message}`));
     try {
       turn.child?.stdin?.end();
@@ -618,6 +699,14 @@ export function createRunner({ store, tools, providers, workdir, origin, bridgeP
       }
       const idx = order.indexOf(turn.id);
       if (idx !== -1) order.splice(idx, 1);
+      // Anything that arrived for this conversation while it was running and
+      // was not taken by a wait rides in on a delivery turn. At most one: the
+      // next turn to start takes the whole inbox.
+      if (!closed) {
+        store.inbox(turn.conversationId)
+          .then((pending) => (pending.length ? startDelivery(turn.conversationId, pending, turn.target) : null))
+          .catch((err) => log.error(`[agents] ${err.message}`));
+      }
       turn.endTurn();
       await pump().catch((err) => log.error(`[agents] ${err.message}`));
     }
@@ -685,6 +774,11 @@ export function createRunner({ store, tools, providers, workdir, origin, bridgeP
   return {
     async boot() {
       await store.interruptUnfinished();
+      // A host that stopped with messages waiting delivers them now.
+      for (const c of await store.conversations({ archived: false })) {
+        const pending = await store.inbox(c.id);
+        if (pending.length) await startDelivery(c.id, pending).catch((err) => log.error(`[agents] ${err.message}`));
+      }
     },
 
     send,
@@ -713,6 +807,98 @@ export function createRunner({ store, tools, providers, workdir, origin, bridgeP
       await emit(turn, { type: 'ask.answered', requestId, response });
       if (!stillOpen) turn.resumeStall?.();
       return true;
+    },
+
+    /** The other conversations in this turn's project, with what each is
+     *  doing right now. The caller is omitted; archived ones too. */
+    async peers(turn) {
+      const meta = await store.conversation(turn.conversationId);
+      const projectId = turn.project?.id ?? meta?.project ?? 'drive';
+      const others = await projectPeers(turn.conversationId, projectId);
+      const statusOf = (c) => {
+        const running = runningTurns().find((t) => t.conversationId === c.id);
+        if (running?.waiter) return 'waiting';
+        if (running && [...running.asks.values()].some((a) => !a.closed)) return 'asking';
+        if (running) return 'running';
+        if ([...live.values()].some((t) => t.conversationId === c.id && t.status === 'queued')) return 'queued';
+        return 'idle';
+      };
+      return {
+        agents: others
+          .sort((x, y) => (y.lastInteractedAt ?? 0) - (x.lastInteractedAt ?? 0))
+          .map((c) => ({ id: c.id, title: c.title, provider: c.provider, target: c.target, status: statusOf(c), activity: c.activity, lastFinishedAt: c.lastFinishedAt })),
+      };
+    },
+
+    /** Send a message from this turn's conversation. Every refusal is a
+     *  returned reason; nothing here throws at an agent. */
+    async deliver(turn, { to, text, about = null, inReplyTo = null }) {
+      const badText = validateText(text);
+      if (badText) return { error: badText };
+      if (typeof to !== 'string' || !to) return { error: 'to is required' };
+      if (to === turn.conversationId) return { error: 'you cannot message yourself' };
+      const receiver = await store.conversation(to);
+      if (!receiver) return { error: `no conversation "${to}"` };
+      if (receiver.archived) return { error: `conversation "${to}" is archived` };
+      const sender = await store.conversation(turn.conversationId);
+      const projectId = turn.project?.id ?? sender?.project ?? 'drive';
+      if ((receiver.project ?? 'drive') !== projectId) return { error: `conversation "${to}" is in another project` };
+      if ((turn.sent ?? 0) >= MAX_SENDS) return { error: `this turn has already sent ${MAX_SENDS} messages` };
+      let hop = 0;
+      if (inReplyTo) {
+        const parent = threads.get(inReplyTo);
+        hop = (parent?.hop ?? -1) + 1; // an unknown parent (host restarted) starts a fresh thread
+        if (hop > MAX_HOP) return { error: `this thread is ${MAX_HOP} replies deep; start a new message if there is something new to say` };
+      }
+      const cleanAbout = about && typeof about.path === 'string' && about.path
+        ? { path: about.path, ...(Array.isArray(about.ids) ? { ids: about.ids.map(String) } : {}) }
+        : null;
+      const message = store.createMessage({ from: turn.conversationId, to, text, about: cleanAbout, inReplyTo, hop });
+      threads.set(message.id, { hop, from: message.from, to });
+      turn.sent = (turn.sent ?? 0) + 1;
+
+      await store.appendInbox(to, message);
+      const running = runningTurns().find((t) => t.conversationId === to);
+      const queued = [...live.values()].some((t) => t.conversationId === to && t.status === 'queued');
+      let delivered;
+      if (running?.waiter) {
+        delivered = 'live';
+        running.waiter();
+      } else if (running || queued) {
+        delivered = 'inbox';
+      } else {
+        delivered = (await startDelivery(to, [message], turn.target)) ? 'turn' : 'inbox';
+      }
+      await recordSent(turn, message, receiver, delivered);
+      return { messageId: message.id, delivered, to: { id: to, title: receiver.title } };
+    },
+
+    /** Park this turn until a message arrives or the clamp runs out. The
+     *  stall timer is held, as it is for an open ask. */
+    async wait(turn, seconds) {
+      const ms = clampSeconds(seconds) * 1000;
+      const take = async () => {
+        const messages = await store.takeInbox(turn.conversationId);
+        for (const m of messages) {
+          await emit(turn, { type: 'message', messageId: m.id, from: m.from, fromTitle: (await store.conversation(m.from))?.title ?? null, text: m.text, about: m.about, delivered: 'live' });
+        }
+        return messages;
+      };
+      const early = await take();
+      if (early.length) return { messages: early };
+      turn.holdStall?.();
+      let timer;
+      const woke = await new Promise((resolve) => {
+        turn.waiter = () => resolve(true);
+        timer = setTimeout(() => resolve(false), ms);
+        timer.unref?.();
+      });
+      clearTimeout(timer);
+      turn.waiter = null;
+      turn.resumeStall?.();
+      if (!woke) return { timeout: true };
+      const messages = await take();
+      return messages.length ? { messages } : { timeout: true };
     },
 
     async callTool(token, name, input) {
