@@ -30,10 +30,15 @@ it in steps.**
   because the layout has one place to put the panes.
 - Split bands are 25% of a pane (34% once open) and the root band is **12px**,
   and none of them is painted. You aim at an invisible target.
-- `.focus-basin[data-drop="into"]` exists in CSS and **nothing sets it**. A
-  drag into a folder or the loose column shows no reaction at all.
-- Room opens for a split and then folds while the pointer is still holding
-  still over it, because hit-testing calls `endDrop`.
+- A drag into a folder or the loose column shows no reaction. Not because it is
+  unwired — `templates/agents.mrbl:2936` has set `data-drop="into"` since the
+  columns spec — but because, measured, the reaction is a **6% shift in
+  background and a 1px border tint** on a region 1424 × 533. It is below the
+  threshold of noticing.
+- Room opens for a split and then folds while the pointer is still on it.
+  Measured: `resolveDrop` tests the pointer against the pane's bounding box
+  fresh on every move with no memory of an open room, so **two pixels** past an
+  edge that nothing paints takes the whole room away.
 - Folders can be created but never renamed, recoloured or removed from the
   canvas, though the server has had all three endpoints all along.
 - A title is the first 60 characters of the first prompt, forever.
@@ -189,29 +194,41 @@ column paints a full-height seam bar at the column boundary.
 Hysteresis stays as it is in kind — an open edge widens to 34% — but is
 measured against the **painted** band, so what widens is what you can see.
 
-### 6.2 Room stays open
+### 6.2 Room stays open — *implemented*
 
-`focusTargetAt` calls `endDrop(false)` from inside hit-testing: a measurement
-with a side effect. Room open/close moves out of hit-testing entirely and into
-an explicit state owned by the drag controller — `roomFor(target)`, called once
-per target change, never per measurement. Hysteresis is on the zone's outer
-boundary, so nothing closes while the pointer is still inside the thing it
-opened. A drag that stops moving changes nothing at all.
+Investigated before changing anything, and the first two suspects were both
+wrong. Holding the pointer perfectly still keeps the room open for at least
+three seconds; so does jittering it eleven pixels; so does the root band at a
+canvas edge. What reproduces is **drifting outward**: at six pixels inside the
+pane's bottom edge the room is open, and at two pixels outside it is gone, with
+no fade.
 
-*The two bugs in §6.2 and §6.3 go through systematic-debugging before the code
-changes; the causes above are the leading suspects, not findings.*
+The cause is `resolveDrop`'s bounds test — the pointer against the pane's
+bounding box, evaluated fresh on every move, with no memory of a room already
+open. Nothing paints that border, and a drop aimed at "the bottom" or "the
+side" sits within a pixel or two of it.
 
-### 6.3 Groups and piles react
+An open room now holds while the pointer is within `ROOM_KEEP` (56px) of the
+pane. Only an open room gets the tolerance: outside the pane with nothing open
+is still nothing, so a drag that never reached the stage cannot conjure a split
+from beyond its edge. `endDrop` inside hit-testing is left alone — with the
+split branch returning first it no longer fires on this path, and one change at
+a time is how the cause stays legible.
 
-Every target change sets `data-drop="into"` on the target basin — the CSS has
-been there since the columns spec and has never had a writer. The gap already
-opens through `pending`; the merge target already rings. What is added:
+### 6.3 Groups and piles react — *partly implemented*
+
+The reaction was wired and invisible, so what it needed was weight, not a
+writer. A **ring drawn inside the region's edge** carries it, because a ring
+reads at whatever size the region happens to be; the tint only supports it. The
+loose region has no fill to change, so there the ring is the whole reaction, and
+closing its dashed edge says "a place to land" in the same move. The folder's
+name takes the folder's colour while it is the target.
+
+Still to come, with the ladder:
 
 - A **pile fans open** while a drag hovers it: the region expands to rows for
   the length of the hover, so a slot inside a put-away group is aimable. It
   collapses on release, with the card in it.
-- The loose region lights the same way as a folder, so "leave the folder" has
-  a reaction.
 
 ## 7. Menus
 
