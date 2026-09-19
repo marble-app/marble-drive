@@ -1,12 +1,17 @@
 import assert from 'node:assert/strict';
 import fsp from 'node:fs/promises';
+import http from 'node:http';
 import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
+import { fileURLToPath } from 'node:url';
 
 import { createRunner } from '../server/agent/runner.js';
 import { createAgentStore } from '../server/agent/store.js';
+import { createTools } from '../server/agent/tools.js';
 import { createFakeProvider } from './fixtures/fake-provider.js';
+
+const HERE = path.dirname(fileURLToPath(import.meta.url));
 
 const SCRIPTS = {
   hello: [{ say: 'Hello from the fake agent' }],
@@ -20,9 +25,31 @@ const SCRIPTS = {
   linger: [{ say: 'done' }, { lingerUntilEof: true }],
   permission: [{ ask: { tool: 'Bash', input: { command: 'rm -rf build' } } }, { say: 'after' }],
   question: [{ ask: { tool: 'AskUserQuestion', input: { questions: [{ question: 'A or B?', header: 'Pick', options: [{ label: 'A' }, { label: 'B' }], multiSelect: false }] } } }],
+  // Sends one message to whoever is in $to (the test rewrites the script), then ends.
+  sendone: [
+    { call: 'list_agents', args: {}, as: 'peers' },
+    { call: 'send_message', args: { to: { $ref: 'peers.agents.0.id' }, text: 'ping from a' }, as: 'sent' },
+    { say: 'sent' },
+  ],
+  // Sends, then waits up to 5 s for a reply, then reports whether one came.
+  sendwait: [
+    { call: 'list_agents', args: {}, as: 'peers' },
+    { call: 'send_message', args: { to: { $ref: 'peers.agents.0.id' }, text: 'question' }, as: 'sent' },
+    { call: 'wait_for_reply', args: { seconds: 5 }, as: 'reply' },
+    { say: 'waited' },
+  ],
+  // The receiver: replies to the first message in its prompt. The fake cannot
+  // parse its prompt, so it lists peers and answers the first one it sees.
+  replyfirst: [
+    { call: 'list_agents', args: {}, as: 'peers' },
+    { call: 'send_message', args: { to: { $ref: 'peers.agents.0.id' }, text: 'answer' }, as: 'sent' },
+    { say: 'replied' },
+  ],
+  // Long enough to still be running when a message arrives.
+  linger2: [{ sleep: 1500 }, { say: 'done lingering' }],
 };
 
-async function setup({ limits = {}, tools, onLook, capability, projects = null, onFinish = null } = {}) {
+async function setup({ limits = {}, tools, realTools = null, onLook, capability, projects = null, onFinish = null, publishAsk = undefined, origin = () => 'http://127.0.0.1:1' } = {}) {
   const dir = await fsp.mkdtemp(path.join(os.tmpdir(), 'marble-runner-'));
   const store = createAgentStore({ dir: path.join(dir, 'agents'), defaultProvider: 'fake' });
   await store.ready();
@@ -40,15 +67,16 @@ async function setup({ limits = {}, tools, onLook, capability, projects = null, 
   };
   const runner = createRunner({
     store,
-    tools: tools ?? { call: async (name, input, turn) => { toolCalls.push({ name, input, turn: turn.id }); return { ok: true }; } },
+    tools: tools ?? realTools ?? { call: async (name, input, turn) => { toolCalls.push({ name, input, turn: turn.id }); return { ok: true }; } },
     providers: new Map([['fake', provider]]),
     workdir: path.join(dir, 'work'),
     driveRoot,
     projects: projects ?? { find: async (id) => (!id || id === 'drive' ? { id: 'drive', name: 'Drive', path: driveRoot, builtIn: true } : null) },
-    origin: () => 'http://127.0.0.1:1',
-    bridgePath: '/nonexistent/marble-mcp.js',
+    origin,
+    bridgePath: path.join(HERE, '..', 'bin', 'marble-mcp.js'),
     readDocument: async () => '<html><body data-marble-id="b"><p data-marble-id="p">hi</p></body></html>',
     publish: (conversationId, event) => published.push({ conversationId, event }),
+    publishAsk,
     limits: { maxRunning: 3, stallMs: 60_000, maxMs: 60_000, killGraceMs: 200, ...limits },
     log: { log() {}, error() {} },
     onLook,
@@ -56,6 +84,42 @@ async function setup({ limits = {}, tools, onLook, capability, projects = null, 
   });
   await runner.boot();
   return { store, runner, published, toolCalls, spawned };
+}
+
+// A message script runs a *real* MCP bridge subprocess (bin/marble-mcp.js),
+// which reaches the drive over HTTP — the same path a real CLI's bridge
+// takes. `setup()`'s dummy origin (nobody listens on port 1) is fine for
+// every other test, whose scripts never call a tool through it; a messaging
+// test's script does, so it needs a real, if minimal, host behind that
+// origin: the one route the bridge calls, forwarding straight to
+// `runner.callTool`.
+function serveBridge(runner, tools) {
+  const server = http.createServer((req, res) => {
+    let body = '';
+    req.on('data', (chunk) => { body += chunk; });
+    req.on('end', async () => {
+      const answer = (status, value) => {
+        res.writeHead(status, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify(value));
+      };
+      const token = (req.headers.authorization ?? '').replace(/^Bearer\s+/i, '');
+      if (!runner.turnForToken(token)) return answer(401, { error: 'no running turn holds that token' });
+      if (req.url === '/agent/tools' && req.method === 'GET') return answer(200, { tools: tools.schemas });
+      const match = /^\/agent\/tools\/([a-z_]+)$/.exec(req.url);
+      if (match && req.method === 'POST') {
+        const args = body ? (JSON.parse(body).arguments ?? {}) : {};
+        return answer(200, (await runner.callTool(token, match[1], args)) ?? { error: 'the turn ended' });
+      }
+      answer(404, { error: 'not found' });
+    });
+  });
+  return {
+    async listen() {
+      await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
+      return `http://127.0.0.1:${server.address().port}`;
+    },
+    close: () => new Promise((resolve) => server.close(resolve)),
+  };
 }
 
 const until = async (check, ms = 5_000) => {
@@ -68,11 +132,238 @@ const until = async (check, ms = 5_000) => {
   throw new Error('timed out');
 };
 
-const finished = (store, turnId) =>
+const finished = (store, turnId, ms = 5_000) =>
   until(async () => {
     const turn = await store.turn(turnId);
     return turn && !['queued', 'running'].includes(turn.status) ? turn : null;
+  }, ms);
+
+// Real tools whose messaging surface is bound to the runner after creation,
+// the way index.js does it. Document tools are not exercised here.
+async function setupMessaging(options = {}) {
+  const messaging = {};
+  const realTools = createTools({
+    store: { read: async () => null, list: async () => [] },
+    writeOps: async () => ({ applied: 0 }),
+    createDocument: async () => {},
+    buildStarter: async () => '',
+    guidePath: '/nonexistent',
+    examine: () => [],
+    messaging,
   });
+  // `origin()` is only read once a turn actually starts, so the real address
+  // can be filled in below, once the runner (and so the bridge server that
+  // forwards to it) exists.
+  const originHolder = { url: 'http://127.0.0.1:1' };
+  const made = await setup({ ...options, realTools, origin: () => originHolder.url });
+  Object.assign(messaging, {
+    peers: (turn) => made.runner.peers(turn),
+    deliver: (turn, input) => made.runner.deliver(turn, input),
+    wait: (turn, seconds) => made.runner.wait(turn, seconds),
+  });
+  const bridge = serveBridge(made.runner, realTools);
+  originHolder.url = await bridge.listen();
+  const closeRunner = made.runner.close.bind(made.runner);
+  made.runner.close = async () => {
+    await closeRunner();
+    await bridge.close();
+  };
+  return made;
+}
+
+async function setupMessagingWithStore(store) {
+  const messaging = {};
+  const realTools = createTools({
+    store: { read: async () => null, list: async () => [] },
+    writeOps: async () => ({ applied: 0 }),
+    createDocument: async () => {},
+    buildStarter: async () => '',
+    guidePath: '/nonexistent',
+    examine: () => [],
+    messaging,
+  });
+  const provider = createFakeProvider({ scripts: SCRIPTS });
+  const originHolder = { url: 'http://127.0.0.1:1' };
+  const runner = createRunner({
+    store,
+    tools: realTools,
+    providers: new Map([['fake', provider]]),
+    workdir: path.join(os.tmpdir(), `marble-runner-again-${Date.now()}`),
+    driveRoot: os.tmpdir(),
+    projects: { find: async (id) => (!id || id === 'drive' ? { id: 'drive', name: 'Drive', path: os.tmpdir(), builtIn: true } : null) },
+    origin: () => originHolder.url,
+    bridgePath: path.join(HERE, '..', 'bin', 'marble-mcp.js'),
+    readDocument: async () => '<html><body data-marble-id="b"><p data-marble-id="p">hi</p></body></html>',
+    publish: () => {},
+    limits: { maxRunning: 3, stallMs: 60_000, maxMs: 60_000, killGraceMs: 200 },
+    log: { log() {}, error() {} },
+  });
+  Object.assign(messaging, {
+    peers: (turn) => runner.peers(turn),
+    deliver: (turn, input) => runner.deliver(turn, input),
+    wait: (turn, seconds) => runner.wait(turn, seconds),
+  });
+  const bridge = serveBridge(runner, realTools);
+  originHolder.url = await bridge.listen();
+  const closeRunner = runner.close.bind(runner);
+  runner.close = async () => {
+    await closeRunner();
+    await bridge.close();
+  };
+  await runner.boot();
+  return { runner };
+}
+
+test('a message to an idle conversation starts its turn, and both transcripts say so', async () => {
+  const { store, runner } = await setupMessaging();
+  const a = await store.createConversation({ provider: 'fake' });
+  const b = await store.createConversation({ provider: 'fake' });
+  await store.updateConversation(b.id, { title: 'Bee', target: 'bees' });
+  const { turnId } = await runner.send(a.id, { prompt: 'script:sendone', context: { target: 'd' } });
+  await finished(store, turnId);
+  const bTurn = await until(async () => (await store.turns(b.id))[0] ?? null);
+  await finished(store, bTurn.id);
+
+  const sent = (await store.events(a.id)).find((e) => e.type === 'message.sent');
+  assert.equal(sent.to, b.id);
+  assert.equal(sent.toTitle, 'Bee');
+  assert.equal(sent.text, 'ping from a');
+  assert.equal(sent.delivered, 'turn');
+
+  const user = (await store.events(b.id)).find((e) => e.type === 'user');
+  assert.equal(user.from.conversation, a.id);
+  assert.equal(user.from.provider, 'fake');
+  assert.match(user.text, /ping from a/);
+  assert.match(user.text, /Reply with send_message to "/);
+  assert.equal(user.context.target, 'bees', 'the receiver keeps its own document');
+  assert.match((await store.conversation(b.id)).activity, /^Message from|^Answered|^Changed/);
+  await runner.close();
+});
+
+test('a message to a running conversation lands in its inbox and a delivery turn follows', async () => {
+  const { store, runner } = await setupMessaging();
+  const a = await store.createConversation({ provider: 'fake' });
+  const b = await store.createConversation({ provider: 'fake' });
+  const bFirst = await runner.send(b.id, { prompt: 'script:linger2', context: { target: 'd' } });
+  await until(() => runner.running().some((t) => t.conversationId === b.id));
+  const { turnId } = await runner.send(a.id, { prompt: 'script:sendone', context: { target: 'd' } });
+  await finished(store, turnId);
+  const sent = (await store.events(a.id)).find((e) => e.type === 'message.sent');
+  assert.equal(sent.delivered, 'inbox');
+  await finished(store, bFirst.turnId);
+  const second = await until(async () => (await store.turns(b.id))[1] ?? null);
+  await finished(store, second.id);
+  const user = (await store.events(b.id)).filter((e) => e.type === 'user')[1];
+  assert.match(user.text, /ping from a/);
+  assert.equal(user.from.conversation, a.id);
+  assert.deepEqual(await store.inbox(b.id), []);
+  await runner.close();
+});
+
+test('a waiting turn receives a message live and wait_for_reply returns it', async () => {
+  const { store, runner } = await setupMessaging({ limits: { maxRunning: 3 } });
+  const a = await store.createConversation({ provider: 'fake' });
+  const b = await store.createConversation({ provider: 'fake' });
+  const { turnId } = await runner.send(a.id, { prompt: 'script:sendwait', context: { target: 'd' } });
+  // a's message starts a delivery turn on b, whose prompt is the rendered
+  // message, not a script — so b's fake agent just ends. Reply as b by hand,
+  // through the runner surface, with a synthetic turn: what matters here is
+  // that a is parked and receives the reply live.
+  await until(() => runner.running().find((t) => t.conversationId === a.id && t.waiter) ?? null);
+  const asB = { conversationId: b.id, target: 'd', sent: 0, project: { id: 'drive' } };
+  const result = await runner.deliver(asB, { to: a.id, text: 'answer' });
+  assert.equal(result.delivered, 'live');
+  await finished(store, turnId);
+  const events = await store.events(a.id);
+  const got = events.find((e) => e.type === 'message' && e.delivered === 'live');
+  assert.equal(got.text, 'answer');
+  assert.equal(got.from, b.id);
+  assert.ok(events.some((e) => e.type === 'tool.result' && /answer/.test(e.summary ?? '')), 'the tool result carried the reply');
+  await runner.close();
+});
+
+test('wait_for_reply times out with a plain answer and the turn goes on', async () => {
+  const { store, runner } = await setupMessaging();
+  const a = await store.createConversation({ provider: 'fake' });
+  await store.createConversation({ provider: 'fake' });
+  const { turnId } = await runner.send(a.id, { prompt: 'script:sendwait', context: { target: 'd' } });
+  const turn = await finished(store, turnId, 20_000);
+  assert.equal(turn.status, 'completed');
+  const results = (await store.events(a.id)).filter((e) => e.type === 'tool.result').map((e) => e.summary);
+  // The bridge pretty-prints tool results, so the key and its value are
+  // separated by a space on the wire: match the pair, not one spelling of it.
+  assert.ok(results.some((s) => /"timeout":\s*true/.test(s)), 'the wait reported a timeout');
+  await runner.close();
+});
+
+test('send_message refuses self, strangers, other projects, archived, empty and oversize text, and the caps', async () => {
+  const { store, runner } = await setupMessaging({
+    projects: { find: async (id) => (id === 'other' ? { id: 'other', name: 'Other', path: '/tmp', builtIn: false } : { id: 'drive', name: 'Drive', path: '/tmp', builtIn: true }) },
+  });
+  const a = await store.createConversation({ provider: 'fake' });
+  const b = await store.createConversation({ provider: 'fake' });
+  const elsewhere = await store.createConversation({ provider: 'fake', project: 'other' });
+  const gone = await store.createConversation({ provider: 'fake' });
+  await store.updateConversation(gone.id, { archived: true });
+  const turn = { conversationId: a.id, target: 'd', sent: 0, project: { id: 'drive' } };
+
+  assert.match((await runner.deliver(turn, { to: a.id, text: 'me' })).error, /yourself/);
+  assert.match((await runner.deliver(turn, { to: 'nope', text: 'x' })).error, /no conversation/);
+  assert.match((await runner.deliver(turn, { to: elsewhere.id, text: 'x' })).error, /project/);
+  assert.match((await runner.deliver(turn, { to: gone.id, text: 'x' })).error, /archived/);
+  assert.match((await runner.deliver(turn, { to: b.id, text: '' })).error, /empty/);
+  assert.match((await runner.deliver(turn, { to: b.id, text: 'x'.repeat(4001) })).error, /4000/);
+
+  let last;
+  for (let i = 0; i < 12; i++) last = await runner.deliver(turn, { to: b.id, text: `n${i}` });
+  assert.ok(last.messageId, 'twelve sends are allowed');
+  assert.match((await runner.deliver(turn, { to: b.id, text: 'thirteen' })).error, /12/);
+
+  const deep = { conversationId: b.id, target: 'd', sent: 0, project: { id: 'drive' } };
+  let parent = last.messageId;
+  for (let hop = 1; hop <= 8; hop++) {
+    const r = await runner.deliver(hop % 2 ? deep : { ...turn, sent: 0 }, { to: hop % 2 ? a.id : b.id, text: `hop ${hop}`, inReplyTo: parent });
+    assert.ok(r.messageId, `hop ${hop} is allowed`);
+    parent = r.messageId;
+  }
+  assert.match((await runner.deliver(deep, { to: a.id, text: 'too deep', inReplyTo: parent })).error, /8/);
+  await runner.close();
+});
+
+test('list_agents shows the other conversations in the project with an honest status', async () => {
+  const { store, runner } = await setupMessaging();
+  const a = await store.createConversation({ provider: 'fake' });
+  const b = await store.createConversation({ provider: 'fake' });
+  const c = await store.createConversation({ provider: 'fake' });
+  await store.createConversation({ provider: 'fake', project: 'other' });
+  await store.updateConversation(b.id, { title: 'Bee', target: 'bees' });
+  await runner.send(c.id, { prompt: 'script:linger2', context: { target: 'd' } });
+  await until(() => runner.running().some((t) => t.conversationId === c.id));
+  const turn = { conversationId: a.id, target: 'd', project: { id: 'drive' } };
+  const { agents } = await runner.peers(turn);
+  assert.deepEqual(agents.map((x) => x.id).sort(), [b.id, c.id].sort());
+  const bee = agents.find((x) => x.id === b.id);
+  assert.equal(bee.title, 'Bee');
+  assert.equal(bee.target, 'bees');
+  assert.equal(bee.status, 'idle');
+  assert.equal(agents.find((x) => x.id === c.id).status, 'running');
+  await runner.close();
+});
+
+test('a pending inbox at boot becomes a delivery turn', async () => {
+  const { store, runner } = await setupMessaging();
+  const a = await store.createConversation({ provider: 'fake' });
+  const b = await store.createConversation({ provider: 'fake' });
+  await store.updateConversation(b.id, { target: 'bees' });
+  await store.appendInbox(b.id, store.createMessage({ from: a.id, to: b.id, text: 'left over' }));
+  await runner.close();
+  const { runner: again } = await setupMessagingWithStore(store);
+  const turn = await until(async () => (await store.turns(b.id))[0] ?? null);
+  await finished(store, turn.id);
+  assert.match((await store.events(b.id)).find((e) => e.type === 'user').text, /left over/);
+  assert.deepEqual(await store.inbox(b.id), []);
+  await again.close();
+});
 
 test('a turn runs, streams into the transcript, and completes', async () => {
   const { store, runner, published } = await setup();
@@ -967,5 +1258,28 @@ test('patchQueued edits a waiting prompt and cycles dispatch', async () => {
   await runner.cancel(first.turnId);
   await finished(store, first.turnId);
   await finished(store, second.turnId);
+  await runner.close();
+});
+
+test('openAsks lists an open ask with its request, and forgets it once answered', async () => {
+  const asks = [];
+  const { store, runner } = await setup({ capability: 'full', publishAsk: (kind, payload) => asks.push({ kind, ...payload }) });
+  const { id } = await store.createConversation({ provider: 'fake' });
+  await runner.send(id, { prompt: 'script:permission', context: { target: 'garden' } });
+  const ask = await until(async () => (await store.events(id)).find((e) => e.type === 'ask'));
+  await until(() => asks.length);
+  const open = runner.openAsks();
+  assert.equal(open.length, 1);
+  assert.equal(open[0].conversation, id);
+  assert.equal(open[0].turn, `${id}-t1`);
+  assert.equal(open[0].requestId, ask.requestId);
+  assert.equal(open[0].request.tool, 'Bash');
+  assert.equal(open[0].request.kind, 'permission');
+  assert.ok(open[0].since > 0);
+  assert.deepEqual(asks.map((a) => a.kind), ['ask']);
+  await runner.answer(`${id}-t1`, ask.requestId, { behavior: 'allow' });
+  assert.equal(runner.openAsks().length, 0);
+  assert.deepEqual(asks.map((a) => a.kind), ['ask', 'ask.resolved']);
+  await until(async () => (await store.turn(`${id}-t1`)).status === 'completed');
   await runner.close();
 });

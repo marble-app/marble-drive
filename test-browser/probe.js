@@ -27,7 +27,12 @@ const SEED = [
 
 const host = await startDrive({ documents: { garden: GARDEN, Agents: await sourceOfAgents() } });
 const store = host.drive.agents.store;
-const { page, errors } = await host.newPage({ viewport: { width: 1440, height: 900 } });
+// `--phone` measures the fisheye at an iPhone's size: every card's tier and
+// box, and where the pane landed.
+const phone = process.argv.includes('--phone');
+const { page, errors } = await host.newPage(phone
+  ? { viewport: { width: 393, height: 852 }, hasTouch: true, isMobile: true, deviceScaleFactor: 3 }
+  : { viewport: { width: 1440, height: 900 } });
 await page.goto(`${host.base}/a/Agents`);
 await page.waitForFunction(() => Boolean(window.marble?.agent && customElements.get('marble-conversation')));
 
@@ -46,6 +51,30 @@ await page.reload();
 await page.waitForFunction(() => document.querySelectorAll('.conv').length >= 10);
 
 const report = {};
+
+if (phone) {
+  await page.evaluate(() => localStorage.setItem('marble-agents:view', 'focus'));
+  await page.reload();
+  await page.waitForFunction(() => document.querySelectorAll('.focus[data-phone] .focus-card').length >= 10);
+  await page.waitForTimeout(500);
+  report.phoneFocus = await page.evaluate(() => {
+    const pane = document.querySelector('.pane').getBoundingClientRect();
+    return {
+      room: document.querySelector('.focus').clientHeight,
+      cards: [...document.querySelectorAll('.focus-card')].map((c) => ({
+        title: c.querySelector('.focus-card-title')?.textContent,
+        lod: c.dataset.lod,
+        top: Math.round(parseFloat(c.style.top)),
+        height: Math.round(parseFloat(c.style.height)),
+      })),
+      pane: [Math.round(pane.x), Math.round(pane.y), Math.round(pane.width), Math.round(pane.height)],
+    };
+  });
+  console.log(JSON.stringify(report, null, 2));
+  console.log('ERRORS', errors);
+  await host.close();
+  process.exit(0);
+}
 
 // --- Focus -----------------------------------------------------------------
 await page.locator('.views [data-view="focus"]').click();

@@ -39,6 +39,10 @@ const SEED = [
 const out = process.argv.find((arg) => !arg.startsWith('-') && arg.endsWith('shots')) ?? process.argv[2];
 const outDir = out && !out.startsWith('--') ? out : '/tmp/agent-shots';
 const narrow = process.argv.includes('--narrow');
+// An iPhone: Deck and the fisheye Focus, with touch and a 3× screen.
+// `--keyboard` takes the room a keyboard would, for the Focus shot.
+const phone = process.argv.includes('--phone');
+const keyboard = process.argv.includes('--keyboard');
 // A board squeezed by its pane: `--stack` opens the first card at 980px.
 const stack = process.argv.includes('--stack');
 const dark = process.argv.includes('--dark');
@@ -52,8 +56,11 @@ const host = await startDrive({ documents: { garden: GARDEN, Agents: await sourc
 const store = host.drive.agents.store;
 
 const { page } = await host.newPage({
-  viewport: narrow ? { width: 700, height: 900 } : stack ? { width: 980, height: 900 } : { width: 1440, height: 900 },
+  viewport: phone ? { width: 393, height: 852 } : narrow ? { width: 700, height: 900 } : stack ? { width: 980, height: 900 } : { width: 1440, height: 900 },
   colorScheme: dark ? 'dark' : 'light',
+  hasTouch: phone,
+  isMobile: phone,
+  deviceScaleFactor: phone ? 3 : 1,
 });
 await page.goto(`${host.base}/a/Agents`);
 await page.waitForFunction(() => Boolean(window.marble?.agent && customElements.get('marble-conversation')));
@@ -93,6 +100,27 @@ const shoot = async (view, name = view) => {
   await page.waitForTimeout(700);
   await page.screenshot({ path: path.join(outDir, `${name}.png`) });
 };
+
+if (phone) {
+  // The view bar is behind ⋯ on a phone; the stored view opens each one.
+  const shootPhone = async (view, name = view) => {
+    await page.evaluate((v) => localStorage.setItem('marble-agents:view', v), view);
+    await page.reload();
+    await page.waitForFunction(() => document.querySelectorAll('.conv').length >= 10);
+    await page.waitForTimeout(700);
+    await page.screenshot({ path: path.join(outDir, `${name}.png`) });
+  };
+  await shootPhone('deck');
+  await page.locator('.deck .conv').first().click();
+  await page.waitForFunction(() => document.body.hasAttribute('data-open'));
+  await page.waitForTimeout(500);
+  await page.screenshot({ path: path.join(outDir, 'deck-open.png') });
+  if (keyboard) await page.setViewportSize({ width: 393, height: 852 - 336 });
+  await shootPhone('focus', keyboard ? 'focus-keyboard' : 'focus');
+  console.log(`shots in ${outDir}`);
+  await host.close();
+  process.exit(0);
+}
 
 await shoot('library', 'list');
 await shoot('board');

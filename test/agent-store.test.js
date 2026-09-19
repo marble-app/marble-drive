@@ -277,3 +277,41 @@ test('a conversation belongs to the drive project unless told otherwise, and a s
   await store.updateConversation(plain.id, { asking: true });
   assert.equal((await store.summary(plain.id)).asking, true);
 });
+
+test('the inbox appends, reads without taking, then takes and is empty', async () => {
+  const { store } = await fresh();
+  const a = await store.createConversation({ provider: 'fake' });
+  const b = await store.createConversation({ provider: 'fake' });
+  const m1 = store.createMessage({ from: a.id, to: b.id, text: 'first' });
+  const m2 = store.createMessage({ from: a.id, to: b.id, text: 'second', inReplyTo: m1.id, hop: 1 });
+  assert.match(m1.id, /^[0-9a-f]{12}$/);
+  assert.equal(typeof m1.t, 'number');
+  assert.equal(m1.hop, 0);
+  assert.equal(m2.hop, 1);
+  assert.deepEqual(await store.inbox(b.id), []);
+  await store.appendInbox(b.id, m1);
+  await store.appendInbox(b.id, m2);
+  assert.deepEqual((await store.inbox(b.id)).map((m) => m.text), ['first', 'second']);
+  assert.deepEqual((await store.inbox(b.id)).map((m) => m.text), ['first', 'second'], 'inbox() does not take');
+  assert.deepEqual((await store.takeInbox(b.id)).map((m) => m.text), ['first', 'second']);
+  assert.deepEqual(await store.takeInbox(b.id), []);
+  assert.deepEqual(await store.inbox(b.id), []);
+});
+
+test('the inbox survives reopening the store', async () => {
+  const { dir, store } = await fresh();
+  const a = await store.createConversation({ provider: 'fake' });
+  const b = await store.createConversation({ provider: 'fake' });
+  await store.appendInbox(b.id, store.createMessage({ from: a.id, to: b.id, text: 'kept' }));
+  const again = createAgentStore({ dir, defaultProvider: 'claude-subscription' });
+  await again.ready();
+  assert.deepEqual((await again.inbox(b.id)).map((m) => m.text), ['kept']);
+});
+
+test('a torn last inbox line is skipped, not fatal', async () => {
+  const { dir, store } = await fresh();
+  const b = await store.createConversation({ provider: 'fake' });
+  await store.appendInbox(b.id, store.createMessage({ from: 'x', to: b.id, text: 'whole' }));
+  await fsp.appendFile(path.join(dir, b.id, 'inbox.jsonl'), '{"id":"tor');
+  assert.deepEqual((await store.inbox(b.id)).map((m) => m.text), ['whole']);
+});

@@ -28,6 +28,17 @@ const FORWARDED = ['x-forwarded-for', 'x-forwarded-proto', 'x-forwarded-host'];
 const DETECT_TIMEOUT = 5_000;
 const DETECT_CACHE = 60_000;
 
+const LEAD_TYPES = new Set(['text', 'tool.call']);
+/** The last two things the agent said or did before it asked. Mirrors
+ *  runtime/agent-phone.js askLead: the page has that copy, the route this one,
+ *  because the page's helpers are browser scripts and this is a module. */
+const askLead = (events, askSeq) => events
+  .filter((event) => event.seq < askSeq && LEAD_TYPES.has(event.type))
+  .slice(-2)
+  .map((event) => (event.type === 'text'
+    ? { type: 'text', text: String(event.text ?? '') }
+    : { type: 'tool.call', name: event.name, input: event.input ?? {} }));
+
 export const isLoopback = (req) => LOOPBACK.has(req.socket?.remoteAddress);
 export const isProxied = (req) => FORWARDED.some((name) => req.headers[name] !== undefined);
 
@@ -202,6 +213,21 @@ export function createAgentRoutes({ store, runner, tools, hub, providers, writeO
       } catch {
         return json(res, 200, { meters: [] });
       }
+    }
+
+    if (route === '/agent/asks' && method === 'GET') {
+      const open = runner.openAsks();
+      const asks = await Promise.all(open.map(async (ask) => {
+        const [events, meta] = await Promise.all([store.events(ask.conversation), store.conversation(ask.conversation)]);
+        const stored = events.find((e) => e.type === 'ask' && e.requestId === ask.requestId);
+        return {
+          ...ask,
+          lead: stored ? askLead(events, stored.seq) : [],
+          title: meta?.title ?? '',
+          target: meta?.target ?? '',
+        };
+      }));
+      return json(res, 200, { asks });
     }
 
     if (route === '/agent/usage/history' && method === 'GET') {

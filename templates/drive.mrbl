@@ -1981,16 +1981,19 @@ __ICON__
 
       // ------------------------------------------------------------ the verbs
 
-      document.querySelector('#new').addEventListener('click', async (event) => {
+      const newButton = document.querySelector('#new');
+      newButton.addEventListener('click', async () => {
         if (sheet.getAttribute('data-open') === '1') return sheet.removeAttribute('data-open');
         const starters = await drive.starters();
         const grid = document.querySelector('#starters');
         grid.replaceChildren();
         for (const starter of starters) grid.append(starterButton(starter));
         // Hung under the button that opened it, nudged back inside the window at
-        // the edges — the same placement the row menu does off its anchor.
+        // the edges — the same placement the row menu does off its anchor. The
+        // rect is read from the button held in scope, not from the event: this
+        // handler awaits, and after the await the event's currentTarget is gone.
         sheet.setAttribute('data-open', '1');
-        const box = event.currentTarget.getBoundingClientRect();
+        const box = newButton.getBoundingClientRect();
         sheet.style.left = Math.max(8, Math.min(box.left, innerWidth - sheet.offsetWidth - 8)) + 'px';
         sheet.style.top = Math.min(box.bottom + 6, innerHeight - sheet.offsetHeight - 8) + 'px';
       });

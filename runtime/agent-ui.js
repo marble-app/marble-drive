@@ -234,7 +234,7 @@
   /** A critically damped spring on one number. It starts from wherever the
    *  value is now and at whatever velocity it is moving, which is what makes an
    *  animation interruptible: a new target is a new spring from the present. */
-  function spring({ from, to, velocity = 0, response = 0.34, onFrame, onDone }) {
+  function spring({ from, to, velocity = 0, response = 0.34, damping = 1, onFrame, onDone }) {
     const omega = (2 * Math.PI) / response;
     let x = from;
     let v = velocity;
@@ -242,7 +242,9 @@
     let frame = requestAnimationFrame(function step(now) {
       const dt = Math.min(0.032, Math.max(0.001, (now - last) / 1000));
       last = now;
-      v += (-omega * omega * (x - to) - 2 * omega * v) * dt;
+      // Damping 1 settles without overshoot; below it, a release that
+      // carried momentum is allowed a little bounce.
+      v += (-omega * omega * (x - to) - 2 * damping * omega * v) * dt;
       x += v * dt;
       if (Math.abs(x - to) < 0.0005 && Math.abs(v) < 0.01) {
         onFrame(to, 0);
@@ -1295,6 +1297,32 @@
 
   // ------------------------------------------------------------ the view
 
+  // The ask card's rules stand alone so a page drawing the card outside a
+  // conversation's shadow root (the Agents page's Deck) can carry them too.
+  const ASK_CSS = `
+    .ask { margin: 8px 0; padding: 10px 12px; border: 1px solid var(--line); border-radius: 12px; background: var(--card); display: grid; gap: 10px; box-shadow: 0 1px 2px color-mix(in srgb, var(--ink) 6%, transparent); }
+    .ask .ask-q { display: grid; gap: 6px; }
+    .ask .ask-title { font-weight: 600; font-size: 13px; }
+    .ask pre { margin: 0; font: 12px/1.5 ui-monospace, SFMono-Regular, Menlo, monospace; white-space: pre-wrap; word-break: break-word; background: var(--paper-2); padding: 6px 8px; border-radius: 8px; }
+    .ask .ask-options { display: grid; gap: 3px; }
+    .ask .ask-options button {
+      display: grid; grid-template-columns: 18px 1fr; column-gap: 8px; align-items: baseline; text-align: left;
+      font: inherit; font-size: 12.5px; padding: 6px 8px; border: 1px solid transparent; border-radius: 8px; background: none; color: inherit; cursor: pointer;
+    }
+    .ask .ask-options button:hover, .ask .ask-options button:focus-visible { background: var(--paper-2); outline: none; }
+    .ask .ask-options button[aria-checked="true"] { border-color: var(--accent-ink); background: color-mix(in srgb, var(--accent-ink) 10%, transparent); }
+    .ask .ask-options kbd { font: 11px/1.4 inherit; color: var(--faint); text-align: center; border: 1px solid var(--line); border-radius: 4px; }
+    .ask .ask-options b { font-weight: 500; }
+    .ask .ask-options small { grid-column: 2; color: var(--muted); font-size: 11.5px; }
+    .ask .ask-other-text { font: inherit; font-size: 12.5px; padding: 5px 8px; border: 1px solid var(--line); border-radius: 8px; background: none; color: inherit; margin-left: 26px; }
+    .ask .ask-other-text[hidden] { display: none; }
+    .ask .ask-actions { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; }
+    .ask .ask-actions button { font: inherit; font-size: 12.5px; padding: 5px 10px; border-radius: 8px; border: 1px solid var(--line); background: none; color: inherit; cursor: pointer; }
+    .ask .ask-actions button.allow, .ask .ask-actions button.answer { background: var(--accent-ink); color: var(--paper); border-color: var(--accent-ink); }
+    .ask .ask-actions button:disabled { opacity: .5; cursor: default; }
+    .ask .deny-note { flex: 1; min-width: 8em; font: inherit; font-size: 12.5px; padding: 5px 8px; border: 1px solid var(--line); border-radius: 8px; background: none; color: inherit; }
+  `;
+
   const CONVERSATION_CSS = `
     /* --conv-surface is the page's handle on this conversation's paper: a
        pane sets it to tint the whole card — chrome, transcript and composer
@@ -1314,6 +1342,13 @@
     :host([data-chrome="tile"]) .composer { padding: 4px 8px 8px; }
     :host([data-chrome="tile"]) .log { padding: 6px 12px 12px; }
     :host([data-chrome="tile"]) .mast { padding: 6px 12px 6px; }
+    /* A phone shows one conversation, full screen. The mast folds to a line,
+       the transcript takes the width, and type is the size a thumb reads. */
+    :host([data-chrome="phone"]) .mast { padding: 6px 14px 6px; gap: 2px; }
+    :host([data-chrome="phone"]) .heading { font-size: 15px; }
+    :host([data-chrome="phone"]) .log { padding: 8px 14px 12px; font-size: 17px; line-height: 1.45; }
+    :host([data-chrome="phone"]) .composer { padding: 6px 10px calc(8px + env(safe-area-inset-bottom, 0px)); }
+    :host([data-chrome="phone"]) .msg { max-width: none; }
     /* A pane that is not the focused one steps back: the page dims its
        surface, and the transcript loses a little colour with it. */
     :host([data-focused="false"]) .log { filter: saturate(.85); }
@@ -1348,27 +1383,7 @@
     .tool[data-state="refused"] { color: var(--caution); } .tool[data-state="refused"]::before { background: var(--caution); }
     .mast .also { font-size: 11.5px; color: var(--faint); margin-top: 2px; }
     .mast .also[hidden] { display: none; }
-    .ask { margin: 8px 0; padding: 10px 12px; border: 1px solid var(--line); border-radius: 12px; background: var(--card); display: grid; gap: 10px; box-shadow: 0 1px 2px color-mix(in srgb, var(--ink) 6%, transparent); }
-    .ask .ask-q { display: grid; gap: 6px; }
-    .ask .ask-title { font-weight: 600; font-size: 13px; }
-    .ask pre { margin: 0; font: 12px/1.5 ui-monospace, SFMono-Regular, Menlo, monospace; white-space: pre-wrap; word-break: break-word; background: var(--paper-2); padding: 6px 8px; border-radius: 8px; }
-    .ask .ask-options { display: grid; gap: 3px; }
-    .ask .ask-options button {
-      display: grid; grid-template-columns: 18px 1fr; column-gap: 8px; align-items: baseline; text-align: left;
-      font: inherit; font-size: 12.5px; padding: 6px 8px; border: 1px solid transparent; border-radius: 8px; background: none; color: inherit; cursor: pointer;
-    }
-    .ask .ask-options button:hover, .ask .ask-options button:focus-visible { background: var(--paper-2); outline: none; }
-    .ask .ask-options button[aria-checked="true"] { border-color: var(--accent-ink); background: color-mix(in srgb, var(--accent-ink) 10%, transparent); }
-    .ask .ask-options kbd { font: 11px/1.4 inherit; color: var(--faint); text-align: center; border: 1px solid var(--line); border-radius: 4px; }
-    .ask .ask-options b { font-weight: 500; }
-    .ask .ask-options small { grid-column: 2; color: var(--muted); font-size: 11.5px; }
-    .ask .ask-other-text { font: inherit; font-size: 12.5px; padding: 5px 8px; border: 1px solid var(--line); border-radius: 8px; background: none; color: inherit; margin-left: 26px; }
-    .ask .ask-other-text[hidden] { display: none; }
-    .ask .ask-actions { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; }
-    .ask .ask-actions button { font: inherit; font-size: 12.5px; padding: 5px 10px; border-radius: 8px; border: 1px solid var(--line); background: none; color: inherit; cursor: pointer; }
-    .ask .ask-actions button.allow, .ask .ask-actions button.answer { background: var(--accent-ink); color: var(--paper); border-color: var(--accent-ink); }
-    .ask .ask-actions button:disabled { opacity: .5; cursor: default; }
-    .ask .deny-note { flex: 1; min-width: 8em; font: inherit; font-size: 12.5px; padding: 5px 8px; border: 1px solid var(--line); border-radius: 8px; background: none; color: inherit; }
+    ${ASK_CSS}
     .tool[data-state="failed"] { color: var(--danger); } .tool[data-state="failed"]::before { background: var(--danger); }
     .turn-footer { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 10px; font-size: 12px; color: var(--faint); padding: 4px 2px 10px; }
     .turn-footer[data-status="failed"] .status { color: var(--danger); }
@@ -3595,9 +3610,7 @@
      *  question with options. A card under the turn's last message, answered
      *  once; the answer event (from any pane) removes it. */
     ask(turn, event) {
-      const card = h('div', 'ask');
-      card.dataset.request = event.requestId;
-      card.dataset.kind = event.kind;
+      let card = null;
       const submit = async (response) => {
         for (const b of card.querySelectorAll('button')) b.disabled = true;
         try {
@@ -3607,6 +3620,20 @@
           this.system(err.message, true);
         }
       };
+      card = this.buildAskCard(event, submit);
+      this.record(turn).asks.set(event.requestId, card);
+      this.append(turn, card);
+      card.querySelector('button')?.focus({ preventScroll: true });
+    }
+
+    /** The card an ask becomes: a permission prompt with Allow / Deny and a
+     *  note, or a question's numbered options with Other…. `submit` gets the
+     *  built response; whoever owns the card decides where it goes. Uses
+     *  nothing of the instance, so the Agents page draws the same card. */
+    buildAskCard(event, submit) {
+      const card = h('div', 'ask');
+      card.dataset.request = event.requestId;
+      card.dataset.kind = event.kind;
       if (event.kind === 'question') {
         const picks = new Map();
         const questions = event.input?.questions ?? [];
@@ -3730,9 +3757,7 @@
         actions.append(allow, deny, note);
         card.append(actions);
       }
-      this.record(turn).asks.set(event.requestId, card);
-      this.append(turn, card);
-      card.querySelector('button')?.focus({ preventScroll: true });
+      return card;
     }
 
     askClosed(turn, event) {
@@ -5197,7 +5222,8 @@
     document.body.append(drawer);
   };
 
-  window.marbleAgentUI = { stateOf, STATE_CSS, renderText, spring, project, TOKENS, conversationTags, eventBelongsToConversation, askResponse, TAG_CSS, fillMeters, usageAvailable, usageTone, formatReset, USAGE_CSS, pageTheme, applyPageTheme, fillRadios, fitPicker, fitPresets, sortProviders };
+  const buildAskCard = (event, submit) => MarbleConversation.prototype.buildAskCard(event, submit);
+  window.marbleAgentUI = { stateOf, STATE_CSS, renderText, spring, project, TOKENS, buildAskCard, ASK_CSS, conversationTags, eventBelongsToConversation, askResponse, TAG_CSS, fillMeters, usageAvailable, usageTone, formatReset, USAGE_CSS, pageTheme, applyPageTheme, fillRadios, fitPicker, fitPresets, sortProviders };
   Object.assign(window.marbleAgentUI, { collapseToolRows, toolShortName });
 
   if (window.marble?.agent) mount();

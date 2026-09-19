@@ -125,8 +125,8 @@ export async function startDrive({ scripts = {}, agents = true, documents = { ga
       // the next test's default. A reset drive has not picked anything yet.
       await drive.agents?.store.saveSettings({ models: {}, efforts: {} });
     },
-    async newPage({ viewport = { width: 1280, height: 800 }, reducedMotion = 'no-preference', colorScheme = 'light' } = {}) {
-      const context = await browser.newContext({ viewport, reducedMotion, colorScheme });
+    async newPage({ viewport = { width: 1280, height: 800 }, reducedMotion = 'no-preference', colorScheme = 'light', hasTouch = false, isMobile = false, deviceScaleFactor = 1 } = {}) {
+      const context = await browser.newContext({ viewport, reducedMotion, colorScheme, hasTouch, isMobile, deviceScaleFactor });
       const page = await context.newPage();
       const errors = [];
       page.on('pageerror', (err) => errors.push(err.message));

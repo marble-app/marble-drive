@@ -2,7 +2,14 @@
 <html lang="en" data-marble="1">
 <head>
 <meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<!-- The document declares its own installability; the host ships nothing.
+     Added to an iPhone's Home Screen it opens without Safari's chrome. -->
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="Agents">
+<link rel="apple-touch-icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 180 180'%3E%3Crect width='180' height='180' rx='40' fill='%23fafaf7'/%3E%3Ccircle cx='62' cy='62' r='22' fill='%239bb6cf'/%3E%3Ccircle cx='118' cy='62' r='22' fill='%23738698'/%3E%3Ccircle cx='62' cy='118' r='22' fill='%23738698'/%3E%3Ccircle cx='118' cy='118' r='22' fill='%239bb6cf'/%3E%3C/svg%3E">
 <meta name="marble:capabilities" content="storage; net=none">
 <meta name="marble-agent" content="custom">
 <title>__TITLE__</title>
@@ -124,7 +131,8 @@ __ICON__
   body[data-view="library"] .views [data-view="library"],
   body[data-view="board"] .views [data-view="board"],
   body[data-view="folders"] .views [data-view="folders"],
-  body[data-view="focus"] .views [data-view="focus"] {
+  body[data-view="focus"] .views [data-view="focus"],
+  body[data-view="deck"] .views [data-view="deck"] {
     color: var(--ink); background: var(--card); box-shadow: var(--shadow);
   }
   /* The view switch slides its pill, as the composer's segmented control does:
@@ -630,6 +638,25 @@ __ICON__
   .focus-look h3 { margin: 0 0 .35rem; font-size: 1rem; font-weight: 500; }
   .focus-look .look-meta { color: var(--muted); font-size: .8rem; margin: 0 0 .75rem; }
   .focus-look .look-events { margin: 0; padding-left: 1.1rem; color: var(--ink); font-size: .85rem; }
+  /* ---- Focus on a phone: one column, one scalar. A card's size is its
+     distance from the one in your hand; the pane sits over the Full. */
+  .focus[data-phone] { position: relative; overflow: hidden; height: calc(var(--vv-h, 100vh) - var(--topbar-h, 2.75rem)); touch-action: none; padding: 0; }
+  .focus[data-phone] .focus-card { position: absolute; left: .75rem; right: .75rem; width: auto; margin: 0; overflow: hidden; border-radius: 12px; transition: none; transform: none; }
+  .focus[data-phone] .focus-card[data-lod="sliver"] { border-radius: 4px 4px 0 0; box-shadow: none; }
+  .focus[data-phone] .focus-card[data-lod="sliver"] .focus-card-head,
+  .focus[data-phone] .focus-card[data-lod="sliver"] .focus-card-body { opacity: 0; }
+  .focus[data-phone] .focus-card[data-lod="chip"] .focus-card-body { display: none; }
+  .focus[data-phone] .focus-card[data-lod="full"] .focus-card-body { opacity: .5; }
+  .focus[data-phone] .focus-card-actions, .focus[data-phone] .focus-slot, .focus[data-phone] .focus-newgroup,
+  .focus[data-phone] .focus-pinslot, .focus[data-phone] .focus-extent, .focus[data-phone] .focus-basin,
+  .focus[data-phone] .focus-empty { display: none; }
+  .focus[data-phone] .focus-card-head { min-height: 44px; }
+  /* A digest has four lines of room: the provider tag and the folder tick
+     are not among them on a phone. */
+  .focus[data-phone] .focus-folder, .focus[data-phone] .focus-tags { display: none; }
+  .focus[data-phone] .focus-card-body { padding-top: 0; }
+  .focus[data-phone][data-settling] .focus-card { pointer-events: none; }
+  @media (prefers-reduced-motion: reduce) { .focus[data-phone] .focus-card { transition: opacity 150ms linear; } }
   .focus[data-stack] { overflow: auto; display: flex; flex-direction: column; gap: .65rem; padding: .75rem; }
   .focus[data-stack] .focus-card {
     position: relative; left: auto !important; top: auto !important;
@@ -704,6 +731,86 @@ __ICON__
   body[data-view="folders"] .library .pane { grid-column: 2; }
   body[data-view="folders"] .folder-rail { display: block; grid-column: 1; pointer-events: auto; }
   body[data-view="focus"] .focus { display: block; }
+  /* Deck is the fifth view: the same rows, partitioned by what wants you. */
+  body[data-view="deck"] .library, body[data-view="deck"] .board,
+  body[data-view="deck"] .folders, body[data-view="deck"] .focus { display: none; }
+  body:not([data-view="deck"]) .deck { display: none; }
+  body[data-view="deck"] .deck { display: block; overflow-y: auto; }
+
+  /* ---- Deck: what wants you, in order. Bands are a partition of the same
+     summaries every other view draws; nothing here is stored. */
+  .deck { padding: 0 0 6rem; -webkit-overflow-scrolling: touch; overscroll-behavior: contain; touch-action: pan-y; }
+  .band { border-bottom: 1px solid var(--line); }
+  .band-head { margin: 0; font-size: .72rem; letter-spacing: .06em; text-transform: uppercase; color: var(--faint); }
+  .band-toggle { display: flex; align-items: center; gap: .5rem; width: 100%; min-height: 2.75rem; padding: 0 1rem; font: inherit; color: inherit; background: none; border: 0; text-align: left; cursor: pointer; }
+  .band-toggle::after { content: '▾'; margin-left: auto; transition: transform var(--t) var(--settle); }
+  .band[data-collapsed] .band-toggle::after { transform: rotate(-90deg); }
+  .band[data-collapsed] .band-body { display: none; }
+  .band-count { font-variant-numeric: tabular-nums; color: var(--ink); }
+  .band-count:empty { display: none; }
+  .band[data-band="asks"] .band-count { color: var(--danger); }
+  .band[data-band="asks"]:not(:has(.deck-ask)) { display: none; }
+  .band-head[data-flash] { animation: band-flash 300ms var(--ease-out); }
+  @keyframes band-flash { from { background: var(--paper-2); } to { background: transparent; } }
+  /* Rows in a band are List rows with the leading colour and a taller hit. */
+  .deck .conv { margin: 0; border-radius: 0; min-height: 3.5rem; position: relative; touch-action: pan-y; background: var(--paper); }
+  .deck .band-body[role="list"]:empty::before { content: 'Nothing here'; display: block; padding: .5rem 1rem 1rem; color: var(--faint); font-size: .85rem; }
+  /* Ask cards page sideways, one per screen. */
+  .asks-rail { display: flex; gap: .75rem; padding: .25rem 1rem 1rem; overflow-x: auto; scroll-snap-type: x mandatory; -webkit-overflow-scrolling: touch; scrollbar-width: none; }
+  .asks-rail::-webkit-scrollbar { display: none; }
+  .deck-ask { flex: 0 0 calc(100% - 1rem); scroll-snap-align: center; border: 1px solid var(--line); border-radius: var(--pane-r); background: var(--card); box-shadow: var(--shadow); padding: .85rem 1rem 1rem; display: flex; flex-direction: column; gap: .5rem; min-width: 0; }
+  .deck-ask-head { display: flex; align-items: center; gap: .5rem; min-width: 0; }
+  .deck-ask-head .dot { flex: none; width: 8px; height: 8px; border-radius: 50%; background: var(--danger); }
+  .deck-ask-title { font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .deck-ask-target { font-size: .8rem; color: var(--faint); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .deck-peek { border-left: 2px solid var(--line); padding: .25rem .6rem; font-size: .82rem; color: var(--muted); display: grid; gap: .15rem; }
+  .deck-peek:empty { display: none; }
+  .deck-peek .peek-lead { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .deck-peek pre { margin: 0; font: .78rem/1.45 ui-monospace, SFMono-Regular, Menlo, monospace; white-space: pre-wrap; word-break: break-word; color: var(--ink); max-height: 8.5em; overflow: hidden; }
+  .deck-ask .ask { margin: 0; border: 0; padding: 0; background: none; box-shadow: none; }
+  .deck-ask .ask-actions { margin-top: .35rem; }
+  .deck-ask .ask-actions button, .deck-ask .ask-options button, .deck-ask .ask-other-text { min-height: 2.75rem; font-size: 1rem; }
+  .deck-ask .ask-actions .allow, .deck-ask .ask-actions .deny { flex: 1 1 0; }
+  .deck-ask-open { align-self: flex-end; font: inherit; font-size: .85rem; color: var(--accent-ink); background: none; border: 0; padding: .4rem .2rem; cursor: pointer; min-height: 2.75rem; }
+  /* A swipe on a review row: right completes the cheap action, left only
+     reveals the consequential one as a button. */
+  .deck .conv > * { position: relative; z-index: 1; transform: translateX(var(--swipe-x, 0px)); }
+  .conv > .swipe-undo { display: none; }
+  .deck .conv > .swipe-undo { position: absolute; z-index: 0; right: 0; top: 0; bottom: 0; width: 88px; border: 0; background: var(--caution); color: #fff; font: inherit; font-weight: 600; transform: none; cursor: pointer; }
+  .deck .conv[data-swipe="undo"] > .swipe-undo { display: block; }
+  .deck .conv[data-swipe="review"]::before { content: 'Reviewed'; position: absolute; inset: 0; z-index: 0; display: flex; align-items: center; padding-left: 1rem; background: var(--accent-soft); color: var(--accent-ink); font-size: .8rem; }
+  @media (prefers-reduced-motion: reduce) { .band-head[data-flash] { animation: none; } }
+
+  /* ---- Sheets. A bottom sheet tracks the finger from where it was grabbed,
+     rubber-bands past the top, and commits by the sign of its velocity. */
+  .sheet-scrim { position: fixed; inset: 0; background: rgba(0,0,0,.28); z-index: 40; opacity: 0; transition: opacity 200ms var(--ease-out); }
+  .sheet-scrim[hidden] { display: none; }
+  body[data-sheet] .sheet-scrim { opacity: 1; }
+  .sheet { position: fixed; left: 0; right: 0; bottom: 0; z-index: 41; background: var(--paper); border-radius: var(--pane-r) var(--pane-r) 0 0; box-shadow: var(--shadow-lift); padding: 0 1rem calc(1rem + env(safe-area-inset-bottom, 0px)); max-height: 80vh; overflow-y: auto; transform: translateY(100%); touch-action: none; will-change: transform; }
+  .sheet[hidden] { display: none; }
+  .sheet-grip { width: 36px; height: 4px; border-radius: 2px; background: var(--line); margin: 8px auto 12px; }
+  .sheet-body { display: grid; gap: .5rem; }
+  .sheet-body h3 { margin: .25rem 0 .5rem; font-size: 1rem; }
+  .sheet-row { display: flex; align-items: center; gap: .6rem; width: 100%; min-height: 2.75rem; padding: 0 .75rem; font: inherit; font-size: 1rem; color: var(--ink); background: var(--card); border: 1px solid var(--line); border-radius: 10px; text-align: left; cursor: pointer; }
+  .sheet-row:active { background: var(--paper-2); }
+  .sheet-row[data-tone="danger"] { color: var(--danger); }
+  .sheet-prompt { min-height: 5.5rem; font: inherit; font-size: 17px; line-height: 1.45; padding: .6rem .75rem; border: 1px solid var(--line); border-radius: 10px; background: var(--card); color: var(--ink); resize: none; }
+  .sheet-start { min-height: 2.75rem; font: inherit; font-size: 1rem; font-weight: 600; color: #fff; background: var(--accent-ink); border: 0; border-radius: 10px; cursor: pointer; }
+  .sheet-start:active { filter: brightness(.9); }
+  .sheet-seg { display: flex; gap: .35rem; flex-wrap: wrap; }
+  .sheet-seg:empty { display: none; }
+  .sheet-seg button { min-height: 2.5rem; padding: 0 .8rem; font: inherit; border: 1px solid var(--line); border-radius: 999px; background: var(--card); color: var(--ink); cursor: pointer; }
+  .sheet-seg button[aria-pressed="true"] { background: var(--accent-soft); border-color: var(--accent); color: var(--accent-ink); }
+  .fleet-meters { display: grid; gap: .5rem; }
+  .fleet-windows { display: grid; gap: .25rem; font-size: .85rem; color: var(--muted); }
+  body[data-sheet] .deck, body[data-sheet] .focus, body[data-sheet] .library { transform: scale(.96); transition: transform 200ms var(--ease-out); transform-origin: 50% 0; }
+  /* The thumb bar and the phone topbar controls exist on a phone; the media
+     block below shows them. */
+  .thumb, .topbar .asks-pill, .topbar .usage-dot, .topbar .more { display: none; }
+  @media (prefers-reduced-motion: reduce) {
+    .sheet { transition: opacity 150ms linear; transform: none !important; }
+    body[data-sheet] .deck, body[data-sheet] .focus, body[data-sheet] .library { transform: none; }
+  }
   /* A part that is leaving stays on screen where it was, out of the flow, for as
      long as it takes to fade — then the layout it no longer belongs to
      forgets it. */
@@ -1141,16 +1248,38 @@ __ICON__
   }
 
   @media (max-width: 719px) {
+    :root { --vv-h: 100vh; --topbar-h: calc(2.75rem + env(safe-area-inset-top, 0px)); --thumb-h: calc(3.5rem + env(safe-area-inset-bottom, 0px)); }
+    /* The thumb bar: always at the sill, translucent, content scrolling under. */
+    .thumb { position: fixed; left: 0; right: 0; bottom: 0; z-index: 30; display: flex; align-items: center; gap: .5rem; height: var(--thumb-h); padding: 0 .75rem env(safe-area-inset-bottom, 0px) 1rem; background: rgba(var(--paper-rgb), .72); -webkit-backdrop-filter: blur(20px) saturate(180%); backdrop-filter: blur(20px) saturate(180%); border-top: 1px solid rgba(255,255,255,.4); }
+    .thumb::before { content: ''; position: absolute; left: 0; right: 0; bottom: 100%; height: 12px; background: linear-gradient(transparent, rgba(var(--paper-rgb), .9)); pointer-events: none; }
+    .thumb-field { flex: 1 1 auto; min-height: 2.75rem; text-align: left; font: inherit; color: var(--faint); background: var(--card); border: 1px solid var(--line); border-radius: 999px; padding: 0 1rem; cursor: pointer; }
+    .thumb-new { width: 2.75rem; height: 2.75rem; border-radius: 50%; border: 0; background: var(--accent-ink); color: #fff; font: inherit; font-size: 1.4rem; line-height: 1; cursor: pointer; }
+    /* A press answers on the way down, in colour: nothing on this page pops. */
+    .thumb-new:active { filter: brightness(.9); }
+    .thumb-field:active { background: var(--paper-2); }
+    body[data-open] .thumb, body[data-view="focus"] .thumb,
+    body:not([data-view="deck"]):not([data-view="focus"]) .thumb { display: none; }
+    @media (prefers-reduced-transparency: reduce) { .thumb { background: var(--paper); -webkit-backdrop-filter: none; backdrop-filter: none; } }
     /* Title + the view bar + Filter + New stay on the first wrap. The bar
        scrolls sideways if it cannot fit; the filter panel opens under the
        whole header rather than under its button. */
-    .topbar { row-gap: .5rem; padding: .5rem .75rem; }
-    .topbar h1 { order: 1; font-size: 1.05rem; }
-    .toggles { order: 2; flex: 1 1 auto; min-width: 0; overflow-x: auto; -webkit-overflow-scrolling: touch; padding-bottom: 1px; }
-    .filterbox { order: 2; position: static; }
+    /* One row: the title, open asks, the worst meter, and ⋯ for the rest.
+       The five-row header was a third of the screen. */
+    html, body { overscroll-behavior: none; }
+    body { -webkit-tap-highlight-color: transparent; }
+    .topbar { position: sticky; top: 0; z-index: 30; flex-wrap: nowrap; align-items: center; gap: .5rem; min-height: var(--topbar-h); height: var(--topbar-h); padding: env(safe-area-inset-top, 0px) .5rem 0 1rem; background: rgba(var(--paper-rgb), .72); -webkit-backdrop-filter: blur(20px) saturate(180%); backdrop-filter: blur(20px) saturate(180%); border-bottom: 0; }
+    .topbar::after { content: ''; position: absolute; left: 0; right: 0; top: 100%; height: 12px; background: linear-gradient(rgba(var(--paper-rgb), .9), transparent); pointer-events: none; }
+    .topbar h1 { order: 0; flex: 1 1 auto; min-width: 0; margin: 0; font-size: 1rem; letter-spacing: -.01em; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; pointer-events: none; }
+    .topbar .toggles, .topbar .filterbox, .topbar .settings, .topbar .new, .topbar .usage { display: none; }
+    .topbar .asks-pill { display: inline-flex; align-items: center; gap: .3rem; min-height: 2.25rem; padding: 0 .6rem; border-radius: 999px; border: 1px solid var(--line); background: var(--card); color: var(--danger); font: inherit; font-size: .85rem; font-variant-numeric: tabular-nums; cursor: pointer; }
+    .topbar .asks-pill[hidden] { display: none; }
+    .topbar .asks-pill .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--danger); }
+    .topbar .usage-dot { display: block; width: 2.25rem; height: 2.25rem; border-radius: 50%; border: 0; padding: 0; position: relative; cursor: pointer; background: conic-gradient(var(--tone, var(--accent)) calc(var(--used, 0) * 1%), var(--line) 0); }
+    .topbar .usage-dot::after { content: ''; position: absolute; inset: 5px; border-radius: 50%; background: var(--paper); }
+    .topbar .usage-dot[hidden] { display: none; }
+    .topbar .more { display: block; width: 2.75rem; height: 2.75rem; border: 0; background: none; font: inherit; font-size: 1.3rem; color: var(--ink); cursor: pointer; }
     .filter-pop { left: .75rem; right: .75rem; width: auto; }
-    .settings { order: 3; margin-left: auto; }
-    .new { order: 4; }
+    @media (prefers-reduced-transparency: reduce) { .topbar { background: var(--paper); -webkit-backdrop-filter: none; backdrop-filter: none; } }
     /* Three meters no longer fit beside the buttons: they take a row of their
        own and the bars give way before the labels do. */
     .usage { order: 5; flex: 1 1 100%; margin-left: 0; gap: .6rem; }
@@ -1164,7 +1293,13 @@ __ICON__
     .list { border-right: 0; max-height: none; height: 100%; }
     .pane { display: none; }
     body[data-open] .list { display: none; }
-    body[data-open] .pane { display: grid; height: 65vh; min-height: 22rem; }
+    /* One conversation takes the screen, under the topbar and over everything
+       else; it enters from the right and leaves by the same edge. */
+    body[data-open] .pane { display: grid; position: fixed; left: 0; right: 0; top: var(--topbar-h); height: calc(var(--vv-h) - var(--topbar-h)); min-height: 0; z-index: 20; background: var(--paper); will-change: transform; }
+    body[data-view="deck"][data-open] .deck { display: none; }
+    body[data-view="deck"][data-open] .library { display: block; }
+    /* Splitting panes is a desk gesture; a phone shows one. */
+    .pane .dock-split { display: none; }
     body[data-open]:not([data-panel="open"]) .pane .back { display: flex; }
     .pane-hint { bottom: 7.5rem; }
 
@@ -1207,7 +1342,8 @@ __ICON__
   }
   .column[data-scrolled] h2::after { opacity: 1; }
   @media (hover: none) {
-    .conv, .seg button, .new, .settings, .filter-toggle, .conv .manage .more { min-height: 2.75rem; }
+    .conv, .seg button, .new, .settings, .filter-toggle, .conv .manage .more,
+    .topbar button, .thumb button, .band-toggle, .sheet-row, .deck-ask-open { min-height: 2.75rem; }
     .dock-close, .dock-split { min-width: 2.75rem; height: 100%; }
   }
 </style>
@@ -1222,6 +1358,7 @@ __ICON__
       <button type="button" data-view="board" aria-pressed="false" data-marble-id="__ID__">Board</button>
       <button type="button" data-view="folders" aria-pressed="false" data-marble-id="__ID__">Folders</button>
       <button type="button" data-view="focus" aria-pressed="false" data-marble-id="__ID__">Focus</button>
+      <button type="button" data-view="deck" aria-pressed="false" data-marble-id="__ID__">Deck</button>
     </div>
   </div>
   <div class="filterbox" data-marble-id="__ID__">
@@ -1247,6 +1384,10 @@ __ICON__
   <div class="usage" data-marble-transient role="group" aria-label="Usage remaining"></div>
   <button type="button" class="settings" data-marble-id="__ID__">Settings</button>
   <button type="button" class="new" data-marble-id="__ID__">New</button>
+  <!-- Phone only: open asks, the worst meter, and the rest behind ⋯. -->
+  <button type="button" class="asks-pill" hidden aria-label="Open asks" data-marble-id="__ID__"><span class="dot" aria-hidden="true"></span><span class="asks-n" data-marble-transient></span></button>
+  <button type="button" class="usage-dot" aria-label="Usage" data-marble-transient hidden></button>
+  <button type="button" class="more" aria-label="More" aria-haspopup="dialog" data-marble-id="__ID__">⋯</button>
 </header>
 
 <div class="library" data-marble-id="__ID__">
@@ -1285,6 +1426,38 @@ __ICON__
   </section>
 </div>
 
+<!-- Deck: the same conversations, partitioned by how much they want you.
+     Bands are a projection of what the summary stream already says. -->
+<div class="deck" data-marble-id="__ID__">
+  <section class="band" data-band="asks" data-marble-id="__ID__">
+    <h2 class="band-head" data-marble-id="__ID__"><button type="button" class="band-toggle" aria-expanded="true" data-marble-id="__ID__">Needs you<span class="band-count" data-marble-transient></span></button></h2>
+    <div class="band-body asks-rail" data-marble-transient></div>
+  </section>
+  <section class="band" data-band="running" data-marble-id="__ID__">
+    <h2 class="band-head" data-marble-id="__ID__"><button type="button" class="band-toggle" aria-expanded="true" data-marble-id="__ID__">Running<span class="band-count" data-marble-transient></span></button></h2>
+    <div class="band-body" role="list" data-marble-transient></div>
+  </section>
+  <section class="band" data-band="review" data-marble-id="__ID__">
+    <h2 class="band-head" data-marble-id="__ID__"><button type="button" class="band-toggle" aria-expanded="true" data-marble-id="__ID__">Review<span class="band-count" data-marble-transient></span></button></h2>
+    <div class="band-body" role="list" data-marble-transient></div>
+  </section>
+  <section class="band" data-band="idle" data-collapsed data-marble-id="__ID__">
+    <h2 class="band-head" data-marble-id="__ID__"><button type="button" class="band-toggle" aria-expanded="false" data-marble-id="__ID__">Idle<span class="band-count" data-marble-transient></span></button></h2>
+    <div class="band-body" role="list" data-marble-transient></div>
+  </section>
+</div>
+
+<!-- The thumb bar and the sheets: phone chrome, hidden at any other width. -->
+<div class="thumb" data-marble-id="__ID__">
+  <button type="button" class="thumb-field" data-marble-id="__ID__">Say something…</button>
+  <button type="button" class="thumb-new" aria-label="New conversation" data-marble-id="__ID__">+</button>
+</div>
+<div class="sheet-scrim" data-marble-transient hidden></div>
+<section class="sheet" role="dialog" aria-modal="true" data-marble-transient hidden>
+  <div class="sheet-grip" aria-hidden="true"></div>
+  <div class="sheet-body"></div>
+</section>
+
 <script>
   // The Agents library. Rows, the open id, the filter and the search are the
   // page's — never ops — so browsing does not rewrite this file. View and the
@@ -1306,11 +1479,14 @@ __ICON__
       } catch { /* private browsing — the page still works; it just forgets */ }
     };
 
-    const VIEW_ORDER = ['library', 'board', 'folders', 'focus'];
+    const VIEW_ORDER = ['library', 'board', 'folders', 'focus', 'deck'];
 
     const restoreView = () => {
       const savedView = recalled(VIEW_KEY);
       if (VIEW_ORDER.includes(savedView)) document.body.setAttribute('data-view', savedView);
+      // A phone with no stored view opens on Deck: what wants you, not where
+      // things live. A stored preference is honoured at any width.
+      else if (matchMedia('(max-width: 719px)').matches) document.body.setAttribute('data-view', 'deck');
       deriveView();
     };
 
@@ -1333,6 +1509,9 @@ __ICON__
     const foldersEl = $('.folders');
     const folderRail = $('.folder-rail');
     const focusEl = $('.focus');
+    const deckEl = $('.deck');
+    let placeInDeck = () => {};
+    let paintDeck = () => {};
     const convo = $('marble-conversation');
     const pane = $('.pane');
     const search = $('input.search');
@@ -1345,6 +1524,15 @@ __ICON__
     const filterFoot = $('.filter-foot');
     const reduceMotion = matchMedia('(prefers-reduced-motion: reduce)');
     const narrowView = matchMedia('(max-width: 719px)');
+    // One flag for the scripts that branch on the phone; the stylesheet uses
+    // the same query directly.
+    const syncPhone = () => document.body.toggleAttribute('data-phone', narrowView.matches);
+    syncPhone();
+    narrowView.addEventListener('change', () => {
+      syncPhone();
+      // The pane's density follows the width.
+      applyDock();
+    });
     const FLIP_MS = 420;
     const FLIP_EASE = 'ease-out';
     const STAGGER_MS = 18;
@@ -2542,7 +2730,9 @@ __ICON__
      *  stacked list, and it is off the canvas entirely. */
     const layoutFocusPane = (fullIds) => {
       if (!pane || !focusEl) return;
-      const stacked = focusEl.hasAttribute('data-stack') || narrowView.matches;
+      // The phone places the pane itself, over the Full of its column.
+      if (narrowView.matches) return;
+      const stacked = focusEl.hasAttribute('data-stack');
       const stage = focusPack?.stage;
       if (!fullIds.length || stacked || !stage || !(stage.w > 0)) {
         hideFocusPane();
@@ -3397,6 +3587,8 @@ __ICON__
       });
       card.addEventListener('click', (event) => {
         if (focusSuppressClick) return;
+        // On a phone the stack's own pointer handler answers a tap.
+        if (narrowView.matches) return;
         if (event.target.closest('button, a, input, textarea, marble-conversation')) return;
         if (event.altKey) {
           openBeside(card.dataset.id);
@@ -3405,6 +3597,7 @@ __ICON__
         selectFocusCard(card.dataset.id, event);
       });
       card.addEventListener('dblclick', (event) => {
+        if (narrowView.matches) return;
         if (event.target.closest('button, a, input, textarea, marble-conversation')) return;
         event.preventDefault();
         pinFocus(card.dataset.id, { keepOpen: event.shiftKey });
@@ -3538,8 +3731,11 @@ __ICON__
       if (!focusEl) return;
       const view = document.body.getAttribute('data-view') || 'library';
       if (view !== 'focus') return;
-      if (narrowView.matches) focusEl.setAttribute('data-stack', '');
-      else focusEl.removeAttribute('data-stack');
+      // A phone lays Focus out as a fisheye column; the stacked fallback is
+      // no longer used at any width.
+      focusEl.removeAttribute('data-stack');
+      if (narrowView.matches) focusEl.setAttribute('data-phone', '');
+      else focusEl.removeAttribute('data-phone');
       if (focusEl.clientWidth < 2 && !focusLayoutQueued) {
         focusLayoutQueued = true;
         requestAnimationFrame(() => {
@@ -3606,11 +3802,11 @@ __ICON__
         }
       }
 
-      if (focusEl.hasAttribute('data-stack') || narrowView.matches) {
+      if (narrowView.matches) {
         focusPack = null;
         sizeFocusExtent(null);
-        layoutFocusPane(fullIds);
         paintFocusBasins(null);
+        layoutPhoneFocus(items, { keepFocal: Boolean(opts.quiet) });
         return;
       }
 
@@ -3795,6 +3991,10 @@ __ICON__
     const place = (el) => {
       const summary = summaries.get(el.dataset.id);
       const view = document.body.getAttribute('data-view') || 'library';
+      if (view === 'deck') {
+        placeInDeck(el, summary);
+        return;
+      }
       if (view === 'board') {
         if (summary?.archived) {
           el.remove();
@@ -3836,6 +4036,7 @@ __ICON__
       if (view === 'board') return boardEl;
       if (view === 'folders') return foldersEl;
       if (view === 'focus') return focusEl;
+      if (view === 'deck') return deckEl;
       return libraryEl;
     };
 
@@ -4666,7 +4867,9 @@ __ICON__
     const paintChrome = () => {
       const focusedKey = dock.focus === 'primary' ? PRIMARY : dock.extras[dock.focus]?.key;
       const primaryOn = !dock.extras.length || focusedKey === PRIMARY;
-      const chrome = dock.extras.length ? 'tile' : 'pane';
+      // Width decides the chrome, never focus: a phone gets the phone shell,
+      // a shared dock gets tiles, a pane on its own gets the roomier pane.
+      const chrome = narrowView.matches ? 'phone' : dock.extras.length ? 'tile' : 'pane';
       const mark = (el, on) => {
         if (!el) return;
         if (on) el.setAttribute('data-focused', '');
@@ -4742,7 +4945,7 @@ __ICON__
     };
 
     const ensurePrimaryBar = () => {
-      convo.setAttribute('data-chrome', 'pane');
+      convo.setAttribute('data-chrome', narrowView.matches ? 'phone' : 'pane');
       let bar = pane.querySelector(':scope > .dock-bar');
       if (!bar) {
         bar = makeBar(PRIMARY);
@@ -5183,7 +5386,10 @@ __ICON__
         el.innerHTML = '<span class="dot" aria-hidden="true"></span><span class="body"><span class="title"></span><span class="target"></span><span class="tags"></span><span class="meta"><span class="badge"></span><span class="activity"></span></span></span><span class="age"></span><div class="manage"><button type="button" class="more" aria-label="Manage conversation" aria-haspopup="menu" aria-expanded="false"><svg width="16" height="16" viewBox="0 0 16 16" aria-hidden="true"><circle cx="3.5" cy="8" r="1.3" fill="currentColor"/><circle cx="8" cy="8" r="1.3" fill="currentColor"/><circle cx="12.5" cy="8" r="1.3" fill="currentColor"/></svg></button></div>';
         const openRow = (event) => {
           if (suppressConvClick) return;
-          if ((document.body.getAttribute('data-view') || 'library') === 'board') openBoardPanel();
+          const view = document.body.getAttribute('data-view') || 'library';
+          if (view === 'board') openBoardPanel();
+          // Deck has no pane of its own at desk width; List shows the thread.
+          if (view === 'deck' && !narrowView.matches) setView('library');
           if (event?.altKey) {
             openBeside(el.dataset.id);
             return;
@@ -5206,6 +5412,24 @@ __ICON__
           else fillRowMenu(el);
         });
         bindConvDrag(el);
+        // Behind a Deck row: the consequential action a left swipe reveals.
+        const undoBtn = document.createElement('button');
+        undoBtn.type = 'button';
+        undoBtn.className = 'swipe-undo';
+        undoBtn.textContent = 'Undo turn';
+        undoBtn.setAttribute('data-marble-transient', '');
+        undoBtn.addEventListener('click', async (event) => {
+          event.stopPropagation();
+          el.removeAttribute('data-swipe');
+          el.style.removeProperty('--swipe-x');
+          try {
+            const { turns } = await agent.conversation(el.dataset.id);
+            const last = undoable(turns);
+            if (last) await agent.undo(last.id);
+          } catch (err) { showEmpty(err.message); }
+        });
+        el.append(undoBtn);
+        attachDeckGestures(el);
         nodes.set(summary.id, el);
       }
       paintRow(el, summary);
@@ -5253,8 +5477,16 @@ __ICON__
       }
       openId = id;
       remember(OPEN_KEY, id);
+      const wasOpen = document.body.hasAttribute('data-open');
       if (id) document.body.setAttribute('data-open', 'true');
       else document.body.removeAttribute('data-open');
+      // On a phone the pane arrives from the right — the edge it leaves by.
+      if (id && !wasOpen && narrowView.matches && pane && (document.body.getAttribute('data-view') || 'library') !== 'focus') {
+        pane.animate(
+          reduceMotion.matches ? [{ opacity: 0 }, { opacity: 1 }] : [{ transform: 'translateX(100%)' }, { transform: 'none' }],
+          { duration: reduceMotion.matches ? 150 : 260, easing: 'cubic-bezier(0.22, 1, 0.36, 1)' },
+        );
+      }
       if (!id) {
         convo.removeAttribute('conversation');
         dock.extras = [];
@@ -5338,6 +5570,7 @@ __ICON__
         if (next === 'library') closeBoardPanel();
         placeAll();
         paintFocus();
+        paintDeck();
         if (next === 'focus') startFocusDecay();
         else stopFocusDecay();
       };
@@ -5409,6 +5642,843 @@ __ICON__
       } catch { /* listing failed; the live stream still fills what it can */ }
     };
 
+    // ---- Deck. Rows are the same .conv elements List draws, placed by band;
+    // asks are cards keyed by request, built by the drawer's own builder.
+    const asksRail = deckEl?.querySelector('.asks-rail');
+    const openAsks = new Map(); // requestId → { ask, card }
+    const BAND_KEY = 'marble-agents:bands';
+    const phone = () => window.marbleAgentPhone;
+
+    const bandBody = (band) => deckEl?.querySelector(`.band[data-band="${band}"] .band-body`);
+
+    const placeInBand = (el, summary, band) => {
+      const body = bandBody(band);
+      if (!body) return;
+      const cmp = phone().bandCompare(band);
+      const siblings = [...body.querySelectorAll(':scope > .conv')].filter((n) => n !== el);
+      const before = siblings.find((n) => cmp(summary, summaries.get(n.dataset.id) ?? {}) < 0);
+      if (before) body.insertBefore(el, before);
+      else body.append(el);
+    };
+
+    const paintBandCounts = () => {
+      for (const band of deckEl?.querySelectorAll('.band') ?? []) {
+        const n = band.dataset.band === 'asks'
+          ? band.querySelectorAll('.deck-ask').length
+          : band.querySelectorAll('.band-body > .conv:not([hidden])').length;
+        band.querySelector('.band-count').textContent = n ? String(n) : '';
+      }
+    };
+
+    placeInDeck = (el, summary) => {
+      const band = phone()?.bandOf(summary) ?? null;
+      if (!band) {
+        el.remove();
+      } else if (band === 'asks') {
+        // An asking conversation is its ask card; the row waits in its next band.
+        placeInBand(el, summary, summary.running ? 'running' : 'idle');
+      } else {
+        placeInBand(el, summary, band);
+      }
+      paintBandCounts();
+    };
+
+    const restoreBands = () => {
+      let saved = {};
+      try { saved = JSON.parse(recalled(BAND_KEY) || '{}'); } catch { saved = {}; }
+      for (const band of deckEl?.querySelectorAll('.band') ?? []) {
+        const collapsed = band.dataset.band in saved ? Boolean(saved[band.dataset.band]) : band.dataset.band === 'idle';
+        band.toggleAttribute('data-collapsed', collapsed);
+        band.querySelector('.band-toggle').setAttribute('aria-expanded', String(!collapsed));
+      }
+    };
+    const rememberBands = () => {
+      const state = {};
+      for (const band of deckEl?.querySelectorAll('.band') ?? []) state[band.dataset.band] = band.hasAttribute('data-collapsed');
+      remember(BAND_KEY, JSON.stringify(state));
+    };
+    restoreBands();
+    deckEl?.addEventListener('click', (event) => {
+      const toggle = event.target.closest('.band-toggle');
+      if (!toggle) return;
+      const band = toggle.closest('.band');
+      band.toggleAttribute('data-collapsed');
+      toggle.setAttribute('aria-expanded', String(!band.hasAttribute('data-collapsed')));
+      rememberBands();
+    });
+
+    // New work bumps the count and flashes the header; it does not take the
+    // screen from under a descending thumb.
+    const flashBand = (band) => {
+      const head = deckEl?.querySelector(`.band[data-band="${band}"] .band-head`);
+      if (!head) return;
+      head.removeAttribute('data-flash');
+      void head.offsetWidth;
+      head.setAttribute('data-flash', '');
+    };
+
+    const buildDeckAsk = (ask) => {
+      const helpers = window.marbleAgentUI;
+      const peek = phone().peekOf(ask.request);
+      const summary = summaries.get(ask.conversation);
+      const card = document.createElement('article');
+      card.className = 'deck-ask';
+      card.dataset.request = ask.requestId;
+      card.dataset.conversation = ask.conversation;
+      const head = document.createElement('div');
+      head.className = 'deck-ask-head';
+      head.innerHTML = '<span class="dot" aria-hidden="true"></span><span class="deck-ask-title"></span>';
+      head.querySelector('.deck-ask-title').textContent = summary?.title || ask.title || 'Untitled';
+      const target = document.createElement('div');
+      target.className = 'deck-ask-target';
+      target.textContent = tailOfTarget(summary?.target || ask.target || '');
+      const peekEl = document.createElement('div');
+      peekEl.className = 'deck-peek';
+      for (const lead of ask.lead ?? []) {
+        const line = document.createElement('div');
+        line.className = 'peek-lead';
+        line.textContent = lead.type === 'text' ? lead.text : `${lead.name} ${lead.input?.file_path ?? lead.input?.command ?? lead.input?.pattern ?? ''}`.trim();
+        peekEl.append(line);
+      }
+      if (peek.detail || peek.lines.length) {
+        const pre = document.createElement('pre');
+        pre.textContent = [peek.detail, ...peek.lines].filter(Boolean).join('\n');
+        peekEl.append(pre);
+      }
+      const submit = async (response) => {
+        // Optimistic: the card leaves now and comes back with a line if the
+        // answer is lost on the way.
+        removeDeckAsk(ask.requestId);
+        try {
+          await agent.answer(ask.turn, ask.requestId, response);
+        } catch (err) {
+          const back = buildDeckAsk(ask);
+          const note = document.createElement('div');
+          note.className = 'deck-ask-target';
+          note.textContent = `Not sent: ${err.message}`;
+          back.prepend(note);
+          addDeckAsk(ask, back);
+        }
+      };
+      const askCard = helpers.buildAskCard(ask.request, submit);
+      const openBtn = document.createElement('button');
+      openBtn.type = 'button';
+      openBtn.className = 'deck-ask-open';
+      openBtn.textContent = 'Open';
+      openBtn.addEventListener('click', () => open(ask.conversation));
+      card.append(head, target, peekEl, askCard, openBtn);
+      return card;
+    };
+
+    const addDeckAsk = (ask, card = buildDeckAsk(ask)) => {
+      if (!asksRail) return;
+      const existing = openAsks.get(ask.requestId);
+      existing?.card.remove();
+      openAsks.set(ask.requestId, { ask, card });
+      asksRail.append(card);
+      const band = asksRail.closest('.band');
+      if (!existing) {
+        if (band.hasAttribute('data-collapsed') && openAsks.size === 1) {
+          band.removeAttribute('data-collapsed');
+          band.querySelector('.band-toggle').setAttribute('aria-expanded', 'true');
+        } else flashBand('asks');
+      }
+      paintBandCounts();
+      paintAsksPill();
+    };
+
+    const removeDeckAsk = (requestId) => {
+      const entry = openAsks.get(requestId);
+      if (!entry) return;
+      entry.card.remove();
+      openAsks.delete(requestId);
+      paintBandCounts();
+      paintAsksPill();
+    };
+
+    const loadAsks = async () => {
+      if (!agent?.asks) return;
+      try {
+        const { asks } = await agent.asks();
+        const seen = new Set(asks.map((a) => a.requestId));
+        for (const id of [...openAsks.keys()]) if (!seen.has(id)) removeDeckAsk(id);
+        for (const ask of asks) if (!openAsks.has(ask.requestId)) addDeckAsk(ask);
+      } catch { /* the host predates the route; the rows still say Needs you */ }
+    };
+
+    paintDeck = () => {
+      if ((document.body.getAttribute('data-view') || 'library') !== 'deck') return;
+      for (const el of nodes.values()) place(el);
+      paintBandCounts();
+    };
+
+    let paintAsksPill = () => {};
+
+    // ---- Sheets. One element, filled per kind; the body behind dims and
+    // steps back. A drag from anywhere that is not a control moves it 1:1.
+    const sheetEl = $('.sheet');
+    const scrimEl = $('.sheet-scrim');
+    const sheetBody = sheetEl?.querySelector('.sheet-body');
+    let sheetY = 0;
+    let sheetStop = null;
+    const sheetHeight = () => sheetEl?.getBoundingClientRect().height || 1;
+    const rubberband = (over, dim, c = 0.55) => (over * dim * c) / (dim + c * Math.abs(over));
+    const placeSheet = (y) => {
+      sheetY = y;
+      if (sheetEl) sheetEl.style.transform = `translateY(${y}px)`;
+    };
+    const springSheet = (to, velocity, done) => {
+      sheetStop?.();
+      if (reduceMotion.matches) {
+        placeSheet(to);
+        done?.();
+        return;
+      }
+      sheetStop = window.marbleAgentUI.spring({ from: sheetY, to, velocity, response: 0.3, damping: 0.8, onFrame: (y) => placeSheet(y), onDone: done });
+    };
+    const closeSheet = (velocity = 0) => {
+      if (!sheetEl || sheetEl.hidden) return;
+      document.body.removeAttribute('data-sheet');
+      springSheet(sheetHeight(), velocity, () => {
+        sheetEl.hidden = true;
+        scrimEl.hidden = true;
+        sheetBody.replaceChildren();
+      });
+    };
+    const openSheet = (kind, fill) => {
+      if (!sheetEl) return;
+      sheetStop?.();
+      sheetBody.replaceChildren();
+      sheetEl.dataset.kind = kind;
+      sheetEl.hidden = false;
+      scrimEl.hidden = false;
+      Promise.resolve(fill(sheetBody)).then(() => {
+        placeSheet(sheetHeight());
+        requestAnimationFrame(() => {
+          document.body.setAttribute('data-sheet', kind);
+          springSheet(0, 0);
+        });
+      });
+    };
+    scrimEl?.addEventListener('click', () => closeSheet());
+    (() => {
+      let grab = null;
+      let history = [];
+      sheetEl?.addEventListener('pointerdown', (event) => {
+        if (event.target.closest('button, input, textarea, select, a')) return;
+        sheetStop?.();
+        grab = { y: event.clientY, at: sheetY, id: event.pointerId };
+        history = [{ y: event.clientY, t: performance.now() }];
+        sheetEl.setPointerCapture(event.pointerId);
+      });
+      sheetEl?.addEventListener('pointermove', (event) => {
+        if (!grab) return;
+        const raw = grab.at + (event.clientY - grab.y);
+        placeSheet(raw < 0 ? rubberband(raw, sheetHeight()) : raw);
+        history.push({ y: event.clientY, t: performance.now() });
+        if (history.length > 6) history.shift();
+      });
+      const release = () => {
+        if (!grab) return;
+        grab = null;
+        const a = history[0];
+        const b = history[history.length - 1];
+        const velocity = b.t > a.t ? ((b.y - a.y) / (b.t - a.t)) * 1000 : 0;
+        // The sign of the velocity decides; only a still hand asks how far.
+        if (velocity > 40 || (Math.abs(velocity) <= 40 && sheetY > sheetHeight() * 0.5)) closeSheet(velocity);
+        else springSheet(0, velocity);
+      };
+      sheetEl?.addEventListener('pointerup', release);
+      sheetEl?.addEventListener('pointercancel', release);
+    })();
+
+    const sheetRow = (label, onTap, tone) => {
+      const b = document.createElement('button');
+      b.type = 'button';
+      b.className = 'sheet-row';
+      if (tone) b.dataset.tone = tone;
+      b.textContent = label;
+      b.addEventListener('click', async () => {
+        closeSheet();
+        try { await onTap(); } catch (err) { showEmpty(err.message); }
+      });
+      return b;
+    };
+
+    const runningTurnOf = async (id) => {
+      const { turns } = await agent.conversation(id);
+      return turns.find((t) => t.status === 'running' || t.status === 'queued') ?? null;
+    };
+
+    const openActions = (id) => {
+      const summary = summaries.get(id);
+      if (!summary || !agent) return;
+      openSheet('actions', (body) => {
+        const h3 = document.createElement('h3');
+        h3.textContent = summary.title || 'Untitled';
+        body.append(h3);
+        if (statusOf(summary) === 'running') {
+          body.append(sheetRow('Stop', async () => {
+            const t = await runningTurnOf(id);
+            if (t) await agent.cancel(t.id);
+          }, 'danger'));
+        }
+        body.append(sheetRow('Open', () => open(id)));
+        if (summary.needsReview) body.append(sheetRow('Mark reviewed', () => agent.markReviewed(id)));
+        body.append(sheetRow(summary.archived ? 'Unarchive' : 'Archive', () => agent.archive(id, !summary.archived)));
+        for (const folder of folderCatalog) {
+          if (folder.id === summary.folderId) continue;
+          body.append(sheetRow(`Move to ${folder.name}`, () => agent.update(id, { folderId: folder.id })));
+        }
+        if (summary.folderId) body.append(sheetRow('Remove from folder', () => agent.update(id, { folderId: null })));
+        for (const provider of [...labels.values()].filter((p) => p.installed && p.signedIn && p.id !== summary.provider)) {
+          body.append(sheetRow(`Continue in ${provider.label}`, async () => open(await agent.handoff(id, provider.id))));
+        }
+      });
+    };
+
+    const seg = (parent, items, chosen, onPick) => {
+      parent.replaceChildren();
+      for (const item of items) {
+        const b = document.createElement('button');
+        b.type = 'button';
+        b.textContent = item.label;
+        b.setAttribute('aria-pressed', String(item.id === chosen));
+        b.addEventListener('click', () => {
+          onPick(item.id);
+          seg(parent, items, item.id, onPick);
+        });
+        parent.append(b);
+      }
+    };
+
+    const openNewSheet = (text = '') => {
+      if (!agent) {
+        showEmpty('This host is not running agents. Restart with MARBLE_DRIVE_AGENTS=1.');
+        return;
+      }
+      openSheet('new', async (body) => {
+        const h3 = document.createElement('h3');
+        h3.textContent = 'New conversation';
+        const projects = document.createElement('div');
+        projects.className = 'sheet-seg';
+        projects.setAttribute('role', 'group');
+        projects.setAttribute('aria-label', 'Project');
+        const setups = document.createElement('div');
+        setups.className = 'sheet-seg';
+        setups.setAttribute('role', 'group');
+        setups.setAttribute('aria-label', 'Agent');
+        const prompt = document.createElement('textarea');
+        prompt.className = 'sheet-prompt';
+        prompt.placeholder = 'What should it do?';
+        prompt.value = text;
+        const start = document.createElement('button');
+        start.type = 'button';
+        start.className = 'sheet-start';
+        start.textContent = 'Start';
+        body.append(h3, projects, setups, prompt, start);
+        let projectId = 'drive';
+        let providerId = null;
+        try {
+          const listed = await agent.projects();
+          const rows = (Array.isArray(listed) ? listed : listed.projects ?? []).map((p) => ({ id: p.id, label: p.name ?? p.id }));
+          projectId = rows[0]?.id ?? 'drive';
+          if (rows.length > 1) seg(projects, rows, projectId, (id) => { projectId = id; });
+        } catch { /* the drive alone */ }
+        if (!labels.size) {
+          try {
+            for (const p of await agent.providers()) labels.set(p.id, p);
+          } catch { /* none */ }
+        }
+        const ready = [...labels.values()].filter((p) => p.installed && p.signedIn);
+        providerId = (ready.find((p) => p.default) ?? ready[0])?.id ?? null;
+        if (ready.length > 1) seg(setups, ready.map((p) => ({ id: p.id, label: p.label })), providerId, (id) => { providerId = id; });
+        start.addEventListener('click', async () => {
+          if (!providerId) {
+            showEmpty('No agent is ready on this machine. npm run agents -- providers says why.');
+            return;
+          }
+          const words = prompt.value.trim();
+          closeSheet();
+          try {
+            const id = await agent.start({ provider: providerId, project: projectId });
+            await open(id);
+            if (words) await agent.send(id, { prompt: words });
+          } catch (err) { showEmpty(err.message); }
+        });
+        prompt.focus();
+      });
+    };
+
+    const openFleetSheet = () => {
+      if (!agent) return;
+      openSheet('fleet', async (body) => {
+        const h3 = document.createElement('h3');
+        h3.textContent = 'Fleet';
+        const meters = document.createElement('div');
+        meters.className = 'fleet-meters';
+        const windows = document.createElement('div');
+        windows.className = 'fleet-windows';
+        body.append(h3, meters, windows);
+        try {
+          const usage = await agent.usage();
+          window.marbleAgentUI?.fillMeters?.(meters, usage.meters ?? []);
+          for (const meter of usage.meters ?? []) {
+            for (const w of meter.windows ?? []) {
+              const line = document.createElement('div');
+              line.textContent = `${meter.label} ${w.label}: ${w.used}% used${w.resetsAt ? ` · resets ${window.marbleAgentUI?.formatReset?.(w.resetsAt) ?? ''}` : ''}`;
+              windows.append(line);
+            }
+          }
+        } catch { meters.textContent = 'Usage unavailable'; }
+        const running = [...summaries.values()].filter((s) => statusOf(s) === 'running');
+        if (running.length) {
+          body.append(sheetRow(`Stop all running (${running.length})`, async () => {
+            for (const s of running) {
+              const t = await runningTurnOf(s.id);
+              if (t) await agent.cancel(t.id);
+            }
+          }, 'danger'));
+        }
+      });
+    };
+
+    $('.thumb-new')?.addEventListener('click', () => openNewSheet());
+    $('.thumb-field')?.addEventListener('click', () => openNewSheet());
+
+    // ---- Phone chrome. The keyboard is just less room: the visual viewport
+    // writes one variable and every phone layout reads it.
+    const syncViewport = () => {
+      const h = window.visualViewport?.height ?? window.innerHeight;
+      document.documentElement.style.setProperty('--vv-h', `${Math.round(h)}px`);
+      if (narrowView.matches && (document.body.getAttribute('data-view') || 'library') === 'focus') paintFocus({ quiet: true });
+    };
+    syncViewport();
+    window.visualViewport?.addEventListener('resize', syncViewport);
+    window.visualViewport?.addEventListener('scroll', syncViewport);
+    addEventListener('resize', syncViewport);
+
+    const asksPill = $('.asks-pill');
+    paintAsksPill = () => {
+      if (!asksPill) return;
+      const n = openAsks.size;
+      asksPill.hidden = n === 0;
+      asksPill.querySelector('.asks-n').textContent = n ? String(n) : '';
+    };
+    asksPill?.addEventListener('click', () => {
+      setView('deck');
+      const band = deckEl?.querySelector('.band[data-band="asks"]');
+      band?.removeAttribute('data-collapsed');
+      band?.querySelector('.band-toggle')?.setAttribute('aria-expanded', 'true');
+      deckEl?.scrollTo({ top: 0, behavior: reduceMotion.matches ? 'auto' : 'smooth' });
+    });
+
+    // The worst signed-in meter as one ring; the fleet sheet has the rest.
+    const usageDot = $('.usage-dot');
+    const paintUsageDot = async () => {
+      if (!usageDot || !agent?.usage) return;
+      let meters = [];
+      try { ({ meters = [] } = await agent.usage()); } catch { meters = []; }
+      const worst = meters.filter((m) => Number.isFinite(m.used)).sort((a, b) => b.used - a.used)[0];
+      usageDot.hidden = !worst;
+      if (!worst) return;
+      usageDot.style.setProperty('--used', String(worst.used));
+      const tone = window.marbleAgentUI?.usageTone?.(worst.used) ?? 'blue';
+      usageDot.style.setProperty('--tone', { blue: 'var(--accent)', yellow: 'var(--caution)', orange: '#d0782f', red: 'var(--danger)' }[tone] ?? 'var(--accent)');
+      usageDot.title = `${worst.label} ${worst.used}%`;
+    };
+    usageDot?.addEventListener('click', () => openFleetSheet());
+    addEventListener('marble:agent-settings-saved', () => paintUsageDot());
+    setInterval(() => { if (narrowView.matches && document.visibilityState === 'visible') paintUsageDot(); }, 120_000);
+
+    const openMore = () => {
+      openSheet('more', (body) => {
+        const views = [['deck', 'Deck'], ['focus', 'Focus'], ['library', 'List'], ['board', 'Board'], ['folders', 'Folders']];
+        const current = document.body.getAttribute('data-view') || 'library';
+        for (const [view, label] of views) {
+          const row = sheetRow(label, () => setView(view));
+          row.setAttribute('aria-pressed', String(view === current));
+          body.append(row);
+        }
+        body.append(sheetRow('Filter', () => setFilterOpen(true, { focus: false })));
+        body.append(sheetRow('Settings', () => window.marble?.agent?.openSettings?.()));
+      });
+    };
+    $('.topbar .more')?.addEventListener('click', openMore);
+
+    // Ages tick on one clock, only while the page is showing.
+    const paintAges = () => {
+      for (const [id, el] of nodes) {
+        if (el.hidden || !el.isConnected) continue;
+        const summary = summaries.get(id);
+        if (summary) el.querySelector('.age').textContent = age(summary.updatedAt);
+      }
+    };
+    setInterval(() => { if (document.visibilityState === 'visible') paintAges(); }, 30_000);
+
+    // ---- Back by the edge. 1:1 from the left edge; commit by the sign of
+    // the velocity at release, and the pane leaves the way it came.
+    (() => {
+      const EDGE = 24;
+      let grab = null;
+      let history = [];
+      let stop = null;
+      const place = (x) => { pane.style.transform = x ? `translateX(${x}px)` : ''; };
+      pane?.addEventListener('pointerdown', (event) => {
+        if (!narrowView.matches || !document.body.hasAttribute('data-open')) return;
+        if ((document.body.getAttribute('data-view') || 'library') === 'focus') return;
+        if (event.clientX > EDGE) return;
+        stop?.();
+        grab = { x: event.clientX, id: event.pointerId };
+        history = [{ x: event.clientX, t: performance.now() }];
+        pane.setPointerCapture(event.pointerId);
+        event.preventDefault();
+      });
+      pane?.addEventListener('pointermove', (event) => {
+        if (!grab) return;
+        place(Math.max(0, event.clientX - grab.x));
+        history.push({ x: event.clientX, t: performance.now() });
+        if (history.length > 6) history.shift();
+      });
+      const release = () => {
+        if (!grab) return;
+        const was = grab;
+        grab = null;
+        try { pane.releasePointerCapture(was.id); } catch { /* not captured */ }
+        const a = history[0];
+        const b = history[history.length - 1];
+        const velocity = b.t > a.t ? ((b.x - a.x) / (b.t - a.t)) * 1000 : 0;
+        const x = Math.max(0, b.x - was.x);
+        const w = pane.getBoundingClientRect().width || 1;
+        const leaving = velocity > 40 || (Math.abs(velocity) <= 40 && x > w * 0.4);
+        const run = (to, done) => {
+          if (reduceMotion.matches) {
+            place(0);
+            done?.();
+            return;
+          }
+          stop = window.marbleAgentUI.spring({ from: x, to, velocity, response: 0.35, onFrame: place, onDone: () => { place(0); done?.(); } });
+        };
+        if (leaving) run(w, () => open(null));
+        else run(0);
+      };
+      pane?.addEventListener('pointerup', release);
+      pane?.addEventListener('pointercancel', release);
+    })();
+
+    // ---- Focus on a phone. `phoneFocal` is a float index into the stack's
+    // order; the fisheye in agent-phone.js turns it into every card's box.
+    // The card you grab stays under your finger; a release projects the
+    // flick, snaps to the nearest card and springs there.
+    let phoneFocal = 0;
+    let phoneOrder = [];
+    let phoneStop = null;
+    const phoneHelpers = () => window.marbleAgentPhone;
+    const phoneRoom = () => focusEl?.clientHeight ?? 0;
+    const phoneStackOrder = (items) => focusColumnsOf(items, null).columns.flatMap((c) => c.ids);
+
+    const layoutPhoneFocus = (items, opts = {}) => {
+      if (!focusEl) return;
+      const order = phoneStackOrder(items);
+      const changedOrder = order.join('|') !== phoneOrder.join('|');
+      phoneOrder = order;
+      if (!order.length) {
+        hideFocusPane();
+        return;
+      }
+      if (changedOrder && !opts.keepFocal) {
+        const want = openId && order.includes(openId) ? order.indexOf(openId) : Math.round(Math.min(phoneFocal, order.length - 1));
+        phoneFocal = Math.max(0, want);
+      } else if (phoneFocal > order.length - 1) {
+        phoneFocal = order.length - 1;
+      }
+      placePhoneStack();
+    };
+
+    const placePhoneStack = () => {
+      const helpers = phoneHelpers();
+      if (!helpers || !focusEl) return;
+      const cards = helpers.fisheye(phoneOrder.length, phoneFocal, phoneRoom());
+      let fullRect = null;
+      phoneOrder.forEach((id, i) => {
+        const card = focusEl.querySelector(`.focus-card[data-id="${id}"]`);
+        if (!card) return;
+        const c = cards[i];
+        stopCardSpring(card);
+        card.style.left = '';
+        card.style.width = '';
+        card.style.transform = '';
+        card.style.top = `${c.top}px`;
+        card.style.height = `${c.height}px`;
+        card.style.zIndex = c.lod === 'full' ? '3' : c.lod === 'sliver' ? '1' : '2';
+        card.dataset.lod = c.lod;
+        if (c.lod === 'full') fullRect = c;
+      });
+      layoutPhonePane(fullRect);
+    };
+
+    const layoutPhonePane = (rect) => {
+      if (!pane || !focusEl) return;
+      if (!rect) {
+        hideFocusPane();
+        return;
+      }
+      const box = focusEl.getBoundingClientRect();
+      pane.style.visibility = '';
+      pane.style.display = 'grid';
+      pane.style.position = 'fixed';
+      pane.style.left = `${box.left + 12}px`;
+      pane.style.top = `${box.top + rect.top}px`;
+      pane.style.width = `${Math.max(0, box.width - 24)}px`;
+      pane.style.height = `${Math.max(0, rect.height)}px`;
+      pane.style.zIndex = '6';
+      pane.style.borderRadius = '12px';
+      pane.style.overflow = 'hidden';
+      pane.style.pointerEvents = 'auto';
+      applyDock();
+      const id = phoneOrder[Math.round(phoneFocal)];
+      if (id && convo.getAttribute('conversation') !== id && !focusEl.hasAttribute('data-settling')) retargetPhonePane(id);
+    };
+
+    /** The pane retargets when the spring lands on a different card, and
+     *  materializes rather than cuts. */
+    const retargetPhonePane = (id) => {
+      open(id);
+      if (reduceMotion.matches) return;
+      pane.animate([{ opacity: 0, filter: 'blur(8px)' }, { opacity: 1, filter: 'blur(0)' }], { duration: 200, easing: 'cubic-bezier(0.22, 1, 0.36, 1)' });
+    };
+
+    const settlePhoneTo = (target, velocity = 0, { damping = 1 } = {}) => {
+      if (!focusEl) return;
+      const n = phoneOrder.length;
+      if (!n) return;
+      const to = Math.max(0, Math.min(n - 1, target));
+      focusEl.setAttribute('data-settling', '');
+      phoneStop?.();
+      const land = () => {
+        focusEl.removeAttribute('data-settling');
+        pane.style.opacity = '';
+        placePhoneStack();
+      };
+      if (reduceMotion.matches) {
+        phoneFocal = to;
+        land();
+        pane.animate([{ opacity: 0.4 }, { opacity: 1 }], { duration: 150 });
+        return;
+      }
+      let state = { x: phoneFocal, v: velocity };
+      let last = performance.now();
+      let frame = 0;
+      const step = (now) => {
+        state = phoneHelpers().stepSpring(state, to, (now - last) / 1000, { damping, response: 0.4 });
+        last = now;
+        phoneFocal = state.x;
+        placePhoneStack();
+        pane.style.opacity = String(Math.max(0, 1 - Math.min(1, 3 * Math.abs(phoneFocal - to))));
+        if (state.settled) {
+          land();
+          return;
+        }
+        frame = requestAnimationFrame(step);
+      };
+      frame = requestAnimationFrame(step);
+      phoneStop = () => cancelAnimationFrame(frame);
+    };
+
+    const settlePhone = (velocityCards) => {
+      const helpers = phoneHelpers();
+      const projected = phoneFocal + helpers.project(velocityCards);
+      const target = Math.round(projected);
+      // Bounce only when the gesture carried the stack at least one card.
+      const damping = Math.abs(projected - phoneFocal) >= 1 ? 0.8 : 1;
+      settlePhoneTo(target, velocityCards, { damping });
+    };
+
+    (() => {
+      let grab = null;
+      let history = [];
+      let pressTimer = 0;
+      focusEl?.addEventListener('pointerdown', (event) => {
+        if (!narrowView.matches) return;
+        if (pane?.contains(event.target)) return;
+        const helpers = phoneHelpers();
+        if (!helpers || !phoneOrder.length) return;
+        const card = event.target.closest('.focus-card');
+        phoneStop?.();
+        focusEl.removeAttribute('data-settling');
+        const index = card ? phoneOrder.indexOf(card.dataset.id) : Math.round(phoneFocal);
+        const cardTop = card ? parseFloat(card.style.top) || 0 : 0;
+        const y = event.clientY - focusEl.getBoundingClientRect().top;
+        grab = { index: Math.max(0, index), offset: y - cardTop, id: event.pointerId, startFocal: phoneFocal, moved: false, cardId: card?.dataset.id ?? null };
+        history = [{ f: phoneFocal, t: performance.now() }];
+        focusEl.setPointerCapture(event.pointerId);
+        clearTimeout(pressTimer);
+        pressTimer = setTimeout(() => {
+          pressTimer = 0;
+          if (grab && !grab.moved && grab.cardId) {
+            const id = grab.cardId;
+            grab = null;
+            openActions(id);
+          }
+        }, LONG_PRESS_MS);
+      });
+      focusEl?.addEventListener('pointermove', (event) => {
+        if (!grab) return;
+        const y = event.clientY - focusEl.getBoundingClientRect().top;
+        const next = phoneHelpers().focalFor(grab.index, y - grab.offset, phoneOrder.length, phoneRoom());
+        if (!grab.moved && Math.abs(next - grab.startFocal) > 0.02) {
+          grab.moved = true;
+          clearTimeout(pressTimer);
+          pressTimer = 0;
+        }
+        if (!grab.moved) return;
+        phoneFocal = next;
+        placePhoneStack();
+        pane.style.opacity = String(Math.max(0, 1 - Math.min(1, 3 * Math.abs(phoneFocal - grab.startFocal))));
+        history.push({ f: phoneFocal, t: performance.now() });
+        if (history.length > 6) history.shift();
+      });
+      const release = () => {
+        clearTimeout(pressTimer);
+        pressTimer = 0;
+        if (!grab) return;
+        const was = grab;
+        grab = null;
+        try { focusEl.releasePointerCapture(was.id); } catch { /* not captured */ }
+        const a = history[0];
+        const b = history[history.length - 1];
+        const velocity = b.t > a.t ? ((b.f - a.f) / (b.t - a.t)) * 1000 : 0;
+        if (!was.moved) {
+          // A tap: spring to that card.
+          const index = was.cardId ? phoneOrder.indexOf(was.cardId) : -1;
+          if (index >= 0 && index !== Math.round(phoneFocal)) settlePhoneTo(index);
+          return;
+        }
+        settlePhone(velocity);
+      };
+      focusEl?.addEventListener('pointerup', release);
+      focusEl?.addEventListener('pointercancel', release);
+    })();
+
+    // ---- Deck gestures. A cheap, reversible action completes as a swipe;
+    // a consequential one is revealed by a swipe and taken by a button. A
+    // long press asks what to do.
+    const SWIPE_COMMIT = 96;
+    const SWIPE_REVEAL = 88;
+    const LONG_PRESS_MS = 400;
+    const attachDeckGestures = (el) => {
+      let start = null;
+      let axis = null;
+      let pressTimer = 0;
+      let dx = 0;
+      let history = [];
+      let stop = null;
+      let justSwiped = false;
+      const inDeck = () => el.closest('.band-body') != null;
+      // The row's content slides; the row itself stays put with the action
+      // behind it, so what a swipe reveals is inside the row's own box.
+      const slide = (x) => {
+        dx = x;
+        if (x) el.style.setProperty('--swipe-x', `${x}px`);
+        else el.style.removeProperty('--swipe-x');
+      };
+      const settle = (to, velocity = 0) => {
+        stop?.();
+        if (reduceMotion.matches) {
+          slide(to);
+          return;
+        }
+        stop = window.marbleAgentUI.spring({ from: dx, to, velocity, response: 0.3, onFrame: slide });
+      };
+      el.addEventListener('pointerdown', (event) => {
+        if (!inDeck() || event.target.closest('.manage, .swipe-undo')) return;
+        stop?.();
+        start = { x: event.clientX, y: event.clientY, id: event.pointerId, base: dx };
+        axis = null;
+        history = [{ x: event.clientX, t: performance.now() }];
+        pressTimer = setTimeout(() => {
+          pressTimer = 0;
+          start = null;
+          suppressConvClick = true;
+          setTimeout(() => { suppressConvClick = false; }, 400);
+          openActions(el.dataset.id);
+        }, LONG_PRESS_MS);
+      });
+      el.addEventListener('pointermove', (event) => {
+        if (!start) return;
+        const mx = event.clientX - start.x;
+        const my = event.clientY - start.y;
+        if (!axis) {
+          if (Math.hypot(mx, my) < 10) return;
+          clearTimeout(pressTimer);
+          pressTimer = 0;
+          axis = Math.abs(mx) > Math.abs(my) ? 'x' : 'y';
+          if (axis === 'x') el.setPointerCapture(start.id);
+          else {
+            start = null;
+            return;
+          }
+        }
+        event.preventDefault();
+        suppressConvClick = true;
+        const band = el.closest('.band')?.dataset.band;
+        const canRight = band === 'review';
+        const canLeft = band === 'review' || band === 'idle';
+        let x = start.base + mx;
+        if ((x > 0 && !canRight) || (x < 0 && !canLeft)) x *= 0.25;
+        slide(x);
+        el.dataset.swipe = x > 0 ? 'review' : 'undo';
+        history.push({ x: event.clientX, t: performance.now() });
+        if (history.length > 6) history.shift();
+      });
+      const end = () => {
+        clearTimeout(pressTimer);
+        pressTimer = 0;
+        if (!start) return;
+        const was = start;
+        start = null;
+        if (axis !== 'x') return;
+        try { el.releasePointerCapture(was.id); } catch { /* not captured */ }
+        justSwiped = true;
+        setTimeout(() => { suppressConvClick = false; justSwiped = false; }, 0);
+        const first = history[0];
+        const last = history[history.length - 1];
+        const velocity = last.t > first.t ? ((last.x - first.x) / (last.t - first.t)) * 1000 : 0;
+        const projected = dx + window.marbleAgentUI.project(velocity);
+        if (projected > SWIPE_COMMIT && el.closest('.band')?.dataset.band === 'review') {
+          const id = el.dataset.id;
+          const summary = summaries.get(id);
+          el.removeAttribute('data-swipe');
+          settle(0, velocity);
+          if (summary) upsert({ ...summary, needsReview: false }); // optimistic
+          agent.markReviewed(id).catch(() => { if (summary) upsert({ ...summary, needsReview: true }); });
+          return;
+        }
+        if (projected < -SWIPE_REVEAL) {
+          el.dataset.swipe = 'undo';
+          settle(-SWIPE_REVEAL - 8, velocity);
+          return;
+        }
+        el.removeAttribute('data-swipe');
+        settle(0, velocity);
+      };
+      el.addEventListener('pointerup', end);
+      el.addEventListener('pointercancel', end);
+      // The click that ends a swipe is not a tap. A tap on a revealed row
+      // puts it back rather than opening it.
+      el.addEventListener('click', (event) => {
+        if (event.target.closest('.swipe-undo')) return;
+        if (justSwiped) {
+          event.stopPropagation();
+          return;
+        }
+        if (!dx) return;
+        event.stopPropagation();
+        el.removeAttribute('data-swipe');
+        settle(0);
+      }, true);
+    };
+
     const load = async () => {
       if (!agent) return;
       try {
@@ -5416,6 +6486,8 @@ __ICON__
         if (filter === 'archived') await loadArchived();
       } catch { /* same as loadArchived */ }
       applyFilters();
+      await loadAsks();
+      if (narrowView.matches) paintUsageDot();
     };
 
     const setFilter = async (next) => {
@@ -5628,10 +6700,18 @@ __ICON__
           const stateStyle = document.createElement('style');
           stateStyle.setAttribute('data-marble-transient', '');
           stateStyle.setAttribute('data-state-css', '');
-          stateStyle.textContent = (window.marbleAgentUI?.TAG_CSS ?? '') + (window.marbleAgentUI?.STATE_CSS ?? '');
+          stateStyle.textContent = (window.marbleAgentUI?.TAG_CSS ?? '') + (window.marbleAgentUI?.STATE_CSS ?? '') + (window.marbleAgentUI?.ASK_CSS ?? '');
           document.head.append(stateStyle);
         }
         api.on('*', (payload) => {
+          if (payload?.kind === 'ask') {
+            addDeckAsk({ ...payload, lead: payload.lead ?? [] });
+            return;
+          }
+          if (payload?.kind === 'ask.resolved') {
+            removeDeckAsk(payload.requestId);
+            return;
+          }
           if (payload?.folders) {
             folderCatalog = payload.folders;
             paintFolderRail();
@@ -5659,6 +6739,17 @@ __ICON__
           repaintRows();
         } catch { /* folders unavailable; rail stays empty */ }
         restoreDock();
+        // Hidden: close the streams. Visible again: reopen them and resync,
+        // because whatever happened while away was never streamed.
+        document.addEventListener('visibilitychange', async () => {
+          if (document.visibilityState === 'hidden') {
+            api.suspend?.();
+            return;
+          }
+          api.resume?.();
+          await load();
+          paintAges();
+        });
         const saved = recalled(OPEN_KEY);
         if (saved) await open(saved);
         addEventListener('marble:agent-settings-saved', async () => {

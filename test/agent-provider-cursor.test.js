@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { spawnSync } from 'node:child_process';
+import { spawn, spawnSync } from 'node:child_process';
 import fs from 'node:fs';
 import fsp from 'node:fs/promises';
 import os from 'node:os';
@@ -243,6 +243,27 @@ const askHook = (input, env = {}) => {
   });
   return { code: run.status, answer: JSON.parse(run.stdout) };
 };
+
+/** Run the hook as Cursor would: `{ tool_name }` on stdin, one JSON answer on stdout. */
+const runHook = (toolName, capability = '') => new Promise((resolve, reject) => {
+  const child = spawn(process.execPath, [HOOK], { env: { ...process.env, MARBLE_CURSOR_CAPABILITY: capability }, stdio: ['pipe', 'pipe', 'inherit'] });
+  let out = '';
+  child.stdout.on('data', (chunk) => { out += chunk; });
+  child.on('error', reject);
+  child.on('close', () => {
+    try { resolve(JSON.parse(out)); } catch (err) { reject(err); }
+  });
+  child.stdin.end(JSON.stringify({ tool_name: toolName }));
+});
+
+test('the hook allows the messaging tools at the narrow capability, and still denies a stranger', async () => {
+  for (const name of ['MCP:list_agents', 'MCP:send_message', 'MCP:wait_for_reply']) {
+    assert.equal((await runHook(name)).permission, 'allow', `${name} is allowed`);
+  }
+  const blocked = await runHook('MCP:somebody_elses_tool');
+  assert.equal(blocked.permission, 'deny');
+  assert.match(blocked.agent_message, /send_message/, 'the denial names the tools that are available');
+});
 
 test('the hook allows exactly Marble\'s tools', () => {
   for (const { name } of TOOL_SCHEMAS) {
