@@ -2,6 +2,8 @@
 // sources.mjs — deterministic data pulls the skill folds into the payload.
 //
 //   weather                 Open-Meteo for Zurich + San Diego: now, hi/lo, hourly
+//   nflstandings [--us SF]   all 32 teams by conference and division, records and point diff
+//   nfllogos [--refresh]     the team crests carried in lib/nfl-logos.json, as data: URIs
 //   arxiv [--cat cs.HC] [--max 80] [--days 1] [--since YYYY-MM-DD] [--unseen] [--rss]
 //                           cs.HC papers, full abstract + submitted date; --since reads every
 //                           announcement since that day, --unseen drops what an issue showed,
@@ -393,6 +395,83 @@ async function art() {
   return { query: q, fetchedAt: new Date().toISOString(), count: picks.length, picks };
 }
 
+// ---------------------------------------------------------------- nfl logos
+// Thirty-two crests, fetched once and kept in the skill. They are in the repo
+// rather than pulled every morning for three reasons: the document is `net=none`, so
+// they have to be inlined anyway; the image budget is ~30 a day and the papers
+// need it; and a logo does not change, so re-fetching it every morning is 32
+// requests spent to arrive at the same bytes. `--refresh` is the only thing that
+// rewrites the pack — a new team, a rebrand, or a size change.
+//
+// PNG, not JPEG: a crest on a cream page needs its alpha. 48px is ~2.8x the
+// size it renders at, which is crisp on every display and costs ~91 KB for the
+// whole league.
+const LOGO_PACK = new URL('./nfl-logos.json', import.meta.url).pathname;
+const LOGO_SIZE = 48;
+
+function nflLogos() {
+  try { return JSON.parse(fs.readFileSync(LOGO_PACK, 'utf8')).logos || {}; } catch { return {}; }
+}
+
+async function refreshNflLogos() {
+  const d = await get('https://site.api.espn.com/apis/v2/sports/football/nfl/standings?level=3');
+  const teams = (d.children || []).flatMap((c) => (c.children || [])
+    .flatMap((g) => (g.standings?.entries || []).map((e) => e.team)));
+  const logos = {}; const missed = [];
+  for (const t of teams) {
+    const slug = String(t.abbreviation || '').toLowerCase();
+    const url = `https://a.espncdn.com/combiner/i?img=/i/teamlogos/nfl/500/${slug}.png&h=${LOGO_SIZE}&w=${LOGO_SIZE}`;
+    try {
+      const res = await fetch(url, { headers: { 'User-Agent': 'Mozilla/5.0' } });
+      if (!res.ok) throw new Error(String(res.status));
+      const buf = Buffer.from(await res.arrayBuffer());
+      if (buf.slice(0, 8).toString('hex') !== '89504e470d0a1a0a') throw new Error('not a png');
+      logos[t.abbreviation] = `data:image/png;base64,${buf.toString('base64')}`;
+    } catch (err) { missed.push(`${t.abbreviation}: ${err.message}`); }
+  }
+  const pack = {
+    _note: 'Team crests as data: URIs, so an issue carries them with no network and no image budget. Rebuild with `sources.mjs nfllogos --refresh`. Rendered by rNflLeague and rNflWest in build.mjs.',
+    source: 'ESPN team logos', size: LOGO_SIZE, fetched: new Date().toISOString().slice(0, 10),
+    count: Object.keys(logos).length, logos,
+  };
+  fs.writeFileSync(LOGO_PACK, `${JSON.stringify(pack, null, 1)}\n`);
+  return { wrote: LOGO_PACK, count: pack.count, bytes: fs.statSync(LOGO_PACK).size, missed };
+}
+
+// ------------------------------------------------------------------ standings
+// The whole league, grouped the way a standings page is: two conferences, four
+// divisions each, four teams each. ESPN's public level-3 standings feed, no key.
+// `--us <ABBR>` marks one team so the renderer can find it without knowing who
+// Bryan follows — that fact lives in state/profile.json and nowhere else.
+async function nflStandings() {
+  const season = args.season ? `&season=${args.season}` : '';
+  const url = `https://site.api.espn.com/apis/v2/sports/football/nfl/standings?level=3${season}`;
+  const d = await get(url);
+  const us = String(args.us || '').toUpperCase();
+  const league = [];
+  for (const conf of d.children || []) {
+    for (const g of conf.children || []) {
+      const teams = (g.standings?.entries || []).map((e) => {
+        const st = Object.fromEntries((e.stats || []).map((x) => [x.name, x.value ?? x.displayValue]));
+        return {
+          abbr: e.team.abbreviation, name: e.team.shortDisplayName, full: e.team.displayName,
+          record: st.overall || `${st.wins}-${st.losses}${st.ties ? `-${st.ties}` : ''}`,
+          w: st.wins, l: st.losses, t: st.ties,
+          pf: st.pointsFor, pa: st.pointsAgainst, diff: st.pointDifferential,
+          home: st.Home, road: st.Road, conf: st['vs. Conf.'], div: st['vs. Div.'],
+          us: e.team.abbreviation === us || undefined,
+        };
+      }).sort((x, y) => (y.w - x.w) || (x.l - y.l) || (y.diff - x.diff));
+      league.push({ conf: conf.abbreviation, div: g.name, teams });
+    }
+  }
+  return {
+    fetchedAt: new Date().toISOString(), season: d.children?.[0]?.children?.[0]?.standings?.season,
+    sourceName: 'ESPN — NFL standings', sourceUrl: 'https://www.espn.com/nfl/standings',
+    league,
+  };
+}
+
 // --------------------------------------------------------------------- main
 
 try {
@@ -400,8 +479,10 @@ try {
   if (cmd === 'weather') out = await weather(process.argv.slice(3));
   else if (cmd === 'arxiv') out = await arxiv();
   else if (cmd === 'art') out = await art();
+  else if (cmd === 'nflstandings') out = await nflStandings();
+  else if (cmd === 'nfllogos') out = args.refresh ? await refreshNflLogos() : { count: Object.keys(nflLogos()).length, pack: LOGO_PACK };
   else {
-    console.error('usage: sources.mjs weather [--here <city>] [--away <city>] | arxiv [--cat cs.HC] [--max 80] [--days 1] [--since YYYY-MM-DD] [--unseen] [--rss] | art --q "<theme>" [--limit 8] [--width 1600]');
+    console.error('usage: sources.mjs weather [--here <city>] [--away <city>] | arxiv [--cat cs.HC] [--max 80] [--days 1] [--since YYYY-MM-DD] [--unseen] [--rss] | art --q "<theme>" [--limit 8] [--width 1600] | nflstandings [--us SF] [--season 2026] | nfllogos [--refresh]');
     process.exit(1);
   }
   console.log(JSON.stringify(out, null, 2));

@@ -12,7 +12,7 @@
       "resolved": "UIST 2026 is 2–5 Nov, Detroit. No UCSD travel funding (LOA Fa26) — self-funded, so book early.",
       "anchor": "UIST 2026, Detroit — 2–5 Nov (Jacaranda poster)",
       "addedOn": "2026-09-08",
-      "lastSeen": "2026-09-18",
+      "lastSeen": "2026-09-19",
       "done": false
     },
     {
@@ -23,7 +23,7 @@
       "origin": "bryan",
       "date": null,
       "addedOn": "2026-09-16",
-      "lastSeen": "2026-09-18",
+      "lastSeen": "2026-09-19",
       "done": false
     },
     {
@@ -35,19 +35,19 @@
       "origin": "bryan",
       "date": null,
       "addedOn": "2026-09-17",
-      "lastSeen": "2026-09-18",
+      "lastSeen": "2026-09-19",
       "done": false
     },
     {
       "key": "own-email-professors-and-companies-for-summer-internship-visiting-researcher",
       "title": "Email Professors and Companies for Summer Internship/Visiting Researcher",
-      "note": "- Bjorn Hartmann\n- Michael Bernstein\n- Wendy & Michel\n- Ai2 Sangho\n- MSR Nic Marquart\n- MSR Advait Sarkar",
+      "note": "- Bjorn Hartmann\n- Michael Bernstein\n- Wendy & Michel\n- Ai2 Sangho\n- MSR Nic Marquardt\n- MSR Advait Sarkar",
       "why": "Reach out about next year internship possibilities and what kinds of research projects they're thinking about next summer. For research labs, I'll have to ask for funding at their lab.",
       "kind": "focus",
       "origin": "bryan",
       "date": null,
       "addedOn": "2026-09-17",
-      "lastSeen": "2026-09-18",
+      "lastSeen": "2026-09-19",
       "done": false
     },
     {
@@ -59,9 +59,20 @@
       "origin": "bryan",
       "date": null,
       "addedOn": "2026-09-17",
-      "lastSeen": "2026-09-18",
+      "lastSeen": "2026-09-19",
+      "done": false
+    },
+    {
+      "key": "own-write-up-project-plan-for-generative-design-patterns",
+      "title": "Write up project plan for Generative Design Patterns",
+      "note": "There are two core components to this project\n1. Generating UIs through a design space of various UI design patterns\n2. Understanding how UI/UX Designers will create GenUI applications, and how this workflow of \"GenUI Design\" differs from traditional UI Design\n\nA question to really ask myself is -- who are these UI/UX Designers for??? Who do we want to benefit? End-users building their own apps? Software tools that have GenUI integrated into their tools? What will it be? What's the biggest impact group?",
+      "kind": "focus",
+      "origin": "bryan",
+      "date": null,
+      "addedOn": "2026-09-18",
+      "lastSeen": "2026-09-19",
       "done": false
     }
   ],
-  "updated": "2026-09-18T16:02:01.966Z"
+  "updated": "2026-09-19T15:48:02.782Z"
 }

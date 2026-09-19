@@ -89,7 +89,18 @@ img { max-width: 100%; }
 .comp.bare .tlx-scroll { background: none; }
 .comp.tint { background: color-mix(in srgb, var(--cat, var(--accent)) 8%, transparent); border: 0; border-radius: var(--radius); padding: var(--s4); }
 
-.chead { display: flex; align-items: center; gap: .5rem; margin-bottom: var(--s3); }
+.chead { display: flex; flex-wrap: wrap; align-items: center; gap: .35rem .5rem; margin-bottom: var(--s3); }
+/* A component's header is one row until the component is narrow. Then the
+   sub-line — the second `.n`, the sentence a component adds about itself — takes
+   a line of its own instead of being squeezed into a two-word column beside the
+   segmented control. Asked for on 16 Sep: "make the layout and scrolling
+   friendly for iOS and iPadOS". Container query, not viewport: the same header
+   is narrow in the rail and wide in the stream. (19 Sep) */
+.chead .n { min-width: 0; }
+@container (max-width: 40rem) {
+  .chead .n:not(:first-of-type) { flex-basis: 100%; order: 3; }
+  .chead .right { order: 2; }
+}
 .chead h2 {
   margin: 0; font: 600 .72rem/1 var(--font-sans); letter-spacing: .12em; text-transform: uppercase; color: var(--muted);
   display: flex; align-items: center; gap: .45rem;
@@ -131,7 +142,8 @@ img { max-width: 100%; }
 .viewbox[data-view="t"] .v-t, .viewbox[data-view="l"] .v-l,
 .viewbox[data-view="top"] .v-top, .viewbox[data-view="men"] .v-men, .viewbox[data-view="women"] .v-women,
 .viewbox[data-view="week"] .v-week, .viewbox[data-view="niners"] .v-niners,
-.viewbox[data-view="arc"] .v-arc, .viewbox[data-view="west"] .v-west { display: block; animation: vin var(--dur) var(--ease) both; }
+.viewbox[data-view="arc"] .v-arc, .viewbox[data-view="west"] .v-west,
+.viewbox[data-view="league"] .v-league { display: block; animation: vin var(--dur) var(--ease) both; }
 .viewbox[data-view="tl"] .seg [data-setview="tl"], .viewbox[data-view="list"] .seg [data-setview="list"], .viewbox[data-view="cal"] .seg [data-setview="cal"],
 .viewbox[data-view="t"] .seg [data-setview="t"], .viewbox[data-view="l"] .seg [data-setview="l"],
 .viewbox[data-view="top"] .seg [data-setview="top"], .viewbox[data-view="men"] .seg [data-setview="men"],
@@ -139,7 +151,8 @@ img { max-width: 100%; }
 .viewbox[data-view="week"] .seg [data-setview="week"],
 .viewbox[data-view="niners"] .seg [data-setview="niners"],
 .viewbox[data-view="arc"] .seg [data-setview="arc"],
-.viewbox[data-view="west"] .seg [data-setview="west"] { background: var(--cat, var(--accent)); color: var(--bg); }
+.viewbox[data-view="west"] .seg [data-setview="west"],
+.viewbox[data-view="league"] .seg [data-setview="league"] { background: var(--cat, var(--accent)); color: var(--bg); }
 @keyframes vin { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: none; } }
 
 /* ------------------------------------------------------------- icons ------- */
@@ -193,6 +206,12 @@ li.row .title { font-size: 1rem; line-height: 1.45; overflow-wrap: break-word; }
 li.row .why { font-size: .88rem; line-height: 1.45; color: var(--muted); }
 li.row .meta { font: 500 .76rem/1.4 var(--font-mono); color: var(--muted); display: flex; flex-wrap: wrap; align-items: center; gap: .3rem .5rem; }
 li.row .note { font-size: .86rem; line-height: 1.45; color: var(--muted); }
+/* A note is Bryan's own text and he types lists into it. The newlines are in
+   the file; without this they only survived because the carrier makes the
+   element editable, so the same document read with no host collapsed his six
+   bullets into one paragraph. `pre-line` keeps the breaks and still collapses
+   stray spaces. (19 Sep) */
+.note { white-space: pre-line; }
 /* An empty note is somewhere to type, not a line of text. It says so only when
    you are actually on the row. */
 li.row .title:empty::before, .ntitle:empty::before {
@@ -557,8 +576,20 @@ li.row:hover .acts, li.row:focus-within .acts,
 .sn-sw.sn-lost { background: var(--warm); }
 .sn-sw.sn-div { background: var(--cat, var(--accent)); }
 
+/* The crest is the height of the line it sits on — it identifies the row, it
+   does not lead it, so it never grows past the name beside it. A team with no
+   crest in the pack still gets the element, so the column holds its width and
+   the names stay in one line down the block. */
+.crest { display: block; width: 1.2rem; height: 1.2rem; object-fit: contain; align-self: center; }
+.sn-tm .crest { width: 1.5rem; height: 1.5rem; }
+/* In the week strip the crest follows the abbreviation rather than replacing
+   it: three letters read at any size, the crest is what the eye finds first,
+   and together they still fit the narrowest cell the grid will make. */
+.sn-op { display: inline-flex; align-items: center; gap: .18rem; }
+.sn-op .crest { width: 1.45rem; height: 1.45rem; }
+
 .sn-west { display: flex; flex-direction: column; gap: .4rem; }
-.sn-tm { display: grid; grid-template-columns: 1fr 2.6rem 1fr 2.4rem; gap: .5rem; align-items: center; padding: .25rem 0; }
+.sn-tm { display: grid; grid-template-columns: 1.5rem 1fr 2.6rem 1fr 2.4rem; gap: .5rem; align-items: center; padding: .25rem 0; }
 .sn-tm.us .sn-tn { font-weight: 700; color: var(--ink); }
 .sn-tn { font-size: .88rem; color: var(--muted); min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .sn-tr, .sn-td { font: 600 .78rem/1 var(--font-mono); font-variant-numeric: tabular-nums; color: var(--muted); }
@@ -574,6 +605,45 @@ li.row:hover .acts, li.row:focus-within .acts,
 .sn-tbar { display: block; height: 100%; border-radius: 999px; }
 .sn-tbar.pos { background: var(--cat, var(--accent)); }
 .sn-tbar.neg { background: color-mix(in srgb, var(--warm) 70%, transparent); }
+
+/* The league. Eight divisions is a lot of rows to put in front of someone who
+   follows one team, so the differential is carried as a tint on the row and the
+   eye reads the shape of it before it reads a single number. The grid answers to
+   the component's width, never the viewport — the same component has to survive
+   being narrowed by the dock. */
+.sl-note { margin: 0 0 .9rem; max-width: 72ch; font-size: .86rem; color: var(--muted); }
+.sl-league { display: flex; flex-direction: column; gap: 1.1rem; }
+.sl-conf { min-width: 0; }
+/* The two conferences are one list, so the break between them is a rule and
+   not a heading sitting in more whitespace. */
+.sl-conf + .sl-conf { padding-top: 1.1rem; border-top: 1px solid var(--line); }
+.sl-ch { margin: 0 0 .55rem; font: 600 .76rem/1 var(--font-sans); letter-spacing: .09em;
+  text-transform: uppercase; color: var(--faint); }
+.sl-grid { display: grid; grid-template-columns: 1fr; gap: .9rem 1.5rem; }
+@container (min-width: 28rem) { .sl-grid { grid-template-columns: 1fr 1fr; } }
+@container (min-width: 50rem) { .sl-grid { grid-template-columns: repeat(4, 1fr); } }
+.sl-div { min-width: 0; }
+.sl-dh { margin: 0 0 .35rem; font: 650 .78rem/1 var(--font-sans); color: var(--ink); }
+.sl-rows { display: flex; flex-direction: column; gap: 1px; }
+.sl-r { display: grid; grid-template-columns: 1.2rem 1fr 2.3rem 2.1rem; gap: .4rem; align-items: baseline;
+  padding: .24rem .4rem; border-radius: 4px;
+  background: color-mix(in srgb, var(--tone, var(--line)) calc(var(--d, 0) * 24%), transparent); }
+.sl-r.pos { --tone: var(--cat, var(--accent)); }
+.sl-r.neg { --tone: var(--warm); }
+.sl-tn { font-size: .84rem; color: var(--muted); min-width: 0;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.sl-r.lead .sl-tn { font-weight: 650; color: var(--ink); }
+.sl-tr, .sl-td { font: 600 .74rem/1 var(--font-mono); font-variant-numeric: tabular-nums; color: var(--muted); }
+.sl-td { text-align: right; }
+.sl-r.pos .sl-td { color: var(--cat, var(--accent)); }
+.sl-r.neg .sl-td { color: var(--warm); }
+/* His own team is marked where he would look for it — in its real division —
+   rather than lifted out of the grid into a summary that repeats the West view. */
+.sl-r.us { box-shadow: inset 0 0 0 1px var(--ink); }
+.sl-r.us .sl-tn { font-weight: 700; color: var(--ink); }
+.sl-sw-pos { background: var(--cat, var(--accent)); }
+.sl-sw-neg { background: var(--warm); }
+.sl-sw-lead { background: var(--panel); box-shadow: inset 0 0 0 2px var(--ink); }
 
 .sn-shape { margin: 0 0 .7rem; font-size: .86rem; color: var(--muted); }
 .sn-sched { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: .05rem; }
