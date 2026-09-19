@@ -261,7 +261,7 @@ __BODY__
     .story-bar { flex: none; display: flex; gap: 3px; padding: .6rem var(--s4) .4rem; }
     .story-seg { flex: 1 1 0; min-width: 0; height: 2.5px; border-radius: 999px;
       background: color-mix(in srgb, var(--faint) 32%, transparent); }
-    .story-seg[data-on] { background: var(--segcat, var(--accent)); }
+    .story-seg[data-on] { background: var(--accent); }
     .story-kick { flex: none; display: flex; align-items: center; gap: .5rem;
       padding: 0 var(--s4) .4rem; min-width: 0; }
     .story-label { min-width: 0; display: flex; align-items: center; gap: .45rem;
@@ -277,7 +277,7 @@ __BODY__
     .story-screen { position: absolute; inset: 0; display: flex; flex-direction: column;
       justify-content: center; padding: 0 var(--s4); will-change: transform; }
     .story-stack { display: flex; flex-direction: column; gap: var(--s4); min-width: 0; }
-    .story-stack > .story-unit + .story-unit { border-top: 1px solid var(--line); }
+    .story-stack > .story-unit + .story-unit { border-top: 1px solid var(--line); border-radius: 0; }
     .story-screen[data-clamped] .story-stack { max-height: 100%; overflow: hidden;
       mask-image: linear-gradient(to bottom, #000 76%, transparent 100%);
       -webkit-mask-image: linear-gradient(to bottom, #000 76%, transparent 100%); }
@@ -285,7 +285,7 @@ __BODY__
     .story-unit.comp { padding: 0; background: none; border: 0; }
     .story-unit.comp.card, .story-unit.comp.tint { padding: var(--s4); }
     .story-unit li.row { grid-template-columns: minmax(0, 1fr); padding: 0; margin-inline: 0;
-      border-top: 0; background: none; }
+      border-top: 0; border-radius: 0; background: none; }
     .story-unit li.row .title, .story-unit .ntitle, .story-unit .ptitle { font-size: 1.2rem; line-height: 1.3; }
     .story-unit li.row .note, .story-unit li.row .why { font-size: .95rem; }
     .story-unit .csrc { font-size: .72rem; }
@@ -513,9 +513,8 @@ __BODY__
   function drawBar() {
     bar.textContent = '';
     segs = [];
-    for (const s of S.screens) {
+    for (let i = 0; i < S.screens.length; i += 1) {
       const seg = el('span', 'story-seg');
-      seg.style.setProperty('--segcat', s.cat);
       bar.append(seg);
       segs.push(seg);
     }
