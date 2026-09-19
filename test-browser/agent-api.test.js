@@ -227,6 +227,44 @@ test('a failing call rejects with the host’s own words', async () => {
   assert.equal(message, 'no provider "nope"');
 });
 
+const selectBetween = (page, fromId, fromOffset, toId, toOffset) => page.evaluate(([a, ao, b, bo]) => {
+  const from = document.querySelector(`[data-marble-id="${a}"]`).firstChild;
+  const to = document.querySelector(`[data-marble-id="${b}"]`).firstChild;
+  const range = document.createRange();
+  range.setStart(from, ao);
+  range.setEnd(to, bo === -1 ? to.length : bo);
+  getSelection().removeAllRanges();
+  getSelection().addRange(range);
+}, [fromId, fromOffset, toId, toOffset]);
+
+test('a selection carries every addressed element it crosses, and a fully covered list is its list', async () => {
+  const { page } = await open();
+  // From inside the paragraph to the end of the second question: p, then the
+  // whole list, which coalesces to q.
+  await selectBetween(page, 'p', 5, 'q2', -1);
+  await page.waitForFunction(() => window.marble.agent.context().selection.length === 2);
+  assert.deepEqual((await page.evaluate(() => window.marble.agent.context())).selection, ['p', 'q']);
+});
+
+test('a selection that stops inside a list keeps the items, not the list', async () => {
+  const { page } = await open();
+  await selectBetween(page, 'q1', 0, 'q2', 4);
+  await page.waitForFunction(() => window.marble.agent.context().selection.length === 2);
+  assert.deepEqual((await page.evaluate(() => window.marble.agent.context())).selection, ['q1', 'q2']);
+});
+
+test('a selection of the whole page never names the body', async () => {
+  const { page } = await open();
+  await page.evaluate(() => {
+    const range = document.createRange();
+    range.selectNodeContents(document.body);
+    getSelection().removeAllRanges();
+    getSelection().addRange(range);
+  });
+  await page.waitForFunction(() => window.marble.agent.context().selection.length > 0);
+  assert.deepEqual((await page.evaluate(() => window.marble.agent.context())).selection, ['h', 'p', 'q']);
+});
+
 test('the summary stream reports conversations changing', async () => {
   const { page } = await open();
   await page.evaluate(() => {

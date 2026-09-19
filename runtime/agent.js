@@ -53,6 +53,62 @@
 
     const notify = () => dispatchEvent(new CustomEvent('marble:agent-context'));
 
+    // Every addressed element the range touches, said once. Candidates are the
+    // elements the range intersects, minus <html>, <body> and transient chrome.
+    // Leaves are the deepest of those; a leaf's addressed ancestor replaces its
+    // children only when the range holds all of it, so a fully selected list is
+    // its list, and three paragraphs picked out of a section stay three.
+    const SKIP = new Set(['HTML', 'BODY']);
+    // A boundary point sitting inside a node's own last descendant — the end
+    // of its final line of text — compares as *before* a boundary point one
+    // level up, right after that node closes, even though both sit at the
+    // same place on the page. selectNode's probe lands one level up, so a
+    // selection that runs to the very end of a list's last item would never
+    // read as covering the list. Descending to the deepest leaf on each edge
+    // puts the probe at the same depth a real selection ends at — skipping
+    // whitespace-only text (the indentation between tags in the markup) so
+    // the probe lands on real content, not the formatting around it.
+    const blank = (node) => node.nodeType === Node.TEXT_NODE && !node.data.trim();
+    const deepEdge = (el, atEnd) => {
+      let node = el;
+      for (;;) {
+        const kids = [...node.childNodes].filter((kid) => !blank(kid));
+        if (!kids.length) break;
+        node = atEnd ? kids[kids.length - 1] : kids[0];
+      }
+      const offset = atEnd ? (node.nodeType === Node.TEXT_NODE ? node.length : node.childNodes.length) : 0;
+      return [node, offset];
+    };
+    const contains = (range, el) => {
+      const probe = document.createRange();
+      const [startNode, startOffset] = deepEdge(el, false);
+      const [endNode, endOffset] = deepEdge(el, true);
+      probe.setStart(startNode, startOffset);
+      probe.setEnd(endNode, endOffset);
+      return range.compareBoundaryPoints(Range.START_TO_START, probe) <= 0
+        && range.compareBoundaryPoints(Range.END_TO_END, probe) >= 0;
+    };
+    const idsInRange = (range) => {
+      const candidates = [...document.querySelectorAll('[data-marble-id]')].filter((el) =>
+        !SKIP.has(el.tagName) && !el.closest(TRANSIENT) && el.getRootNode() === document && range.intersectsNode(el));
+      const set = new Set(candidates);
+      let chosenEls = candidates.filter((el) => !candidates.some((other) => other !== el && el.contains(other)));
+      for (;;) {
+        let merged = false;
+        for (const el of chosenEls) {
+          const parent = el.parentElement?.closest('[data-marble-id]');
+          if (!parent || !set.has(parent) || !contains(range, parent)) continue;
+          chosenEls = [parent, ...chosenEls.filter((other) => !parent.contains(other))];
+          merged = true;
+          break;
+        }
+        if (!merged) break;
+      }
+      return chosenEls
+        .sort((a, b) => (a.compareDocumentPosition(b) & Node.DOCUMENT_POSITION_FOLLOWING ? -1 : 1))
+        .map((el) => el.getAttribute('data-marble-id'));
+    };
+
     document.addEventListener('selectionchange', () => {
       const selection = getSelection();
       if (!selection || !selection.rangeCount) return;
@@ -65,11 +121,7 @@
         notify();
         return;
       }
-      const ids = [];
-      for (const id of [addressed(selection.anchorNode), addressed(selection.focusNode)]) {
-        if (id && !ids.includes(id)) ids.push(id);
-      }
-      remembered = ids;
+      remembered = idsInRange(selection.getRangeAt(0));
       notify();
     });
 
