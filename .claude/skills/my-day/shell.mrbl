@@ -287,6 +287,14 @@ __BODY__
     .story-unit li.row { grid-template-columns: minmax(0, 1fr); padding: 0; margin-inline: 0;
       border-top: 0; border-radius: 0; background: none; }
     .story-unit li.row .title, .story-unit .ntitle, .story-unit .ptitle { font-size: 1.2rem; line-height: 1.3; }
+    /* A paper's picture is the first page of the PDF. In the grid it is a 3:4
+       portrait and it reads; on a phone screen it is half the glass and a grey
+       smudge of body text — the thing rule 11 forbids — and it pushes the line
+       that says why the paper matters under the fade. So on a story screen it
+       becomes a band of the top of the page: the title block, which is the one
+       part legible at this size, and the words keep the room. */
+    .story-unit .pthumb { aspect-ratio: 16 / 9; }
+    .story-unit .pthumb img { width: 100%; height: 100%; object-fit: cover; object-position: top center; }
     .story-unit li.row .note, .story-unit li.row .why { font-size: .95rem; }
     .story-unit .csrc { font-size: .72rem; }
     .story-zone { position: absolute; top: 0; bottom: 0; z-index: 2; appearance: none;
@@ -447,7 +455,7 @@ __BODY__
       const h = hs[i];
       /* One group per screen, never past the ceiling, never past the glass. */
       const fits = open && !open.kind && open.group === u.group && !u.own && !open.own
-        && open.units.length < u.pack && used + GAP + h <= H;
+        && open.units.length < u.pack && used + GAP + h <= H - 8;
       if (!fits) {
         open = { group: u.group, label: u.label, cat: u.cat, units: [], own: u.own };
         screens.push(open);
@@ -488,6 +496,13 @@ __BODY__
     scr.append(stack);
     track.append(scr);
     mounted.set(i, scr);
+    /* The packer predicted; this is what the glass actually holds. A font that
+       settles or an image that decodes after the measuring pass can push a
+       packed screen past the edge, and a screen that overflows without a fade
+       is one whose last line is simply gone. */
+    if (stack.getBoundingClientRect().height > track.clientHeight + 1) {
+      scr.setAttribute('data-clamped', '');
+    }
   }
   /* Three screens live at a time — the one you are reading and the two you
      could be reading next — so a forty-screen day costs three screens of DOM. */
