@@ -21,7 +21,7 @@ import fsp from 'node:fs/promises';
 import { collectSlices, idsOfOps, OP, repairOps, validateOps } from '../engine.js';
 import { parsePath, splitPath } from '../paths.js';
 import { inverseSteps } from './inverse.js';
-import { MAX_SENDS, MAX_TEXT, WAIT_DEFAULT, WAIT_MAX, WAIT_MIN } from './messages.js';
+import { MAX_HOP, MAX_SENDS, MAX_TEXT, WAIT_DEFAULT, WAIT_MAX, WAIT_MIN } from './messages.js';
 import { hashesOf, idsIn, tagsOf, topLevelIds } from './source.js';
 
 const READ_BUDGET = 24_000;
@@ -99,7 +99,7 @@ export const TOOL_SCHEMAS = [
     description:
       'Send a message to another agent conversation in this project. If it is idle, this starts its turn; if it is busy, ' +
       `it reads the message when its current turn ends or when it calls wait_for_reply. At most ${MAX_SENDS} messages per turn; ` +
-      'a thread of replies stops after 8. Returns the message id and how it was delivered. To answer a message, pass its id as inReplyTo.',
+      `a thread of replies stops after ${MAX_HOP}. Returns the message id and how it was delivered. To answer a message, pass its id as inReplyTo.`,
     inputSchema: {
       type: 'object',
       required: ['to', 'text'],

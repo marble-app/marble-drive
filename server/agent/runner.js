@@ -69,6 +69,40 @@ export function createRunner({ store, tools, providers, workdir, origin, bridgeP
   // unknown and starts a fresh thread, which is the lenient side to err on.
   const threads = new Map();
 
+  /** Take this conversation's inbox *for a turn that can act on it*, or hand
+   *  it straight back.
+   *
+   *  Three takers share one inbox — a turn starting (composePrompt), a parked
+   *  wait, and a delivery turn — and the rule they all serve is that a message
+   *  is delivered exactly once and never lost. A turn that is already
+   *  `finishing` cannot act on anything: its process is going away, so a batch
+   *  handed to it becomes a tool result nobody reads and an inbox that reads
+   *  empty to finish()'s own check. So: take, and if this turn is finishing by
+   *  then (or writing the `message` events fails), put the batch back in order
+   *  and report nothing. finish() then queues a delivery turn for it.
+   *
+   *  What a turn did receive is remembered on it (`turn.inbound`): that is the
+   *  thread a reply belongs to when the agent forgets `inReplyTo`. */
+  async function takeFor(turn, delivered) {
+    const messages = await store.takeInbox(turn.conversationId);
+    if (!messages.length) return [];
+    const handBack = async () => {
+      for (const m of messages) await store.appendInbox(turn.conversationId, m);
+      return [];
+    };
+    if (turn.finishing) return handBack();
+    try {
+      for (const m of messages) {
+        await emit(turn, { type: 'message', messageId: m.id, from: m.from, fromTitle: (await store.conversation(m.from))?.title ?? null, text: m.text, about: m.about, delivered });
+      }
+    } catch (err) {
+      log.error(`[agents] ${err.message}`);
+      return handBack();
+    }
+    turn.inbound = [...(turn.inbound ?? []), ...messages];
+    return messages;
+  }
+
   async function recordSent(turn, message, receiver, delivered) {
     if (!turn.id) return; // a synthetic turn in a test has no transcript to write
     await emit(turn, {
@@ -152,12 +186,9 @@ export function createRunner({ store, tools, providers, workdir, origin, bridgeP
     // the turn too: if this turn never gets to act on them — cancelled before
     // its process spawns, the host closing, `start()` throwing below — finish()
     // hands them back to the inbox rather than losing them.
-    const arrived = await store.takeInbox(turn.conversationId);
+    const arrived = await takeFor(turn, 'inbox');
     turn.arrived = arrived;
     if (arrived.length) {
-      for (const m of arrived) {
-        await emit(turn, { type: 'message', messageId: m.id, from: m.from, fromTitle: (await store.conversation(m.from))?.title ?? null, text: m.text, about: m.about, delivered: 'inbox' });
-      }
       lines.push('', 'Messages that arrived while you were away:', '', renderMessages(arrived, await titlesOf(arrived.map((m) => m.from))));
     }
     if (await hasPeers(turn.conversationId, project.id)) lines.push('', MESSAGING_INSTRUCTIONS);
@@ -254,8 +285,9 @@ export function createRunner({ store, tools, providers, workdir, origin, bridgeP
       inflight: new Set(), // tool-call promises the bridge is still waiting on
       sent: 0, // messages this turn has sent; capped
       waiter: null, // resolve() of a wait_for_reply parked on this turn
-      from, // { conversation, title, provider } when a message started this turn
+      from, // { conversation, title, provider, messageId, hop } when a message started this turn
       arrived: null, // messages composePrompt() took from the inbox; handed back in finish() if this turn never got to act on them
+      inbound: null, // every message this turn has actually received, in order; a reply without `inReplyTo` threads off the last one from that conversation
       finishing: false, // true once finish() has started; new tool calls are refused
       ended: new Promise((resolve) => { ended = resolve; }), // settles once the turn has left the runner
       endTurn: () => ended(),
@@ -318,20 +350,47 @@ export function createRunner({ store, tools, providers, workdir, origin, bridgeP
   async function startDelivery(conversationId, messages, fallbackTarget = null) {
     const meta = await store.conversation(conversationId);
     if (!meta) return null;
-    const first = messages[0];
-    const target = pickTarget({ receiver: meta, about: first?.about, senderTarget: fallbackTarget });
-    if (!target) {
-      log.error(`[agents] a message for ${conversationId} has no document to start a turn in; left in its inbox`);
-      return null;
-    }
     const taken = await store.takeInbox(conversationId);
     if (!taken.length) return null; // someone else already took these
+    // Everything about this turn is read from what was actually taken, not
+    // from the `messages` the caller happened to hold: the batch may be
+    // longer (another message landed first) or simply a different one.
+    const handBack = async () => {
+      for (const m of taken) await store.appendInbox(conversationId, m);
+      return null;
+    };
+    const first = taken[0];
+    const target = pickTarget({ receiver: meta, about: first.about, senderTarget: fallbackTarget });
+    if (!target) {
+      log.error(`[agents] a message for ${conversationId} has no document to start a turn in; left in its inbox`);
+      return handBack();
+    }
     const sender = await store.conversation(first.from);
-    return send(conversationId, {
-      prompt: renderMessages(taken, await titlesOf(taken.map((m) => m.from))),
-      context: { target },
-      from: { conversation: first.from, title: sender?.title ?? null, provider: sender?.provider ?? null },
-    });
+    // A conversation that exists only because someone wrote to it has no name
+    // yet. Say where it came from, so the board is not a row of blank titles.
+    if (!meta.title) {
+      await store.updateConversation(conversationId, { title: `Message from ${sender?.title || first.from}` });
+    }
+    try {
+      return await send(conversationId, {
+        prompt: renderMessages(taken, await titlesOf(taken.map((m) => m.from))),
+        context: { target },
+        // `messageId` and `hop` are the thread this turn is an answer to: a
+        // reply that forgets `inReplyTo` still counts against the hop cap.
+        from: {
+          conversation: first.from,
+          title: sender?.title ?? null,
+          provider: sender?.provider ?? null,
+          messageId: first.id,
+          hop: first.hop ?? 0,
+        },
+      });
+    } catch (err) {
+      // The batch is out of the inbox and no turn will carry it. Put it back
+      // before the throw reaches whoever asked for the delivery.
+      await handBack();
+      throw err;
+    }
   }
 
   async function pump() {
@@ -719,8 +778,10 @@ export function createRunner({ store, tools, providers, workdir, origin, bridgeP
       }
       // Anything that arrived for this conversation while it was running and
       // was not taken by a wait rides in on a delivery turn. At most one: the
-      // next turn to start takes the whole inbox.
-      if (!closed) {
+      // next turn to start takes the whole inbox. A turn already queued here
+      // is that next turn — starting a delivery turn as well would race it
+      // for the inbox and leave the conversation with one turn too many.
+      if (!closed && !liveFor(turn.conversationId).length) {
         store.inbox(turn.conversationId)
           .then((pending) => (pending.length ? startDelivery(turn.conversationId, pending, turn.target) : null))
           .catch((err) => log.error(`[agents] ${err.message}`));
@@ -739,6 +800,14 @@ export function createRunner({ store, tools, providers, workdir, origin, bridgeP
     // Same rule as finish(): the terminal status is written last.
     await emit(turn, { type: 'turn.removed' });
     await store.updateTurn(turnId, { status: 'removed', finishedAt: Date.now() });
+    // The removed turn was the one that would have carried this
+    // conversation's inbox in at start. If nothing live is left to do it, a
+    // delivery turn does — the same fire-and-forget check finish() makes.
+    if (!closed && !liveFor(turn.conversationId).length) {
+      store.inbox(turn.conversationId)
+        .then((pending) => (pending.length ? startDelivery(turn.conversationId, pending, turn.target) : null))
+        .catch((err) => log.error(`[agents] ${err.message}`));
+    }
     return true;
   }
 
@@ -862,10 +931,21 @@ export function createRunner({ store, tools, providers, workdir, origin, bridgeP
       const projectId = turn.project?.id ?? sender?.project ?? 'drive';
       if ((receiver.project ?? 'drive') !== projectId) return { error: `conversation "${to}" is in another project` };
       if ((turn.sent ?? 0) >= MAX_SENDS) return { error: `this turn has already sent ${MAX_SENDS} messages` };
+      // What thread is this a reply to? The named parent if this host still
+      // remembers it; failing that, what this turn itself received from the
+      // conversation it is answering — the message that started the turn, or
+      // one that arrived during it. Without that fallback an agent that never
+      // passes `inReplyTo` restarts at hop 0 every time and two of them can
+      // answer each other forever.
+      const named = inReplyTo ? threads.get(inReplyTo) : null; // unknown (host restarted) starts a fresh thread
+      const received = [
+        ...(turn.from?.messageId ? [{ id: turn.from.messageId, from: turn.from.conversation, hop: turn.from.hop ?? 0 }] : []),
+        ...(turn.inbound ?? []),
+      ];
+      const parent = named ?? [...received].reverse().find((m) => m.from === to) ?? null;
       let hop = 0;
-      if (inReplyTo) {
-        const parent = threads.get(inReplyTo);
-        hop = (parent?.hop ?? -1) + 1; // an unknown parent (host restarted) starts a fresh thread
+      if (parent) {
+        hop = (parent.hop ?? 0) + 1;
         if (hop > MAX_HOP) return { error: `this thread is ${MAX_HOP} replies deep; start a new message if there is something new to say` };
       }
       const cleanAbout = about && typeof about.path === 'string' && about.path
@@ -885,7 +965,17 @@ export function createRunner({ store, tools, providers, workdir, origin, bridgeP
       } else if (running || queued) {
         delivered = 'inbox';
       } else {
-        delivered = (await startDelivery(to, [message], turn.target)) ? 'turn' : 'inbox';
+        let started = null;
+        try {
+          started = await startDelivery(to, [message], turn.target);
+        } catch (err) {
+          // The turn could not be started, but the message is safely in the
+          // inbox (startDelivery puts back whatever it took): the receiver
+          // reads it at its next turn, or at the next boot. The sender is told
+          // it was queued rather than handed a failure it cannot act on.
+          log.error(`[agents] ${err.message}`);
+        }
+        delivered = started ? 'turn' : 'inbox';
       }
       await recordSent(turn, message, receiver, delivered);
       return { messageId: message.id, delivered, to: { id: to, title: receiver.title } };
@@ -895,15 +985,12 @@ export function createRunner({ store, tools, providers, workdir, origin, bridgeP
      *  stall timer is held, as it is for an open ask. */
     async wait(turn, seconds) {
       const ms = clampSeconds(seconds) * 1000;
-      const take = async () => {
-        const messages = await store.takeInbox(turn.conversationId);
-        for (const m of messages) {
-          await emit(turn, { type: 'message', messageId: m.id, from: m.from, fromTitle: (await store.conversation(m.from))?.title ?? null, text: m.text, about: m.about, delivered: 'live' });
-        }
-        return messages;
-      };
-      const early = await take();
+      const early = await takeFor(turn, 'live');
       if (early.length) return { messages: early };
+      // takeFor() handed the batch back because this turn is already ending;
+      // parking now would hang finish() until the clamp ran out, for a result
+      // nobody will read.
+      if (turn.finishing) return { timeout: true };
       turn.holdStall?.();
       let timer;
       const woke = await new Promise((resolve) => {
@@ -923,7 +1010,11 @@ export function createRunner({ store, tools, providers, workdir, origin, bridgeP
       // would outlive it. Only re-arm the stall when this turn is still going.
       if (!turn.finishing) turn.resumeStall?.();
       if (!woke) return { timeout: true };
-      const messages = await take();
+      // A wait can also be woken by finish() (`turn.waiter?.()` in its
+      // cleanup). takeFor() hands the batch back in that case and this
+      // reports a timeout, so the messages ride in on a delivery turn instead
+      // of vanishing into a dying process.
+      const messages = await takeFor(turn, 'live');
       return messages.length ? { messages } : { timeout: true };
     },
 

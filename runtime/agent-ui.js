@@ -1333,8 +1333,12 @@
       white-space: pre-wrap; border: 1px solid var(--line);
     }
     .msg.me:first-child { margin-top: 4px; }
-    .msg.me.from-agent { background: var(--paper-2); border: 1px solid var(--line); color: var(--ink); }
-    .msg.me .from { display: block; font-size: 12px; color: var(--muted); margin-bottom: 2px; }
+    /* A bubble that another agent wrote, not the person: same paper, marked
+       down its edge so the transcript reads as one column with a visible
+       seam where someone else spoke. */
+    .msg.me.from-agent { border-left: 2px solid var(--accent-ink); }
+    /* The whole row opens the sending conversation, not just the name in it. */
+    .msg.me .from { display: block; font-size: 12px; color: var(--muted); margin-bottom: 2px; cursor: pointer; }
     .msg.me .from button { all: unset; cursor: pointer; text-decoration: underline; text-decoration-color: var(--line); }
     .msg.me .from button:hover { color: var(--ink); }
     .msg.agent { align-self: stretch; color: var(--ink); padding: 2px 2px 10px; }
