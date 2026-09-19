@@ -1,6 +1,12 @@
 # Focus — gradual attention
 
-> Status: **approved to build**, 2026-09-18. Extends
+> Status: **part built**, 2026-09-18, on `focus-gradual-attention`. Built: §6.1
+> the painted bands, §6.2 the room that holds, §6.3's ring, §9 one title per
+> pane. **Not started: §2 the ladder, §3 attention, §4 the budget and seam, §5
+> one column order, §7 menus, §8 titles a session writes for itself.** Those six
+> are unimplemented design, not shipped behaviour — read this as a plan for them.
+>
+> Extends
 > `2026-09-18-agents-focus-columns-design.md`, which shipped the column shape
 > and a drag that can file any rearrangement. This spec keeps that shape and
 > fixes what it left discrete: three sizes where there should be five, one
