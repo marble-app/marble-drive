@@ -344,3 +344,43 @@ test('every phone control is at least 44pt tall', async () => {
     .filter(([, h]) => h < 44));
   assert.deepEqual(short, []);
 });
+
+/** Phone chrome shows the mast heading, where the old `pane` chrome hid it. So
+ *  the bar has to give up its title here for the same reason it does in a dock,
+ *  or a phone names one conversation twice in the little room it has. */
+test('a phone pane names itself once', async () => {
+  const { page } = await openAgents();
+  const id = await page.evaluate(async () => window.marble.agent.start({ provider: 'fake' }));
+  // Running, so the row stands in an open Deck band rather than a folded one.
+  await host.drive.agents.store.updateConversation(id, { title: 'a phone chat', running: true, activity: 'busy' });
+  await page.reload();
+  await page.locator(`.deck .conv[data-id="${id}"]`).click();
+  await page.waitForFunction(() => document.body.hasAttribute('data-open'));
+  await page.waitForTimeout(400);
+
+  const shot = await page.evaluate(() => {
+    const shown = (el) => Boolean(el)
+      && getComputedStyle(el).display !== 'none'
+      && el.getBoundingClientRect().width > 0;
+    const convo = document.querySelector('marble-conversation[conversation]');
+    const heading = convo?.shadowRoot?.querySelector('.heading');
+    return {
+      chrome: convo?.getAttribute('data-chrome') ?? null,
+      headingShown: shown(heading),
+      headingText: (heading?.textContent ?? '').trim(),
+      barTitles: [...document.querySelectorAll('.dock-bar .dock-title')]
+        .filter(shown)
+        .map((el) => el.textContent.trim())
+        .filter((text) => text.length > 0),
+    };
+  });
+
+  assert.equal(shot.chrome, 'phone', 'expected phone chrome');
+  assert.ok(shot.headingShown, 'the phone pane hid its heading');
+  assert.ok(shot.headingText.length > 0, 'the phone heading was empty');
+  assert.deepEqual(
+    shot.barTitles,
+    [],
+    `a phone bar still carries a title beside the heading: ${JSON.stringify(shot.barTitles)}`,
+  );
+});

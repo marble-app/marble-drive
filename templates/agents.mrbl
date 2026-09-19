@@ -1073,16 +1073,21 @@ __ICON__
     flex: 1 1 auto; min-width: 6rem; font-size: 11.5px; font-weight: 500; letter-spacing: -.01em;
     overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
   }
-  /* One title per pane. A lone pane has no mast heading — the conversation's
-     `pane` chrome hides it — so the bar is the only thing naming it. In a dock
-     the heading comes back, and a bar title beside it names the same
+  /* One title per pane. Only `pane` chrome hides the mast heading, so only a
+     lone desktop pane needs its bar to name it. Wherever the heading is shown
+     — a dock's `tile`, a phone — a bar title beside it names the same
      conversation twice, the lower one larger. The heading wins there: it is
      the one you can type in, and a bar-only title would cost renaming a chat
-     from its pane. `data-titles` carries the dock's own chrome, so the
-     condition here is exactly the one that governs the heading — and not
-     `data-dock="tree"`, which a drag's ghost sets while the dock still holds
-     one pane, and which would leave that pane with no title at all. */
-  .pane[data-titles="tile"] .dock-title { display: none; }
+     from its pane.
+
+     `data-titles` carries the dock's own chrome, so this asks exactly the
+     question that governs the heading. Not `data-dock="tree"`, which a drag's
+     ghost sets while the dock still holds one pane, and which would leave that
+     pane with no title at all. Listed rather than `:not([data-titles="pane"])`
+     so the attribute being unset — before the first paintChrome — still shows
+     a title rather than hiding the only one there is. */
+  .pane[data-titles="tile"] .dock-title,
+  .pane[data-titles="phone"] .dock-title { display: none; }
   .dock-target {
     flex: 0 1 auto; max-width: 9rem; min-width: 2rem; font-size: 11.5px; color: var(--accent-ink);
     overflow: hidden; text-overflow: ellipsis; white-space: nowrap; text-decoration: none;
