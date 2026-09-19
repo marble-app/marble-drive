@@ -90,7 +90,7 @@ Injected (with `runtime/agent-ui.js`, the drawer) only when the host runs agents
 | call | |
 |---|---|
 | `marble.agent.providers()` | `[{id, label, installed, signedIn, detail, default, defaultModel, models, efforts}]` |
-| `marble.agent.settings()` / `.saveSettings(patch)` | `{defaultProvider, models, efforts, maxRunning, keys}` — `keys` is `{anthropic, cursor}` booleans, never the values |
+| `marble.agent.settings()` / `.saveSettings(patch)` | `{defaultProvider, models, efforts, keys}` — `keys` is `{anthropic, cursor}` booleans, never the values |
 | `marble.agent.skills()` | `[{id, name, description}]` — bodies stay on disk |
 | `marble.agent.conversations({archived})` / `.conversation(id)` | summaries / `{meta, turns, events}` |
 | `marble.agent.start({provider, model, effort, handoffFrom})` | → conversation id |

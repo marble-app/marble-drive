@@ -147,6 +147,19 @@ export async function createDrive(config, { log = console, agentProviders = null
   const pendingWrites = createPendingWrites();
   const sessionTouched = createTouched();
 
+  // The construction zones standing right now, per document and agent client.
+  // Presence is a broadcast, so it only ever reached the tabs that were already
+  // listening; this is what a tab joining mid-turn is caught up with. A frame
+  // with no ids is not a zone, so it is a removal.
+  const looking = new Map();
+  const rememberLook = (docPath, frame) => {
+    const here = looking.get(docPath) ?? new Map();
+    if (frame.ids.length) here.set(frame.client, frame);
+    else here.delete(frame.client);
+    if (here.size) looking.set(docPath, here);
+    else looking.delete(docPath);
+  };
+
   // A person's edits are concurrent with an agent's write only if they landed
   // after that agent's turn began: the turn read the document as its base,
   // and anything before the base is history it has already seen.
@@ -456,6 +469,16 @@ export async function createDrive(config, { log = console, agentProviders = null
         return;
       }
 
+      // What zones are standing on this document right now. A presence frame is
+      // broadcast once, to whoever was listening at the time, and a tab loads
+      // its runtime in several script tags — so a tab that opens mid-turn, which
+      // is exactly what a conversation's "take me to the work" does, cannot
+      // catch one by listening. It asks instead.
+      if (route === '/presence' && req.method === 'GET') {
+        const docPath = parsePath(url.searchParams.get('app'), { allowRoot: false });
+        return json(res, 200, { frames: [...(looking.get(docPath)?.values() ?? [])] });
+      }
+
       if (route === '/presence' && req.method === 'POST') {
         const docPath = parsePath(url.searchParams.get('app'), { allowRoot: false });
         const client = url.searchParams.get('client');
@@ -750,13 +773,15 @@ export async function createDrive(config, { log = console, agentProviders = null
       sandbox: agentSandbox ?? null,
       onLook: (docPath, ids, client, extra = {}) => {
         if (!client) return;
-        channels.toPresence(docPath, {
+        const frame = {
           client,
           ids: Array.isArray(ids) ? ids : [],
           label: extra.label ?? client,
           ...(extra.phase ? { phase: extra.phase } : {}),
           ...(extra.note ? { note: extra.note } : {}),
-        });
+        };
+        rememberLook(docPath, frame);
+        channels.toPresence(docPath, frame);
       },
     }).catch((err) => {
       if (err.code !== 'EAGENTSHELD') throw err;

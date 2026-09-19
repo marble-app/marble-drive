@@ -58,9 +58,52 @@ test('an error result ends the turn with Claude\'s own words', () => {
   assert.deepEqual(events.at(-1), { type: 'done', ok: false, error: 'Claude AI usage limit reached|1789624200' });
 });
 
+const toolResult = (text) => JSON.stringify({
+  type: 'user',
+  message: { role: 'user', content: [{ type: 'tool_result', tool_use_id: 't1', is_error: true, content: [{ type: 'text', text }] }] },
+});
+
 test('a failed tool result is not ok', () => {
-  const line = JSON.stringify({ type: 'user', message: { role: 'user', content: [{ type: 'tool_result', tool_use_id: 't1', is_error: true, content: [{ type: 'text', text: 'no document "x"' }] }] } });
-  assert.deepEqual(parseClaudeLine(line), [{ type: 'tool.result', callId: 't1', ok: false, summary: 'no document "x"' }]);
+  assert.deepEqual(parseClaudeLine(toolResult('no document "x"')), [
+    { type: 'tool.result', callId: 't1', ok: false, denied: false, summary: 'no document "x"' },
+  ]);
+});
+
+// A command that exited 1 and a command somebody refused arrive identically —
+// `is_error: true` — and the drawer used to call both "Blocked". Only one of
+// them is a decision, and only that one gets the word.
+test('a command that merely failed is not a refusal', () => {
+  for (const text of [
+    'Exit code 1\n(eval):1: === not found',
+    "Error [ERR_MODULE_NOT_FOUND]: Cannot find package 'playwright'",
+    '<tool_use_error>File has not been read yet. Read it first before writing to it.</tool_use_error>',
+    'Exit code 1\nnpm test failed: 2 tests failed',
+  ]) {
+    assert.equal(parseClaudeLine(toolResult(text))[0].denied, false, text);
+  }
+});
+
+test('a refusal is marked denied, whoever made the call', () => {
+  for (const text of [
+    'Permission for this action was denied by the Claude Code auto mode classifier. Reason: [Credential Exploration].',
+    'Permission to use Bash was denied',
+    'Claude requested permissions to use Bash, but the user denied',
+    'Operation not permitted by hook',
+  ]) {
+    const event = parseClaudeLine(toolResult(text))[0];
+    assert.equal(event.denied, true, text);
+    assert.equal(event.ok, false, text);
+  }
+});
+
+test('a result that succeeded is never denied, whatever it says', () => {
+  const line = JSON.stringify({
+    type: 'user',
+    message: { role: 'user', content: [{ type: 'tool_result', tool_use_id: 't1', content: [{ type: 'text', text: 'permission was denied by the Claude Code auto mode classifier' }] }] },
+  });
+  const event = parseClaudeLine(line)[0];
+  assert.equal(event.ok, true);
+  assert.equal(event.denied, false);
 });
 
 test('mcp__browser__ and mcp__marble__ prefixes both drop so the UI sees the tool name', () => {

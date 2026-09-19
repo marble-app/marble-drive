@@ -52,6 +52,14 @@ const SCRIPTS = {
     { say: 'Renamed late.' },
   ],
   wait: [{ sleep: 2500 }, { say: 'waited' }],
+  // Writes, then stays: long enough to ask what zones are standing while one is.
+  park: [
+    { sleep: 700 },
+    { call: 'read_document', args: { path: 'watched' } },
+    { call: 'apply_ops', args: { path: 'watched', note: 'rename', ops: [{ type: 'setText', id: 'h', text: 'Backlog' }] } },
+    { sleep: 1500 },
+    { say: 'parked' },
+  ],
   hold: [{ silent: 20_000 }],
   permission: [{ ask: { tool: 'Bash', input: { command: 'rm -rf build' } } }, { say: 'after' }],
 };
@@ -392,6 +400,26 @@ test('a conversation can name and later change its CLI mode', async () => {
   const patched = await api('PATCH', `/agent/conversations/${created.body.id}`, { mode: 'default' });
   assert.equal(patched.status, 200);
   assert.equal(patched.body.mode, 'default');
+});
+
+// A permission mode is a standing choice the way the model and the effort
+// are: someone who works in Accept edits should not have to cycle every new
+// conversation out of Auto by hand.
+test('a saved mode is the default a new conversation starts in', async () => {
+  const saved = await api('PUT', '/agent/settings', { modes: { fake: 'acceptEdits' } });
+  assert.equal(saved.body.modes.fake, 'acceptEdits');
+
+  const started = await api('POST', '/agent/conversations', { provider: 'fake' });
+  assert.equal(started.body.mode, 'acceptEdits');
+
+  // Naming one still wins over the default.
+  const named = await api('POST', '/agent/conversations', { provider: 'fake', mode: 'plan' });
+  assert.equal(named.body.mode, 'plan');
+
+  // An empty value clears the default rather than storing a blank mode.
+  const cleared = await api('PUT', '/agent/settings', { modes: { fake: '' } });
+  assert.equal(cleared.body.modes.fake, undefined);
+  assert.equal((await api('POST', '/agent/conversations', { provider: 'fake' })).body.mode, null);
 });
 
 test('a conversation can change its CLI', async () => {
@@ -739,4 +767,40 @@ test('GET /agent/asks lists open asks with a lead, and the * stream announces th
   assert.ok(seen.some((d) => !d.includes('"request"') && d.includes(ask.requestId)), 'an ask.resolved frame');
   assert.equal((await api('GET', '/agent/asks')).body.asks.length, 0);
   await finished(conv.id, `${conv.id}-t1`);
+});
+
+test('a zone is asked for by the document and told to the conversation', async () => {
+  const conversation = await api('POST', '/agent/conversations', { provider: 'fake' });
+  const heard = frames(
+    `/agent/events?conversation=${conversation.body.id}`,
+    (seen) => seen.some((s) => s.includes('"type":"zone"') && s.includes('"writing"')),
+  );
+  const turn = await api('POST', `/agent/conversations/${conversation.body.id}/turns`, {
+    prompt: 'script:park',
+    context: { target: 'watched', viewing: 'watched', selection: [] },
+  });
+
+  // A tab that opens mid-turn missed the broadcast; this is how it catches up.
+  const standing = await until(async () => {
+    const { body } = await api('GET', '/presence?app=watched');
+    return body.frames.find((frame) => frame.phase === 'writing') ?? null;
+  });
+  assert.equal(standing.client, `agent:${conversation.body.id}`);
+  assert.equal(standing.phase, 'writing');
+  assert.equal(standing.note, 'rename');
+
+  // The same frame, on the conversation's own stream: the chat can say where
+  // its hands are wherever it is being read.
+  const zone = (await heard).flatMap((s) => {
+    try {
+      return [JSON.parse(s)];
+    } catch {
+      return [];
+    }
+  }).find((event) => event.type === 'zone' && event.phase === 'writing');
+  assert.equal(zone.path, 'watched');
+  assert.equal(zone.note, 'rename');
+
+  await finished(conversation.body.id, turn.body.turnId);
+  assert.deepEqual((await api('GET', '/presence?app=watched')).body.frames, [], 'a turn that is over holds no zone');
 });

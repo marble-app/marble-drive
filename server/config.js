@@ -125,6 +125,8 @@ export function loadConfig(env = process.env) {
     // root: an agent's own tools should find nothing there worth touching.
     agentWorkdir: path.resolve(str('MARBLE_DRIVE_AGENT_WORKDIR', path.join(os.homedir(), '.cache', 'marble-drive', 'agents'))),
     agentStallMinutes: num('MARBLE_DRIVE_AGENT_STALL_MINUTES', 30),
+    // 0 is no cap: every conversation the person has started runs at once.
+    agentMaxRunning: num('MARBLE_DRIVE_AGENT_MAX_RUNNING', 0),
     // 0 is no cap: a person stops a turn, a timer does not.
     agentMaxMinutes: num('MARBLE_DRIVE_AGENT_MAX_MINUTES', 0),
     // API keys the settings panel writes. Gitignored, and not under the drive

@@ -119,11 +119,32 @@ export async function createAgents({ config, store, writeOps, createDocument, or
 async function boot({ config, store, writeOps, createDocument, origin, providers, log, dir, lock, usage, usageHistory = null, sandbox = null, restore = null, onLook = null, forgetWriter = null }) {
   const agentStore = createAgentStore({ dir, defaultProvider: config.agentProvider, log });
   await agentStore.ready();
-  const settings = await agentStore.settings();
   const keys = createKeyStore({ file: config.agentKeysFile });
   const liveProviders = providers ?? builtInProviders({ env: process.env, secrets: () => keys.asEnv() });
   const skills = await listSkills(skillDirs({ home: os.homedir(), repo: REPO }));
   const hub = createHub();
+
+  // A look goes two ways. Outward, to the document, it is the construction zone
+  // other tabs draw around the element. Inward, to the conversation, it is how a
+  // chat being read somewhere else can say where its hands are and offer to take
+  // you there. Same frame, one call site, both audiences.
+  //
+  // Published, never appended: this is live state, not transcript. A page that
+  // opens mid-turn has no zone until the next look, and a turn's end already
+  // sends `ids: []`, which clears it.
+  const look = (docPath, ids, client, extra = {}) => {
+    onLook?.(docPath, ids, client, extra);
+    const name = String(client ?? '');
+    if (!name.startsWith('agent:')) return;
+    hub.publish(name.slice('agent:'.length), {
+      type: 'zone',
+      path: docPath,
+      ids: Array.isArray(ids) ? ids.map(String) : [],
+      ...(extra.phase ? { phase: extra.phase } : {}),
+      ...(extra.note ? { note: extra.note } : {}),
+    });
+  };
+
   // Late-bound: the runner needs the tools, and the tools need the runner's
   // messaging. `messaging` is created empty here, handed to the tools, and
   // filled in once the runner exists — see below.
@@ -135,7 +156,7 @@ async function boot({ config, store, writeOps, createDocument, origin, providers
     buildStarter,
     guidePath: enginePath('skills/build-in-marble/SKILL.md'),
     examine,
-    onLook,
+    onLook: look,
     messaging,
   });
   const projects = { find: async (id) => findProject({ settings: await agentStore.settings(), root: config.root }, id) };
@@ -155,14 +176,14 @@ async function boot({ config, store, writeOps, createDocument, origin, providers
     publish: hub.publish,
     publishAsk: hub.publishAsk,
     limits: {
-      maxRunning: settings.maxRunning,
+      maxRunning: config.agentMaxRunning,
       stallMs: config.agentStallMinutes * 60_000,
       maxMs: config.agentMaxMinutes * 60_000,
       killGraceMs: 3_000,
     },
     log,
     skills,
-    onLook,
+    onLook: look,
     // A turn's ops were filed as `agent:<id>` and its undo as `agent-undo:<id>`;
     // both are that conversation, and both are done when the turn is.
     onFinish: (conversationId) => {

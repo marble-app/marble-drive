@@ -461,6 +461,18 @@ test('maxRunning caps turns across conversations', async () => {
   await runner.close();
 });
 
+test('with no cap every conversation runs at once', async () => {
+  const { store, runner } = await setup({ limits: { maxRunning: 0 } });
+  const ids = [];
+  for (let i = 0; i < 6; i += 1) ids.push((await store.createConversation({ provider: 'fake' })).id);
+  const sent = [];
+  for (const id of ids) sent.push(await runner.send(id, { prompt: 'script:slow', context: { target: 'd' } }));
+  assert.deepEqual(sent.map((t) => t.status), sent.map(() => 'running'));
+  assert.equal(runner.running().length, 6);
+  for (const t of sent) assert.equal((await finished(store, t.turnId)).status, 'completed');
+  await runner.close();
+});
+
 test('a queued turn can be removed before it starts', async () => {
   const { store, runner } = await setup();
   const { id } = await store.createConversation({ provider: 'fake' });

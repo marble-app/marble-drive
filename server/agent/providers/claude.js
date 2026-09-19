@@ -38,6 +38,16 @@ const textOf = (content) =>
   Array.isArray(content) ? content.filter((b) => b.type === 'text').map((b) => b.text).join('') : String(content ?? '');
 const skill = (name, description = '') => ({ id: String(name), name: String(name), description: String(description ?? '') });
 
+// A tool that failed and a tool that was refused read the same on the wire —
+// `is_error: true` — but they mean opposite things to the person watching. A
+// command that exited 1 is the agent's own business; a refusal is a decision
+// someone made, and the only one worth putting the word "Blocked" on. The CLI
+// says which in the text: the auto-mode classifier names itself, a permission
+// rule or handler says the request was denied, and a hook says it blocked.
+const DENIAL = /\b(denied by the Claude Code auto mode classifier|permission (?:for this action |to use [^\n]*?)?(?:was |is )?denied|requested permissions[^\n]*?(?:denied|rejected)|operation not permitted by (?:a )?hook|blocked by (?:a )?hook)\b/i;
+
+export const isDenial = (text) => DENIAL.test(String(text ?? ''));
+
 /** One line of `claude -p --output-format stream-json` as the runner's events. */
 export function parseClaudeLine(line) {
   const e = JSON.parse(line);
@@ -102,11 +112,13 @@ export function parseClaudeLine(line) {
       const events = [];
       for (const block of e.message?.content ?? []) {
         if (block.type !== 'tool_result') continue;
+        const text = textOf(block.content);
         events.push({
           type: 'tool.result',
           callId: block.tool_use_id,
           ok: !block.is_error,
-          summary: textOf(block.content).slice(0, SUMMARY),
+          denied: Boolean(block.is_error) && isDenial(text),
+          summary: text.slice(0, SUMMARY),
         });
       }
       return events;

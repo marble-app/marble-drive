@@ -41,7 +41,9 @@ export function createFakeProvider({ scripts = {}, id = 'fake' } = {}) {
         case 'delta': return [{ type: 'text.delta', text: e.text }];
         case 'text': return [{ type: 'text', text: e.text }];
         case 'call': return [{ type: 'tool.call', name: e.name, input: e.input, callId: e.callId }];
-        case 'result': return [{ type: 'tool.result', callId: e.callId, ok: e.ok, summary: e.summary }];
+        // `denied` separates a tool somebody refused from one that merely
+        // failed, so the drawer only says "Blocked" about a decision.
+        case 'result': return [{ type: 'tool.result', callId: e.callId, ok: e.ok, denied: Boolean(e.denied), summary: e.summary }];
         case 'ask': return [{ type: 'ask', requestId: e.requestId, tool: e.tool, displayName: e.tool, input: e.input, interactive: e.tool === 'AskUserQuestion' }];
         case 'done': return [{ type: 'done', ok: e.ok, error: e.error }];
         default: return [];

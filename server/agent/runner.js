@@ -396,7 +396,9 @@ export function createRunner({ store, tools, providers, workdir, origin, bridgeP
   async function pump() {
     if (closed) return;
     for (const turnId of [...order]) {
-      if (runningTurns().length >= limits.maxRunning) return;
+      // 0 is no cap: a conversation still runs one turn at a time, but
+      // how many conversations run at once is the person's business.
+      if (limits.maxRunning > 0 && runningTurns().length >= limits.maxRunning) return;
       const turn = live.get(turnId);
       if (!turn || turn.status !== 'queued') continue;
       if (runningTurns().some((t) => t.conversationId === turn.conversationId)) continue;
@@ -685,7 +687,7 @@ export function createRunner({ store, tools, providers, workdir, origin, bridgeP
     // `finishing` — not `status` — is the once-only guard: the turn stays
     // `status: 'running'`, and so stays counted by runningTurns(), for this
     // entire function. Flip status away from 'running' any earlier and
-    // pump() reads the conversation's slot (or a maxRunning slot) as free
+    // pump() reads the conversation's slot (or a capped host's slot) as free
     // while this turn is still draining an in-flight tool call or writing
     // its own outcome — letting the next turn start, run, and finish first,
     // so that when this turn's finish() finally gets to its own
@@ -759,7 +761,7 @@ export function createRunner({ store, tools, providers, workdir, origin, bridgeP
       // throwing — the turn must actually leave the runner. Skip this and a
       // failed write stores nothing but the in-memory turn stays forever
       // `status: 'running'`, permanently holding its conversation's slot
-      // and a maxRunning slot hostage, with nothing left to sweep it.
+      // hostage, with nothing left to sweep it.
       turn.status = status;
       if (turn.token) tokens.delete(turn.token);
       live.delete(turn.id);

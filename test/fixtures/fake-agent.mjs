@@ -103,7 +103,7 @@ for (const step of script) {
   if (step.tool) {
     const callId = `call-${nextId++}`;
     out({ kind: 'call', name: step.tool, input: step.input ?? {}, callId });
-    out({ kind: 'result', callId, ok: step.ok !== false, summary: step.summary ?? '' });
+    out({ kind: 'result', callId, ok: step.ok !== false, denied: step.denied === true, summary: step.summary ?? '' });
   }
   // What a full agent does that a documents agent cannot: write the file
   // itself, with no op and no bridge. The host hears it from the watcher.

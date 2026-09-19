@@ -262,8 +262,18 @@ export function createAgentRoutes({ store, runner, tools, hub, providers, writeO
           }
           patch.efforts = efforts;
         }
-        // Read when the host starts; a change applies after a restart.
-        if (Number.isInteger(body.maxRunning) && body.maxRunning > 0) patch.maxRunning = body.maxRunning;
+        // A permission mode is a standing choice, not a per-conversation one:
+        // someone who works in Accept edits wants every new conversation to
+        // start there, the way the model and the effort already do. Without
+        // this every conversation started in Auto and had to be cycled.
+        if (body.modes && typeof body.modes === 'object') {
+          const modes = { ...(await store.settings()).modes };
+          for (const [id, mode] of Object.entries(body.modes)) {
+            if (typeof mode !== 'string' || !mode.trim()) delete modes[id];
+            else modes[id] = mode.trim();
+          }
+          patch.modes = modes;
+        }
         if (Object.keys(patch).length) await store.saveSettings(patch);
         if (keys && body.keys && typeof body.keys === 'object') {
           await keys.write(body.keys);
@@ -336,7 +346,7 @@ export function createAgentRoutes({ store, runner, tools, hub, providers, writeO
         const from = body.handoffFrom ? await store.conversation(body.handoffFrom) : null;
         if (body.handoffFrom && !from) return json(res, 404, { error: `no conversation "${body.handoffFrom}"` });
         const settings = await store.settings();
-        const { models, efforts } = settings;
+        const { models, efforts, modes } = settings;
         const projectId = typeof body.project === 'string' && body.project.trim() ? body.project.trim() : settings.defaultProject || 'drive';
         const project = findProject({ settings, root }, projectId);
         if (!project) return json(res, 400, { error: `no project "${projectId}"` });
@@ -344,7 +354,7 @@ export function createAgentRoutes({ store, runner, tools, hub, providers, writeO
           provider: body.provider,
           model: body.model ?? models[body.provider] ?? null,
           effort: body.effort ?? efforts?.[body.provider] ?? null,
-          mode: typeof body.mode === 'string' && body.mode.trim() ? body.mode.trim() : null,
+          mode: typeof body.mode === 'string' && body.mode.trim() ? body.mode.trim() : modes?.[body.provider] ?? null,
           handoffFrom: from?.id ?? null,
           project: project.id,
         });
@@ -395,6 +405,23 @@ export function createAgentRoutes({ store, runner, tools, hub, providers, writeO
           turns: await store.turns(id),
           events: await store.events(id, { after: Number(url.searchParams.get('after') ?? 0) }),
         });
+      }
+      /** A chat that was started and never used, discarded rather than
+       *  filed: pressing the close button on a brand-new pane should leave
+       *  the drive as if the chat had never been created. Nothing is thrown
+       *  away silently — a chat with a title, an event, a turn or a running
+       *  agent is refused here, whatever the page believes, because only the
+       *  disk knows what it holds. */
+      if (!turns && method === 'DELETE') {
+        const [turnRecords, events] = await Promise.all([store.turns(id), store.events(id)]);
+        if (meta.title || meta.running || turnRecords.length || events.length) {
+          return json(res, 409, { error: 'this conversation has something in it' });
+        }
+        await store.discardConversation(id);
+        // The summary says only that the chat is gone: there is no meta left
+        // to send, and every list that was holding it has to drop it.
+        hub.publish(id, { type: 'removed' }, { id, removed: true });
+        return json(res, 200, { removed: true });
       }
       if (!turns && method === 'PATCH') {
         const body = await readJson(req, maxBody);

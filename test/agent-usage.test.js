@@ -1,7 +1,10 @@
 import assert from 'node:assert/strict';
+import fs from 'node:fs/promises';
+import os from 'node:os';
+import path from 'node:path';
 import test from 'node:test';
 
-import { claudeTokenFromKeychain, collectUsage, parseClaudeUsage, parseCursorUsage } from '../server/agent/usage.js';
+import { claudeTokenFromFile, claudeTokenFromKeychain, collectUsage, parseClaudeUsage, parseCursorUsage } from '../server/agent/usage.js';
 
 test('Claude compact meter is the 5-hour window even when the week is higher', () => {
   const meter = parseClaudeUsage({
@@ -224,11 +227,65 @@ test('collectUsage asks Claude and Cursor with the tokens from the keychain, nev
 test('a missing keychain is an empty list, not a throw', async () => {
   const { meters } = await collectUsage({
     exec: async () => ({ code: 1, stdout: '', stderr: 'not found', missing: true }),
+    credentialsFile: path.join(os.tmpdir(), 'marble-no-such-credentials.json'),
     request: async () => {
       throw new Error('should not fetch');
     },
   });
   assert.deepEqual(meters, []);
+});
+
+test('a signed-in CLI that keeps its login in a file still has a Claude meter', async (t) => {
+  const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'marble-usage-'));
+  t.after(() => fs.rm(dir, { recursive: true, force: true }));
+  const file = path.join(dir, '.credentials.json');
+  await fs.writeFile(file, JSON.stringify({ claudeAiOauth: { accessToken: 'sk-ant-oat-file' } }), 'utf8');
+  const asked = [];
+  const { meters } = await collectUsage({
+    // No keychain entry at all: this is the 2.1 CLI, signed in, file-only.
+    exec: async () => ({ code: 1, stdout: '', stderr: 'not found', missing: true }),
+    credentialsFile: file,
+    request: async (url, options) => {
+      asked.push({ url: String(url), hasBearer: String(options.headers?.Authorization ?? '').startsWith('Bearer ') });
+      return {
+        ok: true,
+        json: async () => ({
+          five_hour: { utilization: 31, resets_at: '2026-09-19T22:30:00Z' },
+          seven_day: { utilization: 44, resets_at: '2026-09-22T10:59:59Z' },
+        }),
+      };
+    },
+  });
+  assert.equal(meters.length, 1);
+  assert.equal(meters[0].id, 'claude-subscription');
+  assert.equal(meters[0].available, true);
+  assert.equal(meters[0].used, 31);
+  assert.ok(asked.some((call) => call.url.includes('/api/oauth/usage') && call.hasBearer));
+  assert.equal(JSON.stringify({ meters, asked }).includes('sk-ant-oat-file'), false);
+});
+
+test('the keychain wins over the file, and a file that is not the login is not a token', async (t) => {
+  const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'marble-usage-'));
+  t.after(() => fs.rm(dir, { recursive: true, force: true }));
+  assert.equal(claudeTokenFromFile(JSON.stringify({ claudeAiOauth: { accessToken: 'sk-ant-oat-file' } })), 'sk-ant-oat-file');
+  assert.equal(claudeTokenFromFile('sk-ant-oat-bare'), null, 'a bare string in a file is not the login shape');
+  assert.equal(claudeTokenFromFile('{ not json'), null);
+  assert.equal(claudeTokenFromFile(''), null);
+
+  const file = path.join(dir, '.credentials.json');
+  await fs.writeFile(file, JSON.stringify({ claudeAiOauth: { accessToken: 'sk-ant-oat-file' } }), 'utf8');
+  let bearer = '';
+  await collectUsage({
+    exec: async (command, args) => (args.includes('Claude Code-credentials')
+      ? { code: 0, stdout: JSON.stringify({ claudeAiOauth: { accessToken: 'sk-ant-oat-chain' } }), stderr: '', missing: false }
+      : { code: 1, stdout: '', stderr: 'not found', missing: true }),
+    credentialsFile: file,
+    request: async (url, options) => {
+      if (String(url).includes('oauth/usage')) bearer = String(options.headers?.Authorization ?? '');
+      return { ok: false, json: async () => ({}) };
+    },
+  });
+  assert.equal(bearer, 'Bearer sk-ant-oat-chain');
 });
 
 test('a Claude usage fetch that fails is an unavailable meter, not a missing one', async () => {

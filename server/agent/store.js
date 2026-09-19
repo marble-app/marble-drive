@@ -236,8 +236,12 @@ export function createAgentStore({ dir, defaultProvider = 'claude-subscription',
   }
 
   async function settings() {
-    const saved = (await readJson(path.join(dir, 'settings.json'))) ?? {};
-    return { defaultProvider, models: {}, efforts: {}, maxRunning: 3, projects: [], defaultProject: 'drive', skills: {}, ...saved };
+    // `maxRunning` was a cap on how many conversations ran at once. It is
+    // retired: a host that wants one sets MARBLE_DRIVE_AGENT_MAX_RUNNING.
+    // Dropped on read so the key stops being answered, and dropped from
+    // disk the next time anything saves.
+    const { maxRunning: _retired, ...saved } = (await readJson(path.join(dir, 'settings.json'))) ?? {};
+    return { defaultProvider, models: {}, efforts: {}, modes: {}, projects: [], defaultProject: 'drive', skills: {}, ...saved };
   }
 
   async function saveSettings(patch) {
@@ -382,6 +386,31 @@ export function createAgentStore({ dir, defaultProvider = 'claude-subscription',
       };
       await writeJson(metaFile(meta.id), meta);
       return meta;
+    },
+
+    /** A chat taken off the disk rather than filed away. Only ever for one
+     *  with nothing in it — the route decides that, because "nothing in it"
+     *  is a question about events and turns, not about files — and it is
+     *  gone completely: a chat that was opened and closed again unused
+     *  should leave no more trace than one that was never started. The
+     *  folders it was named in forget it too, and a group it was the last
+     *  member of dissolves the same way it would if the chat had moved out.
+     */
+    async discardConversation(id) {
+      const meta = await conversation(id);
+      await fsp.rm(convDir(id), { recursive: true, force: true });
+      counters.delete(id);
+      await serial('folders', async () => {
+        const state = await readFolders();
+        const before = JSON.stringify(state);
+        state.workingSetIds = (state.workingSetIds ?? []).filter((row) => row !== id);
+        for (const folder of state.folders ?? []) {
+          folder.openIds = (folder.openIds ?? []).filter((openId) => openId !== id);
+        }
+        if (JSON.stringify(state) !== before) await writeFolders(state);
+      });
+      await maybeDissolveFolder(meta?.folderId ?? null);
+      return { removed: true };
     },
 
     conversation,

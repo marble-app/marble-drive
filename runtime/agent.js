@@ -190,6 +190,10 @@
       conversations: ({ archived = false } = {}) => ask(`/agent/conversations${archived ? '?archived=1' : ''}`),
       conversation: (id) => ask(`/agent/conversations/${enc(id)}`),
       update: (id, patch) => ask(`/agent/conversations/${enc(id)}`, { method: 'PATCH', body: patch }),
+      // A chat with nothing in it, taken off the disk instead of filed.
+      // The host refuses it for anything that has been used, so a caller
+      // that guesses wrong gets an error rather than a hole.
+      discard: (id) => ask(`/agent/conversations/${enc(id)}`, { method: 'DELETE' }),
 
       // An image pasted or dropped into a composer. It is kept as a file
       // because that is the only form every provider can open — each one is a

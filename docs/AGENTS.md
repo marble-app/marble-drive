@@ -27,7 +27,10 @@ second `serve` on the same drive boots with agents off. Utility commands
 `MARBLE_DRIVE_AGENT_MAX_MINUTES` is `0` by default — no cap; a turn ends when
 the agent finishes or you press Stop. `MARBLE_DRIVE_AGENT_STALL_MINUTES`
 (30) ends a turn whose process prints nothing for that long and is not
-waiting on you.
+waiting on you. `MARBLE_DRIVE_AGENT_MAX_RUNNING` is `0` by default — no cap
+on how many conversations run at once; set it only to hold a small machine
+down. A conversation still runs one turn at a time, so a prompt waits only
+behind that conversation's own turn.
 
 An ungated host answers `/agent/*` only when addressed as `localhost`,
 `127.0.0.1` or `[::1]`, and `/agent/tools/*` refuses any request carrying
@@ -37,7 +40,7 @@ An ungated host answers `/agent/*` only when addressed as `localhost`,
 
 ```
 POST /agent/conversations/:id/turns {prompt, context:{target, viewing, selection}}
-  → runner queues it (one per conversation, maxRunning across all)
+  → runner queues it (one turn at a time per conversation; no cap across them)
   → spawns the provider's CLI (cwd the drive for a full turn, else the empty workspace)
   → the CLI starts bin/marble-mcp.js, which calls /agent/tools/* with the turn's token
   → tools.js reads, checks, and writes through applyOps
@@ -59,10 +62,22 @@ POST /agent/conversations/:id/turns {prompt, context:{target, viewing, selection
 
 ## While an agent works
 
-A corner-marked frame on the page is where the agent is, and its label says
-what it is doing — `Agent · reading`, or the note it gave its edit
-(`Agent · rename the heading`). It follows the element as the page reflows,
-and *Hide* puts it away for the session (*Show work* brings it back).
+A violet box on the page is where the agent is, and the pill under it says what
+it is doing — `Agent · reading`, or the note it gave its edit
+(`Agent · rename the heading`). The colour is the agent's, not the document's:
+every accent in this drive is a muted blue, sage, terracotta or gold, so a
+violet frame is never a control of the app you are in. The wash inside it is
+thin, and the box takes no clicks — what is under it is still yours to select
+and type in. It follows the element as the page reflows.
+
+The pill carries two buttons. *Open chat* opens the conversation doing the work:
+on a page that draws its own agent interface it lands on that page's stage,
+anywhere else in the dock on the right. *Hide* puts every zone away for the
+session (*Show work* brings them back).
+
+The other direction: a running conversation shows **Building here**, or
+**Building in `<document>`**, under its title. Pressing it scrolls to the work,
+opening the other document first if that is where the work is.
 
 Being on the page is not a claim on it. Where your caret is has no bearing on
 what the agent may change; only an edit you made **after its turn began**
@@ -107,6 +122,75 @@ The drawer on a document and the Agents page start the same runner. A turn's
 Undo covers documents. An asset or script an agent writes is not watched by the
 host, so it is neither listed in the turn's changes nor restorable — in a code
 project, git is the undo.
+
+## Why a full agent still gets refused
+
+"As capable as the terminal" cuts both ways: the ceiling on what an agent may
+run is Claude Code's, not Marble's, and it is set in `~/.claude/settings.json`.
+Marble adds nothing to it and can lift nothing from here.
+
+In `auto` — the mode every conversation starts in — an untrusted command is
+judged by Claude Code's **auto-mode classifier**. Most of the time a borderline
+one escalates: the runner gets an `ask`, and a card appears in the drawer. But
+some it refuses outright, with no card and no way to answer:
+
+```
+Permission for this action was denied by the Claude Code auto mode
+classifier. Reason: [Credential Exploration].
+```
+
+The refusal is **sticky for the conversation**. Reading one credential store —
+`security find-generic-password`, `~/.claude/.credentials.json` — is enough to
+put the session in that state, and from then on ordinary `grep`, `sed` and
+`awk` over this repo's own source are refused too. In the worked case
+(conversation `23617e5f3b2d`) the first 40 tool calls ran clean; after two
+keychain probes, seven plain source reads were refused in a row while `Read`
+kept working. This repo is unusually good at provoking it, because its own
+subject matter is sign-in state and usage meters.
+
+Two settings fix it, both in the person's own config:
+
+- `permissions.allow` — an explicit rule is matched before the classifier is
+  consulted, so `Bash(grep:*)` takes ordinary source reading off its desk. The
+  refusal text says so itself: *"the user can add a Bash permission rule to
+  their settings."*
+- `autoMode.environment` — names the repos whose work is routine. A machine set
+  up around one repo makes every other repo's work unroutine, including this
+  one's.
+
+`node tools/agent-permissions.mjs` prints exactly what it would add to both;
+`--apply` backs the file up and writes it. It must be run by a person: Claude
+Code refuses to let an agent edit the settings that govern it
+(`[Self-Modification]`), which is the right boundary and not worth routing
+around. A user `autoMode.allow` **replaces** the shipped exceptions rather than
+adding to them, so the script reads them back from `claude auto-mode defaults`
+and appends — see `test/agent-permissions.test.js`.
+
+Prefer a rule to a bigger hammer. Raising the mode to `bypassPermissions`
+removes the classifier and every other check with it.
+
+## Blocked and failed are different
+
+A tool that was refused and a tool that exited 1 both arrive as
+`is_error: true`, and the drawer used to call both **Blocked**. Most were not:
+of 24 failed `Bash` calls across the stored conversations, 10 were refusals and
+14 were the agent tripping over its own shell — a zsh quoting error, a missing
+module, a script run from the wrong cwd. Fourteen rows saying "Blocked: Bash"
+read as a drive with no access.
+
+The provider now marks a result `denied` when the text is a refusal
+(`isDenial` in `providers/claude.js`), and the drawer says **Blocked** only for
+those — in `--caution`, beside a refused `apply_ops` — and **Failed** in
+`--danger` for the rest. Both keep the label of the step they replaced, so the
+row still says which command it was.
+
+## Default mode
+
+`models`, `efforts` and `modes` in the agent settings are the per-provider
+defaults a new conversation starts from; the settings panel has a picker for
+each. Before `modes` existed every conversation started in `auto` and had to be
+cycled by hand, which is most of why `auto` is the mode in every stored
+conversation.
 
 ## Projects
 
@@ -170,10 +254,10 @@ them at boot. A turn that a message started works in the receiver's own
 document, else the document the message is about, else the sender's.
 
 Caps: 12 sends per turn, 8 replies per thread, same project only, never to
-yourself or an archived conversation. Delivery turns take ordinary
-`maxRunning` slots. Nothing here asks the person: a message never raises
-Needs you, and the Agents page shows it as a bubble naming the sender, whose
-name opens that conversation.
+yourself or an archived conversation. A delivery turn queues behind the
+receiver's own turn, like any other. Nothing here asks the person: a message
+never raises Needs you, and the Agents page shows it as a bubble naming the
+sender, whose name opens that conversation.
 
 Design: [`superpowers/specs/2026-09-18-agent-messaging-design.md`](superpowers/specs/2026-09-18-agent-messaging-design.md).
 

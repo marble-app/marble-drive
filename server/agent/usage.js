@@ -4,11 +4,22 @@
 // A Claude token whose usage fetch fails is an unavailable meter, not a
 // missing one — never a throw. Tests inject `usage` on createDrive so they
 // never hit the network.
+//
+// Claude Code does not always keep its login in the keychain: since 2.1 a
+// signed-in CLI may hold it only in ~/.claude/.credentials.json. Reading the
+// keychain alone left a signed-in drive with no Claude meter at all, which
+// the composer read as "no quota" and greyed out every Claude model. The
+// file is the second place to look, never the first.
+
+import { readFile } from 'node:fs/promises';
+import { homedir } from 'node:os';
+import path from 'node:path';
 
 import { runCommand } from './providers/exec.js';
 
 const CLAUDE_USAGE = 'https://api.anthropic.com/api/oauth/usage';
 const CURSOR_USAGE = 'https://api2.cursor.sh/aiserver.v1.DashboardService/GetCurrentPeriodUsage';
+const CLAUDE_CREDENTIALS = path.join(homedir(), '.claude', '.credentials.json');
 const CACHE_MS = 60_000;
 
 const clampPct = (value) => {
@@ -29,6 +40,14 @@ export function claudeTokenFromKeychain(secret) {
     }
   }
   return raw;
+}
+
+/** The same credential as a file. Only the JSON shape counts here: a file
+ *  that is not that object is not a token, and guessing one would spend a
+ *  request to earn a 401. */
+export function claudeTokenFromFile(contents) {
+  const raw = String(contents ?? '').trim();
+  return raw.startsWith('{') ? claudeTokenFromKeychain(raw) : null;
 }
 
 const windowOf = (id, label, used, resetsAt, kind = 'quota') => (
@@ -149,6 +168,14 @@ const readKeychain = async (exec, service) => {
   }
 };
 
+const readSecretFile = async (file) => {
+  try {
+    return String(await readFile(file, 'utf8')).trim();
+  } catch {
+    return '';
+  }
+};
+
 const readJson = async (response) => {
   try {
     return await response.json();
@@ -157,10 +184,11 @@ const readJson = async (response) => {
   }
 };
 
-export async function collectUsage({ exec = defaultExec, request = defaultRequest } = {}) {
+export async function collectUsage({ exec = defaultExec, request = defaultRequest, credentialsFile = CLAUDE_CREDENTIALS } = {}) {
   const meters = [];
   try {
-    const claudeToken = claudeTokenFromKeychain(await readKeychain(exec, 'Claude Code-credentials'));
+    const claudeToken = claudeTokenFromKeychain(await readKeychain(exec, 'Claude Code-credentials'))
+      ?? claudeTokenFromFile(await readSecretFile(credentialsFile));
     if (claudeToken) {
       try {
         const response = await request(CLAUDE_USAGE, {
