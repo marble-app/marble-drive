@@ -9,6 +9,9 @@ import fsp from 'node:fs/promises';
 import readline from 'node:readline';
 
 const script = JSON.parse(process.env.FAKE_SCRIPT ?? '[]');
+// Background work the CLI is carrying, by id: a subagent or a backgrounded
+// command that outlives the message the agent has already sent.
+const background = new Set();
 const mcp = process.env.FAKE_MCP ? JSON.parse(process.env.FAKE_MCP) : null;
 const out = (value) => process.stdout.write(`${JSON.stringify(value)}\n`);
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
@@ -88,6 +91,21 @@ for (const step of script) {
     out({ kind: 'text', text: `answered:${r.behavior}${r.updatedInput?.answers ? ':' + Object.values(r.updatedInput.answers).join(',') : ''}` });
   }
   if (step.silent) await sleep(step.silent);
+  // A result that is not the end: what a real CLI prints when it has answered
+  // but is still carrying work, or when it flushes a queued notification
+  // before it starts on the prompt at all.
+  if (step.done) out({ kind: 'done', ok: true });
+  if (step.bg) {
+    if (step.bg === 'start') background.add(step.id ?? 'task');
+    else background.delete(step.id ?? 'task');
+    out({ kind: 'background', pending: background.size });
+  }
+  // A process that will not leave on its own: the timer is what keeps it up
+  // once the runner has closed its stdin.
+  if (step.hang) {
+    setInterval(() => {}, 1_000);
+    await new Promise(() => {});
+  }
   if (step.call) {
     const callId = `call-${nextId}`;
     const args = resolve(step.args ?? {});

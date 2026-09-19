@@ -24,6 +24,11 @@ const SELECTION_BUDGET = 6_000;
 const STDERR_TAIL = 4_000;
 // How long closing the host waits for its running turns to write their end.
 const CLOSE_GRACE_MS = 5_000;
+// How long a result has to stand unchallenged before the runner acts on it,
+// and how long it waits instead while the CLI still carries background work.
+// Both are `limits` a host can set; these are the fallbacks.
+const SETTLE_MS = 500;
+const BACKGROUND_SETTLE_MS = 60_000;
 const STEER_NOTE = 'While you were working I added this note. Treat it as course-correction.';
 const DISPATCH = new Set(['queue', 'steer', 'interrupt']);
 
@@ -297,6 +302,9 @@ export function createRunner({ store, tools, providers, workdir, origin, bridgeP
       resumeStall: null,
       resume: null, // the provider session this turn was started to resume
       done: null,
+      settle: null, // the timer that ends a turn whose result has arrived and whose process has gone quiet
+      background: 0, // pieces of background work the CLI is carrying past its own result
+      lingered: false, // true once the runner stopped a process that had already said its piece
       usage: null,
       applied: 0,
       watchdog: false,
@@ -586,6 +594,8 @@ export function createRunner({ store, tools, providers, workdir, origin, bridgeP
       readline.createInterface({ input: child.stdout }).on('line', (line) => {
         if (!line.trim()) return;
         resetStall();
+        // Still talking: whatever end a result proposed earlier is withdrawn.
+        clearTimeout(turn.settle);
         store.appendRaw(turn.id, line).catch(() => {});
         let events = [];
         try {
@@ -602,7 +612,9 @@ export function createRunner({ store, tools, providers, workdir, origin, bridgeP
         turn.stderr = err.message;
       });
       child.on('close', (code) => {
-        const ok = code === 0 && turn.done?.ok !== false;
+        // A process the runner stopped because it would not leave after its
+        // own result did not fail; it had already delivered the turn.
+        const ok = (code === 0 || turn.lingered) && turn.done?.ok !== false;
         safeFinish(turn, turn.cancelled ?? {
           status: ok ? 'completed' : 'failed',
           error: ok ? null : turn.done?.error ?? (turn.stderr.trim() || `exited with ${code}`),
@@ -624,6 +636,38 @@ export function createRunner({ store, tools, providers, workdir, origin, bridgeP
       const next = event.skills.map((s) => ({ id: s.id, name: s.name ?? s.id, description: s.description || old.get(s.id)?.description || '' }));
       return store.saveSettings({ skills: { ...(settings.skills ?? {}), [provider]: next } });
     }).catch((err) => log.error(`[agents] ${err.message}`));
+  }
+
+  /** Close the process's stdin — what makes a CLI reading stream-json leave —
+   *  and see that it actually leaves. */
+  function endInput(turn) {
+    if (!turn.stdinOpen) return;
+    try {
+      turn.child?.stdin?.end();
+    } catch {
+      // Already gone.
+    }
+    const linger = setTimeout(() => {
+      turn.lingered = true;
+      turn.child?.kill('SIGTERM');
+      const hard = setTimeout(() => turn.child?.kill('SIGKILL'), limits.killGraceMs);
+      hard.unref?.();
+      turn.timers.push(() => clearTimeout(hard));
+    }, limits.killGraceMs * 3);
+    linger.unref?.();
+    turn.timers.push(() => clearTimeout(linger));
+  }
+
+  /** Take up a result's proposal to end the turn: if the process says nothing
+   *  more for the settle window, close its stdin. One still carrying
+   *  background work gets a far longer window — what it waits on is its own
+   *  subagent, not us — and every line it prints resets the wait. */
+  function armEnd(turn) {
+    if (!turn.stdinOpen) return; // a CLI handed its prompt on a closed stdin leaves by itself
+    clearTimeout(turn.settle);
+    const wait = turn.background > 0 ? (limits.backgroundSettleMs ?? BACKGROUND_SETTLE_MS) : (limits.settleMs ?? SETTLE_MS);
+    turn.settle = setTimeout(() => endInput(turn), wait);
+    turn.settle.unref?.();
   }
 
   function handle(turn, event) {
@@ -664,19 +708,19 @@ export function createRunner({ store, tools, providers, workdir, origin, bridgeP
         return;
       case 'done':
         turn.done = event;
-        // A CLI reading stream-json waits for the next message after its
-        // result, so the turn is over only once we close its stdin. If it
-        // still lingers, it is stopped rather than left counted as running.
-        if (turn.stdinOpen) {
-          try {
-            turn.child?.stdin?.end();
-          } catch {
-            // Already gone.
-          }
-          const linger = setTimeout(() => turn.child?.kill('SIGTERM'), limits.killGraceMs * 3);
-          linger.unref?.();
-          turn.timers.push(() => clearTimeout(linger));
-        }
+        // A result only *proposes* the end. A CLI prints one before it has
+        // read the prompt at all when it has a queued notification to flush,
+        // and prints one and keeps working when it has answered while a
+        // subagent still runs. Acting on the first one closed stdin under a
+        // process that was mid-sentence and killed it seconds later.
+        armEnd(turn);
+        return;
+      // Background work — a subagent, a backgrounded command — that the CLI's
+      // own result does not wait for. The turn is over when that work has
+      // drained and the process has nothing more to say, not before.
+      case 'background':
+        turn.background = Number(event.pending) || 0;
+        if (turn.background === 0 && turn.done) armEnd(turn);
         return;
       default:
     }
@@ -728,6 +772,7 @@ export function createRunner({ store, tools, providers, workdir, origin, bridgeP
     if (turn.finishing) return;
     turn.finishing = true;
     look(turn, { ids: [] });
+    clearTimeout(turn.settle);
     for (const clear of turn.timers) clear();
     turn.waiter?.(); // a wait parked on this turn returns now; the tool call is in `inflight` and drains below
     await voidAsks(turn, 'ended').catch((err) => log.error(`[agents] ${err.message}`));

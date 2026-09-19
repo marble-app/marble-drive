@@ -24,6 +24,19 @@ const SCRIPTS = {
   forgetful: [{ lostWhenResumed: 'No conversation found with session ID: x' }, { say: 'fresh' }],
   noop: [{ say: 'done' }],
   linger: [{ say: 'done' }, { lingerUntilEof: true }],
+  // A message sent while a subagent is still working: the result comes first,
+  // the subagent finishes after it, and the turn is over only then.
+  background: [
+    { say: 'dispatched' },
+    { bg: 'start', id: 'sub' },
+    { done: true },
+    { sleep: 700 },
+    { bg: 'end', id: 'sub' },
+    { say: 'the subagent finished' },
+    { lingerUntilEof: true },
+  ],
+  // A result, and then a process that neither reads its stdin nor takes SIGTERM.
+  stubbornResult: [{ ignoreTerm: true }, { say: 'answer' }, { done: true }, { hang: true }],
   permission: [{ ask: { tool: 'Bash', input: { command: 'rm -rf build' } } }, { say: 'after' }],
   question: [{ ask: { tool: 'AskUserQuestion', input: { questions: [{ question: 'A or B?', header: 'Pick', options: [{ label: 'A' }, { label: 'B' }], multiSelect: false }] } } }],
   // Sends one message to whoever is in $to (the test rewrites the script), then ends.
@@ -1181,6 +1194,28 @@ test('a process that waits for more input after its result is ended by the runne
   await runner.send(id, { prompt: 'script:linger', context: { target: 'garden' } });
   const turn = await finished(store, `${id}-t1`);
   assert.equal(turn.status, 'completed');
+  assert.equal(turn.error, null);
+  await runner.close();
+});
+
+test('a result while background work is outstanding is not the end of the turn', async () => {
+  const { store, runner } = await setup({ capability: 'full', limits: { settleMs: 50, killGraceMs: 50, backgroundSettleMs: 5_000 } });
+  const { id } = await store.createConversation({ provider: 'fake' });
+  await runner.send(id, { prompt: 'script:background', context: { target: 'garden' } });
+  const turn = await finished(store, `${id}-t1`);
+  assert.equal(turn.status, 'completed');
+  assert.equal(turn.error, null);
+  const said = (await store.events(id)).filter((e) => e.type === 'text').map((e) => e.text);
+  assert.ok(said.includes('the subagent finished'), said.join(' | '));
+  await runner.close();
+});
+
+test('a process the runner had to stop after its result still succeeded', async () => {
+  const { store, runner } = await setup({ capability: 'full', limits: { settleMs: 50, killGraceMs: 50 } });
+  const { id } = await store.createConversation({ provider: 'fake' });
+  await runner.send(id, { prompt: 'script:stubbornResult', context: { target: 'garden' } });
+  const turn = await finished(store, `${id}-t1`);
+  assert.equal(turn.status, 'completed', `error: ${turn.error}`);
   assert.equal(turn.error, null);
   await runner.close();
 });

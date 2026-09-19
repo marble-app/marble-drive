@@ -181,6 +181,10 @@ async function boot({ config, store, writeOps, createDocument, origin, providers
       stallMs: config.agentStallMinutes * 60_000,
       maxMs: config.agentMaxMinutes * 60_000,
       killGraceMs: 3_000,
+      // A result stands for half a second before the runner acts on it, and a
+      // minute while the CLI still has background work of its own in flight.
+      settleMs: 500,
+      backgroundSettleMs: 60_000,
     },
     log,
     skills,

@@ -48,11 +48,24 @@ const DENIAL = /\b(denied by the Claude Code auto mode classifier|permission (?:
 
 export const isDenial = (text) => DENIAL.test(String(text ?? ''));
 
-/** One line of `claude -p --output-format stream-json` as the runner's events. */
-export function parseClaudeLine(line) {
+/** One line of `claude -p --output-format stream-json` as the runner's events.
+ *  `state` is the runner's per-turn scratch: what a line means can depend on
+ *  the lines before it. */
+export function parseClaudeLine(line, state = {}) {
   const e = JSON.parse(line);
   switch (e.type) {
     case 'system': {
+      // Work the CLI is carrying that its own result does not wait for: a
+      // subagent, a backgrounded command. Every task the CLI starts is
+      // announced, and every task that ends is notified — including, on a
+      // resumed session, tasks this process never started, which is why the
+      // count is a set and not a tally.
+      if (e.subtype === 'task_started' || e.subtype === 'task_notification') {
+        const tasks = (state.tasks ??= new Set());
+        if (e.subtype === 'task_started') tasks.add(e.task_id);
+        else tasks.delete(e.task_id);
+        return [{ type: 'background', pending: tasks.size }];
+      }
       if (e.subtype !== 'init') return [];
       const events = [];
       if (e.session_id) events.push({ type: 'session', id: e.session_id });
@@ -125,6 +138,11 @@ export function parseClaudeLine(line) {
     }
 
     case 'result': {
+      // A result with no model turns behind it is not an answer. It is what
+      // the CLI prints when it flushes a notification queued before this
+      // process existed, ahead of reading the prompt it was given. Treating
+      // it as the end closed stdin under an agent that had not begun.
+      if (e.num_turns === 0) return [];
       const usage = e.usage ?? {};
       return [
         {
@@ -253,7 +271,7 @@ export function createClaudeProvider({ auth = 'subscription', exec = runCommand,
       };
     },
 
-    parse: (line) => parseClaudeLine(line),
+    parse: (line, state) => parseClaudeLine(line, state),
 
     // `--resume` with a session the CLI has deleted.
     lostSession: (error) => /no conversation found/i.test(String(error ?? '')),
