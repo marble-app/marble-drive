@@ -46,6 +46,8 @@ export function createFakeProvider({ scripts = {}, id = 'fake' } = {}) {
         case 'result': return [{ type: 'tool.result', callId: e.callId, ok: e.ok, denied: Boolean(e.denied), summary: e.summary }];
         case 'ask': return [{ type: 'ask', requestId: e.requestId, tool: e.tool, displayName: e.tool, input: e.input, interactive: e.tool === 'AskUserQuestion' }];
         case 'done': return [{ type: 'done', ok: e.ok, error: e.error }];
+        // How many pieces of background work the CLI is still carrying.
+        case 'background': return [{ type: 'background', pending: e.pending }];
         default: return [];
       }
     },

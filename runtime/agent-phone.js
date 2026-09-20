@@ -74,40 +74,54 @@
 
   const lodOf = (d) => (d < 0.5 ? 'full' : d < 1.5 ? 'digest' : d < 2.5 ? 'chip' : 'sliver');
 
-  function fisheye(count, focal, room) {
-    if (!count) return [];
+  // A tier is read off a distance, so the way to make one side of the stack
+  // give its height up first is to stretch that side's distances: a card a
+  // digest away from the Full is read as a chip, then as a sliver, as `k`
+  // grows. The half card nearest the focal is left alone at every `k`, which
+  // is what keeps the Full full — and because the stretch is continuous in
+  // both `d` and `k`, so is the whole layout.
+  const SQUEEZE_PIVOT = 0.5;
+  const SQUEEZE_MAX = 16;
+  const stretch = (d, k) => (k === 1 || d <= SQUEEZE_PIVOT ? d : SQUEEZE_PIVOT + (d - SQUEEZE_PIVOT) * k);
+
+  /** The column at one pair of stretches; `below = above = 1` is the plain
+   *  fisheye, where a card's tier is its own distance from the focal. */
+  function layout(count, focal, room, below = 1, above = 1) {
     const f = clamp(focal, 0, count - 1);
     const lo = Math.floor(f);
     const hi = Math.min(count - 1, lo + 1);
     const t = f - lo;
+    /** The distance card `i` is read at: its own, stretched by the side it is on. */
+    const reach = (i) => (i > f ? stretch(i - f, below) : stretch(f - i, above));
     const heights = new Array(count);
     let used = 0;
     for (let i = 0; i < count; i += 1) {
       if (i === lo || i === hi) continue;
-      heights[i] = neighbourHeight(Math.abs(i - f));
+      heights[i] = neighbourHeight(reach(i));
       used += heights[i];
     }
     const full = room - used;
     if (lo === hi) {
       heights[lo] = Math.max(TIERS.digest, full);
     } else {
-      // Between two integers the pair nearest focal shares what a Full and a
-      // digest would take together; t decides the split, so at t = 0 the
-      // lower card is exactly the Full it was and the hand-off is linear.
-      const pair = Math.max(TIERS.digest * 2, full);
-      const share = pair - TIERS.digest * 2;
-      heights[lo] = TIERS.digest + share * (1 - t);
-      heights[hi] = TIERS.digest + share * t;
+      // Between two integers the pair nearest focal shares what their two
+      // tiers would take together; t decides the split, so at t = 0 the lower
+      // card is exactly the Full it was and the hand-off is linear. Unstretched
+      // both bases are a digest, which is the pair this always was.
+      const base = [neighbourHeight(reach(lo)), neighbourHeight(reach(hi))];
+      const floor = base[0] + base[1];
+      const share = Math.max(floor, full) - floor;
+      heights[lo] = base[0] + share * (1 - t);
+      heights[hi] = base[1] + share * t;
     }
     // Slivers overlap so a run of them reads as a deck edge-on.
     const cards = [];
     let top = 0;
     for (let i = 0; i < count; i += 1) {
-      const d = Math.abs(i - f);
-      const lod = lodOf(d);
-      const prevSliver = i > 0 && lodOf(Math.abs(i - 1 - f)) === 'sliver';
+      const lod = lodOf(reach(i));
+      const prevSliver = i > 0 && lodOf(reach(i - 1)) === 'sliver';
       if (lod === 'sliver' && prevSliver) top -= SLIVER_OVERLAP;
-      cards.push({ top, height: heights[i], lod, d });
+      cards.push({ top, height: heights[i], lod, d: Math.abs(i - f) });
       top += heights[i];
     }
     // Overlaps freed a little room; the Full takes it so the column still
@@ -121,15 +135,73 @@
     return cards;
   }
 
+  /** The fisheye. `anchor: 'bottom'` is the keyboard's hint: the room shrank
+   *  from the bottom, so the cards below the Full step down to slivers and
+   *  the ones above keep the layout they had. Only when the Full still has
+   *  less than a digest does the stack above start to give too. */
+  function fisheye(count, focal, room, { anchor } = {}) {
+    if (!count) return [];
+    const plain = layout(count, focal, room);
+    if (anchor !== 'bottom') return plain;
+    const f = clamp(focal, 0, count - 1);
+    const lo = Math.floor(f);
+    const hi = Math.min(count - 1, lo + 1);
+    // The Full is the pair card the focal is nearest; at the hand-off both
+    // hold the same base, so which one this picks is continuous in focal.
+    const fullOf = (cards) => cards[f - lo <= 0.5 ? lo : hi].height;
+    // Everything below the Full folds to a sliver outright: the keyboard is
+    // where the composer has to sit, and a digest between them is a card
+    // the thumb would have to reach past. Only if that still leaves the
+    // Full short does the stack above give, and then as little as it can.
+    const squeezed = layout(count, focal, room, SQUEEZE_MAX);
+    if (fullOf(squeezed) >= TIERS.digest) return squeezed;
+    // Monotone in the stretch, so a bisection finds the gentlest one that
+    // still leaves the Full a digest's worth of transcript.
+    const solve = (make) => {
+      let weak = 1;
+      let strong = SQUEEZE_MAX;
+      for (let n = 0; n < 30; n += 1) {
+        const mid = (weak + strong) / 2;
+        if (fullOf(make(mid)) >= TIERS.digest) strong = mid;
+        else weak = mid;
+      }
+      return strong;
+    };
+    const above = solve((k) => layout(count, focal, room, SQUEEZE_MAX, k));
+    return layout(count, focal, room, SQUEEZE_MAX, above);
+  }
+
+  /** The runs of slivers at the ends of the column. The page draws one pile
+   *  per run — a deck seen edge-on — rather than a dozen hairlines that read
+   *  as ruled paper. `top` and `height` are the run's own box. */
+  const pileRuns = (cards) => {
+    const runs = [];
+    if (!cards?.length) return runs;
+    const run = (from, to, side) => {
+      const first = cards[from];
+      const last = cards[to];
+      runs.push({ side, count: to - from + 1, top: first.top, height: last.top + last.height - first.top });
+    };
+    let head = 0;
+    while (head < cards.length && cards[head].lod === 'sliver') head += 1;
+    if (head > 0) run(0, head - 1, 'top');
+    // From the far end back, never past the head: a column that is nothing but
+    // slivers is one pile, not two.
+    let tail = cards.length - 1;
+    while (tail >= head && cards[tail].lod === 'sliver') tail -= 1;
+    if (tail < cards.length - 1) run(tail + 1, cards.length - 1, 'bottom');
+    return runs;
+  };
+
   /** The focal that puts card `index` at `top`. Moving focal down moves every
    *  card up, so the layout is monotone in focal and a bisection finds it. */
-  function focalFor(index, top, count, room) {
+  function focalFor(index, top, count, room, options = {}) {
     if (count < 2) return 0;
     let lo = 0;
     let hi = count - 1;
     for (let n = 0; n < 40; n += 1) {
       const mid = (lo + hi) / 2;
-      const placed = fisheye(count, mid, room)[index].top;
+      const placed = fisheye(count, mid, room, options)[index].top;
       if (placed > top) lo = mid;
       else hi = mid;
     }
@@ -155,5 +227,5 @@
   /** Where a released gesture would come to rest (Apple's projection). */
   const project = (velocity, rate = 0.998) => ((velocity / 1000) * rate) / (1 - rate);
 
-  globalThis.marbleAgentPhone = { bandOf, bandCompare, askLead, peekOf, TIERS, SLIVER_OVERLAP, fisheye, focalFor, stepSpring, project };
+  globalThis.marbleAgentPhone = { bandOf, bandCompare, askLead, peekOf, TIERS, SLIVER_OVERLAP, fisheye, pileRuns, focalFor, stepSpring, project };
 })();

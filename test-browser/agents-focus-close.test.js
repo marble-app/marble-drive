@@ -163,3 +163,34 @@ test('closing the last pane empties the stage rather than promoting a card into 
   for (const id of ids) assert.equal((await metaOf(page, id))?.pinned ?? false, false, 'nothing is pinned');
   assert.deepEqual(errors, []);
 });
+
+test('clearing the room from a pane takes the other chats off the stage too', async () => {
+  const { page, errors } = await openAgents();
+  const ids = await page.evaluate(async () => {
+    const agent = window.marble.agent;
+    const made = [];
+    for (const title of ['one', 'two', 'three']) {
+      const id = await agent.start({ provider: 'fake' });
+      await agent.update(id, { title, pinned: true });
+      made.push(id);
+    }
+    return made;
+  });
+  await page.locator('.views [data-view="focus"]').click();
+  await until(page, async () => (await panes(page)).length === 3, 'three pinned chats to hold the stage');
+  const kept = (await panes(page))[1];
+  const gone = ids.filter((id) => id !== kept);
+
+  await page.locator(`.dock-bar[data-id="${kept}"]`).click({ button: 'right', position: { x: 60, y: 12 } });
+  await page.locator('.rail-menu').waitFor();
+  await page.locator('.rail-menu button', { hasText: 'Close the other 2 panes' }).click();
+  await until(page, async () => (await panes(page)).length === 1, 'one pane to be left');
+  await page.waitForTimeout(1200);
+
+  assert.deepEqual(await panes(page), [kept]);
+  assert.equal((await metaOf(page, kept))?.pinned, true, 'the chat you kept is still on the stage');
+  for (const id of gone) {
+    assert.equal((await metaOf(page, id))?.pinned ?? false, false, 'the rest left the stage, as closing each would');
+  }
+  assert.deepEqual(errors, []);
+});

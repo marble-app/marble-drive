@@ -223,7 +223,7 @@ test('saved setups hug their labels instead of stretching across the composer', 
       names: [...el.shadowRoot.querySelectorAll('.preset span')].map((node) => node.textContent.trim()),
     };
   });
-  assert.deepEqual(names.names, ['Fable 5.1 High', 'Opus Extra High', 'Opus High', 'Sonnet High']);
+  assert.deepEqual(names.names, ['Fable 5.1 High', 'Opus High', 'Sonnet High']);
   assert.ok(names.presets <= names.pills + 12, `presets ${names.presets} should hug pills ${names.pills}, not setup ${names.setup}`);
   // The setup shares its row with the mode and send buttons now, so the
   // margin is what Custom takes, not the old empty half of the composer.
@@ -339,7 +339,7 @@ test('Custom keeps the Claude model sliders visible after picking a preset', asy
   assert.equal(await view.locator('.picker').isVisible(), true);
   // The setups live in the trigger's menu now, so open it to reach them.
   await view.locator('.presets-more').click();
-  await view.locator('.presets-menu input[name="preset"][value="opus-xhigh"]').click({ force: true });
+  await view.locator('.presets-menu input[name="preset"][value="opus-high"]').click({ force: true });
   await page.waitForFunction(() => {
     const el = document.querySelector('body > marble-conversation');
     return el?.shadowRoot.querySelector('input[name="model"]:checked')?.value === 'opus';
@@ -537,24 +537,28 @@ async function mountPair() {
   return { page, errors, left: view('left'), right: view('right') };
 }
 
-/** Give a view a Claude it can build setups from, and pack them into the ••• */
-const withSetups = (view) => view.evaluate(async (el) => {
-  el.providerList = [{
-    id: 'claude-subscription',
-    label: 'Claude',
-    installed: true,
-    signedIn: true,
-    default: true,
-    models: [{ id: 'sonnet', label: 'Sonnet 5' }, { id: 'opus', label: 'Opus 5' }, { id: 'fable', label: 'Fable 5.1' }],
-    efforts: ['high', 'xhigh'],
-    modes: [{ id: 'default', label: 'Default' }],
-  }];
-  el.usageMeters = [];
-  el.fillAgents('claude-subscription');
-  await el.syncCatalog();
-  el.paintPresets({ initial: true });
-  el.fitSetup();
-});
+/** Give a view a Claude it can build setups from, and pack them into the •••.
+ *  The model and effort are pinned rather than left to the catalog's default,
+ *  because committing a setup persists it on the host — so a test that scrubs
+ *  would otherwise hand its choice to whichever test ran next. */
+const withSetups = (view, { efforts = ['high', 'xhigh'], model = 'fable', effort = 'high' } = {}) =>
+  view.evaluate(async (el, [list, pick]) => {
+    el.providerList = [{
+      id: 'claude-subscription',
+      label: 'Claude',
+      installed: true,
+      signedIn: true,
+      default: true,
+      models: [{ id: 'sonnet', label: 'Sonnet 5' }, { id: 'opus', label: 'Opus 5' }, { id: 'fable', label: 'Fable 5.1' }],
+      efforts: list,
+      modes: [{ id: 'default', label: 'Default' }],
+    }];
+    el.usageMeters = [];
+    el.fillAgents('claude-subscription');
+    await el.syncCatalog(pick);
+    el.paintPresets({ initial: true });
+    el.fitSetup();
+  }, [efforts, { model, effort }]);
 
 const segOpen = (view) => view.evaluate((el) => Boolean(el.shadowRoot.querySelector('.presets.is-open')));
 
@@ -646,7 +650,7 @@ test('a raised sheet still lands where its trigger is, at the right size', async
   assert.ok(placed.overlapsTrigger, 'it still hangs off its own trigger');
   assert.ok(placed.above, 'and still opens above it');
   assert.ok(placed.width > 100 && placed.width < 360, `and keeps its own width, got ${placed.width}px`);
-  assert.equal(placed.rows, 4);
+  assert.equal(placed.rows, 3, 'three setups now that effort has its own axis');
 });
 
 test('only one setup sheet is open on the page, whichever chat opened it', async () => {
@@ -790,11 +794,13 @@ const scrub = (view) => view.evaluate((el) => ({
   open: el.scrubIsOpen(),
   at: el.scrubAt ?? null,
   stops: (el.scrubPresets ?? []).map((preset) => preset.id),
-  now: el.shadowRoot.querySelector('.scrub-now')?.textContent.trim() ?? '',
-  labels: [...el.shadowRoot.querySelectorAll('.scrub-stop')].map((stop) => [
-    stop.querySelector('b').textContent,
-    stop.querySelector('i').textContent,
-  ].join(' · ')),
+  model: el.shadowRoot.querySelector('.scrub-model')?.textContent.trim() ?? '',
+  // Every word of the scale is in the DOM; only the lit one is the reading.
+  effort: el.shadowRoot.querySelector('.scrub-effort > i.is-on')?.textContent ?? '',
+  gauge: [...el.shadowRoot.querySelectorAll('.scrub-gauge > i')].filter((bar) => bar.classList.contains('is-on')).length,
+  labels: [...el.shadowRoot.querySelectorAll('.scrub-stop')].map((stop) => stop.querySelector('.scrub-name').textContent),
+  stopEfforts: [...el.shadowRoot.querySelectorAll('.scrub-stop')].map((stop) => stop.querySelector('.scrub-stop-effort > i.is-on')?.textContent ?? ''),
+  tuned: el.scrubPresets ? el.scrubPresets.map((preset) => `${preset.model}=${el.scrubTuned.get(preset.id)}`) : [],
   marked: [...el.shadowRoot.querySelectorAll('.scrub-stop')].findIndex((stop) => stop.classList.contains('is-at')),
   setup: el.shadowRoot.querySelector('.presets-more')?.textContent.trim() ?? '',
 }));
@@ -819,11 +825,12 @@ test('holding the two modifiers raises the setups as a stepped scrubber', async 
   await hold(page);
   const up = await scrub(left);
   assert.equal(up.open, true);
-  assert.deepEqual(up.stops, ['fable-high', 'opus-xhigh', 'opus-high', 'sonnet-high'], 'one stop per setup you can pick');
-  // Model over effort, so four names fit on one line at pane width.
-  assert.deepEqual(up.labels, ['Fable 5.1 · High', 'Opus · Extra High', 'Opus · High', 'Sonnet · High']);
+  // Weakest at the left: a slider is pushed right to turn something up.
+  assert.deepEqual(up.stops, ['sonnet-high', 'opus-high', 'fable-high'], 'one stop per setup you can pick, weakest first');
+  assert.deepEqual(up.labels, ['Sonnet', 'Opus', 'Fable 5.1'], 'the model alone — effort has its own axis now');
   assert.equal(up.marked, up.at, 'the stop it starts on is the one marked');
-  assert.ok(up.now.includes('Fable 5.1 High'), `the one you are on is named above, got "${up.now}"`);
+  assert.equal(up.model, 'Fable 5.1');
+  assert.equal(up.effort, 'High');
 
   // Raised, not just floated: it has the pane next door to clear as well.
   assert.equal(
@@ -840,29 +847,232 @@ test('the arrows walk the scrubber while the modifiers are held, and stop at the
   await left.locator('.presets-more').waitFor();
   await left.locator('.editor').click();
   await hold(page);
-  const start = (await scrub(left)).at;
+  // The default setup is the strongest, which is now the right-hand end.
+  const start = await scrub(left);
+  assert.equal(start.at, start.stops.length - 1);
+  assert.equal(start.model, 'Fable 5.1');
 
-  await page.keyboard.press('ArrowRight');
-  await page.keyboard.press('ArrowRight');
+  await page.keyboard.press('ArrowLeft');
   const moved = await scrub(left);
-  assert.equal(moved.at, start + 2);
-  assert.equal(moved.marked, start + 2, 'the mark follows');
-  assert.ok(moved.now.includes('Opus High'), `got "${moved.now}"`);
+  assert.equal(moved.at, start.at - 1);
+  assert.equal(moved.marked, moved.at, 'the mark follows');
+  assert.equal(moved.model, 'Opus');
 
   // A timeline has ends; holding an arrow down comes to rest, it does not cycle.
-  for (let i = 0; i < 5; i += 1) await page.keyboard.press('ArrowRight');
-  assert.equal((await scrub(left)).at, moved.stops.length - 1, 'the right end holds');
-  for (let i = 0; i < 9; i += 1) await page.keyboard.press('ArrowLeft');
-  assert.equal((await scrub(left)).at, 0, 'and so does the left');
+  for (let i = 0; i < 6; i += 1) await page.keyboard.press('ArrowLeft');
+  const leftEnd = await scrub(left);
+  assert.equal(leftEnd.at, 0, 'the left end holds');
+  assert.equal(leftEnd.model, 'Sonnet');
+  // The knob and the fill went with it rather than staying where they were.
+  const atLeft = await left.evaluate((el) => ({
+    fill: el.shadowRoot.querySelector('.scrub-fill').style.width,
+    knob: el.shadowRoot.querySelector('.scrub-knob').style.transform,
+  }));
+  assert.equal(atLeft.fill, '0px');
+  assert.equal(atLeft.knob, 'translateX(0px)');
 
-  // The knob and the fill are where the mark is, not still at the start.
-  const geometry = await left.evaluate((el) => {
-    const root = el.shadowRoot;
-    return { fill: root.querySelector('.scrub-fill').style.width, knob: root.querySelector('.scrub-knob').style.transform };
-  });
-  assert.equal(geometry.fill, '0px');
-  assert.equal(geometry.knob, 'translateX(0px)');
+  for (let i = 0; i < 9; i += 1) await page.keyboard.press('ArrowRight');
+  assert.equal((await scrub(left)).at, start.stops.length - 1, 'and so does the right');
+  const atRight = await left.evaluate((el) => ({
+    fill: el.shadowRoot.querySelector('.scrub-fill').style.width,
+    knob: el.shadowRoot.querySelector('.scrub-knob').style.transform,
+  }));
+  assert.notEqual(atRight.fill, '0px');
+  assert.notEqual(atRight.knob, 'translateX(0px)');
   await release(page);
+});
+
+test('up and down tune the effort of the model the scrubber is on', async () => {
+  const { page, left } = await mountDock({ cover: 'left' });
+  await left.locator('input[name="agent"][value="fake"]').waitFor();
+  await withSetups(left, { efforts: ['low', 'medium', 'high', 'xhigh', 'max'] });
+  await left.locator('.presets-more').waitFor();
+  await left.locator('.editor').click();
+
+  await hold(page);
+  const start = await scrub(left);
+  assert.equal(start.effort, 'High', 'it opens on the effort actually set, not the stop\'s own');
+  assert.equal(start.gauge, 3, 'and the gauge is filled to it');
+
+  await page.keyboard.press('ArrowUp');
+  const up = await scrub(left);
+  assert.equal(up.effort, 'Extra High');
+  assert.equal(up.gauge, 4);
+  assert.equal(up.at, start.at, 'the model it is on does not move');
+
+  // Let the switch above land first. Reversing one that has not visually
+  // left zero is 0 → 0, which is no change and so no transition — the
+  // browser is right about that, and it is not what this is asking.
+  await left.evaluate(async (el) => {
+    const parts = [...el.shadowRoot.querySelectorAll('.scrub-effort > i, .scrub-gauge > i')];
+    await Promise.all(parts.flatMap((node) => node.getAnimations().map((a) => a.finished.catch(() => {}))));
+  });
+
+  // The switch is animated, not swapped: the word that arrives fades and
+  // rises, the word it replaces leaves, and the colour and weight travel.
+  // The tune and the reading share one round-trip — the fade is 160ms, and a
+  // couple of assertions in between are enough to miss the end of it, which
+  // is a slower machine away from being a flake.
+  const running = await left.evaluate((el) => {
+    const root = el.shadowRoot;
+    const lit = () => root.querySelector('.scrub-effort > i.is-on')?.textContent ?? '';
+    const was = lit();
+    el.tuneScrub(-1);
+    const props = (node) => (node?.getAnimations() ?? []).map((a) => a.transitionProperty ?? '').filter(Boolean);
+    const words = [...root.querySelectorAll('.scrub-effort > i')];
+    return {
+      was,
+      now: lit(),
+      on: props(words.find((i) => i.classList.contains('is-on'))),
+      // Only one of the words that are off is the one just turned off; the
+      // rest were never on and have nothing but their colour running.
+      all: words.map((i) => `${i.textContent}:${i.classList.contains('is-on') ? 'on' : 'off'}:${getComputedStyle(i).opacity}:${props(i).join('+') || '-'}`),
+      leaving: words.filter((i) => !i.classList.contains('is-on')).map(props).filter((list) => list.includes('opacity')).length,
+      bar: props([...root.querySelectorAll('.scrub-gauge > i')].find((i) => i.classList.contains('is-on'))),
+    };
+  });
+  assert.equal(running.was, 'Extra High');
+  assert.equal(running.now, 'High', 'the tune has to have actually happened for the rest of this to mean anything');
+  assert.ok(running.on.includes('color'), `the colour travels, got ${running.on.join(',') || 'nothing'}`);
+  assert.ok(running.on.includes('font-weight'), `and the weight, got ${running.on.join(',') || 'nothing'}`);
+  assert.ok(running.on.includes('opacity'), 'the arriving word fades in');
+  assert.equal(running.leaving, 1, `and exactly the one it replaced fades out — ${running.all.join(' | ')}`);
+  assert.ok(running.bar.includes('background-color'), `the gauge fills rather than flicking, got ${running.bar.join(',') || 'nothing'}`);
+  await page.keyboard.press('ArrowUp');
+
+  for (let i = 0; i < 4; i += 1) await page.keyboard.press('ArrowUp');
+  assert.equal((await scrub(left)).effort, 'Max', 'the top holds');
+  for (let i = 0; i < 9; i += 1) await page.keyboard.press('ArrowDown');
+  const bottom = await scrub(left);
+  assert.equal(bottom.effort, 'Low', 'and so does the bottom');
+  assert.equal(bottom.gauge, 1);
+  await release(page);
+});
+
+test('a setup no chip matches still opens on its own model', async () => {
+  const { page, left } = await mountDock({ cover: 'left' });
+  await left.locator('input[name="agent"][value="fake"]').waitFor();
+  // Opus at Max is no saved setup — it is what tuning the effort leaves.
+  await withSetups(left, { efforts: ['low', 'medium', 'high', 'xhigh', 'max'], model: 'opus', effort: 'max' });
+  await left.locator('.presets-more').waitFor();
+  await left.locator('.editor').click();
+
+  await hold(page);
+  const up = await scrub(left);
+  assert.equal(up.model, 'Opus', 'the stop is the model, even with no chip to match');
+  assert.equal(up.effort, 'Max', 'and the gauge carries the effort that had no chip');
+  assert.equal(up.gauge, 5);
+  await release(page);
+});
+
+test('each model keeps its own effort, and wears it under its name', async () => {
+  const { page, left } = await mountDock({ cover: 'left' });
+  await left.locator('input[name="agent"][value="fake"]').waitFor();
+  await withSetups(left, { efforts: ['low', 'medium', 'high', 'xhigh', 'max'] });
+  await left.locator('.presets-more').waitFor();
+  await left.locator('.editor').click();
+
+  await hold(page);
+  // Turn the strongest model all the way up.
+  await page.keyboard.press('ArrowUp');
+  await page.keyboard.press('ArrowUp');
+  assert.deepEqual((await scrub(left)).tuned, ['sonnet=high', 'opus=high', 'fable=max'], 'only the one it is on moved');
+
+  // Walk off it: the next model is still where it was left, not at Max.
+  await page.keyboard.press('ArrowLeft');
+  const opus = await scrub(left);
+  assert.equal(opus.model, 'Opus');
+  assert.equal(opus.effort, 'High', 'a raised effort does not follow you to the next model');
+  assert.equal(opus.gauge, 3);
+
+  await page.keyboard.press('ArrowDown');
+  assert.deepEqual((await scrub(left)).tuned, ['sonnet=high', 'opus=medium', 'fable=max']);
+
+  // And back: the model you tuned is still tuned.
+  await page.keyboard.press('ArrowRight');
+  const back = await scrub(left);
+  assert.equal(back.effort, 'Max', 'the model you tuned kept it');
+  // Each stop says what it is remembering, under its own name.
+  assert.deepEqual(back.stopEfforts, ['High', 'Medium', 'Max']);
+  assert.deepEqual(back.labels, ['Sonnet', 'Opus', 'Fable 5.1'], 'the names stay the names');
+  await release(page);
+});
+
+test('the model name does not move when the effort word changes length', async () => {
+  const { page, left } = await mountDock({ cover: 'left' });
+  await left.locator('input[name="agent"][value="fake"]').waitFor();
+  await withSetups(left, { efforts: ['low', 'medium', 'high', 'xhigh', 'max'] });
+  await left.locator('.presets-more').waitFor();
+  await left.locator('.editor').click();
+  // Unrounded: a sub-pixel wobble is still a wobble, and rounding would hide
+  // one while turning another into a whole pixel of apparent movement.
+  const modelLeft = () => left.evaluate((el) => el.shadowRoot.querySelector('.scrub-model').getBoundingClientRect().left);
+
+  // The card scales as it arrives, so a rect read mid-entry is the entry's,
+  // not the layout's. This test is about where things come to rest.
+  const settled = () => left.evaluate(async (el) => {
+    const parts = [...el.shadowRoot.querySelectorAll('.scrub, .scrub *')];
+    await Promise.all(parts.flatMap((node) => node.getAnimations().map((a) => a.finished.catch(() => {}))));
+  });
+
+  await hold(page);
+  const at = [];
+  // "Low" and "Extra High" are the extremes of the scale's own width; the
+  // stack is sized to the longest, so the name beside it cannot shift.
+  for (let i = 0; i < 4; i += 1) await page.keyboard.press('ArrowDown');
+  await settled();
+  at.push(await modelLeft());
+  for (let i = 0; i < 3; i += 1) {
+    await page.keyboard.press('ArrowUp');
+    at.push(await modelLeft());
+    await settled();
+    at.push(await modelLeft());
+  }
+  const spread = Math.max(...at) - Math.min(...at);
+  assert.ok(spread < 0.01, `the name held still at every effort, got ${at.map((n) => n.toFixed(2)).join(', ')}`);
+  assert.equal((await scrub(left)).effort, 'Extra High', 'and it really did walk the whole scale');
+  await release(page);
+});
+
+test('a tuned effort is committed along with the model', async () => {
+  const { page, left } = await mountDock({ cover: 'left' });
+  await left.locator('input[name="agent"][value="fake"]').waitFor();
+  await withSetups(left, { efforts: ['low', 'medium', 'high', 'xhigh', 'max'] });
+  await left.locator('.presets-more').waitFor();
+  await left.locator('.editor').click();
+
+  await hold(page);
+  await page.keyboard.press('ArrowLeft');
+  await page.keyboard.press('ArrowUp');
+  await release(page);
+  await left.locator('.presets-more').waitFor();
+  const picked = await left.evaluate(async (el) => {
+    await new Promise((done) => setTimeout(done, 60));
+    const root = el.shadowRoot;
+    return {
+      model: root.querySelector('input[name="model"]:checked')?.value,
+      effort: root.querySelector('input[name="effort"]:checked')?.value,
+    };
+  });
+  // The setup that used to be its own chip, now reached by one press of ↑.
+  assert.deepEqual(picked, { model: 'opus', effort: 'xhigh' });
+});
+
+test('effort alone is enough of a change to be worth committing', async () => {
+  const { page, left } = await mountDock({ cover: 'left' });
+  await left.locator('input[name="agent"][value="fake"]').waitFor();
+  await withSetups(left, { efforts: ['low', 'medium', 'high', 'xhigh', 'max'] });
+  await left.locator('.presets-more').waitFor();
+  await left.locator('.editor').click();
+
+  await hold(page);
+  await page.keyboard.press('ArrowDown');
+  await release(page);
+  const effort = await left.evaluate(async (el) => {
+    await new Promise((done) => setTimeout(done, 60));
+    return el.shadowRoot.querySelector('input[name="effort"]:checked')?.value;
+  });
+  assert.equal(effort, 'medium', 'the model never moved, but the effort did');
 });
 
 test('letting the modifiers go commits the setup the scrubber landed on', async () => {
@@ -874,8 +1084,8 @@ test('letting the modifiers go commits the setup the scrubber landed on', async 
   const before = (await scrub(left)).setup;
 
   await hold(page);
-  await page.keyboard.press('ArrowRight');
-  await page.keyboard.press('ArrowRight');
+  // Down one from the strongest, which is where the default sits.
+  await page.keyboard.press('ArrowLeft');
   await release(page);
   await left.locator('.presets-more', { hasText: 'Opus High' }).waitFor();
   const after = await scrub(left);
@@ -903,6 +1113,35 @@ test('Escape drops the scrubber without changing the setup', async () => {
   assert.equal((await scrub(left)).open, false);
   await release(page);
   assert.equal((await scrub(left)).setup, before, 'a cancelled scrub commits nothing');
+});
+
+test('resting on the setup button names the shortcut, after a beat', async () => {
+  const { page, left } = await mountDock({ cover: 'left' });
+  await left.locator('input[name="agent"][value="fake"]').waitFor();
+  await withSetups(left);
+  await left.locator('.presets-more').waitFor();
+  const hint = () => left.evaluate((el) => {
+    const tip = el.shadowRoot.querySelector('.keytip');
+    return { open: Boolean(tip?.classList.contains('is-open')), text: tip?.textContent ?? '' };
+  });
+
+  await left.locator('.presets-more').hover();
+  // A tip that arrives the instant the pointer crosses the button is noise on
+  // the way to somewhere else; this one waits to be rested on.
+  assert.equal((await hint()).open, false, 'not on the way past');
+
+  await left.locator('.keytip').waitFor({ state: 'visible' });
+  const up = await hint();
+  assert.equal(up.open, true);
+  assert.match(up.text, /⌃⌥/);
+  assert.match(up.text, /model/);
+  assert.match(up.text, /effort/);
+  // It has the pane next door to clear, like every other floating thing here.
+  assert.equal(await left.evaluate((el) => el.shadowRoot.querySelector('.keytip').matches(':popover-open')), true);
+
+  await page.mouse.move(4, 4);
+  await left.locator('.keytip').waitFor({ state: 'hidden' });
+  assert.equal((await hint()).open, false, 'moving on takes it away');
 });
 
 test('the scrubber belongs to the chat that has focus', async () => {
@@ -1011,7 +1250,7 @@ test('Claude and Cursor presets become the main toggles', async () => {
     el.paintPresets({ initial: true });
     return [...el.shadowRoot.querySelectorAll('.preset span')].map((node) => node.textContent.trim());
   });
-  assert.deepEqual(names, ['Fable 5.1 High', 'Opus Extra High', 'Opus High', 'Sonnet High', 'Grok Extra High']);
+  assert.deepEqual(names, ['Fable 5.1 High', 'Opus High', 'Sonnet High', 'Grok Extra High']);
   assert.equal(await view.locator('.presets').isVisible(), true);
   assert.equal(await view.locator('.picker').isVisible(), false);
   assert.equal(await view.locator('input[name="preset"][value="sonnet-high"]').isChecked(), true);
@@ -1401,24 +1640,85 @@ test('two queued rows show the batch switch, and it is saved on the conversation
   assert.equal(await view.locator('.queued').getAttribute('data-combine'), '1');
 });
 
-test('while a turn runs the bar offers queue, steer and interrupt, and ⌘Enter steers', async () => {
+test('while a turn runs the bar offers queue and steer only, and ⌘Enter steers', async () => {
   const { page, view } = await mount();
   assert.equal(await view.locator('.bar .dispatch').isVisible(), false);
   await sendFrom(view, 'script:hold');
   await view.locator('button.stop').waitFor({ state: 'visible' });
   await view.locator('.bar .dispatch').waitFor({ state: 'visible' });
-  await pick(view, 'dispatch', 'interrupt');
+  const modes = await view.evaluate((el) => [...el.shadowRoot.querySelectorAll('input[name="dispatch"]')].map((i) => i.value));
+  assert.deepEqual(modes, ['queue', 'steer'], 'interrupt is not on offer');
+  await pick(view, 'dispatch', 'steer');
   await view.locator('.editor').fill('now');
   await view.locator('.editor').press('Enter');
   const id = await page.evaluate(() => document.querySelector('body > marble-conversation').getAttribute('conversation'));
-  await page.waitForFunction(async (cid) => (await window.marble.agent.conversation(cid)).turns.some((t) => t.dispatch === 'interrupt'), id);
+  await page.waitForFunction(async (cid) => (await window.marble.agent.conversation(cid)).turns.some((t) => t.dispatch === 'steer'), id);
+  await view.locator('button.stop').click();
   await view.locator('.turn-footer[data-status="cancelled"]').waitFor();
-  await view.locator('.turn-footer[data-status="completed"]').waitFor();
   await sendFrom(view, 'script:hold');
   await view.locator('button.stop').waitFor({ state: 'visible' });
   await view.locator('.editor').fill('nudge');
   await view.locator('.editor').press('Meta+Enter');
-  await page.waitForFunction(async (cid) => (await window.marble.agent.conversation(cid)).turns.some((t) => t.dispatch === 'steer'), id);
+  await page.waitForFunction(async (cid) => (await window.marble.agent.conversation(cid)).turns.filter((t) => t.dispatch === 'steer').length >= 2, id);
+});
+
+test('a queued row cycles between queue and steer, never interrupt', async () => {
+  const { page, view } = await mount();
+  await sendFrom(view, 'script:hold');
+  await view.locator('button.stop').waitFor({ state: 'visible' });
+  await sendFrom(view, 'later');
+  const row = view.locator('.queued-item');
+  await row.waitFor();
+  assert.equal(await row.getAttribute('data-dispatch'), 'queue');
+  await row.locator('.queued-dispatch').click();
+  await page.waitForFunction(() => document.querySelector('body > marble-conversation').shadowRoot.querySelector('.queued-item').dataset.dispatch === 'steer');
+  await row.locator('.queued-dispatch').click();
+  await page.waitForFunction(() => document.querySelector('body > marble-conversation').shadowRoot.querySelector('.queued-item').dataset.dispatch === 'queue');
+});
+
+test('a queued prompt is only the floating row, and joins the log when it starts', async () => {
+  const { page, view } = await mount();
+  await sendFrom(view, 'script:slow');
+  await view.locator('button.stop').waitFor({ state: 'visible' });
+  await view.locator('.msg.me').waitFor();
+  await sendFrom(view, 'waiting its turn');
+  await view.locator('.queued-item').waitFor();
+  // Two bubbles exist — log order is kept — but the queued one is not shown.
+  assert.equal(await view.locator('.msg.me').count(), 2);
+  assert.equal(await view.locator('.msg.me').nth(1).isVisible(), false);
+  assert.match(await view.locator('.queued-text').textContent(), /waiting its turn/);
+  // The stack floats over the foot of the log, so the log ends above it.
+  const room = await view.evaluate((el) => {
+    const log = el.shadowRoot.querySelector('.log');
+    const queued = el.shadowRoot.querySelector('.queued');
+    return {
+      foot: parseFloat(getComputedStyle(log).paddingBottom),
+      stack: Math.round(queued.getBoundingClientRect().height),
+    };
+  });
+  assert.ok(room.stack > 0, 'the stack has a height');
+  assert.ok(room.foot >= room.stack, `the log's foot (${room.foot}) clears the stack (${room.stack})`);
+  // Once it runs it is a message like any other, and the foot comes back.
+  await view.locator('.queued-item').waitFor({ state: 'detached' });
+  await page.waitForFunction(() => {
+    const el = document.querySelector('body > marble-conversation');
+    return el.shadowRoot.querySelectorAll('.msg.me')[1]?.dataset.waiting === undefined;
+  });
+  assert.equal(await view.locator('.msg.me').nth(1).isVisible(), true);
+  const foot = await view.evaluate((el) => parseFloat(getComputedStyle(el.shadowRoot.querySelector('.log')).paddingBottom));
+  assert.ok(foot < room.foot, 'the room under the log goes with the stack');
+});
+
+test('a prompt taken out of the queue leaves no bubble behind', async () => {
+  const { view } = await mount();
+  await sendFrom(view, 'script:slow');
+  await view.locator('button.stop').waitFor({ state: 'visible' });
+  await view.locator('.msg.me').waitFor();
+  await sendFrom(view, 'never mind');
+  await view.locator('.queued-item').waitFor();
+  await view.locator('.queued-item button.dequeue').click();
+  await view.locator('.queued-item').waitFor({ state: 'detached' });
+  assert.equal(await view.locator('.msg.me').count(), 1);
 });
 
 test('a refused edit is shown as refused, not as an error', async () => {
@@ -1546,14 +1846,16 @@ test('a box emptied by hand is the same height as one never typed in', async () 
   assert.equal(await editor.evaluate((el) => el.value), 'again');
 });
 
-test('the drawer shows used usage for Claude and Cursor', async () => {
+test('the drawer shows used usage for Claude and Fable', async () => {
   const { page } = await mount();
   await page.evaluate(() => window.marble.agent.open());
   const claude = page.locator('marble-agent-drawer .usage .meter[data-id="claude-subscription"]');
-  const cursor = page.locator('marble-agent-drawer .usage .meter[data-id="cursor"]');
+  const fable = page.locator('marble-agent-drawer .usage .meter[data-id="fable"]');
   await claude.waitFor();
   assert.match(await claude.textContent(), /23%/);
-  assert.match(await cursor.textContent(), /19%/);
+  assert.match(await fable.textContent(), /58%/);
+  // Two sliders, the same pair as the page's topbar: Cursor is in Settings.
+  assert.equal(await page.locator('marble-agent-drawer .usage .meter').count(), 2);
 });
 
 test('the conversation wears the document’s paper and ink', async () => {

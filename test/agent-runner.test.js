@@ -24,6 +24,19 @@ const SCRIPTS = {
   forgetful: [{ lostWhenResumed: 'No conversation found with session ID: x' }, { say: 'fresh' }],
   noop: [{ say: 'done' }],
   linger: [{ say: 'done' }, { lingerUntilEof: true }],
+  // A message sent while a subagent is still working: the result comes first,
+  // the subagent finishes after it, and the turn is over only then.
+  background: [
+    { say: 'dispatched' },
+    { bg: 'start', id: 'sub' },
+    { done: true },
+    { sleep: 700 },
+    { bg: 'end', id: 'sub' },
+    { say: 'the subagent finished' },
+    { lingerUntilEof: true },
+  ],
+  // A result, and then a process that neither reads its stdin nor takes SIGTERM.
+  stubbornResult: [{ ignoreTerm: true }, { say: 'answer' }, { done: true }, { hang: true }],
   permission: [{ ask: { tool: 'Bash', input: { command: 'rm -rf build' } } }, { say: 'after' }],
   question: [{ ask: { tool: 'AskUserQuestion', input: { questions: [{ question: 'A or B?', header: 'Pick', options: [{ label: 'A' }, { label: 'B' }], multiSelect: false }] } } }],
   // Sends one message to whoever is in $to (the test rewrites the script), then ends.
@@ -50,7 +63,7 @@ const SCRIPTS = {
   linger2: [{ sleep: 1500 }, { say: 'done lingering' }],
 };
 
-async function setup({ limits = {}, tools, realTools = null, onLook, capability, projects = null, onFinish = null, publishAsk = undefined, onPublish = null, origin = () => 'http://127.0.0.1:1' } = {}) {
+async function setup({ limits = {}, tools, realTools = null, onLook, capability, projects = null, onFinish = null, publishAsk = undefined, onPublish = null, nameConversation = null, origin = () => 'http://127.0.0.1:1' } = {}) {
   const dir = await fsp.mkdtemp(path.join(os.tmpdir(), 'marble-runner-'));
   const store = createAgentStore({ dir: path.join(dir, 'agents'), defaultProvider: 'fake' });
   await store.ready();
@@ -79,8 +92,8 @@ async function setup({ limits = {}, tools, realTools = null, onLook, capability,
     // `onPublish` is how a test makes the host fail underneath a turn: a
     // throw here reaches `send` through `emit`, which is the one unguarded
     // await in the path a delivery turn takes.
-    publish: (conversationId, event) => {
-      published.push({ conversationId, event });
+    publish: (conversationId, event, summary = null) => {
+      published.push({ conversationId, event, summary });
       onPublish?.(conversationId, event);
     },
     publishAsk,
@@ -88,6 +101,7 @@ async function setup({ limits = {}, tools, realTools = null, onLook, capability,
     log: { log() {}, error() {} },
     onLook,
     onFinish,
+    nameConversation,
   });
   await runner.boot();
   return { store, runner, published, toolCalls, spawned };
@@ -1184,6 +1198,28 @@ test('a process that waits for more input after its result is ended by the runne
   await runner.close();
 });
 
+test('a result while background work is outstanding is not the end of the turn', async () => {
+  const { store, runner } = await setup({ capability: 'full', limits: { settleMs: 50, killGraceMs: 50, backgroundSettleMs: 5_000 } });
+  const { id } = await store.createConversation({ provider: 'fake' });
+  await runner.send(id, { prompt: 'script:background', context: { target: 'garden' } });
+  const turn = await finished(store, `${id}-t1`);
+  assert.equal(turn.status, 'completed');
+  assert.equal(turn.error, null);
+  const said = (await store.events(id)).filter((e) => e.type === 'text').map((e) => e.text);
+  assert.ok(said.includes('the subagent finished'), said.join(' | '));
+  await runner.close();
+});
+
+test('a process the runner had to stop after its result still succeeded', async () => {
+  const { store, runner } = await setup({ capability: 'full', limits: { settleMs: 50, killGraceMs: 50 } });
+  const { id } = await store.createConversation({ provider: 'fake' });
+  await runner.send(id, { prompt: 'script:stubbornResult', context: { target: 'garden' } });
+  const turn = await finished(store, `${id}-t1`);
+  assert.equal(turn.status, 'completed', `error: ${turn.error}`);
+  assert.equal(turn.error, null);
+  await runner.close();
+});
+
 test('a steer that waited wraps the model prompt, not the user event', async () => {
   const { store, runner } = await setup();
   const { id } = await store.createConversation({ provider: 'fake' });
@@ -1525,5 +1561,82 @@ test('openAsks lists an open ask with its request, and forgets it once answered'
   assert.equal(runner.openAsks().length, 0);
   assert.deepEqual(asks.map((a) => a.kind), ['ask', 'ask.resolved']);
   await until(async () => (await store.turn(`${id}-t1`)).status === 'completed');
+  await runner.close();
+});
+
+// ---------------------------------------------------------------- naming
+
+test('a chat is named by a model once its first turn is over', async () => {
+  const asked = [];
+  const { store, runner, published } = await setup({
+    nameConversation: async (input) => {
+      asked.push(input);
+      return 'Fake Agent Says Hello';
+    },
+  });
+  const chat = await store.createConversation({ provider: 'fake' });
+  const { turnId } = await runner.send(chat.id, { prompt: 'script:hello', context: { target: 'd' } });
+  await finished(store, turnId);
+
+  // The placeholder is there the moment the prompt is stored.
+  const named = await until(async () => {
+    const meta = await store.conversation(chat.id);
+    return meta.title !== 'script:hello' ? meta : null;
+  });
+  assert.equal(named.title, 'Fake Agent Says Hello');
+  assert.equal(named.titleAuto, false, 'a name the model wrote is not replaced again');
+  assert.equal(asked.length, 1);
+  assert.equal(asked[0].prompt, 'script:hello');
+  assert.match(asked[0].reply, /Hello from the fake agent/);
+
+  // Lists hear about it without asking.
+  const meta = published.find((p) => p.conversationId === chat.id && p.event.type === 'meta');
+  assert.equal(meta.summary.title, 'Fake Agent Says Hello');
+  await runner.close();
+});
+
+test('a title the person typed is never written over', async () => {
+  let asked = 0;
+  const { store, runner } = await setup({
+    nameConversation: async () => { asked += 1; return 'A Model Name'; },
+  });
+  const chat = await store.createConversation({ provider: 'fake' });
+  await store.updateConversation(chat.id, { title: 'Mine', titleAuto: false });
+  const { turnId } = await runner.send(chat.id, { prompt: 'script:hello', context: { target: 'd' } });
+  await finished(store, turnId);
+  await new Promise((resolve) => setTimeout(resolve, 100));
+
+  assert.equal((await store.conversation(chat.id)).title, 'Mine');
+  assert.equal(asked, 0, 'a named chat is not worth a model call');
+  await runner.close();
+});
+
+test('a chat whose name could not be got keeps its placeholder, and is asked for once', async () => {
+  let asked = 0;
+  const { store, runner } = await setup({
+    nameConversation: async () => { asked += 1; return null; },
+  });
+  const chat = await store.createConversation({ provider: 'fake' });
+  const first = await runner.send(chat.id, { prompt: 'script:hello', context: { target: 'd' } });
+  await finished(store, first.turnId);
+  await until(async () => asked === 1);
+  const second = await runner.send(chat.id, { prompt: 'script:hello', context: { target: 'd' } });
+  await finished(store, second.turnId);
+  await new Promise((resolve) => setTimeout(resolve, 100));
+
+  assert.equal(asked, 1, 'asked once per conversation, not once per turn');
+  const meta = await store.conversation(chat.id);
+  assert.equal(meta.title, 'script:hello');
+  assert.equal(meta.titleAuto, true);
+  await runner.close();
+});
+
+test('a host with no namer leaves the placeholder alone', async () => {
+  const { store, runner } = await setup();
+  const chat = await store.createConversation({ provider: 'fake' });
+  const { turnId } = await runner.send(chat.id, { prompt: 'script:hello', context: { target: 'd' } });
+  await finished(store, turnId);
+  await new Promise((resolve) => setTimeout(resolve, 100));
+  assert.equal((await store.conversation(chat.id)).title, 'script:hello');
   await runner.close();
 });

@@ -33,6 +33,7 @@ const SOURCE = `<!doctype html>
 const config = loadConfig({
   ...process.env,
   MARBLE_DRIVE_AGENTS: '1',
+  MARBLE_DRIVE_AGENT_NAMING: '0',
   MARBLE_DRIVE_AGENT_PROVIDER: 'fake',
   MARBLE_DRIVE_AGENT_WORKDIR: WORK,
 });

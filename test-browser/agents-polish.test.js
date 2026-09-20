@@ -118,7 +118,7 @@ test('the view switch slides its thumb to the pressed view', async () => {
   assert.ok(at.dx < 1.5 && at.dw < 1.5, `thumb sits under Board (${JSON.stringify(at)})`);
 });
 
-test('a pane bar shortens its target before its title', async () => {
+test('a pane bar keeps its marks on the left and its name and controls on the right', async () => {
   const { page } = await openAgents({ viewport: { width: 1000, height: 800 } });
   await page.evaluate(async () => {
     const agent = window.marble.agent;
@@ -128,9 +128,22 @@ test('a pane bar shortens its target before its title', async () => {
   await page.locator('#list .conv').first().click();
   await page.locator('.pane > .dock-bar .dock-title').waitFor();
   await page.waitForTimeout(300);
-  const widths = await page.evaluate(() => ({
-    title: document.querySelector('.pane > .dock-bar .dock-title').getBoundingClientRect().width,
-    target: document.querySelector('.pane > .dock-bar .dock-target').getBoundingClientRect().width,
-  }));
-  assert.ok(widths.title >= 96, `the title keeps at least 6rem (${widths.title})`);
+  const bar = await page.evaluate(() => {
+    const el = document.querySelector('.pane > .dock-bar');
+    const at = (sel) => el.querySelector(sel)?.getBoundingClientRect() ?? null;
+    return {
+      width: el.getBoundingClientRect().width,
+      left: el.getBoundingClientRect().left,
+      overflow: el.scrollWidth - el.clientWidth,
+      dot: at('.dot'),
+      title: at('.dock-title'),
+      close: at('.dock-close'),
+      grip: el.querySelector('.dock-grip') ? true : false,
+    };
+  });
+  assert.equal(bar.grip, false, 'the bar is its own handle — no grip dots');
+  assert.ok(bar.dot.left - bar.left < 24, 'the status mark stays at the left edge');
+  assert.ok(bar.title.right <= bar.close.left + 1, 'the title sits against the controls');
+  assert.ok(bar.title.left - bar.left > bar.width / 3, `the title is pushed right (${bar.title.left - bar.left} of ${bar.width})`);
+  assert.equal(bar.overflow, 0, 'a long title shortens rather than pushing the controls out');
 });

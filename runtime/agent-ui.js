@@ -40,6 +40,10 @@
       -webkit-font-smoothing: antialiased;
     }
     @media (prefers-color-scheme: dark) {
+      .scrub {
+        --e-low: #8b9096; --e-medium: #7d9dc4; --e-high: #5d9bf0;
+        --e-xhigh: #8a7ff0; --e-max: #c07ff0;
+      }
       :host {
         --ink: #e8e6e1; --muted: #a3a7ab; --faint: #71767a; --line: #2f3438;
         --placeholder: #8d9296;
@@ -265,6 +269,11 @@
   /** Where a released gesture would come to rest (Apple's projection). */
   const project = (velocity, rate = 0.998) => ((velocity / 1000) * rate) / (1 - rate);
 
+  /** Past a boundary, things resist rather than stop: the further you drag, the
+   *  less of the drag the thing takes. A hard stop reads as frozen. */
+  const rubberband = (overshoot, dimension, constant = 0.55) =>
+    (overshoot * dimension * constant) / (dimension + constant * Math.abs(overshoot));
+
   // ------------------------------------------------------------ helpers
 
   const h = (tag, className, text) => {
@@ -374,7 +383,9 @@
     // Above the trigger when there is room, below when there is not.
     const above = a.top - pad - m.height;
     const top = above >= pad ? above : Math.min(a.bottom + pad, innerHeight - pad - m.height);
-    const want = align === 'center' ? a.left + a.width / 2 - m.width / 2 : a.right - m.width;
+    const want = align === 'center' ? a.left + a.width / 2 - m.width / 2
+      : align === 'start' ? a.left
+        : a.right - m.width;
     const left = Math.min(Math.max(pad, want), innerWidth - pad - m.width);
     menu.style.top = `${Math.max(pad, Math.round(top))}px`;
     menu.style.left = `${Math.round(left)}px`;
@@ -438,6 +449,12 @@
    *  AltGr reports as ctrl+alt, so typing one of its characters raises the
    *  scrubber for as long as the key is down. Both are the cost of the
    *  gesture the shortcut is; changing either means changing the pair. */
+  const SCRUB_KEYS = {
+    ArrowLeft: { axis: 'model', delta: -1 },
+    ArrowRight: { axis: 'model', delta: 1 },
+    ArrowDown: { axis: 'effort', delta: -1 },
+    ArrowUp: { axis: 'effort', delta: 1 },
+  };
   let scrubOpen = null;
   let scrubArmed = false;
   let lastFocusedChat = null;
@@ -465,16 +482,18 @@
     }, true);
     document.addEventListener('keydown', (event) => {
       if (event.metaKey || !event.ctrlKey || !event.altKey) return;
-      const arrow = event.key === 'ArrowLeft' || event.key === 'ArrowRight';
+      // Sideways is the model, up and down is how hard it works.
+      const step = SCRUB_KEYS[event.key];
       // Anything else held with the pair is somebody else's shortcut.
-      if (!arrow && event.key !== 'Control' && event.key !== 'Alt') return;
+      if (!step && event.key !== 'Control' && event.key !== 'Alt') return;
       const target = scrubTarget();
       if (!target?.openScrub?.()) return;
-      if (!arrow) return;
+      if (!step) return;
       // Or the caret walks the prompt underneath while the scrubber moves.
       event.preventDefault();
       event.stopPropagation();
-      target.moveScrub(event.key === 'ArrowRight' ? 1 : -1);
+      if (step.axis === 'model') target.moveScrub(step.delta);
+      else target.tuneScrub(step.delta);
     }, true);
     document.addEventListener('keyup', (event) => {
       if (!scrubOpen) return;
@@ -486,6 +505,62 @@
     // Tabbing away never delivers the keyup, so without this the scrubber is
     // still up — and still holding the keys down — when you come back.
     addEventListener('blur', () => scrubOpen?.closeScrub());
+  };
+  /** A shortcut nobody can see is a shortcut nobody uses, and a line of help
+   *  standing permanently under the bar would cost more than it teaches. So
+   *  it waits: rest on the setup button long enough to have been looking for
+   *  something, and the keys are named. Moving on takes it away.
+   *  Raised like the sheets are, for the same reason — it has the pane next
+   *  door to clear. */
+  const HINT_DELAY = 750;
+  let hintEl = null;
+  const hideHint = () => {
+    if (!hintEl) return;
+    const tip = hintEl;
+    hintEl = null;
+    tip.classList.remove('is-open');
+    clearTimeout(tip._unfloat);
+    tip._unfloat = setTimeout(() => {
+      if (tip.classList.contains('is-open')) return;
+      dropMenu(tip);
+      unfloatMenu(tip);
+    }, reduceMotion() ? 0 : MENU_MS + 60);
+  };
+  const showHint = (anchor, tip) => {
+    if (!anchor?.isConnected || hintEl === tip) return;
+    hideHint();
+    hintEl = tip;
+    tip.classList.add('is-open');
+    clearTimeout(tip._unfloat);
+    raiseMenu(tip);
+    // Left edges together, not centred: a tip wider than the little button it
+    // describes would otherwise hang off the pane beside it.
+    floatMenu(anchor, tip, { align: 'start', hug: false });
+  };
+  /** Hook a trigger up to its own tip. The tip lives beside the trigger so it
+   *  keeps the conversation's styles; only the top layer is borrowed. */
+  const armHint = (anchor, text) => {
+    if (!anchor || anchor.dataset.hinted) return;
+    anchor.dataset.hinted = '1';
+    const tip = asPopover(h('div', 'keytip'));
+    tip.setAttribute('role', 'tooltip');
+    tip.textContent = text;
+    anchor.after(tip);
+    let timer = null;
+    const cancel = () => {
+      clearTimeout(timer);
+      timer = null;
+      if (hintEl === tip) hideHint();
+    };
+    anchor.addEventListener('pointerenter', (event) => {
+      // A finger has no hover, and a tip it cannot dismiss would sit there.
+      if (event.pointerType === 'touch') return;
+      clearTimeout(timer);
+      timer = setTimeout(() => showHint(anchor, tip), HINT_DELAY);
+    });
+    anchor.addEventListener('pointerleave', cancel);
+    anchor.addEventListener('pointerdown', cancel);
+    anchor.addEventListener('blur', cancel);
   };
   const collapseSegBox = (box) => {
     if (!box) return;
@@ -738,6 +813,7 @@
         toggleSegBox(track);
       });
       track.append(more);
+      armHint(more, 'Hold ⌃⌥ · ← → model, ↑ ↓ effort');
     }
     if (!menu) {
       menu = asPopover(document.createElement('div'));
@@ -859,13 +935,52 @@
     cursor: '<svg class="brand" viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" d="M3.2 2.4 20.6 12 11.4 13.7 9.5 21.6z"/></svg>',
   };
   const PRESETS = [
+    // Opus Extra High is not a setup of its own any more: the scrubber tunes
+    // effort on its own axis, so it is Opus with one press of ↑.
     { id: 'fable-high', provider: 'claude-subscription', model: 'fable', effort: 'high', name: 'Fable 5.1 High', brand: 'anthropic' },
-    { id: 'opus-xhigh', provider: 'claude-subscription', model: 'opus', effort: 'xhigh', name: 'Opus Extra High', brand: 'anthropic' },
     { id: 'opus-high', provider: 'claude-subscription', model: 'opus', effort: 'high', name: 'Opus High', brand: 'anthropic' },
     { id: 'sonnet-high', provider: 'claude-subscription', model: 'sonnet', effort: 'high', name: 'Sonnet High', brand: 'anthropic' },
     { id: 'grok-xhigh', provider: 'cursor', model: 'cursor-grok-4.6', effort: 'xhigh', name: 'Grok Extra High', brand: 'cursor' },
   ];
   const EFFORT_WORD = { low: 'Low', medium: 'Medium', high: 'High', xhigh: 'Extra High', max: 'Max' };
+  /** Every effort word stacked in one grid cell, only the current one lit.
+   *  Two things fall out of that. The cell is always as wide as the longest
+   *  word, so "Low" and "Extra High" take the same room and the model name
+   *  beside them never shifts — which is what it did when this was one span
+   *  being rewritten. And both words are on screen at the switch, so the old
+   *  one can leave while the new one arrives instead of blinking. */
+  const effortStack = (efforts, className = 'scrub-effort') => {
+    const stack = h('span', className);
+    for (const id of efforts ?? []) {
+      const word = h('i', `e-${id}`, EFFORT_WORD[id] ?? id);
+      word.dataset.effort = id;
+      stack.append(word);
+    }
+    return stack;
+  };
+  /** Light a stack or a gauge at `effort`. A stack lights exactly one child;
+   *  a gauge lights every bar up to it, so `steps` says which those are. */
+  const lightEffort = (el, effort, steps = null) => {
+    if (!el) return;
+    el.dataset.at = effort ?? '';
+    const upto = steps ? steps.indexOf(effort) : -1;
+    [...el.children].forEach((child, index) => {
+      child.classList.toggle('is-on', steps ? index <= upto : child.dataset.effort === effort);
+    });
+  };
+  /** Five bars, lit to the effort. `--i` staggers them so the gauge fills
+   *  along its length rather than all at once. */
+  const effortGauge = (efforts) => {
+    const gauge = h('span', 'scrub-gauge');
+    (efforts ?? []).forEach((id, index) => {
+      const bar = h('i', `e-${id}`);
+      bar.dataset.effort = id;
+      bar.style.setProperty('--i', String(index));
+      bar.style.height = `${3 + index * 1.6}px`;
+      gauge.append(bar);
+    });
+    return gauge;
+  };
   /** A preset's name with its effort taken off the end, so a scrubber stop can
    *  set the model over the effort on two tight lines. "Opus Extra High" is
    *  "Opus" over "Extra High"; a name that does not end in its own effort is
@@ -1066,6 +1181,9 @@
       .meter[data-tone="yellow"] .meter-bar i { background: #e0c056; }
       .meter[data-tone="orange"] .meter-bar i { background: #e08a4a; }
     }
+    /* Held, not live: the number is real but nobody could refresh it. */
+    .meter[data-stale] .meter-pct { opacity: .65; }
+    .meter[data-stale] .meter-bar i { opacity: .55; }
     @media (prefers-reduced-motion: reduce) {
       .meter-bar i { transition: none; }
     }
@@ -1108,6 +1226,19 @@
     if (diff === day) return `Resets tomorrow, ${time}`;
     const when = date.toLocaleDateString(undefined, { weekday: 'short', month: 'short', day: 'numeric' });
     return `Resets ${when}, ${time}`;
+  };
+
+  // A remembered reading is still a reading; it just needs a date on it. The
+  // host serves the last good numbers when the usage API refuses to answer,
+  // so the bar keeps its shape and the tooltip says how old it is.
+  const formatAsOf = (value, now = new Date()) => {
+    const date = parseReset(value);
+    if (!date) return 'Last known';
+    const mins = Math.round((now - date) / 60_000);
+    if (mins < 2) return 'As of just now';
+    if (mins < 60) return `As of ${mins} min ago`;
+    const time = date.toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' });
+    return mins < 60 * 20 ? `As of ${time}` : `As of ${date.toLocaleDateString(undefined, { month: 'short', day: 'numeric' })}, ${time}`;
   };
 
   const TIP_CSS = `
@@ -1181,16 +1312,27 @@
     });
   };
 
-  // The strip shows one slider per provider, plus Fable's weekly window beside
-  // Claude's. Its id is 'fable', not 'claude-*': the composer finds the Claude
-  // meter by that prefix. The popup reads the window off the Claude meter.
-  const compactMeters = (meters) => (meters ?? []).flatMap((meter) => {
-    const fable = usageAvailable(meter) ? (meter.windows ?? []).find((item) => item.id === 'fable') : null;
-    if (!fable) return [meter];
-    return [meter, {
-      id: 'fable', label: fable.label, available: true, used: fable.used, left: fable.left, window: 'week', resetsAt: fable.resetsAt,
-    }];
-  });
+  // The strip is two sliders and always two: Claude's own window and Fable's
+  // beside it. They are the pair you spend, so they are the pair that belongs
+  // in the chrome — every other provider keeps its meters in Settings › Usage
+  // and in the phone's Fleet sheet. Drawing both even when the host cannot
+  // read one is the point: a slider that disappears takes the row's shape with
+  // it, and "no Claude bar" reads as "no usage" rather than "not known".
+  // Fable's id is 'fable', not 'claude-*': the composer finds the Claude meter
+  // by that prefix. The popup reads the window off the Claude meter.
+  const claudeMeterOf = (meters) => (meters ?? [])
+    .find((meter) => meter?.id === 'claude-subscription' || String(meter?.id ?? '').startsWith('claude'));
+
+  const compactMeters = (meters) => {
+    const claude = claudeMeterOf(meters)
+      ?? { id: 'claude-subscription', label: 'Claude', available: false, detail: 'Unavailable' };
+    const fable = usageAvailable(claude) ? (claude.windows ?? []).find((item) => item.id === 'fable') : null;
+    // Fable rides on the Claude reading, so it is exactly as stale as that one.
+    return [claude, fable ? {
+      id: 'fable', label: fable.label || 'Fable', available: true, used: fable.used, left: fable.left, window: 'week', resetsAt: fable.resetsAt,
+      ...(claude.stale ? { stale: true, at: claude.at ?? null } : {}),
+    } : { id: 'fable', label: 'Fable', available: false, detail: claude.detail || 'Unavailable' }];
+  };
 
   const fillMeters = (host, meters) => {
     if (!host) return;
@@ -1207,7 +1349,12 @@
       el.setAttribute('aria-valuemax', '100');
       if (ready) el.setAttribute('aria-valuenow', String(used));
       else el.setAttribute('aria-disabled', 'true');
-      const reset = ready ? formatReset(meter.resetsAt) : (meter.detail || 'Unavailable');
+      if (meter.stale) el.dataset.stale = '1';
+      const reset = !ready
+        ? (meter.detail || 'Unavailable')
+        : (meter.stale
+          ? [formatAsOf(meter.at), formatReset(meter.resetsAt)].filter(Boolean).join(' · ')
+          : formatReset(meter.resetsAt));
       if (reset) el.dataset.resetText = reset;
       const bar = h('span', 'meter-bar');
       const fill = document.createElement('i');
@@ -1544,7 +1691,7 @@
        its bar — two panes side by side should both say what they are — and
        only gives up padding. */
     :host([data-chrome="tile"]) .composer { --edge: 8px; padding: 4px var(--edge) 8px; }
-    :host([data-chrome="tile"]) .log { padding: 6px 12px 12px; }
+    :host([data-chrome="tile"]) .log { padding: 6px 12px calc(12px + var(--queued-space, 0px)); }
     :host([data-chrome="tile"]) .mast { padding: 6px 12px 6px; }
     /* A callout is the conversation drawn at the region it is about. The
        card around it carries the title, the status and the moves, so the
@@ -1557,7 +1704,7 @@
     :host([data-chrome="callout"]) .target-jump,
     :host([data-chrome="callout"]) .zone-jump,
     :host([data-chrome="callout"]) .also { display: none; }
-    :host([data-chrome="callout"]) .log { flex: 0 1 auto; padding: 6px 12px 10px; max-height: min(50vh, 360px); overflow-y: auto; }
+    :host([data-chrome="callout"]) .log { flex: 0 1 auto; padding: 6px 12px calc(10px + var(--queued-space, 0px)); max-height: min(50vh, 360px); overflow-y: auto; }
     :host([data-chrome="callout"][data-folded]) .log { display: none; }
     .ticker { display: none; }
     :host([data-chrome="callout"]) .ticker:not([hidden]) {
@@ -1567,11 +1714,11 @@
     }
     :host([data-chrome="callout"]) .ticker:hover { color: var(--ink); }
     :host([data-chrome="callout"]) .composer { --edge: 10px; padding: 4px var(--edge) 10px; }
-    /* A phone shows one conversation, full screen. The mast folds to a line,
-       the transcript takes the width, and type is the size a thumb reads. */
-    :host([data-chrome="phone"]) .mast { padding: 6px 14px 6px; gap: 2px; }
-    :host([data-chrome="phone"]) .heading { font-size: 15px; }
-    :host([data-chrome="phone"]) .log { padding: 8px 14px 12px; font-size: 17px; line-height: 1.45; }
+    /* A phone shows one conversation, full screen. The mast folds to one line
+       — the fold and the thumb-sized controls are at the foot of this sheet,
+       after the rules they override — the transcript takes the width, and
+       type is the size a thumb reads. */
+    :host([data-chrome="phone"]) .log { padding: 8px 14px calc(12px + var(--queued-space, 0px)); font-size: 17px; line-height: 1.45; }
     :host([data-chrome="phone"]) .composer { --edge: 10px; padding: 6px var(--edge) calc(8px + env(safe-area-inset-bottom, 0px)); }
     :host([data-chrome="phone"]) .msg { max-width: none; }
     /* A pane that is not the focused one steps back: the page dims its
@@ -1588,9 +1735,38 @@
     .heading:focus { background: var(--card); box-shadow: 0 0 0 1px var(--accent), 0 0 0 4px var(--accent-soft); }
     .tags { display: flex; flex-wrap: wrap; gap: 4px; }
     .tags:empty { display: none; }
+    /* Tags and the document this chat is working in share one line: they are
+       the same kind of fact about the conversation — what it is running as,
+       and where it lands. The link wraps to its own line before it truncates
+       away, so a deep path is still readable. */
+    .mast-meta { display: flex; align-items: center; flex-wrap: wrap; gap: 4px 8px; min-width: 0; }
+    /* A way out of this chat, so it wears a link's colour and the arrow that
+       leaves its box. It is the document the agent is working in — the one
+       name in the mast that is somewhere else. */
+    .target-jump {
+      display: inline-flex; align-items: center; gap: 4px; min-width: 0; max-width: 100%;
+      font-size: 11.5px; line-height: 1.35; color: var(--accent-ink); text-decoration: none;
+      padding: 1px 5px; margin: -1px -5px; border-radius: 6px;
+      transition: background-color .13s var(--snap), color .13s var(--snap);
+    }
+    .target-jump[hidden] { display: none; }
+    .target-jump .target-what { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .target-jump .target-out { flex: none; display: inline-flex; opacity: .7; }
+    .target-jump .target-out[hidden] { display: none; }
+    .target-jump:hover, .target-jump:focus-visible { background: var(--paper-2); color: var(--ink); outline: none; }
+    .target-jump:hover .target-out, .target-jump:focus-visible .target-out { opacity: 1; }
+    /* A pane hides its mast when there is nothing on it; the target is something. */
+    :host([data-chrome="pane"]) .mast:not([hidden]):has(.target-jump:not([hidden])) { display: flex; }
     ${TAG_CSS}
-    .log { flex: 1; min-height: 0; overflow-y: auto; padding: 8px 18px 16px; display: flex; flex-direction: column; gap: 0; overscroll-behavior: contain; }
+    /* --queued-space is how tall the floating queue is at this moment. The
+       stack hovers over the foot of the log, so the log has to end that much
+       higher: without the room, the last thing said sits under the stack and
+       there is nothing left to scroll. */
+    .log { flex: 1; min-height: 0; overflow-y: auto; padding: 8px 18px calc(16px + var(--queued-space, 0px)); display: flex; flex-direction: column; gap: 0; overscroll-behavior: contain; }
     .msg { max-width: none; overflow-wrap: anywhere; }
+    /* A prompt still waiting is the floating row and nothing else. Its bubble
+       is made here, in log order, and held back until the turn starts. */
+    .msg.me[data-waiting] { display: none; }
     .msg.me {
       align-self: stretch; background: var(--paper-2); color: var(--ink);
       padding: 10px 12px; border-radius: 10px; margin: 14px 0 8px; font-weight: 500;
@@ -1618,8 +1794,13 @@
     .tool[data-state="pending"]::before { background: var(--accent); animation: pulse 1.2s var(--snap) infinite; }
     .tool[data-state="done"]::before { background: var(--accent-ink); }
     .tool[data-state="refused"] { color: var(--caution); } .tool[data-state="refused"]::before { background: var(--caution); }
+    /* A line of text you can tap. It is a button because on a phone it opens
+       the list of who else is in here — everywhere else it is just the line,
+       so none of the UA's button chrome comes with it. */
+    .also { appearance: none; -webkit-appearance: none; border: 0; background: none; padding: 0; margin: 0; font: inherit; text-align: left; cursor: default; }
     .mast .also { font-size: 11.5px; color: var(--faint); margin-top: 2px; }
     .mast .also[hidden] { display: none; }
+    .also-short { display: none; }
     /* Where this conversation's hands are. It wears the agent's own violet —
        the same one the construction zone draws itself in on the document — so
        the row and the box on the page are visibly one thing, and neither is
@@ -1787,10 +1968,10 @@
     .scrub {
       display: none; position: fixed; z-index: 13;
       margin: 0; color: inherit; width: auto; height: auto;
-      flex-direction: column; gap: 9px; padding: 11px 14px 9px; overflow: visible;
-      background: color-mix(in srgb, var(--card) 94%, transparent);
-      border: 1px solid var(--line); border-radius: 16px;
-      box-shadow: var(--shadow-lift); backdrop-filter: blur(16px); -webkit-backdrop-filter: blur(16px);
+      flex-direction: column; gap: 7px; padding: 8px 12px 7px; overflow: visible;
+      background: var(--card);
+      border: 1px solid var(--line); border-radius: 11px;
+      box-shadow: var(--shadow-rest);
       opacity: 0; transform: translateY(6px) scale(.94); transform-origin: 50% 100%;
       transition: opacity .12s var(--snap), transform .12s var(--snap), display .12s allow-discrete, overlay .12s allow-discrete;
     }
@@ -1802,33 +1983,99 @@
       .scrub.is-open { opacity: 0; transform: translateY(6px) scale(.94); }
     }
     .scrub-now {
-      display: flex; align-items: center; justify-content: center; gap: 6px;
-      font-size: 13px; font-weight: 600; color: var(--ink); white-space: nowrap;
+      display: flex; align-items: center; justify-content: center; gap: 5px;
+      font-size: 11px; white-space: nowrap; line-height: 1.3;
     }
-    .scrub-now .brand { width: 13px; height: 13px; flex: none; }
-    .scrub-track { position: relative; display: flex; align-items: flex-start; min-width: 252px; }
-    .scrub-rail, .scrub-fill { position: absolute; top: 3px; height: 2px; border-radius: 2px; left: calc(50% / var(--n)); }
+    .scrub-model { display: inline-flex; align-items: center; gap: 4px; font-weight: 600; color: var(--ink); }
+    .scrub-model .brand { width: 11px; height: 11px; flex: none; }
+    /* Effort has a colour, and the colour is the scale: grey at the bottom,
+       through a true blue, into indigo, and out at a weighted purple. The
+       word, the bars beside it and the word under each model name all read
+       from the same five, so "how hard" is one thing you learn once. */
+    .scrub {
+      --e-low: #8a8a8a; --e-medium: #5b7fa6; --e-high: #2f6fd0;
+      --e-xhigh: #4b3fbd; --e-max: #7b2fb8;
+    }
+    .scrub [data-at="low"] { --e: var(--e-low); --e-weight: 500; }
+    .scrub [data-at="medium"] { --e: var(--e-medium); --e-weight: 500; }
+    .scrub [data-at="high"] { --e: var(--e-high); --e-weight: 600; }
+    .scrub [data-at="xhigh"] { --e: var(--e-xhigh); --e-weight: 600; }
+    .scrub [data-at="max"] { --e: var(--e-max); --e-weight: 700; }
+    /* Every word of the scale in one grid cell, so the cell is as wide as the
+       longest of them whichever is showing and the model name beside it never
+       moves — which is what it did when this was one span being rewritten.
+       Both words are also on screen at the switch, so the one being replaced
+       can sink out while the new one rises in. */
+    .scrub-effort, .scrub-stop-effort { display: inline-grid; justify-items: center; align-items: center; }
+    .scrub-effort[hidden], .scrub-stop-effort[hidden] { display: none; }
+    .scrub-effort > i, .scrub-stop-effort > i {
+      grid-area: 1 / 1; font-style: normal; white-space: nowrap;
+      color: var(--e, var(--muted));
+      /* The words that are not showing still size the cell, and they hold it
+         at the heaviest weight on the scale. Bolder text is wider text, so
+         without this the cell breathed by a pixel as the weight animated and
+         the model name walked along with it. */
+      font-weight: 700;
+      opacity: 0; transform: translateY(3px);
+      transition: opacity .16s var(--settle), transform .18s var(--settle),
+        color .2s var(--snap), font-weight .2s var(--snap);
+    }
+    .scrub-effort > i.is-on, .scrub-stop-effort > i.is-on {
+      opacity: 1; transform: none; font-weight: var(--e-weight, 500);
+    }
+    .scrub-stop-effort > i { font-size: 9px; }
+    /* A stop you are not on still says what it is remembering, but quietly:
+       at full strength a purple Max two stops away pulls harder than the
+       choice you are actually making. */
+    .scrub-stop-effort { opacity: .5; transition: opacity .16s var(--snap); }
+    .scrub-stop.is-at .scrub-stop-effort { opacity: 1; }
+    /* The second axis, said in the smallest thing that can say it: five bars,
+       filled to where the effort is. Up and down are legible from a shape
+       that already means more and less; a line of prose would be louder than
+       the control. They light along their length rather than all at once. */
+    .scrub-gauge { display: inline-flex; align-items: flex-end; gap: 1px; height: 11px; margin-left: 1px; }
+    .scrub-gauge[hidden] { display: none; }
+    .scrub-gauge > i {
+      width: 2px; border-radius: 1px; background: var(--paper-3);
+      transition: background-color .2s var(--snap) calc(var(--i, 0) * 22ms);
+    }
+    .scrub-gauge > i.is-on { background: var(--e, var(--accent-ink)); }
+    .scrub-track { position: relative; display: flex; align-items: flex-start; min-width: 198px; }
+    .scrub-rail, .scrub-fill { position: absolute; top: 2px; height: 2px; border-radius: 2px; left: calc(50% / var(--n)); }
     .scrub-rail { right: calc(50% / var(--n)); background: var(--paper-3); }
     .scrub-fill { width: 0; background: var(--accent); transition: width .24s var(--settle); }
     .scrub-knob {
-      position: absolute; top: 0; left: calc(50% / var(--n)); margin-left: -4px;
-      width: 8px; height: 8px; border-radius: 999px; background: var(--ink);
-      box-shadow: 0 0 0 3px color-mix(in srgb, var(--card) 85%, transparent);
+      position: absolute; top: -1px; left: calc(50% / var(--n)); margin-left: -3px;
+      width: 6px; height: 6px; border-radius: 999px; background: var(--ink);
+      box-shadow: 0 0 0 2.5px var(--card);
       transition: transform .24s var(--settle);
     }
-    .scrub-stop { flex: 1 1 0; min-width: 0; display: flex; flex-direction: column; align-items: center; gap: 7px; padding: 0 3px; }
-    .scrub-dot { width: 4px; height: 4px; margin-top: 2px; border-radius: 999px; background: var(--paper-3); transition: background-color .16s var(--snap); }
+    .scrub-stop { flex: 1 1 0; min-width: 0; display: flex; flex-direction: column; align-items: center; gap: 4px; padding: 0 3px; }
+    .scrub-dot { width: 4px; height: 4px; margin-top: 1px; border-radius: 999px; background: var(--paper-3); transition: background-color .16s var(--snap); }
     /* The knob is standing on it. */
     .scrub-stop.is-at .scrub-dot { background: transparent; }
-    .scrub-name { display: flex; flex-direction: column; align-items: center; gap: 1px; min-width: 0; }
-    .scrub-name b { font-size: 11px; font-weight: 500; color: var(--muted); white-space: nowrap; transition: color .16s var(--snap); }
-    .scrub-name i { font-size: 10px; font-style: normal; color: var(--faint); white-space: nowrap; transition: color .16s var(--snap); }
-    .scrub-stop.is-at .scrub-name b { color: var(--ink); font-weight: 600; }
-    .scrub-stop.is-at .scrub-name i { color: var(--muted); }
-    .scrub-hint { font-size: 10px; color: var(--faint); text-align: center; }
+    .scrub-name { font-size: 10px; font-weight: 500; color: var(--faint); white-space: nowrap; transition: color .16s var(--snap); }
+    .scrub-stop.is-at .scrub-name { color: var(--ink); }
+    .keytip {
+      display: none; position: fixed; z-index: 14;
+      margin: 0; width: auto; height: auto; overflow: visible;
+      padding: 4px 8px; border: 1px solid var(--line); border-radius: 7px;
+      background: var(--card); color: var(--muted); box-shadow: var(--shadow-rest);
+      font-size: 10px; font-weight: 500; white-space: nowrap; pointer-events: none;
+      opacity: 0; transform: translateY(3px); transform-origin: 50% 100%;
+      transition: opacity .1s var(--snap), transform .1s var(--snap), display .1s allow-discrete, overlay .1s allow-discrete;
+    }
+    .keytip.is-open {
+      display: block; opacity: 1; transform: none;
+      transition: opacity .14s var(--settle), transform .14s var(--settle), display .14s allow-discrete, overlay .14s allow-discrete;
+    }
+    @starting-style {
+      .keytip.is-open { opacity: 0; transform: translateY(3px); }
+    }
     @media (prefers-reduced-motion: reduce) {
       .scrub, .scrub.is-open { transition: none; transform: none; }
       .scrub-fill, .scrub-knob { transition: none; }
+      .keytip, .keytip.is-open { transition: none; transform: none; }
     }
     .custom-toggle {
       appearance: none; border: 0; background: none; color: var(--muted);
@@ -2159,6 +2406,161 @@
     .tool-group-body { display: flex; flex-direction: column; padding-left: 13px; }
     .tool-group-body[hidden] { display: none; }
 
+    /* ----------------------------------------------------------- the phone
+       Last in the sheet because every rule here overrides one above it. A
+       phone is one conversation, full screen, under a topbar that is already
+       the conversation's header: the title, the status and the ⋯ are up
+       there. So the mast keeps only what the topbar has no room for — where
+       the work lands, what it runs as, who else is in there — on one 36px
+       line, and the composer's settings fold into a single chip. */
+    :host([data-chrome="phone"]) .mast {
+      flex-direction: row; align-items: center; gap: 8px;
+      box-sizing: border-box; min-height: 36px; max-height: 36px; padding: 4px 14px;
+    }
+    /* The title is in the topbar. Two of them is one too many. */
+    :host([data-chrome="phone"]) .heading { display: none; }
+    :host([data-chrome="phone"]) .mast-meta { flex: 1 1 auto; flex-wrap: nowrap; gap: 8px; }
+    :host([data-chrome="phone"]) .tags { flex-wrap: nowrap; overflow: hidden; }
+    :host([data-chrome="phone"]) .zone-jump { align-self: center; flex: none; max-width: 40%; margin-top: 0; }
+    /* 44pt of thumb on a line of 13px type: the padding is the target and the
+       negative margin hands the height back to the row, so the mast is still
+       one 36px line and the link is still something a finger can hit. */
+    :host([data-chrome="phone"]) .target-jump {
+      box-sizing: border-box; min-height: 44px; font-size: 13px;
+      padding: 0 8px; margin: -8px -8px;
+    }
+    /* "Also working here: 3 — a, b, c" wraps to two lines and is most of the
+       mast. The count is the fact; the names are a tap away, in the page's own
+       sheet, because the page is what can open one of them. */
+    :host([data-chrome="phone"]) .mast .also {
+      flex: none; display: inline-flex; align-items: center; box-sizing: border-box;
+      min-height: 44px; padding: 0 2px; margin: -8px 0; cursor: pointer;
+    }
+    :host([data-chrome="phone"]) .mast .also[hidden] { display: none; }
+    :host([data-chrome="phone"]) .also-long { display: none; }
+    :host([data-chrome="phone"]) .also-short {
+      display: inline-flex; align-items: center; height: 22px; padding: 0 9px;
+      border-radius: 999px; background: var(--paper-2); box-shadow: inset 0 0 0 1px var(--line);
+      color: var(--muted); font-size: 11.5px; font-weight: 500; white-space: nowrap;
+    }
+    :host([data-chrome="phone"]) .also:active .also-short { background: var(--paper-3); transition: background-color 100ms ease-out; }
+    /* The setup row is a line of 21px words; a thumb cannot hit any of them.
+       It folds into one chip that says what this turn will run as, and comes
+       back as a sheet when you tap it. */
+    :host([data-chrome="phone"]) .bar > .setup, :host([data-chrome="phone"]) .bar > .mode { display: none; }
+    /* A 40pt chip in a 44pt target: the weight the eye wants and the box a
+       thumb needs are not the same rectangle. */
+    :host([data-chrome="phone"]) .setup-chip {
+      order: -1; display: inline-flex; align-items: center;
+      flex: 0 1 auto; min-width: 0; max-width: 72%;
+      box-sizing: border-box; height: 44px; padding: 0; margin: 0;
+      appearance: none; border: 0; background: none; box-shadow: none; cursor: pointer;
+      font: inherit; font-size: 14px; font-weight: 500; color: var(--muted);
+    }
+    :host([data-chrome="phone"]) .setup-chip-what {
+      display: block; box-sizing: border-box; height: 40px; line-height: 40px; padding: 0 14px;
+      border-radius: 999px; background: var(--paper-2); box-shadow: inset 0 0 0 1px var(--line);
+    }
+    :host([data-chrome="phone"]) .setup-chip:active .setup-chip-what { background: var(--paper-3); transition: background-color 100ms ease-out; }
+    .setup-chip { display: none; }
+    .setup-chip[hidden] { display: none; }
+    .setup-chip-what { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    /* 44 × 44 of target around a 32px disc: the geometry a finger needs and
+       the weight the eye wants are not the same box. */
+    :host([data-chrome="phone"]) .send, :host([data-chrome="phone"]) .stop {
+      position: relative; width: 44px; height: 44px; background: none; box-shadow: none;
+    }
+    :host([data-chrome="phone"]) .send::before, :host([data-chrome="phone"]) .stop::before {
+      content: ''; position: absolute; left: 6px; top: 6px; width: 32px; height: 32px;
+      border-radius: 50%; transition: background-color 180ms var(--settle), box-shadow 180ms var(--settle);
+    }
+    :host([data-chrome="phone"]) .send > *, :host([data-chrome="phone"]) .stop > * { position: relative; z-index: 1; }
+    :host([data-chrome="phone"]) .send::before { box-shadow: inset 0 0 0 1px var(--line); }
+    :host([data-chrome="phone"]) .send:not(:disabled) { background: none; }
+    :host([data-chrome="phone"]) .send:not(:disabled)::before { background: var(--ink); box-shadow: none; }
+    :host([data-chrome="phone"]) .send:not(:disabled):active::before { background: color-mix(in srgb, var(--ink) 68%, var(--paper)); }
+    :host([data-chrome="phone"]) .stop { background: none; }
+    :host([data-chrome="phone"]) .stop::before { background: var(--paper-2); box-shadow: inset 0 0 0 1px var(--line); }
+    :host([data-chrome="phone"]) .stop:active::before { background: var(--paper-3); }
+    :host([data-chrome="phone"]) .commit { gap: 2px; }
+    :host([data-chrome="phone"]) .editor { min-height: 44px; font-size: 17px; padding: 10px 0; }
+    :host([data-chrome="phone"]) .attach { min-height: 44px; }
+    /* The sheet the chip opens. It is inside the shadow root because the
+       controls in it are this conversation's own — moved, never rebuilt, so a
+       pick made down here is the pick the composer already had. It reads --kb
+       because a sheet that the keyboard covers is a sheet you cannot use. */
+    .setup-scrim {
+      position: fixed; inset: 0; z-index: 40; background: rgba(0, 0, 0, .28);
+      opacity: calc(1 - var(--at, 1));
+    }
+    .setup-scrim[hidden] { display: none; }
+    .setup-sheet {
+      position: fixed; left: 0; right: 0; bottom: var(--kb, 0px); z-index: 41;
+      display: flex; flex-direction: column; box-sizing: border-box;
+      max-height: min(calc(var(--vv-h, 100vh) * .72), 520px); overflow-y: auto; overscroll-behavior: contain;
+      touch-action: pan-y;
+      padding: 0 16px calc(16px + env(safe-area-inset-bottom, 0px));
+      background: var(--card); color: var(--ink);
+      border-radius: 18px 18px 0 0;
+      box-shadow: 0 -1px 0 var(--line), 0 -18px 44px rgba(0, 0, 0, .18);
+      transform: translateY(calc(var(--at, 1) * 100%));
+      will-change: transform;
+    }
+    .setup-sheet[hidden] { display: none; }
+    .setup-handle { flex: none; display: grid; place-items: center; height: 28px; touch-action: none; cursor: grab; }
+    .setup-grip { width: 36px; height: 5px; border-radius: 999px; background: var(--line); }
+    .setup-sheet-head { flex: none; font-size: 17px; font-weight: 600; letter-spacing: -.01em; padding: 2px 0 10px; }
+    .setup-sheet-body { display: flex; flex-direction: column; gap: 14px; }
+    /* The mode is the bar's, not the setup row's, so it comes down here under
+       a name of its own rather than as one more loose word. */
+    .setup-sheet-mode { display: flex; flex-direction: column; align-items: flex-start; gap: 6px; padding-top: 14px; }
+    .setup-sheet-mode[hidden] { display: none; }
+    .setup-sheet-legend { font-size: 12px; font-weight: 600; letter-spacing: .05em; text-transform: uppercase; color: var(--faint); }
+    /* Everything in the sheet is a 44pt row. The scrubber is a desk gesture on
+       a control too small to be one here, and the chip already says where it
+       would have landed. */
+    :host([data-chrome="phone"]) .setup-sheet .setup { display: flex; flex-direction: column; align-items: stretch; gap: 14px; }
+    :host([data-chrome="phone"]) .setup-sheet .setup-row { flex-wrap: wrap; align-items: center; gap: 10px; }
+    :host([data-chrome="phone"]) .setup-sheet .scrub { display: none; }
+    :host([data-chrome="phone"]) .setup-sheet .picker { display: flex; flex-direction: column; align-items: stretch; gap: 14px; }
+    :host([data-chrome="phone"]) .setup-sheet .seg { display: block; width: 100%; }
+    :host([data-chrome="phone"]) .setup-sheet .seg legend {
+      position: static; width: auto; height: auto; clip: auto; margin: 0 0 6px; padding: 0; overflow: visible;
+      font-size: 12px; font-weight: 600; letter-spacing: .05em; text-transform: uppercase; color: var(--faint);
+    }
+    :host([data-chrome="phone"]) .setup-sheet .seg-opts, :host([data-chrome="phone"]) .setup-sheet .presets { display: flex; flex-wrap: wrap; width: auto; gap: 8px; }
+    :host([data-chrome="phone"]) .setup-sheet .seg-opts span,
+    :host([data-chrome="phone"]) .setup-sheet .preset span,
+    /* Only when it is standing in for a folded segment: a trigger that is not
+       is-drop is a control this sheet has the room to show in full. */
+    :host([data-chrome="phone"]) .setup-sheet .seg-opts.is-drop .seg-current,
+    :host([data-chrome="phone"]) .setup-sheet .presets-more,
+    :host([data-chrome="phone"]) .setup-sheet .custom-toggle,
+    :host([data-chrome="phone"]) .setup-sheet .mode {
+      box-sizing: border-box; display: inline-flex; align-items: center; justify-content: center;
+      min-height: 44px; min-width: 44px; padding: 0 16px; border-radius: 12px;
+      font-size: 15px; background: var(--paper-2); box-shadow: inset 0 0 0 1px var(--line);
+    }
+    :host([data-chrome="phone"]) .setup-sheet .seg-opts input:checked + span,
+    :host([data-chrome="phone"]) .setup-sheet .preset input:checked + span {
+      background: var(--accent-soft); box-shadow: inset 0 0 0 1px var(--accent); color: var(--ink);
+    }
+    :host([data-chrome="phone"]) .setup-sheet .mode { color: var(--accent-ink); align-self: flex-start; margin-top: 0; }
+    /* Hidden still means hidden: these selectors are heavier than the [hidden]
+       rules they sit under, so they have to say it themselves. */
+    :host([data-chrome="phone"]) .setup-sheet .setup[hidden],
+    :host([data-chrome="phone"]) .setup-sheet .picker[hidden],
+    :host([data-chrome="phone"]) .setup-sheet .seg[hidden],
+    :host([data-chrome="phone"]) .setup-sheet .presets[hidden],
+    :host([data-chrome="phone"]) .setup-sheet .presets-more[hidden],
+    :host([data-chrome="phone"]) .setup-sheet .custom-toggle[hidden],
+    :host([data-chrome="phone"]) .setup-sheet .mode[hidden] { display: none; }
+    @media (prefers-reduced-motion: reduce) {
+      /* No slide and no scrim wipe: the sheet arrives by crossfade. */
+      .setup-sheet { transform: none; opacity: calc(1 - var(--at, 1)); transition: opacity 150ms ease; }
+      .setup-scrim { transition: opacity 150ms ease; }
+    }
+
     @keyframes pulse { 0%, 100% { opacity: .35; } 50% { opacity: 1; } }
     @media (prefers-reduced-motion: reduce) { :host, .log, .mast, .composer { transition: none; } .tool::before, .turn-footer .pulse { animation: none; } .seg-thumb { transition: none; } }
   `;
@@ -2221,6 +2623,10 @@
     return mark;
   };
   const STOP_ICON = '<svg width="12" height="12" viewBox="0 0 12 12" aria-hidden="true"><rect x="1.5" y="1.5" width="9" height="9" rx="2" fill="currentColor"/></svg>';
+  /** The arrow leaving its box: the one glyph that says a name is a way out of
+   *  this chat and into another document. Drawn at the mast's type size so it
+   *  sits on the same line as the tags beside it. */
+  const OUT_ICON = '<svg width="11" height="11" viewBox="0 0 16 16" aria-hidden="true"><path d="M6.5 3.5H3.5v9h9v-3" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/><path d="M9.5 3.5h3v3M12.5 3.5 7.5 8.5" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>';
 
   // ------------------------------------------------------------ the editor
 
@@ -2434,7 +2840,11 @@
 
   class MarbleConversation extends HTMLElement {
     static get observedAttributes() {
-      return ['conversation'];
+      // The chrome is the page's word for how much room this conversation
+      // has. It is watched because the phone's fold is not only CSS: the
+      // setup sheet holds nodes that belong back in the bar at any other
+      // density, and a pane that stops being a phone has to get them back.
+      return ['conversation', 'data-chrome'];
     }
 
     constructor() {
@@ -2443,13 +2853,19 @@
       root.innerHTML = `<style>${TOKENS}${CONVERSATION_CSS}</style>
         <header class="mast" hidden>
           <h2 class="heading" contenteditable="plaintext-only" spellcheck="false" aria-label="Conversation title"></h2>
-          <div class="tags"></div>
+          <div class="mast-meta">
+            <div class="tags"></div>
+            <a class="target-jump" hidden><span class="target-what"></span><span class="target-out" aria-hidden="true">${OUT_ICON}</span></a>
+          </div>
           <button type="button" class="zone-jump" hidden>
             <span class="zone-live" aria-hidden="true"></span>
             <span class="zone-what"></span>
             <span class="zone-go" aria-hidden="true">→</span>
           </button>
-          <div class="also" hidden></div>
+          <button type="button" class="also" hidden>
+            <span class="also-long"></span>
+            <span class="also-short"></span>
+          </button>
         </header>
         <button type="button" class="ticker" hidden aria-label="Show or hide the conversation"></button>
         <div class="log" role="log" aria-live="polite" aria-label="Conversation"></div>
@@ -2478,6 +2894,7 @@
               </div>
             </div>
             <div class="bar">
+              <button type="button" class="setup-chip" hidden aria-haspopup="dialog" aria-expanded="false"><span class="setup-chip-what"></span></button>
               <div class="setup" hidden>
                 <div class="setup-row">
                   <div class="presets" role="radiogroup" aria-label="Saved setups" hidden></div>
@@ -2497,7 +2914,14 @@
               <button type="button" class="mode" hidden aria-label="CLI mode — click or Shift+Tab to change"></button>
             </div>
           </div>
-        </form>`;
+        </form>
+        <div class="setup-scrim" hidden></div>
+        <section class="setup-sheet" role="dialog" aria-modal="true" aria-label="Setup" hidden>
+          <div class="setup-handle"><span class="setup-grip" aria-hidden="true"></span></div>
+          <div class="setup-sheet-head">Setup</div>
+          <div class="setup-sheet-body"></div>
+          <div class="setup-sheet-mode" hidden><span class="setup-sheet-legend">Mode</span></div>
+        </section>`;
       this.logEl = root.querySelector('.log');
       this.ticker = root.querySelector('.ticker');
       this.ticker.addEventListener('click', () => this.toggleAttribute('data-folded'));
@@ -2509,6 +2933,9 @@
       this.mast = root.querySelector('.mast');
       this.heading = root.querySelector('.heading');
       this.tagsEl = root.querySelector('.tags');
+      this.targetJump = root.querySelector('.target-jump');
+      this.targetWhat = root.querySelector('.target-what');
+      this.targetOut = root.querySelector('.target-out');
       this.setup = root.querySelector('.setup');
       this.presetsEl = root.querySelector('.presets');
       this.selectionEl = root.querySelector('.selection');
@@ -2524,6 +2951,19 @@
       this.projectBox = root.querySelector('[data-seg="project"]');
       this.projectLabel = root.querySelector('.picker-project');
       this.also = root.querySelector('.also');
+      this.alsoLong = root.querySelector('.also-long');
+      this.alsoShort = root.querySelector('.also-short');
+      this.also.addEventListener('click', () => this.announceWorkingHere());
+      this.setupChip = root.querySelector('.setup-chip');
+      this.setupChipWhat = root.querySelector('.setup-chip-what');
+      this.setupSheet = root.querySelector('.setup-sheet');
+      this.setupScrim = root.querySelector('.setup-scrim');
+      this.setupSheetBody = root.querySelector('.setup-sheet-body');
+      this.setupSheetMode = root.querySelector('.setup-sheet-mode');
+      this.setupHandle = root.querySelector('.setup-handle');
+      this.sheetAt = 1;
+      this.sheetWanted = false;
+      this.armSetupSheet();
       this.zoneJump = root.querySelector('.zone-jump');
       this.zoneWhat = root.querySelector('.zone-what');
       this.zone = null;
@@ -2605,13 +3045,15 @@
       this.modeButton.addEventListener('click', () => this.cycleMode());
       this.queuedIndividually.addEventListener('click', () => this.setQueueCombine(false));
       this.queuedTogether.addEventListener('click', () => this.setQueueCombine(true));
-      // How the next send behaves while a turn runs; the same three modes a
-      // queued row can be set to afterwards.
-      // Three words of segmented pill for a choice you make rarely, sitting
+      // How the next send behaves while a turn runs; the same two modes a
+      // queued row can be set to afterwards. Interrupt is not offered: killing
+      // a turn mid-thought to say one more thing is what steer is for, and the
+      // stop button is still there for actually stopping it.
+      // Two words of segmented pill for a choice you make rarely, sitting
       // beside the prompt you are actually writing. One word and a menu.
       this.dispatchEl.classList.add('seg-opts');
       fillRadios(this.dispatchEl, 'dispatch', [
-        { id: 'queue', label: 'Queue' }, { id: 'steer', label: 'Steer' }, { id: 'interrupt', label: 'Interrupt' },
+        { id: 'queue', label: 'Queue' }, { id: 'steer', label: 'Steer' },
       ], { empty: null, value: 'queue' });
       // After fillRadios, which clears the mode along with the children.
       this.dispatchEl.classList.add('is-drop');
@@ -2764,6 +3206,10 @@
       this.load();
       this.fitObserver = new ResizeObserver(() => this.fitSetup());
       this.fitObserver.observe(this);
+      // A queued row can grow while you edit it, and the stack grows with
+      // every prompt: the log's foot follows it rather than being set once.
+      this.queueObserver = new ResizeObserver(() => this.measureQueue());
+      this.queueObserver.observe(this.queuedEl);
     }
 
     disconnectedCallback() {
@@ -2771,8 +3217,11 @@
       this.tickWatch = null;
       cancelAnimationFrame(this.tickFrame ?? 0);
       this.closeScrub?.({ commit: false });
+      this.restoreSetup?.();
       this.fitObserver?.disconnect();
       this.fitObserver = null;
+      this.queueObserver?.disconnect();
+      this.queueObserver = null;
       this.unwatchTheme?.();
       this.unwatchTheme = null;
       removeEventListener('marble:agent-context', this.onContext);
@@ -2784,7 +3233,15 @@
       this.offQueue = null;
     }
 
-    attributeChangedCallback(_name, before, after) {
+    attributeChangedCallback(name, before, after) {
+      if (name === 'data-chrome') {
+        // The sheet is a phone's answer. At any other density the row belongs
+        // in the bar, and leaving it in a hidden sheet would take the pickers
+        // off the screen with it.
+        if (after !== 'phone') this.restoreSetup?.();
+        this.paintSetupChip?.();
+        return;
+      }
       if (this.isConnected && before !== after && after !== this.loadedId) this.load();
     }
 
@@ -2803,6 +3260,7 @@
       for (const item of this.queuedEl.querySelectorAll('.queued-item')) item.remove();
       this.queuedEl.hidden = true;
       this.queuedBar.hidden = true;
+      this.measureQueue();
       this.applyQueueCombine(false);
       this.composerChips = this.composerChips.filter((chip) => chip.kind === 'model' || chip.kind === 'effort');
       this.renderChips();
@@ -2871,6 +3329,15 @@
         // A discarded chat sends its id and nothing else.
         if (summary.removed) this.others.delete(summary.id);
         else this.others.set(summary.id, summary);
+        // This chat's own row: the host names a new chat once its first turn
+        // is over, and the mast should say so without a reload. paintMast
+        // leaves the heading alone while it has the caret, so a rename
+        // arriving mid-edit cannot take the words out from under someone.
+        if (summary.id === id && !summary.removed && summary.title && summary.title !== this.meta?.title) {
+          this.meta = { ...(this.meta ?? {}), ...summary };
+          this.paintMast();
+          this.dispatchEvent(new CustomEvent('meta', { detail: { meta: this.meta }, bubbles: true, composed: true }));
+        }
         this.paintAlso();
       });
       // The stream only carries changes; a turn already running and silent
@@ -2935,16 +3402,17 @@
       return (this.usageMeters ?? []).find((item) => item.id === 'claude-subscription' || String(item.id ?? '').startsWith('claude')) ?? null;
     }
 
+    // Not knowing is not being out — of a meter that is missing, and equally
+    // of one that is present but unreadable. The usage API rate-limits often,
+    // and a 429 says nothing whatsoever about quota; locking every Claude
+    // model over it would take the drive away from someone who is signed in
+    // and has plenty left. Being genuinely out is `used >= 100`, which is
+    // read off the meter separately and only when the meter could be read.
     claudeUnavailable() {
       const signedIn = (this.providerList ?? []).some((item) => String(item.id ?? '').startsWith('claude') && item.installed && item.signedIn);
       if (!signedIn) return false;
       const meter = this.claudeMeter();
-      if (meter) return !usageAvailable(meter);
-      // No meter at all is not knowing, and not knowing is not being out.
-      // The host reads the quota from a credential it may simply not find;
-      // greying out every Claude model over a percent nobody could fetch
-      // takes the drive away from a person who is signed in and has quota.
-      return false;
+      return meter ? usageAvailable(meter) && Number(meter.used) >= 100 : false;
     }
 
     disabledAgentIds() {
@@ -2985,16 +3453,39 @@
     }
 
     /** Other conversations running in this conversation's project right now. */
-    paintAlso() {
-      if (!this.also) return;
+    workingHere() {
       const id = this.getAttribute('conversation');
       const mine = this.meta?.project ?? 'drive';
-      const rows = [...(this.others?.values() ?? [])]
+      return [...(this.others?.values() ?? [])]
         .filter((s) => s.id !== id && !s.archived && (s.project ?? 'drive') === mine && (s.status === 'running' || s.running));
+    }
+
+    /** One fact, two readings. A desk has the room to name them; a phone mast
+     *  is one line, so it carries the count and the names are a tap away.
+     *  Both are drawn every time and the density picks which one shows, so
+     *  the line never has to be rebuilt when a pane becomes a phone. */
+    paintAlso() {
+      if (!this.also) return;
+      const rows = this.workingHere();
+      const names = rows.map((s) => s.title || 'New Chat');
       this.also.hidden = !rows.length;
-      this.also.textContent = rows.length
-        ? `Also working here: ${rows.length} — ${rows.map((s) => s.title || 'New Chat').join(', ')}`
-        : '';
+      this.alsoLong.textContent = rows.length ? `Also working here: ${rows.length} — ${names.join(', ')}` : '';
+      this.alsoShort.textContent = rows.length ? `+${rows.length} here` : '';
+      this.also.title = names.join(', ');
+      this.also.setAttribute('aria-label', rows.length ? `Also working here: ${names.join(', ')}` : '');
+    }
+
+    /** The page owns the list, because the page is what can open one of them:
+     *  a tap on the count says who they are and lets the page put them in its
+     *  own actions sheet. */
+    announceWorkingHere() {
+      const rows = this.workingHere();
+      if (!rows.length) return;
+      this.dispatchEvent(new CustomEvent('marble:agent-working-here', {
+        bubbles: true,
+        composed: true,
+        detail: { ids: rows.map((s) => s.id), names: rows.map((s) => s.title || 'New Chat') },
+      }));
     }
 
     fillAgents(value) {
@@ -3215,6 +3706,7 @@
       }
       this.customToggle.setAttribute('aria-expanded', String(this.customOpen));
       this.picker.hidden = presets.length > 0 && !this.customOpen;
+      this.paintSetupChip();
       this.fitSetup();
     }
 
@@ -3231,7 +3723,9 @@
       }
     }
 
-    async applyPreset(preset) {
+    /** `effort` overrides the setup's own, which is how the scrubber commits a
+     *  model the person tuned up or down off its resting effort. */
+    async applyPreset(preset, { effort = null } = {}) {
       if (this.presetDisabled(preset)) return;
       const provider = this.resolvePresetProvider(preset);
       if (!provider) return;
@@ -3240,16 +3734,27 @@
         this.fillAgents(provider.id);
         this.mode = this.currentProvider()?.modes?.[0]?.id ?? this.mode;
       }
-      await this.syncCatalog({ model: this.resolvePresetModel(preset, provider), effort: preset.effort });
+      await this.syncCatalog({ model: this.resolvePresetModel(preset, provider), effort: effort ?? preset.effort });
       this.persistCatalog();
       if (switched) this.persistMode();
       this.paintPresets();
     }
 
-    /** The stops, in order. A setup you cannot pick is not a stop: landing on
-     *  one and letting go would be a no-op the scrubber had promised. */
+    /** The stops, weakest first. A slider is pushed right to turn something
+     *  up, so the strongest setup belongs at the right end — the menu reads
+     *  top-down and keeps its own order, which is a list, not a dial.
+     *  A setup you cannot pick is not a stop: landing on one and letting go
+     *  would be a no-op the scrubber had promised. */
     scrubStops() {
-      return this.availablePresets().filter((preset) => !this.presetDisabled(preset));
+      return this.availablePresets().filter((preset) => !this.presetDisabled(preset)).reverse();
+    }
+
+    /** The efforts the stop you are on can be tuned through, weakest first.
+     *  Cursor bakes effort into the model id and reports none, so there is
+     *  nothing to tune there and the gauge says so by not being there. */
+    scrubEfforts(preset) {
+      const provider = this.resolvePresetProvider(preset ?? this.scrubPresets?.[this.scrubAt ?? 0]);
+      return provider?.efforts ?? [];
     }
 
     buildScrub() {
@@ -3260,20 +3765,23 @@
       this.scrubEl.dataset.ids = ids;
       this.scrubEl.style.setProperty('--n', String(presets.length));
       this.scrubEl.setAttribute('aria-valuemax', String(Math.max(0, presets.length - 1)));
+      // Every word and every bar is built once and then only lit, never
+      // rewritten: swapping textContent would resize the row under the model
+      // name and cross-fading needs both words present at the same time.
+      const efforts = this.scrubEfforts(presets[0]);
+      const now = h('div', 'scrub-now');
+      now.append(h('span', 'scrub-model'), effortStack(efforts), effortGauge(efforts));
       const track = h('div', 'scrub-track');
       track.append(h('div', 'scrub-rail'), h('div', 'scrub-fill'), h('div', 'scrub-knob'));
       for (const preset of presets) {
         const stop = h('div', 'scrub-stop');
-        const name = h('div', 'scrub-name');
-        const head = document.createElement('b');
-        head.textContent = presetHead(preset);
-        const tail = document.createElement('i');
-        tail.textContent = EFFORT_WORD[preset.effort] ?? preset.effort ?? '';
-        name.append(head, tail);
-        stop.append(h('div', 'scrub-dot'), name);
+        const name = h('span', 'scrub-name', presetHead(preset));
+        // Each model's own effort, under its own name: the second axis is
+        // remembered per model, and this is where you can see that.
+        stop.append(h('div', 'scrub-dot'), name, effortStack(this.scrubEfforts(preset), 'scrub-stop-effort'));
         track.append(stop);
       }
-      this.scrubEl.replaceChildren(h('div', 'scrub-now'), track, h('div', 'scrub-hint', '← →  while you hold ⌃⌥'));
+      this.scrubEl.replaceChildren(now, track);
       return presets;
     }
 
@@ -3290,9 +3798,27 @@
       if (presets.length < 2) return false;
       closeOpenSeg();
       const match = this.matchingPreset();
-      const at = presets.findIndex((preset) => preset.id === match?.id);
+      let at = presets.findIndex((preset) => preset.id === match?.id);
+      if (at < 0) {
+        // No setup matches exactly, which is what a tuned effort leaves
+        // behind — Opus at Max is no chip. The model alone still says which
+        // stop you are standing on, and the gauge says the rest.
+        const model = radioValue(this.shadowRoot, 'model');
+        at = presets.findIndex((preset) => this.resolvePresetModel(preset, this.resolvePresetProvider(preset)) === model);
+      }
       this.scrubFrom = at < 0 ? 0 : at;
       this.scrubAt = this.scrubFrom;
+      // Effort is remembered per model, not carried across: turning Opus up
+      // is a thing you meant about Opus, and arriving at Sonnet with it still
+      // raised is a setting nobody asked for. Every other stop starts at its
+      // own resting effort; the one you are on starts at the effort actually
+      // set, so ⌃⌥ on Opus at Extra High does not quietly turn it down.
+      this.scrubTuned = new Map(presets.map((preset) => [preset.id, preset.effort]));
+      const here = presets[this.scrubAt];
+      const efforts = this.scrubEfforts(here);
+      const current = radioValue(this.shadowRoot, 'effort');
+      if (here) this.scrubTuned.set(here.id, efforts.includes(current) ? current : here.effort ?? efforts[0] ?? '');
+      this.scrubFromEffort = this.scrubEffort();
       this.scrubEl.classList.add('is-open');
       raiseMenu(this.scrubEl);
       // Centred over the whole bar and keeping its own width: a scrubber hung
@@ -3312,13 +3838,32 @@
       const track = this.scrubEl.querySelector('.scrub-track');
       const fill = this.scrubEl.querySelector('.scrub-fill');
       const knob = this.scrubEl.querySelector('.scrub-knob');
-      const now = this.scrubEl.querySelector('.scrub-now');
       [...this.scrubEl.querySelectorAll('.scrub-stop')].forEach((stop, index) => {
         stop.classList.toggle('is-at', index === at);
       });
       // BRAND is this file's own constant, not anything an agent said.
-      now.innerHTML = BRAND[preset.brand] ?? '';
-      now.append(document.createTextNode(preset.name));
+      const model = this.scrubEl.querySelector('.scrub-model');
+      model.innerHTML = BRAND[preset.brand] ?? '';
+      model.append(document.createTextNode(presetHead(preset)));
+      // Light the word and the bars rather than rewriting them: the stack is
+      // already as wide as its longest word, so nothing beside it moves, and
+      // the word being replaced is still there to leave while the new one
+      // arrives. `data-at` carries the level to the colour scale.
+      const efforts = this.scrubEfforts(preset);
+      const here = this.scrubEffort();
+      const step = efforts.indexOf(here);
+      const effortEl = this.scrubEl.querySelector('.scrub-effort');
+      const gauge = this.scrubEl.querySelector('.scrub-gauge');
+      effortEl.hidden = step < 0;
+      gauge.hidden = step < 0;
+      this.scrubEl.dataset.at = step < 0 ? '' : here;
+      lightEffort(effortEl, here);
+      lightEffort(gauge, here, efforts);
+      // Each stop wears the effort it is remembering, so moving away and back
+      // is visibly the same setting rather than a guess.
+      [...this.scrubEl.querySelectorAll('.scrub-stop')].forEach((stop, index) => {
+        lightEffort(stop.querySelector('.scrub-stop-effort'), this.scrubTuned?.get(presets[index]?.id));
+      });
       // Dot centre to dot centre: the track less one stop's width.
       const span = Math.max(0, track.clientWidth * (1 - 1 / Math.max(1, presets.length)));
       const atPx = Math.round(span * (presets.length > 1 ? at / (presets.length - 1) : 0));
@@ -3335,7 +3880,13 @@
         knob.style.transition = '';
       }
       this.scrubEl.setAttribute('aria-valuenow', String(at));
-      this.scrubEl.setAttribute('aria-valuetext', preset.name);
+      this.scrubEl.setAttribute('aria-valuetext', [presetHead(preset), EFFORT_WORD[here] ?? here].filter(Boolean).join(', '));
+    }
+
+    /** The effort remembered for the stop the scrubber is on. */
+    scrubEffort(index = this.scrubAt) {
+      const preset = (this.scrubPresets ?? [])[index ?? 0];
+      return preset ? this.scrubTuned?.get(preset.id) ?? preset.effort ?? '' : '';
     }
 
     /** Stops at the ends rather than wrapping: a timeline has two of them,
@@ -3346,6 +3897,22 @@
       const next = Math.min(presets.length - 1, Math.max(0, (this.scrubAt ?? 0) + delta));
       if (next === this.scrubAt) return;
       this.scrubAt = next;
+      // Nothing to carry over: the stop you arrive at wears whatever effort
+      // it was left at, which is its own.
+      this.paintScrub();
+    }
+
+    /** The other axis, and only for the model it is pointing at. Same shape
+     *  as moveScrub, and the same ends. */
+    tuneScrub(delta) {
+      if (!this.scrubIsOpen()) return;
+      const preset = (this.scrubPresets ?? [])[this.scrubAt ?? 0];
+      const efforts = this.scrubEfforts(preset);
+      if (!preset || efforts.length < 2) return;
+      const step = efforts.indexOf(this.scrubEffort());
+      const next = Math.min(efforts.length - 1, Math.max(0, (step < 0 ? 0 : step) + delta));
+      if (efforts[next] === this.scrubEffort()) return;
+      this.scrubTuned.set(preset.id, efforts[next]);
       this.paintScrub();
     }
 
@@ -3355,9 +3922,9 @@
       if (!this.scrubIsOpen()) return;
       this.scrubEl.classList.remove('is-open');
       if (scrubOpen === this) scrubOpen = null;
-      const chosen = commit && this.scrubAt !== this.scrubFrom
-        ? (this.scrubPresets ?? [])[this.scrubAt]
-        : null;
+      const effort = this.scrubEffort();
+      const moved = this.scrubAt !== this.scrubFrom || effort !== this.scrubFromEffort;
+      const chosen = commit && moved ? (this.scrubPresets ?? [])[this.scrubAt] : null;
       clearTimeout(this.scrubEl._unfloat);
       const settle = () => {
         if (this.scrubIsOpen()) return;
@@ -3366,7 +3933,7 @@
       };
       if (reduceMotion()) settle();
       else this.scrubEl._unfloat = setTimeout(settle, MENU_MS + 60);
-      if (chosen) this.applyPreset(chosen);
+      if (chosen) this.applyPreset(chosen, { effort: effort || null });
     }
 
     fitSetup() {
@@ -3377,6 +3944,172 @@
         if (!this.picker?.hidden) fitPicker(this.picker);
         fitPresets(this.presetsEl);
       });
+    }
+
+    // ------------------------------------------------------ the setup sheet
+    //
+    // On a phone the whole setup row — two pickers, a scrubber and the mode —
+    // is a line of 21px words, none of which a thumb can hit. It folds into
+    // one chip that says what the next turn will run as, and comes back as a
+    // sheet from the bottom when you tap it. The sheet holds the *same* nodes,
+    // moved there and moved back: nothing is rebuilt, so a pick made down here
+    // is a pick the composer already had, and the desk's row is untouched.
+
+    /** What the row says, in the two words a thumb has room for. The mode
+     *  rides along only when it is not the one the CLI would have chosen —
+     *  the chip is for what is unusual about this turn. */
+    setupChipLabel() {
+      const provider = this.currentProvider();
+      const modes = provider?.modes ?? [];
+      const mode = modes.find((item) => item.id === this.mode);
+      const parts = [provider?.label || 'Agent', this.matchingPreset()?.name || this.currentModel()?.label || 'Custom'];
+      if (mode && modes[0] && mode.id !== modes[0].id) parts.push(mode.label);
+      return parts.join(' · ');
+    }
+
+    paintSetupChip() {
+      if (!this.setupChip) return;
+      // The chip stands for the row, so it is there exactly when the row is:
+      // nothing to configure, nothing to open.
+      this.setupChip.hidden = Boolean(this.setup?.hidden) && !this.sheetWanted;
+      if (this.setupSheetMode) this.setupSheetMode.hidden = Boolean(this.modeButton?.hidden);
+      const label = this.setupChipLabel();
+      this.setupChipWhat.textContent = label;
+      this.setupChip.setAttribute('aria-label', `Setup: ${label}`);
+    }
+
+    armSetupSheet() {
+      this.setupChip.addEventListener('click', () => this.toggleSetupSheet());
+      this.setupScrim.addEventListener('click', () => this.closeSetupSheet());
+      this.setupSheet.addEventListener('keydown', (event) => {
+        if (event.key !== 'Escape') return;
+        event.stopPropagation();
+        this.closeSetupSheet();
+      });
+      // A sheet a finger drives: 1:1 down the screen from wherever it was
+      // grabbed, resisting past the top, and the decision on release is the
+      // direction the finger was going, not where it happened to stop.
+      const grab = { id: null, from: 0, y: 0, v: 0, t: 0 };
+      this.setupHandle.addEventListener('pointerdown', (event) => {
+        if (grab.id !== null) return;
+        grab.id = event.pointerId;
+        grab.from = this.sheetAt;
+        grab.y = event.clientY;
+        grab.v = 0;
+        grab.t = event.timeStamp;
+        this.stopSheetSpring?.();
+        this.stopSheetSpring = null;
+        this.setupHandle.setPointerCapture(event.pointerId);
+        event.preventDefault();
+      });
+      this.setupHandle.addEventListener('pointermove', (event) => {
+        if (grab.id !== event.pointerId) return;
+        const height = this.setupSheet.offsetHeight || 1;
+        const over = grab.from + (event.clientY - grab.y) / height;
+        this.setSheetAt(Math.min(1, over < 0 ? -rubberband(-over * height, height) / height : over));
+        const dt = event.timeStamp - grab.t;
+        if (dt > 0) grab.v = ((event.clientY - grab.y) / dt) * 1000;
+        grab.y = event.clientY;
+        grab.t = event.timeStamp;
+      });
+      const release = (event) => {
+        if (grab.id !== event.pointerId) return;
+        grab.id = null;
+        if (this.setupHandle.hasPointerCapture?.(event.pointerId)) this.setupHandle.releasePointerCapture(event.pointerId);
+        const drifting = Math.abs(grab.v) < 60;
+        if (drifting ? this.sheetAt > 0.5 : grab.v > 0) this.closeSetupSheet({ velocity: grab.v });
+        else this.openSetupSheet({ velocity: grab.v });
+      };
+      this.setupHandle.addEventListener('pointerup', release);
+      this.setupHandle.addEventListener('pointercancel', release);
+    }
+
+    /** 0 is open, 1 is gone. One number, read by the transform and the scrim
+     *  together, so a drag moves both in step. */
+    setSheetAt(at) {
+      this.sheetAt = at;
+      this.setupSheet.style.setProperty('--at', String(at));
+      this.setupScrim.style.setProperty('--at', String(at));
+    }
+
+    springSheet(to, velocity = 0, done) {
+      this.stopSheetSpring?.();
+      this.stopSheetSpring = null;
+      if (reduceMotion()) {
+        // No slide: the CSS crossfades, and the sheet is only really gone
+        // once that fade is over.
+        this.setSheetAt(to);
+        if (done) setTimeout(done, 150);
+        return;
+      }
+      const height = this.setupSheet.offsetHeight || 1;
+      this.stopSheetSpring = spring({
+        from: this.sheetAt,
+        to,
+        velocity: velocity / height,
+        // A drawer, Apple's values: it carries the flick that threw it.
+        damping: 0.8,
+        response: 0.3,
+        onFrame: (value) => this.setSheetAt(value),
+        onDone: () => {
+          this.stopSheetSpring = null;
+          done?.();
+        },
+      });
+    }
+
+    toggleSetupSheet() {
+      if (this.sheetWanted) this.closeSetupSheet();
+      else this.openSetupSheet();
+    }
+
+    openSetupSheet({ velocity = 0 } = {}) {
+      if (!this.setupSheet || this.setup?.hidden) return;
+      const first = !this.sheetWanted;
+      this.sheetWanted = true;
+      if (this.setupSheet.hidden) {
+        this.setupHome = document.createComment('setup');
+        this.setup.replaceWith(this.setupHome);
+        this.modeHome = document.createComment('mode');
+        this.modeButton.replaceWith(this.modeHome);
+        this.setupSheetBody.append(this.setup);
+        this.setupSheetMode.append(this.modeButton);
+        this.setupScrim.hidden = false;
+        this.setupSheet.hidden = false;
+        this.setSheetAt(1);
+        // Measured where it will actually be shown: fitting the pickers while
+        // they were display:none read every segment as overflowing nothing.
+        this.fitSetup();
+      }
+      if (first) this.setupChip.setAttribute('aria-expanded', 'true');
+      this.springSheet(0, velocity);
+    }
+
+    closeSetupSheet({ velocity = 0 } = {}) {
+      if (!this.sheetWanted) return;
+      this.sheetWanted = false;
+      this.setupChip?.setAttribute('aria-expanded', 'false');
+      this.springSheet(1, velocity, () => this.restoreSetup());
+    }
+
+    /** The row goes back where it came from. Called when the sheet has
+     *  finished leaving, and outright when this stops being a phone or leaves
+     *  the page, because the bar is where those nodes live. */
+    restoreSetup() {
+      if (!this.setupHome) return;
+      this.sheetWanted = false;
+      this.stopSheetSpring?.();
+      this.stopSheetSpring = null;
+      closeSegMenus(this.shadowRoot);
+      this.setupSheet.hidden = true;
+      this.setupScrim.hidden = true;
+      this.setSheetAt(1);
+      this.setupHome.replaceWith(this.setup);
+      this.modeHome.replaceWith(this.modeButton);
+      this.setupHome = null;
+      this.modeHome = null;
+      this.setupChip?.setAttribute('aria-expanded', 'false');
+      this.fitSetup();
     }
 
     cycleMode() {
@@ -3410,6 +4143,7 @@
       const mode = modes.find((item) => item.id === this.mode) ?? modes[0];
       this.modeButton.hidden = !mode;
       this.modeButton.textContent = mode?.label ?? '';
+      this.paintSetupChip();
     }
 
     paintMast() {
@@ -3418,12 +4152,32 @@
       if (!id) {
         this.heading.textContent = '';
         this.tagsEl.replaceChildren();
+        this.paintTarget();
         return;
       }
       const title = this.meta?.title || 'New Chat';
       this.savedTitle = title;
       if (this.shadowRoot.activeElement !== this.heading) this.heading.textContent = title;
       this.paintTags();
+      this.paintTarget();
+    }
+
+    /** The document this chat is working in, named in the mast beside the
+     *  model it runs on. It used to ride in the pane's bar, which is the
+     *  pane's own furniture — status, group, split, close. Where the work
+     *  lands is a fact about the conversation, so it belongs on the line that
+     *  already carries them, and it is drawn as the link it is. */
+    paintTarget() {
+      const target = this.meta?.target || '';
+      this.targetJump.hidden = !target;
+      this.targetWhat.textContent = target;
+      const href = target ? window.marble?.href?.(target) : '';
+      if (href) this.targetJump.href = href;
+      else this.targetJump.removeAttribute('href');
+      // No href, nowhere to go: the name still says where the work lands, but
+      // the arrow would be promising a jump that would not happen.
+      this.targetOut.hidden = !href;
+      this.targetJump.title = target ? (href ? `Open ${target}` : target) : '';
     }
 
     /** The construction zone this conversation is drawing, or null. One row in
@@ -4191,6 +4945,9 @@
           this.queue(turn, true);
           break;
         case 'turn.removed':
+          // Taken out of the queue before it ever ran: the bubble was never
+          // in the transcript, and nothing happened for it to stay for.
+          this.logEl.querySelector(`.msg.me[data-turn="${CSS.escape(turn)}"]`)?.remove();
           this.queue(turn, false);
           this.forget(turn);
           break;
@@ -4748,7 +5505,31 @@
       const n = this.queuedEl.querySelectorAll('.queued-item').length;
       this.queuedEl.hidden = n === 0;
       this.queuedBar.hidden = n < 2;
-      // A queued turn's message stays in the log; only the queue row goes.
+      // One prompt, said once: while it waits, the floating row is the whole
+      // of it, and the transcript's copy is held back rather than never made
+      // — the bubble is already in log order, and joins the transcript when
+      // the turn starts (or is folded into the batch that runs it).
+      this.waiting(turn, present);
+      this.measureQueue();
+    }
+
+    /** The log's own copy of a prompt, hidden while its row floats. */
+    waiting(turn, held) {
+      const bubble = this.logEl.querySelector(`.msg.me[data-turn="${CSS.escape(turn)}"]`);
+      if (!bubble) return;
+      if (held) bubble.dataset.waiting = '';
+      else delete bubble.dataset.waiting;
+    }
+
+    /** Hold the foot of the log open by however tall the floating stack is,
+     *  and stay at the bottom if that is where the reader already was. */
+    measureQueue() {
+      const space = this.queuedEl.hidden ? 0 : Math.round(this.queuedEl.getBoundingClientRect().height);
+      if (space === this.queuedSpace) return;
+      const stuck = this.logEl.scrollHeight - this.logEl.scrollTop - this.logEl.clientHeight < 48;
+      this.queuedSpace = space;
+      this.logEl.style.setProperty('--queued-space', `${space}px`);
+      if (stuck) this.logEl.scrollTop = this.logEl.scrollHeight;
     }
 
     applyQueueCombine(on) {
@@ -4777,9 +5558,11 @@
       button.setAttribute('aria-label', `${label} — click to change how this prompt is sent`);
     }
 
+    /** Queue and steer, the two the composer offers. A row left on interrupt
+     *  by an older build still says so, and leaves for queue on a click. */
     cycleQueuedDispatch(item, turn) {
       const prev = item.dataset.dispatch || 'queue';
-      const next = { queue: 'steer', steer: 'interrupt', interrupt: 'queue' }[prev];
+      const next = prev === 'queue' ? 'steer' : 'queue';
       this.paintQueuedDispatch(item, next);
       this.api.patchTurn(turn, { dispatch: next }).catch((err) => {
         this.paintQueuedDispatch(item, prev);
@@ -5936,10 +6719,32 @@
     document.body.append(el);
   };
 
+  // ⌘⇧O is New chat, the chord the CLI and the desktop app use. The Agents
+  // page answers it in its own script, where the Focus stage and the folders
+  // are in scope; this is the fallback for a page whose script predates that,
+  // and it presses the page's own New button so both routes do exactly the
+  // same thing. A page that has the chord says so in `marbleAgentNewChatKey`,
+  // and then nothing here fires.
+  let newChatKeyBound = false;
+  const bindNewChatKey = () => {
+    if (newChatKeyBound) return;
+    newChatKeyBound = true;
+    addEventListener('keydown', (event) => {
+      if (window.marbleAgentNewChatKey) return;
+      if (!(event.metaKey || event.ctrlKey) || !event.shiftKey || event.altKey || event.repeat) return;
+      if (event.code !== 'KeyO' && String(event.key).toLowerCase() !== 'o') return;
+      const button = document.querySelector('header.topbar .new');
+      if (!button) return;
+      event.preventDefault();
+      button.click();
+    });
+  };
+
   const mount = () => {
     mountSettings();
     const pageUsage = document.querySelector('header.topbar > .usage');
     if (pageUsage) watchUsage(pageUsage);
+    bindNewChatKey();
     if (document.querySelector('meta[name="marble-agent"][content="custom"]')) return;
     if (document.querySelector('marble-agent-drawer')) return;
     const drawer = document.createElement('marble-agent-drawer');
@@ -5948,7 +6753,7 @@
   };
 
   const buildAskCard = (event, submit) => MarbleConversation.prototype.buildAskCard(event, submit);
-  window.marbleAgentUI = { stateOf, STATE_CSS, renderText, spring, project, TOKENS, buildAskCard, ASK_CSS, conversationTags, eventBelongsToConversation, askResponse, TAG_CSS, fillMeters, usageAvailable, usageTone, formatReset, USAGE_CSS, pageTheme, applyPageTheme, fillRadios, fitPicker, fitPresets, sortProviders };
+  window.marbleAgentUI = { stateOf, STATE_CSS, renderText, spring, project, TOKENS, buildAskCard, ASK_CSS, conversationTags, eventBelongsToConversation, askResponse, TAG_CSS, fillMeters, usageAvailable, usageTone, formatReset, formatAsOf, USAGE_CSS, pageTheme, applyPageTheme, fillRadios, fitPicker, fitPresets, sortProviders };
   Object.assign(window.marbleAgentUI, { collapseToolRows, toolShortName });
 
   if (window.marble?.agent) mount();

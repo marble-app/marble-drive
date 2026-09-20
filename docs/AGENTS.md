@@ -32,6 +32,16 @@ on how many conversations run at once; set it only to hold a small machine
 down. A conversation still runs one turn at a time, so a prompt waits only
 behind that conversation's own turn.
 
+A new chat is named twice. The first prompt lands as a placeholder — sixty
+characters of what was typed, minus the composer's attachment markup — so no
+row on the board is ever blank while the turn runs. When that turn ends, a
+small model (`MARBLE_DRIVE_AGENT_NAMING_MODEL`, `haiku`) reads the question
+and the answer and writes a short title over it. Naming runs on the login,
+never on an API key, from an empty directory with no tools and none of your
+settings; it never blocks or fails a turn, and a chat is asked about once,
+not once per turn. A title you type yourself is never written over. Set
+`MARBLE_DRIVE_AGENT_NAMING=0` to keep the placeholder.
+
 An ungated host answers `/agent/*` only when addressed as `localhost`,
 `127.0.0.1` or `[::1]`, and `/agent/tools/*` refuses any request carrying
 `X-Forwarded-*` headers, since behind Tailscale Serve every peer is loopback.
@@ -397,13 +407,16 @@ document it started on: when you are looking at another page, the header says
 which file it is editing. Each finished turn shows what changed with **Undo
 turn**, and a turn the watchdog flagged offers **Restore**.
 
-The Agents topbar and the drawer header show Claude and Cursor usage as a
-compact percent meter (`GET /agent/usage`). The host reads the CLI tokens
-from the macOS keychain and asks each vendor; it never returns those
-tokens. A meter is omitted when that CLI is not signed in. If Claude is
-signed in but its usage fetch fails, the meter still appears as
-**Unavailable** (grey, no fill) instead of disappearing. API-key-only
-Claude has no subscription window, so it does not appear. The number and
+The Agents topbar and the drawer header show usage as two compact percent
+sliders and only two (`GET /agent/usage`): **Claude** and **Fable**, the pair
+you spend. Every other provider — Cursor included — keeps its meters in
+Settings › **Usage** and in the phone's Fleet sheet. The host reads the CLI
+tokens from the macOS keychain and asks each vendor; it never returns those
+tokens. Both sliders are always drawn: one the host cannot read reads
+**Unavailable** (grey, no fill) rather than disappearing, because a slider
+that vanishes takes the row's shape with it and reads as "none left" instead
+of "not known". API-key-only Claude has no subscription window, so it reads
+Unavailable too. The number and
 the fill are how much has been used, filling toward 100%. The bar is blue
 below 50%, yellow from 50%, orange from 75%, and red from 90%. Cursor's
 meter is the Auto + Composer pool (the dashboard's Cursor-models bar), not
@@ -484,7 +497,9 @@ Agent text is shown, never interpreted as HTML (`renderText` in
 A drive that has run `serve` at least once with this host gets an `Agents`
 document at the root, seeded the same way Drive is: written only if it is
 not already there. It is a library of conversations in five views: **List**,
-**Board**, **Folders**, **Focus**, and **Deck**. `V` cycles that order. The
+**Board**, **Folders**, **Focus**, and **Deck**. `V` cycles that order.
+`⌘⇧O` starts a new chat from anywhere on the page — the same thing **New**
+does, and it keeps working while the caret is in a composer. The
 drawer's **Open Agents** appears once that document exists.
 
 The page uses `window.marble.agent` and the same `<marble-conversation>`
@@ -543,30 +558,68 @@ Consequential answers are buttons, never completed gestures.
 **On a phone** (under 720 px) Deck is the default view when none is
 stored, and the chrome is a phone's: a one-row topbar with the document's
 title, an **asks pill** (open asks, on every view; tapping it goes to
-Deck), a ring for the worst signed-in meter (tapping it opens the
-**Fleet** sheet: every window, and **Stop all running**), and **⋯** for
-Filter, Settings and the other views; a translucent **thumb bar** at the
-sill that starts a new conversation (project, agent, prompt). A tapped row
-takes the screen at a phone density, enters from the right, and leaves by
-a swipe from the left edge. Sheets track the finger, rubber-band at the
-top, and commit by the sign of the velocity at release. The keyboard is
-read from `visualViewport` into one variable, `--vv-h`, that every phone
-layout uses. The document declares its own installability in its `<head>`
-(`apple-mobile-web-app-capable` and friends), so Safari's **Add to Home
-Screen** opens it without browser chrome; the host ships nothing for it.
-A backgrounded page closes its event streams and resyncs on return.
+Deck), a 22 px ring for the worst signed-in meter (tapping it opens the
+**Fleet** sheet: one row per usage window, and **Stop all running**), and
+**⋯** for a structured sheet — **New conversation**, the five views with
+the current one ticked, then Filter (a sheet holding the real filter
+panel) and Settings. A translucent **thumb bar** sits at the sill on
+every list view (Deck, List, Board, Folders) and starts a new
+conversation. Rows are two lines — title and age, then the activity, the
+outcome word in tone, or the target — with the folder colour as a leading
+rule and one dot vocabulary (running breathes, asking is a ring, review is
+ink, failed is red, idle is an outline). Band headers are sticky and
+count in a pill; empty bands hide, and an empty Deck says so once. A
+tapped row takes the screen and **the topbar becomes its header** (back
+chevron named for the view you left, the title, ⋯ for that
+conversation's actions); the pane keeps no bar of its own, the mast folds
+to one line (target · tags · a "+N here" tag for the other agents on the
+same target), and the composer's setup folds into one chip that opens the
+pickers as a sheet. It enters from the right and leaves by a swipe from
+the left edge, the view behind sliding up under it. Every control is at
+least 44 pt. Sheets are grouped lists; they track the finger, rubber-band
+at the top, commit by the sign of the velocity at release, scroll when
+tall, and stand on the keyboard (`--kb`, from `visualViewport`, beside
+`--vv-h`). Long presses select no text. The document declares its own
+installability in its `<head>` (`apple-mobile-web-app-capable` and
+friends), so Safari's **Add to Home Screen** opens it without browser
+chrome; the host ships nothing for it. A backgrounded page closes its
+event streams and resyncs on return.
 
 **Focus on a phone** is one column held by one number: the card in your
-hand is Full (the live pane sits over it), the next is a four-line digest,
-the one beyond a chip, and everything further a 10 px sliver, with sizes
-interpolated between as you drag. The card you grab stays under your
-finger; a release projects the flick, snaps to the nearest card and springs
-there (damping 1, or 0.8 when the flick carried at least one card). A tap
-springs to that card; a long press opens the actions sheet. Less room —
-the keyboard — demotes the neighbours and keeps the Full. Order is the
-desk's: folders in catalog order, oldest first, stable. Not on the phone:
-keep-open, Quick Look, cooling, and dragging between regions (**Move to
-folder** is on the sheet).
+hand is Full (the live pane sits under the card's own head, which stays
+the header), the next is a four-line digest, the one beyond a chip, and
+everything further a sliver — drawn as one **pile** per end of the stack
+(a deck seen edge-on, with a "+N" when it is deeper than three) rather
+than a run of hairlines. Sizes interpolate as you drag; the card you grab
+stays under your finger; a release projects the flick, snaps to the
+nearest card and springs there (damping 1, or 0.8 when the flick carried
+at least one card). A position track on the right edge shows while the
+stack is in hand; a one-time hint says what to do. A tap springs to that
+card; a long press opens the actions sheet. With the keyboard up the
+cards below the Full fold to slivers first so the composer sits on it.
+Order is the desk's: folders in catalog order, oldest first, stable. Not
+on the phone: keep-open, Quick Look, cooling, and dragging between
+regions (**Move to folder** is on the sheet).
+
+The filter popover's **Idle** row is a cut: chats nobody has touched past it
+are hidden, five hours by default. It hides and never files — Archive is a
+decision a person made about one conversation, and a clock does not get to
+make it for them forty times over — so sliding back to **All chats** returns
+every one of them and the store is never written to. The slider's track is
+the logistic of the log-duration, normalised so its ends land exactly on
+five minutes (right) and 12.5 days (left) and its middle exactly on five
+hours; that buys the hours, where the answer usually is, the middle half of
+the track. Arrow keys walk the named durations rather than the thousand raw
+steps; Home is All chats, End is five minutes. Behind the thumb, one bar per
+slice of the same axis says how many chats sit where, and every bar left of
+the thumb is one going away. Running, queued and asking chats are spared, as
+is the conversation you have open. The cut is the page's, like the search and
+the status filter — `localStorage`, never an op.
+
+The closed Filter button is **marked, not counted**: one dot when anything is
+hiding rows, and the tooltip names what. It used to carry the number of active
+filters, which reads as a notification you are meant to go and clear — and with
+the idle cut on by default it would never go away.
 
 Each row has a ⋯ menu for **Archive** / **Unarchive**, **Mark reviewed**,
 **Undo last turn**, and **Continue in** another CLI. Archiving the open thread

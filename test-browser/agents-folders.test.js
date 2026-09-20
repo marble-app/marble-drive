@@ -334,3 +334,61 @@ test('right-clicking a folder header ungroups it without losing the chats', asyn
   );
   assert.equal(await page.locator('.folder-group').count(), 0);
 });
+
+test('right-clicking a pane files the chat in it, group or none', async () => {
+  const { page } = await openAgents();
+  const ids = await page.evaluate(async () => {
+    const agent = window.marble.agent;
+    const loose = await agent.start({ provider: 'fake' });
+    const filed = await agent.start({ provider: 'fake' });
+    await agent.update(loose, { title: 'loose end' });
+    await agent.update(filed, { title: 'in the folder' });
+    await agent.createFolder({ conversationIds: [filed], name: 'Research', color: 'research' });
+    return { loose, filed };
+  });
+  await page.locator(`#list .conv[data-id="${ids.loose}"]`).click();
+  await page.locator('.pane > .dock-bar').waitFor();
+  // A chat with no group has no tick in its bar; the bar itself is the way in.
+  assert.equal(await page.locator('.pane > .dock-bar .dock-folder:not([hidden])').count(), 0);
+  await page.locator('.pane > .dock-bar').click({ button: 'right', position: { x: 120, y: 12 } });
+  await page.locator('.rail-menu').waitFor();
+  assert.equal((await page.locator('.rail-menu-head').first().textContent()).trim(), 'loose end');
+  await page.locator('.rail-menu button', { hasText: 'Research' }).click();
+  await page.waitForFunction(
+    (id) => document.querySelector('.pane > .dock-bar')?.dataset.id === id
+      && document.querySelector('.pane > .dock-bar')?.dataset.color === 'research',
+    ids.loose,
+  );
+  const home = await page.evaluate(async (id) => (await window.marble.agent.conversation(id)).meta.folderId, ids.loose);
+  const listed = await page.evaluate(() => window.marble.agent.folders());
+  assert.equal(home, listed.folders[0].id);
+  // And back out again, from the same menu.
+  await page.locator('.pane > .dock-bar').click({ button: 'right', position: { x: 120, y: 12 } });
+  await page.locator('.rail-menu button', { hasText: 'Take out of folder' }).click();
+  await page.waitForFunction(
+    () => !document.querySelector('.pane > .dock-bar')?.dataset.color,
+  );
+});
+
+test('the pane menu opens from the mast, and never over the transcript', async () => {
+  const { page } = await openAgents();
+  await page.evaluate(async () => {
+    const agent = window.marble.agent;
+    const id = await agent.start({ provider: 'fake' });
+    await agent.update(id, { title: 'read me' });
+  });
+  await page.locator('#list .conv').first().click();
+  const convo = page.locator('.pane > marble-conversation');
+  await convo.locator('.mast').waitFor();
+  await convo.locator('.tags').click({ button: 'right' });
+  await page.locator('.rail-menu').waitFor();
+  assert.equal((await page.locator('.rail-menu-head').first().textContent()).trim(), 'read me');
+  // Nothing on this menu opens the chat: it is already in front of you.
+  assert.equal(await page.locator('.rail-menu button', { hasText: /^Open/ }).count(), 0);
+  await page.keyboard.press('Escape');
+  await page.waitForFunction(() => document.querySelectorAll('.rail-menu').length === 0);
+  // Over words you might want to copy, the browser keeps its own menu.
+  await convo.locator('.log').click({ button: 'right' });
+  await page.waitForTimeout(200);
+  assert.equal(await page.locator('.rail-menu').count(), 0);
+});

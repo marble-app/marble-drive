@@ -234,6 +234,30 @@ test('a result that is not a success ends the turn failed, even without is_error
   assert.deepEqual(parseClaudeLine(JSON.stringify({ type: 'result', subtype: 'success', is_error: false, result: 'ok' })).at(-1), { type: 'done', ok: true });
 });
 
+// What the CLI prints when it resumes a session holding a notification it
+// never delivered: the notification, then a result with no model turns behind
+// it, and only then does it read the prompt it was given.
+test('a result with no model turns behind it is not the end of a turn', () => {
+  const flush = { type: 'result', subtype: 'success', is_error: false, num_turns: 0, result: '', total_cost_usd: 14.5 };
+  assert.deepEqual(parseClaudeLine(JSON.stringify(flush)), []);
+  // The same line with a turn behind it is an answer, and still ends the turn.
+  assert.deepEqual(parseClaudeLine(JSON.stringify({ ...flush, num_turns: 1, result: 'done' })).at(-1), { type: 'done', ok: true });
+});
+
+test('background work is counted from the CLI\'s own task lifecycle', () => {
+  const state = {};
+  const line = (value) => parseClaudeLine(JSON.stringify(value), state);
+  const started = (id) => line({ type: 'system', subtype: 'task_started', task_id: id, description: id });
+  const ended = (id, status) => line({ type: 'system', subtype: 'task_notification', task_id: id, status });
+  assert.deepEqual(started('a'), [{ type: 'background', pending: 1 }]);
+  assert.deepEqual(started('b'), [{ type: 'background', pending: 2 }]);
+  assert.deepEqual(ended('a', 'completed'), [{ type: 'background', pending: 1 }]);
+  assert.deepEqual(ended('b', 'stopped'), [{ type: 'background', pending: 0 }]);
+  // A notification for work this process never started — a task orphaned by an
+  // earlier session — counts for nothing.
+  assert.deepEqual(ended('gone', 'stopped'), [{ type: 'background', pending: 0 }]);
+});
+
 test('a subagent\'s deltas and tool results are not the turn\'s', () => {
   const delta = { type: 'stream_event', parent_tool_use_id: 'toolu_1', event: { type: 'content_block_delta', delta: { type: 'text_delta', text: 'inner' } } };
   const result = { type: 'user', parent_tool_use_id: 'toolu_1', message: { role: 'user', content: [{ type: 'tool_result', tool_use_id: 't9', content: 'inner' }] } };
