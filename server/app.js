@@ -99,6 +99,8 @@ const RUNTIME = {
   'choice-question.js': () => path.join(REPO, 'runtime', 'choice-question.js'),
   'agent-usage-charts.js': () => path.join(REPO, 'runtime', 'agent-usage-charts.js'),
   'collab.js': () => path.join(REPO, 'runtime', 'collab.js'),
+  // The callout: a conversation drawn at the region of a document it is about.
+  'agent-callout.js': () => path.join(REPO, 'runtime', 'agent-callout.js'),
 };
 
 /** The ids a document's html, head and body carry. */
@@ -192,6 +194,8 @@ export async function createDrive(config, { log = console, agentProviders = null
       tags += `\n<script src="/runtime/agent-usage-charts.js" data-marble-transient></script>`;
     }
     tags += `\n<script src="/runtime/collab.js" data-marble-transient></script>`;
+    // After collab.js: the callout hangs its card with the zone's own geometry.
+    if (agents) tags += `\n<script src="/runtime/agent-callout.js" data-marble-transient></script>`;
     return source.includes('</body>')
       ? source.replace(/<\/body>/i, () => `${tags}\n</body>`)
       : source + tags;

@@ -1322,3 +1322,15 @@ test('a message from another agent renders as a from-bubble that opens the sende
   await sent.waitFor();
   assert.deepEqual(errors, []);
 });
+
+test('arriving with ?open=<id> opens that chat and spends the parameter', async () => {
+  await host.reset();
+  const { page } = await host.newPage();
+  await page.goto(`${host.base}/a/garden`);
+  await page.waitForFunction(() => Boolean(window.marble?.agent));
+  const id = await page.evaluate(() => window.marble.agent.start({ provider: 'fake' }));
+  await page.goto(`${host.base}/a/Agents?open=${id}`);
+  await page.waitForFunction((cid) => document.querySelector(`marble-conversation[conversation="${cid}"]`) !== null, id);
+  assert.equal(new URL(page.url()).searchParams.has('open'), false);
+  await page.close();
+});

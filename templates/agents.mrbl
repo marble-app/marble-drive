@@ -10383,8 +10383,17 @@ __ICON__
           await load();
           paintAges();
         });
-        const saved = recalled(OPEN_KEY);
-        if (saved) await open(saved);
+        // Arrived from a callout's Open in Agents: that chat wins over the
+        // one this tab last had open, and the parameter is spent so a reload
+        // does not reopen it.
+        const arrived = new URL(location.href);
+        const wanted = arrived.searchParams.get('open');
+        if (wanted) {
+          arrived.searchParams.delete('open');
+          history.replaceState(history.state, '', arrived.href);
+        }
+        const first = wanted || recalled(OPEN_KEY);
+        if (first) await open(first).catch(() => {});
         addEventListener('marble:agent-settings-saved', async () => {
           try {
             for (const provider of await api.providers()) labels.set(provider.id, provider);

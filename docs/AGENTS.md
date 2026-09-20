@@ -98,6 +98,51 @@ showing, and *Ask an agent to combine* to send both to an agent that writes a
 third. A turn's ending forgets what it touched, and an undo claims nothing it
 restores, so an agent's claims never outlive its work.
 
+## Summoning an agent in a document
+
+Select something in any document and a small violet handle appears at the
+selection's corner, where the construction zone's label will hang once an
+agent is working there. Click it, or press `⌘J` while the selection is live,
+and a **callout** opens: a card holding a real conversation, anchored to the
+region it is about. With no selection `⌘J` still toggles the drawer.
+
+The selection is every addressed element the range crosses. A fully selected
+list travels as the list; three paragraphs picked out of a section travel as
+three paragraphs. Hold **Option** to pick elements one at a time instead — the
+element under the pointer is outlined, a click toggles it, **Escape** clears.
+
+The card's composer is the composer: setups, model, effort, and the Project
+picker. Choosing a registered project makes it a coding turn in that
+repository, which is how "fix the code behind this" works with no new
+mechanism. **Continue in `<title>`** sends the brief to the chat this tab was
+last in, if it is idle, instead of starting a new one — the same agent, with
+its memory, brought to a new region.
+
+While the agent works the card stands where the zone's label would, showing
+`Agent · <what it is doing>`, and the label itself steps back: one object on
+the page, not two saying the same thing. Every element the turn changes keeps
+a thin violet edge — the **trail** — until the chat is reviewed. When the turn
+ends the card reads `Changed 4 elements · Undo · Done`. *Undo* is the turn's
+own undo. *Done* marks the chat reviewed, clears the trail, and puts the
+callout away: seeing it and saying done is reviewing it.
+
+`×` folds the card to a pill with the chat's name, or with what its last turn
+did if that ended while it was folded. The pill reopens the card. While the
+agent is still working the pill steps aside altogether, because the zone's own
+label is the folded callout — *Open chat* there brings the card back.
+**Open beside** moves the chat to the drawer; **Open in Agents** leaves for the
+Agents page with that chat open. Undo and Done live in the card, never on the
+pill: they come after looking.
+
+A reload rebuilds callouts for chats about this document that are running,
+asking, or unreviewed, at the region their last turn was about — at most six,
+newest first. A chat whose region is no longer on the page draws nothing; the
+drawer still lists it. A prompt sent from the drawer with a selection gets a
+callout as well, so both paths end at the same object.
+
+On a phone the handle opens the drawer with the selection attached; there is
+no anchored card. The Agents page draws no callouts of its own.
+
 ## What a full agent can do
 
 Every provider runs at capability `full` unless it declares `documents` or

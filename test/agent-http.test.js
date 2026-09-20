@@ -721,6 +721,12 @@ test("a document is served with the agent scripts after the Drive's, when agents
     assert.match(response.headers.get('content-type'), /javascript/);
   }
   assert.equal((await fetch(`${base}/runtime/choice-question.js`)).status, 200);
+  assert.match(
+    page,
+    /<script src="\/runtime\/collab\.js"[^>]*><\/script>\n<script src="\/runtime\/agent-callout\.js" data-marble-transient><\/script>/,
+    'the callout script follows collab.js when agents are on',
+  );
+  assert.equal((await fetch(`${base}/runtime/agent-callout.js`)).status, 200);
 });
 
 test('a document that presents agents itself gets the API and the conversation element, not a second drawer script skip', async () => {

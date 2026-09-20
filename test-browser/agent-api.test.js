@@ -17,9 +17,19 @@ const SCRIPTS = {
 const host = await startDrive({ scripts: SCRIPTS });
 test.after(() => host.close());
 
+// A page left open keeps its streams, and only one page at a time holds the
+// browser's focus — which is half of what a selection means.
+const pages = [];
+const closePages = async () => {
+  for (const page of pages.splice(0)) await page.close().catch(() => {});
+};
+test.after(closePages);
+
 const open = async (path = 'garden') => {
+  await closePages();
   await host.reset();
   const { page, errors } = await host.newPage();
+  pages.push(page);
   await page.goto(`${host.base}/a/${path}`);
   await page.waitForFunction(() => Boolean(window.marble?.agent));
   return { page, errors };
@@ -227,6 +237,44 @@ test('a failing call rejects with the host’s own words', async () => {
   assert.equal(message, 'no provider "nope"');
 });
 
+const selectBetween = (page, fromId, fromOffset, toId, toOffset) => page.evaluate(([a, ao, b, bo]) => {
+  const from = document.querySelector(`[data-marble-id="${a}"]`).firstChild;
+  const to = document.querySelector(`[data-marble-id="${b}"]`).firstChild;
+  const range = document.createRange();
+  range.setStart(from, ao);
+  range.setEnd(to, bo === -1 ? to.length : bo);
+  getSelection().removeAllRanges();
+  getSelection().addRange(range);
+}, [fromId, fromOffset, toId, toOffset]);
+
+test('a selection carries every addressed element it crosses, and a fully covered list is its list', async () => {
+  const { page } = await open();
+  // From inside the paragraph to the end of the second question: p, then the
+  // whole list, which coalesces to q.
+  await selectBetween(page, 'p', 5, 'q2', -1);
+  await page.waitForFunction(() => window.marble.agent.context().selection.length === 2);
+  assert.deepEqual((await page.evaluate(() => window.marble.agent.context())).selection, ['p', 'q']);
+});
+
+test('a selection that stops inside a list keeps the items, not the list', async () => {
+  const { page } = await open();
+  await selectBetween(page, 'q1', 0, 'q2', 4);
+  await page.waitForFunction(() => window.marble.agent.context().selection.length === 2);
+  assert.deepEqual((await page.evaluate(() => window.marble.agent.context())).selection, ['q1', 'q2']);
+});
+
+test('a selection of the whole page never names the body', async () => {
+  const { page } = await open();
+  await page.evaluate(() => {
+    const range = document.createRange();
+    range.selectNodeContents(document.body);
+    getSelection().removeAllRanges();
+    getSelection().addRange(range);
+  });
+  await page.waitForFunction(() => window.marble.agent.context().selection.length > 0);
+  assert.deepEqual((await page.evaluate(() => window.marble.agent.context())).selection, ['h', 'p', 'q']);
+});
+
 test('the summary stream reports conversations changing', async () => {
   const { page } = await open();
   await page.evaluate(() => {
@@ -246,4 +294,32 @@ test('the summary stream reports conversations changing', async () => {
   const summary = await page.evaluate(() => window.summaryForTest);
   assert.ok(summary.id);
   assert.ok('needsReview' in summary);
+});
+
+test('a selection survives the collapse that focus moving into chrome causes', async () => {
+  const { page } = await open();
+  await page.evaluate(() => {
+    const range = document.createRange();
+    range.selectNodeContents(document.querySelector('[data-marble-id="h"]'));
+    getSelection().removeAllRanges();
+    getSelection().addRange(range);
+    const chrome = document.createElement('div');
+    chrome.setAttribute('data-marble-transient', '');
+    chrome.innerHTML = '<input id="away-input">';
+    document.body.append(chrome);
+  });
+  await page.waitForFunction(() => window.marble.agent.context().selection.length === 1);
+  // What a browser really does when focus leaves the page for a panel: the
+  // selection collapses to the document root, not into the panel.
+  await page.focus('#away-input');
+  await page.evaluate(() => getSelection().collapse(document.body, 0));
+  await page.waitForTimeout(80);
+  assert.deepEqual((await page.evaluate(() => window.marble.agent.context())).selection, ['h']);
+
+  // Clicking in the document with nothing focused still means nothing.
+  await page.evaluate(() => {
+    document.getElementById('away-input').blur();
+    getSelection().collapse(document.querySelector('[data-marble-id="p"]').firstChild, 1);
+  });
+  await page.waitForFunction(() => window.marble.agent.context().selection.length === 0);
 });

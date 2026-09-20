@@ -67,6 +67,13 @@
         100% { box-shadow: 0 0 0 0 transparent; }
       }
 
+      /* Where an agent's turn landed, until the chat is reviewed. An inset
+         rule: it cannot move layout, it survives the element's own overflow,
+         and it goes when the class goes. */
+      html.marble-collab-host .marble-trail {
+        box-shadow: inset 2px 0 0 color-mix(in srgb, #6d55d4 78%, var(--ink, #222));
+      }
+
       .marble-fork {
         display: flex;
         flex-wrap: wrap;
@@ -415,6 +422,14 @@
       return 'Agent · working';
     }
 
+    // The callout layer hangs its card where the zone hangs its label, and
+    // says the same thing in its head; both need the same answer to "where is
+    // this set of ids" and "what is it doing". Frozen: a helper, not a surface
+    // to extend.
+    if (window.marble && !window.marble.collab) {
+      window.marble.collab = Object.freeze({ tapeTarget, phaseLabel });
+    }
+
     // A zone is drawn by a client named `agent:<conversation>`; an undo writes
     // as `agent-undo:<conversation>` and draws none, so only the first form is
     // ever a chat you could be taken to.
@@ -523,6 +538,17 @@
       return zones;
     }
 
+    // A callout card docked to a zone *is* that zone's label; the pill beside
+    // it would say the same thing twice. The layer says so with docked and
+    // undocked, and takes it back when it folds.
+    const docked = new Set();
+    document.addEventListener('marble-callout:docked', (event) => {
+      if (event.detail?.id) { docked.add(event.detail.id); paintZones(); }
+    });
+    document.addEventListener('marble-callout:undocked', (event) => {
+      if (event.detail?.id) { docked.delete(event.detail.id); paintZones(); }
+    });
+
     function paintZones() {
       placed = [];
       sizes?.disconnect();
@@ -560,7 +586,13 @@
           open.type = 'button';
           open.textContent = 'Open chat';
           open.setAttribute('aria-label', 'Open the conversation working here');
-          open.addEventListener('click', () => openConversation(conversation));
+          open.addEventListener('click', () => {
+            // A callout on this page for the same chat gets first refusal:
+            // being taken to a card two inches away is not being taken anywhere.
+            const offer = new CustomEvent('marble-callout:open', { cancelable: true, detail: { id: conversation } });
+            if (!document.dispatchEvent(offer)) return;
+            openConversation(conversation);
+          });
           label.append(open);
         }
         const hide = document.createElement('button');
@@ -569,6 +601,7 @@
         hide.setAttribute('aria-label', 'Hide construction zone');
         hide.addEventListener('click', () => setZonesHidden(true));
         label.append(hide);
+        if (conversation && docked.has(conversation)) label.hidden = true;
         frame.append(label);
         zoneLayer.append(frame);
         place(frame, target);
@@ -660,15 +693,45 @@
     }).observe(document.documentElement, { subtree: true, childList: true, characterData: true, attributes: true });
     const sizes = typeof ResizeObserver === 'function' ? new ResizeObserver(scheduleRelayout) : null;
 
+    // The trail: what an agent's turn touched, kept per conversation so the
+    // one that wrote it is the one that can take it back. An undo writes as
+    // `agent-undo:<id>`, which lifts the trail its own turn left.
+    const trails = new Map();
+    const trailClient = (client) => {
+      const name = String(client ?? '');
+      if (name.startsWith('agent-undo:')) return { client: `agent:${name.slice('agent-undo:'.length)}`, undo: true };
+      if (name.startsWith('agent:')) return { client: name, undo: false };
+      return null;
+    };
+    const clearTrail = (client) => {
+      for (const id of trails.get(client) ?? []) byId(id)?.classList.remove('marble-trail');
+      trails.delete(client);
+    };
+    document.addEventListener('marble-callout:reviewed', (event) => {
+      if (event.detail?.id) clearTrail(`agent:${event.detail.id}`);
+    });
+
     document.addEventListener('marble:ops', ({ detail }) => {
       const ops = detail?.ops ?? [];
       const forked = new Set();
+      const trail = trailClient(detail?.client);
       for (const op of ops) {
         if (op.type === 'insert' && /<marble-alt[\s>]/.test(op.html ?? '')) {
           const id = op.html.match(/data-marble-id="([^"]+)"/)?.[1];
           if (id) forked.add(id);
         }
         if (op.id) flash(op.id);
+        if (trail && op.id) {
+          const set = trails.get(trail.client) ?? new Set();
+          if (trail.undo) {
+            set.delete(op.id);
+            byId(op.id)?.classList.remove('marble-trail');
+          } else {
+            set.add(op.id);
+            byId(op.id)?.classList.add('marble-trail');
+          }
+          trails.set(trail.client, set);
+        }
       }
       deriveAlts();
       for (const id of forked) wireFork(byId(id));

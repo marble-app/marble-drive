@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 
-import { startDrive } from './harness.js';
+import { GARDEN, startDrive } from './harness.js';
 
 const FORKED = `<!doctype html>
 <html><head><meta charset="utf-8"><title>Fork</title>
@@ -71,7 +71,7 @@ const CUSTOM = `<!doctype html>
 
 const host = await startDrive({
   agents: true,
-  documents: { forked: FORKED, authored: AUTHORED, typing: TYPING, deep: DEEP, custom: CUSTOM },
+  documents: { forked: FORKED, authored: AUTHORED, typing: TYPING, deep: DEEP, custom: CUSTOM, garden: GARDEN },
 });
 test.after(() => host.close());
 
@@ -443,4 +443,95 @@ test('a conversation on the page it is working in scrolls there without a naviga
   await page.evaluate(() => dispatchEvent(new CustomEvent('marble:jump-to', { detail: { ids: ['deep'] } })));
   await page.waitForFunction(() => scrollY > 1000, null, { timeout: 5000 });
   assert.equal(await page.evaluate(() => location.hash), '', 'no hash left in the history to get back past');
+});
+
+// ---------------------------------------------------------------- the trail
+// These drive collab.js the way the rest of this file does, with the events
+// the carrier and the host really send. The end-to-end path — a real turn
+// leaving a real trail — is test-browser/callout.test.js.
+
+const onTyping = async () => {
+  await host.reset();
+  const { page } = await host.newPage();
+  await page.goto(`${host.base}/a/typing`);
+  await page.waitForFunction(() => document.documentElement.classList.contains('marble-collab-host'));
+  return page;
+};
+
+const agentOps = (page, client, ops) => page.evaluate(([c, o]) => {
+  document.dispatchEvent(new CustomEvent('marble:ops', { detail: { ops: o, client: c } }));
+}, [client, ops]);
+
+const zoneFor = (page, client, detail = {}) => page.evaluate(([c, d]) => {
+  document.dispatchEvent(new CustomEvent('marble:presence', { detail: { client: c, ...d } }));
+}, [client, detail]);
+
+test('an agent op leaves a trail on the element, and reviewing the chat clears it', async () => {
+  const page = await onTyping();
+  await agentOps(page, 'agent:c1', [{ type: 'setText', id: 'h', text: 'Backlog' }]);
+  await page.locator('[data-marble-id="h"].marble-trail').waitFor();
+  // The flash is an animated box-shadow over the same element; the trail is
+  // what is left when it has gone.
+  await page.locator('[data-marble-id="h"].marble-flash').waitFor({ state: 'detached' });
+  const shadow = await page.locator('[data-marble-id="h"]').evaluate((el) => getComputedStyle(el).boxShadow);
+  assert.match(shadow, /inset/, 'the trail is an inset rule, not a border');
+  await page.evaluate(() => document.dispatchEvent(new CustomEvent('marble-callout:reviewed', { detail: { id: 'c1' } })));
+  assert.equal(await page.locator('[data-marble-id="h"].marble-trail').count(), 0);
+});
+
+test('an undo of an agent turn takes the trail back off', async () => {
+  const page = await onTyping();
+  await agentOps(page, 'agent:c1', [{ type: 'setText', id: 'h', text: 'Backlog' }]);
+  await page.locator('[data-marble-id="h"].marble-trail').waitFor();
+  await agentOps(page, 'agent-undo:c1', [{ type: 'setText', id: 'h', text: 'Head' }]);
+  assert.equal(await page.locator('[data-marble-id="h"].marble-trail').count(), 0);
+});
+
+test("a person's own ops leave no trail", async () => {
+  const page = await onTyping();
+  await agentOps(page, 'person:someone', [{ type: 'setText', id: 'h', text: 'Mine' }]);
+  assert.equal(await page.locator('.marble-trail').count(), 0);
+});
+
+test('a claimed zone hides its label, and Open chat can be taken by a callout', async () => {
+  const page = await onTyping();
+  await zoneFor(page, 'agent:c1', { ids: ['p'], phase: 'writing', note: 'Rename the heading.' });
+  await page.locator('.marble-zone-label').waitFor();
+  await page.evaluate(() => document.dispatchEvent(new CustomEvent('marble-callout:docked', { detail: { id: 'c1' } })));
+  await page.locator('.marble-zone-label[hidden]').waitFor({ state: 'attached' });
+  await page.evaluate(() => document.dispatchEvent(new CustomEvent('marble-callout:undocked', { detail: { id: 'c1' } })));
+  await page.locator('.marble-zone-label:not([hidden])').waitFor();
+  const taken = await page.evaluate(() => new Promise((resolve) => {
+    document.addEventListener('marble-callout:open', (event) => { event.preventDefault(); resolve(event.detail.id); }, { once: true });
+    document.querySelector('.marble-zone-label button').click();
+  }));
+  assert.equal(taken, 'c1');
+  assert.equal(
+    await page.evaluate(() => Boolean(document.querySelector('marble-agent-drawer')?.isOpen)),
+    false,
+    'the drawer did not open: the callout took the click',
+  );
+});
+
+test('a zone nobody claimed still opens its chat in the dock', async () => {
+  const page = await onTyping();
+  await zoneFor(page, 'agent:c1', { ids: ['p'], phase: 'writing' });
+  await page.getByRole('button', { name: 'Open the conversation working here' }).click();
+  await page.waitForFunction(() => document.querySelector('marble-agent-drawer')?.isOpen === true);
+});
+
+test('marble.collab exposes the zone geometry and label helpers', async () => {
+  await host.reset();
+  const { page } = await host.newPage();
+  await page.goto(`${host.base}/a/garden`);
+  await page.waitForFunction(() => document.documentElement.classList.contains('marble-collab-host'));
+  const out = await page.evaluate(() => {
+    const els = ['q1', 'q2'].map((id) => document.querySelector(`[data-marble-id="${id}"]`));
+    return {
+      tape: window.marble.collab.tapeTarget(els)?.getAttribute('data-marble-id'),
+      body: window.marble.collab.tapeTarget([document.body]),
+      label: window.marble.collab.phaseLabel({ phase: 'writing', note: 'Rename the heading.' }),
+    };
+  });
+  assert.deepEqual(out, { tape: 'q', body: null, label: 'Agent · rename the heading' });
 });
