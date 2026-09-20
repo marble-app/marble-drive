@@ -72,11 +72,13 @@ POST /agent/conversations/:id/turns {prompt, context:{target, viewing, selection
 
 ## While an agent works
 
-A violet box on the page is where the agent is, and the pill under it says what
+A box on the page is where the agent is, and the pill under it says what
 it is doing — `Agent · reading`, or the note it gave its edit
-(`Agent · rename the heading`). The colour is the agent's, not the document's:
-every accent in this drive is a muted blue, sage, terracotta or gold, so a
-violet frame is never a control of the app you are in. The wash inside it is
+(`Agent · rename the heading`). It is drawn in the document's own accent, so
+the agent belongs to the page it is standing on; what says *someone else is
+here* is the shape, the wash and the label, not a colour held apart. A
+document that declares no accent gets the agent's violet instead. The wash
+inside it is
 thin, and the box takes no clicks — what is under it is still yours to select
 and type in. It follows the element as the page reflows.
 
@@ -100,7 +102,7 @@ restores, so an agent's claims never outlive its work.
 
 ## Summoning an agent in a document
 
-Select something in any document and a small violet comment bubble appears at the
+Select something in any document and a small comment bubble appears at the
 selection's corner, where the construction zone's label will hang once an
 agent is working there. Click it, or press `⌘J` while the selection is live,
 and a **callout** opens: a card holding a real conversation, anchored to the
@@ -121,7 +123,7 @@ its memory, brought to a new region.
 While the agent works the card stands where the zone's label would, showing
 `Agent · <what it is doing>`, and the label itself steps back: one object on
 the page, not two saying the same thing. Every element the turn changes keeps
-a thin violet edge — the **trail** — until the chat is reviewed. When the turn
+a thin edge in that accent — the **trail** — until the chat is reviewed. When the turn
 ends the card reads `Changed 4 elements · Undo · Done`. *Undo* is the turn's
 own undo. *Done* marks the chat reviewed, clears the trail, and puts the
 callout away: seeing it and saying done is reviewing it.

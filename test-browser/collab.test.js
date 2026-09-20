@@ -362,7 +362,7 @@ const paint = (page, detail) => page.evaluate((d) => {
   document.dispatchEvent(new CustomEvent('marble:presence', { detail: d }));
 }, detail);
 
-test('the zone is a closed box with a wash, in a colour the document does not own', async () => {
+test('the zone is a closed box with a wash, and it wears the document’s own accent', async () => {
   await host.reset();
   const { page } = await host.newPage();
   await page.goto(`${host.base}/a/forked`);
@@ -384,7 +384,21 @@ test('the zone is a closed box with a wash, in a colour the document does not ow
   assert.notEqual(box.fill, 'rgba(0, 0, 0, 0)', 'the box is washed, not empty');
   assert.match(box.fill, /0\.1\d?\)?$/, 'and the wash is thin enough to read through');
   assert.equal(box.clicks, 'none', 'the work under the wash is still yours to click');
-  assert.notEqual(box.color, box.accent, 'the agent does not wear the app’s accent');
+  // This fixture names no accent, so the agent falls back to its own violet
+  // rather than to nothing.
+  assert.equal(box.accent, '', 'the fixture declares no accent');
+  // A color-mix() resolves to color(srgb …), not rgb(…).
+  assert.match(box.color, /^(rgb|color\()/, 'and the zone is still drawn in something');
+
+  // A document that does name an accent is what the agent works in. The zone
+  // used to be deliberately outside every document's palette; its shape, its
+  // wash and its label carry "someone else is here" now, and belonging to the
+  // page it stands on costs nothing.
+  const wearing = await page.evaluate(() => {
+    document.documentElement.style.setProperty('--accent-ink', 'rgb(90, 114, 71)');
+    return getComputedStyle(document.querySelector('.marble-zone')).borderTopColor;
+  });
+  assert.equal(wearing, 'rgb(90, 114, 71)', 'the zone wears the document’s accent');
 });
 
 test('Open chat opens the conversation in the dock, and on the Agents page on its own stage', async () => {

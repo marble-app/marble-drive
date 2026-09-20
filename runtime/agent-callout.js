@@ -23,20 +23,22 @@
     .marble-callout-layer {
       position: fixed; inset: 0; width: auto; height: auto; margin: 0; padding: 0; border: 0;
       background: none; overflow: visible; pointer-events: none; color: inherit;
-      --callout-mark: color-mix(in srgb, #6d55d4 78%, var(--ink, #222));
+      --callout-mark: var(--accent-ink, color-mix(in srgb, #6d55d4 78%, var(--ink, #222)));
       --callout-paper: var(--card, var(--paper, #fff));
       --callout-ink: var(--ink, #222);
       font: 13px/1.4 var(--ui-font, system-ui, -apple-system, "Segoe UI", sans-serif);
     }
-    /* A comment bubble, not a dot. A disc is a marker — it says something is
-       here and nothing about what. The bubble says the one true thing: there
-       is something to be said about this. It needs the real tail and two
-       written lines: a rounded box with three dots in it is the glyph every
-       interface uses for *more options*, which is the wrong promise. */
+    /* A drawn speech bubble, outlined, with a beak at the lower left — the
+       comment icon, not a marker. A filled disc says only that something is
+       here; a rounded box with dots in it is every interface's *more
+       options*. The interior is the page's own paper so the text under it
+       does not read through, and the drop-shadow is on the glyph rather than
+       a box, so the mark has no box. */
     .marble-callout-handle {
-      position: fixed; width: 26px; height: 20px; border-radius: 7px; border: 0; padding: 0;
-      background: var(--callout-mark); box-shadow: 0 1px 4px rgba(0,0,0,.28); cursor: pointer;
+      position: fixed; width: 24px; height: 24px; border: 0; padding: 0;
+      background: none; cursor: pointer; color: var(--callout-mark);
       pointer-events: auto; display: grid; place-items: center;
+      filter: drop-shadow(0 1px 2px rgba(0,0,0,.28));
       opacity: 1; transform: none;
       /* It grows out of the corner it hangs from, not out of its own middle:
          scaling about the centre walks the disc away from the selection it
@@ -50,20 +52,6 @@
                   display 160ms allow-discrete;
     }
     @starting-style { .marble-callout-handle { opacity: 0; transform: scale(.4); } }
-    /* The tail, cut from two borders, hanging off the bottom-left corner —
-       the corner nearest the text the bubble is about. */
-    .marble-callout-handle::before {
-      content: ''; position: absolute; left: 4px; bottom: -4px;
-      border-left: 6px solid var(--callout-mark);
-      border-bottom: 5px solid transparent;
-    }
-    /* Two lines of writing. The second is drawn as the first one's shadow,
-       pulled in at both ends so it reads as a shorter line, the way the last
-       line of a paragraph is short. */
-    .marble-callout-handle::after {
-      content: ''; width: 12px; height: 2px; border-radius: 1px; background: #fff;
-      box-shadow: -1.5px 4px 0 -0.5px #fff;
-    }
     .marble-callout-handle[hidden] { display: none; opacity: 0; transform: scale(.4); }
     .marble-callout-handle:hover { transform: scale(1.12); }
     .marble-callout {
@@ -520,6 +508,9 @@
     handle.type = 'button';
     handle.className = 'marble-callout-handle';
     handle.setAttribute('aria-label', 'Ask an agent about this selection');
+    // Stroked in the mark, filled with the page's paper: the same two colours
+    // the zone uses, so the thing you summon it with already looks like it.
+    handle.innerHTML = '<svg viewBox="0 0 24 24" width="24" height="24" aria-hidden="true" fill="var(--callout-paper)" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"><path d="M6.5 15.1A8 8 0 1 1 10.9 18.2L4.9 21.1a.6.6 0 0 1-.72-.85Z"/></svg>';
     handle.hidden = true;
     // A mousedown on a button would collapse the very selection it is about.
     handle.addEventListener('pointerdown', (event) => event.preventDefault());

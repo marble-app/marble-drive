@@ -1806,7 +1806,7 @@
        the row and the box on the page are visibly one thing, and neither is
        mistaken for a control of the app's. */
     .zone-jump {
-      --zone-mark: color-mix(in srgb, #6d55d4 78%, var(--ink));
+      --zone-mark: var(--accent-ink, color-mix(in srgb, #6d55d4 78%, var(--ink)));
       align-self: flex-start; display: inline-flex; align-items: center; gap: 6px;
       max-width: 100%; margin-top: 1px; padding: 3px 9px 3px 8px;
       appearance: none; cursor: pointer;

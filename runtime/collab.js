@@ -71,7 +71,7 @@
          rule: it cannot move layout, it survives the element's own overflow,
          and it goes when the class goes. */
       html.marble-collab-host .marble-trail {
-        box-shadow: inset 2px 0 0 color-mix(in srgb, #6d55d4 78%, var(--ink, #222));
+        box-shadow: inset 2px 0 0 var(--accent-ink, color-mix(in srgb, #6d55d4 78%, var(--ink, #222)));
       }
 
       .marble-fork {
@@ -174,10 +174,15 @@
            outside the vocabulary every accent here is drawn from (muted blue,
            sage, terracotta, gold): someone else's hands, not a control.
 
-           Dark mode here is per-document, not per-OS, so the violet is carried
-           toward the document's own ink — darker on light paper, lighter on
-           dark, the same hue either way. */
-        --zone-mark: color-mix(in srgb, #6d55d4 78%, var(--ink, #111));
+           The agent works in the document's own accent. It used to wear one
+           violet, chosen to sit outside every document's palette so that an
+           agent could never be read as a control of the app it was standing
+           in; the zone's shape, its wash and its label carry that now, and
+           belonging to the page it is on costs nothing.
+           The fallback is that violet, and it keeps the old carry toward the
+           page's ink: dark mode here is per-document, not per-OS, so a fixed
+           literal has to adapt itself, where a document's own accent already has. */
+        --zone-mark: var(--accent-ink, color-mix(in srgb, #6d55d4 78%, var(--ink, #111)));
         --zone-fill: color-mix(in srgb, var(--zone-mark) 12%, transparent);
       }
       .marble-zone {
