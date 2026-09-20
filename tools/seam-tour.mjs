@@ -1,7 +1,7 @@
 // A seam tour: drag the bar between the field and the stage all the way in,
 // a frame at a time, and see what the field does with the width it is left.
 import fsp from 'node:fs/promises';
-import { GARDEN, startDrive } from '/Users/bryanmin/Development/3rd-year-projects/marble-drive/test-browser/harness.js';
+import { GARDEN, startDrive } from '../test-browser/harness.js';
 
 const AGENTS_TEMPLATE = '/Users/bryanmin/Development/3rd-year-projects/marble-drive/templates/agents.mrbl';
 const out = process.argv[2] ?? '/tmp/seam-tour';

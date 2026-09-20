@@ -1,9 +1,9 @@
 """Regenerate drive/Agents.mrbl from templates/agents.mrbl when the template
 has gained or lost __ID__ slots: align the two line-wise (ids masked) with
 difflib, carry an id across for a slot inside an equal run, mint for the rest.
-Usage: python3 scratchpad/regen-live-aligned.py [--write]"""
+Usage: python3 tools/regen-live-aligned.py [--write]"""
 import re, sys, difflib, random, pathlib
-root = pathlib.Path('/Users/bryanmin/Development/3rd-year-projects/marble-drive')
+root = pathlib.Path(__file__).resolve().parent.parent
 tpl = (root / 'templates/agents.mrbl').read_text()
 live = (root / 'drive/Agents.mrbl').read_text()
 ID_RE = re.compile(r'data-marble-id="([a-z0-9]{8})"')

@@ -1,7 +1,7 @@
 // A phone tour: every phone surface, plus a touch-target and overflow audit.
 import fsp from 'node:fs/promises';
 import path from 'node:path';
-import { GARDEN, startDrive } from '/Users/bryanmin/Development/3rd-year-projects/marble-drive/test-browser/harness.js';
+import { GARDEN, startDrive } from '../test-browser/harness.js';
 
 const AGENTS_TEMPLATE = '/Users/bryanmin/Development/3rd-year-projects/marble-drive/templates/agents.mrbl';
 const out = process.argv[2] ?? '/tmp/ph-tour';

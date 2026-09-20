@@ -67,6 +67,27 @@ docker compose up -d
 
 The image holds the host; the drive is a volume. See [docs/DEPLOY.md](docs/DEPLOY.md).
 
+## What is in the repository, and what is not
+
+The repository is the host: the code that serves a drive, the templates and
+starters it seeds one from, the tests, and the tools in `tools/` that keep it
+honest. Cloning it gives you an empty drive and everything needed to fill one.
+
+What it does not carry, on purpose:
+
+- **Your drive.** `drive/` is gitignored. A change to a document is saved the
+  moment it is made — that is what the drive is for — and `.marble/` under it is
+  the history. There is nothing to commit after editing a document.
+- **A skill's memory.** `.claude/skills/my-day/` is code and stays; its `state/`
+  is what the skill remembers about its one reader, changes every run, and is
+  ignored.
+- **This machine.** `.env`, `.claude/settings.local.json`, `.codex/`, worktrees.
+- **What a session leaves behind.** `scratchpad/` and `.superpowers/`. A script
+  worth keeping moves to `tools/`; the rest is never read back.
+
+A test that checks one of your own documents lives beside that document, in the
+drive, and is run by hand — the suite in `test/` runs on temporary drives only.
+
 ## Reading it
 
 | | |

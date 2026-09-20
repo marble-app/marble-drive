@@ -1,3 +1,11 @@
+# What this repository carries is the host: the code that serves a drive, the
+# templates and starters it seeds one from, the tests, and the tools that keep
+# it honest. What it does not carry is anybody's drive, anybody's machine, or
+# anything a session leaves behind. If a change is to your documents, it is
+# already saved — that is what the drive is for — and there is nothing to
+# commit.
+
+# ---- dependencies and secrets ----------------------------------------------
 node_modules/
 .env
 .env.local
@@ -5,30 +13,36 @@ node_modules/
 # copy the drive, and `.marble/` is conversation data. The glob covers the
 # atomic-write temp files (`.agent-keys.local.<pid>.<hex>.tmp`) too.
 .agent-keys.local*
+
+# ---- the drive: the owner's, not the repository's --------------------------
 # The default drive root. A drive belongs to whoever is running the host, not
 # to this repository — and `.marble/` under it is their history.
 drive/
+# Hand-made copies of documents, kept beside the drive rather than in it.
 backups/
+# The daily-document skill's memory of its one reader: what it has shown, the
+# to-dos he typed, where he lives. The skill is code and stays; its memory is
+# his, and it changes on every morning's run.
+.claude/skills/my-day/state/
+
+# ---- this machine ----------------------------------------------------------
 .DS_Store
 *.log
-
-# Agent worktrees. Each one is a checkout of this repository, so committing the
-# path stores a gitlink to a branch that lives only on one laptop, and a
-# clone gets an empty directory it cannot fill.
+*.pid
+__pycache__/
+# Claude Code's per-machine settings and the worktrees it checks out. A
+# worktree is a checkout of this repository, so committing the path stores a
+# gitlink to a branch that lives only on one laptop.
+.claude/settings.local.json
 .claude/worktrees/
-
+# Hook config that names absolute paths on one laptop.
+.codex/
 # Local design-hook detector config (per machine)
 .impeccable/
 
-# Scratchpad working directories. The small top-level scripts stay tracked —
-# phone-tour.mjs and friends are how we look at the UI — but each per-session
-# subdirectory is screenshots and generated HTML, megabytes of it, and it is
-# never read back after the session that produced it.
-scratchpad/*/
-
-# Superpowers session state: brainstorm servers, their ports, tokens and pids.
-# Local to one machine and one run; a clone has no use for it.
+# ---- what a session leaves behind ------------------------------------------
+# Screenshots, one-off patches, generated pages. A script worth keeping moves
+# to `tools/`; the rest is never read back after the run that made it.
+scratchpad/
+# Brainstorm servers, their ports, tokens and pids.
 .superpowers/
-
-# Process files, wherever they land.
-*.pid

@@ -3,7 +3,13 @@ node_modules
 drive
 backups
 test
+test-browser
 docs
 *.md
 !README.md
 .env*
+scratchpad
+.superpowers
+.codex
+.claude/worktrees
+.claude/settings.local.json

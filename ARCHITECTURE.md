@@ -59,6 +59,7 @@ What is here is everything to do with there being more than one folder:
 | `lib/affordances.drive.js` | optional affordance overrides by name; none today |
 | `runtime/drive.js` | `marble.drive` — the carrier surface a Drive needs |
 | `templates/drive.mrbl` | the Drive, as a document |
+| `tools/` | scripts that maintain a running host or look at one — a screenshot over CDP, the phone and seam tours, regenerating the live Agents document from its template. None is imported by the host |
 | `starters/` | seven answers to "what is a document", two of which typeset. A starter is one `.mrbl` file, or a folder of parts that are concatenated — which is how the two that typeset share one typesetter rather than carrying two copies of it |
 
 ## The rules the host keeps

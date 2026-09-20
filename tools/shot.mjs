@@ -5,7 +5,7 @@
 // directly, because the drive holds an SSE stream open forever and every
 // screenshot tool that waits for "load" waits for that instead.
 //
-//   node tests/shot.mjs <url> <out.png> [--click <selector>] [--eval <expr>] [--wait <ms>]
+//   node tools/shot.mjs <url> <out.png> [--click <selector>] [--eval <expr>] [--wait <ms>]
 //
 // `out.png` of `-` skips the screenshot, for a run that only wants the eval.
 
@@ -22,7 +22,7 @@ const CHROME = path.join(
 
 const [url, out, ...rest] = process.argv.slice(2);
 if (!url || !out) {
-  console.error('usage: node tests/shot.mjs <url> <out.png> [--click sel] [--wait ms]');
+  console.error('usage: node tools/shot.mjs <url> <out.png> [--click sel] [--wait ms]');
   process.exit(1);
 }
 // Order matters: a click then an eval is a different run from an eval then a

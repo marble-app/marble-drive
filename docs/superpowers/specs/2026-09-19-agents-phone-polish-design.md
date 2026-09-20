@@ -7,7 +7,7 @@
 > the fix for every finding. Same tokens, no new dependencies, follows the
 > `apple-design` skill (values named inline).
 
-Reviewed with `scratchpad/phone-tour.mjs` (every phone surface as a PNG,
+Reviewed with `tools/phone-tour.mjs` (every phone surface as a PNG,
 plus a touch-target and overflow audit) and `test-browser/shots.js --phone`.
 Re-run the tour after a change; do not judge from the code alone.
 
