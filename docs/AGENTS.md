@@ -100,7 +100,7 @@ restores, so an agent's claims never outlive its work.
 
 ## Summoning an agent in a document
 
-Select something in any document and a small violet handle appears at the
+Select something in any document and a small violet comment bubble appears at the
 selection's corner, where the construction zone's label will hang once an
 agent is working there. Click it, or press `⌘J` while the selection is live,
 and a **callout** opens: a card holding a real conversation, anchored to the

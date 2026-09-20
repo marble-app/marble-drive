@@ -28,8 +28,13 @@
       --callout-ink: var(--ink, #222);
       font: 13px/1.4 var(--ui-font, system-ui, -apple-system, "Segoe UI", sans-serif);
     }
+    /* A comment bubble, not a dot. A disc is a marker — it says something is
+       here and nothing about what. The bubble says the one true thing: there
+       is something to be said about this. It needs the real tail and two
+       written lines: a rounded box with three dots in it is the glyph every
+       interface uses for *more options*, which is the wrong promise. */
     .marble-callout-handle {
-      position: fixed; width: 22px; height: 22px; border-radius: 50%; border: 0; padding: 0;
+      position: fixed; width: 26px; height: 20px; border-radius: 7px; border: 0; padding: 0;
       background: var(--callout-mark); box-shadow: 0 1px 4px rgba(0,0,0,.28); cursor: pointer;
       pointer-events: auto; display: grid; place-items: center;
       opacity: 1; transform: none;
@@ -45,7 +50,20 @@
                   display 160ms allow-discrete;
     }
     @starting-style { .marble-callout-handle { opacity: 0; transform: scale(.4); } }
-    .marble-callout-handle::after { content: ''; width: 6px; height: 6px; border-radius: 50%; background: #fff; }
+    /* The tail, cut from two borders, hanging off the bottom-left corner —
+       the corner nearest the text the bubble is about. */
+    .marble-callout-handle::before {
+      content: ''; position: absolute; left: 4px; bottom: -4px;
+      border-left: 6px solid var(--callout-mark);
+      border-bottom: 5px solid transparent;
+    }
+    /* Two lines of writing. The second is drawn as the first one's shadow,
+       pulled in at both ends so it reads as a shorter line, the way the last
+       line of a paragraph is short. */
+    .marble-callout-handle::after {
+      content: ''; width: 12px; height: 2px; border-radius: 1px; background: #fff;
+      box-shadow: -1.5px 4px 0 -0.5px #fff;
+    }
     .marble-callout-handle[hidden] { display: none; opacity: 0; transform: scale(.4); }
     .marble-callout-handle:hover { transform: scale(1.12); }
     .marble-callout {
