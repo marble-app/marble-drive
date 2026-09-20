@@ -116,6 +116,12 @@
       const anchor = elementOf(selection.anchorNode);
       if (!anchor || anchor.closest(TRANSIENT) || anchor.shadowRoot || anchor.getRootNode() !== document) return;
       if (selection.isCollapsed) {
+        // Focus moving into the agent's own chrome — the drawer, a callout
+        // card — collapses the page's selection to the document root as a
+        // side effect. That is the browser tidying up after a focus change,
+        // not the person saying "nothing"; the anchor check above misses it
+        // because the collapse lands on <body>, not on the chrome.
+        if (document.activeElement?.closest?.(TRANSIENT)) return;
         if (!remembered.length) return;
         remembered = [];
         notify();

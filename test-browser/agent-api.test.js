@@ -17,9 +17,19 @@ const SCRIPTS = {
 const host = await startDrive({ scripts: SCRIPTS });
 test.after(() => host.close());
 
+// A page left open keeps its streams, and only one page at a time holds the
+// browser's focus — which is half of what a selection means.
+const pages = [];
+const closePages = async () => {
+  for (const page of pages.splice(0)) await page.close().catch(() => {});
+};
+test.after(closePages);
+
 const open = async (path = 'garden') => {
+  await closePages();
   await host.reset();
   const { page, errors } = await host.newPage();
+  pages.push(page);
   await page.goto(`${host.base}/a/${path}`);
   await page.waitForFunction(() => Boolean(window.marble?.agent));
   return { page, errors };
@@ -284,4 +294,32 @@ test('the summary stream reports conversations changing', async () => {
   const summary = await page.evaluate(() => window.summaryForTest);
   assert.ok(summary.id);
   assert.ok('needsReview' in summary);
+});
+
+test('a selection survives the collapse that focus moving into chrome causes', async () => {
+  const { page } = await open();
+  await page.evaluate(() => {
+    const range = document.createRange();
+    range.selectNodeContents(document.querySelector('[data-marble-id="h"]'));
+    getSelection().removeAllRanges();
+    getSelection().addRange(range);
+    const chrome = document.createElement('div');
+    chrome.setAttribute('data-marble-transient', '');
+    chrome.innerHTML = '<input id="away-input">';
+    document.body.append(chrome);
+  });
+  await page.waitForFunction(() => window.marble.agent.context().selection.length === 1);
+  // What a browser really does when focus leaves the page for a panel: the
+  // selection collapses to the document root, not into the panel.
+  await page.focus('#away-input');
+  await page.evaluate(() => getSelection().collapse(document.body, 0));
+  await page.waitForTimeout(80);
+  assert.deepEqual((await page.evaluate(() => window.marble.agent.context())).selection, ['h']);
+
+  // Clicking in the document with nothing focused still means nothing.
+  await page.evaluate(() => {
+    document.getElementById('away-input').blur();
+    getSelection().collapse(document.querySelector('[data-marble-id="p"]').firstChild, 1);
+  });
+  await page.waitForFunction(() => window.marble.agent.context().selection.length === 0);
 });

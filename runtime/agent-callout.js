@@ -107,6 +107,27 @@
     const records = [];
     const recordOf = (id) => (id ? records.find((r) => r.id === id) ?? null : null);
 
+    // A fold is this tab's opinion about this document, and nothing more: a
+    // dismissed callout needs no memory, because markReviewed is the memory.
+    const FOLD_KEY = `marble-callout-folded:${app}`;
+    const foldedIds = () => {
+      try { return new Set(JSON.parse(sessionStorage.getItem(FOLD_KEY) || '[]')); } catch { return new Set(); }
+    };
+    function rememberFold(id, on) {
+      if (!id) return;
+      const set = foldedIds();
+      if (on) set.add(id); else set.delete(id);
+      try { sessionStorage.setItem(FOLD_KEY, JSON.stringify([...set])); } catch { /* private mode */ }
+    }
+    // A pill has one line. It is the chat's name at rest, but a turn that
+    // ended while the callout was folded is news, and news is what you want
+    // from a line you are not going to open. What you can *do* about it —
+    // Undo, Done — stays in the card: those come after looking.
+    function paintPill(record) {
+      if (record.state !== 'pill' || record.said) return;
+      record.status.textContent = record.title || 'Agent';
+    }
+
     function placeCard(record) {
       const el = record.el;
       const anchor = anchorOf(record.ids);
@@ -128,6 +149,9 @@
     function setState(record, state) {
       record.state = state;
       record.el.dataset.state = state;
+      rememberFold(record.id, state === 'pill');
+      if (state === 'pill') paintPill(record);
+      else if (!record.zone && !record.said && !record.actions.childElementCount) record.status.textContent = 'Ask about this';
       syncDock(record);
       placeCard(record);
     }
@@ -173,7 +197,7 @@
       convo.setAttribute('data-folded', '');
       el.append(head, convo);
 
-      const record = { id, ids: [...ids], el, convo, head, live, status, actions, tools, state, changed: new Set(), docked: false, title: '', zone: null };
+      const record = { id, ids: [...ids], el, convo, head, live, status, actions, tools, state, changed: new Set(), docked: false, title: '', zone: null, said: false };
       records.push(record);
       tools.append(button('×', 'Fold', () => setState(record, 'pill')));
       head.addEventListener('click', (event) => {
@@ -224,6 +248,7 @@
         switch (event.type) {
           case 'turn.started':
             record.changed.clear();
+            record.said = false;
             record.el.dataset.live = '1';
             record.actions.replaceChildren();
             break;
@@ -264,6 +289,7 @@
       record.status.textContent = !ok
         ? (event.type === 'turn.failed' ? 'Failed' : 'Stopped')
         : n ? `Changed ${n} element${n === 1 ? '' : 's'}` : 'No changes';
+      record.said = true;
       // A failure is a thing to read, not a thing to summarise in one line.
       if (event.type === 'turn.failed') record.convo.removeAttribute('data-folded');
       record.actions.replaceChildren();
@@ -280,6 +306,7 @@
       try { await agent.undo(turn.id); } catch { return; }
       record.changed.clear();
       record.status.textContent = 'Undone';
+      record.said = true;
       record.actions.replaceChildren(button('Done', 'Mark reviewed and put the callout away', () => done(record)));
     }
 
@@ -429,6 +456,80 @@
       picked.clear();
       agent.select(null);
     });
+
+    // ------------------------------------------------------------ rehydration
+    //
+    // The store already remembers everything the layer needs: which document a
+    // chat is about, what its last turn was aimed at, and whether it is still
+    // running, asking, or waiting to be looked at. So a reload rebuilds the
+    // callouts rather than storing a second copy of where they were.
+
+    const endedActions = (record) => {
+      record.actions.replaceChildren(button('Done', 'Mark reviewed and put the callout away', () => done(record)));
+    };
+
+    const adopt = async (summary, { folded = foldedIds() } = {}) => {
+      if (recordOf(summary.id) || records.some((r) => r.convo.getAttribute('conversation') === summary.id)) return null;
+      let detail = null;
+      try { detail = await agent.conversation(summary.id); } catch { return null; }
+      const ids = detail?.turns?.at(-1)?.context?.selection ?? [];
+      // A selection that no longer resolves draws nothing; the drawer still
+      // lists the chat.
+      if (!elementsOf(ids).length) return null;
+      const live = summary.status === 'running' || summary.asking;
+      const record = openCard({ id: summary.id, ids, state: live && !folded.has(summary.id) ? 'card' : 'pill' });
+      record.title = summary.title ?? '';
+      if (live) record.el.dataset.live = '1';
+      else endedActions(record);
+      // Rebuilt, not just finished: the line is the chat's name again.
+      record.said = false;
+      paintPill(record);
+      return record;
+    };
+
+    const mine = (summary) => summary.target === app && !summary.archived
+      && (summary.status === 'running' || summary.asking || summary.needsReview);
+
+    async function rehydrate() {
+      let list = [];
+      try { list = await agent.conversations(); } catch { return; }
+      const folded = foldedIds();
+      const wanted = list
+        .filter(mine)
+        .sort((a, b) => String(b.updatedAt ?? '').localeCompare(String(a.updatedAt ?? '')))
+        .slice(0, 6);
+      for (const summary of wanted) await adopt(summary, { folded });
+    }
+
+    // Live: a brief about this document sent from anywhere — the drawer, the
+    // Agents page, another tab — gets a callout here too, so the two paths
+    // converge on one object.
+    agent.on('*', (summary) => {
+      if (!summary || typeof summary.id !== 'string') return;
+      const record = recordOf(summary.id);
+      if (record) {
+        record.title = summary.title ?? record.title;
+        paintPill(record);
+        // Reviewed somewhere else: the trail was about being unread.
+        if (summary.running === false && summary.needsReview === false) {
+          document.dispatchEvent(new CustomEvent('marble-callout:reviewed', { detail: { id: summary.id } }));
+        }
+        return;
+      }
+      if (mine(summary)) adopt(summary);
+    });
+
+    // The zone's Open chat, offered to the callout first: being taken to a
+    // card two inches away is not being taken anywhere.
+    document.addEventListener('marble-callout:open', (event) => {
+      const record = recordOf(event.detail?.id);
+      if (!record) return;
+      event.preventDefault();
+      setState(record, 'card');
+      record.convo.focusInput?.();
+    });
+
+    rehydrate();
   };
 
   if (window.marble?.agent) boot(window.marble);

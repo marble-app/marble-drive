@@ -26,9 +26,43 @@ const AGENTS = (await fsp.readFile(AGENTS_TEMPLATE, 'utf8'))
 const host = await startDrive({ scripts: SCRIPTS, documents: { garden: GARDEN, Agents: AGENTS } });
 test.after(() => host.close());
 
+// A reset drive keeps its conversations, and this layer rebuilds a callout
+// for every unreviewed chat about the document it opens — so one test's chat
+// would hang over the next test's page.
+// A turn left running is a live child process, so this stops them as well as
+// filing them: several 20-second holds at once is a slow machine, not a test.
+const clearConversations = async () => {
+  const list = await (await fetch(`${host.base}/agent/conversations`)).json();
+  for (const summary of list) {
+    if (summary.status === 'running' || summary.queued) {
+      const detail = await (await fetch(`${host.base}/agent/conversations/${summary.id}`)).json();
+      for (const turn of detail.turns ?? []) {
+        if (turn.status === 'running') await fetch(`${host.base}/agent/turns/${turn.id}/cancel`, { method: 'POST' });
+        if (turn.status === 'queued') await fetch(`${host.base}/agent/turns/${turn.id}`, { method: 'DELETE' });
+      }
+    }
+    await fetch(`${host.base}/agent/conversations/${summary.id}`, {
+      method: 'PATCH',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ archived: true }),
+    });
+  }
+};
+
+// Every page left open keeps its streams and rebuilds its own callouts; a
+// file's worth of them is a busy machine, not a test.
+const pages = [];
+const closePages = async () => {
+  for (const page of pages.splice(0)) await page.close().catch(() => {});
+};
+test.after(closePages);
+
 const open = async (doc = 'garden', { width = 1200, height = 800 } = {}) => {
+  await closePages();
   await host.reset();
+  await clearConversations();
   const { page } = await host.newPage();
+  pages.push(page);
   await page.setViewportSize({ width, height });
   await page.goto(`${host.base}/a/${doc}`);
   await page.waitForFunction(() => Boolean(window.marble?.agent));
@@ -212,4 +246,72 @@ test('a turn that touches nothing reads No changes', async () => {
   await page.locator('.marble-callout-status', { hasText: 'No changes' }).waitFor({ timeout: 10_000 });
   assert.equal(await page.getByRole('button', { name: 'Undo this turn' }).count(), 0, 'nothing to undo');
   await page.getByRole('button', { name: 'Mark reviewed and put the callout away' }).waitFor();
+});
+
+const cancelLast = (page) => page.evaluate(async () => {
+  const [s] = await window.marble.agent.conversations();
+  const d = await window.marble.agent.conversation(s.id);
+  await window.marble.agent.cancel(d.turns.at(-1).id);
+});
+
+test('a reload while the agent works rebuilds the card at its region, and a fold is remembered', async () => {
+  const page = await open();
+  await select(page, 'q1');
+  await handle(page).click();
+  await sendFromCard(page, 'script:hold');
+  await page.locator('.marble-zone').waitFor();
+
+  await page.reload();
+  await page.waitForFunction(() => Boolean(window.marble?.agent));
+  await card(page).waitFor();
+  const [q1, box] = await Promise.all([page.locator('[data-marble-id="q1"]').boundingBox(), card(page).boundingBox()]);
+  assert.ok(box.y > q1.y, 'the card hangs at the question it was about');
+
+  await page.getByRole('button', { name: 'Fold' }).click();
+  await page.reload();
+  await page.waitForFunction(() => Boolean(window.marble?.agent));
+  await page.locator('.marble-callout[data-state="pill"]').waitFor();
+  await cancelLast(page);
+});
+
+test('a prompt sent from the drawer with a selection gets a callout too, and Open chat on its zone unfolds it', async () => {
+  const page = await open();
+  // The drawer first, then the selection: opening the drawer takes focus, and
+  // a selection made before it goes with it.
+  await page.evaluate(() => window.marble.agent.open());
+  await page.waitForFunction(() => document.querySelector('marble-agent-drawer')?.isOpen === true);
+  await select(page, 'h');
+  const drawerEditor = page.locator('marble-agent-drawer marble-conversation .editor');
+  await drawerEditor.click();
+  await page.keyboard.type('script:building');
+  await page.keyboard.press('Enter');
+  await page.locator('.marble-callout').waitFor();
+
+  await page.getByRole('button', { name: 'Fold' }).click();
+  await page.locator('.marble-callout[data-state="pill"]').waitFor();
+  await page.locator('.marble-zone-label:not([hidden]) button', { hasText: 'Open chat' }).click();
+  await card(page).waitFor();
+});
+
+test('a finished chat that was never reviewed comes back as a pill', async () => {
+  const page = await open();
+  await select(page, 'p');
+  await handle(page).click();
+  await sendFromCard(page, 'script:building');
+  await page.locator('.marble-callout-status', { hasText: 'Changed' }).waitFor({ timeout: 15_000 });
+  await page.reload();
+  await page.waitForFunction(() => Boolean(window.marble?.agent));
+  const pill = page.locator('.marble-callout[data-state="pill"]');
+  await pill.waitFor();
+  assert.match(await pill.innerText(), /\S/, 'a pill says which chat it is');
+  // Undo and Done live in the card: they come after looking.
+  assert.equal(await page.getByRole('button', { name: 'Mark reviewed and put the callout away' }).isVisible(), false);
+  await pill.locator('.marble-callout-status').click();
+  await card(page).waitFor();
+  await page.getByRole('button', { name: 'Mark reviewed and put the callout away' }).click();
+  await page.waitForFunction(() => document.querySelectorAll('.marble-callout').length === 0);
+  await page.reload();
+  await page.waitForFunction(() => Boolean(window.marble?.agent));
+  await page.waitForTimeout(500);
+  assert.equal(await page.locator('.marble-callout').count(), 0, 'a reviewed chat does not come back');
 });
