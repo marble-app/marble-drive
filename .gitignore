@@ -19,3 +19,16 @@ backups/
 
 # Local design-hook detector config (per machine)
 .impeccable/
+
+# Scratchpad working directories. The small top-level scripts stay tracked —
+# phone-tour.mjs and friends are how we look at the UI — but each per-session
+# subdirectory is screenshots and generated HTML, megabytes of it, and it is
+# never read back after the session that produced it.
+scratchpad/*/
+
+# Superpowers session state: brainstorm servers, their ports, tokens and pids.
+# Local to one machine and one run; a clone has no use for it.
+.superpowers/
+
+# Process files, wherever they land.
+*.pid
