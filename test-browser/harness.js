@@ -69,6 +69,10 @@ export async function startDrive({ scripts = {}, agents = true, documents = { ga
     HOST: '127.0.0.1',
     MARBLE_DRIVE_AGENTS: agents ? '1' : '',
     MARBLE_DRIVE_AGENT_PROVIDER: 'fake',
+    // Every conversation's first turn asks a small model for a title. A host
+    // running a fabricated provider should not be spawning a real CLI to
+    // write labels — the node suites turn it off the same way.
+    MARBLE_DRIVE_AGENT_NAMING: '0',
     MARBLE_DRIVE_AGENT_WORKDIR: workdir,
     MARBLE_DRIVE_AGENT_KEYS: keysFile,
     MARBLE_DRIVE_BACKUP_DIR: '',
