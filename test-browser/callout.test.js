@@ -371,3 +371,36 @@ test('Open in Agents leaves for the Agents page with the chat open', async () =>
   await page.waitForFunction((cid) => document.querySelector(`marble-conversation[conversation="${cid}"]`) !== null, summary.id);
   assert.equal(new URL(page.url()).searchParams.has('open'), false, 'the parameter is spent');
 });
+
+test('Close takes the callout away for good, and Fold is the button that keeps it', async () => {
+  const page = await open();
+  await select(page, 'p');
+  await handle(page).click();
+  await card(page).waitFor();
+  // Nothing sent yet: closing is just letting go of the thing you opened.
+  await page.getByRole('button', { name: 'Close' }).click();
+  await page.waitForFunction(() => document.querySelectorAll('.marble-callout').length === 0);
+
+  // And with a chat behind it: closing reviews it, so nothing brings it back.
+  await select(page, 'h');
+  await handle(page).click();
+  await sendFromCard(page, 'script:quiet');
+  await page.locator('.marble-callout-status', { hasText: 'No changes' }).waitFor({ timeout: 10_000 });
+  const { summary } = await firstConversation(page);
+
+  // Fold keeps it, as a pill — the two buttons are not the same button.
+  await page.getByRole('button', { name: 'Fold' }).click();
+  await page.locator('.marble-callout[data-state="pill"]').waitFor();
+  await page.locator('.marble-callout-status').click();
+  await card(page).waitFor();
+
+  await page.getByRole('button', { name: 'Close' }).click();
+  await page.waitForFunction(() => document.querySelectorAll('.marble-callout').length === 0);
+  const after = await page.evaluate(async (cid) => (await window.marble.agent.conversations()).find((s) => s.id === cid), summary.id);
+  assert.equal(after.needsReview, false, 'a finished chat you closed has been seen');
+
+  await page.reload();
+  await page.waitForFunction(() => Boolean(window.marble?.agent));
+  await page.waitForTimeout(400);
+  assert.equal(await page.locator('.marble-callout').count(), 0, 'a closed callout does not come back');
+});
