@@ -227,7 +227,8 @@ test('a turn that changes nothing says so, and folding a live card gives the zon
   await page.locator('.marble-zone-label[hidden]').waitFor({ state: 'attached' });
 
   await page.getByRole('button', { name: 'Fold' }).click();
-  await page.locator('.marble-callout[data-state="pill"]').waitFor();
+  // Folded while the agent works: the zone's own label is the folded callout.
+  await page.locator('.marble-callout[data-state="pill"][hidden]').waitFor({ state: 'attached' });
   await page.locator('.marble-zone-label:not([hidden])').waitFor();
 
   await page.evaluate(async () => {
@@ -270,8 +271,12 @@ test('a reload while the agent works rebuilds the card at its region, and a fold
   await page.getByRole('button', { name: 'Fold' }).click();
   await page.reload();
   await page.waitForFunction(() => Boolean(window.marble?.agent));
-  await page.locator('.marble-callout[data-state="pill"]').waitFor();
+  // Still running, so the fold is remembered and the zone's label carries it.
+  await page.locator('.marble-callout[data-state="pill"]').waitFor({ state: 'attached' });
+  await page.locator('.marble-zone-label:not([hidden])').waitFor();
   await cancelLast(page);
+  // The turn over, the pill comes back with what it has to say.
+  await page.locator('.marble-callout[data-state="pill"]:not([hidden])').waitFor({ timeout: 10_000 });
 });
 
 test('a prompt sent from the drawer with a selection gets a callout too, and Open chat on its zone unfolds it', async () => {
@@ -288,7 +293,6 @@ test('a prompt sent from the drawer with a selection gets a callout too, and Ope
   await page.locator('.marble-callout').waitFor();
 
   await page.getByRole('button', { name: 'Fold' }).click();
-  await page.locator('.marble-callout[data-state="pill"]').waitFor();
   await page.locator('.marble-zone-label:not([hidden]) button', { hasText: 'Open chat' }).click();
   await card(page).waitFor();
 });
@@ -314,4 +318,56 @@ test('a finished chat that was never reviewed comes back as a pill', async () =>
   await page.waitForFunction(() => Boolean(window.marble?.agent));
   await page.waitForTimeout(500);
   assert.equal(await page.locator('.marble-callout').count(), 0, 'a reviewed chat does not come back');
+});
+
+test('Open beside moves the chat to the drawer and folds the card; Continue in offers the chat you were in', async () => {
+  const page = await open();
+  // An idle chat this tab remembers is the one to continue in.
+  const earlier = await page.evaluate(async () => {
+    const id = await window.marble.agent.start({ provider: 'fake' });
+    await window.marble.agent.send(id, { prompt: 'script:quiet', target: 'garden' });
+    await new Promise((resolve) => {
+      const off = window.marble.agent.on(id, (e) => { if (e.type === 'turn.completed') { off(); resolve(); } });
+    });
+    window.marble.agent.remember(id);
+    return id;
+  });
+  await select(page, 'q2');
+  await handle(page).click();
+  const cont = page.locator('.marble-callout-tools button', { hasText: 'Continue in' });
+  await cont.waitFor();
+  await cont.click();
+  assert.equal(await card(page).locator('marble-conversation').getAttribute('conversation'), earlier);
+
+  await page.getByRole('button', { name: 'Open this chat in the dock' }).click();
+  await page.waitForFunction(() => document.querySelector('marble-agent-drawer')?.isOpen === true);
+  assert.equal(
+    await page.evaluate(() => document.querySelector('marble-agent-drawer').shadowRoot.querySelector('marble-conversation').getAttribute('conversation')),
+    earlier,
+  );
+  await page.locator('.marble-callout[data-state="pill"]').waitFor();
+});
+
+test('a fresh callout offers no moves until it is a conversation', async () => {
+  const page = await open();
+  await select(page, 'h');
+  await handle(page).click();
+  await card(page).waitFor();
+  assert.equal(await page.getByRole('button', { name: 'Open this chat in the dock' }).isVisible(), false);
+  assert.equal(await page.getByRole('button', { name: 'Open this chat on the Agents page' }).isVisible(), false);
+  await sendFromCard(page, 'script:quiet');
+  await page.getByRole('button', { name: 'Open this chat in the dock' }).waitFor();
+});
+
+test('Open in Agents leaves for the Agents page with the chat open', async () => {
+  const page = await open();
+  await select(page, 'h');
+  await handle(page).click();
+  await sendFromCard(page, 'script:quiet');
+  await page.locator('.marble-callout-status', { hasText: 'No changes' }).waitFor({ timeout: 10_000 });
+  const { summary } = await firstConversation(page);
+  await page.getByRole('button', { name: 'Open this chat on the Agents page' }).click();
+  await page.waitForURL((url) => url.pathname.endsWith('/a/Agents'));
+  await page.waitForFunction((cid) => document.querySelector(`marble-conversation[conversation="${cid}"]`) !== null, summary.id);
+  assert.equal(new URL(page.url()).searchParams.has('open'), false, 'the parameter is spent');
 });

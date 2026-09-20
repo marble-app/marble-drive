@@ -49,6 +49,7 @@
     .marble-callout-head button:hover { background: color-mix(in srgb, var(--callout-mark) 12%, transparent); }
     .marble-callout-head button[hidden] { display: none; }
     .marble-callout marble-conversation { display: flex; max-height: min(70vh, 560px); }
+    .marble-callout[hidden] { display: none; }
     .marble-callout[data-state="pill"] { width: auto; max-width: 320px; border-radius: 999px; cursor: pointer; }
     .marble-callout[data-state="pill"] .marble-callout-head { padding: 5px 12px; }
     .marble-callout[data-state="pill"] marble-conversation,
@@ -199,14 +200,54 @@
 
       const record = { id, ids: [...ids], el, convo, head, live, status, actions, tools, state, changed: new Set(), docked: false, title: '', zone: null, said: false };
       records.push(record);
-      tools.append(button('×', 'Fold', () => setState(record, 'pill')));
+
+      // The moves. Id is identity: every one of these is the same chat in
+      // another place, which is why none of them is offered before there is
+      // a chat to move.
+      const beside = button('Open beside', 'Open this chat in the dock', () => {
+        if (!record.id) return;
+        agent.remember?.(record.id);
+        agent.open(record.id);
+        setState(record, 'pill');
+      });
+      const inAgents = button('Open in Agents', 'Open this chat on the Agents page', () => {
+        if (!record.id) return;
+        const url = new URL(marble.href?.('Agents') ?? '/a/Agents', location.href);
+        url.searchParams.set('open', record.id);
+        location.href = url.href;
+      });
+      const paintTools = () => { beside.hidden = inAgents.hidden = !record.id; };
+      paintTools();
+      tools.append(beside, inAgents, button('×', 'Fold', () => setState(record, 'pill')));
+
       head.addEventListener('click', (event) => {
         if (record.state === 'pill' && !event.target.closest('button')) setState(record, 'card');
       });
       convo.addEventListener('conversation', (event) => {
         record.id = event.detail?.id ?? null;
+        paintTools();
         if (record.id) follow(record);
       });
+
+      // Continue in: the chat this tab was last in, if it is idle. This is
+      // the portable agent — it comes to the new region with its memory —
+      // and it is offered, never assumed: a chat mid-task elsewhere should
+      // not quietly receive an unrelated brief.
+      const lastId = id ? null : agent.current?.();
+      if (lastId) {
+        agent.conversation(lastId).then((detail) => {
+          const meta = detail?.meta;
+          if (!meta || meta.archived || meta.running || record.id || !record.el.isConnected) return;
+          const cont = button(`Continue in ${meta.title || 'the last chat'}`, 'Send this to the chat you were in', () => {
+            record.id = lastId;
+            convo.setAttribute('conversation', lastId);
+            follow(record);
+            cont.remove();
+            paintTools();
+          });
+          tools.prepend(cont);
+        }).catch(() => {});
+      }
       // The zone the conversation is drawing is the card's own status line:
       // one object on the page saying where the work is, not two.
       convo.addEventListener('zone', (event) => {
@@ -236,6 +277,11 @@
     // beside a label and lets it return.
 
     function syncDock(record) {
+      // While the agent is working here the zone's label *is* this callout's
+      // folded state: a pill hangs at the same corner as the label, saying
+      // the same thing over the top of it. Open chat on the label brings the
+      // card back, which is what a pill would have done.
+      record.el.hidden = Boolean(record.zone) && record.state === 'pill';
       const want = Boolean(record.zone) && record.state === 'card' && Boolean(record.id);
       if (want === record.docked) return;
       record.docked = want;
