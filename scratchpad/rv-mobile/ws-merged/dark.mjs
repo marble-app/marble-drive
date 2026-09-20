@@ -1,0 +1,10 @@
+import { chromium } from 'playwright';
+const b = await chromium.launch();
+const p = await b.newPage({ viewport:{width:390,height:844}, deviceScaleFactor:2, isMobile:true, hasTouch:true, colorScheme:'dark' });
+const errs=[]; p.on('pageerror',e=>errs.push(String(e)));
+await p.goto('http://127.0.0.1:8750/rv.html',{waitUntil:'load'}); await p.waitForTimeout(900);
+await p.screenshot({path:'dark-390.png', scale:'css'});
+await p.click('.pm-opts button'); await p.waitForTimeout(500);
+await p.screenshot({path:'dark-390-sheet.png', scale:'css'});
+console.log('errors:', errs);
+await b.close();

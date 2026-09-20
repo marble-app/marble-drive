@@ -1,0 +1,13 @@
+import { chromium } from 'playwright';
+const b = await chromium.launch();
+const p = await b.newPage({ viewport:{width:390,height:844}, deviceScaleFactor:2, isMobile:true, hasTouch:true });
+await p.goto('http://127.0.0.1:8741/rv.html',{waitUntil:'load'}); await p.waitForTimeout(900);
+const sel = '.pm-opts button, button.pm-opts';
+console.log('btn html:', await p.evaluate(()=> {const b=document.querySelector('.pm-opts'); return b.outerHTML.slice(0,200);}));
+console.log('before:', await p.getAttribute(sel,'aria-expanded'));
+await p.click(sel); await p.waitForTimeout(400);
+console.log('after open:', await p.getAttribute(sel,'aria-expanded'));
+await p.keyboard.press('Escape'); await p.waitForTimeout(400);
+console.log('after esc:', await p.getAttribute(sel,'aria-expanded'));
+console.log('transient?', await p.evaluate(()=> document.querySelectorAll('.pm-head, .pm-opts, [class^=pm-]').length + ' pm els, all transient: ' + [...document.querySelectorAll('[class*=pm-]')].every(e=>e.closest('[data-marble-transient]'))));
+await b.close();

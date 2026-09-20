@@ -1181,6 +1181,9 @@
       .meter[data-tone="yellow"] .meter-bar i { background: #e0c056; }
       .meter[data-tone="orange"] .meter-bar i { background: #e08a4a; }
     }
+    /* Held, not live: the number is real but nobody could refresh it. */
+    .meter[data-stale] .meter-pct { opacity: .65; }
+    .meter[data-stale] .meter-bar i { opacity: .55; }
     @media (prefers-reduced-motion: reduce) {
       .meter-bar i { transition: none; }
     }
@@ -1223,6 +1226,19 @@
     if (diff === day) return `Resets tomorrow, ${time}`;
     const when = date.toLocaleDateString(undefined, { weekday: 'short', month: 'short', day: 'numeric' });
     return `Resets ${when}, ${time}`;
+  };
+
+  // A remembered reading is still a reading; it just needs a date on it. The
+  // host serves the last good numbers when the usage API refuses to answer,
+  // so the bar keeps its shape and the tooltip says how old it is.
+  const formatAsOf = (value, now = new Date()) => {
+    const date = parseReset(value);
+    if (!date) return 'Last known';
+    const mins = Math.round((now - date) / 60_000);
+    if (mins < 2) return 'As of just now';
+    if (mins < 60) return `As of ${mins} min ago`;
+    const time = date.toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' });
+    return mins < 60 * 20 ? `As of ${time}` : `As of ${date.toLocaleDateString(undefined, { month: 'short', day: 'numeric' })}, ${time}`;
   };
 
   const TIP_CSS = `
@@ -1311,9 +1327,11 @@
     const claude = claudeMeterOf(meters)
       ?? { id: 'claude-subscription', label: 'Claude', available: false, detail: 'Unavailable' };
     const fable = usageAvailable(claude) ? (claude.windows ?? []).find((item) => item.id === 'fable') : null;
+    // Fable rides on the Claude reading, so it is exactly as stale as that one.
     return [claude, fable ? {
       id: 'fable', label: fable.label || 'Fable', available: true, used: fable.used, left: fable.left, window: 'week', resetsAt: fable.resetsAt,
-    } : { id: 'fable', label: 'Fable', available: false, detail: 'Unavailable' }];
+      ...(claude.stale ? { stale: true, at: claude.at ?? null } : {}),
+    } : { id: 'fable', label: 'Fable', available: false, detail: claude.detail || 'Unavailable' }];
   };
 
   const fillMeters = (host, meters) => {
@@ -1331,7 +1349,12 @@
       el.setAttribute('aria-valuemax', '100');
       if (ready) el.setAttribute('aria-valuenow', String(used));
       else el.setAttribute('aria-disabled', 'true');
-      const reset = ready ? formatReset(meter.resetsAt) : (meter.detail || 'Unavailable');
+      if (meter.stale) el.dataset.stale = '1';
+      const reset = !ready
+        ? (meter.detail || 'Unavailable')
+        : (meter.stale
+          ? [formatAsOf(meter.at), formatReset(meter.resetsAt)].filter(Boolean).join(' · ')
+          : formatReset(meter.resetsAt));
       if (reset) el.dataset.resetText = reset;
       const bar = h('span', 'meter-bar');
       const fill = document.createElement('i');
@@ -1668,13 +1691,13 @@
        its bar — two panes side by side should both say what they are — and
        only gives up padding. */
     :host([data-chrome="tile"]) .composer { --edge: 8px; padding: 4px var(--edge) 8px; }
-    :host([data-chrome="tile"]) .log { padding: 6px 12px 12px; }
+    :host([data-chrome="tile"]) .log { padding: 6px 12px calc(12px + var(--queued-space, 0px)); }
     :host([data-chrome="tile"]) .mast { padding: 6px 12px 6px; }
     /* A phone shows one conversation, full screen. The mast folds to one line
        — the fold and the thumb-sized controls are at the foot of this sheet,
        after the rules they override — the transcript takes the width, and
        type is the size a thumb reads. */
-    :host([data-chrome="phone"]) .log { padding: 8px 14px 12px; font-size: 17px; line-height: 1.45; }
+    :host([data-chrome="phone"]) .log { padding: 8px 14px calc(12px + var(--queued-space, 0px)); font-size: 17px; line-height: 1.45; }
     :host([data-chrome="phone"]) .composer { --edge: 10px; padding: 6px var(--edge) calc(8px + env(safe-area-inset-bottom, 0px)); }
     :host([data-chrome="phone"]) .msg { max-width: none; }
     /* A pane that is not the focused one steps back: the page dims its
@@ -1714,8 +1737,15 @@
     /* A pane hides its mast when there is nothing on it; the target is something. */
     :host([data-chrome="pane"]) .mast:not([hidden]):has(.target-jump:not([hidden])) { display: flex; }
     ${TAG_CSS}
-    .log { flex: 1; min-height: 0; overflow-y: auto; padding: 8px 18px 16px; display: flex; flex-direction: column; gap: 0; overscroll-behavior: contain; }
+    /* --queued-space is how tall the floating queue is at this moment. The
+       stack hovers over the foot of the log, so the log has to end that much
+       higher: without the room, the last thing said sits under the stack and
+       there is nothing left to scroll. */
+    .log { flex: 1; min-height: 0; overflow-y: auto; padding: 8px 18px calc(16px + var(--queued-space, 0px)); display: flex; flex-direction: column; gap: 0; overscroll-behavior: contain; }
     .msg { max-width: none; overflow-wrap: anywhere; }
+    /* A prompt still waiting is the floating row and nothing else. Its bubble
+       is made here, in log order, and held back until the turn starts. */
+    .msg.me[data-waiting] { display: none; }
     .msg.me {
       align-self: stretch; background: var(--paper-2); color: var(--ink);
       padding: 10px 12px; border-radius: 10px; margin: 14px 0 8px; font-weight: 500;
@@ -2982,13 +3012,15 @@
       this.modeButton.addEventListener('click', () => this.cycleMode());
       this.queuedIndividually.addEventListener('click', () => this.setQueueCombine(false));
       this.queuedTogether.addEventListener('click', () => this.setQueueCombine(true));
-      // How the next send behaves while a turn runs; the same three modes a
-      // queued row can be set to afterwards.
-      // Three words of segmented pill for a choice you make rarely, sitting
+      // How the next send behaves while a turn runs; the same two modes a
+      // queued row can be set to afterwards. Interrupt is not offered: killing
+      // a turn mid-thought to say one more thing is what steer is for, and the
+      // stop button is still there for actually stopping it.
+      // Two words of segmented pill for a choice you make rarely, sitting
       // beside the prompt you are actually writing. One word and a menu.
       this.dispatchEl.classList.add('seg-opts');
       fillRadios(this.dispatchEl, 'dispatch', [
-        { id: 'queue', label: 'Queue' }, { id: 'steer', label: 'Steer' }, { id: 'interrupt', label: 'Interrupt' },
+        { id: 'queue', label: 'Queue' }, { id: 'steer', label: 'Steer' },
       ], { empty: null, value: 'queue' });
       // After fillRadios, which clears the mode along with the children.
       this.dispatchEl.classList.add('is-drop');
@@ -3125,6 +3157,10 @@
       this.load();
       this.fitObserver = new ResizeObserver(() => this.fitSetup());
       this.fitObserver.observe(this);
+      // A queued row can grow while you edit it, and the stack grows with
+      // every prompt: the log's foot follows it rather than being set once.
+      this.queueObserver = new ResizeObserver(() => this.measureQueue());
+      this.queueObserver.observe(this.queuedEl);
     }
 
     disconnectedCallback() {
@@ -3132,6 +3168,8 @@
       this.restoreSetup?.();
       this.fitObserver?.disconnect();
       this.fitObserver = null;
+      this.queueObserver?.disconnect();
+      this.queueObserver = null;
       this.unwatchTheme?.();
       this.unwatchTheme = null;
       removeEventListener('marble:agent-context', this.onContext);
@@ -3170,6 +3208,7 @@
       for (const item of this.queuedEl.querySelectorAll('.queued-item')) item.remove();
       this.queuedEl.hidden = true;
       this.queuedBar.hidden = true;
+      this.measureQueue();
       this.applyQueueCombine(false);
       this.composerChips = this.composerChips.filter((chip) => chip.kind === 'model' || chip.kind === 'effort');
       this.renderChips();
@@ -3311,16 +3350,17 @@
       return (this.usageMeters ?? []).find((item) => item.id === 'claude-subscription' || String(item.id ?? '').startsWith('claude')) ?? null;
     }
 
+    // Not knowing is not being out — of a meter that is missing, and equally
+    // of one that is present but unreadable. The usage API rate-limits often,
+    // and a 429 says nothing whatsoever about quota; locking every Claude
+    // model over it would take the drive away from someone who is signed in
+    // and has plenty left. Being genuinely out is `used >= 100`, which is
+    // read off the meter separately and only when the meter could be read.
     claudeUnavailable() {
       const signedIn = (this.providerList ?? []).some((item) => String(item.id ?? '').startsWith('claude') && item.installed && item.signedIn);
       if (!signedIn) return false;
       const meter = this.claudeMeter();
-      if (meter) return !usageAvailable(meter);
-      // No meter at all is not knowing, and not knowing is not being out.
-      // The host reads the quota from a credential it may simply not find;
-      // greying out every Claude model over a percent nobody could fetch
-      // takes the drive away from a person who is signed in and has quota.
-      return false;
+      return meter ? usageAvailable(meter) && Number(meter.used) >= 100 : false;
     }
 
     disabledAgentIds() {
@@ -4853,6 +4893,9 @@
           this.queue(turn, true);
           break;
         case 'turn.removed':
+          // Taken out of the queue before it ever ran: the bubble was never
+          // in the transcript, and nothing happened for it to stay for.
+          this.logEl.querySelector(`.msg.me[data-turn="${CSS.escape(turn)}"]`)?.remove();
           this.queue(turn, false);
           this.forget(turn);
           break;
@@ -5395,7 +5438,31 @@
       const n = this.queuedEl.querySelectorAll('.queued-item').length;
       this.queuedEl.hidden = n === 0;
       this.queuedBar.hidden = n < 2;
-      // A queued turn's message stays in the log; only the queue row goes.
+      // One prompt, said once: while it waits, the floating row is the whole
+      // of it, and the transcript's copy is held back rather than never made
+      // — the bubble is already in log order, and joins the transcript when
+      // the turn starts (or is folded into the batch that runs it).
+      this.waiting(turn, present);
+      this.measureQueue();
+    }
+
+    /** The log's own copy of a prompt, hidden while its row floats. */
+    waiting(turn, held) {
+      const bubble = this.logEl.querySelector(`.msg.me[data-turn="${CSS.escape(turn)}"]`);
+      if (!bubble) return;
+      if (held) bubble.dataset.waiting = '';
+      else delete bubble.dataset.waiting;
+    }
+
+    /** Hold the foot of the log open by however tall the floating stack is,
+     *  and stay at the bottom if that is where the reader already was. */
+    measureQueue() {
+      const space = this.queuedEl.hidden ? 0 : Math.round(this.queuedEl.getBoundingClientRect().height);
+      if (space === this.queuedSpace) return;
+      const stuck = this.logEl.scrollHeight - this.logEl.scrollTop - this.logEl.clientHeight < 48;
+      this.queuedSpace = space;
+      this.logEl.style.setProperty('--queued-space', `${space}px`);
+      if (stuck) this.logEl.scrollTop = this.logEl.scrollHeight;
     }
 
     applyQueueCombine(on) {
@@ -5424,9 +5491,11 @@
       button.setAttribute('aria-label', `${label} — click to change how this prompt is sent`);
     }
 
+    /** Queue and steer, the two the composer offers. A row left on interrupt
+     *  by an older build still says so, and leaves for queue on a click. */
     cycleQueuedDispatch(item, turn) {
       const prev = item.dataset.dispatch || 'queue';
-      const next = { queue: 'steer', steer: 'interrupt', interrupt: 'queue' }[prev];
+      const next = prev === 'queue' ? 'steer' : 'queue';
       this.paintQueuedDispatch(item, next);
       this.api.patchTurn(turn, { dispatch: next }).catch((err) => {
         this.paintQueuedDispatch(item, prev);
@@ -6612,7 +6681,7 @@
   };
 
   const buildAskCard = (event, submit) => MarbleConversation.prototype.buildAskCard(event, submit);
-  window.marbleAgentUI = { stateOf, STATE_CSS, renderText, spring, project, TOKENS, buildAskCard, ASK_CSS, conversationTags, eventBelongsToConversation, askResponse, TAG_CSS, fillMeters, usageAvailable, usageTone, formatReset, USAGE_CSS, pageTheme, applyPageTheme, fillRadios, fitPicker, fitPresets, sortProviders };
+  window.marbleAgentUI = { stateOf, STATE_CSS, renderText, spring, project, TOKENS, buildAskCard, ASK_CSS, conversationTags, eventBelongsToConversation, askResponse, TAG_CSS, fillMeters, usageAvailable, usageTone, formatReset, formatAsOf, USAGE_CSS, pageTheme, applyPageTheme, fillRadios, fitPicker, fitPresets, sortProviders };
   Object.assign(window.marbleAgentUI, { collapseToolRows, toolShortName });
 
   if (window.marble?.agent) mount();

@@ -956,6 +956,12 @@
       // one width and not a run: between the narrowest column the field can
       // show and the rail it folds to, there is no width at all.
       let hollow = null;
+      // The widths where a group changes form: at each shape's floor the next
+      // group folds into the rail, and a hand crossing one is watching a
+      // column become a pile. The caller wants to know because that is a
+      // change of contents rather than of size, and it is the one thing in a
+      // drag that should ease rather than track.
+      const folds = [];
       for (let k = forced; k <= foldOrder.length; k += 1) {
         if (k > forced) {
           const victim = foldOrder[k - 1];
@@ -979,11 +985,18 @@
           const at = edge(w);
           if (at < ceiling - 0.5) add(at + gap / 2, rank);
         }
+        if (floorK < ceiling - 0.5) folds.push(floorK + gap / 2);
         ceiling = floorK;
       }
       // Where the layout puts the seam when nobody is holding it.
       const rest = split == null ? seamX : packFocus({ ...options, split: null }).seamX;
       add(rest, 3);
+      // And the ratios a person can name. The widths above are the layout's
+      // own vocabulary — what a column reads at, what a group costs — but a
+      // canvas split in half or in thirds is a thing you mean to ask for, and
+      // it is the only kind of state you can describe over a desk. φ is one of
+      // these already; it arrives as the rest position above.
+      for (const share of [1 / 3, 1 / 2, 2 / 3]) add(margin + room * share, 2);
       // Two stops a few pixels apart are one stop, and the one that means
       // more keeps the place: φ over a preferred width over a floor.
       kept.sort((a, b) => a.at - b.at || b.rank - a.rank);
@@ -998,7 +1011,13 @@
       // does not cross.
       const low = at.length ? at[0] : seamX;
       const high = margin + room - stageAt(paneMin) - gap / 2;
-      return { at: at.filter((v) => v <= high + 0.5), min: low, max: Math.max(low, high), hollow };
+      return {
+        at: at.filter((v) => v <= high + 0.5),
+        min: low,
+        max: Math.max(low, high),
+        hollow,
+        folds,
+      };
     };
 
     return {

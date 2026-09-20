@@ -141,8 +141,12 @@ const widths = (page) => page.evaluate(() => {
   };
 });
 
-/** Where the seam stands, in the canvas coordinates the layout speaks in. */
+/** The gesture has two positions and they are not the same thing. `seamAt` is
+ *  the room: the state the layout has snapped to, which is where the bar
+ *  belongs. `gripAt` is the bar itself, which while a hand is on it is under
+ *  the hand and can be most of a state ahead of the room. */
 const seamAt = (page) => page.evaluate(() => window.marbleFocusSeam?.()?.seamX ?? null);
+const gripAt = (page) => page.evaluate(() => window.marbleFocusSeam?.()?.gripX ?? null);
 
 /** A let-go springs the seam onto its stop, and the gesture is not over until
  *  that spring is. Watching the numbers stop changing is not enough — a slow
@@ -184,6 +188,109 @@ const dragSeamBy = async (page, dx, { still = false } = {}) => {
   }
   await page.mouse.up();
 };
+
+/** Every pane's area, as a share of the largest, so "equal" is a number. */
+const paneAreas = (page) => page.evaluate(() => {
+  const frames = [...document.querySelectorAll('.pane .dock-frame:not(.dock-ghost):not(.marble-leaving)')];
+  const boxes = frames.map((el) => el.getBoundingClientRect()).map((r) => Math.round(r.width * r.height));
+  const most = Math.max(...boxes, 1);
+  return {
+    boxes,
+    keys: frames.map((el) => `${el.dataset.key}:${Math.round(el.getBoundingClientRect().width)}x${Math.round(el.getBoundingClientRect().height)}`),
+    spread: boxes.length ? Math.min(...boxes) / most : 1,
+  };
+});
+
+test('double-clicking the seam tidies the room: φ, and every pane an equal share', async () => {
+  const { page, errors } = await openAgents();
+  await page.evaluate(async () => {
+    const mk = async (title) => {
+      const id = await window.marble.agent.start({ provider: 'fake' });
+      await window.marble.agent.update(id, { title });
+      return id;
+    };
+    for (let i = 0; i < 3; i += 1) {
+      const id = await mk(`pinned ${i + 1}`);
+      await window.marble.agent.update(id, { pinned: true });
+    }
+    const some = [];
+    for (let i = 0; i < 4; i += 1) some.push(await mk(`alpha ${i + 1}`));
+    await window.marble.agent.createFolder({ conversationIds: some, name: 'Research', color: 'research' });
+  });
+  await page.locator('.views [data-view="focus"]').click();
+  await page.locator('.focus-seam').waitFor();
+  await stillCanvas(page);
+  await page.waitForFunction(() => document.querySelectorAll('.pane .dock-gutter[data-dir="row"]').length > 0);
+
+  // Three panes in an L: even shares at every split give the lone one twice
+  // the room of the two it stands beside, so this starts out uneven.
+  const before = await paneAreas(page);
+  assert.equal(before.boxes.length, 3, 'three panes on the stage');
+  assert.ok(before.spread < 0.75, `they start out uneven: ${before.boxes.join(' ')}`);
+
+  // Make it worse by hand, and move the seam off φ too.
+  const gut = await page.locator('.pane .dock-gutter[data-dir="row"]').first().boundingBox();
+  await page.mouse.move(gut.x + gut.width / 2, gut.y + 120);
+  await page.mouse.down();
+  await page.mouse.move(gut.x + gut.width / 2 - 180, gut.y + 120, { steps: 8 });
+  await page.mouse.up();
+  await page.waitForTimeout(500);
+  await dragSeamBy(page, -120, { still: true });
+  await seamSettled(page);
+  await untilSplit((value) => value != null);
+
+  // Now the tidy. One `dblclick` rather than four mouse calls: the seam reads
+  // the gap between two presses, and four round trips to the browser under a
+  // loaded test run can be slower than the double-click window.
+  await page.locator('.focus-seam').dblclick();
+  await page.waitForTimeout(900);
+
+  const after = await paneAreas(page);
+  assert.ok(after.spread > 0.94, `every pane takes an equal share: ${after.keys.join('  ')}`);
+  // And nothing else happened. The canvas reads a double-click as "start a
+  // chat here", and the tidy moves the seam out from under the cursor before
+  // that event is dispatched, so it used to land on bare canvas.
+  assert.equal(after.boxes.length, 3, `no chat was started by the double-click: ${after.keys.join('  ')}`);
+  await untilSplit((value) => value == null);
+  // Not the golden ratio to three decimal places — with three pins the
+  // field's own ceiling binds before φ does, and the layout says so. What the
+  // tidy promises is that the seam is back on the layout's own answer, which
+  // is a state like any other.
+  const settled = await page.evaluate(() => window.marbleFocusSeam());
+  assert.ok(settled.stops.some((v) => Math.abs(v - settled.seamX) < 2),
+    `the seam stands on a state: ${Math.round(settled.seamX)} in ${settled.stops.map(Math.round).join(' ')}`);
+  assert.deepEqual(errors, []);
+});
+
+test('the tidy closes a pile somebody opened for a peek', async () => {
+  const { page, errors } = await openAgents();
+  await seed(page);
+  // Squeeze the field until the group folds into the rail, then peek inside
+  // it. An opened pile is drawn as a region of the rail rather than as a
+  // pile — that is what opening one means — so `data-opened` is the thing to
+  // watch, not the count of piles.
+  const box = await page.locator('.focus-seam').boundingBox();
+  const y = box.y + 200;
+  await page.mouse.move(box.x + box.width / 2, y);
+  await page.mouse.down();
+  await page.mouse.move(box.x + box.width / 2 - 1200, y, { steps: 10 });
+  await page.mouse.up();
+  await seamSettled(page);
+  await page.locator('.focus-basin[data-pile] .focus-basin-name').first().click();
+  await page.waitForFunction(() => document.querySelectorAll('.focus-basin[data-opened]').length > 0);
+
+  await page.locator('.focus-seam').dblclick();
+  await page.waitForTimeout(900);
+
+  const shape = await page.evaluate(() => ({
+    opened: document.querySelectorAll('.focus-basin[data-opened]').length,
+    columns: document.querySelectorAll('.focus-basin:not([data-pile]):not([data-opened])').length,
+  }));
+  assert.equal(shape.opened, 0, 'the peek is closed — it is something you were doing, not a shape the room is in');
+  assert.ok(shape.columns > 0, 'and the field is a column again, since φ has room for one');
+  await untilSplit((value) => value == null);
+  assert.deepEqual(errors, []);
+});
 
 test('the two sides rest at φ, with a seam standing between them', async () => {
   const { page, errors } = await openAgents();
@@ -301,10 +408,10 @@ test('dragging the seam onto the field folds it away, and dragging back brings i
   assert.deepEqual(errors, []);
 });
 
-test('the seam stays under the cursor the whole way in', async () => {
+test('out in the open the seam is under the cursor, the whole way in', async () => {
   const { page, errors } = await openAgents();
   await seed(page);
-  const stops = await page.evaluate(() => window.marbleFocusSeam?.() ?? null);
+  const seam = await page.evaluate(() => window.marbleFocusSeam?.() ?? null);
   const box = await page.locator('.focus-seam').boundingBox();
   const canvas = await page.evaluate(() => document.querySelector('.focus').getBoundingClientRect().left);
   const y = box.y + 200;
@@ -316,11 +423,12 @@ test('the seam stays under the cursor the whole way in', async () => {
     await page.mouse.move(from + dx, y);
     await settleFrames(page);
     const finger = from + dx - canvas;
-    // The hollow under the last column is the one stretch with nothing in it:
-    // there the seam holds at an end on purpose. Everywhere else it is under
-    // the hand, and the couple of pixels are the field's columns taking whole
-    // widths.
-    if (stops.hollow && finger < stops.hollow[1] + 8) continue;
+    // Only where no state is holding it. Inside a zone the room is on the
+    // state and the bar with it — that is the point of a zone — and the
+    // hollow has no widths in it at all.
+    const near = Math.min(...seam.stops.map((v) => Math.abs(v - finger)));
+    if (near < 44) continue;
+    if (seam.hollow && finger < seam.hollow[1] + 44) continue;
     const at = await seamAt(page);
     if (Math.abs(at - finger) > 4) misses.push(`${Math.round(finger)} → ${Math.round(at)}`);
   }
@@ -344,17 +452,19 @@ test('the field folds only when the hand means it, and unfolds the same way', as
     await settleFrames(page);
     return seamAt(page);
   };
+  const middle = (shut + open) / 2;
   await page.mouse.move(from, y);
   await page.mouse.down();
-  // A little way into the hollow is not yet asking for the field to go: the
-  // seam holds at the narrowest column it can show.
-  assert.ok(Math.abs(await at(open - 20) - open) < 2, 'just inside, the field is still there');
-  // A good pull past the end is asking, and the field folds into the rail.
-  assert.ok(Math.abs(await at(open - 70) - shut) < 2, 'pulled past it, the field folds away');
-  // Coming back out takes the same pull from the other end, so a hand resting
-  // in the middle does not flutter the field open and shut.
-  assert.ok(Math.abs(await at(shut + 20) - shut) < 2, 'just off the rail, coming back, is still shut');
-  assert.ok(Math.abs(await at(shut + 70) - open) < 2, 'and pulled past that the column comes back');
+  // The line between the last column and the folded rail is halfway between
+  // them. On the column's side of it the field is still a column, however far
+  // into the gap the hand has gone.
+  assert.ok(Math.abs(await at(middle + 30) - open) < 2, 'on the column side, the field is still there');
+  // Past it, the field is a rail.
+  assert.ok(Math.abs(await at(middle - 30) - shut) < 2, 'past halfway, the field folds away');
+  // And the line has a little width to it, so a hand sitting on it does not
+  // flicker the field open and shut — it keeps whichever side it came from.
+  assert.ok(Math.abs(await at(middle + 3) - shut) < 2, 'a hand back on the line keeps the state it has');
+  assert.ok(Math.abs(await at(middle + 30) - open) < 2, 'and past the line the column comes back');
   await page.mouse.up();
   assert.deepEqual(errors, []);
 });
@@ -373,17 +483,23 @@ test('the drag follows the pointer off the canvas and out of the window', async 
   // dragging the seam. Nothing here may depend on the pointer staying over
   // the element it came down on — or on that element surviving the drag,
   // which a patch landing mid-gesture can take away.
+  const stops = await page.evaluate(() => window.marbleFocusSeam());
   const stations = [
-    ['over the stage', from + 60, y],
-    ['up in the topbar', from + 20, 8],
-    ['below the canvas', from - 40, 894],
-    ['off the top of the window', from - 100, -40],
+    ['over the stage', from + 90, y],
+    ['up in the topbar', from + 130, 8],
+    ['below the canvas', from - 110, 894],
+    ['off the top of the window', from - 150, -40],
   ];
   for (const [where, x, at] of stations) {
     await page.mouse.move(x, at);
     await settleFrames(page);
+    const finger = x - canvas;
+    const near = Math.min(...stops.stops.map((v) => Math.abs(v - finger)));
+    // A station that lands inside a state's zone is held by it on purpose.
+    if (near < 44) continue;
+    await seamSettled(page);
     const seam = await seamAt(page);
-    assert.ok(Math.abs(seam - (x - canvas)) < 6, `${where}: the cursor is at ${Math.round(x - canvas)}, the seam at ${Math.round(seam)}`);
+    assert.ok(Math.abs(seam - finger) < 6, `${where}: the cursor is at ${Math.round(finger)}, the seam at ${Math.round(seam)}`);
   }
   // Back inside before letting go: a release dispatched outside the window
   // is not always delivered, and a button left down belongs to the browser,
@@ -442,26 +558,114 @@ test('a field the canvas has already folded can still be dragged all the way in'
   assert.deepEqual(errors, []);
 });
 
-test('let go near a width that means something, the seam settles onto it', async () => {
+test('the room stretches with the hand, and takes hold of the states it passes', async () => {
   const { page, errors } = await openAgents();
   await seed(page);
-  // Where the layout says the seam can stand. Asked before the drag, because
-  // the answer is about the cards and not about where the seam happens to be.
-  const stops = await page.evaluate(() => window.marbleFocusSeam?.() ?? null);
-  assert.ok(stops && stops.stops.length >= 3, 'the layout offers stops to land on');
-  const nearest = (x) => stops.stops.reduce((best, v) => (Math.abs(v - x) < Math.abs(best - x) ? v : best), stops.stops[0]);
+  const seam = await page.evaluate(() => window.marbleFocusSeam?.() ?? null);
+  const box = await page.locator('.focus-seam').boundingBox();
+  const canvas = await page.evaluate(() => document.querySelector('.focus').getBoundingClientRect().left);
+  const y = box.y + 200;
+  const from = box.x + box.width / 2;
+  const put = async (x) => {
+    await page.mouse.move(canvas + x, y);
+    await settleFrames(page);
+    await seamSettled(page);
+    return page.evaluate(() => window.marbleFocusSeam());
+  };
+  await page.mouse.move(from, y);
+  await page.mouse.down();
+
+  // Out in the open the room is the hand: the columns take whatever width the
+  // drag gives them, which is what a resize is.
+  const loose = (seam.stops[3] + seam.stops[4]) / 2;
+  const free = await put(loose);
+  assert.ok(Math.abs(free.seamX - loose) < 4, `mid-way the room is under the hand: ${Math.round(free.seamX)} for ${Math.round(loose)}`);
+  assert.ok(Math.abs(free.gripX - free.seamX) < 2, 'and the bar is on the room, not off chasing the cursor');
+
+  // Near a state the room is *on* the state, and stays there while the hand
+  // moves about inside its zone.
+  const state = seam.stops[3];
+  for (const off of [0, 8, -8, 14]) {
+    const held = await put(state + off);
+    assert.ok(Math.abs(held.seamX - state) < 2, `at ${off} off the state the room is on it, not at ${Math.round(held.seamX)}`);
+    assert.ok(Math.abs(held.gripX - held.seamX) < 2, 'and the bar with it');
+  }
+
+  // A width the hand is holding is placed, not eased: a basin on its way to a
+  // width that has already changed again is lag wearing the costume of
+  // smoothness.
+  await put(loose);
+  const tracking = await page.evaluate(() => ({
+    basin: getComputedStyle(document.querySelector('.focus-basin')).transitionDuration,
+    snapping: document.querySelector('.focus').classList.contains('marble-snapping'),
+  }));
+  assert.equal(tracking.snapping, false, 'nothing is easing while the hand holds a width');
+  assert.ok(/^0s(,|$)/.test(tracking.basin), `and the basins are placed outright, got ${tracking.basin}`);
+
+  // But taking hold of a state is the room moving on its own, and that eases.
+  await page.mouse.move(canvas + state + 6, y);
+  await page.waitForTimeout(40);
+  const taking = await page.evaluate(() => ({
+    snapping: document.querySelector('.focus').classList.contains('marble-snapping'),
+    dock: document.querySelector('.pane')?.classList.contains('marble-docksnap') ?? false,
+    basin: getComputedStyle(document.querySelector('.focus-basin')).transitionDuration,
+    bar: getComputedStyle(document.querySelector('.focus-seam')).transitionDuration,
+  }));
+  await page.mouse.up();
+  assert.ok(taking.snapping, 'taking hold of a state eases');
+  assert.ok(taking.dock, 'and the stage eases with it');
+  assert.ok(/[1-9]/.test(taking.basin), `the basins have a transition again, got ${taking.basin}`);
+  assert.ok(/[1-9]/.test(taking.bar), `and so does the bar, got ${taking.bar}`);
+  assert.deepEqual(errors, []);
+});
+
+test('a hand going one way never sends the room back to a state it just left', async () => {
+  const { page, errors } = await openAgents();
+  await seed(page);
+  const box = await page.locator('.focus-seam').boundingBox();
+  const y = box.y + 200;
+  const from = box.x + box.width / 2;
+  await page.mouse.move(from, y);
+  await page.mouse.down();
+  const seen = [];
+  for (let dx = -6; dx > -480; dx -= 6) {
+    await page.mouse.move(from + dx, y);
+    await settleFrames(page);
+    const at = Math.round(await seamAt(page));
+    if (seen[seen.length - 1] !== at) seen.push(at);
+  }
+  await page.mouse.up();
+  // This is the jitter: a rule that changes state as soon as the hand is a
+  // little past the one it is in lands the hand deep inside the old state's
+  // half, wants to go straight back, and walks the room between two states a
+  // dozen times while the hand moves steadily one way.
+  const backwards = seen.filter((v, i) => i > 0 && v > seen[i - 1]);
+  assert.deepEqual(backwards, [], `the room went back up to ${backwards.join(', ')} — the whole walk was ${seen.join(' → ')}`);
+  assert.ok(seen.length >= 3, `and it did pass through states on the way: ${seen.join(' → ')}`);
+  assert.deepEqual(errors, []);
+});
+
+test('a let-go inside a state\'s pull lands on it, and outside stays where it was put', async () => {
+  const { page, errors } = await openAgents();
+  await seed(page);
   const rest = await seamAt(page);
 
-  // A nudge off a stop is not a new place to be: let go, it goes back.
-  await dragSeamBy(page, -36, { still: true });
+  // A nudge inside the pull is not a new width: let go, and the room is back
+  // on the state it never really left.
+  await dragSeamBy(page, -10, { still: true });
   const back = await seamSettled(page);
-  assert.ok(Math.abs(back - rest) < 4, `a nudge came back to where it was: ${rest} → ${back}`);
+  assert.ok(Math.abs(back - rest) < 3, `a nudge inside the zone never left the state: ${Math.round(rest)} → ${Math.round(back)}`);
 
-  // A drag that reaches for the next one down lands on it exactly.
-  await dragSeamBy(page, -150, { still: true });
-  const at = await seamSettled(page);
-  const near = nearest(at);
-  assert.ok(Math.abs(near - at) < 4, `settled at ${Math.round(at)}, nearest stop ${Math.round(near)}`);
-  assert.ok(Math.abs(near - rest) > 20, `and it is a different stop than the one it left, ${Math.round(near)}`);
+  // A drag well clear of every state is a width somebody asked for, and it
+  // keeps it.
+  const stops = await page.evaluate(() => window.marbleFocusSeam());
+  const open = stops.stops.reduce((best, v, i, all) => {
+    const next = all[i + 1];
+    return next && next - v > (best.next - best.v) ? { v, next } : best;
+  }, { v: stops.stops[0], next: stops.stops[1] });
+  const target = (open.v + open.next) / 2;
+  await dragSeamBy(page, target - rest, { still: true });
+  const moved = await seamSettled(page);
+  assert.ok(Math.abs(moved - target) < 6, `the room keeps the width it was given: ${Math.round(moved)} vs ${Math.round(target)}`);
   assert.deepEqual(errors, []);
 });

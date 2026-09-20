@@ -1,0 +1,323 @@
+/* ── the columns, on a phone ──────────────────────────────────────────────
+   The sheet above already decided the hard part: narrowing these boards
+   cannot mean fewer tracks, because a card chooses its column by its own
+   attribute and a track that is not in the template is a track at zero width
+   with cards still standing in it. So the columns stay, and the board scrolls
+   sideways.
+
+   What it did not decide is what sideways *feels* like. Today it is an
+   accident — 682px of free scroll inside a page that is already scrolling the
+   other way, with no snap, no peek and nothing on screen admitting a column
+   exists. Everything below turns that accident into a gesture: one column
+   fills the thumb's width, the next one shows its shoulder, and a swipe lands
+   on a column rather than somewhere between two.
+
+   All of it lives in one container query. `doc` is the <html> element's own
+   inline size, so a host that docks a panel beside the document narrows this
+   the same way a narrow phone does — which a media query would refuse to
+   believe. Nothing here fires above 720px, so the wide board is the board it
+   has always been. */
+
+/* The two pieces of chrome the script builds are page-only in both senses:
+   they carry data-marble-transient, and above this breakpoint they are not on
+   screen at all. This is the rule that makes the second one true. */
+.rv-cols, .rv-hud { display: none; }
+
+@container doc (max-width: 720px) {
+
+  /* A flag, not a second breakpoint. The script needs to know whether the
+     carousel is on, and the only honest answer is the one CSS just gave — so
+     it reads this property rather than measuring the window for itself. */
+  .pool { --rv-phone: 1; }
+
+  .stage[data-arrange="form"] .pool,
+  .stage[data-arrange="when"] .pool,
+  .stage[data-arrange="term"] .pool {
+    /* 84% of the screen, capped so a large phone does not run an eighty
+       character line. What is left over is the peek: about 50px of the next
+       column, which is the whole affordance — a card cut off at the edge is
+       the only honest way a board says "there is more of me this way". */
+    --rv-col: min(340px, calc(84cqw - 10px));
+    --rv-gutter: 14px;
+
+    /* Full bleed. The peek only reads if the next column runs off the
+       *screen* rather than stopping twenty pixels short of it inside a text
+       margin. These two lengths are the stage's own side padding; the script
+       re-measures them, so this keeps working if that padding ever moves. */
+    margin-left: calc(var(--rv-bleed-l, 30px) * -1);
+    margin-right: calc(var(--rv-bleed-r, 20px) * -1);
+
+    padding-left: var(--rv-gutter);
+    /* Trailing room the width of the scrollport, so the *last* column can
+       come to rest at the left edge like every other one. Without it the
+       scroller runs out of travel before the last snap position and a
+       mandatory snap sits the board down somewhere nobody asked for. */
+    padding-right: calc(100cqw - var(--rv-col) - var(--rv-gutter));
+    padding-bottom: 8px;
+
+    scroll-snap-type: x mandatory;
+    scroll-padding-left: var(--rv-gutter);
+  }
+
+  .stage[data-arrange="form"] .pool { grid-template-columns: repeat(4, var(--rv-col)); }
+  .stage[data-arrange="when"] .pool { grid-template-columns: repeat(4, var(--rv-col)); }
+  .stage[data-arrange="term"] .pool { grid-template-columns: repeat(6, var(--rv-col)); }
+
+  /* The lane is the column's own head and it sits in row 1, which makes it
+     exactly the box the scroller should come to rest against. Every card
+     below shares its left edge, so snapping the lane snaps the column.
+     `always` is the difference between a carousel and a slide: one flick
+     moves one column, however hard it is thrown. */
+  .stage[data-arrange="form"] .pool > .lane,
+  .stage[data-arrange="when"] .pool > .lane,
+  .stage[data-arrange="term"] .pool > .lane {
+    scroll-snap-align: start;
+    scroll-snap-stop: always;
+    padding-bottom: 4px;
+  }
+
+  /* A column name set at 10px was a label on a board you could see all of.
+     Here it is the thing telling you where you are, so it is read at the
+     weight of a heading and its rule is drawn in ink rather than in hairline.
+     The count belongs to the strip above it and is not repeated here. */
+  .pool > .lane > h4 {
+    font-size: 12px;
+    letter-spacing: .1em;
+    color: var(--ink-2);
+    padding-bottom: 9px;
+    border-bottom-color: var(--muted);
+  }
+  .pool > .lane > .lane-why {
+    font-size: 12px;
+    color: var(--muted);
+  }
+
+  /* ── venue pills ────────────────────────────────────────────────────────
+     Every one of these is data-marble-editable, which makes it a tap target
+     for editing and puts it under the 44px floor. It gets there the way the
+     rest of the document does: a little more air in the pill itself, and an
+     invisible expander for the remainder, so the type is untouched and the
+     pill still reads as a small uppercase mark rather than a button. */
+  .venues { gap: 15px 6px; margin-top: 8px; }
+  .venue {
+    position: relative;
+    font-size: 10px;
+    padding: 9px 10px;
+  }
+  .venue::before {
+    content: "";
+    position: absolute;
+    inset: -7px -2px;
+  }
+
+  /* ── the map ────────────────────────────────────────────────────────────
+     A map is a claim about where things sit relative to each other, and at
+     390px the claim is unreadable: a 612px canvas of absolutely positioned
+     cards, clipped, overlapping, with no way to pan it. So on a phone the map
+     stops pretending. The cards keep their coordinates — nothing here is
+     written to the file, and the same document on a laptop still opens on the
+     canvas it was arranged into — but they are read in file order down the
+     page, which is the one arrangement that always fits.
+
+     The inline left/top has to be shouted down, exactly as the sheet above
+     shouts it down for every other arrangement: it is an inline style, and no
+     selector outranks one. */
+  .stage[data-arrange="map"] .pool {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    min-height: 0;
+    overflow: visible;
+    border: 0;
+    background: none;
+  }
+  .stage[data-arrange="map"] .pool > .item {
+    position: relative;
+    left: auto !important;
+    top: auto !important;
+    max-width: none;
+    cursor: auto;
+    box-shadow: none;
+  }
+  /* Said out loud, because a view that quietly becomes a different view is a
+     view the person will think is broken. */
+  .stage[data-arrange="map"] .pool::before {
+    content: "The map is a layout, and this screen is too narrow to hold one. The cards are listed here in the order they sit in the file; open the document wider to see where they are.";
+    display: block;
+    font-size: 12px;
+    line-height: 1.5;
+    color: var(--faint);
+    padding: 10px 12px;
+    border: 1px dashed var(--hair);
+    border-radius: var(--r-2);
+    background: color-mix(in srgb, var(--paper) 60%, var(--card));
+  }
+
+  /* ── + Idea ─────────────────────────────────────────────────────────────
+     The spine packer hides the column buttons it has no column for with
+     `btn.hidden = true`, and the rule that shows them — a class inside an
+     attribute selector — outranks the browser's own [hidden] rule, so they
+     were never hidden at all. With no left or top of their own they fall back
+     to the pool's top-left corner and land on the first card; one column
+     means two of them sitting there. Hiding is not a suggestion. */
+  .stage[data-arrange="thesis"] .pool > .col-add[hidden] { display: none; }
+
+  /* The ones that are left are 35px of dashed outline, and the packer places
+     them by measuring — its idea of how tall they are is written into where
+     it puts the next one. So the visible button is not touched; each one
+     grows an invisible expander into the slack the packer already left above
+     and below it, up to the 44px floor, and the three of them are cut so
+     that no two claim the same pixel. */
+  .col-add::before { content: ""; position: absolute; }
+  .col-add:not(.col-add-thesis)::before { inset: -5px 0 -4px; }
+  .col-add-thesis:not(.is-rail)::before { inset: -1px 0 -8px; }
+  .col-add-thesis.is-rail::before { inset: 0 -2px; }
+
+  /* ── the framings ───────────────────────────────────────────────────────
+     Ten information graphics drawn on a 960-unit canvas, whose labels are
+     nine to thirteen units tall. Fitted to a 340px column that is a little
+     under 4px of type — a picture of a diagram rather than a diagram. So the
+     figure becomes its own sideways scroller and the drawing keeps a width
+     its labels survive; the title and the caption are prose and stay put,
+     which `position: sticky` gives them for free inside a scroller that only
+     moves one way. */
+  .viz {
+    overflow-x: auto;
+    overscroll-behavior-x: contain;
+    margin-left: calc(var(--rv-bleed-l, 30px) * -1);
+    margin-right: calc(var(--rv-bleed-r, 20px) * -1);
+    padding-bottom: 6px;
+  }
+  /* The text keeps its margin and the scroller has none, so sticky has one
+     unambiguous edge to measure from — the screen's. Browsers do not agree
+     about how a scroll container's own padding enters that measurement, and
+     the fix for a caption that drifts is to give them nothing to disagree
+     about. */
+  .viz > h4,
+  .viz > figcaption {
+    position: sticky;
+    left: var(--rv-bleed-l, 30px);
+    margin-left: var(--rv-bleed-l, 30px);
+    margin-right: var(--rv-bleed-r, 20px);
+  }
+  .viz > h4 { font-size: 14px; }
+  .viz > figcaption { font-size: 13.5px; }
+  .viz-svg {
+    min-width: 780px;
+    margin-left: var(--rv-bleed-l, 30px);
+  }
+
+  /* ── the column strip ───────────────────────────────────────────────────
+     One segment per column, lit for the one being read. It is the standing
+     answer to "how far along am I", and it is also how to cross a six column
+     board without six swipes. Built in script, owned by the page, never
+     written to the file. */
+  .rv-cols {
+    display: none;
+    align-items: center;
+    gap: 10px;
+    /* Bled and inset exactly as the board is, so segment one begins where
+       column one begins. The script hands it the same two measurements. */
+    margin-left: calc(var(--rv-bleed-l, 30px) * -1);
+    margin-right: calc(var(--rv-bleed-r, 20px) * -1);
+    padding: 0 14px;
+    margin-bottom: 6px;
+  }
+  .stage[data-arrange="form"] .rv-cols,
+  .stage[data-arrange="when"] .rv-cols,
+  .stage[data-arrange="term"] .rv-cols { display: flex; }
+
+  .rv-cols-n {
+    font: 600 10px/1 var(--sans);
+    letter-spacing: .1em;
+    color: var(--faint);
+    font-variant-numeric: tabular-nums;
+    flex: none;
+  }
+  .rv-cols-track {
+    display: flex;
+    flex: 1;
+    gap: 5px;
+    min-width: 0;
+  }
+  /* 44px of height on every one of them; the mark itself is a 2px rule,
+     because this is a place-marker and not a row of buttons. */
+  .rv-dot {
+    flex: 1 1 0;
+    min-width: 0;
+    height: 44px;
+    position: relative;
+    padding: 0;
+    margin: 0;
+    border: 0;
+    background: none;
+    cursor: pointer;
+    -webkit-tap-highlight-color: transparent;
+  }
+  .rv-dot::after {
+    content: "";
+    position: absolute;
+    left: 0; right: 0; top: 50%;
+    height: 2px;
+    margin-top: -1px;
+    border-radius: 2px;
+    background: var(--hair);
+    transition: background .18s ease, height .18s ease;
+  }
+  .rv-dot[aria-current="true"]::after {
+    height: 3px;
+    margin-top: -1.5px;
+    background: var(--accent);
+  }
+  .rv-dot:focus-visible {
+    outline: 1px solid var(--accent);
+    outline-offset: -8px;
+    border-radius: var(--r-2);
+  }
+
+  /* ── the column you are in ──────────────────────────────────────────────
+     A lane header cannot stay in view here: the pool is its own scrollport
+     and it does not scroll vertically, so there is no scrollport for a sticky
+     header to stick to. The answer is the gesture's own receipt — a name that
+     appears while the board is moving and leaves when it stops. It never
+     takes a tap and it never occupies the page. */
+  .rv-hud {
+    position: fixed;
+    left: 50%;
+    bottom: calc(env(safe-area-inset-bottom, 0px) + 84px);
+    z-index: 60;
+    transform: translateX(-50%);
+    display: none;
+    max-width: 78cqw;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    padding: 8px 14px;
+    border-radius: 999px;
+    border: 1px solid var(--hair);
+    background: color-mix(in srgb, var(--paper) 88%, var(--card));
+    backdrop-filter: blur(8px);
+    box-shadow: 0 2px 10px color-mix(in srgb, var(--ink) 12%, transparent);
+    font: 500 12px/1.2 var(--sans);
+    color: var(--ink-2);
+    pointer-events: none;
+    opacity: 0;
+    transition: opacity .18s ease;
+  }
+  .rv-hud[data-rv-on] { display: block; }
+  .rv-hud.rv-lit { opacity: 1; }
+  .rv-hud b {
+    font-weight: 600;
+    color: var(--faint);
+    font-variant-numeric: tabular-nums;
+    margin-right: .5em;
+  }
+}
+
+/* Snapping is placement, not animation, so it stays. Smooth travel is
+   animation, and the strip's buttons ask for it explicitly — so this is the
+   one place it has to be taken back. */
+@media (prefers-reduced-motion: reduce) {
+  .pool { scroll-behavior: auto; }
+  .rv-hud { transition: none; }
+}

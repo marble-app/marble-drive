@@ -1,0 +1,369 @@
+/* ══ the card, under a thumb ═══════════════════════════════════════════════
+
+   Everything in here is one argument: a card was drawn for a 248px column
+   with a mouse resting in it, and a phone is neither of those things. The
+   card's corner was a gutter — somewhere a 19px pill could float without
+   costing the title a word. At 44px of finger there is no gutter; there is
+   only the card. So on a phone the chips stop floating and take a line, the
+   title gets its full width back, and every control grows an invisible
+   44×44 skirt rather than a bigger body. The document's design is its
+   typography. None of this is allowed to make it chunky.
+
+   The breakpoint is the container, never the viewport: a host that docks a
+   panel shrinks <html> and leaves the screen alone, and a card that is 300px
+   wide is a phone card whatever the screen says. Touch-only answers — the
+   ones about fingers rather than about width — carry `hover: none` as well. */
+
+@container doc (max-width: 720px) {
+
+  /* ── 1 · the chips stop floating ────────────────────────────────────────
+     The map and the timeline already say this, in this document's own words:
+     "a card this narrow has no corner to spare". A phone card is narrower
+     than either. Floated left with the title clearing them, the two dials
+     become a status line above the name — which is the order you read them
+     in anyway — and cost one 32px row instead of two lines of every heading.
+
+     Float rather than inline-block on purpose: the picker's own rules turn a
+     chip into `display: block`, and a floated block still shrinks to its
+     text where an ordinary one would stretch into a bar. */
+  .pool > .item > .chip.form,
+  .pool > .item > .chip.pub,
+  .pool > .item > .part-ghost.chip {
+    position: relative; float: left; clear: none;
+    right: auto; top: auto; margin: 0 12px 13px 0;
+  }
+  .pool > .item > h3 { clear: both; }
+  /* With the chips out of the corner there is nothing to leave room for, and
+     the spacer that did so would read as a hole bitten out of the heading —
+     which is exactly why the map takes it out too. */
+  .pool > .item > h3::before { display: none; }
+  /* Except on a card that has no dials to make the row — a thesis, or an idea
+     nobody has given a form or a state yet. There the heading is the first
+     thing in the card and the picker button is still in the corner, so the
+     spacer comes back, sized to that button rather than to the word
+     "submitted". It costs nothing: a title long enough to need the width
+     wraps under it on the second line. */
+  .pool > .item[data-kind="thesis"]:not([data-fields-open]) > h3::before,
+  .pool > .item:not([data-form]):not([data-mark]):not([data-fields-open]) > h3::before {
+    display: block; float: right; width: 48px; height: 28px;
+  }
+
+  /* The claim's maturity dial gets the same treatment for the same reason:
+     "forming" is 66px wide and the 3.6rem the heading reserved for it was
+     57.6, so the pill was already sitting on the last word of its own claim. */
+  .pool .claim > .chip {
+    position: relative; float: left; right: auto; top: auto;
+    margin: 0 0 14px;
+  }
+  .pool .claim > h4 { clear: both; padding-right: 0; }
+
+  /* ── 2 · the reading ────────────────────────────────────────────────────
+     None of these sizes were wrong; they were sized for a column a third of
+     this card's width, where 12.5px of body text is a deliberate density and
+     the line runs thirty characters. At 358px the line is comfortable and the
+     type is the only thing left that is small. Nothing here shrinks to fit —
+     this is a document somebody reads. */
+  /* The 26px on the left was the drag rail's, and the rail goes (see below).
+     It is given back to the text. */
+  .pool > .item { padding: 16px; }
+  .pool > .item > h3 { font-size: 18px; line-height: 1.3; }
+  .pool > .item[data-kind="thesis"] > h3 { font-size: 17px; padding-right: 0; }
+  .pool > .item > .say { font-size: 15px; line-height: 1.55; margin-top: 9px; }
+  .pool > .item > .gloss { font-size: 13px; line-height: 1.45; margin-top: 5px; }
+  .pool > .item > .meta { font-size: 12.5px; margin-top: 14px; gap: 4px 8px; }
+  .pool > .item > .meta .k { font-size: 11px; }
+  .pool .claim { margin-top: 14px; padding: 13px 14px; }
+  .pool .claim > h4 { font-size: 15px; line-height: 1.35; }
+  .pool .claim > p { font-size: 13.5px; line-height: 1.52; margin-top: 6px; }
+  .pool > .item > .beats { margin-top: 14px; gap: 6px; }
+  .pool .beat > p { font-size: 14.5px; line-height: 1.5; }
+  /* The picker's empty slots are the same fields with nothing in them yet, so
+     they are read at the same size or the card changes shape when it opens. */
+  .pool > .item > .part-ghost.claim .part-ghost-h { font-size: 15px; }
+  .pool > .item > .part-ghost.claim .part-ghost-p { font-size: 13.5px; }
+  .pool > .item > .part-ghost .part-ghost-beat { font-size: 14.5px; line-height: 1.5; }
+
+  /* ── 3 · a question is a row, not a line ────────────────────────────────
+     A beat carries a heat dial at its right edge, and reserved 3.4rem for it
+     with a flat padding. A flat reserve cannot be right: the pill's width is
+     its word, and an unset dial does not even show a heat word — it reads
+     whatever `data-mark` it finds up the tree, so a question inside a
+     submitted paper wears "submitted", which is 78px against a 54px reserve.
+
+     So the row becomes a two column grid and the dial reserves its own true
+     width, whatever word lands in it. 44px tall at minimum, the dial centred
+     in it, and a 12px column gap for the dial's skirt to grow left into
+     instead of growing onto the question. */
+  .pool .beat {
+    display: grid; grid-template-columns: minmax(0, 1fr) auto;
+    align-items: center; align-content: center; column-gap: 12px;
+    min-height: 44px; box-sizing: border-box;
+    padding: 11px 0 11px 16px;
+  }
+  .pool .beat::before { top: 19px; left: 4px; }
+  .pool .beat > p { grid-column: 1; }
+  .pool .beat > .chip {
+    position: relative; grid-column: 2; justify-self: end;
+    right: auto; top: auto;
+  }
+
+  /* ── 4 · the toolbar above the pool ─────────────────────────────────────
+     Four buttons and a count, 343px of them, on a 340px line. It wraps, and
+     once it wraps the sticky is the problem: ninety pixels of permanently
+     pinned chrome at the top of a phone, competing with whatever the page
+     pins at the bottom. It stops being sticky. Adding an idea is a rare act
+     and the toolbar is one flick away; a screenful of toolbar is not.
+
+     The count is a sentence, not a button — "31 ideas · 4 in hand" — so it
+     takes its own line above them rather than being flung to the right end
+     of whichever row it happened to land on. */
+  .pool-actions {
+    position: static; flex-wrap: wrap;
+    column-gap: 8px; row-gap: 14px;
+    padding: 12px 0 13px; margin-bottom: 14px;
+  }
+  .pool-actions .count {
+    order: -1; flex-basis: 100%; margin-left: 0; font-size: 12.5px;
+  }
+  .pool-actions .btn { font-size: 13px; padding: 6px 11px; }
+
+  /* ── 5 · the two views where a card is a node ───────────────────────────
+     On the map and the timeline a card is a label the size of its name, and
+     the document already un-floats its one chip there and drops the heading's
+     spacer with it. Both of those are right and neither knew about a 44px
+     skirt.
+
+     The picker stands down there altogether. A node has one chip, a name and
+     a line of gloss; a 44px square in its corner is a third of it, and
+     whichever way that square is turned it lands on something — on the title
+     if it stays put, on the gloss if it moves down. A title there is a
+     `-webkit-box` clamped to three lines, and a box ignores a float, so the
+     spacer that keeps a heading clear of that button everywhere else cannot
+     even be drawn. Which fields a card wears is a question you ask of a card,
+     and one view away there is a card: the same sentence this document
+     already uses for the pitch, the claim, the questions and the venue it
+     drops here.
+
+     What is left is the one chip, and it wants fifteen pixels of air above it
+     rather than eight, or its own skirt reaches up onto the gloss. */
+  .stage[data-arrange="map"] .pool > .item > .field-btn,
+  .stage[data-arrange="term"] .pool > .item > .field-btn { display: none; }
+  .stage[data-arrange="map"] .pool > .item > .chip,
+  .stage[data-arrange="term"] .pool > .item > .chip { margin-top: 15px; }
+
+  /* The picker's slots are pills again when it opens; the document's compose
+     rules turn them into blocks, which is right for a corner-floated chip and
+     wrong for one standing in the text flow. */
+  .pool > .item[data-fields-open] > .chip.form,
+  .pool > .item[data-fields-open] > .chip.pub,
+  .pool > .item[data-fields-open] > .part-ghost.chip {
+    display: block; width: max-content; max-width: 100%;
+  }
+
+  /* The only way to add a question, drawn at --faint, on a screen with no
+     hover to discover it with. It is the evidence its own capability exists,
+     so it is shown properly. */
+  .pool > .item > .addlink { font-size: 13px; color: var(--muted); margin-top: 11px; }
+  .pool > .item > .addlink:focus-visible {
+    outline: 2px solid var(--accent); outline-offset: 2px; color: var(--accent);
+  }
+}
+
+/* ══ what a finger can hit ═════════════════════════════════════════════════
+
+   Every skirt below is an absolutely positioned ::before on the control
+   itself. The control keeps its own box, its own border, its own 9px caps —
+   nothing on screen moves a pixel — and the tap lands on 44×44 of nothing.
+
+   They are laid out so that no two skirts ever overlap and none of them
+   leaves its own card, because two skirts that overlap do not make a bigger
+   target, they make a lottery — and the board packs cards ten pixels apart,
+   so a skirt that reached past an edge would be drawing that lottery with the
+   neighbouring card's controls. Where one had to grow sideways it grows into
+   air the row already holds: the gap between the two dials, the gap in the
+   question's grid, the card's own padding. */
+
+@media (hover: none) {
+  @container doc (max-width: 720px) {
+
+    .pool > .item > .chip.form::before,
+    .pool > .item > .chip.pub::before,
+    .pool .claim > .chip::before,
+    .pool .beat > .chip::before,
+    .pool > .item > .field-btn::before,
+    .pool > .item > .addlink::before,
+    .pool-actions .btn::before {
+      content: ""; position: absolute;
+    }
+
+    /* No skirt anywhere is allowed to leave its own card. The board packs
+       cards in 248px columns ten pixels apart, so a skirt that reached even
+       fifteen pixels past the edge would be arguing with the neighbouring
+       card's picker over the same ten pixels — and a tap that might delete a
+       card or might open a menu is not a target, it is a coin toss.
+
+       The two card dials. Height is free; width is not, because "seed" comes
+       out at 43.6px — four tenths short. The skirt grows rightwards only, four
+       pixels into the twelve the row already holds between the two pills. */
+    .pool > .item > .chip.form::before,
+    .pool > .item > .chip.pub::before { inset: -12.5px -4px -12.5px 0; }
+
+    /* the claim's dial: "firm" is 42px, so this one does want its two pixels */
+    .pool .claim > .chip::before { inset: -12.5px -8px; }
+
+    /* A heat dial reads "—" until somebody sets it, and "—" is 25px wide. It
+       grows nine pixels left into the grid's twelve pixel gap and ten right
+       into the card's sixteen of padding, so the skirt lands on the row's own
+       air and never on the question's last word or outside the card. */
+    .pool .beat > .chip::before { inset: -12.5px -10px -12.5px -9px; }
+
+    /* the picker button, moved a few pixels off the corner so its skirt sits
+       square inside the card instead of hanging over the card above it */
+    .pool > .item > .field-btn { right: 12px; top: 12px; }
+    .pool > .item > .field-btn::before { inset: -12px; }
+
+    /* A skirt is positioned against the nearest positioned ancestor, and for
+       these two that was the whole card — an invisible sheet over every field
+       in it, quietly eating the taps meant for the dials. A control that
+       wears a skirt has to be its own containing block. (The chips above are
+       already relative, or, inside a question, already absolute — and an
+       absolutely positioned element is its own containing block, so making
+       one of those `relative` as well is how it leaves its corner.) */
+    .pool > .item > .addlink,
+    .pool-actions .btn { position: relative; }
+    .pool > .item > .addlink::before { inset: -8.5px 0; }
+    .pool-actions .btn::before { inset: -6.5px 0; }
+
+    /* ── the left rail ──────────────────────────────────────────────────
+       The rail is the carrier's drag handle plus a delete, and on a phone
+       exactly one of those two is real. HTML5 drag never starts from a
+       finger — no dragstart, no reorder, no op, measured — so the handle is
+       a control that cannot be operated, drawn full height down every card,
+       teaching a gesture the page will not accept. It goes.
+
+       What is left is worse than absent. The × beside it is `opacity: 0`
+       waiting for a hover that never comes, and an invisible button is still
+       a button: one tap in that gutter takes a card out of the file, with
+       nothing on screen to say there was ever anything there to tap. It is
+       the only way to delete a card on a phone and it is a trap, and those
+       are the same fact.
+
+       There is no corner left to draw it in. Every one of them is spoken for
+       — the dials have the top row, the picker has the top right, "+ question"
+       has the foot — and a card is 340px wide, which is room for three 44px
+       targets and not four. So the rail goes whole, the gutter goes back to
+       the text, and deleting a card moves inside the card's own picker, where
+       part.js draws it: a destructive act behind a deliberate disclosure, said
+       in words rather than in a glyph, and offered back after. */
+    .pool > .item > .marble-grip { display: none; }
+    .pool > .item { padding-left: 16px; }
+
+    /* Said in the picker, at the size the picker's own slots are said at. */
+    .rv-drop {
+      display: block; width: 100%; min-height: 44px;
+      margin-top: 14px; padding: 0 12px;
+      font: inherit; font-size: 13px; text-align: left;
+      color: var(--m-warm); background: none; cursor: pointer;
+      border: 1px dashed color-mix(in srgb, var(--m-warm) 45%, transparent);
+      border-radius: var(--r-2);
+    }
+    .rv-drop:active { background: color-mix(in srgb, var(--m-warm) 12%, transparent); }
+    .rv-drop:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+
+    /* A question's own rail is those same two controls in a 14px indent, both
+       invisible, sitting under the bullet. There is no room to draw them and
+       no need: a question is editable and removable, so emptying it and
+       pressing Backspace takes it out — the outliner gesture this document
+       already wires and already explains in its own comment. The rail goes
+       entirely, and the bullet stops being swapped for something that was
+       never there. */
+    .pool .beat > .marble-grip { display: none; }
+    .pool .beat:hover::before,
+    .pool .beat:focus-within::before { opacity: 1; }
+
+    /* ── the ring, opened ───────────────────────────────────────────────
+       A cycling chip steps one place per tap. That is a mouse control: the
+       cost of overshooting is Mod+Z, or three more clicks round the ring, and
+       both are free. A phone has neither. So on touch the chip stops stepping
+       and starts asking — and a control that asks is its own way back, which
+       is the one thing stepping could never be. part.js builds the sheet;
+       these are its manners. */
+    .pool .chip[data-cycle] { touch-action: manipulation; }
+  }
+}
+
+/* ══ the ring sheet ════════════════════════════════════════════════════════
+   Transient page chrome: it is in the top layer and it is never in the file.
+   Deliberately outside the container query — by the time it is drawn it is a
+   child of <body> in the top layer, where the card's container no longer
+   reaches it. part.js only ever builds it under the conditions above. */
+
+.rv-ring[popover] {
+  position: fixed; inset: auto; margin: 0;
+  width: max-content; max-width: min(19rem, calc(100vw - 24px));
+  padding: 6px; border: 1px solid var(--line); border-radius: var(--r);
+  background: var(--card); color: var(--ink);
+  box-shadow: 0 10px 34px -12px color-mix(in srgb, var(--ink) 34%, transparent);
+  overflow: visible;
+}
+.rv-ring-head {
+  display: block; padding: 4px 10px 6px;
+  font: 600 9px/1 var(--sans); letter-spacing: .09em; text-transform: uppercase;
+  color: var(--faint);
+}
+.rv-ring-opt {
+  display: flex; align-items: center; gap: 10px;
+  width: 100%; min-height: 44px; padding: 0 14px 0 12px;
+  font: inherit; font-size: 15px; text-align: left;
+  color: var(--ink-2); background: none; border: 0; border-radius: var(--r-2);
+  cursor: pointer;
+}
+/* The value the card is on is a fact the button already announces in
+   aria-current; the dot is that same fact drawn, never a second copy of it. */
+.rv-ring-opt::before {
+  content: ""; width: 7px; height: 7px; border-radius: 50%;
+  background: var(--hair); flex: none;
+}
+.rv-ring-opt[aria-current="true"] { color: var(--accent-ink); font-weight: 600; }
+.rv-ring-opt[aria-current="true"]::before { background: var(--accent); }
+.rv-ring-opt:active { background: var(--accent-soft); }
+.rv-ring-opt:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+
+/* ══ the way back ══════════════════════════════════════════════════════════
+   A card taken out of the file, offered back where it went. Transient, in the
+   top layer, gone in eight seconds or on the next tap. With no carrier there
+   is no recorded inverse, so there is nothing to offer and part.js never
+   builds it. */
+
+.rv-undo[popover] {
+  position: fixed; inset: auto; margin: 0;
+  display: flex; align-items: center; gap: 10px;
+  max-width: calc(100vw - 32px);
+  padding: 7px 7px 7px 15px; border: 1px solid var(--line);
+  border-radius: 999px; background: var(--card); color: var(--ink-2);
+  font: inherit; font-size: 13px;
+  box-shadow: 0 10px 30px -14px color-mix(in srgb, var(--ink) 40%, transparent);
+  overflow: visible;
+}
+.rv-undo-say {
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0;
+}
+.rv-undo-do {
+  position: relative; flex: none; min-height: 36px; padding: 0 16px;
+  font: inherit; font-size: 13px; font-weight: 600;
+  color: var(--accent-ink); background: var(--accent-soft);
+  border: 0; border-radius: 999px; cursor: pointer;
+}
+.rv-undo-do::before { content: ""; position: absolute; inset: -4px 0; }
+.rv-undo-do:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+
+/* Motion decorates a state change that is already legible without it, so it
+   is the first thing to go. */
+@media (prefers-reduced-motion: no-preference) {
+  .rv-ring[popover]:popover-open,
+  .rv-undo[popover]:popover-open { animation: rv-rise .18s cubic-bezier(.16, 1, .3, 1); }
+  @keyframes rv-rise {
+    from { opacity: 0; transform: translateY(6px); }
+    to { opacity: 1; transform: none; }
+  }
+}

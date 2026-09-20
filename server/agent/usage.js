@@ -11,7 +11,7 @@
 // the composer read as "no quota" and greyed out every Claude model. The
 // file is the second place to look, never the first.
 
-import { readFile } from 'node:fs/promises';
+import { readFile, writeFile } from 'node:fs/promises';
 import { homedir } from 'node:os';
 import path from 'node:path';
 
@@ -132,7 +132,10 @@ export function parseCursorUsage(data) {
   };
 }
 
-export function unavailableMeter(id, label) {
+// `reason` separates "we asked and were turned away for now" from "we asked
+// and it broke". Only the first is worth remembering a stale number through,
+// and only the first should slow the polling down.
+export function unavailableMeter(id, label, reason = 'error') {
   return {
     id,
     label,
@@ -141,7 +144,8 @@ export function unavailableMeter(id, label) {
     left: null,
     window: null,
     resetsAt: null,
-    detail: 'Unavailable',
+    reason,
+    detail: reason === 'rate-limited' ? 'Rate limited — try again shortly' : 'Unavailable',
     windows: [],
   };
 }
@@ -184,6 +188,10 @@ const readJson = async (response) => {
   }
 };
 
+/** 429 is the usage API's normal answer to a busy account, not a fault. It
+ *  sends `retry-after: 0`, which is no help, so the caller picks the floor. */
+const reasonFor = (response) => (Number(response?.status) === 429 ? 'rate-limited' : 'error');
+
 export async function collectUsage({ exec = defaultExec, request = defaultRequest, credentialsFile = CLAUDE_CREDENTIALS } = {}) {
   const meters = [];
   try {
@@ -199,9 +207,9 @@ export async function collectUsage({ exec = defaultExec, request = defaultReques
           },
         });
         const meter = response?.ok ? parseClaudeUsage(await readJson(response)) : null;
-        meters.push(meter ?? unavailableMeter('claude-subscription', 'Claude'));
+        meters.push(meter ?? unavailableMeter('claude-subscription', 'Claude', reasonFor(response)));
       } catch {
-        meters.push(unavailableMeter('claude-subscription', 'Claude'));
+        meters.push(unavailableMeter('claude-subscription', 'Claude', 'error'));
       }
     }
 
@@ -228,12 +236,96 @@ export async function collectUsage({ exec = defaultExec, request = defaultReques
   return { meters };
 }
 
-export function cachedUsage(fn, ttl = CACHE_MS) {
+// How long to wait before asking again, once the API has said "not now". The
+// old code retried on the plain 60 s cache, which is the cadence that tripped
+// the limit in the first place: the outage kept itself alive and the sliders
+// sat at Unavailable for hours. Each further refusal widens the gap; one good
+// answer puts it back to zero.
+const BACKOFF_MS = [5, 15, 30, 60].map((min) => min * 60_000);
+
+const rememberable = (meter) => meter?.available === true && meter?.used != null;
+
+/** The last good reading, dressed as the answer we could not get. It keeps the
+ *  number and says when it was true — an old percentage is information, and a
+ *  slider that reads 0% / Unavailable is not. */
+const asStale = (remembered, at) => ({ ...remembered, stale: true, at });
+
+const readLast = async (file) => {
+  if (!file) return null;
+  try {
+    const saved = JSON.parse(await readFile(file, 'utf8'));
+    return saved && typeof saved === 'object' ? saved : null;
+  } catch {
+    return null;
+  }
+};
+
+/** Reads usage, remembers what it last knew, and slows down when refused.
+ *  `file` persists the last good reading so a host restart during a rate
+ *  limit still has numbers to show; pass null to keep it in memory only. */
+export function createUsageReader({ collect, ttl = CACHE_MS, now = Date.now, file = null } = {}) {
   let memo = null;
+  let last = null;          // { at, meters: { [id]: meter } }, newest good reading per meter
+  let loaded = false;
+  let backoffUntil = 0;
+  let step = 0;
+
+  const load = async () => {
+    if (loaded) return;
+    loaded = true;
+    const saved = await readLast(file);
+    if (saved?.meters && typeof saved.meters === 'object') last = saved;
+  };
+
+  const save = async () => {
+    if (!file || !last) return;
+    try {
+      await writeFile(file, JSON.stringify(last), 'utf8');
+    } catch { /* a cache we cannot write is still a cache */ }
+  };
+
+  // Remember every meter that came back good; substitute the remembered one
+  // wherever this reading has a login but no answer. A meter that is missing
+  // entirely means signed out, and signed out is not staleness — it is the
+  // truth, so nothing is substituted for it.
+  const merge = (fresh) => {
+    const meters = Array.isArray(fresh?.meters) ? fresh.meters : [];
+    const good = {};
+    for (const meter of meters) if (rememberable(meter)) good[meter.id] = meter;
+    if (Object.keys(good).length) {
+      last = { at: new Date(now()).toISOString(), meters: { ...(last?.meters ?? {}), ...good } };
+    }
+    return {
+      ...fresh,
+      meters: meters.map((meter) => {
+        if (rememberable(meter)) return meter;
+        const remembered = last?.meters?.[meter.id];
+        return remembered ? asStale(remembered, last.at) : meter;
+      }),
+    };
+  };
+
   return async () => {
-    if (memo && Date.now() - memo.at < ttl) return memo.value;
-    const value = await fn();
-    memo = { at: Date.now(), value };
+    await load();
+    const at = now();
+    if (memo && at - memo.at < ttl) return memo.value;
+    if (at < backoffUntil && memo) return memo.value;
+
+    const fresh = await collect();
+    const limited = (fresh?.meters ?? []).some((meter) => meter?.reason === 'rate-limited');
+    if (limited) {
+      backoffUntil = at + BACKOFF_MS[Math.min(step, BACKOFF_MS.length - 1)];
+      step += 1;
+    } else {
+      backoffUntil = 0;
+      step = 0;
+    }
+
+    const before = last;
+    const value = merge(fresh);
+    memo = { at, value };
+    if (last !== before) await save();   // only a genuinely new reading is worth a write
     return value;
   };
 }
+

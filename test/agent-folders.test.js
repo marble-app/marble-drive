@@ -540,6 +540,20 @@ test('a field the canvas already folded still has its whole travel', () => {
   }
 });
 
+test('the states are the layout\'s widths and the ratios a person can name', () => {
+  const rest = F().packFocus(FOLDS);
+  const { at, folds } = rest.stops();
+  const near = (x) => at.some((v) => Math.abs(v - x) < 2);
+  // Half the canvas, and a third of it to the field: the two anchors nobody
+  // needs the layout explained to ask for. φ arrives as the rest position.
+  assert.ok(near(MARGIN + rest.room / 2), `half the canvas is a state, in ${at.map(Math.round).join(' ')}`);
+  assert.ok(near(MARGIN + rest.room / 3), 'and a third of it');
+  assert.ok(near(rest.seamX), 'and φ, which is where it rests');
+  // The folds are states too — that is where a group turns into a pile — so
+  // the room settles either side of one rather than flickering across it.
+  for (const fold of folds) assert.ok(near(fold), `the fold at ${Math.round(fold)} is a state`);
+});
+
 test('the travel has one hollow in it, and the packer says where', () => {
   const rest = F().packFocus(FOLDS);
   const { at, hollow } = rest.stops();

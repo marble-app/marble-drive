@@ -1,0 +1,871 @@
+
+/* ===== shell ===== */
+/* ── the phone reading of the rail ──────────────────────────────────────────
+
+   On a wide screen the rail is a wall you stand beside: 232px of navigation
+   next to the page, costing nothing because the page was never going to use
+   that column anyway. On a phone the same markup stacks, and a wall you stand
+   beside becomes a wall you stand behind — 850px of chrome on an 844px screen,
+   so the document opens on one full page of controls and no ideas at all.
+
+   Nothing here adds a control. Every rule below takes the rail apart and puts
+   the same elements somewhere a thumb can reach them:
+
+     the eight views  →  a bar pinned to the bottom of the screen
+     everything else  →  a sheet that slides up over the page when asked for
+
+   The one structural fact to hold on to: the bar is a *child* of the sheet, and
+   it has to stay put while the sheet moves. That rules out `transform` on the
+   rail — a transformed ancestor becomes the containing block for any fixed
+   descendant, and the bar would ride down with the sheet it is supposed to
+   outlive. So the rail is a fixed box anchored to the bottom edge whose height
+   is what animates, and the bar is `position: sticky; bottom: 0` inside it.
+   Closed, the box is exactly bar-high and the bar fills it. Open, the box grows
+   upward and the bar stays welded to its bottom edge. One property animates and
+   nothing has to escape anything.
+
+   The question is asked of `doc` — the container on <html> — and never of the
+   window, because a host that docks a panel beside this document shrinks <html>
+   and leaves the viewport exactly where it was.                              */
+
+
+/* Page-owned chrome. These four elements are written by part.js and carry
+   data-marble-transient, so they belong to the page and never to the file.
+   They are declared invisible here and summoned inside the phone query, which
+   is the only place they mean anything. */
+.pm-grab, .pm-scrim, .pm-head { display: none; }
+.rail .nav > .pm-opts { display: none; }
+
+
+@container doc (max-width: 720px) {
+
+  /* 100vh on iOS is the viewport with the toolbars retracted — a height you
+     cannot see while you are looking at it, and part of why the rail measured
+     850px on an 844px screen. Every height below asks for the small viewport
+     instead: svh never moves, where dvh reflows every time the toolbar hides
+     and would make a bottom-anchored sheet twitch as you scroll. The bar itself
+     asks for neither; `position: fixed; bottom: 0` plus the safe-area inset is
+     handled by the visual viewport, which is more correct than either unit. */
+  body {
+    --pm-bar-h: 56px;
+    --pm-safe-b: env(safe-area-inset-bottom, 0px);
+    --pm-bar-total: calc(var(--pm-bar-h) + var(--pm-safe-b));
+    /* the plain vh stays first, as the fallback for anything without svh */
+    min-height: 100vh;
+    min-height: 100svh;
+  }
+
+  /* ── 1 · the rail stops being a wall ───────────────────────────────────
+     Out of flow entirely, so the first idea is the first thing on the page.
+     Closed it is bar-high; open it is a sheet. `overflow: hidden` while closed
+     means the sheet's contents are there but unreachable, which is what lets
+     the sticky bar sit over them without a second element to hold it. */
+  .rail {
+    position: fixed; z-index: 50;
+    left: 0; right: 0; bottom: 0; top: auto;
+    width: auto; min-width: 0; height: auto;
+    max-height: var(--pm-bar-total);
+    padding: 0;
+    display: flex; flex-direction: column;
+    overflow: hidden;
+    overscroll-behavior: contain;
+    background: var(--paper);
+    /* No border on the rail itself: it is a border-box, so a 1px top border
+       is 1px the sticky bar cannot occupy, and the bar ends up a hairline
+       below the fold. The bar carries its own top edge; open, the sheet is a
+       raised card on a dimmed page and does not need a line to say so. */
+    border: 0;
+    transition: max-height .32s cubic-bezier(.32, .72, 0, 1),
+                border-radius .32s cubic-bezier(.32, .72, 0, 1),
+                box-shadow .32s ease;
+  }
+  .rail.marble-pm-open {
+    max-height: 86svh;
+    overflow-y: auto;
+    background: var(--card);
+    border-radius: 16px 16px 0 0;
+    /* --hair is the document's own word for an edge and it flips with the
+       theme, so the sheet's lip reads in both. */
+    box-shadow: 0 -1px 0 var(--hair),
+                0 -22px 44px -22px color-mix(in srgb, var(--ink) 26%, transparent);
+  }
+
+  /* DOM order puts the view list in the middle of the rail; on the phone it is
+     the floor. `order` says so without moving a single node. */
+  .rail > * { order: 1; flex: 0 0 auto; }
+  .rail > .pm-grab { order: 0; }
+  .rail > .nav { order: 2; }
+
+  /* The sheet's contents are hidden from the keyboard and the screen reader
+     while it is shut — clipped is not the same as absent. The zero-length
+     visibility transition is delayed on the way out so the content does not
+     blink away before the sheet has finished closing over it. */
+  .rail > :not(.nav) {
+    padding-left: 20px; padding-right: 20px;
+    visibility: hidden;
+    transition: visibility 0s linear .32s;
+  }
+  .rail.marble-pm-open > :not(.nav) { visibility: visible; transition-delay: 0s; }
+
+  .rail > .kicker { padding-top: 4px; }
+  .rail-title { font-size: 20px; margin: 6px 0 4px; }
+  .rail-sub { font-size: 12.5px; margin-bottom: 4px; }
+  .rail-versions { margin: 10px 0 0; }
+  .rail-group { margin: 18px 0 9px; }
+  /* the bar below is the view list; naming it twice would be furniture */
+  .rail-group:has(+ .nav) { display: none; }
+
+  /* The grab handle. It is the sheet's own edge made visible and, because a
+     real button is cheaper than a gesture, it is also how you shut it. */
+  .rail > .pm-grab {
+    display: block; width: 100%;
+    position: sticky; top: 0; z-index: 2;
+    padding: 14px 20px 12px;
+    border: 0; background: var(--card); cursor: pointer;
+  }
+  .pm-grab::after {
+    content: ""; display: block; margin: 0 auto;
+    width: 38px; height: 4px; border-radius: 999px; background: var(--line);
+  }
+  /* 30px of handle, 44px of target. The expander grows downward into the
+     kicker underneath rather than upward past the sheet's edge, where the
+     rail's own overflow would clip it — a clipped hit area is not a hit area. */
+  .pm-grab::before { content: ""; position: absolute; inset: 0 0 -14px; }
+
+  /* ── 2 · the view list becomes the bar ─────────────────────────────────
+     Eight views are this document's main verb, and on a phone the main verb
+     belongs under the thumb. These are the file's own buttons, repositioned —
+     not copies. The document derives `marble-on` from data-arrange for every
+     [data-preset] it can find, so a second bar would be a second source of
+     truth that never lit up. */
+  .rail > .nav {
+    position: sticky; bottom: 0; z-index: 3;
+    visibility: visible;
+    height: var(--pm-bar-total);
+    /* No margin on the bar, ever. A bottom-sticky element may only be shifted
+       until its *margin* box reaches the top of its containing block, so a
+       16px margin here is 16px the bar cannot rise — and 16px of pills left
+       hanging below the fold while the sheet is shut. The air above the bar is
+       spent by the last thing in the sheet instead. */
+    margin: 0;
+    /* no left padding on the strip: a sticky child's `left: 0` is the
+       scrollport's padding edge, so any padding here is a gap the pills show
+       through beside the button that is supposed to be masking them. The
+       toggle carries that inset itself. */
+    /* The trailing inset is not decoration. A phone's lower-right corner is
+       already spoken for — iOS floats its own controls there, and a host may
+       float an agent button over the page — so the strip keeps enough room at
+       the end that its last pill can never come to rest under one. It doubles
+       as the peek that says the strip scrolls. */
+    padding: 5px max(48px, calc(12px + env(safe-area-inset-right, 0px)))
+             calc(5px + var(--pm-safe-b)) 0;
+    flex-direction: row; align-items: stretch; gap: 6px;
+    background: var(--paper);
+    border-top: 1px solid var(--hair);
+    overflow-x: auto; overflow-y: hidden;
+    overscroll-behavior-x: contain;
+    scroll-snap-type: x proximity;
+    scrollbar-width: none;
+  }
+  .rail.marble-pm-open > .nav { background: var(--card); }
+  .rail > .nav::-webkit-scrollbar { display: none; }
+  .rail > .nav > li { flex: 0 0 auto; display: flex; scroll-snap-align: center; }
+
+  .rail .nav button {
+    position: relative;
+    width: auto; text-align: center; align-items: center;
+    padding: 12px 15px;
+    border: 0; border-radius: 999px;
+    font-size: 13.5px; line-height: 1.25; white-space: nowrap;
+    color: var(--muted); background: none;
+    transition: color .16s, background-color .16s;
+  }
+  /* The visual pill stays the size the typography wants; the *target* is
+     grown past it by an expander nobody can see. Vertical only — every label
+     is already wider than 44px, and a sideways expander would have adjacent
+     pills fighting over the same pixels. */
+  .rail .nav button::before { content: ""; position: absolute; inset: -2px 0; }
+  .rail .nav button.marble-on {
+    border-left: 0;
+    color: var(--accent-ink); background: var(--accent-soft); font-weight: 600;
+  }
+  /* 01, 02, 03 … are ornament for a vertical list. On the bar they are eight
+     labels' worth of width spent saying nothing. */
+  .rail .nav .n { display: none; }
+
+  /* The one new control: the rest of the rail, on request. It sits at the
+     *left* end and stays there while the pills scroll under it, because the
+     lower-right corner of a phone already belongs to the browser — iOS Safari
+     floats its own controls there. */
+  .rail .nav > .pm-opts {
+    display: flex; position: sticky; left: 0; z-index: 2;
+    background: inherit; margin-right: 1px;
+    padding-left: max(8px, env(safe-area-inset-left, 0px)); padding-right: 7px;
+    /* the pills pass underneath it, and should look like they are passing
+       underneath it */
+    box-shadow: 7px 0 7px -7px color-mix(in srgb, var(--ink) 34%, transparent);
+  }
+  .pm-opts button {
+    width: 44px; min-width: 44px; padding: 0;
+    display: flex; align-items: center; justify-content: center;
+    border: 1px solid var(--hair); border-radius: 999px;
+    background: none; color: var(--muted);
+    font: 600 17px/1 var(--sans); cursor: pointer;
+    transition: color .16s, background-color .16s, border-color .16s;
+  }
+  .pm-opts button[aria-expanded="true"] {
+    color: var(--accent-ink); background: var(--accent-soft); border-color: var(--accent-soft);
+  }
+
+  /* ── 3 · the dials, inside the sheet ───────────────────────────────────
+     Same expander trick, plus enough gap that the invisible halves of two
+     neighbouring targets never overlap. */
+  .rail .dial { gap: 9px 8px; }
+  .rail .dial button {
+    position: relative; font-size: 12px; padding: 8px 13px;
+  }
+  .rail .dial button::before { content: ""; position: absolute; inset: -5px -2px; }
+
+  /* ── 9 · the note is written for a mouse ───────────────────────────────
+     Grips, drag, drop, Shift-drop, arrow keys, Mod+Z: 240 words about gestures
+     a phone does not have, currently the first thing a phone reader meets. It
+     stays in the file — desktop needs every word — but here it is the last
+     thing in the sheet, and under a touch pointer it is clamped to its first
+     line and faded out. Touching it opens it, which on a live host is the same
+     gesture that lets you edit it. */
+  .rail-note {
+    font-size: 11px; margin-top: 16px; margin-bottom: 18px; padding-top: 12px;
+  }
+  @media (hover: none) {
+    .rail-note {
+      max-height: 3.2em; overflow: hidden; cursor: pointer;
+      -webkit-mask-image: linear-gradient(to bottom, currentColor 38%, transparent);
+              mask-image: linear-gradient(to bottom, currentColor 38%, transparent);
+      transition: max-height .3s ease;
+    }
+    .rail-note:focus-within, .rail-note:active {
+      max-height: 60em;
+      -webkit-mask-image: none; mask-image: none;
+    }
+  }
+
+  /* The scrim. It is what "tap outside to dismiss" is made of, and
+     `touch-action: none` is what stops a drag on it from scrolling the page
+     behind the open sheet — a job usually done by writing to body.style, which
+     here would mean writing an inline style onto an element of the file. */
+  .pm-scrim {
+    display: block; position: fixed; inset: 0; z-index: 45;
+    background: color-mix(in srgb, var(--ink) 34%, transparent);
+    opacity: 0; pointer-events: none; touch-action: none;
+    transition: opacity .32s ease;
+  }
+  /* A scrim made of --ink is a scrim that inverts: in dark mode --ink is the
+     near-white the text is set in, so a wash of it *lights* the page instead
+     of pushing it back. Brightness asks the right question in both themes —
+     dim what is behind, whatever colour it happens to be — and needs no colour
+     of its own. The ink wash above stays as the answer for anything that
+     cannot do it, where light mode is at least right. */
+  @supports ((backdrop-filter: brightness(1)) or (-webkit-backdrop-filter: brightness(1))) {
+    .pm-scrim {
+      background: color-mix(in srgb, var(--ink) 7%, transparent);
+      -webkit-backdrop-filter: brightness(.6) saturate(.9);
+              backdrop-filter: brightness(.6) saturate(.9);
+    }
+  }
+  .pm-scrim.marble-pm-on { opacity: 1; pointer-events: auto; }
+
+  /* ── 4 · a slim page header ────────────────────────────────────────────
+     The document's title went into the sheet with the rest of the rail, and a
+     document you cannot name is a document you are lost inside. This row hands
+     it back, together with the name of the view the bar is lit on — so the
+     bar's state is legible as a word and not only as a highlight. It scrolls
+     away with everything else; only the bar is allowed to be permanent. */
+  .stage > .pm-head {
+    display: flex; align-items: baseline; gap: 12px;
+    padding: 13px 20px 11px;
+    background: var(--paper);
+    border-bottom: 1px solid var(--hair);
+  }
+  .pm-head-doc {
+    font-family: var(--serif); font-size: 15px; font-weight: 600;
+    letter-spacing: -.012em; color: var(--ink);
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  }
+  .pm-head-view {
+    margin-left: auto; flex: 0 0 auto;
+    font: 600 10px/1 var(--sans); letter-spacing: .15em; text-transform: uppercase;
+    color: var(--accent);
+  }
+
+  /* ── 6 · the content gutter ────────────────────────────────────────────
+     34px, then 30/20 at the tablet step — the asymmetry reserves a left margin
+     for a drag grip that has no meaning under a finger. Even gutters here, and
+     bottom room for the bar plus the browser's own floating toolbar, which on
+     iOS lies over the last thing on the page rather than beside it. */
+  .stage { padding-bottom: calc(var(--pm-bar-total) + 96px); }
+  .stage-in { padding-left: 20px; padding-right: 20px; }
+
+  .vhead { margin: 18px 0 14px; }
+  .vhead h2 { font-size: 20px; line-height: 1.22; }
+  .vhead .sub { font-size: 13px; margin-top: 7px; }
+  marble-alt.northstar { margin-bottom: 20px; }
+  marble-alt.northstar > [data-marble-alt] { font-size: 16.5px; line-height: 1.4; }
+}
+
+/* ===== band ===== */
+/* ═══════════════════════════════════════════════════════════════════════════
+   1 · The form chip stops floating over the title — at every width
+   ═══════════════════════════════════════════════════════════════════════════
+
+   This one section is deliberately unscoped. The chip overlapping the title is
+   not a phone bug that a narrow screen exposes; it is an arithmetic mistake
+   that has always been in the band. The chip is positioned from the card's
+   right edge and the title reserves a flat 3.2rem for it — but the chip is
+   64px wide and sits 27px in, so it occupies 68px of the title's line and the
+   title only steps aside for 51px of that. Any title long enough to reach the
+   end of its first line runs underneath it. At 1440 that is "Generating Design
+   Pattern·s"; at 390 it is all four cards.
+
+   More padding would be the same mistake again with a different number, because
+   the chip's width is its text — ABSTRACT and COMPLETE are not the same size,
+   and neither is whatever word this vocabulary grows next. So the card stops
+   guessing and starts measuring: it becomes a two-column grid, the chip takes
+   a real column, and the gap between them is a gap rather than a hope.
+
+   The chip does not move. In a grid whose first column is 1fr, an auto second
+   column lands its content against the right edge of the card's content box —
+   which is within a couple of pixels of where `right: 26px` was putting it, and
+   the negative margin below spends those two pixels. The × is left exactly as
+   it was, still absolute in the corner, still clear of the chip.
+
+   What does change is that titles now wrap at the width they actually have
+   rather than 13px more than they have. On a wide screen that costs nothing —
+   the band's height is set by the three-line gloss underneath, which has room
+   to spare. Between roughly 600 and 900px, where the band packs two cards to a
+   row, one title gains a line and the band grows by that line. That is the true
+   cost of the space the chip was taking without asking for it. */
+
+.now-ref {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: start;
+  /* The cards in a row are all as tall as the tallest, and a grid handed spare
+     height spreads it between its rows by default — which would push a short
+     card's gloss into the middle of nowhere. The rows stay at the top and the
+     spare height stays at the bottom, where it was before any of this. */
+  align-content: start;
+  column-gap: 8px;
+}
+/* A card with no form yet has no chip, so it should not be charged the gap. */
+.now-ref:not([data-form]) { column-gap: 0; }
+
+.now-ref-title {
+  grid-area: 1 / 1 / 2 / 2;
+  padding-right: 0;   /* the grid reserves the chip's column now */
+}
+.now-ref-form {
+  position: static;
+  grid-area: 1 / 2 / 2 / 3;
+  margin-right: -2px; /* land on the pixel `right: 26px` was landing on */
+}
+.now-ref-gloss {
+  grid-area: 2 / 1 / 3 / 3;
+}
+
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   2 · On a phone the band is a strip you scroll, not a wall you scroll past
+   ═══════════════════════════════════════════════════════════════════════════
+
+   Everything below is phone-only, and the gate is the container and not the
+   viewport: <html> is the `doc` container, so a host that docks a panel beside
+   the document narrows the container and gets the phone layout, which is what
+   a 400px-wide document wants whatever the screen behind it measures.
+
+   The band is sticky because it is a drop target: a card you are dragging has
+   to be able to reach it from anywhere in a very long page. On a touch screen
+   there is no dragging and therefore no reason to pin it, and the cost of
+   pinning it here is enormous — four cards at 270px wrap onto four rows, so the
+   band stands 421px tall on an 844px screen and takes half of every screenful
+   of the document, forever, in every view. It gives that back and becomes one
+   row you push sideways. */
+
+@container doc (max-width: 720px) {
+
+  .band-wrap {
+    /* Not sticky. The pinned cards are still marked where they live — the accent
+       rule down the left edge of a data-now card in the pool says so — so the
+       fact survives losing its permanent readout, and the band is one flick from
+       the top of the document when you want the index itself. It stays above the
+       content rather than below it: it is the shortest thing on the page that
+       answers "what am I in the middle of", and arriving at four titles before
+       25 ideas is orientation, where arriving at it after them is burial. */
+    position: static;
+    /* nothing passes behind it any more, and a blur that frosts nothing is a
+       compositor layer for no reason */
+    backdrop-filter: none;
+    /* The strip runs edge to edge, so the wrap keeps no side padding of its own
+       and hands the inset to the head and to the scroller's own padding. */
+    padding: 9px 0 10px;
+  }
+
+  /* The head keeps the document's left margin so "WORKING ON NOW" lines up with
+     the prose underneath it, and the strip starts on the same line. */
+  .band-head {
+    padding-left: 30px;
+    padding-right: 20px;
+    margin-bottom: 8px;
+  }
+
+  .band {
+    display: flex;
+    flex-wrap: nowrap;
+    max-width: none;
+    min-height: 0;
+    gap: 10px;
+    /* Full bleed on the right: the strip's own padding holds the first card off
+       the margin, and nothing holds the last one off the screen edge, so a card
+       is always cut by the edge when there is more to the right. A cut card is
+       the only honest promise of sideways — a fade or an arrow is a picture of
+       one. */
+    padding: 0 20px 0 30px;
+    overflow-x: auto;
+    overflow-y: hidden;
+    overscroll-behavior-x: contain;
+    scroll-snap-type: x mandatory;
+    scroll-padding-left: 30px;
+    -webkit-overflow-scrolling: touch;
+    /* The scrollbar says nothing the cut edge has not already said, and on a
+       short strip it is mostly a grey line under the cards. The strip stays
+       reachable from a keyboard — every card in it is a button, and part.js
+       makes the scroller itself a tab stop whenever it actually overflows. */
+    scrollbar-width: none;
+    /* the dashed drop outline is drawn outside the box, which a scroller clips */
+    outline-offset: -3px;
+  }
+  .band::-webkit-scrollbar { display: none; }
+  .band:focus-visible {
+    outline: 2px solid var(--accent);
+    outline-offset: -2px;
+  }
+
+  .now-ref {
+    /* Wide enough to read a title and a line of gloss, narrow enough that the
+       next card is always visibly there. cqw keeps the peek when the container
+       is narrower than a phone — a docked panel, say — instead of letting one
+       card fill it. */
+    flex: 0 0 auto;
+    width: min(256px, 72cqw);
+    max-width: none;
+    scroll-snap-align: start;
+    /* 36px on the right is not decoration: it is the strip the × lives in, and
+       it is exactly wide enough that the ×'s 44px tap area (below) can reach its
+       full size without ever crossing into the title. */
+    padding: 10px 36px 11px 12px;
+    /* The title takes the whole first line here. At this width the chip beside
+       it would leave about 120px for a serif title, which is not a title, it is
+       a column of words — so the chip drops to the second line and introduces
+       the gloss instead, which is the sentence it was always a label for. */
+    grid-template-columns: auto minmax(0, 1fr);
+    row-gap: 3px;
+  }
+  .now-ref-title {
+    grid-area: 1 / 1 / 2 / 3;
+    /* Two lines is the card's share of the strip. A title that needs a third is
+       telling you to open it, and the whole card is the button that does. */
+    display: -webkit-box;
+    -webkit-box-orient: vertical;
+    -webkit-line-clamp: 2;
+    overflow: hidden;
+  }
+  .now-ref-form {
+    grid-area: 2 / 1 / 3 / 2;
+    align-self: start;
+    margin-top: 1px;
+    margin-right: 8px;
+  }
+  .now-ref-gloss {
+    grid-area: 2 / 2 / 3 / 3;
+    margin-top: 0;
+    /* The band is an index, not a reading surface. Two lines, and the card is
+       one tap from the paragraph it came from. */
+    display: -webkit-box;
+    -webkit-box-orient: vertical;
+    -webkit-line-clamp: 2;
+    overflow: hidden;
+  }
+
+  /* A finger is not a cursor. The × keeps its 18px glyph — this document is its
+     typography and a chunky button would be a different document — and grows a
+     44px tap area underneath it instead. The expander reaches out into the
+     card's right strip and the gap beside it, where there is nothing to hit; it
+     stops at the title's edge, so the two things this card does (unpin it, go
+     to it) never have to guess which one you meant. */
+  .now-ref-x {
+    /* it is already absolute, which already makes it the containing block the
+       expander below measures from — it only moves in a little */
+    top: 6px;
+    right: 6px;
+  }
+  .now-ref-x::before {
+    content: "";
+    position: absolute;
+    inset: -13px;
+  }
+
+  /* An empty band that says nothing is a band nobody discovers — but what it
+     said was "drag an idea up here", and there is no dragging on a touch screen,
+     so on a touch screen it says what is true instead of what is impossible.
+     A narrow window with a mouse can still drag, and still reads the original. */
+  .band.is-empty::after {
+    flex: 1 1 auto;
+    min-width: 0;
+    padding: 12px 0;
+  }
+  @media (hover: none) {
+    .band.is-empty::after {
+      content: "Nothing pinned. Ideas you mark as current work collect here — they stay in their column.";
+    }
+  }
+
+  /* Snapping is a settle, and a settle is motion. Asked for less of it, the
+     strip still snaps where it is going but never takes the scroll out of your
+     hand. Nothing here adds a smooth scroll to disable; this is the one piece
+     of movement the strip introduces, and this is where it is given back. */
+  @media (prefers-reduced-motion: reduce) {
+    .band { scroll-behavior: auto; scroll-snap-type: x proximity; }
+  }
+}
+
+/* Below about 380px the caption stops fitting on the heading's line and starts
+   costing the band a whole row of chrome to say something the interface already
+   says: the × is labelled with what it removes, and a pinned idea still carries
+   the accent rule down its left edge in the pool, where it never left. */
+@container doc (max-width: 380px) {
+  .band-head .count { display: none; }
+}
+
+/* ===== columns ===== */
+/* ── the columns, on a phone ──────────────────────────────────────────────
+   The sheet above already decided the hard part: narrowing these boards
+   cannot mean fewer tracks, because a card chooses its column by its own
+   attribute and a track that is not in the template is a track at zero width
+   with cards still standing in it. So the columns stay, and the board scrolls
+   sideways.
+
+   What it did not decide is what sideways *feels* like. Today it is an
+   accident — 682px of free scroll inside a page that is already scrolling the
+   other way, with no snap, no peek and nothing on screen admitting a column
+   exists. Everything below turns that accident into a gesture: one column
+   fills the thumb's width, the next one shows its shoulder, and a swipe lands
+   on a column rather than somewhere between two.
+
+   All of it lives in one container query. `doc` is the <html> element's own
+   inline size, so a host that docks a panel beside the document narrows this
+   the same way a narrow phone does — which a media query would refuse to
+   believe. Nothing here fires above 720px, so the wide board is the board it
+   has always been. */
+
+/* The two pieces of chrome the script builds are page-only in both senses:
+   they carry data-marble-transient, and above this breakpoint they are not on
+   screen at all. This is the rule that makes the second one true. */
+.rv-cols, .rv-hud { display: none; }
+
+@container doc (max-width: 720px) {
+
+  /* A flag, not a second breakpoint. The script needs to know whether the
+     carousel is on, and the only honest answer is the one CSS just gave — so
+     it reads this property rather than measuring the window for itself. */
+  .pool { --rv-phone: 1; }
+
+  .stage[data-arrange="form"] .pool,
+  .stage[data-arrange="when"] .pool,
+  .stage[data-arrange="term"] .pool {
+    /* 84% of the screen, capped so a large phone does not run an eighty
+       character line. What is left over is the peek: about 50px of the next
+       column, which is the whole affordance — a card cut off at the edge is
+       the only honest way a board says "there is more of me this way". */
+    --rv-col: min(340px, calc(84cqw - 10px));
+    --rv-gutter: 14px;
+
+    /* Full bleed. The peek only reads if the next column runs off the
+       *screen* rather than stopping twenty pixels short of it inside a text
+       margin. These two lengths are the stage's own side padding; the script
+       re-measures them, so this keeps working if that padding ever moves. */
+    margin-left: calc(var(--rv-bleed-l, 30px) * -1);
+    margin-right: calc(var(--rv-bleed-r, 20px) * -1);
+
+    padding-left: var(--rv-gutter);
+    /* Trailing room the width of the scrollport, so the *last* column can
+       come to rest at the left edge like every other one. Without it the
+       scroller runs out of travel before the last snap position and a
+       mandatory snap sits the board down somewhere nobody asked for. */
+    padding-right: calc(100cqw - var(--rv-col) - var(--rv-gutter));
+    padding-bottom: 8px;
+
+    scroll-snap-type: x mandatory;
+    scroll-padding-left: var(--rv-gutter);
+  }
+
+  .stage[data-arrange="form"] .pool { grid-template-columns: repeat(4, var(--rv-col)); }
+  .stage[data-arrange="when"] .pool { grid-template-columns: repeat(4, var(--rv-col)); }
+  .stage[data-arrange="term"] .pool { grid-template-columns: repeat(6, var(--rv-col)); }
+
+  /* The lane is the column's own head and it sits in row 1, which makes it
+     exactly the box the scroller should come to rest against. Every card
+     below shares its left edge, so snapping the lane snaps the column.
+     `always` is the difference between a carousel and a slide: one flick
+     moves one column, however hard it is thrown. */
+  .stage[data-arrange="form"] .pool > .lane,
+  .stage[data-arrange="when"] .pool > .lane,
+  .stage[data-arrange="term"] .pool > .lane {
+    scroll-snap-align: start;
+    scroll-snap-stop: always;
+    padding-bottom: 4px;
+  }
+
+  /* A column name set at 10px was a label on a board you could see all of.
+     Here it is the thing telling you where you are, so it is read at the
+     weight of a heading and its rule is drawn in ink rather than in hairline.
+     The count belongs to the strip above it and is not repeated here. */
+  .pool > .lane > h4 {
+    font-size: 12px;
+    letter-spacing: .1em;
+    color: var(--ink-2);
+    padding-bottom: 9px;
+    border-bottom-color: var(--muted);
+  }
+  .pool > .lane > .lane-why {
+    font-size: 12px;
+    color: var(--muted);
+  }
+
+  /* ── venue pills ────────────────────────────────────────────────────────
+     Every one of these is data-marble-editable, which makes it a tap target
+     for editing and puts it under the 44px floor. It gets there the way the
+     rest of the document does: a little more air in the pill itself, and an
+     invisible expander for the remainder, so the type is untouched and the
+     pill still reads as a small uppercase mark rather than a button. */
+  .venues { gap: 15px 6px; margin-top: 8px; }
+  .venue {
+    position: relative;
+    font-size: 10px;
+    padding: 9px 10px;
+  }
+  .venue::before {
+    content: "";
+    position: absolute;
+    inset: -7px -2px;
+  }
+
+  /* ── the map ────────────────────────────────────────────────────────────
+     A map is a claim about where things sit relative to each other, and at
+     390px the claim is unreadable: a 612px canvas of absolutely positioned
+     cards, clipped, overlapping, with no way to pan it. So on a phone the map
+     stops pretending. The cards keep their coordinates — nothing here is
+     written to the file, and the same document on a laptop still opens on the
+     canvas it was arranged into — but they are read in file order down the
+     page, which is the one arrangement that always fits.
+
+     The inline left/top has to be shouted down, exactly as the sheet above
+     shouts it down for every other arrangement: it is an inline style, and no
+     selector outranks one. */
+  .stage[data-arrange="map"] .pool {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    min-height: 0;
+    overflow: visible;
+    border: 0;
+    background: none;
+  }
+  .stage[data-arrange="map"] .pool > .item {
+    position: relative;
+    left: auto !important;
+    top: auto !important;
+    max-width: none;
+    cursor: auto;
+    box-shadow: none;
+  }
+  /* Said out loud, because a view that quietly becomes a different view is a
+     view the person will think is broken. */
+  .stage[data-arrange="map"] .pool::before {
+    content: "The map is a layout, and this screen is too narrow to hold one. The cards are listed here in the order they sit in the file; open the document wider to see where they are.";
+    display: block;
+    font-size: 12px;
+    line-height: 1.5;
+    color: var(--faint);
+    padding: 10px 12px;
+    border: 1px dashed var(--hair);
+    border-radius: var(--r-2);
+    background: color-mix(in srgb, var(--paper) 60%, var(--card));
+  }
+
+  /* ── + Idea ─────────────────────────────────────────────────────────────
+     The spine packer hides the column buttons it has no column for with
+     `btn.hidden = true`, and the rule that shows them — a class inside an
+     attribute selector — outranks the browser's own [hidden] rule, so they
+     were never hidden at all. With no left or top of their own they fall back
+     to the pool's top-left corner and land on the first card; one column
+     means two of them sitting there. Hiding is not a suggestion. */
+  .stage[data-arrange="thesis"] .pool > .col-add[hidden] { display: none; }
+
+  /* The ones that are left are 35px of dashed outline, and the packer places
+     them by measuring — its idea of how tall they are is written into where
+     it puts the next one. So the visible button is not touched; each one
+     grows an invisible expander into the slack the packer already left above
+     and below it, up to the 44px floor, and the three of them are cut so
+     that no two claim the same pixel. */
+  .col-add::before { content: ""; position: absolute; }
+  .col-add:not(.col-add-thesis)::before { inset: -5px 0 -4px; }
+  .col-add-thesis:not(.is-rail)::before { inset: -1px 0 -8px; }
+  .col-add-thesis.is-rail::before { inset: 0 -2px; }
+
+  /* ── the framings ───────────────────────────────────────────────────────
+     Ten information graphics drawn on a 960-unit canvas, whose labels are
+     nine to thirteen units tall. Fitted to a 340px column that is a little
+     under 4px of type — a picture of a diagram rather than a diagram. So the
+     figure becomes its own sideways scroller and the drawing keeps a width
+     its labels survive; the title and the caption are prose and stay put,
+     which `position: sticky` gives them for free inside a scroller that only
+     moves one way. */
+  .viz {
+    overflow-x: auto;
+    overscroll-behavior-x: contain;
+    margin-left: calc(var(--rv-bleed-l, 30px) * -1);
+    margin-right: calc(var(--rv-bleed-r, 20px) * -1);
+    padding-bottom: 6px;
+  }
+  /* The text keeps its margin and the scroller has none, so sticky has one
+     unambiguous edge to measure from — the screen's. Browsers do not agree
+     about how a scroll container's own padding enters that measurement, and
+     the fix for a caption that drifts is to give them nothing to disagree
+     about. */
+  .viz > h4,
+  .viz > figcaption {
+    position: sticky;
+    left: var(--rv-bleed-l, 30px);
+    margin-left: var(--rv-bleed-l, 30px);
+    margin-right: var(--rv-bleed-r, 20px);
+  }
+  .viz > h4 { font-size: 14px; }
+  .viz > figcaption { font-size: 13.5px; }
+  .viz-svg {
+    min-width: 780px;
+    margin-left: var(--rv-bleed-l, 30px);
+  }
+
+  /* ── the column strip ───────────────────────────────────────────────────
+     One segment per column, lit for the one being read. It is the standing
+     answer to "how far along am I", and it is also how to cross a six column
+     board without six swipes. Built in script, owned by the page, never
+     written to the file. */
+  .rv-cols {
+    display: none;
+    align-items: center;
+    gap: 10px;
+    /* Bled and inset exactly as the board is, so segment one begins where
+       column one begins. The script hands it the same two measurements. */
+    margin-left: calc(var(--rv-bleed-l, 30px) * -1);
+    margin-right: calc(var(--rv-bleed-r, 20px) * -1);
+    padding: 0 14px;
+    margin-bottom: 6px;
+  }
+  .stage[data-arrange="form"] .rv-cols,
+  .stage[data-arrange="when"] .rv-cols,
+  .stage[data-arrange="term"] .rv-cols { display: flex; }
+
+  .rv-cols-n {
+    font: 600 10px/1 var(--sans);
+    letter-spacing: .1em;
+    color: var(--faint);
+    font-variant-numeric: tabular-nums;
+    flex: none;
+  }
+  .rv-cols-track {
+    display: flex;
+    flex: 1;
+    gap: 5px;
+    min-width: 0;
+  }
+  /* 44px of height on every one of them; the mark itself is a 2px rule,
+     because this is a place-marker and not a row of buttons. */
+  .rv-dot {
+    flex: 1 1 0;
+    min-width: 0;
+    height: 44px;
+    position: relative;
+    padding: 0;
+    margin: 0;
+    border: 0;
+    background: none;
+    cursor: pointer;
+    -webkit-tap-highlight-color: transparent;
+  }
+  .rv-dot::after {
+    content: "";
+    position: absolute;
+    left: 0; right: 0; top: 50%;
+    height: 2px;
+    margin-top: -1px;
+    border-radius: 2px;
+    background: var(--hair);
+    transition: background .18s ease, height .18s ease;
+  }
+  .rv-dot[aria-current="true"]::after {
+    height: 3px;
+    margin-top: -1.5px;
+    background: var(--accent);
+  }
+  .rv-dot:focus-visible {
+    outline: 1px solid var(--accent);
+    outline-offset: -8px;
+    border-radius: var(--r-2);
+  }
+
+  /* ── the column you are in ──────────────────────────────────────────────
+     A lane header cannot stay in view here: the pool is its own scrollport
+     and it does not scroll vertically, so there is no scrollport for a sticky
+     header to stick to. The answer is the gesture's own receipt — a name that
+     appears while the board is moving and leaves when it stops. It never
+     takes a tap and it never occupies the page. */
+  .rv-hud {
+    position: fixed;
+    left: 50%;
+    bottom: calc(env(safe-area-inset-bottom, 0px) + 84px);
+    z-index: 60;
+    transform: translateX(-50%);
+    display: none;
+    max-width: 78cqw;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    padding: 8px 14px;
+    border-radius: 999px;
+    border: 1px solid var(--hair);
+    background: color-mix(in srgb, var(--paper) 88%, var(--card));
+    backdrop-filter: blur(8px);
+    box-shadow: 0 2px 10px color-mix(in srgb, var(--ink) 12%, transparent);
+    font: 500 12px/1.2 var(--sans);
+    color: var(--ink-2);
+    pointer-events: none;
+    opacity: 0;
+    transition: opacity .18s ease;
+  }
+  .rv-hud[data-rv-on] { display: block; }
+  .rv-hud.rv-lit { opacity: 1; }
+  .rv-hud b {
+    font-weight: 600;
+    color: var(--faint);
+    font-variant-numeric: tabular-nums;
+    margin-right: .5em;
+  }
+}
+
+/* Snapping is placement, not animation, so it stays. Smooth travel is
+   animation, and the strip's buttons ask for it explicitly — so this is the
+   one place it has to be taken back. */
+@media (prefers-reduced-motion: reduce) {
+  .pool { scroll-behavior: auto; }
+  .rv-hud { transition: none; }
+}

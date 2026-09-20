@@ -55,6 +55,8 @@ __ICON__
     --pane-gap: 5px;
     --ease-out: cubic-bezier(0.22, 1, 0.36, 1);
     --t-room: 520ms;
+    /* One state of the room to the next, which is what the seam moves it in. */
+    --t-snap: 300ms;
     --bar-h: 2.25rem;
     /* The bright edge where light catches a translucent bar. White reads as
        light falling on paper, and as a scratch across a dark screen — so the
@@ -991,11 +993,29 @@ __ICON__
     opacity: .55; transform: translate(-50%, -50%);
   }
   .focus-seam[data-dragging]::after { opacity: 1; background: var(--accent); }
+  /* Held, the grip goes over the stage. It is ahead of the room by however
+     far you have pulled toward the next state, so dragging toward the panes
+     takes it over them — and a handle that disappears under the thing it is
+     sizing is a handle you have lost. */
+  .focus-seam[data-dragging] { z-index: 7; }
   .focus-seam:focus-visible { outline: none; }
-  /* While the seam is under a finger the layout is the gesture: a basin
-     easing toward a width that has already changed again reads as lag. The
-     cards are placed outright for the same reason — see `focusSizing`. */
-  .focus.marble-sizing .focus-basin { transition: none; }
+  /* A seam does not size the room continuously; it moves it from one state to
+     the next. So a change of split is a transition, and everything the split
+     moves takes the same clock: the basins here, the stage below, and the
+     cards on their own spring. */
+  .focus.marble-snapping .focus-basin {
+    transition: left var(--t-snap) var(--ease-out), top var(--t-snap) var(--ease-out),
+      width var(--t-snap) var(--ease-out), height var(--t-snap) var(--ease-out);
+  }
+  /* And while a width is being held by a hand, nothing eases at all: a basin
+     on its way to a width that has already changed again is lag wearing the
+     costume of smoothness. The room is under the hand, so it is placed. */
+  .focus.marble-tracking .focus-basin { transition: none; }
+  /* The bar moves with the room it divides — placed while the hand has it,
+     eased when the room takes hold of a state or lets go of one. A bar that
+     jumped while the basins either side of it eased would be the one part of
+     the room not doing what the room is doing. */
+  .focus.marble-snapping .focus-seam { transition: left var(--t-snap) var(--ease-out); }
   /* Nothing hovers on a touch screen, so the grip simply stays visible. */
   @media (hover: none) { .focus-seam::after { opacity: .4; } }
   .focus-look {
@@ -1574,6 +1594,13 @@ __ICON__
       background-color 200ms var(--ease-out);
   }
   .pane.marble-noanim, .pane.marble-noanim *, .pane.marble-docksizing, .pane.marble-docksizing * { transition: none !important; }
+  /* The stage is placed in pixels by the layout, so the seam moving it is the
+     one time it has to ease rather than jump. Its frames are placed inside it
+     in percentages and come along without a transition of their own. */
+  .pane.marble-docksnap {
+    transition: left var(--t-snap) var(--ease-out), top var(--t-snap) var(--ease-out),
+      width var(--t-snap) var(--ease-out), height var(--t-snap) var(--ease-out);
+  }
   .dock-frame {
     position: absolute; z-index: 1; display: flex; flex-direction: column;
     min-width: 0; min-height: 0; overflow: hidden; pointer-events: auto;
@@ -4429,17 +4456,11 @@ __ICON__
       applyDock();
     };
 
-    // While the seam between the field and the stage is under a finger, the
-    // layout is the gesture: a card easing toward a width that has already
-    // changed again reads as lag rather than as motion, so cards take their
-    // new rect outright until the hand lets go.
-    let focusSizing = false;
-
     const animateFocusCard = (card, from, to, velocity) => {
-      if (!from || focusSizing) {
-        // A spring still running would go on nudging the card against the
-        // hand, so the seam's rect is the last word: the spring is stopped
-        // and the offset it was carrying cleared.
+      if (!from || focusStill) {
+        // A card with no rect behind it has nothing to animate from: it takes
+        // its place outright, and any spring still running is stopped and the
+        // offset it was carrying cleared.
         stopCardSpring(card);
         card.style.transform = '';
         card.style.left = `${to.x}px`;
@@ -4752,13 +4773,14 @@ __ICON__
     // nothing left of it but a rail of piles. Drag back and they come out
     // again, in the order they went in.
     //
-    // Which means the seam's travel is not a continuum, and it does not
-    // pretend to be one. The packer says where the field has somewhere to
-    // stand — a column at its floor, at the width it asks for, at the width it
-    // stops widening at, one such set per shape the field can fold to, and φ.
-    // Between those the seam tracks the hand exactly; within a hand's breadth
-    // of one it goes reluctant, and let go it throws the way it was moving and
-    // settles onto whichever it was headed for.
+    // Which means the seam's travel is not a continuum, and the gesture is in
+    // two parts. The grip is under your hand, one pixel for one pixel, the
+    // whole way. The room behind it is a set of states — the packer says which
+    // widths mean something — and it goes to the one the grip has passed the
+    // threshold of, and eases there. So you are always looking at the layout
+    // you would get if you let go now, and you are always holding the thing
+    // you are moving. Letting go throws the grip the way it was going, takes
+    // whichever state that lands in, and puts the grip back on the edge.
     //
     // Two presses close together are the reset, read from the timestamps
     // rather than from `dblclick`: the preventDefault that stops a drag
@@ -4769,18 +4791,31 @@ __ICON__
     // neighbour: a nudge, and a bigger one with a shift held.
     const SEAM_NUDGE = 24;
     const SEAM_BIG_NUDGE = 72;
-    // How near a stop has to be, when the hand lets go, before it takes the
-    // seam. Nothing pulls while the hand is still on it — a seam that goes
-    // reluctant under the finger is a seam that is not following it.
-    const SEAM_PULL = 56;
+    // How near a state has to be before it takes hold of the room, and how
+    // hard it holds. Inside a zone the room barely moves however the hand
+    // does — dead on the state it does not move at all — and by the edge of
+    // the zone it is back under the hand at exactly one to one, so there is
+    // no step anywhere in the gesture. Capped at a share of the way to the
+    // next state, so two close together do not fight over the space between.
+    const SEAM_ZONE = 30;
+    const SEAM_ZONE_SHARE = 0.35;
+    // And how far out of it the hand has to go to be let go of. Wider than the
+    // way in, or a hand resting on the edge of a zone would have the room
+    // taking and releasing the state a dozen times a second. Never past the
+    // halfway line, so two neighbours cannot both claim the same hand.
+    const SEAM_ZONE_OUT = 1.45;
+    const SEAM_ZONE_OUT_SHARE = 0.48;
+    // The band around the halfway line of the hollow, where the room has two
+    // states and nothing in between: it keeps a hand resting on the line from
+    // flickering the field open and shut.
+    const SEAM_HYST = 8;
     // A let-go keeps going, the way a flicked scroll does. Apple's projection,
     // at a rate well short of a scroll's: a seam is a short travel being
-    // placed, not a list being thrown, and a scroll's momentum carries it the
-    // width of the canvas. This much throws a flick about two stops.
+    // placed, not a list being thrown.
     const SEAM_DECAY = 0.992;
-    // The spring that lands it. Bounce only when the hand was moving: an
-    // overshoot on a seam nudged into place reads as a wobble, and an
-    // overshoot on one thrown reads as weight.
+    // The grip going back to the edge it belongs on. Bounce only when the hand
+    // was moving: an overshoot on a grip set down carefully reads as a wobble,
+    // and an overshoot on one thrown reads as weight.
     const SEAM_RESPONSE = 0.34;
     // The layout module's numbers, or the same numbers spelled out, for the
     // load where a stale cached copy of it left the page without one.
@@ -4798,15 +4833,76 @@ __ICON__
       });
     };
 
+    /** Changing the split changes the shape of the room, and a room changes
+     *  state rather than size: the basins, the stage and the cards all ease to
+     *  the new split together. The mark goes on for the length of the change
+     *  and comes off once nothing has moved for a beat, so a drag holds it for
+     *  the whole gesture and a keypress holds it for one transition. */
+    let snapTimer = 0;
+    // True while the room is being placed at a width the hand is holding, so
+    // the cards take their rects outright instead of chasing one.
+    let focusStill = false;
+    let snapUntil = 0;
+    // Whether a hand is on the seam right now. When an ease ends mid-drag the
+    // room goes straight back to being placed under the hand — without this
+    // the first move after the ease would be eased too, because the basins'
+    // own transition is still there when neither mark is on.
+    let seamHeld = false;
+    const dropFocusSnapping = () => {
+      focusEl.classList.remove('marble-snapping');
+      pane?.classList.remove('marble-docksnap');
+      if (seamHeld) focusEl.classList.add('marble-tracking');
+    };
+    /** Stop easing — but not in the middle of an ease. Taking the transition
+     *  off an element that is halfway through one does not end the motion, it
+     *  deletes it: everything jumps to where it was going. A fold is followed
+     *  by more of the same drag a frame later, and without this the fold's
+     *  ease would be cut off by the next pixel of hand movement. */
+    const clearFocusSnapping = () => {
+      // Not while an ease is still running: taking the transition off an
+      // element halfway through one deletes the motion rather than ending it,
+      // and a fold is followed by more of the same drag a frame later.
+      if (performance.now() < snapUntil) return;
+      clearTimeout(snapTimer);
+      dropFocusSnapping();
+      focusEl.classList.add('marble-tracking');
+    };
+    const markFocusSnapping = () => {
+      focusEl.classList.add('marble-snapping');
+      pane?.classList.add('marble-docksnap');
+      // Just past `--t-snap`: long enough for the transition to finish, short
+      // enough that the hand is tracking again the moment it has.
+      snapUntil = performance.now() + 340;
+      clearTimeout(snapTimer);
+      snapTimer = setTimeout(dropFocusSnapping, 340);
+    };
+
     /** Move the seam. `null` is the reset: no attribute at all, which is the
      *  layout's own answer rather than a number that happens to equal it. */
-    const setFocusSplit = (share) => {
+    const setFocusSplit = (share, ease = true) => {
+      const before = focusEl.getAttribute('data-split');
       if (share == null) focusEl.removeAttribute('data-split');
       else {
         const held = Math.min(seamSplitMax(), Math.max(seamSplitMin(), share));
         focusEl.setAttribute('data-split', String(Math.round(held * 1000) / 1000));
       }
+      const changed = focusEl.getAttribute('data-split') !== before;
+      // Two kinds of change, and they want opposite treatment. A width the
+      // hand is holding is placed outright: an easing basin is a basin
+      // heading for a width that has already changed again, which is lag
+      // wearing the costume of smoothness. A change the hand did not make
+      // continuously — a group folding into the rail, the field opening out
+      // of it, a let-go landing on a state — is a change of state, and the
+      // room eases into it.
+      if (ease) {
+        focusEl.classList.remove('marble-tracking');
+        if (changed) markFocusSnapping();
+      } else {
+        clearFocusSnapping();
+      }
+      focusStill = !ease;
       paintFocus();
+      focusStill = false;
     };
 
     /** What the seam is holding, for anyone who cannot see it. The field's
@@ -4843,102 +4939,116 @@ __ICON__
      *  and a pixel does not. */
     const seamSplitAt = (sx, basis) => 1 - (sx - basis.margin) / basis.room;
 
-    /** Where the seam goes for a hand at `want`, and which side of the hollow
-     *  that leaves it on.
-     *
-     *  Under the finger, wherever the layout can be — which is everywhere
-     *  between the ends of the travel except the hollow under the last
-     *  column, where the field has no width between a column you can read and
-     *  a rail. A hand in there is between two states rather than at a width,
-     *  so the seam holds at the end it is on and goes over when the hand is
-     *  far enough across to mean it. It takes more to cross than to stay, or a
-     *  hand resting at the middle would flutter the field open and shut.
-     *
-     *  Past the ends it rubber-bands, the way everything else here does. The
-     *  stops themselves pull only when the hand lets go: a seam that goes
-     *  reluctant under the finger is a seam that is not following it. */
-    const seamHold = (want, stops, closed) => {
-      const held = stops ? rubberFocus(want, stops.min, stops.max, 140) : want;
-      const hollow = stops?.hollow;
-      if (!hollow) return { at: held, closed };
-      if (held <= hollow[0]) return { at: held, closed: true };
-      if (held >= hollow[1]) return { at: held, closed: false };
-      // How far past the end you are on the hand has to be before it goes
-      // over: a fixed pull, not a share of the hollow, so crossing feels the
-      // same however wide the hollow happens to be — a field with a lot in it
-      // has a wide one, and asking for half of that is asking for a drag that
-      // has visibly stopped. The two thresholds are apart by that pull on
-      // either side, which is the hysteresis: it takes more to cross than to
-      // stay, so a hand resting in there does not flutter the field.
-      const pull = Math.min(SEAM_PULL, (hollow[1] - hollow[0]) * 0.4);
-      const shut = closed ? held < hollow[0] + pull : held < hollow[1] - pull;
-      return { at: shut ? hollow[0] : hollow[1], closed: shut };
+    /** How far a state reaches on one side: the way in, and the way back out. */
+    const seamZone = (stop, list, side) => {
+      const index = list.indexOf(stop);
+      const gap = side >= 0
+        ? (index >= 0 && index < list.length - 1 ? list[index + 1] - stop : Infinity)
+        : (index > 0 ? stop - list[index - 1] : Infinity);
+      const into = Math.min(SEAM_ZONE, gap * SEAM_ZONE_SHARE);
+      return { into, outOf: Math.min(into * SEAM_ZONE_OUT, gap * SEAM_ZONE_OUT_SHARE) };
     };
 
-    /** Where a let-go is headed, and the stop it lands on. Momentum is
-     *  projected the way a scroll's is, so a flick throws the seam past what
-     *  the hand actually covered; a stop within reach of where that lands
-     *  takes it, and past every stop — where the field is simply wide and the
-     *  widths mean nothing in particular — it lands where it was thrown. */
-    const seamLanding = (from, velocity, stops) => {
-      const thrown = from + (velocity / 1000) * SEAM_DECAY / (1 - SEAM_DECAY);
-      const at = stops?.at ?? [];
+    /** Where the room stands for a hand at `at`, and what state that leaves it
+     *  in.
+     *
+     *  Out in the open the room is the hand: the columns stretch and squeeze
+     *  with the drag, one pixel for one pixel, because that is what the layout
+     *  does with the width it is given. Near a state the room is *on* the
+     *  state and stays there while the hand moves about inside its zone. The
+     *  two changeovers — taking hold and letting go — are the only moments the
+     *  room moves on its own, and both of them animate: it eases onto the
+     *  state as you arrive, and eases back under the hand as you leave.
+     *
+     *  It takes more to get out of a zone than into it. Equal radii would mean
+     *  a hand resting on the line took and released the state a dozen times a
+     *  second.
+     *
+     *  The hollow is the exception: between the narrowest readable column and
+     *  the rail the layout has no width at all, so there the room stands at one
+     *  end or the other and crosses at the halfway line with a band. */
+    const seamRoom = (at, stops, state) => {
+      const list = stops?.at ?? [];
       const lo = stops?.min ?? -Infinity;
       const hi = stops?.max ?? Infinity;
-      const held = Math.min(hi, Math.max(lo, thrown));
-      if (!at.length) return held;
-      const near = at.reduce((best, v) => (Math.abs(v - held) < Math.abs(best - held) ? v : best), at[0]);
-      return Math.abs(near - held) <= SEAM_PULL ? near : held;
-    };
-
-    // The gesture outlives the pointer: a seam let go is still moving, and a
-    // hand back on it takes the motion over rather than waiting for it.
-    let seamSettle = null;
-    const stopSeamSettle = () => {
-      if (seamSettle?.frame) cancelAnimationFrame(seamSettle.frame);
-      const carried = seamSettle?.v ?? 0;
-      seamSettle = null;
-      return carried;
-    };
-
-    /** Land the seam on `to`, carrying the hand's velocity into the spring so
-     *  the drag and the settle are one motion. The spring runs in seam-x and
-     *  converts against the layout on screen each frame rather than the one
-     *  the drag started on: folding a group moves the rail under the gesture,
-     *  and a share measured against the old one lands somewhere else. */
-    const settleSeam = (to, velocity, done) => {
-      stopSeamSettle();
-      const basis = seamBasis();
-      if (!basis || reduceMotion.matches) {
-        if (basis) setFocusSplit(seamSplitAt(to, basis));
-        done?.();
-        return;
+      const want = Math.min(hi, Math.max(lo, at));
+      const hollow = stops?.hollow;
+      const held = state?.stop ?? null;
+      if (hollow && want > hollow[0] + 0.5 && want < hollow[1] - 0.5) {
+        const shut = Boolean(state?.shut);
+        const here = shut ? hollow[0] : hollow[1];
+        const there = shut ? hollow[1] : hollow[0];
+        const flip = Math.abs(want - here) - Math.abs(want - there) > SEAM_HYST;
+        const next = flip ? !shut : shut;
+        const stop = next ? hollow[0] : hollow[1];
+        return { at: stop, stop, shut: next, ease: stop !== held };
       }
-      let x = basis.at;
-      let v = velocity;
-      const damping = Math.abs(velocity) > 300 ? 0.85 : 1;
-      const om = (2 * Math.PI) / SEAM_RESPONSE;
-      let last = performance.now();
-      const run = { frame: 0, v };
-      const step = (now) => {
-        const dt = Math.min(0.032, (now - last) / 1000);
-        last = now;
-        v += (-om * om * (x - to) - 2 * damping * om * v) * dt;
-        x += v * dt;
-        run.v = v;
-        const live = seamBasis();
-        if (!live) { seamSettle = null; done?.(); return; }
-        if (Math.abs(x - to) < 0.5 && Math.abs(v) < 12) {
-          setFocusSplit(seamSplitAt(to, live));
-          seamSettle = null;
-          done?.();
-          return;
-        }
-        setFocusSplit(seamSplitAt(x, live));
-        run.frame = requestAnimationFrame(step);
+      const shut = hollow ? want <= hollow[0] + 0.5 : false;
+      if (!list.length) return { at: want, stop: null, shut, ease: held != null };
+      // Still held by the state it is on?
+      if (held != null) {
+        const { outOf } = seamZone(held, list, Math.sign(want - held) || 1);
+        if (Math.abs(want - held) <= outOf) return { at: held, stop: held, shut, ease: false };
+      }
+      const near = list.reduce((best, v) => (Math.abs(v - want) < Math.abs(best - want) ? v : best), list[0]);
+      const { into } = seamZone(near, list, Math.sign(want - near) || 1);
+      if (Math.abs(want - near) <= into) return { at: near, stop: near, shut, ease: near !== held };
+      // Out in the open, and on its way out of a state if it was in one.
+      return { at: want, stop: null, shut, ease: held != null };
+    };
+
+    /** Where a let-go is headed, before the states have their say. Momentum is
+     *  projected the way a scroll's is, so a flick carries the room further
+     *  than the hand actually went; whether it then lands *on* a state is the
+     *  same question as during the drag, and `seamRoom` answers it. */
+    const seamLanding = (from, velocity, stops) => {
+      const thrown = from + (velocity / 1000) * SEAM_DECAY / (1 - SEAM_DECAY);
+      return Math.min(stops?.max ?? Infinity, Math.max(stops?.min ?? -Infinity, thrown));
+    };
+
+    // Whether a change of state is still playing out. The room moves on its own
+    // at exactly two moments — taking hold of a state, and letting go of one —
+    // and both are transitions rather than springs, so this is a clock and not
+    // an animation loop.
+    const focusEasing = () => performance.now() < snapUntil;
+
+    /** Tidy the room, which is what a double-click on the seam asks for.
+     *
+     *  Three things are put back to what the layout would have chosen. The two
+     *  sides go to φ — the attribute comes out of the file altogether rather
+     *  than being written as a number that happens to equal it, so the balance
+     *  keeps answering to the canvas it is on. Every pane on the stage takes an
+     *  equal share of it, in whatever arrangement it is in. And a pile somebody
+     *  opened for a peek closes: a peek is a thing you are doing, not a shape
+     *  the room is in.
+     *
+     *  What it does not touch is anything a person put somewhere on purpose:
+     *  which chats are pinned, how the panes are arranged, which folder a chat
+     *  is in, or the order of the cards in a column. Tidying is about the
+     *  sizes, not the contents. */
+    const tidyFocusRoom = () => {
+      // The double-click that asked for this is still coming. A mouse sends
+      // its click and dblclick after the pointer events whatever `pointerdown`
+      // preventDefault'd, and by the time they arrive the seam has moved to
+      // where φ put it — so the event lands on whatever is under the cursor
+      // now, which is canvas, and the canvas takes a double-click as "start a
+      // chat here". Tidying the room quietly started a chat every time.
+      const swallow = (event) => {
+        event.stopPropagation();
+        event.preventDefault();
       };
-      run.frame = requestAnimationFrame(step);
-      seamSettle = run;
+      focusEl.addEventListener('dblclick', swallow, { capture: true, once: true });
+      setTimeout(() => focusEl.removeEventListener('dblclick', swallow, { capture: true }), 700);
+      if (focusOpened.size) focusOpened.clear();
+      // φ first, and only then the panes: the stage they are shared out of is
+      // the one the golden split just made, not the one it replaced.
+      setFocusSplit(null);
+      const stage = focusPack?.stage;
+      if (levelTree(dock.tree, stage?.w ?? 0, stage?.h ?? 0)) {
+        layoutDock();
+        rememberDock();
+      }
+      fileFocusSplit();
     };
 
     const makeFocusSeam = () => {
@@ -4949,7 +5059,7 @@ __ICON__
       el.setAttribute('aria-orientation', 'vertical');
       el.setAttribute('tabindex', '0');
       el.setAttribute('aria-label', 'How much of the canvas the field takes');
-      el.title = 'Drag to size the field · double-click for the golden ratio';
+      el.title = 'Drag to size the field · double-click to tidy: φ, and the panes evened up';
       // A held arrow key is a hundred gestures and the file should hear one.
       let settleTimer = 0;
       const later = () => {
@@ -4966,21 +5076,15 @@ __ICON__
         const quick = event.timeStamp - last < SEAM_DOUBLE_MS;
         last = event.timeStamp;
         if (quick) {
-          last = -Infinity;  // a third press starts a fresh pair, not another reset
-          stopSeamSettle();
-          setFocusSplit(null);
-          fileFocusSplit();
+          last = -Infinity;  // a third press starts a fresh pair, not another tidy
+          el.removeAttribute('data-dragging');
+          tidyFocusRoom();
           return;
         }
-        // A settle still running is taken over, not waited out — and what it
-        // was carrying is carried on into the drag.
-        const carried = stopSeamSettle();
         el.setPointerCapture?.(event.pointerId);
+        seamHeld = true;
         el.setAttribute('data-dragging', '');
         document.documentElement.classList.add('marble-resizing');
-        pane?.classList.add('marble-docksizing');
-        focusEl.classList.add('marble-sizing');
-        focusSizing = true;
         // A drag is a displacement, and it is read as one: where the seam
         // stood when the hand came down, plus how far the hand has moved
         // since. Reading the pointer's absolute position in canvas
@@ -5000,26 +5104,39 @@ __ICON__
           const now = trail[trail.length - 1];
           const then = trail.find((point) => now.t - point.t <= 90) ?? trail[0];
           const dt = (now.t - then.t) / 1000;
-          return dt > 0.008 ? (now.x - then.x) / dt : carried;
+          return dt > 0.008 ? (now.x - then.x) / dt : 0;
         };
         let moved = false;
-        // Where the gesture has put the seam, and which side of the hollow it
-        // is on. The layout may answer with something else — the last stretch
-        // of a fold is a width it cannot take — but the gesture's own value is
-        // the ask, and the ask is what a let-go is read against.
-        let held = basis.at;
-        let closed = !focusPack?.field;
+        // What the hand is asking for, and what the room is doing about it.
+        // Out in the open they are the same number; inside a state's zone the
+        // ask goes on moving and the room stays on the state.
+        let want = basis.at;
+        let room = basis.at;
+        let state = { stop: null, shut: !focusPack?.field };
+        // The first move writes the state whether or not it has changed. The
+        // room can be standing at a width that is not one — a split filed
+        // before these states existed, or before a chat arrived and changed
+        // what the widths are — and the first thing a hand on the seam should
+        // do is put it on the nearest one.
+        let written = false;
         const move = (e) => {
           moved = true;
           const live = seamBasis();
           if (!live) return;
-          const want = start + (e.clientX - from);
+          want = start + (e.clientX - from);
           trail.push({ x: want, t: e.timeStamp });
           if (trail.length > 8) trail.shift();
-          const now = seamHold(want, stops, closed);
-          held = now.at;
-          closed = now.closed;
-          setFocusSplit(seamSplitAt(held, live));
+          const next = seamRoom(want, stops, state);
+          // A width the hand is moving through is placed outright. Taking hold
+          // of a state, letting go of one, the hollow flipping, or a fold
+          // crossed on the way are the room moving on its own — those ease.
+          const folded = (stops?.folds ?? []).some((f) => (room - f) * (next.at - f) < 0);
+          if (!written || Math.abs(next.at - room) > 0.5) {
+            written = true;
+            room = next.at;
+            setFocusSplit(seamSplitAt(room, live), Boolean(next.ease || folded));
+          }
+          state = next;
         };
         const up = (e) => {
           try { el.releasePointerCapture(event.pointerId); } catch { /* already released */ }
@@ -5027,22 +5144,14 @@ __ICON__
           window.removeEventListener('pointerup', up);
           window.removeEventListener('pointercancel', up);
           window.removeEventListener('blur', up);
-          // Whatever is wearing the mark now, not whatever was wearing it
-          // when the hand came down: a repaint can have replaced the element
-          // in between, and the mark left behind would keep the next paint
-          // from ever tidying it away.
-          for (const bar of focusEl.querySelectorAll('.focus-seam[data-dragging]')) bar.removeAttribute('data-dragging');
+          seamHeld = false;
           document.documentElement.classList.remove('marble-resizing');
-          pane?.classList.remove('marble-docksizing');
-          const loosen = () => {
-            focusEl.classList.remove('marble-sizing');
-            focusSizing = false;
-          };
+          focusEl.classList.remove('marble-tracking');
           // A press that never moved is not a resize. Writing the split here
           // would file wherever the pointer happened to sit as an edit —
           // including on the first press of a reset.
           if (!moved) {
-            loosen();
+            el.removeAttribute('data-dragging');
             return;
           }
           // A drag is not half of a double-click. Two presses mean the reset
@@ -5050,11 +5159,16 @@ __ICON__
           // the next one begins is a drag, and the next press starts a fresh
           // pair rather than undoing what this one just did.
           last = -Infinity;
-          const velocity = speed();
-          settleSeam(seamLanding(held, velocity, stops), velocity, () => {
-            loosen();
-            fileFocusSplit();
-          });
+          el.removeAttribute('data-dragging');
+          // A flick carries the ask further than the hand went, and if that
+          // lands inside a state's zone the room takes it and eases there.
+          // Let go out in the open and the width you were holding is the
+          // width you keep.
+          const thrown = seamLanding(want, speed(), stops);
+          const landing = seamRoom(thrown, stops, state).at;
+          const live = seamBasis();
+          if (live && Math.abs(landing - room) > 0.5) setFocusSplit(seamSplitAt(landing, live), true);
+          fileFocusSplit();
         };
         // The window hears the rest of the gesture, not the bar. Pointer
         // capture is asked for as well — it keeps the pointer off everything
@@ -5074,20 +5188,19 @@ __ICON__
         const basis = seamBasis();
         if (!basis) return;
         if (event.key === 'Home') {
-          stopSeamSettle();
-          setFocusSplit(null);
-          fileFocusSplit();
+          el.removeAttribute('data-dragging');
+          tidyFocusRoom();
           event.preventDefault();
           return;
         }
         if (event.key !== 'ArrowLeft' && event.key !== 'ArrowRight') return;
         event.preventDefault();
-        stopSeamSettle();
+        el.removeAttribute('data-dragging');
         // The seam goes the way the arrow points: left is the field giving the
         // panes room. A key is the same gesture as a drag, so it lands where a
-        // drag lands — one stop a press, three with a shift held. Out past the
-        // last of them, where the field is simply wide and no width means more
-        // than its neighbour, a press is a nudge instead.
+        // drag lands — one state a press, three with a shift held. Out past
+        // the last of them, where the field is simply wide and no width means
+        // more than its neighbour, a press is a nudge instead.
         const stops = focusPack?.stops?.() ?? null;
         const at = stops?.at ?? [];
         const dir = event.key === 'ArrowLeft' ? -1 : 1;
@@ -5117,7 +5230,13 @@ __ICON__
      *  seam keeps it either way — the gesture ends before the element does. */
     const paintFocusSeam = (pack) => {
       const stacked = focusEl.hasAttribute('data-stack') || narrowView.matches;
-      const side = stacked ? 0 : ((pack?.field?.w ?? 0) || (pack?.piles?.length ? pack.railSpan : 0));
+      // Everything on the field's side of the bar, which is the field's
+      // columns plus the rail. The rail's width is the thing to ask — not
+      // whether there are piles in it: a pile somebody opened for a peek stops
+      // being a pile and becomes a region of the rail, and counting piles made
+      // the seam vanish at exactly the moment the field was at its smallest
+      // and the only way back was to drag it.
+      const side = stacked ? 0 : ((pack?.field?.w ?? 0) || (pack?.railSpan ?? 0));
       let el = focusEl.querySelector('.focus-seam');
       if (!side || !(pack?.stage?.w > 0)) {
         if (!el?.hasAttribute('data-dragging')) el?.remove();
@@ -5127,6 +5246,10 @@ __ICON__
         el = makeFocusSeam();
         focusEl.append(el);
       }
+      // The grip belongs to the bar, always: it stands where the room's edge
+      // is, and while a hand is on it the room is what the hand is moving. A
+      // grip that left the bar and followed the cursor instead was a second
+      // thing to look at in a gesture that only has one.
       el.style.left = `${Math.round(pack.seamX ?? (pack.field.x + pack.field.w)) - 6}px`;
       el.style.top = `${Math.round(pack.stage.y)}px`;
       el.style.height = `${Math.round(pack.stage.h)}px`;
@@ -5139,11 +5262,22 @@ __ICON__
      *  the pixels a drag happened to land on. */
     window.marbleFocusSeam = () => {
       if (!focusPack?.stops) return null;
-      const { at, min, max, hollow } = focusPack.stops();
+      const { at, min, max, hollow, folds } = focusPack.stops();
+      const bar = focusEl.querySelector('.focus-seam');
       // `settling` is the spring a let-go started: the gesture is not over
       // while it runs, and a measurement taken during it is a frame of an
       // animation rather than where the seam ended up.
-      return { seamX: focusPack.seamX, stops: at, min, max, hollow, settling: Boolean(seamSettle) };
+      return {
+        seamX: focusPack.seamX,
+        gripX: bar ? Number.parseFloat(bar.style.left) + 6 : null,
+        snapped: focusEl.classList.contains('marble-snapping'),
+        stops: at,
+        min,
+        max,
+        hollow,
+        folds,
+        settling: focusEasing(),
+      };
     };
 
     /** The rail that stands in for an empty stage, drawn over the canvas's
@@ -6230,7 +6364,12 @@ __ICON__
         if (!card || card.classList.contains('marble-dragging')) continue;
         const from = card.hasAttribute('data-placed') ? liveFocusBox(card) : null;
         const vel = opts.velocityId === item.id ? opts.velocity : { x: 0, y: 0 };
-        animateFocusCard(card, from, rect, vel);
+        // A card under a pane is scaffolding and is not drawn (`data-seated`
+        // hides it): it takes its rect outright. Easing one costs a spring and
+        // a size animation nobody can see, and a hidden card halfway between a
+        // wide old rect and a narrow new one reaches past the canvas, which
+        // gives it a scroll extent it never actually shows.
+        animateFocusCard(card, seated.has(item.id) ? null : from, rect, vel);
         card.setAttribute('data-placed', '');
         card.toggleAttribute('data-seated', seated.has(item.id));
         const lod = card.dataset.lod;
@@ -6582,6 +6721,60 @@ __ICON__
         n.sizes.splice(i, 1, ...kid.sizes.map((size) => size * share));
         i += kid.kids.length - 1;
       }
+    };
+
+    const leafCount = (n) => (n.leaf ? 1 : n.kids.reduce((sum, kid) => sum + leafCount(kid), 0));
+
+    /** Raise any share under `floor` and take it from the ones that can give,
+     *  in proportion. A few passes because taking from one can put it under. */
+    const liftShares = (shares, floor) => {
+      for (let pass = 0; pass < 5; pass += 1) {
+        const debt = shares.reduce((sum, s) => sum + Math.max(0, floor - s), 0);
+        if (debt <= 0.0005) break;
+        const spare = shares.reduce((sum, s) => sum + Math.max(0, s - floor), 0);
+        if (spare <= 0.0005) break;
+        for (let i = 0; i < shares.length; i += 1) {
+          if (shares[i] < floor) shares[i] = floor;
+          else shares[i] -= (shares[i] - floor) * Math.min(1, debt / spare);
+        }
+      }
+      return shares;
+    };
+
+    /** Give every pane the same amount of stage, whatever shape the person
+     *  arranged them in.
+     *
+     *  A split's kids share it in proportion to how many panes each of them
+     *  holds — a pane beside a stack of two takes a third of the width, not a
+     *  half — which is the only weighting under which every pane ends up the
+     *  same size. Even shares at every split, which is what a tiling layout
+     *  usually does, gives the lone pane twice the room of the two it stands
+     *  beside.
+     *
+     *  Reading width still wins, as it does everywhere else here: with five
+     *  panes an equal fifth of the stage is narrower than a conversation can
+     *  be read at, so the narrow ones are lifted back to `PANE_MIN` and the
+     *  rest give up what that costs. Equal is the aim, not the rule.
+     *
+     *  Levelling the shares rather than rebuilding the tree is deliberate: the
+     *  arrangement is something somebody built, and only the sizes are being
+     *  tidied. Answers whether anything actually moved. */
+    const levelTree = (n, w = 0, h = 0) => {
+      if (!n || n.leaf) return false;
+      const counts = n.kids.map(leafCount);
+      const total = counts.reduce((sum, count) => sum + count, 0) || 1;
+      const shares = counts.map((count) => count / total);
+      const across = n.dir === 'row';
+      const span = across ? w : h;
+      const least = across ? (window.marbleAgentFolders?.PANE_MIN ?? 300) : 0;
+      if (span > 0 && least > 0) liftShares(shares, Math.min(least / span, 1 / n.kids.length));
+      let moved = false;
+      n.kids.forEach((kid, i) => {
+        if (Math.abs((n.sizes[i] ?? 0) - shares[i]) > 0.002) moved = true;
+        n.sizes[i] = shares[i];
+        if (levelTree(kid, across ? w * shares[i] : w, across ? h : h * shares[i])) moved = true;
+      });
+      return moved;
     };
 
     /** Take a leaf out. Its share flows to its neighbours in proportion, and a
@@ -9574,7 +9767,11 @@ __ICON__
     // ungrouped chat: an empty canvas is the emptiest area there is.
     focusEl?.addEventListener('dblclick', (event) => {
       if (narrowView.matches) return;
-      if (event.target.closest('.focus-card, .pane, .focus-basin-name, button, a, input, textarea, marble-conversation')) return;
+      // A seam is not empty canvas. Double-clicking one tidies the room, and
+      // the compatibility click a mouse still sends after `pointerdown` was
+      // preventDefault'd lands here — so without this, putting the room back
+      // to φ also started a chat in whatever the bar happened to be over.
+      if (event.target.closest('.focus-card, .pane, .focus-seam, .dock-gutter, .focus-basin-name, button, a, input, textarea, marble-conversation')) return;
       let folderId = null;
       const basin = event.target.closest('.focus-basin');
       if (basin) {

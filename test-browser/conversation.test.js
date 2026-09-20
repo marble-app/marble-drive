@@ -1640,24 +1640,85 @@ test('two queued rows show the batch switch, and it is saved on the conversation
   assert.equal(await view.locator('.queued').getAttribute('data-combine'), '1');
 });
 
-test('while a turn runs the bar offers queue, steer and interrupt, and ⌘Enter steers', async () => {
+test('while a turn runs the bar offers queue and steer only, and ⌘Enter steers', async () => {
   const { page, view } = await mount();
   assert.equal(await view.locator('.bar .dispatch').isVisible(), false);
   await sendFrom(view, 'script:hold');
   await view.locator('button.stop').waitFor({ state: 'visible' });
   await view.locator('.bar .dispatch').waitFor({ state: 'visible' });
-  await pick(view, 'dispatch', 'interrupt');
+  const modes = await view.evaluate((el) => [...el.shadowRoot.querySelectorAll('input[name="dispatch"]')].map((i) => i.value));
+  assert.deepEqual(modes, ['queue', 'steer'], 'interrupt is not on offer');
+  await pick(view, 'dispatch', 'steer');
   await view.locator('.editor').fill('now');
   await view.locator('.editor').press('Enter');
   const id = await page.evaluate(() => document.querySelector('body > marble-conversation').getAttribute('conversation'));
-  await page.waitForFunction(async (cid) => (await window.marble.agent.conversation(cid)).turns.some((t) => t.dispatch === 'interrupt'), id);
+  await page.waitForFunction(async (cid) => (await window.marble.agent.conversation(cid)).turns.some((t) => t.dispatch === 'steer'), id);
+  await view.locator('button.stop').click();
   await view.locator('.turn-footer[data-status="cancelled"]').waitFor();
-  await view.locator('.turn-footer[data-status="completed"]').waitFor();
   await sendFrom(view, 'script:hold');
   await view.locator('button.stop').waitFor({ state: 'visible' });
   await view.locator('.editor').fill('nudge');
   await view.locator('.editor').press('Meta+Enter');
-  await page.waitForFunction(async (cid) => (await window.marble.agent.conversation(cid)).turns.some((t) => t.dispatch === 'steer'), id);
+  await page.waitForFunction(async (cid) => (await window.marble.agent.conversation(cid)).turns.filter((t) => t.dispatch === 'steer').length >= 2, id);
+});
+
+test('a queued row cycles between queue and steer, never interrupt', async () => {
+  const { page, view } = await mount();
+  await sendFrom(view, 'script:hold');
+  await view.locator('button.stop').waitFor({ state: 'visible' });
+  await sendFrom(view, 'later');
+  const row = view.locator('.queued-item');
+  await row.waitFor();
+  assert.equal(await row.getAttribute('data-dispatch'), 'queue');
+  await row.locator('.queued-dispatch').click();
+  await page.waitForFunction(() => document.querySelector('body > marble-conversation').shadowRoot.querySelector('.queued-item').dataset.dispatch === 'steer');
+  await row.locator('.queued-dispatch').click();
+  await page.waitForFunction(() => document.querySelector('body > marble-conversation').shadowRoot.querySelector('.queued-item').dataset.dispatch === 'queue');
+});
+
+test('a queued prompt is only the floating row, and joins the log when it starts', async () => {
+  const { page, view } = await mount();
+  await sendFrom(view, 'script:slow');
+  await view.locator('button.stop').waitFor({ state: 'visible' });
+  await view.locator('.msg.me').waitFor();
+  await sendFrom(view, 'waiting its turn');
+  await view.locator('.queued-item').waitFor();
+  // Two bubbles exist — log order is kept — but the queued one is not shown.
+  assert.equal(await view.locator('.msg.me').count(), 2);
+  assert.equal(await view.locator('.msg.me').nth(1).isVisible(), false);
+  assert.match(await view.locator('.queued-text').textContent(), /waiting its turn/);
+  // The stack floats over the foot of the log, so the log ends above it.
+  const room = await view.evaluate((el) => {
+    const log = el.shadowRoot.querySelector('.log');
+    const queued = el.shadowRoot.querySelector('.queued');
+    return {
+      foot: parseFloat(getComputedStyle(log).paddingBottom),
+      stack: Math.round(queued.getBoundingClientRect().height),
+    };
+  });
+  assert.ok(room.stack > 0, 'the stack has a height');
+  assert.ok(room.foot >= room.stack, `the log's foot (${room.foot}) clears the stack (${room.stack})`);
+  // Once it runs it is a message like any other, and the foot comes back.
+  await view.locator('.queued-item').waitFor({ state: 'detached' });
+  await page.waitForFunction(() => {
+    const el = document.querySelector('body > marble-conversation');
+    return el.shadowRoot.querySelectorAll('.msg.me')[1]?.dataset.waiting === undefined;
+  });
+  assert.equal(await view.locator('.msg.me').nth(1).isVisible(), true);
+  const foot = await view.evaluate((el) => parseFloat(getComputedStyle(el.shadowRoot.querySelector('.log')).paddingBottom));
+  assert.ok(foot < room.foot, 'the room under the log goes with the stack');
+});
+
+test('a prompt taken out of the queue leaves no bubble behind', async () => {
+  const { view } = await mount();
+  await sendFrom(view, 'script:slow');
+  await view.locator('button.stop').waitFor({ state: 'visible' });
+  await view.locator('.msg.me').waitFor();
+  await sendFrom(view, 'never mind');
+  await view.locator('.queued-item').waitFor();
+  await view.locator('.queued-item button.dequeue').click();
+  await view.locator('.queued-item').waitFor({ state: 'detached' });
+  assert.equal(await view.locator('.msg.me').count(), 1);
 });
 
 test('a refused edit is shown as refused, not as an error', async () => {

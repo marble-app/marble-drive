@@ -76,6 +76,7 @@ const USAGE = {
   meters: [{
     id: 'claude-subscription',
     label: 'Claude',
+    available: true,
     used: 23,
     left: 77,
     window: '5h',
@@ -83,6 +84,7 @@ const USAGE = {
     detail: '5h 23% used · week 41% used',
   }],
 };
+let usageAnswer = USAGE;
 // Echoes what the route asked for, so the test can see the weeks it was given.
 let failHistory = false;
 const usageHistory = async ({ weeks } = {}) => {
@@ -92,7 +94,7 @@ const usageHistory = async ({ weeks } = {}) => {
 const drive = await createDrive(config, {
   log: quiet,
   agentProviders: new Map([['fake', createFakeProvider({ scripts: SCRIPTS })]]),
-  usage: async () => USAGE,
+  usage: async () => usageAnswer,
   usageHistory,
 });
 await drive.createDocument('garden', SOURCE);
@@ -197,6 +199,46 @@ test('usage is used percent per signed-in agent, never a secret', async () => {
   assert.equal(status, 200);
   assert.deepEqual(body, USAGE);
   assert.equal(JSON.stringify(body).includes('sk-'), false);
+});
+
+// The wire shape has to keep "we could not ask" apart from "you have used
+// nothing". Flattening `used` to 0 and dropping `available` made an
+// unavailable meter arrive as a confident 0%, which reads as full quota.
+test('an unavailable meter stays unavailable over the wire, not 0%', async () => {
+  const previous = usageAnswer;
+  usageAnswer = {
+    meters: [{
+      id: 'claude-subscription', label: 'Claude', available: false, used: null, left: null,
+      window: null, resetsAt: null, reason: 'rate-limited', detail: 'Rate limited — try again shortly', windows: [],
+    }],
+  };
+  try {
+    const { body } = await api('GET', '/agent/usage');
+    assert.equal(body.meters[0].available, false);
+    assert.equal(body.meters[0].used, null);
+    assert.equal(body.meters[0].left, null);
+    assert.equal(body.meters[0].reason, 'rate-limited');
+  } finally {
+    usageAnswer = previous;
+  }
+});
+
+test('a stale meter keeps its number and says when it was true', async () => {
+  const previous = usageAnswer;
+  usageAnswer = {
+    meters: [{
+      id: 'claude-subscription', label: 'Claude', available: true, stale: true,
+      at: '2026-09-19T12:00:00Z', used: 23, left: 77, window: '5h', resetsAt: null, detail: '', windows: [],
+    }],
+  };
+  try {
+    const { body } = await api('GET', '/agent/usage');
+    assert.equal(body.meters[0].used, 23);
+    assert.equal(body.meters[0].stale, true);
+    assert.equal(body.meters[0].at, '2026-09-19T12:00:00Z');
+  } finally {
+    usageAnswer = previous;
+  }
 });
 
 test('usage history is the host\'s daily counts, with the weeks the page asked for', async () => {

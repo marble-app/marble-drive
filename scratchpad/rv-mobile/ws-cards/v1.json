@@ -1,0 +1,171 @@
+{
+  "view": "thesis",
+  "show": "all",
+  "pageOverflowPx": 0,
+  "docHeight": 12103,
+  "tooSmallTargets": [
+    {
+      "el": "button.marble-on",
+      "text": "01Spine",
+      "w": 350,
+      "h": 33
+    },
+    {
+      "el": "button",
+      "text": "02Board",
+      "w": 350,
+      "h": 33
+    },
+    {
+      "el": "button.marble-on",
+      "text": "thesis",
+      "w": 49,
+      "h": 26
+    },
+    {
+      "el": "button",
+      "text": "form",
+      "w": 40,
+      "h": 26
+    },
+    {
+      "el": "button",
+      "text": "when",
+      "w": 44,
+      "h": 26
+    },
+    {
+      "el": "button",
+      "text": "map",
+      "w": 39,
+      "h": 26
+    },
+    {
+      "el": "button",
+      "text": "list",
+      "w": 31,
+      "h": 26
+    },
+    {
+      "el": "button",
+      "text": "focus",
+      "w": 45,
+      "h": 26
+    },
+    {
+      "el": "button.marble-on",
+      "text": "T1",
+      "w": 29,
+      "h": 26
+    },
+    {
+      "el": "button",
+      "text": "T2",
+      "w": 30,
+      "h": 26
+    },
+    {
+      "el": "button.marble-on",
+      "text": "everything",
+      "w": 74,
+      "h": 26
+    },
+    {
+      "el": "button",
+      "text": "claims",
+      "w": 49,
+      "h": 26
+    },
+    {
+      "el": "button",
+      "text": "questions",
+      "w": 67,
+      "h": 26
+    },
+    {
+      "el": "button",
+      "text": "targets",
+      "w": 53,
+      "h": 26
+    },
+    {
+      "el": "button.now-ref-x",
+      "text": "×",
+      "w": 18,
+      "h": 18
+    },
+    {
+      "el": "button.chip.pub",
+      "text": "seed",
+      "w": 44,
+      "h": 44
+    },
+    {
+      "el": "button.col-add",
+      "text": "+ Idea",
+      "w": 340,
+      "h": 35
+    },
+    {
+      "el": "button.col-add",
+      "text": "+ Idea",
+      "w": 57,
+      "h": 35
+    },
+    {
+      "el": "button.col-add.col-add-thesis",
+      "text": "+ Thesis",
+      "w": 340,
+      "h": 35
+    }
+  ],
+  "overflowing": [],
+  "overlaps": [
+    {
+      "chip": "span.now-ref-form",
+      "over": "span.now-ref-title",
+      "text": "Marble",
+      "byPx": 62
+    },
+    {
+      "chip": "span.now-ref-form",
+      "over": "span.now-ref-title",
+      "text": "Generating Design Patterns",
+      "byPx": 62
+    },
+    {
+      "chip": "span.now-ref-form",
+      "over": "span.now-ref-title",
+      "text": "Affordances for Realtime GenUI",
+      "byPx": 62
+    },
+    {
+      "chip": "span.now-ref-form",
+      "over": "span.now-ref-title",
+      "text": "GenUI Design - Position Paper ",
+      "byPx": 62
+    },
+    {
+      "chip": "button.field-btn",
+      "over": "h3",
+      "text": "Thesis 1 · GenUI Design: GenUI",
+      "byPx": 16
+    },
+    {
+      "chip": "button.field-btn",
+      "over": "h3",
+      "text": "Thesis 2 · UI Envisioning: Lev",
+      "byPx": 16
+    },
+    {
+      "chip": "button.field-btn",
+      "over": "h3",
+      "text": "Thesis 3 · Personal User Exper",
+      "byPx": 16
+    }
+  ],
+  "bandHeight": 421,
+  "railHeight": 850,
+  "firstCardTop": 1788,
+  "pageErrors": []
+}

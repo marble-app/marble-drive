@@ -1,0 +1,231 @@
+/* ═══════════════════════════════════════════════════════════════════════════
+   1 · The form chip stops floating over the title — at every width
+   ═══════════════════════════════════════════════════════════════════════════
+
+   This one section is deliberately unscoped. The chip overlapping the title is
+   not a phone bug that a narrow screen exposes; it is an arithmetic mistake
+   that has always been in the band. The chip is positioned from the card's
+   right edge and the title reserves a flat 3.2rem for it — but the chip is
+   64px wide and sits 27px in, so it occupies 68px of the title's line and the
+   title only steps aside for 51px of that. Any title long enough to reach the
+   end of its first line runs underneath it. At 1440 that is "Generating Design
+   Pattern·s"; at 390 it is all four cards.
+
+   More padding would be the same mistake again with a different number, because
+   the chip's width is its text — ABSTRACT and COMPLETE are not the same size,
+   and neither is whatever word this vocabulary grows next. So the card stops
+   guessing and starts measuring: it becomes a two-column grid, the chip takes
+   a real column, and the gap between them is a gap rather than a hope.
+
+   The chip does not move. In a grid whose first column is 1fr, an auto second
+   column lands its content against the right edge of the card's content box —
+   which is within a couple of pixels of where `right: 26px` was putting it, and
+   the negative margin below spends those two pixels. The × is left exactly as
+   it was, still absolute in the corner, still clear of the chip.
+
+   What does change is that titles now wrap at the width they actually have
+   rather than 13px more than they have. On a wide screen that costs nothing —
+   the band's height is set by the three-line gloss underneath, which has room
+   to spare. Between roughly 600 and 900px, where the band packs two cards to a
+   row, one title gains a line and the band grows by that line. That is the true
+   cost of the space the chip was taking without asking for it. */
+
+.now-ref {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: start;
+  /* The cards in a row are all as tall as the tallest, and a grid handed spare
+     height spreads it between its rows by default — which would push a short
+     card's gloss into the middle of nowhere. The rows stay at the top and the
+     spare height stays at the bottom, where it was before any of this. */
+  align-content: start;
+  column-gap: 8px;
+}
+/* A card with no form yet has no chip, so it should not be charged the gap. */
+.now-ref:not([data-form]) { column-gap: 0; }
+
+.now-ref-title {
+  grid-area: 1 / 1 / 2 / 2;
+  padding-right: 0;   /* the grid reserves the chip's column now */
+}
+.now-ref-form {
+  position: static;
+  grid-area: 1 / 2 / 2 / 3;
+  margin-right: -2px; /* land on the pixel `right: 26px` was landing on */
+}
+.now-ref-gloss {
+  grid-area: 2 / 1 / 3 / 3;
+}
+
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   2 · On a phone the band is a strip you scroll, not a wall you scroll past
+   ═══════════════════════════════════════════════════════════════════════════
+
+   Everything below is phone-only, and the gate is the container and not the
+   viewport: <html> is the `doc` container, so a host that docks a panel beside
+   the document narrows the container and gets the phone layout, which is what
+   a 400px-wide document wants whatever the screen behind it measures.
+
+   The band is sticky because it is a drop target: a card you are dragging has
+   to be able to reach it from anywhere in a very long page. On a touch screen
+   there is no dragging and therefore no reason to pin it, and the cost of
+   pinning it here is enormous — four cards at 270px wrap onto four rows, so the
+   band stands 421px tall on an 844px screen and takes half of every screenful
+   of the document, forever, in every view. It gives that back and becomes one
+   row you push sideways. */
+
+@container doc (max-width: 720px) {
+
+  .band-wrap {
+    /* Not sticky. The pinned cards are still marked where they live — the accent
+       rule down the left edge of a data-now card in the pool says so — so the
+       fact survives losing its permanent readout, and the band is one flick from
+       the top of the document when you want the index itself. It stays above the
+       content rather than below it: it is the shortest thing on the page that
+       answers "what am I in the middle of", and arriving at four titles before
+       25 ideas is orientation, where arriving at it after them is burial. */
+    position: static;
+    /* nothing passes behind it any more, and a blur that frosts nothing is a
+       compositor layer for no reason */
+    backdrop-filter: none;
+    /* The strip runs edge to edge, so the wrap keeps no side padding of its own
+       and hands the inset to the head and to the scroller's own padding. */
+    padding: 9px 0 10px;
+  }
+
+  /* The head keeps the document's left margin so "WORKING ON NOW" lines up with
+     the prose underneath it, and the strip starts on the same line. */
+  .band-head {
+    padding-left: 30px;
+    padding-right: 20px;
+    margin-bottom: 8px;
+  }
+
+  .band {
+    display: flex;
+    flex-wrap: nowrap;
+    max-width: none;
+    min-height: 0;
+    gap: 10px;
+    /* Full bleed on the right: the strip's own padding holds the first card off
+       the margin, and nothing holds the last one off the screen edge, so a card
+       is always cut by the edge when there is more to the right. A cut card is
+       the only honest promise of sideways — a fade or an arrow is a picture of
+       one. */
+    padding: 0 20px 0 30px;
+    overflow-x: auto;
+    overflow-y: hidden;
+    overscroll-behavior-x: contain;
+    scroll-snap-type: x mandatory;
+    scroll-padding-left: 30px;
+    -webkit-overflow-scrolling: touch;
+    /* The scrollbar says nothing the cut edge has not already said, and on a
+       short strip it is mostly a grey line under the cards. The strip stays
+       reachable from a keyboard — every card in it is a button, and part.js
+       makes the scroller itself a tab stop whenever it actually overflows. */
+    scrollbar-width: none;
+    /* the dashed drop outline is drawn outside the box, which a scroller clips */
+    outline-offset: -3px;
+  }
+  .band::-webkit-scrollbar { display: none; }
+  .band:focus-visible {
+    outline: 2px solid var(--accent);
+    outline-offset: -2px;
+  }
+
+  .now-ref {
+    /* Wide enough to read a title and a line of gloss, narrow enough that the
+       next card is always visibly there. cqw keeps the peek when the container
+       is narrower than a phone — a docked panel, say — instead of letting one
+       card fill it. */
+    flex: 0 0 auto;
+    width: min(256px, 72cqw);
+    max-width: none;
+    scroll-snap-align: start;
+    /* 36px on the right is not decoration: it is the strip the × lives in, and
+       it is exactly wide enough that the ×'s 44px tap area (below) can reach its
+       full size without ever crossing into the title. */
+    padding: 10px 36px 11px 12px;
+    /* The title takes the whole first line here. At this width the chip beside
+       it would leave about 120px for a serif title, which is not a title, it is
+       a column of words — so the chip drops to the second line and introduces
+       the gloss instead, which is the sentence it was always a label for. */
+    grid-template-columns: auto minmax(0, 1fr);
+    row-gap: 3px;
+  }
+  .now-ref-title {
+    grid-area: 1 / 1 / 2 / 3;
+    /* Two lines is the card's share of the strip. A title that needs a third is
+       telling you to open it, and the whole card is the button that does. */
+    display: -webkit-box;
+    -webkit-box-orient: vertical;
+    -webkit-line-clamp: 2;
+    overflow: hidden;
+  }
+  .now-ref-form {
+    grid-area: 2 / 1 / 3 / 2;
+    align-self: start;
+    margin-top: 1px;
+    margin-right: 8px;
+  }
+  .now-ref-gloss {
+    grid-area: 2 / 2 / 3 / 3;
+    margin-top: 0;
+    /* The band is an index, not a reading surface. Two lines, and the card is
+       one tap from the paragraph it came from. */
+    display: -webkit-box;
+    -webkit-box-orient: vertical;
+    -webkit-line-clamp: 2;
+    overflow: hidden;
+  }
+
+  /* A finger is not a cursor. The × keeps its 18px glyph — this document is its
+     typography and a chunky button would be a different document — and grows a
+     44px tap area underneath it instead. The expander reaches out into the
+     card's right strip and the gap beside it, where there is nothing to hit; it
+     stops at the title's edge, so the two things this card does (unpin it, go
+     to it) never have to guess which one you meant. */
+  .now-ref-x {
+    /* it is already absolute, which already makes it the containing block the
+       expander below measures from — it only moves in a little */
+    top: 6px;
+    right: 6px;
+  }
+  .now-ref-x::before {
+    content: "";
+    position: absolute;
+    inset: -13px;
+  }
+
+  /* An empty band that says nothing is a band nobody discovers — but what it
+     said was "drag an idea up here", and there is no dragging on a touch screen,
+     so on a touch screen it says what is true instead of what is impossible.
+     A narrow window with a mouse can still drag, and still reads the original. */
+  .band.is-empty::after {
+    flex: 1 1 auto;
+    min-width: 0;
+    padding: 12px 0;
+  }
+  @media (hover: none) {
+    .band.is-empty::after {
+      content: "Nothing pinned. Ideas you mark as current work collect here — they stay in their column.";
+    }
+  }
+
+  /* Snapping is a settle, and a settle is motion. Asked for less of it, the
+     strip still snaps where it is going but never takes the scroll out of your
+     hand. Nothing here adds a smooth scroll to disable; this is the one piece
+     of movement the strip introduces, and this is where it is given back. */
+  @media (prefers-reduced-motion: reduce) {
+    .band { scroll-behavior: auto; scroll-snap-type: x proximity; }
+  }
+}
+
+/* Below about 380px the caption stops fitting on the heading's line and starts
+   costing the band a whole row of chrome to say something the interface already
+   says: the × is labelled with what it removes, and a pinned idea still carries
+   the accent rule down its left edge in the pool, where it never left. */
+@container doc (max-width: 380px) {
+  .band-head .count { display: none; }
+}

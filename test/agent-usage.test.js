@@ -4,7 +4,7 @@ import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
 
-import { claudeTokenFromFile, claudeTokenFromKeychain, collectUsage, parseClaudeUsage, parseCursorUsage } from '../server/agent/usage.js';
+import { claudeTokenFromFile, claudeTokenFromKeychain, collectUsage, createUsageReader, parseClaudeUsage, parseCursorUsage } from '../server/agent/usage.js';
 
 test('Claude compact meter is the 5-hour window even when the week is higher', () => {
   const meter = parseClaudeUsage({
@@ -304,4 +304,97 @@ test('a Claude usage fetch that fails is an unavailable meter, not a missing one
   assert.equal(meters[0].used, null);
   assert.match(meters[0].detail, /unavailable/i);
   assert.equal(JSON.stringify(meters).includes('sk-ant-oat-test'), false);
+});
+
+// --- A rate-limited poll knows nothing new -----------------------------------
+// The usage API answers 429 far more often than it is signed out, and its
+// `retry-after` is 0, so the host has to pick its own floor. These tests pin
+// the two halves of that: a 429 never erases what we already knew, and it is
+// not retried at the same cadence that provoked it.
+
+test('a rate-limited Claude fetch is marked retryable, not just unavailable', async () => {
+  const { meters } = await collectUsage({
+    exec: async (command, args) => (args.includes('Claude Code-credentials')
+      ? { code: 0, stdout: JSON.stringify({ claudeAiOauth: { accessToken: 'sk-ant-oat-test' } }), stderr: '', missing: false }
+      : { code: 1, stdout: '', stderr: 'not found', missing: true }),
+    request: async () => ({ ok: false, status: 429, headers: new Map(), json: async () => ({ error: { type: 'rate_limit_error' } }) }),
+  });
+  assert.equal(meters[0].available, false);
+  assert.equal(meters[0].reason, 'rate-limited');
+  assert.match(meters[0].detail, /again/i);
+});
+
+test('a reader serves the last good reading when the fetch is rate-limited', async () => {
+  const good = { meters: [{ id: 'claude-subscription', label: 'Claude', available: true, used: 23, left: 77, windows: [] }] };
+  const limited = { meters: [{ id: 'claude-subscription', label: 'Claude', available: false, used: null, reason: 'rate-limited', detail: 'Try again shortly' }] };
+  let answer = good;
+  let now = 1_000_000;
+  const read = createUsageReader({ collect: async () => answer, now: () => now, file: null });
+
+  assert.equal((await read()).meters[0].used, 23);
+  answer = limited;
+  now += 10 * 60_000;
+  const stale = await read();
+  assert.equal(stale.meters[0].used, 23, 'keeps the number it last knew');
+  assert.equal(stale.meters[0].available, true);
+  assert.equal(stale.meters[0].stale, true);
+  assert.ok(stale.meters[0].at, 'says when it was true');
+});
+
+test('a reader backs off after a rate limit instead of asking every minute', async () => {
+  const limited = { meters: [{ id: 'claude-subscription', label: 'Claude', available: false, used: null, reason: 'rate-limited' }] };
+  let calls = 0;
+  let now = 1_000_000;
+  const read = createUsageReader({ collect: async () => { calls += 1; return limited; }, now: () => now, file: null });
+
+  await read();
+  assert.equal(calls, 1);
+  now += 61_000;              // past the plain 60 s cache
+  await read();
+  assert.equal(calls, 1, 'still inside the backoff window');
+  now += 10 * 60_000;         // past the first backoff step
+  await read();
+  assert.equal(calls, 2);
+});
+
+test('a reader widens the backoff while the limit holds and resets on success', async () => {
+  const limited = { meters: [{ id: 'claude-subscription', label: 'Claude', available: false, reason: 'rate-limited' }] };
+  const good = { meters: [{ id: 'claude-subscription', label: 'Claude', available: true, used: 5, left: 95, windows: [] }] };
+  let answer = limited;
+  let calls = 0;
+  let now = 1_000_000;
+  const read = createUsageReader({ collect: async () => { calls += 1; return answer; }, now: () => now, file: null });
+
+  await read();
+  now += 5 * 60_000; await read();
+  assert.equal(calls, 2, 'first step is 5 min');
+  now += 5 * 60_000; await read();
+  assert.equal(calls, 2, 'second step is longer than the first');
+  now += 10 * 60_000; answer = good; await read();
+  assert.equal(calls, 3);
+  assert.equal((await read()).meters[0].used, 5);
+
+  answer = limited;
+  now += 61_000;
+  const after = await read();
+  assert.equal(calls, 4, 'a success clears the backoff');
+  assert.equal(after.meters[0].used, 5, 'and the fresh 429 falls back to it');
+});
+
+test('the last good reading outlives a restart', async () => {
+  const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'marble-usage-'));
+  const file = path.join(dir, 'usage-last.json');
+  const good = { meters: [{ id: 'claude-subscription', label: 'Claude', available: true, used: 42, left: 58, windows: [] }] };
+  const limited = { meters: [{ id: 'claude-subscription', label: 'Claude', available: false, reason: 'rate-limited' }] };
+  let now = 1_000_000;
+
+  const first = createUsageReader({ collect: async () => good, now: () => now, file });
+  assert.equal((await first()).meters[0].used, 42);
+
+  // A new host process, still rate-limited.
+  const second = createUsageReader({ collect: async () => limited, now: () => now + 60_000, file });
+  const out = await second();
+  assert.equal(out.meters[0].used, 42);
+  assert.equal(out.meters[0].stale, true);
+  await fs.rm(dir, { recursive: true, force: true });
 });

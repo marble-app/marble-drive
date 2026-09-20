@@ -20,7 +20,7 @@ import { listSkills, skillDirs } from './skills.js';
 import { createAgentStore } from './store.js';
 import { createTools } from './tools.js';
 import { builtInProviders } from './providers/index.js';
-import { cachedUsage, collectUsage } from './usage.js';
+import { collectUsage, createUsageReader } from './usage.js';
 import { createUsageHistory } from './usage-history.js';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
@@ -229,7 +229,14 @@ async function boot({ config, store, writeOps, createDocument, origin, providers
     gated: Boolean(config.secret),
     keys,
     skills,
-    usage: usage ?? cachedUsage(() => collectUsage()),
+    // Not a plain 60 s cache: the usage API rate-limits, and retrying on that
+    // cadence keeps the limit tripped while the sliders read Unavailable. The
+    // reader backs off and keeps serving the last good reading, on disk so a
+    // restart mid-limit still has numbers.
+    usage: usage ?? createUsageReader({
+      collect: () => collectUsage(),
+      file: path.join(store.marbleDir, 'usage-last.json'),
+    }),
     usageHistory: usageHistory ?? createUsageHistory(),
     root: config.root,
   });

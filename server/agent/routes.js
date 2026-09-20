@@ -68,16 +68,29 @@ const publicWindow = (window) => ({
   kind: window?.kind === 'share' ? 'share' : 'quota',
 });
 
+// `available` has to survive the trip. Coercing `used` to 0 and dropping the
+// flag made "the host could not read your quota" arrive at the page as a
+// confident 0% used — full quota, blue bar — which is the opposite of what
+// happened. A meter nobody could read carries nulls and says so.
 const publicMeter = (meter) => {
+  const available = meter?.available !== false && meter?.used != null && Number.isFinite(Number(meter.used));
   const out = {
     id: String(meter?.id ?? ''),
     label: String(meter?.label ?? ''),
-    used: Number(meter?.used) || 0,
-    left: Number(meter?.left) || 0,
+    available,
+    used: available ? Number(meter.used) : null,
+    left: available ? (Number(meter?.left) || 0) : null,
     window: meter?.window == null ? '' : String(meter.window),
     resetsAt: meter?.resetsAt ?? null,
     detail: String(meter?.detail ?? ''),
   };
+  if (meter?.reason) out.reason = String(meter.reason);
+  // A remembered reading and the moment it was true, so the page can show the
+  // number it last knew instead of nothing.
+  if (meter?.stale) {
+    out.stale = true;
+    out.at = meter.at ?? null;
+  }
   if (Array.isArray(meter?.windows) && meter.windows.length) {
     out.windows = meter.windows.map(publicWindow).filter((item) => item.id);
   }
