@@ -5462,6 +5462,11 @@
       this.onKey = (event) => {
         if ((event.metaKey || event.ctrlKey) && !event.altKey && !event.shiftKey && event.key.toLowerCase() === 'j') {
           event.preventDefault();
+          // One key for "agent", and the selection decides where the agent
+          // appears: the callout layer takes it when it can draw a card at
+          // what you are holding.
+          const selected = window.marble?.agent?.context?.().selection?.length;
+          if (selected && !dispatchEvent(new CustomEvent('marble-callout:summon', { cancelable: true }))) return;
           if (this.isOpen) this.close();
           else this.open();
         } else if (event.key === 'Escape' && this.isOpen && this.shadowRoot.activeElement !== null) {
