@@ -128,6 +128,7 @@
     function setState(record, state) {
       record.state = state;
       record.el.dataset.state = state;
+      syncDock(record);
       placeCard(record);
     }
 
@@ -180,14 +181,116 @@
       });
       convo.addEventListener('conversation', (event) => {
         record.id = event.detail?.id ?? null;
+        if (record.id) follow(record);
+      });
+      // The zone the conversation is drawing is the card's own status line:
+      // one object on the page saying where the work is, not two.
+      convo.addEventListener('zone', (event) => {
+        const zone = event.detail?.zone ?? null;
+        record.zone = zone && zone.path === app && elementsOf(zone.ids).length ? zone : null;
+        if (record.zone) record.ids = [...record.zone.ids];
+        if (zone) {
+          record.status.textContent = zone.path === app
+            ? (marble.collab?.phaseLabel?.(zone) ?? 'Agent · working')
+            : `Building in ${zone.path}`;
+        }
+        syncDock(record);
+        placeCard(record);
       });
       layer.append(el);
       // The attribute after the append: the component only loads once connected.
-      if (id) convo.setAttribute('conversation', id);
+      if (id) { convo.setAttribute('conversation', id); follow(record); }
       handle.hidden = true;
       setState(record, state);
       if (state === 'card') convo.focusInput?.();
       return record;
+    }
+
+    // ------------------------------------------------------------ watching
+    // Docked means: this card stands where the zone's label would, so the
+    // label steps back. Only a card docks; a pill is small enough to sit
+    // beside a label and lets it return.
+
+    function syncDock(record) {
+      const want = Boolean(record.zone) && record.state === 'card' && Boolean(record.id);
+      if (want === record.docked) return;
+      record.docked = want;
+      document.dispatchEvent(new CustomEvent(want ? 'marble-callout:docked' : 'marble-callout:undocked', { detail: { id: record.id } }));
+    }
+
+    function follow(record) {
+      record.off?.();
+      record.off = agent.on(record.id, (event) => {
+        switch (event.type) {
+          case 'turn.started':
+            record.changed.clear();
+            record.el.dataset.live = '1';
+            record.actions.replaceChildren();
+            break;
+          case 'ask':
+            // An ask needs an answer, and an answer needs the log.
+            record.convo.removeAttribute('data-folded');
+            if (record.state === 'pill') setState(record, 'card');
+            break;
+          case 'turn.completed':
+          case 'turn.failed':
+          case 'turn.cancelled':
+          case 'turn.interrupted':
+            endRow(record, event);
+            break;
+          default:
+        }
+      });
+    }
+
+    // What the turn changed, counted where it lands rather than asked for
+    // afterwards: the ops are already on their way to this page.
+    document.addEventListener('marble:ops', ({ detail }) => {
+      const client = String(detail?.client ?? '');
+      if (!client.startsWith('agent:')) return;
+      const record = recordOf(client.slice('agent:'.length));
+      if (!record) return;
+      for (const op of detail.ops ?? []) if (op.id) record.changed.add(op.id);
+    });
+
+    // ------------------------------------------------------------ finishing
+
+    function endRow(record, event) {
+      delete record.el.dataset.live;
+      record.zone = null;
+      syncDock(record);
+      const n = record.changed.size;
+      const ok = event.type === 'turn.completed';
+      record.status.textContent = !ok
+        ? (event.type === 'turn.failed' ? 'Failed' : 'Stopped')
+        : n ? `Changed ${n} element${n === 1 ? '' : 's'}` : 'No changes';
+      // A failure is a thing to read, not a thing to summarise in one line.
+      if (event.type === 'turn.failed') record.convo.removeAttribute('data-folded');
+      record.actions.replaceChildren();
+      if (ok && n) record.actions.append(button('Undo', 'Undo this turn', () => undoLast(record)));
+      record.actions.append(button('Done', 'Mark reviewed and put the callout away', () => done(record)));
+      placeCard(record);
+    }
+
+    async function undoLast(record) {
+      let detail = null;
+      try { detail = await agent.conversation(record.id); } catch { return; }
+      const turn = [...(detail?.turns ?? [])].reverse().find((t) => t.status === 'completed' && t.applied && !t.undoneAt);
+      if (!turn) return;
+      try { await agent.undo(turn.id); } catch { return; }
+      record.changed.clear();
+      record.status.textContent = 'Undone';
+      record.actions.replaceChildren(button('Done', 'Mark reviewed and put the callout away', () => done(record)));
+    }
+
+    // Seeing it and saying done is reviewing it — the rule the Focus pane
+    // already uses. The trail goes with the review.
+    async function done(record) {
+      if (record.id) {
+        try { await agent.markReviewed(record.id); } catch { /* the callout still goes */ }
+        document.dispatchEvent(new CustomEvent('marble-callout:reviewed', { detail: { id: record.id } }));
+      }
+      remove(record);
     }
 
     // ------------------------------------------------------------ geometry

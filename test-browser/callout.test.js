@@ -143,3 +143,73 @@ test('Option-clicking the same element twice takes it back off', async () => {
   await page.waitForFunction(() => window.marble.agent.context().selection.length === 0);
   assert.equal(await page.locator('.marble-callout-pick:not([hidden])').count(), 0, 'the outline goes with the key');
 });
+
+const sendFromCard = async (page, prompt) => {
+  const editor = card(page).locator('marble-conversation .editor');
+  await editor.click();
+  await page.keyboard.type(prompt);
+  await page.keyboard.press('Enter');
+};
+const firstConversation = (page) => page.evaluate(async () => {
+  const [summary] = await window.marble.agent.conversations();
+  return summary ? { summary, detail: await window.marble.agent.conversation(summary.id) } : null;
+});
+
+test('a brief sent from the card carries the selection, docks to the zone, and ends with Undo and Done', async () => {
+  const page = await open();
+  await select(page, 'h');
+  await handle(page).click();
+  await sendFromCard(page, 'script:building');
+  await page.locator('.marble-zone').waitFor();
+  const { summary, detail } = await firstConversation(page);
+  assert.deepEqual(detail.turns[0].context.selection, ['h'], 'the turn carries the selection');
+  assert.equal(detail.turns[0].context.target, 'garden');
+
+  await page.locator('.marble-zone-label[hidden]').waitFor({ state: 'attached' });
+  await page.locator('.marble-callout-status', { hasText: 'Agent · rename the heading' }).waitFor();
+  assert.ok(await page.locator('.marble-callout[data-live]').count(), 'the head pulses while the turn runs');
+
+  await page.locator('.marble-callout-status', { hasText: 'Changed 1 element' }).waitFor({ timeout: 15_000 });
+  assert.equal(await page.locator('.marble-zone').count(), 0, 'the zone went with the turn');
+  assert.equal(await page.locator('[data-marble-id="h"].marble-trail').count(), 1);
+
+  await page.getByRole('button', { name: 'Undo this turn' }).click();
+  await page.waitForFunction(() => document.querySelector('[data-marble-id="h"]').textContent === 'Research Garden');
+  await page.locator('.marble-callout-status', { hasText: 'Undone' }).waitFor();
+
+  await page.getByRole('button', { name: 'Mark reviewed and put the callout away' }).click();
+  await page.waitForFunction(() => document.querySelectorAll('.marble-callout').length === 0);
+  assert.equal(await page.locator('.marble-trail').count(), 0);
+  const after = await page.evaluate(async (cid) => (await window.marble.agent.conversations()).find((s) => s.id === cid), summary.id);
+  assert.equal(after.needsReview, false, 'Done reviewed the chat');
+});
+
+test('a turn that changes nothing says so, and folding a live card gives the zone its label back', async () => {
+  const page = await open();
+  await select(page, 'p');
+  await handle(page).click();
+  await sendFromCard(page, 'script:hold');
+  await page.locator('.marble-zone').waitFor();
+  await page.locator('.marble-zone-label[hidden]').waitFor({ state: 'attached' });
+
+  await page.getByRole('button', { name: 'Fold' }).click();
+  await page.locator('.marble-callout[data-state="pill"]').waitFor();
+  await page.locator('.marble-zone-label:not([hidden])').waitFor();
+
+  await page.evaluate(async () => {
+    const [s] = await window.marble.agent.conversations();
+    const d = await window.marble.agent.conversation(s.id);
+    await window.marble.agent.cancel(d.turns.at(-1).id);
+  });
+  await page.locator('.marble-callout-status', { hasText: 'Stopped' }).waitFor({ timeout: 10_000 });
+});
+
+test('a turn that touches nothing reads No changes', async () => {
+  const page = await open();
+  await select(page, 'p');
+  await handle(page).click();
+  await sendFromCard(page, 'script:quiet');
+  await page.locator('.marble-callout-status', { hasText: 'No changes' }).waitFor({ timeout: 10_000 });
+  assert.equal(await page.getByRole('button', { name: 'Undo this turn' }).count(), 0, 'nothing to undo');
+  await page.getByRole('button', { name: 'Mark reviewed and put the callout away' }).waitFor();
+});
