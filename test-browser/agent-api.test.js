@@ -298,6 +298,9 @@ test('the summary stream reports conversations changing', async () => {
 
 test('a selection survives the collapse that focus moving into chrome causes', async () => {
   const { page } = await open();
+  // Which element has focus is only meaningful on the page the person is
+  // looking at, and that is the page this rule is about.
+  await page.bringToFront();
   await page.evaluate(() => {
     const range = document.createRange();
     range.selectNodeContents(document.querySelector('[data-marble-id="h"]'));
@@ -310,9 +313,15 @@ test('a selection survives the collapse that focus moving into chrome causes', a
   });
   await page.waitForFunction(() => window.marble.agent.context().selection.length === 1);
   // What a browser really does when focus leaves the page for a panel: the
-  // selection collapses to the document root, not into the panel.
-  await page.focus('#away-input');
-  await page.evaluate(() => getSelection().collapse(document.body, 0));
+  // selection collapses to the document root, not into the panel. Both halves
+  // in one turn, because it is one event in life and a focus that has not
+  // landed yet is a different test.
+  const focused = await page.evaluate(() => {
+    document.getElementById('away-input').focus();
+    getSelection().collapse(document.body, 0);
+    return document.activeElement?.id;
+  });
+  assert.equal(focused, 'away-input', 'the collapse happened with the chrome focused');
   await page.waitForTimeout(80);
   assert.deepEqual((await page.evaluate(() => window.marble.agent.context())).selection, ['h']);
 
