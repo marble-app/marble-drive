@@ -100,8 +100,24 @@ Injected (with `runtime/agent-ui.js`, the drawer) only when the host runs agents
 | `marble.agent.archive(id, bool)` / `.markReviewed(id)` / `.handoff(id, provider)` | |
 | `marble.agent.restore(path, sha)` | the watchdog's restore point |
 | `marble.agent.on(id \| '*', fn)` | a conversation's events (replayed, then live) / summaries; returns unsubscribe |
-| `marble.agent.context()` | `{viewing, target, selection, also}` — viewing is this page; target is the aimed document, or this page if none; `also` is extra documents in view, not extra writable targets. The element selection survives focus moving into transient chrome |
+| `marble.agent.context()` | `{viewing, target, selection, also}` — viewing is this page; target is the aimed document, or this page if none; `also` is extra documents in view, not extra writable targets. `selection` is every addressed element the text selection intersects, coalesced upward so a fully covered container travels as itself, in document order. It survives focus moving into transient chrome, and the collapse that such a focus change causes |
 | `marble.agent.select(ids)` | for documents with their own selection model; `null` clears |
+
+`marble.collab`, set by `runtime/collab.js`, exposes `tapeTarget(els)` — the
+smallest common ancestor of a set of elements, or `null` when only `<html>` or
+`<body>` contains them — and `phaseLabel({phase, note})`, the construction
+zone's `Agent · <clause>` text. The callout layer (`runtime/agent-callout.js`)
+hangs its card and its handle with them, so a card and a zone agree about
+where the work is. A document may read them; it should not rely on more.
+
+The callout layer also listens for, and dispatches, four events. Chrome that
+wants to take one calls `preventDefault()` on the cancelable ones:
+`marble-callout:summon` (on `window`, cancelable — the drawer offers ⌘J here
+when a selection exists), `marble-callout:open` `{id}` (on `document`,
+cancelable — the zone label's *Open chat* offers itself to a callout first),
+`marble-callout:reviewed` `{id}` (clears that conversation's trail), and
+`marble-callout:docked` / `marble-callout:undocked` `{id}` (hide and restore
+that zone's own label).
 | `marble.agent.aim(path, {also}?)` | the writable target while you stay on this page; `null` clears. Drive's listing `pick()` calls this so a picked document is what a turn writes, without opening it |
 | `marble.agent.current()` / `.remember(id)` | the conversation that follows you between pages |
 | `marble.agent.open(id)` / `.close()` | ask the drawer |
