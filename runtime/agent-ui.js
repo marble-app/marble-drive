@@ -1546,6 +1546,27 @@
     :host([data-chrome="tile"]) .composer { --edge: 8px; padding: 4px var(--edge) 8px; }
     :host([data-chrome="tile"]) .log { padding: 6px 12px 12px; }
     :host([data-chrome="tile"]) .mast { padding: 6px 12px 6px; }
+    /* A callout is the conversation drawn at the region it is about. The
+       card around it carries the title, the status and the moves, so the
+       mast keeps only its tags — the model and the target read once — and
+       the log folds behind a one-line ticker. The card has no height of its
+       own, so the log sizes to its content and stops at half the window. */
+    :host([data-chrome="callout"]) .mast { padding: 2px 12px 0; border-bottom: 0; }
+    :host([data-chrome="callout"]) .mast:not(:has(.tag)) { display: none; }
+    :host([data-chrome="callout"]) .heading,
+    :host([data-chrome="callout"]) .target-jump,
+    :host([data-chrome="callout"]) .zone-jump,
+    :host([data-chrome="callout"]) .also { display: none; }
+    :host([data-chrome="callout"]) .log { flex: 0 1 auto; padding: 6px 12px 10px; max-height: min(50vh, 360px); overflow-y: auto; }
+    :host([data-chrome="callout"][data-folded]) .log { display: none; }
+    .ticker { display: none; }
+    :host([data-chrome="callout"]) .ticker:not([hidden]) {
+      display: block; flex: none; width: 100%; text-align: left; font: inherit; font-size: 12.5px; line-height: 1.4;
+      color: var(--muted); background: none; border: 0; padding: 4px 12px; cursor: pointer;
+      overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+    }
+    :host([data-chrome="callout"]) .ticker:hover { color: var(--ink); }
+    :host([data-chrome="callout"]) .composer { --edge: 10px; padding: 4px var(--edge) 10px; }
     /* A phone shows one conversation, full screen. The mast folds to a line,
        the transcript takes the width, and type is the size a thumb reads. */
     :host([data-chrome="phone"]) .mast { padding: 6px 14px 6px; gap: 2px; }
@@ -2402,6 +2423,15 @@
     else placeCaret(list.children[index - 1]);
   }
 
+  // Rendered text on one line: blocks are spaced apart, inline runs are not.
+  const INLINE_TEXT = new Set(['A', 'B', 'STRONG', 'EM', 'I', 'CODE', 'SPAN', 'SMALL', 'SUP', 'SUB', 'MARK', 'U', 'DEL', 'INS', 'ABBR', 'TIME']);
+  const flatten = (node) => {
+    if (node.nodeType === Node.TEXT_NODE) return node.nodeValue ?? '';
+    if (node.nodeType !== Node.ELEMENT_NODE) return '';
+    const inner = [...node.childNodes].map(flatten).join('');
+    return INLINE_TEXT.has(node.tagName) ? inner : ` ${inner} `;
+  };
+
   class MarbleConversation extends HTMLElement {
     static get observedAttributes() {
       return ['conversation'];
@@ -2421,6 +2451,7 @@
           </button>
           <div class="also" hidden></div>
         </header>
+        <button type="button" class="ticker" hidden aria-label="Show or hide the conversation"></button>
         <div class="log" role="log" aria-live="polite" aria-label="Conversation"></div>
         <form class="composer">
           <div class="slash" hidden role="listbox" aria-label="Commands"></div>
@@ -2468,6 +2499,8 @@
           </div>
         </form>`;
       this.logEl = root.querySelector('.log');
+      this.ticker = root.querySelector('.ticker');
+      this.ticker.addEventListener('click', () => this.toggleAttribute('data-folded'));
       this.queuedEl = root.querySelector('.queued');
       this.queuedBar = root.querySelector('.queued-bar');
       this.queuedIndividually = root.querySelector('.queued-individually');
@@ -2708,6 +2741,22 @@
     }
 
     connectedCallback() {
+      // In a callout the document is not "this document" but the region you
+      // selected, and the placeholder says so.
+      if (this.dataset.chrome === 'callout') {
+        this.input.dataset.placeholder = 'Ask about this…';
+        // The log is written down several paths — streamed text, a finished
+        // message re-rendered, tool rows folding. The ticker follows the log
+        // itself rather than the paths, so it cannot fall behind one of them.
+        // Scheduled once per frame, never rescheduled: text streams in faster
+        // than a frame, and a tick that keeps deferring itself never runs.
+        this.tickWatch = new MutationObserver(() => {
+          if (this.tickFrame) return;
+          this.tickFrame = requestAnimationFrame(() => { this.tickFrame = 0; this.tick(); });
+        });
+        this.tickWatch.observe(this.logEl, { childList: true, subtree: true, characterData: true });
+        this.tick();
+      }
       armScrubKeys();
       this.unwatchTheme = watchPageTheme(this);
       addEventListener('marble:agent-context', this.onContext);
@@ -2718,6 +2767,9 @@
     }
 
     disconnectedCallback() {
+      this.tickWatch?.disconnect();
+      this.tickWatch = null;
+      cancelAnimationFrame(this.tickFrame ?? 0);
       this.closeScrub?.({ commit: false });
       this.fitObserver?.disconnect();
       this.fitObserver = null;
@@ -4180,6 +4232,8 @@
           break;
         case 'ask':
           this.endLive();
+          // An ask needs an answer, so a folded callout unfolds itself.
+          this.removeAttribute('data-folded');
           this.ask(turn, event);
           break;
         case 'ask.answered':
@@ -4394,6 +4448,19 @@
     system(message, error = false) {
       this.logEl.append(h('div', error ? 'system error' : 'system', message));
       this.logEl.scrollTop = this.logEl.scrollHeight;
+    }
+
+    /** The callout's one line: whatever the log said last, on one line. Any
+     *  other chrome leaves the button hidden, so this costs nothing there. */
+    tick() {
+      if (this.dataset.chrome !== 'callout' || !this.ticker) return;
+      const last = [...this.logEl.children].reverse().find((el) => !el.classList.contains('turn-footer'));
+      // Not textContent: a paragraph followed by a list would run together
+      // into onesentence. Blocks are spaced, inline runs are not, so bold
+      // text keeps its punctuation.
+      const text = (last ? flatten(last) : '').replace(/\s+/g, ' ').trim();
+      this.ticker.textContent = text.slice(0, 240);
+      this.ticker.hidden = !text;
     }
 
     delta(turn, text) {

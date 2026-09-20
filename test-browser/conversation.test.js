@@ -1762,3 +1762,62 @@ test('the row names the other document, and pressing it opens that document at t
   await page.locator('.marble-zone').waitFor();
   assert.match(await page.locator('.marble-zone-label').innerText(), /Agent · rename the heading/);
 });
+
+/** The same view in callout chrome: what the card at a selection holds. */
+async function mountCallout() {
+  await host.reset();
+  const { page, errors } = await host.newPage();
+  await page.goto(`${host.base}/a/garden`);
+  await page.waitForFunction(() => Boolean(window.marble?.agent && customElements.get('marble-conversation')));
+  await page.evaluate(() => {
+    const el = document.createElement('marble-conversation');
+    el.setAttribute('data-marble-transient', '');
+    el.dataset.chrome = 'callout';
+    el.setAttribute('project', 'drive');
+    el.setAttribute('data-folded', '');
+    el.style.cssText = 'position:fixed;left:0;bottom:0;width:420px;';
+    document.body.append(el);
+  });
+  return { page, errors, view: page.locator('body > marble-conversation') };
+}
+
+test('callout chrome folds the log to a ticker, unfolds on click and on an ask', async () => {
+  const { page, view } = await mountCallout();
+  await view.locator('.editor').waitFor();
+  assert.equal(await view.locator('.editor').getAttribute('data-placeholder'), 'Ask about this…');
+  assert.equal(await view.locator('.heading').isVisible(), false, 'no heading in a callout');
+
+  await sendFrom(view, 'script:rename');
+  await view.locator('.ticker:not([hidden])').waitFor();
+  await page.waitForFunction(() => /\S/.test(document.querySelector('body > marble-conversation').shadowRoot.querySelector('.ticker').textContent));
+  assert.equal(await view.locator('.log').isVisible(), false, 'folded: the log is hidden');
+
+  await view.locator('.ticker').click();
+  assert.equal(await view.locator('.log').isVisible(), true, 'a click unfolds');
+  await view.locator('.ticker').click();
+  assert.equal(await view.locator('.log').isVisible(), false, 'and folds again');
+
+  // An ask needs an answer, so it unfolds by itself.
+  await sendFrom(view, 'script:question');
+  await view.locator('.ask').waitFor();
+  assert.equal(await view.evaluate((el) => el.hasAttribute('data-folded')), false);
+});
+
+test('the ticker says what the log said last, and nothing outside callout chrome has one', async () => {
+  const { view } = await mountCallout();
+  await sendFrom(view, 'script:rename');
+  await view.locator('.ticker:not([hidden])').waitFor();
+  // Folded, the log's own footer is hidden with it; unfold to wait on the turn.
+  await view.locator('.ticker').click();
+  await view.locator('.turn-footer[data-status="completed"]').waitFor();
+  // The ticker follows the log a frame behind, by design.
+  await view.locator('.ticker', { hasText: 'Renamed the heading' }).waitFor();
+  const line = await view.locator('.ticker').innerText();
+  assert.match(line, /Renamed the heading to Backlog\. kept the questions/, 'the last thing said, on one line');
+  assert.ok(!line.includes('\n'), 'one line');
+
+  const { view: plain } = await mount();
+  await sendFrom(plain, 'script:rename');
+  await plain.locator('.turn-footer[data-status="completed"]').waitFor();
+  assert.equal(await plain.locator('.ticker').isVisible(), false, 'the drawer keeps its log');
+});
