@@ -105,3 +105,41 @@ test('the Agents page draws no callout layer', async () => {
   await page.waitForFunction(() => Boolean(document.querySelector('marble-conversation')));
   assert.equal(await page.locator('.marble-callout-layer').count(), 0);
 });
+
+test('Option-click picks elements, Escape clears, and a new text selection replaces the picks', async () => {
+  const page = await open();
+  const q2 = await page.locator('[data-marble-id="q2"]').boundingBox();
+  await page.keyboard.down('Alt');
+  await page.mouse.move(q2.x + 10, q2.y + q2.height / 2);
+  await page.locator('.marble-callout-pick:not([hidden])').waitFor();
+  await page.mouse.click(q2.x + 10, q2.y + q2.height / 2);
+  await page.waitForFunction(() => JSON.stringify(window.marble.agent.context().selection) === '["q2"]');
+  const p = await page.locator('[data-marble-id="p"]').boundingBox();
+  await page.mouse.click(p.x + 10, p.y + p.height / 2);
+  await page.keyboard.up('Alt');
+  await page.waitForFunction(() => JSON.stringify(window.marble.agent.context().selection) === '["q2","p"]');
+  await handle(page).waitFor();
+
+  await page.keyboard.press('Escape');
+  await page.waitForFunction(() => window.marble.agent.context().selection.length === 0);
+
+  await page.keyboard.down('Alt');
+  await page.mouse.click(p.x + 10, p.y + p.height / 2);
+  await page.keyboard.up('Alt');
+  await page.waitForFunction(() => JSON.stringify(window.marble.agent.context().selection) === '["p"]');
+  // A fresh text selection is the person choosing something else.
+  await select(page, 'h');
+  await page.waitForFunction(() => JSON.stringify(window.marble.agent.context().selection) === '["h"]');
+});
+
+test('Option-clicking the same element twice takes it back off', async () => {
+  const page = await open();
+  const p = await page.locator('[data-marble-id="p"]').boundingBox();
+  await page.keyboard.down('Alt');
+  await page.mouse.click(p.x + 10, p.y + p.height / 2);
+  await page.waitForFunction(() => JSON.stringify(window.marble.agent.context().selection) === '["p"]');
+  await page.mouse.click(p.x + 10, p.y + p.height / 2);
+  await page.keyboard.up('Alt');
+  await page.waitForFunction(() => window.marble.agent.context().selection.length === 0);
+  assert.equal(await page.locator('.marble-callout-pick:not([hidden])').count(), 0, 'the outline goes with the key');
+});

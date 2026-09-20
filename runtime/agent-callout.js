@@ -261,6 +261,71 @@
     addEventListener('marble-callout:summon', (event) => {
       if (summon()) event.preventDefault();
     });
+
+    // ------------------------------------------------------------ pick mode
+    // Option held: the pointer names an element instead of firing it. Holding
+    // a key is the only way a click on a page full of live controls can mean
+    // "this one" without setting it off, and Option is already Marble's pick
+    // modifier — the Drive listing's lasso is Option-drag.
+
+    const pickFrame = document.createElement('div');
+    pickFrame.className = 'marble-callout-pick';
+    pickFrame.setAttribute(TRANSIENT, '');
+    pickFrame.hidden = true;
+    layer.append(pickFrame);
+    const picked = new Set();
+    let hovered = null;
+
+    const addressedAt = (x, y) => {
+      const hit = document.elementFromPoint(x, y)?.closest?.('[data-marble-id]');
+      if (!hit || hit === document.body || hit === document.documentElement || hit.closest(`[${TRANSIENT}]`)) return null;
+      return hit;
+    };
+    const outline = (el) => {
+      hovered = el;
+      if (!el) { pickFrame.hidden = true; return; }
+      const r = el.getBoundingClientRect();
+      Object.assign(pickFrame.style, {
+        left: `${r.left - 3}px`, top: `${r.top - 3}px`, width: `${r.width + 6}px`, height: `${r.height + 6}px`,
+      });
+      pickFrame.hidden = false;
+    };
+    const commitPicks = () => agent.select(picked.size ? [...picked] : null);
+
+    addEventListener('pointermove', (event) => {
+      if (!event.altKey) { if (hovered) outline(null); return; }
+      outline(addressedAt(event.clientX, event.clientY));
+    }, true);
+    addEventListener('keyup', (event) => {
+      if (event.key === 'Alt' && hovered) outline(null);
+    }, true);
+    addEventListener('click', (event) => {
+      if (!event.altKey || layer.contains(event.target)) return;
+      const el = addressedAt(event.clientX, event.clientY);
+      if (!el) return;
+      // The page never sees this click: it is a name, not a press.
+      event.preventDefault();
+      event.stopPropagation();
+      const id = el.getAttribute('data-marble-id');
+      if (picked.has(id)) picked.delete(id); else picked.add(id);
+      commitPicks();
+    }, true);
+    addEventListener('keydown', (event) => {
+      if (event.key !== 'Escape' || !picked.size) return;
+      picked.clear();
+      commitPicks();
+    }, true);
+    // A fresh text selection is the person choosing something else; the two
+    // must never disagree about what is selected.
+    document.addEventListener('selectionchange', () => {
+      const selection = getSelection();
+      if (!picked.size || !selection || selection.isCollapsed || !selection.rangeCount) return;
+      const node = selection.anchorNode;
+      const anchor = node?.nodeType === Node.ELEMENT_NODE ? node : node?.parentElement;
+      if (!anchor || anchor.closest(`[${TRANSIENT}]`)) return;
+      picked.clear();
+      agent.select(null);
+    });
   };
 
   if (window.marble?.agent) boot(window.marble);
