@@ -183,8 +183,15 @@
       const el = record.el;
       const anchor = anchorOf(record.ids);
       if (!anchor) {
-        // Nothing left to point at: the chat is still reachable, bottom-right.
-        Object.assign(el.style, { left: 'auto', top: 'auto', right: `${PAD}px`, bottom: `${PAD}px` });
+        // Nothing left to point at: the chat is still reachable, bottom-right —
+        // above the marks toolbar when that is the corner it lives in. The
+        // toolbar's rest is not a fixed inset — it stacks above the drawer's
+        // own launcher, which sits at a height this layer does not know — so
+        // this measures where the toolbar actually is rather than adding a
+        // constant to PAD.
+        const toolbar = document.querySelector('.marble-marks-bar[data-corner="br"]:not([hidden])');
+        const bottom = toolbar ? innerHeight - toolbar.getBoundingClientRect().top + GAP : PAD;
+        Object.assign(el.style, { left: 'auto', top: 'auto', right: `${PAD}px`, bottom: `${bottom}px` });
         return;
       }
       const r = anchor.getBoundingClientRect();

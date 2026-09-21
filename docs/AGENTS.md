@@ -145,6 +145,27 @@ callout as well, so both paths end at the same object.
 On a phone the handle opens the drawer with the selection attached; there is
 no anchored card. The Agents page draws no callouts of its own.
 
+## Marking a document up for an agent
+
+Every document also carries a small round button at its bottom right, wearing
+the callout's bubble. It opens into a strip of tools; in this phase the strip
+holds **Select**. Pick a tool and the page is in that mode until Escape, or the
+tool again, gives it back. Wheel scrolling still works inside a mode.
+
+**Select** draws a marquee. Every addressed element the rectangle covers by
+sixty percent or more is outlined as you drag, and a rectangle across a whole
+list outlines the list rather than its items. Letting go hands those elements
+to the callout — the same handle and card a text selection gets — and leaves
+the mode. **Shift** while releasing adds to what is already selected; a
+double-click on Select pins the mode for several rectangles; **Escape** with a
+marquee selection standing clears it, as it clears Option-picks.
+
+The button can be thrown to any corner: drag it, let go, and it settles in the
+corner nearest to where the throw was headed. The corner is remembered per
+document. When the drawer is pinned the toolbar moves in with the page's edge,
+and on a phone it steps aside while the drawer is open. The Agents page has no
+toolbar; it is the orchestration view already.
+
 ## What a full agent can do
 
 Every provider runs at capability `full` unless it declares `documents` or

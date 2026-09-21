@@ -221,7 +221,6 @@
     const expand = () => { strip.hidden = false; main.setAttribute('aria-expanded', 'true'); };
     const collapse = () => { strip.hidden = true; main.setAttribute('aria-expanded', 'false'); };
     const toggle = () => (strip.hidden ? expand() : collapse());
-    main.addEventListener('click', toggle);
 
     // ------------------------------------------------------------ modes
     //
@@ -461,6 +460,110 @@
     const drawerRoot = drawerHost()?.shadowRoot;
     if (drawerRoot) new MutationObserver(syncHidden).observe(drawerRoot, { subtree: true, attributes: true, attributeFilter: ['data-pinned'] });
     syncHidden();
+
+    // ------------------------------------------------------------ throwing it
+    //
+    // The button follows the pointer 1:1 from where it was grabbed. On
+    // release the landing point is projected from the release velocity, the
+    // nearest corner to that projection wins, and a spring with a little
+    // bounce carries the bar there starting at the hand's speed — the only
+    // motion in this layer that has momentum behind it.
+
+    let hold = null;
+    let flight = 0;
+    let justDragged = false;
+    const stopFlight = () => { cancelAnimationFrame(flight); flight = 0; };
+    const velocityOf = (history) => {
+      if (history.length < 2) return { x: 0, y: 0 };
+      const last = history[history.length - 1];
+      const first = history.find((sample) => last.t - sample.t <= 120) ?? history[0];
+      const dt = (last.t - first.t) / 1000;
+      if (dt <= 0) return { x: 0, y: 0 };
+      return { x: (last.x - first.x) / dt, y: (last.y - first.y) / dt };
+    };
+    const flyTo = (target, velocity) => {
+      stopFlight();
+      if (stillness.matches) {
+        pos = target;
+        paint();
+        bar.animate([{ opacity: .4 }, { opacity: 1 }], { duration: 200, easing: 'ease-out' });
+        return;
+      }
+      let sx = { x: pos.x, v: velocity.x };
+      let sy = { x: pos.y, v: velocity.y };
+      let last = performance.now();
+      const step = (now) => {
+        // The spring substeps internally at a fixed rate, so this clamp is
+        // no longer here for numerical stability — it exists so that a tab
+        // returning from the background, where `now` can jump by seconds,
+        // does not read as one enormous step of the throw.
+        const dt = Math.min(0.032, Math.max(0.001, (now - last) / 1000));
+        last = now;
+        sx = G().spring(sx, target.x, dt, { damping: 0.8, response: 0.4 });
+        sy = G().spring(sy, target.y, dt, { damping: 0.8, response: 0.4 });
+        pos = { x: sx.x, y: sy.x };
+        paint();
+        if (G().settled(sx, target.x) && G().settled(sy, target.y)) {
+          pos = target;
+          paint();
+          flight = 0;
+          return;
+        }
+        flight = requestAnimationFrame(step);
+      };
+      flight = requestAnimationFrame(step);
+    };
+    // Resize and the dock re-seat the bar, unless a hand or a flight has it.
+    settle = () => { if (hold?.moved || flight) return; pos = restingPoint(corner); paint(); };
+
+    main.addEventListener('pointerdown', (event) => {
+      if (event.button !== 0) return;
+      main.setPointerCapture(event.pointerId);
+      stopFlight();
+      hold = { id: event.pointerId, sx: event.clientX, sy: event.clientY, gx: event.clientX - pos.x, gy: event.clientY - pos.y, moved: false, history: [] };
+    });
+    main.addEventListener('pointermove', (event) => {
+      if (!hold || event.pointerId !== hold.id) return;
+      if (!hold.moved) {
+        if (Math.hypot(event.clientX - hold.sx, event.clientY - hold.sy) < 10) return;
+        hold.moved = true;
+        collapse();
+        bar.dataset.dragging = '';
+      }
+      pos = { x: event.clientX - hold.gx, y: event.clientY - hold.gy };
+      paint();
+      hold.history.push({ x: event.clientX, y: event.clientY, t: performance.now() });
+      if (hold.history.length > 8) hold.history.shift();
+    });
+    const release = (event) => {
+      if (!hold || event.pointerId !== hold.id) return;
+      const done = hold;
+      hold = null;
+      delete bar.dataset.dragging;
+      if (!done.moved) return;
+      justDragged = true;
+      const velocity = velocityOf(done.history);
+      const e = edges();
+      // SIZE, not bar.offsetWidth/offsetHeight, for the same reason
+      // restingPoint() above measures with it: the bar can be display:none
+      // here too if the drawer opened mid-drag, and a landing computed from
+      // a zero-size box would put the corner test off by half the bar.
+      const landing = { x: pos.x + G().project(velocity.x), y: pos.y + G().project(velocity.y) };
+      corner = G().nearestCorner(
+        { x: landing.x + SIZE / 2 - e.left, y: landing.y + SIZE / 2 - e.top },
+        { width: e.right - e.left, height: e.bottom - e.top },
+      );
+      bar.dataset.corner = corner;
+      localStorage.setItem(cornerKey(app), corner);
+      flyTo(restingPoint(corner), velocity);
+    };
+    main.addEventListener('pointerup', release);
+    main.addEventListener('pointercancel', release);
+    main.addEventListener('click', () => {
+      // The click after a throw is the hand letting go, not a press.
+      if (justDragged) { justDragged = false; return; }
+      toggle();
+    });
   };
 
   if (window.marble?.agent) boot(window.marble);

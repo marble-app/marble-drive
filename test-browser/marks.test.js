@@ -294,3 +294,58 @@ test('a tool mode owns Escape while it is on, and the callout\'s picks survive i
   await page.waitForFunction(() => document.querySelector('.marble-marks-layer').dataset.mode === '');
   assert.deepEqual(await selection(page), ['p'], 'the pick is still there once the mode ends');
 });
+
+test('the toolbar can be thrown to another corner, and the corner is remembered', async () => {
+  const page = await open();
+  await bar(page).waitFor();
+  const b = await barBox(page);
+  const cx = b.left + b.width / 2;
+  const cy = b.top + b.height / 2;
+  await page.mouse.move(cx, cy);
+  await page.mouse.down();
+  await page.mouse.move(cx - 300, cy, { steps: 12 });
+  await page.waitForFunction(() => document.querySelector('.marble-marks-bar').hasAttribute('data-dragging'));
+  await page.mouse.move(cx - 700, cy, { steps: 4 });
+  await page.mouse.up();
+  await page.waitForFunction(() => localStorage.getItem('marble-marks:corner:garden') === 'bl');
+  await page.waitForFunction(() => Math.abs(document.querySelector('.marble-marks-bar').getBoundingClientRect().left - 16) <= 1);
+  assert.equal(await page.evaluate(() => document.querySelector('.marble-marks-bar').dataset.corner), 'bl');
+  await page.reload();
+  await page.waitForFunction(() => Boolean(window.marble?.agent));
+  await bar(page).waitFor();
+  await page.waitForFunction(() => Math.abs(document.querySelector('.marble-marks-bar').getBoundingClientRect().left - 16) <= 1);
+});
+
+test('a short press is a click, not a throw', async () => {
+  const page = await open();
+  await bar(page).waitFor();
+  const b = await barBox(page);
+  await page.mouse.move(b.left + 20, b.top + 20);
+  await page.mouse.down();
+  await page.mouse.move(b.left + 24, b.top + 22);
+  await page.mouse.up();
+  await strip(page).waitFor();
+  assert.equal(await page.evaluate(() => localStorage.getItem('marble-marks:corner:garden')), null);
+});
+
+test('with the strip open, dragging closes it first, and the strip reopens on the new side', async () => {
+  const page = await open();
+  await bar(page).waitFor();
+  await main(page).click();
+  await strip(page).waitFor();
+  const b = await barBox(page);
+  await page.mouse.move(b.left + 20, b.top + 20);
+  await page.mouse.down();
+  await page.mouse.move(b.left - 900, b.top - 600, { steps: 12 });
+  await page.waitForFunction(() => document.querySelector('.marble-marks-strip').hidden);
+  await page.mouse.up();
+  await page.waitForFunction(() => document.querySelector('.marble-marks-bar').dataset.corner === 'tl');
+  await main(page).click();
+  await strip(page).waitFor();
+  const [button, s] = await page.evaluate(() => {
+    const r = (sel) => document.querySelector(sel).getBoundingClientRect();
+    return [r('.marble-marks-main'), r('.marble-marks-strip')];
+  });
+  assert.ok(s.top > button.bottom, 'in a top corner the strip hangs below');
+  assert.ok(Math.abs(s.left - button.left) <= 1, 'and shares the left edge');
+});
