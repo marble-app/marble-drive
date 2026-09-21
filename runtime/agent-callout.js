@@ -614,6 +614,11 @@
     }, true);
     addEventListener('keydown', (event) => {
       if (event.key !== 'Escape' || !picked.size) return;
+      // A tool mode owns Escape while it is on — this listener runs first
+      // because this script loads first, so without this check its Escape
+      // would clear the picks before the mode ever saw the key. The picks
+      // are still there when the mode ends.
+      if (document.querySelector('.marble-marks-layer')?.dataset.mode) return;
       picked.clear();
       commitPicks();
     }, true);

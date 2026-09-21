@@ -123,8 +123,11 @@
     .marble-marks-bar[data-corner$="l"] .marble-marks-tool::after { left: calc(100% + 10px); }
 
     /* Inside a mode the overlay takes the pointer and nothing else changes:
-       wheel still scrolls the page under it. */
-    .marble-marks-overlay { position: fixed; inset: 0; pointer-events: auto; cursor: crosshair; touch-action: none; }
+       wheel still scrolls the page under it. Pinch still works too; a single
+       finger is claimed for the marquee drag rather than left free to pan —
+       dropping touch-action entirely would let the browser start that pan on
+       the first touch, before the first pointermove ever reaches here. */
+    .marble-marks-overlay { position: fixed; inset: 0; pointer-events: auto; cursor: crosshair; touch-action: pinch-zoom; }
     .marble-marks-overlay[hidden] { display: none; }
     .marble-marks-marquee {
       position: fixed; pointer-events: none; border-radius: 2px;
@@ -240,18 +243,9 @@
 
     let mode = null;
     let pinned = false;
+    let drag = null;
+    let fromMarquee = false;
     const tools = { select: selectTool };
-    const setMode = (next) => {
-      mode = next;
-      layer.dataset.mode = next ?? '';
-      overlay.hidden = !next;
-      for (const [name, button] of Object.entries(tools)) button.setAttribute('aria-pressed', String(name === next));
-      if (!next) { pinned = false; delete layer.dataset.pinned; }
-    };
-    const pin = (name) => { setMode(name); pinned = true; layer.dataset.pinned = ''; };
-    setMode(null);
-    selectTool.addEventListener('click', () => setMode(mode === 'select' ? null : 'select'));
-    selectTool.addEventListener('dblclick', () => pin('select'));
 
     // ------------------------------------------------------------ boxes
 
@@ -289,8 +283,10 @@
 
     // ------------------------------------------------------------ Select
 
-    let drag = null;
-    let fromMarquee = false;
+    // Set on scroll and cleared inside `frame`: a scrolling document moves
+    // every box, but recomputing them all is real work, so a momentum
+    // scroll pays for one pass per frame rather than one per scroll event.
+    let boxesDirty = false;
     const rectOf = (d) => ({
       left: Math.min(d.x0, d.x1), top: Math.min(d.y0, d.y1),
       width: Math.abs(d.x1 - d.x0), height: Math.abs(d.y1 - d.y0),
@@ -298,18 +294,51 @@
     const frame = () => {
       if (!drag) return;
       drag.raf = 0;
+      if (boxesDirty) { drag.boxes = collectBoxes(); boxesDirty = false; }
       const r = rectOf(drag);
       Object.assign(marquee.style, { left: `${r.left}px`, top: `${r.top}px`, width: `${r.width}px`, height: `${r.height}px` });
       drag.ids = G().idsInRect(r, drag.boxes);
       paintHits(drag.ids, drag.boxes);
     };
     const scheduleFrame = () => { if (drag && !drag.raf) drag.raf = requestAnimationFrame(frame); };
+    // The one place a drag ends: cancel its pending frame, blank the marquee
+    // and every outline, and let go of the state. `setMode` calls this when
+    // a mode is left mid-drag — Escape, or the tool clicked again — and
+    // `finish` calls it once the pointer itself has come up, so there is one
+    // place that knows how a drag ends rather than two copies of it.
+    const endDrag = () => {
+      if (!drag) return;
+      cancelAnimationFrame(drag.raf);
+      drag = null;
+      marquee.hidden = true;
+      paintHits([], []);
+    };
+
+    // ------------------------------------------------------------ the switch
+
+    const setMode = (next) => {
+      // A mode being left never leaves its drag behind: hiding the overlay
+      // below takes it out of hit-testing (and drops its pointer capture
+      // with it), so a pointerup after this point would never reach
+      // `finish` — this is the only other place a drag ends, and it is a
+      // no-op when none is running.
+      endDrag();
+      mode = next;
+      layer.dataset.mode = next ?? '';
+      overlay.hidden = !next;
+      for (const [name, button] of Object.entries(tools)) button.setAttribute('aria-pressed', String(name === next));
+      if (!next) { pinned = false; delete layer.dataset.pinned; }
+    };
+    const pin = (name) => { setMode(name); pinned = true; layer.dataset.pinned = ''; };
 
     overlay.addEventListener('pointerdown', (event) => {
-      if (mode !== 'select' || event.button !== 0) return;
+      if (mode !== 'select' || event.button !== 0 || drag) return;
       // The page never sees this press: no text selection starts under it.
       event.preventDefault();
       overlay.setPointerCapture(event.pointerId);
+      // Picking the tool leaves the strip up, so it can still be pinned or
+      // swapped for another; the corner is only busy once a drag starts.
+      collapse();
       drag = { id: event.pointerId, x0: event.clientX, y0: event.clientY, x1: event.clientX, y1: event.clientY, boxes: collectBoxes(), ids: [], raf: 0 };
       marquee.hidden = false;
       frame();
@@ -326,10 +355,8 @@
       drag.raf = 0;
       frame();
       const ids = drag.ids;
-      drag = null;
-      marquee.hidden = true;
-      paintHits([], []);
       const prior = event.type === 'pointerup' && event.shiftKey ? agent.context().selection : [];
+      endDrag();
       const union = [...prior, ...ids.filter((id) => !prior.includes(id))];
       agent.select(union.length ? union : null);
       fromMarquee = union.length > 0;
@@ -338,7 +365,7 @@
     overlay.addEventListener('pointerup', finish);
     overlay.addEventListener('pointercancel', finish);
     // Wheel passes through the overlay and the page moves under the drag.
-    addEventListener('scroll', () => { if (drag) { drag.boxes = collectBoxes(); scheduleFrame(); } }, true);
+    addEventListener('scroll', () => { if (drag) { boxesDirty = true; scheduleFrame(); } }, true);
 
     // Escape inside a mode leaves it; Escape with a marquee selection standing
     // clears it, as Escape clears Option-picks.
@@ -357,6 +384,10 @@
       fromMarquee = false;
       agent.select(null);
     });
+
+    setMode(null);
+    selectTool.addEventListener('click', () => setMode(mode === 'select' ? null : 'select'));
+    selectTool.addEventListener('dblclick', () => pin('select'));
 
     // ------------------------------------------------------------ the corner
     //

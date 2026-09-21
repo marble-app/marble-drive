@@ -263,11 +263,13 @@ re-brief from what they see.
 One rule for the layer, drawn from the callout: things arrive and leave, they
 never blink. Enter and exit use `@starting-style` with
 `transition-behavior: allow-discrete`, 180ms, the callout's curve. Only
-`transform` and `opacity` animate on the compositor. The toolbar's expand and
-its corner spring are the two exceptions above, and both are documented
-there. Under `prefers-reduced-motion`, every spring and slide becomes a
-cross-fade, the press scale stays, and the marquee outline still updates per
-frame because it is feedback, not motion.
+`transform` and `opacity` animate on the compositor for anything that moves;
+a hover or pressed tint on a small control is paint over a negligible area,
+not motion, and is allowed. The toolbar's expand and its corner spring are
+the two exceptions above, and both are documented there. Under
+`prefers-reduced-motion`, every spring and slide becomes a cross-fade, the
+press scale stays, and the marquee outline still updates per frame because
+it is feedback, not motion.
 
 ## 6. Decisions made here, and why
 
@@ -370,3 +372,5 @@ Three phases, each usable on its own:
 - Phone sketching beyond what the overlay gives; on a phone Send hands to the
   drawer as the callout does.
 - Readings beyond box, arrow and ink.
+- Panning with one finger while a tool mode is active; pinch still works, and
+  the way out is the tool button, which sits above the overlay.

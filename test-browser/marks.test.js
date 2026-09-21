@@ -172,7 +172,12 @@ const drag = async (page, from, to, { shift = false } = {}) => {
 const boxOf = (page, id) => page.locator(`[data-marble-id="${id}"]`).boundingBox();
 const selection = (page) => page.evaluate(() => window.marble.agent.context().selection);
 const enterSelect = async (page) => {
-  if (await strip(page).isHidden()) await main(page).click();
+  // The strip's own `hidden` IDL property, not Playwright's rendered
+  // isHidden(): a collapse from the previous drag is still visibly fading
+  // out under the allow-discrete transition, so asking what is on screen
+  // races that 300ms and can read "still open" moments before it finishes
+  // closing for good.
+  if (await strip(page).evaluate((el) => el.hidden)) await main(page).click();
   await tool(page, 'select').click();
   await page.locator('.marble-marks-layer[data-mode="select"]').waitFor();
 };
@@ -257,4 +262,35 @@ test('double-clicking Select pins the mode for several rectangles', async () => 
   await page.waitForFunction(() => JSON.stringify(window.marble.agent.context().selection) === '["p"]');
   await page.keyboard.press('Escape');
   await page.waitForFunction(() => document.querySelector('.marble-marks-layer').dataset.mode === '');
+});
+
+test('Escape mid-drag ends the drag it was in, not just the mode', async () => {
+  const page = await open();
+  await bar(page).waitFor();
+  await enterSelect(page);
+  const h = await boxOf(page, 'h');
+  await page.mouse.move(h.x - 6, h.y - 6);
+  await page.mouse.down();
+  await page.mouse.move(h.x + h.width + 6, h.y + h.height + 6, { steps: 6 });
+  await page.locator('.marble-marks-marquee:not([hidden])').waitFor();
+  await page.keyboard.press('Escape');
+  await page.waitForFunction(() => document.querySelector('.marble-marks-layer').dataset.mode === '');
+  assert.equal(await page.locator('.marble-marks-marquee:not([hidden])').count(), 0);
+  assert.equal(await page.locator('.marble-marks-hit:not([hidden])').count(), 0);
+  await page.mouse.up();
+});
+
+test('a tool mode owns Escape while it is on, and the callout\'s picks survive it', async () => {
+  const page = await open();
+  await bar(page).waitFor();
+  const p = await boxOf(page, 'p');
+  await page.keyboard.down('Alt');
+  await page.mouse.click(p.x + 10, p.y + p.height / 2);
+  await page.keyboard.up('Alt');
+  await page.waitForFunction(() => JSON.stringify(window.marble.agent.context().selection) === '["p"]');
+
+  await enterSelect(page);
+  await page.keyboard.press('Escape');
+  await page.waitForFunction(() => document.querySelector('.marble-marks-layer').dataset.mode === '');
+  assert.deepEqual(await selection(page), ['p'], 'the pick is still there once the mode ends');
 });
