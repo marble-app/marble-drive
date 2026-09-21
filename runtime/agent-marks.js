@@ -165,18 +165,21 @@
     let pos = { x: 0, y: 0 };
     const restingPoint = (which) => {
       const e = edges();
-      const x = which.endsWith('l') ? e.left + PAD : e.right - PAD - bar.offsetWidth;
-      let y = which.startsWith('t') ? e.top + PAD : e.bottom - PAD - bar.offsetHeight;
+      // SIZE, not bar.offsetWidth/offsetHeight: the bar is display:none while
+      // the drawer is open and unpinned (below), and a resize during that
+      // window would otherwise compute the rest from a zero-size box —
+      // landing flush in the corner and staying there once the bar reappears,
+      // since nothing else re-settles it.
+      const x = which.endsWith('l') ? e.left + PAD : e.right - PAD - SIZE;
+      let y = which.startsWith('t') ? e.top + PAD : e.bottom - PAD - SIZE;
       // A document with agents off, or the Agents page, has no drawer to clear.
       const l = launcherRect();
       if (l) {
-        const w = bar.offsetWidth;
-        const h = bar.offsetHeight;
-        const overlaps = x < l.right && x + w > l.left && y < l.bottom && y + h > l.top;
+        const overlaps = x < l.right && x + SIZE > l.left && y < l.bottom && y + SIZE > l.top;
         // Stack clear of it instead of sitting on it: up from a bottom
         // corner, down from a top one. The corner now reads bottom-up as
         // launcher, toolbar, and — later — a callout with nothing to point at.
-        if (overlaps) y = which.startsWith('t') ? l.bottom + GAP : l.top - GAP - h;
+        if (overlaps) y = which.startsWith('t') ? l.bottom + GAP : l.top - GAP - SIZE;
       }
       return { x, y };
     };
@@ -206,6 +209,11 @@
     };
     const syncHidden = () => { bar.hidden = drawerOpen(); };
     new MutationObserver(syncHidden).observe(document.documentElement, { subtree: true, attributes: true, attributeFilter: ['data-open-state'] });
+    // Captured once, not re-read on demand: this is guaranteed non-null by
+    // the injection order in server/app.js — agent-ui.js's script tag (and so
+    // its drawer mount) always runs before this file's — so the shadow root
+    // already exists here. Reordering those tags would make this observer
+    // silently never attach, with no error to point at why.
     const drawerRoot = drawerHost()?.shadowRoot;
     if (drawerRoot) new MutationObserver(syncHidden).observe(drawerRoot, { subtree: true, attributes: true, attributeFilter: ['data-pinned'] });
     syncHidden();

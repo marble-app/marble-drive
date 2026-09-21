@@ -88,6 +88,26 @@ test('the toolbar steps aside while the drawer is open, and comes back when it c
   await page.waitForFunction(() => !document.querySelector('.marble-marks-bar').hidden);
 });
 
+test('a resize while the drawer is open does not strand the toolbar when it reappears', async () => {
+  const page = await open();
+  await bar(page).waitFor();
+  const drawer = page.locator('marble-agent-drawer');
+  await drawer.locator('.launcher').click();
+  await page.locator('marble-agent-drawer aside.panel[data-open="true"]').waitFor();
+  await page.waitForFunction(() => document.querySelector('.marble-marks-bar').hidden);
+  // The bar is display:none here, so its offsetWidth/offsetHeight are 0.
+  // restingPoint() must not use them, or this resize computes a degenerate
+  // rest point nothing ever corrects afterwards.
+  await page.setViewportSize({ width: 1000, height: 700 });
+  await drawer.locator('button.close').click();
+  await page.waitForFunction(() => !document.querySelector('.marble-marks-bar').hidden);
+  const box = await barBox(page);
+  assert.ok(Math.abs(box.right - (1000 - 16)) <= 1, `right edge at ${box.right}`);
+  const launcherTop = await page.evaluate(() =>
+    document.querySelector('marble-agent-drawer').shadowRoot.querySelector('.launcher').getBoundingClientRect().top);
+  assert.ok(Math.abs(box.bottom - (launcherTop - 12)) <= 1, `bottom edge at ${box.bottom}, launcher top at ${launcherTop}`);
+});
+
 test('pinning the drawer moves the toolbar in with the page edge', async () => {
   const page = await open();
   await bar(page).waitFor();
