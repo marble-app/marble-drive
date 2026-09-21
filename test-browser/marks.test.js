@@ -123,3 +123,40 @@ test('pinning the drawer moves the toolbar in with the page edge', async () => {
     return Math.abs(r.right - (edge - 16)) <= 1;
   });
 });
+
+const strip = (page) => page.locator('.marble-marks-strip');
+const tool = (page, name) => page.locator(`.marble-marks-tool[data-tool="${name}"]`);
+
+test('the button opens a strip holding Select, out of its own corner, and closes it again', async () => {
+  const page = await open();
+  await bar(page).waitFor();
+  assert.equal(await strip(page).isHidden(), true);
+  await main(page).click();
+  await strip(page).waitFor();
+  assert.equal(await main(page).getAttribute('aria-expanded'), 'true');
+  await tool(page, 'select').waitFor();
+  assert.equal(await tool(page, 'select').getAttribute('aria-pressed'), 'false');
+  assert.equal(await tool(page, 'select').getAttribute('data-label'), 'Select');
+  // The strip hangs above the button and shares its right edge.
+  const [b, s] = await page.evaluate(() => {
+    const r = (sel) => document.querySelector(sel).getBoundingClientRect();
+    return [r('.marble-marks-main'), r('.marble-marks-strip')];
+  });
+  assert.ok(s.bottom < b.top, 'strip sits above the button');
+  assert.ok(Math.abs(s.right - b.right) <= 1, 'strip shares the button\'s right edge');
+  assert.equal(await strip(page).evaluate((el) => {
+    const [x, y] = getComputedStyle(el).transformOrigin.split(' ').map(parseFloat);
+    return Math.round(x) === el.offsetWidth && Math.round(y) === el.offsetHeight;
+  }), true, 'grows from the bottom right');
+  await main(page).click();
+  await page.waitForFunction(() => document.querySelector('.marble-marks-strip').hidden);
+  assert.equal(await main(page).getAttribute('aria-expanded'), 'false');
+});
+
+test('under reduced motion the strip appears with no animation', async () => {
+  const page = await open('garden', { reducedMotion: 'reduce' });
+  await bar(page).waitFor();
+  await main(page).click();
+  await strip(page).waitFor();
+  assert.equal(await strip(page).evaluate((el) => el.getAnimations().length), 0);
+});

@@ -85,6 +85,43 @@
     .marble-marks-bar[data-corner$="r"] .marble-marks-strip { right: 0; }
     .marble-marks-bar[data-corner$="l"] .marble-marks-strip { left: 0; }
 
+    /* The strip materialises out of the button: blur, scale and opacity
+       together, so it reads as a surface arriving rather than a fade. */
+    .marble-marks-strip {
+      opacity: 1; transform: scale(1); filter: blur(0);
+      transition: opacity 300ms ${EASE}, transform 300ms ${EASE}, filter 300ms ${EASE},
+                  display 300ms allow-discrete;
+    }
+    @starting-style { .marble-marks-strip { opacity: 0; transform: scale(.9); filter: blur(6px); } }
+    .marble-marks-strip[hidden] { opacity: 0; transform: scale(.9); filter: blur(6px); }
+    .marble-marks-bar[data-corner="br"] .marble-marks-strip { transform-origin: bottom right; }
+    .marble-marks-bar[data-corner="bl"] .marble-marks-strip { transform-origin: bottom left; }
+    .marble-marks-bar[data-corner="tr"] .marble-marks-strip { transform-origin: top right; }
+    .marble-marks-bar[data-corner="tl"] .marble-marks-strip { transform-origin: top left; }
+
+    .marble-marks-tool {
+      all: unset; box-sizing: border-box; position: relative;
+      width: 36px; height: 36px; border-radius: 10px;
+      display: grid; place-items: center; cursor: pointer;
+      color: var(--marks-ink);
+      transition: transform 100ms ease-out, background 120ms ease, color 120ms ease;
+    }
+    .marble-marks-tool:hover { background: color-mix(in srgb, var(--marks-ink) 8%, transparent); }
+    .marble-marks-tool:active { transform: scale(.97); }
+    .marble-marks-tool:focus-visible { outline: 2px solid var(--marks-mark); outline-offset: 2px; }
+    .marble-marks-tool[aria-pressed="true"] { background: var(--marks-mark); color: var(--marks-paper); }
+    .marble-marks-tool svg { width: 20px; height: 20px; }
+    /* The label sits on the side away from the page edge. */
+    .marble-marks-tool::after {
+      content: attr(data-label); position: absolute; top: 50%; transform: translateY(-50%);
+      white-space: nowrap; padding: 4px 8px; border-radius: 6px;
+      background: color-mix(in srgb, var(--marks-ink) 88%, transparent); color: var(--marks-paper);
+      opacity: 0; pointer-events: none; transition: opacity 120ms ease;
+    }
+    .marble-marks-tool:hover::after, .marble-marks-tool:focus-visible::after { opacity: 1; }
+    .marble-marks-bar[data-corner$="r"] .marble-marks-tool::after { right: calc(100% + 10px); }
+    .marble-marks-bar[data-corner$="l"] .marble-marks-tool::after { left: calc(100% + 10px); }
+
     @media (prefers-reduced-transparency: reduce) {
       .marble-marks-main, .marble-marks-strip {
         background: var(--marks-paper);
@@ -93,7 +130,8 @@
       }
     }
     @media (prefers-reduced-motion: reduce) {
-      .marble-marks-main { transition: none; }
+      .marble-marks-main, .marble-marks-strip, .marble-marks-tool, .marble-marks-tool::after { transition: none; }
+      .marble-marks-strip, .marble-marks-strip[hidden] { transform: none; filter: none; }
     }
   `;
 
@@ -144,6 +182,28 @@
 
     bar.append(main, strip);
     layer.append(bar);
+
+    const GLYPHS = {
+      select: '<svg viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><rect x="4" y="4" width="16" height="16" rx="2" stroke-dasharray="3 2.5"/></svg>',
+    };
+    const tool = (name, label, glyph) => {
+      const button = document.createElement('button');
+      button.type = 'button';
+      button.className = 'marble-marks-tool';
+      button.dataset.tool = name;
+      button.dataset.label = label;
+      button.setAttribute('aria-label', label);
+      button.setAttribute('aria-pressed', 'false');
+      button.innerHTML = glyph;
+      strip.append(button);
+      return button;
+    };
+    const selectTool = tool('select', 'Select', GLYPHS.select);
+
+    const expand = () => { strip.hidden = false; main.setAttribute('aria-expanded', 'true'); };
+    const collapse = () => { strip.hidden = true; main.setAttribute('aria-expanded', 'false'); };
+    const toggle = () => (strip.hidden ? expand() : collapse());
+    main.addEventListener('click', toggle);
 
     // ------------------------------------------------------------ the corner
     //
