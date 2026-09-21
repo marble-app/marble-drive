@@ -106,6 +106,7 @@ test('/ lands on the Drive, which is an ordinary document in the drive', async (
   assert.match(page, /<script src="\/runtime\/drive\.js"/);
   assert.match(page, /<script src="\/runtime\/collab\.js"/);
   assert.doesNotMatch(page, /agent-callout\.js/, 'no agents here, so nothing to summon');
+  assert.doesNotMatch(page, /agent-marks/, 'no agents here, so nothing to mark up for');
   // The host injects the carrier and nothing else — no affordance, no chrome.
   assert.ok(!page.includes('<script src="/lib/'));
 });
