@@ -160,3 +160,101 @@ test('under reduced motion the strip appears with no animation', async () => {
   await strip(page).waitFor();
   assert.equal(await strip(page).evaluate((el) => el.getAnimations().length), 0);
 });
+
+const drag = async (page, from, to, { shift = false } = {}) => {
+  if (shift) await page.keyboard.down('Shift');
+  await page.mouse.move(from.x, from.y);
+  await page.mouse.down();
+  await page.mouse.move(to.x, to.y, { steps: 8 });
+  await page.mouse.up();
+  if (shift) await page.keyboard.up('Shift');
+};
+const boxOf = (page, id) => page.locator(`[data-marble-id="${id}"]`).boundingBox();
+const selection = (page) => page.evaluate(() => window.marble.agent.context().selection);
+const enterSelect = async (page) => {
+  if (await strip(page).isHidden()) await main(page).click();
+  await tool(page, 'select').click();
+  await page.locator('.marble-marks-layer[data-mode="select"]').waitFor();
+};
+
+test('Select outlines elements as the marquee crosses them, and a rect over a list hands the list to the callout', async () => {
+  const page = await open();
+  await bar(page).waitFor();
+  await enterSelect(page);
+  assert.equal(await tool(page, 'select').getAttribute('aria-pressed'), 'true');
+  const q = await boxOf(page, 'q');
+  await page.mouse.move(q.x - 6, q.y - 6);
+  await page.mouse.down();
+  await page.mouse.move(q.x + q.width + 6, q.y + q.height / 2, { steps: 6 });
+  await page.locator('.marble-marks-marquee:not([hidden])').waitFor();
+  // Half way down the list only the first item is covered.
+  await page.waitForFunction(() => document.querySelectorAll('.marble-marks-hit:not([hidden])').length === 1);
+  await page.mouse.move(q.x + q.width + 6, q.y + q.height + 6, { steps: 6 });
+  await page.waitForFunction(() => document.querySelectorAll('.marble-marks-hit:not([hidden])').length === 1);
+  await page.mouse.up();
+  await page.waitForFunction(() => JSON.stringify(window.marble.agent.context().selection) === '["q"]');
+  // The mode ends with the release, and the callout's handle takes over.
+  await page.waitForFunction(() => document.querySelector('.marble-marks-layer').dataset.mode === '');
+  await page.locator('.marble-callout-handle:not([hidden])').waitFor();
+  assert.equal(await page.locator('.marble-marks-marquee:not([hidden])').count(), 0);
+});
+
+test('a marquee that grazes an element selects nothing, and a fresh text selection replaces a marquee', async () => {
+  const page = await open();
+  await bar(page).waitFor();
+  await enterSelect(page);
+  const p = await boxOf(page, 'p');
+  await drag(page, { x: p.x - 6, y: p.y + p.height - 3 }, { x: p.x + p.width + 6, y: p.y + p.height + 3 });
+  await page.waitForTimeout(100);
+  assert.deepEqual(await selection(page), []);
+
+  await enterSelect(page);
+  await drag(page, { x: p.x - 6, y: p.y - 6 }, { x: p.x + p.width + 6, y: p.y + p.height + 6 });
+  await page.waitForFunction(() => JSON.stringify(window.marble.agent.context().selection) === '["p"]');
+  await page.evaluate(() => {
+    const el = document.querySelector('[data-marble-id="h"]');
+    const range = document.createRange();
+    range.selectNodeContents(el);
+    getSelection().removeAllRanges();
+    getSelection().addRange(range);
+  });
+  await page.waitForFunction(() => JSON.stringify(window.marble.agent.context().selection) === '["h"]');
+});
+
+test('Shift adds a second marquee; Escape leaves the mode and then clears the selection', async () => {
+  const page = await open();
+  await bar(page).waitFor();
+  await enterSelect(page);
+  const q1 = await boxOf(page, 'q1');
+  await drag(page, { x: q1.x - 6, y: q1.y - 4 }, { x: q1.x + q1.width + 6, y: q1.y + q1.height + 4 });
+  await page.waitForFunction(() => JSON.stringify(window.marble.agent.context().selection) === '["q1"]');
+  await enterSelect(page);
+  const h = await boxOf(page, 'h');
+  await drag(page, { x: h.x - 6, y: h.y - 6 }, { x: h.x + h.width + 6, y: h.y + h.height + 6 }, { shift: true });
+  await page.waitForFunction(() => JSON.stringify([...window.marble.agent.context().selection].sort()) === '["h","q1"]');
+
+  await enterSelect(page);
+  await page.keyboard.press('Escape');
+  await page.waitForFunction(() => document.querySelector('.marble-marks-layer').dataset.mode === '');
+  assert.deepEqual((await selection(page)).sort(), ['h', 'q1'], 'leaving the mode keeps the selection');
+  await page.keyboard.press('Escape');
+  await page.waitForFunction(() => window.marble.agent.context().selection.length === 0);
+});
+
+test('double-clicking Select pins the mode for several rectangles', async () => {
+  const page = await open();
+  await bar(page).waitFor();
+  await main(page).click();
+  await tool(page, 'select').dblclick();
+  await page.locator('.marble-marks-layer[data-mode="select"][data-pinned]').waitFor();
+  const h = await boxOf(page, 'h');
+  await drag(page, { x: h.x - 6, y: h.y - 6 }, { x: h.x + h.width + 6, y: h.y + h.height + 6 });
+  await page.waitForFunction(() => JSON.stringify(window.marble.agent.context().selection) === '["h"]');
+  assert.equal(await page.evaluate(() => document.querySelector('.marble-marks-layer').dataset.mode), 'select', 'pinned: still in the mode');
+  const p = await boxOf(page, 'p');
+  await drag(page, { x: p.x - 6, y: p.y - 6 }, { x: p.x + p.width + 6, y: p.y + p.height + 6 });
+  // Without Shift the second rectangle replaces the first.
+  await page.waitForFunction(() => JSON.stringify(window.marble.agent.context().selection) === '["p"]');
+  await page.keyboard.press('Escape');
+  await page.waitForFunction(() => document.querySelector('.marble-marks-layer').dataset.mode === '');
+});

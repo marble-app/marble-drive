@@ -122,6 +122,21 @@
     .marble-marks-bar[data-corner$="r"] .marble-marks-tool::after { right: calc(100% + 10px); }
     .marble-marks-bar[data-corner$="l"] .marble-marks-tool::after { left: calc(100% + 10px); }
 
+    /* Inside a mode the overlay takes the pointer and nothing else changes:
+       wheel still scrolls the page under it. */
+    .marble-marks-overlay { position: fixed; inset: 0; pointer-events: auto; cursor: crosshair; touch-action: none; }
+    .marble-marks-overlay[hidden] { display: none; }
+    .marble-marks-marquee {
+      position: fixed; pointer-events: none; border-radius: 2px;
+      border: 1px solid var(--marks-mark);
+      background: color-mix(in srgb, var(--marks-mark) 8%, transparent);
+    }
+    .marble-marks-marquee[hidden] { display: none; }
+    /* The same outline the callout's pick mode draws, one per element the
+       rectangle means, repainted every frame of the drag. */
+    .marble-marks-hit { position: fixed; pointer-events: none; border: 1.5px solid var(--marks-mark); border-radius: 6px; }
+    .marble-marks-hit[hidden] { display: none; }
+
     @media (prefers-reduced-transparency: reduce) {
       .marble-marks-main, .marble-marks-strip {
         background: var(--marks-paper);
@@ -204,6 +219,144 @@
     const collapse = () => { strip.hidden = true; main.setAttribute('aria-expanded', 'false'); };
     const toggle = () => (strip.hidden ? expand() : collapse());
     main.addEventListener('click', toggle);
+
+    // ------------------------------------------------------------ modes
+    //
+    // A tool is a mode the page is put in. The overlay under the toolbar
+    // takes the pointer while a mode is on; Escape, or the tool again, gives
+    // it back. Later phases add Comment and Sketch through the same switch.
+
+    const overlay = document.createElement('div');
+    overlay.className = 'marble-marks-overlay';
+    overlay.setAttribute(TRANSIENT, '');
+    overlay.hidden = true;
+    const marquee = document.createElement('div');
+    marquee.className = 'marble-marks-marquee';
+    marquee.setAttribute(TRANSIENT, '');
+    marquee.hidden = true;
+    const hits = [];
+    // Under the bar, so the toolbar stays clickable inside a mode.
+    bar.before(overlay, marquee);
+
+    let mode = null;
+    let pinned = false;
+    const tools = { select: selectTool };
+    const setMode = (next) => {
+      mode = next;
+      layer.dataset.mode = next ?? '';
+      overlay.hidden = !next;
+      for (const [name, button] of Object.entries(tools)) button.setAttribute('aria-pressed', String(name === next));
+      if (!next) { pinned = false; delete layer.dataset.pinned; }
+    };
+    const pin = (name) => { setMode(name); pinned = true; layer.dataset.pinned = ''; };
+    setMode(null);
+    selectTool.addEventListener('click', () => setMode(mode === 'select' ? null : 'select'));
+    selectTool.addEventListener('dblclick', () => pin('select'));
+
+    // ------------------------------------------------------------ boxes
+
+    const collectBoxes = () => {
+      const els = [...document.querySelectorAll('[data-marble-id]')].filter((el) =>
+        el !== document.body && el !== document.documentElement && !el.closest(`[${TRANSIENT}]`) && el.getRootNode() === document);
+      const known = new Set(els);
+      return els.map((el) => {
+        const r = el.getBoundingClientRect();
+        const parent = el.parentElement?.closest('[data-marble-id]');
+        return {
+          id: el.getAttribute('data-marble-id'),
+          parent: parent && known.has(parent) ? parent.getAttribute('data-marble-id') : null,
+          left: r.left, top: r.top, width: r.width, height: r.height,
+        };
+      });
+    };
+    const paintHits = (ids, boxes) => {
+      const byId = new Map(boxes.map((box) => [box.id, box]));
+      ids.forEach((id, i) => {
+        let hit = hits[i];
+        if (!hit) {
+          hit = document.createElement('div');
+          hit.className = 'marble-marks-hit';
+          hit.setAttribute(TRANSIENT, '');
+          hits.push(hit);
+          marquee.before(hit);
+        }
+        const box = byId.get(id);
+        Object.assign(hit.style, { left: `${box.left - 3}px`, top: `${box.top - 3}px`, width: `${box.width + 6}px`, height: `${box.height + 6}px` });
+        hit.hidden = false;
+      });
+      for (let i = ids.length; i < hits.length; i += 1) hits[i].hidden = true;
+    };
+
+    // ------------------------------------------------------------ Select
+
+    let drag = null;
+    let fromMarquee = false;
+    const rectOf = (d) => ({
+      left: Math.min(d.x0, d.x1), top: Math.min(d.y0, d.y1),
+      width: Math.abs(d.x1 - d.x0), height: Math.abs(d.y1 - d.y0),
+    });
+    const frame = () => {
+      if (!drag) return;
+      drag.raf = 0;
+      const r = rectOf(drag);
+      Object.assign(marquee.style, { left: `${r.left}px`, top: `${r.top}px`, width: `${r.width}px`, height: `${r.height}px` });
+      drag.ids = G().idsInRect(r, drag.boxes);
+      paintHits(drag.ids, drag.boxes);
+    };
+    const scheduleFrame = () => { if (drag && !drag.raf) drag.raf = requestAnimationFrame(frame); };
+
+    overlay.addEventListener('pointerdown', (event) => {
+      if (mode !== 'select' || event.button !== 0) return;
+      // The page never sees this press: no text selection starts under it.
+      event.preventDefault();
+      overlay.setPointerCapture(event.pointerId);
+      drag = { id: event.pointerId, x0: event.clientX, y0: event.clientY, x1: event.clientX, y1: event.clientY, boxes: collectBoxes(), ids: [], raf: 0 };
+      marquee.hidden = false;
+      frame();
+    });
+    overlay.addEventListener('pointermove', (event) => {
+      if (!drag || event.pointerId !== drag.id) return;
+      drag.x1 = event.clientX;
+      drag.y1 = event.clientY;
+      scheduleFrame();
+    });
+    const finish = (event) => {
+      if (!drag || event.pointerId !== drag.id) return;
+      cancelAnimationFrame(drag.raf);
+      drag.raf = 0;
+      frame();
+      const ids = drag.ids;
+      drag = null;
+      marquee.hidden = true;
+      paintHits([], []);
+      const prior = event.type === 'pointerup' && event.shiftKey ? agent.context().selection : [];
+      const union = [...prior, ...ids.filter((id) => !prior.includes(id))];
+      agent.select(union.length ? union : null);
+      fromMarquee = union.length > 0;
+      if (!pinned) setMode(null);
+    };
+    overlay.addEventListener('pointerup', finish);
+    overlay.addEventListener('pointercancel', finish);
+    // Wheel passes through the overlay and the page moves under the drag.
+    addEventListener('scroll', () => { if (drag) { drag.boxes = collectBoxes(); scheduleFrame(); } }, true);
+
+    // Escape inside a mode leaves it; Escape with a marquee selection standing
+    // clears it, as Escape clears Option-picks.
+    addEventListener('keydown', (event) => {
+      if (event.key !== 'Escape') return;
+      if (mode) { event.preventDefault(); event.stopPropagation(); setMode(null); return; }
+      if (fromMarquee) { fromMarquee = false; agent.select(null); }
+    }, true);
+    // A fresh text selection is the person choosing something else.
+    document.addEventListener('selectionchange', () => {
+      const sel = getSelection();
+      if (!fromMarquee || !sel || sel.isCollapsed || !sel.rangeCount) return;
+      const node = sel.anchorNode;
+      const anchor = node?.nodeType === Node.ELEMENT_NODE ? node : node?.parentElement;
+      if (!anchor || anchor.closest(`[${TRANSIENT}]`)) return;
+      fromMarquee = false;
+      agent.select(null);
+    });
 
     // ------------------------------------------------------------ the corner
     //
