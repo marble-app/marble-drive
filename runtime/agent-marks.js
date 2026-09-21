@@ -507,6 +507,11 @@
           pos = target;
           paint();
           flight = 0;
+          // A resize or a dock change that landed mid-flight was dropped by
+          // `settle`'s own guard above; catch it up now that nothing is
+          // holding the bar any more, instead of leaving it stale until the
+          // next one.
+          schedule();
           return;
         }
         flight = requestAnimationFrame(step);
@@ -517,7 +522,13 @@
     settle = () => { if (hold?.moved || flight) return; pos = restingPoint(corner); paint(); };
 
     main.addEventListener('pointerdown', (event) => {
-      if (event.button !== 0) return;
+      // A second touch while the first is still down would otherwise
+      // overwrite `hold` out from under it: the first pointer's later
+      // moves and its release would stop matching `hold.id` and be
+      // silently dropped, and the drag would reassign to the second
+      // pointer with the threshold and grab offset reset. The Select
+      // overlay had the same bug and was fixed the same way.
+      if (event.button !== 0 || hold) return;
       main.setPointerCapture(event.pointerId);
       stopFlight();
       hold = { id: event.pointerId, sx: event.clientX, sy: event.clientY, gx: event.clientX - pos.x, gy: event.clientY - pos.y, moved: false, history: [] };
@@ -535,11 +546,18 @@
       hold.history.push({ x: event.clientX, y: event.clientY, t: performance.now() });
       if (hold.history.length > 8) hold.history.shift();
     });
-    const release = (event) => {
-      if (!hold || event.pointerId !== hold.id) return;
+    // The one place a hold ends — the way `endDrag` already serves both
+    // `setMode` and `finish` for Select — so `release` and a capture lost
+    // out from under it share one path rather than two copies of it.
+    const endHold = () => {
       const done = hold;
       hold = null;
       delete bar.dataset.dragging;
+      return done;
+    };
+    const release = (event) => {
+      if (!hold || event.pointerId !== hold.id) return;
+      const done = endHold();
       if (!done.moved) return;
       justDragged = true;
       const velocity = velocityOf(done.history);
@@ -559,6 +577,20 @@
     };
     main.addEventListener('pointerup', release);
     main.addEventListener('pointercancel', release);
+    // The drawer opening mid-drag hides `main`'s ancestor, and a hidden
+    // element implicitly loses pointer capture per spec — with a
+    // `lostpointercapture`, never a `pointerup` or a `pointercancel`.
+    // Without this, `hold` would latch forever: `settle`'s guard above would
+    // stay tripped, and the bar would freeze wherever the drag left it once
+    // the drawer closed and un-hid it. The hand's velocity means nothing
+    // once the browser took the pointer away on its own, so this resettles
+    // the bar at the corner it already claims rather than throwing it to a
+    // new one from a history that no longer reflects anything.
+    main.addEventListener('lostpointercapture', (event) => {
+      if (!hold || event.pointerId !== hold.id) return;
+      const done = endHold();
+      if (done.moved) settle();
+    });
     main.addEventListener('click', () => {
       // The click after a throw is the hand letting go, not a press.
       if (justDragged) { justDragged = false; return; }

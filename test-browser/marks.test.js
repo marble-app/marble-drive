@@ -349,3 +349,33 @@ test('with the strip open, dragging closes it first, and the strip reopens on th
   assert.ok(s.top > button.bottom, 'in a top corner the strip hangs below');
   assert.ok(Math.abs(s.left - button.left) <= 1, 'and shares the left edge');
 });
+
+test('under reduced motion a throw jumps and fades instead of springing', async () => {
+  const page = await open('garden', { reducedMotion: 'reduce' });
+  await bar(page).waitFor();
+  const b = await barBox(page);
+  const cx = b.left + b.width / 2;
+  const cy = b.top + b.height / 2;
+  await page.mouse.move(cx, cy);
+  await page.mouse.down();
+  await page.mouse.move(cx - 300, cy, { steps: 12 });
+  await page.waitForFunction(() => document.querySelector('.marble-marks-bar').hasAttribute('data-dragging'));
+  await page.mouse.move(cx - 700, cy, { steps: 4 });
+  await page.mouse.up();
+  await page.waitForFunction(() => localStorage.getItem('marble-marks:corner:garden') === 'bl');
+  // A spring takes frames to converge; the jump is done in the same tick as
+  // the release, so — with no wait at all — the bar should already sit at
+  // its new corner rather than partway toward it.
+  const left = (await barBox(page)).left;
+  assert.ok(Math.abs(left - 16) <= 1, `jumped straight to the corner (left at ${left})`);
+  // The only Animation running is the opacity fade: a spring never creates
+  // a Web Animation at all (it drives `transform` by hand, frame by frame),
+  // so anything here that touches a property other than opacity would mean
+  // the spring path ran instead.
+  const kinds = await page.evaluate(() => document.querySelector('.marble-marks-bar')
+    .getAnimations()
+    .flatMap((a) => a.effect.getKeyframes())
+    .flatMap((frame) => Object.keys(frame).filter((key) => !['offset', 'computedOffset', 'easing', 'composite'].includes(key))));
+  assert.ok(kinds.length > 0, 'the opacity fade is running');
+  assert.ok(kinds.every((prop) => prop === 'opacity'), `only opacity animates, got ${kinds.join(', ')}`);
+});
