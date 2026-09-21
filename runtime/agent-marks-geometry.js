@@ -56,5 +56,30 @@
     return chosen.sort((a, b) => order.get(a) - order.get(b));
   };
 
-  globalThis.marbleMarksGeometry = { coverage, idsInRect };
+  /** Where a flick comes to rest, from Designing Fluid Interfaces: an
+   *  exponential decay, not the textbook v²/2a. 0.998 is scroll feel. */
+  const project = (velocity, decelerationRate = 0.998) =>
+    ((velocity / 1000) * decelerationRate) / (1 - decelerationRate);
+
+  /** The corner of a `width × height` field a point is nearest. Points past
+   *  the field still resolve, so a projected landing can be off-screen. */
+  const nearestCorner = ({ x, y }, { width, height }) =>
+    `${y < height / 2 ? 't' : 'b'}${x < width / 2 ? 'l' : 'r'}`;
+
+  /** One step of a damped spring, in Apple's two parameters: `damping` is the
+   *  damping ratio (1 = no overshoot), `response` the period in seconds.
+   *  Semi-implicit Euler; stable for dt up to ~0.03s at response 0.4. */
+  const spring = (state, target, dt, { damping = 1, response = 0.4 } = {}) => {
+    const omega = (2 * Math.PI) / response;
+    const stiffness = omega * omega;
+    const drag = 2 * damping * omega;
+    const acceleration = -stiffness * (state.x - target) - drag * state.v;
+    const v = state.v + acceleration * dt;
+    const x = state.x + v * dt;
+    return { x, v };
+  };
+
+  const settled = (state, target) => Math.abs(state.x - target) < 0.5 && Math.abs(state.v) < 10;
+
+  globalThis.marbleMarksGeometry = { coverage, idsInRect, project, nearestCorner, spring, settled };
 })();

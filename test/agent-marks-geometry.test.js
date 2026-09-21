@@ -58,3 +58,55 @@ test('ids come back in document order', () => {
 test('threshold is an option', () => {
   assert.deepEqual(G().idsInRect(rect(30, 100, 700, 113), PAGE, { threshold: 0.5 }), ['p']);
 });
+
+test('project is the exponential-decay form, not v²/2a', () => {
+  // 1000 px/s at 0.998 lands 499px out.
+  assert.equal(Math.round(G().project(1000)), 499);
+  assert.equal(G().project(0), 0);
+  assert.ok(G().project(-400) < 0, 'sign follows velocity');
+  assert.ok(Math.abs(G().project(1000, 0.99)) < Math.abs(G().project(1000)), 'a snappier rate lands shorter');
+});
+
+test('nearestCorner reads the quadrant', () => {
+  const field = { width: 1000, height: 600 };
+  assert.equal(G().nearestCorner({ x: 10, y: 10 }, field), 'tl');
+  assert.equal(G().nearestCorner({ x: 990, y: 10 }, field), 'tr');
+  assert.equal(G().nearestCorner({ x: 10, y: 590 }, field), 'bl');
+  assert.equal(G().nearestCorner({ x: 990, y: 590 }, field), 'br');
+  assert.equal(G().nearestCorner({ x: 2000, y: -50 }, field), 'tr', 'a projection past the field still picks a corner');
+});
+
+const fly = (damping, { seconds = 2, dt = 1 / 120 } = {}) => {
+  let state = { x: 0, v: 0 };
+  let peak = 0;
+  for (let t = 0; t < seconds; t += dt) {
+    state = G().spring(state, 100, dt, { damping, response: 0.4 });
+    peak = Math.max(peak, state.x);
+  }
+  return { state, peak };
+};
+
+test('a critically damped spring reaches the target without overshoot', () => {
+  const { state, peak } = fly(1);
+  assert.ok(Math.abs(state.x - 100) < 0.5, `ends at ${state.x}`);
+  assert.ok(peak <= 100.5, `peaked at ${peak}`);
+  assert.ok(G().settled(state, 100));
+});
+
+test('an underdamped spring overshoots and still settles', () => {
+  const { state, peak } = fly(0.8);
+  assert.ok(peak > 101, `peaked at ${peak}`);
+  assert.ok(Math.abs(state.x - 100) < 0.5, `ends at ${state.x}`);
+});
+
+test('a spring started with velocity carries it', () => {
+  const still = G().spring({ x: 0, v: 0 }, 100, 1 / 120, { damping: 1 });
+  const thrown = G().spring({ x: 0, v: 2000 }, 100, 1 / 120, { damping: 1 });
+  assert.ok(thrown.x > still.x);
+});
+
+test('settled needs both a near position and a slow velocity', () => {
+  assert.equal(G().settled({ x: 100.2, v: 0 }, 100), true);
+  assert.equal(G().settled({ x: 100.2, v: 50 }, 100), false);
+  assert.equal(G().settled({ x: 103, v: 0 }, 100), false);
+});
