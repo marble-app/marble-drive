@@ -18,6 +18,7 @@
     "backup": "node bin/marble-drive.js backup",
     "remote": "node --env-file-if-exists=.env --env-file-if-exists=.env.local bin/marble-drive.js remote",
     "agents": "node --env-file-if-exists=.env --env-file-if-exists=.env.local bin/marble-drive.js agents",
+    "daemon": "macos/launchd/daemon.sh",
     "test": "node --test --test-reporter=spec \"test/**/*.test.js\"",
     "test:browser": "node --test --test-concurrency=1 --test-reporter=spec \"test-browser/*.test.js\""
   },

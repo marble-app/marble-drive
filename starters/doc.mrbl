@@ -31,6 +31,9 @@ __ICON__
     --accent: #9bb6cf;
     --accent-soft: #f1f5f8;
     --accent-ink: #738698;
+    /* Selection is its own colour rather than the accent's palest tint: it has
+       to read across a whole page of text, not decorate one button. */
+    --select: #d2e2f0;
     --radius: 3px;
 
     /* Every face the two pickers can choose, written once. A document names no
@@ -55,6 +58,7 @@ __ICON__
       --accent: #7fa8c9;
       --accent-soft: #1d2932;
       --accent-ink: #9dc0dc;
+      --select: #2c4459;
     }
   }
 
@@ -88,7 +92,7 @@ __ICON__
     font: 13.5px/1.5 var(--ui, var(--f-avenir));
     -webkit-font-smoothing: antialiased;
   }
-  ::selection { background: var(--accent-soft); }
+  ::selection { background: var(--select); }
   .sprite { display: none; }
   .ico { width: 18px; height: 18px; fill: currentColor; display: block; }
   .caret { width: 13px; height: 13px; fill: currentColor; opacity: .55; flex: none; }
@@ -199,11 +203,17 @@ __ICON__
   .ruler .pin.l { left: calc(var(--ml, 1in) - 5.5px); }
   .ruler .pin.r { right: calc(var(--mr, 1in) - 5.5px); }
 
+  /* The sheet is one field, not a stack of them — see the script. What that
+     asks of the CSS is that the flow fill the page rather than stopping under
+     the last paragraph, so the white below the text is still somewhere the
+     caret can be put, and that the page say so with the cursor. */
   .page {
-    min-height: 10in; margin-bottom: 3rem;
+    min-height: 10in; margin-bottom: 3rem; position: relative;
+    display: flex; flex-direction: column; cursor: text;
     padding: var(--mt, 1in) var(--mr, 1in) var(--mb, 1in) var(--ml, 1in);
     background: var(--card); border: 1px solid var(--line); border-radius: var(--radius);
   }
+  .flow { flex: 1; outline: none; }
 
   /* --------------------------------------------------------- the text itself
 
@@ -259,6 +269,35 @@ __ICON__
   .flow > [data-list="number"]::before { content: counter(item) "."; }
 
   .flow > hr { border: 0; border-top: 1px solid var(--line); margin: 14pt 0; padding: 0; }
+
+  /* An empty paragraph is still a line you can stand on. A block with no
+     children gives the browser nothing to lay a line box out with, so it is
+     given one character that is not in the file and has no width. */
+  .flow > :empty::before { content: "\feff"; }
+
+  /* ------------------------------------------------- picking a paragraph up
+
+     The handle is the page's and never the file's: one of it, moved to
+     whichever block the pointer is beside. A bar the height of the paragraph
+     rather than a cluster of dots, because what you are taking hold of is the
+     whole paragraph and the bar is exactly as tall as it. The seam is where it
+     would land. */
+  .grip {
+    position: absolute; z-index: 2; appearance: none; padding: 0; border: 0;
+    width: 3px; margin-left: -15px; border-radius: 2px;
+    background: var(--line); opacity: 0; cursor: grab;
+    transition: opacity .12s ease, background .12s ease;
+  }
+  .grip[data-on] { opacity: .9; }
+  .grip:hover, .grip:focus-visible { background: var(--accent); opacity: 1; outline: none; }
+  .grip.marble-dragging { background: var(--accent-ink); opacity: 1; cursor: grabbing; }
+  @media (hover: none) { .grip[data-on] { width: 4px; opacity: .55; } }
+
+  .seam {
+    position: absolute; z-index: 2; display: none;
+    height: 2px; border-radius: 2px; background: var(--accent-ink);
+  }
+  .seam[data-on] { display: block; }
 
   /* The inline vocabulary, and the whole of it. Anything the editor cannot
      write here, it strips on the way into the file. */
@@ -483,8 +522,9 @@ __ICON__
 <p class="subtitle" data-marble-id="__ID__" data-marble-rich>Notes that are also the file they are kept in</p>
 <p data-marble-id="__ID__" data-marble-rich>There is no save button, because what you are reading is not a copy of these notes — it <i>is</i> the notes. Type into it and the bytes on disk change with you.</p>
 <h2 data-marble-id="__ID__" data-marble-rich>Writing</h2>
-<p data-marble-id="__ID__" data-marble-rich>Enter starts a new paragraph, splitting this one where the caret is. Backspace at the beginning joins it to the one above. The arrow keys walk from paragraph to paragraph the way they walk from line to line, and Ctrl+Shift+Up or Down carries a paragraph with them.</p>
-<p data-marble-id="__ID__" data-marble-rich>Select a few words and the toolbar acts on <b>exactly those words</b> — weight, slant, colour, face and size are written around the characters, so the file holds <i>this</i> and not a note about it. Select nothing and the same buttons act on the whole paragraph.</p>
+<p data-marble-id="__ID__" data-marble-rich>The page is one field rather than a column of boxes, which is what makes it behave like a page. Drag across a heading and the paragraphs under it and the selection follows you; <b>Ctrl+A</b> takes the whole document rather than whichever paragraph you happen to be standing in. Enter starts a new one, splitting this one where the caret is, and Backspace at the beginning joins it to the one above.</p>
+<p data-marble-id="__ID__" data-marble-rich>Select a few words and the toolbar acts on <b>exactly those words</b> — weight, slant, colour, face and size are written around the characters, so the file holds <i>this</i> and not a note about it. Select nothing and the same buttons act on the whole paragraph; select several and they act on all of them.</p>
+<p data-marble-id="__ID__" data-marble-rich>Rest the pointer beside a paragraph and a bar appears in the margin. Drag it and the paragraph goes where you put it — several of them, if a selection is what you took hold of. Ctrl+Shift+Up or Down does the same without leaving the keyboard.</p>
 <h3 data-marble-id="__ID__" data-marble-rich>Two kinds of property</h3>
 <p data-marble-id="__ID__" data-marble-rich data-list="bullet">The paragraph's own — its style, its alignment, whether it is a list item, how far it is indented — is one attribute on the block, so each change is one edit.</p>
 <p data-marble-id="__ID__" data-marble-rich data-list="bullet">The characters' own — <b>bold</b>, <i>italic</i>, <u>underline</u>, <s>struck through</s> — is inline markup, the way you would have written it by hand.</p>
@@ -534,20 +574,38 @@ __ICON__
 <script>
   // The editor's own behaviour.
   //
-  // Everything below is one of two things. A command changes the notes, and
-  // every one of them does the same two things in the same order: it moves the
-  // page, and it writes the same change down as an op, so the file and the
-  // screen never get to disagree. A derivation reads the notes and draws
-  // something transient from them — the outline, the word count, the labels and
-  // the lit buttons on the toolbar — and files nothing at all, because none of
-  // it is a fact the document keeps.
+  // The flow is ONE editing host, not a column of them. That is the whole
+  // difference between a page of text and a stack of boxes: Select All takes
+  // the document rather than the paragraph, a drag highlights across
+  // paragraphs, Backspace at a seam joins two of them, and the caret walks from
+  // one to the next because it never left the field it was in.
+  //
+  // What that costs is that the browser, not this file, decides what the markup
+  // looks like after a keystroke — it will split a paragraph, merge two, and
+  // paste a stylesheet if you let it. So nothing here trusts the DOM it gets
+  // back. Every change, whether the browser made it or a command below did,
+  // goes through the same three steps:
+  //
+  //   1. the page moves
+  //   2. normalise() puts the flow back into this document's vocabulary —
+  //      blocks it knows, one fresh id each, only the inline marks it can file
+  //   3. file() reads the flow against `shadow`, the last thing written down,
+  //      and the difference between the two *is* the ops
+  //
+  // So there is exactly one way a change reaches the file, and no command can
+  // move the screen without writing itself down: they are not two halves that
+  // have to agree, they are one step.
   //
   // The one affordance this document invents is data-marble-rich. The shared
   // `editable` is a setText affordance: it holds plain text and its whole
   // contents are replaced on every keystroke, which is right for a name in the
   // chrome and fatal to a <b> in the middle of a sentence. A rich block is
-  // edited with setInner instead, so the inline markup survives, and it says so
+  // filed with setInner instead, so the inline markup survives, and it says so
   // in its own attribute rather than pretending to be the other thing.
+  //
+  // A derivation — the outline, the word count, the lit buttons on the toolbar
+  // — reads the flow and files nothing at all, because none of it is a fact the
+  // document keeps.
   (() => {
     const begin = (marble) => {
       const $ = (sel) => document.querySelector(sel);
@@ -560,9 +618,16 @@ __ICON__
       const widget = $('#fonts');
       if (!flow) return;
 
+      const ID = 'data-marble-id';
+      const RICH = 'data-marble-rich';
+
       // All four belong to the page. An open menu is not a fact about the
-      // notes, and neither is a greyed-out undo button.
+      // notes, neither is a greyed-out undo button, and neither is the field
+      // being typeable — the file is a document, not a session.
       marble.pageOnly('contenteditable', 'spellcheck', 'data-open', 'disabled');
+
+      flow.setAttribute('contenteditable', 'true');
+      flow.setAttribute('spellcheck', 'true');
 
       // ------------------------------------------------------------ the styles
 
@@ -595,13 +660,23 @@ __ICON__
       const INKS = ['', '#111111', '#5a5a5a', '#8a8a8a', '#738698',
                     '#9bb6cf', '#b4544f', '#8a6d3b', '#5f7a52', '#7a5f7e'];
 
-      const isText = (el) => Boolean(el) && el.parentElement === flow && el.hasAttribute('data-marble-rich');
-      const firstBlock = () => [...flow.children].find(isText) ?? null;
+      // --------------------------------------------------------- the blocks
 
-      // The block the toolbar is talking about. It survives a click on the
-      // toolbar itself, which is why none of those buttons take focus.
-      let here = null;
-      const target = () => (isText(here) && here.isConnected ? here : (here = firstBlock()));
+      // The block vocabulary. A paragraph's style is its tag, so this list is
+      // also the list of tags the file is allowed to hold at the top of the
+      // flow; anything else the browser leaves there is turned into one.
+      const BLOCKS = new Set(['P', 'H1', 'H2', 'H3', 'H4', 'HR']);
+
+      const blocks = () => [...flow.children];
+      const at = (el) => blocks().indexOf(el);
+      const isText = (el) => Boolean(el) && el.parentElement === flow && el.hasAttribute(RICH);
+
+      function blockOf(node) {
+        let el = node?.nodeType === Node.TEXT_NODE ? node.parentElement : node;
+        if (el === flow) return null;
+        while (el && el.parentElement !== flow) el = el.parentElement;
+        return isText(el) ? el : null;
+      }
 
       // ------------------------------------------------- the inline vocabulary
       //
@@ -644,6 +719,14 @@ __ICON__
             continue;
           }
 
+          // A mark inside the same mark says nothing twice, and wrapping a run
+          // that was already partly marked is the ordinary way to make one.
+          if (tag !== 'BR' && tag !== 'SPAN' && node.parentElement?.closest(tag)) {
+            node.replaceWith(...node.childNodes);
+            changed = true;
+            continue;
+          }
+
           for (const name of [...node.getAttributeNames()]) {
             if (name === 'style' && tag === 'SPAN') continue;
             node.removeAttribute(name);
@@ -668,61 +751,414 @@ __ICON__
 
       // ---------------------------------------------------------- the caret
       //
-      // Offsets are counted in characters across the block's text nodes, so a
-      // caret survives the inline markup moving around underneath it.
+      // Offsets are counted in characters from the start of a block, and a
+      // block is counted by its place in the flow, so a mark survives both the
+      // inline markup moving around underneath it and the block being replaced
+      // by one with a different tag.
 
       const lineOf = (el) => {
         const cs = getComputedStyle(el);
         return parseFloat(cs.lineHeight) || parseFloat(cs.fontSize) * 1.3 || 16;
       };
 
-      function caretAt(el) {
-        const sel = getSelection();
-        if (!sel || !sel.rangeCount) return null;
-        const range = sel.getRangeAt(0);
-        if (!el.contains(range.startContainer)) return null;
-        const before = range.cloneRange();
+      function spot(node, offset) {
+        if (node === flow) {
+          const el = flow.children[Math.min(offset, Math.max(0, flow.children.length - 1))];
+          return el ? { at: at(el), offset: 0 } : null;
+        }
+        const el = blockOf(node);
+        if (!el) return null;
+        const before = document.createRange();
         before.selectNodeContents(el);
-        before.setEnd(range.startContainer, range.startOffset);
-        return before.toString().length;
+        try {
+          before.setEnd(node, offset);
+        } catch {
+          return null;
+        }
+        return { at: at(el), offset: before.toString().length };
       }
 
-      function place(el, at) {
-        el.focus();
+      function markRange() {
+        const sel = getSelection();
+        if (!sel || !sel.rangeCount || !flow.contains(sel.anchorNode)) return null;
+        const range = sel.getRangeAt(0);
+        const a = spot(range.startContainer, range.startOffset);
+        const b = sel.isCollapsed ? a : spot(range.endContainer, range.endOffset);
+        return a && b ? { a, b } : null;
+      }
+
+      function point(el, offset) {
         const walk = document.createTreeWalker(el, NodeFilter.SHOW_TEXT);
         let seen = 0;
-        let node = null;
-        let into = 0;
         let last = null;
+        let node = null;
         while ((node = walk.nextNode())) {
-          last = node;
-          if (seen + node.length >= at) { into = at - seen; break; }
+          if (seen + node.length >= offset) return { node, offset: Math.max(0, offset - seen) };
           seen += node.length;
-          node = null;
+          last = node;
         }
+        return last ? { node: last, offset: last.length } : { node: el, offset: 0 };
+      }
+
+      const blockAt = (index) => flow.children[Math.max(0, Math.min(index, flow.children.length - 1))] ?? null;
+
+      function putRange(mark) {
+        if (!mark) return;
+        const head = blockAt(mark.a.at);
+        const tail = blockAt(mark.b.at);
+        if (!head || !tail) return;
+        const a = point(head, mark.a.offset);
+        const b = point(tail, mark.b.offset);
         const range = document.createRange();
-        if (node) range.setStart(node, Math.max(0, Math.min(into, node.length)));
-        else if (last) range.setStart(last, last.length);
-        else range.selectNodeContents(el);
-        range.collapse(true);
+        range.setStart(a.node, a.offset);
+        try {
+          range.setEnd(b.node, b.offset);
+        } catch {
+          range.collapse(true);
+        }
         const sel = getSelection();
         sel.removeAllRanges();
         sel.addRange(range);
-        here = el;
+        flow.focus({ preventScroll: true });
       }
 
-      const loose = () => {
-        const sel = getSelection();
-        return !sel || !sel.isCollapsed;
+      const place = (el, offset) => {
+        const index = at(el);
+        if (index < 0) return;
+        putRange({ a: { at: index, offset }, b: { at: index, offset } });
       };
 
-      const inBlock = (el) => {
-        const sel = getSelection();
-        return Boolean(sel && sel.rangeCount && el && el.contains(sel.anchorNode));
+      const selectAll = () => {
+        const all = blocks();
+        if (!all.length) return;
+        const last = all[all.length - 1];
+        putRange({ a: { at: 0, offset: 0 }, b: { at: all.length - 1, offset: marble.text(last).length } });
       };
 
-      // ------------------------------------------------------ writing it down
+      // The part of a range that lies inside one block, as a range of its own.
+      function bite(el, range) {
+        const part = range.cloneRange();
+        const whole = document.createRange();
+        whole.selectNodeContents(el);
+        if (part.compareBoundaryPoints(Range.START_TO_START, whole) < 0) {
+          part.setStart(whole.startContainer, whole.startOffset);
+        }
+        if (part.compareBoundaryPoints(Range.END_TO_END, whole) > 0) {
+          part.setEnd(whole.endContainer, whole.endOffset);
+        }
+        return part;
+      }
 
+      function rangeIn(el, from, to) {
+        const a = point(el, from);
+        const b = point(el, to);
+        const range = document.createRange();
+        range.setStart(a.node, a.offset);
+        try {
+          range.setEnd(b.node, b.offset);
+        } catch {
+          range.setEnd(el, el.childNodes.length);
+        }
+        return range;
+      }
+
+      // The blocks a command is about: everything the selection touches, or the
+      // one the caret sits in, or — with the focus somewhere else entirely —
+      // the last one it was in.
+      let here = null;
+
+      function chosen() {
+        const all = blocks().filter(isText);
+        const fallback = () => (isText(here) && here.isConnected ? [here] : all.slice(0, 1));
+        const sel = getSelection();
+        if (!sel || !sel.rangeCount || !flow.contains(sel.anchorNode)) return fallback();
+        const range = sel.getRangeAt(0);
+        if (sel.isCollapsed) {
+          const one = blockOf(range.startContainer);
+          return one ? [one] : fallback();
+        }
+        let hit = all.filter((el) => range.intersectsNode(el));
+        // A selection that stops at the very top of a block has not reached
+        // into it, whatever intersectsNode says about the boundary.
+        const empty = (el) => marble.text(el).length > 0 && bite(el, range).toString().length === 0;
+        if (hit.length > 1 && empty(hit[0])) hit = hit.slice(1);
+        if (hit.length > 1 && empty(hit[hit.length - 1])) hit = hit.slice(0, -1);
+        return hit.length ? hit : fallback();
+      }
+
+      // What the caret is sitting in, which is what the toolbar reports.
+      function atCaret() {
+        const sel = getSelection();
+        const node = sel?.anchorNode;
+        const el = node?.nodeType === Node.TEXT_NODE ? node.parentElement : node;
+        return el && flow.contains(el) && el !== flow ? el : chosen()[0];
+      }
+
+      function spread() {
+        const el = chosen()[0];
+        if (!el) return false;
+        const sel = getSelection();
+        if (sel && sel.rangeCount && !sel.isCollapsed && flow.contains(sel.anchorNode)) return true;
+        const all = document.createRange();
+        all.selectNodeContents(el);
+        sel.removeAllRanges();
+        sel.addRange(all);
+        flow.focus({ preventScroll: true });
+        return true;
+      }
+
+      // --------------------------------------------------------- making blocks
+
+      // A new block is shaped from an existing one, so the paragraph's own
+      // properties carry forward the way they do in any editor.
+      function shape(from, key, inner) {
+        const style = styleNamed(key);
+        const el = document.createElement(style.tag);
+        if (from) for (const a of marble.clone(from).attributes) el.setAttribute(a.name, a.value);
+        el.removeAttribute('class');
+        if (!el.getAttribute('style')?.trim()) el.removeAttribute('style');
+        if (style.cls) el.setAttribute('class', style.cls);
+        el.setAttribute(RICH, '');
+        el.setAttribute(ID, marble.newId());
+        el.innerHTML = '';
+        if (typeof inner === 'string') el.innerHTML = inner;
+        else if (inner) el.append(inner);
+        tidy(el);
+        return el;
+      }
+
+      // ------------------------------------------------------------- normalise
+      //
+      // The browser's idea of what it just did, turned back into this
+      // document's. Everything it can leave behind is answered here rather than
+      // guarded against upstream, because there is no upstream: a paste, a
+      // drag, a native Enter and an autocorrect all arrive as "the DOM is
+      // different now".
+
+      function normalise() {
+        let changed = false;
+        let loose = [];
+
+        const gather = () => {
+          if (!loose.length) return;
+          const p = document.createElement('p');
+          p.setAttribute(RICH, '');
+          p.setAttribute(ID, marble.newId());
+          loose[0].replaceWith(p);
+          p.append(...loose);
+          loose = [];
+          changed = true;
+        };
+
+        for (const node of [...flow.childNodes]) {
+          if (node.nodeType === Node.ELEMENT_NODE && BLOCKS.has(node.tagName)) {
+            gather();
+            continue;
+          }
+          // A block the vocabulary does not have — a <div> from a paste, a
+          // <blockquote> from a drag — keeps its words and loses its tag.
+          if (node.nodeType === Node.ELEMENT_NODE && getComputedStyle(node).display !== 'inline') {
+            gather();
+            const p = document.createElement('p');
+            p.setAttribute(RICH, '');
+            p.setAttribute(ID, marble.newId());
+            p.append(...node.childNodes);
+            node.replaceWith(p);
+            changed = true;
+            continue;
+          }
+          if (node.nodeType === Node.TEXT_NODE && !node.nodeValue.trim() && !loose.length) {
+            node.remove();
+            changed = true;
+            continue;
+          }
+          loose.push(node);
+        }
+        gather();
+
+        const seen = new Set();
+        for (const el of blocks()) {
+          if (el.tagName !== 'HR' && !el.hasAttribute(RICH)) {
+            el.setAttribute(RICH, '');
+            changed = true;
+          }
+          let id = marble.id(el);
+          const was = filed.get(id);
+          // A split paragraph is the same element twice, tag and id and all,
+          // so the second one to appear is the new one and takes a new name.
+          if (!id || seen.has(id) || (was && was.tag !== el.tagName)) {
+            id = marble.newId();
+            el.setAttribute(ID, id);
+            changed = true;
+          }
+          seen.add(id);
+          if (el.tagName !== 'HR' && tidy(el)) changed = true;
+        }
+
+        if (!blocks().length) {
+          const p = document.createElement('p');
+          p.setAttribute(RICH, '');
+          p.setAttribute(ID, marble.newId());
+          flow.append(p);
+          changed = true;
+        }
+        return changed;
+      }
+
+      const tidyUp = () => {
+        const mark = markRange();
+        if (normalise()) putRange(mark);
+      };
+
+      // --------------------------------------------------------- writing it down
+      //
+      // `shadow` is what the file says the flow is, as of the last op filed.
+      // Reading the flow against it is the only place an op about the text is
+      // ever made, so a command's whole job is to leave the page right.
+
+      let shadow = [];
+      let filed = new Map();
+
+      function readFlow() {
+        const next = blocks().map((el) => ({
+          id: marble.id(el),
+          tag: el.tagName,
+          outer: marble.source.outer(el),
+        }));
+        filed = new Map(next.map((b) => [b.id, b]));
+        return next;
+      }
+
+      const parse = (html) => {
+        const slot = document.createElement('template');
+        slot.innerHTML = html;
+        return slot.content.firstElementChild;
+      };
+
+      function changesTo(was, now) {
+        const ops = [];
+        const a = parse(was.outer);
+        const b = parse(now.outer);
+        if (!a || !b) return ops;
+        const names = new Set([...a.getAttributeNames(), ...b.getAttributeNames()]);
+        for (const name of names) {
+          if (name === ID) continue;
+          const value = b.getAttribute(name);
+          if (a.getAttribute(name) === value) continue;
+          ops.push({ type: 'setAttr', id: now.id, name, value });
+        }
+        if (a.innerHTML !== b.innerHTML) ops.push({ type: 'setInner', id: now.id, html: b.innerHTML });
+        return ops;
+      }
+
+      // The longest run of blocks that are already in the right order relative
+      // to one another. Everything outside it is what actually moved, which is
+      // the difference between "you dragged one paragraph up" and "every
+      // paragraph below it also changed place".
+      function settled(places) {
+        const ends = [];
+        const back = new Array(places.length).fill(-1);
+        for (let i = 0; i < places.length; i++) {
+          if (places[i] < 0) continue;
+          let lo = 0;
+          let hi = ends.length;
+          while (lo < hi) {
+            const mid = (lo + hi) >> 1;
+            if (places[ends[mid]] < places[i]) lo = mid + 1;
+            else hi = mid;
+          }
+          back[i] = lo > 0 ? ends[lo - 1] : -1;
+          ends[lo] = i;
+        }
+        const run = [];
+        let at = ends.length ? ends[ends.length - 1] : -1;
+        while (at >= 0) {
+          run.push(at);
+          at = back[at];
+        }
+        return new Set(run);
+      }
+
+      // The ops that carry one list of blocks to the other. Walked from the
+      // end, so every insert and every move can name the block that is already
+      // in its right place behind it.
+      function diff(prev, next) {
+        const parentId = marble.id(flow);
+        const was = new Map(prev.map((b) => [b.id, b]));
+        const now = new Set(next.map((b) => b.id));
+        const order = prev.filter((b) => now.has(b.id)).map((b) => b.id);
+        const places = next.map((b) => order.indexOf(b.id));
+        const stays = settled(places);
+        const ops = [];
+
+        for (const b of prev) if (!now.has(b.id)) ops.push({ type: 'remove', id: b.id });
+
+        for (let i = next.length - 1; i >= 0; i--) {
+          const b = next[i];
+          const after = i + 1 < next.length ? next[i + 1].id : null;
+          if (places[i] < 0) {
+            ops.push({ type: 'insert', html: b.outer, parentId, beforeId: after });
+            continue;
+          }
+          const older = was.get(b.id);
+          if (older.outer !== b.outer) ops.push(...changesTo(older, b));
+          if (!stays.has(i)) ops.push({ type: 'move', id: b.id, parentId, beforeId: after });
+        }
+        return ops;
+      }
+
+      // Typing files an op immediately, so the file is never behind the screen.
+      // Undo is coarser than that on purpose: one step per burst of typing
+      // rather than one per character. The burst opens on the first keystroke
+      // and closes when typing stops, when focus leaves, before any other
+      // command, and before Ctrl+Z — so there is never one in flight that undo
+      // does not know about.
+      let base = null;
+      let idle = null;
+
+      function settle() {
+        clearTimeout(idle);
+        const from = base;
+        base = null;
+        if (!from) return;
+        const redo = diff(from, shadow);
+        const undo = diff(shadow, from);
+        if (redo.length && undo.length) marble.record({ redo, undo });
+        marble.flush();
+      }
+
+      function file(burst) {
+        const from = shadow;
+        const next = readFlow();
+        const ops = diff(from, next);
+        if (!ops.length) return;
+        shadow = next;
+        for (const op of ops) marble.op(op, { immediate: !burst });
+        if (burst) {
+          base = base ?? from;
+          clearTimeout(idle);
+          idle = setTimeout(settle, 700);
+        } else {
+          const undo = diff(next, from);
+          if (undo.length) marble.record({ redo: ops, undo });
+        }
+        derive();
+      }
+
+      // A change made on purpose rather than one the browser made because a key
+      // was pressed: the burst is closed first, so it is its own step of undo.
+      function change(run) {
+        settle();
+        const mark = run();
+        tidyUp();
+        file(false);
+        if (mark) putRange(mark);
+        sync();
+      }
+
+      // An attribute on something that is not in the flow — the page, the font
+      // card, the body. Those are single facts, not text, and they are filed
+      // one at a time.
       function attr(el, name, value) {
         const id = el && marble.id(el);
         if (!id) return;
@@ -753,352 +1189,223 @@ __ICON__
         return kept.length ? kept.join('; ') : null;
       }
 
-      // ------------------------------------------------------- typing, filed
-      //
-      // A keystroke files a setInner immediately, so the file is never behind
-      // the screen. Undo is coarser than that on purpose: one step per burst of
-      // typing rather than one per character. The carrier only knows how to
-      // coalesce setText, so the grouping is kept here — opened on the first
-      // keystroke, closed when typing stops, when focus leaves, before any
-      // other command, and before Ctrl+Z, so there is never a burst in flight
-      // that undo does not know about.
-
-      let pending = null;
-      let held = null;
-      let idle = null;
-
-      function commit() {
-        clearTimeout(idle);
-        const open = pending;
-        pending = null;
-        if (!open) return;
-        const { el, prior } = open;
-        const id = el.isConnected && marble.id(el);
-        if (!id) return;
-        const html = marble.source.inner(el);
-        if (html === prior) return;
-        marble.record({
-          redo: [{ type: 'setInner', id, html }],
-          undo: [{ type: 'setInner', id, html: prior }],
-        });
-      }
-
-      function typed(el) {
-        const id = marble.id(el);
-        if (!id) return;
-        if (!pending || pending.el !== el) {
-          commit();
-          pending = { el, prior: held ?? marble.source.inner(el) };
-        }
-        const html = marble.source.inner(el);
-        held = html;
-        marble.op({ type: 'setInner', id, html });
-        clearTimeout(idle);
-        idle = setTimeout(commit, 700);
-      }
-
-      // A change this document makes on purpose, rather than one the browser
-      // made because a key was pressed: filed as its own step, against the
-      // markup as it was before.
-      function fileInner(el, prior) {
-        commit();
-        const id = marble.id(el);
-        const html = marble.source.inner(el);
-        held = html;
-        if (!id || html === prior) return;
-        marble.record({
-          redo: [{ type: 'setInner', id, html }],
-          undo: [{ type: 'setInner', id, html: prior }],
-        });
-        marble.op({ type: 'setInner', id, html }, { immediate: true });
-      }
-
-      // ---------------------------------------------------- the rich affordance
-
-      const wired = new WeakSet();
-
-      function wireRich(root) {
-        const all = [
-          ...(root.matches?.('[data-marble-rich]') ? [root] : []),
-          ...root.querySelectorAll('[data-marble-rich]'),
-        ];
-        for (const el of all) {
-          if (wired.has(el)) continue;
-          wired.add(el);
-          el.setAttribute('contenteditable', 'true');
-          el.spellcheck = false;
-
-          el.addEventListener('focus', () => {
-            held = marble.source.inner(el);
-          });
-          el.addEventListener('input', () => {
-            if (tidy(el)) place(el, caretAt(el) ?? 0);
-            typed(el);
-            derive();
-            sync();
-          });
-          el.addEventListener('blur', () => {
-            commit();
-            held = null;
-            marble.flush();
-          });
-          // A contenteditable will take whole documents if you let it. Plain
-          // text is what a note wants anyway, and it is the only paste that
-          // cannot put something in the file that nothing here can edit.
-          el.addEventListener('paste', (event) => {
-            event.preventDefault();
-            const text = event.clipboardData?.getData('text/plain') ?? '';
-            document.execCommand('insertText', false, text);
-          });
-        }
-      }
-
-      // A new block is shaped from an existing one, so the paragraph's own
-      // properties carry forward the way they do in any editor.
-      function shape(from, key, html) {
-        const style = styleNamed(key);
-        const el = document.createElement(style.tag);
-        if (from) for (const a of marble.clone(from).attributes) el.setAttribute(a.name, a.value);
-        el.removeAttribute('class');
-        if (!styleOn(el)) el.removeAttribute('style');
-        if (style.cls) el.setAttribute('class', style.cls);
-        el.setAttribute('data-marble-rich', '');
-        el.setAttribute('data-marble-id', marble.newId());
-        el.innerHTML = '';
-        if (typeof html === 'string') el.innerHTML = html;
-        else if (html) el.append(html);
-        tidy(el);
-        return el;
-      }
-
-      const before = (el) => (el?.nextElementSibling ? marble.id(el.nextElementSibling) : null);
-
       // ------------------------------------------------------- block commands
 
-      function restyle(el, key) {
-        if (!isText(el) || styleOf(el) === key) return el;
-        commit();
-        const parentId = marble.id(flow);
-        const oldId = marble.id(el);
-        const oldHtml = marble.source.outer(el);
-        const at = caretAt(el) ?? 0;
-
-        const made = shape(el, key, marble.source.inner(el));
-        const id = marble.id(made);
-        const insert = { type: 'insert', html: marble.source.outer(made), parentId, beforeId: oldId };
-        const remove = { type: 'remove', id: oldId };
-        marble.apply(insert);
-        marble.apply(remove);
-        marble.record({
-          redo: [insert, remove],
-          undo: [{ type: 'insert', html: oldHtml, parentId, beforeId: id }, { type: 'remove', id }],
+      const restyle = (key) =>
+        change(() => {
+          const mark = markRange();
+          for (const el of chosen()) {
+            if (styleOf(el) === key) continue;
+            el.replaceWith(shape(el, key, marble.source.inner(el)));
+          }
+          return mark;
         });
-        marble.op(insert);
-        marble.op(remove, { immediate: true });
-
-        const node = marble.byId(id);
-        if (node) place(node, at);
-        return node;
-      }
-
-      // Enter. The paragraph is cut at the caret and everything after it —
-      // markup included — becomes the next one.
-      function split(el) {
-        commit();
-        const sel = getSelection();
-        if (!sel || !sel.rangeCount) return;
-        const prior = marble.source.inner(el);
-
-        // Nothing in it and it is a list item: Enter leaves the list rather
-        // than making another empty one.
-        if (!marble.text(el) && el.hasAttribute('data-list')) return attr(el, 'data-list', null);
-
-        const tail = sel.getRangeAt(0).cloneRange();
-        tail.setEnd(el, el.childNodes.length);
-        const carried = tail.extractContents();
-
-        const parentId = marble.id(flow);
-        const id = marble.id(el);
-        const made = shape(el, 'body', carried);
-        const newId = marble.id(made);
-        tidy(el);
-        const cut = { type: 'setInner', id, html: marble.source.inner(el) };
-        const insert = { type: 'insert', html: marble.source.outer(made), parentId, beforeId: before(el) };
-        marble.apply(insert);
-        marble.record({
-          redo: [cut, insert],
-          undo: [{ type: 'remove', id: newId }, { type: 'setInner', id, html: prior }],
-        });
-        marble.op(cut);
-        marble.op(insert, { immediate: true });
-
-        const node = marble.byId(newId);
-        if (node) place(node, 0);
-      }
-
-      // Backspace at the start, or Delete at the end: two paragraphs become one.
-      function join(head, tail) {
-        commit();
-        const parentId = marble.id(flow);
-        const kept = marble.source.inner(head);
-        const at = marble.text(head).length;
-        const tailHtml = marble.source.outer(tail);
-        const beforeId = before(tail);
-
-        head.append(...tail.childNodes);
-        tidy(head);
-        const merge = { type: 'setInner', id: marble.id(head), html: marble.source.inner(head) };
-        const remove = { type: 'remove', id: marble.id(tail) };
-        marble.apply(remove);
-        marble.record({
-          redo: [merge, remove],
-          undo: [
-            { type: 'insert', html: tailHtml, parentId, beforeId },
-            { type: 'setInner', id: marble.id(head), html: kept },
-          ],
-        });
-        marble.op(merge);
-        marble.op(remove, { immediate: true });
-        place(head, at);
-      }
-
-      function drop(el) {
-        commit();
-        const op = { type: 'remove', id: marble.id(el) };
-        const back = marble.invert(op);
-        el.remove();
-        if (back) marble.record({ redo: [op], undo: [back] });
-        marble.op(op, { immediate: true });
-      }
-
-      function follow(el, made) {
-        commit();
-        const op = {
-          type: 'insert',
-          html: marble.source.outer(made),
-          parentId: marble.id(flow),
-          beforeId: before(el),
-        };
-        marble.apply(op);
-        marble.record({ redo: [op], undo: [{ type: 'remove', id: marble.id(made) }] });
-        marble.op(op, { immediate: true });
-        return marble.byId(marble.id(made));
-      }
-
-      function shift(el, dir) {
-        commit();
-        const kin = dir < 0 ? el.previousElementSibling : el.nextElementSibling;
-        if (!kin) return;
-        const parentId = marble.id(flow);
-        const id = marble.id(el);
-        const was = before(el);
-        const beforeId = dir < 0 ? marble.id(kin) : before(kin);
-        const op = { type: 'move', id, parentId, beforeId };
-        marble.apply(op);
-        marble.record({ redo: [op], undo: [{ type: 'move', id, parentId, beforeId: was }] });
-        marble.op(op, { immediate: true });
-        el.focus();
-      }
 
       const alignOf = (el) => el?.getAttribute('data-align') ?? 'left';
       const listOf = (el) => el?.getAttribute('data-list') ?? null;
 
-      const listAs = (kind) => {
-        const el = target();
-        attr(el, 'data-list', listOf(el) === kind ? null : kind);
-      };
+      const setOn = (name, value) =>
+        change(() => {
+          const mark = markRange();
+          for (const el of chosen()) {
+            if (value === null) el.removeAttribute(name);
+            else el.setAttribute(name, value);
+          }
+          return mark;
+        });
 
-      function indent(dir) {
-        const el = target();
-        const now = Number(el?.getAttribute('data-indent') ?? 0);
-        const next = Math.max(0, Math.min(5, now + dir));
-        attr(el, 'data-indent', next ? String(next) : null);
+      const listAs = (kind) => setOn('data-list', listOf(chosen()[0]) === kind ? null : kind);
+      const alignAs = (value) => setOn('data-align', value === 'left' ? null : value);
+
+      const indent = (dir) =>
+        change(() => {
+          const mark = markRange();
+          for (const el of chosen()) {
+            const now = Number(el.getAttribute('data-indent') ?? 0);
+            const next = Math.max(0, Math.min(5, now + dir));
+            if (next) el.setAttribute('data-indent', String(next));
+            else el.removeAttribute('data-indent');
+          }
+          return mark;
+        });
+
+      // Enter. The paragraph is cut at the caret and everything after it —
+      // markup included — becomes the next one.
+      function split() {
+        const sel = getSelection();
+        if (!sel || !sel.rangeCount || !flow.contains(sel.anchorNode)) return;
+        if (!sel.isCollapsed) document.execCommand('delete');
+        const range = getSelection().getRangeAt(0);
+        const el = blockOf(range.startContainer);
+        if (!el) return;
+
+        // Nothing in it and it is a list item: Enter leaves the list rather
+        // than making another empty one.
+        if (!marble.text(el) && el.hasAttribute('data-list')) return setOn('data-list', null);
+
+        settle();
+        const tail = range.cloneRange();
+        tail.setEnd(el, el.childNodes.length);
+        const made = shape(el, 'body', tail.extractContents());
+        el.after(made);
+        tidyUp();
+        file(false);
+        place(made, 0);
+        sync();
+      }
+
+      const follow = (made) =>
+        change(() => {
+          const all = chosen();
+          const last = all[all.length - 1];
+          if (last) last.after(made);
+          else flow.append(made);
+          return null;
+        });
+
+      const drop = (els) =>
+        change(() => {
+          for (const el of els) el.remove();
+          return null;
+        });
+
+      function shift(dir) {
+        const all = chosen();
+        if (!all.length) return;
+        const edge = dir < 0 ? all[0].previousElementSibling : all[all.length - 1].nextElementSibling;
+        if (!edge) return;
+        change(() => {
+          const mark = markRange();
+          if (dir < 0) for (const el of all) edge.before(el);
+          else for (const el of [...all].reverse()) edge.after(el);
+          return mark && {
+            a: { at: mark.a.at + dir, offset: mark.a.offset },
+            b: { at: mark.b.at + dir, offset: mark.b.offset },
+          };
+        });
       }
 
       // ------------------------------------------------ character commands
       //
-      // These act on what is selected, which is the whole point of them. With
-      // nothing selected there is no pending-format machine to consult, so the
+      // These act on what is selected, which is the whole point of them, and
+      // the selection is free to run across paragraphs now. With nothing
+      // selected there is no pending-format machine to consult, so the
       // paragraph is selected instead — the reading of "bold" that needs no
       // hidden state to explain it.
 
-      function onSelection(run) {
-        const el = target();
-        if (!el) return;
+      // execCommand is the only thing in any browser that knows how to *take* a
+      // tag off a partial selection, splitting and merging the runs on both
+      // edges. It is legacy and it has no replacement, so it is kept for that —
+      // and for nothing else, least of all for deciding which way a toggle goes.
+      const MARK = { bold: 'bold', italic: 'italic', underline: 'underline', strike: 'strikeThrough' };
+      const TAG = { bold: 'b', italic: 'i', underline: 'u', strike: 's' };
+
+      // Whether what is selected is already marked, asked of the markup the
+      // file holds rather than of the weight on the screen. A heading is heavy
+      // because it is a heading; queryCommandState cannot tell that from
+      // somebody having pressed Bold, so it answered "already bold" for every
+      // heading — and pressing Bold on one took a mark off text that never had
+      // it. Nothing here reads the computed style, because the file is the
+      // only place the answer lives.
+      function marked(name, els) {
+        const tag = TAG[name];
         const sel = getSelection();
-        if (!inBlock(el) || sel.isCollapsed) {
-          el.focus();
-          const all = document.createRange();
-          all.selectNodeContents(el);
-          sel.removeAllRanges();
-          sel.addRange(all);
+        if (!sel || !sel.rangeCount || !flow.contains(sel.anchorNode)) return false;
+        const range = sel.isCollapsed ? null : sel.getRangeAt(0);
+        let any = false;
+        for (const el of els ?? chosen()) {
+          const walk = document.createTreeWalker(el, NodeFilter.SHOW_TEXT);
+          let node = null;
+          while ((node = walk.nextNode())) {
+            if (!node.nodeValue.trim()) continue;
+            if (range && !range.intersectsNode(node)) continue;
+            any = true;
+            if (!node.parentElement?.closest(tag)) return false;
+          }
         }
-        const prior = marble.source.inner(el);
-        run(el, getSelection());
-        tidy(el);
-        fileInner(el, prior);
-        sync();
+        return any;
       }
 
-      // execCommand is the only thing in any browser that knows how to toggle a
-      // tag across a partial selection, splitting and merging the runs on both
-      // edges. It is legacy and it has no replacement; what it writes is
-      // filtered by tidy() before it reaches the file, which is what makes it
-      // safe to lean on.
-      const MARK = { bold: 'bold', italic: 'italic', underline: 'underline', strike: 'strikeThrough' };
+      // The runs of text the selection covers, block by block, counted in
+      // characters — measured before anything is cut, because cutting the first
+      // block invalidates a range held across the rest.
+      function runs() {
+        const sel = getSelection();
+        if (!sel || !sel.rangeCount || !flow.contains(sel.anchorNode)) return [];
+        const range = sel.getRangeAt(0);
+        return chosen()
+          .map((el) => {
+            const part = bite(el, range);
+            const lead = document.createRange();
+            lead.selectNodeContents(el);
+            lead.setEnd(part.startContainer, part.startOffset);
+            const from = lead.toString().length;
+            return { el, from, to: from + part.toString().length };
+          })
+          .filter((run) => run.to > run.from);
+      }
 
       const markUp = (name) =>
-        onSelection(() => {
-          document.execCommand('styleWithCSS', false, false);
-          document.execCommand(MARK[name], false, null);
+        change(() => {
+          if (!spread()) return null;
+          const mark = markRange();
+          if (marked(name)) {
+            document.execCommand('styleWithCSS', false, false);
+            document.execCommand(MARK[name], false, null);
+          } else {
+            // Putting a mark on is the half a document can do for itself, and
+            // the half that has to be right: it writes the tag this file uses,
+            // around exactly the characters that were selected.
+            for (const { el, from, to } of runs()) {
+              const range = rangeIn(el, from, to);
+              const held = document.createElement(TAG[name]);
+              held.append(range.extractContents());
+              range.insertNode(held);
+            }
+          }
+          return mark;
         });
 
       // Colour, face and size have no toggling command worth the name, so the
-      // selection is wrapped by hand and tidy() merges what it can.
+      // selection is wrapped by hand, one block at a time, and tidy() merges
+      // what it can.
       const dressUp = (prop, value) =>
-        onSelection((el, sel) => {
-          const range = sel.getRangeAt(0);
-
-          // Dressing the very same words twice should not stack wrappers. If
-          // the selection is exactly what one span already holds, the
-          // declaration joins that span — colour and face on one run of text
-          // are one span with two declarations, not one span inside another.
-          //
-          // Found by comparing the text rather than by climbing from the
-          // range's boundaries: a browser is free to express "all of this
-          // span" either as the node itself or as the text inside it, and both
-          // spellings have to land here.
-          const host = [...el.querySelectorAll('span')].find(
-            (span) => range.intersectsNode(span) && range.toString() === span.textContent,
-          );
-          if (host) {
-            if (value) host.style.setProperty(prop, value);
-            else host.style.removeProperty(prop);
-            return;
-          }
-
-          // Otherwise take the property off whatever already carries it inside
-          // the selection, so the new value is the only one there.
-          for (const span of [...el.querySelectorAll('span')]) {
-            if (range.intersectsNode(span)) span.style.removeProperty(prop);
-          }
-          if (!value) return;
-          const span = document.createElement('span');
-          span.style.setProperty(prop, value);
-          span.append(range.extractContents());
-          range.insertNode(span);
-          sel.removeAllRanges();
-          const after = document.createRange();
-          after.selectNodeContents(span);
-          sel.addRange(after);
+        change(() => {
+          if (!spread()) return null;
+          const mark = markRange();
+          for (const { el, from, to } of runs()) dress(el, rangeIn(el, from, to), prop, value);
+          return mark;
         });
 
-      // What the caret is sitting in, which is what the toolbar reports.
-      function atCaret() {
-        const sel = getSelection();
-        const node = sel?.anchorNode;
-        const el = node?.nodeType === 3 ? node.parentElement : node;
-        return el && flow.contains(el) ? el : target();
+      function dress(el, range, prop, value) {
+        // Dressing the very same words twice should not stack wrappers. If the
+        // range is exactly what one span already holds, the declaration joins
+        // that span — colour and face on one run of text are one span with two
+        // declarations, not one span inside another.
+        //
+        // Found by comparing the text rather than by climbing from the range's
+        // boundaries: a browser is free to express "all of this span" either as
+        // the node itself or as the text inside it, and both spellings have to
+        // land here.
+        const host = [...el.querySelectorAll('span')].find(
+          (span) => range.intersectsNode(span) && range.toString() === span.textContent,
+        );
+        if (host) {
+          if (value) host.style.setProperty(prop, value);
+          else host.style.removeProperty(prop);
+          return;
+        }
+
+        // Otherwise take the property off whatever already carries it inside
+        // the range, so the new value is the only one there.
+        for (const span of [...el.querySelectorAll('span')]) {
+          if (range.intersectsNode(span)) span.style.removeProperty(prop);
+        }
+        if (!value) return;
+        const span = document.createElement('span');
+        span.style.setProperty(prop, value);
+        span.append(range.extractContents());
+        range.insertNode(span);
       }
 
       const faceOf = (el) => {
@@ -1112,44 +1419,63 @@ __ICON__
       const ptOf = (el) => Math.round(parseFloat(getComputedStyle(el ?? flow).fontSize) * 0.75 * 2) / 2;
 
       const resize = (dir) => {
-        const at = atCaret();
-        const now = ptOf(at);
-        const next = Math.max(6, Math.min(96, now + dir));
-        dressUp('font-size', next + 'pt');
+        const now = ptOf(atCaret());
+        dressUp('font-size', Math.max(6, Math.min(96, now + dir)) + 'pt');
       };
 
-      // Clear formatting is every inline mark in the paragraph and every
-      // property the paragraph itself carries, gone in one gesture and so in
+      // Clear formatting is every inline mark in the selection and every
+      // property the paragraphs themselves carry, gone in one gesture and so in
       // one step of undo.
-      function clear() {
-        const el = target();
-        const id = el && marble.id(el);
-        if (!id) return;
-        commit();
-        const prior = marble.source.inner(el);
-        const redo = [];
-        const undo = [];
+      const clear = () =>
+        change(() => {
+          const mark = markRange();
+          for (const el of chosen()) {
+            const text = marble.text(el);
+            for (const name of ['data-align', 'data-indent', 'data-list', 'style']) el.removeAttribute(name);
+            el.textContent = text;
+            if (styleOf(el) !== 'body') el.replaceWith(shape(el, 'body', document.createTextNode(text)));
+          }
+          return mark;
+        });
 
-        el.innerHTML = '';
-        el.textContent = new DOMParser().parseFromString(prior, 'text/html').body.textContent;
-        const html = marble.source.inner(el);
-        if (html !== prior) {
-          redo.push({ type: 'setInner', id, html });
-          undo.unshift({ type: 'setInner', id, html: prior });
+      // ----------------------------------------------------------- the clipboard
+      //
+      // A contenteditable will take whole documents if you let it. Plain text
+      // is what a note wants anyway, and it is the only paste that cannot put
+      // something in the file that nothing here can edit — but plain text has
+      // paragraphs in it, and they arrive as paragraphs.
+      function pasteText(text) {
+        const lines = text.replace(/\r\n?/g, '\n').split('\n');
+        const sel = getSelection();
+        if (!sel || !sel.rangeCount || !flow.contains(sel.anchorNode)) return;
+        if (!sel.isCollapsed) document.execCommand('delete');
+        if (lines.length === 1) {
+          document.execCommand('insertText', false, lines[0]);
+          return;
         }
-        for (const name of ['data-align', 'data-indent', 'data-list', 'style']) {
-          if (!el.hasAttribute(name)) continue;
-          undo.unshift({ type: 'setAttr', id, name, value: name === 'style' ? styleOn(el) : el.getAttribute(name) });
-          redo.push({ type: 'setAttr', id, name, value: null });
-          el.removeAttribute(name);
+
+        settle();
+        const range = getSelection().getRangeAt(0);
+        const el = blockOf(range.startContainer);
+        if (!el) return;
+        const tail = range.cloneRange();
+        tail.setEnd(el, el.childNodes.length);
+        const rest = shape(el, 'body', tail.extractContents());
+        range.insertNode(document.createTextNode(lines[0]));
+
+        let after = el;
+        for (const line of lines.slice(1, -1)) {
+          const made = shape(el, 'body', document.createTextNode(line));
+          after.after(made);
+          after = made;
         }
-        if (redo.length) {
-          marble.record({ redo, undo });
-          for (const op of redo) marble.op(op);
-          marble.flush();
-        }
-        held = marble.source.inner(el);
-        restyle(el, 'body');
+        const ending = lines[lines.length - 1];
+        rest.prepend(document.createTextNode(ending));
+        after.after(rest);
+
+        tidyUp();
+        file(false);
+        place(rest, ending.length);
         sync();
       }
 
@@ -1189,7 +1515,7 @@ __ICON__
           const up = () => {
             removeEventListener('pointermove', move);
             handle.classList.remove('marble-dragging');
-            if (live) settled();
+            settled(live);
           };
           addEventListener('pointermove', move);
           addEventListener('pointerup', up, { once: true });
@@ -1200,7 +1526,7 @@ __ICON__
       for (const pin of document.querySelectorAll('.ruler .pin')) {
         const edge = pin.getAttribute('data-edge');
         let was = null;
-        let at = null;
+        let to = null;
         draggable(
           pin,
           (event) => {
@@ -1211,19 +1537,19 @@ __ICON__
             // An eighth of an inch is where the ruler's own ticks are. Shift is
             // the way off the ticks, for the margin that has to sit between two.
             const step = event.shiftKey ? Math.round(raw * 100) / 100 : Math.round(raw * 8) / 8;
-            at = Math.max(0.25, Math.min(3.5, step));
-            pagebox.style.setProperty('--' + edge, at + 'in');
+            to = Math.max(0.25, Math.min(3.5, step));
+            pagebox.style.setProperty('--' + edge, to + 'in');
           },
-          () => {
-            if (at === null) return;
-            const value = withVar(was, '--' + edge, at + 'in');
+          (live) => {
+            if (!live || to === null) return;
+            const value = withVar(was, '--' + edge, to + 'in');
             const id = marble.id(pagebox);
             pagebox.setAttribute('style', value);
             const op = { type: 'setAttr', id, name: 'style', value };
             marble.record({ redo: [op], undo: [{ type: 'setAttr', id, name: 'style', value: was }] });
             marble.op(op, { immediate: true });
             was = null;
-            at = null;
+            to = null;
           },
         );
       }
@@ -1231,33 +1557,33 @@ __ICON__
       // The widget is furniture you can put where you like, and where you put
       // it is an inline style on it — one attribute, filed once, on release.
       {
-        const grip = widget.querySelector('header');
+        const handle = widget.querySelector('header');
         let was = null;
         let from = null;
-        let at = null;
+        let to = null;
         draggable(
-          grip,
+          handle,
           (event) => {
             const box = widget.getBoundingClientRect();
             if (was === null) {
               was = widget.getAttribute('style');
               from = { x: event.clientX - box.left, y: event.clientY - box.top };
             }
-            at = {
+            to = {
               x: Math.max(4, Math.min(innerWidth - box.width - 4, event.clientX - from.x)),
               y: Math.max(4, Math.min(innerHeight - box.height - 4, event.clientY - from.y)),
             };
             // Pinning left/top means letting go of right/bottom, or the card
             // would be told to be in two places at once.
-            widget.style.setProperty('--fx', at.x + 'px');
-            widget.style.setProperty('--fy', at.y + 'px');
+            widget.style.setProperty('--fx', to.x + 'px');
+            widget.style.setProperty('--fy', to.y + 'px');
             widget.style.setProperty('--fr', 'auto');
             widget.style.setProperty('--fb', 'auto');
           },
-          () => {
-            if (!at) return;
-            let value = withVar(was, '--fx', at.x + 'px');
-            value = withVar(value, '--fy', at.y + 'px');
+          (live) => {
+            if (!live || !to) return;
+            let value = withVar(was, '--fx', to.x + 'px');
+            value = withVar(value, '--fy', to.y + 'px');
             value = withVar(value, '--fr', 'auto');
             value = withVar(value, '--fb', 'auto');
             const id = marble.id(widget);
@@ -1266,10 +1592,117 @@ __ICON__
             marble.record({ redo: [op], undo: [{ type: 'setAttr', id, name: 'style', value: was }] });
             marble.op(op, { immediate: true });
             was = null;
-            at = null;
+            to = null;
           },
         );
       }
+
+      // ---------------------------------------------------- picking blocks up
+      //
+      // A paragraph is a thing you can take hold of. The handle and the seam it
+      // draws belong to the page — there is one of each, moved to whichever
+      // block the pointer is beside — so the file gains nothing from this but
+      // the move itself, filed once, on release.
+
+      const grip = document.createElement('button');
+      grip.type = 'button';
+      grip.className = 'grip';
+      grip.setAttribute('data-marble-transient', '');
+      grip.setAttribute('aria-label', 'Move this paragraph');
+      grip.title = 'Drag to move · click to select';
+
+      const seam = document.createElement('i');
+      seam.className = 'seam';
+      seam.setAttribute('data-marble-transient', '');
+      page.append(grip, seam);
+
+      let beside = null;
+      let carried = [];
+
+      function gripTo(el) {
+        beside = el;
+        if (!el) return grip.removeAttribute('data-on');
+        grip.setAttribute('data-on', '1');
+        grip.style.top = el.offsetTop + 'px';
+        grip.style.left = el.offsetLeft + 'px';
+        grip.style.height = el.offsetHeight + 'px';
+      }
+
+      const dropBefore = (y) =>
+        blocks()
+          .filter((el) => !carried.includes(el))
+          .find((el) => {
+            const box = el.getBoundingClientRect();
+            return y < box.top + box.height / 2;
+          }) ?? null;
+
+      function drawSeam(before) {
+        const box = page.getBoundingClientRect();
+        const last = blocks().filter((el) => !carried.includes(el)).pop();
+        const edge = before ?? last;
+        if (!edge) return seam.removeAttribute('data-on');
+        const rect = edge.getBoundingClientRect();
+        seam.setAttribute('data-on', '1');
+        seam.style.top = (before ? rect.top : rect.bottom) - box.top + 'px';
+        seam.style.left = edge.offsetLeft + 'px';
+        seam.style.width = edge.offsetWidth + 'px';
+      }
+
+      grip.addEventListener('pointerdown', () => {
+        const all = chosen();
+        carried = beside ? (all.length > 1 && all.includes(beside) ? all : [beside]) : [];
+      });
+
+      let landing = null;
+      draggable(
+        grip,
+        (event) => {
+          if (!carried.length) return;
+          landing = dropBefore(event.clientY);
+          drawSeam(landing);
+        },
+        (live) => {
+          seam.removeAttribute('data-on');
+          if (!live) {
+            if (beside) {
+              const range = document.createRange();
+              range.selectNodeContents(beside);
+              const sel = getSelection();
+              sel.removeAllRanges();
+              sel.addRange(range);
+              flow.focus({ preventScroll: true });
+              sync();
+            }
+            carried = [];
+            return;
+          }
+          const moving = carried;
+          const before = landing;
+          carried = [];
+          landing = null;
+          if (!moving.length) return;
+          change(() => {
+            for (const el of moving) {
+              if (before) before.before(el);
+              else flow.append(el);
+            }
+            return null;
+          });
+          gripTo(moving[0]);
+        },
+      );
+
+      $('.scroll').addEventListener('pointermove', (event) => {
+        if (grip.classList.contains('marble-dragging')) return;
+        if (grip.contains(event.target)) return;
+        gripTo(blocks().find((el) => {
+          const box = el.getBoundingClientRect();
+          return event.clientY >= box.top && event.clientY <= box.bottom;
+        }) ?? null);
+      });
+      $('.scroll').addEventListener('pointerleave', () => {
+        if (!grip.classList.contains('marble-dragging')) gripTo(null);
+      });
 
       // ---------------------------------------------------- menus and pickers
 
@@ -1318,6 +1751,14 @@ __ICON__
       const showing = (name) => document.body.getAttribute(name) !== 'off';
       const flip = (name) => attr(document.body, name, showing(name) ? 'off' : 'on');
 
+      const back = async (forward) => {
+        settle();
+        await (forward ? marble.redo() : marble.undo());
+        shadow = readFlow();
+        derive();
+        sync();
+      };
+
       const MENUS = {
         file: (add) => {
           add('Page setup…', pageSetup);
@@ -1329,16 +1770,19 @@ __ICON__
           });
         },
         edit: (add) => {
-          add('Undo', () => (commit(), marble.undo()), { hint: 'Ctrl+Z', off: !marble.canUndo });
-          add('Redo', () => marble.redo(), { hint: 'Ctrl+Shift+Z', off: !marble.canRedo });
+          add('Undo', () => back(false), { hint: 'Ctrl+Z', off: !marble.canUndo });
+          add('Redo', () => back(true), { hint: 'Ctrl+Shift+Z', off: !marble.canRedo });
+          add('Select all', selectAll, { hint: 'Ctrl+A' });
+          add('Move up', () => shift(-1), { hint: 'Ctrl+Shift+↑' });
+          add('Move down', () => shift(1), { hint: 'Ctrl+Shift+↓' });
           add('Delete paragraph', () => {
-            const el = target();
-            const to = el.previousElementSibling ?? el.nextElementSibling;
+            const all = chosen();
+            const to = all[0].previousElementSibling ?? all[all.length - 1].nextElementSibling;
             if (!to) return;
-            drop(el);
+            drop(all);
             here = null;
             if (isText(to)) place(to, marble.text(to).length);
-          }, { off: [...flow.children].filter(isText).length < 2 });
+          }, { off: blocks().filter(isText).length < 2 });
         },
         view: (add) => {
           add('Outline', () => flip('data-outline'), { on: showing('data-outline') });
@@ -1348,26 +1792,26 @@ __ICON__
         insert: (add) => {
           for (const key of ['h1', 'h2', 'h3']) {
             add(styleNamed(key).name, () => {
-              const made = follow(target(), shape(target(), key, ''));
-              if (made) place(made, 0);
+              const made = shape(chosen()[0], key, '');
+              follow(made);
+              place(made, 0);
             });
           }
-          add('Bulleted list', () => listAs('bullet'), { on: listOf(target()) === 'bullet' });
-          add('Numbered list', () => listAs('number'), { on: listOf(target()) === 'number' });
+          add('Bulleted list', () => listAs('bullet'), { on: listOf(chosen()[0]) === 'bullet' });
+          add('Numbered list', () => listAs('number'), { on: listOf(chosen()[0]) === 'number' });
           add('Horizontal line', () => {
             const rule = document.createElement('hr');
-            rule.setAttribute('data-marble-id', marble.newId());
-            follow(target(), rule);
+            rule.setAttribute(ID, marble.newId());
+            follow(rule);
           });
         },
         format: (add) => {
-          add('Bold', () => markUp('bold'), { hint: 'Ctrl+B', on: state('bold') });
-          add('Italic', () => markUp('italic'), { hint: 'Ctrl+I', on: state('italic') });
-          add('Underline', () => markUp('underline'), { hint: 'Ctrl+U', on: state('underline') });
-          add('Strikethrough', () => markUp('strike'), { on: state('strike') });
+          add('Bold', () => markUp('bold'), { hint: 'Ctrl+B', on: marked('bold') });
+          add('Italic', () => markUp('italic'), { hint: 'Ctrl+I', on: marked('italic') });
+          add('Underline', () => markUp('underline'), { hint: 'Ctrl+U', on: marked('underline') });
+          add('Strikethrough', () => markUp('strike'), { on: marked('strike') });
           for (const [value, name] of ALIGN) {
-            add('Align ' + name.toLowerCase(), () => attr(target(), 'data-align', value === 'left' ? null : value),
-                { on: alignOf(target()) === value });
+            add('Align ' + name.toLowerCase(), () => alignAs(value), { on: alignOf(chosen()[0]) === value });
           }
           add('Clear formatting', clear, { hint: 'Ctrl+\\' });
         },
@@ -1379,7 +1823,7 @@ __ICON__
       const PICKS = {
         style: (add) => {
           for (const style of STYLES) {
-            add(style.name, () => restyle(target(), style.key), { on: styleOf(target()) === style.key });
+            add(style.name, () => restyle(style.key), { on: styleOf(chosen()[0]) === style.key });
           }
         },
         face: (add) => {
@@ -1391,8 +1835,7 @@ __ICON__
         },
         align: (add) => {
           for (const [value, name] of ALIGN) {
-            add(name, () => attr(target(), 'data-align', value === 'left' ? null : value),
-                { on: alignOf(target()) === value });
+            add(name, () => alignAs(value), { on: alignOf(chosen()[0]) === value });
           }
         },
         colour: () => {
@@ -1426,17 +1869,9 @@ __ICON__
         return said;
       };
 
-      const state = (name) => {
-        try {
-          return document.queryCommandState(MARK[name]);
-        } catch {
-          return false;
-        }
-      };
-
       const CMD = {
-        undo: () => (commit(), marble.undo()),
-        redo: () => marble.redo(),
+        undo: () => back(false),
+        redo: () => back(true),
         bold: () => markUp('bold'),
         italic: () => markUp('italic'),
         underline: () => markUp('underline'),
@@ -1455,7 +1890,7 @@ __ICON__
       // undo, an agent or another window is live the moment it lands.
       addEventListener('mousedown', (event) => {
         // The selection stays exactly as it was under the button acting on it.
-        if (event.target.closest('.tools, .menus, .popup, .fonts')) event.preventDefault();
+        if (event.target.closest('.tools, .menus, .popup, .fonts, .grip')) event.preventDefault();
       }, true);
 
       addEventListener('pointerdown', (event) => {
@@ -1484,31 +1919,52 @@ __ICON__
 
       // -------------------------------------------------------- typing in it
 
+      flow.addEventListener('input', () => {
+        tidyUp();
+        file(true);
+        sync();
+      });
+
+      flow.addEventListener('blur', () => {
+        settle();
+        marble.flush();
+      });
+
+      flow.addEventListener('paste', (event) => {
+        event.preventDefault();
+        pasteText(event.clipboardData?.getData('text/plain') ?? '');
+      });
+
+      // Select All with the focus anywhere but in a field of its own means the
+      // document, which is the whole reason the flow is one host.
+      addEventListener('keydown', (event) => {
+        const mod = event.metaKey || event.ctrlKey;
+        if (!mod || event.altKey || event.shiftKey || event.key.toLowerCase() !== 'a') return;
+        const target = event.target;
+        if (target instanceof HTMLInputElement || target instanceof HTMLTextAreaElement) return;
+        if (target instanceof HTMLElement && target.isContentEditable && !flow.contains(target)) return;
+        event.preventDefault();
+        selectAll();
+      });
+
       flow.addEventListener('keydown', (event) => {
-        const el = event.target.closest?.('[data-marble-rich]');
-        if (!isText(el)) return;
-        here = el;
         const mod = event.metaKey || event.ctrlKey;
 
         // Undo is this document's to handle in here. The shared `history` part
         // steps aside for any contenteditable that is not a data-marble-editable
-        // — it assumes the browser owns undo there — and a rich block is exactly
+        // — it assumes the browser owns undo there — and the flow is exactly
         // that, so Ctrl+Z would otherwise reach the browser's own stack and
         // desync the page from the file. Close the burst, then reverse it.
         if (mod && !event.altKey && 'zy'.includes(event.key.toLowerCase())) {
           event.preventDefault();
           event.stopPropagation();
-          commit();
-          held = null;
-          const forward = event.key.toLowerCase() === 'y' || event.shiftKey;
-          if (forward) marble.redo();
-          else marble.undo();
+          back(event.key.toLowerCase() === 'y' || event.shiftKey);
           return;
         }
 
         if (event.key === 'Enter' && !event.shiftKey && !mod) {
           event.preventDefault();
-          return split(el);
+          return split();
         }
 
         // Read off event.code rather than event.key: Option rewrites the
@@ -1518,15 +1974,14 @@ __ICON__
           const digit = /^Digit([0-3])$/.exec(event.code)?.[1];
           if (!digit) return;
           event.preventDefault();
-          restyle(el, digit === '0' ? 'body' : 'h' + digit);
-          return sync();
+          return restyle(digit === '0' ? 'body' : 'h' + digit);
         }
 
         if (mod && !event.altKey) {
           const key = event.key.toLowerCase();
           if (event.shiftKey && (key === 'arrowup' || key === 'arrowdown')) {
             event.preventDefault();
-            return shift(el, key === 'arrowup' ? -1 : 1);
+            return shift(key === 'arrowup' ? -1 : 1);
           }
           if (event.shiftKey && key === 'c') {
             event.preventDefault();
@@ -1536,112 +1991,55 @@ __ICON__
           event.preventDefault();
           if (key === '\\') clear();
           else markUp(key === 'b' ? 'bold' : key === 'i' ? 'italic' : 'underline');
-          return sync();
+          return;
         }
 
         if (event.key === 'Tab') {
           event.preventDefault();
-          indent(event.shiftKey ? -1 : 1);
-          return sync();
+          return indent(event.shiftKey ? -1 : 1);
         }
 
         // Backspace at the very start peels one thing off at a time — the
-        // indent, then the list, and only then the paragraph break itself.
-        if (event.key === 'Backspace' && !loose() && caretAt(el) === 0) {
-          event.preventDefault();
+        // indent, then the list, and only then the paragraph break itself,
+        // which the browser is welcome to do because joining two paragraphs is
+        // now an ordinary edit inside one field.
+        const sel = getSelection();
+        if (event.key === 'Backspace' && sel?.isCollapsed) {
+          const el = blockOf(sel.anchorNode);
+          const mark = markRange();
+          if (!el || mark?.a.offset !== 0) return;
           if (Number(el.getAttribute('data-indent') ?? 0) > 0) {
-            indent(-1);
-            return sync();
+            event.preventDefault();
+            return indent(-1);
           }
           if (el.hasAttribute('data-list')) {
-            attr(el, 'data-list', null);
-            return sync();
-          }
-          const above = el.previousElementSibling;
-          if (!above) return;
-          return isText(above) ? join(above, el) : drop(above);
-        }
-
-        if (event.key === 'Delete' && !loose() && caretAt(el) === marble.text(el).length) {
-          const below = el.nextElementSibling;
-          if (!below) return;
-          event.preventDefault();
-          return isText(below) ? join(el, below) : drop(below);
-        }
-
-        if (event.key === 'ArrowUp' || event.key === 'ArrowDown') {
-          if (loose()) return;
-          const up = event.key === 'ArrowUp';
-          if (!onEdge(el, up)) return;
-          let to = up ? el.previousElementSibling : el.nextElementSibling;
-          while (to && !isText(to)) to = up ? to.previousElementSibling : to.nextElementSibling;
-          if (!to) return;
-          event.preventDefault();
-          land(to, up, caretX());
-        }
-      }, true);
-
-      // A caret leaving the top or bottom line of a paragraph leaves the
-      // paragraph, which is the only thing that makes a stack of separately
-      // editable blocks feel like one page of text.
-      function onEdge(el, up) {
-        const sel = getSelection();
-        if (!sel || !sel.rangeCount) return true;
-        const range = sel.getRangeAt(0).cloneRange();
-        range.collapse(true);
-        const box = el.getBoundingClientRect();
-        const caret = range.getClientRects()[0] ?? box;
-        const cs = getComputedStyle(el);
-        const line = lineOf(el);
-        return up
-          ? caret.top - (box.top + parseFloat(cs.paddingTop)) < line * 0.6
-          : box.bottom - parseFloat(cs.paddingBottom) - caret.bottom < line * 0.6;
-      }
-
-      function caretX() {
-        const sel = getSelection();
-        if (!sel || !sel.rangeCount) return page.getBoundingClientRect().left;
-        const range = sel.getRangeAt(0).cloneRange();
-        range.collapse(true);
-        return range.getClientRects()[0]?.left ?? page.getBoundingClientRect().left;
-      }
-
-      // Landing in the next paragraph at the column you left, rather than at
-      // its end, which is what every editor does and what nobody notices until
-      // it stops happening.
-      function land(el, up, x) {
-        el.focus();
-        const box = el.getBoundingClientRect();
-        const line = lineOf(el);
-        const y = up ? box.bottom - line / 2 : box.top + line / 2;
-        let range = null;
-        if (document.caretRangeFromPoint) range = document.caretRangeFromPoint(x, y);
-        else if (document.caretPositionFromPoint) {
-          const spot = document.caretPositionFromPoint(x, y);
-          if (spot) {
-            range = document.createRange();
-            range.setStart(spot.offsetNode, spot.offset);
+            event.preventDefault();
+            return setOn('data-list', null);
           }
         }
-        if (range && el.contains(range.startContainer)) {
-          range.collapse(true);
-          const sel = getSelection();
-          sel.removeAllRanges();
-          sel.addRange(range);
-          here = el;
-        } else {
-          place(el, up ? marble.text(el).length : 0);
-        }
-      }
+      });
 
-      // The margin below the last paragraph is still the page, and clicking a
-      // page puts you in its text.
+      // The margin around the text is still the page, and clicking a page puts
+      // you in its text — on the line you pointed at, not at the end of it.
       page.addEventListener('mousedown', (event) => {
-        if (event.target !== page && event.target !== flow) return;
-        const last = [...flow.children].reverse().find(isText);
-        if (!last) return;
+        if (event.target !== page || grip.contains(event.target)) return;
+        const all = blocks().filter(isText);
+        if (!all.length) return;
         event.preventDefault();
-        place(last, marble.text(last).length);
+        const y = event.clientY;
+        const el = all.find((block) => y <= block.getBoundingClientRect().bottom) ?? all[all.length - 1];
+        const box = el.getBoundingClientRect();
+        const x = event.clientX < box.left ? box.left + 1 : box.right - 1;
+        const spotted = document.caretRangeFromPoint?.(x, Math.min(Math.max(y, box.top + 1), box.bottom - 1));
+        if (spotted && flow.contains(spotted.startContainer)) {
+          const range = getSelection();
+          range.removeAllRanges();
+          range.addRange(spotted);
+          flow.focus({ preventScroll: true });
+        } else {
+          place(el, marble.text(el).length);
+        }
+        sync();
       });
 
       // ----------------------------------------------------------- what is drawn
@@ -1656,7 +2054,7 @@ __ICON__
 
       function derive() {
         outline.textContent = '';
-        for (const el of flow.children) {
+        for (const el of blocks()) {
           const depth = DEPTH[styleOf(el)];
           if (!depth || !isText(el)) continue;
           const item = document.createElement('li');
@@ -1670,7 +2068,7 @@ __ICON__
           outline.append(item);
         }
 
-        const text = [...flow.children].filter(isText).map((el) => marble.text(el)).join(' ').trim();
+        const text = blocks().filter(isText).map((el) => marble.text(el)).join(' ').trim();
         counted = { words: text ? text.split(/\s+/).length : 0, characters: text.length };
         counter.textContent = counted.words === 1 ? '1 word' : counted.words + ' words';
       }
@@ -1679,26 +2077,28 @@ __ICON__
       function detail() {
         counter.textContent =
           counted.words + ' words · ' + counted.characters + ' characters · ' +
-          [...flow.children].filter(isText).length + ' paragraphs';
+          blocks().filter(isText).length + ' paragraphs';
         clearTimeout(saying);
         saying = setTimeout(derive, 6000);
       }
 
       function sync() {
-        const el = target();
-        const at = atCaret();
+        const els = chosen();
+        const el = els[0];
+        if (isText(el)) here = el;
+        const caret = atCaret();
         const lit = (selector, on) => $(selector)?.classList.toggle('marble-on', Boolean(on));
         for (const name of ['bold', 'italic', 'underline', 'strike']) {
-          lit('[data-cmd="' + name + '"]', state(name));
+          lit('[data-cmd="' + name + '"]', marked(name, els));
         }
         lit('[data-cmd="bullet"]', listOf(el) === 'bullet');
         lit('[data-cmd="number"]', listOf(el) === 'number');
         lit('[data-cmd="fonts"]', showing('data-fonts'));
 
         $('#now-style').textContent = styleNamed(styleOf(el)).name;
-        $('#now-face').textContent = faceOf(at);
-        $('#now-pt').textContent = String(ptOf(at));
-        $('#now-fg').style.color = getComputedStyle(at ?? flow).color;
+        $('#now-face').textContent = faceOf(caret);
+        $('#now-pt').textContent = String(ptOf(caret));
+        $('#now-fg').style.color = getComputedStyle(caret ?? flow).color;
 
         const aligner = $('.aligner');
         for (const [value] of ALIGN) {
@@ -1708,29 +2108,25 @@ __ICON__
         $('[data-cmd="redo"]').disabled = !marble.canRedo;
       }
 
-      // Wired and redrawn now, and again over anything that arrives later — a
-      // paragraph added here, an edit made in a text editor, another window's
-      // undo. A block that came back from the file has to be made editable
-      // again, which is what the carrier hands subtrees to a registration for.
-      marble.register((root) => {
-        wireRich(root);
+      // Drawn now, and again over anything that arrives later — an edit made in
+      // a text editor, another window's undo, an agent's op. What comes back
+      // from the file is the file's idea of the flow, so the shadow is taken
+      // from it again rather than kept from before.
+      marble.register(() => {
+        flow.setAttribute('contenteditable', 'true');
+        flow.setAttribute('spellcheck', 'true');
+        shadow = readFlow();
+        if (normalise()) file(false);
         derive();
         sync();
       });
 
-      flow.addEventListener('focusin', (event) => {
-        const el = event.target.closest?.('[data-marble-rich]');
-        if (isText(el)) {
-          here = el;
-          sync();
-        }
-      });
       flow.addEventListener('keyup', sync);
       flow.addEventListener('click', sync);
       document.addEventListener('selectionchange', () => {
-        if (inBlock(target())) sync();
+        if (flow.contains(getSelection()?.anchorNode)) sync();
       });
-      addEventListener('beforeunload', commit);
+      addEventListener('beforeunload', settle);
     };
 
     if (window.marble) begin(window.marble);

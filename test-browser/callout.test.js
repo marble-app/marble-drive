@@ -371,3 +371,81 @@ test('Open in Agents leaves for the Agents page with the chat open', async () =>
   await page.waitForFunction((cid) => document.querySelector(`marble-conversation[conversation="${cid}"]`) !== null, summary.id);
   assert.equal(new URL(page.url()).searchParams.has('open'), false, 'the parameter is spent');
 });
+
+test('Close takes the callout away for good, and Fold is the button that keeps it', async () => {
+  const page = await open();
+  await select(page, 'p');
+  await handle(page).click();
+  await card(page).waitFor();
+  // Nothing sent yet: closing is just letting go of the thing you opened.
+  await page.getByRole('button', { name: 'Close' }).click();
+  await page.waitForFunction(() => document.querySelectorAll('.marble-callout').length === 0);
+
+  // And with a chat behind it: closing reviews it, so nothing brings it back.
+  await select(page, 'h');
+  await handle(page).click();
+  await sendFromCard(page, 'script:quiet');
+  await page.locator('.marble-callout-status', { hasText: 'No changes' }).waitFor({ timeout: 10_000 });
+  const { summary } = await firstConversation(page);
+
+  // Fold keeps it, as a pill — the two buttons are not the same button.
+  await page.getByRole('button', { name: 'Fold' }).click();
+  await page.locator('.marble-callout[data-state="pill"]').waitFor();
+  await page.locator('.marble-callout-status').click();
+  await card(page).waitFor();
+
+  await page.getByRole('button', { name: 'Close' }).click();
+  await page.waitForFunction(() => document.querySelectorAll('.marble-callout').length === 0);
+  const after = await page.evaluate(async (cid) => (await window.marble.agent.conversations()).find((s) => s.id === cid), summary.id);
+  assert.equal(after.needsReview, false, 'a finished chat you closed has been seen');
+
+  await page.reload();
+  await page.waitForFunction(() => Boolean(window.marble?.agent));
+  await page.waitForTimeout(400);
+  assert.equal(await page.locator('.marble-callout').count(), 0, 'a closed callout does not come back');
+});
+
+test('a callout with nothing left to point at clears the toolbar and the launcher, wherever the toolbar has been thrown', async () => {
+  const page = await open();
+  await page.locator('.marble-marks-bar').waitFor();
+  // The corner holds three things, and only two of them are in this file's
+  // hands: the drawer's launcher sets its own inset from the safe area, and
+  // the marks toolbar rests wherever it was last thrown. A card with no
+  // anchor has to measure both rather than trust a constant.
+  const cornerBoxes = () => page.evaluate(() => {
+    const r = (el) => { const b = el.getBoundingClientRect(); return { top: b.top, left: b.left, right: b.right, bottom: b.bottom }; };
+    const toolbar = document.querySelector('.marble-marks-bar:not([hidden])');
+    return {
+      card: r(document.querySelector('.marble-callout[data-state="card"]')),
+      toolbar: toolbar ? { ...r(toolbar), corner: toolbar.dataset.corner } : null,
+      launcher: r(document.querySelector('marble-agent-drawer').shadowRoot.querySelector('.launcher')),
+    };
+  });
+  const orphan = async () => {
+    await select(page, 'q1');
+    await handle(page).click();
+    await card(page).waitFor();
+    await page.evaluate(() => {
+      document.querySelector('[data-marble-id="q1"]')?.remove();
+      dispatchEvent(new Event('resize'));
+    });
+    await page.waitForTimeout(120);
+  };
+
+  await orphan();
+  let boxes = await cornerBoxes();
+  assert.equal(boxes.toolbar.corner, 'br');
+  assert.ok(boxes.card.bottom <= boxes.toolbar.top + 1, `card bottom ${boxes.card.bottom} sits on the toolbar at ${boxes.toolbar.top}`);
+  assert.ok(boxes.card.bottom <= boxes.launcher.top + 1, `card bottom ${boxes.card.bottom} sits on the launcher at ${boxes.launcher.top}`);
+
+  // Thrown to another corner, the toolbar is no longer what the card has to
+  // clear — but the launcher never moved, and it is still down there.
+  await page.evaluate(() => localStorage.setItem('marble-marks:corner:garden', 'tl'));
+  await page.reload();
+  await page.waitForFunction(() => Boolean(window.marble?.agent));
+  await page.locator('.marble-marks-bar[data-corner="tl"]').waitFor();
+  await orphan();
+  boxes = await cornerBoxes();
+  assert.equal(boxes.toolbar.corner, 'tl');
+  assert.ok(boxes.card.bottom <= boxes.launcher.top + 1, `card bottom ${boxes.card.bottom} sits on the launcher at ${boxes.launcher.top}`);
+});

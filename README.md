@@ -67,6 +67,18 @@ docker compose up -d
 
 The image holds the host; the drive is a volume. See [docs/DEPLOY.md](docs/DEPLOY.md).
 
+On a Mac you keep the drive on, run it under launchd instead of in a terminal
+window — it has no terminal to be hung up on when an ssh session ends, comes
+back on its own if it ever stops, and starts again at login:
+
+```
+macos/launchd/daemon.sh install     # or: npm run daemon -- install
+macos/launchd/daemon.sh status
+macos/launchd/daemon.sh logs        # ~/Library/Logs/marble-drive/serve.log
+```
+
+`server/` changes still need a restart: `macos/launchd/daemon.sh restart`.
+
 ## What is in the repository, and what is not
 
 The repository is the host: the code that serves a drive, the templates and

@@ -726,7 +726,26 @@ test("a document is served with the agent scripts after the Drive's, when agents
     /<script src="\/runtime\/collab\.js"[^>]*><\/script>\n<script src="\/runtime\/agent-callout\.js" data-marble-transient><\/script>/,
     'the callout script follows collab.js when agents are on',
   );
-  assert.equal((await fetch(`${base}/runtime/agent-callout.js`)).status, 200);
+  assert.match(
+    page,
+    /<script src="\/runtime\/agent-callout\.js"[^>]*><\/script>\n<script src="\/runtime\/agent-marks-geometry\.js" data-marble-transient><\/script>\n<script src="\/runtime\/agent-marks\.js" data-marble-transient><\/script>/,
+    'the marks layer follows the callout it hands its ids to, and its geometry is read on the way in',
+  );
+  // The toolbar captures the drawer's shadow root once, at boot, and hangs
+  // its `data-pinned` observer on it. There is nothing to capture until
+  // agent-ui.js has mounted the drawer, and nothing says so at the point of
+  // failure: put agent-marks.js first and the toolbar quietly stops stepping
+  // aside for an open drawer, with all seventeen marks tests still passing.
+  // This line is what stands between that order and a silent regression.
+  assert.ok(
+    ui < page.indexOf('<script src="/runtime/agent-marks.js" data-marble-transient></script>'),
+    'agent-ui.js mounts the drawer before agent-marks.js reads its shadow root',
+  );
+  for (const file of ['agent-callout.js', 'agent-marks-geometry.js', 'agent-marks.js']) {
+    const response = await fetch(`${base}/runtime/${file}`);
+    assert.equal(response.status, 200, file);
+    assert.match(response.headers.get('content-type'), /javascript/);
+  }
 });
 
 test('a document that presents agents itself gets the API and the conversation element, not a second drawer script skip', async () => {

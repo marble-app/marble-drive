@@ -72,11 +72,13 @@ POST /agent/conversations/:id/turns {prompt, context:{target, viewing, selection
 
 ## While an agent works
 
-A violet box on the page is where the agent is, and the pill under it says what
+A box on the page is where the agent is, and the pill under it says what
 it is doing — `Agent · reading`, or the note it gave its edit
-(`Agent · rename the heading`). The colour is the agent's, not the document's:
-every accent in this drive is a muted blue, sage, terracotta or gold, so a
-violet frame is never a control of the app you are in. The wash inside it is
+(`Agent · rename the heading`). It is drawn in the document's own accent, so
+the agent belongs to the page it is standing on; what says *someone else is
+here* is the shape, the wash and the label, not a colour held apart. A
+document that declares no accent gets the agent's violet instead. The wash
+inside it is
 thin, and the box takes no clicks — what is under it is still yours to select
 and type in. It follows the element as the page reflows.
 
@@ -100,7 +102,7 @@ restores, so an agent's claims never outlive its work.
 
 ## Summoning an agent in a document
 
-Select something in any document and a small violet handle appears at the
+Select something in any document and a small comment bubble appears at the
 selection's corner, where the construction zone's label will hang once an
 agent is working there. Click it, or press `⌘J` while the selection is live,
 and a **callout** opens: a card holding a real conversation, anchored to the
@@ -121,7 +123,7 @@ its memory, brought to a new region.
 While the agent works the card stands where the zone's label would, showing
 `Agent · <what it is doing>`, and the label itself steps back: one object on
 the page, not two saying the same thing. Every element the turn changes keeps
-a thin violet edge — the **trail** — until the chat is reviewed. When the turn
+a thin edge in that accent — the **trail** — until the chat is reviewed. When the turn
 ends the card reads `Changed 4 elements · Undo · Done`. *Undo* is the turn's
 own undo. *Done* marks the chat reviewed, clears the trail, and puts the
 callout away: seeing it and saying done is reviewing it.
@@ -142,6 +144,28 @@ callout as well, so both paths end at the same object.
 
 On a phone the handle opens the drawer with the selection attached; there is
 no anchored card. The Agents page draws no callouts of its own.
+
+## Marking a document up for an agent
+
+Every document also carries a small round button at its bottom right, wearing
+the callout's bubble. It opens into a strip of tools; in this phase the strip
+holds **Select**. Pick a tool and the page is in that mode until Escape, or the
+tool again, gives it back. Wheel scrolling still works inside a mode.
+
+**Select** draws a marquee. Every addressed element the rectangle covers by
+sixty percent or more is outlined as you drag, and a rectangle across a whole
+list outlines the list rather than its items. Letting go hands those elements
+to the callout — the same handle and card a text selection gets — and leaves
+the mode. **Shift** while releasing adds to what is already selected; a
+double-click on Select pins the mode for several rectangles; **Escape** with a
+marquee selection standing clears it, as it clears Option-picks.
+
+The button can be thrown to any corner: drag it, let go, and it settles in the
+corner nearest to where the throw was headed. The corner is remembered per
+document. When the drawer is pinned the toolbar moves in with the page's edge;
+while an unpinned drawer is open — the usual case at any width, phone or
+desktop — it steps aside rather than sit under the panel. The Agents page has
+no toolbar; it is the orchestration view already.
 
 ## What a full agent can do
 
