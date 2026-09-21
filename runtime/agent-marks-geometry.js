@@ -66,16 +66,32 @@
   const nearestCorner = ({ x, y }, { width, height }) =>
     `${y < height / 2 ? 't' : 'b'}${x < width / 2 ? 'l' : 'r'}`;
 
-  /** One step of a damped spring, in Apple's two parameters: `damping` is the
-   *  damping ratio (1 = no overshoot), `response` the period in seconds.
-   *  Semi-implicit Euler; stable for dt up to ~0.03s at response 0.4. */
+  // The semi-implicit Euler update's numerical damping depends on step size,
+  // so a spring driven straight off requestAnimationFrame would bounce
+  // differently on a 60Hz external monitor than on a 120Hz ProMotion Mac —
+  // and in a node test given yet another dt. Substepping at a fixed, small
+  // step makes the motion the same regardless of what dt the caller passes.
+  const STEP = 0.001;
+
+  /** Advance a damped spring by `dt` seconds, in Apple's two parameters:
+   *  `damping` is the damping ratio (1 = no overshoot), `response` the
+   *  period in seconds. Integrates in fixed `STEP`-sized substeps internally
+   *  (semi-implicit Euler per substep), so it is stable and frame-rate
+   *  independent for any dt the caller passes. */
   const spring = (state, target, dt, { damping = 1, response = 0.4 } = {}) => {
+    if (!Number.isFinite(dt) || dt <= 0) return state;
     const omega = (2 * Math.PI) / response;
     const stiffness = omega * omega;
     const drag = 2 * damping * omega;
-    const acceleration = -stiffness * (state.x - target) - drag * state.v;
-    const v = state.v + acceleration * dt;
-    const x = state.x + v * dt;
+    let { x, v } = state;
+    let remaining = dt;
+    while (remaining > 0) {
+      const h = Math.min(STEP, remaining);
+      const acceleration = -stiffness * (x - target) - drag * v;
+      v = v + acceleration * h;
+      x = x + v * h;
+      remaining -= h;
+    }
     return { x, v };
   };
 

@@ -99,6 +99,17 @@ test('an underdamped spring overshoots and still settles', () => {
   assert.ok(Math.abs(state.x - 100) < 0.5, `ends at ${state.x}`);
 });
 
+test('the spring moves the same distance whatever the frame rate', () => {
+  const advance = (dt) => {
+    let state = { x: 0, v: 0 };
+    for (let t = 0; t < 0.2 - 1e-9; t += dt) state = G().spring(state, 100, dt, { damping: 0.8, response: 0.4 });
+    return state.x;
+  };
+  const slow = advance(1 / 60);
+  const fast = advance(1 / 120);
+  assert.ok(Math.abs(slow - fast) < 0.5, `60Hz reached ${slow}, 120Hz reached ${fast}`);
+});
+
 test('a spring started with velocity carries it', () => {
   const still = G().spring({ x: 0, v: 0 }, 100, 1 / 120, { damping: 1 });
   const thrown = G().spring({ x: 0, v: 2000 }, 100, 1 / 120, { damping: 1 });
