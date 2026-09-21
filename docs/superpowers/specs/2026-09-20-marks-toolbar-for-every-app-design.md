@@ -101,8 +101,11 @@ checked against the code, not assumed.
 
 ### 5.1 The toolbar
 
-One round button, 40px, at the bottom right by default, inset 16px from the
-page's own edges. It carries the comment-bubble glyph the callout handle uses,
+One round button, 40px, at the bottom right by default, inset 16px
+horizontally from the page's own edges, resting just above the drawer's
+launcher where the two share a corner. They are siblings there, not rivals —
+one opens a conversation, the other marks the page up for one. It carries the
+comment-bubble glyph the callout handle uses,
 so the two say the same thing: *ask an agent about this*. A count of draft
 marks sits on it as a small badge when there are any.
 
@@ -294,6 +297,10 @@ frame because it is feedback, not motion.
 - **Corner drag with a spring, and nothing else springs.** The one thing a
   person throws is the toolbar. Every other motion here is a state change
   with no momentum behind it, so it settles without bounce.
+- **The corner was not empty.** The drawer's launcher already lived in the
+  bottom right; the toolbar stacks above it rather than claiming a different
+  corner, so the corner now reads bottom-up as launcher, toolbar, and —
+  later — a callout that has nothing left to point at.
 
 ## 7. Components and boundaries
 

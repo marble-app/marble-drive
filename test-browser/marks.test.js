@@ -40,18 +40,52 @@ const barBox = (page) => page.evaluate(() => {
   return { left: r.left, top: r.top, right: r.right, bottom: r.bottom, width: r.width, height: r.height };
 });
 
-test('every document gets the toolbar at the bottom right; the Agents page does not', async () => {
+test('every document gets the toolbar in the bottom-right corner above the drawer\'s launcher; the Agents page does not', async () => {
   const page = await open();
   await bar(page).waitFor();
   const box = await barBox(page);
   assert.ok(Math.abs(box.right - (1200 - 16)) <= 1, `right edge at ${box.right}`);
-  assert.ok(Math.abs(box.bottom - (800 - 16)) <= 1, `bottom edge at ${box.bottom}`);
+  const launcherTop = await page.evaluate(() =>
+    document.querySelector('marble-agent-drawer').shadowRoot.querySelector('.launcher').getBoundingClientRect().top);
+  assert.ok(Math.abs(box.bottom - (launcherTop - 12)) <= 1, `bottom edge at ${box.bottom}, launcher top at ${launcherTop}`);
   assert.equal(await page.evaluate(() => document.querySelector('.marble-marks-layer').hasAttribute('data-marble-transient')), true);
   assert.equal(await main(page).getAttribute('aria-expanded'), 'false');
 
   const agents = await open('Agents');
   await agents.waitForTimeout(300);
   assert.equal(await agents.locator('.marble-marks-layer').count(), 0, 'no toolbar on the page made of agents');
+});
+
+test('the toolbar leaves the drawer’s launcher reachable in the same corner', async () => {
+  const page = await open();
+  await bar(page).waitFor();
+  const [barRect, launcherRect] = await page.evaluate(() => {
+    const l = document.querySelector('marble-agent-drawer').shadowRoot.querySelector('.launcher');
+    const r = (el) => { const b = el.getBoundingClientRect(); return { left: b.left, top: b.top, right: b.right, bottom: b.bottom }; };
+    return [r(document.querySelector('.marble-marks-bar')), r(l)];
+  });
+  const overlaps = barRect.left < launcherRect.right && barRect.right > launcherRect.left
+    && barRect.top < launcherRect.bottom && barRect.bottom > launcherRect.top;
+  assert.equal(overlaps, false, `toolbar ${JSON.stringify(barRect)} covers launcher ${JSON.stringify(launcherRect)}`);
+  // And the launcher is what a click in its middle actually reaches.
+  const hit = await page.evaluate(() => {
+    const l = document.querySelector('marble-agent-drawer').shadowRoot.querySelector('.launcher');
+    const b = l.getBoundingClientRect();
+    const top = document.elementFromPoint(b.left + b.width / 2, b.top + b.height / 2);
+    return top?.tagName?.toLowerCase() ?? null;
+  });
+  assert.equal(hit, 'marble-agent-drawer');
+});
+
+test('the toolbar steps aside while the drawer is open, and comes back when it closes', async () => {
+  const page = await open();
+  await bar(page).waitFor();
+  const drawer = page.locator('marble-agent-drawer');
+  await drawer.locator('.launcher').click();
+  await page.locator('marble-agent-drawer aside.panel[data-open="true"]').waitFor();
+  await page.waitForFunction(() => document.querySelector('.marble-marks-bar').hidden);
+  await drawer.locator('button.close').click();
+  await page.waitForFunction(() => !document.querySelector('.marble-marks-bar').hidden);
 });
 
 test('pinning the drawer moves the toolbar in with the page edge', async () => {

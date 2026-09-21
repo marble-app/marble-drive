@@ -14,6 +14,8 @@
   const stillness = matchMedia('(prefers-reduced-motion: reduce)');
   const PAD = 16;
   const SIZE = 40;
+  // The callout's spacing between stacked chrome.
+  const GAP = 12;
   // The callout's curve, so the two layers move as one.
   const EASE = 'cubic-bezier(.2, .8, .3, 1)';
   const CORNERS = new Set(['tl', 'tr', 'bl', 'br']);
@@ -152,32 +154,60 @@
       const r = document.documentElement.getBoundingClientRect();
       return { left: Math.max(0, r.left), right: Math.min(innerWidth, r.right), top: 0, bottom: innerHeight };
     };
+    // The drawer's own launcher already lives in this corner (its CSS is in
+    // runtime/agent-ui.js). Its box does not move when the drawer opens —
+    // only its opacity does — so measuring it here is stable, and the
+    // toolbar never jumps once it has settled clear of it.
+    const launcherRect = () => document.querySelector('marble-agent-drawer')?.shadowRoot?.querySelector('.launcher')?.getBoundingClientRect() ?? null;
     const stored = localStorage.getItem(cornerKey(app));
     let corner = CORNERS.has(stored) ? stored : 'br';
     bar.dataset.corner = corner;
     let pos = { x: 0, y: 0 };
     const restingPoint = (which) => {
       const e = edges();
-      return {
-        x: which.endsWith('l') ? e.left + PAD : e.right - PAD - bar.offsetWidth,
-        y: which.startsWith('t') ? e.top + PAD : e.bottom - PAD - bar.offsetHeight,
-      };
+      const x = which.endsWith('l') ? e.left + PAD : e.right - PAD - bar.offsetWidth;
+      let y = which.startsWith('t') ? e.top + PAD : e.bottom - PAD - bar.offsetHeight;
+      // A document with agents off, or the Agents page, has no drawer to clear.
+      const l = launcherRect();
+      if (l) {
+        const w = bar.offsetWidth;
+        const h = bar.offsetHeight;
+        const overlaps = x < l.right && x + w > l.left && y < l.bottom && y + h > l.top;
+        // Stack clear of it instead of sitting on it: up from a bottom
+        // corner, down from a top one. The corner now reads bottom-up as
+        // launcher, toolbar, and — later — a callout with nothing to point at.
+        if (overlaps) y = which.startsWith('t') ? l.bottom + GAP : l.top - GAP - h;
+      }
+      return { x, y };
     };
     const paint = () => { bar.style.transform = `translate3d(${Math.round(pos.x)}px, ${Math.round(pos.y)}px, 0)`; };
     // Overridden in Task 6 to stay out of the way of a drag or a flight.
     let settle = () => { pos = restingPoint(corner); paint(); };
     let raf = 0;
-    const schedule = () => { if (!raf) raf = requestAnimationFrame(() => { raf = 0; settle(); }); };
+    const schedule = () => { if (!raf) raf = requestAnimationFrame(() => { raf = 0; settle(); syncHidden(); }); };
     addEventListener('resize', schedule);
     // The dock changes <html>'s width without a resize event.
     new ResizeObserver(schedule).observe(document.documentElement);
     settle();
 
-    // On a phone the drawer is a sheet from the bottom; the toolbar yields.
-    const drawerOpen = () => PHONE.matches && Boolean(document.querySelector('marble-agent-drawer[data-open-state="open"]'));
+    // The marks layer is a top-layer popover, so an unpinned drawer panel
+    // would otherwise float underneath the toolbar's own corner — a card
+    // parked on top of the very conversation it covers. Pinned is different:
+    // the page is docked and the toolbar belongs to the page's own area,
+    // already tracked by edges() above, so it moves in with the edge rather
+    // than hiding. On a phone the drawer is never pinned, so this one rule
+    // also covers the phone-sheet case the brief asked for separately.
+    const drawerHost = () => document.querySelector('marble-agent-drawer');
+    const drawerPanel = () => drawerHost()?.shadowRoot?.querySelector('.panel') ?? null;
+    const drawerOpen = () => {
+      const host = drawerHost();
+      if (!host?.hasAttribute('data-open-state')) return false;
+      return drawerPanel()?.dataset.pinned !== 'true';
+    };
     const syncHidden = () => { bar.hidden = drawerOpen(); };
     new MutationObserver(syncHidden).observe(document.documentElement, { subtree: true, attributes: true, attributeFilter: ['data-open-state'] });
-    PHONE.addEventListener('change', syncHidden);
+    const drawerRoot = drawerHost()?.shadowRoot;
+    if (drawerRoot) new MutationObserver(syncHidden).observe(drawerRoot, { subtree: true, attributes: true, attributeFilter: ['data-pinned'] });
     syncHidden();
   };
 
