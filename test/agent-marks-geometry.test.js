@@ -121,3 +121,26 @@ test('settled needs both a near position and a slow velocity', () => {
   assert.equal(G().settled({ x: 100.2, v: 50 }, 100), false);
   assert.equal(G().settled({ x: 103, v: 0 }, 100), false);
 });
+
+// The Drive's own home page: a sidebar holding a visible pins list, a visible
+// recents list, and `<ul class="folder-tints" hidden>` between them. A hidden
+// element has a zero-area box, so it can never be a candidate — and a rule
+// that asks for *every* addressed child would let it veto its parent forever.
+const SIDEBAR = [
+  { id: 'side', parent: null, left: 0, top: 0, width: 200, height: 300 },
+  { id: 'pins', parent: 'side', left: 8, top: 8, width: 184, height: 140 },
+  { id: 'tints', parent: 'side', left: 8, top: 148, width: 0, height: 0 },
+  { id: 'recent', parent: 'side', left: 8, top: 152, width: 184, height: 140 },
+];
+
+test('a hidden, zero-area child does not stop its parent from coalescing', () => {
+  assert.deepEqual(G().idsInRect(rect(-10, -10, 210, 310), SIDEBAR), ['side']);
+});
+
+test('a parent whose only children are zero-area is still chosen on its own', () => {
+  const empty = [
+    { id: 'wrap', parent: null, left: 0, top: 0, width: 200, height: 100 },
+    { id: 'ghost', parent: 'wrap', left: 0, top: 0, width: 0, height: 0 },
+  ];
+  assert.deepEqual(G().idsInRect(rect(-10, -10, 210, 110), empty), ['wrap']);
+});

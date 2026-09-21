@@ -6078,6 +6078,10 @@
        clickable it swallows whatever sits in the bottom-right corner of the
        page behind it — which is where a composer's send and stop buttons are. */
     :host { position: fixed; inset: auto 0 0 auto; z-index: 2147483000; pointer-events: none; }
+    /* The marks toolbar measures this button through the shadow root and
+       stacks itself on top of it, taking its inset from what it measures —
+       so this rule sets the inset for two pieces of chrome, not one, and the
+       safe-area terms here are the only ones either of them applies. */
     .launcher { pointer-events: auto; position: fixed; right: calc(20px + env(safe-area-inset-right, 0px)); bottom: calc(20px + env(safe-area-inset-bottom, 0px));
       width: 44px; height: 44px; border-radius: 50%; border: 1px solid var(--line); background: var(--card); color: var(--ink);
       box-shadow: var(--shadow-lift); cursor: pointer; display: grid; place-items: center;

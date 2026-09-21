@@ -200,7 +200,10 @@ export async function createDrive(config, { log = console, agentProviders = null
     tags += `\n<script src="/runtime/collab.js" data-marble-transient></script>`;
     // After collab.js: the callout hangs its card with the zone's own geometry.
     if (agents) tags += `\n<script src="/runtime/agent-callout.js" data-marble-transient></script>`;
-    // After the callout: Select hands its ids to the callout's handle.
+    // After the callout: Select hands its ids to the callout's handle. After
+    // agent-ui.js too, and less visibly — the toolbar captures the drawer's
+    // shadow root once at boot, so a drawer mounted later would leave it
+    // watching nothing. test/agent-http.test.js holds both orders.
     if (agents) {
       tags += `\n<script src="/runtime/agent-marks-geometry.js" data-marble-transient></script>`;
       tags += `\n<script src="/runtime/agent-marks.js" data-marble-transient></script>`;

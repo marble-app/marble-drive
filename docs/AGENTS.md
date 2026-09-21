@@ -162,9 +162,10 @@ marquee selection standing clears it, as it clears Option-picks.
 
 The button can be thrown to any corner: drag it, let go, and it settles in the
 corner nearest to where the throw was headed. The corner is remembered per
-document. When the drawer is pinned the toolbar moves in with the page's edge,
-and on a phone it steps aside while the drawer is open. The Agents page has no
-toolbar; it is the orchestration view already.
+document. When the drawer is pinned the toolbar moves in with the page's edge;
+while an unpinned drawer is open — the usual case at any width, phone or
+desktop — it steps aside rather than sit under the panel. The Agents page has
+no toolbar; it is the orchestration view already.
 
 ## What a full agent can do
 

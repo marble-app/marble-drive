@@ -23,37 +23,55 @@
   /** Every addressed box the rectangle means, said once, in document order.
    *  Candidates are boxes covered by `threshold` of their area or more.
    *  Leaves are the deepest candidates. A candidate parent replaces its
-   *  children only when every addressed child is chosen — a rect across a
-   *  whole list is the list; a rect across one item is that item. */
+   *  children only when every addressed child that *could* be chosen is
+   *  chosen — a rect across a whole list is the list; a rect across one item
+   *  is that item.
+   *
+   *  A zero-area child is left out of that count. It has coverage 0 by the
+   *  guard in `coverage`, so it can never be a candidate, and asking for it
+   *  would make one hidden child veto its parent forever: the Drive's own
+   *  sidebar holds a `hidden` list beside its visible ones, and a marquee
+   *  over it would hand an agent the children instead of the sidebar. A
+   *  parent with no non-degenerate children left never coalesces at all.
+   *
+   *  Runs on every frame of a drag over every box on screen, so the shape of
+   *  the work matters: one pass to find the candidates, one walk up each
+   *  candidate's parent chain to drop the ancestors among them, and a merge
+   *  loop that asks a Set rather than scanning an array. */
   const idsInRect = (rect, boxes, { threshold = 0.6 } = {}) => {
     const order = new Map(boxes.map((box, i) => [box.id, i]));
     const byId = new Map(boxes.map((box) => [box.id, box]));
     const children = new Map();
     for (const box of boxes) {
-      if (!box.parent) continue;
+      if (!box.parent || !area(box)) continue;
       if (!children.has(box.parent)) children.set(box.parent, []);
       children.get(box.parent).push(box.id);
     }
-    const under = (id, ancestor) => {
-      for (let p = byId.get(id)?.parent; p; p = byId.get(p)?.parent) if (p === ancestor) return true;
-      return false;
-    };
-    const candidates = new Set(boxes.filter((box) => coverage(rect, box) >= threshold).map((box) => box.id));
-    let chosen = [...candidates].filter((id) => ![...candidates].some((other) => other !== id && under(other, id)));
+    const candidates = new Set();
+    for (const box of boxes) if (coverage(rect, box) >= threshold) candidates.add(box.id);
+    // Leaves win: a candidate that is an ancestor of another candidate is not
+    // one of them. Walking up from each candidate costs its depth; asking
+    // every candidate about every other one costs the square of the page.
+    const ancestors = new Set();
+    for (const id of candidates) {
+      for (let p = byId.get(id)?.parent; p; p = byId.get(p)?.parent) if (candidates.has(p)) ancestors.add(p);
+    }
+    const chosen = new Set([...candidates].filter((id) => !ancestors.has(id)));
     for (;;) {
       let merged = false;
       for (const id of chosen) {
         const parent = byId.get(id)?.parent;
         if (!parent || !candidates.has(parent)) continue;
         const kids = children.get(parent) ?? [];
-        if (!kids.every((kid) => chosen.includes(kid))) continue;
-        chosen = [parent, ...chosen.filter((other) => !kids.includes(other))];
+        if (!kids.length || !kids.every((kid) => chosen.has(kid))) continue;
+        for (const kid of kids) chosen.delete(kid);
+        chosen.add(parent);
         merged = true;
         break;
       }
       if (!merged) break;
     }
-    return chosen.sort((a, b) => order.get(a) - order.get(b));
+    return [...chosen].sort((a, b) => order.get(a) - order.get(b));
   };
 
   /** Where a flick comes to rest, from Designing Fluid Interfaces: an

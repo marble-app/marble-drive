@@ -183,14 +183,20 @@
       const el = record.el;
       const anchor = anchorOf(record.ids);
       if (!anchor) {
-        // Nothing left to point at: the chat is still reachable, bottom-right —
-        // above the marks toolbar when that is the corner it lives in. The
-        // toolbar's rest is not a fixed inset — it stacks above the drawer's
-        // own launcher, which sits at a height this layer does not know — so
-        // this measures where the toolbar actually is rather than adding a
-        // constant to PAD.
-        const toolbar = document.querySelector('.marble-marks-bar[data-corner="br"]:not([hidden])');
-        const bottom = toolbar ? innerHeight - toolbar.getBoundingClientRect().top + GAP : PAD;
+        // Nothing left to point at: the chat is still reachable, bottom-right,
+        // above whatever already lives down there. Neither piece sits at an
+        // inset this layer can assume — the drawer's launcher takes its own
+        // from the safe area, and the marks toolbar rests wherever it was
+        // last thrown, in a corner it remembers per document — so both are
+        // measured and the card clears the higher of the two. A toolbar in a
+        // top corner is not in the way at all; the launcher always is.
+        const floors = [];
+        const toolbar = document.querySelector('.marble-marks-bar:not([hidden])');
+        if (toolbar?.dataset.corner?.startsWith('b')) floors.push(toolbar.getBoundingClientRect());
+        const launcher = document.querySelector('marble-agent-drawer')?.shadowRoot?.querySelector('.launcher');
+        if (launcher) floors.push(launcher.getBoundingClientRect());
+        const clear = floors.filter((r) => r.width && r.height).map((r) => innerHeight - r.top + GAP);
+        const bottom = Math.max(PAD, ...clear);
         Object.assign(el.style, { left: 'auto', top: 'auto', right: `${PAD}px`, bottom: `${bottom}px` });
         return;
       }

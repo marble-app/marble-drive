@@ -148,7 +148,14 @@
       }
     }
     @media (prefers-reduced-motion: reduce) {
-      .marble-marks-main, .marble-marks-strip, .marble-marks-tool, .marble-marks-tool::after { transition: none; }
+      .marble-marks-main, .marble-marks-tool, .marble-marks-tool::after { transition: none; }
+      /* §5.7: every spring and slide becomes a cross-fade — a cross-fade, not
+         a blink. The strip keeps its opacity transition and loses only the
+         two properties that move it, the way the throw fades to its corner
+         instead of springing there. */
+      .marble-marks-strip {
+        transition: opacity 300ms ${EASE}, display 300ms allow-discrete;
+      }
       .marble-marks-strip, .marble-marks-strip[hidden] { transform: none; filter: none; }
     }
   `;
@@ -248,19 +255,54 @@
 
     // ------------------------------------------------------------ boxes
 
+    // Real documents here are not the size of a test fixture: the Pattern
+    // Atlas carries 21,587 addressed elements and a dozen more documents are
+    // past 1,500. Two things keep that from landing on a drag.
+    //
+    // The first is scope. The marquee is `position: fixed`, so a rectangle
+    // drawn in it can only ever mean something on screen: every box whose
+    // rect misses the viewport is dropped, and what reaches the geometry is
+    // the page you can see rather than the page you have. Off-screen
+    // *ancestors* of a box that was kept stay, because the coalescing rule
+    // reads the parent chain and a chain with a hole in it would coalesce
+    // wrongly. An addressed child scrolled out of view is simply not there,
+    // so a rectangle over everything visible can name the parent — which is
+    // what a person dragging over all of something means.
+    //
+    // The second is the parent walk. `closest()` on every element walks to
+    // the root every time; `querySelectorAll` hands them back in document
+    // order, so a stack of open ancestors answers the same question in one
+    // pass. `contains` on the way down is the only comparison it costs.
     const collectBoxes = () => {
       const els = [...document.querySelectorAll('[data-marble-id]')].filter((el) =>
         el !== document.body && el !== document.documentElement && !el.closest(`[${TRANSIENT}]`) && el.getRootNode() === document);
-      const known = new Set(els);
-      return els.map((el) => {
-        const r = el.getBoundingClientRect();
-        const parent = el.parentElement?.closest('[data-marble-id]');
-        return {
+      const parentOf = new Map();
+      const rects = new Map();
+      const open = [];
+      for (const el of els) {
+        while (open.length && !open[open.length - 1].contains(el)) open.pop();
+        parentOf.set(el, open[open.length - 1] ?? null);
+        open.push(el);
+        rects.set(el, el.getBoundingClientRect());
+      }
+      const keep = new Set();
+      for (const el of els) {
+        const r = rects.get(el);
+        if (r.bottom < 0 || r.right < 0 || r.top > innerHeight || r.left > innerWidth) continue;
+        keep.add(el);
+        for (let p = parentOf.get(el); p && !keep.has(p); p = parentOf.get(p)) keep.add(p);
+      }
+      const out = [];
+      for (const el of els) {
+        if (!keep.has(el)) continue;
+        const r = rects.get(el);
+        out.push({
           id: el.getAttribute('data-marble-id'),
-          parent: parent && known.has(parent) ? parent.getAttribute('data-marble-id') : null,
+          parent: parentOf.get(el)?.getAttribute('data-marble-id') ?? null,
           left: r.left, top: r.top, width: r.width, height: r.height,
-        };
-      });
+        });
+      }
+      return out;
     };
     const paintHits = (ids, boxes) => {
       const byId = new Map(boxes.map((box) => [box.id, box]));
@@ -282,18 +324,30 @@
 
     // ------------------------------------------------------------ Select
 
-    // Set on scroll and cleared inside `frame`: a scrolling document moves
-    // every box, but recomputing them all is real work, so a momentum
-    // scroll pays for one pass per frame rather than one per scroll event.
-    let boxesDirty = false;
     const rectOf = (d) => ({
       left: Math.min(d.x0, d.x1), top: Math.min(d.y0, d.y1),
       width: Math.abs(d.x1 - d.x0), height: Math.abs(d.y1 - d.y0),
     });
+    // A page scrolling under a drag moves every box the same distance, and
+    // the boxes are in client coordinates, so the scroll is a pure shift:
+    // translating what was measured at the press costs nothing, where
+    // re-measuring a long document costs the frame. What the shift cannot
+    // know is a `position: fixed` element, which does not move with the page
+    // — `finish` measures again before any id is committed for exactly that
+    // reason.
+    const shiftBoxes = () => {
+      if (!drag) return;
+      const dx = scrollX - drag.scrollX;
+      const dy = scrollY - drag.scrollY;
+      if (!dx && !dy) return;
+      for (const box of drag.boxes) { box.left -= dx; box.top -= dy; }
+      drag.scrollX = scrollX;
+      drag.scrollY = scrollY;
+    };
     const frame = () => {
       if (!drag) return;
       drag.raf = 0;
-      if (boxesDirty) { drag.boxes = collectBoxes(); boxesDirty = false; }
+      shiftBoxes();
       const r = rectOf(drag);
       Object.assign(marquee.style, { left: `${r.left}px`, top: `${r.top}px`, width: `${r.width}px`, height: `${r.height}px` });
       drag.ids = G().idsInRect(r, drag.boxes);
@@ -310,7 +364,10 @@
       cancelAnimationFrame(drag.raf);
       drag = null;
       marquee.hidden = true;
-      paintHits([], []);
+      // The pool lives for the drag, not for the page: it grows to the
+      // largest selection ever painted, and on a document of thousands of
+      // addressed elements that is thousands of divs left in the layer.
+      for (const hit of hits.splice(0)) hit.remove();
     };
 
     // ------------------------------------------------------------ the switch
@@ -338,7 +395,10 @@
       // Picking the tool leaves the strip up, so it can still be pinned or
       // swapped for another; the corner is only busy once a drag starts.
       collapse();
-      drag = { id: event.pointerId, x0: event.clientX, y0: event.clientY, x1: event.clientX, y1: event.clientY, boxes: collectBoxes(), ids: [], raf: 0 };
+      drag = {
+        id: event.pointerId, x0: event.clientX, y0: event.clientY, x1: event.clientX, y1: event.clientY,
+        boxes: collectBoxes(), scrollX, scrollY, ids: [], raf: 0,
+      };
       marquee.hidden = false;
       frame();
     });
@@ -352,9 +412,23 @@
       if (!drag || event.pointerId !== drag.id) return;
       cancelAnimationFrame(drag.raf);
       drag.raf = 0;
+      // The release point, not the last move: a finger usually travels a few
+      // pixels between the two, and the rectangle a person let go of is the
+      // one they meant.
+      drag.x1 = event.clientX;
+      drag.y1 = event.clientY;
+      // Measured again, once, before anything is committed. The live outline
+      // follows a scroll by translating the boxes from the press, which is
+      // wrong for a `position: fixed` element that stayed where it was — so
+      // the outline may drift a pixel mid-scroll, while the ids handed to an
+      // agent are always measured fresh. A briefly wrong outline and a wrong
+      // id reaching an agent are not mistakes of the same order.
+      drag.boxes = collectBoxes();
+      drag.scrollX = scrollX;
+      drag.scrollY = scrollY;
       frame();
       const ids = drag.ids;
-      const prior = event.type === 'pointerup' && event.shiftKey ? agent.context().selection : [];
+      const prior = event.shiftKey ? agent.context().selection : [];
       endDrag();
       const union = [...prior, ...ids.filter((id) => !prior.includes(id))];
       agent.select(union.length ? union : null);
@@ -362,9 +436,13 @@
       if (!pinned) setMode(null);
     };
     overlay.addEventListener('pointerup', finish);
-    overlay.addEventListener('pointercancel', finish);
+    // A cancel is not a release: a pinch during a marquee — which the
+    // overlay's `touch-action: pinch-zoom` invites — takes the pointer away
+    // mid-rectangle, and committing the half-drawn one would name whatever
+    // the hand happened to be over. Escape mid-drag discards; so does this.
+    overlay.addEventListener('pointercancel', (event) => { if (drag && event.pointerId === drag.id) endDrag(); });
     // Wheel passes through the overlay and the page moves under the drag.
-    addEventListener('scroll', () => { if (drag) { boxesDirty = true; scheduleFrame(); } }, true);
+    addEventListener('scroll', () => { if (drag) scheduleFrame(); }, true);
 
     // Escape inside a mode leaves it; Escape with a marquee selection standing
     // clears it, as Escape clears Option-picks.
@@ -388,61 +466,20 @@
     selectTool.addEventListener('click', () => setMode(mode === 'select' ? null : 'select'));
     selectTool.addEventListener('dblclick', () => pin('select'));
 
-    // ------------------------------------------------------------ the corner
+    // ------------------------------------------------------------ the drawer
     //
-    // The page's edge, not the viewport's: a pinned drawer takes the right
-    // side of <html> with a margin, and a toolbar under the drawer is lost.
-
-    const edges = () => {
-      const r = document.documentElement.getBoundingClientRect();
-      return { left: Math.max(0, r.left), right: Math.min(innerWidth, r.right), top: 0, bottom: innerHeight };
-    };
-    // The drawer's own launcher already lives in this corner (its CSS is in
-    // runtime/agent-ui.js). Its box does not move when the drawer opens —
-    // only its opacity does — so measuring it here is stable, and the
-    // toolbar never jumps once it has settled clear of it.
-    const launcherRect = () => document.querySelector('marble-agent-drawer')?.shadowRoot?.querySelector('.launcher')?.getBoundingClientRect() ?? null;
-    const stored = localStorage.getItem(cornerKey(app));
-    let corner = CORNERS.has(stored) ? stored : 'br';
-    bar.dataset.corner = corner;
-    let pos = { x: 0, y: 0 };
-    const restingPoint = (which) => {
-      const e = edges();
-      // SIZE, not bar.offsetWidth/offsetHeight: the bar is display:none while
-      // the drawer is open and unpinned (below), and a resize during that
-      // window would otherwise compute the rest from a zero-size box —
-      // landing flush in the corner and staying there once the bar reappears,
-      // since nothing else re-settles it.
-      const x = which.endsWith('l') ? e.left + PAD : e.right - PAD - SIZE;
-      let y = which.startsWith('t') ? e.top + PAD : e.bottom - PAD - SIZE;
-      // A document with agents off, or the Agents page, has no drawer to clear.
-      const l = launcherRect();
-      if (l) {
-        const overlaps = x < l.right && x + SIZE > l.left && y < l.bottom && y + SIZE > l.top;
-        // Stack clear of it instead of sitting on it: up from a bottom
-        // corner, down from a top one. The corner now reads bottom-up as
-        // launcher, toolbar, and — later — a callout with nothing to point at.
-        if (overlaps) y = which.startsWith('t') ? l.bottom + GAP : l.top - GAP - SIZE;
-      }
-      return { x, y };
-    };
-    const paint = () => { bar.style.transform = `translate3d(${Math.round(pos.x)}px, ${Math.round(pos.y)}px, 0)`; };
-    // Overridden in Task 6 to stay out of the way of a drag or a flight.
-    let settle = () => { pos = restingPoint(corner); paint(); };
-    let raf = 0;
-    const schedule = () => { if (!raf) raf = requestAnimationFrame(() => { raf = 0; settle(); syncHidden(); }); };
-    addEventListener('resize', schedule);
-    // The dock changes <html>'s width without a resize event.
-    new ResizeObserver(schedule).observe(document.documentElement);
-    settle();
-
     // The marks layer is a top-layer popover, so an unpinned drawer panel
     // would otherwise float underneath the toolbar's own corner — a card
     // parked on top of the very conversation it covers. Pinned is different:
     // the page is docked and the toolbar belongs to the page's own area,
-    // already tracked by edges() above, so it moves in with the edge rather
+    // already tracked by edges() below, so it moves in with the edge rather
     // than hiding. On a phone the drawer is never pinned, so this one rule
     // also covers the phone-sheet case the brief asked for separately.
+    //
+    // This block comes before the corner's because the corner's code reads
+    // it: `schedule` calls `syncHidden`, and the launcher is measured
+    // through `drawerHost`. It used to sit below, and worked only because a
+    // ResizeObserver never calls back synchronously.
     const drawerHost = () => document.querySelector('marble-agent-drawer');
     const drawerPanel = () => drawerHost()?.shadowRoot?.querySelector('.panel') ?? null;
     const drawerOpen = () => {
@@ -456,10 +493,80 @@
     // the injection order in server/app.js — agent-ui.js's script tag (and so
     // its drawer mount) always runs before this file's — so the shadow root
     // already exists here. Reordering those tags would make this observer
-    // silently never attach, with no error to point at why.
+    // silently never attach, with no error to point at why; the order is
+    // held by a line in test/agent-http.test.js.
     const drawerRoot = drawerHost()?.shadowRoot;
     if (drawerRoot) new MutationObserver(syncHidden).observe(drawerRoot, { subtree: true, attributes: true, attributeFilter: ['data-pinned'] });
     syncHidden();
+
+    // ------------------------------------------------------------ the corner
+    //
+    // The page's edge, not the viewport's: a pinned drawer takes the right
+    // side of <html> with a margin, and a toolbar under the drawer is lost.
+
+    const edges = () => {
+      const r = document.documentElement.getBoundingClientRect();
+      return { left: Math.max(0, r.left), right: Math.min(innerWidth, r.right), top: 0, bottom: innerHeight };
+    };
+    // The drawer's own launcher already lives in this corner (its CSS is in
+    // runtime/agent-ui.js). Its box does not move when the drawer opens —
+    // only its opacity does — so measuring it here is stable, and the
+    // toolbar never jumps once it has settled clear of it.
+    const launcherRect = () => drawerHost()?.shadowRoot?.querySelector('.launcher')?.getBoundingClientRect() ?? null;
+    // `agent.storage`, not `localStorage`: it is the try/catch every other
+    // runtime file here reads and writes through. Raw storage throws where a
+    // person has it turned off, and this read runs during boot — the whole
+    // toolbar would fail to appear, with no toolbar-shaped error to find.
+    const stored = agent.storage.get(cornerKey(app));
+    let corner = CORNERS.has(stored) ? stored : 'br';
+    bar.dataset.corner = corner;
+    let pos = { x: 0, y: 0 };
+    // The throw's state is declared here, not beside the throw below, because
+    // `settle` is the one piece that has to know about it: nothing re-seats
+    // the bar while a hand or a flight still has hold of it.
+    let hold = null;
+    let flight = 0;
+    const restingPoint = (which) => {
+      const e = edges();
+      // A document with agents off, or the Agents page, has no drawer.
+      const l = launcherRect();
+      const centre = l?.width ? { x: l.left + l.width / 2, y: l.top + l.height / 2 } : null;
+      // Where the launcher shares this corner, the toolbar takes its inset
+      // from the launcher's measured box instead of from PAD, and the two
+      // stand in one column. Three pieces of corner chrome at three insets
+      // read as a staircase — and the insets are not even comparable: the
+      // launcher's is `calc(20px + env(safe-area-inset-right))` and PAD is a
+      // bare 16, so on a phone in landscape, where the safe area is about
+      // 44px, the toolbar would sit beside the launcher rather than above it,
+      // partly under the display cutout. Measuring the launcher inherits its
+      // safe-area handling for free. PAD is the inset for a corner the
+      // toolbar has to itself. A pinned drawer leaves the launcher outside
+      // the page's own edges, which is one of those corners.
+      const shared = Boolean(centre) && centre.x >= e.left && centre.x <= e.right
+        && G().nearestCorner({ x: centre.x - e.left, y: centre.y - e.top }, { width: e.right - e.left, height: e.bottom - e.top }) === which;
+      // SIZE, not bar.offsetWidth/offsetHeight: the bar is display:none while
+      // the drawer is open and unpinned (above), and a resize during that
+      // window would otherwise compute the rest from a zero-size box —
+      // landing flush in the corner and staying there once the bar reappears,
+      // since nothing else re-settles it.
+      const x = shared ? centre.x - SIZE / 2 : (which.endsWith('l') ? e.left + PAD : e.right - PAD - SIZE);
+      // Stack clear of the launcher instead of sitting on it: up from a
+      // bottom corner, down from a top one. The corner reads bottom-up as
+      // launcher, toolbar, and — later — a callout with nothing to point at.
+      const y = shared
+        ? (which.startsWith('t') ? l.bottom + GAP : l.top - GAP - SIZE)
+        : (which.startsWith('t') ? e.top + PAD : e.bottom - PAD - SIZE);
+      return { x, y };
+    };
+    const paint = () => { bar.style.transform = `translate3d(${Math.round(pos.x)}px, ${Math.round(pos.y)}px, 0)`; };
+    // Resize and the dock re-seat the bar, unless a hand or a flight has it.
+    const settle = () => { if (hold?.moved || flight) return; pos = restingPoint(corner); paint(); };
+    let raf = 0;
+    const schedule = () => { if (!raf) raf = requestAnimationFrame(() => { raf = 0; settle(); syncHidden(); }); };
+    addEventListener('resize', schedule);
+    // The dock changes <html>'s width without a resize event.
+    new ResizeObserver(schedule).observe(document.documentElement);
+    settle();
 
     // ------------------------------------------------------------ throwing it
     //
@@ -469,8 +576,6 @@
     // bounce carries the bar there starting at the hand's speed — the only
     // motion in this layer that has momentum behind it.
 
-    let hold = null;
-    let flight = 0;
     let justDragged = false;
     const stopFlight = () => { cancelAnimationFrame(flight); flight = 0; };
     const velocityOf = (history) => {
@@ -518,9 +623,6 @@
       };
       flight = requestAnimationFrame(step);
     };
-    // Resize and the dock re-seat the bar, unless a hand or a flight has it.
-    settle = () => { if (hold?.moved || flight) return; pos = restingPoint(corner); paint(); };
-
     main.addEventListener('pointerdown', (event) => {
       // A second touch while the first is still down would otherwise
       // overwrite `hold` out from under it: the first pointer's later
@@ -529,6 +631,12 @@
       // pointer with the threshold and grab offset reset. The Select
       // overlay had the same bug and was fixed the same way.
       if (event.button !== 0 || hold) return;
+      // A throw that was cancelled rather than released — the drawer opening
+      // over the bar, the browser taking the pointer away — sets
+      // `justDragged` and is never followed by the click that clears it, so
+      // the flag would latch and swallow the next real tap. A press starts
+      // clean.
+      justDragged = false;
       main.setPointerCapture(event.pointerId);
       stopFlight();
       hold = { id: event.pointerId, sx: event.clientX, sy: event.clientY, gx: event.clientX - pos.x, gy: event.clientY - pos.y, moved: false, history: [] };
@@ -572,7 +680,10 @@
         { width: e.right - e.left, height: e.bottom - e.top },
       );
       bar.dataset.corner = corner;
-      localStorage.setItem(cornerKey(app), corner);
+      // Wrapped for the same reason as the read above, and one more: a throw
+      // here would abort the release before `flyTo` and strand the bar in
+      // mid-air, where the hand let go of it.
+      agent.storage.set(cornerKey(app), corner);
       flyTo(restingPoint(corner), velocity);
     };
     main.addEventListener('pointerup', release);

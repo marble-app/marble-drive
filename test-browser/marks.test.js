@@ -12,7 +12,27 @@ const AGENTS = (await fsp.readFile(AGENTS_TEMPLATE, 'utf8'))
   .replaceAll('__ID__', () => Math.random().toString(36).slice(2, 10))
   .replace('__ICON__', '');
 
-const host = await startDrive({ documents: { garden: GARDEN, Agents: AGENTS } });
+// A page taller than the window, with a row below the fold and a banner that
+// does not move when the page does. The garden fixture is five elements in
+// one screen and can say nothing about either.
+const TALL = `<!doctype html>
+<html><head><meta charset="utf-8"><title>Tall</title>
+<style>
+  body { margin: 0; font: 16px/1.5 system-ui, sans-serif; }
+  .banner { position: fixed; top: 0; left: 0; right: 0; height: 60px; background: #eee; }
+  .gap { height: 1000px; }
+  .row { height: 120px; background: #f6f6f6; }
+  .tail { height: 1500px; }
+</style></head>
+<body data-marble-id="b">
+  <div class="banner" data-marble-id="banner">Pinned to the window</div>
+  <div class="gap" data-marble-id="gap"></div>
+  <div class="row" data-marble-id="r1">Below the fold until you scroll</div>
+  <div class="tail" data-marble-id="tail"></div>
+</body></html>
+`;
+
+const host = await startDrive({ documents: { garden: GARDEN, Agents: AGENTS, tall: TALL } });
 test.after(() => host.close());
 
 const pages = [];
@@ -39,15 +59,25 @@ const barBox = (page) => page.evaluate(() => {
   const r = document.querySelector('.marble-marks-bar').getBoundingClientRect();
   return { left: r.left, top: r.top, right: r.right, bottom: r.bottom, width: r.width, height: r.height };
 });
+const launcherBox = (page) => page.evaluate(() => {
+  const r = document.querySelector('marble-agent-drawer').shadowRoot.querySelector('.launcher').getBoundingClientRect();
+  return { left: r.left, top: r.top, right: r.right, bottom: r.bottom, width: r.width, height: r.height };
+});
+// The toolbar takes its horizontal inset from the launcher it stacks on, not
+// from its own PAD: the launcher's inset carries `env(safe-area-inset-right)`
+// and the toolbar's would not, so two round buttons 6px out of true on a
+// desktop are a whole notch apart on a phone in landscape. Above it, centred
+// on it, one column.
+const stackedOnLauncher = (box, launcher) => {
+  const drift = Math.abs((box.left + box.width / 2) - (launcher.left + launcher.width / 2));
+  assert.ok(drift <= 1, `toolbar centre is ${drift}px off the launcher's`);
+  assert.ok(Math.abs(box.bottom - (launcher.top - 12)) <= 1, `bottom edge at ${box.bottom}, launcher top at ${launcher.top}`);
+};
 
 test('every document gets the toolbar in the bottom-right corner above the drawer\'s launcher; the Agents page does not', async () => {
   const page = await open();
   await bar(page).waitFor();
-  const box = await barBox(page);
-  assert.ok(Math.abs(box.right - (1200 - 16)) <= 1, `right edge at ${box.right}`);
-  const launcherTop = await page.evaluate(() =>
-    document.querySelector('marble-agent-drawer').shadowRoot.querySelector('.launcher').getBoundingClientRect().top);
-  assert.ok(Math.abs(box.bottom - (launcherTop - 12)) <= 1, `bottom edge at ${box.bottom}, launcher top at ${launcherTop}`);
+  stackedOnLauncher(await barBox(page), await launcherBox(page));
   assert.equal(await page.evaluate(() => document.querySelector('.marble-marks-layer').hasAttribute('data-marble-transient')), true);
   assert.equal(await main(page).getAttribute('aria-expanded'), 'false');
 
@@ -101,11 +131,7 @@ test('a resize while the drawer is open does not strand the toolbar when it reap
   await page.setViewportSize({ width: 1000, height: 700 });
   await drawer.locator('button.close').click();
   await page.waitForFunction(() => !document.querySelector('.marble-marks-bar').hidden);
-  const box = await barBox(page);
-  assert.ok(Math.abs(box.right - (1000 - 16)) <= 1, `right edge at ${box.right}`);
-  const launcherTop = await page.evaluate(() =>
-    document.querySelector('marble-agent-drawer').shadowRoot.querySelector('.launcher').getBoundingClientRect().top);
-  assert.ok(Math.abs(box.bottom - (launcherTop - 12)) <= 1, `bottom edge at ${box.bottom}, launcher top at ${launcherTop}`);
+  stackedOnLauncher(await barBox(page), await launcherBox(page));
 });
 
 test('pinning the drawer moves the toolbar in with the page edge', async () => {
@@ -153,12 +179,27 @@ test('the button opens a strip holding Select, out of its own corner, and closes
   assert.equal(await main(page).getAttribute('aria-expanded'), 'false');
 });
 
-test('under reduced motion the strip appears with no animation', async () => {
+test('under reduced motion the strip cross-fades in rather than blinking', async () => {
   const page = await open('garden', { reducedMotion: 'reduce' });
   await bar(page).waitFor();
   await main(page).click();
+  // §5.7: every spring and slide becomes a cross-fade. Nothing about the
+  // strip may move — but it still arrives, and `transition: none` would take
+  // the fade away with the scale and leave a blink. Read while it is still
+  // running, before the 300ms is up.
+  const props = await strip(page).evaluate((el) => el.getAnimations()
+    .flatMap((a) => a.effect.getKeyframes())
+    .flatMap((frame) => Object.keys(frame).filter((key) => !['offset', 'computedOffset', 'easing', 'composite'].includes(key))));
+  assert.ok(props.includes('opacity'), `the fade is running, got ${props.join(', ') || 'nothing at all'}`);
+  assert.ok(!props.includes('transform') && !props.includes('filter'), `nothing moves, got ${props.join(', ')}`);
   await strip(page).waitFor();
-  assert.equal(await strip(page).evaluate((el) => el.getAnimations().length), 0);
+  const settled = await strip(page).evaluate((el) => {
+    const style = getComputedStyle(el);
+    return { transform: style.transform, filter: style.filter, transition: style.transitionProperty };
+  });
+  assert.equal(settled.transform, 'none');
+  assert.equal(settled.filter, 'none');
+  assert.ok(!/transform|filter/.test(settled.transition), `only opacity and display transition, got ${settled.transition}`);
 });
 
 const drag = async (page, from, to, { shift = false } = {}) => {
@@ -224,6 +265,27 @@ test('a marquee that grazes an element selects nothing, and a fresh text selecti
     getSelection().addRange(range);
   });
   await page.waitForFunction(() => JSON.stringify(window.marble.agent.context().selection) === '["h"]');
+});
+
+test('a page that scrolls under a drag commits what is on screen when the hand lets go', async () => {
+  const page = await open('tall');
+  await bar(page).waitFor();
+  await enterSelect(page);
+  // The boxes are measured at the press and translated by the scroll after
+  // it, which is what keeps a momentum scroll off the frame budget. Two
+  // things that translation cannot know: a row that was below the fold and
+  // was never measured, and the banner, which is `position: fixed` and did
+  // not move with the page at all. `finish` measures again before it commits
+  // for exactly that reason.
+  await page.mouse.move(1190, 380);
+  await page.mouse.down();
+  await page.mouse.move(1100, 420, { steps: 4 });
+  await page.mouse.wheel(0, 600);
+  await page.waitForFunction(() => scrollY >= 590);
+  await page.mouse.move(5, 540, { steps: 6 });
+  await page.mouse.up();
+  await page.waitForFunction(() => window.marble.agent.context().selection.length > 0);
+  assert.deepEqual(await selection(page), ['r1'], 'the row that scrolled into view, and not the banner that never moved');
 });
 
 test('Shift adds a second marquee; Escape leaves the mode and then clears the selection', async () => {
