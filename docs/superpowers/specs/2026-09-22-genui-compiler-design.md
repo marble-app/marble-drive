@@ -1,7 +1,7 @@
 # The GenUI compiler: a screen spec that runs, and can be turned
 
 **Date:** 2026-09-22
-**Status:** design, awaiting review
+**Status:** design, awaiting review (revised 2026-09-22 — the division of labour, §2)
 **Builds on:** `2026-09-21-writing-screens-composition-study-design.md` (the grammar, v1–v6, and the 40 screens),
 `2026-09-18-genui-authored-spaces-design.md` (the app-space contract), `2026-09-18-genui-generate-design.md` (the engine)
 **Method:** stage 9 of `method.json`, *demonstrate across domains and stakeholders*; feeds stage 11.
@@ -30,11 +30,95 @@ counts what can be stated but has nothing to *render*: a `malleability: true` on
 CSS can express is a hole the composition checker cannot see, because the spec is well-formed.
 Same loop as the composition study — compile, count the holes, fill, migrate.
 
-## 2. What it produces
+## 2. The division of labour
 
-`node tools/compile.mjs <screen-id>` reads a screen from `genui/rounds/*.mjs` (or a spec JSON)
-and writes `drive/Spaces/<screen-id>.mrbl`: a real app space, served by the host, that satisfies
-`validateSpace` from `server/genui/space.js`.
+> **The LLM builds the space. Jev positions within it. Neither does the other's job.**
+
+Everything up to and including the creation of the design space is authoring, and authoring is
+generative: it decides what the screen *is*, and its output is a space of possible screens.
+Everything after is positioning: choosing one point in a space that already exists, from options
+that are already built. Jev is very good at the second and has no business doing the first.
+
+**This moves the root-pattern decision off Jev.** `POST /genui/root` asks Jev to pick one pattern
+from `ROOT_PATTERNS`, a 13-item constant, and that has been the wrong shape all along — the
+corpus says so plainly:
+
+| Measured over the 40 written screens | |
+|---|---|
+| screens that are a single pattern — what one L0 Choice can express | **0** |
+| screens made entirely of `ROOT_PATTERNS` entries | **0** |
+| distinct patterns actually used | **65** |
+| patterns used that are not on the 13-item menu | **52** |
+
+A real screen is four or five patterns in relation to each other. "Which pattern" is not a
+decision with a menu; it is the first line of the authoring, and it belongs to whatever writes
+the spec.
+
+**What is lost, and what replaces it.** L0 gave a bounded menu, a confidence and a probability
+distribution — an off-menu answer was a 502. Giving that to the LLM gives it up. The replacement
+is the checker: an LLM-written spec must pass `grammar-check.mjs`, so every pattern must resolve
+to a real Atlas entry, every `config` key to a real sub-dimension, and every value to a named
+variation. The guarantee is weaker per decision and much broader in reach, and — unlike a
+confidence score — it is a proof rather than an estimate.
+
+Jev keeps the job it is actually good at, and its guardrails are untouched: criteria are only the
+options the document implements, off-menu is refused, below 0.75 keeps the author's default,
+pinned never moves.
+
+## 2a. The pipeline
+
+```
+  PROMPT
+    │
+    ▼   ┌── LLM ─────────────────────────────────────────────────────┐
+        │  agent turn. Writes a screen spec in the grammar:          │
+        │  sources, instances, config, relations, malleability.      │
+        │  UNBOUNDED — this is the whole generative step.            │
+        └────────────────────────────────────────────────────────────┘
+    │  screen spec (JSON, grammar vN)
+    ▼   ┌── CHECK ── grammar-check.mjs checkScreen() ────────────────┐
+        │  deterministic. Patterns, keys and variations must resolve │
+        │  against the codebook. Errors go back to the LLM verbatim. │
+        └────────────────────────────────────────────────────────────┘
+    │  valid spec
+    ▼   ┌── COMPILE ── tools/compile.mjs ───────────────────────────┐
+        │  deterministic, NO MODEL. Renderers build the markup and  │
+        │  the CSS for every option; malleability becomes           │
+        │  declarations.                                            │
+        └───────────────────────────────────────────────────────────┘
+    │  SPACE₁ — the app space. A finite, countable set of screens.
+    ▼   ┌── POSITION ── POST /genui/decide ── JEV ──────────────────┐
+        │  one Choice per live dimension, criteria = only what this │
+        │  document implements. Output is setAttr ops, never markup.│
+        └───────────────────────────────────────────────────────────┘
+    │  the first show
+    ▼
+  THE RUNNING UI ──── a person turns a control ────┐
+    ▲                                              │
+    └──────── same attribute, same CSS ────────────┘
+```
+
+The last two steps are the same mechanism. Jev positioning the screen and the person turning a
+control both write one attribute on an instance root, and CSS does the rest. **A generated
+interface and a customized one differ only in who moved** — which is the cleanest statement of
+the thesis the demo can make, and it falls out of the architecture rather than being argued for.
+
+## 2b. The repair loop
+
+The LLM writes a spec; `checkScreen` accepts it or returns errors; the errors go back verbatim
+and it tries again, three attempts, then fails loudly. Same posture as `gateWithRepair` elsewhere
+in this repo and as `decide.js`'s refusal of an off-menu answer: a wrong-shaped answer is a bug
+to see, not data to smooth over.
+
+**Sequencing.** The compiler is built and trusted *before* a model is put in front of it (M1–M3
+below use specs written by hand, from the corpus). A failure in an LLM-written spec is otherwise
+unattributable — grammar, renderer or model, with no way to tell which.
+
+## 2c. What the compiler produces
+
+`node tools/compile.mjs <screen-id>` reads a screen from `genui/rounds/*.mjs` (or any spec JSON
+that passes the checker, including an LLM-written one) and writes `drive/Spaces/<screen-id>.mrbl`:
+a real app space, satisfying `validateSpace` from `server/genui/space.js`.
 
 The output is an app space in the existing contract, not a new format:
 
@@ -47,12 +131,25 @@ The output is an app space in the existing contract, not a new format:
 - `data-genui-excludes` where the spec's `constraints` forbid a pair
 
 Because it is that contract, three things come free: `marble-drive genui space <doc>` validates it,
-`marble-drive genui decide <doc>` lets Jev re-position it, and `GET /genui/spaces` lists it — so
-the existing GenUI page can open a compiled screen with no new route.
+`marble-drive genui decide <doc>` lets Jev position it, and `GET /genui/spaces` lists it — so the
+existing GenUI page can open a compiled screen with no new route.
 
 The hand-authored `test/fixtures/genui/metrics.mrbl` (dashboard#ops + stat-tile#kpi + chart#trend,
-11 KB, every option implemented in CSS) is the quality bar for screen one. The compiler's output
-should be at least as good, from the spec alone.
+11 KB, every option implemented in CSS) is the quality bar for screen one: 9 live dimensions,
+**5,832 distinct screens** from one document. The compiler's output should be at least as good,
+from the spec alone.
+
+### The tension worth naming
+
+Eighteen hand-written renderers will make every compiled screen look like the same application.
+An LLM writing CSS directly produces something bespoke each time, and that variety is most of
+what makes a GenUI demo feel like one. Trading it away is a real cost, not a neutral refactor.
+
+The resolution, if it proves necessary: the compiler owns **structure and options** — the
+declarations and the implementation of every variation, which must be complete and checkable —
+and the LLM may author a **skin**: presentation CSS layered over a compiled structure, touching
+no declaration and no option rule. Not built in M1. Recorded here so the choice is deliberate
+when the first three screens look like siblings.
 
 ## 3. Three units
 
@@ -187,6 +284,9 @@ later screen is only what it adds.
   actually differs. The validator matches bytes; this catches a rule that matches and does
   nothing — the failure mode that would make the malleability claim false while every check is
   green.
+- **The repair loop (M4).** The checker's errors are fed back and the retry is bounded at three;
+  tested with a deliberately invalid spec (a `config` naming a variation that does not exist), so
+  the loop is exercised without needing a model that happens to fail.
 - **Report.** `tools/compile-report.mjs` → a render-hole table: dimension, screen, why it could
   not be rendered. This is the study output, and the input to the next round.
 
@@ -198,14 +298,25 @@ Not in this work: the other 36 screens; the nine unimplemented relation kinds; a
 `genui/grammar.schema.json` and tolerates constructs it does not know, so v7 landing mid-build
 changes nothing here.
 
-No changes to `server/genui/*`: it is imported as a library and left alone. If the compiled
-screens need a route of their own, that is a later piece of work.
+No changes to `server/genui/*` in M1–M3: it is imported as a library and left alone.
+
+`POST /genui/root` and `ROOT_PATTERNS` leave the pipeline at M4, but are **not deleted** —
+`drive/GenUI.mrbl` still calls the route and draws an L0 node with confidence bars. Migrating
+that page to the spec pipeline is its own piece of work, scoped after M4; until then the two
+paths coexist and the route keeps working. Removing it before the page moves would break the
+only front end GenUI has.
 
 ## 10. Milestones
+
+The deterministic path is built and trusted first; the model goes in front of it last.
 
 1. **M1** — `resolve` + five renderers + `observe` compiled, validating, and turnable in a browser.
 2. **M2** — `triage`, on the coded entry; `alternative` and `reports` working.
 3. **M3** — `views`; the recognisable switch; the first render-hole report across three screens.
-4. **Stress** — `frontdoor` compiled for its holes, and the report written up as the third instrument.
+4. **M4 — the LLM in front.** A `genui-spec` skill: prompt → screen spec → checker → repair →
+   compile → Jev positions the first show. The end-to-end pipeline of §2a, on a prompt that was
+   never in the corpus. This is the demo.
+5. **Stress** — `frontdoor` compiled for its holes, and the report written up as the third
+   instrument.
 
 Check in at each; decisions taken along the way are recorded here rather than asked.
