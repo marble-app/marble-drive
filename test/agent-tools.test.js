@@ -215,6 +215,14 @@ test('list and guide', async () => {
   assert.match(section.text, /setInner/);
   const grow = await tools.call('read_guide', { section: 'growing the open page' }, turn);
   assert.match(grow.text, /insert a stub/i);
+  // The section carries the whole staged method, subsections included: the
+  // splitter cuts on "## " and a "### " heading is not one.
+  assert.match(grow.text, /### What a stage is/);
+  assert.match(grow.text, /### Filler/);
+  assert.match(grow.text, /Whole\./);
+  assert.match(grow.text, /Continuous\./);
+  assert.match(grow.text, /Named\./);
+  assert.match(grow.text, /Stage 2 of 4/);
 });
 
 test('a path outside the drive is an error', async () => {

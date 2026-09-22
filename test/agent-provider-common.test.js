@@ -16,16 +16,30 @@ test('the instructions name every tool and the rules the tools enforce', () => {
   assert.ok(INSTRUCTIONS.includes('"type":"setText"'));
 });
 
-test('a documents agent is told to insert a stub that matches the surrounding UI, then fill it', () => {
+test('a documents agent is told to insert a stub that matches the surrounding UI, then refine it in stages', () => {
   assert.match(INSTRUCTIONS, /insert a stub/i);
   assert.match(INSTRUCTIONS, /surrounding/i);
-  assert.match(INSTRUCTIONS, /fill it/i);
+  assert.match(INSTRUCTIONS, /in stages/i);
+  assert.match(INSTRUCTIONS, /three to six stages/i);
+  assert.match(INSTRUCTIONS, /whole, plainer version/i);
+});
+
+test('a stage keeps its ids, names itself in the note, and retires its filler', () => {
+  for (const text of [INSTRUCTIONS, instructionsFor('full')]) {
+    assert.match(text, /keeps the id from the stage that introduced it/i);
+    assert.match(text, /never remove an element to reinsert its finished form/i);
+    assert.match(text, /Stage 2 of 4/);
+    assert.match(text, /page itself never narrates/i);
+    assert.match(text, /filler/i);
+    assert.match(text, /read_guide "Growing the open page"/);
+  }
 });
 
 test('a full agent grows a document the person is viewing instead of Writing the finished subtree', () => {
   const full = instructionsFor('full');
   assert.match(full, /person is viewing/i);
   assert.match(full, /do not Write the finished/i);
+  assert.match(full, /in stages/i);
 });
 
 test('a probe reports what the command printed and how it exited', async () => {

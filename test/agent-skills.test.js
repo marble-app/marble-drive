@@ -36,6 +36,7 @@ test('the drive ships growing-the-open-page so every agent workspace can load it
   const body = await fsp.readFile(path.join(grow.dir, 'SKILL.md'), 'utf8');
   assert.match(body, /read_guide/);
   assert.match(body, /Growing the open page/);
+  assert.match(body, /stages/);
   assert.doesNotMatch(body, /under construction/i);
 });
 
