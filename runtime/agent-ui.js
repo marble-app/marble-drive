@@ -3347,6 +3347,28 @@
       placeCaret(this.input);
     }
 
+    /** Say this, as soon as there is somebody to say it to. A card built a
+     *  moment ago is still asking the host which agents exist, and `submit`
+     *  refuses without one — so a brief handed over by another layer waits for
+     *  the picker instead of failing in front of the person who wrote it. */
+    async sendNow(text) {
+      this.draft(text);
+      await this.whenAgents();
+      return this.submit();
+    }
+
+    whenAgents({ within = 8000 } = {}) {
+      if (this.getAttribute('conversation') || radioValue(this.shadowRoot, 'agent')) return Promise.resolve();
+      return new Promise((resolve) => {
+        const done = () => { clearTimeout(timer); watch.disconnect(); resolve(); };
+        const watch = new MutationObserver(() => { if (radioValue(this.shadowRoot, 'agent')) done(); });
+        watch.observe(this.agentBox ?? this.shadowRoot, { childList: true, subtree: true, attributes: true });
+        // Nobody is coming: `submit` says so in the card, which is where "no
+        // agent is ready on this machine" belongs.
+        const timer = setTimeout(done, within);
+      });
+    }
+
     // ---------------------------------------------------------- loading
 
     async load() {
@@ -6487,7 +6509,15 @@
       this.pinned = api.storage.get(PIN_KEY) === '1';
       this.width = this.clampWidth(this.readStoredWidth());
       const current = api.current();
-      if (current) this.view.setAttribute('conversation', current);
+      // A conversation handed over by something else: the Drive, once it has made
+      // a document from a template and briefed an agent at it; a link somebody
+      // sent. It sits beside collab's `#at=<ids>`, which lands you on elements
+      // rather than on a chat — and it outranks what was last remembered here,
+      // because being handed one is a decision somebody just made.
+      const handed = /(?:^|[#&])chat=([\w-]+)/.exec(location.hash)?.[1] ?? null;
+      if (handed) api.remember(handed);
+      const showing = handed ?? current;
+      if (showing) this.view.setAttribute('conversation', showing);
 
       // Pinned, the launcher does not go away, so it has to be able to say
       // "enough" as well as "come here".
@@ -6583,7 +6613,10 @@
         this.showMeta(this.meta);
       }).catch(() => {});
 
-      if (api.storage.get(OPEN_KEY) === '1') this.open({ animate: false });
+      // Handed a conversation, the drawer opens whether or not it was left open:
+      // arriving at a document to watch something being built in it and finding
+      // the panel shut is arriving at nothing.
+      if (handed || api.storage.get(OPEN_KEY) === '1') this.open({ animate: false });
       else this.render();
       this.unwatchUsage = watchUsage(this.usageEl);
       this.fillTray();

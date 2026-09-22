@@ -48,6 +48,22 @@ async function visit(path = 'garden', options = {}) {
 
 const opened = (panel) => panel.locator('xpath=self::*[@data-open="true"]').waitFor();
 
+test('a document opened with #chat= arrives with that conversation open', async () => {
+  await host.reset();
+  const started = await fetch(`${host.base}/agent/conversations`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ provider: 'fake' }),
+  });
+  const { id } = await started.json();
+
+  const { page, panel, view } = await visit(`garden#chat=${id}`);
+  await opened(panel);
+  assert.equal(await view.getAttribute('conversation'), id);
+  // And it is remembered, so the next document in this tab shows the same chat.
+  assert.equal(await page.evaluate(() => window.marble.agent.current()), id);
+});
+
 test('the drawer is on the page and not in the document', async () => {
   await host.reset();
   const { page, drawer, panel, errors } = await visit();
