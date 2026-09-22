@@ -286,3 +286,37 @@ test('the cut is a filter, not a filing: nothing is archived by the clock', asyn
   await page.locator('.filter[data-filter="archived"]').click();
   await page.waitForFunction((id) => document.querySelector(`.conv[data-id="${id}"]`)?.hidden === true, ids[0]);
 });
+
+/** The track's two answers — All chats and 5 min — are at its ends, and the
+ *  ends are a dozen pixels from the edge of the panel. A drag to either one
+ *  overshoots into the page, and the hand then lets go out there and presses
+ *  again to carry on. That second press is not somebody dismissing the panel. */
+test('the panel stays under a slider drag that overshoots it', async () => {
+  const { page, errors } = await openAgents();
+  await startChats(page, 2);
+  await openFilters(page);
+  const pop = await page.locator('.filter-pop').boundingBox();
+  const track = await page.locator('.filter-pop .idle-range').boundingBox();
+  const y = track.y + track.height / 2;
+  const open = () => page.locator('.filterbox[data-open]').count();
+
+  await page.mouse.move(track.x + track.width * 0.5, y);
+  await page.mouse.down();
+  await page.mouse.move(pop.x + pop.width + 60, y, { steps: 8 });
+  assert.equal(await open(), 1, 'a held drag past the panel keeps it open');
+  await page.mouse.up();
+  assert.equal(await open(), 1, 'and letting go out there does not shut it');
+  // The hand comes straight back for another go, from where it left off.
+  await page.mouse.down();
+  await page.mouse.move(pop.x + pop.width * 0.5, y, { steps: 6 });
+  assert.equal(await open(), 1, 'the panel is still there for the rest of the drag');
+  await page.mouse.up();
+
+  // A press somewhere else is still a dismissal.
+  await page.mouse.move(pop.x + pop.width / 2, pop.y + pop.height + 160);
+  await page.waitForTimeout(450);
+  await page.mouse.down();
+  await page.mouse.up();
+  assert.equal(await open(), 0, 'a press elsewhere still puts the panel away');
+  assert.deepEqual(errors, []);
+});

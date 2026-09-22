@@ -87,6 +87,9 @@ const RUNTIME = {
   // Marble's carrier, served from the package. Not copied into this repo: two
   // copies of the contract is how two hosts stop rendering a file the same way.
   'marble.js': () => enginePath('runtime/marble.js'),
+  // The vocabulary reader: what an element affords, and the op each gesture
+  // would file. A reader, not an affordance — it wires nothing.
+  'affords.js': () => enginePath('runtime/affords.js'),
   // The Drive's extension to it. Everything a Drive needs that a single
   // document does not — see docs/CARRIER-DRIVE.md.
   'drive.js': () => path.join(REPO, 'runtime', 'drive.js'),
@@ -97,6 +100,10 @@ const RUNTIME = {
   'agent-folders.js': () => path.join(REPO, 'runtime', 'agent-folders.js'),
   'agent-phone.js': () => path.join(REPO, 'runtime', 'agent-phone.js'),
   'choice-question.js': () => path.join(REPO, 'runtime', 'choice-question.js'),
+  // The card a ```marble-visual block becomes in the transcript: a sandboxed
+  // frame wearing the page's own palette. Imported by agent-ui.js on the first
+  // visual, never injected — most conversations never hold one.
+  'chat-visual.js': () => path.join(REPO, 'runtime', 'chat-visual.js'),
   'agent-usage-charts.js': () => path.join(REPO, 'runtime', 'agent-usage-charts.js'),
   'collab.js': () => path.join(REPO, 'runtime', 'collab.js'),
   // The callout: a conversation drawn at the region of a document it is about.
@@ -189,7 +196,8 @@ export async function createDrive(config, { log = console, agentProviders = null
   const injectCarrier = (source, docPath) => {
     let tags =
       `<script src="/runtime/marble.js" data-marble-app="${escapeHtml(docPath)}" data-marble-transient></script>\n` +
-      `<script src="/runtime/drive.js" data-marble-transient></script>`;
+      `<script src="/runtime/drive.js" data-marble-transient></script>\n` +
+      `<script src="/runtime/affords.js" data-marble-transient></script>`;
     if (agents) {
       tags += `\n<script src="/runtime/agent.js" data-marble-transient></script>`;
       // Custom meta skips the drawer mount in runtime/agent-ui.js, not this script —

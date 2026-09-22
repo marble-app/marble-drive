@@ -1,15 +1,14 @@
-// Marks: the tray's two tools for briefing an agent about a region — Select,
-// a marquee over addressed elements, and Sketch, ink that is read as a box, an
-// arrow or a scribble over them. What both have to get right is that they end
-// where a text selection ends, so the callout's handle and the tray's Ask here
-// are the one door out.
+// Describe mode: the toolbar of tools for saying what you want about a
+// document, the frame that wraps what you meant, and the field on it. What it
+// has to get right is that everything still ends where a text selection ends —
+// one selection, one callout, one conversation.
 import assert from 'node:assert/strict';
 import test from 'node:test';
 
 import { GARDEN, startDrive } from './harness.js';
 
 // A page that carries its own conversation chrome mounts no drawer, so there
-// is no tray — and these tools are only reachable from one.
+// is no tray — and Describe mode is only reachable from one.
 const CUSTOM = `<!doctype html>
 <html><head><meta charset="utf-8"><title>Custom</title>
 <meta name="marble-agent" content="custom">
@@ -41,18 +40,23 @@ const open = async (doc = 'garden', { width = 1200, height = 800 } = {}) => {
 };
 
 const launcher = (page) => page.locator('marble-agent-drawer .launcher');
-const tool = (page, id) => page.locator(`marble-agent-drawer .tool[data-tool="${id}"]`);
+const trayTool = (page, id) => page.locator(`marble-agent-drawer .tool[data-tool="${id}"]`);
 const layer = (page) => page.locator('.marble-marks-layer');
+const bar = (page) => page.locator('.marble-marks-bar');
+const tool = (page, id) => page.locator(`.marble-marks-tool[data-tool="${id}"]`);
+const frame = (page) => page.locator('.marble-marks-frame');
+const field = (page) => page.locator('.marble-marks-field');
+const brief = (page) => page.locator('.marble-marks-brief');
 const selection = (page) => page.evaluate(() => window.marble.agent.context().selection);
 const boxOf = (page, id) => page.locator(`[data-marble-id="${id}"]`).boundingBox();
-// The tray closes on a click, and a closed tray takes no pointer, so every
-// reach for a tool starts at the launcher.
-const pick = async (page, id) => {
+
+const describe = async (page) => {
   await launcher(page).hover();
-  await tool(page, id).click();
+  await trayTool(page, 'marks-describe').click();
+  await bar(page).waitFor();
 };
-const enter = async (page, name) => {
-  await pick(page, `marks-${name}`);
+const use = async (page, name) => {
+  await tool(page, name).click();
   await page.locator(`.marble-marks-layer[data-mode="${name}"]`).waitFor();
 };
 const stroke = async (page, points) => {
@@ -61,182 +65,266 @@ const stroke = async (page, points) => {
   for (const point of points.slice(1)) await page.mouse.move(point.x, point.y, { steps: 4 });
   await page.mouse.up();
 };
+// A brief handed over by the field waits for the card to find out which agents
+// exist before it can send, so the turn lands a beat after the click.
+const knownChats = (page) => page.evaluate(async () => (await window.marble.agent.conversations()).map((c) => c.id));
+// The host keeps its conversations across a reset, so a turn is only this
+// test's if the chat holding it was not there before the click.
+const newTurn = async (page, known = []) => {
+  for (let i = 0; i < 60; i += 1) {
+    const turn = await page.evaluate(async (before) => {
+      const fresh = (await window.marble.agent.conversations()).filter((c) => !before.includes(c.id));
+      for (const summary of fresh) {
+        const detail = await window.marble.agent.conversation(summary.id);
+        if (detail?.turns?.length) return detail.turns[0];
+      }
+      return null;
+    }, known);
+    if (turn) return turn;
+    await page.waitForTimeout(250);
+  }
+  throw new Error('no turn ever arrived');
+};
+const boxAround = (box, pad = 8) => [
+  { x: box.x - pad, y: box.y - pad },
+  { x: box.x + box.width + pad, y: box.y - pad },
+  { x: box.x + box.width + pad, y: box.y + box.height + pad },
+  { x: box.x - pad, y: box.y + box.height + pad },
+  { x: box.x - pad, y: box.y - pad + 2 },
+];
 
-test('the tools are in the tray, and a page with no tray has no tools and no layer', async () => {
+test('the tray holds one entry, and a page with no tray has no layer at all', async () => {
   const page = await open();
   await layer(page).waitFor({ state: 'attached' });
-  assert.equal(await layer(page).evaluate((el) => el.hasAttribute('data-marble-transient')), true);
   await launcher(page).hover();
-  await tool(page, 'marks-select').waitFor({ state: 'visible' });
-  assert.equal(await tool(page, 'marks-select').getAttribute('aria-label'), 'Select an area');
-  assert.equal(await tool(page, 'marks-sketch').getAttribute('aria-label'), 'Sketch');
-  assert.equal(await tool(page, 'marks-clear').isVisible(), false, 'nothing to clear yet');
+  await trayTool(page, 'marks-describe').waitFor({ state: 'visible' });
+  assert.equal(await trayTool(page, 'marks-describe').getAttribute('aria-label'), 'Describe a change');
+  assert.equal(await trayTool(page, 'marks-select').count(), 0, 'the modal tools are not in two homes');
+  assert.equal(await bar(page).isVisible(), false, 'no toolbar until you ask for one');
 
   const custom = await open('custom');
   await custom.waitForTimeout(300);
   assert.equal(await layer(custom).count(), 0, 'no tray, so the layer stands down rather than draw its own affordance');
 });
 
-test('Select outlines what the rectangle means, hands the list to the callout, and leaves the mode', async () => {
+test('Describe opens the toolbar on the picker; Escape drops the tool, then the mode', async () => {
   const page = await open();
-  await enter(page, 'select');
-  assert.equal(await tool(page, 'marks-select').getAttribute('aria-pressed'), 'true');
+  await describe(page);
+  await page.locator('.marble-marks-layer[data-mode="select"]').waitFor();
+  assert.equal(await tool(page, 'select').getAttribute('aria-pressed'), 'true');
+  for (const id of ['sketch', 'text', 'explore', 'done']) {
+    assert.equal(await tool(page, id).isVisible(), true, id);
+  }
+  assert.equal(await tool(page, 'explore').isDisabled(), true, 'nothing selected to explore yet');
+
+  await page.keyboard.press('Escape');
+  await page.waitForFunction(() => document.querySelector('.marble-marks-layer').dataset.mode === '');
+  assert.equal(await bar(page).isVisible(), true, 'the toolbar is still there; only the tool went');
+  await page.keyboard.press('Escape');
+  await page.waitForFunction(() => !document.querySelector('.marble-marks-layer').hasAttribute('data-describing'));
+
+  // And Done is the same door.
+  await describe(page);
+  await tool(page, 'done').click();
+  await page.waitForFunction(() => !document.querySelector('.marble-marks-layer').hasAttribute('data-describing'));
+});
+
+test('leaving the mode takes the marks off the page and brings them back, keeping every one', async () => {
+  const page = await open();
+  await describe(page);
+  await use(page, 'sketch');
+  const q = await boxOf(page, 'q');
+  await stroke(page, boxAround(q));
+  await page.waitForFunction(() => document.querySelectorAll('.marble-marks-stroke').length === 1);
+  await use(page, 'text');
+  const p = await boxOf(page, 'p');
+  await page.mouse.click(p.x + 40, p.y + 4);
+  await page.locator('.marble-marks-note-body').waitFor();
+  await page.keyboard.type('shorter');
+  await page.waitForFunction(() => document.querySelector('.marble-marks-brief')?.textContent.includes('a note on p'));
+
+  // Out: a fade, not a blink, and nothing thrown away.
+  await tool(page, 'done').click();
+  const fading = await layer(page).evaluate((el) => el.getAnimations()
+    .flatMap((a) => a.effect.getKeyframes())
+    .flatMap((frame) => Object.keys(frame).filter((key) => !['offset', 'computedOffset', 'easing', 'composite'].includes(key))));
+  assert.ok(fading.includes('opacity'), `the layer fades out, got ${fading.join(', ') || 'nothing'}`);
+
+  await page.waitForFunction(() => getComputedStyle(document.querySelector('.marble-marks-layer')).visibility === 'hidden');
+  assert.equal(await page.locator('.marble-marks-stroke').count(), 1, 'the ink is still there, only out of sight');
+  assert.equal(await page.locator('.marble-marks-note').count(), 1);
+  // And out of reach while it is out of sight: no caret, no tab stop.
+  assert.equal(await page.locator('.marble-marks-note-body').isVisible(), false);
+  assert.equal(await field(page).isVisible(), false);
+  assert.equal(await bar(page).isVisible(), false);
+  // Including the one piece of it that lives in another layer: the callout's
+  // handle, which would otherwise hang at a selection nobody can see.
+  assert.deepEqual(await selection(page), []);
+  assert.equal(await page.locator('.marble-callout-handle:not([hidden])').count(), 0);
+
+  // The way back says the work is still in hand.
+  await launcher(page).hover();
+  await page.waitForFunction(() => document.querySelector('marble-agent-drawer').shadowRoot
+    .querySelector('.tool[data-tool="marks-describe"]')?.getAttribute('aria-label') === 'Describe · 2 kept');
+
+  // In: the same marks, the same brief.
+  await trayTool(page, 'marks-describe').click();
+  await page.waitForFunction(() => getComputedStyle(document.querySelector('.marble-marks-layer')).visibility === 'visible');
+  await page.waitForFunction(() => {
+    const said = document.querySelector('.marble-marks-brief')?.textContent ?? '';
+    return said.includes('a box around q') && said.includes('a note on p: "shorter"');
+  });
+  assert.equal(await page.locator('.marble-marks-stroke').count(), 1);
+  assert.equal(await page.locator('.marble-marks-note-body').textContent(), 'shorter');
+  await page.waitForFunction(() => JSON.stringify(window.marble.agent.context().selection) === '["q","p"]');
+});
+
+test('a marquee wraps what it means in one frame and hangs the field on it', async () => {
+  const page = await open();
+  await describe(page);
   const q = await boxOf(page, 'q');
   await page.mouse.move(q.x - 6, q.y - 6);
   await page.mouse.down();
   await page.mouse.move(q.x + q.width + 6, q.y + q.height / 2, { steps: 6 });
-  await page.locator('.marble-marks-marquee:not([hidden])').waitFor();
-  // Half way down the list only the first item is covered.
   await page.waitForFunction(() => document.querySelectorAll('.marble-marks-hit:not([hidden])').length === 1);
   await page.mouse.move(q.x + q.width + 6, q.y + q.height + 6, { steps: 6 });
   await page.mouse.up();
   await page.waitForFunction(() => JSON.stringify(window.marble.agent.context().selection) === '["q"]');
-  // The mode ends with the release, and the callout's handle takes over.
-  await page.waitForFunction(() => document.querySelector('.marble-marks-layer').dataset.mode === '');
-  await page.locator('.marble-callout-handle:not([hidden])').waitFor();
-  assert.equal(await page.locator('.marble-marks-marquee:not([hidden])').count(), 0);
+
+  await frame(page).waitFor();
+  await field(page).waitFor();
+  assert.equal(await brief(page).textContent(), '1 element');
+  // The frame is around the list, not around the window.
+  const [f, list] = await Promise.all([frame(page).boundingBox(), boxOf(page, 'q')]);
+  assert.ok(f.x <= list.x && f.y <= list.y, `frame ${JSON.stringify(f)} does not contain ${JSON.stringify(list)}`);
+  assert.ok(f.x + f.width >= list.x + list.width - 1 && f.width < list.width + 40);
+  // And the field hangs under it.
+  const input = await field(page).boundingBox();
+  assert.ok(input.y > f.y + f.height - 2, 'the field is below the frame');
 });
 
-test('a marquee that grazes an element selects nothing, and Escape clears what one left standing', async () => {
+test('a region too tall to sit under keeps its field at the marks, never on the toolbar', async () => {
   const page = await open();
-  const p = await boxOf(page, 'p');
-  await enter(page, 'select');
-  await stroke(page, [{ x: p.x - 6, y: p.y + p.height - 3 }, { x: p.x + p.width + 6, y: p.y + p.height + 3 }]);
-  await page.waitForTimeout(100);
-  assert.deepEqual(await selection(page), []);
-
-  await enter(page, 'select');
-  await stroke(page, [{ x: p.x - 6, y: p.y - 6 }, { x: p.x + p.width + 6, y: p.y + p.height + 6 }]);
-  await page.waitForFunction(() => JSON.stringify(window.marble.agent.context().selection) === '["p"]');
-  await page.keyboard.press('Escape');
-  await page.waitForFunction(() => window.marble.agent.context().selection.length === 0);
-});
-
-test('the tray is reachable inside a mode — the overlay has a hole in it — and Escape gets out', async () => {
-  const page = await open();
-  await enter(page, 'sketch');
-  assert.equal(await tool(page, 'marks-sketch').getAttribute('aria-pressed'), 'true');
-  // The overlay is in the top layer and the tray is not. Without the hole the
-  // one piece of chrome that ends a mode would be under it.
-  const hit = await page.evaluate(() => {
-    const l = document.querySelector('marble-agent-drawer').shadowRoot.querySelector('.launcher');
-    const b = l.getBoundingClientRect();
-    return document.elementFromPoint(b.left + b.width / 2, b.top + b.height / 2)?.tagName?.toLowerCase() ?? null;
+  // A box around most of a page has no room under it, which is how the field
+  // used to end up parked at the bottom of the window — on the toolbar, and
+  // nowhere near the thing it was about.
+  await page.evaluate(() => {
+    document.querySelector('[data-marble-id="q"]').style.minHeight = '620px';
   });
-  assert.equal(hit, 'marble-agent-drawer');
-  // And the middle of the page is the overlay's, which is what a mode means.
-  const middle = await page.evaluate(() => document.elementFromPoint(innerWidth / 2, innerHeight / 2)?.className ?? '');
-  assert.equal(middle, 'marble-marks-overlay');
-
-  await page.keyboard.press('Escape');
-  await page.waitForFunction(() => document.querySelector('.marble-marks-layer').dataset.mode === '');
-  assert.equal(await page.locator('.marble-marks-overlay:not([hidden])').count(), 0);
-  assert.equal(await tool(page, 'marks-sketch').getAttribute('aria-pressed'), 'false');
-});
-
-test('a box sketched round the list selects the list and reads as a box around it', async () => {
-  const page = await open();
-  await enter(page, 'sketch');
+  await describe(page);
+  await use(page, 'sketch');
   const q = await boxOf(page, 'q');
-  const left = q.x - 10;
-  const right = q.x + q.width + 10;
-  const top = q.y - 8;
-  const bottom = q.y + q.height + 8;
-  await stroke(page, [
-    { x: left, y: top }, { x: right, y: top }, { x: right, y: bottom },
-    { x: left, y: bottom }, { x: left, y: top + 2 },
+  await stroke(page, boxAround(q, 6));
+  await field(page).waitFor();
+
+  const [box, toolbar, frameBox] = await Promise.all([
+    field(page).boundingBox(),
+    bar(page).boundingBox(),
+    frame(page).boundingBox(),
   ]);
+  const overlaps = (a, b) => a.x < b.x + b.width && a.x + a.width > b.x && a.y < b.y + b.height && a.y + a.height > b.y;
+  assert.equal(overlaps(box, toolbar), false, `field ${JSON.stringify(box)} is on the toolbar ${JSON.stringify(toolbar)}`);
+
+  // And it is against the marks — over, under, beside, or inside them — rather
+  // than in a corner of the window.
+  const dx = Math.max(frameBox.x - (box.x + box.width), box.x - (frameBox.x + frameBox.width), 0);
+  const dy = Math.max(frameBox.y - (box.y + box.height), box.y - (frameBox.y + frameBox.height), 0);
+  assert.ok(Math.hypot(dx, dy) <= 16, `field is ${Math.round(Math.hypot(dx, dy))}px from the marks`);
+});
+
+test('a sketch says what it read in the brief line, and Select picks the ink back up', async () => {
+  const page = await open();
+  await describe(page);
+  await use(page, 'sketch');
+  const q = await boxOf(page, 'q');
+  await stroke(page, boxAround(q));
   await page.waitForFunction(() => JSON.stringify(window.marble.agent.context().selection) === '["q"]');
+  await page.waitForFunction(() => document.querySelector('.marble-marks-brief')?.textContent.includes('a box around q'));
   assert.equal(await page.locator('.marble-marks-stroke').count(), 1, 'the hand\'s own stroke, never redrawn as a shape');
-  // The reading, in words, under the pointer that drew it.
-  await page.mouse.move(left, (top + bottom) / 2);
-  await page.locator('.marble-marks-caption:not([hidden])').waitFor();
-  assert.equal(await page.locator('.marble-marks-caption').textContent(), 'a box around q');
-  // The mode is sticky: a sketch is usually several strokes.
-  assert.equal(await layer(page).evaluate((el) => el.dataset.mode), 'sketch');
-});
 
-test('the sketch goes out through Ask here, with its reading written into the card as a draft', async () => {
-  const page = await open();
-  await enter(page, 'sketch');
-  const q1 = await boxOf(page, 'q1');
-  await stroke(page, [
-    { x: q1.x - 8, y: q1.y - 6 }, { x: q1.x + q1.width + 8, y: q1.y - 6 },
-    { x: q1.x + q1.width + 8, y: q1.y + q1.height + 6 }, { x: q1.x - 8, y: q1.y + q1.height + 6 },
-    { x: q1.x - 8, y: q1.y - 4 },
-  ]);
-  await page.waitForFunction(() => JSON.stringify(window.marble.agent.context().selection) === '["q1"]');
-  await page.keyboard.press('Escape');
-  // Ask here is the drawer's own tool; what it says while there is a sketch to
-  // send is the marks layer's business.
-  await launcher(page).hover();
-  await page.waitForFunction(() => document.querySelector('marble-agent-drawer').shadowRoot
-    .querySelector('.tool[data-tool="ask"]')?.getAttribute('aria-label') === 'Ask about the sketch');
-  await tool(page, 'ask').click();
-  const editor = page.locator('.marble-callout marble-conversation .editor');
-  await editor.waitFor();
-  await page.waitForFunction(() => {
-    const el = document.querySelector('.marble-callout marble-conversation')?.shadowRoot?.querySelector('.editor');
-    return el?.textContent?.startsWith('I marked up the page: a box around q1.');
-  }, null, { timeout: 5000 });
-  // The person's to edit, with the caret left after it: typing carries on
-  // where the reading stopped rather than replacing it.
-  await page.keyboard.type(' Make these two lines one.');
-  const text = await editor.textContent();
-  assert.ok(text.startsWith('I marked up the page: a box around q1.'), text);
-  assert.ok(text.trimEnd().endsWith('Make these two lines one.'), text);
-});
-
-test('Clear takes the ink and the selection with it, and ⌘Z takes back the last stroke', async () => {
-  const page = await open();
-  await enter(page, 'sketch');
-  const h = await boxOf(page, 'h');
-  const p = await boxOf(page, 'p');
-  await stroke(page, [
-    { x: h.x - 6, y: h.y - 6 }, { x: h.x + h.width + 6, y: h.y - 6 },
-    { x: h.x + h.width + 6, y: h.y + h.height + 6 }, { x: h.x - 6, y: h.y + h.height + 6 },
-    { x: h.x - 6, y: h.y - 4 },
-  ]);
-  await page.waitForFunction(() => JSON.stringify(window.marble.agent.context().selection) === '["h"]');
-  await stroke(page, [
-    { x: p.x - 6, y: p.y - 6 }, { x: p.x + p.width + 6, y: p.y - 6 },
-    { x: p.x + p.width + 6, y: p.y + p.height + 6 }, { x: p.x - 6, y: p.y + p.height + 6 },
-    { x: p.x - 6, y: p.y - 4 },
-  ]);
-  await page.waitForFunction(() => JSON.stringify(window.marble.agent.context().selection) === '["h","p"]');
-  assert.equal(await page.locator('.marble-marks-stroke').count(), 2);
-
-  await page.keyboard.press('Meta+z');
-  await page.waitForFunction(() => JSON.stringify(window.marble.agent.context().selection) === '["h"]');
-  assert.equal(await page.locator('.marble-marks-stroke').count(), 1);
-
-  await page.keyboard.press('Escape');
-  await pick(page, 'marks-clear');
+  // A marquee over the ink picks the mark itself — the things you drew are as
+  // pointable as the things the document holds — and ⌫ takes it off.
+  await use(page, 'select');
+  await stroke(page, [{ x: q.x - 30, y: q.y - 30 }, { x: q.x + q.width + 30, y: q.y + q.height + 30 }]);
+  await page.locator('.marble-marks-halo:not([hidden])').waitFor();
+  await page.keyboard.press('Backspace');
   await page.waitForFunction(() => document.querySelectorAll('.marble-marks-stroke').length === 0);
-  await page.waitForFunction(() => window.marble.agent.context().selection.length === 0);
-  await launcher(page).hover();
-  assert.equal(await tool(page, 'marks-clear').isVisible(), false, 'nothing left to clear');
 });
 
-test('ink follows the element it was drawn on when the page scrolls under it', async () => {
+test('Note puts a text box on the page, and what is typed in it is part of the brief', async () => {
   const page = await open();
-  await page.evaluate(() => { document.body.style.paddingBottom = '2000px'; });
-  await enter(page, 'sketch');
+  await describe(page);
+  await use(page, 'text');
+  const p = await boxOf(page, 'p');
+  await page.mouse.click(p.x + 40, p.y + 4);
+  const body = page.locator('.marble-marks-note-body');
+  await body.waitFor();
+  await page.keyboard.type('make this the headline');
+  await page.waitForFunction(() => document.querySelector('.marble-marks-brief')?.textContent.includes('a note on p: "make this the headline"'));
+  await page.waitForFunction(() => JSON.stringify(window.marble.agent.context().selection) === '["p"]');
+
+  // A note dragged by its grip keeps its place on the element it was put on.
+  const before = await page.locator('.marble-marks-note').boundingBox();
+  const grip = await page.locator('.marble-marks-note-grip').boundingBox();
+  await page.mouse.move(grip.x + grip.width / 2, grip.y + grip.height / 2);
+  await page.mouse.down();
+  await page.mouse.move(grip.x + grip.width / 2 + 60, grip.y + grip.height / 2 + 30, { steps: 6 });
+  await page.mouse.up();
+  const after = await page.locator('.marble-marks-note').boundingBox();
+  assert.ok(Math.abs(after.x - before.x - 60) < 6 && Math.abs(after.y - before.y - 30) < 6, `${JSON.stringify(before)} → ${JSON.stringify(after)}`);
+
+  // An empty note is a slip of the hand, not a mark.
+  await page.mouse.click(p.x + 200, p.y + 4);
+  await page.waitForFunction(() => document.querySelectorAll('.marble-marks-note').length === 2);
+  await page.locator('.marble-marks-input').click();
+  await page.waitForFunction(() => document.querySelectorAll('.marble-marks-note').length === 1);
+});
+
+test('the field sends through the callout, with the marks in front of the sentence', async () => {
+  const page = await open();
+  await describe(page);
+  await use(page, 'sketch');
   const q1 = await boxOf(page, 'q1');
-  await stroke(page, [
-    { x: q1.x - 8, y: q1.y - 6 }, { x: q1.x + q1.width + 8, y: q1.y - 6 },
-    { x: q1.x + q1.width + 8, y: q1.y + q1.height + 6 }, { x: q1.x - 8, y: q1.y + q1.height + 6 },
-    { x: q1.x - 8, y: q1.y - 4 },
-  ]);
-  await page.waitForFunction(() => document.querySelectorAll('.marble-marks-stroke').length === 1);
-  const before = await page.locator('.marble-marks-stroke').boundingBox();
-  // A mark is an anchor and fractions of its box, never a pixel: the element
-  // moving under the window is the stroke moving with it.
-  await page.evaluate(() => scrollTo(0, 80));
-  await page.waitForFunction(() => scrollY >= 79);
-  await page.waitForFunction((was) => {
-    const ink = document.querySelector('.marble-marks-stroke').getBoundingClientRect();
-    const el = document.querySelector('[data-marble-id="q1"]').getBoundingClientRect();
-    return Math.abs(ink.top - (was - 80)) < 4 && Math.abs((ink.top + 6) - el.top) < 12;
-  }, before.y, { timeout: 5000 });
+  await stroke(page, boxAround(q1));
+  await page.waitForFunction(() => document.querySelector('.marble-marks-brief')?.textContent.includes('a box around q1'));
+
+  await page.locator('.marble-marks-input').click();
+  await page.keyboard.type('make these one line');
+  const before = await knownChats(page);
+  await page.locator('.marble-marks-send').click();
+
+  await page.locator('.marble-callout marble-conversation .editor').waitFor();
+  // Sent, not just drafted: the card is the one that answers.
+  const turn = await newTurn(page, before);
+  assert.ok(turn.prompt.startsWith('I marked up the page: a box around q1.'), turn.prompt);
+  assert.ok(turn.prompt.endsWith('make these one line'), turn.prompt);
+  assert.deepEqual(turn.context.selection, ['q1'], 'the turn carries what was marked');
+  // Handed over: the ink is still there and no longer the thing being made.
+  await page.waitForFunction(() => document.querySelector('.marble-marks-stroke')?.dataset.state === 'sent');
+});
+
+test('Explore asks for variations in the document\'s own words, and says what it wants and why', async () => {
+  const page = await open();
+  await describe(page);
+  const q = await boxOf(page, 'q');
+  await stroke(page, [{ x: q.x - 6, y: q.y - 6 }, { x: q.x + q.width + 6, y: q.y + q.height + 6 }]);
+  await page.waitForFunction(() => JSON.stringify(window.marble.agent.context().selection) === '["q"]');
+  await page.waitForFunction(() => !document.querySelector('.marble-marks-tool[data-tool="explore"]').disabled);
+
+  await tool(page, 'explore').click();
+  await page.locator('.marble-marks-explore:not([hidden])').waitFor();
+  const asks = page.locator('.marble-marks-ask');
+  await asks.first().click();
+  await page.keyboard.type('shorter lines');
+  await asks.nth(1).click();
+  await page.keyboard.type('the list is the first thing read');
+  await page.locator('.marble-marks-count[aria-pressed="false"]').first().click();
+  const before = await knownChats(page);
+  await page.locator('.marble-marks-go').click();
+
+  const { prompt } = await newTurn(page, before);
+  assert.ok(prompt.startsWith('Explore 5 variations of q'), prompt.slice(0, 80));
+  assert.ok(prompt.includes('What to try: shorter lines'), prompt);
+  assert.ok(prompt.includes('Why: the list is the first thing read'), prompt);
+  assert.ok(prompt.includes('<marble-alt>'), 'the ask is in the format the document has for this');
 });

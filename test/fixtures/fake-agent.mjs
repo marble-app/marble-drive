@@ -76,8 +76,16 @@ out({ kind: 'text', text: `prompt:${prompt.split('\n')[0]}` });
 
 for (const step of script) {
   if (step.ignoreTerm) process.on('SIGTERM', () => {});
+  // Text arriving in pieces, the way a CLI streams a long answer: one delta
+  // per chunk, and usually a `say` after it for the finished message.
+  if (step.stream) {
+    for (const chunk of step.stream) {
+      out({ kind: 'delta', text: chunk });
+      await sleep(step.every ?? 40);
+    }
+  }
   if (step.say) {
-    out({ kind: 'delta', text: step.say.slice(0, 3) });
+    if (!step.stream) out({ kind: 'delta', text: step.say.slice(0, 3) });
     out({ kind: 'text', text: step.say });
   }
   if (step.sleep) await sleep(step.sleep);

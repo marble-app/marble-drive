@@ -1649,8 +1649,28 @@ const GROK_MODELS = [
   { id: 'grok-4.7-xhigh', label: 'Grok 4.7 Extra High' },
 ];
 
+const CLAUDE_AND_GROK = [
+  { id: 'auto', label: 'Auto' },
+  { id: 'claude-fable-5-1-high', label: 'Claude Fable 5.1 1M' },
+  { id: 'claude-opus-5-thinking-high', label: 'Claude Opus 5 1M Thinking' },
+  { id: 'claude-opus-4-8-high', label: 'Claude Opus 4.8 1M' },
+  { id: 'claude-opus-5-5-high', label: 'Claude Opus 5.5 1M High' },
+  { id: 'claude-opus-5-5-xhigh', label: 'Claude Opus 5.5 1M Extra High' },
+  { id: 'claude-sonnet-5-high', label: 'Claude Sonnet 5 1M' },
+  { id: 'grok-4.7-high', label: 'Grok 4.7 High' },
+  { id: 'grok-4.7-xhigh', label: 'Grok 4.7 Extra High' },
+];
+
 /** Claude is the scripted provider. Cursor is a second one whose model list the handoff reads. */
-async function setupFailover({ signedIn = true, models = GROK_MODELS, listModels = null, failover = 'auto' } = {}) {
+async function setupFailover({
+  signedIn = true,
+  models = GROK_MODELS,
+  listModels = null,
+  failover = 'auto',
+  model = 'opus',
+  cursorScripts = { hello: [{ say: 'picked up' }] },
+  cursorPrompt = null,
+} = {}) {
   const spawned = [];
   const claude = createFakeProvider({
     id: 'claude-subscription',
@@ -1661,7 +1681,7 @@ async function setupFailover({ signedIn = true, models = GROK_MODELS, listModels
       hello: [{ say: 'done' }],
     },
   });
-  const cursor = createFakeProvider({ id: 'cursor', scripts: { hello: [{ say: 'picked up' }] } });
+  const cursor = createFakeProvider({ id: 'cursor', scripts: cursorScripts });
   const claudeSpawn = claude.spawn.bind(claude);
   claude.spawn = (opts) => {
     spawned.push({ provider: 'claude-subscription', ...opts });
@@ -1670,14 +1690,15 @@ async function setupFailover({ signedIn = true, models = GROK_MODELS, listModels
   const cursorSpawn = cursor.spawn.bind(cursor);
   cursor.spawn = (opts) => {
     spawned.push({ provider: 'cursor', ...opts });
-    return cursorSpawn({ ...opts, prompt: `script:hello\n${opts.prompt}` });
+    const script = cursorPrompt ? cursorPrompt(spawned) : 'script:hello';
+    return cursorSpawn({ ...opts, prompt: `${script}\n${opts.prompt}` });
   };
   cursor.detect = async () => ({ installed: true, signedIn });
   cursor.listModels = listModels ?? (async () => models);
   const made = await setup({
     providerMap: new Map([['claude-subscription', claude], ['cursor', cursor]]),
   });
-  const chat = await made.store.createConversation({ provider: 'claude-subscription', model: 'opus', effort: 'high', failover });
+  const chat = await made.store.createConversation({ provider: 'claude-subscription', model, effort: 'high', failover });
   await made.store.updateConversation(chat.id, { providerSession: 'claude-session' });
   return { ...made, spawned, chat };
 }
@@ -1752,6 +1773,59 @@ test('Pause asks instead of continuing, and records whether Cursor can take the 
   assert.equal(stayed.canSwitch, false);
   assert.match(stayed.error, new RegExp(STAY.signedOut.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')));
   await blocked.runner.close();
+});
+
+test('a spent Claude window continues on Cursor with the same model, and Fable continues on Opus', async () => {
+  const { store, runner, spawned, chat, published } = await setupFailover({ models: CLAUDE_AND_GROK, model: 'fable' });
+  const { turnId } = await runner.send(chat.id, { prompt: 'script:spent', context: { target: 'd' } });
+  await finished(store, turnId);
+  await until(async () => (await store.conversation(chat.id)).provider === 'cursor');
+  const meta = await store.conversation(chat.id);
+  assert.equal(meta.model, 'claude-opus-5-5');
+  assert.equal(meta.effort, 'high');
+  assert.equal(meta.usageLane, 'model');
+  assert.equal(meta.providerSession, null);
+  const cont = (await store.turns(chat.id)).find((turn) => turn.prompt === 'Continue');
+  await finished(store, cont.id);
+  const handoff = spawned.find((item) => item.provider === 'cursor');
+  assert.equal(handoff.model, 'claude-opus-5-5');
+  assert.equal(handoff.effort, 'high');
+  assert.match(handoff.prompt, /Finish the work it started/);
+  assert.equal(published.some((item) => item.event.type === 'usage.continued' && item.event.label === 'Claude Opus 5.5 1M High'), true);
+  assert.equal((await store.conversation(chat.id)).model, 'claude-opus-5-5');
+  await runner.close();
+});
+
+test('a session limit on that Cursor model continues once more on Grok', async () => {
+  const { store, runner, spawned, chat } = await setupFailover({
+    models: CLAUDE_AND_GROK,
+    model: 'opus',
+    cursorScripts: {
+      spent: [{ fail: "You've hit your session limit" }],
+      hello: [{ say: 'picked up' }],
+    },
+    cursorPrompt: (spawned) => (spawned.filter((item) => item.provider === 'cursor').length === 1 ? 'script:spent' : 'script:hello'),
+  });
+  const { turnId } = await runner.send(chat.id, { prompt: 'script:spent', context: { target: 'd' } });
+  await finished(store, turnId);
+  await until(async () => (await store.conversation(chat.id)).model === 'claude-opus-5-5');
+  const first = (await store.turns(chat.id)).find((turn) => turn.prompt === 'Continue');
+  const failed = await finished(store, first.id);
+  assert.match(failed.error, /session limit/);
+  await until(async () => (await store.conversation(chat.id)).model === 'grok-4.7');
+  const meta = await store.conversation(chat.id);
+  assert.equal(meta.provider, 'cursor');
+  assert.equal(meta.usageLane, 'grok');
+  assert.equal(meta.effort, 'high');
+  const continues = (await store.turns(chat.id)).filter((turn) => turn.prompt === 'Continue');
+  assert.equal(continues.length, 2);
+  await finished(store, continues[1].id);
+  const grok = spawned.filter((item) => item.provider === 'cursor').at(-1);
+  assert.equal(grok.model, 'grok-4.7');
+  assert.match(grok.prompt, /The Cursor model stopped because its usage was used up/);
+  const third = await runner.handoffUsage(chat.id);
+  assert.equal(third.turnId, continues[1].id);
+  await runner.close();
 });
 
 test('a signed-out Cursor, an unreadable list, or no Grok leaves the chat on Claude', async () => {

@@ -24,10 +24,11 @@ import {
   CONTINUE,
   STAY,
   continuedLabel,
+  handoffLane,
+  handoffModel,
   matchEffort,
-  pickGrok,
   usageBrief,
-  usageStopped,
+  usageHandoffDue,
 } from './usage-failover.js';
 
 const SELECTION_BUDGET = 6_000;
@@ -240,7 +241,8 @@ export function createRunner({ store, tools, providers, workdir, origin, bridgeP
     }
     if (turn.usageHandoff) {
       const events = (await store.events(turn.conversationId)).filter((event) => event.turn !== turn.id);
-      const brief = usageBrief(events, turn.usageError);
+      const earlier = (await store.turns(turn.conversationId)).some((item) => item.usageHandoff && item.id !== turn.id);
+      const brief = usageBrief(events, turn.usageError, { afterCursor: earlier });
       if (brief) lines.unshift(`${brief}\n\n---\n`);
     }
     return lines.join('\n');
@@ -837,16 +839,23 @@ export function createRunner({ store, tools, providers, workdir, origin, bridgeP
     }
     let usageMark = null;
     let pendingHandoff = false;
-    if (!lostSession && status === 'failed' && CLAUDE_PROVIDERS.has(turn.provider?.id) && usageStopped(error)) {
+    if (!lostSession && status === 'failed') {
       const meta = await store.conversation(turn.conversationId);
-      const ready = await cursorReadiness();
-      if (meta?.failover === 'pause') {
-        usageMark = { usageStopped: true, canSwitch: ready.ok, ...(ready.ok ? {} : { stay: ready.suffix }) };
-        if (!ready.ok) error = `${error} ${ready.suffix}`;
-      } else if (ready.ok) {
-        pendingHandoff = true;
-      } else {
-        error = `${error} ${ready.suffix}`;
+      if (usageHandoffDue({ provider: turn.provider?.id, usageLane: meta?.usageLane, error })) {
+        const ready = await cursorReadiness(meta);
+        const grokNext = meta?.usageLane === 'model';
+        if (meta?.failover === 'pause') {
+          usageMark = {
+            usageStopped: true,
+            canSwitch: ready.ok,
+            ...(ready.ok ? (grokNext ? { next: 'grok' } : {}) : { stay: ready.suffix }),
+          };
+          if (!ready.ok) error = `${error} ${ready.suffix}`;
+        } else if (ready.ok) {
+          pendingHandoff = true;
+        } else {
+          error = `${error} ${ready.suffix}`;
+        }
       }
     }
     try {
@@ -1005,7 +1014,7 @@ export function createRunner({ store, tools, providers, workdir, origin, bridgeP
 
   const handoffInflight = new Map();
 
-  async function cursorReadiness() {
+  async function cursorReadiness(meta) {
     const cursor = providers.get('cursor');
     if (!cursor?.detect) return { ok: false, suffix: STAY.signedOut };
     let detected = null;
@@ -1023,23 +1032,33 @@ export function createRunner({ store, tools, providers, workdir, origin, bridgeP
       return { ok: false, suffix: STAY.unreadable };
     }
     if (!Array.isArray(models)) return { ok: false, suffix: STAY.unreadable };
-    const family = pickGrok(models);
-    if (!family) return { ok: false, suffix: STAY.noGrok };
-    return { ok: true, family };
+    const family = handoffModel(models, { model: meta?.model, usageLane: meta?.usageLane });
+    if (!family) return { ok: false, suffix: meta?.usageLane === 'model' ? STAY.noFurther : STAY.noGrok };
+    return { ok: true, family, lane: handoffLane(family) };
   }
 
   async function performHandoff(conversationId, error) {
     const meta = await store.conversation(conversationId);
     if (!meta) throw Object.assign(new Error(`no conversation "${conversationId}"`), { status: 404 });
     const turns = await store.turns(conversationId);
-    const existing = [...turns].reverse().find((item) => item.usageHandoff && item.status !== 'removed');
-    const liveContinue = liveFor(conversationId).find((item) => item.usageHandoff);
+    const hops = turns.filter((item) => item.usageHandoff && item.status !== 'removed');
+    const latest = hops.at(-1);
+    // A handoff turn that is itself finishing is the one that just stopped.
+    // It is still `running` in memory until finish() lets it go, and it must
+    // not count as a Continue already in flight — that is what blocks the
+    // hop from the same model on to Grok.
+    const liveContinue = liveFor(conversationId).find((item) => (
+      item.usageHandoff && !item.finishing && (item.status === 'queued' || item.status === 'running')
+    ));
     if (liveContinue) return { turnId: liveContinue.id, status: liveContinue.status };
-    if (meta.provider === 'cursor' && existing) return { turnId: existing.id, status: existing.status };
-    if (!CLAUDE_PROVIDERS.has(meta.provider)) {
+    if (latest && latest.status !== 'failed') return { turnId: latest.id, status: latest.status };
+    if (meta.usageLane === 'grok' && latest) return { turnId: latest.id, status: latest.status };
+    const onClaude = CLAUDE_PROVIDERS.has(meta.provider);
+    const onModelHop = meta.provider === 'cursor' && meta.usageLane === 'model';
+    if (!onClaude && !onModelHop) {
       throw Object.assign(new Error('this chat is not on Claude'), { status: 409 });
     }
-    const ready = await cursorReadiness();
+    const ready = await cursorReadiness(meta);
     if (!ready.ok) throw Object.assign(new Error(ready.suffix), { status: 409 });
     const effort = matchEffort(meta.effort, ready.family);
     const label = continuedLabel(ready.family.label, effort);
@@ -1051,6 +1070,7 @@ export function createRunner({ store, tools, providers, workdir, origin, bridgeP
       model: ready.family.id,
       effort: effort || null,
       providerSession: null,
+      usageLane: ready.lane,
       activity: `Continuing on ${label}`,
     });
     const carrier = { id: failed?.id ?? conversationId, conversationId };

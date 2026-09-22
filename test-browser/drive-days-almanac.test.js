@@ -254,4 +254,32 @@ if (!SOURCE) {
     assert.deepEqual(notSandbox(errors), []);
     await page.close();
   });
+
+  // A folder that draws itself its own way owns the size of its cards. The plain
+  // listing gives every card a sheet-of-paper ratio, and on 2026-09-22 that rule
+  // reached in here through the `item` class a day card also carries — turning
+  // the hero into a 1950 x 1380 box with one paragraph at the top of it. The
+  // console said nothing, so this is the assertion that has to.
+  test('a day is sized by what is in it, not by the listing that is not here', async () => {
+    const { page, errors } = await openDays();
+    await page.locator('.day-card.is-today').waitFor();
+
+    // The hero is a banner across the top, not a box: far wider than it is tall.
+    const hero = await page.locator('.day-card.is-today').evaluate((el) => {
+      const r = el.getBoundingClientRect();
+      return { w: Math.round(r.width), h: Math.round(r.height), ratio: r.width / r.height };
+    });
+    assert.ok(hero.ratio > 3, `the day hero is a banner, not a box: ${hero.w}x${hero.h}`);
+
+    // And no card in here is given a ratio from outside it. A wall cell is a
+    // square because the month grid says so — that one is the rep's own rule —
+    // so it is the cards that are *not* wall cells that must be free to be as
+    // tall as their contents.
+    const imposed = await page.locator('.items[data-rep="days"] .day-card:not(.wall-cell)').evaluateAll((els) =>
+      els.filter((el) => getComputedStyle(el).aspectRatio !== 'auto').map((el) => el.className));
+    assert.deepEqual(imposed, [], 'a day card is sized by its contents, not by a ratio');
+
+    assert.deepEqual(notSandbox(errors), []);
+    await page.close();
+  });
 }

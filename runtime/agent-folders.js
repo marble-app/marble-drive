@@ -1137,6 +1137,91 @@
     return Math.abs(axis - prev.edge) <= band ? prev : next;
   };
 
+  // ------------------------------------------------------------- the peek
+  //
+  // What a chat was about, for the card a pointer is resting on. A title is
+  // written by a namer and generalises; the two things that actually tell one
+  // chat from another are the last thing you asked and the last thing that
+  // came back, and neither of them fits on a card.
+  //
+  // Facts, not lines: the page renders them, because the tool labeller and
+  // the tag pills are browser things and this module is read by the host too.
+
+  /** Markdown with the markup taken out. A peek is a glance — `**bold**` in a
+   *  glance is noise as syntax and noise as weight — so the marks go and the
+   *  words stay. Single underscores are left alone: `run_of_words` is a file
+   *  name far more often than it is emphasis. */
+  const plainOf = (text) => String(text ?? '')
+    .replace(/```[\w-]*\n?/g, '')
+    .replace(/^[ \t]{0,3}#{1,6}[ \t]+/gm, '')
+    .replace(/^[ \t]{0,3}>[ \t]?/gm, '')
+    .replace(/!?\[([^\]]*)\]\([^)]*\)/g, '$1')
+    .replace(/\*\*([^*]+)\*\*/g, '$1')
+    .replace(/__([^_\n]+)__/g, '$1')
+    .replace(/(^|[\s(])\*([^*\n]+)\*(?=$|[\s).,;:!?])/g, '$1$2')
+    .replace(/`([^`\n]+)`/g, '$1')
+    .replace(/^[ \t]*[-*][ \t]+/gm, '• ')
+    .replace(/[ \t]+$/gm, '')
+    .replace(/\n{3,}/g, '\n\n')
+    .trim();
+
+  const DOC_WRITES = new Set(['document.changed', 'ops.applied']);
+
+  /** `{ meta, turns, events }` from `GET /agent/conversations/:id`, digested.
+   *  `doing` is the tail of the tool calls — what it is doing now, while it is
+   *  running; `said` is the last thing it said; `touched` is the documents it
+   *  wrote to, most recent first. */
+  const peekOf = (detail, { doing: doingCap = 3, touched: touchedCap = 4 } = {}) => {
+    const meta = detail?.meta ?? {};
+    const turns = Array.isArray(detail?.turns) ? detail.turns : [];
+    const events = Array.isArray(detail?.events) ? detail.events : [];
+
+    // The last turn, whatever became of it: a queued one is still the thing
+    // you last asked for, and a failed one is still what you were after.
+    const last = turns[turns.length - 1] ?? null;
+    let asked = plainOf(last?.prompt ?? '');
+    if (!asked) {
+      for (let i = events.length - 1; i >= 0; i -= 1) {
+        if (events[i]?.type === 'user') {
+          asked = plainOf(events[i].text ?? '');
+          break;
+        }
+      }
+    }
+
+    // One pass backwards: the newest of everything is what a peek wants.
+    let said = '';
+    const doing = [];
+    const touched = [];
+    let tools = 0;
+    const lastTurn = last?.id ?? null;
+    for (let i = events.length - 1; i >= 0; i -= 1) {
+      const event = events[i];
+      const type = event?.type;
+      if (type === 'text') {
+        if (!said) said = plainOf(event.text ?? '');
+      } else if (type === 'tool.call') {
+        if (doing.length < doingCap) doing.unshift({ name: event.name ?? '', input: event.input ?? {} });
+        if (!lastTurn || !event.turn || event.turn === lastTurn) tools += 1;
+      } else if (DOC_WRITES.has(type) && event.path
+        && !touched.includes(event.path) && touched.length < touchedCap) {
+        touched.push(event.path);
+      }
+    }
+
+    return {
+      id: meta.id ?? '',
+      asked,
+      askedAt: last?.createdAt ?? null,
+      said,
+      doing,
+      touched,
+      tools,
+      turns: turns.length,
+      model: meta.model ?? '',
+    };
+  };
+
   globalThis.marbleAgentFolders = {
     COLOR_KEYS,
     REALMS,
@@ -1179,5 +1264,7 @@
     stageSlotAt,
     steadySlot,
     regionAt,
+    plainOf,
+    peekOf,
   };
 })();

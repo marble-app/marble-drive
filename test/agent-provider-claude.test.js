@@ -146,7 +146,9 @@ test('ids, labels, catalog, and the documents spawn', () => {
   assert.deepEqual(api.spawn({ workspace: '/w', prompt: 'x', env: {} }).env, { ANTHROPIC_API_KEY: 'sk-test' });
   assert.ok(!sub.spawn({ workspace: '/w', prompt: 'x', env: {} }).args.includes('--resume'));
   assert.deepEqual(sub.models.map((m) => m.id), ['haiku', 'sonnet', 'opus', 'fable']);
-  assert.deepEqual(sub.models.map((m) => m.label), ['Haiku 4.5', 'Sonnet 5', 'Opus 5', 'Fable 5.1']);
+  assert.deepEqual(sub.models.map((m) => m.label), ['Haiku 4.5', 'Sonnet 5', 'Opus 5.5', 'Fable 5.1']);
+  const opus = sub.spawn({ workspace: '/w', prompt: 'x', model: 'opus', env: {} });
+  assert.equal(opus.args[opus.args.indexOf('--model') + 1], 'claude-opus-5-5[1m]', 'opus pins 5.5; the bare alias still means Opus 5 on Claude Code 2.1.278');
   assert.deepEqual(sub.efforts, ['low', 'medium', 'high', 'xhigh', 'max']);
   assert.deepEqual(sub.modes.map((m) => m.id), ['auto', 'acceptEdits', 'plan', 'manual', 'bypassPermissions']);
 });

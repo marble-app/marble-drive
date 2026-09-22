@@ -24,9 +24,18 @@ import { writePrivateFile } from './private-file.js';
 export const CLAUDE_MODELS = [
   { id: 'haiku', label: 'Haiku 4.5' },
   { id: 'sonnet', label: 'Sonnet 5' },
-  { id: 'opus', label: 'Opus 5' },
+  { id: 'opus', label: 'Opus 5.5' },
   { id: 'fable', label: 'Fable 5.1' },
 ];
+// The picker keeps the family id (`opus`) so a saved conversation still
+// selects it. Claude Code 2.1.278 resolves the bare alias `opus` to Opus 5
+// and does not list 5.5, so a turn pins the API id. `[1m]` is the CLI's hint
+// that an unrecognized model has a 1M window; it is stripped before the
+// request. Opus 5.5's window is 1M (platform.claude.com, 2026-09-22).
+const CLAUDE_MODEL_ARGS = {
+  opus: 'claude-opus-5-5[1m]',
+};
+const claudeModelArg = (model) => CLAUDE_MODEL_ARGS[model] ?? model;
 export const CLAUDE_EFFORTS = ['low', 'medium', 'high', 'xhigh', 'max'];
 // The request id Marble gives the stream-json initialize handshake. Its reply
 // carries the CLI's own skills list.
@@ -243,7 +252,7 @@ export function createClaudeProvider({ auth = 'subscription', exec = runCommand,
         if (mode === 'bypassPermissions') args.push('--allow-dangerously-skip-permissions');
       }
       // No model or effort means the person's own settings.json — the terminal default.
-      if (model) args.push('--model', model);
+      if (model) args.push('--model', claudeModelArg(model));
       if (effort) args.push('--effort', effort);
       if (resume) args.push('--resume', resume);
       // Without a key the CLI would fall back to the login, and bill the

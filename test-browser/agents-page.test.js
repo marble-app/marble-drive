@@ -232,7 +232,7 @@ test('conversation tags name Claude and KIXLAB API', async () => {
   ]);
   assert.deepEqual(tags.alias, [
     { kind: 'agent', label: 'Claude' },
-    { kind: 'model', label: 'Sonnet • high' },
+    { kind: 'model', label: 'Sonnet 5 • high' },
   ]);
 });
 

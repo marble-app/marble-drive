@@ -18,7 +18,9 @@
   // Drive UIST warm / Dusk stay as fallbacks. When the open document names a
   // palette (--paper, --ink, … on :root) or paints the body, the chrome copies
   // those colors so a conversation on a white starter or a custom theme matches
-  // the page it is sitting on — not a second, Drive-only sheet.
+  // the page it is sitting on — not a second, Drive-only sheet. Colors only:
+  // the type is the design system's own UI stack on every page (see
+  // applyPageTheme).
   const TOKENS = `
     :host {
       --ink: #111111; --muted: #5a5a5a; --faint: #8a8a8a; --line: #ddd9cf;
@@ -119,12 +121,24 @@
   function applyPageTheme(el, theme) {
     const next = theme || pageTheme(getComputedStyle(document.documentElement), getComputedStyle(document.body));
     for (const [name, value] of Object.entries(next)) el.style.setProperty(`--${name}`, value);
-    const family = getComputedStyle(document.body).fontFamily;
-    if (family) el.style.setProperty('--ui-font', family);
+    // Colour is the page's, type is not. A document picks its body face to be
+    // read in — Avenir, a serif, whatever it was written in — and the chrome is
+    // not the document: a log, a composer and a row of buttons set in the
+    // page's reading face stop being the same piece of furniture from one
+    // document to the next. The chrome keeps the design system's UI stack. A
+    // page that really means to restyle it can still say so by declaring
+    // --ui-font, which this no longer overwrites.
+    el.style.removeProperty('--ui-font');
   }
 
   function watchPageTheme(el) {
-    const paint = () => applyPageTheme(el);
+    // A visual is a frame, so the palette does not cascade into it: a page that
+    // changes colour has to be told to it. Nothing reloads — the frame swaps
+    // one stylesheet.
+    const paint = () => {
+      applyPageTheme(el);
+      el.repaintVisuals?.();
+    };
     paint();
     const mo = new MutationObserver(paint);
     mo.observe(document.documentElement, { attributes: true, attributeFilter: ['class', 'style', 'data-theme'] });
@@ -193,17 +207,31 @@
   const BULLET = /^\s*[-*]\s+(.*)$/;
   const NUMBERED = /^\s*\d+[.)]\s+(.*)$/;
   const FENCE = /^\s*```/;
+  // The whole protocol for a visual: what the info string says. The caption
+  // after it, and everything done with the block, is chat-visual.js's.
+  const VISUAL_FENCE = /^marble-visual\b/i;
+  // The same fence, found in a message that is still arriving.
+  const VISUAL_OPEN = /(^|\n)[ \t]*```[ \t]*marble-visual\b/i;
 
-  function renderText(text, { chip = null } = {}) {
+  function renderText(text, { chip = null, visual = null } = {}) {
     const out = document.createDocumentFragment();
     const lines = String(text ?? '').replace(/\r\n/g, '\n').split('\n');
     let i = 0;
     while (i < lines.length) {
       const line = lines[i];
       if (FENCE.test(line)) {
+        const info = line.replace(FENCE, '').trim();
         const body = [];
         for (i += 1; i < lines.length && !FENCE.test(lines[i]); i += 1) body.push(lines[i]);
         i += 1;
+        // A fence the agent tagged `marble-visual` is the one piece of its text
+        // that is not read as text. It is not read by this page either: the
+        // card hands it to a sandboxed frame. Anything else is code.
+        const card = VISUAL_FENCE.test(info) ? visual?.(info, body.join('\n')) : null;
+        if (card) {
+          out.append(card);
+          continue;
+        }
         const pre = document.createElement('pre');
         const code = document.createElement('code');
         code.textContent = body.join('\n');
@@ -839,6 +867,33 @@
       .sort((a, b) => Number(a.dataset.index) - Number(b.dataset.index));
     for (const chip of chips) track.insertBefore(chip, more);
   };
+  /** The one word the packed control wears. The checked setup names itself;
+   *  nothing checked means the setup is not one of the saved ones — a model
+   *  tuned off its resting effort, or one chosen in the custom row — and the
+   *  word then has to be the model actually set. It used to fall back to the
+   *  first chip in the menu, which told everybody they were on Sonnet High
+   *  whatever they had picked. `data-custom` is written by markCustomSetup
+   *  just before this runs. */
+  const nameCurrentPreset = (track, more, menu) => {
+    const span = menu.querySelector('input:checked + span');
+    if (span) {
+      more.replaceChildren(span.cloneNode(true));
+      more.classList.add('is-current');
+      more.setAttribute('aria-label', `Setup: ${span.textContent.trim()}`);
+      return;
+    }
+    const label = track.dataset.custom || '';
+    if (!label) return;
+    // The same node a chip wears — a span holding the brand mark and the name
+    // — so a setup nobody saved reads at exactly the weight and size of one
+    // that is. BRAND is this file's own constant; the name is text.
+    const wrap = h('span');
+    wrap.innerHTML = BRAND[track.dataset.customBrand] ?? '';
+    wrap.append(document.createTextNode(label));
+    more.replaceChildren(wrap);
+    more.classList.add('is-current');
+    more.setAttribute('aria-label', `Setup: ${label}`);
+  };
   const fitPresets = (track) => {
     if (!track || track.hidden) return;
     const { more, menu } = ensurePresetOverflow(track);
@@ -863,12 +918,7 @@
       more.hidden = false;
       track.classList.add('is-packed');
       for (const chip of all) menu.append(chip);
-      const span = menu.querySelector('input:checked + span') ?? menu.querySelector('span');
-      if (span) {
-        more.replaceChildren(span.cloneNode(true));
-        more.classList.add('is-current');
-        more.setAttribute('aria-label', `Setup: ${span.textContent.trim()}`);
-      }
+      nameCurrentPreset(track, more, menu);
       slideThumb(track, { animate: false });
       return;
     }
@@ -911,12 +961,7 @@
         fitPresets(track);
         return;
       }
-      const span = menu.querySelector('input:checked + span');
-      if (span) {
-        more.replaceChildren(span.cloneNode(true));
-        more.classList.add('is-current');
-        more.setAttribute('aria-label', span.textContent.trim());
-      }
+      nameCurrentPreset(track, more, menu);
     }
     slideThumb(track, { animate: false });
   };
@@ -954,7 +999,7 @@
     // that stays a step on the effort slider rather than the saved setup.
     { id: 'sonnet-high', provider: 'claude-subscription', model: 'sonnet', effort: 'high', name: 'Sonnet High', brand: 'anthropic' },
     { id: 'grok-high', provider: 'cursor', model: 'grok-4.7', effort: 'high', name: 'Grok 4.7 High', brand: 'cursor' },
-    { id: 'opus-high', provider: 'claude-subscription', model: 'opus', effort: 'high', name: 'Opus High', brand: 'anthropic' },
+    { id: 'opus-high', provider: 'claude-subscription', model: 'opus', effort: 'high', name: 'Opus 5.5 High', brand: 'anthropic' },
     { id: 'fable-high', provider: 'claude-subscription', model: 'fable', effort: 'high', name: 'Fable 5.1 High', brand: 'anthropic' },
   ];
   const EFFORT_WORD = { low: 'Low', medium: 'Medium', high: 'High', xhigh: 'Extra High', max: 'Max' };
@@ -1005,6 +1050,13 @@
     const name = String(preset?.name ?? '');
     return word && name.endsWith(` ${word}`) ? name.slice(0, -(word.length + 1)) : name;
   };
+  /** The same trim done to a catalog label. Cursor spells effort into the
+   *  model's own name ("Grok 4.7 High Fast"); effort is the other axis here
+   *  and says itself, so the model keeps only what names the model. */
+  const modelHead = (label) => String(label ?? '')
+    .replace(/\s+(Extra High|High|Medium|Low)(\s+Fast)?$/i, '')
+    .replace(/\s+Fast$/i, '')
+    .trim();
   const nextMode = (modes, current) => {
     const ids = (modes ?? []).map((item) => item.id);
     if (!ids.length) return current ?? '';
@@ -1048,10 +1100,10 @@
   };
 
   const KNOWN_MODELS = [
-    ['sonnet', 'Sonnet'],
-    ['opus', 'Opus'],
-    ['haiku', 'Haiku'],
-    ['fable', 'Fable'],
+    ['sonnet', 'Sonnet 5'],
+    ['opus', 'Opus 5.5'],
+    ['haiku', 'Haiku 4.5'],
+    ['fable', 'Fable 5.1'],
   ];
 
   const providerLabel = (summary, labels) => {
@@ -1066,8 +1118,10 @@
     if (!id) return '';
     const models = labels instanceof Map ? labels.get(summary.provider)?.models : null;
     const named = models?.find((item) => item.id === id)?.label;
-    if (named) return named;
+    if (named) return modelHead(named) || named;
     const lower = String(id).toLowerCase();
+    const grok = lower.match(/grok[^\d]*(\d+(?:\.\d+)?)/);
+    if (grok) return `Grok ${grok[1]}`;
     for (const [key, name] of KNOWN_MODELS) {
       if (lower === key || lower.includes(key)) return name;
     }
@@ -1587,6 +1641,25 @@
     return choiceModule;
   };
 
+  // ------------------------------------------------------------ visuals
+
+  // The same arrangement for the card a ```marble-visual block becomes. The
+  // shell is built the moment the text renders; runtime/chat-visual.js — the
+  // sandboxed frame, the palette, the wire back to the composer — follows.
+  let visualModule = null;
+  const loadVisual = () => {
+    visualModule ??= import('/runtime/chat-visual.js').then((mod) => {
+      Object.assign(window.marbleAgentUI, {
+        readVisualInfo: mod.readVisualInfo,
+        maskStreamingVisuals: mod.maskStreamingVisuals,
+        visualDocument: mod.visualDocument,
+        VISUAL_CSS: mod.VISUAL_CSS,
+      });
+      return mod;
+    }).catch(() => null);
+    return visualModule;
+  };
+
   // ------------------------------------------------------------ tool runs
 
   // A run of finished steps folds into "7 steps" because reads and greps are
@@ -1736,7 +1809,7 @@
     :host([data-chrome="callout"]) .mast:not(:has(.tag)) { display: none; }
     :host([data-chrome="callout"]) .heading,
     :host([data-chrome="callout"]) .target-jump,
-    :host([data-chrome="callout"]) .zone-jump,
+    :host([data-chrome="callout"]) .zone-row,
     :host([data-chrome="callout"]) .also { display: none; }
     :host([data-chrome="callout"]) .log { flex: 0 1 auto; padding: 6px 12px calc(10px + var(--queued-space, 0px)); max-height: min(50vh, 360px); overflow-y: auto; }
     :host([data-chrome="callout"][data-folded]) .log { display: none; }
@@ -1852,13 +1925,39 @@
       transition: background-color .13s var(--snap), color .13s var(--snap);
     }
     .zone-jump[hidden] { display: none; }
+    /* Going once and going along are the same errand at two lengths, so they
+       share a row: the arrow takes you there now, the eye keeps you with the
+       agent as it moves — to the next element, and on to the next document. */
+    .zone-row { display: flex; align-items: center; gap: 4px; min-width: 0; }
+    .zone-row[hidden] { display: none; }
+    .zone-row .zone-jump { min-width: 0; }
+    .zone-follow {
+      --zone-mark: var(--accent-ink, color-mix(in srgb, #6d55d4 78%, var(--ink)));
+      flex: none;
+      display: inline-flex;
+      align-items: center;
+      gap: 4px;
+      padding: 3px 8px 3px 6px;
+      border: 1px solid color-mix(in srgb, var(--zone-mark) 30%, transparent);
+      border-radius: 999px;
+      background: color-mix(in srgb, var(--zone-mark) 10%, transparent);
+      color: color-mix(in srgb, var(--zone-mark) 64%, var(--ink));
+      font: inherit;
+      cursor: pointer;
+    }
+    .zone-follow svg { width: 13px; height: 13px; display: block; }
+    .zone-follow:hover { background: color-mix(in srgb, var(--zone-mark) 18%, transparent); color: var(--zone-mark); }
+    .zone-follow:focus-visible { outline: 2px solid var(--zone-mark); outline-offset: 2px; }
+    /* On, it is not an offer any more: it is a state you are in. */
+    .zone-follow[aria-pressed="true"] { background: var(--zone-mark); border-color: var(--zone-mark); color: var(--paper); }
+    .zone-follow[aria-pressed="true"]:hover { color: var(--paper); opacity: .88; }
     .zone-jump:hover { background: color-mix(in srgb, var(--zone-mark) 18%, transparent); color: var(--zone-mark); }
     .zone-jump:focus-visible { outline: 2px solid var(--zone-mark); outline-offset: 2px; }
     .zone-jump .zone-live { flex: none; width: 6px; height: 6px; border-radius: 50%; background: var(--zone-mark); animation: pulse 1.2s var(--snap) infinite; }
     .zone-jump .zone-what { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
     .zone-jump .zone-go { flex: none; opacity: .72; }
     /* A pane hides its mast when there is nothing on it; a live zone is something. */
-    :host([data-chrome="pane"]) .mast:not([hidden]):has(.zone-jump:not([hidden])) { display: flex; }
+    :host([data-chrome="pane"]) .mast:not([hidden]):has(.zone-row:not([hidden])) { display: flex; }
     @media (prefers-reduced-motion: reduce) { .zone-jump .zone-live { animation: none; } }
     ${ASK_CSS}
     .tool[data-state="failed"] { color: var(--danger); } .tool[data-state="failed"]::before { background: var(--danger); }
@@ -2703,6 +2802,7 @@
   /** The arrow leaving its box: the one glyph that says a name is a way out of
    *  this chat and into another document. Drawn at the mast's type size so it
    *  sits on the same line as the tags beside it. */
+  const EYE_ICON = '<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M2.5 12S6 5.5 12 5.5 21.5 12 21.5 12 18 18.5 12 18.5 2.5 12 2.5 12Z"/><circle cx="12" cy="12" r="2.8"/></svg>';
   const OUT_ICON = '<svg width="11" height="11" viewBox="0 0 16 16" aria-hidden="true"><path d="M6.5 3.5H3.5v9h9v-3" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/><path d="M9.5 3.5h3v3M12.5 3.5 7.5 8.5" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>';
 
   // ------------------------------------------------------------ the editor
@@ -2911,6 +3011,9 @@
   const flatten = (node) => {
     if (node.nodeType === Node.TEXT_NODE) return node.nodeValue ?? '';
     if (node.nodeType !== Node.ELEMENT_NODE) return '';
+    // A visual's caption and its two buttons are furniture, not what was said:
+    // the callout's one line would otherwise end "… Two layouts Expand Code".
+    if (node.classList?.contains('visual-head')) return '';
     const inner = [...node.childNodes].map(flatten).join('');
     return INLINE_TEXT.has(node.tagName) ? inner : ` ${inner} `;
   };
@@ -2934,11 +3037,17 @@
             <div class="tags"></div>
             <a class="target-jump" hidden><span class="target-what"></span><span class="target-out" aria-hidden="true">${OUT_ICON}</span></a>
           </div>
-          <button type="button" class="zone-jump" hidden>
-            <span class="zone-live" aria-hidden="true"></span>
-            <span class="zone-what"></span>
-            <span class="zone-go" aria-hidden="true">→</span>
-          </button>
+          <div class="zone-row" hidden>
+            <button type="button" class="zone-jump">
+              <span class="zone-live" aria-hidden="true"></span>
+              <span class="zone-what"></span>
+              <span class="zone-go" aria-hidden="true">→</span>
+            </button>
+            <button type="button" class="zone-follow" aria-pressed="false">
+              <span class="zone-eye" aria-hidden="true">${EYE_ICON}</span>
+              <span class="zone-follow-what">Follow</span>
+            </button>
+          </div>
           <button type="button" class="also" hidden>
             <span class="also-long"></span>
             <span class="also-short"></span>
@@ -3065,6 +3174,10 @@
       this.sheetWanted = false;
       this.armSetupSheet();
       this.zoneJump = root.querySelector('.zone-jump');
+      this.zoneRow = root.querySelector('.zone-row');
+      this.zoneFollow = root.querySelector('.zone-follow');
+      this.zoneFollowWhat = root.querySelector('.zone-follow-what');
+      this.zoneFollow.addEventListener('click', () => this.toggleFollow());
       this.zoneWhat = root.querySelector('.zone-what');
       this.zone = null;
       this.zoneJump.addEventListener('click', () => this.goToZone());
@@ -3819,6 +3932,30 @@
       return preset.model;
     }
 
+    /** The words a setup wears. Opus and Grok take the version from the
+     *  catalog ("Opus 5.5", "Grok 4.7") so a newer model does not keep wearing
+     *  last month's number. Effort is the other axis and is written after.
+     *  Sonnet and Fable keep the name on the preset. */
+    presetShownName(preset) {
+      const word = EFFORT_WORD[preset?.effort] ?? '';
+      const numbered = preset?.model === 'opus' || /grok/i.test(preset?.model ?? '') || preset?.provider === 'cursor';
+      if (!numbered) return preset?.name ?? '';
+      const provider = this.resolvePresetProvider(preset);
+      const id = provider ? this.resolvePresetModel(preset, provider) : preset.model;
+      const fromCatalog = modelHead((provider ? this.pickerModels(provider) : []).find((item) => item.id === id)?.label);
+      const head = fromCatalog || presetHead(preset);
+      if (!word || head.toLowerCase().endsWith(` ${word.toLowerCase()}`)) return head;
+      return `${head} ${word}`;
+    }
+
+    /** The model half of a setup's name, for the scrubber, where effort has
+     *  its own axis and must not be repeated under the stop. */
+    presetModelName(preset) {
+      const shown = this.presetShownName(preset);
+      const word = EFFORT_WORD[preset?.effort] ?? '';
+      return word && shown.endsWith(` ${word}`) ? shown.slice(0, -(word.length + 1)) : shown;
+    }
+
     matchingPreset() {
       const providerId = radioValue(this.shadowRoot, 'agent');
       const model = radioValue(this.shadowRoot, 'model');
@@ -3829,6 +3966,33 @@
           && this.resolvePresetModel(preset, provider) === model
           && preset.effort === effort;
       }) ?? null;
+    }
+
+    /** What this setup is called when no saved one matches it — Opus tuned up
+     *  to Max, or Haiku picked in the custom row. The model names itself and
+     *  wears its effort, in the same shape a setup's name has, so the word in
+     *  the bar is a true answer to "what am I about to run as" rather than a
+     *  guess. Empty only when there is no model to name; the callers say
+     *  "Custom" for that. */
+    customSetupName() {
+      const model = this.currentModel()?.label ?? '';
+      if (!model) return '';
+      const word = EFFORT_WORD[radioValue(this.shadowRoot, 'effort')] ?? '';
+      return word && !model.toLowerCase().endsWith(word.toLowerCase()) ? `${model} ${word}` : model;
+    }
+
+    /** The name and brand the packed setups control falls back to, written on
+     *  the track for fitPresets to read. Refreshed immediately before every
+     *  fit rather than at paint time: syncCatalog and the setup sheet fit the
+     *  row too, and a stale word here is the whole bug this guards against. */
+    markCustomSetup() {
+      if (!this.presetsEl) return;
+      const custom = this.matchingPreset() ? '' : (this.customSetupName() || 'Custom');
+      const provider = String(this.currentProvider()?.id ?? '');
+      this.presetsEl.dataset.custom = custom;
+      this.presetsEl.dataset.customBrand = custom
+        ? (provider.startsWith('claude') ? 'anthropic' : provider === 'cursor' ? 'cursor' : '')
+        : '';
     }
 
     paintPresets({ initial = false } = {}) {
@@ -3856,7 +4020,7 @@
           input.checked = match?.id === preset.id && !this.presetDisabled(preset);
           input.disabled = this.presetDisabled(preset);
           const span = document.createElement('span');
-          span.innerHTML = `${BRAND[preset.brand] ?? ''}${preset.name}`;
+          span.innerHTML = `${BRAND[preset.brand] ?? ''}${this.presetShownName(preset)}`;
           label.append(input, span);
           this.presetsEl.append(label);
         }
@@ -3867,6 +4031,8 @@
           const preset = presets.find((item) => item.id === input.value);
           input.checked = match?.id === input.value && !this.presetDisabled(preset);
           input.disabled = this.presetDisabled(preset);
+          const span = input.nextElementSibling;
+          if (span && preset) span.innerHTML = `${BRAND[preset.brand] ?? ''}${this.presetShownName(preset)}`;
         }
         slideThumb(this.presetsEl, { animate: !initial });
       }
@@ -3941,7 +4107,7 @@
       track.append(h('div', 'scrub-rail'), h('div', 'scrub-fill'), h('div', 'scrub-knob'));
       for (const preset of presets) {
         const stop = h('div', 'scrub-stop');
-        const name = h('span', 'scrub-name', presetHead(preset));
+        const name = h('span', 'scrub-name', this.presetModelName(preset));
         // Each model's own effort, under its own name: the second axis is
         // remembered per model, and this is where you can see that.
         stop.append(h('div', 'scrub-dot'), name, effortStack(this.scrubEfforts(preset), 'scrub-stop-effort'));
@@ -4006,11 +4172,13 @@
       const knob = this.scrubEl.querySelector('.scrub-knob');
       [...this.scrubEl.querySelectorAll('.scrub-stop')].forEach((stop, index) => {
         stop.classList.toggle('is-at', index === at);
+        const name = stop.querySelector('.scrub-name');
+        if (name && presets[index]) name.textContent = this.presetModelName(presets[index]);
       });
       // BRAND is this file's own constant, not anything an agent said.
       const model = this.scrubEl.querySelector('.scrub-model');
       model.innerHTML = BRAND[preset.brand] ?? '';
-      model.append(document.createTextNode(presetHead(preset)));
+      model.append(document.createTextNode(this.presetModelName(preset)));
       // Light the word and the bars rather than rewriting them: the stack is
       // already as wide as its longest word, so nothing beside it moves, and
       // the word being replaced is still there to leave while the new one
@@ -4046,7 +4214,7 @@
         knob.style.transition = '';
       }
       this.scrubEl.setAttribute('aria-valuenow', String(at));
-      this.scrubEl.setAttribute('aria-valuetext', [presetHead(preset), EFFORT_WORD[here] ?? here].filter(Boolean).join(', '));
+      this.scrubEl.setAttribute('aria-valuetext', [this.presetModelName(preset), EFFORT_WORD[here] ?? here].filter(Boolean).join(', '));
     }
 
     /** The effort remembered for the stop the scrubber is on. */
@@ -4108,6 +4276,7 @@
         delete this.bar.dataset.wrap;
         delete this.setupRow?.dataset.wrap;
         if (!this.picker?.hidden) fitPicker(this.picker);
+        this.markCustomSetup();
         fitPresets(this.presetsEl);
       });
     }
@@ -4128,7 +4297,8 @@
       const provider = this.currentProvider();
       const modes = provider?.modes ?? [];
       const mode = modes.find((item) => item.id === this.mode);
-      const parts = [provider?.label || 'Agent', this.matchingPreset()?.name || this.currentModel()?.label || 'Custom'];
+      const preset = this.matchingPreset();
+      const parts = [provider?.label || 'Agent', (preset ? this.presetShownName(preset) : '') || this.customSetupName() || 'Custom'];
       if (mode && modes[0] && mode.id !== modes[0].id) parts.push(mode.label);
       return parts.join(' · ');
     }
@@ -4351,7 +4521,8 @@
      *  It is the only thing in a chat that points back out at the document. */
     showZone(zone) {
       this.zone = zone && Array.isArray(zone.ids) && zone.ids.length ? zone : null;
-      this.zoneJump.hidden = !this.zone;
+      this.zoneRow.hidden = !this.zone;
+      this.paintFollow();
       if (!this.zone) {
         this.dispatchEvent(new CustomEvent('zone', { detail: { zone: null }, bubbles: true, composed: true }));
         return;
@@ -4363,6 +4534,48 @@
         : `Open ${this.zone.path} at what the agent is working on`;
       this.zoneJump.setAttribute('aria-label', this.zoneJump.title);
       this.dispatchEvent(new CustomEvent('zone', { detail: { zone: this.zone }, bubbles: true, composed: true }));
+    }
+
+    /** Is this page already tied to this conversation? The tether lives on the
+     *  document — collab.js owns it, because it is the thing that moves your
+     *  view — and answers by cancelling the question. */
+    followingHere() {
+      const id = this.getAttribute('conversation');
+      if (!id) return false;
+      return !dispatchEvent(new CustomEvent('marble:following?', { cancelable: true, detail: { id } }));
+    }
+
+    paintFollow(on = this.followingHere()) {
+      this.zoneFollow.setAttribute('aria-pressed', String(on));
+      this.zoneFollowWhat.textContent = on ? 'Following' : 'Follow';
+      this.zoneFollow.title = on
+        ? 'Stop following this agent'
+        : 'Follow this agent: your view goes where its work goes, here and into other documents';
+      this.zoneFollow.setAttribute('aria-label', this.zoneFollow.title);
+    }
+
+    /** Going once and going along. A jump is spent on arrival; a tether keeps
+     *  taking you — to the next element, and on to the next document — until
+     *  you stop it. Following includes the first jump, because a tether that
+     *  leaves you where you were has not started. */
+    toggleFollow() {
+      const id = this.getAttribute('conversation');
+      if (!id) return;
+      if (this.followingHere()) {
+        dispatchEvent(new CustomEvent('marble:follow', { detail: { id: null } }));
+        this.paintFollow(false);
+        return;
+      }
+      const zone = this.zone;
+      if (zone && zone.path !== window.marble?.app) {
+        // Another document: the tether rides the hash and is tied on arrival.
+        const at = zone.ids.map(encodeURIComponent).join(',');
+        location.href = `/a/${encodeURIComponent(zone.path)}#follow=${encodeURIComponent(id)}&at=${at}`;
+        return;
+      }
+      dispatchEvent(new CustomEvent('marble:follow', { detail: { id } }));
+      this.paintFollow(true);
+      if (zone) this.goToZone();
     }
 
     /** Same document: scroll to it. Another document: the jump is a navigation,
@@ -5411,7 +5624,9 @@
       this.usageAsk = event;
       const can = event.canSwitch !== false;
       this.usageNoteText.textContent = can
-        ? 'Claude usage stopped. Switch to Cursor?'
+        ? (event.next === 'grok'
+          ? 'This model stopped. Switch to Grok?'
+          : 'Claude usage stopped. Switch to Cursor?')
         : String(event.stay || 'Cursor is unavailable, so this chat stayed on Claude').replace(/^—\s*/, '');
       this.usageSwitch.hidden = !can;
       this.usageNote.hidden = false;
@@ -5459,22 +5674,89 @@
       if (!this.live || this.live.turn !== turn) {
         this.endLive();
         const node = h('div', 'msg agent live');
-        this.live = { turn, node };
+        this.live = { turn, node, raw: '' };
         this.append(turn, node);
       }
-      this.live.node.append(text);
+      this.live.raw += text;
+      // The cheap path is the only one until a visual opens. After that the
+      // live message is rebuilt from the whole delta each time, because half a
+      // visual is markup and markup is not what the log shows.
+      if (!this.live.visual && !VISUAL_OPEN.test(this.live.raw)) {
+        this.live.node.append(text);
+        return;
+      }
+      this.live.visual = true;
+      const mod = window.marbleAgentUI?.maskStreamingVisuals;
+      if (!mod) {
+        // Nothing is shown until the module that knows what to hide is here.
+        // If it never comes, this falls back to the plain streaming it
+        // replaced rather than waiting on a promise that has already settled.
+        if (this.visualGone) {
+          this.live.node.append(text);
+          return;
+        }
+        loadVisual().then((loaded) => {
+          this.visualGone = !loaded;
+          if (this.live?.turn === turn) this.delta(turn, '');
+        });
+        return;
+      }
+      const { text: shown, visuals } = mod(this.live.raw);
+      this.live.node.replaceChildren(shown);
+      this.styleVisuals(window.marbleAgentUI?.VISUAL_CSS);
+      for (let i = 0; i < visuals; i += 1) this.live.node.append(h('div', 'visual-pending'));
+    }
+
+    /** The hook renderText calls for a ```marble-visual block: a shell now, and
+     *  the frame that fills it as soon as the module lands. */
+    visualHook() {
+      return (info, body) => {
+        const card = h('figure', 'visual');
+        card.setAttribute('role', 'group');
+        card.append(h('div', 'visual-pending'));
+        loadVisual().then((loaded) => {
+          if (loaded) {
+            this.styleVisuals(loaded.VISUAL_CSS);
+            loaded.mountVisual(card, { info, body, view: this });
+            return;
+          }
+          // A host that cannot serve the module — an older one, or a reload
+          // that lost the network — shows the markup as what it is. A
+          // placeholder that shimmers for ever is the one thing worse.
+          const pre = h('pre');
+          pre.append(h('code', '', body));
+          card.replaceChildren(pre);
+        });
+        return card;
+      };
+    }
+
+    /** The card's own sheet, added to this root the first time one appears. */
+    styleVisuals(css) {
+      if (this.visualStyled || !css) return;
+      this.visualStyled = true;
+      const style = document.createElement('style');
+      style.textContent = css;
+      this.shadowRoot.append(style);
+    }
+
+    /** The palette again, for frames that were mounted before it changed. */
+    repaintVisuals() {
+      if (!this.visualStyled) return;
+      visualModule?.then?.((mod) => mod?.paintVisuals(this));
     }
 
     text(turn, text) {
+      const visual = this.visualHook();
       if (this.live && this.live.turn === turn) {
         this.live.node.classList.remove('live');
-        this.live.node.replaceChildren(renderText(text));
+        this.live.node.replaceChildren(renderText(text, { visual }));
         this.record(turn).lastText = { text, node: this.live.node };
         this.live = null;
         return;
       }
       const node = h('div', 'msg agent');
-      node.append(renderText(text));
+      node.append(renderText(text, { visual }));
       this.append(turn, node);
       this.record(turn).lastText = { text, node };
     }
@@ -7249,7 +7531,7 @@
 
   const buildAskCard = (event, submit) => MarbleConversation.prototype.buildAskCard(event, submit);
   window.marbleAgentUI = { stateOf, STATE_CSS, renderText, spring, project, TOKENS, buildAskCard, ASK_CSS, conversationTags, eventBelongsToConversation, askResponse, TAG_CSS, fillMeters, usageAvailable, usageTone, formatReset, formatAsOf, USAGE_CSS, pageTheme, applyPageTheme, fillRadios, fitPicker, fitPresets, sortProviders };
-  Object.assign(window.marbleAgentUI, { collapseToolRows, toolShortName });
+  Object.assign(window.marbleAgentUI, { collapseToolRows, toolShortName, toolLabel });
 
   if (window.marble?.agent) mount();
   else addEventListener('marble:agent', mount, { once: true });

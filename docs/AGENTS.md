@@ -146,36 +146,78 @@ On a phone the handle opens the drawer on a new conversation, with the
 selection attached; there is no anchored card. The Agents page draws no
 callouts of its own.
 
-## Marking a document up: Select and Sketch
+## Describe mode: saying what you want about a document
 
-The drawer's tray holds two tools for saying *this part, like this* without
-typing an id. Both are pointer tools, so neither is offered where there is no
-hover; both put the page in a mode that Escape, or the tool again, leaves; and
-in a mode the pointer belongs to the layer while the wheel still scrolls the
-page under it. A page with no tray — the Agents page — has neither.
+The drawer's tray has one entry for this, **Describe**, and it opens a toolbar
+at the bottom of the screen holding the tools that go with it. They are pointer
+tools, so none of them is offered where there is no hover; each is a mode that
+Escape or a second press leaves; Escape with no tool leaves Describe mode, and
+so does **Done**. Leaving fades the whole layer out — the ink, the notes, the
+frame, the field and the toolbar together — and keeps every mark: the tray's
+entry reads **Describe · 3 kept**, and opening it again brings them back
+exactly as they were, selection included. A page you have stopped marking up is
+a page you want to read. Inside a mode the pointer belongs to the layer while the wheel
+still scrolls the page under it. A page with no tray — the Agents page — has
+none of this.
 
-**Select an area** draws a marquee. Every addressed element the rectangle
-covers by sixty percent or more is outlined as you drag, and a rectangle across
-a whole list outlines the list rather than its items. Letting go hands those
-elements to the selection the callout's handle and ⌘J already answer to, and
-leaves the mode. **Shift** while releasing adds to what is already selected.
+- **Select** draws a marquee. Every addressed element it covers by sixty
+  percent or more is outlined as you drag, and a rectangle across a whole list
+  means the list rather than its items. It also picks up **marks**: a rectangle
+  over a sketch or a note takes that mark, ⌫ removes what is picked, and a drag
+  from inside the picked area moves it. **Shift** while releasing adds to what
+  is already selected.
+- **Sketch** draws. Each stroke is read as **a box around** the elements it
+  encloses, **an arrow from** one element **to** another — a short stroke at
+  either end within half a second is its head, not a second mark — or **ink
+  over** what it covers. Resting on a stroke shows its reading in words. ⌘Z
+  takes back the last stroke.
+- **Note** puts a text box on the page at the point you click, anchored to the
+  element under it. It reads as `a note on q1: "make this the headline"`, it is
+  dragged by its grip, and an empty one is discarded when it loses the caret.
+- **Move or resize** is the direct-manipulation tool, and it implements no
+  layout of its own. Point at an element and it says what that element allows —
+  `p1 · reorder · resize (undeclared)` — reading the document's own vocabulary
+  through `marbleVocabulary.affords`. Drag it and the gesture files the op that
+  answer names: a `move` in a `data-marble-sortable` list, an inline position
+  on a `data-marble-canvas`, an inline size from the corner handle of a
+  `data-marble-resizable`. Where a document declares none of that the gesture
+  still lands — reordering siblings *is* a move, and a size *is* an inline
+  style — it says it did so undeclared, and offers one button that writes the
+  declaration in: **Make this list sortable**, **Make this resizable**. One op
+  per gesture, so the document's own undo takes the whole drag back.
+- **Clear marks** takes the ink, the notes and the selection off.
 
-**Sketch** draws. Each stroke is read as one of three things and the reading is
-what the agent is told: a stroke that closes on itself is **a box around** the
-elements it encloses, a straight one is **an arrow from** the element at its
-start **to** the one at its end — a short stroke at either end within half a
-second is its head, not a second mark — and anything else is **ink over** what
-it covers. Resting on a stroke shows its reading in words, so a wrong one can
-be redrawn before it is sent. ⌘Z takes back the last stroke and **Clear
-sketch**, which is in the tray only while there is ink, takes back all of them.
+Everything selected or marked is wrapped in **one frame**, with a **field**
+hanging under it: one line, *Describe the change…*, Enter to send. The brief
+line above it says what is attached — `3 elements · a box around q1 · a note on
+p`. Sending opens the callout's card at the same region with the marks and your
+sentence in it and submits, so the turn, the zone, the trail, Undo and Done are
+the ones that already exist. Marks live in the page for as long as the tab does;
+nothing is written to the document — except what Adjust does, which is a real
+edit, and is reported in the brief as `I already moved p1 to the end of its list
+by hand` so an agent reads what the hand did as the example for the rest.
 
-A sketch is a selection with a reading attached: the strokes name their
-elements as the selection, and sending goes out through the door that was
-already there — the handle, ⌘J, or **Ask about the sketch** in the tray, which
-is Ask here wearing what the sketch made of it. The card opens with the reading
-as the first sentence of its draft, for the person to edit before they send.
-Marks live in the page for as long as the tab does; nothing is written to the
-document, and nothing is stored beside it yet.
+## Variations
+
+An element that might have been something else is a `<marble-alt>` in the file
+with one child per version, and which one shows is one attribute. Wherever a
+document has one, the page grows a **version pill** on that element — the name,
+where you are in the set, and ‹ › to step through it. A step is an ordinary op:
+it records, undoes, reaches the file and travels to another tab.
+
+The pill's last button opens the **compare surface**, which lays every version
+out as a live preview of itself in whatever space the page has left after the
+drawer and the toolbar — side by side when the versions are narrow enough to
+stay legible, stacked when they are not. Each card says what it is trying, and
+offers **Use** (make it the one that shows) and **Keep only this** (drop the
+others and unwrap, leaving the survivor answering to the id the element always
+had). The surface is dragged by its bar, resized from its corner, and remembers
+where it was left.
+
+**Explore variations**, in Describe mode's toolbar, is how a set gets written in
+the first place: with something selected it asks what you want to try and why,
+how many to make, and sends one turn asking for exactly that, in `<marble-alt>`
+form. When the alternatives land the compare surface opens on them.
 
 ## What a full agent can do
 
@@ -318,6 +360,54 @@ it asked — derived from the runner's live turns, not stored. The summary
 stream (`/agent/events?all=1`) carries `event: ask` when one opens and
 `event: ask.resolved` when it closes, so a list can know without holding
 every conversation's stream. The Agents page's Deck is built on both.
+
+## Visuals in the chat
+
+An answer may hold one thing that is not text. A fenced block tagged
+`marble-visual` becomes a card in the transcript:
+
+````
+```marble-visual Two layouts
+<button class="pick" aria-pressed="false" data-answer="Side by side">…</button>
+```
+````
+
+The body is a fragment — markup, an optional `<style>`, an optional `<script>`
+— and the host puts it in an iframe with `sandbox="allow-scripts"` and nothing
+else. No `allow-same-origin`, so it runs at an opaque origin: it cannot read
+the page it is drawn in, its cookie or its storage, and it cannot navigate the
+tab. That boundary is what lets a visual be interactive at all on a drawer that
+sits on top of every document.
+
+The frame is handed the chrome's own palette — which is the open document's,
+copied on by `applyPageTheme` — so a visual in a green Research document is
+green, and a page that changes colour repaints the frames rather than reloading
+them. It is also handed the size the transcript is being read at, because a
+phone reads at seventeen. It measures its content and the card grows to it,
+capped at 70vh with **Expand** offered only when there is more to see, and
+**Code** shows the markup behind it. Because it is a frame, a
+`@media (max-width: 420px)` inside it fires off the card's own width: one
+visual is legible in a 380px drawer and a wide Focus pane without the author
+knowing which it is in.
+
+A visual answers: `data-answer="…"` on a button sends that text as the person's
+next message, `data-draft="…"` puts it in the composer, and `marble.answer()` /
+`marble.draft()` do the same from script. It goes through the composer's own
+submit, so queueing and steering are the ones that already exist; a card is
+rate-limited to one send every 600 ms and twelve in all, and says **Sent** once
+it has been spent.
+
+Nothing is stored. The block travels in the turn's text event, so a reload
+draws the card again from the transcript; a host that cannot serve
+`runtime/chat-visual.js` shows the markup as code rather than a placeholder
+that never resolves. While a visual is still arriving the live message shows
+the words around it and a quiet *Drawing…* — half a visual is markup, and
+markup is not what the log shows.
+
+The rules an agent writes them by are in the `visuals-in-chat` skill
+(`.claude/skills/visuals-in-chat/`), and the four recipes there are rendered at
+both widths in both schemes by `node tools/visual-shots.mjs`. Design:
+[`superpowers/specs/2026-09-22-visuals-in-chat-design.md`](superpowers/specs/2026-09-22-visuals-in-chat-design.md).
 
 ## Messages
 
@@ -477,11 +567,14 @@ starting a new conversation. The next turn uses the new CLI and does not
 resume the previous CLI's session. Beside the model, one word — **Auto** or
 **Pause** — belongs to that chat (a new chat starts on Auto; on a phone the
 word is in the setup sheet with the model). When a Claude turn stops because
-its usage window is spent, Auto points the chat at Cursor's newest Grok, at
-the same effort or the nearest one that model offers, and sends **Continue**
-with this chat's transcript so Grok can finish the work. Pause leaves the
-turn failed and asks above the composer whether to switch to Cursor. **Leave
-it** keeps the failure. **Switch** is the same handoff. A crash, a refusal,
+its usage window is spent, Auto continues that chat on Cursor at the same
+effort, or the nearest effort Cursor offers. The first stop uses the same
+model the chat was on. Fable continues on Opus, so the handoff does not spend
+Fable again. If that Cursor model then stops for usage, Auto continues once
+more, on Cursor's newest Grok, and sends **Continue** with this chat's
+transcript. If Cursor has no matching model, the first stop goes straight to
+Grok. Pause leaves the turn failed and asks above the composer whether to
+switch. **Leave it** keeps the failure. **Switch** is the same handoff. A crash, a refusal,
 or a message that says to retry shortly does not switch. A new conversation still prefers the
 Settings default, except when Claude's 5-hour meter is at 100%: then the
 picker starts on Cursor if Cursor is signed in. If Claude usage cannot be
@@ -580,8 +673,11 @@ whenever a chat ticks.
 Click selects. Double-click or Enter pins a chat **Full**; other Fulls become
 Digest. Shift-double-click or **Keep open** adds a Full without demoting the
 others, up to four. Cold Digests over the budget become Chips. Arrow keys
-move selection; Space opens a Quick Look preview without pinning. Narrow view
-stacks the cards and does not add extra panes.
+move selection. Resting a pointer on a card opens **the peek** beside it —
+the last thing you asked, what it is doing or last said, and the documents it
+wrote to — which closes with the pointer and never counts as having read the
+chat; Space opens the same thing *held*, until Escape. Neither pins. Narrow
+view stacks the cards and does not add extra panes.
 
 **Deck** orders by how much a conversation wants you, not where it lives:
 four bands — **Needs you**, **Running**, **Review**, **Idle** — each a

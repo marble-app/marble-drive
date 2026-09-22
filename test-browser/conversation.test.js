@@ -165,7 +165,7 @@ const installNamedSetups = async (view, { model = 'sonnet', effort = 'high', wid
         models: [
           { id: 'haiku', label: 'Haiku 4.5' },
           { id: 'sonnet', label: 'Sonnet 4.5' },
-          { id: 'opus', label: 'Opus 4.1' },
+          { id: 'opus', label: 'Opus 5.5' },
           { id: 'fable', label: 'Fable 5' },
         ],
         efforts: ['low', 'medium', 'high', 'xhigh', 'max'],
@@ -207,7 +207,7 @@ test('saved setups hug their labels instead of stretching across the composer', 
         models: [
           { id: 'haiku', label: 'Haiku 4.5' },
           { id: 'sonnet', label: 'Sonnet 4.5' },
-          { id: 'opus', label: 'Opus 4.1' },
+          { id: 'opus', label: 'Opus 5.5' },
           { id: 'fable', label: 'Fable 5' },
         ],
         efforts: ['low', 'medium', 'high', 'xhigh', 'max'],
@@ -232,7 +232,7 @@ test('saved setups hug their labels instead of stretching across the composer', 
       names: [...el.shadowRoot.querySelectorAll('.preset span')].map((node) => node.textContent.trim()),
     };
   });
-  assert.deepEqual(names.names, ['Sonnet High', 'Opus High', 'Fable 5.1 High']);
+  assert.deepEqual(names.names, ['Sonnet High', 'Opus 5.5 High', 'Fable 5.1 High']);
   assert.ok(names.presets <= names.pills + 12, `presets ${names.presets} should hug pills ${names.pills}, not setup ${names.setup}`);
   // The setup shares its row with the mode and send buttons now, so the
   // margin is what Custom takes, not the old empty half of the composer.
@@ -318,7 +318,7 @@ test('Custom keeps the Claude model sliders visible after picking a preset', asy
         models: [
           { id: 'haiku', label: 'Haiku 4.5' },
           { id: 'sonnet', label: 'Sonnet 4.5' },
-          { id: 'opus', label: 'Opus 4.1' },
+          { id: 'opus', label: 'Opus 5.5' },
           { id: 'fable', label: 'Fable 5' },
         ],
         efforts: ['low', 'medium', 'high', 'xhigh', 'max'],
@@ -371,7 +371,7 @@ test('Cursor presets stay enabled on a Claude conversation', async () => {
         models: [
           { id: 'haiku', label: 'Haiku 4.5' },
           { id: 'sonnet', label: 'Sonnet 4.5' },
-          { id: 'opus', label: 'Opus 4.1' },
+          { id: 'opus', label: 'Opus 5.5' },
           { id: 'fable', label: 'Fable 5' },
         ],
         efforts: ['low', 'medium', 'high', 'xhigh', 'max'],
@@ -498,7 +498,7 @@ test('a signed-in Claude with no usage meter keeps its models pickable', async (
         installed: true,
         signedIn: true,
         default: true,
-        models: [{ id: 'sonnet', label: 'Sonnet 5' }, { id: 'opus', label: 'Opus 5' }, { id: 'fable', label: 'Fable 5.1' }],
+        models: [{ id: 'sonnet', label: 'Sonnet 5' }, { id: 'opus', label: 'Opus 5.5' }, { id: 'fable', label: 'Fable 5.1' }],
         efforts: ['high', 'xhigh'],
         modes: [{ id: 'default', label: 'Default' }],
       },
@@ -561,7 +561,7 @@ const withSetups = (view, { efforts = ['high', 'xhigh'], model = 'fable', effort
       installed: true,
       signedIn: true,
       default: true,
-      models: [{ id: 'sonnet', label: 'Sonnet 5' }, { id: 'opus', label: 'Opus 5' }, { id: 'fable', label: 'Fable 5.1' }],
+      models: [{ id: 'sonnet', label: 'Sonnet 5' }, { id: 'opus', label: 'Opus 5.5' }, { id: 'fable', label: 'Fable 5.1' }],
       efforts: list,
       modes: [{ id: 'default', label: 'Default' }],
     }];
@@ -839,7 +839,7 @@ test('holding the two modifiers raises the setups as a stepped scrubber', async 
   assert.equal(up.open, true);
   // Weakest at the left: a slider is pushed right to turn something up.
   assert.deepEqual(up.stops, ['sonnet-high', 'opus-high', 'fable-high'], 'one stop per setup you can pick, weakest first');
-  assert.deepEqual(up.labels, ['Sonnet', 'Opus', 'Fable 5.1'], 'the model alone — effort has its own axis now');
+  assert.deepEqual(up.labels, ['Sonnet', 'Opus 5.5', 'Fable 5.1'], 'the model alone — effort has its own axis now');
   assert.equal(up.marked, up.at, 'the stop it starts on is the one marked');
   assert.equal(up.model, 'Fable 5.1');
   assert.equal(up.effort, 'High');
@@ -868,7 +868,7 @@ test('the arrows walk the scrubber while the modifiers are held, and stop at the
   const moved = await scrub(left);
   assert.equal(moved.at, start.at - 1);
   assert.equal(moved.marked, moved.at, 'the mark follows');
-  assert.equal(moved.model, 'Opus');
+  assert.equal(moved.model, 'Opus 5.5');
 
   // A timeline has ends; holding an arrow down comes to rest, it does not cycle.
   for (let i = 0; i < 6; i += 1) await page.keyboard.press('ArrowLeft');
@@ -971,7 +971,7 @@ test('a setup no chip matches still opens on its own model', async () => {
 
   await hold(page);
   const up = await scrub(left);
-  assert.equal(up.model, 'Opus', 'the stop is the model, even with no chip to match');
+  assert.equal(up.model, 'Opus 5.5', 'the stop is the model, even with no chip to match');
   assert.equal(up.effort, 'Max', 'and the gauge carries the effort that had no chip');
   assert.equal(up.gauge, 5);
   await release(page);
@@ -993,7 +993,7 @@ test('each model keeps its own effort, and wears it under its name', async () =>
   // Walk off it: the next model is still where it was left, not at Max.
   await page.keyboard.press('ArrowLeft');
   const opus = await scrub(left);
-  assert.equal(opus.model, 'Opus');
+  assert.equal(opus.model, 'Opus 5.5');
   assert.equal(opus.effort, 'High', 'a raised effort does not follow you to the next model');
   assert.equal(opus.gauge, 3);
 
@@ -1006,7 +1006,7 @@ test('each model keeps its own effort, and wears it under its name', async () =>
   assert.equal(back.effort, 'Max', 'the model you tuned kept it');
   // Each stop says what it is remembering, under its own name.
   assert.deepEqual(back.stopEfforts, ['High', 'Medium', 'Max']);
-  assert.deepEqual(back.labels, ['Sonnet', 'Opus', 'Fable 5.1'], 'the names stay the names');
+  assert.deepEqual(back.labels, ['Sonnet', 'Opus 5.5', 'Fable 5.1'], 'the names stay the names');
   await release(page);
 });
 
@@ -1099,11 +1099,11 @@ test('letting the modifiers go commits the setup the scrubber landed on', async 
   // Down one from the strongest, which is where the default sits.
   await page.keyboard.press('ArrowLeft');
   await release(page);
-  await left.locator('.presets-more', { hasText: 'Opus High' }).waitFor();
+  await left.locator('.presets-more', { hasText: 'Opus 5.5 High' }).waitFor();
   const after = await scrub(left);
   assert.equal(after.open, false, 'the scrubber goes down with the keys');
   assert.notEqual(after.setup, before);
-  assert.equal(after.setup, 'Opus High');
+  assert.equal(after.setup, 'Opus 5.5 High');
   assert.equal(
     await left.evaluate((el) => el.shadowRoot.querySelector('input[name="model"]:checked')?.value),
     'opus',
@@ -1236,7 +1236,7 @@ test('Claude and Cursor presets become the main toggles', async () => {
         models: [
           { id: 'haiku', label: 'Haiku 4.5' },
           { id: 'sonnet', label: 'Sonnet 4.5' },
-          { id: 'opus', label: 'Opus 4.1' },
+          { id: 'opus', label: 'Opus 5.5' },
           { id: 'fable', label: 'Fable 5' },
         ],
         efforts: ['low', 'medium', 'high', 'xhigh', 'max'],
@@ -1264,7 +1264,7 @@ test('Claude and Cursor presets become the main toggles', async () => {
     el.paintPresets({ initial: true });
     return [...el.shadowRoot.querySelectorAll('.preset span')].map((node) => node.textContent.trim());
   });
-  assert.deepEqual(names, ['Sonnet High', 'Grok 4.7 High', 'Opus High', 'Fable 5.1 High']);
+  assert.deepEqual(names, ['Sonnet High', 'Grok 4.7 High', 'Opus 5.5 High', 'Fable 5.1 High']);
   assert.equal(await view.locator('.presets').isVisible(), true);
   assert.equal(await view.locator('.picker').isVisible(), false);
   assert.equal(await view.locator('input[name="preset"][value="sonnet-high"]').isChecked(), true);
@@ -2076,6 +2076,27 @@ test('a running conversation says where its hands are, and the row goes when the
   await view.locator('.turn-footer[data-status="completed"]').waitFor();
   await row.waitFor({ state: 'hidden' });
   assert.deepEqual(errors, []);
+});
+
+test('Follow ties you to the agent, crosses to its document, and says so there', async () => {
+  const { page, view } = await mount();
+  await view.locator('input[name="agent"][value="fake"]').waitFor();
+  await page.evaluate(() => window.marble.agent.aim('atlas'));
+  await sendFrom(view, 'script:elsewhere');
+
+  const follow = view.locator('.zone-follow');
+  await follow.waitFor();
+  assert.equal(await follow.getAttribute('aria-pressed'), 'false');
+  assert.equal((await follow.textContent()).trim(), 'Follow');
+
+  // Going along, not going once: the tether rides the hash to the document the
+  // work is in, and is tied there on arrival.
+  await follow.click();
+  await page.waitForURL(/\/a\/atlas/);
+  await page.waitForFunction(() => document.documentElement.classList.contains('marble-collab-host'));
+  await page.locator('.marble-follow').waitFor();
+  assert.match(await page.locator('.marble-follow').innerText(), /Following/);
+  assert.equal(await page.evaluate(() => location.hash), '');
 });
 
 test('the row names the other document, and pressing it opens that document at the work', async () => {

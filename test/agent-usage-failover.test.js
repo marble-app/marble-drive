@@ -6,14 +6,18 @@ import {
   CONTINUE,
   STAY,
   continuedLabel,
+  handoffModel,
   matchEffort,
   pickGrok,
+  pickSameModel,
   usageBrief,
+  usageHandoffDue,
   usageStopped,
 } from '../server/agent/usage-failover.js';
 
 test('a spent window is a usage stop, and a short retry is not', () => {
   assert.equal(usageStopped('You have hit your limit · resets 7pm'), true);
+  assert.equal(usageStopped("You've hit your session limit · resets 1pm (America/Los_Angeles)"), true);
   assert.equal(usageStopped('usage limit reached'), true);
   assert.equal(usageStopped('You are out of extra usage'), true);
   assert.equal(usageStopped('Extra usage limit reached for this model'), true);
@@ -22,8 +26,46 @@ test('a spent window is a usage stop, and a short retry is not', () => {
   assert.equal(usageStopped('Permission for this action was denied'), false);
   assert.equal(usageStopped('stalled — no output for 30 s'), false);
   assert.equal(usageStopped('exited with 1'), false);
+  assert.equal(usageStopped("You've hit your session limit · resets 1pm"), true);
   assert.equal(usageStopped(''), false);
   assert.equal(usageStopped(null), false);
+});
+
+const CURSOR_FAMILIES = [
+  { id: 'auto', label: 'Auto' },
+  { id: 'claude-fable-5-1-high', label: 'Claude Fable 5.1 1M' },
+  { id: 'claude-opus-5-thinking-high', label: 'Claude Opus 5 1M Thinking' },
+  { id: 'claude-opus-4-8-high', label: 'Claude Opus 4.8 1M' },
+  { id: 'claude-opus-5-5-high', label: 'Claude Opus 5.5 1M High' },
+  { id: 'claude-opus-5-5-xhigh', label: 'Claude Opus 5.5 1M Extra High' },
+  { id: 'claude-opus-5-high', label: 'Claude Opus 5 1M' },
+  { id: 'claude-sonnet-5-high', label: 'Claude Sonnet 5 1M' },
+  { id: 'claude-sonnet-5-thinking-high', label: 'Claude Sonnet 5 1M Thinking' },
+  { id: 'claude-4.6-sonnet-medium', label: 'Claude Sonnet 4.6 1M' },
+  { id: 'grok-4.7-high', label: 'Grok 4.7 High' },
+];
+
+test('the same model on Cursor is the newest plain family, and Fable lands on Opus', () => {
+  assert.equal(pickSameModel(CURSOR_FAMILIES, 'opus').id, 'claude-opus-5-5');
+  assert.equal(pickSameModel(CURSOR_FAMILIES, 'fable').id, 'claude-opus-5-5');
+  assert.equal(pickSameModel(CURSOR_FAMILIES, 'sonnet').id, 'claude-sonnet-5');
+  assert.equal(pickSameModel(CURSOR_FAMILIES, 'haiku'), null);
+  assert.equal(pickSameModel(CURSOR_FAMILIES, 'opus').id.includes('thinking'), false);
+  assert.equal(pickSameModel(CURSOR_FAMILIES, 'opus').id.includes('fable'), false);
+});
+
+test('the handoff chain is the same model, then Grok, and Grok is the last stop', () => {
+  assert.equal(handoffModel(CURSOR_FAMILIES, { model: 'opus' }).id, 'claude-opus-5-5');
+  assert.equal(handoffModel(CURSOR_FAMILIES, { model: 'fable' }).id, 'claude-opus-5-5');
+  assert.equal(handoffModel(CURSOR_FAMILIES, { model: 'opus', usageLane: 'model' }).id, 'grok-4.7');
+  assert.equal(handoffModel(CURSOR_FAMILIES, { model: 'haiku' }).id, 'grok-4.7');
+  assert.equal(handoffModel([{ id: 'auto', label: 'Auto' }], { model: 'opus' }), null);
+  assert.equal(handoffModel(CURSOR_FAMILIES, { usageLane: 'grok' }), null);
+  assert.equal(usageHandoffDue({ provider: 'claude-subscription', error: 'You have hit your limit' }), true);
+  assert.equal(usageHandoffDue({ provider: 'cursor', usageLane: 'model', error: "You've hit your session limit" }), true);
+  assert.equal(usageHandoffDue({ provider: 'cursor', usageLane: 'grok', error: "You've hit your session limit" }), false);
+  assert.equal(usageHandoffDue({ provider: 'cursor', error: "You've hit your session limit" }), false);
+  assert.equal(usageHandoffDue({ provider: 'claude-subscription', error: 'exited with 1' }), false);
 });
 
 test('effort keeps the same step, and the nearest higher step on a tie', () => {
@@ -74,6 +116,12 @@ test('the brief carries the task, the paths, and where Claude stopped', () => {
   assert.match(brief, /notes\.mrbl/);
   assert.match(brief, /Agent: I renamed it\./);
   assert.match(brief, /Stopped: You have hit your limit/);
+  const second = usageBrief([
+    { type: 'user', text: 'Rename the heading' },
+    { type: 'text', text: 'I renamed it.' },
+  ], "You've hit your session limit", { afterCursor: true });
+  assert.match(second, /The Cursor model stopped because its usage was used up/);
+  assert.match(second, /Finish the work it started/);
   assert.equal(brief.includes('secret-body-should-not-appear'), false);
   assert.equal(CONTINUE, 'Continue');
   assert.match(STAY.signedOut, /Cursor is unavailable/);

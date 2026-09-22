@@ -728,8 +728,8 @@ test("a document is served with the agent scripts after the Drive's, when agents
   );
   assert.match(
     page,
-    /<script src="\/runtime\/agent-callout\.js"[^>]*><\/script>\n<script src="\/runtime\/agent-marks-geometry\.js" data-marble-transient><\/script>\n<script src="\/runtime\/agent-marks\.js" data-marble-transient><\/script>/,
-    'the marks layer follows the callout it hands its ids to, and its geometry is read on the way in',
+    /<script src="\/runtime\/agent-callout\.js"[^>]*><\/script>\n<script src="\/runtime\/agent-marks-geometry\.js" data-marble-transient><\/script>\n<script src="\/runtime\/agent-marks\.js" data-marble-transient><\/script>\n<script src="\/runtime\/agent-variations\.js" data-marble-transient><\/script>/,
+    'the marks layer follows the callout it hands its ids to, its geometry is read on the way in, and the variations surface comes after both',
   );
   // The marks layer asks the drawer's tray for its slots at boot and takes
   // itself down if nothing answers, and it hangs its observers on the drawer's
@@ -740,7 +740,7 @@ test("a document is served with the agent scripts after the Drive's, when agents
     ui < page.indexOf('<script src="/runtime/agent-marks.js" data-marble-transient></script>'),
     'agent-ui.js mounts the drawer before agent-marks.js asks it for a slot',
   );
-  for (const file of ['agent-callout.js', 'agent-marks-geometry.js', 'agent-marks.js']) {
+  for (const file of ['agent-callout.js', 'agent-marks-geometry.js', 'agent-marks.js', 'agent-variations.js']) {
     const response = await fetch(`${base}/runtime/${file}`);
     assert.equal(response.status, 200, file);
     assert.match(response.headers.get('content-type'), /javascript/);

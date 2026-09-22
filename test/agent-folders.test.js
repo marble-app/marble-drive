@@ -771,3 +771,74 @@ test('regionAt answers the region under a point, else the nearest', () => {
   assert.equal(F().regionAt(packed, { x: b.x + 5, y: b.y + b.h + 200 }).folderId, b.folderId, 'below everything → nearest');
   assert.equal(F().regionAt({ regions: [] }, { x: 0, y: 0 }), null);
 });
+
+// ---------------------------------------------------------------- the peek
+//
+// What a chat was about, for the card the pointer is resting on. Facts only:
+// the page turns them into lines.
+
+const DETAIL = {
+  meta: { id: 'a'.repeat(12), title: 'Focus View Layout State', model: 'opus', target: 'Agents' },
+  turns: [
+    { n: 1, prompt: 'first ask', status: 'completed', createdAt: 10 },
+    { n: 2, prompt: '**Hover** a card to see what it was about.\n\nSee `agents.mrbl`.', status: 'running', createdAt: 20 },
+  ],
+  events: [
+    { seq: 1, type: 'user', text: 'first ask' },
+    { seq: 2, type: 'text', text: 'Reading the page.' },
+    { seq: 3, type: 'document.changed', path: 'Agents' },
+    { seq: 4, type: 'tool.call', name: 'Read', input: { file_path: '/x/agents.mrbl' } },
+    { seq: 5, type: 'tool.result', callId: 'c1', ok: true },
+    { seq: 6, type: 'tool.call', name: 'Edit', input: { file_path: '/x/agents.mrbl' } },
+    { seq: 7, type: 'tool.call', name: 'Bash', input: { command: 'npm test' } },
+    { seq: 8, type: 'tool.call', name: 'check_document', input: { path: 'Agents' } },
+    { seq: 9, type: 'text', text: 'Done — the peek is **in**.' },
+    { seq: 10, type: 'ops.applied', path: 'Research/Notes', count: 2 },
+  ],
+};
+
+test('peekOf reads the ask from the last turn and strips its markdown', () => {
+  const peek = F().peekOf(DETAIL);
+  assert.equal(peek.asked, 'Hover a card to see what it was about.\n\nSee agents.mrbl.');
+  assert.equal(peek.turns, 2);
+});
+
+test('peekOf falls back to the last user event when no turn records survive', () => {
+  const peek = F().peekOf({ ...DETAIL, turns: [] });
+  assert.equal(peek.asked, 'first ask');
+  assert.equal(peek.turns, 0);
+});
+
+test('peekOf says the last thing the agent said, plain', () => {
+  assert.equal(F().peekOf(DETAIL).said, 'Done — the peek is in.');
+});
+
+test('peekOf lists the last tool calls, newest last, capped', () => {
+  const peek = F().peekOf(DETAIL, { doing: 3 });
+  assert.deepEqual(peek.doing.map((row) => row.name), ['Edit', 'Bash', 'check_document']);
+  assert.equal(peek.doing.at(-1).input.path, 'Agents');
+  assert.equal(peek.tools, 4);
+});
+
+test('peekOf collects the documents written to, most recent first, said once', () => {
+  const twice = { ...DETAIL, events: [...DETAIL.events, { seq: 11, type: 'document.changed', path: 'Agents' }] };
+  assert.deepEqual(F().peekOf(twice).touched, ['Agents', 'Research/Notes']);
+});
+
+test('peekOf answers an empty digest rather than throwing on nothing', () => {
+  const peek = F().peekOf(undefined);
+  assert.equal(peek.asked, '');
+  assert.equal(peek.said, '');
+  assert.deepEqual(peek.doing, []);
+  assert.deepEqual(peek.touched, []);
+  assert.equal(peek.turns, 0);
+});
+
+test('plainOf drops the markup a glance cannot use and keeps the words', () => {
+  const plain = F().plainOf;
+  assert.equal(plain('## Heading\n\n- one\n- two'), 'Heading\n\n• one\n• two');
+  assert.equal(plain('see [the spec](https://x.test/a) now'), 'see the spec now');
+  assert.equal(plain('```js\nconst a = 1;\n```'), 'const a = 1;');
+  assert.equal(plain('a __strong__ *word* in run_of_words'), 'a strong word in run_of_words');
+  assert.equal(plain('> quoted'), 'quoted');
+});

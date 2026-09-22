@@ -385,6 +385,20 @@ test('the drawer panel wears the document’s paper', async () => {
   assert.ok(!(r > 200 && g > 200 && b > 200), 'panel must not stay Drive cream');
 });
 
+test('… but not the document’s face', async () => {
+  const { drawer, panel, view } = await visit('forest');
+  await drawer.locator('.launcher').click();
+  await opened(panel);
+  // Forest is set in Georgia. The chrome is not the document: it keeps the
+  // design system's UI stack so a log, a composer and a row of buttons read
+  // the same on every page they are opened over.
+  for (const el of [panel, view.locator('.editor'), view.locator('.log')]) {
+    const family = await el.evaluate((node) => getComputedStyle(node).fontFamily);
+    assert.ok(!/georgia/i.test(family), `chrome should not wear the page face, got ${family}`);
+    assert.match(family, /Google Sans/);
+  }
+});
+
 test('a document that draws its own agent interface gets no drawer', async () => {
   await host.drive.createDocument('custom', GARDEN.replace('<title>', '<meta name="marble-agent" content="custom"><title>'));
   const { page } = await host.newPage();

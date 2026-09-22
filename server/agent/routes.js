@@ -485,6 +485,7 @@ export function createAgentRoutes({ store, runner, tools, hub, providers, writeO
             patch.providerSession = null;
           }
         }
+        if (patch.provider || (patch.model && patch.model !== meta.model)) patch.usageLane = null;
         if ('folderId' in body) {
           if (body.folderId === null) {
             patch.folderId = null;

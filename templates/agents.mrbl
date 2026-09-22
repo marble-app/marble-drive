@@ -1017,18 +1017,52 @@ __ICON__
   .focus.marble-snapping .focus-seam { transition: left var(--t-snap) var(--ease-out); }
   /* Nothing hovers on a touch screen, so the grip simply stays visible. */
   @media (hover: none) { .focus-seam::after { opacity: .4; } }
+  /* ---- The peek. A card says which chat this is; the peek says what it was
+     about — the last thing you asked, the last thing that came back — for as
+     long as the pointer rests on the card. Hovered it is transient: it takes
+     no pointer events and it never scrolls, because a peek you have to scroll
+     is a window you should have opened. Held (Space) it stays and is read. */
   .focus-look {
     position: fixed; z-index: 12;
-    width: min(28rem, calc(100vw - 2rem)); max-height: 70vh; overflow: auto;
-    padding: 1rem 1.1rem; border: 1px solid var(--line); border-radius: 12px;
+    width: min(26rem, calc(100vw - 2rem)); max-height: min(28rem, 70vh); overflow: hidden;
+    padding: .85rem .95rem; border: 1px solid var(--line); border-radius: 12px;
     background: rgba(var(--card-rgb), .86);
     backdrop-filter: blur(20px) saturate(160%);
     -webkit-backdrop-filter: blur(20px) saturate(160%);
     box-shadow: var(--shadow-lift);
+    display: grid; gap: .55rem; align-content: start;
+    animation: look-in 120ms var(--ease-out);
   }
-  .focus-look h3 { margin: 0 0 .35rem; font-size: 1rem; font-weight: 500; }
-  .focus-look .look-meta { color: var(--muted); font-size: .8rem; margin: 0 0 .75rem; }
-  .focus-look .look-events { margin: 0; padding-left: 1.1rem; color: var(--ink); font-size: .85rem; }
+  @keyframes look-in { from { opacity: 0; transform: translateY(4px); } }
+  /* The delay is the gesture; the arrival is instant. A peek that fades in
+     again on every card is a peek you wait for twice. */
+  .focus-look[data-moved] { animation: none; }
+  .focus-look:not([data-held]) { pointer-events: none; }
+  .focus-look[data-held] { max-height: 70vh; overflow: auto; }
+  .look-head { display: flex; align-items: center; gap: .45rem; }
+  .focus-look h3 { margin: 0; flex: 1; min-width: 0; font-size: .98rem; font-weight: 500; line-height: 1.3; }
+  .look-head .age { flex: none; color: var(--faint); font-size: .75rem; }
+  .focus-look .look-meta {
+    margin: -.4rem 0 0; color: var(--muted); font-size: .78rem;
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  }
+  .focus-look .look-meta:empty { display: none; }
+  .look-part { display: grid; gap: .18rem; }
+  .look-label { margin: 0; font-size: .68rem; letter-spacing: .06em; text-transform: uppercase; color: var(--faint); }
+  /* Clamped rather than scrolled, and clamped by the register: what a glance
+     holds is three lines of the ask and six of the answer. */
+  .look-body {
+    margin: 0; font-size: .85rem; line-height: 1.45; color: var(--ink);
+    white-space: pre-wrap; overflow-wrap: anywhere;
+    display: -webkit-box; -webkit-box-orient: vertical; overflow: hidden;
+    -webkit-line-clamp: 6; line-clamp: 6;
+  }
+  .look-body[data-part="asked"] { color: var(--muted); -webkit-line-clamp: 3; line-clamp: 3; }
+  .focus-look[data-held] .look-body { -webkit-line-clamp: 24; line-clamp: 24; }
+  .look-doing { margin: 0; padding: 0; list-style: none; display: grid; gap: .15rem; font-size: .82rem; color: var(--muted); }
+  .look-doing li { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .look-doing li:last-child { color: var(--ink); }
+  .look-touched { margin: 0; display: flex; flex-wrap: wrap; gap: .3rem; }
   /* ---- Focus on a phone: one column, one scalar. A card's size is its
      distance from the one in your hand; the pane sits over the Full. */
   /* The home indicator is not a place to put the last card: the column ends
@@ -2850,6 +2884,9 @@ __ICON__
     let focusPrimaryId = null;
     let focusHoveredId = null;
     let focusLookId = null;
+    // Held: opened with Space and staying until Escape, as against the
+    // transient one a pointer resting on a card brings up.
+    let focusLookHeld = false;
     let focusSuppressClick = false;
     let focusDecayTimer = null;
     let focusLayoutQueued = false;
@@ -4129,9 +4166,8 @@ __ICON__
     const leaveFocusView = () => {
       endFocusDrag();
       clearFocusPane();
-      document.querySelector('.focus-look')?.remove();
+      closeFocusLook();
       closeFolderPalettes();
-      focusLookId = null;
       stopFocusDecay();
     };
 
@@ -4573,52 +4609,257 @@ __ICON__
       paintFocus({ quiet: true });
     };
 
-    const closeFocusLook = () => {
-      document.querySelector('.focus-look')?.remove();
-      focusLookId = null;
+    // ---- The peek. What a chat was about, beside the card the pointer is on.
+    //
+    // A card carries a title a namer wrote, a path and one line of activity.
+    // That is enough to find a chat and not enough to remember it: the two
+    // things that tell one from another are the last thing you asked and the
+    // last thing that came back, and neither fits in a digest's four lines.
+    //
+    // One object, two registers. Hovered, it is transient — no pointer
+    // events, no scrolling, and it leaves with the pointer. Held, by Space,
+    // it stays until Escape and can be read properly. Neither is a review:
+    // seeing a pane clears Needs review, resting a pointer on a card does
+    // not, because deciding whether to open it is the whole point.
+
+    const PEEK_DELAY = 420;
+    const PEEK_GRACE = 120;
+    const hoverPointer = matchMedia('(hover: hover)');
+    /** One digest per chat, kept until that chat next changes. The route
+     *  answers with the whole event log — hundreds of kilobytes on a long
+     *  chat — which is far too much to ask for on every pass of a pointer and
+     *  exactly right to ask for once. */
+    const peekCache = new Map();
+    let peekTimer = 0;
+    let peekLeaveTimer = 0;
+
+    const peekKeyOf = (summary) => [summary?.updatedAt ?? 0, summary?.activity ?? '', summary?.running ? 1 : 0].join('|');
+
+    const loadPeek = async (id) => {
+      const key = peekKeyOf(summaries.get(id));
+      const hit = peekCache.get(id);
+      if (hit && hit.key === key) return hit.peek;
+      let detail = null;
+      try { detail = await agent.conversation(id); } catch { return hit?.peek ?? null; }
+      const peek = window.marbleAgentFolders?.peekOf?.(detail) ?? null;
+      // A hover sweep across a full canvas would otherwise keep every chat it
+      // crossed alive for the life of the page.
+      if (peekCache.size > 24) peekCache.delete(peekCache.keys().next().value);
+      peekCache.delete(id);
+      peekCache.set(id, { key, peek });
+      return peek;
     };
 
-    const openFocusLook = async (id) => {
+    /** One line for a tool call, in the drawer's own words. */
+    const peekToolLine = (call) => {
+      const ui = window.marbleAgentUI;
+      const label = ui?.toolLabel?.(call?.name, call?.input ?? {})?.label;
+      if (label) return label;
+      const short = ui?.toolShortName?.(call?.name) ?? call?.name ?? 'Tool';
+      const arg = Object.values(call?.input ?? {}).find((v) => typeof v === 'string' && v.trim()) ?? '';
+      return arg ? `${short} ${arg.replace(/\s+/g, ' ').trim().slice(0, 60)}` : short;
+    };
+
+    const lookPart = (label, body) => {
+      const part = document.createElement('section');
+      part.className = 'look-part';
+      const head = document.createElement('p');
+      head.className = 'look-label';
+      head.textContent = label;
+      part.append(head, body);
+      return part;
+    };
+
+    const lookProse = (text, part) => {
+      const p = document.createElement('p');
+      p.className = 'look-body';
+      p.dataset.part = part;
+      p.textContent = text;
+      return p;
+    };
+
+    const lookCalls = (calls) => {
+      const list = document.createElement('ul');
+      list.className = 'look-doing';
+      for (const call of calls) {
+        const li = document.createElement('li');
+        li.textContent = peekToolLine(call);
+        list.append(li);
+      }
+      return list;
+    };
+
+    /** Where it works, on what, and how far in. */
+    const fillLookMeta = (meta, summary, peek) => {
+      const turns = peek?.turns ?? 0;
+      meta.textContent = [
+        summary.target || targets.get(summary.id) || '',
+        turns ? `${turns} turn${turns === 1 ? '' : 's'}` : '',
+      ].filter(Boolean).join(' · ');
+    };
+
+    const fillLookBody = (look, summary, peek) => {
+      for (const el of look.querySelectorAll('.look-part, .look-touched')) el.remove();
+      if (!peek) return;
+      if (peek.asked) look.append(lookPart('You asked', lookProse(peek.asked, 'asked')));
+      // What it is doing beats what it last said while it is still going; the
+      // other way round once it has stopped.
+      const running = statusOf(summary) === 'running';
+      if (running && peek.doing.length) look.append(lookPart(summary.asking ? 'Waiting on you' : 'Now', lookCalls(peek.doing)));
+      else if (peek.said) look.append(lookPart('It said', lookProse(peek.said, 'said')));
+      else if (peek.doing.length) look.append(lookPart('Last', lookCalls(peek.doing)));
+      if (peek.touched.length) {
+        const row = document.createElement('p');
+        row.className = 'look-touched';
+        for (const path of peek.touched) {
+          const tag = document.createElement('span');
+          tag.className = 'tag';
+          tag.dataset.kind = 'path';
+          tag.dataset.hue = '5';
+          tag.textContent = tailOfTarget(path);
+          tag.title = path;
+          row.append(tag);
+        }
+        look.append(row);
+      }
+    };
+
+    const focusLookEl = () => document.querySelector('.focus-look');
+
+    const closeFocusLook = () => {
+      clearTimeout(peekTimer);
+      peekTimer = 0;
+      clearTimeout(peekLeaveTimer);
+      peekLeaveTimer = 0;
+      focusLookEl()?.remove();
+      focusLookId = null;
+      focusLookHeld = false;
+    };
+
+    /** Beside the card, on whichever side has the room; under it, or over it,
+     *  when a wide card has left no side at all. Never across the card it
+     *  points at, and never past the edge of the window — a peek that grew
+     *  off the screen is a peek with its answer cut off. Measured after the
+     *  body lands, because until then it has no height worth clamping to. */
+    const placeFocusLook = (look, id) => {
+      const card = focusEl?.querySelector(`.focus-card[data-id="${id}"]`);
+      const box = card?.getBoundingClientRect();
+      const size = look.getBoundingClientRect();
+      const w = size.width || Math.min(26 * 16, window.innerWidth - 32);
+      const h = size.height || 160;
+      const GAP = 12;
+      const EDGE = 16;
+      const clamp = (v, max) => Math.min(Math.max(EDGE, v), Math.max(EDGE, max));
+      if (!box) {
+        look.style.left = `${Math.max(EDGE, (window.innerWidth - w) / 2)}px`;
+        look.style.top = `${window.innerHeight * 0.12}px`;
+        return;
+      }
+      let left;
+      let top = clamp(box.top, window.innerHeight - h - EDGE);
+      if (box.right + GAP + w <= window.innerWidth - EDGE) left = box.right + GAP;
+      else if (box.left - GAP - w >= EDGE) left = box.left - GAP - w;
+      else {
+        // No side: under the card, else over it, aligned to its left edge.
+        left = clamp(box.left, window.innerWidth - w - EDGE);
+        top = box.bottom + GAP + h <= window.innerHeight - EDGE
+          ? box.bottom + GAP
+          : clamp(box.top - GAP - h, window.innerHeight - h - EDGE);
+      }
+      look.style.left = `${left}px`;
+      look.style.top = `${top}px`;
+    };
+
+    const openFocusLook = async (id, { held = false, moved = false } = {}) => {
       if (!id || !agent) return;
+      const replacing = Boolean(focusLookEl());
       closeFocusLook();
-      let detail = null;
-      try { detail = await agent.conversation(id); } catch { /* preview still shows summary */ }
-      const summary = detail?.meta ?? summaries.get(id) ?? {};
+      const summary = summaries.get(id) ?? {};
       const look = document.createElement('div');
       look.className = 'focus-look';
+      look.dataset.id = id;
+      look.dataset.state = stateOf(summary);
+      if (held) look.setAttribute('data-held', '');
+      if (moved || replacing) look.setAttribute('data-moved', '');
       look.setAttribute('data-marble-transient', '');
       look.setAttribute('role', 'dialog');
       look.setAttribute('aria-label', 'Quick Look');
+
+      const head = document.createElement('header');
+      head.className = 'look-head';
+      const dot = document.createElement('span');
+      dot.className = 'dot';
+      dot.setAttribute('aria-hidden', 'true');
       const title = document.createElement('h3');
       title.textContent = summary.title || 'New Chat';
+      const when = document.createElement('span');
+      when.className = 'age';
+      when.textContent = age(summary.updatedAt);
+      head.append(dot, title, when);
       const meta = document.createElement('p');
       meta.className = 'look-meta';
-      meta.textContent = [summary.target || targets.get(id) || '', statusOf(summary), summary.activity || ''].filter(Boolean).join(' · ');
-      const list = document.createElement('ul');
-      list.className = 'look-events';
-      const events = (detail?.events ?? []).slice(-8);
-      for (const row of events) {
-        const li = document.createElement('li');
-        li.textContent = row.type || row.text || '';
-        list.append(li);
-      }
-      look.append(title, meta, list);
+      fillLookMeta(meta, summary, null);
+      look.append(head, meta);
+
+      // The head is drawn from what the page already knows, so the peek is
+      // there the instant the wait is over; the body lands when the chat's
+      // own record does.
       document.body.append(look);
-      const card = focusEl?.querySelector(`.focus-card[data-id="${id}"]`);
-      const box = card?.getBoundingClientRect();
-      const width = Math.min(28 * 16, window.innerWidth - 32);
-      let left;
-      if (box) {
-        left = box.right + 12;
-        if (left + width > window.innerWidth - 16) left = box.left - width - 12;
-        left = Math.min(Math.max(16, left), window.innerWidth - width - 16);
-      } else {
-        left = Math.max(16, (window.innerWidth - width) / 2);
-      }
-      const top = box ? Math.min(Math.max(16, box.top), window.innerHeight - 120) : window.innerHeight * 0.12;
-      look.style.left = `${left}px`;
-      look.style.top = `${top}px`;
       focusLookId = id;
+      focusLookHeld = held;
+      placeFocusLook(look, id);
+
+      const peek = await loadPeek(id);
+      if (focusLookId !== id || !look.isConnected) return;
+      fillLookMeta(meta, summary, peek);
+      fillLookBody(look, summary, peek);
+      placeFocusLook(look, id);
+    };
+
+    /** Only where a peek is the right answer: a card that is not already a
+     *  pane, on a canvas nobody is dragging, under a pointer that hovers. */
+    const peekable = (id) => {
+      if (!id || !agent || narrowView.matches || !hoverPointer.matches) return false;
+      if ((document.body.getAttribute('data-view') || 'library') !== 'focus') return false;
+      if (focusDrag || focusSuppressClick) return false;
+      const card = focusEl?.querySelector(`.focus-card[data-id="${id}"]`);
+      // A Full card has its pane on top of it: the conversation is open
+      // already, and a picture of it beside itself says nothing.
+      return Boolean(card) && card.dataset.lod !== 'full' && !card.hasAttribute('data-seated');
+    };
+
+    const armPeek = (id) => {
+      // A held peek belongs to the keyboard; the pointer does not take it.
+      if (focusLookHeld) return;
+      clearTimeout(peekTimer);
+      peekTimer = 0;
+      // Not peekable: any close already pending stands, so moving from a card
+      // onto its pane puts the peek away rather than freezing it there.
+      if (!peekable(id)) return;
+      clearTimeout(peekLeaveTimer);
+      peekLeaveTimer = 0;
+      if (focusLookId === id) return;
+      const open = () => {
+        peekTimer = 0;
+        if (focusHoveredId === id && peekable(id)) openFocusLook(id, { moved: Boolean(focusLookId) });
+      };
+      // The wait is for the first one. Once a peek is up, the next card's is
+      // the answer to a pointer that is already asking.
+      if (focusLookId) open();
+      else peekTimer = setTimeout(open, PEEK_DELAY);
+    };
+
+    const disarmPeek = () => {
+      clearTimeout(peekTimer);
+      peekTimer = 0;
+      if (focusLookHeld) return;
+      clearTimeout(peekLeaveTimer);
+      // A grace, so crossing the gap between two cards does not flicker.
+      peekLeaveTimer = setTimeout(() => {
+        peekLeaveTimer = 0;
+        if (focusHoveredId) return;
+        closeFocusLook();
+      }, PEEK_GRACE);
     };
 
     /** A basin is the region the packer allocated, not the bounding box of
@@ -5621,7 +5862,7 @@ __ICON__
         const next = window.marbleAgentFolders?.nearestCard?.(cards, fromId, arrows[event.key]);
         if (next) {
           selectFocusCard(next.id, event);
-          if (focusLookId) openFocusLook(next.id);
+          if (focusLookId) openFocusLook(next.id, { held: focusLookHeld, moved: true });
         }
         return true;
       }
@@ -5632,7 +5873,7 @@ __ICON__
         const row = focusEl?.querySelector(`.focus-card[data-id="${id}"]`);
         if (row?.dataset.lod === 'full' && !focusLookId) return true;
         if (focusLookId === id) closeFocusLook();
-        else openFocusLook(id);
+        else openFocusLook(id, { held: true });
         return true;
       }
       if (event.key === 'Enter') {
@@ -5847,6 +6088,7 @@ __ICON__
 
         const begin = () => {
           focusSuppressClick = true;
+          closeFocusLook();
           const ids = focusSelectedIds.includes(id) && focusSelectedIds.length > 1
             ? [id, ...focusSelectedIds.filter((row) => row !== id)]
             : [id];
@@ -5946,14 +6188,17 @@ __ICON__
         event.preventDefault();
         pinFocus(card.dataset.id, { keepOpen: event.shiftKey });
       });
-      // Hover is remembered for Quick Look, and nothing else: a card that
-      // grew under the pointer pushed its column and the pointer off itself.
-      card.addEventListener('pointerenter', () => {
+      // Hover is remembered, and the card itself never answers it: a card
+      // that grew under the pointer pushed its column and the pointer off
+      // itself. What it opens instead is the peek, beside the card.
+      card.addEventListener('pointerenter', (event) => {
         if (focusSuppressClick) return;
         focusHoveredId = card.dataset.id;
+        if (event.pointerType !== 'touch') armPeek(card.dataset.id);
       });
       card.addEventListener('pointerleave', () => {
         if (focusHoveredId === card.dataset.id) focusHoveredId = null;
+        disarmPeek();
       });
       card.querySelector('.focus-pin')?.addEventListener('click', (event) => {
         event.stopPropagation();
@@ -7516,11 +7761,16 @@ __ICON__
         if (room && room.key === key) {
           intentKey = key;
           clearTimeout(intentTimer);
+          intentTimer = 0;
           openRoom(plan, id);
-        } else if (intentKey !== key) {
+        } else if (intentKey !== key || !intentTimer) {
+          // A new edge — or the same edge with no room and nothing on its way
+          // to one, which is a room that was let go under the hand. Intent
+          // once spent used to stay spent, so a lost room never came back
+          // until the pointer left the edge and returned to it.
           intentKey = key;
           clearTimeout(intentTimer);
-          intentTimer = setTimeout(() => { if (roomLive && intentKey === key) openRoom(plan, id); }, room ? 70 : 130);
+          intentTimer = setTimeout(() => { intentTimer = 0; if (roomLive && intentKey === key) openRoom(plan, id); }, room ? 70 : 130);
         }
       } else if (mode === 'swap') {
         intentKey = null;
@@ -7532,10 +7782,11 @@ __ICON__
         if (swapPreview && swapPreview.source === res.source && swapPreview.target === plan.target) {
           swapIntentKey = key;
           clearTimeout(swapIntentTimer);
-        } else if (swapIntentKey !== key) {
+          swapIntentTimer = 0;
+        } else if (swapIntentKey !== key || !swapIntentTimer) {
           swapIntentKey = key;
           clearTimeout(swapIntentTimer);
-          swapIntentTimer = setTimeout(() => { if (roomLive && swapIntentKey === key) showSwap(res.source, plan.target); }, swapPreview ? 70 : 120);
+          swapIntentTimer = setTimeout(() => { swapIntentTimer = 0; if (roomLive && swapIntentKey === key) showSwap(res.source, plan.target); }, swapPreview ? 70 : 120);
         }
       } else {
         intentKey = null;
@@ -7918,29 +8169,85 @@ __ICON__
       setTimeout(drop, 700);
     };
 
+    /** The tree a card in the air is showing, rebuilt on whatever the
+     *  committed tree has just become. applyDock runs on every paint — an
+     *  agent's event, a patch, a resize — and it used to take the room each
+     *  time, so the first thing the page heard after a room opened dropped
+     *  the ghost and eased the space closed under a hand still holding it.
+     *  A preview is not a drop: it is rebased, not taken. A pin that came or
+     *  went under the drag moves the panes, and the room, or the swap, moves
+     *  with them. Null when nothing is in the air, or when the edge the room
+     *  was opening no longer exists — then it lets go. */
+    const previewTree = () => {
+      const base = treeOf();
+      const have = new Set(treeLeaves(base));
+      if (room && !room.closing && !room.held) {
+        const { plan } = room;
+        if (plan.root || have.has(plan.target)) {
+          room.tree = plan.root
+            ? insertAtRoot(cloneTree(base), plan.side, room.ghostKey)
+            : insertBeside(cloneTree(base), plan.target, plan.side, room.ghostKey);
+          return room.tree;
+        }
+        dropPreview();
+        return null;
+      }
+      if (swapPreview) {
+        if (have.has(swapPreview.source) && have.has(swapPreview.target)) {
+          swapPreview.tree = swapTreeOf(swapPreview.source, swapPreview.target);
+          return swapPreview.tree;
+        }
+        dropPreview();
+      }
+      return null;
+    };
+
+    /** Let a preview go without animating anything: the caller is about to
+     *  lay the committed tree out. The intent goes with it, so the next move
+     *  over the same edge can ask again. */
+    const dropPreview = () => {
+      takeRoom()?.ghost.remove();
+      intentKey = null;
+      clearTimeout(intentTimer);
+      intentTimer = 0;
+      swapPreview = null;
+      swapIntentKey = null;
+      clearTimeout(swapIntentTimer);
+      swapIntentTimer = 0;
+    };
+
     const applyDock = () => {
       ensurePrimaryBar();
       clearTimeout(collapseTimer);
-      const handOver = takeRoom();
+      // A drop (`held`) hands its slot over to the chat that takes it; a
+      // preview stays with the hand.
+      const handOver = room && !room.closing && !room.held ? null : takeRoom();
       const view = document.body.getAttribute('data-view') || 'library';
       const animated = !reduceMotion.matches && !narrowView.matches;
       if (view === 'focus' && pane.style.display === 'none') {
         // Nothing pinned: the pane is off the canvas, and there is nothing to lay out.
         handOver?.ghost.remove();
+        dropPreview();
         leaveTreeMode();
         paintBars();
         return;
       }
       normalizeExtras();
       dock.tree = reconcileTree(dock.tree, [PRIMARY, ...dock.extras.map((extra) => extra.key)]);
+      const shown = previewTree();
       if (!dock.tree) {
         // Down to one pane: fold the others away, then hand the layout back to
         // the grid, which puts the primary chat exactly where the stage had it.
         if (pane.getAttribute('data-dock') === 'tree') {
           syncLeaves(animated, handOver);
-          layoutDock(leafNode(PRIMARY));
-          if (animated) collapseTimer = setTimeout(() => { if (!dock.extras.length) leaveTreeMode(); }, ROOM_MS + 60);
-          else leaveTreeMode();
+          if (shown) {
+            // One pane and a room beside it: the stage stays up for the ghost.
+            layoutDock(shown);
+          } else {
+            layoutDock(leafNode(PRIMARY));
+            if (animated) collapseTimer = setTimeout(() => { if (!dock.extras.length) leaveTreeMode(); }, ROOM_MS + 60);
+            else leaveTreeMode();
+          }
         } else {
           handOver?.ghost.remove();
         }
@@ -7950,7 +8257,7 @@ __ICON__
       const fresh = pane.getAttribute('data-dock') !== 'tree';
       if (fresh) enterTreeMode();
       syncLeaves(animated, handOver);
-      layoutDock(dock.tree);
+      layoutDock(shown ?? dock.tree);
       paintBars();
     };
 
@@ -9837,6 +10144,18 @@ __ICON__
       startNew({ folderId });
     });
 
+    // A peek is tied to the card it points at, so anything that moves the
+    // canvas under it takes it away: scrolling, and a press anywhere but
+    // inside a held one.
+    focusEl?.addEventListener('scroll', () => {
+      if (focusLookId) closeFocusLook();
+    }, { passive: true });
+    document.addEventListener('pointerdown', (event) => {
+      if (!focusLookId) return;
+      if (event.target?.closest?.('.focus-look')) return;
+      closeFocusLook();
+    }, true);
+
     (() => {
       let grab = null;
       let history = [];
@@ -10181,13 +10500,43 @@ __ICON__
       remember(IDLE_KEY, 'all');
       await setFilter('all');
     });
+    // A press outside the panel dismisses it — unless it is the same hand
+    // still working a control inside it. The idle track ends a dozen pixels
+    // from the panel's edge and both its answers live at the ends, so a drag
+    // to All chats or to 5 min overshoots into the page; letting go out there
+    // and pressing again to carry on read as "dismiss", and the panel went out
+    // from under a slider that was still being dragged. A press that lands
+    // where an inside drag has just let go, a moment after it, is that drag
+    // carrying on — the pointer never went anywhere else.
+    const CARRY_ON_MS = 400;
+    const CARRY_ON_PX = 40;
+    let handOnPanel = null;   // the pointer of a press that began inside
+    let handLeftOff = null;   // where and when such a press last ended
+    const handCarryingOn = (event) => {
+      if (handOnPanel != null) return true;
+      if (!handLeftOff) return false;
+      return event.timeStamp - handLeftOff.at < CARRY_ON_MS &&
+        Math.hypot(event.clientX - handLeftOff.x, event.clientY - handLeftOff.y) < CARRY_ON_PX;
+    };
+    filterBox.addEventListener('pointerdown', (event) => { handOnPanel = event.pointerId; });
+    // Any release ends the hold, whichever pointer it was: a flag that only
+    // its own pointer can clear is a flag that can stick, and a stuck one
+    // would leave a panel nothing outside it could put away.
+    addEventListener('pointerup', (event) => {
+      if (handOnPanel == null) return;
+      handOnPanel = null;
+      handLeftOff = { x: event.clientX, y: event.clientY, at: event.timeStamp };
+    });
+    addEventListener('pointercancel', () => { handOnPanel = null; });
     document.addEventListener('pointerdown', (event) => {
       // While the panel is on loan to a sheet the sheet owns its dismissal;
       // the desk's outside-click would only fight it.
       if (filterOnLoan()) return;
-      if (filterOpen && !event.target.closest?.('.filterbox')) setFilterOpen(false);
+      if (filterOpen && !event.target.closest?.('.filterbox') && !handCarryingOn(event)) setFilterOpen(false);
     });
     filterBox.addEventListener('focusout', (event) => {
+      // A hand on the panel is not the panel losing interest.
+      if (handOnPanel != null) return;
       if (filterOpen && event.relatedTarget && !filterBox.contains(event.relatedTarget)) setFilterOpen(false);
     });
     filterBox.addEventListener('keydown', (event) => {
@@ -10323,22 +10672,29 @@ __ICON__
       restoreView();
       deriveFilters();
       marble.register?.(() => {
-        // pageOnly stops filing data-view; it does not stop syncAttrs copying
-        // the file's data-view="library" onto a live board session.
-        restoreView();
-        placeAll();
-        deriveFilters();
-        applyFilters();
-        // The same patch strips the popover's page-only open state.
-        setFilterOpen(filterOpen);
-        restoreOpen();
-        // A patch strips the inline geometry the panes are placed by. While a
-        // room is open that geometry is the room's, not the committed tree's:
-        // laying the committed one out here would close the space back up
-        // without removing anything, which looks the same from the outside.
-        // The same goes for a swap preview: the panes have traded places and
-        // a patch must not snap them back while the hand is still down.
-        layoutDock(room && !room.closing ? room.tree : (swapPreview ? swapPreview.tree : undefined));
+        // The same patch strips the popover's page-only open state, and the
+        // rebuild below is a long way to fall: anything in it that throws
+        // used to leave the panel shut with `filterOpen` still true, so the
+        // next press on Filter only turned the flag off again. The restore
+        // is the one part of this hook that is owed whatever else happens.
+        try {
+          // pageOnly stops filing data-view; it does not stop syncAttrs copying
+          // the file's data-view="library" onto a live board session.
+          restoreView();
+          placeAll();
+          deriveFilters();
+          applyFilters();
+          restoreOpen();
+          // A patch strips the inline geometry the panes are placed by. While a
+          // room is open that geometry is the room's, not the committed tree's:
+          // laying the committed one out here would close the space back up
+          // without removing anything, which looks the same from the outside.
+          // The same goes for a swap preview: the panes have traded places and
+          // a patch must not snap them back while the hand is still down.
+          layoutDock(room && !room.closing ? room.tree : (swapPreview ? swapPreview.tree : undefined));
+        } finally {
+          setFilterOpen(filterOpen);
+        }
       });
       const start = async (api) => {
         agent = api;

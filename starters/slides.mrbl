@@ -2,102 +2,597 @@
 <html lang="en" data-marble="1">
 <head>
 <meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <meta name="marble:capabilities" content="storage; net=none">
 <title>__TITLE__</title>
 __ICON__
 <style>
-  /* The Marble design system's palette, with one change the system does not
-     make: a document is white to the edge. The off-white paper belongs to
-     the interface — the Drive itself — not to the thing you are writing in.
-     One dusty blue does all the accenting, the same blue in every starter,
-     because five colours would be five claims and there is only one. */
-  :root {
-    --ink: #111111;
-    --muted: #5a5a5a;
-    --line: #ddd9cf;
-    --paper: #ffffff;
-    --card: #ffffff;
-    --accent: #9bb6cf;
-    --accent-soft: #f1f5f8;
-    --accent-ink: #738698;
-  }
-  @media (prefers-color-scheme: dark) {
-    :root {
-      --ink: #e8e6e1; --muted: #a3a7ab; --line: #2f3438;
-      --paper: #1c1f22; --card: #1c1f22;
-      --accent: #7fa8c9; --accent-soft: #1d2932; --accent-ink: #9dc0dc;
-    }
-  }
-  * { box-sizing: border-box; }
-  body {
-    margin: 0; padding: 2.5rem 1.5rem 8rem; background: var(--paper); color: var(--ink);
-    font: 16px/1.5 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
-    -webkit-font-smoothing: antialiased;
-  }
-  .deck { max-width: 54rem; margin: 0 auto; }
-  .deck > h1 { font-size: 1.4rem; margin: 0 0 .2rem; letter-spacing: -.015em; }
-  .lede { color: var(--muted); margin: 0 0 1.75rem; font-size: .95rem; }
+  /* ------------------------------------------------------------------ tokens
 
-  .slides { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 1.1rem; }
-  .slide {
-    aspect-ratio: 16 / 9; padding: 3rem 3.5rem; display: flex; flex-direction: column; justify-content: center;
-    background: var(--card); border: 1px solid var(--line); border-radius: 10px;
-    counter-increment: slide;
+     Marble's own, copied from the drive's Design System document, with the one
+     change that document does not make: a deck is white to the edge. Each is
+     written once as a light-dark() pair, so a deck follows the machine into the
+     dark with no second stylesheet and no switch anybody has to find. */
+  :root {
+    color-scheme: light dark;
+    --ink: light-dark(#111111, #e8e6e1);
+    --muted: light-dark(#5a5a5a, #a3a7ab);
+    --faint: light-dark(#8a8a8a, #71767a);
+    --placeholder: light-dark(#767676, #8d9296);
+    --line: light-dark(#e6e2d8, #272c30);
+    --paper: light-dark(#ffffff, #1c1f22);   /* a document is white to the edge */
+    --paper-2: light-dark(#f7f6f2, #212528);
+    --well: light-dark(#f3f1ea, #16181a);
+    --card: light-dark(#ffffff, #22262a);
+    --accent: light-dark(#9bb6cf, #7fa8c9);
+    --accent-soft: light-dark(#f1f5f8, #1d2932);
+    --accent-ink: light-dark(#738698, #9dc0dc);
+    --danger: light-dark(#b4533e, #e08a74);
+    --caution: light-dark(#a07a2c, #d9b25e);
+    --shadow: 0 1px 2px light-dark(rgba(74,66,52,.05), rgba(0,0,0,.28)), 0 2px 4px light-dark(rgba(74,66,52,.03), rgba(0,0,0,.18));
+    --shadow-lift: 0 2px 6px light-dark(rgba(74,66,52,.07), rgba(0,0,0,.32)), 0 8px 18px light-dark(rgba(74,66,52,.08), rgba(0,0,0,.26));
+    --r: 12px; --r-sm: 8px; --r-text: 4px; --pill: 999px;
+    --ease-out: cubic-bezier(.22, 1, .36, 1);
+    --ease: cubic-bezier(.22, .61, .36, 1);
+    --snap: cubic-bezier(.4, 0, .2, 1);
+    --t-fast: 110ms; --t: 200ms; --t-slow: 340ms;
+    --ui: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    --serif: ui-serif, "New York", "Iowan Old Style", Palatino, Georgia, serif;
+    --mono: ui-monospace, "SF Mono", SFMono-Regular, Menlo, Consolas, monospace;
+    /* The gap between slides has a name because the seam that adds one in the
+       middle lives in it and has to be exactly as tall; the gutter has one
+       because the drag grip hangs 2rem to the left of a slide. */
+    --bar: 3.1rem; --gap: 1.15rem; --gutter: 2.2rem;
   }
-  .slides { counter-reset: slide; }
-  /* The number is drawn, never stored: reorder the deck and every slide is
-     renumbered without a byte of the file changing. */
-  .slide::after {
-    content: counter(slide); align-self: flex-end; margin-top: auto;
-    font: 600 .7rem/1 ui-monospace, SFMono-Regular, Menlo, monospace; color: var(--muted); opacity: .6;
+
+  /* Every width answer is asked of the root, never the window: a Marble host
+     docks a panel beside the page by shrinking <html>, and the viewport never
+     hears about it. A @media (max-width) here would be wrong exactly when
+     somebody opens the agent drawer next to the deck. */
+  html { container: doc / inline-size; }
+  html, body { height: 100%; }
+  * { box-sizing: border-box; }
+  button { font: inherit; color: inherit; }
+  body { margin: 0; overflow: hidden; background: var(--paper); color: var(--ink); font: 15px/1.5 var(--ui); -webkit-font-smoothing: antialiased; }
+
+  /* ------------------------------------------------------------------- shell
+
+     The bar floats over the deck rather than being a strip cut out of it, and
+     its controls line up with the slides rather than with the window. The deck
+     is the scroller and the window is not: a presented slide is fixed to the
+     viewport, and a fixed thing inside a page that scrolls drifts. */
+  .bar {
+    position: fixed; top: 0; left: 0; right: 0; z-index: 30; height: var(--bar);
+    display: flex; align-items: center; gap: .6rem;
+    padding-inline: max(var(--gutter), env(safe-area-inset-left), calc((100cqw - 54rem) / 2));
+    background: color-mix(in srgb, var(--paper) 76%, transparent); backdrop-filter: blur(20px) saturate(180%);
+    border-bottom: 1px solid color-mix(in srgb, var(--line) 65%, transparent);
   }
-  .slide h2 { font-size: 2.1rem; line-height: 1.15; margin: 0 0 .6rem; letter-spacing: -.02em; }
-  .slide p { margin: 0; font-size: 1.1rem; color: var(--muted); max-width: 34rem; }
-  .slide.title h2 { font-size: 2.8rem; }
-  [data-marble-editable] { outline: none; border-radius: 3px; }
-  [data-marble-editable]:hover { background: var(--accent-soft); }
-  [data-marble-editable]:focus { background: var(--card); box-shadow: 0 0 0 1px var(--accent), 0 0 0 4px var(--accent-soft); }
+  .count { color: var(--faint); font-size: .8rem; font-variant-numeric: tabular-nums; }
+  /* With no host every control still works and none of it is kept, which is a
+     worse silence than a broken button. So the deck says so. */
+  [data-marble-readonly] .count::after { content: " · not saved — no host"; color: var(--caution); }
+  .deck { height: 100%; overflow: auto; padding: calc(var(--bar) + 1.4rem) var(--gutter) max(6rem, calc(4rem + env(safe-area-inset-bottom))); }
+  .head, .add { max-width: 54rem; margin-inline: auto; }
+  .head h1 { margin: 0 0 .15rem; font-size: 1.45rem; line-height: 1.2; letter-spacing: -.018em; }
+  .lede { margin: 0 0 1.6rem; color: var(--muted); font-size: .9rem; max-width: 42rem; }
+
+  /* ----------------------------------------------------------------- a slide
+
+     The number is drawn, never stored: reorder the deck and every slide is
+     renumbered without a byte of the file changing. That is this starter's
+     whole point, so nothing below keeps a copy of it. */
+  .slides { list-style: none; margin: 0 auto; padding: 0; max-width: 54rem; counter-reset: slide; }
+  .slide { counter-increment: slide; position: relative; margin-top: var(--gap); display: grid; grid-template-columns: minmax(0, 1fr) auto; }
+  /* :empty is defeated by the whitespace removed slides leave behind, and an
+     empty deck is the one state that has to draw itself. */
+  .slides:not(:has(> .slide)) { display: grid; place-items: center; min-height: 11rem; margin-top: var(--gap); border: 1px dashed var(--line); border-radius: var(--r); }
+  .slides:not(:has(> .slide))::after { content: "No slides yet — add the first one below."; padding: 0 1rem; color: var(--placeholder); font-size: .88rem; text-align: center; }
+
+  /* The frame holds the 16:9 slot and the face is what is drawn in it. Two
+     elements rather than one because presenting takes the face out of the flow
+     and puts it on the screen, and a deck that collapsed behind it would reflow
+     underneath the move.
+
+     The face is its own container, so the type on a slide is a proportion of
+     the slide and not of the window: the same composition at 390px, at 1280px
+     and blown up on a projector. Nothing on a slide is sized by the window. */
+  .frame { grid-column: 1 / -1; position: relative; aspect-ratio: 16 / 9; }
+  .face {
+    position: absolute; inset: 0; overflow: hidden; padding: 6.2% 7%; container: face / inline-size; --fit: 1;
+    display: flex; flex-direction: column; justify-content: center; justify-content: safe center;
+    background: var(--card); border: 1px solid var(--line); border-radius: var(--r); box-shadow: var(--shadow);
+  }
+  /* The number is the interface's reading of where a slide sits and not part of
+     the composition, so it is sized in rem like the rest of the chrome. */
+  .face::after { content: counter(slide); position: absolute; right: 4.4%; bottom: 3.4%; font: 600 .68rem/1 var(--mono); color: var(--muted); opacity: .6; }
+  .face h2 { margin: 0; font-weight: 600; letter-spacing: -.022em; font-size: calc(var(--fit) * 6.4cqi); line-height: 1.06; }
+  .face p { margin: .55em 0 0; color: var(--muted); max-width: 32ch; font-size: calc(var(--fit) * 2.9cqi); line-height: 1.4; }
+  .slide[data-kind="title"] .face { text-align: center; align-items: center; }
+  .slide[data-kind="title"] .face h2 { font-size: calc(var(--fit) * 8.2cqi); }
+  .slide[data-kind="title"] .face p { font-size: calc(var(--fit) * 3cqi); max-width: 26ch; }
+
+  /* Sixty words on a slide used to run out of the bottom of the box with
+     nothing said about it. Now the type steps down twice — a slide may be
+     denser than the one beside it — and past the second step it stops shrinking
+     and says so, because type small enough to fit anything is type nobody at
+     the back can read. All three are the page's reading of the text rather than
+     a fact about it, so all three carry the marble- prefix and none is filed. */
+  .marble-fit-2 .face { --fit: .86; }
+  .marble-fit-3 .face { --fit: .73; }
+  /* Drawn on the frame rather than inside the face, because the face clips —
+     and a caret typing past the bottom of it scrolls the mark out of sight. */
+  .marble-over .frame::after {
+    content: "Doesn’t fit"; position: absolute; top: .5rem; right: .5rem; padding: .1rem .5rem;
+    border: 1px solid var(--caution); border-radius: var(--pill); background: var(--card); color: var(--caution); font: 600 .66rem/1.6 var(--ui);
+  }
+
+  /* --------------------------------------------------------------- the notes
+
+     Speaker notes belong to the slide and are content like anything else — in
+     the file, addressable, undoable, and the first thing anybody wants from a
+     deck. They are also the one part of it the room must never see, so
+     presenting hides them along with the rest of the chrome. */
+  .notes { grid-column: 1; margin: .5rem 0 0; padding-left: .65rem; border-left: 2px solid var(--line); color: var(--muted); font-size: .84rem; line-height: 1.5; }
+  /* Never at nought: this pill is the only evidence a slide can be the title
+     slide, and a control you must hover to find is one nobody on a tablet
+     ever finds. */
+  .kind {
+    grid-column: 2; align-self: start; margin: .5rem 0 0 .6rem; padding: .3rem .62rem; opacity: .38; cursor: pointer;
+    border: 1px solid var(--line); border-radius: var(--pill); background: none; color: var(--muted); font: 500 .72rem/1 var(--ui);
+    transition: opacity var(--t) var(--ease), transform var(--t-fast) var(--snap);
+  }
+  .slide:hover > .kind, .slide:focus-within > .kind, .kind:focus-visible { opacity: 1; }
+  .kind:active { transform: scale(.97); }
+  .kind[aria-pressed="true"] { opacity: 1; background: var(--accent-soft); border-color: var(--accent); color: var(--accent-ink); }
+
+  /* ---------------------------------------------------------------- the seam
+
+     A deck you can only add to at the bottom is a deck you reorder by dragging.
+     The seam sits in the gap above each slide and puts one there instead — and
+     it is exactly as tall as that gap, so it never covers a card. */
+  .seam {
+    position: absolute; left: 0; right: 0; top: calc(var(--gap) * -1); height: var(--gap); display: grid; place-items: center;
+    padding: 0; border: 0; background: none; color: var(--faint); cursor: pointer; opacity: 0; transition: opacity var(--t) var(--ease);
+  }
+  .seam::before { content: ""; position: absolute; left: 0; right: 0; top: 50%; border-top: 1px dashed var(--line); }
+  .seam i { position: relative; display: grid; place-items: center; width: 1.35rem; height: 1.35rem; border-radius: var(--pill); border: 1px dashed var(--line); background: var(--paper); font: 500 13px/1 var(--ui); font-style: normal; transition: transform var(--t-fast) var(--snap); }
+  .slide:hover > .seam, .slide:focus-within > .seam, .seam:focus-visible { opacity: 1; }
+  .seam:hover i, .seam:focus-visible i { color: var(--accent-ink); border-color: var(--accent); }
+  .seam:active i { transform: scale(.94); }
+
   .add {
-    appearance: none; display: block; width: 100%; margin-top: 1.1rem; padding: .8rem;
-    border: 1px dashed var(--line); border-radius: 10px; background: none;
-    color: var(--muted); font: 500 .9rem/1 inherit; cursor: pointer;
+    appearance: none; display: block; width: 100%; margin-top: var(--gap); padding: .85rem; min-height: 2.75rem;
+    background: none; cursor: pointer; border: 1px dashed var(--line); border-radius: var(--r); color: var(--muted); font: 500 .88rem/1 var(--ui);
+    transition: color var(--t) var(--ease), border-color var(--t) var(--ease), transform var(--t-fast) var(--snap);
   }
   .add:hover { color: var(--accent-ink); border-color: var(--accent); }
-  @media (max-width: 40rem) { .slide { padding: 1.5rem; aspect-ratio: auto; } .slide h2 { font-size: 1.6rem; } }
+  .add:active { transform: scale(.99); }
+  .btn {
+    appearance: none; display: inline-flex; align-items: center; gap: .45rem; padding: .45rem .9rem; min-height: 2rem;
+    background: var(--card); cursor: pointer; border: 1px solid var(--line); border-radius: var(--pill); box-shadow: var(--shadow); font: 500 .86rem/1 var(--ui);
+    transition: transform var(--t-fast) var(--snap), border-color var(--t) var(--ease), color var(--t) var(--ease);
+  }
+  .btn:hover { border-color: var(--accent); color: var(--accent-ink); }
+  .btn:active { transform: scale(.97); }
+  .btn[aria-disabled="true"] { opacity: .42; pointer-events: none; }
+  .tri { width: 0; height: 0; margin-left: .1rem; border: .3rem solid transparent; border-right-width: 0; border-left-color: currentColor; }
+
+  [data-marble-editable] { outline: none; border-radius: var(--r-text); overflow-wrap: anywhere; transition: background var(--t-fast) var(--snap); }
+  [data-marble-editable]:hover, [data-marble-editable]:focus { background: var(--accent-soft); }
+  /* An empty editable has no line box and so nowhere to put a caret: a heading
+     is one Backspace away from being untypable without this. The prompt goes on
+     ::after, behind the caret rather than in front of it. */
+  [data-marble-editable]:empty::before { content: "\feff"; }
+  [data-marble-editable][data-ph]:empty::after { content: attr(data-ph); color: var(--placeholder); }
+  :focus-visible { outline: 2px solid var(--accent-ink); outline-offset: 2px; }
+
+  /* ------------------------------------------------------------ present mode
+
+     One slide, filling the screen. The stage is the well the card sits in and
+     the surface every gesture is read from — a tap on one half, a swipe, a drag
+     that tracks the finger. The card takes no pointer events itself, so nobody
+     puts a caret in a heading by touching the screen. */
+  .stage { position: fixed; inset: 0; z-index: 50; background: var(--well); opacity: 0; visibility: hidden; touch-action: none; }
+  [data-present] .stage { opacity: 1; visibility: visible; }
+  [data-present] .slide.marble-at > .frame > .face,
+  [data-present] .slide.marble-out > .frame > .face { position: fixed; inset: 0; z-index: 60; border: 0; border-radius: 0; box-shadow: none; pointer-events: none; }
+  /* Everything that is not the slide: the bar, the adder, the name of the deck,
+     the grips, the seams and — the one that matters — the notes. The number goes
+     too, because the corner of the screen is saying it already. */
+  [data-present] .bar,
+  [data-present] .add,
+  [data-present] .head,
+  [data-present] .slide > :not(.frame) { visibility: hidden; }
+  [data-present] .face::after, [data-present] .frame::after { content: none; }
+  [data-present] [data-marble-editable]:hover { background: none; }
+  .hud {
+    position: fixed; z-index: 70; left: 0; right: 0; bottom: max(.9rem, env(safe-area-inset-bottom));
+    display: none; align-items: center; justify-content: space-between; padding-inline: max(1rem, env(safe-area-inset-left));
+    pointer-events: none; transition: opacity var(--t-slow) var(--ease);
+  }
+  [data-present] .hud { display: flex; }
+  /* Out of the way while you talk, back on the first move of a hand. */
+  .marble-idle .hud { opacity: 0; }
+  .marble-idle .hud > * { pointer-events: none; }
+  .pos, .leave {
+    padding: .35rem .75rem; border-radius: var(--pill); border: 1px solid var(--line); pointer-events: auto;
+    background: color-mix(in srgb, var(--paper) 72%, transparent); backdrop-filter: blur(14px);
+    font: 500 .78rem/1.4 var(--ui); font-variant-numeric: tabular-nums; color: var(--muted);
+  }
+  .leave { cursor: pointer; transition: transform var(--t-fast) var(--snap); }
+  .leave:hover { color: var(--accent-ink); border-color: var(--accent); }
+  .leave:active { transform: scale(.97); }
+
+  /* ---------------------------------------------------------------- widths */
+  @container doc (max-width: 46rem) {
+    .deck { padding-inline: var(--gutter) 1.1rem; }   /* the left gutter is the grip's */
+    .head h1 { font-size: 1.25rem; }
+    .lede { font-size: .85rem; margin-bottom: 1.2rem; }
+  }
+  @container doc (max-width: 30rem) {
+    .slide { grid-template-columns: minmax(0, 1fr); }
+    .kind { grid-column: 1; justify-self: start; margin-left: 0; }
+  }
+
+  /* 44 is the smallest thing a finger commits with, and a gap of 1.15rem is not
+     a seam anybody can hit — so where there is no pointer the deck opens up and
+     every control grows into the room that makes. */
+  @media (pointer: coarse) {
+    :root { --gap: 3rem; }
+    .seam { opacity: .7; }
+    .seam i { width: 1.9rem; height: 1.9rem; font-size: 15px; }
+    .btn, .leave { min-height: 44px; padding-inline: 1rem; }
+    .kind { min-height: 44px; display: inline-flex; align-items: center; padding-inline: 1rem; }
+    .add { min-height: 3.2rem; }
+  }
+  @media (hover: none) { .slide > .kind { opacity: 1; } }
+  @media (prefers-reduced-transparency: reduce) { .bar, .pos, .leave { background: var(--paper); backdrop-filter: none; } }
+  @media (prefers-reduced-motion: reduce) {
+    *, *::before, *::after { transition-duration: .001ms !important; animation-duration: .001ms !important; }
+    .btn:active, .add:active, .kind:active, .leave:active, .seam:active i { transform: none; }
+  }
 </style>
 </head>
 <body>
-<main class="deck" data-marble-id="__ID__">
+<div class="bar" data-marble-transient>
+  <button class="btn play" data-marble-instruction="Present this deck full screen, one slide at a time."><span class="tri" aria-hidden="true"></span>Present</button>
+  <span class="count"></span>
+</div>
 
-  <h1 data-marble-id="__ID__" data-marble-editable>__TITLE__</h1>
-  <p class="lede" data-marble-id="__ID__" data-marble-editable>A slide is a section. Drag one by its handle to reorder the deck; the numbers follow on their own.</p>
+<main class="deck" data-marble-id="__ID__">
+  <header class="head" data-marble-id="__ID__">
+    <h1 data-marble-id="__ID__" data-marble-editable>__TITLE__</h1>
+    <p class="lede" data-marble-id="__ID__" data-marble-editable>One slide is one section. Drag a slide by its handle to reorder the deck — the numbers follow on their own — and press Present when it is ready for a room.</p>
+  </header>
 
   <ol class="slides" data-marble-id="__ID__" data-marble-sortable="slides">
-    <li class="slide title" data-marble-id="__ID__" data-marble-removable>
-      <h2 data-marble-id="__ID__" data-marble-editable>__TITLE__</h2>
-      <p data-marble-id="__ID__" data-marble-editable>Your name, and the date</p>
+    <li class="slide" data-marble-id="__ID__" data-marble-removable data-kind="title">
+      <div class="frame"><div class="face">
+        <h2 data-marble-id="__ID__" data-marble-editable>__TITLE__</h2>
+        <p data-marble-id="__ID__" data-marble-editable>Your name, and the date</p>
+      </div></div>
+      <p class="notes" data-marble-id="__ID__" data-marble-editable data-ph="Speaker notes — for you, not the room"></p>
     </li>
-    <li class="slide" data-marble-id="__ID__" data-marble-removable>
-      <h2 data-marble-id="__ID__" data-marble-editable>The point</h2>
-      <p data-marble-id="__ID__" data-marble-editable>One idea per slide, said in a sentence you could read aloud.</p>
+    <li class="slide" data-marble-id="__ID__" data-marble-removable data-kind="point">
+      <div class="frame"><div class="face">
+          <h2 data-marble-id="__ID__" data-marble-editable>The point</h2>
+        <p data-marble-id="__ID__" data-marble-editable>One idea per slide, said in a sentence you could read aloud.</p>
+      </div></div>
+      <p class="notes" data-marble-id="__ID__" data-marble-editable data-ph="Speaker notes — for you, not the room">Slow down here. The sentence on the slide is the one to land.</p>
     </li>
-    <li class="slide" data-marble-id="__ID__" data-marble-removable>
-      <h2 data-marble-id="__ID__" data-marble-editable>What follows from it</h2>
-      <p data-marble-id="__ID__" data-marble-editable>And what you want the room to do about it.</p>
+    <li class="slide" data-marble-id="__ID__" data-marble-removable data-kind="point">
+      <div class="frame"><div class="face">
+          <h2 data-marble-id="__ID__" data-marble-editable>What follows from it</h2>
+        <p data-marble-id="__ID__" data-marble-editable>And what you want the room to do about it.</p>
+      </div></div>
+      <p class="notes" data-marble-id="__ID__" data-marble-editable data-ph="Speaker notes — for you, not the room"></p>
     </li>
   </ol>
-
   <button class="add" data-marble-transient data-marble-add="#tpl-slide" data-marble-into="prev">+ slide</button>
-
 </main>
-
+<div class="stage" data-marble-transient aria-hidden="true"></div>
+<div class="hud" data-marble-transient>
+  <span class="pos" aria-live="polite"></span>
+  <button class="leave" aria-label="Stop presenting">Done</button>
+</div>
 <template id="tpl-slide" data-marble-transient>
-  <li class="slide" data-marble-removable>
-    <h2 data-marble-editable>New slide</h2>
-    <p data-marble-editable>Say it in a sentence.</p>
+  <li class="slide" data-marble-removable data-kind="point">
+    <div class="frame"><div class="face">
+      <h2 data-marble-editable>New slide</h2>
+      <p data-marble-editable>Say it in a sentence.</p>
+    </div></div>
+    <p class="notes" data-marble-editable data-ph="Speaker notes — for you, not the room"></p>
   </li>
 </template>
+
+<script>
+  // The three things a deck knows about itself that no affordance can.
+  //
+  // **Presenting.** Which slide you are on is where your eyes are, not
+  // something this deck says about itself — so it is a marble- class on the
+  // page, never an op, and a second person opening the file is not dragged to
+  // slide four. The mode is the same kind of fact: you are presenting, the deck
+  // is not, and a rehearsal must not turn up in a diff. So it is a page-only
+  // attribute on <body>, declared to the carrier so a reconcile against the
+  // file cannot take the deck off the screen mid-sentence.
+  //
+  // **What fits.** A slide is a fixed box and the words in it are not.
+  //
+  // **Where a new slide goes.** The library's adder clones a template onto the
+  // end of a list, which is right for the button at the bottom and has no way
+  // to say "before this one", which is all the seams want. Only that one
+  // writes, so the deck presents with no host at all.
+  (() => {
+    const [list, stage] = [document.querySelector('.slides'), document.querySelector('.stage')];
+    const [play, count, pos] = ['.play', '.count', '.pos'].map((sel) => document.querySelector(sel));
+    if (!list || !stage) return;
+
+    const T = 340;
+    const EASE = 'cubic-bezier(.22, 1, .36, 1)';
+    const reduced = matchMedia('(prefers-reduced-motion: reduce)');
+    const slides = () => [...list.querySelectorAll(':scope > .slide')];
+    const at = () => list.querySelector(':scope > .slide.marble-at');
+    const faceOf = (slide) => slide?.querySelector('.face');
+    const current = () => faceOf(at());
+    const presenting = () => document.body.hasAttribute('data-present');
+    const fade = (el, from, to) => el.animate([{ opacity: from }, { opacity: to }], { duration: T, easing: EASE });
+    const swipe = (el, from, to, ms = T) => el.animate([{ transform: `translateX(${from}px)` }, { transform: to }], { duration: ms, easing: EASE });
+
+    // -------------------------------------------------------------- what fits
+    //
+    // Two steps down and then a stop. Measured rather than counted: "too much"
+    // is a question about this box at this size, and the same forty words fit a
+    // title slide and overrun the one after it. Changing the type does not
+    // change the box, so this never feeds itself.
+    function fit(face) {
+      const slide = face.closest('.slide');
+      if (!slide) return;
+      slide.classList.remove('marble-fit-2', 'marble-fit-3', 'marble-over');
+      if (!face.clientHeight) return;
+      const over = () => face.scrollHeight > face.clientHeight + 1;
+      if (!over()) return;
+      slide.classList.add('marble-fit-2');
+      if (!over()) return;
+      slide.classList.replace('marble-fit-2', 'marble-fit-3');
+      if (over()) slide.classList.add('marble-over');
+    }
+    const sizes = new ResizeObserver((entries) => { for (const entry of entries) fit(entry.target); });
+
+    function sync() {
+      const n = slides().length;
+      if (count) count.textContent = n === 1 ? '1 slide' : `${n} slides`;
+      play?.setAttribute('aria-disabled', String(n === 0));
+      for (const face of list.querySelectorAll('.face')) { sizes.unobserve(face); sizes.observe(face); }
+    }
+    // Slides arrive from the adder, an undo, an agent's write and another tab,
+    // so this watches the list rather than each way in.
+    new MutationObserver(sync).observe(list, { childList: true, subtree: true, attributes: true, attributeFilter: ['data-kind'] });
+    list.addEventListener('input', ({ target }) => { const face = target.closest?.('.face'); if (face) fit(face); });
+    // Typing past the bottom of a slide scrolls the card; leaving it puts the
+    // card back, because what a deck shows has to be what it will present.
+    list.addEventListener('focusout', ({ target }) => { const face = target.closest?.('.face'); if (face) face.scrollTop = 0; });
+    sync();
+
+    // ------------------------------------------------------------- presenting
+    //
+    // Entering and leaving are one move: the card is measured where it stands,
+    // the attribute is flipped, and the card is played from where the eye last
+    // saw it to wherever it has landed. Leaving is entering with the two
+    // rectangles the other way round, and this does not know which it is.
+    function turn(on, slide) {
+      const face = faceOf(slide);
+      const from = face.getBoundingClientRect();
+      document.body.toggleAttribute('data-present', on);
+      // Coming back, the deck lands on the slide you left on rather than
+      // wherever it happened to be scrolled to when you started.
+      if (!on) slide.scrollIntoView({ block: 'center' });
+      const to = face.getBoundingClientRect();
+      stage.animate([{ opacity: on ? 0 : 1 }, { opacity: on ? 1 : 0 }], { duration: T, easing: EASE });
+      if (reduced.matches) return fade(face, 0, 1);
+      if (!from.width || !to.width) return;
+      const move = `translate(${from.left - to.left}px, ${from.top - to.top}px)`;
+      const grow = `scale(${from.width / to.width}, ${from.height / to.height})`;
+      const keys = [{ transform: `${move} ${grow}` }, { transform: 'none' }].map((k) => ({ ...k, transformOrigin: '0 0' }));
+      face.animate(keys, { duration: T, easing: EASE });
+    }
+
+    function enter() {
+      const all = slides();
+      if (!all.length || presenting()) return;
+      const here = all.includes(at()) ? at() : (document.activeElement?.closest?.('.slide') ?? all[0]);
+      document.activeElement?.blur?.();
+      for (const one of all) one.classList.toggle('marble-at', one === here);
+      turn(true, here);
+      mark();
+      wake();
+      // Offered, never required: a browser may refuse it, and a deck that only
+      // worked full screen would be a deck that sometimes did not work.
+      document.documentElement.requestFullscreen?.().catch(() => {});
+    }
+    function leave() {
+      if (!presenting()) return;
+      const here = at() ?? slides()[0];
+      if (here) turn(false, here);
+      else document.body.removeAttribute('data-present');
+      clearTimeout(idle);
+      document.body.classList.remove('marble-idle');
+      if (document.fullscreenElement) document.exitFullscreen().catch(() => {});
+    }
+
+    // Escape inside full screen is the browser's key and not ours, so leaving
+    // the one is how we hear about leaving the other.
+    document.addEventListener('fullscreenchange', () => { if (!document.fullscreenElement) leave(); });
+
+    function show(next, dir, fromX = 0) {
+      const prev = at();
+      if (!next || next === prev) return;
+      const width = stage.clientWidth || 1;
+      next.classList.remove('marble-out');
+      next.classList.add('marble-at');
+      if (prev) {
+        prev.classList.remove('marble-at');
+        prev.classList.add('marble-out');
+        const going = faceOf(prev);
+        park(going);
+        const out = reduced.matches ? fade(going, 1, 0) : swipe(going, fromX, `translateX(${-dir * width}px)`);
+        out.finished.then(() => prev.classList.remove('marble-out'), () => {});
+      }
+      const coming = faceOf(next);
+      if (reduced.matches) fade(coming, 0, 1);
+      else swipe(coming, dir * width, 'none');
+      mark();
+    }
+
+    // The deck has ends. Pushing past one gives and comes back: a hard stop
+    // reads as frozen, and resistance reads as nothing more this way.
+    function go(step, fromX = 0) {
+      const all = slides();
+      const next = all[all.indexOf(at()) + step];
+      if (next) return show(next, step, fromX);
+      const face = current();
+      if (!face || reduced.matches) return;
+      const push = `translateX(${-step * 24}px)`;
+      face.animate([{ transform: `translateX(${fromX}px)` }, { transform: push }, { transform: 'none' }], { duration: 300, easing: EASE });
+    }
+
+    function mark() { if (pos) pos.textContent = `${slides().indexOf(at()) + 1} / ${slides().length}`; }
+    // Out of the way while you talk, back on the first move of a hand.
+    let idle = 0;
+    function wake() {
+      document.body.classList.remove('marble-idle');
+      clearTimeout(idle);
+      idle = setTimeout(() => { if (presenting()) document.body.classList.add('marble-idle'); }, 2600);
+    }
+
+    play?.addEventListener('click', enter);
+    document.querySelector('.leave')?.addEventListener('click', leave);
+
+    addEventListener('keydown', (event) => {
+      if (!presenting()) return;
+      const key = event.key;
+      const back = key === 'ArrowLeft' || key === 'ArrowUp' || key === 'PageUp' || (key === ' ' && event.shiftKey);
+      const on = key === 'ArrowRight' || key === 'ArrowDown' || key === 'PageDown' || key === ' ';
+      if (back || on) go(back ? -1 : 1);
+      else if (key === 'Escape') leave();
+      else if (key === 'Home') show(slides()[0], -1);
+      else if (key === 'End') show(slides().at(-1), 1);
+      else return;
+      event.preventDefault();
+      wake();
+    });
+
+    // -------------------------------------------------------- hand on the deck
+    //
+    // One handler for both ways a hand moves a deck: a tap on the half of the
+    // screen you want to go to, and a drag the slide follows 1:1 until there is
+    // nothing more that way. On release the flick is projected the way a scroll
+    // is, and the slide carries on from where the finger left it rather than
+    // snapping back to nought first. The face carries no style of its own, so
+    // parking the drag is dropping the attribute, not leaving an empty one.
+    const park = (face, px) => { if (face) { if (px) face.style.transform = `translateX(${px}px)`; else face.removeAttribute('style'); } };
+    const project = (velocity) => (velocity / 1000) * 0.998 / (1 - 0.998);
+
+    // Resistance only at the ends of the deck, where nothing can be pulled in.
+    function give(raw) {
+      const [all, width] = [slides(), stage.clientWidth || 1];
+      const i = all.indexOf(at());
+      if (!((raw < 0 && i >= all.length - 1) || (raw > 0 && i <= 0))) return raw;
+      return (raw * width * 0.4) / (width + 0.4 * Math.abs(raw));
+    }
+
+    let drag = null;
+    stage.addEventListener('pointerdown', (event) => {
+      wake();
+      if (!presenting() || event.button !== 0 || !current()) return;
+      stage.setPointerCapture(event.pointerId);
+      drag = { id: event.pointerId, from: event.clientX, x: 0, lastX: event.clientX, lastT: event.timeStamp, v: 0, moved: false };
+    });
+    stage.addEventListener('pointermove', (event) => {
+      wake();
+      if (!drag || event.pointerId !== drag.id) return;
+      const dt = event.timeStamp - drag.lastT;
+      if (dt > 0) drag.v = ((event.clientX - drag.lastX) / dt) * 1000;
+      drag.lastX = event.clientX;
+      drag.lastT = event.timeStamp;
+      const raw = event.clientX - drag.from;
+      if (!drag.moved && Math.abs(raw) < 10) return;   // a tap is not a drag yet
+      drag.moved = true;
+      drag.x = give(raw);
+      park(current(), drag.x);
+    });
+    const release = (event) => {
+      if (!drag || event.pointerId !== drag.id) return;
+      const [held, moving] = [drag, current()];
+      drag = null;
+      park(moving);
+      if (!held.moved) return go(event.clientX < stage.clientWidth / 2 ? -1 : 1);
+      const width = stage.clientWidth || 1;
+      const landing = held.x + project(held.v);
+      const step = landing <= -width * 0.18 ? 1 : landing >= width * 0.18 ? -1 : 0;
+      if (step) go(step, held.x);
+      else if (!reduced.matches) swipe(moving, held.x, 'none', 300);
+    };
+    stage.addEventListener('pointerup', release);
+    stage.addEventListener('pointercancel', release);
+
+    // ------------------------------------------------------- what gets written
+    const begin = (marble) => {
+      document.body.removeAttribute('data-marble-readonly');
+      marble.pageOnly('data-present');
+
+      // A slide's own chrome is drawn here rather than written into the markup,
+      // for the reason the library draws its grip here: serializing a slide
+      // strips its transient children, so chrome written by hand would be lost
+      // the first time a slide was added, copied or brought back by an undo.
+      // The carrier hands every subtree that arrives later to this as well.
+      const chrome = (className, html, attrs) => {
+        const el = Object.assign(document.createElement('button'), { className, innerHTML: html });
+        for (const [k, v] of Object.entries({ 'data-marble-transient': '', ...attrs })) el.setAttribute(k, v);
+        return el;
+      };
+      const add = 'Add a slide above this one';   // said twice: a label and a hover
+      marble.register((root) => {
+        for (const slide of [...(root.matches?.('.slide') ? [root] : []), ...(root.querySelectorAll?.('.slide') ?? [])]) {
+          if (!slide.querySelector(':scope > .seam')) slide.prepend(chrome('seam', '<i aria-hidden="true">+</i>', { 'aria-label': add, title: add }));
+          if (!slide.querySelector(':scope > .kind')) slide.append(chrome('kind', 'Title', { 'data-marble-toggle': 'data-kind:title|point', 'data-marble-of': '.slide', 'data-marble-instruction': 'Make this the title slide, or an ordinary one.' }));
+        }
+      });
+
+      list.addEventListener('click', (event) => {
+        const seam = event.target.closest?.('.seam');
+        const before = seam?.closest('.slide');
+        const seed = document.querySelector('#tpl-slide')?.content.firstElementChild;
+        if (!seam || !before || !seed) return;
+
+        const node = seed.cloneNode(true);
+        // The same names the library's adder mints, so a slide put in the
+        // middle and one put on the end are the same slide.
+        for (const el of [node, ...node.querySelectorAll('[data-marble-editable]')]) {
+          el.setAttribute('data-marble-id', marble.newId());
+        }
+        // Serialized before it is wired, so no transient chrome reaches the file.
+        const html = marble.source.outer(node);
+        const op = { type: 'insert', html, parentId: marble.id(list), beforeId: marble.id(before) };
+        list.insertBefore(node, before);
+        marble.adopt(node);
+        const inverse = marble.invert(op);
+        if (inverse) marble.record({ redo: [op], undo: [inverse] });
+        marble.op(op, { immediate: true });
+        node.querySelector('[data-marble-editable]')?.focus();
+      });
+    };
+
+    // The carrier is injected once the document has been parsed, so arriving
+    // late is not the same as never arriving — and never arriving is something
+    // the deck says out loud rather than quietly forgetting.
+    if (window.marble) begin(window.marble);
+    else {
+      addEventListener('marble:ready', (event) => begin(event.detail), { once: true });
+      setTimeout(() => { if (!window.marble) document.body.setAttribute('data-marble-readonly', ''); }, 2000);
+    }
+  })();
+</script>
 
 __SCRIPT__
 </body>

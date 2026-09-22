@@ -98,8 +98,7 @@ __ICON__
   .brand { display: flex; align-items: center; gap: .6rem; min-width: 13rem; }
   .logo {
     width: 1.9rem; height: 1.9rem; display: grid; place-items: center;
-    border-radius: 7px; background: var(--accent-ink); color: var(--paper); font-size: .85rem;
-    box-shadow: inset 0 1px 0 rgba(255,255,255,.25), 0 1px 2px rgba(0,0,0,.12);
+    border-radius: 8px; background: var(--accent-ink); color: var(--paper); font-size: .85rem;
   }
   .brand h1 { font-size: 1.15rem; font-weight: 500; margin: 0; letter-spacing: -.015em; }
   .search { flex: 1 1 auto; max-width: 44rem; }
@@ -166,7 +165,7 @@ __ICON__
      and is not written into the pin. */
   .pin-open {
     appearance: none; flex: 0 0 auto; width: 1.55rem; height: 1.55rem; padding: 0;
-    display: grid; place-items: center; border: 0; border-radius: 7px;
+    display: grid; place-items: center; border: 0; border-radius: 8px;
     background: none; color: var(--faint); cursor: pointer;
   }
   .pin:hover .pin-open, .pin:focus-within .pin-open { color: var(--muted); }
@@ -187,7 +186,7 @@ __ICON__
   .crumbs { display: flex; align-items: center; gap: .3rem; padding: 1rem 1.25rem .25rem; flex-wrap: wrap; }
   .crumb {
     appearance: none; border: 0; background: none; cursor: pointer;
-    color: var(--muted); font-size: 1.3rem; font-weight: 400; padding: .1rem .3rem; border-radius: 6px;
+    color: var(--muted); font-size: 1.3rem; font-weight: 400; padding: .1rem .3rem; border-radius: 8px;
     letter-spacing: -.01em;
   }
   .crumb:last-child { color: var(--ink); font-weight: 500; }
@@ -248,7 +247,7 @@ __ICON__
 
   .items { flex: 1 1 auto; overflow-y: auto; padding: .6rem 1rem 2rem; }
   body[data-view="grid"] .items {
-    display: grid; grid-template-columns: repeat(auto-fill, minmax(13rem, 1fr)); gap: .7rem;
+    display: grid; grid-template-columns: repeat(auto-fill, minmax(15rem, 1fr)); gap: .75rem;
     align-content: start;
   }
   .item { position: relative; cursor: pointer; user-select: none; touch-action: none; }
@@ -259,19 +258,40 @@ __ICON__
      third of a second. */
   .item { animation: arrive var(--t-slow) var(--settle) backwards; }
   @keyframes arrive { from { opacity: 0; transform: translateY(3px) scale(.98); } }
+  /* Root two — the proportion of a sheet of paper — belongs to the card, not to
+     the picture on it. The card is the folder: the thing you see, name, drag
+     and open. So the card is the sheet, and the cover takes whatever the name
+     row leaves; fixing the card rather than the tile is what makes this one
+     rule instead of a number per column count. At four across the cover falls
+     out at about sixteen by nine and at six across it barely moves, and the
+     folder is the same shape either way. */
+  /* Only the plain listing. A folder that draws itself its own way — the days
+     gallery, the vision gallery — builds `.item` elements too, and its cards
+     are sized by what is in them; handing one a sheet-of-paper ratio made the
+     day hero a 1950 x 1380 box with a paragraph at the top of it. */
+  body[data-view="grid"] .items:not([data-rep]) .item:not([data-material]) {
+    aspect-ratio: 1.41421; display: flex; flex-direction: column;
+  }
   body[data-view="grid"] .item {
-    border: 1px solid var(--line); border-radius: var(--radius); padding: .7rem .8rem;
+    border: 1px solid var(--line); border-radius: var(--radius); padding: .65rem .75rem;
     background: var(--card);
   }
+  /* Hover darkens the ground and the edge and does nothing else. A card that
+     lifts on a shadow is forty cards lifting as the pointer crosses them, and
+     the grid never sits still. Press still answers, because that is an act. */
   body[data-view="grid"] .item:hover {
-    background: var(--paper-3); border-color: color-mix(in srgb, var(--accent-ink) 30%, var(--line));
-    box-shadow: var(--shadow-lift); transform: translateY(-2px);
+    background: var(--paper-3); border-color: color-mix(in srgb, var(--accent-ink) 34%, var(--line));
   }
-  body[data-view="grid"] .item:active { transform: translateY(-2px) scale(.98); }
+  body[data-view="grid"] .item:active { transform: scale(.985); }
   body[data-view="grid"] .item .row-meta { display: none; }
+  /* The cover is the rest of the card, so it has no ratio of its own to argue
+     about: it is as tall as the card is, less the name. That is what lets it be
+     flat — a cover is a band across a folder, and what is drawn on it reads
+     wide. The ground under it is one flat tone; a tile is somewhere to put what
+     the document is, not a surface to light. */
   body[data-view="grid"] .item .thumb {
-    display: block; height: 7rem; margin: .6rem 0 0; border-radius: 8px;
-    background: linear-gradient(160deg, var(--paper) 0%, var(--paper-2) 100%); border: 1px solid var(--line);
+    display: block; flex: 1 1 auto; min-height: 0; margin: .55rem 0 0; border-radius: 8px;
+    background: var(--paper-2); border: 1px solid var(--line);
     overflow: hidden; position: relative; color: var(--faint); font-size: .72rem;
   }
   /* A thin bar of the accent, proportional to how much of this document is —
@@ -308,9 +328,13 @@ __ICON__
     position: relative; overflow: hidden; display: grid; place-items: center;
   }
   .item .thumb .mini .cell.is-doc { background: var(--card); box-shadow: inset 0 0 0 1px var(--line); }
+  /* A folder inside a folder is drawn the way a material is: an outline and its
+     glyph. Only a document gets a filled cell, because only a document has
+     something to show in it — nine tinted blocks read as nine things to look
+     at, and there is nothing in them to look at. */
   .item .thumb .mini .cell.is-folder {
-    background: color-mix(in srgb, var(--folder) 16%, var(--paper-2));
-    color: var(--folder);
+    background: none; color: var(--folder);
+    box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--folder) 34%, var(--line));
   }
   /* A material inside a folder, on that folder's tile: present, and flatter
      than the documents beside it. */
@@ -319,6 +343,19 @@ __ICON__
   }
   .item .thumb .mini .cell.is-mat .mini-ico { opacity: .5; }
   .item .thumb .mini .cell.is-empty { grid-column: 1 / -1; background: none; box-shadow: none; }
+  /* How many there are decides how it is cut — one column, two, or three — so
+     that the cut lands on the tile's own proportion as often as it can. The
+     counts in between would leave a hole at the end of the last row, so the
+     last cell takes the hole instead of leaving it. */
+  .item .thumb .mini:not(:has(.cell:nth-child(2))) { grid-template-columns: 1fr; }
+  .item .thumb .mini:has(.cell:nth-child(2)):not(:has(.cell:nth-child(5))) {
+    grid-template-columns: repeat(2, 1fr);
+  }
+  .item .thumb .mini:has(.cell:nth-child(2)):not(:has(.cell:nth-child(5))) .cell:nth-child(odd):last-child {
+    grid-column: span 2;
+  }
+  .item .thumb .mini:has(.cell:nth-child(5)) .cell:nth-child(3n+1):last-child { grid-column: span 3; }
+  .item .thumb .mini:has(.cell:nth-child(5)) .cell:nth-child(3n+2):last-child { grid-column: span 2; }
   .item .thumb .mini .mini-ico { display: flex; color: inherit; opacity: .72; z-index: 0; }
   .item .thumb .mini .mini-ico .glyph { width: 1rem; height: 1rem; }
   .item .thumb .mini .peek { inset: 0; background: var(--card); }
@@ -326,10 +363,16 @@ __ICON__
   .item .thumb .big { display: block; color: var(--folder); }
   .item[data-kind="doc"] .thumb .big { color: var(--accent-ink); }
   .item .thumb .big .glyph { width: 2.5rem; height: 2.5rem; }
+  /* What a tile says about itself, when it is not already saying it: a
+     folder's count, a material's kind. Never a document's name — that tile is
+     the document. A label in the corner on a chip of the tile's own paper; the
+     full-width fade this replaces hid the last row of a folder's contents and
+     ended in white across the bottom of every coloured one. */
   .item .thumb .cap {
-    position: absolute; left: 0; right: 0; bottom: 3px; padding: .28rem .5rem; z-index: 1;
-    background: linear-gradient(transparent, var(--card) 55%);
-    max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+    position: absolute; left: .35rem; bottom: .35rem; z-index: 1;
+    max-width: calc(100% - .7rem); padding: .08rem .36rem; border-radius: 4px;
+    background: var(--realm-paper, var(--paper-2));
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
   }
 
   /* Folder tiles wear an identity; nested folders inherit it. The Drive chrome does not. */
@@ -360,32 +403,27 @@ __ICON__
   }
   body[data-view="grid"] .item[data-realm] {
     border-color: color-mix(in srgb, var(--accent-ink) 22%, var(--line));
-    background: linear-gradient(165deg, color-mix(in srgb, var(--accent-soft) 70%, var(--card)), var(--card));
+    background: color-mix(in srgb, var(--accent-soft) 45%, var(--card));
   }
   body[data-view="grid"] .item[data-realm] .thumb {
     border-color: color-mix(in srgb, var(--accent-ink) 18%, var(--line));
-    background: linear-gradient(160deg, var(--realm-paper) 0%, var(--realm-paper-2) 100%);
+    background: var(--realm-paper);
   }
   .item[data-realm] .name .ico { color: var(--folder); }
-  body[data-view="grid"] .item[data-realm="research"] .thumb {
-    background: linear-gradient(135deg, transparent 58%, color-mix(in srgb, var(--accent-ink) 12%, transparent) 58%), linear-gradient(160deg, #f7faf8, #dceee5);
-  }
-  body[data-view="grid"] .item[data-realm="fun"] .thumb {
-    background: radial-gradient(circle at 85% 15%, color-mix(in srgb, #f0a080 45%, transparent), transparent 42%), linear-gradient(160deg, #fdf7f4, #f3d5c8);
-  }
-  body[data-view="grid"] .item[data-realm="marble"] .thumb {
-    background: radial-gradient(circle at 34% 30%, #ffffff 0%, #e9eef3 48%, #cfd9e3 100%);
-  }
-  body[data-view="grid"] .item[data-realm="travel"] .thumb {
-    background: linear-gradient(180deg, color-mix(in srgb, #9ec4dc 55%, var(--realm-paper)) 0 38%, color-mix(in srgb, #3d6b8a 28%, var(--realm-paper-2)) 38% 52%, color-mix(in srgb, #c4a574 35%, var(--realm-paper)) 52% 100%);
-  }
-  body[data-view="grid"] .item[data-realm="days"] {
-    border-radius: 16px; background: linear-gradient(165deg, #f7f4ec, #efe8d8);
-    border-color: color-mix(in srgb, #6f8f7d 28%, var(--line));
-  }
-  body[data-view="grid"] .item[data-realm="days"] .thumb {
-    background: repeating-linear-gradient(transparent 0 1.35rem, color-mix(in srgb, #c4a35a 22%, transparent) 1.35rem calc(1.35rem + 1px)), linear-gradient(160deg, #fbf8f0, #efe6d4);
-    border-radius: 10px;
+  /* One realm still draws something behind its contents, because what it draws
+     is information: the days folder is ruled like a ledger, a line to the day.
+     The other four are one flat tone of their own paper. A diagonal, a sunset
+     band and a lit sphere were pictures *about* a folder, painted behind the
+     things the folder actually holds — and the tile already has a better
+     picture in it, which is the contents. Identity survives in ink: the glyph,
+     the edge, the ground, and the nested folders on the tile. */
+  body[data-view="grid"] .item[data-days] .thumb {
+    background:
+      repeating-linear-gradient(
+        transparent 0 1.35rem,
+        color-mix(in srgb, var(--accent-ink) 18%, transparent) 1.35rem calc(1.35rem + 1px)
+      ),
+      var(--realm-paper, var(--paper-2));
   }
 
   body[data-view="list"] .items { padding: 0 0 2rem; }
@@ -419,7 +457,22 @@ __ICON__
   .item.marble-picked { background: var(--accent-soft); }
   .item.marble-picked .name b { color: var(--accent-ink); }
   .item.marble-picked .more { opacity: 1; }
-  body[data-view="grid"] .item.marble-picked { border-color: var(--accent-ink); }
+  /* Picked is a ring drawn inside the edge, not a bar down one side. Two rules
+     from the design system decide this. A hairline with a tint behind it is
+     below the threshold of noticing on a region this size, and what reads at
+     any size is a ring (§01). And a rule — a leading edge, a folder's colour —
+     is a straight segment that never bends around a corner (§04); a 3px bar
+     inset on a 12px card bent around two of them. A ring may follow the
+     radius, because a ring is the shape.
+     A row is not a region: it keeps the leading rule, flush and square-capped
+     on an edge with no radius to bend around. One rule covers the plain, the
+     realm and the tinted card, because `--accent-ink` is already the folder's
+     own colour in each of those. */
+  body[data-view="grid"] .item.marble-picked:not([data-material]) {
+    border-color: color-mix(in srgb, var(--accent-ink) 50%, var(--line));
+    box-shadow: inset 0 0 0 2px var(--accent-ink);
+  }
+  body[data-view="list"] .item.marble-picked { box-shadow: inset 3px 0 0 var(--accent-ink); }
   body[data-view="grid"] .item.marble-picked:hover,
   body[data-view="list"] .item.marble-picked:hover { background: var(--accent-soft); }
   .item .more {
@@ -539,7 +592,7 @@ __ICON__
      look like itself there too. */
   .item.trow {
     position: relative; display: flex; align-items: center; gap: .85rem;
-    padding: .5rem .6rem .5rem .1rem; border-radius: 10px;
+    padding: .5rem .6rem .5rem .1rem; border-radius: 12px;
   }
   .item.trow::before {
     /* One continuous spine behind every row and every header, whichever
@@ -828,7 +881,7 @@ __ICON__
     position: fixed; z-index: 41; left: 50%; top: 50%;
     width: min(46rem, calc(100vw - 2rem)); max-height: calc(100vh - 3rem); overflow-y: auto;
     display: grid; grid-template-columns: 16rem 1fr; gap: 1.3rem;
-    padding: 1.1rem; border: 1px solid var(--line); border-radius: 18px;
+    padding: 1.1rem; border: 1px solid var(--line); border-radius: 14px;
     background: var(--card); box-shadow: var(--shadow-lift);
     transform-origin: var(--from, 50% 50%);
     transform: translate(-50%, -50%) scale(.92); opacity: 0; pointer-events: none;
@@ -856,7 +909,7 @@ __ICON__
   .start input[type="text"], .start textarea {
     display: block; width: 100%; margin: 0 0 1rem; padding: .5rem .6rem; font: inherit;
     color: var(--ink); background: var(--paper); border: 1px solid var(--line);
-    border-radius: 9px; outline: none;
+    border-radius: 8px; outline: none;
     transition: border-color var(--t) var(--settle), box-shadow var(--t) var(--settle);
   }
   .start input[type="text"]:focus, .start textarea:focus {
@@ -885,7 +938,7 @@ __ICON__
     overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
   }
   .start-foot button {
-    padding: .45rem .95rem; border: 1px solid var(--line); border-radius: 9px;
+    padding: .45rem .95rem; border: 1px solid var(--line); border-radius: 8px;
     background: var(--card); color: var(--ink); font-size: .88rem; cursor: pointer;
   }
   .start-foot button:hover { background: var(--paper-3); }
@@ -922,14 +975,14 @@ __ICON__
     position: fixed; z-index: 30; pointer-events: none; min-width: 12rem; padding: .35rem;
     background: rgba(var(--card-rgb), .9); backdrop-filter: blur(24px) saturate(160%);
     -webkit-backdrop-filter: blur(24px) saturate(160%);
-    border: 1px solid var(--line); border-radius: 10px; box-shadow: var(--shadow-lift);
+    border: 1px solid var(--line); border-radius: 14px; box-shadow: var(--shadow-lift);
     transform: scale(.94); opacity: 0;
     transition: transform var(--t) var(--settle), opacity var(--t) var(--settle);
   }
   .menu[data-open="1"] { pointer-events: auto; transform: none; opacity: 1; }
   .menu button {
     display: flex; align-items: center; gap: 1.2rem; width: 100%; text-align: left; padding: .45rem .7rem;
-    border: 0; border-radius: 6px; background: none; color: var(--ink); cursor: pointer; font-size: .88rem;
+    border: 0; border-radius: 8px; background: none; color: var(--ink); cursor: pointer; font-size: .88rem;
   }
   /* The key that would have done it without the menu. A shortcut nobody is
      told about is a shortcut nobody has: the menu is where you look when you
@@ -941,7 +994,7 @@ __ICON__
 
   .toast {
     position: fixed; left: 1.2rem; bottom: 1.2rem; z-index: 40;
-    padding: .65rem 1rem; border-radius: 10px;
+    padding: .65rem 1rem; border-radius: 12px;
     background: rgba(var(--card-rgb), .82); backdrop-filter: blur(20px) saturate(160%);
     -webkit-backdrop-filter: blur(20px) saturate(160%);
     border: 1px solid var(--line); color: var(--ink); font-weight: 500; letter-spacing: .003em;
@@ -1256,7 +1309,7 @@ __ICON__
       const ICON = {
         folder:
           '<svg class="glyph" viewBox="0 0 16 16" aria-hidden="true" focusable="false">' +
-          '<path fill="currentColor" d="M1.6 4.1A1.7 1.7 0 0 1 3.3 2.4h2.8c.45 0 .88.18 1.2.5l1 1h3.4a1.7 1.7 0 0 1 1.7 1.7v6.1a1.7 1.7 0 0 1-1.7 1.7H3.3a1.7 1.7 0 0 1-1.7-1.7z"/></svg>',
+          '<path fill="currentColor" d="M2.4 3.404h2.796a.9.9 0 0 1 .9.9v.598a.8.8 0 0 0 .8.8h6.454a1.15 1.15 0 0 1 1.15 1.15v4.594a1.15 1.15 0 0 1-1.15 1.15H2.65A1.15 1.15 0 0 1 1.5 11.446V4.304a.9.9 0 0 1 .9-.9z"/></svg>',
         doc:
           '<svg class="glyph" viewBox="0 0 16 16" aria-hidden="true" focusable="false">' +
           '<rect x="2.2" y="2.7" width="11.6" height="10.6" rx="2.1" fill="none" stroke="currentColor" stroke-width="1.3"/>' +
@@ -1520,9 +1573,11 @@ __ICON__
           return;
         }
         if (entry.kind === 'doc') {
-          thumb.innerHTML =
-            '<span class="peek"><span class="big">' + ICON.doc + '</span></span><span class="cap"></span>';
-          thumb.querySelector('.cap').textContent = entry.title || leaf(entry.path);
+          // No caption. The tile is the document, and the document says its own
+          // name on its own first line — under a heading that says it a second
+          // time. Printing it a third, over the page, was the loudest thing on
+          // the tile and it cost the bottom fifth of the preview to a fade.
+          thumb.innerHTML = '<span class="peek"><span class="big">' + ICON.doc + '</span></span>';
           const peek = thumb.querySelector('.peek');
           peek.dataset.src = marble.href(entry.path);
           peekObserver.observe(peek);

@@ -106,6 +106,30 @@ involved a proposal, 3% one rater's `?`, and only 2% three-way splits. The
 raters were not reading different products; they were filling the same list to
 different depths.
 
+**Final — three rounds (2026-09-21).** 118/118 entries at κ ≥ 0.80; mean κ 0.917,
+median 0.929, all three raters agreeing on 94.2% of cells. Corpus finalized:
+248 proposed variations adopted (2,918 → 3,166), every entry carries a `coding`
+block (first-pass and final κ per sub-dimension, the consensus code per instance,
+the variation distribution, unresolved and unobserved lists, and each rater's
+notes), and `evidence` moved to the new `agent-coded` tier. `validate.mjs` and
+`build.mjs` clean, extract round-trip clean, Atlas rebuilt at 4.4 MB with 25,081
+uniquely-addressed elements.
+
+`checkout`, the corpus's worst entry, ran a third round: κ 0.243 → 0.78 → 0.899.
+Its per-sub trace is the argument in miniature — `structure` 0.30 → 1.00,
+`payment` 0.06 → 0.90, `disclosure` −0.11 → 0.84 all resolved once raters
+re-read, while `abandonment` stalled at 0.77. All three raters independently
+concluded that dimension is broken rather than contested, citing the same
+contradiction: the codebook names Amazon as the exemplar for "Saved cart" while
+glossing "Synced across devices" as "signed-in carts", so the two variations
+describe one product, and "Reminder" answers a different question entirely.
+That is the finding; the number was never going to fix it.
+
+**Where it is reported:** `drive/Research/Design Pattern Generation/Coding and IRR.mrbl`,
+generated from the run's own files by `tools/coding-report.mjs` so nothing on the
+page is hand-typed and it cannot drift. `Catch Up.mrbl` in the same folder was
+corrected — it had still claimed every card but overview–detail was synthesized.
+
 **Round 2 — reconciliation works.** Every archetype whose round completed rose
 above threshold:
 
