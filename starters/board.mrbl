@@ -7,120 +7,587 @@
 <title>__TITLE__</title>
 __ICON__
 <style>
-  /* The Marble design system's palette, with one change the system does not
-     make: a document is white to the edge. The off-white paper belongs to
-     the interface — the Drive itself — not to the thing you are writing in.
-     One dusty blue does all the accenting, the same blue in every starter,
-     because five colours would be five claims and there is only one. */
+  /* The Marble design system's palette, with the one change every starter here
+     makes, written where it is made: the system's --paper is off-white and
+     belongs to the Drive — the interface — and a document is white to the edge.
+     Dark is not a second stylesheet under this one, it is the other half of
+     each value, so a colour cannot be changed in one scheme and left stale in
+     the other. One dusty blue does all the accenting; --danger is the one word
+     the accent cannot say, and in this file it appears on the column delete and
+     nowhere else. */
   :root {
-    --ink: #111111;
-    --muted: #5a5a5a;
-    --line: #ddd9cf;
-    --paper: #ffffff;
-    --card: #ffffff;
-    --accent: #9bb6cf;
-    --accent-soft: #f1f5f8;
-    --accent-ink: #738698;
+    color-scheme: light dark;
+    --ink: light-dark(#111111, #e8e6e1);
+    --muted: light-dark(#5a5a5a, #a3a7ab);
+    --faint: light-dark(#8a8a8a, #71767a);
+    --placeholder: light-dark(#767676, #8d9296);
+    --line: light-dark(#e6e2d8, #272c30);
+    --paper: light-dark(#ffffff, #1c1f22);   /* a document is white to the edge */
+    --paper-2: light-dark(#f7f6f2, #212528);
+    --well: light-dark(#f3f1ea, #16181a);
+    --card: light-dark(#ffffff, #22262a);
+    --accent: light-dark(#9bb6cf, #7fa8c9);
+    --accent-soft: light-dark(#f1f5f8, #1d2932);
+    --accent-ink: light-dark(#738698, #9dc0dc);
+    --danger: light-dark(#b4533e, #e08a74);
+    --caution: light-dark(#a07a2c, #d9b25e);
+    --shadow: 0 1px 2px light-dark(rgba(74,66,52,.05), rgba(0,0,0,.28)), 0 2px 4px light-dark(rgba(74,66,52,.03), rgba(0,0,0,.18));
+    --shadow-lift: 0 2px 6px light-dark(rgba(74,66,52,.07), rgba(0,0,0,.32)), 0 8px 18px light-dark(rgba(74,66,52,.08), rgba(0,0,0,.26));
+    --r: 12px; --r-sm: 8px; --r-text: 4px; --pill: 999px;
+    --ease-out: cubic-bezier(.22, 1, .36, 1);
+    --ease: cubic-bezier(.22, .61, .36, 1);
+    --snap: cubic-bezier(.4, 0, .2, 1);
+    --t-fast: 110ms; --t: 200ms; --t-slow: 340ms;
+    --ui: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    --serif: ui-serif, "New York", "Iowan Old Style", Palatino, Georgia, serif;
+    --mono: ui-monospace, "SF Mono", SFMono-Regular, Menlo, Consolas, monospace;
   }
-  @media (prefers-color-scheme: dark) {
-    :root {
-      --ink: #e8e6e1; --muted: #a3a7ab; --line: #2f3438;
-      --paper: #1c1f22; --card: #1c1f22;
-      --accent: #7fa8c9; --accent-soft: #1d2932; --accent-ink: #9dc0dc;
-    }
-  }
-  * { box-sizing: border-box; }
-  body {
-    margin: 0; padding: 2.5rem 1.5rem 6rem; background: var(--paper); color: var(--ink);
-    font: 15px/1.5 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
-    -webkit-font-smoothing: antialiased;
-  }
-  h1 { font-size: 1.4rem; margin: 0 0 .2rem; letter-spacing: -.015em; }
-  .lede { color: var(--muted); margin: 0 0 1.5rem; font-size: .95rem; }
 
-  .cols { display: flex; gap: 1rem; align-items: flex-start; overflow-x: auto; padding: 0 0 1rem 1.6rem; }
-  .col { flex: 0 0 17rem; }
-  .col-head { display: flex; align-items: baseline; gap: .5rem; padding: 0 .25rem .5rem; }
-  .col-head h2 { font-size: .95rem; margin: 0; letter-spacing: -.005em; }
-  /* How many cards is a count of elements, so it is counted rather than kept. */
-  .cards { counter-reset: card; }
-  .card { counter-increment: card; }
-  .col-head .n { font: 600 .7rem/1 ui-monospace, SFMono-Regular, Menlo, monospace; color: var(--muted); }
+  * { box-sizing: border-box; }
+  /* Every width answer is asked of the root rather than the window: a host that
+     docks a panel beside this page shrinks <html> and leaves the viewport where
+     it was, so a @media (max-width) here would be wrong the moment anybody
+     opened the drawer next to it. The paper is on the root as well as on the
+     body because of that: a root that establishes a container does not hand its
+     child's background up to the canvas, and the page below the last column
+     would be the browser's black. */
+  html { container: doc / inline-size; background: var(--paper); }
+  body {
+    --gutter: 1.5rem;
+    margin: 0; padding: 0 0 max(3rem, env(safe-area-inset-bottom));
+    background: var(--paper); color: var(--ink);
+    font: 15px/1.5 var(--ui); -webkit-font-smoothing: antialiased;
+  }
+  button { font: inherit; color: inherit; }
+  /* One ring, the same one, everywhere a key can land. */
+  :focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+
+  /* ------------------------------------------------------------- the heading
+     The gutter is on the rows rather than on <body>, because the strip below
+     has to scroll edge to edge: padding on the body would start the columns
+     3.1rem in on the left and give the right none. */
+  .top { display: grid; grid-template-columns: 1fr auto; column-gap: 1rem; align-items: start; padding: 2.25rem var(--gutter) 1.1rem; }
+  h1 { font-size: 1.4rem; line-height: 1.15; margin: 0 0 .2rem; letter-spacing: -.015em; }
+  .lede { grid-column: 1 / -1; max-width: 40rem; margin: 0; color: var(--muted); font-size: .95rem; }
+  /* With no host every control below still moves the page and none of it is
+     written down. That is worth saying once, where somebody is reading. */
+  body[data-marble-readonly] .lede::after { content: " Nothing here is being saved — there is no host."; color: var(--caution); }
+  /* Mod+Z is bound, and a phone has no Mod. So whether there is a way back is
+     drawn rather than merely available — the button appears the moment there is
+     a step to take back. */
+  .undo {
+    appearance: none; padding: .4rem .8rem; border: 1px solid var(--line);
+    border-radius: var(--pill); background: var(--card); color: var(--muted);
+    font: 500 .82rem/1 inherit; cursor: pointer;
+    transition: color var(--t-fast) var(--ease), border-color var(--t-fast) var(--ease);
+  }
+  .undo:hover:not(:disabled) { color: var(--accent-ink); border-color: var(--accent); }
+  .undo:active:not(:disabled) { transform: scale(.97); }
+  .undo:disabled { opacity: .35; cursor: default; }
+
+  /* --------------------------------------------------------------- the strip
+     A board is a row of columns, and on a phone a stack of them — the container
+     query at the foot of this sheet says why. Snapping is on at every width: a
+     strip that scrolls sideways with nothing to land on is the worst thing
+     about a board on a small screen. */
+  .cols {
+    display: flex; gap: 1rem; align-items: flex-start;
+    padding: 0 var(--gutter) 1.25rem;
+    overflow-x: auto; overscroll-behavior-x: contain;
+    scroll-snap-type: x proximity; scroll-padding-inline-start: var(--gutter);
+  }
+  .cols:not(:has(> .col))::before {
+    content: "An empty board. Add a column and name it after a stage.";
+    align-self: center; padding: 1rem .25rem; color: var(--faint); font-size: .85rem;
+  }
+
+  /* A column is a two-column grid so its foot can hold the + card button and
+     the count on one line with no wrapper between them — a wrapper would break
+     both `data-marble-into="prev"` and the counter's scope. */
+  .col {
+    flex: 0 0 17rem; scroll-snap-align: start;
+    display: grid; grid-template-columns: 1fr auto;
+  }
+  .col-head { grid-column: 1 / -1; display: flex; align-items: center; gap: .1rem; padding: 0 .1rem .4rem .3rem; }
+  .col-head h2 { flex: 1 1 auto; min-width: 0; margin: 0; font-size: .95rem; letter-spacing: -.005em; }
+  .col-head h2:empty::before { content: "Column"; color: var(--placeholder); }
+
+  /* Nothing here hides behind a hover. A column's controls are the only
+     evidence that a column can be moved or deleted at all, so they are drawn
+     whether or not there is a pointer in the room. */
+  .tool {
+    flex: none; display: grid; place-items: center;
+    width: 1.7rem; height: 1.7rem; padding: 0;
+    appearance: none; border: 0; border-radius: var(--r-sm); background: none;
+    color: var(--faint); cursor: pointer;
+    transition: color var(--t-fast) var(--ease), background-color var(--t-fast) var(--ease);
+  }
+  .tool:hover { color: var(--accent-ink); background: var(--accent-soft); }
+  .tool:active { transform: scale(.94); }
+  .tool.marble-off { opacity: .25; cursor: default; }
+  .tool.marble-off:hover { color: var(--faint); background: none; }
+  .move[data-move="prev"]::before { content: "←"; }
+  .move[data-move="next"]::before { content: "→"; }
+  /* A delete is not the same act as a move, so it is not the same colour and it
+     does not sit flush against one. */
+  .drop { margin-left: .35rem; font-size: 1.05rem; }
+  .drop::before { content: "×"; }
+  .drop:hover { color: var(--danger); background: color-mix(in srgb, var(--danger) 12%, transparent); }
 
   .cards {
-    list-style: none; margin: 0; padding: .25rem; min-height: 4rem;
-    display: flex; flex-direction: column; gap: .5rem;
-    background: color-mix(in srgb, var(--line) 35%, transparent); border-radius: 10px;
+    grid-column: 1 / -1; list-style: none; margin: 0; padding: .3rem;
+    min-height: 3.6rem; display: flex; flex-direction: column; gap: .4rem;
+    background: var(--well); border-radius: var(--r);
+    counter-reset: card done;
   }
+  /* :empty would miss a list holding a newline, which is every list the moment
+     somebody hand-edits the file. */
+  .cards:not(:has(> .card))::after {
+    content: "No cards yet — press + card";
+    margin: auto; padding: .5rem; text-align: center;
+    color: var(--faint); font-size: .78rem;
+  }
+
   .card {
-    background: var(--card); border: 1px solid var(--line); border-radius: 8px;
-    padding: .6rem .7rem; box-shadow: 0 1px 2px rgba(0,0,0,.04);
+    position: relative; display: grid; grid-template-columns: auto 1fr; gap: 0 .5rem;
+    padding: .5rem .6rem .55rem .5rem;
+    background: var(--card); border: 1px solid var(--line); border-radius: var(--r-sm);
+    box-shadow: var(--shadow); counter-increment: card;
   }
-  .card h3 { font-size: .88rem; margin: 0 0 .2rem; line-height: 1.35; }
-  .card p { margin: 0; font-size: .8rem; color: var(--muted); line-height: 1.45; }
-  [data-marble-editable] { outline: none; border-radius: 3px; }
+  .card[data-done="yes"] { counter-increment: card done; }
+  /* Only the title gives up room for the chrome that lands in the corner, so a
+     card's own sentence still has the width of the card. */
+  .card h3 { grid-column: 2; margin: 0; padding-right: 2.4rem; font-size: .88rem; line-height: 1.35; }
+  .card p { grid-column: 2; margin: 0; font-size: .8rem; line-height: 1.45; color: var(--muted); }
+  .card h3:empty::before { content: "Untitled"; color: var(--placeholder); }
+  .card p:empty::before { content: "A line about it"; color: var(--placeholder); }
+  .card[data-done="yes"] h3 { text-decoration: line-through; color: var(--muted); }
+
+  /* A real toggle out of the affordance library rather than a hand-rolled
+     checkbox: it files a setAttr, records its own inverse, and announces
+     itself — three things a <div> with a click handler has never once done.
+     The circle is drawn rather than being the button's own border, so the
+     target can be the size a finger needs without a card growing a 44px dot. */
+  .check {
+    grid-row: 1; align-self: center; width: 1.7rem; height: 1.7rem; padding: 0;
+    appearance: none; border: 0; background: none; cursor: pointer;
+    display: grid; place-items: center; color: var(--paper);
+  }
+  .check::before {
+    content: ""; grid-area: 1 / 1; width: 1.25rem; height: 1.25rem;
+    border: 1.5px solid var(--faint); border-radius: 50%;
+    transition: background-color var(--t-fast) var(--ease), border-color var(--t-fast) var(--ease);
+  }
+  .check::after { grid-area: 1 / 1; font-size: .72rem; line-height: 1; }
+  .check:hover::before { border-color: var(--accent); }
+  .check:active::before { transform: scale(.92); }
+  .card[data-done="yes"] .check::before { background: var(--accent-ink); border-color: var(--accent-ink); }
+  .card[data-done="yes"] .check::after { content: "✓"; }
+
+  /* The library hangs the drag handle and the delete off a grip out in the
+     margin, which is where a page with margins keeps them. A 17rem column has
+     no margin, so they move inside the card — still revealed on hover, focus
+     and touch by the library's own rules, and the room for them is reserved
+     either way so nothing shifts when they arrive. */
+  .card > .marble-grip { left: auto; right: .3rem; top: .35rem; flex-direction: row; gap: .25rem; }
+
+  /* One dashed control at two scales — a card into a column, a column into the
+     board. The rail is a child of the strip so a new column can be filed
+     *before* it; see the script. */
+  .add, .rail {
+    appearance: none; padding: .5rem .6rem; border: 1px dashed var(--line);
+    border-radius: var(--r-sm); background: none; color: var(--muted);
+    font: 500 .82rem/1.2 inherit; text-align: left; cursor: pointer;
+    transition: color var(--t-fast) var(--ease), border-color var(--t-fast) var(--ease);
+  }
+  .add:hover, .rail:hover { color: var(--accent-ink); border-color: var(--accent); }
+  .add:active, .rail:active { transform: scale(.98); }
+  .add { grid-column: 1; margin-top: .4rem; }
+  .rail { flex: 0 0 9.5rem; align-self: start; font-size: .85rem; }
+
+  /* How many cards is a count of elements, so it is counted rather than kept —
+     and a CSS counter can only be read after the things it counts, which is why
+     the count sits in the foot beside + card rather than up in the head. */
+  .n {
+    grid-column: 2; align-self: center; margin-top: .4rem; padding: 0 .35rem;
+    font: 600 .7rem/1 var(--mono); color: var(--faint);
+    font-variant-numeric: tabular-nums;
+  }
+  .n::after { content: counter(card); }
+  .col:has(.card[data-done="yes"]) .n::after { content: counter(done) "/" counter(card); }
+  .col:not(:has(.card)) .n { display: none; }
+
+  /* Typing over anything is a setText, so every editable takes a caret even
+     when it is empty, and a 200-character word wraps rather than widening the
+     column under it. */
+  [data-marble-editable] {
+    outline: none; border-radius: var(--r-text); overflow-wrap: anywhere;
+  }
+  [data-marble-editable]:empty { min-height: 1.2em; }
   [data-marble-editable]:hover { background: var(--accent-soft); }
-  [data-marble-editable]:focus { background: var(--card); box-shadow: 0 0 0 1px var(--accent), 0 0 0 4px var(--accent-soft); }
-  .add {
-    appearance: none; width: 100%; margin-top: .5rem; padding: .45rem;
-    border: 1px dashed var(--line); border-radius: 8px; background: none;
-    color: var(--muted); font: 500 .82rem/1 inherit; cursor: pointer;
+  [data-marble-editable]:focus {
+    background: var(--card); box-shadow: 0 0 0 1px var(--accent), 0 0 0 4px var(--accent-soft);
   }
-  .add:hover { color: var(--accent-ink); border-color: var(--accent); }
+
+  /* Said where the loss happened, which is the alternative to a dialog that
+     asks before every delete and teaches people to dismiss dialogs. */
+  .reversal {
+    position: fixed; left: var(--gutter); bottom: max(1rem, env(safe-area-inset-bottom));
+    z-index: 30; display: flex; align-items: center; gap: .6rem;
+    padding: .45rem .5rem .45rem .8rem;
+    border: 1px solid var(--line); border-radius: var(--r-sm);
+    background: var(--card); color: var(--ink); box-shadow: var(--shadow-lift);
+    font-size: .8rem; max-width: calc(100% - 2 * var(--gutter));
+    opacity: 0; transform: translateY(4px); pointer-events: none;
+    transition: opacity var(--t) var(--ease-out), transform var(--t) var(--ease-out);
+  }
+  .reversal[data-open] { opacity: 1; transform: none; pointer-events: auto; }
+  .back {
+    appearance: none; padding: .3rem .6rem; border: 0; border-radius: var(--r-text);
+    background: var(--accent-soft); color: var(--accent-ink);
+    font: 600 .78rem/1 inherit; cursor: pointer;
+  }
+  .back:active { transform: scale(.96); }
+
+  /* --------------------------------------------------------------- the phone
+     A board on a phone is a stack, not a strip. Sideways scrolling on a 390px
+     screen means one column at a time behind a gesture that fights the
+     browser's own back-swipe — and it breaks the one thing a board is for,
+     because the library decides where a dragged card lands by comparing
+     vertical midpoints, so a card can only be dragged into a column that is
+     *below* the one it is leaving. Stacked, the whole board is one vertical
+     scroll and every gesture in it works with a thumb. */
+  @container doc (max-width: 37rem) {
+    body { --gutter: 1.1rem; }
+    .cols { flex-direction: column; overflow-x: visible; scroll-snap-type: none; }
+    .col, .rail { flex: 1 1 auto; width: 100%; }
+    .cards { min-height: 3rem; }
+    /* Left and right are up and down here, which is why the labels say
+       "earlier" and "later" — those stay true in both. */
+    .move[data-move="prev"]::before { content: "↑"; }
+    .move[data-move="next"]::before { content: "↓"; }
+  }
+
+  /* ---------------------------------------------------------------- the hand
+     44px for anything a finger commits with. Nothing else about the card
+     changes: what grows is the target around a drawn circle and a drawn glyph,
+     and the title gives up the width for it. */
+  @media (pointer: coarse) {
+    .tool, .check { width: 2.75rem; height: 2.75rem; }
+    .add, .rail, .undo, .back { min-height: 2.75rem; }
+    .card h3 { padding-right: 5.6rem; }
+    /* Two nested opacities — the library dims the grip *and* the glyph, which
+       under a finger adds up to something nobody can see. */
+    .card > .marble-grip { right: .15rem; top: .05rem; opacity: 1; gap: .1rem; }
+    .card > .marble-grip .marble-btn { width: 2.75rem; height: 2.75rem; font-size: 16px; line-height: 2.75rem; opacity: .7; }
+  }
+
+  /* No travel, no scale, no overshoot — a cross-fade and nothing else. */
+  @media (prefers-reduced-motion: reduce) {
+    *, *::before, *::after {
+      animation-duration: .001ms !important; animation-iteration-count: 1 !important;
+      transition-property: opacity, color, background-color, border-color !important;
+      transition-duration: var(--t-fast) !important;
+      scroll-behavior: auto !important;
+    }
+    button:active, .check:active::before { transform: none; }
+    .reversal { transform: none; }
+  }
 </style>
 </head>
 <body>
-<main data-marble-id="__ID__">
+<main class="board" data-marble-id="__ID__">
 
-  <h1 data-marble-id="__ID__" data-marble-editable>__TITLE__</h1>
-  <p class="lede" data-marble-id="__ID__" data-marble-editable>A card’s column is the column it sits in and nothing else. Drag one across and you have moved it in the file.</p>
+  <header class="top" data-marble-id="__ID__">
+    <h1 data-marble-id="__ID__" data-marble-editable>__TITLE__</h1>
+    <button class="undo" type="button" data-marble-transient disabled>Undo</button>
+    <p class="lede" data-marble-id="__ID__" data-marble-editable>A card’s column is the column it sits in and nothing else. Drag one across and you have moved it in the file.</p>
+  </header>
 
-  <div class="cols" data-marble-id="__ID__" data-marble-sortable="cols">
+  <div class="cols" data-marble-id="__ID__">
 
-    <section class="col" data-marble-id="__ID__" data-marble-removable>
+    <section class="col" data-marble-id="__ID__">
       <header class="col-head" data-marble-id="__ID__">
         <h2 data-marble-id="__ID__" data-marble-editable>To do</h2>
+        <button class="tool move" type="button" data-marble-id="__ID__" data-move="prev" aria-label="Move this column earlier"></button>
+        <button class="tool move" type="button" data-marble-id="__ID__" data-move="next" aria-label="Move this column later"></button>
+        <button class="tool drop" type="button" data-marble-id="__ID__" aria-label="Delete this column and the cards in it"></button>
       </header>
       <ol class="cards" data-marble-id="__ID__" data-marble-sortable="cards">
-        <li class="card" data-marble-id="__ID__" data-marble-removable>
+        <li class="card" data-marble-id="__ID__" data-marble-removable data-done="no">
+          <button class="check" type="button" data-marble-id="__ID__" data-marble-toggle="data-done:yes|no" data-marble-of=".card" aria-label="Check this card off"></button>
           <h3 data-marble-id="__ID__" data-marble-editable>Something to do</h3>
           <p data-marble-id="__ID__" data-marble-editable>And a line about what it means.</p>
         </li>
-      </ol>
-      <button class="add" data-marble-transient data-marble-add="#tpl-card" data-marble-into="prev">+ card</button>
-    </section>
-
-    <section class="col" data-marble-id="__ID__" data-marble-removable>
-      <header class="col-head" data-marble-id="__ID__">
-        <h2 data-marble-id="__ID__" data-marble-editable>Doing</h2>
-      </header>
-      <ol class="cards" data-marble-id="__ID__" data-marble-sortable="cards">
-        <li class="card" data-marble-id="__ID__" data-marble-removable>
-          <h3 data-marble-id="__ID__" data-marble-editable>Something in flight</h3>
-          <p data-marble-id="__ID__" data-marble-editable>Drag it right when it is finished.</p>
+        <li class="card" data-marble-id="__ID__" data-marble-removable data-done="no">
+          <button class="check" type="button" data-marble-id="__ID__" data-marble-toggle="data-done:yes|no" data-marble-of=".card" aria-label="Check this card off"></button>
+          <h3 data-marble-id="__ID__" data-marble-editable>Something after that</h3>
+          <p data-marble-id="__ID__" data-marble-editable>Tick it here, or carry it across.</p>
         </li>
       </ol>
-      <button class="add" data-marble-transient data-marble-add="#tpl-card" data-marble-into="prev">+ card</button>
+      <button class="add" type="button" data-marble-id="__ID__" data-marble-add="#tpl-card" data-marble-into="prev">+ card</button>
+      <span class="n" data-marble-id="__ID__" aria-hidden="true"></span>
     </section>
 
-    <section class="col" data-marble-id="__ID__" data-marble-removable>
+    <section class="col" data-marble-id="__ID__">
+      <header class="col-head" data-marble-id="__ID__">
+        <h2 data-marble-id="__ID__" data-marble-editable>Doing</h2>
+        <button class="tool move" type="button" data-marble-id="__ID__" data-move="prev" aria-label="Move this column earlier"></button>
+        <button class="tool move" type="button" data-marble-id="__ID__" data-move="next" aria-label="Move this column later"></button>
+        <button class="tool drop" type="button" data-marble-id="__ID__" aria-label="Delete this column and the cards in it"></button>
+      </header>
+      <ol class="cards" data-marble-id="__ID__" data-marble-sortable="cards">
+        <li class="card" data-marble-id="__ID__" data-marble-removable data-done="no">
+          <button class="check" type="button" data-marble-id="__ID__" data-marble-toggle="data-done:yes|no" data-marble-of=".card" aria-label="Check this card off"></button>
+          <h3 data-marble-id="__ID__" data-marble-editable>Something in flight</h3>
+          <p data-marble-id="__ID__" data-marble-editable>Drag it right when it is finished — or focus its handle and press →.</p>
+        </li>
+      </ol>
+      <button class="add" type="button" data-marble-id="__ID__" data-marble-add="#tpl-card" data-marble-into="prev">+ card</button>
+      <span class="n" data-marble-id="__ID__" aria-hidden="true"></span>
+    </section>
+
+    <section class="col" data-marble-id="__ID__">
       <header class="col-head" data-marble-id="__ID__">
         <h2 data-marble-id="__ID__" data-marble-editable>Done</h2>
+        <button class="tool move" type="button" data-marble-id="__ID__" data-move="prev" aria-label="Move this column earlier"></button>
+        <button class="tool move" type="button" data-marble-id="__ID__" data-move="next" aria-label="Move this column later"></button>
+        <button class="tool drop" type="button" data-marble-id="__ID__" aria-label="Delete this column and the cards in it"></button>
       </header>
       <ol class="cards" data-marble-id="__ID__" data-marble-sortable="cards"></ol>
-      <button class="add" data-marble-transient data-marble-add="#tpl-card" data-marble-into="prev">+ card</button>
+      <button class="add" type="button" data-marble-id="__ID__" data-marble-add="#tpl-card" data-marble-into="prev">+ card</button>
+      <span class="n" data-marble-id="__ID__" aria-hidden="true"></span>
     </section>
+
+    <button class="rail" type="button" data-marble-id="__ID__">+ column</button>
 
   </div>
 
 </main>
 
+<div class="reversal" data-marble-transient role="status">
+  <span class="said"></span>
+  <button class="back" type="button">Undo</button>
+</div>
+
 <template id="tpl-card" data-marble-transient>
-  <li class="card" data-marble-removable>
+  <li class="card" data-marble-removable data-done="no">
+    <button class="check" type="button" data-marble-toggle="data-done:yes|no" data-marble-of=".card" aria-label="Check this card off"></button>
     <h3 data-marble-editable>New card</h3>
     <p data-marble-editable>What it is.</p>
   </li>
 </template>
+
+<!-- A column is furniture as much as it is content: the + card button and the
+     count come with it. They are addressed markup rather than page chrome for a
+     reason worth knowing — `source.outer` drops transient nodes, so a column
+     whose buttons were chrome would be filed without them, and undoing its
+     deletion would bring back a column nobody could add a card to. -->
+<template id="tpl-col" data-marble-transient>
+  <section class="col">
+    <header class="col-head">
+      <h2 data-marble-editable>New column</h2>
+      <button class="tool move" type="button" data-move="prev" aria-label="Move this column earlier"></button>
+      <button class="tool move" type="button" data-move="next" aria-label="Move this column later"></button>
+      <button class="tool drop" type="button" aria-label="Delete this column and the cards in it"></button>
+    </header>
+    <ol class="cards" data-marble-sortable="cards"></ol>
+    <button class="add" type="button" data-marble-add="#tpl-card" data-marble-into="prev">+ card</button>
+    <span class="n" aria-hidden="true"></span>
+  </section>
+</template>
+
+<script>
+  // What a board knows about itself that the affordance library cannot: what a
+  // column is, where a new one goes, which way one moves, and what it costs to
+  // delete one. Everything else here — typing, dragging a card, adding one,
+  // deleting one, checking one off, Mod+Z — is the library's, wired by the
+  // attributes in the markup above.
+  (() => {
+    const begin = (marble) => {
+      const strip = document.querySelector('.cols');
+      const rail = document.querySelector('.rail');
+      const reversal = document.querySelector('.reversal');
+      const undoButton = document.querySelector('.undo');
+      if (!strip || !rail) return;
+
+      const columns = () => [...strip.querySelectorAll(':scope > .col')];
+
+      // The library's delete offers back what it took by calling whatever
+      // answers to `offerUndo`. The part that usually provides it is not in this
+      // document's list, so the board provides it — one strip for every loss,
+      // including the column delete filed below.
+      let hiding = null;
+      function offerUndo(said) {
+        reversal.querySelector('.said').textContent = said;
+        reversal.setAttribute('data-open', '');
+        clearTimeout(hiding);
+        hiding = setTimeout(() => reversal.removeAttribute('data-open'), 8000);
+      }
+      window.offerUndo = offerUndo;
+
+      const back = () => {
+        reversal.removeAttribute('data-open');
+        if (marble.canUndo) marble.undo();
+      };
+      reversal.querySelector('.back').addEventListener('click', back);
+      undoButton.addEventListener('click', back);
+
+      // Whether there is a way back, and which ends of the strip a column can
+      // still move towards, are live facts about the document — so they are
+      // derived from it rather than kept beside it. `marble-` says the class
+      // belongs to the page, which is what survives a reconcile against the file.
+      function derive() {
+        undoButton.disabled = !marble.canUndo;
+        const all = columns();
+        all.forEach((col, at) => {
+          for (const button of col.querySelectorAll(':scope > .col-head > .move')) {
+            const off = button.dataset.move === 'prev' ? at === 0 : at === all.length - 1;
+            button.classList.toggle('marble-off', off);
+            button.setAttribute('aria-disabled', String(off));
+          }
+        });
+      }
+      marble.register(derive);
+      document.addEventListener('marble:history', derive);
+
+      // Adding a column is this document's own behaviour rather than a generic
+      // add, for two reasons that are both about what a column is. It arrives
+      // with furniture of its own, which the adder would serialize away. And it
+      // goes *before* the rail, which an adder that can only append has no way
+      // to say — so the page and the file would disagree about where the button
+      // sits the moment you reloaded.
+      function addColumn() {
+        const seed = document.querySelector('#tpl-col')?.content.firstElementChild;
+        if (!seed) return;
+        const node = seed.cloneNode(true);
+        // A subtree that is not in the document yet carries its ids with it.
+        for (const el of [node, ...node.querySelectorAll('*')]) {
+          if (!el.hasAttribute('data-marble-transient')) el.setAttribute('data-marble-id', marble.newId());
+        }
+
+        const id = marble.id(node);
+        const op = {
+          type: 'insert',
+          parentId: marble.id(strip),
+          beforeId: marble.id(rail),
+          html: marble.source.outer(node),
+        };
+        marble.apply(op);                    // the page moves, affordances wired
+        marble.op(op, { immediate: true });  // and the file is told, from the same op
+        // One gesture, so one undo step.
+        marble.record({ redo: [op], undo: [{ type: 'remove', id }] });
+
+        // And you are standing in it: the strip scrolls to the new column and
+        // its name is selected, so the next thing typed is what it is called.
+        const made = marble.byId(id);
+        made?.scrollIntoView({ block: 'nearest', inline: 'nearest' });
+        const name = made?.querySelector('[data-marble-editable]');
+        if (name) {
+          name.focus();
+          getSelection()?.selectAllChildren(name);
+        }
+        derive();
+      }
+
+      // A column moves by a button rather than by a drag, and that is a fix
+      // rather than a shortcut: the library's sortable decides where a dragged
+      // item lands by comparing vertical midpoints, which is the right question
+      // for a list and the wrong one for a row — every column dropped anywhere
+      // in a strip lands first. Two buttons say the same thing where a finger
+      // and a keyboard can both reach it.
+      function moveColumn(col, dir) {
+        const all = columns();
+        const to = all.indexOf(col) + dir;
+        if (to < 0 || to >= all.length) return;
+        const id = marble.id(col);
+        const parentId = marble.id(strip);
+        // Captured before the move, or it is the place we are about to be.
+        const undo = { type: 'move', id, parentId, beforeId: marble.id(col.nextElementSibling) };
+        const op = {
+          type: 'move', id, parentId,
+          beforeId: marble.id(dir > 0 ? all[to + 1] ?? rail : all[to]),
+        };
+        marble.apply(op);
+        marble.op(op, { immediate: true });
+        marble.record({ redo: [op], undo: [undo] });
+        col.scrollIntoView({ block: 'nearest', inline: 'nearest' });
+        derive();
+      }
+
+      // Deleting a column takes its cards with it, which is the largest loss
+      // anything on this page can cause — so it says how many left, and offers
+      // them back where the loss happened.
+      function dropColumn(col) {
+        const id = marble.id(col);
+        const cards = col.querySelectorAll('.card').length;
+        const named = marble.text(col.querySelector(':scope > .col-head > h2')).trim();
+        const op = { type: 'remove', id };
+        const undo = marble.invert(op);   // captured against the live node
+        if (!undo) return;
+        marble.apply(op);
+        marble.op(op, { immediate: true });
+        marble.record({ redo: [op], undo: [undo] });
+        offerUndo(
+          `Removed “${named || 'the column'}”` +
+            (cards ? ` and ${cards} card${cards === 1 ? '' : 's'}` : ''),
+        );
+        derive();
+      }
+
+      // One listener rather than one per button, so a column inserted later
+      // needs no wiring at all.
+      strip.addEventListener('click', (event) => {
+        const button = event.target.closest('button');
+        if (!button) return;
+        if (button === rail) { addColumn(); return; }
+        const col = button.closest('.col');
+        if (!col) return;
+        if (button.classList.contains('move')) moveColumn(col, button.dataset.move === 'prev' ? -1 : 1);
+        else if (button.classList.contains('drop')) dropColumn(col);
+      });
+
+      // The same crossing without a pointer. The library's handle already takes
+      // ArrowUp and ArrowDown, which reorder a card inside its column; left and
+      // right are the question only a board asks, so the board answers them. A
+      // card that crosses lands at the end of where it arrived, which is what
+      // "it is in Doing now" means.
+      strip.addEventListener('keydown', (event) => {
+        const dir = event.key === 'ArrowLeft' ? -1 : event.key === 'ArrowRight' ? 1 : 0;
+        if (!dir) return;
+        const handle = event.target.closest?.('.marble-handle');
+        const card = handle?.closest('.card');
+        if (!card) return;
+        const all = columns();
+        const into = all[all.indexOf(card.closest('.col')) + dir]?.querySelector(':scope > .cards');
+        if (!into) return;
+        event.preventDefault();
+
+        const id = marble.id(card);
+        const undo = {
+          type: 'move', id,
+          parentId: marble.id(card.parentElement),
+          beforeId: marble.id(card.nextElementSibling),
+        };
+        const op = { type: 'move', id, parentId: marble.id(into), beforeId: null };
+        marble.apply(op);
+        marble.op(op, { immediate: true });
+        marble.record({ redo: [op], undo: [undo] });
+        card.scrollIntoView({ block: 'nearest', inline: 'nearest' });
+        handle.focus();
+      });
+    };
+
+    // A page with no host is still a board you can read and rearrange; it just
+    // forgets. Said out loud once, rather than silently.
+    addEventListener('load', () => {
+      if (!window.marble) document.body.setAttribute('data-marble-readonly', '');
+    });
+
+    if (window.marble) begin(window.marble);
+    else addEventListener('marble:ready', (event) => begin(event.detail), { once: true });
+  })();
+</script>
 
 __SCRIPT__
 </body>
