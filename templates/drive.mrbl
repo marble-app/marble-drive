@@ -759,19 +759,19 @@ __ICON__
      behave the same, and picking here and picking on the page are one gesture. */
   .tgrid[data-compact] { grid-template-columns: 1fr 1fr; gap: .45rem; }
   .tcard {
-    --tint: var(--accent-ink); --on-tint: #fff;
+    --tint: var(--accent-ink); --on-tint: #fff; --edge: var(--tint);
     position: relative; display: block; width: 100%; padding: 0; text-align: left;
     border: 1px solid var(--line); border-radius: var(--radius); overflow: hidden;
     background: var(--card); color: var(--ink); cursor: pointer; box-shadow: var(--shadow);
   }
   .tcard:hover {
     transform: translateY(-2px); box-shadow: var(--shadow-lift);
-    border-color: color-mix(in srgb, var(--tint) 45%, var(--line));
+    border-color: color-mix(in srgb, var(--edge) 45%, var(--line));
   }
   /* Outranks the page-wide `button:active`, which would shrink the whole card
      about its middle and drop it back behind the lift. */
   .tcard:active { transform: translateY(-1px) scale(.985); }
-  .tcard:focus-visible { outline: 2px solid var(--tint); outline-offset: 2px; }
+  .tcard:focus-visible { outline: 2px solid var(--edge); outline-offset: 2px; }
   .tgrid[data-compact] .tcard { box-shadow: none; }
 
   /* The picture. `--z` is the one number: the frame is rendered at full size
@@ -781,7 +781,7 @@ __ICON__
   .tpeek {
     --z: .2;
     position: relative; display: grid; place-items: center; overflow: hidden;
-    aspect-ratio: 4 / 3; background: var(--card); color: var(--tint);
+    aspect-ratio: 4 / 3; background: var(--card); color: var(--edge);
   }
   .tpeek iframe {
     position: absolute; top: 0; left: 0; border: 0; background: var(--card);
@@ -799,9 +799,9 @@ __ICON__
   .tpeek .tglyph { width: 2.4rem; height: 2.4rem; opacity: .4; }
   .tfoot {
     display: flex; align-items: center; gap: .5rem; padding: .55rem .7rem;
-    border-top: 2px solid var(--tint); background: var(--card); font-weight: 500;
+    border-top: 2px solid var(--edge); background: var(--card); font-weight: 500;
   }
-  .tfoot .tglyph { flex: 0 0 auto; width: 1rem; height: 1rem; color: var(--tint); }
+  .tfoot .tglyph { flex: 0 0 auto; width: 1rem; height: 1rem; color: var(--edge); }
   .tfoot b { font-weight: 500; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .tgrid[data-compact] .tfoot { padding: .38rem .5rem; font-size: .82rem; }
   .tgrid[data-compact] .tfoot .tglyph { width: .85rem; height: .85rem; }
@@ -815,13 +815,16 @@ __ICON__
      A modal task, so it is dimmed to: the scrim pushes the listing back, and
      the panel grows out of the card that was pressed and shrinks back into it
      (`--from` is set from that card's rect, once, per opening). */
-  .scrim {
+  /* Named for what it belongs to: the Drive already has a `.scrim`, the one
+     the phone sidebar slides out over, and two things called the same thing in
+     one file is one of them waiting to be broken by the other. */
+  .start-scrim {
     position: fixed; inset: 0; z-index: 40; background: rgba(0, 0, 0, .3);
     opacity: 0; pointer-events: none; transition: opacity var(--t) var(--settle);
   }
-  .scrim[data-open="1"] { opacity: 1; pointer-events: auto; }
+  .start-scrim[data-open="1"] { opacity: 1; pointer-events: auto; }
   .start {
-    --tint: var(--accent-ink); --on-tint: #fff;
+    --tint: var(--accent-ink); --on-tint: #fff; --edge: var(--tint);
     position: fixed; z-index: 41; left: 50%; top: 50%;
     width: min(46rem, calc(100vw - 2rem)); max-height: calc(100vh - 3rem); overflow-y: auto;
     display: grid; grid-template-columns: 16rem 1fr; gap: 1.3rem;
@@ -857,7 +860,7 @@ __ICON__
     transition: border-color var(--t) var(--settle), box-shadow var(--t) var(--settle);
   }
   .start input[type="text"]:focus, .start textarea:focus {
-    border-color: var(--tint); box-shadow: 0 0 0 3px color-mix(in srgb, var(--tint) 20%, transparent);
+    border-color: var(--edge); box-shadow: 0 0 0 3px color-mix(in srgb, var(--edge) 22%, transparent);
   }
   .start textarea { min-height: 4.6rem; margin-bottom: .6rem; line-height: 1.5; resize: vertical; }
   /* Three of them, concrete. An empty field teaches nothing about what a
@@ -871,7 +874,7 @@ __ICON__
   }
   .start-ideas button:hover {
     background: var(--card); color: var(--ink);
-    border-color: color-mix(in srgb, var(--tint) 50%, var(--line));
+    border-color: color-mix(in srgb, var(--edge) 50%, var(--line));
   }
   .start-foot { display: flex; align-items: center; gap: .5rem; }
   .start-body { min-width: 0; }
@@ -894,6 +897,14 @@ __ICON__
   }
   #start-go[disabled] { opacity: .55; cursor: default; }
   #start-go[disabled]:hover { background: var(--tint); }
+  /* In the dark the seven accents are still the light scheme's, and a
+     mid-dark hex drawn as a hairline on a near-black card is a line you cannot
+     see. Only the edges and the marks are lifted: the fill of a button keeps the
+     real colour, because that is the one place the label's contrast against it
+     was measured. */
+  @media (prefers-color-scheme: dark) {
+    .tcard, .start { --edge: color-mix(in srgb, var(--tint) 62%, #ffffff); }
+  }
   @media (max-width: 44rem) {
     .start { grid-template-columns: 1fr; gap: .8rem; }
     .start-shot .tpeek { aspect-ratio: 16 / 9; --z: .26; }
@@ -1129,7 +1140,7 @@ __ICON__
      it, and what you want built in it — leave that second field alone and this
      is the clone it always was. Transient, all of it: a panel about making a
      document is not part of any document, and none of it is ever written down. -->
-<div class="scrim" id="scrim" data-marble-transient></div>
+<div class="start-scrim" id="start-scrim" data-marble-transient></div>
 <div class="start" id="start" data-marble-transient role="dialog" aria-modal="true" aria-labelledby="start-title">
   <div class="start-shot"><span class="tpeek" id="start-preview"></span></div>
   <div class="start-body">
@@ -2055,13 +2066,15 @@ __ICON__
 
       // What can be read on a given accent. The seven run from Pearl to
       // Research green, and one fixed label colour is unreadable at one end or
-      // the other — so it is measured rather than picked.
+      // the other — so it is measured rather than picked. White and near-black
+      // cross over at a relative luminance of .189: above it the dark label is
+      // the higher contrast of the two, below it the white one is.
       function onTint(hex) {
         const n = parseInt(String(hex).replace('#', ''), 16);
         if (!Number.isFinite(n)) return '#ffffff';
         const lin = (c) => (c / 255 <= 0.04045 ? c / 255 / 12.92 : ((c / 255 + 0.055) / 1.055) ** 2.4);
         const luma = 0.2126 * lin((n >> 16) & 255) + 0.7152 * lin((n >> 8) & 255) + 0.0722 * lin(n & 255);
-        return luma > 0.3 ? '#101010' : '#ffffff';
+        return luma > 0.189 ? '#101010' : '#ffffff';
       }
 
       function tinted(el, accent) {
@@ -2116,7 +2129,7 @@ __ICON__
       // ------------------------------------------------------------ the brief
 
       const startPanel = $('#start');
-      const scrim = $('#scrim');
+      const startScrim = $('#start-scrim');
       // The template the panel is about, and the card it grew out of — which is
       // also where focus goes back to when it closes.
       let starting = null;
@@ -2158,7 +2171,7 @@ __ICON__
 
         sheet.removeAttribute('data-open');
         growFrom(startPanel, from);
-        scrim.setAttribute('data-open', '1');
+        startScrim.setAttribute('data-open', '1');
         startPanel.setAttribute('data-open', '1');
         // Selected, not just filled: the name a template suggests is a name you
         // should be able to replace by typing.
@@ -2184,7 +2197,7 @@ __ICON__
       function closeStart() {
         if (startPanel.getAttribute('data-open') !== '1') return false;
         startPanel.removeAttribute('data-open');
-        scrim.removeAttribute('data-open');
+        startScrim.removeAttribute('data-open');
         const back = starting?.from;
         starting = null;
         // A panel that closes onto nothing leaves you looking for where you were.
@@ -2558,7 +2571,7 @@ __ICON__
 
       $('#start-go').addEventListener('click', commitStart);
       $('#start-cancel').addEventListener('click', closeStart);
-      scrim.addEventListener('click', closeStart);
+      startScrim.addEventListener('click', closeStart);
       $('#start-prompt').addEventListener('input', paintGo);
       // Enter accepts the name, because a name is one line. In the wish it is a
       // new line, and the commit is the modifier — the field is the thing you
