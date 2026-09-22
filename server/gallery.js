@@ -40,6 +40,14 @@ const REPO = path.resolve(HERE, '..');
 
 // `shared` opens the closure and `tail` closes it, so neither is optional;
 // `grip` draws the handle that `sortable` and `removable` hang gestures on.
+//
+// Four of the starters shipped without `history`, which meant Mod+Z did nothing
+// in a sheet, a board, a canvas or a deck — the carrier was keeping a complete
+// inverse for every gesture and no key was bound to reach it. They all ask for
+// it now, and for `state`, because a checkable row, a switcher, a disclosure and
+// a counter are written once in the library and were being hand-rolled (or gone
+// without) in each of them. `canvas` also takes `resizable`: a note you can move
+// and cannot resize is half an answer to "where".
 const ALWAYS = ['shared', 'tail'];
 const NEEDS = { sortable: ['grip'], removable: ['grip'] };
 
@@ -115,7 +123,7 @@ export const STARTERS = [
     id: 'sheet',
     title: 'Sheet',
     blurb: 'A grid of cells. Rows and columns are markup, so both are yours to change.',
-    parts: ['editable', 'sortable', 'removable', 'add', 'status'],
+    parts: ['editable', 'sortable', 'removable', 'add', 'state', 'history', 'status'],
     accent: '#2f6f5b',
     hint: 'A budget with a column for the plan and one for what I spent',
     ideas: [
@@ -128,7 +136,7 @@ export const STARTERS = [
     id: 'board',
     title: 'Board',
     blurb: 'Columns of cards. A card’s column is where it sits and nothing else.',
-    parts: ['editable', 'sortable', 'removable', 'add', 'status'],
+    parts: ['editable', 'sortable', 'removable', 'add', 'state', 'history', 'status'],
     accent: '#b45309',
     hint: 'A sprint board with columns for triage, doing and shipped',
     ideas: [
@@ -141,7 +149,7 @@ export const STARTERS = [
     id: 'canvas',
     title: 'Canvas',
     blurb: 'Notes placed anywhere. The position is an inline style on the note.',
-    parts: ['editable', 'canvas', 'removable', 'add', 'status'],
+    parts: ['editable', 'canvas', 'resizable', 'removable', 'add', 'state', 'history', 'status'],
     accent: '#6f8f7d',
     hint: 'A mood board I can drag pictures and notes around on',
     ideas: [
@@ -154,7 +162,7 @@ export const STARTERS = [
     id: 'slides',
     title: 'Slides',
     blurb: 'One section per slide, reordered by dragging, presented as it stands.',
-    parts: ['editable', 'sortable', 'removable', 'add', 'status'],
+    parts: ['editable', 'sortable', 'removable', 'add', 'state', 'history', 'status'],
     accent: '#c45c3e',
     hint: 'A ten-minute talk, with a title slide and my notes under each one',
     ideas: [
