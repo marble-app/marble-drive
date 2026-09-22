@@ -1964,3 +1964,39 @@ MSG
 ## What M1 does not do
 
 `triage` (M2), `views` (M3), the LLM authoring step (M4) and `frontdoor` (the stress case) are separate plans. The `selects`, `reports`, `anchors` and `triggers` relations are rendered as static appearance in M1 — `contains` is the only relation that changes the document's structure. Making a brush in one chart grey out the other is M3's work, where `views` needs it.
+
+
+---
+
+## Outcome — M1 done, 2026-09-22
+
+`node tools/compile.mjs observe` writes `drive/Spaces/observe.mrbl`: **6 instances, 5 dimensions
+you can turn, 18 options built**, zero render holes, `validateSpace` clean. 46 tests pass
+(`node --test genui/compile/*.test.mjs`), including the browser suite.
+
+`node tools/compile-report.mjs` across all 40 screens: **7 dimensions turnable, 95 render holes**,
+every one a `no-renderer` for a pattern M2/M3 will add. That table is the third instrument's
+first reading.
+
+### Three things the plan got wrong, found by running it
+
+1. **Governance was written as prohibition.** Task 8's rule was `held = who !== 'anyone'`. Every
+   malleable dimension on `observe` names a party, so every control on the demo screen was dead.
+   Fixed with a viewer role — see the revised §4 of the spec. The plan's own browser test would
+   have caught it one task later; compiling and reading the output caught it first.
+2. **Two tests outlived their premise.** `document.test.mjs`'s "an instance with no renderer is
+   skipped" and `declare.test.mjs`'s "a dimension with no renderer is a hole" both asserted
+   against patterns that later got renderers. Both were rewritten to use a pattern genuinely
+   outside M1 (`inbox`), preserving the intent rather than deleting the test.
+3. **The compiler reported success over a file it had not written.** A running host races a write
+   to a document it is already serving and restored its own copy. `tools/compile.mjs` now removes
+   the file first and reads it back, failing loudly if what landed is not what was written.
+
+### Two defects only looking at it caught
+
+- Every panel was captioned with its Atlas definition — the page narrating itself. The pattern's
+  identity is in `data-genui`, where it can be inspected without being printed. Removed, and an
+  overlay instance no longer gets a heading in the middle of what it is drawn over.
+- `story-layout` collapsed the wall to a sliver: `margin: 0 auto` on a flex-column child makes
+  auto margins override `stretch`, shrinking the item to min-content. The computed-style test
+  passed anyway, because the property really did change. A centred column needs a `width`.

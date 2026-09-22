@@ -197,9 +197,19 @@ The three cases:
   spec's refusals are part of the claim.
 - **`true`** → declaration plus a control.
 - **`{ who, scope, persists, why }`** → declaration, control, and the governance carried into the
-  document as `data-genui-who` / `-scope` / `-persists`. A dimension only *the team* may change
-  shows as held, with the spec's own `why` as the reason it is held. **Governed malleability is
-  the thesis** — not a free-for-all, but a screen that knows who may change what, and says so.
+  document as `data-who` / `data-scope`. **Governed malleability is the thesis** — not a
+  free-for-all, but a screen that knows who may change what, and says so.
+
+  **Revised during M1, from building it.** The first rule was "a dimension with a named `who` is
+  held", which turned out to make governance mean prohibition: every one of `observe`'s five
+  malleable dimensions names a party (`team` twice, `admin` once), so the whole demo screen had
+  nothing a person could turn. But `who: 'team'` does not mean *not you* — it names **which
+  party** may turn it. So the document carries **who you are viewing as** (`data-viewer` on
+  `<body>`, defaulting to the party the screen most often trusts), and a control is held only
+  when the viewer is not the party the spec names. Switching viewer opens the admin's dimension
+  and closes the team's. This is a better demonstration than a greyed-out button: the same screen
+  offers different malleability to different people, which is what the permission was always
+  saying.
 - **marked malleable, renderer implements fewer than two** → a **render hole**. Not declared
   (so the document still validates), and reported. These are the findings.
 
