@@ -2,110 +2,284 @@
 <html lang="en" data-marble="1">
 <head>
 <meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <meta name="marble:capabilities" content="storage; net=none">
 <title>__TITLE__</title>
 __ICON__
 <style>
   /* The Marble design system's palette, with one change the system does not
-     make: a document is white to the edge. The off-white paper belongs to
-     the interface — the Drive itself — not to the thing you are writing in.
-     One dusty blue does all the accenting, the same blue in every starter,
-     because five colours would be five claims and there is only one. */
+     make: a document is white to the edge. The off-white paper belongs to the
+     interface — the Drive itself — not to the thing you are writing in. One
+     dusty blue does all the accenting, the same blue in every starter, because
+     five colours would be five claims and there is only one. Every colour is one
+     light-dark pair rather than a light set with a dark stylesheet under it, so a
+     colour cannot be changed in one scheme and left stale in the other. */
   :root {
-    --ink: #111111;
-    --muted: #5a5a5a;
-    --line: #ddd9cf;
-    --paper: #ffffff;
-    --card: #ffffff;
-    --accent: #9bb6cf;
-    --accent-soft: #f1f5f8;
-    --accent-ink: #738698;
-  }
-  @media (prefers-color-scheme: dark) {
-    :root {
-      --ink: #e8e6e1; --muted: #a3a7ab; --line: #2f3438;
-      --paper: #1c1f22; --card: #1c1f22;
-      --accent: #7fa8c9; --accent-soft: #1d2932; --accent-ink: #9dc0dc;
-    }
+    color-scheme: light dark;
+    --ink: light-dark(#111111, #e8e6e1);
+    --muted: light-dark(#5a5a5a, #a3a7ab);
+    --faint: light-dark(#8a8a8a, #71767a);
+    --placeholder: light-dark(#767676, #8d9296);
+    --line: light-dark(#e6e2d8, #272c30);
+    --paper: light-dark(#ffffff, #1c1f22);   /* a document is white to the edge */
+    --paper-2: light-dark(#f7f6f2, #212528);
+    --well: light-dark(#f3f1ea, #16181a);
+    --card: light-dark(#ffffff, #22262a);
+    --accent: light-dark(#9bb6cf, #7fa8c9);
+    --accent-soft: light-dark(#f1f5f8, #1d2932);
+    --accent-ink: light-dark(#738698, #9dc0dc);
+    --danger: light-dark(#b4533e, #e08a74);
+    --caution: light-dark(#a07a2c, #d9b25e);
+    --shadow: 0 1px 2px light-dark(rgba(74,66,52,.05), rgba(0,0,0,.28)), 0 2px 4px light-dark(rgba(74,66,52,.03), rgba(0,0,0,.18));
+    --shadow-lift: 0 2px 6px light-dark(rgba(74,66,52,.07), rgba(0,0,0,.32)), 0 8px 18px light-dark(rgba(74,66,52,.08), rgba(0,0,0,.26));
+    --r: 12px; --r-sm: 8px; --r-text: 4px; --pill: 999px;
+    --ease-out: cubic-bezier(.22, 1, .36, 1);
+    --ease: cubic-bezier(.22, .61, .36, 1);
+    --snap: cubic-bezier(.4, 0, .2, 1);
+    --t-fast: 110ms; --t: 200ms; --t-slow: 340ms;
+    --ui: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    --serif: ui-serif, "New York", "Iowan Old Style", Palatino, Georgia, serif;
+    --mono: ui-monospace, "SF Mono", SFMono-Regular, Menlo, Consolas, monospace;
   }
   * { box-sizing: border-box; }
+  /* Every width answer is asked of the root rather than the window, because a
+     host that docks a panel beside this page shrinks <html> and leaves the
+     viewport where it was. A sheet laid out by @media would be wrong the moment
+     somebody opened a drawer next to it. */
+  html { container: doc / inline-size; }
+  html, body { height: 100%; }
   body {
-    margin: 0; padding: 2.5rem 1.5rem 8rem; background: var(--paper); color: var(--ink);
-    font: 15px/1.5 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
-    -webkit-font-smoothing: antialiased;
+    height: 100dvh; margin: 0; padding: 1.6rem 1.2rem 0; overflow: hidden;
+    display: flex; flex-direction: column;
+    background: var(--paper); color: var(--ink);
+    font: 15px/1.5 var(--ui); -webkit-font-smoothing: antialiased;
   }
-  .sheet { max-width: 62rem; margin: 0 auto; }
-  h1 { font-size: 1.5rem; margin: 0 0 .2rem; letter-spacing: -.015em; }
-  .lede { color: var(--muted); margin: 0 0 1.5rem; font-size: .95rem; }
+  .sheet { flex: 1; min-height: 0; display: flex; flex-direction: column;
+    width: 100%; max-width: 62rem; margin: 0 auto; }
+  .top { flex: none; }
+  h1 { margin: 0 0 .15rem; font-size: 1.5rem; line-height: 1.2; letter-spacing: -.015em; overflow-wrap: anywhere; }
+  .lede { margin: 0 0 .9rem; max-width: 46rem; color: var(--muted); font-size: .92rem; overflow-wrap: anywhere; }
+  /* One Backspace from empty, an editable has no line box left to put a caret in.
+     A zero-width no-break space is one — and it is generated content, so it is in
+     nobody's text and in nobody's file. */
+  [data-marble-editable]:empty::before { content: "\feff"; }
+  :focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 
-  /* The column count is one custom property on the grid, so adding a column is
-     one setAttr plus one cell per row — and the layout has no second copy of
-     "how many columns there are" to fall out of step with the markup. */
+  /* The rows scroll inside a box of their own rather than taking the page
+     sideways with them, which is what keeps the title, the toolbar and the row
+     numbers where they were put on a 390px phone — where four columns of anything
+     do not fit and never will. It is also what makes the header, the gutter and
+     the totals sticky: sticky is measured against the nearest scrolling box, so
+     there has to be one. It takes the height its rows need and no more before it
+     starts scrolling — a box held open to the bottom of the window with three
+     rows in it is mostly a picture of emptiness. */
+  .scroll {
+    flex: 0 1 auto; min-height: 0; overflow: auto; overscroll-behavior: contain;
+    background: var(--card); border: 1px solid var(--line); border-radius: var(--r);
+    box-shadow: var(--shadow);
+  }
+  /* Three numbers, written down once each, and every other measurement here
+     derived from them. The column count is a custom property because CSS cannot
+     count cells and two copies of it would drift; the width is one number for all
+     the columns, so there is nothing to keep in step; and the grid is at least as
+     wide as the two of them say, which is what makes it scroll rather than
+     squeeze — and what stops a 200-character word widening anything. */
+  .grid { --cols: 4; --w: 11rem; --gutter: 2.4rem; --tail: 2.8rem;
+    min-width: calc(var(--gutter) + var(--cols) * var(--w) + var(--tail)); }
   /* Every row is its own grid over the same track list, so the columns line up
      without the rows having to be children of one grid — which is what leaves
-     room for a drag handle beside a row. */
-  .grid {
-    --cols: 4;
-    background: var(--card); border: 1px solid var(--line); border-radius: 8px;
-  }
-  .rows { display: block; }
-  .row {
-    position: relative;
-    display: grid; grid-template-columns: repeat(var(--cols), minmax(7rem, 1fr));
-  }
+     room beside a row for its number and its own controls. */
+  .row { position: relative; background: var(--card); display: grid;
+    grid-template-columns: var(--gutter) repeat(var(--cols), minmax(var(--w), 1fr)) var(--tail); }
+  .rows { display: block; counter-reset: row; }
+  .rows > .row { counter-increment: row; }
+  /* The two boxes a spreadsheet keeps still: the row's number on the left, the
+     row's own controls on the right. Both are grid items placed by hand so the
+     cells auto-place between them, and both are sticky, so scrolling sideways
+     never takes away the answer to "which row is this". The number is a counter,
+     so the file holds no copy of it and reordering renumbers for free. */
+  .row::before, .row::after { content: ""; display: block; position: sticky; z-index: 1;
+    border-bottom: 1px solid var(--line); }
+  .row::before { grid-area: 1 / 1; left: 0; content: counter(row);
+    background: var(--well); border-right: 1px solid var(--line);
+    font: 500 .72rem/2.3rem var(--mono); color: var(--faint); text-align: center; }
+  .row::after { grid-area: 1 / -2; right: 0; background: inherit; border-left: 1px solid var(--line); }
+  .row:focus-within::before { background: var(--accent-soft); color: var(--accent-ink); }
   .cell {
-    padding: .5rem .65rem; border-right: 1px solid var(--line); border-bottom: 1px solid var(--line);
-    min-height: 2.3rem; outline: none; font-variant-numeric: tabular-nums;
+    min-width: 0; min-height: 2.3rem; padding: .45rem .6rem; outline: none;
+    border-right: 1px solid var(--line); border-bottom: 1px solid var(--line);
+    overflow-wrap: anywhere; font-variant-numeric: tabular-nums; scroll-margin: 3.2rem 3rem;
   }
-  .head .cell { background: var(--accent-soft); font-weight: 600; color: var(--muted); }
+  .row > .cell:last-child { border-right: 0; }   /* the tail draws that edge */
   .cell:hover { background: var(--accent-soft); }
-  .cell:focus { background: var(--card); box-shadow: inset 0 0 0 2px var(--accent-ink); }
+  .cell:focus { position: relative; z-index: 2; background: var(--card); box-shadow: inset 0 0 0 2px var(--accent-ink); }
+  /* Which columns hold numbers is a fact about what is in them rather than about
+     the columns, so it is derived onto the cells and never written down. */
+  .cell.marble-num { text-align: right; }
 
-  .bar { display: flex; gap: .5rem; margin-top: .75rem; }
+  /* The header stays put once the sheet is longer than its box, and every column
+     says which one it is — another counter, so inserting a column reletters the
+     rest without touching a byte. */
+  .head { position: sticky; top: 0; z-index: 3; background: var(--well); counter-reset: col; }
+  .head::before { content: ""; }
+  .head .cell { position: relative; counter-increment: col;
+    padding-top: 1.15rem; font-weight: 600; color: var(--muted); }
+  .head .cell::after { content: counter(col, upper-alpha); pointer-events: none;
+    position: absolute; top: .15rem; left: .62rem;
+    font: 500 .62rem/1 var(--mono); letter-spacing: .07em; color: var(--faint); }
+  /* Which column − column is about. The caret belongs to the page, so the answer
+     is a marble- class on the heading and never an attribute in the file. */
+  .head .cell.marble-here, .head .cell.marble-here::after { color: var(--accent-ink); }
+
+  /* The totals are counted from the cells on every edit, so there is no second
+     copy of a sum to go stale — which makes the row the page's and not the file's.
+     Whether to show it at all is the person's: one attribute on <body>, filed and
+     undoable like any other fact. */
+  #foot { position: sticky; bottom: 0; z-index: 3; background: var(--well); }
+  #foot::before { content: "\3a3"; color: var(--accent-ink); }
+  #foot::before, #foot::after, #foot .cell { border-bottom: 0; }
+  #foot .cell { min-height: 2.1rem; font-weight: 600; color: var(--ink); text-align: right; }
+  body[data-totals="off"] #foot { display: none; }
+  /* An emptied sheet says what to do with itself and keeps a box to do it in.
+     :has, because the whitespace between two rows in the file is a text node — a
+     list somebody emptied by hand is never :empty. */
+  .rows:not(:has(> .row))::before { content: "No rows yet. Press + row to start one.";
+    display: block; padding: 1.6rem 1rem; text-align: center;
+    color: var(--placeholder); font-size: .9rem; }
+  .rows:not(:has(> .row)) + #foot { display: none; }
+
+  /* The row's own controls — the drag handle and the delete — sit in the tail
+     rather than out in the left margin where the affordance library puts them,
+     because that margin is outside the scrolling box and would be clipped by it.
+     Sticky to the right, so they are in reach at any scroll position. Written
+     against .row > .marble-grip because the library appends its stylesheet after
+     this one, so an override has to win on specificity rather than on order. */
+  .row > .marble-grip { grid-area: 1 / -2; z-index: 2;
+    position: sticky; right: 0; left: auto; top: auto;
+    flex-direction: row; justify-content: center; align-items: center; gap: 2px; opacity: 1; }
+  /* Nothing hides behind a pointer: the handle is the only evidence a row can be
+     dragged and the × the only evidence it can be deleted, so both are always
+     drawn — quiet at rest, plain once the row is under a pointer or a caret. */
+  .row > .marble-grip .marble-btn { opacity: .4; }
+  .row:hover > .marble-grip .marble-btn,
+  .row:focus-within > .marble-grip .marble-btn { opacity: .85; }
+  .row > .marble-grip .marble-btn:hover { opacity: 1; }
+
+  .bar { flex: none; display: flex; flex-wrap: wrap; align-items: center; gap: .5rem;
+    padding: .8rem 0 max(.55rem, env(safe-area-inset-bottom)); }
   .btn {
-    appearance: none; padding: .45rem .8rem; border: 1px solid var(--line); border-radius: 999px;
-    background: var(--card); color: var(--muted); font: 500 .85rem/1 inherit; cursor: pointer;
+    appearance: none; display: inline-flex; align-items: center; justify-content: center;
+    padding: .45rem .85rem; border: 1px solid var(--line); border-radius: var(--pill);
+    background: var(--card); color: var(--muted); cursor: pointer; white-space: nowrap;
+    font: 500 .85rem/1.2 inherit;
+    transition: color var(--t-fast) var(--ease), border-color var(--t-fast) var(--ease),
+                background var(--t-fast) var(--ease), transform var(--t-fast) var(--ease-out);
   }
   .btn:hover { color: var(--accent-ink); border-color: var(--accent); }
-  .row:last-child .cell { border-bottom: 0; }
-  .cell:last-child { border-right: 0; }
+  .btn:active { transform: scale(.97); }   /* a press answers on the way down */
+  .btn[aria-pressed="true"] { background: var(--accent-soft); color: var(--accent-ink); border-color: var(--accent); }
+  /* The one word the accent cannot say, kept away from the buttons a pointer
+     travels to: a delete should not sit where an add was aimed. */
+  .btn.danger { margin-left: auto; }
+  .btn.danger:hover { color: var(--danger); border-color: var(--danger); }
+  /* What just happened, beside the control that did it. The corner pill answers
+     "did the file take it"; this answers "what did I just do to my sheet", which
+     is the question somebody has after a row disappears. */
+  .said { order: -1; flex: 1 0 100%; min-width: 0; color: var(--accent-ink); font-size: .8rem; }
+  .said:empty { display: none; }
+  /* With no host every gesture works and none of it is kept, which is a worse
+     failure than a broken button unless the document says so out loud. */
+  [data-marble-readonly] .bar::after { content: "not saved — no host is serving this file";
+    color: var(--caution); font-size: .78rem; }
+
+  /* A tablet, or a desktop with the drawer pinned open: below this, four columns
+     at their full width no longer fit, so they narrow rather than overflow. */
+  @container doc (max-width: 52rem) { .grid { --w: 9rem; } }
+  /* A phone. The columns narrow and do not collapse: a cell too small to read is
+     worse than a cell you scroll to. */
+  @container doc (max-width: 30rem) {
+    body { padding: 1.1rem .7rem 0; }
+    h1 { font-size: 1.28rem; }
+    .lede { margin-bottom: .7rem; font-size: .86rem; }
+    .grid { --w: 8rem; }
+    .btn.danger { margin-left: 0; }
+  }
+  /* 44px for anything a finger commits with, asked of the pointer rather than of
+     the width, because a narrow window is still a mouse. Two 44px controls make
+     the tail wide; the alternatives were a 70px row or a handle a finger misses,
+     and a sheet is scrolled sideways anyway. */
+  @media (hover: none), (pointer: coarse) {
+    .cell { min-height: 2.75rem; padding: .65rem .6rem; }
+    .row::before { line-height: 2.75rem; }
+    .grid { --tail: 6rem; }
+    .btn { min-height: 2.75rem; padding-inline: 1rem; }
+    /* No hover to brighten them, so they are drawn plainly from the start. */
+    .row > .marble-grip .marble-btn { width: 2.75rem; height: 2.75rem; font-size: 15px; line-height: 2.75rem; opacity: .8; }
+  }
+  /* Reduced motion keeps the cross-fades and drops everything that travels or
+     scales. One block, at the end, so there is one place to read it. */
+  @media (prefers-reduced-motion: reduce) {
+    *, *::before, *::after {
+      transition-property: opacity, color, background-color, border-color, box-shadow !important;
+      transition-duration: var(--t-fast) !important;
+      animation: none !important; scroll-behavior: auto !important;
+    }
+    .btn:active { transform: none; }
+  }
 </style>
 </head>
-<body>
+<body data-marble-id="__ID__" data-totals="on">
 <main class="sheet" data-marble-id="__ID__">
+  <header class="top" data-marble-id="__ID__">
+    <h1 data-marble-id="__ID__" data-marble-editable>__TITLE__</h1>
+    <p class="lede" data-marble-id="__ID__" data-marble-editable>Every cell is an element in the file. So is every row, and so is the number of columns — which is why you can change all three from here. Tab, Enter and the arrow keys walk the grid.</p>
+  </header>
 
-  <h1 data-marble-id="__ID__" data-marble-editable>__TITLE__</h1>
-  <p class="lede" data-marble-id="__ID__" data-marble-editable>Every cell is an element in the file. So is every row, and so is the number of columns — which is why you can change all three from here.</p>
-
-  <div class="grid" data-marble-id="__ID__" id="grid" style="--cols:4">
-    <div class="row head" data-marble-id="__ID__" id="head">
-      <div class="cell" data-marble-id="__ID__" data-marble-editable>Item</div>
-      <div class="cell" data-marble-id="__ID__" data-marble-editable>Owner</div>
-      <div class="cell" data-marble-id="__ID__" data-marble-editable>Due</div>
-      <div class="cell" data-marble-id="__ID__" data-marble-editable>Notes</div>
-    </div>
-    <div class="rows" data-marble-id="__ID__" id="rows" data-marble-sortable="rows">
-      <div class="row" data-marble-id="__ID__" data-marble-removable>
-        <div class="cell" data-marble-id="__ID__" data-marble-editable>First thing</div>
-        <div class="cell" data-marble-id="__ID__" data-marble-editable>You</div>
-        <div class="cell" data-marble-id="__ID__" data-marble-editable>Friday</div>
-        <div class="cell" data-marble-id="__ID__" data-marble-editable></div>
+  <div class="scroll" data-marble-id="__ID__" id="scroll">
+    <div class="grid" data-marble-id="__ID__" id="grid" style="--cols:4">
+      <div class="row head" data-marble-id="__ID__" id="head">
+        <div class="cell" data-marble-id="__ID__" data-marble-editable>Item</div>
+        <div class="cell" data-marble-id="__ID__" data-marble-editable>Owner</div>
+        <div class="cell" data-marble-id="__ID__" data-marble-editable>Due</div>
+        <div class="cell" data-marble-id="__ID__" data-marble-editable>Cost</div>
       </div>
-      <div class="row" data-marble-id="__ID__" data-marble-removable>
-        <div class="cell" data-marble-id="__ID__" data-marble-editable>Second thing</div>
-        <div class="cell" data-marble-id="__ID__" data-marble-editable></div>
-        <div class="cell" data-marble-id="__ID__" data-marble-editable></div>
-        <div class="cell" data-marble-id="__ID__" data-marble-editable></div>
+      <div class="rows" data-marble-id="__ID__" id="rows" data-marble-sortable="rows">
+        <div class="row" data-marble-id="__ID__" data-marble-removable>
+          <div class="cell" data-marble-id="__ID__" data-marble-editable>First thing</div>
+          <div class="cell" data-marble-id="__ID__" data-marble-editable>You</div>
+          <div class="cell" data-marble-id="__ID__" data-marble-editable>Friday</div>
+          <div class="cell" data-marble-id="__ID__" data-marble-editable>120</div>
+        </div>
+        <div class="row" data-marble-id="__ID__" data-marble-removable>
+          <div class="cell" data-marble-id="__ID__" data-marble-editable>Second thing</div>
+          <div class="cell" data-marble-id="__ID__" data-marble-editable>Sam</div>
+          <div class="cell" data-marble-id="__ID__" data-marble-editable>Next week</div>
+          <div class="cell" data-marble-id="__ID__" data-marble-editable>48.50</div>
+        </div>
+        <div class="row" data-marble-id="__ID__" data-marble-removable>
+          <div class="cell" data-marble-id="__ID__" data-marble-editable>Third thing</div>
+          <div class="cell" data-marble-id="__ID__" data-marble-editable></div>
+          <div class="cell" data-marble-id="__ID__" data-marble-editable></div>
+          <div class="cell" data-marble-id="__ID__" data-marble-editable></div>
+        </div>
       </div>
+      <!-- Counted from the cells on every edit, so it is the page's reading of the
+           sheet rather than a second copy of it. -->
+      <div class="row foot" id="foot" data-marble-transient aria-label="Column totals"></div>
     </div>
   </div>
 
-  <div class="bar" data-marble-transient>
-    <button class="btn" data-marble-add="#tpl-row" data-marble-into="#rows">+ row</button>
-    <button class="btn" id="add-col">+ column</button>
+  <div class="bar" data-marble-id="__ID__">
+    <button class="btn" data-marble-id="__ID__" data-marble-add="#tpl-row" data-marble-into="#rows"
+            data-marble-instruction="Add an empty row to the end of the sheet.">+ row</button>
+    <button class="btn" data-marble-id="__ID__" id="add-col"
+            data-marble-instruction="Add a column to the sheet.">+ column</button>
+    <button class="btn" data-marble-id="__ID__" data-marble-toggle="data-totals:on|off" data-marble-of="body"
+            data-marble-instruction="Show or hide the row of column totals.">Σ totals</button>
+    <button class="btn danger" data-marble-id="__ID__" id="drop-col"
+            data-marble-instruction="Delete the column the caret is in, or the last one.">− column</button>
+    <span class="said" id="said" data-marble-transient role="status"></span>
   </div>
-
 </main>
 
 <template id="tpl-row" data-marble-transient>
@@ -118,58 +292,297 @@ __ICON__
 </template>
 
 <script>
-  // Adding a column is this document's own behaviour, not an affordance: a
-  // generic "add" clones one template into one list, and a column is a cell in
-  // every row plus a heading plus one number on the grid. Three kinds of edit,
-  // one gesture — which is exactly the sort of thing a document is allowed to
-  // know about itself.
+  // Two things here are this document's own behaviour rather than an affordance,
+  // and they are the same kind of thing: something true of a grid that no generic
+  // part could know.
+  //
+  // A column is a cell in every row plus a heading plus one number on the grid —
+  // three kinds of edit in one gesture — where the generic "add" clones one
+  // template into one list. And a sheet is walked with the keys: Tab, Enter and
+  // the arrows are what anybody who has used a spreadsheet will press.
   (() => {
-    const begin = (marble) => {
-      const button = document.querySelector('#add-col');
-      const grid = document.querySelector('#grid');
-      if (!button || !grid) return;
+    const grid = document.querySelector('#grid');
+    const headRow = document.querySelector('#head');
+    const rowsBox = document.querySelector('#rows');
+    const foot = document.querySelector('#foot');
+    const scroller = document.querySelector('#scroll');
+    const said = document.querySelector('#said');
+    if (!grid || !headRow || !rowsBox) return;
 
-      button.addEventListener('click', () => {
-        const rows = [document.querySelector('#head'), ...document.querySelectorAll('#rows > .row')];
-        const cols = Number(getComputedStyle(grid).getPropertyValue('--cols')) || rows[0].children.length;
+    const cellsOf = (row) => [...row.querySelectorAll(':scope > .cell')];
+    const bodyRows = () => [...rowsBox.querySelectorAll(':scope > .row')];
+    const allRows = () => [headRow, ...bodyRows()];
+    // Read from the one place that holds it. The number of cells in the heading
+    // says the same thing, and is only the fallback for a file hand-edited into
+    // disagreeing with itself.
+    const colCount = () =>
+      Number(getComputedStyle(grid).getPropertyValue('--cols')) || cellsOf(headRow).length;
+    const newCell = (className, editable) => {
+      const made = document.createElement('div');
+      made.className = className;
+      if (editable) made.setAttribute('data-marble-editable', '');
+      return made;
+    };
 
-        const redo = [];
-        const undo = [];
+    // ------------------------------------------------------------- derivations
+    // Nothing below is a fact, so nothing below files an op. Each runs again from
+    // marble.register, which is exactly when a derived value has just been lost —
+    // a reconcile against the file, an agent's write, another tab saving.
 
+    // What counts as a number. A sheet is typed into by people, so a thousands
+    // comma, a currency mark and a trailing per cent do not stop one being one.
+    const asNumber = (text) => {
+      const bare = text.trim().replace(/[\s,]/g, '').replace(/^([-+]?)[$£€]/, '$1').replace(/%$/, '');
+      return /^[-+]?(\d+\.?\d*|\.\d+)$/.test(bare) ? Number(bare) : null;
+    };
+
+    // A column totals only if every cell anybody filled in is a number — which is
+    // also the answer to whether the column reads right-aligned.
+    const retotal = () => {
+      const cols = colCount();
+      const rows = bodyRows();
+      const sums = [];
+      for (let c = 0; c < cols; c += 1) {
+        let sum = 0, counted = 0, numeric = true;
         for (const row of rows) {
-          const id = marble.newId();
-          const head = row.classList.contains('head');
-          const op = {
-            type: 'insert',
-            parentId: marble.id(row),
-            beforeId: null,
-            html: `<div class="cell" data-marble-id="${id}" data-marble-editable>${head ? 'Column' : ''}</div>`,
-          };
-          // The page moves and the file is told, from the same op.
-          marble.apply(op);
-          redo.push(op);
-          undo.unshift({ type: 'remove', id });
+          const text = cellsOf(row)[c]?.textContent ?? '';
+          if (!text.trim()) continue;
+          const value = asNumber(text);
+          if (value === null) { numeric = false; break; }
+          sum += value; counted += 1;
         }
+        sums[c] = numeric && counted ? sum : null;
+      }
+      for (const row of allRows()) cellsOf(row).forEach((cell, c) => cell.classList.toggle('marble-num', sums[c] !== null));
+      if (!foot) return;
+      while (foot.children.length > cols) foot.lastElementChild.remove();
+      while (foot.children.length < cols) foot.append(newCell('cell sum'));
+      [...foot.children].forEach((cell, c) => { cell.textContent = sums[c] === null ? '' : String(Math.round(sums[c] * 1e4) / 1e4); });
+    };
 
-        // Composed rather than read back off the element: the browser's own
-        // serialization of a style attribute is not this document's source. And
-        // the inverse is taken before the write, or it would be the value we
-        // are about to put there.
+    // + row clones one template, and a four-cell template in a five-column sheet
+    // is a short row. The template belongs to the page rather than to the file, so
+    // the answer is to derive it from --cols rather than to write the extra cell
+    // into it — which would be the second copy this sheet exists without.
+    const fitTemplate = () => {
+      const seed = document.querySelector('#tpl-row')?.content?.firstElementChild;
+      if (!seed) return;
+      const cols = colCount();
+      while (seed.children.length > cols) seed.lastElementChild.remove();
+      while (seed.children.length < cols) seed.append(newCell('cell', true));
+    };
+
+    // Which column − column is about. The caret is the page's business, so this is
+    // a marble- class on the heading and nothing in the file.
+    let armed = null;
+    const armedColumn = () => {
+      if (armed && !armed.isConnected) armed = null;
+      return armed ? cellsOf(armed.closest('.row')).indexOf(armed) : -1;
+    };
+    const markColumn = () => {
+      const at = armedColumn();
+      cellsOf(headRow).forEach((cell, c) => cell.classList.toggle('marble-here', c === at));
+    };
+    const derive = () => { fitTemplate(); retotal(); markColumn(); };
+
+    let hush = null;
+    const say = (line) => {
+      if (!said) return;
+      said.textContent = line;
+      clearTimeout(hush);
+      hush = setTimeout(() => { said.textContent = ''; }, 7000);
+    };
+
+    grid.addEventListener('focusin', (event) => {
+      const cell = event.target.closest?.('.cell[data-marble-editable]');
+      if (cell) { armed = cell; markColumn(); }
+    });
+    grid.addEventListener('input', retotal);
+    // A row arriving, leaving or moving all change the totals. A row that moved is
+    // still in the document, which is how a move is told from a delete.
+    new MutationObserver((records) => {
+      derive();
+      if (records.some((record) => [...record.removedNodes].some((node) => !node.isConnected))) say('A row left the sheet. Ctrl+Z puts it back.');
+    }).observe(rowsBox, { childList: true });
+
+    // -------------------------------------------------------------------- keys
+    const inOrder = () => allRows().flatMap(cellsOf);   // reading order, which is Tab's
+
+    // One step, clamped at the edges of the sheet: an arrow key that wrapped would
+    // put the caret somewhere nobody was looking.
+    const step = (cell, dc, dr) => {
+      const table = allRows().map(cellsOf);
+      const r = table.findIndex((row) => row.includes(cell));
+      if (r < 0) return null;
+      const c = table[r].indexOf(cell);
+      const nr = Math.min(table.length - 1, Math.max(0, r + dr));
+      const nc = Math.min(table[nr].length - 1, Math.max(0, c + dc));
+      return table[nr][nc] === cell ? null : table[nr][nc];
+    };
+
+    // Tab does wrap, and off the last cell it comes back to the first, because a
+    // tab ring with an end in it is a ring you fall out of.
+    const walk = (cell, by) => {
+      const all = inOrder();
+      const at = all.indexOf(cell);
+      return at < 0 ? null : all[(at + by + all.length) % all.length];
+    };
+
+    // Where the caret is in a cell. Left and right only leave from its ends, up and
+    // down only from its first and last drawn line — so a cell holding a wrapped
+    // sentence is still ordinary text to move around in.
+    const atEdge = (cell) => {
+      const selection = getSelection();
+      if (!selection?.isCollapsed || !cell.contains(selection.anchorNode)) return { start: true, end: true, first: true, last: true };
+      const range = selection.getRangeAt(0);
+      const upto = range.cloneRange();
+      upto.selectNodeContents(cell);
+      upto.setEnd(range.startContainer, range.startOffset);
+      let caret = range.getBoundingClientRect();
+      if (!caret.height) caret = cell.getBoundingClientRect();
+      const box = cell.getBoundingClientRect();
+      const line = parseFloat(getComputedStyle(cell).lineHeight) || 20;
+      const at = upto.toString().length;
+      return { start: at === 0, end: at === cell.textContent.length,
+        first: caret.top < box.top + line, last: caret.bottom > box.bottom - line };
+    };
+
+    // Arriving by Tab or Enter takes the cell whole, which is what makes typing over
+    // a value the one gesture it is in every spreadsheet. Arriving by an arrow puts
+    // the caret at the edge you came in from, which is what makes the same cell
+    // ordinary text.
+    const land = (cell, where) => {
+      cell.focus();
+      const range = document.createRange();
+      range.selectNodeContents(cell);
+      if (where !== 'all') range.collapse(where === 'start');
+      const selection = getSelection();
+      selection.removeAllRanges(); selection.addRange(range);
+      cell.scrollIntoView({ block: 'nearest', inline: 'nearest' });
+    };
+
+    // Bound in the capture phase, so this runs before the editable affordance's own
+    // keydown. Enter there ends the edit by blurring the cell; moving the focus
+    // first turns that into the no-op it should be — and Enter on the last row finds
+    // nowhere to go, so the blur stands, which is what Enter means at the bottom of
+    // a column.
+    grid.addEventListener('keydown', (event) => {
+      const cell = event.target.closest?.('.cell[data-marble-editable]');
+      if (!cell || event.metaKey || event.ctrlKey || event.altKey) return;
+      let to = null;
+      let where = 'all';
+      if (event.key === 'Tab') {
+        event.preventDefault();
+        to = walk(cell, event.shiftKey ? -1 : 1);
+      } else if (event.key === 'Enter' && !event.shiftKey) to = step(cell, 0, 1);
+      else if (event.key === 'ArrowRight' && atEdge(cell).end) { to = step(cell, 1, 0); where = 'start'; }
+      else if (event.key === 'ArrowLeft' && atEdge(cell).start) { to = step(cell, -1, 0); where = 'end'; }
+      else if (event.key === 'ArrowDown' && atEdge(cell).last) { to = step(cell, 0, 1); where = 'start'; }
+      else if (event.key === 'ArrowUp' && atEdge(cell).first) { to = step(cell, 0, -1); where = 'end'; }
+      else return;
+      if (!to) return;
+      event.preventDefault();
+      land(to, where);
+    }, true);
+
+    // ----------------------------------------------------------------- columns
+    const begin = (marble) => {
+      // Composed rather than read back off the element: the browser's own
+      // serialization of a style attribute is not this document's source. Only
+      // --cols is ours to change, so whatever else the grid carries is kept, in the
+      // order it was written in.
+      const styleWith = (cols) => [`--cols:${cols}`,
+        ...(grid.getAttribute('style') ?? '').split(';').map((d) => d.trim())
+          .filter((d) => d && !d.startsWith('--cols'))].join(';');
+
+      // The inverse is taken before the write, or it would be the value we are
+      // about to put there.
+      const setCols = (cols, redo, undo) => {
         undo.push({ type: 'setAttr', id: marble.id(grid), name: 'style', value: grid.getAttribute('style') });
-        const style = `--cols:${cols + 1}`;
+        const style = styleWith(cols);
         grid.setAttribute('style', style);
         redo.push({ type: 'setAttr', id: marble.id(grid), name: 'style', value: style });
+      };
 
-        // One gesture, so one undo step: the inverses go in together, or the
-        // column comes back a cell at a time.
+      // One gesture, so one undo step: the inverses go in together, or the column
+      // comes back a cell at a time.
+      const file = (redo, undo) => {
         marble.record({ redo, undo });
         for (const op of redo) marble.op(op);
         marble.flush();
-      });
+        derive();
+      };
+
+      const addColumn = () => {
+        const cols = colCount();
+        const redo = [];
+        const undo = [];
+        for (const row of allRows()) {
+          const id = marble.newId();
+          const heading = row === headRow ? 'Column' : '';
+          const op = { type: 'insert', parentId: marble.id(row), beforeId: null,
+            html: `<div class="cell" data-marble-id="${id}" data-marble-editable>${heading}</div>` };
+          marble.apply(op);   // the page moves and the file is told, from one op
+          redo.push(op);
+          undo.unshift({ type: 'remove', id });
+        }
+        setCols(cols + 1, redo, undo);
+        file(redo, undo);
+        say('');
+      };
+
+      // The exact inverse of the gesture above, filed the same way and in one step.
+      // Which column goes is the one the caret was last in, because a delete belongs
+      // to something you can see it pointing at — that heading is lit while it is
+      // armed.
+      const dropColumn = () => {
+        const cols = colCount();
+        if (cols <= 1) return say('A sheet keeps one column. Type over this one instead.');
+        const at = armedColumn() < 0 ? cols - 1 : armedColumn();
+        const redo = [];
+        const undo = [];
+        // Every inverse is captured against the live cell, and all of them before
+        // anything goes: after a remove there is nothing left to read one off, and
+        // the text in the cell is what has to come back.
+        for (const row of allRows()) {
+          const cell = cellsOf(row)[at];
+          const id = cell && marble.id(cell);
+          const back = id && marble.invert({ type: 'remove', id });
+          if (!back) continue;
+          redo.push({ type: 'remove', id });
+          undo.unshift(back);
+        }
+        if (!redo.length) return;
+        for (const op of redo) marble.apply(op);
+        setCols(cols - 1, redo, undo);
+        armed = null;
+        file(redo, undo);
+        say(`Column ${String.fromCharCode(65 + at)} removed. Ctrl+Z puts it back.`);
+      };
+
+      document.querySelector('#add-col')?.addEventListener('click', addColumn);
+      document.querySelector('#drop-col')?.addEventListener('click', dropColumn);
+      marble.register(derive);
+
+      // The library's drag band scrolls the window, so a long list can be crossed
+      // without letting go. These rows are in a box of their own, so the window has
+      // nothing to scroll — this hands that one scroll to the box that does, for the
+      // length of the drag, rather than writing a second edge band here.
+      const scrollPage = window.scrollBy.bind(window);
+      window.scrollBy = (...args) => {
+        if (!scroller || !document.body.classList.contains('marble-dragging-now')) return scrollPage(...args);
+        const [x, y] = typeof args[0] === 'object' ? [args[0].left ?? 0, args[0].top ?? 0] : args;
+        scroller.scrollBy(x, y);
+      };
     };
 
+    // The derivations need no host: a sheet opened with no carrier at all is still
+    // one you can read, total and walk with the keys. Only the writing needs one,
+    // and a document that quietly forgot would be worse than one that said so.
+    derive();
     if (window.marble) begin(window.marble);
     else addEventListener('marble:ready', (event) => begin(event.detail), { once: true });
+    addEventListener('load', () => { if (!window.marble) document.body.setAttribute('data-marble-readonly', ''); });
   })();
 </script>
 
