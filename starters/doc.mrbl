@@ -105,9 +105,19 @@ __ICON__
      host that docks a panel beside this page shrinks <html> and leaves the
      viewport where it was. */
   html { container: doc / inline-size; }
-  html, body { height: 100%; }
+  html { height: 100%; }
+  /* The two halves of what a software keyboard does, written by the script
+     below and both 0 wherever there is no keyboard. --kb is the room it took
+     off the bottom; --vv-top is how far down the screen the strip you can
+     still see now begins, because the keyboard does not only cover the page,
+     it slides it. Between them the app is exactly that strip: the toolbar is
+     never above the top of it, and the flow's scroller — the last thing in
+     this column — ends at the top of the keyboard rather than behind it, which
+     is the whole of why the line you are typing stays in sight. */
   body {
-    margin: 0; display: flex; flex-direction: column; overflow: hidden;
+    height: calc(100% - var(--kb, 0px) - var(--vv-top, 0px));
+    margin: var(--vv-top, 0px) 0 0;
+    display: flex; flex-direction: column; overflow: hidden;
     background: var(--paper); color: var(--ink);
     font: 14px/1.5 var(--ui, var(--f-system));
     -webkit-font-smoothing: antialiased;
@@ -117,8 +127,16 @@ __ICON__
 
   /* One ring, the same one, everywhere a key can land. A pointer gets the tint
      instead — see .docname — because a ring under the mouse is noise. */
-  button:focus-visible, [data-marble-editable]:focus-visible, .pin:focus-visible {
+  button:focus-visible, [data-marble-editable]:focus-visible, .pin:focus-visible,
+  .outline li:focus-visible {
     outline: 2px solid var(--accent); outline-offset: 1px;
+  }
+  /* A press answers on the way down, not when the click arrives. The colour
+     changes below say which control it was; this says that the finger landed,
+     and it is the same nudge on every one of them. */
+  .tool:active:not([disabled]), .menu:active, .fonts .shut:active {
+    transform: scale(.94);
+    transition: transform var(--t-fast) var(--ease-out);
   }
   @media (prefers-reduced-motion: reduce) {
     *, *::before, *::after {
@@ -157,6 +175,11 @@ __ICON__
   .menu:hover { color: var(--ink); background: var(--accent-soft); }
   .menu:active { color: var(--accent-ink); background: var(--accent-soft); }
   .menu[data-open] { color: var(--accent-ink); background: var(--accent-soft); }
+  /* The one menu a phone has room for, and the tool that opens the rest of the
+     toolbar. Both exist in the file at every width and are shown at one — see
+     the phone block at the end of this stylesheet, which is the only place
+     that decides what a narrow page can afford. */
+  .menus .all, .tools .more { display: none; }
 
   .tools {
     flex: none; display: flex; align-items: center; gap: 1px; flex-wrap: wrap;
@@ -221,7 +244,7 @@ __ICON__
     padding: .22rem .4rem; border-radius: var(--r-sm); cursor: pointer; color: var(--muted);
     font-size: .82rem; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
   }
-  .outline li:hover { background: var(--accent-soft); color: var(--accent-ink); }
+  .outline li:hover, .outline li:focus-visible { background: var(--accent-soft); color: var(--accent-ink); }
   .outline li.d2 { padding-left: 1.1rem; }
   .outline li.d3 { padding-left: 1.9rem; }
   .outline ol:empty::before {
@@ -388,7 +411,11 @@ __ICON__
 
   .fonts {
     position: fixed; z-index: 50; display: none;
-    left: var(--fx, auto); top: var(--fy, auto); right: var(--fr, 1.4rem); bottom: var(--fb, 1.4rem);
+    left: var(--fx, auto); top: var(--fy, auto); right: var(--fr, 1.4rem);
+    /* Where the card rests if nobody has dragged it: clear of the keyboard and
+       of the bar at the bottom of a phone. Drag it and --fb says where it
+       went, and a place somebody chose is not corrected. */
+    bottom: var(--fb, calc(1.4rem + var(--kb, 0px) + env(safe-area-inset-bottom, 0px)));
     width: 25rem; padding: 0 0 .6rem;
     background: var(--card); border: 1px solid var(--line); border-radius: var(--r);
     box-shadow: var(--shadow-lift);
@@ -445,10 +472,17 @@ __ICON__
   body[data-doc-font="charter"]  .fonts [data-set-doc="charter"]::before,
   body[data-doc-font="mono"]     .fonts [data-set-doc="mono"]::before { content: "\2713"; }
 
+  /* A reading of the notes, floating over them. It is never pressed, so it
+     does not take a press — a thumb aiming at the word underneath gets the
+     word — and it is glass, so where it has to sit over prose the prose is
+     still there behind it. */
   .count {
-    position: fixed; left: 1rem; bottom: 1rem; z-index: 20;
+    position: fixed; left: 1rem; z-index: 20; pointer-events: none;
+    bottom: calc(1rem + var(--kb, 0px) + env(safe-area-inset-bottom, 0px));
     padding: .25rem .6rem; border-radius: var(--pill); font-size: .74rem; color: var(--muted);
-    background: var(--card); border: 1px solid var(--line);
+    background: color-mix(in srgb, var(--card) 76%, transparent);
+    -webkit-backdrop-filter: blur(14px); backdrop-filter: blur(14px);
+    border: 1px solid var(--line);
   }
   .count:empty { display: none; }
   body[data-outline="on"] .count { left: 14.5rem; }
@@ -477,6 +511,116 @@ __ICON__
     .page { min-height: 0; }
     .fonts { width: auto; left: 1rem; right: 1rem; }
   }
+
+  /* ------------------------------------------------------------- the phone
+     At 390px the chrome above the first word was 273px — six menus, five
+     wrapped rows of tools, and a ruler measuring inches on a screen four
+     inches wide. None of it was wrong, there was just no room for it.
+
+     So at this width the document takes the screen and the interface takes one
+     row: the five things a thumb reaches while writing, and one tool that
+     opens the other thirteen. Nothing is removed, and it all comes back the
+     moment the page is wide again — which is why the question goes to the
+     container: a docked panel makes a desktop this narrow with no phone in
+     it. */
+  @container doc (max-width: 34rem) {
+    /* Row one is what a thumb reaches. The rest is behind the ⋯, and it is
+       hidden rather than moved, so nothing here has a second home to keep in
+       step with the first. */
+    body:not([data-tools="on"]) .tools > :not([data-thumb]) { display: none; }
+    /* The ⋯ keeps its corner whether the toolbar is one row or three. A
+       control that moves the moment you press it is one you have to find
+       again, and the padding is the room it is standing in. */
+    .tools { position: relative; padding: .25rem 3rem .4rem .5rem; gap: .1rem; }
+    .tools .more { display: flex; position: absolute; top: .25rem; right: .4rem; }
+    .tools .more[aria-expanded="true"] { background: var(--accent-soft); color: var(--accent-ink); }
+    /* The spring pushes the last tool to the end of a one-row toolbar. On
+       three wrapped rows it pushes it onto a fourth. */
+    .tools .spring { display: none; }
+    .tool.wide { min-width: 0; flex: 1 1 4rem; max-width: 9rem; }
+
+    /* Six menus become one. The six are still in the file and still the same
+       six buttons — their names are read off them, a press deeper. */
+    .menus > :not(.all) { display: none; }
+    .menus .all { display: block; font-size: .82rem; padding: .3rem .45rem; }
+    .bar { padding: max(.5rem, env(safe-area-inset-top, 0px)) .7rem 0; gap: .5rem; align-items: center; }
+    .mark { display: none; }
+    .head { display: flex; align-items: center; gap: .3rem; }
+    .docname { flex: 1; min-width: 0; font-size: .98rem; max-width: none; }
+    .menus { margin: 0; }
+    body .marble-status { top: auto; bottom: calc(1rem + var(--kb, 0px) + env(safe-area-inset-bottom, 0px)); right: 1rem; }
+
+    /* A ruler in inches on a four-inch screen measures nothing anybody can
+       use, and the margins it sets are the other half of the same problem: an
+       inch each side of 390px leaves 196px of text. The inches are still in
+       the file and still the page's, untouched — this is the one width that
+       does not draw them. */
+    .ruler { display: none; }
+    .page { padding: 1.1rem 1.15rem 2.5rem; border: 0; border-radius: 0; margin-bottom: 0; }
+    .scroll { padding-bottom: calc(4rem + env(safe-area-inset-bottom, 0px)); }
+    .count { font-size: .7rem; }
+    .fonts { left: .6rem; right: .6rem; }
+    .fonts .two { grid-template-columns: 1fr; }
+    .fonts .col + .col { border-left: 0; border-top: 1px solid var(--line); }
+    .popup { min-width: 13rem; }
+  }
+
+  /* ---------------------------------------------------------------- on paper
+     A document that cannot be printed is a demo. This starter draws an 8.5in
+     page with a ruler setting its margins, and until this block there was no
+     way to get that onto one.
+
+     Everything belonging to the page rather than to the notes leaves — which
+     is what data-marble-transient already means, so the rule says it once —
+     along with the three pieces of chrome that are in the file because they
+     are this document's own interface. */
+  @media print {
+    /* Paper is white and ink is black whatever the screen was set to: a dark
+       scheme is a fact about a room at night, not about paper. */
+    :root {
+      color-scheme: light;
+      --paper: #ffffff;
+      --card: #ffffff;
+      --ink: #000000;
+      --muted: #333333;
+      --faint: #555555;
+      --line: #999999;
+      --select: transparent;
+    }
+    /* The only !important outside the reduced-motion block, and for the same
+       reason: this is not a rule arguing with another one, it is the whole of
+       the interface leaving the room. */
+    [data-marble-transient], .bar, .tools, .fonts { display: none !important; }
+
+    /* On screen this is a column that does not scroll with a pane inside it
+       that does. Paper has no viewport to fill and nothing to clip against, so
+       every box that was holding the screen together lets go. */
+    html, body, .work, .scroll, .pagebox, .page, .flow {
+      display: block; height: auto; max-width: none; overflow: visible;
+    }
+    .scroll { padding: 0; }
+
+    /* @page draws the margin at the top and bottom of every sheet, which one
+       padded box cannot do for a document that runs onto a second page. The
+       left and right stay on the page itself: those are the two the ruler
+       moves, they are inches in the file, and @page has no way to read them.
+       Change the paper here — `size: A4` — and the margins follow. */
+    @page { size: letter; margin: 1in 0; }
+    .page {
+      min-height: 0; margin: 0; border: 0; border-radius: 0;
+      padding: 0 var(--mr, 1in) 0 var(--ml, 1in); background: var(--paper);
+    }
+
+    /* A heading belongs with what it introduces and a list item is one thing,
+       so neither is allowed to be split or stranded. A paragraph is welcome to
+       break across sheets — that is what prose does on paper — but never for
+       one line, which is what orphans and widows are for. */
+    .flow { orphans: 2; widows: 2; }
+    .flow > h1, .flow > h2, .flow > h3, .flow > h4, .flow > .subtitle {
+      break-inside: avoid; break-after: avoid;
+    }
+    .flow > [data-list], .flow > hr { break-inside: avoid; }
+  }
 </style>
 </head>
 <body class="doc" data-marble-id="__ID__" data-outline="on" data-ruler="on" data-fonts="off" data-ui-font="system" data-doc-font="system">
@@ -495,6 +639,7 @@ __ICON__
   <g id="i-indent"><path d="M3 5h18v2H3zm8 4h10v2H11zm0 4h10v2H11zm-8 4h18v2H3zM4 9.4 8 12l-4 2.6z"/></g>
   <g id="i-clear"><path d="M4 5h12v2.6h-4.4l-1.2 4.4H7.7L8.9 7.6H4zm4.2 14 1.5-5.2h2.7L10.9 19zm7-5.6 1.3-1.3 1.7 1.7 1.7-1.7 1.3 1.3-1.7 1.7 1.7 1.7-1.3 1.3-1.7-1.7-1.7 1.7-1.3-1.3 1.7-1.7z"/></g>
   <g id="i-caret"><path d="M7 10h10l-5 5z"/></g>
+  <g id="i-more"><circle cx="5" cy="12" r="1.8"/><circle cx="12" cy="12" r="1.8"/><circle cx="19" cy="12" r="1.8"/></g>
 </defs></svg>
 
 <header class="bar" data-marble-id="__ID__">
@@ -502,63 +647,72 @@ __ICON__
     <svg class="ico" data-marble-id="__ID__" viewBox="0 0 24 24"><use href="#i-mark"/></svg>
   </span>
   <div class="head" data-marble-id="__ID__">
-    <span class="docname" data-marble-id="__ID__" data-marble-editable>__TITLE__</span>
-    <nav class="menus" data-marble-id="__ID__">
-      <button class="menu" data-marble-id="__ID__" data-menu="file">File</button>
-      <button class="menu" data-marble-id="__ID__" data-menu="edit">Edit</button>
-      <button class="menu" data-marble-id="__ID__" data-menu="view">View</button>
-      <button class="menu" data-marble-id="__ID__" data-menu="insert">Insert</button>
-      <button class="menu" data-marble-id="__ID__" data-menu="format">Format</button>
-      <button class="menu" data-marble-id="__ID__" data-menu="tools">Tools</button>
+    <span class="docname" data-marble-id="__ID__" data-marble-editable aria-label="Document name">__TITLE__</span>
+    <nav class="menus" data-marble-id="__ID__" role="menubar" aria-label="Menus">
+      <button class="menu" data-marble-id="__ID__" data-menu="file" role="menuitem" aria-haspopup="menu" aria-expanded="false">File</button>
+      <button class="menu" data-marble-id="__ID__" data-menu="edit" role="menuitem" aria-haspopup="menu" aria-expanded="false">Edit</button>
+      <button class="menu" data-marble-id="__ID__" data-menu="view" role="menuitem" aria-haspopup="menu" aria-expanded="false">View</button>
+      <button class="menu" data-marble-id="__ID__" data-menu="insert" role="menuitem" aria-haspopup="menu" aria-expanded="false">Insert</button>
+      <button class="menu" data-marble-id="__ID__" data-menu="format" role="menuitem" aria-haspopup="menu" aria-expanded="false">Format</button>
+      <button class="menu" data-marble-id="__ID__" data-menu="tools" role="menuitem" aria-haspopup="menu" aria-expanded="false">Tools</button>
+      <!-- The six above, one press deeper, for a width that has room for one.
+           It reads their names off them rather than saying them again here. -->
+      <button class="menu all" data-marble-id="__ID__" data-menu="all" role="menuitem" aria-haspopup="menu" aria-expanded="false">Menu</button>
     </nav>
   </div>
 </header>
 
-<div class="tools" data-marble-id="__ID__">
-  <button class="tool" data-marble-id="__ID__" data-cmd="undo" title="Undo (Ctrl+Z)" aria-label="Undo"><svg class="ico" data-marble-id="__ID__" viewBox="0 0 24 24"><use href="#i-undo"/></svg></button>
-  <button class="tool" data-marble-id="__ID__" data-cmd="redo" title="Redo (Ctrl+Shift+Z)" aria-label="Redo"><svg class="ico" data-marble-id="__ID__" viewBox="0 0 24 24"><use href="#i-redo"/></svg></button>
+<!-- data-thumb is what a thumb reaches while writing: undo, redo, the
+     paragraph style, bold, italic, and the ⋯ that opens the rest. They are the
+     only ones a phone shows unasked — see the phone block in the stylesheet —
+     and everything else is one press away at that width and in the row at
+     every other. -->
+<div class="tools" data-marble-id="__ID__" role="toolbar" aria-label="Formatting">
+  <button class="tool" data-marble-id="__ID__" data-thumb data-cmd="undo" title="Undo (Ctrl+Z)" aria-label="Undo"><svg class="ico" data-marble-id="__ID__" viewBox="0 0 24 24"><use href="#i-undo"/></svg></button>
+  <button class="tool" data-marble-id="__ID__" data-thumb data-cmd="redo" title="Redo (Ctrl+Shift+Z)" aria-label="Redo"><svg class="ico" data-marble-id="__ID__" viewBox="0 0 24 24"><use href="#i-redo"/></svg></button>
   <i class="sep" data-marble-id="__ID__"></i>
-  <button class="tool wide" data-marble-id="__ID__" data-pick="style" title="Paragraph style">
-    <span class="now" id="now-style" data-marble-transient>Body</span>
+  <button class="tool wide" data-marble-id="__ID__" data-thumb data-pick="style" title="Paragraph style" aria-haspopup="menu" aria-expanded="false">
+    <span class="now" id="now-style" data-marble-transient>Title</span>
     <svg class="caret" data-marble-id="__ID__" viewBox="0 0 24 24"><use href="#i-caret"/></svg>
   </button>
-  <button class="tool wide" data-marble-id="__ID__" data-pick="face" title="Font of the selected text">
+  <button class="tool wide" data-marble-id="__ID__" data-pick="face" title="Font of the selected text" aria-haspopup="menu" aria-expanded="false">
     <span class="now" id="now-face" data-marble-transient>System</span>
     <svg class="caret" data-marble-id="__ID__" viewBox="0 0 24 24"><use href="#i-caret"/></svg>
   </button>
   <span class="sizer" data-marble-id="__ID__">
     <button class="tool step" data-marble-id="__ID__" data-cmd="smaller" title="Smaller" aria-label="Smaller">&#8722;</button>
-    <span class="pt" id="now-pt" data-marble-transient>10.5</span>
+    <span class="pt" id="now-pt" data-marble-transient>23</span>
     <button class="tool step" data-marble-id="__ID__" data-cmd="bigger" title="Bigger" aria-label="Bigger">+</button>
   </span>
   <i class="sep" data-marble-id="__ID__"></i>
-  <button class="tool" data-marble-id="__ID__" data-cmd="bold" title="Bold (Ctrl+B)"><span class="letter" data-marble-id="__ID__">B</span></button>
-  <button class="tool" data-marble-id="__ID__" data-cmd="italic" title="Italic (Ctrl+I)"><span class="letter i" data-marble-id="__ID__">I</span></button>
-  <button class="tool" data-marble-id="__ID__" data-cmd="underline" title="Underline (Ctrl+U)"><span class="letter u" data-marble-id="__ID__">U</span></button>
-  <button class="tool" data-marble-id="__ID__" data-cmd="strike" title="Strikethrough"><span class="letter s" data-marble-id="__ID__">S</span></button>
-  <button class="tool paint" data-marble-id="__ID__" data-pick="colour" title="Text colour">
+  <button class="tool" data-marble-id="__ID__" data-thumb data-cmd="bold" title="Bold (Ctrl+B)" aria-pressed="false"><span class="letter" data-marble-id="__ID__">B</span></button>
+  <button class="tool" data-marble-id="__ID__" data-thumb data-cmd="italic" title="Italic (Ctrl+I)" aria-pressed="false"><span class="letter i" data-marble-id="__ID__">I</span></button>
+  <button class="tool" data-marble-id="__ID__" data-cmd="underline" title="Underline (Ctrl+U)" aria-pressed="false"><span class="letter u" data-marble-id="__ID__">U</span></button>
+  <button class="tool" data-marble-id="__ID__" data-cmd="strike" title="Strikethrough" aria-pressed="false"><span class="letter s" data-marble-id="__ID__">S</span></button>
+  <button class="tool paint" data-marble-id="__ID__" data-pick="colour" title="Text colour" aria-haspopup="menu" aria-expanded="false">
     <span class="letter" data-marble-id="__ID__">A</span>
     <i class="swatch" id="now-fg" data-marble-transient></i>
   </button>
   <i class="sep" data-marble-id="__ID__"></i>
-  <button class="tool aligner" data-marble-id="__ID__" data-pick="align" title="Align">
+  <button class="tool aligner" data-marble-id="__ID__" data-pick="align" title="Align" aria-haspopup="menu" aria-expanded="false">
     <svg class="ico g-left" data-marble-id="__ID__" viewBox="0 0 24 24"><use href="#i-left"/></svg>
     <svg class="ico g-center" data-marble-id="__ID__" viewBox="0 0 24 24"><use href="#i-center"/></svg>
     <svg class="ico g-right" data-marble-id="__ID__" viewBox="0 0 24 24"><use href="#i-right"/></svg>
     <svg class="ico g-justify" data-marble-id="__ID__" viewBox="0 0 24 24"><use href="#i-justify"/></svg>
   </button>
-  <button class="tool" data-marble-id="__ID__" data-cmd="bullet" title="Bulleted list"><svg class="ico" data-marble-id="__ID__" viewBox="0 0 24 24"><use href="#i-bullet"/></svg></button>
-  <button class="tool" data-marble-id="__ID__" data-cmd="number" title="Numbered list"><svg class="ico" data-marble-id="__ID__" viewBox="0 0 24 24"><use href="#i-number"/></svg></button>
+  <button class="tool" data-marble-id="__ID__" data-cmd="bullet" title="Bulleted list" aria-pressed="false"><svg class="ico" data-marble-id="__ID__" viewBox="0 0 24 24"><use href="#i-bullet"/></svg></button>
+  <button class="tool" data-marble-id="__ID__" data-cmd="number" title="Numbered list" aria-pressed="false"><svg class="ico" data-marble-id="__ID__" viewBox="0 0 24 24"><use href="#i-number"/></svg></button>
   <button class="tool" data-marble-id="__ID__" data-cmd="outdent" title="Less indent (Shift+Tab)"><svg class="ico" data-marble-id="__ID__" viewBox="0 0 24 24"><use href="#i-outdent"/></svg></button>
   <button class="tool" data-marble-id="__ID__" data-cmd="indent" title="More indent (Tab)"><svg class="ico" data-marble-id="__ID__" viewBox="0 0 24 24"><use href="#i-indent"/></svg></button>
   <button class="tool" data-marble-id="__ID__" data-cmd="clear" title="Clear formatting (Ctrl+\)"><svg class="ico" data-marble-id="__ID__" viewBox="0 0 24 24"><use href="#i-clear"/></svg></button>
   <i class="spring" data-marble-id="__ID__"></i>
-  <button class="tool" data-marble-id="__ID__" data-cmd="fonts" title="Fonts"><span class="letter" data-marble-id="__ID__">Aa</span></button>
+  <button class="tool" data-marble-id="__ID__" data-cmd="fonts" title="Fonts" aria-pressed="false"><span class="letter" data-marble-id="__ID__">Aa</span></button>
+  <button class="tool more" data-marble-id="__ID__" data-thumb data-cmd="more" title="More tools" aria-label="More tools" aria-expanded="false"><svg class="ico" data-marble-id="__ID__" viewBox="0 0 24 24"><use href="#i-more"/></svg></button>
 </div>
 
 <div class="work" data-marble-id="__ID__">
 
-  <aside class="outline" data-marble-transient>
+  <aside class="outline" data-marble-transient aria-label="Outline">
     <h2>Outline</h2>
     <ol id="outline-list"></ol>
   </aside>
@@ -677,10 +831,17 @@ __ICON__
       const ID = 'data-marble-id';
       const RICH = 'data-marble-rich';
 
-      // All four belong to the page. An open menu is not a fact about the
+      // All of these belong to the page. An open menu is not a fact about the
       // notes, neither is a greyed-out undo button, and neither is the field
-      // being typeable — the file is a document, not a session.
-      marble.pageOnly('contenteditable', 'spellcheck', 'data-open', 'disabled');
+      // being typeable — the file is a document, not a session. The last four
+      // are the same rule for what a screen reader and the Tab key read: which
+      // tool is lit, which menu is open, whether the narrow toolbar is showing
+      // the rest of itself, and which button holds its one tab stop. Every one
+      // is derived from something else here, and a derivation is not a fact.
+      marble.pageOnly(
+        'contenteditable', 'spellcheck', 'data-open', 'disabled',
+        'aria-pressed', 'aria-expanded', 'data-tools', 'tabindex',
+      );
 
       flow.setAttribute('contenteditable', 'true');
       flow.setAttribute('spellcheck', 'true');
@@ -1770,12 +1931,14 @@ __ICON__
         popup.removeAttribute('data-open');
         popup.textContent = '';
         opened?.removeAttribute('data-open');
+        opened?.setAttribute('aria-expanded', 'false');
         opened = null;
       }
 
       function row(label, run, { hint, on, off } = {}) {
         const button = document.createElement('button');
         button.type = 'button';
+        button.setAttribute('role', 'menuitem');
         button.append(label);
         if (hint) {
           const span = document.createElement('span');
@@ -1789,6 +1952,11 @@ __ICON__
           shut();
           run();
           sync();
+          // Emptying the popup drops whatever was focused in it on the floor,
+          // which only happens to somebody working the menu by keyboard. The
+          // notes are where they were, so that is where the key goes back —
+          // unless the command had somewhere better for it, as Rename does.
+          if (document.activeElement === document.body) flow.focus({ preventScroll: true });
         });
         popup.append(button);
       }
@@ -1800,10 +1968,21 @@ __ICON__
         build(row);
         opened = anchor;
         anchor.setAttribute('data-open', '1');
+        anchor.setAttribute('aria-expanded', 'true');
         popup.setAttribute('data-open', '1');
         const box = anchor.getBoundingClientRect();
-        popup.style.left = Math.max(4, Math.min(box.left, innerWidth - popup.offsetWidth - 8)) + 'px';
-        popup.style.top = Math.min(box.bottom + 4, innerHeight - popup.offsetHeight - 8) + 'px';
+        // A fixed popup is placed against the layout viewport, and with a
+        // keyboard up that is not the part of the screen anybody can see. The
+        // visual viewport is, so it is what the popup is kept inside.
+        const vv = window.visualViewport;
+        const wide = vv?.width ?? innerWidth;
+        const tall = vv?.height ?? innerHeight;
+        const down = vv?.offsetTop ?? 0;
+        const across = vv?.offsetLeft ?? 0;
+        popup.style.left =
+          Math.max(across + 4, Math.min(box.left, across + wide - popup.offsetWidth - 8)) + 'px';
+        popup.style.top =
+          Math.max(down + 4, Math.min(box.bottom + 4, down + tall - popup.offsetHeight - 8)) + 'px';
       }
 
       const showing = (name) => document.body.getAttribute(name) !== 'off';
@@ -1818,6 +1997,16 @@ __ICON__
       };
 
       const MENUS = {
+        // A phone has room for one menu, not six. The six are still in the
+        // file and still named there once — this reads their names back off
+        // them rather than writing a second copy here, and anchors each list
+        // to the one button there is room for at that width.
+        all: (add) => {
+          for (const button of document.querySelectorAll('.menus [data-menu]:not(.all)')) {
+            const key = button.getAttribute('data-menu');
+            add(button.textContent, () => open($('.menus .all'), MENUS[key]));
+          }
+        },
         file: (add) => {
           add('Page setup…', pageSetup);
           add('Print', () => print(), { hint: 'Ctrl+P' });
@@ -1927,7 +2116,17 @@ __ICON__
         return said;
       };
 
+      // Whether the narrow toolbar is showing the rest of itself is attention
+      // rather than content: it dies with the tab, so it is set on the page
+      // and filed nowhere. attr() above is for the other kind.
+      const moreTools = (on) => {
+        document.body.setAttribute('data-tools', on ? 'on' : 'off');
+        $('.tools .more')?.setAttribute('aria-expanded', String(on));
+        arm();
+      };
+
       const CMD = {
+        more: () => moreTools(document.body.getAttribute('data-tools') !== 'on'),
         undo: () => back(false),
         redo: () => back(true),
         bold: () => markUp('bold'),
@@ -1943,6 +2142,78 @@ __ICON__
         clear: () => clear(),
         fonts: () => flip('data-fonts'),
       };
+
+      // ------------------------------------------------ reaching the chrome
+      //
+      // A toolbar is one stop on the way through a page, not thirty. Tab
+      // reaches it and leaves it; the arrow keys move inside it. That is what
+      // role="toolbar" in the markup promises, and to anybody not using a
+      // pointer it is the difference between a toolbar and a heap of buttons.
+      // The menubar works the same way, so it is these lines over both.
+      //
+      // Which button holds the tab stop is the page's, and declared page-only
+      // above: a document does not remember where somebody's focus was.
+
+      const BARS = [$('.tools'), $('.menus')];
+      const reachable = (bar) =>
+        [...bar.querySelectorAll('button')].filter((el) => el.offsetParent && !el.disabled);
+
+      function arm(active) {
+        for (const bar of BARS) {
+          const all = reachable(bar);
+          if (!all.length) continue;
+          const one = all.includes(active)
+            ? active
+            : all.find((el) => el.getAttribute('tabindex') === '0') ?? all[0];
+          for (const el of all) el.setAttribute('tabindex', el === one ? '0' : '-1');
+        }
+      }
+
+      for (const bar of BARS) {
+        bar.addEventListener('focusin', (event) => {
+          if (event.target.tagName === 'BUTTON') arm(event.target);
+        });
+        bar.addEventListener('keydown', (event) => {
+          const all = reachable(bar);
+          const from = all.indexOf(document.activeElement);
+          if (from < 0) return;
+          const step = { ArrowRight: 1, ArrowLeft: -1, Home: -all.length, End: all.length }[event.key];
+          if (step === undefined) return;
+          event.preventDefault();
+          const to = all[Math.max(0, Math.min(all.length - 1, from + step))];
+          arm(to);
+          to.focus();
+        });
+      }
+
+      // A menu that only a pointer can open is a menu half the people using
+      // this cannot open at all. Down opens one and steps into it, Up and Down
+      // walk it, and Escape closes it and hands the key back to the button
+      // that opened it.
+      addEventListener('keydown', (event) => {
+        if (event.key === 'Escape' && opened) {
+          const anchor = opened;
+          event.preventDefault();
+          shut();
+          anchor.focus();
+          return;
+        }
+        const anchor = event.target.closest?.('.menu, .tool');
+        if (anchor && !opened && event.key === 'ArrowDown') {
+          if (!anchor.hasAttribute('data-menu') && !anchor.hasAttribute('data-pick')) return;
+          event.preventDefault();
+          anchor.click();
+          popup.querySelector('button')?.focus();
+          return;
+        }
+        if (!popup.contains(event.target)) return;
+        const step = { ArrowDown: 1, ArrowUp: -1 }[event.key];
+        if (step === undefined) return;
+        event.preventDefault();
+        const rows = [...popup.querySelectorAll('button')];
+        const from = rows.indexOf(document.activeElement);
+        rows[Math.max(0, Math.min(rows.length - 1, from + step))]?.focus();
+      });
 
       // Delegated rather than wired button by button, so chrome rebuilt by an
       // undo, an agent or another window is live the moment it lands.
@@ -2100,6 +2371,31 @@ __ICON__
         sync();
       });
 
+      // ----------------------------------------------------------- the phone
+      //
+      // The software keyboard does two things and the second is the one that
+      // gets missed. It takes room off the bottom of the screen — and it
+      // *moves* the room, sliding the visible strip down the layout viewport
+      // to keep the caret clear of itself, so everything the page fixed to
+      // that viewport ends up exactly that far too high. --kb is how much was
+      // taken, --vv-top is where what is left begins, and between them the
+      // stylesheet can put a surface on the screen somebody is looking at.
+      //
+      // Both are written on <html> and filed nowhere: where a keyboard is is
+      // not a fact about the notes. A reconcile drops them with everything
+      // else the page put there, so they are written again below.
+      function viewport() {
+        const vv = window.visualViewport;
+        const top = vv ? Math.max(0, Math.round(vv.offsetTop)) : 0;
+        const kb = vv ? Math.max(0, Math.round(innerHeight - vv.height - top)) : 0;
+        document.documentElement.style.setProperty('--kb', kb + 'px');
+        document.documentElement.style.setProperty('--vv-top', top + 'px');
+      }
+      viewport();
+      visualViewport?.addEventListener('resize', viewport);
+      visualViewport?.addEventListener('scroll', viewport);
+      addEventListener('resize', viewport);
+
       // ----------------------------------------------------------- what is drawn
       //
       // None of this is in the file and none of it files anything. The outline
@@ -2118,10 +2414,22 @@ __ICON__
           const item = document.createElement('li');
           item.className = depth;
           item.textContent = marble.text(el) || 'Heading';
-          item.addEventListener('click', () => {
+          // A reading of the notes is still something you press, so it takes a
+          // key as well as a pointer. A real <button> would want the padding
+          // and the hover back off the <li> it sits in for nothing gained, so
+          // the row says what it is and answers the two keys that means.
+          item.setAttribute('role', 'button');
+          item.tabIndex = 0;
+          const go = () => {
             el.scrollIntoView({ block: 'center', behavior: 'smooth' });
             place(el, marble.text(el).length);
             sync();
+          };
+          item.addEventListener('click', go);
+          item.addEventListener('keydown', (event) => {
+            if (event.key !== 'Enter' && event.key !== ' ') return;
+            event.preventDefault();
+            go();
           });
           outline.append(item);
         }
@@ -2145,7 +2453,13 @@ __ICON__
         const el = els[0];
         if (isText(el)) here = el;
         const caret = atCaret();
-        const lit = (selector, on) => $(selector)?.classList.toggle('marble-on', Boolean(on));
+        // Lit is a reading, so it is said in a marble- class the carrier knows
+        // is the page's, and in the one attribute a screen reader reads.
+        const lit = (selector, on) => {
+          const el = $(selector);
+          el?.classList.toggle('marble-on', Boolean(on));
+          el?.setAttribute('aria-pressed', String(Boolean(on)));
+        };
         for (const name of ['bold', 'italic', 'underline', 'strike']) {
           lit('[data-cmd="' + name + '"]', marked(name, els));
         }
@@ -2162,8 +2476,15 @@ __ICON__
         for (const [value] of ALIGN) {
           aligner?.classList.toggle('marble-align-' + value, alignOf(el) === value);
         }
-        $('[data-cmd="undo"]').disabled = !marble.canUndo;
-        $('[data-cmd="redo"]').disabled = !marble.canRedo;
+        const steps = [$('[data-cmd="undo"]'), $('[data-cmd="redo"]')];
+        const was = steps.map((el) => el.disabled);
+        steps[0].disabled = !marble.canUndo;
+        steps[1].disabled = !marble.canRedo;
+        // Disabling a button takes it out of the tab order, and undo is the
+        // first of them — the one that holds the toolbar's only way in. Armed
+        // again only when that actually changed, because sync() runs on every
+        // move of the caret and reachable() asks the browser for a layout.
+        if (steps.some((el, i) => el.disabled !== was[i])) arm();
       }
 
       // Drawn now, and again over anything that arrives later — an edit made in
@@ -2177,6 +2498,11 @@ __ICON__
         if (normalise()) file(false);
         derive();
         sync();
+        // Everything the page put on an element and the file does not know
+        // about, put back: the tab stop inside the toolbar, and where the
+        // keyboard is.
+        arm();
+        viewport();
       });
 
       flow.addEventListener('keyup', sync);
