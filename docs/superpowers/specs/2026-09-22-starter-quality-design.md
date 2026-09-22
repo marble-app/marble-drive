@@ -187,7 +187,40 @@ Every starter is checked against all of these, and a test covers the ones marked
 - Grow a second source of truth for something the markup already says. The
   sheet's column count is one custom property *because* two copies would drift.
 
-## 7. Done means
+## 7. The two things none of them do
+
+Found by reading all six: not one starter has either of these, including the two
+that were otherwise in good shape.
+
+**Printing.** `grep -c "@media print"` is `0` across the set. The `doc` starter
+draws an 8.5in page with a ruler and margin markers and cannot be printed onto
+one; a deck cannot be handed out; a sheet cannot go on a wall. A `@media print`
+block that drops the chrome, unwraps the scroller, lets content break across
+pages, and prints the paper white regardless of scheme is a small block and the
+difference between a document and a demo. Every starter that has a page gets one.
+
+**The phone keyboard.** No starter mentions `visualViewport`. On a phone the
+software keyboard does two things and the second one is the one everybody
+misses: it **shrinks** the viewport *and* **scrolls** it, so a toolbar pinned to
+the bottom ends up under the keyboard and the caret ends up behind it. Both
+halves are needed:
+
+```js
+const vv = window.visualViewport;
+const sync = () => {
+  document.documentElement.style.setProperty('--kb', `${Math.max(0, innerHeight - vv.height - vv.offsetTop)}px`);
+  document.documentElement.style.setProperty('--vv-top', `${vv.offsetTop}px`);
+};
+vv?.addEventListener('resize', sync);
+vv?.addEventListener('scroll', sync);
+```
+
+Anything anchored to the bottom then sits at
+`bottom: calc(var(--kb, 0px) + max(0px, env(safe-area-inset-bottom)))`. This
+applies to `doc` and `note` first, because they are the two you type into for an
+hour, and to anything else that anchors a control to the bottom of the screen.
+
+## 8. Done means
 
 1. `node --test --test-reporter=spec test/gallery.test.js` passes.
 2. `node --test --test-concurrency=1 --test-reporter=spec test-browser/starter-<id>.test.js`
