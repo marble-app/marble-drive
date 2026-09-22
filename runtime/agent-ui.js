@@ -1501,6 +1501,11 @@
   const hostOf = (url) => { try { return new URL(url).host; } catch { return String(url ?? ''); } };
   const firstString = (input) => Object.values(input ?? {}).find((v) => typeof v === 'string' && v.trim()) ?? '';
 
+  const ACT_GERUND = {
+    press: 'Pressing', type: 'Typing in', set: 'Setting', move: 'Moving',
+    size: 'Resizing', remove: 'Removing', pick: 'Picking',
+  };
+
   /** One line per call: a verb, and the thing it touched. `source` is what a
    *  folded run lists; `short` is the kind it counts by. */
   function toolLabel(name, input = {}) {
@@ -1512,6 +1517,15 @@
         return out(`Read${where}${Array.isArray(input.ids) && input.ids.length ? ` · ${plural(input.ids.length, 'element')}` : ''}`, input.path ?? '');
       case 'apply_ops':
         return out(`Editing${where}${input.note ? ` — ${input.note}` : ''}`, input.path ?? '');
+      // Operating, not authoring. The gesture vocabulary is closed, so the
+      // verb is a lookup; the control is an id until the act has run, and the
+      // app says its own name back in the result (see toolResult).
+      case 'act': {
+        const doing = ACT_GERUND[input.gesture] ?? 'Acting on';
+        return out(`${doing} ${input.id ?? 'a control'}`, input.path ?? '');
+      }
+      case 'read_affordances':
+        return out(`What${where} affords${Array.isArray(input.ids) && input.ids.length ? ` · ${plural(input.ids.length, 'element')}` : ''}`, input.path ?? '');
       case 'list_documents': return out('Listed documents');
       case 'create_document': return out(`Creating${where}`, input.path ?? '');
       case 'read_guide': return out(input.section ? `Read the guide · ${input.section}` : 'Read the guide', input.section ?? '');
@@ -1575,7 +1589,12 @@
 
   // ------------------------------------------------------------ tool runs
 
-  const foldable = (node) => node?.classList?.contains('tool') && node.dataset.state === 'done';
+  // A run of finished steps folds into "7 steps" because reads and greps are
+  // the agent's own business. An act is not: it happened in the person's
+  // document, by the person's app, and it keeps its line.
+  const foldable = (node) => node?.classList?.contains('tool')
+    && node.dataset.state === 'done'
+    && node.dataset.kind !== 'act';
 
   /** `Shell ×2 · Read harness.js, agents.mrbl +1 · Grep packFocus`. */
   function groupLabel(rows) {
@@ -5558,6 +5577,7 @@
       // Kept so a refusal or a failure can say which step it was, instead of
       // replacing the label with the bare tool name.
       row.dataset.was = label;
+      if (event.name === 'act') row.dataset.kind = 'act';
       if (source) row.dataset.source = source;
       const record = this.record(turn);
       record.tools.set(event.callId, row);
@@ -5586,6 +5606,17 @@
     toolResult(turn, event) {
       const row = this.record(turn).tools.get(event.callId);
       if (!row || row.dataset.state === 'refused') return;
+      // The one row its result is allowed to rewrite. "Pressing sort-btn" is
+      // the call; "Pressed Sort · 12 changes" is what happened, and only the
+      // host — which read the control's own words and counted the ops — can
+      // say it. Its result leads with that line.
+      if (row.dataset.kind === 'act' && event.ok) {
+        const said = String(event.summary ?? '').trim().split('\n')[0];
+        if (said && said.length <= 80) {
+          row.textContent = said;
+          row.dataset.was = said;
+        }
+      }
       if (row.dataset.state === 'pending' && event.ok && row.dataset.name !== 'apply_ops') {
         row.dataset.state = 'done';
         this.regroup(turn);

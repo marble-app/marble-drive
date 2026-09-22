@@ -309,7 +309,90 @@
         outline-offset: 3px;
       }
 
+      /* ------------------------------------------------------- the act mark
+
+         A press is not a region, so it is not a zone: no wash, no padding, no
+         box around the neighbourhood. One ring, in the control's own shape, on
+         the control's own outline — drawn in the agent's violet, because the
+         press is the only part of this the agent did. Whatever changes next
+         keeps the flash in the document's own accent, because the app changed
+         it, by its own code.
+
+         Design: docs/superpowers/specs/2026-09-22-watching-an-agent-use-your-app-design.md */
+      .marble-act-layer {
+        position: fixed;
+        inset: 0;
+        pointer-events: none;
+        z-index: 2147483000;
+        --zone-mark: var(--accent-ink, color-mix(in srgb, #6d55d4 78%, var(--ink, #111)));
+      }
+      .marble-act {
+        position: fixed;
+        pointer-events: none;
+        transition:
+          top 180ms ${EASE},
+          left 180ms ${EASE},
+          width 180ms ${EASE},
+          height 180ms ${EASE};
+      }
+      /* The ring and the label are siblings so the ring can let go while the
+         label is still saying what happened. */
+      .marble-act-ring {
+        position: absolute;
+        inset: 0;
+        box-sizing: border-box;
+        border: 1.5px solid var(--zone-mark);
+        border-radius: inherit;
+        transform-origin: 50% 50%;
+        /* Arrival without a journey. A cursor gliding in from off-screen would
+           draw a pointer this agent does not have. */
+        animation: marble-act-in 140ms ${EASE} both;
+      }
+      /* The zone's pill is sized against the zone, which is a region. A control
+         is not: 100% of a Sort button is four characters wide, which clipped
+         the sentence down to its ellipsis. The act's label is sized against
+         the viewport it has to be read in. */
+      .marble-act > .marble-zone-label {
+        max-width: min(30rem, calc(100vw - 2rem));
+      }
+      /* A control acts on what is under it — a toolbar sits above its table —
+         so the act's label goes above the control, clear of the rows it just
+         changed. Under it only when there is no room up there. */
+      .marble-act-above > .marble-zone-label {
+        top: auto;
+        bottom: 100%;
+        margin-top: 0;
+        margin-bottom: 6px;
+      }
+      .marble-act-live { animation: marble-act-breathe 1.6s ease-in-out infinite; }
+      /* Arrived, not pressed: the person's hands are on this control, so the
+         act is waiting for them. Still, and a shade back. */
+      .marble-act-wait { opacity: .72; }
+      .marble-act-out { animation: marble-act-out 180ms ${EASE} both; }
+      @keyframes marble-act-in {
+        from { transform: scale(1.14); opacity: 0; }
+        to { transform: none; opacity: 1; }
+      }
+      @keyframes marble-act-breathe {
+        0%, 100% { opacity: .55; }
+        50% { opacity: 1; }
+      }
+      @keyframes marble-act-out {
+        from { transform: none; opacity: 1; }
+        to { transform: scale(1.06); opacity: 0; }
+      }
+      /* The control is held down for as long as the act is in flight. Transform
+         and filter only: a press may not move the page around it. */
+      html.marble-collab-host [data-marble-acting] {
+        transform: translateY(1px);
+        filter: brightness(.96);
+        transition: transform 120ms ${EASE}, filter 120ms ${EASE};
+      }
+
       @media (prefers-reduced-motion: reduce) {
+        .marble-act-ring,
+        .marble-act-live,
+        .marble-act-out,
         .marble-flash,
         .marble-fork,
         .marble-fork.marble-fork-out,
@@ -317,6 +400,9 @@
         .marble-zone-live,
         .marble-zones-show { animation: none; }
         .marble-zone-live { opacity: .7; }
+        .marble-act-ring { opacity: 1; }
+        .marble-act-out { opacity: 0; }
+        html.marble-collab-host [data-marble-acting] { transform: none; transition: none; }
         .marble-presence,
         .marble-presence-out,
         .marble-zone,
@@ -326,6 +412,7 @@
       }
       @media (prefers-reduced-transparency: reduce) {
         .marble-fork-seg { background: var(--paper-2, #f3f1ea); }
+        /* The ring is a line, and lines are what survive both reductions. */
         .marble-presence { background-color: color-mix(in srgb, var(--accent, #9bb6cf) 28%, transparent); }
         /* The wash goes; the box stays. Where the agent is must still be said. */
         .marble-zone { background-color: transparent; }
@@ -424,8 +511,38 @@
       return text.charAt(0).toLowerCase() + text.slice(1);
     }
 
+    // The gesture vocabulary is closed — press, type, set, move, size, remove,
+    // pick — so the past tense is a lookup and not a conjugation. The host
+    // sends the landed sentence itself; this is what the page can still say
+    // when a frame arrives without one.
+    const PAST = new Map([
+      ['pressing', 'Pressed'], ['typing', 'Typed'], ['setting', 'Set'], ['moving', 'Moved'],
+      ['sizing', 'Resized'], ['removing', 'Removed'], ['picking', 'Picked'],
+    ]);
+    function pastNote(note) {
+      const words = String(note ?? '').trim().split(/\s+/);
+      const past = PAST.get(words[0]?.toLowerCase());
+      return past ? [past, ...words.slice(1)].join(' ') : note;
+    }
+    /** A deferred act has not been done, so its label names the control and
+     *  not the gesture: "waiting for you · Unread", never "pressing Unread". */
+    function bareNote(note) {
+      const words = String(note ?? '').trim().split(/\s+/);
+      return PAST.has(words[0]?.toLowerCase()) ? words.slice(1).join(' ') : String(note ?? '').trim();
+    }
+
     function phaseLabel(detail) {
       const note = String(detail.note ?? '').trim();
+      // A press is one control at one instant, and the sentence for it is the
+      // host's: written from the id, the gesture and the control's own words,
+      // never from the agent's account of what it meant to do.
+      if (detail.phase === 'acting') {
+        if (detail.deferred) {
+          const what = bareNote(note);
+          return what ? `Agent · waiting for you · ${what}` : 'Agent · waiting for you';
+        }
+        return note ? `Agent · ${asClause(note)}` : 'Agent · pressing';
+      }
       if (note) return `Agent · ${asClause(note)}`;
       if (detail.phase === 'reading') return 'Agent · reading';
       if (detail.phase === 'writing') return 'Agent · writing';
@@ -597,6 +714,9 @@
       const zones = [];
       for (const detail of presence.values()) {
         if (!isAgent(detail.client)) continue;
+        // A client mid-press has a ring, and the ring carries the label. A box
+        // around the button as well would say the agent is rewriting it.
+        if (acts.has(detail.client)) continue;
         const target = tapeTarget((detail.ids ?? []).map((id) => byId(id)).filter(Boolean));
         if (target) zones.push({ detail, target });
       }
@@ -711,9 +831,223 @@
       }
     }
 
+
+    // ------------------------------------------------------------ acting
+    //
+    // The third thing an agent can be doing here. Reading is a claim on ids,
+    // writing is a claim on a region — both are states, and a zone says a
+    // state well. A press is an event: one control, one instant, and a
+    // consequence its own app files. Told as a zone it reads as "the agent is
+    // rewriting this button", which is the one thing it is not.
+    //
+    // So the press gets its own mark, and the design holds three lines:
+    //   cause at the control, in the agent's colour;
+    //   effect where it lands, in the document's own;
+    //   cause first, even when the ops arrive ahead of the news of the press.
+    //
+    // Design: docs/superpowers/specs/2026-09-22-watching-an-agent-use-your-app-design.md
+
+    const ACT_CONTACT = 140;      // the ring converging on the control
+    const ACT_DWELL = 360;        // the floor under how briefly a press can be seen
+    const ACT_SAID = 2400;        // how long the label holds what happened
+    const ACT_SAID_EMPTY = 3600;  // ... longer when the answer was "nothing"
+    const ACT_LOST = 15000;       // an act whose closing frame never came
+
+    const acts = new Map();
+    let placedActs = [];
+
+    const actLayer = document.createElement('div');
+    actLayer.className = 'marble-act-layer';
+    actLayer.setAttribute(TRANSIENT, '');
+    actLayer.setAttribute('aria-live', 'polite');
+    document.documentElement.append(actLayer);
+
+    /** The ring is the control's own shape — a pill around a pill, a circle
+     *  around a checkbox — grown by the gap it stands off at. */
+    function ringRadius(el, pad) {
+      const radius = getComputedStyle(el).borderRadius || '0px';
+      if (radius.includes('%')) return radius;
+      return radius.replace(/([\d.]+)px/g, (_, n) => `${Number(n) + pad}px`);
+    }
+
+    function placeAct(act) {
+      const r = act.target.getBoundingClientRect();
+      const pad = 3;
+      Object.assign(act.frame.style, {
+        top: `${r.top - pad}px`,
+        left: `${r.left - pad}px`,
+        width: `${Math.max(12, r.width + pad * 2)}px`,
+        height: `${Math.max(12, r.height + pad * 2)}px`,
+        borderRadius: ringRadius(act.target, pad),
+      });
+      act.frame.classList.toggle('marble-act-above', r.top > 40);
+    }
+
+    function actText(act) {
+      return phaseLabel({ phase: 'acting', note: act.note, deferred: act.deferred });
+    }
+
+    function landedText(act, changed) {
+      const note = pastNote(act.landed ?? act.note);
+      const said = changed
+        ? `${changed} change${changed === 1 ? '' : 's'}`
+        // An act that ran and changed nothing is a finding about the app, not
+        // a failure of the press. Silence would read as the feedback breaking.
+        : 'nothing changed';
+      return `${note ? `Agent · ${asClause(note)}` : 'Agent · pressed'} · ${said}`;
+    }
+
+    function beginAct(detail) {
+      const ids = (detail.ids ?? []).filter(Boolean);
+      const act = {
+        client: detail.client,
+        ids,
+        note: detail.note ?? '',
+        deferred: Boolean(detail.deferred),
+        target: tapeTarget(ids.map(byId).filter(Boolean)),
+        startedAt: performance.now(),
+        held: [],
+        changed: 0,
+        ending: false,
+        frame: null,
+        ring: null,
+        text: null,
+        dot: null,
+      };
+      act.lost = setTimeout(() => endAct(act.client, {}), ACT_LOST);
+      acts.set(detail.client, act);
+      // Nothing on this page to point at: the press is the conversation's to
+      // report. The page does not narrate what it cannot show.
+      if (!act.target) return act;
+
+      const frame = document.createElement('div');
+      frame.className = 'marble-act';
+      frame.setAttribute(TRANSIENT, '');
+      const ring = document.createElement('div');
+      ring.className = act.deferred ? 'marble-act-ring marble-act-wait' : 'marble-act-ring';
+      const label = document.createElement('div');
+      label.className = 'marble-zone-label';
+      const dot = document.createElement('span');
+      dot.className = 'marble-zone-live';
+      dot.setAttribute('aria-hidden', 'true');
+      const text = document.createElement('span');
+      text.textContent = actText(act);
+      label.append(dot, text);
+      const conversation = conversationOf(detail.client);
+      if (conversation) {
+        const open = document.createElement('button');
+        open.type = 'button';
+        open.textContent = 'Open chat';
+        open.setAttribute('aria-label', 'Open the conversation working here');
+        open.addEventListener('click', (event) => {
+          event.stopPropagation();
+          const offer = new CustomEvent('marble-callout:open', { cancelable: true, detail: { id: conversation } });
+          if (document.dispatchEvent(offer)) openConversation(conversation);
+        });
+        label.append(open);
+      }
+      frame.append(ring, label);
+      Object.assign(act, { frame, ring, text, dot });
+      actLayer.append(frame);
+      placeAct(act);
+      placedActs.push(act);
+      sizes?.observe(act.target);
+      // Held down for as long as it is held down. A deferred act has arrived
+      // and pressed nothing, so the control stays up.
+      if (!act.deferred) {
+        act.target.setAttribute('data-marble-acting', '');
+        setTimeout(() => {
+          if (acts.get(act.client) === act && !act.ending) ring.classList.add('marble-act-live');
+        }, ACT_CONTACT);
+      }
+      return act;
+    }
+
+    function updateAct(act, detail) {
+      const ids = (detail.ids ?? []).filter(Boolean);
+      // A second control in the same turn is a second act, not a moved ring.
+      if (ids.join('\u0000') !== act.ids.join('\u0000')) {
+        endAct(act.client, detail);
+        beginAct(detail);
+        return;
+      }
+      act.note = detail.note ?? act.note;
+      act.deferred = Boolean(detail.deferred);
+      if (act.ring) act.ring.classList.toggle('marble-act-wait', act.deferred);
+      if (act.target) act.target.toggleAttribute('data-marble-acting', !act.deferred);
+      if (act.text) act.text.textContent = actText(act);
+    }
+
+    function endAct(client, detail = {}) {
+      const act = acts.get(client);
+      if (!act || act.ending) return;
+      act.ending = true;
+      clearTimeout(act.lost);
+      // A frame that claims other ids is the agent getting on with something
+      // else, not a report on the act. Its note belongs to that work, and its
+      // zone is more use than the tail of this label — so the tail is cut and
+      // the sentence is conjugated from what this act already said.
+      const elsewhere = (detail.ids ?? []).filter(Boolean).length > 0;
+      act.superseded = elsewhere;
+      if (detail.note && !elsewhere) act.landed = detail.note;
+      if (Number.isFinite(detail.changed)) act.changed = detail.changed;
+      // A press too quick to see is, for the person, a press that never
+      // happened. The host can resolve an act in under a frame; the floor is
+      // the page's, not the act's.
+      const wait = Math.max(0, ACT_DWELL - (performance.now() - act.startedAt));
+      setTimeout(() => releaseAct(act), wait);
+    }
+
+    function releaseAct(act) {
+      act.target?.removeAttribute('data-marble-acting');
+      const changed = act.changed || new Set(act.held).size;
+      if (act.ring) {
+        act.ring.classList.remove('marble-act-live');
+        act.ring.classList.add('marble-act-out');
+      }
+      // An act that was still waiting for the person when it ended was never
+      // done, and has nothing to report. It just goes.
+      if (act.text && !act.deferred) act.text.textContent = landedText(act, changed);
+      if (act.dot) {
+        act.dot.style.animation = 'none';
+        act.dot.style.opacity = '.45';
+      }
+      flushHeld(act);
+      const tail = act.deferred ? 0 : act.superseded ? 400 : changed ? ACT_SAID : ACT_SAID_EMPTY;
+      setTimeout(() => {
+        act.frame?.remove();
+        placedActs = placedActs.filter((other) => other !== act);
+        if (act.target) sizes?.unobserve(act.target);
+        // A second act may have taken this client's slot while this one was
+        // letting go; it owns the entry now.
+        if (acts.get(act.client) === act) acts.delete(act.client);
+        paintZones();
+      }, act.frame ? tail : 0);
+    }
+
+    /** The effect, in document order, once the ring has let go. A stagger so a
+     *  wide effect reads as a sweep rather than a jump cut. */
+    function flushHeld(act) {
+      const ids = [...new Set(act.held)];
+      act.held = [];
+      const els = ids.map(byId).filter(Boolean);
+      els.sort((a, b) =>
+        (a.compareDocumentPosition(b) & Node.DOCUMENT_POSITION_FOLLOWING) ? -1 : 1);
+      els.forEach((el, i) => {
+        const id = marble.id(el);
+        if (i < 8 && !reducedMotion()) setTimeout(() => flash(id), i * 40);
+        else flash(id);
+      });
+    }
+
     document.addEventListener('marble:presence', ({ detail }) => {
       if (!detail?.client) return;
       const ids = Array.isArray(detail.ids) ? detail.ids : [];
+      const acting = detail.phase === 'acting' && ids.length > 0;
+      const current = acts.get(detail.client);
+      if (acting && !current) beginAct(detail);
+      else if (acting && current && !current.ending) updateAct(current, detail);
+      else if (!acting && current) endAct(detail.client, detail);
       // Ids are the whole of it now: an agent that names none has no zone to
       // draw, and keeping it here would only be state nothing reads.
       if (ids.length) presence.set(detail.client, { ...detail, ids });
@@ -752,11 +1086,14 @@
     let relayout = 0;
     function relayoutZones() {
       relayout = 0;
+      for (const act of placedActs) {
+        if (act.target?.isConnected) placeAct(act);
+      }
       if (placed.some(({ target }) => !target.isConnected)) return paintZones();
       for (const { frame, target } of placed) place(frame, target);
     }
     function scheduleRelayout() {
-      if (!placed.length || relayout) return;
+      if ((!placed.length && !placedActs.length) || relayout) return;
       relayout = requestAnimationFrame(relayoutZones);
     }
     addEventListener('scroll', scheduleRelayout, true);
@@ -787,6 +1124,7 @@
 
     document.addEventListener('marble:ops', ({ detail }) => {
       const ops = detail?.ops ?? [];
+      const act = acts.get(detail?.client);
       const forked = new Set();
       const trail = trailClient(detail?.client);
       for (const op of ops) {
@@ -794,7 +1132,14 @@
           const id = op.html.match(/data-marble-id="([^"]+)"/)?.[1];
           if (id) forked.add(id);
         }
-        if (op.id) flash(op.id);
+        // Cause before effect. The host computes an act's op and writes it
+        // before the page has been told a press happened, so played back as
+        // they arrive these would be the document telling its own history
+        // backwards. They wait for the ring to let go.
+        if (op.id) {
+          if (act?.frame && !act.ending) act.held.push(op.id);
+          else flash(op.id);
+        }
         if (trail && op.id) {
           const set = trails.get(trail.client) ?? new Set();
           if (trail.undo) {

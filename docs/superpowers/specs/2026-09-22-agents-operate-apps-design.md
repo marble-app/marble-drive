@@ -231,6 +231,10 @@ time, naming the control. Undeclared stays undeclared, and stays refused.
 
 ## 9. What the person sees
 
+*Designed in full, and partly built, in
+`2026-09-22-watching-an-agent-use-your-app-design.md`. The sketch below is what
+that one starts from.*
+
 Presence already has the vocabulary. `onLook` sends `{client, ids, phase}` and the
 phases today are `reading` and `writing`; operating is a third, `acting`, and
 `runtime/collab.js` already paints `.marble-presence` on the ids a frame names.

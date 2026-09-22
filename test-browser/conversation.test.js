@@ -45,6 +45,15 @@ const SCRIPTS = {
     { tool: 'Edit', input: { file_path: '/Users/x/marble-drive/runtime/agent-ui.js' } },
     { say: 'Six calls later.' },
   ],
+  // Operating the app instead of rewriting it. The act is one line about the
+  // person's document, so it keeps its line while the reads fold around it.
+  operating: [
+    { tool: 'Read', input: { file_path: '/Users/x/marble-drive/runtime/collab.js' } },
+    { tool: 'read_affordances', input: { path: 'table', ids: ['sort'] } },
+    { tool: 'act', input: { path: 'table', id: 'sort', gesture: 'press' }, summary: 'Pressed Sort · 12 changes' },
+    { tool: 'Grep', input: { pattern: 'sort', path: '/Users/x/marble-drive/runtime' } },
+    { say: 'Sorted.' },
+  ],
   // One command somebody refused and one that merely fell over. They arrive
   // the same way; the drawer has to tell them apart.
   refusals: [
@@ -1510,6 +1519,25 @@ test('finished tool rows fold into one line that counts by kind and names source
 // Calling both "Blocked: Bash" read as a drive with no access, when most of
 // them were the agent tripping over its own shell. Only a refusal is a
 // decision, and only a decision gets the word.
+test('an act says what the app did, and stays out of the fold', async () => {
+  const { view } = await mount();
+  await sendFrom(view, 'script:operating');
+  await view.locator('.turn-footer[data-status="completed"]').waitFor();
+
+  // Called as an address and a gesture; reported as the sentence the host
+  // wrote once the control had run.
+  const act = view.locator('.tool[data-kind="act"]');
+  assert.equal(await act.count(), 1);
+  assert.equal((await act.textContent()).trim(), 'Pressed Sort · 12 changes');
+  assert.equal(await act.isVisible(), true, 'an act is never folded away');
+  assert.equal(await view.locator('.tool-group .tool[data-kind="act"]').count(), 0);
+  assert.match(await view.locator('.tool-group-count').first().textContent(), /^2 steps$/);
+  assert.match(
+    await view.locator('.tool-group-kinds').first().textContent(),
+    /Read_affordances/,
+  );
+});
+
 test('a refused command says Blocked, a broken one says Failed, and both keep their label', async () => {
   const { view } = await mount();
   await sendFrom(view, 'script:refusals');

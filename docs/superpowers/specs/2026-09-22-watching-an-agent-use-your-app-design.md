@@ -175,7 +175,34 @@ the chat can take you there, which is the affordance `marble:jump-to` already is
 Reduced motion: no scale, no breath — the ring appears, holds, and fades.
 Reduced transparency: the ring stays; it is a line, and lines are what survive.
 
-## 11. What is built now, and what waits for `act`
+## 11. Four things only the picture said
+
+Written after building it and looking at it, because none of them were visible
+from the prose.
+
+**The label is sized against the viewport, not the control.** The zone's pill
+takes `max-width: 100%` of its frame, which is right for a region and absurd for
+a button: 100% of Sort is four characters, and the sentence rendered as an
+ellipsis. Act labels size against the viewport.
+
+**A control acts on what is under it, so its label goes above it.** Hung below
+in the zone's idiom, the pill covered the first two rows — exactly the rows the
+press had just changed and was flashing. Toolbars sit above their content, so
+the label goes above the control, and drops below only when there is no room up
+there.
+
+**A frame that claims other ids is not a report on the act.** The agent presses
+Sort, then starts writing somewhere else. Read naively, the closing frame's note
+became the act's landed sentence ("pressed · rewrite the list · nothing
+changed"), and the act's label held its zone off the page for three seconds.
+Now a closing frame that claims ids ends the act without lending it a sentence,
+and cuts the tail short so the new zone can be drawn.
+
+**A deferred act names the control, not the gesture.** "Waiting for you ·
+pressing Unread" says the press is happening, which is the one thing that is
+not. The gesture word is dropped: "waiting for you · Unread".
+
+## 12. What is built now, and what waits for `act`
 
 Buildable today, because presence already carries everything: the ring, the
 dwell, the ordering, the label, reduced-motion behaviour, and the browser test
@@ -186,13 +213,19 @@ effect count; `origin: operated` in the log, which is what would let the trail
 distinguish *the agent wrote this* from *your app wrote this*; and the act row's
 rewrite-on-result in the conversation.
 
-One rule about that row goes in now, because it is a decision and not plumbing:
-**an act row never folds.** The stream folds runs of finished steps into "7
+Two rules about that row go in now, because they are decisions and not plumbing.
+**An act row never folds.** The stream folds runs of finished steps into "7
 steps" because reads and greps are the agent's business. An act is not the
 agent's business — it is a thing that happened in the person's document, by the
 person's app. It stays on its own line, with the reads folded around it.
 
-## 12. Decided, with the reasoning
+And **an act row is the one row its own result rewrites.** The call is an
+address and a gesture — all the page can say at call time is "Pressing sort".
+What happened is a sentence only the host can write, because only the host read
+the control's words and counted the ops. So `act`'s result leads with that line,
+and the row takes it: *Pressed Sort · 12 changes*.
+
+## 13. Decided, with the reasoning
 
 - **The press is the agent's colour, the change is the app's.** The alternative —
   everything violet — would say the agent moved twelve rows. It didn't. It
@@ -206,7 +239,7 @@ person's app. It stays on its own line, with the reads folded around it.
 - **Delay the effect to keep the order.** The only thing more confusing than no
   feedback is feedback in the wrong causal order.
 
-## 13. Open
+## 14. Open
 
 - **Replay.** Ops are stamped with the act id, so "show me what that did" is a
   scrub away. Wanted, but it is a second interaction, not a signal.
