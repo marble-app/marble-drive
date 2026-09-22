@@ -708,7 +708,7 @@ __ICON__
      as anchoring a menu to its trigger. */
   .sheet {
     position: fixed; z-index: 30; pointer-events: none;
-    width: 19rem; max-width: calc(100vw - 1rem);
+    width: 23rem; max-width: calc(100vw - 1rem);
     max-height: calc(100vh - 5rem); overflow-y: auto;
     background: rgba(var(--card-rgb), .88); backdrop-filter: blur(24px) saturate(160%);
     -webkit-backdrop-filter: blur(24px) saturate(160%);
@@ -718,23 +718,194 @@ __ICON__
     transition: transform var(--t) var(--settle), opacity var(--t) var(--settle);
   }
   .sheet[data-open="1"] { pointer-events: auto; transform: none; opacity: 1; }
-  .sheet p { margin: .25rem .55rem .4rem; color: var(--faint); font-size: .78rem; line-height: 1.4; }
-  .starters { display: grid; grid-template-columns: repeat(auto-fill, minmax(11rem, 1fr)); gap: .7rem; }
-  .starter {
-    text-align: left; padding: .8rem .9rem; border: 1px solid var(--line); border-radius: var(--radius);
-    background: var(--card); color: var(--ink); cursor: pointer;
+  .sheet p { margin: .25rem .55rem .5rem; color: var(--faint); font-size: .78rem; line-height: 1.4; }
+  /* The way out of a menu and into the room it is a corner of. */
+  .sheet-all {
+    display: block; width: 100%; margin-top: .4rem; padding: .45rem .5rem;
+    border: 0; border-radius: 8px; background: none; color: var(--muted);
+    font-size: .82rem; text-align: left; cursor: pointer;
   }
-  .starter:hover { background: var(--paper-3); }
-  .starter b { display: flex; align-items: center; gap: .5rem; font-weight: 500; margin-bottom: .25rem; }
-  .starter i { flex: 0 0 auto; width: .6rem; height: .6rem; border-radius: 3px; background: var(--accent-ink); }
-  .starter span { display: block; color: var(--faint); font-size: .8rem; line-height: 1.4; }
-  /* In the menu the same starters stack as rows, not a grid of cards: no border
-     of their own, the blurb tucked under the title past the swatch. */
-  .sheet .starters { display: block; }
-  .sheet .starter { border: 0; border-radius: 6px; padding: .5rem .55rem; }
-  .sheet .starter b { margin-bottom: .1rem; }
-  .sheet .starter b span { color: var(--ink); }
-  .sheet .starter .blurb { padding-left: 1.1rem; font-size: .76rem; }
+  .sheet-all:hover { background: var(--paper-3); color: var(--ink); }
+
+  /* --------------------------------------------------------- the gallery */
+  /* A template is a document, so a card for one is a picture of a document.
+     These were eight cards that differed only in the sentence written on them,
+     under eight swatches that were all the same grey — which is a set you have
+     to read twice to choose from. Now each card mounts the real starter, built
+     and stripped of anything that could run, in the same sandboxed frame a
+     grid tile uses; the only text left is its name. The prose is one level
+     down, in the panel you get when you pick one, which is where somebody who
+     wants to read is standing.
+
+     Colour is the second cue and does the work the swatch never did: each
+     starter carries an accent out of the Drive's own folder palette, served
+     with it, and the card wears it as `--tint`. The third is shape — a
+     schematic of the document's structure, which is what shows while the frame
+     loads and what stays if it never does. */
+  /* Outranks whichever view the listing was last in: those rules are
+     `body[data-view="grid"] .items`, and a gallery is not a listing in any of
+     the seven senses they mean. */
+  body[data-view] .items[data-gallery] {
+    display: block; overflow-y: auto; padding: .8rem 1.4rem 2.5rem;
+  }
+  .tlead { margin: 0 0 1rem; color: var(--faint); font-size: .84rem; max-width: 46ch; }
+  .tgrid {
+    display: grid; grid-template-columns: repeat(auto-fill, minmax(15rem, 1fr));
+    gap: 1rem; align-content: start;
+  }
+  /* The same card at the density a popover can afford: two columns, no shadow
+     of its own against the blurred panel, and the picture a little shorter. It
+     is the same component deliberately — a thing that looks the same has to
+     behave the same, and picking here and picking on the page are one gesture. */
+  .tgrid[data-compact] { grid-template-columns: 1fr 1fr; gap: .45rem; }
+  .tcard {
+    --tint: var(--accent-ink); --on-tint: #fff;
+    position: relative; display: block; width: 100%; padding: 0; text-align: left;
+    border: 1px solid var(--line); border-radius: var(--radius); overflow: hidden;
+    background: var(--card); color: var(--ink); cursor: pointer; box-shadow: var(--shadow);
+  }
+  .tcard:hover {
+    transform: translateY(-2px); box-shadow: var(--shadow-lift);
+    border-color: color-mix(in srgb, var(--tint) 45%, var(--line));
+  }
+  /* Outranks the page-wide `button:active`, which would shrink the whole card
+     about its middle and drop it back behind the lift. */
+  .tcard:active { transform: translateY(-1px) scale(.985); }
+  .tcard:focus-visible { outline: 2px solid var(--tint); outline-offset: 2px; }
+  .tgrid[data-compact] .tcard { box-shadow: none; }
+
+  /* The picture. `--z` is the one number: the frame is rendered at full size
+     and scaled down by it, so the page it holds is laid out as a page rather
+     than as a very narrow column, and the wrapper only has to be the reciprocal
+     wide. The panel reuses this at a third rather than a fifth. */
+  .tpeek {
+    --z: .2;
+    position: relative; display: grid; place-items: center; overflow: hidden;
+    aspect-ratio: 4 / 3; background: var(--card); color: var(--tint);
+  }
+  .tpeek iframe {
+    position: absolute; top: 0; left: 0; border: 0; background: var(--card);
+    width: calc(100% / var(--z)); height: calc(100% / var(--z));
+    transform: scale(var(--z)); transform-origin: top left;
+    opacity: 0; pointer-events: none;
+    transition: opacity var(--t-slow) var(--settle), transform var(--t) var(--settle);
+  }
+  .tpeek.marble-is-loaded iframe { opacity: 1; }
+  .tpeek.marble-is-loaded .tglyph { display: none; }
+  /* A hover leans into the page rather than lighting the card up: the room is
+     the preview, so the preview is what answers. */
+  .tcard:hover .tpeek iframe { transform: scale(calc(var(--z) * 1.03)); }
+  .tgrid[data-compact] .tpeek { aspect-ratio: 3 / 2; }
+  .tpeek .tglyph { width: 2.4rem; height: 2.4rem; opacity: .4; }
+  .tfoot {
+    display: flex; align-items: center; gap: .5rem; padding: .55rem .7rem;
+    border-top: 2px solid var(--tint); background: var(--card); font-weight: 500;
+  }
+  .tfoot .tglyph { flex: 0 0 auto; width: 1rem; height: 1rem; color: var(--tint); }
+  .tfoot b { font-weight: 500; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .tgrid[data-compact] .tfoot { padding: .38rem .5rem; font-size: .82rem; }
+  .tgrid[data-compact] .tfoot .tglyph { width: .85rem; height: .85rem; }
+
+  /* ----------------------------------------------------------- the brief */
+  /* Picking a template does not make a document, it opens this: what to call
+     it, and what you want built in it. Leave the second field alone and it is
+     the clone it always was — that is the whole of the agency here, and it is
+     why there is one button rather than two, with the truth written on it.
+
+     A modal task, so it is dimmed to: the scrim pushes the listing back, and
+     the panel grows out of the card that was pressed and shrinks back into it
+     (`--from` is set from that card's rect, once, per opening). */
+  .scrim {
+    position: fixed; inset: 0; z-index: 40; background: rgba(0, 0, 0, .3);
+    opacity: 0; pointer-events: none; transition: opacity var(--t) var(--settle);
+  }
+  .scrim[data-open="1"] { opacity: 1; pointer-events: auto; }
+  .start {
+    --tint: var(--accent-ink); --on-tint: #fff;
+    position: fixed; z-index: 41; left: 50%; top: 50%;
+    width: min(46rem, calc(100vw - 2rem)); max-height: calc(100vh - 3rem); overflow-y: auto;
+    display: grid; grid-template-columns: 16rem 1fr; gap: 1.3rem;
+    padding: 1.1rem; border: 1px solid var(--line); border-radius: 18px;
+    background: var(--card); box-shadow: var(--shadow-lift);
+    transform-origin: var(--from, 50% 50%);
+    transform: translate(-50%, -50%) scale(.92); opacity: 0; pointer-events: none;
+    transition: transform var(--t) var(--settle), opacity var(--t) var(--settle);
+  }
+  .start[data-open="1"] { transform: translate(-50%, -50%) scale(1); opacity: 1; pointer-events: auto; }
+  .start-shot { border: 1px solid var(--line); border-radius: 12px; overflow: hidden; align-self: start; }
+  /* Taller and closer in than the card's: the same picture, at the size you
+     look at rather than the size you scan. A document is a page and the top of
+     it is what a preview has — so a template whose document is short shows its
+     own white space here, which is what opening it would show too. */
+  .start-shot .tpeek { --z: .3; aspect-ratio: 4 / 5; }
+  /* The actions run the full width under both columns rather than under the
+     fields alone: it is the panel that is being committed, not the form. */
+  .start-foot {
+    grid-column: 1 / -1; padding-top: .85rem; border-top: 1px solid var(--line);
+  }
+  .start h2 { margin: 0 0 .3rem; font-size: 1.2rem; font-weight: 500; letter-spacing: -.012em; }
+  .start-blurb { margin: 0 0 1.1rem; color: var(--muted); font-size: .86rem; line-height: 1.5; max-width: 40ch; }
+  .start-label {
+    display: block; margin: 0 0 .32rem; color: var(--faint);
+    font-size: .72rem; letter-spacing: .04em; text-transform: uppercase;
+  }
+  .start-label span { text-transform: none; letter-spacing: 0; opacity: .75; }
+  .start input[type="text"], .start textarea {
+    display: block; width: 100%; margin: 0 0 1rem; padding: .5rem .6rem; font: inherit;
+    color: var(--ink); background: var(--paper); border: 1px solid var(--line);
+    border-radius: 9px; outline: none;
+    transition: border-color var(--t) var(--settle), box-shadow var(--t) var(--settle);
+  }
+  .start input[type="text"]:focus, .start textarea:focus {
+    border-color: var(--tint); box-shadow: 0 0 0 3px color-mix(in srgb, var(--tint) 20%, transparent);
+  }
+  .start textarea { min-height: 4.6rem; margin-bottom: .6rem; line-height: 1.5; resize: vertical; }
+  /* Three of them, concrete. An empty field teaches nothing about what a
+     starter can become; three examples teach most of it, and one tap is the
+     cheapest way to find that out. */
+  .start-ideas { display: flex; flex-wrap: wrap; gap: .35rem; margin: 0; }
+  .start-ideas button {
+    padding: .3rem .65rem; border: 1px solid var(--line); border-radius: 999px;
+    background: var(--paper-2); color: var(--muted); font-size: .78rem;
+    text-align: left; cursor: pointer;
+  }
+  .start-ideas button:hover {
+    background: var(--card); color: var(--ink);
+    border-color: color-mix(in srgb, var(--tint) 50%, var(--line));
+  }
+  .start-foot { display: flex; align-items: center; gap: .5rem; }
+  .start-body { min-width: 0; }
+  /* Where it lands, said out loud. A create that puts the file somewhere you
+     were not looking is the one failure this panel can still have. */
+  .start-where {
+    flex: 1 1 auto; min-width: 0; color: var(--faint); font-size: .8rem;
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  }
+  .start-foot button {
+    padding: .45rem .95rem; border: 1px solid var(--line); border-radius: 9px;
+    background: var(--card); color: var(--ink); font-size: .88rem; cursor: pointer;
+  }
+  .start-foot button:hover { background: var(--paper-3); }
+  /* Filled in the template's own colour, with a label colour chosen from that
+     colour's luminance rather than fixed — white on Pearl is unreadable and
+     black on Slate is worse. */
+  #start-go {
+    border-color: transparent; background: var(--tint); color: var(--on-tint); font-weight: 500;
+  }
+  #start-go[disabled] { opacity: .55; cursor: default; }
+  #start-go[disabled]:hover { background: var(--tint); }
+  @media (max-width: 44rem) {
+    .start { grid-template-columns: 1fr; gap: .8rem; }
+    .start-shot .tpeek { aspect-ratio: 16 / 9; --z: .26; }
+  }
+  /* A panel that scales is a panel that moves; reduced motion gets the arrival
+     without the travel, and a card that answers a hover without rising. */
+  @media (prefers-reduced-motion: reduce) {
+    .start { transform: translate(-50%, -50%); transition: opacity var(--t) linear; }
+    .start[data-open="1"] { transform: translate(-50%, -50%); }
+    .tcard:hover { transform: none; }
+    .tcard:hover .tpeek iframe { transform: scale(var(--z)); }
+  }
 
   .menu {
     position: fixed; z-index: 30; pointer-events: none; min-width: 12rem; padding: .35rem;
@@ -946,8 +1117,35 @@ __ICON__
 </div>
 
 <div class="sheet" id="sheet" data-marble-transient>
-  <p>A starter is a document you clone. The copy is yours — including the parts of it you would rather were different.</p>
-  <div class="starters" id="starters"></div>
+  <!-- No sentence at the top of it. The menu that used to open with a line of
+       prose above eight more now opens with the eight documents themselves; the
+       line it opened with says what a starter is, and it is on the Templates
+       page, where somebody who wants to read is already standing. -->
+  <div class="tgrid" id="starters" data-compact></div>
+  <button type="button" class="sheet-all" id="all-templates">All templates</button>
+</div>
+
+<!-- Picking a template does not make a document; it opens a brief. What to call
+     it, and what you want built in it — leave that second field alone and this
+     is the clone it always was. Transient, all of it: a panel about making a
+     document is not part of any document, and none of it is ever written down. -->
+<div class="scrim" id="scrim" data-marble-transient></div>
+<div class="start" id="start" data-marble-transient role="dialog" aria-modal="true" aria-labelledby="start-title">
+  <div class="start-shot"><span class="tpeek" id="start-preview"></span></div>
+  <div class="start-body">
+    <h2 id="start-title"></h2>
+    <p class="start-blurb" id="start-blurb"></p>
+    <label class="start-label" for="start-name">Name</label>
+    <input id="start-name" type="text" autocomplete="off" spellcheck="false">
+    <label class="start-label" for="start-prompt">What do you want to build? <span>optional</span></label>
+    <textarea id="start-prompt" rows="3"></textarea>
+    <div class="start-ideas" id="start-ideas"></div>
+  </div>
+  <div class="start-foot">
+    <span class="start-where" id="start-where"></span>
+    <button type="button" id="start-cancel">Cancel</button>
+    <button type="button" id="start-go">Create</button>
+  </div>
 </div>
 
 <div class="menu" id="menu" data-marble-transient></div>
@@ -1379,6 +1577,9 @@ __ICON__
       const mode = () => document.body.getAttribute('data-view') || 'grid';
 
       function draw() {
+        // Anything drawn into this container that is not the gallery is a
+        // listing again, and wants the listing's own padding back.
+        items.removeAttribute('data-gallery');
         if (!latest) return;
         const m = mode();
         // Timeline and Pulse both ask "when" of documents specifically, so
@@ -1825,37 +2026,231 @@ __ICON__
         return node;
       }
 
+      // ---------------------------------------------------------- the gallery
+      //
+      // A template is a document, so a card for one is a picture of a document.
+      // Nothing on it has to be read but the name: the sentence each starter
+      // used to wear is one level down, in the brief you get when you pick one.
+
+      // The structure of each starter, drawn. It is what shows while the frame
+      // loads and what stays if it never does — and in the card's foot it stays
+      // whatever happens, so shape and colour say which template this is before
+      // the picture has arrived. A starter with no drawing here gets the plain
+      // document mark rather than nothing.
+      const SCHEMATIC = {
+        doc: '<rect x="3" y="1.8" width="10" height="12.4" rx="1.6"/><path d="M5.4 5.3h5.2M5.4 8h5.2M5.4 10.7h3.2"/>',
+        note: '<rect x="1.9" y="4.4" width="9.4" height="9.6" rx="1.6"/><path d="M5.2 2.2h7.2a1.6 1.6 0 0 1 1.6 1.6v7.3"/><path d="M4.5 7.6h4.2M4.5 10.3h2.6"/>',
+        sheet: '<rect x="2" y="2.6" width="12" height="10.8" rx="1.4"/><path d="M2 6.2h12M2 9.8h12M6.4 2.6v10.8M10.2 2.6v10.8"/>',
+        board: '<rect x="1.8" y="2.4" width="3.6" height="11.2" rx="1.2"/><rect x="6.2" y="2.4" width="3.6" height="7.6" rx="1.2"/><rect x="10.6" y="2.4" width="3.6" height="9.4" rx="1.2"/>',
+        canvas: '<rect x="1.8" y="2.2" width="5.2" height="4" rx="1.1"/><rect x="9" y="4.6" width="5.2" height="4" rx="1.1"/><rect x="4.4" y="9.2" width="5.2" height="4.4" rx="1.1"/>',
+        slides: '<rect x="1.8" y="2.6" width="12.4" height="8.2" rx="1.4"/><path d="M4.8 13.4h6.4"/>',
+        paper: '<rect x="2.4" y="1.8" width="11.2" height="12.4" rx="1.4"/><path d="M5 4.4h6"/><rect x="4.6" y="6.6" width="2.8" height="5" rx=".6"/><rect x="8.6" y="6.6" width="2.8" height="5" rx=".6"/>',
+        latex: '<rect x="2.4" y="1.8" width="11.2" height="12.4" rx="1.4"/><path d="M4.9 4.4h6.2"/><path d="M10 7H6l2.1 2.1L6 11.2h4"/>',
+      };
+
+      const schematic = (id) =>
+        '<svg class="tglyph" viewBox="0 0 16 16" aria-hidden="true" focusable="false">' +
+        '<g fill="none" stroke="currentColor" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round">' +
+        (SCHEMATIC[id] ?? SCHEMATIC.doc) + '</g></svg>';
+
+      // What can be read on a given accent. The seven run from Pearl to
+      // Research green, and one fixed label colour is unreadable at one end or
+      // the other — so it is measured rather than picked.
+      function onTint(hex) {
+        const n = parseInt(String(hex).replace('#', ''), 16);
+        if (!Number.isFinite(n)) return '#ffffff';
+        const lin = (c) => (c / 255 <= 0.04045 ? c / 255 / 12.92 : ((c / 255 + 0.055) / 1.055) ** 2.4);
+        const luma = 0.2126 * lin((n >> 16) & 255) + 0.7152 * lin((n >> 8) & 255) + 0.0722 * lin(n & 255);
+        return luma > 0.3 ? '#101010' : '#ffffff';
+      }
+
+      function tinted(el, accent) {
+        el.style.setProperty('--tint', accent);
+        el.style.setProperty('--on-tint', onTint(accent));
+      }
+
+      // One card, at whichever density it was asked for. The same element in the
+      // page's grid and in the New popover, because picking a template is one
+      // gesture and a thing that looks the same has to behave the same.
+      function templateCard(starter) {
+        const card = document.createElement('button');
+        card.type = 'button';
+        card.className = 'tcard';
+        card.dataset.id = starter.id;
+        card.dataset.accent = starter.accent;
+        tinted(card, starter.accent);
+        card.setAttribute('aria-label', 'Start from the ' + starter.title + ' template');
+        // The sentence is not on the card, but it is not hidden either: a hover
+        // is where somebody who wants it will look for it.
+        card.title = starter.blurb;
+        card.innerHTML =
+          '<span class="tpeek">' + schematic(starter.id) + '</span>' +
+          '<span class="tfoot">' + schematic(starter.id) + '<b></b></span>';
+        card.querySelector('.tfoot b').textContent = starter.title;
+        const peek = card.querySelector('.tpeek');
+        // The same lazy observer the listing's tiles use: one place that knows
+        // how a preview is mounted, whatever is being previewed.
+        peek.dataset.src = drive.starterPreviewHref(starter.id);
+        peekObserver.observe(peek);
+        card.addEventListener('click', () => openStart(starter, card));
+        return card;
+      }
+
       async function drawTemplates() {
         const starters = await drive.starters();
-        items.replaceChildren();
+        const lead = document.createElement('p');
+        lead.className = 'tlead';
+        lead.textContent =
+          'Every template is a document you clone. The copy is yours — including the parts of it you would rather were different.';
         const grid = document.createElement('div');
-        grid.className = 'starters';
-        for (const starter of starters) grid.append(starterButton(starter));
-        items.append(grid);
+        grid.className = 'tgrid';
+        for (const starter of starters) grid.append(templateCard(starter));
+        // The listing's padding is set per view and the gallery is not a
+        // listing; `#items` is transient, so this attribute is the page's to
+        // set and is never written down.
+        items.dataset.gallery = '1';
+        items.replaceChildren(lead, grid);
         drawCrumbs();
       }
 
-      function starterButton(starter) {
-        const button = document.createElement('button');
-        button.className = 'starter';
-        button.innerHTML = '<b><i></i><span></span></b><span class="blurb"></span>';
-        button.querySelector('i').style.background = starter.accent;
-        button.querySelector('b span').textContent = starter.title;
-        button.querySelector('.blurb').textContent = starter.blurb;
-        button.addEventListener('click', () => make(starter));
-        return button;
+      // ------------------------------------------------------------ the brief
+
+      const startPanel = $('#start');
+      const scrim = $('#scrim');
+      // The template the panel is about, and the card it grew out of — which is
+      // also where focus goes back to when it closes.
+      let starting = null;
+
+      function openStart(starter, from) {
+        starting = { starter, from };
+        tinted(startPanel, starter.accent);
+        $('#start-title').textContent = starter.title;
+        $('#start-blurb').textContent = starter.blurb;
+
+        const shot = $('#start-preview');
+        shot.className = 'tpeek';
+        shot.innerHTML = schematic(starter.id);
+        shot.dataset.src = drive.starterPreviewHref(starter.id);
+        peekObserver.observe(shot);
+
+        const name = $('#start-name');
+        const wish = $('#start-prompt');
+        name.value = starter.title;
+        wish.value = '';
+        wish.placeholder = starter.hint ?? '';
+        paintGo();
+
+        const ideas = $('#start-ideas');
+        ideas.replaceChildren();
+        for (const idea of starter.ideas ?? []) {
+          const chip = document.createElement('button');
+          chip.type = 'button';
+          chip.textContent = idea;
+          chip.addEventListener('click', () => {
+            wish.value = idea;
+            wish.focus();
+            paintGo();
+          });
+          ideas.append(chip);
+        }
+
+        $('#start-where').textContent = 'into ' + (here || 'My Drive');
+
+        sheet.removeAttribute('data-open');
+        growFrom(startPanel, from);
+        scrim.setAttribute('data-open', '1');
+        startPanel.setAttribute('data-open', '1');
+        // Selected, not just filled: the name a template suggests is a name you
+        // should be able to replace by typing.
+        name.focus();
+        name.select();
       }
 
-      async function make(starter) {
-        const name = prompt('Name for the new ' + starter.title.toLowerCase(), starter.title.toLowerCase());
-        if (!name) return;
+      // Out of the card that was pressed, and back into it. The panel is
+      // centred, so the origin is that card's middle expressed in the panel's
+      // own box — measured off `offsetWidth`, which is the layout size and not
+      // the scaled one the transform is currently showing.
+      function growFrom(panel, from) {
+        const box = from?.getBoundingClientRect?.();
+        if (!box) return panel.style.removeProperty('--from');
+        const w = panel.offsetWidth;
+        const h = panel.offsetHeight;
+        const clamp = (v, hi) => Math.max(0, Math.min(hi, v));
+        const x = clamp(box.left + box.width / 2 - (innerWidth / 2 - w / 2), w);
+        const y = clamp(box.top + box.height / 2 - (innerHeight / 2 - h / 2), h);
+        panel.style.setProperty('--from', x + 'px ' + y + 'px');
+      }
+
+      function closeStart() {
+        if (startPanel.getAttribute('data-open') !== '1') return false;
+        startPanel.removeAttribute('data-open');
+        scrim.removeAttribute('data-open');
+        const back = starting?.from;
+        starting = null;
+        // A panel that closes onto nothing leaves you looking for where you were.
+        if (back?.isConnected) back.focus();
+        return true;
+      }
+
+      // One button, and it says which of the two things it is about to do.
+      // Two buttons where one is always dead is a choice you have to read.
+      function paintGo() {
+        const go = $('#start-go');
+        if (go.disabled) return;
+        go.textContent = $('#start-prompt').value.trim() ? 'Create & build' : 'Create';
+      }
+
+      // Short, because the agent is already told what a Marble document is and
+      // what the ids in it are for. What it cannot know is which template this
+      // came out of and that every part of it is fair game.
+      const briefFor = (starter, words) =>
+        'I just made this document from the “' + starter.title + '” template in Marble Drive — ' +
+        'a fresh clone, so all of it is mine to change.\n\n' +
+        'What I want: ' + words + '\n\n' +
+        'Build it in this document. Keep it one file that works on its own, the way the template does.';
+
+      async function commitStart() {
+        if (!starting) return;
+        const { starter } = starting;
+        const go = $('#start-go');
+        if (go.disabled) return;
+        const name = $('#start-name').value.trim() || starter.title;
+        const words = $('#start-prompt').value.trim();
+        const said = go.textContent;
+        // The answer happens at the control, not in a toast across the room.
+        go.disabled = true;
+        go.textContent = 'Creating…';
+
+        let made;
         try {
-          const made = await drive.create({ path: [here, name].filter(Boolean).join('/'), from: starter.id });
-          sheet.removeAttribute('data-open');
-          say('Made ' + made.path);
-          location.href = made.href;
+          made = await drive.create({ path: [here, name].filter(Boolean).join('/'), from: starter.id });
         } catch (err) {
-          fail(err);
+          go.disabled = false;
+          go.textContent = said;
+          return fail(err);
+        }
+
+        if (!words) {
+          location.href = made.href;
+          return;
+        }
+
+        // The document exists now whatever happens next, so a failure from here
+        // is said out loud and then walked past. Losing the file because no
+        // agent could be reached would be much the worse of the two outcomes.
+        try {
+          const settings = await marble.agent.settings();
+          const conversation = await marble.agent.start({ provider: settings.defaultProvider });
+          await marble.agent.send(conversation, {
+            prompt: briefFor(starter, words),
+            target: made.path,
+            viewing: made.path,
+            selection: [],
+          });
+          location.href = made.href + '#chat=' + encodeURIComponent(conversation);
+        } catch {
+          say('Made ' + made.path + ' — but there is no agent here to build it');
+          location.href = made.href;
         }
       }
 
@@ -1964,13 +2359,20 @@ __ICON__
         go(here.includes('/') ? here.slice(0, here.lastIndexOf('/')) : '');
       });
 
-      document.querySelector('#nav').addEventListener('click', (event) => {
-        const item = event.target.closest('.nav-item');
-        if (!item || !item.dataset.nav) return;
-        view = item.dataset.nav;
+      // Which room you are in. Named, because the nav is not the only thing
+      // that sends you somewhere — the New menu's way out does too, and two
+      // copies of "set it, paint it, draw it" would drift apart.
+      function goView(next) {
+        view = next;
         if (view === 'drive') return go(here);
         drawNav();
         refresh();
+      }
+
+      document.querySelector('#nav').addEventListener('click', (event) => {
+        const item = event.target.closest('.nav-item');
+        if (!item || !item.dataset.nav) return;
+        goView(item.dataset.nav);
       });
 
       // A plain click on a pin focuses its label — the pin's name is
@@ -2023,7 +2425,7 @@ __ICON__
         const starters = await drive.starters();
         const grid = document.querySelector('#starters');
         grid.replaceChildren();
-        for (const starter of starters) grid.append(starterButton(starter));
+        for (const starter of starters) grid.append(templateCard(starter));
         // Hung under the button that opened it, nudged back inside the window at
         // the edges — the same placement the row menu does off its anchor. The
         // rect is read from the button held in scope, not from the event: this
@@ -2149,7 +2551,38 @@ __ICON__
         }
       });
 
+      $('#all-templates').addEventListener('click', () => {
+        sheet.removeAttribute('data-open');
+        goView('templates');
+      });
+
+      $('#start-go').addEventListener('click', commitStart);
+      $('#start-cancel').addEventListener('click', closeStart);
+      scrim.addEventListener('click', closeStart);
+      $('#start-prompt').addEventListener('input', paintGo);
+      // Enter accepts the name, because a name is one line. In the wish it is a
+      // new line, and the commit is the modifier — the field is the thing you
+      // are writing in, and it keeps its own key.
+      $('#start-name').addEventListener('keydown', (event) => {
+        if (event.key !== 'Enter') return;
+        event.preventDefault();
+        commitStart();
+      });
+      $('#start-prompt').addEventListener('keydown', (event) => {
+        if (event.key !== 'Enter' || !(event.metaKey || event.ctrlKey)) return;
+        event.preventDefault();
+        commitStart();
+      });
+
       addEventListener('keydown', (event) => {
+        // The brief is the innermost layer and it is made of fields, so its
+        // Escape has to be answered before the guard below that lets a field
+        // keep its own keys — otherwise the one place you are certainly typing
+        // is the one place Escape does not work.
+        if (event.key === 'Escape' && closeStart()) {
+          event.preventDefault();
+          return;
+        }
         // A document in the drive is editable content, and Enter inside it is a
         // paragraph, not a command. Only the page's own chrome gets these keys.
         // composedPath, not target: the agent composer lives in shadow DOM, and

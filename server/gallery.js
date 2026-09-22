@@ -84,9 +84,9 @@ export const STARTERS = [
     accent: '#3d6b8a',
     hint: 'A weekly research log, with a heading a week and room for links',
     ideas: [
-      'A reading log: a section a paper, the quote above what I thought of it',
-      'A meeting note that opens with the decisions and keeps the rest under them',
-      'A wiki page with its links down the left and the writing beside them',
+      'A reading log: a section a paper, with my notes',
+      'A meeting note that opens with the decisions',
+      'A wiki page with its links down the left',
     ],
   },
   {
@@ -106,9 +106,9 @@ export const STARTERS = [
     accent: '#7e91a3',
     hint: 'A journal I keep adding to, newest at the top',
     ideas: [
-      'A journal, one note a day, the newest one first',
-      'A scratchpad where each note carries a tag I can read the list by',
-      'A recipe book: a note a recipe, the ingredients above the method',
+      'A journal, a note a day, newest first',
+      'A scratchpad where each note carries a tag',
+      'A recipe book, ingredients above the method',
     ],
   },
   {
@@ -119,8 +119,8 @@ export const STARTERS = [
     accent: '#2f6f5b',
     hint: 'A budget with a column for the plan and one for what I spent',
     ideas: [
-      'A reading list with a column for status and one for what I rated it',
-      'A budget that totals every column at the foot',
+      'A reading list with status and rating columns',
+      'A budget that totals every column',
       'A habit tracker: a row a week, a tick a day',
     ],
   },
@@ -133,8 +133,8 @@ export const STARTERS = [
     hint: 'A sprint board with columns for triage, doing and shipped',
     ideas: [
       'A paper board: to read, reading, cited',
-      'A sprint board with a column for blocked and a count on each column',
-      'A trip planner with a column a day and a card a plan',
+      'A sprint board with a count on each column',
+      'A trip planner, a column a day',
     ],
   },
   {
@@ -145,9 +145,9 @@ export const STARTERS = [
     accent: '#6f8f7d',
     hint: 'A mood board I can drag pictures and notes around on',
     ideas: [
-      'A mind map where a note can be joined to another with a line',
-      'A mood board with a swatch of colour beside each note',
-      'A seating plan I can drag people around on',
+      'A mind map, with lines drawn between the notes',
+      'A mood board with a swatch beside each note',
+      'A seating plan I can drag people around',
     ],
   },
   {
@@ -158,9 +158,9 @@ export const STARTERS = [
     accent: '#c45c3e',
     hint: 'A ten-minute talk, with a title slide and my notes under each one',
     ideas: [
-      'A conference talk with speaker notes under every slide',
-      'A lecture deck with a progress bar across the foot',
-      'A pitch with one big number on each slide',
+      'A talk with speaker notes under each slide',
+      'A lecture deck with a progress bar',
+      'A pitch with one big number a slide',
     ],
   },
   {
@@ -175,9 +175,9 @@ export const STARTERS = [
     accent: '#8b5e3c',
     hint: 'A CHI submission with the sections I always write and my bibliography',
     ideas: [
-      'A CHI paper with the sections stubbed and a figure environment ready',
-      'A UIST submission: one column while I draft, two when I send it',
-      'A rebuttal with each reviewer’s point quoted above my answer',
+      'A CHI paper with the sections stubbed',
+      'A UIST draft in one column, sent in two',
+      'A rebuttal, each point quoted above my answer',
     ],
   },
   {
@@ -199,7 +199,7 @@ export const STARTERS = [
     hint: 'A problem set where every answer typesets on its own',
     ideas: [
       'A problem set with a macro for the answer boxes',
-      'A thesis chapter: a file a section, one bibliography under them',
+      'A thesis chapter: a file a section',
       'A one-page CV that typesets itself',
     ],
   },
