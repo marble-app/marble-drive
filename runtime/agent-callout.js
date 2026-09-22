@@ -73,19 +73,36 @@
     .marble-callout[data-live] .marble-callout-live { opacity: 1; animation: marble-callout-pulse 1.4s ease-in-out infinite; }
     @keyframes marble-callout-pulse { 50% { opacity: .35; } }
     .marble-callout-status { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-    .marble-callout-actions, .marble-callout-tools { display: flex; gap: 2px; flex: none; }
+    .marble-callout-actions, .marble-callout-tools { display: flex; align-items: center; gap: 2px; flex: none; }
     .marble-callout-head button {
       font: inherit; font-size: 12px; border: 0; background: none; color: inherit; cursor: pointer;
       padding: 2px 6px; border-radius: 6px; white-space: nowrap;
     }
     .marble-callout-head button:hover { background: color-mix(in srgb, var(--callout-mark) 12%, transparent); }
+    .marble-callout-head button:active { opacity: .7; }
     .marble-callout-head button[hidden] { display: none; }
+    /* The head's own padding would win over a lone class and make the icon
+       button a different box from its neighbour. Both corners are this box. */
+    .marble-callout-head button.marble-callout-icon {
+      box-sizing: border-box; width: 22px; height: 22px; padding: 0; flex: none;
+      display: grid; place-items: center; line-height: 0; border-radius: 6px;
+    }
+    .marble-callout-icon svg { display: block; }
+    .marble-callout-tip {
+      position: fixed; z-index: 2; margin: 0; padding: 3px 7px; border-radius: 6px;
+      border: 1px solid color-mix(in srgb, var(--callout-ink) 12%, transparent);
+      background: var(--callout-paper); color: var(--callout-ink);
+      box-shadow: 0 4px 14px rgba(0,0,0,.14);
+      font: 500 11px/1.3 var(--ui-font, system-ui, sans-serif);
+      letter-spacing: -.011em; white-space: nowrap; pointer-events: none;
+    }
+    .marble-callout-tip[hidden] { display: none; }
     .marble-callout marble-conversation { display: flex; max-height: min(70vh, 560px); }
     .marble-callout[hidden] { display: none; }
     .marble-callout[data-state="pill"] { width: auto; max-width: 320px; border-radius: 999px; cursor: pointer; }
     .marble-callout[data-state="pill"] .marble-callout-head { padding: 5px 12px; }
     .marble-callout[data-state="pill"] marble-conversation,
-    .marble-callout[data-state="pill"] .marble-callout-fold,
+    .marble-callout[data-state="pill"] .marble-callout-tools,
     .marble-callout[data-state="pill"] .marble-callout-actions { display: none; }
     /* The body crossfades while the box travels, so folding reads as one
        move rather than a resize with a hole in it. */
@@ -153,6 +170,53 @@
       return b;
     };
 
+    // The tip lives on the layer, not in the card: the card clips its overflow
+    // so the fold can hide the body, and a label inside it would be cut off.
+    const tip = document.createElement('div');
+    tip.className = 'marble-callout-tip';
+    tip.setAttribute('role', 'tooltip');
+    tip.hidden = true;
+    layer.append(tip);
+    let tipTimer = 0;
+    const hideTip = () => {
+      clearTimeout(tipTimer);
+      tip.hidden = true;
+    };
+    const showTip = (anchor, text) => {
+      clearTimeout(tipTimer);
+      tipTimer = setTimeout(() => {
+        if (!anchor.isConnected) return;
+        tip.textContent = text;
+        layer.append(tip);
+        tip.hidden = false;
+        const box = anchor.getBoundingClientRect();
+        const size = tip.getBoundingClientRect();
+        let left = box.left + box.width / 2 - size.width / 2;
+        left = Math.max(8, Math.min(left, innerWidth - size.width - 8));
+        let top = box.top - size.height - 6;
+        if (top < 8) top = box.bottom + 6;
+        tip.style.left = `${Math.round(left)}px`;
+        tip.style.top = `${Math.round(top)}px`;
+      }, stillness.matches ? 0 : 320);
+    };
+    const iconButton = (svg, label, hint, onClick) => {
+      const b = button('', label, onClick);
+      b.classList.add('marble-callout-icon');
+      b.innerHTML = svg;
+      const arm = (event) => {
+        if (event.pointerType === 'touch') return;
+        showTip(b, hint);
+      };
+      b.addEventListener('pointerenter', arm);
+      b.addEventListener('focus', () => showTip(b, hint));
+      b.addEventListener('pointerleave', hideTip);
+      b.addEventListener('pointerdown', hideTip);
+      b.addEventListener('blur', hideTip);
+      return b;
+    };
+    const SIDE_ICON = '<svg width="14" height="14" viewBox="0 0 16 16" aria-hidden="true"><rect x="2.25" y="2.75" width="11.5" height="10.5" rx="1.6" fill="none" stroke="currentColor" stroke-width="1.4"/><path d="M10.15 2.75v10.5" stroke="currentColor" stroke-width="1.4"/></svg>';
+    const MINIMIZE_ICON = '<svg width="14" height="14" viewBox="0 0 16 16" aria-hidden="true"><path d="M4.7 4.7l6.6 6.6M11.3 4.7l-6.6 6.6" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/></svg>';
+
     // ------------------------------------------------------------ records
 
     const records = [];
@@ -183,8 +247,14 @@
       const el = record.el;
       const anchor = anchorOf(record.ids);
       if (!anchor) {
-        // Nothing left to point at: the chat is still reachable, bottom-right.
-        Object.assign(el.style, { left: 'auto', top: 'auto', right: `${PAD}px`, bottom: `${PAD}px` });
+        // Nothing left to point at: the chat is still reachable, bottom-right
+        // — above whatever already lives down there. The drawer's tray takes
+        // its own inset from the safe area, which this layer cannot assume, so
+        // it is measured and the card clears it.
+        const tray = document.querySelector('marble-agent-drawer')?.shadowRoot?.querySelector('.tray');
+        const r = tray?.getBoundingClientRect();
+        const bottom = r?.height ? Math.max(PAD, innerHeight - r.top + GAP) : PAD;
+        Object.assign(el.style, { left: 'auto', top: 'auto', right: `${PAD}px`, bottom: `${bottom}px` });
         return;
       }
       const r = anchor.getBoundingClientRect();
@@ -292,14 +362,20 @@
       const record = { id, ids: [...ids], el, convo, head, live, status, actions, tools, state, changed: new Set(), docked: false, title: '', zone: null, said: false };
       records.push(record);
 
-      // The moves. Id is identity: every one of these is the same chat in
-      // another place, which is why none of them is offered before there is
-      // a chat to move.
-      const beside = button('Open beside', 'Open this chat in the dock', () => {
-        if (!record.id) return;
-        agent.remember?.(record.id);
-        agent.open(record.id);
+      // The two corner controls. The side icon folds the card and opens the
+      // drawer. × only folds it. The pill that is left opens the card again,
+      // so neither control is reachable from the pill. Open in Agents still
+      // needs a conversation to point at, which is why it waits for an id.
+      const beside = iconButton(SIDE_ICON, 'Open this chat on the side', 'Open on the side', () => {
         setState(record, 'pill');
+        if (record.id) {
+          agent.remember?.(record.id);
+          agent.open(record.id);
+          return;
+        }
+        const drawer = document.querySelector('marble-agent-drawer');
+        if (typeof drawer?.startNew === 'function') drawer.startNew();
+        else agent.open();
       });
       const inAgents = button('Open in Agents', 'Open this chat on the Agents page', () => {
         if (!record.id) return;
@@ -307,11 +383,9 @@
         url.searchParams.set('open', record.id);
         location.href = url.href;
       });
-      const paintTools = () => { beside.hidden = inAgents.hidden = !record.id; };
+      const paintTools = () => { inAgents.hidden = !record.id; };
       paintTools();
-      const fold = button('⌄', 'Fold', () => setState(record, 'pill'));
-      fold.className = 'marble-callout-fold';
-      tools.append(beside, inAgents, fold, button('×', 'Close', () => dismiss(record)));
+      tools.append(inAgents, beside, iconButton(MINIMIZE_ICON, 'Minimize', 'Minimize', () => setState(record, 'pill')));
 
       head.addEventListener('click', (event) => {
         if (record.state === 'pill' && !event.target.closest('button')) setState(record, 'card');
@@ -322,25 +396,10 @@
         if (record.id) follow(record);
       });
 
-      // Continue in: the chat this tab was last in, if it is idle. This is
-      // the portable agent — it comes to the new region with its memory —
-      // and it is offered, never assumed: a chat mid-task elsewhere should
-      // not quietly receive an unrelated brief.
-      const lastId = id ? null : agent.current?.();
-      if (lastId) {
-        agent.conversation(lastId).then((detail) => {
-          const meta = detail?.meta;
-          if (!meta || meta.archived || meta.running || record.id || !record.el.isConnected) return;
-          const cont = button(`Continue in ${meta.title || 'the last chat'}`, 'Send this to the chat you were in', () => {
-            record.id = lastId;
-            convo.setAttribute('conversation', lastId);
-            follow(record);
-            cont.remove();
-            paintTools();
-          });
-          tools.prepend(cont);
-        }).catch(() => {});
-      }
+      // A summoned card is a new conversation. The chat this tab was last in
+      // stays where it was: spawning at a selection is a fresh brief, and the
+      // first send creates the conversation rather than joining that one.
+
       // The zone the conversation is drawing is the card's own status line:
       // one object on the page saying where the work is, not two.
       convo.addEventListener('zone', (event) => {
@@ -361,6 +420,11 @@
       handle.hidden = true;
       setState(record, state);
       if (state === 'card') convo.focusInput?.();
+      // A card is the one place a brief made somewhere else can land. The
+      // marks layer listens for this to write a sketch's reading into the
+      // composer; anything else that briefs an agent about a region can do
+      // the same, and nothing here needs to know about any of them.
+      dispatchEvent(new CustomEvent('marble-callout:card', { detail: { id: record.id, ids: [...record.ids], convo } }));
       return record;
     }
 
@@ -449,35 +513,12 @@
       record.actions.replaceChildren(button('Done', 'Mark reviewed and put the callout away', () => done(record)));
     }
 
-    // A closed callout stays closed for this tab. Without this the next
-    // rehydration would hand back the very thing you just shut.
+    // An older × used to shut a callout for this tab. That list is still
+    // honored, so a callout closed before this change does not come back.
     const SHUT_KEY = `marble-callout-shut:${app}`;
     const shutIds = () => {
       try { return new Set(JSON.parse(sessionStorage.getItem(SHUT_KEY) || '[]')); } catch { return new Set(); }
     };
-    function rememberShut(id) {
-      if (!id) return;
-      const set = shutIds();
-      set.add(id);
-      try { sessionStorage.setItem(SHUT_KEY, JSON.stringify([...set])); } catch { /* private mode */ }
-    }
-
-    /** × is close, and close means gone from this page. The chat is not gone:
-     *  Open beside and the Agents page still reach it. A chat that has
-     *  finished is marked reviewed too, because shutting the thing that was
-     *  showing you the work is how you say you have seen it — but a turn
-     *  still running has not been seen yet, so its review waits. */
-    function dismiss(record) {
-      const id = record.id;
-      const working = record.el.hasAttribute('data-live');
-      remove(record);
-      if (!id) return;
-      rememberShut(id);
-      rememberFold(id, false);
-      if (working) return;
-      Promise.resolve(agent.markReviewed(id)).catch(() => {});
-      document.dispatchEvent(new CustomEvent('marble-callout:reviewed', { detail: { id } }));
-    }
 
     // Seeing it and saying done is reviewing it — the rule the Focus pane
     // already uses. The trail goes with the review.
@@ -527,7 +568,11 @@
       const ids = agent.context().selection;
       // A card with no conversation yet is this selection's callout already.
       const drawn = records.some((r) => r.id === null);
-      const target = pointerDown || !ids.length || drawn ? null : anchorOf(ids);
+      // Inside a marks tool mode an overlay in the top layer has the pointer,
+      // so a handle drawn now would be visible and unclickable. The tray is
+      // the way out of a mode; the handle comes back when the mode ends.
+      const marking = Boolean(document.querySelector('.marble-marks-layer')?.dataset.mode);
+      const target = pointerDown || !ids.length || drawn || marking ? null : anchorOf(ids);
       if (!target) { handle.hidden = true; return; }
       const r = target.getBoundingClientRect();
       handle.style.left = `${Math.round(Math.max(PAD, r.left - 10))}px`;
@@ -541,6 +586,7 @@
     }, true);
     addEventListener('pointerup', () => { pointerDown = false; scheduleHandle(); }, true);
     addEventListener('marble:agent-context', scheduleHandle);
+    addEventListener('marble-marks:mode', scheduleHandle);
 
     // ------------------------------------------------------------ summon
 
@@ -552,9 +598,13 @@
         // No room for a card beside the text on a phone; the drawer already
         // carries the selection as its own control. Opening it takes focus,
         // and the native selection collapses with it, so the ids are pinned
-        // before the hand-off rather than read again after it.
+        // before the hand-off rather than read again after it. The drawer
+        // otherwise opens on the chat this tab was last in; a spawn here is
+        // a new conversation, the same as the card on a wider window.
         agent.select(ids);
-        agent.open();
+        const drawer = document.querySelector('marble-agent-drawer');
+        if (typeof drawer?.startNew === 'function') drawer.startNew();
+        else agent.open();
         return true;
       }
       openCard({ ids });
@@ -614,6 +664,11 @@
     }, true);
     addEventListener('keydown', (event) => {
       if (event.key !== 'Escape' || !picked.size) return;
+      // A marks tool mode owns Escape while it is on — this listener runs
+      // first, because this script is injected first, so without the check its
+      // Escape would clear the picks before the mode ever saw the key. The
+      // picks are still there when the mode ends.
+      if (document.querySelector('.marble-marks-layer')?.dataset.mode) return;
       picked.clear();
       commitPicks();
     }, true);

@@ -726,7 +726,25 @@ test("a document is served with the agent scripts after the Drive's, when agents
     /<script src="\/runtime\/collab\.js"[^>]*><\/script>\n<script src="\/runtime\/agent-callout\.js" data-marble-transient><\/script>/,
     'the callout script follows collab.js when agents are on',
   );
-  assert.equal((await fetch(`${base}/runtime/agent-callout.js`)).status, 200);
+  assert.match(
+    page,
+    /<script src="\/runtime\/agent-callout\.js"[^>]*><\/script>\n<script src="\/runtime\/agent-marks-geometry\.js" data-marble-transient><\/script>\n<script src="\/runtime\/agent-marks\.js" data-marble-transient><\/script>/,
+    'the marks layer follows the callout it hands its ids to, and its geometry is read on the way in',
+  );
+  // The marks layer asks the drawer's tray for its slots at boot and takes
+  // itself down if nothing answers, and it hangs its observers on the drawer's
+  // shadow root. There is nothing to ask and nothing to observe until
+  // agent-ui.js has mounted the drawer: put agent-marks.js first and Select
+  // and Sketch quietly stop existing, with every marks test still passing.
+  assert.ok(
+    ui < page.indexOf('<script src="/runtime/agent-marks.js" data-marble-transient></script>'),
+    'agent-ui.js mounts the drawer before agent-marks.js asks it for a slot',
+  );
+  for (const file of ['agent-callout.js', 'agent-marks-geometry.js', 'agent-marks.js']) {
+    const response = await fetch(`${base}/runtime/${file}`);
+    assert.equal(response.status, 200, file);
+    assert.match(response.headers.get('content-type'), /javascript/);
+  }
 });
 
 test('a document that presents agents itself gets the API and the conversation element, not a second drawer script skip', async () => {
@@ -853,4 +871,98 @@ test('a zone is asked for by the document and told to the conversation', async (
 
   await finished(conversation.body.id, turn.body.turnId);
   assert.deepEqual((await api('GET', '/presence?app=watched')).body.frames, [], 'a turn that is over holds no zone');
+});
+
+test('a new conversation starts on auto, and pause is the only other failover', async () => {
+  const created = await api('POST', '/agent/conversations', { provider: 'fake' });
+  assert.equal(created.body.failover, 'auto');
+  const paused = await api('PATCH', `/agent/conversations/${created.body.id}`, { failover: 'pause' });
+  assert.equal(paused.status, 200);
+  assert.equal(paused.body.failover, 'pause');
+  const reloaded = await api('GET', `/agent/conversations/${created.body.id}`);
+  assert.equal(reloaded.body.meta.failover, 'pause');
+  const bad = await api('PATCH', `/agent/conversations/${created.body.id}`, { failover: 'later' });
+  assert.equal(bad.status, 400);
+});
+
+test('Leave it is still on the conversation after a reload', async () => {
+  const created = await api('POST', '/agent/conversations', { provider: 'fake' });
+  const left = await api('POST', `/agent/conversations/${created.body.id}/usage-left`, { turn: `${created.body.id}-t1` });
+  assert.equal(left.status, 200);
+  assert.equal(left.body.type, 'usage.left');
+  const reloaded = await api('GET', `/agent/conversations/${created.body.id}`);
+  assert.equal(reloaded.body.events.some((event) => event.type === 'usage.left' && event.turn === `${created.body.id}-t1`), true);
+});
+
+test('Switch starts a Continue turn and a second call returns it', async () => {
+  const root = await fsp.mkdtemp(path.join(os.tmpdir(), 'marble-failover-http-'));
+  const work = await fsp.mkdtemp(path.join(os.tmpdir(), 'marble-failover-work-'));
+  const local = loadConfig({
+    ...process.env,
+    MARBLE_DRIVE_ROOT: root,
+    MARBLE_APPS: root,
+    MARBLE_DRIVE_AGENTS: '1',
+    MARBLE_DRIVE_AGENT_NAMING: '0',
+    MARBLE_DRIVE_AGENT_PROVIDER: 'claude-subscription',
+    MARBLE_DRIVE_AGENT_WORKDIR: work,
+    MARBLE_DRIVE_AGENT_KEYS: path.join(work, 'keys'),
+  });
+  const claude = createFakeProvider({
+    id: 'claude-subscription',
+    scripts: { spent: [{ fail: 'You have hit your limit' }] },
+  });
+  const cursor = createFakeProvider({ id: 'cursor', scripts: { hello: [{ say: 'picked up' }] } });
+  const cursorSpawn = cursor.spawn.bind(cursor);
+  cursor.spawn = (opts) => cursorSpawn({ ...opts, prompt: `script:hello\n${opts.prompt}` });
+  cursor.detect = async () => ({ installed: true, signedIn: true });
+  cursor.listModels = async () => [
+    { id: 'auto', label: 'Auto' },
+    { id: 'grok-4.7-high', label: 'Grok 4.7 High' },
+    { id: 'grok-4.7-xhigh', label: 'Grok 4.7 Extra High' },
+  ];
+  const localDrive = await createDrive(local, {
+    log: quiet,
+    agentProviders: new Map([['claude-subscription', claude], ['cursor', cursor]]),
+  });
+  await localDrive.createDocument('garden', SOURCE);
+  const localPort = await new Promise((resolve) => localDrive.server.listen(0, '127.0.0.1', () => resolve(localDrive.server.address().port)));
+  const call = async (method, route, body) => {
+    const response = await fetch(`http://127.0.0.1:${localPort}${route}`, {
+      method,
+      headers: body ? { 'Content-Type': 'application/json' } : {},
+      body: body ? JSON.stringify(body) : undefined,
+    });
+    return { status: response.status, body: await response.json().catch(() => null) };
+  };
+  try {
+    const created = await call('POST', '/agent/conversations', { provider: 'claude-subscription', model: 'opus', effort: 'max', failover: 'pause' });
+    assert.equal(created.body.failover, 'pause');
+    const sent = await call('POST', `/agent/conversations/${created.body.id}/turns`, {
+      prompt: 'script:spent',
+      context: { target: 'garden', viewing: 'garden', selection: [] },
+    });
+    const done = await until(async () => {
+      const { body } = await call('GET', `/agent/conversations/${created.body.id}`);
+      const turn = body.turns.find((item) => item.id === sent.body.turnId);
+      return turn && turn.status === 'failed' ? body : null;
+    });
+    assert.equal(done.turns[0].usageStopped, true);
+    assert.equal(done.meta.provider, 'claude-subscription');
+    const switched = await call('POST', `/agent/conversations/${created.body.id}/failover`);
+    assert.equal(switched.status, 200);
+    const again = await call('POST', `/agent/conversations/${created.body.id}/failover`);
+    assert.equal(again.status, 200);
+    assert.equal(again.body.turnId, switched.body.turnId);
+    const after = await until(async () => {
+      const { body } = await call('GET', `/agent/conversations/${created.body.id}`);
+      return body.meta.provider === 'cursor' ? body : null;
+    });
+    assert.equal(after.meta.model, 'grok-4.7');
+    assert.equal(after.meta.effort, 'xhigh');
+    assert.equal(after.turns.some((turn) => turn.prompt === 'Continue'), true);
+  } finally {
+    await localDrive.close();
+    await fsp.rm(root, { recursive: true, force: true });
+    await fsp.rm(work, { recursive: true, force: true });
+  }
 });

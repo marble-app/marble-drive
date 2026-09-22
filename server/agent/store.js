@@ -363,7 +363,7 @@ export function createAgentStore({ dir, defaultProvider = 'claude-subscription',
 
     saveSettings,
 
-    async createConversation({ provider, model = null, effort = null, mode = null, handoffFrom = null, project = 'drive' }) {
+    async createConversation({ provider, model = null, effort = null, mode = null, handoffFrom = null, project = 'drive', failover = 'auto' }) {
       const now = Date.now();
       const meta = {
         id: crypto.randomBytes(6).toString('hex'),
@@ -392,6 +392,7 @@ export function createAgentStore({ dir, defaultProvider = 'claude-subscription',
         focusY: null,
         lastInteractedAt: now,
         queueCombine: false,
+        failover: failover === 'pause' ? 'pause' : 'auto',
       };
       await writeJson(metaFile(meta.id), meta);
       return meta;
@@ -521,7 +522,7 @@ export function createAgentStore({ dir, defaultProvider = 'claude-subscription',
     appendEvent,
     events,
 
-    async createTurn(id, { prompt, context, dispatch = 'queue', behind = false, bundle = null }) {
+    async createTurn(id, { prompt, context, dispatch = 'queue', behind = false, bundle = null, usageHandoff = false }) {
       return serial(`turns:${id}`, async () => {
         const n = (await turns(id)).length + 1;
         const turn = {
@@ -541,6 +542,7 @@ export function createAgentStore({ dir, defaultProvider = 'claude-subscription',
           applied: 0,
           usage: null,
           undoneAt: null,
+          ...(usageHandoff ? { usageHandoff: true } : {}),
         };
         await writeJson(turnFile(turn.id), turn);
         return turn;

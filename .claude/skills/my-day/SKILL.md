@@ -66,7 +66,7 @@ Below 82rem the tail drops under the stream; below 62rem everything stacks.
 | `todos` | full to-do list, checkable/snoozable/pinnable | stream | |
 | `news` | **Reading** (cards, default) ⇄ **Front page** (mosaic) | stream | a main stream · `view: list\|cal` |
 | `papers` | today's arXiv cs.HC as a card grid | stream | a main stream |
-| `weather` | **where he is** + one away city, °F with °C alongside, **48 hours** scrubbed sideways under a temperature curve and a precipitation curve, sky-tinted; **expands** to a ten-day forecast | rail | cities come from `state/profile.json` — **never hardcode them here**; cites Open-Meteo |
+| `weather` | **where he is**, then each city in `location.also`, then the away city. °F with °C alongside, **48 hours** scrubbed sideways under a temperature curve and a precipitation curve, sky-tinted. A city named in `location.folded` starts with that strip closed. **Expands** to a ten-day forecast | rail | cities come from `state/profile.json` — **never hardcode them here**; cites Open-Meteo |
 | `calendar` | what's coming, two readings | **tail**, `card` | `view: t` Timeline \| `l` List |
 | `usopen` | Now / Men / Women, real bracket | **stream** | a draw needs width; never the rail |
 | `nfl` | one week's slate ⇄ one game in full | **stream** | `view: week\|niners` · use on a game day |
@@ -301,7 +301,9 @@ and whose season the `nflseason` component is about.
 | field | today | what it drives |
 |---|---|---|
 | `location.here` | **San Anselmo**, Marin County | `sources.mjs weather --here`, and the "you are here" label |
-| `location.away` | San Diego | the second weather block |
+| `location.also` | Zurich | extra weather blocks, in order, between here and away |
+| `location.away` | San Diego | the last weather block |
+| `location.folded` | San Diego | that city's 48-hour strip starts closed |
 | `nfl.team` | **San Francisco 49ers** (`sf`, NFC West) | `nflseason` — the arc is his team, The West is his division |
 | `nfl.place` | stream, every day | where the season component sits |
 | `travel` | Seattle legs dropped 15 Sep | dates you must **not** re-add from `third-year.mrbl` |
@@ -473,6 +475,78 @@ component the note sits in, not what it says):
    always shorthand for "keep this"; a typed note saying so in as many words
    means the same thing and gets the same treatment, today.
 
+### 1e. File every keep into `index.mrbl`
+```
+node .claude/skills/my-day/lib/build.mjs keeps
+```
+1c and 1d read what Bryan **wrote**. This step reads what he **kept** — and he
+keeps things in three ways: a ★ on a card, a 👍, and a note that says so in
+words. All three mean *this one matters, do not lose it*, and all three used to
+end their life in the one morning's file they were made in.
+
+`drive/Bryan's Days/index.mrbl` is where they go. The **Reading list** there is
+the standing reference behind this dashboard — the only part of it meant to be
+read months later, when the issue it came from is forty scrolls back and the
+paper has long since aged off arXiv's front page. It is the answer to *"can you
+find that one paper I saved?"*, and it only works if it is complete.
+
+The sweep returns:
+
+- **`unfiled`** — kept, and not in `index.mrbl`. **This is the step's to-do
+  list.** Each carries `why` (`star` / `thumbs-up` / `note`), his note verbatim,
+  the issue it was kept in, and the date he first kept it.
+- **`filed`** (with `--all`) — already on the list. "Filed" is checked against
+  the document itself, never a state file: if the entry is not in the `<ol>`, it
+  is not filed, and no bookkeeping anywhere may claim otherwise.
+- **`familiar`** — *"I already know this one btw."* Not a keep. Never file these;
+  they are a personalization signal, per 1d's third bullet.
+
+For every `unfiled` item:
+
+1. **Verify the citation from the real source** — the arXiv API, or the article
+   itself. Never the card; the card is what you wrote. Author lists in full, the
+   same rule as step 4d.
+2. **Write one `<li class="entry">`** into `ix-reading`, **newest first**:
+   - `.t` — the title as published.
+   - `.m` — `authors · venue · year · url`.
+   - `.n` — opens with `Saved <date> — ` and then **his note verbatim, in
+     quotes** (or `★, no note` when the star was the whole message), then one or
+     two sentences on what the thing says and where it touches his work.
+   - `<pre>` — real BibTeX. `@misc` with `eprint`/`archivePrefix` for arXiv,
+     `@online` with `urldate` for an article.
+
+   Mint fresh `data-marble-id`s. Never reuse one, and never renumber the entries
+   already there.
+3. **Re-run `keeps`.** The count is the check. A run that writes the entry and
+   does not re-run has verified nothing.
+4. A keep that also makes a claim about a specific project ("this contradicts
+   §03") still goes into that document too, per 1d — **as well as**, not instead
+   of. The reading list is the index; it does not replace writing the thought
+   where it lands.
+
+Two failures this step exists to prevent, both of which actually happened:
+
+- **A star with no note had no home at all.** Hartmann's *The Systems Paper is
+  Dead* was ★-saved on 10 Sep and reached nothing for ten days, because 1c and
+  1d only ever look at words.
+- **A keep bundled with a request gets marked applied for the request.** The
+  8 Sep note on Google's AI Overviews rollout opened *"This is pretty important
+  and i didn't know abot this"* and then asked for four dashboard changes. The
+  changes shipped the next day, the item was marked applied — and the sentence
+  that said *keep this* went down with it. **When one note does both, 1c and 1e
+  each owe him something.**
+
+One more, upstream of all of it: a card that also appears in the story used to
+read back **blank**, because the story copy carries no note and overwrote the
+real one. `readback` now merges the two. If you ever touch that merge, the
+symptom is silent — stars and notes simply stop existing.
+
+The reading list is the part of `index.mrbl` that only a run can write. The two
+lists below it — **Recent issues** and **Representations used** — are derived
+from the folder and are rebuilt by `build.mjs index --write` in step 8. Do not
+hand-maintain them; both had gone stale exactly because someone had to remember
+to.
+
 ### 2. Voice, and naming the day
 `greeting` — one line. `summary` — one or two plain sentences about where the
 day sits. Both sit at the top of the **stream**, stacked and flush left with
@@ -548,13 +622,15 @@ Not "Tuesday" and not "Daily brief". The date is not lost: it lives in the file'
   and the note is what stops him reading the record column as if it said
   something. It is a different question from The West, which is why it is a
   segment and not more rows in that one.
-- **weather** — `node lib/sources.mjs weather --here "<city>" --away "<city>"` →
-  straight into `payload.weather`. Cities come from `profile.json`; anything not in
-  `GAZETTEER` is geocoded automatically, so a new town needs no code change.
-  Glyphs already carry U+FE0F so every condition renders in colour, and each
-  block carries a `sky` class that paints the card with a condition-accurate
-  gradient (clear / clear-night / partly / cloudy / rain / snow / storm / fog).
-  Nothing to do beyond passing the object through.
+- **weather** — `node lib/sources.mjs weather --here "<city>" --also "<city>" --away "<city>" --fold "<city>"` →
+  straight into `payload.weather`. Repeat `--also` and `--fold` once per city.
+  Cities come from `profile.json` (`here`, then `also`, then `away`; `folded`
+  is which strips start closed). Anything not in `GAZETTEER` is geocoded
+  automatically, so a new town needs no code change. Glyphs already carry
+  U+FE0F so every condition renders in colour, and each block carries a `sky`
+  class that paints the card with a condition-accurate gradient (clear /
+  clear-night / partly / cloudy / rain / snow / storm / fog). Nothing to do
+  beyond passing the object through.
 - **usOpen** — `WebSearch` both draws; see the shape below.
 - **arxiv** — `node lib/sources.mjs arxiv --since <the last issue's day:date> --unseen --max 150`
   → score it, then into `payload.arxiv`. `--since` reads every announcement since the
@@ -690,12 +766,31 @@ note you filed (step 1d):
 ```
 node lib/build.mjs feedback --apply <id> --change "what changed, and where"
 ```
-Fold 👍/👎 into `state/tuning.json`; add newly ★-saved items **and any papers
-filed via step 1d** to `index.mrbl`'s reading list with a verified BibTeX
-block. Report: palette, composition, counts, images, whether the screenshot
-pass ran, and **which of Bryan's open requests and reading notes you applied
-and which you left open, quoting his words** — that list is the part he
-cannot reconstruct for himself.
+Fold 👍/👎 into `state/tuning.json`. Then close step 1e — this morning's own
+stars and notes are only visible once the issue is written:
+```
+node lib/build.mjs keeps
+```
+**`unfiledCount` must read `0` before the run is finished**, or the report must
+name what you left unfiled and why.
+
+Then make the rest of `index.mrbl` agree with the folder:
+```
+node lib/build.mjs index --write
+```
+This rebuilds **Recent issues** and **Representations used** from the issue files
+themselves — an issue's date, its title, and the subtitle its road-ahead section
+wore. Both lists are facts about files on disk, so neither is ever typed by hand
+again. An entry already in the document is kept exactly as it stands, id and
+label and all; only what is missing is written, and `--write` re-sorts newest
+first so the command repairs order as well as adding. Run it without `--write`
+first if you want to see what it would do. It also reports any day whose
+representation never reached `representations/LOG.md` — append those by hand,
+because the log line is a paragraph about the form and only you can write it. Report: palette, composition, counts,
+images, whether the screenshot pass ran, and **which of Bryan's open requests
+and reading notes you applied, what you filed into `index.mrbl`, and what you
+left open, quoting his words** — that list is the part he cannot reconstruct
+for himself.
 
 ### 9. Email — only when asked
 Compact digest to **bdmnewsletters@gmail.com** in the day's palette: greeting,
@@ -790,6 +885,10 @@ to powers of two so the bracket connectors line up.
   a star that may never come, or on a paper that may never be shown again — it
   is filed into `index.mrbl` or `research-vision.mrbl` the run it is found,
   see step 1d.
+- Nor is anything he kept. A ★, a 👍 and a "this is really relevant!!!" all mean
+  keep this, and all three are filed into `index.mrbl`'s reading list the run
+  they are found. `build.mjs keeps` reporting `unfiledCount: 0` is the proof —
+  see step 1e. A star with no words is still a keep.
 - Controls announce their state, derived in `shell.mrbl` and never emitted as
   markup by `build.mjs`. Adding a control means adding its reading to
   `deriveAria`, not an `aria-*` attribute to a template string.

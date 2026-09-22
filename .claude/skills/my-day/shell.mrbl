@@ -209,6 +209,54 @@ __BODY__
                       'data-vote', 'data-known', 'data-view', 'data-expanded', 'data-open'],
   });
 
+  /* A way back.
+
+     `affordances.js` presents its `history` part as a cut point — "binding the
+     keys is the app's call" — and this shell never took it. Every tick, star,
+     pin, snooze and delete on this page has been recording a correct inverse
+     through `marble.record`, and nothing could reach it. The comment above
+     already assumed Mod+Z; this is the binding it assumed.
+
+     The carrier owns the stack, so this only reaches for it. With no host there
+     is nothing to undo, and the page already says so via data-marble-readonly. */
+  addEventListener('keydown', (e) => {
+    const m = window.marble;
+    if (!m || !(e.metaKey || e.ctrlKey) || e.altKey) return;
+    const key = e.key.toLowerCase();
+    const isUndo = key === 'z' && !e.shiftKey;
+    const isRedo = (key === 'z' && e.shiftKey) || key === 'y';
+    if (!isUndo && !isRedo) return;
+    /* A native field keeps the browser's own undo stack; a marble editable
+       does not, so the two can never fight over one keystroke. */
+    const t = e.target;
+    if (t instanceof HTMLInputElement || t instanceof HTMLTextAreaElement
+        || (t instanceof HTMLElement && t.isContentEditable
+            && !t.closest('[data-marble-editable]'))) return;
+    /* Anything still here with a caret in it is a marble editable — the guard
+       above sent the native fields home. Inside one the carrier owns the
+       history whether or not there is a step left in it: letting the key
+       through at the bottom of the ring hands the field to the browser's own
+       undo, which rewrites it without the file hearing about it. */
+    const editing = t instanceof HTMLElement && t.isContentEditable;
+    if (isUndo && m.canUndo) { e.preventDefault(); m.undo(); }
+    else if (isRedo && m.canRedo) { e.preventDefault(); m.redo(); }
+    else if (editing) { e.preventDefault(); }
+    syncHistory();
+  });
+
+  /* Whether there is a way back is a live fact about the document, so it is
+     derived into a class like every other fact here — never mirrored into a
+     variable someone has to remember to update. design.css draws it. */
+  function syncHistory() {
+    const m = window.marble;
+    document.body.classList.toggle('day-can-undo', !!(m && m.canUndo));
+    document.body.classList.toggle('day-can-redo', !!(m && m.canRedo));
+  }
+  addEventListener('pointerup', syncHistory, true);
+  addEventListener('keyup', syncHistory, true);
+  addEventListener('marble:ready', syncHistory);
+  syncHistory();
+
   /* Reveal-on-scroll for browsers without animation-timeline. Adds a class the
      stylesheet already knows; no layout is read or written per frame. */
   if (!CSS.supports('animation-timeline: view()') && 'IntersectionObserver' in window
@@ -980,9 +1028,19 @@ __BODY__
         el.spellcheck = false;
         let prior = null;
         el.addEventListener('focus', () => { prior = marble.text(el); });
-        el.addEventListener('input', () => {
+        el.addEventListener('input', (event) => {
           const id = marble.id(el); const text = marble.text(el);
           const op = { type: 'setText', id, text };
+          // The browser's own undo inside the field arrives here as an input
+          // like any other, and it is not a new edit. Recording it put the state
+          // just undone back on the ring — and cleared the redo with it — so the
+          // next Mod+Z moved the document forward instead of back. File where
+          // the text ended up, and let the session start again from there.
+          if (event.inputType === 'historyUndo' || event.inputType === 'historyRedo') {
+            prior = text;
+            marble.op(op);
+            return;
+          }
           if (prior !== null && text !== prior) marble.record({ redo: [op], undo: [{ type: 'setText', id, text: prior }] }, { coalesce: true });
           marble.op(op);
         });

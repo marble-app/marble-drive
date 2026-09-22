@@ -44,5 +44,6 @@ __pycache__/
 # Screenshots, one-off patches, generated pages. A script worth keeping moves
 # to `tools/`; the rest is never read back after the run that made it.
 scratchpad/
+*.heapsnapshot
 # Brainstorm servers, their ports, tokens and pids.
 .superpowers/

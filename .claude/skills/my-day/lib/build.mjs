@@ -12,6 +12,8 @@
 //   assemble  --payload <p|->   compose + render the dated issue, verify
 //   harvest   [file]            update state/seen.json, print saved items + votes
 //   feedback  [--all]           what Bryan wrote INTO past issues — asks for this dashboard
+//   keeps     [--all]           every ★ / 👍 / "keep this" note, and whether it reached index.mrbl
+//   index     [--write]         rebuild index.mrbl's issue list + representation ledger from the issues
 //   check     --file <file>     invariant self-check + layout doctor
 
 import fs from 'node:fs';
@@ -32,6 +34,7 @@ const DEFAULTS = {
   fontCss: path.join(HERE, 'font.css'),
   dir: NLDIR,
   stable: path.join(NLDIR, 'today.mrbl'),
+  index: path.join(NLDIR, 'index.mrbl'),
   keyDates: path.join(SKILL, 'key-dates.md'),
   thirdYear: path.join(REPO, 'drive', 'Travel', 'third-year.mrbl'),
   seen: path.join(SKILL, 'state', 'seen.json'),
@@ -222,7 +225,7 @@ function readback(file) {
     const titleM = /<(?:div|h4) class="(?:title|ntitle|ptitle|mo-title)"[^>]*>([\s\S]*?)<\/(?:div|h4)>/.exec(body);
     const hrefM = titleM ? /href="([^"]*)"/.exec(titleM[1]) : null;
     const voteM = /data-vote="([^"]*)"/.exec(attrs);
-    rows[keyM[1]] = {
+    const row = {
       kind: (classes.has('ncard') || classes.has('mo')) ? 'item' : classes.has('pcard') ? 'arxiv'
         : (classes.has('todo') || classes.has('focus')) ? 'todo' : classes.has('keydate') ? 'keydate' : 'row',
       done: /\bdata-done\b/.test(attrs), snooze: /\bdata-snooze\b/.test(attrs), pin: /\bdata-pin\b/.test(attrs),
@@ -230,6 +233,20 @@ function readback(file) {
       note: noteM ? stripTags(noteM[1]) : '', title: titleM ? stripTags(titleM[1]) : '',
       url: hrefM ? decodeEntities(hrefM[1]) : '',
     };
+    // One card can appear twice in a file: once in the page, once again in the
+    // story, which carries no notes and no controls. The story copy comes
+    // second, so overwriting meant a starred, annotated card read back blank —
+    // that is how "This is pretty important and i didn't know abot this" on
+    // Google's AI Overviews rollout stayed invisible to every later run. Merge
+    // instead: state is true if either copy has it, and the longer note wins.
+    const prior = rows[keyM[1]];
+    rows[keyM[1]] = prior ? {
+      ...prior,
+      done: prior.done || row.done, snooze: prior.snooze || row.snooze, pin: prior.pin || row.pin,
+      open: prior.open || row.open, saved: prior.saved || row.saved, vote: prior.vote || row.vote,
+      note: row.note.length > prior.note.length ? row.note : prior.note,
+      title: prior.title || row.title, url: prior.url || row.url,
+    } : row;
   }
 
   // Rows Bryan added himself come from a <template> and carry no data-key, so
@@ -642,9 +659,10 @@ function wxDaily(daily, unit) {
 }
 
 // Where Bryan is is a fact about the week, not a constant, so `sources.mjs
-// weather --here <city> --away <city>` now returns an ordered pair and the first
-// one reads as "you are here". The old fixed Zurich/San Diego shape is still
-// accepted so past payloads keep rendering.
+// weather` returns an ordered list: where he is, then each city he asked to
+// keep, then the away city. The first one reads as "you are here". A city with
+// `folded` keeps its glance and hides the 48-hour strip. The old fixed
+// Zurich/San Diego shape is still accepted so past payloads keep rendering.
 function wxCities(w) {
   if (Array.isArray(w.cities)) return w.cities.filter(Boolean);
   return (w.here === 'sanDiego' ? [w.sanDiego, w.zurich] : [w.zurich, w.sanDiego]).filter(Boolean);
@@ -674,8 +692,22 @@ function rWeather(w) {
     const tempChart = wxTempChart(hours, c.unit);
     const popChart = wxPrecipChart(hours);
     const popMax = Math.max(0, ...hours.map((h) => h.pop || 0));
+    const strip = [
+      `    <div class="wx-hrs" data-marble-id="${mint()}"><div class="wx-track" style="--wx-n:${hours.length}" data-marble-id="${mint()}">`,
+      `      <div class="wx-cells" data-marble-id="${mint()}">${cells}</div>`,
+      tempChart ? `      <div class="wx-band wx-band-t" data-marble-id="${mint()}">${tempChart}</div>` : '',
+      popChart ? `      <div class="wx-band wx-band-p" data-marble-id="${mint()}">${popChart}</div>` : '',
+      `    </div></div>`,
+      popChart ? `    <div class="wx-legend" data-marble-id="${mint()}"><span class="wx-lg wx-lg-t tip" data-tip="${escAttr('The line is temperature across the next 48 hours.')}" data-marble-id="${mint()}">temperature</span><span class="wx-lg wx-lg-p tip" data-tip="${escAttr(`Chance of precipitation, peaking at ${popMax}%.`)}" data-marble-id="${mint()}">chance of rain · to ${popMax}%</span></div>` : '',
+    ].filter(Boolean).join('\n');
+    // Folded means the glance stays: city, temperature, and the one-line rest
+    // of the day. The 48-hour strip is the second reading, behind the same
+    // disclosure the papers use, and it starts shut.
+    const detail = c.folded
+      ? `    <button type="button" class="exp-toggle" data-exp data-marble-id="${mint()}">48 hours</button>\n    <div class="exp" data-marble-id="${mint()}"><div class="exp-inner" data-marble-id="${mint()}">\n${strip}\n    </div></div>`
+      : strip;
     return [
-      `  <div class="wx-block" data-marble-id="${mint()}" data-sky="${escAttr(c.now.sky || 'cloudy')}">`,
+      `  <div class="wx-block${c.folded ? ' expandable' : ''}" data-marble-id="${mint()}" data-sky="${escAttr(c.now.sky || 'cloudy')}">`,
       `    <div class="wx-city" data-marble-id="${mint()}">${esc(c.city)}${here ? ' — you are here' : ''}</div>`,
       `    <div class="wx-now" data-marble-id="${mint()}">`,
       `      <span class="wx-emoji tip" data-marble-id="${mint()}" data-tip="${escAttr(`${c.city}: ${c.now.label}\nHigh ${bothT(c.today.hi, c.unit)} · Low ${bothT(c.today.lo, c.unit)}\nFeels like ${bothT(c.now.feels, c.unit)}${c.today.popMax != null ? `\n${c.today.popMax}% chance of rain today` : ''}`)}">${esc(c.now.glyph)}</span>`,
@@ -687,12 +719,7 @@ function rWeather(w) {
       `        <span class="wx-hilo tip" data-marble-id="${mint()}" data-tip="${escAttr(`High ${bothT(c.today.hi, c.unit)}\nLow ${bothT(c.today.lo, c.unit)}\nFeels like ${bothT(c.now.feels, c.unit)}`)}">H ${c.today.hi}° · L ${c.today.lo}° · feels ${c.now.feels}°${(c.unit || 'F') === 'F' ? ` <span class="wx-c" data-marble-id="${mint()}">${toC(c.today.hi)}° / ${toC(c.today.lo)}°C</span>` : ''}</span></span>`,
       `    </div>`,
       `    <p class="wx-rest" data-marble-id="${mint()}">${esc(restOfDay(c))}</p>`,
-      `    <div class="wx-hrs" data-marble-id="${mint()}"><div class="wx-track" style="--wx-n:${hours.length}" data-marble-id="${mint()}">`,
-      `      <div class="wx-cells" data-marble-id="${mint()}">${cells}</div>`,
-      tempChart ? `      <div class="wx-band wx-band-t" data-marble-id="${mint()}">${tempChart}</div>` : '',
-      popChart ? `      <div class="wx-band wx-band-p" data-marble-id="${mint()}">${popChart}</div>` : '',
-      `    </div></div>`,
-      popChart ? `    <div class="wx-legend" data-marble-id="${mint()}"><span class="wx-lg wx-lg-t tip" data-tip="${escAttr('The line is temperature across the next 48 hours.')}" data-marble-id="${mint()}">temperature</span><span class="wx-lg wx-lg-p tip" data-tip="${escAttr(`Chance of precipitation, peaking at ${popMax}%.`)}" data-marble-id="${mint()}">chance of rain · to ${popMax}%</span></div>` : '',
+      detail,
       `  </div>`,
     ].filter(Boolean).join('\n');
   };
@@ -1804,6 +1831,218 @@ function applyFeedback(ids, change) {
   return { marked: done, appliedCount: Object.keys(state.applied).length };
 }
 
+// ------------------------------------------------------------------ keeps ---
+// A ★, a 👍 and a note saying "this is really relevant!!!" all mean the same
+// thing: Bryan decided to keep something. Each of them used to live in one
+// morning's file and nowhere else. The star on Brath's visualisation
+// retrospective sat unfiled for nine days; the "this is pretty important and i
+// didn't know abot this" note on Google's AI Overviews rollout was read as a
+// dashboard request, acted on for the dashboard half, and never filed at all.
+//
+// This sweeps every issue for keeps and checks each against the reading list in
+// index.mrbl, so a run can see what it still owes him. There is no state file:
+// "filed" means the thing is actually in the document, which is the only claim
+// worth making.
+const KEEP_NOTE = /\b(relevant|important|keep this|save this|worth (?:reading|citing|keeping)|cite this|i know (?:these|this) (?:people|person|author|group)|really good|love this)\b/i;
+const KEEP_FAMILIAR = /\b(i already know|already read|already seen|i'?ve seen|i went to|i was there)\b/i;
+const READING_KINDS = new Set(['arxiv', 'item']);
+
+// arXiv ids collapse across versions and abs/pdf; everything else collapses on
+// scheme, www, query and trailing slash. Two spellings of one paper must key
+// the same or the sweep re-offers something already on the list.
+function keepKey(url) {
+  const u = String(url || '').trim().toLowerCase();
+  if (!u) return '';
+  const ax = /arxiv\.org\/(?:abs|pdf)\/(\d{4}\.\d{4,5})/.exec(u);
+  if (ax) return `arxiv:${ax[1]}`;
+  return u.replace(/^https?:\/\//, '').replace(/^www\./, '').replace(/[#?].*$/, '').replace(/\/+$/, '');
+}
+
+// What the reading list already holds. Read the <ol> itself, not the whole
+// file, so a link in the "Recent issues" list can never mask an unfiled paper.
+function filedKeys(file = DEFAULTS.index) {
+  const keys = new Set();
+  let html = '';
+  try { html = fs.readFileSync(file, 'utf8'); } catch { return keys; }
+  const at = html.indexOf('data-marble-id="ix-reading"');
+  const section = at === -1 ? html : sliceTag(html.slice(html.lastIndexOf('<ol', at)), 'ol');
+  for (const m of section.matchAll(/https?:\/\/[^\s"'<>)]+/g)) keys.add(keepKey(m[0]));
+  for (const m of section.matchAll(/\b(\d{4}\.\d{4,5})\b/g)) keys.add(`arxiv:${m[1]}`);
+  keys.delete('');
+  return keys;
+}
+
+function sweepKeeps(opts = {}) {
+  const files = fs.existsSync(DEFAULTS.dir)
+    ? fs.readdirSync(DEFAULTS.dir).filter((f) => f.endsWith('.mrbl') && f !== 'index.mrbl' && f !== 'today.mrbl').map((f) => path.join(DEFAULTS.dir, f))
+    : [];
+  const already = filedKeys();
+  const keeps = new Map();
+  const familiar = [];
+  for (const file of files) {
+    const back = readback(file);
+    const date = back.date || '';
+    const issue = path.basename(file, '.mrbl');
+    for (const [key, row] of Object.entries(back.rows || {})) {
+      if (!READING_KINDS.has(row.kind)) continue;
+      const note = (row.note || '').trim();
+      if (note && KEEP_FAMILIAR.test(note)) { familiar.push({ key, title: row.title, url: row.url, note, date, issue }); continue; }
+      const why = [];
+      if (row.saved) why.push('star');
+      if (row.vote === 'up') why.push('thumbs-up');
+      if (note && KEEP_NOTE.test(note)) why.push('note');
+      if (!why.length) continue;
+      const k = keepKey(row.url) || `row:${key}`;
+      const prev = keeps.get(k);
+      if (prev) {
+        for (const w of why) if (!prev.why.includes(w)) prev.why.push(w);
+        if (note && !prev.note) prev.note = note;
+        if (date && date < prev.date) prev.date = date;   // the day he first kept it
+        continue;
+      }
+      keeps.set(k, { key: k, title: row.title, url: row.url, note, why, date, issue, filed: already.has(k) });
+    }
+  }
+  const all = [...keeps.values()].sort((a, b) => String(b.date).localeCompare(String(a.date)));
+  const unfiled = all.filter((k) => !k.filed);
+  return {
+    issuesScanned: files.length,
+    index: path.relative(REPO, DEFAULTS.index),
+    unfiled,
+    unfiledCount: unfiled.length,
+    filedCount: all.length - unfiled.length,
+    filed: opts.all ? all.filter((k) => k.filed) : undefined,
+    familiar,
+  };
+}
+
+// ------------------------------------------------------------------ index ---
+// The reading list is not the only part of index.mrbl that goes stale. Nothing
+// has ever maintained "Recent issues" or "Representations used": both were hand
+// written, so the issue list held four of twelve mornings and the ledger three,
+// and representations/LOG.md had drifted the other way — carrying days the doc
+// had lost and missing days the doc still had.
+//
+// Neither list holds an opinion. Both are facts about files on disk, so both are
+// derived, never remembered. An entry already in the document is kept exactly as
+// it is — id, label, whatever Bryan retyped into it — and only what is missing is
+// written. That is the whole reason to derive rather than regenerate.
+const ISSUE_HREF = (name) => `http://localhost:4400/a/${encodeURIComponent(`Bryan's Days/${name}`).replace(/'/g, '%27').replace(/%2f/gi, '%2F')}`;
+const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+const dayLabel = (ymd) => { const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(ymd || ''); return m ? `${+m[3]} ${MONTHS[+m[2] - 1]}` : (ymd || ''); };
+
+// Every issue, as the file itself reports it: its date, its title, and the name
+// of the road-ahead representation, which is the component's subtitle.
+function issueFacts() {
+  if (!fs.existsSync(DEFAULTS.dir)) return [];
+  const out = [];
+  for (const f of fs.readdirSync(DEFAULTS.dir)) {
+    if (!f.endsWith('.mrbl') || f === 'index.mrbl' || f === 'today.mrbl') continue;
+    const file = path.join(DEFAULTS.dir, f);
+    let html = '';
+    try { html = fs.readFileSync(file, 'utf8'); } catch { continue; }
+    const name = f.replace(/\.mrbl$/, '');
+    const date = (/<meta name="(?:day|newsletter):date" content="([^"]*)">/.exec(html) || [, ''])[1];
+    const title = stripTags((/<title>([\s\S]*?)<\/title>/.exec(html) || [, ''])[1]);
+    let repr = '';
+    const at = html.indexOf('class="repr"');
+    if (at !== -1) {
+      const head = html.slice(html.lastIndexOf('<section', at), at);
+      const spans = [...head.matchAll(/<span class="n"[^>]*>([\s\S]*?)<\/span>/g)].map((m) => stripTags(m[1]));
+      repr = spans.find((x) => x && !/^\d+$/.test(x)) || '';
+    }
+    out.push({ file, name, date, title: title || name, repr, href: ISSUE_HREF(name) });
+  }
+  return out.sort((a, b) => String(b.date).localeCompare(String(a.date)) || b.name.localeCompare(a.name));
+}
+
+// Pull one <ul> out of index.mrbl and index its <li>s by a caller-chosen key, so
+// an entry that is already there can be handed back untouched.
+function listItems(html, id) {
+  const at = html.indexOf(`data-marble-id="${id}"`);
+  if (at === -1) return null;
+  const start = html.lastIndexOf('<ul', at);
+  const inner = sliceTag(html.slice(start), 'ul');
+  const items = [...inner.matchAll(/<li\b[\s\S]*?<\/li>/g)].map((m) => m[0]);
+  return { start, end: start + inner.length, inner, items };
+}
+
+function reviewIndex(opts = {}) {
+  const file = DEFAULTS.index;
+  if (!fs.existsSync(file)) die(`no index at ${file}`);
+  let html = fs.readFileSync(file, 'utf8');
+  const facts = issueFacts();
+
+  const issues = listItems(html, 'ix-issues');
+  const reprs = listItems(html, 'ix-reprs');
+  if (!issues || !reprs) die('index.mrbl is missing ix-issues or ix-reprs');
+
+  // An issue is present if some <li> already links at it. A representation is
+  // present if some <li> already names that date and that name.
+  const haveIssue = (f) => issues.items.find((li) => li.includes(f.href) || li.includes(decodeEntities(f.href)));
+  const haveRepr = (f) => reprs.items.find((li) => { const t = stripTags(li); return t.startsWith(f.date) && t.includes(f.repr); });
+
+  const missingIssues = facts.filter((f) => !haveIssue(f));
+  const missingReprs = facts.filter((f) => f.repr && !haveRepr(f));
+
+  // The ledger in representations/LOG.md is a third copy of the same fact.
+  const logFile = path.join(SKILL, 'representations', 'LOG.md');
+  let log = '';
+  try { log = fs.readFileSync(logFile, 'utf8'); } catch {}
+  // Match on the date, never on the name: a log line is a paragraph describing
+  // the form ("The mixing desk — eight channel strips…") while the document
+  // carries whatever short name the header wore ("The desk"). A date either has
+  // as many log lines as it had representations, or it is short some.
+  const logDates = new Map();
+  for (const m of log.matchAll(/^(\d{4}-\d{2}-\d{2})\s/gm)) logDates.set(m[1], (logDates.get(m[1]) || 0) + 1);
+  const missingLog = [];
+  for (const [date, group] of Object.entries(facts.filter((f) => f.repr).reduce((acc, f) => ((acc[f.date] ||= []).push(f), acc), {}))) {
+    const short = group.length - (logDates.get(date) || 0);
+    for (const f of group.slice(0, Math.max(0, short))) missingLog.push(f);
+  }
+
+  const report = {
+    index: path.relative(REPO, file),
+    issues: { onDisk: facts.length, inDoc: issues.items.length, missing: missingIssues.map((f) => `${f.date} — ${f.title}`) },
+    representations: { inDoc: reprs.items.length, missing: missingReprs.map((f) => `${f.date} — ${f.repr}`) },
+    log: { file: path.relative(REPO, logFile), missing: missingLog.map((f) => `${f.date} — ${f.repr}`) },
+    wrote: false,
+  };
+  if (!opts.write) return report;
+  // --write always rewrites both lists, even when nothing is missing: the job is
+  // to make the document agree with the folder, and order is part of that. A run
+  // that only appended could never repair a list that had drifted out of order.
+
+  // Keep every existing <li> exactly as it stands; splice the missing ones in
+  // by date so the list still reads newest first. Fresh ids are derived from the
+  // file name, which is unique, so a second --write is a no-op.
+  const issueLi = (f) => `<li data-marble-id="ix-iss-${slug(f.name)}"><a href="${escAttr(f.href)}" data-marble-id="ix-iss-${slug(f.name)}a">${esc(f.title)} — ${esc(dayLabel(f.date))}</a></li>`;
+  const reprLi = (f) => `<li data-marble-id="ix-rep-${slug(f.name)}" data-marble-editable>${esc(f.date)} — ${esc(f.repr)}</li>`;
+  const dateOf = (li) => { const t = stripTags(li); const m = /(\d{4}-\d{2}-\d{2})/.exec(t) || /(\d{1,2})\s+([A-Z][a-z]{2})\b/.exec(t); if (!m) return ''; if (m[0].includes('-')) return m[1]; const mo = MONTHS.indexOf(m[2]) + 1; return mo ? `2026-${String(mo).padStart(2, '0')}-${String(+m[1]).padStart(2, '0')}` : ''; };
+
+  const splice = (list, additions, render) => {
+    const kept = list.items.map((li) => ({ li, date: dateOf(li), pinned: !dateOf(li) }));
+    const added = additions.map((f) => ({ li: render(f), date: f.date, pinned: false }));
+    const pinned = kept.filter((k) => k.pinned);
+    const dated = [...kept.filter((k) => !k.pinned), ...added].sort((a, b) => String(b.date).localeCompare(String(a.date)));
+    return [...pinned, ...dated].map((x) => `      ${x.li}`).join('\n');
+  };
+
+  const newIssues = splice(issues, missingIssues, issueLi);
+  const newReprs = splice(reprs, missingReprs, reprLi);
+  // Rewrite the later list first so the earlier one's offsets still hold.
+  const [first, second] = issues.start < reprs.start
+    ? [{ ...issues, body: newIssues }, { ...reprs, body: newReprs }]
+    : [{ ...reprs, body: newReprs }, { ...issues, body: newIssues }];
+  for (const part of [second, first]) {
+    const open = html.slice(part.start, html.indexOf('>', part.start) + 1);
+    html = html.slice(0, part.start) + open + '\n' + part.body + '\n    </ul>' + html.slice(part.end);
+  }
+  fs.writeFileSync(file, html);
+  report.wrote = true;
+  return report;
+}
+
 if (cmd === 'readback') console.log(JSON.stringify(readback(args._[1] || args.file || DEFAULTS.stable), null, 2));
 else if (cmd === 'feedback') {
   if (args.apply) {
@@ -1811,6 +2050,8 @@ else if (cmd === 'feedback') {
     console.log(JSON.stringify(applyFeedback(ids, args.change || args.note || ''), null, 2));
   } else console.log(JSON.stringify(sweepFeedback({ all: !!args.all }), null, 2));
 }
+else if (cmd === 'keeps') console.log(JSON.stringify(sweepKeeps({ all: !!args.all }), null, 2));
+else if (cmd === 'index') console.log(JSON.stringify(reviewIndex({ write: !!args.write }), null, 2));
 else if (cmd === 'dates') console.log(JSON.stringify(sweepDates(), null, 2));
 else if (cmd === 'assemble') assemble(args);
 else if (cmd === 'harvest') harvest(args);
@@ -1818,6 +2059,15 @@ else if (cmd === 'carry') {
   const file = args.file || args._[1] || DEFAULTS.stable;
   if (args.list) console.log(JSON.stringify(loadCarry(), null, 2));
   else console.log(JSON.stringify(carry(file, null), null, 2));
+}
+else if (cmd === 'wxhtml') {
+  const file = args.file || args._[1];
+  if (!file) die('wxhtml needs --file <weather.json>');
+  const w = JSON.parse(fs.readFileSync(file, 'utf8'));
+  process.stdout.write('-----WEATHER-----\n');
+  process.stdout.write(rWeather(w) + '\n');
+  process.stdout.write('-----MORE-----\n');
+  process.stdout.write(rWeatherMore(w) + '\n');
 }
 else if (cmd === 'check') {
   const file = args.file || args._[1] || DEFAULTS.stable;
@@ -1830,8 +2080,11 @@ else if (cmd === 'check') {
   console.log(`Bryan's Days — build.mjs
   readback [file] | dates | carry [file] [--list] | assemble --payload <f|-> [--dry-run]
   harvest [file] | check [--file F] | feedback [--all] [--apply <id,id>] [--change "..."]
+  keeps [--all] | index [--write]
   composes drive/Bryan's Days/<the day's theme>.mrbl (mirrored to today.mrbl) from payload.layout
   carry  — folds to-dos Bryan typed himself into state/carry.json so they outlive the issue
-  feedback — sweeps every past issue for notes Bryan wrote asking this dashboard to change`);
+  feedback — sweeps every past issue for notes Bryan wrote asking this dashboard to change
+  keeps  — every ★ / 👍 / "keep this" note across every issue, and whether index.mrbl has it yet
+  index  — rebuilds index.mrbl's issue list + representation ledger from the issue files`);
   if (cmd) die(`unknown command "${cmd}"`);
 }

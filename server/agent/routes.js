@@ -52,6 +52,8 @@ const hostnameOf = (req) => {
 };
 const bearer = (req) => (req.headers.authorization ?? '').replace(/^Bearer\s+/i, '');
 const CONVERSATION = /^\/agent\/conversations\/([0-9a-f]{12})(\/turns)?$/;
+const FAILOVER = /^\/agent\/conversations\/([0-9a-f]{12})\/failover$/;
+const USAGE_LEFT = /^\/agent\/conversations\/([0-9a-f]{12})\/usage-left$/;
 const TURN = /^\/agent\/turns\/([0-9a-f]{12}-t\d+)(\/cancel|\/undo|\/answer)?$/;
 const DISPATCH = new Set(['queue', 'steer', 'interrupt']);
 const FOLDER = /^\/agent\/folders\/([0-9a-f]{12})$/;
@@ -370,6 +372,7 @@ export function createAgentRoutes({ store, runner, tools, hub, providers, writeO
           mode: typeof body.mode === 'string' && body.mode.trim() ? body.mode.trim() : modes?.[body.provider] ?? null,
           handoffFrom: from?.id ?? null,
           project: project.id,
+          failover: body.failover === 'pause' ? 'pause' : 'auto',
         });
         if (from) {
           await store.updateConversation(from.id, { handoffTo: meta.id });
@@ -377,6 +380,30 @@ export function createAgentRoutes({ store, runner, tools, hub, providers, writeO
           await publishSummary(meta.id, await store.appendEvent(meta.id, { type: 'handoff', from: from.id, provider: from.provider }));
         }
         return json(res, 201, summarize(await store.conversation(meta.id)));
+      }
+    }
+
+    const usageLeft = USAGE_LEFT.exec(route);
+    if (usageLeft && method === 'POST') {
+      const id = usageLeft[1];
+      const meta = await store.conversation(id);
+      if (!meta) return json(res, 404, { error: `no conversation "${id}"` });
+      const body = await readJson(req, maxBody);
+      const turn = String(body.turn ?? '');
+      if (!turn) return json(res, 400, { error: 'turn is required' });
+      const event = await store.appendEvent(id, { type: 'usage.left', turn });
+      await publishSummary(id, event);
+      return json(res, 200, event);
+    }
+    const failover = FAILOVER.exec(route);
+    if (failover && method === 'POST') {
+      const id = failover[1];
+      if (!(await store.conversation(id))) return json(res, 404, { error: `no conversation "${id}"` });
+      try {
+        return json(res, 200, await runner.handoffUsage(id));
+      } catch (err) {
+        if (err.status) return json(res, err.status, { error: err.message });
+        throw err;
       }
     }
 
@@ -485,6 +512,12 @@ export function createAgentRoutes({ store, runner, tools, hub, providers, writeO
           patch.focusY = body.focusY;
         }
         if (typeof body.queueCombine === 'boolean') patch.queueCombine = body.queueCombine;
+        if (body.failover !== undefined) {
+          if (body.failover !== 'auto' && body.failover !== 'pause') {
+            return json(res, 400, { error: 'failover must be auto or pause' });
+          }
+          patch.failover = body.failover;
+        }
         await store.updateConversation(id, patch);
         if (body.queueCombine === true) await runner.kick(id);
         const next = await store.summary(id);

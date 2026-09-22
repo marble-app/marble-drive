@@ -9,8 +9,8 @@ import os from 'node:os';
 import path from 'node:path';
 
 
-test('seven starters, each with a blurb somebody could choose from', () => {
-  assert.deepEqual(list().map((s) => s.id), ['doc', 'sheet', 'slides', 'board', 'canvas', 'paper', 'latex']);
+test('eight starters, each with a blurb somebody could choose from', () => {
+  assert.deepEqual(list().map((s) => s.id), ['doc', 'note', 'sheet', 'slides', 'board', 'canvas', 'paper', 'latex']);
   for (const starter of list()) {
     assert.ok(starter.title && starter.blurb && starter.accent);
   }

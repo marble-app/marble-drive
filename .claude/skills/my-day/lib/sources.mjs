@@ -45,30 +45,38 @@ const WMO = {
   95: ['Thunderstorm', '\u26C8\uFE0F', 'storm'], 96: ['Thunderstorm + hail', '\u26C8\uFE0F', 'storm'], 99: ['Thunderstorm + hail', '\u26C8\uFE0F', 'storm'],
 };
 const wmo = (c) => WMO[c] || ['\u2014', '\u2753\uFE0F', 'cloudy'];
+// A clear code is a sun in the table. After sunset that reads as daytime,
+// so the night sky and the moon come from is_day, not from the code.
+const face = (code, isDay) => {
+  const [label, glyph, sky] = wmo(code);
+  if (sky === 'clear' && (isDay === 0 || isDay === false)) return [label, '\u{1F319}', 'clear-night'];
+  return [label, glyph, sky];
+};
 
 async function oneCity(name, lat, lon) {
   const u = `https://api.open-meteo.com/v1/forecast?latitude=${lat}&longitude=${lon}` +
     `&current=temperature_2m,apparent_temperature,weather_code,is_day` +
-    `&hourly=temperature_2m,apparent_temperature,weather_code,precipitation_probability` +
+    `&hourly=temperature_2m,apparent_temperature,weather_code,precipitation_probability,is_day` +
     `&daily=weather_code,temperature_2m_max,temperature_2m_min,sunrise,sunset,precipitation_probability_max` +
     `&timezone=auto&forecast_days=10&temperature_unit=fahrenheit&wind_speed_unit=mph`;
   const d = await get(u);
   const nowIso = d.current.time; // local
   const idx = d.hourly.time.findIndex((t) => t >= nowIso);
   const from = idx < 0 ? 0 : idx;
-  const hourly = d.hourly.time.slice(from, from + 48).map((t, i) => ({
-    time: t,
-    hour: Number(t.slice(11, 13)),
-    temp: Math.round(d.hourly.temperature_2m[from + i]),
-    feels: d.hourly.apparent_temperature ? Math.round(d.hourly.apparent_temperature[from + i]) : null,
-    code: d.hourly.weather_code[from + i],
-    label: wmo(d.hourly.weather_code[from + i])[0],
-    glyph: wmo(d.hourly.weather_code[from + i])[1],
-    sky: wmo(d.hourly.weather_code[from + i])[2],
-    pop: d.hourly.precipitation_probability?.[from + i] ?? null,
-    day: t.slice(0, 10),
-  }));
-  const [label, glyph, sky] = wmo(d.current.weather_code);
+  const hourly = d.hourly.time.slice(from, from + 48).map((t, i) => {
+    const code = d.hourly.weather_code[from + i];
+    const [label, glyph, sky] = face(code, d.hourly.is_day?.[from + i]);
+    return {
+      time: t,
+      hour: Number(t.slice(11, 13)),
+      temp: Math.round(d.hourly.temperature_2m[from + i]),
+      feels: d.hourly.apparent_temperature ? Math.round(d.hourly.apparent_temperature[from + i]) : null,
+      code, label, glyph, sky,
+      pop: d.hourly.precipitation_probability?.[from + i] ?? null,
+      day: t.slice(0, 10),
+    };
+  });
+  const [label, glyph, sky] = face(d.current.weather_code, d.current.is_day);
   return {
     city: name,
     tz: d.timezone,
@@ -76,8 +84,7 @@ async function oneCity(name, lat, lon) {
     now: {
       temp: Math.round(d.current.temperature_2m),
       feels: Math.round(d.current.apparent_temperature),
-      code: d.current.weather_code, label, glyph,
-      sky: sky === 'clear' && !d.current.is_day ? 'clear-night' : sky,
+      code: d.current.weather_code, label, glyph, sky,
       isDay: !!d.current.is_day,
     },
     today: {
@@ -106,10 +113,10 @@ async function oneCity(name, lat, lon) {
   };
 }
 
-// Where Bryan is changes every few weeks, so the two cities are arguments, not
+// Where Bryan is changes every few weeks, so the cities are arguments, not
 // constants. They were fixed to Zurich + San Diego, which kept reporting Zurich
-// after he flew home on 13 Sep. First city is where he is; second is the one he
-// is heading to or keeping an eye on.
+// after he flew home on 13 Sep. Order is where he is, then each --also, then
+// --away. --fold names a city whose 48-hour strip starts closed.
 const GAZETTEER = {
   zurich: ['Zurich', 47.3769, 8.5417],
   sandiego: ['San Diego', 32.7157, -117.1611],
@@ -129,6 +136,13 @@ async function weather(argv = []) {
     const i = argv.indexOf(flag);
     return i >= 0 && argv[i + 1] ? argv[i + 1] : dflt;
   };
+  const all = (flag) => {
+    const out = [];
+    for (let i = 0; i < argv.length; i++) {
+      if (argv[i] === flag && argv[i + 1] && !String(argv[i + 1]).startsWith('--')) out.push(argv[++i]);
+    }
+    return out;
+  };
   // The gazetteer is a fast path, not a gate. Bryan moves — Zurich to Seattle to
   // San Anselmo inside a week, with a five-stop drive south still to come — and a
   // city that needs a code edit before the weather is right is a city that shows
@@ -141,12 +155,13 @@ async function weather(argv = []) {
     if (!r) throw new Error(`unknown city "${name}" — geocoding found nothing; add it to GAZETTEER in sources.mjs`);
     return [r.name, r.latitude, r.longitude];
   };
-  const [hereName, hereLat, hereLon] = await pick(arg('--here', 'sananselmo'));
-  const [awayName, awayLat, awayLon] = await pick(arg('--away', 'sandiego'));
-  const cities = await Promise.all([
-    oneCity(hereName, hereLat, hereLon),
-    oneCity(awayName, awayLat, awayLon),
-  ]);
+  const fold = new Set(all('--fold').map(cityKey));
+  const wanted = [arg('--here', 'sananselmo'), ...all('--also'), arg('--away', 'sandiego')];
+  const picked = await Promise.all(wanted.map((name) => pick(name)));
+  const cities = await Promise.all(picked.map(([name, lat, lon]) => oneCity(name, lat, lon)));
+  for (const c of cities) {
+    if (fold.has(cityKey(c.city))) c.folded = true;
+  }
   return { fetchedAt: new Date().toISOString(), cities };
 }
 
@@ -482,7 +497,7 @@ try {
   else if (cmd === 'nflstandings') out = await nflStandings();
   else if (cmd === 'nfllogos') out = args.refresh ? await refreshNflLogos() : { count: Object.keys(nflLogos()).length, pack: LOGO_PACK };
   else {
-    console.error('usage: sources.mjs weather [--here <city>] [--away <city>] | arxiv [--cat cs.HC] [--max 80] [--days 1] [--since YYYY-MM-DD] [--unseen] [--rss] | art --q "<theme>" [--limit 8] [--width 1600] | nflstandings [--us SF] [--season 2026] | nfllogos [--refresh]');
+    console.error('usage: sources.mjs weather [--here <city>] [--also <city>]... [--away <city>] [--fold <city>]... | arxiv [--cat cs.HC] [--max 80] [--days 1] [--since YYYY-MM-DD] [--unseen] [--rss] | art --q "<theme>" [--limit 8] [--width 1600] | nflstandings [--us SF] [--season 2026] | nfllogos [--refresh]');
     process.exit(1);
   }
   console.log(JSON.stringify(out, null, 2));

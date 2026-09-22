@@ -116,9 +116,8 @@ element under the pointer is outlined, a click toggles it, **Escape** clears.
 The card's composer is the composer: setups, model, effort, and the Project
 picker. Choosing a registered project makes it a coding turn in that
 repository, which is how "fix the code behind this" works with no new
-mechanism. **Continue in `<title>`** sends the brief to the chat this tab was
-last in, if it is idle, instead of starting a new one — the same agent, with
-its memory, brought to a new region.
+mechanism. The card is a new conversation: the first send creates it, and
+it does not continue the chat this tab was last in.
 
 While the agent works the card stands where the zone's label would, showing
 `Agent · <what it is doing>`, and the label itself steps back: one object on
@@ -128,13 +127,14 @@ ends the card reads `Changed 4 elements · Undo · Done`. *Undo* is the turn's
 own undo. *Done* marks the chat reviewed, clears the trail, and puts the
 callout away: seeing it and saying done is reviewing it.
 
-`×` folds the card to a pill with the chat's name, or with what its last turn
-did if that ended while it was folded. The pill reopens the card. While the
-agent is still working the pill steps aside altogether, because the zone's own
-label is the folded callout — *Open chat* there brings the card back.
-**Open beside** moves the chat to the drawer; **Open in Agents** leaves for the
-Agents page with that chat open. Undo and Done live in the card, never on the
-pill: they come after looking.
+The two controls at the card's corner do different jobs. The side icon folds
+the card to a pill and opens that chat in the drawer. `×` only folds it. The
+pill reopens the card, and it never opens the drawer: the side icon is the
+only control that does. While the agent is still working the pill steps aside
+altogether, because the zone's own label is the folded callout — clicking that
+label, or *Open chat* on it, brings the card back. **Open in Agents** leaves
+for the Agents page with that chat open, once the conversation exists. Undo
+and Done live in the card, never on the pill: they come after looking.
 
 A reload rebuilds callouts for chats about this document that are running,
 asking, or unreviewed, at the region their last turn was about — at most six,
@@ -142,8 +142,40 @@ newest first. A chat whose region is no longer on the page draws nothing; the
 drawer still lists it. A prompt sent from the drawer with a selection gets a
 callout as well, so both paths end at the same object.
 
-On a phone the handle opens the drawer with the selection attached; there is
-no anchored card. The Agents page draws no callouts of its own.
+On a phone the handle opens the drawer on a new conversation, with the
+selection attached; there is no anchored card. The Agents page draws no
+callouts of its own.
+
+## Marking a document up: Select and Sketch
+
+The drawer's tray holds two tools for saying *this part, like this* without
+typing an id. Both are pointer tools, so neither is offered where there is no
+hover; both put the page in a mode that Escape, or the tool again, leaves; and
+in a mode the pointer belongs to the layer while the wheel still scrolls the
+page under it. A page with no tray — the Agents page — has neither.
+
+**Select an area** draws a marquee. Every addressed element the rectangle
+covers by sixty percent or more is outlined as you drag, and a rectangle across
+a whole list outlines the list rather than its items. Letting go hands those
+elements to the selection the callout's handle and ⌘J already answer to, and
+leaves the mode. **Shift** while releasing adds to what is already selected.
+
+**Sketch** draws. Each stroke is read as one of three things and the reading is
+what the agent is told: a stroke that closes on itself is **a box around** the
+elements it encloses, a straight one is **an arrow from** the element at its
+start **to** the one at its end — a short stroke at either end within half a
+second is its head, not a second mark — and anything else is **ink over** what
+it covers. Resting on a stroke shows its reading in words, so a wrong one can
+be redrawn before it is sent. ⌘Z takes back the last stroke and **Clear
+sketch**, which is in the tray only while there is ink, takes back all of them.
+
+A sketch is a selection with a reading attached: the strokes name their
+elements as the selection, and sending goes out through the door that was
+already there — the handle, ⌘J, or **Ask about the sketch** in the tray, which
+is Ask here wearing what the sketch made of it. The card opens with the reading
+as the first sentence of its draft, for the person to edit before they send.
+Marks live in the page for as long as the tab does; nothing is written to the
+document, and nothing is stored beside it yet.
 
 ## What a full agent can do
 
@@ -437,15 +469,23 @@ and project are the mast's tags; what a turn changed is its footer; there is
 no status line. The setup shrinks first (segments fold into dropdowns, the
 capsule packs into More) and takes its own line only when even that does not
 fit. Saved setups are the main toggles when Claude or Cursor is signed in: Anthropic or
-Cursor mark plus a short **model + effort** name (Fable 5.1 High, Opus Extra
-High, Opus High, Sonnet High, Grok Extra High). Those presets stay clickable on an
+Cursor mark plus a short **model + effort** name, weakest first (Sonnet High,
+Grok 4.7 High, Opus High, Fable 5.1 High). Grok 4.7 rests on High; High Fast
+is the same model with fast on, and it stays on the effort slider. Those presets stay clickable on an
 existing thread, so you can switch from Claude to Cursor (or back) without
 starting a new conversation. The next turn uses the new CLI and does not
-resume the previous CLI's session. A new conversation still prefers the
+resume the previous CLI's session. Beside the model, one word — **Auto** or
+**Pause** — belongs to that chat (a new chat starts on Auto; on a phone the
+word is in the setup sheet with the model). When a Claude turn stops because
+its usage window is spent, Auto points the chat at Cursor's newest Grok, at
+the same effort or the nearest one that model offers, and sends **Continue**
+with this chat's transcript so Grok can finish the work. Pause leaves the
+turn failed and asks above the composer whether to switch to Cursor. **Leave
+it** keeps the failure. **Switch** is the same handoff. A crash, a refusal,
+or a message that says to retry shortly does not switch. A new conversation still prefers the
 Settings default, except when Claude's 5-hour meter is at 100%: then the
 picker starts on Cursor if Cursor is signed in. If Claude usage cannot be
-read, Claude is treated as unavailable: the picker starts on Cursor, Claude's
-CLI and presets are disabled, and the Claude meter reads Unavailable. **Custom** expands the three thin
+read, the meter reads Unavailable and Claude stays pickable — not knowing is not being out. **Custom** expands the three thin
 segmented bars for **CLI** (Claude, Cursor, KIXLAB API), **model**, and
 **effort**. If a bar would overflow the row, it becomes a compact dropdown
 instead of scrolling sideways. Cursor's picker is Default, Auto, and the

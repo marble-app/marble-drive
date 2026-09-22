@@ -12,11 +12,12 @@
     "marble-drive": "bin/marble-drive.js"
   },
   "scripts": {
-    "dev": "node --env-file-if-exists=.env --env-file-if-exists=.env.local bin/marble-drive.js serve",
-    "start": "node bin/marble-drive.js serve",
+    "dev": "mkdir -p scratchpad/heapsnapshots && node --diagnostic-dir=scratchpad/heapsnapshots --heapsnapshot-near-heap-limit=1 --env-file-if-exists=.env --env-file-if-exists=.env.local bin/marble-drive.js serve",
+    "start": "mkdir -p scratchpad/heapsnapshots && node --diagnostic-dir=scratchpad/heapsnapshots --heapsnapshot-near-heap-limit=1 --env-file-if-exists=.env --env-file-if-exists=.env.local bin/marble-drive.js serve",
     "weigh": "node bin/marble-drive.js weigh",
     "backup": "node bin/marble-drive.js backup",
     "remote": "node --env-file-if-exists=.env --env-file-if-exists=.env.local bin/marble-drive.js remote",
+    "funnel": "tailscale funnel --bg 4400",
     "agents": "node --env-file-if-exists=.env --env-file-if-exists=.env.local bin/marble-drive.js agents",
     "daemon": "macos/launchd/daemon.sh",
     "test": "node --test --test-reporter=spec \"test/**/*.test.js\"",

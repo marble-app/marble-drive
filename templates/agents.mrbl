@@ -587,10 +587,10 @@ __ICON__
   .focus-card[data-lod="full"] .focus-card-head { cursor: grab; }
   .focus-card[data-lod="full"] { z-index: 3; }
   .focus-card[data-lod="digest"] { z-index: 2; }
-  .focus-card[data-lod="chip"] {
-    z-index: 1;
-    border-left: 3px solid var(--folder, var(--line));
-  }
+  /* A chip wears its group the same way every other card does: on the square
+     tick in its head. A coloured left border had to follow the card's own
+     12px corner, so the rule bowed away from the edge at both ends. */
+  .focus-card[data-lod="chip"] { z-index: 1; }
   .focus-card[data-selected="true"] {
     box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent-ink) 70%, transparent), var(--shadow-lift);
   }
@@ -635,7 +635,6 @@ __ICON__
   .focus-card[data-lod="full"]:hover .focus-card-actions,
   .focus-card:focus-within .focus-card-actions { opacity: 1; visibility: visible; transition-delay: 0s; }
   .focus-card[data-lod="chip"] .focus-card-actions { display: none; }
-  .focus-card[data-lod="chip"] .focus-folder,
   .focus-card[data-lod="chip"] .focus-pin,
   .focus-card[data-lod="chip"] .focus-keep,
   .focus-card[data-lod="chip"] .focus-collapse,
@@ -1034,7 +1033,7 @@ __ICON__
      distance from the one in your hand; the pane sits over the Full. */
   /* The home indicator is not a place to put the last card: the column ends
      where the hand does, and `phoneRoom()` subtracts the same inset. */
-  .focus[data-phone] { position: relative; overflow: hidden; height: calc(var(--vv-h, 100vh) - var(--topbar-h, 2.75rem)); touch-action: none; padding: 0 0 env(safe-area-inset-bottom, 0px); }
+  .focus[data-phone] { position: relative; top: var(--vv-top, 0px); overflow: hidden; height: calc(var(--vv-h, 100vh) - var(--topbar-h, 2.75rem)); touch-action: none; padding: 0 0 env(safe-area-inset-bottom, 0px); }
   /* Folder colour rides every tier, not the chip alone: the leading rule is
      how a thumb reads which region it is passing through. */
   .focus[data-phone] .focus-card { position: absolute; left: .75rem; right: .75rem; width: auto; margin: 0; overflow: hidden; border-radius: 12px; border-left: 3px solid var(--folder, var(--line)); transition: none; transform: none; }
@@ -1881,7 +1880,7 @@ __ICON__
   }
 
   @media (max-width: 719px) {
-    :root { --vv-h: 100vh; --topbar-h: calc(2.75rem + env(safe-area-inset-top, 0px)); --thumb-h: calc(3.5rem + env(safe-area-inset-bottom, 0px)); }
+    :root { --vv-h: 100vh; --vv-top: 0px; --topbar-h: calc(2.75rem + env(safe-area-inset-top, 0px)); --thumb-h: calc(3.5rem + env(safe-area-inset-bottom, 0px)); }
     /* The thumb bar: always at the sill, translucent, content scrolling under. */
     .thumb { position: fixed; left: 0; right: 0; bottom: 0; z-index: 30; display: flex; align-items: center; gap: .5rem; height: var(--thumb-h); padding: 0 .75rem env(safe-area-inset-bottom, 0px) 1rem; background: rgba(var(--paper-rgb), .72); -webkit-backdrop-filter: blur(20px) saturate(180%); backdrop-filter: blur(20px) saturate(180%); border-top: 1px solid var(--edge-lit); }
     .thumb::before { content: ''; position: absolute; left: 0; right: 0; bottom: 100%; height: 12px; background: linear-gradient(transparent, rgba(var(--paper-rgb), .9)); pointer-events: none; }
@@ -1901,7 +1900,11 @@ __ICON__
        The five-row header was a third of the screen. */
     html, body { overscroll-behavior: none; }
     body { -webkit-tap-highlight-color: transparent; }
-    .topbar { position: sticky; top: 0; z-index: 30; flex-wrap: nowrap; align-items: center; gap: .5rem; min-height: var(--topbar-h); height: var(--topbar-h); padding: env(safe-area-inset-top, 0px) .5rem 0 1rem; background: rgba(var(--paper-rgb), .72); -webkit-backdrop-filter: blur(20px) saturate(180%); backdrop-filter: blur(20px) saturate(180%); border-bottom: 0; }
+    /* `--vv-top` is how far down the layout viewport the visible strip now
+       starts. Sticky pins the topbar to the layout viewport, which with the
+       keyboard up is above the screen — so it rides down by that much and the
+       conversation's own header stays where it can be read. */
+    .topbar { transform: translateY(var(--vv-top, 0px)); position: sticky; top: 0; z-index: 30; flex-wrap: nowrap; align-items: center; gap: .5rem; min-height: var(--topbar-h); height: var(--topbar-h); padding: env(safe-area-inset-top, 0px) .5rem 0 1rem; background: rgba(var(--paper-rgb), .72); -webkit-backdrop-filter: blur(20px) saturate(180%); backdrop-filter: blur(20px) saturate(180%); border-bottom: 0; }
     .topbar::after { content: ''; position: absolute; left: 0; right: 0; top: 100%; height: 12px; background: linear-gradient(rgba(var(--paper-rgb), .9), transparent); pointer-events: none; }
     .topbar h1 { order: 0; flex: 1 1 auto; min-width: 0; margin: 0 .35rem 0 0; font-size: 1rem; letter-spacing: -.01em; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; pointer-events: none; }
     .topbar .toggles, .topbar .filterbox, .topbar .settings, .topbar .new, .topbar .usage { display: none; }
@@ -2051,7 +2054,7 @@ __ICON__
     body[data-open] .list { display: none; }
     /* One conversation takes the screen, under the topbar and over everything
        else; it enters from the right and leaves by the same edge. */
-    body[data-open] .pane { display: grid; position: fixed; left: 0; right: 0; top: var(--topbar-h); height: calc(var(--vv-h) - var(--topbar-h)); min-height: 0; z-index: 20; background: var(--paper); will-change: transform; }
+    body[data-open] .pane { display: grid; position: fixed; left: 0; right: 0; top: calc(var(--vv-top, 0px) + var(--topbar-h)); height: calc(var(--vv-h) - var(--topbar-h)); min-height: 0; z-index: 20; background: var(--paper); will-change: transform; }
     body[data-view="deck"][data-open] .deck { display: none; }
     body[data-view="deck"][data-open] .library { display: block; }
     .pane-hint { bottom: 7.5rem; }
@@ -3873,10 +3876,24 @@ __ICON__
 
     const effectiveFocusMode = () => (focusMode === 'active' ? 'active' : focusModeFolder() ? 'group' : 'pinned');
 
+    // Every lens keeps its own arrangement of the stage. The stage is the
+    // person's to lay out, so a lens that takes it over has to hand back what
+    // it took: without this, a moment in Active and home again found the
+    // pinned tree gone — every leaf taken out as its chat left the stage, and
+    // a default grid built in its place. Keyed by the lens, holding the
+    // id-named form a filed tree takes, and this page's, like the dock.
+    const focusStages = new Map();
+    const focusStageKey = () => {
+      if (focusMode === 'active') return 'active';
+      const folder = focusModeFolder();
+      return folder ? `group:${folder.id}` : 'pinned';
+    };
+
     const setFocusMode = (next, { quiet = false } = {}) => {
       const value = next === 'active' || (typeof next === 'string' && next.startsWith('group:')) ? next : 'pinned';
       closeFocusModesMenu();
       if (value === focusMode) return;
+      stashFocusStage();
       focusMode = value;
       remember(FOCUS_MODE_KEY, value === 'pinned' ? null : value);
       if (!quiet) paintFocus();
@@ -4199,12 +4216,13 @@ __ICON__
       else convo.removeAttribute('conversation');
       normalizeExtras();
       const keys = [PRIMARY, ...dock.extras.map((extra) => extra.key)];
-      // A stage arranged before a reload comes back if it names these very pins.
-      if (dock.saved?.tree && dock.extras.length) {
+      // A stage arranged before a reload, or before a lens took it over, comes
+      // back if it names these very pins. The tree filed at unload is tried
+      // first: it is the one this very stage was showing.
+      if (dock.extras.length) {
         const keyOfId = new Map([[primary, PRIMARY], ...dock.extras.map((extra) => [extra.id, extra.key])]);
-        const tree = savedToTree(dock.saved.tree, keyOfId);
-        const have2 = tree ? treeLeaves(tree) : [];
-        if (tree && have2.length === keys.length && keys.every((key) => have2.includes(key))) dock.tree = tree;
+        const tree = restoreStageTree(keys, keyOfId, dock.saved?.tree, focusStages.get(focusStageKey()));
+        if (tree) dock.tree = tree;
       }
       dock.saved = null;
       dock.tree = dock.extras.length ? reconcileTree(dock.tree, keys) : null;
@@ -6948,6 +6966,19 @@ __ICON__
       return splitNode(saved.dir, kids, sizes && sizes.every((size) => size > 0) ? sizes : null);
     };
 
+    /** The first of `candidates` — id-named trees, most wanted first — that
+     *  names exactly `keys`. A layout that no longer matches its panes is
+     *  discarded, not repaired. */
+    const restoreStageTree = (keys, keyOfId, ...candidates) => {
+      for (const saved of candidates) {
+        if (!saved) continue;
+        const tree = savedToTree(saved, keyOfId);
+        const have = tree ? treeLeaves(tree) : [];
+        if (tree && have.length === keys.length && keys.every((key) => have.includes(key))) return tree;
+      }
+      return null;
+    };
+
     // An empty pane is not remembered: a tree naming a leaf that will not
     // come back is no tree at all, so it is dropped with the pane.
     const savedDock = (record) => {
@@ -6960,7 +6991,16 @@ __ICON__
         file: record === dock ? convo.getAttribute('conversation') : (record.file ?? null),
       };
     };
+    /** File the stage's arrangement under the lens showing it. This runs
+     *  wherever the dock is filed, so what a lens hands back is the last tree
+     *  it had rather than the one it had the first time it was left. */
+    const stashFocusStage = () => {
+      const tree = docks.focus.extras.length && docks.focus.tree ? savedDock(docks.focus).tree : null;
+      focusStages.set(focusStageKey(), tree);
+    };
+
     const rememberDock = () => {
+      stashFocusStage();
       remember(DOCK_KEY, JSON.stringify({ v: 3, page: savedDock(docks.page), focus: savedDock(docks.focus) }));
     };
 
@@ -9232,8 +9272,14 @@ __ICON__
       const vv = window.visualViewport;
       const h = vv?.height ?? window.innerHeight;
       document.documentElement.style.setProperty('--vv-h', `${Math.round(h)}px`);
-      // The keyboard is the strip of the layout viewport the visual viewport
-      // no longer covers. Anything standing on the sill stands on `--kb`.
+      // The keyboard does not only take room, it moves the room: to keep the
+      // caret clear the browser slides the visual viewport down the layout
+      // viewport, and everything the page fixed to the layout viewport is then
+      // that much too high. `--vv-top` is where the visible strip starts and
+      // `--kb` is where it ends; between them they place every fixed surface
+      // on the screen the person is actually looking at.
+      const top = vv ? Math.max(0, Math.round(vv.offsetTop)) : 0;
+      document.documentElement.style.setProperty('--vv-top', `${top}px`);
       const kb = vv ? Math.max(0, Math.round(window.innerHeight - vv.height - vv.offsetTop)) : 0;
       document.documentElement.style.setProperty('--kb', `${kb}px`);
       if (narrowView.matches && (document.body.getAttribute('data-view') || 'library') === 'focus') paintFocus({ quiet: true });

@@ -820,6 +820,7 @@ pre { white-space: pre-wrap; word-break: break-word; font: 12px/1.5 var(--font-m
 .act:focus-visible,
 .chk:focus-visible,
 .wx-hrs:focus-visible,
+.exp-toggle:focus-visible,
 .seg button:focus-visible,
 .add:focus-visible,
 .kd:focus-visible,
@@ -851,7 +852,7 @@ li.row:has(:focus-visible) .acts,
 @media (hover: none) {
   .acts { opacity: 1; }
   .tip::after, .ic-wrap::after { display: none; }   /* a tip no tap can open is a lie */
-  .act, .seg button, .add, .comp-exp { min-width: 2.75rem; min-height: 2.75rem; }
+  .act, .seg button, .add, .comp-exp, .exp-toggle { min-width: 2.75rem; min-height: 2.75rem; }
   .act { padding: .5rem; }
 }
 
@@ -862,3 +863,15 @@ li.row:has(:focus-visible) .acts,
   content: ' · not saved — no host, so changes die with this tab';
   color: var(--warm);
 }
+
+/* -- 6. A way back, drawn. Mod+Z is bound in shell.mrbl, which derives
+      .day-can-undo from the carrier's own `canUndo`. This is the only evidence
+      the page gives that a tick, a star or a delete can be taken back, and it
+      appears only once there is actually something on the stack — so it is a
+      reading of the document, not a decoration. Text, never motion: under
+      prefers-reduced-motion an animated hint would be no hint at all. -------- */
+body.day-can-undo .colophon::after {
+  content: ' · ⌘Z takes back the last change';
+  color: var(--faint);
+}
+body.day-can-undo[data-marble-readonly] .colophon::after { content: none; }

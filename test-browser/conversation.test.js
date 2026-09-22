@@ -169,7 +169,7 @@ const installNamedSetups = async (view, { model = 'sonnet', effort = 'high', wid
         signedIn: true,
         models: [
           { id: 'auto', label: 'Auto' },
-          { id: 'cursor-grok-4.6', label: 'Grok 4.6', efforts: [{ id: 'high', label: 'High' }, { id: 'xhigh', label: 'Extra High' }], hasBare: false },
+          { id: 'grok-4.7', label: 'Grok 4.7', efforts: [{ id: 'high', label: 'High' }, { id: 'high-fast', label: 'High Fast' }, { id: 'xhigh', label: 'Extra High' }], hasBare: false },
         ],
         efforts: [],
         modes: [{ id: 'agent', label: 'Run Everything' }],
@@ -223,7 +223,7 @@ test('saved setups hug their labels instead of stretching across the composer', 
       names: [...el.shadowRoot.querySelectorAll('.preset span')].map((node) => node.textContent.trim()),
     };
   });
-  assert.deepEqual(names.names, ['Fable 5.1 High', 'Opus High', 'Sonnet High']);
+  assert.deepEqual(names.names, ['Sonnet High', 'Opus High', 'Fable 5.1 High']);
   assert.ok(names.presets <= names.pills + 12, `presets ${names.presets} should hug pills ${names.pills}, not setup ${names.setup}`);
   // The setup shares its row with the mode and send buttons now, so the
   // margin is what Custom takes, not the old empty half of the composer.
@@ -246,7 +246,7 @@ const presetGeometry = (el) => {
       top: Math.round(box.top * 10) / 10,
     };
   }).filter((item) => item.width > 0 && item.height > 0 && item.display !== 'none');
-  const names = boxes.filter((item) => item.text.includes('Grok Extra High'));
+  const names = boxes.filter((item) => item.text.includes('Grok 4.7 High'));
   const overlap = (a, b) => a.left < b.right - 2 && b.left < a.right - 2 && Math.abs(a.top - b.top) < 12;
   const clashes = [];
   for (let i = 0; i < names.length; i += 1) {
@@ -269,7 +269,7 @@ const presetGeometry = (el) => {
 test('saved setups collapse to the one you are on, at every width', async () => {
   const { view } = await mount();
   await view.locator('input[name="agent"][value="fake"]').waitFor();
-  await installNamedSetups(view, { model: 'cursor-grok-4.6', effort: 'xhigh' });
+  await installNamedSetups(view, { model: 'grok-4.7', effort: 'high' });
   // A row of capsules for a choice made rarely outweighed the prompt above it,
   // and had to be packed and re-packed at every width to fit. One word cannot
   // overflow, so the fitting problem is gone rather than solved.
@@ -291,7 +291,7 @@ test('saved setups collapse to the one you are on, at every width', async () => 
     assert.equal(shape.onTrack, 0, `width ${width}: nothing should sit on the track`);
     assert.ok(shape.inMenu >= 4, `width ${width}: every setup lives in the menu, got ${shape.inMenu}`);
     assert.ok(shape.height < 32, `width ${width}: one row, got ${shape.height}`);
-    assert.match(shape.trigger, /Grok Extra High/, `width ${width}: the trigger names the setup you are on`);
+    assert.match(shape.trigger, /Grok 4\.7 High/, `width ${width}: the trigger names the setup you are on`);
     assert.match(shape.fill, /rgba\(0, 0, 0, 0\)/, `width ${width}: the trigger is a word, not a capsule`);
   }
 });
@@ -322,7 +322,7 @@ test('Custom keeps the Claude model sliders visible after picking a preset', asy
         signedIn: true,
         models: [
           { id: 'auto', label: 'Auto' },
-          { id: 'cursor-grok-4.6', label: 'Grok 4.6', efforts: [{ id: 'high', label: 'High' }, { id: 'xhigh', label: 'Extra High' }], hasBare: false },
+          { id: 'grok-4.7', label: 'Grok 4.7', efforts: [{ id: 'high', label: 'High' }, { id: 'high-fast', label: 'High Fast' }, { id: 'xhigh', label: 'Extra High' }], hasBare: false },
         ],
         efforts: [],
         modes: [{ id: 'agent', label: 'Run Everything' }],
@@ -375,7 +375,7 @@ test('Cursor presets stay enabled on a Claude conversation', async () => {
         signedIn: true,
         models: [
           { id: 'auto', label: 'Auto' },
-          { id: 'cursor-grok-4.6', label: 'Grok 4.6', efforts: [{ id: 'high', label: 'High' }, { id: 'xhigh', label: 'Extra High' }], hasBare: false },
+          { id: 'grok-4.7', label: 'Grok 4.7', efforts: [{ id: 'high', label: 'High' }, { id: 'high-fast', label: 'High Fast' }, { id: 'xhigh', label: 'Extra High' }], hasBare: false },
         ],
         efforts: [],
         modes: [{ id: 'agent', label: 'Run Everything' }],
@@ -391,15 +391,15 @@ test('Cursor presets stay enabled on a Claude conversation', async () => {
     await el.syncCatalog({ model: 'sonnet', effort: 'high' });
     el.paintPresets({ initial: true });
     await el.applyPreset({
-      id: 'grok-xhigh',
+      id: 'grok-high',
       provider: 'cursor',
-      model: 'cursor-grok-4.6',
-      effort: 'xhigh',
-      name: 'Grok Extra High',
+      model: 'grok-4.7',
+      effort: 'high',
+      name: 'Grok 4.7 High',
       brand: 'cursor',
     });
     return {
-      grokDisabled: el.shadowRoot.querySelector('input[name="preset"][value="grok-xhigh"]')?.disabled ?? true,
+      grokDisabled: el.shadowRoot.querySelector('input[name="preset"][value="grok-high"]')?.disabled ?? true,
       agent: el.shadowRoot.querySelector('input[name="agent"]:checked')?.value,
       model: el.shadowRoot.querySelector('input[name="model"]:checked')?.value,
       effort: el.shadowRoot.querySelector('input[name="effort"]:checked')?.value,
@@ -407,8 +407,8 @@ test('Cursor presets stay enabled on a Claude conversation', async () => {
   });
   assert.equal(flags.grokDisabled, false);
   assert.equal(flags.agent, 'cursor');
-  assert.equal(flags.model, 'cursor-grok-4.6');
-  assert.equal(flags.effort, 'xhigh');
+  assert.equal(flags.model, 'grok-4.7');
+  assert.equal(flags.effort, 'high', 'Grok 4.7 rests on High, not High Fast');
 });
 
 test('spent Claude usage prefers Cursor for a new conversation', async () => {
@@ -426,7 +426,10 @@ test('spent Claude usage prefers Cursor for a new conversation', async () => {
   assert.equal(pick, 'cursor');
 });
 
-test('unavailable Claude usage prefers Cursor and disables Claude presets', async () => {
+// An unreadable meter (`available: false`, no `used`) is not spent usage.
+// Not knowing is not being out: stay on Claude and leave its presets on.
+// Spent usage (`used >= 100`) is the test above.
+test('an unreadable Claude meter stays on Claude with its presets enabled', async () => {
   const { view } = await mount();
   await view.locator('input[name="agent"][value="fake"]').waitFor();
   const flags = await view.evaluate(async (el) => {
@@ -461,13 +464,13 @@ test('unavailable Claude usage prefers Cursor and disables Claude presets', asyn
       agent: el.shadowRoot.querySelector('input[name="agent"]:checked')?.value,
       claudeDisabled: el.shadowRoot.querySelector('input[name="agent"][value="claude-subscription"]')?.disabled ?? false,
       sonnetDisabled: el.shadowRoot.querySelector('input[name="preset"][value="sonnet-high"]')?.disabled ?? false,
-      grokDisabled: el.shadowRoot.querySelector('input[name="preset"][value="grok-xhigh"]')?.disabled ?? true,
+      grokDisabled: el.shadowRoot.querySelector('input[name="preset"][value="grok-high"]')?.disabled ?? true,
     };
   });
-  assert.equal(flags.preferred, 'cursor');
-  assert.equal(flags.agent, 'cursor');
-  assert.equal(flags.claudeDisabled, true);
-  assert.equal(flags.sonnetDisabled, true);
+  assert.equal(flags.preferred, 'claude-subscription');
+  assert.equal(flags.agent, 'claude-subscription');
+  assert.equal(flags.claudeDisabled, false);
+  assert.equal(flags.sonnetDisabled, false);
   assert.equal(flags.grokDisabled, false);
 });
 
@@ -1120,8 +1123,10 @@ test('resting on the setup button names the shortcut, after a beat', async () =>
   await left.locator('input[name="agent"][value="fake"]').waitFor();
   await withSetups(left);
   await left.locator('.presets-more').waitFor();
+  // Its own tip: every armed control keeps one beside it, so ".keytip" alone
+  // now means more than one thing.
   const hint = () => left.evaluate((el) => {
-    const tip = el.shadowRoot.querySelector('.keytip');
+    const tip = el.shadowRoot.querySelector('.presets-more + .keytip');
     return { open: Boolean(tip?.classList.contains('is-open')), text: tip?.textContent ?? '' };
   });
 
@@ -1130,17 +1135,17 @@ test('resting on the setup button names the shortcut, after a beat', async () =>
   // the way to somewhere else; this one waits to be rested on.
   assert.equal((await hint()).open, false, 'not on the way past');
 
-  await left.locator('.keytip').waitFor({ state: 'visible' });
+  await left.locator('.presets-more + .keytip').waitFor({ state: 'visible' });
   const up = await hint();
   assert.equal(up.open, true);
   assert.match(up.text, /⌃⌥/);
   assert.match(up.text, /model/);
   assert.match(up.text, /effort/);
   // It has the pane next door to clear, like every other floating thing here.
-  assert.equal(await left.evaluate((el) => el.shadowRoot.querySelector('.keytip').matches(':popover-open')), true);
+  assert.equal(await left.evaluate((el) => el.shadowRoot.querySelector('.presets-more + .keytip').matches(':popover-open')), true);
 
   await page.mouse.move(4, 4);
-  await left.locator('.keytip').waitFor({ state: 'hidden' });
+  await left.locator('.presets-more + .keytip').waitFor({ state: 'hidden' });
   assert.equal((await hint()).open, false, 'moving on takes it away');
 });
 
@@ -1236,7 +1241,7 @@ test('Claude and Cursor presets become the main toggles', async () => {
         models: [
           { id: 'auto', label: 'Auto' },
           { id: 'composer-2.5', label: 'Composer 2.5' },
-          { id: 'cursor-grok-4.6', label: 'Grok 4.6', efforts: [{ id: 'high', label: 'High' }, { id: 'xhigh', label: 'Extra High' }], hasBare: false },
+          { id: 'grok-4.7', label: 'Grok 4.7', efforts: [{ id: 'high', label: 'High' }, { id: 'high-fast', label: 'High Fast' }, { id: 'xhigh', label: 'Extra High' }], hasBare: false },
         ],
         efforts: [],
         modes: [{ id: 'agent', label: 'Run Everything' }],
@@ -1250,7 +1255,7 @@ test('Claude and Cursor presets become the main toggles', async () => {
     el.paintPresets({ initial: true });
     return [...el.shadowRoot.querySelectorAll('.preset span')].map((node) => node.textContent.trim());
   });
-  assert.deepEqual(names, ['Fable 5.1 High', 'Opus High', 'Sonnet High', 'Grok Extra High']);
+  assert.deepEqual(names, ['Sonnet High', 'Grok 4.7 High', 'Opus High', 'Fable 5.1 High']);
   assert.equal(await view.locator('.presets').isVisible(), true);
   assert.equal(await view.locator('.picker').isVisible(), false);
   assert.equal(await view.locator('input[name="preset"][value="sonnet-high"]').isChecked(), true);
@@ -1260,20 +1265,20 @@ test('Claude and Cursor presets become the main toggles', async () => {
   assert.deepEqual(claudeModels, ['haiku', 'sonnet', 'opus', 'fable']);
   await view.evaluate(async (el) => {
     await el.applyPreset({
-      id: 'grok-xhigh',
+      id: 'grok-high',
       provider: 'cursor',
-      model: 'cursor-grok-4.6',
-      effort: 'xhigh',
-      name: 'Grok Extra High',
+      model: 'grok-4.7',
+      effort: 'high',
+      name: 'Grok 4.7 High',
       brand: 'cursor',
     });
   });
   assert.equal(await view.evaluate((el) => el.shadowRoot.querySelector('input[name="agent"]:checked')?.value), 'cursor');
-  assert.equal(await view.evaluate((el) => el.shadowRoot.querySelector('input[name="model"]:checked')?.value), 'cursor-grok-4.6');
-  assert.equal(await view.evaluate((el) => el.shadowRoot.querySelector('input[name="effort"]:checked')?.value), 'xhigh');
+  assert.equal(await view.evaluate((el) => el.shadowRoot.querySelector('input[name="model"]:checked')?.value), 'grok-4.7');
+  assert.equal(await view.evaluate((el) => el.shadowRoot.querySelector('input[name="effort"]:checked')?.value), 'high');
   assert.equal(await view.locator('.picker').isVisible(), true, 'Custom stays open so the sliders do not vanish');
   const cursorModels = await view.evaluate((el) => [...el.shadowRoot.querySelectorAll('input[name="model"]')].map((input) => input.value));
-  assert.deepEqual(cursorModels, ['', 'auto', 'cursor-grok-4.6']);
+  assert.deepEqual(cursorModels, ['', 'auto', 'grok-4.7']);
   const clis = await view.evaluate((el) => [...el.shadowRoot.querySelectorAll('input[name="agent"] + span')].map((node) => node.textContent.trim()));
   assert.deepEqual(clis, ['Claude', 'Cursor']);
 });
@@ -2122,4 +2127,76 @@ test('the ticker says what the log said last, and nothing outside callout chrome
   await sendFrom(plain, 'script:rename');
   await plain.locator('.turn-footer[data-status="completed"]').waitFor();
   assert.equal(await plain.locator('.ticker').isVisible(), false, 'the drawer keeps its log');
+});
+
+test('the usage toggle sits with the model, and Pause asks above the box', async () => {
+  const { page, view } = await mount();
+  await view.locator('.failover').waitFor();
+  assert.equal(await view.locator('.failover').getAttribute('data-failover'), 'auto');
+  assert.equal(
+    await view.evaluate((el) => el.shadowRoot.querySelector('.failover').querySelector('svg') != null),
+    true,
+    'a glyph, not the word Auto, which the permission modes already own',
+  );
+  assert.equal(
+    await view.evaluate((el) => {
+      const style = getComputedStyle(el.shadowRoot.querySelector('.failover'));
+      return `${style.borderTopWidth} ${style.backgroundColor}`;
+    }),
+    '0px rgba(0, 0, 0, 0)',
+    'no pill: it is as quiet as the options beside it',
+  );
+  assert.equal(
+    await view.evaluate((el) => el.shadowRoot.querySelector('.failover').closest('.setup-row') != null),
+    true,
+    'the toggle lives in the setup row, which a phone moves into the sheet',
+  );
+
+  await sendFrom(view, 'script:rename');
+  await view.locator('.turn-footer[data-status="completed"]').waitFor();
+  const id = await view.getAttribute('conversation');
+  await view.locator('.failover').click();
+  await page.waitForFunction(async (conversation) => {
+    const meta = await window.marble.agent.conversation(conversation);
+    return meta.meta.failover === 'pause';
+  }, id);
+  assert.equal(await view.locator('.failover').getAttribute('data-failover'), 'pause');
+  assert.match(
+    await view.locator('.failover').getAttribute('aria-label'),
+    /^Pause when Claude usage stops/,
+    'the mode it is in, said out loud',
+  );
+
+  // A rest on it names the mode; moving on takes the tip away.
+  await view.locator('.failover').hover();
+  const tip = view.locator('.failover + .keytip');
+  await tip.waitFor({ state: 'visible' });
+  assert.match(await tip.innerText(), /^Pause when Claude usage runs out/);
+  await view.locator('.editor').hover();
+  await tip.waitFor({ state: 'hidden' });
+
+  await view.evaluate((el, conversation) => {
+    el.receive({
+      type: 'turn.failed',
+      usageStopped: true,
+      canSwitch: true,
+      turn: `${conversation}-t9`,
+    });
+  }, id);
+  await view.locator('.usage-note').waitFor();
+  const place = await view.evaluate((el) => {
+    const root = el.shadowRoot;
+    const note = root.querySelector('.usage-note').getBoundingClientRect();
+    const editor = root.querySelector('.editor').getBoundingClientRect();
+    return { note: note.bottom, editor: editor.top, text: root.querySelector('.usage-note-text').textContent };
+  });
+  assert.ok(place.note <= place.editor, 'the note sits above the box');
+  assert.equal(place.text, 'Claude usage stopped. Switch to Cursor?');
+
+  await view.locator('.usage-leave').click();
+  await view.locator('.usage-note').waitFor({ state: 'hidden' });
+  await page.waitForFunction(async (conversation) => {
+    const body = await window.marble.agent.conversation(conversation);
+    return body.events.some((event) => event.type === 'usage.left');
+  }, id);
 });

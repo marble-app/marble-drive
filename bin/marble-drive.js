@@ -110,6 +110,10 @@ async function serve() {
     console.log(`\n  ${url}\n`);
     console.log(`[drive] documents in ${config.root}`);
     console.log(`[drive] history and op log in ${path.join(config.root, '.marble')}`);
+    const snapshotDir = process.execArgv.find((arg) => arg.startsWith('--diagnostic-dir='))?.slice('--diagnostic-dir='.length);
+    if (snapshotDir) {
+      console.log(`[drive] if the process runs out of memory, a heap snapshot is written to ${snapshotDir}`);
+    }
 
     if (drive.gate.open) {
       console.log('[drive] no gate — anybody who can reach this port can edit everything.');

@@ -138,6 +138,12 @@ test('phone: the setup row is one chip, and the sheet it opens is all 44pt', asy
       .filter((box) => box.height < 44 || box.width < 44);
   });
   assert.deepEqual(small, [], `controls under 44pt: ${JSON.stringify(small)}`);
+  // No hover on a phone, so the toggle that is a glyph on the desk says its
+  // mode in words here.
+  assert.deepEqual(await page.evaluate(() => {
+    const failover = document.querySelector('marble-conversation').shadowRoot.querySelector('.setup-sheet .failover');
+    return [failover.querySelector('.failover-word').textContent, getComputedStyle(failover.querySelector('.failover-word')).display];
+  }), ['Hand off', 'block']);
   const count = await page.evaluate(() => document.querySelector('marble-conversation').shadowRoot.querySelectorAll('.setup-sheet label, .setup-sheet button').length);
   assert.ok(count > 0, 'the sheet has no controls in it');
   // The scrim puts it away and the row goes home to the bar.

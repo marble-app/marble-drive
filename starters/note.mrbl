@@ -1,0 +1,1446 @@
+<!doctype html>
+<html lang="en" data-marble="1">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="marble:capabilities" content="storage; net=none">
+<title>__TITLE__</title>
+__ICON__
+<style>
+  /* ------------------------------------------------------------------ tokens
+
+     Marble's own, copied from the drive's Design System document and nothing
+     added: three greys of ink, paper for the interface and white for the page,
+     one accent, one family of curves. Each is written once as a light-dark()
+     pair, so a note follows the machine into the dark without a second
+     stylesheet and without a switch anybody has to find. */
+  :root {
+    color-scheme: light dark;
+    --ink: light-dark(#111111, #e8e6e1);
+    --muted: light-dark(#5a5a5a, #a3a7ab);
+    --faint: light-dark(#8a8a8a, #71767a);
+    --placeholder: light-dark(#767676, #8d9296);
+    --line: light-dark(#e6e2d8, #272c30);
+    /* The interface is off-white; a note is white to the edge. Each step back
+       is structure, not content: a shelf the page sits on. */
+    --paper: light-dark(#fafaf7, #16181a);
+    --paper-2: light-dark(#f3f1ea, #1e2124);
+    --paper-3: light-dark(#eceae1, #262a2e);
+    --card: light-dark(#ffffff, #1c1f22);
+    /* The open note's row. In the light it is the white of the page it opens;
+       after dark the page is the darkest thing on screen, so the row cannot
+       also be the page — it steps up instead of down, or it disappears. */
+    --row-on: light-dark(#ffffff, #2a2f33);
+    --accent-ink: light-dark(#738698, #9dc0dc);
+    --danger: light-dark(#b4533e, #e08a74);
+    /* Warm shadows on paper, black ones after dark — never a colour mixed out
+       of --ink, which glows white in the dark. */
+    --shadow: 0 1px 2px light-dark(rgba(74,66,52,.06), rgba(0,0,0,.34)), 0 2px 6px light-dark(rgba(74,66,52,.05), rgba(0,0,0,.22));
+    --r: 12px;
+    --r-sm: 8px;
+    --r-text: 4px;
+    --pill: 999px;
+    /* One ease-out that decelerates hard, and a snap for the instant a press
+       registers. Nothing here needs a third. */
+    --ease-out: cubic-bezier(.22, 1, .36, 1);
+    --ease: cubic-bezier(.22, .61, .36, 1);
+    --snap: cubic-bezier(.4, 0, .2, 1);
+    --t-fast: 110ms;
+    --t: 200ms;
+    /* The chrome is one sans at 14/1.5. The notes read in a serif, because
+       that is what a document does. No webfont is named. */
+    --ui: "Google Sans", Roboto, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    --serif: ui-serif, "New York", "Iowan Old Style", "Palatino Linotype", Palatino, Georgia, serif;
+    --rail: 15.5rem;
+    --measure: 34rem;
+  }
+
+  /* Every width answer is asked of the root, not the window: a host that docks
+     a panel beside the page shrinks <html> and leaves the viewport alone. */
+  html { container: app / inline-size; }
+  html, body { height: 100%; }
+  * { box-sizing: border-box; }
+  button { font: inherit; color: inherit; }
+  /* One drawing of each mark, referenced where it is needed. */
+  .sprite { display: none; }
+
+  /* ------------------------------------------------------------------- shell
+
+     Two regions and no third. The rail is the notes; the sheet is the one you
+     are in. There is no toolbar, no ruler, no inspector and no menu bar,
+     because a place to jot text down is worth less every time it asks you to
+     choose something first. */
+  body.app {
+    margin: 0; display: grid; grid-template-columns: var(--rail) minmax(0, 1fr);
+    background: var(--paper); color: var(--ink);
+    font: 14px/1.5 var(--ui); -webkit-font-smoothing: antialiased;
+  }
+
+  .rail {
+    min-width: 0; min-height: 0; display: flex; flex-direction: column;
+    background: var(--paper-2); border-right: 1px solid var(--line);
+  }
+  .railhead { display: flex; align-items: center; gap: .5rem; padding: .8rem .6rem 0 .85rem; }
+  .name {
+    flex: 1; min-width: 0; margin: 0; font-size: .95rem; font-weight: 600;
+    letter-spacing: -.005em; overflow-wrap: break-word;
+  }
+  /* Editable text gets the tint under the pointer and the ring under the
+     keyboard, so the one word in the chrome you can change says so. */
+  [data-marble-editable] {
+    outline: none; border-radius: var(--r-text);
+    transition: background var(--t-fast) var(--snap);
+  }
+  /* An empty editable has no line box and so nowhere to put a caret: the name
+     is one Backspace away from being untypable without this. */
+  [data-marble-editable]:empty::before { content: "\feff"; }
+  [data-marble-editable]:hover { background: var(--paper-3); }
+  [data-marble-editable]:focus { background: var(--paper-3); }
+  :focus-visible { outline: 2px solid var(--accent-ink); outline-offset: 2px; }
+
+  /* 20 inside a 44 hit box, wherever a finger has to find it. */
+  .icon {
+    flex: 0 0 auto; width: 2rem; height: 2rem; display: grid; place-items: center;
+    padding: 0; border: 0; border-radius: var(--pill); background: none;
+    color: var(--muted); cursor: pointer;
+    transition: background var(--t) var(--ease), color var(--t) var(--ease);
+  }
+  .icon svg { width: 20px; height: 20px; fill: currentColor; }
+  /* 20 in a 44 where a finger has to find it, and no bigger where a pointer
+     does — the drawing is the same size either way. */
+  @media (hover: none), (pointer: coarse) {
+    .icon { width: 2.75rem; height: 2.75rem; }
+  }
+  .icon:hover { background: var(--paper-3); color: var(--ink); }
+  /* A press answers on the way down, in colour. Nothing scales. */
+  .icon:active { background: var(--paper-3); color: var(--accent-ink); }
+
+  .meta {
+    padding: .1rem .95rem .55rem; color: var(--faint); font-size: .78rem;
+    min-height: 1.5rem; transition: color var(--t) var(--ease);
+  }
+  .meta[data-said] { color: var(--accent-ink); }
+
+  /* The filter is a reading of the notes and never a fact about them, so it
+     lives in the page: nothing you type here reaches the file. */
+  .find {
+    margin: 0 .85rem .5rem; padding: .35rem .6rem; border: 1px solid var(--line);
+    border-radius: var(--r-sm); background: var(--card); color: var(--ink);
+    font: inherit; font-size: .84rem; min-width: 0;
+    transition: border-color var(--t) var(--ease);
+  }
+  .find::placeholder { color: var(--placeholder); }
+  .find:focus { outline: none; border-color: var(--accent-ink); }
+
+  .rows { flex: 1; min-height: 0; overflow: auto; padding: 0 .45rem 1rem; }
+  .rows:empty::before {
+    display: block; padding: .5rem .55rem; color: var(--faint); font-size: .84rem;
+    content: "Nothing here";
+  }
+
+  .row {
+    display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center;
+    border-radius: var(--r-sm);
+    transition: background var(--t) var(--ease), box-shadow var(--t) var(--ease);
+  }
+  .row:hover { background: var(--paper-3); }
+  /* Which note is open is one attribute on the body; this class is derived
+     from it, because CSS cannot ask whether a child matches an ancestor. The
+     open note's row is white, like the page it opens. */
+  .row.marble-current { background: var(--row-on); box-shadow: var(--shadow); }
+  .open {
+    min-width: 0; padding: .45rem .55rem; border: 0; background: none;
+    text-align: left; cursor: pointer; border-radius: var(--r-sm);
+  }
+  .open .t {
+    display: block; font-weight: 500; font-size: .87rem;
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  }
+  .open .t:empty::before { content: "New note"; color: var(--placeholder); }
+  .open .s {
+    display: block; color: var(--faint); font-size: .8rem;
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  }
+  .open .s:empty::before { content: "\feff"; }
+  /* Revealed by the pointer, by the keyboard, and always where there is no
+     pointer to reveal it with. */
+  .row .drop { width: 1.75rem; height: 1.75rem; margin-right: .2rem; opacity: 0; transition: opacity var(--t) var(--ease), color var(--t) var(--ease); }
+  .row:hover .drop, .row:focus-within .drop { opacity: 1; }
+  .row .drop:hover, .row .drop:focus-visible { color: var(--danger); }
+  @media (hover: none) { .row .drop { opacity: 1; } }
+
+  /* -------------------------------------------------------------- the sheet */
+  .sheet { min-width: 0; min-height: 0; overflow: auto; background: var(--card); }
+
+  /* Which note shows is the same one attribute, derived the same way. With no
+     host at all nothing derives anything, so the first note is the one that
+     reads — a note opened straight off the disk is still a note. */
+  .note { display: none; }
+  .note.marble-open { display: block; }
+  .notes:not(.marble-derived) .note:first-child { display: block; }
+
+  .note {
+    max-width: var(--measure); margin: 0 auto; outline: none;
+    /* Half a screen of room under the last line, so the line you are writing
+       is never the one at the bottom of the window. */
+    padding: 4.5rem 2rem 45vh;
+    font: 1.0625rem/1.72 var(--serif);
+  }
+
+  /* ------------------------------------------------------------ the text
+
+     One flow of sibling blocks, each a paragraph with a name of its own. A
+     block's style is its tag, so an <h2> here is a heading to a text editor, an
+     agent and a screen reader alike; whether it is a list item is one attribute
+     on the block; bold and italic are inline markup around the characters, the
+     way you would have written them by hand. */
+  .note > * { margin: 0; white-space: pre-wrap; overflow-wrap: break-word; }
+  .note > p + * { margin-top: .85em; }
+  .note > h2 { margin-top: 1.7em; font-size: 1.32rem; font-weight: 600; line-height: 1.3; letter-spacing: -.012em; }
+  .note > h3 { margin-top: 1.5em; font-size: 1.08rem; font-weight: 600; line-height: 1.35; }
+  .note > h2 + *, .note > h3 + * { margin-top: .5em; }
+
+  /* The first line is the note's name — in the rail, in the file and here.
+     Drawing it as one means nothing has to be styled to get a titled note, and
+     no second copy of the name exists to fall out of step with it. */
+  .note > :first-child {
+    margin: 0 0 .9rem; font-size: 1.5rem; font-weight: 600;
+    line-height: 1.28; letter-spacing: -.014em;
+  }
+  .note > :first-child:empty::after { content: "Jot something down"; color: var(--placeholder); font-weight: 400; }
+
+  /* A bullet is drawn, never stored, so moving a line around costs the file
+     nothing but the move. */
+  .note > [data-list="bullet"] { padding-left: 1.15em; position: relative; }
+  .note > [data-list="bullet"] + [data-list="bullet"] { margin-top: .25em; }
+  .note > [data-list="bullet"]::before {
+    content: "\2022"; position: absolute; left: .1em; color: var(--faint);
+  }
+  .note > hr { border: 0; border-top: 1px solid var(--line); margin: 1.6em 0; }
+
+  /* An empty line is still a line you can stand on. A block with no children
+     gives the browser nothing to lay a line box out with, so it is given one
+     character that is not in the file and has no width — and it is ::after
+     rather than ::before, because an empty bullet's ::before is the bullet,
+     positioned out in the margin where it lays no line box at all. Without
+     this the caret in an empty line draws in the line below it, and the next
+     thing typed goes there. */
+  .note > :empty::after { content: "\feff"; }
+
+  .note b { font-weight: 650; }
+  .note u { text-underline-offset: .18em; }
+
+  /* ------------------------------------------------------------- narrow
+
+     One column, and the rail becomes a strip of notes above the page you are
+     writing in. Both stay on screen: a phone that hides the list behind a
+     button has made choosing a note the first thing you do again. */
+  @container app (max-width: 42rem) {
+    body.app { grid-template-columns: minmax(0, 1fr); grid-template-rows: auto minmax(0, 1fr); }
+    .rail { border-right: 0; border-bottom: 1px solid var(--line); }
+    .railhead { padding-top: .7rem; }
+    .meta { display: none; }
+    .rows { display: flex; gap: .3rem; overflow-x: auto; padding: 0 .45rem .5rem; }
+    .row { flex: 0 0 auto; width: 9.5rem; }
+    .open .s { display: none; }
+    .note { padding: 1.8rem 1.25rem 45vh; }
+  }
+
+  /* Reduced motion zeroes the transitions rather than guessing which of them
+     was the one that made somebody ill. */
+  @media (prefers-reduced-motion: reduce) {
+    * { transition-duration: 1ms !important; animation-duration: 1ms !important; }
+  }
+</style>
+</head>
+<body class="app" data-marble-id="__ID__">
+
+<svg class="sprite" data-marble-id="__ID__" aria-hidden="true" focusable="false"><defs>
+  <g id="i-plus"><path d="M11 5h2v6h6v2h-6v6h-2v-6H5v-2h6z"/></g>
+  <g id="i-x"><path d="M6.4 5 12 10.6 17.6 5 19 6.4 13.4 12 19 17.6 17.6 19 12 13.4 6.4 19 5 17.6 10.6 12 5 6.4z"/></g>
+</defs></svg>
+
+<!-- The rail. The notes in it are a reading of the page beside it — first line
+     for the name, the rest for the line under it — so the list is marked
+     transient and nothing in it is a second copy of anything. The document's
+     own name and the button that makes a note are the two things here that are
+     facts, and those are in the file. -->
+<aside class="rail" data-marble-id="__ID__">
+  <div class="railhead" data-marble-id="__ID__">
+    <h1 class="name" data-marble-id="__ID__" data-marble-editable>__TITLE__</h1>
+    <button class="icon" data-marble-id="__ID__" data-cmd="new" title="New note (Ctrl+Enter)" aria-label="New note">
+      <svg data-marble-id="__ID__" viewBox="0 0 24 24" aria-hidden="true"><use href="#i-plus"/></svg>
+    </button>
+  </div>
+  <p class="meta" data-marble-transient></p>
+  <input class="find" data-marble-transient type="search" placeholder="Search" aria-label="Search notes" autocomplete="off" spellcheck="false">
+  <div class="rows" id="rows" data-marble-transient></div>
+</aside>
+
+<main class="sheet" id="sheet" data-marble-id="__ID__">
+  <div class="notes" id="notes" data-marble-id="__ID__">
+
+    <article class="note" data-marble-id="__ID__">
+<p data-marble-id="__ID__" data-marble-rich>__TITLE__</p>
+<p data-marble-id="__ID__" data-marble-rich>There is no save button, because what you are reading is not a copy of these notes — it <i>is</i> the file they are kept in. Type and the bytes on disk change with you.</p>
+<p data-marble-id="__ID__" data-marble-rich>The list on the left is not kept anywhere. It is these notes read back: a note's first line is its name, in the list and on the page both, so there is nothing to title twice and no name that can fall out of step. New notes go on top; the <b>×</b> beside one takes it away, and <b>Ctrl+Z</b> puts it back.</p>
+<p data-marble-id="__ID__" data-marble-rich>Everything else this could have had — a toolbar, colours, faces, folders, tags — is left out on purpose. It is a place to put text down, and every choice it asks you to make first is one you did not come here to make.</p>
+    </article>
+
+    <article class="note" data-marble-id="__ID__">
+<p data-marble-id="__ID__" data-marble-rich>Keys</p>
+<p data-marble-id="__ID__" data-marble-rich>Six of them, and no menu to look any of them up in.</p>
+<p data-marble-id="__ID__" data-marble-rich data-list="bullet"><b>#</b> then a space starts a heading, <b>##</b> a smaller one, <b>-</b> a bulleted line. <b>---</b> and Enter draws a rule.</p>
+<p data-marble-id="__ID__" data-marble-rich data-list="bullet"><b>Ctrl+B</b>, <b>Ctrl+I</b> and <b>Ctrl+U</b> mark whatever is selected — or open a mark where the caret is, if nothing is.</p>
+<p data-marble-id="__ID__" data-marble-rich data-list="bullet"><b>Ctrl+Alt+1</b>, <b>2</b> and <b>0</b> make a line a heading, a subheading, or plain again.</p>
+<p data-marble-id="__ID__" data-marble-rich data-list="bullet"><b>Ctrl+Enter</b> starts a new note. <b>Ctrl+Alt+↑</b> and <b>↓</b> walk to the note above or below.</p>
+<p data-marble-id="__ID__" data-marble-rich data-list="bullet"><b>Ctrl+Z</b> takes back the last change, whoever made it — you, an agent, or another window.</p>
+<p data-marble-id="__ID__" data-marble-rich>The page is one field rather than a column of boxes, so a drag highlights across paragraphs and <b>Ctrl+A</b> takes the whole note. Paste arrives as plain text, with its line breaks kept.</p>
+    </article>
+
+  </div>
+</main>
+
+<script>
+  // The note's own behaviour.
+  //
+  // A note is ONE editing host, not a column of them: Select All takes the note
+  // rather than the paragraph, a drag highlights across paragraphs, Backspace at
+  // a seam joins two of them, and the caret walks from one line to the next
+  // because it never left the field it was in.
+  //
+  // What that costs is that the browser, not this file, decides what the markup
+  // looks like after a keystroke — it will split a paragraph, merge two, and
+  // paste a stylesheet if you let it. So nothing here trusts the DOM it gets
+  // back. Every change, whether the browser made it or a command below did,
+  // goes through the same three steps:
+  //
+  //   1. the page moves
+  //   2. normalise() puts the note back into this document's vocabulary —
+  //      blocks it knows, one fresh id each, only the marks it can file
+  //   3. file() reads the note against `shadow`, the last thing written down,
+  //      and the difference between the two *is* the ops
+  //
+  // So there is exactly one way a change reaches the file, and no command can
+  // move the screen without writing itself down.
+  //
+  // Several notes, one host: only the open note is contenteditable, so there is
+  // never a selection to share between two of them. Which one is open is one
+  // attribute on <body>; the list in the rail, the class that shows the page and
+  // the class that lights its row are all derived from that and kept nowhere.
+  //
+  // The one affordance this document invents is data-marble-rich. The shared
+  // `editable` is a setText affordance: it holds plain text and its whole
+  // contents are replaced on every keystroke, which is right for the name in the
+  // rail and fatal to a <b> in the middle of a sentence. A rich block is filed
+  // with setInner instead, so the inline markup survives.
+  (() => {
+    const begin = (marble) => {
+      const $ = (sel) => document.querySelector(sel);
+      const app = document.body;
+      const notes = $('#notes');
+      const sheet = $('#sheet');
+      const rows = $('#rows');
+      const meta = $('.meta');
+      const find = $('.find');
+      if (!notes) return;
+
+      const ID = 'data-marble-id';
+      const RICH = 'data-marble-rich';
+      const CURRENT = 'data-current';
+
+      // Both belong to the page. The file is a document, not a session: which
+      // field happens to be typeable is not a fact about these notes.
+      marble.pageOnly('contenteditable', 'spellcheck');
+
+      // ----------------------------------------------------------- the notes
+
+      const noteEls = () => [...notes.children].filter((el) => el.classList.contains('note'));
+      const noteById = (id) => (id ? noteEls().find((el) => marble.id(el) === id) ?? null : null);
+      // The open note, as the file has it — and the first one when the file says
+      // nothing, so a note opened straight off the disk opens on something.
+      const current = () => noteById(app.getAttribute(CURRENT)) ?? noteEls()[0] ?? null;
+
+      // The open note is the flow, and every helper below reads it from here.
+      let flow = null;
+      let shadow = [];
+      let filed = new Map();
+
+      // ------------------------------------------------------------ the styles
+
+      const STYLES = [
+        { key: 'h1', tag: 'h2' },
+        { key: 'h2', tag: 'h3' },
+        { key: 'body', tag: 'p' },
+      ];
+      const styleNamed = (key) => STYLES.find((s) => s.key === key) ?? STYLES[2];
+      const styleOf = (el) =>
+        el?.tagName === 'H2' ? 'h1' : el?.tagName === 'H3' ? 'h2' : 'body';
+
+      // A paragraph's style is its tag, so this list is also the list of tags
+      // the file is allowed to hold in a note; anything else the browser leaves
+      // there is turned into one.
+      const BLOCKS = new Set(['P', 'H2', 'H3', 'HR']);
+
+      const blocks = () => (flow ? [...flow.children] : []);
+      const at = (el) => blocks().indexOf(el);
+      const isText = (el) => Boolean(el) && el.parentElement === flow && el.hasAttribute(RICH);
+
+      function blockOf(node) {
+        let el = node?.nodeType === Node.TEXT_NODE ? node.parentElement : node;
+        if (el === flow) return null;
+        while (el && el.parentElement !== flow) el = el.parentElement;
+        return isText(el) ? el : null;
+      }
+
+      // ------------------------------------------------- the inline vocabulary
+      //
+      // Everything the editor is allowed to put between the tags of a block, and
+      // it is four tags. A contenteditable will happily produce far more given a
+      // paste or a stray shortcut, so what comes out is filtered down to this on
+      // the way into the file rather than trusted on the way out of the browser.
+
+      const KEEP = new Set(['B', 'I', 'U', 'S', 'BR']);
+
+      function tidy(el) {
+        let changed = false;
+        for (const node of [...el.querySelectorAll('*')]) {
+          if (!node.isConnected) continue;
+          const tag = node.tagName;
+
+          // The tags a browser writes for the ones this document uses.
+          if (tag === 'STRONG' || tag === 'EM' || tag === 'STRIKE' || tag === 'DEL') {
+            const swap = document.createElement(tag === 'STRONG' ? 'b' : tag === 'EM' ? 'i' : 's');
+            swap.append(...node.childNodes);
+            node.replaceWith(swap);
+            changed = true;
+            continue;
+          }
+
+          // A span with a colour on it, a font tag, a pasted <div>: the words
+          // stay and the dressing goes. This note has no colours to keep.
+          if (!KEEP.has(tag)) {
+            node.replaceWith(...node.childNodes);
+            changed = true;
+            continue;
+          }
+
+          // Wrapping a selection leaves the husk of whatever it was cut out of.
+          // Empty marks are invisible on screen and noise in the diff.
+          if (tag !== 'BR' && !node.textContent) {
+            node.remove();
+            changed = true;
+            continue;
+          }
+
+          // A mark inside the same mark says nothing twice, and wrapping a run
+          // that was already partly marked is the ordinary way to make one.
+          if (tag !== 'BR' && node.parentElement?.closest(tag)) {
+            node.replaceWith(...node.childNodes);
+            changed = true;
+            continue;
+          }
+
+          for (const name of [...node.getAttributeNames()]) {
+            node.removeAttribute(name);
+            changed = true;
+          }
+        }
+
+        // An empty text node is invisible and weighs nothing, and a block left
+        // holding one stops matching :empty — so it loses the line box the
+        // stylesheet gives it, and a caret standing in it draws in the next
+        // block instead. The next thing typed lands there. Deleting the last
+        // character of a line is enough to leave one behind.
+        const walk = document.createTreeWalker(el, NodeFilter.SHOW_TEXT);
+        const empties = [];
+        let text = null;
+        while ((text = walk.nextNode())) if (!text.length) empties.push(text);
+        for (const dead of empties) {
+          dead.remove();
+          changed = true;
+        }
+
+        if (changed) el.normalize();
+        return changed;
+      }
+
+      // ------------------------------------------------------------- the caret
+      //
+      // Offsets are counted in characters from the start of a block, and a block
+      // by its place in the note, so a mark survives both the inline markup
+      // moving around underneath it and the block being replaced by one with a
+      // different tag.
+
+      function spot(node, offset) {
+        if (node === flow) {
+          const el = flow.children[Math.min(offset, Math.max(0, flow.children.length - 1))];
+          return el ? { at: at(el), offset: 0 } : null;
+        }
+        const el = blockOf(node);
+        if (!el) return null;
+        const before = document.createRange();
+        before.selectNodeContents(el);
+        try {
+          before.setEnd(node, offset);
+        } catch {
+          return null;
+        }
+        return { at: at(el), offset: before.toString().length };
+      }
+
+      function markRange() {
+        const sel = getSelection();
+        if (!sel || !sel.rangeCount || !flow?.contains(sel.anchorNode)) return null;
+        const range = sel.getRangeAt(0);
+        const a = spot(range.startContainer, range.startOffset);
+        const b = sel.isCollapsed ? a : spot(range.endContainer, range.endOffset);
+        return a && b ? { a, b } : null;
+      }
+
+      function point(el, offset) {
+        const walk = document.createTreeWalker(el, NodeFilter.SHOW_TEXT);
+        let seen = 0;
+        let last = null;
+        let node = null;
+        while ((node = walk.nextNode())) {
+          if (seen + node.length >= offset) return { node, offset: Math.max(0, offset - seen) };
+          seen += node.length;
+          last = node;
+        }
+        return last ? { node: last, offset: last.length } : { node: el, offset: 0 };
+      }
+
+      const blockAt = (index) =>
+        flow?.children[Math.max(0, Math.min(index, flow.children.length - 1))] ?? null;
+
+      function putRange(mark) {
+        if (!mark) return;
+        const head = blockAt(mark.a.at);
+        const tail = blockAt(mark.b.at);
+        if (!head || !tail) return;
+        const a = point(head, mark.a.offset);
+        const b = point(tail, mark.b.offset);
+        const range = document.createRange();
+        range.setStart(a.node, a.offset);
+        try {
+          range.setEnd(b.node, b.offset);
+        } catch {
+          range.collapse(true);
+        }
+        const sel = getSelection();
+        sel.removeAllRanges();
+        sel.addRange(range);
+        flow.focus({ preventScroll: true });
+      }
+
+      const place = (el, offset) => {
+        const index = at(el);
+        if (index < 0) return;
+        putRange({ a: { at: index, offset }, b: { at: index, offset } });
+      };
+
+      const selectAll = () => {
+        const all = blocks();
+        if (!all.length) return;
+        putRange({
+          a: { at: 0, offset: 0 },
+          b: { at: all.length - 1, offset: marble.text(all[all.length - 1]).length },
+        });
+      };
+
+      // The part of a range that lies inside one block, as a range of its own.
+      function bite(el, range) {
+        const part = range.cloneRange();
+        const whole = document.createRange();
+        whole.selectNodeContents(el);
+        if (part.compareBoundaryPoints(Range.START_TO_START, whole) < 0) {
+          part.setStart(whole.startContainer, whole.startOffset);
+        }
+        if (part.compareBoundaryPoints(Range.END_TO_END, whole) > 0) {
+          part.setEnd(whole.endContainer, whole.endOffset);
+        }
+        return part;
+      }
+
+      function rangeIn(el, from, to) {
+        const a = point(el, from);
+        const b = point(el, to);
+        const range = document.createRange();
+        range.setStart(a.node, a.offset);
+        try {
+          range.setEnd(b.node, b.offset);
+        } catch {
+          range.setEnd(el, el.childNodes.length);
+        }
+        return range;
+      }
+
+      // The blocks a command is about: everything the selection touches, or the
+      // one the caret sits in, or — with the focus somewhere else entirely — the
+      // last one it was in.
+      let here = null;
+
+      function chosen() {
+        const all = blocks().filter(isText);
+        const fallback = () => (isText(here) && here.isConnected ? [here] : all.slice(0, 1));
+        const sel = getSelection();
+        if (!sel || !sel.rangeCount || !flow?.contains(sel.anchorNode)) return fallback();
+        const range = sel.getRangeAt(0);
+        if (sel.isCollapsed) {
+          const one = blockOf(range.startContainer);
+          return one ? [one] : fallback();
+        }
+        let hit = all.filter((el) => range.intersectsNode(el));
+        // A selection that stops at the very top of a block has not reached into
+        // it, whatever intersectsNode says about the boundary.
+        const empty = (el) => marble.text(el).length > 0 && bite(el, range).toString().length === 0;
+        if (hit.length > 1 && empty(hit[0])) hit = hit.slice(1);
+        if (hit.length > 1 && empty(hit[hit.length - 1])) hit = hit.slice(0, -1);
+        return hit.length ? hit : fallback();
+      }
+
+      // --------------------------------------------------------- making blocks
+
+      // A new block is shaped from an existing one, so the line's own properties
+      // carry forward the way they do in any editor.
+      function shape(from, key, inner) {
+        const el = document.createElement(styleNamed(key).tag);
+        if (from) for (const a of marble.clone(from).attributes) el.setAttribute(a.name, a.value);
+        el.removeAttribute('class');
+        el.setAttribute(RICH, '');
+        el.setAttribute(ID, marble.newId());
+        el.innerHTML = '';
+        if (typeof inner === 'string') el.innerHTML = inner;
+        else if (inner) el.append(inner);
+        tidy(el);
+        return el;
+      }
+
+      // ------------------------------------------------------------- normalise
+      //
+      // The browser's idea of what it just did, turned back into this
+      // document's. Everything it can leave behind is answered here rather than
+      // guarded against upstream, because there is no upstream: a paste, a drag,
+      // a native Enter and an autocorrect all arrive as "the DOM is different
+      // now".
+
+      function normalise() {
+        if (!flow) return false;
+        let changed = false;
+        let loose = [];
+
+        const gather = () => {
+          if (!loose.length) return;
+          const p = document.createElement('p');
+          p.setAttribute(RICH, '');
+          p.setAttribute(ID, marble.newId());
+          loose[0].replaceWith(p);
+          p.append(...loose);
+          loose = [];
+          changed = true;
+        };
+
+        for (const node of [...flow.childNodes]) {
+          if (node.nodeType === Node.ELEMENT_NODE && BLOCKS.has(node.tagName)) {
+            gather();
+            continue;
+          }
+          // A block the vocabulary does not have — a <div> from a paste, a
+          // <blockquote> from a drag — keeps its words and loses its tag.
+          if (node.nodeType === Node.ELEMENT_NODE && getComputedStyle(node).display !== 'inline') {
+            gather();
+            const p = document.createElement('p');
+            p.setAttribute(RICH, '');
+            p.setAttribute(ID, marble.newId());
+            p.append(...node.childNodes);
+            node.replaceWith(p);
+            changed = true;
+            continue;
+          }
+          if (node.nodeType === Node.TEXT_NODE && !node.nodeValue.trim() && !loose.length) {
+            node.remove();
+            changed = true;
+            continue;
+          }
+          loose.push(node);
+        }
+        gather();
+
+        const seen = new Set();
+        for (const el of blocks()) {
+          if (el.tagName !== 'HR' && !el.hasAttribute(RICH)) {
+            el.setAttribute(RICH, '');
+            changed = true;
+          }
+          let id = marble.id(el);
+          const was = filed.get(id);
+          // A split paragraph is the same element twice, tag and id and all, so
+          // the second one to appear is the new one and takes a new name.
+          if (!id || seen.has(id) || (was && was.tag !== el.tagName)) {
+            id = marble.newId();
+            el.setAttribute(ID, id);
+            changed = true;
+          }
+          seen.add(id);
+          if (el.tagName !== 'HR' && tidy(el)) changed = true;
+        }
+
+        if (!blocks().length) {
+          const p = document.createElement('p');
+          p.setAttribute(RICH, '');
+          p.setAttribute(ID, marble.newId());
+          flow.append(p);
+          changed = true;
+        }
+        return changed;
+      }
+
+      const tidyUp = () => {
+        const mark = markRange();
+        if (normalise()) putRange(mark);
+      };
+
+      // ------------------------------------------------------ writing it down
+      //
+      // `shadow` is what the file says the open note is, as of the last op filed.
+      // Reading the note against it is the only place an op about the text is
+      // ever made, so a command's whole job is to leave the page right.
+
+      function readFlow() {
+        const next = blocks().map((el) => ({
+          id: marble.id(el),
+          tag: el.tagName,
+          outer: marble.source.outer(el),
+        }));
+        filed = new Map(next.map((b) => [b.id, b]));
+        return next;
+      }
+
+      const parse = (html) => {
+        const slot = document.createElement('template');
+        slot.innerHTML = html;
+        return slot.content.firstElementChild;
+      };
+
+      function changesTo(was, now) {
+        const ops = [];
+        const a = parse(was.outer);
+        const b = parse(now.outer);
+        if (!a || !b) return ops;
+        const names = new Set([...a.getAttributeNames(), ...b.getAttributeNames()]);
+        for (const name of names) {
+          if (name === ID) continue;
+          const value = b.getAttribute(name);
+          if (a.getAttribute(name) === value) continue;
+          ops.push({ type: 'setAttr', id: now.id, name, value });
+        }
+        if (a.innerHTML !== b.innerHTML) ops.push({ type: 'setInner', id: now.id, html: b.innerHTML });
+        return ops;
+      }
+
+      // The longest run of blocks already in the right order relative to one
+      // another. Everything outside it is what actually moved, which is the
+      // difference between "you moved one line up" and "every line below it also
+      // changed place".
+      function settled(places) {
+        const ends = [];
+        const back = new Array(places.length).fill(-1);
+        for (let i = 0; i < places.length; i++) {
+          if (places[i] < 0) continue;
+          let lo = 0;
+          let hi = ends.length;
+          while (lo < hi) {
+            const mid = (lo + hi) >> 1;
+            if (places[ends[mid]] < places[i]) lo = mid + 1;
+            else hi = mid;
+          }
+          back[i] = lo > 0 ? ends[lo - 1] : -1;
+          ends[lo] = i;
+        }
+        const run = [];
+        let cursor = ends.length ? ends[ends.length - 1] : -1;
+        while (cursor >= 0) {
+          run.push(cursor);
+          cursor = back[cursor];
+        }
+        return new Set(run);
+      }
+
+      // The ops that carry one list of blocks to the other. Walked from the end,
+      // so every insert and every move can name the block that is already in its
+      // right place behind it.
+      function diff(prev, next) {
+        const parentId = marble.id(flow);
+        const was = new Map(prev.map((b) => [b.id, b]));
+        const now = new Set(next.map((b) => b.id));
+        const order = prev.filter((b) => now.has(b.id)).map((b) => b.id);
+        const places = next.map((b) => order.indexOf(b.id));
+        const stays = settled(places);
+        const ops = [];
+
+        for (const b of prev) if (!now.has(b.id)) ops.push({ type: 'remove', id: b.id });
+
+        for (let i = next.length - 1; i >= 0; i--) {
+          const b = next[i];
+          const after = i + 1 < next.length ? next[i + 1].id : null;
+          if (places[i] < 0) {
+            ops.push({ type: 'insert', html: b.outer, parentId, beforeId: after });
+            continue;
+          }
+          const older = was.get(b.id);
+          if (older.outer !== b.outer) ops.push(...changesTo(older, b));
+          if (!stays.has(i)) ops.push({ type: 'move', id: b.id, parentId, beforeId: after });
+        }
+        return ops;
+      }
+
+      // Typing files an op immediately, so the file is never behind the screen.
+      // Undo is coarser than that on purpose: one step per burst of typing rather
+      // than one per character. The burst opens on the first keystroke and closes
+      // when typing stops, when focus leaves, before any other command, when the
+      // note changes, and before Ctrl+Z — so there is never one in flight that
+      // undo does not know about.
+      let base = null;
+      let idle = null;
+
+      function settle() {
+        clearTimeout(idle);
+        const from = base;
+        base = null;
+        if (!from) return;
+        const redo = diff(from, shadow);
+        const undo = diff(shadow, from);
+        if (redo.length && undo.length) marble.record({ redo, undo });
+        marble.flush();
+      }
+
+      function file(burst) {
+        if (!flow) return;
+        const from = shadow;
+        const next = readFlow();
+        const ops = diff(from, next);
+        if (!ops.length) return;
+        shadow = next;
+        for (const op of ops) marble.op(op, { immediate: !burst });
+        if (burst) {
+          base = base ?? from;
+          clearTimeout(idle);
+          idle = setTimeout(settle, 700);
+        } else {
+          const undo = diff(next, from);
+          if (undo.length) marble.record({ redo: ops, undo });
+        }
+        derive();
+      }
+
+      // A change made on purpose rather than one the browser made because a key
+      // was pressed: the burst is closed first, so it is its own step of undo.
+      function change(run) {
+        settle();
+        const mark = run();
+        tidyUp();
+        file(false);
+        if (mark) putRange(mark);
+      }
+
+      // ------------------------------------------------------- block commands
+
+      const restyle = (key) =>
+        change(() => {
+          const mark = markRange();
+          for (const el of chosen()) {
+            if (styleOf(el) === key) continue;
+            el.replaceWith(shape(el, key, marble.source.inner(el)));
+          }
+          return mark;
+        });
+
+      const listOf = (el) => el?.getAttribute('data-list') ?? null;
+
+      const setOn = (name, value) =>
+        change(() => {
+          const mark = markRange();
+          for (const el of chosen()) {
+            if (value === null) el.removeAttribute(name);
+            else el.setAttribute(name, value);
+          }
+          return mark;
+        });
+
+      // Enter. The line is cut at the caret and everything after it — markup
+      // included — becomes the next one.
+      function split() {
+        const sel = getSelection();
+        if (!sel || !sel.rangeCount || !flow.contains(sel.anchorNode)) return;
+        if (!sel.isCollapsed) document.execCommand('delete');
+        const range = getSelection().getRangeAt(0);
+        const el = blockOf(range.startContainer);
+        if (!el) return;
+
+        // Nothing in it and it is a bullet: Enter leaves the list rather than
+        // making another empty one.
+        if (!marble.text(el) && el.hasAttribute('data-list')) return setOn('data-list', null);
+
+        settle();
+        const tail = range.cloneRange();
+        tail.setEnd(el, el.childNodes.length);
+        const made = shape(el, 'body', tail.extractContents());
+        el.after(made);
+        tidyUp();
+        file(false);
+        place(made, 0);
+      }
+
+      // Three markers, taken off the line they were typed on and turned into the
+      // thing they draw. Written this way round — the marker is deleted and the
+      // block restyled inside one change() — so the whole shortcut is one step
+      // of undo and one line in the diff.
+      const MARKERS = [
+        ['#', () => restyle('h1')],
+        ['##', () => restyle('h2')],
+        ['-', () => setOn('data-list', 'bullet')],
+        ['*', () => setOn('data-list', 'bullet')],
+      ];
+
+      function marker() {
+        const sel = getSelection();
+        if (!sel?.isCollapsed || !flow.contains(sel.anchorNode)) return false;
+        const el = blockOf(sel.anchorNode);
+        const mark = markRange();
+        if (!el || !mark) return false;
+        const head = marble.text(el).slice(0, mark.a.offset);
+        const found = MARKERS.find(([marked]) => marked === head);
+        if (!found) return false;
+        settle();
+        rangeIn(el, 0, head.length).deleteContents();
+        place(el, 0);
+        found[1]();
+        return true;
+      }
+
+      // Three dashes and Enter: the line becomes the rule it was drawing.
+      function rule() {
+        const el = blockOf(getSelection()?.anchorNode);
+        if (!el || marble.text(el).trim() !== '---' || el.hasAttribute('data-list')) return false;
+        let made = null;
+        change(() => {
+          const hr = document.createElement('hr');
+          hr.setAttribute(ID, marble.newId());
+          made = shape(el, 'body', '');
+          made.removeAttribute('data-list');
+          el.replaceWith(hr);
+          hr.after(made);
+          return null;
+        });
+        if (made) place(made, 0);
+        return true;
+      }
+
+      // ------------------------------------------------ character commands
+      //
+      // These act on what is selected, which is the whole point of them, and the
+      // selection is free to run across paragraphs. With nothing selected there
+      // is no pending-format machine to consult, so the line is selected
+      // instead — the reading of "bold" that needs no hidden state to explain it.
+
+      // execCommand is the only thing in any browser that knows how to *take* a
+      // tag off a partial selection, splitting and merging the runs on both
+      // edges. It is legacy and it has no replacement, so it is kept for that —
+      // and for nothing else, least of all for deciding which way a toggle goes.
+      const MARK = { bold: 'bold', italic: 'italic', underline: 'underline' };
+      const TAG = { bold: 'b', italic: 'i', underline: 'u' };
+
+      // Whether what is selected is already marked, asked of the markup the file
+      // holds rather than of the weight on the screen. A heading is heavy because
+      // it is a heading; queryCommandState cannot tell that from somebody having
+      // pressed Bold, and answered "already bold" for every heading.
+      function marked(name, els) {
+        const tag = TAG[name];
+        const sel = getSelection();
+        if (!sel || !sel.rangeCount || !flow.contains(sel.anchorNode)) return false;
+        const range = sel.isCollapsed ? null : sel.getRangeAt(0);
+        let any = false;
+        for (const el of els ?? chosen()) {
+          const walk = document.createTreeWalker(el, NodeFilter.SHOW_TEXT);
+          let node = null;
+          while ((node = walk.nextNode())) {
+            if (!node.nodeValue.trim()) continue;
+            if (range && !range.intersectsNode(node)) continue;
+            any = true;
+            if (!node.parentElement?.closest(tag)) return false;
+          }
+        }
+        return any;
+      }
+
+      // The runs of text the selection covers, block by block, counted in
+      // characters — measured before anything is cut, because cutting the first
+      // block invalidates a range held across the rest.
+      function runs() {
+        const sel = getSelection();
+        if (!sel || !sel.rangeCount || !flow.contains(sel.anchorNode)) return [];
+        const range = sel.getRangeAt(0);
+        return chosen()
+          .map((el) => {
+            const part = bite(el, range);
+            const lead = document.createRange();
+            lead.selectNodeContents(el);
+            lead.setEnd(part.startContainer, part.startOffset);
+            const from = lead.toString().length;
+            return { el, from, to: from + part.toString().length };
+          })
+          .filter((run) => run.to > run.from);
+      }
+
+      function markUp(name) {
+        const sel = getSelection();
+        if (!sel || !sel.rangeCount || !flow.contains(sel.anchorNode)) return;
+
+        // Nothing selected: the mark opens at the caret and the next thing typed
+        // comes out inside it. The browser has owned that pending state since
+        // before any of this, and what it writes arrives here as an ordinary
+        // input and is filed like any other — whereas selecting the line on the
+        // person's behalf, which is what a document with a toolbar can afford to
+        // do, means the next character they type replaces it.
+        if (sel.isCollapsed) {
+          document.execCommand('styleWithCSS', false, false);
+          document.execCommand(MARK[name], false, null);
+          return;
+        }
+
+        change(() => {
+          const mark = markRange();
+          if (marked(name)) {
+            document.execCommand('styleWithCSS', false, false);
+            document.execCommand(MARK[name], false, null);
+          } else {
+            // Putting a mark on is the half a document can do for itself, and
+            // the half that has to be right: it writes the tag this file uses,
+            // around exactly the characters that were selected.
+            for (const { el, from, to } of runs()) {
+              const range = rangeIn(el, from, to);
+              const held = document.createElement(TAG[name]);
+              held.append(range.extractContents());
+              range.insertNode(held);
+            }
+          }
+          return mark;
+        });
+      }
+
+      // --------------------------------------------------------- the clipboard
+      //
+      // A contenteditable will take whole documents if you let it. Plain text is
+      // what a note wants anyway, and it is the only paste that cannot put
+      // something in the file that nothing here can edit — but plain text has
+      // lines in it, and they arrive as lines.
+      function pasteText(text) {
+        const lines = text.replace(/\r\n?/g, '\n').split('\n');
+        const sel = getSelection();
+        if (!sel || !sel.rangeCount || !flow.contains(sel.anchorNode)) return;
+        if (!sel.isCollapsed) document.execCommand('delete');
+        if (lines.length === 1) {
+          document.execCommand('insertText', false, lines[0]);
+          return;
+        }
+
+        settle();
+        const range = getSelection().getRangeAt(0);
+        const el = blockOf(range.startContainer);
+        if (!el) return;
+        const tail = range.cloneRange();
+        tail.setEnd(el, el.childNodes.length);
+        const rest = shape(el, 'body', tail.extractContents());
+        range.insertNode(document.createTextNode(lines[0]));
+
+        let after = el;
+        for (const line of lines.slice(1, -1)) {
+          const made = shape(el, 'body', document.createTextNode(line));
+          after.after(made);
+          after = made;
+        }
+        const ending = lines[lines.length - 1];
+        rest.prepend(document.createTextNode(ending));
+        after.after(rest);
+
+        tidyUp();
+        file(false);
+        place(rest, ending.length);
+      }
+
+      // ---------------------------------------------------- moving between notes
+
+      // Point the editor at whichever note the file says is open, and take the
+      // shadow from what is there now rather than from what was there before —
+      // the note may have been changed in a text editor, by an agent, or in
+      // another window while this one was looking elsewhere.
+      function reopen() {
+        const el = current();
+        if (flow && flow !== el) {
+          flow.removeAttribute('contenteditable');
+          flow.removeAttribute('spellcheck');
+        }
+        flow = el;
+        here = null;
+        if (!flow) return;
+        flow.setAttribute('contenteditable', 'true');
+        flow.setAttribute('spellcheck', 'true');
+        shadow = readFlow();
+        if (normalise()) file(false);
+        derive();
+      }
+
+      function show(el, { focus = false } = {}) {
+        if (!el) return;
+        if (el !== flow) {
+          settle();
+          // Which note is open is a fact about the document, so it is written
+          // down — the note you were in is the one you come back to. It records
+          // no step of undo, though: looking at something else is not an edit,
+          // and Ctrl+Z belongs to the text. A person who wants the other note
+          // back clicks it.
+          const id = marble.id(el);
+          const mine = marble.id(app);
+          if (id && mine && app.getAttribute(CURRENT) !== id) {
+            app.setAttribute(CURRENT, id);
+            marble.op({ type: 'setAttr', id: mine, name: CURRENT, value: id }, { immediate: true });
+          }
+          reopen();
+          sheet.scrollTo({ top: 0 });
+        }
+        if (focus && flow) place(flow.children[0] ?? flow, 0);
+      }
+
+      function add() {
+        settle();
+        const id = marble.newId();
+        const html =
+          '<article class="note" ' + ID + '="' + id + '">' +
+          '<p ' + ID + '="' + marble.newId() + '" ' + RICH + '></p></article>';
+        const first = noteEls()[0];
+        const op = {
+          type: 'insert',
+          html,
+          parentId: marble.id(notes),
+          beforeId: first ? marble.id(first) : null,
+        };
+        // The page moves and the file is written — one gesture, both halves, and
+        // an inverse recorded so the note can be taken back off again.
+        marble.apply(op);
+        marble.record({ redo: [op], undo: [{ type: 'remove', id }] });
+        marble.op(op, { immediate: true });
+        drawn = null;
+        const made = marble.byId(id);
+        if (made) show(made, { focus: true });
+      }
+
+      // No dialog: the note goes, and the way back is said at the control that
+      // took it. A dialog asks everybody every time to save the one person who
+      // meant it; undo asks nobody and answers the same question.
+      function forget(el) {
+        if (noteEls().length < 2) return;
+        settle();
+        const id = marble.id(el);
+        const next = el.nextElementSibling ?? el.previousElementSibling;
+        const html = marble.source.outer(el);
+        const beforeId = el.nextElementSibling ? marble.id(el.nextElementSibling) : null;
+        if (el === flow) show(next);
+        const op = { type: 'remove', id };
+        marble.record({
+          redo: [op],
+          undo: [{ type: 'insert', html, parentId: marble.id(notes), beforeId }],
+        });
+        marble.apply(op);
+        marble.op(op, { immediate: true });
+        drawn = null;
+        derive();
+        say('Deleted — Ctrl+Z puts it back');
+      }
+
+      function step(dir) {
+        const all = noteEls();
+        const to = all[all.indexOf(flow) + dir];
+        if (to) show(to, { focus: true });
+      }
+
+      const back = async (forward) => {
+        settle();
+        await (forward ? marble.redo() : marble.undo());
+        drawn = null;
+        reopen();
+      };
+
+      // ----------------------------------------------------------- what is drawn
+      //
+      // None of this is in the file and none of it files anything. The rail is
+      // the notes, read back — a note's first line for its name and the rest for
+      // the line under it — and the two classes are the one attribute on <body>,
+      // spelled as something CSS can reach. Three readings of the same notes,
+      // redrawn from them rather than kept beside them, which is why none of them
+      // can be wrong.
+
+      const lines = (el) =>
+        [...el.children].filter((b) => b.hasAttribute(RICH)).map((b) => marble.text(b).trim());
+
+      let drawn = null;
+
+      function drawRows() {
+        const query = find.value.trim().toLowerCase();
+        const all = noteEls().map((el) => {
+          const said = lines(el);
+          return { el, title: said[0] ?? '', rest: said.slice(1).filter(Boolean).join(' ') };
+        });
+
+        // Redrawn only when a reading of it changed. The rail is rebuilt from
+        // scratch, and rebuilding it under the pointer on every keystroke takes
+        // the hover and the focus with it.
+        const sig = JSON.stringify([
+          query,
+          marble.id(flow) ?? '',
+          all.map((one) => [marble.id(one.el), one.title, one.rest.slice(0, 140)]),
+        ]);
+        if (sig === drawn) return;
+        drawn = sig;
+
+        rows.textContent = '';
+        for (const { el, title, rest } of all) {
+          if (query && !(title + ' ' + rest).toLowerCase().includes(query)) continue;
+
+          const row = document.createElement('div');
+          row.className = el === flow ? 'row marble-current' : 'row';
+
+          const open = document.createElement('button');
+          open.type = 'button';
+          open.className = 'open';
+          if (el === flow) open.setAttribute('aria-current', 'page');
+          const name = document.createElement('span');
+          name.className = 't';
+          name.textContent = title;
+          const under = document.createElement('span');
+          under.className = 's';
+          under.textContent = rest;
+          open.append(name, under);
+          open.addEventListener('click', () => show(el));
+          row.append(open);
+
+          // The last note is the document, so it has no ×. Emptying it is what
+          // deleting it would have meant.
+          if (all.length > 1) {
+            const drop = document.createElement('button');
+            drop.type = 'button';
+            drop.className = 'icon drop';
+            drop.title = 'Delete note';
+            drop.setAttribute('aria-label', 'Delete note: ' + (title || 'New note'));
+            drop.innerHTML = '<svg viewBox="0 0 24 24" aria-hidden="true"><use href="#i-x"/></svg>';
+            drop.addEventListener('click', () => forget(el));
+            row.append(drop);
+          }
+
+          rows.append(row);
+        }
+      }
+
+      let said = null;
+
+      const count = () => {
+        const n = noteEls().length;
+        meta.textContent = n === 1 ? '1 note' : n + ' notes';
+      };
+
+      // What just happened, said where it happened rather than only in the corner
+      // pill — and gone again, because it is news and not a state.
+      function say(text) {
+        meta.textContent = text;
+        meta.setAttribute('data-said', '');
+        clearTimeout(said);
+        said = setTimeout(() => {
+          said = null;
+          meta.removeAttribute('data-said');
+          count();
+        }, 4000);
+      }
+
+      function derive() {
+        notes.classList.add('marble-derived');
+        for (const el of noteEls()) el.classList.toggle('marble-open', el === flow);
+        drawRows();
+        if (!said) count();
+      }
+
+      // -------------------------------------------------------- searching them
+
+      find.addEventListener('input', () => {
+        drawn = null;
+        drawRows();
+      });
+
+      find.addEventListener('keydown', (event) => {
+        if (event.key === 'Escape') {
+          find.value = '';
+          drawn = null;
+          drawRows();
+          return;
+        }
+        if (event.key !== 'Enter') return;
+        event.preventDefault();
+        rows.querySelector('.open')?.click();
+      });
+
+      // -------------------------------------------------------- typing in it
+      //
+      // Bound to the container rather than to the note, so switching notes
+      // rebinds nothing: only one of them is ever contenteditable.
+
+      notes.addEventListener('input', () => {
+        tidyUp();
+        file(true);
+      });
+
+      notes.addEventListener('focusout', () => {
+        settle();
+        marble.flush();
+      });
+
+      notes.addEventListener('paste', (event) => {
+        event.preventDefault();
+        pasteText(event.clipboardData?.getData('text/plain') ?? '');
+      });
+
+      notes.addEventListener('click', () => {
+        const el = chosen()[0];
+        if (isText(el)) here = el;
+      });
+
+      // The two gestures that have to work from the search field as well as from
+      // the page, so they are bound to the window rather than to either.
+      addEventListener('keydown', (event) => {
+        const mod = event.metaKey || event.ctrlKey;
+        if (!mod) return;
+        const key = event.key.toLowerCase();
+
+        if (!event.altKey && event.key === 'Enter') {
+          event.preventDefault();
+          return add();
+        }
+        if (event.altKey && (key === 'arrowup' || key === 'arrowdown')) {
+          event.preventDefault();
+          return step(key === 'arrowup' ? -1 : 1);
+        }
+
+        // Select All with the focus anywhere but in a field of its own means the
+        // note, which is the whole reason it is one host.
+        if (event.altKey || event.shiftKey || key !== 'a') return;
+        const target = event.target;
+        if (target instanceof HTMLInputElement || target instanceof HTMLTextAreaElement) return;
+        if (target instanceof HTMLElement && target.isContentEditable && !flow?.contains(target)) return;
+        event.preventDefault();
+        selectAll();
+      });
+
+      notes.addEventListener('keydown', (event) => {
+        const mod = event.metaKey || event.ctrlKey;
+
+        // Undo is this document's to handle in here. The shared `history` part
+        // steps aside for any contenteditable that is not a data-marble-editable
+        // — it assumes the browser owns undo there — and a note is exactly that,
+        // so Ctrl+Z would otherwise reach the browser's own stack and desync the
+        // page from the file. Close the burst, then reverse it.
+        if (mod && !event.altKey && 'zy'.includes(event.key.toLowerCase())) {
+          event.preventDefault();
+          event.stopPropagation();
+          back(event.key.toLowerCase() === 'y' || event.shiftKey);
+          return;
+        }
+
+        if (event.key === 'Enter' && !event.shiftKey && !mod) {
+          event.preventDefault();
+          if (rule()) return;
+          return split();
+        }
+
+        if (event.key === ' ' && !mod && !event.altKey) {
+          if (marker()) event.preventDefault();
+          return;
+        }
+
+        // Read off event.code rather than event.key: Option rewrites the
+        // character on a Mac, so Ctrl+Alt+1 arrives as "¡" and a document that
+        // matched on the character would work on one platform only.
+        if (mod && event.altKey) {
+          const digit = /^Digit([0-2])$/.exec(event.code)?.[1];
+          if (!digit) return;
+          event.preventDefault();
+          return restyle(digit === '0' ? 'body' : 'h' + digit);
+        }
+
+        if (mod && !event.altKey && !event.shiftKey) {
+          const key = event.key.toLowerCase();
+          if (!'biu'.includes(key)) return;
+          event.preventDefault();
+          return markUp(key === 'b' ? 'bold' : key === 'i' ? 'italic' : 'underline');
+        }
+
+        // Backspace at the very start peels the bullet off before it joins the
+        // line to the one above, which the browser is welcome to do because
+        // joining two lines is an ordinary edit inside one field.
+        const sel = getSelection();
+        if (event.key === 'Backspace' && sel?.isCollapsed) {
+          const el = blockOf(sel.anchorNode);
+          const mark = markRange();
+          if (el && mark?.a.offset === 0 && el.hasAttribute('data-list')) {
+            event.preventDefault();
+            setOn('data-list', null);
+          }
+        }
+      });
+
+      // The white around the text is still the page, and clicking a page puts you
+      // in its text — on the line you pointed at, not at the end of it.
+      sheet.addEventListener('mousedown', (event) => {
+        if (event.target !== sheet && event.target !== notes) return;
+        const all = blocks().filter(isText);
+        if (!all.length) return;
+        event.preventDefault();
+        const y = event.clientY;
+        const el = all.find((block) => y <= block.getBoundingClientRect().bottom) ?? all[all.length - 1];
+        const box = el.getBoundingClientRect();
+        const x = event.clientX < box.left ? box.left + 1 : box.right - 1;
+        const spotted = document.caretRangeFromPoint?.(
+          x,
+          Math.min(Math.max(y, box.top + 1), box.bottom - 1),
+        );
+        if (spotted && flow.contains(spotted.startContainer)) {
+          const sel = getSelection();
+          sel.removeAllRanges();
+          sel.addRange(spotted);
+          flow.focus({ preventScroll: true });
+        } else {
+          place(el, marble.text(el).length);
+        }
+      });
+
+      app.addEventListener('click', (event) => {
+        if (event.target.closest('[data-cmd="new"]')) add();
+      });
+
+      // Drawn now, and again over anything that arrives later — an edit made in a
+      // text editor, another window's undo, an agent's op. What comes back from
+      // the file is the file's idea of these notes, so the shadow and the open
+      // note are both taken from it again rather than kept from before.
+      marble.register(() => {
+        drawn = null;
+        reopen();
+      });
+
+      addEventListener('beforeunload', settle);
+    };
+
+    if (window.marble) begin(window.marble);
+    else addEventListener('marble:ready', (event) => begin(event.detail), { once: true });
+  })();
+</script>
+
+__SCRIPT__
+</body>
+</html>

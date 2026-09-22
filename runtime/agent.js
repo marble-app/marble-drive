@@ -248,6 +248,8 @@
       conversations: ({ archived = false } = {}) => ask(`/agent/conversations${archived ? '?archived=1' : ''}`),
       conversation: (id) => ask(`/agent/conversations/${enc(id)}`),
       update: (id, patch) => ask(`/agent/conversations/${enc(id)}`, { method: 'PATCH', body: patch }),
+      failover: (id) => ask(`/agent/conversations/${enc(id)}/failover`, { method: 'POST' }),
+      leaveUsage: (id, turn) => ask(`/agent/conversations/${enc(id)}/usage-left`, { method: 'POST', body: { turn } }),
       // A chat with nothing in it, taken off the disk instead of filed.
       // The host refuses it for anything that has been used, so a caller
       // that guesses wrong gets an error rather than a hole.
@@ -263,13 +265,14 @@
       addProject: (body) => ask('/agent/projects', { method: 'POST', body }),
       removeProject: (id) => ask(`/agent/projects/${enc(id)}`, { method: 'DELETE' }),
 
-      async start({ provider, model = null, effort = null, mode = null, handoffFrom = null, project = null } = {}) {
+      async start({ provider, model = null, effort = null, mode = null, handoffFrom = null, project = null, failover = null } = {}) {
         const body = { provider };
         if (model) body.model = model;
         if (effort) body.effort = effort;
         if (mode) body.mode = mode;
         if (handoffFrom) body.handoffFrom = handoffFrom;
         if (project) body.project = project;
+        if (failover === 'auto' || failover === 'pause') body.failover = failover;
         return (await ask('/agent/conversations', { method: 'POST', body })).id;
       },
       handoff: (id, provider) => agent.start({ provider, handoffFrom: id }),

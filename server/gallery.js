@@ -45,7 +45,7 @@ const NEEDS = { sortable: ['grip'], removable: ['grip'] };
 
 /**
  * The starters. Each is a different answer to "what is a document", which is
- * the point of shipping several rather than one good one — and the first five
+ * the point of shipping several rather than one good one — and the first six
  * are small enough to read in a sitting, because the first thing anyone does
  * with a starter is change it. The last two are not, and say why where they
  * stand: they carry a typesetter, and they carry the same one.
@@ -65,6 +65,22 @@ export const STARTERS = [
     // inline markup, so the document defines its own data-marble-rich and
     // edits them with setInner, which is the whole reason that attribute
     // exists rather than reusing this one.
+    parts: ['editable', 'history', 'status'],
+    accent: '#738698',
+  },
+  {
+    id: 'note',
+    title: 'Note',
+    blurb: 'Notes, one at a time. No toolbar: the keys are the formatting, and the list is a reading of them.',
+    // The Document starter with everything taken out of it — no toolbar, no
+    // ruler, no faces, no colours — and one thing put in: several notes in the
+    // one file, with the open one an attribute on <body>. It is the other answer
+    // to "what is a document": not a page you compose, a place you put text.
+    //
+    // Same three parts as `doc`, and for the same reasons: `editable` for the
+    // name in the rail, `history` for Mod+Z, `status` for the pill. The lines
+    // are not editable — they carry inline markup, so the document defines its
+    // own data-marble-rich and files them with setInner.
     parts: ['editable', 'history', 'status'],
     accent: '#738698',
   },

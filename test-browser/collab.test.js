@@ -252,12 +252,32 @@ test('the construction label uses the apply_ops note, and Hide puts it away', as
   const zone = page.locator('.marble-zone');
   assert.match(await zone.innerText(), /Agent · rename the heading(?!\.)/);
 
-  await page.getByRole('button', { name: 'Hide' }).click();
+  // Hide is in the zone's own pill; the way back is the work tool in the
+  // tray above the launcher, which is where every agent affordance lives now.
+  const tray = page.locator('marble-agent-drawer .tray');
+  await page.locator('.marble-zone-label').getByRole('button', { name: 'Hide construction zone' }).click();
   assert.equal(await page.locator('.marble-zone').count(), 0);
-  assert.equal(await page.getByRole('button', { name: 'Show work' }).count(), 1);
+  assert.equal(await page.locator('.marble-zones-show').count(), 1, 'the corner fallback exists');
+  assert.equal(
+    await page.locator('.marble-zones-show').isVisible(),
+    false,
+    'but this page has a tray, so nothing is pinned to the page’s own corner',
+  );
 
-  await page.getByRole('button', { name: 'Show work' }).click();
+  await tray.locator('.launcher').hover();
+  const work = tray.locator('.tool[data-tool="work"]');
+  await work.waitFor({ state: 'visible' });
+  assert.equal(await work.getAttribute('aria-label'), 'Show work');
+  await work.click();
   assert.equal(await page.locator('.marble-zone').count(), 1);
+
+  await tray.locator('.launcher').hover();
+  await page.waitForFunction(
+    () => document.querySelector('marble-agent-drawer')?.shadowRoot
+      .querySelector('.tool[data-tool="work"]')?.getAttribute('aria-label') === 'Hide work',
+  );
+  await work.click();
+  assert.equal(await page.locator('.marble-zone').count(), 0, 'and the tool hides them again');
 });
 
 const zoneTop = (page) => page.locator('.marble-zone').evaluate((el) => el.getBoundingClientRect().top);
@@ -336,7 +356,12 @@ test('agent work with nothing to point at draws nothing', async () => {
   await presence({ client: 'agent:c1', ids: ['not-on-this-page'], phase: 'working' });
   assert.equal(await page.locator('.marble-zone').count(), 0, 'ids that are not here have nowhere to land');
 
-  assert.equal(await page.getByRole('button', { name: 'Show work' }).count(), 0, 'nothing hidden, nothing to show');
+  await page.locator('marble-agent-drawer .launcher').hover();
+  assert.equal(
+    await page.locator('marble-agent-drawer .tool[data-tool="work"]').isVisible(),
+    false,
+    'no zone on this page, so the tray carries no work tool',
+  );
 });
 
 test('the construction label keeps an all-caps first word and names the phase without a note', async () => {

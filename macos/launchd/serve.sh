@@ -49,4 +49,5 @@ print -r -- "[launchd] $(date '+%Y-%m-%d %H:%M:%S') starting — node $(node -v)
 
 # exec, so the host is this process: launchd watches it directly, and its
 # SIGTERM on stop reaches the handler that closes the drive cleanly.
-exec node --env-file-if-exists=.env --env-file-if-exists=.env.local bin/marble-drive.js serve
+mkdir -p scratchpad/heapsnapshots
+exec node --diagnostic-dir=scratchpad/heapsnapshots --heapsnapshot-near-heap-limit=1 --env-file-if-exists=.env --env-file-if-exists=.env.local bin/marble-drive.js serve

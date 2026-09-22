@@ -544,7 +544,15 @@
     anchor.dataset.hinted = '1';
     const tip = asPopover(h('div', 'keytip'));
     tip.setAttribute('role', 'tooltip');
-    tip.textContent = text;
+    // A tip on a toggle has to say what the toggle is now, so the text is read
+    // when it opens rather than when it was hooked up.
+    const say = typeof text === 'function' ? text : () => text;
+    const word = () => {
+      const said = say();
+      tip.textContent = said;
+      tip.classList.toggle('is-multi', said.includes('\n'));
+    };
+    word();
     anchor.after(tip);
     let timer = null;
     const cancel = () => {
@@ -556,7 +564,10 @@
       // A finger has no hover, and a tip it cannot dismiss would sit there.
       if (event.pointerType === 'touch') return;
       clearTimeout(timer);
-      timer = setTimeout(() => showHint(anchor, tip), HINT_DELAY);
+      timer = setTimeout(() => {
+        word();
+        showHint(anchor, tip);
+      }, HINT_DELAY);
     });
     anchor.addEventListener('pointerleave', cancel);
     anchor.addEventListener('pointerdown', cancel);
@@ -935,12 +946,16 @@
     cursor: '<svg class="brand" viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" d="M3.2 2.4 20.6 12 11.4 13.7 9.5 21.6z"/></svg>',
   };
   const PRESETS = [
+    // Weakest first, which is the menu and the scrubber: a slider is pushed
+    // right to turn something up, so Fable sits at the right-hand end.
     // Opus Extra High is not a setup of its own any more: the scrubber tunes
     // effort on its own axis, so it is Opus with one press of ↑.
-    { id: 'fable-high', provider: 'claude-subscription', model: 'fable', effort: 'high', name: 'Fable 5.1 High', brand: 'anthropic' },
-    { id: 'opus-high', provider: 'claude-subscription', model: 'opus', effort: 'high', name: 'Opus High', brand: 'anthropic' },
+    // Grok 4.7 rests on High. High Fast is the same model with fast on, and
+    // that stays a step on the effort slider rather than the saved setup.
     { id: 'sonnet-high', provider: 'claude-subscription', model: 'sonnet', effort: 'high', name: 'Sonnet High', brand: 'anthropic' },
-    { id: 'grok-xhigh', provider: 'cursor', model: 'cursor-grok-4.6', effort: 'xhigh', name: 'Grok Extra High', brand: 'cursor' },
+    { id: 'grok-high', provider: 'cursor', model: 'grok-4.7', effort: 'high', name: 'Grok 4.7 High', brand: 'cursor' },
+    { id: 'opus-high', provider: 'claude-subscription', model: 'opus', effort: 'high', name: 'Opus High', brand: 'anthropic' },
+    { id: 'fable-high', provider: 'claude-subscription', model: 'fable', effort: 'high', name: 'Fable 5.1 High', brand: 'anthropic' },
   ];
   const EFFORT_WORD = { low: 'Low', medium: 'Medium', high: 'High', xhigh: 'Extra High', max: 'Max' };
   /** Every effort word stacked in one grid cell, only the current one lit.
@@ -1911,7 +1926,7 @@
     }
     .presets-more:not(.is-current) { width: 28px; }
     .presets-more:hover, .presets.is-open .presets-more { color: var(--ink); background: var(--paper-2); }
-    .presets-more, .seg-current, .custom-toggle, .mode { transition: background-color .13s var(--snap), color .13s var(--snap); }
+    .presets-more, .seg-current, .custom-toggle, .failover, .mode { transition: background-color .13s var(--snap), color .13s var(--snap); }
     .presets-more[hidden] { display: none; }
     .presets-more.is-current {
       width: auto; max-width: 100%; min-width: 0; height: auto;
@@ -2062,9 +2077,13 @@
       padding: 4px 8px; border: 1px solid var(--line); border-radius: 7px;
       background: var(--card); color: var(--muted); box-shadow: var(--shadow-rest);
       font-size: 10px; font-weight: 500; white-space: nowrap; pointer-events: none;
+      text-align: left;
       opacity: 0; transform: translateY(3px); transform-origin: 50% 100%;
       transition: opacity .1s var(--snap), transform .1s var(--snap), display .1s allow-discrete, overlay .1s allow-discrete;
     }
+    /* A tip that names a mode wants its second line, so newlines survive —
+       and a tip is still never wide enough to wrap on its own. */
+    .keytip.is-multi { white-space: pre-line; }
     .keytip.is-open {
       display: block; opacity: 1; transform: none;
       transition: opacity .14s var(--settle), transform .14s var(--settle), display .14s allow-discrete, overlay .14s allow-discrete;
@@ -2111,6 +2130,35 @@
        gutter beside them instead of sitting on a line with anything. The 2px
        is what centres it against a single row, so one rule serves both. */
     .mode { flex: none; align-self: flex-start; margin-top: 2px; font: inherit; font-size: 11px; font-weight: 500; color: var(--accent-ink); background: none; border: 0; padding: 3px 6px; border-radius: 999px; cursor: pointer; }
+    /* Two modes, drawn rather than named. "Auto" read as the Auto permission
+       mode standing in the wrong row, and a bordered capsule made the quietest
+       setting in the strip the loudest thing in it. So it borrows the preset
+       overflow's borderless 22px slot: a baton handed to the next CLI, or a
+       pause. The glyph says which mode is on; the hover tip says its name. */
+    .failover {
+      appearance: none; border: 0; background: none; color: var(--muted);
+      flex: none; align-self: center; margin: 0; font: inherit;
+      min-width: 22px; height: 22px; padding: 0 4px; border-radius: 7px; cursor: pointer;
+      display: inline-flex; align-items: center; justify-content: center; gap: 5px;
+    }
+    .failover:hover { color: var(--ink); background: var(--paper-2); }
+    .failover-mark { display: inline-flex; flex: none; }
+    .failover svg { display: block; flex: none; }
+    /* The word rides along only where nothing can be hovered to ask: the phone
+       sheet has the room, and a bare glyph there names nothing. */
+    .failover-word { display: none; font-size: 11px; font-weight: 500; }
+    .usage-note {
+      margin: 0 0 8px; padding: 12px; border: 1px solid var(--line); border-radius: 10px;
+      background: var(--paper); color: var(--ink); font-size: 12px; line-height: 1.4;
+    }
+    .usage-note[hidden] { display: none; }
+    .usage-note p { margin: 0 0 10px; }
+    .usage-note .actions { display: flex; gap: 8px; flex-wrap: wrap; }
+    .usage-note button {
+      height: 28px; padding: 0 12px; border-radius: 999px; border: 1px solid var(--ink);
+      background: var(--ink); color: var(--paper); font: inherit; font-size: 12px; cursor: pointer;
+    }
+    .usage-note button.quiet { background: transparent; color: var(--ink); }
     .mode:hover { color: var(--ink); background: var(--paper-2); }
     .mode[hidden] { display: none; }
     .dispatch[hidden] { display: none; }
@@ -2536,6 +2584,7 @@
     :host([data-chrome="phone"]) .setup-sheet .seg-opts.is-drop .seg-current,
     :host([data-chrome="phone"]) .setup-sheet .presets-more,
     :host([data-chrome="phone"]) .setup-sheet .custom-toggle,
+    :host([data-chrome="phone"]) .setup-sheet .failover,
     :host([data-chrome="phone"]) .setup-sheet .mode {
       box-sizing: border-box; display: inline-flex; align-items: center; justify-content: center;
       min-height: 44px; min-width: 44px; padding: 0 16px; border-radius: 12px;
@@ -2546,6 +2595,8 @@
       background: var(--accent-soft); box-shadow: inset 0 0 0 1px var(--accent); color: var(--ink);
     }
     :host([data-chrome="phone"]) .setup-sheet .mode { color: var(--accent-ink); align-self: flex-start; margin-top: 0; }
+    :host([data-chrome="phone"]) .setup-sheet .failover { color: var(--ink); gap: 8px; }
+    :host([data-chrome="phone"]) .setup-sheet .failover-word { display: block; font-size: 15px; }
     /* Hidden still means hidden: these selectors are heavier than the [hidden]
        rules they sit under, so they have to say it themselves. */
     :host([data-chrome="phone"]) .setup-sheet .setup[hidden],
@@ -2623,6 +2674,13 @@
     return mark;
   };
   const STOP_ICON = '<svg width="12" height="12" viewBox="0 0 12 12" aria-hidden="true"><rect x="1.5" y="1.5" width="9" height="9" rx="2" fill="currentColor"/></svg>';
+  /** What happens when Claude's usage runs out, in two glyphs. The handoff is a
+   *  baton: an arc leaving the runner it is with and coming down on the next
+   *  one, which is what switching CLI mid-turn actually is. The pause is the
+   *  pause every transport has ever drawn, because inventing one here would
+   *  only make it harder to read. */
+  const HANDOFF_ICON = '<svg width="14" height="14" viewBox="0 0 14 14" aria-hidden="true"><circle cx="2.9" cy="9.4" r="1.3" fill="currentColor"/><circle cx="11.1" cy="9.4" r="1.3" fill="currentColor"/><path d="M2.9 7C2.9 2.8 11.1 2.8 11.1 6.1" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/><path d="M9.75 5.5 11.1 6.9 12.45 5.5" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/></svg>';
+  const PAUSE_ICON = '<svg width="14" height="14" viewBox="0 0 14 14" aria-hidden="true"><rect x="4.1" y="3.4" width="1.8" height="7.2" rx=".9" fill="currentColor"/><rect x="8.1" y="3.4" width="1.8" height="7.2" rx=".9" fill="currentColor"/></svg>';
   /** The arrow leaving its box: the one glyph that says a name is a way out of
    *  this chat and into another document. Drawn at the mast's type size so it
    *  sits on the same line as the tags beside it. */
@@ -2878,6 +2936,13 @@
             </div>
             <div class="peek-body"></div>
           </div>
+          <div class="usage-note" hidden>
+            <p class="usage-note-text">Claude usage stopped. Switch to Cursor?</p>
+            <div class="actions">
+              <button type="button" class="usage-switch">Switch</button>
+              <button type="button" class="usage-leave quiet">Leave it</button>
+            </div>
+          </div>
           <div class="queued" hidden data-combine="0">
             <div class="queued-bar" hidden role="group" aria-label="How queued prompts are sent">
               <button type="button" class="queued-individually" aria-pressed="true">Send individually</button>
@@ -2899,6 +2964,7 @@
                 <div class="setup-row">
                   <div class="presets" role="radiogroup" aria-label="Saved setups" hidden></div>
                   <button type="button" class="custom-toggle" aria-expanded="false" hidden>Custom</button>
+                  <button type="button" class="failover" data-failover="auto" aria-label="When Claude usage stops"><span class="failover-mark"></span><span class="failover-word"></span></button>
                   <div class="scrub" role="slider" aria-label="Model setup" aria-valuemin="0" tabindex="-1"></div>
                 </div>
                 <div class="picker">
@@ -2945,6 +3011,21 @@
       this.picker = root.querySelector('.picker');
       this.bar = root.querySelector('.bar');
       this.modeButton = root.querySelector('.mode');
+      this.failoverButton = root.querySelector('.failover');
+      this.failoverMark = root.querySelector('.failover-mark');
+      this.failoverWord = root.querySelector('.failover-word');
+      armHint(this.failoverButton, () => (this.failoverMode() === 'pause'
+        ? 'Pause when Claude usage runs out\nClick to hand off instead'
+        : 'Hand off to Cursor when Claude usage runs out\nClick to pause instead'));
+      this.usageNote = root.querySelector('.usage-note');
+      this.usageNoteText = root.querySelector('.usage-note-text');
+      this.usageSwitch = root.querySelector('.usage-switch');
+      this.usageLeave = root.querySelector('.usage-leave');
+      this.usageLeft = new Set();
+      this.pendingFailover = null;
+      this.failoverButton.addEventListener('click', () => this.flipFailover());
+      this.usageSwitch.addEventListener('click', () => this.switchFromUsage());
+      this.usageLeave.addEventListener('click', () => this.leaveUsage());
       this.dispatchEl = root.querySelector('.dispatch');
       this.agentLabel = root.querySelector('.picker-agent');
       this.agentBox = root.querySelector('[data-seg="agent"]');
@@ -3249,6 +3330,23 @@
       this.input.focus({ preventScroll: true });
     }
 
+    /** A first sentence written by something other than the hand: the marks
+     *  layer hands a sketch's reading over this way, as the start of a draft
+     *  the person then edits. Never a replacement — anything already typed
+     *  keeps its place and the new words go after it — because the one thing
+     *  a composer may not do is lose what somebody wrote in it. */
+    draft(text) {
+      if (!text) return;
+      if (!this.input.value.trim()) {
+        this.setValue(text);
+      } else {
+        this.input.append(document.createTextNode(this.input.value.endsWith(' ') ? text : ` ${text}`));
+        this.onEdited();
+      }
+      this.focusInput();
+      placeCaret(this.input);
+    }
+
     // ---------------------------------------------------------- loading
 
     async load() {
@@ -3269,6 +3367,8 @@
       this.updateContext();
       this.seen = 0;
       this.turns.clear();
+      this.usageLeft = new Set();
+      this.hideUsageNote();
       this.prompts.clear();
       this.live = null;
       this.editedFiles = new Set();
@@ -3283,6 +3383,7 @@
       if (!id) {
         this.meta = null;
         this.paintMast();
+        this.paintFailover();
         await this.showPicker(token);
         return;
       }
@@ -3298,6 +3399,8 @@
         ]);
         if (this.loading !== token) return;
         this.meta = meta;
+        this.pendingFailover = null;
+        this.paintFailover();
         this.applyQueueCombine(Boolean(meta.queueCombine));
         this.projectList = projects;
         this.providerList = sortProviders(providers);
@@ -3336,7 +3439,29 @@
         if (summary.id === id && !summary.removed && summary.title && summary.title !== this.meta?.title) {
           this.meta = { ...(this.meta ?? {}), ...summary };
           this.paintMast();
+          this.paintFailover();
           this.dispatchEvent(new CustomEvent('meta', { detail: { meta: this.meta }, bubbles: true, composed: true }));
+        }
+        if (summary.id === id && !summary.removed) {
+          const previous = this.meta ?? {};
+          const setupChanged = summary.provider !== previous.provider
+            || summary.model !== previous.model
+            || summary.effort !== previous.effort;
+          const failoverChanged = summary.failover && summary.failover !== previous.failover;
+          if ((setupChanged && summary.provider) || failoverChanged) {
+            this.meta = {
+              ...previous,
+              provider: summary.provider ?? previous.provider,
+              model: summary.model,
+              effort: summary.effort,
+              failover: summary.failover ?? previous.failover,
+            };
+            this.paintFailover();
+            if (setupChanged && summary.provider) {
+              this.fillAgents(summary.provider);
+              this.syncCatalog({ model: summary.model, effort: summary.effort }).then(() => this.paintPresets());
+            }
+          }
         }
         this.paintAlso();
       });
@@ -3740,13 +3865,13 @@
       this.paintPresets();
     }
 
-    /** The stops, weakest first. A slider is pushed right to turn something
-     *  up, so the strongest setup belongs at the right end — the menu reads
-     *  top-down and keeps its own order, which is a list, not a dial.
+    /** The stops, weakest first — the same order as the menu. A slider is
+     *  pushed right to turn something up, so the strongest setup belongs at
+     *  the right end.
      *  A setup you cannot pick is not a stop: landing on one and letting go
      *  would be a no-op the scrubber had promised. */
     scrubStops() {
-      return this.availablePresets().filter((preset) => !this.presetDisabled(preset)).reverse();
+      return this.availablePresets().filter((preset) => !this.presetDisabled(preset));
     }
 
     /** The efforts the stop you are on can be tuned through, weakest first.
@@ -4412,6 +4537,7 @@
             effort: picks.effort,
             mode: picks.mode,
             project,
+            failover: this.pendingFailover === 'pause' ? 'pause' : 'auto',
           });
           this.setAttribute('conversation', id);
           this.agentLabel.hidden = false;
@@ -4419,6 +4545,7 @@
           this.fillAgents(provider);
           this.meta = {
             id,
+            failover: this.pendingFailover === 'pause' ? 'pause' : 'auto',
             provider,
             model: picks.model,
             effort: picks.effort,
@@ -4428,6 +4555,7 @@
           };
           this.paintMast();
           this.paintPresets();
+          this.paintFailover();
           this.dispatchEvent(new CustomEvent('conversation', { detail: { id }, bubbles: true, composed: true }));
         }
         await this.api.send(id, { prompt, dispatch: mode, ...context });
@@ -5003,12 +5131,21 @@
         case 'turn.interrupted':
           this.endLive();
           this.finish(turn, event);
+          if (event.type === 'turn.failed' && event.usageStopped && this.failoverMode() === 'pause') this.showUsageNote(event);
           break;
         case 'turn.undone':
           this.undone(turn, event);
           break;
         case 'handoff':
           this.system(event.from ? 'Continued from an earlier conversation.' : 'Continued in a new conversation.');
+          break;
+        case 'usage.continued':
+          this.hideUsageNote();
+          this.system(`Claude usage stopped. Continuing on ${event.label}.`);
+          break;
+        case 'usage.left':
+          if (event.turn) this.usageLeft?.add(event.turn);
+          if (this.usageAsk?.turn === event.turn) this.hideUsageNote();
           break;
         case 'message':
           this.endLive();
@@ -5200,6 +5337,63 @@
       const footer = turn ? this.turns.get(turn)?.footer : null;
       if (footer?.isConnected) this.logEl.insertBefore(node, footer);
       else this.logEl.append(node);
+    }
+
+    failoverMode() {
+      if (this.meta?.failover === 'pause' || this.meta?.failover === 'auto') return this.meta.failover;
+      return this.pendingFailover === 'pause' ? 'pause' : 'auto';
+    }
+
+    paintFailover() {
+      if (!this.failoverButton) return;
+      const pause = this.failoverMode() === 'pause';
+      this.failoverButton.dataset.failover = pause ? 'pause' : 'auto';
+      if (this.failoverMark) this.failoverMark.innerHTML = pause ? PAUSE_ICON : HANDOFF_ICON;
+      if (this.failoverWord) this.failoverWord.textContent = pause ? 'Pause' : 'Hand off';
+      this.failoverButton.setAttribute('aria-label', pause
+        ? 'Pause when Claude usage stops. Click to hand off to Cursor instead.'
+        : 'Hand off to Cursor when Claude usage stops. Click to pause instead.');
+    }
+
+    flipFailover() {
+      const next = this.failoverMode() === 'pause' ? 'auto' : 'pause';
+      this.pendingFailover = next;
+      if (this.meta) this.meta = { ...this.meta, failover: next };
+      this.paintFailover();
+      const id = this.getAttribute('conversation');
+      if (!id) return;
+      this.api.update(id, { failover: next }).catch((err) => this.system(err.message, true));
+    }
+
+    showUsageNote(event) {
+      if (!this.usageNote || this.usageLeft?.has(event.turn)) return;
+      this.usageAsk = event;
+      const can = event.canSwitch !== false;
+      this.usageNoteText.textContent = can
+        ? 'Claude usage stopped. Switch to Cursor?'
+        : String(event.stay || 'Cursor is unavailable, so this chat stayed on Claude').replace(/^—\s*/, '');
+      this.usageSwitch.hidden = !can;
+      this.usageNote.hidden = false;
+    }
+
+    hideUsageNote() {
+      if (this.usageNote) this.usageNote.hidden = true;
+      this.usageAsk = null;
+    }
+
+    switchFromUsage() {
+      const id = this.getAttribute('conversation');
+      if (!id) return;
+      this.api.failover(id).then(() => this.hideUsageNote()).catch((err) => this.system(err.message, true));
+    }
+
+    leaveUsage() {
+      const id = this.getAttribute('conversation');
+      const turn = this.usageAsk?.turn;
+      if (turn) this.usageLeft?.add(turn);
+      this.hideUsageNote();
+      if (!id || !turn) return;
+      this.api.leaveUsage(id, turn).catch((err) => this.system(err.message, true));
     }
 
     system(message, error = false) {
@@ -6078,15 +6272,71 @@
        clickable it swallows whatever sits in the bottom-right corner of the
        page behind it — which is where a composer's send and stop buttons are. */
     :host { position: fixed; inset: auto 0 0 auto; z-index: 2147483000; pointer-events: none; }
-    .launcher { pointer-events: auto; position: fixed; right: calc(20px + env(safe-area-inset-right, 0px)); bottom: calc(20px + env(safe-area-inset-bottom, 0px));
+    /* The tray. At rest it is exactly what it has always been — one round
+       button in the corner — and the column above it is empty air the page
+       can still be clicked through. The tools rise on hover, and only the
+       ones with something to do are in the column at all, so an agent
+       affordance never stands over a document saying nothing.
+
+       --tray-inset is how far the pinned panel has pushed the page across.
+       Keeping it here is the whole reason the tray can stay up beside a
+       pinned panel: it sits at the page's corner, never the panel's. */
+    .tray { pointer-events: none; position: fixed;
+      right: calc(20px + env(safe-area-inset-right, 0px) + var(--tray-inset, 0px));
+      bottom: calc(20px + env(safe-area-inset-bottom, 0px));
+      display: flex; flex-direction: column-reverse; align-items: center; gap: 10px;
+      transition: opacity 200ms var(--settle), right 220ms var(--settle); }
+    /* An overlay panel covers the page the tools act on; a pinned one does not. */
+    .tray[data-away="true"] { opacity: 0; }
+    .tray[data-away="true"] * { pointer-events: none !important; }
+
+    .launcher { pointer-events: auto; position: relative;
       width: 44px; height: 44px; border-radius: 50%; border: 1px solid var(--line); background: var(--card); color: var(--ink);
-      box-shadow: var(--shadow-lift); cursor: pointer; display: grid; place-items: center;
+      box-shadow: var(--shadow-lift); cursor: pointer; display: grid; place-items: center; padding: 0;
       transition: opacity 200ms var(--settle); }
     .launcher svg { width: 20px; height: 20px; }
     .launcher-dot { position: absolute; top: 6px; right: 6px; width: 9px; height: 9px; border-radius: 50%; background: var(--accent-ink); box-shadow: 0 0 0 2px var(--card); }
     .launcher-dot[hidden] { display: none; }
     .launcher.running::after { content: ''; position: absolute; inset: -4px; border-radius: 50%; border: 2px solid transparent; border-top-color: var(--accent); animation: spin 1s linear infinite; }
-    :host([data-open-state="open"]) .launcher { opacity: 0; pointer-events: none; }
+
+    /* column-reverse twice over: the first tool in the DOM is the one nearest
+       the thumb, so Tab walks the column bottom-up the way the eye does. */
+    .tools { display: flex; flex-direction: column-reverse; align-items: center; gap: 8px; }
+    .tools:empty { display: none; }
+    .tool { pointer-events: none; position: relative; flex: none; width: 34px; height: 34px; padding: 0;
+      display: grid; place-items: center; border-radius: 50%; border: 1px solid var(--line);
+      background: var(--card); color: var(--muted); cursor: pointer; box-shadow: var(--shadow-rest);
+      opacity: 0; transform: translateY(10px) scale(.86); transform-origin: 50% 100%;
+      transition: opacity 180ms var(--settle), transform 180ms var(--settle),
+        color 140ms var(--settle), background 140ms var(--settle); }
+    .tool[hidden] { display: none; }
+    .tool svg { width: 17px; height: 17px; }
+    .tray[data-open="true"] .tool { pointer-events: auto; opacity: 1; transform: none;
+      transition-delay: calc(var(--i, 0) * 26ms); }
+    .tool:hover, .tool:focus-visible { color: var(--ink); background: var(--paper-2); outline: none; }
+    .tool:focus-visible { border-color: var(--accent-ink); }
+    .tool:active { transform: scale(.94); }
+    /* Some tools are modes — Select and Sketch put the page in one. While a
+       mode is on its tool wears the accent, so the column says which one of
+       them has the pointer without a second piece of chrome saying it. */
+    .tool[data-active="true"] { color: var(--accent-ink); background: var(--accent-soft); border-color: var(--accent-ink); }
+    /* The name is a pill beside the icon, not inside it: a button the width of
+       its label would make the column ragged and the hit target a moving edge. */
+    .tool-label { position: absolute; right: calc(100% + 8px); white-space: nowrap; pointer-events: none;
+      font: 500 12px/1 inherit; color: var(--ink); background: var(--card);
+      border: 1px solid var(--line); border-radius: 999px; padding: 5px 9px; box-shadow: var(--shadow-rest);
+      opacity: 0; transform: translateX(5px);
+      transition: opacity 120ms var(--settle), transform 120ms var(--settle); }
+    .tool:hover .tool-label, .tool:focus-visible .tool-label { opacity: 1; transform: none; }
+    /* No hover to reveal with, so the contextual tools simply stand there —
+       there are seldom more than one. The two that are always available do
+       not, because on a phone they would be permanent furniture, and the
+       drawer's own bar already carries both. */
+    @media (hover: none) {
+      .tool { pointer-events: auto; opacity: 1; transform: none; transition-delay: 0s !important; }
+      .tool[data-always="true"] { display: none; }
+      .tool-label { display: none; }
+    }
 
     .panel { pointer-events: auto; position: fixed; top: 0; right: 0; bottom: 0; width: ${WIDTH}px; max-width: 100vw; display: flex; flex-direction: column;
       box-sizing: border-box;
@@ -6144,6 +6394,10 @@
     @media (prefers-reduced-motion: reduce) {
       .panel { transition: opacity 150ms linear; }
       .launcher.running::after { animation: none; }
+      .tray, .tool-label { transition: none; }
+      .tool { transition: none; transform: none; transition-delay: 0s !important; }
+      .tray[data-open="true"] .tool { transform: none; }
+      .tool:active { transform: none; }
     }
     @keyframes spin { to { transform: rotate(360deg); } }
   `;
@@ -6155,6 +6409,13 @@
     more: '<svg width="16" height="16" viewBox="0 0 16 16" aria-hidden="true"><circle cx="3.5" cy="8" r="1.3" fill="currentColor"/><circle cx="8" cy="8" r="1.3" fill="currentColor"/><circle cx="12.5" cy="8" r="1.3" fill="currentColor"/></svg>',
     pin: '<svg width="16" height="16" viewBox="0 0 16 16" aria-hidden="true"><rect x="2.5" y="3" width="11" height="10" rx="2" fill="none" stroke="currentColor" stroke-width="1.5"/><path d="M9.5 3v10" stroke="currentColor" stroke-width="1.5"/></svg>',
     close: '<svg width="16" height="16" viewBox="0 0 16 16" aria-hidden="true"><path d="M4 4l8 8M12 4l-8 8" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg>',
+    // Tray tools. Ask here borrows the callout's own mark — the beaked bubble
+    // that hangs at a selection — because it summons exactly that, and a
+    // second glyph for one affordance would be a second affordance. The
+    // overlapping rounds are two conversations at once, which is the Agents
+    // page. Both are drawn on the 24-box the callout's mark was drawn on.
+    ask: '<svg viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round"><g transform="translate(2.6 -.6) scale(.8)"><path d="M6.5 15.1A8 8 0 1 1 10.9 18.2L4.9 21.1a.6.6 0 0 1-.72-.85Z" stroke-width="2.2"/></g><path d="M4.5 21.4h15" stroke-width="2.2"/></svg>',
+    agents: '<svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="3" width="10" height="10" rx="3" fill="none" stroke="currentColor" stroke-width="1.7"/><rect x="11" y="11" width="10" height="10" rx="3" fill="none" stroke="currentColor" stroke-width="1.7"/></svg>',
   };
 
   class MarbleAgentDrawer extends HTMLElement {
@@ -6162,7 +6423,10 @@
       super();
       const root = this.attachShadow({ mode: 'open' });
       root.innerHTML = `<style>${TOKENS}${DRAWER_CSS}</style>
-        <button type="button" class="launcher" aria-label="Agent (⌘J)" aria-expanded="false">${ICONS.launcher}<span class="launcher-dot" hidden></span></button>
+        <div class="tray" data-open="false" data-away="false">
+          <button type="button" class="launcher" aria-label="Agent (⌘J)" aria-expanded="false">${ICONS.launcher}<span class="launcher-dot" hidden></span></button>
+          <div class="tools" role="group" aria-label="Agent tools"></div>
+        </div>
         <aside class="panel" role="dialog" aria-label="Agent" data-open="false" data-pinned="false" inert>
           <span class="grip" aria-hidden="true"></span>
           <button type="button" class="resize" aria-label="Resize sidebar"></button>
@@ -6183,6 +6447,8 @@
         </aside>`;
       this.launcher = root.querySelector('.launcher');
       this.dot = root.querySelector('.launcher-dot');
+      this.tray = root.querySelector('.tray');
+      this.tools = root.querySelector('.tools');
       this.panel = root.querySelector('.panel');
       this.bar = root.querySelector('.bar');
       this.usageEl = root.querySelector('.usage');
@@ -6205,6 +6471,10 @@
       this.reduced = matchMedia('(prefers-reduced-motion: reduce)');
       this.summaries = new Map();
       this.labels = new Map();
+      this.toolSpecs = new Map();
+      this.toolEls = new Map();
+      this.trayOpen = false;
+      this.trayTimer = null;
     }
 
     get api() {
@@ -6219,7 +6489,9 @@
       const current = api.current();
       if (current) this.view.setAttribute('conversation', current);
 
-      this.launcher.addEventListener('click', () => this.open());
+      // Pinned, the launcher does not go away, so it has to be able to say
+      // "enough" as well as "come here".
+      this.launcher.addEventListener('click', () => (this.isOpen ? this.close() : this.open()));
       this.root('.close').addEventListener('click', () => this.close());
       this.root('.new').addEventListener('click', () => this.startNew());
       this.pinButton.addEventListener('click', () => this.setPinned(!this.pinned));
@@ -6255,6 +6527,9 @@
         } else if (event.key === 'Escape' && this.isOpen && this.shadowRoot.activeElement !== null) {
           if (!this.recent.hidden || !this.actions.hidden) this.hideMenus();
           else this.close();
+        } else if (event.key === 'Escape' && this.trayOpen) {
+          this.setTray(false);
+          this.launcher.focus({ preventScroll: true });
         }
       };
       addEventListener('keydown', this.onKey, true);
@@ -6282,6 +6557,7 @@
 
       this.bindDrag();
       this.bindResize();
+      this.bindTray();
       this.onWindowResize = () => {
         this.applyWidth(this.readStoredWidth(), { persist: false });
         this.render();
@@ -6310,6 +6586,12 @@
       if (api.storage.get(OPEN_KEY) === '1') this.open({ animate: false });
       else this.render();
       this.unwatchUsage = watchUsage(this.usageEl);
+      this.fillTray();
+      // Scripts load in order and collab.js comes after this one, so its
+      // registration lands on a tray that already exists. This is for the
+      // other case — a drawer mounted late, or remounted — where whoever
+      // asked first was told there was no tray.
+      dispatchEvent(new CustomEvent('marble-tray:ready'));
     }
 
     disconnectedCallback() {
@@ -6319,6 +6601,11 @@
       removeEventListener('marble:agent-open', this.onOpenRequest);
       removeEventListener('marble:agent-close', this.onCloseRequest);
       removeEventListener('marble:agent-settings-saved', this.onSettingsSaved);
+      removeEventListener('marble-tray:register', this.onTrayRegister);
+      removeEventListener('marble-tray:update', this.onTrayUpdate);
+      removeEventListener('marble-tray:unregister', this.onTrayRemove);
+      removeEventListener('marble:agent-context', this.onContext);
+      clearTimeout(this.trayTimer);
       this.phone.removeEventListener('change', this.onViewport);
       removeEventListener('resize', this.onWindowResize);
       this.offSummaries?.();
@@ -6393,7 +6680,13 @@
       }
       this.pinButton.setAttribute('aria-pressed', String(this.pinned));
       this.panel.style.width = phone ? '' : `${this.width}px`;
-      this.dock(this.isOpen && this.pinned && !phone);
+      const docked = this.isOpen && this.pinned && !phone;
+      this.dock(docked);
+      // Pinned, the page is still there to act on and the tray goes with it.
+      // Overlaying, the panel is the whole of what you are looking at.
+      this.tray.dataset.away = String(this.isOpen && !docked);
+      this.tray.style.setProperty('--tray-inset', docked ? `${this.width}px` : '0px');
+      if (this.isOpen) this.setTray(false);
     }
 
     setPinned(pinned) {
@@ -6449,6 +6742,144 @@
       } else if (existing) {
         existing.remove();
       }
+    }
+
+    // ---------------------------------------------------------------- tray
+
+    /** A tool is a small named action that only appears when it applies. The
+     *  drawer owns the tray; anything else that wants a slot in it — today
+     *  that is collab.js's work toggle — asks by dispatching a *cancelable*
+     *  `marble-tray:register`, and the tray answers by preventing it. An
+     *  unanswered ask means there is no tray on this page (a page with
+     *  `<meta name="marble-agent" content="custom">` mounts no drawer), and
+     *  the asker is expected to draw its own affordance instead. */
+    bindTray() {
+      this.onTrayRegister = (event) => {
+        if (!event.detail?.id) return;
+        event.preventDefault();
+        this.addTool(event.detail);
+      };
+      this.onTrayUpdate = (event) => {
+        if (event.detail?.id) this.addTool(event.detail, { merge: true });
+      };
+      this.onTrayRemove = (event) => {
+        const id = event.detail?.id;
+        if (!id) return;
+        this.toolSpecs.delete(id);
+        this.fillTray();
+      };
+      addEventListener('marble-tray:register', this.onTrayRegister);
+      addEventListener('marble-tray:update', this.onTrayUpdate);
+      addEventListener('marble-tray:unregister', this.onTrayRemove);
+
+      // Ask here summons the callout at the selection — the same door ⌘J
+      // opens. It is in the tray only while there is a selection to hang it
+      // on, which is also the only time ⌘J means this rather than "drawer".
+      this.addTool({
+        id: 'ask',
+        order: 5,
+        label: 'Ask here',
+        icon: ICONS.ask,
+        hidden: true,
+        onSelect: () => {
+          if (!dispatchEvent(new CustomEvent('marble-callout:summon', { cancelable: true }))) return;
+          this.open();
+        },
+      });
+      this.addTool({ id: 'new', order: 20, label: 'New chat', icon: ICONS.plus, always: true, onSelect: () => this.startNew() });
+      this.addTool({
+        id: 'agents',
+        order: 30,
+        label: 'All agents',
+        icon: ICONS.agents,
+        always: true,
+        onSelect: () => { location.href = window.marble?.href?.('Agents') ?? '/a/Agents'; },
+      });
+
+      this.onContext = () => {
+        const selected = this.api?.context?.().selection?.length ?? 0;
+        this.addTool({ id: 'ask', hidden: !selected }, { merge: true });
+      };
+      addEventListener('marble:agent-context', this.onContext);
+      this.onContext();
+
+      const leave = () => {
+        clearTimeout(this.trayTimer);
+        this.trayTimer = setTimeout(() => this.setTray(false), 180);
+      };
+      // The gaps between the buttons do not take a pointer — the page under
+      // them is still the page — so crossing one leaves the tray for a frame.
+      // The delay is what makes the column one surface to the hand.
+      this.tray.addEventListener('pointerenter', () => this.setTray(true));
+      this.tray.addEventListener('pointerleave', leave);
+      this.tray.addEventListener('focusin', () => this.setTray(true));
+      this.tray.addEventListener('focusout', (event) => {
+        if (!this.tray.contains(event.relatedTarget)) leave();
+      });
+    }
+
+    addTool(spec, { merge = false } = {}) {
+      const existing = this.toolSpecs.get(spec.id);
+      const next = merge && existing ? { ...existing, ...spec } : { ...spec };
+      // A selection change asks about Ask here on every keystroke. Answering
+      // "same as before" by rebuilding the column would move DOM under a
+      // hovering pointer for nothing.
+      if (existing && Object.keys(next).every((key) => next[key] === existing[key])
+        && Object.keys(existing).length === Object.keys(next).length) return;
+      this.toolSpecs.set(spec.id, next);
+      this.fillTray();
+    }
+
+    fillTray() {
+      const wanted = [...this.toolSpecs.values()].sort((a, b) => (a.order ?? 50) - (b.order ?? 50));
+      for (const [id, el] of this.toolEls) {
+        if (!this.toolSpecs.has(id)) { el.remove(); this.toolEls.delete(id); }
+      }
+      let shown = 0;
+      for (const spec of wanted) {
+        let el = this.toolEls.get(spec.id);
+        if (!el) {
+          el = h('button', 'tool');
+          el.type = 'button';
+          el.dataset.tool = spec.id;
+          el.append(h('span', 'tool-icon'), h('span', 'tool-label'));
+          el.addEventListener('click', () => {
+            this.setTray(false);
+            this.toolSpecs.get(spec.id)?.onSelect?.();
+          });
+          this.toolEls.set(spec.id, el);
+        }
+        const icon = el.querySelector('.tool-icon');
+        if (icon.dataset.icon !== spec.icon) {
+          icon.dataset.icon = spec.icon ?? '';
+          icon.innerHTML = spec.icon ?? '';
+        }
+        el.querySelector('.tool-label').textContent = spec.label ?? '';
+        el.setAttribute('aria-label', spec.label ?? '');
+        el.dataset.always = String(Boolean(spec.always));
+        // Only a tool that says whether it is active is a toggle; the rest are
+        // actions, and pressing an action is not a state to announce.
+        if ('active' in spec) {
+          el.dataset.active = String(Boolean(spec.active));
+          el.setAttribute('aria-pressed', String(Boolean(spec.active)));
+        }
+        el.hidden = Boolean(spec.hidden);
+        // The stagger counts visible tools, so a hidden one does not leave a
+        // beat of silence in the middle of the column.
+        if (!el.hidden) el.style.setProperty('--i', String(shown++));
+        if (el.parentNode !== this.tools) this.tools.append(el);
+      }
+      const order = wanted.map((spec) => this.toolEls.get(spec.id));
+      if (order.some((el, i) => this.tools.children[i] !== el)) this.tools.replaceChildren(...order);
+      for (const el of this.toolEls.values()) el.tabIndex = this.trayOpen ? 0 : -1;
+    }
+
+    setTray(open) {
+      clearTimeout(this.trayTimer);
+      if (this.trayOpen === open) return;
+      this.trayOpen = open;
+      this.tray.dataset.open = String(open);
+      for (const el of this.toolEls.values()) el.tabIndex = open ? 0 : -1;
     }
 
     // ---------------------------------------------------------- dragging

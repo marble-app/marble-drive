@@ -11,6 +11,7 @@ import { createRunner } from '../server/agent/runner.js';
 import { createAgentStore } from '../server/agent/store.js';
 import { createTools } from '../server/agent/tools.js';
 import { createFakeProvider } from './fixtures/fake-provider.js';
+import { STAY } from '../server/agent/usage-failover.js';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 
@@ -63,7 +64,7 @@ const SCRIPTS = {
   linger2: [{ sleep: 1500 }, { say: 'done lingering' }],
 };
 
-async function setup({ limits = {}, tools, realTools = null, onLook, capability, projects = null, onFinish = null, publishAsk = undefined, onPublish = null, nameConversation = null, origin = () => 'http://127.0.0.1:1' } = {}) {
+async function setup({ limits = {}, tools, realTools = null, onLook, capability, projects = null, onFinish = null, publishAsk = undefined, onPublish = null, nameConversation = null, origin = () => 'http://127.0.0.1:1', providerMap = null } = {}) {
   const dir = await fsp.mkdtemp(path.join(os.tmpdir(), 'marble-runner-'));
   const store = createAgentStore({ dir: path.join(dir, 'agents'), defaultProvider: 'fake' });
   await store.ready();
@@ -82,7 +83,6 @@ async function setup({ limits = {}, tools, realTools = null, onLook, capability,
   const runner = createRunner({
     store,
     tools: tools ?? realTools ?? { call: async (name, input, turn) => { toolCalls.push({ name, input, turn: turn.id }); return { ok: true }; } },
-    providers: new Map([['fake', provider]]),
     workdir: path.join(dir, 'work'),
     driveRoot,
     projects: projects ?? { find: async (id) => (!id || id === 'drive' ? { id: 'drive', name: 'Drive', path: driveRoot, builtIn: true } : null) },
@@ -92,6 +92,7 @@ async function setup({ limits = {}, tools, realTools = null, onLook, capability,
     // `onPublish` is how a test makes the host fail underneath a turn: a
     // throw here reaches `send` through `emit`, which is the one unguarded
     // await in the path a delivery turn takes.
+    providers: providerMap ?? new Map([['fake', provider]]),
     publish: (conversationId, event, summary = null) => {
       published.push({ conversationId, event, summary });
       onPublish?.(conversationId, event);
@@ -1639,4 +1640,132 @@ test('a host with no namer leaves the placeholder alone', async () => {
   await new Promise((resolve) => setTimeout(resolve, 100));
   assert.equal((await store.conversation(chat.id)).title, 'script:hello');
   await runner.close();
+});
+
+const GROK_MODELS = [
+  { id: 'auto', label: 'Auto' },
+  { id: 'grok-4.6-high', label: 'Grok 4.6 High' },
+  { id: 'grok-4.7-high', label: 'Grok 4.7 High' },
+  { id: 'grok-4.7-xhigh', label: 'Grok 4.7 Extra High' },
+];
+
+/** Claude is the scripted provider. Cursor is a second one whose model list the handoff reads. */
+async function setupFailover({ signedIn = true, models = GROK_MODELS, listModels = null, failover = 'auto' } = {}) {
+  const spawned = [];
+  const claude = createFakeProvider({
+    id: 'claude-subscription',
+    scripts: {
+      spent: [{ fail: 'You have hit your limit' }],
+      retry: [{ fail: 'Rate limit — try again shortly' }],
+      crash: [{ fail: 'exited with 1' }],
+      hello: [{ say: 'done' }],
+    },
+  });
+  const cursor = createFakeProvider({ id: 'cursor', scripts: { hello: [{ say: 'picked up' }] } });
+  const claudeSpawn = claude.spawn.bind(claude);
+  claude.spawn = (opts) => {
+    spawned.push({ provider: 'claude-subscription', ...opts });
+    return claudeSpawn(opts);
+  };
+  const cursorSpawn = cursor.spawn.bind(cursor);
+  cursor.spawn = (opts) => {
+    spawned.push({ provider: 'cursor', ...opts });
+    return cursorSpawn({ ...opts, prompt: `script:hello\n${opts.prompt}` });
+  };
+  cursor.detect = async () => ({ installed: true, signedIn });
+  cursor.listModels = listModels ?? (async () => models);
+  const made = await setup({
+    providerMap: new Map([['claude-subscription', claude], ['cursor', cursor]]),
+  });
+  const chat = await made.store.createConversation({ provider: 'claude-subscription', model: 'opus', effort: 'high', failover });
+  await made.store.updateConversation(chat.id, { providerSession: 'claude-session' });
+  return { ...made, spawned, chat };
+}
+
+test('a spent Claude window switches the chat to the newest Grok and continues', async () => {
+  const { store, runner, spawned, chat, published } = await setupFailover();
+  const { turnId } = await runner.send(chat.id, { prompt: 'script:spent', context: { target: 'd' } });
+  const failed = await finished(store, turnId);
+  assert.equal(failed.status, 'failed');
+  assert.match(failed.error, /hit your limit/);
+  await until(async () => (await store.conversation(chat.id)).provider === 'cursor');
+  const meta = await store.conversation(chat.id);
+  assert.equal(meta.provider, 'cursor');
+  assert.equal(meta.model, 'grok-4.7');
+  assert.equal(meta.effort, 'high');
+  assert.equal(meta.providerSession, null);
+  const turns = await store.turns(chat.id);
+  const cont = turns.find((turn) => turn.prompt === 'Continue');
+  assert.ok(cont);
+  assert.equal(cont.usageHandoff, true);
+  await finished(store, cont.id);
+  const handoff = spawned.find((item) => item.provider === 'cursor');
+  assert.match(handoff.prompt, /Finish the work it started/);
+  assert.match(handoff.prompt, /Person: script:spent/);
+  assert.match(handoff.prompt, /\nContinue\n/);
+  assert.equal(published.some((item) => item.event.type === 'usage.continued' && item.event.label === 'Grok 4.7 High'), true);
+  const again = await runner.handoffUsage(chat.id);
+  assert.equal(again.turnId, cont.id);
+  await runner.close();
+});
+
+test('Continue runs ahead of a prompt that was already queued', async () => {
+  const { store, runner, spawned, chat } = await setupFailover();
+  const first = await runner.send(chat.id, { prompt: 'script:spent', context: { target: 'd' } });
+  const queued = await runner.send(chat.id, { prompt: 'script:hello\nplease also fix the tests', context: { target: 'd' } });
+  await finished(store, first.turnId);
+  await until(async () => (await store.turns(chat.id)).some((turn) => turn.prompt === 'Continue'));
+  await finished(store, queued.turnId);
+  const cont = (await store.turns(chat.id)).find((turn) => turn.prompt === 'Continue');
+  await finished(store, cont.id);
+  const cursorSpawns = spawned.filter((item) => item.provider === 'cursor');
+  assert.match(cursorSpawns[0].prompt, /Finish the work it started/);
+  assert.match(cursorSpawns[1].prompt, /please also fix the tests/);
+  assert.equal(cursorSpawns[1].prompt.includes('Finish the work it started'), false);
+  await runner.close();
+});
+
+test('a crash or a short retry does not switch off Claude', async () => {
+  for (const prompt of ['script:crash', 'script:retry']) {
+    const { store, runner, chat } = await setupFailover();
+    const { turnId } = await runner.send(chat.id, { prompt, context: { target: 'd' } });
+    await finished(store, turnId);
+    assert.equal((await store.conversation(chat.id)).provider, 'claude-subscription');
+    assert.equal((await store.turns(chat.id)).some((turn) => turn.prompt === 'Continue'), false);
+    await runner.close();
+  }
+});
+
+test('Pause asks instead of continuing, and records whether Cursor can take the chat', async () => {
+  const asking = await setupFailover({ failover: 'pause' });
+  const sent = await asking.runner.send(asking.chat.id, { prompt: 'script:spent', context: { target: 'd' } });
+  const failed = await finished(asking.store, sent.turnId);
+  assert.equal(failed.usageStopped, true);
+  assert.equal(failed.canSwitch, true);
+  assert.equal((await asking.store.conversation(asking.chat.id)).provider, 'claude-subscription');
+  assert.equal(asking.published.some((item) => item.event.type === 'turn.failed' && item.event.usageStopped && item.event.canSwitch), true);
+  await asking.runner.close();
+
+  const blocked = await setupFailover({ failover: 'pause', signedIn: false });
+  const stopped = await blocked.runner.send(blocked.chat.id, { prompt: 'script:spent', context: { target: 'd' } });
+  const stayed = await finished(blocked.store, stopped.turnId);
+  assert.equal(stayed.canSwitch, false);
+  assert.match(stayed.error, new RegExp(STAY.signedOut.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')));
+  await blocked.runner.close();
+});
+
+test('a signed-out Cursor, an unreadable list, or no Grok leaves the chat on Claude', async () => {
+  const cases = [
+    [{ signedIn: false }, STAY.signedOut],
+    [{ listModels: async () => { throw new Error('nope'); } }, STAY.unreadable],
+    [{ models: [{ id: 'auto', label: 'Auto' }, { id: 'composer-2.5', label: 'Composer 2.5' }] }, STAY.noGrok],
+  ];
+  for (const [options, suffix] of cases) {
+    const { store, runner, chat } = await setupFailover(options);
+    const { turnId } = await runner.send(chat.id, { prompt: 'script:spent', context: { target: 'd' } });
+    const failed = await finished(store, turnId);
+    assert.equal((await store.conversation(chat.id)).provider, 'claude-subscription');
+    assert.match(failed.error, new RegExp(suffix.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')));
+    await runner.close();
+  }
 });

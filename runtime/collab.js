@@ -206,6 +206,7 @@
          legible by a paper text-shadow, which floated free of anything. */
       .marble-zone-label {
         pointer-events: auto;
+        cursor: pointer;
         position: absolute;
         left: -1.5px;
         top: 100%;
@@ -274,8 +275,12 @@
         outline: 2px solid var(--zone-mark);
         outline-offset: 2px;
       }
-      /* Nothing is on the page to belong to, so this stays what it was:
-         quiet text in the corner, kept legible by a halo of paper. */
+      /* The last resort. The work toggle lives in the agent tray above the
+         launcher now; this corner button survives only for a page that mounts
+         no drawer for the tray to be part of — Agents.mrbl, which carries its
+         own conversation chrome. There, nothing is on the page to belong to,
+         so it stays what it always was: quiet text in the corner, kept
+         legible by a halo of paper. */
       .marble-zones-show {
         appearance: none;
         border: 0;
@@ -514,6 +519,61 @@
     showWork.addEventListener('click', () => setZonesHidden(false));
     document.documentElement.append(showWork);
 
+    // Where the work toggle goes. It used to be quiet text pinned to the
+    // viewport's top-right corner, which is a corner the document already owns
+    // — and once the agent panel is pinned, a corner the panel is sitting in,
+    // where it landed across the panel's own bar. So it moves to the tray
+    // above the launcher, with the rest of the agent's affordances, and is
+    // only there at all while there is a zone on this page to toggle.
+    //
+    // The tray belongs to the drawer, so a page that mounts no drawer has
+    // none. Registering is cancelable: preventing it is the tray saying it
+    // took the tool. Unanswered, the corner button stays, which is the old
+    // behaviour and the only thing such a page can do.
+    const EYE = '<svg viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M2.5 12S6 5.5 12 5.5 21.5 12 21.5 12 18 18.5 12 18.5 2.5 12 2.5 12Z"/><circle cx="12" cy="12" r="2.8"/></svg>';
+    const EYE_OFF = `${EYE.slice(0, -6)}<path d="M4 20 20 4"/></svg>`;
+    let trayHasWork = false;
+
+    function askTray() {
+      if (trayHasWork) return true;
+      const asked = new CustomEvent('marble-tray:register', {
+        cancelable: true,
+        detail: {
+          id: 'work',
+          order: 10,
+          hidden: true,
+          label: 'Show work',
+          icon: EYE,
+          onSelect: () => setZonesHidden(!zonesHidden()),
+        },
+      });
+      trayHasWork = !dispatchEvent(asked);
+      return trayHasWork;
+    }
+
+    // A drawer that mounts after this script ran was told there was no tray.
+    addEventListener('marble-tray:ready', () => {
+      trayHasWork = false;
+      if (askTray()) paintZones();
+    });
+
+    /** `state` is what the toggle would do next: nothing, show, or hide. */
+    function offerWork(state) {
+      if (askTray()) {
+        showWork.hidden = true;
+        dispatchEvent(new CustomEvent('marble-tray:update', {
+          detail: {
+            id: 'work',
+            hidden: state === 'none',
+            label: state === 'hide' ? 'Hide work' : 'Show work',
+            icon: state === 'hide' ? EYE_OFF : EYE,
+          },
+        }));
+        return;
+      }
+      showWork.hidden = state !== 'show';
+    }
+
     let placed = [];
     function place(frame, el) {
       const r = el.getBoundingClientRect();
@@ -562,14 +622,14 @@
       const hidden = zonesHidden();
       document.documentElement.classList.toggle('marble-zones-off', hidden);
       if (!zones.length) {
-        showWork.hidden = true;
+        offerWork('none');
         return;
       }
       if (hidden) {
-        showWork.hidden = false;
+        offerWork('show');
         return;
       }
-      showWork.hidden = true;
+      offerWork('hide');
       for (const { detail, target } of zones) {
         const frame = document.createElement('div');
         frame.className = 'marble-zone';
@@ -586,25 +646,34 @@
         // half a signal. The zone knows which conversation drew it, so it can
         // hand you the chat.
         const conversation = conversationOf(detail.client);
+        const openHere = () => {
+          // A callout on this page for the same chat gets first refusal:
+          // the pill under the zone opens that tooltip, not the drawer.
+          if (!conversation) return;
+          const offer = new CustomEvent('marble-callout:open', { cancelable: true, detail: { id: conversation } });
+          if (!document.dispatchEvent(offer)) return;
+          openConversation(conversation);
+        };
         if (conversation) {
           const open = document.createElement('button');
           open.type = 'button';
           open.textContent = 'Open chat';
           open.setAttribute('aria-label', 'Open the conversation working here');
-          open.addEventListener('click', () => {
-            // A callout on this page for the same chat gets first refusal:
-            // being taken to a card two inches away is not being taken anywhere.
-            const offer = new CustomEvent('marble-callout:open', { cancelable: true, detail: { id: conversation } });
-            if (!document.dispatchEvent(offer)) return;
-            openConversation(conversation);
+          open.addEventListener('click', (event) => {
+            event.stopPropagation();
+            openHere();
           });
           label.append(open);
+          label.addEventListener('click', openHere);
         }
         const hide = document.createElement('button');
         hide.type = 'button';
         hide.textContent = 'Hide';
         hide.setAttribute('aria-label', 'Hide construction zone');
-        hide.addEventListener('click', () => setZonesHidden(true));
+        hide.addEventListener('click', (event) => {
+          event.stopPropagation();
+          setZonesHidden(true);
+        });
         label.append(hide);
         if (conversation && docked.has(conversation)) label.hidden = true;
         frame.append(label);

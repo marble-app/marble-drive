@@ -19,6 +19,16 @@ import { effectiveCapability } from './capability.js';
 import { pickEnv } from './env.js';
 import { MAX_HOP, MAX_SENDS, clampSeconds, pickTarget, renderMessages, validateText } from './messages.js';
 import { MESSAGING_INSTRUCTIONS } from './instructions.js';
+import {
+  CLAUDE_PROVIDERS,
+  CONTINUE,
+  STAY,
+  continuedLabel,
+  matchEffort,
+  pickGrok,
+  usageBrief,
+  usageStopped,
+} from './usage-failover.js';
 
 const SELECTION_BUDGET = 6_000;
 const STDERR_TAIL = 4_000;
@@ -228,6 +238,11 @@ export function createRunner({ store, tools, providers, workdir, origin, bridgeP
       const brief = await handoffBrief(meta.handoffFrom);
       if (brief) lines.unshift(`This continues an earlier conversation. What happened there:\n\n${brief}\n\n---\n`);
     }
+    if (turn.usageHandoff) {
+      const events = (await store.events(turn.conversationId)).filter((event) => event.turn !== turn.id);
+      const brief = usageBrief(events, turn.usageError);
+      if (brief) lines.unshift(`${brief}\n\n---\n`);
+    }
     return lines.join('\n');
   }
 
@@ -257,7 +272,7 @@ export function createRunner({ store, tools, providers, workdir, origin, bridgeP
 
   const hasPeers = async (conversationId, projectId) => (await projectPeers(conversationId, projectId)).length > 0;
 
-  async function send(conversationId, { prompt, context, dispatch, from = null }) {
+  async function send(conversationId, { prompt, context, dispatch, from = null, ahead = false, usageHandoff = false, usageError = null }) {
     const meta = await store.conversation(conversationId);
     if (!meta) throw Object.assign(new Error(`no conversation "${conversationId}"`), { status: 404 });
     if (!context?.target) throw Object.assign(new Error('a turn needs context.target'), { status: 400 });
@@ -277,7 +292,7 @@ export function createRunner({ store, tools, providers, workdir, origin, bridgeP
       }
     }
 
-    const record = await store.createTurn(conversationId, { prompt: String(prompt ?? ''), context: frozen, dispatch, behind });
+    const record = await store.createTurn(conversationId, { prompt: String(prompt ?? ''), context: frozen, dispatch, behind, usageHandoff });
     let ended;
     const turn = {
       id: record.id,
@@ -322,6 +337,8 @@ export function createRunner({ store, tools, providers, workdir, origin, bridgeP
       sent: 0, // messages this turn has sent; capped
       waiter: null, // resolve() of a wait_for_reply parked on this turn
       from, // { conversation, title, provider, messageId, hop } when a message started this turn
+      usageHandoff,
+      usageError,
       arrived: null, // messages composePrompt() took from the inbox; handed back in finish() if this turn never got to act on them
       inbound: null, // every message this turn has actually received, in order; a reply without `inReplyTo` threads off the last one from that conversation
       finishing: false, // true once finish() has started; new tool calls are refused
@@ -370,8 +387,20 @@ export function createRunner({ store, tools, providers, workdir, origin, bridgeP
     });
     await emit(turn, { type: 'turn.queued', dispatch: turn.dispatch });
     live.set(turn.id, turn);
-    order.push(turn.id);
-    const effective = meta.queueCombine ? batchDispatch(queuedFor(conversationId)) : turn.dispatch;
+    if (ahead) {
+      const idx = order.findIndex((id) => {
+        const other = live.get(id);
+        return other && other.id !== turn.id && other.conversationId === conversationId && other.status === 'queued';
+      });
+      if (idx === -1) order.push(turn.id);
+      else order.splice(idx, 0, turn.id);
+    } else {
+      order.push(turn.id);
+    }
+    // A usage handoff is its own turn. Folding it into a combined queue would
+    // bury Continue inside the person's waiting prompt, and an interrupt
+    // dispatch would try to cancel the turn that is still finishing.
+    const effective = usageHandoff || !meta.queueCombine ? turn.dispatch : batchDispatch(queuedFor(conversationId));
     if (effective === 'interrupt') {
       const running = liveFor(conversationId).find((t) => t.status === 'running' && t.id !== turn.id);
       if (running) await cancel(running.id);
@@ -463,7 +492,7 @@ export function createRunner({ store, tools, providers, workdir, origin, bridgeP
 
   async function mergeQueued(conversationId) {
     if (!(await store.conversation(conversationId)).queueCombine) return;
-    const waiting = queuedFor(conversationId);
+    const waiting = queuedFor(conversationId).filter((turn) => !turn.usageHandoff);
     if (waiting.length < 2) return;
     const survivor = waiting[0];
     survivor.bundle = waiting.map((t) => t.prompt);
@@ -806,6 +835,20 @@ export function createRunner({ store, tools, providers, workdir, origin, bridgeP
     if (lostSession) {
       error = `${error} — the provider no longer has this conversation's session; the next message starts a new one`;
     }
+    let usageMark = null;
+    let pendingHandoff = false;
+    if (!lostSession && status === 'failed' && CLAUDE_PROVIDERS.has(turn.provider?.id) && usageStopped(error)) {
+      const meta = await store.conversation(turn.conversationId);
+      const ready = await cursorReadiness();
+      if (meta?.failover === 'pause') {
+        usageMark = { usageStopped: true, canSwitch: ready.ok, ...(ready.ok ? {} : { stay: ready.suffix }) };
+        if (!ready.ok) error = `${error} ${ready.suffix}`;
+      } else if (ready.ok) {
+        pendingHandoff = true;
+      } else {
+        error = `${error} ${ready.suffix}`;
+      }
+    }
     try {
       try {
         await turn.undoSaved;
@@ -823,7 +866,7 @@ export function createRunner({ store, tools, providers, workdir, origin, bridgeP
           lastOutcome: outcome,
           lastFinishedAt: finishedAt,
         });
-        await emit(turn, { type: `turn.${status}`, applied, ...(error ? { error } : {}) });
+        await emit(turn, { type: `turn.${status}`, applied, ...(error ? { error } : {}), ...(usageMark ?? {}) });
       } finally {
         // The terminal status is the LAST store write. Anyone polling the
         // turn (tests, GET /agent/conversations/:id, the UI) treats a
@@ -831,7 +874,14 @@ export function createRunner({ store, tools, providers, workdir, origin, bridgeP
         // the conversation's outcome, and the closing event must already be
         // there when it appears. It is still written if one of those failed,
         // so the stored turn is not left reading `running` forever.
-        await store.updateTurn(turn.id, { status, finishedAt, error, applied, usage: turn.usage });
+        await store.updateTurn(turn.id, {
+          status,
+          finishedAt,
+          error,
+          applied,
+          usage: turn.usage,
+          ...(usageMark ? { usageStopped: true, canSwitch: usageMark.canSwitch } : {}),
+        });
       }
     } finally {
       // Whatever happened above — success, or one of those store writes
@@ -839,6 +889,15 @@ export function createRunner({ store, tools, providers, workdir, origin, bridgeP
       // failed write stores nothing but the in-memory turn stays forever
       // `status: 'running'`, permanently holding its conversation's slot
       // hostage, with nothing left to sweep it.
+      // Switch before this turn lets go of the slot, so a prompt already
+      // queued cannot start on Claude in the gap.
+      if (pendingHandoff) {
+        try {
+          await handoffUsage(turn.conversationId, { error });
+        } catch (err) {
+          log.error(`[agents] ${err.message}`);
+        }
+      }
       turn.status = status;
       if (turn.token) tokens.delete(turn.token);
       live.delete(turn.id);
@@ -944,6 +1003,87 @@ export function createRunner({ store, tools, providers, workdir, origin, bridgeP
     await pump();
   }
 
+  const handoffInflight = new Map();
+
+  async function cursorReadiness() {
+    const cursor = providers.get('cursor');
+    if (!cursor?.detect) return { ok: false, suffix: STAY.signedOut };
+    let detected = null;
+    try {
+      detected = await cursor.detect();
+    } catch {
+      detected = null;
+    }
+    if (!detected?.signedIn) return { ok: false, suffix: STAY.signedOut };
+    if (typeof cursor.listModels !== 'function') return { ok: false, suffix: STAY.unreadable };
+    let models;
+    try {
+      models = await cursor.listModels();
+    } catch {
+      return { ok: false, suffix: STAY.unreadable };
+    }
+    if (!Array.isArray(models)) return { ok: false, suffix: STAY.unreadable };
+    const family = pickGrok(models);
+    if (!family) return { ok: false, suffix: STAY.noGrok };
+    return { ok: true, family };
+  }
+
+  async function performHandoff(conversationId, error) {
+    const meta = await store.conversation(conversationId);
+    if (!meta) throw Object.assign(new Error(`no conversation "${conversationId}"`), { status: 404 });
+    const turns = await store.turns(conversationId);
+    const existing = [...turns].reverse().find((item) => item.usageHandoff && item.status !== 'removed');
+    const liveContinue = liveFor(conversationId).find((item) => item.usageHandoff);
+    if (liveContinue) return { turnId: liveContinue.id, status: liveContinue.status };
+    if (meta.provider === 'cursor' && existing) return { turnId: existing.id, status: existing.status };
+    if (!CLAUDE_PROVIDERS.has(meta.provider)) {
+      throw Object.assign(new Error('this chat is not on Claude'), { status: 409 });
+    }
+    const ready = await cursorReadiness();
+    if (!ready.ok) throw Object.assign(new Error(ready.suffix), { status: 409 });
+    const effort = matchEffort(meta.effort, ready.family);
+    const label = continuedLabel(ready.family.label, effort);
+    const failed = [...turns].reverse().find((item) => item.status === 'failed');
+    const context = failed?.context;
+    if (!context?.target) throw Object.assign(new Error('the handoff could not be started'), { status: 409 });
+    await store.updateConversation(conversationId, {
+      provider: 'cursor',
+      model: ready.family.id,
+      effort: effort || null,
+      providerSession: null,
+      activity: `Continuing on ${label}`,
+    });
+    const carrier = { id: failed?.id ?? conversationId, conversationId };
+    try {
+      await emit(carrier, { type: 'usage.continued', label });
+    } catch (err) {
+      log.error(`[agents] ${err.message}`);
+    }
+    try {
+      return await send(conversationId, {
+        prompt: CONTINUE,
+        context,
+        dispatch: 'queue',
+        ahead: true,
+        usageHandoff: true,
+        usageError: error ?? failed?.error ?? null,
+      });
+    } catch (err) {
+      await store.updateConversation(conversationId, { activity: 'the handoff could not be started' }).catch(() => {});
+      throw err;
+    }
+  }
+
+  function handoffUsage(conversationId, options = {}) {
+    const inflight = handoffInflight.get(conversationId);
+    if (inflight) return inflight;
+    const run = performHandoff(conversationId, options.error ?? null).finally(() => {
+      if (handoffInflight.get(conversationId) === run) handoffInflight.delete(conversationId);
+    });
+    handoffInflight.set(conversationId, run);
+    return run;
+  }
+
   return {
     async boot() {
       await store.interruptUnfinished();
@@ -955,6 +1095,8 @@ export function createRunner({ store, tools, providers, workdir, origin, bridgeP
     },
 
     send,
+
+    handoffUsage,
 
     cancel,
 
