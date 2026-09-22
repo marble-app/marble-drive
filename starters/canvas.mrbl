@@ -11,92 +11,454 @@ __ICON__
      make: a document is white to the edge. The off-white paper belongs to
      the interface — the Drive itself — not to the thing you are writing in.
      One dusty blue does all the accenting, the same blue in every starter,
-     because five colours would be five claims and there is only one. */
+     because five colours would be five claims and there is only one.
+     light-dark() says each of them once, so a token cannot exist in one
+     scheme and go missing in the other. */
   :root {
-    --ink: #111111;
-    --muted: #5a5a5a;
-    --line: #ddd9cf;
-    --paper: #ffffff;
-    --card: #ffffff;
-    --note: #e1e9f1;
-    --accent: #9bb6cf;
-    --accent-soft: #f1f5f8;
-    --accent-ink: #738698;
+    color-scheme: light dark;
+    --ink: light-dark(#111111, #e8e6e1);
+    --muted: light-dark(#5a5a5a, #a3a7ab);
+    --faint: light-dark(#8a8a8a, #71767a);
+    --placeholder: light-dark(#767676, #8d9296);
+    --line: light-dark(#e6e2d8, #272c30);
+    --paper: light-dark(#ffffff, #1c1f22);   /* a document is white to the edge */
+    --paper-2: light-dark(#f7f6f2, #212528);
+    --well: light-dark(#f3f1ea, #16181a);
+    --card: light-dark(#ffffff, #22262a);
+    --accent: light-dark(#9bb6cf, #7fa8c9);
+    --accent-soft: light-dark(#f1f5f8, #1d2932);
+    --accent-ink: light-dark(#738698, #9dc0dc);
+    --danger: light-dark(#b4533e, #e08a74);
+    --caution: light-dark(#a07a2c, #d9b25e);
+    --shadow: 0 1px 2px light-dark(rgba(74,66,52,.05), rgba(0,0,0,.28)), 0 2px 4px light-dark(rgba(74,66,52,.03), rgba(0,0,0,.18));
+    --shadow-lift: 0 2px 6px light-dark(rgba(74,66,52,.07), rgba(0,0,0,.32)), 0 8px 18px light-dark(rgba(74,66,52,.08), rgba(0,0,0,.26));
+    --r: 12px; --r-sm: 8px; --r-text: 4px; --pill: 999px;
+    --ease-out: cubic-bezier(.22, 1, .36, 1);
+    --ease: cubic-bezier(.22, .61, .36, 1);
+    --snap: cubic-bezier(.4, 0, .2, 1);
+    --t-fast: 110ms; --t: 200ms; --t-slow: 340ms;
+    --ui: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    --serif: ui-serif, "New York", "Iowan Old Style", Palatino, Georgia, serif;
+    --mono: ui-monospace, "SF Mono", SFMono-Regular, Menlo, Consolas, monospace;
   }
-  @media (prefers-color-scheme: dark) {
-    :root {
-      --ink: #e8e6e1; --muted: #a3a7ab; --line: #2f3438;
-      --paper: #1c1f22; --card: #1c1f22; --note: #22303a;
-      --accent: #7fa8c9; --accent-soft: #1d2932; --accent-ink: #9dc0dc;
-    }
-  }
-  * { box-sizing: border-box; }
-  body {
-    margin: 0; padding: 2rem 1.5rem 4rem; background: var(--paper); color: var(--ink);
-    font: 15px/1.5 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
-    -webkit-font-smoothing: antialiased;
-  }
-  header { max-width: 60rem; margin: 0 auto .9rem; }
-  h1 { font-size: 1.4rem; margin: 0 0 .2rem; letter-spacing: -.015em; }
-  .lede { color: var(--muted); margin: 0; font-size: .95rem; }
 
-  .board {
-    position: relative; max-width: 60rem; height: 34rem; margin: 0 auto;
-    background: var(--card); border: 1px solid var(--line); border-radius: 10px;
+  * { box-sizing: border-box; }
+
+  /* Every width answer is asked of the root rather than the window, because a
+     host that docks a panel beside this page shrinks <html> and leaves the
+     viewport exactly where it was. */
+  html { container: doc / inline-size; }
+
+  body {
+    margin: 0; min-height: 100svh;
+    padding: 2rem 1.5rem max(1.25rem, env(safe-area-inset-bottom));
+    display: flex; flex-direction: column; gap: .9rem;
+    background: var(--paper); color: var(--ink);
+    font: 15px/1.5 var(--ui);
+    -webkit-font-smoothing: antialiased;
+    /* How many notes there are is a count of elements, never a number kept
+       beside them — the bar reads the counter back below the board. */
+    counter-reset: note;
+  }
+  button { font: inherit; }
+
+  /* One ring, the same one, everywhere a key can land. */
+  :focus-visible { outline: 2px solid var(--accent-ink); outline-offset: 2px; }
+
+  .head, .bar { width: 100%; max-width: 60rem; margin: 0 auto; flex: none; }
+  h1 { font-size: 1.4rem; margin: 0 0 .2rem; letter-spacing: -.015em; overflow-wrap: anywhere; }
+  .lede { color: var(--muted); margin: 0; font-size: .95rem; overflow-wrap: anywhere; }
+
+  /* ------------------------------------------------------------- the board
+     A board is a place, and a place does not get smaller because you are
+     holding it in one hand — it gets panned. So the frame is a window onto
+     the board, and it scrolls to whatever has been put on it. The board used
+     to be a fixed 34rem box with overflow:hidden, which at 390px wide meant a
+     note dragged to the right was clipped away with no way to scroll to it,
+     drag it back, or read what it said: the text was in the file and the app
+     would not show it.
+
+     Scrolling to the content is the half of the answer that needs no second
+     opinion about where a note is allowed to be. The other half is the one
+     place scrolling cannot reach — a scroll container has no way back past
+     its own origin — so nothing is placed before the board's top-left
+     corner, and the keyboard nudge below stops there.
+
+     Two things live on the frame rather than on the board, and both for the
+     same reason: the canvas affordance measures a drop from the board's own
+     border box. A border on the board would add its width to every position
+     filed; a scrollbar on the board would take its scroll offset off every
+     one of them. The frame carries both instead. */
+  .frame {
+    flex: 1 1 auto; width: 100%; max-width: 60rem; margin: 0 auto; min-height: 14rem;
+    /* A grid of one cell, so the board fills the window onto it. `height:100%`
+       does not: the frame's own height comes from the flex line above, which
+       is not a definite height a percentage can be resolved against, and a
+       zero-height board is a zero-height empty state. */
+    display: grid; grid-template: 1fr / 1fr;
+    overflow: auto; overscroll-behavior: contain;
+    border: 1px solid var(--line); border-radius: var(--r); background: var(--card);
     background-image: radial-gradient(color-mix(in srgb, var(--line) 90%, transparent) 1px, transparent 1px);
-    background-size: 16px 16px; overflow: hidden;
-    /* A finger dragging a note should move the note, not scroll the page. */
+    background-size: 16px 16px;
+    /* local, so the grid belongs to the board rather than to the window onto
+       it, and keeps going wherever a note has been dragged. */
+    background-attachment: local;
+  }
+  .board { position: relative; min-width: 0; min-height: 0; }
+
+  /* ------------------------------------------------------------- the notes
+     `.board > .note`, not `.note`: `removable` puts .marble-item on anything
+     it draws a × beside, and `.marble-item { position: relative }` is one
+     class in a stylesheet appended after this one. At equal specificity the
+     later rule won, so every note on this canvas was in normal flow with its
+     left and top read as an offset from wherever it happened to fall — a
+     canvas that was not one. */
+  .board > .note {
+    position: absolute; width: 12rem; min-width: 6rem; padding: .6rem .7rem .65rem;
+    display: grid; grid-template-columns: 1fr auto auto; gap: 0 .15rem; align-items: start;
+    background: color-mix(in srgb, var(--accent) 30%, var(--card));
+    border: 1px solid color-mix(in srgb, var(--ink) 12%, transparent);
+    border-radius: var(--r-sm); box-shadow: var(--shadow);
+    /* A finger on a note moves the note; a finger anywhere else scrolls the
+       board. This used to sit on the board itself, which made a 34rem-tall
+       region of a phone that could not be scrolled at all. The drag is on the
+       note, so the touch-action is on the note. */
     touch-action: none;
+    /* Named properties, never `all`. The drag writes left and top on every
+       pointermove, and a transition on those would leave the note trailing
+       the finger instead of tracking it. */
+    transition: scale var(--t-fast) var(--ease-out), box-shadow var(--t) var(--ease-out);
   }
-  .note {
-    position: absolute; width: 12rem; min-height: 5.5rem; padding: .65rem .75rem;
-    background: var(--note); border: 1px solid color-mix(in srgb, var(--ink) 12%, transparent);
-    border-radius: 6px; box-shadow: 0 2px 6px rgba(0,0,0,.09);
+  .note > h3 { grid-area: 1 / 1; min-width: 0; font-size: .85rem; margin: 0 0 .25rem; overflow-wrap: anywhere; }
+  .note > p { grid-area: 2 / 1 / 3 / 4; margin: 0; font-size: .8rem; color: var(--muted); line-height: 1.45; overflow-wrap: anywhere; }
+  /* Folded is one attribute on the note, and the body and the chevron below
+     both read it rather than keeping their own copy. A note answers "how
+     wide" and its height is its words, so folding one really does shrink it
+     and nothing can ever be made too small to read. */
+  .note[data-expanded="no"] > p { display: none; }
+  /* The press answers on the way down, and the answer is the note lifting off
+     the board towards the hand. */
+  .note.marble-moving { scale: 1.02; box-shadow: var(--shadow-lift); }
+
+  /* Which note is on top is document order — the file already says it, and a
+     z-index beside it would be a second copy of the same fact, free to drift
+     from the first. What comes up is only the note in your hand or under your
+     caret, and it settles back when you let go: a lasting raise is a move in
+     the file, and a grab should not make one behind your back. */
+  .board > .note:focus-within, .board > .note.marble-moving { z-index: 20; }
+
+  /* The library hangs its grip in the margin beside a row. A canvas has no
+     margin — a note at the left edge would put its × off the board — so the
+     grip takes a cell in the note's own top row instead. A grid cell is
+     reserved whether or not the × is showing, so nothing shifts on hover. */
+  .note > .marble-grip { grid-area: 1 / 3; position: static; flex-direction: row; }
+
+  .fold {
+    grid-area: 1 / 2; display: grid; place-items: center;
+    width: 1.25rem; height: 1.25rem; padding: 0; border: 0; border-radius: var(--r-text);
+    background: none; color: currentColor; opacity: 0; cursor: pointer;
+    transition: opacity var(--t-fast) var(--ease), transform var(--t-fast) var(--ease);
   }
-  .note h3 { font-size: .85rem; margin: 0 0 .25rem; }
-  .note p { margin: 0; font-size: .8rem; color: var(--muted); line-height: 1.45; }
-  [data-marble-editable] { outline: none; border-radius: 3px; }
-  [data-marble-editable]:hover { background: var(--accent-soft); }
-  [data-marble-editable]:focus { background: var(--card); box-shadow: 0 0 0 1px var(--accent), 0 0 0 4px var(--accent-soft); }
-  .bar { max-width: 60rem; margin: .75rem auto 0; }
-  .add {
-    appearance: none; padding: .45rem .9rem; border: 1px dashed var(--line); border-radius: 999px;
-    background: none; color: var(--muted); font: 500 .85rem/1 inherit; cursor: pointer;
+  .fold::before { content: "▾"; font-size: 11px; line-height: 1; transition: rotate var(--t) var(--ease); }
+  .note[data-expanded="no"] .fold::before { rotate: -90deg; }
+  .note:hover > .fold, .note:focus-within > .fold { opacity: .45; }
+  .fold:hover, .fold:focus-visible { opacity: 1; background: var(--accent-soft); }
+  .fold:active { transform: scale(.92); }
+
+  [data-marble-editable] { outline: none; border-radius: var(--r-text); }
+  [data-marble-editable]:hover { background: color-mix(in srgb, var(--card) 55%, transparent); }
+  [data-marble-editable]:focus-visible {
+    outline: none; background: var(--card);
+    box-shadow: 0 0 0 1px var(--accent), 0 0 0 4px var(--accent-soft);
   }
-  .add:hover { color: var(--accent-ink); border-color: var(--accent); }
+
+  /* Drawn by asking the board what is in it, so nothing anywhere holds a
+     second opinion about whether it is empty. An empty canvas is the one
+     state that teaches nothing on its own: no note to drag, and no sign that
+     dragging is what this is for. */
+  .empty { display: none; }
+  .board:not(:has(> .note)) > .empty {
+    display: grid; position: absolute; inset: 0; padding: 1.5rem;
+    place-content: center; justify-items: center; gap: .75rem; text-align: center;
+  }
+  .empty p { margin: 0; max-width: 22rem; font-size: .9rem; color: var(--faint); }
+
+  /* ---------------------------------------------------------------- the bar */
+  .bar { display: flex; align-items: center; gap: .5rem; }
+  .count { color: var(--faint); font-size: .8rem; margin-right: auto; }
+  .count::after { content: counter(note) " on the board"; }
+  .note { counter-increment: note; }
+  .add, .act {
+    appearance: none; padding: .45rem .9rem; border-radius: var(--pill);
+    background: none; color: var(--muted); font: 500 .85rem/1.35 inherit; cursor: pointer;
+    border: 1px dashed var(--line);
+    transition: color var(--t-fast) var(--ease), border-color var(--t-fast) var(--ease), transform var(--t-fast) var(--ease);
+  }
+  .act { border-style: solid; }
+  .add:hover, .act:not(:disabled):hover { color: var(--accent-ink); border-color: var(--accent); }
+  .add:active, .act:not(:disabled):active { transform: scale(.97); }
+  /* `history` binds Mod+Z and keeps a complete inverse for every gesture here.
+     A phone has no Mod+Z, so a document that draws no way into that history
+     has one only for the people who already had one. */
+  .act:disabled { opacity: .35; cursor: default; }
+
+  /* A finger is owed 44px, and it is the pointer that is asked for it rather
+     than the width — a narrow window is still a mouse. At that size the two
+     note controls no longer fit beside a title, so they drop to a row of
+     their own under it. */
+  @media (pointer: coarse) {
+    .add, .act { min-height: 44px; padding-inline: 1.1rem; }
+    .note > h3 { grid-area: 1 / 1 / 2 / 4; }
+    .fold { grid-area: 3 / 2; width: 44px; height: 44px; }
+    .fold::before { font-size: 15px; }
+    .note > .marble-grip { grid-area: 3 / 3; }
+    .note > .marble-grip .marble-btn { width: 44px; height: 44px; font-size: 18px; line-height: 44px; }
+    /* A 14px bar is a target for a mouse and not for a thumb. */
+    .note > .marble-resize-w { width: 26px; right: -13px; }
+  }
+  /* Nothing hides behind hover alone. */
+  @media (hover: none) { .fold { opacity: .5; } }
+
+  /* `status` pins the save pill to the bottom-right corner of the window,
+     which on this page is the corner the bar is in. Give it a row of its own
+     at the foot instead, where it covers nothing and never moves. */
+  body .marble-status { position: static; flex: none; align-self: flex-end; }
+
+  @container doc (max-width: 34rem) {
+    body { padding: 1.1rem .8rem max(.9rem, env(safe-area-inset-bottom)); gap: .7rem; }
+    h1 { font-size: 1.2rem; }
+    .lede { font-size: .85rem; }
+    .bar { flex-wrap: wrap; }
+    .count { order: 3; width: 100%; margin: 0; }
+  }
+
+  /* One block, at the end. Reduced motion is not no feedback: the scale and
+     the travel go, the colour and the shadow stay. */
+  @media (prefers-reduced-motion: reduce) {
+    *, *::before, *::after {
+      animation-duration: .001ms !important; animation-iteration-count: 1 !important;
+      transition-duration: .001ms !important; scroll-behavior: auto !important;
+    }
+    .note.marble-moving { scale: none; }
+    .add:active, .act:active, .fold:active { transform: none; }
+  }
 </style>
 </head>
 <body>
-<header data-marble-id="__ID__">
+<header class="head" data-marble-id="__ID__">
   <h1 data-marble-id="__ID__" data-marble-editable>__TITLE__</h1>
-  <p class="lede" data-marble-id="__ID__" data-marble-editable>Drag a note anywhere. Where it is written as an inline style on the note itself — one attribute in the file, not a table of coordinates beside it.</p>
+  <p class="lede" data-marble-id="__ID__" data-marble-editable>Drag a note anywhere. Where it sits is an inline style on the note itself — one attribute in the file, not a table of coordinates kept beside the document.</p>
 </header>
 
-<div class="board" data-marble-id="__ID__" id="board" data-marble-canvas>
+<main class="frame" data-marble-id="__ID__" aria-label="Board">
+  <div class="board" data-marble-id="__ID__" id="board" data-marble-canvas>
 
-  <div class="note" data-marble-id="__ID__" style="left:32px;top:28px" data-marble-removable>
-    <h3 data-marble-id="__ID__" data-marble-editable>Start here</h3>
-    <p data-marble-id="__ID__" data-marble-editable>Move me. Then open this file in a text editor and find the number that changed.</p>
+    <!-- Before the notes, not after them. Undoing a delete puts the note back
+         before the next addressable sibling, and a transient div has no id to
+         be that sibling: with the empty state last, the last note ever removed
+         came back underneath it and the file said so. -->
+    <div class="empty" data-marble-transient>
+      <p>Nothing on the board. Put a note down, then drag it to where it belongs.</p>
+      <button class="add" data-marble-add="#tpl-note" data-marble-into="#board">Add the first note</button>
+    </div>
+
+    <article class="note" data-marble-id="__ID__" style="left:32px;top:28px" data-expanded="yes" data-marble-removable data-marble-resizable="w">
+      <h3 data-marble-id="__ID__" data-marble-editable>Start here</h3>
+      <button class="fold" data-marble-id="__ID__" data-marble-expand data-marble-of=".note" aria-label="Fold this note to its title"></button>
+      <p data-marble-id="__ID__" data-marble-editable>Move me. Then open this file in a text editor and find the number that changed.</p>
+    </article>
+
+    <article class="note" data-marble-id="__ID__" style="left:160px;top:180px" data-expanded="yes" data-marble-removable data-marble-resizable="w">
+      <h3 data-marble-id="__ID__" data-marble-editable>A second note</h3>
+      <button class="fold" data-marble-id="__ID__" data-marble-expand data-marble-of=".note" aria-label="Fold this note to its title"></button>
+      <p data-marble-id="__ID__" data-marble-editable>A canvas answers <em>where</em>, which a list has no way to say. Tab to a note and the arrow keys move it.</p>
+    </article>
+
   </div>
-
-  <div class="note" data-marble-id="__ID__" style="left:272px;top:132px" data-marble-removable>
-    <h3 data-marble-id="__ID__" data-marble-editable>A second note</h3>
-    <p data-marble-id="__ID__" data-marble-editable>A canvas answers <em>where</em>, which a list has no way to say.</p>
-  </div>
-
-</div>
+</main>
 
 <div class="bar" data-marble-transient>
   <button class="add" data-marble-add="#tpl-note" data-marble-into="#board">+ note</button>
+  <span class="count"></span>
+  <button class="act" data-back disabled>Undo</button>
+  <button class="act" data-forward disabled>Redo</button>
 </div>
 
 <template id="tpl-note" data-marble-transient>
-  <div class="note" style="left:64px;top:64px" data-marble-removable>
+  <article class="note" style="left:64px;top:64px" data-expanded="yes" data-marble-removable data-marble-resizable="w">
     <h3 data-marble-editable>New note</h3>
+    <button class="fold" data-marble-expand data-marble-of=".note" aria-label="Fold this note to its title"></button>
     <p data-marble-editable>Say something, then move it.</p>
-  </div>
+  </article>
 </template>
 
 __SCRIPT__
+<script>
+// What a canvas has to say for itself. Where a new note should land, what an
+// arrow key means on one, that a document carrying `history` with nothing
+// drawn into it has a way back only for whoever already had a Mod+Z — and
+// which parts of a note are a drag surface, which is the question the canvas
+// affordance answers "all of them" and cannot be left there.
+(() => {
+  const board = document.getElementById('board');
+  const back = document.querySelector('[data-back]');
+  const forward = document.querySelector('[data-forward]');
+
+  const notes = () => [...board.children].filter((el) => el.classList.contains('note'));
+  const at = (note) => ({ x: parseFloat(note.style.left) || 0, y: parseFloat(note.style.top) || 0 });
+  const editableAt = (node) => node?.closest?.('[data-marble-editable]');
+
+  // What a press on a note means.
+  //
+  // The canvas affordance calls preventDefault on every pointerdown that lands
+  // on one of its children, so that a drag can never turn into a text
+  // selection, and it takes a pointer capture on the board, which retargets
+  // the click that follows to the board. Between them nothing inside a note
+  // could be pressed at all: not the ×, not the fold, and not the words, which
+  // could not even take a caret. A canvas of editable notes that cannot be
+  // edited or deleted with a mouse is the whole app.
+  //
+  // So this document decides, in the capture phase before the drag hears
+  // about it, which parts of a note are a drag surface. Chrome never is, so a
+  // button gets its click. Nor is a note you are already writing in — the
+  // caret and the selection belong to it until you click away, which is what
+  // every canvas does. Everything else is, and a press that did not travel is
+  // a click on whatever it landed on rather than a drag of nothing.
+  const TRAVEL = 3;
+  let pressed = null;
+  board.addEventListener('pointerdown', (event) => {
+    // A resize handle answers pointerdown itself, and calls off the drag
+    // itself: taking the event away from it here would take its gesture.
+    if (event.target.closest?.('.marble-resize')) { pressed = null; return; }
+    const writing = editableAt(document.activeElement);
+    if (event.target.closest?.('button, [data-marble-transient]') || writing?.contains(event.target)) {
+      event.stopPropagation();
+      pressed = null;
+      return;
+    }
+    pressed = { x: event.clientX, y: event.clientY, on: event.target };
+  }, true);
+  board.addEventListener('pointerup', (event) => {
+    const press = pressed;
+    pressed = null;
+    const el = press && editableAt(press.on);
+    if (!el || Math.hypot(event.clientX - press.x, event.clientY - press.y) > TRAVEL) return;
+    el.focus();
+    // Focus alone puts the caret at the start of the line, which is not where
+    // anybody pointed.
+    const range = document.caretRangeFromPoint?.(event.clientX, event.clientY);
+    const selection = getSelection();
+    if (!range || !selection || !el.contains(range.startContainer)) return;
+    selection.removeAllRanges();
+    selection.addRange(range);
+  }, true);
+
+  // The same composition the canvas affordance uses when a drag lands, so a
+  // nudge and a drag write the same bytes in the same order — rather than
+  // handing the file the browser's re-serialization of a style attribute,
+  // respaced, reordered and with a semicolon added.
+  const styleWith = (el, declarations) => {
+    const shared = globalThis.marbleVocabulary?.styleWith;
+    if (shared) return shared(el, declarations);
+    const dropped = new Set(Object.keys(declarations));
+    const rest = (el.getAttribute('style') ?? '').split(';').map((d) => d.trim())
+      .filter((d) => d && !dropped.has(d.slice(0, d.indexOf(':')).trim().toLowerCase()));
+    return [...Object.entries(declarations).map(([name, value]) => `${name}:${value}`), ...rest].join(';');
+  };
+
+  // Where a new note goes. It used to be 64,64 every time, so the second one
+  // landed exactly on top of the first and the button looked like it had done
+  // nothing. The first free place instead, scanned the way you would put them
+  // down — left to right, then down a row — against a note's own footprint
+  // rather than its corner, so a new one never lands half over an old one.
+  // Read off what is there rather than off a count, so deleting a note and
+  // adding one reuses the hole.
+  const FOOT = { x: 204, y: 124 };
+  function spot() {
+    const taken = notes().map(at);
+    const columns = Math.max(1, Math.floor((board.clientWidth - 32) / FOOT.x));
+    for (let i = 0; i < 400; i += 1) {
+      const x = 32 + (i % columns) * FOOT.x;
+      const y = 28 + Math.floor(i / columns) * FOOT.y;
+      if (!taken.some((p) => Math.abs(p.x - x) < FOOT.x && Math.abs(p.y - y) < FOOT.y)) return { x, y };
+    }
+    return { x: 32, y: 28 };
+  }
+
+  // The adder clones the template as it stands, so the place is written into
+  // the template before the clone is taken — from the capture phase, which is
+  // the whole reason this is four lines and not a second adder. The template
+  // is the page's, so nothing written here reaches the file.
+  document.addEventListener('click', (event) => {
+    const button = event.target.closest?.('[data-marble-add]');
+    const seed = button && document.querySelector(button.dataset.marbleAdd)?.content?.firstElementChild;
+    if (!seed) return;
+    const { x, y } = spot();
+    seed.setAttribute('style', `left:${x}px;top:${y}px`);
+  }, true);
+
+  function begin(marble) {
+    // Whether there is a way back is a live fact about the document, and the
+    // carrier says so every time it changes. Listening beats asking after a
+    // gesture: undo is asynchronous, so reading canUndo straight after
+    // calling it reads the answer to the question before it.
+    const sync = ({ canUndo, canRedo }) => {
+      back.disabled = !canUndo;
+      forward.disabled = !canRedo;
+    };
+    document.addEventListener('marble:history', (event) => sync(event.detail));
+    back.addEventListener('click', () => marble.undo());
+    forward.addEventListener('click', () => marble.redo());
+
+    // A note has to be on the tab ring before an arrow key can mean anything.
+    // It is put there from here rather than written into the markup because
+    // the carrier keeps tabindex out of the file: a note added later would be
+    // serialized without it and come back from a reload unreachable.
+    marble.register(() => {
+      for (const note of notes()) note.tabIndex = 0;
+      sync(marble);
+    });
+
+    // An arrow key files exactly what a drag files: the one style attribute on
+    // the note. The step is the grid a drag snaps to and Shift is the same
+    // escape hatch from it, so the two gestures agree about where a note can
+    // be — which is the point of a position being one attribute rather than a
+    // coordinate table. Each press is its own step of undo: the carrier
+    // coalesces setText and nothing else, and the library's own resize nudge
+    // works the same way.
+    const SNAP = 4;
+    board.addEventListener('keydown', (event) => {
+      const by = { ArrowLeft: [-1, 0], ArrowRight: [1, 0], ArrowUp: [0, -1], ArrowDown: [0, 1] }[event.key];
+      const note = event.target;
+      // Only with the note itself focused. Inside its text the arrows belong
+      // to the caret, and taking them would be taking the caret.
+      if (!by || !note.classList?.contains('note')) return;
+      const id = marble.id(note);
+      if (!id) return;
+      event.preventDefault();
+      const step = event.shiftKey ? 1 : SNAP;
+      const now = at(note);
+      const prior = note.getAttribute('style');
+      // The board's top-left corner is the origin, and a scroll container has
+      // no way to reach anything placed before it, so a nudge stops there.
+      const value = styleWith(note, {
+        left: `${Math.max(0, now.x + by[0] * step)}px`,
+        top: `${Math.max(0, now.y + by[1] * step)}px`,
+      });
+      if (value === prior) return;
+      note.setAttribute('style', value);
+      const op = { type: 'setAttr', id, name: 'style', value };
+      marble.record({ redo: [op], undo: [{ type: 'setAttr', id, name: 'style', value: prior }] });
+      marble.op(op);
+      note.scrollIntoView({ block: 'nearest', inline: 'nearest' });
+    });
+  }
+
+  // No carrier, no ops: the page still reads and still scrolls, it just has
+  // nothing to remember with.
+  if (window.marble) begin(window.marble);
+  else addEventListener('marble:ready', (event) => begin(event.detail), { once: true });
+})();
+</script>
 </body>
 </html>
