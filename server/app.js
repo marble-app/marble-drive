@@ -30,7 +30,7 @@ import { createIntents } from './intent-routes.js';
 import { createOpLog } from './oplog.js';
 import { createPendingWrites } from './pending-writes.js';
 import { PathError, joinPath, parsePath, safePath, safeSegment, splitPath, withoutDocExt } from './paths.js';
-import { build as buildStarter, list as listStarters } from './gallery.js';
+import { build as buildStarter, list as listStarters, preview as starterPreview } from './gallery.js';
 import { createChannels } from './sse.js';
 import { createStore } from './store/index.js';
 import { createTypesafeHandler } from './typesafe/routes.js';
@@ -105,6 +105,8 @@ const RUNTIME = {
   // about a region. Geometry first; the layer reads it off globalThis.
   'agent-marks-geometry.js': () => path.join(REPO, 'runtime', 'agent-marks-geometry.js'),
   'agent-marks.js': () => path.join(REPO, 'runtime', 'agent-marks.js'),
+  // Variations: the version pill and the compare surface for a <marble-alt>.
+  'agent-variations.js': () => path.join(REPO, 'runtime', 'agent-variations.js'),
 };
 
 /** The ids a document's html, head and body carry. */
@@ -206,6 +208,7 @@ export async function createDrive(config, { log = console, agentProviders = null
     if (agents) {
       tags += `\n<script src="/runtime/agent-marks-geometry.js" data-marble-transient></script>`;
       tags += `\n<script src="/runtime/agent-marks.js" data-marble-transient></script>`;
+      tags += `\n<script src="/runtime/agent-variations.js" data-marble-transient></script>`;
     }
     return source.includes('</body>')
       ? source.replace(/<\/body>/i, () => `${tags}\n</body>`)
@@ -579,6 +582,25 @@ export async function createDrive(config, { log = console, agentProviders = null
 
       if (route === '/drive/starters' && req.method === 'GET') {
         return json(res, 200, listStarters());
+      }
+
+      // A picture of a starter, so the gallery can show the document instead of
+      // describing it. Deliberately not under /a/: there is no document here and
+      // none is made by asking. What comes back has had every script taken out of
+      // it, and the page mounts it in an empty sandbox on top of that — a preview
+      // is a picture, not a second live copy.
+      const previewing = /^\/drive\/starters\/([\w-]+)\/preview$/.exec(route);
+      if (previewing && req.method === 'GET') {
+        try {
+          const source = await starterPreview(previewing[1]);
+          res.writeHead(200, {
+            'Content-Type': 'text/html; charset=utf-8',
+            'Cache-Control': 'private, max-age=300',
+          });
+          return res.end(source);
+        } catch (err) {
+          return json(res, err.status ?? 500, { error: err.message });
+        }
       }
 
       if (route === '/drive/tree' && req.method === 'GET') {

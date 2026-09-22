@@ -53,6 +53,13 @@
       }));
 
     const starters = () => ask('/drive/starters').catch(() => []);
+
+    // What a starter looks like, for a gallery that shows the document rather
+    // than describing it. A href rather than the bytes, because it is mounted in
+    // an iframe and a document is not the thing that decides what a preview may
+    // run — and a href rather than a path the page builds, because a document
+    // never names a route.
+    const starterPreviewHref = (id) => `/drive/starters/${encodeURIComponent(id)}/preview`;
     const trash = () => ask('/drive/trash').catch(() => []);
 
     const create = ({ path, from = null, copy = null }) =>
@@ -157,6 +164,7 @@
       client: CLIENT,
       tree,
       starters,
+      starterPreviewHref,
       trash,
       create,
       mkdir,

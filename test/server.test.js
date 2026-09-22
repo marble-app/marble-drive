@@ -333,6 +333,23 @@ test('the Drive hears about the folder changing, not just about one file', async
   assert.ok((await listening.frames).some((frame) => frame.event === 'created'));
 });
 
+test('a starter can be looked at without one being made', async () => {
+  const before = await asJson(await get('/drive/tree'));
+
+  const response = await get('/drive/starters/board/preview');
+  assert.equal(response.status, 200);
+  assert.match(response.headers.get('content-type'), /text\/html/);
+  const html = await response.text();
+  assert.match(html, /^<!doctype html>/);
+  assert.ok(!/<script/i.test(html), 'a preview carries nothing that could run');
+
+  // The gallery asks for this on every draw. Asking must not leave anything
+  // behind — a preview is a picture of a document, not a document.
+  assert.deepEqual(await asJson(await get('/drive/tree')), before);
+
+  assert.equal((await get('/drive/starters/telekinesis/preview')).status, 404);
+});
+
 test('moving, trashing and restoring, over HTTP', async () => {
   await asJson(await post('/drive/new', { path: 'scratch', from: 'board' }));
   await asJson(await post('/drive/move', { from: 'scratch', to: 'archive/scratch' }));
