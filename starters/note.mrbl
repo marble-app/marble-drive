@@ -48,16 +48,26 @@ __ICON__
     --t-fast: 110ms;
     --t: 200ms;
     /* The chrome is one sans at 14/1.5. The notes read in a serif, because
-       that is what a document does. No webfont is named. */
-    --ui: "Google Sans", Roboto, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+       that is what a document does. No webfont is named, and no brand face
+       either: the first name here is whatever the machine calls its own, so a
+       note looks like it belongs to the person rather than to a company. */
+    --ui: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
     --serif: ui-serif, "New York", "Iowan Old Style", "Palatino Linotype", Palatino, Georgia, serif;
     --rail: 15.5rem;
     --measure: 34rem;
   }
 
   /* Every width answer is asked of the root, not the window: a host that docks
-     a panel beside the page shrinks <html> and leaves the viewport alone. */
-  html { container: app / inline-size; }
+     a panel beside the page shrinks <html> and leaves the viewport alone.
+
+     The height answer is asked of the keyboard, and the keyboard is two numbers
+     rather than one. It shrinks the visible strip from the bottom — that is
+     `--kb` — and on any browser that has to lift the caret clear of it, it
+     slides that strip down the layout viewport as well, which is `--vv-top`.
+     Neither shows up in `100%`, in `100vh` or in `100dvh`, so a shell that asks
+     only the window puts the line you are typing behind the keys. The padding
+     holds the shell between the two; both are 0 until a keyboard is up. */
+  html { container: app / inline-size; padding: var(--vv-top, 0px) 0 var(--kb, 0px); }
   html, body { height: 100%; }
   * { box-sizing: border-box; }
   button { font: inherit; color: inherit; }
@@ -79,6 +89,9 @@ __ICON__
   .rail {
     min-width: 0; min-height: 0; display: flex; flex-direction: column;
     background: var(--paper-2); border-right: 1px solid var(--line);
+    /* Held in landscape, where the notch takes a bite out of the left edge and
+       the rail is what is under it. */
+    padding-left: env(safe-area-inset-left, 0px);
   }
   .railhead { display: flex; align-items: center; gap: .5rem; padding: .8rem .6rem 0 .85rem; }
   .name {
@@ -132,7 +145,9 @@ __ICON__
   .find::placeholder { color: var(--placeholder); }
   .find:focus { outline: none; border-color: var(--accent-ink); }
 
-  .rows { flex: 1; min-height: 0; overflow: auto; padding: 0 .45rem 1rem; }
+  /* The list runs to the bottom of the screen, so the last row has to clear
+     the home indicator sitting across it. */
+  .rows { flex: 1; min-height: 0; overflow: auto; padding: 0 .45rem max(1rem, env(safe-area-inset-bottom, 0px)); }
   .rows:empty::before {
     display: block; padding: .5rem .55rem; color: var(--faint); font-size: .84rem;
     content: "Nothing here";
@@ -144,6 +159,8 @@ __ICON__
     transition: background var(--t) var(--ease), box-shadow var(--t) var(--ease);
   }
   .row:hover { background: var(--paper-3); }
+  /* A row answers on the way down, like every other press in here. */
+  .open:active { background: var(--paper-3); }
   /* Which note is open is one attribute on the body; this class is derived
      from it, because CSS cannot ask whether a child matches an ancestor. The
      open note's row is white, like the page it opens. */
@@ -169,8 +186,27 @@ __ICON__
   .row .drop:hover, .row .drop:focus-visible { color: var(--danger); }
   @media (hover: none) { .row .drop { opacity: 1; } }
 
+  /* The rest of what a finger is owed in here. It sits at the foot of the rail
+     rather than beside .icon, because each of these answers a rule written
+     above it and a tie is decided by which came last. */
+  @media (hover: none), (pointer: coarse) {
+    /* The × is an .icon too, and the rule that places it in the row was cutting
+       it back to 28px — half the hit box, on the one control here that takes
+       something away. */
+    .row .drop { width: 2.75rem; height: 2.75rem; }
+    /* A row is a thing you commit to with a thumb. A button centres its own
+       contents, so the height is all it needs. */
+    .open { min-height: 2.75rem; }
+    /* Under 16px a phone zooms the whole page when the field takes focus, and
+       the note behind it comes back twice the width of the screen. */
+    .find { font-size: 1rem; min-height: 2.75rem; }
+  }
+
   /* -------------------------------------------------------------- the sheet */
-  .sheet { min-width: 0; min-height: 0; overflow: auto; background: var(--card); }
+  /* The line you are typing is never flush against the bottom edge — which,
+     with a keyboard up, is the keyboard. The browser scrolls the caret the
+     least it can, and this is how much air it leaves when it does. */
+  .sheet { min-width: 0; min-height: 0; overflow: auto; background: var(--card); scroll-padding-bottom: 2rem; }
 
   /* Which note shows is the same one attribute, derived the same way. With no
      host at all nothing derives anything, so the first note is the one that
@@ -238,12 +274,73 @@ __ICON__
   @container app (max-width: 42rem) {
     body.app { grid-template-columns: minmax(0, 1fr); grid-template-rows: auto minmax(0, 1fr); }
     .rail { border-right: 0; border-bottom: 1px solid var(--line); }
-    .railhead { padding-top: .7rem; }
+    .railhead { padding-top: max(.7rem, env(safe-area-inset-top, 0px)); }
+    /* The count is not worth a line of a phone screen, but the news is: the one
+       gesture on this screen that takes something away says where the way back
+       is, and saying it off screen is saying nothing. */
     .meta { display: none; }
+    .meta[data-said] { display: block; padding: 0 .95rem .45rem; }
     .rows { display: flex; gap: .3rem; overflow-x: auto; padding: 0 .45rem .5rem; }
     .row { flex: 0 0 auto; width: 9.5rem; }
     .open .s { display: none; }
     .note { padding: 1.8rem 1.25rem 45vh; }
+  }
+
+  /* The save pill belongs to the affordance library, and it is fixed to the
+     layout viewport — the one thing a keyboard does not resize. `--kb` stands
+     it on the sill instead, and the home indicator gets its inch. The extra
+     `html` is not decoration: the parts' stylesheet is appended to <head> after
+     this one, so a plain `.marble-status` would lose the tie. */
+  html .marble-status {
+    bottom: calc(var(--kb, 0px) + max(1rem, env(safe-area-inset-bottom, 0px)));
+    right: max(1rem, env(safe-area-inset-right, 0px));
+  }
+
+  /* ------------------------------------------------------------------- paper
+
+     What comes out of the printer is the note you have open, by itself. The
+     others are other pieces of paper — open one and print it — because a file
+     here may hold fifty notes and nobody asked for the stack.
+
+     None of the chrome has anything to say on paper, and neither has the
+     scheme: ink is black and paper is white whether or not the screen was dark.
+     Redeclaring the tokens says that once, rather than overriding every rule
+     that reads one. */
+  @media print {
+    :root {
+      color-scheme: light;
+      --ink: #000;
+      --muted: #222;
+      --faint: #444;
+      --placeholder: #666;
+      --line: #999;
+      --paper: #fff;
+      --paper-2: #fff;
+      --paper-3: #fff;
+      --card: #fff;
+      --row-on: #fff;
+      --accent-ink: #000;
+      --shadow: none;
+    }
+    @page { margin: 16mm 18mm; }
+    /* The shell is a screen's worth of scrollers; on paper it is one flow as
+       long as the note is. */
+    html { padding: 0; }
+    html, body.app { height: auto; }
+    body.app { display: block; }
+    .rail, .marble-status { display: none; }
+    .sheet { overflow: visible; }
+    /* The page margins are the printer's now, and the half screen of room
+       under the last line would come out as a blank page. Paper reads a size
+       tighter — and keeps a measure, in ems of the size it is actually set in
+       rather than the screen's rems. */
+    .note { max-width: 36em; padding: 0; font: 11pt/1.55 var(--serif); }
+    .note > :first-child { font-size: 17pt; }
+    .note > :first-child:empty::after { content: none; }
+    /* A heading is no use at the foot of a page, and one line of a paragraph is
+       no use on its own at either end of one. */
+    .note > * { orphans: 2; widows: 2; }
+    .note > h2, .note > h3, .note > :first-child { break-after: avoid; break-inside: avoid; }
   }
 
   /* Reduced motion zeroes the transitions rather than guessing which of them
@@ -265,17 +362,19 @@ __ICON__
      transient and nothing in it is a second copy of anything. The document's
      own name and the button that makes a note are the two things here that are
      facts, and those are in the file. -->
-<aside class="rail" data-marble-id="__ID__">
+<nav class="rail" aria-label="Notes" data-marble-id="__ID__">
   <div class="railhead" data-marble-id="__ID__">
     <h1 class="name" data-marble-id="__ID__" data-marble-editable>__TITLE__</h1>
-    <button class="icon" data-marble-id="__ID__" data-cmd="new" title="New note (Ctrl+Enter)" aria-label="New note">
+    <button class="icon" data-marble-id="__ID__" data-cmd="new" title="New note (Ctrl+Enter)" aria-label="New note" aria-keyshortcuts="Control+Enter">
       <svg data-marble-id="__ID__" viewBox="0 0 24 24" aria-hidden="true"><use href="#i-plus"/></svg>
     </button>
   </div>
-  <p class="meta" data-marble-transient></p>
+  <!-- The count, and whatever just happened. It is announced rather than only
+       drawn: the way back from a deletion is said here and nowhere else. -->
+  <p class="meta" role="status" data-marble-transient></p>
   <input class="find" data-marble-transient type="search" placeholder="Search" aria-label="Search notes" autocomplete="off" spellcheck="false">
-  <div class="rows" id="rows" data-marble-transient></div>
-</aside>
+  <div class="rows" id="rows" role="list" data-marble-transient></div>
+</nav>
 
 <main class="sheet" id="sheet" data-marble-id="__ID__">
   <div class="notes" id="notes" data-marble-id="__ID__">
@@ -335,6 +434,33 @@ __ICON__
   // rail and fatal to a <b> in the middle of a sentence. A rich block is filed
   // with setInner instead, so the inline markup survives.
   (() => {
+    // ---------------------------------------------------------- the keyboard
+    //
+    // The visible strip of a phone screen, written down as two custom
+    // properties for the stylesheet above to hold the shell between. The
+    // keyboard shrinks the strip from the bottom (--kb) and, on a browser that
+    // has to lift the caret clear, slides it down the layout viewport from the
+    // top (--vv-top) — and the second one is the half that gets forgotten,
+    // because the page looks right until a browser actually slides.
+    //
+    // This is the page answering the hardware and has nothing to do with the
+    // file, so it runs before any carrier arrives and without one at all: a
+    // note opened straight off the disk keeps the line you are typing above the
+    // keys too.
+    const vv = window.visualViewport;
+    const insets = () => {
+      if (!vv) return;
+      const top = Math.max(0, Math.round(vv.offsetTop));
+      const style = document.documentElement.style;
+      style.setProperty('--vv-top', top + 'px');
+      // The layout viewport never changed, so innerHeight is still the whole
+      // screen and the difference is what the keyboard took.
+      style.setProperty('--kb', Math.max(0, Math.round(innerHeight - vv.height - top)) + 'px');
+    };
+    insets();
+    vv?.addEventListener('resize', insets);
+    vv?.addEventListener('scroll', insets);
+
     const begin = (marble) => {
       const $ = (sel) => document.querySelector(sel);
       const app = document.body;
@@ -1209,6 +1335,9 @@ __ICON__
 
           const row = document.createElement('div');
           row.className = el === flow ? 'row marble-current' : 'row';
+          // A list to a screen reader as well as to an eye: "list, 3 items",
+          // and which of them is the one you are in.
+          row.setAttribute('role', 'listitem');
 
           const open = document.createElement('button');
           open.type = 'button';
@@ -1431,6 +1560,10 @@ __ICON__
       marble.register(() => {
         drawn = null;
         reopen();
+        // The insets are an inline style on <html>, and the file says <html>
+        // carries none — so reconciling the page against the file takes them
+        // off. Written again here, where the page has just been put back.
+        insets();
       });
 
       addEventListener('beforeunload', settle);

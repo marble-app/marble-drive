@@ -26,16 +26,51 @@ const closePages = async () => {
 };
 test.after(closePages);
 
-const open = async () => {
+const open = async ({ viewport = { width: 1280, height: 900 }, ...rest } = {}) => {
   await closePages();
   await host.reset();
-  const { page, errors } = await host.newPage({ viewport: { width: 1280, height: 900 } });
+  const { page, errors } = await host.newPage({ viewport, ...rest });
   pages.push(page);
   await page.goto(`${host.base}/a/scratch`);
   await page.waitForFunction(() => Boolean(window.marble));
   await page.waitForTimeout(150);
   return { page, errors };
 };
+
+/** A phone, with a finger rather than a pointer. */
+const openPhone = () => open({ viewport: { width: 390, height: 780 }, hasTouch: true, isMobile: true });
+
+/** The keyboard coming up, as the browser reports it: the visual viewport
+ *  shrinks by `kb`, and — on a browser that has to lift the caret clear — slides
+ *  `offsetTop` down the layout viewport as well. Both halves, because a page
+ *  that answers only the first looks right until it meets the other. */
+const raiseKeyboard = async (page, kb, offsetTop = 0) => {
+  await page.evaluate(({ kb: taken, offsetTop: slid }) => {
+    const vv = window.visualViewport;
+    Object.defineProperty(vv, 'height', { value: window.innerHeight - taken, configurable: true });
+    Object.defineProperty(vv, 'offsetTop', { value: slid, configurable: true });
+    vv.dispatchEvent(new Event('resize'));
+  }, { kb, offsetTop });
+  await page.waitForTimeout(150);
+};
+
+/** Where the person can actually see, and what is standing in it. */
+const seen = (page) =>
+  page.evaluate(() => {
+    const vv = window.visualViewport;
+    const box = (sel) => {
+      const r = document.querySelector(sel)?.getBoundingClientRect();
+      return r ? { top: Math.round(r.top), bottom: Math.round(r.bottom) } : null;
+    };
+    const root = getComputedStyle(document.documentElement);
+    return {
+      kb: root.getPropertyValue('--kb').trim(),
+      vvTop: root.getPropertyValue('--vv-top').trim(),
+      strip: { top: Math.round(vv.offsetTop), bottom: Math.round(vv.offsetTop + vv.height) },
+      shell: box('body.app'),
+      pill: box('.marble-status'),
+    };
+  });
 
 /** The blocks of the open note, as the file would address them. */
 const blocks = (page) =>
@@ -110,7 +145,7 @@ test('one note is the editing host, and opening it files nothing', async () => {
   // The rail's own container is in the file; nothing it is filled with is.
   assert.ok(!/class="row"/.test(source), 'the rail is a reading, not a copy');
   assert.ok(!/class="open"/.test(source));
-  assert.match(source, /class="rows" id="rows" data-marble-transient><\/div>/);
+  assert.match(source, /class="rows" id="rows" role="list" data-marble-transient><\/div>/);
   assert.deepEqual(errors, []);
 });
 
@@ -414,5 +449,258 @@ test('a paste arrives as plain lines, each its own addressed block', async () =>
   const source = await filed(page);
   assert.ok(!source.includes('color:red'), 'the dressing did not come with it');
   assert.ok(!/<h1[^>]*>one/.test(source), 'nor the tag it was wearing');
+  assert.deepEqual(errors, []);
+});
+
+// ---------------------------------------------------------------- the phone
+//
+// A note is the thing you type into with a keyboard up, so the keyboard is not
+// an edge case here — it is the setting. Everything below is about the screen
+// the person is actually looking at rather than the one the window reports.
+
+test('the keyboard is two insets, and nothing stands under it', async () => {
+  const { page, errors } = await openPhone();
+  await caretToEndOf(page, 3);
+  await page.keyboard.type(' typing at the foot of the note.');
+
+  // A browser that answers the keyboard by shrinking the visual viewport.
+  await raiseKeyboard(page, 336);
+  let s = await seen(page);
+  assert.equal(s.kb, '336px');
+  assert.equal(s.vvTop, '0px');
+  assert.ok(s.shell.bottom <= s.strip.bottom + 1, `the shell ends at ${s.shell.bottom}, under a keyboard that starts at ${s.strip.bottom}`);
+  assert.ok(s.shell.bottom >= s.strip.bottom - 2, `the shell ends at ${s.shell.bottom}, ${s.strip.bottom - s.shell.bottom}px short of the sill at ${s.strip.bottom}`);
+  assert.ok(s.pill.bottom <= s.strip.bottom, `the save pill ends at ${s.pill.bottom}, behind the keyboard at ${s.strip.bottom}`);
+
+  // And one that slides the viewport down the page to keep the caret clear:
+  // nothing was taken off the bottom, and everything fixed to the layout
+  // viewport is now above the screen unless it hears about --vv-top.
+  await raiseKeyboard(page, 336, 336);
+  s = await seen(page);
+  assert.equal(s.vvTop, '336px');
+  assert.ok(s.shell.top >= s.strip.top - 1, `the shell starts at ${s.shell.top}, above the screen's top edge at ${s.strip.top}`);
+  assert.ok(s.shell.bottom <= s.strip.bottom + 1 && s.shell.bottom >= s.strip.bottom - 2, `the shell ends at ${s.shell.bottom}, not on the sill at ${s.strip.bottom}`);
+  assert.ok(s.pill.bottom <= s.strip.bottom, `the save pill ends at ${s.pill.bottom}, off a screen that ends at ${s.strip.bottom}`);
+
+  // The line being typed is the whole point of the exercise.
+  await page.keyboard.type(' and more.');
+  await page.waitForTimeout(200);
+  const caret = await page.evaluate(() => {
+    const r = getSelection().getRangeAt(0).getBoundingClientRect();
+    const vv = window.visualViewport;
+    return { bottom: Math.round(r.bottom), sill: Math.round(vv.offsetTop + vv.height) };
+  });
+  assert.ok(caret.bottom <= caret.sill, `the caret is at ${caret.bottom}, behind a keyboard that starts at ${caret.sill}`);
+
+  // The keyboard going away puts the whole window back.
+  await raiseKeyboard(page, 0, 0);
+  s = await seen(page);
+  assert.equal(s.kb, '0px');
+  assert.ok(s.shell.bottom >= 778, `the shell ends at ${s.shell.bottom} with no keyboard up`);
+  assert.deepEqual(errors, []);
+});
+
+test('the insets are written again after the file has been read back over the page', async () => {
+  // They are an inline style on <html>, and the file says <html> carries none:
+  // reconciling the page against the file takes them off unless something puts
+  // them back. An edit made in a text editor is what that looks like.
+  const { page, errors } = await openPhone();
+  await raiseKeyboard(page, 336);
+  const source = await filed(page);
+  await host.drive.createDocument('scratch', source.replace('Keys', 'Keys and knobs'), { label: 'by hand' });
+  await page.waitForFunction(() => document.body.textContent.includes('Keys and knobs'), null, { timeout: 4000 });
+  await page.waitForTimeout(200);
+
+  const s = await seen(page);
+  assert.equal(s.kb, '336px', 'the reconcile took the keyboard inset off <html>');
+  assert.ok(s.shell.bottom <= s.strip.bottom + 1, `the shell ends at ${s.shell.bottom}, under a keyboard that starts at ${s.strip.bottom}`);
+  assert.deepEqual(errors, []);
+});
+
+test('a finger gets its 44, and the search field does not zoom the page', async () => {
+  const { page, errors } = await openPhone();
+  const hands = await page.evaluate(() => {
+    const box = (sel) => {
+      const r = document.querySelector(sel).getBoundingClientRect();
+      return { w: Math.round(r.width), h: Math.round(r.height) };
+    };
+    return {
+      add: box('[data-cmd="new"]'),
+      // The × was being cut back to 28px by the rule that places it in a row.
+      drop: box('.row .drop'),
+      row: box('.row .open'),
+      find: box('.find'),
+      // Under 16px a phone zooms the whole page when the field takes focus.
+      findText: parseFloat(getComputedStyle(document.querySelector('.find')).fontSize),
+      // Nothing is hidden behind a hover on a screen that has none.
+      dropShown: getComputedStyle(document.querySelector('.row .drop')).opacity,
+    };
+  });
+  assert.ok(hands.add.w >= 44 && hands.add.h >= 44, `the new-note button is ${hands.add.w}×${hands.add.h}`);
+  assert.ok(hands.drop.w >= 44 && hands.drop.h >= 44, `the × is ${hands.drop.w}×${hands.drop.h}`);
+  assert.ok(hands.row.h >= 44, `a note chip is ${hands.row.h}px tall`);
+  assert.ok(hands.find.h >= 44, `the search field is ${hands.find.h}px tall`);
+  assert.ok(hands.findText >= 16, `the search field is set at ${hands.findText}px`);
+  assert.equal(hands.dropShown, '1');
+  assert.deepEqual(errors, []);
+});
+
+test('the way back from a deletion is said on a phone too', async () => {
+  // The count is not worth a line of a phone screen and is hidden there; the
+  // news is, because the × is the one gesture on this screen that takes
+  // something away and Ctrl+Z is the only way back from it.
+  const { page, errors } = await openPhone();
+  assert.equal(await page.evaluate(() => getComputedStyle(document.querySelector('.meta')).display), 'none');
+  await page.click('.row:nth-child(2) .drop');
+  await page.waitForTimeout(250);
+  const meta = await page.evaluate(() => ({
+    display: getComputedStyle(document.querySelector('.meta')).display,
+    text: document.querySelector('.meta').textContent,
+    role: document.querySelector('.meta').getAttribute('role'),
+  }));
+  assert.notEqual(meta.display, 'none', 'the news was said off the screen');
+  assert.match(meta.text, /Ctrl\+Z/);
+  assert.equal(meta.role, 'status', 'and said out loud as well as drawn');
+  assert.deepEqual(errors, []);
+});
+
+// ---------------------------------------------------------------- on paper
+
+test('printing gives you the note you are in, and none of the chrome', async () => {
+  // From a screen that was in the dark, because that is the printout that goes
+  // wrong: paper is white and ink is black whichever way the machine was set.
+  const { page, errors } = await open({ colorScheme: 'dark' });
+  await page.click('.row:nth-child(2) .open');
+  await page.waitForTimeout(200);
+  await page.emulateMedia({ media: 'print', colorScheme: 'dark' });
+  await page.waitForTimeout(150);
+
+  const paper = await page.evaluate(() => {
+    const cs = (sel, prop) => getComputedStyle(document.querySelector(sel))[prop];
+    return {
+      rail: cs('.rail', 'display'),
+      // The field is inside the rail, so what it is worth asking is whether it
+      // comes out on the paper — not what its own display says.
+      find: document.querySelector('.find').getClientRects().length,
+      pill: cs('.marble-status', 'display'),
+      ink: cs('.note.marble-open', 'color'),
+      paper: cs('body.app', 'backgroundColor'),
+      sheet: cs('.sheet', 'backgroundColor'),
+      // The half screen of room under the last line would print as a blank page.
+      trailing: cs('.note.marble-open', 'paddingBottom'),
+      printed: [...document.querySelectorAll('.note')]
+        .filter((el) => getComputedStyle(el).display !== 'none')
+        .map((el) => el.textContent.trim().slice(0, 4)),
+      breaks: cs('.note.marble-open > h2, .note.marble-open > p', 'orphans'),
+    };
+  });
+  assert.equal(paper.rail, 'none', 'the rail is on the paper');
+  assert.equal(paper.find, 0, 'the search field is on the paper');
+  assert.equal(paper.pill, 'none', 'the save pill is on the paper');
+  assert.equal(paper.ink, 'rgb(0, 0, 0)');
+  assert.equal(paper.paper, 'rgb(255, 255, 255)');
+  assert.equal(paper.sheet, 'rgb(255, 255, 255)');
+  assert.equal(paper.trailing, '0px');
+  assert.deepEqual(paper.printed, ['Keys'], 'the note you are in, and only it');
+  assert.equal(paper.breaks, '2', 'a paragraph may not leave one line behind');
+  assert.deepEqual(errors, []);
+});
+
+// ------------------------------------------------------------- the caret
+//
+// The failure this family is prone to: an empty block has no line box of its
+// own, so the caret cannot be put in it, and the next thing typed lands in the
+// line below. Placing the caret with a script would not catch it — these drive
+// the mouse, which is the only thing that can fail.
+
+test('the caret reaches an empty line, clicked into rather than placed', async () => {
+  const { page, errors } = await open();
+  await page.click('[data-cmd="new"]');
+  await page.waitForTimeout(250);
+
+  // A new note is one empty line with a placeholder drawn over it.
+  const inside = await page.evaluate(() => {
+    const r = document.querySelector('.note.marble-open').getBoundingClientRect();
+    return { x: Math.round(r.left + r.width / 2), y: Math.round(r.top + 120) };
+  });
+  await page.mouse.click(inside.x, inside.y);
+  await page.keyboard.type('Clicked into');
+  await page.waitForTimeout(250);
+  let all = await blocks(page);
+  assert.equal(all.length, 1, 'the click made a second line rather than a caret');
+  assert.equal(all[0].text, 'Clicked into');
+
+  // And the white beside the page, which is the page: an empty first line is
+  // where that has nothing to aim at.
+  await page.keyboard.press('ControlOrMeta+a');
+  await page.keyboard.press('Backspace');
+  await page.waitForTimeout(200);
+  const margin = await page.evaluate(() => {
+    const r = document.querySelector('.note.marble-open').getBoundingClientRect();
+    const sheet = document.querySelector('.sheet').getBoundingClientRect();
+    return { x: Math.round((sheet.left + r.left) / 2), y: Math.round(r.top + 30) };
+  });
+  await page.mouse.click(margin.x, margin.y);
+  await page.keyboard.type('From the margin');
+  await page.waitForTimeout(250);
+  all = await blocks(page);
+  assert.equal(all[0].text, 'From the margin', 'the click in the margin landed somewhere else');
+  assert.deepEqual(errors, []);
+});
+
+test('an empty line in the middle of a note takes a caret and keeps it', async () => {
+  const { page, errors } = await open();
+  await caretToEndOf(page, 1);
+  await page.keyboard.press('Enter');
+  await page.keyboard.press('Enter');
+  await page.keyboard.type('after the gap');
+  await page.waitForTimeout(200);
+
+  const gap = await page.evaluate(() => {
+    const el = document.querySelector('.note.marble-open').children[2];
+    const r = el.getBoundingClientRect();
+    return { text: el.textContent, h: Math.round(r.height), x: Math.round(r.left + 8), y: Math.round(r.top + r.height / 2) };
+  });
+  assert.equal(gap.text, '', 'the middle line is not the empty one');
+  assert.ok(gap.h > 8, `an empty line has no line box to stand a caret in — ${gap.h}px tall`);
+
+  await page.mouse.click(gap.x, gap.y);
+  await page.keyboard.type('in the gap');
+  await page.waitForTimeout(250);
+  const all = await blocks(page);
+  assert.equal(all[2].text, 'in the gap', 'what was typed went into the line below instead');
+  assert.equal(all[3].text, 'after the gap');
+  assert.ok((await filed(page)).includes('in the gap'));
+  assert.deepEqual(errors, []);
+});
+
+test('the rail says what it is to somebody who cannot see it', async () => {
+  const { page, errors } = await open();
+  const spoken = await page.evaluate(() => ({
+    rail: document.querySelector('.rail').tagName,
+    railName: document.querySelector('.rail').getAttribute('aria-label'),
+    rows: document.querySelector('#rows').getAttribute('role'),
+    row: document.querySelector('.row').getAttribute('role'),
+    current: document.querySelector('.row.marble-current .open').getAttribute('aria-current'),
+    find: document.querySelector('.find').getAttribute('aria-label'),
+    add: document.querySelector('[data-cmd="new"]').getAttribute('aria-label'),
+    keys: document.querySelector('[data-cmd="new"]').getAttribute('aria-keyshortcuts'),
+    drop: document.querySelector('.row .drop').getAttribute('aria-label'),
+    sheet: document.querySelector('.sheet').tagName,
+  }));
+  assert.equal(spoken.rail, 'NAV');
+  assert.equal(spoken.railName, 'Notes');
+  assert.equal(spoken.rows, 'list');
+  assert.equal(spoken.row, 'listitem');
+  assert.equal(spoken.current, 'page');
+  assert.equal(spoken.find, 'Search notes');
+  assert.equal(spoken.add, 'New note');
+  assert.equal(spoken.keys, 'Control+Enter');
+  assert.match(spoken.drop, /^Delete note: /);
+  assert.equal(spoken.sheet, 'MAIN');
+
+  // None of it reaches the file except the two that are in the markup.
+  const source = await filed(page);
+  assert.ok(!/role="list(item)?"/.test(source.replace('role="list"', '')), 'a row role is a reading, not a fact');
   assert.deepEqual(errors, []);
 });
