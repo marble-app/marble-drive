@@ -1259,7 +1259,9 @@
 
   const KNOWN_PROVIDERS = {
     'claude-subscription': 'Claude',
-    'claude-api': 'KIXLAB API',
+    // The host reports the deployment's own name (MARBLE_DRIVE_API_LABEL);
+    // this is only for a summary that arrives before the provider list.
+    'claude-api': 'Claude API',
     'cursor': 'Cursor',
   };
 

@@ -79,9 +79,9 @@ test('the Cursor picker only offers Auto and the best Grok family', () => {
   assert.equal(resolveCursorModel('grok-4.7', 'high', 'composer-2.5'), 'grok-4.7-high');
 });
 
-test('picker providers are Claude, Cursor, then KIXLAB API', () => {
+test('picker providers are Claude, Cursor, then Claude API', () => {
   const sorted = sortProviders([
-    { id: 'claude-api', label: 'KIXLAB API' },
+    { id: 'claude-api', label: 'Claude API' },
     { id: 'fake', label: 'Fake' },
     { id: 'cursor', label: 'Cursor' },
     { id: 'claude-subscription', label: 'Claude' },

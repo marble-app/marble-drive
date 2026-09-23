@@ -1292,12 +1292,12 @@ test('Claude and Cursor presets become the main toggles', async () => {
   assert.deepEqual(clis, ['Claude', 'Cursor']);
 });
 
-test('CLI radios are Claude, Cursor, then KIXLAB API', async () => {
+test('CLI radios are Claude, Cursor, then Claude API', async () => {
   const { view } = await mount();
   await view.locator('input[name="agent"][value="fake"]').waitFor();
   const order = await view.evaluate((el) => {
     const sorted = window.marbleAgentUI.sortProviders([
-      { id: 'claude-api', label: 'KIXLAB API' },
+      { id: 'claude-api', label: 'Claude API' },
       { id: 'fake', label: 'Fake' },
       { id: 'cursor', label: 'Cursor' },
       { id: 'claude-subscription', label: 'Claude' },
