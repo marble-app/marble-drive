@@ -84,3 +84,34 @@ clips; no page errors. Also looked at: fit, zoomed, and a 400 px dark view.
 Not checked: that the converted clips sound sample-identical to the old
 section list (the old code was replaced, so there was nothing to render
 against).
+
+## Palette (added the same evening)
+
+Bryan asked for "a small spatial canvas space that holds these music things,
+like my little palette". It sits under the editor.
+
+- A card is `<li class="swatch" data-lane data-from data-len data-x data-y>`
+  in `<ol class="swatches">`, with its name as an editable `.sw-name`. It
+  holds a stretch of one record, like a clip that is not placed anywhere
+  yet. x and y are pixels on the space, which scrolls sideways when the page
+  is narrower than the cards are spread, instead of squeezing them together.
+- Positions are drawn by a constructed stylesheet (`adoptedStyleSheets`),
+  never written onto the card, so nothing page-only reaches the file.
+  The dragged card is a transient clone (`.marble-pal-lift`), so it can leave
+  the scrolling space.
+- **In:** drag a clip down from the lanes, or a pick down from Ariana's
+  strip. The source stays where it was: the palette keeps a copy.
+- **Out:** drag a card onto its own lane, which previews the drop with the
+  dashed ghost and overwrites what it lands on. The card stays in the
+  palette. A beat card held over the vocals lane says where it belongs.
+  *Use* places it at the playhead.
+- Click a card to hear it, fitted to the mashup's tempo and key, through the
+  same mix. × or ⌫ removes it. Every change is one undo step.
+- Seeded with the five stretches of Ariana's beat the arrangement used, named
+  for what they sat under.
+- The page never loaded Marble's affordance library, so `data-marble-editable`
+  has never worked here (the title, the lede and the to-dos are affected too).
+  The palette wires its own card names, with `pageOnly('contenteditable')`.
+
+Tested: /tmp/ed/test2.mjs, 23 checks against a fixture on a fresh throwaway
+host, plus the editor suite again; both pass.

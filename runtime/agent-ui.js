@@ -154,7 +154,7 @@
 
   // ------------------------------------------------------------ safe text
 
-  const INLINE = /(`[^`\n]+`)|(\*\*[^*\n]+\*\*)|(\*[^*\s][^*\n]*\*)|(\[[^\]\n]+\]\((https?:\/\/[^\s)]+)\))/g;
+  const INLINE = /(`[^`\n]+`)|(\*\*[^*\n]+\*\*)|(\*[^*\s][^*\n]*\*)|(~~[^~\n]+~~)|(\[[^\]\n]+\]\((https?:\/\/[^\s)]+)\))/g;
 
   /** Inline marks, and — when a `chip` hook is given — the `[image n]` /
    *  `[pasted text n]` tokens a sent message carries, as the chips they name. */
@@ -177,8 +177,10 @@
 
   function inlineMarks(parent, text) {
     let last = 0;
-    INLINE.lastIndex = 0;
-    for (let match = INLINE.exec(text); match; match = INLINE.exec(text)) {
+    // matchAll walks its own copy of the regex: marks nest, so this recurses,
+    // and a shared lastIndex reset by the inner call re-found the same `**…**`
+    // forever.
+    for (const match of text.matchAll(INLINE)) {
       if (match.index > last) parent.append(text.slice(last, match.index));
       const [whole] = match;
       let node;
@@ -186,15 +188,19 @@
         node = document.createElement('code');
         node.textContent = whole.slice(1, -1);
       } else if (match[2]) {
+        // Marks nest: `**the \`.mrbl\` file**` is bold with code in it.
         node = document.createElement('strong');
-        node.textContent = whole.slice(2, -2);
+        inlineMarks(node, whole.slice(2, -2));
       } else if (match[3]) {
         node = document.createElement('em');
-        node.textContent = whole.slice(1, -1);
+        inlineMarks(node, whole.slice(1, -1));
+      } else if (match[4]) {
+        node = document.createElement('del');
+        inlineMarks(node, whole.slice(2, -2));
       } else {
         node = document.createElement('a');
-        node.textContent = /^\[([^\]]+)\]/.exec(whole)[1];
-        node.href = match[5];
+        inlineMarks(node, /^\[([^\]]+)\]/.exec(whole)[1]);
+        node.href = match[6];
         node.target = '_blank';
         node.rel = 'noopener noreferrer';
       }
@@ -204,18 +210,55 @@
     if (last < text.length) parent.append(text.slice(last));
   }
 
-  const BULLET = /^\s*[-*]\s+(.*)$/;
-  const NUMBERED = /^\s*\d+[.)]\s+(.*)$/;
+  const LIST_ITEM = /^(\s*)([-*+]|\d+[.)])\s+(.*)$/;
   const FENCE = /^\s*```/;
+  const HEADING = /^\s{0,3}(#{1,6})\s+(.*?)(?:\s+#+)?\s*$/;
+  const RULE = /^\s{0,3}([-*_])(?:\s*\1){2,}\s*$/;
+  const QUOTE = /^\s{0,3}>\s?(.*)$/;
+  // The row under a table's header: pipes, dashes, and a colon where a column
+  // says how it is aligned. Nothing else looks like it.
+  const TABLE_RULE = /^\s*\|?\s*:?-+:?\s*(\|\s*:?-+:?\s*)*\|?\s*$/;
   // The whole protocol for a visual: what the info string says. The caption
   // after it, and everything done with the block, is chat-visual.js's.
   const VISUAL_FENCE = /^marble-visual\b/i;
   // The same fence, found in a message that is still arriving.
   const VISUAL_OPEN = /(^|\n)[ \t]*```[ \t]*marble-visual\b/i;
 
+  const indentOf = (line) => /^\s*/.exec(line)[0].replace(/\t/g, '    ').length;
+  /** The cells of one table row. A pipe inside backticks is the code's, and
+   *  `\|` is a pipe the writer meant as a character. */
+  function cellsOf(line) {
+    let row = line.trim();
+    if (row.startsWith('|')) row = row.slice(1);
+    if (row.endsWith('|') && !row.endsWith('\\|')) row = row.slice(0, -1);
+    const cells = [];
+    let cell = '';
+    let code = false;
+    for (let k = 0; k < row.length; k += 1) {
+      const c = row[k];
+      if (c === '\\' && row[k + 1] === '|') { cell += '|'; k += 1; continue; }
+      if (c === '`') code = !code;
+      if (c === '|' && !code) { cells.push(cell.trim()); cell = ''; continue; }
+      cell += c;
+    }
+    cells.push(cell.trim());
+    return cells;
+  }
+  const isTableStart = (lines, i) => lines[i].includes('|') && i + 1 < lines.length
+    && TABLE_RULE.test(lines[i + 1]) && lines[i + 1].includes('-')
+    && (lines[i + 1].includes('|') || cellsOf(lines[i]).length > 1);
+  /** Where a paragraph stops: at a blank line, or where another block begins. */
+  const startsBlock = (lines, i) => FENCE.test(lines[i]) || HEADING.test(lines[i])
+    || RULE.test(lines[i]) || QUOTE.test(lines[i]) || LIST_ITEM.test(lines[i]) || isTableStart(lines, i);
+
   function renderText(text, { chip = null, visual = null } = {}) {
-    const out = document.createDocumentFragment();
     const lines = String(text ?? '').replace(/\r\n/g, '\n').split('\n');
+    return renderBlocks(lines, { chip, visual });
+  }
+
+  function renderBlocks(lines, opts) {
+    const { chip, visual } = opts;
+    const out = document.createDocumentFragment();
     let i = 0;
     while (i < lines.length) {
       const line = lines[i];
@@ -239,31 +282,152 @@
         out.append(pre);
         continue;
       }
-      const kind = BULLET.test(line) ? BULLET : NUMBERED.test(line) ? NUMBERED : null;
-      if (kind) {
-        const list = document.createElement(kind === BULLET ? 'ul' : 'ol');
-        for (; i < lines.length && kind.test(lines[i]); i += 1) {
-          const item = document.createElement('li');
-          inline(item, kind.exec(lines[i])[1], chip);
-          list.append(item);
-        }
-        out.append(list);
-        continue;
-      }
       if (!line.trim()) {
         i += 1;
         continue;
       }
+      // A heading in a chat is a section of one reply, not a page title: `#`
+      // and `##` both land on the reply's largest step, and the rest step down
+      // from there. The level the agent wrote survives as aria-level.
+      const heading = HEADING.exec(line);
+      if (heading) {
+        const level = heading[1].length;
+        const node = document.createElement(`h${Math.min(6, Math.max(3, level + 1))}`);
+        node.className = 'md-h';
+        node.dataset.level = String(Math.min(level, 4));
+        inline(node, heading[2], chip);
+        out.append(node);
+        i += 1;
+        continue;
+      }
+      // A rule is checked before a list: `* * *` is a rule, not an item.
+      if (RULE.test(line)) {
+        out.append(document.createElement('hr'));
+        i += 1;
+        continue;
+      }
+      if (QUOTE.test(line)) {
+        const body = [];
+        for (; i < lines.length && lines[i].trim() && (QUOTE.test(lines[i]) || !startsBlock(lines, i)); i += 1) {
+          const m = QUOTE.exec(lines[i]);
+          body.push(m ? m[1] : lines[i]);
+        }
+        const quote = document.createElement('blockquote');
+        quote.append(renderBlocks(body, opts));
+        out.append(quote);
+        continue;
+      }
+      if (isTableStart(lines, i)) {
+        const head = cellsOf(line);
+        const align = cellsOf(lines[i + 1]).map((c) => (c.startsWith(':') && c.endsWith(':') ? 'center' : c.endsWith(':') ? 'right' : ''));
+        const table = document.createElement('table');
+        const thead = document.createElement('thead');
+        const tbody = document.createElement('tbody');
+        const row = (cells, tag) => {
+          const tr = document.createElement('tr');
+          head.forEach((_, k) => {
+            const cell = document.createElement(tag);
+            if (align[k]) cell.style.textAlign = align[k];
+            inline(cell, cells[k] ?? '', chip);
+            tr.append(cell);
+          });
+          return tr;
+        };
+        thead.append(row(head, 'th'));
+        for (i += 2; i < lines.length && lines[i].trim() && lines[i].includes('|') && !FENCE.test(lines[i]); i += 1) {
+          tbody.append(row(cellsOf(lines[i]), 'td'));
+        }
+        table.append(thead, tbody);
+        // The frame scrolls, not the reply: a wide table in a narrow pane
+        // keeps its columns and slides.
+        const wrap = document.createElement('div');
+        wrap.className = 'md-table';
+        wrap.append(table);
+        out.append(wrap);
+        continue;
+      }
+      if (LIST_ITEM.test(line)) {
+        out.append(renderList(lines, i, opts, (next) => { i = next; }));
+        continue;
+      }
       const paragraph = document.createElement('p');
       let first = true;
-      for (; i < lines.length && lines[i].trim() && !FENCE.test(lines[i]) && !BULLET.test(lines[i]) && !NUMBERED.test(lines[i]); i += 1) {
+      for (; i < lines.length && lines[i].trim() && (first || !startsBlock(lines, i)); i += 1) {
         if (!first) paragraph.append(document.createElement('br'));
-        inline(paragraph, lines[i], chip);
+        inline(paragraph, lines[i].trim(), chip);
         first = false;
       }
       out.append(paragraph);
     }
     return out;
+  }
+
+  /** One list, from the item at `start`. An item owns every line indented
+   *  past its marker — a second paragraph, a nested list, a fence — and a
+   *  blank line between two items of the same kind does not end the list
+   *  (so `1.` … `2.` with space between them stays one list, numbered on). */
+  function renderList(lines, start, opts, done) {
+    const first = LIST_ITEM.exec(lines[start]);
+    const base = indentOf(lines[start]);
+    const ordered = /\d/.test(first[2]);
+    const list = document.createElement(ordered ? 'ol' : 'ul');
+    if (ordered) {
+      const n = parseInt(first[2], 10);
+      if (n !== 1) list.start = n;
+    }
+    const sameKind = (m) => m && indentOf(m[0]) <= base + 1 && /\d/.test(m[2]) === ordered;
+    let i = start;
+    let loose = false;
+    while (i < lines.length) {
+      const m = LIST_ITEM.exec(lines[i]);
+      if (!sameKind(m)) break;
+      const body = [m[3]];
+      const inset = indentOf(lines[i]) + m[2].length + 1;
+      let gap = false;
+      for (i += 1; i < lines.length; i += 1) {
+        const l = lines[i];
+        if (!l.trim()) {
+          gap = true;
+          body.push('');
+          continue;
+        }
+        const ind = indentOf(l);
+        if (ind > base && (ind >= Math.min(inset, base + 2) || !gap)) {
+          // Indented past the marker: this item's. A lazy line straight under
+          // it (no blank between, no indent) continues its paragraph too.
+          body.push(l.replace(new RegExp(`^\\s{0,${Math.min(ind, inset)}}`), ''));
+          gap = false;
+          continue;
+        }
+        if (!gap && ind <= base && !startsBlock(lines, i)) {
+          body.push(l.trim());
+          continue;
+        }
+        break;
+      }
+      while (body.length && !body[body.length - 1].trim()) body.pop();
+      // A blank line before the next item of this list makes it loose.
+      if (gap && sameKind(LIST_ITEM.exec(lines[i] ?? ''))) loose = true;
+      const item = document.createElement('li');
+      const task = /^\[([ xX])\]\s+/.exec(body[0]);
+      if (task) {
+        body[0] = body[0].slice(task[0].length);
+        item.className = 'md-task';
+        item.dataset.done = String(task[1] !== ' ');
+      }
+      const content = renderBlocks(body, opts);
+      // A tight item is its words, not a paragraph holding them.
+      if (content.firstChild?.nodeName === 'P') {
+        const p = content.firstChild;
+        p.replaceWith(...p.childNodes);
+      }
+      item.append(content);
+      list.append(item);
+      if (gap && !sameKind(LIST_ITEM.exec(lines[i] ?? ''))) break;
+    }
+    if (loose) list.classList.add('loose');
+    done(i);
+    return list;
   }
 
   // ------------------------------------------------------------ motion
@@ -1907,6 +2071,29 @@
     .msg.agent code { font: 12.5px/1.4 ui-monospace, SFMono-Regular, Menlo, monospace; background: var(--paper-2); padding: 1px 4px; border-radius: 4px; }
     .msg.agent pre { background: var(--paper-2); padding: 10px 12px; border-radius: 8px; overflow-x: auto; }
     .msg.agent pre code { background: none; padding: 0; }
+    .msg.agent li + li { margin-top: .15em; }
+    .msg.agent .loose > li + li { margin-top: .5em; }
+    .msg.agent li > ul, .msg.agent li > ol { margin: .15em 0 .25em; }
+    .msg.agent li > p { margin: .35em 0 0; }
+    .md-task { list-style: none; margin-left: -1.25em; }
+    .md-task::before { content: '☐'; display: inline-block; width: 1.25em; color: var(--muted); }
+    .md-task[data-done="true"]::before { content: '☑'; }
+    /* A heading is a section of one reply: a step of weight and a little air
+       above, never a title. */
+    .msg .md-h { font-size: 1em; font-weight: 600; line-height: 1.35; margin: 1em 0 .35em; color: var(--ink); }
+    .msg .md-h[data-level="1"] { font-size: 1.14em; }
+    .msg .md-h[data-level="2"] { font-size: 1.07em; }
+    .msg .md-h[data-level="4"] { color: var(--muted); }
+    .msg .md-h:first-child { margin-top: 0; }
+    .msg.agent hr { border: 0; border-top: 1px solid var(--line); margin: .9em 0; }
+    .msg.agent blockquote { margin: .25em 0 .6em; padding: 0 0 0 12px; color: var(--muted); box-shadow: inset 3px 0 0 var(--line); }
+    .msg.agent del { color: var(--muted); }
+    .md-table { overflow-x: auto; margin: .35em 0 .7em; border: 1px solid var(--line); border-radius: 8px; }
+    .md-table table { border-collapse: collapse; width: 100%; font-size: 13px; line-height: 1.45; }
+    .md-table th, .md-table td { text-align: left; vertical-align: top; padding: 6px 10px; overflow-wrap: normal; min-width: 8ch; }
+    .md-table th { font-weight: 600; background: var(--paper-2); border-bottom: 1px solid var(--line); }
+    .md-table tr + tr td { border-top: 1px solid var(--line); }
+    .md-table th + th, .md-table td + td { border-left: 1px solid var(--line); }
     .msg.agent a { color: var(--accent-ink); }
     .tool { display: flex; align-items: baseline; gap: 8px; font-size: 12.5px; color: var(--muted); padding: 1px 2px 1px 2px; }
     .tool::before { content: ''; flex: none; width: 6px; height: 6px; border-radius: 50%; background: var(--faint); transform: translateY(-1px); }
