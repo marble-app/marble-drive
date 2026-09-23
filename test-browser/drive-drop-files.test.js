@@ -1,11 +1,9 @@
 import assert from 'node:assert/strict';
-import fsp from 'node:fs/promises';
-import path from 'node:path';
 import test from 'node:test';
-import { fileURLToPath } from 'node:url';
 
 import { buildDrive } from '../server/seed.js';
 import { GARDEN, startDrive } from './harness.js';
+import { liveDriveSource } from './live-drive.js';
 
 // A file off the desktop is a DataTransfer, not a pointer, so the drop is
 // built in the page and dispatched at the element a hand would let go over.
@@ -67,8 +65,7 @@ test('an mp3 dropped on a folder lands in it, byte for byte, and a .DS_Store doe
 });
 
 test('the live drive takes a song and a document from one drop', async () => {
-  const live = path.join(path.dirname(fileURLToPath(import.meta.url)), '..', 'drive', 'drive.mrbl');
-  const source = await fsp.readFile(live, 'utf8').catch(() => null);
+  const source = await liveDriveSource();
   if (!source) return; // the live drive is not in this checkout
   const host = await startDrive({ agents: false, documents: { drive: source, garden: GARDEN } });
   try {

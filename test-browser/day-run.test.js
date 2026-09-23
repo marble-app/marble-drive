@@ -12,6 +12,7 @@ import path from 'node:path';
 import test from 'node:test';
 
 import { startDrive } from './harness.js';
+import { liveDriveSource } from './live-drive.js';
 
 // Parked 2026-09-18 at the owner's request, to be settled later. The subject here
 // is the day-runner button, which lives in `drive/drive.mrbl` and not in
@@ -23,9 +24,7 @@ import { startDrive } from './harness.js';
 const PARKED = true;
 const SOURCE = PARKED
   ? null
-  : await fsp
-    .readFile(new URL('../drive/drive.mrbl', import.meta.url), 'utf8')
-    .catch(() => null);
+  : await liveDriveSource();
 
 // The days folder is found by name in the live document, so the fixtures
 // take the name from there.

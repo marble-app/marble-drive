@@ -3,6 +3,7 @@ import test from 'node:test';
 
 import { buildDrive } from '../server/seed.js';
 import { GARDEN, startDrive } from './harness.js';
+import { liveDriveSource } from './live-drive.js';
 
 // Twenty seconds of a tone that swells, as a WAV — a real song the page can
 // decode, made here rather than checked in.
@@ -97,9 +98,7 @@ test('a folder of nothing but files shows every one of them, and text shows its 
 });
 
 test('the live drive draws a song in the map as a waveform that plays', async () => {
-  const fsp = await import('node:fs/promises');
-  const live = process.env.MARBLE_DRIVE_DOC ?? new URL('../drive/drive.mrbl', import.meta.url);
-  const source = await fsp.readFile(live, 'utf8').catch(() => null);
+  const source = await liveDriveSource();
   if (!source || !source.includes('function tmCell(')) return; // no live drive in this checkout
   const host = await startDrive({ agents: false, documents: { drive: source, garden: GARDEN } });
   try {

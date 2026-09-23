@@ -9,8 +9,16 @@ STAGE="$(mktemp -d "${TMPDIR:-/tmp}/marble-app.XXXXXX")"
 APP="$STAGE/Marble.app"
 DEST="${MARBLE_APP_DEST:-$HOME/Applications/Marble.app}"
 CONFIG_DIR="$HOME/Library/Application Support/Marble"
-DRIVE_ROOT="${MARBLE_DRIVE_ROOT:-/Users/bryanmin/Development/3rd-year-projects/marble-drive/drive}"
-HOST="${MARBLE_DRIVE_HOST:-https://bryans-macbook-pro.tail3668e0.ts.net}"
+# Which drive Finder opens .mrbl files into, and the host that serves it. No
+# defaults: they name one machine's drive, and a guess would be someone else's.
+# Only needed for a first install; an existing finder.json is kept.
+DRIVE_ROOT="${MARBLE_DRIVE_ROOT:-}"
+HOST="${MARBLE_DRIVE_HOST:-}"
+if [[ ! -f "$CONFIG_DIR/finder.json" && ( -z "$DRIVE_ROOT" || -z "$HOST" ) ]]; then
+  echo "usage: MARBLE_DRIVE_ROOT=/path/to/drive MARBLE_DRIVE_HOST=https://your-host $0" >&2
+  echo "  (both are written to $CONFIG_DIR/finder.json on the first install)" >&2
+  exit 2
+fi
 
 cleanup() { rm -rf "$STAGE"; }
 trap cleanup EXIT
@@ -74,6 +82,7 @@ qlmanage -r >/dev/null
 qlmanage -r cache >/dev/null
 
 echo "==> reindexing .mrbl so Spotlight picks up the new type"
+[[ -n "$DRIVE_ROOT" ]] || DRIVE_ROOT="$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1])).get("driveRoot",""))' "$CONFIG_DIR/finder.json" 2>/dev/null || true)"
 find "$DRIVE_ROOT" -name '*.mrbl' -print0 2>/dev/null | xargs -0 -n 20 mdimport 2>/dev/null || true
 find "$HOME/Desktop" -maxdepth 1 -name '*.mrbl' -print0 2>/dev/null | xargs -0 mdimport 2>/dev/null || true
 

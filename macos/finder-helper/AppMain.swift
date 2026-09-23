@@ -23,10 +23,9 @@ func loadConfig() -> FinderConfig {
     {
         return cfg
     }
-    return FinderConfig(
-        driveRoot: "/Users/bryanmin/Development/3rd-year-projects/marble-drive/drive",
-        host: "https://bryans-macbook-pro.tail3668e0.ts.net"
-    )
+    // Not installed with a drive (install.sh writes finder.json): every file
+    // opens as local HTML rather than somebody else's drive.
+    return FinderConfig(driveRoot: "", host: "http://127.0.0.1:4400")
 }
 
 func registerHandler() {

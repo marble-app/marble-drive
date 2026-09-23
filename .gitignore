@@ -37,6 +37,8 @@ __pycache__/
 .claude/worktrees/
 # Hook config that names absolute paths on one laptop.
 .codex/
+# A deploy target: which org and machine this checkout's `sprite` talks to.
+.sprite
 # Local design-hook detector config (per machine)
 .impeccable/
 
@@ -44,6 +46,8 @@ __pycache__/
 # Screenshots, one-off patches, generated pages. A script worth keeping moves
 # to `tools/`; the rest is never read back after the run that made it.
 scratchpad/
+# Screenshots the visual tools write on every run.
+test-results/
 *.heapsnapshot
 # Brainstorm servers, their ports, tokens and pids.
 .superpowers/

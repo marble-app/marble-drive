@@ -13,6 +13,7 @@ import test from 'node:test';
 
 import { buildDrive } from '../server/seed.js';
 import { GARDEN, startDrive } from './harness.js';
+import { liveDriveSource } from './live-drive.js';
 
 const host = await startDrive({
   agents: false,
@@ -175,7 +176,7 @@ test('a picked row typing into a name is not a picked row being deleted', async 
 // --------------------------------------------------------------- the live copy
 
 test('the live drive document does all of the above', async (t) => {
-  const live = await fsp.readFile(new URL('../drive/drive.mrbl', import.meta.url), 'utf8').catch(() => null);
+  const live = await liveDriveSource();
   if (!live) {
     t.skip('no drive/drive.mrbl in this checkout');
     return;

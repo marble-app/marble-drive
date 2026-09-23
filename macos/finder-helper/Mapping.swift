@@ -18,6 +18,9 @@ func openTarget(filePath: String, driveRoot: String, host: String) -> OpenTarget
     let file = (filePath as NSString).standardizingPath
     var root = (driveRoot as NSString).standardizingPath
     while root.hasSuffix("/") { root.removeLast() }
+    // No drive configured: nothing is inside one. Without this, an empty root
+    // makes "/" the prefix, and every file on the machine maps to the host.
+    guard !root.isEmpty else { return .localHtml }
 
     let rootPrefix = root + "/"
     guard file == root || file.hasPrefix(rootPrefix) else { return .localHtml }

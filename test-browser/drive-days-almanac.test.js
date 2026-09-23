@@ -6,13 +6,12 @@
 // that document is not in the checkout.
 
 import assert from 'node:assert/strict';
-import fsp from 'node:fs/promises';
 import test from 'node:test';
 
 import { startDrive } from './harness.js';
+import { liveDriveSource } from './live-drive.js';
 
-const DOC = process.env.MARBLE_DRIVE_DOC || new URL('../drive/drive.mrbl', import.meta.url);
-const SOURCE = await fsp.readFile(DOC, 'utf8').catch(() => null);
+const SOURCE = await liveDriveSource();
 // The days folder is found by name in the live document, so the fixtures
 // take the name from there.
 const FOLDER = /const DAYS = "([^"]+)"/.exec(SOURCE ?? '')?.[1];
