@@ -3715,8 +3715,13 @@ __ICON__
       })();
       let uploading = null;
       tray.querySelector('.up-foot button').addEventListener('click', () => {
-        if (uploading) uploading.abort();
-        else tray.removeAttribute('data-open');
+        if (uploading) return uploading.abort();
+        // Files whose connection dropped are still held by the page: Retry
+        // sends them again, and the host's session means they carry on.
+        const again = tray.retry;
+        tray.retry = null;
+        if (again?.length) return receive([], [], again.into, again);
+        tray.removeAttribute('data-open');
       });
       // Leaving mid-upload throws the rest away, so the browser asks first.
       addEventListener('beforeunload', (event) => {
@@ -3725,8 +3730,8 @@ __ICON__
         event.returnValue = '';
       });
 
-      async function receive(entries, files, into) {
-        let dropped = files.map((file) => ({ file, folder: '' }));
+      async function receive(entries, files, into, prepared = null) {
+        let dropped = prepared ? [...prepared] : files.map((file) => ({ file, folder: '' }));
         if (entries.length) {
           dropped = [];
           try {
@@ -3801,6 +3806,7 @@ __ICON__
         uploading = controller;
         const added = [];
         const refused = [];
+        const retry = [];
         let cancelled = false;
         for (const [i, { file, folder }] of wanted.entries()) {
           if (controller.signal.aborted) {
@@ -3825,6 +3831,10 @@ __ICON__
                       mark(i, 'going', Math.floor((sent[i] / (file.size || 1)) * 100) + '%');
                       paint();
                     },
+                    // A chunk the network dropped is being retried.
+                    onState: (state) => {
+                      if (state === 'reconnecting') mark(i, 'going', 'reconnecting…');
+                    },
                   }),
             );
             sent[i] = file.size;
@@ -3835,7 +3845,8 @@ __ICON__
               mark(i, 'failed', 'cancelled');
             } else {
               refused.push(file.name + ' — ' + (err?.message ?? err));
-              mark(i, 'failed', err?.message ?? 'refused');
+              mark(i, 'failed', err?.retryable ? 'paused' : err?.message ?? 'refused');
+              if (err?.retryable) retry.push({ file, folder });
             }
           }
           paint();
@@ -3856,7 +3867,8 @@ __ICON__
         title.textContent = tally[0] ?? 'Nothing added';
         sum.textContent = tally.slice(1).join(' · ') || bytes(total);
         tray.setAttribute('data-state', refused.length || cancelled ? 'failed' : 'done');
-        button.textContent = 'Close';
+        tray.retry = retry.length ? Object.assign(retry, { into }) : null;
+        button.textContent = retry.length ? 'Retry' : 'Close';
         say(tally.join(' · '));
         if (!refused.length && !cancelled) tray.timer = setTimeout(() => tray.removeAttribute('data-open'), 2600);
       }
@@ -3931,6 +3943,13 @@ __ICON__
       drawNav();
       positionThumb();
       refresh();
+      // An upload this browser started and did not finish is waiting on the
+      // host; the file itself went with the last page, so it has to be
+      // dropped again to carry on.
+      const pending = drive.pendingUploads?.() ?? [];
+      if (pending.length) {
+        say('Drop “' + pending[0].name + '” again to finish adding it' + (pending.length > 1 ? ' (and ' + (pending.length - 1) + ' more)' : ''));
+      }
       // The drive's own realms arrive after the first draw rather than
       // holding it back; a drive that names some is drawn once more in them.
       drive.settings?.().then(({ realms }) => {

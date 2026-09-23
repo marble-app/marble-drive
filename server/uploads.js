@@ -142,7 +142,7 @@ export function createUploads({ store, maxBytes, chunkBytes, marginBytes, freePa
 
   async function status(id) {
     const record = await read(id);
-    return { received: await sizeOf(id), bytes: record.bytes, folder: record.folder, name: record.name };
+    return { received: await sizeOf(id), bytes: record.bytes, folder: record.folder, name: record.name, chunk: chunkBytes };
   }
 
   function finish(id) {

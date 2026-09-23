@@ -93,7 +93,13 @@
     // got, and a song going up over a slow link with nothing moving looks
     // exactly like a drop that did nothing. `onProgress(sent, total)` hears it;
     // `signal` stops it.
-    const uploadFile = ({ folder = '', name, file, onProgress = null, signal = null }) =>
+    // A file bigger than this goes up in chunks through a session the host
+    // keeps (server/uploads.js), so a dropped connection costs one chunk and a
+    // reload does not cost the file.
+    const SESSION_ABOVE = 32 * 1024 * 1024;
+    const uploadFile = (opts) => (opts.file.size > SESSION_ABOVE ? uploadInChunks(opts) : uploadWhole(opts));
+
+    const uploadWhole = ({ folder = '', name, file, onProgress = null, signal = null }) =>
       new Promise((resolve, reject) => {
         const xhr = new XMLHttpRequest();
         xhr.open(
@@ -130,6 +136,132 @@
         }
         xhr.send(file);
       });
+
+    // ----------------------------------------------------- chunked uploads
+    //
+    // Start a session (or pick up one this browser remembers for the same
+    // file in the same folder), send each chunk at the offset the host says it
+    // has, and finish. A chunk the network drops is retried after 1, 2, 4, 8
+    // and 16 seconds, reading back what the host has first; after that the
+    // file fails as `retryable` and the session is kept, so dropping the same
+    // file again — even after a reload, when the page no longer holds it —
+    // carries on from there.
+
+    const REMEMBERED = 'marble-drive:uploads';
+    const BACKOFF = [1, 2, 4, 8, 16];
+    const remembered = () => {
+      try {
+        const list = JSON.parse(localStorage.getItem(REMEMBERED) || '[]');
+        return Array.isArray(list) ? list : [];
+      } catch {
+        return [];
+      }
+    };
+    const remember = (list) => {
+      try {
+        localStorage.setItem(REMEMBERED, JSON.stringify(list));
+      } catch {
+        // A private window: a reload starts over, which is still correct.
+      }
+    };
+    const sameFile = (r, folder, name, file) =>
+      r.folder === folder && r.name === name && r.bytes === file.size && r.modified === file.lastModified;
+    const forget = (id) => remember(remembered().filter((r) => r.id !== id));
+
+    /** Uploads this browser started and did not finish: drop the same file
+     *  again to carry on. */
+    const pendingUploads = () => remembered().map(({ folder, name, bytes }) => ({ folder, name, bytes }));
+
+    const cancelled = () => Object.assign(new Error('cancelled'), { name: 'AbortError' });
+    const wait = (seconds, signal) => new Promise((resolve, reject) => {
+      const timer = setTimeout(resolve, seconds * 1000);
+      signal?.addEventListener('abort', () => { clearTimeout(timer); reject(cancelled()); }, { once: true });
+    });
+
+    /** One chunk as one XHR, so its progress can be heard. Answers the host's
+     *  JSON with the status beside it; a dropped connection rejects. */
+    const sendChunk = (href, body, { onProgress, signal }) => new Promise((resolve, reject) => {
+      const xhr = new XMLHttpRequest();
+      xhr.open('PUT', href);
+      xhr.setRequestHeader('Content-Type', 'application/octet-stream');
+      if (onProgress) xhr.upload.onprogress = (event) => onProgress(event.loaded);
+      xhr.onload = () => {
+        let answer = {};
+        try {
+          answer = JSON.parse(xhr.responseText || '{}');
+        } catch {
+          // A proxy's page, not an answer.
+        }
+        resolve({ status: xhr.status, answer });
+      };
+      xhr.onerror = () => reject(new Error('the connection dropped'));
+      xhr.onabort = () => reject(cancelled());
+      if (signal) {
+        if (signal.aborted) return xhr.onabort();
+        signal.addEventListener('abort', () => xhr.abort(), { once: true });
+      }
+      xhr.send(body);
+    });
+
+    async function uploadInChunks({ folder = '', name, file, onProgress = null, onState = null, signal = null }) {
+      let session = null;
+      const mine = remembered().find((r) => sameFile(r, folder, name, file));
+      if (mine) {
+        session = await ask(`/drive/uploads/${mine.id}`)
+          .then((s) => ({ id: mine.id, chunk: s.chunk, received: s.received }))
+          .catch(() => (forget(mine.id), null));
+      }
+      if (!session) {
+        session = await ask('/drive/uploads', { method: 'POST', body: { folder, name, bytes: file.size, modified: file.lastModified } });
+        remember([...remembered(), { id: session.id, folder, name, bytes: file.size, modified: file.lastModified }]);
+      }
+      const { id } = session;
+      const chunk = Math.max(64 * 1024, Number(session.chunk) || SESSION_ABOVE);
+      let received = session.received;
+      let tries = 0;
+      onProgress?.(received, file.size);
+
+      while (received < file.size) {
+        if (signal?.aborted) break;
+        const end = Math.min(file.size, received + chunk);
+        try {
+          const { status, answer } = await sendChunk(
+            `/drive/uploads/${id}?offset=${received}&client=${CLIENT}`,
+            file.slice(received, end),
+            { signal, onProgress: (loaded) => onProgress?.(Math.min(received + loaded, file.size), file.size) },
+          );
+          if (status === 200 || status === 409) {
+            received = Number(answer.received) || received;
+            if (tries) onState?.('going');
+            tries = 0;
+            continue;
+          }
+          if (status === 404) forget(id);
+          throw Object.assign(new Error(answer.error ?? `upload answered ${status}`), { status });
+        } catch (err) {
+          if (err.name === 'AbortError') break;
+          if (err.status) throw err;
+          if (tries >= BACKOFF.length) {
+            onState?.('paused');
+            throw Object.assign(new Error('the connection dropped — drop the file again to carry on'), { retryable: true });
+          }
+          onState?.('reconnecting');
+          await wait(BACKOFF[tries], signal);
+          tries += 1;
+          // Where is the host now? A chunk whose answer was lost may have landed.
+          received = await ask(`/drive/uploads/${id}`).then((s) => s.received, () => received);
+        }
+      }
+      if (signal?.aborted) {
+        await ask(`/drive/uploads/${id}`, { method: 'DELETE' }).catch(() => {});
+        forget(id);
+        throw cancelled();
+      }
+      const answer = await ask(`/drive/uploads/${id}/finish?client=${CLIENT}`, { method: 'POST', body: {} });
+      forget(id);
+      if (answer.path) drawThumb({ path: answer.path, file });
+      return answer;
+    }
 
     const move = (from, to) => ask('/drive/move', { method: 'POST', body: { from, to } });
     const remove = (path) => ask('/drive/trash', { method: 'POST', body: { path } });
@@ -383,6 +515,7 @@
       mkdir,
       upload,
       uploadFile,
+      pendingUploads,
       move,
       remove,
       restore,
