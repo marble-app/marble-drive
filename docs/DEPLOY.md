@@ -174,7 +174,10 @@ tools/sprite-deploy.sh <sprite> --org <org> --rollback # the release before
   destroys it after a typed confirmation. `tools/sprite-deploy.sh --all`
   updates every tester. A tester's Drive and Agents pages are theirs once made:
   a deploy updates the host, the shared page code and starters, never those.
-- **Signing in.** The sprite's URL stays private to the org ("sprite" auth).
+- **Signing in.** Every sprite has a Marble passphrase (`MARBLE_DRIVE_SECRET`
+  in its `sprite.env`): a drive with none answers agent routes only when asked
+  for as `localhost`, which a sprite's URL never is. The owner's own sprite keeps
+  its URL private to the org as well ("sprite" auth), so it has both.
   Agents need a `claude login` in `sprite console` or an API key in Agents
   settings; a sprite made for someone else never carries anyone's login.
 
