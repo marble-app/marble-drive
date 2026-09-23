@@ -33,6 +33,7 @@ import { PathError, joinPath, parsePath, safePath, safeSegment, splitPath, witho
 import { build as buildStarter, list as listStarters, preview as starterPreview } from './gallery.js';
 import { createChannels } from './sse.js';
 import { createStore } from './store/index.js';
+import { readDriveSettings } from './drive-settings.js';
 import { createStems } from './stems/index.js';
 import { createThumbs } from './thumbs.js';
 import { createTypesafeHandler } from './typesafe/routes.js';
@@ -445,9 +446,11 @@ export async function createDrive(config, { log = console, agentProviders = null
       if (route === '/today') {
         // One address, bookmarked once, that always opens whatever a
         // recurring skill built most recently — the skill's job is to keep
-        // `config.latestDoc` mirrored, not to hand out a fresh URL each day.
-        const landing = (await store.has(config.latestDoc))
-          ? config.latestDoc
+        // `latest` mirrored, not to hand out a fresh URL each day. The
+        // environment wins, then the drive's own settings, then the newest.
+        const latest = config.latestDoc ?? (await readDriveSettings(store.marbleDir)).latest;
+        const landing = latest && (await store.has(latest))
+          ? latest
           : (await listDocs())[0]?.path;
         if (landing) return send(res, 302, '', { Location: `/a/${encodeURIComponent(landing)}` });
         return text(res, 404, `no documents in ${config.root}\n\nmake one:  marble-drive new <name>\n`);
@@ -623,6 +626,12 @@ export async function createDrive(config, { log = console, agentProviders = null
         } catch (err) {
           return json(res, err.status ?? 500, { error: err.message });
         }
+      }
+
+      // The drive's own choices (server/drive-settings.js): which folders wear
+      // a realm, which document /today opens. Empty for a drive with none.
+      if (route === '/drive/settings' && req.method === 'GET') {
+        return json(res, 200, await readDriveSettings(store.marbleDir));
       }
 
       if (route === '/drive/tree' && req.method === 'GET') {

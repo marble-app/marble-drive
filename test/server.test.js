@@ -116,10 +116,14 @@ test('/today bookmarks whatever the day skill mirrored there most recently, fall
   assert.equal(before.status, 302);
   assert.equal(before.headers.get('location'), '/a/drive');
 
-  await drive.store.write("Bryan's Days/today", '<html><body>today</body></html>', { label: 'seeded' });
+  // The drive names its own bookmark (server/drive-settings.js).
+  await fsp.writeFile(path.join(drive.store.marbleDir, 'drive.json'), JSON.stringify({ latest: 'Days/today' }));
+  await drive.store.write('Days/today', '<html><body>today</body></html>', { label: 'seeded' });
+  await drive.store.write('a newer page', '<html><body>newer</body></html>', { label: 'seeded' });
   const after = await get('/today');
   assert.equal(after.status, 302);
-  assert.equal(after.headers.get('location'), `/a/${encodeURIComponent("Bryan's Days/today")}`);
+  assert.equal(after.headers.get('location'), `/a/${encodeURIComponent('Days/today')}`);
+  await fsp.rm(path.join(drive.store.marbleDir, 'drive.json'));
 });
 
 test('the carrier and its Drive extension are both served', async () => {

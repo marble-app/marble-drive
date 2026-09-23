@@ -54,6 +54,14 @@
 
     const starters = () => ask('/drive/starters').catch(() => []);
 
+    // The drive's own choices (`.marble/drive.json`): which top-level folders
+    // wear a realm's colour, which document /today opens. A host that predates
+    // them, or a drive with none, is simply no choices.
+    const settings = () =>
+      ask('/drive/settings')
+        .then((s) => ({ realms: s?.realms ?? {}, latest: s?.latest ?? null }))
+        .catch(() => ({ realms: {}, latest: null }));
+
     // What a starter looks like, for a gallery that shows the document rather
     // than describing it. A href rather than the bytes, because it is mounted in
     // an iframe and a document is not the thing that decides what a preview may
@@ -214,6 +222,7 @@
       client: CLIENT,
       tree,
       starters,
+      settings,
       starterPreviewHref,
       trash,
       create,

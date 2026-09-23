@@ -69,9 +69,10 @@ export function loadConfig(env = process.env) {
     home: str('MARBLE_DRIVE_HOME', 'drive'),
 
     // `/today`'s bookmark: a stable address for whichever document a
-    // recurring skill keeps mirroring the latest run into. Same fallback as
-    // `/` — missing, it lands on whatever's newest instead of 404ing.
-    latestDoc: str('MARBLE_DRIVE_LATEST_DOC', "Bryan's Days/today"),
+    // recurring skill keeps mirroring the latest run into. Unset here, the
+    // drive's own `drive.json` names it (server/drive-settings.js); named
+    // nowhere, `/today` lands on whatever's newest, like `/`.
+    latestDoc: str('MARBLE_DRIVE_LATEST_DOC', null),
 
     // G0's gate. Unset means an open host, which is right for a laptop and
     // wrong for anything with a domain in front of it — so it says so, loudly,
