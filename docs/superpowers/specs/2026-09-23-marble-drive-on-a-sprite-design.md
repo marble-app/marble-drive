@@ -68,9 +68,9 @@ sprite-env services create marble-drive \
 ```
 
 The drive lives at `/drive` (created once with `sudo`, owned by `sprite`), the
-root-level folder the companion spec named for production. Whether the Sprites
-proxy reaches the host on `127.0.0.1` or it has to listen on every interface
-(`HOST=0.0.0.0`) is checked on first deploy and recorded here.
+root-level folder the companion spec named for production. *Confirmed on `admin-p1`
+2026-09-23:* the Sprites URL reaches the host listening on `127.0.0.1:4400`; it
+does not need to listen on every interface.
 
 ### 4. It stays awake while work runs
 
