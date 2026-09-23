@@ -9,6 +9,7 @@ import zlib from 'node:zlib';
 
 import { buildDrive } from '../server/seed.js';
 import { GARDEN, startDrive } from './harness.js';
+import { liveDriveSource } from './live-drive.js';
 
 process.env.MARBLE_DRIVE_QUICKLOOK = '0';
 
@@ -49,7 +50,10 @@ const PDF = Buffer.from([
   '%%EOF',
 ].join('\n'));
 
-const host = await startDrive({ agents: false, documents: { drive: await buildDrive(), garden: GARDEN } });
+// MARBLE_TEST_LIVE_DRIVE=1 runs the same checks against the owner's live Drive
+// document (MARBLE_DRIVE_DOC, or the drive root's), e.g. after a patch.
+const DRIVE_DOC = process.env.MARBLE_TEST_LIVE_DRIVE ? await liveDriveSource() : await buildDrive();
+const host = await startDrive({ agents: false, documents: { drive: DRIVE_DOC, garden: GARDEN } });
 test.after(() => host.close());
 const put = (name, bytes) => host.drive.store.putFile(`Media/${name}`, (async function* () { yield bytes; })());
 await host.drive.store.mkdir('Media');

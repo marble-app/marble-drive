@@ -7,6 +7,7 @@ import test from 'node:test';
 
 import { buildDrive } from '../server/seed.js';
 import { GARDEN, startDrive } from './harness.js';
+import { liveDriveSource } from './live-drive.js';
 
 process.env.MARBLE_DRIVE_UPLOAD_CHUNK = String(1024 * 1024);
 process.env.MARBLE_DRIVE_UPLOAD_MARGIN = '0';
@@ -14,7 +15,10 @@ process.env.MARBLE_DRIVE_UPLOAD_MARGIN = '0';
 const SIZE = 33 * 1024 * 1024 + 123;
 const expected = (size) => Buffer.from(Array.from({ length: size }, (_, i) => (i * 37) % 256));
 
-const host = await startDrive({ agents: false, documents: { drive: await buildDrive(), garden: GARDEN } });
+// MARBLE_TEST_LIVE_DRIVE=1 runs the same checks against the owner's live Drive
+// document (MARBLE_DRIVE_DOC, or the drive root's), e.g. after a patch.
+const DRIVE_DOC = process.env.MARBLE_TEST_LIVE_DRIVE ? await liveDriveSource() : await buildDrive();
+const host = await startDrive({ agents: false, documents: { drive: DRIVE_DOC, garden: GARDEN } });
 test.after(() => host.close());
 await host.drive.store.mkdir('Video');
 await host.drive.createDocument('Video/Notes', GARDEN, { label: 'test' });
