@@ -4,6 +4,7 @@
 #   tools/sprite-deploy.sh <sprite> [--org <org>] [--ref <commit>] [--marble <version>] [--claude <version>]
 #   tools/sprite-deploy.sh <sprite> [--org <org>] --local
 #   tools/sprite-deploy.sh <sprite> [--org <org>] --rollback
+#   tools/sprite-deploy.sh --all [--org <org>] [--ref ...]   every tester (t-…)
 #
 # By default a sprite runs public sources: marble-drive at <ref> (default
 # origin/main) from GitHub, and @bdhmin/marble@<version> (default: the local
@@ -21,7 +22,34 @@ REPO="$(cd "$HERE/.." && pwd)"
 MARBLE_DIR="${MARBLE_DIR:-$(cd "$REPO/.." && pwd)/marble}"
 [[ -d "$MARBLE_DIR" ]] || MARBLE_DIR="$(cd "$(git -C "$REPO" rev-parse --git-common-dir)/../.." && pwd)/marble"
 
-usage() { sed -n '2,15p' "$0" | sed 's/^# \{0,1\}//'; exit 2; }
+usage() { awk 'NR > 1 && /^#/ { sub(/^# ?/, ""); print; next } NR > 1 { exit }' "$0"; exit 2; }
+
+# --all: every tester's sprite (named t-…), one after another, going on past a
+# failure and ending with one line per sprite. Never admin sprites.
+if [[ "${1:-}" == --all ]]; then
+  shift
+  ALL_ORG=marble-drive
+  PASS=()
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --org) ALL_ORG=$2; shift 2 ;;
+      *) PASS+=("$1"); shift ;;
+    esac
+  done
+  SPRITES="$(sprite list -o "$ALL_ORG" --prefix t- 2>/dev/null | grep -E '^t-' || true)"
+  [[ -n "$SPRITES" ]] || { echo "sprite-deploy: no tester sprites (t-…) in $ALL_ORG"; exit 0; }
+  RESULTS=()
+  for one in $SPRITES; do
+    printf '\n==> ==== %s ====\n' "$one"
+    if "$0" "$one" --org "$ALL_ORG" ${PASS[@]+"${PASS[@]}"}; then RESULTS+=("  deployed  $one")
+    else RESULTS+=("  FAILED    $one"); fi
+  done
+  printf '\n==> summary\n'
+  printf '%s\n' "${RESULTS[@]}"
+  printf '%s\n' "${RESULTS[@]}" | grep -q FAILED && exit 1
+  exit 0
+fi
+
 [[ $# -ge 1 && "$1" != -* ]] || usage
 SPRITE=$1; shift
 ORG=marble-drive REF=origin/main MARBLE_VERSION="" CLAUDE_VERSION="" LOCAL=0 ROLLBACK=0

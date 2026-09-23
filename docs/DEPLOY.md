@@ -165,6 +165,15 @@ tools/sprite-deploy.sh <sprite> --org <org> --rollback # the release before
   connection. While an agent turn or a stem split runs, the host holds a Sprites
   task (`server/keep-awake.js`), so a turn outlives its tab.
 - **Checkpoints.** Every deploy checkpoints first and prints how to restore.
+- **A sprite per tester.** `tools/sprite-provision.sh <person> [--agent
+  api|subscription] [--key-file <file>]` makes `t-<person>`: a passphrase and
+  its own settings in `~/.config/marble-drive/sprite.env` on the sprite (kept
+  across deploys, like saved API keys in `~/.config/marble-drive/agent-keys`),
+  a deploy, a public URL behind the passphrase, and a note to send. The roster
+  is `~/.config/marble-drive/testers.json` on the Mac. `--remove <person>`
+  destroys it after a typed confirmation. `tools/sprite-deploy.sh --all`
+  updates every tester. A tester's Drive and Agents pages are theirs once made:
+  a deploy updates the host, the shared page code and starters, never those.
 - **Signing in.** The sprite's URL stays private to the org ("sprite" auth).
   Agents need a `claude login` in `sprite console` or an API key in Agents
   settings; a sprite made for someone else never carries anyone's login.
