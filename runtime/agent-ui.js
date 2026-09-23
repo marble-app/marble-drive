@@ -1882,8 +1882,20 @@
     .msg.me:first-child { margin-top: 4px; }
     /* A bubble that another agent wrote, not the person: same paper, marked
        down its edge so the transcript reads as one column with a visible
-       seam where someone else spoke. */
-    .msg.me.from-agent { border-left: 2px solid var(--accent-ink); }
+       seam where someone else spoke. The mark is a clean bar, not a border:
+       a border-left on a 10px bubble bent round both corners, and a corner
+       belongs to the bubble, not to what is drawn on it. So it is a straight
+       bar with square ends, lifted inside the edge and stopped a radius short
+       of each end — the same rule a library row wears for its folder. The
+       words' indent is derived from the bar, never typed. */
+    .msg.me.from-agent {
+      --rule-w: 3px; --rule-in: 6px; --rule-gap: 8px;
+      padding-left: calc(var(--rule-in) + var(--rule-w) + var(--rule-gap));
+      background-image: linear-gradient(var(--accent-ink), var(--accent-ink));
+      background-repeat: no-repeat;
+      background-size: var(--rule-w) calc(100% - 20px);
+      background-position: var(--rule-in) center;
+    }
     /* The whole row opens the sending conversation, not just the name in it. */
     .msg.me .from { display: block; font-size: 12px; color: var(--muted); margin-bottom: 2px; cursor: pointer; }
     .msg.me .from button { all: unset; cursor: pointer; text-decoration: underline; text-decoration-color: var(--line); }
@@ -3824,6 +3836,10 @@
       } catch { /* defaults from the provider list */ }
       const id = provider?.id;
       const models = this.pickerModels(provider);
+      // A Claude family id (`opus`) is not a Cursor model. Leaving it checked
+      // when the CLI switches makes the next turn ask Cursor for `opus-high`,
+      // which Cursor rejects by printing its entire model list.
+      const claudeFamily = new Set(['haiku', 'sonnet', 'opus', 'fable']);
       // A started conversation keeps the model it was started with. A composer
       // with no conversation yet opens on the last model this person chose —
       // which is what `settings.models` holds, and what the next conversation
@@ -3835,7 +3851,13 @@
       let effortValue = effort ?? radioValue(this.shadowRoot, 'effort') ?? '';
       if (!effortValue && fresh) effortValue = settings.efforts?.[id] ?? '';
       const split = splitCursorModel(modelValue);
-      if (split.family && models.some((item) => item.id === split.family)) {
+      if (id === 'cursor' && claudeFamily.has(modelValue)) {
+        const saved = settings.models?.[id] ?? '';
+        const savedFamily = splitCursorModel(saved).family;
+        const grok = models.find((item) => item.id !== 'auto' && /grok/i.test(`${item.id} ${item.label ?? ''}`));
+        modelValue = models.some((item) => item.id === savedFamily) ? savedFamily : (grok?.id ?? '');
+        if (!effortValue) effortValue = settings.efforts?.[id] || 'high';
+      } else if (split.family && models.some((item) => item.id === split.family)) {
         if (!effortValue) effortValue = split.effort;
         modelValue = split.family;
       }
@@ -4628,9 +4650,18 @@
 
     // ---------------------------------------------------------- sending
 
+    /** Words that go in front of whatever is typed, written by the page rather
+     *  than the hand: Describe mode sets this to the reading of its marks, so
+     *  the card it borrows sends "I marked up the page: …" ahead of the
+     *  sentence without ever putting those words in the box. */
+    get briefText() {
+      try { return String(this.brief?.() ?? '').trim(); } catch { return ''; }
+    }
+
     updateSendable() {
       const noAgent = !this.getAttribute('conversation') && !radioValue(this.shadowRoot, 'agent');
       const canSend = Boolean(this.input.value.trim())
+        || Boolean(this.briefText)
         || this.attachments.length > 0
         || this.composerChips.some((chip) => chip.kind === 'skill' || chip.kind === 'compact');
       this.sendButton.disabled = this.sending || noAgent || !canSend;
@@ -4762,9 +4793,10 @@
       }
       const skillChips = this.composerChips.filter((chip) => chip.kind === 'skill');
       const compactChip = this.composerChips.some((chip) => chip.kind === 'compact');
-      if (!typed && !skillChips.length && !compactChip && !this.attachments.length) return;
+      const brief = this.briefText;
+      if (!typed && !brief && !skillChips.length && !compactChip && !this.attachments.length) return;
 
-      let prompt = typed;
+      let prompt = brief && !['skill', 'compact'].includes(slash?.kind) && !skillChips.length && !compactChip ? `${brief} ${typed}`.trim() : typed;
       if (compactChip || slash?.kind === 'compact') prompt = '/compact';
       else if (slash?.kind === 'skill') prompt = `/${slash.id}${slash.rest ? ` ${slash.rest}` : ''}`;
       else if (skillChips.length) prompt = `${skillChips.map((chip) => `/${chip.id}`).join(' ')}${typed ? ` ${typed}` : ''}`.trim();
@@ -4813,6 +4845,9 @@
           this.dispatchEvent(new CustomEvent('conversation', { detail: { id }, bubbles: true, composed: true }));
         }
         await this.api.send(id, { prompt, dispatch: mode, ...context });
+        // Whoever lent this composer out learns the words left it: Describe
+        // mode steps back as soon as its brief is on its way.
+        this.dispatchEvent(new CustomEvent('sent', { detail: { id, prompt }, bubbles: true, composed: true }));
         // A reply in the person's own words answers the question too.
         for (const record of this.turns.values()) {
           record.choice?.remove();
@@ -6929,7 +6964,7 @@
       // Handed a conversation, the drawer opens whether or not it was left open:
       // arriving at a document to watch something being built in it and finding
       // the panel shut is arriving at nothing.
-      if (handed || api.storage.get(OPEN_KEY) === '1') this.open({ animate: false });
+      if (handed || api.storage.get(api.here(OPEN_KEY)) === '1') this.open({ animate: false });
       else this.render();
       this.unwatchUsage = watchUsage(this.usageEl);
       this.fillTray();
@@ -6968,7 +7003,7 @@
 
     open({ animate = true } = {}) {
       this.isOpen = true;
-      this.api.storage.set(OPEN_KEY, '1');
+      this.api.storage.set(this.api.here(OPEN_KEY), '1');
       this.animateTo(1, { animate });
       this.view.focusInput();
       const id = this.view.getAttribute('conversation');
@@ -6977,7 +7012,7 @@
 
     close() {
       this.isOpen = false;
-      this.api.storage.set(OPEN_KEY, '0');
+      this.api.storage.set(this.api.here(OPEN_KEY), '0');
       this.hideMenus();
       this.animateTo(0);
       this.launcher.focus({ preventScroll: true });
@@ -7275,7 +7310,7 @@
         const resting = offset + project(velocity);
         if (resting > size / 2) {
           this.isOpen = false;
-          this.api.storage.set(OPEN_KEY, '0');
+          this.api.storage.set(this.api.here(OPEN_KEY), '0');
           this.animateTo(0, { velocity: -velocity / size });
         } else {
           this.animateTo(1, { velocity: -velocity / size });

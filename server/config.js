@@ -109,6 +109,9 @@ export function loadConfig(env = process.env) {
     // and `marble-drive weigh` is how you find out before deciding.
     maxBodyBytes: num('MARBLE_DRIVE_MAX_BODY', 16 * 1024 * 1024),
     maxBlobBytes: num('MARBLE_DRIVE_MAX_BLOB', 64 * 1024 * 1024),
+    // A file that is not a document is streamed to disk rather than held, so
+    // this is a ceiling on a mistake, not on memory. An album of WAVs fits.
+    maxFileBytes: num('MARBLE_DRIVE_MAX_FILE', 2 * 1024 * 1024 * 1024),
 
     open: bool('MARBLE_DRIVE_OPEN', false),
 

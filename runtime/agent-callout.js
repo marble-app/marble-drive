@@ -244,6 +244,9 @@
     }
 
     function placeCard(record) {
+      // A card lent to Describe mode hangs on the marks, and the marks layer
+      // knows where those are; this layer only knows the selection.
+      if (record.owner) return;
       const el = record.el;
       const anchor = anchorOf(record.ids);
       if (!anchor) {
@@ -272,7 +275,7 @@
       record.el.dataset.state = state;
       rememberFold(record.id, state === 'pill');
       if (state === 'pill') paintPill(record);
-      else if (!record.zone && !record.said && !record.actions.childElementCount) record.status.textContent = 'Ask about this';
+      else if (!record.zone && !record.said && !record.actions.childElementCount) record.status.textContent = record.label || 'Ask about this';
       syncDock(record);
       placeCard(record);
     }
@@ -324,9 +327,12 @@
       if (at >= 0) records.splice(at, 1);
       vanish(record.el, () => record.el.remove());
       placeHandle();
+      // Describe mode keeps the marks a brief was made of on the page while
+      // the agent works; this is when they can go.
+      dispatchEvent(new CustomEvent('marble-callout:removed', { detail: { id: record.id } }));
     }
 
-    function openCard({ id = null, ids, state = 'card' }) {
+    function openCard({ id = null, ids, state = 'card', focus = true, owner = null }) {
       const existing = recordOf(id);
       if (existing) {
         setState(existing, state);
@@ -359,7 +365,7 @@
       convo.setAttribute('data-folded', '');
       el.append(head, convo);
 
-      const record = { id, ids: [...ids], el, convo, head, live, status, actions, tools, state, changed: new Set(), docked: false, title: '', zone: null, said: false };
+      const record = { id, ids: [...ids], el, convo, head, live, status, actions, tools, state, changed: new Set(), docked: false, title: '', zone: null, said: false, owner, label: '' };
       records.push(record);
 
       // The two corner controls. The side icon folds the card and opens the
@@ -419,7 +425,10 @@
       if (id) { convo.setAttribute('conversation', id); follow(record); }
       handle.hidden = true;
       setState(record, state);
-      if (state === 'card') convo.focusInput?.();
+      // Not on the way in for a lent card: it appears the moment something is
+      // marked, often while a note is still being typed, and taking the caret
+      // out of that note would be the card interrupting the thing it is for.
+      if (state === 'card' && focus) convo.focusInput?.();
       // A card is the one place a brief made somewhere else can land. The
       // marks layer listens for this to write a sketch's reading into the
       // composer; anything else that briefs an agent about a region can do
@@ -567,11 +576,15 @@
     function placeHandle() {
       const ids = agent.context().selection;
       // A card with no conversation yet is this selection's callout already.
-      const drawn = records.some((r) => r.id === null);
+      // A card Describe mode has borrowed is that mode's, and hides with it.
+      const drawn = records.some((r) => r.id === null && !r.owner);
       // Inside a marks tool mode an overlay in the top layer has the pointer,
       // so a handle drawn now would be visible and unclickable. The tray is
       // the way out of a mode; the handle comes back when the mode ends.
-      const marking = Boolean(document.querySelector('.marble-marks-layer')?.dataset.mode);
+      // In Describe mode at all, the card is already hung on what is marked:
+      // a handle beside it would summon a second composer for the same brief.
+      const marksLayer = document.querySelector('.marble-marks-layer');
+      const marking = Boolean(marksLayer?.dataset.mode) || Boolean(marksLayer?.hasAttribute('data-describing'));
       const target = pointerDown || !ids.length || drawn || marking ? null : anchorOf(ids);
       if (!target) { handle.hidden = true; return; }
       const r = target.getBoundingClientRect();
@@ -591,6 +604,12 @@
     // ------------------------------------------------------------ summon
 
     function summon() {
+      // ⌘J and Ask here inside Describe mode mean the card that is already
+      // there, not a second one.
+      if (document.querySelector('.marble-marks-layer[data-describing]')) {
+        dispatchEvent(new CustomEvent('marble-marks:focus'));
+        return true;
+      }
       const ids = agent.context().selection;
       if (!ids.length) return false;
       handle.hidden = true;
@@ -612,6 +631,45 @@
     }
     addEventListener('marble-callout:summon', (event) => {
       if (summon()) event.preventDefault();
+    });
+
+    // A top-layer sheet shown later paints over one shown earlier. Describe
+    // mode's overlay takes the pointer across the window, and the card it
+    // borrows has to be clickable over it, so it asks for this layer to be
+    // shown again after its own. Hidden and shown in one task, nothing blinks.
+    addEventListener('marble-callout:raise', () => {
+      try { layer.hidePopover(); layer.showPopover(); } catch { /* not a popover here */ }
+    });
+
+    // Describe mode borrows a card rather than drawing a composer of its own,
+    // so there is one way to talk to an agent on a page and it looks the same
+    // everywhere. The lender keeps the conversation model; the borrower says
+    // where the card hangs and what its head line reads, then hands it back
+    // once the brief is sent, when it becomes an ordinary callout on the work.
+    addEventListener('marble-callout:describe', (event) => {
+      const record = openCard({ ids: event.detail?.ids ?? [], focus: false, owner: 'describe' });
+      event.preventDefault();
+      event.detail.card = {
+        el: record.el,
+        convo: record.convo,
+        label(text) {
+          record.label = text;
+          if (!record.zone && !record.said && !record.actions.childElementCount) record.status.textContent = text || 'Ask about this';
+        },
+        focus() {
+          if (record.state !== 'card') setState(record, 'card');
+          record.convo.focusInput?.();
+        },
+        show(on) { record.el.hidden = !on; },
+        release(ids) {
+          record.owner = null;
+          record.label = '';
+          if (ids?.length) record.ids = [...ids];
+          record.el.hidden = false;
+          placeCard(record);
+        },
+        discard() { if (records.includes(record)) remove(record); },
+      };
     });
 
     // ------------------------------------------------------------ pick mode

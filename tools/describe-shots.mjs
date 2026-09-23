@@ -83,13 +83,13 @@ await page.locator('.marble-marks-bar').waitFor();
 await page.mouse.move(590, 300);
 await shot('toolbar');
 
-// A marquee: one frame around what it means, with the field on it.
+// A marquee: one frame around what it means, with the card on it.
 const q = await boxOf('q');
 await page.mouse.move(q.x - 10, q.y - 10);
 await page.mouse.down();
 await page.mouse.move(q.x + q.width + 10, q.y + q.height + 10, { steps: 10 });
 await page.mouse.up();
-await page.locator('.marble-marks-field').waitFor();
+await page.locator('.marble-callout').waitFor();
 await shot('frame');
 
 // Ink and a note, and what the frame makes of both.

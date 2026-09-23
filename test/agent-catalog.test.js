@@ -26,6 +26,10 @@ test('Cursor model ids split into a family and an effort or speed', () => {
   assert.equal(resolveCursorModel('cursor-grok-4.6', 'xhigh', 'composer-2.5'), 'cursor-grok-4.6-xhigh');
   assert.equal(resolveCursorModel('cursor-grok-4.6-high', 'xhigh-fast', 'composer-2.5'), 'cursor-grok-4.6-xhigh-fast');
   assert.equal(resolveCursorModel(null, null, 'composer-2.5'), 'composer-2.5');
+  assert.equal(resolveCursorModel('opus', 'high', 'composer-2.5'), 'composer-2.5');
+  assert.equal(resolveCursorModel('fable', 'high', 'grok-4.7'), 'grok-4.7');
+  assert.equal(resolveCursorModel('claude-opus-5-5[1m]', 'high', 'composer-2.5'), 'composer-2.5');
+  assert.equal(resolveCursorModel('claude-opus-5-5', 'high', 'composer-2.5'), 'claude-opus-5-5-high');
 });
 
 test('Cursor catalogs collapse effort variants into one family with effort radios', () => {

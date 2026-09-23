@@ -28,14 +28,25 @@ export const CLAUDE_MODELS = [
   { id: 'fable', label: 'Fable 5.1' },
 ];
 // The picker keeps the family id (`opus`) so a saved conversation still
-// selects it. Claude Code 2.1.278 resolves the bare alias `opus` to Opus 5
-// and does not list 5.5, so a turn pins the API id. `[1m]` is the CLI's hint
-// that an unrecognized model has a 1M window; it is stripped before the
-// request. Opus 5.5's window is 1M (platform.claude.com, 2026-09-22).
-const CLAUDE_MODEL_ARGS = {
-  opus: 'claude-opus-5-5[1m]',
-};
-const claudeModelArg = (model) => CLAUDE_MODEL_ARGS[model] ?? model;
+// selects it. Claude Code 2.1.280 is the first build that accepts the Opus
+// 5.5 API id. 2.1.278 rejects `claude-opus-5-5[1m]` outright ("version
+// 2.1.280 or newer is required") and runs the bare alias `opus`. `[1m]` is
+// the CLI's hint that an unrecognized model has a 1M window; it is stripped
+// before the request. Opus 5.5's window is 1M (platform.claude.com, 2026-09-22).
+export function claudeCodeAcceptsOpus55(version) {
+  const match = /(\d+)\.(\d+)\.(\d+)/.exec(String(version ?? ''));
+  if (!match) return false;
+  const major = Number(match[1]);
+  const minor = Number(match[2]);
+  const patch = Number(match[3]);
+  if (major !== 2 || minor !== 1) return major > 2 || (major === 2 && minor > 1);
+  return patch >= 280;
+}
+
+export function claudeModelArg(model, version) {
+  if (model === 'opus' && claudeCodeAcceptsOpus55(version)) return 'claude-opus-5-5[1m]';
+  return model;
+}
 export const CLAUDE_EFFORTS = ['low', 'medium', 'high', 'xhigh', 'max'];
 // The request id Marble gives the stream-json initialize handshake. Its reply
 // carries the CLI's own skills list.
@@ -172,9 +183,10 @@ export function parseClaudeLine(line, state = {}) {
   }
 }
 
-export function createClaudeProvider({ auth = 'subscription', exec = runCommand, env = process.env, secrets } = {}) {
+export function createClaudeProvider({ auth = 'subscription', exec = runCommand, env = process.env, secrets, version = null } = {}) {
   const api = auth === 'api';
   const live = () => ({ ...env, ...(typeof secrets === 'function' ? secrets() : secrets ?? {}) });
+  let cliVersion = version;
 
   return {
     id: api ? 'claude-api' : 'claude-subscription',
@@ -191,6 +203,10 @@ export function createClaudeProvider({ auth = 'subscription', exec = runCommand,
       if (api && current.ANTHROPIC_API_KEY) probeEnv.ANTHROPIC_API_KEY = current.ANTHROPIC_API_KEY;
       const probe = await exec('claude', ['auth', 'status'], { env: probeEnv });
       if (probe.missing) return { installed: false, signedIn: false, detail: 'claude is not installed' };
+      if (cliVersion == null) {
+        const versionProbe = await exec('claude', ['--version'], { env: probeEnv });
+        cliVersion = /(\d+\.\d+\.\d+)/.exec(`${versionProbe.stdout}\n${versionProbe.stderr}`)?.[1] ?? '';
+      }
 
       if (api) {
         return current.ANTHROPIC_API_KEY
@@ -252,7 +268,7 @@ export function createClaudeProvider({ auth = 'subscription', exec = runCommand,
         if (mode === 'bypassPermissions') args.push('--allow-dangerously-skip-permissions');
       }
       // No model or effort means the person's own settings.json — the terminal default.
-      if (model) args.push('--model', claudeModelArg(model));
+      if (model) args.push('--model', claudeModelArg(model, cliVersion));
       if (effort) args.push('--effort', effort);
       if (resume) args.push('--resume', resume);
       // Without a key the CLI would fall back to the login, and bill the

@@ -147,8 +147,12 @@ test('ids, labels, catalog, and the documents spawn', () => {
   assert.ok(!sub.spawn({ workspace: '/w', prompt: 'x', env: {} }).args.includes('--resume'));
   assert.deepEqual(sub.models.map((m) => m.id), ['haiku', 'sonnet', 'opus', 'fable']);
   assert.deepEqual(sub.models.map((m) => m.label), ['Haiku 4.5', 'Sonnet 5', 'Opus 5.5', 'Fable 5.1']);
-  const opus = sub.spawn({ workspace: '/w', prompt: 'x', model: 'opus', env: {} });
-  assert.equal(opus.args[opus.args.indexOf('--model') + 1], 'claude-opus-5-5[1m]', 'opus pins 5.5; the bare alias still means Opus 5 on Claude Code 2.1.278');
+  const oldCli = createClaudeProvider({ version: '2.1.278' });
+  const pinned = oldCli.spawn({ workspace: '/w', prompt: 'x', model: 'opus', env: {} });
+  assert.equal(pinned.args[pinned.args.indexOf('--model') + 1], 'opus', '2.1.278 rejects claude-opus-5-5; the bare alias is the one it runs');
+  const current = createClaudeProvider({ version: '2.1.280' });
+  const opus = current.spawn({ workspace: '/w', prompt: 'x', model: 'opus', env: {} });
+  assert.equal(opus.args[opus.args.indexOf('--model') + 1], 'claude-opus-5-5[1m]', '2.1.280 and newer can pin Opus 5.5');
   assert.deepEqual(sub.efforts, ['low', 'medium', 'high', 'xhigh', 'max']);
   assert.deepEqual(sub.modes.map((m) => m.id), ['auto', 'acceptEdits', 'plan', 'manual', 'bypassPermissions']);
 });
@@ -170,9 +174,10 @@ test('detect: signed in, signed out, not installed, and the API key', async () =
   };
   const signedIn = createClaudeProvider({ exec: exec({ code: 0, stdout: '{"loggedIn": true, "authMethod": "claude.ai"}', stderr: '', missing: false }), env: { ANTHROPIC_API_KEY: 'k', PATH: '/bin' } });
   assert.deepEqual(await signedIn.detect(), { installed: true, signedIn: true, detail: 'signed in (claude.ai)' });
-  assert.equal(calls.at(-1).command, 'claude');
-  assert.deepEqual(calls.at(-1).args, ['auth', 'status']);
-  assert.equal(calls.at(-1).env.ANTHROPIC_API_KEY, undefined, 'probing the subscription without the key');
+  const auth = calls.find((call) => call.args[0] === 'auth');
+  assert.equal(auth.command, 'claude');
+  assert.deepEqual(auth.args, ['auth', 'status']);
+  assert.equal(auth.env.ANTHROPIC_API_KEY, undefined, 'probing the subscription without the key');
 
   const signedOut = createClaudeProvider({ exec: exec({ code: 1, stdout: '{"loggedIn": false}', stderr: '', missing: false }), env: {} });
   assert.equal((await signedOut.detect()).signedIn, false);
@@ -202,7 +207,7 @@ test('detection probes get the allowlisted environment, never the drive secret',
   const host = { PATH: '/bin', HOME: '/h', MARBLE_DRIVE_SECRET: 's3cret', ANTHROPIC_API_KEY: 'k', GITHUB_TOKEN: 'g', NODE_OPTIONS: '--x' };
   const seen = [];
   const exec = async (command, args, options) => {
-    seen.push(options?.env);
+    if (args[0] === 'auth') seen.push(options?.env);
     return { code: 0, stdout: '{"loggedIn": true}', stderr: '', missing: false };
   };
   await createClaudeProvider({ auth: 'subscription', exec, env: host }).detect();

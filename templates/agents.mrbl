@@ -1069,8 +1069,20 @@ __ICON__
      where the hand does, and `phoneRoom()` subtracts the same inset. */
   .focus[data-phone] { position: relative; top: var(--vv-top, 0px); overflow: hidden; height: calc(var(--vv-h, 100vh) - var(--topbar-h, 2.75rem)); touch-action: none; padding: 0 0 env(safe-area-inset-bottom, 0px); }
   /* Folder colour rides every tier, not the chip alone: the leading rule is
-     how a thumb reads which region it is passing through. */
-  .focus[data-phone] .focus-card { position: absolute; left: .75rem; right: .75rem; width: auto; margin: 0; overflow: hidden; border-radius: 12px; border-left: 3px solid var(--folder, var(--line)); transition: none; transform: none; }
+     how a thumb reads which region it is passing through. It is a clean bar,
+     not a border: a border-left had to follow the card's 12px corner and
+     bowed away from the edge at both ends, the fault the desk chip already
+     dropped it for. So it is straight with square ends, lifted inside the
+     edge and stopped a radius short of each end, and the words' indent is
+     derived from it. */
+  .focus[data-phone] .focus-card { --rule-w: 3px; --rule-in: 4px; --rule-gap: 7px; position: absolute; left: .75rem; right: .75rem; width: auto; margin: 0; overflow: hidden; border-radius: 12px; transition: none; transform: none; }
+  .focus[data-phone] .focus-card::before {
+    content: ""; position: absolute; z-index: 1; pointer-events: none;
+    left: var(--rule-in); top: 12px; bottom: 12px; width: var(--rule-w);
+    background: var(--folder, var(--line));
+  }
+  .focus[data-phone] .focus-card-head,
+  .focus[data-phone] .focus-card-body { padding-left: calc(var(--rule-in) + var(--rule-w) + var(--rule-gap)); }
   /* A sliver still holds its place in the column — the pile is drawn from the
      run it makes — but it is not what you see. Seven hairlines read as ruled
      paper; one deck seen edge-on reads as the rest of the stack. */

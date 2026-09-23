@@ -161,3 +161,35 @@ sketch as well as a list; a note is placed, typed, and read back in the brief;
 the frame wraps the union and the field sends through the callout; a
 `<marble-alt>` with three children grows a pill, flips on ›, and the compare
 surface lays three cards out in the free space and applies one.
+
+## Revision, 2026-09-22: one composer, and the marks outlive the mode
+
+Bryan photographed the mode's own field ("1 element / Describe the change…")
+lying across a callout card that the selection's handle had summoned: two
+composers for one brief, with different send buttons and one of them missing
+the model picker. Three changes.
+
+1. **The field is gone; the mode borrows a callout card.** `marble-callout:describe`
+   (cancelable, answered with `detail.card`) opens a card with no conversation,
+   no focus, and `owner: 'describe'`, which `placeCard` leaves alone: the marks
+   layer hangs it on the frame with the same four-place `hang`. Its head line
+   reads the marks (`2 elements · a box around q`), and `convo.brief` — a new
+   hook on `<marble-conversation>` — puts `note()` in front of whatever is
+   typed at submit, and makes a marks-only brief sendable. While the mode is on,
+   the callout's handle stays hidden, and ⌘J / Ask here focus that card
+   (`marble-marks:focus`) rather than summon a second. Explore sends through
+   the same card. Declare moved to the toolbar.
+2. **Sent ends describing; the marks stay while the agent works.** The
+   conversation now fires `sent` after `api.send`. The layer moves the sent
+   marks into `.marble-marks-held`, a second inert top-layer sheet that the
+   mode's fade does not reach, hands the card back (`release`) as the ordinary
+   callout on the work, and leaves the mode. When that callout is put away
+   (`marble-callout:removed`, which Done fires), the marks return to the
+   mode's layer as `sent`: out of sight outside the mode, dimmed inside it.
+3. **The app stays usable under a tool.** The overlay stops at a pinned
+   panel's edge (`punch` sets its `right`), and the callout layer is re-shown
+   after the marks layer (`marble-callout:raise`) so cards paint above the
+   overlay. A hover-based pass-through was tried first and rejected: a press
+   with no move before it (touch, or Playwright) still hit the overlay. Keys
+   typed in a shadow-root composer are read through `composedPath()[0]`, or ⌫
+   in the card took a picked mark off the page.

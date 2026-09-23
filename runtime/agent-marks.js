@@ -1,5 +1,5 @@
 // Describe mode: the tools for saying what you want about a document, and the
-// frame and field that carry what you said to an agent.
+// frame and card that carry what you said to an agent.
 //
 // One tray entry turns it on; the tools themselves live in a toolbar at the
 // bottom of the screen, where a hand rests while the eye is on the page.
@@ -11,7 +11,8 @@
 //
 // Nothing here edits the document: everything drawn is transient chrome in one
 // fixed layer, like the callout. Nothing here invents a way to send, either —
-// the field opens the callout's card at the same region with the words in it.
+// the composer hung on the marks is a callout card, borrowed, so the words go
+// out through the same component as every other chat on the page.
 //
 // Spec: docs/superpowers/specs/2026-09-21-describe-mode-design.md
 
@@ -42,7 +43,7 @@
   };
 
   const STYLE = `
-    .marble-marks-layer {
+    .marble-marks-layer, .marble-marks-held {
       position: fixed; inset: 0; width: auto; height: auto; margin: 0; padding: 0; border: 0;
       background: none; overflow: visible; pointer-events: none;
       z-index: 2147483002;
@@ -54,10 +55,16 @@
     }
     /* In the top layer so no document's stacking context can cover it; the UA
        sheet for [popover] would otherwise centre it and give it a border. */
-    .marble-marks-layer:popover-open { position: fixed; inset: 0; }
+    .marble-marks-layer:popover-open, .marble-marks-held:popover-open { position: fixed; inset: 0; }
+    /* Marks an agent is working from. They leave the mode's layer for this one
+       when the brief is sent, so leaving Describe mode does not take them
+       with it: while the work is going on, the page still shows what was
+       asked for and where. Inert, because they are the brief now and not a
+       draft. */
+    .marble-marks-held * { pointer-events: none !important; }
 
     /* Leaving Describe mode takes everything it drew with it — the ink, the
-       notes, the frame, the field, the toolbar — and brings it all back on the
+       notes, the frame, the card, the toolbar — and brings it all back on the
        way in. Nothing is thrown away: the marks are still in the layer, still
        in the brief, still naming their elements. What goes is the sight of
        them, because a page you have stopped marking up is a page you want to
@@ -113,35 +120,6 @@
       transition: opacity 140ms ${EASE};
     }
     .marble-marks-frame[hidden] { display: none; }
-
-    .marble-marks-field {
-      position: fixed; pointer-events: auto; width: min(380px, calc(100vw - 32px));
-      display: flex; flex-direction: column; gap: 5px; padding: 8px 8px 8px 12px;
-      border-radius: 14px; background: var(--marks-paper);
-      border: 1px solid color-mix(in srgb, var(--marks-ink) 12%, transparent);
-      box-shadow: 0 1px 2px rgba(0, 0, 0, .06), 0 10px 30px rgba(0, 0, 0, .14);
-    }
-    .marble-marks-field[hidden] { display: none; }
-    .marble-marks-brief {
-      font-size: 11.5px; color: color-mix(in srgb, var(--marks-ink) 55%, transparent);
-      overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
-    }
-    .marble-marks-brief:empty { display: none; }
-    .marble-marks-row { display: flex; align-items: center; gap: 6px; }
-    .marble-marks-input {
-      all: unset; flex: 1; min-width: 0; font: inherit; color: var(--marks-ink);
-      caret-color: var(--marks-mark); padding: 2px 0;
-    }
-    .marble-marks-input:empty::before { content: attr(data-placeholder); color: color-mix(in srgb, var(--marks-ink) 40%, transparent); }
-    .marble-marks-send {
-      all: unset; flex: none; width: 28px; height: 28px; border-radius: 50%;
-      display: grid; place-items: center; cursor: pointer;
-      background: var(--marks-mark); color: var(--marks-paper);
-      transition: opacity 120ms ${EASE}, transform 100ms ease-out;
-    }
-    .marble-marks-send svg { width: 16px; height: 16px; }
-    .marble-marks-send:active { transform: scale(.94); }
-    .marble-marks-send[disabled] { opacity: .35; cursor: default; }
 
     .marble-marks-ink { position: fixed; inset: 0; width: 100%; height: 100%; overflow: visible; pointer-events: none; }
     .marble-marks-stroke {
@@ -392,29 +370,33 @@
     const halos = [];
     const hits = [];
 
-    // ------------------------------------------------------------- the field
+    // ------------------------------------------------------------ the held
+    //
+    // A second top-layer sheet for the marks an agent is working from. It is
+    // not inside the mode's layer, so the mode fading out leaves it standing.
 
-    const field = el('div', 'marble-marks-field', layer);
-    field.hidden = true;
-    const briefLine = el('div', 'marble-marks-brief', field);
-    const row = el('div', 'marble-marks-row', field);
-    const input = el('div', 'marble-marks-input', row);
-    input.contentEditable = 'true';
-    input.setAttribute('role', 'textbox');
-    input.setAttribute('aria-label', 'Describe the change');
-    input.dataset.placeholder = 'Describe the change…';
-    const send = document.createElement('button');
-    send.type = 'button';
-    send.className = 'marble-marks-send';
-    send.setAttribute(TRANSIENT, '');
-    send.setAttribute('aria-label', 'Send to an agent');
-    send.innerHTML = GLYPHS.send;
+    const held = document.createElement('div');
+    held.className = 'marble-marks-held';
+    held.setAttribute(TRANSIENT, '');
+    held.setAttribute('popover', 'manual');
+    held.inert = true;
+    document.documentElement.append(held);
+    try { held.showPopover(); } catch { /* fixed positioning still stands */ }
+    const heldInk = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+    heldInk.setAttribute('class', 'marble-marks-ink');
+    heldInk.setAttribute('aria-hidden', 'true');
+    heldInk.setAttribute(TRANSIENT, '');
+    held.append(heldInk);
+    const heldNotes = el('div', 'marble-marks-notes', held);
+
+    // After an undeclared move or resize, one click writes the declaration.
+    // It sits in the toolbar: the composer is the callout's, and a button
+    // about the document's vocabulary is not a thing to say to an agent.
     const declare = document.createElement('button');
     declare.type = 'button';
     declare.className = 'marble-marks-declare';
     declare.setAttribute(TRANSIENT, '');
     declare.hidden = true;
-    row.append(declare, send);
 
     // ----------------------------------------------------------- the toolbar
 
@@ -447,6 +429,7 @@
     const clearButton = button('clear', 'Clear marks', GLYPHS.clear);
     el('span', 'marble-marks-sep', bar);
     const doneButton = button('done', 'Done', GLYPHS.done);
+    bar.insertBefore(declare, bar.firstChild);
 
     // ------------------------------------------------------------ Explore ask
 
@@ -502,7 +485,11 @@
     // out, so the context listener below does not read that as the person
     // choosing something else.
     let handling = false;
-    let pending = null;
+    // The callout card this mode has borrowed as its composer, while it has one.
+    let card = null;
+    // True while Explore's ask is on its way: that ask already carries the
+    // marks' reading, so the card must not put it in front a second time.
+    let exploring = false;
     const marks = [];
     const picked = new Set();
 
@@ -686,7 +673,7 @@
       for (let i = chosen.length; i < halos.length; i += 1) halos[i].hidden = true;
     };
 
-    // --------------------------------------------------- the frame and field
+    // ---------------------------------------------------- the frame and card
 
     /** Everything meant right now, as one rectangle: the elements the
      *  selection names and the marks drawn about them. */
@@ -712,7 +699,7 @@
       const span = union();
       if (!span) {
         frame.hidden = true;
-        field.hidden = true;
+        card?.show(false);
         return;
       }
       const pad = 6;
@@ -721,16 +708,14 @@
         width: `${Math.round(span.width + pad * 2)}px`, height: `${Math.round(span.height + pad * 2)}px`,
       });
       frame.hidden = false;
-      paintField(span);
+      paintCard(span);
       paintExplore(span);
     };
 
-    /** The field hangs under the frame, flips above it when the bottom of the
-     *  window is nearer than its own height, and never leaves the window. */
     /** Hang something on the marks. Four places, tried in order — under them,
      *  over them, beside them, and failing all three just inside their top edge
      *  — because the one thing it must not do is give up and go and sit at the
-     *  bottom of the window. Down there is the toolbar, and a field that lands
+     *  bottom of the window. Down there is the toolbar, and a card that lands
      *  on the toolbar is in the way of the tools *and* nowhere near the thing
      *  it is about. A region taller than the window is the ordinary way to get
      *  there: a box sketched around most of a page has no room under it and
@@ -745,6 +730,8 @@
         node.style.left = `${Math.round(Math.min(Math.max(12, left), innerWidth - size.width - 12))}px`;
         node.style.top = `${Math.round(Math.min(Math.max(ceiling, top), Math.max(ceiling, floor)))}px`;
       };
+      node.style.right = 'auto';
+      node.style.bottom = 'auto';
       const centred = span.left + span.width / 2 - size.width / 2;
       const under = span.top + span.height + gap;
       const over = span.top - gap - size.height;
@@ -758,46 +745,63 @@
       // least of it underneath.
       return at(span.left + span.width - size.width - gap, span.top + gap);
     };
-    const paintField = (span) => {
-      if (explore.hidden === false) { field.hidden = true; return; }
+
+    /** What the card's head line says: what is meant, in the fewest words. */
+    const briefLine = () => {
       const count = fromUs ? mine.length : 0;
       const parts = [];
       if (count) parts.push(`${count} element${count === 1 ? '' : 's'}`);
       for (const mark of drafts()) parts.push(phraseOf(mark));
-      briefLine.textContent = parts.join(' · ');
-      hang(field, span);
+      return parts.join(' · ');
+    };
+
+    /** The composer is the callout's card, borrowed: the same component, with
+     *  the same model picker and send, as a chat anywhere else on the page.
+     *  One card for the whole mode, however the marks change; its head line
+     *  reads the marks and it sends their reading ahead of what is typed. */
+    const borrowCard = () => {
+      if (card) return card;
+      const detail = { ids: fromUs ? [...mine] : [] };
+      // Unanswered means no callout on this page, and so no card to hang.
+      if (dispatchEvent(new CustomEvent('marble-callout:describe', { detail, cancelable: true })) || !detail.card) return null;
+      card = detail.card;
+      card.convo.brief = () => (exploring ? '' : note());
+      card.convo.addEventListener('sent', onSent);
+      return card;
+    };
+    const paintCard = (span) => {
+      if (!describing || explore.hidden === false) { card?.show(false); return; }
+      const lent = borrowCard();
+      if (!lent) return;
+      lent.label(briefLine() || 'Describe the change');
+      lent.show(true);
+      hang(lent.el, span);
+      lent.convo.updateSendable?.();
     };
     const paintExplore = (span) => {
       if (explore.hidden) return;
       hang(explore, span);
     };
 
-    const sendable = () => Boolean(input.textContent.trim() || drafts().length || (fromUs && mine.length));
-    const paintSend = () => { send.disabled = !sendable(); };
-
-    /** One door out, and it is the callout's: the card opens at the same
-     *  region, with the brief and the sentence in it, and sends. */
-    const handOff = (text, { submit = true } = {}) => {
-      if (!fromUs && !drafts().length) return;
-      pending = { text, submit, marks: drafts() };
-      if (!dispatchEvent(new CustomEvent('marble-callout:summon', { cancelable: true }))) return;
-      // Nothing took it — no callout on this page, or nothing to anchor to.
-      pending = null;
-      agent.open();
-    };
-    const sendField = () => {
-      if (!sendable()) return;
-      const typed = input.textContent.trim();
-      input.textContent = '';
-      paintSend();
-      handOff(`${note()}${typed}`.trim());
-    };
-    send.addEventListener('click', sendField);
-    input.addEventListener('input', paintSend);
-    input.addEventListener('keydown', (event) => {
-      if (event.key === 'Enter' && !event.shiftKey) { event.preventDefault(); sendField(); return; }
-      if (event.key === 'Escape') { event.stopPropagation(); input.blur(); }
-    });
+    /** Sent: the agent has the brief, so the mode steps back and the page is
+     *  yours to read again — but what was marked stays up, in the held sheet,
+     *  for as long as the agent is working from it. The card stops being
+     *  this mode's and becomes the ordinary callout on the work. */
+    function onSent(event) {
+      const lent = card;
+      if (!lent) return;
+      const id = event.detail?.id ?? null;
+      for (const mark of drafts()) hold(mark, id);
+      card = null;
+      exploring = false;
+      lent.convo.brief = null;
+      lent.convo.removeEventListener('sent', onSent);
+      lent.release(fromUs ? mine : []);
+      area = [];
+      setDescribing(false);
+      syncSelection();
+      syncBrief();
+    }
 
     // ---------------------------------------------------------------- Select
 
@@ -823,6 +827,7 @@
     /** Which marks a rectangle means. A mark has no id and never enters the
      *  selection; it is picked so it can be moved or taken off the page. */
     const marksInRect = (r) => marks.filter((mark) => {
+      if (mark.working !== undefined) return false;
       const span = spanOf(mark);
       return span ? G().coverage(r, span) >= 0.6 : false;
     });
@@ -969,6 +974,29 @@
       return mark;
     };
 
+    /** Each element a mark is drawn with, however it was drawn. */
+    const elsOf = (mark) => (mark.type === 'note' ? [mark.el] : mark.type === 'stroke' ? mark.parts.map((part) => part.el) : []);
+    /** Sent, and being worked from: into the held sheet, where leaving the
+     *  mode does not reach. */
+    const hold = (mark, id) => {
+      mark.sent = true;
+      mark.working = id;
+      picked.delete(mark);
+      for (const node of elsOf(mark)) {
+        node.dataset.state = 'working';
+        (mark.type === 'note' ? heldNotes : heldInk).append(node);
+      }
+    };
+    /** The work it was for is put away: a kept mark again, back in the mode's
+     *  own layer, dimmed as sent. */
+    const unhold = (mark) => {
+      delete mark.working;
+      for (const node of elsOf(mark)) {
+        node.dataset.state = 'sent';
+        (mark.type === 'note' ? notes : ink).append(node);
+      }
+    };
+
     const removeMark = (mark) => {
       const at = marks.indexOf(mark);
       if (at < 0) return;
@@ -980,10 +1008,14 @@
       syncBrief();
     };
     const clearMarks = () => {
+      // What an agent is working from is its brief now, not this mode's to
+      // rub out; it goes when that callout is put away.
+      const keep = marks.filter((mark) => mark.working !== undefined);
       for (const mark of marks.splice(0)) {
-        if (mark.type === 'note') mark.el.remove();
-        else if (mark.type === 'stroke') for (const part of mark.parts) part.el.remove();
+        if (keep.includes(mark)) continue;
+        for (const node of elsOf(mark)) node.remove();
       }
+      marks.push(...keep);
       picked.clear();
       caption.hidden = true;
       offerDeclare(null);
@@ -1367,7 +1399,7 @@
       clearButton.hidden = count === 0 && !(fromUs && mine.length);
       exploreButton.disabled = !(fromUs && mine.length);
       update({ id: 'ask', label: count && fromUs ? 'Ask about the sketch' : 'Ask here' });
-      paintSend();
+      card?.convo.updateSendable?.();
       paintFrame();
     };
 
@@ -1376,6 +1408,12 @@
      *  be under it — and the tray is how Describe mode is turned off. Clip the
      *  corner it stands in out of the overlay, and the clicks there reach it. */
     const punch = () => {
+      // A pinned panel is the app beside the page, not the page: the overlay
+      // stops at its edge, so the chat in it can be read, typed in and
+      // scrolled with a tool still on.
+      const side = document.querySelector('marble-agent-drawer')?.shadowRoot?.querySelector('.panel');
+      const pinned = side?.dataset.open === 'true' && side?.dataset.pinned === 'true' ? side.getBoundingClientRect() : null;
+      overlay.style.right = pinned?.width ? `${Math.max(0, Math.round(innerWidth - pinned.left))}px` : '';
       const r = trayEl()?.getBoundingClientRect();
       if (!r?.width || !r?.height) { overlay.style.clipPath = ''; return; }
       const pad = 10;
@@ -1584,7 +1622,6 @@
     const openExplore = () => {
       if (!(fromUs && mine.length)) return;
       explore.hidden = false;
-      field.hidden = true;
       paintFrame();
       wantField.focus();
     };
@@ -1605,7 +1642,15 @@
       wantField.textContent = '';
       whyField.textContent = '';
       dispatchEvent(new CustomEvent('marble-variations:watch', { detail: { ids } }));
-      handOff(lines.join('\n'));
+      // The ask goes out through the same borrowed card as a sentence would,
+      // so it lands in the same kind of conversation and ends the same way.
+      const lent = borrowCard();
+      if (lent) {
+        exploring = true;
+        lent.convo.sendNow(lines.join('\n')).finally(() => { exploring = false; });
+      } else {
+        agent.open();
+      }
       paintFrame();
     };
     exploreButton.addEventListener('click', () => {
@@ -1636,6 +1681,12 @@
 
     const typing = (node) => node?.isContentEditable || ['INPUT', 'TEXTAREA'].includes(node?.tagName);
     addEventListener('keydown', (event) => {
+      // Keys typed into a composer are the composer's, and the card's lives in
+      // a shadow root, where document.activeElement is only its host: ⌫ in
+      // the brief must not take a mark off the page, nor ⌘Z a stroke.
+      if (typing(event.composedPath()[0])) {
+        if (event.key !== 'Escape' || !mode) return;
+      }
       if (mode === 'sketch' && (event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 'z' && !event.shiftKey) {
         if (!marks.length) return;
         event.preventDefault();
@@ -1643,7 +1694,7 @@
         undoStroke();
         return;
       }
-      if ((event.key === 'Backspace' || event.key === 'Delete') && picked.size && !typing(document.activeElement)) {
+      if ((event.key === 'Backspace' || event.key === 'Delete') && picked.size) {
         event.preventDefault();
         for (const mark of [...picked]) removeMark(mark);
         picked.clear();
@@ -1684,6 +1735,16 @@
         if (covered && mode) setMode(null);
       }).observe(panel, { attributes: true, attributeFilter: ['data-open', 'data-pinned'] });
     }
+
+    // The rest of the app stays usable under a tool. The card the brief is
+    // written in is the callout's, and its layer is lifted over this one — a
+    // top-layer sheet shown later paints later — so no hole is needed for it.
+    dispatchEvent(new CustomEvent('marble-callout:raise'));
+    if (panel) {
+      new ResizeObserver(() => { if (mode) punch(); }).observe(panel);
+      new MutationObserver(() => { if (mode) punch(); }).observe(panel, { attributes: true, attributeFilter: ['data-open', 'data-pinned', 'style'] });
+    }
+
     const tray = trayEl();
     if (tray) {
       // The hole follows the tray: it grows a row when a tool appears, and it
@@ -1692,30 +1753,19 @@
       new MutationObserver(() => { if (mode) punch(); }).observe(tray, { attributes: true, attributeFilter: ['style', 'data-away', 'data-open'] });
     }
 
-    // The callout card is where a brief lands. Whoever opened it, the words go
-    // in as a draft the person can still edit; only a brief this layer sent on
-    // purpose is submitted for them.
-    addEventListener('marble-callout:card', (event) => {
-      const convo = event.detail?.convo;
-      const brief = pending;
-      pending = null;
-      const text = brief ? brief.text : (fromUs ? note() : '');
-      if (!convo || !text) return;
-      const sent = brief?.marks ?? drafts();
-      if (brief?.submit && typeof convo.sendNow === 'function') convo.sendNow(text);
-      else convo.draft?.(text);
-      // Dimmed once the brief is on its way, not when the card opens: a card
-      // closed without sending leaves the marks yours.
-      const dim = () => {
-        for (const mark of sent) {
-          mark.sent = true;
-          if (mark.type === 'note') mark.el.dataset.state = 'sent';
-          else if (mark.type === 'stroke') for (const part of mark.parts) part.el.dataset.state = 'sent';
-        }
-        syncBrief();
-      };
-      if (brief?.submit) dim();
-      else convo.addEventListener('conversation', dim, { once: true });
+    // ⌘J and Ask here inside the mode mean the card already hung on the marks.
+    addEventListener('marble-marks:focus', () => {
+      if (!describing) return;
+      paintFrame();
+      card?.focus();
+    });
+
+    // The callout an agent was briefed from is put away — Done, or closed —
+    // and the marks it was working from go back to being kept marks: out of
+    // sight outside the mode, dimmed inside it.
+    addEventListener('marble-callout:removed', (event) => {
+      const id = event.detail?.id ?? null;
+      for (const mark of marks) if (mark.working !== undefined && mark.working === id) unhold(mark);
     });
 
     setMode(null);

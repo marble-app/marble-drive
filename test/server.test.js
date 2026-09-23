@@ -184,6 +184,47 @@ test('a file is served under a type the browser will not execute', async () => {
   assert.match(svg.headers.get('content-disposition'), /^attachment/);
 });
 
+// A song is played by seeking into it, and a browser that is not offered a
+// byte range will play one from the top and refuse to move the playhead.
+test('a file is served in ranges, so a song can be seeked', async () => {
+  await fsp.writeFile(path.join(ROOT, 'work/q3/tone.mp3'), Buffer.from('0123456789'));
+  const whole = await get('/drive/file?path=work%2Fq3%2Ftone.mp3');
+  assert.equal(whole.headers.get('accept-ranges'), 'bytes');
+  assert.equal(whole.headers.get('content-type'), 'audio/mpeg');
+
+  const mid = await get('/drive/file?path=work%2Fq3%2Ftone.mp3', { headers: { Range: 'bytes=2-5' } });
+  assert.equal(mid.status, 206);
+  assert.equal(mid.headers.get('content-range'), 'bytes 2-5/10');
+  assert.equal(await mid.text(), '2345');
+
+  const tail = await get('/drive/file?path=work%2Fq3%2Ftone.mp3', { headers: { Range: 'bytes=-3' } });
+  assert.equal(await tail.text(), '789');
+  const open = await get('/drive/file?path=work%2Fq3%2Ftone.mp3', { headers: { Range: 'bytes=7-' } });
+  assert.equal(await open.text(), '789');
+
+  const past = await get('/drive/file?path=work%2Fq3%2Ftone.mp3', { headers: { Range: 'bytes=40-' } });
+  assert.equal(past.status, 416);
+  assert.equal(past.headers.get('content-range'), 'bytes */10');
+});
+
+// The browser's PDF viewer will not draw under a sandbox, so a PDF is the one
+// file served without it — and still never sniffed into something else.
+test('a PDF opens in the browser rather than as a blank sandboxed tab', async () => {
+  await fsp.writeFile(path.join(ROOT, 'work/q3/paper.pdf'), '%PDF-1.4\n%%EOF');
+  const pdf = await get('/drive/file?path=work%2Fq3%2Fpaper.pdf');
+  assert.equal(pdf.headers.get('content-type'), 'application/pdf');
+  assert.match(pdf.headers.get('content-disposition'), /^inline/);
+  assert.equal(pdf.headers.get('content-security-policy'), null);
+  assert.equal(pdf.headers.get('x-content-type-options'), 'nosniff');
+});
+
+test('a thumbnail is asked for, and a file with none is a 404 the page can draw around', async () => {
+  const none = await get('/drive/thumb?path=work%2Fq3%2Frefs.bib&w=320');
+  assert.equal(none.status, 404);
+  assert.equal((await get('/drive/thumb?path=work%2Fq3%2Fnope.pdf')).status, 404);
+  assert.equal((await get('/drive/thumb?path=..%2Fetc%2Fpasswd')).status, 400);
+});
+
 test('the file route refuses a document, a folder and a way out of the drive', async () => {
   assert.equal((await get('/drive/file?path=work%2Fq3%2Fnotes')).status, 404);
   assert.equal((await get('/drive/file?path=work%2Fq3%2Fnotes.mrbl')).status, 400);
@@ -459,6 +500,62 @@ test('an upload is announced to the drive, and never to whoever filed it', async
   const heard = await others.frames;
   assert.ok(heard.some((frame) => frame.event === 'created' && JSON.parse(frame.data).path === 'Announced'));
   assert.deepEqual(await uploader.frames, []);
+});
+
+/** The file route: the body is the bytes, and nothing about them is text. */
+const putFile = (folder, name, bytes, client = 'up') =>
+  fetch(
+    `${base}/drive/upload-file?folder=${encodeURIComponent(folder)}` +
+      `&name=${encodeURIComponent(name)}&client=${client}`,
+    { method: 'POST', headers: { 'Content-Type': 'audio/mpeg' }, body: bytes },
+  );
+
+test('a song dropped into a folder lands there byte for byte, and plays from the drive', async () => {
+  await asJson(await post('/drive/mkdir', { path: 'Fun/Song Mashups' }));
+  // Every byte value, so a text decode anywhere on the way would show.
+  const bytes = Buffer.from(Array.from({ length: 70000 }, (_, i) => (i * 37) % 256));
+  const others = collect('/events?drive=1&client=listener', { want: 1, ms: 1500 });
+  await others.ready;
+
+  const first = await asJson(await putFile('Fun/Song Mashups', 'thank u, next (Instrumental).mp3', bytes));
+  assert.equal(first.path, 'Fun/Song Mashups/thank u next Instrumental.mp3');
+  assert.equal(first.bytes, bytes.length);
+  assert.deepEqual(await fsp.readFile(path.join(ROOT, first.path)), bytes);
+
+  const heard = await others.frames;
+  assert.ok(heard.some((f) => f.event === 'created' && JSON.parse(f.data).path === first.path));
+
+  const served = await get(first.href);
+  assert.equal(served.status, 200);
+  assert.equal(served.headers.get('content-type'), 'audio/mpeg');
+  assert.deepEqual(Buffer.from(await served.arrayBuffer()), bytes);
+
+  // The same name twice is a second file, numbered before the extension so it
+  // is still an mp3 — never the first one overwritten.
+  const second = await asJson(await putFile('Fun/Song Mashups', 'thank u, next (Instrumental).mp3', Buffer.from('b')));
+  assert.equal(second.path, 'Fun/Song Mashups/thank u next Instrumental 1.mp3');
+  assert.deepEqual(await fsp.readFile(path.join(ROOT, first.path)), bytes);
+
+  const tree = await asJson(await get('/drive/tree?folder=Fun%2FSong%20Mashups'));
+  const names = tree.children.map((c) => c.kind + ':' + c.name).sort();
+  assert.deepEqual(names, [
+    'file:thank u next Instrumental 1.mp3',
+    'file:thank u next Instrumental.mp3',
+  ]);
+  // Nothing half-written is left behind under its hidden name.
+  const onDisk = await fsp.readdir(path.join(ROOT, 'Fun/Song Mashups'));
+  assert.equal(onDisk.filter((n) => n.startsWith('.')).length, 0);
+});
+
+test('a document is never stored as a file, and a file cannot climb out', async () => {
+  const doc = await putFile('', 'Sneaky.mrbl', Buffer.from('<!doctype html><title>x</title>'));
+  assert.equal(doc.status, 400);
+  assert.equal((await putFile('', 'page.html', Buffer.from('<p>'))).status, 400);
+
+  const climbed = await asJson(await putFile('../..', '../escape.mp3', Buffer.from('x')));
+  assert.ok(path.resolve(ROOT, climbed.path).startsWith(path.resolve(ROOT) + path.sep));
+  assert.match(climbed.path, /escape\.mp3$/);
+  assert.ok(!(await fsp.stat(path.join(ROOT, '..', 'escape.mp3')).catch(() => null)));
 });
 
 test('a bad path is a 400 with a sentence, not a stack trace', async () => {

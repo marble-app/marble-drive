@@ -33,6 +33,16 @@ import {
 
 const SELECTION_BUDGET = 6_000;
 const STDERR_TAIL = 4_000;
+
+/** Cursor's "Cannot use this model" answer continues with every model id.
+ *  The sentence before "Available models" is the failure. The list is not. */
+export function clipFailure(text) {
+  const raw = String(text ?? '').trim();
+  const at = raw.search(/Available models:/i);
+  const clipped = (at > 0 ? raw.slice(0, at) : raw).trim().replace(/[.:]\s*$/, '');
+  if (!clipped) return '';
+  return clipped.length > 500 ? `${clipped.slice(0, 500)}…` : clipped;
+}
 // How long closing the host waits for its running turns to write their end.
 const CLOSE_GRACE_MS = 5_000;
 // How long a result has to stand unchallenged before the runner acts on it,
@@ -637,7 +647,9 @@ export function createRunner({ store, tools, providers, workdir, origin, bridgeP
         for (const event of events) handle(turn, event);
       });
       child.stderr.on('data', (chunk) => {
-        turn.stderr = (turn.stderr + chunk).slice(-STDERR_TAIL);
+        const text = String(chunk);
+        turn.stderrHead = `${turn.stderrHead ?? ''}${text}`.slice(0, 500);
+        turn.stderr = (turn.stderr + text).slice(-STDERR_TAIL);
       });
       child.on('error', (err) => {
         turn.stderr = err.message;
@@ -648,7 +660,7 @@ export function createRunner({ store, tools, providers, workdir, origin, bridgeP
         const ok = (code === 0 || turn.lingered) && turn.done?.ok !== false;
         safeFinish(turn, turn.cancelled ?? {
           status: ok ? 'completed' : 'failed',
-          error: ok ? null : turn.done?.error ?? (turn.stderr.trim() || `exited with ${code}`),
+          error: ok ? null : turn.done?.error ?? (clipFailure(turn.stderrHead || turn.stderr) || `exited with ${code}`),
         });
       });
     } catch (err) {

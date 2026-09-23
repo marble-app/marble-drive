@@ -10,7 +10,7 @@
 # tarball, or a git ref if you are running ahead of a release.
 
 FROM node:22-alpine AS base
-ARG MARBLE_PACKAGE=@bdhmin/marble@^0.1.2
+ARG MARBLE_PACKAGE=@bdhmin/marble@^0.2.0
 
 WORKDIR /app
 
@@ -42,7 +42,8 @@ ENV MARBLE_DRIVE_ROOT=/data \
 # Made and owned before the volume is declared: Docker seeds a named volume from
 # the image, ownership included, and a drive root the process cannot write to is
 # a host that starts cleanly and fails on the first document.
-RUN mkdir -p /data /backups && chown -R node:node /data /backups
+RUN mkdir -p /data /backups && chown -R node:node /data /backups \
+ && apk add --no-cache su-exec
 VOLUME ["/data"]
 EXPOSE 4400
 
@@ -50,5 +51,9 @@ EXPOSE 4400
 HEALTHCHECK --interval=30s --timeout=3s --start-period=5s \
   CMD node -e "fetch('http://127.0.0.1:'+(process.env.PORT||4400)+'/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"
 
-USER node
+# Starts as root for one reason: a disk mounted over /data by a platform rather
+# than seeded by Docker (a Fly volume, a bind mount) arrives owned by root, and
+# the seeding above never happens. Hand it to `node` if it is not already
+# theirs, then drop to `node` for everything else.
+ENTRYPOINT ["/bin/sh", "-c", "[ \"$(stat -c %U /data)\" = node ] || chown -R node:node /data; exec su-exec node \"$@\"", "--"]
 CMD ["node", "bin/marble-drive.js", "serve"]

@@ -1003,6 +1003,43 @@ __ICON__
   }
   .toast[data-open="1"] { opacity: 1; transform: none; }
 
+  /* What is on its way up. The toast says a thing happened and goes; a song
+     going up over a slow link is minutes of "is it doing anything", so this
+     stays until it is done and shows it moving. Same corner as the toast,
+     which it replaces while it is open. */
+  .uploads {
+    position: fixed; left: 1.2rem; bottom: 1.2rem; z-index: 41; width: min(22rem, calc(100vw - 2.4rem));
+    padding: .8rem .9rem .75rem; border-radius: 12px;
+    background: rgba(var(--card-rgb), .9); backdrop-filter: blur(20px) saturate(160%);
+    -webkit-backdrop-filter: blur(20px) saturate(160%);
+    border: 1px solid var(--line); color: var(--ink); font-size: .85rem; box-shadow: var(--shadow-lift);
+    opacity: 0; transform: translateY(.4rem) scale(.98); pointer-events: none;
+    transition: opacity var(--t) var(--settle), transform var(--t) var(--settle);
+  }
+  .uploads[data-open="1"] { opacity: 1; transform: none; pointer-events: auto; }
+  .uploads[data-open="1"] ~ .toast, .uploads[data-open="1"] + .toast { opacity: 0; }
+  .up-head { display: flex; align-items: baseline; gap: .6rem; }
+  .up-title { flex: 1 1 auto; min-width: 0; font-weight: 500; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .up-sum { flex: 0 0 auto; color: var(--muted); font-size: .78rem; font-variant-numeric: tabular-nums; }
+  .up-bar { position: relative; height: 4px; margin: .55rem 0 .5rem; border-radius: 2px; overflow: hidden;
+    background: color-mix(in srgb, var(--line) 70%, transparent); }
+  .up-bar i { position: absolute; inset: 0 auto 0 0; width: 0; background: var(--accent-ink);
+    transition: width 180ms linear; }
+  .uploads[data-state="done"] .up-bar i { width: 100%; }
+  .uploads[data-state="failed"] .up-bar i { background: #b3261e; }
+  .up-files { list-style: none; margin: 0; padding: 0; display: grid; gap: .2rem; max-height: 7.5rem; overflow: auto; }
+  .up-files li { display: flex; gap: .6rem; align-items: baseline; font-size: .8rem; }
+  .up-files .n { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--muted); }
+  .up-files li[data-state="going"] .n { color: var(--ink); }
+  .up-files .s { flex: 0 0 auto; color: var(--faint); font-variant-numeric: tabular-nums; }
+  .up-files li[data-state="done"] .s { color: var(--accent-ink); }
+  .up-files li[data-state="failed"] .s { color: #b3261e; }
+  .up-foot { display: flex; justify-content: flex-end; margin-top: .45rem; }
+  .up-foot button { font: inherit; font-size: .78rem; padding: .2rem .6rem; border-radius: 6px; cursor: pointer;
+    background: transparent; color: var(--muted); border: 1px solid var(--line); }
+  .up-foot button:hover { color: var(--ink); border-color: var(--muted); }
+  @media (prefers-reduced-motion: reduce) { .up-bar i { transition: none; } }
+
   .ghost {
     position: fixed; z-index: 50; pointer-events: none; padding: .4rem .7rem;
     background: var(--card); border: 1px solid var(--accent-ink); border-radius: 8px;
@@ -1059,6 +1096,147 @@ __ICON__
     body[data-view="list"] .item > .row-meta.owner,
     body[data-view="list"] .item > .row-meta.size,
     .listhead > .owner, .listhead > .size { display: none; }
+  }
+  /* A file that is not a document, shown as what it is. A picture is the
+     picture (a PDF's first page, a slide, a photo); a song is its waveform,
+     with a button to hear it where it lies; text is its first lines. What
+     cannot be shown is its glyph and its kind, which is what it was before.
+     One element for the grid's tile and the map's cell, sized by whoever
+     places it. */
+  .fp {
+    --fp: var(--tile, var(--accent-ink));
+    position: absolute; inset: 0; overflow: hidden;
+    display: grid; place-items: center; container-type: size;
+    color: var(--fp);
+  }
+  .item .thumb .fp { inset: 0 0 3px 0; background: var(--card); }
+  .fp-badge {
+    display: flex; flex-direction: column; align-items: center; gap: .4rem;
+    color: color-mix(in srgb, var(--fp) 70%, var(--faint)); pointer-events: none;
+    transition: opacity var(--t) var(--settle);
+  }
+  .fp-badge .glyph { width: 2.1rem; height: 2.1rem; }
+  .fp-badge i {
+    font-style: normal; font-size: 11px; font-weight: 600; letter-spacing: .06em;
+    padding: 1px 6px; border-radius: 3px;
+    background: color-mix(in srgb, var(--fp) 12%, transparent);
+  }
+  @container (max-height: 70px) { .fp-badge i { display: none; } }
+  .fp.marble-is-ready > .fp-badge { display: none; }
+
+  .fp-img {
+    position: absolute; inset: 0; width: 100%; height: 100%;
+    object-fit: cover; object-position: center; pointer-events: none;
+    opacity: 0; transition: opacity var(--t-slow) var(--settle), filter var(--t-slow) var(--settle);
+  }
+  .fp.marble-is-ready > .fp-img { opacity: 1; }
+  /* A page is read from the top, the way a document tile shows one. */
+  .fp[data-fk="pdf"] > .fp-img, .fp[data-fk="office"] > .fp-img { object-position: top center; }
+  /* The thumbnailer draws a page on its own white; a picture of a sheet on
+     the card reads as the sheet. */
+  .fp[data-fk="pdf"], .fp[data-fk="office"] { background: var(--card); }
+  .fp-mark {
+    position: absolute; right: 8px; bottom: 8px; width: 28px; height: 28px; border-radius: 7px;
+    display: grid; place-items: center; pointer-events: none; z-index: 3;
+    color: #fff; background: rgb(0 0 0 / .45); backdrop-filter: blur(6px);
+  }
+  .fp-mark svg { width: 12px; height: 12px; }
+
+  .fp-text {
+    position: absolute; inset: 0; margin: 0; padding: 9px 11px; overflow: hidden;
+    font: 11px/1.45 ui-monospace, SFMono-Regular, Menlo, monospace; white-space: pre-wrap; word-break: break-word;
+    color: color-mix(in srgb, var(--fp) 45%, var(--ink)); pointer-events: none;
+    -webkit-mask-image: linear-gradient(#000 70%, transparent);
+            mask-image: linear-gradient(#000 70%, transparent);
+    opacity: 0; transition: opacity var(--t-slow) var(--settle);
+  }
+  .fp.marble-is-ready > .fp-text { opacity: .85; }
+
+  /* A song. The waveform is the file's own shape, drawn once and kept; the
+     part already heard is filled in the accent, so where you are in it is
+     where the colour stops. Pressing anywhere on it goes there. */
+  .fp-tune {
+    position: absolute; inset: 0; display: grid;
+    grid-template: "art" 0 "wave" 1fr "bar" auto / 1fr;
+    padding: 10px 12px;
+  }
+  .fp.marble-has-art .fp-tune { grid-template-rows: minmax(0, 1fr) minmax(36px, .5fr) auto; row-gap: 10px; }
+  @container (aspect-ratio > 1.6) {
+    .fp.marble-has-art .fp-tune {
+      grid-template: "art wave" 1fr "art bar" auto / auto 1fr; column-gap: 12px; row-gap: 0;
+    }
+  }
+  .fp-art {
+    grid-area: art; min-height: 0; max-width: 100%; height: 100%; aspect-ratio: 1; justify-self: start;
+    border-radius: 6px; overflow: hidden; background: color-mix(in srgb, var(--fp) 14%, var(--card));
+  }
+  .fp-art img { width: 100%; height: 100%; object-fit: cover; display: block; }
+  .fp-wave {
+    grid-area: wave; position: relative; min-height: 0; cursor: pointer;
+    align-self: center; height: 100%; max-height: 200px;
+  }
+  .fp-wave svg { position: absolute; inset: 0; width: 100%; height: 100%; overflow: visible; }
+  .fp-wave .fp-bars { fill: color-mix(in srgb, var(--fp) 32%, transparent); }
+  .fp-wave .fp-heard { fill: var(--fp); clip-path: inset(0 calc(100% - var(--p, 0) * 100%) 0 0); }
+  .fp-wave:hover .fp-bars { fill: color-mix(in srgb, var(--fp) 44%, transparent); }
+  .fp[data-fk="audio"]:not(.marble-is-ready) .fp-wave { opacity: 0; }
+  .fp[data-fk="audio"].marble-is-ready .fp-wave { animation: fp-rise var(--t-slow) var(--settle); }
+  @keyframes fp-rise { from { opacity: 0; transform: scaleY(.2); } }
+  .fp-bar {
+    grid-area: bar; display: flex; align-items: center; gap: 10px; min-width: 0; padding-top: 8px;
+  }
+  .fp-play {
+    flex: none; width: 34px; height: 34px; border-radius: 9px; border: 0; padding: 0;
+    display: grid; place-items: center; cursor: pointer;
+    color: var(--card); background: var(--fp);
+    transition: transform var(--t-fast) var(--snap), filter var(--t-fast) var(--snap);
+  }
+  .fp-play:hover { filter: brightness(1.08); }
+  .fp-play:active { transform: scale(.94); }
+  .fp-play:focus-visible { outline: 2px solid var(--fp); outline-offset: 2px; }
+  .fp-play svg { width: 14px; height: 14px; }
+  .fp-play .is-pause, .fp.marble-is-playing .fp-play .is-play { display: none; }
+  .fp.marble-is-playing .fp-play .is-pause { display: block; }
+  .fp-say { min-width: 0; display: flex; flex-direction: column; line-height: 1.25; }
+  .fp-say b {
+    font-size: 12.5px; font-weight: 500; color: var(--ink);
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  }
+  .fp-say b:empty { display: none; }
+  .fp-time { font-size: 12px; color: var(--muted); font-variant-numeric: tabular-nums; white-space: nowrap; }
+  /* Small: the waveform alone, and the button over it. */
+  @container (max-height: 96px) {
+    .fp-tune { padding: 6px 8px; grid-template: "wave" 1fr / 1fr; }
+    .fp-tune .fp-art, .fp-tune .fp-say { display: none; }
+    .fp-tune .fp-bar { grid-area: wave; padding: 0; align-self: center; justify-self: start; z-index: 1; }
+    .fp-tune .fp-wave { margin-left: 44px; }
+    .fp-play { width: 30px; height: 30px; }
+    .fp[data-fk="audio"] > .fp-badge { display: none; }
+  }
+  @container (max-width: 150px) { .fp-say { display: none; } }
+
+  /* In the map, the pictures are printed in the folder's ink like the
+     pages beside them, and show as themselves under the pointer. */
+  .tm-file { position: absolute; border-radius: 8px; box-shadow: 0 0 0 1px color-mix(in srgb, var(--tile) 18%, var(--line)); }
+  .tm-file.marble-is-pic { isolation: isolate; background: var(--card); }
+  .tm-file.marble-is-pic > .fp-img { filter: grayscale(1); }
+  .tm-file.marble-is-pic.marble-is-ready::before, .tm-file.marble-is-pic.marble-is-ready::after {
+    content: ''; position: absolute; inset: 0; pointer-events: none;
+    transition: opacity var(--t-slow) var(--settle);
+  }
+  .tm-file.marble-is-pic::before { z-index: 1; background: var(--tile); mix-blend-mode: screen; }
+  .tm-file.marble-is-pic::after { z-index: 2; mix-blend-mode: multiply; background: color-mix(in srgb, var(--tile) var(--mix), var(--card)); }
+  @media (prefers-color-scheme: dark) {
+    .tm-file.marble-is-pic::before { mix-blend-mode: multiply; }
+    .tm-file.marble-is-pic::after { mix-blend-mode: screen; }
+  }
+  .tm:hover > .tm-file.marble-is-pic::before, .tm:hover > .tm-file.marble-is-pic::after { opacity: 0; }
+  .tm:hover > .tm-file.marble-is-pic > .fp-img { filter: none; }
+  .tm-file[data-fk="audio"], .tm-file[data-fk="text"] { box-shadow: none; }
+  .tm-file .fp-tune { padding: 4px 6px; }
+  .tm-file .fp-bar { padding-top: 10px; }
+  @media (prefers-reduced-motion: reduce) {
+    .fp[data-fk="audio"].marble-is-ready .fp-wave { animation: none; }
   }
 </style>
 </head>
@@ -1331,8 +1509,52 @@ __ICON__
           '<path fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round" ' +
           'd="M9 3.2h3.8V7M12.8 3.2 7.4 8.6"/></svg>',
       };
-      const iconFor = (kind) =>
-        kind === 'folder' ? ICON.folder : kind === 'file' ? ICON.file : ICON.doc;
+      // A file says what kind of thing it is before it is opened: a picture,
+      // a song, a film, something to read. Same sheet, same weight, one mark.
+      const SHEET =
+        '<path fill="none" stroke="currentColor" stroke-width="1.3" stroke-linejoin="round" ' +
+        'd="M3.4 2.3h5.1l4.1 4.1v7.3a1 1 0 0 1-1 1H3.4a1 1 0 0 1-1-1V3.3a1 1 0 0 1 1-1z"/>' +
+        '<path fill="none" stroke="currentColor" stroke-width="1.3" stroke-linejoin="round" d="M8.4 2.4v4.2h4.2"/>';
+      const FILE_ICON = {
+        image:
+          '<svg class="glyph" viewBox="0 0 16 16" aria-hidden="true" focusable="false">' +
+          '<rect x="2.2" y="2.7" width="11.6" height="10.6" rx="2.1" fill="none" stroke="currentColor" stroke-width="1.3"/>' +
+          '<path fill="none" stroke="currentColor" stroke-width="1.3" stroke-linejoin="round" d="m2.6 11.6 3.5-3.7 2.6 2.6 1.5-1.4 3.2 2.9"/>' +
+          '<circle cx="10.4" cy="5.9" r="1.05" fill="currentColor"/></svg>',
+        audio:
+          '<svg class="glyph" viewBox="0 0 16 16" aria-hidden="true" focusable="false">' +
+          '<path fill="none" stroke="currentColor" stroke-width="1.3" stroke-linejoin="round" d="M6.3 11.7V3.8l6.3-1.4v7.8"/>' +
+          '<circle cx="4.6" cy="11.7" r="1.7" fill="none" stroke="currentColor" stroke-width="1.3"/>' +
+          '<circle cx="10.9" cy="10.2" r="1.7" fill="none" stroke="currentColor" stroke-width="1.3"/></svg>',
+        video:
+          '<svg class="glyph" viewBox="0 0 16 16" aria-hidden="true" focusable="false">' +
+          '<rect x="2.2" y="3.2" width="11.6" height="9.6" rx="2.1" fill="none" stroke="currentColor" stroke-width="1.3"/>' +
+          '<path fill="currentColor" d="M6.7 5.9v4.2l3.4-2.1z"/></svg>',
+        text:
+          '<svg class="glyph" viewBox="0 0 16 16" aria-hidden="true" focusable="false">' + SHEET +
+          '<path fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" d="M5 9.3h5.4M5 11.7h3.6"/></svg>',
+      };
+      FILE_ICON.pdf = FILE_ICON.text;
+      FILE_ICON.office = FILE_ICON.text;
+      const iconFor = (kind, entry) =>
+        kind === 'folder' ? ICON.folder
+        : kind === 'file' ? (entry && FILE_ICON[fileKind(entry)]) || ICON.file
+        : ICON.doc;
+
+      // What a file is, from its name — the only thing about it the listing
+      // knows without asking. Unknown is `other`, which is shown as a glyph.
+      const FILE_KINDS = {
+        image: 'png jpg jpeg gif webp avif bmp ico heic heif tif tiff svg psd eps ai dng cr2 cr3 nef arw raf orf',
+        pdf: 'pdf',
+        office: 'doc docx rtf pages odt ppt pptx key odp xls xlsx numbers ods epub',
+        video: 'mp4 m4v mov webm ogv mkv avi',
+        audio: 'mp3 wav m4a aac flac ogg oga opus aif aiff',
+        text: 'txt md markdown json jsonl csv tsv bib tex yml yaml toml ini js mjs cjs ts tsx jsx py rb go rs java c h cpp sh css log bak xml',
+      };
+      const FILE_KIND = new Map(
+        Object.entries(FILE_KINDS).flatMap(([kind, list]) => list.split(' ').map((ext) => [ext, kind])),
+      );
+      const fileKind = (entry) => FILE_KIND.get(String(entry.ext || '').toLowerCase()) ?? 'other';
 
       // ------------------------------------------------------------ the listing
 
@@ -1354,9 +1576,24 @@ __ICON__
         (folder.children ?? []).some(
           (child) => child.kind === 'doc' || (child.kind === 'folder' && holdsDocs(child)),
         );
+      // An empty folder holds no paperwork either: it is a place nobody has
+      // put anything in yet — usually the one just made — so it is drawn as a
+      // folder, not folded away under the rule.
+      const holdsFiles = (folder) =>
+        (folder.children ?? []).some(
+          (child) => child.kind === 'file' || (child.kind === 'folder' && holdsFiles(child)),
+        );
+      //
+      // Except a file that shows itself — a song, a film, a photo, a paper.
+      // The mp3 beside the mashup is what the mashup is made of, and a strip
+      // of names under the rule was a song you could not hear. Those get a
+      // tile that plays, pictures or pages them; the text and the data still
+      // fold away.
+      const SHOWS = new Set(['audio', 'video', 'image', 'pdf', 'office']);
       const isMaterial = (entry) =>
         view === 'drive' &&
-        (entry.kind === 'file' || (entry.kind === 'folder' && !holdsDocs(entry)));
+        ((entry.kind === 'file' && !SHOWS.has(fileKind(entry))) ||
+          (entry.kind === 'folder' && holdsFiles(entry) && !holdsDocs(entry)));
 
       // Which rows are picked, held as a set of paths rather than elements,
       // because the listing is thrown away and rebuilt on every refresh and a
@@ -1415,7 +1652,7 @@ __ICON__
         if (picked.has(entry.path)) el.classList.add('marble-picked');
         el.innerHTML =
           '<span class="name"><span class="ico">' +
-          iconFor(entry.kind) +
+          iconFor(entry.kind, entry) +
           '</span><b></b></span>' +
           '<span class="row-meta owner"></span>' +
           '<span class="row-meta when"></span>' +
@@ -1434,10 +1671,12 @@ __ICON__
         // is the only question a row in there is asked.
         el.querySelector('.owner').textContent =
           entry.kind === 'doc' ? entry.nodes + ' nodes'
+          : entry.kind === 'file' ? (entry.ext || 'file').toUpperCase()
           : entry.items != null ? entry.items + (entry.items === 1 ? ' item' : ' items')
           : '—';
         el.querySelector('.when').textContent = entry.modified ? ago(entry.modified) : '';
-        el.querySelector('.size').textContent = entry.kind === 'doc' ? bytes(entry.bytes) : '';
+        el.querySelector('.size').textContent =
+          entry.kind === 'doc' || entry.kind === 'file' ? bytes(entry.bytes ?? 0) : '';
         fillThumb(el.querySelector('.thumb'), entry);
         el.querySelector('.thumb').insertAdjacentHTML('beforeend', '<span class="weight"></span>');
         el.querySelector('.thumb .weight').style.setProperty(
@@ -1460,7 +1699,7 @@ __ICON__
         stampRealm(el, entry.path);
         if (picked.has(entry.path)) el.classList.add('marble-picked');
         el.innerHTML =
-          '<span class="name"><span class="ico">' + iconFor(entry.kind) + '</span><b></b></span>' +
+          '<span class="name"><span class="ico">' + iconFor(entry.kind, entry) + '</span><b></b></span>' +
           '<span class="about"></span>' +
           '<button class="more" aria-label="More">\u22ee</button>';
         el.querySelector('b').textContent = entry.name ?? leaf(entry.path);
@@ -1562,10 +1801,387 @@ __ICON__
         { rootMargin: '250px' },
       );
 
+      // ------------------------------------------------------ files, previewed
+      //
+      // A file cannot draw itself the way a page can, but most of them can
+      // still be seen. The host's thumbnailer pictures what the browser cannot
+      // (a PDF's first page, a deck, a HEIC photo, an SVG drawn to pixels so
+      // its script never runs), and this page does the rest from the bytes: a
+      // song's waveform and its cover, a text file's first lines. Everything
+      // is asked for once the tile nears the screen, and whatever cannot be
+      // shown stays the glyph it was drawn as.
+      const NATIVE_IMAGE = new Set(['png', 'jpg', 'jpeg', 'gif', 'webp', 'avif', 'bmp', 'ico']);
+      const fileStamp = (entry) => entry.path + '|' + (entry.modified || '') + '|' + (entry.bytes || '');
+      const PLAY =
+        '<svg class="is-play" viewBox="0 0 14 14" aria-hidden="true"><path fill="currentColor" d="M3.5 1.9v10.2a.6.6 0 0 0 .9.5l8.1-5.1a.6.6 0 0 0 0-1L4.4 1.4a.6.6 0 0 0-.9.5z"/></svg>' +
+        '<svg class="is-pause" viewBox="0 0 14 14" aria-hidden="true"><rect x="2.6" y="1.8" width="3.1" height="10.4" rx=".7" fill="currentColor"/><rect x="8.3" y="1.8" width="3.1" height="10.4" rx=".7" fill="currentColor"/></svg>';
+
+      const fileObserver = new IntersectionObserver(
+        (entries) => {
+          for (const e of entries) {
+            if (!e.isIntersecting) continue;
+            fileObserver.unobserve(e.target);
+            mountFile(e.target);
+          }
+        },
+        { rootMargin: '250px' },
+      );
+
+      // The preview element. `w` is roughly how wide it will be drawn, so the
+      // thumbnailer is asked for a picture that size and not the whole photo.
+      function filePreview(entry, { w = 320 } = {}) {
+        const kind = fileKind(entry);
+        const el = document.createElement('span');
+        el.className = 'fp';
+        el.dataset.fk = kind;
+        el.dataset.path = entry.path;
+        el.dataset.ext = entry.ext || '';
+        el.dataset.w = String(Math.round(w));
+        el.dataset.v = String(entry.modified || '');
+        el.dataset.bytes = String(entry.bytes || 0);
+        el.innerHTML = '<span class="fp-badge">' + iconFor('file', entry) + '<i></i></span>';
+        el.querySelector('.fp-badge i').textContent = (entry.ext || 'file').toUpperCase();
+        if (kind === 'audio') {
+          el.insertAdjacentHTML(
+            'beforeend',
+            '<span class="fp-tune"><span class="fp-art" hidden></span>' +
+              '<span class="fp-wave" aria-hidden="true"></span>' +
+              '<span class="fp-bar"><button class="fp-play" type="button">' + PLAY + '</button>' +
+              '<span class="fp-say"><b></b><span class="fp-time"></span></span></span></span>',
+          );
+          el.querySelector('.fp-play').setAttribute('aria-label', 'Play ' + (entry.name ?? leaf(entry.path)));
+          el.querySelector('.fp-time').textContent = bytes(entry.bytes ?? 0);
+          tuneSync(el);
+        }
+        fileObserver.observe(el);
+        return el;
+      }
+
+      function mountFile(el) {
+        const kind = el.dataset.fk;
+        const path = el.dataset.path;
+        if (kind === 'audio') return mountTune(el);
+        if (kind === 'text') {
+          fetch(drive.fileHref(path), { headers: { Range: 'bytes=0-3071' } })
+            .then((r) => (r.ok ? r.arrayBuffer() : Promise.reject(r.status)))
+            .then((buf) => {
+              let words = new TextDecoder('utf-8').decode(buf.slice(0, 3072));
+              // Bytes that are not text are not worth showing as text.
+              if (/[\u0000-\u0008\u000e-\u001f]/.test(words.slice(0, 512))) return;
+              const cut = words.lastIndexOf('\n');
+              if (cut > 200) words = words.slice(0, cut);
+              const pre = document.createElement('pre');
+              pre.className = 'fp-text';
+              pre.textContent = words;
+              el.append(pre);
+              el.classList.add('marble-is-ready');
+            })
+            .catch(() => {});
+          return;
+        }
+        if (kind === 'other') return;
+        const img = new Image();
+        img.className = 'fp-img';
+        img.alt = '';
+        img.decoding = 'async';
+        const w = Math.min(1280, Math.round(Number(el.dataset.w || 320) * (devicePixelRatio || 1)));
+        let fellBack = false;
+        img.addEventListener('load', () => {
+          el.append(img);
+          el.classList.add('marble-is-ready');
+          if (kind === 'video') el.insertAdjacentHTML('beforeend', '<span class="fp-mark">' + PLAY.split('</svg>')[0] + '</svg></span>');
+        });
+        img.addEventListener('error', () => {
+          // No thumbnailer here, or none for this kind: a picture the browser
+          // can draw is drawn from the file itself, and anything else keeps
+          // its glyph.
+          if (fellBack || !NATIVE_IMAGE.has(el.dataset.ext)) return;
+          fellBack = true;
+          img.src = drive.fileHref(path);
+        });
+        img.src = drive.thumbHref
+          ? drive.thumbHref(path, { w, v: el.dataset.v })
+          : drive.fileHref(path);
+      }
+
+      // ------------------------------------------------------------ songs
+      //
+      // One player for the page, not one per tile: the listing is thrown away
+      // and redrawn on every write anywhere in the drive, and a song should not
+      // stop because somebody saved a document. A tile that is drawn again
+      // finds the player by the path and picks up where it is.
+      const tune = { audio: null, path: '', frame: 0 };
+
+      function tuneEls() {
+        return document.querySelectorAll('.fp[data-fk="audio"]');
+      }
+      const clock = (sec) => {
+        if (!Number.isFinite(sec)) return '';
+        const s = Math.max(0, Math.round(sec));
+        return Math.floor(s / 60) + ':' + String(s % 60).padStart(2, '0');
+      };
+
+      function tuneSync(only) {
+        const a = tune.audio;
+        for (const el of only ? [only] : tuneEls()) {
+          const mine = !!a && el.dataset.path === tune.path;
+          const playing = mine && !a.paused && !a.ended;
+          el.classList.toggle('marble-is-playing', playing);
+          const known = Number(el.dataset.duration) || (mine && Number.isFinite(a.duration) ? a.duration : 0);
+          const at = mine ? a.currentTime : 0;
+          el.style.setProperty('--p', known ? Math.min(1, at / known).toFixed(4) : 0);
+          const btn = el.querySelector('.fp-play');
+          const name = btn?.getAttribute('aria-label')?.replace(/^(Play|Pause) /, '') ?? '';
+          btn?.setAttribute('aria-label', (playing ? 'Pause ' : 'Play ') + name);
+          const time = el.querySelector('.fp-time');
+          if (time && known) time.textContent = mine && at > 0.05 ? clock(at) + ' / ' + clock(known) : clock(known);
+        }
+      }
+
+      function tuneTick() {
+        cancelAnimationFrame(tune.frame);
+        const step = () => {
+          tuneSync();
+          if (tune.audio && !tune.audio.paused) tune.frame = requestAnimationFrame(step);
+        };
+        tune.frame = requestAnimationFrame(step);
+      }
+
+      function tunePlay(path, at = null) {
+        if (!tune.audio) {
+          tune.audio = new Audio();
+          tune.audio.preload = 'auto';
+          for (const type of ['play', 'pause', 'ended', 'seeked', 'loadedmetadata', 'emptied']) {
+            tune.audio.addEventListener(type, () => (type === 'play' ? tuneTick() : tuneSync()));
+          }
+        }
+        const a = tune.audio;
+        if (tune.path !== path) {
+          a.pause();
+          tune.path = path;
+          a.src = drive.fileHref(path);
+        }
+        const seek = () => {
+          if (at != null && Number.isFinite(a.duration)) a.currentTime = at * a.duration;
+        };
+        if (at != null) {
+          if (a.readyState >= 1) seek();
+          else a.addEventListener('loadedmetadata', seek, { once: true });
+        }
+        a.play().catch(() => {});
+        tuneSync();
+      }
+
+      function tuneToggle(path) {
+        const a = tune.audio;
+        if (a && tune.path === path && !a.paused) a.pause();
+        else tunePlay(path, a && tune.path === path && a.ended ? 0 : null);
+      }
+
+      // A control inside a tile is not a press on the tile: it must not pick
+      // it, open it, start a drag or draw a marquee.
+      const hush = (event) => event.stopPropagation();
+
+      function mountTune(el) {
+        const path = el.dataset.path;
+        const btn = el.querySelector('.fp-play');
+        const wave = el.querySelector('.fp-wave');
+        for (const type of ['pointerdown', 'mousedown', 'dblclick', 'auxclick']) {
+          btn.addEventListener(type, hush);
+          wave.addEventListener(type, hush);
+        }
+        btn.addEventListener('click', (event) => {
+          hush(event);
+          tuneToggle(path);
+        });
+        btn.addEventListener('keydown', hush);
+        wave.addEventListener('click', (event) => {
+          hush(event);
+          const box = wave.getBoundingClientRect();
+          tunePlay(path, Math.min(1, Math.max(0, (event.clientX - box.left) / box.width)));
+        });
+
+        tagsOf(el.dataset.ext, path, el.dataset.v).then((tags) => {
+          if (!tags || !el.isConnected) return;
+          const said = [tags.title, tags.artist].filter(Boolean).join(' — ');
+          el.querySelector('.fp-say b').textContent = said;
+          if (tags.cover) {
+            const art = el.querySelector('.fp-art');
+            art.innerHTML = '<img alt="">';
+            art.firstChild.src = tags.cover;
+            art.hidden = false;
+            el.classList.add('marble-has-art');
+          }
+        });
+        waveOf(path, el.dataset.v, Number(el.dataset.bytes)).then((got) => {
+          if (!got || !el.isConnected) return;
+          el.dataset.duration = String(got.duration);
+          drawWave(wave, got.peaks);
+          el.classList.add('marble-is-ready');
+          tuneSync(el);
+        });
+      }
+
+      // The shape of a song: 400 peaks between 0 and 1, and how long it is.
+      // Worked out once from the whole file — decoded at a low rate, which is
+      // plenty for a picture — then kept on this machine under the file's
+      // version, so a redraw or a reload never decodes it twice.
+      const waves = new Map();
+      let decoding = Promise.resolve();
+      function waveOf(path, v, size) {
+        const stamp = path + '|' + v + '|' + size;
+        if (waves.has(stamp)) return waves.get(stamp);
+        const key = 'marble-drive:wave:' + stamp;
+        const got = (async () => {
+          try {
+            const hit = JSON.parse(localStorage.getItem(key) || 'null');
+            if (hit?.p) {
+              const raw = atob(hit.p);
+              return { duration: hit.d, peaks: Array.from(raw, (c) => c.charCodeAt(0) / 255) };
+            }
+          } catch {}
+          if (!size || size > 150 * 1024 * 1024) return null;
+          // One at a time: a folder of albums is a queue, not a stampede.
+          const run = decoding.then(async () => {
+            const buf = await (await fetch(drive.fileHref(path))).arrayBuffer();
+            const ctx = new OfflineAudioContext(1, 1, 8000);
+            const audio = await ctx.decodeAudioData(buf);
+            const N = 400;
+            const chans = Array.from({ length: audio.numberOfChannels }, (_, i) => audio.getChannelData(i));
+            const len = chans[0].length;
+            const peaks = new Array(N).fill(0);
+            for (let b = 0; b < N; b += 1) {
+              const from = Math.floor((b * len) / N);
+              const to = Math.max(from + 1, Math.floor(((b + 1) * len) / N));
+              // Loudness over the slice rather than its one loudest sample,
+              // so a song reads as its sections and not as a flat wall.
+              let sum = 0;
+              let n = 0;
+              for (const data of chans) {
+                for (let i = from; i < to; i += 2) {
+                  sum += data[i] * data[i];
+                  n += 1;
+                }
+              }
+              peaks[b] = Math.sqrt(sum / Math.max(1, n));
+            }
+            // Scaled between the quiet and the loud of this song rather than
+            // from silence: a mastered pop song is loud from end to end, and
+            // drawn from zero it is a wall. Drawn from its own floor, the
+            // verses, the drop and the bridge are shapes you can point at.
+            const sorted = [...peaks].sort((a, b) => a - b);
+            const top = sorted[Math.floor(N * 0.98)] || 1;
+            const floor = sorted[Math.floor(N * 0.04)] * 0.55;
+            const shaped = peaks.map((p) => Math.min(1, Math.max(0, (p - floor) / Math.max(1e-6, top - floor)) ** 1.25));
+            try {
+              localStorage.setItem(
+                key,
+                JSON.stringify({
+                  d: audio.duration,
+                  p: btoa(String.fromCharCode(...shaped.map((p) => Math.round(p * 255)))),
+                }),
+              );
+            } catch {}
+            return { duration: audio.duration, peaks: shaped };
+          });
+          decoding = run.catch(() => {});
+          return run.catch(() => null);
+        })();
+        waves.set(stamp, got);
+        return got;
+      }
+
+      // Bars, square, one per few pixels — resampled from the kept peaks to
+      // however wide the tile is. Drawn twice: the whole song faint, and the
+      // same shape in full colour clipped to how much has been heard.
+      function drawWave(wave, peaks) {
+        const width = Math.max(40, wave.clientWidth || 200);
+        const n = Math.max(12, Math.min(peaks.length, Math.floor(width / 4)));
+        let d = '';
+        for (let i = 0; i < n; i += 1) {
+          const from = Math.floor((i * peaks.length) / n);
+          const to = Math.max(from + 1, Math.floor(((i + 1) * peaks.length) / n));
+          let p = 0;
+          for (let j = from; j < to; j += 1) p = Math.max(p, peaks[j]);
+          const h = Math.max(3, p * 94);
+          d += 'M' + (i + 0.16).toFixed(2) + ' ' + (50 - h / 2).toFixed(2) + 'h.68v' + h.toFixed(2) + 'h-.68z';
+        }
+        const svg = (cls) =>
+          '<svg class="' + cls + '" viewBox="0 0 ' + n + ' 100" preserveAspectRatio="none"><path d="' + d + '"/></svg>';
+        wave.innerHTML = svg('fp-bars') + svg('fp-heard');
+      }
+
+      // What an mp3 says about itself — title, artist, the cover — from the
+      // ID3 tag at its head, read with a byte range rather than the whole
+      // file. Other formats keep their names.
+      const tagCache = new Map();
+      function tagsOf(ext, path, v) {
+        if (ext !== 'mp3') return Promise.resolve(null);
+        const stamp = path + '|' + v;
+        if (tagCache.has(stamp)) return tagCache.get(stamp);
+        const range = (a, b) =>
+          fetch(drive.fileHref(path), { headers: { Range: 'bytes=' + a + '-' + b } }).then((r) =>
+            r.ok ? r.arrayBuffer() : Promise.reject(r.status),
+          );
+        const got = (async () => {
+          const head = new Uint8Array(await range(0, 9));
+          if (head.length < 10 || head[0] !== 0x49 || head[1] !== 0x44 || head[2] !== 0x33) return null;
+          const major = head[3];
+          const size = ((head[6] & 127) << 21) | ((head[7] & 127) << 14) | ((head[8] & 127) << 7) | (head[9] & 127);
+          if (!size || size > 16 * 1024 * 1024) return null;
+          const tag = new Uint8Array(await range(10, 9 + size));
+          const view = new DataView(tag.buffer);
+          const text = (bytes) => {
+            const enc = bytes[0];
+            const body = bytes.subarray(1);
+            const label = enc === 1 ? 'utf-16' : enc === 2 ? 'utf-16be' : enc === 3 ? 'utf-8' : 'latin1';
+            return new TextDecoder(label).decode(body).replace(/\u0000+$/g, '').split('\u0000')[0].trim();
+          };
+          const out = {};
+          let i = 0;
+          while (i + 10 <= tag.length) {
+            const id = String.fromCharCode(tag[i], tag[i + 1], tag[i + 2], tag[i + 3]);
+            if (!/^[A-Z0-9]{4}$/.test(id)) break;
+            const len =
+              major >= 4
+                ? ((tag[i + 4] & 127) << 21) | ((tag[i + 5] & 127) << 14) | ((tag[i + 6] & 127) << 7) | (tag[i + 7] & 127)
+                : view.getUint32(i + 4);
+            const body = tag.subarray(i + 10, i + 10 + len);
+            if (id === 'TIT2') out.title = text(body);
+            else if (id === 'TPE1') out.artist = text(body);
+            else if (id === 'TALB') out.album = text(body);
+            else if (id === 'APIC' && !out.cover) {
+              // encoding, mime\0, picture type, description\0 (\0\0 in UTF-16), data
+              const enc = body[0];
+              let at = body.indexOf(0, 1);
+              const mime = new TextDecoder('latin1').decode(body.subarray(1, at)) || 'image/jpeg';
+              at += 2;
+              if (enc === 1 || enc === 2) {
+                while (at + 1 < body.length && (body[at] || body[at + 1])) at += 2;
+                at += 2;
+              } else {
+                while (at < body.length && body[at]) at += 1;
+                at += 1;
+              }
+              const data = body.subarray(at);
+              if (data.length > 64) out.cover = URL.createObjectURL(new Blob([data], { type: mime.includes('/') ? mime : 'image/' + mime.toLowerCase() }));
+            }
+            i += 10 + len;
+          }
+          return out.title || out.artist || out.cover ? out : null;
+        })().catch(() => null);
+        tagCache.set(stamp, got);
+        return got;
+      }
+
       function fillThumb(thumb, entry) {
-        // A file this Drive does not open cannot draw itself, and it has no
-        // contents to draw either. Only reachable from the trash, where a
-        // material is listed as itself rather than as a chip.
+        // A file shows what it can of itself: the picture, the page, the
+        // song. In the trash it has no address any more, so it keeps its
+        // glyph and its kind.
+        if (entry.kind === 'file' && view !== 'trash') {
+          thumb.append(filePreview(entry, { w: 360 }));
+          return;
+        }
         if (entry.kind === 'file') {
           thumb.innerHTML =
             '<span class="peek"><span class="big">' + ICON.file + '</span></span><span class="cap"></span>';
@@ -1673,7 +2289,12 @@ __ICON__
         // to where a material goes rather than one per view.
         const work = [];
         const mats = [];
-        for (const entry of pool) (isMaterial(entry) ? mats : work).push(entry);
+        // A folder that holds nothing but files is those files: the songs,
+        // the scans, the photos. Folded into a footnote there, they would be a
+        // strip of names under an empty page, so they get tiles of their own.
+        const onlyFiles =
+          view === 'drive' && !query && pool.length > 0 && pool.every((e) => e.kind === 'file' || isMaterial(e));
+        for (const entry of pool) (onlyFiles || !isMaterial(entry) ? work : mats).push(entry);
         // A diagram is not a listing. The map places things by kind around a
         // centre and the pulse counts edits per day; neither has a bottom to
         // hang a footnote off, so in those two the materials stay out of it.
@@ -1684,7 +2305,7 @@ __ICON__
           empty.className = 'empty';
           empty.innerHTML = query
             ? '<strong>Nothing matches</strong>Try a different word.'
-            : '<strong>This folder is empty</strong>Press New to make something, or drop a .mrbl file in from anywhere.';
+            : '<strong>This folder is empty</strong>Press New to make something, or drop documents and files in from anywhere.';
           items.append(empty);
           return;
         }
@@ -1747,7 +2368,7 @@ __ICON__
           '<span class="tdot"></span><span class="ico"></span>' +
           '<span class="tname"><b></b><small></small></span>' +
           '<span class="tmeta"></span><button class="more" aria-label="More">⋮</button>';
-        el.querySelector('.ico').innerHTML = iconFor(entry.kind);
+        el.querySelector('.ico').innerHTML = iconFor(entry.kind, entry);
         el.querySelector('b').textContent = entry.name ?? leaf(entry.path);
         el.title = entry.title && entry.title !== entry.name ? entry.title : '';
 
@@ -1799,7 +2420,7 @@ __ICON__
         stampRealm(el, entry.path);
         if (picked.has(entry.path)) el.classList.add('marble-picked');
         el.innerHTML = '<span class="ico"></span><b></b><button class="more" aria-label="More">⋮</button>';
-        el.querySelector('.ico').innerHTML = iconFor(entry.kind);
+        el.querySelector('.ico').innerHTML = iconFor(entry.kind, entry);
         el.querySelector('b').textContent = entry.name ?? leaf(entry.path);
         el.title = (entry.title && entry.title !== entry.name ? entry.title + ' — ' : '') +
           (entry.kind === 'doc' ? bytes(entry.bytes) : bytes(weight) + ' inside') +
@@ -1890,7 +2511,7 @@ __ICON__
             '<span class="wbar"><i></i></span><span class="wmeta"></span>' +
             '<button class="more" aria-label="More">⋮</button>';
           el.querySelector('.wrank').textContent = i + 1 + '.';
-          el.querySelector('.witem-ico').innerHTML = iconFor(entry.kind);
+          el.querySelector('.witem-ico').innerHTML = iconFor(entry.kind, entry);
           el.querySelector('.wname b').textContent = entry.name ?? leaf(entry.path);
           el.title = entry.title && entry.title !== entry.name ? entry.title : '';
           const rel = entry.folder && entry.folder !== here ? entry.folder.replace(here ? here + '/' : '', '') : '';
@@ -2661,6 +3282,7 @@ __ICON__
           ),
         );
         if (typing) return;
+        if (event.target?.closest?.('.fp')) return;
         if (event.key === 'Enter') {
           if (picked.size !== 1) return;
           const item = items.querySelector('.item.marble-picked');
@@ -3069,6 +3691,34 @@ __ICON__
         }
       }
 
+      // The card that stays up while files go up. Made here rather than kept
+      // in the markup: it is the page's own state, never the file's, and a tab
+      // that is not uploading has no reason to carry it.
+      const tray = (() => {
+        const el = document.createElement('div');
+        el.className = 'uploads';
+        el.setAttribute('data-marble-transient', '');
+        el.setAttribute('role', 'status');
+        el.setAttribute('aria-live', 'polite');
+        el.innerHTML =
+          '<div class="up-head"><span class="up-title"></span><span class="up-sum"></span></div>' +
+          '<div class="up-bar"><i></i></div><ul class="up-files"></ul>' +
+          '<div class="up-foot"><button type="button">Cancel</button></div>';
+        toast.before(el);
+        return el;
+      })();
+      let uploading = null;
+      tray.querySelector('.up-foot button').addEventListener('click', () => {
+        if (uploading) uploading.abort();
+        else tray.removeAttribute('data-open');
+      });
+      // Leaving mid-upload throws the rest away, so the browser asks first.
+      addEventListener('beforeunload', (event) => {
+        if (!uploading) return;
+        event.preventDefault();
+        event.returnValue = '';
+      });
+
       async function receive(entries, files, into) {
         let dropped = files.map((file) => ({ file, folder: '' }));
         if (entries.length) {
@@ -3080,38 +3730,129 @@ __ICON__
           }
         }
 
-        const docs = dropped.filter(({ file }) => DOCUMENT.test(file.name));
-        const skipped = dropped.length - docs.length;
-        if (!docs.length) {
-          return say(skipped ? 'A drive holds documents — nothing else came in' : 'Nothing to add');
-        }
-        say(docs.length === 1 ? 'Adding ' + docs[0].file.name + '…' : 'Adding ' + docs.length + ' documents…');
+        // What a desktop leaves in every folder it has shown you — .DS_Store,
+        // ._ resource forks — is not something anybody meant to drop, and a
+        // dotted name is how the drive hides its own bookkeeping anyway.
+        const meant = dropped.filter(({ file }) => !file.name.startsWith('.'));
+        if (!meant.length) return say('Nothing to add');
+        if (uploading) return say('Still adding the last drop — wait for it to finish');
+        // A drive holds documents and the files beside them: the song the
+        // mashup plays, the picture the zine is laid out around. A host that
+        // cannot take a file yet still takes the documents.
+        const takesFiles = typeof drive.uploadFile === 'function';
+        const wanted = takesFiles ? meant : meant.filter(({ file }) => DOCUMENT.test(file.name));
+        const unheld = meant.length - wanted.length;
+        if (!wanted.length) return say('This drive only takes documents — nothing came in');
+        const allDocs = wanted.every(({ file }) => DOCUMENT.test(file.name));
+        const noun = (n) => (allDocs ? 'document' : 'file') + (n === 1 ? '' : 's');
+        const where = into || 'My Drive';
+
+        // The card, one row per file. Progress is counted in bytes across the
+        // whole drop, because one 40 MB song and three 4 KB documents are not
+        // four quarters of the work.
+        const total = wanted.reduce((sum, { file }) => sum + file.size, 0) || 1;
+        const sent = wanted.map(() => 0);
+        const list = tray.querySelector('.up-files');
+        list.replaceChildren(
+          ...wanted.map(({ file }) => {
+            const li = document.createElement('li');
+            li.dataset.state = 'waiting';
+            li.innerHTML = '<span class="n"></span><span class="s">waiting</span>';
+            li.querySelector('.n').textContent = file.name;
+            return li;
+          }),
+        );
+        const rows = [...list.children];
+        const bar = tray.querySelector('.up-bar i');
+        const sum = tray.querySelector('.up-sum');
+        const title = tray.querySelector('.up-title');
+        const button = tray.querySelector('.up-foot button');
+        const started = performance.now();
+        const paint = () => {
+          const done = sent.reduce((a, b) => a + b, 0);
+          bar.style.width = ((done / total) * 100).toFixed(1) + '%';
+          const secs = (performance.now() - started) / 1000;
+          const rate = secs > 1 ? done / secs : 0;
+          sum.textContent =
+            bytes(done) + ' of ' + bytes(total) + (rate && done < total ? ' · ' + bytes(rate) + '/s' : '');
+        };
+        const mark = (i, state, text) => {
+          rows[i].dataset.state = state;
+          rows[i].querySelector('.s').textContent = text;
+        };
+        title.textContent = 'Adding ' + (wanted.length === 1 ? wanted[0].file.name : wanted.length + ' ' + noun(wanted.length)) + ' to ' + where;
+        button.textContent = 'Cancel';
+        tray.removeAttribute('data-state');
+        bar.style.width = '0%';
+        paint();
+        tray.setAttribute('data-open', '1');
+        clearTimeout(tray.timer);
 
         // One at a time, because the host serialises writes per document
-        // anyway and because a failure should name the file it was.
+        // anyway, because one file at full speed beats four sharing a slow
+        // link, and because a failure should name the file it was.
+        const controller = new AbortController();
+        uploading = controller;
         const added = [];
         const refused = [];
-        for (const { file, folder } of docs) {
+        let cancelled = false;
+        for (const [i, { file, folder }] of wanted.entries()) {
+          if (controller.signal.aborted) {
+            cancelled = true;
+            mark(i, 'failed', 'cancelled');
+            continue;
+          }
+          const to = [into, folder].filter(Boolean).join('/');
+          mark(i, 'going', '0%');
+          rows[i].scrollIntoView({ block: 'nearest' });
           try {
             added.push(
-              await drive.upload({
-                folder: [into, folder].filter(Boolean).join('/'),
-                name: file.name,
-                source: await file.text(),
-              }),
+              DOCUMENT.test(file.name)
+                ? await drive.upload({ folder: to, name: file.name, source: await file.text() })
+                : await drive.uploadFile({
+                    folder: to,
+                    name: file.name,
+                    file,
+                    signal: controller.signal,
+                    onProgress: (loaded) => {
+                      sent[i] = Math.min(loaded, file.size);
+                      mark(i, 'going', Math.floor((sent[i] / (file.size || 1)) * 100) + '%');
+                      paint();
+                    },
+                  }),
             );
+            sent[i] = file.size;
+            mark(i, 'done', 'added');
           } catch (err) {
-            refused.push(file.name + ' — ' + (err?.message ?? err));
+            if (err?.name === 'AbortError') {
+              cancelled = true;
+              mark(i, 'failed', 'cancelled');
+            } else {
+              refused.push(file.name + ' — ' + (err?.message ?? err));
+              mark(i, 'failed', err?.message ?? 'refused');
+            }
           }
+          paint();
         }
+        uploading = null;
 
         if (added.length) refresh();
         const tally = [];
         if (added.length === 1) tally.push('Added ' + added[0].path);
-        else if (added.length) tally.push('Added ' + added.length + ' documents to ' + (into || 'My Drive'));
-        if (skipped) tally.push(skipped + (skipped === 1 ? ' other file' : ' other files') + ' left alone');
+        else if (added.length) tally.push('Added ' + added.length + ' ' + noun(added.length) + ' to ' + where);
+        if (cancelled) tally.push('the rest cancelled');
+        if (unheld) tally.push(unheld + (unheld === 1 ? ' other file' : ' other files') + ' left alone');
         if (refused.length) tally.push(refused.length === 1 ? refused[0] : refused.length + ' refused — ' + refused[0]);
+
+        // The card becomes the receipt. A clean drop closes itself; one that
+        // lost something stays until it is dismissed, because a failure that
+        // disappears on its own is one you find out about later.
+        title.textContent = tally[0] ?? 'Nothing added';
+        sum.textContent = tally.slice(1).join(' · ') || bytes(total);
+        tray.setAttribute('data-state', refused.length || cancelled ? 'failed' : 'done');
+        button.textContent = 'Close';
         say(tally.join(' · '));
+        if (!refused.length && !cancelled) tray.timer = setTimeout(() => tray.removeAttribute('data-open'), 2600);
       }
 
       // ---------------------------------------------------------- the toggles
@@ -3158,8 +3899,17 @@ __ICON__
 
       // ---------------------------------------------------------- the listening
 
-      drive.on('*', () => {
+      // A change to this page's own file is not news about the folder. The
+      // page files ops of its own — the view, a tint, a pin — and the drive
+      // stream echoes each one back, because it keeps a different client id
+      // from the carrier's and so cannot tell the echo from someone else. A
+      // refresh on it redraws the listing ~200ms after the gesture already
+      // drew it, and the entrance plays twice. What the file says about the
+      // page arrives through the reconcile below, not through here.
+      const SELF = document.querySelector('script[data-marble-app]')?.dataset.marbleApp;
+      drive.on('*', (event) => {
         if (view === 'templates') return;
+        if (event.event === 'changed' && SELF && event.path === SELF) return;
         refresh();
       });
       status.setAttribute('data-live', '1');

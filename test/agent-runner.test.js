@@ -7,13 +7,20 @@ import test from 'node:test';
 import { fileURLToPath } from 'node:url';
 
 import { MAX_HOP } from '../server/agent/messages.js';
-import { createRunner } from '../server/agent/runner.js';
+import { createRunner, clipFailure } from '../server/agent/runner.js';
 import { createAgentStore } from '../server/agent/store.js';
 import { createTools } from '../server/agent/tools.js';
 import { createFakeProvider } from './fixtures/fake-provider.js';
 import { STAY } from '../server/agent/usage-failover.js';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
+
+test('a Cursor model-list dump keeps the sentence and drops the catalog', () => {
+  assert.equal(
+    clipFailure('Cannot use this model: opus-high. Available models: auto, grok-4.7-high, claude-opus-4-8-medium'),
+    'Cannot use this model: opus-high',
+  );
+});
 
 const SCRIPTS = {
   hello: [{ say: 'Hello from the fake agent' }],

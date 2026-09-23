@@ -33,6 +33,8 @@ import { PathError, joinPath, parsePath, safePath, safeSegment, splitPath, witho
 import { build as buildStarter, list as listStarters, preview as starterPreview } from './gallery.js';
 import { createChannels } from './sse.js';
 import { createStore } from './store/index.js';
+import { createStems } from './stems/index.js';
+import { createThumbs } from './thumbs.js';
 import { createTypesafeHandler } from './typesafe/routes.js';
 import { createGenuiHandler } from './genui/routes.js';
 import { watchDrive } from './watch.js';
@@ -53,13 +55,23 @@ const INLINE_TYPES = {
   webp: 'image/webp',
   avif: 'image/avif',
   bmp: 'image/bmp',
+  ico: 'image/x-icon',
   pdf: 'application/pdf',
   mp4: 'video/mp4',
+  m4v: 'video/mp4',
   webm: 'video/webm',
   mov: 'video/quicktime',
+  ogv: 'video/ogg',
   mp3: 'audio/mpeg',
   wav: 'audio/wav',
   m4a: 'audio/mp4',
+  aac: 'audio/aac',
+  flac: 'audio/flac',
+  ogg: 'audio/ogg',
+  oga: 'audio/ogg',
+  opus: 'audio/ogg',
+  aif: 'audio/aiff',
+  aiff: 'audio/aiff',
   txt: 'text/plain; charset=utf-8',
   md: 'text/plain; charset=utf-8',
   json: 'text/plain; charset=utf-8',
@@ -138,6 +150,7 @@ export async function createDrive(config, { log = console, agentProviders = null
 
   const channels = createChannels();
   const oplog = createOpLog({ dir: store.marbleDir });
+  const thumbs = createThumbs({ dir: path.join(store.marbleDir, 'thumbs') });
   const gate = createGate({
     secret: config.secret,
     cookieName: config.cookieName,
@@ -145,6 +158,7 @@ export async function createDrive(config, { log = console, agentProviders = null
     secure: config.secureCookie,
   });
   const intents = createIntents({ store, log });
+  const stems = createStems({ store, channels, log });
   const typesafe = createTypesafeHandler({
     apiKey: config.typesafeApiKey,
     maxBodyBytes: config.maxBodyBytes,
@@ -655,6 +669,36 @@ export async function createDrive(config, { log = console, agentProviders = null
         });
       }
 
+      // A file that is not a document, arriving the same way — the mp3 dropped
+      // into the folder beside the mashup that plays it. The body is the bytes
+      // and is streamed to disk as it comes, so it has its own ceiling rather
+      // than the one sized for documents held in memory. A document never comes
+      // in through here: the page sends those to `/drive/upload`, and a .mrbl or
+      // .html that arrives anyway is refused rather than stored as a file that
+      // would open as its own source.
+      if (route === '/drive/upload-file' && req.method === 'POST') {
+        const folder = parsePath(safePath(url.searchParams.get('folder') ?? ''));
+        const wanted = url.searchParams.get('name') ?? '';
+        if (/\.(mrbl|html?)$/i.test(wanted)) {
+          return json(res, 400, { error: `"${wanted}" is a document — send it to /drive/upload` });
+        }
+        // The stem and the extension are cleaned apart, so the brackets the
+        // grammar refuses do not leave a space stranded before the `.mp3`.
+        const dot = wanted.lastIndexOf('.');
+        const ext = dot > 0 ? wanted.slice(dot + 1).replace(/[^a-z0-9]/gi, '').slice(0, 16) : '';
+        const stem = safeSegment(dot > 0 ? wanted.slice(0, dot) : wanted);
+        const name = ext ? `${stem}.${ext}` : stem;
+        const filePath = await freeFilePath(joinPath(folder, name));
+        const put = await store.putFile(filePath, req, { limit: config.maxFileBytes });
+        channels.toDrive('created', { path: put.path, kind: 'file' }, { except: url.searchParams.get('client') });
+        return json(res, 200, {
+          ok: true,
+          path: put.path,
+          href: `/drive/file?path=${encodeURIComponent(put.path)}`,
+          bytes: put.bytes,
+        });
+      }
+
       if (route === '/drive/mkdir' && req.method === 'POST') {
         const body = await readJson(req, config.maxBodyBytes);
         const made = await store.mkdir(body.path);
@@ -704,10 +748,9 @@ export async function createDrive(config, { log = console, agentProviders = null
         const file = await store.readRaw(url.searchParams.get('path') ?? '');
         if (!file) return text(res, 404, `no file "${url.searchParams.get('path')}"`);
         const type = INLINE_TYPES[file.ext] ?? null;
-        res.writeHead(200, {
+        const headers = {
           'Cache-Control': 'no-store',
           'Content-Type': type ?? 'application/octet-stream',
-          'Content-Length': file.bytes,
           // Two headers doing one job, because getting this wrong is a script
           // running on the drive's own origin with the drive's own cookie.
           // `nosniff` stops the browser deciding for itself that a .txt is
@@ -721,8 +764,74 @@ export async function createDrive(config, { log = console, agentProviders = null
           // it is one.
           'Content-Disposition':
             `${type ? 'inline' : 'attachment'}; filename="${file.name.replace(/["\\]/g, '')}"`,
-        });
+          // A song is played by seeking into it. Without this a browser will
+          // play one from the top and refuse to move the playhead anywhere.
+          'Accept-Ranges': 'bytes',
+        };
+        // A PDF is the one exception to the sandbox. The browser's viewer is a
+        // plugin, and it refuses to draw inside a sandboxed page (or under a
+        // policy that forbids objects) — so a PDF under the header above opens
+        // as a blank tab. The viewer runs its own document, not script on
+        // this origin, so the file has nothing to reach even without it.
+        if (file.ext === 'pdf') delete headers['Content-Security-Policy'];
+
+        const range = /^bytes=(\d*)-(\d*)$/.exec(req.headers.range ?? '');
+        if (range && file.bytes > 0 && (range[1] || range[2])) {
+          // `bytes=500-` is from 500 on, `bytes=-500` is the last 500.
+          let start = range[1] ? Number(range[1]) : Math.max(0, file.bytes - Number(range[2]));
+          let end = range[1] && range[2] ? Math.min(Number(range[2]), file.bytes - 1) : file.bytes - 1;
+          if (start > end || start >= file.bytes) {
+            res.writeHead(416, { ...headers, 'Content-Range': `bytes */${file.bytes}` });
+            return res.end();
+          }
+          res.writeHead(206, {
+            ...headers,
+            'Content-Range': `bytes ${start}-${end}/${file.bytes}`,
+            'Content-Length': end - start + 1,
+          });
+          return file.open({ start, end }).pipe(res);
+        }
+        res.writeHead(200, { ...headers, 'Content-Length': file.bytes });
         return file.open().pipe(res);
+      }
+
+      // A picture of a file, for the tile it sits in: a PDF's first page, a
+      // slide, a photo the browser cannot decode. Made by the system's own
+      // thumbnailer and kept; a 404 means "draw it yourself", which is always
+      // allowed. Cacheable, because the address names the file's version.
+      if (route === '/drive/thumb' && req.method === 'GET') {
+        const file = await store.readRaw(url.searchParams.get('path') ?? '');
+        if (!file) return text(res, 404, `no file "${url.searchParams.get('path')}"`);
+        const made = await thumbs.get(file, url.searchParams.get('w'));
+        if (!made) return text(res, 404, `no picture of "${file.name}"`);
+        const bytes = await fsp.readFile(made);
+        return send(res, 200, bytes, {
+          'Content-Type': 'image/png',
+          'Cache-Control': 'private, max-age=86400',
+          'X-Content-Type-Options': 'nosniff',
+        });
+      }
+
+      // ---------------------------------------------------------------- stems
+
+      // A song, split on this machine into its voice and its band, the pair
+      // written beside it (server/stems). Asking answers at once with a job;
+      // the page watches it by asking again.
+      if (route === '/stems' && req.method === 'GET') {
+        const folder = url.searchParams.has('folder') ? parsePath(url.searchParams.get('folder') ?? '') : null;
+        return json(res, 200, stems.list({ folder }));
+      }
+
+      if (route === '/stems/split' && req.method === 'POST') {
+        const body = await readJson(req, config.maxBodyBytes);
+        return json(res, 200, { ok: true, job: await stems.split(body.path ?? '') });
+      }
+
+      if (route === '/stems/cancel' && req.method === 'POST') {
+        const body = await readJson(req, config.maxBodyBytes);
+        const job = stems.cancel(body.id ?? '');
+        if (!job) return json(res, 404, { error: 'no such job' });
+        return json(res, 200, { ok: true, job });
       }
 
       // ---------------------------------------------------------------- blobs
@@ -879,6 +988,27 @@ button{background:#738698;color:#fafaf7;border-color:#738698;cursor:pointer}p{co
       if (!(await store.has(candidate)) && !(await store.hasFolder(candidate))) return candidate;
     }
     throw new PathError(`too many documents called "${name}"`);
+  }
+
+  /** The same, for a file: the number goes before the extension, the way a
+   *  desktop does it, so `song.mp3` is followed by `song 1.mp3` and still
+   *  plays. Checked against every kind, because a file called `Notes` with no
+   *  extension and a document called `Notes` would be one name twice. */
+  async function freeFilePath(wanted) {
+    const taken = async (candidate) =>
+      (await store.hasFile(candidate)) ||
+      (await store.hasFolder(candidate)) ||
+      (await store.has(candidate));
+    if (!(await taken(wanted))) return wanted;
+    const { parent, name } = splitPath(wanted);
+    const dot = name.lastIndexOf('.');
+    const stem = dot > 0 ? name.slice(0, dot) : name;
+    const ext = dot > 0 ? name.slice(dot) : '';
+    for (let n = 1; n < 500; n += 1) {
+      const candidate = [parent, `${stem} ${n}${ext}`].filter(Boolean).join('/');
+      if (!(await taken(candidate))) return candidate;
+    }
+    throw new PathError(`too many files called "${name}"`);
   }
 
   /** What the drive thinks of a document somebody just handed it: `{error}`,
@@ -1113,6 +1243,7 @@ button{background:#738698;color:#fafaf7;border-color:#738698;cursor:pointer}p{co
     },
     async close() {
       await agents?.close();
+      stems.close();
       stopBackups();
       watcher.close();
       channels.close();

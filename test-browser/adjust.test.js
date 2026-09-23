@@ -67,7 +67,7 @@ const boxOf = (page, id) => page.locator(`[data-marble-id="${id}"]`).boundingBox
 const order = (page, list) => page.evaluate((id) => [...document.querySelector(`[data-marble-id="${id}"]`).children]
   .map((el) => el.getAttribute('data-marble-id')), list);
 const says = (page) => page.locator('.marble-marks-says');
-const brief = (page) => page.locator('.marble-marks-brief');
+const brief = (page) => page.locator('.marble-callout-status');
 const drag = async (page, from, to) => {
   await page.mouse.move(from.x, from.y);
   await page.mouse.down();
@@ -117,7 +117,7 @@ test('a drag in a declared list files the move the sortable would have filed', a
     .map((el) => el.getAttribute('data-marble-id')).join() === 'd2,d3,d1');
 
   // It reached the file, and the brief says what the hand did.
-  await page.waitForFunction(() => document.querySelector('.marble-marks-brief')?.textContent.includes('moved d1 to the end of its list'));
+  await page.waitForFunction(() => document.querySelector('.marble-callout-status')?.textContent.includes('moved d1 to the end of its list'));
   assert.equal(await page.locator('.marble-marks-declare').isVisible(), false, 'nothing to declare: the list already said so');
   await page.waitForTimeout(500);
   await page.reload();
@@ -164,14 +164,14 @@ test('pulling the corner of a resizable pane writes one size into the file', asy
   await page.waitForFunction(() => Math.round(document.querySelector('[data-marble-id="side"]').getBoundingClientRect().width) === 260);
   const style = await page.getAttribute('[data-marble-id="side"]', 'style');
   assert.equal(style, 'width:260px;height:110px', 'the declarations are composed, not read back off the browser');
-  await page.waitForFunction(() => document.querySelector('.marble-marks-brief')?.textContent.includes('sized side to 260×110'));
+  await page.waitForFunction(() => document.querySelector('.marble-callout-status')?.textContent.includes('sized side to 260×110'));
 
   // One op for the gesture: the carrier's undo puts the whole drag back.
   await page.evaluate(() => window.marble.undo());
   await page.waitForFunction(() => document.querySelector('[data-marble-id="side"]').getAttribute('style') === 'width:200px;height:80px');
 });
 
-test('what the hand did rides along in the brief when the field is sent', async () => {
+test('what the hand did rides along in the brief when the card sends', async () => {
   const page = await open();
   const d1 = await boxOf(page, 'd1');
   const d2 = await boxOf(page, 'd2');
@@ -180,12 +180,12 @@ test('what the hand did rides along in the brief when the field is sent', async 
   await drag(page,
     { x: d1.x + 40, y: d1.y + d1.height / 2 },
     { x: d2.x + 40, y: d2.y + d2.height - 2 });
-  await page.waitForFunction(() => document.querySelector('.marble-marks-brief')?.textContent.includes('moved d1'));
+  await page.waitForFunction(() => document.querySelector('.marble-callout-status')?.textContent.includes('moved d1'));
 
   const before = await page.evaluate(async () => (await window.marble.agent.conversations()).map((c) => c.id));
-  await page.locator('.marble-marks-input').click();
+  await page.locator('.marble-callout marble-conversation .editor').click();
   await page.keyboard.type('now do the same to the others');
-  await page.locator('.marble-marks-send').click();
+  await page.locator('.marble-callout marble-conversation .send').click();
   let turn = null;
   for (let i = 0; i < 60 && !turn; i += 1) {
     turn = await page.evaluate(async (known) => {

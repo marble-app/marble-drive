@@ -19,6 +19,7 @@
 import fs from 'node:fs';
 import fsp from 'node:fs/promises';
 import path from 'node:path';
+import { pipeline } from 'node:stream/promises';
 
 import {
   bytesOf,
@@ -123,8 +124,58 @@ export function createFsStore({ root }) {
       ext: extOf(name),
       bytes: info.size,
       modified: info.mtimeMs,
-      open: () => fs.createReadStream(at),
+      // Where it is on this disk, for the one reader that needs a path rather
+      // than a stream: the thumbnailer hands the file to the system's own.
+      at,
+      // `{start, end}` is a byte range, inclusive, the way HTTP says it — a
+      // song is played by seeking into it, not by reading it from the top.
+      open: (range) => fs.createReadStream(at, range),
     };
+  }
+
+  /**
+   * A file that is not a document, written from a stream — the song dropped
+   * beside the mashup, the cover image beside the zine. The body is streamed to
+   * disk rather than collected, for the same reason `readRaw` answers with
+   * `open()`: an album of WAVs is a normal thing to drag in.
+   *
+   * Written beside its destination under a hidden name and then linked into
+   * place, so a half-arrived upload is never listed, and linked rather than
+   * renamed so that a name somebody took in the meantime is refused instead of
+   * replaced. Picking a free name is the caller's job.
+   */
+  async function putFile(filePath, input, { limit = Infinity } = {}) {
+    const clean = parsePath(filePath, { allowRoot: false });
+    if (clean.endsWith(DOC_EXT)) throw new PathError('a .mrbl is a document, not a file');
+    const at = abs(clean);
+    const dir = path.dirname(at);
+    await fsp.mkdir(dir, { recursive: true });
+    const part = path.join(dir, `.${path.basename(at)}.${process.pid}.${Date.now()}.part`);
+    let bytes = 0;
+    try {
+      await pipeline(
+        input,
+        async function* (source) {
+          for await (const chunk of source) {
+            bytes += chunk.length;
+            if (bytes > limit) {
+              const err = new Error(`that file is larger than ${limit} bytes`);
+              err.status = 413;
+              throw err;
+            }
+            yield chunk;
+          }
+        },
+        fs.createWriteStream(part, { flags: 'wx' }),
+      );
+      await fsp.link(part, at);
+    } catch (err) {
+      if (err.code === 'EEXIST') throw new PathError(`"${clean}" is already there`);
+      throw err;
+    } finally {
+      await fsp.rm(part, { force: true });
+    }
+    return { path: clean, bytes };
   }
 
   async function hasFolder(folderPath) {
@@ -508,6 +559,7 @@ export function createFsStore({ root }) {
     ready,
     read,
     readRaw,
+    putFile,
     has,
     hasFolder,
     hasFile,

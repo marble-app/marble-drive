@@ -323,8 +323,15 @@
         notify();
       },
 
-      current: () => storage.get(KEY),
-      remember: (id) => storage.set(KEY, id ?? null),
+      // The conversation is this document's, not the tab's. A chat opened
+      // beside one page is about that page; carried to the next one it would
+      // quietly start talking about somewhere else. So each document keeps its
+      // own, a page that has none opens a new one, and moving a chat to
+      // another page is something the person does from the menu, never the
+      // drawer on its own.
+      current: () => storage.get(agent.here(KEY)),
+      remember: (id) => storage.set(agent.here(KEY), id ?? null),
+      here: (key) => `${key}:${marble.app ?? location.pathname}`,
       storage,
 
       open: (id = null) => dispatchEvent(new CustomEvent('marble:agent-open', { detail: { id } })),

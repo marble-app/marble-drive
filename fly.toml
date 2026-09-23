@@ -1,0 +1,39 @@
+# One drive on Fly: the Dockerfile's image, a volume at the drive root, HTTPS
+# in front. Step 1 of going public — one owner, the gate still the lock.
+#
+#   fly apps create <name>                      then put <name> below
+#   fly volumes create drive_data --size 3 --region lax
+#   fly secrets set MARBLE_DRIVE_SECRET="$(openssl rand -base64 32)"
+#   fly deploy
+#
+# The machine stops when nobody is using it and starts on the next request, so
+# an idle drive costs only its volume.
+
+app = "marble-drive-CHANGE-ME"
+primary_region = "lax"
+
+[env]
+  MARBLE_DRIVE_ROOT = "/data"
+
+[[mounts]]
+  source = "drive_data"
+  destination = "/data"
+
+[http_service]
+  internal_port = 4400
+  force_https = true
+  auto_stop_machines = "stop"
+  auto_start_machines = true
+  min_machines_running = 0
+
+  # /health answers before the gate, so the check needs no secret.
+  [[http_service.checks]]
+    grace_period = "10s"
+    interval = "30s"
+    timeout = "3s"
+    method = "GET"
+    path = "/health"
+
+[[vm]]
+  size = "shared-cpu-1x"
+  memory = "512mb"

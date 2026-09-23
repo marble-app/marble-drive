@@ -60,7 +60,7 @@ test('a document opened with #chat= arrives with that conversation open', async 
   const { page, panel, view } = await visit(`garden#chat=${id}`);
   await opened(panel);
   assert.equal(await view.getAttribute('conversation'), id);
-  // And it is remembered, so the next document in this tab shows the same chat.
+  // And it is remembered as this document's chat.
   assert.equal(await page.evaluate(() => window.marble.agent.current()), id);
 });
 
@@ -94,7 +94,7 @@ test('⌘J and Ctrl+J toggle it, Escape closes it, and opening focuses the compo
   await panel.locator('xpath=self::*[@data-open="false"]').waitFor();
 });
 
-test('a conversation from the drawer edits the page, and follows you to the next page', async () => {
+test('a conversation from the drawer edits the page, and stays with that page', async () => {
   await host.reset();
   const { page, drawer, panel, view } = await visit();
   await drawer.locator('.launcher').click();
@@ -104,15 +104,29 @@ test('a conversation from the drawer edits the page, and follows you to the next
   await view.locator('.turn-footer[data-status="completed"]').waitFor();
   await page.locator('h1', { hasText: 'Backlog' }).waitFor();
   await drawer.locator('.title-text', { hasText: 'script:rename' }).waitFor();
+  const gardenChat = await view.getAttribute('conversation');
 
+  // Another page: the panel is shut, and opening it starts a new chat there
+  // rather than carrying the garden's over.
   await page.goto(`${host.base}/a/reading`);
   const again = page.locator('marble-agent-drawer');
-  await again.locator('aside.panel[data-open="true"]').waitFor();
-  await again.locator('marble-conversation .turn-footer[data-status="completed"]').waitFor();
-  assert.equal(await again.locator('marble-conversation .msg.me').count(), 1);
+  await again.locator('.launcher').waitFor();
+  assert.equal(await again.locator('aside.panel').getAttribute('data-open'), 'false');
+  await again.locator('.launcher').click();
+  await opened(again.locator('aside.panel'));
+  assert.equal(await again.locator('marble-conversation').getAttribute('conversation'), null);
+  assert.equal(await again.locator('marble-conversation .msg.me').count(), 0);
+  assert.equal(await page.evaluate(() => window.marble.agent.current()), null);
+
+  // Back on the garden, its own chat is where it was left.
+  await page.goto(`${host.base}/a/garden`);
+  const home = page.locator('marble-agent-drawer');
+  await home.locator('aside.panel[data-open="true"]').waitFor();
+  assert.equal(await home.locator('marble-conversation').getAttribute('conversation'), gardenChat);
+  await home.locator('marble-conversation .turn-footer[data-status="completed"]').waitFor();
 });
 
-test('the header names the file being edited when you are looking at another page', async () => {
+test('the header names the file being edited when you bring a chat to another page', async () => {
   await host.reset();
   const { page, drawer, panel, view } = await visit();
   await drawer.locator('.launcher').click();
@@ -121,9 +135,13 @@ test('the header names the file being edited when you are looking at another pag
   await view.locator('.editor').fill('script:hold');
   await view.locator('.editor').press('Enter');
   await view.locator('button.stop').waitFor({ state: 'visible' });
+  const gardenChat = await view.getAttribute('conversation');
 
+  // Only by asking for it — the recent menu, or a link that hands it over.
   await page.goto(`${host.base}/a/reading`);
   const again = page.locator('marble-agent-drawer');
+  await again.locator('.launcher').waitFor();
+  await page.evaluate((id) => window.marble.agent.open(id), gardenChat);
   await again.locator('.where').waitFor({ state: 'visible' });
   assert.match(await again.locator('.where').textContent(), /Viewing reading · editing garden/);
   await again.locator('marble-conversation button.stop').click();

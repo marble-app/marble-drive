@@ -77,6 +77,48 @@
         { method: 'POST', raw: source },
       );
 
+    // A file that is not a document — a song, a picture, a PDF — as its own
+    // bytes. `file` is a Blob (what a drop hands you), sent as the body with
+    // no encoding at all, because a 40 MB WAV base64-quoted is 53 MB of string.
+    //
+    // XHR rather than fetch, because fetch cannot say how far an upload has
+    // got, and a song going up over a slow link with nothing moving looks
+    // exactly like a drop that did nothing. `onProgress(sent, total)` hears it;
+    // `signal` stops it.
+    const uploadFile = ({ folder = '', name, file, onProgress = null, signal = null }) =>
+      new Promise((resolve, reject) => {
+        const xhr = new XMLHttpRequest();
+        xhr.open(
+          'POST',
+          `/drive/upload-file?folder=${encodeURIComponent(folder)}` +
+            `&name=${encodeURIComponent(name)}&client=${CLIENT}`,
+        );
+        xhr.setRequestHeader('Content-Type', file.type || 'application/octet-stream');
+        xhr.responseType = 'text';
+        if (onProgress) xhr.upload.onprogress = (event) => onProgress(event.loaded, event.total || file.size);
+        xhr.onload = () => {
+          let answer = {};
+          try {
+            answer = JSON.parse(xhr.responseText || '{}');
+          } catch {
+            // A proxy's HTML error page is not an answer; the status still is.
+          }
+          if (xhr.status >= 200 && xhr.status < 300) return resolve(answer);
+          // A host started before it knew about files has no route for them,
+          // and "404" says nothing about what to do.
+          if (xhr.status === 404) return reject(new Error('the host needs a restart before it can take files'));
+          if (xhr.status === 413) return reject(new Error('too large for this host'));
+          reject(new Error(answer.error ?? `upload answered ${xhr.status}`));
+        };
+        xhr.onerror = () => reject(new Error('the connection dropped'));
+        xhr.onabort = () => reject(Object.assign(new Error('cancelled'), { name: 'AbortError' }));
+        if (signal) {
+          if (signal.aborted) return xhr.onabort();
+          signal.addEventListener('abort', () => xhr.abort(), { once: true });
+        }
+        xhr.send(file);
+      });
+
     const move = (from, to) => ask('/drive/move', { method: 'POST', body: { from, to } });
     const remove = (path) => ask('/drive/trash', { method: 'POST', body: { path } });
     const restore = (id, to = null) => ask('/drive/untrash', { method: 'POST', body: { id, to } });
@@ -92,6 +134,14 @@
     // safe to render and what is only safe to download; a document asking for
     // the href is not making that call.
     const fileHref = (path) => `/drive/file?path=${encodeURIComponent(path)}`;
+
+    // A picture of that file, `w` pixels wide or a little more, from the host's
+    // thumbnailer. It may answer 404 — no thumbnailer here, or none for this
+    // kind — and a page that asks has to have something else to draw. `v` is
+    // the file's version (its modified time), so an edited file is a new
+    // address and a cached picture of the old one is never shown for it.
+    const thumbHref = (path, { w = 640, v = '' } = {}) =>
+      `/drive/thumb?path=${encodeURIComponent(path)}&w=${w}` + (v ? `&v=${encodeURIComponent(v)}` : '');
 
     // ------------------------------------------------------------- the events
     //
@@ -169,12 +219,14 @@
       create,
       mkdir,
       upload,
+      uploadFile,
       move,
       remove,
       restore,
       weigh,
       downloadHref,
       fileHref,
+      thumbHref,
       on,
       resolveBlobs,
     };

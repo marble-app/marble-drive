@@ -13,6 +13,7 @@
 //   ready()                          make whatever the store needs to exist
 //   read(path)          → string|null
 //   readRaw(path)       → {path,name,ext,bytes,open()}|null   a file that is not a document
+//   putFile(path, stream, {limit}) → {path, bytes}   refuses to overwrite
 //   has(path)           → boolean          a document is there
 //   hasFolder(path)     → boolean          a folder is there
 //   hasFile(path)       → boolean          something that is neither is there
