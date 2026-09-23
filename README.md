@@ -90,10 +90,17 @@ What it does not carry, on purpose:
 - **Your drive.** `drive/` is gitignored. A change to a document is saved the
   moment it is made — that is what the drive is for — and `.marble/` under it is
   the history. There is nothing to commit after editing a document.
-- **A skill's memory.** `.claude/skills/my-day/` is code and stays; its `state/`
-  is what the skill remembers about its one reader, changes every run, and is
-  ignored.
-- **This machine.** `.env`, `.claude/settings.local.json`, `.codex/`, worktrees.
+- **Your skills and settings.** A skill you make, or have an agent make, lives
+  in your drive at `drive/.claude/skills/`, and the drive's own choices (which
+  folders wear a colour, which document `/today` opens) in
+  `drive/.marble/drive.json`. The app's own agent skills ship in
+  `agent-plugin/` and reach every agent turn wherever the drive is.
+- **This machine.** `.env`, `.claude/settings.local.json`, `.codex/`, `.sprite`,
+  `test-results/`, worktrees.
+
+Agents working in your drive cannot reach this repository's git: their turns
+run with `GIT_CEILING_DIRECTORIES` at the drive's parent, so nothing done in the
+drive becomes a commit here.
 - **What a session leaves behind.** `scratchpad/` and `.superpowers/`. A script
   worth keeping moves to `tools/`; the rest is never read back.
 

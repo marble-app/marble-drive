@@ -20,10 +20,6 @@ node_modules/
 drive/
 # Hand-made copies of documents, kept beside the drive rather than in it.
 backups/
-# The daily-document skill's memory of its one reader: what it has shown, the
-# to-dos he typed, where he lives. The skill is code and stays; its memory is
-# his, and it changes on every morning's run.
-.claude/skills/my-day/state/
 
 # ---- this machine ----------------------------------------------------------
 .DS_Store
