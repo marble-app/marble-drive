@@ -88,6 +88,8 @@ for (const step of script) {
     if (!step.stream) out({ kind: 'delta', text: step.say.slice(0, 3) });
     out({ kind: 'text', text: step.say });
   }
+  // What the runner put in this process's environment, said back as text.
+  if (step.sayEnv) out({ kind: 'text', text: `${step.sayEnv}=${process.env[step.sayEnv] ?? ''}` });
   if (step.sleep) await sleep(step.sleep);
   // What a CLI does when it needs the person: print the prompt, wait for the
   // answer on stdin, say what it got.

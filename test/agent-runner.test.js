@@ -23,6 +23,7 @@ test('a Cursor model-list dump keeps the sentence and drops the catalog', () => 
 });
 
 const SCRIPTS = {
+  ceiling: [{ sayEnv: 'GIT_CEILING_DIRECTORIES' }],
   hello: [{ say: 'Hello from the fake agent' }],
   slow: [{ sleep: 600 }, { say: 'done sleeping' }],
   stall: [{ silent: 5_000 }],
@@ -1849,4 +1850,44 @@ test('a signed-out Cursor, an unreadable list, or no Grok leaves the chat on Cla
     assert.match(failed.error, new RegExp(suffix.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')));
     await runner.close();
   }
+});
+
+// The drive may sit inside the app's own checkout (it does on a development
+// machine). A turn working in the drive must not find that repository: git's
+// search stops at the drive's parent, so `git status` there is "not a git
+// repository" and a commit cannot land in the app.
+test('a turn in the drive cannot see the git repository around it; a turn in a registered project can', async () => {
+  const repo = await fsp.mkdtemp(path.join(os.tmpdir(), 'marble-runner-repo-'));
+  let driveRoot = null;
+  const projects = {
+    find: async (id) => (id === 'p1'
+      ? { id: 'p1', name: 'Repo', path: repo, builtIn: false }
+      : { id: 'drive', name: 'Drive', path: driveRoot, builtIn: true }),
+  };
+  const said = async (store, id) => (await store.events(id))
+    .filter((e) => e.type === 'text' && e.text.startsWith('GIT_CEILING_DIRECTORIES='))
+    .map((e) => e.text.slice('GIT_CEILING_DIRECTORIES='.length));
+
+  const full = await setup({ capability: 'full', projects });
+  const somewhere = await fsp.mkdtemp(path.join(os.tmpdir(), 'marble-runner-checkout-'));
+  driveRoot = path.join(somewhere, 'drive');
+  await fsp.mkdir(driveRoot);
+  const inDrive = await full.store.createConversation({ provider: 'fake' });
+  await full.runner.send(inDrive.id, { prompt: 'script:ceiling', context: { target: 'garden' } });
+  await until(async () => (await full.store.turn(`${inDrive.id}-t1`)).status === 'completed');
+  assert.deepEqual(await said(full.store, inDrive.id), [somewhere]);
+
+  const inRepo = await full.store.createConversation({ provider: 'fake', project: 'p1' });
+  await full.runner.send(inRepo.id, { prompt: 'script:ceiling', context: { target: 'garden' } });
+  await until(async () => (await full.store.turn(`${inRepo.id}-t1`)).status === 'completed');
+  assert.deepEqual(await said(full.store, inRepo.id), ['']);
+  await full.runner.close();
+
+  // A documents turn works in an empty workspace, not the drive: nothing to fence.
+  const docs = await setup();
+  const plain = await docs.store.createConversation({ provider: 'fake' });
+  await docs.runner.send(plain.id, { prompt: 'script:ceiling', context: { target: 'garden' } });
+  await until(async () => (await docs.store.turn(`${plain.id}-t1`)).status === 'completed');
+  assert.deepEqual(await said(docs.store, plain.id), ['']);
+  await docs.runner.close();
 });

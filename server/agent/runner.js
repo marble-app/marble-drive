@@ -595,6 +595,13 @@ export function createRunner({ store, tools, providers, workdir, origin, bridgeP
       // asks for it.
       const env = { ...base, ...(spec.env ?? {}) };
       delete env.MARBLE_DRIVE_SECRET;
+      // The drive may sit inside the app's own checkout (it does on a
+      // development machine). An agent working in the drive must not find that
+      // repository: git's search stops at the drive's parent, so a `git status`
+      // there is "not a git repository" and a commit cannot land in the app.
+      // A registered project is somewhere git work belongs, and keeps it.
+      if (capability === 'full' && project?.builtIn && project.path) env.GIT_CEILING_DIRECTORIES = path.dirname(project.path);
+      else delete env.GIT_CEILING_DIRECTORIES;
 
       // A full agent's own tools are confined to its working directory, so the
       // working directory is the boundary: the drive for a full turn, the empty
