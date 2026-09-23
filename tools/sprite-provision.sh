@@ -3,6 +3,7 @@
 # (docs/superpowers/specs/2026-09-23-a-sprite-per-tester-design.md).
 #
 #   tools/sprite-provision.sh <person> [--agent api|subscription] [--key-file <path>] [--org <org>] [--local]
+#   tools/sprite-provision.sh --resume <person> [--org <org>] [--local]   finish one that stopped part way
 #   tools/sprite-provision.sh --remove <person> [--org <org>]
 #
 # Makes sprite t-<person>, gives it a passphrase and its own settings, deploys
@@ -18,7 +19,7 @@
 set -euo pipefail
 
 HERE="$(cd "$(dirname "$0")" && pwd)"
-ORG=marble-drive AGENT=api KEY_FILE="" REMOVE=0 PERSON="" DEPLOY_FLAGS=()
+ORG=marble-drive AGENT=api KEY_FILE="" REMOVE=0 RESUME=0 PERSON="" DEPLOY_FLAGS=()
 ROSTER_DIR="$HOME/.config/marble-drive"
 ROSTER="$ROSTER_DIR/testers.json"
 REMOTE_CONFIG=/home/sprite/.config/marble-drive
@@ -33,6 +34,7 @@ while [[ $# -gt 0 ]]; do
     --agent) AGENT=${2:?}; shift 2 ;;
     --key-file) KEY_FILE=${2:?}; shift 2 ;;
     --remove) REMOVE=1; PERSON=${2:?}; shift 2 ;;
+    --resume) RESUME=1; PERSON=${2:?}; shift 2 ;;
     --local) DEPLOY_FLAGS+=(--local); shift ;;
     -h|--help) usage ;;
     -*) usage ;;
@@ -80,7 +82,11 @@ fi
 
 # ------------------------------------------------------------- making one
 
-exists && die "$SPRITE already exists in $ORG (remove it first, or pick another name)"
+if [[ $RESUME == 1 ]]; then
+  exists || die "no sprite $SPRITE in $ORG to resume"
+else
+  exists && die "$SPRITE already exists in $ORG (finish it with --resume, remove it, or pick another name)"
+fi
 
 WORK="$(mktemp -d)"
 chmod 700 "$WORK"
@@ -95,6 +101,15 @@ finish() {
 }
 trap finish EXIT
 
+if [[ $RESUME == 1 ]]; then
+  # Everything up to its settings happened; take what it already has.
+  CREATED=1
+  SETTINGS="$(on -- cat "$REMOTE_CONFIG/sprite.env" 2>/dev/null)" || die "$SPRITE has no settings to resume from; remove it and provision again"
+  PASSPHRASE="$(sed -n 's/^MARBLE_DRIVE_SECRET=//p' <<<"$SETTINGS")"
+  [[ "$(sed -n 's/^MARBLE_DRIVE_AGENT_PROVIDER=//p' <<<"$SETTINGS")" == claude-subscription ]] && AGENT=subscription
+  [[ -n "$PASSPHRASE" ]] || die "$SPRITE's settings have no passphrase"
+  say "resuming $SPRITE"
+else
 say "creating $SPRITE in $ORG"
 sprite create -o "$ORG" --skip-console --label marble-tester "$SPRITE"
 CREATED=1
@@ -126,6 +141,7 @@ if [[ -n "$KEY_FILE" ]]; then
   on --file "$WORK/agent-keys:$REMOTE_CONFIG/agent-keys" -- chmod 600 "$REMOTE_CONFIG/agent-keys"
   rm -f "$WORK/agent-keys"
 fi
+fi
 
 say "deploying Marble Drive to $SPRITE"
 "$HERE/sprite-deploy.sh" "$SPRITE" --org "$ORG" ${DEPLOY_FLAGS[@]+"${DEPLOY_FLAGS[@]}"}
@@ -142,7 +158,9 @@ for _ in $(seq 1 30); do
   sleep 2
 done
 [[ $ok == 1 ]] || die "$URL/health did not answer"
-where="$(curl -s -o /dev/null -w '%{http_code} %{redirect_url}' "$URL/")"
+# Asked as a browser: the gate sends a browser to its passphrase page and
+# answers anything else with a 401.
+where="$(curl -s -o /dev/null -H 'Accept: text/html' -w '%{http_code} %{redirect_url}' "$URL/")"
 [[ "$where" == 302*"/gate"* ]] || die "$URL/ did not ask for the passphrase (got: $where)"
 
 roster set "$(node -e 'console.log(JSON.stringify({ person: process.argv[1], sprite: process.argv[2], org: process.argv[3], url: process.argv[4], passphrase: process.argv[5], agent: process.argv[6], created: new Date().toISOString() }))' "$PERSON" "$SPRITE" "$ORG" "$URL" "$PASSPHRASE" "$AGENT")"
