@@ -1,0 +1,156 @@
+#!/usr/bin/env bash
+# The sprite's half of a deploy (tools/sprite-deploy.sh is the Mac's half).
+#
+#   release.sh stage <name> <source> <marble>   build a release beside the others
+#   release.sh switch <name>                    make it current and (re)start the service
+#   release.sh rollback                         go back to the release before current
+#
+# <source> is git:<sha> (fetched from the public marble-drive repo) or
+# tar:<path> (a pack of the owner's working copy, for --local).
+# <marble> is what npm installs for @bdhmin/marble: a published spec such as
+# @bdhmin/marble@0.2.1, or the path of an `npm pack` tarball.
+#
+# A release that fails to install or to answer /health is removed and never
+# becomes current; a switch whose service does not come up goes back to the
+# release before it.
+set -euo pipefail
+
+APP="$HOME/app"
+RELEASES="$APP/releases"
+CURRENT="$APP/current"
+HISTORY="$APP/history"
+SERVICE=marble-drive
+PORT=4400
+HOST="${MARBLE_SPRITE_HOST:-127.0.0.1}"
+DRIVE=/drive
+REPO_TARBALL=https://codeload.github.com/marble-app/marble-drive/tar.gz
+NODE="$(command -v node)"
+SERVICE_PATH="$HOME/.local/bin:$(dirname "$NODE"):/usr/local/bin:/usr/bin:/bin"
+
+say() { printf '==> %s\n' "$*"; }
+die() { printf 'release: %s\n' "$*" >&2; exit 1; }
+
+health() { # health <port> <seconds>
+  local port=$1 wait=$2
+  for _ in $(seq 1 "$wait"); do
+    curl -fsS "http://127.0.0.1:$port/health" >/dev/null 2>&1 && return 0
+    sleep 1
+  done
+  return 1
+}
+
+stage() {
+  local name=$1 source=$2 marble=$3
+  local dir="$RELEASES/$name"
+  [[ -e "$dir" ]] && die "release $name already exists"
+  mkdir -p "$dir/marble-drive"
+  trap 'rm -rf "$dir"' ERR
+
+  say "fetching marble-drive ($source)"
+  case "$source" in
+    git:*) curl -fsSL "$REPO_TARBALL/${source#git:}" | tar xz --strip-components 1 -C "$dir/marble-drive" ;;
+    tar:*) tar xzf "${source#tar:}" -C "$dir/marble-drive" ;;
+    *) die "unknown source $source" ;;
+  esac
+
+  say "installing (marble: $marble)"
+  cd "$dir/marble-drive"
+  npm pkg delete dependencies.@bdhmin/marble
+  npm install --omit=dev --no-audit --no-fund --loglevel=error "$marble"
+
+  # The agents' browser. Shared across releases, installed once.
+  if [[ ! -e "$APP/.chromium-ready" ]]; then
+    say "installing Chromium for the agents' browser (once)"
+    sudo -E env "PATH=$PATH" npx --yes playwright install-deps chromium >/dev/null
+    npx --yes playwright install chromium >/dev/null
+    touch "$APP/.chromium-ready"
+  fi
+
+  say "smoke test on :4499 with a throwaway drive"
+  local scratch
+  scratch="$(mktemp -d)"
+  MARBLE_DRIVE_ROOT="$scratch" PORT=4499 HOST=127.0.0.1 MARBLE_DRIVE_AGENTS=0 \
+    "$NODE" bin/marble-drive.js serve >"$scratch.log" 2>&1 &
+  local pid=$!
+  if ! health 4499 30; then
+    kill "$pid" 2>/dev/null || true
+    tail -30 "$scratch.log" >&2
+    rm -rf "$scratch" "$scratch.log"
+    die "release $name did not answer /health"
+  fi
+  kill "$pid" 2>/dev/null || true
+  wait "$pid" 2>/dev/null || true
+  rm -rf "$scratch" "$scratch.log"
+  trap - ERR
+  say "staged $name"
+}
+
+service_up() {
+  local env="MARBLE_DRIVE_ROOT=$DRIVE,PORT=$PORT,HOST=$HOST,MARBLE_DRIVE_AGENTS=1,NODE_ENV=production,PATH=$SERVICE_PATH"
+  if sprite-env services get "$SERVICE" >/dev/null 2>&1; then
+    sprite-env services restart "$SERVICE" >/dev/null
+  else
+    sprite-env services create "$SERVICE" --cmd "$NODE" --args bin/marble-drive.js,serve \
+      --dir "$CURRENT/marble-drive" --env "$env" --http-port "$PORT" --no-stream >/dev/null
+  fi
+}
+
+point() { # point <name>: make <name> current, atomically
+  ln -sfn "$RELEASES/$1" "$APP/current.next"
+  mv -Tf "$APP/current.next" "$CURRENT"
+}
+
+switch() {
+  local name=$1
+  [[ -d "$RELEASES/$name" ]] || die "no release $name"
+  if [[ ! -d "$DRIVE" ]]; then
+    say "creating $DRIVE"
+    sudo mkdir -p "$DRIVE"
+    sudo chown "$(id -un):$(id -gn)" "$DRIVE"
+  fi
+  local previous=""
+  [[ -L "$CURRENT" ]] && previous="$(basename "$(readlink "$CURRENT")")"
+  say "switching to $name${previous:+ (from $previous)}"
+  point "$name"
+  service_up
+  if ! health "$PORT" 45; then
+    tail -40 "/.sprite/logs/services/$SERVICE.log" >&2 || true
+    if [[ -n "$previous" ]]; then
+      say "service did not come up; going back to $previous"
+      point "$previous"
+      service_up
+      health "$PORT" 45 || true
+    fi
+    die "release $name did not come up"
+  fi
+  [[ "$(tail -1 "$HISTORY" 2>/dev/null)" == "$name" ]] || echo "$name" >>"$HISTORY"
+  # Keep the three newest releases, and whatever is current.
+  local keep
+  keep="$(ls -1t "$RELEASES" | head -3)"
+  for old in $(ls -1t "$RELEASES"); do
+    grep -qx "$old" <<<"$keep" && continue
+    [[ "$old" == "$(basename "$(readlink "$CURRENT")")" ]] && continue
+    rm -rf "${RELEASES:?}/$old"
+  done
+  say "live: $name"
+}
+
+rollback() {
+  [[ -L "$CURRENT" ]] || die "nothing is current"
+  local now previous
+  now="$(basename "$(readlink "$CURRENT")")"
+  previous="$(grep -vx "$now" "$HISTORY" 2>/dev/null | tail -1 || true)"
+  [[ -n "$previous" && -d "$RELEASES/$previous" ]] || die "no earlier release to go back to"
+  # Rolling back drops the release being left from the history.
+  grep -vx "$now" "$HISTORY" >"$HISTORY.next" || true
+  mv "$HISTORY.next" "$HISTORY"
+  switch "$previous"
+}
+
+mkdir -p "$RELEASES"
+case "${1:-}" in
+  stage) stage "$2" "$3" "$4" ;;
+  switch) switch "$2" ;;
+  rollback) rollback ;;
+  *) die "usage: release.sh stage <name> <source> <marble> | switch <name> | rollback" ;;
+esac

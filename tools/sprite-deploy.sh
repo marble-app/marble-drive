@@ -1,0 +1,86 @@
+#!/usr/bin/env bash
+# Deploy Marble Drive to a Fly Sprite (docs/DEPLOY.md, "On a Fly Sprite").
+#
+#   tools/sprite-deploy.sh <sprite> [--org <org>] [--ref <commit>] [--marble <version>]
+#   tools/sprite-deploy.sh <sprite> [--org <org>] --local
+#   tools/sprite-deploy.sh <sprite> [--org <org>] --rollback
+#
+# By default a sprite runs public sources: marble-drive at <ref> (default
+# origin/main) from GitHub, and @bdhmin/marble@<version> (default: the local
+# ../marble's version) from npm. Nothing secret is copied to the sprite.
+# --local deploys this Mac's working copies instead (marble-drive's tracked and
+# untracked-but-not-ignored files, and `npm pack` of ../marble), for trying
+# unreleased changes on a test sprite.
+#
+# Every deploy checkpoints the sprite first and prints how to restore it.
+set -euo pipefail
+
+HERE="$(cd "$(dirname "$0")" && pwd)"
+REPO="$(cd "$HERE/.." && pwd)"
+MARBLE_DIR="${MARBLE_DIR:-$(cd "$REPO/.." && pwd)/marble}"
+[[ -d "$MARBLE_DIR" ]] || MARBLE_DIR="$(cd "$(git -C "$REPO" rev-parse --git-common-dir)/../.." && pwd)/marble"
+
+usage() { sed -n '2,15p' "$0" | sed 's/^# \{0,1\}//'; exit 2; }
+[[ $# -ge 1 && "$1" != -* ]] || usage
+SPRITE=$1; shift
+ORG=marble-drive REF=origin/main MARBLE_VERSION="" LOCAL=0 ROLLBACK=0
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --org) ORG=$2; shift 2 ;;
+    --ref) REF=$2; shift 2 ;;
+    --marble) MARBLE_VERSION=$2; shift 2 ;;
+    --local) LOCAL=1; shift ;;
+    --rollback) ROLLBACK=1; shift ;;
+    *) usage ;;
+  esac
+done
+
+on() { sprite exec -o "$ORG" -s "$SPRITE" --no-stdin "$@"; }
+REMOTE=/home/sprite/app
+say() { printf '==> %s\n' "$*"; }
+
+say "sending the release script to $SPRITE ($ORG)"
+on -- mkdir -p "$REMOTE/incoming"
+on --file "$HERE/sprite/release.sh:$REMOTE/release.sh" -- chmod +x "$REMOTE/release.sh"
+
+if [[ $ROLLBACK == 1 ]]; then
+  on -- "$REMOTE/release.sh" rollback
+  exit 0
+fi
+
+STAMP="$(date -u +%Y%m%dT%H%M%SZ)"
+FILES=()
+if [[ $LOCAL == 1 ]]; then
+  SHA="$(git -C "$REPO" rev-parse --short HEAD)"
+  NAME="$STAMP-local-$SHA"
+  WORK="$(mktemp -d)"
+  trap 'rm -rf "$WORK"' EXIT
+  say "packing this Mac's marble-drive (working copy at $SHA)"
+  (cd "$REPO" && git ls-files -co --exclude-standard -z | tar --null -T - -czf "$WORK/marble-drive.tgz")
+  say "packing $MARBLE_DIR"
+  MARBLE_TGZ="$(cd "$MARBLE_DIR" && npm pack --silent --pack-destination "$WORK" | tail -1)"
+  FILES+=(--file "$WORK/marble-drive.tgz:$REMOTE/incoming/$NAME.tgz" --file "$WORK/$MARBLE_TGZ:$REMOTE/incoming/$NAME-marble.tgz")
+  SOURCE="tar:$REMOTE/incoming/$NAME.tgz"
+  MARBLE="$REMOTE/incoming/$NAME-marble.tgz"
+else
+  git -C "$REPO" fetch --quiet origin
+  SHA="$(git -C "$REPO" rev-parse --verify "$REF^{commit}")"
+  git -C "$REPO" branch -r --contains "$SHA" | grep -q . || { echo "sprite-deploy: $SHA is not on the remote — push it first, or deploy --local" >&2; exit 1; }
+  [[ -n "$MARBLE_VERSION" ]] || MARBLE_VERSION="$(node -p "require('$MARBLE_DIR/package.json').version")"
+  npm view "@bdhmin/marble@$MARBLE_VERSION" version >/dev/null 2>&1 \
+    || { echo "sprite-deploy: @bdhmin/marble@$MARBLE_VERSION is not on npm — publish marble first, or deploy --local" >&2; exit 1; }
+  NAME="$STAMP-${SHA:0:7}"
+  SOURCE="git:$SHA"
+  MARBLE="@bdhmin/marble@$MARBLE_VERSION"
+fi
+
+say "checkpointing $SPRITE"
+sprite checkpoint create -o "$ORG" -s "$SPRITE" --comment "before deploy $NAME"
+echo "   to undo everything since: sprite checkpoint list -o $ORG -s $SPRITE, then sprite restore <id> -o $ORG -s $SPRITE"
+
+say "staging $NAME"
+on ${FILES[@]+"${FILES[@]}"} -- "$REMOTE/release.sh" stage "$NAME" "$SOURCE" "$MARBLE"
+say "switching"
+on -- "$REMOTE/release.sh" switch "$NAME"
+on -- sh -c "rm -f $REMOTE/incoming/$NAME*"
+say "done: $NAME is live on $SPRITE"
