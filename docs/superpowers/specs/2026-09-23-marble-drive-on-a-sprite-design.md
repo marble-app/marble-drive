@@ -83,8 +83,9 @@ sprite awake on its own through its live connection.
 
 The 15-second check is inside Sprites' 30-second idle window, so a turn that
 outlives its tab is held before the sprite can pause. Tested against a fake
-socket; the task API's exact delete call is confirmed on `admin-p1` and
-recorded here.
+socket. *Confirmed on `admin-p1` 2026-09-23:* `POST /v1/tasks
+{"name","expire"}` answers 201 with `expires_at`, `GET /v1/tasks` lists it, and
+`DELETE /v1/tasks/<name>` answers 204 — exactly the calls keep-awake makes.
 
 ### 5. Access
 

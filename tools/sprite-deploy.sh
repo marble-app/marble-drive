@@ -56,7 +56,8 @@ if [[ $LOCAL == 1 ]]; then
   WORK="$(mktemp -d)"
   trap 'rm -rf "$WORK"' EXIT
   say "packing this Mac's marble-drive (working copy at $SHA)"
-  (cd "$REPO" && git ls-files -co --exclude-standard -z | tar --null -T - -czf "$WORK/marble-drive.tgz")
+  # No macOS metadata in the pack: Linux tar would warn about every file.
+  (cd "$REPO" && git ls-files -co --exclude-standard -z | COPYFILE_DISABLE=1 tar --no-mac-metadata --null -T - -czf "$WORK/marble-drive.tgz")
   say "packing $MARBLE_DIR"
   MARBLE_TGZ="$(cd "$MARBLE_DIR" && npm pack --silent --pack-destination "$WORK" | tail -1)"
   FILES+=(--file "$WORK/marble-drive.tgz:$REMOTE/incoming/$NAME.tgz" --file "$WORK/$MARBLE_TGZ:$REMOTE/incoming/$NAME-marble.tgz")
