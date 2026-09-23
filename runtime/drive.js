@@ -231,7 +231,10 @@
             { signal, onProgress: (loaded) => onProgress?.(Math.min(received + loaded, file.size), file.size) },
           );
           if (status === 200 || status === 409) {
-            received = Number(answer.received) || received;
+            // The host's count is the truth, zero included: a host that lost
+            // the part says 0, and resending at the old offset would never end.
+            const at = Number(answer.received);
+            if (Number.isSafeInteger(at) && at >= 0) received = at;
             if (tries) onState?.('going');
             tries = 0;
             continue;

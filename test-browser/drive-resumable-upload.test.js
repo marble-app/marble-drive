@@ -112,3 +112,27 @@ test('a reload part way through, and the same file dropped again, carries on fro
   assert.equal(elsewhere[0], 0);
   await first.page.context().close();
 });
+
+// A host that has less than the page thought — nothing at all — is believed:
+// the page goes back to where the host is, rather than resending the same
+// chunk at the same offset forever.
+test('a 409 that says the host has nothing sends the file again from the start', async () => {
+  const { page } = await host.newPage();
+  const seen = offsets(page);
+  await page.goto(`${host.base}/a/drive`);
+  let told = false;
+  await page.route(/\/drive\/uploads\/[0-9a-f]+\?offset=/, (route) => {
+    if (!told && /[?&]offset=1048576(&|$)/.test(route.request().url())) {
+      told = true;
+      return route.fulfill({ status: 409, contentType: 'application/json', body: JSON.stringify({ error: 'lost', received: 0 }) });
+    }
+    return route.continue();
+  });
+  const result = await Promise.race([
+    page.evaluate((make) => window.marble.drive.uploadFile({ folder: 'Other', name: 'restart.mov', file: eval(make) }), MAKE),
+    new Promise((r) => setTimeout(() => r('stuck'), 30_000)),
+  ]);
+  assert.notEqual(result, 'stuck');
+  assert.deepEqual(seen.slice(0, 3), [0, 1048576, 0], 'after the 409 the page went back to 0');
+  await page.context().close();
+});
