@@ -174,8 +174,12 @@ test('a picked row typing into a name is not a picked row being deleted', async 
 
 // --------------------------------------------------------------- the live copy
 
-test('the document Bryan is actually looking at does all of the above', async () => {
-  const live = await fsp.readFile(new URL('../drive/drive.mrbl', import.meta.url), 'utf8');
+test('the live drive document does all of the above', async (t) => {
+  const live = await fsp.readFile(new URL('../drive/drive.mrbl', import.meta.url), 'utf8').catch(() => null);
+  if (!live) {
+    t.skip('no drive/drive.mrbl in this checkout');
+    return;
+  }
   const there = await startDrive({
     agents: false,
     documents: { drive: live, garden: GARDEN, 'Papers/one': GARDEN, 'Papers/deep/two': GARDEN },

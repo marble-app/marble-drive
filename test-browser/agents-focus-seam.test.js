@@ -513,7 +513,7 @@ test('the drag follows the pointer off the canvas and out of the window', async 
 
 test('a field the canvas has already folded can still be dragged all the way in', async () => {
   const { page, errors } = await openAgents();
-  // Bryan's shape: two pins and far more chats than the canvas can hold, so
+  // A real drive's shape: two pins and far more chats than the canvas can hold, so
   // the packer folds some of the field before the seam is ever touched.
   await page.evaluate(async () => {
     const mk = async (title) => {

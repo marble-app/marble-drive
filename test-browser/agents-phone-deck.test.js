@@ -79,7 +79,7 @@ const ask = async (page) => page.evaluate(async () => {
 
 test('a phone row is two lines in 64px: dot, title, age, and one line under it', async () => {
   const { page } = await openAgents();
-  const id = await start(page, { title: 'CHI related work', target: 'Research/CHI2027.mrbl', running: true, activity: 'reading Hollan 1985' });
+  const id = await start(page, { title: 'CHI related work', target: 'Research/CHI2027.mrbl', running: true, activity: 'reading a 1985 paper' });
   await openDeck(page);
   const row = page.locator(`.deck .conv[data-id="${id}"]`);
   await row.waitFor();
@@ -87,7 +87,7 @@ test('a phone row is two lines in 64px: dot, title, age, and one line under it',
   assert.ok(box.height <= 64, `row is ${box.height}px`);
   assert.ok(box.height >= 56, `row is ${box.height}px`);
   assert.equal((await row.locator('.title').textContent()).trim(), 'CHI related work');
-  assert.equal((await row.locator('.line2').textContent()).trim(), 'reading Hollan 1985');
+  assert.equal((await row.locator('.line2').textContent()).trim(), 'reading a 1985 paper');
   assert.ok(await row.locator('.age').textContent());
   // Two lines, and only two: the target line, the tags and the meta line are
   // the desk's way of saying the same things.
@@ -107,7 +107,7 @@ test('a phone row is two lines in 64px: dot, title, age, and one line under it',
 
 test('a row on the desk keeps its three lines and writes no second line', async () => {
   const { page } = await openAgents({ viewport: { width: 1280, height: 800 }, hasTouch: false, isMobile: false });
-  const id = await start(page, { title: 'CHI related work', target: 'Research/CHI2027.mrbl', running: true, activity: 'reading Hollan 1985' });
+  const id = await start(page, { title: 'CHI related work', target: 'Research/CHI2027.mrbl', running: true, activity: 'reading a 1985 paper' });
   await page.reload();
   const row = page.locator(`.conv[data-id="${id}"]`);
   await row.waitFor();

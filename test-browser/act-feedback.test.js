@@ -26,8 +26,8 @@ const APP = `<!doctype html>
 <body data-marble-id="b">
   <button data-marble-id="sort" data-marble-choose="asc">Sort</button>
   <ul data-marble-id="rows">
-    <li data-marble-id="r1">Ana</li>
-    <li data-marble-id="r2">Bo</li>
+    <li data-marble-id="r1">Apples</li>
+    <li data-marble-id="r2">Beans</li>
   </ul>
 </body></html>
 `;
@@ -80,7 +80,7 @@ test('a press is a ring on the control, not a zone around it', async () => {
 test('the effect waits for the press: cause first, then what the app filed', async () => {
   const { page } = await open();
   await frame(page, pressing);
-  await ops(page, { client: 'agent:c1', ops: [{ type: 'setText', id: 'r1', text: 'Ana' }] });
+  await ops(page, { client: 'agent:c1', ops: [{ type: 'setText', id: 'r1', text: 'Apples' }] });
 
   assert.equal(
     await page.locator('[data-marble-id="r1"]').evaluate((el) => el.classList.contains('marble-flash')),
@@ -147,7 +147,7 @@ test('an act on nothing this page shows draws nothing, and holds nothing back', 
   const { page } = await open();
   await frame(page, { client: 'agent:c1', ids: ['not-here'], phase: 'acting', note: 'Pressing Sort' });
   assert.equal(await page.locator('.marble-act').count(), 0);
-  await ops(page, { client: 'agent:c1', ops: [{ type: 'setText', id: 'r1', text: 'Ana' }] });
+  await ops(page, { client: 'agent:c1', ops: [{ type: 'setText', id: 'r1', text: 'Apples' }] });
   assert.equal(
     await page.locator('[data-marble-id="r1"]').evaluate((el) => el.classList.contains('marble-flash')),
     true,

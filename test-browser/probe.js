@@ -13,14 +13,14 @@ const sourceOfAgents = async () => {
 };
 
 const SEED = [
-  { title: 'CHI 2027 related work pass', target: 'Research/CHI2027 - Elicitive UIs.mrbl', folder: 'Research', activity: 'reading Hollan 1985', running: true },
+  { title: 'CHI 2027 related work pass', target: 'Research/CHI2027 - Elicitive UIs.mrbl', folder: 'Research', activity: 'reading a 1985 paper', running: true },
   { title: 'Bibliography dedup', target: 'Research/Bibliography Cleanup.mrbl', folder: 'Research', lastOutcome: 'changes', activity: 'merged 14 duplicate keys' },
   { title: 'Figure 3 redraw', target: 'Research/CHI2027 - Elicitive UIs.mrbl', folder: 'Research', lastOutcome: 'changes', activity: 'exported figure-3.svg' },
   { title: 'Three-thesis vision edit', target: 'Research/Research Vision Docs/vision.mrbl', folder: 'Research', lastOutcome: 'failed', activity: 'write refused' },
   { title: 'Agents drawer plan', target: 'Marble/docs/agents-drawer.md', folder: 'Marble', running: true, activity: 'drafting Plan 3' },
   { title: 'Affordance caret fix', target: 'Marble/lib/affordances.js', folder: 'Marble', lastOutcome: 'changes', activity: 'empty rows take a caret' },
   { title: 'Tailscale serve notes', target: 'Marble/docs/remote.md', folder: 'Marble', lastOutcome: 'changes', activity: 'documented the funnel flag' },
-  { title: 'US Open bracket widget', target: "Bryan's Days/today.mrbl", lastOutcome: 'changes', activity: 'bracket renders' },
+  { title: 'US Open bracket widget', target: 'Days/today.mrbl', lastOutcome: 'changes', activity: 'bracket renders' },
   { title: 'Kyoto itinerary', target: 'Travel/Japan.mrbl' },
   { title: 'Weekend reading', target: 'Fun/Reading.mrbl', lastOutcome: 'changes', activity: 'three papers queued' },
 ];

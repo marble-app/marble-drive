@@ -13,7 +13,7 @@ import test from 'node:test';
 
 import { startDrive } from './harness.js';
 
-// Parked 2026-09-18 at Bryan's request, to be settled later. The subject here
+// Parked 2026-09-18 at the owner's request, to be settled later. The subject here
 // is the day-runner button, which lives in `drive/drive.mrbl` and not in
 // `templates/drive.mrbl` — so this file can only ever be green on the one
 // machine whose gitignored drive has that button, and a checkout carrying an
@@ -26,6 +26,10 @@ const SOURCE = PARKED
   : await fsp
     .readFile(new URL('../drive/drive.mrbl', import.meta.url), 'utf8')
     .catch(() => null);
+
+// The days folder is found by name in the live document, so the fixtures
+// take the name from there.
+const FOLDER = /const DAYS = "([^"]+)"/.exec(SOURCE ?? '')?.[1];
 
 const pad = (n) => String(n).padStart(2, '0');
 const now = new Date();
@@ -63,7 +67,7 @@ if (!SOURCE) {
     documents: {
       drive: aimedAt('script:writes'),
       'drive-stops': aimedAt('script:stops'),
-      "Bryan's Days/2026-09-07": dayDoc('2026-09-07', 'An older day'),
+      [`${FOLDER}/2026-09-07`]: dayDoc('2026-09-07', 'An older day'),
     },
   });
   // The button runs its skill in a project the owner registered, so the test
@@ -76,7 +80,7 @@ if (!SOURCE) {
 
   async function openDays(doc = 'drive') {
     const { page, errors } = await host.newPage();
-    await page.goto(`${host.base}/a/${doc}#/${encodeURIComponent("Bryan's Days")}`);
+    await page.goto(`${host.base}/a/${doc}#/${encodeURIComponent(FOLDER)}`);
     await page.locator('.items[data-rep="days"]').waitFor();
     await page.evaluate((dir) => window.marble.agent.addProject({ path: dir, name: 'Marble Drive' }), project);
     await page.locator('.day-wait .day-start').waitFor();
@@ -118,7 +122,7 @@ if (!SOURCE) {
     await page.locator('.day-start').click();
     await page.locator('.day-live').waitFor();
 
-    await host.drive.createDocument("Bryan's Days/today", dayDoc(TODAY, 'The quiet morning'));
+    await host.drive.createDocument(`${FOLDER}/today`, dayDoc(TODAY, 'The quiet morning'));
 
     await page.locator('.day-card.is-today').waitFor();
     assert.equal(await page.locator('.day-wait').count(), 0);

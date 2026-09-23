@@ -81,7 +81,7 @@ const carryOnto = async (page, index, key, side) => {
   await page.mouse.move(at.x + at.w * fx, at.y + at.h * fy, { steps: 10 });
 };
 
-/** Bryan named it: three columns means three even columns. An insert
+/** As asked: three columns means three even columns. An insert
  *  re-levels the row it lands in, and because the room previews with the
  *  same insert, what you are shown while the chat is in the air is the
  *  balanced layout you get. */

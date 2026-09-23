@@ -159,7 +159,7 @@ const settledAt = (page, key, x) => page.waitForFunction(([k, want]) => {
   return Boolean(r) && Math.abs(r.x - want) < 1;
 }, [key, x], { timeout: 5000 });
 
-/** Bryan's ask: a swap showed no preview. Now the preview is the swap — hold
+/** The ask: a swap showed no preview. Now the preview is the swap — hold
  *  a pane over another's centre and the two ease across while the hand is
  *  still down. */
 test('holding a pane over another pane\'s centre trades their places before the drop', async () => {

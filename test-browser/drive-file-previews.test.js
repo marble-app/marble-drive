@@ -96,7 +96,7 @@ test('a folder of nothing but files shows every one of them, and text shows its 
   }
 });
 
-test('the drive Bryan is looking at draws a song in the map as a waveform that plays', async () => {
+test('the live drive draws a song in the map as a waveform that plays', async () => {
   const fsp = await import('node:fs/promises');
   const live = process.env.MARBLE_DRIVE_DOC ?? new URL('../drive/drive.mrbl', import.meta.url);
   const source = await fsp.readFile(live, 'utf8').catch(() => null);

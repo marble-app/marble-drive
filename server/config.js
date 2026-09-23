@@ -112,6 +112,9 @@ export function loadConfig(env = process.env) {
     // A file that is not a document is streamed to disk rather than held, so
     // this is a ceiling on a mistake, not on memory. An album of WAVs fits.
     maxFileBytes: num('MARBLE_DRIVE_MAX_FILE', 2 * 1024 * 1024 * 1024),
+    // An upload is timed by silence, not by length: a 2 GB file over a slow
+    // link takes as long as it takes, and one that stops sending is cut.
+    uploadIdleSeconds: num('MARBLE_DRIVE_UPLOAD_IDLE_SECONDS', 60),
 
     open: bool('MARBLE_DRIVE_OPEN', false),
 

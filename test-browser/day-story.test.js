@@ -17,7 +17,7 @@ import { startDrive } from './harness.js';
 const ROOT = new URL('../', import.meta.url).pathname;
 const BUILD = path.join(ROOT, '.claude/skills/my-day/lib/build.mjs');
 const PHONE = { width: 393, height: 852 };
-const DOC = "Bryan's Days/story";
+const DOC = 'Days/story';
 
 // No `id` or `pdfUrl` on a paper: the build screenshots a first PDF page over
 // the network when it has one, and a test must never leave the machine.
@@ -25,7 +25,7 @@ const DAY = {
   date: '2026-09-19',
   title: 'Story fixture',
   palette: 'Sax Blue & Sulphur',
-  greeting: 'Good morning, Bryan.',
+  greeting: 'Good morning.',
   summary: 'A fixture day, built to be read as screens.',
   layout: {
     rail: [{ type: 'weather', treatment: 'card' }],
@@ -298,7 +298,7 @@ test('swiping up holds the live component, and the bar brings the story back', a
   await page.waitForSelector('.story:not([hidden]) .story-screen');
   const struck = await page.$$eval('.story-screen[data-cur] .story-stack li.row', (els) =>
     els.some((e) => e.getAttribute('data-key') === 't1' && e.hasAttribute('data-done')));
-  assert.equal(struck, true, 'the glance is rebuilt from the document he just edited');
+  assert.equal(struck, true, 'the glance is rebuilt from the document you just edited');
 });
 
 test('the story files the reading mode and nothing else', async (t) => {

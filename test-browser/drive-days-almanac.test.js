@@ -13,6 +13,9 @@ import { startDrive } from './harness.js';
 
 const DOC = process.env.MARBLE_DRIVE_DOC || new URL('../drive/drive.mrbl', import.meta.url);
 const SOURCE = await fsp.readFile(DOC, 'utf8').catch(() => null);
+// The days folder is found by name in the live document, so the fixtures
+// take the name from there.
+const FOLDER = /const DAYS = "([^"]+)"/.exec(SOURCE ?? '')?.[1];
 
 const pad = (n) => String(n).padStart(2, '0');
 const now = new Date();
@@ -50,7 +53,7 @@ const ncard = (key, title, { saved = false, vote = '', note = '' } = {}) =>
 const pcard = (key, title, { saved = false, vote = '', note = '' } = {}) =>
   `<div class="pcard" data-key="${key}"${saved ? ' data-saved' : ''}${vote ? ` data-vote="${vote}"` : ''}>
     <h4 class="ptitle"><a href="https://arxiv.org/abs/${key}">${title}</a></h4>
-    <div class="pmeta">Ada Lovelace, Alan Turing</div>
+    <div class="pmeta">A. Author, B. Author</div>
     <div class="pfoot"><span class="rel rel-2">Adjacent</span></div>
     <div class="note">${note}</div>
   </div>`;
@@ -73,20 +76,20 @@ ${push ? `<section class="comp tint"><div class="chead"><h2>Push one thing forwa
 `;
 
 const DAYS = {
-  [`Bryan's Days/${D2}`]: dayDoc({
+  [`${FOLDER}/${D2}`]: dayDoc({
     key: D2, title: 'The first day', palette: 'Rust & Duck Egg', chips: ['#a85a3c', '#a9c6bf', '#f0ece2', '#322d29'],
     push: 'Draft the intro',
     rows: {
       focus: [row('focus', 'own-book-flights', 'Book flights')],
-      todos: [row('todo', 'own-write-grant', 'Write the grant'), row('todo', 'own-reply-alex', 'Reply to Alex')],
+      todos: [row('todo', 'own-write-grant', 'Write the grant'), row('todo', 'own-reply-committee', 'Reply to the committee')],
     },
     cards: {
-      news: [ncard('wire-1', 'A story he starred', { saved: true, note: 'This is really relevant!!!' })],
-      papers: [pcard('2609.00001', 'A paper he ignored')],
+      news: [ncard('wire-1', 'A story you starred', { saved: true, note: 'This is really relevant!!!' })],
+      papers: [pcard('2609.00001', 'A paper you ignored')],
     },
     road: 'The trellis',
   }),
-  [`Bryan's Days/${D1}`]: dayDoc({
+  [`${FOLDER}/${D1}`]: dayDoc({
     key: D1, title: 'The second day', palette: 'Moss & Buff', chips: ['#4c6b45', '#d8c9a3', '#f3efe4', '#2c2f2a'],
     push: 'Send the email',
     rows: {
@@ -95,20 +98,20 @@ const DAYS = {
     },
     cards: {
       news: [],
-      papers: [pcard('2609.00002', 'A paper he liked', { vote: 'up' })],
+      papers: [pcard('2609.00002', 'A paper you liked', { vote: 'up' })],
     },
     road: 'Soundings',
   }),
-  [`Bryan's Days/${TODAY}`]: dayDoc({
+  [`${FOLDER}/${TODAY}`]: dayDoc({
     key: TODAY, title: 'The day itself', palette: 'Peacock & Sand', chips: ['#2f7d78', '#dcc9a4', '#eef1ec', '#2b3330'],
-    push: 'Write back to Devina',
+    push: 'Write back to the editor',
     rows: {
       focus: [row('focus', 'own-book-flights', 'Book flights and hotel')],
       todos: [row('todo', 'own-course-plan', 'Plan the course', { note: 'Winter 2027\n50 students' })],
     },
     cards: {
-      news: [ncard('wire-2', 'A story he thumbed down', { vote: 'down' })],
-      papers: [pcard('2609.00003', 'A paper he saved today', { saved: true, vote: 'up' })],
+      news: [ncard('wire-2', 'A story you thumbed down', { vote: 'down' })],
+      papers: [pcard('2609.00003', 'A paper you saved today', { saved: true, vote: 'up' })],
     },
     road: 'The lending library',
   }),
@@ -116,7 +119,7 @@ const DAYS = {
 
 const notSandbox = (errors) => errors.filter((e) => !/sandbox/i.test(e));
 
-if (!SOURCE) {
+if (!SOURCE || !FOLDER) {
   test('the days folder reads its issues back', { skip: 'no drive/drive.mrbl in this checkout' }, () => {});
 } else {
   const host = await startDrive({ agents: false, documents: { drive: SOURCE, ...DAYS } });
@@ -126,7 +129,7 @@ if (!SOURCE) {
 
   async function openDays() {
     const { page, errors } = await host.newPage();
-    await page.goto(`${host.base}/a/drive#/${encodeURIComponent("Bryan's Days")}`);
+    await page.goto(`${host.base}/a/drive#/${encodeURIComponent(FOLDER)}`);
     await page.locator('.items[data-rep="days"]').waitFor();
     return { page, errors };
   }
@@ -151,13 +154,13 @@ if (!SOURCE) {
     assert.match((await second.locator('.day-facts').textContent()).replace(/\s+/g, ' '), /▲ 1.*✓ 1\/3/);
 
     const hero = page.locator('.day-card.is-today');
-    assert.equal(await hero.locator('.day-push').textContent(), 'Write back to Devina');
+    assert.equal(await hero.locator('.day-push').textContent(), 'Write back to the editor');
     await page.locator('.days-bar .days-note', { hasText: '3 days' }).waitFor();
     assert.deepEqual(notSandbox(errors), []);
     await page.close();
   });
 
-  test('kept is every star, thumb and note, in his voice', async () => {
+  test('kept is every star, thumb and note, in your own voice', async () => {
     const { page, errors } = await openDays();
     await page.locator('[data-days-read="kept"]').click();
     assert.equal(await page.locator('body').getAttribute('data-days-read'), 'kept');
@@ -169,11 +172,11 @@ if (!SOURCE) {
     assert.equal(await items.count(), 5);
     const titles = await items.locator('.kept-title').allTextContents();
     assert.deepEqual(titles, [
-      'A paper he saved today',
+      'A paper you saved today',
       'Plan the course',
-      'A paper he liked',
+      'A paper you liked',
       'Book flights',
-      'A story he starred',
+      'A story you starred',
     ]);
     const starred = items.last();
     assert.equal(await starred.locator('.kept-note').textContent(), 'This is really relevant!!!');
@@ -215,15 +218,15 @@ if (!SOURCE) {
     assert.equal(grant.state, 'done');
     assert.equal(grant.label, `Done ${short(D1)}`);
     assert.deepEqual(grant.cells, ['open', 'done']);
-    const alex = await read(3);
-    assert.equal(alex.state, 'dropped');
-    assert.equal(alex.label, `Dropped after ${short(D2)}`);
+    const reply = await read(3);
+    assert.equal(reply.state, 'dropped');
+    assert.equal(reply.label, `Dropped after ${short(D2)}`);
     // The note travels with the thread.
     assert.equal(await rows.nth(0).locator('.t-note').textContent(), 'right after the deadline');
     // Today's column is marked, and the pushes run newest first.
     assert.equal(await page.locator('.threads thead th.day.now').count(), 1);
     assert.deepEqual(await page.locator('.pushes a > span:last-child').allTextContents(), [
-      'Write back to Devina', 'Send the email', 'Draft the intro',
+      'Write back to the editor', 'Send the email', 'Draft the intro',
     ]);
     assert.deepEqual(notSandbox(errors), []);
     await page.close();
@@ -250,7 +253,7 @@ if (!SOURCE) {
     assert.equal(await page.locator('.wall').count() > 0, true);
     // A tile still opens the day.
     await page.locator(`.wall .day-card[data-day="${D2}"]`).click();
-    await page.waitForURL(/Bryan/);
+    await page.waitForURL((url) => decodeURIComponent(url.href).includes(FOLDER));
     assert.deepEqual(notSandbox(errors), []);
     await page.close();
   });

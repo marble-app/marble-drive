@@ -1,4 +1,4 @@
-// Six things Bryan caught in the Agents UI: a composer bar that grew a second
+// Six things caught in the Agents UI: a composer bar that grew a second
 // row instead of folding, cards showing from behind their panes, focus that
 // took the title away and lit the bar white, a dead New-group column, and a
 // drag preview the size of the whole stage.
@@ -77,7 +77,7 @@ test('a crowded composer bar folds its setups instead of growing a second row', 
   await page.locator('.pane > marble-conversation[conversation]').waitFor();
   await page.waitForTimeout(500);
 
-  // The state Bryan's screenshot is in: saved setups, a Custom toggle and a
+  // The state the reported screenshot is in: saved setups, a Custom toggle and a
   // long mode label, in a pane too narrow to hold them all at once.
   await page.evaluate(() => {
     const c = document.querySelector('marble-conversation[data-chrome]');

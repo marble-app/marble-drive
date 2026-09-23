@@ -66,7 +66,7 @@ test('an mp3 dropped on a folder lands in it, byte for byte, and a .DS_Store doe
   }
 });
 
-test('the drive Bryan is looking at takes a song and a document from one drop', async () => {
+test('the live drive takes a song and a document from one drop', async () => {
   const live = path.join(path.dirname(fileURLToPath(import.meta.url)), '..', 'drive', 'drive.mrbl');
   const source = await fsp.readFile(live, 'utf8').catch(() => null);
   if (!source) return; // the live drive is not in this checkout

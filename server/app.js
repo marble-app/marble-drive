@@ -689,6 +689,10 @@ export async function createDrive(config, { log = console, agentProviders = null
         const stem = safeSegment(dot > 0 ? wanted.slice(0, dot) : wanted);
         const name = ext ? `${stem}.${ext}` : stem;
         const filePath = await freeFilePath(joinPath(folder, name));
+        // Silence, not length, ends an upload (the server has no whole-request
+        // deadline, see below). Cutting the socket fails the pipe, and putFile
+        // takes its half-written part away.
+        req.setTimeout(config.uploadIdleSeconds * 1000, () => req.destroy(new Error('the upload stopped sending')));
         const put = await store.putFile(filePath, req, { limit: config.maxFileBytes });
         channels.toDrive('created', { path: put.path, kind: 'file' }, { except: url.searchParams.get('client') });
         return json(res, 200, {
@@ -906,6 +910,13 @@ export async function createDrive(config, { log = console, agentProviders = null
       });
     }
   });
+
+  // Node's default gives a whole request five minutes, which capped a dropped
+  // file at what the link could carry in five minutes — ~600 MB at 2 MB/s,
+  // whatever MARBLE_DRIVE_MAX_FILE said. The deadline cannot be lifted for one
+  // route, so it is lifted here and the upload route times silence instead.
+  // Headers still have to arrive within `headersTimeout`.
+  server.requestTimeout = 0;
 
   if (!agentsWhy) {
     agents = await createAgents({
