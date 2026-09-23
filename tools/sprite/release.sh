@@ -25,7 +25,11 @@ HISTORY="$APP/history"
 SERVICE=marble-drive
 PORT=4400
 HOST="${MARBLE_SPRITE_HOST:-127.0.0.1}"
-DRIVE=/drive
+DRIVE="${MARBLE_SPRITE_DRIVE:-/drive}"
+# This sprite's own settings and saved keys: outside every release, so a
+# deploy keeps them (a tester's passphrase, which agent pays, their API key).
+CONFIG="$HOME/.config/marble-drive"
+SPRITE_ENV="$CONFIG/sprite.env"
 REPO_TARBALL=https://codeload.github.com/marble-app/marble-drive/tar.gz
 NODE="$(command -v node)"
 # The release's own node_modules/.bin first, so its pinned `claude` is the one
@@ -97,8 +101,26 @@ stage() {
   say "staged $name"
 }
 
-service_up() {
+# The service's environment: the defaults, then this sprite's sprite.env
+# (KEY=value lines, # comments). `sprite-env --env` is a comma-separated list,
+# so a value with a comma in it would be split silently; it is refused.
+service_env() {
   local env="MARBLE_DRIVE_ROOT=$DRIVE,PORT=$PORT,HOST=$HOST,MARBLE_DRIVE_AGENTS=1,NODE_ENV=production,PATH=$SERVICE_PATH"
+  env="$env,MARBLE_DRIVE_AGENT_KEYS=$CONFIG/agent-keys"
+  if [[ -f "$SPRITE_ENV" ]]; then
+    local line
+    while IFS= read -r line || [[ -n "$line" ]]; do
+      [[ -z "${line// }" || "$line" == \#* ]] && continue
+      [[ "$line" =~ ^[A-Z_][A-Z0-9_]*= ]] || die "sprite.env: not KEY=value: $line"
+      [[ "$line" == *,* ]] && die "sprite.env: ${line%%=*} has a comma in its value, which the service's settings cannot hold"
+      env="$env,$line"
+    done <"$SPRITE_ENV"
+  fi
+  printf '%s' "$env"
+}
+
+service_up() {
+  local env=$1
   # Recreated rather than restarted, so the service's settings are always
   # this script's: a restart keeps the env it was created with.
   sprite-env services delete "$SERVICE" >/dev/null 2>&1 || true
@@ -106,14 +128,17 @@ service_up() {
     --dir "$CURRENT/marble-drive" --env "$env" --http-port "$PORT" --no-stream >/dev/null
 }
 
-point() { # point <name>: make <name> current, atomically
-  ln -sfn "$RELEASES/$1" "$APP/current.next"
-  mv -Tf "$APP/current.next" "$CURRENT"
+point() { # point <name>: make <name> current
+  ln -sfn "$RELEASES/$1" "$CURRENT"
 }
 
 switch() {
   local name=$1
   [[ -d "$RELEASES/$name" ]] || die "no release $name"
+  mkdir -p "$CONFIG" && chmod 700 "$CONFIG"
+  # Read before anything moves: a bad sprite.env stops the switch cold.
+  local env
+  env="$(service_env)" || exit 1
   if [[ ! -d "$DRIVE" ]]; then
     say "creating $DRIVE"
     sudo mkdir -p "$DRIVE"
@@ -123,13 +148,13 @@ switch() {
   [[ -L "$CURRENT" ]] && previous="$(basename "$(readlink "$CURRENT")")"
   say "switching to $name${previous:+ (from $previous)}"
   point "$name"
-  service_up
+  service_up "$env"
   if ! health "$PORT" 45; then
     tail -40 "/.sprite/logs/services/$SERVICE.log" >&2 || true
     if [[ -n "$previous" ]]; then
       say "service did not come up; going back to $previous"
       point "$previous"
-      service_up
+      service_up "$env"
       health "$PORT" 45 || true
     fi
     die "release $name did not come up"
