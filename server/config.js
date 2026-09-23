@@ -126,6 +126,9 @@ export function loadConfig(env = process.env) {
     // macOS's own thumbnailer, for the kinds a page cannot draw itself. On by
     // default where it exists; off makes a Mac behave like any other host.
     quicklook: bool('MARBLE_DRIVE_QUICKLOOK', true),
+    // A Fly Sprite's own API. Present only on a sprite; there, the host holds
+    // a task on it while work runs so the sprite cannot pause mid-turn.
+    spriteSocket: str('MARBLE_DRIVE_SPRITE_SOCKET', '/.sprite/api.sock'),
 
     open: bool('MARBLE_DRIVE_OPEN', false),
 

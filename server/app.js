@@ -34,6 +34,7 @@ import { build as buildStarter, list as listStarters, preview as starterPreview 
 import { createChannels } from './sse.js';
 import { createStore } from './store/index.js';
 import { readDriveSettings } from './drive-settings.js';
+import { createKeepAwake } from './keep-awake.js';
 import { createStems } from './stems/index.js';
 import { cleanFileName, createUploads } from './uploads.js';
 import { DRAWN_MAX_BYTES, createThumbs } from './thumbs.js';
@@ -172,6 +173,16 @@ export async function createDrive(config, { log = console, agentProviders = null
   uploads.sweep().catch(() => {});
   const uploadSweep = setInterval(() => uploads.sweep().catch(() => {}), 60 * 60 * 1000);
   uploadSweep.unref?.();
+  // On a sprite: stay awake while a turn or a split is running, even with no
+  // tab open (server/keep-awake.js). Inert anywhere else.
+  const keepAwake = createKeepAwake({
+    socket: config.spriteSocket,
+    busy: () =>
+      (agents?.runner?.running?.().length ?? 0) > 0
+      || stems.list().jobs.some((job) => job.state === 'running' || job.state === 'queued'),
+    log,
+  });
+  keepAwake.start();
   const typesafe = createTypesafeHandler({
     apiKey: config.typesafeApiKey,
     maxBodyBytes: config.maxBodyBytes,
@@ -1291,6 +1302,7 @@ button{background:#738698;color:#fafaf7;border-color:#738698;cursor:pointer}p{co
     server,
     store,
     uploads,
+    keepAwake,
     channels,
     gate,
     oplog,
@@ -1320,6 +1332,7 @@ button{background:#738698;color:#fafaf7;border-color:#738698;cursor:pointer}p{co
       await agents?.close();
       stems.close();
       clearInterval(uploadSweep);
+      await keepAwake.stop();
       stopBackups();
       watcher.close();
       channels.close();
