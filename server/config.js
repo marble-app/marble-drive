@@ -111,8 +111,15 @@ export function loadConfig(env = process.env) {
     maxBodyBytes: num('MARBLE_DRIVE_MAX_BODY', 16 * 1024 * 1024),
     maxBlobBytes: num('MARBLE_DRIVE_MAX_BLOB', 64 * 1024 * 1024),
     // A file that is not a document is streamed to disk rather than held, so
-    // this is a ceiling on a mistake, not on memory. An album of WAVs fits.
-    maxFileBytes: num('MARBLE_DRIVE_MAX_FILE', 2 * 1024 * 1024 * 1024),
+    // this is a ceiling on a mistake, not on memory. A long 4K video fits; the
+    // disk is checked separately (server/uploads.js).
+    maxFileBytes: num('MARBLE_DRIVE_MAX_FILE', 20 * 1024 * 1024 * 1024),
+    // A big file goes up in chunks of this size through a session, so a
+    // dropped connection costs one chunk and a proxy never sees the whole file.
+    uploadChunkBytes: num('MARBLE_DRIVE_UPLOAD_CHUNK', 32 * 1024 * 1024),
+    // Room kept back on the drive's disk: an upload that would leave less than
+    // this is refused before a byte is sent.
+    uploadMarginBytes: num('MARBLE_DRIVE_UPLOAD_MARGIN', 1024 * 1024 * 1024),
     // An upload is timed by silence, not by length: a 2 GB file over a slow
     // link takes as long as it takes, and one that stops sending is cut.
     uploadIdleSeconds: num('MARBLE_DRIVE_UPLOAD_IDLE_SECONDS', 60),

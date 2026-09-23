@@ -14,6 +14,7 @@
 //   read(path)          → string|null
 //   readRaw(path)       → {path,name,ext,bytes,open()}|null   a file that is not a document
 //   putFile(path, stream, {limit}) → {path, bytes}   refuses to overwrite
+//   placeFile(path, from) → {path, bytes}  link a file already on this volume into place, refusing to overwrite
 //   has(path)           → boolean          a document is there
 //   hasFolder(path)     → boolean          a folder is there
 //   hasFile(path)       → boolean          something that is neither is there

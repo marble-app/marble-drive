@@ -35,6 +35,7 @@ import { createChannels } from './sse.js';
 import { createStore } from './store/index.js';
 import { readDriveSettings } from './drive-settings.js';
 import { createStems } from './stems/index.js';
+import { cleanFileName, createUploads } from './uploads.js';
 import { DRAWN_MAX_BYTES, createThumbs } from './thumbs.js';
 import { createTypesafeHandler } from './typesafe/routes.js';
 import { createGenuiHandler } from './genui/routes.js';
@@ -160,6 +161,17 @@ export async function createDrive(config, { log = console, agentProviders = null
   });
   const intents = createIntents({ store, log });
   const stems = createStems({ store, channels, log });
+  const uploads = createUploads({
+    store,
+    maxBytes: config.maxFileBytes,
+    chunkBytes: config.uploadChunkBytes,
+    marginBytes: config.uploadMarginBytes,
+    freePath: (wanted) => freeFilePath(wanted),
+  });
+  // A session nobody came back for is dropped after a day: at boot, then hourly.
+  uploads.sweep().catch(() => {});
+  const uploadSweep = setInterval(() => uploads.sweep().catch(() => {}), 60 * 60 * 1000);
+  uploadSweep.unref?.();
   const typesafe = createTypesafeHandler({
     apiKey: config.typesafeApiKey,
     maxBodyBytes: config.maxBodyBytes,
@@ -687,16 +699,11 @@ export async function createDrive(config, { log = console, agentProviders = null
       // would open as its own source.
       if (route === '/drive/upload-file' && req.method === 'POST') {
         const folder = parsePath(safePath(url.searchParams.get('folder') ?? ''));
-        const wanted = url.searchParams.get('name') ?? '';
-        if (/\.(mrbl|html?)$/i.test(wanted)) {
-          return json(res, 400, { error: `"${wanted}" is a document — send it to /drive/upload` });
-        }
-        // The stem and the extension are cleaned apart, so the brackets the
-        // grammar refuses do not leave a space stranded before the `.mp3`.
-        const dot = wanted.lastIndexOf('.');
-        const ext = dot > 0 ? wanted.slice(dot + 1).replace(/[^a-z0-9]/gi, '').slice(0, 16) : '';
-        const stem = safeSegment(dot > 0 ? wanted.slice(0, dot) : wanted);
-        const name = ext ? `${stem}.${ext}` : stem;
+        const name = cleanFileName(url.searchParams.get('name') ?? '');
+        // A size the client declares is checked before a byte is read: above
+        // the cap, or more than the disk has room for, is refused now.
+        const declared = Number(req.headers['content-length']);
+        if (Number.isSafeInteger(declared)) await uploads.room(declared);
         const filePath = await freeFilePath(joinPath(folder, name));
         // Silence, not length, ends an upload (the server has no whole-request
         // deadline, see below). Cutting the socket fails the pipe, and putFile
@@ -823,6 +830,42 @@ export async function createDrive(config, { log = console, agentProviders = null
           'Cache-Control': 'private, max-age=86400',
           'X-Content-Type-Options': 'nosniff',
         });
+      }
+
+      // ------------------------------------------------------- upload sessions
+      //
+      // A big file, in chunks (server/uploads.js). Start, send each chunk at
+      // the offset the host has, finish; a chunk that lands in the wrong
+      // place is a 409 that says where the host is, so a retry never
+      // duplicates a byte and a reload can carry on.
+      if (route === '/drive/uploads' && req.method === 'POST') {
+        const body = await readJson(req, 64 * 1024);
+        return json(res, 200, await uploads.start(body));
+      }
+      const session = /^\/drive\/uploads\/([^/]+)(\/finish)?$/.exec(route);
+      if (session) {
+        const [, id, finishing] = session;
+        if (finishing && req.method === 'POST') {
+          const put = await uploads.finish(id);
+          channels.toDrive('created', { path: put.path, kind: 'file' }, { except: url.searchParams.get('client') });
+          return json(res, 200, {
+            ok: true,
+            path: put.path,
+            href: `/drive/file?path=${encodeURIComponent(put.path)}`,
+            bytes: put.bytes,
+          });
+        }
+        if (!finishing && req.method === 'PUT') {
+          req.setTimeout(config.uploadIdleSeconds * 1000, () => req.destroy(new Error('the upload stopped sending')));
+          try {
+            return json(res, 200, await uploads.append(id, url.searchParams.get('offset'), req));
+          } catch (err) {
+            if (err.status === 409) return json(res, 409, { error: err.message, received: err.received });
+            throw err;
+          }
+        }
+        if (!finishing && req.method === 'GET') return json(res, 200, await uploads.status(id));
+        if (!finishing && req.method === 'DELETE') return json(res, 200, await uploads.cancel(id));
       }
 
       // A picture the page drew, because this host could not: the first page
@@ -1247,6 +1290,7 @@ button{background:#738698;color:#fafaf7;border-color:#738698;cursor:pointer}p{co
   return {
     server,
     store,
+    uploads,
     channels,
     gate,
     oplog,
@@ -1275,6 +1319,7 @@ button{background:#738698;color:#fafaf7;border-color:#738698;cursor:pointer}p{co
     async close() {
       await agents?.close();
       stems.close();
+      clearInterval(uploadSweep);
       stopBackups();
       watcher.close();
       channels.close();

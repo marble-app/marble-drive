@@ -178,6 +178,28 @@ export function createFsStore({ root }) {
     return { path: clean, bytes };
   }
 
+  /**
+   * A file that arrived somewhere else on this volume (an upload assembled in
+   * `.marble/uploads/`), linked into place. The same rules as `putFile`: not a
+   * document, and a name somebody took in the meantime is refused, never
+   * replaced. The source is removed once the file is in place.
+   */
+  async function placeFile(filePath, from) {
+    const clean = parsePath(filePath, { allowRoot: false });
+    if (clean.endsWith(DOC_EXT)) throw new PathError('a .mrbl is a document, not a file');
+    const at = abs(clean);
+    await fsp.mkdir(path.dirname(at), { recursive: true });
+    try {
+      await fsp.link(from, at);
+    } catch (err) {
+      if (err.code === 'EEXIST') throw new PathError(`"${clean}" is already there`);
+      throw err;
+    }
+    await fsp.rm(from, { force: true });
+    const info = await fsp.stat(at);
+    return { path: clean, bytes: info.size };
+  }
+
   async function hasFolder(folderPath) {
     const at = abs(parsePath(folderPath));
     return fsp
@@ -560,6 +582,7 @@ export function createFsStore({ root }) {
     read,
     readRaw,
     putFile,
+    placeFile,
     has,
     hasFolder,
     hasFile,
