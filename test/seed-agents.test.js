@@ -5,7 +5,7 @@ import path from 'node:path';
 import test from 'node:test';
 
 import { createStore } from '../server/store/index.js';
-import { seedAgents, seedDrive } from '../server/seed.js';
+import { seedAgents, seedChat, seedDrive } from '../server/seed.js';
 
 const fresh = async () => {
   const root = await fsp.mkdtemp(path.join(os.tmpdir(), 'marble-agents-seed-'));
@@ -28,4 +28,17 @@ test('Agents is seeded once, and a hand-edited copy is not overwritten', async (
   const second = await seedAgents(store);
   assert.equal(second.seeded, false);
   assert.match(await store.read('Agents'), /Agents \(mine\)/);
+});
+
+test('Chat is seeded once, with custom chrome, unique ids and its affordances', async () => {
+  const { store } = await fresh();
+  const first = await seedChat(store);
+  assert.equal(first.seeded, true);
+  assert.equal(first.path, 'Chat');
+  const source = await store.read('Chat');
+  assert.match(source, /marble-agent" content="custom"/);
+  assert.doesNotMatch(source, /__(ID|TITLE|ICON|SCRIPT)__/);
+  const ids = [...source.matchAll(/data-marble-id="([^"]+)"/g)].map((m) => m[1]);
+  assert.equal(new Set(ids).size, ids.length);
+  assert.equal((await seedChat(store)).seeded, false);
 });

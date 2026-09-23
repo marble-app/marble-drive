@@ -120,6 +120,32 @@ export const STARTERS = [
     ],
   },
   {
+    id: 'chat',
+    title: 'Chat',
+    blurb: 'A chatbot, with its conversations down the side. It answers; it leaves the page alone.',
+    // The third answer in the writing family, and the one where most of the
+    // words are not yours: a thread with Claude, over the same conversations
+    // Agents runs, filtered to the ones this file started. Each copy talks
+    // only about its own, because the file's own path is the key — two chats
+    // made from this starter are two rooms, not two doors into one.
+    //
+    // `removable` is for the idea chips under the greeting; `editable` for the
+    // name in the rail; `history` so Mod+Z brings back a chip or a name. The
+    // threads are not the document's: they are drawn from the agent store
+    // every time the page opens, and archiving one is the agent's business.
+    parts: ['editable', 'removable', 'history', 'status'],
+    // Violet, the one colour not in the Drive's folder palette, and chosen for
+    // that: it is the colour an agent wears everywhere else in this drive, and
+    // this is the template that is nothing but one.
+    accent: '#7c5ca3',
+    hint: 'A tutor that quizzes me on whatever I paste in',
+    ideas: [
+      'A study buddy that asks me a question after each answer',
+      'A chat with a box above the thread for standing instructions',
+      'A chat that pins the answers I star into a notes column',
+    ],
+  },
+  {
     id: 'sheet',
     title: 'Sheet',
     blurb: 'A grid of cells. Rows and columns are markup, so both are yours to change.',

@@ -9,10 +9,10 @@ import os from 'node:os';
 import path from 'node:path';
 
 
-test('eight starters, each with a blurb somebody could choose from', () => {
+test('nine starters, each with a blurb somebody could choose from', () => {
   // The order is by family — write, structure, present, publish — because the
   // grid the page draws groups by adjacency and nothing else.
-  assert.deepEqual(list().map((s) => s.id), ['doc', 'note', 'sheet', 'board', 'canvas', 'slides', 'paper', 'latex']);
+  assert.deepEqual(list().map((s) => s.id), ['doc', 'note', 'chat', 'sheet', 'board', 'canvas', 'slides', 'paper', 'latex']);
   for (const starter of list()) {
     assert.ok(starter.title && starter.blurb && starter.accent);
   }

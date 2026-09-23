@@ -1,0 +1,1504 @@
+<!doctype html>
+<html lang="en" data-marble="1">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, interactive-widget=resizes-content">
+<!-- Added to an iPhone's Home Screen it opens without Safari's chrome, the way
+     the Agents page does. -->
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="default">
+<meta name="apple-mobile-web-app-title" content="__TITLE__">
+<meta name="marble:capabilities" content="storage; net=none">
+<!-- This page is a conversation already, so the host's agent drawer and its
+     launcher stay off it. -->
+<meta name="marble-agent" content="custom">
+<title>__TITLE__</title>
+__ICON__
+<style>
+  /* ------------------------------------------------------------------ tokens
+
+     The drive's own, from the Design System document: three greys of ink,
+     paper for chrome, one dusty blue. Each is one light-dark() pair, so the
+     app follows the machine into the dark without a switch. Four are this
+     app's: the sidebar and the room it sits beside, the bubble a person's
+     words come in, and the field they are typed into. */
+  :root {
+    color-scheme: light dark;
+    --ink: light-dark(#111111, #e8e6e1);
+    --muted: light-dark(#5a5a5a, #a3a7ab);
+    --faint: light-dark(#8a8a8a, #71767a);
+    --placeholder: light-dark(#767676, #8d9296);
+    --line: light-dark(#e6e2d8, #272c30);
+    --paper: light-dark(#fafaf7, #16181a);
+    --paper-2: light-dark(#f3f1ea, #1e2124);
+    --paper-3: light-dark(#eceae1, #262a2e);
+    --card: light-dark(#ffffff, #1c1f22);
+    --accent: light-dark(#9bb6cf, #7fa8c9);
+    --accent-soft: light-dark(#f1f5f8, #1d2932);
+    --accent-ink: light-dark(#738698, #9dc0dc);
+    --danger: light-dark(#b4533e, #e08a74);
+    --edge-lit: light-dark(rgba(255,255,255,.4), rgba(255,255,255,.08));
+    /* The sidebar is a shelf the room sits beside: a step back in the light,
+       a step down after dark, so it reads as structure either way. The room
+       is white to the edge, because what is read there is the point. */
+    --side: light-dark(#f3f1ea, #121416);
+    --room: light-dark(#ffffff, #1a1d20);
+    --bubble: light-dark(#e8eef4, #26323c);
+    --field: light-dark(#ffffff, #23272b);
+    --row-on: light-dark(#e6e3da, #262a2e);
+    --shadow: 0 1px 2px light-dark(rgba(74,66,52,.05), rgba(0,0,0,.28)), 0 2px 4px light-dark(rgba(74,66,52,.03), rgba(0,0,0,.18));
+    --shadow-rest: 0 1px 2px light-dark(rgba(74,66,52,.06), rgba(0,0,0,.40)), 0 6px 16px light-dark(rgba(74,66,52,.08), rgba(0,0,0,.28));
+    --shadow-lift: 0 2px 6px light-dark(rgba(74,66,52,.07), rgba(0,0,0,.32)), 0 8px 18px light-dark(rgba(74,66,52,.08), rgba(0,0,0,.26));
+    --r: 12px;
+    --r-sm: 8px;
+    --r-text: 4px;
+    --r-bubble: 18px;
+    --r-field: 22px;
+    --pill: 999px;
+    --ease-out: cubic-bezier(.22, 1, .36, 1);
+    --ease: cubic-bezier(.22, .61, .36, 1);
+    --snap: cubic-bezier(.4, 0, .2, 1);
+    --t-fast: 110ms;
+    --t: 200ms;
+    --t-slow: 340ms;
+    /* The chrome is the machine's own sans at 14/1.5; a reply reads a size up,
+       at 15, because reading it is what the room is for. */
+    --ui: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    --mono: ui-monospace, "SF Mono", SFMono-Regular, Menlo, Consolas, monospace;
+    --rail: 16.5rem;
+    --bar: 3.25rem;
+    --measure: 46rem;
+  }
+
+  /* Every width answer is asked of the root, not the window: a host that docks
+     a panel beside the page shrinks <html> and leaves the viewport alone. */
+  html { container: app / inline-size; height: 100%; }
+  * { box-sizing: border-box; }
+  body.app {
+    margin: 0; height: 100dvh; overflow: hidden;
+    display: grid; grid-template-columns: var(--rail) minmax(0, 1fr);
+    background: var(--room); color: var(--ink);
+    font: 14px/1.5 var(--ui); -webkit-font-smoothing: antialiased;
+    transition: grid-template-columns var(--t-slow) var(--ease-out);
+  }
+  /* Whether the sidebar is out is one attribute on <body>, in the file. */
+  body.app[data-side="closed"] { grid-template-columns: 0 minmax(0, 1fr); }
+  button { font: inherit; color: inherit; }
+  .sprite { display: none; }
+  svg { width: 20px; height: 20px; fill: currentColor; flex: none; }
+
+  [data-marble-editable] { outline: none; border-radius: var(--r-text); transition: background var(--t-fast) var(--snap); }
+  [data-marble-editable]:hover, [data-marble-editable]:focus-within { background: var(--accent-soft); }
+  [data-marble-editable]:focus { background: var(--card); box-shadow: 0 0 0 1px var(--accent), 0 0 0 4px var(--accent-soft); }
+  /* Keyboard focus is its own state: one ring, everywhere a key can land. */
+  :focus-visible { outline: none; box-shadow: 0 0 0 2px var(--accent); }
+
+  /* An icon button: a 20px drawing in a 36px target that answers on the way
+     down, in colour. Nothing here pops under the finger. */
+  .icon {
+    display: grid; place-items: center; width: 36px; height: 36px; padding: 0;
+    border: 0; border-radius: var(--r-sm); background: none; color: var(--muted); cursor: pointer;
+    transition: background-color var(--t-fast) var(--ease), color var(--t-fast) var(--ease);
+  }
+  .icon:hover { background: var(--paper-3); color: var(--ink); }
+  .icon:active { background: color-mix(in srgb, var(--paper-3) 70%, var(--ink) 8%); }
+
+  /* ----------------------------------------------------------------- sidebar */
+  .side {
+    min-width: 0; overflow: hidden; background: var(--side);
+    display: flex; flex-direction: column;
+  }
+  /* The contents keep their width while the column closes, so the sidebar
+     slides away under the room instead of reflowing as it goes. */
+  .side > * { width: var(--rail); flex: none; }
+  .side-head {
+    display: flex; align-items: center; gap: .25rem;
+    height: calc(var(--bar) + env(safe-area-inset-top, 0px)); padding: env(safe-area-inset-top, 0px) .6rem 0 1rem;
+  }
+  .side-head .name {
+    flex: 1; min-width: 0; margin: 0; padding: 0 .2rem; font-size: 1.05rem; font-weight: 600;
+    letter-spacing: -.01em; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  }
+  .find { display: block; padding: 0 .75rem .5rem; }
+  .find input {
+    width: 100%; height: 32px; padding: 0 .7rem 0 2rem; font: inherit; font-size: 13px; color: var(--ink);
+    border: 0; border-radius: var(--r-sm); background: var(--paper-3) no-repeat .6rem 50% / 14px;
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Ccircle cx='7' cy='7' r='4.6' fill='none' stroke='%238a8a8a' stroke-width='1.6'/%3E%3Cpath d='m10.4 10.4 3.4 3.4' stroke='%238a8a8a' stroke-width='1.6' stroke-linecap='round'/%3E%3C/svg%3E");
+  }
+  .find input::placeholder { color: var(--placeholder); }
+  .find input::-webkit-search-cancel-button { filter: grayscale(1); }
+  .chats { flex: 1; min-height: 0; overflow-y: auto; padding: 0 .5rem 1rem; overscroll-behavior: contain; }
+  .chats .when {
+    margin: .9rem .6rem .25rem; font: 600 .7rem/1 var(--ui); letter-spacing: .06em;
+    text-transform: uppercase; color: var(--faint);
+  }
+  .chats .when:first-child { margin-top: .35rem; }
+  .row { position: relative; display: flex; align-items: center; border-radius: var(--r-sm); }
+  .row .pick {
+    flex: 1; min-width: 0; display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: baseline; column-gap: .5rem;
+    padding: .5rem .6rem; border: 0; border-radius: var(--r-sm); background: none; cursor: pointer; text-align: left;
+    transition: background-color var(--t-fast) var(--ease);
+  }
+  .row .pick:hover { background: var(--paper-3); }
+  .row .pick:active { background: var(--row-on); }
+  .row .pick[aria-current="page"] { background: var(--row-on); }
+  .row .t { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; font-size: 13.5px; }
+  .row .ago { font-size: 11.5px; color: var(--faint); font-variant-numeric: tabular-nums; }
+  /* A chat that is working says so where the time was; one that has
+     something unread wears the dot Messages taught everybody. */
+  .row[data-state="running"] .ago, .row[data-state="asking"] .ago, .row[data-state="unread"] .ago { font-size: 0; }
+  .row[data-state] .ago::before { content: ''; display: inline-block; width: 8px; height: 8px; border-radius: 50%; vertical-align: 1px; }
+  .row[data-state="unread"] .ago::before { background: var(--accent-ink); }
+  .row[data-state="asking"] .ago::before { background: var(--danger); }
+  .row[data-state="running"] .ago::before { background: var(--accent); animation: breathe 1.4s var(--ease) infinite; }
+  .row[data-state="unread"] .t { font-weight: 600; }
+  .row .drop {
+    position: absolute; right: .3rem; width: 28px; height: 28px; opacity: 0;
+    background: var(--paper-3); transition: opacity var(--t-fast) var(--ease), background-color var(--t-fast) var(--ease);
+  }
+  .row:hover .drop, .row:focus-within .drop { opacity: 1; }
+  .row:hover .ago, .row:focus-within .ago { visibility: hidden; }
+  .row .drop svg { width: 16px; height: 16px; }
+  @media (hover: none) { .row .drop { display: none; } }
+  .side-empty { display: none; margin: 1.5rem 1.25rem; color: var(--faint); font-size: 13px; }
+  .chats:empty + .side-empty { display: block; }
+
+  /* ------------------------------------------------------------------- room */
+  .room { position: relative; min-width: 0; min-height: 0; display: flex; flex-direction: column; background: var(--room); }
+
+  /* The bar is a translucent layer the transcript scrolls under. It has no
+     rule of its own: an edge appears only once something is under it. */
+  .bar {
+    position: absolute; inset: 0 0 auto 0; z-index: 3;
+    display: flex; align-items: center; gap: .25rem;
+    height: var(--bar); padding: 0 .6rem; padding-top: env(safe-area-inset-top, 0px); box-sizing: content-box;
+    background: color-mix(in srgb, var(--room) 78%, transparent);
+    -webkit-backdrop-filter: blur(20px) saturate(1.6); backdrop-filter: blur(20px) saturate(1.6);
+    box-shadow: 0 1px 0 transparent;
+    transition: box-shadow var(--t) var(--ease);
+  }
+  body.marble-scrolled .bar { box-shadow: 0 1px 0 var(--line); }
+  .bar .title {
+    flex: 0 1 auto; min-width: 0; margin: 0 .25rem; padding: .1rem .35rem;
+    font-size: 14px; font-weight: 600; letter-spacing: -.005em;
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis; border-radius: var(--r-text);
+  }
+  .bar .title[contenteditable] { background: var(--card); box-shadow: 0 0 0 1px var(--accent), 0 0 0 4px var(--accent-soft); outline: none; text-overflow: clip; }
+  .bar .gap { flex: 1; }
+  .bar .back { display: none; }
+  /* The sidebar's own New chat button is the one to reach for; this twin
+     appears only when the sidebar is not there to hold it. */
+  .bar .new { display: none; }
+  body[data-side="closed"] .bar .new { display: grid; }
+
+  .model {
+    display: inline-flex; align-items: center; gap: .15rem; height: 30px; padding: 0 .5rem 0 .75rem;
+    border: 0; border-radius: var(--pill); background: none; color: var(--muted); cursor: pointer; font-size: 13px; font-weight: 500;
+    transition: background-color var(--t-fast) var(--ease), color var(--t-fast) var(--ease);
+  }
+  .model:hover, .model[aria-expanded="true"] { background: var(--paper-3); color: var(--ink); }
+  .model svg { width: 16px; height: 16px; }
+  .model[hidden] { display: none; }
+
+  /* A popover, so it sits in the top layer above everything, and grows out of
+     the pill that opened it. */
+  .menu {
+    margin: 0; padding: .3rem; min-width: 13rem; border: 1px solid var(--line); border-radius: var(--r);
+    background: color-mix(in srgb, var(--card) 88%, transparent); color: var(--ink);
+    -webkit-backdrop-filter: blur(24px) saturate(1.6); backdrop-filter: blur(24px) saturate(1.6);
+    box-shadow: var(--shadow-lift); inset: auto; position: fixed;
+    transform-origin: top right;
+    opacity: 0; transform: scale(.96) translateY(-4px);
+    transition: opacity var(--t) var(--ease-out), transform var(--t) var(--ease-out), overlay var(--t) allow-discrete, display var(--t) allow-discrete;
+  }
+  .menu:popover-open { opacity: 1; transform: none; }
+  @starting-style { .menu:popover-open { opacity: 0; transform: scale(.96) translateY(-4px); } }
+  .menu .k { margin: .35rem .6rem .3rem; font: 600 .7rem/1 var(--ui); letter-spacing: .06em; text-transform: uppercase; color: var(--faint); }
+  .menu button {
+    display: flex; align-items: center; gap: .5rem; width: 100%; padding: .45rem .6rem; border: 0; border-radius: var(--r-sm);
+    background: none; text-align: left; cursor: pointer; font-size: 13.5px;
+  }
+  .menu button:hover, .menu button:focus-visible { background: var(--paper-3); box-shadow: none; }
+  .menu button span { flex: 1; }
+  .menu button svg { width: 16px; height: 16px; color: var(--accent-ink); visibility: hidden; }
+  .menu button[aria-checked="true"] svg { visibility: visible; }
+
+  /* The log is the one scroller. It is a column whose last child is the dock,
+     stuck to the bottom — so a short chat still puts the field at the foot of
+     the room, and a long one scrolls under it. */
+  .log {
+    flex: 1; min-height: 0; overflow-y: auto; overscroll-behavior: contain;
+    display: flex; flex-direction: column;
+    padding-top: calc(var(--bar) + env(safe-area-inset-top, 0px));
+    scrollbar-gutter: stable;
+  }
+  .col { width: 100%; max-width: var(--measure); margin: 0 auto; padding: 0 1.5rem; }
+
+  /* ------------------------------------------------------------ fresh chat
+
+     A chat with nothing in it is a greeting with the field under it, in the
+     middle of the room. The first message sends the field to the foot of the
+     room, and the greeting goes. */
+  .hello { display: none; }
+  body.marble-fresh .hello { display: flex; flex-direction: column; justify-content: flex-end; flex: 1 1 0; padding-bottom: 1.25rem; }
+  body.marble-fresh .log::after { content: ''; flex: 1 1 0; min-height: 2rem; }
+  body.marble-fresh .thread { display: none; }
+  .hello h2 {
+    margin: 0 0 .25rem; font-size: clamp(1.6rem, 3.2vw, 2rem); font-weight: 500;
+    letter-spacing: -.022em; line-height: 1.15; text-align: center; text-wrap: balance;
+  }
+  .hello .sub { margin: 0 auto; max-width: 30rem; color: var(--muted); text-align: center; font-size: 14px; text-wrap: balance; }
+  .ideas { display: flex; flex-wrap: wrap; justify-content: center; gap: .4rem; margin: 1.1rem 0 0; padding: 0; list-style: none; }
+  .ideas li { position: relative; }
+  .idea {
+    padding: .45rem .85rem; border: 1px solid var(--line); border-radius: var(--pill); background: var(--room);
+    color: var(--muted); font-size: 13px; cursor: pointer; text-align: left;
+    transition: background-color var(--t-fast) var(--ease), color var(--t-fast) var(--ease), border-color var(--t-fast) var(--ease);
+  }
+  .idea:hover { background: var(--paper-2); color: var(--ink); }
+  .idea:active { background: var(--paper-3); }
+  body.marble-fresh .dock { position: static; }
+  body.marble-fresh .dock::before { display: none; }
+
+  /* ------------------------------------------------------------- transcript */
+  .thread { flex: 1 0 auto; padding-top: 1rem; padding-bottom: 1.5rem; }
+  .turn { display: flex; flex-direction: column; }
+  .turn + .turn { margin-top: 1.5rem; }
+  /* A person's words: a bubble on the right, the size of what was said. */
+  .me {
+    align-self: flex-end; max-width: min(80%, 36rem); margin: 0 0 .9rem;
+    padding: .55rem .95rem; border-radius: var(--r-bubble); background: var(--bubble);
+    font-size: 15px; line-height: 1.5; white-space: pre-wrap; overflow-wrap: anywhere;
+  }
+  .me .from { display: block; margin-bottom: .1rem; font-size: 12px; color: var(--muted); }
+  .turn.marble-pending .me, .turn.marble-queued .me { opacity: .6; }
+  .turn.marble-queued .me::after { content: 'Waiting'; display: block; margin-top: .15rem; font-size: 11.5px; color: var(--muted); }
+
+  /* The reply: no bubble, the full measure, a size up from the chrome. */
+  .reply { font-size: 15px; line-height: 1.62; overflow-wrap: anywhere; }
+  .reply > * + * { margin-top: .75rem; }
+  .md p { margin: 0 0 .75em; }
+  .md > :last-child { margin-bottom: 0; }
+  .md .md-h { margin: 1.1em 0 .4em; font-size: 1.02em; font-weight: 600; letter-spacing: -.005em; line-height: 1.35; }
+  .md .md-h[data-level="1"] { font-size: 1.15em; }
+  .md > .md-h:first-child { margin-top: 0; }
+  .md ul, .md ol { margin: .25em 0 .75em; padding-left: 1.35em; }
+  .md li + li { margin-top: .2em; }
+  .md li > ul, .md li > ol { margin: .2em 0; }
+  .md a { color: var(--accent-ink); text-underline-offset: .18em; }
+  .md strong, .md b { font-weight: 600; }
+  .md code { font: .88em/1.4 var(--mono); background: var(--paper-2); padding: 1px 5px; border-radius: var(--r-text); }
+  .md pre { margin: .25em 0 .85em; padding: .8rem 1rem; background: var(--paper-2); border-radius: var(--r); overflow-x: auto; }
+  .md pre code { background: none; padding: 0; font-size: 13px; line-height: 1.55; }
+  .md blockquote { margin: .25em 0 .75em; padding: 0 0 0 1rem; color: var(--muted); box-shadow: inset 3px 0 0 var(--line); }
+  .md hr { border: 0; border-top: 1px solid var(--line); margin: 1.2em 0; }
+  .md table { border-collapse: collapse; margin: .25em 0 .85em; font-size: 14px; display: block; overflow-x: auto; }
+  .md th, .md td { padding: .4rem .7rem; border-bottom: 1px solid var(--line); text-align: left; vertical-align: top; }
+  .md th { font-weight: 600; }
+  .md.marble-live > :last-child::after { content: ''; display: inline-block; width: .55em; height: .55em; margin-left: .2em; border-radius: 50%; background: var(--accent); vertical-align: .05em; animation: breathe 1s var(--ease) infinite; }
+
+  /* Before the first word: three dots, breathing. */
+  .dots { display: flex; gap: 5px; height: 1.62em; align-items: center; }
+  .dots i { width: 7px; height: 7px; border-radius: 50%; background: var(--faint); animation: breathe 1.2s var(--ease) infinite; }
+  .dots i:nth-child(2) { animation-delay: .15s; }
+  .dots i:nth-child(3) { animation-delay: .3s; }
+  @keyframes breathe { 0%, 100% { opacity: .3; } 50% { opacity: 1; } }
+
+  /* What the agent did between its words: one quiet line that opens. */
+  .work { font-size: 13px; color: var(--muted); }
+  .work summary {
+    display: inline-flex; align-items: center; gap: .4rem; padding: .2rem .55rem .2rem .45rem; margin-left: -.45rem;
+    border-radius: var(--pill); cursor: pointer; list-style: none;
+    transition: background-color var(--t-fast) var(--ease), color var(--t-fast) var(--ease);
+  }
+  .work summary::-webkit-details-marker { display: none; }
+  .work summary:hover { background: var(--paper-2); color: var(--ink); }
+  .work summary svg { width: 14px; height: 14px; transition: transform var(--t) var(--ease-out); }
+  .work[open] summary svg { transform: rotate(90deg); }
+  .work[data-state="running"] .work-label {
+    background: linear-gradient(90deg, var(--muted) 0%, var(--muted) 40%, var(--ink) 50%, var(--muted) 60%, var(--muted) 100%) 0 0 / 250% 100%;
+    -webkit-background-clip: text; background-clip: text; color: transparent; animation: sheen 1.8s linear infinite;
+  }
+  @keyframes sheen { from { background-position: 100% 0; } to { background-position: 0 0; } }
+  .steps { margin: .35rem 0 .1rem; padding: 0 0 0 .95rem; list-style: none; box-shadow: inset 1px 0 0 var(--line); }
+  .steps li { display: flex; gap: .45rem; padding: .12rem 0 .12rem .55rem; min-width: 0; }
+  .steps b { flex: none; font-weight: 500; color: var(--ink); }
+  .steps span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--faint); font-family: var(--mono); font-size: 12px; padding-top: 1px; }
+  .steps li[data-state="failed"] b { color: var(--danger); }
+
+  .note { font-size: 13px; color: var(--muted); }
+  .note a { color: var(--accent-ink); }
+  .err { font-size: 14px; color: var(--danger); }
+
+  /* Under a finished reply: its actions, there when the reply is pointed at,
+     and always there on a touchscreen. */
+  .acts { display: flex; gap: .1rem; margin-top: .35rem !important; margin-left: -.5rem; opacity: 0; transition: opacity var(--t) var(--ease); }
+  .turn:hover .acts, .turn:focus-within .acts, .turn:last-child .acts { opacity: 1; }
+  @media (hover: none) { .acts { opacity: 1; } }
+  .acts .icon { width: 30px; height: 30px; }
+  .acts .icon svg { width: 16px; height: 16px; }
+
+  /* Ask cards come from the Agents page; these give them this room's shape. */
+  .ask { margin: .25rem 0; padding: .8rem 1rem; border: 1px solid var(--line); border-radius: var(--r); background: var(--card); display: grid; gap: .65rem; box-shadow: var(--shadow); font-size: 14px; }
+  .ask .ask-q { display: grid; gap: .4rem; }
+  .ask .ask-title { font-weight: 600; }
+  .ask pre { margin: 0; font: 12.5px/1.5 var(--mono); white-space: pre-wrap; word-break: break-word; background: var(--paper-2); padding: .5rem .65rem; border-radius: var(--r-sm); }
+  .ask .ask-options { display: grid; gap: 2px; }
+  .ask .ask-options button {
+    display: grid; grid-template-columns: 20px 1fr; column-gap: .5rem; align-items: baseline; text-align: left;
+    padding: .45rem .6rem; border: 1px solid transparent; border-radius: var(--r-sm); background: none; cursor: pointer;
+  }
+  .ask .ask-options button:hover, .ask .ask-options button:focus-visible { background: var(--paper-2); }
+  .ask .ask-options button[aria-checked="true"] { border-color: var(--accent-ink); background: var(--accent-soft); }
+  .ask .ask-options kbd { font-family: inherit; font-size: 11px; line-height: 1.5; color: var(--faint); text-align: center; border: 1px solid var(--line); border-radius: 4px; }
+  .ask .ask-options b { font-weight: 500; }
+  .ask .ask-options small { grid-column: 2; color: var(--muted); font-size: 12.5px; }
+  .ask .ask-other-text, .ask .deny-note { font: inherit; font-size: 13.5px; padding: .4rem .6rem; border: 1px solid var(--line); border-radius: var(--r-sm); background: none; color: inherit; }
+  .ask .ask-other-text { margin-left: 28px; }
+  .ask .ask-other-text[hidden] { display: none; }
+  .ask .ask-actions { display: flex; gap: .4rem; align-items: center; flex-wrap: wrap; }
+  .ask .ask-actions button { padding: .4rem .85rem; border-radius: var(--pill); border: 1px solid var(--line); background: none; cursor: pointer; }
+  .ask .ask-actions button.allow, .ask .ask-actions button.answer { background: var(--ink); color: var(--room); border-color: var(--ink); }
+  .ask .ask-actions button:disabled { opacity: .5; cursor: default; }
+  .ask .deny-note { flex: 1; min-width: 8em; }
+
+  /* A ```marble-visual the agent drew: its frame comes from the chat-visual
+     module; the card around it is this room's. */
+  figure.visual { margin: .25rem 0; }
+  .visual-pending { height: 120px; border-radius: var(--r); background: var(--paper-2); animation: breathe 1.4s var(--ease) infinite; }
+
+  /* ------------------------------------------------------------------ dock
+
+     The composer is two registers: the field, a floating card that owns its
+     send button, and the room around it, which draws nothing — only a fade
+     where the transcript passes under. */
+  .dock {
+    position: sticky; bottom: 0; z-index: 2; flex: none;
+    padding-bottom: max(1rem, env(safe-area-inset-bottom, 0px));
+  }
+  .dock::before {
+    content: ''; position: absolute; inset: -1.5rem 0 0 0; z-index: -1; pointer-events: none;
+    background: linear-gradient(to bottom, transparent, var(--room) 1.5rem);
+  }
+  .field {
+    position: relative; display: flex; align-items: flex-end; gap: .5rem;
+    padding: .45rem .45rem .45rem 1.1rem; min-height: 52px;
+    background: var(--field); border: 1px solid var(--line); border-radius: var(--r-field);
+    box-shadow: var(--shadow-rest); view-transition-name: field;
+    transition: border-color var(--t) var(--ease), box-shadow var(--t) var(--ease);
+  }
+  .field:focus-within { border-color: color-mix(in srgb, var(--accent) 60%, var(--line)); }
+  .field textarea {
+    flex: 1; min-width: 0; min-height: 36px; max-height: 40vh; margin: 0; padding: .45rem 0; resize: none;
+    border: 0; outline: none; background: none; color: var(--ink);
+    font: 15px/1.45 var(--ui); caret-color: var(--accent-ink); field-sizing: content;
+  }
+  .field textarea::placeholder { color: var(--placeholder); }
+  .field textarea:focus-visible { box-shadow: none; }
+  /* Empty, the button is only an outline; with something to send it fills —
+     the change of state is the affordance. While a reply is coming and the
+     field is empty, it is the stop button instead. */
+  .send {
+    flex: none; display: grid; place-items: center; width: 36px; height: 36px; padding: 0;
+    border: 0; border-radius: 50%; cursor: pointer;
+    background: none; color: var(--faint); box-shadow: inset 0 0 0 1px var(--line);
+    transition: background-color var(--t) var(--ease), color var(--t) var(--ease), box-shadow var(--t) var(--ease);
+  }
+  .send svg { width: 18px; height: 18px; }
+  .send .i-stop { display: none; }
+  .send:disabled { cursor: default; }
+  .send[data-mode="send"]:not(:disabled), .send[data-mode="stop"] { background: var(--ink); color: var(--room); box-shadow: none; }
+  .send[data-mode="send"]:not(:disabled):hover, .send[data-mode="stop"]:hover { background: color-mix(in srgb, var(--ink) 82%, var(--room)); }
+  .send[data-mode="send"]:not(:disabled):active, .send[data-mode="stop"]:active { background: color-mix(in srgb, var(--ink) 68%, var(--room)); }
+  .send[data-mode="stop"] .i-send { display: none; }
+  .send[data-mode="stop"] .i-stop { display: block; }
+  .hint { margin: .45rem 0 0; text-align: center; font-size: 11.5px; color: var(--faint); }
+  body.marble-offline .field { opacity: .6; }
+
+  .latest {
+    position: absolute; left: 50%; top: -3rem; translate: -50% 0; width: 34px; height: 34px;
+    border-radius: 50%; border: 1px solid var(--line); background: var(--field); color: var(--ink); box-shadow: var(--shadow-rest);
+    opacity: 0; pointer-events: none; transform: translateY(6px);
+    transition: opacity var(--t) var(--ease-out), transform var(--t) var(--ease-out);
+  }
+  .latest.marble-shown { opacity: 1; pointer-events: auto; transform: none; }
+  .latest svg { width: 16px; height: 16px; }
+
+  /* Said once, where the gesture was made, and then gone. */
+  .toast {
+    position: fixed; left: 50%; bottom: calc(6.5rem + env(safe-area-inset-bottom, 0px)); z-index: 5;
+    display: flex; align-items: center; gap: .75rem; padding: .5rem .5rem .5rem 1rem;
+    border-radius: var(--pill); background: var(--ink); color: var(--room); font-size: 13.5px; box-shadow: var(--shadow-lift);
+    translate: -50% 0; opacity: 0; transform: translateY(8px); pointer-events: none;
+    transition: opacity var(--t) var(--ease-out), transform var(--t) var(--ease-out);
+  }
+  .toast.marble-shown { opacity: 1; transform: none; pointer-events: auto; }
+  .toast button { padding: .25rem .75rem; border: 0; border-radius: var(--pill); background: color-mix(in srgb, var(--room) 18%, transparent); color: inherit; cursor: pointer; font-weight: 600; }
+
+  /* The save pill belongs to the affordance library; it waits in the
+     sidebar's corner, clear of the field. */
+  html .marble-status { left: 1rem; right: auto; bottom: max(1rem, env(safe-area-inset-bottom, 0px)); }
+
+  /* ------------------------------------------------------------------ phone
+
+     One thing at a time: the list, and a chat pushed in over it from the
+     right — and back out the way it came. */
+  @container app (max-width: 44rem) {
+    body.app, body.app[data-side="closed"] { grid-template-columns: minmax(0, 1fr); }
+    .side, .room { grid-area: 1 / 1; }
+    .side > * { width: auto; }
+    .side { transition: transform var(--t-slow) var(--ease-out), opacity var(--t-slow) var(--ease-out); }
+    /* Off to the right it is hidden too, once it has got there: its shadow
+       would otherwise show at the list's edge, and its keys would still take
+       a Tab. */
+    .room {
+      transform: translateX(100%); visibility: hidden; z-index: 1;
+      box-shadow: -1px 0 0 var(--line), -12px 0 32px light-dark(rgba(74,66,52,.08), rgba(0,0,0,.4));
+      transition: transform var(--t-slow) var(--ease-out), visibility 0s linear var(--t-slow);
+    }
+    body.marble-reading .room { transform: none; visibility: visible; transition: transform var(--t-slow) var(--ease-out), visibility 0s; }
+    body.marble-reading .side { transform: translateX(-28%); opacity: .6; }
+    .side-head { padding-left: 1.1rem; }
+    .side-head .name { font-size: 1.6rem; letter-spacing: -.02em; }
+    .row .pick { padding: .7rem .7rem; }
+    .row .t { font-size: 15px; }
+    .bar .side-toggle { display: none; }
+    .bar .back { display: grid; }
+    .bar .new, body[data-side="closed"] .bar .new { display: grid; }
+    .bar .title { flex: 1; text-align: center; }
+    .col { padding: 0 1rem; }
+    .me { max-width: 88%; }
+    .hint { display: none; }
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    *, *::before, *::after { transition-duration: 1ms !important; animation-duration: 1ms !important; animation-iteration-count: 1 !important; }
+    ::view-transition-group(*) { animation: none !important; }
+  }
+  @media (prefers-reduced-transparency: reduce) {
+    .bar { background: var(--room); -webkit-backdrop-filter: none; backdrop-filter: none; }
+    .menu { background: var(--card); -webkit-backdrop-filter: none; backdrop-filter: none; }
+  }
+  ::view-transition-group(field) { animation-duration: var(--t-slow); animation-timing-function: var(--ease-out); }
+</style>
+</head>
+<body class="app" data-marble-id="__ID__" data-side="open" data-model="">
+
+<svg class="sprite" data-marble-id="__ID__" aria-hidden="true" focusable="false"><defs>
+  <g id="i-compose"><path d="M17.7 3.3a2.3 2.3 0 0 1 3.2 3.2l-8.6 8.6-4 1 1-4zm1.8 1.4a.3.3 0 0 0-.4 0l-8.2 8.2-.4 1.2 1.2-.4 8.2-8.2a.3.3 0 0 0 0-.4zM5.5 4H12v2H5.5a.5.5 0 0 0-.5.5v13a.5.5 0 0 0 .5.5h13a.5.5 0 0 0 .5-.5V13h2v6.5a2.5 2.5 0 0 1-2.5 2.5h-13A2.5 2.5 0 0 1 3 19.5v-13A2.5 2.5 0 0 1 5.5 4z"/></g>
+  <g id="i-sidebar"><path d="M5.5 4h13A2.5 2.5 0 0 1 21 6.5v11a2.5 2.5 0 0 1-2.5 2.5h-13A2.5 2.5 0 0 1 3 17.5v-11A2.5 2.5 0 0 1 5.5 4zM9 6v12h9.5a.5.5 0 0 0 .5-.5v-11a.5.5 0 0 0-.5-.5zM7 6H5.5a.5.5 0 0 0-.5.5v11a.5.5 0 0 0 .5.5H7z"/></g>
+  <g id="i-back"><path d="M15.4 4.6 16.8 6l-6 6 6 6-1.4 1.4L8 12z"/></g>
+  <g id="i-down"><path d="M11 4h2v12.2l4.3-4.3 1.4 1.4L12 20l-6.7-6.7 1.4-1.4 4.3 4.3z"/></g>
+  <g id="i-up"><path d="M12 4l6.7 6.7-1.4 1.4L13 7.8V20h-2V7.8l-4.3 4.3-1.4-1.4z"/></g>
+  <g id="i-stop"><rect x="7" y="7" width="10" height="10" rx="2"/></g>
+  <g id="i-chev"><path d="M7.4 9.4 12 14l4.6-4.6L18 10.8l-6 6-6-6z"/></g>
+  <g id="i-right"><path d="M9.4 6.6 10.8 5.2l6.8 6.8-6.8 6.8-1.4-1.4L14.8 12z"/></g>
+  <g id="i-check"><path d="M9.5 16.2 5.3 12l-1.4 1.4 5.6 5.6L20.1 8.4 18.7 7z"/></g>
+  <g id="i-copy"><path d="M9 3h9.5A2.5 2.5 0 0 1 21 5.5V15a2.5 2.5 0 0 1-2.5 2.5H17v-2h1.5a.5.5 0 0 0 .5-.5V5.5a.5.5 0 0 0-.5-.5H9a.5.5 0 0 0-.5.5V7h-2V5.5A2.5 2.5 0 0 1 9 3zM5.5 8.5H15a2.5 2.5 0 0 1 2.5 2.5v7.5A2.5 2.5 0 0 1 15 21H5.5A2.5 2.5 0 0 1 3 18.5V11a2.5 2.5 0 0 1 2.5-2.5zm0 2a.5.5 0 0 0-.5.5v7.5a.5.5 0 0 0 .5.5H15a.5.5 0 0 0 .5-.5V11a.5.5 0 0 0-.5-.5z"/></g>
+  <g id="i-archive"><path d="M6.4 5 12 10.6 17.6 5 19 6.4 13.4 12 19 17.6 17.6 19 12 13.4 6.4 19 5 17.6 10.6 12 5 6.4z"/></g>
+</defs></svg>
+
+<!-- The sidebar. Its name and its button are facts in the file; the chats in
+     it are the host's conversations read back, so the list is transient and
+     nothing in it is a second copy of anything. -->
+<nav class="side" aria-label="Chats" data-marble-id="__ID__">
+  <div class="side-head" data-marble-id="__ID__">
+    <h1 class="name" data-marble-id="__ID__" data-marble-editable>__TITLE__</h1>
+    <button class="icon" type="button" data-cmd="new" data-marble-id="__ID__" title="New chat (⌘⇧O)" aria-label="New chat" aria-keyshortcuts="Meta+Shift+O Control+Shift+O">
+      <svg data-marble-id="__ID__" viewBox="0 0 24 24" aria-hidden="true"><use href="#i-compose"/></svg>
+    </button>
+  </div>
+  <label class="find" data-marble-transient><input type="search" placeholder="Search" aria-label="Search chats" autocomplete="off" spellcheck="false"></label>
+  <div class="chats" role="list" data-marble-transient></div>
+  <p class="side-empty" data-marble-id="__ID__" data-marble-editable>No chats yet.</p>
+</nav>
+
+<main class="room" data-marble-id="__ID__">
+  <header class="bar" data-marble-id="__ID__">
+    <button class="icon side-toggle" type="button" data-cmd="side" data-marble-id="__ID__" aria-label="Hide sidebar" title="Sidebar (⌘.)">
+      <svg data-marble-id="__ID__" viewBox="0 0 24 24" aria-hidden="true"><use href="#i-sidebar"/></svg>
+    </button>
+    <button class="icon back" type="button" data-cmd="back" data-marble-id="__ID__" aria-label="Chats">
+      <svg data-marble-id="__ID__" viewBox="0 0 24 24" aria-hidden="true"><use href="#i-back"/></svg>
+    </button>
+    <h2 class="title" data-marble-transient>New chat</h2>
+    <span class="gap" data-marble-id="__ID__"></span>
+    <button class="model" type="button" data-cmd="model" data-marble-transient aria-haspopup="menu" aria-expanded="false" popovertarget="models" hidden><span>Claude</span><svg viewBox="0 0 24 24" aria-hidden="true"><use href="#i-chev"/></svg></button>
+    <div class="menu" id="models" popover role="menu" aria-label="Model" data-marble-transient></div>
+    <button class="icon new" type="button" data-cmd="new" data-marble-id="__ID__" aria-label="New chat">
+      <svg data-marble-id="__ID__" viewBox="0 0 24 24" aria-hidden="true"><use href="#i-compose"/></svg>
+    </button>
+  </header>
+
+  <div class="log" data-marble-id="__ID__">
+    <!-- What a new chat says before anyone has. The words and the ideas are
+         the file's: type over the greeting, or change the ideas in the source. -->
+    <section class="hello col" data-marble-id="__ID__">
+      <h2 data-marble-id="__ID__" data-marble-editable>What’s on your mind?</h2>
+      <p class="sub" data-marble-id="__ID__" data-marble-editable>Ask anything. Claude can read and make documents in your drive when you ask it to.</p>
+      <ul class="ideas" data-marble-id="__ID__">
+        <li data-marble-id="__ID__" data-marble-removable><button class="idea" type="button" data-marble-id="__ID__">Explain an idea simply</button></li>
+        <li data-marble-id="__ID__" data-marble-removable><button class="idea" type="button" data-marble-id="__ID__">Help me write an email</button></li>
+        <li data-marble-id="__ID__" data-marble-removable><button class="idea" type="button" data-marble-id="__ID__">Plan my week</button></li>
+        <li data-marble-id="__ID__" data-marble-removable><button class="idea" type="button" data-marble-id="__ID__">What’s in my drive?</button></li>
+      </ul>
+    </section>
+
+    <div class="thread col" role="log" aria-label="Messages" data-marble-transient></div>
+
+    <div class="dock col" data-marble-id="__ID__">
+      <button class="latest" type="button" data-marble-transient aria-label="Jump to latest"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="#i-down"/></svg></button>
+      <div class="field" data-marble-id="__ID__">
+        <textarea data-marble-id="__ID__" rows="1" placeholder="Message Claude" aria-label="Message"></textarea>
+        <button class="send" type="button" data-mode="send" data-marble-id="__ID__" aria-label="Send" disabled>
+          <svg class="i-send" data-marble-id="__ID__" viewBox="0 0 24 24" aria-hidden="true"><use href="#i-up"/></svg>
+          <svg class="i-stop" data-marble-id="__ID__" viewBox="0 0 24 24" aria-hidden="true"><use href="#i-stop"/></svg>
+        </button>
+      </div>
+      <p class="hint" data-marble-id="__ID__" data-marble-editable>Return to send · Shift-Return for a new line</p>
+    </div>
+  </div>
+</main>
+
+<div class="toast" role="status" data-marble-transient><span></span><button type="button">Undo</button></div>
+
+<script>
+/* The chat. Conversations are the host's — the same ones the Agents page
+   lists, filtered to the ones started here — so nothing about them is kept in
+   this file. What the file holds is the app: its words, whether the sidebar
+   is out (data-side) and which model a new chat starts on (data-model), each
+   one attribute on <body>, written by an op when it changes.
+
+   Everything drawn from the host is transient chrome, derived afresh from the
+   event stream every time a chat is opened, and page-only state is a marble-
+   class on <body>. */
+(() => {
+  const SVG = 'http://www.w3.org/2000/svg';
+  const $ = (s, root = document) => root.querySelector(s);
+  const h = (tag, cls, text) => {
+    const el = document.createElement(tag);
+    if (cls) el.className = cls;
+    if (text != null) el.textContent = text;
+    return el;
+  };
+  const icon = (name) => {
+    const svg = document.createElementNS(SVG, 'svg');
+    svg.setAttribute('viewBox', '0 0 24 24');
+    svg.setAttribute('aria-hidden', 'true');
+    const use = document.createElementNS(SVG, 'use');
+    use.setAttribute('href', `#i-${name}`);
+    svg.append(use);
+    return svg;
+  };
+
+  const body = document.body;
+  const rows = $('.chats');
+  const find = $('.find input');
+  const room = $('.room');
+  const log = $('.log');
+  const thread = $('.thread');
+  const titleEl = $('.bar .title');
+  const modelBtn = $('.model');
+  const menu = $('#models');
+  const input = $('.field textarea');
+  const sendBtn = $('.send');
+  const latest = $('.latest');
+  const toast = $('.toast');
+  const coarse = matchMedia('(pointer: coarse)');
+  const still = matchMedia('(prefers-reduced-motion: reduce)');
+  const narrow = () => document.documentElement.clientWidth <= 44 * 16;
+
+  let agent = null;
+  let HERE = null;
+  let provider = null;
+  const chats = new Map();
+  const rowEls = new Map();
+  let view = { id: null, turns: new Map(), running: null, seen: 0, off: null, meta: null };
+
+  // ---------------------------------------------------------------- facts
+
+  /** A fact on <body>: the page moves, and the file is told once. */
+  const setFact = (name, value) => {
+    if (body.getAttribute(name) === value) return;
+    body.setAttribute(name, value);
+    const id = window.marble?.id?.(body);
+    if (id) window.marble.op({ type: 'setAttr', id, name, value });
+  };
+
+  // ------------------------------------------------------------ the list
+
+  const DAY = 864e5;
+  const startOfDay = (t) => { const d = new Date(t); d.setHours(0, 0, 0, 0); return d.getTime(); };
+  const groupOf = (t) => {
+    const today = startOfDay(Date.now());
+    if (t >= today) return 'Today';
+    if (t >= today - DAY) return 'Yesterday';
+    if (t >= today - 7 * DAY) return 'Previous 7 days';
+    if (t >= today - 30 * DAY) return 'Previous 30 days';
+    return 'Earlier';
+  };
+  const ago = (t) => {
+    const today = startOfDay(Date.now());
+    const d = new Date(t);
+    if (t >= today) return d.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
+    if (t >= today - DAY) return 'Yesterday';
+    if (t >= today - 6 * DAY) return d.toLocaleDateString([], { weekday: 'long' });
+    return d.toLocaleDateString([], { month: 'short', day: 'numeric' });
+  };
+  const titleOf = (c) => (c?.title || '').trim() || 'New chat';
+  const stateOf = (c) => {
+    if (c.asking) return 'asking';
+    if (c.running) return 'running';
+    if (c.needsReview && c.id !== view.id) return 'unread';
+    return null;
+  };
+  const belongs = (c) => !c.archived && !c.removed && (c.target === HERE || (c.id === view.id && !c.target));
+
+  function rowOf(c) {
+    let li = rowEls.get(c.id);
+    if (!li) {
+      li = h('div', 'row');
+      li.setAttribute('role', 'listitem');
+      li.dataset.id = c.id;
+      const pick = h('button', 'pick');
+      pick.type = 'button';
+      pick.append(h('span', 't'), h('span', 'ago'));
+      pick.addEventListener('click', () => go(c.id));
+      const drop = h('button', 'icon drop');
+      drop.type = 'button';
+      drop.setAttribute('aria-label', 'Archive chat');
+      drop.title = 'Archive';
+      drop.append(icon('archive'));
+      drop.addEventListener('click', () => archive(c.id));
+      li.append(pick, drop);
+      rowEls.set(c.id, li);
+    }
+    const now = chats.get(c.id) ?? c;
+    li.querySelector('.t').textContent = titleOf(now);
+    li.querySelector('.ago').textContent = ago(now.updatedAt ?? Date.now());
+    const state = stateOf(now);
+    if (state) li.dataset.state = state;
+    else delete li.dataset.state;
+    const pick = li.querySelector('.pick');
+    if (now.id === view.id) pick.setAttribute('aria-current', 'page');
+    else pick.removeAttribute('aria-current');
+    return li;
+  }
+
+  const heads = new Map();
+  const headOf = (label) => {
+    if (!heads.has(label)) heads.set(label, h('p', 'when', label));
+    return heads.get(label);
+  };
+
+  function paintList() {
+    const q = find.value.trim().toLowerCase();
+    const list = [...chats.values()]
+      .filter((c) => !q || titleOf(c).toLowerCase().includes(q))
+      .sort((a, b) => (b.updatedAt ?? 0) - (a.updatedAt ?? 0));
+    const want = [];
+    let group = null;
+    for (const c of list) {
+      const g = groupOf(c.updatedAt ?? Date.now());
+      if (g !== group) want.push(headOf((group = g)));
+      want.push(rowOf(c));
+    }
+    for (const [id, el] of rowEls) if (!chats.has(id)) { el.remove(); rowEls.delete(id); }
+    // Only move what moved: taking a focused row out of the document to put
+    // it back in the same place would drop the focus on the floor.
+    const have = [...rows.children];
+    if (have.length !== want.length || have.some((el, i) => el !== want[i])) {
+      const focused = rows.contains(document.activeElement) ? document.activeElement : null;
+      rows.replaceChildren(...want);
+      focused?.isConnected && focused.focus({ preventScroll: true });
+    }
+  }
+
+  function take(summary) {
+    if (!summary?.id) return;
+    const merged = { ...(chats.get(summary.id) ?? {}), ...summary };
+    if (belongs(merged)) chats.set(summary.id, merged);
+    else chats.delete(summary.id);
+    if (summary.id === view.id) {
+      view.meta = { ...(view.meta ?? {}), ...summary };
+      if (summary.removed) go(null);
+      paintBar();
+    }
+    paintList();
+  }
+
+  // ------------------------------------------------------------- routing
+
+  // Which chat is open is the address, not the file: #<id>, #new for a
+  // fresh one, and nothing for the list on a phone (a fresh chat elsewhere).
+  const fromHash = () => {
+    const raw = decodeURIComponent(location.hash.slice(1));
+    return /^[0-9a-f]{12}$/.test(raw) ? raw : null;
+  };
+  function go(id) {
+    const next = id ? `#${id}` : '#new';
+    if (location.hash !== next) location.hash = next;
+    else route();
+  }
+  function route() {
+    const id = fromHash();
+    body.classList.toggle('marble-reading', Boolean(id) || location.hash === '#new');
+    open(id);
+    if (!coarse.matches && (id || location.hash === '#new' || !narrow())) input.focus({ preventScroll: true });
+  }
+  addEventListener('hashchange', route);
+
+  // ------------------------------------------------------------- a chat
+
+  function open(id) {
+    if (view.id === id && (id || !view.turns.size)) {
+      paintList();
+      return;
+    }
+    view.off?.();
+    view = { id, turns: new Map(), running: null, seen: 0, off: null, meta: id ? chats.get(id) ?? null : null };
+    thread.replaceChildren();
+    latest.classList.remove('marble-shown');
+    paintFresh();
+    paintBar();
+    paintList();
+    paintSend();
+    if (!id || !agent) return;
+    listen(view);
+    agent.conversation(id).then(({ meta }) => {
+      if (view.id !== id) return;
+      view.meta = { ...(view.meta ?? {}), ...meta };
+      paintBar();
+    }).catch(() => {
+      if (view.id === id && !view.turns.size) note(null, 'This chat could not be opened.', true);
+    });
+    seen(id);
+  }
+
+  function listen(v) {
+    v.off = agent.on(v.id, (event) => {
+      if (view !== v) return;
+      receive(event);
+    });
+  }
+
+  /** Reading a chat is reviewing it, here and on the Agents page. */
+  const seen = (id) => {
+    const c = chats.get(id);
+    if (c?.needsReview) agent?.markReviewed(id).catch(() => {});
+  };
+
+  function paintFresh() {
+    const fresh = !thread.querySelector('.turn');
+    if (fresh === body.classList.contains('marble-fresh')) return;
+    // The field travels from the middle of the room to its foot as one
+    // object, where the browser can say so.
+    if (!fresh && document.startViewTransition && !still.matches && document.visibilityState === 'visible') {
+      document.startViewTransition(() => body.classList.toggle('marble-fresh', fresh));
+    } else body.classList.toggle('marble-fresh', fresh);
+  }
+
+  function paintBar() {
+    const c = view.id ? chats.get(view.id) ?? view.meta : null;
+    if (!titleEl.isContentEditable) titleEl.textContent = view.id ? titleOf(c) : 'New chat';
+    document.title = view.id ? `${titleOf(c)} — ${$('.side-head .name').textContent.trim()}` : $('.side-head .name').textContent.trim();
+    const models = modelsOf();
+    modelBtn.hidden = !models.length;
+    const current = currentModel();
+    modelBtn.firstChild.textContent = labelOf(current);
+    modelBtn.setAttribute('aria-label', `Model: ${labelOf(current)}`);
+  }
+
+  // -------------------------------------------------------------- models
+
+  const modelsOf = () => (provider?.models ?? []).map((m) => (typeof m === 'string' ? { id: m, label: m } : m)).filter((m) => m?.id);
+  const currentModel = () => (view.id ? view.meta?.model : null) || body.dataset.model || provider?.defaultModel || modelsOf()[0]?.id || '';
+  const labelOf = (id) => {
+    const m = modelsOf().find((x) => x.id === id);
+    if (m?.label) return m.label;
+    return id ? id.charAt(0).toUpperCase() + id.slice(1) : provider?.label ?? 'Claude';
+  };
+
+  function paintMenu() {
+    const current = currentModel();
+    const items = modelsOf().map((m) => {
+      const b = h('button');
+      b.type = 'button';
+      b.setAttribute('role', 'menuitemradio');
+      b.setAttribute('aria-checked', String(m.id === current));
+      b.append(h('span', '', m.label || m.id), icon('check'));
+      b.addEventListener('click', () => choose(m.id));
+      return b;
+    });
+    menu.replaceChildren(h('p', 'k', view.id ? 'This chat' : 'New chats'), ...items);
+  }
+
+  // The popover is anchored by hand, under the pill and flush with its right
+  // edge, so it grows out of what opened it.
+  menu.addEventListener('beforetoggle', (e) => {
+    if (e.newState !== 'open') {
+      modelBtn.setAttribute('aria-expanded', 'false');
+      return;
+    }
+    paintMenu();
+    const r = modelBtn.getBoundingClientRect();
+    menu.style.top = `${Math.round(r.bottom + 6)}px`;
+    menu.style.right = `${Math.round(document.documentElement.clientWidth - r.right)}px`;
+    modelBtn.setAttribute('aria-expanded', 'true');
+  });
+  menu.addEventListener('toggle', (e) => {
+    if (e.newState === 'open') menu.querySelector('[aria-checked="true"]')?.focus();
+  });
+  menu.addEventListener('keydown', (e) => {
+    if (e.key !== 'ArrowDown' && e.key !== 'ArrowUp') return;
+    e.preventDefault();
+    const items = [...menu.querySelectorAll('button')];
+    const at = items.indexOf(document.activeElement);
+    items[(at + (e.key === 'ArrowDown' ? 1 : items.length - 1)) % items.length]?.focus();
+  });
+
+  function choose(model) {
+    menu.hidePopover();
+    // What a new chat starts on is the app's, so it is in the file; an open
+    // chat's own model is the host's, so it goes there.
+    setFact('data-model', model);
+    if (view.id) {
+      view.meta = { ...(view.meta ?? {}), model };
+      agent?.update(view.id, { model }).catch(() => {});
+    }
+    paintBar();
+    input.focus({ preventScroll: true });
+  }
+
+  // ------------------------------------------------------------ receiving
+
+  const nearBottom = () => log.scrollHeight - log.scrollTop - log.clientHeight < 80;
+  const toBottom = (smooth = false) => log.scrollTo({ top: log.scrollHeight, behavior: smooth && !still.matches ? 'smooth' : 'auto' });
+
+  function turnOf(turn) {
+    let t = view.turns.get(turn);
+    if (t) return t;
+    const el = h('div', 'turn');
+    el.dataset.turn = turn;
+    thread.append(el);
+    t = { el, me: null, reply: null, live: null, work: null, texts: [], steps: new Map(), asks: new Map(), done: false };
+    view.turns.set(turn, t);
+    return t;
+  }
+
+  /** A message sent from here is drawn before the host has it, and taken
+   *  over by the turn when its `user` event arrives with the same words. */
+  function pendingTurn(text) {
+    const el = h('div', 'turn marble-pending');
+    const me = h('div', 'me', text);
+    el.append(me);
+    thread.append(el);
+    return el;
+  }
+  function adoptPending(turn, text) {
+    const el = [...thread.querySelectorAll('.turn.marble-pending')].find((p) => p.querySelector('.me')?.textContent === text);
+    if (!el) return null;
+    el.classList.remove('marble-pending');
+    el.dataset.turn = turn;
+    const t = { el, me: el.querySelector('.me'), reply: null, live: null, work: null, texts: [], steps: new Map(), asks: new Map(), done: false };
+    view.turns.set(turn, t);
+    return t;
+  }
+
+  const replyOf = (t) => {
+    if (!t.reply) {
+      t.reply = h('div', 'reply');
+      t.el.append(t.reply);
+    }
+    return t.reply;
+  };
+  const thinking = (t, on) => {
+    const dots = t.reply?.querySelector(':scope > .dots');
+    if (on && !dots) {
+      const d = h('div', 'dots');
+      d.setAttribute('aria-label', 'Thinking');
+      d.append(h('i'), h('i'), h('i'));
+      replyOf(t).append(d);
+    } else if (!on) dots?.remove();
+  };
+
+  // ---- text
+
+  const UI = () => window.marbleAgentUI;
+  const VISUAL_OPEN = /(^|\n)[ \t]*```[ \t]*marble-visual\b/i;
+
+  let visualModule = null;
+  const loadVisual = () => {
+    visualModule ??= import('/runtime/chat-visual.js').then((mod) => {
+      if (mod.VISUAL_CSS && !document.querySelector('style[data-chat-visual]')) {
+        const style = h('style');
+        style.dataset.chatVisual = '';
+        style.setAttribute('data-marble-transient', '');
+        style.textContent = mod.VISUAL_CSS;
+        document.head.append(style);
+      }
+      return mod;
+    }).catch(() => null);
+    return visualModule;
+  };
+  // What a visual in a reply talks back to: the field, under the same names
+  // the Agents composer answers to.
+  room.input = { get value() { return input.value; }, set value(v) { input.value = v; } };
+  room.updateSendable = () => paintSend();
+  room.submit = () => submit();
+  const visual = (info, source) => {
+    const card = h('figure', 'visual');
+    card.setAttribute('role', 'group');
+    card.append(h('div', 'visual-pending'));
+    loadVisual().then((mod) => {
+      if (mod?.mountVisual) return mod.mountVisual(card, { info, body: source, view: room });
+      const pre = h('pre');
+      pre.append(h('code', '', source));
+      card.replaceChildren(pre);
+      return null;
+    });
+    return card;
+  };
+
+  const render = (node, text, { final = false } = {}) => {
+    const ui = UI();
+    if (!ui?.renderText) {
+      node.textContent = text;
+      node.style.whiteSpace = 'pre-wrap';
+      return;
+    }
+    // Half a visual is markup, and markup is not what a reply shows: while it
+    // streams, the text stops where the visual starts.
+    if (!final) {
+      const m = VISUAL_OPEN.exec(text);
+      const shown = m ? text.slice(0, m.index) : text;
+      node.replaceChildren(ui.renderText(shown));
+      if (m) node.append(h('div', 'visual-pending'));
+      return;
+    }
+    node.replaceChildren(ui.renderText(text, { visual }));
+  };
+
+  let painting = 0;
+  const paintLive = () => {
+    if (painting) return;
+    painting = requestAnimationFrame(() => {
+      painting = 0;
+      const stuck = nearBottom();
+      for (const t of view.turns.values()) if (t.live) render(t.live.node, t.live.raw);
+      if (stuck) toBottom();
+    });
+  };
+
+  function delta(t, text) {
+    thinking(t, false);
+    closeWork(t);
+    if (!t.live) {
+      const node = h('div', 'md marble-live');
+      replyOf(t).append(node);
+      t.live = { node, raw: '' };
+    }
+    t.live.raw += text;
+    paintLive();
+  }
+
+  function text(t, full) {
+    thinking(t, false);
+    closeWork(t);
+    let node = t.live?.node;
+    if (!node) {
+      node = h('div', 'md');
+      replyOf(t).append(node);
+    }
+    node.classList.remove('marble-live');
+    render(node, full, { final: true });
+    t.live = null;
+    t.texts.push(full);
+  }
+
+  const endLive = (t) => {
+    if (!t.live) return;
+    t.live.node.classList.remove('marble-live');
+    render(t.live.node, t.live.raw, { final: true });
+    t.live = null;
+  };
+
+  // ---- work
+
+  const tail = (p) => String(p ?? '').split('/').filter(Boolean).pop() ?? '';
+  const host = (u) => { try { return new URL(u).host; } catch { return String(u ?? ''); } };
+  function stepOf(name, input = {}) {
+    const n = String(name ?? '');
+    if (/^browser_/.test(n)) return ['Used the browser', input.url ? host(input.url) : ''];
+    switch (n) {
+      case 'Bash': case 'Shell': case 'shell': return ['Ran a command', input.description || input.command || ''];
+      case 'Read': case 'read_file': return ['Read', tail(input.file_path ?? input.path)];
+      case 'Grep': case 'Glob': return ['Searched files', input.pattern ?? ''];
+      case 'Edit': case 'MultiEdit': case 'Write': case 'NotebookEdit': return ['Edited', tail(input.file_path ?? input.notebook_path)];
+      case 'WebSearch': case 'web_search': return ['Searched the web', input.query ?? ''];
+      case 'WebFetch': return ['Read a page', host(input.url)];
+      case 'read_document': return ['Read', input.path ?? ''];
+      case 'apply_ops': return ['Changed', input.path ?? ''];
+      case 'create_document': return ['Made', input.path ?? ''];
+      case 'list_documents': return ['Looked through the drive', ''];
+      case 'check_document': return ['Checked', input.path ?? ''];
+      case 'read_guide': return ['Read the guide', input.section ?? ''];
+      case 'Task': case 'Agent': return ['Asked a helper', input.description ?? ''];
+      case 'TodoWrite': case 'updateTodos': return ['Made a plan', ''];
+      case 'Skill': return ['Used a skill', input.skill ?? input.name ?? ''];
+      case 'ToolSearch': return ['Looked for a tool', ''];
+      default: return [n.replace(/^mcp__[^_]+__/, '').replace(/_/g, ' '), ''];
+    }
+  }
+
+  function workOf(t) {
+    if (t.work) return t.work;
+    const box = h('details', 'work');
+    box.dataset.state = 'running';
+    const sum = h('summary');
+    sum.append(icon('right'), h('span', 'work-label', 'Working'));
+    box.append(sum, h('ol', 'steps'));
+    replyOf(t).append(box);
+    t.work = box;
+    return box;
+  }
+  const workLabel = (box) => {
+    const steps = box.querySelectorAll('.steps li');
+    const n = steps.length;
+    if (box.dataset.state === 'running') return `${steps[n - 1]?.querySelector('b')?.textContent ?? 'Working'}…`;
+    return n === 1 ? steps[0].querySelector('b').textContent : `${n} steps`;
+  };
+  function closeWork(t) {
+    if (!t.work) return;
+    t.work.dataset.state = 'done';
+    t.work.querySelector('.work-label').textContent = workLabel(t.work);
+    t.work = null;
+  }
+
+  function toolCall(t, event) {
+    thinking(t, false);
+    endLive(t);
+    const box = workOf(t);
+    const [label, detail] = stepOf(event.name, event.input ?? {});
+    const li = h('li');
+    li.dataset.state = 'pending';
+    li.append(h('b', '', label));
+    if (detail) li.append(h('span', '', detail));
+    box.querySelector('.steps').append(li);
+    t.steps.set(event.callId, li);
+    box.querySelector('.work-label').textContent = workLabel(box);
+  }
+
+  // ---- notes and asks
+
+  function note(t, words, bad = false, link = null) {
+    const p = h('p', bad ? 'err' : 'note');
+    if (link) {
+      p.append(`${words} `);
+      const a = h('a', '', link);
+      a.href = `/a/${link.split('/').map(encodeURIComponent).join('/')}`;
+      p.append(a);
+    } else p.textContent = words;
+    if (t) replyOf(t).append(p);
+    else thread.append(p);
+    return p;
+  }
+
+  function ask(t, event) {
+    thinking(t, false);
+    endLive(t);
+    const build = UI()?.buildAskCard;
+    if (!build) return;
+    let card = null;
+    const submitAnswer = async (response) => {
+      for (const b of card.querySelectorAll('button')) b.disabled = true;
+      try {
+        await agent.answer(event.turn, event.requestId, response);
+      } catch (err) {
+        for (const b of card.querySelectorAll('button')) b.disabled = false;
+        note(t, err.message, true);
+      }
+    };
+    card = build(event, submitAnswer);
+    t.asks.set(event.requestId, card);
+    replyOf(t).append(card);
+    if (!coarse.matches) card.querySelector('button')?.focus({ preventScroll: true });
+  }
+
+  // ---- the end of a turn
+
+  function finish(t, event) {
+    t.done = true;
+    thinking(t, false);
+    endLive(t);
+    closeWork(t);
+    t.el.classList.remove('marble-queued');
+    for (const card of t.asks.values()) card.remove();
+    if (event.type === 'turn.failed') note(t, event.error || 'Something went wrong.', true);
+    if (event.type === 'turn.cancelled') note(t, 'Stopped.');
+    if (event.type === 'turn.interrupted') note(t, 'Interrupted.');
+    if (t.texts.length && !t.reply.querySelector(':scope > .acts')) {
+      const acts = h('div', 'acts');
+      const copy = h('button', 'icon');
+      copy.type = 'button';
+      copy.setAttribute('aria-label', 'Copy reply');
+      copy.title = 'Copy';
+      copy.append(icon('copy'));
+      copy.addEventListener('click', async () => {
+        try {
+          await navigator.clipboard.writeText(t.texts.join('\n\n'));
+          copy.replaceChildren(icon('check'));
+          copy.setAttribute('aria-label', 'Copied');
+          setTimeout(() => { copy.replaceChildren(icon('copy')); copy.setAttribute('aria-label', 'Copy reply'); }, 1400);
+        } catch {}
+      });
+      acts.append(copy);
+      t.reply.append(acts);
+    }
+    if (view.running === event.turn) view.running = null;
+    paintSend();
+    if (view.id) seen(view.id);
+  }
+
+  function receive(event) {
+    if (event.seq) {
+      if (event.seq <= view.seen) return;
+      view.seen = event.seq;
+    }
+    const stuck = nearBottom();
+    const turn = event.turn;
+    switch (event.type) {
+      case 'user': {
+        const said = String(event.text ?? '');
+        let t = view.turns.get(turn);
+        if (!t) t = adoptPending(turn, said) ?? turnOf(turn);
+        else if (!t.me) {
+          const early = [...thread.querySelectorAll('.turn.marble-pending')].find((p) => p.querySelector('.me')?.textContent === said);
+          if (early) {
+            t.me = early.querySelector('.me');
+            t.el.prepend(t.me);
+            early.remove();
+          }
+        }
+        if (!t.me) {
+          t.me = h('div', 'me');
+          if (event.from) t.me.append(h('span', 'from', `From ${event.from.title || 'another chat'}`));
+          t.me.append(said);
+          t.el.prepend(t.me);
+        }
+        paintFresh();
+        break;
+      }
+      case 'message': {
+        const t = turnOf(turn ?? `m${event.seq}`);
+        t.me = h('div', 'me');
+        t.me.append(h('span', 'from', `From ${event.fromTitle || 'another chat'}`), String(event.text ?? ''));
+        t.el.prepend(t.me);
+        paintFresh();
+        break;
+      }
+      case 'turn.queued':
+        turnOf(turn).el.classList.add('marble-queued');
+        break;
+      case 'turn.removed':
+        view.turns.get(turn)?.el.remove();
+        view.turns.delete(turn);
+        paintFresh();
+        break;
+      case 'turn.started': {
+        const t = turnOf(turn);
+        t.el.classList.remove('marble-queued');
+        view.running = turn;
+        thinking(t, true);
+        paintSend();
+        break;
+      }
+      case 'text.delta':
+        delta(turnOf(turn), event.text ?? '');
+        break;
+      case 'text':
+        text(turnOf(turn), event.text ?? '');
+        break;
+      case 'tool.call':
+        toolCall(turnOf(turn), event);
+        break;
+      case 'tool.result': {
+        const li = view.turns.get(turn)?.steps.get(event.callId);
+        if (li) li.dataset.state = event.ok === false ? 'failed' : 'done';
+        break;
+      }
+      case 'ops.applied':
+      case 'document.changed': {
+        const t = turnOf(turn);
+        const path = event.path ?? '';
+        if (path && !t.el.querySelector(`.note[data-path="${CSS.escape(path)}"]`)) {
+          const p = note(t, 'Changed', false, path);
+          p.dataset.path = path;
+        }
+        break;
+      }
+      case 'ask':
+        ask(turnOf(turn), event);
+        break;
+      case 'ask.answered':
+      case 'ask.void': {
+        const t = view.turns.get(turn);
+        t?.asks.get(event.requestId)?.remove();
+        t?.asks.delete(event.requestId);
+        break;
+      }
+      case 'turn.completed':
+      case 'turn.failed':
+      case 'turn.cancelled':
+      case 'turn.interrupted':
+        finish(turnOf(turn), event);
+        break;
+      case 'handoff':
+        note(null, event.from ? 'Continued from an earlier chat.' : 'Continued in a new chat.');
+        break;
+      case 'usage.continued':
+        note(null, `Usage ran out; carrying on with ${event.label}.`);
+        break;
+      default:
+    }
+    if (stuck) toBottom();
+    paintLatest();
+  }
+
+  // ------------------------------------------------------------- sending
+
+  const sendable = () => Boolean(agent) && input.value.trim().length > 0;
+  function paintSend() {
+    const stop = Boolean(view.running) && !input.value.trim();
+    sendBtn.dataset.mode = stop ? 'stop' : 'send';
+    sendBtn.disabled = stop ? false : !sendable();
+    sendBtn.setAttribute('aria-label', stop ? 'Stop' : 'Send');
+  }
+
+  let sending = false;
+  async function submit() {
+    const words = input.value.trim();
+    if (!words || !agent || sending) return;
+    sending = true;
+    input.value = '';
+    autosize();
+    paintSend();
+    const pending = pendingTurn(words);
+    paintFresh();
+    toBottom();
+    try {
+      let id = view.id;
+      if (!id) {
+        id = await agent.start({ provider: provider?.id, model: body.dataset.model || null });
+        // Became this chat without reopening it: the bubble already drawn is
+        // the one its first event will claim.
+        view.id = id;
+        view.meta = { id, model: body.dataset.model || null };
+        chats.set(id, { id, title: words.slice(0, 60), updatedAt: Date.now(), running: true, target: HERE });
+        history.replaceState(null, '', `#${id}`);
+        body.classList.add('marble-reading');
+        listen(view);
+        paintList();
+        paintBar();
+      }
+      await agent.send(id, { prompt: words, target: HERE, viewing: HERE, selection: [], also: [], surface: 'chat' });
+    } catch (err) {
+      pending.classList.remove('marble-pending');
+      const p = h('p', 'err', `Not sent — ${err.message}`);
+      pending.append(p);
+      if (!input.value) input.value = words;
+      paintSend();
+    } finally {
+      sending = false;
+    }
+  }
+
+  function stop() {
+    if (view.running) agent?.cancel(view.running).catch(() => {});
+  }
+
+  sendBtn.addEventListener('click', () => (sendBtn.dataset.mode === 'stop' ? stop() : submit()));
+  // Where the field cannot size itself to what is in it, it is told.
+  const autosize = CSS.supports('field-sizing', 'content') ? () => {} : () => {
+    input.style.height = 'auto';
+    input.style.height = `${input.scrollHeight}px`;
+  };
+  room.autosize = autosize;
+  input.addEventListener('input', () => {
+    autosize();
+    paintSend();
+  });
+  input.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter' && !e.shiftKey && !e.isComposing && !(coarse.matches && narrow())) {
+      e.preventDefault();
+      submit();
+    } else if (e.key === 'Escape' && view.running && !input.value) {
+      e.preventDefault();
+      stop();
+    }
+  });
+  // An idea is a first message, put in the field to be sent or changed.
+  document.querySelector('.ideas').addEventListener('click', (e) => {
+    const idea = e.target.closest('.idea');
+    if (!idea) return;
+    input.value = idea.textContent.trim();
+    autosize();
+    paintSend();
+    input.focus();
+    input.setSelectionRange(input.value.length, input.value.length);
+  });
+
+  // ------------------------------------------------------------ the rest
+
+  function paintLatest() {
+    const away = !body.classList.contains('marble-fresh') && !nearBottom();
+    latest.classList.toggle('marble-shown', away);
+  }
+  log.addEventListener('scroll', () => {
+    body.classList.toggle('marble-scrolled', log.scrollTop > 4);
+    paintLatest();
+  }, { passive: true });
+  latest.addEventListener('click', () => toBottom(true));
+
+  let toastTimer = 0;
+  function say(words, undo) {
+    toast.firstElementChild.textContent = words;
+    const button = toast.querySelector('button');
+    button.hidden = !undo;
+    button.onclick = () => {
+      toast.classList.remove('marble-shown');
+      undo?.();
+    };
+    toast.classList.add('marble-shown');
+    clearTimeout(toastTimer);
+    toastTimer = setTimeout(() => toast.classList.remove('marble-shown'), 5000);
+  }
+
+  async function archive(id) {
+    const was = chats.get(id);
+    chats.delete(id);
+    paintList();
+    if (view.id === id) go(null);
+    try {
+      await agent.archive(id, true);
+      say('Chat archived', async () => {
+        await agent.archive(id, false).catch(() => {});
+        if (was) chats.set(id, { ...was, archived: false });
+        paintList();
+      });
+    } catch (err) {
+      if (was) chats.set(id, was);
+      paintList();
+      say(`Not archived — ${err.message}`);
+    }
+  }
+
+  // Double-click the title to rename the chat. The name is the host's.
+  titleEl.addEventListener('dblclick', () => {
+    if (!view.id || titleEl.isContentEditable) return;
+    const before = titleEl.textContent;
+    titleEl.contentEditable = 'plaintext-only';
+    titleEl.focus();
+    getSelection().selectAllChildren(titleEl);
+    const done = (keep) => {
+      titleEl.removeAttribute('contenteditable');
+      const name = titleEl.textContent.trim();
+      if (!keep || !name || name === before) {
+        titleEl.textContent = before;
+        return;
+      }
+      const c = chats.get(view.id);
+      if (c) c.title = name;
+      paintList();
+      agent?.update(view.id, { title: name }).catch(() => { titleEl.textContent = before; });
+    };
+    titleEl.addEventListener('keydown', function key(e) {
+      if (e.key === 'Enter' || e.key === 'Escape') {
+        e.preventDefault();
+        titleEl.removeEventListener('keydown', key);
+        titleEl.removeEventListener('blur', blur);
+        done(e.key === 'Enter');
+      }
+    });
+    const blur = () => done(true);
+    titleEl.addEventListener('blur', blur, { once: true });
+  });
+
+  document.addEventListener('click', (e) => {
+    const cmd = e.target.closest('[data-cmd]')?.dataset.cmd;
+    if (cmd === 'new') go(null);
+    else if (cmd === 'back') {
+      body.classList.remove('marble-reading');
+      history.replaceState(null, '', location.pathname + location.search);
+      open(null);
+    } else if (cmd === 'side') toggleSide();
+  });
+  function toggleSide() {
+    const next = body.dataset.side === 'closed' ? 'open' : 'closed';
+    setFact('data-side', next);
+    $('.side-toggle').setAttribute('aria-label', next === 'open' ? 'Hide sidebar' : 'Show sidebar');
+  }
+  addEventListener('keydown', (e) => {
+    const mod = e.metaKey || e.ctrlKey;
+    if (mod && e.shiftKey && e.key.toLowerCase() === 'o') {
+      e.preventDefault();
+      go(null);
+    } else if (mod && e.key === '.' && !narrow()) {
+      e.preventDefault();
+      toggleSide();
+    }
+  });
+  find.addEventListener('input', paintList);
+  // The clock moves the groups and the times on its own.
+  setInterval(paintList, 60_000);
+
+  // ---------------------------------------------------------------- boot
+
+  function boot(a) {
+    if (agent) return;
+    agent = a;
+    HERE = window.marble.app;
+    body.classList.remove('marble-offline');
+    agent.providers().then((list) => {
+      provider = list.find((p) => p.default) ?? list[0] ?? null;
+      paintBar();
+    }).catch(() => {});
+    agent.conversations().then((list) => {
+      for (const c of list) if (belongs(c)) chats.set(c.id, c);
+      paintList();
+      paintBar();
+    }).catch(() => {});
+    agent.on('*', (summary) => {
+      if (summary?.kind) return;
+      take(summary);
+    });
+    view.id = undefined;
+    route();
+    // A phone that slept closed the streams; it reopens them on return.
+    document.addEventListener('visibilitychange', () => {
+      if (document.visibilityState === 'hidden') agent.suspend?.();
+      else agent.resume?.();
+    });
+  }
+
+  $('.side-toggle').setAttribute('aria-label', body.dataset.side === 'closed' ? 'Show sidebar' : 'Hide sidebar');
+  body.classList.add('marble-fresh');
+  paintSend();
+  if (window.marble?.agent) boot(window.marble.agent);
+  else {
+    addEventListener('marble:agent', (e) => boot(e.detail), { once: true });
+    // Opened without a host that runs agents, it is still the app — it just
+    // has nobody to talk to, and says so where the words would go.
+    setTimeout(() => {
+      if (agent) return;
+      body.classList.add('marble-offline');
+      input.disabled = true;
+      input.placeholder = 'Open this in Marble Drive to chat';
+    }, 2500);
+  }
+})();
+</script>
+__SCRIPT__
+</body>
+</html>

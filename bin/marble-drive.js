@@ -29,7 +29,7 @@ import { stamp, stamped } from '../server/favicon.js';
 import { build as buildStarter, list as listStarters } from '../server/gallery.js';
 import { check as checkRemote, serveOff, serveOn, serveStatus, tailnetUrl } from '../server/remote.js';
 import { splitPath, parsePath } from '../server/paths.js';
-import { seedAgents, seedDrive } from '../server/seed.js';
+import { seedAgents, seedChat, seedDrive } from '../server/seed.js';
 import { createStore } from '../server/store/index.js';
 
 const [command = 'serve', ...rest] = process.argv.slice(2);
@@ -89,6 +89,7 @@ async function serve() {
   const drive = await createDrive(config);
   await seedDrive(drive.store, { name: config.home });
   await seedAgents(drive.store);
+  await seedChat(drive.store);
   // Not awaited: the host should answer requests while it reads the drive, and
   // a document served before its baseline lands sets its own on the way out.
   drive.seed().catch(() => {});

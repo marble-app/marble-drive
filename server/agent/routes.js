@@ -461,6 +461,9 @@ export function createAgentRoutes({ store, runner, tools, hub, providers, writeO
             }).filter(Boolean))]
             : [],
         };
+        // Where the words were typed, when that is not a document being worked
+        // on: the Chat app sends `chat`, so the agent answers rather than edits.
+        if (body.context.surface === 'chat') context.surface = 'chat';
         return json(res, 202, await runner.send(id, {
           prompt: String(body.prompt ?? ''),
           context,

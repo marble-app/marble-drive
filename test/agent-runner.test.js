@@ -1107,6 +1107,18 @@ test('a drive turn keeps the document context block', async () => {
   await runner.close();
 });
 
+test('a turn sent from the Chat app is told to answer, not to edit the app', async () => {
+  const { store, runner, spawned } = await setup({ capability: 'full' });
+  const { id } = await store.createConversation({ provider: 'fake' });
+  await runner.send(id, { prompt: 'script:noop', context: { target: 'Chat', viewing: 'Chat', surface: 'chat' } });
+  await until(async () => (await store.turn(`${id}-t1`)).status === 'completed');
+  const prompt = spawned.at(-1).prompt;
+  assert.match(prompt, /Sent from the Chat app \("Chat"\)\. This is a conversation/);
+  assert.doesNotMatch(prompt, /The document you may edit/);
+  assert.equal((await store.turn(`${id}-t1`)).context.surface, 'chat');
+  await runner.close();
+});
+
 test('a conversation whose project is gone fails its turn plainly', async () => {
   const { store, runner } = await setup({ capability: 'full' });
   const { id } = await store.createConversation({ provider: 'fake', project: 'gone' });

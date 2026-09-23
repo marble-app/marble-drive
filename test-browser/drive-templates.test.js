@@ -32,13 +32,13 @@ async function openTemplates() {
 // every one of them. It is the point of the feature, not a fault in it.
 const real = (errors) => errors.filter((message) => !/sandbox/i.test(message));
 
-test('the gallery shows eight documents, not eight descriptions', async () => {
+test('the gallery shows nine documents, not nine descriptions', async () => {
   const { page, errors } = await openTemplates();
   const cards = page.locator('#items .tgrid .tcard');
-  assert.equal(await cards.count(), 8);
+  assert.equal(await cards.count(), 9);
   assert.deepEqual(
     await cards.evaluateAll((els) => els.map((el) => el.dataset.id)),
-    ['doc', 'note', 'sheet', 'board', 'canvas', 'slides', 'paper', 'latex'],
+    ['doc', 'note', 'chat', 'sheet', 'board', 'canvas', 'slides', 'paper', 'latex'],
   );
 
   // Each card is a picture of its own starter.
@@ -52,10 +52,10 @@ test('the gallery shows eight documents, not eight descriptions', async () => {
   // Nothing on the card has to be read but the name.
   assert.equal((await page.locator('.tcard[data-id="sheet"]').innerText()).trim(), 'Sheet');
 
-  // Seven colours over eight templates — paper and latex are one family and say so.
+  // Eight colours over nine templates — paper and latex are one family and say so.
   const accents = await cards.evaluateAll((els) => els.map((el) => el.dataset.accent));
-  assert.equal(new Set(accents).size, 7);
-  assert.deepEqual([accents[6], accents[7]], [accents[7], accents[6]]);
+  assert.equal(new Set(accents).size, 8);
+  assert.deepEqual([accents[7], accents[8]], [accents[8], accents[7]]);
 
   assert.deepEqual(real(errors), []);
 });
@@ -150,7 +150,7 @@ test('the New popover offers the same cards, two at a time', async () => {
   await page.locator('#nav .nav-item[data-nav="drive"]').click();
   await page.locator('#new').click();
   await page.locator('#sheet[data-open="1"] .tgrid[data-compact] .tcard').first().waitFor();
-  assert.equal(await page.locator('#sheet .tcard').count(), 8);
+  assert.equal(await page.locator('#sheet .tcard').count(), 9);
 
   // And the way out of the menu into the room it is a corner of.
   assert.equal((await page.locator('#all-templates').innerText()).trim(), 'All templates');

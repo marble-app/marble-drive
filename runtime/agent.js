@@ -277,7 +277,7 @@
       },
       handoff: (id, provider) => agent.start({ provider, handoffFrom: id }),
 
-      send(id, { prompt, target, viewing, selection, also, dispatch } = {}) {
+      send(id, { prompt, target, viewing, selection, also, dispatch, surface } = {}) {
         const here = context();
         const body = {
           prompt,
@@ -289,6 +289,9 @@
           },
         };
         if (dispatch) body.dispatch = dispatch;
+        // Where it was typed, when that is an app for talking rather than a
+        // document being worked on. Only `chat` is understood.
+        if (surface) body.context.surface = surface;
         return ask(`/agent/conversations/${enc(id)}/turns`, { method: 'POST', body });
       },
 

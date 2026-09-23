@@ -1,6 +1,7 @@
 // What a brand new drive has in it after the host seeds it.
 //
-// The Drive document and the Agents library — each written only once if missing.
+// The Drive document, the Agents library and the Chat app — each written only
+// once if missing.
 // Not because a drive should arrive full, but because the alternative is a host
 // that serves a folder with nothing in it and an address that 404s — and because
 // the Drive being an ordinary document in the drive is the claim this whole repo
@@ -12,7 +13,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 import { link as iconLink } from './favicon.js';
-import { composeScript } from './gallery.js';
+import { build as buildStarter, composeScript } from './gallery.js';
 import { titleize } from './paths.js';
 
 const REPO = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
@@ -56,5 +57,18 @@ export async function buildAgents({ name = 'Agents', title = 'Agents' } = {}) {
 export async function seedAgents(store, { name = 'Agents', title = 'Agents' } = {}) {
   if (await store.has(name)) return { seeded: false, path: name };
   await store.write(name, await buildAgents({ name, title }), { label: 'seeded' });
+  return { seeded: true, path: name };
+}
+
+/** The Chat app — a plain chatbot over the same conversations Agents runs.
+ *  It is also a starter in the gallery (`starters/chat.mrbl`), so the one every
+ *  drive is seeded with and one made from Templates are the same build. */
+export async function buildChat({ name = 'Chat', title = 'Chat' } = {}) {
+  return buildStarter('chat', { name: title || name });
+}
+
+export async function seedChat(store, { name = 'Chat', title = 'Chat' } = {}) {
+  if (await store.has(name)) return { seeded: false, path: name };
+  await store.write(name, await buildChat({ name, title }), { label: 'seeded' });
   return { seeded: true, path: name };
 }

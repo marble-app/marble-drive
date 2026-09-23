@@ -214,7 +214,15 @@ export function createRunner({ store, tools, providers, workdir, origin, bridgeP
       body = `${STEER_NOTE}\n\n${body}`;
     }
     const lines = [body, '', '---'];
-    if (kind === 'drive') {
+    if (context.surface === 'chat') {
+      // The Chat app is the window the words came through, not their subject.
+      // Its document is still the one a tool may write, because the host needs
+      // one; the line says not to, unless the app itself is what is asked about.
+      lines.push(
+        'Context from Marble Drive:',
+        `- Sent from the Chat app ("${context.target}"). This is a conversation: answer in your reply, and leave that document alone unless they ask you to change the app itself.`,
+      );
+    } else if (kind === 'drive') {
       lines.push(
         'Context from Marble Drive:',
         `- The person is viewing: ${context.viewing ?? context.target}`,
@@ -292,6 +300,7 @@ export function createRunner({ store, tools, providers, workdir, origin, bridgeP
     const behind = liveFor(conversationId).some((t) => t.status === 'queued' || t.status === 'running');
 
     const frozen = { viewing: context.viewing ?? null, target: context.target, selection: context.selection ?? [] };
+    if (context.surface === 'chat') frozen.surface = 'chat';
     const also = [...new Set((Array.isArray(context.also) ? context.also : []).map((item) => String(item).trim()).filter(Boolean))]
       .filter((doc) => doc !== frozen.target && doc !== frozen.viewing);
     if (also.length) frozen.also = also;
