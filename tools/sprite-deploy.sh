@@ -1,13 +1,14 @@
 #!/usr/bin/env bash
 # Deploy Marble Drive to a Fly Sprite (docs/DEPLOY.md, "On a Fly Sprite").
 #
-#   tools/sprite-deploy.sh <sprite> [--org <org>] [--ref <commit>] [--marble <version>]
+#   tools/sprite-deploy.sh <sprite> [--org <org>] [--ref <commit>] [--marble <version>] [--claude <version>]
 #   tools/sprite-deploy.sh <sprite> [--org <org>] --local
 #   tools/sprite-deploy.sh <sprite> [--org <org>] --rollback
 #
 # By default a sprite runs public sources: marble-drive at <ref> (default
 # origin/main) from GitHub, and @bdhmin/marble@<version> (default: the local
-# ../marble's version) from npm. Nothing secret is copied to the sprite.
+# ../marble's version) from npm, with Claude Code pinned at --claude (default:
+# the version on this Mac). Nothing secret is copied to the sprite.
 # --local deploys this Mac's working copies instead (marble-drive's tracked and
 # untracked-but-not-ignored files, and `npm pack` of ../marble), for trying
 # unreleased changes on a test sprite.
@@ -23,12 +24,13 @@ MARBLE_DIR="${MARBLE_DIR:-$(cd "$REPO/.." && pwd)/marble}"
 usage() { sed -n '2,15p' "$0" | sed 's/^# \{0,1\}//'; exit 2; }
 [[ $# -ge 1 && "$1" != -* ]] || usage
 SPRITE=$1; shift
-ORG=marble-drive REF=origin/main MARBLE_VERSION="" LOCAL=0 ROLLBACK=0
+ORG=marble-drive REF=origin/main MARBLE_VERSION="" CLAUDE_VERSION="" LOCAL=0 ROLLBACK=0
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --org) ORG=$2; shift 2 ;;
     --ref) REF=$2; shift 2 ;;
     --marble) MARBLE_VERSION=$2; shift 2 ;;
+    --claude) CLAUDE_VERSION=$2; shift 2 ;;
     --local) LOCAL=1; shift ;;
     --rollback) ROLLBACK=1; shift ;;
     *) usage ;;
@@ -47,6 +49,11 @@ if [[ $ROLLBACK == 1 ]]; then
   on -- "$REMOTE/release.sh" rollback
   exit 0
 fi
+
+[[ -n "$CLAUDE_VERSION" ]] || CLAUDE_VERSION="$(claude --version 2>/dev/null | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' | head -1)"
+[[ -n "$CLAUDE_VERSION" ]] || { echo "sprite-deploy: no claude on this Mac to take a version from — pass --claude <version>" >&2; exit 1; }
+npm view "@anthropic-ai/claude-code@$CLAUDE_VERSION" version >/dev/null 2>&1 \
+  || { echo "sprite-deploy: @anthropic-ai/claude-code@$CLAUDE_VERSION is not on npm" >&2; exit 1; }
 
 STAMP="$(date -u +%Y%m%dT%H%M%SZ)"
 FILES=()
@@ -80,7 +87,7 @@ sprite checkpoint create -o "$ORG" -s "$SPRITE" --comment "before deploy $NAME"
 echo "   to undo everything since: sprite checkpoint list -o $ORG -s $SPRITE, then sprite restore <id> -o $ORG -s $SPRITE"
 
 say "staging $NAME"
-on ${FILES[@]+"${FILES[@]}"} -- "$REMOTE/release.sh" stage "$NAME" "$SOURCE" "$MARBLE"
+on ${FILES[@]+"${FILES[@]}"} -- "$REMOTE/release.sh" stage "$NAME" "$SOURCE" "$MARBLE" "$CLAUDE_VERSION"
 say "switching"
 on -- "$REMOTE/release.sh" switch "$NAME"
 on -- sh -c "rm -f $REMOTE/incoming/$NAME*"

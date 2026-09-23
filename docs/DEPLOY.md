@@ -135,6 +135,40 @@ take the host down.
 A backup is a copy of the drive root. Stop the host, put it back, start the
 host. There is no import step, because there was no export step.
 
+## On a Fly Sprite
+
+One sprite per person, each running this host as it runs on a laptop
+(docs/superpowers/specs/2026-09-23-marble-drive-on-a-sprite-design.md). From
+this checkout:
+
+```
+tools/sprite-deploy.sh <sprite> --org <org>            # a pushed commit, from GitHub + npm
+tools/sprite-deploy.sh <sprite> --org <org> --local    # this Mac's working copies
+tools/sprite-deploy.sh <sprite> --org <org> --rollback # the release before
+```
+
+- **Sources.** By default the sprite fetches `marble-drive` at `--ref`
+  (default `origin/main`, which must be pushed) from GitHub and installs
+  `@bdhmin/marble@<version>` from npm, so it holds no credentials. `--local`
+  packs this Mac's working copies instead, for trying unreleased changes.
+- **Claude Code is pinned per release** (`--claude`, default the version on
+  this Mac): the host passes flags a given CLI must know. The release runs
+  Claude Code's own installer, because npm on a sprite blocks install scripts.
+- **Releases** live side by side in `~/app/releases/`, `~/app/current` points
+  at the live one, and the last three are kept. A release that does not answer
+  `/health` on a throwaway drive never goes live; one whose service does not
+  come up is switched back.
+- **The service** is `marble-drive` (`sprite-env services`), port 4400, drive
+  at `/drive`, recreated on every switch so its settings are always the
+  script's. Logs: `/.sprite/logs/services/marble-drive.log`.
+- **Staying awake.** A sprite pauses about 30 seconds after its last
+  connection. While an agent turn or a stem split runs, the host holds a Sprites
+  task (`server/keep-awake.js`), so a turn outlives its tab.
+- **Checkpoints.** Every deploy checkpoints first and prints how to restore.
+- **Signing in.** The sprite's URL stays private to the org ("sprite" auth).
+  Agents need a `claude login` in `sprite console` or an API key in Agents
+  settings; a sprite made for someone else never carries anyone's login.
+
 ## Everything else
 
 | | |

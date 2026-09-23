@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # The sprite's half of a deploy (tools/sprite-deploy.sh is the Mac's half).
 #
-#   release.sh stage <name> <source> <marble>   build a release beside the others
+#   release.sh stage <name> <source> <marble> <claude>   build a release beside the others
 #   release.sh switch <name>                    make it current and (re)start the service
 #   release.sh rollback                         go back to the release before current
 #
@@ -9,6 +9,9 @@
 # tar:<path> (a pack of the owner's working copy, for --local).
 # <marble> is what npm installs for @bdhmin/marble: a published spec such as
 # @bdhmin/marble@0.2.1, or the path of an `npm pack` tarball.
+# <claude> is the Claude Code version the release carries: the host passes
+# flags a given CLI must know, so the CLI is pinned with the release rather than
+# left to whatever the sprite's image ships.
 #
 # A release that fails to install or to answer /health is removed and never
 # becomes current; a switch whose service does not come up goes back to the
@@ -25,7 +28,9 @@ HOST="${MARBLE_SPRITE_HOST:-127.0.0.1}"
 DRIVE=/drive
 REPO_TARBALL=https://codeload.github.com/marble-app/marble-drive/tar.gz
 NODE="$(command -v node)"
-SERVICE_PATH="$HOME/.local/bin:$(dirname "$NODE"):/usr/local/bin:/usr/bin:/bin"
+# The release's own node_modules/.bin first, so its pinned `claude` is the one
+# the host finds; through the `current` link, so a switch needs no new service.
+SERVICE_PATH="$CURRENT/marble-drive/node_modules/.bin:$HOME/.local/bin:$(dirname "$NODE"):/usr/local/bin:/usr/bin:/bin"
 
 say() { printf '==> %s\n' "$*"; }
 die() { printf 'release: %s\n' "$*" >&2; exit 1; }
@@ -40,7 +45,7 @@ health() { # health <port> <seconds>
 }
 
 stage() {
-  local name=$1 source=$2 marble=$3
+  local name=$1 source=$2 marble=$3 claude=$4
   local dir="$RELEASES/$name"
   [[ -e "$dir" ]] && die "release $name already exists"
   mkdir -p "$dir/marble-drive"
@@ -53,10 +58,15 @@ stage() {
     *) die "unknown source $source" ;;
   esac
 
-  say "installing (marble: $marble)"
+  say "installing (marble: $marble, claude: $claude)"
   cd "$dir/marble-drive"
   npm pkg delete dependencies.@bdhmin/marble
-  npm install --omit=dev --no-audit --no-fund --loglevel=error "$marble"
+  npm install --omit=dev --no-audit --no-fund --loglevel=error "$marble" "@anthropic-ai/claude-code@$claude"
+  # npm on the sprite blocks install scripts it has not been told to allow, and
+  # Claude Code's is the one that puts its native binary in place. Run that one
+  # script, for that one package, and nothing else.
+  node node_modules/@anthropic-ai/claude-code/install.cjs >/dev/null
+  [[ "$(node_modules/.bin/claude --version 2>/dev/null)" == "$claude"* ]] || die "claude $claude did not install"
 
   # The agents' browser. Shared across releases, installed once.
   if [[ ! -e "$APP/.chromium-ready" ]]; then
@@ -87,12 +97,11 @@ stage() {
 
 service_up() {
   local env="MARBLE_DRIVE_ROOT=$DRIVE,PORT=$PORT,HOST=$HOST,MARBLE_DRIVE_AGENTS=1,NODE_ENV=production,PATH=$SERVICE_PATH"
-  if sprite-env services get "$SERVICE" >/dev/null 2>&1; then
-    sprite-env services restart "$SERVICE" >/dev/null
-  else
-    sprite-env services create "$SERVICE" --cmd "$NODE" --args bin/marble-drive.js,serve \
-      --dir "$CURRENT/marble-drive" --env "$env" --http-port "$PORT" --no-stream >/dev/null
-  fi
+  # Recreated rather than restarted, so the service's settings are always
+  # this script's: a restart keeps the env it was created with.
+  sprite-env services delete "$SERVICE" >/dev/null 2>&1 || true
+  sprite-env services create "$SERVICE" --cmd "$NODE" --args bin/marble-drive.js,serve \
+    --dir "$CURRENT/marble-drive" --env "$env" --http-port "$PORT" --no-stream >/dev/null
 }
 
 point() { # point <name>: make <name> current, atomically
@@ -149,8 +158,8 @@ rollback() {
 
 mkdir -p "$RELEASES"
 case "${1:-}" in
-  stage) stage "$2" "$3" "$4" ;;
+  stage) stage "$2" "$3" "$4" "$5" ;;
   switch) switch "$2" ;;
   rollback) rollback ;;
-  *) die "usage: release.sh stage <name> <source> <marble> | switch <name> | rollback" ;;
+  *) die "usage: release.sh stage <name> <source> <marble> <claude> | switch <name> | rollback" ;;
 esac
