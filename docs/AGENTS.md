@@ -405,7 +405,7 @@ the words around it and a quiet *Drawing…* — half a visual is markup, and
 markup is not what the log shows.
 
 The rules an agent writes them by are in the `visuals-in-chat` skill
-(`.claude/skills/visuals-in-chat/`), and the four recipes there are rendered at
+(`agent-plugin/skills/visuals-in-chat/`, loaded as `marble-drive:visuals-in-chat`), and the four recipes there are rendered at
 both widths in both schemes by `node tools/visual-shots.mjs`. Design:
 [`superpowers/specs/2026-09-22-visuals-in-chat-design.md`](superpowers/specs/2026-09-22-visuals-in-chat-design.md).
 

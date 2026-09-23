@@ -31,6 +31,8 @@ COPY runtime ./runtime
 COPY lib ./lib
 COPY starters ./starters
 COPY templates ./templates
+# The app's own agent skills, passed to every full Claude turn (--plugin-dir).
+COPY agent-plugin ./agent-plugin
 
 # The drive lives on a volume. If this path is not mounted, the documents live
 # in the container and go away with it — which is the one failure mode worth

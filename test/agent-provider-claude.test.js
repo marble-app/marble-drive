@@ -8,6 +8,7 @@ import { fileURLToPath } from 'node:url';
 
 import { INSTRUCTIONS } from '../server/agent/instructions.js';
 import { createClaudeProvider, parseClaudeLine } from '../server/agent/providers/claude.js';
+import { PLUGIN_DIR } from '../server/agent/skills.js';
 
 const instructionsModule = await import('../server/agent/instructions.js');
 
@@ -287,6 +288,8 @@ test('each capability and project kind gets its own instructions', () => {
   assert.match(DRIVE_INSTRUCTIONS, /apply_ops/);
   assert.match(DRIVE_INSTRUCTIONS, /Grep/);
   assert.match(DRIVE_INSTRUCTIONS, /check_document/);
+  // A skill the person asks for is theirs: it goes in their drive.
+  assert.match(DRIVE_INSTRUCTIONS, /\.claude\/skills\/<name>/);
 
   assert.equal(instructionsFor('full', 'project'), PROJECT_INSTRUCTIONS);
   assert.match(PROJECT_INSTRUCTIONS, /usual coding agent/);
@@ -317,6 +320,8 @@ test('a full-capability spawn is the terminal\'s, with Marble added and prompts 
     '--permission-mode', 'auto',
     '--permission-prompts', 'host', '--permission-prompt-tool', 'stdio',
     '--mcp-config', path.join('/w', 'mcp.json'),
+    // The app's own skills, wherever the drive is.
+    '--plugin-dir', PLUGIN_DIR,
     '--append-system-prompt', DRIVE_INSTRUCTIONS,
   ]);
   for (const gone of ['--restricted', '--tools', '--settings', '--strict-mcp-config', '--setting-sources', '--model', '--effort']) {

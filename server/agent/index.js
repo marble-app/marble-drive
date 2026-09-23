@@ -26,7 +26,6 @@ import { createUsageHistory } from './usage-history.js';
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const BRIDGE = path.resolve(HERE, '..', '..', 'bin', 'marble-mcp.js');
 const BROWSER = path.resolve(HERE, '..', '..', 'bin', 'marble-browser-mcp.js');
-const REPO = path.resolve(HERE, '..', '..');
 const LOOPBACK_HOSTS = new Set(['127.0.0.1', '::1', 'localhost']);
 const ANY_HOST = new Set(['0.0.0.0', '::']);
 
@@ -122,7 +121,7 @@ async function boot({ config, store, writeOps, createDocument, origin, providers
   await agentStore.ready();
   const keys = createKeyStore({ file: config.agentKeysFile });
   const liveProviders = providers ?? builtInProviders({ env: process.env, secrets: () => keys.asEnv() });
-  const skills = await listSkills(skillDirs({ home: os.homedir(), repo: REPO }));
+  const skills = await listSkills(skillDirs({ home: os.homedir(), root: config.root }));
   const hub = createHub();
 
   // A look goes two ways. Outward, to the document, it is the construction zone

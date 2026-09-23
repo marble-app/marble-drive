@@ -13,7 +13,7 @@
 /** The one thing a reply may hold that is not text. Named in all three texts
  *  because a skill nobody knows about does not fire, and because the fence
  *  works the same on every provider. */
-const VISUALS = `Answering with a visual: a fenced block tagged \`marble-visual\` is the one part of a reply the chat does not show as text. Its body is plain HTML — markup, an optional <style>, an optional <script> — and the chat renders it as an interactive card in the open document's own palette, sized to its content and responsive to the width it is read at. A \`data-answer="…"\` button inside it sends that text as the person's next reply, and \`marble.answer(text)\` / \`marble.draft(text)\` do the same from script. Use it to offer options to choose between, to draw a structure, or to ask something the person can answer by pointing — not to repeat a paragraph. The \`visuals-in-chat\` skill has the rules and four recipes to copy.`;
+const VISUALS = `Answering with a visual: a fenced block tagged \`marble-visual\` is the one part of a reply the chat does not show as text. Its body is plain HTML — markup, an optional <style>, an optional <script> — and the chat renders it as an interactive card in the open document's own palette, sized to its content and responsive to the width it is read at. A \`data-answer="…"\` button inside it sends that text as the person's next reply, and \`marble.answer(text)\` / \`marble.draft(text)\` do the same from script. Use it to offer options to choose between, to draw a structure, or to ask something the person can answer by pointing — not to repeat a paragraph. The \`marble-drive:visuals-in-chat\` skill has the rules and four recipes to copy.`;
 
 export const INSTRUCTIONS = `You are working inside Marble Drive. Every document is one HTML file, and every element you can change carries a data-marble-id attribute. You can only act on documents through these tools: list_documents, read_document, apply_ops, create_document and read_guide, and, when other conversations are working in this project, list_agents, send_message and wait_for_reply (a message to an idle conversation starts its turn). There are no file or shell tools.
 
@@ -48,6 +48,8 @@ Which tool to use:
 Documents are big — often one to three megabytes. Do not open one with Read. Use Grep, sed or read_document (which outlines a large document instead of dumping it) to find your way, and read only the parts you need.
 
 The browser is a fresh Chromium with no cookies; it dies when the turn ends.
+
+A skill the person asks you to make is theirs, so it lives in their drive: write it to .claude/skills/<name>/SKILL.md here, never in ~/.claude/skills or in any other repository.
 
 ${VISUALS}
 

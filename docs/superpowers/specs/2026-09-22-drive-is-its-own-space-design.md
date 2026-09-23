@@ -79,10 +79,13 @@ This guards against accident, not intent. A full-capability agent can still
 `cd` out of the drive; the point is that nothing an agent does *in the drive*
 becomes a git change.
 
-*To verify during milestone 1:* a probe turn in `<repo>/drive` to see what
-else Claude inherits from the checkout around it (`CLAUDE.md`,
-`.claude/settings.json`, skills). Anything it picks up that a production drive
-would not have is either moved into the plugin (section 4) or recorded here.
+*Verified 2026-09-22 (probe turn from `<checkout>/drive`):* Claude walks up
+and loads the checkout's `.claude/skills` (it listed `my-day` and
+`visuals-in-chat`), but not `.agents/skills`. The checkout has no `CLAUDE.md`,
+and its `.claude/settings.json` only sets worktree isolation. Moving both skills
+out of the repository's `.claude/skills` (sections 3 and 4) is therefore what
+stops a drive inheriting them; `.agents/skills/<name>` stays as symlinks into
+the plugin so Cursor, which may read that folder, is unchanged.
 
 ### 2. The drive's settings: `<drive>/.marble/drive.json`
 

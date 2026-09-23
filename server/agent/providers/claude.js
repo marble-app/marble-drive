@@ -18,6 +18,7 @@ import path from 'node:path';
 import { CLAUDE_MODES } from '../catalog.js';
 import { pickEnv } from '../env.js';
 import { instructionsFor } from '../instructions.js';
+import { PLUGIN_DIR } from '../skills.js';
 import { runCommand } from './exec.js';
 import { writePrivateFile } from './private-file.js';
 
@@ -254,6 +255,9 @@ export function createClaudeProvider({ auth = 'subscription', exec = runCommand,
             '--permission-prompts', 'host', '--permission-prompt-tool', 'stdio',
             // Marble's server is added to whatever the person configured, not swapped for it.
             '--mcp-config', path.join(workspace, 'mcp.json'),
+            // The app's own skills (visuals in the chat, growing an open page,
+            // GenUI), wherever the drive is — never found by walking up from it.
+            '--plugin-dir', PLUGIN_DIR,
             '--append-system-prompt', instructionsFor('full', kind),
           ]
         : [

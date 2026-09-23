@@ -126,8 +126,8 @@ button:focus-visible, [data-marble-editable]:focus-visible { outline: 2px solid 
 </style>
 </head>
 <body data-marble-id="body" data-space="" data-root="" data-run=""
-  data-author-prompt="Use the genui-author skill. Root pattern: {root} ({name}) — Jev chose it at {confidence} for this request. Write the app space to &quot;{doc}&quot; (a document path inside the drive; create it, do not edit another). Prompt, verbatim: &quot;{request}&quot;. Validate with `node bin/marble-drive.js genui space &quot;{doc}&quot;` until it prints ok, then stop. Do not run a decide."
-  data-extend-prompt="Use the genui-author skill, in its extend mode. The app space at &quot;{doc}&quot; already exists; edit it in place — keep every existing fact, declaration and pin untouched. Add one live dimension or one option so that this can be expressed: &quot;{signal}&quot;. Implement it in CSS, declare it, then validate with `node bin/marble-drive.js genui space &quot;{doc}&quot;` until it prints ok, and stop. Do not run a decide.">
+  data-author-prompt="Use the marble-drive:genui-author skill. Root pattern: {root} ({name}) — Jev chose it at {confidence} for this request. Write the app space to &quot;{doc}&quot; (a document path inside the drive; create it, do not edit another). Prompt, verbatim: &quot;{request}&quot;. Validate with `node bin/marble-drive.js genui space &quot;{doc}&quot;` until it prints ok, then stop. Do not run a decide."
+  data-extend-prompt="Use the marble-drive:genui-author skill, in its extend mode. The app space at &quot;{doc}&quot; already exists; edit it in place — keep every existing fact, declaration and pin untouched. Add one live dimension or one option so that this can be expressed: &quot;{signal}&quot;. Implement it in CSS, declare it, then validate with `node bin/marble-drive.js genui space &quot;{doc}&quot;` until it prints ok, and stop. Do not run a decide.">
   <header class="mast" data-marble-id="mast">
     <div data-marble-id="mast-t">
       <span class="kicker" data-marble-id="kicker">TypeSafe AI · GenUI</span>
@@ -1009,10 +1009,12 @@ button:focus-visible, [data-marble-editable]:focus-visible { outline: 2px solid 
     return `${base}-${Date.now().toString(36).slice(-4)}`;
   }
 
+  // The genui-author skill ships with the app (agent-plugin) and reaches every
+  // turn, so the drive itself will do; a registered "Marble Drive" project is
+  // still preferred where there is one.
   async function project(agent) {
     const found = (await agent.projects()).find((p) => p.name.trim().toLowerCase() === 'marble drive');
-    if (!found) throw new Error('No project called “Marble Drive” — that is where the genui-author skill lives. Add it in the agent settings.');
-    return found.id;
+    return found ? found.id : 'drive';
   }
   async function provider(agent) {
     const ready = (await agent.providers()).filter((p) => p.installed && p.signedIn);
