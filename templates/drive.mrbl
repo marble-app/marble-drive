@@ -228,8 +228,6 @@ __ICON__
   body[data-view="grid"] .toggle [data-set-view="grid"],
   body[data-view="list"] .toggle [data-set-view="list"],
   body[data-view="timeline"] .toggle [data-set-view="timeline"],
-  body[data-view="map"] .toggle [data-set-view="map"],
-  body[data-view="pulse"] .toggle [data-set-view="pulse"],
   body[data-view="weight"] .toggle [data-set-view="weight"] { color: var(--accent-ink); }
 
   .listhead {
@@ -587,9 +585,8 @@ __ICON__
     color: var(--faint); font-weight: 600;
   }
   .tgroup:first-child { margin-top: .3rem; }
-  /* Scoped to the row's own class rather than the view attribute: a timeline
-     row is reused verbatim inside the Pulse detail panel below, and it has to
-     look like itself there too. */
+  /* Scoped to the row's own class rather than the view attribute, so a
+     timeline row looks like itself wherever it is reused. */
   .item.trow {
     position: relative; display: flex; align-items: center; gap: .85rem;
     padding: .5rem .6rem .5rem .1rem; border-radius: 12px;
@@ -627,103 +624,8 @@ __ICON__
   .item.trow .more { position: static; opacity: .5; }
   .item.trow .thumb { display: none; }
 
-  /* ------------------------------------------------------------------ the map */
-  /* The shape of a folder rather than a manifest of it: what is here, how
-     folders relate to what holds them, and which of them is heavy — the same
-     bytes and node counts `weigh` already reports, spent on geometry instead
-     of a sentence. Nothing here is content; close the tab and reopen and it is
-     recomputed, same as the grid is. */
-  body[data-view="map"] .items { position: relative; overflow: hidden; padding: 0; }
-  .orbit-wrap { position: absolute; inset: 0; display: grid; place-items: center; }
-  .orbit-center {
-    position: relative; z-index: 2; display: flex; flex-direction: column; align-items: center;
-    justify-content: center; gap: .15rem; width: 7.5rem; height: 7.5rem; border-radius: 999px;
-    text-align: center; padding: .5rem; background: var(--card); border: 1px solid var(--line);
-    box-shadow: var(--shadow-lift); color: var(--muted);
-  }
-  .orbit-center .ico { color: var(--folder); }
-  .orbit-center .ico .glyph { width: 1.4rem; height: 1.4rem; }
-  .orbit-center b { color: var(--ink); font-weight: 500; font-size: .88rem; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-  .orbit-center small { color: var(--faint); font-size: .74rem; }
-  .ring {
-    position: absolute; top: 50%; left: 50%; border: 1px dashed var(--line); border-radius: 999px;
-    width: calc(var(--r) * 2); height: calc(var(--r) * 2); margin-left: calc(var(--r) * -1); margin-top: calc(var(--r) * -1);
-    opacity: .6; pointer-events: none;
-  }
-  /* The disk drifts, once around every few minutes — slow enough that it never
-     reads as "spinning", only as "not a photograph". `@property` is what lets
-     a child cancel a value its rotating ancestor is still animating: --spin is
-     declared an angle and marked to inherit, so every node downstream can read
-     the live value and subtract it back out to stay upright while its
-     *position* keeps revolving for free. Where a browser has never heard of
-     @property, --spin simply never becomes 360deg and the disk sits still —
-     a map that does not turn is still a map. */
-  @property --spin { syntax: '<angle>'; inherits: true; initial-value: 0deg; }
-  .orbit { position: absolute; inset: 0; transform: rotate(var(--spin)); animation: drift 240s linear infinite; }
-  @keyframes drift { to { --spin: 360deg; } }
-  .item.node {
-    position: absolute; top: 50%; left: 50%; width: var(--size); height: var(--size);
-    margin-left: calc(var(--size) / -2); margin-top: calc(var(--size) / -2);
-    transform: rotate(var(--angle)) translate(var(--radius)) rotate(calc(-1 * var(--angle) - var(--spin)));
-    display: flex; flex-direction: column; align-items: center; justify-content: center; gap: .25rem;
-    text-align: center; padding: .3rem; border-radius: 999px;
-    background: var(--card); border: 1px solid var(--line); box-shadow: var(--shadow);
-    opacity: var(--fresh, 1);
-  }
-  .item.node:hover { box-shadow: var(--shadow-lift); border-color: var(--accent-ink); z-index: 3; opacity: 1; }
-  .item.node:active { transform: rotate(var(--angle)) translate(var(--radius)) rotate(calc(-1 * var(--angle) - var(--spin))) scale(.94); }
-  .item.node .ico { color: var(--folder); }
-  .item.node[data-kind="doc"] .ico { color: var(--accent-ink); }
-  .item.node .ico .glyph { width: 1.2rem; height: 1.2rem; }
-  .item.node b {
-    font-weight: 500; font-size: .74rem; max-width: calc(var(--size) * 1.7); overflow: hidden;
-    text-overflow: ellipsis; white-space: nowrap; position: absolute; top: 100%; margin-top: .3rem;
-    color: var(--muted); background: color-mix(in srgb, var(--paper) 75%, transparent); padding: 0 .2rem; border-radius: 4px;
-  }
-  /* Present, not deleted: a node still needs Rename, Move, Pin, Trash — it
-     only needs them to stay out of the way of a shape that is mostly circle. */
-  .item.node .more {
-    position: absolute; top: -.3rem; right: -.3rem; width: 1.5rem; height: 1.5rem;
-    background: var(--card); border: 1px solid var(--line); opacity: 0;
-  }
-  .item.node:hover .more, .item.node:focus-within .more { opacity: 1; }
-  @media (prefers-reduced-motion: reduce) { .orbit { animation: none; } }
-
-  /* ---------------------------------------------------------------- the pulse */
-  /* A calendar of activity, one square per day — the same question the
-     timeline answers, asked the other way around. The timeline is for "what
-     did I touch"; this is for "when was I actually in here", which a list of
-     forty rows cannot show you at a glance and a grid of ninety squares can. */
-  body[data-view="pulse"] .items { padding: 1.4rem 1.6rem 2rem; }
-  .pulse-head { display: flex; align-items: baseline; justify-content: space-between; gap: 1rem; margin-bottom: 1rem; }
-  .pulse-head b { font-weight: 500; font-size: .95rem; }
-  .pulse-head span { color: var(--faint); font-size: .78rem; }
-  .pulse-grid { display: grid; grid-auto-flow: column; grid-template-rows: repeat(7, 1fr); gap: 3px; overflow-x: auto; padding-bottom: .3rem; }
-  .pulse-day {
-    width: 13px; height: 13px; border-radius: 3px; background: var(--paper-3);
-    cursor: pointer; position: relative;
-  }
-  .pulse-day[data-level="1"] { background: color-mix(in srgb, var(--accent-ink) 28%, var(--paper-3)); }
-  .pulse-day[data-level="2"] { background: color-mix(in srgb, var(--accent-ink) 55%, var(--paper-3)); }
-  .pulse-day[data-level="3"] { background: color-mix(in srgb, var(--accent-ink) 80%, var(--paper-3)); }
-  .pulse-day[data-level="4"] { background: var(--accent-ink); }
-  .pulse-day:hover { outline: 2px solid var(--accent-ink); outline-offset: 1px; }
-  .pulse-day.marble-picked { outline: 2px solid var(--ink); outline-offset: 1px; }
-  .pulse-legend { display: flex; align-items: center; gap: .3rem; margin-top: .6rem; color: var(--faint); font-size: .74rem; }
-  .pulse-legend i { width: 11px; height: 11px; border-radius: 3px; background: var(--paper-3); display: inline-block; }
-  .pulse-legend i[data-level="1"] { background: color-mix(in srgb, var(--accent-ink) 28%, var(--paper-3)); }
-  .pulse-legend i[data-level="2"] { background: color-mix(in srgb, var(--accent-ink) 55%, var(--paper-3)); }
-  .pulse-legend i[data-level="3"] { background: color-mix(in srgb, var(--accent-ink) 80%, var(--paper-3)); }
-  .pulse-legend i[data-level="4"] { background: var(--accent-ink); }
-  /* Left padding wide enough that a reused timeline row's spine and dot —
-     both positioned outside its own left edge — land inside the scroll
-     container instead of under the row before it. */
-  .pulse-detail { margin-top: 1.4rem; border-top: 1px solid var(--line); padding: .8rem 0 0 2rem; }
-  .pulse-detail h4 { margin: 0 0 .5rem; font-size: .82rem; font-weight: 500; color: var(--muted); }
-  .pulse-detail .empty { padding: 1rem 0; text-align: left; }
-
   /* --------------------------------------------------------------- the weight */
-  /* The map answers "where" by shape; this answers "which ones" by rank —
+  /* This answers "which ones" by rank —
      the same numbers `weigh` reports, sorted worst-first so the one document
      worth doing something about is always the top row. */
   body[data-view="weight"] .items { padding: .5rem 1.4rem 2rem; }
@@ -1316,22 +1218,6 @@ __ICON__
             <rect x="6.3" y="11.8" width="7.2" height="1.6" rx=".8" opacity=".85"/>
           </g></svg>
         </button>
-        <button data-set-view="map" title="Map" aria-label="Map">
-          <svg viewBox="0 0 16 16" aria-hidden="true"><g fill="none" stroke="currentColor" stroke-width="1.1" opacity=".6">
-            <circle cx="8" cy="8" r="6.2"/></g><g fill="currentColor">
-            <circle cx="8" cy="8" r="1.9"/><circle cx="13.2" cy="6" r="1.3"/><circle cx="4" cy="2.6" r="1.3"/><circle cx="3.2" cy="12.4" r="1.3"/>
-          </g></svg>
-        </button>
-        <button data-set-view="pulse" title="Pulse" aria-label="Pulse">
-          <svg viewBox="0 0 16 16" aria-hidden="true"><g fill="currentColor">
-            <rect x="1" y="1" width="3" height="3" rx=".6" opacity=".25"/><rect x="5" y="1" width="3" height="3" rx=".6" opacity=".9"/>
-            <rect x="9" y="1" width="3" height="3" rx=".6" opacity=".45"/><rect x="13" y="1" width="2.2" height="3" rx=".6" opacity=".7"/>
-            <rect x="1" y="5" width="3" height="3" rx=".6" opacity=".7"/><rect x="5" y="5" width="3" height="3" rx=".6" opacity=".25"/>
-            <rect x="9" y="5" width="3" height="3" rx=".6" opacity=".9"/><rect x="13" y="5" width="2.2" height="3" rx=".6" opacity=".45"/>
-            <rect x="1" y="9" width="3" height="3" rx=".6" opacity=".45"/><rect x="5" y="9" width="3" height="3" rx=".6" opacity=".7"/>
-            <rect x="9" y="9" width="3" height="3" rx=".6" opacity=".25"/><rect x="13" y="9" width="2.2" height="3" rx=".6" opacity=".9"/>
-          </g></svg>
-        </button>
         <button data-set-view="weight" title="Weight" aria-label="Weight">
           <svg viewBox="0 0 16 16" aria-hidden="true"><g fill="currentColor">
             <rect x="1.3" y="9" width="3" height="6" rx=".8"/><rect x="6.5" y="5" width="3" height="10" rx=".8"/>
@@ -1586,9 +1472,14 @@ __ICON__
       // tile that plays, pictures or pages them; the text and the data still
       // fold away.
       const SHOWS = new Set(['audio', 'video', 'image', 'pdf', 'office']);
+      // This page, in the listing of the drive it shows (SELF, below: the
+      // path the carrier names it by): the interface, not something in the
+      // drive, so it folds away with the materials. A renamed Drive still
+      // knows itself.
       const isMaterial = (entry) =>
         view === 'drive' &&
-        ((entry.kind === 'file' && !SHOWS.has(fileKind(entry))) ||
+        ((entry.kind === 'doc' && entry.path === SELF) ||
+          (entry.kind === 'file' && !SHOWS.has(fileKind(entry))) ||
           (entry.kind === 'folder' && holdsFiles(entry) && !holdsDocs(entry)));
 
       // Which rows are picked, held as a set of paths rather than elements,
@@ -2262,7 +2153,11 @@ __ICON__
           ? entry.bytes ?? 0
           : flatten(entry).reduce((sum, e) => sum + (e.kind === 'doc' ? e.bytes ?? 0 : 0), 0);
 
-      const mode = () => document.body.getAttribute('data-view') || 'grid';
+      // The lenses this Drive has. A document saved on one it no longer has
+      // (an older Drive's Map or Pulse) opens on Grid rather than on nothing.
+      const MODES = new Set(['grid', 'list', 'timeline', 'weight']);
+      if (!MODES.has(document.body.getAttribute('data-view'))) document.body.setAttribute('data-view', 'grid');
+      const mode = () => (MODES.has(document.body.getAttribute('data-view')) ? document.body.getAttribute('data-view') : 'grid');
 
       function draw() {
         // Anything drawn into this container that is not the gallery is a
@@ -2270,18 +2165,18 @@ __ICON__
         items.removeAttribute('data-gallery');
         if (!latest) return;
         const m = mode();
-        // Timeline and Pulse both ask "when" of documents specifically, so
-        // both look through the whole subtree rather than one level — a
+        // Timeline asks "when" of documents specifically, so it looks
+        // through the whole subtree rather than one level — a
         // folder's own modified time is when someone last touched *it*, not a
         // fact about what is inside it. Weight asks "how much", which a
         // folder does have an answer to, so it goes recursive but keeps both
-        // kinds. Grid, List and Map all still show one level: what is here.
+        // kinds. Grid and List still show one level: what is here.
         const docsBelow = () => flatten(latest).filter((entry) => entry.kind === 'doc');
         const pool = query
           ? flatten(latest).filter((entry) =>
               `${entry.title ?? ''} ${entry.path}`.toLowerCase().includes(query),
             )
-          : (m === 'timeline' || m === 'pulse') && view === 'drive'
+          : m === 'timeline' && view === 'drive'
             ? docsBelow()
             : m === 'weight' && view === 'drive'
               ? flatten(latest)
@@ -2301,10 +2196,7 @@ __ICON__
         const onlyFiles =
           view === 'drive' && !query && pool.length > 0 && pool.every((e) => e.kind === 'file' || isMaterial(e));
         for (const entry of pool) (onlyFiles || !isMaterial(entry) ? work : mats).push(entry);
-        // A diagram is not a listing. The map places things by kind around a
-        // centre and the pulse counts edits per day; neither has a bottom to
-        // hang a footnote off, so in those two the materials stay out of it.
-        const footnote = mats.length && m !== 'map' && m !== 'pulse';
+        const footnote = mats.length;
 
         if (!work.length && !mats.length) {
           const empty = document.createElement('div');
@@ -2319,8 +2211,6 @@ __ICON__
         heaviest = Math.max(1, ...work.map((entry) => (entry.kind === 'doc' ? entry.bytes ?? 0 : 0)));
 
         if (m === 'timeline') drawTimeline(work);
-        else if (m === 'map') drawMap(work);
-        else if (m === 'pulse') drawPulse(work);
         else if (m === 'weight') drawWeight(work);
         else {
           work.forEach((entry, i) => {
@@ -2416,85 +2306,9 @@ __ICON__
         });
       }
 
-      // ------------------------------------------------------------------ map
-
-      function mapNode(entry, weight, maxWeight, oldest, newest) {
-        const el = document.createElement('div');
-        el.className = 'item node';
-        el.dataset.kind = entry.kind;
-        el.dataset.path = entry.path;
-        stampRealm(el, entry.path);
-        if (picked.has(entry.path)) el.classList.add('marble-picked');
-        el.innerHTML = '<span class="ico"></span><b></b><button class="more" aria-label="More">⋮</button>';
-        el.querySelector('.ico').innerHTML = iconFor(entry.kind, entry);
-        el.querySelector('b').textContent = entry.name ?? leaf(entry.path);
-        el.title = (entry.title && entry.title !== entry.name ? entry.title + ' — ' : '') +
-          (entry.kind === 'doc' ? bytes(entry.bytes) : bytes(weight) + ' inside') +
-          (entry.modified ? ' · ' + ago(entry.modified) : '');
-
-        const size = 42 + Math.sqrt(weight / Math.max(1, maxWeight)) * 46;
-        el.style.setProperty('--size', size.toFixed(0) + 'px');
-        const span = Math.max(1, newest - oldest);
-        const fresh = Math.min(1, Math.max(0.4, ((entry.modified ?? oldest) - oldest) / span));
-        el.style.setProperty('--fresh', fresh.toFixed(2));
-        return el;
-      }
-
-      // One ring of folders, one of documents, spread evenly by angle and
-      // nudged apart so the two rings don't line up radius-for-radius. Sized
-      // by weight rather than placed by it — position here answers "what kind
-      // is it", not "how big", because angle has no natural order to lend a
-      // size to and would just be lying with axes nobody drew.
-      function drawMap(children) {
-        // `translate()` resolves a percentage against the *moving element's*
-        // own box, not the container — a CSS Transforms rule that would have
-        // put every node a few px from center regardless of how big the map
-        // is. So the radius is measured in pixels, once per draw, against
-        // however much room `.items` actually has this time.
-        const box = items.getBoundingClientRect();
-        const half = Math.max(140, Math.min(box.width, box.height) / 2 - 40);
-        const r1 = Math.round(half * 0.52);
-        const r2 = Math.round(half * 0.94);
-
-        const wrap = document.createElement('div');
-        wrap.className = 'orbit-wrap';
-        wrap.innerHTML =
-          '<div class="ring" style="--r:' + r1 + 'px"></div><div class="ring" style="--r:' + r2 + 'px"></div>' +
-          '<div class="orbit-center"><span class="ico"></span><b></b><small></small></div>' +
-          '<div class="orbit"></div>';
-        const centerName = here ? leaf(here) : (document.querySelector('.brand h1').textContent.trim() || 'My Drive');
-        wrap.querySelector('.orbit-center .ico').innerHTML = iconFor('folder');
-        wrap.querySelector('.orbit-center b').textContent = centerName;
-        wrap.querySelector('.orbit-center small').textContent =
-          children.length + (children.length === 1 ? ' item' : ' items');
-
-        const folders = children.filter((c) => c.kind === 'folder');
-        const docs = children.filter((c) => c.kind === 'doc');
-        const weights = children.map((c) => weightOf(c));
-        const maxWeight = Math.max(1, ...weights);
-        const times = children.map((c) => c.modified ?? Date.now());
-        const oldest = Math.min(Date.now(), ...times);
-        const newest = Math.max(0, ...times);
-
-        const orbit = wrap.querySelector('.orbit');
-        const ring = (list, radiusPct, offset) => {
-          list.forEach((entry, i) => {
-            const angle = (360 / list.length) * i + offset;
-            const el = mapNode(entry, weightOf(entry), maxWeight, oldest, newest);
-            el.style.setProperty('--angle', angle.toFixed(1) + 'deg');
-            el.style.setProperty('--radius', radiusPct);
-            orbit.append(el);
-          });
-        };
-        if (folders.length) ring(folders, r1 + 'px', 0);
-        if (docs.length) ring(docs, r2 + 'px', 14);
-
-        items.append(wrap);
-      }
-
       // ---------------------------------------------------------------- weight
 
-      // The map answers "where" by shape; this answers "which ones" by rank —
+      // This answers "which ones" by rank —
       // the same numbers `weigh` reports, sorted worst-first so the one
       // document actually worth doing something about is always the top row.
       function drawWeight(pool) {
@@ -2528,88 +2342,6 @@ __ICON__
           el.style.animationDelay = Math.min(i * 10, 260) + 'ms';
           items.append(el);
         });
-      }
-
-      // ----------------------------------------------------------------- pulse
-
-      // A calendar of activity, one square per day — the timeline asked "what
-      // did I touch", this asks "when was I actually in here", which a list of
-      // rows cannot show at a glance and a grid of squares can.
-      function drawPulse(pool) {
-        const DAY = 86400000;
-        const startOfDay = (t) => {
-          const d = new Date(t);
-          return new Date(d.getFullYear(), d.getMonth(), d.getDate()).getTime();
-        };
-        const today = startOfDay(Date.now());
-
-        const byDay = new Map();
-        let oldest = today;
-        for (const entry of pool) {
-          if (!entry.modified) continue;
-          const day = startOfDay(entry.modified);
-          if (!byDay.has(day)) byDay.set(day, []);
-          byDay.get(day).push(entry);
-          if (day < oldest) oldest = day;
-        }
-
-        // Twenty weeks, GitHub-scale — enough to see a pattern, not so much
-        // that a drive's whole history is one illegible strip.
-        const spanDays = Math.min(20 * 7, Math.round((today - oldest) / DAY) + 1);
-        const firstDay = today - (spanDays - 1) * DAY;
-        const gridStart = firstDay - new Date(firstDay).getDay() * DAY;
-        const totalDays = Math.round((today - gridStart) / DAY) + 1;
-        const totalEdits = [...byDay.values()].reduce((sum, list) => sum + list.length, 0);
-
-        const wrap = document.createElement('div');
-        wrap.innerHTML =
-          '<div class="pulse-head"><b>Activity</b><span></span></div>' +
-          '<div class="pulse-grid"></div>' +
-          '<div class="pulse-legend"><span>Less</span>' +
-          '<i data-level="0"></i><i data-level="1"></i><i data-level="2"></i><i data-level="3"></i><i data-level="4"></i>' +
-          '<span>More</span></div>' +
-          '<div class="pulse-detail"></div>';
-        wrap.querySelector('.pulse-head span').textContent =
-          totalEdits + (totalEdits === 1 ? ' edit' : ' edits') + ' across ' + byDay.size + (byDay.size === 1 ? ' day' : ' days');
-
-        const grid = wrap.querySelector('.pulse-grid');
-        for (let i = 0; i < totalDays; i++) {
-          const day = gridStart + i * DAY;
-          if (day > today) break;
-          const entries = byDay.get(day) ?? [];
-          const level = !entries.length ? 0 : entries.length === 1 ? 1 : entries.length <= 3 ? 2 : entries.length <= 6 ? 3 : 4;
-          const cell = document.createElement('div');
-          cell.className = 'pulse-day';
-          cell.dataset.day = day;
-          cell.setAttribute('data-level', level);
-          cell.title =
-            new Date(day).toLocaleDateString(undefined, { weekday: 'short', month: 'short', day: 'numeric' }) +
-            ' — ' + (entries.length ? entries.length + (entries.length === 1 ? ' edit' : ' edits') : 'nothing');
-          grid.append(cell);
-        }
-
-        const detail = wrap.querySelector('.pulse-detail');
-        grid.addEventListener('click', (event) => {
-          const cell = event.target.closest('.pulse-day');
-          if (!cell) return;
-          for (const el of grid.querySelectorAll('.pulse-day')) el.classList.toggle('marble-picked', el === cell);
-          const day = Number(cell.dataset.day);
-          const entries = (byDay.get(day) ?? []).slice().sort((a, b) => b.modified - a.modified);
-          detail.replaceChildren();
-          const h = document.createElement('h4');
-          h.textContent = new Date(day).toLocaleDateString(undefined, { weekday: 'long', month: 'long', day: 'numeric' });
-          detail.append(h);
-          if (!entries.length) {
-            const empty = document.createElement('div');
-            empty.className = 'empty';
-            empty.innerHTML = 'Nothing touched this day.';
-            detail.append(empty);
-            return;
-          }
-          for (const entry of entries) detail.append(timelineRow(entry, day, day + DAY));
-        });
-
-        items.append(wrap);
       }
 
       function drawCrumbs() {
@@ -3389,7 +3121,7 @@ __ICON__
         // place a drop target can be read back from, and a timeline row has
         // no folder under it to drop onto — "Move to…" in the row menu still
         // reaches both.
-        if (mode() === 'timeline' || mode() === 'map') return;
+        if (mode() === 'timeline') return;
         const item = event.target.closest('.item');
         if (!item || event.target.closest('.more') || view === 'trash') return;
         lifting = { item, x: event.clientX, y: event.clientY, moved: false };
@@ -3912,7 +3644,6 @@ __ICON__
 
       addEventListener('resize', () => {
         positionThumb();
-        if (mode() === 'map') draw();
       });
 
       // ---------------------------------------------------------- the listening
