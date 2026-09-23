@@ -199,7 +199,7 @@ test('a conversation row tags the agent and the model, not the Agents page', asy
   assert.equal(await row.locator('.tag[data-kind="doc"]').count(), 0);
 });
 
-test('conversation tags name Claude and Claude API', async () => {
+test('conversation tags say Claude, and · API when an API key pays', async () => {
   const { page } = await openAgents();
   const tags = await page.evaluate(() => {
     const labels = new Map([
@@ -210,7 +210,7 @@ test('conversation tags name Claude and Claude API', async () => {
       }],
       ['claude-api', {
         id: 'claude-api',
-        label: 'Claude API',
+        label: 'Claude',
         models: [{ id: 'opus', label: 'Opus' }],
       }],
     ]);
@@ -227,7 +227,7 @@ test('conversation tags name Claude and Claude API', async () => {
     { kind: 'model', label: 'Sonnet • high' },
   ]);
   assert.deepEqual(tags.api, [
-    { kind: 'agent', label: 'Claude API' },
+    { kind: 'agent', label: 'Claude · API' },
     { kind: 'model', label: 'Opus • max' },
   ]);
   assert.deepEqual(tags.alias, [

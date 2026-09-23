@@ -183,7 +183,7 @@ if [[ "$AGENT" == subscription ]]; then
 elif [[ -n "$KEY_FILE" ]]; then
   echo "Agents are set up with an API key for you."
 else
-  echo "To use agents, open Agents, then Settings, and add your Anthropic API key."
+  echo "To use agents: open Agents, then Settings; Claude is set to \"API key\" — paste your Anthropic API key there."
 fi
 echo "It is yours: nothing you make there is shared with anyone."
 echo "---------------------------------------------------------------------------"

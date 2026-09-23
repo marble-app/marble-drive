@@ -188,9 +188,9 @@ export function createClaudeProvider({ auth = 'subscription', exec = runCommand,
   const api = auth === 'api';
   const live = () => ({ ...env, ...(typeof secrets === 'function' ? secrets() : secrets ?? {}) });
   let cliVersion = version;
-  // The API-key agent's name is the deployment's (MARBLE_DRIVE_API_LABEL); a
-  // new install calls it what it is.
-  const label = api ? String(env.MARBLE_DRIVE_API_LABEL || '').trim() || 'Claude API' : 'Claude';
+  // One name for both: which one pays is a switch in Agents settings, not a
+  // second agent to pick (server/agent/routes.js, claudeAuth).
+  const label = 'Claude';
 
   return {
     id: api ? 'claude-api' : 'claude-subscription',
@@ -281,7 +281,7 @@ export function createClaudeProvider({ auth = 'subscription', exec = runCommand,
       // Without a key the CLI would fall back to the login, and bill the
       // subscription for a conversation someone chose to put on the API.
       if (api && !current.ANTHROPIC_API_KEY) {
-        throw new Error(`ANTHROPIC_API_KEY is not set, so ${label} cannot run — set it or choose Claude`);
+        throw new Error('No Claude API key is set — add one in Agents settings, or switch Claude to your login');
       }
       // A full turn speaks stream-json: the initialize handshake first (it is
       // what makes AskUserQuestion available and answers with the skills

@@ -1259,9 +1259,7 @@
 
   const KNOWN_PROVIDERS = {
     'claude-subscription': 'Claude',
-    // The host reports the deployment's own name (MARBLE_DRIVE_API_LABEL);
-    // this is only for a summary that arrives before the provider list.
-    'claude-api': 'Claude API',
+    'claude-api': 'Claude',
     'cursor': 'Cursor',
   };
 
@@ -1276,7 +1274,9 @@
     const id = summary?.provider;
     if (!id) return '';
     const listed = labels instanceof Map ? labels.get(id)?.label : '';
-    return listed || KNOWN_PROVIDERS[id] || id;
+    const name = listed || KNOWN_PROVIDERS[id] || id;
+    // One Claude either way; a conversation paid for by an API key says so.
+    return id === 'claude-api' ? `${name} · API` : name;
   };
 
   const modelLabel = (summary, labels) => {
@@ -6480,6 +6480,16 @@
     .agent select { grid-column: 2; }
     input[type="text"], input[type="password"], select { font: inherit; color: var(--ink); background: var(--paper-2); border: 1px solid var(--line); border-radius: 8px; padding: 6px 8px; width: 100%; box-sizing: border-box; }
     .key { display: flex; gap: 6px; align-items: center; }
+    /* Claude's one switch: which sign-in pays for it. A segmented pair, and
+       the API key field right under it only while "API key" is on. */
+    .claude-auth { grid-column: 2; display: inline-flex; justify-self: start; border: 1px solid var(--line); border-radius: 8px; overflow: hidden; }
+    .claude-auth label { position: relative; padding: 4px 10px; font-size: 12px; color: var(--muted); cursor: pointer; }
+    .claude-auth label + label { border-left: 1px solid var(--line); }
+    .claude-auth input { position: absolute; opacity: 0; pointer-events: none; }
+    .claude-auth label:has(input:checked) { background: var(--paper-2); color: var(--ink); }
+    .claude-auth label:has(input:focus-visible) { outline: 2px solid var(--accent-ink); outline-offset: -2px; }
+    .claude-key { grid-column: 2; display: flex; flex-direction: column; gap: 4px; font-size: 12px; color: var(--muted); }
+    .claude-key[hidden] { display: none; }
     .hint { margin: 0 0 6px; font-size: 12px; color: var(--muted); }
     .project { display: flex; gap: 8px; align-items: baseline; flex-wrap: wrap; }
     .project code { font-size: 11.5px; color: var(--faint); overflow-wrap: anywhere; }
@@ -6667,11 +6677,11 @@
           fillSelect(mode, provider.modes, { value: settings.modes?.[provider.id] ?? '' });
           row.append(mode);
         }
+        if (provider.id.startsWith('claude')) row.append(...this.claudeSwitch(settings));
         agents.append(row);
       }
       const keys = document.createElement('fieldset');
       keys.append(h('legend', '', 'API keys'));
-      keys.append(this.keyRow('anthropic', 'Claude API key', settings.keys?.anthropic));
       keys.append(this.keyRow('cursor', 'Cursor API key', settings.keys?.cursor));
       const projects = document.createElement('fieldset');
       projects.append(h('legend', '', 'Projects'));
@@ -6749,6 +6759,34 @@
       }
     }
 
+    /** Claude signs in with the Claude login or an API key: one agent, one
+     *  switch. The key field shows only while "API key" is on. */
+    claudeSwitch(settings) {
+      const auth = settings.claudeAuth === 'api' ? 'api' : 'login';
+      const group = document.createElement('div');
+      group.className = 'claude-auth';
+      group.setAttribute('role', 'radiogroup');
+      group.setAttribute('aria-label', 'Claude signs in with');
+      const key = document.createElement('div');
+      key.className = 'claude-key';
+      key.append(this.keyRow('anthropic', 'Claude API key', settings.keys?.anthropic));
+      key.hidden = auth !== 'api';
+      for (const [value, text] of [['login', 'Claude login'], ['api', 'API key']]) {
+        const label = document.createElement('label');
+        const radio = document.createElement('input');
+        radio.type = 'radio';
+        radio.name = 'claude-auth';
+        radio.value = value;
+        radio.checked = value === auth;
+        radio.addEventListener('change', () => {
+          key.hidden = value !== 'api';
+        });
+        label.append(radio, document.createTextNode(text));
+        group.append(label);
+      }
+      return [group, key];
+    }
+
     keyRow(name, label, set) {
       const wrap = document.createElement('label');
       wrap.append(document.createTextNode(label));
@@ -6796,6 +6834,8 @@
       }
       const patch = { models, efforts, modes };
       if (defaultProvider) patch.defaultProvider = defaultProvider;
+      const claudeAuth = this.shadowRoot.querySelector('input[name="claude-auth"]:checked')?.value;
+      if (claudeAuth) patch.claudeAuth = claudeAuth;
       const keys = {};
       const anthropic = this.shadowRoot.querySelector('input[name="key-anthropic"]')?.value.trim();
       const cursor = this.shadowRoot.querySelector('input[name="key-cursor"]')?.value.trim();

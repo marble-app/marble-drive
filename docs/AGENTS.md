@@ -579,7 +579,7 @@ or a message that says to retry shortly does not switch. A new conversation stil
 Settings default, except when Claude's 5-hour meter is at 100%: then the
 picker starts on Cursor if Cursor is signed in. If Claude usage cannot be
 read, the meter reads Unavailable and Claude stays pickable — not knowing is not being out. **Custom** expands the three thin
-segmented bars for **CLI** (Claude, Cursor, Claude API), **model**, and
+segmented bars for **CLI** (Claude, Cursor), **model**, and
 **effort**. If a bar would overflow the row, it becomes a compact dropdown
 instead of scrolling sideways. Cursor's picker is Default, Auto, and the
 newest Grok family; Claude stays Haiku → Sonnet → Opus → Fable. **Shift+Tab**
@@ -619,7 +619,7 @@ In the transcript, a tool row says what it touched (`Read harness.js`,
 more finished rows folds into one line — `6 steps · Shell ×2 · Read ×2
 harness.js, agents.mrbl · Grep packFocus` — that opens on click. The row
 still running, and any failed or refused row, stays out of the fold. The conversation mast has an editable
-title and tags for the agent (`Claude`, `Claude API`) and for
+title and tags for the agent (`Claude`, `Claude · API` when a conversation runs on an API key) and for
 model • effort (`Sonnet 4.5 • high`). On Agents, the title and the
 target document live on the pane header instead of a right-hand inspector.
 
@@ -641,7 +641,7 @@ The page uses `window.marble.agent` and the same `<marble-conversation>`
 as the drawer (`<meta name="marble-agent" content="custom">`, so it does
 not wear a second launcher). The topbar has three thin segmented bars on
 one row: **List / Board / Folders / Focus**, **CLI** (All plus each signed-in
-agent, so you can show only Claude, Cursor, or Claude API), and **All /
+agent, so you can show only Claude or Cursor), and **All /
 Running / Review / Archived**. Conversation rows are not stored in the file.
 
 **Folders** is a vertical tab strip. Groups sit on top, ungrouped last, and

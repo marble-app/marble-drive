@@ -105,10 +105,25 @@ export function createAgentRoutes({ store, runner, tools, hub, providers, writeO
   // that arrive together both pass it before either has written.
   const undoing = new Set();
 
-  const publicSettings = async () => ({
-    ...(await store.settings()),
-    keys: keys ? await keys.flags() : { anthropic: false, cursor: false },
-  });
+  // One Claude, signed in one of two ways: the Claude login
+  // (claude-subscription) or an API key (claude-api). `claudeAuth` says which;
+  // until someone sets it, the drive's default agent does.
+  const CLAUDE = { login: 'claude-subscription', api: 'claude-api' };
+  const claudeAuth = (settings) =>
+    settings.claudeAuth === 'api' || settings.claudeAuth === 'login'
+      ? settings.claudeAuth
+      : settings.defaultProvider === CLAUDE.api ? 'api' : 'login';
+  const activeClaude = (settings) => CLAUDE[claudeAuth(settings)];
+  const isClaude = (id) => id === CLAUDE.login || id === CLAUDE.api;
+
+  const publicSettings = async () => {
+    const settings = await store.settings();
+    return {
+      ...settings,
+      claudeAuth: claudeAuth(settings),
+      keys: keys ? await keys.flags() : { anthropic: false, cursor: false },
+    };
+  };
 
   async function detectAll() {
     if (detected && Date.now() - detected.at < DETECT_CACHE) return detected.list;
@@ -197,8 +212,12 @@ export function createAgentRoutes({ store, runner, tools, hub, providers, writeO
     if (method !== 'GET' && !sameOrigin(req)) return json(res, 403, { error: 'a change has to come from this drive' });
 
     if (route === '/agent/providers' && method === 'GET') {
-      const { defaultProvider } = await store.settings();
-      return json(res, 200, (await detectAll()).map((p) => ({ ...p, default: p.id === defaultProvider })));
+      const settings = await store.settings();
+      const active = activeClaude(settings);
+      const defaultId = isClaude(settings.defaultProvider) ? active : settings.defaultProvider;
+      return json(res, 200, (await detectAll())
+        .filter((p) => !isClaude(p.id) || p.id === active)
+        .map((p) => ({ ...p, default: p.id === defaultId })));
     }
 
     if (route === '/agent/skills' && method === 'GET') {
@@ -261,6 +280,12 @@ export function createAgentRoutes({ store, runner, tools, hub, providers, writeO
         const body = await readJson(req, maxBody);
         const patch = {};
         if (typeof body.defaultProvider === 'string') patch.defaultProvider = body.defaultProvider;
+        if (body.claudeAuth === 'login' || body.claudeAuth === 'api') {
+          patch.claudeAuth = body.claudeAuth;
+          // A default of "Claude" follows the switch to whichever pays.
+          const current = patch.defaultProvider ?? (await store.settings()).defaultProvider;
+          if (isClaude(current)) patch.defaultProvider = CLAUDE[body.claudeAuth];
+        }
         if (body.models && typeof body.models === 'object') {
           const models = { ...(await store.settings()).models };
           for (const [id, model] of Object.entries(body.models)) {
@@ -357,6 +382,9 @@ export function createAgentRoutes({ store, runner, tools, hub, providers, writeO
       }
       if (method === 'POST') {
         const body = await readJson(req, maxBody);
+        // Asked for Claude either way, a new conversation gets the Claude the
+        // switch chose; one already started keeps the back-end it began on.
+        if (isClaude(body.provider)) body.provider = activeClaude(await store.settings());
         if (!providers.has(body.provider)) return json(res, 400, { error: `no provider "${body.provider}"` });
         const from = body.handoffFrom ? await store.conversation(body.handoffFrom) : null;
         if (body.handoffFrom && !from) return json(res, 404, { error: `no conversation "${body.handoffFrom}"` });

@@ -1292,7 +1292,7 @@ test('Claude and Cursor presets become the main toggles', async () => {
   assert.deepEqual(clis, ['Claude', 'Cursor']);
 });
 
-test('CLI radios are Claude, Cursor, then Claude API', async () => {
+test('CLI radios sort Claude, Cursor, then the API-key Claude', async () => {
   const { view } = await mount();
   await view.locator('input[name="agent"][value="fake"]').waitFor();
   const order = await view.evaluate((el) => {

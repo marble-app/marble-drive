@@ -132,7 +132,7 @@ test('ids, labels, catalog, and the documents spawn', () => {
   assert.equal(sub.id, 'claude-subscription');
   assert.equal(sub.label, 'Claude');
   assert.equal(api.id, 'claude-api');
-  assert.equal(api.label, 'Claude API');
+  assert.equal(api.label, 'Claude');
 
   const spec = sub.spawn({ workspace: '/w', prompt: 'Rename it', resume: 'sess-1', model: 'claude-haiku-4-5', effort: 'high', env: { PATH: '/bin' } });
   assert.equal(spec.command, 'claude');
@@ -232,7 +232,7 @@ test('a lost session is recognised by what the CLI says', () => {
 test('Claude (API key) with no key refuses to start rather than use the login', () => {
   const api = createClaudeProvider({ auth: 'api', env: { PATH: '/bin' } });
   assert.throws(() => api.spawn({ workspace: '/w', prompt: 'x', env: {} }), {
-    message: 'ANTHROPIC_API_KEY is not set, so Claude API cannot run — set it or choose Claude',
+    message: 'No Claude API key is set — add one in Agents settings, or switch Claude to your login',
   });
   assert.deepEqual(createClaudeProvider({ auth: 'subscription', env: {} }).spawn({ workspace: '/w', prompt: 'x', env: {} }).env, {});
 });
@@ -391,17 +391,6 @@ test('a permission prompt on stdout becomes an ask, the initialize reply becomes
     { type: 'session', id: 's' },
     { type: 'catalog', skills: [{ id: 'compact', name: 'compact', description: '' }, { id: 'apple-design', name: 'apple-design', description: '' }], agents: ['Explore'] },
   ]);
-});
-
-// The API-key agent's name is the deployment's to choose, and a new install
-// names nobody's lab: "Claude API" unless MARBLE_DRIVE_API_LABEL says otherwise.
-test('the API agent is called Claude API, unless the deployment names it', () => {
-  const plain = createClaudeProvider({ auth: 'api', env: {} });
-  assert.equal(plain.label, 'Claude API');
-  assert.throws(() => plain.spawn({ workspace: '/w', prompt: 'x', env: {} }), /so Claude API cannot run/);
-  const named = createClaudeProvider({ auth: 'api', env: { MARBLE_DRIVE_API_LABEL: 'Lab API' } });
-  assert.equal(named.label, 'Lab API');
-  assert.equal(createClaudeProvider({ auth: 'subscription', env: { MARBLE_DRIVE_API_LABEL: 'Lab API' } }).label, 'Claude');
 });
 
 test('no shipped host, page code or template names a lab', () => {

@@ -57,7 +57,7 @@ export const usageHistoryStub = (weeks = 26) => {
   return { source: 'claude-code-local', tz: 'America/Los_Angeles', generatedAt: '2026-09-18T20:00:00.000Z', from: days[0].date, to: days.at(-1).date, days };
 };
 
-export async function startDrive({ scripts = {}, agents = true, documents = { garden: GARDEN }, genui = null } = {}) {
+export async function startDrive({ scripts = {}, agents = true, documents = { garden: GARDEN }, genui = null, providers = [] } = {}) {
   const root = await fsp.mkdtemp(path.join(os.tmpdir(), 'marble-browser-drive-'));
   const workdir = await fsp.mkdtemp(path.join(os.tmpdir(), 'marble-browser-work-'));
   const keysFile = path.join(workdir, 'agent-keys.local');
@@ -80,7 +80,9 @@ export async function startDrive({ scripts = {}, agents = true, documents = { ga
   });
   const drive = await createDrive(config, {
     log: quiet,
-    agentProviders: new Map([['fake', createFakeProvider({ scripts })]]),
+    // `providers` adds scripted stand-ins under real ids (claude-subscription,
+    // claude-api, cursor) for tests of what the page does with those ids.
+    agentProviders: new Map([['fake', createFakeProvider({ scripts })], ...providers.map((id) => [id, createFakeProvider({ scripts, id })])]),
     genui,
     usageHistory: async ({ weeks = 26 } = {}) => usageHistoryStub(weeks),
     usage: async () => ({
