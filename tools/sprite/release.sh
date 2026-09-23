@@ -49,7 +49,9 @@ stage() {
   local dir="$RELEASES/$name"
   [[ -e "$dir" ]] && die "release $name already exists"
   mkdir -p "$dir/marble-drive"
-  trap 'rm -rf "$dir"' ERR
+  # Any way out of a failed stage — a failed command or a `die` — takes the
+  # half-built release with it, so a folder under releases/ always worked.
+  trap 'rm -rf "$dir"' EXIT
 
   say "fetching marble-drive ($source)"
   case "$source" in
@@ -91,7 +93,7 @@ stage() {
   kill "$pid" 2>/dev/null || true
   wait "$pid" 2>/dev/null || true
   rm -rf "$scratch" "$scratch.log"
-  trap - ERR
+  trap - EXIT
   say "staged $name"
 }
 
@@ -133,12 +135,12 @@ switch() {
     die "release $name did not come up"
   fi
   [[ "$(tail -1 "$HISTORY" 2>/dev/null)" == "$name" ]] || echo "$name" >>"$HISTORY"
-  # Keep the three newest releases, and whatever is current.
+  # Keep the last three releases that went live (the history), and whatever
+  # is current; anything else under releases/ is removed.
   local keep
-  keep="$(ls -1t "$RELEASES" | head -3)"
-  for old in $(ls -1t "$RELEASES"); do
+  keep="$( (tail -3 "$HISTORY"; basename "$(readlink "$CURRENT")") | sort -u)"
+  for old in $(ls -1 "$RELEASES"); do
     grep -qx "$old" <<<"$keep" && continue
-    [[ "$old" == "$(basename "$(readlink "$CURRENT")")" ]] && continue
     rm -rf "${RELEASES:?}/$old"
   done
   say "live: $name"
