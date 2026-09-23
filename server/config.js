@@ -116,6 +116,9 @@ export function loadConfig(env = process.env) {
     // An upload is timed by silence, not by length: a 2 GB file over a slow
     // link takes as long as it takes, and one that stops sending is cut.
     uploadIdleSeconds: num('MARBLE_DRIVE_UPLOAD_IDLE_SECONDS', 60),
+    // macOS's own thumbnailer, for the kinds a page cannot draw itself. On by
+    // default where it exists; off makes a Mac behave like any other host.
+    quicklook: bool('MARBLE_DRIVE_QUICKLOOK', true),
 
     open: bool('MARBLE_DRIVE_OPEN', false),
 

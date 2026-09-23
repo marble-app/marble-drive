@@ -37,6 +37,35 @@ export const THUMB_EXTS = new Set([
 const SIZES = [320, 640, 1280];
 export const thumbSize = (want) => SIZES.find((s) => s >= (Number(want) || 0)) ?? SIZES[SIZES.length - 1];
 
+// What a page may hand over when it draws a picture itself: small, a real
+// PNG or WebP, and no bigger than the largest size the tiles ever ask for.
+export const DRAWN_MAX_BYTES = 512 * 1024;
+export const DRAWN_MAX_SIDE = 1280;
+
+/** A PNG's or WebP's type and size, read from its header and nothing else —
+ *  the host never decodes a picture a page sent it. Null for anything else. */
+export function imageSize(buf) {
+  if (!Buffer.isBuffer(buf) || buf.length < 21) return null;
+  if (buf.length >= 24 && buf.readUInt32BE(0) === 0x89504e47 && buf.readUInt32BE(4) === 0x0d0a1a0a && buf.toString('latin1', 12, 16) === 'IHDR') {
+    return { type: 'png', width: buf.readUInt32BE(16), height: buf.readUInt32BE(20) };
+  }
+  if (buf.toString('latin1', 0, 4) !== 'RIFF' || buf.toString('latin1', 8, 12) !== 'WEBP') return null;
+  const chunk = buf.toString('latin1', 12, 16);
+  if (chunk === 'VP8 ' && buf.length >= 30 && buf[23] === 0x9d && buf[24] === 0x01 && buf[25] === 0x2a) {
+    return { type: 'webp', width: buf.readUInt16LE(26) & 0x3fff, height: buf.readUInt16LE(28) & 0x3fff };
+  }
+  if (chunk === 'VP8L' && buf.length >= 25 && buf[20] === 0x2f) {
+    const bits = buf.readUInt32LE(21);
+    return { type: 'webp', width: (bits & 0x3fff) + 1, height: ((bits >>> 14) & 0x3fff) + 1 };
+  }
+  if (chunk === 'VP8X' && buf.length >= 30) {
+    return { type: 'webp', width: buf.readUIntLE(24, 3) + 1, height: buf.readUIntLE(27, 3) + 1 };
+  }
+  return null;
+}
+
+const refuse = (message) => Object.assign(new Error(message), { status: 400 });
+
 function quicklook(file, size, outDir, { timeout = 15000 } = {}) {
   return new Promise((resolve) => {
     execFile('qlmanage', ['-t', '-s', String(size), '-o', outDir, file], { timeout }, (err) => {
@@ -93,8 +122,45 @@ export function createThumbs({ dir, platform = process.platform, make = quickloo
     }
   }
 
-  /** The path of a PNG picturing `file` (a `store.readRaw` answer), or null. */
+  // A picture the page drew is one per version of the file, whatever size a
+  // tile asks for: the tile scales it.
+  const drawnKey = (file) => crypto
+    .createHash('sha1')
+    .update(`${file.path}\n${file.modified}\n${file.bytes}\ndrawn`)
+    .digest('hex');
+  const drawnAt = (file, type) => path.join(dir, `${drawnKey(file)}.drawn.${type}`);
+
+  async function drawn(file) {
+    for (const type of ['webp', 'png']) {
+      const at = drawnAt(file, type);
+      if (await fsp.stat(at).then(() => true, () => false)) return at;
+    }
+    return null;
+  }
+
+  /** Keep a picture a page drew of `file`. Refused (status 400) unless it is a
+   *  small PNG or WebP no larger than the largest tile. */
+  async function put(file, bytes) {
+    if (!Buffer.isBuffer(bytes) || bytes.length > DRAWN_MAX_BYTES) throw refuse(`a picture is at most ${DRAWN_MAX_BYTES} bytes`);
+    const size = imageSize(bytes);
+    if (!size) throw refuse('a picture is a PNG or a WebP');
+    if (!size.width || !size.height || Math.max(size.width, size.height) > DRAWN_MAX_SIDE) {
+      throw refuse(`a picture is at most ${DRAWN_MAX_SIDE} pixels on its long side`);
+    }
+    await fsp.mkdir(dir, { recursive: true });
+    const at = drawnAt(file, size.type);
+    const part = `${at}.${process.pid}.${Date.now()}.part`;
+    await fsp.writeFile(part, bytes);
+    await fsp.rename(part, at);
+    await fsp.rm(drawnAt(file, size.type === 'png' ? 'webp' : 'png'), { force: true });
+    return { type: size.type };
+  }
+
+  /** The path of a picture of `file` (a `store.readRaw` answer), or null: one a
+   *  page drew, else QuickLook's PNG. The extension says which. */
   async function get(file, want) {
+    const page = await drawn(file);
+    if (page) return page;
     if (!able || !THUMB_EXTS.has(file.ext)) return null;
     const size = thumbSize(want);
     // Named for the version of the file, not the file: an edited PDF is a new
@@ -116,5 +182,5 @@ export function createThumbs({ dir, platform = process.platform, make = quickloo
     return inflight.get(key);
   }
 
-  return { get, able };
+  return { get, put, able };
 }

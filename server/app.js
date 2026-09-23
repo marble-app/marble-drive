@@ -35,7 +35,7 @@ import { createChannels } from './sse.js';
 import { createStore } from './store/index.js';
 import { readDriveSettings } from './drive-settings.js';
 import { createStems } from './stems/index.js';
-import { createThumbs } from './thumbs.js';
+import { DRAWN_MAX_BYTES, createThumbs } from './thumbs.js';
 import { createTypesafeHandler } from './typesafe/routes.js';
 import { createGenuiHandler } from './genui/routes.js';
 import { watchDrive } from './watch.js';
@@ -151,7 +151,7 @@ export async function createDrive(config, { log = console, agentProviders = null
 
   const channels = createChannels();
   const oplog = createOpLog({ dir: store.marbleDir });
-  const thumbs = createThumbs({ dir: path.join(store.marbleDir, 'thumbs') });
+  const thumbs = createThumbs({ dir: path.join(store.marbleDir, 'thumbs'), ...(config.quicklook === false ? { platform: 'none' } : {}) });
   const gate = createGate({
     secret: config.secret,
     cookieName: config.cookieName,
@@ -819,10 +819,21 @@ export async function createDrive(config, { log = console, agentProviders = null
         if (!made) return text(res, 404, `no picture of "${file.name}"`);
         const bytes = await fsp.readFile(made);
         return send(res, 200, bytes, {
-          'Content-Type': 'image/png',
+          'Content-Type': made.endsWith('.webp') ? 'image/webp' : 'image/png',
           'Cache-Control': 'private, max-age=86400',
           'X-Content-Type-Options': 'nosniff',
         });
+      }
+
+      // A picture the page drew, because this host could not: the first page
+      // of a PDF, a frame of a video. Kept beside QuickLook's, for this version
+      // of the file, and served before QuickLook is asked. Small PNG or WebP
+      // only (server/thumbs.js).
+      if (route === '/drive/thumb' && req.method === 'PUT') {
+        const file = await store.readRaw(url.searchParams.get('path') ?? '');
+        if (!file) return text(res, 404, `no file "${url.searchParams.get('path')}"`);
+        await thumbs.put(file, await readBody(req, DRAWN_MAX_BYTES));
+        return json(res, 200, { ok: true });
       }
 
       // ---------------------------------------------------------------- stems

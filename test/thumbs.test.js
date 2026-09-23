@@ -81,3 +81,93 @@ test('on a Mac, QuickLook really draws a picture', { skip: process.platform !== 
   const head = (await fsp.readFile(out)).subarray(1, 4).toString();
   assert.equal(head, 'PNG');
 });
+
+// ------------------------------------------------------ pictures the page drew
+//
+// Off a Mac there is no QuickLook, so the page draws pictures itself and hands
+// them to the host to keep. Only the header is read: a size is all the host
+// needs to know, and it never decodes what a page sent it.
+
+const png = (w, h) => {
+  const b = Buffer.alloc(33);
+  Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]).copy(b, 0);
+  b.writeUInt32BE(13, 8);
+  b.write('IHDR', 12, 'latin1');
+  b.writeUInt32BE(w, 16);
+  b.writeUInt32BE(h, 20);
+  return b;
+};
+const riff = (chunk, body) => {
+  const b = Buffer.alloc(20 + body.length);
+  b.write('RIFF', 0, 'latin1');
+  b.writeUInt32LE(12 + body.length, 4);
+  b.write('WEBP', 8, 'latin1');
+  b.write(chunk, 12, 'latin1');
+  b.writeUInt32LE(body.length, 16);
+  body.copy(b, 20);
+  return b;
+};
+const vp8 = (w, h) => {
+  const body = Buffer.alloc(10);
+  body.set([0x9d, 0x01, 0x2a], 3);
+  body.writeUInt16LE(w, 6);
+  body.writeUInt16LE(h, 8);
+  return riff('VP8 ', body);
+};
+const vp8l = (w, h) => {
+  const body = Buffer.alloc(5);
+  body[0] = 0x2f;
+  const bits = (w - 1) | ((h - 1) << 14);
+  body.writeUInt32LE(bits >>> 0, 1);
+  return riff('VP8L', body);
+};
+const vp8x = (w, h) => {
+  const body = Buffer.alloc(10);
+  body.writeUIntLE(w - 1, 4, 3);
+  body.writeUIntLE(h - 1, 7, 3);
+  return riff('VP8X', body);
+};
+
+test('a picture\'s size is read from its header, for PNG and all three kinds of WebP', async () => {
+  const { imageSize } = await import('../server/thumbs.js');
+  assert.deepEqual(imageSize(png(640, 480)), { type: 'png', width: 640, height: 480 });
+  assert.deepEqual(imageSize(vp8(640, 360)), { type: 'webp', width: 640, height: 360 });
+  assert.deepEqual(imageSize(vp8l(640, 905)), { type: 'webp', width: 640, height: 905 });
+  assert.deepEqual(imageSize(vp8x(1280, 720)), { type: 'webp', width: 1280, height: 720 });
+  assert.equal(imageSize(Buffer.from('<svg xmlns="http://www.w3.org/2000/svg"/>')), null);
+  assert.equal(imageSize(Buffer.alloc(3)), null);
+});
+
+test('a drawn picture is kept and served before QuickLook is asked', async () => {
+  const { make, calls } = fake();
+  const thumbs = createThumbs({ dir: path.join(DIR, 'drawn'), make });
+  await thumbs.put(file(), vp8(640, 360));
+  const got = await thumbs.get(file(), 300);
+  assert.match(got, /\.webp$/);
+  assert.deepEqual(await fsp.readFile(got), vp8(640, 360));
+  assert.deepEqual(calls, [], 'QuickLook was not asked');
+  // A new version of the file is not the old drawing.
+  const edited = await thumbs.get(file({ modified: 9 }), 300);
+  assert.doesNotMatch(edited ?? '', /\.webp$/);
+});
+
+test('a host with no QuickLook still serves what the page drew, for any kind', async () => {
+  const thumbs = createThumbs({ dir: path.join(DIR, 'nomac'), platform: 'linux' });
+  const song = file({ path: 'b/clip.webm', ext: 'webm' });
+  assert.equal(await thumbs.get(song, 640), null);
+  await thumbs.put(song, png(640, 360));
+  assert.match(await thumbs.get(song, 640), /\.png$/);
+});
+
+test('what a page may hand over is small, a real picture, and not huge', async () => {
+  const thumbs = createThumbs({ dir: path.join(DIR, 'refuse'), platform: 'linux' });
+  const refused = async (bytes) => {
+    const err = await thumbs.put(file(), bytes).then(() => null, (e) => e);
+    assert.ok(err, 'refused');
+    assert.equal(err.status, 400);
+  };
+  await refused(Buffer.from('<svg/>'));
+  await refused(png(4000, 300));
+  await refused(Buffer.concat([vp8(640, 360), Buffer.alloc(512 * 1024)]));
+  assert.equal(await thumbs.get(file(), 640), null);
+});
