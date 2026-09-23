@@ -11,10 +11,13 @@ test('suggestName uses the most specific shared path segment', () => {
   assert.equal(F().suggestName([]), 'Group');
 });
 
-test('realmOf reads Drive’s first-segment map', () => {
-  assert.equal(F().realmOf('Research/Marble/uist'), 'research');
-  assert.equal(F().realmOf("Bryan's Days/today"), 'days');
-  assert.equal(F().realmOf(''), '');
+test('realmOf reads a drive’s first-segment map, and names no folders of its own', () => {
+  const realms = { Research: 'research', Days: 'days' };
+  assert.equal(F().realmOf('Research/Marble/uist', realms), 'research');
+  assert.equal(F().realmOf('Days/today', realms), 'days');
+  assert.equal(F().realmOf('Research/Marble/uist'), '');
+  assert.deepEqual(F().REALMS, {});
+  assert.equal(F().realmOf('', realms), '');
 });
 
 test('nextColor skips keys already used', () => {

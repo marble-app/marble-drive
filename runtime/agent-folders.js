@@ -2,13 +2,9 @@
 // Classic IIFE so the host can inject it as a script tag; Node tests import for side effect.
 
 (() => {
-  const REALMS = {
-    Research: 'research',
-    Fun: 'fun',
-    "Bryan's Days": 'days',
-    Marble: 'marble',
-    Travel: 'travel',
-  };
+  // No folders of its own: which top-level folders wear a realm is the
+  // drive's choice (`.marble/drive.json`), handed in by whoever asks.
+  const REALMS = Object.freeze({});
 
   const COLOR_KEYS = [
     'research',
@@ -28,7 +24,7 @@
   const FULL_CAP = 4;
   const GAP = 5;
 
-  const realmOf = (path) => (path ? REALMS[path.split('/')[0]] || '' : '');
+  const realmOf = (path, realms = REALMS) => (path ? realms[path.split('/')[0]] || '' : '');
 
   const suggestName = (targets) => {
     if (!targets.length) return 'Group';

@@ -1461,13 +1461,9 @@ __ICON__
 
       const leaf = (path) => path.split('/').pop();
 
-      const REALMS = {
-        Research: 'research',
-        Fun: 'fun',
-        "Bryan's Days": 'days',
-        Marble: 'marble',
-        Travel: 'travel',
-      };
+      // Top-level folders that wear a realm's colour. A new drive has none;
+      // the drive names its own in `.marble/drive.json`, read at boot.
+      let REALMS = {};
       const realmOf = (path) => (path ? REALMS[path.split('/')[0]] || '' : '');
       const stampRealm = (el, path) => {
         // Identity is for folders you came for. A folder of nothing but
@@ -3925,6 +3921,13 @@ __ICON__
       drawNav();
       positionThumb();
       refresh();
+      // The drive's own realms arrive after the first draw rather than
+      // holding it back; a drive that names some is drawn once more in them.
+      drive.settings?.().then(({ realms }) => {
+        if (!Object.keys(realms).length) return;
+        REALMS = realms;
+        refresh();
+      });
     };
 
     if (window.marble?.drive) begin(window.marble);
