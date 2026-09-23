@@ -1887,10 +1887,20 @@ __ICON__
           el.classList.add('marble-is-ready');
           if (kind === 'video') el.insertAdjacentHTML('beforeend', '<span class="fp-mark">' + PLAY.split('</svg>')[0] + '</svg></span>');
         });
+        let drew = false;
         img.addEventListener('error', () => {
-          // No thumbnailer here, or none for this kind: a picture the browser
-          // can draw is drawn from the file itself, and anything else keeps
-          // its glyph.
+          // No picture on the host yet: the page draws one and hands it over
+          // (marble.drive.drawThumb), so the next visit has it.
+          if (!drew && drive.drawThumb) {
+            drew = true;
+            drive.drawThumb({ path, ext: el.dataset.ext }).then((src) => {
+              if (src) img.src = src;
+              else if (NATIVE_IMAGE.has(el.dataset.ext)) img.src = drive.fileHref(path);
+            });
+            return;
+          }
+          // Nothing drawn either: a picture the browser can show is shown
+          // from the file itself, and anything else keeps its glyph.
           if (fellBack || !NATIVE_IMAGE.has(el.dataset.ext)) return;
           fellBack = true;
           img.src = drive.fileHref(path);

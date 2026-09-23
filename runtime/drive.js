@@ -111,7 +111,11 @@
           } catch {
             // A proxy's HTML error page is not an answer; the status still is.
           }
-          if (xhr.status >= 200 && xhr.status < 300) return resolve(answer);
+          if (xhr.status >= 200 && xhr.status < 300) {
+            // Drawn now, while the page still holds the file.
+            if (answer.path) drawThumb({ path: answer.path, file });
+            return resolve(answer);
+          }
           // A host started before it knew about files has no route for them,
           // and "404" says nothing about what to do.
           if (xhr.status === 404) return reject(new Error('the host needs a restart before it can take files'));
@@ -150,6 +154,155 @@
     // address and a cached picture of the old one is never shown for it.
     const thumbHref = (path, { w = 640, v = '' } = {}) =>
       `/drive/thumb?path=${encodeURIComponent(path)}&w=${w}` + (v ? `&v=${encodeURIComponent(v)}` : '');
+
+    // -------------------------------------------------------- pictures drawn
+    //
+    // A host that cannot picture a file (anything but a Mac's QuickLook, or a
+    // kind QuickLook does not know) is not the end of it: the page can draw
+    // an image, a PDF's first page and a video's frame itself. It draws once,
+    // hands the picture to the host to keep for this version of the file, and
+    // every later visit, on any device, gets it from `thumbHref` instead.
+    //
+    // Right after an upload the page still holds the file, so it draws from
+    // that and costs the network nothing; otherwise it reads the file back —
+    // a PDF and a video only as far as they need to. `drawThumb` answers an
+    // object URL of what it drew, or null for a kind no browser can draw.
+
+    const DRAWN = {
+      image: new Set(['png', 'jpg', 'jpeg', 'gif', 'webp', 'avif', 'bmp', 'ico']),
+      video: new Set(['mp4', 'm4v', 'webm', 'mov', 'ogv']),
+      pdf: new Set(['pdf']),
+    };
+    const drawnKind = (ext) => Object.keys(DRAWN).find((k) => DRAWN[k].has(String(ext || '').toLowerCase())) ?? null;
+    // Pinned. The browser loads it, not the host, so a host needs no way out
+    // to the internet for a PDF to get a picture; offline, a PDF keeps its glyph.
+    const PDFJS = 'https://cdn.jsdelivr.net/npm/pdfjs-dist@4.10.38/build/';
+    const WIDE = 640;
+    const LONGEST = 1280;
+    const MOST_BYTES = 512 * 1024;
+
+    // Two at once: a folder of forty photos is forty asks, and forty decodes
+    // at once is the machine, not the page.
+    let drawing = 0;
+    const turns = [];
+    const turn = () => new Promise((resolve) => {
+      if (drawing < 2) {
+        drawing += 1;
+        resolve();
+      } else turns.push(resolve);
+    });
+    const done = () => {
+      const next = turns.shift();
+      if (next) next();
+      else drawing -= 1;
+    };
+
+    const canvasFor = (w, h) => {
+      const scale = Math.min(1, WIDE / w, LONGEST / h);
+      const canvas = document.createElement('canvas');
+      canvas.width = Math.max(1, Math.round(w * scale));
+      canvas.height = Math.max(1, Math.round(h * scale));
+      return canvas;
+    };
+    const once = (el, ok, ms = 20_000) => new Promise((resolve, reject) => {
+      const timer = setTimeout(() => reject(new Error('timed out')), ms);
+      el.addEventListener(ok, () => { clearTimeout(timer); resolve(); }, { once: true });
+      el.addEventListener('error', () => { clearTimeout(timer); reject(new Error('no picture')); }, { once: true });
+    });
+
+    async function drawImage(source) {
+      const blob = source instanceof Blob ? source : await (await fetch(source)).blob();
+      const bitmap = await createImageBitmap(blob);
+      const canvas = canvasFor(bitmap.width, bitmap.height);
+      canvas.getContext('2d').drawImage(bitmap, 0, 0, canvas.width, canvas.height);
+      bitmap.close?.();
+      return canvas;
+    }
+
+    async function drawVideo(source) {
+      const video = document.createElement('video');
+      video.muted = true;
+      video.playsInline = true;
+      video.preload = 'auto';
+      const own = source instanceof Blob ? URL.createObjectURL(source) : null;
+      video.src = own ?? source;
+      try {
+        await once(video, 'loadeddata');
+        // A recorded clip can say its length is Infinity; its first frame will do.
+        const at = Number.isFinite(video.duration) ? Math.min(1, video.duration / 10) : 0;
+        if (at > 0) {
+          video.currentTime = at;
+          await once(video, 'seeked');
+        }
+        const canvas = canvasFor(video.videoWidth, video.videoHeight);
+        canvas.getContext('2d').drawImage(video, 0, 0, canvas.width, canvas.height);
+        return canvas;
+      } finally {
+        video.removeAttribute('src');
+        video.load();
+        if (own) URL.revokeObjectURL(own);
+      }
+    }
+
+    async function drawPdf(source) {
+      const lib = await import(`${PDFJS}pdf.min.mjs`);
+      lib.GlobalWorkerOptions.workerSrc = `${PDFJS}pdf.worker.min.mjs`;
+      const doc = await lib.getDocument(
+        source instanceof Blob ? { data: new Uint8Array(await source.arrayBuffer()) } : { url: source, disableAutoFetch: true },
+      ).promise;
+      try {
+        const page = await doc.getPage(1);
+        const natural = page.getViewport({ scale: 1 });
+        const canvas = canvasFor(natural.width, natural.height);
+        const viewport = page.getViewport({ scale: canvas.width / natural.width });
+        const g = canvas.getContext('2d');
+        g.fillStyle = '#fff';
+        g.fillRect(0, 0, canvas.width, canvas.height);
+        await page.render({ canvasContext: g, viewport }).promise;
+        return canvas;
+      } finally {
+        doc.destroy();
+      }
+    }
+
+    const encode = async (canvas) => {
+      for (const quality of [0.8, 0.6, 0.4]) {
+        const blob = await new Promise((resolve) => canvas.toBlob(resolve, 'image/webp', quality));
+        if (blob && blob.size <= MOST_BYTES) return blob;
+      }
+      return null;
+    };
+
+    const drawing$ = new Map();
+    function drawThumb({ path, ext = null, file = null } = {}) {
+      const kind = drawnKind(ext ?? String(path).split('.').pop());
+      if (!kind || !path) return Promise.resolve(null);
+      if (drawing$.has(path)) return drawing$.get(path);
+      const work = (async () => {
+        await turn();
+        try {
+          const source = file ?? fileHref(path);
+          const canvas = await (kind === 'image' ? drawImage(source) : kind === 'video' ? drawVideo(source) : drawPdf(source));
+          const blob = await encode(canvas);
+          if (!blob) return null;
+          const kept = await fetch(`/drive/thumb?path=${encodeURIComponent(path)}`, {
+            method: 'PUT',
+            headers: { 'Content-Type': blob.type || 'image/webp' },
+            body: blob,
+          });
+          return kept.ok ? URL.createObjectURL(blob) : null;
+        } catch {
+          // A codec this browser lacks, a PDF it cannot read, no network for
+          // pdf.js: the tile keeps its glyph.
+          return null;
+        } finally {
+          done();
+        }
+      })();
+      drawing$.set(path, work);
+      work.finally(() => setTimeout(() => drawing$.delete(path), 0));
+      return work;
+    }
 
     // ------------------------------------------------------------- the events
     //
@@ -223,6 +376,7 @@
       tree,
       starters,
       settings,
+      drawThumb,
       starterPreviewHref,
       trash,
       create,
