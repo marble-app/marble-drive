@@ -119,3 +119,32 @@ test('a stream the page closes itself stays closed through a rest', async () => 
   await until(async () => (await streams()) > 0, 'the page\'s own streams to reopen');
   assert.equal(await page.evaluate(() => window.__mine.readyState), 2);
 });
+
+test('a tab the host gave up on (it looked forgotten) gets its streams back when used', async () => {
+  // The host forgets a tab after 300 ms; the tab itself never rests. As after
+  // a laptop sleeps: the page's timers froze, the host closed its streams, and
+  // the browser's own reconnect was refused.
+  const strict = await startDrive({
+    agents: false,
+    env: { MARBLE_DRIVE_STREAM_UNUSED_MINUTES: '0.005', MARBLE_DRIVE_TAB_IDLE_MINUTES: '10' },
+  });
+  try {
+    const { page } = await strict.newPage();
+    await page.goto(`${strict.base}/a/garden`);
+    await page.waitForFunction(() => Boolean(window.marbleTabRest));
+    const count = async () => (await (await fetch(`${strict.base}/health`)).json()).streams;
+    await until(count.bind(null), 'the page\'s streams', 8_000).catch(() => {});
+    await until(async () => (await count()) === 0, 'the host to close the streams of a tab it thinks is forgotten');
+    // The browser's reconnect (a few seconds later) is refused with 204.
+    await page.waitForFunction(() => {
+      const probe = window.__probe ??= new EventSource('/events?drive=1');
+      return probe.readyState === 2;
+    }, null, { timeout: 10_000 });
+    assert.equal(await page.evaluate(() => window.marbleTabRest.resting), false);
+    await page.mouse.move(50, 60);
+    await page.mouse.move(70, 80);
+    await until(async () => (await count()) > 0, 'the streams to come back once the tab is used');
+  } finally {
+    await strict.close();
+  }
+});

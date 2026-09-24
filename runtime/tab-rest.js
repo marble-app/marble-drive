@@ -136,13 +136,28 @@
     for (const source of all) source._rest();
   }
 
+  // A stream with nothing open underneath: rested, or given up on by the
+  // browser (the host refused a tab it took for forgotten, say after a laptop
+  // slept with the page open). Never one the page closed itself.
+  const idle = (source) => !source._closed && (!source._native || source._native.readyState === 2);
+
+  let reopening = null;
+  function reopen() {
+    // Said first, so the host lets this tab's streams back in. One at a time:
+    // every pointermove until it lands would otherwise send another.
+    reopening ??= ping().then(() => {
+      reopening = null;
+      if (resting) return;
+      for (const source of all) if (idle(source)) source._open(true);
+    });
+    return reopening;
+  }
+
   async function wake({ fromIdle }) {
     if (!resting) return;
     resting = false;
-    // Said first, so the host lets this tab's streams back in.
-    await ping();
+    await reopen();
     if (resting) return;
-    for (const source of all) if (!source._native && !source._closed) source._open(true);
     // A page that resyncs when it is shown again (the Agents page does) had
     // not been hidden, so it is told the same way.
     if (fromIdle) document.dispatchEvent(new Event('visibilitychange'));
@@ -165,6 +180,7 @@
     lastInput = Date.now();
     if (document.visibilityState === 'hidden') return;
     if (resting) wake({ fromIdle: true });
+    else if ([...all].some(idle)) reopen();
     else if (Date.now() - lastPing >= PING_MS) ping();
     armIdle();
   }
