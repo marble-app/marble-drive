@@ -4,6 +4,9 @@
 #   release.sh stage <name> <source> <marble> <claude>   build a release beside the others
 #   release.sh switch <name>                    make it current and (re)start the service
 #   release.sh rollback                         go back to the release before current
+#   release.sh hand-off <name>                  switch later, when no agent is working
+#   release.sh rollback-when-idle               rollback, the same way
+#   release.sh switch-when-idle <name>          (what hand-off runs, as its own service)
 #
 # <source> is git:<sha> (fetched from the public marble-drive repo) or
 # tar:<path> (a pack of the owner's working copy, for --local).
@@ -171,15 +174,89 @@ switch() {
   say "live: $name"
 }
 
-rollback() {
+# ------------------------------------------------------ switching when idle
+#
+# An agent runs inside the host it is served from, so a deploy that one of this
+# sprite's own conversations starts (admin-p1 updating itself) cannot switch at
+# once: the restart would end that conversation mid-turn. `hand-off` runs
+# `switch-when-idle` as a Sprites service of its own — a process started from
+# the turn would be a child of the host the switch restarts — and returns.
+# `switch-when-idle` waits until the host holds no Sprites task (keep-awake holds
+# one exactly while a turn or a stem split runs) at two checks in a row, then
+# switches and removes its own service. An answer it cannot read counts as busy.
+SOCKET="${MARBLE_SPRITE_SOCKET:-/.sprite/api.sock}"
+CHECK_EVERY="${MARBLE_SWITCH_CHECK_SECONDS:-15}"
+GIVE_UP_AFTER="${MARBLE_SWITCH_GIVE_UP_SECONDS:-7200}"
+SWITCHER=marble-switch
+SWITCH_LOG="$APP/switch.log"
+
+host_is_busy() {
+  "$NODE" -e '
+    const req = require("http").request({ socketPath: process.argv[1], path: "/v1/tasks", timeout: 5000 }, (res) => {
+      let body = "";
+      res.on("data", (c) => { body += c; });
+      res.on("end", () => {
+        try {
+          if (res.statusCode !== 200) process.exit(0);
+          const tasks = JSON.parse(body).tasks || [];
+          process.exit(tasks.some((t) => t.name === "marble-drive") ? 0 : 1);
+        } catch { process.exit(0); }
+      });
+    });
+    req.on("error", () => process.exit(0));
+    req.on("timeout", () => req.destroy());
+    req.end();
+  ' "$SOCKET"
+}
+
+hand_off() {
+  local name=$1
+  [[ -d "$RELEASES/$name" ]] || die "no release $name"
+  # A newer hand-off replaces an older one still waiting: one switch, to the newest.
+  sprite-env services delete "$SWITCHER" >/dev/null 2>&1 || true
+  sprite-env services create "$SWITCHER" --cmd bash --args "$APP/release.sh,switch-when-idle,$name" \
+    --dir "$APP" --env "PATH=$PATH,HOME=$HOME" --no-stream >/dev/null
+  say "$name will go live when no agent is working (log: $SWITCH_LOG)"
+}
+
+switch_when_idle() {
+  local name=$1 quiet=0 started=$SECONDS
+  exec >>"$SWITCH_LOG" 2>&1
+  say "$(date -u +%FT%TZ) waiting to switch to $name"
+  while :; do
+    if host_is_busy; then quiet=0; else quiet=$((quiet + 1)); fi
+    if [[ $quiet -ge 2 ]]; then
+      say "$(date -u +%FT%TZ) idle; switching"
+      local status=0
+      ( switch "$name" ) || status=$?
+      sprite-env services delete "$SWITCHER" >/dev/null 2>&1 || true
+      exit $status
+    fi
+    # Wall time, not the sum of the sleeps: a check that hangs counts too.
+    if (( SECONDS - started >= ${GIVE_UP_AFTER%.*} )); then
+      say "$(date -u +%FT%TZ) gave up after ${GIVE_UP_AFTER}s: an agent was always working; $name was not switched to"
+      sprite-env services delete "$SWITCHER" >/dev/null 2>&1 || true
+      exit 1
+    fi
+    sleep "$CHECK_EVERY"
+  done
+}
+
+# The release before current, with the one being left dropped from the history.
+leave_current() {
   [[ -L "$CURRENT" ]] || die "nothing is current"
   local now previous
   now="$(basename "$(readlink "$CURRENT")")"
   previous="$(grep -vx "$now" "$HISTORY" 2>/dev/null | tail -1 || true)"
   [[ -n "$previous" && -d "$RELEASES/$previous" ]] || die "no earlier release to go back to"
-  # Rolling back drops the release being left from the history.
   grep -vx "$now" "$HISTORY" >"$HISTORY.next" || true
   mv "$HISTORY.next" "$HISTORY"
+  printf '%s' "$previous"
+}
+
+rollback() {
+  local previous
+  previous="$(leave_current)" || exit 1
   switch "$previous"
 }
 
@@ -188,5 +265,8 @@ case "${1:-}" in
   stage) stage "$2" "$3" "$4" "$5" ;;
   switch) switch "$2" ;;
   rollback) rollback ;;
+  hand-off) hand_off "$2" ;;
+  rollback-when-idle) previous="$(leave_current)" || exit 1; hand_off "$previous" ;;
+  switch-when-idle) switch_when_idle "$2" ;;
   *) die "usage: release.sh stage <name> <source> <marble> <claude> | switch <name> | rollback" ;;
 esac

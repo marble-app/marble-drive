@@ -43,3 +43,14 @@ test('--claude still overrides the pin', async () => {
   assert.equal(run.status, 0, run.stderr);
   assert.match(run.stdout, /claude: 9\.9\.9\b/);
 });
+
+// Deploying to the machine this runs on (admin-p1, from one of its own
+// conversations) must not switch at once: it hands the switch to marble-switch,
+// which waits until no agent is working. From anywhere else it switches now.
+test('a deploy to this very machine switches when idle; from anywhere else, now', async () => {
+  const here = await plan(['admin-p1', '--local'], { host: 'admin-p1' });
+  assert.equal(here.status, 0, here.stderr);
+  assert.match(here.stdout, /switch: when no agent is working/);
+  const there = await plan(['admin-p1', '--local'], { host: 'my-laptop' });
+  assert.match(there.stdout, /switch: now/);
+});
