@@ -24,12 +24,12 @@ MARBLE_DIR="${MARBLE_DIR:-$(cd "$REPO/.." && pwd)/marble}"
 
 usage() { awk 'NR > 1 && /^#/ { sub(/^# ?/, ""); print; next } NR > 1 { exit }' "$0"; exit 2; }
 
-# --all: every sprite that is someone's drive — labelled marble-owner (the
-# owner's own) or marble-tester (a tester's, from sprite-provision.sh) — one
-# after another, going on past a failure and ending with one line per sprite.
-# A sprite with neither label (admin-p1, the owner's test bed) is never
-# included. --list only says which sprites that is.
-USER_LABELS='marble-owner|marble-tester'
+# --all: every user's sprite — labelled marble-tester (from sprite-provision.sh,
+# the owner's own drive included) or marble-user (the label they will all move
+# to) — one after another, going on past a failure and ending with one line per
+# sprite. The owner's test bed (labelled marble-owner) is never included; it is
+# deployed by name. --list only says which sprites that is.
+USER_LABELS='marble-tester|marble-user'
 if [[ "${1:-}" == --all ]]; then
   shift
   ALL_ORG=marble-drive
@@ -46,7 +46,7 @@ if [[ "${1:-}" == --all ]]; then
   for one in $(sprite list -o "$ALL_ORG" 2>/dev/null); do
     sprite info -o "$ALL_ORG" -s "$one" 2>/dev/null | grep -E '^Labels:' | grep -qwE "$USER_LABELS" && SPRITES="$SPRITES $one"
   done
-  [[ -n "$SPRITES" ]] || { echo "sprite-deploy: no user sprites (labelled marble-owner or marble-tester) in $ALL_ORG"; exit 0; }
+  [[ -n "$SPRITES" ]] || { echo "sprite-deploy: no user sprites (labelled marble-tester or marble-user) in $ALL_ORG"; exit 0; }
   if [[ $LIST_ONLY == 1 ]]; then printf '%s\n' $SPRITES; exit 0; fi
   RESULTS=()
   for one in $SPRITES; do
