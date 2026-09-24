@@ -99,7 +99,7 @@ async function claimHost(dir) {
   return { held: null, release: null, why: 'could not take host.lock' };
 }
 
-export async function createAgents({ config, store, writeOps, createDocument, origin, providers, log = console, usage = null, usageHistory = null, sandbox = null, restore = null, onLook = null, forgetWriter = null }) {
+export async function createAgents({ config, store, writeOps, createDocument, origin, providers, log = console, usage = null, usageHistory = null, sandbox = null, restore = null, onLook = null, forgetWriter = null, awake, progress }) {
   const dir = path.join(store.marbleDir, 'agents');
   const lock = await claimHost(dir);
   if (!lock.release) {
@@ -109,14 +109,14 @@ export async function createAgents({ config, store, writeOps, createDocument, or
     throw Object.assign(new Error(why), { code: 'EAGENTSHELD' });
   }
   try {
-    return await boot({ config, store, writeOps, createDocument, origin, providers, log, dir, lock, usage, usageHistory, sandbox, restore, onLook, forgetWriter });
+    return await boot({ config, store, writeOps, createDocument, origin, providers, log, dir, lock, usage, usageHistory, sandbox, restore, onLook, forgetWriter, awake, progress });
   } catch (err) {
     await lock.release();
     throw err;
   }
 }
 
-async function boot({ config, store, writeOps, createDocument, origin, providers, log, dir, lock, usage, usageHistory = null, sandbox = null, restore = null, onLook = null, forgetWriter = null }) {
+async function boot({ config, store, writeOps, createDocument, origin, providers, log, dir, lock, usage, usageHistory = null, sandbox = null, restore = null, onLook = null, forgetWriter = null, awake, progress }) {
   const agentStore = createAgentStore({ dir, defaultProvider: config.agentProvider, log });
   await agentStore.ready();
   const keys = createKeyStore({ file: config.agentKeysFile });
@@ -173,6 +173,10 @@ async function boot({ config, store, writeOps, createDocument, origin, providers
     bridgePath: BRIDGE,
     browserPath: BROWSER,
     readDocument: (docPath) => store.read(docPath),
+    // The host's own clock and measure, so the stall rule and keep-awake agree
+    // on what "awake" and "progress" mean. Undefined falls to the runner's own.
+    awake,
+    progress,
     publish: hub.publish,
     publishAsk: hub.publishAsk,
     limits: {

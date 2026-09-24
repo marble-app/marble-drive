@@ -98,7 +98,7 @@ export function createStems({
   let seq = 0;
 
   const view = (job) => {
-    const { child, workDir, ...rest } = job;
+    const { child, workDir, output, ...rest } = job;
     return rest;
   };
 
@@ -210,11 +210,13 @@ export function createStems({
     const done = await new Promise((ok, no) => {
       const child = spawn(cmd, args, { stdio: ['ignore', 'pipe', 'pipe'], env: { ...process.env, PYTHONUNBUFFERED: '1' } });
       job.child = child;
+      job.output = 0;
       let tail = '';
       let last = null;
       let buf = '';
       child.stdout.setEncoding('utf8');
       child.stdout.on('data', (chunk) => {
+        job.output += 1;
         buf += chunk;
         let nl;
         while ((nl = buf.indexOf('\n')) >= 0) {
@@ -238,6 +240,7 @@ export function createStems({
       // one long wait nobody would otherwise be told about.
       child.stderr.setEncoding('utf8');
       child.stderr.on('data', (chunk) => {
+        job.output += 1;
         tail = (tail + chunk).slice(-4000);
         if (job.stage === 'starting' && /Download|Install|Built|Resolved/.test(chunk)) job.stage = 'installing';
       });
@@ -302,10 +305,18 @@ export function createStems({
     };
   }
 
+  /** The split in progress, as work that keeps a sprite awake (server/hold.js):
+   *  its process, and how many times it has said anything. */
+  function work() {
+    const job = running;
+    if (!job || job.state !== 'running' || !job.child) return [];
+    return [{ key: `stems:${job.id}`, pid: job.child.pid, output: job.output ?? 0, pausedSince: null }];
+  }
+
   function close() {
     queue.length = 0;
     running?.child?.kill('SIGTERM');
   }
 
-  return { split, cancel, list, close, stemPaths };
+  return { split, cancel, list, work, close, stemPaths };
 }

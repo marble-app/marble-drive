@@ -34,6 +34,8 @@ import { build as buildStarter, list as listStarters, preview as starterPreview 
 import { createChannels } from './sse.js';
 import { createStore } from './store/index.js';
 import { readDriveSettings } from './drive-settings.js';
+import { createAwakeClock, createProgress } from './awake.js';
+import { createHold } from './hold.js';
 import { createKeepAwake } from './keep-awake.js';
 import { createStems } from './stems/index.js';
 import { cleanFileName, createUploads } from './uploads.js';
@@ -173,13 +175,31 @@ export async function createDrive(config, { log = console, agentProviders = null
   uploads.sweep().catch(() => {});
   const uploadSweep = setInterval(() => uploads.sweep().catch(() => {}), 60 * 60 * 1000);
   uploadSweep.unref?.();
-  // On a sprite: stay awake while a turn or a split is running, even with no
-  // tab open (server/keep-awake.js). Inert anywhere else.
+  // On a sprite: stay awake while a turn or a split is getting somewhere, even
+  // with no tab open (server/keep-awake.js), within the limits in server/hold.js.
+  // Time is awake time, so a night frozen adds nothing. Inert off a sprite.
+  const awake = createAwakeClock();
+  const progress = createProgress();
+  const hold = createHold({
+    clock: awake,
+    progress,
+    limits: {
+      pausedMs: config.askHoldMinutes * 60_000,
+      noProgressMs: config.noProgressMinutes * 60_000,
+      maxMs: config.awakeMaxHours * 60 * 60_000,
+    },
+  });
+  const work = () => [
+    ...(agents?.runner?.running?.() ?? []).map((turn) => ({
+      key: `turn:${turn.id}`,
+      lastProgress: turn.lastProgress,
+      pausedSince: turn.pausedSince,
+    })),
+    ...stems.work(),
+  ];
   const keepAwake = createKeepAwake({
     socket: config.spriteSocket,
-    busy: () =>
-      (agents?.runner?.running?.().length ?? 0) > 0
-      || stems.list().jobs.some((job) => job.state === 'running' || job.state === 'queued'),
+    busy: () => hold.holds(work()),
     log,
   });
   keepAwake.start();
@@ -996,6 +1016,8 @@ export async function createDrive(config, { log = console, agentProviders = null
     agents = await createAgents({
       config,
       store,
+      awake,
+      progress,
       writeOps,
       createDocument,
       restore: restoreDocument,
@@ -1333,6 +1355,7 @@ button{background:#738698;color:#fafaf7;border-color:#738698;cursor:pointer}p{co
       stems.close();
       clearInterval(uploadSweep);
       await keepAwake.stop();
+      awake.stop();
       stopBackups();
       watcher.close();
       channels.close();

@@ -119,3 +119,18 @@ test('a failed split says why, and a cancelled one leaves nothing', async () => 
   assert.equal(await hanging.store.hasFile('Songs/one - vocals.flac'), false);
   assert.equal(hanging.stems.cancel('nope'), null);
 });
+
+test('a running split is work that keeps the sprite awake: its process and how much it has said', async () => {
+  const { stems } = await setup('hang');
+  assert.deepEqual(stems.work(), []);
+  const job = await stems.split('Songs/one.mp3');
+  await new Promise((r) => setTimeout(r, 150));
+  const [item] = stems.work();
+  assert.equal(item.key, `stems:${job.id}`);
+  assert.ok(Number.isInteger(item.pid) && item.pid > 0, 'the splitter process');
+  assert.ok(item.output > 0, 'it has printed its stage and progress');
+  assert.equal(item.pausedSince, null);
+  stems.cancel(job.id);
+  await new Promise((r) => setTimeout(r, 100));
+  assert.deepEqual(stems.work(), []);
+});

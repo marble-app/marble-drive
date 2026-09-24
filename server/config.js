@@ -129,6 +129,13 @@ export function loadConfig(env = process.env) {
     // A Fly Sprite's own API. Present only on a sprite; there, the host holds
     // a task on it while work runs so the sprite cannot pause mid-turn.
     spriteSocket: str('MARBLE_DRIVE_SPRITE_SOCKET', '/.sprite/api.sock'),
+    // What keeps a sprite awake with no tab open (server/hold.js). A question
+    // nobody answers holds it this long; work that has stopped getting anywhere
+    // this long; anything at all this long after anyone last used the drive.
+    // Letting go freezes the work, it does not end it.
+    askHoldMinutes: num('MARBLE_DRIVE_ASK_HOLD_MINUTES', 10),
+    noProgressMinutes: num('MARBLE_DRIVE_NO_PROGRESS_MINUTES', 30),
+    awakeMaxHours: num('MARBLE_DRIVE_AWAKE_MAX_HOURS', 24),
 
     open: bool('MARBLE_DRIVE_OPEN', false),
 
