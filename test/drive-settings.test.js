@@ -72,6 +72,11 @@ test('/today opens the environment\'s pick, then drive.json\'s, then the newest 
   await h.drive.store.write('older', '<html><body>older</body></html>', { label: 'seeded' });
   await h.drive.store.write('Days/today', '<html><body>today</body></html>', { label: 'seeded' });
   await h.drive.store.write('newest', '<html><body>newest</body></html>', { label: 'seeded' });
+  // Three writes can land in the same millisecond; say which is newest.
+  const age = (doc, s) => fsp.utimes(path.join(h.root, `${doc}.mrbl`), new Date(Date.now() - s * 1000), new Date(Date.now() - s * 1000));
+  await age('older', 300);
+  await age('Days/today', 200);
+  await age('newest', 100);
   assert.equal((await h.get('/today')).headers.get('location'), '/a/newest');
 
   await h.settle({ latest: 'Days/today' });
