@@ -287,4 +287,5 @@ only thing that ends a turn is the stall rule, on the same progress and clock.
 | A frozen machine's timers fire all at once on waking | a turn frozen overnight would be "stalled" the moment its owner looked | measure limits in awake time, not wall time |
 | "No output" is not "no work" | a long quiet build was killed as stalled | read the process tree's CPU and I/O |
 | An open connection is activity | a forgotten tab kept a sprite billing | streams rest with their tab; the host closes the rest |
+| Renewing a Sprites task by POSTing its name again | a 409 every renewal; every hold lapsed after 5 min, unseen because the proof's turn took 57 s | extend with `PUT /v1/tasks/<name>`; prove a limit by outlasting it |
 | A sprite pauses about a second after its last connection, not 30 s | a turn sent with no tab open froze before keep-awake's first 15 s check | take the hold when work starts, not on a timer |

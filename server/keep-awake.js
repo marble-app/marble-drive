@@ -41,7 +41,7 @@ export function createKeepAwake({
         },
         (res) => {
           res.resume();
-          res.on('end', () => (res.statusCode < 300 ? resolve() : reject(new Error(`sprite answered ${res.statusCode}`))));
+          res.on('end', () => (res.statusCode < 300 ? resolve() : reject(Object.assign(new Error(`sprite answered ${res.statusCode}`), { status: res.statusCode }))));
         },
       );
       req.on('timeout', () => req.destroy(new Error('sprite did not answer')));
@@ -49,13 +49,25 @@ export function createKeepAwake({
       req.end(payload ?? undefined);
     });
 
-  const hold = () => ask('POST', '/v1/tasks', { name, expire }).then(() => {
+  // A task is made by POST and extended by PUT to its name: a second POST of
+  // the same name is refused (409), so renewing that way never renewed, and
+  // every hold lapsed after `expire`. Each falls back to the other: a task that
+  // is already there (a host restarted) is extended, one that lapsed is made.
+  const task = `/v1/tasks/${encodeURIComponent(name)}`;
+  const make = () => ask('POST', '/v1/tasks', { name, expire })
+    .catch((err) => (err.status === 409 ? ask('PUT', task, { expire }) : Promise.reject(err)));
+  const extend = () => ask('PUT', task, { expire })
+    .catch((err) => (err.status === 404 ? ask('POST', '/v1/tasks', { name, expire }) : Promise.reject(err)));
+  const hold = () => (held ? extend() : make()).then(() => {
     held = true;
     heldAt = Date.now();
   });
-  const letGo = () => ask('DELETE', `/v1/tasks/${encodeURIComponent(name)}`).then(() => {
-    held = false;
-  });
+  // Already gone (it lapsed) is let go all the same.
+  const letGo = () => ask('DELETE', task)
+    .catch((err) => (err.status === 404 ? undefined : Promise.reject(err)))
+    .then(() => {
+      held = false;
+    });
 
   // One request at a time. A turn that ends while a renewal is in flight is
   // let go on the next check, once that renewal has landed.
