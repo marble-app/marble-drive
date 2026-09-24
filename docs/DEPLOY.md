@@ -137,6 +137,10 @@ host. There is no import step, because there was no export step.
 
 ## On a Fly Sprite
 
+The full guide to the sprites (who runs where, shipping, provisioning,
+recovery, troubleshooting) is [`HOSTING.md`](HOSTING.md), and the reasoning is
+[`HOSTING-DECISIONS.md`](HOSTING-DECISIONS.md). In short:
+
 One sprite per person, each running this host as it runs on a laptop
 (docs/superpowers/specs/2026-09-23-marble-drive-on-a-sprite-design.md). From
 this checkout:

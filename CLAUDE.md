@@ -9,7 +9,9 @@ The `marble` package (the format and its carrier) is a sibling checkout,
 
 ## Where it runs
 
-Every drive is a Fly Sprite in the org `marble-drive` (docs/DEPLOY.md):
+Every drive is a Fly Sprite in the org `marble-drive`. How it all works, the
+runbooks and troubleshooting: `docs/HOSTING.md`; why each choice was made:
+`docs/HOSTING-DECISIONS.md`. Read them before changing how anything is hosted.
 
 - **admin-p1**: the owner's real drive and the workshop (this checkout, in
   `/home/sprite/src`). Private to the org, and deployed by name only.
