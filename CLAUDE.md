@@ -31,8 +31,9 @@ runbooks and troubleshooting: `docs/HOSTING.md`; why each choice was made:
    then point this repo at that version before step 4.
 4. Commit, and push to `main`.
 5. Only when the owner says to ship:
-   - `tools/sprite-deploy.sh --all`. Irene's sprite cannot make checkpoints
-     right now; if it fails there, `tools/sprite-deploy.sh t-irene --no-checkpoint`.
+   - `tools/sprite-deploy.sh --all`. Irene's and Sam's sprites cannot make
+     checkpoints right now; where one fails with "Failed to create checkpoint",
+     `tools/sprite-deploy.sh <sprite> --no-checkpoint` (nothing was changed there).
    - Then `tools/sprite-deploy.sh admin-p1`. From admin-p1 itself this stages
      the release and switches only when no agent is working, so this
      conversation is not cut off (`~/app/switch.log`).

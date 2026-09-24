@@ -170,7 +170,7 @@ printed note. Loop over several under `bash`, not zsh: zsh does not split an
 unquoted variable into words.
 
 **Update everyone.** `tools/sprite-deploy.sh --all --list`, then `--all`, then
-`tools/sprite-deploy.sh admin-p1`. `t-irene` currently needs
+`tools/sprite-deploy.sh admin-p1`. `t-irene` and `t-sam` currently need
 `--no-checkpoint` (see Troubleshooting).
 
 **Undo a deploy.** `tools/sprite-deploy.sh <sprite> --rollback`. For the
@@ -209,7 +209,7 @@ machine, so continuing one starts fresh.
 | A turn froze when nobody was around | held past its limit: an unanswered question (10 min), no progress (30 min), or a day unattended | by design; opening the drive wakes it and it carries on |
 | A tab stopped updating | it rested (hidden 60 s, or idle 10 min) | any input wakes it; an old tab from before a deploy needs a reload |
 | A sprite never pauses | something holds it: a stream, a request, or a Sprites task | `/health` `streams`; `GET /v1/tasks` on `/.sprite/api.sock` |
-| `Failed to create checkpoint … v3.in-progress … file exists` | stuck checkpoint store (seen on t-irene) | `--no-checkpoint`; report to Fly if it persists |
+| `Failed to create checkpoint … v3.in-progress … file exists` | stuck checkpoint store (t-irene since 2026-09-23, t-sam since 2026-09-24) | `--no-checkpoint`; report to Fly if it persists |
 | An API key vanished after a deploy | keys inside the release (old behaviour) | keys live in `~/.config/marble-drive/agent-keys` now |
 | `tar: unrecognized option '--no-mac-metadata'` | a macOS-only flag on Linux | fixed: the flag is passed only on macOS |
 | A deploy from admin-p1 would kill its own turn | switching restarts the host running the turn | self-deploys hand off to `marble-switch`; watch `~/app/switch.log` |
