@@ -75,8 +75,11 @@ if (step === 'quiet') {
   startBeat();
   const sent = await call(`/agent/conversations/${id}/turns`, {
     method: 'POST',
-    body: JSON.stringify({ prompt, context: { target: null, viewing: null, selection: [], also: [] } }),
+    // A turn needs a document; every drive has its Agents page, and the prompt
+    // touches nothing.
+    body: JSON.stringify({ prompt, context: { target: 'Agents', viewing: 'Agents', selection: [], also: [] } }),
   });
+  if (!sent.ok) throw new Error(`the turn was refused: ${sent.status} ${await sent.text()}`);
   say('turn sent:', sent.status, '— no tab open, touching nothing for 7 min');
   await sleep(7 * 60_000);
   const gaps = freezes();
