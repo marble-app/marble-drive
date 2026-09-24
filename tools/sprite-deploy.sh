@@ -5,12 +5,15 @@
 #   tools/sprite-deploy.sh <sprite> [--org <org>] --local
 #   tools/sprite-deploy.sh <sprite> [--org <org>] --rollback
 #   ... --no-checkpoint   skip the restore point, only when Sprites cannot make one
+#   ... --print-plan      say what would be deployed, and stop before touching a sprite
 #   tools/sprite-deploy.sh --all [--org <org>] [--list] [--ref ...]   every user's sprite
 #
 # By default a sprite runs public sources: marble-drive at <ref> (default
 # origin/main) from GitHub, and @bdhmin/marble@<version> (default: the local
 # ../marble's version) from npm, with Claude Code pinned at --claude (default:
-# the version on this Mac). Nothing secret is copied to the sprite.
+# tools/sprite/claude-version, bumped deliberately: the host passes flags a given
+# CLI must know, and the machine running this may have an older one). Nothing
+# secret is copied to the sprite.
 # --local deploys this Mac's working copies instead (marble-drive's tracked and
 # untracked-but-not-ignored files, and `npm pack` of ../marble), for trying
 # unreleased changes on a test sprite.
@@ -63,7 +66,7 @@ fi
 
 [[ $# -ge 1 && "$1" != -* ]] || usage
 SPRITE=$1; shift
-ORG=marble-drive REF=origin/main MARBLE_VERSION="" CLAUDE_VERSION="" LOCAL=0 ROLLBACK=0 CHECKPOINT=1
+ORG=marble-drive REF=origin/main MARBLE_VERSION="" CLAUDE_VERSION="" LOCAL=0 ROLLBACK=0 CHECKPOINT=1 PRINT_PLAN=0
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --org) ORG=$2; shift 2 ;;
@@ -73,6 +76,7 @@ while [[ $# -gt 0 ]]; do
     --local) LOCAL=1; shift ;;
     --rollback) ROLLBACK=1; shift ;;
     --no-checkpoint) CHECKPOINT=0; shift ;;
+    --print-plan) PRINT_PLAN=1; shift ;;
     *) usage ;;
   esac
 done
@@ -81,25 +85,34 @@ on() { sprite exec -o "$ORG" -s "$SPRITE" --no-stdin "$@"; }
 REMOTE=/home/sprite/app
 say() { printf '==> %s\n' "$*"; }
 
-say "sending the release script to $SPRITE ($ORG)"
-on -- mkdir -p "$REMOTE/incoming"
-on --file "$HERE/sprite/release.sh:$REMOTE/release.sh" -- chmod +x "$REMOTE/release.sh"
+send_release_script() {
+  say "sending the release script to $SPRITE ($ORG)"
+  on -- mkdir -p "$REMOTE/incoming"
+  on --file "$HERE/sprite/release.sh:$REMOTE/release.sh" -- chmod +x "$REMOTE/release.sh"
+}
 
 if [[ $ROLLBACK == 1 ]]; then
+  send_release_script
   on -- "$REMOTE/release.sh" rollback
   exit 0
 fi
 
-[[ -n "$CLAUDE_VERSION" ]] || CLAUDE_VERSION="$(claude --version 2>/dev/null | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' | head -1)"
-[[ -n "$CLAUDE_VERSION" ]] || { echo "sprite-deploy: no claude on this Mac to take a version from — pass --claude <version>" >&2; exit 1; }
+[[ -n "$CLAUDE_VERSION" ]] || CLAUDE_VERSION="$(tr -d '[:space:]' <"$HERE/sprite/claude-version" 2>/dev/null)"
+[[ -n "$CLAUDE_VERSION" ]] || { echo "sprite-deploy: no tools/sprite/claude-version — pass --claude <version>" >&2; exit 1; }
 npm view "@anthropic-ai/claude-code@$CLAUDE_VERSION" version >/dev/null 2>&1 \
   || { echo "sprite-deploy: @anthropic-ai/claude-code@$CLAUDE_VERSION is not on npm" >&2; exit 1; }
+
+print_plan() { # print_plan <name> <source> <marble>
+  printf 'target: %s (%s)\nrelease: %s\nsource: %s\nmarble: %s\nclaude: %s\n' "$SPRITE" "$ORG" "$1" "$2" "$3" "$CLAUDE_VERSION"
+  exit 0
+}
 
 STAMP="$(date -u +%Y%m%dT%H%M%SZ)"
 FILES=()
 if [[ $LOCAL == 1 ]]; then
   SHA="$(git -C "$REPO" rev-parse --short HEAD)"
   NAME="$STAMP-local-$SHA"
+  [[ $PRINT_PLAN == 1 ]] && print_plan "$NAME" "this machine's working copy" "this machine's ../marble, packed"
   WORK="$(mktemp -d)"
   trap 'rm -rf "$WORK"' EXIT
   say "packing this Mac's marble-drive (working copy at $SHA)"
@@ -120,7 +133,10 @@ else
   NAME="$STAMP-${SHA:0:7}"
   SOURCE="git:$SHA"
   MARBLE="@bdhmin/marble@$MARBLE_VERSION"
+  [[ $PRINT_PLAN == 1 ]] && print_plan "$NAME" "$SOURCE" "$MARBLE"
 fi
+
+send_release_script
 
 if [[ $CHECKPOINT == 1 ]]; then
   say "checkpointing $SPRITE"
