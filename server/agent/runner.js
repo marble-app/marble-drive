@@ -14,6 +14,7 @@ import fsp from 'node:fs/promises';
 import path from 'node:path';
 import readline from 'node:readline';
 
+import { createAwakeClock, createProgress } from '../awake.js';
 import { collectSlices, shaOf } from '../engine.js';
 import { effectiveCapability } from './capability.js';
 import { pickEnv } from './env.js';
@@ -53,7 +54,7 @@ const BACKGROUND_SETTLE_MS = 60_000;
 const STEER_NOTE = 'While you were working I added this note. Treat it as course-correction.';
 const DISPATCH = new Set(['queue', 'steer', 'interrupt']);
 
-export function createRunner({ store, tools, providers, workdir, origin, bridgePath, browserPath, readDocument, publish, publishAsk = () => {}, limits, log = console, skills = [], driveRoot, projects = null, power = '', sandbox = null, onLook = null, onFinish = null, nameConversation = null }) {
+export function createRunner({ store, tools, providers, workdir, origin, bridgePath, browserPath, readDocument, publish, publishAsk = () => {}, limits, log = console, skills = [], driveRoot, projects = null, power = '', sandbox = null, onLook = null, onFinish = null, nameConversation = null, awake = createAwakeClock(), progress = createProgress() }) {
   const live = new Map(); // turnId → live turn
   const order = []; // turnIds, in the order they were sent
   const tokens = new Map(); // token → live turn
@@ -629,18 +630,38 @@ export function createRunner({ store, tools, providers, workdir, origin, bridgeP
       else child.stdin.end(spec.stdin ?? '');
 
       const state = {};
-      let stall;
+      // Stalled means no progress in time the machine was awake. Progress is
+      // output, or growth in the CPU time and I/O of the turn's processes (a
+      // long job is often one silent command); awake time, because a paused
+      // sprite freezes this process and its overdue timers fire the moment it
+      // wakes. A turn waiting on the person, or on another agent, is paused,
+      // not stalled; `pausedSince` is also what keep-awake reads.
       const openAsks = () => [...turn.asks.values()].filter((a) => !a.closed).length;
+      turn.lastProgress = awake.now();
+      turn.pausedSince = null;
+      let lastSample = null;
       const resetStall = () => {
-        clearTimeout(stall);
-        if (openAsks()) return; // waiting on the person is not a stall
-        stall = setTimeout(() => stop(turn, { status: 'failed', error: `stalled — no output for ${Math.round(limits.stallMs / 1000)} s` }), limits.stallMs);
-        stall.unref?.();
+        turn.lastProgress = awake.now();
+        if (!openAsks()) turn.pausedSince = null;
       };
-      turn.holdStall = () => clearTimeout(stall);
+      turn.holdStall = () => {
+        if (turn.pausedSince === null) turn.pausedSince = awake.now();
+      };
       turn.resumeStall = resetStall;
-      resetStall();
-      turn.timers.push(() => clearTimeout(stall));
+      const checkStall = () => {
+        if (turn.finishing || turn.pausedSince !== null) return;
+        const measured = progress.sample(child.pid);
+        if (measured !== null && measured !== lastSample) {
+          if (lastSample !== null) turn.lastProgress = awake.now();
+          lastSample = measured;
+        }
+        if (awake.now() - turn.lastProgress >= limits.stallMs) {
+          stop(turn, { status: 'failed', error: `stalled — no output and no work for ${Math.round(limits.stallMs / 1000)} s` });
+        }
+      };
+      const stallCheck = setInterval(checkStall, Math.max(50, Math.min(60_000, Math.floor(limits.stallMs / 4))));
+      stallCheck.unref?.();
+      turn.timers.push(() => clearInterval(stallCheck));
       // A cap is opt-in. A person stops a turn; a timer does not.
       if (limits.maxMs > 0) {
         const cap = setTimeout(() => stop(turn, { status: 'cancelled', error: `took longer than ${Math.round(limits.maxMs / 60000)} min` }), limits.maxMs);

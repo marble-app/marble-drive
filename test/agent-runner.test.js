@@ -27,6 +27,7 @@ const SCRIPTS = {
   hello: [{ say: 'Hello from the fake agent' }],
   slow: [{ sleep: 600 }, { say: 'done sleeping' }],
   stall: [{ silent: 5_000 }],
+  quietWork: [{ silent: 1_500 }, { say: 'finished quietly' }],
   hold: [{ silent: 20_000 }],
   stubborn: [{ ignoreTerm: true }, { silent: 5_000 }],
   broken: [{ fail: 'You have hit your usage limit' }],
@@ -72,7 +73,7 @@ const SCRIPTS = {
   linger2: [{ sleep: 1500 }, { say: 'done lingering' }],
 };
 
-async function setup({ limits = {}, tools, realTools = null, onLook, capability, projects = null, onFinish = null, publishAsk = undefined, onPublish = null, nameConversation = null, origin = () => 'http://127.0.0.1:1', providerMap = null } = {}) {
+async function setup({ limits = {}, tools, realTools = null, onLook, capability, projects = null, onFinish = null, publishAsk = undefined, onPublish = null, nameConversation = null, origin = () => 'http://127.0.0.1:1', providerMap = null, awake = undefined, progress = undefined } = {}) {
   const dir = await fsp.mkdtemp(path.join(os.tmpdir(), 'marble-runner-'));
   const store = createAgentStore({ dir: path.join(dir, 'agents'), defaultProvider: 'fake' });
   await store.ready();
@@ -111,6 +112,8 @@ async function setup({ limits = {}, tools, realTools = null, onLook, capability,
     onLook,
     onFinish,
     nameConversation,
+    ...(awake ? { awake } : {}),
+    ...(progress ? { progress } : {}),
   });
   await runner.boot();
   return { store, runner, published, toolCalls, spawned };
@@ -1902,4 +1905,32 @@ test('a turn in the drive cannot see the git repository around it; a turn in a r
   await until(async () => (await docs.store.turn(`${plain.id}-t1`)).status === 'completed');
   assert.deepEqual(await said(docs.store, plain.id), ['']);
   await docs.runner.close();
+});
+
+// A long job is often silent: one command crunching for hours prints nothing.
+// Working is output or the CPU and I/O of the turn's processes; a turn is
+// stalled only when there has been neither, in time the sprite was awake.
+test('a quiet turn whose processes are working is not stalled', async () => {
+  let n = 0;
+  const progress = { available: true, sample: () => (n += 1) }; // always growing
+  const { store, runner } = await setup({ limits: { stallMs: 300 }, progress });
+  const { id } = await store.createConversation({ provider: 'fake' });
+  const { turnId } = await runner.send(id, { prompt: 'script:quietWork', context: { target: 'd' } });
+  await until(async () => ['completed', 'failed'].includes((await store.turn(turnId)).status), 8000);
+  const turn = await store.turn(turnId);
+  assert.equal(turn.status, 'completed', turn.error ?? '');
+  await runner.close();
+});
+
+test('a turn frozen with its sprite is not stalled when the sprite wakes', async () => {
+  // The awake clock does not move while the sprite is paused; model the whole
+  // quiet stretch as frozen.
+  const awake = { now: () => 0, tick() {}, stop() {} };
+  const progress = { available: true, sample: () => 7 }; // nothing moves either
+  const { store, runner } = await setup({ limits: { stallMs: 300 }, awake, progress });
+  const { id } = await store.createConversation({ provider: 'fake' });
+  const { turnId } = await runner.send(id, { prompt: 'script:quietWork', context: { target: 'd' } });
+  await until(async () => ['completed', 'failed'].includes((await store.turn(turnId)).status), 8000);
+  assert.equal((await store.turn(turnId)).status, 'completed');
+  await runner.close();
 });
