@@ -38,6 +38,7 @@ import { createAwakeClock, createProgress } from './awake.js';
 import { createHold } from './hold.js';
 import { createKeepAwake } from './keep-awake.js';
 import { createStreams } from './streams.js';
+import { consoleAllowed, createConsole } from './console/index.js';
 import { createStems } from './stems/index.js';
 import { cleanFileName, createUploads } from './uploads.js';
 import { DRAWN_MAX_BYTES, createThumbs } from './thumbs.js';
@@ -114,6 +115,8 @@ const RUNTIME = {
   // Runs first on every page: lets a tab nobody is using close its streams,
   // so its sprite can sleep (server/streams.js).
   'tab-rest.js': () => path.join(REPO, 'runtime', 'tab-rest.js'),
+  'console.js': () => path.join(REPO, 'runtime', 'console.js'),
+  'console.css': () => path.join(REPO, 'runtime', 'console.css'),
   // Agents, when they are on: the client for /agent/* and the drawer that
   // uses it. Served to every document; injected only when agents run here.
   'agent.js': () => path.join(REPO, 'runtime', 'agent.js'),
@@ -276,6 +279,12 @@ export async function createDrive(config, { log = console, agentProviders = null
       tags += `\n<script src="/runtime/agent-usage-charts.js" data-marble-transient></script>`;
     }
     tags += `\n<script src="/runtime/collab.js" data-marble-transient></script>`;
+    // The Console's own look and behaviour, only on the Console, only where
+    // the console is on (server/console).
+    if (consoleApp && /<meta\s+name="marble-console"/i.test(source)) {
+      tags += `\n<link rel="stylesheet" href="/runtime/console.css" data-marble-transient>`;
+      tags += `\n<script src="/runtime/console.js" data-marble-transient></script>`;
+    }
     // After collab.js: the callout hangs its card with the zone's own geometry.
     if (agents) tags += `\n<script src="/runtime/agent-callout.js" data-marble-transient></script>`;
     // After the callout, whose handle both tools hand their ids to, and after
@@ -442,6 +451,8 @@ export async function createDrive(config, { log = console, agentProviders = null
   // Set once the server exists, because the agents need to know where to tell
   // their MCP bridge to call back. Null when agents are not allowed here.
   let agents = null;
+  // The console (server/console): on only where MARBLE_DRIVE_CONSOLE says so.
+  let consoleApp = null;
   // Why `agents` is null, when it is — for the boot line.
   let agentsWhy = withAgents ? agentsAllowed(config).why : 'not started for this command';
 
@@ -483,6 +494,9 @@ export async function createDrive(config, { log = console, agentProviders = null
       if (route.startsWith('/agent/')) {
         return agents ? await agents.handle(req, res, url) : text(res, 404, 'not found');
       }
+      if (route.startsWith('/console/')) {
+        return consoleApp ? await consoleApp.handle(req, res, url, route) : text(res, 404, 'not found');
+      }
       if (await typesafe.handle(req, res, url)) return;
       if (await genui.handle(req, res, url)) return;
 
@@ -515,7 +529,8 @@ export async function createDrive(config, { log = console, agentProviders = null
         if (!resolve) return text(res, 404, `no runtime module "${file}"`);
         const js = await fsp.readFile(resolve(), 'utf8').catch(() => null);
         if (js === null) return text(res, 404, `no runtime module "${file}"`);
-        return send(res, 200, js, { 'Content-Type': 'text/javascript; charset=utf-8' });
+        const type = file.endsWith('.css') ? 'text/css' : 'text/javascript';
+        return send(res, 200, js, { 'Content-Type': `${type}; charset=utf-8` });
       }
 
       if (route.startsWith('/a/')) {
@@ -1085,6 +1100,13 @@ export async function createDrive(config, { log = console, agentProviders = null
     });
   }
 
+  const consoleWhy = consoleAllowed(config);
+  if (consoleWhy.ok) {
+    consoleApp = await createConsole({ config, store, streams, log, json, readJson, text });
+  } else if (config.console) {
+    log.error?.(`[console] not started: ${consoleWhy.why}`);
+  }
+
   // ------------------------------------------------------------------ helpers
 
   function gateRoute(req, res, url) {
@@ -1361,6 +1383,7 @@ button{background:#738698;color:#fafaf7;border-color:#738698;cursor:pointer}p{co
     genui,
     agents,
     agentsWhy,
+    console: consoleApp,
     createDocument,
     config,
     seed,
@@ -1386,6 +1409,7 @@ button{background:#738698;color:#fafaf7;border-color:#738698;cursor:pointer}p{co
       await keepAwake.stop();
       awake.stop();
       streams.close();
+      consoleApp?.close();
       stopBackups();
       watcher.close();
       channels.close();

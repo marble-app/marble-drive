@@ -72,3 +72,20 @@ export async function seedChat(store, { name = 'Chat', title = 'Chat' } = {}) {
   await store.write(name, await buildChat({ name, title }), { label: 'seeded' });
   return { seeded: true, path: name };
 }
+
+/** The Console: every drive, from one page. Only where the console is on
+ *  (admin-p1); its code is the host's (runtime/console.js), so the file is a
+ *  place, not a program, and never needs patching. */
+export async function buildConsole({ title = 'Console' } = {}) {
+  const template = await fsp.readFile(path.join(REPO, 'templates', 'console.mrbl'), 'utf8');
+  return template
+    .replaceAll('__TITLE__', title)
+    .replace('__ICON__', () => iconLink('doc'))
+    .replace(/__ID__/g, () => newId());
+}
+
+export async function seedConsole(store, { name = 'Console', title = 'Console' } = {}) {
+  if (await store.has(name)) return { seeded: false, path: name };
+  await store.write(name, await buildConsole({ title }), { label: 'seeded' });
+  return { seeded: true, path: name };
+}

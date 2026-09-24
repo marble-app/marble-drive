@@ -129,6 +129,12 @@ export function loadConfig(env = process.env) {
     // A Fly Sprite's own API. Present only on a sprite; there, the host holds
     // a task on it while work runs so the sprite cannot pause mid-turn.
     spriteSocket: str('MARBLE_DRIVE_SPRITE_SOCKET', '/.sprite/api.sock'),
+    // The console: every drive, from one page (server/console). admin-p1 only.
+    console: bool('MARBLE_DRIVE_CONSOLE', false),
+    consoleOrg: str('MARBLE_DRIVE_CONSOLE_ORG', 'marble-drive'),
+    consoleSrc: str('MARBLE_DRIVE_CONSOLE_SRC', '/home/sprite/src'),
+    consoleSprite: str('MARBLE_DRIVE_CONSOLE_SPRITE', 'sprite'),
+    consoleSelf: str('MARBLE_DRIVE_CONSOLE_SELF', ''),
     // What keeps a sprite awake with no tab open (server/hold.js). A question
     // nobody answers holds it this long; work that has stopped getting anywhere
     // this long; anything at all this long after anyone last used the drive.
