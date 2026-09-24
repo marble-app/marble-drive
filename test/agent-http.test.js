@@ -966,3 +966,11 @@ test('Switch starts a Continue turn and a second call returns it', async () => {
     await fsp.rm(work, { recursive: true, force: true });
   }
 });
+
+test('a run the host starts itself is named, aimed, and under way', async () => {
+  const { id, turn } = await drive.agents.startRun({ prompt: 'script:edit', target: 'garden', title: 'Today’s day' });
+  const { body } = await finished(id, turn.turnId);
+  assert.equal(body.meta.title, 'Today’s day');
+  assert.equal(body.meta.provider, 'fake');
+  assert.equal(body.events.find((e) => e.type === 'user').context.target, 'garden');
+});

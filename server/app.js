@@ -45,6 +45,7 @@ import { DRAWN_MAX_BYTES, createThumbs } from './thumbs.js';
 import { createTypesafeHandler } from './typesafe/routes.js';
 import { createGenuiHandler } from './genui/routes.js';
 import { watchDrive } from './watch.js';
+import { createDaily } from './daily.js';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const REPO = path.resolve(HERE, '..');
@@ -451,6 +452,8 @@ export async function createDrive(config, { log = console, agentProviders = null
   // Set once the server exists, because the agents need to know where to tell
   // their MCP bridge to call back. Null when agents are not allowed here.
   let agents = null;
+  // The run the host starts once a day (server/daily.js), once agents are up.
+  let daily = null;
   // The console (server/console): on only where MARBLE_DRIVE_CONSOLE says so.
   let consoleApp = null;
   // Why `agents` is null, when it is — for the boot line.
@@ -459,6 +462,10 @@ export async function createDrive(config, { log = console, agentProviders = null
   const server = http.createServer(async (req, res) => {
     const url = new URL(req.url, `http://${req.headers.host ?? 'localhost'}`);
     const route = url.pathname;
+    // Any request may be the one that woke a paused sprite, and the only
+    // chance to start a day that came due while it slept: the sprite pauses
+    // again before a minute timer would fire.
+    daily?.nudge();
 
     try {
       // The gate, and the two things that have to be reachable through it: the
@@ -1100,6 +1107,21 @@ export async function createDrive(config, { log = console, agentProviders = null
     });
   }
 
+  if (agents) {
+    daily = createDaily({
+      at: config.dayAt,
+      zone: config.dayZone,
+      prompt: config.dayPrompt,
+      target: config.dayTarget,
+      start: agents.startRun,
+      conversations: async () => [
+        ...(await agents.store.conversations()),
+        ...(await agents.store.conversations({ archived: true })),
+      ],
+      log,
+    });
+  }
+
   const consoleWhy = consoleAllowed(config);
   if (consoleWhy.ok) {
     consoleApp = await createConsole({ config, store, streams, log, json, readJson, text });
@@ -1411,6 +1433,7 @@ button{background:#738698;color:#fafaf7;border-color:#738698;cursor:pointer}p{co
       streams.close();
       consoleApp?.close();
       stopBackups();
+      daily?.stop();
       watcher.close();
       channels.close();
       // Event streams are open by design and keep-alive sockets are open by

@@ -252,6 +252,7 @@ async function boot({ config, store, writeOps, createDocument, origin, providers
 
   return {
     handle: routes.handle,
+    startRun: routes.startRun,
     handleTools: routes.handleTools,
     watchdog: (docPath, sha) => runner.watchdog(docPath, sha),
     documentTouched: (docPath, sha) => runner.documentTouched(docPath, sha),

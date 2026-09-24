@@ -106,6 +106,14 @@ export function loadConfig(env = process.env) {
     backupEveryMinutes: num('MARBLE_DRIVE_BACKUP_MINUTES', 60),
     backupKeep: num('MARBLE_DRIVE_BACKUP_KEEP', 24),
 
+    // A run the host starts on its own once a day: at `dayAt` (HH:MM) in
+    // `dayZone`, `dayPrompt` aimed at `dayTarget`. Off unless both a time and
+    // a target are set. A sprite asleep at that hour runs it on waking.
+    dayAt: str('MARBLE_DRIVE_DAY_AT', null),
+    dayZone: str('MARBLE_DRIVE_DAY_TZ', 'America/Los_Angeles'),
+    dayPrompt: str('MARBLE_DRIVE_DAY_PROMPT', '/my-day'),
+    dayTarget: str('MARBLE_DRIVE_DAY_TARGET', null),
+
     // A document that carries megabytes of base64 is the case blobs exist for,
     // and `marble-drive weigh` is how you find out before deciding.
     maxBodyBytes: num('MARBLE_DRIVE_MAX_BODY', 16 * 1024 * 1024),

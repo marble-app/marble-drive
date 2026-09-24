@@ -203,6 +203,56 @@ export function createAgentRoutes({ store, runner, tools, hub, providers, writeO
     return undefined;
   }
 
+  /** A new conversation, as POST /agent/conversations makes one. Returns
+   *  `{ summary }`, or `{ status, error }` for a request that cannot be met. */
+  async function startConversation(body) {
+    // Asked for Claude either way, a new conversation gets the Claude the
+    // switch chose; one already started keeps the back-end it began on.
+    if (isClaude(body.provider)) body.provider = activeClaude(await store.settings());
+    if (!providers.has(body.provider)) return { status: 400, error: `no provider "${body.provider}"` };
+    const from = body.handoffFrom ? await store.conversation(body.handoffFrom) : null;
+    if (body.handoffFrom && !from) return { status: 404, error: `no conversation "${body.handoffFrom}"` };
+    const settings = await store.settings();
+    const { models, efforts, modes } = settings;
+    const projectId = typeof body.project === 'string' && body.project.trim() ? body.project.trim() : settings.defaultProject || 'drive';
+    const project = findProject({ settings, root }, projectId);
+    if (!project) return { status: 400, error: `no project "${projectId}"` };
+    const meta = await store.createConversation({
+      provider: body.provider,
+      model: body.model ?? models[body.provider] ?? null,
+      effort: body.effort ?? efforts?.[body.provider] ?? null,
+      mode: typeof body.mode === 'string' && body.mode.trim() ? body.mode.trim() : modes?.[body.provider] ?? null,
+      handoffFrom: from?.id ?? null,
+      project: project.id,
+      failover: body.failover === 'pause' ? 'pause' : 'auto',
+    });
+    if (from) {
+      await store.updateConversation(from.id, { handoffTo: meta.id });
+      await publishSummary(from.id, await store.appendEvent(from.id, { type: 'handoff', to: meta.id, provider: meta.provider }));
+      await publishSummary(meta.id, await store.appendEvent(meta.id, { type: 'handoff', from: from.id, provider: from.provider }));
+    }
+    return { summary: summarize(await store.conversation(meta.id)) };
+  }
+
+  /** What the day button does, without a page: a conversation on the drive's
+   *  default agent, named, and sent one prompt aimed at `target`. For work the
+   *  host starts on its own (server/daily.js). */
+  async function startRun({ prompt, target, title = null, project = null }) {
+    const settings = await store.settings();
+    const made = await startConversation({ provider: settings.defaultProvider, project });
+    if (made.error) throw Object.assign(new Error(made.error), { status: made.status });
+    const { id } = made.summary;
+    if (title) {
+      await store.updateConversation(id, { title, titleAuto: false });
+      hub.publish(id, { type: 'meta' }, await store.summary(id));
+    }
+    const turn = await runner.send(id, {
+      prompt,
+      context: { viewing: null, target: parsePath(target, { allowRoot: false }), selection: [], also: [] },
+    });
+    return { id, turn };
+  }
+
   async function handle(req, res, url) {
     const route = url.pathname;
     const method = req.method;
@@ -381,33 +431,8 @@ export function createAgentRoutes({ store, runner, tools, hub, providers, writeO
         return json(res, 200, await store.conversations({ archived: url.searchParams.get('archived') === '1' }));
       }
       if (method === 'POST') {
-        const body = await readJson(req, maxBody);
-        // Asked for Claude either way, a new conversation gets the Claude the
-        // switch chose; one already started keeps the back-end it began on.
-        if (isClaude(body.provider)) body.provider = activeClaude(await store.settings());
-        if (!providers.has(body.provider)) return json(res, 400, { error: `no provider "${body.provider}"` });
-        const from = body.handoffFrom ? await store.conversation(body.handoffFrom) : null;
-        if (body.handoffFrom && !from) return json(res, 404, { error: `no conversation "${body.handoffFrom}"` });
-        const settings = await store.settings();
-        const { models, efforts, modes } = settings;
-        const projectId = typeof body.project === 'string' && body.project.trim() ? body.project.trim() : settings.defaultProject || 'drive';
-        const project = findProject({ settings, root }, projectId);
-        if (!project) return json(res, 400, { error: `no project "${projectId}"` });
-        const meta = await store.createConversation({
-          provider: body.provider,
-          model: body.model ?? models[body.provider] ?? null,
-          effort: body.effort ?? efforts?.[body.provider] ?? null,
-          mode: typeof body.mode === 'string' && body.mode.trim() ? body.mode.trim() : modes?.[body.provider] ?? null,
-          handoffFrom: from?.id ?? null,
-          project: project.id,
-          failover: body.failover === 'pause' ? 'pause' : 'auto',
-        });
-        if (from) {
-          await store.updateConversation(from.id, { handoffTo: meta.id });
-          await publishSummary(from.id, await store.appendEvent(from.id, { type: 'handoff', to: meta.id, provider: meta.provider }));
-          await publishSummary(meta.id, await store.appendEvent(meta.id, { type: 'handoff', from: from.id, provider: from.provider }));
-        }
-        return json(res, 201, summarize(await store.conversation(meta.id)));
+        const made = await startConversation(await readJson(req, maxBody));
+        return made.error ? json(res, made.status, { error: made.error }) : json(res, 201, made.summary);
       }
     }
 
@@ -701,5 +726,5 @@ export function createAgentRoutes({ store, runner, tools, hub, providers, writeO
     return json(res, 404, { error: 'not found' });
   }
 
-  return { handle, handleTools };
+  return { handle, handleTools, startRun };
 }
