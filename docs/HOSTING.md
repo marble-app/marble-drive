@@ -160,8 +160,13 @@ so it ships with every deploy; the document is only where it lives.
 | **Activity** | every job the console ran, its output streamed and kept |
 
 How it knows things: the Sprites API for the list, awake or asleep
-(`status` is `running` while awake and `warm` while paused), links and
-checkpoints, none of which wakes a drive; **Look now** runs a read-only probe on
+(`status` is `running` while awake, `warm` while paused, `cold` when stopped)
+and links, none of which wakes a drive; checkpoints too, except that asking
+about a **cold** drive's checkpoints starts it, so the console never does that
+on its own (a cold drive's checkpoints are read only on request). What a drive
+runs is known from a look, from a deploy the console finished, or from its last
+"before deploy" checkpoint (shown as "or later": a deploy made without a
+checkpoint does not show there); **Look now** runs a read-only probe on
 a drive (`server/console/probe.mjs`) for its release, versions, settings,
 Claude, documents and log, and does wake it. Drives already awake are looked at
 by themselves, every five minutes while a console tab is open. The console

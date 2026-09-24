@@ -322,4 +322,5 @@ the list is honest.
 | An open connection is activity | a forgotten tab kept a sprite billing | streams rest with their tab; the host closes the rest |
 | Renewing a Sprites task by POSTing its name again | a 409 every renewal; every hold lapsed after 5 min, unseen because the proof's turn took 57 s | extend with `PUT /v1/tasks/<name>`; prove a limit by outlasting it |
 | A status page that reads the machine it reports on | would wake every drive it drew | read the platform's API; look inside only when asked, or when awake anyway |
+| Listing a stopped (cold) sprite's checkpoints | three friends' drives were started every five minutes the console was open | never ask a cold sprite anything on a timer; re-read only after it has run |
 | A sprite pauses about a second after its last connection, not 30 s | a turn sent with no tab open froze before keep-awake's first 15 s check | take the hold when work starts, not on a timer |

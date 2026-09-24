@@ -23,7 +23,7 @@ test('the list is one row per drive: name, awake or asleep since when, link, acc
   assert.equal(rows[0].access, 'private');
   assert.deepEqual(rows[0].labels, ['marble-owner']);
   assert.equal(irene.url, 'https://t-irene-b3fwm.sprites.app');
-  assert.deepEqual(Object.keys(irene).sort(), ['access', 'awake', 'createdAt', 'labels', 'name', 'since', 'status', 'url']);
+  assert.deepEqual(Object.keys(irene).sort(), ['access', 'awake', 'createdAt', 'labels', 'name', 'ranAt', 'since', 'status', 'url']);
   assert.deepEqual((await fleet.calls())[0], ['api', '-o', 'marble-drive', '/v1/sprites/']);
 });
 

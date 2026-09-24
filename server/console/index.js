@@ -84,16 +84,20 @@ export async function createConsole({ config, store, streams = null, log = conso
   // What a drive is running, known without waking it: every deploy checkpoints
   // first, as "before deploy <release>", so the newest such checkpoint names the
   // last release sent there. A look, when newer, is the better answer.
-  const hints = new Map(); // name → { at, value }
-  async function lastDeploy(name) {
-    const have = hints.get(name);
-    if (have && Date.now() - have.at < 5 * 60_000) return have.value;
-    let value = null;
+  // Asking about a cold drive's checkpoints starts it, so a cold drive is never
+  // asked: what was known is kept. Anyone else is asked once, and again only
+  // after it has run since (a deploy runs it).
+  const hints = new Map(); // name → { ranAt, value }
+  async function lastDeploy(row) {
+    const have = hints.get(row.name);
+    if (row.status === 'cold') return have?.value ?? null;
+    if (have && have.ranAt === row.ranAt) return have.value;
+    let value = have?.value ?? null;
     try {
-      const cp = (await sprites.checkpoints(name)).find((c) => /^before deploy \S+/.test(c.comment));
-      if (cp) value = { release: /^before deploy (\S+)/.exec(cp.comment)[1], at: cp.at };
+      const cp = (await sprites.checkpoints(row.name)).find((c) => /^before deploy \S+/.test(c.comment));
+      value = cp ? { release: /^before deploy (\S+)/.exec(cp.comment)[1], at: cp.at } : null;
     } catch {}
-    hints.set(name, { at: Date.now(), value });
+    hints.set(row.name, { ranAt: row.ranAt, value });
     return value;
   }
 
@@ -105,7 +109,7 @@ export async function createConsole({ config, store, streams = null, log = conso
       // deploy this console finished (certain), or the last deploy's checkpoint
       // (a floor: a deploy made without a checkpoint does not show there).
       const seen = await inspector.cached(row.name);
-      const hint = await lastDeploy(row.name);
+      const hint = await lastDeploy(row);
       const shipped = recent.find((j) => j.state === 'done' && j.result?.sha
         && ((j.kind === 'deploy' && j.target === row.name) || (j.kind === 'ship' && j.result.deployed?.includes(row.name))));
       const answers = [

@@ -48,7 +48,8 @@ the most expensive page in Marble.
 |---|---|---|
 | Which drives exist, labels, link, public or private | Sprites API (`/v1/sprites/`) | no |
 | Awake or asleep, and since when | Sprites API: `status` is `running` while awake, `warm` while paused (measured 2026-09-24); `last_running_at` is when it woke, `last_warming_at` when it paused | no |
-| Checkpoints | Sprites API (`/v1/sprites/<n>/checkpoints`) | no |
+| Checkpoints | Sprites API (`/v1/sprites/<n>/checkpoints`) | not a paused one; a **cold** (stopped) one is started by it, so it is asked only on request (found on admin-p1) |
+| What it runs, when nobody looked | its last "before deploy <release>" checkpoint, or a deploy the console finished | no (a floor: shown as "or later") |
 | Release live, history, Claude and marble versions, sprite.env keys, Claude mode, saved keys, a Claude login, working or not, disk, documents, recent log | **Look inside**: a read-only probe run on the sprite with `sprite exec` | **yes**, so it is asked for |
 | What main is, what is on it that a drive lacks | the workshop checkout (`git fetch`), cached a minute | no |
 | marble on npm | `npm view`, cached ten minutes | no |

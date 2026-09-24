@@ -4,6 +4,10 @@
 // woke and `last_warming_at` when it last paused (measured 2026-09-24). So the
 // console can say who is awake, and since when, for nothing.
 //
+// One read is not free: listing a *cold* sprite's checkpoints starts it (seen
+// on 2026-09-24, when three stopped drives woke within seconds of the console
+// first asking). A warm one stays paused.
+//
 // Only the fields a row needs are passed on. The API has more — a sprite's
 // services answer with the host's environment, passphrase included — and none
 // of it leaves this file.
@@ -46,6 +50,9 @@ export function createSprites({ bin = 'sprite', org = 'marble-drive' } = {}) {
       access: s.url_settings?.auth === 'public' ? 'public' : 'private',
       labels: Array.isArray(s.labels) ? s.labels : [],
       createdAt: s.created_at ?? null,
+      // When it last started running: a drive that has not run since a read
+      // has nothing new to read.
+      ranAt: s.last_running_at ?? null,
     };
   };
 

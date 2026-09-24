@@ -128,3 +128,15 @@ test('a deploy the console finished is known exactly, and outranks an older chec
   assert.equal(sam.releaseFrom, 'console');
   assert.match(sam.release, /0dd39ac1234567$/);
 });
+
+test('a cold drive is never asked about its checkpoints: that would start it', async (t) => {
+  const h = await host({ MARBLE_DRIVE_CONSOLE: '1', MARBLE_DRIVE_SECRET: 'pw-1234' });
+  t.after(() => h.close());
+  const sprites = h.fleet.state.sprites.map((s) => (s.name === 't-peiling' ? { ...s, status: 'cold' } : s));
+  await h.fleet.set({ sprites });
+  await (await h.call('/console/api/state')).json();
+  await (await h.call('/console/api/state')).json();
+  const asked = (await h.fleet.calls()).filter((c) => c[0] === 'api' && c.at(-1).endsWith('/checkpoints')).map((c) => c.at(-1).split('/')[3]);
+  assert.ok(!asked.includes('t-peiling'), 'the cold drive was left alone');
+  assert.equal(asked.filter((n) => n === 't-irene').length, 1, 'a warm one is asked once, not on every read');
+});

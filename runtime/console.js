@@ -926,6 +926,8 @@
 
   async function loadCheckpoints(name, force = false) {
     const have = S.checkpoints.get(name);
+    // A cold drive would be started by the question; it is asked only on request.
+    if (!force && drive(name)?.status === 'cold') return;
     if (have?.loading || (have && !force && Date.now() - have.at < 60_000)) return;
     S.checkpoints.set(name, { ...(have ?? { list: null }), loading: true, at: Date.now() });
     try {
@@ -940,8 +942,11 @@
   function checkpoints(d) {
     const c = S.checkpoints.get(d.name);
     const list = c?.list;
+    const cold = d.status === 'cold' && !list && !c?.loading;
     return section('Checkpoints', list ? `${list.length}` : null,
-      !list ? h('p.loading', { text: 'Reading…' })
+      cold ? h('p.soft', {}, 'It is stopped, and reading its checkpoints would start it. ',
+        h('button.btn.quiet', { type: 'button', style: { padding: '0 .35rem' }, text: 'Read them', onclick: () => loadCheckpoints(d.name, true) }))
+      : !list ? h('p.loading', { text: 'Reading…' })
         : !list.length ? h('p.soft', { text: c.error ?? 'None yet.' })
           : h('ul.commits', {}, list.slice(0, 8).map((cp, i) => h('li', { style: { '--i': String(i) } },
             h('span.sha', { text: cp.id }),
