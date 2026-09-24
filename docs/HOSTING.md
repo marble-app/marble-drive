@@ -144,6 +144,41 @@ only, never over local changes), installs them and re-registers the projects.
 
 The same steps work from the MacBook, where this repo also lives.
 
+## The console
+
+**Console** is a document in admin-p1's drive (`/a/Console`): every drive and
+everything done to them, from one page. It is on only where `sprite.env` says
+`MARBLE_DRIVE_CONSOLE=1` and the drive has a passphrase, which is admin-p1. Its
+code is the host's (`server/console/`, `runtime/console.js`, `console.css`),
+so it ships with every deploy; the document is only where it lives.
+
+| View | What it does |
+|---|---|
+| **Drives** | every drive, awake or asleep and since when, without waking any; a drive's release, health, Claude (login or key, sign in or out), access (public or private, the passphrase: show, copy, new), settings (`sprite.env`, applied with a restart), checkpoints (make, restore by typing the name), and removing a tester; **New drive** provisions one |
+| **Ship** | main's recent commits and which drives have them; each drive against main; **Ship** shows the plan (`sprite-deploy.sh --print-plan`) before deploying main to every user and then admin-p1; **Try the workshop on t-bryan** |
+| **Workshop** | both checkouts (branch, head, changes, against origin), pull, run tests, **Publish** marble (test, bump, publish, push, then take it up in marble-drive, test, commit, push), and a workshop chat in the Marble Drive or Marble project |
+| **Activity** | every job the console ran, its output streamed and kept |
+
+How it knows things: the Sprites API for the list, awake or asleep
+(`status` is `running` while awake and `warm` while paused), links and
+checkpoints, none of which wakes a drive; **Look now** runs a read-only probe on
+a drive (`server/console/probe.mjs`) for its release, versions, settings,
+Claude, documents and log, and does wake it. Drives already awake are looked at
+by themselves, every five minutes while a console tab is open. The console
+polls nothing when no console tab is open.
+
+How it acts: every action is a job running the same tools as this page
+describes (`sprite-deploy.sh`, `sprite-provision.sh`, `release.sh`, the Sprites
+CLI, git, npm), one job at a time per drive, output kept in
+`/drive/.marble/console/jobs/`. A deploy of main runs the deploy script from a
+checkout of that commit (`/home/sprite/src/marble-drive-ship`). A drive whose
+checkpoint store is stuck is retried without a checkpoint and remembered
+(**Try them again** clears it). Settings are rewritten from a fresh read of
+`sprite.env` and applied with `release.sh apply` (admin-p1: `apply-when-idle`).
+No passphrase or key reaches a log or a cache file; a passphrase reaches the
+page only on **Show** or **Copy**. A new drive's roster entry is written on
+admin-p1 (`~/.config/marble-drive/testers.json`), the machine that made it.
+
 ## Tools
 
 | Command | Does |
@@ -169,7 +204,8 @@ api` (or `subscription`, then `claude login` in their console). Send the
 printed note. Loop over several under `bash`, not zsh: zsh does not split an
 unquoted variable into words.
 
-**Update everyone.** `tools/sprite-deploy.sh --all --list`, then `--all`, then
+**Update everyone.** In the console: Ship, read the plan, Ship. From a
+terminal: `tools/sprite-deploy.sh --all --list`, then `--all`, then
 `tools/sprite-deploy.sh admin-p1`. `t-irene` and `t-sam` currently need
 `--no-checkpoint` (see Troubleshooting).
 
@@ -229,8 +265,6 @@ not more than a day unattended (see "Staying awake, and sleeping").
 - **UI updates to existing drives:** a `Marble Updates/` folder in every drive,
   each update a note with a "Merge into my Drive" button that briefs the
   person's own agent.
-- **The admin console app** on admin-p1: every sprite, its release, awake or
-  paused, deploy and rollback buttons, the roster, add or remove a tester.
 - **The front door:** sign-up, sign-in and routing, replacing passphrases and
   provisioning by hand; then limits and cost per person.
 - **Labels:** move every user to `marble-user` (`--all` already accepts it).

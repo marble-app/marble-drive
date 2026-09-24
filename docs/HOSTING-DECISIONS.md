@@ -269,6 +269,39 @@ hung one does not. Every limit counts **awake time**: a clock that adds at most
 two ticks across any gap, so a freeze adds nothing. Letting go freezes; the
 only thing that ends a turn is the stall rule, on the same progress and clock.
 
+### 21. The console: the tools, with a page in front of them
+
+**Asked for.** One app on admin-p1 to monitor and manage every drive, ship
+marble-drive and marble, and run the workshop; in Marble's design system;
+designed and built without stopping for questions.
+
+**Chose.**
+- *A document, with the host's code.* Console is a document in the drive, so
+  it opens from the Drive like anything else, but everything it does is
+  `runtime/console.js` and `console.css`, injected by the host. The Agents page
+  taught that code kept in a live document drifts from the repo and has to be
+  patched by hand; nothing on the console is the owner's writing to keep.
+- *Never wake a drive to draw a page.* The Sprites API answers who is awake,
+  links and checkpoints for nothing; what only the drive knows is a look, asked
+  for, or taken for free from a drive already awake. A status page that woke
+  six machines on every paint would have been the most expensive page in Marble.
+- *The same tools, not a second way.* Every action runs the scripts the owner
+  runs from a terminal, as a recorded, streamed, stoppable job; a deploy of main
+  runs the deploy script from that very commit, so the release script and the
+  Claude pin match what ships.
+- *Safety at the edges:* on only with the setting and a passphrase; changing
+  requests only from the page's own origin; passphrases on explicit request
+  only, and never in a log or a cache; admin-p1 never public, never restored or
+  removed from itself; restore and remove need the drive's name typed.
+- *Considered and left out:* money (the Sprites API reports no usage; awake
+  time stands in), editing a person's documents (their drive is theirs; Open
+  drive is the way in), and anything that would poll a drive to keep the page
+  fresh.
+
+**Found on the way.** `status: warm` had been read as "the API cannot tell";
+held open with an exec, the same sprite read `running`, so `warm` is paused and
+the list is honest.
+
 ## Traps worth remembering
 
 | Trap | How it showed up | Lesson |
@@ -288,4 +321,5 @@ only thing that ends a turn is the stall rule, on the same progress and clock.
 | "No output" is not "no work" | a long quiet build was killed as stalled | read the process tree's CPU and I/O |
 | An open connection is activity | a forgotten tab kept a sprite billing | streams rest with their tab; the host closes the rest |
 | Renewing a Sprites task by POSTing its name again | a 409 every renewal; every hold lapsed after 5 min, unseen because the proof's turn took 57 s | extend with `PUT /v1/tasks/<name>`; prove a limit by outlasting it |
+| A status page that reads the machine it reports on | would wake every drive it drew | read the platform's API; look inside only when asked, or when awake anyway |
 | A sprite pauses about a second after its last connection, not 30 s | a turn sent with no tab open froze before keep-awake's first 15 s check | take the hold when work starts, not on a timer |

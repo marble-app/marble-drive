@@ -21,6 +21,10 @@ runbooks and troubleshooting: `docs/HOSTING.md`; why each choice was made:
 
 `tools/sprite-deploy.sh --all --list` shows who `--all` reaches.
 
+The owner also runs all of this from **Console** on admin-p1 (`/a/Console`,
+`server/console/`): drives, shipping, the workshop, and a log of every job.
+It runs the same tools, so a change to them reaches it.
+
 ## Shipping a change
 
 1. Make the change. Run `npm test`, and the browser tests it touches:
