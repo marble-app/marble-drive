@@ -306,11 +306,13 @@ export function createStems({
   }
 
   /** The split in progress, as work that keeps a sprite awake (server/hold.js):
-   *  its process, and how many times it has said anything. */
+   *  its process once it has one, and how many times it has said anything. */
   function work() {
+    // Held from the moment it runs: before its process starts it is copying
+    // the song, which is work too, and the sprite would not wait for it.
     const job = running;
-    if (!job || job.state !== 'running' || !job.child) return [];
-    return [{ key: `stems:${job.id}`, pid: job.child.pid, output: job.output ?? 0, pausedSince: null }];
+    if (!job || job.state !== 'running') return [];
+    return [{ key: `stems:${job.id}`, pid: job.child?.pid, output: job.output ?? 0, pausedSince: null }];
   }
 
   function close() {

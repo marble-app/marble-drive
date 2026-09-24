@@ -104,3 +104,19 @@ test('the host starts it against the sprite socket it is given, and stops it on 
   await drive.close();
   assert.equal(drive.keepAwake.state().active, false);
 });
+
+test('work that starts is held at once, not at the next check', async (t) => {
+  // A sprite pauses about a second after its last connection closes: the
+  // request that started a turn is often the last one, so waiting for the
+  // next 15 s check lets it freeze first.
+  const sprite = await fakeSprite();
+  t.after(sprite.close);
+  let busy = false;
+  const ka = createKeepAwake({ socket: sprite.socket, busy: () => busy, checkMs: 60_000, log: { error() {} } });
+  t.after(() => ka.stop());
+  ka.start();
+  await sleep(50);
+  busy = true;
+  ka.nudge();
+  await until(() => sprite.calls.some((c) => c.method === 'POST'), 300);
+});

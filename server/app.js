@@ -947,7 +947,9 @@ export async function createDrive(config, { log = console, agentProviders = null
 
       if (route === '/stems/split' && req.method === 'POST') {
         const body = await readJson(req, config.maxBodyBytes);
-        return json(res, 200, { ok: true, job: await stems.split(body.path ?? '') });
+        const job = await stems.split(body.path ?? '');
+        keepAwake.nudge();
+        return json(res, 200, { ok: true, job });
       }
 
       if (route === '/stems/cancel' && req.method === 'POST') {
@@ -1044,6 +1046,7 @@ export async function createDrive(config, { log = console, agentProviders = null
       awake,
       progress,
       streams,
+      onActivity: () => keepAwake.nudge(),
       writeOps,
       createDocument,
       restore: restoreDocument,

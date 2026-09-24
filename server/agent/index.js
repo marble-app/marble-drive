@@ -99,7 +99,7 @@ async function claimHost(dir) {
   return { held: null, release: null, why: 'could not take host.lock' };
 }
 
-export async function createAgents({ config, store, writeOps, createDocument, origin, providers, log = console, usage = null, usageHistory = null, sandbox = null, restore = null, onLook = null, forgetWriter = null, awake, progress, streams = null }) {
+export async function createAgents({ config, store, writeOps, createDocument, origin, providers, log = console, usage = null, usageHistory = null, sandbox = null, restore = null, onLook = null, forgetWriter = null, awake, progress, streams = null, onActivity = null }) {
   const dir = path.join(store.marbleDir, 'agents');
   const lock = await claimHost(dir);
   if (!lock.release) {
@@ -109,14 +109,14 @@ export async function createAgents({ config, store, writeOps, createDocument, or
     throw Object.assign(new Error(why), { code: 'EAGENTSHELD' });
   }
   try {
-    return await boot({ config, store, writeOps, createDocument, origin, providers, log, dir, lock, usage, usageHistory, sandbox, restore, onLook, forgetWriter, awake, progress, streams });
+    return await boot({ config, store, writeOps, createDocument, origin, providers, log, dir, lock, usage, usageHistory, sandbox, restore, onLook, forgetWriter, awake, progress, streams, onActivity });
   } catch (err) {
     await lock.release();
     throw err;
   }
 }
 
-async function boot({ config, store, writeOps, createDocument, origin, providers, log, dir, lock, usage, usageHistory = null, sandbox = null, restore = null, onLook = null, forgetWriter = null, awake, progress, streams = null }) {
+async function boot({ config, store, writeOps, createDocument, origin, providers, log, dir, lock, usage, usageHistory = null, sandbox = null, restore = null, onLook = null, forgetWriter = null, awake, progress, streams = null, onActivity = null }) {
   const agentStore = createAgentStore({ dir, defaultProvider: config.agentProvider, log });
   await agentStore.ready();
   const keys = createKeyStore({ file: config.agentKeysFile });
@@ -177,7 +177,12 @@ async function boot({ config, store, writeOps, createDocument, origin, providers
     // on what "awake" and "progress" mean. Undefined falls to the runner's own.
     awake,
     progress,
-    publish: hub.publish,
+    // Every event a turn publishes is a sign of work, and the host's keep-awake
+    // looks at once rather than at its next check (server/keep-awake.js).
+    publish: (...args) => {
+      hub.publish(...args);
+      onActivity?.();
+    },
     publishAsk: hub.publishAsk,
     limits: {
       maxRunning: config.agentMaxRunning,

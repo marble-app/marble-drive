@@ -71,7 +71,10 @@ if (step === 'quiet') {
   const settings = await (await call('/agent/settings')).json();
   const provider = settings.claudeAuth === 'api' ? 'claude-api' : 'claude-subscription';
   const { id } = await (await call('/agent/conversations', { method: 'POST', body: JSON.stringify({ provider }) })).json();
-  const prompt = 'Run exactly this one shell command with the Bash tool, with a 400000 ms timeout, and nothing else: `sleep 300 && echo slept`. Then reply with just the word done.';
+  // Not `sleep`: Claude Code refuses a foreground sleep. A timer in node is
+  // just as silent, and uses no CPU, so only the hold's 30-minute grace keeps
+  // the sprite up.
+  const prompt = 'This is a test of a long quiet job. Run exactly this one shell command with the Bash tool, in the foreground, with a 400000 ms timeout, and nothing else: `node -e "setTimeout(() => console.log(\'waited\'), 300000)"`. Then reply with just the word done.';
   startBeat();
   const sent = await call(`/agent/conversations/${id}/turns`, {
     method: 'POST',

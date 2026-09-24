@@ -124,6 +124,7 @@ test('a running split is work that keeps the sprite awake: its process and how m
   const { stems } = await setup('hang');
   assert.deepEqual(stems.work(), []);
   const job = await stems.split('Songs/one.mp3');
+  assert.equal(stems.work().length, 1, 'held from the moment it is asked for, before its process starts');
   await new Promise((r) => setTimeout(r, 150));
   const [item] = stems.work();
   assert.equal(item.key, `stems:${job.id}`);

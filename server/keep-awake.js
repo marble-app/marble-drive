@@ -7,7 +7,8 @@
 // (`busy`), it holds a task on the sprite's own API socket, renews it before it
 // expires, and lets it go when the work is done.
 //
-// Checked every 15 seconds, inside the sprite's idle window. On any machine
+// Checked every 15 seconds, and at once whenever work may have started (nudge):
+// the sprite pauses within about a second of its last connection. On any machine
 // without `/.sprite/api.sock` this does nothing, not even a timer.
 
 import fs from 'node:fs';
@@ -88,6 +89,12 @@ export function createKeepAwake({
       timer = null;
       await asking;
       if (held) await letGo().catch(() => {});
+    },
+    /** Work may have started: look now, not at the next check. A sprite pauses
+     *  about a second after its last connection closes, and the request that
+     *  started the work is often that connection. */
+    nudge() {
+      if (timer) check();
     },
     state: () => ({ active: Boolean(timer), held }),
   };

@@ -93,15 +93,19 @@ The service's environment is the release script's defaults
   flags the host passes). The owner's subscription is shared with two friends
   by his choice; Anthropic's consumer terms are for one person, so a
   Console key per friend is the path for anyone else.
-- **Staying awake, and sleeping:** a sprite pauses about 30 s after its last
-  connection, freezing every process. Two things keep it up, and both let go:
+- **Staying awake, and sleeping:** a sprite pauses about a second after its
+  last connection closes (Fly's docs say 30 s; measured on t-bryan, it is
+  immediate), freezing every process. Two things keep it up, and both let go:
   - **Tabs.** Every page runs `runtime/tab-rest.js` first: a tab hidden for
     60 s, or shown with no input for 10 min, closes its live streams, and
     reopens them and catches up on the next input. The host closes the streams
     of a tab that has not reported use (`POST /tab/alive`) in 15 min and answers
     its reconnect 204 (`server/streams.js`).
   - **Work.** While a turn or a stem split is getting somewhere, the host holds
-    a Sprites task (`server/keep-awake.js`) so it outlives its tab. It lets go
+    a Sprites task (`server/keep-awake.js`) so it outlives its tab. The task is
+    taken the moment work starts (every agent event, and a split being asked
+    for, nudges it), because the request that started the work is often the
+    last connection. It lets go
     after 10 min of an unanswered question, 30 min without progress (output, or
     CPU and I/O of its processes), or 24 h since anyone used the drive
     (`server/hold.js`). Letting go freezes the work; it carries on when someone

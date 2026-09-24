@@ -137,11 +137,14 @@ became a regression test.
 
 ### 10. A sprite stays awake while an agent works
 
-**Found in the docs, then proved.** A sprite pauses about 30 s after its last
+**Found in the docs, then proved.** A sprite pauses after its last
 connection and freezes every process; a turn outlives its tab. The host now
 holds a Sprites task while anything runs. Proved by starting a turn, cutting
 every connection, and reading the event timestamps afterwards: it finished 57 s
-later, not when the sprite was next woken.
+later, not when the sprite was next woken. That run had a connection open when the turn
+began. On 2026-09-24 a turn sent with nothing else connected froze within a
+second, before keep-awake's first 15 s check, so the hold is now taken the
+moment work starts.
 
 ### 11. Claude Code is pinned per release, from the repository
 
@@ -284,3 +287,4 @@ only thing that ends a turn is the stall rule, on the same progress and clock.
 | A frozen machine's timers fire all at once on waking | a turn frozen overnight would be "stalled" the moment its owner looked | measure limits in awake time, not wall time |
 | "No output" is not "no work" | a long quiet build was killed as stalled | read the process tree's CPU and I/O |
 | An open connection is activity | a forgotten tab kept a sprite billing | streams rest with their tab; the host closes the rest |
+| A sprite pauses about a second after its last connection, not 30 s | a turn sent with no tab open froze before keep-awake's first 15 s check | take the hold when work starts, not on a timer |
