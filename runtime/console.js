@@ -429,7 +429,9 @@
     const meta = row.querySelector('.row-meta');
     const sha = releaseSha(d.release);
     const facts = [
-      sha ? `${sha.slice(0, 7)}${d.behind > 0 ? ` · ${d.behind} behind` : ''}` : null,
+      sha ? (d.releaseFrom === 'checkpoint'
+        ? `${sha.slice(0, 7)} or later`
+        : `${sha.slice(0, 7)}${d.behind > 0 ? ` · ${d.behind} behind` : ''}`) : null,
       seen?.claudeAuth === 'login' ? 'Claude login' : seen?.claudeAuth === 'api' ? 'API key' : null,
       d.access,
     ].filter(Boolean);
@@ -593,10 +595,11 @@
     const history = (seen?.history ?? []).filter((r) => r !== live).reverse();
     const status = !live ? h('span.faint', { text: 'Not known yet: Look now reads it' })
       : isLocal(live) ? h('span.warn', { text: "The workshop's copy, not main" })
+        : d.releaseFrom === 'checkpoint' ? h('span.soft', { text: d.behind > 0 ? `At most ${d.behind} behind main: known from its last deploy's checkpoint, and a deploy made without one would not show. Look now to be sure.` : 'Known from its last deploy’s checkpoint.' })
         : d.behind === 0 ? h('span.good', { text: 'Up to date with main' })
           : d.behind > 0 ? h('span.warn', { text: `${d.behind} behind main` })
             : h('span.faint', { text: 'Not on main' });
-    const source = d.releaseFrom === 'checkpoint' ? 'from its last deploy' : seen ? `looked ${since(seen.lookedAt)}` : null;
+    const source = d.releaseFrom === 'checkpoint' ? 'from a checkpoint' : d.releaseFrom === 'console' ? 'as deployed from here' : seen ? `looked ${since(seen.lookedAt)}` : null;
     return section('Release', source,
       live ? h('p.lede', {}, h('span.sha', { text: sha ? sha.slice(0, 7) : live }), ' ', h('b', { text: subject ?? (isLocal(live) ? 'a working copy' : '') }), when ? h('span.faint', { text: ` · ${clock(when)}` }) : null) : null,
       h('p.lede', {}, status),
@@ -975,7 +978,7 @@
     if (!changed('ship', [S.fleet, S.workshop?.main, liveJobs(), notes(''), S.arrived.has('ship')])) return;
     const shop = S.workshop;
     const commits = shop?.main?.commits ?? [];
-    const known = S.fleet.filter((d) => Number.isFinite(d.behind));
+    const known = S.fleet.filter((d) => Number.isFinite(d.behind) && d.releaseFrom !== 'checkpoint');
     const head = commits[0];
     const main = h('div.card.wide', { style: { '--i': '0' } },
       h('div.card-head', {}, h('h2', { text: 'Main' }),
@@ -997,10 +1000,10 @@
         const sha = releaseSha(d.release);
         return h('tr', { style: { '--i': String(i) } },
           h('td', {}, h('span.name', {}, h('span.dot', { 'data-state': running(d.name) ? 'busy' : failedUnseen(d) ? 'failed' : d.awake ? 'awake' : 'asleep' }), d.name)),
-          h('td', {}, sha ? h('span.sha', { text: sha.slice(0, 7) }) : h('span.faint', { text: '—' }), isLocal(d.release) ? h('span.faint', { text: ' local' }) : null),
+          h('td', {}, sha ? h('span.sha', { text: sha.slice(0, 7) }) : h('span.faint', { text: '—' }), isLocal(d.release) ? h('span.faint', { text: ' local' }) : null, d.releaseFrom === 'checkpoint' ? h('span.faint', { text: ' or later' }) : null),
           h('td', {}, running(d.name) ? h('span.good', { text: `${running(d.name).title}…` })
             : d.behind === 0 ? h('span.good', { text: 'Up to date' })
-              : d.behind > 0 ? h('span.warn', { text: `${d.behind} behind` }) : h('span.faint', { text: d.release ? 'Not on main' : 'Not known yet' })),
+              : d.behind > 0 ? h('span.warn', { text: d.releaseFrom === 'checkpoint' ? `Up to ${d.behind} behind` : `${d.behind} behind` }) : h('span.faint', { text: d.release ? 'Not on main' : 'Not known yet' })),
           h('td', {}, d.lastJob ? h('span', { class: d.lastJob.state === 'failed' ? 'bad' : 'soft', text: `${d.lastJob.title.replace(` ${d.name}`, '').replace(/ to$/, '')}${d.lastJob.state === 'failed' ? ', failed' : ''} · ${since(d.lastJob.endedAt)}` }) : h('span.faint', { text: '—' })),
           h('td.acts', {},
             jobButton({ key: `deploy:${d.name}`, target: d.name, kind: 'deploy', label: 'Deploy', cls: 'quiet', onclick: (e) => deployPlan(e.currentTarget, d.name, 'main') }),

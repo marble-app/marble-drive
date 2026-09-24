@@ -116,3 +116,15 @@ test('a drive nobody has looked inside still says what it runs, from its last de
   assert.equal(irene.seen, null);
   assert.ok(!(await h.fleet.calls()).some((c) => c[0] === 'exec' && c.includes('t-irene')), 'nothing woke it');
 });
+
+test('a deploy the console finished is known exactly, and outranks an older checkpoint', async (t) => {
+  const h = await host({ MARBLE_DRIVE_CONSOLE: '1', MARBLE_DRIVE_SECRET: 'pw-1234' });
+  t.after(() => h.close());
+  await h.fleet.set({ checkpoints: { 't-sam': [{ id: 'v2', create_time: '2026-09-20T05:00:00Z', comment: 'before deploy 20260920T050000Z-c949a34' }] } });
+  const jobs = h.drive.console.jobs;
+  const job = jobs.start({ kind: 'deploy', title: 'Deploy main to t-sam', target: 't-sam', run: async () => ({ sha: '0dd39ac1234567', name: 't-sam' }) });
+  for (let i = 0; i < 50 && jobs.get(job.id).state === 'running'; i += 1) await new Promise((r) => setTimeout(r, 20));
+  const sam = (await (await h.call('/console/api/state')).json()).fleet.find((d) => d.name === 't-sam');
+  assert.equal(sam.releaseFrom, 'console');
+  assert.match(sam.release, /0dd39ac1234567$/);
+});

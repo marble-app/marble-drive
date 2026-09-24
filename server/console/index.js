@@ -101,10 +101,20 @@ export async function createConsole({ config, store, streams = null, log = conso
     const stuck = new Set(actions.stuck());
     const recent = jobs.list();
     return Promise.all(fleet.map(async (row) => {
+      // Three ways to know what a drive runs, newest wins: a look (certain), a
+      // deploy this console finished (certain), or the last deploy's checkpoint
+      // (a floor: a deploy made without a checkpoint does not show there).
       const seen = await inspector.cached(row.name);
       const hint = await lastDeploy(row.name);
-      const fromLook = seen?.release && (!hint || Date.parse(seen.lookedAt) >= Date.parse(hint.at));
-      const release = fromLook ? seen.release : hint?.release ?? seen?.release ?? null;
+      const shipped = recent.find((j) => j.state === 'done' && j.result?.sha
+        && ((j.kind === 'deploy' && j.target === row.name) || (j.kind === 'ship' && j.result.deployed?.includes(row.name))));
+      const answers = [
+        seen?.release ? { release: seen.release, at: Date.parse(seen.lookedAt), from: 'look' } : null,
+        shipped ? { release: `console-${shipped.result.sha}`, at: shipped.endedAt, from: 'console' } : null,
+        hint ? { release: hint.release, at: Date.parse(hint.at), from: 'checkpoint' } : null,
+      ].filter(Boolean).sort((a, b) => b.at - a.at);
+      const best = answers[0] ?? null;
+      const release = best?.release ?? null;
       const running = jobs.running(row.name) ?? (jobs.running('fleet')?.meta?.targets?.includes(row.name) ? jobs.running('fleet') : null);
       const last = recent.find((j) => j.target === row.name && j.state !== 'running') ?? null;
       return {
@@ -113,7 +123,7 @@ export async function createConsole({ config, store, streams = null, log = conso
         role: row.labels.includes('marble-owner') ? 'owner' : row.labels.some((l) => l === 'marble-tester' || l === 'marble-user') ? 'user' : 'other',
         seen,
         release,
-        releaseFrom: release ? (fromLook || !hint ? 'look' : 'checkpoint') : null,
+        releaseFrom: best?.from ?? null,
         behind: release ? await workshop.behind(release) : null,
         stuckCheckpoints: stuck.has(row.name),
         job: running ? { id: running.id, title: running.title, kind: running.kind } : null,
