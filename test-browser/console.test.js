@@ -119,3 +119,23 @@ test('on a phone the detail slides in and out, and nothing runs off the side', a
   assert.deepEqual(errors, []);
   await page.close();
 });
+
+test('a redraw that lands while a button is held does not lose the click', async () => {
+  const { page } = await world.open();
+  await page.click('.row[data-name="t-sam"]');
+  await page.fill('input[data-key="set:t-sam:MARBLE_DRIVE_ASK_HOLD_MINUTES"]', '5');
+  await page.waitForSelector('.pending .btn.primary');
+  await page.waitForTimeout(300);
+  const box = await page.locator('.pending .btn.primary').boundingBox();
+  let posted = false;
+  page.on('request', (r) => { if (r.method() === 'POST' && r.url().endsWith('/drives/t-sam/settings')) posted = true; });
+  await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
+  await page.mouse.down();
+  // Everything rebuilt from state, as a burst of updates would, mid-press.
+  await page.evaluate(() => window.marbleConsoleReady.redraw());
+  await page.waitForTimeout(120);
+  await page.mouse.up();
+  for (let i = 0; i < 30 && !posted; i += 1) await page.waitForTimeout(100);
+  assert.equal(posted, true, 'the press became a click');
+  await page.close();
+});

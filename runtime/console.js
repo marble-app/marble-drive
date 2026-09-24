@@ -15,7 +15,8 @@
 (() => {
   const mount = document.querySelector('main[data-console]');
   if (!mount || window.marbleConsoleReady) return;
-  window.marbleConsoleReady = true;
+  // Only a flag and a redraw, for tests: the page keeps its state to itself.
+  window.marbleConsoleReady = { redraw: () => { drawn.clear(); paint(); } };
 
   const TRANSIENT = 'data-marble-transient';
   const VIEWS = [['drives', 'Drives'], ['ship', 'Ship'], ['workshop', 'Workshop'], ['activity', 'Activity']];
@@ -202,14 +203,48 @@
 
   // --------------------------------------------------------- painting, once
 
+  // Nothing is rebuilt under a hand: a paint that lands between a press and
+  // its release would replace the button being pressed and the click would be
+  // lost. A paint asked for while a pointer is down waits for it to come up.
   let frame = 0;
+  let holding = false;
+  let waiting = false;
   function paint() {
+    if (holding) {
+      waiting = true;
+      return;
+    }
     if (frame) return;
     frame = requestAnimationFrame(() => {
       frame = 0;
       draw();
     });
   }
+  addEventListener('pointerdown', () => { holding = true; }, true);
+  const letGo = () => {
+    holding = false;
+    if (waiting) {
+      waiting = false;
+      // After the click has been dispatched.
+      setTimeout(paint, 0);
+    }
+  };
+  addEventListener('pointerup', letGo, true);
+  addEventListener('pointercancel', letGo, true);
+
+  // Each region is rebuilt only when what it shows has changed, so a stream of
+  // updates about other drives leaves the one being read, and its controls,
+  // alone. The minute is part of every key, for the ages.
+  const drawn = new Map();
+  const changed = (region, value) => {
+    const key = JSON.stringify([Math.floor(Date.now() / 60_000), value]);
+    if (drawn.get(region) === key) return false;
+    drawn.set(region, key);
+    return true;
+  };
+  const notes = (part) => [...S.said].filter(([k, v]) => k.includes(part) && v.until > Date.now()).map(([k, v]) => [k, v.text])
+    .concat([...S.flash].filter(([k, until]) => k.includes(part) && until > Date.now()).map(([k]) => [k]));
+  const liveJobs = () => S.jobs.filter((j) => j.state === 'running').map((j) => [j.id, j.kind, j.target, j.meta?.source]);
 
   const say = (key, text) => {
     S.said.set(key, { text, until: Date.now() + 6000 });
@@ -474,6 +509,11 @@
       detailPane.querySelector('.pending')?.remove();
       return;
     }
+    if (!changed('detail', [d, S.checkpoints.get(d.name), S.revealed.get(d.name), S.looking.has(d.name), liveJobs(), notes(d.name), S.workshop?.main?.sha, S.open, S.forceDetail])) {
+      pendingBar(d);
+      return;
+    }
+    S.forceDetail = null;
     // Keep what the hand is in: the focused control and its caret survive a paint.
     const active = document.activeElement;
     const focusKey = detailScroll.contains(active) ? active.dataset?.key : null;
@@ -804,7 +844,9 @@
           if (v === '') p.unset.push(key);
           else p.set[key] = v;
         }
-        paint();
+        // The field and the bar answer; the rest of the pane stays as it is.
+        input.closest('.field').toggleAttribute('data-dirty', key in p.set || p.unset.includes(key));
+        pendingBar(d);
       });
       return h('div.field', { 'data-dirty': dirty ? true : null }, h('label', { text: `${label} (${unit})` }), input);
     });
@@ -831,6 +873,7 @@
         if (value.value.trim() === '') p.unset.push(k);
         else p.set[k] = value.value.trim();
         close();
+        S.forceDetail = Date.now();
         paint();
       };
       value.addEventListener('keydown', (e) => { if (e.key === 'Enter') go(); });
@@ -847,6 +890,7 @@
     const old = detailPane.querySelector('.pending');
     const n = changes(d.name);
     const busy = running(d.name, ['settings']);
+    if (old && !changed('pending', [d.name, S.pending.get(d.name), busy?.id, notes(`settings:${d.name}`)])) return;
     if (!n && !busy) {
       old?.remove();
       return;
@@ -856,11 +900,14 @@
     const bar = h('div.pending', { role: 'region', 'aria-label': 'Changes to apply' },
       h('div.say', {}, busy ? 'Applying…' : `${n} change${n === 1 ? '' : 's'}: ${what.join(', ')}`,
         h('small', { text: d.self ? 'Applying restarts this drive when no agent is working.' : `Applying restarts ${d.name}; open tabs reconnect by themselves.` })),
-      h('button.btn.quiet', { type: 'button', text: 'Discard', disabled: busy ? true : null, onclick: () => { S.pending.delete(d.name); paint(); } }),
+      h('button.btn.quiet', { type: 'button', text: 'Discard', disabled: busy ? true : null, onclick: () => { S.pending.delete(d.name); S.forceDetail = Date.now(); paint(); } }),
       jobButton({ key: `settings:${d.name}`, target: d.name, kind: 'settings', cls: 'primary', onclick: async () => {
         const change = { set: { ...p.set }, unset: [...p.unset] };
         const job = await start(`settings:${d.name}`, () => api(`drives/${encodeURIComponent(d.name)}/settings`, { method: 'POST', body: change }));
-        if (job) S.pending.delete(d.name);
+        if (job) {
+          S.pending.delete(d.name);
+          S.forceDetail = Date.now();
+        }
         paint();
       } }),
       said(`settings:${d.name}`));
@@ -921,6 +968,7 @@
   // ------------------------------------------------------------------ ship
 
   function drawShip() {
+    if (!changed('ship', [S.fleet, S.workshop?.main, liveJobs(), notes(''), S.arrived.has('ship')])) return;
     const shop = S.workshop;
     const commits = shop?.main?.commits ?? [];
     const known = S.fleet.filter((d) => Number.isFinite(d.behind));
@@ -1002,6 +1050,7 @@
   shopGrid.append(reposHolder, chatHolder);
   shopPage.append(shopGrid);
   function drawWorkshop() {
+    if (!changed('workshop', [S.workshop, liveJobs(), notes(''), S.chat, S.chatConversation, S.projects, S.conversations, S.arrived.has('workshop')])) return;
     const shop = S.workshop;
     const repos = shop?.repos ?? [];
     shopGrid.classList.toggle('still', S.arrived.has('workshop'));
@@ -1123,6 +1172,7 @@
   const drawnJobs = new Set();
   function drawActivity() {
     const list = S.jobs;
+    if (!changed('activity', [list.map((j) => [j.id, j.state, j.endedAt, j.error]), S.job, S.jobOpen])) return;
     jobsWell.toggleAttribute('data-empty', !list.length);
     const fresh = (id) => {
       const first = !drawnJobs.has(id);
