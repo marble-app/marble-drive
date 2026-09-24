@@ -135,9 +135,11 @@ The two checkouts and the agent that works in them.
 
 - **marble-drive** and **marble**, side by side: branch, head, ahead and behind
   origin, changed files. *Pull* (fast-forward only), *Run tests* (streamed).
-- **marble** also has *Publish*: bump the patch version, run marble's tests,
-  publish to npm, push; then point marble-drive at it, run its tests, commit
-  and push. Its popover lists those steps before it runs them.
+- **marble** also has *Publish*: the next patch version in package.json and
+  both plugin manifests, committed, tagged and pushed, then published (marble's
+  prepublish guard and unit tests run first; npm may ask the owner to approve).
+  marble-drive needs no change: it depends on `file:../marble`, and a deploy
+  installs whatever version that checkout declares.
 - **A workshop chat, on the page:** a live conversation (`<marble-conversation>`)
   in the Marble Drive or Marble project, with the recent workshop chats beside
   it, each opening in Agents. Asking for a change is typing it here.

@@ -217,3 +217,60 @@ test('admin-p1 stays private', async () => {
   assert.equal(done.state, 'done');
   assert.ok((await w.fleet.calls()).some((c) => c.join(' ') === 'config update --url-auth sprite -o marble-drive -s t-sam'));
 });
+
+// Publishing marble: the version and both plugin manifests move together (the
+// package's own test holds them to it), the release is committed, tagged and
+// pushed before npm is asked (marble's prepublish guard wants it pushed), and
+// marble-drive is left alone: it depends on ../marble, and a deploy installs
+// whatever version that checkout declares.
+test('publishing marble bumps the version and its manifests, pushes, then publishes, and leaves marble-drive alone', async () => {
+  const w = await world();
+  const bare = path.join(w.root, 'marble.git');
+  git(w.root, 'init', '-q', '--bare', '-b', 'main', bare);
+  git(w.src, 'clone', '-q', bare, 'marble');
+  const marble = path.join(w.src, 'marble');
+  git(marble, 'checkout', '-q', '-b', 'main');
+  await fsp.mkdir(path.join(marble, '.claude-plugin'));
+  await fsp.writeFile(path.join(marble, 'package.json'), `${JSON.stringify({ name: '@bdhmin/marble', version: '0.2.2' }, null, 2)}\n`);
+  await fsp.writeFile(path.join(marble, '.claude-plugin', 'plugin.json'), `${JSON.stringify({ name: 'marble', version: '0.2.2' }, null, 2)}\n`);
+  await fsp.writeFile(path.join(marble, '.claude-plugin', 'marketplace.json'), `${JSON.stringify({ plugins: [{ name: 'marble', version: '0.2.2' }] }, null, 2)}\n`);
+  git(marble, 'add', '.');
+  git(marble, 'commit', '-q', '-m', 'first');
+  git(marble, 'push', '-q', '-u', 'origin', 'main');
+  const bin = path.join(w.root, 'bin');
+  await fsp.mkdir(bin);
+  // A stand-in npm: `version patch --no-git-tag-version` bumps package.json;
+  // `publish` records what it would have published.
+  await fsp.writeFile(path.join(bin, 'npm'), `#!/usr/bin/env node
+const fs = require('fs');
+const a = process.argv.slice(2);
+fs.appendFileSync(process.env.FAKE_TOOL_LOG, 'npm ' + a.join(' ') + '\\n');
+if (a[0] === 'version') {
+  const p = JSON.parse(fs.readFileSync('package.json', 'utf8'));
+  const v = p.version.split('.').map(Number); v[2] += 1; p.version = v.join('.');
+  fs.writeFileSync('package.json', JSON.stringify(p, null, 2) + '\\n');
+  console.log('v' + p.version);
+}
+if (a[0] === 'publish') console.log('+ @bdhmin/marble@' + JSON.parse(fs.readFileSync('package.json', 'utf8')).version);
+`, { mode: 0o755 });
+  const actions = createActions({
+    sprites: createSprites({ bin: w.fleet.bin, org: 'marble-drive' }), inspector: w.inspector, jobs: w.jobs,
+    workshop: createWorkshop({ src: w.src, npmVersion: async () => '0.2.2' }),
+    src: w.src, self: 'admin-p1', stateDir: w.stateDir,
+    env: { ...process.env, PATH: `${bin}:${process.env.PATH}`, FAKE_TOOL_LOG: path.join(w.root, 'tools.log') },
+  });
+  const mdBefore = git(w.md, 'rev-parse', 'HEAD');
+  const done = await settle(w.jobs, actions.publish());
+  assert.equal(done.state, 'done', await w.jobs.output(done.id));
+  assert.equal(done.result.version, '0.2.3');
+  const read = async (f) => JSON.parse(await fsp.readFile(path.join(marble, f), 'utf8'));
+  assert.equal((await read('.claude-plugin/plugin.json')).version, '0.2.3');
+  assert.equal((await read('.claude-plugin/marketplace.json')).plugins[0].version, '0.2.3');
+  assert.equal(git(marble, 'status', '--porcelain'), '', 'all of it committed');
+  assert.equal(git(marble, 'log', '-1', '--format=%s'), 'marble 0.2.3');
+  assert.equal(git(marble, 'rev-parse', 'v0.2.3^{commit}'), git(marble, 'rev-parse', 'HEAD'), 'tagged');
+  assert.equal(git(bare, 'rev-parse', 'main'), git(marble, 'rev-parse', 'HEAD'), 'pushed before publishing');
+  const npm = (await w.tools()).filter((l) => l.startsWith('npm '));
+  assert.deepEqual(npm.map((l) => l.split(' ')[1]), ['version', 'publish'], 'no separate full test run: prepublishOnly runs the guard and unit tests');
+  assert.equal(git(w.md, 'rev-parse', 'HEAD'), mdBefore, 'marble-drive untouched');
+});

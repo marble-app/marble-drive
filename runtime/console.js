@@ -1101,10 +1101,10 @@
     openPop(trigger, (close) => h('div.pop-body', {},
       h('h4', { text: `Publish marble ${next}` }),
       h('ol.steps', {},
-        h('li', { text: 'Stops if either checkout has uncommitted changes' }),
-        h('li', { text: 'marble: run its tests, bump to the next patch, publish to npm, push' }),
-        h('li', { text: `marble-drive: take marble ^${next}, run its tests, commit, push to main` }),
-        h('li', { text: 'Nothing reaches a drive until you ship' })),
+        h('li', { text: 'Stops if marble has uncommitted changes' }),
+        h('li', { text: `Moves package.json and both plugin manifests to ${next}; commits, tags and pushes` }),
+        h('li', { text: 'Publishes to npm, after its own guard and unit tests; npm may print a link for you to approve' }),
+        h('li', { text: `marble-drive needs nothing: the next deploy installs ${next}. Nothing reaches a drive until you ship` })),
       h('div.foot', {}, h('button.btn.quiet', { type: 'button', text: 'Cancel', onclick: close }),
         h('button.btn.primary', { type: 'button', text: `Publish ${next}`, onclick: () => { close(); start('publish', () => api('workshop/marble/publish', { method: 'POST' })); } }))));
   }

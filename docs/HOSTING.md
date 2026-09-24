@@ -156,7 +156,7 @@ so it ships with every deploy; the document is only where it lives.
 |---|---|
 | **Drives** | every drive, awake or asleep and since when, without waking any; a drive's release, health, Claude (login or key, sign in or out), access (public or private, the passphrase: show, copy, new), settings (`sprite.env`, applied with a restart), checkpoints (make, restore by typing the name), and removing a tester; **New drive** provisions one |
 | **Ship** | main's recent commits and which drives have them; each drive against main; **Ship** shows the plan (`sprite-deploy.sh --print-plan`) before deploying main to every user and then admin-p1; **Try the workshop on t-bryan** |
-| **Workshop** | both checkouts (branch, head, changes, against origin), pull, run tests, **Publish** marble (test, bump, publish, push, then take it up in marble-drive, test, commit, push), and a workshop chat in the Marble Drive or Marble project |
+| **Workshop** | both checkouts (branch, head, changes, against origin), pull, run tests, **Publish** marble (the next patch in package.json and both plugin manifests, committed, tagged and pushed, then `npm publish`, which runs marble's guard and unit tests; npm may ask you to approve it). marble-drive needs no change: it depends on `file:../marble`, and a deploy installs the version that checkout declares, and a workshop chat in the Marble Drive or Marble project |
 | **Activity** | every job the console ran, its output streamed and kept |
 
 How it knows things: the Sprites API for the list, awake or asleep

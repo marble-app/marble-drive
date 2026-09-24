@@ -450,31 +450,42 @@ export function createActions({ sprites, inspector, jobs, workshop, src, self, s
     });
   }
 
-  /** marble, published and taken up: bump, test, publish, push; then point
-   *  marble-drive at it, test, commit, push. Each step stops the next. */
+  /** marble, published: the next patch version in package.json and both
+   *  plugin manifests (marble's own test holds them together), committed,
+   *  tagged and pushed (its prepublish guard wants every packed file pushed),
+   *  then published; prepublishOnly runs the guard and the unit tests. Nothing
+   *  in marble-drive changes: it depends on ../marble, and a deploy installs
+   *  whatever version that checkout declares. npm may ask the owner to approve
+   *  the publish; the link it prints is in the job's output. */
   function publish() {
     return jobs.start({
       kind: 'publish',
       title: 'Publish marble',
       target: 'workshop',
       run: async (ctx) => {
-        for (const [dir, repo] of [[marbleDir, 'marble'], [md, 'marble-drive']]) {
-          const { out } = await ctx.exec('git', ['-C', dir, 'status', '--porcelain'], { env: jobEnv, quiet: true });
-          if (out.trim()) throw new Error(`${repo} has changes that are not committed; commit them first`);
+        const { out: dirty } = await ctx.exec('git', ['-C', marbleDir, 'status', '--porcelain'], { env: jobEnv, quiet: true });
+        if (dirty.trim()) throw new Error('marble has changes that are not committed; commit them first');
+        ctx.say('==> marble: the next patch version');
+        const { out: bumped } = await ctx.exec('npm', ['version', 'patch', '--no-git-tag-version'], { cwd: marbleDir, env: jobEnv });
+        const version = bumped.trim().split('\n').pop().replace(/^v/, '');
+        for (const file of ['.claude-plugin/plugin.json', '.claude-plugin/marketplace.json']) {
+          const full = path.join(marbleDir, file);
+          const text = await fsp.readFile(full, 'utf8').catch(() => null);
+          if (text === null) continue;
+          await fsp.writeFile(full, text.replace(/("version":\s*")[^"]*(")/g, `$1${version}$2`));
         }
-        ctx.say('==> marble: tests');
-        await ctx.exec('npm', ['test'], { cwd: marbleDir, env: jobEnv });
-        ctx.say('==> marble: a new patch version');
-        const { out: bumped } = await ctx.exec('npm', ['version', 'patch', '-m', 'marble %s'], { cwd: marbleDir, env: jobEnv });
-        const version = bumped.trim().replace(/^v/, '');
-        ctx.say(`==> marble: publishing ${version}`);
-        await ctx.exec('npm', ['publish'], { cwd: marbleDir, env: jobEnv });
-        await ctx.exec('git', ['-C', marbleDir, 'push', '--follow-tags'], { env: jobEnv });
-        ctx.say(`==> marble-drive: taking marble ${version}`);
-        await ctx.exec('npm', ['install', `@bdhmin/marble@^${version}`], { cwd: md, env: jobEnv });
-        await ctx.exec('npm', ['test'], { cwd: md, env: jobEnv });
-        await ctx.exec('git', ['-C', md, 'commit', '-am', `Use marble ${version}`], { env: jobEnv });
-        await ctx.exec('git', ['-C', md, 'push'], { env: jobEnv });
+        await ctx.exec('git', ['-C', marbleDir, 'commit', '-q', '-am', `marble ${version}`], { env: jobEnv });
+        await ctx.exec('git', ['-C', marbleDir, 'tag', `v${version}`], { env: jobEnv });
+        ctx.say(`==> marble: pushing ${version}`);
+        await ctx.exec('git', ['-C', marbleDir, 'push', '--quiet', '--follow-tags'], { env: jobEnv });
+        ctx.say(`==> marble: publishing ${version} (npm may print a link for you to approve it)`);
+        const published = await ctx.exec('npm', ['publish'], { cwd: marbleDir, env: jobEnv, allowFail: true });
+        if (published.code !== 0) {
+          if (/EOTP|one-time password/.test(`${published.out}${published.err}`)) {
+            throw new Error(`npm wants your approval: ${version} is committed and pushed; publish it from a console on this sprite (cd ~/src/marble && npm publish)`);
+          }
+          throw new Error(`npm did not publish ${version}`);
+        }
         return { version };
       },
     });
