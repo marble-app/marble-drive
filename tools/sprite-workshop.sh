@@ -73,7 +73,11 @@ checkout() { # checkout <name> <url>
   local dir="$SRC/$1"
   if [[ ! -d "$dir/.git" ]]; then
     git clone --quiet "$2" "$dir" && echo "   $1: cloned" || { echo "   $1: could not clone (for the private marble repo, pass --github)"; return 1; }
-  elif [[ -n "$(git -C "$dir" status --porcelain)" ]]; then
+  fi
+  # npm marks a linked package'"'"'s bin executable, which git would report as a
+  # change forever and --local would pack as one; the bit is npm'"'"'s, not ours.
+  git -C "$dir" config core.fileMode false
+  if [[ -n "$(git -C "$dir" status --porcelain)" ]]; then
     echo "   $1: has local changes; left as it is"
   else
     git -C "$dir" fetch --quiet origin && git -C "$dir" merge --ff-only --quiet "origin/$(git -C "$dir" rev-parse --abbrev-ref HEAD)" \
