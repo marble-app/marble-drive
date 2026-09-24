@@ -183,6 +183,11 @@ tools/sprite-deploy.sh <sprite> --org <org> --rollback # the release before
   its URL private to the org as well ("sprite" auth), so it has both.
   Agents need a `claude login` in `sprite console` or an API key in Agents
   settings; a sprite made for someone else never carries anyone's login.
+- **The workshop.** `tools/sprite-workshop.sh <sprite>` makes the owner's
+  sprite the workshop: checkouts of `marble-drive` and `marble` in
+  `/home/sprite/src`, the agent projects "Marble Drive" and "Marble", and
+  commits as the owner. GitHub, npm and Sprites are signed in there with
+  `gh auth login`, `npm login` and `sprite login`.
 
 ## Everything else
 
