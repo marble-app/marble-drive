@@ -153,3 +153,42 @@ test('an answer it cannot read counts as busy, and it gives up without switching
   assert.ok(calls.includes('services delete marble-switch'));
   assert.match(switchLog, /gave up/);
 });
+
+// The console changes a drive's settings by rewriting its sprite.env, then
+// asking for the live release again: `apply` restarts the service with the new
+// settings through the same health check, and leaves the history alone.
+// admin-p1 applies its own when no agent is working.
+async function applyStubs(command) {
+  const home = await fsp.mkdtemp(path.join(os.tmpdir(), 'sprite-apply-'));
+  const bin = path.join(home, 'bin');
+  await fsp.mkdir(bin, { recursive: true });
+  const log = path.join(home, 'sprite-env.log');
+  await fsp.writeFile(path.join(bin, 'sprite-env'), `#!/bin/sh\nprintf '%s\\n' "$*" >> '${log}'\nexit 0\n`, { mode: 0o755 });
+  for (const name of ['curl', 'sudo']) await fsp.writeFile(path.join(bin, name), '#!/bin/sh\nexit 0\n', { mode: 0o755 });
+  for (const r of ['r1', 'r2']) await fsp.mkdir(path.join(home, 'app', 'releases', r, 'marble-drive'), { recursive: true });
+  await fsp.symlink(path.join(home, 'app', 'releases', 'r2'), path.join(home, 'app', 'current'));
+  await fsp.writeFile(path.join(home, 'app', 'history'), 'r1\nr2\n');
+  await fsp.mkdir(path.join(home, '.config', 'marble-drive'), { recursive: true });
+  await fsp.writeFile(path.join(home, '.config', 'marble-drive', 'sprite.env'), 'MARBLE_DRIVE_AWAKE_MAX_HOURS=12\n');
+  const run = spawnSync('bash', [SCRIPT, command], {
+    env: { ...process.env, HOME: home, PATH: `${bin}:${process.env.PATH}`, MARBLE_SPRITE_DRIVE: path.join(home, 'drive') },
+    encoding: 'utf8',
+  });
+  const calls = (await fsp.readFile(log, 'utf8').catch(() => '')).split('\n').filter(Boolean);
+  return { run, calls, home };
+}
+
+test('apply restarts the live release with the new settings and keeps the history', async () => {
+  const { run, calls, home } = await applyStubs('apply');
+  assert.equal(run.status, 0, run.stderr);
+  const create = calls.find((line) => line.startsWith('services create marble-drive'));
+  assert.ok(create && create.includes('MARBLE_DRIVE_AWAKE_MAX_HOURS=12'), calls.join('\n'));
+  assert.ok((await fsp.readlink(path.join(home, 'app', 'current'))).endsWith('/r2'));
+  assert.equal(await fsp.readFile(path.join(home, 'app', 'history'), 'utf8'), 'r1\nr2\n');
+});
+
+test('apply-when-idle hands the live release to marble-switch', async () => {
+  const { run, calls } = await applyStubs('apply-when-idle');
+  assert.equal(run.status, 0, run.stderr);
+  assert.ok(calls.some((line) => line.startsWith('services create marble-switch') && line.includes('switch-when-idle,r2')), calls.join('\n'));
+});

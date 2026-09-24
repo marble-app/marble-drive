@@ -7,6 +7,8 @@
 #   release.sh hand-off <name>                  switch later, when no agent is working
 #   release.sh rollback-when-idle               rollback, the same way
 #   release.sh switch-when-idle <name>          (what hand-off runs, as its own service)
+#   release.sh apply                            restart the live release with this sprite's settings
+#   release.sh apply-when-idle                  apply, the same way as hand-off
 #
 # <source> is git:<sha> (fetched from the public marble-drive repo) or
 # tar:<path> (a pack of the owner's working copy, for --local).
@@ -260,6 +262,14 @@ rollback() {
   switch "$previous"
 }
 
+# The live release, for applying new settings: the console rewrites sprite.env
+# and switches to what is already current, so the service is recreated with
+# them through the same health check and fall-back as any switch.
+live() {
+  [[ -L "$CURRENT" ]] || die "nothing is current"
+  basename "$(readlink "$CURRENT")"
+}
+
 mkdir -p "$RELEASES"
 case "${1:-}" in
   stage) stage "$2" "$3" "$4" "$5" ;;
@@ -268,5 +278,7 @@ case "${1:-}" in
   hand-off) hand_off "$2" ;;
   rollback-when-idle) previous="$(leave_current)" || exit 1; hand_off "$previous" ;;
   switch-when-idle) switch_when_idle "$2" ;;
-  *) die "usage: release.sh stage <name> <source> <marble> <claude> | switch <name> | rollback" ;;
+  apply) name="$(live)" || exit 1; switch "$name" ;;
+  apply-when-idle) name="$(live)" || exit 1; hand_off "$name" ;;
+  *) die "usage: release.sh stage <name> <source> <marble> <claude> | switch <name> | rollback | apply" ;;
 esac
