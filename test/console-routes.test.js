@@ -101,3 +101,18 @@ test('the Console document gets the console\'s code; no other document does', as
   const css = await h.call('/runtime/console.css');
   assert.match(css.headers.get('content-type'), /text\/css/);
 });
+
+test('a drive nobody has looked inside still says what it runs, from its last deploy’s checkpoint', async (t) => {
+  const h = await host({ MARBLE_DRIVE_CONSOLE: '1', MARBLE_DRIVE_SECRET: 'pw-1234' });
+  t.after(() => h.close());
+  await h.fleet.set({ checkpoints: { 't-irene': [
+    { id: 'v4', create_time: '2026-09-24T05:36:00Z', comment: 'before deploy 20260924T053600Z-0dd39ac' },
+    { id: 'v3', create_time: '2026-09-23T05:00:00Z', comment: 'from the console' },
+  ] } });
+  const state = await (await h.call('/console/api/state')).json();
+  const irene = state.fleet.find((d) => d.name === 't-irene');
+  assert.equal(irene.release, '20260924T053600Z-0dd39ac');
+  assert.equal(irene.releaseFrom, 'checkpoint');
+  assert.equal(irene.seen, null);
+  assert.ok(!(await h.fleet.calls()).some((c) => c[0] === 'exec' && c.includes('t-irene')), 'nothing woke it');
+});

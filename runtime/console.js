@@ -427,7 +427,7 @@
     age.textContent = d.awake ? 'awake' : ago(d.since);
     age.toggleAttribute('data-awake', d.awake);
     const meta = row.querySelector('.row-meta');
-    const sha = releaseSha(seen?.release);
+    const sha = releaseSha(d.release);
     const facts = [
       sha ? `${sha.slice(0, 7)}${d.behind > 0 ? ` · ${d.behind} behind` : ''}` : null,
       seen?.claudeAuth === 'login' ? 'Claude login' : seen?.claudeAuth === 'api' ? 'API key' : null,
@@ -583,21 +583,24 @@
     return h('section.sec', {}, h('h3', {}, title, note ? h('span.note', { text: note }) : null), kids);
   }
 
+  const releaseName = (r) => `${(releaseSha(r) ?? r).slice(0, 7)}${isLocal(r) ? ' (workshop copy)' : ''}`;
   function release(d) {
     const seen = d.seen;
-    const sha = releaseSha(seen?.release);
-    const when = releaseAt(seen?.release);
+    const live = d.release;
+    const sha = releaseSha(live);
+    const when = releaseAt(live);
     const subject = subjectOf(sha);
-    const history = (seen?.history ?? []).filter((r) => r !== seen?.release).reverse();
-    const status = !seen ? h('span.faint', { text: 'Not looked inside yet' })
-      : isLocal(seen.release) ? h('span.warn', { text: "The workshop's copy, not main" })
+    const history = (seen?.history ?? []).filter((r) => r !== live).reverse();
+    const status = !live ? h('span.faint', { text: 'Not known yet: Look now reads it' })
+      : isLocal(live) ? h('span.warn', { text: "The workshop's copy, not main" })
         : d.behind === 0 ? h('span.good', { text: 'Up to date with main' })
           : d.behind > 0 ? h('span.warn', { text: `${d.behind} behind main` })
             : h('span.faint', { text: 'Not on main' });
-    return section('Release', seen ? `looked ${since(seen.lookedAt)}` : null,
-      seen ? h('p.lede', {}, h('span.sha', { text: sha ? sha.slice(0, 7) : seen.release ?? '—' }), ' ', h('b', { text: subject ?? (isLocal(seen.release) ? 'a working copy' : '') }), when ? h('span.faint', { text: ` · ${clock(when)}` }) : null) : null,
+    const source = d.releaseFrom === 'checkpoint' ? 'from its last deploy' : seen ? `looked ${since(seen.lookedAt)}` : null;
+    return section('Release', source,
+      live ? h('p.lede', {}, h('span.sha', { text: sha ? sha.slice(0, 7) : live }), ' ', h('b', { text: subject ?? (isLocal(live) ? 'a working copy' : '') }), when ? h('span.faint', { text: ` · ${clock(when)}` }) : null) : null,
       h('p.lede', {}, status),
-      history.length ? h('p.faint', { style: { 'font-size': '.8rem', margin: '.35rem 0 0' } }, `Before it: ${history.map((r) => (releaseSha(r) ?? r).slice(0, 7)).join(', ')}`) : null,
+      history.length ? h('p.faint', { style: { 'font-size': '.8rem', margin: '.35rem 0 0' } }, `Before it: ${history.map(releaseName).join(', ')}`) : null,
       d.stuckCheckpoints ? h('p.warn', { style: { 'font-size': '.8rem', margin: '.5rem 0 0' } },
         'Checkpoints fail here (Fly’s store is stuck), so deploys skip them. ',
         h('button.btn.quiet', { type: 'button', style: { padding: '0 .3rem' }, onclick: () => start(`stuck:${d.name}`, () => api(`drives/${encodeURIComponent(d.name)}/checkpoints-ok`, { method: 'POST' }).then(refresh)) }, 'Try them again')) : null,
@@ -682,6 +685,7 @@
         h('div.what', {}, h('span', { text: busy ? 'Switching…' : mode === 'login' ? 'Agents here use a Claude login' : mode === 'api' ? 'Agents here use an API key' : 'Not known yet' }),
           seen ? h('small', { text: [seen.claudeLogin ? 'A login is on this machine' : 'No login on this machine', (seen.keys ?? []).includes('anthropic') ? 'an API key is saved' : 'no API key saved'].join(' · ') } ) : null),
         control),
+      mode === 'api' && seen && !(seen.keys ?? []).includes('anthropic') ? h('p.warn', { style: { margin: '.7rem 0 0', 'font-size': '.85rem' }, text: 'Its agents cannot run: no API key is saved. Paste one in its Agents settings, or switch it to a Claude login.' }) : null,
       mode === 'login' && seen && !seen.claudeLogin ? h('div', {},
         h('p.warn', { style: { margin: '.7rem 0 0', 'font-size': '.85rem' }, text: 'Sign it in: from your Mac, open its console and run Claude, then /login.' }),
         codeLine(`sprite console -o marble-drive -s ${d.name}`),
@@ -990,13 +994,13 @@
     const table = h('table.table', {},
       h('thead', {}, h('tr', {}, h('th', { text: 'Drive' }), h('th', { text: 'Release' }), h('th', { text: 'Against main' }), h('th', { text: 'Last change' }), h('th'))),
       h('tbody', {}, S.fleet.map((d, i) => {
-        const sha = releaseSha(d.seen?.release);
+        const sha = releaseSha(d.release);
         return h('tr', { style: { '--i': String(i) } },
           h('td', {}, h('span.name', {}, h('span.dot', { 'data-state': running(d.name) ? 'busy' : failedUnseen(d) ? 'failed' : d.awake ? 'awake' : 'asleep' }), d.name)),
-          h('td', {}, sha ? h('span.sha', { text: sha.slice(0, 7) }) : h('span.faint', { text: '—' }), isLocal(d.seen?.release) ? h('span.faint', { text: ' local' }) : null),
+          h('td', {}, sha ? h('span.sha', { text: sha.slice(0, 7) }) : h('span.faint', { text: '—' }), isLocal(d.release) ? h('span.faint', { text: ' local' }) : null),
           h('td', {}, running(d.name) ? h('span.good', { text: `${running(d.name).title}…` })
             : d.behind === 0 ? h('span.good', { text: 'Up to date' })
-              : d.behind > 0 ? h('span.warn', { text: `${d.behind} behind` }) : h('span.faint', { text: d.seen ? 'Not on main' : 'Not looked at' })),
+              : d.behind > 0 ? h('span.warn', { text: `${d.behind} behind` }) : h('span.faint', { text: d.release ? 'Not on main' : 'Not known yet' })),
           h('td', {}, d.lastJob ? h('span', { class: d.lastJob.state === 'failed' ? 'bad' : 'soft', text: `${d.lastJob.title.replace(` ${d.name}`, '').replace(/ to$/, '')}${d.lastJob.state === 'failed' ? ', failed' : ''} · ${since(d.lastJob.endedAt)}` }) : h('span.faint', { text: '—' })),
           h('td.acts', {},
             jobButton({ key: `deploy:${d.name}`, target: d.name, kind: 'deploy', label: 'Deploy', cls: 'quiet', onclick: (e) => deployPlan(e.currentTarget, d.name, 'main') }),
@@ -1425,6 +1429,6 @@
 
   placeThumb();
   refresh();
-  if (S.view === 'workshop') loadChats();
+  loadChats();
   paint();
 })();

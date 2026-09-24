@@ -53,7 +53,10 @@ export async function createConsole({ config, store, streams = null, log = conso
       if (e.type === 'job') {
         send('job', e.job);
         // A job's end changes what the fleet looks like.
-        if (e.job.state !== 'running') refreshSoon();
+        if (e.job.state !== 'running') {
+          if (e.job.target) hints.delete(e.job.target);
+          refreshSoon();
+        }
       } else send('output', e);
     },
   });
@@ -78,11 +81,30 @@ export async function createConsole({ config, store, streams = null, log = conso
     return fleet;
   }
 
+  // What a drive is running, known without waking it: every deploy checkpoints
+  // first, as "before deploy <release>", so the newest such checkpoint names the
+  // last release sent there. A look, when newer, is the better answer.
+  const hints = new Map(); // name → { at, value }
+  async function lastDeploy(name) {
+    const have = hints.get(name);
+    if (have && Date.now() - have.at < 5 * 60_000) return have.value;
+    let value = null;
+    try {
+      const cp = (await sprites.checkpoints(name)).find((c) => /^before deploy \S+/.test(c.comment));
+      if (cp) value = { release: /^before deploy (\S+)/.exec(cp.comment)[1], at: cp.at };
+    } catch {}
+    hints.set(name, { at: Date.now(), value });
+    return value;
+  }
+
   async function drives() {
     const stuck = new Set(actions.stuck());
     const recent = jobs.list();
     return Promise.all(fleet.map(async (row) => {
       const seen = await inspector.cached(row.name);
+      const hint = await lastDeploy(row.name);
+      const fromLook = seen?.release && (!hint || Date.parse(seen.lookedAt) >= Date.parse(hint.at));
+      const release = fromLook ? seen.release : hint?.release ?? seen?.release ?? null;
       const running = jobs.running(row.name) ?? (jobs.running('fleet')?.meta?.targets?.includes(row.name) ? jobs.running('fleet') : null);
       const last = recent.find((j) => j.target === row.name && j.state !== 'running') ?? null;
       return {
@@ -90,7 +112,9 @@ export async function createConsole({ config, store, streams = null, log = conso
         self: row.name === self,
         role: row.labels.includes('marble-owner') ? 'owner' : row.labels.some((l) => l === 'marble-tester' || l === 'marble-user') ? 'user' : 'other',
         seen,
-        behind: seen?.release ? await workshop.behind(seen.release) : null,
+        release,
+        releaseFrom: release ? (fromLook || !hint ? 'look' : 'checkpoint') : null,
+        behind: release ? await workshop.behind(release) : null,
         stuckCheckpoints: stuck.has(row.name),
         job: running ? { id: running.id, title: running.title, kind: running.kind } : null,
         lastJob: last ? { id: last.id, title: last.title, state: last.state, endedAt: last.endedAt } : null,
