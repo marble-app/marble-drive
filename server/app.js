@@ -37,6 +37,7 @@ import { readDriveSettings } from './drive-settings.js';
 import { createAwakeClock, createProgress } from './awake.js';
 import { createHold } from './hold.js';
 import { createKeepAwake } from './keep-awake.js';
+import { createStreams } from './streams.js';
 import { createStems } from './stems/index.js';
 import { cleanFileName, createUploads } from './uploads.js';
 import { DRAWN_MAX_BYTES, createThumbs } from './thumbs.js';
@@ -197,6 +198,10 @@ export async function createDrive(config, { log = console, agentProviders = null
     })),
     ...stems.work(),
   ];
+  // A forgotten tab's streams would keep the sprite awake too: they close once
+  // the tab goes unused (server/streams.js, runtime/tab-rest.js).
+  const unusedMs = config.streamUnusedMinutes * 60_000;
+  const streams = createStreams({ unusedMs, checkMs: Math.max(50, Math.min(60_000, Math.floor(unusedMs / 4))) });
   const keepAwake = createKeepAwake({
     socket: config.spriteSocket,
     busy: () => hold.holds(work()),
@@ -443,7 +448,7 @@ export async function createDrive(config, { log = console, agentProviders = null
       // The gate, and the two things that have to be reachable through it: the
       // form itself, and a health check a load balancer runs before anybody has
       // a cookie.
-      if (route === '/health') return json(res, 200, { ok: true, docs: channels.counts });
+      if (route === '/health') return json(res, 200, { ok: true, docs: channels.counts, streams: streams.count });
       // The mark, for the two pages that cannot carry it in their own head: a
       // document written before this host had one, and the gate. Everything
       // made here has it inline and never asks — which is why this is a
@@ -534,7 +539,22 @@ export async function createDrive(config, { log = console, agentProviders = null
         return json(res, 200, docs.map((doc) => ({ ...doc, name: doc.path })));
       }
 
+      // A tab says someone is using it: its streams stay open, and a day of
+      // unattended work starts again (server/streams.js, server/hold.js).
+      if (route === '/tab/alive' && req.method === 'POST') {
+        const body = await readJson(req, 1024).catch(() => ({}));
+        streams.alive(body?.tab);
+        hold.used();
+        res.writeHead(204, { 'Cache-Control': 'no-store' });
+        return res.end();
+      }
+
       if (route === '/events') {
+        if (!streams.admit(req, url)) {
+          res.writeHead(204, { 'Cache-Control': 'no-store' });
+          return res.end();
+        }
+        streams.track(req, res, url);
         res.writeHead(200, {
           'Content-Type': 'text/event-stream',
           'Cache-Control': 'no-store',
@@ -1018,6 +1038,7 @@ export async function createDrive(config, { log = console, agentProviders = null
       store,
       awake,
       progress,
+      streams,
       writeOps,
       createDocument,
       restore: restoreDocument,
@@ -1356,6 +1377,7 @@ button{background:#738698;color:#fafaf7;border-color:#738698;cursor:pointer}p{co
       clearInterval(uploadSweep);
       await keepAwake.stop();
       awake.stop();
+      streams.close();
       stopBackups();
       watcher.close();
       channels.close();

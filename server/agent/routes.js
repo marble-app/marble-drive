@@ -99,7 +99,7 @@ const publicMeter = (meter) => {
   return out;
 };
 
-export function createAgentRoutes({ store, runner, tools, hub, providers, writeOps, restore, maxBody, gated = false, keys = null, skills = [], usage = null, usageHistory = null, root = null }) {
+export function createAgentRoutes({ store, runner, tools, hub, providers, writeOps, restore, maxBody, gated = false, keys = null, skills = [], usage = null, usageHistory = null, root = null, streams = null }) {
   let detected = null;
   // Turns being undone right now. The undoneAt check alone lets two requests
   // that arrive together both pass it before either has written.
@@ -676,6 +676,12 @@ export function createAgentRoutes({ store, runner, tools, hub, providers, writeO
     }
 
     if (route === '/agent/events' && method === 'GET') {
+      // A forgotten tab's reconnect is told to stop (server/streams.js).
+      if (streams && !streams.admit(req, url)) {
+        res.writeHead(204, { 'Cache-Control': 'no-store' });
+        return res.end();
+      }
+      streams?.track(req, res, url);
       res.writeHead(200, {
         'Content-Type': 'text/event-stream',
         'Cache-Control': 'no-store',

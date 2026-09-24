@@ -133,6 +133,8 @@ export function loadConfig(env = process.env) {
     // nobody answers holds it this long; work that has stopped getting anywhere
     // this long; anything at all this long after anyone last used the drive.
     // Letting go freezes the work, it does not end it.
+    // A live stream whose tab has gone this long unused is closed (server/streams.js).
+    streamUnusedMinutes: num('MARBLE_DRIVE_STREAM_UNUSED_MINUTES', 15),
     askHoldMinutes: num('MARBLE_DRIVE_ASK_HOLD_MINUTES', 10),
     noProgressMinutes: num('MARBLE_DRIVE_NO_PROGRESS_MINUTES', 30),
     awakeMaxHours: num('MARBLE_DRIVE_AWAKE_MAX_HOURS', 24),
