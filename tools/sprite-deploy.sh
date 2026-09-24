@@ -4,7 +4,7 @@
 #   tools/sprite-deploy.sh <sprite> [--org <org>] [--ref <commit>] [--marble <version>] [--claude <version>]
 #   tools/sprite-deploy.sh <sprite> [--org <org>] --local
 #   tools/sprite-deploy.sh <sprite> [--org <org>] --rollback
-#   tools/sprite-deploy.sh --all [--org <org>] [--ref ...]   every tester (t-…)
+#   tools/sprite-deploy.sh --all [--org <org>] [--list] [--ref ...]   every user's sprite
 #
 # By default a sprite runs public sources: marble-drive at <ref> (default
 # origin/main) from GitHub, and @bdhmin/marble@<version> (default: the local
@@ -24,20 +24,30 @@ MARBLE_DIR="${MARBLE_DIR:-$(cd "$REPO/.." && pwd)/marble}"
 
 usage() { awk 'NR > 1 && /^#/ { sub(/^# ?/, ""); print; next } NR > 1 { exit }' "$0"; exit 2; }
 
-# --all: every tester's sprite (named t-…), one after another, going on past a
-# failure and ending with one line per sprite. Never admin sprites.
+# --all: every sprite that is someone's drive — labelled marble-owner (the
+# owner's own) or marble-tester (a tester's, from sprite-provision.sh) — one
+# after another, going on past a failure and ending with one line per sprite.
+# A sprite with neither label (admin-p1, the owner's test bed) is never
+# included. --list only says which sprites that is.
+USER_LABELS='marble-owner|marble-tester'
 if [[ "${1:-}" == --all ]]; then
   shift
   ALL_ORG=marble-drive
+  LIST_ONLY=0
   PASS=()
   while [[ $# -gt 0 ]]; do
     case "$1" in
       --org) ALL_ORG=$2; shift 2 ;;
+      --list) LIST_ONLY=1; shift ;;
       *) PASS+=("$1"); shift ;;
     esac
   done
-  SPRITES="$(sprite list -o "$ALL_ORG" --prefix t- 2>/dev/null | grep -E '^t-' || true)"
-  [[ -n "$SPRITES" ]] || { echo "sprite-deploy: no tester sprites (t-…) in $ALL_ORG"; exit 0; }
+  SPRITES=""
+  for one in $(sprite list -o "$ALL_ORG" 2>/dev/null); do
+    sprite info -o "$ALL_ORG" -s "$one" 2>/dev/null | grep -E '^Labels:' | grep -qwE "$USER_LABELS" && SPRITES="$SPRITES $one"
+  done
+  [[ -n "$SPRITES" ]] || { echo "sprite-deploy: no user sprites (labelled marble-owner or marble-tester) in $ALL_ORG"; exit 0; }
+  if [[ $LIST_ONLY == 1 ]]; then printf '%s\n' $SPRITES; exit 0; fi
   RESULTS=()
   for one in $SPRITES; do
     printf '\n==> ==== %s ====\n' "$one"

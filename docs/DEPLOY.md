@@ -172,7 +172,9 @@ tools/sprite-deploy.sh <sprite> --org <org> --rollback # the release before
   a deploy, a public URL behind the passphrase, and a note to send. The roster
   is `~/.config/marble-drive/testers.json` on the Mac. `--remove <person>`
   destroys it after a typed confirmation. `tools/sprite-deploy.sh --all`
-  updates every tester. A tester's Drive and Agents pages are theirs once made:
+  updates every user's sprite: those labelled `marble-tester` (testers) or
+  `marble-owner` (the owner's own drive); `--all --list` shows which. A sprite
+  with neither label, like a test bed, is deployed by name only. A tester's Drive and Agents pages are theirs once made:
   a deploy updates the host, the shared page code and starters, never those.
 - **Signing in.** Every sprite has a Marble passphrase (`MARBLE_DRIVE_SECRET`
   in its `sprite.env`): a drive with none answers agent routes only when asked
