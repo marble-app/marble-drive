@@ -4,6 +4,7 @@
 #   tools/sprite-deploy.sh <sprite> [--org <org>] [--ref <commit>] [--marble <version>] [--claude <version>]
 #   tools/sprite-deploy.sh <sprite> [--org <org>] --local
 #   tools/sprite-deploy.sh <sprite> [--org <org>] --rollback
+#   ... --no-checkpoint   skip the restore point, only when Sprites cannot make one
 #   tools/sprite-deploy.sh --all [--org <org>] [--list] [--ref ...]   every user's sprite
 #
 # By default a sprite runs public sources: marble-drive at <ref> (default
@@ -62,7 +63,7 @@ fi
 
 [[ $# -ge 1 && "$1" != -* ]] || usage
 SPRITE=$1; shift
-ORG=marble-drive REF=origin/main MARBLE_VERSION="" CLAUDE_VERSION="" LOCAL=0 ROLLBACK=0
+ORG=marble-drive REF=origin/main MARBLE_VERSION="" CLAUDE_VERSION="" LOCAL=0 ROLLBACK=0 CHECKPOINT=1
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --org) ORG=$2; shift 2 ;;
@@ -71,6 +72,7 @@ while [[ $# -gt 0 ]]; do
     --claude) CLAUDE_VERSION=$2; shift 2 ;;
     --local) LOCAL=1; shift ;;
     --rollback) ROLLBACK=1; shift ;;
+    --no-checkpoint) CHECKPOINT=0; shift ;;
     *) usage ;;
   esac
 done
@@ -120,9 +122,15 @@ else
   MARBLE="@bdhmin/marble@$MARBLE_VERSION"
 fi
 
-say "checkpointing $SPRITE"
-sprite checkpoint create -o "$ORG" -s "$SPRITE" --comment "before deploy $NAME"
-echo "   to undo everything since: sprite checkpoint list -o $ORG -s $SPRITE, then sprite restore <id> -o $ORG -s $SPRITE"
+if [[ $CHECKPOINT == 1 ]]; then
+  say "checkpointing $SPRITE"
+  sprite checkpoint create -o "$ORG" -s "$SPRITE" --comment "before deploy $NAME"
+  echo "   to undo everything since: sprite checkpoint list -o $ORG -s $SPRITE, then sprite restore <id> -o $ORG -s $SPRITE"
+else
+  # Only for a sprite whose checkpoints Sprites cannot make right now. A deploy
+  # replaces code, which --rollback undoes; it does not touch /drive.
+  say "no checkpoint for $SPRITE (--no-checkpoint); --rollback still undoes the code"
+fi
 
 say "staging $NAME"
 on ${FILES[@]+"${FILES[@]}"} -- "$REMOTE/release.sh" stage "$NAME" "$SOURCE" "$MARBLE" "$CLAUDE_VERSION"
