@@ -90,6 +90,8 @@ test('the workshop chat is a real conversation in the Marble Drive project', asy
   await page.click('.seg [data-view="workshop"]');
   await page.waitForSelector('.cx-view[data-view="workshop"] marble-conversation');
   assert.equal(await page.getAttribute('.cx-view[data-view="workshop"] marble-conversation', 'project'), 'mdrive');
+  const prompt = () => page.evaluate(() => document.querySelector('.cx-view[data-view="workshop"] marble-conversation').shadowRoot.querySelector('.editor').dataset.placeholder);
+  assert.equal(await prompt(), 'Ask for a change to Marble Drive…', 'the composer says what it is for here');
   await page.click('.cx-view[data-view="workshop"] .seg button:text-is("Marble")');
   await page.waitForFunction(() => document.querySelector('.cx-view[data-view="workshop"] marble-conversation')?.getAttribute('project') === 'marble');
   assert.deepEqual(errors, []);

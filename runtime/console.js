@@ -996,9 +996,9 @@
   // The chat card is built once and kept: a <marble-conversation> taken out of
   // the page and put back loses its stream, so only the cards around it are
   // redrawn.
-  const shopGrid = h('div.page-grid');
-  const reposHolder = h('div', { style: { display: 'contents' } });
-  const chatHolder = h('div.card.wide', { style: { '--i': '2', display: 'flex', 'flex-direction': 'column' } });
+  const shopGrid = h('div.shop');
+  const reposHolder = h('div.repos');
+  const chatHolder = h('div.card.chat-card', { style: { '--i': '2' } });
   shopGrid.append(reposHolder, chatHolder);
   shopPage.append(shopGrid);
   function drawWorkshop() {
@@ -1076,6 +1076,7 @@
         convoEl.setAttribute(TRANSIENT, '');
         convoEl.dataset.chrome = 'pane';
         convoEl.setAttribute('project', project.id);
+        convoEl.dataset.prompt = `Ask for a change to ${S.chat === 'marble' ? 'Marble' : 'Marble Drive'}…`;
         if (S.chatConversation) convoEl.setAttribute('conversation', S.chatConversation);
         convoKey = key;
         convoBox.replaceChildren(convoEl);

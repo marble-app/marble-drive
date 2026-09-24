@@ -3604,6 +3604,9 @@
     connectedCallback() {
       // In a callout the document is not "this document" but the region you
       // selected, and the placeholder says so.
+      // A page that hosts a conversation for one purpose says what it is for
+      // (the Console's workshop chat asks for a change to the code).
+      if (this.dataset.prompt) this.input.dataset.placeholder = this.dataset.prompt;
       if (this.dataset.chrome === 'callout') {
         this.input.dataset.placeholder = 'Ask about this…';
         // The log is written down several paths — streamed text, a finished

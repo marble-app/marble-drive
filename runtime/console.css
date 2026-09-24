@@ -556,8 +556,14 @@ button, input, select, textarea { font: inherit; color: inherit; }
 .files { list-style: none; margin: .5rem 0 0; padding: 0; font: 12px/1.6 var(--mono); color: var(--muted); max-height: 9rem; overflow: auto; }
 .files .st { display: inline-block; width: 1.6rem; color: var(--faint); }
 
+/* The workshop: the checkouts at the top, and the chat takes the height that is
+   left, so its composer is always on screen. */
+.shop { display: flex; flex-direction: column; gap: var(--pane-gap); min-height: 100%; }
+.repos { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: var(--pane-gap); align-items: start; }
+.chat-card { flex: 1 1 0; min-height: 26rem; display: flex; flex-direction: column; }
+.still.shop .card { animation: none; }
 /* The workshop chat is a real conversation, on the page. */
-.chat { display: flex; flex-direction: column; height: min(44rem, calc(100cqh - 9rem)); min-height: 24rem; }
+.chat { display: flex; flex-direction: column; min-height: 0; }
 /* The component lays itself out as a column (its :host is flex); an outer
    display here would override that and leave the composer floating at the top. */
 .chat marble-conversation { flex: 1; min-height: 0; }
@@ -572,7 +578,7 @@ button, input, select, textarea { font: inherit; color: inherit; }
 .still :is(.card, tbody tr, .commits li) { animation: none; }
 
 .chat-body { display: grid; grid-template-columns: minmax(0, 1fr) 16rem; flex: 1; min-height: 0; border-top: 1px solid var(--line); }
-.chat-side { border-left: 1px solid var(--line); min-width: 0; overflow: auto; max-height: min(44rem, calc(100cqh - 9rem)); }
+.chat-side { border-left: 1px solid var(--line); min-width: 0; overflow: auto; }
 .chat-side-head { display: flex; align-items: center; justify-content: space-between; padding: .55rem .6rem .3rem 1.1rem; font-size: 13px; font-weight: 600; }
 .chat-side-head .btn { padding: .12rem .55rem; font-size: .78rem; }
 .chat-list a[aria-current="true"] { background: var(--accent-soft); }
@@ -650,7 +656,7 @@ button, input, select, textarea { font: inherit; color: inherit; }
 /* ---------------------------------------------------- a desk, and a phone */
 
 @container (max-width: 1080px) {
-  .page-grid { grid-template-columns: minmax(0, 1fr); }
+  .page-grid, .repos { grid-template-columns: minmax(0, 1fr); }
 }
 
 /* One thing at a time: the list, and a tap slides the detail in. */
@@ -674,14 +680,14 @@ button, input, select, textarea { font: inherit; color: inherit; }
   .well[data-open] .pane.list { transform: translateX(-28%); }
   .back { display: inline-block; }
   .page { padding: 0; }
-  .page-grid { gap: 0; }
+  .page-grid, .shop, .repos { gap: 0; }
   .card { border-radius: 0; border-left: 0; border-right: 0; }
   .d-head { padding: .9rem 1rem .8rem; }
   .sec { padding: .9rem 1rem 1rem; }
   .row { padding: .7rem 1rem .75rem; }
   .table th:nth-child(4), .table td:nth-child(4) { display: none; }
   .table .acts .btn { opacity: .75; }
-  .chat-body { grid-template-columns: minmax(0, 1fr); }
+  .chat-body { grid-template-columns: minmax(0, 1fr); grid-template-rows: minmax(24rem, 1fr) auto; }
   .kv { grid-template-columns: minmax(0, 1fr); }
   .kv > :last-child { justify-self: start; max-width: 100%; }
   .btns { justify-content: flex-start; margin-left: -.85rem; }
