@@ -70,9 +70,14 @@ export async function fakeFleet(state = {}) {
       Object.assign(full, next);
       await fsp.writeFile(statePath, JSON.stringify(full));
     },
-    async calls() {
+    /** Every call, with the contents of the files it uploaded. */
+    async uploads() {
       const text = await fsp.readFile(logPath, 'utf8').catch(() => '');
       return text.split('\n').filter(Boolean).map((line) => JSON.parse(line));
+    },
+    async calls() {
+      const text = await fsp.readFile(logPath, 'utf8').catch(() => '');
+      return text.split('\n').filter(Boolean).map((line) => JSON.parse(line).args);
     },
   };
 }

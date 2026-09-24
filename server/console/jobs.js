@@ -70,12 +70,15 @@ export function createJobs({ dir, onEvent = () => {} }) {
     const id = `${Date.now().toString(36)}-${crypto.randomBytes(3).toString('hex')}`;
     const job = { id, kind, title, target, meta, state: 'running', startedAt: Date.now(), endedAt: null, error: null, result: null };
     jobs.set(id, job);
-    const state = { children: new Set(), secrets: [], pending: { out: '', err: '' }, bytes: 0, cut: false, stopping: false, stream: fs.createWriteStream(path.join(dir, `${id}.log`)) };
+    const state = { children: new Set(), secrets: [], masks: [], pending: { out: '', err: '' }, bytes: 0, cut: false, stopping: false, stream: fs.createWriteStream(path.join(dir, `${id}.log`)) };
     live.set(id, state);
 
     const redact = (text) => {
       let out = text;
       for (const s of state.secrets) if (s) out = out.split(s).join(MASK);
+      // A secret the job cannot know in advance (a passphrase a tool makes and
+      // prints) is masked by where it appears: group 1 is kept, the rest goes.
+      for (const re of state.masks) out = out.replace(re, (_, keep) => `${keep}${MASK}`);
       return out;
     };
     const write = (text) => {
@@ -115,6 +118,7 @@ export function createJobs({ dir, onEvent = () => {} }) {
       secret: (value) => {
         if (typeof value === 'string' && value.length >= 4) state.secrets.push(value);
       },
+      mask: (re) => state.masks.push(new RegExp(re.source, re.flags.includes('g') ? re.flags : `${re.flags}g`)),
       get stopping() {
         return state.stopping;
       },

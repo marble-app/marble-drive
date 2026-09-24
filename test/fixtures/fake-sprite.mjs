@@ -16,7 +16,19 @@ import fs from 'node:fs';
 const statePath = process.env.FAKE_SPRITE_STATE;
 const state = statePath ? JSON.parse(fs.readFileSync(statePath, 'utf8')) : {};
 const args = process.argv.slice(2);
-if (process.env.FAKE_SPRITE_LOG) fs.appendFileSync(process.env.FAKE_SPRITE_LOG, `${JSON.stringify(args)}\n`);
+// Files an exec uploads are logged with their contents, so a test can see
+// exactly what a job wrote to a drive.
+const files = {};
+for (let i = 0; i < args.length; i += 1) {
+  if (args[i] !== '--file') continue;
+  const [local, remote] = args[i + 1].split(':');
+  try {
+    files[remote] = fs.readFileSync(local, 'utf8');
+  } catch {
+    files[remote] = null;
+  }
+}
+if (process.env.FAKE_SPRITE_LOG) fs.appendFileSync(process.env.FAKE_SPRITE_LOG, `${JSON.stringify({ args, files })}\n`);
 
 const flag = (name) => {
   const at = args.indexOf(name);
@@ -57,7 +69,10 @@ switch (args[0]) {
     const rest = args.slice(args.indexOf('--') + 1);
     const script = rest.find((a) => a.endsWith('.mjs'));
     if (rest[0] === 'node' && script && state.probe?.[name]) done(state.probe[name]);
-    const answer = state.exec?.[name] ?? {};
+    // A command may have its own answer (state.exec[name][<first word>]), or
+    // the drive answers every exec the same way.
+    const own = state.exec?.[name] ?? {};
+    const answer = own[rest[0]] ?? own;
     const finish = () => done(answer.stdout ?? '', answer.code ?? 0, answer.stderr ?? '');
     if (answer.delayMs) setTimeout(finish, answer.delayMs);
     else finish();

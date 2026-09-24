@@ -87,3 +87,15 @@ test('after a restart the jobs are listed, and one that was running says it was 
   assert.equal(listed.state, 'interrupted');
   jobs.cancel(job.id);
 });
+
+test('a secret known only by where it is printed is masked there', async () => {
+  const { jobs } = await setup();
+  const job = jobs.start({ kind: 'provision', title: 't', target: 't-new', run: async (ctx) => {
+    ctx.mask(/(passphrase: )\S+/);
+    await ctx.exec(node, ['-e', 'console.log("  passphrase: Zx81kQ")']);
+  } });
+  await settle(jobs, job.id);
+  const out = await jobs.output(job.id);
+  assert.match(out, /passphrase: ••••/);
+  assert.ok(!out.includes('Zx81kQ'));
+});
