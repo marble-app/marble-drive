@@ -70,7 +70,8 @@ test('busy holds a task, renews it, and idle lets it go', async (t) => {
   busy = false;
   await until(() => sprite.calls.some((c) => c.method === 'DELETE'));
   assert.deepEqual(sprite.calls.find((c) => c.method === 'DELETE').url, '/v1/tasks/marble-drive');
-  assert.equal(ka.state().held, false);
+  // Let go once the sprite has answered, not the moment it was asked.
+  await until(() => !ka.state().held);
 });
 
 test('with no sprite socket it does nothing at all', async () => {
