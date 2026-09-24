@@ -93,9 +93,26 @@ The service's environment is the release script's defaults
   flags the host passes). The owner's subscription is shared with two friends
   by his choice; Anthropic's consumer terms are for one person, so a
   Console key per friend is the path for anyone else.
-- **Staying awake:** a sprite pauses about 30 s after its last connection.
-  While a turn or a stem split runs, the host holds a Sprites task
-  (`server/keep-awake.js`) so a turn outlives its tab.
+- **Staying awake, and sleeping:** a sprite pauses about 30 s after its last
+  connection, freezing every process. Two things keep it up, and both let go:
+  - **Tabs.** Every page runs `runtime/tab-rest.js` first: a tab hidden for
+    60 s, or shown with no input for 10 min, closes its live streams, and
+    reopens them and catches up on the next input. The host closes the streams
+    of a tab that has not reported use (`POST /tab/alive`) in 15 min and answers
+    its reconnect 204 (`server/streams.js`).
+  - **Work.** While a turn or a stem split is getting somewhere, the host holds
+    a Sprites task (`server/keep-awake.js`) so it outlives its tab. It lets go
+    after 10 min of an unanswered question, 30 min without progress (output, or
+    CPU and I/O of its processes), or 24 h since anyone used the drive
+    (`server/hold.js`). Letting go freezes the work; it carries on when someone
+    comes back. All of these count awake time (`server/awake.js`), so a night
+    frozen adds nothing and wakes nothing.
+  - Limits, in `sprite.env`: `MARBLE_DRIVE_TAB_HIDDEN_SECONDS` (60),
+    `MARBLE_DRIVE_TAB_IDLE_MINUTES` (10), `MARBLE_DRIVE_STREAM_UNUSED_MINUTES`
+    (15), `MARBLE_DRIVE_ASK_HOLD_MINUTES` (10), `MARBLE_DRIVE_NO_PROGRESS_MINUTES`
+    (30), `MARBLE_DRIVE_AWAKE_MAX_HOURS` (24). The page reads its two from the
+    host. A turn is only ever ended by the stall rule: 30 min of no output and
+    no work, in awake time (`MARBLE_DRIVE_AGENT_STALL_MINUTES`).
 - **Git:** agents in a person's Drive project cannot reach a repository
   (`GIT_CEILING_DIRECTORIES`); agents in a registered project (the workshop's)
   can.
@@ -185,6 +202,9 @@ machine, so continuing one starts fresh.
 | Every turn fails at once: `unknown option '--permission-prompts'` | an old `claude` | releases pin `tools/sprite/claude-version`; deploy |
 | `claude native binary not installed` | npm on a sprite blocks install scripts | the release runs `node node_modules/@anthropic-ai/claude-code/install.cjs` |
 | A turn froze when its tab closed | sprite paused | keep-awake; check `GET /v1/tasks` on `/.sprite/api.sock` |
+| A turn froze when nobody was around | held past its limit: an unanswered question (10 min), no progress (30 min), or a day unattended | by design; opening the drive wakes it and it carries on |
+| A tab stopped updating | it rested (hidden 60 s, or idle 10 min) | any input wakes it; an old tab from before a deploy needs a reload |
+| A sprite never pauses | something holds it: a stream, a request, or a Sprites task | `/health` `streams`; `GET /v1/tasks` on `/.sprite/api.sock` |
 | `Failed to create checkpoint … v3.in-progress … file exists` | stuck checkpoint store (seen on t-irene) | `--no-checkpoint`; report to Fly if it persists |
 | An API key vanished after a deploy | keys inside the release (old behaviour) | keys live in `~/.config/marble-drive/agent-keys` now |
 | `tar: unrecognized option '--no-mac-metadata'` | a macOS-only flag on Linux | fixed: the flag is passed only on macOS |
@@ -196,14 +216,12 @@ machine, so continuing one starts fresh.
 
 Sprites bill CPU and memory per second **only while running**, and disk for
 what is written (about $0.50 per GB-month) while paused
-([Fly pricing](https://fly.io/pricing/); new prices from 2026-10-01). An open
-Drive or Agents tab holds a live connection and keeps its sprite running and
-billing: close tabs when done (see "Shelved").
+([Fly pricing](https://fly.io/pricing/); new prices from 2026-10-01). A sprite
+runs while someone is using a tab on it or its work is getting somewhere, and
+not more than a day unattended (see "Staying awake, and sleeping").
 
 ## Shelved (decided, not built)
 
-- **Pause the live connection when a tab is hidden**, so an idle open tab does
-  not keep a sprite billing. The main cost risk with friends on.
 - **UI updates to existing drives:** a `Marble Updates/` folder in every drive,
   each update a note with a "Merge into my Drive" button that briefs the
   person's own agent.

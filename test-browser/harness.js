@@ -57,7 +57,7 @@ export const usageHistoryStub = (weeks = 26) => {
   return { source: 'claude-code-local', tz: 'America/Los_Angeles', generatedAt: '2026-09-18T20:00:00.000Z', from: days[0].date, to: days.at(-1).date, days };
 };
 
-export async function startDrive({ scripts = {}, agents = true, documents = { garden: GARDEN }, genui = null, providers = [] } = {}) {
+export async function startDrive({ scripts = {}, agents = true, documents = { garden: GARDEN }, genui = null, providers = [], env = {} } = {}) {
   const root = await fsp.mkdtemp(path.join(os.tmpdir(), 'marble-browser-drive-'));
   const workdir = await fsp.mkdtemp(path.join(os.tmpdir(), 'marble-browser-work-'));
   const keysFile = path.join(workdir, 'agent-keys.local');
@@ -77,6 +77,7 @@ export async function startDrive({ scripts = {}, agents = true, documents = { ga
     MARBLE_DRIVE_AGENT_KEYS: keysFile,
     MARBLE_DRIVE_BACKUP_DIR: '',
     MARBLE_DRIVE_BACKUP_CMD: '',
+    ...env,
   });
   const drive = await createDrive(config, {
     log: quiet,

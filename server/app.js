@@ -111,6 +111,9 @@ const RUNTIME = {
   // The Drive's extension to it. Everything a Drive needs that a single
   // document does not — see docs/CARRIER-DRIVE.md.
   'drive.js': () => path.join(REPO, 'runtime', 'drive.js'),
+  // Runs first on every page: lets a tab nobody is using close its streams,
+  // so its sprite can sleep (server/streams.js).
+  'tab-rest.js': () => path.join(REPO, 'runtime', 'tab-rest.js'),
   // Agents, when they are on: the client for /agent/* and the drawer that
   // uses it. Served to every document; injected only when agents run here.
   'agent.js': () => path.join(REPO, 'runtime', 'agent.js'),
@@ -257,7 +260,9 @@ export async function createDrive(config, { log = console, agentProviders = null
   // ------------------------------------------------------------------ serving
 
   const injectCarrier = (source, docPath) => {
+    // tab-rest.js first: it stands in for EventSource before any stream opens.
     let tags =
+      `<script src="/runtime/tab-rest.js" data-hidden-ms="${config.tabHiddenSeconds * 1000}" data-idle-ms="${config.tabIdleMinutes * 60_000}" data-marble-transient></script>\n` +
       `<script src="/runtime/marble.js" data-marble-app="${escapeHtml(docPath)}" data-marble-transient></script>\n` +
       `<script src="/runtime/drive.js" data-marble-transient></script>\n` +
       `<script src="/runtime/affords.js" data-marble-transient></script>`;

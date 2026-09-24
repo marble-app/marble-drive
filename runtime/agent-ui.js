@@ -1668,7 +1668,12 @@
       }
     };
     load();
-    timer = setInterval(load, 120_000);
+    // Only while someone is using the tab: a request is activity, and a meter
+    // polling from a forgotten tab would keep its sprite awake.
+    timer = setInterval(() => {
+      if (document.visibilityState === 'hidden' || window.marbleTabRest?.resting) return;
+      load();
+    }, 120_000);
     const onSaved = () => load();
     addEventListener('marble:agent-settings-saved', onSaved);
     return () => {

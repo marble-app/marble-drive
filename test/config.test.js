@@ -16,3 +16,12 @@ test('agent limits default to no cap and a 30 minute stall', () => {
   assert.equal(config.agentMaxMinutes, 0);
   assert.equal(config.agentStallMinutes, 30);
 });
+
+test('a sprite sleeps on these limits unless its sprite.env says otherwise', () => {
+  const config = loadConfig({});
+  assert.deepEqual(
+    [config.tabHiddenSeconds, config.tabIdleMinutes, config.streamUnusedMinutes, config.askHoldMinutes, config.noProgressMinutes, config.awakeMaxHours],
+    [60, 10, 15, 10, 30, 24],
+  );
+  assert.equal(loadConfig({ MARBLE_DRIVE_AWAKE_MAX_HOURS: '48' }).awakeMaxHours, 48);
+});

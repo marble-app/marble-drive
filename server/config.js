@@ -133,6 +133,10 @@ export function loadConfig(env = process.env) {
     // nobody answers holds it this long; work that has stopped getting anywhere
     // this long; anything at all this long after anyone last used the drive.
     // Letting go freezes the work, it does not end it.
+    // A tab rests, closing its streams, once hidden this long or shown with no
+    // input this long (runtime/tab-rest.js, which reads them off its tag).
+    tabHiddenSeconds: num('MARBLE_DRIVE_TAB_HIDDEN_SECONDS', 60),
+    tabIdleMinutes: num('MARBLE_DRIVE_TAB_IDLE_MINUTES', 10),
     // A live stream whose tab has gone this long unused is closed (server/streams.js).
     streamUnusedMinutes: num('MARBLE_DRIVE_STREAM_UNUSED_MINUTES', 15),
     askHoldMinutes: num('MARBLE_DRIVE_ASK_HOLD_MINUTES', 10),

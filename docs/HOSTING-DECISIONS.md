@@ -242,6 +242,30 @@ checkpoint failed and the deploy stopped before changing anything, as designed.
 Rather than weaken the default, `--no-checkpoint` exists for exactly that case,
 and says so when used.
 
+### 20. A sprite sleeps when nobody needs it; limits freeze, never kill
+
+**Found.** Three ways a sprite billed with nobody there: an open tab (its live
+streams count as activity, for as long as the tab stays open), keep-awake
+holding for any running turn, even one waiting days on an unanswered question
+or hung, and polling (the usage meter, every two minutes). And two bugs in the
+stall rule: it ended a turn after 30 min without output, killing one long silent
+command, and a sprite that froze mid-turn woke to overdue timers and ended the
+turn the moment its owner came back.
+
+**Considered.** A hard cap on how long a sprite may run (1 or 2 hours), against
+limits on attention and progress. The owner has run long jobs, and lab
+scientists may run longer: a cap that ends work is wrong. A cap that only
+freezes it is safe, so the one hard limit is a day unattended, as a backstop.
+
+**Chose.** Tabs rest (hidden 60 s, idle 10 min) and the host closes the streams
+of tabs that stopped saying they are used. Keep-awake holds only work that is
+getting somewhere: 10 min for an unanswered question, 30 min without progress,
+24 h since anyone used the drive. Progress includes CPU and I/O of the turn's
+process tree, read from `/proc`, so a silent command counts as working and a
+hung one does not. Every limit counts **awake time**: a clock that adds at most
+two ticks across any gap, so a freeze adds nothing. Letting go freezes; the
+only thing that ends a turn is the stall rule, on the same progress and clock.
+
 ## Traps worth remembering
 
 | Trap | How it showed up | Lesson |
@@ -257,3 +281,6 @@ and says so when used.
 | An agent turn is a child of its host | a self-deploy would kill the turn doing it | hand the switch to something the restart does not touch |
 | The image's `claude` is older than yours | every agent turn failed instantly | pin the tool with the release |
 | npm blocks install scripts on a sprite | Claude Code's binary was missing | run the one installer that is needed, explicitly |
+| A frozen machine's timers fire all at once on waking | a turn frozen overnight would be "stalled" the moment its owner looked | measure limits in awake time, not wall time |
+| "No output" is not "no work" | a long quiet build was killed as stalled | read the process tree's CPU and I/O |
+| An open connection is activity | a forgotten tab kept a sprite billing | streams rest with their tab; the host closes the rest |
