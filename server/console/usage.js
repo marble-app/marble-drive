@@ -281,11 +281,11 @@ export function createUsage({ dir, sprites, self, selfLedger = null, now = Date.
       const inRange = lines.filter((l) => l.t * 1000 > from);
 
       const buckets = new Map();
-      const totals = { cost: { cpu: 0, ram: 0, hot: 0, cold: 0 }, awakeHours: 0, estimatedHours: 0, why: { looking: 0, idle: 0, work: 0, asks: 0, other: 0 }, turns: 0, opens: 0 };
+      const totals = { cost: { cpu: 0, ram: 0, hot: 0, cold: 0 }, awakeHours: 0, estimatedHours: 0, why: { looking: 0, idle: 0, work: 0, asks: 0, other: 0, unrecorded: 0 }, turns: 0, opens: 0 };
       for (const line of inRange) {
         const c = lineCost(line, options);
         const key = Math.floor((line.t * 1000 - 1) / step) * step;
-        const b = buckets.get(key) ?? { t: key, awake: 0, cpu: 0, memS: 0, memN: 0, cost: 0, why: { looking: 0, idle: 0, work: 0, asks: 0, other: 0 }, turns: 0, opens: 0, est: 0 };
+        const b = buckets.get(key) ?? { t: key, awake: 0, cpu: 0, memS: 0, memN: 0, cost: 0, why: { looking: 0, idle: 0, work: 0, asks: 0, other: 0, unrecorded: 0 }, turns: 0, opens: 0, est: 0 };
         const dt = Number(line.dt) || 0;
         b.awake += dt;
         b.cpu += Number(line.cpu) || 0;

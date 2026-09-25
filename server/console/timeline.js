@@ -37,7 +37,7 @@ function runs(lines, options) {
 function detail(lines, options) {
   let cost = 0;
   let peak = null;
-  const why = { looking: 0, idle: 0, work: 0, asks: 0, other: 0 };
+  const why = { looking: 0, idle: 0, work: 0, asks: 0, other: 0, unrecorded: 0 };
   for (const line of lines) {
     cost += total(lineCost(line, options));
     const mem = line[options.basis ?? 'mem'] ?? line.mem ?? line.used;
@@ -49,6 +49,8 @@ function detail(lines, options) {
 
 /** The one reason a minute was awake, most telling first. */
 export function reason(line) {
+  // A minute the Console saw from the API but no ledger recorded.
+  if (line.est) return 'unrecorded';
   const w = line.why ?? {};
   if (w.looking > 0) return 'looking';
   if (w.work > 0) return 'work';

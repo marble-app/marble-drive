@@ -286,7 +286,7 @@ export async function createConsole({ config, store, streams = null, ledger = nu
       }
       if (a === 'bill' && method === 'POST') {
         const result = await usage.addBill(String(body.text ?? '').slice(0, 20_000));
-        return json(res, result.ok ? 200 : 400, result);
+        return json(res, result.ok ? 200 : 400, result.ok ? result : { ...result, error: result.line ? `${result.why}: “${result.line}”` : result.why });
       }
       if (a === 'budget' && method === 'PUT') return json(res, 200, { monthly: await usage.setBudget(body.monthly) });
 

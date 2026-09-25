@@ -82,11 +82,16 @@ export async function consoleWorld({ fleet: fleetState = {} } = {}) {
   ] });
   // Looks the console would have made earlier, so every drive has something to say.
   for (const name of Object.keys(probes)) await host.drive.console.actions.look(name).catch(() => {});
-  async function open({ width = 1280, height = 820, colorScheme = 'light', hasTouch = false, isMobile = false } = {}) {
+  // The Console opens on its dashboard; most tests are about the drives.
+  async function open({ width = 1280, height = 820, colorScheme = 'light', hasTouch = false, isMobile = false, view = 'drives' } = {}) {
     const { page, errors } = await host.newPage({ viewport: { width, height }, colorScheme, hasTouch, isMobile });
     await page.request.post(`${host.base}/gate`, { data: { secret: SECRET } });
     await page.goto(`${host.base}/a/Console`);
-    await page.waitForSelector('.cx .row');
+    await page.waitForSelector('.cx .row', { state: 'attached' });
+    if (view !== 'dashboard') {
+      await (hasTouch ? page.tap(`.cx-bar .seg [data-view="${view}"]`) : page.click(`.cx-bar .seg [data-view="${view}"]`));
+      if (view === 'drives') await page.waitForSelector('.cx-view[data-view="drives"] .row');
+    }
     return { page, errors };
   }
   return { host, fleet, src, open, shas };

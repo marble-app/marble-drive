@@ -121,6 +121,7 @@ const RUNTIME = {
   'tab-rest.js': () => path.join(REPO, 'runtime', 'tab-rest.js'),
   'console.js': () => path.join(REPO, 'runtime', 'console.js'),
   'console.css': () => path.join(REPO, 'runtime', 'console.css'),
+  'console-charts.js': () => path.join(REPO, 'runtime', 'console-charts.js'),
   // Agents, when they are on: the client for /agent/* and the drawer that
   // uses it. Served to every document; injected only when agents run here.
   'agent.js': () => path.join(REPO, 'runtime', 'agent.js'),
@@ -333,6 +334,7 @@ export async function createDrive(config, { log = console, agentProviders = null
     // the console is on (server/console).
     if (consoleApp && /<meta\s+name="marble-console"/i.test(source)) {
       tags += `\n<link rel="stylesheet" href="${runtimeUrl('console.css')}" data-marble-transient>`;
+      tags += `\n<script src="${runtimeUrl('console-charts.js')}" data-marble-transient></script>`;
       tags += `\n<script src="${runtimeUrl('console.js')}" data-marble-transient></script>`;
     }
     // After collab.js: the callout hangs its card with the zone's own geometry.

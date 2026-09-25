@@ -19,7 +19,7 @@
   window.marbleConsoleReady = { redraw: () => { drawn.clear(); paint(); } };
 
   const TRANSIENT = 'data-marble-transient';
-  const VIEWS = [['drives', 'Drives'], ['ship', 'Ship'], ['workshop', 'Workshop'], ['activity', 'Activity']];
+  const VIEWS = [['dashboard', 'Dashboard'], ['drives', 'Drives'], ['ship', 'Ship'], ['workshop', 'Workshop'], ['activity', 'Activity']];
   const LIMITS = [
     ['MARBLE_DRIVE_TAB_HIDDEN_SECONDS', 'A hidden tab rests after', 's', 60],
     ['MARBLE_DRIVE_TAB_IDLE_MINUTES', 'An idle tab rests after', 'min', 10],
@@ -67,7 +67,8 @@
   };
 
   const S = {
-    view: VIEWS.some(([v]) => v === store.get('view')) ? store.get('view') : 'drives',
+    // The Console opens on the dashboard; the other views are a tap away.
+    view: 'dashboard',
     drive: store.get('drive'),
     job: store.get('job'),
     open: false, // the detail slid in, on a phone
@@ -94,6 +95,14 @@
     animateDetail: true,
     animateList: true,
     arrived: new Set(), // views drawn since they were last switched to
+    // The dashboard's data, one answer per range, and which cards show a table.
+    range: ['24h', '7d', '30d', 'month'].includes(store.get('range')) ? store.get('range') : '7d',
+    usage: new Map(), // range → { data, at }
+    usageLoading: new Set(),
+    usageError: null,
+    usageStale: false,
+    tables: new Set(store.get('tables', [])),
+    heatFor: store.get('heatFor', 'all'),
   };
 
   // ---------------------------------------------------------------- helpers
@@ -376,6 +385,13 @@
   jobsWell.append(h('div.pane.list', {}, h('div.pane-head', {}, h('h2', { text: 'What the console has done' })), jobsScroll), jobPane);
   views.activity.append(jobsWell);
 
+  const dashPage = h('div.page.dash');
+  views.dashboard.append(dashPage);
+  new ResizeObserver(() => {
+    drawn.delete('dash');
+    if (S.view === 'dashboard') paint();
+  }).observe(dashPage);
+
   const shipPage = h('div.page');
   views.ship.append(shipPage);
   const shopPage = h('div.page');
@@ -399,6 +415,7 @@
     for (const b of seg.querySelectorAll('button')) b.setAttribute('aria-selected', String(b.dataset.view === id));
     placeThumb();
     if (id === 'workshop') loadChats();
+    if (id === 'dashboard') loadUsage(S.range);
     paint();
   }
 
@@ -511,7 +528,8 @@
       detailPane.querySelector('.pending')?.remove();
       return;
     }
-    if (!changed('detail', [d, S.checkpoints.get(d.name), S.revealed.get(d.name), S.looking.has(d.name), liveJobs(), notes(d.name), S.workshop?.main?.sha, S.open, S.forceDetail])) {
+    if (!S.usage.has('7d')) loadUsage('7d');
+    if (!changed('detail', [d, S.checkpoints.get(d.name), S.revealed.get(d.name), S.looking.has(d.name), liveJobs(), notes(d.name), S.workshop?.main?.sha, S.open, S.forceDetail, S.usage.get('7d')?.at])) {
       pendingBar(d);
       return;
     }
@@ -522,7 +540,7 @@
     const caret = focusKey && 'selectionStart' in active ? [active.selectionStart, active.selectionEnd] : null;
 
     const body = h('div.detail-body', { class: S.animateDetail ? null : 'still' },
-      head(d), release(d), health(d), claude(d), access(d), settings(d), checkpoints(d), d.role === 'user' ? remove(d) : null);
+      head(d), use(d), release(d), health(d), claude(d), access(d), settings(d), checkpoints(d), d.role === 'user' ? remove(d) : null);
     if (!S.animateDetail) body.style.animation = 'none';
     S.animateDetail = false;
     detailScroll.replaceChildren(body);
@@ -1360,6 +1378,352 @@
     });
   }
 
+  // ------------------------------------------------------------- dashboard
+  //
+  // State, use and cost of every drive over time, from /console/api/usage
+  // (server/console/usage.js). One answer per range, refetched when a drive's
+  // ledger or status changes, and every minute while it is on screen.
+
+  const CH = () => window.marbleConsoleCharts;
+  const RANGES = [['24h', '24 h'], ['7d', '7 days'], ['30d', '30 days'], ['month', 'This month']];
+  const PRODUCT = { ram: ['Memory', 'var(--prod-ram)'], cpu: ['CPU', 'var(--prod-cpu)'], storage: ['Storage', 'var(--prod-storage)'] };
+  const WHY_COLOR = { looking: 'var(--why-looking)', idle: 'var(--why-idle)', work: 'var(--why-work)', asks: 'var(--why-asks)', other: 'var(--why-other)', unrecorded: 'var(--why-unrecorded)' };
+
+  let usageTimer = 0;
+  async function loadUsage(range, { quiet = false } = {}) {
+    if (S.usageLoading.has(range)) return;
+    S.usageLoading.add(range);
+    if (!quiet) paint();
+    try {
+      const data = await api(`usage?range=${encodeURIComponent(range)}`);
+      S.usage.set(range, { data, at: Date.now() });
+      S.usageError = null;
+    } catch (err) {
+      S.usageError = err.message;
+    } finally {
+      S.usageLoading.delete(range);
+      paint();
+    }
+  }
+  /** Something changed on a drive: fetch again, at most every ten seconds. */
+  function usageChanged() {
+    S.usageStale = true;
+    if (usageTimer) return;
+    usageTimer = setTimeout(() => {
+      usageTimer = 0;
+      if (!S.usageStale) return;
+      S.usageStale = false;
+      if (S.view === 'dashboard') loadUsage(S.range, { quiet: true });
+      if (S.view === 'drives' || S.range !== '7d') S.usage.delete('7d');
+      if (S.view === 'drives') loadUsage('7d', { quiet: true });
+    }, 10_000);
+  }
+  setInterval(() => {
+    if (document.hidden || window.marbleTabRest?.resting) return;
+    if (S.view === 'dashboard') loadUsage(S.range, { quiet: true });
+  }, 60_000);
+
+  /** A sprite's colour follows it, never its rank: by when it was made. */
+  function spriteColors(data) {
+    const order = [...data.sprites].sort((a, b) => String(a.createdAt ?? '~').localeCompare(String(b.createdAt ?? '~')) || a.name.localeCompare(b.name));
+    return new Map(order.map((sp, i) => [sp.name, i < 8 ? `var(--s${i + 1})` : 'var(--s-other)']));
+  }
+  const money = (n) => CH().money(n);
+  const tileMoney = (n) => (Number.isFinite(n) ? `$${n.toFixed(2)}` : '—');
+
+  function card(id, title, note, { wide = false, tableOf, drawChart, end = null, i = 0 }) {
+    const showTable = S.tables.has(id) && tableOf;
+    const body = h('div.card-body.chart-body', { 'data-chart': id });
+    const toggle = tableOf ? h('button.btn.quiet.small', {
+      type: 'button',
+      'aria-pressed': String(Boolean(showTable)),
+      text: showTable ? 'Chart' : 'Table',
+      onclick: () => {
+        if (S.tables.has(id)) S.tables.delete(id);
+        else S.tables.add(id);
+        store.set('tables', [...S.tables]);
+        drawn.delete('dash');
+        paint();
+      },
+    }) : null;
+    const el = h(`section.card${wide ? '.wide' : ''}`, { 'data-card': id, style: { '--i': String(i) } },
+      h('div.card-head', {}, h('h2', { text: title }), note ? h('span.note', { text: note }) : null, h('div.end', {}, end, toggle)),
+      body);
+    // Drawn once the card is in the page, so it knows its width.
+    requestAnimationFrame(() => {
+      if (showTable) body.replaceChildren(tableOf());
+      else CH().whenSized(body, () => drawChart(body));
+    });
+    return el;
+  }
+
+  function tile(label, value, sub, { tone = null } = {}) {
+    return h('div.tile', { 'data-tone': tone }, h('span.tile-label', { text: label }), h('b.tile-value', { text: value }), sub ? h('span.tile-sub', {}, sub) : null);
+  }
+
+  function legend(items) {
+    return h('div.legend', {}, items.map(([label, color, cls]) => h('span.key', {}, h('i', { class: cls ?? null, style: color ? { background: color } : null }), label)));
+  }
+
+  const bucketsBy = (sp, key) => (sp.buckets ?? []).filter((b) => b.awake > 0).map((b) => ({ t: b.t, v: b[key] ?? 0 }));
+
+  function drawDashboard() {
+    const entry = S.usage.get(S.range);
+    if (!entry && !S.usageLoading.has(S.range)) loadUsage(S.range);
+    const data = entry?.data;
+    if (!changed('dash', [S.range, entry?.at, S.usageLoading.has(S.range), S.usageError, [...S.tables], S.heatFor, S.fleet.map((d) => [d.name, d.status])])) return;
+    CH()?.hideTip();
+
+    const ranges = segmented(RANGES, S.range, (v) => {
+      S.range = v;
+      store.set('range', v);
+      loadUsage(v);
+      paint();
+    }, { small: true, label: 'Range' });
+    const updated = h('span.dash-when', { text: S.usageLoading.has(S.range) ? 'Reading…' : entry ? `Updated ${since(entry.at)}` : '' });
+    const billBtn = h('button.btn.quiet.small', { type: 'button', text: data?.calibration ? 'New bill' : 'Paste a bill', onclick: (e) => pasteBill(e.currentTarget) });
+    const budgetBtn = h('button.btn.quiet.small', { type: 'button', text: data?.budget ? `Budget ${money(data.budget)}` : 'Set a budget', onclick: (e) => setBudget(e.currentTarget, data?.budget) });
+    const barRow = h('div.dash-bar', {}, ranges, updated, h('span.dash-end', {}, billBtn, budgetBtn));
+
+    if (!data) {
+      dashPage.replaceChildren(barRow, h('p.empty', { text: S.usageError ? `Could not read usage: ${S.usageError}` : 'Reading every drive’s ledger…' }));
+      return;
+    }
+    if (!CH()) {
+      dashPage.replaceChildren(barRow, h('p.empty', { text: 'The charts did not load. Reload the page.' }));
+      return;
+    }
+
+    const colors = spriteColors(data);
+    const label = (sp) => sp.name;
+    const month = data.month;
+    const proj = month.projection;
+    const over = data.budget && proj.end > data.budget;
+    const awakeNow = S.fleet.filter((d) => d.awake);
+    const cal = data.calibration;
+    const calNote = cal
+      ? `calibrated to your bill of ${CH().dayLabel(cal.bill.from)}–${CH().dayLabel(cal.bill.to - 86_400_000)}${cal.factor.ram ? `, memory ×${cal.factor.ram.toFixed(2)}` : ''}`
+      : 'estimated from the ledgers';
+    const estimatedHours = data.sprites.reduce((a, sp) => a + sp.totals.estimatedHours, 0);
+
+    const tiles = h('div.tiles', {},
+      tile('This month so far', tileMoney(month.spent), calNote),
+      tile('By the end of the month', tileMoney(proj.end), over
+        ? h('span.warn', { text: `⚠ over your ${money(data.budget)} budget` })
+        : `likely ${money(proj.low)} – ${money(proj.high)}${data.budget ? ` · budget ${money(data.budget)}` : ''}`, { tone: over ? 'caution' : null }),
+      tile('Awake now', `${awakeNow.length} of ${S.fleet.length}`, awakeNow.length ? awakeNow.map((d) => d.name).join(', ') : 'every drive is asleep'),
+      tile(`Awake, ${RANGES.find(([v]) => v === S.range)[1].toLowerCase()}`, CH().hours(data.totals.awakeHours), `${money(data.totals.total)} in this range${estimatedHours > 0.05 ? ` · ${CH().hours(estimatedHours)} estimated from state` : ''}`));
+
+    const lanes = data.sprites.map((sp) => ({ name: sp.name, label: label(sp), color: colors.get(sp.name), segments: sp.segments }));
+    const stateCard = card('state', 'State over time', null, {
+      wide: true,
+      i: 0,
+      end: legend([['Running', 'var(--st-running)'], ['Warm', 'var(--st-warm)'], ['Cold', 'var(--st-cold)'], ['Not known', null, 'hatch']]),
+      drawChart: (el) => CH().timeline(el, { from: data.from, to: data.to, lanes }, { onPick: (name) => {
+        setView('drives');
+        pick(name);
+      } }),
+      tableOf: () => CH().table(['Drive', 'State', 'From', 'To', 'For'], data.sprites.flatMap((sp) => sp.segments.filter((g) => g.state !== 'unknown').map((g) => [sp.name, CH().STATE_LABEL[g.state], CH().when(g.from), g.to >= data.to - 60_000 ? 'now' : CH().when(g.to), CH().hours((g.to - g.from) / 3_600_000)]))),
+    });
+
+    const costRows = data.sprites.map((sp) => {
+      const c = sp.totals.cost;
+      return {
+        name: sp.name,
+        label: label(sp),
+        color: colors.get(sp.name),
+        value: sp.totals.total,
+        parts: [['ram', c.ram], ['cpu', c.cpu], ['storage', c.hot + c.cold]].map(([k, v]) => ({ label: PRODUCT[k][0], value: v, color: PRODUCT[k][1] })),
+        note: sp.totals.estimatedHours > 0.05 ? `${CH().hours(sp.totals.estimatedHours)} of it estimated: no ledger yet` : null,
+      };
+    });
+    const costCard = card('cost', 'Cost by drive', RANGES.find(([v]) => v === S.range)[1], {
+      i: 1,
+      drawChart: (el) => CH().hbars(el, { rows: costRows }),
+      tableOf: () => CH().table(['Drive', 'Memory', 'CPU', 'Storage', 'Total'], costRows.map((r) => [r.label, ...r.parts.map((p) => money(p.value)), money(r.value)])),
+    });
+
+    const whyRows = data.sprites.map((sp) => ({ label: label(sp), parts: CH().WHY_ORDER.map((k) => ({ key: k, value: sp.totals.why[k] ?? 0 })) }));
+    const whyCard = card('why', 'Why they were awake', null, {
+      i: 2,
+      end: null,
+      drawChart: (el) => {
+        el.replaceChildren();
+        const chart = h('div');
+        const present = CH().WHY_ORDER.filter((k) => whyRows.some((r) => r.parts.some((p) => p.key === k && p.value > 0)));
+        el.append(legend(present.map((k) => [CH().WHY_LABEL[k], WHY_COLOR[k]])), chart);
+        CH().whenSized(chart, () => CH().share(chart, { rows: whyRows, colors: WHY_COLOR }));
+      },
+      tableOf: () => CH().table(['Drive', ...CH().WHY_ORDER.map((k) => CH().WHY_LABEL[k])], whyRows.map((r) => [r.label, ...r.parts.map((p) => CH().hours(p.value / 3600))])),
+    });
+
+    let run = 0;
+    const cumPoints = month.days.map((d) => {
+      run += d.total;
+      return { t: Math.min(data.now, Date.parse(`${d.day}T00:00:00Z`) + 86_400_000), v: run };
+    });
+    const monthEnd = Date.UTC(new Date(data.now).getUTCFullYear(), new Date(data.now).getUTCMonth() + 1, 1);
+    const bills = cal && cal.bill.from === month.from ? [{ t: cal.bill.to, v: cal.bill.total, label: 'Fly’s bill' }] : [];
+    const spendCard = card('spend', 'Spend this month', cal ? 'calibrated' : 'estimated', {
+      i: 3,
+      drawChart: (el) => CH().cumulative(el, { from: month.from, to: monthEnd, now: data.now, points: cumPoints, spent: month.spent, projection: proj, budget: data.budget, bills }),
+      tableOf: () => CH().table(['Day', 'Spent that day', 'By then'], month.days.map((d, i) => [d.day, money(d.total), money(cumPoints[i].v)])),
+    });
+
+    const days = month.days.map((d) => ({
+      t: Date.parse(`${d.day}T12:00:00Z`),
+      label: String(Number(d.day.slice(8))),
+      parts: data.sprites.map((sp) => ({ name: sp.name, label: label(sp), color: colors.get(sp.name), value: d.bySprite[sp.name] ?? 0 })),
+    }));
+    const dailyCard = card('daily', 'Spend per day', 'this month, by drive', {
+      i: 4,
+      drawChart: (el) => CH().columns(el, { days }),
+      tableOf: () => CH().table(['Day', ...data.sprites.map(label), 'Total'], month.days.map((d) => [d.day, ...data.sprites.map((sp) => money(d.bySprite[sp.name] ?? 0)), money(d.total)])),
+    });
+
+    const heatSprites = S.heatFor === 'all' ? data.sprites : data.sprites.filter((sp) => sp.name === S.heatFor);
+    const cells = Array.from({ length: 7 }, () => Array(24).fill(0));
+    for (const sp of heatSprites) {
+      for (const b of sp.buckets) {
+        const d = new Date(b.t);
+        cells[(d.getDay() + 6) % 7][d.getHours()] += b.awake / 60;
+      }
+    }
+    const heatPick = h('select.small', { 'aria-label': 'Whose', onchange: (e) => {
+      S.heatFor = e.target.value;
+      store.set('heatFor', S.heatFor);
+      paint();
+    } }, h('option', { value: 'all', text: 'Every drive', selected: S.heatFor === 'all' ? true : null }), data.sprites.map((sp) => h('option', { value: sp.name, text: sp.name, selected: S.heatFor === sp.name ? true : null })));
+    const heatCard = card('heat', 'When they are awake', 'hour × weekday, your time', {
+      i: 5,
+      end: heatPick,
+      drawChart: (el) => CH().heatmap(el, { cells }),
+      tableOf: () => CH().table(['Day', ...Array.from({ length: 24 }, (_, i) => String(i))], ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'].map((n, d) => [n, ...cells[d].map((m) => (m ? Math.round(m) : ''))])),
+    });
+
+    const memSeries = data.sprites.map((sp) => ({ label: label(sp), color: colors.get(sp.name), points: bucketsBy(sp, 'mem').filter((p) => p.v !== null) }));
+    const cpuSeries = data.sprites.map((sp) => ({ label: label(sp), color: colors.get(sp.name), points: bucketsBy(sp, 'cpu') }));
+    const cpuFmt = (v) => (v < 1 ? `${Math.round(v * 100)}%` : `${v.toFixed(1)} CPU`);
+    const memCard = card('mem', 'Memory', `GB, averaged per ${data.step >= 3_600_000 ? 'hour' : '5 minutes'} awake`, {
+      i: 6,
+      drawChart: (el) => CH().lines(el, { series: memSeries, from: data.from, to: data.to, step: data.step, format: (v) => `${v.toFixed(v < 10 ? 1 : 0)} GB`, unitLabel: 'Memory held while awake' }),
+      tableOf: () => CH().table(['Drive', 'Average', 'Peak'], memSeries.map((sr) => [sr.label, sr.points.length ? `${(sr.points.reduce((a, p) => a + p.v, 0) / sr.points.length).toFixed(2)} GB` : '—', sr.points.length ? `${Math.max(...sr.points.map((p) => p.v)).toFixed(2)} GB` : '—'])),
+    });
+    const cpuCard = card('cpu', 'CPU', 'share of one CPU, while awake', {
+      i: 7,
+      drawChart: (el) => CH().lines(el, { series: cpuSeries, from: data.from, to: data.to, step: data.step, format: cpuFmt, unitLabel: 'CPU used while awake' }),
+      tableOf: () => CH().table(['Drive', 'Average', 'Peak'], cpuSeries.map((sr) => [sr.label, sr.points.length ? cpuFmt(sr.points.reduce((a, p) => a + p.v, 0) / sr.points.length) : '—', sr.points.length ? cpuFmt(Math.max(...sr.points.map((p) => p.v))) : '—'])),
+    });
+
+    // Activity: turns and documents opened, per day (per hour for 24 h).
+    const slot = S.range === '24h' ? 3_600_000 : 86_400_000;
+    const slots = [];
+    for (let t = Math.floor(data.from / slot) * slot; t < data.to; t += slot) slots.push(t);
+    const perSlot = (sp, key) => slots.map((t) => sp.buckets.filter((b) => b.t >= t && b.t < t + slot).reduce((a, b) => a + (b[key] ?? 0), 0));
+    const slotLabel = (t) => (slot < 86_400_000 ? CH().when(t) : CH().dayLabel(t));
+    const actCard = card('activity', 'What people did', `agent turns and documents opened, per ${slot < 86_400_000 ? 'hour' : 'day'}`, {
+      wide: true,
+      i: 8,
+      drawChart: (el) => {
+        const maxTurns = Math.max(1, ...data.sprites.flatMap((sp) => perSlot(sp, 'turns')));
+        const maxOpens = Math.max(1, ...data.sprites.flatMap((sp) => perSlot(sp, 'opens')));
+        const grid = h('div.act-grid', {}, h('span.act-h'), h('span.act-h', { text: 'Agent turns' }), h('span.act-h', { text: 'Documents opened' }));
+        const todo = [];
+        for (const sp of data.sprites) {
+          const turns = perSlot(sp, 'turns');
+          const opens = perSlot(sp, 'opens');
+          const a = h('div.act-spark');
+          const b = h('div.act-spark');
+          grid.append(h('span.act-name', {}, h('i', { style: { background: colors.get(sp.name) } }), sp.name, sp.hasLedger ? null : h('span.faint', { text: ' · no ledger yet' })),
+            h('div.act-cell', {}, a, h('b', { text: String(turns.reduce((x, y) => x + y, 0)) })),
+            h('div.act-cell', {}, b, h('b', { text: String(opens.reduce((x, y) => x + y, 0)) })));
+          todo.push(() => {
+            CH().spark(a, { values: turns, color: colors.get(sp.name), max: maxTurns, labels: slots.map(slotLabel), format: (v) => `${v} turn${v === 1 ? '' : 's'}` });
+            CH().spark(b, { values: opens, color: colors.get(sp.name), max: maxOpens, labels: slots.map(slotLabel), format: (v) => `${v} opened` });
+          });
+        }
+        el.replaceChildren(grid);
+        CH().whenSized(grid, () => todo.forEach((f) => f()));
+      },
+      tableOf: () => CH().table(['Drive', 'Agent turns', 'Documents opened'], data.sprites.map((sp) => [sp.name, String(sp.totals.turns), String(sp.totals.opens)])),
+    });
+
+    dashPage.replaceChildren(barRow, tiles, h('div.page-grid', {}, stateCard, costCard, whyCard, spendCard, dailyCard, heatCard, memCard, cpuCard, actCard));
+  }
+
+  function pasteBill(trigger) {
+    openPop(trigger, (close) => {
+      const area = h('textarea', { rows: '9', placeholder: 'From:\n09/19/2026\nTo:\n09/25/2026\nTotal Spend\n$6.75\n…\nSprites: RAM    $6.05', spellcheck: 'false', 'aria-label': 'The Cost Explorer page, pasted' });
+      const error = h('p.error');
+      const save = h('button.btn.primary', { type: 'button', text: 'Use this bill' });
+      save.addEventListener('click', async () => {
+        save.disabled = true;
+        try {
+          await api('bill', { method: 'POST', body: { text: area.value } });
+          close();
+          S.usage.clear();
+          loadUsage(S.range);
+        } catch (err) {
+          error.textContent = err.message;
+          save.disabled = false;
+        }
+      });
+      return h('div.pop-body', {},
+        h('h4', { text: 'What Fly actually charged' }),
+        h('p.soft', { style: { 'font-size': '.85rem' }, text: 'Open Billing → Cost Explorer on fly.io, pick a range, select the page and paste it here (the per-app view works too). Every estimate is then scaled to match it.' }),
+        area, error,
+        h('div.foot', {}, h('button.btn.quiet', { type: 'button', text: 'Cancel', onclick: close }), save));
+    });
+  }
+
+  function setBudget(trigger, current) {
+    openPop(trigger, (close) => {
+      const input = h('input', { type: 'number', min: '0', step: '1', inputmode: 'decimal', placeholder: 'e.g. 25', value: current ?? '', 'aria-label': 'Monthly budget in dollars' });
+      const error = h('p.error');
+      const save = async (value) => {
+        try {
+          await api('budget', { method: 'PUT', body: { monthly: value } });
+          close();
+          S.usage.clear();
+          loadUsage(S.range);
+        } catch (err) {
+          error.textContent = err.message;
+        }
+      };
+      input.addEventListener('keydown', (e) => { if (e.key === 'Enter') save(input.value); });
+      return h('div.pop-body', {},
+        h('h4', { text: 'A monthly budget' }),
+        h('p.soft', { style: { 'font-size': '.85rem' }, text: 'Drawn on the month’s chart; the projection turns amber when it would pass it. Nothing is stopped.' }),
+        h('div.field', {}, h('label', { text: 'Dollars a month' }), input),
+        error,
+        h('div.foot', {},
+          current ? h('button.btn.quiet', { type: 'button', text: 'No budget', onclick: () => save(null) }) : h('button.btn.quiet', { type: 'button', text: 'Cancel', onclick: close }),
+          h('button.btn.primary', { type: 'button', text: 'Save', onclick: () => save(input.value) })));
+    });
+  }
+
+  /** In a drive's detail: its last seven days, its month so far, and why it was up. */
+  function use(d) {
+    const data = S.usage.get('7d')?.data;
+    const sp = data?.sprites.find((x) => x.name === d.name);
+    if (!CH()) return null;
+    if (!data) return section('Use', null, h('p.loading', { text: 'Reading…' }));
+    if (!sp) return null;
+    const colors = spriteColors(data);
+    const strip = h('div.use-strip', { 'data-chart': `use-${d.name}` });
+    const why = h('div.use-why');
+    const mtd = data.month.days.reduce((a, day) => a + (day.bySprite[d.name] ?? 0), 0);
+    CH().whenSized(strip, () => CH().timeline(strip, { from: data.from, to: data.to, lanes: [{ name: d.name, label: d.name, color: colors.get(d.name), segments: sp.segments }] }, { compact: true }));
+    CH().whenSized(why, () => CH().share(why, { rows: [{ label: 'Why awake', parts: CH().WHY_ORDER.map((k) => ({ key: k, value: sp.totals.why[k] ?? 0 })) }], colors: WHY_COLOR }));
+    return section('Use', 'last 7 days',
+      h('p.stat-line', {},
+        h('span', {}, 'This month ', h('b', { text: money(mtd) })),
+        h('span', {}, '7 days ', h('b', { text: money(sp.totals.total) })),
+        h('span', {}, 'awake ', h('b', { text: CH().hours(sp.totals.awakeHours) })),
+        sp.hasLedger ? null : h('span.faint', { text: 'no ledger yet: from what the Console saw' })),
+      strip, why);
+  }
+
   // ------------------------------------------------------------------ draw
 
   function draw() {
@@ -1371,6 +1735,7 @@
       // The list is kept current in the background, so coming back is instant.
       drawList();
     }
+    if (S.view === 'dashboard') drawDashboard();
     if (S.view === 'ship') drawShip();
     if (S.view === 'workshop') drawWorkshop();
     if (S.view === 'activity') drawActivity();
@@ -1421,6 +1786,9 @@
     paint();
   });
   events.addEventListener('job', (e) => upsertJob(JSON.parse(e.data)));
+  // A drive's ledger arrived, or its state changed: the dashboard reads again.
+  events.addEventListener('usage', usageChanged);
+  events.addEventListener('status', usageChanged);
   events.addEventListener('output', (e) => {
     const { id, text } = JSON.parse(e.data);
     appendOutput(id, text);
@@ -1438,5 +1806,6 @@
   placeThumb();
   refresh();
   loadChats();
+  loadUsage(S.range);
   paint();
 })();
