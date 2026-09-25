@@ -39,7 +39,9 @@ REPO_TARBALL=https://codeload.github.com/marble-app/marble-drive/tar.gz
 NODE="$(command -v node)"
 # The release's own node_modules/.bin first, so its pinned `claude` is the one
 # the host finds; through the `current` link, so a switch needs no new service.
-SERVICE_PATH="$CURRENT/marble-drive/node_modules/.bin:$HOME/.local/bin:$(dirname "$NODE"):/usr/local/bin:/usr/bin:/bin"
+# /.sprite/bin holds the Sprites CLI (`sprite`) and `gh`, which the console's
+# fleet view and its deploy jobs run.
+SERVICE_PATH="$CURRENT/marble-drive/node_modules/.bin:$HOME/.local/bin:$(dirname "$NODE"):/.sprite/bin:/usr/local/bin:/usr/bin:/bin"
 
 say() { printf '==> %s\n' "$*"; }
 die() { printf 'release: %s\n' "$*" >&2; exit 1; }
