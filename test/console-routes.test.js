@@ -140,3 +140,34 @@ test('a cold drive is never asked about its checkpoints: that would start it', a
   assert.ok(!asked.includes('t-peiling'), 'the cold drive was left alone');
   assert.equal(asked.filter((n) => n === 't-irene').length, 1, 'a warm one is asked once, not on every read');
 });
+
+test('the dashboard\'s data: ledgers pulled from awake drives only, a live usage event, bills and a budget', async (t) => {
+  const h = await host({ MARBLE_DRIVE_CONSOLE: '1', MARBLE_DRIVE_SECRET: 'pw-1234' });
+  t.after(() => h.close());
+  const now = Math.floor(Date.now() / 1000);
+  const lines = Array.from({ length: 30 }, (_, i) => ({ t: now - 3600 + i * 60, dt: 60, cpu: 2, mem: 2, disk: 3, why: { tabs: 1, looking: 1 } }));
+  await h.fleet.set({ ledger: { 't-sam': lines, 't-irene': lines } });
+  const res = await h.call('/console/api/events', { origin: null });
+  const reader = res.body.getReader();
+  let seen = '';
+  const end = Date.now() + 8_000;
+  while (!seen.includes('event: usage') && Date.now() < end) seen += new TextDecoder().decode((await reader.read()).value ?? new Uint8Array());
+  await reader.cancel();
+  assert.match(seen, /event: usage\ndata: \{"sprite":"t-sam","lines":30/);
+  const execs = (await h.fleet.calls()).filter((c) => c[0] === 'exec' && c.some((a) => a.endsWith('ledger-read.mjs')));
+  assert.ok(execs.length >= 1);
+  assert.ok(execs.every((c) => c.includes('t-sam')), 't-irene is asleep: never read');
+
+  const data = await (await h.call('/console/api/usage?range=24h')).json();
+  assert.equal(data.range, '24h');
+  const sam = data.sprites.find((s) => s.name === 't-sam');
+  assert.ok(Math.abs(sam.totals.awakeHours - sam.totals.estimatedHours - 0.5) < 1e-9, 'its ledger, plus the minutes since it woke that no line covers yet');
+  assert.equal(data.sprites.find((s) => s.name === 't-irene').hasLedger, false);
+
+  assert.equal((await h.call('/console/api/bill', { method: 'POST', body: { text: 'what $1' } })).status, 400);
+  const bill = await h.call('/console/api/bill', { method: 'POST', body: { text: 'From: 09/19/2026\nTo: 09/25/2026\nTotal Spend $6.75\nSprites: RAM $6.05\nSprites: CPU $0.58\nSprites: Hot Storage $0.11' } });
+  assert.equal(bill.status, 200);
+  assert.deepEqual(await (await h.call('/console/api/budget', { method: 'PUT', body: { monthly: 30 } })).json(), { monthly: 30 });
+  assert.equal((await h.call('/console/api/budget', { method: 'PUT', body: { monthly: 30 }, origin: 'https://evil.example' })).status, 403);
+  assert.equal((await (await h.call('/console/api/usage?range=month')).json()).budget, 30);
+});

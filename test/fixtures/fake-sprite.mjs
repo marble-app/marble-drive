@@ -8,6 +8,7 @@
 //   checkpoints: { <name>: [ { id, create_time, comment } ] },
 //   exec: { <name>: { stdout, stderr, code, delayMs } }       // any exec on it
 //   probe: { <name>: { ...probe output } }                      // node <probe>
+//   ledger: { <name>: [ { t, dt, cpu, mem, ... } ] }              // node ledger-read.mjs <since>
 //   fail: { <command>: { stderr, code } }                        // e.g. "checkpoint"
 // }
 
@@ -68,6 +69,12 @@ switch (args[0]) {
     const name = flag('-s');
     const rest = args.slice(args.indexOf('--') + 1);
     const script = rest.find((a) => a.endsWith('.mjs'));
+    // A ledger read: every line of state.ledger[name] after the cursor.
+    if (rest[0] === 'node' && script?.endsWith('ledger-read.mjs')) {
+      const since = Number(rest[2]) || 0;
+      const lines = (state.ledger?.[name] ?? []).filter((l) => l.t > since);
+      done(`${JSON.stringify({ ledger: lines.length, more: false })}\n${lines.map((l) => JSON.stringify(l)).join('\n')}\n`);
+    }
     if (rest[0] === 'node' && script && state.probe?.[name]) done(state.probe[name]);
     // A command may have its own answer (state.exec[name][<first word>]), or
     // the drive answers every exec the same way.

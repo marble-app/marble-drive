@@ -1191,7 +1191,7 @@ export async function createDrive(config, { log = console, agentProviders = null
 
   const consoleWhy = consoleAllowed(config);
   if (consoleWhy.ok) {
-    consoleApp = await createConsole({ config, store, streams, log, json, readJson, text });
+    consoleApp = await createConsole({ config, store, streams, ledger, log, json, readJson, text });
   } else if (config.console) {
     log.error?.(`[console] not started: ${consoleWhy.why}`);
   }

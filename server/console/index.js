@@ -17,10 +17,13 @@ import { createActions } from './actions.js';
 import { createInspector } from './inspect.js';
 import { createJobs } from './jobs.js';
 import { createSprites } from './sprites.js';
+import { createUsage } from './usage.js';
 import { createWorkshop } from './workshop.js';
 
 const FLEET_EVERY = 20_000;
 const LOOK_AWAKE_EVERY = 5 * 60_000;
+// An awake drive's ledger is read this often while a console tab is open.
+const PULL_EVERY = 60_000;
 const WORKSHOP_EVERY = 60_000;
 const NAME = /^[a-z0-9][a-z0-9-]{0,62}$/;
 
@@ -32,7 +35,7 @@ export function consoleAllowed(config) {
   return { ok: true, why: null };
 }
 
-export async function createConsole({ config, store, streams = null, log = console, json, readJson, text }) {
+export async function createConsole({ config, store, streams = null, ledger = null, log = console, json, readJson, text }) {
   const dir = path.join(store.marbleDir, 'console');
   const self = config.consoleSelf || os.hostname();
   const listeners = new Set();
@@ -61,6 +64,7 @@ export async function createConsole({ config, store, streams = null, log = conso
     },
   });
   await jobs.ready();
+  const usage = createUsage({ dir: path.join(dir, 'usage'), sprites, self, selfLedger: ledger, log });
   const workshop = createWorkshop({ src: config.consoleSrc });
   const actions = createActions({ sprites, inspector, jobs, workshop, src: config.consoleSrc, self, stateDir: dir });
 
@@ -75,6 +79,8 @@ export async function createConsole({ config, store, streams = null, log = conso
       fleet = await sprites.list();
       fleetError = null;
       fleetAt = Date.now();
+      const changes = await usage.observe(fleet).catch(() => []);
+      for (const change of changes) send('status', change);
     } catch (err) {
       fleetError = err.message;
     }
@@ -171,6 +177,7 @@ export async function createConsole({ config, store, streams = null, log = conso
         await actions.look(row.name).catch(() => {});
         send('fleet', { fleet: await drives(), fleetAt, fleetError });
       }
+      await pullAwake();
       if (Date.now() - lastWorkshop >= WORKSHOP_EVERY) {
         lastWorkshop = Date.now();
         await workshop.fetch();
@@ -181,6 +188,18 @@ export async function createConsole({ config, store, streams = null, log = conso
     } finally {
       ticking = false;
     }
+  }
+
+  // Every awake drive's new ledger lines. Never a drive that is asleep: the API
+  // said it is running, and an exec on a running sprite wakes nothing.
+  const pulledAt = new Map();
+  async function pullAwake() {
+    const due = fleet.filter((r) => r.awake && !jobs.running(r.name) && Date.now() - (pulledAt.get(r.name) ?? 0) >= PULL_EVERY);
+    await Promise.allSettled(due.map(async (row) => {
+      pulledAt.set(row.name, Date.now());
+      const lines = await usage.pull(row.name);
+      if (lines.length) send('usage', { sprite: row.name, lines: lines.length, t: lines.at(-1).t });
+    }));
   }
 
   function refreshSoon() {
@@ -260,6 +279,17 @@ export async function createConsole({ config, store, streams = null, log = conso
         return undefined;
       }
 
+      if (a === 'usage' && method === 'GET') {
+        if (!fleetAt) await readFleet();
+        const range = ['24h', '7d', '30d', 'month'].includes(url.searchParams.get('range')) ? url.searchParams.get('range') : '7d';
+        return json(res, 200, await usage.query({ range, rows: fleet }));
+      }
+      if (a === 'bill' && method === 'POST') {
+        const result = await usage.addBill(String(body.text ?? '').slice(0, 20_000));
+        return json(res, result.ok ? 200 : 400, result);
+      }
+      if (a === 'budget' && method === 'PUT') return json(res, 200, { monthly: await usage.setBudget(body.monthly) });
+
       if (a === 'plan' && method === 'GET') {
         return json(res, 200, await actions.plan({
           name: url.searchParams.get('name') ? name(url.searchParams.get('name')) : null,
@@ -331,6 +361,7 @@ export async function createConsole({ config, store, streams = null, log = conso
     state,
     jobs,
     actions,
+    usage,
     close() {
       if (timer) clearInterval(timer);
       if (pending) clearTimeout(pending);
