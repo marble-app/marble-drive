@@ -236,6 +236,7 @@ async function boot({ config, store, writeOps, createDocument, origin, providers
     maxBody: config.maxBodyBytes,
     gated: Boolean(config.secret),
     keys,
+    anthropicBase: config.anthropicBase,
     skills,
     // Not a plain 60 s cache: the usage API rate-limits, and retrying on that
     // cadence keeps the limit tripped while the sliders read Unavailable. The

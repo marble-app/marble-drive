@@ -24,6 +24,7 @@
     "test:browser": "node --test --test-concurrency=1 --test-reporter=spec \"test-browser/*.test.js\""
   },
   "dependencies": {
+    "@anthropic-ai/sdk": "^0.128.0",
     "@bdhmin/marble": "file:../marble",
     "playwright": "^1.63.0"
   }

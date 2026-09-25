@@ -57,7 +57,7 @@ export const usageHistoryStub = (weeks = 26) => {
   return { source: 'claude-code-local', tz: 'America/Los_Angeles', generatedAt: '2026-09-18T20:00:00.000Z', from: days[0].date, to: days.at(-1).date, days };
 };
 
-export async function startDrive({ scripts = {}, agents = true, documents = { garden: GARDEN }, genui = null, providers = [], env = {} } = {}) {
+export async function startDrive({ scripts = {}, agents = true, documents = { garden: GARDEN }, genui = null, providers = [], signedOut = [], env = {} } = {}) {
   const root = await fsp.mkdtemp(path.join(os.tmpdir(), 'marble-browser-drive-'));
   const workdir = await fsp.mkdtemp(path.join(os.tmpdir(), 'marble-browser-work-'));
   const keysFile = path.join(workdir, 'agent-keys.local');
@@ -83,7 +83,12 @@ export async function startDrive({ scripts = {}, agents = true, documents = { ga
     log: quiet,
     // `providers` adds scripted stand-ins under real ids (claude-subscription,
     // claude-api, cursor) for tests of what the page does with those ids.
-    agentProviders: new Map([['fake', createFakeProvider({ scripts })], ...providers.map((id) => [id, createFakeProvider({ scripts, id })])]),
+    // `signedOut` names the ones among them that report no sign-in.
+    agentProviders: new Map([['fake', createFakeProvider({ scripts })], ...providers.map((id) => {
+      const provider = createFakeProvider({ scripts, id });
+      if (signedOut.includes(id)) provider.detect = async () => ({ installed: true, signedIn: false, detail: 'signed out' });
+      return [id, provider];
+    })]),
     genui,
     usageHistory: async ({ weeks = 26 } = {}) => usageHistoryStub(weeks),
     usage: async () => ({

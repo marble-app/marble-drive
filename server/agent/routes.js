@@ -18,6 +18,7 @@ import { json, readJson, send } from '../http.js';
 import { parsePath } from '../paths.js';
 import { sameOrigin } from '../sessions.js';
 import { driveWhere, pickCursorPickerModels, sortProviders } from './catalog.js';
+import { checkAnthropicKey } from './key-check.js';
 import { findProject, listProjects, validateProjectPath } from './projects.js';
 import { summarize } from './store.js';
 import { normalizeUndo, undoTurn } from './undo.js';
@@ -99,7 +100,7 @@ const publicMeter = (meter) => {
   return out;
 };
 
-export function createAgentRoutes({ store, runner, tools, hub, providers, writeOps, restore, maxBody, gated = false, keys = null, skills = [], usage = null, usageHistory = null, root = null, streams = null }) {
+export function createAgentRoutes({ store, runner, tools, hub, providers, writeOps, restore, maxBody, gated = false, keys = null, anthropicBase = 'https://api.anthropic.com', skills = [], usage = null, usageHistory = null, root = null, streams = null }) {
   let detected = null;
   // Turns being undone right now. The undoneAt check alone lets two requests
   // that arrive together both pass it before either has written.
@@ -123,6 +124,21 @@ export function createAgentRoutes({ store, runner, tools, hub, providers, writeO
       claudeAuth: claudeAuth(settings),
       keys: keys ? await keys.flags() : { anthropic: false, cursor: false },
     };
+  };
+
+  // Whether this drive can run Claude at all: a Claude login that is signed
+  // in, or an API key. A page asks once a visit and, when neither, offers the
+  // key field (runtime/agent-ui.js, <marble-agent-setup>). A drive with no
+  // Claude agent has nothing to set up.
+  const setupState = async () => {
+    const settings = await store.settings();
+    const hasClaude = providers.has(CLAUDE.login) || providers.has(CLAUDE.api);
+    const key = keys ? (await keys.flags()).anthropic : false;
+    // The login is only asked about when it matters: the probe runs the CLI.
+    const login = hasClaude && !key && providers.has(CLAUDE.login)
+      ? Boolean((await detectAll()).find((p) => p.id === CLAUDE.login)?.signedIn)
+      : false;
+    return { needed: hasClaude && !key && !login, login, key, claudeAuth: claudeAuth(settings) };
   };
 
   async function detectAll() {
@@ -322,6 +338,25 @@ export function createAgentRoutes({ store, runner, tools, hub, providers, writeO
       } catch {
         return json(res, 200, { source: null, tz: null, from: null, to: null, days: [] });
       }
+    }
+
+    if (route === '/agent/setup' && method === 'GET') return json(res, 200, await setupState());
+    if (route === '/agent/setup' && method === 'POST') {
+      if (!keys) return json(res, 409, { error: 'this drive keeps no keys' });
+      const body = await readJson(req, maxBody);
+      const key = typeof body.key === 'string' ? body.key.trim() : '';
+      if (!key || /\s/.test(key)) return json(res, 400, { error: 'Paste the whole key. It starts with sk-ant-.' });
+      const verdict = await checkAnthropicKey(key, { baseURL: anthropicBase });
+      if (verdict === 'rejected') {
+        return json(res, 400, { error: "Anthropic didn't accept that key. Check that it was copied whole." });
+      }
+      // Kept even when Anthropic could not be asked: an outage is not a
+      // wrong key, and the page says it went unchecked.
+      await keys.write({ anthropic: key });
+      detected = null;
+      const current = (await store.settings()).defaultProvider;
+      await store.saveSettings({ claudeAuth: 'api', ...(isClaude(current) ? { defaultProvider: CLAUDE.api } : {}) });
+      return json(res, 200, { ...(await setupState()), checked: verdict === 'ok' });
     }
 
     if (route === '/agent/settings') {

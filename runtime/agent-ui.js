@@ -6863,6 +6863,176 @@
 
   customElements.define('marble-agent-settings', MarbleAgentSettings);
 
+  // ------------------------------------------------------------ first visit
+
+  // A drive whose Claude has neither a signed-in login nor an API key cannot
+  // run an agent, and nothing said so until a turn failed. On the first page
+  // of a visit this asks the host (GET /agent/setup) and, when neither is
+  // there, offers the key field right away. The host checks the key with
+  // Anthropic before keeping it; the page never holds it past the request.
+  // "Not now" lasts the tab, so moving between documents does not ask again.
+  const SETUP_DISMISSED = 'marble-agent-setup-dismissed';
+  const SETUP_CSS = `
+    dialog {
+      width: min(420px, calc(100vw - 32px)); box-sizing: border-box; margin: auto;
+      padding: 22px 22px 18px; border: 1px solid var(--line); border-radius: 16px;
+      background: var(--card); color: var(--ink); box-shadow: var(--shadow-lift);
+      font: inherit;
+    }
+    dialog::backdrop { background: rgba(20, 18, 14, .28); }
+    h2 { margin: 0 0 6px; font-size: 17px; font-weight: 600; letter-spacing: -.01em; }
+    .lede { margin: 0 0 16px; color: var(--muted); font-size: 13.5px; }
+    label { display: flex; flex-direction: column; gap: 6px; font-size: 12px; color: var(--muted); }
+    input {
+      font: 13.5px/1.4 ui-monospace, SFMono-Regular, Menlo, monospace; color: var(--ink);
+      background: var(--paper-2); border: 1px solid var(--line); border-radius: 8px;
+      padding: 8px 10px; width: 100%; box-sizing: border-box;
+    }
+    /* Under 16px, iOS zooms the page in to show a focused field. */
+    @media (pointer: coarse) { input { font-size: 16px; } }
+    input::placeholder { color: var(--placeholder); }
+    input:focus-visible { outline: 2px solid var(--accent-ink); outline-offset: 1px; }
+    .hint { margin: 8px 0 0; font-size: 12px; color: var(--muted); }
+    .hint a { color: var(--accent-ink); }
+    .status { min-height: 1.3em; margin: 10px 0 0; font-size: 12.5px; color: var(--muted); }
+    .status.error { color: var(--danger); }
+    .actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 10px; }
+    button { font: inherit; cursor: pointer; border-radius: 8px; padding: 6px 14px; border: 1px solid var(--line); background: var(--paper-2); color: var(--ink); }
+    button.save { background: var(--ink); color: var(--paper); border-color: var(--ink); }
+    button.save:disabled { opacity: .55; cursor: progress; }
+    button.link { border: 0; background: none; color: var(--muted); padding: 6px 8px; }
+    button[hidden] { display: none; }
+    button:focus-visible { outline: 2px solid var(--accent-ink); outline-offset: 2px; }
+    .alt { margin: 16px 0 0; padding-top: 12px; border-top: 1px solid var(--line); font-size: 12px; color: var(--faint); }
+  `;
+
+  class MarbleAgentSetup extends HTMLElement {
+    constructor() {
+      super();
+      const root = this.attachShadow({ mode: 'open' });
+      root.innerHTML = `<style>${TOKENS}${SETUP_CSS}</style>
+        <dialog aria-labelledby="agent-setup-title" aria-describedby="agent-setup-lede">
+          <form>
+            <h2 id="agent-setup-title">Connect Claude</h2>
+            <p class="lede" id="agent-setup-lede">Agents on this drive run on Claude. Paste an Anthropic API key to turn them on.</p>
+            <label>API key
+              <input name="key" type="password" autocomplete="off" spellcheck="false" placeholder="sk-ant-…">
+            </label>
+            <p class="hint">Make one at <a href="https://console.anthropic.com/settings/keys" target="_blank" rel="noopener noreferrer">console.anthropic.com</a>. It stays on this drive and is never shown again.</p>
+            <p class="status" role="status" aria-live="polite"></p>
+            <div class="actions">
+              <button type="button" class="link later">Not now</button>
+              <button type="submit" class="save">Connect</button>
+            </div>
+            <p class="alt">Or ask whoever runs this drive to sign it in to a Claude account.</p>
+          </form>
+        </dialog>`;
+      this.dialog = root.querySelector('dialog');
+      this.form = root.querySelector('form');
+      this.input = root.querySelector('input');
+      this.status = root.querySelector('.status');
+      this.saveButton = root.querySelector('.save');
+      this.laterButton = root.querySelector('.later');
+      this.done = false;
+    }
+
+    get api() {
+      return window.marble?.agent;
+    }
+
+    connectedCallback() {
+      this.unwatchTheme = watchPageTheme(this);
+      this.form.addEventListener('submit', (event) => {
+        event.preventDefault();
+        if (this.done) this.dialog.close();
+        else this.connect();
+      });
+      this.laterButton.addEventListener('click', () => this.later());
+      // Escape: the dialog's own cancel, which is the same as Not now.
+      this.dialog.addEventListener('cancel', (event) => {
+        event.preventDefault();
+        this.later();
+      });
+      this.check();
+    }
+
+    disconnectedCallback() {
+      this.unwatchTheme?.();
+      this.unwatchTheme = null;
+    }
+
+    async check() {
+      // A page drawn inside another (the Drive's live previews) is not a visit.
+      if (window.top !== window) return;
+      try {
+        if (sessionStorage.getItem(SETUP_DISMISSED)) return;
+      } catch {
+        // Storage refused: ask anyway, and Not now lasts this page.
+      }
+      let state = null;
+      try {
+        state = await this.api?.setup();
+      } catch {
+        return;
+      }
+      if (state?.needed && this.isConnected) this.open();
+    }
+
+    open() {
+      if (this.dialog.open) return;
+      this.say('');
+      this.dialog.showModal();
+      this.input.focus();
+    }
+
+    later() {
+      try {
+        sessionStorage.setItem(SETUP_DISMISSED, '1');
+      } catch {
+        // Nothing to remember it in; it is closed for this page either way.
+      }
+      this.dialog.close();
+    }
+
+    async connect() {
+      const key = this.input.value.trim();
+      if (!key) {
+        this.say('Paste the key first.', true);
+        this.input.focus();
+        return;
+      }
+      this.saveButton.disabled = true;
+      this.say('Checking the key with Anthropic…');
+      try {
+        const answer = await this.api.connectClaude(key);
+        this.input.value = '';
+        dispatchEvent(new CustomEvent('marble:agent-settings-saved'));
+        this.done = true;
+        this.laterButton.hidden = true;
+        this.input.disabled = true;
+        if (answer.checked) {
+          this.say('Connected. Agents are ready.');
+          setTimeout(() => this.dialog.close(), 900);
+        } else {
+          // Kept, but Anthropic could not be asked: say so, and let it be read.
+          this.say("Saved. Anthropic couldn't be reached to check it, so the first chat will say if it's wrong.");
+          this.saveButton.textContent = 'Done';
+        }
+      } catch (err) {
+        this.say(err.message || "Couldn't save the key.", true);
+        this.input.select();
+      }
+      this.saveButton.disabled = false;
+    }
+
+    say(text, error = false) {
+      this.status.textContent = text;
+      this.status.classList.toggle('error', error);
+    }
+  }
+
+  customElements.define('marble-agent-setup', MarbleAgentSetup);
+
   // ------------------------------------------------------------ the drawer
 
   const WIDTH = 420;
@@ -7789,8 +7959,17 @@
     });
   };
 
+  // Every page, the Agents page too: a visit can begin on any of them.
+  const mountSetup = () => {
+    if (window.top !== window || document.querySelector('marble-agent-setup')) return;
+    const el = document.createElement('marble-agent-setup');
+    el.setAttribute('data-marble-transient', '');
+    document.body.append(el);
+  };
+
   const mount = () => {
     mountSettings();
+    mountSetup();
     const pageUsage = document.querySelector('header.topbar > .usage');
     if (pageUsage) watchUsage(pageUsage);
     bindNewChatKey();

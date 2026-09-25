@@ -17,6 +17,16 @@ not in the drive and not in `.marble/`. The settings panel writes them there.
 `.env.local` can still hold `ANTHROPIC_API_KEY` / `CURSOR_API_KEY` for a host
 that has no panel-set key; both files are gitignored.
 
+A drive whose Claude has neither a signed-in login nor a key says so on the
+first page of a visit: a **Connect Claude** popup (`<marble-agent-setup>` in
+`runtime/agent-ui.js`) with a field to paste an API key into. `GET
+/agent/setup` answers whether it is needed; `POST /agent/setup {key}` checks
+the key with Anthropic (the model list, via `@anthropic-ai/sdk`; nothing is
+spent) and keeps it only if Anthropic does not refuse it, then switches Claude
+to the key. An unreachable Anthropic keeps it and says it went unchecked.
+"Not now" lasts the tab; a page inside another page never asks.
+`MARBLE_DRIVE_ANTHROPIC_BASE` points the check elsewhere (the tests' fake).
+
 Refused, with the reason printed at boot, on a multi-tenant host, on an
 ungated host that is not listening on loopback, and on a host bound to one
 address other than loopback (the MCP bridge calls back on loopback). One host

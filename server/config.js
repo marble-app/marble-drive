@@ -192,6 +192,8 @@ export function loadConfig(env = process.env) {
     // API keys the settings panel writes. Gitignored, and not under the drive
     // root, so a backup of `.marble/` does not take them.
     agentKeysFile: path.resolve(str('MARBLE_DRIVE_AGENT_KEYS', path.join(process.cwd(), '.agent-keys.local'))),
+    // Where a pasted API key is checked before it is kept (server/agent/key-check.js).
+    anthropicBase: str('MARBLE_DRIVE_ANTHROPIC_BASE', 'https://api.anthropic.com'),
 
     // Recursive Subquestions on Monitor. The key never lives in a document.
     typesafeApiKey: str('TYPESAFE_API_KEY', null),
