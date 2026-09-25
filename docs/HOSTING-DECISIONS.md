@@ -324,3 +324,5 @@ the list is honest.
 | A status page that reads the machine it reports on | would wake every drive it drew | read the platform's API; look inside only when asked, or when awake anyway |
 | Listing a stopped (cold) sprite's checkpoints | three friends' drives were started every five minutes the console was open | never ask a cold sprite anything on a timer; re-read only after it has run |
 | A sprite pauses about a second after its last connection, not 30 s | a turn sent with no tab open froze before keep-awake's first 15 s check | take the hold when work starts, not on a timer |
+| Waking is the slow part, not the network | the owner's drive felt slow between pages; Fly's edge answered in ~90 ms, while a wake took 9 s paused and 70 s stopped | on the owner's drive, a tab keeps the sprite up for 30 min hidden and 60 min idle; the host's stream cut follows those limits unless set |
+| The runtime was `no-store` | every page switch refetched 14 scripts (~265 KB compressed) | name each at `?v=<hash>` and let the browser keep it; `no-cache` + ETag for any other address |

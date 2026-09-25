@@ -13,6 +13,8 @@
 // Nothing below reaches the filesystem. Every read and every write goes through
 // the store, which is the seam the next four generations hang off.
 
+import crypto from 'node:crypto';
+import fs from 'node:fs';
 import fsp from 'node:fs/promises';
 import http from 'node:http';
 import path from 'node:path';
@@ -141,6 +143,32 @@ const RUNTIME = {
   'agent-variations.js': () => path.join(REPO, 'runtime', 'agent-variations.js'),
 };
 
+// A runtime file's version is a hash of its bytes. A page asks for each one at
+// `?v=<version>`, which the browser keeps until the file changes, so moving
+// between documents downloads only the document. Remembered against the
+// file's size and mtime, because the runtime is re-read on every request and a
+// page names all of it.
+const hashOf = (bytes) => crypto.createHash('sha1').update(bytes).digest('hex').slice(0, 12);
+const runtimeVersions = new Map();
+const runtimeVersion = (file) => {
+  try {
+    const where = RUNTIME[file]();
+    const stat = fs.statSync(where);
+    const stamp = `${stat.size}:${stat.mtimeMs}`;
+    const known = runtimeVersions.get(file);
+    if (known?.stamp === stamp) return known.version;
+    const version = hashOf(fs.readFileSync(where));
+    runtimeVersions.set(file, { stamp, version });
+    return version;
+  } catch {
+    return null;
+  }
+};
+const runtimeUrl = (file) => {
+  const version = runtimeVersion(file);
+  return version ? `/runtime/${file}?v=${version}` : `/runtime/${file}`;
+};
+
 /** The ids a document's html, head and body carry. */
 const rootIds = (source) => {
   const ids = new Set();
@@ -266,35 +294,35 @@ export async function createDrive(config, { log = console, agentProviders = null
   const injectCarrier = (source, docPath) => {
     // tab-rest.js first: it stands in for EventSource before any stream opens.
     let tags =
-      `<script src="/runtime/tab-rest.js" data-hidden-ms="${config.tabHiddenSeconds * 1000}" data-idle-ms="${config.tabIdleMinutes * 60_000}" data-marble-transient></script>\n` +
-      `<script src="/runtime/marble.js" data-marble-app="${escapeHtml(docPath)}" data-marble-transient></script>\n` +
-      `<script src="/runtime/drive.js" data-marble-transient></script>\n` +
-      `<script src="/runtime/affords.js" data-marble-transient></script>`;
+      `<script src="${runtimeUrl('tab-rest.js')}" data-hidden-ms="${config.tabHiddenSeconds * 1000}" data-idle-ms="${config.tabIdleMinutes * 60_000}" data-marble-transient></script>\n` +
+      `<script src="${runtimeUrl('marble.js')}" data-marble-app="${escapeHtml(docPath)}" data-marble-transient></script>\n` +
+      `<script src="${runtimeUrl('drive.js')}" data-marble-transient></script>\n` +
+      `<script src="${runtimeUrl('affords.js')}" data-marble-transient></script>`;
     if (agents) {
-      tags += `\n<script src="/runtime/agent.js" data-marble-transient></script>`;
+      tags += `\n<script src="${runtimeUrl('agent.js')}" data-marble-transient></script>`;
       // Custom meta skips the drawer mount in runtime/agent-ui.js, not this script —
       // Agents.mrbl still needs <marble-conversation> without a second launcher.
-      tags += `\n<script src="/runtime/agent-ui.js" data-marble-transient></script>`;
-      tags += `\n<script src="/runtime/agent-folders.js" data-marble-transient></script>`;
-      tags += `\n<script src="/runtime/agent-phone.js" data-marble-transient></script>`;
-      tags += `\n<script src="/runtime/agent-usage-charts.js" data-marble-transient></script>`;
+      tags += `\n<script src="${runtimeUrl('agent-ui.js')}" data-marble-transient></script>`;
+      tags += `\n<script src="${runtimeUrl('agent-folders.js')}" data-marble-transient></script>`;
+      tags += `\n<script src="${runtimeUrl('agent-phone.js')}" data-marble-transient></script>`;
+      tags += `\n<script src="${runtimeUrl('agent-usage-charts.js')}" data-marble-transient></script>`;
     }
-    tags += `\n<script src="/runtime/collab.js" data-marble-transient></script>`;
+    tags += `\n<script src="${runtimeUrl('collab.js')}" data-marble-transient></script>`;
     // The Console's own look and behaviour, only on the Console, only where
     // the console is on (server/console).
     if (consoleApp && /<meta\s+name="marble-console"/i.test(source)) {
-      tags += `\n<link rel="stylesheet" href="/runtime/console.css" data-marble-transient>`;
-      tags += `\n<script src="/runtime/console.js" data-marble-transient></script>`;
+      tags += `\n<link rel="stylesheet" href="${runtimeUrl('console.css')}" data-marble-transient>`;
+      tags += `\n<script src="${runtimeUrl('console.js')}" data-marble-transient></script>`;
     }
     // After collab.js: the callout hangs its card with the zone's own geometry.
-    if (agents) tags += `\n<script src="/runtime/agent-callout.js" data-marble-transient></script>`;
+    if (agents) tags += `\n<script src="${runtimeUrl('agent-callout.js')}" data-marble-transient></script>`;
     // After the callout, whose handle both tools hand their ids to, and after
     // agent-ui.js, whose tray is the only place these tools are reachable from
     // — a register nobody answers takes the layer back down.
     if (agents) {
-      tags += `\n<script src="/runtime/agent-marks-geometry.js" data-marble-transient></script>`;
-      tags += `\n<script src="/runtime/agent-marks.js" data-marble-transient></script>`;
-      tags += `\n<script src="/runtime/agent-variations.js" data-marble-transient></script>`;
+      tags += `\n<script src="${runtimeUrl('agent-marks-geometry.js')}" data-marble-transient></script>`;
+      tags += `\n<script src="${runtimeUrl('agent-marks.js')}" data-marble-transient></script>`;
+      tags += `\n<script src="${runtimeUrl('agent-variations.js')}" data-marble-transient></script>`;
     }
     return source.includes('</body>')
       ? source.replace(/<\/body>/i, () => `${tags}\n</body>`)
@@ -537,7 +565,18 @@ export async function createDrive(config, { log = console, agentProviders = null
         const js = await fsp.readFile(resolve(), 'utf8').catch(() => null);
         if (js === null) return text(res, 404, `no runtime module "${file}"`);
         const type = file.endsWith('.css') ? 'text/css' : 'text/javascript';
-        return send(res, 200, js, { 'Content-Type': `${type}; charset=utf-8` });
+        // Kept for good at the address a page names (runtimeUrl), because a new
+        // version is a new address. Any other address — an import() inside
+        // the runtime, a stale version — is asked about each time, and a
+        // browser that already has these bytes is told so.
+        const version = hashOf(js);
+        const headers = {
+          'Content-Type': `${type}; charset=utf-8`,
+          ETag: `"${version}"`,
+          'Cache-Control': url.searchParams.get('v') === version ? 'private, max-age=31536000, immutable' : 'no-cache',
+        };
+        if (req.headers['if-none-match'] === headers.ETag) return send(res, 304, '', headers);
+        return send(res, 200, js, headers);
       }
 
       if (route.startsWith('/a/')) {

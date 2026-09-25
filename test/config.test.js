@@ -25,3 +25,15 @@ test('a sprite sleeps on these limits unless its sprite.env says otherwise', () 
   );
   assert.equal(loadConfig({ MARBLE_DRIVE_AWAKE_MAX_HOURS: '48' }).awakeMaxHours, 48);
 });
+
+test('raising a tab\'s limits raises the host\'s stream cut with them, unless the cut is set itself', () => {
+  // A tab says it is used only on input while shown, so it can sit idle for
+  // its whole idle limit and then hidden for its whole hidden limit without a
+  // word. A cut shorter than that would put to sleep a drive kept up on purpose.
+  const awake = loadConfig({ MARBLE_DRIVE_TAB_HIDDEN_SECONDS: '1800', MARBLE_DRIVE_TAB_IDLE_MINUTES: '60' });
+  assert.equal(awake.streamUnusedMinutes, 60 + 30 + 1);
+  assert.equal(
+    loadConfig({ MARBLE_DRIVE_TAB_IDLE_MINUTES: '60', MARBLE_DRIVE_STREAM_UNUSED_MINUTES: '20' }).streamUnusedMinutes,
+    20,
+  );
+});

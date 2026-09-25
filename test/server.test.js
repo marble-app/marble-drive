@@ -102,9 +102,9 @@ test('/ lands on the Drive, which is an ordinary document in the drive', async (
   assert.equal(response.headers.get('location'), '/a/drive');
 
   const page = await (await get('/a/drive')).text();
-  assert.match(page, /<script src="\/runtime\/marble\.js" data-marble-app="drive"/);
-  assert.match(page, /<script src="\/runtime\/drive\.js"/);
-  assert.match(page, /<script src="\/runtime\/collab\.js"/);
+  assert.match(page, /<script src="\/runtime\/marble\.js\?v=[0-9a-f]{12}" data-marble-app="drive"/);
+  assert.match(page, /<script src="\/runtime\/drive\.js\?v=[0-9a-f]{12}"/);
+  assert.match(page, /<script src="\/runtime\/collab\.js\?v=[0-9a-f]{12}"/);
   assert.doesNotMatch(page, /agent-callout\.js/, 'no agents here, so nothing to summon');
   assert.doesNotMatch(page, /agent-marks/, 'no agents here, so nothing to mark up for');
   // The host injects the carrier and nothing else — no affordance, no chrome.
@@ -437,6 +437,55 @@ const collabDoc = (title) =>
   `<!doctype html>\n<html lang="en" data-marble="1">\n<head><meta charset="utf-8"><title>${title}</title></head>\n` +
   `<body data-marble-id="bodyc1">\n<main data-marble-id="rootc1">\n<h1 data-marble-id="hc1" data-marble-editable>${title}</h1>\n</main>\n</body>\n</html>\n`;
 
+test('a page and its runtime come compressed to a browser that asks, and plain to one that does not', async () => {
+  // Over a sprite's URL every byte of a page crosses the internet, and a page
+  // is its document plus about 800 KB of runtime.
+  for (const encoding of ['br', 'gzip']) {
+    const page = await get('/a/drive', { headers: { 'Accept-Encoding': encoding } });
+    assert.equal(page.headers.get('content-encoding'), encoding);
+    assert.match(page.headers.get('vary'), /Accept-Encoding/);
+    assert.match(await page.text(), /<script src="\/runtime\/marble\.js/, 'and it still reads as the page');
+  }
+  const js = await get('/runtime/marble.js', { headers: { 'Accept-Encoding': 'gzip, br' } });
+  assert.equal(js.headers.get('content-encoding'), 'br', 'brotli when both are on offer');
+  assert.match(await js.text(), /window\.marble = \{/);
+
+  const http = await import('node:http');
+  const plain = await new Promise((resolve, reject) => {
+    http.get(`${base}/a/drive`, (res) => {
+      let body = '';
+      res.setEncoding('utf8').on('data', (chunk) => { body += chunk; }).on('end', () => resolve({ res, body }));
+    }).on('error', reject);
+  });
+  assert.equal(plain.res.headers['content-encoding'], undefined);
+  assert.match(plain.body, /<script src="\/runtime\/marble\.js/);
+});
+
+test('the runtime a page names is kept by the browser until it changes, and any other address is revalidated', async () => {
+  const page = await (await get('/a/drive')).text();
+  const named = page.match(/src="(\/runtime\/marble\.js\?v=([0-9a-f]{12}))"/);
+  assert.ok(named, 'the page names a version of marble.js');
+
+  const pinned = await get(named[1]);
+  assert.equal(pinned.status, 200);
+  assert.match(pinned.headers.get('cache-control'), /max-age=31536000/);
+  assert.match(pinned.headers.get('cache-control'), /immutable/);
+  assert.equal(pinned.headers.get('etag'), `"${named[2]}"`, 'the version is the hash of what is served');
+
+  // An import() inside the runtime names no version; neither does a page from
+  // before the file changed. Both are asked about, and a match costs nothing.
+  for (const route of ['/runtime/marble.js', '/runtime/marble.js?v=000000000000']) {
+    const response = await get(route);
+    assert.equal(response.headers.get('cache-control'), 'no-cache', route);
+    const again = await get(route, { headers: { 'If-None-Match': response.headers.get('etag') } });
+    assert.equal(again.status, 304, route);
+    assert.equal(await again.text(), '');
+  }
+
+  // Documents are never kept: the page is the document, and it moves.
+  assert.equal((await get('/a/drive')).headers.get('cache-control'), 'no-store');
+});
+
 test('a document dropped into the drive lands in the folder it was dropped on', async () => {
   const made = await asJson(await put('archive', 'Brought In.mrbl', brought('Brought In')));
   assert.equal(made.path, 'archive/Brought In');
@@ -445,7 +494,7 @@ test('a document dropped into the drive lands in the folder it was dropped on', 
 
   // Served as the app it is, not previewed — the whole point of the drive.
   const page = await (await get('/a/archive%2FBrought%20In')).text();
-  assert.match(page, /<script src="\/runtime\/marble\.js" data-marble-app="archive\/Brought In"/);
+  assert.match(page, /<script src="\/runtime\/marble\.js\?v=[0-9a-f]{12}" data-marble-app="archive\/Brought In"/);
   assert.match(page, /<h1 data-marble-id="aa11bb22"/);
 
   // And it is in the tree, in that folder, rather than at the root.

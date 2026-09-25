@@ -712,8 +712,8 @@ test('a turn can be sent as steer and a queued turn can be patched', async () =>
 test("a document is served with the agent scripts after the Drive's, when agents are on", async () => {
   const page = await (await fetch(`${base}/a/garden`)).text();
   const drive = page.indexOf('/runtime/drive.js');
-  const api = page.indexOf('<script src="/runtime/agent.js" data-marble-transient></script>');
-  const ui = page.indexOf('<script src="/runtime/agent-ui.js" data-marble-transient></script>');
+  const api = page.search(/<script src="\/runtime\/agent\.js\?v=[0-9a-f]{12}" data-marble-transient><\/script>/);
+  const ui = page.search(/<script src="\/runtime\/agent-ui\.js\?v=[0-9a-f]{12}" data-marble-transient><\/script>/);
   assert.ok(drive > 0 && api > drive && ui > api, 'drive.js, then agent.js, then agent-ui.js');
   for (const file of ['agent.js', 'agent-ui.js']) {
     const response = await fetch(`${base}/runtime/${file}`);
@@ -723,12 +723,12 @@ test("a document is served with the agent scripts after the Drive's, when agents
   assert.equal((await fetch(`${base}/runtime/choice-question.js`)).status, 200);
   assert.match(
     page,
-    /<script src="\/runtime\/collab\.js"[^>]*><\/script>\n<script src="\/runtime\/agent-callout\.js" data-marble-transient><\/script>/,
+    /<script src="\/runtime\/collab\.js\?v=[0-9a-f]{12}"[^>]*><\/script>\n<script src="\/runtime\/agent-callout\.js\?v=[0-9a-f]{12}" data-marble-transient><\/script>/,
     'the callout script follows collab.js when agents are on',
   );
   assert.match(
     page,
-    /<script src="\/runtime\/agent-callout\.js"[^>]*><\/script>\n<script src="\/runtime\/agent-marks-geometry\.js" data-marble-transient><\/script>\n<script src="\/runtime\/agent-marks\.js" data-marble-transient><\/script>\n<script src="\/runtime\/agent-variations\.js" data-marble-transient><\/script>/,
+    /<script src="\/runtime\/agent-callout\.js\?v=[0-9a-f]{12}"[^>]*><\/script>\n<script src="\/runtime\/agent-marks-geometry\.js\?v=[0-9a-f]{12}" data-marble-transient><\/script>\n<script src="\/runtime\/agent-marks\.js\?v=[0-9a-f]{12}" data-marble-transient><\/script>\n<script src="\/runtime\/agent-variations\.js\?v=[0-9a-f]{12}" data-marble-transient><\/script>/,
     'the marks layer follows the callout it hands its ids to, its geometry is read on the way in, and the variations surface comes after both',
   );
   // The marks layer asks the drawer's tray for its slots at boot and takes
@@ -737,7 +737,7 @@ test("a document is served with the agent scripts after the Drive's, when agents
   // agent-ui.js has mounted the drawer: put agent-marks.js first and Select
   // and Sketch quietly stop existing, with every marks test still passing.
   assert.ok(
-    ui < page.indexOf('<script src="/runtime/agent-marks.js" data-marble-transient></script>'),
+    ui < page.search(/<script src="\/runtime\/agent-marks\.js\?v=[0-9a-f]{12}" data-marble-transient><\/script>/),
     'agent-ui.js mounts the drawer before agent-marks.js asks it for a slot',
   );
   for (const file of ['agent-callout.js', 'agent-marks-geometry.js', 'agent-marks.js', 'agent-variations.js']) {

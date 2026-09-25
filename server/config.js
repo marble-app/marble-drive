@@ -55,6 +55,11 @@ export function loadConfig(env = process.env) {
   env.MARBLE_APPS = root;
   process.env.MARBLE_APPS = root;
 
+  // A tab rests, closing its streams, once hidden this long or shown with no
+  // input this long (runtime/tab-rest.js, which reads them off its tag).
+  const tabHiddenSeconds = num('MARBLE_DRIVE_TAB_HIDDEN_SECONDS', 60);
+  const tabIdleMinutes = num('MARBLE_DRIVE_TAB_IDLE_MINUTES', 10);
+
   return {
     root,
     port: num('PORT', 4400),
@@ -147,12 +152,14 @@ export function loadConfig(env = process.env) {
     // nobody answers holds it this long; work that has stopped getting anywhere
     // this long; anything at all this long after anyone last used the drive.
     // Letting go freezes the work, it does not end it.
-    // A tab rests, closing its streams, once hidden this long or shown with no
-    // input this long (runtime/tab-rest.js, which reads them off its tag).
-    tabHiddenSeconds: num('MARBLE_DRIVE_TAB_HIDDEN_SECONDS', 60),
-    tabIdleMinutes: num('MARBLE_DRIVE_TAB_IDLE_MINUTES', 10),
+    tabHiddenSeconds,
+    tabIdleMinutes,
     // A live stream whose tab has gone this long unused is closed (server/streams.js).
-    streamUnusedMinutes: num('MARBLE_DRIVE_STREAM_UNUSED_MINUTES', 15),
+    // Unless set, it outlasts the tab's own limits: a tab says it is used only
+    // on input while shown, so it can sit idle and then hidden, silent the
+    // whole time, and a shorter cut would put to sleep a drive its limits were
+    // raised to keep up.
+    streamUnusedMinutes: num('MARBLE_DRIVE_STREAM_UNUSED_MINUTES', Math.max(15, tabIdleMinutes + tabHiddenSeconds / 60 + 1)),
     askHoldMinutes: num('MARBLE_DRIVE_ASK_HOLD_MINUTES', 10),
     noProgressMinutes: num('MARBLE_DRIVE_NO_PROGRESS_MINUTES', 30),
     awakeMaxHours: num('MARBLE_DRIVE_AWAKE_MAX_HOURS', 24),

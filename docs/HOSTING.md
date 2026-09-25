@@ -113,10 +113,21 @@ The service's environment is the release script's defaults
     frozen adds nothing and wakes nothing.
   - Limits, in `sprite.env`: `MARBLE_DRIVE_TAB_HIDDEN_SECONDS` (60),
     `MARBLE_DRIVE_TAB_IDLE_MINUTES` (10), `MARBLE_DRIVE_STREAM_UNUSED_MINUTES`
-    (15), `MARBLE_DRIVE_ASK_HOLD_MINUTES` (10), `MARBLE_DRIVE_NO_PROGRESS_MINUTES`
-    (30), `MARBLE_DRIVE_AWAKE_MAX_HOURS` (24). The page reads its two from the
-    host. A turn is only ever ended by the stall rule: 30 min of no output and
-    no work, in awake time (`MARBLE_DRIVE_AGENT_STALL_MINUTES`).
+    (15, or the idle and hidden limits added together plus a minute, if longer,
+    unless it is set itself), `MARBLE_DRIVE_ASK_HOLD_MINUTES` (10),
+    `MARBLE_DRIVE_NO_PROGRESS_MINUTES` (30), `MARBLE_DRIVE_AWAKE_MAX_HOURS`
+    (24). The page reads its two from the host. A turn is only ever ended by the
+    stall rule: 30 min of no output and no work, in awake time
+    (`MARBLE_DRIVE_AGENT_STALL_MINUTES`).
+  - **admin-p1 stays up while the owner uses it:** its `sprite.env` has
+    `MARBLE_DRIVE_TAB_HIDDEN_SECONDS=1800` and `MARBLE_DRIVE_TAB_IDLE_MINUTES=60`
+    (so its stream cut is 91 min). Waking costs seconds from paused and
+    about 70 s from stopped (measured 2026-09-25), which is what made moving
+    between pages feel slow. Testers keep the short defaults.
+- **Page weight:** the host compresses text (Brotli, else gzip; Fly's edge
+  gzips anyway), and a page names each runtime file at `?v=<hash>`, which the
+  browser keeps until the file changes. Moving between documents downloads
+  only the document.
 - **Git:** agents in a person's Drive project cannot reach a repository
   (`GIT_CEILING_DIRECTORIES`); agents in a registered project (the workshop's)
   can.
