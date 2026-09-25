@@ -82,6 +82,13 @@ export function createStreams({ unusedMs = 15 * 60_000, checkMs = 60_000, now = 
     get count() {
       return open.size;
     },
+    /** Open tabs someone reported using within the last `ms`. */
+    looking(ms) {
+      const t = now();
+      const tabs = new Set();
+      for (const stream of open) if (stream.tab && t - (lastUse.get(stream.tab) ?? 0) < ms) tabs.add(stream.tab);
+      return tabs.size;
+    },
     close() {
       if (timer) clearInterval(timer);
     },

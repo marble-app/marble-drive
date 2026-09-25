@@ -39,6 +39,7 @@ import { readDriveSettings } from './drive-settings.js';
 import { createAwakeClock, createProgress } from './awake.js';
 import { createHold } from './hold.js';
 import { createKeepAwake } from './keep-awake.js';
+import { createLedger } from './ledger.js';
 import { createStreams } from './streams.js';
 import { consoleAllowed, createConsole } from './console/index.js';
 import { createStems } from './stems/index.js';
@@ -243,6 +244,26 @@ export async function createDrive(config, { log = console, agentProviders = null
     log,
   });
   keepAwake.start();
+  // One line a minute while awake: what the machine used and why it was up,
+  // for the Console to draw state and cost over time (server/ledger.js).
+  const seenTurns = new Set();
+  const ledger = createLedger({
+    dir: path.join(store.marbleDir, 'usage'),
+    log,
+    why: () => {
+      const items = work();
+      for (const item of items) {
+        if (item.key.startsWith('turn:') && !seenTurns.has(item.key)) {
+          seenTurns.add(item.key);
+          ledger.count('turns');
+        }
+      }
+      const live = new Set(items.map((i) => i.key));
+      for (const key of seenTurns) if (!live.has(key)) seenTurns.delete(key);
+      const asks = items.filter((i) => i.pausedSince !== null && i.pausedSince !== undefined).length;
+      return { tabs: streams.count, looking: streams.looking(60_000), work: items.length - asks, asks };
+    },
+  });
   const typesafe = createTypesafeHandler({
     apiKey: config.typesafeApiKey,
     maxBodyBytes: config.maxBodyBytes,
@@ -590,6 +611,7 @@ export async function createDrive(config, { log = console, agentProviders = null
           lastKnown.set(docPath, { source, client: null });
           await store.mark(docPath, source, 'opened');
         }
+        ledger.count('opens');
         return html(res, 200, injectCarrier(source, docPath));
       }
 
@@ -607,6 +629,12 @@ export async function createDrive(config, { log = console, agentProviders = null
 
       // A tab says someone is using it: its streams stay open, and a day of
       // unattended work starts again (server/streams.js, server/hold.js).
+      // This drive's ledger since a moment (unix seconds): what it used, minute
+      // by minute, while awake (server/ledger.js).
+      if (route === '/usage' && req.method === 'GET') {
+        return json(res, 200, { lines: await ledger.read(Number(url.searchParams.get('since')) || 0) });
+      }
+
       if (route === '/tab/alive' && req.method === 'POST') {
         const body = await readJson(req, 1024).catch(() => ({}));
         streams.alive(body?.tab);
@@ -1437,6 +1465,7 @@ button{background:#738698;color:#fafaf7;border-color:#738698;cursor:pointer}p{co
     store,
     uploads,
     keepAwake,
+    ledger,
     channels,
     gate,
     oplog,
@@ -1468,6 +1497,7 @@ button{background:#738698;color:#fafaf7;border-color:#738698;cursor:pointer}p{co
       stems.close();
       clearInterval(uploadSweep);
       await keepAwake.stop();
+      await ledger.stop();
       awake.stop();
       streams.close();
       consoleApp?.close();
