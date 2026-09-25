@@ -130,5 +130,6 @@ test('recent days: the last seven full days since the first line, else today sca
   assert.equal(recentDays(byDay, NOW - 30 * 24 * H, NOW).length, 7, 'at most seven');
   assert.deepEqual(recentDays(new Map(), NOW - 30 * 60_000, NOW), []);
   const today = new Map([['2026-10-10', { cpuH: 0, ramGBh: 12, hotGBh: 0 }]]);
+  assert.deepEqual(recentDays(today, NOW - 2 * H, NOW), [], 'two hours after a deploy is not a day');
   assert.equal(recentDays(today, NOW - 6 * H, NOW)[0].ramGBh, 48);
 });

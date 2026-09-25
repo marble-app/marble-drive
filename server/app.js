@@ -613,7 +613,9 @@ export async function createDrive(config, { log = console, agentProviders = null
           lastKnown.set(docPath, { source, client: null });
           await store.mark(docPath, source, 'opened');
         }
-        ledger.count('opens');
+        // A visit, not a preview: the Drive draws live pages in iframes.
+        const dest = req.headers['sec-fetch-dest'];
+        if (!dest || dest === 'document') ledger.count('opens');
         return html(res, 200, injectCarrier(source, docPath));
       }
 

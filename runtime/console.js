@@ -1508,9 +1508,11 @@
 
     const tiles = h('div.tiles', {},
       tile('This month so far', tileMoney(month.spent), calNote),
-      tile('By the end of the month', tileMoney(proj.end), over
-        ? h('span.warn', { text: `⚠ over your ${money(data.budget)} budget` })
-        : `likely ${money(proj.low)} – ${money(proj.high)}${data.budget ? ` · budget ${money(data.budget)}` : ''}`, { tone: over ? 'caution' : null }),
+      proj.days
+        ? tile('By the end of the month', tileMoney(proj.end), over
+          ? h('span.warn', { text: `⚠ over your ${money(data.budget)} budget` })
+          : `likely ${money(proj.low)} – ${money(proj.high)}${data.budget ? ` · budget ${money(data.budget)}` : ''}`, { tone: over ? 'caution' : null })
+        : tile('By the end of the month', '—', 'needs six hours of ledgers first'),
       tile('Awake now', `${awakeNow.length} of ${S.fleet.length}`, awakeNow.length ? awakeNow.map((d) => d.name).join(', ') : 'every drive is asleep'),
       tile(`Awake, ${RANGES.find(([v]) => v === S.range)[1].toLowerCase()}`, CH().hours(data.totals.awakeHours), `${money(data.totals.total)} in this range${estimatedHours > 0.05 ? ` · ${CH().hours(estimatedHours)} estimated from state` : ''}`));
 
@@ -1566,7 +1568,7 @@
     const bills = cal && cal.bill.from === month.from ? [{ t: cal.bill.to, v: cal.bill.total, label: 'Fly’s bill' }] : [];
     const spendCard = card('spend', 'Spend this month', cal ? 'calibrated' : 'estimated', {
       i: 3,
-      drawChart: (el) => CH().cumulative(el, { from: month.from, to: monthEnd, now: data.now, points: cumPoints, spent: month.spent, projection: proj, budget: data.budget, bills }),
+      drawChart: (el) => CH().cumulative(el, { from: month.from, to: monthEnd, now: data.now, points: cumPoints, spent: month.spent, projection: proj.days ? proj : null, budget: data.budget, bills }),
       tableOf: () => CH().table(['Day', 'Spent that day', 'By then'], month.days.map((d, i) => [d.day, money(d.total), money(cumPoints[i].v)])),
     });
 

@@ -39,10 +39,14 @@ const median = (xs) => {
   return s.length ? s[Math.floor(s.length / 2)] : null;
 };
 
+// Today alone is scaled to a day only once it holds this much: an hour after a
+// deploy is a restart's burst and every tab reconnecting, not a day.
+const TODAY_ENOUGH = 6 * H;
+
 /**
  * The use of each of the last seven full days since anything was recorded, a
  * day with nothing counting as zero. With no full day yet, today so far,
- * scaled to a day, once there is at least an hour of it.
+ * scaled to a day, once there are six hours of it.
  */
 export function recentDays(byDay, firstMs, now) {
   const zero = { cpuH: 0, ramGBh: 0, hotGBh: 0 };
@@ -51,7 +55,7 @@ export function recentDays(byDay, firstMs, now) {
   for (let d = today - 7 * DAY; d < today; d += DAY) if (d >= firstMs) out.push(byDay.get(dayOf(d)) ?? zero);
   if (out.length || !Number.isFinite(firstMs)) return out;
   const since = Math.max(firstMs, today);
-  if (now - since < H) return [];
+  if (now - since < TODAY_ENOUGH) return [];
   const u = byDay.get(dayOf(now)) ?? zero;
   const k = DAY / (now - since);
   return [{ cpuH: u.cpuH * k, ramGBh: u.ramGBh * k, hotGBh: u.hotGBh * k }];
@@ -359,7 +363,7 @@ export function createUsage({ dir, sprites, self, selfLedger = null, now = Date.
     const monthCold = sprites.reduce((a, s) => a + coldCost(lastDisk(entries.get(s.name)) ?? 0, monthStart, t), 0);
     const spent = days.reduce((a, d) => a + d.total, 0) + monthCold;
     const recent = recentDays(recentUse, firstMs, t);
-    const projection = project({ spent, recent, now: t, factor, coldPerDay });
+    const projection = { ...project({ spent, recent, now: t, factor, coldPerDay }), days: recent.length };
 
     const all = sum(sprites.map((s) => s.totals.cost));
     return {

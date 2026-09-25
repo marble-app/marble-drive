@@ -207,3 +207,20 @@ test('a drive answers its ledger at /usage, behind the gate, and counts a docume
   const body = await (await fetch(`${base}/usage?since=150`, { headers: { cookie } })).json();
   assert.deepEqual(body.lines.map((l) => l.t), [200]);
 });
+
+test('a document counts as opened when it is visited, not when the Drive previews it in a frame', async (t) => {
+  const { createDrive } = await import('../server/app.js');
+  const { loadConfig } = await import('../server/config.js');
+  const root = await fsp.mkdtemp(path.join(os.tmpdir(), 'ledger-opens-'));
+  const drive = await createDrive(loadConfig({ MARBLE_DRIVE_ROOT: root }), { log: { log() {}, error() {}, info() {} }, agents: false });
+  t.after(() => drive.close());
+  await drive.createDocument('note', '<!doctype html><html><body data-marble-id="b"><p data-marble-id="p">x</p></body></html>', { label: 't' });
+  const port = await new Promise((r) => drive.server.listen(0, '127.0.0.1', () => r(drive.server.address().port)));
+  const counted = [];
+  const count = drive.ledger.count;
+  drive.ledger.count = (kind) => { counted.push(kind); count(kind); };
+  await fetch(`http://127.0.0.1:${port}/a/note`, { headers: { 'Sec-Fetch-Dest': 'document' } });
+  await fetch(`http://127.0.0.1:${port}/a/note`, { headers: { 'Sec-Fetch-Dest': 'iframe' } });
+  await fetch(`http://127.0.0.1:${port}/a/note`);
+  assert.deepEqual(counted, ['opens', 'opens']);
+});
