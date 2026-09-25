@@ -44,6 +44,7 @@ everyone on the next deploy, and a change to `templates/drive.mrbl` or
 | Path | What | Survives a deploy |
 |---|---|---|
 | `/drive` | the drive: documents, `.marble/` history, conversations, `.claude/skills/`, `.marble/drive.json` | yes (never touched) |
+| `/drive/.marble/usage/<day>.jsonl` | the drive's own ledger: one line per awake minute (CPU, memory, disk, why it was up, how it woke), 90 days (`server/ledger.js`) | yes |
 | `~/app/releases/<utc>-<sha or local-sha>/marble-drive` | a release of this repo, its own `node_modules` and its own pinned `claude` | the last three that went live are kept |
 | `~/app/current` | link to the live release | switched by a deploy |
 | `~/app/history` | releases that went live, in order (rollback reads it) | yes |
@@ -165,6 +166,7 @@ so it ships with every deploy; the document is only where it lives.
 
 | View | What it does |
 |---|---|
+| **Dashboard** (opens on it) | every drive's state over time (running, warm, cold), cost by drive, why each was awake, spend this month and its projection (and a budget, if set), spend per day, when drives are awake (hour × weekday), memory, CPU, agent turns and documents opened; 24 h, 7 days, 30 days or this month; any chart as a table; **Paste a bill** takes Fly's Cost Explorer page and calibrates every estimate to it |
 | **Drives** | every drive, awake or asleep and since when, without waking any; a drive's release, health, Claude (login or key, sign in or out), access (public or private, the passphrase: show, copy, new), settings (`sprite.env`, applied with a restart), checkpoints (make, restore by typing the name), and removing a tester; **New drive** provisions one |
 | **Ship** | main's recent commits and which drives have them; each drive against main; **Ship** shows the plan (`sprite-deploy.sh --print-plan`) before deploying main to every user and then admin-p1; **Try the workshop on t-bryan** |
 | **Workshop** | both checkouts (branch, head, changes, against origin), pull, run tests, **Publish** marble (the next patch in package.json and both plugin manifests, committed, tagged and pushed, then `npm publish`, which runs marble's guard and unit tests; npm may ask you to approve it). marble-drive needs no change: it depends on `file:../marble`, and a deploy installs the version that checkout declares, and a workshop chat in the Marble Drive or Marble project |
@@ -182,6 +184,17 @@ a drive (`server/console/probe.mjs`) for its release, versions, settings,
 Claude, documents and log, and does wake it. Drives already awake are looked at
 by themselves, every five minutes while a console tab is open. The console
 polls nothing when no console tab is open.
+
+How the dashboard knows the past: every drive writes its own ledger while it
+is awake, which is exactly while Fly bills it, so nothing has to watch it. The
+console reads new ledger lines from each drive that is **running**, every
+minute while a console tab is open (`server/console/ledger-read.mjs`), reads
+admin-p1's own from disk, and records each change of status the Sprites API
+shows, with the wake and pause times the API keeps. Kept on admin-p1 in
+`/drive/.marble/console/usage/<sprite>/`. A drive asleep while the console
+watched catches up the next time both are awake; a drive not yet deployed with
+the ledger shows only what the console saw, costed as typical minutes and said
+so.
 
 How it acts: every action is a job running the same tools as this page
 describes (`sprite-deploy.sh`, `sprite-provision.sh`, `release.sh`, the Sprites
@@ -270,11 +283,26 @@ machine, so continuing one starts fresh.
 
 ## Costs
 
-Sprites bill CPU and memory per second **only while running**, and disk for
-what is written (about $0.50 per GB-month) while paused
-([Fly pricing](https://fly.io/pricing/); new prices from 2026-10-01). A sprite
-runs while someone is using a tab on it or its work is getting somewhere, and
-not more than a day unattended (see "Staying awake, and sleeping").
+Sprites bill CPU actually used and memory held, per second, **only while
+running**, plus storage: hot while awake, cold always
+([Fly pricing](https://fly.io/pricing/)). A sprite runs while someone is using
+a tab on it or its work is getting somewhere, and not more than a day
+unattended (see "Staying awake, and sleeping").
+
+| | until 2026-09-30 | from 2026-10-01 |
+|---|---|---|
+| CPU | $0.07 / CPU-hour | $0.03825 |
+| Memory | $0.04375 / GB-hour | $0.021875 |
+| Hot storage (awake) | $0.000683 / GB-hour (≈ $0.50 / GB-month) | same |
+| Cold storage (always) | $0.000027 / GB-hour (≈ $0.02 / GB-month) | same |
+
+While running, Fly bills at least 1/16 of a CPU and 256 MB. The first real bill
+(2026-09-19 to 09-25, all six drives) was **$6.75**: memory $6.05, CPU $0.58,
+hot storage $0.11, so memory is the bill. The dashboard estimates cost from
+the ledgers at these rates (`server/console/cost.js`), using `memory.current`
+(which counts file cache; `MemTotal − MemAvailable` is kept beside it), and a
+pasted bill scales each product to what Fly actually charged. Fly has no API
+for the bill.
 
 ## Shelved (decided, not built)
 

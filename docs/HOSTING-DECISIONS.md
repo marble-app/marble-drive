@@ -302,6 +302,31 @@ designed and built without stopping for questions.
 held open with an exec, the same sprite read `running`, so `warm` is paused and
 the list is honest.
 
+### 22. A drive keeps its own ledger; cost is estimated, then reconciled
+
+**Found.** The owner asked for state, use and cost over time. Nothing could
+record it from outside for free: the Sprites API answers only "now", Fly has no
+API for the bill (checked 2026-09-25: the Cost Explorer is a dashboard page),
+and the console runs on admin-p1, which sleeps when nobody uses it. Inside a
+sprite the whole VM is one cgroup (`0::/`): `cpu.stat` and `memory.current`
+cover the machine. On t-bryan `memory.current` read 3.6 GB where
+`MemTotal − MemAvailable` read 1.8 GB, so which one Fly bills is not obvious.
+
+**Chose.**
+- *The drive writes it down.* Its host runs exactly while it is billed, so one
+  line per awake minute costs no wake and no connection (`server/ledger.js`).
+  How it woke is read from the machine itself: the process was frozen (warm),
+  the boot id changed (cold), or a new host on the same boot (a restart).
+- *The console gathers, never wakes.* It reads ledgers only from drives the API
+  says are running, and records status changes it sees. Rejected: polling from
+  admin-p1 whenever it is awake (still gaps while it sleeps, and a call every
+  20 s may itself keep it up), an always-on collector (a new machine to watch
+  machines that cost about a dollar a day), and waking drives to ask.
+- *Estimated, then reconciled.* Cost is the ledger at Fly's dated rates; both
+  memory readings are kept, `memory.current` is used, and a pasted Cost
+  Explorer page sets a factor per product, so a wrong guess about what Fly
+  measures is corrected by the first bill rather than argued about.
+
 ## Traps worth remembering
 
 | Trap | How it showed up | Lesson |
@@ -325,4 +350,6 @@ the list is honest.
 | Listing a stopped (cold) sprite's checkpoints | three friends' drives were started every five minutes the console was open | never ask a cold sprite anything on a timer; re-read only after it has run |
 | A sprite pauses about a second after its last connection, not 30 s | a turn sent with no tab open froze before keep-awake's first 15 s check | take the hold when work starts, not on a timer |
 | Waking is the slow part, not the network | the owner's drive felt slow between pages; Fly's edge answered in ~90 ms, while a wake took 9 s paused and 70 s stopped | on the owner's drive, a tab keeps the sprite up for 30 min hidden and 60 min idle; the host's stream cut follows those limits unless set |
+| A chart drawn into a hidden box | the phone's drive detail guessed 600 px for a chart it could not measure and pushed the page sideways | draw once the box has a width (`whenSized`) |
+| One more tab in a flex bar inside a grid | a grid item's minimum width is its content, so the whole Console grew to 448 px on a 390 px phone | `min-width: 0` on the bar; let the tabs scroll within it |
 | The runtime was `no-store` | every page switch refetched 14 scripts (~265 KB compressed) | name each at `?v=<hash>` and let the browser keep it; `no-cache` + ETag for any other address |

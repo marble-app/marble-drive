@@ -1,6 +1,6 @@
 # The Console's dashboard: state, use and cost of every drive, over time
 
-2026-09-25. Status: design, for the owner's review. Choices were made here and
+2026-09-25. Status: built and shipped to admin-p1 the same day (the owner said "ship this"). Where the build differs from the design, the section says so under *As built*. Choices were made here and
 say why, per the owner's standing preference; the questions still open are at
 the end.
 
@@ -297,3 +297,21 @@ segment grows without animating, reduced motion changes nothing else.
 2. **Tester privacy:** the dashboard shows when each friend uses their drive
    (the hour × weekday chart, per sprite). It is visible only to the owner on
    admin-p1. Keep per-person, or show testers only in aggregate?
+
+## As built
+
+- **Answers the open questions by default:** no budget until one is set (a
+  *Set a budget* button), and each tester shown by name.
+- **The page refetches instead of folding lines in.** A `usage` or `status`
+  event makes the page read its range again, at most every ten seconds, and it
+  reads again every minute while shown. Folding lines client-side would have
+  meant a second copy of the timeline and cost code in the browser.
+- **The Console always opens on the Dashboard**, as asked ("opens up to all
+  visualizations"); the old remembered view no longer overrides it.
+- **A sixth reason:** minutes the API saw running with no ledger line are
+  *Not recorded*, not *Nothing of ours*.
+- **Products are greys** (memory, CPU, storage), shown in a bar's tooltip and
+  table, so they never look like a drive's colour; cold storage is folded
+  into storage.
+- **Cost by drive is coloured by drive**, the same colour as its lane dot,
+  daily column and lines everywhere on the page.
