@@ -151,7 +151,8 @@ follows the repo's `CLAUDE.md`:
 5. When the owner says so: `tools/sprite-deploy.sh --all`, then
    `tools/sprite-deploy.sh admin-p1`. From admin-p1 itself this stages the
    release and hands the switch to a `marble-switch` service that waits until no
-   agent is working, so the conversation that asked is not cut off.
+   agent is working, so the conversation that asked is not cut off. From
+   anywhere else, add `--when-idle` for the same wait.
 6. Report what shipped where.
 
 admin-p1 is signed in to GitHub (`gh auth login` + `gh auth setup-git`), npm
@@ -223,6 +224,7 @@ admin-p1 (`~/.config/marble-drive/testers.json`), the machine that made it.
 | `… --rollback` | back to the release before (from itself: when idle) |
 | `… --no-checkpoint` | skip the restore point, only when Sprites cannot make one |
 | `… --print-plan` | say what would be deployed, and stop |
+| `… --when-idle` | stage now, switch when no agent is working (always so from the sprite itself); for a drive in use |
 | `tools/sprite-deploy.sh --all [--list]` | every sprite labelled `marble-tester` or `marble-user`; continues past a failure; `--list` only names them |
 | `tools/sprite-provision.sh <person> [--agent api\|subscription] [--key-file f] [--local]` | makes `t-<person>`: passphrase, `sprite.env`, optional preloaded key, deploy, public URL, outside check, roster entry, a note to send |
 | `tools/sprite-provision.sh --resume <person>` | finish one that stopped part way |
@@ -279,6 +281,7 @@ machine, so continuing one starts fresh.
 | A turn froze when nobody was around | held past its limit: an unanswered question (10 min), no progress (30 min), or a day unattended | by design; opening the drive wakes it and it carries on |
 | A tab stopped updating | it rested (hidden 60 s, or idle 10 min) | any input wakes it; an old tab from before a deploy needs a reload |
 | A sprite never pauses | something holds it: a stream, a request, or a Sprites task | `/health` `streams`; `GET /v1/tasks` on `/.sprite/api.sock` |
+| API says `running` but `sprite exec`/`console` hang (i/o timeout) and a checkpoint says 503 "No process is running to checkpoint" | the sprite itself is stuck, below Marble: admin-p1 2026-09-26, 06:12–16:22 UTC; its ledger went silent, a deploy stalled after sending `release.sh`, memory never passed 2.4 GB | nothing inside can help; it came back on its own with a cold boot. Do not restore (you lose the drive since the checkpoint); give Fly the `fly-request-id`. Afterwards redeploy whatever stalled |
 | `Failed to create checkpoint … v3.in-progress … file exists` | stuck checkpoint store (t-irene since 2026-09-23, t-sam since 2026-09-24) | `--no-checkpoint`; report to Fly if it persists |
 | An API key vanished after a deploy | keys inside the release (old behaviour) | keys live in `~/.config/marble-drive/agent-keys` now |
 | `tar: unrecognized option '--no-mac-metadata'` | a macOS-only flag on Linux | fixed: the flag is passed only on macOS |

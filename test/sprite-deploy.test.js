@@ -54,3 +54,11 @@ test('a deploy to this very machine switches when idle; from anywhere else, now'
   const there = await plan(['admin-p1', '--local'], { host: 'my-laptop' });
   assert.match(there.stdout, /switch: now/);
 });
+
+// From a laptop, --when-idle asks for the same wait, for a drive someone is
+// using: a switch now would cut off the turns running on it.
+test('--when-idle waits for idle from anywhere', async () => {
+  const run = await plan(['admin-p1', '--local', '--when-idle'], { host: 'my-laptop' });
+  assert.equal(run.status, 0, run.stderr);
+  assert.match(run.stdout, /switch: when no agent is working/);
+});

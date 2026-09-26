@@ -6,6 +6,7 @@
 #   tools/sprite-deploy.sh <sprite> [--org <org>] --rollback
 #   ... --no-checkpoint   skip the restore point, only when Sprites cannot make one
 #   ... --print-plan      say what would be deployed, and stop before touching a sprite
+#   ... --when-idle       stage now, switch when no agent is working (always, from the sprite itself)
 #   tools/sprite-deploy.sh --all [--org <org>] [--list] [--ref ...]   every user's sprite
 #
 # By default a sprite runs public sources: marble-drive at <ref> (default
@@ -66,7 +67,7 @@ fi
 
 [[ $# -ge 1 && "$1" != -* ]] || usage
 SPRITE=$1; shift
-ORG=marble-drive REF=origin/main MARBLE_VERSION="" CLAUDE_VERSION="" LOCAL=0 ROLLBACK=0 CHECKPOINT=1 PRINT_PLAN=0
+ORG=marble-drive REF=origin/main MARBLE_VERSION="" CLAUDE_VERSION="" LOCAL=0 ROLLBACK=0 CHECKPOINT=1 PRINT_PLAN=0 WHEN_IDLE=0
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --org) ORG=$2; shift 2 ;;
@@ -77,6 +78,7 @@ while [[ $# -gt 0 ]]; do
     --rollback) ROLLBACK=1; shift ;;
     --no-checkpoint) CHECKPOINT=0; shift ;;
     --print-plan) PRINT_PLAN=1; shift ;;
+    --when-idle) WHEN_IDLE=1; shift ;;
     *) usage ;;
   esac
 done
@@ -89,8 +91,8 @@ say() { printf '==> %s\n' "$*"; }
 # its own conversations): switching now would restart the host running that
 # conversation, so the switch is handed to marble-switch, which waits until no
 # agent is working (release.sh hand-off). A rollback waits the same way.
-SELF=0
-[[ "$(hostname 2>/dev/null)" == "$SPRITE" ]] && SELF=1
+# --when-idle asks for the same from anywhere, for a sprite someone is using.
+[[ "$(hostname 2>/dev/null)" == "$SPRITE" ]] && WHEN_IDLE=1
 
 send_release_script() {
   say "sending the release script to $SPRITE ($ORG)"
@@ -100,7 +102,7 @@ send_release_script() {
 
 if [[ $ROLLBACK == 1 ]]; then
   send_release_script
-  if [[ $SELF == 1 ]]; then on -- "$REMOTE/release.sh" rollback-when-idle; else on -- "$REMOTE/release.sh" rollback; fi
+  if [[ $WHEN_IDLE == 1 ]]; then on -- "$REMOTE/release.sh" rollback-when-idle; else on -- "$REMOTE/release.sh" rollback; fi
   exit 0
 fi
 
@@ -111,7 +113,7 @@ npm view "@anthropic-ai/claude-code@$CLAUDE_VERSION" version >/dev/null 2>&1 \
 
 print_plan() { # print_plan <name> <source> <marble>
   printf 'target: %s (%s)\nrelease: %s\nsource: %s\nmarble: %s\nclaude: %s\n' "$SPRITE" "$ORG" "$1" "$2" "$3" "$CLAUDE_VERSION"
-  if [[ $SELF == 1 ]]; then echo "switch: when no agent is working"; else echo "switch: now"; fi
+  if [[ $WHEN_IDLE == 1 ]]; then echo "switch: when no agent is working"; else echo "switch: now"; fi
   exit 0
 }
 
@@ -160,7 +162,7 @@ fi
 
 say "staging $NAME"
 on ${FILES[@]+"${FILES[@]}"} -- "$REMOTE/release.sh" stage "$NAME" "$SOURCE" "$MARBLE" "$CLAUDE_VERSION"
-if [[ $SELF == 1 ]]; then
+if [[ $WHEN_IDLE == 1 ]]; then
   on -- "$REMOTE/release.sh" hand-off "$NAME"
   on -- sh -c "rm -f $REMOTE/incoming/$NAME*"
   say "done: $NAME is staged on $SPRITE and goes live when no agent is working ($REMOTE/switch.log)"
