@@ -81,13 +81,27 @@ stage() {
   node node_modules/@anthropic-ai/claude-code/install.cjs >/dev/null
   [[ "$(node_modules/.bin/claude --version 2>/dev/null)" == "$claude"* ]] || die "claude $claude did not install"
 
-  # The agents' browser. Shared across releases, installed once.
+  # The agents' browser: the Chromium build this release's Playwright drives,
+  # through the same lookup the host makes (server/agent/browser.js). Its system
+  # libraries go in once per sprite; the build is asked for on every release,
+  # which is a no-op when the sprite has it and a download when marble moved
+  # Playwright on.
+  local playwright
+  playwright="$(dirname "$("$NODE" --input-type=module -e \
+    "import { fileURLToPath } from 'node:url'; import { playwrightEntry } from './server/agent/browser.js'; console.log(fileURLToPath(playwrightEntry()))")")/cli.js"
   if [[ ! -e "$APP/.chromium-ready" ]]; then
-    say "installing Chromium for the agents' browser (once)"
-    sudo -E env "PATH=$PATH" npx --yes playwright install-deps chromium >/dev/null
-    npx --yes playwright install chromium >/dev/null
+    say "installing Chromium's system libraries (once)"
+    sudo -E env "PATH=$PATH" "$NODE" "$playwright" install-deps chromium >/dev/null
     touch "$APP/.chromium-ready"
   fi
+  say "installing Chromium for the agents' browser"
+  "$NODE" "$playwright" install chromium >/dev/null
+  say "launching the agents' browser"
+  "$NODE" --input-type=module -e "
+    import { loadChromium } from './server/agent/browser.js';
+    const browser = await (await loadChromium()).launch({ headless: true });
+    await browser.close();
+  " || die "the agents' browser does not launch"
 
   say "smoke test on :4499 with a throwaway drive"
   local scratch

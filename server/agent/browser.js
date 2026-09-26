@@ -3,8 +3,11 @@
 // The document tools live on the host (`tools.js`) because they share the
 // store, the ledger and the op queue. A browser does not: it is a child the
 // CLI starts from mcp.json, it holds no turn token, and it dies when the
-// turn's process dies. This file is that child — Playwright imported the same
-// way Drive's browser tests already import it, from `@bdhmin/marble`.
+// turn's process dies. This file is that child — Playwright is the one
+// `@bdhmin/marble` depends on, so there is one Chromium build to install.
+
+import { createRequire } from 'node:module';
+import { pathToFileURL } from 'node:url';
 
 export const BROWSER_TOOLS = [
   'browser_tabs',
@@ -107,10 +110,16 @@ export function toMcpResult(payload) {
 
 const INSTALL = 'npx playwright install chromium';
 
+/** Playwright's ESM entry, found the way marble itself would find it: inside
+ *  marble's own node_modules when marble is a linked checkout (the Mac), or
+ *  hoisted beside it when npm installed marble from the registry (a sprite). */
+export function playwrightEntry(from = import.meta.resolve('@bdhmin/marble/package.json')) {
+  return new URL('index.mjs', pathToFileURL(createRequire(from).resolve('playwright/package.json')));
+}
+
 export async function loadChromium() {
   try {
-    const PLAYWRIGHT = new URL('node_modules/playwright/index.mjs', import.meta.resolve('@bdhmin/marble/package.json'));
-    const { chromium } = await import(PLAYWRIGHT.href);
+    const { chromium } = await import(playwrightEntry().href);
     return chromium;
   } catch (err) {
     throw new Error(`Playwright is not available (${err.message}). Run \`${INSTALL}\`.`);
@@ -132,7 +141,27 @@ async function info(page) {
   return { url: typeof page.url === 'function' ? page.url() : page.url, title: await page.title() };
 }
 
-export function createBrowserSession({ chromium, userDataDir } = {}) {
+const LOOPBACK_NAMES = ['127.0.0.1', 'localhost'];
+
+/** The cookies a drive pass plants: its own host's, under both names a page on
+ *  it is reached by when that host is loopback. Never any other site's. */
+export function passCookies(pass) {
+  if (!pass?.origin || !pass?.cookie) return [];
+  const at = pass.cookie.indexOf('=');
+  if (at < 1) return [];
+  const { hostname } = new URL(pass.origin);
+  const hosts = LOOPBACK_NAMES.includes(hostname) ? LOOPBACK_NAMES : [hostname];
+  return hosts.map((domain) => ({
+    name: pass.cookie.slice(0, at),
+    value: pass.cookie.slice(at + 1),
+    domain,
+    path: '/',
+    httpOnly: true,
+    sameSite: 'Lax',
+  }));
+}
+
+export function createBrowserSession({ chromium, userDataDir, pass } = {}) {
   let browser = null;
   let context = null;
   const tabs = [];
@@ -166,6 +195,8 @@ export function createBrowserSession({ chromium, userDataDir } = {}) {
     } catch (err) {
       throw new Error(`${err.message}. If Chromium is missing, run \`${INSTALL}\`.`);
     }
+    const cookies = passCookies(pass);
+    if (cookies.length) await context.addCookies(cookies);
   }
 
   async function openTab() {

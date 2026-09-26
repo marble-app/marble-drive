@@ -11,6 +11,9 @@ import { BROWSER_SCHEMAS, createBrowserSession, toMcpResult } from '../server/ag
 
 const session = createBrowserSession({
   userDataDir: process.env.MARBLE_BROWSER_PROFILE || undefined,
+  pass: process.env.MARBLE_BROWSER_PASS
+    ? { origin: process.env.MARBLE_BROWSER_ORIGIN, cookie: process.env.MARBLE_BROWSER_PASS }
+    : undefined,
 });
 
 const send = (message) => process.stdout.write(`${JSON.stringify(message)}\n`);

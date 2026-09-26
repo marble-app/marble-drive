@@ -69,6 +69,11 @@ The service's environment is the release script's defaults
   `sprite.env`). The host answers agent routes only to a signed-in browser, or,
   with no passphrase, only when asked for as `localhost`, which a sprite URL
   never is.
+- **An agent's browser gets a pass.** Each turn's headless Chromium is handed
+  the gate's own cookie, good for a day and planted for `127.0.0.1` and
+  `localhost` only, so it can open the drive it works on (`/a/<path>`) and
+  nothing else is signed in. Every release installs the Chromium build its
+  Playwright wants and launches it before it can go live.
 - **Testers' URLs are public**, so the passphrase is their only lock.
   **admin-p1's URL is private to the Fly org** as well, because it holds the
   keys that can change everyone's drive.
@@ -279,6 +284,8 @@ machine, so continuing one starts fresh.
 | `tar: unrecognized option '--no-mac-metadata'` | a macOS-only flag on Linux | fixed: the flag is passed only on macOS |
 | A deploy from admin-p1 would kill its own turn | switching restarts the host running the turn | self-deploys hand off to `marble-switch`; watch `~/app/switch.log` |
 | `/today` lands somewhere odd | `latest` in `/drive/.marble/drive.json`, or `MARBLE_DRIVE_LATEST_DOC` | set `latest` |
+| Agents: "Playwright is not available … node_modules/@bdhmin/marble/node_modules/playwright" | npm hoisted Playwright beside marble (every sprite) and the host looked only inside it | fixed 2026-09-25: `playwrightEntry` resolves it either way |
+| Agents' browser lands on `/gate` | the turn's browser had no pass | fixed 2026-09-25: the runner hands it one; a stage fails if Chromium will not launch |
 | The gate check says 401 where a browser gets the passphrase page | the gate redirects only requests asking for `text/html` | send `Accept: text/html` |
 
 ## Costs

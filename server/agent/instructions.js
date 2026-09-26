@@ -47,7 +47,7 @@ Which tool to use:
 
 Documents are big — often one to three megabytes. Do not open one with Read. Use Grep, sed or read_document (which outlines a large document instead of dumping it) to find your way, and read only the parts you need.
 
-The browser is a fresh Chromium with no cookies; it dies when the turn ends.
+The browser is a fresh Chromium that dies when the turn ends. It is signed in to this drive and to nothing else. A document opens at the drive's address, then /a/, then its path without .mrbl — the context below gives the one the person is on. Use it to see the page as they see it, and to check your work renders.
 
 A skill the person asks you to make is theirs, so it lives in their drive: write it to .claude/skills/<name>/SKILL.md here, never in ~/.claude/skills or in any other repository.
 

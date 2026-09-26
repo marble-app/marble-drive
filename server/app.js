@@ -1154,6 +1154,10 @@ export async function createDrive(config, { log = console, agentProviders = null
         const loopback = address.family === 'IPv6' ? '[::1]' : '127.0.0.1';
         return `http://${loopback}:${address.port}`;
       },
+      // An agent's browser is a fresh Chromium, and this host's own gate would
+      // turn it away from the drive it is working on. A pass is the gate's own
+      // cookie, good for a day, planted for this host only (server/agent/browser.js).
+      browserPass: gate.open ? null : () => `${gate.cookieName}=${gate.issue(24 * 60 * 60 * 1000)}`,
       providers: agentProviders ?? null,
       log,
       usage,

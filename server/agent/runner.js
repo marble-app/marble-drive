@@ -54,7 +54,7 @@ const BACKGROUND_SETTLE_MS = 60_000;
 const STEER_NOTE = 'While you were working I added this note. Treat it as course-correction.';
 const DISPATCH = new Set(['queue', 'steer', 'interrupt']);
 
-export function createRunner({ store, tools, providers, workdir, origin, bridgePath, browserPath, readDocument, publish, publishAsk = () => {}, limits, log = console, skills = [], driveRoot, projects = null, power = '', sandbox = null, onLook = null, onFinish = null, nameConversation = null, awake = createAwakeClock(), progress = createProgress() }) {
+export function createRunner({ store, tools, providers, workdir, origin, bridgePath, browserPath, browserPass = null, readDocument, publish, publishAsk = () => {}, limits, log = console, skills = [], driveRoot, projects = null, power = '', sandbox = null, onLook = null, onFinish = null, nameConversation = null, awake = createAwakeClock(), progress = createProgress() }) {
   const live = new Map(); // turnId → live turn
   const order = []; // turnIds, in the order they were sent
   const tokens = new Map(); // token → live turn
@@ -205,6 +205,9 @@ export function createRunner({ store, tools, providers, workdir, origin, bridgeP
     return project;
   }
 
+  /** Where a document opens in this host: `/a/` and its path, without .mrbl. */
+  const pageUrl = (docPath) => `${origin()}/a/${String(docPath).split('/').map(encodeURIComponent).join('/')}`;
+
   async function composePrompt(turn, meta, project) {
     const context = turn.context;
     const kind = project.id === 'drive' ? 'drive' : 'project';
@@ -230,6 +233,8 @@ export function createRunner({ store, tools, providers, workdir, origin, bridgeP
         `- The document you may edit: ${context.target}`,
       );
       if (context.also?.length) lines.push(`- Also in view: ${context.also.join(', ')}`);
+      // The address the host serves it at, which is not its path on disk.
+      if (turn.capability === 'full') lines.push(`- In your browser it is at: ${pageUrl(context.viewing ?? context.target)}`);
     } else {
       // A project agent may edit anything in its project; the document is
       // where the person was, not a constraint.
@@ -570,7 +575,11 @@ export function createRunner({ store, tools, providers, workdir, origin, bridgeP
         ? {
             command: process.execPath,
             args: [browserPath],
-            env: { MARBLE_BROWSER_PROFILE: profile },
+            env: {
+              MARBLE_BROWSER_PROFILE: profile,
+              MARBLE_BROWSER_ORIGIN: origin(),
+              ...(browserPass ? { MARBLE_BROWSER_PASS: browserPass() } : {}),
+            },
           }
         : null;
       if (browser) await fsp.rm(profile, { recursive: true, force: true });

@@ -1,7 +1,11 @@
 import assert from 'node:assert/strict';
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
 import test from 'node:test';
+import { pathToFileURL } from 'node:url';
 
-import { BROWSER_TOOLS, createBrowserSession, toMcpResult } from '../server/agent/browser.js';
+import { BROWSER_TOOLS, createBrowserSession, playwrightEntry, toMcpResult } from '../server/agent/browser.js';
 
 test('the shipped tools are exactly the eight names, in this order', () => {
   assert.deepEqual(BROWSER_TOOLS, [
@@ -16,10 +20,37 @@ test('the shipped tools are exactly the eight names, in this order', () => {
   ]);
 });
 
+/** A node_modules with marble in it and Playwright wherever npm put it. */
+function fakeInstall(nested) {
+  const root = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'marble-pw-')));
+  const marble = path.join(root, 'node_modules', '@bdhmin', 'marble');
+  const playwright = nested
+    ? path.join(marble, 'node_modules', 'playwright')
+    : path.join(root, 'node_modules', 'playwright');
+  for (const [dir, name] of [[marble, '@bdhmin/marble'], [playwright, 'playwright']]) {
+    fs.mkdirSync(dir, { recursive: true });
+    fs.writeFileSync(path.join(dir, 'package.json'), JSON.stringify({ name, exports: { './package.json': './package.json' } }));
+  }
+  fs.writeFileSync(path.join(playwright, 'index.mjs'), '');
+  return { from: pathToFileURL(path.join(marble, 'package.json')).href, entry: pathToFileURL(path.join(playwright, 'index.mjs')).href };
+}
+
+test('Playwright is found where npm hoisted it, as on a sprite', () => {
+  const { from, entry } = fakeInstall(false);
+  assert.equal(playwrightEntry(from).href, entry);
+});
+
+test('Playwright is found inside a linked marble checkout, as on the Mac', () => {
+  const { from, entry } = fakeInstall(true);
+  assert.equal(playwrightEntry(from).href, entry);
+});
+
 /** A Chromium stub the session can launch. Pages record what the agent did. */
 function fakeChromium() {
   const launched = [];
   const pages = [];
+  const cookies = [];
+  const addCookies = async (list) => { cookies.push(...list); };
 
   const makePage = () => {
     const locators = [];
@@ -76,9 +107,11 @@ function fakeChromium() {
     launched,
     persistent: [],
     pages,
+    cookies,
     async launch(opts) {
       launched.push(opts);
       const context = {
+        addCookies,
         async newPage() {
           return makePage();
         },
@@ -99,6 +132,7 @@ function fakeChromium() {
     async launchPersistentContext(dir, opts) {
       this.persistent.push({ dir, opts });
       const context = {
+        addCookies,
         pages: () => pages.filter((p) => !p.closed),
         async newPage() {
           return makePage();
@@ -174,6 +208,34 @@ test('a profile dir uses launchPersistentContext and adopts the blank tab', asyn
   const listed = await session.call('browser_tabs', { action: 'list' });
   assert.equal(listed.tabs.length, 1);
   assert.equal(listed.tabs[0].url, 'https://example.com/');
+  await session.close();
+});
+
+test('a drive pass signs the browser in to its own host, by either loopback name, and nowhere else', async () => {
+  const chromium = fakeChromium();
+  const session = createBrowserSession({
+    chromium,
+    userDataDir: '/tmp/marble-profile',
+    pass: { origin: 'http://127.0.0.1:4400', cookie: 'marble_drive=123.sig' },
+  });
+  await session.call('browser_navigate', { url: 'http://127.0.0.1:4400/Research/Vision.mrbl' });
+  const planted = chromium.cookies.map(({ name, value, domain, path: at, httpOnly }) => ({ name, value, domain, path: at, httpOnly }));
+  assert.deepEqual(planted, [
+    { name: 'marble_drive', value: '123.sig', domain: '127.0.0.1', path: '/', httpOnly: true },
+    { name: 'marble_drive', value: '123.sig', domain: 'localhost', path: '/', httpOnly: true },
+  ]);
+  // A relaunch is a new context, and gets the pass again.
+  await session.call('browser_close', {});
+  await session.call('browser_navigate', { url: 'http://localhost:4400/' });
+  assert.equal(chromium.cookies.length, 4);
+  await session.close();
+});
+
+test('a browser without a pass has no cookies', async () => {
+  const chromium = fakeChromium();
+  const session = createBrowserSession({ chromium, userDataDir: '/tmp/marble-profile' });
+  await session.call('browser_navigate', { url: 'http://127.0.0.1:4400/' });
+  assert.deepEqual(chromium.cookies, []);
   await session.close();
 });
 

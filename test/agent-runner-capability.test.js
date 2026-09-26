@@ -28,7 +28,7 @@ const until = async (check, ms = 5_000) => {
 };
 
 /** A host with one fake provider, watched so the test can see how it was spawned. */
-async function hostWith({ capability, power = '', sandbox = null } = {}) {
+async function hostWith({ capability, power = '', sandbox = null, secret = '' } = {}) {
   const root = await fsp.mkdtemp(path.join(ROOT, 'd-'));
   const seen = [];
   const prepared = [];
@@ -38,7 +38,7 @@ async function hostWith({ capability, power = '', sandbox = null } = {}) {
   else if (capability) provider.capability = capability;
   const spawn = provider.spawn.bind(provider);
   provider.spawn = (opts) => {
-    seen.push({ capability: opts.capability, cwd: opts.cwd });
+    seen.push({ capability: opts.capability, cwd: opts.cwd, prompt: opts.prompt });
     const spec = spawn(opts);
     return opts.capability === 'full' && opts.cwd ? { ...spec, cwd: opts.cwd } : spec;
   };
@@ -54,6 +54,7 @@ async function hostWith({ capability, power = '', sandbox = null } = {}) {
     MARBLE_DRIVE_AGENT_PROVIDER: 'fake',
     MARBLE_DRIVE_AGENT_WORKDIR: await fsp.mkdtemp(path.join(WORK, 'w-')),
     MARBLE_DRIVE_AGENT_POWER: power,
+    ...(secret ? { MARBLE_DRIVE_SECRET: secret } : {}),
   });
   const drive = await createDrive(config, {
     log: quiet,
@@ -103,6 +104,60 @@ test('a full turn hands prepare a browser MCP spec; documents does not', async (
     await runTurn(docs.drive);
     assert.equal(docs.prepared[0].capability, 'documents');
     assert.equal(docs.prepared[0].browser, null);
+  } finally {
+    await docs.drive.close();
+  }
+});
+
+test('on a gated drive the browser gets a pass through its own host\'s gate; on an open one it gets none', async () => {
+  const gated = await hostWith({ capability: 'full', secret: 'open sesame' });
+  try {
+    await runTurn(gated.drive);
+    const { env } = gated.prepared[0].browser;
+    assert.equal(env.MARBLE_BROWSER_ORIGIN, `http://127.0.0.1:${gated.port}`);
+    const page = `${env.MARBLE_BROWSER_ORIGIN}/a/notes`;
+    const closed = await fetch(page, { headers: { accept: 'text/html' }, redirect: 'manual' });
+    assert.equal(closed.status, 302, 'the gate is really closed');
+    const passed = await fetch(page, { headers: { accept: 'text/html', cookie: env.MARBLE_BROWSER_PASS }, redirect: 'manual' });
+    assert.equal(passed.status, 200, 'the pass gets through it');
+  } finally {
+    await gated.drive.close();
+  }
+
+  const open = await hostWith({ capability: 'full' });
+  try {
+    await runTurn(open.drive);
+    assert.equal(open.prepared[0].browser.env.MARBLE_BROWSER_PASS, undefined);
+  } finally {
+    await open.drive.close();
+  }
+});
+
+test('a full turn is told where the page it is on opens in its browser; documents is not', async () => {
+  const full = await hostWith({ capability: 'full' });
+  try {
+    await full.drive.createDocument('Research/Vision Docs/Research Vision', SOURCE);
+    const conversation = await full.drive.agents.store.createConversation({ provider: 'fake' });
+    const { turnId } = await full.drive.agents.runner.send(conversation.id, {
+      prompt: 'script:noop',
+      context: { target: 'Research/Vision Docs/Research Vision', viewing: 'Research/Vision Docs/Research Vision', selection: [] },
+    });
+    await until(async () => {
+      const turn = await full.drive.agents.store.turn(turnId);
+      return turn && !['queued', 'running'].includes(turn.status) ? turn : null;
+    });
+    const url = `http://127.0.0.1:${full.port}/a/Research/Vision%20Docs/Research%20Vision`;
+    assert.ok(full.seen[0].prompt.includes(url), full.seen[0].prompt);
+    const page = await fetch(url, { headers: { accept: 'text/html' } });
+    assert.equal(page.status, 200, 'the address it is given is the page');
+  } finally {
+    await full.drive.close();
+  }
+
+  const docs = await hostWith({ capability: 'documents' });
+  try {
+    await runTurn(docs.drive);
+    assert.ok(!docs.seen[0].prompt.includes('/a/notes'));
   } finally {
     await docs.drive.close();
   }

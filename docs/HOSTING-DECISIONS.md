@@ -327,6 +327,32 @@ cover the machine. On t-bryan `memory.current` read 3.6 GB where
   Explorer page sets a factor per product, so a wrong guess about what Fly
   measures is corrected by the first bill rather than argued about.
 
+### 23. An agent's browser carries a pass to its own drive
+
+**Found.** Agents on sprites could not open a page or take a screenshot. Two
+walls, one behind the other: the host looked for Playwright only inside
+`@bdhmin/marble/node_modules`, where a linked checkout keeps it and an npm
+install from the registry never does (it hoists it), so every browser call
+failed before Chromium started; and past that, a sprite is always gated, and a
+turn's browser is a fresh profile with no cookie, so the drive sent it to the
+passphrase page.
+
+**Chose.**
+- *Find Playwright the way Node would*, from marble's own package, nested or
+  hoisted (`playwrightEntry`). The release installs the Chromium build that
+  Playwright names on every stage, and launches it, so a Playwright bump
+  cannot leave a sprite with the wrong build or ship a browser that cannot run.
+- *A pass, not an exemption.* The runner hands each turn's browser the gate's
+  own signed cookie, good for a day, planted for `127.0.0.1` and `localhost`
+  only. Rejected: letting loopback through the gate (anything on the sprite, or
+  any proxy forwarding to it, would be signed in), and giving the browser the
+  passphrase itself. An agent with a browser already has a shell on the
+  sprite, so the pass grants it nothing it could not reach; it only lets the
+  page be seen the way the person sees it.
+- *Told where the page is.* A document is served at `/a/<path>` with no
+  `.mrbl`, which an agent guessed wrong; a full turn's prompt now carries the
+  address of the page the person is on.
+
 ## Traps worth remembering
 
 | Trap | How it showed up | Lesson |
@@ -352,4 +378,5 @@ cover the machine. On t-bryan `memory.current` read 3.6 GB where
 | Waking is the slow part, not the network | the owner's drive felt slow between pages; Fly's edge answered in ~90 ms, while a wake took 9 s paused and 70 s stopped | on the owner's drive, a tab keeps the sprite up for 30 min hidden and 60 min idle; the host's stream cut follows those limits unless set |
 | A chart drawn into a hidden box | the phone's drive detail guessed 600 px for a chart it could not measure and pushed the page sideways | draw once the box has a width (`whenSized`) |
 | One more tab in a flex bar inside a grid | a grid item's minimum width is its content, so the whole Console grew to 448 px on a 390 px phone | `min-width: 0` on the bar; let the tabs scroll within it |
+| A dependency's dependency reached by path (`<pkg>/node_modules/<dep>`) | worked on the Mac (a linked checkout nests it), failed on every sprite (npm hoists it) | resolve it with `createRequire` from the package, never by path |
 | The runtime was `no-store` | every page switch refetched 14 scripts (~265 KB compressed) | name each at `?v=<hash>` and let the browser keep it; `no-cache` + ETag for any other address |

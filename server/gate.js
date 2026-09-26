@@ -43,8 +43,9 @@ export function createGate({ secret, cookieName = 'marble_drive', days = 30, sec
   const sign = (payload) =>
     crypto.createHmac('sha256', secret).update(payload).digest('base64url');
 
-  function issue() {
-    const expires = Date.now() + days * DAY;
+  /** A signed cookie value, good for `ms` (a person's, by default, is `days`). */
+  function issue(ms = days * DAY) {
+    const expires = Date.now() + ms;
     const payload = String(expires);
     return `${payload}.${sign(payload)}`;
   }
