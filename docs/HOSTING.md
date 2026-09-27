@@ -22,8 +22,12 @@ runs on a laptop. One person, one sprite, one drive.
 | `t-irene`, `t-sam` | friends | their drives; agents on the owner's Claude login | `marble-tester` | `--all` |
 | `t-sangho`, `t-peiling` | friends | their drives; agents on their own API keys | `marble-tester` | `--all` |
 
-The owner's MacBook no longer serves a drive. Its `drive/` folder is a
-**frozen backup** from 2026-09-24 01:15 UTC; nothing syncs it.
+The owner's MacBook holds no drive of its own. Its `drive/` is a **mirror** of
+admin-p1, pulled one way on request (`tools/drive-pull.sh`), so big changes to
+Marble run their tests and harnesses on the Mac, against real documents, and
+not on a sprite's compute. Anything written to the mirror is lost at the next
+pull; real edits happen on admin-p1. Until the first pull it was a frozen backup
+from 2026-09-24 01:15 UTC (kept at `drive.kept-<utc>/` when it is replaced).
 
 ## Three layers, three ways of saving
 
@@ -226,6 +230,7 @@ admin-p1 (`~/.config/marble-drive/testers.json`), the machine that made it.
 | `… --print-plan` | say what would be deployed, and stop |
 | `… --when-idle` | stage now, switch when no agent is working (always so from the sprite itself); for a drive in use |
 | `tools/sprite-deploy.sh --all [--list]` | every sprite labelled `marble-tester` or `marble-user`; continues past a failure; `--list` only names them |
+| `tools/drive-pull.sh [<sprite>] [--into <dir>]` | a one-way mirror of a drive (default admin-p1) into this checkout's `drive/`, the last one set aside |
 | `tools/sprite-provision.sh <person> [--agent api\|subscription] [--key-file f] [--local]` | makes `t-<person>`: passphrase, `sprite.env`, optional preloaded key, deploy, public URL, outside check, roster entry, a note to send |
 | `tools/sprite-provision.sh --resume <person>` | finish one that stopped part way |
 | `tools/sprite-provision.sh --remove <person>` | destroy after typing the name; drops the roster entry |
@@ -254,6 +259,16 @@ since that checkpoint, drive included).
 4410:4400` (4400 may be taken locally). Through the proxy the Host header is
 `127.0.0.1`, which an ungated host allows; send
 `-H "Host: <sprite>-b3fwm.sprites.app"` to see what a browser sees.
+
+**Mirror a drive here.** `tools/drive-pull.sh` (admin-p1 into this
+checkout's `drive/`; `<sprite>` and `--into <dir>` for others). Stop the local
+host first; the script refuses while one holds the drive. The sprite must be
+running: nothing reaches a stuck one, and a checkpoint cannot be read out, only
+restored onto the same sprite. The copy streams through `sprite exec` while the
+drive is live, so counts may differ by what was being written. Agent projects
+are repointed at this machine's checkouts; the earlier mirror becomes
+`drive.previous/`. Conversations come across readable, but their Claude
+sessions do not.
 
 **Edit a person's live Drive page** (rare; theirs to change). Stop the service
 (`sprite-env services stop marble-drive`), write once, start it: a running

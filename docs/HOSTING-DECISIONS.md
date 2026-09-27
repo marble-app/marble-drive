@@ -353,6 +353,26 @@ passphrase page.
   `.mrbl`, which an agent guessed wrong; a full turn's prompt now carries the
   address of the page the person is on.
 
+### 24. Heavy work runs on the Mac, against a mirror of the drive
+
+**Problem.** A sprite is too small for the big changes to Marble: full test
+runs, browser suites and several agents at once, on the machine that also
+serves the owner's drive. And admin-p1 stalled twice (2026-09-26 and 09-27),
+leaving the Mac's three-day-old backup as the only copy within reach.
+
+**Considered.** Moving the owner's documents to `t-bryan` and keeping admin-p1
+for the console and shipping: rejected, since `t-bryan` gets every change first
+(it is in `--all`, and takes `--local` builds), which would make the real drive
+the canary, and the compute would still be a sprite's. Syncing the drive both
+ways: rejected, since two hosts writing copies of one drive fork it.
+
+**Chose.** admin-p1 stays the owner's drive and the light workshop (fix what
+you hit, from inside Marble). The Mac is the heavy workshop: its checkout, and
+its `drive/` as a one-way mirror of admin-p1, pulled on request
+(`tools/drive-pull.sh`), set aside rather than deleted, and marked
+(`.marble/mirror.json`) so a mirror is never taken for the real drive. It
+needs the sprite running, so pull while it is well.
+
 ## Traps worth remembering
 
 | Trap | How it showed up | Lesson |

@@ -18,6 +18,9 @@ node_modules/
 # The default drive root. A drive belongs to whoever is running the host, not
 # to this repository — and `.marble/` under it is their history.
 drive/
+# A mirror pulled from a sprite set its predecessors aside beside it
+# (tools/drive-pull.sh): drive.pulling/, drive.previous/, drive.kept-<utc>/.
+/drive.*/
 # Hand-made copies of documents, kept beside the drive rather than in it.
 backups/
 
