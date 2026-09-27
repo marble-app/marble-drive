@@ -29,7 +29,8 @@ import { stamp, stamped } from '../server/favicon.js';
 import { build as buildStarter, list as listStarters } from '../server/gallery.js';
 import { check as checkRemote, serveOff, serveOn, serveStatus, tailnetUrl } from '../server/remote.js';
 import { splitPath, parsePath } from '../server/paths.js';
-import { seedAgents, seedChat, seedConsole, seedDrive } from '../server/seed.js';
+import { updateApps } from '../server/app-updates.js';
+import { seedAgents, seedBoard, seedChat, seedConsole, seedDrive } from '../server/seed.js';
 import { createStore } from '../server/store/index.js';
 
 const [command = 'serve', ...rest] = process.argv.slice(2);
@@ -79,8 +80,11 @@ switch (command) {
   case 'genui':
     await genuiCommand();
     break;
+  case 'apps':
+    await appsCommand();
+    break;
   default:
-    fail(`no command "${command}" — there is: serve, new, icon, weigh, backup, remote, agents, starters, genui`);
+    fail(`no command "${command}" — there is: serve, new, icon, weigh, backup, remote, agents, starters, genui, apps`);
 }
 
 // ---------------------------------------------------------------------- serve
@@ -90,6 +94,7 @@ async function serve() {
   await seedDrive(drive.store, { name: config.home });
   await seedAgents(drive.store);
   await seedChat(drive.store);
+  await seedBoard(drive.store);
   if (drive.console) await seedConsole(drive.store);
   // Not awaited: the host should answer requests while it reads the drive, and
   // a document served before its baseline lands sets its own on the way out.
@@ -107,6 +112,15 @@ async function serve() {
   });
 
   drive.server.listen(port, config.host, () => {
+    // After the host answers, not before: merging is seconds of work on a big
+    // drive, and nobody should wait at a blank page for it.
+    if (config.appUpdates) {
+      updateApps({
+        store: drive.store,
+        config,
+        write: (where, text, { label }) => drive.putDocument(where, text, { label, event: 'changed' }),
+      }).catch((err) => console.error('[apps] could not bring app pages forward:', err.message));
+    }
     const url = `http://localhost:${port}/`;
     console.log('[drive] serving at');
     console.log(`\n  ${url}\n`);
@@ -221,6 +235,23 @@ async function icon() {
       ? `\n  --dry, so nothing was written. Run it again without the flag.`
       : `\n  ${marked} document(s) marked. Every one of them can still be edited back.`,
   );
+}
+
+// ----------------------------------------------------------------------- apps
+
+/** `marble-drive apps [--write]`: what bringing this drive's app pages forward
+ *  would do (the host does it on start), or do it now with --write. */
+async function appsCommand() {
+  const store = createStore({ root: config.root });
+  await store.ready();
+  const report = await updateApps({ store, config, dryRun: !flags.write, log: { log() {} } });
+  if (!report.length) console.log('  every app page is current');
+  for (const line of report) {
+    const why = line.status === 'held' ? ` (${line.reason}${line.conflicts ? `, ${line.conflicts} overlapping` : ''})` : '';
+    const what = line.status === 'update' ? ` ${line.from} → ${line.to}, ${line.hunks} changes` : '';
+    console.log(`  ${line.status.padEnd(8)} ${line.app.padEnd(10)} ${line.path}${what}${why}`);
+  }
+  if (!flags.write && report.some((l) => l.status === 'update')) console.log('\n  nothing written — run with --write to apply');
 }
 
 // ---------------------------------------------------------------------- weigh

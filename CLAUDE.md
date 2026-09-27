@@ -47,9 +47,14 @@ It runs the same tools, so a change to them reaches it.
 
 ## Rules
 
-- Each person's Drive and Agents pages are their own documents. A change to
-  `templates/drive.mrbl` or `templates/agents.mrbl` reaches new drives only;
-  do not patch an existing user's pages without the owner asking.
+- Each person's Drive, Agents, Chat and Board pages, and the notes they make,
+  are their own documents. On start the host brings them forward to this
+  release's templates by a three-way merge (`server/app-updates.js`): only a
+  clean merge that passes the document check is written, and a page whose owner
+  changed the same lines is left as it is (`marble-drive apps` shows which).
+  After changing a template or starter listed in `server/app-lineage.js`, run
+  `node tools/app-lineage.mjs` and commit `templates/lineage/` with it.
+  Still: do not patch an existing user's pages by hand without the owner asking.
 - The Claude Code version every sprite runs is `tools/sprite/claude-version`.
   Bump it in its own commit, after trying it on t-bryan.
 - Never print, commit or copy a key: GitHub, npm, Sprites, Anthropic, or a

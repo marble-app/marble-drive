@@ -144,6 +144,11 @@ export function loadConfig(env = process.env) {
     spriteSocket: str('MARBLE_DRIVE_SPRITE_SOCKET', '/.sprite/api.sock'),
     // The console: every drive, from one page (server/console). admin-p1 only.
     console: bool('MARBLE_DRIVE_CONSOLE', false),
+    // Bring this drive's own app pages (Drive, Agents, Chat, Board, notes made
+    // from the Note starter) forward to the templates this release ships, by a
+    // three-way merge that keeps what their owner changed (server/app-updates.js).
+    // Off for a drive whose pages are where the templates come from.
+    appUpdates: bool('MARBLE_DRIVE_APP_UPDATES', true),
     consoleOrg: str('MARBLE_DRIVE_CONSOLE_ORG', 'marble-drive'),
     consoleSrc: str('MARBLE_DRIVE_CONSOLE_SRC', '/home/sprite/src'),
     consoleSprite: str('MARBLE_DRIVE_CONSOLE_SPRITE', 'sprite'),
