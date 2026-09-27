@@ -160,3 +160,23 @@ test('a drive from before the manifest keeps what it has and is not seeded twice
   assert.equal(await store.read('Chat'), '<!doctype html><title>Mine</title>');
   assert.equal((await readManifest(store.marbleDir)).seeded.chat, 'Chat');
 });
+
+test('a copy of any recent version of any app is recognised exactly and comes forward', async () => {
+  for (const id of ['drive', 'agents', 'chat', 'note']) {
+    const app = appById(id);
+    const all = lineage(app);
+    for (const version of all.slice(-10, -1)) {
+      const copy = await buildApp(app, version.source, { title: 'Mine' });
+      const plan = await planCopy(app, copy);
+      assert.equal(plan.from, version.id, `${id} ${version.id} recognised`);
+      assert.equal(plan.status, 'update', `${id} ${version.id}: ${plan.reason ?? ''}`);
+    }
+  }
+});
+
+test('a lived-in Drive from ten versions back comes forward too', async () => {
+  const old = versions.at(-10) ?? versions[0];
+  const plan = await planCopy(drive, await livedInDrive(old));
+  assert.equal(plan.status, 'update', plan.reason);
+  assert.ok(plan.text.includes('data-marble-id="mypin001"'));
+});
