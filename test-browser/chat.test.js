@@ -147,3 +147,26 @@ test('the sidebar and the chat fill the window, whatever else is in <body>', asy
     await page.close();
   }
 });
+
+// The Drive's New menu hands over what was typed as #ask=…: it is sent as the
+// first message of a fresh chat, and the address is spent so a reload does not
+// send it again.
+test('words handed over as #ask= are the first message, sent once', async () => {
+  await host.reset();
+  const { page, errors } = await host.newPage();
+  await page.goto(`${host.base}/a/Chat#ask=${encodeURIComponent('script:hello')}`);
+  await page.locator('.me', { hasText: 'script:hello' }).waitFor();
+  await page.locator('.reply .md strong', { hasText: 'there' }).waitFor();
+  assert.doesNotMatch(await page.evaluate(() => location.hash), /ask=/);
+  const count = async () => {
+    const list = await (await fetch(`${host.base}/agent/conversations`)).json();
+    return (Array.isArray(list) ? list : list.conversations).length;
+  };
+  const before = await count();
+  await page.reload();
+  await page.waitForFunction(() => Boolean(window.marble?.agent));
+  await page.waitForTimeout(500);
+  assert.equal(await count(), before, 'a reload sent nothing');
+  assert.equal(await page.locator('.me').count(), 1);
+  assert.deepEqual(errors, []);
+});

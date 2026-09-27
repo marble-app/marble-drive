@@ -1464,7 +1464,7 @@ __ICON__
     agent = a;
     HERE = window.marble.app;
     body.classList.remove('marble-offline');
-    agent.providers().then((list) => {
+    const ready = agent.providers().then((list) => {
       provider = list.find((p) => p.default) ?? list[0] ?? null;
       paintBar();
     }).catch(() => {});
@@ -1477,8 +1477,16 @@ __ICON__
       if (summary?.kind) return;
       take(summary);
     });
+    // Arrived from the Drive's New menu with the words already written
+    // (#ask=…): a fresh chat, and they are its first message. The address is
+    // spent before anything else so a reload does not send them twice.
+    const asked = /^#ask=/.test(location.hash)
+      ? decodeURIComponent(location.hash.slice(5)).trim()
+      : '';
+    if (/^#ask=/.test(location.hash)) history.replaceState(null, '', '#new');
     view.id = undefined;
     route();
+    if (asked) ready.then(() => { input.value = asked; autosize(); paintSend(); submit(); });
     // A phone that slept closed the streams; it reopens them on return.
     document.addEventListener('visibilitychange', () => {
       if (document.visibilityState === 'hidden') agent.suspend?.();
