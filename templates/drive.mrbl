@@ -896,7 +896,7 @@ __ICON__
      do not know, so it is the only place the key can be learned. Moving to
      the trash has no key on purpose — it is only ever asked for here. */
   .menu button .key { margin-left: auto; color: var(--muted); font-size: .95em; }
-  .menu button:hover { background: var(--paper-3); }
+  .menu button:hover, .menu button:focus-visible { background: var(--paper-3); outline: none; }
   .menu button:active { transform: scale(.98); }
   .menu hr { border: 0; border-top: 1px solid var(--line); margin: .3rem 0; }
 
@@ -2920,6 +2920,10 @@ __ICON__
         }
       });
 
+      // One menu, asked two ways: from a row's ⋮, where it hangs under the
+      // button, and by right-clicking, where it opens at the pointer. `anchor`
+      // is an element for the first and `{ x, y }` for the second; what is in
+      // it depends only on what was asked about, never on how.
       function openMenu(item, anchor) {
         const path = item.dataset.path;
         const isFolder = item.dataset.kind === 'folder';
@@ -2932,6 +2936,8 @@ __ICON__
 
         const add = (label, fn, key = '') => {
           const button = document.createElement('button');
+          button.type = 'button';
+          button.setAttribute('role', 'menuitem');
           button.append(label);
           if (key) {
             const hint = document.createElement('span');
@@ -2948,17 +2954,26 @@ __ICON__
             }
           });
           menu.append(button);
+          return button;
         };
+        const rule = () => menu.append(document.createElement('hr'));
 
         // A menu on a row that is part of a larger selection speaks for the
         // whole selection — Rename and Move to… stop making sense once there
         // is more than one "it", so the bulk menu only offers what still does.
-        const bulk = !trashed && picked.size > 1 && picked.has(path);
+        const bulk = picked.size > 1 && picked.has(path);
 
         if (trashed) {
-          add('Restore', async () => {
-            await drive.restore(item.dataset.trashId);
+          // The trash keeps things, it does not destroy them, so the only
+          // thing to do with what is in it is take it back out.
+          const rows = bulk ? [...items.querySelectorAll('.item.marble-picked')] : [item];
+          add(rows.length > 1 ? 'Restore ' + rows.length : 'Restore', async () => {
+            const results = await Promise.allSettled(rows.map((row) => drive.restore(row.dataset.trashId)));
+            const failed = results.filter((r) => r.status === 'rejected').length;
+            pick(null);
             refresh();
+            if (failed) say(failed + ' of ' + rows.length + ' could not be restored');
+            else say(rows.length === 1 ? 'Restored' : 'Restored ' + rows.length);
           });
         } else if (bulk) {
           const paths = [...picked];
@@ -2967,16 +2982,38 @@ __ICON__
             add('Open ' + docs.length + ' in new tabs', () => {
               for (const p of docs) window.open(marble.href(p), '_blank');
             });
+            rule();
           }
-          menu.append(document.createElement('hr'));
+          add('Move ' + paths.length + ' to…', async () => {
+            const to = prompt('Folder to move them into (blank for the top)', here);
+            if (to === null) return;
+            const folder = to.trim().replace(/^\/+|\/+$/g, '');
+            const results = await Promise.allSettled(
+              paths.map(async (p) => {
+                const next = [folder, leaf(p)].filter(Boolean).join('/');
+                if (next !== p) await drive.move(p, next);
+              }),
+            );
+            const failed = results.filter((r) => r.status === 'rejected').length;
+            pick(null);
+            refresh();
+            if (failed) say(failed + ' of ' + paths.length + ' could not be moved');
+            else say('Moved ' + paths.length + ' to ' + (folder || 'My Drive'));
+          });
+          add('Copy ' + paths.length + ' links', () => copyText(paths.map((p) => linkFor(p)).join('\n'), 'Links copied'));
+          rule();
           add('Move ' + paths.length + ' to trash', trashPicked);
         } else {
-          if (isFile) {
-            add('Open beside this', () => window.open(drive.fileHref(path), '_blank'));
-          } else if (!isFolder) {
+          if (isFolder) {
+            add('Open', () => go(path), '⏎');
+            add('Open in new tab', () => window.open(location.pathname + '#/' + path, '_blank'));
+          } else if (isFile) {
+            add('Open beside this', () => window.open(drive.fileHref(path), '_blank'), '⏎');
+          } else {
             add('Open', () => (location.href = marble.href(path)), '⏎');
             add('Open in new tab', () => window.open(marble.href(path), '_blank'));
           }
+          rule();
           add('Rename…', async () => {
             const name = prompt('New name', leaf(path));
             if (!name || name === leaf(path)) return;
@@ -2990,17 +3027,21 @@ __ICON__
             await drive.move(path, [to.trim().replace(/^\/+|\/+$/g, ''), leaf(path)].filter(Boolean).join('/'));
             refresh();
           });
-          // A pin is a shortcut to something you go into or open, and neither
-          // is what a material is.
-          if (!isFile) add(pinned(path) ? 'Unpin' : 'Pin to sidebar', () => togglePin(path, isFolder));
           if (!isFolder && !isFile) {
             add('Make a copy', async () => {
               await drive.create({ path: path + ' copy', copy: path });
               refresh();
             });
-            add('Download (one file)', () => window.open(drive.downloadHref(path), '_blank'));
           }
-          menu.append(document.createElement('hr'));
+          // A pin is a shortcut to something you go into or open, and neither
+          // is what a material is.
+          if (!isFile) add(pinned(path) ? 'Unpin from sidebar' : 'Pin to sidebar', () => togglePin(path, isFolder));
+          rule();
+          add('Copy link', () => copyText(linkFor(path), 'Link copied'));
+          add('Copy path', () => copyText(path, 'Path copied'));
+          if (isFile) add('Download', () => saveAs(drive.fileHref(path), leaf(path)));
+          else if (!isFolder) add('Download (one file)', () => window.open(drive.downloadHref(path), '_blank'));
+          rule();
           // No key does this. Throwing something away is a thing you ask
           // for, from here, so a stray keystroke never costs you a file.
           add('Move to trash', async () => {
@@ -3011,11 +3052,204 @@ __ICON__
           });
         }
 
-        const box = anchor.getBoundingClientRect();
-        menu.style.left = Math.min(box.left, innerWidth - 220) + 'px';
-        menu.style.top = Math.min(box.bottom + 4, innerHeight - 260) + 'px';
-        menu.setAttribute('data-open', '1');
+        placeMenu(anchor);
       }
+
+      // A menu that is not about a row: the gap between rows, or a pin. The
+      // same buttons as a row's, without the key hints a row can promise.
+      function menuButton(label, fn) {
+        const button = document.createElement('button');
+        button.type = 'button';
+        button.setAttribute('role', 'menuitem');
+        button.textContent = label;
+        button.addEventListener('click', async () => {
+          menu.removeAttribute('data-open');
+          try {
+            await fn();
+          } catch (err) {
+            fail(err);
+          }
+        });
+        menu.append(button);
+        return button;
+      }
+
+      // A menu about the listing rather than anything in it: right-click the
+      // gap between rows and it offers what you would make or do here.
+      function openSpaceMenu(point) {
+        menu.replaceChildren();
+        if (view === 'drive') {
+          menuButton('New document…', () => newButton.click());
+          menuButton('New folder…', () => $('#mk').click());
+          menu.append(document.createElement('hr'));
+        }
+        if (items.querySelector('.item')) {
+          menuButton('Select all', () => pick([...items.querySelectorAll('.item')].map((el) => el.dataset.path)));
+        }
+        if (view === 'drive') {
+          menuButton('Copy link to this folder', () => copyText(linkFor(here, 'folder'), 'Link copied'));
+          if (here) menuButton(pinned(here) ? 'Unpin this folder' : 'Pin this folder to sidebar', () => togglePin(here, true));
+        }
+        while (menu.lastChild?.tagName === 'HR') menu.lastChild.remove();
+        if (!menu.firstChild) return menu.removeAttribute('data-open');
+        placeMenu(point);
+      }
+
+      // Hung under an element, or opened at a point, and kept inside the
+      // window either way. Measured after it opens, because what it holds
+      // sets how tall it is.
+      function placeMenu(anchor) {
+        menu.setAttribute('role', 'menu');
+        menu.style.left = '0px';
+        menu.style.top = '0px';
+        menu.setAttribute('data-open', '1');
+        const w = menu.offsetWidth;
+        const h = menu.offsetHeight;
+        let x;
+        let y;
+        if (anchor instanceof Element) {
+          const box = anchor.getBoundingClientRect();
+          x = box.left;
+          y = box.bottom + 4;
+          if (y + h > innerHeight - 8) y = Math.max(8, box.top - h - 4);
+          menu.style.transformOrigin = 'top left';
+        } else {
+          x = anchor.x;
+          y = anchor.y;
+          // Near the bottom or right edge a context menu flips to open away
+          // from the edge rather than sliding off it, the way a desktop does.
+          if (x + w > innerWidth - 8) x = Math.max(8, x - w);
+          if (y + h > innerHeight - 8) y = Math.max(8, y - h);
+          menu.style.transformOrigin = (x < anchor.x ? 'right' : 'left') + ' ' + (y < anchor.y ? 'bottom' : 'top');
+        }
+        menu.style.left = Math.max(8, Math.min(x, innerWidth - w - 8)) + 'px';
+        menu.style.top = Math.max(8, Math.min(y, innerHeight - h - 8)) + 'px';
+      }
+
+      // Where a thing can be reached from outside this tab: a document's own
+      // address, a file's, or the Drive itself opened at a folder.
+      function linkFor(path, kind) {
+        const el = items.querySelector('.item[data-path="' + CSS.escape(path) + '"]');
+        const k = kind ?? el?.dataset.kind ?? 'doc';
+        const rel =
+          k === 'folder' ? location.pathname + (path ? '#/' + path : '')
+          : k === 'file' ? drive.fileHref(path)
+          : marble.href(path);
+        return new URL(rel, location.href).href;
+      }
+
+      async function copyText(text, done) {
+        try {
+          await navigator.clipboard.writeText(text);
+          say(done);
+        } catch {
+          prompt('Copy this', text);
+        }
+      }
+
+      function saveAs(href, name) {
+        const a = document.createElement('a');
+        a.href = href;
+        a.download = name;
+        document.body.append(a);
+        a.click();
+        a.remove();
+      }
+
+      // Which hand is on the page. A `contextmenu` does not say, and the
+      // press that came before it always does.
+      let byTouch = false;
+      addEventListener('pointerdown', (event) => {
+        byTouch = event.pointerType === 'touch';
+      }, true);
+
+      // Right-click is the desktop's way of asking "what can I do with this?"
+      // A row answers with its own menu — the same one its ⋮ opens — and the
+      // gap between rows answers for the folder you are in. A finger's long
+      // press on a row asks the same question, so it gets the same menu; on
+      // the gap it is only a finger resting, and is left alone.
+      items.addEventListener('contextmenu', (event) => {
+        if (event.shiftKey) return; // the browser's own menu, still one key away
+        const item = event.target.closest('.item');
+        if (!item && byTouch) return;
+        // The menu key, or Shift+F10, reports no pointer at all.
+        const keyboard = event.clientX === 0 && event.clientY === 0;
+        if (!item) {
+          // Where there is nothing to offer — the gallery — the browser's
+          // own menu is left to answer.
+          openSpaceMenu({ x: event.clientX, y: event.clientY });
+          if (menu.getAttribute('data-open') !== '1') return;
+          event.preventDefault();
+          sheet.removeAttribute('data-open');
+          if (!keyboard) pick(null);
+          if (keyboard) menu.querySelector('button')?.focus();
+          return;
+        }
+        event.preventDefault();
+        sheet.removeAttribute('data-open');
+        // Like a click, a right-click on a row outside the selection makes it
+        // the selection; on a row inside it, the menu speaks for all of them.
+        if (!picked.has(item.dataset.path)) pick(item.dataset.path);
+        openMenu(item, keyboard ? item : { x: event.clientX, y: event.clientY });
+        if (keyboard) menu.querySelector('button')?.focus();
+      });
+
+      // A pin is a document or a folder too, so it answers a right-click with
+      // the few things a shortcut can do: open, share, or stop being pinned.
+      document.querySelector('#pins').addEventListener('contextmenu', (event) => {
+        // A finger held on a pin is choosing its text to rename it.
+        if (byTouch) return;
+        const pin = event.target.closest('.pin');
+        if (!pin || !pin.dataset.path || event.shiftKey) return;
+        // The pin's label is editable; a right-click while renaming it is
+        // asking for the text menu — cut, copy, paste — not this one.
+        if (document.activeElement?.closest?.('.pin') === pin && event.target.closest('[data-marble-editable]')) return;
+        event.preventDefault();
+        const path = pin.dataset.path;
+        const folder = pin.dataset.kind === 'folder';
+        menu.replaceChildren();
+        if (folder) {
+          menuButton('Open', () => go(path));
+          menuButton('Open in new tab', () => window.open(location.pathname + '#/' + path, '_blank'));
+        } else {
+          menuButton('Open', () => (location.href = marble.href(path)));
+          menuButton('Open in new tab', () => window.open(marble.href(path), '_blank'));
+        }
+        menuButton('Rename pin…', () => {
+          const label = pin.querySelector('[data-marble-editable]');
+          if (!label) return;
+          label.focus();
+          const range = document.createRange();
+          range.selectNodeContents(label);
+          const sel = getSelection();
+          sel.removeAllRanges();
+          sel.addRange(range);
+        });
+        menuButton('Copy link', () => copyText(linkFor(path, folder ? 'folder' : 'doc'), 'Link copied'));
+        menu.append(document.createElement('hr'));
+        menuButton('Unpin from sidebar', () => togglePin(path, folder));
+        placeMenu({ x: event.clientX, y: event.clientY });
+      });
+
+      // Arrow keys walk an open menu, the way every menu you right-click on a
+      // desktop lets you; the first press steps into it from wherever focus
+      // was. Enter and Space are the buttons' own.
+      addEventListener('keydown', (event) => {
+        if (menu.getAttribute('data-open') !== '1') return;
+        if (!['ArrowDown', 'ArrowUp', 'Home', 'End'].includes(event.key)) return;
+        const buttons = [...menu.querySelectorAll(':scope > button')];
+        if (!buttons.length) return;
+        event.preventDefault();
+        event.stopPropagation();
+        const at = buttons.indexOf(document.activeElement);
+        const next =
+          event.key === 'Home' ? 0
+          : event.key === 'End' ? buttons.length - 1
+          : event.key === 'ArrowDown' ? (at + 1) % buttons.length
+          : at < 0 ? buttons.length - 1
+          : (at - 1 + buttons.length) % buttons.length;
+        buttons[next].focus();
+      }, true);
 
       addEventListener('pointerdown', (event) => {
         if (!menu.contains(event.target) && !event.target.closest('.more')) {
@@ -3069,6 +3303,8 @@ __ICON__
         );
         if (typing) return;
         if (event.target?.closest?.('.fp')) return;
+        // Inside an open menu, Enter presses the button it is on.
+        if (event.key === 'Enter' && event.target?.closest?.('#menu')) return;
         if (event.key === 'Enter') {
           if (picked.size !== 1) return;
           const item = items.querySelector('.item.marble-picked');
@@ -3083,6 +3319,7 @@ __ICON__
         // Escape undoes the last thing you opened, one layer at a time: the row
         // menu, then the New menu, then the selection itself.
         const layered = menu.getAttribute('data-open') === '1' || sheet.getAttribute('data-open') === '1';
+        if (menu.contains(document.activeElement)) document.activeElement.blur();
         menu.removeAttribute('data-open');
         sheet.removeAttribute('data-open');
         if (!layered) pick(null);
@@ -3153,6 +3390,8 @@ __ICON__
         // no folder under it to drop onto — "Move to…" in the row menu still
         // reaches both.
         if (mode() === 'timeline') return;
+        // A right-click asks for the menu; only the main button lifts.
+        if (event.button) return;
         const item = event.target.closest('.item');
         if (!item || event.target.closest('.more') || view === 'trash') return;
         lifting = { item, x: event.clientX, y: event.clientY, moved: false };
