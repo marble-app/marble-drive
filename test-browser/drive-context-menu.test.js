@@ -45,7 +45,7 @@ test('a document answers a right-click with its menu, at the pointer, and is pic
   await rightClick(page, name, { position: { x: 10, y: 5 } });
   await opened(page);
   assert.deepEqual(await labels(page), [
-    'Open', 'Open in new tab', 'Rename…', 'Move to…', 'Make a copy', 'Pin to sidebar',
+    'Open in new tab', 'Rename…', 'Move to…', 'Make a copy', 'Pin to sidebar',
     'Copy link', 'Copy path', 'Download as .mrbl', 'Download as HTML', 'Move to trash',
   ]);
   const at = await page.locator('#menu').boundingBox();
@@ -71,7 +71,7 @@ test('a folder, a file and the trash each get their own verbs', async () => {
   await rightClick(page, row(page, 'notes.txt'));
   await opened(page);
   const file = await labels(page);
-  assert.equal(file[0], 'Open beside this');
+  assert.equal(file[0], 'Open in new tab');
   assert.ok(file.includes('Download') && !file.includes('Pin to sidebar') && !file.includes('Make a copy'));
 
   await page.keyboard.press('Escape');
@@ -106,7 +106,7 @@ test('right-clicking one of several picked rows speaks for all of them', async (
   await rightClick(page, row(page, 'plan').locator('.name'));
   await opened(page);
   assert.equal(await page.locator('#items .item.marble-picked').count(), 1);
-  assert.equal((await labels(page))[0], 'Open');
+  assert.equal((await labels(page))[0], 'Open in new tab');
   await page.context().close();
 });
 
@@ -126,7 +126,7 @@ test('the gap between rows answers for the folder, and a pin for itself', async 
   await pin.waitFor();
   await rightClick(page, pin.locator('.ico'));
   await opened(page);
-  assert.deepEqual(await labels(page), ['Open', 'Open in new tab', 'Rename pin…', 'Copy link', 'Unpin from sidebar']);
+  assert.deepEqual(await labels(page), ['Open in new tab', 'Rename pin…', 'Copy link', 'Unpin from sidebar']);
   await page.locator('#menu button', { hasText: 'Unpin from sidebar' }).click();
   await pin.waitFor({ state: 'detached' });
   await page.context().close();

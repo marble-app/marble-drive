@@ -2771,10 +2771,10 @@ __ICON__
 
       // ----------------------------------------------------------- navigation
 
-      // Opening is a folder you go into or a document you leave for — or, held
-      // open beside this one, a document you leave a tab running. Named once so
-      // the pointer, the keyboard and a modifier key all commit to the same
-      // thing rather than three routes that could drift apart.
+      // Opening is a folder you go into, or a document or file you open beside
+      // the Drive. Named once so the pointer, the keyboard and a modifier key
+      // all commit to the same thing rather than three routes that could
+      // drift apart.
       function openItem(item, { newTab = false } = {}) {
         if (!item) return;
         if (item.dataset.kind === 'folder') {
@@ -2782,16 +2782,15 @@ __ICON__
           return go(item.dataset.path);
         }
         if (view === 'trash') return say('Restore it first — it is in the trash.');
-        // A material is not an app, so it always opens beside the Drive rather
-        // than in place of it: there would be nothing in there to come back
-        // with, and the host — not this document — is the one that decides
-        // whether a given file is shown or handed over as a download.
+        // Documents and files alike open in a tab of their own, never in place
+        // of this one, so the Drive stays the tab you come back to. The host,
+        // not this document, decides whether a given file is shown or handed
+        // over as a download.
         if (item.dataset.kind === 'file') {
           window.open(drive.fileHref(item.dataset.path), '_blank');
           return;
         }
-        if (newTab) window.open(marble.href(item.dataset.path), '_blank');
-        else location.href = marble.href(item.dataset.path);
+        window.open(marble.href(item.dataset.path), '_blank');
       }
 
       function go(path) {
@@ -2884,7 +2883,8 @@ __ICON__
       // what the main pane is showing out from under you mid-edit (a folder
       // pin). Opening is the dedicated button: one click, a new tab for a
       // document, the folder itself for a folder. Cmd/Ctrl-click and
-      // double-click still open, for the same convention the listing uses.
+      // double-click still open, for the same convention the listing uses —
+      // and a document opens in a new tab whichever of them it was.
       document.querySelector('#pins').addEventListener('click', (event) => {
         const pin = event.target.closest('.pin');
         if (!pin || !pin.dataset.path) return;
@@ -2903,8 +2903,7 @@ __ICON__
         const pin = event.target.closest('.pin');
         if (!pin || !pin.dataset.path) return;
         if (pin.dataset.kind === 'folder') return go(pin.dataset.path);
-        if (event.metaKey || event.ctrlKey) window.open(marble.href(pin.dataset.path), '_blank');
-        else location.href = marble.href(pin.dataset.path);
+        window.open(marble.href(pin.dataset.path), '_blank');
       });
 
       document.querySelector('#pins').addEventListener('auxclick', (event) => {
@@ -3175,10 +3174,9 @@ __ICON__
             add('Open', () => go(path), '⏎');
             add('Open in new tab', () => window.open(location.pathname + '#/' + path, '_blank'));
           } else if (isFile) {
-            add('Open beside this', () => window.open(drive.fileHref(path), '_blank'), '⏎');
+            add('Open in new tab', () => window.open(drive.fileHref(path), '_blank'), '⏎');
           } else {
-            add('Open', () => (location.href = marble.href(path)), '⏎');
-            add('Open in new tab', () => window.open(marble.href(path), '_blank'));
+            add('Open in new tab', () => window.open(marble.href(path), '_blank'), '⏎');
           }
           rule();
           add('Rename…', async () => {
@@ -3385,7 +3383,6 @@ __ICON__
           menuButton('Open', () => go(path));
           menuButton('Open in new tab', () => window.open(location.pathname + '#/' + path, '_blank'));
         } else {
-          menuButton('Open', () => (location.href = marble.href(path)));
           menuButton('Open in new tab', () => window.open(marble.href(path), '_blank'));
         }
         menuButton('Rename pin…', () => {
