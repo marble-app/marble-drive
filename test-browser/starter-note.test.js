@@ -522,6 +522,42 @@ test('an address pasted over words links them; pasted or typed on its own, it is
   assert.deepEqual(errors, []);
 });
 
+// ---------------------------------------------------------------- the count
+
+test('the corner counts the open note: not its name, not its quotes, and a limit its name gives', async () => {
+  const { page, errors } = await open();
+  const wc = page.locator('.wc');
+  const count = async () => {
+    await page.waitForTimeout(120);
+    return (await wc.textContent()).trim();
+  };
+  // Make the open note exactly: a name with a limit, a quote, and five words.
+  await page.evaluate(() => {
+    const note = document.querySelector('.note.marble-open');
+    const [name, first] = note.children;
+    for (const el of [...note.children].slice(2)) el.remove();
+    name.textContent = 'Essay · 6 words';
+    first.textContent = 'one two three four five';
+    const quote = document.createElement('blockquote');
+    quote.textContent = 'a prompt that is not counted at all';
+    note.insertBefore(quote, first);
+  });
+  assert.equal(await count(), '5 / 6 words');
+  assert.equal(await wc.getAttribute('data-over'), null);
+
+  await caretToEndOf(page, 2);
+  await page.keyboard.type(' six seven');
+  assert.equal(await count(), '7 / 6 words');
+  assert.equal(await wc.getAttribute('data-over'), '', 'over the limit, it says so');
+
+  await select(page, 2, 0, 2, 7);
+  assert.equal(await count(), '2 of 7 words selected');
+
+  // Nothing of it reaches the file.
+  assert.doesNotMatch(await filed(page), /class="wc"[^>]*>\d/);
+  assert.deepEqual(errors, []);
+});
+
 // ---------------------------------------------------------------- the phone
 //
 // A note is the thing you type into with a keyboard up, so the keyboard is not

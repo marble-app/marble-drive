@@ -561,6 +561,26 @@ __ICON__
   .note[data-view] > :nth-child(2) { color: var(--muted); font-size: .95rem; }
 </style>
 <style>
+  /* ------------------------------------------------------------- the count
+
+     How long the open note is, in the corner. The first line is the note's
+     name and a quote is somebody else's words, so neither is counted: what is
+     counted is what you wrote. A name that says "200 words" is a limit, and
+     the count turns when the note goes past it. A selection is counted on its
+     own. It is a reading of the page, so it is transient and never filed. */
+  .wc {
+    position: sticky; bottom: .9rem; z-index: 5; align-self: flex-start;
+    margin: 0 0 .9rem 1.6rem; padding: .2rem .65rem; border-radius: var(--pill);
+    background: var(--paper-2); color: var(--faint); box-shadow: var(--shadow);
+    font: 500 .75rem/1.5 var(--ui); font-variant-numeric: tabular-nums;
+    pointer-events: none; transition: color var(--t) var(--ease);
+  }
+  .wc:empty { display: none; }
+  .wc[data-over] { color: var(--danger); }
+  @container app (max-width: 42rem) { .wc { margin-left: 1rem; } }
+  @media print { .wc { display: none !important; } }
+</style>
+<style>
   /* -------------------------------------------------------------- a table
 
      A block in a note that is not text. `data-embed` tells the note's editor
@@ -768,6 +788,7 @@ __ICON__
     </article>
 
   </div>
+  <p class="wc" data-marble-transient></p>
 </main>
 
 <script>
@@ -3827,6 +3848,42 @@ __ICON__
     };
     if (window.marble) begin(window.marble);
     else addEventListener('marble:ready', (event) => begin(event.detail), { once: true });
+  })();
+</script>
+
+<script>
+  // The count in the corner. A reading of the open note, redrawn whenever the
+  // notes or the selection move, and never written anywhere.
+  (() => {
+    const notes = document.getElementById('notes');
+    const wc = document.querySelector('.wc');
+    if (!notes || !wc) return;
+    const words = (s) => (s.match(/[\p{L}\p{N}][\p{L}\p{N}'’._-]*/gu) || []).length;
+    const open = () =>
+      notes.querySelector(':scope > .note.marble-open') ??
+      notes.querySelector(':scope > .note:not([hidden])');
+    let queued = false;
+    const draw = () => {
+      queued = false;
+      const note = open();
+      // A page that is only read is not something being written.
+      if (!note || note.hasAttribute('data-view')) { wc.textContent = ''; return; }
+      const [name, ...rest] = [...note.children];
+      const limit = Number((name?.textContent.match(/(\d[\d,]*)\s*words?\b/i)?.[1] ?? '').replace(/,/g, '')) || 0;
+      const n = rest.filter((b) => b.tagName !== 'BLOCKQUOTE').reduce((t, b) => t + words(b.textContent), 0);
+      const sel = getSelection();
+      const picked = sel && !sel.isCollapsed && note.contains(sel.anchorNode) ? words(sel.toString()) : 0;
+      wc.textContent = picked
+        ? picked + ' of ' + n + ' words selected'
+        : limit ? n + ' / ' + limit + ' words' : n + (n === 1 ? ' word' : ' words');
+      wc.toggleAttribute('data-over', limit > 0 && n > limit);
+    };
+    const soon = () => { if (!queued) { queued = true; requestAnimationFrame(draw); } };
+    new MutationObserver(soon).observe(notes, {
+      subtree: true, childList: true, characterData: true, attributes: true, attributeFilter: ['class'],
+    });
+    document.addEventListener('selectionchange', soon);
+    draw();
   })();
 </script>
 
