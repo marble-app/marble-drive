@@ -333,6 +333,16 @@ __ICON__
 
   .note b { font-weight: 650; }
   .note u { text-underline-offset: .18em; }
+  /* A link is a mark like the others: the words stay the words, in the
+     accent. The pointer is still a text cursor, because a click in a note
+     puts the caret there — the box under it is where it opens. */
+  .note a {
+    color: var(--accent-ink); text-decoration: underline;
+    text-decoration-color: color-mix(in srgb, currentColor 40%, transparent);
+    text-underline-offset: .18em; overflow-wrap: anywhere;
+  }
+  .note a:hover { text-decoration-color: currentColor; }
+  .note[data-view] a { cursor: pointer; }
 
   /* ------------------------------------------------------------- narrow
 
@@ -397,7 +407,7 @@ __ICON__
     html { padding: 0; }
     html, body.app { height: auto; }
     body.app { display: block; }
-    .rail, .marble-status, .tools { display: none !important; }
+    .rail, .marble-status, .tools, .linkbox { display: none !important; }
     .sheet, .notes { display: block; overflow: visible; }
     /* The page margins are the printer's now, and the half screen of room
        under the last line would come out as a blank page. Paper reads a size
@@ -483,6 +493,45 @@ __ICON__
   }
   @container app (max-width: 42rem) {
     .tools { padding-inline: .5rem; }
+  }
+
+  /* The link under the caret: where it goes, and the two things you can do
+     to it. The same box takes an address when a link is being made. */
+  .linkbox {
+    position: fixed; z-index: 5; display: flex; align-items: center; gap: .2rem;
+    max-width: calc(100vw - 1rem); padding: .3rem;
+    background: var(--card); color: var(--ink);
+    border: 1px solid var(--line); border-radius: var(--r); box-shadow: var(--shadow);
+    font: 500 .82rem/1 var(--ui);
+  }
+  .linkbox[hidden] { display: none; }
+  .linkbox[data-mode="view"] .lb-edit, .linkbox[data-mode="edit"] .lb-view { display: none; }
+  .lb-view, .lb-edit { display: flex; align-items: center; gap: .2rem; min-width: 0; margin: 0; }
+  .lb-url {
+    min-width: 0; max-width: 18rem; padding: 0 .5rem;
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+    color: var(--accent-ink); text-decoration: none;
+  }
+  .lb-url:hover { text-decoration: underline; }
+  .lb-btn {
+    flex: none; height: 1.9rem; padding: 0 .6rem; border: 0; border-radius: var(--r-sm);
+    background: none; color: var(--muted); font: inherit; cursor: pointer;
+    transition: background var(--t) var(--ease), color var(--t) var(--ease);
+  }
+  .lb-btn:hover { background: var(--paper-2); color: var(--ink); }
+  .lb-go { background: var(--paper-2); color: var(--ink); }
+  .lb-go:hover { background: var(--paper-3); }
+  .lb-in {
+    width: min(17rem, 60vw); height: 1.9rem; padding: 0 .6rem;
+    border: 1px solid var(--line); border-radius: var(--r-sm);
+    background: var(--paper); color: var(--ink); font: 400 .85rem/1 var(--ui);
+  }
+  .lb-in::placeholder { color: var(--placeholder); }
+  .lb-in:focus { outline: none; border-color: var(--accent-ink); }
+  .lb-in[aria-invalid="true"] { border-color: var(--danger); }
+  @media (hover: none), (pointer: coarse) {
+    .lb-btn, .lb-in { height: 2.5rem; }
+    .lb-in { font-size: 1rem; }
   }
 </style>
 <style>
@@ -712,9 +761,10 @@ __ICON__
 <p data-marble-id="__ID__" data-marble-rich data-list="check">And again to untick it.</p>
 <h4 data-marble-id="__ID__" data-marble-rich>Marks and notes</h4>
 <p data-marble-id="__ID__" data-marble-rich data-list="number"><b>Ctrl+B</b>, <b>Ctrl+I</b>, <b>Ctrl+U</b> and <b>Ctrl+Shift+X</b> mark whatever is selected; <b>Ctrl+\</b> clears it.</p>
+<p data-marble-id="__ID__" data-marble-rich data-list="number"><b>Ctrl+K</b> makes a link of whatever is selected, and an address pasted or typed becomes one by itself. Put the caret in a link to open, change or remove it.</p>
 <p data-marble-id="__ID__" data-marble-rich data-list="number"><b>Ctrl+Enter</b> starts a new note. <b>Ctrl+Alt+↑</b> and <b>↓</b> walk to the note above or below. <b>Ctrl+Shift+\</b> folds the list away and brings it back.</p>
 <p data-marble-id="__ID__" data-marble-rich data-list="number"><b>Ctrl+Z</b> takes back the last change, whoever made it — you, an agent, or another window.</p>
-<p data-marble-id="__ID__" data-marble-rich>The page is one field rather than a column of boxes, so a drag highlights across paragraphs and <b>Ctrl+A</b> takes the whole note. Paste arrives as plain text, with its line breaks kept.</p>
+<p data-marble-id="__ID__" data-marble-rich>The page is one field rather than a column of boxes, so a drag highlights across paragraphs and <b>Ctrl+A</b> takes the whole note. Paste arrives as plain text, with its line breaks kept and its addresses made links.</p>
     </article>
 
   </div>
@@ -869,12 +919,67 @@ __ICON__
 
       // ------------------------------------------------- the inline vocabulary
       //
-      // Everything the editor is allowed to put between the tags of a block, and
-      // it is four tags. A contenteditable will happily produce far more given a
+      // Everything the editor is allowed to put between the tags of a block: four
+      // marks and a link. A contenteditable will happily produce far more given a
       // paste or a stray shortcut, so what comes out is filtered down to this on
       // the way into the file rather than trusted on the way out of the browser.
 
-      const KEEP = new Set(['B', 'I', 'U', 'S', 'BR']);
+      const KEEP = new Set(['B', 'I', 'U', 'S', 'BR', 'A']);
+      // What each may carry. A mark carries nothing; a link carries where it goes.
+      const CARRY = { A: ['href'] };
+
+      // Where a link may go: the web and mail. Anything that runs code when it is
+      // followed is refused, and an address typed without its scheme is given
+      // the one a person meant.
+      function safeHref(raw) {
+        const text = String(raw ?? '').trim();
+        if (!text || /\s/.test(text)) return null;
+        const guess =
+          /^[a-z][a-z0-9+.-]*:/i.test(text) ? text :
+          /^[^@/]+@[^@/]+\.[a-z]{2,}$/i.test(text) ? 'mailto:' + text :
+          /^(www\.)?[a-z0-9-]+(\.[a-z0-9-]+)*\.[a-z]{2,}(:\d+)?([/?#]|$)/i.test(text) ? 'https://' + text :
+          null;
+        if (!guess) return null;
+        try {
+          const url = new URL(guess);
+          return ['http:', 'https:', 'mailto:'].includes(url.protocol) ? guess : null;
+        } catch {
+          return null;
+        }
+      }
+
+      // What tidying refuses: a link that would run something. A relative
+      // address — another document in the drive — is kept.
+      const unsafe = (value) => !value || /^\s*(javascript:|vbscript:|data:)/i.test(value);
+
+      // An address in running text, stopping short of the full stop or the
+      // bracket that closes the sentence around it.
+      const URLS = /\b(?:https?:\/\/|www\.)[^\s<>"]*[^\s<>".,;:!?'")\]}]/gi;
+
+      // Plain text with its addresses turned into links.
+      function linked(text) {
+        const out = document.createDocumentFragment();
+        let last = 0;
+        for (const found of text.matchAll(URLS)) {
+          const href = safeHref(found[0]);
+          if (!href) continue;
+          if (found.index > last) out.append(text.slice(last, found.index));
+          const a = document.createElement('a');
+          a.setAttribute('href', href);
+          a.textContent = found[0];
+          out.append(a);
+          last = found.index + found[0].length;
+        }
+        if (last < text.length) out.append(text.slice(last));
+        return out;
+      }
+
+      // The one address pasted on its own, if that is what was pasted.
+      function soleUrl(text) {
+        const one = String(text ?? '').trim();
+        if (!one || /\s/.test(one) || !/^(https?:\/\/|www\.|mailto:)/i.test(one)) return null;
+        return safeHref(one);
+      }
 
       function tidy(el) {
         let changed = false;
@@ -892,8 +997,9 @@ __ICON__
           }
 
           // A span with a colour on it, a font tag, a pasted <div>: the words
-          // stay and the dressing goes. This note has no colours to keep.
-          if (!KEEP.has(tag)) {
+          // stay and the dressing goes. This note has no colours to keep. A link
+          // that goes nowhere a link may go is dressing too.
+          if (!KEEP.has(tag) || (tag === 'A' && unsafe(node.getAttribute('href')))) {
             node.replaceWith(...node.childNodes);
             changed = true;
             continue;
@@ -915,7 +1021,9 @@ __ICON__
             continue;
           }
 
+          const carried = CARRY[tag] ?? [];
           for (const name of [...node.getAttributeNames()]) {
+            if (carried.includes(name)) continue;
             node.removeAttribute(name);
             changed = true;
           }
@@ -1625,12 +1733,14 @@ __ICON__
       // what a note wants anyway, and it is the only paste that cannot put
       // something in the file that nothing here can edit — but plain text has
       // lines in it, and they arrive as lines.
+      //
+      // The addresses in it arrive as links.
       function pasteText(text) {
         const lines = text.replace(/\r\n?/g, '\n').split('\n');
         const sel = getSelection();
         if (!sel || !sel.rangeCount || !flow.contains(sel.anchorNode)) return;
         if (!sel.isCollapsed) document.execCommand('delete');
-        if (lines.length === 1) {
+        if (lines.length === 1 && !text.match(URLS)) {
           document.execCommand('insertText', false, lines[0]);
           return;
         }
@@ -1638,25 +1748,153 @@ __ICON__
         settle();
         const range = getSelection().getRangeAt(0);
         const el = blockOf(range.startContainer);
-        if (!el) return;
+        const mark = markRange();
+        if (!el || !mark) return;
+
+        if (lines.length === 1) {
+          range.insertNode(linked(lines[0]));
+          tidyUp();
+          file(false);
+          place(el, mark.a.offset + lines[0].length);
+          return;
+        }
+
         const tail = range.cloneRange();
         tail.setEnd(el, el.childNodes.length);
         const rest = shape(el, 'body', tail.extractContents());
-        range.insertNode(document.createTextNode(lines[0]));
+        range.insertNode(linked(lines[0]));
 
         let after = el;
         for (const line of lines.slice(1, -1)) {
-          const made = shape(el, 'body', document.createTextNode(line));
+          const made = shape(el, 'body', linked(line));
           after.after(made);
           after = made;
         }
         const ending = lines[lines.length - 1];
-        rest.prepend(document.createTextNode(ending));
+        rest.prepend(linked(ending));
         after.after(rest);
 
         tidyUp();
         file(false);
         place(rest, ending.length);
+      }
+
+      // ------------------------------------------------------------- links
+      //
+      // A link is a mark with somewhere to go. It is made the ways the other
+      // marks are — around what is selected — and two more ways besides: an
+      // address pasted or typed becomes one on its own.
+
+      const linkOf = (node) => {
+        const a = (node?.nodeType === Node.TEXT_NODE ? node.parentElement : node)?.closest?.('a');
+        return a && flow?.contains(a) ? a : null;
+      };
+
+      // The link the caret, or the whole selection, is inside.
+      function linkAt() {
+        const sel = getSelection();
+        if (!flow || !sel || !sel.rangeCount || !flow.contains(sel.anchorNode)) return null;
+        const range = sel.getRangeAt(0);
+        const a = linkOf(range.startContainer);
+        return a && a === linkOf(range.endContainer) ? a : null;
+      }
+
+      // `href` null takes the link off. Everything else puts one on: over the
+      // link the caret is in, around what is selected, or — with nothing
+      // selected — as the address itself, written in at the caret.
+      function link(href, mark, text) {
+        if (!mark) return;
+        change(() => {
+          putRange(mark);
+          const sel = getSelection();
+          const range = sel.getRangeAt(0);
+          const inside = linkAt();
+          if (inside) {
+            if (href) inside.setAttribute('href', href);
+            else inside.replaceWith(...inside.childNodes);
+            return mark;
+          }
+          if (!href) {
+            for (const el of chosen()) {
+              for (const a of [...el.querySelectorAll('a')]) {
+                if (sel.isCollapsed || range.intersectsNode(a)) a.replaceWith(...a.childNodes);
+              }
+            }
+            return mark;
+          }
+          if (sel.isCollapsed) {
+            const a = document.createElement('a');
+            a.setAttribute('href', href);
+            a.textContent = text || href;
+            range.insertNode(a);
+            const end = { at: mark.a.at, offset: mark.a.offset + a.textContent.length };
+            return { a: end, b: end };
+          }
+          for (const { el, from, to } of runs()) {
+            const part = rangeIn(el, from, to);
+            const held = document.createElement('a');
+            held.setAttribute('href', href);
+            const cut = part.extractContents();
+            for (const old of [...cut.querySelectorAll('a')]) old.replaceWith(...old.childNodes);
+            held.append(cut);
+            part.insertNode(held);
+          }
+          return mark;
+        });
+      }
+
+      // An address pasted on its own. Over a selection it links the selection;
+      // anywhere else it is a link written in at the caret.
+      function pasteLink(href, text) {
+        const sel = getSelection();
+        if (!sel || !sel.rangeCount || !flow.contains(sel.anchorNode)) return;
+        const mark = markRange();
+        if (!sel.isCollapsed && !sel.toString().includes('\n')) return link(href, mark);
+        if (!sel.isCollapsed) document.execCommand('delete');
+        link(href, markRange(), text);
+      }
+
+      // An address typed and followed by a space or Enter becomes a link, the
+      // way it would in a message.
+      function autolink() {
+        const sel = getSelection();
+        if (!sel?.isCollapsed || !flow.contains(sel.anchorNode) || linkOf(sel.anchorNode)) return false;
+        const el = blockOf(sel.anchorNode);
+        const mark = markRange();
+        if (!el || !mark) return false;
+        const head = marble.text(el).slice(0, mark.a.offset);
+        const found = /(?:^|\s)((?:https?:\/\/|www\.)\S+)$/i.exec(head);
+        if (!found) return false;
+        const word = found[1].replace(/[.,;:!?'")\]}]+$/, '');
+        const href = safeHref(word);
+        if (!href) return false;
+        const from = head.length - found[1].length;
+        if (rangeIn(el, from, from + word.length).cloneContents().querySelector('a')) return false;
+        change(() => {
+          const part = rangeIn(el, from, from + word.length);
+          const a = document.createElement('a');
+          a.setAttribute('href', href);
+          a.append(part.extractContents());
+          part.insertNode(a);
+          return mark;
+        });
+        return true;
+      }
+
+      // The link whose last character the caret stands after. Typing there goes
+      // on after the link rather than into it, as it does in any editor: the
+      // address you pasted is not lengthened by the sentence that follows it.
+      function endOf(node, offset) {
+        const a = linkOf(node);
+        if (!a) return null;
+        const rest = document.createRange();
+        try {
+          rest.setStart(node, offset);
+          rest.setEnd(a, a.childNodes.length);
+        } catch {
+          return null;
+        }
+        return rest.toString() ? null : a;
       }
 
       // ---------------------------------------------------- moving between notes
@@ -2156,6 +2394,7 @@ __ICON__
         outdent: '<path d="M11 6.5h9M11 12h9M11 17.5h9"/><path d="M7.5 9 4.5 12l3 3"/>',
         indent: '<path d="M11 6.5h9M11 12h9M11 17.5h9"/><path d="M4.5 9l3 3-3 3"/>',
         clear: '<path d="M5 5.5h10M10 5.5v12"/><path d="M14.5 14l5 5M19.5 14l-5 5"/>',
+        link: '<path d="M10.2 13.8a3.6 3.6 0 0 0 5.1 0l3.2-3.2a3.6 3.6 0 0 0-5.1-5.1l-1.1 1.1"/><path d="M13.8 10.2a3.6 3.6 0 0 0-5.1 0l-3.2 3.2a3.6 3.6 0 0 0 5.1 5.1l1.1-1.1"/>',
       };
       const svg = (name) =>
         '<svg viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">' + ICON[name] + '</svg>';
@@ -2170,6 +2409,7 @@ __ICON__
         ['mark', 'italic', '<i>I</i>', 'Italic', KEY('Mod', 'I')],
         ['mark', 'underline', '<u>U</u>', 'Underline', KEY('Mod', 'U')],
         ['mark', 'strike', '<s>S</s>', 'Strikethrough', KEY('Mod', 'Shift', 'X')],
+        ['link', 'link', svg('link'), 'Link', KEY('Mod', 'K') + '  or paste an address'],
         null,
         ['list', 'bullet', svg('bullet'), 'Bulleted list', KEY('Mod', 'Shift', '8') + '  or  - space'],
         ['list', 'number', svg('number'), 'Numbered list', KEY('Mod', 'Shift', '7') + '  or  1. space'],
@@ -2186,6 +2426,7 @@ __ICON__
         style: (name) => restyle(styleOf(chosen()[0]) === name ? 'body' : name),
         mark: (name) => markUp(name),
         list: (name) => toggleList(name),
+        link: () => editLink(),
         cmd: (name) =>
           name === 'rule' ? addRule() : name === 'clear' ? clearAll() : indent(name === 'indent' ? 1 : -1),
       };
@@ -2268,6 +2509,7 @@ __ICON__
           const lit =
             kind === 'style' ? style === name :
             kind === 'list' ? els.length > 0 && els.every((el) => listOf(el) === name) :
+            kind === 'link' ? Boolean(linkAt()) :
             markedHere(name);
           b.setAttribute('aria-pressed', String(lit));
         }
@@ -2280,8 +2522,141 @@ __ICON__
         requestAnimationFrame(() => {
           lighting = false;
           lights();
+          viewLink();
         });
       });
+
+      // ----------------------------------------------------------- the link box
+      //
+      // With the caret in a link, where it goes is shown under it, with the way
+      // to open it, change it or take it off. Making a link opens the same box
+      // on a field for the address. It is the page's and never the file's; the
+      // link itself is filed by link(), through change(), like every mark.
+
+      const box = document.createElement('div');
+      box.className = 'linkbox';
+      box.hidden = true;
+      box.setAttribute('data-marble-transient', '');
+      box.setAttribute('role', 'dialog');
+      box.setAttribute('aria-label', 'Link');
+      box.innerHTML =
+        '<div class="lb-view">' +
+          '<a class="lb-url" target="_blank" rel="noopener noreferrer"></a>' +
+          '<button type="button" class="lb-btn" data-do="edit">Edit</button>' +
+          '<button type="button" class="lb-btn" data-do="unlink">Remove</button>' +
+        '</div>' +
+        '<form class="lb-edit">' +
+          '<input class="lb-in" type="text" inputmode="url" autocomplete="off" spellcheck="false" placeholder="Paste or type a link" aria-label="Link address">' +
+          '<button type="submit" class="lb-btn lb-go">Apply</button>' +
+        '</form>';
+      sheet.append(box);
+      const boxUrl = box.querySelector('.lb-url');
+      const boxIn = box.querySelector('.lb-in');
+      let editing = null;
+      let showing = null;
+
+      function hang(rect) {
+        box.hidden = false;
+        const w = box.offsetWidth;
+        const h = box.offsetHeight;
+        const left = Math.max(8, Math.min(rect.left, innerWidth - w - 8));
+        const below = rect.bottom + 6;
+        box.style.left = left + 'px';
+        box.style.top = (below + h > innerHeight - 8 ? Math.max(8, rect.top - h - 6) : below) + 'px';
+      }
+
+      const closeBox = () => {
+        box.hidden = true;
+        editing = null;
+        showing = null;
+        boxIn.removeAttribute('aria-invalid');
+      };
+
+      // With the caret in a link: where it goes.
+      function viewLink() {
+        if (editing) return;
+        const sel = getSelection();
+        const a = sel?.isCollapsed ? linkAt() : null;
+        if (!a || isView(flow)) return closeBox();
+        if (showing === a && !box.hidden) return;
+        showing = a;
+        const href = a.getAttribute('href');
+        boxUrl.href = href;
+        boxUrl.textContent = href.replace(/^mailto:/, '');
+        boxUrl.title = 'Open ' + href;
+        box.dataset.mode = 'view';
+        hang(a.getBoundingClientRect());
+      }
+
+      // Making one, or changing the one the caret is in.
+      function editLink() {
+        if (!flow || isView(flow)) return;
+        settle();
+        const mark = markRange() ?? (here?.isConnected ? { a: { at: at(here), offset: marble.text(here).length }, b: { at: at(here), offset: marble.text(here).length } } : null);
+        if (!mark) return;
+        putRange(mark);
+        const a = linkAt();
+        editing = { mark, had: Boolean(a) };
+        showing = null;
+        boxIn.value = a?.getAttribute('href') ?? '';
+        boxIn.removeAttribute('aria-invalid');
+        box.dataset.mode = 'edit';
+        const range = getSelection().getRangeAt(0);
+        const rect = a?.getBoundingClientRect() ?? range.getClientRects()[0] ?? blockAt(mark.a.at).getBoundingClientRect();
+        hang(rect);
+        boxIn.focus();
+        boxIn.select();
+      }
+
+      box.querySelector('.lb-edit').addEventListener('submit', (event) => {
+        event.preventDefault();
+        if (!editing) return;
+        const raw = boxIn.value.trim();
+        const href = raw ? safeHref(raw) : null;
+        if (raw && !href) {
+          boxIn.setAttribute('aria-invalid', 'true');
+          return;
+        }
+        const { mark, had } = editing;
+        closeBox();
+        if (!href && !had) return putRange(mark);
+        link(href, mark, raw);
+      });
+
+      boxIn.addEventListener('keydown', (event) => {
+        if (event.key !== 'Escape') return;
+        event.preventDefault();
+        event.stopPropagation();
+        const mark = editing?.mark;
+        closeBox();
+        if (mark) putRange(mark);
+      });
+      boxIn.addEventListener('input', () => boxIn.removeAttribute('aria-invalid'));
+
+      // A press on the box does not take the caret out of the link it is about.
+      box.addEventListener('mousedown', (event) => {
+        if (box.dataset.mode === 'view') event.preventDefault();
+      });
+      box.addEventListener('click', (event) => {
+        const b = event.target.closest('[data-do]');
+        if (!b) return;
+        if (b.dataset.do === 'edit') return editLink();
+        const mark = markRange();
+        closeBox();
+        link(null, mark);
+      });
+
+      document.addEventListener('mousedown', (event) => {
+        if (box.hidden || box.contains(event.target)) return;
+        if (editing) closeBox();
+      }, true);
+      sheet.addEventListener('scroll', () => {
+        if (editing) return;
+        if (showing) {
+          showing = null;
+          viewLink();
+        }
+      }, { passive: true });
 
 
       // -------------------------------------------------------- searching them
@@ -2341,7 +2716,33 @@ __ICON__
       notes.addEventListener('paste', (event) => {
         if (inEmbed(event.target)) return;
         event.preventDefault();
-        pasteText(event.clipboardData?.getData('text/plain') ?? '');
+        const text = event.clipboardData?.getData('text/plain') ?? '';
+        const href = soleUrl(text);
+        if (href) return pasteLink(href, text.trim());
+        pasteText(text);
+      });
+
+      // Typing just after a link goes on after it, not into it.
+      notes.addEventListener('beforeinput', (event) => {
+        if (event.inputType !== 'insertText' || !event.data || event.isComposing) return;
+        if (!flow || isView(flow) || inEmbed(event.target)) return;
+        const sel = getSelection();
+        if (!sel?.isCollapsed || !flow.contains(sel.anchorNode)) return;
+        const a = endOf(sel.anchorNode, sel.anchorOffset);
+        if (!a) return;
+        event.preventDefault();
+        let node = a.nextSibling;
+        if (node?.nodeType === Node.TEXT_NODE) node.insertData(0, event.data);
+        else {
+          node = document.createTextNode(event.data);
+          a.after(node);
+        }
+        const range = document.createRange();
+        range.setStart(node, event.data.length);
+        sel.removeAllRanges();
+        sel.addRange(range);
+        tidyUp();
+        file(true);
       });
 
       notes.addEventListener('mousedown', (event) => {
@@ -2355,7 +2756,16 @@ __ICON__
         tick(el);
       });
 
-      notes.addEventListener('click', () => {
+      // A click in a note puts the caret there, so a link opens from the box
+      // under it, or at once with Ctrl or Cmd held. A note that is only read
+      // has no caret to put, and a click on a link simply opens it.
+      notes.addEventListener('click', (event) => {
+        const a = event.target.closest?.('a[href]');
+        if (a && flow?.contains(a) && (isView(flow) || event.metaKey || event.ctrlKey)) {
+          event.preventDefault();
+          window.open(a.href, '_blank', 'noopener');
+          return;
+        }
         const el = chosen()[0];
         if (isText(el)) here = el;
       });
@@ -2408,14 +2818,21 @@ __ICON__
         // the embed's.
         if (inEmbed(event.target)) return;
 
+        if (mod && !event.altKey && !event.shiftKey && event.key.toLowerCase() === 'k') {
+          event.preventDefault();
+          return editLink();
+        }
+
         if (event.key === 'Enter' && !event.shiftKey && !mod) {
           event.preventDefault();
           if (rule()) return;
+          autolink();
           return split();
         }
 
         if (event.key === ' ' && !mod && !event.altKey) {
           if (marker()) event.preventDefault();
+          else autolink();
           return;
         }
 

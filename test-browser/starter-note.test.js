@@ -452,6 +452,76 @@ test('a paste arrives as plain lines, each its own addressed block', async () =>
   assert.deepEqual(errors, []);
 });
 
+// ---------------------------------------------------------------- links
+
+const paste = (page, text) =>
+  page.evaluate((text) => {
+    const data = new DataTransfer();
+    data.setData('text/plain', text);
+    document.querySelector('.note.marble-open')
+      .dispatchEvent(new ClipboardEvent('paste', { bubbles: true, cancelable: true, clipboardData: data }));
+  }, text);
+
+const anchors = (page) =>
+  page.evaluate(() =>
+    [...document.querySelectorAll('.note.marble-open a')].map((a) => ({ href: a.getAttribute('href'), text: a.textContent })));
+
+test('Mod+K links the selection, the box under it opens, changes and removes it', async () => {
+  const { page, errors } = await open();
+  await select(page, 1, 0, 1, 5);
+  await page.keyboard.press('ControlOrMeta+k');
+  const box = page.locator('.linkbox');
+  await box.locator('.lb-in').waitFor();
+  assert.equal(await box.getAttribute('data-mode'), 'edit');
+  // Only the web and mail: anything that would run is refused in the field.
+  await box.locator('.lb-in').fill('javascript:alert(1)');
+  await box.locator('.lb-in').press('Enter');
+  assert.equal(await box.locator('.lb-in').getAttribute('aria-invalid'), 'true');
+  // An address typed without its scheme is given the one a person meant.
+  await box.locator('.lb-in').fill('example.com');
+  await box.locator('.lb-in').press('Enter');
+  await page.waitForTimeout(200);
+  assert.deepEqual(await anchors(page), [{ href: 'https://example.com', text: 'There' }]);
+  assert.match(await filed(page), /<a href="https:\/\/example\.com">There<\/a> is no save button/);
+
+  // The caret in the link shows where it goes.
+  await page.locator('.note.marble-open a').click();
+  await page.waitForTimeout(150);
+  assert.equal(await box.isVisible(), true);
+  assert.equal(await box.getAttribute('data-mode'), 'view');
+  assert.equal(await box.locator('.lb-url').textContent(), 'https://example.com');
+  assert.equal(await page.locator('.tool[data-kind="link"]').getAttribute('aria-pressed'), 'true', 'the chain in the toolbar is lit');
+
+  await box.locator('[data-do="unlink"]').click();
+  await page.waitForTimeout(200);
+  assert.deepEqual(await anchors(page), []);
+  assert.doesNotMatch(await filed(page), /<a href="https:\/\/example\.com">/);
+  assert.deepEqual(errors, []);
+});
+
+test('an address pasted over words links them; pasted or typed on its own, it is a link', async () => {
+  const { page, errors } = await open();
+  await select(page, 1, 0, 1, 5);
+  await paste(page, 'https://example.org/a');
+  await page.waitForTimeout(200);
+  assert.deepEqual(await anchors(page), [{ href: 'https://example.org/a', text: 'There' }]);
+
+  await caretToEndOf(page, 2);
+  await paste(page, ' see https://example.net/b.');
+  await page.waitForTimeout(200);
+  assert.deepEqual((await anchors(page))[1], { href: 'https://example.net/b', text: 'https://example.net/b' });
+
+  // Typed, then a space: a link, and what follows it stays outside it.
+  await caretToEndOf(page, 3);
+  await page.keyboard.type(' www.example.com and after');
+  await page.waitForTimeout(250);
+  const typed = (await anchors(page)).at(-1);
+  assert.deepEqual(typed, { href: 'https://www.example.com', text: 'www.example.com' });
+  const source = await filed(page);
+  assert.match(source, /<a href="https:\/\/www\.example\.com">www\.example\.com<\/a> and after/);
+  assert.deepEqual(errors, []);
+});
+
 // ---------------------------------------------------------------- the phone
 //
 // A note is the thing you type into with a keyboard up, so the keyboard is not
