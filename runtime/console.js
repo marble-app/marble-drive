@@ -19,7 +19,7 @@
   window.marbleConsoleReady = { redraw: () => { drawn.clear(); paint(); } };
 
   const TRANSIENT = 'data-marble-transient';
-  const VIEWS = [['dashboard', 'Dashboard'], ['drives', 'Drives'], ['ship', 'Ship'], ['workshop', 'Workshop'], ['activity', 'Activity']];
+  const VIEWS = [['dashboard', 'Dashboard'], ['drives', 'Drives'], ['backups', 'Backups'], ['ship', 'Ship'], ['workshop', 'Workshop'], ['activity', 'Activity']];
   const LIMITS = [
     ['MARBLE_DRIVE_TAB_HIDDEN_SECONDS', 'A hidden tab rests after', 's', 60],
     ['MARBLE_DRIVE_TAB_IDLE_MINUTES', 'An idle tab rests after', 'min', 10],
@@ -103,6 +103,11 @@
     usageStale: false,
     tables: new Set(store.get('tables', [])),
     heatFor: store.get('heatFor', 'all'),
+    // The Mac's backups (server/console/backups.js): its reports, and when this
+    // page opened, so a Mac that has not checked in yet is not called missing.
+    backups: [],
+    openedAt: Date.now(),
+    allSnapshots: false,
   };
 
   // ---------------------------------------------------------------- helpers
@@ -394,6 +399,8 @@
 
   const shipPage = h('div.page');
   views.ship.append(shipPage);
+  const backupsPage = h('div.page');
+  views.backups.append(backupsPage);
   const shopPage = h('div.page');
   views.workshop.append(shopPage);
 
@@ -995,6 +1002,197 @@
       said(`remove:${d.name}`));
   }
 
+  // --------------------------------------------------------------- backups
+  //
+  // Backups kept on the owner's Mac (tools/drive-backup.sh), as the Mac last
+  // reported them. Nothing here reaches the Mac: a button leaves a request, the
+  // Mac picks it up within a minute while this drive is awake, and its next
+  // report says how it went.
+
+  const snapAt = (name) => {
+    const m = /^(\d{4})-(\d{2})-(\d{2})T(\d{2})(\d{2})(\d{2})Z$/.exec(String(name ?? ''));
+    return m ? Date.UTC(+m[1], +m[2] - 1, +m[3], +m[4], +m[5], +m[6]) : null;
+  };
+  const snapWhen = (name) => {
+    const t = snapAt(name);
+    return t ? new Date(t).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' }) : name;
+  };
+  const BACKUP_WHY = { running: 'while awake', 'asked from the Console': 'asked from here', asked: 'asked', 'first backup': 'first' };
+  const whyText = (why) => (why ? BACKUP_WHY[why] ?? (/^asleep since/.test(why) ? 'last changes before it slept' : /^woke at/.test(why) ? 'after a short wake' : why) : '');
+
+  /** What the owner should know about a drive's backups, worst first. Only
+   *  once this page has been open a few minutes: a drive that just woke has
+   *  not heard from the Mac yet, and that is not the Mac's fault. */
+  function backupWorries(r) {
+    const out = [];
+    const settled = Date.now() - S.openedAt > 3 * MIN;
+    const heard = Date.parse(r.heardAt);
+    if (r.last && !r.last.ok) out.push(['bad', `The last backup failed ${since(r.last.at)}: ${r.last.error ?? 'no reason given'}`]);
+    if (settled && S.live === 'on' && Date.now() - heard > 5 * MIN) {
+      out.push(['warn', `${r.machine} has not checked in since ${clock(heard)}. It is asleep, off, or cannot reach this drive; backups carry on when it can.`]);
+    } else if (settled && r.schedule === 'on' && r.last?.ok && Date.now() - Date.parse(r.last.at) > (r.every + 10) * MIN) {
+      out.push(['warn', `No backup since ${clock(r.last.at)}, though ${r.machine} is checking in.`]);
+    }
+    if (r.schedule === 'off') out.push(['warn', 'The schedule is off: only a backup asked for here is taken.']);
+    return out;
+  }
+
+  const requestLabel = (q) => (q.kind === 'backup' ? 'Back up now'
+    : q.kind === 'schedule' ? (q.on ? 'Turn the schedule on' : 'Turn the schedule off')
+      : q.kind === 'restore' ? `Restore ${clock(snapAt(q.snapshot))} onto ${q.target}` : q.kind);
+  // The Mac names snapshots by their UTC stamp; the page says the time.
+  const snapNames = (text) => String(text ?? '').replace(/\d{4}-\d{2}-\d{2}T\d{6}Z/g, (n) => clock(snapAt(n)));
+
+  async function askMac(key, sprite, body) {
+    try {
+      await api(`backups/${encodeURIComponent(sprite)}/request`, { method: 'POST', body });
+      const { backups } = await api('backups');
+      S.backups = backups;
+      paint();
+    } catch (err) {
+      say(key, err.message);
+    }
+  }
+
+  function drawBackups() {
+    const worries = S.backups.map((r) => backupWorries(r));
+    if (!changed('backups', [S.backups, worries, S.fleet.map((d) => d.name), S.allSnapshots, notes('backup'), S.live, S.arrived.has('backups')])) return;
+    const still = S.arrived.has('backups');
+    S.arrived.add('backups');
+    if (!S.backups.length) {
+      backupsPage.replaceChildren(h('div.page-grid', {}, h('div.card.wide', {}, h('div.card-body', {},
+        h('p.empty', { text: 'No Mac has checked in with backups yet.' }),
+        h('p.soft', { style: { 'text-align': 'center', margin: '0 0 1.5rem' }, text: 'On the Mac: macos/launchd/backup.sh install, then keep this page open for a minute.' })))));
+      return;
+    }
+    const cards = [];
+    S.backups.forEach((r, i) => cards.push(...backupCards(r, worries[i], i)));
+    backupsPage.replaceChildren(h('div.page-grid', { class: still ? 'still' : null }, cards));
+  }
+
+  function backupCards(r, worries, i) {
+    const pending = r.pending ?? [];
+    const waiting = (kind) => pending.find((q) => q.kind === kind);
+    const busy = (kind) => waiting(kind) || (r.results ?? []).find((x) => x.kind === kind && x.state === 'running');
+    const key = (what) => `backup:${r.sprite}:${what}`;
+    const snaps = r.snapshots ?? [];
+
+    const schedule = segmented([['on', 'On'], ['off', 'Off']], waiting('schedule') ? (waiting('schedule').on ? 'on' : 'off') : r.schedule,
+      (v) => { if (v !== r.schedule && !waiting('schedule')) askMac(key('schedule'), r.sprite, { kind: 'schedule', on: v === 'on' }); },
+      { small: true, busy: Boolean(waiting('schedule')), label: 'Backups on a schedule' });
+    const now = h('button.btn', {
+      type: 'button',
+      'data-busy': busy('backup') ? true : null,
+      disabled: busy('backup') ? true : null,
+      text: waiting('backup') ? 'Asked…' : busy('backup') ? 'Backing up…' : 'Back up now',
+      onclick: () => askMac(key('backup'), r.sprite, { kind: 'backup' }),
+    });
+
+    const stats = h('p.stat-line', {},
+      r.last ? h('span', {}, 'Last backup ', h('b', { text: since(r.last.at) }), r.last.ok && r.last.why ? ` · ${whyText(r.last.why)}` : null) : h('span', { text: 'No backup yet' }),
+      h('span', {}, h('b', { text: String(snaps.length) }), ' kept'),
+      r.disk?.used ? h('span', {}, h('b', { text: bytes(r.disk.used) }), ` on the Mac${r.disk.free ? `, ${bytes(r.disk.free)} free` : ''}`) : null,
+      h('span', {}, `${r.machine} checked in `, h('b', { text: since(r.heardAt) })));
+
+    const asks = pending.map((q) => h('li', {},
+      h('span.sha', { text: 'waiting' }),
+      h('span.subject', { text: requestLabel(q) }),
+      h('span', { style: { display: 'flex', gap: '.5rem', 'align-items': 'baseline' } },
+        h('span.where', { text: `asked ${since(q.at)}` }),
+        h('button.btn.quiet', { type: 'button', style: { padding: '.05rem .5rem' }, text: 'Withdraw', onclick: () => api(`backups/${encodeURIComponent(r.sprite)}/withdraw`, { method: 'POST', body: { id: q.id } }).then((x) => x && refresh()).catch((err) => say(key('withdraw'), err.message)) }))));
+    const done = (r.results ?? []).slice(0, 5).map((x) => h('li', {},
+      h('span', { class: x.state === 'failed' ? 'sha bad' : x.state === 'running' ? 'sha good' : 'sha', text: x.state === 'running' ? 'now' : x.state }),
+      h('span.subject', { title: snapNames(x.note), text: `${requestLabel(x)}${x.note ? ` — ${snapNames(x.note.split('\n').at(-1))}` : ''}` }),
+      h('span.where', { text: since(x.at) })));
+
+    const main = h('div.card.wide', { style: { '--i': String(i * 3) } },
+      h('div.card-head', {}, h('h2', { text: r.sprite }), h('span.soft', { text: `backed up to ${r.machine}, ${r.to}` }),
+        h('div.end', {}, h('span.soft', { style: { 'font-size': '.8rem', 'align-self': 'center' }, text: `Every ${r.every} min` }), schedule, now)),
+      h('div.card-body', {},
+        stats,
+        worries.map(([tone, text]) => h(`p.${tone}`, { style: { margin: '0 0 .5rem', 'font-size': '.88rem' }, text })),
+        asks.length || done.length ? h('ul.commits', {}, asks, done) : null,
+        said(key('backup')), said(key('schedule')), said(key('withdraw')), said(key('restore'))));
+
+    // Grouped the way they are kept: every one from today, then a day each,
+    // then a month each.
+    const groups = [];
+    const today = new Date().toDateString();
+    const yesterday = new Date(Date.now() - 86_400_000).toDateString();
+    for (const snap of snaps) {
+      const t = new Date(snapAt(snap.name));
+      const old = Date.now() - t.getTime() > 60 * 86_400_000;
+      const label = old ? t.toLocaleDateString([], { month: 'long', year: 'numeric' })
+        : t.toDateString() === today ? 'Today' : t.toDateString() === yesterday ? 'Yesterday'
+          : t.toLocaleDateString([], { weekday: 'short', month: 'short', day: 'numeric' });
+      if (groups.at(-1)?.label !== label) groups.push({ label, snaps: [] });
+      groups.at(-1).snaps.push(snap);
+    }
+    const LIMIT = 8;
+    let shown = 0;
+    const lists = [];
+    for (const g of groups) {
+      const room = S.allSnapshots ? g.snaps.length : Math.max(0, Math.min(g.snaps.length, LIMIT * 2 - shown));
+      if (!room) break;
+      shown += room;
+      lists.push(h('h3.snap-group', { text: g.label }), h('ul.commits.snaps', {}, g.snaps.slice(0, room).map((snap) => h('li', {},
+        h('span.sha', { text: snapWhen(snap.name) }),
+        h('span.subject', { text: [snap.documents !== null ? `${snap.documents} documents` : null, snap.added !== null ? `+${bytes(snap.added)}` : null, whyText(snap.why)].filter(Boolean).join(' · ') || snap.name }),
+        h('button.btn.quiet', { type: 'button', style: { padding: '.05rem .5rem' }, text: 'Restore…', disabled: busy('restore') ? true : null, onclick: (e) => restoreSnapshot(e.currentTarget, r, snap) })))));
+    }
+    const more = snaps.length > shown || S.allSnapshots ? h('button.btn.quiet', {
+      type: 'button',
+      text: S.allSnapshots ? 'Show fewer' : `Show all ${snaps.length}`,
+      onclick: () => { S.allSnapshots = !S.allSnapshots; paint(); },
+    }) : null;
+    const list = h('div.card.wide', { style: { '--i': String(i * 3 + 1) } },
+      h('div.card-head', {}, h('h2', { text: 'Snapshots' }), h('span.note', { text: 'every one from the last day, then one a day for 60 days, then one a month' })),
+      h('div.card-body', {}, snaps.length ? lists : h('p.soft', { text: 'None yet.' }), more));
+
+    const down = h('div.card.wide', { style: { '--i': String(i * 3 + 2) } },
+      h('div.card-head', {}, h('h2', { text: `If ${r.sprite} is down` })),
+      h('div.card-body', {},
+        h('p.soft', { style: { margin: '0 0 .25rem', 'font-size': '.88rem' }, text: `This page lives on ${r.sprite}, so it goes with it. On ${r.machine}, in the marble-drive checkout, put the newest snapshot back (on a new drive, deploy it first):` }),
+        codeLine(`tools/drive-restore.sh "${r.to.replace(/^~/, '$HOME')}/latest" ${r.sprite} --yes`)));
+    return [main, list, down];
+  }
+
+  function restoreSnapshot(trigger, r, snap) {
+    openPop(trigger, (close) => {
+      const names = [r.sprite, ...S.fleet.map((d) => d.name).filter((n) => n !== r.sprite)];
+      let target = r.sprite;
+      const select = h('select', {}, names.map((n) => h('option', { value: n, text: n === r.sprite ? `${n} (where it came from)` : n })));
+      const body = h('p.soft', { style: { 'font-size': '.85rem' } });
+      const input = h('input', { type: 'text', autocomplete: 'off', spellcheck: 'false', 'aria-label': 'Type the drive to confirm' });
+      const label = h('label');
+      const go = h('button.btn.danger.primary', { type: 'button', disabled: true });
+      const when = clock(snapAt(snap.name));
+      const redraw = () => {
+        const here = target === (S.self ?? '');
+        body.textContent = `${target}'s host stops, its drive as it is now is set aside on the sprite (kept, never deleted), the snapshot from ${when} goes in, and it starts again. ${here ? 'That is this drive: this page goes away for a few minutes and comes back on the restored drive, and any agent working here is stopped.' : ''} ${r.machine} does it, within a minute.`;
+        label.textContent = `Type ${target} to confirm`;
+        input.placeholder = target;
+        go.textContent = `Restore ${target}`;
+        go.disabled = input.value.trim() !== target;
+      };
+      select.addEventListener('change', () => { target = select.value; redraw(); });
+      input.addEventListener('input', redraw);
+      input.addEventListener('keydown', (e) => { if (e.key === 'Enter' && !go.disabled) go.click(); });
+      go.addEventListener('click', () => {
+        close();
+        askMac(`backup:${r.sprite}:restore`, r.sprite, { kind: 'restore', snapshot: snap.name, target, confirm: input.value.trim() });
+      });
+      redraw();
+      return h('div.pop-body', {},
+        h('h4', { text: `Restore the snapshot from ${when}?` }),
+        snap.documents !== null ? h('p.faint', { style: { 'font-size': '.8rem', margin: '-.2rem 0 .6rem' }, text: `${snap.documents} documents, ${since(snapAt(snap.name))}` }) : null,
+        h('div.field', {}, h('label', { text: 'Onto' }), select),
+        body,
+        h('div.field', {}, label, input),
+        h('div.foot', {}, h('button.btn.quiet', { type: 'button', text: 'Cancel', onclick: close }), go));
+    });
+  }
+
   // ------------------------------------------------------------------ ship
 
   function drawShip() {
@@ -1317,6 +1515,11 @@
     const mark = act.querySelector('.mark');
     if (anyRunning && !mark) act.append(h('span.mark', { 'aria-label': 'running' }));
     if (!anyRunning && mark) mark.remove();
+    const bk = seg.querySelector('[data-view="backups"]');
+    const bkMark = bk.querySelector('.mark');
+    const worried = S.backups.some((r) => backupWorries(r).length);
+    if (worried && !bkMark) bk.append(h('span.mark.warn', { 'aria-label': 'backups need a look' }));
+    if (!worried && bkMark) bkMark.remove();
     placeThumb();
 
     live.dataset.state = S.live === 'on' ? 'on' : 'off';
@@ -1738,6 +1941,7 @@
       drawList();
     }
     if (S.view === 'dashboard') drawDashboard();
+    if (S.view === 'backups') drawBackups();
     if (S.view === 'ship') drawShip();
     if (S.view === 'workshop') drawWorkshop();
     if (S.view === 'activity') drawActivity();
@@ -1753,6 +1957,7 @@
       S.fleetError = state.fleetError;
       S.self = state.self;
       S.workshop = state.workshop;
+      S.backups = state.backups ?? [];
       const byId = new Map(S.jobs.map((j) => [j.id, j]));
       for (const j of state.jobs) byId.set(j.id, j);
       S.jobs = [...byId.values()].sort((a, b) => b.startedAt - a.startedAt);
@@ -1794,6 +1999,10 @@
   events.addEventListener('output', (e) => {
     const { id, text } = JSON.parse(e.data);
     appendOutput(id, text);
+  });
+  events.addEventListener('backups', (e) => {
+    S.backups = JSON.parse(e.data);
+    paint();
   });
   events.addEventListener('workshop', (e) => {
     S.workshop = JSON.parse(e.data);

@@ -9,20 +9,20 @@
 
   <key>ProgramArguments</key>
   <array>
-    <string>/bin/bash</string>
-    <string>@REPO@/tools/drive-backup.sh</string>
+    <string>@NODE@</string>
+    <string>@REPO@/tools/backup-agent.mjs</string>
     <string>@SPRITE@</string>
-    <string>--if-changed</string>
   </array>
 
   <key>WorkingDirectory</key>
   <string>@REPO@</string>
 
-  <!-- Every quarter hour, and once at login. A run that finds nothing new
-       costs one API call and wakes no sprite; a Mac that slept runs once on
-       waking, not once per missed interval. -->
+  <!-- Every minute, and once at login: the agent checks in with the Console
+       while the sprite is awake and backs up every 15 minutes. A run with
+       nothing to do costs one API call and wakes no sprite; a Mac that slept
+       runs once on waking, not once per missed interval. -->
   <key>StartInterval</key>
-  <integer>900</integer>
+  <integer>60</integer>
   <key>RunAtLoad</key>
   <true/>
 

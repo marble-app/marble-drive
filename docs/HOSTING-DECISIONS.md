@@ -388,6 +388,16 @@ plus once after it sleeps. The last-word run wakes it once, which would look
 like new activity; the rule compares when it last woke with when the last
 snapshot *ended*, so its own wake never triggers another.
 
+**Controls in the Console (2026-09-27).** The owner wanted them in the drive on
+the VM. The sprite cannot reach the Mac, so the Mac does the talking: an agent
+on the Mac, every minute, reads the Console's requests and leaves a report, but
+only while the sprite is awake anyway, so no page ever wakes it and a sleeping
+drive is never woken to be told nothing. *Considered:* the controls only in a
+Console on the Mac (right for when admin-p1 is down, but the owner lives on
+admin-p1; that page shows the terminal command for that case instead);
+reaching the Mac from the sprite over Tailscale (a network to run for one
+page). Spec: `docs/superpowers/specs/2026-09-27-backups-in-console-design.md`.
+
 ## Traps worth remembering
 
 | Trap | How it showed up | Lesson |

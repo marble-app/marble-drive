@@ -14,6 +14,7 @@ import os from 'node:os';
 import path from 'node:path';
 
 import { createActions } from './actions.js';
+import { createBackups } from './backups.js';
 import { createInspector } from './inspect.js';
 import { createJobs } from './jobs.js';
 import { createSprites } from './sprites.js';
@@ -25,6 +26,8 @@ const LOOK_AWAKE_EVERY = 5 * 60_000;
 // An awake drive's ledger is read this often while a console tab is open.
 const PULL_EVERY = 60_000;
 const WORKSHOP_EVERY = 60_000;
+// The Mac checks in once a minute; its report is noticed within seconds.
+const BACKUPS_EVERY = 5_000;
 const NAME = /^[a-z0-9][a-z0-9-]{0,62}$/;
 
 const bad = (message, status = 400) => Object.assign(new Error(message), { status });
@@ -66,6 +69,7 @@ export async function createConsole({ config, store, streams = null, ledger = nu
   await jobs.ready();
   const usage = createUsage({ dir: path.join(dir, 'usage'), sprites, self, selfLedger: ledger, log });
   const workshop = createWorkshop({ src: config.consoleSrc });
+  const backups = createBackups({ dir: path.join(dir, 'backups') });
   const actions = createActions({ sprites, inspector, jobs, workshop, src: config.consoleSrc, self, stateDir: dir });
 
   // ---------------------------------------------------------------- state
@@ -152,6 +156,7 @@ export async function createConsole({ config, store, streams = null, ledger = nu
       fleetAt,
       fleetError,
       workshop: shop,
+      backups: await backups.list(),
       jobs: jobs.list().slice(0, 60),
     };
   }
@@ -213,16 +218,30 @@ export async function createConsole({ config, store, streams = null, ledger = nu
     pending.unref?.();
   }
 
+  // The Mac's report and the requests waiting for it, sent when they change.
+  let backupsTimer = null;
+  let backupsSeen = null;
+  async function backupsChanged(force = false) {
+    const sig = await backups.signature().catch(() => null);
+    if (!force && sig === backupsSeen) return;
+    backupsSeen = sig;
+    send('backups', await backups.list().catch(() => []));
+  }
+
   const watching = () => {
     if (timer || !listeners.size) return;
     timer = setInterval(tick, FLEET_EVERY);
     timer.unref?.();
+    backupsTimer = setInterval(() => backupsChanged().catch(() => {}), BACKUPS_EVERY);
+    backupsTimer.unref?.();
     tick();
   };
   const unwatching = () => {
     if (listeners.size || !timer) return;
     clearInterval(timer);
+    clearInterval(backupsTimer);
     timer = null;
+    backupsTimer = null;
   };
 
   // --------------------------------------------------------------- routes
@@ -298,6 +317,20 @@ export async function createConsole({ config, store, streams = null, ledger = nu
       }
       if (a === 'ship' && method === 'POST') return json(res, 202, await actions.ship());
 
+      if (a === 'backups') {
+        if (!b && method === 'GET') return json(res, 200, { backups: await backups.list() });
+        if (b && method === 'POST' && c === 'request') {
+          const req = await backups.request(name(b), body);
+          await backupsChanged(true);
+          return json(res, 202, req);
+        }
+        if (b && method === 'POST' && c === 'withdraw') {
+          const out = await backups.withdraw(body.id);
+          await backupsChanged(true);
+          return json(res, 200, out);
+        }
+      }
+
       if (a === 'jobs' && b) {
         if (c === 'log' && method === 'GET') return text(res, 200, await jobs.output(b));
         if (c === 'cancel' && method === 'POST') return json(res, 200, { ok: jobs.cancel(b) });
@@ -365,6 +398,7 @@ export async function createConsole({ config, store, streams = null, ledger = nu
     close() {
       if (timer) clearInterval(timer);
       if (pending) clearTimeout(pending);
+      if (backupsTimer) clearInterval(backupsTimer);
       for (const res of listeners) {
         try {
           res.end();

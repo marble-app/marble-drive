@@ -1,14 +1,16 @@
 #!/bin/zsh
-# Back a sprite's drive up to this Mac on a schedule (tools/drive-backup.sh).
+# Back a sprite's drive up to this Mac on a schedule, and answer its Console
+# (tools/backup-agent.mjs, which runs tools/drive-backup.sh).
 #
-#   macos/launchd/backup.sh install [<sprite>]   every 15 min and at login (default admin-p1)
+#   macos/launchd/backup.sh install [<sprite>]   every minute and at login (default admin-p1)
 #   macos/launchd/backup.sh status               installed? the last snapshots, the log's tail
 #   macos/launchd/backup.sh run                  one scheduled run now
 #   macos/launchd/backup.sh uninstall            stop scheduling; the backups stay
 #   macos/launchd/backup.sh logs                 follow the log
 #
-# The snapshots are in ~/Marble Backups/<sprite>/. Restoring one is
-# tools/drive-restore.sh.
+# The snapshots are in ~/Marble Backups/<sprite>/. The Console's Backups view
+# on the sprite turns the schedule on or off, backs up and restores; so does
+# tools/drive-restore.sh from here.
 
 set -u
 emulate -L zsh
@@ -27,13 +29,15 @@ case "${1:-status}" in
 
 install)
   sprite="${2:-admin-p1}"
+  # launchd inherits no PATH worth the name, and node lives under nvm here.
+  node="$(command -v node)" || { print -u2 "backup: no node on PATH"; exit 1; }
   mkdir -p "${plist:h}" "$logdir"
-  sed -e "s#@LABEL@#$label#g" -e "s#@REPO@#$repo#g" -e "s#@HOME@#$HOME#g" -e "s#@SPRITE@#$sprite#g" "$template" > "$plist"
+  sed -e "s#@LABEL@#$label#g" -e "s#@REPO@#$repo#g" -e "s#@HOME@#$HOME#g" -e "s#@SPRITE@#$sprite#g" -e "s#@NODE@#$node#g" "$template" > "$plist"
   plutil -lint "$plist" >/dev/null || { print -u2 "backup: rendered plist is not valid"; exit 1 }
   launchctl bootout "$domain/$label" 2>/dev/null
   launchctl enable "$domain/$label" 2>/dev/null
   launchctl bootstrap "$domain" "$plist" || { print -u2 "backup: launchctl bootstrap failed"; exit 1 }
-  print -r -- "backing up $sprite every 15 min into ~/Marble Backups/$sprite (log: $log)"
+  print -r -- "backing up $sprite every 15 min into ~/Marble Backups/$sprite, and checking in with its Console every minute (log: $log)"
   ;;
 
 status)
