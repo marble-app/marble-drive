@@ -69,6 +69,10 @@ __ICON__
      holds the shell between the two; both are 0 until a keyboard is up. */
   html { container: app / inline-size; padding: var(--vv-top, 0px) 0 var(--kb, 0px); }
   html, body { height: 100%; }
+  /* A screen driven by a mouse or trackpad has no keyboard to make room for,
+     so the shell always reaches the bottom of the window there, whatever a
+     script has worked out. */
+  @media (hover: hover) and (pointer: fine) { html { padding: 0; } }
   * { box-sizing: border-box; }
   button { font: inherit; color: inherit; }
   /* One drawing of each mark, referenced where it is needed. */
@@ -82,6 +86,11 @@ __ICON__
      every time it asks you to choose something first. */
   body.app {
     margin: 0; display: grid; grid-template-columns: var(--rail) minmax(0, 1fr);
+    /* The host appends its own elements to <body> — the agent setup dialog is
+       an inline custom element — and the grid would give each a row of its
+       own and split the height with it. The page's rows are the only ones
+       with height; anything else lands on a row of none. */
+    grid-template-rows: minmax(0, 1fr); grid-auto-rows: 0;
     background: var(--paper); color: var(--ink);
     font: 14px/1.5 var(--ui); -webkit-font-smoothing: antialiased;
   }
@@ -759,18 +768,31 @@ __ICON__
     // note opened straight off the disk keeps the line you are typing above the
     // keys too.
     const vv = window.visualViewport;
+    // Only a touch screen with something focused to type into has a keyboard
+    // on it. Anywhere else the same subtraction still comes out non-zero — a
+    // desktop web view's title bar or scrollbar, a zoomed page — and the shell
+    // would stop short of the bottom of the window by exactly that much.
+    const touch = matchMedia('(hover: none) and (pointer: coarse)');
+    const typing = () => {
+      const el = document.activeElement;
+      return Boolean(el && (el.isContentEditable || el.matches('input, textarea, select')));
+    };
     const insets = () => {
       if (!vv) return;
-      const top = Math.max(0, Math.round(vv.offsetTop));
+      const up = touch.matches && typing();
+      const top = up ? Math.max(0, Math.round(vv.offsetTop)) : 0;
       const style = document.documentElement.style;
       style.setProperty('--vv-top', top + 'px');
       // The layout viewport never changed, so innerHeight is still the whole
       // screen and the difference is what the keyboard took.
-      style.setProperty('--kb', Math.max(0, Math.round(innerHeight - vv.height - top)) + 'px');
+      style.setProperty('--kb', (up ? Math.max(0, Math.round(innerHeight - vv.height - top)) : 0) + 'px');
     };
     insets();
     vv?.addEventListener('resize', insets);
     vv?.addEventListener('scroll', insets);
+    addEventListener('focusin', insets);
+    addEventListener('focusout', () => setTimeout(insets));
+    touch.addEventListener?.('change', insets);
 
     const begin = (marble) => {
       const $ = (sel) => document.querySelector(sel);

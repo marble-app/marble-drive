@@ -505,6 +505,7 @@ test('the insets are written again after the file has been read back over the pa
   // reconciling the page against the file takes them off unless something puts
   // them back. An edit made in a text editor is what that looks like.
   const { page, errors } = await openPhone();
+  await caretToEndOf(page, 1);
   await raiseKeyboard(page, 336);
   const source = await filed(page);
   await host.drive.createDocument('scratch', source.replace('Keys', 'Keys and knobs'), { label: 'by hand' });
@@ -515,6 +516,41 @@ test('the insets are written again after the file has been read back over the pa
   assert.equal(s.kb, '336px', 'the reconcile took the keyboard inset off <html>');
   assert.ok(s.shell.bottom <= s.strip.bottom + 1, `the shell ends at ${s.shell.bottom}, under a keyboard that starts at ${s.strip.bottom}`);
   assert.deepEqual(errors, []);
+});
+
+test('a mouse has no keyboard: a viewport short of the window leaves no band', async () => {
+  // A desktop web view's title bar or a zoomed page makes the visual viewport
+  // shorter than the window with no keyboard anywhere near it.
+  const { page, errors } = await open();
+  await caretToEndOf(page, 1);
+  await raiseKeyboard(page, 200);
+  const s = await seen(page);
+  assert.equal(s.kb, '0px');
+  assert.equal(s.shell.bottom, 900, `the shell ends at ${s.shell.bottom} of 900`);
+  // And the stylesheet holds even if a script says otherwise.
+  await page.evaluate(() => document.documentElement.style.setProperty('--kb', '200px'));
+  assert.equal((await seen(page)).shell.bottom, 900);
+  assert.deepEqual(errors, []);
+});
+
+test('the rail and the page fill the window, whatever else the host puts in <body>', async () => {
+  for (const phone of [false, true]) {
+    const { page, errors } = phone ? await openPhone() : await open();
+    await page.evaluate(() => {
+      const extra = document.createElement('marble-agent-setup');
+      extra.setAttribute('data-marble-transient', '');
+      extra.textContent = 'injected';
+      document.body.append(extra);
+    });
+    const r = await page.evaluate(() => ({
+      rail: document.querySelector('.rail').getBoundingClientRect().toJSON(),
+      sheet: Math.round(document.querySelector('.sheet').getBoundingClientRect().bottom),
+      height: innerHeight,
+    }));
+    assert.equal(r.sheet, r.height, `${phone ? 'phone' : 'desktop'}: the page ends at ${r.sheet} of ${r.height}`);
+    if (!phone) assert.equal(Math.round(r.rail.bottom), r.height, `the rail ends at ${r.rail.bottom}`);
+    assert.deepEqual(errors, []);
+  }
 });
 
 test('a finger gets its 44, and the search field does not zoom the page', async () => {
