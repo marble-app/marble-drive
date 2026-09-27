@@ -594,27 +594,20 @@ __ICON__
      timeline row looks like itself wherever it is reused. */
   .item.trow {
     position: relative; display: flex; align-items: center; gap: .85rem;
-    padding: .5rem .6rem .5rem .1rem; border-radius: 12px;
+    padding: .45rem .7rem .45rem .45rem; margin: .3rem 0; border-radius: 12px;
   }
   .item.trow::before {
     /* One continuous spine behind every row and every header, whichever
        document is picked. A single element the height of the list rather than
        a border per row, so it reads as one thread through time and not a
        fence between entries. */
-    content: ''; position: absolute; left: -1.62rem; top: -.35rem; bottom: -.35rem; width: 2px;
+    content: ''; position: absolute; left: -1.62rem; top: -.65rem; bottom: -.65rem; width: 2px;
     background: var(--line);
   }
   .item.trow:hover { background: var(--paper-3); }
   .item.trow .tdot {
     position: absolute; left: -1.87rem; width: .55rem; height: .55rem; border-radius: 999px;
     background: var(--accent-ink); box-shadow: 0 0 0 3px var(--paper-2);
-  }
-  .item.trow .tdot.marble-fresh {
-    animation: pulse-dot 2.2s var(--settle) infinite;
-  }
-  @keyframes pulse-dot {
-    0%, 100% { box-shadow: 0 0 0 3px var(--paper-2), 0 0 0 3px rgba(var(--accent-ink-rgb), 0); }
-    50% { box-shadow: 0 0 0 3px var(--paper-2), 0 0 0 7px rgba(var(--accent-ink-rgb), .28); }
   }
   .item.trow .ico { flex: 0 0 auto; display: flex; color: var(--folder); }
   .item.trow[data-kind="doc"] .ico { color: var(--accent-ink); }
@@ -627,7 +620,33 @@ __ICON__
     flex: 0 0 auto; color: var(--faint); font-size: .8rem; white-space: nowrap; font-variant-numeric: tabular-nums;
   }
   .item.trow .more { position: static; opacity: .5; }
-  .item.trow .thumb { display: none; }
+  /* A row shows what the document is, not only what it is called: a small
+     live peek of the page, framed in the colour of the folder it lives in,
+     and that folder's name written in the same colour. The glyph steps aside
+     for the peek; the peek falls back to it until its frame loads. */
+  .item.trow .ico { display: none; }
+  .item.trow .thumb {
+    display: block; position: relative; flex: 0 0 auto; width: 5.6rem; height: 3.6rem;
+    border-radius: 7px; overflow: hidden; background: var(--card);
+    border: 1px solid color-mix(in srgb, var(--accent-ink) 22%, var(--line));
+    color: var(--faint); font-size: .66rem;
+  }
+  .item.trow .thumb .peek, .item.trow .thumb .fp { inset: 0; }
+  .item.trow .thumb .peek iframe { width: 1000%; height: 1000%; transform: scale(.1); }
+  .item.trow .thumb .big .glyph { width: 1.4rem; height: 1.4rem; }
+  .item.trow .thumb .mini { inset: 0; padding: .2rem; gap: .15rem; }
+  .item.trow .thumb .mini .mini-ico .glyph { width: .7rem; height: .7rem; }
+  .item.trow .thumb .cap { display: none; }
+  .item.trow:hover .thumb { border-color: color-mix(in srgb, var(--accent-ink) 45%, var(--line)); }
+  .item.trow[data-home] .tname small { color: var(--accent-ink); font-weight: 500; }
+  .item.trow[data-home] .tname small::before {
+    content: ''; display: inline-block; width: .5rem; height: .5rem; margin-right: .35rem;
+    border-radius: 2px; background: var(--accent-ink); vertical-align: .02rem;
+  }
+  .item.trow[data-home] {
+    background: linear-gradient(90deg, color-mix(in srgb, var(--accent-ink) 7%, transparent), transparent 55%);
+  }
+  .item.trow[data-home]:hover { background: color-mix(in srgb, var(--accent-ink) 10%, var(--paper-3)); }
 
   /* --------------------------------------------------------------- the weight */
   /* This answers "which ones" by rank —
@@ -2307,12 +2326,24 @@ __ICON__
         stampRealm(el, entry.path);
         if (picked.has(entry.path)) el.classList.add('marble-picked');
         el.innerHTML =
-          '<span class="tdot"></span><span class="ico"></span>' +
+          '<span class="tdot"></span><span class="ico"></span><span class="thumb"></span>' +
           '<span class="tname"><b></b><small></small></span>' +
           '<span class="tmeta"></span><button class="more" aria-label="More">⋮</button>';
         el.querySelector('.ico').innerHTML = iconFor(entry.kind, entry);
         el.querySelector('b').textContent = entry.name ?? leaf(entry.path);
         el.title = entry.title && entry.title !== entry.name ? entry.title : '';
+        fillThumb(el.querySelector('.thumb'), entry);
+        // A folder already wears its own colour; a document or file here wears
+        // the colour of the folder it lives in, so where it belongs reads
+        // before its name does.
+        if (entry.kind !== 'folder') {
+          const home = entry.path.split('/').slice(0, -1).join('/');
+          const realm = home && realmOf(home);
+          if (realm) {
+            el.dataset.realm = realm;
+            el.dataset.home = home;
+          }
+        }
 
         const inFolder = entry.folder && entry.folder !== here ? entry.folder.replace(here ? here + '/' : '', '') : '';
         el.querySelector('small').textContent = inFolder ? 'in ' + inFolder : '';
@@ -2325,7 +2356,6 @@ __ICON__
         const fraction = Math.min(1, Math.max(0.3, (entry.modified - oldest) / span));
         const dot = el.querySelector('.tdot');
         dot.style.opacity = fraction.toFixed(2);
-        if (Date.now() - (entry.modified ?? 0) < 3600e3) dot.classList.add('marble-fresh');
         return el;
       }
 
