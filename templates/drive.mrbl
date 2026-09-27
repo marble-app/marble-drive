@@ -705,6 +705,62 @@ __ICON__
     font-size: .82rem; text-align: left; cursor: pointer;
   }
   .sheet-all:hover { background: var(--paper-3); color: var(--ink); }
+  /* The New menu reads top to bottom as three ways in, most direct first: a
+     sentence, then the app that sentence goes to, then a starter to clone. */
+  .sheet-ask {
+    display: flex; align-items: flex-end; gap: .4rem;
+    margin: 0 0 .2rem; padding: .35rem .35rem .35rem .75rem;
+    border: 1px solid var(--line); border-radius: var(--radius); background: var(--card);
+    transition: border-color var(--t) var(--settle), box-shadow var(--t) var(--settle);
+  }
+  .sheet-ask:focus-within {
+    border-color: color-mix(in srgb, var(--accent-ink) 45%, var(--line));
+    box-shadow: var(--shadow);
+  }
+  .sheet-ask textarea {
+    flex: 1 1 auto; min-width: 0; min-height: 1.9rem; max-height: 9rem;
+    padding: .38rem 0; border: 0; outline: 0; resize: none; overflow-y: auto;
+    background: none; color: var(--ink); font: inherit; font-size: .9rem; line-height: 1.4;
+  }
+  .sheet-ask textarea::placeholder { color: var(--faint); }
+  .sheet-send {
+    flex: 0 0 auto; display: grid; place-items: center;
+    width: 1.9rem; height: 1.9rem; padding: 0; border: 0; border-radius: 999px;
+    background: var(--ink); color: var(--card); cursor: pointer;
+    transition: opacity var(--t) var(--settle), transform var(--t) var(--settle);
+  }
+  .sheet-send svg { width: 1rem; height: 1rem; }
+  .sheet-send:disabled { opacity: .25; cursor: default; }
+  .sheet-send:not(:disabled):hover { transform: translateY(-1px); }
+  .sheet-send:focus-visible { outline: 2px solid var(--accent-ink); outline-offset: 2px; }
+  .sheet-h {
+    margin: .7rem .3rem .35rem; color: var(--faint);
+    font-size: .72rem; font-weight: 500; letter-spacing: .04em; text-transform: uppercase;
+  }
+  .sheet-apps { display: grid; grid-template-columns: repeat(3, 1fr); gap: .45rem; }
+  .sheet-app {
+    display: flex; flex-direction: column; align-items: flex-start; gap: .1rem; min-width: 0;
+    padding: .55rem .6rem .5rem; border: 1px solid var(--line); border-radius: var(--radius);
+    background: var(--card); color: var(--ink); text-align: left; cursor: pointer;
+    transition: border-color var(--t) var(--settle), box-shadow var(--t) var(--settle), transform var(--t) var(--settle);
+  }
+  .sheet-app svg { width: 1.1rem; height: 1.1rem; margin-bottom: .25rem; color: var(--muted); }
+  .sheet-app b { font-weight: 500; font-size: .86rem; }
+  .sheet-app small {
+    max-width: 100%; color: var(--faint); font-size: .74rem;
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  }
+  .sheet-app:hover { transform: translateY(-1px); border-color: color-mix(in srgb, var(--accent-ink) 35%, var(--line)); }
+  .sheet-app:active { transform: scale(.98); }
+  .sheet-app:focus-visible { outline: 2px solid var(--accent-ink); outline-offset: 2px; }
+  /* The one Enter sends to: the last used, remembered. */
+  .sheet-app[aria-pressed="true"] {
+    border-color: color-mix(in srgb, var(--accent-ink) 60%, var(--line));
+    box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--accent-ink) 60%, transparent);
+  }
+  .sheet-app[aria-pressed="true"] svg { color: var(--accent-ink); }
+  .sheet-app[data-busy] { opacity: .6; pointer-events: none; }
+
 
   /* --------------------------------------------------------- the gallery */
   /* A template is a document, so a card for one is a picture of a document.
@@ -1314,6 +1370,34 @@ __ICON__
        prose above eight more now opens with the eight documents themselves; the
        line it opened with says what a starter is, and it is on the Templates
        page, where somebody who wants to read is already standing. -->
+  <!-- A sentence is the quickest way to begin, so the field comes first and is
+       focused the moment the menu opens: click New, type, Enter. Where the
+       sentence goes is the row under it — the three apps that take a prompt,
+       each shaped for a different way of working. Enter sends to whichever of
+       them you used last; a click on one sends there instead, or, with nothing
+       typed, simply opens it. -->
+  <form class="sheet-ask" id="sheet-ask" autocomplete="off">
+    <textarea id="ask" rows="1" placeholder="Describe an app to build…" aria-label="Describe an app to build"></textarea>
+    <button type="submit" class="sheet-send" id="ask-send" aria-label="Send to Chat" title="Send to Chat" disabled>
+      <svg viewBox="0 0 20 20" aria-hidden="true" focusable="false"><path d="M10 15.5V4.5M5.5 9 10 4.5 14.5 9" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>
+    </button>
+  </form>
+  <h3 class="sheet-h">Prompt in</h3>
+  <div class="sheet-apps" id="sheet-apps" role="group" aria-label="Prompt in">
+    <button type="button" class="sheet-app" data-app="Chat" data-name="Chat" aria-pressed="true">
+      <svg viewBox="0 0 20 20" aria-hidden="true" focusable="false"><path d="M4 5.5A1.5 1.5 0 0 1 5.5 4h9A1.5 1.5 0 0 1 16 5.5v6a1.5 1.5 0 0 1-1.5 1.5H9l-3.5 3v-3h0A1.5 1.5 0 0 1 4 11.5z" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round"/></svg>
+      <b>Chat</b><small>Talk it through</small>
+    </button>
+    <button type="button" class="sheet-app" data-app="Agents" data-name="Agent" aria-pressed="false">
+      <svg viewBox="0 0 20 20" aria-hidden="true" focusable="false"><path d="M10 2.5l1.6 4.4 4.4 1.6-4.4 1.6L10 14.5l-1.6-4.4L4 8.5l4.4-1.6z" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round"/><path d="M15.5 13l.6 1.6 1.6.6-1.6.6-.6 1.6-.6-1.6-1.6-.6 1.6-.6z" fill="currentColor"/></svg>
+      <b>Agent</b><small>Let it run</small>
+    </button>
+    <button type="button" class="sheet-app" data-app="Board" data-name="Board" aria-pressed="false">
+      <svg viewBox="0 0 20 20" aria-hidden="true" focusable="false"><rect x="3.5" y="3.5" width="13" height="13" rx="1.5" fill="none" stroke="currentColor" stroke-width="1.4"/><rect x="6" y="6" width="4" height="4" rx=".5" fill="currentColor" opacity=".55"/><path d="M11.5 12.5h2.5M6 13h3" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/></svg>
+      <b>Board</b><small>Sketch it first</small>
+    </button>
+  </div>
+  <h3 class="sheet-h">Start from a template</h3>
   <div class="tgrid" id="starters" data-compact></div>
   <button type="button" class="sheet-all" id="all-templates">All templates</button>
 </div>
@@ -2935,7 +3019,10 @@ __ICON__
         sheet.setAttribute('data-open', '1');
         const box = newButton.getBoundingClientRect();
         sheet.style.left = Math.max(8, Math.min(box.left, innerWidth - sheet.offsetWidth - 8)) + 'px';
-        sheet.style.top = Math.min(box.bottom + 6, innerHeight - sheet.offsetHeight - 8) + 'px';
+        sheet.style.top = Math.max(8, Math.min(box.bottom + 6, innerHeight - sheet.offsetHeight - 8)) + 'px';
+        // Open to type: the field has the keyboard before the menu has finished
+        // growing, so the first keystroke after New is the first word.
+        document.querySelector('#ask').focus({ preventScroll: true });
       });
 
       document.querySelector('#mk').addEventListener('click', async () => {
@@ -3433,6 +3520,88 @@ __ICON__
       $('#all-templates').addEventListener('click', () => {
         sheet.removeAttribute('data-open');
         goView('templates');
+      });
+
+      // The prompt at the top of the New menu, and the three apps it can go
+      // to. Chat and Board take the words through the address (#ask=) and send
+      // them themselves, so the first bubble is drawn in the app rather than
+      // waited on here. Agents already opens a conversation by ?open=, so the
+      // conversation is started from here and handed over by id. Cmd/Ctrl keeps
+      // the drive and opens it beside, the convention every other open uses.
+      const ask = $('#ask');
+      const askSend = $('#ask-send');
+      const apps = [...document.querySelectorAll('.sheet-app')];
+      const APP_KEY = 'marble-drive:new-app';
+      const pickApp = (app) => {
+        const tile = apps.find((t) => t.dataset.app === app) ?? apps[0];
+        for (const t of apps) t.setAttribute('aria-pressed', String(t === tile));
+        askSend.setAttribute('aria-label', 'Send to ' + tile.dataset.name);
+        askSend.title = 'Send to ' + tile.dataset.name;
+        return tile.dataset.app;
+      };
+      let chosenApp = pickApp((() => {
+        try { return localStorage.getItem(APP_KEY); } catch { return null; }
+      })() || 'Chat');
+      const sizeAsk = () => {
+        ask.style.height = 'auto';
+        ask.style.height = ask.scrollHeight + 'px';
+        askSend.disabled = !ask.value.trim();
+      };
+      ask.addEventListener('input', sizeAsk);
+
+      async function promptIn(app, { newTab = false } = {}) {
+        const words = ask.value.trim();
+        chosenApp = pickApp(app);
+        try { localStorage.setItem(APP_KEY, app); } catch { /* private mode */ }
+        let href = marble.href(app);
+        if (app === 'Agents') {
+          if (words) {
+            const tile = apps.find((t) => t.dataset.app === app);
+            tile.setAttribute('data-busy', '');
+            try {
+              if (!marble.agent?.start) throw new Error('There is no agent here to send it to');
+              const settings = await marble.agent.settings();
+              const id = await marble.agent.start({ provider: settings.defaultProvider });
+              await marble.agent.send(id, { prompt: words });
+              href += '?open=' + encodeURIComponent(id);
+            } catch (err) {
+              tile.removeAttribute('data-busy');
+              return fail(err);
+            }
+            tile.removeAttribute('data-busy');
+          }
+        } else {
+          href += words ? '#ask=' + encodeURIComponent(words) : app === 'Chat' ? '#new' : '';
+        }
+        sheet.removeAttribute('data-open');
+        ask.value = '';
+        sizeAsk();
+        if (newTab) window.open(href, '_blank');
+        else location.href = href;
+      }
+
+      for (const tile of apps) {
+        tile.addEventListener('click', (event) =>
+          promptIn(tile.dataset.app, { newTab: event.metaKey || event.ctrlKey }));
+      }
+      $('#sheet-ask').addEventListener('submit', (event) => {
+        event.preventDefault();
+        if (ask.value.trim()) promptIn(chosenApp);
+      });
+      // Enter sends and Shift+Enter is a new line, as in every composer here.
+      // Escape is answered by the field itself, because the page's own keys
+      // stand back while you are typing.
+      ask.addEventListener('keydown', (event) => {
+        if (event.key === 'Escape') {
+          event.preventDefault();
+          sheet.removeAttribute('data-open');
+          newButton.focus();
+          return;
+        }
+        if (event.key !== 'Enter' || event.shiftKey || event.isComposing) return;
+        event.preventDefault();
+        if (!ask.value.trim()) return;
+        promptIn(chosenApp, { newTab: event.metaKey || event.ctrlKey });
       });
 
       $('#start-go').addEventListener('click', commitStart);
