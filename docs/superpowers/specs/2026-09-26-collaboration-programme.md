@@ -40,6 +40,24 @@ same document at once.
    owner's machine. It runs on the collaborator's side (their drive, or Claude
    Code) and writes as its person. (Proposed in conversation; confirmed with
    project 4's spec.)
+5. **Isolation is an invisible sandbox with passes** (approach A): each
+   document is served with `Content-Security-Policy: sandbox` and holds
+   per-document passes instead of the owner's cookie. It stays a normal full
+   page. Chosen over a host page wrapping a sandboxed frame (stronger, far more
+   rework) and over reviewing others' code before it runs. Project 1's spec.
+6. **Sharing works like Google Docs, with personal links instead of
+   accounts.** A Share sheet on every app and every folder: *People with
+   access* (add a person by name and email, *Can view* / *Can edit*, change or
+   remove each), *General access* (*Restricted* or *Anyone with the link*),
+   *Copy link*, and access requests to approve. Adding a person makes a link
+   that is theirs alone: whoever holds it is that person, named by the owner,
+   so history and per-author undo can trust the name. On an *Anyone with the
+   link* link people type their own name. Rejected: link-only (no people list,
+   self-claimed names in history) and real Marble accounts (a central identity
+   service; revisit when drive-to-drive sharing and "Shared with me" come).
+
+Open: comments pinned to parts of an app (Google's third pillar). Not in any
+project yet; Describe mode's marks already pin to elements.
 
 ## The projects, in order
 
