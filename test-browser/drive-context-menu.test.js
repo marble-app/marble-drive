@@ -46,10 +46,11 @@ test('a document answers a right-click with its menu, at the pointer, and is pic
   await opened(page);
   assert.deepEqual(await labels(page), [
     'Open', 'Open in new tab', 'Rename…', 'Move to…', 'Make a copy', 'Pin to sidebar',
-    'Copy link', 'Copy path', 'Download (one file)', 'Move to trash',
+    'Copy link', 'Copy path', 'Download as .mrbl', 'Download as HTML', 'Move to trash',
   ]);
   const at = await page.locator('#menu').boundingBox();
-  assert.ok(Math.abs(at.x - (box.x + 10)) < 3 && Math.abs(at.y - (box.y + 5)) < 3, JSON.stringify({ at, box }));
+  // Loose by a few pixels: the row is still settling from its entrance.
+  assert.ok(Math.abs(at.x - (box.x + 10)) < 6 && Math.abs(at.y - (box.y + 5)) < 6, JSON.stringify({ at, box }));
   await row(page, 'garden').and(page.locator('.marble-picked')).waitFor();
   assert.deepEqual(errors.filter((e) => !e.includes('sandboxed')), []);
   await page.context().close();
@@ -95,7 +96,9 @@ test('right-clicking one of several picked rows speaks for all of them', async (
   await rightClick(page, row(page, 'Papers').locator('.name'));
   await opened(page);
   const bulk = await labels(page);
-  assert.deepEqual(bulk.filter((l) => /\b2\b|1 in/.test(l)), ['Open 1 in new tabs', 'Move 2 to…', 'Copy 2 links', 'Move 2 to trash']);
+  assert.deepEqual(bulk.filter((l) => /\b2\b|1 in/.test(l)), [
+    'Open 1 in new tabs', 'Move 2 to…', 'Copy 2 links', 'Download 2 as .zip', 'Download 2 as .zip of HTML', 'Move 2 to trash',
+  ]);
   assert.equal(await page.locator('#items .item.marble-picked').count(), 2);
 
   // A row outside the selection becomes the selection.
