@@ -122,9 +122,14 @@ __ICON__
      var(--paper) again — the eye should read it as a shelf the main pane sits
      on, not a continuation of the same surface. */
   .side {
-    flex: 0 0 15rem; padding: .9rem .75rem 1rem; overflow-y: auto;
+    flex: 0 0 15rem; padding: .9rem .75rem calc(1rem + env(safe-area-inset-bottom, 0px)); overflow-y: auto;
     display: flex; flex-direction: column; gap: .35rem; background: var(--paper-2);
   }
+  /* Nothing on the shelf gives up height to fit. The pins list floors at
+     1.5rem so an empty one is still a drop target, and that floor is also
+     what let a long list be squeezed to 1.5rem while its rows spilled out
+     under the footer. The shelf scrolls instead. */
+  .side > * { flex-shrink: 0; }
   .new {
     display: flex; align-items: center; gap: .55rem; align-self: flex-start;
     padding: .75rem 1.4rem .75rem 1.1rem; margin: 0 0 .9rem .35rem;
@@ -998,6 +1003,46 @@ __ICON__
     body[data-view="list"] .item > .row-meta.owner,
     body[data-view="list"] .item > .row-meta.size,
     .listhead > .owner, .listhead > .size { display: none; }
+    /* A rail is a column of glyphs, so a pin is its glyph centred, and the
+       whole glyph is the open button — with the name hidden there is no
+       rename for a tap to be saving room for. */
+    .side .nav-item, .side .pin { justify-content: center; padding-left: 0; padding-right: 0; }
+    .side .pin { position: relative; min-height: 2.25rem; }
+    .side .pin-open { position: absolute; inset: 0; width: auto; height: auto; border-radius: 999px; }
+    .side .pin-open svg { display: none; }
+    .side .marble-grip { display: none; }
+  }
+
+  /* The reorder and remove handles belong to the affordance layer, which is
+     composed into this file when a drive is seeded and which reveals them on
+     hover. A touchscreen has no hover, so working on a row is the touch
+     equivalent of pointing at it: tapping a name puts the caret in it, and
+     that focus brings its handles up. A keyboard gets the same reveal a mouse
+     always had. These outrank the composed stylesheet on specificity rather
+     than by being edited into it, because that script is the package's. */
+  body .marble-item:focus-within > .marble-grip { opacity: 1; }
+  /* On a touchscreen the handles take the slot at the row's right end, and
+     only while the row is being worked on — otherwise they would sit on top
+     of a pin's open button. A row in hand swaps open for reorder and remove,
+     and makes room so none of them covers the name. Visibility, not opacity,
+     is the switch, so a hidden handle takes no tap; it waits a beat on the
+     way out so the tap that blurs the name still lands on the × it was aimed
+     at. */
+  @media (hover: none) {
+    body .marble-grip {
+      left: auto; right: .3rem; top: 50%; bottom: auto; transform: translateY(-50%);
+      flex-direction: row; align-items: center; gap: .15rem;
+      visibility: hidden; transition: opacity .12s ease, visibility 0s linear .35s;
+    }
+    body .marble-item:focus-within > .marble-grip {
+      visibility: visible; transition: opacity .12s ease;
+    }
+    body .marble-btn {
+      width: 2.25rem; height: 2.25rem; line-height: 2.25rem;
+      font-size: 15px; opacity: .6; border-radius: 999px;
+    }
+    .side .marble-item:focus-within { background: var(--card); padding-right: 5.2rem; }
+    .pin:focus-within > .pin-open { display: none; }
   }
   /* A file that is not a document, shown as what it is. A picture is the
      picture (a PDF's first page, a slide, a photo); a song is its waveform,
