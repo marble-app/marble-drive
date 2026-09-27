@@ -1142,7 +1142,6 @@ export async function createDrive(config, { log = console, agentProviders = null
       onActivity: () => keepAwake.nudge(),
       writeOps,
       createDocument,
-    putDocument,
       restore: restoreDocument,
       // An agent's turn ending is the end of its claim on what it touched. Kept
       // for the life of the process, a turn's touches forked every later edit
@@ -1484,6 +1483,7 @@ button{background:#738698;color:#fafaf7;border-color:#738698;cursor:pointer}p{co
     agentsWhy,
     console: consoleApp,
     createDocument,
+    putDocument,
     config,
     seed,
     weigh,

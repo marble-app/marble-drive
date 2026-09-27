@@ -42,3 +42,15 @@ test('/today on a fresh drive lands on a document it actually has', async () => 
   const where = decodeURIComponent(landing.headers.get('location').slice('/a/'.length));
   assert.ok(await drive.store.has(where), `${where} exists`);
 });
+
+test('the host hands app updates its own write path, the way bin/marble-drive.js serve does', async () => {
+  const { updateApps } = await import('../server/app-updates.js');
+  assert.equal(typeof drive.putDocument, 'function');
+  const report = await updateApps({
+    store: drive.store,
+    config: loadConfig({ MARBLE_DRIVE_ROOT: root }),
+    log: { log() {} },
+    write: (where, text, { label }) => drive.putDocument(where, text, { label, event: 'changed' }),
+  });
+  assert.ok(report.every((line) => line.status !== 'held' || line.reason !== 'error'), JSON.stringify(report));
+});
