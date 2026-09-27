@@ -147,6 +147,32 @@ export const STARTERS = [
     ],
   },
   {
+    id: 'whiteboard',
+    title: 'Whiteboard',
+    blurb: 'An endless board for sticky notes, sketches, pictures and documents, with Claude beside it. The board is the prompt.',
+    // The chat's sibling, for the ideas that are easier drawn than said: a
+    // canvas with no edges, and every message to Claude carries the board —
+    // a picture of it and a list of what is on it and where. Every drive is
+    // seeded with one, called Board.
+    //
+    // The board binds its own gestures and files its own ops through the
+    // carrier; the part it needs is `history`, for Mod+Z. `editable` rides
+    // along because the composed closure wants one addressable selector to
+    // address, and nothing on the board wears it. What it puts
+    // on the board from outside goes into "<name> media" beside the file,
+    // through `marble.drive`, so the board is a page of references.
+    parts: ['editable', 'history'],
+    // Raspberry, the one family nothing else here wears: sticky notes and ink
+    // are the whole of this one's look.
+    accent: '#b0507a',
+    hint: 'A board for planning an app, a section for each screen',
+    ideas: [
+      'A launch plan: a section a week, notes for each task',
+      'A mood board for a redesign, with screenshots and notes',
+      'A retro board: went well, went badly, try next',
+    ],
+  },
+  {
     id: 'sheet',
     title: 'Sheet',
     blurb: 'A grid of cells. Rows and columns are markup, so both are yours to change.',
