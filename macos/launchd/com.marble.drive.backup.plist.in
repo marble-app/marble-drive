@@ -1,0 +1,45 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!-- Rendered into ~/Library/LaunchAgents by macos/launchd/backup.sh; the
+     placeholders are absolute paths this machine's copy needs. -->
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>@LABEL@</string>
+
+  <key>ProgramArguments</key>
+  <array>
+    <string>/bin/bash</string>
+    <string>@REPO@/tools/drive-backup.sh</string>
+    <string>@SPRITE@</string>
+    <string>--if-changed</string>
+  </array>
+
+  <key>WorkingDirectory</key>
+  <string>@REPO@</string>
+
+  <!-- Every quarter hour, and once at login. A run that finds nothing new
+       costs one API call and wakes no sprite; a Mac that slept runs once on
+       waking, not once per missed interval. -->
+  <key>StartInterval</key>
+  <integer>900</integer>
+  <key>RunAtLoad</key>
+  <true/>
+
+  <key>ProcessType</key>
+  <string>Background</string>
+
+  <key>StandardOutPath</key>
+  <string>@HOME@/Library/Logs/marble-drive/backup.log</string>
+  <key>StandardErrorPath</key>
+  <string>@HOME@/Library/Logs/marble-drive/backup.log</string>
+
+  <key>EnvironmentVariables</key>
+  <dict>
+    <key>HOME</key>
+    <string>@HOME@</string>
+    <key>PATH</key>
+    <string>@HOME@/.local/bin:/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin</string>
+  </dict>
+</dict>
+</plist>

@@ -353,7 +353,7 @@ passphrase page.
   `.mrbl`, which an agent guessed wrong; a full turn's prompt now carries the
   address of the page the person is on.
 
-### 24. Heavy work runs on the Mac, against a mirror of the drive
+### 24. Heavy work runs on the Mac, against a mirror; a backup keeps up with the drive
 
 **Problem.** A sprite is too small for the big changes to Marble: full test
 runs, browser suites and several agents at once, on the machine that also
@@ -372,6 +372,21 @@ its `drive/` as a one-way mirror of admin-p1, pulled on request
 (`tools/drive-pull.sh`), set aside rather than deleted, and marked
 (`.marble/mirror.json`) so a mirror is never taken for the real drive. It
 needs the sprite running, so pull while it is well.
+
+**And a backup, separate from the mirror.** The owner's priority was a copy
+that keeps up with admin-p1 in case it crashes. The mirror cannot be that: the
+local host writes to it and each pull replaces it. So `tools/drive-backup.sh`
+keeps dated snapshots in `~/Marble Backups/`, on a 15-minute launchd schedule,
+and `tools/drive-restore.sh` puts one back on a sprite. *Considered:* a live
+two-way sync (rejected, as above: a crash is exactly when two copies disagree
+and nothing would say which is right); Fly checkpoints alone (they share the
+platform that stalled, and the 09-26 recovery may itself have been a restore);
+tar each time (2.2 GB and 80 s per run against 224 KB and 11 s with rsync and
+hard links). *Schedule without waking:* the API answers without waking a sprite,
+and a sleeping drive does not change, so a run backs up only while it is awake,
+plus once after it sleeps. The last-word run wakes it once, which would look
+like new activity; the rule compares when it last woke with when the last
+snapshot *ended*, so its own wake never triggers another.
 
 ## Traps worth remembering
 

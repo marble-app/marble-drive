@@ -1,0 +1,66 @@
+#!/bin/zsh
+# Back a sprite's drive up to this Mac on a schedule (tools/drive-backup.sh).
+#
+#   macos/launchd/backup.sh install [<sprite>]   every 15 min and at login (default admin-p1)
+#   macos/launchd/backup.sh status               installed? the last snapshots, the log's tail
+#   macos/launchd/backup.sh run                  one scheduled run now
+#   macos/launchd/backup.sh uninstall            stop scheduling; the backups stay
+#   macos/launchd/backup.sh logs                 follow the log
+#
+# The snapshots are in ~/Marble Backups/<sprite>/. Restoring one is
+# tools/drive-restore.sh.
+
+set -u
+emulate -L zsh
+
+label="com.marble.drive.backup"
+repo="${0:A:h:h:h}"
+plist="$HOME/Library/LaunchAgents/$label.plist"
+template="$repo/macos/launchd/com.marble.drive.backup.plist.in"
+logdir="$HOME/Library/Logs/marble-drive"
+log="$logdir/backup.log"
+domain="gui/$(id -u)"
+
+sprite_of() { plutil -extract ProgramArguments.2 raw -o - "$plist" 2>/dev/null || print -r -- admin-p1 }
+
+case "${1:-status}" in
+
+install)
+  sprite="${2:-admin-p1}"
+  mkdir -p "${plist:h}" "$logdir"
+  sed -e "s#@LABEL@#$label#g" -e "s#@REPO@#$repo#g" -e "s#@HOME@#$HOME#g" -e "s#@SPRITE@#$sprite#g" "$template" > "$plist"
+  plutil -lint "$plist" >/dev/null || { print -u2 "backup: rendered plist is not valid"; exit 1 }
+  launchctl bootout "$domain/$label" 2>/dev/null
+  launchctl enable "$domain/$label" 2>/dev/null
+  launchctl bootstrap "$domain" "$plist" || { print -u2 "backup: launchctl bootstrap failed"; exit 1 }
+  print -r -- "backing up $sprite every 15 min into ~/Marble Backups/$sprite (log: $log)"
+  ;;
+
+status)
+  if [[ ! -f $plist ]]; then print -r -- "not installed — run: macos/launchd/backup.sh install"; exit 1; fi
+  print -r -- "label    $label ($(launchctl print "$domain/$label" >/dev/null 2>&1 && print loaded || print 'not loaded'))"
+  print -r -- "sprite   $(sprite_of)"
+  "$repo/tools/drive-backup.sh" --list "$(sprite_of)" | tail -4 | sed 's/^/  /'
+  print -r -- "log      $log"
+  tail -5 "$log" 2>/dev/null | sed 's/^/  /'
+  ;;
+
+run)
+  launchctl kickstart "$domain/$label" && print -r -- "started; see: macos/launchd/backup.sh logs"
+  ;;
+
+uninstall)
+  launchctl bootout "$domain/$label" 2>/dev/null
+  rm -f "$plist"
+  print -r -- "uninstalled. The backups stay in ~/Marble Backups"
+  ;;
+
+logs)
+  tail -f -n 40 "$log"
+  ;;
+
+*)
+  print -u2 "usage: backup.sh [install [<sprite>]|status|run|uninstall|logs]"
+  exit 2
+  ;;
+esac

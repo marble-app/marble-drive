@@ -230,6 +230,9 @@ admin-p1 (`~/.config/marble-drive/testers.json`), the machine that made it.
 | `… --print-plan` | say what would be deployed, and stop |
 | `… --when-idle` | stage now, switch when no agent is working (always so from the sprite itself); for a drive in use |
 | `tools/sprite-deploy.sh --all [--list]` | every sprite labelled `marble-tester` or `marble-user`; continues past a failure; `--list` only names them |
+| `tools/drive-backup.sh [<sprite>] [--if-changed]` | a dated snapshot of a drive (default admin-p1) in `~/Marble Backups/<sprite>/`; unchanged files hard-linked to the one before, so a run moves and stores only what changed |
+| `macos/launchd/backup.sh install [<sprite>]` | runs `drive-backup.sh --if-changed` every 15 min and at login; `status`, `run`, `logs`, `uninstall` |
+| `tools/drive-restore.sh <snapshot> <sprite> [--yes]` | puts a snapshot back on a sprite: stops the host, sets `/drive` aside, copies in, starts it, checks `/health` |
 | `tools/drive-pull.sh [<sprite>] [--into <dir>]` | a one-way mirror of a drive (default admin-p1) into this checkout's `drive/`, the last one set aside |
 | `tools/sprite-provision.sh <person> [--agent api\|subscription] [--key-file f] [--local]` | makes `t-<person>`: passphrase, `sprite.env`, optional preloaded key, deploy, public URL, outside check, roster entry, a note to send |
 | `tools/sprite-provision.sh --resume <person>` | finish one that stopped part way |
@@ -259,6 +262,27 @@ since that checkpoint, drive included).
 4410:4400` (4400 may be taken locally). Through the proxy the Host header is
 `127.0.0.1`, which an ungated host allows; send
 `-H "Host: <sprite>-b3fwm.sprites.app"` to see what a browser sees.
+
+**Back a drive up here.** admin-p1 is backed up to the owner's Mac by
+`macos/launchd/backup.sh` (installed 2026-09-27): every 15 minutes it asks the
+Sprites API about the sprite, which wakes nothing, and takes a snapshot only
+when the drive may have changed: the sprite is running, or it has gone to sleep
+since a snapshot taken while it was awake (one wake, for its last changes), or it
+woke and slept between two runs. Snapshots are whole drives in `~/Marble
+Backups/admin-p1/<utc>/` (`latest` points at the newest); unchanged files are
+hard links, so the first cost 2.2 GB and 80 s and the next 224 KB and 11 s. Kept:
+all of the last day, one a day for 60 days, one a month after. The copy runs
+rsync through `sprite exec` (`tools/sprite-rsh.sh`), taken while the drive is
+live. It is off Fly, unlike checkpoints, and needs the Mac awake: a Mac that
+slept catches up on waking.
+
+**Restore a drive from a backup.** `tools/drive-restore.sh "~/Marble
+Backups/admin-p1/<utc>" <sprite>` says what it would do; add `--yes` to do it.
+Onto the same sprite after it lost its drive, or a new one (`sprite-provision.sh`
+or a deploy first, since a backup holds the drive only: `sprite.env`, keys and
+the Claude login are not in it). The drive it replaces is set aside as
+`/drive.before-restore-<utc>`. Conversations come back readable; their Claude
+sessions lived on the old machine.
 
 **Mirror a drive here.** `tools/drive-pull.sh` (admin-p1 into this
 checkout's `drive/`; `<sprite>` and `--into <dir>` for others). Stop the local
