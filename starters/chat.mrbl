@@ -78,6 +78,9 @@ __ICON__
   body.app {
     margin: 0; height: 100dvh; overflow: hidden;
     display: grid; grid-template-columns: var(--rail) minmax(0, 1fr);
+    /* One row, the whole height. Anything the host slips into <body> lands in
+       a zero-height row below it instead of taking a share of the window. */
+    grid-template-rows: minmax(0, 1fr); grid-auto-rows: 0;
     background: var(--room); color: var(--ink);
     font: 14px/1.5 var(--ui); -webkit-font-smoothing: antialiased;
     transition: grid-template-columns var(--t-slow) var(--ease-out);
@@ -86,6 +89,7 @@ __ICON__
   body.app[data-side="closed"] { grid-template-columns: 0 minmax(0, 1fr); }
   button { font: inherit; color: inherit; }
   .sprite { display: none; }
+  .side, .room { grid-row: 1; }
   svg { width: 20px; height: 20px; fill: currentColor; flex: none; }
 
   [data-marble-editable] { outline: none; border-radius: var(--r-text); transition: background var(--t-fast) var(--snap); }

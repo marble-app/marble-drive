@@ -125,3 +125,25 @@ test('on a phone the list comes first and a chat is pushed in over it', async ()
   await page.waitForFunction(() => document.querySelector('.room').getBoundingClientRect().left >= 380);
   assert.deepEqual(errors, []);
 });
+
+// Whatever the host slips into <body> (the key prompt, <marble-agent-setup>)
+// must not take a row of the page's grid and a share of the window with it.
+test('the sidebar and the chat fill the window, whatever else is in <body>', async () => {
+  await host.reset();
+  for (const viewport of [{ width: 1280, height: 800 }, { width: 390, height: 844 }]) {
+    const { page, errors } = await host.newPage({ viewport });
+    await page.goto(`${host.base}/a/Chat`);
+    await page.waitForFunction(() => Boolean(window.marble?.agent));
+    await page.evaluate(() => {
+      const extra = document.createElement('div');
+      extra.setAttribute('data-marble-transient', '');
+      extra.textContent = 'injected';
+      document.body.append(extra);
+    });
+    const heights = await page.evaluate(() =>
+      ['.side', '.room'].map((s) => Math.round(document.querySelector(s).getBoundingClientRect().height)));
+    assert.deepEqual(heights, [viewport.height, viewport.height], `${viewport.width}px wide`);
+    assert.deepEqual(errors, []);
+    await page.close();
+  }
+});
