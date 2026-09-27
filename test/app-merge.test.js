@@ -74,3 +74,18 @@ test('a fresh id never collides with one the document holds', () => {
   assert.match(r2.text, /data-marble-id="dup00001">mine/);
   assert.doesNotMatch(r2.text, /data-marble-id="dup00001">new/);
 });
+
+test('where both reworded the same words on the page, the owner’s words win', () => {
+  const base = '<style>\n.a{}\n</style>\n<p data-marble-id="b1" data-marble-rich>Sample text.</p>\n';
+  const ours = '<style>\n.a{}\n</style>\n<p data-marble-id="o1" data-marble-rich>Sample text. My trip starts Friday.</p>\n';
+  const theirs = '<style>\n.a{ gap: 1px }\n</style>\n<p data-marble-id="t1" data-marble-rich>Better sample text.</p>\n';
+  const r = run(base, ours, theirs);
+  assert.equal(r.conflicts.length, 0);
+  assert.equal(r.kept, 1);
+  assert.equal(r.text, '<style>\n.a{ gap: 1px }\n</style>\n<p data-marble-id="o1" data-marble-rich>Sample text. My trip starts Friday.</p>\n');
+});
+
+test('a disagreement over the app itself still holds the page back', () => {
+  const r = run('<script>\nrun(1);\n</script>\n', '<script>\nrun(2);\n</script>\n', '<script>\nrun(3);\n</script>\n');
+  assert.equal(r.conflicts.length, 1);
+});

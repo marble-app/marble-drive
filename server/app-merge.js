@@ -169,6 +169,11 @@ function hunksOf(pairs, aLen, bLen) {
  * comparison is on masked lines. Returns { lines, conflicts, changed }, where
  * each output line is `{ line, from: 'ours'|'theirs', at, replaced? }`.
  */
+/** A line that is words on the page: an element Marble marks as content, or
+ *  the bare end of one. The owner's words are theirs to keep. */
+const WORDS = /data-marble-(rich|editable)\b/;
+export const isWords = (line) => WORDS.test(line) || /^\s*<\/[a-z][\w-]*>\s*$/i.test(line);
+
 export function merge3(base, ours, theirs) {
   const code = encoder();
   const B = code(base.map(mask));
@@ -182,6 +187,7 @@ export function merge3(base, ours, theirs) {
   const out = [];
   const conflicts = [];
   let changed = 0;
+  let kept = 0; // disagreements over words, settled for the owner
   let b = 0; // next base line not yet written
   let o = 0; // the ours line that base line b sits at
   const emitOurs = (from, to) => { for (let k = from; k < to; k++) out.push({ line: ours[k], from: 'ours', at: k }); };
@@ -218,14 +224,20 @@ export function merge3(base, ours, theirs) {
       const oCodes = O.subarray(oSpan[0], oSpan[1]);
       const tCodes = T.subarray(tSpan[0], tSpan[1]);
       const same = oCodes.length === tCodes.length && oCodes.every((c, k) => c === tCodes[k]);
+      // Where the owner and the template disagree about words on the page —
+      // a starter's sample paragraph the owner typed into, and the template
+      // reworded — the owner's words win. Only a disagreement over the app
+      // itself holds the page back.
+      const words = base.slice(start, end).every(isWords) && theirs.slice(tSpan[0], tSpan[1]).every(isWords);
       if (same) emitOurs(oSpan[0], oSpan[1]);
+      else if (words) { emitOurs(oSpan[0], oSpan[1]); kept++; }
       else conflicts.push({ base: [start, end], ours: oSpan, theirs: tSpan });
     }
     o = oSpan[1];
     b = end;
   }
   emitOurs(o, ours.length);
-  return { lines: out, conflicts, changed };
+  return { lines: out, conflicts, changed, kept };
 }
 
 // ------------------------------------------------------------------- the ids
