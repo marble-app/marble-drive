@@ -1,11 +1,13 @@
-// Throwing something away, finding out that you can, and getting it back.
+// Throwing something away, and getting it back.
 //
-// Three things were wrong here at once. The Drive has had Delete-moves-to-
-// trash since the row menu grew a trash verb and nothing on the page ever
-// said so. The bulk "Move N to trash" branch was unreachable, because opening
-// a row menu narrowed the selection to that row first. And Restore had never
-// worked at all: the row never carried the trash id, so it posted `undefined`
-// and the host answered 400.
+// Three things were wrong here at once. The Drive had Delete-moves-to-trash
+// and nothing on the page ever said so. The bulk "Move N to trash" branch was
+// unreachable, because opening a row menu narrowed the selection to that row
+// first. And Restore had never worked at all: the row never carried the trash
+// id, so it posted `undefined` and the host answered 400.
+//
+// Since then the key is gone altogether: moving to the trash is only ever
+// asked for by name, from a menu, so a stray keystroke never costs a file.
 
 import fsp from 'node:fs/promises';
 import assert from 'node:assert/strict';
@@ -55,36 +57,26 @@ const inDrive = async () =>
 
 // -------------------------------------------------------------------- the key
 
-test('Delete on a picked document moves it to the trash', async () => {
+test('Delete and Backspace leave a picked document where it is', async () => {
   const page = await openDrive();
   await pick(page, 'garden');
   await page.keyboard.press('Delete');
-  await gone(page, 'garden');
-
-  await page.locator('#nav .nav-item[data-nav="trash"]').click();
-  // The id it got on the way in is what makes the row restorable at all.
-  await page.locator('#items .item[data-path="garden"][data-trash-id]').waitFor();
-  assert.deepEqual(await page.locator('#items .item b').allTextContents(), ['garden']);
-});
-
-test('the key will not throw a folder away, and says where to', async () => {
-  const page = await openDrive();
-  await pick(page, 'Papers');
   await page.keyboard.press('Backspace');
-  await page.locator('#toast[data-open="1"]').waitFor();
-  assert.match(await page.locator('#toast').textContent(), /Delete a folder from its . menu/);
-  // Still there, and still picked — nothing happened at all.
-  await page.locator('#items .item[data-path="Papers"].marble-picked').waitFor();
-  assert.ok((await inDrive()).includes('Papers/deep/two'));
+  await page.waitForTimeout(300);
+  await page.locator('#items .item[data-path="garden"].marble-picked').waitFor();
+  assert.ok((await inDrive()).includes('garden'));
 });
 
-test('one folder in the selection spares the documents beside it', async () => {
+test('nor do they touch a folder, or a selection with one in it', async () => {
   const page = await openDrive();
   await pick(page, 'garden');
   await pick(page, 'Papers', ['Meta']);
+  await page.keyboard.press('Backspace');
   await page.keyboard.press('Delete');
-  await page.locator('#toast[data-open="1"]').waitFor();
-  assert.ok((await inDrive()).includes('garden'));
+  await page.waitForTimeout(300);
+  const there = await inDrive();
+  assert.ok(there.includes('garden'));
+  assert.ok(there.includes('Papers/deep/two'));
 });
 
 // ------------------------------------------------------------------- the menu
@@ -112,10 +104,10 @@ test('the menu is how a folder is thrown away, and how it comes back', async () 
   assert.deepEqual(await inDrive(), before);
 });
 
-test('a document comes back from the trash the same way', async () => {
+test('a document goes by its menu and comes back the same way', async () => {
   const page = await openDrive();
-  await pick(page, 'solo');
-  await page.keyboard.press('Delete');
+  await menu(page, 'solo');
+  await page.locator('#menu button', { hasText: 'Move to trash' }).click();
   await gone(page, 'solo');
 
   await page.locator('#nav .nav-item[data-nav="trash"]').click();
@@ -133,22 +125,15 @@ test('a document comes back from the trash the same way', async () => {
 
 // ------------------------------------------------------------------ the hints
 
-test('the trash verb names its key, and does not on a folder', async () => {
+test('the trash verb names no key, because there is none', async () => {
   const page = await openDrive();
   await menu(page, 'garden');
-  assert.equal(
-    await page.locator('#menu button', { hasText: 'Move to trash' }).locator('.key').textContent(),
-    '⌫',
-  );
-  assert.equal(await page.locator('#menu button').first().locator('.key').textContent(), '⏎');
-
-  await page.keyboard.press('Escape');
-  await menu(page, 'Papers');
-  // A hint for a key that would refuse is worse than no hint.
   assert.equal(
     await page.locator('#menu button', { hasText: 'Move to trash' }).locator('.key').count(),
     0,
   );
+  assert.equal(await page.locator('#menu button').first().locator('.key').textContent(), '⏎');
+  assert.doesNotMatch(await page.locator('#menu').textContent(), /⌫/);
 });
 
 test('the bulk trash verb speaks for the selection', async () => {
@@ -158,7 +143,6 @@ test('the bulk trash verb speaks for the selection', async () => {
   await menu(page, 'Papers');
   const trash = page.locator('#menu button', { hasText: 'to trash' });
   assert.match(await trash.textContent(), /Move 2 to trash/);
-  // A folder is in it, so the key is not offered.
   assert.equal(await trash.locator('.key').count(), 0);
 });
 
@@ -192,8 +176,8 @@ test('the live drive document does all of the above', async (t) => {
 
     await page.locator('#items .item[data-path="Papers"] .name').click();
     await page.keyboard.press('Backspace');
-    await page.locator('#toast[data-open="1"]').waitFor();
-    assert.match(await page.locator('#toast').textContent(), /Delete a folder/);
+    await page.waitForTimeout(300);
+    await page.locator('#items .item[data-path="Papers"].marble-picked').waitFor();
 
     await page.locator('#items .item[data-path="Papers"] .more').click();
     await page.locator('#menu button', { hasText: 'Move to trash' }).click();

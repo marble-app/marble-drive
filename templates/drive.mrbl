@@ -893,7 +893,8 @@ __ICON__
   }
   /* The key that would have done it without the menu. A shortcut nobody is
      told about is a shortcut nobody has: the menu is where you look when you
-     do not know, so it is the only place the key can be learned. */
+     do not know, so it is the only place the key can be learned. Moving to
+     the trash has no key on purpose — it is only ever asked for here. */
   .menu button .key { margin-left: auto; color: var(--muted); font-size: .95em; }
   .menu button:hover { background: var(--paper-3); }
   .menu button:active { transform: scale(.98); }
@@ -2968,9 +2969,7 @@ __ICON__
             });
           }
           menu.append(document.createElement('hr'));
-          // The hint is derived from the same question the key asks, so the
-          // menu cannot end up promising a key that would refuse.
-          add('Move ' + paths.length + ' to trash', trashPicked, foldersPicked() ? '' : '⌫');
+          add('Move ' + paths.length + ' to trash', trashPicked);
         } else {
           if (isFile) {
             add('Open beside this', () => window.open(drive.fileHref(path), '_blank'));
@@ -3002,10 +3001,14 @@ __ICON__
             add('Download (one file)', () => window.open(drive.downloadHref(path), '_blank'));
           }
           menu.append(document.createElement('hr'));
+          // No key does this. Throwing something away is a thing you ask
+          // for, from here, so a stray keystroke never costs you a file.
           add('Move to trash', async () => {
             await drive.remove(path);
+            pick(null);
             refresh();
-          }, isFolder ? '' : '⌫');
+            say('Moved to trash');
+          });
         }
 
         const box = anchor.getBoundingClientRect();
@@ -3073,16 +3076,9 @@ __ICON__
           event.preventDefault();
           return openItem(item, { newTab: event.metaKey || event.ctrlKey });
         }
-        if ((event.key === 'Backspace' || event.key === 'Delete') && picked.size && view !== 'trash') {
-          event.preventDefault();
-          // A folder leaves with everything inside it, and a keystroke is not
-          // enough of a decision for that. Nothing in the selection goes, not
-          // even the documents in it: a key that deletes some of what is
-          // picked is worse than a key that deletes none of it. The ⋮ menu
-          // still throws a folder away, deliberately, and says so here.
-          if (foldersPicked()) return say('Delete a folder from its ⋮ menu.');
-          return trashPicked();
-        }
+        // Backspace and Delete do nothing to what is picked. Moving something
+        // to the trash is asked for by name, from its menu, so no stray
+        // keystroke ever throws a file away.
         if (event.key !== 'Escape') return;
         // Escape undoes the last thing you opened, one layer at a time: the row
         // menu, then the New menu, then the selection itself.
@@ -3092,18 +3088,8 @@ __ICON__
         if (!layered) pick(null);
       });
 
-      // Is any of what is picked a folder? Asked of the listing rather than
-      // kept alongside the selection, because the listing is the one that
-      // knows what a path is — the same reason `picked` holds paths.
-      const foldersPicked = () =>
-        [...picked].some(
-          (path) =>
-            items.querySelector('.item[data-path="' + CSS.escape(path) + '"]')?.dataset.kind ===
-            'folder',
-        );
-
-      // However many are picked, one press throws all of them away — to the
-      // trash, not to nowhere, so it costs nothing to be wrong about it.
+      // However many are picked, one menu choice throws all of them away — to
+      // the trash, not to nowhere, so it costs nothing to be wrong about it.
       async function trashPicked() {
         const paths = [...picked];
         pick(null);
