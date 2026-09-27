@@ -1,7 +1,11 @@
 # Shareable apps: a link to one document, used live together
 
-2026-09-26. Status: design, approved in conversation; spec awaiting the
-owner's review before a plan.
+2026-09-26. Status: **superseded in part.** This is the first draft of
+project 2 in [`2026-09-26-collaboration-programme.md`](2026-09-26-collaboration-programme.md).
+The owner has since decided that collaborators edit code too ("content is
+code") and that documents are isolated first, so section 3's guest guard and
+every "content, not code" rule below are withdrawn. The link store, route
+table, names and roster carry into project 2's spec.
 
 ## Why
 
