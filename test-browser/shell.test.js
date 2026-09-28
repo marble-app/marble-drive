@@ -11,7 +11,7 @@ import { GARDEN, startDrive } from './harness.js';
 const NOTES = GARDEN.replace('Research Garden', 'Field notes').replace('<title>Garden</title>', '<title>Field notes</title>');
 
 const host = await startDrive({
-  documents: { garden: GARDEN, 'Research/Specs/Field notes': NOTES, 'Travel/plans': GARDEN },
+  documents: { garden: GARDEN, 'Research/Specs/Field notes': NOTES, 'Travel/plans': GARDEN, drive: GARDEN },
 });
 test.after(() => host.close());
 
@@ -24,10 +24,16 @@ async function visit(path = 'Research/Specs/Field notes', options) {
   return { page, errors, shell, panel };
 }
 
-const margins = (page) => page.evaluate(() => {
-  const s = getComputedStyle(document.documentElement);
-  return { top: s.marginTop, left: s.marginLeft, right: s.marginRight };
-});
+// The page eases into the room it is given; read it once it has arrived —
+// the motion off the dock stylesheet, and the chat's spring at rest.
+const margins = async (page) => {
+  await page.waitForFunction(() => !document.getElementById('marble-shell-dock')?.textContent.includes('transition')
+    && !document.querySelector('marble-agent-drawer')?.cancelMotion);
+  return page.evaluate(() => {
+    const s = getComputedStyle(document.documentElement);
+    return { top: s.marginTop, left: s.marginLeft, right: s.marginRight };
+  });
+};
 const isOpen = (page) => page.evaluate(() => document.querySelector('marble-shell').hasAttribute('data-open'));
 
 test('closed, the page is the page: no bar, no tree, no margin, and a pill only on the way to the corner', async () => {
@@ -57,7 +63,7 @@ test('⌘J opens Fit: the page gives up the top, the left and the right, and the
   const m = await margins(page);
   assert.equal(m.top, '44px');
   assert.equal(m.left, '260px');
-  assert.notEqual(m.right, '0px', 'the drawer docks on the right');
+  assert.equal(m.right, `${await page.evaluate(() => document.querySelector('marble-agent-drawer').width)}px`, 'the drawer docks on the right');
   assert.equal(await panel.evaluate((el) => el.getBoundingClientRect().top), 44);
   assert.equal(await panel.getAttribute('data-shell'), 'fit');
   assert.equal(await page.evaluate(() => getComputedStyle(document.documentElement).getPropertyValue('--marble-shell-top')), '44px');
@@ -78,7 +84,8 @@ test('Float lays the panels over the page and moves nothing', async () => {
   await shell.locator('[data-act="float"]').click();
   assert.deepEqual(await margins(page), { top: '0px', left: '0px', right: '0px' });
   assert.equal(await panel.getAttribute('data-shell'), 'float');
-  assert.equal(await panel.evaluate((el) => el.getBoundingClientRect().top), 44 + 16);
+  // The card glides from Fit's place to Float's.
+  await page.waitForFunction(() => document.querySelector('marble-agent-drawer').shadowRoot.querySelector('.panel').getBoundingClientRect().top === 44 + 16);
   assert.equal(await shell.locator('[data-act="float"]').getAttribute('aria-pressed'), 'true');
   await shell.locator('[data-act="fit"]').click();
   assert.equal((await margins(page)).top, '44px');
@@ -145,4 +152,44 @@ test('at phone width there is no shell to open: ⌘J is the drawer\'s, as before
   await page.waitForFunction(() => document.querySelector('marble-agent-drawer').isOpen === true);
   assert.equal(await isOpen(page), false);
   assert.equal((await margins(page)).top, '0px');
+});
+
+test('the page glides into the room the shell makes, and back out of it', async () => {
+  const { page } = await visit();
+  await page.mouse.move(640, 400);
+  // Sample the page's left edge every frame while the shell opens and closes.
+  const track = (key) => page.evaluate(async (key) => {
+    const seen = [];
+    const t0 = performance.now();
+    dispatchEvent(new KeyboardEvent('keydown', { key, ctrlKey: true, bubbles: true }));
+    await new Promise((done) => {
+      const tick = () => {
+        seen.push(parseFloat(getComputedStyle(document.documentElement).marginLeft));
+        if (performance.now() - t0 < 600) requestAnimationFrame(tick); else done();
+      };
+      requestAnimationFrame(tick);
+    });
+    return seen;
+  }, key);
+  const opening = await track('j');
+  assert.ok(opening.some((x) => x > 20 && x < 240), `passes through the middle: ${opening.join(' ')}`);
+  assert.equal(opening.at(-1), 260);
+  assert.ok(opening.every((x, i) => i === 0 || x >= opening[i - 1]), 'never backs up');
+  const closing = await track('j');
+  assert.ok(closing.some((x) => x > 20 && x < 240), 'and on the way out');
+  assert.equal(closing.at(-1), 0);
+  assert.equal(await page.evaluate(() => document.getElementById('marble-shell-dock')), null, 'gone once it has arrived');
+});
+
+test('asked for less motion, the page moves at once', async () => {
+  const { page } = await visit('garden', { reducedMotion: 'reduce' });
+  await page.keyboard.press('Control+j');
+  assert.equal(await page.evaluate(() => getComputedStyle(document.documentElement).marginLeft), '260px');
+});
+
+test('on the Drive itself the bar says Drive, not the name of its file', async () => {
+  const { page, shell } = await visit('drive');
+  await page.keyboard.press('Control+j');
+  assert.deepEqual(await shell.locator('.crumbs > *').allInnerTexts(), ['Drive']);
+  assert.equal(await shell.locator('.crumbs a').getAttribute('aria-current'), 'page');
 });

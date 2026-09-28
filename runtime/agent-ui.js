@@ -981,6 +981,16 @@
     if (!picker || picker.hidden) return;
     const segs = [...picker.querySelectorAll('.seg-opts')].filter((box) => !box.closest('.seg')?.hidden);
     const overflowed = () => picker.scrollWidth > picker.clientWidth + 1;
+    // Measuring unfolds every sheet and folds it back, and a fold left to its
+    // transition plays the sheet's exit: the options hang over the composer
+    // for a moment each time. Nothing here is a sheet opening or closing, so
+    // the closed ones measure without motion.
+    for (const box of segs) {
+      const menu = box.classList.contains('is-open') ? null : segMenuOf(box);
+      if (!menu) continue;
+      menu.style.transition = 'none';
+      requestAnimationFrame(() => requestAnimationFrame(() => { menu.style.transition = ''; }));
+    }
     for (const box of segs) {
       collapseSegBox(box);
       box.classList.remove('is-drop');
@@ -7126,6 +7136,13 @@
        place of this panel's pin. */
     .panel[data-shell="float"] { border: 1px solid var(--line); border-radius: 16px; overflow: hidden;
       box-shadow: var(--shadow-lift); }
+    /* Between Fit and Float the card moves with the shell's own panels. The
+       slide itself stays the spring's: a transition on transform would fight it.
+       Only a card that was already showing glides; one arriving takes its
+       place at once, off-screen, or the conversation inside would be resized
+       on every frame of the slide. */
+    .panel[data-glide] { transition: top 340ms var(--settle), right 340ms var(--settle), bottom 340ms var(--settle),
+      border-radius 340ms var(--settle), box-shadow 340ms var(--settle), background-color 340ms var(--settle); }
     .panel[data-shell] .pin { display: none; }
     .panel[data-resizing="true"] { cursor: ew-resize; user-select: none; }
     @media (prefers-reduced-transparency: reduce) { .panel { background: var(--paper); -webkit-backdrop-filter: none; backdrop-filter: none; } }
@@ -7470,7 +7487,9 @@
       }
       this.isOpen = want;
       if (!want) this.hideMenus();
-      this.animateTo(want ? 1 : 0, { animate: !first });
+      // The shell's panels and the page ease over 340ms; this spring is tuned
+      // to land with them rather than a beat behind.
+      this.animateTo(want ? 1 : 0, { animate: !first, response: 0.25 });
       if (want && !first) {
         this.view.focusInput();
         const id = this.view.getAttribute('conversation');
@@ -7478,7 +7497,7 @@
       }
     }
 
-    animateTo(target, { animate = true, velocity = 0 } = {}) {
+    animateTo(target, { animate = true, velocity = 0, response } = {}) {
       this.cancelMotion?.();
       this.cancelMotion = null;
       if (!animate || this.reduced.matches) {
@@ -7490,6 +7509,7 @@
         from: this.progress,
         to: target,
         velocity,
+        ...(response ? { response } : {}),
         onFrame: (value) => {
           this.progress = value;
           this.render();
@@ -7505,10 +7525,16 @@
       const phone = this.phone.matches;
       const p = Math.max(0, Math.min(1, this.progress));
       const visible = this.isOpen || p > 0.001;
-      const shell = phone ? null : this.shell;
+      // A chat leaving with the shell leaves from where the shell had it, and
+      // only takes its own place again once it is out of sight.
+      if (this.shell && !phone) this.lastShell = this.shell;
+      else if (!visible) this.lastShell = null;
+      const shell = phone ? null : this.shell ?? (this.isOpen ? null : this.lastShell);
       const gap = shell?.mode === 'float' ? shell.gap : 0;
       this.panel.dataset.open = String(this.isOpen);
       this.panel.dataset.pinned = String(shell ? shell.mode === 'fit' : this.pinned && !phone);
+      this.panel.toggleAttribute('data-glide', Boolean(this.wasInShell && shell && this.isOpen));
+      this.wasInShell = Boolean(shell && this.isOpen);
       if (shell) this.panel.dataset.shell = shell.mode;
       else delete this.panel.dataset.shell;
       this.panel.style.top = shell ? `${shell.top}px` : '';

@@ -351,7 +351,9 @@ export async function createDrive(config, { log = console, agentProviders = null
     }
     // Last: the shell seats the drawer, so it comes after everything that
     // mounts one, and reads the drawer's tokens off window.marbleAgentUI.
-    tags += `\n<script src="${runtimeUrl('shell.js')}" data-marble-transient></script>`;
+    // It is told which document is the Drive, so on the Drive itself the bar
+    // says Drive rather than naming its file.
+    tags += `\n<script src="${runtimeUrl('shell.js')}" data-home="${escapeHtml(config.home)}" data-marble-transient></script>`;
     return source.includes('</body>')
       ? source.replace(/<\/body>/i, () => `${tags}\n</body>`)
       : source + tags;

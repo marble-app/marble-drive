@@ -24,6 +24,11 @@
   if (document.querySelector('meta[name="marble-shell"][content="off"]')) return;
 
   const BAR = 44;
+  // One motion for everything the shell moves: the panels, and the page making
+  // room for them. The drawer's spring (runtime/agent-ui.js) settles in about
+  // the same time, so the chat arrives with the rest rather than after it.
+  const MOTION = 340;
+  const EASE = 'cubic-bezier(.22, 1, .36, 1)';
   const NAV = 260;
   const GAP = 8;
   const PHONE = '(max-width: 719px)';
@@ -33,6 +38,9 @@
   // and a fragment rides through the redirect: `#/<folder>` is how the Drive
   // reads which folder to show.
   const HOME = '/';
+  // The Drive's own path, from the host (server/app.js), which is the one
+  // that knows what this drive calls it.
+  const HOME_DOC = document.currentScript?.dataset.home ?? null;
 
   const stored = (name, fallback) => {
     try { return localStorage.getItem(KEY + name) ?? fallback; } catch { return fallback; }
@@ -98,8 +106,10 @@
 
     /* Shown at once and hidden only after the slide: a panel that is still
        visibility: hidden on the frame it opens cannot take the focus ⌘K gives it. */
-    .bar, .nav { position: fixed; transition: transform 280ms var(--settle), opacity 220ms var(--settle), top 280ms var(--settle), left 280ms var(--settle),
-      right 280ms var(--settle), bottom 280ms var(--settle), visibility 0s linear var(--hide-after, 0s); }
+    .bar, .nav { position: fixed; transition: transform ${MOTION}ms ${EASE}, opacity ${Math.round(MOTION * 0.7)}ms ${EASE},
+      top ${MOTION}ms ${EASE}, left ${MOTION}ms ${EASE}, width ${MOTION}ms ${EASE}, bottom ${MOTION}ms ${EASE},
+      border-radius ${MOTION}ms ${EASE}, box-shadow ${MOTION}ms ${EASE}, background-color ${MOTION}ms ${EASE},
+      visibility 0s linear var(--hide-after, 0s); }
 
     /* ── The bar ── */
     .bar { top: 0; left: 0; width: 100vw; height: ${BAR}px; display: flex; align-items: center; gap: 6px; padding: 0 8px;
@@ -162,8 +172,13 @@
     @media (prefers-reduced-transparency: reduce) { :host([data-mode="float"]) .bar, :host([data-mode="float"]) .nav { background: var(--paper); -webkit-backdrop-filter: none; backdrop-filter: none; } }
 
     /* ── Closed, or the tree put away ── */
-    :host(:not([data-open])) .bar { transform: translateY(calc(-100% - 16px)); opacity: 0; pointer-events: none; visibility: hidden; --hide-after: 280ms; }
-    :host(:not([data-open])) .nav, :host([data-nav="off"]) .nav { transform: translateX(calc(-100% - 24px)); opacity: 0; pointer-events: none; visibility: hidden; --hide-after: 280ms; }
+    :host(:not([data-open])) .bar { transform: translateY(calc(-100% - 16px)); opacity: 0; pointer-events: none; visibility: hidden; --hide-after: ${MOTION}ms; }
+    :host(:not([data-open])) .nav, :host([data-nav="off"]) .nav { transform: translateX(calc(-100% - 24px)); opacity: 0; pointer-events: none; visibility: hidden; --hide-after: ${MOTION}ms; }
+    /* In Fit each panel travels exactly as far as the page's edge does, on the
+       same curve, so the page is never seen pulling away from a panel that has
+       not arrived yet. Floating cards clear their own shadow on the way out. */
+    :host([data-mode="fit"]:not([data-open])) .bar { transform: translateY(-100%); }
+    :host([data-mode="fit"]:not([data-open])) .nav, :host([data-mode="fit"][data-nav="off"]) .nav { transform: translateX(-100%); }
 
     /* ── App alone: a pill at the top-left corner, only when the pointer goes there ──
        The hot strip is thin on purpose: the corner is where an app keeps its
@@ -175,7 +190,8 @@
     .pill b { font-weight: 620; font-size: 13px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
     .pill:hover kbd { color: var(--ink); border-color: var(--accent); }
     :host([data-peek]:not([data-open])) .pill, :host(:not([data-open])) .pill:focus-visible { opacity: 1; transform: none; pointer-events: auto; }
-    :host([data-open]) .zone, :host([data-open]) .pill { display: none; }
+    :host([data-open]) .zone { display: none; }
+    :host([data-open]) .pill { opacity: 0; transform: translateY(-8px); pointer-events: none; }
     @media (hover: none) { .zone { display: none; } :host(:not([data-open])) .pill { opacity: 1; transform: none; pointer-events: auto; } }
 
     /* ── Popovers: Share and the document's menu ── */
@@ -197,7 +213,9 @@
 
     /* Arriving at a document with the shell open is not the shell opening. */
     :host([data-still]) *, :host([data-still]) *::before { transition: none !important; }
-    @media (prefers-reduced-motion: reduce) { .bar, .nav, .pill, .toast, .sec-h .i, .row .car { transition: none; } }
+    @media (prefers-reduced-motion: reduce) {
+      .bar, .nav, .pill, .toast, .sec-h .i, .row .car { transition: opacity 120ms linear, visibility 0s linear var(--hide-after, 0s); transform: none !important; }
+    }
   `;
 
   const h = (tag, className, text) => {
@@ -250,6 +268,7 @@
       this.menu = this.$('.menu');
       this.sharing = this.$('.sharing');
       this.phone = matchMedia(PHONE);
+      this.reduced = matchMedia('(prefers-reduced-motion: reduce)');
 
       this.state = {
         open: stored('open', '0') === '1',
@@ -366,7 +385,7 @@
       removeEventListener('marble-tray:ready', this.onDrawer);
       this.phone.removeEventListener('change', this.onViewport);
       this.offDrive?.();
-      this.dock(null);
+      this.dock(null, { animate: false });
     }
 
     // ------------------------------------------------------------ state
@@ -413,7 +432,7 @@
       chatButton.setAttribute('aria-pressed', String(chat));
       this.nav.inert = !open || !nav;
       this.bar.inert = !open;
-      this.dock(open && mode === 'fit' ? { top: BAR, left: nav ? NAV : 0 } : null);
+      this.dock(open && mode === 'fit' ? { top: BAR, left: nav ? NAV : 0 } : null, { animate: !this.hasAttribute('data-still') });
       if (open && !this.tree) this.load();
       this.announce();
     }
@@ -426,29 +445,47 @@
 
     /** Fit moves the page, the way the pinned drawer always has: a transient
      *  stylesheet, so nothing about the document changes. The drawer adds its
-     *  own right-hand margin; this is the top and the left. */
-    dock(inset) {
-      const existing = document.getElementById('marble-shell-dock');
-      if (!inset) {
-        existing?.remove();
-        document.documentElement.style.removeProperty('--marble-shell-top');
-        document.documentElement.style.removeProperty('--marble-shell-left');
+     *  own right-hand margin; this is the top and the left.
+     *
+     *  The page glides into the room it is given rather than jumping to it:
+     *  for one motion after a change the stylesheet also carries a transition
+     *  on the root's margins, which covers the drawer's margin too, and on
+     *  --marble-shell-top, so a document that sizes itself to the window
+     *  resizes with the rest. Only for that long — a margin that eased while
+     *  you dragged the chat's edge would trail your hand. */
+    dock(inset, { animate = true } = {}) {
+      const top = inset?.top ?? 0;
+      const left = inset?.left ?? 0;
+      const moving = animate && !this.reduced.matches;
+      let style = document.getElementById('marble-shell-dock');
+      if (!inset && !style) return;
+      if (!style) {
+        style = document.createElement('style');
+        style.id = 'marble-shell-dock';
+        style.setAttribute('data-marble-transient', '');
+        document.head.append(style);
+      }
+      const write = (withMotion) => {
+        const motion = withMotion
+          ? `transition: margin ${MOTION}ms ${EASE}, height ${MOTION}ms ${EASE}, --marble-shell-top ${MOTION}ms ${EASE}, --marble-shell-left ${MOTION}ms ${EASE} !important;`
+          : '';
+        // A document that sizes itself to the window can ask how much of it the
+        // shell has taken: calc(100dvh - var(--marble-shell-top, 0px)).
+        style.textContent = `html { --marble-shell-top: ${top}px; --marble-shell-left: ${left}px; margin-top: ${top}px !important; margin-left: ${left}px !important; height: calc(100% - ${top}px) !important; ${motion} }`;
+      };
+      clearTimeout(this.settleTimer);
+      if (!moving) {
+        if (inset) write(false);
+        else style.remove();
         return;
       }
-      const css = `html { margin-top: ${inset.top}px !important; margin-left: ${inset.left}px !important; height: calc(100% - ${inset.top}px) !important; }`;
-      // A document that sizes itself to the window can ask how much of it the
-      // shell has taken: calc(100dvh - var(--marble-shell-top, 0px)).
-      document.documentElement.style.setProperty('--marble-shell-top', `${inset.top}px`);
-      document.documentElement.style.setProperty('--marble-shell-left', `${inset.left}px`);
-      if (existing) {
-        existing.textContent = css;
-        return;
-      }
-      const style = document.createElement('style');
-      style.id = 'marble-shell-dock';
-      style.setAttribute('data-marble-transient', '');
-      style.textContent = css;
-      document.head.append(style);
+      write(true);
+      // Once it has arrived: the motion comes off, and a page that is not
+      // docked any more gets back exactly the stylesheet it had.
+      this.settleTimer = setTimeout(() => {
+        if (inset) write(false);
+        else style.remove();
+      }, MOTION + 60);
     }
 
     // ------------------------------------------------------------ keys
@@ -518,7 +555,7 @@
       const top = h('a', '', 'Drive');
       top.href = this.folderHref('');
       crumbs.append(top);
-      if (this.home && this.home === this.here) {
+      if (HOME_DOC && HOME_DOC === this.here) {
         top.setAttribute('aria-current', 'page');
         top.classList.add('here');
         return;
@@ -638,15 +675,6 @@
       }
       this.tree = await drive.tree('');
       this.drawTree();
-      // Which document the front door lands on is the host's to say. Asked
-      // once, so that on the Drive itself the bar says Drive and not its file.
-      if (this.home === undefined) {
-        this.home = null;
-        const landed = await fetch(HOME, { method: 'HEAD', cache: 'no-store' }).catch(() => null);
-        const path = landed?.redirected ? new URL(landed.url).pathname.match(/^\/a\/(.+)$/)?.[1] : null;
-        this.home = path ? decodeURIComponent(path) : null;
-        if (this.home === this.here) this.fillCrumbs();
-      }
     }
 
     toggleSection(name) {
@@ -770,6 +798,12 @@
         this.scroll.querySelector('[aria-current="page"]')?.scrollIntoView({ block: 'nearest' });
       }
     }
+  }
+
+  // Registered as lengths so they can be eased; unregistered, a custom
+  // property jumps from one value to the next.
+  for (const name of ['--marble-shell-top', '--marble-shell-left']) {
+    try { CSS.registerProperty({ name, syntax: '<length>', inherits: true, initialValue: '0px' }); } catch { /* already, or unsupported */ }
   }
 
   customElements.define('marble-shell', MarbleShell);
