@@ -78,14 +78,16 @@ test('⌘J opens Fit: the page gives up the top, the left and the right, and the
   assert.deepEqual(await margins(page), { top: '0px', left: '0px', right: '0px' });
 });
 
-test('Float lays the panels over the page and moves nothing', async () => {
+test('Float lays the sidebars over the page; the bar stays docked above it', async () => {
   const { page, shell, panel } = await visit();
   await page.keyboard.press('Control+j');
   await shell.locator('[data-act="float"]').click();
-  assert.deepEqual(await margins(page), { top: '0px', left: '0px', right: '0px' });
+  assert.deepEqual(await margins(page), { top: '44px', left: '0px', right: '0px' });
   assert.equal(await panel.getAttribute('data-shell'), 'float');
-  // The card glides from Fit's place to Float's.
-  await page.waitForFunction(() => document.querySelector('marble-agent-drawer').shadowRoot.querySelector('.panel').getBoundingClientRect().top === 44 + 16);
+  assert.deepEqual(await shell.locator('.bar').evaluate((el) => { const r = el.getBoundingClientRect(); return [r.top, r.left, r.width]; }), [0, 0, 1280]);
+  // The cards sit just under the bar; the chat's glides from Fit's place.
+  assert.equal(await shell.locator('.nav').evaluate((el) => el.getBoundingClientRect().top), 44 + 8);
+  await page.waitForFunction(() => document.querySelector('marble-agent-drawer').shadowRoot.querySelector('.panel').getBoundingClientRect().top === 44 + 8);
   assert.equal(await shell.locator('[data-act="float"]').getAttribute('aria-pressed'), 'true');
   await shell.locator('[data-act="fit"]').click();
   assert.equal((await margins(page)).top, '44px');

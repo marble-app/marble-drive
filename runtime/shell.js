@@ -179,20 +179,20 @@
     /* Under the hand the panel follows at once; easing would trail it. */
     :host([data-resizing]) .nav { transition: none; }
 
-    /* ── Float: the same three, as cards over the page ── */
-    :host([data-mode="float"]) .bar { top: ${GAP}px; left: ${GAP}px; width: calc(100vw - ${GAP * 2}px); border: 1px solid var(--line); border-radius: 12px;
+    /* ── Float: the two sidebars as cards over the page ──
+       The bar stays where Fit has it in either mode. It is the one line that
+       says where you are, and a page that slid under it would lose its top
+       edge to it; Float is about the sidebars, not the bar. */
+    :host([data-mode="float"]) .nav { top: ${BAR + GAP}px; left: ${GAP}px; bottom: ${GAP}px; border: 1px solid var(--line); border-radius: 16px;
       box-shadow: var(--shadow-lift); background: color-mix(in srgb, var(--paper) 82%, transparent); -webkit-backdrop-filter: blur(18px) saturate(1.3); backdrop-filter: blur(18px) saturate(1.3); }
-    :host([data-mode="float"]) .nav { top: ${BAR + GAP * 2}px; left: ${GAP}px; bottom: ${GAP}px; border: 1px solid var(--line); border-radius: 16px;
-      box-shadow: var(--shadow-lift); background: color-mix(in srgb, var(--paper) 82%, transparent); -webkit-backdrop-filter: blur(18px) saturate(1.3); backdrop-filter: blur(18px) saturate(1.3); }
-    @media (prefers-reduced-transparency: reduce) { :host([data-mode="float"]) .bar, :host([data-mode="float"]) .nav { background: var(--paper); -webkit-backdrop-filter: none; backdrop-filter: none; } }
+    @media (prefers-reduced-transparency: reduce) { :host([data-mode="float"]) .nav { background: var(--paper); -webkit-backdrop-filter: none; backdrop-filter: none; } }
 
     /* ── Closed, or the tree put away ── */
-    :host(:not([data-open])) .bar { transform: translateY(calc(-100% - 16px)); opacity: 0; pointer-events: none; visibility: hidden; --hide-after: ${MOTION}ms; }
+    :host(:not([data-open])) .bar { transform: translateY(-100%); opacity: 0; pointer-events: none; visibility: hidden; --hide-after: ${MOTION}ms; }
     :host(:not([data-open])) .nav, :host([data-nav="off"]) .nav { transform: translateX(calc(-100% - 24px)); opacity: 0; pointer-events: none; visibility: hidden; --hide-after: ${MOTION}ms; }
     /* In Fit each panel travels exactly as far as the page's edge does, on the
        same curve, so the page is never seen pulling away from a panel that has
        not arrived yet. Floating cards clear their own shadow on the way out. */
-    :host([data-mode="fit"]:not([data-open])) .bar { transform: translateY(-100%); }
     :host([data-mode="fit"]:not([data-open])) .nav, :host([data-mode="fit"][data-nav="off"]) .nav { transform: translateX(-100%); }
 
     /* ── App alone: a pill at the top-left corner, only when the pointer goes there ──
@@ -315,7 +315,7 @@
         mode: this.state.mode,
         nav: this.state.nav,
         chat: this.state.chat,
-        top: this.state.mode === 'float' ? BAR + GAP * 2 : BAR,
+        top: this.state.mode === 'float' ? BAR + GAP : BAR,
         gap: GAP,
         // How much of the window the tree takes, so the chat's edge knows
         // how far it may be pulled.
@@ -462,7 +462,7 @@
       edge.setAttribute('aria-valuenow', String(this.navWidth));
       edge.setAttribute('aria-valuemin', String(NAV_MIN));
       edge.setAttribute('aria-valuemax', String(this.clampNav(NAV_MAX)));
-      this.dock(open && mode === 'fit' ? { top: BAR, left: nav ? this.navWidth : 0 } : null, { animate: animate && !this.hasAttribute('data-still') });
+      this.dock(open ? { top: BAR, left: mode === 'fit' && nav ? this.navWidth : 0 } : null, { animate: animate && !this.hasAttribute('data-still') });
       if (open && !this.tree) this.load();
       this.announce();
     }
