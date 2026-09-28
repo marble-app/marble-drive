@@ -71,6 +71,21 @@ test('the service gets the sprite\'s own settings after the defaults, and keys o
   assert.equal((await fsp.readlink(path.join(home, 'app', 'current'))).endsWith('/r1'), true);
 });
 
+// A host that dies is started again by the release's keeper; a release from
+// before the keeper still runs node itself, so rolling back to one works.
+test('the service runs the host through the release\'s keeper when it has one', async () => {
+  const bare = await spriteStubs(await fsp.mkdtemp(path.join(os.tmpdir(), 'sprite-env-')), []);
+  assert.match(bare.calls, /services create marble-drive --cmd \S*node --args bin\/marble-drive\.js,serve /);
+
+  const home = await fsp.mkdtemp(path.join(os.tmpdir(), 'sprite-env-'));
+  const tools = path.join(home, 'app', 'releases', 'r1', 'marble-drive', 'tools', 'sprite');
+  await fsp.mkdir(tools, { recursive: true });
+  await fsp.writeFile(path.join(tools, 'serve.sh'), '');
+  const { run, calls } = await spriteStubs(home, []);
+  assert.equal(run.status, 0, run.stderr);
+  assert.match(calls, /services create marble-drive --cmd bash --args tools\/sprite\/serve\.sh --dir \S+\/app\/current\/marble-drive /);
+});
+
 test('a setting with a comma in it is refused before anything moves', async () => {
   const home = await fsp.mkdtemp(path.join(os.tmpdir(), 'sprite-env-'));
   const { run, calls } = await spriteStubs(home, ['MARBLE_DRIVE_SECRET=a,b']);

@@ -145,7 +145,12 @@ service_up() {
   # Recreated rather than restarted, so the service's settings are always
   # this script's: a restart keeps the env it was created with.
   sprite-env services delete "$SERVICE" >/dev/null 2>&1 || true
-  sprite-env services create "$SERVICE" --cmd "$NODE" --args bin/marble-drive.js,serve \
+  # Through the release's own keeper (tools/sprite/serve.sh), which starts the
+  # host again when it dies; a release from before it existed runs node as it
+  # always did, so a rollback to one still comes up.
+  local cmd=("$NODE" bin/marble-drive.js,serve)
+  [[ -f "$CURRENT/marble-drive/tools/sprite/serve.sh" ]] && cmd=(bash tools/sprite/serve.sh)
+  sprite-env services create "$SERVICE" --cmd "${cmd[0]}" --args "${cmd[1]}" \
     --dir "$CURRENT/marble-drive" --env "$env" --http-port "$PORT" --no-stream >/dev/null
 }
 

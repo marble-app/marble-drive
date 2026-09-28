@@ -20,6 +20,7 @@ import { effectiveCapability } from './capability.js';
 import { pickEnv } from './env.js';
 import { MAX_HOP, MAX_SENDS, clampSeconds, pickTarget, renderMessages, validateText } from './messages.js';
 import { MESSAGING_INSTRUCTIONS } from './instructions.js';
+import { firstToGo } from './first-to-go.js';
 import {
   CLAUDE_PROVIDERS,
   CONTINUE,
@@ -628,7 +629,9 @@ export function createRunner({ store, tools, providers, workdir, origin, bridgeP
       // when one is written (spec §10.1); until then it is null and this is a
       // plain spawn.
       const cwd = spec.cwd ?? workspace;
-      const launch = sandbox ? sandbox({ command: spec.command, args: spec.args, cwd }) : spec;
+      // When the machine runs out of memory, the kernel takes the turn before
+      // the host (server/agent/first-to-go.js).
+      const launch = firstToGo(sandbox ? sandbox({ command: spec.command, args: spec.args, cwd }) : spec);
       const child = spawn(launch.command, launch.args, { cwd, env, stdio: ['pipe', 'pipe', 'pipe'] });
       turn.child = child;
       child.stdin.on('error', () => {});
