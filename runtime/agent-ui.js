@@ -468,6 +468,27 @@
 
   // ------------------------------------------------------------ helpers
 
+  /** Keys typed into a field in chrome belong to the field. A page listens for
+   *  its shortcuts on the document, and an event from inside a shadow root
+   *  reaches it retargeted to the host — so to the page, V typed into the
+   *  composer is V pressed on the page, and ⌘Z there is the page's undo.
+   *  Stopped at the shadow root, the key never gets that far. The drive's own
+   *  chords (⌘J, ⌘K, ⌘\) are heard in the capture phase on window, before
+   *  this; Escape and Tab still travel, since leaving a field is not typing in
+   *  it; and ⌘⇧O and ⌘⇧D, which a page may answer itself, go through. */
+  const typingIn = (event) => {
+    const node = event.composedPath?.()[0];
+    return Boolean(node?.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(node?.tagName ?? ''));
+  };
+  function keepKeys(root) {
+    const keep = (event) => {
+      if (!typingIn(event) || event.key === 'Escape' || event.key === 'Tab') return;
+      if ((event.metaKey || event.ctrlKey) && event.shiftKey && /^[od]$/i.test(event.key)) return;
+      event.stopPropagation();
+    };
+    for (const type of ['keydown', 'keypress', 'keyup']) root.addEventListener(type, keep);
+  }
+
   const h = (tag, className, text) => {
     const node = document.createElement(tag);
     if (className) node.className = className;
@@ -3246,6 +3267,7 @@
     constructor() {
       super();
       const root = this.attachShadow({ mode: 'open' });
+      keepKeys(root);
       root.innerHTML = `<style>${TOKENS}${CONVERSATION_CSS}</style>
         <header class="mast" hidden>
           <h2 class="heading" contenteditable="plaintext-only" spellcheck="false" aria-label="Conversation title"></h2>
@@ -7392,7 +7414,7 @@
         // or open from the last visit — it could not tell then whether what
         // it is showing had finished unseen. Now it can: showing it is seeing it.
         const id = this.view.getAttribute('conversation');
-        if (this.isOpen && id && this.summaries.get(id)?.needsReview) api.markReviewed(id).catch(() => {});
+        if (this.isOpen && id && this.summaries.get(id)?.needsReview) this.markSeen(id);
       }).catch(() => {});
       this.offSummaries = api.on('*', (summary) => {
         if (summary?.removed) {
@@ -7449,6 +7471,16 @@
       return this.shadowRoot.querySelector(selector);
     }
 
+    /** Showing a finished conversation is seeing it. Said aloud as well as
+     *  filed, because a list that was read a moment before the host heard
+     *  (the shell's Agents, runtime/shell.js) would otherwise go on calling
+     *  it unread. */
+    markSeen(id) {
+      this.api.markReviewed(id)
+        .then(() => dispatchEvent(new CustomEvent('marble-agent:seen', { detail: { id } })))
+        .catch(() => {});
+    }
+
     // ---------------------------------------------------------- open, close
 
     open({ animate = true } = {}) {
@@ -7462,7 +7494,7 @@
       this.animateTo(1, { animate });
       this.view.focusInput();
       const id = this.view.getAttribute('conversation');
-      if (id && this.summaries.get(id)?.needsReview) this.api.markReviewed(id).catch(() => {});
+      if (id && this.summaries.get(id)?.needsReview) this.markSeen(id);
     }
 
     close() {
@@ -7503,7 +7535,7 @@
       if (want && !first) {
         this.view.focusInput();
         const id = this.view.getAttribute('conversation');
-        if (id && this.summaries.get(id)?.needsReview) this.api.markReviewed(id).catch(() => {});
+        if (id && this.summaries.get(id)?.needsReview) this.markSeen(id);
       }
     }
 
@@ -7619,7 +7651,9 @@
     dock(on) {
       const existing = document.getElementById('marble-agent-dock');
       if (on) {
-        const css = `html { margin-inline-end: ${this.width}px !important; }`;
+        // The width is said as well as taken, so chrome that centres itself on
+        // the page (Describe's toolbar) can centre on what is left of it.
+        const css = `html { margin-inline-end: ${this.width}px !important; --marble-dock-right: ${this.width}px; }`;
         if (existing) {
           existing.textContent = css;
           return;
@@ -7902,7 +7936,7 @@
       if (this.view.getAttribute('conversation') === id) return;
       this.api.remember(id);
       this.view.setAttribute('conversation', id);
-      if (this.summaries.get(id)?.needsReview && this.isOpen) this.api.markReviewed(id).catch(() => {});
+      if (this.summaries.get(id)?.needsReview && this.isOpen) this.markSeen(id);
     }
 
     showMeta(meta) {
@@ -8083,7 +8117,7 @@
   };
 
   const buildAskCard = (event, submit) => MarbleConversation.prototype.buildAskCard(event, submit);
-  window.marbleAgentUI = { stateOf, STATE_CSS, renderText, spring, project, TOKENS, watchPageTheme, buildAskCard, ASK_CSS, conversationTags, eventBelongsToConversation, askResponse, TAG_CSS, fillMeters, usageAvailable, usageTone, formatReset, formatAsOf, USAGE_CSS, pageTheme, applyPageTheme, fillRadios, fitPicker, fitPresets, sortProviders };
+  window.marbleAgentUI = { stateOf, STATE_CSS, renderText, spring, project, TOKENS, watchPageTheme, keepKeys, buildAskCard, ASK_CSS, conversationTags, eventBelongsToConversation, askResponse, TAG_CSS, fillMeters, usageAvailable, usageTone, formatReset, formatAsOf, USAGE_CSS, pageTheme, applyPageTheme, fillRadios, fitPicker, fitPresets, sortProviders };
   Object.assign(window.marbleAgentUI, { collapseToolRows, toolShortName, toolLabel });
 
   if (window.marble?.agent) mount();

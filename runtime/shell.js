@@ -104,6 +104,8 @@
     download: '<path d="M8 2.25v7.5M5.25 7 8 9.75 10.75 7"/><path d="M3.25 10.5v1.75c0 .83.67 1.5 1.5 1.5h6.5c.83 0 1.5-.67 1.5-1.5V10.5"/>',
     collapse: '<path d="M6 2.75V4.5c0 .83-.67 1.5-1.5 1.5H2.75M13.25 6H11.5c-.83 0-1.5-.67-1.5-1.5V2.75M2.75 10H4.5c.83 0 1.5.67 1.5 1.5v1.75M10 13.25V11.5c0-.83.67-1.5 1.5-1.5h1.75"/>',
     check: '<path d="m3.75 8.25 2.75 2.75 5.75-6.25"/>',
+    describe: '<rect x="2.25" y="2.25" width="11.5" height="11.5" rx="2.75"/><path d="M5 10.25c1.5-3.1 2.55-4.65 3.2-4.65 1 0 .2 4.65 1.2 4.65.65 0 1.25-.95 1.75-2.85"/>',
+    move: '<path d="M2 11.25v-6.5c0-.83.67-1.5 1.5-1.5h2.88c.4 0 .78.16 1.06.44l.62.62c.28.28.66.44 1.06.44h3.38c.83 0 1.5.67 1.5 1.5v4.99c0 .83-.67 1.5-1.5 1.5H3.5c-.83 0-1.5-.67-1.5-1.5z"/><path d="M6 9.25h4.25M8.75 7.5 10.5 9.25 8.75 11"/>',
     grip: '<path d="M6 4h.01M10 4h.01M6 8h.01M10 8h.01M6 12h.01M10 12h.01" stroke-width="2"/>',
   };
   const icon = (name) => `<svg class="i" viewBox="0 0 16 16" aria-hidden="true">${PATHS[name]}</svg>`;
@@ -153,10 +155,10 @@
     /* ── The tree ── */
     .nav { top: ${BAR}px; left: 0; bottom: 0; width: var(--nav-w, ${NAV}px); display: flex; flex-direction: column;
       background: var(--paper); border-right: 1px solid var(--line); font-size: 13px; }
-    .search { margin: 10px 10px 6px; display: flex; align-items: center; gap: 8px; padding: 0 8px; height: 32px; border-radius: 8px; background: var(--paper-2); color: var(--faint); }
-    .search input { flex: 1; min-width: 0; border: 0; outline: 0; background: none; font: inherit; color: var(--ink); padding: 0; }
-    .search input::placeholder { color: var(--faint); }
-    .search:focus-within { box-shadow: inset 0 0 0 1px var(--accent); }
+    .search, .finder { margin: 10px 10px 6px; display: flex; align-items: center; gap: 8px; padding: 0 8px; height: 32px; border-radius: 8px; background: var(--paper-2); color: var(--faint); }
+    .search input, .finder input { flex: 1; min-width: 0; border: 0; outline: 0; background: none; font: inherit; color: var(--ink); padding: 0; }
+    .search input::placeholder, .finder input::placeholder { color: var(--faint); }
+    .search:focus-within, .finder:focus-within { box-shadow: inset 0 0 0 1px var(--accent); }
     .search:focus-within kbd { display: none; }
     .scroll { flex: 1; overflow: auto; padding: 2px 6px 12px; overscroll-behavior: contain; }
     .sec { position: relative; border-radius: 10px; }
@@ -269,6 +271,27 @@
     .sharing .link { display: flex; gap: 6px; }
     .sharing input { flex: 1; min-width: 0; height: 30px; border: 1px solid var(--line); border-radius: 8px; padding: 0 8px; font: 12px/1 ui-monospace, SFMono-Regular, Menlo, monospace; color: var(--muted); background: var(--paper); }
     .sharing .copy { height: 30px; padding: 0 12px; border-radius: 8px; background: var(--ink); color: var(--paper); font-weight: 600; font-size: 12.5px; display: flex; align-items: center; gap: 6px; }
+    /* Move or rename: the name, then where. */
+    .moving { width: 320px; padding: 12px; display: flex; flex-direction: column; gap: 8px; }
+    .moving h3 { margin: 0; font-size: 13.5px; font-weight: 600; }
+    .moving .name { height: 30px; border: 1px solid var(--line); border-radius: 8px; padding: 0 8px; font: inherit; color: var(--ink); background: var(--paper); }
+    .moving .name:focus { outline: 2px solid var(--accent); outline-offset: -1px; }
+    .moving .finder { margin: 0; }
+    .dests { max-height: 220px; overflow: auto; display: flex; flex-direction: column; gap: 1px; }
+    .dest { display: flex; align-items: center; gap: 7px; padding: 5px 8px; border-radius: 6px; color: var(--muted); text-align: left; white-space: nowrap; }
+    .dest > span { overflow: hidden; text-overflow: ellipsis; }
+    .dest:hover { background: var(--paper-2); color: var(--ink); }
+    .dest[aria-selected="true"] { background: var(--accent-soft); color: var(--ink); font-weight: 560; }
+    .dest[aria-selected="true"] .i { color: var(--accent-ink); }
+    .dest .here-tag { margin-left: auto; font-size: 11px; color: var(--faint); font-weight: 400; }
+    .moving .note { margin: 0; font-size: 12px; color: var(--muted); }
+    .moving .note[data-bad] { color: var(--danger, #b4533e); }
+    .moving .go { display: flex; justify-content: flex-end; gap: 6px; }
+    .moving .go button { height: 30px; padding: 0 12px; border-radius: 8px; font-weight: 600; font-size: 12.5px; }
+    .moving .cancel { color: var(--muted); }
+    .moving .cancel:hover { background: var(--paper-2); color: var(--ink); }
+    .moving .ok { background: var(--ink); color: var(--paper); }
+    .moving .ok:disabled { opacity: .4; cursor: default; }
     .toast { position: fixed; left: 50%; bottom: 24px; transform: translate(-50%, 8px); opacity: 0; pointer-events: none; background: var(--ink); color: var(--paper);
       border-radius: 999px; padding: 7px 14px; font-size: 12.5px; transition: opacity 160ms var(--settle), transform 160ms var(--settle); }
     .toast[data-on] { opacity: 1; transform: translate(-50%, 0); }
@@ -294,6 +317,9 @@
     constructor() {
       super();
       const root = this.attachShadow({ mode: 'open' });
+      // Typing in the search or a dialog here is typing, not the page's
+      // shortcuts (runtime/agent-ui.js, keepKeys).
+      UI?.keepKeys?.(root);
       root.innerHTML = `<style>${UI?.TOKENS ?? FALLBACK_TOKENS}${STYLE}</style>
         <div class="zone" aria-hidden="true"></div>
         <button type="button" class="pill" aria-label="Open the drive (⌘J)">${LOGO}<b></b><kbd>⌘J</kbd></button>
@@ -302,6 +328,7 @@
           <a class="home" aria-label="Drive" title="Drive">${LOGO}</a>
           <nav class="crumbs" aria-label="Where you are"></nav>
           <span class="spacer"></span>
+          <button type="button" class="ib" data-act="describe" aria-pressed="false" aria-label="Describe a change (⌘⇧D)" title="Describe a change (⌘⇧D)" hidden>${icon('describe')}</button>
           <button type="button" class="share" data-act="share" aria-haspopup="dialog" aria-expanded="false">${icon('share')}Share</button>
           <span class="vr"></span>
           <span class="seg" role="group" aria-label="Layout">
@@ -322,14 +349,23 @@
           <p>Anyone who can open this drive can open this link.</p>
           <div class="link"><input readonly aria-label="Link"><button type="button" class="copy">${icon('link')}Copy</button></div>
         </div>
+        <div class="pop moving" role="dialog" aria-label="Move or rename" hidden>
+          <h3>Move or rename</h3>
+          <input class="name" aria-label="Name" spellcheck="false" autocomplete="off">
+          <label class="finder">${icon('search')}<input class="find" type="search" placeholder="Find a folder" aria-label="Find a folder" autocomplete="off" spellcheck="false"></label>
+          <div class="dests" role="listbox" aria-label="Folders"></div>
+          <p class="note"></p>
+          <div class="go"><button type="button" class="cancel">Cancel</button><button type="button" class="ok" disabled>Move</button></div>
+        </div>
         <div class="toast" role="status" aria-live="polite"></div>`;
       this.$ = (selector) => root.querySelector(selector);
       this.bar = this.$('.bar');
       this.nav = this.$('.nav');
       this.scroll = this.$('.scroll');
-      this.search = this.$('.search input');
+      this.search = this.$('.nav .search input');
       this.menu = this.$('.menu');
       this.sharing = this.$('.sharing');
+      this.moving = this.$('.moving');
       this.phone = matchMedia(PHONE);
       this.reduced = matchMedia('(prefers-reduced-motion: reduce)');
 
@@ -402,19 +438,23 @@
         else if (act === 'chat') this.set({ chat: !this.state.chat });
         else if (act === 'close') this.setOpen(false);
         else if (act === 'share') this.toggleSharing();
+        else if (act === 'describe') dispatchEvent(new CustomEvent('marble-marks:toggle'));
         else if (act === 'doc') this.toggleMenu(event.target.closest('[data-act]'));
       });
       this.sharing.querySelector('.copy').addEventListener('click', () => this.copyLink());
+      this.bindMove();
+      this.arrive();
       this.menu.addEventListener('click', (event) => {
         const pick = event.target.closest('[data-pick]')?.dataset.pick;
         if (!pick) return;
         this.hidePops();
         if (pick === 'link') this.copyLink();
+        else if (pick === 'move') this.openMove();
         else if (pick === 'drive') location.href = this.folderHref(folderOf(this.here));
         else if (pick === 'download') location.href = window.marble.drive.downloadHref(this.here);
       });
       this.shadowRoot.addEventListener('pointerdown', (event) => {
-        if (!event.composedPath().some((node) => node === this.menu || node === this.sharing || node?.dataset?.act === 'share' || node?.dataset?.act === 'doc')) this.hidePops();
+        if (!event.composedPath().some((node) => node === this.menu || node === this.sharing || node === this.moving || node?.dataset?.act === 'share' || node?.dataset?.act === 'doc')) this.hidePops();
       });
       this.onOutside = (event) => {
         if (!event.composedPath().includes(this)) this.hidePops();
@@ -456,6 +496,13 @@
       // this or after it; either way it asks once it exists.
       this.onDrawer = () => this.announce();
       addEventListener('marble-tray:ready', this.onDrawer);
+      // Describe mode (runtime/agent-marks.js) is there only where the tray
+      // is; its button here says whether it is on.
+      this.onMarks = (event) => {
+        this.$('[data-act="describe"]').setAttribute('aria-pressed', String(Boolean(event.detail?.describing)));
+        this.$('[data-act="describe"]').hidden = false;
+      };
+      addEventListener('marble-marks:mode', this.onMarks);
       this.onViewport = () => this.apply();
       this.phone.addEventListener('change', this.onViewport);
       this.onWindowResize = () => this.apply({ animate: false });
@@ -472,10 +519,12 @@
       removeEventListener('keydown', this.onKey, true);
       removeEventListener('pointerdown', this.onOutside);
       removeEventListener('marble-tray:ready', this.onDrawer);
+      removeEventListener('marble-marks:mode', this.onMarks);
       this.phone.removeEventListener('change', this.onViewport);
       removeEventListener('resize', this.onWindowResize);
       this.offDrive?.();
       this.offAgents?.();
+      removeEventListener('marble-agent:seen', this.onSeen);
       this.dock(null, { animate: false });
     }
 
@@ -523,6 +572,7 @@
       this.$('[data-act="float"]').setAttribute('aria-pressed', String(mode === 'float'));
       const chatButton = this.$('[data-act="chat"]');
       chatButton.hidden = !this.drawer;
+      this.$('[data-act="describe"]').hidden = !document.querySelector('.marble-marks-layer');
       chatButton.setAttribute('aria-pressed', String(chat));
       this.nav.inert = !open || !nav;
       this.bar.inert = !open;
@@ -586,6 +636,140 @@
         if (inset) write(false);
         else style.remove();
       }, MOTION + 60);
+    }
+
+    // ------------------------------------------------------------ moving this document
+
+    /** Move or rename the document you are in. The host does the moving and
+     *  makes the old address forward (server/moves.js), so a link or a tab
+     *  left on it still lands; this page is bound to the old address, so it
+     *  opens again at the new one, where you were on it. */
+    openMove() {
+      this.hidePops();
+      const dialog = this.moving;
+      this.moveTo = { folder: folderOf(this.here) };
+      dialog.querySelector('.name').value = nameOf(this.here);
+      dialog.querySelector('.find').value = '';
+      dialog.hidden = false;
+      const anchor = this.$('.crumbs .here');
+      this.place(dialog, anchor, 'left');
+      if (!this.tree) this.load().then(() => this.drawDests());
+      this.drawDests();
+      const name = dialog.querySelector('.name');
+      name.focus({ preventScroll: true });
+      name.select();
+    }
+
+    folders() {
+      const out = [{ path: '', name: 'Drive', depth: 0 }];
+      const walk = (folder, depth) => {
+        const kids = (folder.children ?? []).filter((c) => c.kind === 'folder')
+          .sort((a, b) => a.name.localeCompare(b.name, undefined, { numeric: true, sensitivity: 'base' }));
+        for (const child of kids) {
+          out.push({ path: child.path, name: child.name, depth });
+          walk(child, depth + 1);
+        }
+      };
+      if (this.tree) walk(this.tree, 1);
+      return out;
+    }
+
+    drawDests() {
+      const list = this.moving.querySelector('.dests');
+      const query = this.moving.querySelector('.find').value.trim().toLowerCase();
+      list.replaceChildren();
+      for (const folder of this.folders()) {
+        if (query && !folder.path.toLowerCase().includes(query) && !(folder.path === '' && 'drive'.includes(query))) continue;
+        const b = h('button', 'dest');
+        b.type = 'button';
+        b.setAttribute('role', 'option');
+        b.dataset.dest = folder.path;
+        b.style.paddingLeft = `${8 + (query ? 0 : folder.depth * 14)}px`;
+        b.setAttribute('aria-selected', String(folder.path === this.moveTo.folder));
+        b.innerHTML = icon('folder');
+        b.append(h('span', '', query && folder.path ? folder.path : folder.name));
+        if (folder.path === folderOf(this.here)) b.append(h('span', 'here-tag', 'now'));
+        list.append(b);
+      }
+      this.checkMove();
+    }
+
+    target() {
+      const name = this.moving.querySelector('.name').value.trim();
+      return { name, path: [this.moveTo.folder, name].filter(Boolean).join('/') };
+    }
+
+    checkMove() {
+      const { name, path } = this.target();
+      const note = this.moving.querySelector('.note');
+      const ok = this.moving.querySelector('.ok');
+      const taken = path !== this.here && this.docs().some((d) => d.path === path);
+      const bad = !name ? 'A document needs a name.'
+        : /[\/\\]/.test(name) ? 'A name cannot hold a slash; pick the folder below.'
+        : taken ? `Something called ${name} is already there.`
+        : null;
+      note.toggleAttribute('data-bad', Boolean(bad));
+      note.textContent = bad ?? (path === this.here ? '' : 'Links to it keep working: the old address sends them here.');
+      ok.disabled = Boolean(bad) || path === this.here;
+      ok.textContent = folderOf(path) === folderOf(this.here) ? 'Rename' : 'Move';
+    }
+
+    bindMove() {
+      const dialog = this.moving;
+      dialog.querySelector('.name').addEventListener('input', () => this.checkMove());
+      dialog.querySelector('.find').addEventListener('input', () => this.drawDests());
+      dialog.querySelector('.dests').addEventListener('click', (event) => {
+        const dest = event.target.closest('.dest');
+        if (!dest) return;
+        this.moveTo.folder = dest.dataset.dest;
+        for (const b of dialog.querySelectorAll('.dest')) b.setAttribute('aria-selected', String(b === dest));
+        this.checkMove();
+      });
+      dialog.querySelector('.cancel').addEventListener('click', () => this.hidePops());
+      dialog.querySelector('.ok').addEventListener('click', () => this.commitMove());
+      dialog.addEventListener('keydown', (event) => {
+        if (event.key === 'Enter' && !dialog.querySelector('.ok').disabled && !event.target.closest?.('.dest, .cancel')) {
+          event.preventDefault();
+          this.commitMove();
+        }
+      });
+    }
+
+    async commitMove() {
+      const ok = this.moving.querySelector('.ok');
+      const { path } = this.target();
+      if (ok.disabled || path === this.here) return;
+      ok.disabled = true;
+      try {
+        // Whatever is still on its way to the file lands at the old address
+        // first; the move carries it.
+        await window.marble.flush?.();
+        await window.marble.drive.move(this.here, path);
+      } catch (err) {
+        const note = this.moving.querySelector('.note');
+        note.setAttribute('data-bad', '');
+        note.textContent = err.message || 'The move did not happen.';
+        ok.disabled = false;
+        return;
+      }
+      try {
+        sessionStorage.setItem(`${KEY}arrive`, JSON.stringify({ path, x: scrollX, y: scrollY, renamed: folderOf(path) === folderOf(this.here) }));
+      } catch { /* a fresh page at the top is all that is lost */ }
+      location.replace(`${window.marble.href(path)}${location.hash}`);
+    }
+
+    /** Arriving at a document this page just moved: back to where you were on it. */
+    arrive() {
+      let at = null;
+      try {
+        at = JSON.parse(sessionStorage.getItem(`${KEY}arrive`) ?? 'null');
+        sessionStorage.removeItem(`${KEY}arrive`);
+      } catch { /* nothing to come back to */ }
+      if (!at || at.path !== this.here) return;
+      const go = () => scrollTo(at.x, at.y);
+      if (document.readyState === 'complete') requestAnimationFrame(go);
+      else addEventListener('load', () => requestAnimationFrame(go), { once: true });
+      this.say(at.renamed ? `Renamed to ${nameOf(at.path)}` : `Moved to ${nameOf(folderOf(at.path)) || 'Drive'}`);
     }
 
     // ------------------------------------------------------------ the tree's edge
@@ -676,7 +860,7 @@
         event.preventDefault();
         event.stopPropagation();
         this.set({ nav: !this.state.nav });
-      } else if (event.key === 'Escape' && (!this.menu.hidden || !this.sharing.hidden)) {
+      } else if (event.key === 'Escape' && (!this.menu.hidden || !this.sharing.hidden || !this.moving.hidden)) {
         event.stopPropagation();
         this.hidePops();
       }
@@ -748,6 +932,7 @@
     hidePops() {
       this.menu.hidden = true;
       this.sharing.hidden = true;
+      this.moving.hidden = true;
       this.$('.crumbs .here')?.setAttribute('aria-expanded', 'false');
       this.$('[data-act="share"]').setAttribute('aria-expanded', 'false');
     }
@@ -779,6 +964,7 @@
         this.menu.append(b);
       };
       item('link', 'link', 'Copy link');
+      if (window.marble?.drive?.move) item('move', 'move', 'Move or rename…');
       item('drive', 'open', 'Show in Drive');
       if (window.marble?.drive?.downloadHref) item('download', 'download', 'Download');
       this.menu.hidden = false;
@@ -871,36 +1057,56 @@
     watchAgents() {
       const api = window.marble?.agent;
       if (!api || this.offAgents) return;
+      // What the stream says is newer than the list, which was read at some
+      // moment while the stream was already open: a conversation the stream
+      // has spoken for keeps what the stream said, and an ask heard before
+      // its conversation is known waits for it.
+      const heard = new Set();
+      this.asks = new Map();
       this.offAgents = api.on('*', (summary) => {
         // An ask opening or closing arrives on its own, ahead of any summary
         // that would say so.
         if (summary?.kind === 'ask' || summary?.kind === 'ask.resolved') {
-          const c = this.convs.get(summary.conversation);
-          if (c) this.convs.set(c.id, { ...c, asking: summary.kind === 'ask' });
+          this.asks.set(summary.conversation, summary.kind === 'ask');
           this.redraw('agents');
           return;
         }
         if (!summary?.id || summary.kind) return;
+        heard.add(summary.id);
+        this.asks.delete(summary.id);
         if (summary.removed) this.convs.delete(summary.id);
         else this.convs.set(summary.id, summary);
         this.redraw('agents');
       });
       api.conversations().then((list) => {
-        for (const summary of list) this.convs.set(summary.id, summary);
+        for (const summary of list) if (!heard.has(summary.id)) this.convs.set(summary.id, summary);
         this.redraw('agents');
       }).catch(() => {});
+      // The chat saw one (runtime/agent-ui.js, markSeen): it is read now,
+      // whatever the list said when it was fetched.
+      this.onSeen = (event) => {
+        const c = this.convs.get(event.detail?.id);
+        if (!c?.needsReview) return;
+        this.convs.set(c.id, { ...c, needsReview: false });
+        this.redraw('agents');
+      };
+      addEventListener('marble-agent:seen', this.onSeen);
     }
 
     /** What a conversation is doing, in the three words the pips draw. */
+    asking(c) {
+      return this.asks?.has(c.id) ? this.asks.get(c.id) : Boolean(c.asking);
+    }
+
     stateOf(c) {
-      if (c.asking) return 'waiting';
+      if (this.asking(c)) return 'waiting';
       if (c.running || c.queued) return 'working';
       return 'done';
     }
 
     // Unread: waiting on you, or finished since you last looked.
     unread(c) {
-      return Boolean(c.asking || c.needsReview);
+      return Boolean(this.asking(c) || c.needsReview);
     }
 
     /** The documents agents are at, most urgent first. A conversation counts
@@ -910,7 +1116,7 @@
       const apps = new Map();
       for (const c of this.convs.values()) {
         if (c.archived || !c.target) continue;
-        const live = c.running || c.queued || c.asking || c.needsReview || now - (c.lastFinishedAt ?? 0) < AGENT_WINDOW;
+        const live = c.running || c.queued || this.asking(c) || c.needsReview || now - (c.lastFinishedAt ?? 0) < AGENT_WINDOW;
         if (!live) continue;
         if (!apps.has(c.target)) apps.set(c.target, []);
         apps.get(c.target).push(c);
@@ -1007,7 +1213,7 @@
 
     agentsMeta() {
       let waiting = 0;
-      for (const c of this.convs.values()) if (!c.archived && c.asking) waiting += 1;
+      for (const c of this.convs.values()) if (!c.archived && this.asking(c)) waiting += 1;
       if (!waiting) return null;
       const meta = h('span', 'sec-meta', `${waiting} need${waiting === 1 ? 's' : ''} you`);
       meta.prepend(this.pip('waiting'));

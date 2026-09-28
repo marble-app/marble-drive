@@ -30,6 +30,7 @@ import { createGate } from './gate.js';
 import { escapeHtml, html, json, readBody, readJson, send, text } from './http.js';
 import { createIntents } from './intent-routes.js';
 import { createOpLog } from './oplog.js';
+import { createMoves } from './moves.js';
 import { createPendingWrites } from './pending-writes.js';
 import { PathError, joinPath, parsePath, safePath, safeSegment, splitPath, withoutDocExt } from './paths.js';
 import { build as buildStarter, list as listStarters, preview as starterPreview } from './gallery.js';
@@ -195,6 +196,7 @@ export async function createDrive(config, { log = console, agentProviders = null
 
   const channels = createChannels();
   const oplog = createOpLog({ dir: store.marbleDir });
+  const moves = createMoves({ dir: store.marbleDir });
   const thumbs = createThumbs({ dir: path.join(store.marbleDir, 'thumbs'), ...(config.quicklook === false ? { platform: 'none' } : {}) });
   const gate = createGate({
     secret: config.secret,
@@ -364,6 +366,46 @@ export async function createDrive(config, { log = console, agentProviders = null
    *  written for a flat host still works; one written for this one gets
    *  folders. */
   const listDocs = async () => (await store.list({ recursive: true })).filter((e) => e.kind === 'doc');
+
+  // ------------------------------------------------------------------ moving
+
+  /** The name is the address, so a move is a change of identity, and what
+   *  pointed at the old one has to follow: the old address forwards
+   *  (server/moves.js), the conversations aimed at it aim at the new one, and
+   *  the Drive's pins — the Drive's own references, in its own file — are
+   *  rewritten there as ops, so they are undoable like any other edit. Other
+   *  documents' links are theirs; the forward is what keeps them working. */
+  const unescapeAttr = (v) => v.replace(/&quot;/g, '"').replace(/&#39;/g, "'").replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&amp;/g, '&');
+
+  async function followMove(from, to) {
+    const folder = (await store.has(to)) ? 'doc' : 'folder';
+    const at = (p) => (p === from ? to : folder === 'folder' && p?.startsWith(`${from}/`) ? to + p.slice(from.length) : null);
+    try {
+      await moves.note(from, to, folder);
+    } catch (err) {
+      log.error(`[move] could not remember ${from} → ${to}: ${err.message}`);
+    }
+    try {
+      await agents?.followMove?.(at);
+    } catch (err) {
+      log.error(`[move] conversations did not follow ${from} → ${to}: ${err.message}`);
+    }
+    try {
+      const home = config.home;
+      const source = home && home !== from ? await store.read(home) : null;
+      if (!source) return;
+      const ops = [];
+      for (const [tag] of source.matchAll(/<li\b[^>]*\bclass="pin"[^>]*>/g)) {
+        const id = /\bdata-marble-id="([^"]+)"/.exec(tag)?.[1];
+        const pinned = /\bdata-path="([^"]*)"/.exec(tag)?.[1];
+        const next = pinned ? at(unescapeAttr(pinned)) : null;
+        if (id && next) ops.push({ type: 'setAttr', id, name: 'data-path', value: next });
+      }
+      if (ops.length) await applyOps(home, ops, { client: 'drive:move' });
+    } catch (err) {
+      log.error(`[move] pins did not follow ${from} → ${to}: ${err.message}`);
+    }
+  }
 
   // ------------------------------------------------------------------ writing
 
@@ -612,7 +654,13 @@ export async function createDrive(config, { log = console, agentProviders = null
       if (route.startsWith('/a/')) {
         const docPath = parsePath(decodeURIComponent(route.slice(3)), { allowRoot: false });
         const source = await store.read(docPath);
-        if (source === null) return text(res, 404, `no document "${docPath}"`);
+        if (source === null) {
+          // An address a document left: send the visit on to where it went.
+          // The fragment rides the redirect, so a chat or a place in it survives.
+          const went = await moves.resolve(docPath);
+          if (went && (await store.has(went))) return send(res, 302, '', { Location: `/a/${encodeURIComponent(went)}` });
+          return text(res, 404, `no document "${docPath}"`);
+        }
         // Serving is the first thing that happens to a document this session, so
         // it is where the baseline comes from: an edit from outside now has a
         // state to be measured against, and a restore point that predates it.
@@ -894,6 +942,7 @@ export async function createDrive(config, { log = console, agentProviders = null
         }
         pendingWrites.move(moved.from, moved.to);
         channels.toDrive('moved', moved);
+        await followMove(moved.from, moved.to);
         return json(res, 200, { ok: true, ...moved });
       }
 

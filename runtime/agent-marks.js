@@ -1,8 +1,10 @@
 // Describe mode: the tools for saying what you want about a document, and the
 // frame and card that carry what you said to an agent.
 //
-// One tray entry turns it on; the tools themselves live in a toolbar at the
-// bottom of the screen, where a hand rests while the eye is on the page.
+// The tray's entry, the shell's bar or ⌘⇧D turns it on; the tools themselves
+// live in a toolbar at the bottom of the page, where a hand rests while the
+// eye is on it, one key each: V is the page itself, A Select, P Sketch,
+// T Note, E Explore.
 // Select is a marquee over addressed elements — and over the marks you made.
 // Sketch is ink, read as a box, an arrow or a scribble. Text is a note stuck
 // on the page. Explore asks for alternatives, which the document has its own
@@ -29,13 +31,15 @@
   const GLYPHS = {
     // The tray's one entry: a page with a hand's mark across it.
     describe: '<svg viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><rect x="3.5" y="3.5" width="17" height="17" rx="4"/><path d="M7.5 15c2.2-4.6 3.8-6.9 4.8-6.9 1.5 0 .3 6.9 1.8 6.9 1 0 1.9-1.4 2.6-4.2"/></svg>',
+    // The cursor: the page answering as it always does, with the marks left
+    // where they are.
+    use: '<svg viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"><path d="M6.5 4.2 18 12.4l-5.4 1.1-2.5 5.3z"/></svg>',
     // An area, drawn as the marquee itself; ink, drawn as a stroke that is
     // plainly a hand's; a note; a set of things that might have been; and the
     // way out.
     select: '<svg viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><rect x="4" y="4" width="16" height="16" rx="2" stroke-dasharray="3 2.5"/></svg>',
     sketch: '<svg viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M3.5 16.2c2.6-6.4 4.6-9.6 6-9.6 2 0 .4 9.6 2.4 9.6 1.4 0 3.1-3.2 5.1-9.6"/><path d="M4 20.2h16"/></svg>',
     text: '<svg viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M5 7.5V5.5h14v2"/><path d="M12 5.5v13"/><path d="M9 18.5h6"/></svg>',
-    adjust: '<svg viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3v18M3 12h18"/><path d="m9 6 3-3 3 3M9 18l3 3 3-3M6 9l-3 3 3 3M18 9l3 3-3 3"/></svg>',
     explore: '<svg viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round"><rect x="3" y="4" width="8" height="7" rx="2"/><rect x="13" y="4" width="8" height="7" rx="2"/><rect x="3" y="13" width="8" height="7" rx="2"/><rect x="13" y="13" width="8" height="7" rx="2"/></svg>',
     clear: '<svg viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M8.5 18.5 4 14a1.6 1.6 0 0 1 0-2.3l7-7a1.6 1.6 0 0 1 2.3 0l5.2 5.2a1.6 1.6 0 0 1 0 2.3l-6.3 6.3z"/><path d="M9 20h11"/></svg>',
     done: '<svg viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round"><path d="M6 6l12 12M18 6 6 18"/></svg>',
@@ -175,49 +179,13 @@
     }
     .marble-marks-caption[hidden] { display: none; }
 
-    /* Adjust. What is under the pointer, what it allows, and where a drag of it
-       would land — three pieces of chrome that all go away the moment the mode
-       does, because none of them is a change. */
-    .marble-marks-aim { position: fixed; pointer-events: none; border: 1.5px solid var(--marks-mark); border-radius: 6px; }
-    .marble-marks-aim[hidden] { display: none; }
-    .marble-marks-says {
-      position: fixed; pointer-events: none; padding: 3px 7px; border-radius: 6px; white-space: nowrap;
-      font: 500 11.5px/1.2 var(--ui-font, system-ui, sans-serif);
-      background: var(--marks-mark); color: var(--marks-paper);
-    }
-    .marble-marks-says[hidden] { display: none; }
-    .marble-marks-says[data-undeclared="true"] { background: color-mix(in srgb, var(--marks-ink) 85%, transparent); }
-    /* The slot a release would drop into. A line, not a gap: the page has not
-       moved yet, and pretending it had would be a preview of a different page. */
-    .marble-marks-slot {
-      position: fixed; pointer-events: none; background: var(--marks-mark); border-radius: 2px;
-      box-shadow: 0 0 0 2px color-mix(in srgb, var(--marks-mark) 25%, transparent);
-    }
-    .marble-marks-slot[hidden] { display: none; }
-    .marble-marks-grab {
-      position: fixed; pointer-events: auto; width: 14px; height: 14px; margin: -7px 0 0 -7px;
-      border-radius: 50%; border: 1.5px solid var(--marks-paper); background: var(--marks-mark);
-      box-shadow: 0 1px 3px rgba(0, 0, 0, .25);
-    }
-    .marble-marks-grab[hidden] { display: none; }
-    .marble-marks-grab[data-edge="e"] { cursor: ew-resize; }
-    .marble-marks-grab[data-edge="s"] { cursor: ns-resize; }
-    .marble-marks-grab[data-edge="se"] { cursor: nwse-resize; }
-    .marble-marks-layer[data-mode="adjust"] .marble-marks-overlay { cursor: default; }
-
-    /* One button, offered only after a gesture the document had not declared:
-       the vocabulary it was missing, written in. */
-    .marble-marks-declare {
-      all: unset; flex: none; padding: 5px 9px; border-radius: 8px; cursor: pointer;
-      font: 600 11.5px/1 var(--ui-font, system-ui, sans-serif);
-      color: var(--marks-mark); background: color-mix(in srgb, var(--marks-mark) 12%, transparent);
-    }
-    .marble-marks-declare[hidden] { display: none; }
-
     /* The toolbar. Bottom centre, where every drawing tool puts one, because
        that is where a hand rests when the eye is on the page. */
+    /* Centred on the page the tools act on: inside the shell (runtime/shell.js)
+       and beside a docked chat, that is the room they leave, not the window. */
     .marble-marks-bar {
-      position: fixed; left: 50%; transform: translateX(-50%);
+      position: fixed; transform: translateX(-50%);
+      left: calc(var(--marble-shell-left, 0px) + (100vw - var(--marble-shell-left, 0px) - var(--marble-dock-right, 0px)) / 2);
       bottom: calc(18px + env(safe-area-inset-bottom, 0px));
       display: flex; align-items: center; gap: 2px; padding: 5px; border-radius: 15px;
       pointer-events: auto;
@@ -241,13 +209,15 @@
     .marble-marks-tool[aria-pressed="true"] { background: var(--marks-mark); color: var(--marks-paper); }
     .marble-marks-tool[disabled] { opacity: .4; cursor: default; }
     .marble-marks-tool[hidden] { display: none; }
+    /* Just the icon; the name and its key come up on hover or focus, after a
+       beat, so passing over the row does not flash a label at every step. */
     .marble-marks-tool::after {
-      content: attr(data-label); position: absolute; bottom: calc(100% + 8px); left: 50%; transform: translateX(-50%);
+      content: attr(data-label) attr(data-key-hint); position: absolute; bottom: calc(100% + 8px); left: 50%; transform: translateX(-50%);
       white-space: nowrap; padding: 4px 8px; border-radius: 7px; font: 500 11.5px/1 var(--ui-font, system-ui, sans-serif);
       background: color-mix(in srgb, var(--marks-ink) 88%, transparent); color: var(--marks-paper);
       opacity: 0; pointer-events: none; transition: opacity 120ms ${EASE};
     }
-    .marble-marks-tool:hover::after, .marble-marks-tool:focus-visible::after { opacity: 1; }
+    .marble-marks-tool:hover::after, .marble-marks-tool:focus-visible::after { opacity: 1; transition-delay: 300ms; }
     .marble-marks-sep { width: 1px; height: 22px; margin: 0 4px; background: color-mix(in srgb, var(--marks-ink) 14%, transparent); }
 
     /* Explore: what you want and why, which is what makes a set of variations
@@ -354,18 +324,6 @@
     caption.hidden = true;
     layer.append(overlay, marquee, ink, frame, caption);
 
-    const aim = el('div', 'marble-marks-aim', layer);
-    aim.hidden = true;
-    const says = el('div', 'marble-marks-says', layer);
-    says.hidden = true;
-    const slot = el('div', 'marble-marks-slot', layer);
-    slot.hidden = true;
-    const grabs = ['e', 's', 'se'].map((edge) => {
-      const node = el('div', 'marble-marks-grab', layer);
-      node.dataset.edge = edge;
-      node.hidden = true;
-      return node;
-    });
     const notes = el('div', 'marble-marks-notes', layer);
     const halos = [];
     const hits = [];
@@ -389,47 +347,48 @@
     held.append(heldInk);
     const heldNotes = el('div', 'marble-marks-notes', held);
 
-    // After an undeclared move or resize, one click writes the declaration.
-    // It sits in the toolbar: the composer is the callout's, and a button
-    // about the document's vocabulary is not a thing to say to an agent.
-    const declare = document.createElement('button');
-    declare.type = 'button';
-    declare.className = 'marble-marks-declare';
-    declare.setAttribute(TRANSIENT, '');
-    declare.hidden = true;
-
     // ----------------------------------------------------------- the toolbar
+
+    // A note or the Explore ask is typed into on the page itself; its keys
+    // are its own, not the page's shortcuts (runtime/agent-ui.js, keepKeys).
+    window.marbleAgentUI?.keepKeys?.(layer);
 
     const bar = el('div', 'marble-marks-bar', layer);
     bar.setAttribute('role', 'toolbar');
     bar.setAttribute('aria-label', 'Describe');
     // Not hidden: out of the mode the whole layer is invisible, and the toolbar
     // is only ever `hidden` when the drawer is covering the page it acts on.
-    const button = (id, label, glyph, { pressed = null } = {}) => {
+    const button = (id, label, glyph, { pressed = null, key = null } = {}) => {
       const node = document.createElement('button');
       node.type = 'button';
       node.className = 'marble-marks-tool';
       node.dataset.tool = id;
       node.dataset.label = label;
+      if (key) {
+        node.dataset.key = key.toLowerCase();
+        node.dataset.keyHint = `\u2003${key}`;
+        node.setAttribute('aria-keyshortcuts', key);
+      }
       node.setAttribute(TRANSIENT, '');
-      node.setAttribute('aria-label', label);
+      node.setAttribute('aria-label', key ? `${label} (${key})` : label);
       if (pressed !== null) node.setAttribute('aria-pressed', String(pressed));
       node.innerHTML = glyph;
       bar.append(node);
       return node;
     };
+    // The cursor first: with no tool on, the page is the page — and every
+    // tool is one key away from it, and back.
+    const useButton = button('use', 'Use the app', GLYPHS.use, { pressed: true, key: 'V' });
     const tools = {
-      select: button('select', 'Select', GLYPHS.select, { pressed: false }),
-      adjust: button('adjust', 'Move or resize', GLYPHS.adjust, { pressed: false }),
-      sketch: button('sketch', 'Sketch', GLYPHS.sketch, { pressed: false }),
-      text: button('text', 'Note', GLYPHS.text, { pressed: false }),
+      select: button('select', 'Select', GLYPHS.select, { pressed: false, key: 'A' }),
+      sketch: button('sketch', 'Sketch', GLYPHS.sketch, { pressed: false, key: 'P' }),
+      text: button('text', 'Note', GLYPHS.text, { pressed: false, key: 'T' }),
     };
     el('span', 'marble-marks-sep', bar);
-    const exploreButton = button('explore', 'Explore variations', GLYPHS.explore);
+    const exploreButton = button('explore', 'Explore variations', GLYPHS.explore, { key: 'E' });
     const clearButton = button('clear', 'Clear marks', GLYPHS.clear);
     el('span', 'marble-marks-sep', bar);
-    const doneButton = button('done', 'Done', GLYPHS.done);
-    bar.insertBefore(declare, bar.firstChild);
+    const doneButton = button('done', 'Done', GLYPHS.done, { key: 'Esc' });
 
     // ------------------------------------------------------------ Explore ask
 
@@ -593,7 +552,6 @@
     const spanOf = (mark) => {
       const box = boxOf(mark.anchorId);
       if (!box) return null;
-      if (mark.type === 'act') return box;
       if (mark.type === 'note') {
         const r = mark.el.getBoundingClientRect();
         return r.width ? { left: r.left, top: r.top, width: r.width, height: r.height } : null;
@@ -609,31 +567,23 @@
     /** What the agent will be told about one mark, in the words the person
      *  sees under their own pointer. */
     const phraseOf = (mark) => {
-      if (mark.type === 'act') return mark.phrase;
       if (mark.type === 'note') return `a note on ${mark.anchorId}: "${mark.text}"`;
       if (mark.kind === 'box') return `a box around ${names(mark.ids)}`;
       if (mark.kind === 'arrow') return `an arrow from ${mark.from ?? 'nothing'} to ${mark.to ?? 'nothing'}`;
       return `ink over ${names(mark.ids)}`;
     };
     const idsOf = (mark) => {
-      if (mark.type === 'act' || mark.type === 'note') return mark.anchorId ? [mark.anchorId] : [];
+      if (mark.type === 'note') return mark.anchorId ? [mark.anchorId] : [];
       return mark.kind === 'arrow' ? [mark.from, mark.to].filter(Boolean) : mark.ids;
     };
     const drafts = () => marks.filter((mark) => !mark.sent);
     const note = () => {
-      const drawn = drafts().filter((mark) => mark.type !== 'act').map(phraseOf);
-      const done = drafts().filter((mark) => mark.type === 'act').map(phraseOf);
-      const said = [];
-      if (drawn.length) said.push(`I marked up the page: ${drawn.join('; ')}.`);
-      // What the hand already changed is context, not a request — and saying so
-      // is the difference between "do this" and "do this to everything else".
-      if (done.length) said.push(`I already ${done.join(', and ')} by hand.`);
-      return said.length ? `${said.join(' ')} ` : '';
+      const drawn = drafts().map(phraseOf);
+      return drawn.length ? `I marked up the page: ${drawn.join('; ')}. ` : '';
     };
 
     const repaint = () => {
       for (const mark of marks) {
-        if (mark.type === 'act') continue;
         const box = boxOf(mark.anchorId);
         if (mark.type === 'note') {
           if (!box) { mark.el.hidden = true; continue; }
@@ -651,7 +601,7 @@
       paintFrame();
     };
     let repainting = 0;
-    const scheduleRepaint = () => { if (!repainting) repainting = requestAnimationFrame(() => { repainting = 0; repaint(); paintAim(); }); };
+    const scheduleRepaint = () => { if (!repainting) repainting = requestAnimationFrame(() => { repainting = 0; repaint(); }); };
 
     const paintHalos = () => {
       const chosen = [...picked];
@@ -1018,7 +968,6 @@
       marks.push(...keep);
       picked.clear();
       caption.hidden = true;
-      offerDeclare(null);
       area = [];
       syncSelection();
       syncBrief();
@@ -1079,295 +1028,6 @@
     };
     addEventListener('pointerup', dropMove);
     addEventListener('pointercancel', dropMove);
-
-    // ---------------------------------------------------------------- Adjust
-    //
-    // The direct-manipulation tool, and it implements no layout semantics of
-    // its own: it asks the vocabulary what the element under the pointer
-    // allows, and files the op that answer names. Where a document declares
-    // nothing — which is every document written before the vocabulary had a
-    // word for size — the same gesture still lands, because reordering
-    // siblings *is* a move and a size *is* an inline style, and it says it did
-    // so undeclared rather than pretending it was invited.
-
-    const vocabulary = () => globalThis.marbleVocabulary ?? null;
-    const affordsOf = (node) => vocabulary()?.affords(node) ?? { move: null, size: null };
-    const styleWith = (node, declarations) => {
-      const shared = vocabulary()?.styleWith;
-      if (shared) return shared(node, declarations);
-      const dropped = new Set(Object.keys(declarations));
-      const rest = (node.getAttribute('style') ?? '').split(';').map((part) => part.trim())
-        .filter((part) => part && !dropped.has(part.slice(0, part.indexOf(':')).trim().toLowerCase()));
-      return [...Object.entries(declarations).map(([name, value]) => `${name}:${value}`), ...rest].join(';');
-    };
-
-    /** The carrier's own write path, as collab.js plays an op: apply, file,
-     *  record the inverse so the document's own undo takes it back, flush.
-     *
-     *  `undo` is for the gesture that already moved the page before it filed
-     *  anything. `marble.invert` reads the inverse off the page as it stands,
-     *  which is right for an op nobody has applied yet and wrong for a drag —
-     *  by release the element is already the new size, so the inverse it
-     *  computes would put it back to where it just was. A drag captures its own
-     *  before-value at the press and hands it in. */
-    const play = (ops, { undo = null } = {}) => {
-      const inverses = undo ? [...undo] : [];
-      for (const op of ops) {
-        if (!undo) {
-          const inverse = marble.invert?.(op);
-          if (inverse) inverses.unshift(inverse);
-        }
-        marble.apply(op);
-        marble.op(op);
-      }
-      if (inverses.length) marble.record?.({ redo: ops, undo: inverses });
-      return marble.flush?.() ?? Promise.resolve();
-    };
-
-    let aiming = null;
-    let acting = null;
-    let declaring = null;
-
-    const siblingsOf = (node) => [...(node.parentElement?.children ?? [])]
-      .filter((child) => child !== node && !child.hasAttribute(TRANSIENT) && child.getAttribute('data-marble-id'));
-    /** Which way the children of this container run. A list is a column and a
-     *  toolbar is a row, and a drop line drawn the wrong way round is a lie
-     *  about where the thing will land. */
-    const runsAcross = (node) => {
-      const kids = siblingsOf(node).map((child) => child.getBoundingClientRect()).filter((r) => r.width && r.height);
-      if (kids.length < 2) return false;
-      const [a, b] = kids;
-      return Math.abs(b.left - a.left) > Math.abs(b.top - a.top);
-    };
-
-    const clearAim = () => {
-      aiming = null;
-      aim.hidden = true;
-      says.hidden = true;
-      slot.hidden = true;
-      for (const grab of grabs) grab.hidden = true;
-    };
-
-    /** What this element allows, half by half. One undeclared half does not
-     *  make the other one undeclared — a pane that says it can be resized and
-     *  sits in a list that says nothing is exactly that, and a label that
-     *  flattened the two would be wrong about one of them. */
-    const sayingFor = (can, id) => {
-      const moves = can.move?.kind === 'canvas' ? 'move' : 'reorder';
-      const parts = [
-        `${moves}${can.move ? '' : ' (undeclared)'}`,
-        `resize${can.size ? '' : ' (undeclared)'}`,
-      ];
-      return { text: [id, ...parts].filter(Boolean).join(' · '), undeclared: !can.move || !can.size };
-    };
-
-    const paintAim = () => {
-      if (mode !== 'adjust' || !aiming?.el?.isConnected) { clearAim(); return; }
-      const r = aiming.el.getBoundingClientRect();
-      Object.assign(aim.style, {
-        left: `${Math.round(r.left - 2)}px`, top: `${Math.round(r.top - 2)}px`,
-        width: `${Math.round(r.width + 4)}px`, height: `${Math.round(r.height + 4)}px`,
-      });
-      aim.hidden = false;
-      const saying = sayingFor(aiming.can, marble.id(aiming.el));
-      says.textContent = saying.text;
-      says.dataset.undeclared = String(saying.undeclared);
-      says.hidden = false;
-      const size = says.getBoundingClientRect();
-      says.style.left = `${Math.round(Math.min(Math.max(8, r.left), innerWidth - size.width - 8))}px`;
-      says.style.top = `${Math.round(r.top - size.height - 6 < 8 ? r.bottom + 6 : r.top - size.height - 6)}px`;
-      const at = { e: [r.right, r.top + r.height / 2], s: [r.left + r.width / 2, r.bottom], se: [r.right, r.bottom] };
-      for (const grab of grabs) {
-        const [x, y] = at[grab.dataset.edge];
-        grab.style.left = `${Math.round(x)}px`;
-        grab.style.top = `${Math.round(y)}px`;
-        grab.hidden = false;
-      }
-    };
-
-    const aimAt = (x, y) => {
-      if (acting) return;
-      const node = elementAt(x, y);
-      if (!node) { clearAim(); return; }
-      if (aiming?.el === node) { paintAim(); return; }
-      aiming = { el: node, can: affordsOf(node) };
-      paintAim();
-    };
-
-    /** What a release would do, in the words the brief will carry. */
-    const noteAct = (phrase, anchorId, declared) => {
-      marks.push({ type: 'act', kind: 'act', anchorId, phrase, at: Date.now(), sent: false, declared });
-      syncSelection();
-      syncBrief();
-    };
-
-    const offerDeclare = (what) => {
-      declaring = what;
-      declare.hidden = !what;
-      if (what) declare.textContent = what.label;
-      paintFrame();
-    };
-
-    // ---- moving
-
-    const startMoveGesture = (event) => {
-      const node = aiming.el;
-      const can = aiming.can;
-      const id = marble.id(node);
-      if (!id) return;
-      acting = {
-        kind: 'move', el: node, can, id, pointerId: event.pointerId,
-        x: event.clientX, y: event.clientY,
-        prior: node.getAttribute('style'),
-        grab: null, before: undefined,
-      };
-      if (can.move?.kind === 'canvas') {
-        const box = node.getBoundingClientRect();
-        acting.grab = { x: event.clientX - box.left, y: event.clientY - box.top };
-      }
-      overlay.setPointerCapture(event.pointerId);
-      says.hidden = true;
-    };
-
-    const dropPlace = (x, y) => {
-      const node = acting.el;
-      const across = runsAcross(node);
-      const before = siblingsOf(node).find((child) => {
-        const r = child.getBoundingClientRect();
-        return across ? x < r.left + r.width / 2 : y < r.top + r.height / 2;
-      }) ?? null;
-      return { before, across };
-    };
-
-    const paintSlot = (place) => {
-      const node = acting.el;
-      const parent = node.parentElement;
-      if (!parent) { slot.hidden = true; return; }
-      const box = parent.getBoundingClientRect();
-      const edge = place.before ? place.before.getBoundingClientRect() : null;
-      const last = siblingsOf(node).at(-1)?.getBoundingClientRect() ?? node.getBoundingClientRect();
-      if (place.across) {
-        const x = edge ? edge.left - 3 : last.right + 1;
-        Object.assign(slot.style, { left: `${Math.round(x)}px`, top: `${Math.round(box.top)}px`, width: '3px', height: `${Math.round(box.height)}px` });
-      } else {
-        const y = edge ? edge.top - 3 : last.bottom + 1;
-        Object.assign(slot.style, { left: `${Math.round(box.left)}px`, top: `${Math.round(y)}px`, width: `${Math.round(box.width)}px`, height: '3px' });
-      }
-      slot.hidden = false;
-    };
-
-    const commitMove = async () => {
-      const { el: node, can, id, prior } = acting;
-      if (can.move?.kind === 'canvas') {
-        const value = styleWith(node, { left: node.style.left, top: node.style.top });
-        acting = null;
-        if (value === prior) { paintAim(); return; }
-        node.setAttribute('style', value);
-        await play([{ type: 'setAttr', id, name: 'style', value }], {
-          undo: [{ type: 'setAttr', id, name: 'style', value: prior }],
-        });
-        noteAct(`moved ${id} on its canvas`, id, true);
-        paintAim();
-        return;
-      }
-      const place = acting.before === undefined ? { before: null } : { before: acting.before };
-      const parent = node.parentElement;
-      acting = null;
-      slot.hidden = true;
-      if (!parent || !marble.id(parent)) { paintAim(); return; }
-      let next = place.before;
-      // The element already sits there: a drag that changed nothing files
-      // nothing, rather than an op that says it moved to where it was.
-      let after = node.nextElementSibling;
-      while (after && (after.hasAttribute(TRANSIENT) || !after.getAttribute('data-marble-id'))) after = after.nextElementSibling;
-      if (next === after) { paintAim(); return; }
-      await play([{ type: 'move', id, parentId: marble.id(parent), beforeId: next ? marble.id(next) : null }]);
-      const where = next ? `above ${marble.id(next)}` : 'to the end of its list';
-      noteAct(`moved ${id} ${where}`, id, Boolean(can.move));
-      if (!can.move) offerDeclare({ kind: 'sortable', el: parent, label: 'Make this list sortable' });
-      paintAim();
-    };
-
-    // ---- resizing
-
-    const startSizeGesture = (event, edge) => {
-      if (!aiming?.el) return;
-      const node = aiming.el;
-      const id = marble.id(node);
-      if (!id) return;
-      event.preventDefault();
-      event.stopPropagation();
-      const box = node.getBoundingClientRect();
-      acting = {
-        kind: 'size', el: node, can: aiming.can, id, pointerId: event.pointerId, edge,
-        x: event.clientX, y: event.clientY,
-        start: { width: Math.round(box.width), height: Math.round(box.height) },
-        prior: node.getAttribute('style'),
-        at: null,
-      };
-      grabs.find((grab) => grab.dataset.edge === edge)?.setPointerCapture(event.pointerId);
-      says.hidden = true;
-    };
-
-    const dragSize = (event) => {
-      const { el: node, edge, start } = acting;
-      const width = edge.includes('e') ? Math.max(24, Math.round(start.width + event.clientX - acting.x)) : start.width;
-      const height = edge.includes('s') ? Math.max(24, Math.round(start.height + event.clientY - acting.y)) : start.height;
-      acting.at = { width, height };
-      if (edge.includes('e')) node.style.width = `${width}px`;
-      if (edge.includes('s')) node.style.height = `${height}px`;
-      paintAim();
-    };
-
-    const commitSize = async () => {
-      const { el: node, can, id, edge, prior, at } = acting;
-      acting = null;
-      if (!at) { paintAim(); return; }
-      const declarations = {};
-      if (edge.includes('e')) declarations.width = `${at.width}px`;
-      if (edge.includes('s')) declarations.height = `${at.height}px`;
-      const value = styleWith(node, declarations);
-      if (value === prior) { paintAim(); return; }
-      node.setAttribute('style', value);
-      await play([{ type: 'setAttr', id, name: 'style', value }], {
-        undo: [{ type: 'setAttr', id, name: 'style', value: prior }],
-      });
-      const said = edge === 'se' ? `${at.width}×${at.height}` : (edge === 'e' ? `${at.width} wide` : `${at.height} tall`);
-      noteAct(`sized ${id} to ${said}`, id, Boolean(can.size));
-      if (!can.size) offerDeclare({ kind: 'resizable', el: node, label: 'Make this resizable' });
-      paintAim();
-    };
-
-    for (const grab of grabs) {
-      grab.addEventListener('pointerdown', (event) => {
-        if (event.button !== 0 || acting) return;
-        startSizeGesture(event, grab.dataset.edge);
-      });
-      grab.addEventListener('pointermove', (event) => {
-        if (acting?.kind === 'size' && event.pointerId === acting.pointerId) dragSize(event);
-      });
-      const let_go = (event) => {
-        if (acting?.kind === 'size' && event.pointerId === acting.pointerId) commitSize();
-      };
-      grab.addEventListener('pointerup', let_go);
-      grab.addEventListener('pointercancel', let_go);
-    }
-
-    // The vocabulary the gesture found missing, written in — one op, on the
-    // element or the list that needed it, and then the tool has nothing more
-    // to say about it.
-    declare.addEventListener('click', async () => {
-      const what = declaring;
-      if (!what) return;
-      offerDeclare(null);
-      const id = marble.id(what.el);
-      if (!id) return;
-      const name = what.kind === 'sortable' ? 'data-marble-sortable' : 'data-marble-resizable';
-      const value = what.kind === 'sortable' ? (id || 'items') : 'wh';
-      await play([{ type: 'setAttr', id, name, value }]);
-      noteAct(`declared ${id} ${what.kind}`, id, true);
-      if (aiming?.el) { aiming.can = affordsOf(aiming.el); paintAim(); }
-    });
 
     // ------------------------------------------------------------ the switch
 
@@ -1430,15 +1090,13 @@
       // a pointerup after this point would never reach `finish`.
       endDrag();
       endPen();
-      acting = null;
-      clearAim();
-      offerDeclare(null);
       mode = next;
       layer.dataset.mode = next ?? '';
       overlay.hidden = !next;
       caption.hidden = true;
       if (next) punch();
       for (const [name, node] of Object.entries(tools)) node.setAttribute('aria-pressed', String(name === next));
+      useButton.setAttribute('aria-pressed', String(!next));
       // The callout's handle would be drawn under the overlay and unclickable;
       // it comes back when the mode ends.
       dispatchEvent(new CustomEvent('marble-marks:mode', { detail: { mode: next, describing } }));
@@ -1466,7 +1124,11 @@
     for (const [name, node] of Object.entries(tools)) {
       node.addEventListener('click', () => setMode(mode === name ? null : name));
     }
+    useButton.addEventListener('click', () => setMode(null));
     clearButton.addEventListener('click', () => { clearMarks(); syncBrief(); });
+    // Another door in: the shell's bar (runtime/shell.js), or anything else
+    // that wants to offer Describe without a tray of its own.
+    addEventListener('marble-marks:toggle', (event) => setDescribing(event.detail?.on ?? !describing));
     doneButton.addEventListener('click', () => setDescribing(false));
 
     // --------------------------------------------------------------- pointer
@@ -1501,7 +1163,6 @@
         return;
       }
       if (mode === 'text') { placeNote(event.clientX, event.clientY); return; }
-      if (mode === 'adjust' && aiming?.el) startMoveGesture(event);
     });
     overlay.addEventListener('pointermove', (event) => {
       if (drag && event.pointerId === drag.id) {
@@ -1522,24 +1183,9 @@
         pen.el.setAttribute('d', pathOf(pen.points));
         return;
       }
-      if (acting?.kind === 'move' && event.pointerId === acting.pointerId) {
-        if (acting.can.move?.kind === 'canvas') {
-          const box = acting.can.move.container.getBoundingClientRect();
-          acting.el.style.left = `${Math.round(event.clientX - box.left - acting.grab.x)}px`;
-          acting.el.style.top = `${Math.round(event.clientY - box.top - acting.grab.y)}px`;
-          paintAim();
-          return;
-        }
-        const place = dropPlace(event.clientX, event.clientY);
-        acting.before = place.before;
-        paintSlot(place);
-        return;
-      }
-      if (mode === 'adjust' && !acting) { aimAt(event.clientX, event.clientY); return; }
       if (mode === 'sketch' && !moving) hover(event);
     });
     const finish = (event) => {
-      if (acting?.kind === 'move' && event.pointerId === acting.pointerId) { commitMove(); return; }
       if (pen && event.pointerId === pen.id) {
         const done = endPen({ keep: true });
         done.el.remove();
@@ -1680,6 +1326,32 @@
     new ResizeObserver(scheduleRepaint).observe(document.documentElement);
 
     const typing = (node) => node?.isContentEditable || ['INPUT', 'TEXTAREA'].includes(node?.tagName);
+    // One key per tool while describing, and ⌘⇧D in and out from anywhere —
+    // a chord, so it is heard even mid-sentence in a composer.
+    const KEYS = { v: null, a: 'select', p: 'sketch', t: 'text' };
+    addEventListener('keydown', (event) => {
+      if ((event.metaKey || event.ctrlKey) && event.shiftKey && !event.altKey && event.key.toLowerCase() === 'd') {
+        event.preventDefault();
+        event.stopPropagation();
+        setDescribing(!describing);
+        return;
+      }
+      if (!describing || event.metaKey || event.ctrlKey || event.altKey || event.repeat || typing(event.composedPath()[0])) return;
+      const key = event.key.toLowerCase();
+      if (key === 'e') {
+        if (exploreButton.disabled || exploreButton.hidden) return;
+        event.preventDefault();
+        event.stopPropagation();
+        exploreButton.click();
+        return;
+      }
+      if (!(key in KEYS)) return;
+      // The tools' keys are the mode's while it is on; the app hears every
+      // other key as it always does.
+      event.preventDefault();
+      event.stopPropagation();
+      setMode(KEYS[key]);
+    }, true);
     addEventListener('keydown', (event) => {
       // Keys typed into a composer are the composer's, and the card's lives in
       // a shadow root, where document.activeElement is only its host: ⌫ in

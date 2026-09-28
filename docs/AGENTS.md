@@ -158,8 +158,14 @@ callouts of its own.
 
 ## Describe mode: saying what you want about a document
 
-The drawer's tray has one entry for this, **Describe**, and it opens a toolbar
-at the bottom of the screen holding the tools that go with it. They are pointer
+The drawer's tray has one entry for this, **Describe**; the shell's bar has a
+button for it, and **⌘⇧D** turns it on and off from anywhere. It opens a
+toolbar at the bottom of the page — centred on the page, not the window, when
+the shell or a docked chat has taken some of it — holding the tools that go
+with it: icons, with each one's name and key in a tip. **Use the app** (V) is
+no tool at all: the page answers as it always does and the marks stay where
+they are. Select is A, Sketch P, Note T, Explore E; the keys are the mode's
+only while it is on, and never while you are typing. They are pointer
 tools, so none of them is offered where there is no hover; each is a mode that
 Escape or a second press leaves; Escape with no tool leaves Describe mode, and
 so does **Done**. Leaving fades the whole layer out — the ink, the notes, the
@@ -184,17 +190,6 @@ none of this.
 - **Note** puts a text box on the page at the point you click, anchored to the
   element under it. It reads as `a note on q1: "make this the headline"`, it is
   dragged by its grip, and an empty one is discarded when it loses the caret.
-- **Move or resize** is the direct-manipulation tool, and it implements no
-  layout of its own. Point at an element and it says what that element allows —
-  `p1 · reorder · resize (undeclared)` — reading the document's own vocabulary
-  through `marbleVocabulary.affords`. Drag it and the gesture files the op that
-  answer names: a `move` in a `data-marble-sortable` list, an inline position
-  on a `data-marble-canvas`, an inline size from the corner handle of a
-  `data-marble-resizable`. Where a document declares none of that the gesture
-  still lands — reordering siblings *is* a move, and a size *is* an inline
-  style — it says it did so undeclared, and offers one button that writes the
-  declaration in: **Make this list sortable**, **Make this resizable**. One op
-  per gesture, so the document's own undo takes the whole drag back.
 - **Clear marks** takes the ink, the notes and the selection off.
 
 Everything selected or marked is wrapped in **one frame**, with a **field**

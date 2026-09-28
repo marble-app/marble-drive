@@ -398,7 +398,10 @@ test('a starter can be looked at without one being made', async () => {
 test('moving, trashing and restoring, over HTTP', async () => {
   await asJson(await post('/drive/new', { path: 'scratch', from: 'board' }));
   await asJson(await post('/drive/move', { from: 'scratch', to: 'archive/scratch' }));
-  assert.equal((await get('/a/scratch')).status, 404);
+  // The old address is not a dead end: it forwards to where it went.
+  const old = await get('/a/scratch');
+  assert.equal(old.status, 302);
+  assert.equal(old.headers.get('location'), '/a/archive%2Fscratch');
   assert.equal((await get('/a/archive%2Fscratch')).status, 200);
 
   const gone = await asJson(await post('/drive/trash', { path: 'archive/scratch' }));

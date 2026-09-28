@@ -261,6 +261,17 @@ async function boot({ config, store, writeOps, createDocument, origin, browserPa
     running: () => runner.running(),
     store: agentStore,
     runner,
+    /** A document moved (server/app.js): the conversations aimed at it aim
+     *  where it went, so the next turn writes to the document and not to its
+     *  old address. `at` maps an old path to its new one, or null. */
+    async followMove(at) {
+      for (const summary of [...await agentStore.conversations(), ...await agentStore.conversations({ archived: true })]) {
+        const next = at(summary.target);
+        if (!next) continue;
+        await agentStore.updateConversation(summary.id, { target: next });
+        hub.publish(summary.id, { type: 'meta' }, await agentStore.summary(summary.id));
+      }
+    },
     async close() {
       await runner.close();
       hub.close();
