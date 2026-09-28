@@ -48,8 +48,9 @@ __ICON__
      somebody opened a drawer next to it. */
   html { container: doc / inline-size; }
   html, body { height: 100%; }
+  /* The window, less the bar a docked shell puts above the page (--marble-shell-top). */
   body {
-    height: 100dvh; margin: 0; padding: 1.6rem 1.2rem 0; overflow: hidden;
+    height: calc(100dvh - var(--marble-shell-top, 0px)); margin: 0; padding: 1.6rem 1.2rem 0; overflow: hidden;
     display: flex; flex-direction: column;
     background: var(--paper); color: var(--ink);
     font: 15px/1.5 var(--ui); -webkit-font-smoothing: antialiased;

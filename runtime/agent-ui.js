@@ -7121,6 +7121,12 @@
       border-left: 1px solid var(--line); box-shadow: -18px 0 40px color-mix(in srgb, var(--ink) 12%, transparent);
       transform: translateX(100%); will-change: transform; visibility: hidden; }
     .panel[data-pinned="true"] { box-shadow: none; background: var(--paper); -webkit-backdrop-filter: none; backdrop-filter: none; }
+    /* Inside the shell the chat is one of its three panels: under its bar, and
+       in Float a card like the tree, with the shell's own layout switch in
+       place of this panel's pin. */
+    .panel[data-shell="float"] { border: 1px solid var(--line); border-radius: 16px; overflow: hidden;
+      box-shadow: var(--shadow-lift); }
+    .panel[data-shell] .pin { display: none; }
     .panel[data-resizing="true"] { cursor: ew-resize; user-select: none; }
     @media (prefers-reduced-transparency: reduce) { .panel { background: var(--paper); -webkit-backdrop-filter: none; backdrop-filter: none; } }
 
@@ -7301,6 +7307,8 @@
 
       this.onKey = (event) => {
         if ((event.metaKey || event.ctrlKey) && !event.altKey && !event.shiftKey && event.key.toLowerCase() === 'j') {
+          // Where the shell can open, ⌘J opens it, chat and all.
+          if (window.marbleShell?.takesKeys) return;
           event.preventDefault();
           // One key for "agent", and the selection decides where the agent
           // appears: the callout layer takes it when it can draw a card at
@@ -7311,7 +7319,13 @@
           else this.open();
         } else if (event.key === 'Escape' && this.isOpen && this.shadowRoot.activeElement !== null) {
           if (!this.recent.hidden || !this.actions.hidden) this.hideMenus();
-          else this.close();
+          // The shell's chat is one of its panels, not a sheet over the page:
+          // Escape hands the keys back to the page and leaves it where it is.
+          else if (this.shell) {
+            let focused = document.activeElement;
+            while (focused?.shadowRoot?.activeElement) focused = focused.shadowRoot.activeElement;
+            focused?.blur?.();
+          } else this.close();
         } else if (event.key === 'Escape' && this.trayOpen) {
           this.setTray(false);
           this.launcher.focus({ preventScroll: true });
@@ -7325,6 +7339,8 @@
       this.onCloseRequest = () => this.close();
       addEventListener('marble:agent-open', this.onOpenRequest);
       addEventListener('marble:agent-close', this.onCloseRequest);
+      this.onShell = (event) => this.applyShell(event.detail);
+      addEventListener('marble-shell:layout', this.onShell);
       this.onSettingsSaved = async () => {
         try {
           this.labels.clear();
@@ -7371,7 +7387,8 @@
       // Handed a conversation, the drawer opens whether or not it was left open:
       // arriving at a document to watch something being built in it and finding
       // the panel shut is arriving at nothing.
-      if (handed || api.storage.get(api.here(OPEN_KEY)) === '1') this.open({ animate: false });
+      if (window.marbleShell?.layout) this.applyShell(window.marbleShell.layout);
+      if (handed || (!this.shell && api.storage.get(api.here(OPEN_KEY)) === '1')) this.open({ animate: false });
       else this.render();
       this.unwatchUsage = watchUsage(this.usageEl);
       this.fillTray();
@@ -7388,6 +7405,7 @@
       removeEventListener('keydown', this.onKey, true);
       removeEventListener('marble:agent-open', this.onOpenRequest);
       removeEventListener('marble:agent-close', this.onCloseRequest);
+      removeEventListener('marble-shell:layout', this.onShell);
       removeEventListener('marble:agent-settings-saved', this.onSettingsSaved);
       removeEventListener('marble-tray:register', this.onTrayRegister);
       removeEventListener('marble-tray:update', this.onTrayUpdate);
@@ -7409,6 +7427,11 @@
     // ---------------------------------------------------------- open, close
 
     open({ animate = true } = {}) {
+      if (this.shell) {
+        if (this.shell.chat) this.view.focusInput();
+        else window.marbleShell.setChat(true);
+        return;
+      }
       this.isOpen = true;
       this.api.storage.set(this.api.here(OPEN_KEY), '1');
       this.animateTo(1, { animate });
@@ -7418,11 +7441,41 @@
     }
 
     close() {
+      if (this.shell) {
+        window.marbleShell.setChat(false);
+        this.launcher.focus({ preventScroll: true });
+        return;
+      }
       this.isOpen = false;
       this.api.storage.set(this.api.here(OPEN_KEY), '0');
       this.hideMenus();
       this.animateTo(0);
       this.launcher.focus({ preventScroll: true });
+    }
+
+    /** The shell (runtime/shell.js) says where the chat sits while it is
+     *  open: under its bar, docked in Fit or a card in Float, and shown or not
+     *  by its chat button rather than by this panel's remembered state. Closing
+     *  the shell takes the chat with it — App alone is the app, and the
+     *  launcher is how the chat comes back by itself. */
+    applyShell(layout) {
+      const first = this.shellSeen !== true;
+      this.shellSeen = true;
+      const was = this.shell;
+      this.shell = layout?.open ? layout : null;
+      const want = this.shell ? Boolean(this.shell.chat) : was ? false : this.isOpen;
+      if (want === this.isOpen) {
+        this.render();
+        return;
+      }
+      this.isOpen = want;
+      if (!want) this.hideMenus();
+      this.animateTo(want ? 1 : 0, { animate: !first });
+      if (want && !first) {
+        this.view.focusInput();
+        const id = this.view.getAttribute('conversation');
+        if (id && this.summaries.get(id)?.needsReview) this.api.markReviewed(id).catch(() => {});
+      }
     }
 
     animateTo(target, { animate = true, velocity = 0 } = {}) {
@@ -7452,8 +7505,15 @@
       const phone = this.phone.matches;
       const p = Math.max(0, Math.min(1, this.progress));
       const visible = this.isOpen || p > 0.001;
+      const shell = phone ? null : this.shell;
+      const gap = shell?.mode === 'float' ? shell.gap : 0;
       this.panel.dataset.open = String(this.isOpen);
-      this.panel.dataset.pinned = String(this.pinned && !phone);
+      this.panel.dataset.pinned = String(shell ? shell.mode === 'fit' : this.pinned && !phone);
+      if (shell) this.panel.dataset.shell = shell.mode;
+      else delete this.panel.dataset.shell;
+      this.panel.style.top = shell ? `${shell.top}px` : '';
+      this.panel.style.right = gap ? `${gap}px` : '';
+      this.panel.style.bottom = gap ? `${gap}px` : '';
       this.panel.inert = !this.isOpen;
       this.panel.style.visibility = visible ? 'visible' : 'hidden';
       this.launcher.setAttribute('aria-expanded', String(this.isOpen));
@@ -7464,16 +7524,20 @@
         this.panel.style.opacity = this.isOpen ? '1' : '0';
       } else {
         this.panel.style.opacity = '';
-        this.panel.style.transform = phone ? `translateY(${(1 - p) * 100}%)` : `translateX(${(1 - p) * 100}%)`;
+        this.panel.style.transform = phone ? `translateY(${(1 - p) * 100}%)`
+          : gap ? `translateX(calc(${(1 - p) * 100}% + ${(1 - p) * (gap + 24)}px))`
+          : `translateX(${(1 - p) * 100}%)`;
       }
       this.pinButton.setAttribute('aria-pressed', String(this.pinned));
       this.panel.style.width = phone ? '' : `${this.width}px`;
-      const docked = this.isOpen && this.pinned && !phone;
+      const docked = this.isOpen && !phone && (shell ? shell.mode === 'fit' : this.pinned);
       this.dock(docked);
       // Pinned, the page is still there to act on and the tray goes with it.
-      // Overlaying, the panel is the whole of what you are looking at.
-      this.tray.dataset.away = String(this.isOpen && !docked);
-      this.tray.style.setProperty('--tray-inset', docked ? `${this.width}px` : '0px');
+      // Overlaying, the panel is the whole of what you are looking at — unless
+      // it is the shell's card, which leaves the page beside it.
+      this.tray.dataset.away = String(this.isOpen && !docked && !shell);
+      const inset = docked ? this.width : shell && this.isOpen ? this.width + gap : 0;
+      this.tray.style.setProperty('--tray-inset', `${inset}px`);
       if (this.isOpen) this.setTray(false);
     }
 
@@ -7485,7 +7549,7 @@
     }
 
     widthKey() {
-      return this.pinned ? WIDTH_PINNED_KEY : WIDTH_OVERLAY_KEY;
+      return this.pinned || this.shell ? WIDTH_PINNED_KEY : WIDTH_OVERLAY_KEY;
     }
 
     widthMax() {
@@ -7677,7 +7741,7 @@
       // A title click opens the recent menu; only the bar's empty space starts a drag.
       this.titleButton.addEventListener('pointerdown', (event) => event.stopPropagation());
       this.bar.addEventListener('pointerdown', (event) => {
-        if (!this.isOpen || event.button !== 0) return;
+        if (!this.isOpen || this.shell || event.button !== 0) return;
         if (event.composedPath().some((node) => TOOLS.has(node?.localName) && node !== this.titleButton)) return;
         drag = { id: event.pointerId, start: this.phone.matches ? event.clientY : event.clientX, moved: false, history: [] };
         this.bar.setPointerCapture(event.pointerId);
@@ -7981,7 +8045,7 @@
   };
 
   const buildAskCard = (event, submit) => MarbleConversation.prototype.buildAskCard(event, submit);
-  window.marbleAgentUI = { stateOf, STATE_CSS, renderText, spring, project, TOKENS, buildAskCard, ASK_CSS, conversationTags, eventBelongsToConversation, askResponse, TAG_CSS, fillMeters, usageAvailable, usageTone, formatReset, formatAsOf, USAGE_CSS, pageTheme, applyPageTheme, fillRadios, fitPicker, fitPresets, sortProviders };
+  window.marbleAgentUI = { stateOf, STATE_CSS, renderText, spring, project, TOKENS, watchPageTheme, buildAskCard, ASK_CSS, conversationTags, eventBelongsToConversation, askResponse, TAG_CSS, fillMeters, usageAvailable, usageTone, formatReset, formatAsOf, USAGE_CSS, pageTheme, applyPageTheme, fillRadios, fitPicker, fitPresets, sortProviders };
   Object.assign(window.marbleAgentUI, { collapseToolRows, toolShortName, toolLabel });
 
   if (window.marble?.agent) mount();

@@ -143,6 +143,8 @@ const RUNTIME = {
   'agent-marks.js': () => path.join(REPO, 'runtime', 'agent-marks.js'),
   // Variations: the version pill and the compare surface for a <marble-alt>.
   'agent-variations.js': () => path.join(REPO, 'runtime', 'agent-variations.js'),
+  // The shell: ⌘J's tree, bar and chat around whatever document is open.
+  'shell.js': () => path.join(REPO, 'runtime', 'shell.js'),
 };
 
 // A runtime file's version is a hash of its bytes. A page asks for each one at
@@ -347,6 +349,9 @@ export async function createDrive(config, { log = console, agentProviders = null
       tags += `\n<script src="${runtimeUrl('agent-marks.js')}" data-marble-transient></script>`;
       tags += `\n<script src="${runtimeUrl('agent-variations.js')}" data-marble-transient></script>`;
     }
+    // Last: the shell seats the drawer, so it comes after everything that
+    // mounts one, and reads the drawer's tokens off window.marbleAgentUI.
+    tags += `\n<script src="${runtimeUrl('shell.js')}" data-marble-transient></script>`;
     return source.includes('</body>')
       ? source.replace(/<\/body>/i, () => `${tags}\n</body>`)
       : source + tags;

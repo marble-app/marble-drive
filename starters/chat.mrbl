@@ -75,8 +75,9 @@ __ICON__
      a panel beside the page shrinks <html> and leaves the viewport alone. */
   html { container: app / inline-size; height: 100%; }
   * { box-sizing: border-box; }
+  /* The window, less the bar a docked shell puts above the page (--marble-shell-top). */
   body.app {
-    margin: 0; height: 100dvh; overflow: hidden;
+    margin: 0; height: calc(100dvh - var(--marble-shell-top, 0px)); overflow: hidden;
     display: grid; grid-template-columns: var(--rail) minmax(0, 1fr);
     /* One row, the whole height. Anything the host slips into <body> lands in
        a zero-height row below it instead of taking a share of the window. */

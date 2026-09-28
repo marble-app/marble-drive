@@ -49,8 +49,9 @@ __ICON__
      viewport exactly where it was. */
   html { container: doc / inline-size; }
 
+  /* The window, less the bar a docked shell puts above the page (--marble-shell-top). */
   body {
-    margin: 0; min-height: 100svh;
+    margin: 0; min-height: calc(100svh - var(--marble-shell-top, 0px));
     padding: 2rem 1.5rem max(1.25rem, env(safe-area-inset-bottom));
     display: flex; flex-direction: column; gap: .9rem;
     background: var(--paper); color: var(--ink);

@@ -77,8 +77,9 @@ __ICON__
 
   html { container: app / inline-size; height: 100%; }
   * { box-sizing: border-box; }
+  /* The window, less the bar a docked shell puts above the page (--marble-shell-top). */
   body.app {
-    margin: 0; height: 100dvh; overflow: hidden;
+    margin: 0; height: calc(100dvh - var(--marble-shell-top, 0px)); overflow: hidden;
     display: grid; grid-template-columns: minmax(0, 1fr) auto;
     /* One row, the whole height. Anything the host slips into <body> lands in
        a zero-height row below it instead of taking a share of the window. */
@@ -396,7 +397,7 @@ __ICON__
      The conversation about the board. Its words and ideas are the file's;
      the thread is the host's, read back from the event stream. */
   .panel {
-    grid-row: 1; width: var(--panel); min-width: 0; height: 100dvh; display: flex; flex-direction: column;
+    grid-row: 1; width: var(--panel); min-width: 0; height: calc(100dvh - var(--marble-shell-top, 0px)); display: flex; flex-direction: column;
     background: var(--room); border-left: 1px solid var(--line); position: relative; z-index: 12;
   }
   body[data-panel="closed"] .panel { display: none; }

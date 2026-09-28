@@ -78,7 +78,7 @@ test('the drawer is on the page and not in the document', async () => {
   assert.deepEqual(errors, []);
 });
 
-test('⌘J and Ctrl+J toggle it, Escape closes it, and opening focuses the composer', async () => {
+test('⌘J and Ctrl+J open the shell with the chat in it, focused; Escape hands the keys back', async () => {
   const { page, panel, view } = await visit();
   await page.keyboard.press('Meta+j');
   await opened(panel);
@@ -86,12 +86,15 @@ test('⌘J and Ctrl+J toggle it, Escape closes it, and opening focuses the compo
     const view = document.querySelector('marble-agent-drawer').shadowRoot.querySelector('marble-conversation');
     return view.shadowRoot.activeElement?.classList.contains('editor');
   });
+  // Inside the shell the chat is a panel, not a sheet: Escape leaves the box
+  // and the chat stays where it is.
   await view.locator('.editor').press('Escape');
+  await page.waitForFunction(() => document.activeElement === document.body);
+  assert.equal(await panel.getAttribute('data-open'), 'true');
+  await page.keyboard.press('Control+j');
   await panel.locator('xpath=self::*[@data-open="false"]').waitFor();
   await page.keyboard.press('Control+j');
   await opened(panel);
-  await page.keyboard.press('Control+j');
-  await panel.locator('xpath=self::*[@data-open="false"]').waitFor();
 });
 
 test('a conversation from the drawer edits the page, and stays with that page', async () => {
