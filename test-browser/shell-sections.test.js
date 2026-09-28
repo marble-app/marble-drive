@@ -1,5 +1,5 @@
 // The shell's tree, section by section: Pinned is read out of the Drive's own
-// file, Agents is every document an agent is at with a pip per agent, and the
+// file, Agents is every document an agent is at with a mark per state, and the
 // sections fold and move where you put them. What it has to get right is that
 // none of this is a second copy of anything — a pin is the Drive's, a state is
 // the conversation's — and that the order you give the sections is kept.
@@ -56,7 +56,7 @@ test('Pinned is the Drive\'s own pins, in the Drive\'s order, and a pinned folde
   assert.deepEqual(await order(shell), ['pinned', 'recent', 'agents', 'drive']);
 });
 
-test('Agents: a row per document, a pip per agent most urgent first, bold while unread, and a count of who needs you', async () => {
+test('Agents: a row per document, a mark per state most urgent first, bold while unread, and a count of who needs you', async () => {
   const { page, shell } = await visit();
   const ids = await page.evaluate(async () => {
     const a = window.marble.agent;
@@ -90,6 +90,13 @@ test('Agents: a row per document, a pip per agent most urgent first, bold while 
   await plans.locator('[data-fold-app]').click();
   const threads = shell.locator('.thread');
   assert.equal(await threads.count(), 2);
+  await threads.first().waitFor({ state: 'visible' });
+  // Unfolded, the document's marks give way to each agent's, at the row's end.
+  await page.waitForFunction(() => {
+    const pips = document.querySelector('marble-shell').shadowRoot.querySelector('.row.app[data-app="Travel/plans"] .pips');
+    return getComputedStyle(pips).opacity === '0';
+  });
+  assert.deepEqual(await threads.evaluateAll((ts) => ts.map((t) => t.lastElementChild.className)), ['pip', 'pip']);
 
   // A conversation opens at its document with the chat beside it, showing it.
   await shell.locator(`.row.app[data-app="Research/atlas"] [data-thread="${ids.done}"]`).click();

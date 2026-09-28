@@ -207,7 +207,7 @@
     .row .where { margin-left: auto; padding-left: 8px; font-size: 11px; color: var(--faint); font-weight: 400; overflow: hidden; text-overflow: ellipsis; flex: 0 1 auto; }
     .empty { padding: 6px 10px; color: var(--faint); font-size: 12px; }
 
-    /* ── Agents: a document per row, a pip per agent ── */
+    /* ── Agents: a document per row; folded, a mark per state and how many ── */
     .row.app { padding: 0; gap: 0; }
     .row.app .go { display: flex; align-items: center; gap: 7px; flex: 1; min-width: 0; padding: 4px 8px; border-radius: 6px; text-align: left; color: inherit; }
     .row.app .go .name, .thread .name { overflow: hidden; text-overflow: ellipsis; min-width: 0; }
@@ -217,12 +217,32 @@
     .row.app:has(.fold) .go { padding-left: 10px; }
     .row.app .pips { margin: 0 8px 0 6px; }
     ul.threads { padding-left: 24px; }
+    /* Unfolding slides the agents open, and the marks hand over: the
+       document's sink away as each agent's drops into place below. */
+    .agents .drop { display: grid; grid-template-rows: 0fr; visibility: hidden; transition: grid-template-rows 240ms var(--settle), visibility 0s linear 240ms; }
+    .agents .drop > ul { min-height: 0; overflow: hidden; opacity: 0; transition: opacity 140ms ease; }
+    .agents [data-open] > .drop { grid-template-rows: 1fr; visibility: visible; transition: grid-template-rows 240ms var(--settle), visibility 0s; }
+    .agents [data-open] > .drop > ul { opacity: 1; transition: opacity 200ms ease 40ms; }
+    .row.app .pips { transition: opacity 140ms ease, transform 200ms var(--settle); }
+    .agents [data-open] > .row.app .pips { opacity: 0; transform: translateY(5px); }
+    .drop .pip { opacity: 0; transform: translateY(-6px); transition: opacity 120ms ease, transform 120ms ease; }
+    .agents [data-open] .drop .pip { opacity: 1; transform: none; transition: opacity 180ms ease 90ms, transform 260ms var(--settle) 90ms; }
+    .agents [data-open] .drop li:nth-child(2) .pip { transition-delay: 120ms; }
+    .agents [data-open] .drop li:nth-child(n+3) .pip { transition-delay: 150ms; }
     .thread { font-size: 12.5px; }
     /* Bold while unread: waiting on you, or finished since you last looked. */
     [data-unread] .name, .thread[data-unread] .name { color: var(--ink); font-weight: 620; }
+    /* Each agent's mark sits at the row's end, under its document's. */
+    .thread .pip { margin-left: auto; }
     .pips { display: inline-flex; align-items: center; gap: 3px; flex: none; }
-    .pips .more { font-size: 10.5px; color: var(--faint); margin-left: 1px; }
-    .pip { width: 10px; height: 10px; display: grid; place-items: center; flex: none; }
+    .pips .pg { display: inline-flex; align-items: center; gap: 1px; }
+    .pips .n { font-size: 10.5px; font-weight: 560; line-height: 1; color: var(--faint); font-variant-numeric: tabular-nums; }
+    /* Each mark's box is as wide as what it draws, so the gaps are the gaps. */
+    .pip { width: 6px; height: 10px; display: grid; place-items: center; flex: none; }
+    .pip[data-st="waiting"], .pip[data-st="done"] { width: 7px; }
+    /* One column down the right edge: a row's last mark sits in the same slot,
+       drawn at its centre, the document's and each agent's alike. */
+    .pips > .pg:last-child > .pip:last-child, .thread .pip { width: 9px; }
     .pip::before { content: ''; width: 6px; height: 6px; border-radius: 50%; }
     /* Needs you is a ring — the Agents page's word for it — so it reads apart
        from the working dot by its shape, whatever the palette does to the
@@ -232,7 +252,10 @@
     .pip[data-st="done"]::before { display: none; }
     .pip svg { width: 10px; height: 10px; fill: none; stroke: var(--muted); stroke-width: 1.6; stroke-linecap: round; stroke-linejoin: round; }
     @keyframes breathe { 0%, 100% { opacity: 1; } 50% { opacity: .3; } }
-    @media (prefers-reduced-motion: reduce) { .pip[data-st="working"]::before { animation: none; } }
+    @media (prefers-reduced-motion: reduce) {
+      .pip[data-st="working"]::before { animation: none; }
+      .agents .drop, .agents .drop > ul, .agents .pips, .agents .pip { transition-duration: 0s !important; transition-delay: 0s !important; transform: none !important; }
+    }
 
     /* The tree's inner edge: drag it, or focus it and use the arrow keys.
        Double-click puts it back. The same edge the chat has on its side. */
@@ -1075,7 +1098,7 @@
 
     // Up and Down walk the visible rows; Right and Left unfold and fold.
     walkRows(event) {
-      const rows = [...this.scroll.querySelectorAll('.row:is(a, button), .row .go, .sec-fold')].filter((el) => el.offsetParent);
+      const rows = [...this.scroll.querySelectorAll('.row:is(a, button), .row .go, .sec-fold')].filter((el) => el.offsetParent && !el.closest('[inert]'));
       const at = rows.indexOf(this.shadowRoot.activeElement);
       if (at < 0) return;
       const row = rows[at];
@@ -1368,7 +1391,7 @@
       return list.sort((a, b) => rank(a.threads[0]) - rank(b.threads[0]) || latest(b.threads[0]) - latest(a.threads[0]));
     }
 
-    /** One pip per agent, most urgent first; after four, a count. */
+    /** One mark per state, most urgent first, with how many when more than one. */
     pips(threads) {
       const wrap = h('span', 'pips');
       const counts = { waiting: 0, working: 0, done: 0 };
@@ -1377,8 +1400,13 @@
       wrap.setAttribute('role', 'img');
       wrap.setAttribute('aria-label', said);
       wrap.title = said;
-      threads.slice(0, 4).forEach((c) => wrap.append(this.pip(this.stateOf(c))));
-      if (threads.length > 4) wrap.append(h('span', 'more', `+${threads.length - 4}`));
+      for (const k of ORDER) {
+        if (!counts[k]) continue;
+        const group = h('span', 'pg');
+        group.append(this.pip(k));
+        if (counts[k] > 1) group.append(h('span', 'n', String(counts[k])));
+        wrap.append(group);
+      }
       return wrap;
     }
 
@@ -1409,6 +1437,7 @@
         const li = h('li');
         const many = app.threads.length > 1;
         const open = many && this.openApps.has(app.path);
+        if (open) li.setAttribute('data-open', '');
         const row = h('div', 'row app');
         row.dataset.app = app.path;
         if (app.threads.some((c) => this.unread(c))) row.setAttribute('data-unread', '');
@@ -1428,20 +1457,25 @@
         go.title = `${app.path} — open with its chat`;
         go.innerHTML = icon('doc');
         go.append(h('span', 'name', nameOf(app.path)));
+        // Unfolded, these fade and the rows below say it agent by agent.
         row.append(go, this.pips(app.threads));
         li.append(row);
-        if (open) {
+        if (many) {
+          // Always there, folded shut, so unfolding can slide it open.
+          const drop = h('div', 'drop');
+          drop.inert = !open;
           const threads = h('ul', 'threads');
           for (const c of app.threads) {
             const t = h('button', 'row thread');
             t.type = 'button';
             t.dataset.thread = c.id;
             if (this.unread(c)) t.setAttribute('data-unread', '');
-            t.append(this.pip(this.stateOf(c)), h('span', 'name', c.title || 'New chat'));
+            t.append(h('span', 'name', c.title || 'New chat'), this.pip(this.stateOf(c)));
             t.title = `${c.title || 'New chat'} — ${WORDS[this.stateOf(c)]}`;
             threads.append(this.item(t));
           }
-          li.append(threads);
+          drop.append(threads);
+          li.append(drop);
         }
         ul.append(li);
       }
@@ -1513,8 +1547,16 @@
       if (this.openApps.has(path)) this.openApps.delete(path);
       else this.openApps.add(path);
       store('open-apps', JSON.stringify([...this.openApps]));
-      this.redraw('agents');
-      this.scroll.querySelector(`[data-fold-app="${CSS.escape(path)}"]`)?.focus({ preventScroll: true });
+      // In place, not redrawn, so the rows slide and the marks hand over.
+      const car = this.scroll.querySelector(`[data-fold-app="${CSS.escape(path)}"]`);
+      const li = car?.closest('li');
+      if (!li) { this.redraw('agents'); return; }
+      const open = this.openApps.has(path);
+      li.toggleAttribute('data-open', open);
+      li.querySelector(':scope > .drop').inert = !open;
+      car.setAttribute('aria-expanded', String(open));
+      car.setAttribute('aria-label', car.getAttribute('aria-label').replace(/^(Show|Hide)/, open ? 'Hide' : 'Show'));
+      car.focus({ preventScroll: true });
     }
 
     // The folders you are inside are unfolded until you fold one yourself.
