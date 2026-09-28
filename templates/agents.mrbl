@@ -2127,7 +2127,7 @@ __ICON__
      care which of them it is inside; `:is(…)` gives it the one point of
      specificity it needs to sit over the runtime's STATE_CSS, which is
      appended to the head after this sheet.
-       running  accent, breathing      asking  a danger ring
+       running  accent, breathing      asking  a caution ring, the drive's needs-you everywhere
        review   ink, filled            failed  danger, filled
        idle     a hairline ring — present, asking for nothing. */
   :is(.conv, .focus-card, .deck-ask, .topbar, .dock-bar) .dot[data-state] {
@@ -2141,7 +2141,7 @@ __ICON__
     background: var(--accent); animation: dot-breath 2s ease-in-out infinite;
   }
   :is(.conv, .focus-card, .deck-ask, .topbar, .dock-bar) .dot[data-state="asking"] {
-    background: transparent; border: 2px solid var(--danger);
+    background: transparent; border: 2px solid var(--caution);
   }
   :is(.conv, .focus-card, .deck-ask, .topbar, .dock-bar) .dot[data-state="review"] { background: var(--ink); }
   :is(.conv, .focus-card, .deck-ask, .topbar, .dock-bar) .dot[data-state="failed"] { background: var(--danger); }

@@ -163,10 +163,17 @@ test('Agents keeps to the Agents page\'s idle cut: older conversations are left 
   await settledDone(page, old);
   // Two days since anyone touched it.
   const then = Date.now() - 2 * 24 * 60 * 60 * 1000;
-  // Written straight into its record: the store stamps updatedAt on every update.
+  // Written straight into its record: the store stamps updatedAt on every
+  // update. The runner may still be finishing the turn's own write, so it is
+  // written until the host reads it back old.
   const file = path.join(host.drive.store.marbleDir, 'agents', old, 'meta.json');
-  const meta = JSON.parse(await fsp.readFile(file, 'utf8'));
-  await fsp.writeFile(file, JSON.stringify({ ...meta, createdAt: then, updatedAt: then, lastFinishedAt: then, lastInteractedAt: then }));
+  for (let tries = 0; tries < 20; tries += 1) {
+    const meta = JSON.parse(await fsp.readFile(file, 'utf8'));
+    await fsp.writeFile(file, JSON.stringify({ ...meta, createdAt: then, updatedAt: then, lastFinishedAt: then, lastInteractedAt: then }));
+    await page.waitForTimeout(150);
+    const seen = await page.evaluate(async (id) => (await window.marble.agent.conversations()).find((c) => c.id === id), old);
+    if (seen && seen.updatedAt === then && seen.lastFinishedAt === then) break;
+  }
   await page.evaluate(() => localStorage.setItem('marble-agents:idle', String(24 * 60)));
   await page.reload();
   await open(page);

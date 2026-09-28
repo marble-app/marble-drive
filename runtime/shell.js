@@ -224,7 +224,10 @@
     .pips .more { font-size: 10.5px; color: var(--faint); margin-left: 1px; }
     .pip { width: 10px; height: 10px; display: grid; place-items: center; flex: none; }
     .pip::before { content: ''; width: 6px; height: 6px; border-radius: 50%; }
-    .pip[data-st="waiting"]::before { background: var(--caution); }
+    /* Needs you is a ring — the Agents page's word for it — so it reads apart
+       from the working dot by its shape, whatever the palette does to the
+       colours. The same stroke as the done check beside it. */
+    .pip[data-st="waiting"]::before { width: 7px; height: 7px; box-sizing: border-box; background: none; border: 1.6px solid var(--caution); }
     .pip[data-st="working"]::before { background: var(--accent-ink); animation: breathe 1.8s ease-in-out infinite; }
     .pip[data-st="done"]::before { display: none; }
     .pip svg { width: 10px; height: 10px; fill: none; stroke: var(--muted); stroke-width: 1.6; stroke-linecap: round; stroke-linejoin: round; }

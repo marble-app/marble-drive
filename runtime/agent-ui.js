@@ -1399,7 +1399,9 @@
     [data-state="unseen"] .dot { background: var(--ink); }
     [data-state="failed"] .dot { background: var(--danger); }
     [data-state="working"] .dot { background: var(--accent-ink); animation: dot-breathe 1.6s ease-in-out infinite; }
-    [data-state="waiting"] .dot { background: var(--caution); animation: dot-ring 1.8s ease-out infinite; }
+    /* A ring, not a dot: needs you has to read apart from working by shape,
+       not only by colour. Heavier than idle's hairline, and it pulses. */
+    [data-state="waiting"] .dot { background: transparent; border: 2px solid var(--caution); animation: dot-ring 1.8s ease-out infinite; }
     @keyframes dot-breathe { 0%, 100% { opacity: 1; } 50% { opacity: .45; } }
     @keyframes dot-ring {
       0% { box-shadow: 0 0 0 0 color-mix(in srgb, var(--caution) 55%, transparent); }
