@@ -42,7 +42,7 @@ const HOUR = 60 * 60_000;
 
 const args = process.argv.slice(2);
 const opts = {
-  sprite: 'admin-p1',
+  sprite: 'admin-p2',
   org: 'marble-drive',
   to: path.join(os.homedir(), 'Marble Backups'),
   link: path.join(os.homedir(), 'Marble Drive'),

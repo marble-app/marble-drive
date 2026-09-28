@@ -1,4 +1,4 @@
-// The console: every drive, from one page on admin-p1
+// The console: every drive, from one page on admin-p2
 // (docs/superpowers/specs/2026-09-24-the-console-design.md).
 //
 // On only with MARBLE_DRIVE_CONSOLE=1 and a passphrase. It answers
@@ -8,7 +8,7 @@
 // It looks at the fleet only while a console tab is open: the Sprites list
 // every 20 s (which wakes nobody), a look inside any drive that is awake
 // anyway and has not been looked at in five minutes, and the workshop every
-// minute. With no tab open it does nothing, and admin-p1 can sleep.
+// minute. With no tab open it does nothing, and admin-p2 can sleep.
 
 import os from 'node:os';
 import path from 'node:path';

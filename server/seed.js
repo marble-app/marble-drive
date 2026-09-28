@@ -120,7 +120,7 @@ export async function seedDesignSystem(store, { name = 'Design System', title = 
 }
 
 /** The Console: every drive, from one page. Only where the console is on
- *  (admin-p1); its code is the host's (runtime/console.js), so the file is a
+ *  (admin-p2); its code is the host's (runtime/console.js), so the file is a
  *  place, not a program, and never needs patching. */
 export async function buildConsole({ title = 'Console' } = {}) {
   const template = await fsp.readFile(path.join(REPO, 'templates', 'console.mrbl'), 'utf8');

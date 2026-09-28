@@ -3,7 +3,7 @@
 //
 // What the probe prints is split in two. What may be shown — release, versions,
 // health, which settings exist and the values of the ones that are not secret —
-// is cached on admin-p1's disk with when it was seen, so an asleep drive still
+// is cached on admin-p2's disk with when it was seen, so an asleep drive still
 // says what it looked like. What may not — the passphrase, any key — is held in
 // memory, for the console to act with, and is gone with the process.
 

@@ -1,6 +1,6 @@
 # Hosting Marble Drive
 
-How Marble Drive runs in the cloud as of 2026-09-24: what runs where, what is
+How Marble Drive runs in the cloud as of 2026-09-28: what runs where, what is
 on each machine, and how to ship, add people, recover and troubleshoot. The
 reasoning behind each of these choices is in
 [`HOSTING-DECISIONS.md`](HOSTING-DECISIONS.md); running a single drive on your
@@ -17,16 +17,17 @@ runs on a laptop. One person, one sprite, one drive.
 
 | Sprite | Who | Role | Label | Updated by |
 |---|---|---|---|---|
-| `admin-p1` | the owner | his real drive **and** the workshop, where Marble is changed and shipped | `marble-owner` | by name, last |
+| `admin-p2` | the owner | his real drive **and** the workshop, where Marble is changed and shipped | `marble-owner` | by name, last |
+| `admin-p1` | nobody | the owner's sprite until 2026-09-28, kept asleep for Fly to look at (see "Moving the owner's sprite") | `marble-owner` until relabelled | never |
 | `t-bryan` | the owner | a test user on an API key; try changes here first | `marble-tester` | `--all` |
 | `t-irene`, `t-sam` | friends | their drives; agents on the owner's Claude login | `marble-tester` | `--all` |
 | `t-sangho`, `t-peiling` | friends | their drives; agents on their own API keys | `marble-tester` | `--all` |
 
 The owner's MacBook holds no drive of its own. Its `drive/` is a **mirror** of
-admin-p1, pulled one way on request (`tools/drive-pull.sh`), so big changes to
+admin-p2, pulled one way on request (`tools/drive-pull.sh`), so big changes to
 Marble run their tests and harnesses on the Mac, against real documents, and
 not on a sprite's compute. Anything written to the mirror is lost at the next
-pull; real edits happen on admin-p1. Until the first pull it was a frozen backup
+pull; real edits happen on admin-p2. Until the first pull it was a frozen backup
 from 2026-09-24 01:15 UTC (kept at `drive.kept-<utc>/` when it is replaced).
 
 ## Three layers, three ways of saving
@@ -53,13 +54,14 @@ everyone on the next deploy, and a change to `templates/drive.mrbl` or
 | `~/app/current` | link to the live release | switched by a deploy |
 | `~/app/history` | releases that went live, in order (rollback reads it) | yes |
 | `~/app/release.sh` | the sprite's half of a deploy (`tools/sprite/release.sh`), re-sent each deploy | replaced |
-| `~/.config/marble-drive/sprite.env` | this sprite's settings (`KEY=value`, mode 600): passphrase, secure cookie, which Claude pays, extra keys (TYPESAFE_API_KEY on admin-p1) | yes |
+| `~/.config/marble-drive/sprite.env` | this sprite's settings (`KEY=value`, mode 600): passphrase, secure cookie, which Claude pays, extra keys (TYPESAFE_API_KEY on admin-p2) | yes |
 | `~/.config/marble-drive/agent-keys` | API keys saved in Agents settings (mode 600) | yes |
 | `~/.claude/` | a Claude login, where the owner ran `claude login` | yes |
-| Sprites service `marble-drive` | the host, port 4400, recreated on every switch | recreated |
+| Sprites service `marble-drive` | the host, port 4400, run by the release's `tools/sprite/serve.sh`, which starts it again if it dies; recreated on every switch | recreated |
+| `~/app/crash/` | `crashes.log` (a line per time the host died and was started again) and Node's report of a fatal error, such as running out of heap | yes |
 | `/.sprite/logs/services/marble-drive.log` | the host's log | yes |
-| `~/app/switch.log` | admin-p1 only: self-updates that waited for idle | yes |
-| `/home/sprite/src/{marble-drive,marble}` | admin-p1 only: the workshop checkouts, agent projects "Marble Drive" and "Marble" | yes |
+| `~/app/switch.log` | admin-p2 only: self-updates that waited for idle | yes |
+| `/home/sprite/src/{marble-drive,marble}` | admin-p2 only: the workshop checkouts (and the other worktrees beside them), agent projects "Marble Drive" and "Marble" | yes |
 
 The service's environment is the release script's defaults
 (`MARBLE_DRIVE_ROOT=/drive`, `PORT=4400`, `HOST=127.0.0.1`, agents on,
@@ -79,7 +81,7 @@ The service's environment is the release script's defaults
   nothing else is signed in. Every release installs the Chromium build its
   Playwright wants and launches it before it can go live.
 - **Testers' URLs are public**, so the passphrase is their only lock.
-  **admin-p1's URL is private to the Fly org** as well, because it holds the
+  **admin-p2's URL is private to the Fly org** as well, because it holds the
   keys that can change everyone's drive.
 - **The roster** of URLs and passphrases is on the owner's Mac at
   `~/.config/marble-drive/testers.json` (mode 600). Read one:
@@ -129,11 +131,20 @@ The service's environment is the release script's defaults
     (24). The page reads its two from the host. A turn is only ever ended by the
     stall rule: 30 min of no output and no work, in awake time
     (`MARBLE_DRIVE_AGENT_STALL_MINUTES`).
-  - **admin-p1 stays up while the owner uses it:** its `sprite.env` has
+  - **admin-p2 stays up while the owner uses it:** its `sprite.env` has
     `MARBLE_DRIVE_TAB_HIDDEN_SECONDS=1800` and `MARBLE_DRIVE_TAB_IDLE_MINUTES=60`
     (so its stream cut is 91 min). Waking costs seconds from paused and
     about 70 s from stopped (measured 2026-09-25), which is what made moving
     between pages feel slow. Testers keep the short defaults.
+- **Staying up:** a Sprites service is not restarted when its process dies,
+  so the service runs `tools/sprite/serve.sh`, which starts the host again
+  (at once, then backing off to a minute while it keeps failing) and writes
+  each exit to `~/app/crash/crashes.log`; Node leaves a report there on a
+  fatal error. When the machine runs out of memory the kernel takes an agent's
+  turn, and whatever it runs (a test's Chromium), before the host: Sprites
+  starts a service at `oom_score_adj` -900 and each turn raises its own to 500
+  (`server/agent/first-to-go.js`). A hard ceiling (a cgroup's `memory.max`)
+  cannot be set on a sprite, even as root.
 - **Page weight:** the host compresses text (Brotli, else gzip; Fly's edge
   gzips anyway), and a page names each runtime file at `?v=<hash>`, which the
   browser keeps until the file changes. Moving between documents downloads
@@ -144,7 +155,7 @@ The service's environment is the release script's defaults
 
 ## Shipping a change: the workshop
 
-The owner works in his drive on admin-p1. A bug or an idea becomes a
+The owner works in his drive on admin-p2. A bug or an idea becomes a
 conversation there in the **Marble Drive** (or **Marble**) project. The agent
 follows the repo's `CLAUDE.md`:
 
@@ -153,24 +164,24 @@ follows the repo's `CLAUDE.md`:
 3. A `marble` change: bump, `npm publish` from `../marble`, point this repo at it.
 4. Commit and push to `main` (straight to `main`, by the owner's choice).
 5. When the owner says so: `tools/sprite-deploy.sh --all`, then
-   `tools/sprite-deploy.sh admin-p1`. From admin-p1 itself this stages the
+   `tools/sprite-deploy.sh admin-p2`. From admin-p2 itself this stages the
    release and hands the switch to a `marble-switch` service that waits until no
    agent is working, so the conversation that asked is not cut off. From
    anywhere else, add `--when-idle` for the same wait.
 6. Report what shipped where.
 
-admin-p1 is signed in to GitHub (`gh auth login` + `gh auth setup-git`), npm
+admin-p2 is signed in to GitHub (`gh auth login` + `gh auth setup-git`), npm
 (`npm login`) and Sprites (`sprite login`) by the owner, and commits as
-`bdhmin`. `tools/sprite-workshop.sh admin-p1` refreshes the checkouts (fast-forward
+`bdhmin`. `tools/sprite-workshop.sh admin-p2` refreshes the checkouts (fast-forward
 only, never over local changes), installs them and re-registers the projects.
 
 The same steps work from the MacBook, where this repo also lives.
 
 ## The console
 
-**Console** is a document in admin-p1's drive (`/a/Console`): every drive and
+**Console** is a document in admin-p2's drive (`/a/Console`): every drive and
 everything done to them, from one page. It is on only where `sprite.env` says
-`MARBLE_DRIVE_CONSOLE=1` and the drive has a passphrase, which is admin-p1. Its
+`MARBLE_DRIVE_CONSOLE=1` and the drive has a passphrase, which is admin-p2. Its
 code is the host's (`server/console/`, `runtime/console.js`, `console.css`),
 so it ships with every deploy; the document is only where it lives.
 
@@ -179,7 +190,7 @@ so it ships with every deploy; the document is only where it lives.
 | **Dashboard** (opens on it) | every drive's state over time (running, warm, cold), cost by drive, why each was awake, spend this month and its projection (and a budget, if set), spend per day, when drives are awake (hour × weekday), memory, CPU, agent turns and documents opened; 24 h, 7 days, 30 days or this month; any chart as a table; **Paste a bill** takes Fly's Cost Explorer page and calibrates every estimate to it |
 | **Drives** | every drive, awake or asleep and since when, without waking any; a drive's release, health, Claude (login or key, sign in or out), access (public or private, the passphrase: show, copy, new), settings (`sprite.env`, applied with a restart), checkpoints (make, restore by typing the name), and removing a tester; **New drive** provisions one |
 | **Backups** | the Mac's backup of this drive, as the Mac last reported it: when it last backed up and why, whether changes are waiting and when they will be copied, when the Mac last checked in; warnings when it stops checking in, a backup fails or changes are overdue (they mark the tab); **Schedule** on/off and **Back up now**; **On the Mac**: the one copy (`~/Marble Drive`), its documents, size and matching Fly checkpoint, with **Restore…** onto this or another drive; **History on Fly**: the drive's checkpoints, each with **Restore…** (the Mac does it); names typed to confirm; the terminal command for when this drive is down. Buttons leave requests the Mac picks up within a minute (see "Back a drive up here") |
-| **Ship** | main's recent commits and which drives have them; each drive against main; **Ship** shows the plan (`sprite-deploy.sh --print-plan`) before deploying main to every user and then admin-p1; **Try the workshop on t-bryan** |
+| **Ship** | main's recent commits and which drives have them; each drive against main; **Ship** shows the plan (`sprite-deploy.sh --print-plan`) before deploying main to every user and then admin-p2; **Try the workshop on t-bryan** |
 | **Workshop** | both checkouts (branch, head, changes, against origin), pull, run tests, **Publish** marble (the next patch in package.json and both plugin manifests, committed, tagged and pushed, then `npm publish`, which runs marble's guard and unit tests; npm may ask you to approve it). marble-drive needs no change: it depends on `file:../marble`, and a deploy installs the version that checkout declares, and a workshop chat in the Marble Drive or Marble project |
 | **Activity** | every job the console ran, its output streamed and kept |
 
@@ -200,8 +211,8 @@ How the dashboard knows the past: every drive writes its own ledger while it
 is awake, which is exactly while Fly bills it, so nothing has to watch it. The
 console reads new ledger lines from each drive that is **running**, every
 minute while a console tab is open (`server/console/ledger-read.mjs`), reads
-admin-p1's own from disk, and records each change of status the Sprites API
-shows, with the wake and pause times the API keeps. Kept on admin-p1 in
+admin-p2's own from disk, and records each change of status the Sprites API
+shows, with the wake and pause times the API keeps. Kept on admin-p2 in
 `/drive/.marble/console/usage/<sprite>/`. A drive asleep while the console
 watched catches up the next time both are awake; a drive not yet deployed with
 the ledger shows only what the console saw, costed as typical minutes and said
@@ -214,10 +225,10 @@ CLI, git, npm), one job at a time per drive, output kept in
 checkout of that commit (`/home/sprite/src/marble-drive-ship`). A drive whose
 checkpoint store is stuck is retried without a checkpoint and remembered
 (**Try them again** clears it). Settings are rewritten from a fresh read of
-`sprite.env` and applied with `release.sh apply` (admin-p1: `apply-when-idle`).
+`sprite.env` and applied with `release.sh apply` (admin-p2: `apply-when-idle`).
 No passphrase or key reaches a log or a cache file; a passphrase reaches the
 page only on **Show** or **Copy**. A new drive's roster entry is written on
-admin-p1 (`~/.config/marble-drive/testers.json`), the machine that made it.
+admin-p2 (`~/.config/marble-drive/testers.json`), the machine that made it.
 
 ## Tools
 
@@ -231,11 +242,11 @@ admin-p1 (`~/.config/marble-drive/testers.json`), the machine that made it.
 | `… --print-plan` | say what would be deployed, and stop |
 | `… --when-idle` | stage now, switch when no agent is working (always so from the sprite itself); for a drive in use |
 | `tools/sprite-deploy.sh --all [--list]` | every sprite labelled `marble-tester` or `marble-user`; continues past a failure; `--list` only names them |
-| `tools/drive-backup.sh [<sprite>] [--to <dir>] [--link <path>]` | a Fly checkpoint, then the one copy of a drive (default admin-p1) in `~/Marble Backups/<utc>/`, linked from `~/Marble Drive`; unchanged files hard-linked to the copy before, so a run moves only what changed |
+| `tools/drive-backup.sh [<sprite>] [--to <dir>] [--link <path>]` | a Fly checkpoint, then the one copy of a drive (default admin-p2) in `~/Marble Backups/<utc>/`, linked from `~/Marble Drive`; unchanged files hard-linked to the copy before, so a run moves only what changed |
 | `macos/launchd/backup.sh install [<sprite>]` | runs `tools/backup-agent.mjs` every minute and at login; `status`, `run`, `logs`, `uninstall` |
 | `tools/backup-agent.mjs [<sprite>]` | the Mac's half of the Console's Backups view: backs up after changes (10 quiet minutes, hourly at most), takes the Console's requests and reports back, touching the sprite only while it is awake |
 | `tools/drive-restore.sh <snapshot> <sprite> [--yes]` | puts a snapshot back on a sprite: stops the host, sets `/drive` aside, copies in, starts it, checks `/health` |
-| `tools/drive-pull.sh [<sprite>] [--into <dir>]` | a one-way mirror of a drive (default admin-p1) into this checkout's `drive/`, the last one set aside |
+| `tools/drive-pull.sh [<sprite>] [--into <dir>]` | a one-way mirror of a drive (default admin-p2) into this checkout's `drive/`, the last one set aside |
 | `tools/sprite-provision.sh <person> [--agent api\|subscription] [--key-file f] [--local]` | makes `t-<person>`: passphrase, `sprite.env`, optional preloaded key, deploy, public URL, outside check, roster entry, a note to send |
 | `tools/sprite-provision.sh --resume <person>` | finish one that stopped part way |
 | `tools/sprite-provision.sh --remove <person>` | destroy after typing the name; drops the roster entry |
@@ -252,7 +263,7 @@ unquoted variable into words.
 
 **Update everyone.** In the console: Ship, read the plan, Ship. From a
 terminal: `tools/sprite-deploy.sh --all --list`, then `--all`, then
-`tools/sprite-deploy.sh admin-p1`. `t-irene` and `t-sam` currently need
+`tools/sprite-deploy.sh admin-p2`. `t-irene` and `t-sam` currently need
 `--no-checkpoint` (see Troubleshooting).
 
 **Undo a deploy.** `tools/sprite-deploy.sh <sprite> --rollback`. For the
@@ -265,7 +276,7 @@ since that checkpoint, drive included).
 `127.0.0.1`, which an ungated host allows; send
 `-H "Host: <sprite>-b3fwm.sprites.app"` to see what a browser sees.
 
-**Back a drive up here.** admin-p1 is backed up to the owner's Mac by
+**Back a drive up here.** admin-p2 is backed up to the owner's Mac by
 `macos/launchd/backup.sh` (installed 2026-09-27), which runs
 `tools/backup-agent.mjs` every minute. The Mac keeps **one copy**,
 `~/Marble Backups/<utc>/`, and `~/Marble Drive` is a link to it; the history is
@@ -304,7 +315,7 @@ readable; their Claude sessions lived on the old machine. To go further back,
 restore one of Fly's checkpoints (the whole machine: drive, code, settings);
 from the Backups view the Mac does it, after checkpointing what is there now.
 
-**Mirror a drive here.** `tools/drive-pull.sh` (admin-p1 into this
+**Mirror a drive here.** `tools/drive-pull.sh` (admin-p2 into this
 checkout's `drive/`; `<sprite>` and `--into <dir>` for others). Stop the local
 host first; the script refuses while one holds the drive. The sprite must be
 running: nothing reaches a stuck one, and a checkpoint cannot be read out, only
@@ -328,6 +339,27 @@ sprite to sprite without printing them; recreate the service. Old
 conversations stay readable, but their Claude sessions stayed on the old
 machine, so continuing one starts fresh.
 
+**Moving the owner's sprite** (admin-p1 to admin-p2, 2026-09-28, about 13 s
+offline). `sprite create -o marble-drive --skip-console --label marble-owner
+<new>` (private to the org, like the old one). Copy `/drive` from the old
+sprite while it still serves: `sudo mkdir /drive` and `chown` it on the new
+one, then on the old one `rsync -a --delete --exclude
+/.marble/agents/host.lock -e ~/app/current/marble-drive/tools/sprite-rsh.sh
+/drive/ <new>:/drive/` (2.5 GB in a minute, inside Fly). The owner copies the
+home folder himself, because it holds every sign-in (Claude, GitHub, npm,
+Sprites, the other agent CLIs) and `sprite.env`: on the old sprite, `tar -C
+/home/sprite -czf - --exclude=./app --exclude=./.npm --exclude=./.sprite-shared
+. | sprite exec -o marble-drive -s <new> -- tar -C /home/sprite -xzf -`, from
+a Mac terminal (a `!` command in Claude Code cannot reach the keychain).
+Checkouts come across with their uncommitted work, and Claude sessions with
+them, so old conversations can be continued. Deploy the new sprite only once
+the drive is there: its first request would otherwise start the day's run on
+an empty drive. To cut over: stop the old host (`sprite-env services stop
+marble-drive`), stop the new one, rsync again (seconds), compare file counts,
+`release.sh apply` on the new one. Then delete the old sprite's services so
+nothing can wake its host, relabel it, `macos/launchd/backup.sh install
+<new>`, and point the daily cron-job.org ping at the new URL.
+
 ## Troubleshooting
 
 | Symptom | Cause | Fix |
@@ -340,11 +372,12 @@ machine, so continuing one starts fresh.
 | A turn froze when nobody was around | held past its limit: an unanswered question (10 min), no progress (30 min), or a day unattended | by design; opening the drive wakes it and it carries on |
 | A tab stopped updating | it rested (hidden 60 s, or idle 10 min) | any input wakes it; an old tab from before a deploy needs a reload |
 | A sprite never pauses | something holds it: a stream, a request, or a Sprites task | `/health` `streams`; `GET /v1/tasks` on `/.sprite/api.sock` |
-| API says `running` but `sprite exec`/`console` hang (i/o timeout) and a checkpoint says 503 "No process is running to checkpoint" | the sprite itself is stuck, below Marble: admin-p1 2026-09-26, 06:12–16:22 UTC; its ledger went silent, a deploy stalled after sending `release.sh`, memory never passed 2.4 GB | nothing inside can help; it came back on its own with a cold boot. Do not restore (you lose the drive since the checkpoint); give Fly the `fly-request-id`. Afterwards redeploy whatever stalled |
+| API says `running` but `sprite exec`/`console` hang (i/o timeout) and a checkpoint says 503 "No process is running to checkpoint" | the sprite itself is stuck, below Marble: admin-p1 on 2026-09-26, 09-27 and 09-28 (and never another sprite). On 09-28 the files API still listed `/drive` while anything under `/home/sprite` hung | nothing inside can help. A dashboard restart may time out; a restore can hang for 40 min and fail (`INTERNAL_ERROR`) without applying, though the sprite then cold-boots on its own disk with nothing lost. Give Fly the `fly-request-id`s. If it keeps happening, move to a new sprite ("Moving the owner's sprite") |
+| The host died and the URL answers 502, though the service says running | before 2026-09-28 nothing restarted a host that exited (admin-p1, 15:17 UTC: out of heap) | fixed: `serve.sh` starts it again; read `~/app/crash/crashes.log` and any report beside it |
 | `Failed to create checkpoint … v3.in-progress … file exists` | stuck checkpoint store: the next version's name is held by a checkpoint Sprites' own database has no row for (`sprite checkpoint info vN` says "not found"), and it cannot be reached from inside the sprite (t-irene since 2026-09-23, t-sam since 2026-09-24; t-bryan, t-eunhye, t-rima by 2026-09-28) | `sprite-deploy.sh` goes on without a checkpoint by itself and says so; report the stuck sprites to Fly |
 | An API key vanished after a deploy | keys inside the release (old behaviour) | keys live in `~/.config/marble-drive/agent-keys` now |
 | `tar: unrecognized option '--no-mac-metadata'` | a macOS-only flag on Linux | fixed: the flag is passed only on macOS |
-| A deploy from admin-p1 would kill its own turn | switching restarts the host running the turn | self-deploys hand off to `marble-switch`; watch `~/app/switch.log` |
+| A deploy from admin-p2 would kill its own turn | switching restarts the host running the turn | self-deploys hand off to `marble-switch`; watch `~/app/switch.log` |
 | `/today` lands somewhere odd | `latest` in `/drive/.marble/drive.json`, or `MARBLE_DRIVE_LATEST_DOC` | set `latest` |
 | Agents: "Playwright is not available … node_modules/@bdhmin/marble/node_modules/playwright" | npm hoisted Playwright beside marble (every sprite) and the host looked only inside it | fixed 2026-09-25: `playwrightEntry` resolves it either way |
 | Agents' browser lands on `/gate` | the turn's browser had no pass | fixed 2026-09-25: the runner hands it one; a stage fails if Chromium will not launch |
@@ -382,4 +415,4 @@ for the bill.
   provisioning by hand; then limits and cost per person.
 - **Labels:** move every user to `marble-user` (`--all` already accepts it).
 - Catch up: `--all` to bring testers to the latest `main`; `sprite-workshop.sh
-  admin-p1` to fast-forward the workshop checkout.
+  admin-p2` to fast-forward the workshop checkout.

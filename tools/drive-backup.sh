@@ -5,7 +5,7 @@
 #
 #   tools/drive-backup.sh [<sprite>] [--org <org>] [--to <dir>] [--link <path>] [--why <text>] [--no-checkpoint]
 #
-# <sprite> defaults to admin-p1, --to to ~/Marble Backups, --link to
+# <sprite> defaults to admin-p2, --to to ~/Marble Backups, --link to
 # ~/Marble Drive. The copy is <to>/<utc>/, the whole drive as it was at <utc>;
 # <link> points at it. Each run makes a Fly checkpoint first (the history lives
 # on Fly), copies the drive into <to>/<new utc>/ with every unchanged file a
@@ -21,7 +21,7 @@
 set -euo pipefail
 
 HERE="$(cd "$(dirname "$0")" && pwd)"
-SPRITE=admin-p1 ORG=marble-drive TO="$HOME/Marble Backups" LINK="$HOME/Marble Drive" WHY=asked CHECKPOINT=1
+SPRITE=admin-p2 ORG=marble-drive TO="$HOME/Marble Backups" LINK="$HOME/Marble Drive" WHY=asked CHECKPOINT=1
 usage() { awk 'NR > 1 && /^#/ { sub(/^# ?/, ""); print; next } NR > 1 { exit }' "$0"; exit 2; }
 if [[ $# -gt 0 && "$1" != -* ]]; then SPRITE=$1; shift; fi
 while [[ $# -gt 0 ]]; do

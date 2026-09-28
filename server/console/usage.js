@@ -1,4 +1,4 @@
-// Every drive's ledger, gathered on admin-p1, and the answers the dashboard
+// Every drive's ledger, gathered on admin-p2, and the answers the dashboard
 // draws (docs/superpowers/specs/2026-09-25-console-dashboard-design.md).
 //
 // Two kinds of evidence are kept, per sprite, under console/usage/<sprite>/:

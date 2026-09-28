@@ -200,7 +200,7 @@ switch() {
 # ------------------------------------------------------ switching when idle
 #
 # An agent runs inside the host it is served from, so a deploy that one of this
-# sprite's own conversations starts (admin-p1 updating itself) cannot switch at
+# sprite's own conversations starts (admin-p2 updating itself) cannot switch at
 # once: the restart would end that conversation mid-turn. `hand-off` runs
 # `switch-when-idle` as a Sprites service of its own — a process started from
 # the turn would be a child of the host the switch restarts — and returns.

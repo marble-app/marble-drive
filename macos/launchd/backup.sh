@@ -2,7 +2,7 @@
 # Back a sprite's drive up to this Mac on a schedule, and answer its Console
 # (tools/backup-agent.mjs, which runs tools/drive-backup.sh).
 #
-#   macos/launchd/backup.sh install [<sprite>]   every minute and at login (default admin-p1)
+#   macos/launchd/backup.sh install [<sprite>]   every minute and at login (default admin-p2)
 #   macos/launchd/backup.sh status               installed? the last snapshots, the log's tail
 #   macos/launchd/backup.sh run                  one scheduled run now
 #   macos/launchd/backup.sh uninstall            stop scheduling; the backups stay
@@ -23,12 +23,12 @@ logdir="$HOME/Library/Logs/marble-drive"
 log="$logdir/backup.log"
 domain="gui/$(id -u)"
 
-sprite_of() { plutil -extract ProgramArguments.2 raw -o - "$plist" 2>/dev/null || print -r -- admin-p1 }
+sprite_of() { plutil -extract ProgramArguments.2 raw -o - "$plist" 2>/dev/null || print -r -- admin-p2 }
 
 case "${1:-status}" in
 
 install)
-  sprite="${2:-admin-p1}"
+  sprite="${2:-admin-p2}"
   # launchd inherits no PATH worth the name, and node lives under nvm here.
   node="$(command -v node)" || { print -u2 "backup: no node on PATH"; exit 1; }
   mkdir -p "${plist:h}" "$logdir"

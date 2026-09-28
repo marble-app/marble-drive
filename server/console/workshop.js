@@ -1,4 +1,4 @@
-// The workshop as the console shows it: admin-p1's checkouts of marble-drive
+// The workshop as the console shows it: admin-p2's checkouts of marble-drive
 // and marble (/home/sprite/src), what main is, and how far a drive's release is
 // behind it. Read with git and npm; nothing here changes anything.
 

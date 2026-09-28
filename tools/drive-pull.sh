@@ -4,7 +4,7 @@
 #
 #   tools/drive-pull.sh [<sprite>] [--org <org>] [--into <dir>]
 #
-# <sprite> defaults to admin-p1, --into to this checkout's drive/ (the drive a
+# <sprite> defaults to admin-p2, --into to this checkout's drive/ (the drive a
 # local host serves). One way only: nothing goes back to the sprite, and
 # anything written to the mirror is lost at the next pull. Real edits happen
 # on the sprite.
@@ -26,7 +26,7 @@ MARBLE_DIR="${MARBLE_DIR:-$(cd "$REPO/.." && pwd)/marble}"
 
 usage() { awk 'NR > 1 && /^#/ { sub(/^# ?/, ""); print; next } NR > 1 { exit }' "$0"; exit 2; }
 
-SPRITE=admin-p1 ORG=marble-drive INTO="$REPO/drive"
+SPRITE=admin-p2 ORG=marble-drive INTO="$REPO/drive"
 if [[ $# -gt 0 && "$1" != -* ]]; then SPRITE=$1; shift; fi
 while [[ $# -gt 0 ]]; do
   case "$1" in

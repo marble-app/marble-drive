@@ -142,7 +142,7 @@ export function loadConfig(env = process.env) {
     // A Fly Sprite's own API. Present only on a sprite; there, the host holds
     // a task on it while work runs so the sprite cannot pause mid-turn.
     spriteSocket: str('MARBLE_DRIVE_SPRITE_SOCKET', '/.sprite/api.sock'),
-    // The console: every drive, from one page (server/console). admin-p1 only.
+    // The console: every drive, from one page (server/console). admin-p2 only.
     console: bool('MARBLE_DRIVE_CONSOLE', false),
     // Bring this drive's own app pages (Drive, Agents, Chat, Board, notes made
     // from the Note starter) forward to the templates this release ships, by a

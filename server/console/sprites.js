@@ -1,4 +1,4 @@
-// The fleet, as the Sprites API sees it, through the CLI admin-p1 is signed in
+// The fleet, as the Sprites API sees it, through the CLI admin-p2 is signed in
 // to. Reading the API never wakes a drive: `status` is `running` while a sprite
 // is awake and `warm` while it is paused, `last_running_at` is when it last
 // woke and `last_warming_at` when it last paused (measured 2026-09-24). So the

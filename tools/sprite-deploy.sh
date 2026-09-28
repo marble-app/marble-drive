@@ -89,7 +89,7 @@ on() { sprite exec -o "$ORG" -s "$SPRITE" --no-stdin "$@"; }
 REMOTE=/home/sprite/app
 say() { printf '==> %s\n' "$*"; }
 
-# Deploying to the machine this runs on (admin-p1 updating itself from one of
+# Deploying to the machine this runs on (admin-p2 updating itself from one of
 # its own conversations): switching now would restart the host running that
 # conversation, so the switch is handed to marble-switch, which waits until no
 # agent is working (release.sh hand-off). A rollback waits the same way.

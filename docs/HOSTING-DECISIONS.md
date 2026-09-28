@@ -412,6 +412,37 @@ t-bryan since 2026-09-28), in which case a copy goes ahead without one and says
 so. The Mac's copy is the part that survives Fly; going further back than it
 needs Fly.
 
+### 25. The owner moves to a new sprite; a host that dies starts again
+
+**Problem.** admin-p1 stalled below Marble three days running (2026-09-26,
+09-27, 09-28): `running` to the API, while exec, the console and the proxy
+hung. On 09-28 the files API still listed `/drive` while anything under
+`/home/sprite` hung. Its checkpoint store misbehaved too: a checkpoint missing
+its data, a pre-restore that would not boot, and a restore that hung 40 min and
+failed with `INTERNAL_ERROR` without applying. No other sprite, all taking the
+same deploys, ever stalled. Separately, the same afternoon its host ran out of
+V8 heap and stayed down, because a Sprites service is not restarted when its
+process exits.
+
+**Options.** Split the drive from the workshop onto two sprites (the owner's
+first thought), with the workshop's heavy work reached from the drive; a new
+sprite for both, as before; or stay and wait on Fly.
+
+**Chosen.** A new sprite, admin-p2, doing both jobs as admin-p1 did, because
+the evidence pointed at admin-p1's own storage and not at the workload, and
+the owner wants one place to work. If admin-p2 stalls too, the workload is the
+suspect and the split is next. admin-p1 is kept asleep for Fly. And two
+guards: the service runs `tools/sprite/serve.sh`, which starts the host again
+when it dies and keeps a crash log; and an agent's turn is the kernel's first
+choice when memory runs out. A per-turn memory ceiling was the plan; Sprites
+will not let a cgroup's `memory.max` be written, even by root.
+
+**Cost or lesson.** Moving took a minute of copying inside Fly (rsync, run on
+the old sprite, through `sprite-rsh.sh`) and 13 s offline. The sign-ins moved
+with the home folder, which the owner copies himself: an agent is not to move
+credentials between machines. A new sprite's first request starts the day's
+run, so the drive goes over before the first deploy.
+
 ## Traps worth remembering
 
 | Trap | How it showed up | Lesson |
@@ -439,3 +470,4 @@ needs Fly.
 | One more tab in a flex bar inside a grid | a grid item's minimum width is its content, so the whole Console grew to 448 px on a 390 px phone | `min-width: 0` on the bar; let the tabs scroll within it |
 | A dependency's dependency reached by path (`<pkg>/node_modules/<dep>`) | worked on the Mac (a linked checkout nests it), failed on every sprite (npm hoists it) | resolve it with `createRequire` from the package, never by path |
 | The runtime was `no-store` | every page switch refetched 14 scripts (~265 KB compressed) | name each at `?v=<hash>` and let the browser keep it; `no-cache` + ETag for any other address |
+| A test of a memory ceiling run before checking the ceiling was set | a 64 MB cgroup could not be made, the hog ran unbounded and t-bryan thrashed (load 30) until the kernel killed it | prove the guard is in place before testing what it guards |

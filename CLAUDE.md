@@ -13,15 +13,17 @@ Every drive is a Fly Sprite in the org `marble-drive`. How it all works, the
 runbooks and troubleshooting: `docs/HOSTING.md`; why each choice was made:
 `docs/HOSTING-DECISIONS.md`. Read them before changing how anything is hosted.
 
-- **admin-p1**: the owner's real drive and the workshop (this checkout, in
+- **admin-p2**: the owner's real drive and the workshop (this checkout, in
   `/home/sprite/src`). Private to the org, and deployed by name only.
+- **admin-p1**: the owner's sprite until 2026-09-28, when its storage kept
+  stalling; kept asleep for Fly to look at. Never deploy to it.
 - **t-bryan**: the owner's test user, on an API key. Try changes here first.
 - **t-irene, t-sam, t-sangho, t-peiling**: friends testing Marble. They are
   real people's drives: never edit them directly.
 
 `tools/sprite-deploy.sh --all --list` shows who `--all` reaches.
 
-The owner also runs all of this from **Console** on admin-p1 (`/a/Console`,
+The owner also runs all of this from **Console** on admin-p2 (`/a/Console`,
 `server/console/`): drives, shipping, the workshop, and a log of every job.
 It runs the same tools, so a change to them reaches it.
 
@@ -40,7 +42,7 @@ It runs the same tools, so a change to them reaches it.
      t-rima as of 2026-09-28); the deploy recognises that, goes on without a
      checkpoint, and says so (report stuck ones to Fly). Any other checkpoint
      failure still stops that sprite's deploy with nothing changed there.
-   - Then `tools/sprite-deploy.sh admin-p1`. From admin-p1 itself this stages
+   - Then `tools/sprite-deploy.sh admin-p2`. From admin-p2 itself this stages
      the release and switches only when no agent is working, so this
      conversation is not cut off (`~/app/switch.log`).
 6. Report what shipped, where, and anything that failed.
