@@ -177,6 +177,35 @@ the app, byte-identical splices and legible diffs go, and hand editing (principl
 | **C** native data views | with A: the iOS app that passes review | with B, later |
 | **E** lens | online capture on the phone | offline capture |
 
+## Smoothness: will an iPhone feel as good as Swift?
+
+Mostly yes for reading and ordinary use; no for custom gestures and typing, which
+is where the plan puts native parts.
+
+- **As smooth as Swift in WebKit:** plain scrolling (a web view scrolls with
+  iOS's own scroll view), animations of transform and opacity (composited, not
+  run by the page's script), reading, ordinary taps.
+- **Better in Swift:** custom gestures written in a page (no UIKit physics,
+  and they stall when the page's script is busy); typing and selection in
+  `contenteditable`; opening instantly; haptics (a web page on iPhone cannot
+  trigger them); system sheets; very long lists.
+
+| Surface | Where | Why |
+|---|---|---|
+| Files, folders, search | native | long lists, swipe actions, the Files app; data, not a document |
+| Chat with agents, asks, notifications | native | the keyboard in constant use; answers arrive in the background |
+| Sharing, pairing, backups | native | share sheet, Keychain, background refresh |
+| Documents and apps | WebKit | they are code; only WebKit may run downloaded code |
+| The owner's Drive and Agents pages | WebKit | customized documents; the native browser sits beside them |
+| Haptics, share sheet, a native text box on request | native bridge | the shell does them on a document's behalf |
+| Quick notes and capture | WebKit for now | the candidate for lens E if typing proves bad |
+
+The honest benchmark before building anything: the drive in Safari on the
+iPhone is roughly the ceiling for documents in the app, minus Safari's bars, plus
+the native parts. A living copy of this spec, with verdicts, sides and answers to
+mark, is the owner's `Notes and Sketches/Marble on the Mac and iPhone.mrbl` on
+admin-p1.
+
 ## Recommendation
 
 1. **Build the shared foundation first**, which every combination needs: device
