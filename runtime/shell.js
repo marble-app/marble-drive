@@ -30,6 +30,10 @@
   const MOTION = 340;
   const EASE = 'cubic-bezier(.22, 1, .36, 1)';
   const NAV = 260;
+  const NAV_MIN = 200;
+  const NAV_MAX = 520;
+  // However wide the two panels are pulled, the document keeps this much.
+  const PAGE_MIN = 360;
   const GAP = 8;
   const PHONE = '(max-width: 719px)';
   const KEY = 'marble-shell:';
@@ -137,7 +141,7 @@
     button:focus-visible, a:focus-visible, input:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
 
     /* ── The tree ── */
-    .nav { top: ${BAR}px; left: 0; bottom: 0; width: ${NAV}px; display: flex; flex-direction: column;
+    .nav { top: ${BAR}px; left: 0; bottom: 0; width: var(--nav-w, ${NAV}px); display: flex; flex-direction: column;
       background: var(--paper); border-right: 1px solid var(--line); font-size: 13px; }
     .search { margin: 10px 10px 6px; display: flex; align-items: center; gap: 8px; padding: 0 8px; height: 32px; border-radius: 8px; background: var(--paper-2); color: var(--faint); }
     .search input { flex: 1; min-width: 0; border: 0; outline: 0; background: none; font: inherit; color: var(--ink); padding: 0; }
@@ -163,6 +167,17 @@
     .row[aria-current="page"] .i { color: var(--accent-ink); }
     .row .where { margin-left: auto; padding-left: 8px; font-size: 11px; color: var(--faint); font-weight: 400; overflow: hidden; text-overflow: ellipsis; flex: 0 1 auto; }
     .empty { padding: 6px 10px; color: var(--faint); font-size: 12px; }
+
+    /* The tree's inner edge: drag it, or focus it and use the arrow keys.
+       Double-click puts it back. The same edge the chat has on its side. */
+    .edge { position: absolute; top: 0; bottom: 0; right: -5px; width: 10px; z-index: 1; cursor: ew-resize; touch-action: none; }
+    .edge::before { content: ''; position: absolute; top: 0; bottom: 0; left: 4px; width: 2px; border-radius: 1px; background: transparent;
+      transition: background-color 120ms var(--settle); }
+    .edge:hover::before, .edge:focus-visible::before, :host([data-resizing]) .edge::before { background: var(--accent-ink); }
+    .edge:focus-visible { outline: none; }
+    :host([data-mode="float"]) .edge::before { top: 14px; bottom: 14px; }
+    /* Under the hand the panel follows at once; easing would trail it. */
+    :host([data-resizing]) .nav { transition: none; }
 
     /* ── Float: the same three, as cards over the page ── */
     :host([data-mode="float"]) .bar { top: ${GAP}px; left: ${GAP}px; width: calc(100vw - ${GAP * 2}px); border: 1px solid var(--line); border-radius: 12px;
@@ -250,6 +265,7 @@
           <button type="button" class="ib" data-act="close" aria-label="Hide everything" title="Hide everything (⌘J)">${icon('collapse')}</button>
         </header>
         <nav class="nav" aria-label="Drive tree">
+          <button type="button" class="edge" role="separator" aria-orientation="vertical" aria-label="Resize the tree" title="Drag to resize · double-click to reset"></button>
           <label class="search">${icon('search')}<input type="search" placeholder="Search the drive" aria-label="Search the drive" autocomplete="off" spellcheck="false"><kbd>⌘K</kbd></label>
           <div class="scroll"></div>
         </nav>
@@ -279,6 +295,7 @@
       this.folded = new Set(JSON.parse(stored('folded', '[]')));
       this.unfolded = new Set(JSON.parse(stored('unfolded', '[]')));
       this.closed = new Set();
+      this.navWidth = Number(stored('nav-width', NAV)) || NAV;
       this.tree = null;
     }
 
@@ -300,6 +317,9 @@
         chat: this.state.chat,
         top: this.state.mode === 'float' ? BAR + GAP * 2 : BAR,
         gap: GAP,
+        // How much of the window the tree takes, so the chat's edge knows
+        // how far it may be pulled.
+        side: active && this.state.nav ? this.navWidth + (this.state.mode === 'float' ? GAP : 0) : 0,
       };
     }
 
@@ -372,6 +392,9 @@
       addEventListener('marble-tray:ready', this.onDrawer);
       this.onViewport = () => this.apply();
       this.phone.addEventListener('change', this.onViewport);
+      this.onWindowResize = () => this.apply({ animate: false });
+      addEventListener('resize', this.onWindowResize);
+      this.bindEdge();
 
       this.setAttribute('data-still', '');
       this.apply();
@@ -384,6 +407,7 @@
       removeEventListener('pointerdown', this.onOutside);
       removeEventListener('marble-tray:ready', this.onDrawer);
       this.phone.removeEventListener('change', this.onViewport);
+      removeEventListener('resize', this.onWindowResize);
       this.offDrive?.();
       this.dock(null, { animate: false });
     }
@@ -419,7 +443,7 @@
       else this.peekTimer = setTimeout(() => this.removeAttribute('data-peek'), 260);
     }
 
-    apply() {
+    apply({ animate = true } = {}) {
       const { open, mode, nav, chat } = this.layout;
       this.toggleAttribute('data-open', open);
       this.dataset.mode = mode;
@@ -432,7 +456,13 @@
       chatButton.setAttribute('aria-pressed', String(chat));
       this.nav.inert = !open || !nav;
       this.bar.inert = !open;
-      this.dock(open && mode === 'fit' ? { top: BAR, left: nav ? NAV : 0 } : null, { animate: !this.hasAttribute('data-still') });
+      this.navWidth = this.clampNav(this.navWidth);
+      this.style.setProperty('--nav-w', `${this.navWidth}px`);
+      const edge = this.$('.edge');
+      edge.setAttribute('aria-valuenow', String(this.navWidth));
+      edge.setAttribute('aria-valuemin', String(NAV_MIN));
+      edge.setAttribute('aria-valuemax', String(this.clampNav(NAV_MAX)));
+      this.dock(open && mode === 'fit' ? { top: BAR, left: nav ? this.navWidth : 0 } : null, { animate: animate && !this.hasAttribute('data-still') });
       if (open && !this.tree) this.load();
       this.announce();
     }
@@ -486,6 +516,69 @@
         if (inset) write(false);
         else style.remove();
       }, MOTION + 60);
+    }
+
+    // ------------------------------------------------------------ the tree's edge
+
+    clampNav(px) {
+      const chat = this.state.chat && this.drawer?.isOpen ? this.drawer.width ?? 0 : 0;
+      const room = innerWidth - chat - PAGE_MIN;
+      return Math.round(Math.max(NAV_MIN, Math.min(NAV_MAX, room, Number(px) || NAV)));
+    }
+
+    setNavWidth(px, { persist = false, animate = false } = {}) {
+      this.navWidth = this.clampNav(px);
+      if (persist) store('nav-width', String(this.navWidth));
+      this.apply({ animate });
+    }
+
+    bindEdge() {
+      const edge = this.$('.edge');
+      let drag = null;
+      const hold = (on) => {
+        this.toggleAttribute('data-resizing', on);
+        // The cursor and the selection belong to the drag for as long as it
+        // lasts, wherever over the page the pointer wanders.
+        const id = 'marble-shell-resizing';
+        document.getElementById(id)?.remove();
+        if (!on) return;
+        const style = document.createElement('style');
+        style.id = id;
+        style.setAttribute('data-marble-transient', '');
+        style.textContent = 'html, html * { cursor: ew-resize !important; user-select: none !important; }';
+        document.head.append(style);
+      };
+      edge.addEventListener('pointerdown', (event) => {
+        if (event.button !== 0) return;
+        event.preventDefault();
+        drag = { id: event.pointerId, x: event.clientX, width: this.navWidth };
+        edge.setPointerCapture(event.pointerId);
+        hold(true);
+      });
+      edge.addEventListener('pointermove', (event) => {
+        if (drag?.id !== event.pointerId) return;
+        this.setNavWidth(drag.width + event.clientX - drag.x);
+      });
+      const stop = (event) => {
+        if (drag?.id !== event.pointerId) return;
+        drag = null;
+        hold(false);
+        this.setNavWidth(this.navWidth, { persist: true });
+      };
+      edge.addEventListener('pointerup', stop);
+      edge.addEventListener('pointercancel', stop);
+      edge.addEventListener('dblclick', () => this.setNavWidth(NAV, { persist: true, animate: true }));
+      edge.addEventListener('keydown', (event) => {
+        const step = event.shiftKey ? 48 : 16;
+        const next = event.key === 'ArrowRight' ? this.navWidth + step
+          : event.key === 'ArrowLeft' ? this.navWidth - step
+          : event.key === 'Home' ? NAV_MIN
+          : event.key === 'End' ? NAV_MAX
+          : null;
+        if (next === null) return;
+        event.preventDefault();
+        this.setNavWidth(next, { persist: true });
+      });
     }
 
     // ------------------------------------------------------------ keys

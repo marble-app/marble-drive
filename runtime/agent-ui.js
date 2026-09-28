@@ -7144,6 +7144,9 @@
     .panel[data-glide] { transition: top 340ms var(--settle), right 340ms var(--settle), bottom 340ms var(--settle),
       border-radius 340ms var(--settle), box-shadow 340ms var(--settle), background-color 340ms var(--settle); }
     .panel[data-shell] .pin { display: none; }
+    /* The card clips its corners, so its edge sits just inside it. */
+    .panel[data-shell="float"] .resize { margin-left: 0; }
+    .panel[data-shell="float"] .resize::before { top: 14px; bottom: 14px; left: 2px; }
     .panel[data-resizing="true"] { cursor: ew-resize; user-select: none; }
     @media (prefers-reduced-transparency: reduce) { .panel { background: var(--paper); -webkit-backdrop-filter: none; backdrop-filter: none; } }
 
@@ -7480,6 +7483,8 @@
       this.shellSeen = true;
       const was = this.shell;
       this.shell = layout?.open ? layout : null;
+      // A wider tree can leave less room for the chat than it had.
+      if (this.shell && this.width > this.widthMax()) this.applyWidth(this.width);
       const want = this.shell ? Boolean(this.shell.chat) : was ? false : this.isOpen;
       if (want === this.isOpen) {
         this.render();
@@ -7579,7 +7584,9 @@
     }
 
     widthMax() {
-      return Math.max(WIDTH_MIN, Math.min(Math.round(innerWidth * 0.72), innerWidth - 200));
+      // Inside the shell the tree takes its share of the window first.
+      const side = this.shell?.side ?? 0;
+      return Math.max(WIDTH_MIN, Math.min(Math.round(innerWidth * 0.72), innerWidth - 200 - side));
     }
 
     clampWidth(px) {

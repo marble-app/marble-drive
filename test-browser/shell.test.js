@@ -193,3 +193,57 @@ test('on the Drive itself the bar says Drive, not the name of its file', async (
   assert.deepEqual(await shell.locator('.crumbs > *').allInnerTexts(), ['Drive']);
   assert.equal(await shell.locator('.crumbs a').getAttribute('aria-current'), 'page');
 });
+
+test('the tree\'s edge drags wider and narrower, the page follows, and the width follows you', async () => {
+  const { page, shell } = await visit();
+  await page.keyboard.press('Control+j');
+  await margins(page);
+  const edge = shell.locator('.edge');
+  const box = await edge.boundingBox();
+  await page.mouse.move(box.x + box.width / 2, box.y + 300);
+  await page.mouse.down();
+  await page.mouse.move(box.x + box.width / 2 + 80, box.y + 300, { steps: 6 });
+  // Under the hand it follows at once: no easing to trail the pointer.
+  assert.equal(await page.evaluate(() => getComputedStyle(document.documentElement).marginLeft), '340px');
+  await page.mouse.up();
+  assert.equal(await shell.locator('.nav').evaluate((el) => el.getBoundingClientRect().width), 340);
+  assert.equal(await edge.getAttribute('aria-valuenow'), '340');
+
+  // Too narrow is as narrow as it goes.
+  await page.mouse.move(box.x + box.width / 2 + 80, box.y + 300);
+  await page.mouse.down();
+  await page.mouse.move(box.x - 400, box.y + 300, { steps: 4 });
+  await page.mouse.up();
+  assert.equal((await margins(page)).left, '200px');
+
+  await edge.focus();
+  await page.keyboard.press('ArrowRight');
+  assert.equal((await margins(page)).left, '216px');
+
+  await page.goto(`${host.base}/a/garden`);
+  await page.waitForFunction(() => document.querySelector('marble-shell')?.hasAttribute('data-open'));
+  assert.equal((await margins(page)).left, '216px', 'the next document opens with the same tree');
+  await page.locator('marble-shell').locator('.edge').dblclick();
+  assert.equal((await margins(page)).left, '260px', 'double-click puts it back');
+});
+
+test('the chat\'s edge drags too inside the shell, and never takes the page from the tree', async () => {
+  const { page } = await visit();
+  await page.keyboard.press('Control+j');
+  const before = await margins(page);
+  const handle = page.locator('marble-agent-drawer').locator('.resize');
+  const box = await handle.boundingBox();
+  await page.mouse.move(box.x + box.width / 2, box.y + 300);
+  await page.mouse.down();
+  await page.mouse.move(box.x + box.width / 2 - 100, box.y + 300, { steps: 6 });
+  await page.mouse.up();
+  const after = await margins(page);
+  assert.equal(parseFloat(after.right), parseFloat(before.right) + 100);
+  // All the way left: the page keeps its share beside the tree.
+  await page.mouse.move(box.x - 100 + box.width / 2, box.y + 300);
+  await page.mouse.down();
+  await page.mouse.move(0, box.y + 300, { steps: 6 });
+  await page.mouse.up();
+  const most = await margins(page);
+  assert.ok(1280 - parseFloat(most.left) - parseFloat(most.right) >= 200, `page keeps room: ${JSON.stringify(most)}`);
+});
