@@ -262,3 +262,64 @@ test('a page that loads under a pointer resting in the corner keeps its corner',
   await page.waitForTimeout(600);
   assert.equal(await page.evaluate(() => document.querySelector('marble-shell').hasAttribute('data-peek')), false);
 });
+
+// Float: the sidebars wait at the edges, and come out when reached for.
+const navOut = (page) => page.evaluate(() => !document.querySelector('marble-shell').hasAttribute('data-hide-nav'));
+const chatOut = (page) => page.evaluate(() => document.querySelector('marble-agent-drawer').isOpen);
+
+test('Float shows both sidebars on arriving, and puts them away at the first thing done on the page', async () => {
+  const { page, shell } = await visit();
+  await page.keyboard.press('Control+j');
+  await margins(page);
+  await shell.locator('[data-act="float"]').click();
+  assert.equal(await navOut(page), true, 'the tree, so it is plain it is there');
+  assert.equal(await chatOut(page), true, 'and the chat');
+  await page.mouse.click(640, 420);
+  await page.waitForFunction(() => document.querySelector('marble-shell').hasAttribute('data-hide-nav') && !document.querySelector('marble-agent-drawer').isOpen);
+  // A mark on each edge says where they went.
+  await page.waitForFunction(() => ['nav', 'chat'].every((side) => getComputedStyle(document.querySelector('marble-shell').shadowRoot.querySelector(`.hint[data-side="${side}"]`)).opacity === '1'));
+});
+
+test('in Float the pointer at an edge brings that sidebar out, and leaving puts it back; typing in it keeps it', async () => {
+  const { page } = await visit();
+  await page.keyboard.press('Control+j');
+  await page.locator('marble-shell').locator('[data-act="float"]').click();
+  await page.mouse.click(640, 420);
+  await page.waitForFunction(() => document.querySelector('marble-shell').hasAttribute('data-hide-nav'));
+
+  await page.mouse.move(3, 420);
+  await page.waitForFunction(() => !document.querySelector('marble-shell').hasAttribute('data-hide-nav'));
+  await page.mouse.move(120, 420, { steps: 4 });
+  await page.waitForTimeout(600);
+  assert.equal(await navOut(page), true, 'over it, it stays');
+  await page.mouse.move(640, 420, { steps: 4 });
+  await page.waitForFunction(() => document.querySelector('marble-shell').hasAttribute('data-hide-nav'));
+
+  await page.mouse.move(1277, 420);
+  await page.waitForFunction(() => document.querySelector('marble-agent-drawer').isOpen);
+  assert.notEqual(await page.evaluate(() => document.activeElement?.localName), 'marble-agent-drawer', 'a passing pointer does not take the caret');
+  const editor = page.locator('marble-agent-drawer').locator('marble-conversation').locator('.editor');
+  await editor.click();
+  await page.keyboard.type('hello');
+  await page.mouse.move(640, 420, { steps: 4 });
+  await page.waitForTimeout(700);
+  assert.equal(await chatOut(page), true, 'typing in it keeps it out');
+  await page.keyboard.press('Escape');
+  await page.waitForFunction(() => !document.querySelector('marble-agent-drawer').isOpen);
+});
+
+test('a page opened in Float starts with the sidebars away, and ⌘K brings the tree out to search', async () => {
+  const { page } = await visit();
+  await page.keyboard.press('Control+j');
+  await page.locator('marble-shell').locator('[data-act="float"]').click();
+  await page.goto(`${host.base}/a/garden`);
+  await page.waitForFunction(() => document.querySelector('marble-shell')?.hasAttribute('data-open') && document.querySelector('marble-agent-drawer'));
+  await page.mouse.move(640, 420);
+  assert.equal(await navOut(page), false);
+  assert.equal(await chatOut(page), false);
+  await page.keyboard.press('Control+k');
+  assert.equal(await navOut(page), true);
+  await page.keyboard.type('field');
+  await page.waitForTimeout(600);
+  assert.equal(await navOut(page), true, 'searching keeps it out');
+});

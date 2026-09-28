@@ -7485,8 +7485,9 @@
 
     open({ animate = true } = {}) {
       if (this.shell) {
-        if (this.shell.chat) this.view.focusInput();
-        else window.marbleShell.setChat(true);
+        if (!this.shell.chat) window.marbleShell.setChat(true);
+        else if (this.shell.chatShown === false) window.marbleShell.reveal('chat', { focus: true });
+        else this.view.focusInput();
         return;
       }
       this.isOpen = true;
@@ -7499,7 +7500,10 @@
 
     close() {
       if (this.shell) {
-        window.marbleShell.setChat(false);
+        // Floating, closing puts the chat back at its edge; docked, it is the
+        // chat turned off.
+        if (window.marbleShell.autoHide) window.marbleShell.conceal('chat');
+        else window.marbleShell.setChat(false);
         this.launcher.focus({ preventScroll: true });
         return;
       }
@@ -7522,8 +7526,11 @@
       this.shell = layout?.open ? layout : null;
       // A wider tree can leave less room for the chat than it had.
       if (this.shell && this.width > this.widthMax()) this.applyWidth(this.width);
-      const want = this.shell ? Boolean(this.shell.chat) : was ? false : this.isOpen;
+      // In Float the chat is out only while the shell says it is reached for
+      // (`chatShown`); in Fit, whenever it is on.
+      const want = this.shell ? Boolean(this.shell.chat && this.shell.chatShown !== false) : was ? false : this.isOpen;
       if (want === this.isOpen) {
+        if (want && layout?.focusChat) this.view.focusInput();
         this.render();
         return;
       }
@@ -7533,7 +7540,10 @@
       // to land with them rather than a beat behind.
       this.animateTo(want ? 1 : 0, { animate: !first, response: 0.25 });
       if (want && !first) {
-        this.view.focusInput();
+        // The caret goes in when the chat was asked for — the shell opening,
+        // its button, a conversation opened — and never because a pointer
+        // passing the edge brought it out.
+        if (!was || layout.focusChat) this.view.focusInput();
         const id = this.view.getAttribute('conversation');
         if (id && this.summaries.get(id)?.needsReview) this.markSeen(id);
       }

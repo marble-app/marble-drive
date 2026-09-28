@@ -34,6 +34,10 @@
   const NAV_MAX = 520;
   // However wide the two panels are pulled, the document keeps this much.
   const PAGE_MIN = 360;
+  // Float keeps the sidebars out of the way until the pointer reaches for
+  // them: this close to the window's edge, and this long after it leaves.
+  const EDGE = 10;
+  const LINGER = 320;
   const GAP = 8;
   const PHONE = '(max-width: 719px)';
   const KEY = 'marble-shell:';
@@ -234,6 +238,16 @@
       box-shadow: var(--shadow-lift); background: color-mix(in srgb, var(--paper) 82%, transparent); -webkit-backdrop-filter: blur(18px) saturate(1.3); backdrop-filter: blur(18px) saturate(1.3); }
     @media (prefers-reduced-transparency: reduce) { :host([data-mode="float"]) .nav { background: var(--paper); -webkit-backdrop-filter: none; backdrop-filter: none; } }
 
+    /* ── Float, at rest: the sidebars wait at the edges ──
+       Each is a hand's reach away — the pointer at that edge brings it out —
+       and a thin mark on the edge says that something is there. */
+    :host([data-hide-nav]) .nav { transform: translateX(calc(-100% - 24px)); opacity: 0; pointer-events: none; visibility: hidden; --hide-after: ${MOTION}ms; }
+    .hint { position: fixed; top: calc(${BAR}px + (100vh - ${BAR}px) / 2); width: 4px; height: 44px; margin-top: -22px; border-radius: 2px;
+      background: color-mix(in srgb, var(--ink) 22%, transparent); opacity: 0; pointer-events: none; transition: opacity 200ms var(--settle); }
+    .hint[data-side="nav"] { left: 3px; }
+    .hint[data-side="chat"] { right: 3px; }
+    :host([data-hide-nav]) .hint[data-side="nav"], :host([data-hide-chat]) .hint[data-side="chat"] { opacity: 1; pointer-events: auto; }
+
     /* ── Closed, or the tree put away ── */
     :host(:not([data-open])) .bar { transform: translateY(-100%); opacity: 0; pointer-events: none; visibility: hidden; --hide-after: ${MOTION}ms; }
     :host(:not([data-open])) .nav, :host([data-nav="off"]) .nav { transform: translateX(calc(-100% - 24px)); opacity: 0; pointer-events: none; visibility: hidden; --hide-after: ${MOTION}ms; }
@@ -322,6 +336,8 @@
       UI?.keepKeys?.(root);
       root.innerHTML = `<style>${UI?.TOKENS ?? FALLBACK_TOKENS}${STYLE}</style>
         <div class="zone" aria-hidden="true"></div>
+        <div class="hint" data-side="nav" aria-hidden="true"></div>
+        <div class="hint" data-side="chat" aria-hidden="true"></div>
         <button type="button" class="pill" aria-label="Open the drive (⌘J)">${LOGO}<b></b><kbd>⌘J</kbd></button>
         <header class="bar" aria-label="Drive">
           <button type="button" class="ib" data-act="nav" aria-pressed="true" aria-label="Tree" title="Tree (⌘\\)">${icon('nav')}</button>
@@ -367,6 +383,14 @@
       this.sharing = this.$('.sharing');
       this.moving = this.$('.moving');
       this.phone = matchMedia(PHONE);
+      // A pointer that can hover is what Float's reaching is for; on a touch
+      // screen the sidebars simply stay out, as they always have.
+      this.fine = matchMedia('(hover: hover) and (pointer: fine)');
+      this.shown = { nav: false, chat: false };
+      this.quiet = { nav: false, chat: false };
+      this.intro = false;
+      this.pointer = null;
+      this.hideTimers = {};
       this.reduced = matchMedia('(prefers-reduced-motion: reduce)');
 
       this.state = {
@@ -390,6 +414,11 @@
       return window.marble?.app ?? '';
     }
 
+    /** Float, with a pointer that can reach: the sidebars hide until wanted. */
+    get autoHide() {
+      return this.state.open && this.state.mode === 'float' && this.fine.matches && !this.phone.matches;
+    }
+
     get drawer() {
       return document.querySelector('marble-agent-drawer');
     }
@@ -407,6 +436,11 @@
         // How much of the window the tree takes, so the chat's edge knows
         // how far it may be pulled.
         side: active && this.state.nav ? this.navWidth + (this.state.mode === 'float' ? GAP : 0) : 0,
+        // In Float the chat is out only while it is reached for; `focusChat`
+        // is a one-time ask to put the caret in it, for a reveal somebody
+        // asked for rather than one a passing pointer caused.
+        chatShown: !this.autoHide || this.shown.chat,
+        focusChat: Boolean(this.focusChat),
       };
     }
 
@@ -508,6 +542,10 @@
       this.onWindowResize = () => this.apply({ animate: false });
       addEventListener('resize', this.onWindowResize);
       this.bindEdge();
+      this.bindReach();
+      for (const hint of this.shadowRoot.querySelectorAll('.hint')) {
+        hint.addEventListener('click', () => this.reveal(hint.dataset.side, { focus: hint.dataset.side === 'chat' }));
+      }
 
       this.setAttribute('data-still', '');
       this.apply();
@@ -522,6 +560,12 @@
       removeEventListener('marble-marks:mode', this.onMarks);
       this.phone.removeEventListener('change', this.onViewport);
       removeEventListener('resize', this.onWindowResize);
+      removeEventListener('pointermove', this.onPointer, true);
+      document.removeEventListener('mouseout', this.onLeave);
+      removeEventListener('focusin', this.onFocus, true);
+      removeEventListener('focusout', this.onFocus, true);
+      for (const type of ['pointerdown', 'wheel', 'keydown']) removeEventListener(type, this.onWork, true);
+      this.fine.removeEventListener('change', this.onFine);
       this.offDrive?.();
       this.offAgents?.();
       removeEventListener('marble-agent:seen', this.onSeen);
@@ -531,10 +575,17 @@
     // ------------------------------------------------------------ state
 
     set(patch) {
+      const was = { ...this.state };
       Object.assign(this.state, patch);
       for (const [name, value] of Object.entries(patch)) {
         store(name, typeof value === 'boolean' ? (value ? '1' : '0') : value);
       }
+      // Arriving in Float shows both sidebars once, so it is plain what and
+      // where they are; the first thing done on the page puts them away.
+      if (this.autoHide && (patch.mode === 'float' && was.mode !== 'float' || patch.open && !was.open)) this.startIntro();
+      // Turned on while floating: out, for the hand that just asked for it.
+      if (this.autoHide && patch.nav && !was.nav) this.shown.nav = true;
+      if (this.autoHide && patch.chat && !was.chat) { this.shown.chat = true; this.focusChat = true; }
       this.apply();
     }
 
@@ -562,6 +613,128 @@
       else this.peekTimer = setTimeout(() => this.removeAttribute('data-peek'), 140);
     }
 
+    // ------------------------------------------------------------ Float's reach
+
+    startIntro() {
+      this.intro = true;
+      this.shown.nav = this.state.nav;
+      this.shown.chat = this.state.chat && Boolean(this.drawer);
+    }
+
+    /** Bring a side out on purpose — ⌘K, the chat button, a conversation
+     *  opened — rather than because the pointer passed by. */
+    reveal(side, { focus = false } = {}) {
+      if (!this.autoHide) return;
+      this.quiet[side] = false;
+      if (this.shown[side] && !(focus && side === 'chat')) return;
+      clearTimeout(this.hideTimers[side]);
+      this.shown[side] = true;
+      if (focus && side === 'chat') this.focusChat = true;
+      this.apply();
+    }
+
+    /** Put a side away now, pointer or not: it stays away until the pointer
+     *  has left and comes back for it. */
+    conceal(side) {
+      if (!this.autoHide) return;
+      this.quiet[side] = true;
+      const drawer = this.drawer;
+      if (side === 'chat' && document.activeElement === drawer) {
+        let focused = drawer;
+        while (focused?.shadowRoot?.activeElement) focused = focused.shadowRoot.activeElement;
+        focused?.blur?.();
+      }
+      if (side === 'nav' && this.nav.contains(this.shadowRoot.activeElement)) this.shadowRoot.activeElement.blur();
+      this.shown[side] = false;
+      this.apply();
+    }
+
+    rectOf(side) {
+      const el = side === 'nav' ? this.nav : this.drawer?.shadowRoot?.querySelector('.panel');
+      return el?.getBoundingClientRect() ?? null;
+    }
+
+    /** Whether a side is being reached for, read, typed in or resized. */
+    wanted(side) {
+      if (!this.autoHide) return false;
+      if (side === 'nav' && !this.state.nav) return false;
+      if (side === 'chat' && (!this.state.chat || !this.drawer)) return false;
+      if (this.intro) return true;
+      const focused = side === 'nav'
+        ? this.nav.contains(this.shadowRoot.activeElement)
+        : document.activeElement === this.drawer;
+      if (focused) return true;
+      if (side === 'nav' ? this.hasAttribute('data-resizing') : this.rectOf('chat') && this.drawer.shadowRoot.querySelector('.panel')?.dataset.resizing === 'true') return true;
+      const p = this.pointer;
+      if (!p) return false;
+      const atEdge = p.y > BAR && (side === 'nav' ? p.x <= EDGE : p.x >= innerWidth - EDGE);
+      let over = false;
+      if (this.shown[side]) {
+        const r = this.rectOf(side);
+        over = Boolean(r && r.width && p.x >= r.left - 16 && p.x <= r.right + 16 && p.y >= r.top - 16 && p.y <= r.bottom + 16);
+      }
+      const reaching = atEdge || over;
+      // Put away on purpose: the same hand has to leave before it can call
+      // the side back.
+      if (this.quiet[side]) {
+        if (!reaching) this.quiet[side] = false;
+        return false;
+      }
+      return reaching;
+    }
+
+    /** Out at once when wanted; away a beat after it stops being wanted, so
+     *  a hand crossing the gap between the edge and the card keeps it. */
+    settle() {
+      if (!this.autoHide) return;
+      let changed = false;
+      for (const side of ['nav', 'chat']) {
+        if (this.wanted(side)) {
+          clearTimeout(this.hideTimers[side]);
+          this.hideTimers[side] = null;
+          if (!this.shown[side]) { this.shown[side] = true; changed = true; }
+        } else if (this.shown[side] && !this.hideTimers[side]) {
+          this.hideTimers[side] = setTimeout(() => {
+            this.hideTimers[side] = null;
+            if (this.wanted(side) || !this.shown[side]) return;
+            this.shown[side] = false;
+            this.apply();
+          }, LINGER);
+        }
+      }
+      if (changed) this.apply();
+    }
+
+    bindReach() {
+      let queued = 0;
+      this.onPointer = (event) => {
+        this.pointer = { x: event.clientX, y: event.clientY };
+        if (!queued) queued = requestAnimationFrame(() => { queued = 0; this.settle(); });
+      };
+      this.onLeave = (event) => {
+        if (event.relatedTarget) return;
+        this.pointer = null;
+        this.settle();
+      };
+      this.onFocus = () => setTimeout(() => this.settle(), 0);
+      // Doing something on the page — a press, a scroll, a key — is being
+      // back at work, and the introduction is over.
+      this.onWork = (event) => {
+        if (!this.intro) return;
+        const path = event.composedPath();
+        if (path.includes(this) || (this.drawer && path.includes(this.drawer))) return;
+        this.intro = false;
+        this.settle();
+      };
+      addEventListener('pointermove', this.onPointer, { capture: true, passive: true });
+      document.addEventListener('mouseout', this.onLeave);
+      addEventListener('focusin', this.onFocus, true);
+      addEventListener('focusout', this.onFocus, true);
+      for (const type of ['pointerdown', 'wheel', 'keydown']) addEventListener(type, this.onWork, { capture: true, passive: true });
+      this.onFine = () => this.apply({ animate: false });
+      this.fine.addEventListener('change', this.onFine);
+    }
+
     apply({ animate = true } = {}) {
       const { open, mode, nav, chat } = this.layout;
       this.toggleAttribute('data-open', open);
@@ -574,7 +747,10 @@
       chatButton.hidden = !this.drawer;
       this.$('[data-act="describe"]').hidden = !document.querySelector('.marble-marks-layer');
       chatButton.setAttribute('aria-pressed', String(chat));
-      this.nav.inert = !open || !nav;
+      const auto = this.autoHide;
+      this.toggleAttribute('data-hide-nav', auto && nav && !this.shown.nav);
+      this.toggleAttribute('data-hide-chat', auto && chat && Boolean(this.drawer) && !this.shown.chat);
+      this.nav.inert = !open || !nav || (auto && !this.shown.nav);
       this.bar.inert = !open;
       this.navWidth = this.clampNav(this.navWidth);
       this.style.setProperty('--nav-w', `${this.navWidth}px`);
@@ -589,7 +765,8 @@
 
     announce() {
       const layout = this.layout;
-      window.marbleShell.layout = layout;
+      this.focusChat = false;
+      window.marbleShell.layout = { ...layout, focusChat: false };
       dispatchEvent(new CustomEvent('marble-shell:layout', { detail: layout }));
     }
 
@@ -854,6 +1031,7 @@
         event.stopPropagation();
         if (!this.state.open) this.set({ open: true });
         if (!this.state.nav) this.set({ nav: true });
+        this.reveal('nav');
         this.search.focus({ preventScroll: true });
         this.search.select();
       } else if (mod && !event.shiftKey && event.key === '\\' && this.state.open) {
@@ -1518,6 +1696,10 @@
       toggle: () => el.setOpen(!el.state.open),
       setOpen: (open) => el.setOpen(open),
       setChat: (chat) => el.set({ chat }),
+      reveal: (side, options) => el.reveal(side, options),
+      conceal: (side) => el.conceal(side),
+      // Whether the sidebars are floating and hiding until reached for.
+      get autoHide() { return el.autoHide; },
       // The drawer leaves ⌘J to the shell wherever the shell can open.
       get takesKeys() { return !el.phone.matches; },
     };
