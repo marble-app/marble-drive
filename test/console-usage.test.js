@@ -105,6 +105,23 @@ test('a removed drive still draws where it has history; an empty drive draws not
   assert.ok(Number.isFinite(q.month.projection.end) && q.month.projection.end >= q.month.spent);
 });
 
+test('a drive destroyed while seen running stops where its records stop, not at now', async () => {
+  // t-jeremey, 2026-09-26: seen running, ran 40 minutes on its ledger, then
+  // destroyed. Its last status was running and nothing ever followed it, so it
+  // was costed as a typical running drive every minute since.
+  const w = await world({ remote: { 't-gone': minutes(NOW - 30 * H, NOW - 29 * H) } });
+  await w.usage.observe([row('t-gone', 'running', { ranAt: new Date(NOW - 30 * H).toISOString() })]);
+  await w.usage.pull('t-gone');
+  const week = (await w.usage.query({ range: '7d', rows: [] })).sprites[0];
+  assert.equal(week.role, 'gone');
+  assert.ok(Math.abs(week.totals.awakeHours - 1) < 1e-9, 'its ledger hour, nothing after');
+  assert.equal(week.totals.estimatedHours, 0);
+  const day = await w.usage.query({ range: '24h', rows: [] });
+  assert.equal(day.sprites[0].totals.total, 0, 'no running, and no storage once it is gone');
+  assert.ok(!day.sprites[0].segments.some((s) => s.state === 'running'));
+  assert.equal(day.month.projection.end, day.month.spent, 'nothing left to spend on it');
+});
+
 test('a pasted bill calibrates every estimate; a budget is kept; bad input is refused', async () => {
   const w = await world({ self: minutes(NOW - 30 * H, NOW - 26 * H) });
   await w.usage.pull('admin-p1');

@@ -214,6 +214,17 @@ export function createUsage({ dir, sprites, self, selfLedger = null, now = Date.
     return entry.lines.findLast?.((l) => l.disk)?.disk ?? null;
   }
 
+  /**
+   * A destroyed drive's records, closed where they stop. It never reports
+   * another status, so its last one would hold until now: a drive destroyed
+   * while running was costed as running, and storing its disk, ever after.
+   */
+  function closed(entry) {
+    const last = Math.max(entry.observations.at(-1)?.t ?? -Infinity, (entry.lines.at(-1)?.t ?? -Infinity) * 1000);
+    if (!Number.isFinite(last)) return entry;
+    return { ...entry, observations: [...entry.observations, { t: last, status: 'gone' }], gone: last };
+  }
+
   async function allNames(rows) {
     const names = new Set(rows.map((r) => r.name));
     try {
@@ -253,7 +264,7 @@ export function createUsage({ dir, sprites, self, selfLedger = null, now = Date.
     const byName = new Map(rows.map((r) => [r.name, r]));
     const names = await allNames(rows);
     const entries = new Map();
-    for (const name of names) entries.set(name, await load(name));
+    for (const name of names) entries.set(name, byName.has(name) ? await load(name) : closed(await load(name)));
 
     // Calibration from the newest bill: what the ledger says that range cost.
     const bill = (await readBills()).at(-1) ?? null;
@@ -312,9 +323,9 @@ export function createUsage({ dir, sprites, self, selfLedger = null, now = Date.
         totals.opens += line.opens ?? 0;
       }
       const disk = lastDisk(entry) ?? (lines.length ? TYPICAL.disk : 0);
-      totals.cost.cold = coldCost(disk, Math.max(from, entry.lines[0] ? entry.lines[0].t * 1000 : from), to);
+      totals.cost.cold = coldCost(disk, Math.max(from, entry.lines[0] ? entry.lines[0].t * 1000 : from), Math.min(to, entry.gone ?? to));
       totals.total = total(totals.cost);
-      coldPerDay += coldCost(disk, t, t + DAY);
+      if (entry.gone === undefined) coldPerDay += coldCost(disk, t, t + DAY);
 
       // The month, day by day, and the last seven full days' use.
       for (const line of lines) {
@@ -360,7 +371,7 @@ export function createUsage({ dir, sprites, self, selfLedger = null, now = Date.
       total: Object.values(bySprite).reduce((a, b) => a + b, 0),
     }));
     // Cold storage accrues whether or not anything ran.
-    const monthCold = sprites.reduce((a, s) => a + coldCost(lastDisk(entries.get(s.name)) ?? 0, monthStart, t), 0);
+    const monthCold = sprites.reduce((a, s) => a + coldCost(lastDisk(entries.get(s.name)) ?? 0, monthStart, Math.min(t, entries.get(s.name).gone ?? t)), 0);
     const spent = days.reduce((a, d) => a + d.total, 0) + monthCold;
     const recent = recentDays(recentUse, firstMs, t);
     const projection = { ...project({ spent, recent, now: t, factor, coldPerDay }), days: recent.length };

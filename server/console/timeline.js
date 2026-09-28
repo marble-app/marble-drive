@@ -75,10 +75,12 @@ export function segments({ lines = [], observations = [], from, to, options = {}
   }
   layers.push(gaps);
 
-  // Then what was seen: each status holds until the next one seen.
+  // Then what was seen: each status holds until the next one seen. A destroyed
+  // drive's records end in 'gone', which closes the last and is nothing itself.
   const seen = [...observations].sort((a, b) => a.t - b.t);
   const observed = [];
   for (let i = 0; i < seen.length; i += 1) {
+    if (seen[i].status === 'gone') continue;
     const end = i + 1 < seen.length ? seen[i + 1].t : to;
     if (end > seen[i].t) observed.push({ from: seen[i].t, to: end, state: seen[i].status === 'running' ? 'running' : seen[i].status === 'cold' ? 'cold' : 'warm', source: 'observed' });
   }
