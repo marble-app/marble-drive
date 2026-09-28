@@ -5,7 +5,7 @@ import path from 'node:path';
 import test from 'node:test';
 
 import { createStore } from '../server/store/index.js';
-import { seedAgents, seedChat, seedDrive } from '../server/seed.js';
+import { seedAgents, seedChat, seedDesignSystem, seedDrive } from '../server/seed.js';
 
 const fresh = async () => {
   const root = await fsp.mkdtemp(path.join(os.tmpdir(), 'marble-agents-seed-'));
@@ -41,4 +41,25 @@ test('Chat is seeded once, with custom chrome, unique ids and its affordances', 
   const ids = [...source.matchAll(/data-marble-id="([^"]+)"/g)].map((m) => m[1]);
   assert.equal(new Set(ids).size, ids.length);
   assert.equal((await seedChat(store)).seeded, false);
+});
+
+test('the Design System is seeded once, and a drive that already has one keeps it', async () => {
+  const { store } = await fresh();
+  const first = await seedDesignSystem(store);
+  assert.equal(first.seeded, true);
+  assert.equal(first.path, 'Design System');
+  const source = await store.read('Design System');
+  assert.match(source, /<title>Design system<\/title>/);
+  assert.doesNotMatch(source, /__(ID|TITLE|ICON|SCRIPT)__/);
+  // Its scripts find elements by id, so count the markup's ids, not theirs.
+  const markup = source.replace(/<script>[\s\S]*?<\/script>/g, '');
+  const ids = [...markup.matchAll(/data-marble-id="([^"]+)"/g)].map((m) => m[1]);
+  assert.equal(new Set(ids).size, ids.length);
+  assert.equal((await seedDesignSystem(store)).seeded, false);
+
+  const { store: theirs } = await fresh();
+  await theirs.write('Design System', '<!doctype html><title>Mine</title>', { label: 'edit' });
+  const kept = await seedDesignSystem(theirs);
+  assert.equal(kept.seeded, false);
+  assert.match(await theirs.read('Design System'), /<title>Mine<\/title>/);
 });

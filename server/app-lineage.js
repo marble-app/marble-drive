@@ -26,6 +26,7 @@ export const APPS = [
   { id: 'console', source: 'templates/console.mrbl', icon: 'doc', seeded: (config) => (config.console ? 'Console' : null) },
   { id: 'chat', source: 'starters/chat.mrbl', icon: 'doc', starter: 'chat', seeded: () => 'Chat', derived: true },
   { id: 'whiteboard', source: 'starters/whiteboard.mrbl', icon: 'doc', starter: 'whiteboard', seeded: () => 'Board', derived: true },
+  { id: 'design-system', source: 'templates/design-system.mrbl', icon: 'doc', seeded: () => 'Design System' },
   { id: 'note', source: 'starters/note.mrbl', icon: 'doc', starter: 'note', derived: true },
 ];
 

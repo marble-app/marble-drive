@@ -1,7 +1,8 @@
 // What a brand new drive has in it after the host seeds it.
 //
-// The Drive document, the Agents library, the Chat app and the Board — each
-// written once, the first time the host sees the drive without it.
+// The Drive document, the Agents library, the Chat app, the Board and the
+// Design System — each written once, the first time the host sees the drive
+// without it.
 // Not because a drive should arrive full, but because the alternative is a host
 // that serves a folder with nothing in it and an address that 404s — and because
 // the Drive being an ordinary document in the drive is the claim this whole repo
@@ -99,6 +100,23 @@ export async function seedChat(store, { name = 'Chat', title = 'Chat' } = {}) {
 export async function seedBoard(store, { name = 'Board' } = {}) {
   if (!STARTERS.some((starter) => starter.id === 'whiteboard')) return { seeded: false, path: null };
   return seedOnce(store, 'whiteboard', name, () => buildStarter('whiteboard', { name }));
+}
+
+/** The design system: the tokens, type, motion and parts the drive's own apps
+ *  are drawn with, drawn with them. A page to look at, and the page the
+ *  marble-drive:design-system skill sends an agent to before it styles
+ *  anything — so a drive that changes a token here changes what gets built.
+ *  Its script is its own, like the Agents page's, so nothing is composed in. */
+export async function buildDesignSystem({ title = 'Design system' } = {}) {
+  const template = await fsp.readFile(path.join(REPO, 'templates', 'design-system.mrbl'), 'utf8');
+  return template
+    .replaceAll('__TITLE__', title)
+    .replace('__ICON__', () => iconLink('doc'))
+    .replace(/__ID__/g, () => newId());
+}
+
+export async function seedDesignSystem(store, { name = 'Design System', title = 'Design system' } = {}) {
+  return seedOnce(store, 'design-system', name, () => buildDesignSystem({ title }));
 }
 
 /** The Console: every drive, from one page. Only where the console is on

@@ -49,9 +49,9 @@ It runs the same tools, so a change to them reaches it.
 
 ## Rules
 
-- Each person's Drive, Agents, Chat and Board pages, and the notes they make,
-  are their own documents. On start the host brings them forward to this
-  release's templates by a three-way merge (`server/app-updates.js`): only a
+- Each person's Drive, Agents, Chat, Board and Design System pages, and the
+  notes they make, are their own documents. On start the host brings them
+  forward to this release's templates by a three-way merge (`server/app-updates.js`): only a
   clean merge that passes the document check is written, and a page whose owner
   changed the same lines is left as it is (`marble-drive apps` shows which).
   After changing a template or starter listed in `server/app-lineage.js`, run

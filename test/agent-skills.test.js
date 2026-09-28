@@ -61,6 +61,7 @@ test('skills come from the drive, the app\'s plugin and the person\'s home, neve
   await skillDir(path.join(root, '.claude', 'skills'), 'mine', '---\nname: mine\ndescription: The person\'s own\n---\n');
   const ids = (await listSkills(dirs)).map((s) => s.id).sort();
   assert.deepEqual(ids, [
+    'marble-drive:design-system',
     'marble-drive:genui-author',
     'marble-drive:growing-the-open-page',
     'marble-drive:typesafe-ai',
@@ -73,4 +74,21 @@ test('the plugin says who it is', async () => {
   const manifest = JSON.parse(await fsp.readFile(path.join(PLUGIN_DIR, '.claude-plugin', 'plugin.json'), 'utf8'));
   assert.equal(manifest.name, 'marble-drive');
   assert.equal(PLUGIN_DIR, path.join(REPO, 'agent-plugin'));
+});
+
+test('the app ships design-system in its plugin, and its fallback tokens are the template\'s', async () => {
+  const listed = await listSkills([{ dir: path.join(PLUGIN_DIR, 'skills'), prefix: 'marble-drive:' }]);
+  const skill = listed.find((s) => s.id === 'marble-drive:design-system');
+  assert.ok(skill, 'agent-plugin/skills/design-system must exist');
+  assert.match(skill.description, /^Use /);
+  const body = await fsp.readFile(path.join(skill.dir, 'SKILL.md'), 'utf8');
+  assert.match(body, /seeded\["design-system"\]/);
+
+  // Every token the template declares, with the same value, and nothing else.
+  const tokens = (css) => new Map([...css.matchAll(/^\s*(--[\w-]+):\s*([^;]+);/gm)].map((m) => [m[1], m[2].trim()]));
+  const template = await fsp.readFile(path.join(REPO, 'templates', 'design-system.mrbl'), 'utf8');
+  const root = /^ {2}:root \{[\s\S]*?^ {2}\}/m.exec(template)[0];
+  const fallback = await fsp.readFile(path.join(skill.dir, 'tokens.css'), 'utf8');
+  assert.deepEqual(tokens(fallback), tokens(root));
+  assert.ok(tokens(root).size > 30);
 });
