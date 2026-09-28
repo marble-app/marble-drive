@@ -7388,6 +7388,11 @@
       api.conversations().then((list) => {
         for (const summary of list) this.summaries.set(summary.id, summary);
         this.showLauncherState();
+        // Opened before the list arrived — handed a conversation by a link,
+        // or open from the last visit — it could not tell then whether what
+        // it is showing had finished unseen. Now it can: showing it is seeing it.
+        const id = this.view.getAttribute('conversation');
+        if (this.isOpen && id && this.summaries.get(id)?.needsReview) api.markReviewed(id).catch(() => {});
       }).catch(() => {});
       this.offSummaries = api.on('*', (summary) => {
         if (summary?.removed) {

@@ -43,8 +43,14 @@ test('closed, the page is the page: no bar, no tree, no margin, and a pill only 
   assert.deepEqual(await margins(page), { top: '0px', left: '0px', right: '0px' });
   assert.equal(await shell.locator('.bar').isVisible(), false);
   await page.waitForFunction(() => getComputedStyle(document.querySelector('marble-shell').shadowRoot.querySelector('.pill')).opacity === '0');
-  // The corner strip raises it; the pill names the document by its name in the folder.
+  // Crossing the corner's strip raises nothing; resting in it does. The pill
+  // names the document by its name in the folder.
   await page.mouse.move(40, 3);
+  await page.mouse.move(40, 30);
+  await page.waitForTimeout(400);
+  assert.equal(await shell.locator('.pill').evaluate((el) => getComputedStyle(el).opacity), '0', 'a pass through the strip is not a request');
+  await page.mouse.move(40, 3);
+  await page.mouse.move(44, 4);
   await page.waitForFunction(() => getComputedStyle(document.querySelector('marble-shell').shadowRoot.querySelector('.pill')).opacity === '1');
   assert.equal(await shell.locator('.pill b').innerText(), 'Field notes');
   await shell.locator('.pill').click();
@@ -248,4 +254,11 @@ test('the chat\'s edge drags too inside the shell, and never takes the page from
   await page.mouse.up();
   const most = await margins(page);
   assert.ok(1280 - parseFloat(most.left) - parseFloat(most.right) >= 200, `page keeps room: ${JSON.stringify(most)}`);
+});
+
+test('a page that loads under a pointer resting in the corner keeps its corner', async () => {
+  const { page } = await visit('garden');
+  // Playwright's pointer starts at the very corner; nothing has moved it.
+  await page.waitForTimeout(600);
+  assert.equal(await page.evaluate(() => document.querySelector('marble-shell').hasAttribute('data-peek')), false);
 });

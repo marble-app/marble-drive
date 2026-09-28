@@ -38,10 +38,19 @@
   const PHONE = '(max-width: 719px)';
   const KEY = 'marble-shell:';
   const RECENT = 6;
+  const SECTIONS = ['pinned', 'recent', 'agents', 'drive'];
+  const LABELS = { pinned: 'Pinned', recent: 'Recent', agents: 'Agents', drive: 'Drive' };
+  // Most urgent first, everywhere a set of agents is drawn.
+  const ORDER = ['waiting', 'working', 'done'];
+  const WORDS = { waiting: 'needs you', working: 'working', done: 'done' };
+  // A finished conversation stays in Agents this long after it ends.
+  const AGENT_WINDOW = 24 * 60 * 60 * 1000;
   // The host's front door lands on the Drive, wherever this drive keeps it,
   // and a fragment rides through the redirect: `#/<folder>` is how the Drive
   // reads which folder to show.
   const HOME = '/';
+  // How long the pointer rests in the corner's strip before the pill rises.
+  const DWELL = 280;
   // The Drive's own path, from the host (server/app.js), which is the one
   // that knows what this drive calls it.
   const HOME_DOC = document.currentScript?.dataset.home ?? null;
@@ -60,7 +69,7 @@
     :host {
       --ink: #111111; --muted: #5a5a5a; --faint: #8a8a8a; --line: #ddd9cf;
       --paper: #fafaf7; --paper-2: #f3f1ea; --paper-3: #eceae1; --card: #ffffff;
-      --accent: #9bb6cf; --accent-soft: #f1f5f8; --accent-ink: #738698;
+      --accent: #9bb6cf; --accent-soft: #f1f5f8; --accent-ink: #738698; --caution: #a07a2c;
       --shadow-lift: 0 4px 10px rgba(74,66,52,.10), 0 14px 28px rgba(74,66,52,.12);
       --shadow-rest: 0 1px 2px rgba(74,66,52,.06), 0 6px 16px rgba(74,66,52,.08);
       --settle: cubic-bezier(.22, 1, .36, 1);
@@ -71,7 +80,7 @@
       :host {
         --ink: #e8e6e1; --muted: #a3a7ab; --faint: #71767a; --line: #2f3438;
         --paper: #16181a; --paper-2: #1e2124; --paper-3: #262a2e; --card: #1c1f22;
-        --accent: #7fa8c9; --accent-soft: #1d2932; --accent-ink: #9dc0dc;
+        --accent: #7fa8c9; --accent-soft: #1d2932; --accent-ink: #9dc0dc; --caution: #d9b25e;
         --shadow-lift: 0 6px 16px rgba(0,0,0,.45), 0 18px 36px rgba(0,0,0,.35);
         --shadow-rest: 0 1px 2px rgba(0,0,0,.40), 0 8px 20px rgba(0,0,0,.28);
       }
@@ -95,11 +104,12 @@
     download: '<path d="M8 2.25v7.5M5.25 7 8 9.75 10.75 7"/><path d="M3.25 10.5v1.75c0 .83.67 1.5 1.5 1.5h6.5c.83 0 1.5-.67 1.5-1.5V10.5"/>',
     collapse: '<path d="M6 2.75V4.5c0 .83-.67 1.5-1.5 1.5H2.75M13.25 6H11.5c-.83 0-1.5-.67-1.5-1.5V2.75M2.75 10H4.5c.83 0 1.5.67 1.5 1.5v1.75M10 13.25V11.5c0-.83.67-1.5 1.5-1.5h1.75"/>',
     check: '<path d="m3.75 8.25 2.75 2.75 5.75-6.25"/>',
+    grip: '<path d="M6 4h.01M10 4h.01M6 8h.01M10 8h.01M6 12h.01M10 12h.01" stroke-width="2"/>',
   };
   const icon = (name) => `<svg class="i" viewBox="0 0 16 16" aria-hidden="true">${PATHS[name]}</svg>`;
   const LOGO = '<span class="logo" aria-hidden="true"><svg viewBox="0 0 20 20"><path d="M10 6 14 10 10 14 6 10z"/></svg></span>';
 
-  const CSS = `
+  const STYLE = `
     :host { position: fixed; top: 0; left: 0; width: 0; height: 0; z-index: 2147483001; }
     * { box-sizing: border-box; }
     button { font: inherit; color: inherit; background: none; border: 0; padding: 0; margin: 0; cursor: pointer; }
@@ -149,11 +159,22 @@
     .search:focus-within { box-shadow: inset 0 0 0 1px var(--accent); }
     .search:focus-within kbd { display: none; }
     .scroll { flex: 1; overflow: auto; padding: 2px 6px 12px; overscroll-behavior: contain; }
+    .sec { position: relative; border-radius: 10px; }
     .sec-h { display: flex; align-items: center; gap: 2px; margin: 10px 2px 2px; }
-    .sec-h button { display: flex; align-items: center; gap: 4px; padding: 3px 6px 3px 4px; border-radius: 6px; font-size: 11px; font-weight: 600; letter-spacing: .02em; color: var(--faint); }
-    .sec-h button:hover { color: var(--ink); background: var(--paper-2); }
-    .sec-h .i { width: 12px; height: 12px; transition: transform 160ms var(--settle); transform: rotate(90deg); }
-    .sec[data-folded] .sec-h .i { transform: none; }
+    .sec-fold { display: flex; align-items: center; gap: 4px; padding: 3px 6px 3px 4px; border-radius: 6px; font-size: 11px; font-weight: 600; letter-spacing: .02em; color: var(--faint); }
+    .sec-fold:hover { color: var(--ink); background: var(--paper-2); }
+    .sec-fold .i { width: 12px; height: 12px; transition: transform 160ms var(--settle); transform: rotate(90deg); }
+    .sec[data-folded] .sec-fold .i { transform: none; }
+    .sec-meta { display: inline-flex; align-items: center; gap: 5px; margin-left: 4px; font-size: 11px; color: var(--caution); }
+    /* The grip is there when you reach for the heading, and for the keyboard. */
+    .sec-grip { margin-left: auto; width: 22px; height: 22px; border-radius: 6px; display: grid; place-items: center; color: var(--faint);
+      cursor: grab; touch-action: none; opacity: 0; transition: opacity 120ms var(--settle); }
+    .sec-h:hover .sec-grip, .sec-grip:focus-visible, .sec[data-lifted] .sec-grip { opacity: 1; }
+    .sec-grip:hover { background: var(--paper-2); color: var(--ink); }
+    @media (hover: none) { .sec-grip { opacity: 1; } }
+    /* Held: lifted off the list, over the others as they make room. */
+    .sec[data-lifted] { z-index: 2; background: var(--card); box-shadow: var(--shadow-lift); cursor: grabbing; }
+    :host([data-sorting]) .scroll, :host([data-sorting]) .sec-grip { cursor: grabbing; user-select: none; }
     .sec[data-folded] > ul { display: none; }
     ul { list-style: none; margin: 0; padding: 0; }
     ul ul { padding-left: 14px; }
@@ -167,6 +188,30 @@
     .row[aria-current="page"] .i { color: var(--accent-ink); }
     .row .where { margin-left: auto; padding-left: 8px; font-size: 11px; color: var(--faint); font-weight: 400; overflow: hidden; text-overflow: ellipsis; flex: 0 1 auto; }
     .empty { padding: 6px 10px; color: var(--faint); font-size: 12px; }
+
+    /* ── Agents: a document per row, a pip per agent ── */
+    .row.app { padding: 0; gap: 0; }
+    .row.app .go { display: flex; align-items: center; gap: 7px; flex: 1; min-width: 0; padding: 4px 8px; border-radius: 6px; text-align: left; color: inherit; }
+    .row.app .go .name, .thread .name { overflow: hidden; text-overflow: ellipsis; min-width: 0; }
+    .row.app .fold { width: 16px; height: 26px; margin-right: -8px; display: grid; place-items: center; color: var(--faint); flex: none; position: relative; z-index: 1; }
+    .row.app .fold .car { width: 12px; height: 12px; transition: transform 160ms var(--settle); }
+    .row.app .fold[aria-expanded="true"] .car { transform: rotate(90deg); }
+    .row.app:has(.fold) .go { padding-left: 10px; }
+    .row.app .pips { margin: 0 8px 0 6px; }
+    ul.threads { padding-left: 24px; }
+    .thread { font-size: 12.5px; }
+    /* Bold while unread: waiting on you, or finished since you last looked. */
+    [data-unread] .name, .thread[data-unread] .name { color: var(--ink); font-weight: 620; }
+    .pips { display: inline-flex; align-items: center; gap: 3px; flex: none; }
+    .pips .more { font-size: 10.5px; color: var(--faint); margin-left: 1px; }
+    .pip { width: 10px; height: 10px; display: grid; place-items: center; flex: none; }
+    .pip::before { content: ''; width: 6px; height: 6px; border-radius: 50%; }
+    .pip[data-st="waiting"]::before { background: var(--caution); }
+    .pip[data-st="working"]::before { background: var(--accent-ink); animation: breathe 1.8s ease-in-out infinite; }
+    .pip[data-st="done"]::before { display: none; }
+    .pip svg { width: 10px; height: 10px; fill: none; stroke: var(--muted); stroke-width: 1.6; stroke-linecap: round; stroke-linejoin: round; }
+    @keyframes breathe { 0%, 100% { opacity: 1; } 50% { opacity: .3; } }
+    @media (prefers-reduced-motion: reduce) { .pip[data-st="working"]::before { animation: none; } }
 
     /* The tree's inner edge: drag it, or focus it and use the arrow keys.
        Double-click puts it back. The same edge the chat has on its side. */
@@ -195,9 +240,11 @@
        not arrived yet. Floating cards clear their own shadow on the way out. */
     :host([data-mode="fit"]:not([data-open])) .nav, :host([data-mode="fit"][data-nav="off"]) .nav { transform: translateX(-100%); }
 
-    /* ── App alone: a pill at the top-left corner, only when the pointer goes there ──
-       The hot strip is thin on purpose: the corner is where an app keeps its
-       own title and tools, and a wide invisible target would take their clicks. */
+    /* ── App alone: a pill at the top-left corner, only when the pointer rests there ──
+       The hot strip is thin on purpose, and it asks for a moment's rest rather
+       than a pass: the corner is where an app keeps its own title and tools,
+       and a pointer on its way to them — or down from the tab bar — must not
+       raise a pill over them. */
     .zone { position: fixed; top: 0; left: 0; width: 220px; height: 10px; }
     .pill { position: fixed; top: 12px; left: 12px; display: flex; align-items: center; gap: 8px; padding: 5px 6px; max-width: 320px;
       background: var(--card); border: 1px solid var(--line); border-radius: 12px; box-shadow: var(--shadow-lift);
@@ -247,7 +294,7 @@
     constructor() {
       super();
       const root = this.attachShadow({ mode: 'open' });
-      root.innerHTML = `<style>${UI?.TOKENS ?? FALLBACK_TOKENS}${CSS}</style>
+      root.innerHTML = `<style>${UI?.TOKENS ?? FALLBACK_TOKENS}${STYLE}</style>
         <div class="zone" aria-hidden="true"></div>
         <button type="button" class="pill" aria-label="Open the drive (⌘J)">${LOGO}<b></b><kbd>⌘J</kbd></button>
         <header class="bar" aria-label="Drive">
@@ -296,6 +343,10 @@
       this.unfolded = new Set(JSON.parse(stored('unfolded', '[]')));
       this.closed = new Set();
       this.navWidth = Number(stored('nav-width', NAV)) || NAV;
+      const order = JSON.parse(stored('order', '[]')).filter((name) => SECTIONS.includes(name));
+      this.order = [...order, ...SECTIONS.filter((name) => !order.includes(name))];
+      this.openApps = new Set(JSON.parse(stored('open-apps', '[]')));
+      this.convs = new Map();
       this.tree = null;
     }
 
@@ -331,10 +382,16 @@
 
       this.$('.pill').addEventListener('click', () => this.setOpen(true));
       const zone = this.$('.zone');
-      zone.addEventListener('pointerenter', () => this.peek(true));
-      this.$('.pill').addEventListener('pointerenter', () => this.peek(true));
+      // A move, not an arrival: a page that loads under a still pointer, or
+      // a pointer crossing the strip on its way somewhere, raises nothing.
+      zone.addEventListener('pointermove', () => {
+        if (!this.hasAttribute('data-peek') && !this.dwell) this.dwell = setTimeout(() => this.peek(true), DWELL);
+      });
+      this.$('.pill').addEventListener('pointerenter', () => { if (this.hasAttribute('data-peek')) this.peek(true); });
       this.$('.pill').addEventListener('pointerleave', () => this.peek(false));
       zone.addEventListener('pointerleave', (event) => {
+        clearTimeout(this.dwell);
+        this.dwell = null;
         if (!event.relatedTarget || !this.shadowRoot.contains(event.relatedTarget)) this.peek(false);
       });
 
@@ -377,11 +434,20 @@
         }
       });
       this.scroll.addEventListener('click', (event) => {
-        const row = event.target.closest('.row');
+        const t = event.target;
+        const row = t.closest('.row');
         if (row?.dataset.folder !== undefined && row.localName === 'button') this.toggleFolder(row.dataset.folder);
-        const sec = event.target.closest('.sec-h button');
-        if (sec) this.toggleSection(sec.closest('.sec').dataset.sec);
+        const fold = t.closest('.sec-fold');
+        if (fold) this.toggleSection(fold.closest('.sec').dataset.sec);
+        const app = t.closest('[data-fold-app]');
+        if (app) this.toggleApp(app.dataset.foldApp);
+        const thread = t.closest('[data-thread]');
+        if (thread) {
+          const c = this.convs.get(thread.dataset.thread);
+          if (c) this.openThread(c);
+        }
       });
+      this.bindReorder();
       this.scroll.addEventListener('keydown', (event) => this.walkRows(event));
 
       this.onKey = (event) => this.key(event);
@@ -409,6 +475,7 @@
       this.phone.removeEventListener('change', this.onViewport);
       removeEventListener('resize', this.onWindowResize);
       this.offDrive?.();
+      this.offAgents?.();
       this.dock(null, { animate: false });
     }
 
@@ -437,10 +504,13 @@
 
     peek(on) {
       clearTimeout(this.peekTimer);
+      clearTimeout(this.dwell);
+      this.dwell = null;
       if (on) this.setAttribute('data-peek', '');
-      // Leaving the strip for the pill crosses a gap of empty page; the delay
-      // is what makes the two one target to the hand.
-      else this.peekTimer = setTimeout(() => this.removeAttribute('data-peek'), 260);
+      // Leaving the strip for the pill crosses a sliver of page; the delay is
+      // what makes the two one target to the hand. Short, so that a pill left
+      // behind gives the app its corner back almost at once.
+      else this.peekTimer = setTimeout(() => this.removeAttribute('data-peek'), 140);
     }
 
     apply({ animate = true } = {}) {
@@ -614,7 +684,7 @@
 
     // Up and Down walk the visible rows; Right and Left unfold and fold.
     walkRows(event) {
-      const rows = [...this.scroll.querySelectorAll('.row, .sec-h button')].filter((el) => el.offsetParent);
+      const rows = [...this.scroll.querySelectorAll('.row:is(a, button), .row .go, .sec-fold')].filter((el) => el.offsetParent);
       const at = rows.indexOf(this.shadowRoot.activeElement);
       if (at < 0) return;
       const row = rows[at];
@@ -761,20 +831,196 @@
       if (!drive) return;
       if (!this.offDrive && drive.on) {
         let queued = 0;
-        this.offDrive = drive.on('*', () => {
+        this.offDrive = drive.on('*', (change) => {
+          // The pins are written in the Drive's own file, so only a change to
+          // that file can move them.
+          if (change?.path === HOME_DOC || change?.from === HOME_DOC || change?.to === HOME_DOC) this.pinsStale = true;
           clearTimeout(queued);
           queued = setTimeout(() => this.load(), 300);
         });
       }
-      this.tree = await drive.tree('');
+      this.watchAgents();
+      const [tree] = await Promise.all([drive.tree(''), this.pins && !this.pinsStale ? null : this.loadPins()]);
+      this.tree = tree;
       this.drawTree();
     }
+
+    /** Pinned is the Drive's sidebar list, read out of the Drive's own file —
+     *  the one place a pin is kept — rather than a second list kept here. */
+    async loadPins() {
+      this.pinsStale = false;
+      if (!HOME_DOC || !window.marble?.href) { this.pins = []; return; }
+      try {
+        const res = await fetch(window.marble.href(HOME_DOC), { cache: 'no-store' });
+        if (!res.ok) throw new Error(String(res.status));
+        const doc = new DOMParser().parseFromString(await res.text(), 'text/html');
+        this.pins = [...doc.querySelectorAll('#pins > .pin[data-path]')].map((li) => ({
+          path: li.dataset.path,
+          kind: li.dataset.kind === 'folder' ? 'folder' : 'doc',
+          label: [...li.querySelectorAll('[data-marble-editable]')].at(-1)?.textContent.trim() || nameOf(li.dataset.path),
+        }));
+      } catch {
+        this.pins = [];
+      }
+    }
+
+    // ------------------------------------------------------------ agents
+
+    /** Conversations, as the drawer and the Agents page hear them: one list,
+     *  then every change as it happens. */
+    watchAgents() {
+      const api = window.marble?.agent;
+      if (!api || this.offAgents) return;
+      this.offAgents = api.on('*', (summary) => {
+        // An ask opening or closing arrives on its own, ahead of any summary
+        // that would say so.
+        if (summary?.kind === 'ask' || summary?.kind === 'ask.resolved') {
+          const c = this.convs.get(summary.conversation);
+          if (c) this.convs.set(c.id, { ...c, asking: summary.kind === 'ask' });
+          this.redraw('agents');
+          return;
+        }
+        if (!summary?.id || summary.kind) return;
+        if (summary.removed) this.convs.delete(summary.id);
+        else this.convs.set(summary.id, summary);
+        this.redraw('agents');
+      });
+      api.conversations().then((list) => {
+        for (const summary of list) this.convs.set(summary.id, summary);
+        this.redraw('agents');
+      }).catch(() => {});
+    }
+
+    /** What a conversation is doing, in the three words the pips draw. */
+    stateOf(c) {
+      if (c.asking) return 'waiting';
+      if (c.running || c.queued) return 'working';
+      return 'done';
+    }
+
+    // Unread: waiting on you, or finished since you last looked.
+    unread(c) {
+      return Boolean(c.asking || c.needsReview);
+    }
+
+    /** The documents agents are at, most urgent first. A conversation counts
+     *  while it runs, waits, or finished within the day. */
+    agentApps() {
+      const now = Date.now();
+      const apps = new Map();
+      for (const c of this.convs.values()) {
+        if (c.archived || !c.target) continue;
+        const live = c.running || c.queued || c.asking || c.needsReview || now - (c.lastFinishedAt ?? 0) < AGENT_WINDOW;
+        if (!live) continue;
+        if (!apps.has(c.target)) apps.set(c.target, []);
+        apps.get(c.target).push(c);
+      }
+      const rank = (c) => ORDER.indexOf(this.stateOf(c));
+      const latest = (c) => Math.max(c.updatedAt ?? 0, c.lastFinishedAt ?? 0);
+      const list = [...apps].map(([path, threads]) => ({
+        path,
+        threads: threads.sort((a, b) => rank(a) - rank(b) || latest(b) - latest(a)),
+      }));
+      return list.sort((a, b) => rank(a.threads[0]) - rank(b.threads[0]) || latest(b.threads[0]) - latest(a.threads[0]));
+    }
+
+    /** One pip per agent, most urgent first; after four, a count. */
+    pips(threads) {
+      const wrap = h('span', 'pips');
+      const counts = { waiting: 0, working: 0, done: 0 };
+      for (const c of threads) counts[this.stateOf(c)] += 1;
+      const said = ORDER.filter((k) => counts[k]).map((k) => `${counts[k]} ${WORDS[k]}`).join(', ');
+      wrap.setAttribute('role', 'img');
+      wrap.setAttribute('aria-label', said);
+      wrap.title = said;
+      threads.slice(0, 4).forEach((c) => wrap.append(this.pip(this.stateOf(c))));
+      if (threads.length > 4) wrap.append(h('span', 'more', `+${threads.length - 4}`));
+      return wrap;
+    }
+
+    pip(state) {
+      const pip = h('span', 'pip');
+      pip.dataset.st = state;
+      if (state === 'done') pip.innerHTML = `<svg viewBox="0 0 10 10" aria-hidden="true"><path d="m2.4 5.3 1.8 1.8 3.6-4"/></svg>`;
+      return pip;
+    }
+
+    /** Opens the conversation at its document, with the chat beside it. */
+    openThread(c) {
+      if (c.target === this.here) {
+        if (!this.state.chat) this.set({ chat: true });
+        dispatchEvent(new CustomEvent('marble:agent-open', { detail: { id: c.id } }));
+        return;
+      }
+      // The drawer on the next page picks the conversation up from the hash
+      // and opens with it, the way the Drive hands one over.
+      if (!this.state.chat) this.set({ chat: true });
+      location.href = `${window.marble.href(c.target)}#chat=${encodeURIComponent(c.id)}`;
+    }
+
+    agentsList() {
+      const ul = h('ul', 'agents');
+      const apps = this.agentApps();
+      for (const app of apps) {
+        const li = h('li');
+        const many = app.threads.length > 1;
+        const open = many && this.openApps.has(app.path);
+        const row = h('div', 'row app');
+        row.dataset.app = app.path;
+        if (app.threads.some((c) => this.unread(c))) row.setAttribute('data-unread', '');
+        if (app.path === this.here) row.setAttribute('aria-current', 'page');
+        if (many) {
+          const car = h('button', 'fold');
+          car.type = 'button';
+          car.dataset.foldApp = app.path;
+          car.setAttribute('aria-expanded', String(open));
+          car.setAttribute('aria-label', `${open ? 'Hide' : 'Show'} the ${app.threads.length} conversations at ${nameOf(app.path)}`);
+          car.innerHTML = `<svg class="i car" viewBox="0 0 16 16" aria-hidden="true">${PATHS.chev}</svg>`;
+          row.append(car);
+        }
+        const go = h('button', 'go');
+        go.type = 'button';
+        go.dataset.thread = app.threads[0].id;
+        go.title = `${app.path} — open with its chat`;
+        go.innerHTML = icon('doc');
+        go.append(h('span', 'name', nameOf(app.path)));
+        row.append(go, this.pips(app.threads));
+        li.append(row);
+        if (open) {
+          const threads = h('ul', 'threads');
+          for (const c of app.threads) {
+            const t = h('button', 'row thread');
+            t.type = 'button';
+            t.dataset.thread = c.id;
+            if (this.unread(c)) t.setAttribute('data-unread', '');
+            t.append(this.pip(this.stateOf(c)), h('span', 'name', c.title || 'New chat'));
+            t.title = `${c.title || 'New chat'} — ${WORDS[this.stateOf(c)]}`;
+            threads.append(this.item(t));
+          }
+          li.append(threads);
+        }
+        ul.append(li);
+      }
+      if (!apps.length) ul.append(h('li', 'empty', 'No agent is at work.'));
+      return ul;
+    }
+
+    agentsMeta() {
+      let waiting = 0;
+      for (const c of this.convs.values()) if (!c.archived && c.asking) waiting += 1;
+      if (!waiting) return null;
+      const meta = h('span', 'sec-meta', `${waiting} need${waiting === 1 ? 's' : ''} you`);
+      meta.prepend(this.pip('waiting'));
+      return meta;
+    }
+
+    // ------------------------------------------------------------ sections
 
     toggleSection(name) {
       if (this.folded.has(name)) this.folded.delete(name);
       else this.folded.add(name);
       store('folded', JSON.stringify([...this.folded]));
-      this.drawTree();
+      this.redraw(name);
     }
 
     toggleFolder(path) {
@@ -787,8 +1033,16 @@
         this.closed.delete(path);
       }
       store('unfolded', JSON.stringify([...this.unfolded]));
-      this.drawTree();
+      this.redraw('drive');
       this.scroll.querySelector(`button.row[data-folder="${CSS.escape(path)}"]`)?.focus({ preventScroll: true });
+    }
+
+    toggleApp(path) {
+      if (this.openApps.has(path)) this.openApps.delete(path);
+      else this.openApps.add(path);
+      store('open-apps', JSON.stringify([...this.openApps]));
+      this.redraw('agents');
+      this.scroll.querySelector(`[data-fold-app="${CSS.escape(path)}"]`)?.focus({ preventScroll: true });
     }
 
     // The folders you are inside are unfolded until you fold one yourself.
@@ -818,17 +1072,25 @@
       return li;
     }
 
-    section(name, label, list) {
+    section(name, list, meta = null) {
+      const label = LABELS[name];
       const sec = h('section', 'sec');
       sec.dataset.sec = name;
       if (this.folded.has(name)) sec.setAttribute('data-folded', '');
       const head = h('div', 'sec-h');
-      const b = h('button');
-      b.type = 'button';
-      b.setAttribute('aria-expanded', String(!this.folded.has(name)));
-      b.innerHTML = icon('chev');
-      b.append(label);
-      head.append(b);
+      const fold = h('button', 'sec-fold');
+      fold.type = 'button';
+      fold.setAttribute('aria-expanded', String(!this.folded.has(name)));
+      fold.innerHTML = icon('chev');
+      fold.append(label);
+      const grip = h('button', 'sec-grip');
+      grip.type = 'button';
+      grip.innerHTML = icon('grip');
+      grip.setAttribute('aria-label', `Move ${label}: drag, or Alt+Up and Alt+Down`);
+      grip.title = 'Drag to reorder';
+      head.append(fold);
+      if (meta) head.append(meta);
+      head.append(grip);
       sec.append(head, list);
       return sec;
     }
@@ -857,8 +1119,7 @@
       return ul;
     }
 
-    drawTree() {
-      if (!this.tree) return;
+    docs() {
       const docs = [];
       const walk = (folder) => {
         for (const child of folder.children ?? []) {
@@ -866,12 +1127,60 @@
           else if (child.kind === 'folder') walk(child);
         }
       };
-      walk(this.tree);
+      if (this.tree) walk(this.tree);
+      return docs;
+    }
+
+    /** One section, built fresh; null when it has nothing to say at all. */
+    build(name) {
+      if (name === 'pinned') {
+        if (!this.pins?.length) return null;
+        const ul = h('ul');
+        for (const pin of this.pins) {
+          const a = h('a', 'row');
+          a.href = pin.kind === 'folder' ? this.folderHref(pin.path) : window.marble?.href?.(pin.path) ?? '#';
+          a.innerHTML = icon(pin.kind === 'folder' ? 'folder' : 'doc');
+          a.append(h('span', '', pin.label));
+          a.title = pin.path;
+          const folder = folderOf(pin.path);
+          if (folder) a.append(h('span', 'where', nameOf(folder)));
+          if (pin.path === this.here) a.setAttribute('aria-current', 'page');
+          ul.append(this.item(a));
+        }
+        return this.section(name, ul);
+      }
+      if (name === 'recent') {
+        const ul = h('ul');
+        for (const d of this.docs().sort((a, b) => b.modified - a.modified).slice(0, RECENT)) ul.append(this.item(this.docRow(d, { where: true })));
+        return this.section(name, ul);
+      }
+      if (name === 'agents') {
+        if (!window.marble?.agent) return null;
+        return this.section(name, this.agentsList(), this.agentsMeta());
+      }
+      return this.section(name, this.branch(this.tree));
+    }
+
+    /** Only the one section that changed: an agent reporting in every few
+     *  seconds should not rebuild the whole tree under your pointer. */
+    redraw(name) {
+      if (!this.tree || this.search.value.trim()) return;
+      if (this.dragging) { this.dirty = true; return; }
+      const old = this.scroll.querySelector(`:scope > .sec[data-sec="${name}"]`);
+      if (!old) { this.drawTree(); return; }
+      const next = this.build(name);
+      if (next) old.replaceWith(next);
+      else old.remove();
+    }
+
+    drawTree() {
+      if (!this.tree) return;
+      if (this.dragging) { this.dirty = true; return; }
       const keep = this.scroll.scrollTop;
       const query = this.search.value.trim().toLowerCase();
       if (query) {
         const ul = h('ul');
-        const hits = docs.filter((d) => d.path.toLowerCase().includes(query) || String(d.title ?? '').toLowerCase().includes(query))
+        const hits = this.docs().filter((d) => d.path.toLowerCase().includes(query) || String(d.title ?? '').toLowerCase().includes(query))
           .sort((a, b) => Number(b.name.toLowerCase().includes(query)) - Number(a.name.toLowerCase().includes(query)) || b.modified - a.modified)
           .slice(0, 40);
         for (const d of hits) ul.append(this.item(this.docRow(d, { where: true })));
@@ -879,17 +1188,110 @@
         this.scroll.replaceChildren(ul);
         return;
       }
-      const recent = h('ul');
-      for (const d of [...docs].sort((a, b) => b.modified - a.modified).slice(0, RECENT)) recent.append(this.item(this.docRow(d, { where: true })));
-      this.scroll.replaceChildren(
-        this.section('recent', 'Recent', recent),
-        this.section('drive', 'Drive', this.branch(this.tree)),
-      );
+      this.scroll.replaceChildren(...this.order.map((name) => this.build(name)).filter(Boolean));
       this.scroll.scrollTop = keep;
       if (!this.revealed) {
         this.revealed = true;
-        this.scroll.querySelector('[aria-current="page"]')?.scrollIntoView({ block: 'nearest' });
+        this.scroll.querySelector('.sec[data-sec="drive"] [aria-current="page"]')?.scrollIntoView({ block: 'nearest' });
       }
+    }
+
+    // ------------------------------------------------------------ reordering
+
+    saveOrder() {
+      const shown = [...this.scroll.querySelectorAll(':scope > .sec')].map((sec) => sec.dataset.sec);
+      // A section with nothing in it today (no pins yet) keeps its place for
+      // the day it has something.
+      const hidden = this.order.filter((name) => !shown.includes(name));
+      const next = [...shown];
+      for (const name of hidden) next.splice(Math.min(this.order.indexOf(name), next.length), 0, name);
+      this.order = next;
+      store('order', JSON.stringify(next));
+    }
+
+    /** Moves a section and lets the others slide to their new places rather
+     *  than jump there: each is measured, moved, and animated back from
+     *  where it was (FLIP). */
+    moveSection(sec, beforeNode, { except = null } = {}) {
+      const others = [...this.scroll.querySelectorAll(':scope > .sec')].filter((el) => el !== except);
+      const before = new Map(others.map((el) => [el, el.getBoundingClientRect().top]));
+      this.scroll.insertBefore(sec, beforeNode);
+      if (this.reduced.matches) return;
+      for (const el of others) {
+        const dy = before.get(el) - el.getBoundingClientRect().top;
+        if (!dy) continue;
+        el.animate([{ transform: `translateY(${dy}px)` }, { transform: 'none' }], { duration: 220, easing: EASE });
+      }
+    }
+
+    bindReorder() {
+      this.scroll.addEventListener('keydown', (event) => {
+        const grip = event.target.closest?.('.sec-grip');
+        if (!grip || !event.altKey || (event.key !== 'ArrowUp' && event.key !== 'ArrowDown')) return;
+        event.preventDefault();
+        const sec = grip.closest('.sec');
+        const target = event.key === 'ArrowUp' ? sec.previousElementSibling : sec.nextElementSibling?.nextElementSibling ?? null;
+        if (event.key === 'ArrowUp' && !target) return;
+        if (event.key === 'ArrowDown' && !sec.nextElementSibling) return;
+        this.moveSection(sec, target);
+        this.saveOrder();
+        grip.focus({ preventScroll: true });
+      });
+
+      this.scroll.addEventListener('pointerdown', (event) => {
+        const grip = event.target.closest?.('.sec-grip');
+        if (!grip || event.button !== 0) return;
+        event.preventDefault();
+        const sec = grip.closest('.sec');
+        const start = event.clientY;
+        const origin = sec.getBoundingClientRect().top;
+        let lifted = false;
+        const move = (ev) => {
+          const dy = ev.clientY - start;
+          if (!lifted) {
+            if (Math.abs(dy) < 4) return;
+            lifted = true;
+            this.dragging = true;
+            sec.setAttribute('data-lifted', '');
+            this.setAttribute('data-sorting', '');
+          }
+          // Where the pointer wants the section's top, and so its middle,
+          // among the others' middles.
+          const want = origin + dy;
+          const middle = want + sec.offsetHeight / 2;
+          const others = [...this.scroll.querySelectorAll(':scope > .sec')].filter((el) => el !== sec);
+          const next = others.find((el) => {
+            const r = el.getBoundingClientRect();
+            return middle < r.top + r.height / 2;
+          }) ?? null;
+          if (next !== sec.nextElementSibling) this.moveSection(sec, next, { except: sec });
+          // It follows the pointer from wherever the list has put it now.
+          const held = Number(sec.dataset.dy) || 0;
+          const placed = sec.getBoundingClientRect().top - held;
+          sec.dataset.dy = String(want - placed);
+          sec.style.transform = `translateY(${want - placed}px)`;
+        };
+        const up = () => {
+          removeEventListener('pointermove', move);
+          removeEventListener('pointerup', up);
+          removeEventListener('pointercancel', up);
+          if (!lifted) return;
+          const from = Number(sec.dataset.dy) || 0;
+          sec.style.transform = '';
+          delete sec.dataset.dy;
+          sec.removeAttribute('data-lifted');
+          this.removeAttribute('data-sorting');
+          if (from && !this.reduced.matches) {
+            sec.animate([{ transform: `translateY(${from}px)` }, { transform: 'none' }], { duration: 200, easing: EASE });
+          }
+          this.dragging = false;
+          this.saveOrder();
+          if (this.dirty) { this.dirty = false; this.drawTree(); }
+        };
+        addEventListener('pointermove', move);
+        addEventListener('pointerup', up);
+        addEventListener('pointercancel', up);
+      });
     }
   }
 
