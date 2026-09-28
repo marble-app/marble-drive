@@ -47,8 +47,14 @@
   // Most urgent first, everywhere a set of agents is drawn.
   const ORDER = ['waiting', 'working', 'done'];
   const WORDS = { waiting: 'needs you', working: 'working', done: 'done' };
-  // A finished conversation stays in Agents this long after it ends.
-  const AGENT_WINDOW = 24 * 60 * 60 * 1000;
+  // Which conversations are old enough to leave out: the Agents page's own
+  // idle cut (templates/agents.mrbl, IDLE_KEY), read from where that page
+  // keeps it so the slider there is the one setting for both. Minutes, 'all'
+  // for no cut, and five hours until somebody moves it.
+  const IDLE_KEY = 'marble-agents:idle';
+  const IDLE_MIN = 5;
+  const IDLE_MID = 5 * 60;
+  const IDLE_MAX = (IDLE_MID * IDLE_MID) / IDLE_MIN;
   // The host's front door lands on the Drive, wherever this drive keeps it,
   // and a fragment rides through the redirect: `#/<folder>` is how the Drive
   // reads which folder to show.
@@ -110,6 +116,8 @@
     check: '<path d="m3.75 8.25 2.75 2.75 5.75-6.25"/>',
     describe: '<rect x="2.25" y="2.25" width="11.5" height="11.5" rx="2.75"/><path d="M5 10.25c1.5-3.1 2.55-4.65 3.2-4.65 1 0 .2 4.65 1.2 4.65.65 0 1.25-.95 1.75-2.85"/>',
     move: '<path d="M2 11.25v-6.5c0-.83.67-1.5 1.5-1.5h2.88c.4 0 .78.16 1.06.44l.62.62c.28.28.66.44 1.06.44h3.38c.83 0 1.5.67 1.5 1.5v4.99c0 .83-.67 1.5-1.5 1.5H3.5c-.83 0-1.5-.67-1.5-1.5z"/><path d="M6 9.25h4.25M8.75 7.5 10.5 9.25 8.75 11"/>',
+    // Two ticks: every one of them, read.
+    read: '<path d="m1.75 8.5 2.75 2.75 5-5.75"/><path d="m7.75 11 .25.25 5.5-6"/>',
     grip: '<path d="M6 4h.01M10 4h.01M6 8h.01M10 8h.01M6 12h.01M10 12h.01" stroke-width="2"/>',
   };
   const icon = (name) => `<svg class="i" viewBox="0 0 16 16" aria-hidden="true">${PATHS[name]}</svg>`;
@@ -173,7 +181,11 @@
     .sec[data-folded] .sec-fold .i { transform: none; }
     .sec-meta { display: inline-flex; align-items: center; gap: 5px; margin-left: 4px; font-size: 11px; color: var(--caution); }
     /* The grip is there when you reach for the heading, and for the keyboard. */
-    .sec-grip { margin-left: auto; width: 22px; height: 22px; border-radius: 6px; display: grid; place-items: center; color: var(--faint);
+    .sec-gap { flex: 1; }
+    .sec-act { width: 22px; height: 22px; border-radius: 6px; display: grid; place-items: center; color: var(--faint); }
+    .sec-act:hover { background: var(--paper-2); color: var(--ink); }
+    .older { padding: 4px 10px 2px 32px; font-size: 11.5px; color: var(--faint); }
+    .sec-grip { width: 22px; height: 22px; border-radius: 6px; display: grid; place-items: center; color: var(--faint);
       cursor: grab; touch-action: none; opacity: 0; transition: opacity 120ms var(--settle); }
     .sec-h:hover .sec-grip, .sec-grip:focus-visible, .sec[data-lifted] .sec-grip { opacity: 1; }
     .sec-grip:hover { background: var(--paper-2); color: var(--ink); }
@@ -326,6 +338,16 @@
   const splitPath = (p) => String(p ?? '').split('/').filter(Boolean);
   const nameOf = (p) => splitPath(p).at(-1) ?? '';
   const folderOf = (p) => splitPath(p).slice(0, -1).join('/');
+  // The Agents page's words for a span of minutes (templates/agents.mrbl, idleLabel).
+  const idleLabel = (minutes) => {
+    if (minutes == null) return 'ever';
+    if (minutes < 60) return `${Math.round(minutes)} min`;
+    const hours = minutes / 60;
+    if (hours < 24) return `${hours < 10 ? Math.round(hours * 10) / 10 : Math.round(hours)} hr`;
+    const days = hours / 24;
+    const n = days < 10 ? Math.round(days * 10) / 10 : Math.round(days);
+    return `${n} ${n === 1 ? 'day' : 'days'}`;
+  };
 
   class MarbleShell extends HTMLElement {
     constructor() {
@@ -513,6 +535,7 @@
         if (row?.dataset.folder !== undefined && row.localName === 'button') this.toggleFolder(row.dataset.folder);
         const fold = t.closest('.sec-fold');
         if (fold) this.toggleSection(fold.closest('.sec').dataset.sec);
+        if (t.closest('[data-mark-read]')) { this.markAllRead(); return; }
         const app = t.closest('[data-fold-app]');
         if (app) this.toggleApp(app.dataset.foldApp);
         const thread = t.closest('[data-thread]');
@@ -569,6 +592,9 @@
       this.offDrive?.();
       this.offAgents?.();
       removeEventListener('marble-agent:seen', this.onSeen);
+      removeEventListener('storage', this.onCut);
+      document.removeEventListener('input', this.onCut, true);
+      document.removeEventListener('change', this.onCut, true);
       this.dock(null, { animate: false });
     }
 
@@ -1269,6 +1295,16 @@
         this.redraw('agents');
       };
       addEventListener('marble-agent:seen', this.onSeen);
+      // The cut moved: in another tab, or by the slider on this very page when
+      // it is the Agents page (which writes it as the slider goes).
+      this.onCut = (event) => {
+        if (event.type === 'storage' ? event.key === IDLE_KEY : event.target?.matches?.('.idle-range')) {
+          requestAnimationFrame(() => this.redraw('agents'));
+        }
+      };
+      addEventListener('storage', this.onCut);
+      document.addEventListener('input', this.onCut, true);
+      document.addEventListener('change', this.onCut, true);
     }
 
     /** What a conversation is doing, in the three words the pips draw. */
@@ -1287,15 +1323,36 @@
       return Boolean(this.asking(c) || c.needsReview);
     }
 
-    /** The documents agents are at, most urgent first. A conversation counts
-     *  while it runs, waits, or finished within the day. */
+    /** The Agents page's cut, in minutes, or null for none. */
+    idleCut() {
+      let saved = null;
+      try { saved = localStorage.getItem(IDLE_KEY); } catch { /* private browsing: the default */ }
+      if (saved === 'all') return null;
+      const n = Number(saved);
+      return Number.isFinite(n) && n > 0 ? Math.min(IDLE_MAX, Math.max(IDLE_MIN, n)) : IDLE_MID;
+    }
+
+    /** The Agents page's rule, word for word: untouched longer than the cut —
+     *  by you or by the agent — and not live work, which is never stale, nor
+     *  the conversation showing in the chat. */
+    idleHides(c, cut, now = Date.now()) {
+      if (cut == null) return false;
+      if (this.drawer?.isOpen && c.id === this.drawer.view?.getAttribute('conversation')) return false;
+      if (c.running || c.queued || this.asking(c) || c.status === 'running') return false;
+      const touched = Math.max(c.lastInteractedAt ?? 0, c.updatedAt ?? 0, c.lastFinishedAt ?? 0, c.createdAt ?? 0);
+      return touched > 0 && now - touched > cut * 60_000;
+    }
+
+    /** The documents agents are at, most urgent first — every conversation the
+     *  Agents page's idle cut would keep. */
     agentApps() {
       const now = Date.now();
+      const cut = this.idleCut();
       const apps = new Map();
+      this.olderCount = 0;
       for (const c of this.convs.values()) {
         if (c.archived || !c.target) continue;
-        const live = c.running || c.queued || this.asking(c) || c.needsReview || now - (c.lastFinishedAt ?? 0) < AGENT_WINDOW;
-        if (!live) continue;
+        if (this.idleHides(c, cut, now)) { this.olderCount += 1; continue; }
         if (!apps.has(c.target)) apps.set(c.target, []);
         apps.get(c.target).push(c);
       }
@@ -1385,8 +1442,36 @@
         }
         ul.append(li);
       }
-      if (!apps.length) ul.append(h('li', 'empty', 'No agent is at work.'));
+      const cut = this.idleCut();
+      if (!apps.length) ul.append(h('li', 'empty', this.olderCount ? `Nothing in the last ${idleLabel(cut)}.` : 'No agent is at work.'));
+      if (this.olderCount) {
+        const older = h('li', 'older', `${this.olderCount} older than ${idleLabel(cut)}`);
+        older.title = 'The cut is the Agents page\'s: move its slider to show more or fewer';
+        ul.append(older);
+      }
       return ul;
+    }
+
+    /** Everything finished and not yet looked at, looked at. A conversation
+     *  waiting on you stays bold: reading it does not answer it. */
+    markAllRead() {
+      const api = window.marble?.agent;
+      const unread = [...this.convs.values()].filter((c) => !c.archived && c.needsReview);
+      for (const c of unread) this.convs.set(c.id, { ...c, needsReview: false });
+      this.redraw('agents');
+      for (const c of unread) api?.markReviewed(c.id).catch(() => {});
+    }
+
+    agentsActions() {
+      const unread = [...this.convs.values()].some((c) => !c.archived && c.needsReview);
+      if (!unread) return [];
+      const b = h('button', 'sec-act');
+      b.type = 'button';
+      b.dataset.markRead = '';
+      b.innerHTML = icon('read');
+      b.setAttribute('aria-label', 'Mark all as read');
+      b.title = 'Mark all as read';
+      return [b];
     }
 
     agentsMeta() {
@@ -1456,7 +1541,7 @@
       return li;
     }
 
-    section(name, list, meta = null) {
+    section(name, list, meta = null, actions = []) {
       const label = LABELS[name];
       const sec = h('section', 'sec');
       sec.dataset.sec = name;
@@ -1474,7 +1559,7 @@
       grip.title = 'Drag to reorder';
       head.append(fold);
       if (meta) head.append(meta);
-      head.append(grip);
+      head.append(h('span', 'sec-gap'), ...actions, grip);
       sec.append(head, list);
       return sec;
     }
@@ -1540,7 +1625,7 @@
       }
       if (name === 'agents') {
         if (!window.marble?.agent) return null;
-        return this.section(name, this.agentsList(), this.agentsMeta());
+        return this.section(name, this.agentsList(), this.agentsMeta(), this.agentsActions());
       }
       return this.section(name, this.branch(this.tree));
     }

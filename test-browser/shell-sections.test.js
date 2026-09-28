@@ -4,6 +4,8 @@
 // none of this is a second copy of anything — a pin is the Drive's, a state is
 // the conversation's — and that the order you give the sections is kept.
 import assert from 'node:assert/strict';
+import fsp from 'node:fs/promises';
+import path from 'node:path';
 import test from 'node:test';
 
 import { GARDEN, startDrive } from './harness.js';
@@ -141,4 +143,56 @@ test('a section moves by its grip, with the pointer or with Alt and the arrows, 
   await page.goto(`${host.base}/a/Travel%2Fplans`);
   await page.locator('marble-shell').locator('.sec[data-sec="drive"]').waitFor();
   assert.deepEqual(await order(page.locator('marble-shell')), ['pinned', 'drive', 'recent', 'agents'], 'kept on the next document');
+});
+
+const startDone = (page, target) => page.evaluate(async (target) => {
+  const a = window.marble.agent;
+  const id = await a.start({ provider: 'fake' });
+  await a.send(id, { prompt: 'script:done', target, viewing: target });
+  return id;
+}, target);
+const settledDone = (page, id) => page.waitForFunction(async (id) => (await window.marble.agent.conversations()).find((c) => c.id === id)?.status === 'done', id);
+
+test('Agents keeps to the Agents page\'s idle cut: older conversations are left out and counted, and "all" brings them back', async () => {
+  const { page, shell } = await visit();
+  // The old one first: the newest is the one the chat shows, and the one
+  // showing is never hidden.
+  const old = await startDone(page, 'Research/atlas');
+  const fresh = await startDone(page, 'Travel/plans');
+  await settledDone(page, fresh);
+  await settledDone(page, old);
+  // Two days since anyone touched it.
+  const then = Date.now() - 2 * 24 * 60 * 60 * 1000;
+  // Written straight into its record: the store stamps updatedAt on every update.
+  const file = path.join(host.drive.store.marbleDir, 'agents', old, 'meta.json');
+  const meta = JSON.parse(await fsp.readFile(file, 'utf8'));
+  await fsp.writeFile(file, JSON.stringify({ ...meta, createdAt: then, updatedAt: then, lastFinishedAt: then, lastInteractedAt: then }));
+  await page.evaluate(() => localStorage.setItem('marble-agents:idle', String(24 * 60)));
+  await page.reload();
+  await open(page);
+  await shell.locator('.row.app[data-app="Travel/plans"]').waitFor();
+  assert.equal(await shell.locator('.row.app[data-app="Research/atlas"]').count(), 0, 'older than a day: out');
+  assert.equal(await shell.locator('.sec[data-sec="agents"] .older').innerText(), '1 older than 1 day');
+
+  await page.evaluate(() => localStorage.setItem('marble-agents:idle', 'all'));
+  await page.reload();
+  await open(page);
+  await shell.locator('.row.app[data-app="Research/atlas"]').waitFor();
+  assert.equal(await shell.locator('.sec[data-sec="agents"] .older').count(), 0);
+  await page.evaluate((ids) => Promise.all(ids.map((id) => window.marble.agent.archive(id, true))), [fresh, old]);
+});
+
+test('Mark all as read takes the bold off everything finished, and says so to the host', async () => {
+  const { page, shell } = await visit();
+  const ids = [await startDone(page, 'Travel/plans'), await startDone(page, 'Research/atlas')];
+  for (const id of ids) await settledDone(page, id);
+  await open(page);
+  const button = shell.locator('.sec[data-sec="agents"] [data-mark-read]');
+  await button.waitFor();
+  assert.equal(await shell.locator('.row.app[data-unread]').count(), 2);
+  await button.click();
+  assert.equal(await shell.locator('.row.app[data-unread]').count(), 0);
+  assert.equal(await button.count(), 0, 'nothing left to mark');
+  await page.waitForFunction(async (ids) => (await window.marble.agent.conversations()).filter((c) => ids.includes(c.id)).every((c) => !c.needsReview), ids);
+  await page.evaluate((ids) => Promise.all(ids.map((id) => window.marble.agent.archive(id, true))), ids);
 });
