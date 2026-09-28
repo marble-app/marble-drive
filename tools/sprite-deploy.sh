@@ -5,6 +5,8 @@
 #   tools/sprite-deploy.sh <sprite> [--org <org>] --local
 #   tools/sprite-deploy.sh <sprite> [--org <org>] --rollback
 #   ... --no-checkpoint   skip the restore point, only when Sprites cannot make one
+#                         (a stuck checkpoint store, "…in-progress … file exists", is
+#                         recognised and skipped on its own, with a warning)
 #   ... --print-plan      say what would be deployed, and stop before touching a sprite
 #   ... --when-idle       stage now, switch when no agent is working (always, from the sprite itself)
 #   tools/sprite-deploy.sh --all [--org <org>] [--list] [--ref ...]   every user's sprite
@@ -152,8 +154,23 @@ send_release_script
 
 if [[ $CHECKPOINT == 1 ]]; then
   say "checkpointing $SPRITE"
-  sprite checkpoint create -o "$ORG" -s "$SPRITE" --comment "before deploy $NAME"
-  echo "   to undo everything since: sprite checkpoint list -o $ORG -s $SPRITE, then sprite restore <id> -o $ORG -s $SPRITE"
+  if made="$(sprite checkpoint create -o "$ORG" -s "$SPRITE" --comment "before deploy $NAME" 2>&1)"; then
+    printf '%s\n' "$made"
+    echo "   to undo everything since: sprite checkpoint list -o $ORG -s $SPRITE, then sprite restore <id> -o $ORG -s $SPRITE"
+  elif grep -q 'in-progress.*file exists' <<<"$made"; then
+    # A stuck checkpoint store (docs/HOSTING.md): the next version's name is
+    # held by a checkpoint Sprites itself has lost track of, so every attempt
+    # fails the same way until Fly clears it. Stopping here would only leave
+    # this one person a release behind everyone else; a deploy replaces code,
+    # which --rollback undoes, and does not touch /drive. So it goes on, and
+    # says so.
+    printf '%s\n' "$made"
+    say "no checkpoint for $SPRITE: its checkpoint store is stuck (report it to Fly); --rollback still undoes the code"
+  else
+    printf '%s\n' "$made" >&2
+    echo "sprite-deploy: could not checkpoint $SPRITE; nothing was changed there" >&2
+    exit 1
+  fi
 else
   # Only for a sprite whose checkpoints Sprites cannot make right now. A deploy
   # replaces code, which --rollback undoes; it does not touch /drive.

@@ -35,9 +35,11 @@ It runs the same tools, so a change to them reaches it.
    then point this repo at that version before step 4.
 4. Commit, and push to `main`.
 5. Only when the owner says to ship:
-   - `tools/sprite-deploy.sh --all`. Irene's and Sam's sprites cannot make
-     checkpoints right now; where one fails with "Failed to create checkpoint",
-     `tools/sprite-deploy.sh <sprite> --no-checkpoint` (nothing was changed there).
+   - `tools/sprite-deploy.sh --all`. Several sprites' checkpoint stores are
+     stuck ("… in-progress … file exists": t-irene, t-sam, t-bryan, t-eunhye,
+     t-rima as of 2026-09-28); the deploy recognises that, goes on without a
+     checkpoint, and says so (report stuck ones to Fly). Any other checkpoint
+     failure still stops that sprite's deploy with nothing changed there.
    - Then `tools/sprite-deploy.sh admin-p1`. From admin-p1 itself this stages
      the release and switches only when no agent is working, so this
      conversation is not cut off (`~/app/switch.log`).
