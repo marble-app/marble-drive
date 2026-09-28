@@ -20,10 +20,12 @@ const REPORT = {
   machine: 'The MacBook',
   to: '~/Marble Backups/admin-p1',
   heardAt: '2026-09-27T19:00:00Z',
-  every: 15,
+  link: '~/Marble Drive',
+  rule: { quiet: 10, most: 60 },
   schedule: 'on',
-  last: { at: '2026-09-27T18:50:00Z', ok: true, snapshot: '2026-09-27T185000Z', why: 'running', error: null },
-  snapshots: [{ name: '2026-09-27T185000Z', documents: 96, files: 6500, added: 224_000, took: 11, why: 'running' }],
+  last: { at: '2026-09-27T18:50:00Z', ok: true, snapshot: '2026-09-27T185000Z', why: 'quiet after changes', error: null },
+  copy: { name: '2026-09-27T185000Z', path: '~/Marble Backups/2026-09-27T185000Z', checkpoint: 'v42', documents: 96, files: 6500, added: 224_000, took: 11, why: 'quiet after changes', syncedAt: '2026-09-27T18:50:11Z' },
+  changes: { waiting: false, since: null, next: null },
   disk: { used: 2_200_000_000, free: 180_000_000_000 },
   results: [],
 };
@@ -54,18 +56,24 @@ test('requests: validated, one of a kind at a time, withdrawable', async () => {
 
   await assert.rejects(b.request('admin-p1', { kind: 'schedule' }), /on or off/);
   assert.equal((await b.request('admin-p1', { kind: 'schedule', on: false })).on, false);
-  await assert.rejects(b.request('admin-p1', { kind: 'nuke' }), /back up, schedule or restore/);
+  await assert.rejects(b.request('admin-p1', { kind: 'nuke' }), /back up, schedule, restore or checkpoint/);
   await assert.rejects(b.request('../x', { kind: 'backup' }), /not a drive name/);
 });
 
-test('a restore needs a snapshot the Mac has and the target typed', async () => {
+test('a restore needs the copy the Mac has, or a checkpoint, and the name typed', async () => {
   const dir = await fsp.mkdtemp(path.join(os.tmpdir(), 'console-backups-'));
   await withReport(dir);
   const b = createBackups({ dir });
-  await assert.rejects(b.request('admin-p1', { kind: 'restore', snapshot: '2026-01-01T000000Z', target: 'admin-p1', confirm: 'admin-p1' }), /no snapshot/);
+  await assert.rejects(b.request('admin-p1', { kind: 'restore', snapshot: '2026-01-01T000000Z', target: 'admin-p1', confirm: 'admin-p1' }), /copy is 2026-09-27T185000Z/);
   await assert.rejects(b.request('admin-p1', { kind: 'restore', snapshot: '2026-09-27T185000Z', target: 'admin-p1', confirm: 'admin' }), /type admin-p1/);
   const req = await b.request('admin-p1', { kind: 'restore', snapshot: '2026-09-27T185000Z', target: 'admin-p1', confirm: 'admin-p1' });
   assert.deepEqual([req.kind, req.snapshot, req.target], ['restore', '2026-09-27T185000Z', 'admin-p1']);
+  await assert.rejects(b.request('admin-p1', { kind: 'checkpoint', checkpoint: 'v40', confirm: 'admin-p1' }), /already asked/, 'one restore at a time');
+  await b.withdraw(req.id);
+  await assert.rejects(b.request('admin-p1', { kind: 'checkpoint', checkpoint: '../v40', confirm: 'admin-p1' }), /not a checkpoint/);
+  await assert.rejects(b.request('admin-p1', { kind: 'checkpoint', checkpoint: 'v40', confirm: 'admin' }), /type admin-p1/);
+  const cp = await b.request('admin-p1', { kind: 'checkpoint', checkpoint: 'v40', confirm: 'admin-p1' });
+  assert.deepEqual([cp.kind, cp.checkpoint, cp.target], ['checkpoint', 'v40', 'admin-p1']);
 });
 
 test('the routes: state carries backups, a request is a 202, only from the page', async (t) => {

@@ -76,3 +76,15 @@ covers it), backing up friends' drives, browsing inside a snapshot, Finder.
 `test/backup-agent.test.js` (the agent's decisions against a fake `sprite` and
 fake backup tools), `test-browser/console-backups.test.js` (the view from a
 seeded report), and one real run against t-bryan.
+
+## Revised the same day: one copy, history on Fly, backups after changes
+
+The owner found dated snapshots every 15 minutes too many and too often. Now
+the Mac keeps one copy (`~/Marble Backups/<utc>/`, linked from `~/Marble
+Drive`, carrying `.marble/sync.json`), each backup makes a Fly checkpoint first,
+and a backup is due only after a real change in the drive: 10 quiet minutes
+after it, hourly while changes keep coming, once as it goes to sleep with
+changes. The agent learns of changes from its minute check-in (the newest file
+time outside the ledger and the Console's own files). The view's snapshot list
+became **On the Mac** (the copy, Restore…) and **History on Fly** (checkpoints,
+Restore… as a request the Mac carries out, after checkpointing what is there).

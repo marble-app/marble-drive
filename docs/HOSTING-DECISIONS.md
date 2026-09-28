@@ -398,6 +398,20 @@ admin-p1; that page shows the terminal command for that case instead);
 reaching the Mac from the sprite over Tailscale (a network to run for one
 page). Spec: `docs/superpowers/specs/2026-09-27-backups-in-console-design.md`.
 
+**One copy on the Mac, the history on Fly (2026-09-27).** Dated snapshots
+every 15 minutes looked like a lot (each folder shows 2.2 GB in Finder, though
+all 35 held 2.5 GB), and 15 minutes of being awake is not 15 minutes of work:
+an open tab keeps a sprite awake. The owner asked for one copy, `~/Marble
+Drive` pointing at `~/Marble Backups/<utc>/`, carrying its sync reference, and
+backups only when there is something to back up. So each backup makes a Fly
+checkpoint and replaces the copy, and a backup is due only after a real change:
+10 quiet minutes after it, or hourly while changes keep coming, or once as the
+drive goes to sleep with changes. *Traded:* history now lives on the platform
+that stalled twice, and Sprites' checkpoint store can jam (t-irene, t-sam, and
+t-bryan since 2026-09-28), in which case a copy goes ahead without one and says
+so. The Mac's copy is the part that survives Fly; going further back than it
+needs Fly.
+
 ## Traps worth remembering
 
 | Trap | How it showed up | Lesson |

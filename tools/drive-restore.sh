@@ -4,7 +4,8 @@
 #
 #   tools/drive-restore.sh <snapshot> <sprite> [--org <org>] [--yes]
 #
-# <snapshot> is a snapshot folder, e.g. "~/Marble Backups/admin-p1/latest".
+# <snapshot> is a copy, e.g. "~/Marble Drive" (the link to the newest). Its
+# sync reference (.marble/sync.json) is this Mac's, and stays here.
 # Without --yes it only says what it would do. With it: the host stops; the
 # sprite's /drive is set aside as /drive.before-restore-<utc> (never deleted);
 # the snapshot is copied into a fresh /drive, copying unchanged files from the
@@ -33,7 +34,7 @@ SERVICE=marble-drive
 NOW="$(date -u +%Y%m%dT%H%M%SZ)"
 ASIDE="/drive.before-restore-$NOW"
 DOCS="$(cd "$SNAP" && find . -name '*.mrbl' ! -path './.marble/*' | wc -l | tr -d ' ')"
-FILES="$(cd "$SNAP" && find . -type f | wc -l | tr -d ' ')"
+FILES="$(cd "$SNAP" && find . -type f ! -path ./.marble/sync.json | wc -l | tr -d ' ')"
 say() { printf '==> %s\n' "$*"; }
 on_sprite() { sprite exec -o "$ORG" -s "$SPRITE" --no-stdin -- "$@"; }
 
@@ -50,7 +51,7 @@ say "copying in"
 COPY_DEST=()
 on_sprite test -d "$ASIDE" && COPY_DEST=(--copy-dest="$ASIDE/")
 set +e
-rsync -a ${COPY_DEST[@]+"${COPY_DEST[@]}"} -e "$HERE/sprite-rsh.sh" "$SNAP/" "$SPRITE:/drive/"
+rsync -a --exclude=/.marble/sync.json ${COPY_DEST[@]+"${COPY_DEST[@]}"} -e "$HERE/sprite-rsh.sh" "$SNAP/" "$SPRITE:/drive/"
 code=$?
 set -e
 if [[ $code != 0 ]]; then

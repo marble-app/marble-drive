@@ -178,7 +178,7 @@ so it ships with every deploy; the document is only where it lives.
 |---|---|
 | **Dashboard** (opens on it) | every drive's state over time (running, warm, cold), cost by drive, why each was awake, spend this month and its projection (and a budget, if set), spend per day, when drives are awake (hour × weekday), memory, CPU, agent turns and documents opened; 24 h, 7 days, 30 days or this month; any chart as a table; **Paste a bill** takes Fly's Cost Explorer page and calibrates every estimate to it |
 | **Drives** | every drive, awake or asleep and since when, without waking any; a drive's release, health, Claude (login or key, sign in or out), access (public or private, the passphrase: show, copy, new), settings (`sprite.env`, applied with a restart), checkpoints (make, restore by typing the name), and removing a tester; **New drive** provisions one |
-| **Backups** | the Mac's backups of this drive, as the Mac last reported them: when it last backed up and why, how many are kept, space on the Mac, when it last checked in; warnings when it stops checking in or a backup fails (they mark the tab); **Schedule** on/off and **Back up now**; every snapshot, grouped as kept, each with **Restore…** onto this or another drive (the name typed to confirm); the terminal command for when this drive is down. Buttons leave requests the Mac picks up within a minute (see "Back a drive up here") |
+| **Backups** | the Mac's backup of this drive, as the Mac last reported it: when it last backed up and why, whether changes are waiting and when they will be copied, when the Mac last checked in; warnings when it stops checking in, a backup fails or changes are overdue (they mark the tab); **Schedule** on/off and **Back up now**; **On the Mac**: the one copy (`~/Marble Drive`), its documents, size and matching Fly checkpoint, with **Restore…** onto this or another drive; **History on Fly**: the drive's checkpoints, each with **Restore…** (the Mac does it); names typed to confirm; the terminal command for when this drive is down. Buttons leave requests the Mac picks up within a minute (see "Back a drive up here") |
 | **Ship** | main's recent commits and which drives have them; each drive against main; **Ship** shows the plan (`sprite-deploy.sh --print-plan`) before deploying main to every user and then admin-p1; **Try the workshop on t-bryan** |
 | **Workshop** | both checkouts (branch, head, changes, against origin), pull, run tests, **Publish** marble (the next patch in package.json and both plugin manifests, committed, tagged and pushed, then `npm publish`, which runs marble's guard and unit tests; npm may ask you to approve it). marble-drive needs no change: it depends on `file:../marble`, and a deploy installs the version that checkout declares, and a workshop chat in the Marble Drive or Marble project |
 | **Activity** | every job the console ran, its output streamed and kept |
@@ -231,9 +231,9 @@ admin-p1 (`~/.config/marble-drive/testers.json`), the machine that made it.
 | `… --print-plan` | say what would be deployed, and stop |
 | `… --when-idle` | stage now, switch when no agent is working (always so from the sprite itself); for a drive in use |
 | `tools/sprite-deploy.sh --all [--list]` | every sprite labelled `marble-tester` or `marble-user`; continues past a failure; `--list` only names them |
-| `tools/drive-backup.sh [<sprite>] [--if-changed]` | a dated snapshot of a drive (default admin-p1) in `~/Marble Backups/<sprite>/`; unchanged files hard-linked to the one before, so a run moves and stores only what changed |
+| `tools/drive-backup.sh [<sprite>] [--to <dir>] [--link <path>]` | a Fly checkpoint, then the one copy of a drive (default admin-p1) in `~/Marble Backups/<utc>/`, linked from `~/Marble Drive`; unchanged files hard-linked to the copy before, so a run moves only what changed |
 | `macos/launchd/backup.sh install [<sprite>]` | runs `tools/backup-agent.mjs` every minute and at login; `status`, `run`, `logs`, `uninstall` |
-| `tools/backup-agent.mjs [<sprite>]` | the Mac's half of the Console's Backups view: backs up (`drive-backup.sh --if-changed --every 15`), takes the Console's requests and reports back, touching the sprite only while it is awake |
+| `tools/backup-agent.mjs [<sprite>]` | the Mac's half of the Console's Backups view: backs up after changes (10 quiet minutes, hourly at most), takes the Console's requests and reports back, touching the sprite only while it is awake |
 | `tools/drive-restore.sh <snapshot> <sprite> [--yes]` | puts a snapshot back on a sprite: stops the host, sets `/drive` aside, copies in, starts it, checks `/health` |
 | `tools/drive-pull.sh [<sprite>] [--into <dir>]` | a one-way mirror of a drive (default admin-p1) into this checkout's `drive/`, the last one set aside |
 | `tools/sprite-provision.sh <person> [--agent api\|subscription] [--key-file f] [--local]` | makes `t-<person>`: passphrase, `sprite.env`, optional preloaded key, deploy, public URL, outside check, roster entry, a note to send |
@@ -267,32 +267,42 @@ since that checkpoint, drive included).
 
 **Back a drive up here.** admin-p1 is backed up to the owner's Mac by
 `macos/launchd/backup.sh` (installed 2026-09-27), which runs
-`tools/backup-agent.mjs` every minute. It asks the Sprites API about the
-sprite, which wakes nothing. While the sprite is awake it checks in with its
-Console: it takes the requests the Backups view left in
-`/drive/.marble/console/backups/requests/` (back up, schedule on/off, restore)
-and leaves a report in `/drive/.marble/console/backups/<sprite>.json`. It
-remembers every request it handled and refuses one older than an hour, so a
-restored snapshot cannot replay one. The schedule is a flag on the Mac
-(`.schedule-off`), so turned off it still answers the page. It takes a snapshot
-only when the drive may have changed: the sprite is running and the last one is
-15 minutes old, or it has gone to sleep
-since a snapshot taken while it was awake (one wake, for its last changes), or it
-woke and slept between two runs. Snapshots are whole drives in `~/Marble
-Backups/admin-p1/<utc>/` (`latest` points at the newest); unchanged files are
-hard links, so the first cost 2.2 GB and 80 s and the next 224 KB and 11 s. Kept:
-all of the last day, one a day for 60 days, one a month after. The copy runs
-rsync through `sprite exec` (`tools/sprite-rsh.sh`), taken while the drive is
-live. It is off Fly, unlike checkpoints, and needs the Mac awake: a Mac that
-slept catches up on waking.
+`tools/backup-agent.mjs` every minute. The Mac keeps **one copy**,
+`~/Marble Backups/<utc>/`, and `~/Marble Drive` is a link to it; the history is
+on Fly, as checkpoints. Each backup (`tools/drive-backup.sh`) makes a Fly
+checkpoint (`backup <utc>`), copies the drive into a new `<utc>/` with every
+unchanged file a hard link to the copy before (so only what changed moves),
+points `~/Marble Drive` at it and removes the old one; a failed run leaves the
+old copy and link alone. The copy carries its sync reference in
+`.marble/sync.json`: the drive, when, the Fly checkpoint it matches (or why
+there is none: Sprites' checkpoint store can get stuck, and then the copy goes
+ahead without), documents, files, bytes added.
 
-**Restore a drive from a backup.** `tools/drive-restore.sh "~/Marble
-Backups/admin-p1/<utc>" <sprite>` says what it would do; add `--yes` to do it.
-Onto the same sprite after it lost its drive, or a new one (`sprite-provision.sh`
-or a deploy first, since a backup holds the drive only: `sprite.env`, keys and
-the Claude login are not in it). The drive it replaces is set aside as
-`/drive.before-restore-<utc>`. Conversations come back readable; their Claude
-sessions lived on the old machine.
+When: the agent asks the Sprites API about the sprite every minute, which wakes
+nothing. Only while it is running does it look inside, once: the newest real
+change in the drive (its usage ledger and the Console's files are not changes)
+and the Console's requests. It backs up only after a change: once the drive has
+been quiet for 10 minutes, every hour while changes keep coming, or once when
+it goes to sleep with changes not yet copied (the one wake). Awake and
+untouched, however long, it copies nothing. It leaves a report in
+`/drive/.marble/console/backups/<sprite>.json` and takes requests from
+`requests/` (back up, schedule on/off, put the copy on a drive, restore a Fly
+checkpoint), remembering every one it handled and refusing one older than an
+hour, so a restore cannot replay one. The schedule is a flag on the Mac
+(`~/Marble Backups/.schedule-off`), so turned off it still answers the page.
+The copy runs rsync through `sprite exec` (`tools/sprite-rsh.sh`), taken while
+the drive is live, and needs the Mac awake: a Mac that slept catches up on
+waking.
+
+**Restore a drive from a backup.** From the Console's Backups view, or:
+`tools/drive-restore.sh "$HOME/Marble Drive" <sprite>` says what it would do;
+add `--yes` to do it. Onto the same sprite after it lost its drive, or a new
+one (`sprite-provision.sh` or a deploy first, since a backup holds the drive
+only: `sprite.env`, keys and the Claude login are not in it). The drive it
+replaces is set aside as `/drive.before-restore-<utc>`. Conversations come back
+readable; their Claude sessions lived on the old machine. To go further back,
+restore one of Fly's checkpoints (the whole machine: drive, code, settings);
+from the Backups view the Mac does it, after checkpointing what is there now.
 
 **Mirror a drive here.** `tools/drive-pull.sh` (admin-p1 into this
 checkout's `drive/`; `<sprite>` and `--into <dir>` for others). Stop the local

@@ -8,7 +8,7 @@
 #   macos/launchd/backup.sh uninstall            stop scheduling; the backups stay
 #   macos/launchd/backup.sh logs                 follow the log
 #
-# The snapshots are in ~/Marble Backups/<sprite>/. The Console's Backups view
+# The copy is ~/Marble Backups/<utc>/, linked from ~/Marble Drive. The Console's Backups view
 # on the sprite turns the schedule on or off, backs up and restores; so does
 # tools/drive-restore.sh from here.
 
@@ -37,14 +37,20 @@ install)
   launchctl bootout "$domain/$label" 2>/dev/null
   launchctl enable "$domain/$label" 2>/dev/null
   launchctl bootstrap "$domain" "$plist" || { print -u2 "backup: launchctl bootstrap failed"; exit 1 }
-  print -r -- "backing up $sprite every 15 min into ~/Marble Backups/$sprite, and checking in with its Console every minute (log: $log)"
+  print -r -- "backing up $sprite into ~/Marble Drive after changes, and checking in with its Console every minute (log: $log)"
   ;;
 
 status)
   if [[ ! -f $plist ]]; then print -r -- "not installed — run: macos/launchd/backup.sh install"; exit 1; fi
   print -r -- "label    $label ($(launchctl print "$domain/$label" >/dev/null 2>&1 && print loaded || print 'not loaded'))"
   print -r -- "sprite   $(sprite_of)"
-  "$repo/tools/drive-backup.sh" --list "$(sprite_of)" | tail -4 | sed 's/^/  /'
+  if [[ -L "$HOME/Marble Drive" ]]; then
+    print -r -- "copy     ~/Marble Drive -> $(readlink "$HOME/Marble Drive" | sed "s#^$HOME#~#")"
+    print -r -- "         $(cat "$HOME/Marble Drive/.marble/sync.json" 2>/dev/null)"
+  else
+    print -r -- "copy     none yet"
+  fi
+  [[ -f "$HOME/Marble Backups/.schedule-off" ]] && print -r -- "schedule off (turn it on from the Console's Backups view)"
   print -r -- "log      $log"
   tail -5 "$log" 2>/dev/null | sed 's/^/  /'
   ;;
@@ -56,7 +62,7 @@ run)
 uninstall)
   launchctl bootout "$domain/$label" 2>/dev/null
   rm -f "$plist"
-  print -r -- "uninstalled. The backups stay in ~/Marble Backups"
+  print -r -- "uninstalled. The copy stays in ~/Marble Backups"
   ;;
 
 logs)

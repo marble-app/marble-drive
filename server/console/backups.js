@@ -14,6 +14,7 @@ import path from 'node:path';
 const NAME = /^[a-z0-9][a-z0-9-]{0,62}$/;
 const SNAPSHOT = /^\d{4}-\d{2}-\d{2}T\d{6}Z$/;
 const ID = /^[A-Za-z0-9-]{1,64}$/;
+const CHECKPOINT = /^v\d{1,9}$/;
 
 const bad = (message, status = 400) => Object.assign(new Error(message), { status });
 
@@ -71,19 +72,31 @@ export function createBackups({ dir, now = () => Date.now() }) {
         Object.assign(req, { kind: 'schedule', on: body.on });
         break;
       case 'restore': {
+        // The Mac keeps one copy; a restore names it, so a copy replaced in
+        // the meantime is not the one put back.
         const snapshot = String(body.snapshot ?? '');
         const target = String(body.target ?? '');
-        if (!SNAPSHOT.test(snapshot) || !report.snapshots?.some((s) => s.name === snapshot)) throw bad(`the Mac has no snapshot ${snapshot}`);
+        if (!SNAPSHOT.test(snapshot) || report.copy?.name !== snapshot) throw bad(`the Mac's copy is ${report.copy?.name ?? 'missing'}, not ${snapshot}`);
         if (!NAME.test(target)) throw bad('not a drive name');
         if (body.confirm !== target) throw bad(`type ${target} to confirm`);
         Object.assign(req, { kind: 'restore', snapshot, target });
         break;
       }
+      case 'checkpoint': {
+        // Restoring the drive this page is on stops it, so the Mac does it.
+        const checkpoint = String(body.checkpoint ?? '');
+        if (!CHECKPOINT.test(checkpoint)) throw bad('not a checkpoint');
+        if (body.confirm !== sprite) throw bad(`type ${sprite} to confirm`);
+        Object.assign(req, { kind: 'checkpoint', checkpoint, target: sprite });
+        break;
+      }
       default:
-        throw bad('back up, schedule or restore');
+        throw bad('back up, schedule, restore or checkpoint');
     }
-    // One of a kind at a time: pressing twice leaves one request.
-    const same = (await pending()).find((q) => q.sprite === sprite && q.kind === req.kind);
+    // One at a time of a kind, and one restore of either kind: pressing twice
+    // leaves one request.
+    const restoring = (k) => (k === 'restore' || k === 'checkpoint' ? 'restore' : k);
+    const same = (await pending()).find((q) => q.sprite === sprite && restoring(q.kind) === restoring(req.kind));
     if (same) throw bad(`already asked ${Math.round((now() - Date.parse(same.at)) / 1000)} s ago; the Mac picks it up within a minute`, 409);
     await fsp.mkdir(requestsDir, { recursive: true });
     const file = path.join(requestsDir, `${req.id}.json`);

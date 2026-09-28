@@ -1004,21 +1004,28 @@
 
   // --------------------------------------------------------------- backups
   //
-  // Backups kept on the owner's Mac (tools/drive-backup.sh), as the Mac last
-  // reported them. Nothing here reaches the Mac: a button leaves a request, the
-  // Mac picks it up within a minute while this drive is awake, and its next
-  // report says how it went.
+  // The owner's Mac keeps one copy of this drive and makes a Fly checkpoint
+  // each time it copies (tools/drive-backup.sh), as the Mac last reported it.
+  // Nothing here reaches the Mac: a button leaves a request, the Mac picks it
+  // up within a minute while this drive is awake, and its next report says how
+  // it went. The history is Fly's checkpoints, read the way Drives reads them.
 
   const snapAt = (name) => {
     const m = /^(\d{4})-(\d{2})-(\d{2})T(\d{2})(\d{2})(\d{2})Z$/.exec(String(name ?? ''));
     return m ? Date.UTC(+m[1], +m[2] - 1, +m[3], +m[4], +m[5], +m[6]) : null;
   };
-  const snapWhen = (name) => {
-    const t = snapAt(name);
-    return t ? new Date(t).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' }) : name;
+  const BACKUP_WHY = {
+    'quiet after changes': 'after changes went quiet',
+    'hourly while working': 'an hour into changes',
+    'went to sleep with changes': 'as it went to sleep',
+    'asked from the Console': 'asked from here',
+    'after a restore': 'after a restore',
+    'first backup': 'the first',
+    asked: 'asked',
   };
-  const BACKUP_WHY = { running: 'while awake', 'asked from the Console': 'asked from here', asked: 'asked', 'first backup': 'first' };
-  const whyText = (why) => (why ? BACKUP_WHY[why] ?? (/^asleep since/.test(why) ? 'last changes before it slept' : /^woke at/.test(why) ? 'after a short wake' : why) : '');
+  const whyText = (why) => (why ? BACKUP_WHY[why] ?? why : '');
+  // The Mac names copies by their UTC stamp; the page says the time.
+  const snapNames = (text) => String(text ?? '').replace(/\d{4}-\d{2}-\d{2}T\d{6}Z/g, (n) => clock(snapAt(n)));
 
   /** What the owner should know about a drive's backups, worst first. Only
    *  once this page has been open a few minutes: a drive that just woke has
@@ -1027,11 +1034,11 @@
     const out = [];
     const settled = Date.now() - S.openedAt > 3 * MIN;
     const heard = Date.parse(r.heardAt);
-    if (r.last && !r.last.ok) out.push(['bad', `The last backup failed ${since(r.last.at)}: ${r.last.error ?? 'no reason given'}`]);
+    if (r.last && !r.last.ok) out.push(['bad', `The last backup failed ${since(r.last.at)}: ${snapNames(r.last.error) || 'no reason given'}`]);
     if (settled && S.live === 'on' && Date.now() - heard > 5 * MIN) {
       out.push(['warn', `${r.machine} has not checked in since ${clock(heard)}. It is asleep, off, or cannot reach this drive; backups carry on when it can.`]);
-    } else if (settled && r.schedule === 'on' && r.last?.ok && Date.now() - Date.parse(r.last.at) > (r.every + 10) * MIN) {
-      out.push(['warn', `No backup since ${clock(r.last.at)}, though ${r.machine} is checking in.`]);
+    } else if (settled && r.schedule === 'on' && r.changes?.next && Date.now() - Date.parse(r.changes.next) > 5 * MIN) {
+      out.push(['warn', `Changes since ${clock(r.changes.since)} are not backed up yet, though ${r.machine} is checking in.`]);
     }
     if (r.schedule === 'off') out.push(['warn', 'The schedule is off: only a backup asked for here is taken.']);
     return out;
@@ -1039,9 +1046,8 @@
 
   const requestLabel = (q) => (q.kind === 'backup' ? 'Back up now'
     : q.kind === 'schedule' ? (q.on ? 'Turn the schedule on' : 'Turn the schedule off')
-      : q.kind === 'restore' ? `Restore ${clock(snapAt(q.snapshot))} onto ${q.target}` : q.kind);
-  // The Mac names snapshots by their UTC stamp; the page says the time.
-  const snapNames = (text) => String(text ?? '').replace(/\d{4}-\d{2}-\d{2}T\d{6}Z/g, (n) => clock(snapAt(n)));
+      : q.kind === 'restore' ? `Put the copy from ${clock(snapAt(q.snapshot))} on ${q.target}`
+        : q.kind === 'checkpoint' ? `Restore ${q.target ?? 'it'} to checkpoint ${q.checkpoint}` : q.kind);
 
   async function askMac(key, sprite, body) {
     try {
@@ -1056,7 +1062,9 @@
 
   function drawBackups() {
     const worries = S.backups.map((r) => backupWorries(r));
-    if (!changed('backups', [S.backups, worries, S.fleet.map((d) => d.name), S.allSnapshots, notes('backup'), S.live, S.arrived.has('backups')])) return;
+    for (const r of S.backups) loadCheckpoints(r.sprite);
+    const history = S.backups.map((r) => S.checkpoints.get(r.sprite) ?? null);
+    if (!changed('backups', [S.backups, worries, history, S.fleet.map((d) => d.name), S.allSnapshots, notes('backup'), S.live, S.arrived.has('backups')])) return;
     const still = S.arrived.has('backups');
     S.arrived.add('backups');
     if (!S.backups.length) {
@@ -1073,13 +1081,14 @@
   function backupCards(r, worries, i) {
     const pending = r.pending ?? [];
     const waiting = (kind) => pending.find((q) => q.kind === kind);
-    const busy = (kind) => waiting(kind) || (r.results ?? []).find((x) => x.kind === kind && x.state === 'running');
+    const busy = (...kinds) => pending.find((q) => kinds.includes(q.kind)) || (r.results ?? []).find((x) => kinds.includes(x.kind) && x.state === 'running');
     const key = (what) => `backup:${r.sprite}:${what}`;
-    const snaps = r.snapshots ?? [];
+    const c = r.copy;
+    const rule = r.rule ?? { quiet: 10, most: 60 };
 
     const schedule = segmented([['on', 'On'], ['off', 'Off']], waiting('schedule') ? (waiting('schedule').on ? 'on' : 'off') : r.schedule,
       (v) => { if (v !== r.schedule && !waiting('schedule')) askMac(key('schedule'), r.sprite, { kind: 'schedule', on: v === 'on' }); },
-      { small: true, busy: Boolean(waiting('schedule')), label: 'Backups on a schedule' });
+      { small: true, busy: Boolean(waiting('schedule')), label: 'Back up after changes' });
     const now = h('button.btn', {
       type: 'button',
       'data-busy': busy('backup') ? true : null,
@@ -1090,9 +1099,11 @@
 
     const stats = h('p.stat-line', {},
       r.last ? h('span', {}, 'Last backup ', h('b', { text: since(r.last.at) }), r.last.ok && r.last.why ? ` · ${whyText(r.last.why)}` : null) : h('span', { text: 'No backup yet' }),
-      h('span', {}, h('b', { text: String(snaps.length) }), ' kept'),
-      r.disk?.used ? h('span', {}, h('b', { text: bytes(r.disk.used) }), ` on the Mac${r.disk.free ? `, ${bytes(r.disk.free)} free` : ''}`) : null,
       h('span', {}, `${r.machine} checked in `, h('b', { text: since(r.heardAt) })));
+    const changes = r.changes?.waiting
+      ? h('p.soft', { style: { margin: '0 0 .6rem', 'font-size': '.88rem' } }, `Changes since ${clock(r.changes.since)}. `,
+        r.changes.next ? `Backed up about ${clock(r.changes.next)}, once they have been quiet for ${rule.quiet} minutes (at most an hour after the last backup).` : 'Backed up at the next check-in.')
+      : r.copy ? h('p.soft', { style: { margin: '0 0 .6rem', 'font-size': '.88rem' }, text: 'No changes since the last backup, so none is due.' }) : null;
 
     const asks = pending.map((q) => h('li', {},
       h('span.sha', { text: 'waiting' }),
@@ -1105,91 +1116,110 @@
       h('span.subject', { title: snapNames(x.note), text: `${requestLabel(x)}${x.note ? ` — ${snapNames(x.note.split('\n').at(-1))}` : ''}` }),
       h('span.where', { text: since(x.at) })));
 
-    const main = h('div.card.wide', { style: { '--i': String(i * 3) } },
-      h('div.card-head', {}, h('h2', { text: r.sprite }), h('span.soft', { text: `backed up to ${r.machine}, ${r.to}` }),
-        h('div.end', {}, h('span.soft', { style: { 'font-size': '.8rem', 'align-self': 'center' }, text: `Every ${r.every} min` }), schedule, now)),
+    const main = h('div.card.wide', { style: { '--i': String(i * 4) } },
+      h('div.card-head', {}, h('h2', { text: r.sprite }), h('span.soft', { text: `backed up to ${r.machine}` }),
+        h('div.end', {}, h('span.soft', { style: { 'font-size': '.8rem', 'align-self': 'center' }, text: `After ${rule.quiet} quiet minutes, hourly at most` }), schedule, now)),
       h('div.card-body', {},
         stats,
+        changes,
         worries.map(([tone, text]) => h(`p.${tone}`, { style: { margin: '0 0 .5rem', 'font-size': '.88rem' }, text })),
         asks.length || done.length ? h('ul.commits', {}, asks, done) : null,
-        said(key('backup')), said(key('schedule')), said(key('withdraw')), said(key('restore'))));
+        said(key('backup')), said(key('schedule')), said(key('withdraw')), said(key('restore')), said(key('checkpoint'))));
 
-    // Grouped the way they are kept: every one from today, then a day each,
-    // then a month each.
-    const groups = [];
-    const today = new Date().toDateString();
-    const yesterday = new Date(Date.now() - 86_400_000).toDateString();
-    for (const snap of snaps) {
-      const t = new Date(snapAt(snap.name));
-      const old = Date.now() - t.getTime() > 60 * 86_400_000;
-      const label = old ? t.toLocaleDateString([], { month: 'long', year: 'numeric' })
-        : t.toDateString() === today ? 'Today' : t.toDateString() === yesterday ? 'Yesterday'
-          : t.toLocaleDateString([], { weekday: 'short', month: 'short', day: 'numeric' });
-      if (groups.at(-1)?.label !== label) groups.push({ label, snaps: [] });
-      groups.at(-1).snaps.push(snap);
-    }
-    const LIMIT = 8;
-    let shown = 0;
-    const lists = [];
-    for (const g of groups) {
-      const room = S.allSnapshots ? g.snaps.length : Math.max(0, Math.min(g.snaps.length, LIMIT * 2 - shown));
-      if (!room) break;
-      shown += room;
-      lists.push(h('h3.snap-group', { text: g.label }), h('ul.commits.snaps', {}, g.snaps.slice(0, room).map((snap) => h('li', {},
-        h('span.sha', { text: snapWhen(snap.name) }),
-        h('span.subject', { text: [snap.documents !== null ? `${snap.documents} documents` : null, snap.added !== null ? `+${bytes(snap.added)}` : null, whyText(snap.why)].filter(Boolean).join(' · ') || snap.name }),
-        h('button.btn.quiet', { type: 'button', style: { padding: '.05rem .5rem' }, text: 'Restore…', disabled: busy('restore') ? true : null, onclick: (e) => restoreSnapshot(e.currentTarget, r, snap) })))));
-    }
-    const more = snaps.length > shown || S.allSnapshots ? h('button.btn.quiet', {
-      type: 'button',
-      text: S.allSnapshots ? 'Show fewer' : `Show all ${snaps.length}`,
-      onclick: () => { S.allSnapshots = !S.allSnapshots; paint(); },
-    }) : null;
-    const list = h('div.card.wide', { style: { '--i': String(i * 3 + 1) } },
-      h('div.card-head', {}, h('h2', { text: 'Snapshots' }), h('span.note', { text: 'every one from the last day, then one a day for 60 days, then one a month' })),
-      h('div.card-body', {}, snaps.length ? lists : h('p.soft', { text: 'None yet.' }), more));
+    const copyCard = h('div.card', { style: { '--i': String(i * 4 + 1) } },
+      h('div.card-head', {}, h('h2', { text: 'On the Mac' }), h('span.note', { text: 'one copy, replaced each time' })),
+      h('div.card-body', {}, c ? [
+        h('p.lede', {}, h('b', { text: r.link ?? '~/Marble Drive' }), h('span.faint', { text: ` → ${c.path}` })),
+        h('p.stat-line', { style: { margin: '.5rem 0 .6rem' } },
+          h('span', {}, 'From ', h('b', { text: clock(snapAt(c.name)) })),
+          c.documents !== null && c.documents !== undefined ? h('span', {}, h('b', { text: String(c.documents) }), ' documents') : null,
+          r.disk?.used ? h('span', {}, h('b', { text: bytes(r.disk.used) }), r.disk.free ? `, ${bytes(r.disk.free)} free` : '') : null,
+          c.checkpoint ? h('span', {}, 'matches Fly checkpoint ', h('b', { text: c.checkpoint })) : null),
+        c.checkpointError ? h('p.warn', { style: { margin: '0 0 .6rem', 'font-size': '.82rem' }, text: `No Fly checkpoint with this copy: ${c.checkpointError}` }) : null,
+        h('div.row-actions', {}, h('button.btn.quiet', { type: 'button', text: 'Restore…', style: { 'margin-left': '-.85rem' }, disabled: busy('restore', 'checkpoint') ? true : null, onclick: (e) => restoreCopy(e.currentTarget, r) })),
+      ] : h('p.soft', { text: 'No copy yet: the first comes at the next check-in.' })));
 
-    const down = h('div.card.wide', { style: { '--i': String(i * 3 + 2) } },
+    const cps = S.checkpoints.get(r.sprite);
+    const list = cps?.list ?? null;
+    const LIMIT = 10;
+    const shown = list ? (S.allSnapshots ? list : list.slice(0, LIMIT)) : [];
+    const historyCard = h('div.card', { style: { '--i': String(i * 4 + 2) } },
+      h('div.card-head', {}, h('h2', { text: 'History on Fly' }), h('span.note', { text: list ? `${list.length} checkpoints` : 'checkpoints' })),
+      h('div.card-body', {},
+        !list ? h('p.loading', { text: 'Reading…' })
+          : !list.length ? h('p.soft', { text: cps.error ?? 'None yet.' })
+            : h('ul.commits.snaps', {}, shown.map((cp) => {
+              const ours = /^backup \d{4}-/.test(cp.comment ?? '');
+              return h('li', {},
+                h('span.sha', { text: cp.id }),
+                h('span.subject', { title: cp.comment ?? '', text: ours ? `Backup${c?.checkpoint === cp.id ? ' · the copy on the Mac' : ''}` : (cp.comment || 'no comment') }),
+                h('span', { style: { display: 'flex', gap: '.5rem', 'align-items': 'baseline' } },
+                  h('span.where', { text: clock(cp.at) }),
+                  h('button.btn.quiet', { type: 'button', style: { padding: '.05rem .5rem' }, text: 'Restore…', disabled: busy('restore', 'checkpoint') ? true : null, onclick: (e) => restoreCheckpoint(e.currentTarget, r, cp) })));
+            })),
+        list && list.length > LIMIT ? h('button.btn.quiet', { type: 'button', text: S.allSnapshots ? 'Show fewer' : `Show all ${list.length}`, onclick: () => { S.allSnapshots = !S.allSnapshots; paint(); } }) : null));
+
+    const down = h('div.card.wide', { style: { '--i': String(i * 4 + 3) } },
       h('div.card-head', {}, h('h2', { text: `If ${r.sprite} is down` })),
       h('div.card-body', {},
-        h('p.soft', { style: { margin: '0 0 .25rem', 'font-size': '.88rem' }, text: `This page lives on ${r.sprite}, so it goes with it. On ${r.machine}, in the marble-drive checkout, put the newest snapshot back (on a new drive, deploy it first):` }),
-        codeLine(`tools/drive-restore.sh "${r.to.replace(/^~/, '$HOME')}/latest" ${r.sprite} --yes`)));
-    return [main, list, down];
+        h('p.soft', { style: { margin: '0 0 .25rem', 'font-size': '.88rem' }, text: `This page lives on ${r.sprite}, so it goes with it. On ${r.machine}, in the marble-drive checkout, put the copy back (on a new drive, deploy it first):` }),
+        codeLine(`tools/drive-restore.sh "${(r.link ?? '~/Marble Drive').replace(/^~/, '$HOME')}" ${r.sprite} --yes`)));
+    return [main, copyCard, historyCard, down];
   }
 
-  function restoreSnapshot(trigger, r, snap) {
+  /** A popover that asks for a name typed before it will do anything. */
+  function typedPop(trigger, { title, sub, choose = null, explain, run }) {
     openPop(trigger, (close) => {
-      const names = [r.sprite, ...S.fleet.map((d) => d.name).filter((n) => n !== r.sprite)];
-      let target = r.sprite;
-      const select = h('select', {}, names.map((n) => h('option', { value: n, text: n === r.sprite ? `${n} (where it came from)` : n })));
+      let target = choose?.names?.[0] ?? choose?.fixed;
+      const select = choose?.names ? h('select', {}, choose.names.map((n, j) => h('option', { value: n, text: j === 0 ? `${n} (where it came from)` : n }))) : null;
       const body = h('p.soft', { style: { 'font-size': '.85rem' } });
       const input = h('input', { type: 'text', autocomplete: 'off', spellcheck: 'false', 'aria-label': 'Type the drive to confirm' });
       const label = h('label');
       const go = h('button.btn.danger.primary', { type: 'button', disabled: true });
-      const when = clock(snapAt(snap.name));
       const redraw = () => {
-        const here = target === (S.self ?? '');
-        body.textContent = `${target}'s host stops, its drive as it is now is set aside on the sprite (kept, never deleted), the snapshot from ${when} goes in, and it starts again. ${here ? 'That is this drive: this page goes away for a few minutes and comes back on the restored drive, and any agent working here is stopped.' : ''} ${r.machine} does it, within a minute.`;
+        body.textContent = explain(target);
         label.textContent = `Type ${target} to confirm`;
         input.placeholder = target;
         go.textContent = `Restore ${target}`;
         go.disabled = input.value.trim() !== target;
       };
-      select.addEventListener('change', () => { target = select.value; redraw(); });
+      select?.addEventListener('change', () => { target = select.value; redraw(); });
       input.addEventListener('input', redraw);
       input.addEventListener('keydown', (e) => { if (e.key === 'Enter' && !go.disabled) go.click(); });
       go.addEventListener('click', () => {
         close();
-        askMac(`backup:${r.sprite}:restore`, r.sprite, { kind: 'restore', snapshot: snap.name, target, confirm: input.value.trim() });
+        run(target, input.value.trim());
       });
       redraw();
       return h('div.pop-body', {},
-        h('h4', { text: `Restore the snapshot from ${when}?` }),
-        snap.documents !== null ? h('p.faint', { style: { 'font-size': '.8rem', margin: '-.2rem 0 .6rem' }, text: `${snap.documents} documents, ${since(snapAt(snap.name))}` }) : null,
-        h('div.field', {}, h('label', { text: 'Onto' }), select),
+        h('h4', { text: title }),
+        sub ? h('p.faint', { style: { 'font-size': '.8rem', margin: '-.2rem 0 .6rem' }, text: sub }) : null,
+        select ? h('div.field', {}, h('label', { text: 'Onto' }), select) : null,
         body,
         h('div.field', {}, label, input),
         h('div.foot', {}, h('button.btn.quiet', { type: 'button', text: 'Cancel', onclick: close }), go));
+    });
+  }
+
+  function restoreCopy(trigger, r) {
+    const c = r.copy;
+    const when = clock(snapAt(c.name));
+    typedPop(trigger, {
+      title: `Put the copy from ${when} back?`,
+      sub: c.documents !== null && c.documents !== undefined ? `${c.documents} documents, ${since(snapAt(c.name))}` : null,
+      choose: { names: [r.sprite, ...S.fleet.map((d) => d.name).filter((n) => n !== r.sprite)] },
+      explain: (target) => `${target}'s host stops, its drive as it is now is set aside on the sprite (kept, never deleted), the copy from ${when} goes in, and it starts again. Only the drive: its code and settings stay. ${target === (S.self ?? '') ? 'That is this drive: this page goes away for a few minutes, and any agent working here is stopped. ' : ''}${r.machine} does it, within a minute.`,
+      run: (target, confirm) => askMac(`backup:${r.sprite}:restore`, r.sprite, { kind: 'restore', snapshot: c.name, target, confirm }),
+    });
+  }
+
+  function restoreCheckpoint(trigger, r, cp) {
+    typedPop(trigger, {
+      title: `Restore ${r.sprite} to ${cp.id}?`,
+      sub: `${cp.comment || 'no comment'} · ${clock(cp.at)}`,
+      choose: { fixed: r.sprite },
+      explain: (target) => `The whole of ${target} goes back to ${clock(cp.at)}: its drive, its code and its settings. A checkpoint of it as it is now is made first, so this can be undone the same way. ${target === (S.self ?? '') ? 'This page goes away for a few minutes, and any agent working here is stopped. ' : ''}${r.machine} does it, within a minute.`,
+      run: (target, confirm) => askMac(`backup:${r.sprite}:checkpoint`, r.sprite, { kind: 'checkpoint', checkpoint: cp.id, confirm }),
     });
   }
 
