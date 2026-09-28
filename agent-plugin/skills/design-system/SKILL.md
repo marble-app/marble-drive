@@ -134,6 +134,35 @@ over a 20px blur, or a sheet at 88% over 24px, with `--edge-lit` along the top.
 A popover hangs under the button that opened it and grows from the nearest
 corner. It is never a sheet at the far edge of the window.
 
+**A tip says what a press will do.** Give a tooltip to a control that has no word,
+or whose word does not say it all: an icon button, a toggle, a meter. The tip
+names the action verb first, in a few words, and adds the key that does it too
+(`Archive this chat` then `<kbd>E</kbd>`). On a toggle it says what the toggle is
+now and what a press makes it (`Kept open · press to let it close`). On a meter
+it says what the bar cannot (`As of 12:19 PM · Resets today, 4:29 PM`). A button
+that already shows its word gets no tip, because a tip that repeats the label
+is noise.
+
+- **Look.** Draw it yourself, never with `title=`, because the browser's
+  version brings its own delay, type and scheme. Use a `--card` card with a 1px
+  `--line` border, radius 8, `--shadow-rest`, 12.5px/1.35 in `--ink`, padding
+  6px 10px. Keep it to one line, 16rem at most, with no arrow.
+- **Place.** 8px above the control and centred on it, kept 8px inside the
+  window. It goes below when there is no room above. Put it in the top layer
+  (`popover="manual"`) where panes are stacking contexts.
+- **Timing.** It shows after a 750ms rest, so a pointer crossing a bar does not
+  strobe it. It shows at once on keyboard focus. It enters with a 140ms fade and
+  a 3px rise. It leaves at once on pointer leave, press or blur.
+- **Behaviour.** `pointer-events: none`, `role="tooltip"`, and
+  `aria-describedby` on the control. Mark it `data-marble-transient` when a
+  script builds it.
+- **Touch.** A finger has no hover, so no tip is shown to one. A tip is never
+  the only place a thing is said: its words also live in a label, a menu line or
+  a setting.
+
+The page's "The tooltip" component (`c-tip`) is live: rest on it to see the
+timing.
+
 **A finger is not a mouse.** Targets are 44pt, grouped-list rows 48pt. No menu
 may be reachable only by hover. Every hover reveal has a `:focus-within` twin
 and a `hover: none` answer. Measure heights against the visual viewport. A tap
@@ -178,7 +207,8 @@ the reason instead of the rule.
    stay media queries.
 8. Every fact in one attribute, and every look derived from it. Page-only state
    is a `marble-` class or a declared page-only attribute, never an op.
-9. Icons are drawn: SVG in `currentColor`, 20 inside a 44 hit box.
+9. Icons are drawn: SVG in `currentColor`, 20 inside a 44 hit box. An icon with
+   no word gets a tip that says what a press does, and the key.
 10. Reasons above rules.
 11. Affordances with their history part, and Mod+Z bound.
 12. Dragged things track one to one and spring on release.

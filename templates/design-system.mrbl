@@ -1085,6 +1085,11 @@ __ICON__
           <span class="from" data-marble-id="i-15f">Agents on a phone</span>
           <p class="rb" data-marble-id="i-15b" data-marble-editable>What the stack is, said one time, over the Full. A three-pixel track on the right edge: in on the way down, out six hundred milliseconds after the spring lands — there while the hand is, gone while you read.</p>
         </li>
+        <li class="rule" data-marble-id="i-16" data-marble-removable>
+          <p class="rt" data-marble-id="i-16t" data-marble-editable>A tip says what a press will do.</p>
+          <span class="from" data-marble-id="i-16f">Agents · the composer</span>
+          <p class="rb" data-marble-id="i-16b" data-marble-editable>An icon has no word, so it borrows one when the pointer rests on it: what pressing it does, the key that does it too, and on a toggle which way it is now. It waits for a rest so a pointer crossing the bar does not strobe it, leaves the moment the hand does, and never catches a click. It is a hint, never the only place a thing is said, because a finger has no hover.</p>
+        </li>
       </ol>
 
       <h3 data-marble-id="int-h-hold" data-marble-editable>Hold, drag, let go</h3>
@@ -1284,6 +1289,58 @@ __ICON__
           <p data-marble-id="c-pop-n1" data-marble-editable>Hung under the button that summons it, never a sheet across the far edge of the window. It materialises rather than fades: it stays in the render tree, invisible and unreachable when closed, and grows from the corner nearest its trigger. The shortcut is learned here, because the menu is where you look when you do not know.</p>
           <p class="dim" data-marble-id="c-pop-n2">card 88% + blur 24 · radius 14 · shadow-lift · scale .94→1 with opacity, 200ms</p>
           <p class="from" data-marble-id="c-pop-n3"><b>From</b> Drive, Agents</p>
+        </div>
+      </div>
+
+      <h3 data-marble-id="c-tip-h" data-marble-editable>The tooltip</h3>
+      <div class="spec" data-marble-id="c-tip">
+        <style data-marble-id="tip-css">
+  /* ------------------------------------------------------------ tooltip
+     A tip is a small card resting above the thing it names. It is drawn, not
+     the browser's title=, whose delay, type and scheme are not the page's. It
+     waits for a rest before it rises, so a pointer crossing a bar does not
+     strobe it, and it leaves at once, because a hint still on screen after the
+     hand has gone is in the way. It never takes the pointer. */
+  .tips { display: flex; flex-wrap: wrap; justify-content: center; align-items: center; gap: 1.4rem 2rem; padding-top: 3rem; }
+  .tipped { position: relative; display: inline-flex; align-items: center; border-radius: var(--r-sm); }
+  .tipped:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; }
+  .tip {
+    position: absolute; bottom: calc(100% + 8px); left: 50%; z-index: 7;
+    padding: 6px 10px; max-width: 16rem; white-space: nowrap;
+    font-size: 12.5px; line-height: 1.35; font-weight: 400; color: var(--ink);
+    background: var(--card); border: 1px solid var(--line); border-radius: var(--r-sm);
+    box-shadow: var(--shadow-rest); pointer-events: none;
+    visibility: hidden; opacity: 0; transform: translate(-50%, 3px);
+    transition: opacity var(--t-fast) var(--snap), transform var(--t-fast) var(--snap), visibility 0s linear var(--t-fast);
+  }
+  .tip kbd { margin-left: .4rem; }
+  .tipped:hover > .tip {
+    visibility: visible; opacity: 1; transform: translate(-50%, 0);
+    transition: opacity 140ms var(--ease-out) 750ms, transform 140ms var(--ease-out) 750ms, visibility 0s linear 750ms;
+  }
+  /* A key has already chosen the control, so it does not wait. */
+  .tipped:focus-visible > .tip, .tipped:has(:focus-visible) > .tip {
+    visibility: visible; opacity: 1; transform: translate(-50%, 0);
+    transition: opacity 140ms var(--ease-out), transform 140ms var(--ease-out), visibility 0s;
+  }
+  /* A press is the hand answering the question, so the tip gets out of the way. */
+  .tipped:active > .tip { visibility: hidden; opacity: 0; transition: none; }
+  /* A finger has no hover, and a tip it cannot dismiss would sit there. */
+  @media (hover: none) { .tipped:hover > .tip { visibility: hidden; opacity: 0; } }
+  @media (prefers-reduced-motion: reduce) { .tip, .tipped:hover > .tip { transform: translate(-50%, 0); } }
+        </style>
+        <div class="show" data-marble-id="c-tip-show">
+          <div class="tips" data-marble-id="tips">
+            <span class="tipped" data-marble-id="tt-1"><button type="button" class="btn-icon" aria-label="Archive" aria-describedby="tip-archive" data-marble-id="tt-1b"><svg viewBox="0 0 20 20" aria-hidden="true"><path d="M3.5 5.5h13v3h-13zM4.5 8.5v7h11v-7M8 11.5h4" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg></button><span class="tip" role="tooltip" id="tip-archive" data-marble-id="tt-1t" data-marble-editable>Archive this chat<kbd>E</kbd></span></span>
+            <span class="tipped" data-marble-id="tt-2"><button type="button" class="btn-icon" aria-label="Keep open" aria-pressed="true" aria-describedby="tip-keep" data-marble-id="tt-2b"><svg viewBox="0 0 20 20" aria-hidden="true"><path d="M7.5 3.5h5l-.8 4.5 2.8 2.5v1.2h-9v-1.2l2.8-2.5zM10 11.7v4.8" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg></button><span class="tip" role="tooltip" id="tip-keep" data-marble-id="tt-2t" data-marble-editable>Kept open · press to let it close</span></span>
+            <span class="tipped" tabindex="0" aria-describedby="tip-usage" data-marble-id="tt-3"><span class="meter" style="--w: 1%" data-marble-id="tt-3m"><span class="meter-label">Claude</span><span class="meter-bar"><i class="meter-fill"></i></span><span class="meter-num">1%</span></span><span class="tip" role="tooltip" id="tip-usage" data-marble-id="tt-3t" data-marble-editable>As of 12:19 PM · Resets today, 4:29 PM</span></span>
+          </div>
+        </div>
+        <div class="notes" data-marble-id="c-tip-n">
+          <p data-marble-id="c-tip-n1" data-marble-editable>A word for a control that has none, or whose word does not say it all: an icon button, a toggle, a meter. It says what a press will do, verb first, in a few words, and the key that does it too. On a toggle it says what the toggle is now and what a press makes it. On a meter it says what the bar cannot, like how old the reading is and when it resets. A button that already says its word gets no tip, because a tip that repeats the label is noise.</p>
+          <p data-marble-id="c-tip-n4" data-marble-editable>Rest the pointer for three quarters of a second, or tab to it, and it rises in above the control. It goes the moment you leave, press or look away, and it never catches a click. It is never the only place a thing is said: a finger has no hover and never sees one, so what a tip says is also a label, a menu line or a setting.</p>
+          <p class="dim" data-marble-id="c-tip-n2">card · 1px line · radius 8 · shadow-rest · 12.5px/1.35 ink · pad 6 10 · one line, 16rem at most · 8px above, centred, kept 8px inside the window, below when there is no room · 750ms rest, 140ms in, gone at once · top layer, role tooltip</p>
+          <p class="from" data-marble-id="c-tip-n3"><b>From</b> Agents, the composer, the usage meters</p>
         </div>
       </div>
 
@@ -1653,6 +1710,7 @@ __ICON__
         <li data-marble-id="ch-11" data-marble-editable><b>Copy the affordances with their history part,</b> bind Mod+Z, and record an inverse for anything a person might want back. Safety is not a cut point.</li>
         <li data-marble-id="ch-12" data-marble-editable><b>Anything dragged tracks one to one and springs on release;</b> one op, from the composed value. Under a hand nothing eases.</li>
         <li data-marble-id="ch-13" data-marble-editable><b>Say it at the control.</b> Press feedback on the way down, the commit legible where you pressed, and the status pill for whether the file took it.</li>
+        <li data-marble-id="ch-14" data-marble-editable><b>An icon with no word gets a tip.</b> It says what a press does, and the key, in a drawn card after a 750ms rest or at once on focus. It is never the only place that is said.</li>
       </ol>
     </section>
 
