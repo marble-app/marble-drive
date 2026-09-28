@@ -243,24 +243,46 @@ export function createFsStore({ root }) {
     }
   }
 
+  // What a document says about itself (its title, its day, how many nodes it
+  // has, its own icon) costs reading all of it, and a tree asks for every document each time
+  // a page draws its sidebar: fifty megabytes for a drive of a hundred
+  // documents. So it is kept per file until the file changes. The stat is
+  // still taken every time and is what says so: a write through the host, an
+  // agent's editor or a copy from Finder each move the change time.
+  const facts = new Map();
+
+  async function factsOf(file, info) {
+    const was = facts.get(file);
+    if (was && was.mtimeMs === info.mtimeMs && was.ctimeMs === info.ctimeMs && was.size === info.size) return was;
+    const source = await fsp.readFile(file, 'utf8').catch(() => null);
+    if (source === null) {
+      facts.delete(file);
+      return null;
+    }
+    const next = { mtimeMs: info.mtimeMs, ctimeMs: info.ctimeMs, size: info.size, title: titleOf(source, null), day: dayOf(source), nodes: nodesOf(source), icon: iconOf(source) };
+    facts.set(file, next);
+    return next;
+  }
+
   async function stat(docPath) {
     const clean = parsePath(docPath, { allowRoot: false });
     const file = fileOf(clean);
-    const [info, source] = await Promise.all([
-      fsp.stat(file).catch(() => null),
-      fsp.readFile(file, 'utf8').catch(() => null),
-    ]);
-    if (!info || source === null) return null;
+    const info = await fsp.stat(file).catch(() => null);
+    const known = info?.isFile() ? await factsOf(file, info) : null;
+    if (!known) {
+      facts.delete(file);
+      return null;
+    }
     const { parent, name } = splitPath(clean);
-    const icon = iconOf(source);
+    const { icon } = known;
     return {
       kind: 'doc',
       path: clean,
       name,
       folder: parent,
-      title: titleOf(source, titleize(name)),
-      day: dayOf(source),
-      nodes: nodesOf(source),
+      title: known.title ?? titleize(name),
+      day: known.day,
+      nodes: known.nodes,
       bytes: info.size,
       modified: info.mtimeMs,
       created: info.birthtimeMs || info.ctimeMs,
@@ -282,38 +304,43 @@ export function createFsStore({ root }) {
    */
   async function list({ folder = '', recursive = true, files = false } = {}) {
     const base = parsePath(folder);
-    const out = [];
 
+    // Every entry of a folder at once, and every folder under it at once: a
+    // drive of two thousand files is two thousand stats, and one after the
+    // other they were most of what a tree cost. Each folder's entries come
+    // back in the order it read them, so the result is the same as walking
+    // one at a time.
     async function walk(relative) {
       const here = abs(relative);
       const entries = await fsp.readdir(here, { withFileTypes: true }).catch(() => []);
-      for (const entry of entries) {
-        if (HIDDEN.test(entry.name)) continue;
+      const each = await Promise.all(entries.map(async (entry) => {
+        if (HIDDEN.test(entry.name)) return [];
         const child = joinPath(relative, entry.name);
         if (entry.isDirectory()) {
-          const info = await fsp.stat(path.join(here, entry.name)).catch(() => null);
-          out.push({
+          const [info, inside] = await Promise.all([
+            fsp.stat(path.join(here, entry.name)).catch(() => null),
+            recursive ? walk(child) : [],
+          ]);
+          return [{
             kind: 'folder',
             path: child,
             name: entry.name,
             folder: relative,
             title: titleize(entry.name),
             modified: info?.mtimeMs ?? 0,
-          });
-          if (recursive) await walk(child);
-          continue;
+          }, ...inside];
         }
         // A name the grammar refuses is a file somebody put there by hand. It
         // is not addressable, so it is not listed — but it is not deleted or
         // complained about either, because it is their folder.
         if (!entry.name.endsWith(DOC_EXT)) {
-          if (!files || !isValidPath(child)) continue;
+          if (!files || !isValidPath(child)) return [];
           const info = await fsp.stat(path.join(here, entry.name)).catch(() => null);
-          if (!info) continue;
+          if (!info) return [];
           // The path of a file keeps its extension, because that *is* its
           // address — `atlas.json` and `atlas.md` are two files, and a
           // document's path drops `.mrbl` only because every document has it.
-          out.push({
+          return [{
             kind: 'file',
             path: child,
             name: entry.name,
@@ -322,25 +349,26 @@ export function createFsStore({ root }) {
             ext: extOf(entry.name),
             bytes: info.size,
             modified: info.mtimeMs,
-          });
-          continue;
+          }];
         }
         const docPath = child.slice(0, -DOC_EXT.length);
-        if (!isValidPath(docPath)) continue;
+        if (!isValidPath(docPath)) return [];
         const info = await stat(docPath);
-        if (info) out.push(info);
-      }
+        return info ? [info] : [];
+      }));
+      return each.flat();
     }
 
-    await walk(base);
+    const out = await walk(base);
     return out.sort((a, b) => b.modified - a.modified);
   }
 
   /** The same entries, nested. Folders carry `children`; documents and files
-   *  are leaves. */
-  async function tree({ folder = '' } = {}) {
+   *  are leaves. `files: false` leaves the files out, for a caller that only
+   *  draws folders and documents (the shell's sidebar). */
+  async function tree({ folder = '', files = true } = {}) {
     const base = parsePath(folder);
-    const flat = await list({ folder: base, recursive: true, files: true });
+    const flat = await list({ folder: base, recursive: true, files });
 
     const folders = new Map();
     folders.set(base, { kind: 'folder', path: base, name: splitPath(base).name, folder: splitPath(base).parent, title: base === '' ? 'My Drive' : titleize(splitPath(base).name), children: [] });

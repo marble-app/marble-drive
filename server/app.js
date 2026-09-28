@@ -700,7 +700,10 @@ export async function createDrive(config, { log = console, agentProviders = null
 
       if (route === '/docs' && req.method === 'GET') {
         if (url.searchParams.get('tree')) {
-          return json(res, 200, await store.tree({ folder: url.searchParams.get('folder') ?? '' }));
+          return json(res, 200, await store.tree({
+          folder: url.searchParams.get('folder') ?? '',
+          files: url.searchParams.get('files') !== '0',
+        }));
         }
         // `name` is what Marble's carrier calls a document, and here that name
         // is its whole path — so `marble.href(doc.name)` still opens it.
@@ -873,7 +876,10 @@ export async function createDrive(config, { log = console, agentProviders = null
       }
 
       if (route === '/drive/tree' && req.method === 'GET') {
-        return json(res, 200, await store.tree({ folder: url.searchParams.get('folder') ?? '' }));
+        return json(res, 200, await store.tree({
+          folder: url.searchParams.get('folder') ?? '',
+          files: url.searchParams.get('files') !== '0',
+        }));
       }
 
       if (route === '/drive/new' && req.method === 'POST') {

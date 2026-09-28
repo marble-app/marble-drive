@@ -44,6 +44,12 @@
   const PHONE = '(max-width: 719px)';
   const KEY = 'marble-shell:';
   const RECENT = 6;
+  // The sidebar as the last page left it (remember/restore). Past this size it
+  // is not kept, and the next page asks the way it did before there was one.
+  const LAST = `${KEY}last`;
+  const LAST_MAX = 1_500_000;
+  // All a conversation's row and pips are drawn from.
+  const CONV_KEEP = ['id', 'target', 'title', 'running', 'queued', 'asking', 'status', 'needsReview', 'updatedAt', 'lastFinishedAt', 'lastInteractedAt', 'createdAt'];
   const SECTIONS = ['pinned', 'recent', 'agents', 'drive'];
   const LABELS = { pinned: 'Pinned', recent: 'Recent', agents: 'Agents', drive: 'Drive' };
   // Most urgent first, everywhere a set of agents is drawn.
@@ -381,6 +387,16 @@
   const splitPath = (p) => String(p ?? '').split('/').filter(Boolean);
   const nameOf = (p) => splitPath(p).at(-1) ?? '';
   const folderOf = (p) => splitPath(p).slice(0, -1).join('/');
+  // Which version of a document a tree saw: it changes whenever the file does.
+  const stampOf = (tree, docPath) => {
+    if (!docPath) return null;
+    let folder = tree;
+    for (const part of splitPath(docPath).slice(0, -1)) {
+      folder = folder?.children?.find((c) => c.kind === 'folder' && c.name === part);
+    }
+    const doc = folder?.children?.find((c) => c.kind === 'doc' && c.path === docPath);
+    return doc ? `${doc.modified}:${doc.bytes}` : null;
+  };
   // The Agents page's words for a span of minutes (templates/agents.mrbl, idleLabel).
   const idleLabel = (minutes) => {
     if (minutes == null) return 'ever';
@@ -642,6 +658,7 @@
       for (const type of ['pointerdown', 'wheel', 'keydown']) removeEventListener(type, this.onWork, true);
       this.fine.removeEventListener('change', this.onFine);
       this.offDrive?.();
+      if (this.onHide) removeEventListener('pagehide', this.onHide);
       this.offAgents?.();
       removeEventListener('marble-agent:seen', this.onSeen);
       removeEventListener('storage', this.onCut);
@@ -1282,10 +1299,13 @@
 
     // ------------------------------------------------------------ the tree
 
-    /** Read on first open, not on every page: most visits never open it. */
+    /** Read on first open, not on every page: most visits never open it.
+     *  Every page is a new page, so the sidebar is drawn at once from how the
+     *  last one left it (`restore`), and then from what the drive says now. */
     async load() {
       const drive = window.marble?.drive;
       if (!drive) return;
+      if (!this.tree) this.restore();
       if (!this.offDrive && drive.on) {
         let queued = 0;
         this.offDrive = drive.on('*', (change) => {
@@ -1296,22 +1316,50 @@
           queued = setTimeout(() => this.load(), 300);
         });
       }
+      // Leaving is when the conversations are newest: the stream has been
+      // talking since the tree was last kept.
+      if (!this.onHide) addEventListener('pagehide', this.onHide = () => this.remember());
       this.watchAgents();
+      const asked = (this.asked ?? 0) + 1;
+      this.asked = asked;
+      // Folders and documents only: the sidebar draws nothing else, and in a
+      // drive with a dataset in it the files are most of the answer. The
+      // drive's realms — which top-level folders wear which colour
+      // (server/drive-settings.js) — once a page, beside it.
       const [tree] = await Promise.all([
-        drive.tree(''),
-        this.pins && !this.pinsStale ? null : this.loadPins(),
-        // The drive's realms: which top-level folders wear which colour
-        // (server/drive-settings.js). Read once; they change by hand.
-        this.realms ? null : (drive.settings?.() ?? Promise.resolve(null)).then((s) => { this.realms = s?.realms ?? {}; }, () => { this.realms = {}; }),
+        drive.tree('', { files: false }),
+        this.realmsRead ? null : (drive.settings?.() ?? Promise.resolve(null)).then(
+          (settings) => { this.realms = settings?.realms ?? {}; this.realmsRead = true; },
+          () => { this.realms ??= {}; },
+        ),
       ]);
+      if (asked !== this.asked) return;
+      // A drive always holds at least its own Drive page, so a tree with
+      // nothing in it is the host not answering: keep what is drawn.
+      if (!tree?.children?.length && this.tree) return;
+      // The Drive's file moving is the one thing that can move the pins or a
+      // folder's tint; its stamp in the tree says whether it has, without
+      // reading the file.
+      const stamp = stampOf(tree, HOME_DOC);
+      if (!this.pins || this.pinsStale || stamp !== this.pinsStamp) await this.loadPins(stamp);
+      if (asked !== this.asked) return;
+      // Most of the time nothing moved since the last page: then what the
+      // restore drew stands, and the row under the pointer is not rebuilt.
+      const said = JSON.stringify(tree);
+      const pinsSaid = JSON.stringify([this.pins, this.tints, this.realms]);
+      const same = said === this.treeSaid && pinsSaid === this.pinsSaid;
       this.tree = tree;
       this.byPath = new Map(this.docs().map((d) => [d.path, d]));
+      this.treeSaid = said;
+      this.pinsSaid = pinsSaid;
+      if (same) return;
       this.drawTree();
+      this.remember();
     }
 
     /** Pinned is the Drive's sidebar list, read out of the Drive's own file —
      *  the one place a pin is kept — rather than a second list kept here. */
-    async loadPins() {
+    async loadPins(stamp = null) {
       this.pinsStale = false;
       if (!HOME_DOC || !window.marble?.href) { this.pins = []; return; }
       try {
@@ -1329,9 +1377,13 @@
           .map((li) => ({ path: li.dataset.path, hex: tidyHex(li.dataset.tint) }))
           .filter((t) => t.path && t.hex)
           .sort((a, b) => b.path.length - a.path.length);
+        this.pinsStamp = stamp;
       } catch {
-        this.pins = [];
-        this.tints = [];
+        // Unread is not empty: the pins and tints already drawn stay, and the
+        // next tree asks again.
+        this.pins ??= [];
+        this.tints ??= [];
+        this.pinsStamp = null;
       }
     }
 
@@ -1366,6 +1418,48 @@
       }
     }
 
+    /** The sidebar as this page leaves it, for the next page to draw before it
+     *  has asked anybody anything. The conversations keep only what a row and
+     *  its pips are drawn from. */
+    remember() {
+      if (!this.tree) return;
+      const convs = [...this.convs.values()].filter((c) => !c.archived && c.target).map((c) => {
+        const slim = {};
+        for (const k of CONV_KEEP) if (c[k] !== undefined) slim[k] = c[k];
+        return slim;
+      });
+      const saved = JSON.stringify({ v: 1, tree: this.tree, pins: this.pins ?? null, pinsStamp: this.pinsStamp ?? null, tints: this.tints ?? null, realms: this.realms ?? null, convs });
+      if (saved.length > LAST_MAX) return;
+      try { localStorage.setItem(LAST, saved); } catch { /* full, or private: the next page asks, as it always did */ }
+    }
+
+    /** Draws what the last page left, if it left anything. What the drive says
+     *  replaces it a moment later; until then this is at worst a few seconds
+     *  old, which is better than a blank panel. */
+    restore() {
+      let last = null;
+      try { last = JSON.parse(localStorage.getItem(LAST) ?? 'null'); } catch { /* unreadable: nothing */ }
+      if (last?.v !== 1 || !last.tree?.children?.length) return;
+      this.tree = last.tree;
+      this.byPath = new Map(this.docs().map((d) => [d.path, d]));
+      this.treeSaid = JSON.stringify(last.tree);
+      // The colours come with it, so a row is not drawn grey and then tinted.
+      if (last.realms) this.realms = last.realms;
+      if (last.pins) {
+        this.pins = last.pins;
+        this.pinsStamp = last.pinsStamp;
+        this.tints = last.tints ?? [];
+        this.pinsSaid = JSON.stringify([this.pins, this.tints, this.realms]);
+      }
+      this.restored = new Set();
+      for (const c of last.convs ?? []) {
+        if (!c?.id || this.convs.has(c.id)) continue;
+        this.convs.set(c.id, c);
+        this.restored.add(c.id);
+      }
+      this.drawTree();
+    }
+
     // ------------------------------------------------------------ agents
 
     /** Conversations, as the drawer and the Agents page hear them: one list,
@@ -1395,6 +1489,11 @@
         this.redraw('agents');
       });
       api.conversations().then((list) => {
+        // What the last page left is replaced by the list, and one the list no
+        // longer has (deleted since) goes.
+        const listed = new Set(list.map((summary) => summary.id));
+        for (const id of this.restored ?? []) if (!listed.has(id) && !heard.has(id)) this.convs.delete(id);
+        this.restored = null;
         for (const summary of list) if (!heard.has(summary.id)) this.convs.set(summary.id, summary);
         this.redraw('agents');
       }).catch(() => {});

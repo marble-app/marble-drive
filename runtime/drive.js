@@ -44,8 +44,10 @@
 
     // ------------------------------------------------------------- the folder
 
-    const tree = (folder = '') =>
-      ask(`/drive/tree?folder=${encodeURIComponent(folder)}`).catch(() => ({
+    // `{ files: false }` for a caller that draws only folders and documents:
+    // in a drive with a dataset in it, the files are most of the answer.
+    const tree = (folder = '', { files = true } = {}) =>
+      ask(`/drive/tree?folder=${encodeURIComponent(folder)}${files ? '' : '&files=0'}`).catch(() => ({
         kind: 'folder',
         path: '',
         title: 'My Drive',
