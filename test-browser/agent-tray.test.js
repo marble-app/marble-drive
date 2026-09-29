@@ -7,6 +7,10 @@ import test from 'node:test';
 
 import { GARDEN, startDrive } from './harness.js';
 
+// The fake agents these tests put on the page, followed from this tab as if
+// it had asked for the work: only followed work draws a zone.
+const FOLLOWED = ['c1', 'open'];
+
 // A page that carries its own conversation chrome mounts no drawer, so there
 // is no tray for the work toggle to live in.
 const CUSTOM = `<!doctype html>
@@ -23,7 +27,7 @@ const host = await startDrive({ documents: { garden: GARDEN, custom: CUSTOM } })
 test.after(() => host.close());
 
 async function visit(path = 'garden') {
-  const { page, errors } = await host.newPage();
+  const { page, errors } = await host.newPage({ attending: FOLLOWED });
   await page.goto(`${host.base}/a/${path}`);
   await page.waitForFunction(() => Boolean(document.querySelector('marble-agent-drawer')?.shadowRoot?.querySelector('.launcher')));
   const drawer = page.locator('marble-agent-drawer');
@@ -109,7 +113,7 @@ test('the work toggle keeps to the tray, never the page’s own top-right corner
 
 test('a page with no drawer keeps the corner button', async () => {
   await host.reset();
-  const { page } = await host.newPage();
+  const { page } = await host.newPage({ attending: FOLLOWED });
   await page.goto(`${host.base}/a/custom`);
   await page.waitForFunction(() => document.documentElement.classList.contains('marble-collab-host'));
   assert.equal(await page.locator('marble-agent-drawer').count(), 0);
@@ -160,7 +164,7 @@ test('Ask here arrives with a selection and summons the callout', async () => {
 
 test('with no hover to reveal with, only the contextual tools stand there', async () => {
   await host.reset();
-  const { page } = await host.newPage({ viewport: { width: 390, height: 844 }, hasTouch: true, isMobile: true });
+  const { page } = await host.newPage({ attending: FOLLOWED, viewport: { width: 390, height: 844 }, hasTouch: true, isMobile: true });
   await page.goto(`${host.base}/a/garden`);
   await page.waitForFunction(() => Boolean(document.querySelector('marble-agent-drawer')?.shadowRoot?.querySelector('.launcher')));
   assert.equal(await page.evaluate(() => matchMedia('(hover: none)').matches), true);

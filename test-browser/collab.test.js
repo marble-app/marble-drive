@@ -3,6 +3,10 @@ import test from 'node:test';
 
 import { GARDEN, startDrive } from './harness.js';
 
+// The fake agents these tests put on the page, followed from this tab as if
+// it had asked for the work: only followed work draws a zone.
+const FOLLOWED = ['c1', 'open'];
+
 const FORKED = `<!doctype html>
 <html><head><meta charset="utf-8"><title>Fork</title>
 <style>body { font: 16px/1.5 Georgia, serif; margin: 40px; } h1 { font-size: 32px; }</style>
@@ -77,7 +81,7 @@ test.after(() => host.close());
 
 test('a conflict fork says why it is there, and shows You, Agent, Keep this, and Ask an agent to combine', async () => {
   await host.reset();
-  const { page, errors } = await host.newPage();
+  const { page, errors } = await host.newPage({ attending: FOLLOWED });
   await page.goto(`${host.base}/a/forked`);
   await page.waitForFunction(() => document.documentElement.classList.contains('marble-collab-host'));
   const bar = page.locator('marble-alt > .marble-fork');
@@ -94,7 +98,7 @@ test('a conflict fork says why it is there, and shows You, Agent, Keep this, and
 
 test('Ask an agent to combine hands both versions to the agent drawer', async () => {
   await host.reset();
-  const { page } = await host.newPage();
+  const { page } = await host.newPage({ attending: FOLLOWED });
   await page.goto(`${host.base}/a/forked`);
   await page.waitForFunction(() => document.documentElement.classList.contains('marble-collab-host'));
   await page.locator('marble-alt > .marble-fork').waitFor();
@@ -116,7 +120,7 @@ test('Ask an agent to combine hands both versions to the agent drawer', async ()
 
 test('Keep this commits the version that is showing', async () => {
   await host.reset();
-  const { page, errors } = await host.newPage();
+  const { page, errors } = await host.newPage({ attending: FOLLOWED });
   await page.goto(`${host.base}/a/forked`);
   await page.waitForFunction(() => document.documentElement.classList.contains('marble-collab-host'));
   const bar = page.locator('marble-alt > .marble-fork');
@@ -142,7 +146,7 @@ test('Keep this commits the version that is showing', async () => {
 
 test('Keep this on You keeps the person’s version', async () => {
   await host.reset();
-  const { page } = await host.newPage();
+  const { page } = await host.newPage({ attending: FOLLOWED });
   await page.goto(`${host.base}/a/forked`);
   await page.waitForFunction(() => document.documentElement.classList.contains('marble-collab-host'));
   const bar = page.locator('marble-alt > .marble-fork');
@@ -163,7 +167,7 @@ test('Keep this on You keeps the person’s version', async () => {
 
 test('an authoring alt does not get Drive conflict chrome', async () => {
   await host.reset();
-  const { page } = await host.newPage();
+  const { page } = await host.newPage({ attending: FOLLOWED });
   await page.goto(`${host.base}/a/authored`);
   await page.waitForFunction(() => document.documentElement.classList.contains('marble-collab-host'));
   await page.waitForFunction(() => Boolean(window.marble));
@@ -179,7 +183,7 @@ test('an authoring alt does not get Drive conflict chrome', async () => {
 
 test('a remote op flashes the component it changed', async () => {
   await host.reset();
-  const { page } = await host.newPage();
+  const { page } = await host.newPage({ attending: FOLLOWED });
   await page.goto(`${host.base}/a/forked`);
   await page.waitForFunction(() => Boolean(window.marble));
   await page.evaluate(() => {
@@ -192,7 +196,7 @@ test('a remote op flashes the component it changed', async () => {
 
 test('person presence washes the id they are on, then fades out', async () => {
   await host.reset();
-  const { page } = await host.newPage();
+  const { page } = await host.newPage({ attending: FOLLOWED });
   await page.goto(`${host.base}/a/forked`);
   await page.waitForFunction(() => document.documentElement.classList.contains('marble-collab-host'));
   await page.evaluate(() => {
@@ -214,7 +218,7 @@ test('person presence washes the id they are on, then fades out', async () => {
 
 test('agent presence tapes off the region it is working on', async () => {
   await host.reset();
-  const { page } = await host.newPage();
+  const { page } = await host.newPage({ attending: FOLLOWED });
   await page.goto(`${host.base}/a/forked`);
   await page.waitForFunction(() => document.documentElement.classList.contains('marble-collab-host'));
   await page.evaluate(() => {
@@ -241,7 +245,7 @@ test('agent presence tapes off the region it is working on', async () => {
 
 test('the construction label uses the apply_ops note, and Hide puts it away', async () => {
   await host.reset();
-  const { page } = await host.newPage();
+  const { page } = await host.newPage({ attending: FOLLOWED });
   await page.goto(`${host.base}/a/forked`);
   await page.waitForFunction(() => document.documentElement.classList.contains('marble-collab-host'));
   await page.evaluate(() => {
@@ -285,7 +289,7 @@ const targetTop = (page, id) => page.locator(`[data-marble-id="${id}"]`).evaluat
 
 test('the construction zone follows its target when the person’s own typing moves it', async () => {
   await host.reset();
-  const { page } = await host.newPage();
+  const { page } = await host.newPage({ attending: FOLLOWED });
   await page.goto(`${host.base}/a/typing`);
   await page.waitForFunction(() => document.documentElement.classList.contains('marble-collab-host'));
   await page.evaluate(() => {
@@ -311,7 +315,7 @@ test('the construction zone follows its target when the person’s own typing mo
 
 test('the construction zone finds its target again after it is replaced', async () => {
   await host.reset();
-  const { page } = await host.newPage();
+  const { page } = await host.newPage({ attending: FOLLOWED });
   await page.goto(`${host.base}/a/typing`);
   await page.waitForFunction(() => document.documentElement.classList.contains('marble-collab-host'));
   await page.evaluate(() => {
@@ -341,7 +345,7 @@ test('the construction zone finds its target again after it is replaced', async 
 
 test('agent work with nothing to point at draws nothing', async () => {
   await host.reset();
-  const { page } = await host.newPage();
+  const { page } = await host.newPage({ attending: FOLLOWED });
   await page.goto(`${host.base}/a/forked`);
   await page.waitForFunction(() => document.documentElement.classList.contains('marble-collab-host'));
   const presence = async (detail) => {
@@ -366,7 +370,7 @@ test('agent work with nothing to point at draws nothing', async () => {
 
 test('the construction label keeps an all-caps first word and names the phase without a note', async () => {
   await host.reset();
-  const { page } = await host.newPage();
+  const { page } = await host.newPage({ attending: FOLLOWED });
   await page.goto(`${host.base}/a/forked`);
   await page.waitForFunction(() => document.documentElement.classList.contains('marble-collab-host'));
   const labelFor = async (detail) => {
@@ -389,7 +393,7 @@ const paint = (page, detail) => page.evaluate((d) => {
 
 test('the zone is a closed box with a wash, and it wears the document’s own accent', async () => {
   await host.reset();
-  const { page } = await host.newPage();
+  const { page } = await host.newPage({ attending: FOLLOWED });
   await page.goto(`${host.base}/a/forked`);
   await page.waitForFunction(() => document.documentElement.classList.contains('marble-collab-host'));
   await paint(page, { client: 'agent:c1', ids: ['p'], phase: 'writing' });
@@ -428,7 +432,7 @@ test('the zone is a closed box with a wash, and it wears the document’s own ac
 
 test('Open chat opens the conversation in the dock, and on the Agents page on its own stage', async () => {
   await host.reset();
-  const { page } = await host.newPage();
+  const { page } = await host.newPage({ attending: FOLLOWED });
   await page.goto(`${host.base}/a/forked`);
   await page.waitForFunction(() => document.documentElement.classList.contains('marble-collab-host'));
   await paint(page, { client: 'agent:c1', ids: ['p'], phase: 'writing' });
@@ -440,7 +444,7 @@ test('Open chat opens the conversation in the dock, and on the Agents page on it
   await page.getByRole('button', { name: 'Open the conversation working here' }).click();
   assert.deepEqual(await page.evaluate(() => window.opened), ['c1'], 'an ordinary document opens the dock');
 
-  const custom = await host.newPage();
+  const custom = await host.newPage({ attending: FOLLOWED });
   await custom.page.goto(`${host.base}/a/custom`);
   await custom.page.waitForFunction(() => document.documentElement.classList.contains('marble-collab-host'));
   await paint(custom.page, { client: 'agent:c1', ids: ['p'], phase: 'writing' });
@@ -454,7 +458,7 @@ test('Open chat opens the conversation in the dock, and on the Agents page on it
 
 test('an undo draws no zone, so it offers no chat', async () => {
   await host.reset();
-  const { page } = await host.newPage();
+  const { page } = await host.newPage({ attending: FOLLOWED });
   await page.goto(`${host.base}/a/forked`);
   await page.waitForFunction(() => document.documentElement.classList.contains('marble-collab-host'));
   await paint(page, { client: 'agent-undo:c1', ids: ['p'], phase: 'writing' });
@@ -463,7 +467,7 @@ test('an undo draws no zone, so it offers no chat', async () => {
 
 test('arriving with #at= scrolls to the work, and spends the hash', async () => {
   await host.reset();
-  const { page } = await host.newPage();
+  const { page } = await host.newPage({ attending: FOLLOWED });
   await page.goto(`${host.base}/a/deep#at=deep`);
   await page.waitForFunction(() => document.documentElement.classList.contains('marble-collab-host'));
   await page.waitForFunction(() => {
@@ -475,7 +479,7 @@ test('arriving with #at= scrolls to the work, and spends the hash', async () => 
 
 test('a conversation on the page it is working in scrolls there without a navigation', async () => {
   await host.reset();
-  const { page } = await host.newPage();
+  const { page } = await host.newPage({ attending: FOLLOWED });
   await page.goto(`${host.base}/a/deep`);
   await page.waitForFunction(() => document.documentElement.classList.contains('marble-collab-host'));
   assert.ok(await page.evaluate(() => scrollY) < 10);
@@ -491,7 +495,7 @@ test('a conversation on the page it is working in scrolls there without a naviga
 
 const onTyping = async () => {
   await host.reset();
-  const { page } = await host.newPage();
+  const { page } = await host.newPage({ attending: FOLLOWED });
   await page.goto(`${host.base}/a/typing`);
   await page.waitForFunction(() => document.documentElement.classList.contains('marble-collab-host'));
   return page;
@@ -561,7 +565,7 @@ test('a zone nobody claimed still opens its chat in the dock', async () => {
 
 test('marble.collab exposes the zone geometry and label helpers', async () => {
   await host.reset();
-  const { page } = await host.newPage();
+  const { page } = await host.newPage({ attending: FOLLOWED });
   await page.goto(`${host.base}/a/garden`);
   await page.waitForFunction(() => document.documentElement.classList.contains('marble-collab-host'));
   const out = await page.evaluate(() => {

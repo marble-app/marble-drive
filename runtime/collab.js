@@ -794,6 +794,13 @@
     // the top of the page, which is not a zone but an ambient status line, and
     // one the app's own chrome (the agent rows, the dock) already carries. No
     // target, no zone.
+    const attended = (client) => {
+      const id = conversationOf(client);
+      const agentApi = window.marble?.agent;
+      return !id || typeof agentApi?.attending !== 'function' || agentApi.attending(id);
+    };
+    addEventListener('marble:attending', () => paintZones());
+
     function zonesToPaint() {
       const zones = [];
       for (const detail of presence.values()) {
@@ -801,6 +808,10 @@
         // A client mid-press has a ring, and the ring carries the label. A box
         // around the button as well would say the agent is rewriting it.
         if (acts.has(detail.client)) continue;
+        // A zone is for work this tab is following: asked from here, or
+        // opened to follow. Any other agent on the page is a glint on its
+        // element (agent-glints.js), not a box and a label over the page.
+        if (!attended(detail.client)) continue;
         const target = tapeTarget((detail.ids ?? []).map((id) => byId(id)).filter(Boolean));
         if (target) zones.push({ detail, target });
       }

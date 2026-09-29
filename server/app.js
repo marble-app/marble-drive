@@ -139,6 +139,9 @@ const RUNTIME = {
   'collab.js': () => path.join(REPO, 'runtime', 'collab.js'),
   // The callout: a conversation drawn at the region of a document it is about.
   'agent-callout.js': () => path.join(REPO, 'runtime', 'agent-callout.js'),
+  // Glints: a dot on each element an agent is on, for the chats nobody here
+  // is following — the callout's quiet counterpart.
+  'agent-glints.js': () => path.join(REPO, 'runtime', 'agent-glints.js'),
   // Marks: Select and Sketch, the tray's two tools for briefing an agent
   // about a region. Geometry first; the layer reads it off globalThis.
   'agent-marks-geometry.js': () => path.join(REPO, 'runtime', 'agent-marks-geometry.js'),
@@ -348,6 +351,8 @@ export async function createDrive(config, { log = console, agentProviders = null
     }
     // After collab.js: the callout hangs its card with the zone's own geometry.
     if (agents) tags += `\n<script src="${runtimeUrl('agent-callout.js')}" data-marble-transient></script>`;
+    // After the callout, which it asks what it already shows.
+    if (agents) tags += `\n<script src="${runtimeUrl('agent-glints.js')}" data-marble-transient></script>`;
     // After the callout, whose handle both tools hand their ids to, and after
     // agent-ui.js, whose tray is the only place these tools are reachable from
     // — a register nobody answers takes the layer back down.

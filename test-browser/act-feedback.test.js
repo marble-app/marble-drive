@@ -10,6 +10,10 @@ import test from 'node:test';
 
 import { startDrive } from './harness.js';
 
+// The fake agents these tests put on the page, followed from this tab as if
+// it had asked for the work: only followed work draws a zone.
+const FOLLOWED = ['c1', 'open'];
+
 const APP = `<!doctype html>
 <html><head><meta charset="utf-8"><title>Table</title>
 <style>
@@ -37,7 +41,7 @@ test.after(() => host.close());
 
 const open = async () => {
   await host.reset();
-  const { page, errors } = await host.newPage();
+  const { page, errors } = await host.newPage({ attending: FOLLOWED });
   await page.goto(`${host.base}/a/table`);
   await page.waitForFunction(() => document.documentElement.classList.contains('marble-collab-host'));
   return { page, errors };

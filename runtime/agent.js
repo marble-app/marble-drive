@@ -236,6 +236,11 @@
       },
     };
 
+    const ATTENDING = 'marble-attending';
+    const attendingIds = () => {
+      try { return new Set(JSON.parse(sessionStorage.getItem(ATTENDING) || '[]')); } catch { return new Set(); }
+    };
+
     const agent = {
       providers: () => ask('/agent/providers'),
       settings: () => ask('/agent/settings'),
@@ -296,7 +301,24 @@
         // Where it was typed, when that is an app for talking rather than a
         // document being worked on. Only `chat` is understood.
         if (surface) body.context.surface = surface;
+        // Sending is attending: whatever this tab just asked of an agent is
+        // what this tab is following, and may draw its work on the page.
+        agent.attend(id);
+        dispatchEvent(new CustomEvent('marble:agent-sent', { detail: { id } }));
         return ask(`/agent/conversations/${enc(id)}/turns`, { method: 'POST', body });
+      },
+
+      // The chats this tab is following: sent to here, or opened to follow.
+      // The page draws a working agent's zone only for these; the rest show
+      // as a glint (agent-glints.js). A tab's business, so session storage.
+      attending: (id) => attendingIds().has(id),
+      attend(id) {
+        if (!id) return;
+        const ids = attendingIds();
+        if (ids.has(id)) return;
+        ids.add(id);
+        try { sessionStorage.setItem(ATTENDING, JSON.stringify([...ids].slice(-50))); } catch { /* private mode */ }
+        dispatchEvent(new CustomEvent('marble:attending', { detail: { id } }));
       },
 
       patchTurn: (turnId, patch) => ask(`/agent/turns/${enc(turnId)}`, { method: 'PATCH', body: patch }),

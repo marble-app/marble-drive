@@ -7209,6 +7209,11 @@
     .menu [role="menuitem"]:hover, .menu [role="menuitem"]:focus-visible { background: var(--paper-2); outline: none; }
     .menu [role="menuitem"] small { font-size: 11.5px; color: var(--faint); }
     .menu .empty { font-size: 12px; color: var(--faint); padding: 8px 10px; }
+    /* The chat switcher in two: this app's agents first, then the rest. */
+    .menu .seg { display: flex; justify-content: space-between; align-items: baseline; gap: 8px; padding: 8px 10px 3px; font-size: 11px; font-weight: 600; letter-spacing: .05em; text-transform: uppercase; color: var(--faint); }
+    .menu .seg small { font-size: 11px; font-weight: 400; letter-spacing: 0; text-transform: none; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .menu .seg-rule { height: 1px; margin: 6px 8px 2px; background: var(--line); }
+    .menu [role="menuitem"].is-hidden > span { color: var(--muted); }
 
     marble-conversation { flex: 1; min-height: 0; }
 
@@ -8022,11 +8027,50 @@
       }
       this.recent.replaceChildren();
       if (!list.length) this.recent.append(h('div', 'empty', 'No conversations yet.'));
-      for (const summary of list.slice(0, 20)) {
+      // Split in two: the agents working on this app first, in a segment of
+      // their own, then every other chat with the document it is about.
+      // Hovering one of this app's rows outlines its element on the page.
+      const here = window.marble?.app ?? null;
+      const inApp = here ? list.filter((s) => s.target === here).slice(0, 12) : [];
+      const elsewhere = list.filter((s) => !inApp.includes(s)).slice(0, 20);
+      let hidden = new Set();
+      try { hidden = new Set(JSON.parse(localStorage.getItem(`marble-glints-hidden:${here}`) || '[]')); } catch { /* private mode */ }
+      const word = (summary) => (summary.asking ? 'Needs you' : summary.status === 'running' ? 'Running' : summary.needsReview ? 'Needs review' : summary.activity || summary.status);
+      const row = (summary, detail) => {
         this.summaries.set(summary.id, summary);
+        // Choosing a chat is following it: its work may be drawn on the page.
+        const item = this.item(this.recent, summary.title || 'New Chat', detail, () => {
+          this.api.attend?.(summary.id);
+          this.switchTo(summary.id);
+        });
+        if (summary.target === here) {
+          const point = (on) => dispatchEvent(new CustomEvent('marble-glints:point', { detail: { id: on ? summary.id : null } }));
+          item.addEventListener('pointerenter', () => point(true));
+          item.addEventListener('pointerleave', () => point(false));
+          item.addEventListener('click', () => point(false));
+        }
+        return item;
+      };
+      const seg = (label, note) => {
+        const el = h('div', 'seg', label);
+        if (note) el.append(h('small', '', note));
+        this.recent.append(el);
+      };
+      if (inApp.length) {
+        seg('In this app', document.title || here);
+        for (const summary of inApp) {
+          const item = row(summary, hidden.has(summary.id) ? `${word(summary)} · Hidden` : word(summary));
+          item.classList.toggle('is-hidden', hidden.has(summary.id));
+        }
+        if (elsewhere.length) {
+          this.recent.append(h('div', 'seg-rule'));
+          seg('Elsewhere');
+        }
+      }
+      for (const summary of elsewhere) {
         const provider = this.labels.get(summary.provider)?.label ?? summary.provider;
-        const state = summary.asking ? 'Needs you' : summary.status === 'running' ? 'Running' : summary.needsReview ? 'Needs review' : summary.activity || summary.status;
-        this.item(this.recent, summary.title || 'New Chat', `${provider} · ${state}`, () => this.switchTo(summary.id));
+        const where = inApp.length && summary.target ? String(summary.target).split('/').pop() : provider;
+        row(summary, `${where} · ${word(summary)}`);
       }
       this.recent.querySelector('[role="menuitem"]')?.focus({ preventScroll: true });
     }

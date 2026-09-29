@@ -137,8 +137,14 @@ export async function startDrive({ scripts = {}, agents = true, documents = { ga
       // the next test's default. A reset drive has not picked anything yet.
       await drive.agents?.store.saveSettings({ models: {}, efforts: {} });
     },
-    async newPage({ viewport = { width: 1280, height: 800 }, reducedMotion = 'no-preference', colorScheme = 'light', hasTouch = false, isMobile = false, deviceScaleFactor = 1 } = {}) {
+    // `attending` names the chats this tab starts out following, as a tab
+    // that asked for the work would: only those draw a zone on the page
+    // (collab.js); any other agent is a glint.
+    async newPage({ viewport = { width: 1280, height: 800 }, reducedMotion = 'no-preference', colorScheme = 'light', hasTouch = false, isMobile = false, deviceScaleFactor = 1, attending = [] } = {}) {
       const context = await browser.newContext({ viewport, reducedMotion, colorScheme, hasTouch, isMobile, deviceScaleFactor });
+      if (attending.length) {
+        await context.addInitScript((ids) => { try { sessionStorage.setItem('marble-attending', JSON.stringify(ids)); } catch { /* opaque origin */ } }, attending);
+      }
       const page = await context.newPage();
       const errors = [];
       page.on('pageerror', (err) => errors.push(err.message));

@@ -2,9 +2,11 @@
 //
 // The fifth view of a conversation. The drawer and the Agents page show the
 // same object in a panel and in panes; this shows it in situ — a handle at
-// your selection, a card when you summon, a pill when you fold it, and the
-// zone's own label while the agent works there. Everything here is transient
-// chrome in one fixed layer; no document is edited to get a callout.
+// your selection, a card when you summon, and the zone's own label while the
+// agent works there. Closing a card puts it away: it never folds into a pill
+// left on the page. Chats nobody here is looking at are a glint on their
+// element instead (agent-glints.js). Everything here is transient chrome in
+// one fixed layer; no document is edited to get a callout.
 
 (() => {
   const TRANSIENT = 'data-marble-transient';
@@ -13,8 +15,8 @@
   const CARD_WIDTH = 440;
   const GAP = 12;
   const PAD = 12;
-  // One duration and one curve for the whole layer, so a handle, a card and
-  // a pill all arrive at the same speed and read as one piece of furniture.
+  // One duration and one curve for the whole layer, so a handle and a card
+  // arrive at the same speed and read as one piece of furniture.
   const MOTION = 180;
   const EASE = 'cubic-bezier(.2, .8, .3, 1)';
   const stillness = matchMedia('(prefers-reduced-motion: reduce)');
@@ -99,15 +101,6 @@
     .marble-callout-tip[hidden] { display: none; }
     .marble-callout marble-conversation { display: flex; max-height: min(70vh, 560px); }
     .marble-callout[hidden] { display: none; }
-    .marble-callout[data-state="pill"] { width: auto; max-width: 320px; border-radius: 999px; cursor: pointer; }
-    .marble-callout[data-state="pill"] .marble-callout-head { padding: 5px 12px; }
-    .marble-callout[data-state="pill"] marble-conversation,
-    .marble-callout[data-state="pill"] .marble-callout-tools,
-    .marble-callout[data-state="pill"] .marble-callout-actions { display: none; }
-    /* The body crossfades while the box travels, so folding reads as one
-       move rather than a resize with a hole in it. */
-    .marble-callout marble-conversation { transition: opacity 120ms ease; }
-    .marble-callout[data-state="pill"] marble-conversation { opacity: 0; }
     .marble-callout-pick {
       position: fixed; pointer-events: none; border: 1.5px solid var(--callout-mark); border-radius: 6px;
       opacity: 1;
@@ -221,27 +214,10 @@
 
     const records = [];
     const recordOf = (id) => (id ? records.find((r) => r.id === id) ?? null : null);
-
-    // A fold is this tab's opinion about this document, and nothing more: a
-    // dismissed callout needs no memory, because markReviewed is the memory.
-    const FOLD_KEY = `marble-callout-folded:${app}`;
-    const foldedIds = () => {
-      try { return new Set(JSON.parse(sessionStorage.getItem(FOLD_KEY) || '[]')); } catch { return new Set(); }
-    };
-    function rememberFold(id, on) {
-      if (!id) return;
-      const set = foldedIds();
-      if (on) set.add(id); else set.delete(id);
-      try { sessionStorage.setItem(FOLD_KEY, JSON.stringify([...set])); } catch { /* private mode */ }
-    }
-    // A pill has one line. It is the chat's name at rest, but a turn that
-    // ended while the callout was folded is news, and news is what you want
-    // from a line you are not going to open. What you can *do* about it —
-    // Undo, Done — stays in the card: those come after looking.
-    function paintPill(record) {
-      if (record.state !== 'pill' || record.said) return;
-      record.status.textContent = record.title || 'Agent';
-    }
+    // A chat with a card on this page is shown by the card; its glint steps
+    // back while the card is there (agent-glints.js asks).
+    window.marbleCallout = { holds: (id) => Boolean(recordOf(id)) };
+    const held = () => dispatchEvent(new CustomEvent('marble-callout:held'));
 
     function placeCard(record) {
       // A card lent to Describe mode hangs on the marks, and the marks layer
@@ -273,35 +249,13 @@
     function applyState(record, state) {
       record.state = state;
       record.el.dataset.state = state;
-      rememberFold(record.id, state === 'pill');
-      if (state === 'pill') paintPill(record);
-      else if (!record.zone && !record.said && !record.actions.childElementCount) record.status.textContent = record.label || 'Ask about this';
+      if (!record.zone && !record.said && !record.actions.childElementCount) record.status.textContent = record.label || 'Ask about this';
       syncDock(record);
       placeCard(record);
     }
 
-    /** Card to pill and back. The box is measured either side of the change
-     *  and animated between the two rectangles — not scaled, which would
-     *  stretch the words inside it, but really resized, with the card's own
-     *  overflow doing the hiding. */
-    function morph(record, apply) {
-      const el = record.el;
-      const was = el.dataset.state;
-      if (stillness.matches || !el.isConnected || !was || was === record.state) { apply(); return; }
-      const before = el.getBoundingClientRect();
-      apply();
-      const after = el.getBoundingClientRect();
-      const still = Math.abs(before.width - after.width) < 1 && Math.abs(before.height - after.height) < 1
-        && Math.abs(before.left - after.left) < 1 && Math.abs(before.top - after.top) < 1;
-      if (still) return;
-      el.animate([
-        { width: `${before.width}px`, height: `${before.height}px`, left: `${before.left}px`, top: `${before.top}px` },
-        { width: `${after.width}px`, height: `${after.height}px`, left: `${after.left}px`, top: `${after.top}px` },
-      ], { duration: MOTION, easing: EASE });
-    }
-
     function setState(record, state) {
-      morph(record, () => applyState(record, state));
+      applyState(record, state);
     }
 
     /** Let a thing finish leaving before it is gone. The timer is the net:
@@ -327,6 +281,7 @@
       if (at >= 0) records.splice(at, 1);
       vanish(record.el, () => record.el.remove());
       placeHandle();
+      held();
       // Describe mode keeps the marks a brief was made of on the page while
       // the agent works; this is when they can go.
       dispatchEvent(new CustomEvent('marble-callout:removed', { detail: { id: record.id } }));
@@ -368,12 +323,12 @@
       const record = { id, ids: [...ids], el, convo, head, live, status, actions, tools, state, changed: new Set(), docked: false, title: '', zone: null, said: false, owner, label: '' };
       records.push(record);
 
-      // The two corner controls. The side icon folds the card and opens the
-      // drawer. × only folds it. The pill that is left opens the card again,
-      // so neither control is reachable from the pill. Open in Agents still
+      // The two corner controls. The side icon puts the card away and opens
+      // the chat in the drawer; × just puts it away. Neither leaves anything
+      // on the page: a chat still going shows as its glint. Open in Agents
       // needs a conversation to point at, which is why it waits for an id.
       const beside = iconButton(SIDE_ICON, 'Open this chat on the side', 'Open on the side', () => {
-        setState(record, 'pill');
+        remove(record);
         if (record.id) {
           agent.remember?.(record.id);
           agent.open(record.id);
@@ -391,13 +346,10 @@
       });
       const paintTools = () => { inAgents.hidden = !record.id; };
       paintTools();
-      tools.append(inAgents, beside, iconButton(MINIMIZE_ICON, 'Minimize', 'Minimize', () => setState(record, 'pill')));
-
-      head.addEventListener('click', (event) => {
-        if (record.state === 'pill' && !event.target.closest('button')) setState(record, 'card');
-      });
+      tools.append(inAgents, beside, iconButton(MINIMIZE_ICON, 'Close', 'Close', () => remove(record)));
       convo.addEventListener('conversation', (event) => {
         record.id = event.detail?.id ?? null;
+        held();
         paintTools();
         if (record.id) follow(record);
       });
@@ -439,15 +391,9 @@
 
     // ------------------------------------------------------------ watching
     // Docked means: this card stands where the zone's label would, so the
-    // label steps back. Only a card docks; a pill is small enough to sit
-    // beside a label and lets it return.
+    // label steps back while the card is there.
 
     function syncDock(record) {
-      // While the agent is working here the zone's label *is* this callout's
-      // folded state: a pill hangs at the same corner as the label, saying
-      // the same thing over the top of it. Open chat on the label brings the
-      // card back, which is what a pill would have done.
-      record.el.hidden = Boolean(record.zone) && record.state === 'pill';
       const want = Boolean(record.zone) && record.state === 'card' && Boolean(record.id);
       if (want === record.docked) return;
       record.docked = want;
@@ -467,7 +413,6 @@
           case 'ask':
             // An ask needs an answer, and an answer needs the log.
             record.convo.removeAttribute('data-folded');
-            if (record.state === 'pill') setState(record, 'card');
             break;
           case 'turn.completed':
           case 'turn.failed':
@@ -521,13 +466,6 @@
       record.said = true;
       record.actions.replaceChildren(button('Done', 'Mark reviewed and put the callout away', () => done(record)));
     }
-
-    // An older × used to shut a callout for this tab. That list is still
-    // honored, so a callout closed before this change does not come back.
-    const SHUT_KEY = `marble-callout-shut:${app}`;
-    const shutIds = () => {
-      try { return new Set(JSON.parse(sessionStorage.getItem(SHUT_KEY) || '[]')); } catch { return new Set(); }
-    };
 
     // Seeing it and saying done is reviewing it — the rule the Focus pane
     // already uses. The trail goes with the review.
@@ -742,67 +680,15 @@
       agent.select(null);
     });
 
-    // ------------------------------------------------------------ rehydration
-    //
-    // The store already remembers everything the layer needs: which document a
-    // chat is about, what its last turn was aimed at, and whether it is still
-    // running, asking, or waiting to be looked at. So a reload rebuilds the
-    // callouts rather than storing a second copy of where they were.
-
-    const endedActions = (record) => {
-      record.actions.replaceChildren(button('Done', 'Mark reviewed and put the callout away', () => done(record)));
-    };
-
-    const adopt = async (summary, { folded = foldedIds() } = {}) => {
-      if (recordOf(summary.id) || records.some((r) => r.convo.getAttribute('conversation') === summary.id)) return null;
-      let detail = null;
-      try { detail = await agent.conversation(summary.id); } catch { return null; }
-      const ids = detail?.turns?.at(-1)?.context?.selection ?? [];
-      // A selection that no longer resolves draws nothing; the drawer still
-      // lists the chat.
-      if (!elementsOf(ids).length) return null;
-      const live = summary.status === 'running' || summary.asking;
-      const record = openCard({ id: summary.id, ids, state: live && !folded.has(summary.id) ? 'card' : 'pill' });
-      record.title = summary.title ?? '';
-      if (live) record.el.dataset.live = '1';
-      else endedActions(record);
-      // Rebuilt, not just finished: the line is the chat's name again.
-      record.said = false;
-      paintPill(record);
-      return record;
-    };
-
-    const mine = (summary) => summary.target === app && !summary.archived
-      && !shutIds().has(summary.id)
-      && (summary.status === 'running' || summary.asking || summary.needsReview);
-
-    async function rehydrate() {
-      let list = [];
-      try { list = await agent.conversations(); } catch { return; }
-      const folded = foldedIds();
-      const wanted = list
-        .filter(mine)
-        .sort((a, b) => String(b.updatedAt ?? '').localeCompare(String(a.updatedAt ?? '')))
-        .slice(0, 6);
-      for (const summary of wanted) await adopt(summary, { folded });
-    }
-
-    // Live: a brief about this document sent from anywhere — the drawer, the
-    // Agents page, another tab — gets a callout here too, so the two paths
-    // converge on one object.
+    // Reviewed somewhere else — the drawer, the Agents page, a glint's Done:
+    // the trail was about being unread. A card is only ever for a chat this
+    // tab opened; a reload rebuilds none, and a brief sent from elsewhere
+    // shows here as a glint, not a card.
     agent.on('*', (summary) => {
-      if (!summary || typeof summary.id !== 'string') return;
-      const record = recordOf(summary.id);
-      if (record) {
-        record.title = summary.title ?? record.title;
-        paintPill(record);
-        // Reviewed somewhere else: the trail was about being unread.
-        if (summary.running === false && summary.needsReview === false) {
-          document.dispatchEvent(new CustomEvent('marble-callout:reviewed', { detail: { id: summary.id } }));
-        }
-        return;
+      if (!summary || typeof summary.id !== 'string' || !recordOf(summary.id)) return;
+      if (summary.running === false && summary.needsReview === false) {
+        document.dispatchEvent(new CustomEvent('marble-callout:reviewed', { detail: { id: summary.id } }));
       }
-      if (mine(summary)) adopt(summary);
     });
 
     // The zone's Open chat, offered to the callout first: being taken to a
@@ -814,8 +700,6 @@
       setState(record, 'card');
       record.convo.focusInput?.();
     });
-
-    rehydrate();
   };
 
   if (window.marble?.agent) boot(window.marble);
