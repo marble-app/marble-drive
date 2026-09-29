@@ -2712,15 +2712,19 @@
     /* Finished, the card sits down: one line of what came of it, and what it
        made. The stops and the plan were for watching. */
     /* Live, the card is a lifted white sheet with an edge. Done, it sits
-       down into the log: no edge, no shadow, just a shade of whatever the
-       chat is drawn on, so it still reads as one thing without asking for
-       the eye. The edge stays transparent rather than going, so nothing moves. */
+       down into the log as the same paper-2 a prompt wears (the page's own
+       palette, when it has one): no edge, no shadow. The edge stays, only
+       transparent, so nothing moves. What was paper-2 inside it steps the
+       other way to paper, so every level is still one shade from the next. */
     .progress:not([data-state="running"]):not([data-state="asking"]) {
       gap: 8px; padding: 10px 12px; box-shadow: none; border-color: transparent;
-      background: color-mix(in srgb, var(--ink) 4%, var(--conv-surface, var(--paper)));
+      background: var(--paper-2);
     }
-    .progress:not([data-state="running"]):not([data-state="asking"]) .pv-frame { border-color: transparent; }
-    .progress:not([data-state="running"]):not([data-state="asking"]) .progress-chip { background: var(--card); }
+    .progress:not([data-state="running"]):not([data-state="asking"]) .pv-frame { border-color: transparent; background: var(--paper); }
+    .progress:not([data-state="running"]):not([data-state="asking"]) .pv-bar { background: transparent; border-bottom-color: var(--paper-2); }
+    .progress:not([data-state="running"]):not([data-state="asking"]) :is(.progress-chip, .pv-step:not([aria-pressed="true"]), .act:not(.primary)) { background: var(--paper); }
+    .progress:not([data-state="running"]):not([data-state="asking"]) :is(.act:not(.primary), .progress-more):hover { background: var(--paper-3); }
+    .progress:not([data-state="running"]):not([data-state="asking"]) :is(.progress-said, .progress-next) { border-top-color: var(--paper-3); }
     .progress:not([data-state="running"]):not([data-state="asking"]) :is(.progress-track, .progress-plan) { display: none; }
     .progress:not([data-state="running"]):not([data-state="asking"]) .progress-glyph { width: 26px; height: 26px; border-radius: 8px; background: none; }
     .progress:not([data-state="running"]):not([data-state="asking"]) .progress-glyph svg { width: 22px; height: 22px; }
