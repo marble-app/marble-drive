@@ -437,11 +437,37 @@ when it dies and keeps a crash log; and an agent's turn is the kernel's first
 choice when memory runs out. A per-turn memory ceiling was the plan; Sprites
 will not let a cgroup's `memory.max` be written, even by root.
 
-**Cost or lesson.** Moving took a minute of copying inside Fly (rsync, run on
-the old sprite, through `sprite-rsh.sh`) and 13 s offline. The sign-ins moved
+**Cost or lesson.** The diagnosis was wrong: admin-p2 froze the same way the
+next night, and its ledger showed why: memory climbing from 1.2 to 6.3 GB
+under several agents' work, then thrashing. The fix is the memory guard
+(decision 26), not the move; the move cost little and is kept. Moving took a
+minute of copying inside Fly (rsync, run on the old sprite, through
+`sprite-rsh.sh`) and 13 s offline. The sign-ins moved
 with the home folder, which the owner copies himself: an agent is not to move
 credentials between machines. A new sprite's first request starts the day's
 run, so the drive goes over before the first deploy.
+
+### 26. The host stops an agent's heaviest command before memory runs out
+
+**Problem.** A sprite has 8 GB and no swap. Several agents' turns, each with
+its own Chromium, and browser test runs (a Chromium per core by default) ran
+it short, and Linux thrashed rather than killing anything, for hours.
+
+**Options.** A cgroup ceiling for turns (cannot be written on a sprite); the
+kernel's own killer with turns first (never fires while thrashing); a
+watchdog; fewer things at once; a bigger sprite (16 GB on request from Fly);
+tests on the owner's Mac.
+
+**Chosen.** A watchdog in the host (`server/memory-guard.js`) that stops the
+heaviest command a turn runs, and one browser test file at a time on a sprite.
+The rest wait on how often it acts, which the ledger now counts. Thresholds
+are amounts, calibrated on t-bryan with a capped hog against the host's own
+reading: it acts at about 4.6–5 GB of load, with 1.1–1.5 GB left.
+
+**Cost or lesson.** A shell and the host on the same sprite read different
+`/proc/meminfo` (8 GB against 16 GB, the shell's in steps), and a sprite's
+init runs at the turns' kill score: the first version would have counted it
+as a turn. Test the guard's aim before its trigger, and with a backstop.
 
 ## Traps worth remembering
 
@@ -471,3 +497,4 @@ run, so the drive goes over before the first deploy.
 | A dependency's dependency reached by path (`<pkg>/node_modules/<dep>`) | worked on the Mac (a linked checkout nests it), failed on every sprite (npm hoists it) | resolve it with `createRequire` from the package, never by path |
 | The runtime was `no-store` | every page switch refetched 14 scripts (~265 KB compressed) | name each at `?v=<hash>` and let the browser keep it; `no-cache` + ETag for any other address |
 | A test of a memory ceiling run before checking the ceiling was set | a 64 MB cgroup could not be made, the hog ran unbounded and t-bryan thrashed (load 30) until the kernel killed it | prove the guard is in place before testing what it guards |
+| A watchdog tested from a script whose only timer was `unref`'d | the script exited at once, the hog ran to its cap and the machine thrashed | keep the test process alive, and give every hog its own backstop |

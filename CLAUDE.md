@@ -30,7 +30,10 @@ It runs the same tools, so a change to them reaches it.
 ## Shipping a change
 
 1. Make the change. Run `npm test`, and the browser tests it touches:
-   `node --test test-browser/<file>.test.js`.
+   `node --test test-browser/<file>.test.js`. More than one file: add
+   `--test-concurrency=1` (or `npm run test:browser` for all). Left to itself
+   `node --test` runs a file per core, each with its own Chromium, and on a
+   sprite (8 GB, no swap) that is what runs the machine out of memory.
 2. Try it as a user sees it: `tools/sprite-deploy.sh t-bryan --local`. Say what
    to look at on `https://t-bryan-b3fwm.sprites.app`.
 3. A change to `marble` too: bump its version, `npm publish` it from `../marble`,

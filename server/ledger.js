@@ -7,16 +7,20 @@
 // the machine used and why it was up, and the Console gathers the lines later
 // (docs/superpowers/specs/2026-09-25-console-dashboard-design.md).
 //
-// A line: { t, dt, cpu, mem, used, disk, why, turns, opens, wake }
+// A line: { t, dt, cpu, mem, used, total, procs, disk, why, turns, opens, relieved, wake }
 //   t      end of the minute, unix seconds
 //   dt     awake seconds it covers (a freeze ends a minute early and adds nothing)
 //   cpu    CPU-seconds the whole machine used (cgroup cpu.stat)
 //   mem    GB of memory the machine holds, file cache included (memory.current)
 //   used   GB in use by programs (MemTotal − MemAvailable); which of the two Fly
 //          bills is settled by comparing with a real bill
+//   total  GB the machine has (MemTotal); a sprite's may grow under load
+//   procs  MB held at the minute's end by the host, the agents' turns, the
+//          browsers among those, and everything else (server/memory-guard.js)
 //   disk   GB used on the drive's filesystem
 //   why    the most seen in the minute of: tabs with live streams, tabs someone
 //          used, work holding the sprite up, work waiting on a question
+//   relieved  times the memory guard stopped something an agent ran
 //   wake   on the first line after a sleep or a start: "warm" (the process was
 //          frozen and carried on), "cold" (the machine booted), "restart" (a
 //          new host on the same boot: a deploy or a settings change)
@@ -75,6 +79,7 @@ export function createLedger({
   dir,
   readers = systemReaders(),
   why = () => ({ tabs: 0, looking: 0, work: 0, asks: 0 }),
+  processes = () => null,
   now = Date.now,
   tickMs = 15_000,
   lineMs = 60_000,
@@ -87,7 +92,7 @@ export function createLedger({
   let wake = null;
   let failed = false;
   let writes = Promise.resolve();
-  const counts = { turns: 0, opens: 0 };
+  const counts = { turns: 0, opens: 0, relieved: 0 };
   const fresh = () => ({ dt: 0, mem: [], used: [], why: { tabs: 0, looking: 0, work: 0, asks: 0 } });
   let minute = fresh();
 
@@ -129,6 +134,10 @@ export function createLedger({
       used = lastCpu === null || cpu < lastCpu ? cpu : cpu - lastCpu;
     }
     lastCpu = cpu;
+    let procs = null;
+    try {
+      procs = processes();
+    } catch {}
     const avg = (xs) => (xs.length ? xs.reduce((a, b) => a + b, 0) / xs.length : null);
     const line = {
       t: Math.round(endMs / 1000),
@@ -136,15 +145,19 @@ export function createLedger({
       cpu: round(used),
       mem: round(avg(minute.mem)),
       used: round(avg(minute.used)),
+      total: round(procs?.totalGB ?? null),
+      procs: procs ? { host: procs.host, agents: procs.agents, browsers: procs.browsers, other: procs.other } : null,
       disk: round(readers.diskGB(), 2),
       why: minute.why,
       turns: counts.turns,
       opens: counts.opens,
+      relieved: counts.relieved,
       wake,
     };
     wake = null;
     counts.turns = 0;
     counts.opens = 0;
+    counts.relieved = 0;
     minute = fresh();
     const file = path.join(dir, `${dayOf(endMs)}.jsonl`);
     writes = writes

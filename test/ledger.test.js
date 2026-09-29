@@ -12,7 +12,7 @@ import { createLedger, systemReaders } from '../server/ledger.js';
 const DAY = 24 * 60 * 60 * 1000;
 const T0 = Date.UTC(2026, 8, 25, 12, 0, 0);
 
-async function world({ boot = 'boot-1', stored = undefined, uptime = 9999, cpu = 100, files = {} } = {}) {
+async function world({ boot = 'boot-1', stored = undefined, uptime = 9999, cpu = 100, files = {}, processes = undefined } = {}) {
   const dir = await fsp.mkdtemp(path.join(os.tmpdir(), 'ledger-'));
   if (stored !== undefined) await fsp.writeFile(path.join(dir, '.boot'), stored);
   for (const [name, text] of Object.entries(files)) await fsp.writeFile(path.join(dir, name), text);
@@ -32,6 +32,7 @@ async function world({ boot = 'boot-1', stored = undefined, uptime = 9999, cpu =
     dir,
     readers,
     why: () => ({ ...why }),
+    ...(processes ? { processes } : {}),
     now: () => wall,
     schedule: null,
     log: { error: (m) => logged.push(m), info() {}, log() {} },
@@ -136,6 +137,21 @@ test('turns and documents opened are counted into the minute they happened in', 
   assert.equal(a.opens, 2);
   assert.equal(a.turns, 1);
   assert.equal(b.opens, 0);
+});
+
+test('a line says where the memory was, how much the machine had, and when the guard stepped in', async () => {
+  let seen = { totalGB: 8, host: 400, agents: 2300, browsers: 1600, other: 20 };
+  const w = await world({ processes: () => seen });
+  w.ledger.count('relieved');
+  for (let i = 0; i < 4; i += 1) await w.step(15_000);
+  seen = null;
+  for (let i = 0; i < 4; i += 1) await w.step(15_000);
+  const [a, b] = await w.lines();
+  assert.equal(a.total, 8);
+  assert.deepEqual(a.procs, { host: 400, agents: 2300, browsers: 1600, other: 20 });
+  assert.equal(a.relieved, 1);
+  assert.equal(b.relieved, 0);
+  assert.equal(b.procs, null, 'nothing to read (a Mac) is null, and the line is still written');
 });
 
 test('lines go in one file per UTC day, older than 90 days are removed, and read() crosses days', async () => {

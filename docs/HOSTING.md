@@ -145,6 +145,23 @@ The service's environment is the release script's defaults
   starts a service at `oom_score_adj` -900 and each turn raises its own to 500
   (`server/agent/first-to-go.js`). A hard ceiling (a cgroup's `memory.max`)
   cannot be set on a sprite, even as root.
+- **Memory:** a sprite has 8 GB and no swap, and short of memory Linux does not
+  kill anything, it thrashes: exec, the files API and the host all stall for
+  as long as the load lasts. The kernel's killer never fires, so the host
+  watches instead (`server/memory-guard.js`): every 2 s it reads what is left
+  and the kernel's memory pressure, and below 1.5 GB left (or 3 GB with
+  pressure at 10%) it stops the heaviest thing an agent's turn is running (a
+  test run and its Chromium), logging `[memory] …`; the turn goes on and reads
+  its command as killed. Only processes under the host at a turn's score count
+  (a sprite's init runs at that score too). The host sees a 16 GB machine of
+  which about 8 GB is never its (Fly's autoscaled memory), so its
+  `MemAvailable` is the real room: about 6 GB idle on t-bryan, falling one for
+  one with load, pressure staying under 1% until the last few hundred MB. A
+  shell's view (8 GB total) updates in steps and misleads. `/health` reports
+  the host's reading; each ledger line has `total`, `procs` (MB for the host,
+  the agents' turns, their browsers, the rest) and `relieved`. On a sprite,
+  run browser tests one file at a time (`--test-concurrency=1`): `node --test`
+  otherwise runs a Chromium per core.
 - **Page weight:** the host compresses text (Brotli, else gzip; Fly's edge
   gzips anyway), and a page names each runtime file at `?v=<hash>`, which the
   browser keeps until the file changes. Moving between documents downloads
@@ -372,7 +389,7 @@ nothing can wake its host, relabel it, `macos/launchd/backup.sh install
 | A turn froze when nobody was around | held past its limit: an unanswered question (10 min), no progress (30 min), or a day unattended | by design; opening the drive wakes it and it carries on |
 | A tab stopped updating | it rested (hidden 60 s, or idle 10 min) | any input wakes it; an old tab from before a deploy needs a reload |
 | A sprite never pauses | something holds it: a stream, a request, or a Sprites task | `/health` `streams`; `GET /v1/tasks` on `/.sprite/api.sock` |
-| API says `running` but `sprite exec`/`console` hang (i/o timeout) and a checkpoint says 503 "No process is running to checkpoint" | the sprite itself is stuck, below Marble: admin-p1 on 2026-09-26, 09-27 and 09-28 (and never another sprite). On 09-28 the files API still listed `/drive` while anything under `/home/sprite` hung | nothing inside can help. A dashboard restart may time out; a restore can hang for 40 min and fail (`INTERNAL_ERROR`) without applying, though the sprite then cold-boots on its own disk with nothing lost. Give Fly the `fly-request-id`s. If it keeps happening, move to a new sprite ("Moving the owner's sprite") |
+| API says `running` but `sprite exec`/`console` hang (i/o timeout) and a checkpoint says 503 "No process is running to checkpoint" | most likely out of memory and thrashing: it followed the owner from admin-p1 (09-26, 09-27, 09-28) to a new admin-p2 (09-29, memory 1.2 → 6.3 GB in 25 min under several agents' work, the ledger's minute timer running late before it went silent). The files API may still list some folders while others hang. Since 2026-09-29 the memory guard should stop it first; `grep '\[memory\]'` the host log | nothing inside can help. A dashboard restart may say it timed out and still take effect ~16 min later (admin-p2, 09-29); a restore can hang for 40 min and fail (`INTERNAL_ERROR`) without applying, though the sprite then cold-boots on its own disk with nothing lost. Give Fly the `fly-request-id`s. If it keeps happening, move to a new sprite ("Moving the owner's sprite") |
 | The host died and the URL answers 502, though the service says running | before 2026-09-28 nothing restarted a host that exited (admin-p1, 15:17 UTC: out of heap) | fixed: `serve.sh` starts it again; read `~/app/crash/crashes.log` and any report beside it |
 | `Failed to create checkpoint … v3.in-progress … file exists` | stuck checkpoint store: the next version's name is held by a checkpoint Sprites' own database has no row for (`sprite checkpoint info vN` says "not found"), and it cannot be reached from inside the sprite (t-irene since 2026-09-23, t-sam since 2026-09-24; t-bryan, t-eunhye, t-rima by 2026-09-28) | `sprite-deploy.sh` goes on without a checkpoint by itself and says so; report the stuck sprites to Fly |
 | An API key vanished after a deploy | keys inside the release (old behaviour) | keys live in `~/.config/marble-drive/agent-keys` now |

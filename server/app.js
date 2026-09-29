@@ -41,6 +41,7 @@ import { createAwakeClock, createProgress } from './awake.js';
 import { createHold } from './hold.js';
 import { createKeepAwake } from './keep-awake.js';
 import { createLedger } from './ledger.js';
+import { createMemoryGuard } from './memory-guard.js';
 import { createStreams } from './streams.js';
 import { consoleAllowed, createConsole } from './console/index.js';
 import { createStems } from './stems/index.js';
@@ -268,7 +269,11 @@ export async function createDrive(config, { log = console, agentProviders = null
       const asks = items.filter((i) => i.pausedSince !== null && i.pausedSince !== undefined).length;
       return { tabs: streams.count, looking: streams.looking(60_000), work: items.length - asks, asks };
     },
+    processes: () => memoryGuard?.snapshot() ?? null,
   });
+  // Before the machine runs out of memory and stalls, stop the heaviest thing
+  // an agent is running (server/memory-guard.js). Inert where there is no /proc.
+  const memoryGuard = config.memoryGuard ? createMemoryGuard({ log, onRelief: () => ledger.count('relieved') }) : null;
   const typesafe = createTypesafeHandler({
     apiKey: config.typesafeApiKey,
     maxBodyBytes: config.maxBodyBytes,
@@ -571,7 +576,7 @@ export async function createDrive(config, { log = console, agentProviders = null
       // The gate, and the two things that have to be reachable through it: the
       // form itself, and a health check a load balancer runs before anybody has
       // a cookie.
-      if (route === '/health') return json(res, 200, { ok: true, docs: channels.counts, streams: streams.count });
+      if (route === '/health') return json(res, 200, { ok: true, docs: channels.counts, streams: streams.count, memory: memoryGuard?.reading() ?? null });
       // The mark, for the two pages that cannot carry it in their own head: a
       // document written before this host had one, and the gate. Everything
       // made here has it inline and never asks — which is why this is a
@@ -1563,6 +1568,7 @@ button{background:#738698;color:#fafaf7;border-color:#738698;cursor:pointer}p{co
       clearInterval(uploadSweep);
       await keepAwake.stop();
       await ledger.stop();
+      memoryGuard?.stop();
       awake.stop();
       streams.close();
       consoleApp?.close();
