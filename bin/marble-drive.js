@@ -2,6 +2,7 @@
 // The command.
 //
 //   marble-drive serve            serve the drive (the default)
+//   marble-drive standby          the host on a machine that is not this drive's home: writes nothing
 //   marble-drive new <path>       a document from a starter, without a browser
 //   marble-drive icon [path]      give a document already in the drive its mark
 //   marble-drive weigh [path]     what the documents weigh, and how much is base64
@@ -32,6 +33,9 @@ import { splitPath, parsePath } from '../server/paths.js';
 import { updateApps } from '../server/app-updates.js';
 import { seedAgents, seedBoard, seedChat, seedConsole, seedDesignDonts, seedDesignSystem, seedDrive } from '../server/seed.js';
 import { createStore } from '../server/store/index.js';
+import { createStandby } from '../server/standby.js';
+import { createLeaseClient } from '../server/hub/lease-client.js';
+import { loadHubSettings } from '../server/hub/settings.js';
 
 const [command = 'serve', ...rest] = process.argv.slice(2);
 
@@ -55,6 +59,9 @@ const kb = (n) => (n < 1024 ? `${n} B` : n < 1048576 ? `${(n / 1024).toFixed(0)}
 switch (command) {
   case 'serve':
     await serve();
+    break;
+  case 'standby':
+    await standby();
     break;
   case 'new':
     await make();
@@ -88,6 +95,15 @@ switch (command) {
 }
 
 // ---------------------------------------------------------------------- serve
+
+async function standby() {
+  const settings = loadHubSettings(config.hubEnv);
+  const lease = settings ? await createLeaseClient({ settings }).cached() : null;
+  const server = createStandby({ home: lease?.home ?? null, since: lease?.since ?? null });
+  server.listen(Number(flags.port ?? config.port), config.host, () => {
+    console.log(`[drive] standby on ${config.host}:${flags.port ?? config.port}: this drive's home is ${lease?.home ?? 'elsewhere'}`);
+  });
+}
 
 async function serve() {
   const drive = await createDrive(config);

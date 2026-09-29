@@ -173,6 +173,10 @@ export function loadConfig(env = process.env) {
     awakeMaxHours: num('MARBLE_DRIVE_AWAKE_MAX_HOURS', 24),
 
     open: bool('MARBLE_DRIVE_OPEN', false),
+    // The hub (server/hub/): a file of settings when this drive has two homes
+    // (the owner's Mac and Fly), unset for every other drive. Never defaulted,
+    // so a test host or the dev checkout can never upload anything.
+    hubEnv: str('MARBLE_HUB_ENV', null),
 
     // Agents: Claude, Cursor or Codex running on this machine and editing the
     // drive through Marble's tools. Off unless asked for, because it is a
