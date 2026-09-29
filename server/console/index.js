@@ -17,6 +17,7 @@ import { createActions } from './actions.js';
 import { createInspector } from './inspect.js';
 import { createJobs } from './jobs.js';
 import { createSprites } from './sprites.js';
+import { createUptime } from './uptime.js';
 import { createWorkshop } from './workshop.js';
 
 const FLEET_EVERY = 20_000;
@@ -47,6 +48,7 @@ export async function createConsole({ config, store, streams = null, log = conso
 
   const sprites = createSprites({ bin: config.consoleSprite, org: config.consoleOrg });
   const inspector = createInspector({ sprites, dir: path.join(dir, 'sprites') });
+  const uptime = createUptime({ file: path.join(dir, 'uptime.json') });
   const jobs = createJobs({
     dir: path.join(dir, 'jobs'),
     onEvent: (e) => {
@@ -73,6 +75,7 @@ export async function createConsole({ config, store, streams = null, log = conso
   async function readFleet() {
     try {
       fleet = await sprites.list();
+      await uptime.record(fleet);
       fleetError = null;
       fleetAt = Date.now();
     } catch (err) {
@@ -132,6 +135,8 @@ export async function createConsole({ config, store, streams = null, log = conso
         stuckCheckpoints: stuck.has(row.name),
         job: running ? { id: running.id, title: running.title, kind: running.kind } : null,
         lastJob: last ? { id: last.id, title: last.title, state: last.state, endedAt: last.endedAt } : null,
+        // Its changes of state over the last day, for the timeline.
+        uptime: uptime.of(row.name),
       };
     }));
   }

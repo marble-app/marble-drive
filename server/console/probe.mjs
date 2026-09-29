@@ -6,6 +6,7 @@
 // printed whole — the console needs the passphrase to act for the owner — and
 // the console keeps the secret values in memory only (server/console/inspect.js).
 
+import { spawnSync } from 'node:child_process';
 import fs from 'node:fs';
 import http from 'node:http';
 import os from 'node:os';
@@ -101,6 +102,31 @@ const get = (options) => new Promise((resolve) => {
   req.end();
 });
 
+// Whether Claude is signed in, asked of Claude Code itself (`claude auth
+// status`), which reads the login the agents use. An API key in the
+// environment would answer for the key instead, so it is left out. Only the
+// answer is kept: who, which plan, which organisation; never a token.
+let claudeStatus = null;
+const claudeBin = path.join(live, '.bin', 'claude');
+if (fs.existsSync(claudeBin)) {
+  const env = { ...process.env };
+  delete env.ANTHROPIC_API_KEY;
+  delete env.ANTHROPIC_AUTH_TOKEN;
+  const run = spawnSync(claudeBin, ['auth', 'status', '--json'], { env, encoding: 'utf8', timeout: 15_000 });
+  try {
+    const s = JSON.parse(run.stdout.slice(run.stdout.indexOf('{')));
+    claudeStatus = {
+      loggedIn: Boolean(s.loggedIn),
+      method: s.authMethod ?? null,
+      email: s.email ?? null,
+      org: s.orgName ?? null,
+      plan: s.subscriptionType ?? null,
+    };
+  } catch {
+    claudeStatus = { loggedIn: null, error: (run.stderr || run.error?.message || 'no answer').trim().split('\n').pop().slice(0, 200) };
+  }
+}
+
 const health = await get({ host: '127.0.0.1', port: PORT, path: '/health' });
 const tasks = fs.existsSync(SOCKET) ? await get({ socketPath: SOCKET, path: '/v1/tasks' }) : null;
 
@@ -116,6 +142,7 @@ process.stdout.write(JSON.stringify({
   claudeAuth: settings.claudeAuth ?? (provider === 'claude-subscription' ? 'login' : provider === 'claude-api' ? 'api' : null),
   keys: Object.entries(saved).filter(([, v]) => typeof v === 'string' && v.length).map(([k]) => k),
   claudeLogin: fs.existsSync(path.join(HOME, '.claude', '.credentials.json')),
+  claudeStatus,
   documents,
   driveBytes,
   diskFree,

@@ -100,11 +100,12 @@ export const STARTERS = [
   {
     id: 'note',
     title: 'Note',
-    blurb: 'Notes, one at a time. No toolbar: the keys are the formatting, and the list is a reading of them.',
-    // The Document starter with everything taken out of it — no toolbar, no
-    // ruler, no faces, no colours — and one thing put in: several notes in the
-    // one file, with the open one an attribute on <body>. It is the other answer
-    // to "what is a document": not a page you compose, a place you put text.
+    blurb: 'Notes, one at a time. The toolbar is the keys drawn out, and the list is a reading of the notes.',
+    // Several notes in the one file, with the open one an attribute on <body>.
+    // It is the other answer to "what is a document": not a page you compose, a
+    // place you put text. No ruler, no faces, no colours — but headings,
+    // bulleted, numbered and checked lists at four depths, quotes and rules, a
+    // toolbar that runs the same keys, rows you drag to reorder, and tables.
     //
     // Same three parts as `doc`, and for the same reasons: `editable` for the
     // name in the rail, `history` for Mod+Z, `status` for the pill. The lines

@@ -33,6 +33,10 @@ import {
 } from './usage-failover.js';
 
 const SELECTION_BUDGET = 6_000;
+// How long a turn that is ready to start waits for the picture of what was
+// marked. The shot is taken as the brief is sent, so this is only ever the
+// rest of it; past this the turn starts without one.
+const SHOT_WAIT_MS = 25_000;
 const STDERR_TAIL = 4_000;
 
 /** Cursor's "Cannot use this model" answer continues with every model id.
@@ -54,7 +58,7 @@ const BACKGROUND_SETTLE_MS = 60_000;
 const STEER_NOTE = 'While you were working I added this note. Treat it as course-correction.';
 const DISPATCH = new Set(['queue', 'steer', 'interrupt']);
 
-export function createRunner({ store, tools, providers, workdir, origin, bridgePath, browserPath, readDocument, publish, publishAsk = () => {}, limits, log = console, skills = [], driveRoot, projects = null, power = '', sandbox = null, onLook = null, onFinish = null, nameConversation = null, awake = createAwakeClock(), progress = createProgress() }) {
+export function createRunner({ store, tools, providers, workdir, origin, bridgePath, browserPath, readDocument, publish, publishAsk = () => {}, limits, log = console, skills = [], driveRoot, projects = null, power = '', sandbox = null, onLook = null, onFinish = null, nameConversation = null, awake = createAwakeClock(), progress = createProgress(), shots = null }) {
   const live = new Map(); // turnId → live turn
   const order = []; // turnIds, in the order they were sent
   const tokens = new Map(); // token → live turn
@@ -239,6 +243,18 @@ export function createRunner({ store, tools, providers, workdir, origin, bridgeP
       );
     }
     if (context.selectionSource) lines.push('- They selected these elements:', '', context.selectionSource);
+    if (context.marked) {
+      // Describe mode: what was on the screen under the marks, not just which
+      // ids they name — as a picture, and as the page read it when it was sent.
+      const shot = await waitForShot(turn);
+      lines.push('- They marked up the page in Describe mode (the sketches, boxes and notes described at the top).');
+      if (shot) {
+        lines.push(`- A screenshot of the part of the page they marked, with their marks drawn over it in orange: ${shot.path}. Look at it (Read the file) before you change anything, so you know what they were pointing at.`);
+      }
+      if (context.marked.seen) {
+        lines.push('- What was on screen under the marks, read from their live page as they sent it (an outline; "◀ marked" is what a mark names):', '', context.marked.seen);
+      }
+    }
     const others = runningTurns().filter((t) => t.id !== turn.id && t.project?.id === project.id).length;
     if (others) {
       lines.push('', `${others} other agent conversation(s) are running in this project right now. Do not stash, reset, check out or discard changes you did not make.`);
@@ -265,6 +281,19 @@ export function createRunner({ store, tools, providers, workdir, origin, bridgeP
       if (brief) lines.unshift(`${brief}\n\n---\n`);
     }
     return lines.join('\n');
+  }
+
+  /** The picture of what was marked, once it is ready — or null, if it
+   *  failed, or is taking longer than a turn should wait for it. */
+  async function waitForShot(turn) {
+    if (!turn.shot) return null;
+    let timer;
+    const late = new Promise((resolve) => { timer = setTimeout(() => resolve(null), SHOT_WAIT_MS); });
+    try {
+      return await Promise.race([turn.shot, late]);
+    } finally {
+      clearTimeout(timer);
+    }
   }
 
   async function handoffBrief(fromId) {
@@ -305,6 +334,20 @@ export function createRunner({ store, tools, providers, workdir, origin, bridgeP
     const also = [...new Set((Array.isArray(context.also) ? context.also : []).map((item) => String(item).trim()).filter(Boolean))]
       .filter((doc) => doc !== frozen.target && doc !== frozen.viewing);
     if (also.length) frozen.also = also;
+    // Taken now, while the page is as they marked it, and waited for only when
+    // the turn starts: sending does not stall on a headless browser.
+    let shot = null;
+    if (context.marked) {
+      frozen.marked = { seen: context.marked.seen ?? '' };
+      shot = shots
+        ? shots.shoot(frozen.viewing ?? frozen.target, context.marked)
+          .then((png) => (png ? store.saveUpload({ type: 'image/png', data: png.toString('base64'), name: 'marked.png' }) : null))
+          .catch((err) => {
+            log.warn?.(`[agents] ${err.message}`);
+            return null;
+          })
+        : null;
+    }
     if (frozen.selection.length) {
       const source = await readDocument(frozen.target).catch(() => null);
       if (source) {
@@ -359,6 +402,7 @@ export function createRunner({ store, tools, providers, workdir, origin, bridgeP
       sent: 0, // messages this turn has sent; capped
       waiter: null, // resolve() of a wait_for_reply parked on this turn
       from, // { conversation, title, provider, messageId, hop } when a message started this turn
+      shot, // a promise of the saved picture of what Describe mode marked, or null
       usageHandoff,
       usageError,
       arrived: null, // messages composePrompt() took from the inbox; handed back in finish() if this turn never got to act on them

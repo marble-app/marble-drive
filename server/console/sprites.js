@@ -53,6 +53,8 @@ export function createSprites({ bin = 'sprite', org = 'marble-drive' } = {}) {
       // When it last started running: a drive that has not run since a read
       // has nothing new to read.
       ranAt: s.last_running_at ?? null,
+      // When it last paused: with ranAt, the two edges of its last sleep.
+      warmedAt: s.last_warming_at ?? null,
     };
   };
 

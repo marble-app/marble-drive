@@ -277,7 +277,7 @@
       },
       handoff: (id, provider) => agent.start({ provider, handoffFrom: id }),
 
-      send(id, { prompt, target, viewing, selection, also, dispatch, surface } = {}) {
+      send(id, { prompt, target, viewing, selection, also, dispatch, surface, marked } = {}) {
         const here = context();
         const body = {
           prompt,
@@ -292,6 +292,9 @@
         // Where it was typed, when that is an app for talking rather than a
         // document being worked on. Only `chat` is understood.
         if (surface) body.context.surface = surface;
+        // Describe mode's marks: what they were drawn over, so the host can
+        // show the agent the region and not only name it.
+        if (marked) body.context.marked = marked;
         return ask(`/agent/conversations/${enc(id)}/turns`, { method: 'POST', body });
       },
 

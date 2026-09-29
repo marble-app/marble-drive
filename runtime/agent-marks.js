@@ -631,6 +631,165 @@
       return said.length ? `${said.join(' ')} ` : '';
     };
 
+    // ------------------------------------------------- what the marks are over
+    //
+    // The words say where; this says what was there. At the moment of sending,
+    // the page reads what is on screen under the marks — the live page, with
+    // what was typed into it, ticked, scrolled to and drawn by script, which
+    // the document's saved source does not have — and hands it over with the
+    // marks themselves, so the host can draw them back on a picture of the
+    // region (server/agent/marked.js).
+
+    const SEEN_BUDGET = 5500;
+    const NOTABLE = new Set(['h1', 'h2', 'h3', 'h4', 'h5', 'h6', 'button', 'a', 'input', 'select', 'textarea', 'img', 'canvas', 'svg', 'video', 'audio', 'iframe', 'label', 'summary', 'progress', 'meter']);
+    const CONTROLS = new Set(['input', 'select', 'textarea', 'button', 'img', 'canvas', 'svg', 'video', 'audio', 'iframe', 'progress', 'meter']);
+    const UNREAD = new Set(['script', 'style', 'template', 'noscript', 'link', 'meta', 'marble-agent-drawer']);
+    const clip = (text, n) => (text.length > n ? `${text.slice(0, n - 1)}…` : text);
+    const squash = (text) => String(text ?? '').replace(/\s+/g, ' ').trim();
+    const ownText = (node) => {
+      let text = '';
+      for (const child of node.childNodes) if (child.nodeType === Node.TEXT_NODE) text += child.data;
+      return squash(text);
+    };
+    /** One element, in the fewest words that say what it is and what it holds. */
+    const describeEl = (node) => {
+      const tag = node.localName;
+      const bits = [tag];
+      const key = node.getAttribute('data-marble-id');
+      if (key) bits.push(`#${key}`);
+      const role = node.getAttribute('role');
+      if (role) bits.push(`[role=${role}]`);
+      const label = node.getAttribute('aria-label') || node.getAttribute('title');
+      if (label) bits.push(`[${clip(squash(label), 60)}]`);
+      if (tag === 'input' || tag === 'textarea' || tag === 'select') {
+        const type = node.type;
+        if (type === 'checkbox' || type === 'radio') bits.push(node.checked ? '(checked)' : '(unchecked)');
+        else if (tag === 'select') bits.push(`= "${clip(squash(node.selectedOptions?.[0]?.textContent), 80)}"`);
+        else {
+          if (tag === 'input' && type && type !== 'text') bits.push(`type=${type}`);
+          bits.push(node.value ? `= "${clip(squash(node.value), 120)}"` : node.placeholder ? `placeholder "${clip(squash(node.placeholder), 60)}"` : '(empty)');
+        }
+      }
+      if (tag === 'img') bits.push(`alt "${clip(squash(node.alt), 80)}" ${clip(String(node.currentSrc || node.src || '').split('/').pop(), 60)}`);
+      if (tag === 'canvas' || tag === 'video') bits.push(`${node.width}×${node.height}`);
+      if (tag === 'a' && node.getAttribute('href')) bits.push(`→ ${clip(node.getAttribute('href'), 80)}`);
+      return bits.join(' ');
+    };
+    /** An outline of the live page inside a region: what is there, how it
+     *  nests, what is typed and ticked, and which of it the marks name. */
+    const readScreen = (region, named) => {
+      const lines = [];
+      let used = 0;
+      let cut = false;
+      const hit = (r) => r.width > 0 && r.height > 0
+        && r.right > region.left && r.left < region.right && r.bottom > region.top && r.top < region.bottom;
+      const say = (depth, line) => {
+        if (cut) return false;
+        if (used + line.length > SEEN_BUDGET) {
+          cut = true;
+          lines.push(`${'  '.repeat(depth)}… (more under the marks, cut for length)`);
+          return false;
+        }
+        lines.push(`${'  '.repeat(depth)}${line}`);
+        used += line.length + 1 + depth * 2;
+        return true;
+      };
+      const marked = (node) => {
+        const key = node.getAttribute('data-marble-id');
+        return key && named.has(key) ? '  ◀ marked' : '';
+      };
+      const visit = (node, depth) => {
+        if (cut || UNREAD.has(node.localName) || node.hasAttribute(TRANSIENT)) return;
+        const style = getComputedStyle(node);
+        if (style.display === 'none' || style.visibility === 'hidden') return;
+        const boxless = style.display === 'contents';
+        if (!boxless && !hit(node.getBoundingClientRect())) return;
+        const kids = [...(node.shadowRoot?.children ?? []), ...node.children];
+        if (boxless) { for (const child of kids) visit(child, depth); return; }
+        const tag = node.localName;
+        const own = ownText(node);
+        // Words: the whole run as it reads, once, rather than split at every
+        // <b> — and then only what the words leave out (a field, a picture) or
+        // what a mark names inside them.
+        if (own && !CONTROLS.has(tag)) {
+          if (!say(depth, `${describeEl(node)}: "${clip(squash(node.innerText), 240)}"${marked(node)}`)) return;
+          for (const inner of node.querySelectorAll('input, select, textarea, img, canvas, video, [data-marble-id]')) {
+            if (cut) return;
+            const key = inner.getAttribute('data-marble-id');
+            if (key && !named.has(key) && !CONTROLS.has(inner.localName)) continue;
+            if (!hit(inner.getBoundingClientRect())) continue;
+            const words = CONTROLS.has(inner.localName) ? '' : `: "${clip(squash(inner.innerText), 160)}"`;
+            say(depth + 1, `${describeEl(inner)}${words}${marked(inner)}`);
+          }
+          return;
+        }
+        const notable = node.hasAttribute('data-marble-id') || NOTABLE.has(tag);
+        let next = depth;
+        if (notable) {
+          const words = tag === 'button' || tag === 'a' || tag === 'label' || tag === 'summary' || /^h\d$/.test(tag)
+            ? `: "${clip(squash(node.innerText), 160)}"`
+            : tag === 'svg' && squash(node.textContent) ? `: "${clip(squash(node.textContent), 120)}"` : '';
+          if (!say(depth, `${describeEl(node)}${words}${marked(node)}`)) return;
+          next = depth + 1;
+          // What a control or a picture holds is in the line already.
+          if (CONTROLS.has(tag) || words) return;
+        }
+        for (const child of kids) visit(child, next);
+      };
+      for (const child of document.body.children) visit(child, 0);
+      return lines.join('\n');
+    };
+    /** Round to what a picture can use: a thousandth of an anchor's box. */
+    const fine = (n) => Math.round(n * 1000) / 1000;
+    const thin = (pairs, most = 300) => {
+      if (pairs.length <= most) return pairs;
+      const step = pairs.length / most;
+      const out = [];
+      for (let i = 0; i < most; i += 1) out.push(pairs[Math.floor(i * step)]);
+      out.push(pairs[pairs.length - 1]);
+      return out;
+    };
+    /** The marks, as the host needs them to draw them back on the page and
+     *  to tell the agent what they were drawn over. */
+    const briefMarks = () => {
+      const drawn = drafts();
+      const named = new Set(fromUs ? mine : []);
+      if (!drawn.length && !named.size) return null;
+      const span = union();
+      const pad = 16;
+      const region = span ? {
+        left: span.left - pad, top: span.top - pad,
+        right: span.left + span.width + pad, bottom: span.top + span.height + pad,
+      } : null;
+      let seen = '';
+      try { seen = region ? readScreen(region, named) : ''; } catch { seen = ''; }
+      // What was typed and ticked in the region, so the picture shows it too:
+      // the copy the host opens has the document, not this tab's state.
+      const values = {};
+      if (region) {
+        for (const field of document.querySelectorAll('input[data-marble-id], textarea[data-marble-id], select[data-marble-id]')) {
+          if (field.closest(`[${TRANSIENT}]`) || field.type === 'password' || field.type === 'file') continue;
+          const r = field.getBoundingClientRect();
+          if (!r.width || r.right < region.left || r.left > region.right || r.bottom < region.top || r.top > region.bottom) continue;
+          values[field.getAttribute('data-marble-id')] = field.type === 'checkbox' || field.type === 'radio' ? field.checked : String(field.value).slice(0, 500);
+          if (Object.keys(values).length >= 40) break;
+        }
+      }
+      return {
+        values,
+        viewport: { width: innerWidth, height: innerHeight },
+        ids: fromUs ? [...area] : [],
+        strokes: drawn.filter((mark) => mark.type === 'stroke').map((mark) => ({
+          anchorId: mark.anchorId,
+          parts: mark.parts.map((part) => thin(part.pairs).map(([u, v]) => [fine(u), fine(v)])),
+        })),
+        notes: drawn.filter((mark) => mark.type === 'note').map((mark) => ({
+          anchorId: mark.anchorId, u: fine(mark.u), v: fine(mark.v), text: mark.text,
+        })),
+        seen,
+      };
+    };
+
     const repaint = () => {
       for (const mark of marks) {
         if (mark.type === 'act') continue;
@@ -766,6 +925,7 @@
       if (dispatchEvent(new CustomEvent('marble-callout:describe', { detail, cancelable: true })) || !detail.card) return null;
       card = detail.card;
       card.convo.brief = () => (exploring ? '' : note());
+      card.convo.briefMarks = () => (exploring ? null : briefMarks());
       card.convo.addEventListener('sent', onSent);
       return card;
     };
@@ -795,6 +955,7 @@
       card = null;
       exploring = false;
       lent.convo.brief = null;
+      lent.convo.briefMarks = null;
       lent.convo.removeEventListener('sent', onSent);
       lent.release(fromUs ? mine : []);
       area = [];
@@ -1567,7 +1728,18 @@
       drag.scrollX = scrollX;
       drag.scrollY = scrollY;
       frameStep();
-      const ids = drag.ids;
+      let ids = drag.ids;
+      // A rectangle inside one element that covers none of its parts — a
+      // corner of a chart, a stretch of a long card — still means something:
+      // the smallest element that holds all of it. Otherwise an area drawn
+      // over a canvas or a big panel would name nothing at all.
+      const drawn = rectOf(drag);
+      if (!ids.length && drawn.width * drawn.height >= SCRATCH * SCRATCH) {
+        const holds = drag.boxes.filter((box) => box.left <= drawn.left + 1 && box.top <= drawn.top + 1
+          && box.left + box.width >= drawn.left + drawn.width - 1 && box.top + box.height >= drawn.top + drawn.height - 1);
+        // Document order: of the elements around a point, the deepest is last.
+        if (holds.length) ids = [holds[holds.length - 1].id];
+      }
       const prior = event.shiftKey ? area : [];
       endDrag();
       area = [...prior, ...ids.filter((id) => !prior.includes(id))];

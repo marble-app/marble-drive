@@ -79,11 +79,21 @@ export async function startDrive({ scripts = {}, agents = true, documents = { ga
     MARBLE_DRIVE_BACKUP_CMD: '',
     ...env,
   });
+  // Every prompt a turn was started with, as the agent was handed it: the
+  // context the host writes under the words as well as the words.
+  const prompts = [];
+  const heard = (provider) => ({
+    ...provider,
+    spawn: (args) => {
+      prompts.push(args.prompt);
+      return provider.spawn(args);
+    },
+  });
   const drive = await createDrive(config, {
     log: quiet,
     // `providers` adds scripted stand-ins under real ids (claude-subscription,
     // claude-api, cursor) for tests of what the page does with those ids.
-    agentProviders: new Map([['fake', createFakeProvider({ scripts })], ...providers.map((id) => [id, createFakeProvider({ scripts, id })])]),
+    agentProviders: new Map([['fake', heard(createFakeProvider({ scripts }))], ...providers.map((id) => [id, heard(createFakeProvider({ scripts, id }))])]),
     genui,
     usageHistory: async ({ weeks = 26 } = {}) => usageHistoryStub(weeks),
     usage: async () => ({
@@ -126,6 +136,7 @@ export async function startDrive({ scripts = {}, agents = true, documents = { ga
   return {
     drive,
     base,
+    prompts,
     async reset() {
       for (const [docPath, source] of Object.entries(documents)) await drive.createDocument(docPath, source, { label: 'reset' });
       // The composer remembers the model a person picks, so one test's pick is

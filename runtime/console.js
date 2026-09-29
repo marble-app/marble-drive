@@ -31,9 +31,9 @@
   ];
   const KNOWN = new Set(LIMITS.map(([k]) => k));
   const LABELS = {
-    deploy: ['Deploy main', 'Deploying…', 'Deployed'],
-    'deploy-workshop': ["Deploy the workshop's copy", 'Deploying…', 'Deployed'],
-    rollback: ['Roll back', 'Rolling back…', 'Rolled back'],
+    deploy: ['Update to main', 'Updating…', 'Updated'],
+    'deploy-workshop': ['Try the workshop copy', 'Installing…', 'Installed'],
+    rollback: ['Undo last update', 'Undoing…', 'Undone'],
     settings: ['Apply', 'Applying…', 'Applied'],
     passphrase: ['New passphrase', 'Changing…', 'Changed'],
     claude: ['', 'Switching…', 'Switched'],
@@ -69,6 +69,7 @@
   const S = {
     view: VIEWS.some(([v]) => v === store.get('view')) ? store.get('view') : 'drives',
     drive: store.get('drive'),
+    overview: store.get('overview', true), // the whole fleet in the detail pane, not one drive
     job: store.get('job'),
     open: false, // the detail slid in, on a phone
     fleet: [],
@@ -191,6 +192,115 @@
   const subjectOf = (sha) => (sha && S.workshop?.main?.commits?.find((c) => c.sha.startsWith(sha))?.subject) ?? null;
   const running = (target, kinds) => S.jobs.find((j) => j.state === 'running' && (j.target === target || (j.target === 'fleet' && j.meta?.targets?.includes(target))) && (!kinds || kinds.includes(j.kind) || (j.kind === 'ship' && kinds.includes('deploy'))));
   const failedUnseen = (d) => d.lastJob && d.lastJob.state === 'failed' && !S.seen.has(d.lastJob.id);
+  // One word and one colour per state, everywhere a drive shows: online is
+  // running, asleep is paused (wakes in a second), stopped is cold (wakes in
+  // a few), busy is a console job on it, failed is a job that did not finish.
+  const STATES = { busy: 'Working', failed: 'Failed', awake: 'Online', asleep: 'Asleep', stopped: 'Stopped' };
+  const machine = (d) => d.awake ? 'awake' : d.status === 'cold' ? 'stopped' : 'asleep';
+  const stateOf = (d) => running(d.name) ? 'busy' : failedUnseen(d) ? 'failed' : machine(d);
+  function chip(d, state, long = false) {
+    const when = long ? (d.since ? clock(d.since) : '') : ago(d.since);
+    const text = state === 'awake' || state === 'asleep' || state === 'stopped'
+      ? `${STATES[state]}${when && when !== 'now' ? (long ? ` since ${when}` : ` · ${when}`) : ''}`
+      : STATES[state];
+    return h('span.chip', { 'data-state': state, text });
+  }
+
+  // Whether its agents can run on Claude, in a tone and a word: signed in
+  // (Claude Code's own `claude auth status`, read at the last look), on a
+  // saved API key, not signed in, or not checked yet.
+  function claudeOf(d) {
+    const seen = d.seen;
+    if (!seen) return { tone: 'mute', word: 'Not checked', short: 'Claude ?', detail: 'Look now reads it' };
+    const st = seen.claudeStatus;
+    const key = (seen.keys ?? []).includes('anthropic');
+    if (seen.claudeAuth === 'api') {
+      return key ? { tone: 'info', word: 'API key', short: 'API key', detail: 'Its agents use a saved API key' }
+        : { tone: 'bad', word: 'No API key', short: 'No key', detail: 'Set to an API key, but none is saved: its agents cannot run' };
+    }
+    if (st?.loggedIn === true) {
+      return { tone: 'good', word: 'Signed in', short: 'Claude ✓', detail: st.email ? `as ${st.email}` : 'with a Claude login', plan: st.plan, org: st.org };
+    }
+    if (st?.loggedIn === false) return { tone: 'bad', word: 'Not signed in', short: 'Claude ✕', detail: 'Its agents cannot run until someone signs in' };
+    if (st?.error) return { tone: 'warn', word: 'Could not ask', short: 'Claude ?', detail: st.error };
+    // A look from before the console asked Claude Code: only whether a login file is there.
+    return seen.claudeLogin ? { tone: 'warn', word: 'Login found', short: 'Claude ?', detail: 'A login is on the machine; Look now checks it' }
+      : { tone: 'bad', word: 'Not signed in', short: 'Claude ✕', detail: 'No login on the machine' };
+  }
+  const PLANS = { max: 'Max', pro: 'Pro', team: 'Team', enterprise: 'Enterprise' };
+
+  function badge(tone, text, title) {
+    return h('span.badge', { 'data-tone': tone, title }, text);
+  }
+
+  // ------------------------------------------------------------- pictures
+
+  const DAY = 24 * 3600_000;
+  const TONE = { awake: 'good', asleep: 'warn', stopped: 'mute' };
+  const pct = (part) => `${Math.max(0, Math.min(100, part * 100))}%`;
+  const jobsOn = (name) => S.jobs.filter((j) => j.target === name || (j.target === 'fleet' && j.meta?.targets?.includes(name)));
+
+  /** A drive's last day as a strip: green online, amber asleep, grey stopped,
+   *  hatched where nothing is known; what the console did to it as ticks. */
+  function strip(d, { tall = false } = {}) {
+    const now = Date.now();
+    const from = now - DAY;
+    const changes = d.uptime ?? [];
+    const el = h(`div.strip${tall ? '.tall' : ''}`, { role: 'img' });
+    let on = 0;
+    let known = 0;
+    changes.forEach(([at, state], i) => {
+      const a = Math.max(at, from);
+      const b = Math.min(changes[i + 1]?.[0] ?? now, now);
+      if (b <= a) return;
+      known += b - a;
+      if (state === 'awake') on += b - a;
+      el.append(h('span.span', {
+        'data-state': state,
+        title: `${STATES[state]}, ${clock(a)} to ${i + 1 < changes.length ? clock(b) : 'now'}`,
+        style: { left: pct((a - from) / DAY), width: pct((b - a) / DAY) },
+      }));
+    });
+    for (const j of jobsOn(d.name)) {
+      if (!(j.startedAt >= from)) continue;
+      el.append(h('span.tick', { 'data-state': j.state, title: `${j.title} · ${clock(j.startedAt)}`, style: { left: pct((j.startedAt - from) / DAY) } }));
+    }
+    const share = known ? on / known : null;
+    el.setAttribute('aria-label', share === null ? 'Nothing known of its last day yet' : `Online ${Math.round(share * 100)}% of the known part of its last day`);
+    return { el, share, known };
+  }
+  const axis = (marks = ['24h ago', '18h', '12h', '6h', 'now']) => h('div.axis', { 'aria-hidden': 'true' }, marks.map((m) => h('span', { text: m })));
+
+  /** Parts of a whole as one bar, each part a tone. */
+  function meter(parts) {
+    const shown = parts.filter((p) => p.n);
+    return h('div.meter', { role: 'img', 'aria-label': shown.map((p) => `${p.n} ${p.label}`).join(', ') },
+      shown.map((p) => h('span', { 'data-tone': p.tone, style: { flex: String(p.n) }, title: `${p.n} ${p.label}` })));
+  }
+  const key = (parts) => h('div.key', {}, parts.filter((p) => p.n).map((p) => h('span', {}, h('i', { 'data-tone': p.tone }), `${p.n} ${p.label}`)));
+
+  /** Where a drive sits on main: its last ten commits, oldest first, lit up to
+   *  the one it runs. */
+  function ladder(d, n = 10) {
+    const commits = (S.workshop?.main?.commits ?? []).slice(0, n);
+    if (!Number.isFinite(d.behind) || !commits.length) return null;
+    return h('div.ladder', { role: 'img', 'aria-label': d.behind === 0 ? 'On the newest commit of main' : `${d.behind} commits behind main` },
+      commits.map((c, i) => h('span', {
+        'data-has': i >= d.behind ? true : null,
+        'data-here': i === d.behind ? true : null,
+        title: `${c.sha.slice(0, 7)} ${c.subject}${i === d.behind ? ' (runs this)' : i < d.behind ? ' (not there yet)' : ''}`,
+      })).reverse());
+  }
+  function versionOf(d) {
+    if (running(d.name, ['deploy', 'rollback'])) return { tone: 'info', word: 'Updating…' };
+    if (isLocal(d.release)) return { tone: 'info', word: 'Workshop copy' };
+    if (d.behind === 0) return { tone: 'good', word: 'Up to date' };
+    if (d.behind > 0) return { tone: 'warn', word: d.releaseFrom === 'checkpoint' ? `Up to ${d.behind} behind` : `${d.behind} behind` };
+    return { tone: 'mute', word: d.release ? 'Not on main' : 'Not known' };
+  }
+  function tile(label, big, sub, ...kids) {
+    return h('div.tile', {}, h('div.tile-label', { text: label }), h('div.tile-big', {}, big, sub ? h('span.of', { text: sub }) : null), kids);
+  }
 
   async function copy(text) {
     try {
@@ -418,27 +528,29 @@
     const job = running(d.name);
     const failed = failedUnseen(d);
     const seen = d.seen;
-    const state = job ? 'busy' : failed ? 'failed' : d.awake ? 'awake' : 'asleep';
+    const state = stateOf(d);
     row.querySelector('.dot').dataset.state = state;
-    row.querySelector('.dot').setAttribute('aria-label', state);
+    row.querySelector('.dot').setAttribute('aria-label', STATES[state]);
     const title = row.querySelector('.row-title');
     title.replaceChildren(d.name, h('span.who', { text: person(d) }));
     const age = row.querySelector('.row-age');
-    age.textContent = d.awake ? 'awake' : ago(d.since);
-    age.toggleAttribute('data-awake', d.awake);
+    // The chip says the machine's state; busy and failed are the meta line's.
+    age.replaceChildren(chip(d, machine(d)));
     const meta = row.querySelector('.row-meta');
     const sha = releaseSha(d.release);
     const facts = [
       sha ? (d.releaseFrom === 'checkpoint'
         ? `${sha.slice(0, 7)} or later`
         : `${sha.slice(0, 7)}${d.behind > 0 ? ` · ${d.behind} behind` : ''}`) : null,
-      seen?.claudeAuth === 'login' ? 'Claude login' : seen?.claudeAuth === 'api' ? 'API key' : null,
       d.access,
     ].filter(Boolean);
-    meta.textContent = job ? `${job.title}…` : failed ? `${d.lastJob.title} failed` : facts.join(' · ') || 'Not looked inside yet';
+    const c = claudeOf(d);
+    if (job) meta.textContent = `${job.title}…`;
+    else if (failed) meta.textContent = `${d.lastJob.title} failed`;
+    else meta.replaceChildren(badge(c.tone, c.short, `Claude: ${c.word}${c.detail ? `, ${c.detail}` : ''}`), facts.join(' · '));
     meta.toggleAttribute('data-busy', Boolean(job));
     meta.toggleAttribute('data-failed', Boolean(failed && !job));
-    const current = d.name === S.drive && (S.open || !narrow());
+    const current = !S.overview && d.name === S.drive && (S.open || !narrow());
     row.setAttribute('aria-current', String(current));
     row.setAttribute('aria-selected', String(current));
     return row;
@@ -450,6 +562,18 @@
       ['People', S.fleet.filter((d) => d.role === 'user')],
     ].filter(([, list]) => list.length);
     const kids = [];
+    if (S.fleet.length) {
+      const tally = {};
+      for (const d of S.fleet) {
+        tally[machine(d)] = (tally[machine(d)] ?? 0) + 1;
+      }
+      const current = S.overview && (S.open || !narrow());
+      kids.push(h('button.row.overview-row', { type: 'button', role: 'option', 'aria-current': String(current), 'aria-selected': String(current), style: { animation: 'none' }, onclick: pickOverview },
+        h('span.ov-icon', { 'aria-hidden': 'true' }), h('span.row-title', { text: 'Overview' }), h('span.row-age', { text: `${S.fleet.length} drives` }),
+        h('span.row-meta', {}, meter(['awake', 'asleep', 'stopped'].map((st) => ({ n: tally[st] ?? 0, tone: TONE[st], label: STATES[st].toLowerCase() }))))));
+      kids.push(h('p.legend', {}, ['awake', 'asleep', 'stopped'].filter((st) => tally[st]).map((st) =>
+        h('span', {}, h('span.dot', { 'data-state': st }), `${tally[st]} ${STATES[st].toLowerCase()}`))));
+    }
     let i = 0;
     for (const [label, list] of groups) {
       kids.push(h('h3.group', {}, label, h('span.count', { text: String(list.length) })));
@@ -461,8 +585,19 @@
     S.animateList = false;
   }
 
+  function pickOverview() {
+    if (!S.overview) S.animateDetail = true;
+    S.overview = true;
+    S.open = true;
+    store.set('overview', true);
+    if (narrow()) history.pushState({ consoleOpen: '*' }, '');
+    paint();
+  }
+
   function pick(name) {
-    if (S.drive !== name) S.animateDetail = true;
+    if (S.drive !== name || S.overview) S.animateDetail = true;
+    S.overview = false;
+    store.set('overview', false);
     S.drive = name;
     S.open = true;
     store.set('drive', name);
@@ -482,7 +617,7 @@
   listScroll.addEventListener('keydown', (e) => {
     if (e.key !== 'ArrowDown' && e.key !== 'ArrowUp') return;
     e.preventDefault();
-    const names = [...listScroll.querySelectorAll('.row')].map((r) => r.dataset.name);
+    const names = [...listScroll.querySelectorAll('.row[data-name]')].map((r) => r.dataset.name);
     const i = names.indexOf(S.drive);
     const next = names[Math.max(0, Math.min(names.length - 1, i + (e.key === 'ArrowDown' ? 1 : -1)))];
     if (next) {
@@ -505,7 +640,16 @@
       S.drive = d.name;
       loadCheckpoints(d.name);
     }
-    drivesWell.toggleAttribute('data-open', Boolean(S.open && d));
+    drivesWell.toggleAttribute('data-open', Boolean(S.open && (d || S.overview)));
+    if (S.overview && S.fleet.length) {
+      if (!changed('detail', ['*', S.fleet, S.workshop?.main?.sha, liveJobs(), S.open])) return;
+      detailPane.querySelector('.pending')?.remove();
+      const body = overview();
+      if (!S.animateDetail) body.style.animation = 'none';
+      S.animateDetail = false;
+      detailScroll.replaceChildren(body);
+      return;
+    }
     if (!d) {
       detailScroll.replaceChildren(h('p.empty', { text: S.loaded ? 'Pick a drive.' : '' }));
       detailPane.querySelector('.pending')?.remove();
@@ -522,7 +666,7 @@
     const caret = focusKey && 'selectionStart' in active ? [active.selectionStart, active.selectionEnd] : null;
 
     const body = h('div.detail-body', { class: S.animateDetail ? null : 'still' },
-      head(d), release(d), health(d), claude(d), access(d), settings(d), checkpoints(d), d.role === 'user' ? remove(d) : null);
+      head(d), driveTiles(d), release(d), h('div.sec-pair', {}, claude(d), access(d)), health(d), settings(d), checkpoints(d), d.role === 'user' ? remove(d) : null);
     if (!S.animateDetail) body.style.animation = 'none';
     S.animateDetail = false;
     detailScroll.replaceChildren(body);
@@ -538,7 +682,6 @@
   }
 
   function head(d) {
-    const since = d.since ? clock(d.since) : '';
     const looking = S.looking.has(d.name);
     return h('div.d-head', {},
       h('div.names', {},
@@ -550,9 +693,9 @@
               paint();
             }
           } }),
-          h('span.dot', { 'data-state': running(d.name) ? 'busy' : d.awake ? 'awake' : 'asleep' }),
+          h('span.dot', { 'data-state': running(d.name) ? 'busy' : machine(d) }),
           d.name),
-        h('p.d-sub', {}, `${person(d, true)} · `, d.awake ? h('span.good', { text: `awake${since ? ` since ${since}` : ''}` }) : `asleep${since ? ` since ${since}` : ''}`)),
+        h('p.d-sub', {}, `${person(d, true)} · `, chip(d, machine(d), true))),
       h('div.actions', {},
         h('a.btn', { href: d.url, target: '_blank', rel: 'noopener' }, 'Open drive', h('span.out')),
         h('button.btn', {
@@ -564,6 +707,20 @@
           onclick: looking ? null : () => look(d.name),
         })),
       said(`look:${d.name}`));
+  }
+
+  /** One drive in four numbers: its day, its Claude, its version, its size. */
+  function driveTiles(d) {
+    const c = claudeOf(d);
+    const v = versionOf(d);
+    const sha = releaseSha(d.release);
+    const { el, share } = strip(d);
+    const seen = d.seen;
+    return h('div.tiles', {},
+      tile('Last 24 hours', share === null ? '—' : `${Math.round(share * 100)}%`, 'online', el, axis(['24h ago', '12h', 'now'])),
+      tile('Claude', h('span.tone', { 'data-tone': c.tone, text: c.word }), c.plan ? PLANS[c.plan] ?? c.plan : null, h('p.tile-note', { text: c.detail })),
+      tile('App version', sha ? h('span.mono', { text: sha.slice(0, 7) }) : '—', null, h('div.b-line', {}, badge(v.tone, v.word)), ladder(d)),
+      tile('Drive', seen ? String(seen.documents ?? 0) : '—', 'documents', h('p.tile-note', { text: seen ? `${bytes(seen.driveBytes)} in it · ${bytes(seen.diskFree)} free` : 'Look now counts them' })));
   }
 
   async function look(name) {
@@ -595,12 +752,15 @@
     const history = (seen?.history ?? []).filter((r) => r !== live).reverse();
     const status = !live ? h('span.faint', { text: 'Not known yet: Look now reads it' })
       : isLocal(live) ? h('span.warn', { text: "The workshop's copy, not main" })
-        : d.releaseFrom === 'checkpoint' ? h('span.soft', { text: d.behind > 0 ? `At most ${d.behind} behind main: known from its last deploy's checkpoint, and a deploy made without one would not show. Look now to be sure.` : 'Known from its last deploy’s checkpoint.' })
+        : d.releaseFrom === 'checkpoint' ? (d.behind > 0
+          ? h('span.warn', { text: `At most ${d.behind} behind main. This is read from the checkpoint its last update made, so an update made without one would not show. Look now to be sure.` })
+          : h('span.good', { text: 'Up to date with main, going by the checkpoint its last update made' }))
         : d.behind === 0 ? h('span.good', { text: 'Up to date with main' })
           : d.behind > 0 ? h('span.warn', { text: `${d.behind} behind main` })
             : h('span.faint', { text: 'Not on main' });
-    const source = d.releaseFrom === 'checkpoint' ? 'from a checkpoint' : d.releaseFrom === 'console' ? 'as deployed from here' : seen ? `looked ${since(seen.lookedAt)}` : null;
-    return section('Release', source,
+    const source = d.releaseFrom === 'checkpoint' ? 'read from a checkpoint' : d.releaseFrom === 'console' ? 'as updated from here' : seen ? `looked ${since(seen.lookedAt)}` : null;
+    const back = history.length ? (releaseSha(history[0]) ?? history[0]).slice(0, 7) : null;
+    return section('App version', source,
       live ? h('p.lede', {}, h('span.sha', { text: sha ? sha.slice(0, 7) : live }), ' ', h('b', { text: subject ?? (isLocal(live) ? 'a working copy' : '') }), when ? h('span.faint', { text: ` · ${clock(when)}` }) : null) : null,
       h('p.lede', {}, status),
       history.length ? h('p.faint', { style: { 'font-size': '.8rem', margin: '.35rem 0 0' } }, `Before it: ${history.map(releaseName).join(', ')}`) : null,
@@ -608,19 +768,27 @@
         'Checkpoints fail here (Fly’s store is stuck), so deploys skip them. ',
         h('button.btn.quiet', { type: 'button', style: { padding: '0 .3rem' }, onclick: () => start(`stuck:${d.name}`, () => api(`drives/${encodeURIComponent(d.name)}/checkpoints-ok`, { method: 'POST' }).then(refresh)) }, 'Try them again')) : null,
       h('div.row-actions', {},
-        jobButton({ key: `deploy:${d.name}`, target: d.name, kind: 'deploy', onclick: (e) => deployPlan(e.currentTarget, d.name, 'main') }),
-        jobButton({ key: `deployw:${d.name}`, target: d.name, kind: 'deploy-workshop', cls: 'quiet', onclick: (e) => deployPlan(e.currentTarget, d.name, 'workshop') }),
-        jobButton({ key: `rollback:${d.name}`, target: d.name, kind: 'rollback', cls: 'quiet', disabled: !history.length, title: history.length ? `Back to ${(releaseSha(history[0]) ?? history[0]).slice(0, 7)}` : 'Nothing to go back to', onclick: () => start(`rollback:${d.name}`, () => api(`drives/${encodeURIComponent(d.name)}/rollback`, { method: 'POST' })) })),
+        jobButton({ key: `deploy:${d.name}`, target: d.name, kind: 'deploy', title: 'Install the newest Marble Drive from GitHub main', onclick: (e) => deployPlan(e.currentTarget, d.name, 'main') }),
+        jobButton({ key: `deployw:${d.name}`, target: d.name, kind: 'deploy-workshop', cls: 'quiet', title: 'Install the workshop checkout, uncommitted edits included, to test it before shipping', onclick: (e) => deployPlan(e.currentTarget, d.name, 'workshop') }),
+        jobButton({ key: `rollback:${d.name}`, target: d.name, kind: 'rollback', cls: 'quiet', disabled: !history.length, title: back ? `Back to ${back}` : 'Nothing to go back to', onclick: () => start(`rollback:${d.name}`, () => api(`drives/${encodeURIComponent(d.name)}/rollback`, { method: 'POST' })) })),
+      // What the three buttons change, since "deploy" alone does not say.
+      h('dl.explain', {},
+        h('dt', { text: 'Update to main' }), h('dd', { text: 'installs the newest Marble Drive from GitHub main.' }),
+        h('dt', { text: 'Try the workshop copy' }), h('dd', { text: 'installs your workshop checkout, uncommitted edits included, to test it here before shipping.' }),
+        h('dt', { text: 'Undo last update' }), h('dd', { text: back ? `puts back the version it had before (${back}).` : 'puts back the version it had before; there is none to go back to yet.' }),
+        h('p', { text: `All three change only the app ${d.name} runs. The documents, chats and files in the drive stay as they are, and a checkpoint is made first.` })),
       said(`deploy:${d.name}`), said(`deployw:${d.name}`), said(`rollback:${d.name}`));
   }
 
   function deployPlan(trigger, name, source) {
     const key = source === 'workshop' ? `deployw:${name}` : `deploy:${name}`;
     openPop(trigger, (close) => {
-      const body = h('div.pop-body', {}, h('h4', { text: source === 'workshop' ? `The workshop's copy, to ${name}` : `Main, to ${name}` }), h('p.loading', { text: 'Reading the plan…' }));
+      const title = source === 'workshop' ? `Install the workshop copy on ${name}` : `Update ${name} to main`;
+      const body = h('div.pop-body', {}, h('h4', { text: title }), h('p.loading', { text: 'Reading the plan…' }));
       api(`plan?name=${encodeURIComponent(name)}&source=${source}`).then((plan) => {
         body.replaceChildren(
-          h('h4', { text: source === 'workshop' ? `The workshop's copy, to ${name}` : `Main, to ${name}` }),
+          h('h4', { text: title }),
+          h('p.soft', { style: { margin: '0', 'font-size': '.85rem' }, text: 'Replaces the Marble Drive app it runs. Its documents and chats are not touched.' }),
           plan.ok ? h('ul.steps', {},
             source === 'main' ? h('li', {}, h('span.sha', { text: (plan.sha ?? '').slice(0, 7) }), ' ', subjectOf(plan.sha) ?? '') : h('li', { text: 'Everything in the workshop checkout, committed or not' }),
             h('li', { text: `${(plan.marble ?? '').replace('@bdhmin/', '')}${plan.marble?.startsWith('/') ? ' (packed from the workshop)' : ''} · Claude Code ${plan.claude ?? ''}` }),
@@ -631,7 +799,7 @@
             h('button.btn.primary', {
               type: 'button',
               disabled: !plan.ok,
-              text: 'Deploy',
+              text: source === 'workshop' ? 'Install' : 'Update',
               onclick: () => {
                 close();
                 start(key, () => api(`drives/${encodeURIComponent(name)}/deploy`, { method: 'POST', body: { source } }));
@@ -650,9 +818,6 @@
       h('dl.facts', {},
         fact('Working', seen.working === null || seen.working === undefined ? '—' : seen.working ? 'Yes' : 'Idle'),
         fact('Open tabs', seen.health?.streams ?? '—'),
-        fact('Documents', seen.documents ?? '—'),
-        fact('Drive', bytes(seen.driveBytes)),
-        fact('Free', bytes(seen.diskFree)),
         fact('Claude Code', seen.claudeVersion ?? '—'),
         fact('marble', seen.marbleVersion ?? '—')),
       lines ? h('pre.lines', { text: lines }) : null,
@@ -683,13 +848,18 @@
       start(`claude:${d.name}`, () => api(`drives/${encodeURIComponent(d.name)}/claude`, { method: 'POST', body: { auth } }));
     };
     const control = segmented([['login', 'Claude login'], ['api', 'API key']], busy ? null : mode, choose, { small: true, busy: Boolean(busy), label: 'Which Claude pays' });
-    return section('Claude', null,
+    const c = claudeOf(d);
+    return section('Claude', seen ? `checked ${since(seen.lookedAt)}` : null,
+      h('div.status-card', { 'data-tone': c.tone },
+        h('i', { 'aria-hidden': 'true' }),
+        h('div', {}, h('b', { text: `${c.word}${c.plan ? ` · ${PLANS[c.plan] ?? c.plan}` : ''}` }),
+          h('small', { text: [c.detail, c.org].filter(Boolean).join(' · ') }))),
       h('div.kv', {},
         h('div.what', {}, h('span', { text: busy ? 'Switching…' : mode === 'login' ? 'Agents here use a Claude login' : mode === 'api' ? 'Agents here use an API key' : 'Not known yet' }),
           seen ? h('small', { text: [seen.claudeLogin ? 'A login is on this machine' : 'No login on this machine', (seen.keys ?? []).includes('anthropic') ? 'an API key is saved' : 'no API key saved'].join(' · ') } ) : null),
         control),
       mode === 'api' && seen && !(seen.keys ?? []).includes('anthropic') ? h('p.warn', { style: { margin: '.7rem 0 0', 'font-size': '.85rem' }, text: 'Its agents cannot run: no API key is saved. Paste one in its Agents settings, or switch it to a Claude login.' }) : null,
-      mode === 'login' && seen && !seen.claudeLogin ? h('div', {},
+      mode !== 'api' && seen && c.tone === 'bad' ? h('div', {},
         h('p.warn', { style: { margin: '.7rem 0 0', 'font-size': '.85rem' }, text: 'Sign it in: from your Mac, open its console and run Claude, then /login.' }),
         codeLine(`sprite console -o marble-drive -s ${d.name}`),
         codeLine('~/app/current/marble-drive/node_modules/.bin/claude')) : null,
@@ -977,6 +1147,68 @@
       said(`remove:${d.name}`));
   }
 
+  // --------------------------------------------------------------- overview
+
+  /** The whole fleet at once: four numbers, then every drive side by side,
+   *  then everyone's last day. */
+  function overview() {
+    const f = S.fleet;
+    const count = (fn) => f.filter(fn).length;
+    const states = ['awake', 'asleep', 'stopped'].map((st) => ({ n: count((d) => machine(d) === st), tone: TONE[st], label: STATES[st].toLowerCase() }));
+    const cl = f.map(claudeOf);
+    const claudeParts = [
+      { n: cl.filter((c) => c.tone === 'good').length, tone: 'good', label: 'signed in' },
+      { n: cl.filter((c) => c.tone === 'info').length, tone: 'info', label: 'on an API key' },
+      { n: cl.filter((c) => c.tone === 'bad').length, tone: 'bad', label: 'cannot run' },
+      { n: cl.filter((c) => c.tone === 'warn' || c.tone === 'mute').length, tone: 'mute', label: 'not checked' },
+    ];
+    const vs = f.map(versionOf);
+    const versionParts = ['good', 'warn', 'info', 'mute'].map((tone) => ({ n: vs.filter((v) => v.tone === tone).length, tone, label: { good: 'up to date', warn: 'behind', info: 'workshop or updating', mute: 'not known' }[tone] }));
+    const docs = f.reduce((n, d) => n + (d.seen?.documents ?? 0), 0);
+    const size = f.reduce((n, d) => n + (d.seen?.driveBytes ?? 0), 0);
+    const biggest = Math.max(1, ...f.map((d) => d.seen?.driveBytes ?? 0));
+    const looked = count((d) => d.seen);
+
+    const tiles = h('div.tiles', {},
+      tile('Online now', String(states[0].n), `of ${f.length}`, meter(states), key(states)),
+      tile('Claude', String(claudeParts[0].n + claudeParts[1].n), `of ${f.length} can run agents`, meter(claudeParts), key(claudeParts)),
+      tile('App version', String(versionParts[0].n), `of ${f.length} up to date`, meter(versionParts), key(versionParts)),
+      tile('Documents', String(docs), bytes(size), h('p.tile-note', { text: looked < f.length ? `Counted on ${looked} of ${f.length}: the rest have not been looked inside` : 'Across every drive' })));
+
+    const board = h('div.board', { role: 'table', 'aria-label': 'Every drive' },
+      h('div.b-row.b-head', { role: 'row' }, ['Drive', 'Status', 'Claude', 'App version', 'Documents'].map((t) => h('span', { role: 'columnheader', text: t }))),
+      f.map((d, i) => {
+        const c = claudeOf(d);
+        const v = versionOf(d);
+        const sha = releaseSha(d.release);
+        return h('button.b-row', { type: 'button', role: 'row', style: { '--i': String(i) }, onclick: () => pick(d.name) },
+          h('span.b-name', { role: 'cell' }, h('span.dot', { 'data-state': stateOf(d) }), h('b', { text: d.name }), h('span.who', { text: person(d) })),
+          h('span', { role: 'cell' }, chip(d, machine(d))),
+          h('span.b-stack', { role: 'cell' }, badge(c.tone, c.word), h('small', { text: c.tone === 'good' ? [c.plan && PLANS[c.plan], c.detail.replace(/^as /, '')].filter(Boolean).join(' · ') : c.detail })),
+          h('span.b-stack', { role: 'cell' }, h('span.b-line', {}, badge(v.tone, v.word), sha ? h('span.sha', { text: sha.slice(0, 7) }) : null), ladder(d)),
+          h('span.b-stack', { role: 'cell' }, h('span', { text: d.seen ? `${d.seen.documents ?? 0} · ${bytes(d.seen.driveBytes)}` : '—' }),
+            d.seen ? h('span.bar', {}, h('i', { style: { width: pct((d.seen.driveBytes ?? 0) / biggest) } })) : null));
+      }));
+
+    const day = f.map((d) => ({ d, ...strip(d, { tall: true }) }));
+    const timeline = h('div.timeline', {},
+      h('div.t-row.t-axis', {}, h('span'), axis(), h('span')),
+      day.map(({ d, el, share }) => h('div.t-row', {},
+        h('button.t-name', { type: 'button', onclick: () => pick(d.name), text: d.name }),
+        el,
+        h('span.t-share', { text: share === null ? '—' : `${Math.round(share * 100)}%`, title: 'Online, of the part of the day the console knows' }))));
+
+    return h('div.detail-body.ov', {},
+      h('div.d-head', {}, h('div.names', {}, h('h2.d-name', {},
+        h('button.back', { type: 'button', 'aria-label': 'Back to the drives', onclick: () => { if (history.state?.consoleOpen) history.back(); else { S.open = false; paint(); } } }),
+        'Overview'), h('p.d-sub', { text: `${f.length} drives · read ${since(S.fleetAt) || 'now'}` }))),
+      tiles,
+      h('section.sec', {}, h('h3', {}, 'Every drive', h('span.note', { text: 'pick one to manage it' })), board),
+      h('section.sec', {}, h('h3', {}, 'The last 24 hours', h('span.note', { text: 'online, asleep, stopped; ticks are what the console did' })), timeline,
+        h('div.key', {}, [['good', 'online'], ['warn', 'asleep'], ['mute', 'stopped']].map(([tone, label]) => h('span', {}, h('i', { 'data-tone': tone }), label)),
+          h('span', {}, h('i.unknown'), 'not known yet'), h('span', {}, h('i.tick-key'), 'a console job'))));
+  }
+
   // ------------------------------------------------------------------ ship
 
   function drawShip() {
@@ -1004,15 +1236,13 @@
       h('tbody', {}, S.fleet.map((d, i) => {
         const sha = releaseSha(d.release);
         return h('tr', { style: { '--i': String(i) } },
-          h('td', {}, h('span.name', {}, h('span.dot', { 'data-state': running(d.name) ? 'busy' : failedUnseen(d) ? 'failed' : d.awake ? 'awake' : 'asleep' }), d.name)),
+          h('td', {}, h('span.name', {}, h('span.dot', { 'data-state': stateOf(d), title: STATES[stateOf(d)] }), d.name)),
           h('td', {}, sha ? h('span.sha', { text: sha.slice(0, 7) }) : h('span.faint', { text: '—' }), isLocal(d.release) ? h('span.faint', { text: ' local' }) : null, d.releaseFrom === 'checkpoint' ? h('span.faint', { text: ' or later' }) : null),
-          h('td', {}, running(d.name) ? h('span.good', { text: `${running(d.name).title}…` })
-            : d.behind === 0 ? h('span.good', { text: 'Up to date' })
-              : d.behind > 0 ? h('span.warn', { text: d.releaseFrom === 'checkpoint' ? `Up to ${d.behind} behind` : `${d.behind} behind` }) : h('span.faint', { text: d.release ? 'Not on main' : 'Not known yet' })),
-          h('td', {}, d.lastJob ? h('span', { class: d.lastJob.state === 'failed' ? 'bad' : 'soft', text: `${d.lastJob.title.replace(` ${d.name}`, '').replace(/ to$/, '')}${d.lastJob.state === 'failed' ? ', failed' : ''} · ${since(d.lastJob.endedAt)}` }) : h('span.faint', { text: '—' })),
+          h('td', {}, h('div.b-line', {}, running(d.name) ? badge('info', `${running(d.name).title}…`) : badge(versionOf(d).tone, versionOf(d).word), ladder(d))),
+          h('td', {}, d.lastJob ? h('span', { class: d.lastJob.state === 'failed' ? 'bad' : 'soft', text: `${d.lastJob.title.replace(` ${d.name}`, '').replace(/ (to|on)$/, '')}${d.lastJob.state === 'failed' ? ', failed' : ''} · ${since(d.lastJob.endedAt)}` }) : h('span.faint', { text: '—' })),
           h('td.acts', {},
-            jobButton({ key: `deploy:${d.name}`, target: d.name, kind: 'deploy', label: 'Deploy', cls: 'quiet', onclick: (e) => deployPlan(e.currentTarget, d.name, 'main') }),
-            jobButton({ key: `rollback:${d.name}`, target: d.name, kind: 'rollback', cls: 'quiet', disabled: !(d.seen?.history ?? []).filter((r) => r !== d.seen?.release).length, onclick: () => start(`rollback:${d.name}`, () => api(`drives/${encodeURIComponent(d.name)}/rollback`, { method: 'POST' })) })));
+            jobButton({ key: `deploy:${d.name}`, target: d.name, kind: 'deploy', label: 'Update', cls: 'quiet', title: `Update ${d.name}'s Marble Drive app to main. Its documents are not touched.`, onclick: (e) => deployPlan(e.currentTarget, d.name, 'main') }),
+            jobButton({ key: `rollback:${d.name}`, target: d.name, kind: 'rollback', label: 'Undo', cls: 'quiet', title: 'Put back the app version it had before its last update', disabled: !(d.seen?.history ?? []).filter((r) => r !== d.seen?.release).length, onclick: () => start(`rollback:${d.name}`, () => api(`drives/${encodeURIComponent(d.name)}/rollback`, { method: 'POST' })) })));
       })));
     const drives = h('div.card.wide', { style: { '--i': '1' } },
       h('div.card-head', {}, h('h2', { text: 'Drives' }), h('span.soft', { text: `${S.fleet.filter((d) => d.behind === 0).length} of ${S.fleet.length} up to date` })),

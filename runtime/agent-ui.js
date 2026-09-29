@@ -4855,6 +4855,12 @@
       try { return String(this.brief?.() ?? '').trim(); } catch { return ''; }
     }
 
+    /** What the brief's words point at, for the host rather than the prose:
+     *  Describe mode sets this to the marks and what is on screen under them. */
+    get briefContext() {
+      try { return this.briefMarks?.() ?? null; } catch { return null; }
+    }
+
     updateSendable() {
       const noAgent = !this.getAttribute('conversation') && !radioValue(this.shadowRoot, 'agent');
       const canSend = Boolean(this.input.value.trim())
@@ -4993,7 +4999,9 @@
       const brief = this.briefText;
       if (!typed && !brief && !skillChips.length && !compactChip && !this.attachments.length) return;
 
-      let prompt = brief && !['skill', 'compact'].includes(slash?.kind) && !skillChips.length && !compactChip ? `${brief} ${typed}`.trim() : typed;
+      // A skill or /compact sent from a card on the marks is not about them.
+      const plain = !['skill', 'compact'].includes(slash?.kind) && !skillChips.length && !compactChip;
+      let prompt = brief && plain ? `${brief} ${typed}`.trim() : typed;
       if (compactChip || slash?.kind === 'compact') prompt = '/compact';
       else if (slash?.kind === 'skill') prompt = `/${slash.id}${slash.rest ? ` ${slash.rest}` : ''}`;
       else if (skillChips.length) prompt = `${skillChips.map((chip) => `/${chip.id}`).join(' ')}${typed ? ` ${typed}` : ''}`.trim();
@@ -5008,6 +5016,9 @@
         if (packed) prompt = `${packed}\n\n${prompt}`.trimEnd();
         const context = this.api.context();
         if (this.skipSelection) context.selection = [];
+        // What the marks are over — an area picked with no ink on it too.
+        const marked = plain ? this.briefContext : null;
+        if (marked) context.marked = marked;
         let id = this.getAttribute('conversation');
         if (!id) {
           const provider = radioValue(this.shadowRoot, 'agent');

@@ -51,7 +51,7 @@ __ICON__
        that is what a document does. No webfont is named, and no brand face
        either: the first name here is whatever the machine calls its own, so a
        note looks like it belongs to the person rather than to a company. */
-    --ui: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    --ui: "Google Sans", Roboto, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
     --serif: ui-serif, "New York", "Iowan Old Style", "Palatino Linotype", Palatino, Georgia, serif;
     --rail: 15.5rem;
     --measure: 34rem;
@@ -77,9 +77,9 @@ __ICON__
   /* ------------------------------------------------------------------- shell
 
      Two regions and no third. The rail is the notes; the sheet is the one you
-     are in. There is no toolbar, no ruler, no inspector and no menu bar,
-     because a place to jot text down is worth less every time it asks you to
-     choose something first. */
+     are in, with the toolbar pinned across its top. There is no ruler, no
+     inspector and no menu bar, because a place to jot text down is worth less
+     every time it asks you to choose something first. */
   body.app {
     margin: 0; display: grid; grid-template-columns: var(--rail) minmax(0, 1fr);
     background: var(--paper); color: var(--ink);
@@ -93,7 +93,7 @@ __ICON__
        the rail is what is under it. */
     padding-left: env(safe-area-inset-left, 0px);
   }
-  .railhead { display: flex; align-items: center; gap: .5rem; padding: .8rem .6rem 0 .85rem; }
+  .railhead { display: flex; align-items: center; gap: .35rem; padding: .8rem .6rem 0 .45rem; }
   .name {
     flex: 1; min-width: 0; margin: 0; font-size: .95rem; font-weight: 600;
     letter-spacing: -.005em; overflow-wrap: break-word;
@@ -208,6 +208,14 @@ __ICON__
      least it can, and this is how much air it leaves when it does. */
   .sheet { min-width: 0; min-height: 0; overflow: auto; background: var(--card); scroll-padding-bottom: 2rem; }
 
+  /* The page is the whole of the sheet under the toolbar, however little is
+     written on it: a short note is still a full sheet of paper, and a press
+     anywhere on it lands in the text. */
+  .sheet { display: flex; flex-direction: column; }
+  .sheet > .tools { flex: none; }
+  .notes { flex: 1 0 auto; display: flex; flex-direction: column; }
+  .notes > .note { flex: 1 0 auto; }
+
   /* Which note shows is the same one attribute, derived the same way. With no
      host at all nothing derives anything, so the first note is the one that
      reads — a note opened straight off the disk is still a note. */
@@ -216,11 +224,16 @@ __ICON__
   .notes:not(.marble-derived) .note:first-child { display: block; }
 
   .note {
-    max-width: var(--measure); margin: 0 auto; outline: none;
-    /* Half a screen of room under the last line, so the line you are writing
-       is never the one at the bottom of the window. */
-    padding: 4.5rem 2rem 45vh;
-    font: 1.0625rem/1.72 var(--serif);
+    /* The page runs to the edges of the sheet, less a hand's breadth: the
+       text is the room, not a column standing in the middle of it. */
+    max-width: none; margin: 0; outline: none;
+    /* A third of a screen of room under the last line, so the line you are
+       writing is never the one at the bottom of the window — and no more, so
+       the end of a note is not a page of nothing to scroll through. */
+    padding: 1.4rem 1.6rem 33vh;
+    /* The Design System's one sans, a step above the chrome's 14 because this
+       is read rather than glanced at. */
+    font: 15px/1.6 var(--ui);
   }
 
   /* ------------------------------------------------------------ the text
@@ -232,26 +245,72 @@ __ICON__
      way you would have written them by hand. */
   .note > * { margin: 0; white-space: pre-wrap; overflow-wrap: break-word; }
   .note > p + * { margin-top: .85em; }
-  .note > h2 { margin-top: 1.7em; font-size: 1.32rem; font-weight: 600; line-height: 1.3; letter-spacing: -.012em; }
-  .note > h3 { margin-top: 1.5em; font-size: 1.08rem; font-weight: 600; line-height: 1.35; }
-  .note > h2 + *, .note > h3 + * { margin-top: .5em; }
+  .note > h2 { margin-top: 1.6em; font-size: 1.3rem; font-weight: 600; line-height: 1.3; letter-spacing: -.015em; }
+  .note > h3 { margin-top: 1.4em; font-size: 1.1rem; font-weight: 600; line-height: 1.35; letter-spacing: -.008em; }
+  .note > h4 { margin-top: 1.3em; font: 600 .8rem/1.4 var(--ui); letter-spacing: .06em; text-transform: uppercase; color: var(--muted); }
+  .note > h2 + *, .note > h3 + *, .note > h4 + * { margin-top: .5em; }
+  /* A quote is a block with a square bar down its edge — the bar is drawn, the
+     tag is what it is. */
+  .note > blockquote { margin-top: .85em; padding-left: 1em; border-left: 3px solid var(--line); color: var(--muted); }
+  .note > blockquote + blockquote { margin-top: 0; padding-top: .25em; }
 
   /* The first line is the note's name — in the rail, in the file and here.
      Drawing it as one means nothing has to be styled to get a titled note, and
      no second copy of the name exists to fall out of step with it. */
   .note > :first-child {
-    margin: 0 0 .9rem; font-size: 1.5rem; font-weight: 600;
-    line-height: 1.28; letter-spacing: -.014em;
+    margin: 0 0 .9rem; font-size: 1.55rem; font-weight: 600;
+    line-height: 1.25; letter-spacing: -.02em;
   }
   .note > :first-child:empty::after { content: "Jot something down"; color: var(--placeholder); font-weight: 400; }
 
-  /* A bullet is drawn, never stored, so moving a line around costs the file
-     nothing but the move. */
-  .note > [data-list="bullet"] { padding-left: 1.15em; position: relative; }
-  .note > [data-list="bullet"] + [data-list="bullet"] { margin-top: .25em; }
-  .note > [data-list="bullet"]::before {
-    content: "\2022"; position: absolute; left: .1em; color: var(--faint);
+  /* A bullet, a number and a box are drawn, never stored, so moving a line
+     around costs the file nothing but the move. What kind of list a line is,
+     how far in it sits and whether its box is ticked are three attributes on
+     the line; the numbers are counted by the stylesheet from the lines around
+     it, so no line carries a number that could go stale. */
+  .note > [data-list] { position: relative; padding-left: calc(1.6em + var(--in, 0) * 1.6em); }
+  .note > [data-indent="1"] { --in: 1; }
+  .note > [data-indent="2"] { --in: 2; }
+  .note > [data-indent="3"] { --in: 3; }
+  .note > [data-list] + [data-list] { margin-top: .25em; }
+  .note > [data-list]::before {
+    position: absolute; left: calc(var(--in, 0) * 1.6em); width: 1.25em;
+    color: var(--faint); text-align: center;
   }
+  .note > [data-list="bullet"]::before { content: "\2022"; }
+  .note > [data-list="bullet"][data-indent="1"]::before { content: "\25E6"; }
+  .note > [data-list="bullet"][data-indent="2"]::before,
+  .note > [data-list="bullet"][data-indent="3"]::before { content: "\25AA"; }
+
+  /* A run of numbered lines counts itself. Anything that is not a list line
+     ends the run; a line at one depth starts the count again for the depths
+     under it. */
+  .note { counter-reset: n0 n1 n2 n3; }
+  .note > :not([data-list]) { counter-reset: n0 n1 n2 n3; }
+  .note > [data-list]:not([data-indent]) { counter-reset: n1 n2 n3; }
+  .note > [data-list][data-indent="1"] { counter-reset: n2 n3; }
+  .note > [data-list][data-indent="2"] { counter-reset: n3; }
+  .note > [data-list="number"]:not([data-indent]) { counter-increment: n0; }
+  .note > [data-list="number"][data-indent="1"] { counter-increment: n1; }
+  .note > [data-list="number"][data-indent="2"] { counter-increment: n2; }
+  .note > [data-list="number"][data-indent="3"] { counter-increment: n3; }
+  .note > [data-list="number"]::before { content: counter(n0) "."; text-align: right; width: 1.2em; font-variant-numeric: tabular-nums; }
+  .note > [data-list="number"][data-indent="1"]::before { content: counter(n1, lower-alpha) "."; }
+  .note > [data-list="number"][data-indent="2"]::before { content: counter(n2, lower-roman) "."; }
+  .note > [data-list="number"][data-indent="3"]::before { content: counter(n3) "."; }
+
+  /* The box is the ::before, so pressing it is pressing the line's left edge;
+     the script reads the press by where it landed. */
+  .note > [data-list="check"]::before {
+    content: ""; top: .36em; left: calc(var(--in, 0) * 1.6em + .1em);
+    width: .95em; height: .95em; border: 1.5px solid var(--faint); border-radius: 4px;
+    cursor: pointer; transition: background var(--t) var(--ease), border-color var(--t) var(--ease);
+  }
+  .note > [data-list="check"][data-done]::before {
+    border-color: var(--accent-ink);
+    background: var(--accent-ink) url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Cpath d='M3.5 8.4l2.9 2.9 6-6.3' fill='none' stroke='white' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E") center / 100% no-repeat;
+  }
+  .note > [data-list="check"][data-done] { color: var(--faint); text-decoration: line-through; text-decoration-color: var(--line); }
   .note > hr { border: 0; border-top: 1px solid var(--line); margin: 1.6em 0; }
 
   /* An empty line is still a line you can stand on. A block with no children
@@ -283,7 +342,8 @@ __ICON__
     .rows { display: flex; gap: .3rem; overflow-x: auto; padding: 0 .45rem .5rem; }
     .row { flex: 0 0 auto; width: 9.5rem; }
     .open .s { display: none; }
-    .note { padding: 1.8rem 1.25rem 45vh; }
+    /* A phone reads at the Design System's seventeen. */
+    .note { padding: 1rem 1rem 33vh; font-size: 17px; line-height: 1.5; }
   }
 
   /* The save pill belongs to the affordance library, and it is fixed to the
@@ -328,13 +388,13 @@ __ICON__
     html { padding: 0; }
     html, body.app { height: auto; }
     body.app { display: block; }
-    .rail, .marble-status { display: none; }
-    .sheet { overflow: visible; }
+    .rail, .marble-status, .tools { display: none !important; }
+    .sheet, .notes { display: block; overflow: visible; }
     /* The page margins are the printer's now, and the half screen of room
        under the last line would come out as a blank page. Paper reads a size
        tighter — and keeps a measure, in ems of the size it is actually set in
        rather than the screen's rems. */
-    .note { max-width: 36em; padding: 0; font: 11pt/1.55 var(--serif); }
+    .note { max-width: 36em; padding: 0; font: 10.5pt/1.55 var(--ui); }
     .note > :first-child { font-size: 17pt; }
     .note > :first-child:empty::after { content: none; }
     /* A heading is no use at the foot of a page, and one line of a paragraph is
@@ -349,11 +409,252 @@ __ICON__
     * { transition-duration: 1ms !important; animation-duration: 1ms !important; }
   }
 </style>
+<style>
+  /* --------------------------------------------------------- reordering
+
+     A row picked up is lifted clear of the rail — the open note's white, and a
+     deeper shadow than anything resting — and follows the pointer on the one
+     axis the list runs along. The rows it passes step aside on the house ease;
+     it does not, because it is under the hand. Nothing scales. */
+  .rows {
+    --lift: 0 10px 28px light-dark(rgba(74,66,52,.16), rgba(0,0,0,.52)),
+            0 2px 6px light-dark(rgba(74,66,52,.08), rgba(0,0,0,.3));
+  }
+  /* A row is a thing you pick up, not text you select, and a held finger is
+     a pick-up rather than a callout. */
+  .row { -webkit-user-select: none; user-select: none; -webkit-touch-callout: none; }
+  .rows.marble-sorting .row:not(.marble-lifted) {
+    transition: transform var(--t) var(--ease-out), background var(--t) var(--ease), box-shadow var(--t) var(--ease);
+  }
+  .row.marble-lifted {
+    position: relative; z-index: 2;
+    background: var(--row-on); box-shadow: var(--lift);
+    transition: background var(--t) var(--ease), box-shadow var(--t) var(--ease-out);
+  }
+  .rows.marble-sorting, .rows.marble-sorting * { cursor: grabbing; }
+  /* Mid-gesture the pointer is over rows it is not choosing. */
+  .rows.marble-sorting .row:not(.marble-lifted):not(.marble-current) { background: none; }
+  .rows.marble-sorting .row .drop { opacity: 0; }
+  /* The press that picked it up is not still a press on the row. */
+  .rows.marble-sorting .open:active { background: none; }
+</style>
+<style>
+  /* ------------------------------------------------------------ the toolbar
+
+     One quiet row across the top of the sheet, pinned while the page scrolls
+     under it. The buttons are ghosts until they are lit: a lit one wears the
+     accent, the way the open note's row does in the rail. */
+  .tools {
+    position: sticky; top: 0; z-index: 2;
+    display: flex; align-items: center; gap: 2px;
+    padding: .4rem 1.1rem; overflow-x: auto; scrollbar-width: none;
+    background: var(--card); border-bottom: 1px solid var(--line);
+  }
+  .tools::-webkit-scrollbar { display: none; }
+  .tools[hidden] { display: none; }
+  .tools .gap { flex: 0 0 1px; align-self: stretch; margin: .3rem .35rem; background: var(--line); }
+  .tool {
+    flex: 0 0 auto; min-width: 2rem; height: 2rem; padding: 0 .35rem;
+    display: inline-grid; place-items: center;
+    border: 0; border-radius: var(--r-sm); background: none; color: var(--muted);
+    font: 600 .82rem/1 var(--ui); cursor: pointer;
+    transition: background var(--t) var(--ease), color var(--t) var(--ease);
+  }
+  .tool svg { width: 18px; height: 18px; }
+  .tool b { font-weight: 750; font-size: .95rem; }
+  .tool i { font: italic 500 .95rem/1 var(--ui); }
+  .tool u, .tool s { font-weight: 500; font-size: .92rem; text-underline-offset: .14em; }
+  .tool:hover { background: var(--paper-2); color: var(--ink); }
+  .tool:active { color: var(--accent-ink); }
+  .tool[aria-pressed="true"] { background: var(--paper-3); color: var(--accent-ink); }
+  /* A finger is owed 44px. */
+  @media (hover: none), (pointer: coarse) {
+    .tool { min-width: 2.75rem; height: 2.75rem; }
+    .tools { padding-block: .2rem; }
+  }
+  @container app (max-width: 42rem) {
+    .tools { padding-inline: .5rem; }
+  }
+</style>
+<style>
+  /* ---------------------------------------------------------- folded
+
+     Mod+Shift+\ or the mark at the top of the rail folds it to a strip holding
+     just its two buttons, so the page can have the width. Where the rail is
+     already a strip across the top, folding it takes the notes away and leaves
+     the name. Whether it is folded is a reading of this window, never a fact
+     about the notes: it sits on <html>, which the file says carries nothing. */
+  [data-rail="off"] .rail > :not(.railhead) { display: none !important; }
+  @container app (min-width: 42.01rem) {
+    [data-rail="off"] body.app { grid-template-columns: auto minmax(0, 1fr); }
+    [data-rail="off"] .railhead { flex-direction: column; padding: .8rem .45rem 0; gap: .25rem; }
+    [data-rail="off"] .railhead .name { display: none; }
+  }
+</style>
+<style>
+  /* ------------------------------------------------------------ a view page
+
+     A note can also be a page you read rather than type in: `data-view` on the
+     note says so, and the note's own script leaves it alone — no caret, no
+     normalising, nothing filed from it. Its first line is still its name and
+     its second still the line under it in the rail, so the list reads it the
+     same way it reads every other note. Everything else in it is a UI. */
+  .note[data-view] { max-width: none; }
+  .note[data-view] > :nth-child(2) { color: var(--muted); font-size: .95rem; }
+</style>
+<style>
+  /* -------------------------------------------------------------- a table
+
+     A block in a note that is not text. `data-embed` tells the note's editor
+     that its insides belong to the script that draws it: never normalised,
+     never tidied, filed by that script rather than read back from the flow.
+     Set in the interface face, like the chrome, because a table is a
+     grid you scan and fill in a cell at a time, not prose you read. */
+  .note > .tt { white-space: normal; margin-top: 1rem; font: 13.5px/1.45 var(--ui); }
+  .note > .tt + * { margin-top: 1rem; }
+
+  /* The bar: a filter, the columns, and the things you add. */
+  .tt-bar { display: flex; flex-wrap: wrap; align-items: center; gap: .35rem; margin-bottom: .55rem; }
+  .tt-find {
+    flex: 0 1 14rem; min-width: 8rem; height: 2rem; padding: 0 .7rem;
+    border: 1px solid var(--line); border-radius: var(--r-sm);
+    background: var(--card); color: var(--ink); font: inherit;
+  }
+  .tt-find::placeholder { color: var(--placeholder); }
+  .tt-find:focus { outline: none; border-color: var(--accent-ink); }
+  .tt-btn {
+    height: 2rem; padding: 0 .65rem; display: inline-flex; align-items: center; gap: .3rem;
+    border: 0; border-radius: var(--r-sm); background: none; color: var(--muted);
+    font: 500 .82rem/1 var(--ui); white-space: nowrap; cursor: pointer;
+    transition: background var(--t) var(--ease), color var(--t) var(--ease);
+  }
+  .tt-btn:hover, .tt-btn[aria-expanded="true"] { background: var(--paper-2); color: var(--ink); }
+  .tt-btn:active { color: var(--accent-ink); }
+  .tt-add { background: var(--paper-2); color: var(--ink); }
+  .tt-add:hover { background: var(--paper-3); }
+  .tt-say, .tt-count {
+    margin-left: auto; padding: 0 .3rem; color: var(--faint);
+    font-size: .8rem; font-variant-numeric: tabular-nums; white-space: nowrap;
+  }
+  .tt-say { color: var(--muted); }
+  .tt-say:empty { display: none; }
+  .tt-say:not(:empty) + .tt-count { display: none; }
+
+  /* The grid fits the note while every column can keep a readable width,
+     then scrolls sideways inside its own frame rather than pushing the note
+     wider — and the week column stays put while it does. */
+  .tt-scroll { overflow-x: auto; border: 1px solid var(--line); border-radius: var(--r); background: var(--card); }
+  .tt-t { width: 100%; border-collapse: separate; border-spacing: 0; counter-reset: wk; }
+  .tt-t th, .tt-t td {
+    min-width: 8.5rem; padding: .55rem .7rem;
+    text-align: left; vertical-align: top; white-space: pre-wrap; overflow-wrap: break-word;
+    border-right: 1px solid var(--line); border-bottom: 1px solid var(--line);
+  }
+  .tt-t tr > :last-child { border-right: 0; }
+  .tt-t tbody tr:last-child > * { border-bottom: 0; }
+  .tt-t thead th {
+    position: relative; padding-right: 2.1rem; background: var(--paper-2); color: var(--muted);
+    font-size: .74rem; font-weight: 600; letter-spacing: .04em; text-transform: uppercase;
+  }
+  .tt-t .tt-wk {
+    position: sticky; left: 0; z-index: 1; min-width: 0; width: 5.4rem;
+    background: var(--card); white-space: nowrap;
+  }
+  .tt-t thead .tt-wk { background: var(--paper-2); padding-right: .7rem; }
+  .tt-t .tt-st { min-width: 0; width: 7.5rem; }
+
+  /* Weeks are counted from the order of the rows, so moving a row moves its
+     plan to another week and the numbers follow. The finals row is the one
+     row that is not a week. */
+  .tt-t tbody tr:not([data-kind="finals"]) { counter-increment: wk; }
+  .tt-t tbody .tt-wk::before { content: counter(wk); font-weight: 600; font-variant-numeric: tabular-nums; }
+  .tt-t tbody tr[data-kind="finals"] .tt-wk::before { content: "Finals"; }
+  .tt-t tbody tr[data-kind="finals"] > * { background: var(--paper-2); }
+
+  /* A cell is typed into where it stands. */
+  .tt-t td[contenteditable], .tt-h[contenteditable] { outline: none; cursor: text; }
+  .tt-t td[contenteditable]:hover { background: var(--paper-2); }
+  .tt-t tr[data-kind="finals"] td[contenteditable]:hover { background: var(--paper-3); }
+  .tt-t td[contenteditable]:focus { background: var(--card); box-shadow: inset 0 0 0 2px var(--accent-ink); }
+  .tt-t td:empty::after, .tt-h:empty::after { content: "\feff"; }
+  .tt-h { display: inline-block; min-width: 2ch; margin: -.1rem -.2rem; padding: .1rem .2rem; border-radius: var(--r-text); }
+  .tt-h[contenteditable]:hover, .tt-h[contenteditable]:focus { background: var(--paper-3); color: var(--ink); }
+
+  /* How far along a week is, one attribute on its row. Opened with no host
+     it is still read out; with one it is a chip you press to change. */
+  .tt:not(.marble-live) tr[data-status="idea"] > .tt-st::before { content: "Idea"; }
+  .tt:not(.marble-live) tr[data-status="draft"] > .tt-st::before { content: "Draft"; }
+  .tt:not(.marble-live) tr[data-status="ready"] > .tt-st::before { content: "Ready"; }
+  .tt-chip {
+    display: inline-flex; align-items: center; gap: .4rem; height: 1.65rem; padding: 0 .65rem 0 .55rem;
+    border: 0; border-radius: var(--pill); background: var(--paper-2); color: var(--muted);
+    font: 500 .78rem/1 var(--ui); white-space: nowrap; cursor: pointer;
+    transition: box-shadow var(--t) var(--ease);
+  }
+  .tt-chip::before { content: ""; width: .45rem; height: .45rem; border-radius: 50%; background: currentColor; }
+  .tt-chip:hover, .tt-chip[aria-expanded="true"] { box-shadow: inset 0 0 0 1px currentColor; }
+  .tt-chip[data-s="none"] { background: none; color: var(--faint); box-shadow: inset 0 0 0 1px var(--line); }
+  .tt-chip[data-s="none"]::before { background: none; box-shadow: inset 0 0 0 1px currentColor; }
+  .tt-chip[data-s="idea"] { background: var(--paper-3); color: var(--muted); }
+  .tt-chip[data-s="draft"] { background: light-dark(#f5eedb, #332c1c); color: light-dark(#86661c, #dcbd78); }
+  .tt-chip[data-s="ready"] { background: light-dark(#e4eee6, #1e3125); color: light-dark(#3a6847, #9fd0ad); }
+
+  /* The row's handle and the column's options: quiet until the row or the
+     column is under the hand or the keyboard. */
+  .tt-grip, .tt-hm {
+    display: inline-grid; place-items: center; width: 1.6rem; height: 1.6rem; padding: 0;
+    border: 0; border-radius: 6px; background: none; color: var(--faint); cursor: pointer; opacity: 0;
+    transition: opacity var(--t) var(--ease), background var(--t) var(--ease), color var(--t) var(--ease);
+  }
+  .tt-grip svg, .tt-hm svg { width: 16px; height: 16px; fill: currentColor; }
+  .tt-grip { margin: -.2rem 0 -.2rem .4rem; vertical-align: middle; cursor: grab; touch-action: none; }
+  .tt-hm { position: absolute; top: .38rem; right: .3rem; }
+  .tt-t tr:hover .tt-grip, .tt-t tr:focus-within .tt-grip, .tt-grip[aria-expanded="true"],
+  .tt-t th:hover .tt-hm, .tt-t th:focus-within .tt-hm, .tt-hm[aria-expanded="true"] { opacity: 1; }
+  .tt-grip:hover, .tt-hm:hover, .tt-grip[aria-expanded="true"], .tt-hm[aria-expanded="true"] { background: var(--paper-3); color: var(--ink); }
+  @media (hover: none) { .tt-grip, .tt-hm { opacity: .7; } }
+  @media (pointer: coarse) {
+    .tt-grip, .tt-hm { width: 2.2rem; height: 2.2rem; }
+    .tt-btn, .tt-find { height: 2.75rem; }
+  }
+
+  /* What the bar and the handles leave on the rows: all derived, none filed. */
+  .tt .marble-hide { display: none; }
+  .tt-t tr.marble-miss { visibility: collapse; }
+  .tt.marble-sorting, .tt.marble-sorting * { cursor: grabbing; -webkit-user-select: none; user-select: none; }
+  .tt-t tr.marble-lifted > * { background: var(--paper-3); color: var(--muted); }
+  .tt-t tr.marble-drop-before > * { box-shadow: inset 0 2px 0 var(--accent-ink); }
+  .tt-t tr.marble-drop-after > * { box-shadow: inset 0 -2px 0 var(--accent-ink); }
+  @keyframes tt-fresh { from { background-color: light-dark(#e6edf3, #23303b); } }
+  .tt-t tr.marble-fresh > * { animation: tt-fresh 1.4s var(--ease-out); }
+  @media (prefers-reduced-motion: reduce) { .tt-t tr.marble-fresh > * { animation: none; } }
+
+  /* One menu for the whole table, in the top layer so nothing clips it. */
+  .tt-menu {
+    position: fixed; inset: auto; margin: 0; padding: 4px; min-width: 13rem; max-width: 18rem;
+    border: 1px solid var(--line); border-radius: var(--r-sm); background: var(--card); color: var(--ink);
+    box-shadow: 0 10px 28px light-dark(rgba(74,66,52,.16), rgba(0,0,0,.52)), 0 2px 6px light-dark(rgba(74,66,52,.08), rgba(0,0,0,.3));
+    font: 13.5px/1.4 var(--ui);
+  }
+  .tt-menu button {
+    display: flex; align-items: center; gap: .55rem; width: 100%; padding: .42rem .6rem;
+    border: 0; border-radius: 6px; background: none; color: inherit; font: inherit; text-align: left; cursor: pointer;
+  }
+  .tt-menu button > span { flex: 1; }
+  .tt-menu button:hover:not(:disabled), .tt-menu button:focus-visible { background: var(--paper-2); outline: none; }
+  .tt-menu button:disabled { color: var(--faint); cursor: default; }
+  .tt-menu button.danger { color: var(--danger); }
+  .tt-menu kbd { color: var(--faint); font: .75rem var(--ui); }
+  .tt-menu hr { margin: 4px 2px; border: 0; border-top: 1px solid var(--line); }
+  .tt-menu [aria-checked]::before { content: ""; width: .9rem; text-align: center; font-size: .8rem; color: var(--accent-ink); }
+  .tt-menu [aria-checked="true"]::before { content: "\2713"; }
+</style>
 </head>
 <body class="app" data-marble-id="__ID__">
 
 <svg class="sprite" data-marble-id="__ID__" aria-hidden="true" focusable="false"><defs>
   <g id="i-plus"><path d="M11 5h2v6h6v2h-6v6h-2v-6H5v-2h6z"/></g>
+  <g id="i-rail"><path fill-rule="evenodd" d="M5 4h14a3 3 0 0 1 3 3v10a3 3 0 0 1-3 3H5a3 3 0 0 1-3-3V7a3 3 0 0 1 3-3zm0 2a1 1 0 0 0-1 1v10a1 1 0 0 0 1 1h3V6H5zm5 0v12h9a1 1 0 0 0 1-1V7a1 1 0 0 0-1-1h-9z"/><path d="M5 8h2v1.5H5zM5 11h2v1.5H5z" opacity=".55"/></g>
   <g id="i-x"><path d="M6.4 5 12 10.6 17.6 5 19 6.4 13.4 12 19 17.6 17.6 19 12 13.4 6.4 19 5 17.6 10.6 12 5 6.4z"/></g>
 </defs></svg>
 
@@ -364,6 +665,9 @@ __ICON__
      facts, and those are in the file. -->
 <nav class="rail" aria-label="Notes" data-marble-id="__ID__">
   <div class="railhead" data-marble-id="__ID__">
+    <button class="icon railtoggle" data-marble-id="__ID__" data-cmd="rail" title="Toggle sidebar (Ctrl+Shift+\)" aria-label="Toggle sidebar" aria-expanded="true" aria-controls="rows" aria-keyshortcuts="Control+Shift+\ Meta+Shift+\">
+      <svg data-marble-id="__ID__" viewBox="0 0 24 24" aria-hidden="true"><use href="#i-rail"/></svg>
+    </button>
     <h1 class="name" data-marble-id="__ID__" data-marble-editable>__TITLE__</h1>
     <button class="icon" data-marble-id="__ID__" data-cmd="new" title="New note (Ctrl+Enter)" aria-label="New note" aria-keyshortcuts="Control+Enter">
       <svg data-marble-id="__ID__" viewBox="0 0 24 24" aria-hidden="true"><use href="#i-plus"/></svg>
@@ -382,18 +686,25 @@ __ICON__
     <article class="note" data-marble-id="__ID__">
 <p data-marble-id="__ID__" data-marble-rich>__TITLE__</p>
 <p data-marble-id="__ID__" data-marble-rich>There is no save button, because what you are reading is not a copy of these notes — it <i>is</i> the file they are kept in. Type and the bytes on disk change with you.</p>
-<p data-marble-id="__ID__" data-marble-rich>The list on the left is not kept anywhere. It is these notes read back: a note's first line is its name, in the list and on the page both, so there is nothing to title twice and no name that can fall out of step. New notes go on top; the <b>×</b> beside one takes it away, and <b>Ctrl+Z</b> puts it back.</p>
-<p data-marble-id="__ID__" data-marble-rich>Everything else this could have had — a toolbar, colours, faces, folders, tags — is left out on purpose. It is a place to put text down, and every choice it asks you to make first is one you did not come here to make.</p>
+<p data-marble-id="__ID__" data-marble-rich>The list on the left is not kept anywhere. It is these notes read back: a note's first line is its name, in the list and on the page both, so there is nothing to title twice and no name that can fall out of step. New notes go on top; drag a row to put it somewhere else, the <b>×</b> beside one takes it away, and <b>Ctrl+Z</b> puts it back.</p>
+<p data-marble-id="__ID__" data-marble-rich>The toolbar across the top is the keyboard drawn where a pointer can find it: every button runs a key that already exists, and hovering one tells you which.</p>
     </article>
 
     <article class="note" data-marble-id="__ID__">
 <p data-marble-id="__ID__" data-marble-rich>Keys</p>
-<p data-marble-id="__ID__" data-marble-rich>Six of them, and no menu to look any of them up in.</p>
-<p data-marble-id="__ID__" data-marble-rich data-list="bullet"><b>#</b> then a space starts a heading, <b>##</b> a smaller one, <b>-</b> a bulleted line. <b>---</b> and Enter draws a rule.</p>
-<p data-marble-id="__ID__" data-marble-rich data-list="bullet"><b>Ctrl+B</b>, <b>Ctrl+I</b> and <b>Ctrl+U</b> mark whatever is selected — or open a mark where the caret is, if nothing is.</p>
-<p data-marble-id="__ID__" data-marble-rich data-list="bullet"><b>Ctrl+Alt+1</b>, <b>2</b> and <b>0</b> make a line a heading, a subheading, or plain again.</p>
-<p data-marble-id="__ID__" data-marble-rich data-list="bullet"><b>Ctrl+Enter</b> starts a new note. <b>Ctrl+Alt+↑</b> and <b>↓</b> walk to the note above or below.</p>
-<p data-marble-id="__ID__" data-marble-rich data-list="bullet"><b>Ctrl+Z</b> takes back the last change, whoever made it — you, an agent, or another window.</p>
+<p data-marble-id="__ID__" data-marble-rich>Everything the toolbar does, without leaving the keys or opening a menu.</p>
+<h4 data-marble-id="__ID__" data-marble-rich>Lines</h4>
+<p data-marble-id="__ID__" data-marble-rich data-list="bullet"><b>#</b>, <b>##</b> or <b>###</b> then a space starts a heading; <b>&gt;</b> a quote. <b>---</b> and Enter draws a rule.</p>
+<p data-marble-id="__ID__" data-marble-rich data-list="bullet"><b>Ctrl+Alt+1</b>, <b>2</b>, <b>3</b> and <b>0</b> make a line a heading, a subheading, a small heading, or plain again.</p>
+<h4 data-marble-id="__ID__" data-marble-rich>Lists</h4>
+<p data-marble-id="__ID__" data-marble-rich data-list="bullet"><b>-</b> then a space starts a bulleted line, <b>1.</b> a numbered one, <b>[]</b> a checkbox.</p>
+<p data-marble-id="__ID__" data-marble-rich data-list="bullet" data-indent="1"><b>Tab</b> and <b>Shift+Tab</b> move a line in and out; numbers count themselves at every depth.</p>
+<p data-marble-id="__ID__" data-marble-rich data-list="check" data-done>Press a box to tick it.</p>
+<p data-marble-id="__ID__" data-marble-rich data-list="check">And again to untick it.</p>
+<h4 data-marble-id="__ID__" data-marble-rich>Marks and notes</h4>
+<p data-marble-id="__ID__" data-marble-rich data-list="number"><b>Ctrl+B</b>, <b>Ctrl+I</b>, <b>Ctrl+U</b> and <b>Ctrl+Shift+X</b> mark whatever is selected; <b>Ctrl+\</b> clears it.</p>
+<p data-marble-id="__ID__" data-marble-rich data-list="number"><b>Ctrl+Enter</b> starts a new note. <b>Ctrl+Alt+↑</b> and <b>↓</b> walk to the note above or below. <b>Ctrl+Shift+\</b> folds the list away and brings it back.</p>
+<p data-marble-id="__ID__" data-marble-rich data-list="number"><b>Ctrl+Z</b> takes back the last change, whoever made it — you, an agent, or another window.</p>
 <p data-marble-id="__ID__" data-marble-rich>The page is one field rather than a column of boxes, so a drag highlights across paragraphs and <b>Ctrl+A</b> takes the whole note. Paste arrives as plain text, with its line breaks kept.</p>
     </article>
 
@@ -486,6 +797,20 @@ __ICON__
       // The open note, as the file has it — and the first one when the file says
       // nothing, so a note opened straight off the disk opens on something.
       const current = () => noteById(app.getAttribute(CURRENT)) ?? noteEls()[0] ?? null;
+      // A note marked data-view is a page to read, not text to type: it is
+      // never made editable, never normalised and never filed from, so the UI
+      // inside it is whatever its markup says and nothing here rewrites it.
+      const isView = (el) => Boolean(el?.hasAttribute('data-view'));
+      // A block this editor does not write — a table, say — is marked
+      // data-embed. It sits in the flow like a line and moves and deletes like
+      // one, so the flow still files it whole; but its insides are its own
+      // script's, which files them itself and tells the flow through a
+      // `marble-embed` event, so nothing here normalises, tidies or re-files
+      // them.
+      const EMBED = 'data-embed';
+      const isEmbed = (node) => node?.nodeType === Node.ELEMENT_NODE && node.hasAttribute(EMBED);
+      const inEmbed = (node) =>
+        Boolean((node?.nodeType === Node.TEXT_NODE ? node.parentElement : node)?.closest?.(`[${EMBED}]`));
 
       // The open note is the flow, and every helper below reads it from here.
       let flow = null;
@@ -497,16 +822,17 @@ __ICON__
       const STYLES = [
         { key: 'h1', tag: 'h2' },
         { key: 'h2', tag: 'h3' },
+        { key: 'h3', tag: 'h4' },
+        { key: 'quote', tag: 'blockquote' },
         { key: 'body', tag: 'p' },
       ];
-      const styleNamed = (key) => STYLES.find((s) => s.key === key) ?? STYLES[2];
-      const styleOf = (el) =>
-        el?.tagName === 'H2' ? 'h1' : el?.tagName === 'H3' ? 'h2' : 'body';
+      const styleNamed = (key) => STYLES.find((s) => s.key === key) ?? STYLES[STYLES.length - 1];
+      const styleOf = (el) => STYLES.find((s) => s.tag.toUpperCase() === el?.tagName)?.key ?? 'body';
 
       // A paragraph's style is its tag, so this list is also the list of tags
       // the file is allowed to hold in a note; anything else the browser leaves
       // there is turned into one.
-      const BLOCKS = new Set(['P', 'H2', 'H3', 'HR']);
+      const BLOCKS = new Set(['P', 'H2', 'H3', 'H4', 'BLOCKQUOTE', 'HR']);
 
       const blocks = () => (flow ? [...flow.children] : []);
       const at = (el) => blocks().indexOf(el);
@@ -752,7 +1078,7 @@ __ICON__
       // now".
 
       function normalise() {
-        if (!flow) return false;
+        if (!flow || isView(flow)) return false;
         let changed = false;
         let loose = [];
 
@@ -768,7 +1094,7 @@ __ICON__
         };
 
         for (const node of [...flow.childNodes]) {
-          if (node.nodeType === Node.ELEMENT_NODE && BLOCKS.has(node.tagName)) {
+          if (isEmbed(node) || (node.nodeType === Node.ELEMENT_NODE && BLOCKS.has(node.tagName))) {
             gather();
             continue;
           }
@@ -795,7 +1121,7 @@ __ICON__
 
         const seen = new Set();
         for (const el of blocks()) {
-          if (el.tagName !== 'HR' && !el.hasAttribute(RICH)) {
+          if (el.tagName !== 'HR' && !isEmbed(el) && !el.hasAttribute(RICH)) {
             el.setAttribute(RICH, '');
             changed = true;
           }
@@ -809,7 +1135,7 @@ __ICON__
             changed = true;
           }
           seen.add(id);
-          if (el.tagName !== 'HR' && tidy(el)) changed = true;
+          if (el.tagName !== 'HR' && !isEmbed(el) && tidy(el)) changed = true;
         }
 
         if (!blocks().length) {
@@ -942,7 +1268,7 @@ __ICON__
       }
 
       function file(burst) {
-        if (!flow) return;
+        if (!flow || isView(flow)) return;
         const from = shadow;
         const next = readFlow();
         const ops = diff(from, next);
@@ -977,12 +1303,115 @@ __ICON__
           const mark = markRange();
           for (const el of chosen()) {
             if (styleOf(el) === key) continue;
-            el.replaceWith(shape(el, key, marble.source.inner(el)));
+            const made = shape(el, key, marble.source.inner(el));
+            // A heading or a quote is not a list line; a paragraph keeps
+            // whatever list it was in.
+            if (key !== 'body') for (const name of ['data-list', 'data-indent', 'data-done']) made.removeAttribute(name);
+            el.replaceWith(made);
           }
           return mark;
         });
 
       const listOf = (el) => el?.getAttribute('data-list') ?? null;
+
+      // A list line is three attributes: which kind, how far in, and — for a
+      // box — whether it is ticked. Leaving a list takes all three.
+      const LISTY = ['data-list', 'data-indent', 'data-done'];
+
+      // Every line chosen becomes that kind of list, or — if every one of them
+      // already is — stops being a list. The toolbar and the keys both toggle.
+      const toggleList = (type) =>
+        change(() => {
+          const mark = markRange();
+          const els = chosen();
+          const all = els.length > 0 && els.every((el) => listOf(el) === type);
+          for (const el of els) {
+            if (all) for (const name of LISTY) el.removeAttribute(name);
+            else {
+              el.setAttribute('data-list', type);
+              if (type !== 'check') el.removeAttribute('data-done');
+            }
+          }
+          return mark;
+        });
+
+      // A marker typed at the start of a line only ever turns it on.
+      const listOn = (type) =>
+        change(() => {
+          const mark = markRange();
+          for (const el of chosen()) el.setAttribute('data-list', type);
+          return mark;
+        });
+
+      const unlist = () =>
+        change(() => {
+          const mark = markRange();
+          for (const el of chosen()) for (const name of LISTY) el.removeAttribute(name);
+          return mark;
+        });
+
+      const depthOf = (el) => Number(el?.getAttribute('data-indent') ?? 0) || 0;
+
+      // Tab and Shift+Tab. Only a list line has a depth; a paragraph is where
+      // it is.
+      function indent(by) {
+        const els = chosen().filter((el) => el.hasAttribute('data-list'));
+        if (!els.length) return false;
+        change(() => {
+          const mark = markRange();
+          for (const el of els) {
+            const depth = Math.max(0, Math.min(3, depthOf(el) + by));
+            if (depth) el.setAttribute('data-indent', String(depth));
+            else el.removeAttribute('data-indent');
+          }
+          return mark;
+        });
+        return true;
+      }
+
+      // Ticking a box is an edit like any other: one attribute, one step of undo.
+      const tick = (el) =>
+        change(() => {
+          const mark = markRange();
+          el.toggleAttribute('data-done');
+          return mark;
+        });
+
+      // A rule under the line you are on, and a fresh line under the rule.
+      function addRule() {
+        const el = chosen().at(-1);
+        if (!el) return;
+        let made = null;
+        change(() => {
+          const hr = document.createElement('hr');
+          hr.setAttribute(ID, marble.newId());
+          made = shape(el, 'body', '');
+          for (const name of LISTY) made.removeAttribute(name);
+          el.after(hr);
+          hr.after(made);
+          return null;
+        });
+        if (made) place(made, 0);
+      }
+
+      // Back to a plain line: no marks, no list, no heading. A paragraph keeps
+      // its name; anything else is a different tag and so a different element.
+      const clearAll = () =>
+        change(() => {
+          const mark = markRange();
+          for (const el of chosen()) {
+            const text = marble.text(el);
+            if (el.tagName === 'P') {
+              el.textContent = text;
+              for (const name of LISTY) el.removeAttribute(name);
+            } else {
+              const plain = shape(el, 'body', document.createTextNode(text));
+              for (const name of LISTY) plain.removeAttribute(name);
+              el.replaceWith(plain);
+            }
+          }
+          return mark;
+        });
 
       const setOn = (name, value) =>
         change(() => {
@@ -1004,14 +1433,21 @@ __ICON__
         const el = blockOf(range.startContainer);
         if (!el) return;
 
-        // Nothing in it and it is a bullet: Enter leaves the list rather than
-        // making another empty one.
-        if (!marble.text(el) && el.hasAttribute('data-list')) return setOn('data-list', null);
+        // Nothing in it and it is a list line: Enter steps out a level, and at
+        // the outermost level leaves the list, rather than making another
+        // empty one. An empty quote line leaves the quote the same way.
+        if (!marble.text(el) && el.hasAttribute('data-list')) {
+          if (depthOf(el)) return indent(-1);
+          return unlist();
+        }
+        if (!marble.text(el) && styleOf(el) === 'quote') return restyle('body');
 
         settle();
         const tail = range.cloneRange();
         tail.setEnd(el, el.childNodes.length);
-        const made = shape(el, 'body', tail.extractContents());
+        // A quote goes on being a quote; a heading hands over to a paragraph.
+        const made = shape(el, styleOf(el) === 'quote' ? 'quote' : 'body', tail.extractContents());
+        made.removeAttribute('data-done');
         el.after(made);
         tidyUp();
         file(false);
@@ -1025,8 +1461,14 @@ __ICON__
       const MARKERS = [
         ['#', () => restyle('h1')],
         ['##', () => restyle('h2')],
-        ['-', () => setOn('data-list', 'bullet')],
-        ['*', () => setOn('data-list', 'bullet')],
+        ['###', () => restyle('h3')],
+        ['>', () => restyle('quote')],
+        ['-', () => listOn('bullet')],
+        ['*', () => listOn('bullet')],
+        ['1.', () => listOn('number')],
+        ['1)', () => listOn('number')],
+        ['[]', () => listOn('check')],
+        ['[ ]', () => listOn('check')],
       ];
 
       function marker() {
@@ -1074,8 +1516,8 @@ __ICON__
       // tag off a partial selection, splitting and merging the runs on both
       // edges. It is legacy and it has no replacement, so it is kept for that —
       // and for nothing else, least of all for deciding which way a toggle goes.
-      const MARK = { bold: 'bold', italic: 'italic', underline: 'underline' };
-      const TAG = { bold: 'b', italic: 'i', underline: 'u' };
+      const MARK = { bold: 'bold', italic: 'italic', underline: 'underline', strike: 'strikeThrough' };
+      const TAG = { bold: 'b', italic: 'i', underline: 'u', strike: 's' };
 
       // Whether what is selected is already marked, asked of the markup the file
       // holds rather than of the weight on the screen. A heading is heavy because
@@ -1210,6 +1652,13 @@ __ICON__
         flow = el;
         here = null;
         if (!flow) return;
+        if (isView(flow)) {
+          flow.removeAttribute('contenteditable');
+          flow.removeAttribute('spellcheck');
+          shadow = [];
+          derive();
+          return;
+        }
         flow.setAttribute('contenteditable', 'true');
         flow.setAttribute('spellcheck', 'true');
         shadow = readFlow();
@@ -1235,7 +1684,7 @@ __ICON__
           reopen();
           sheet.scrollTo({ top: 0 });
         }
-        if (focus && flow) place(flow.children[0] ?? flow, 0);
+        if (focus && flow && !isView(flow)) place(flow.children[0] ?? flow, 0);
       }
 
       function add() {
@@ -1310,6 +1759,9 @@ __ICON__
         [...el.children].filter((b) => b.hasAttribute(RICH)).map((b) => marble.text(b).trim());
 
       let drawn = null;
+      // Which note a row stands for. The row is the page's; this is how it
+      // finds its way back to the file.
+      const rowNote = new WeakMap();
 
       function drawRows() {
         const query = find.value.trim().toLowerCase();
@@ -1350,7 +1802,9 @@ __ICON__
           under.className = 's';
           under.textContent = rest;
           open.append(name, under);
+          open.setAttribute('aria-keyshortcuts', 'Alt+ArrowUp Alt+ArrowDown');
           open.addEventListener('click', () => show(el));
+          rowNote.set(row, el);
           row.append(open);
 
           // The last note is the document, so it has no ×. Emptying it is what
@@ -1395,7 +1849,418 @@ __ICON__
         for (const el of noteEls()) el.classList.toggle('marble-open', el === flow);
         drawRows();
         if (!said) count();
+        lights();
       }
+
+      // ------------------------------------------------------ reordering them
+      //
+      // The order in the rail is the order of the notes in the file and is kept
+      // nowhere else, so moving a row is one `move` of the <article> it stands
+      // for — filed, recorded with its way back, and the rail read back from it
+      // like every other time. The row follows the pointer, the rows it passes
+      // step aside, and on release every row glides from where it was drawn to
+      // where the file now puts it.
+      //
+      // A mouse picks a row up once it has travelled a few pixels, so a click is
+      // still a click. A finger holds it first, because a finger on this list is
+      // also how the list scrolls. The keyboard does it with Alt and the arrows,
+      // a place at a time.
+
+      const rowEls = () => [...rows.querySelectorAll(':scope > .row')];
+      const rowOf = (el) => rowEls().find((row) => rowNote.get(row) === el) ?? null;
+      const still = () => matchMedia('(prefers-reduced-motion: reduce)').matches;
+      // The phone's strip runs across; the rail runs down.
+      const across = () => getComputedStyle(rows).display.includes('flex') && getComputedStyle(rows).flexDirection === 'row';
+      const noteAfter = (el) => {
+        let next = el?.nextElementSibling ?? null;
+        while (next && !next.classList.contains('note')) next = next.nextElementSibling;
+        return next;
+      };
+
+      // Every row glides from where it was drawn to where it is drawn now,
+      // whoever redrew it: a drop, a key, an undo, an agent's move. `lifted` is
+      // the note under the hand, which comes down as it lands.
+      function flip(run, lifted = null) {
+        const was = new Map();
+        for (const row of rowEls()) if (rowNote.has(row)) was.set(rowNote.get(row), row.getBoundingClientRect());
+        const held = rowNote.get(document.activeElement?.closest?.('.row'));
+        const shadow = lifted && getComputedStyle(rows).getPropertyValue('--lift');
+        run();
+        if (held && !rows.contains(document.activeElement)) rowOf(held)?.querySelector('.open')?.focus({ preventScroll: true });
+        if (still()) return;
+        for (const row of rowEls()) {
+          const el = rowNote.get(row);
+          const from = was.get(el);
+          if (!from) continue;
+          const to = row.getBoundingClientRect();
+          const dx = from.left - to.left;
+          const dy = from.top - to.top;
+          const landing = el === lifted;
+          if (!landing && Math.abs(dx) < 0.5 && Math.abs(dy) < 0.5) continue;
+          const frames = [{ transform: `translate(${dx}px, ${dy}px)` }, { transform: 'none' }];
+          if (landing) {
+            frames[0].boxShadow = shadow;
+            frames[1].boxShadow = getComputedStyle(row).boxShadow;
+            row.style.position = 'relative';
+            row.style.zIndex = '2';
+          }
+          const motion = row.animate(frames, { duration: landing ? 260 : 220, easing: 'cubic-bezier(.22, 1, .36, 1)' });
+          if (landing) {
+            motion.finished.catch(() => {}).then(() => {
+              row.style.removeProperty('position');
+              row.style.removeProperty('z-index');
+            });
+          }
+        }
+      }
+
+      // `seen` is the notes in the order their rows are drawn — all of them, or
+      // the ones a search left — and `to` is the place among them the note is
+      // going to. Among a search's rows, landing last means just after the last
+      // one showing, not at the end of everything.
+      function reorder(el, seen, to) {
+        const rest = seen.filter((one) => one !== el);
+        let before = rest[to] ?? noteAfter(rest[rest.length - 1]);
+        if (before === el) before = noteAfter(el);
+        const was = noteAfter(el);
+        if (before === was) return false;
+        settle();
+        const id = marble.id(el);
+        const parentId = marble.id(notes);
+        if (!id || !parentId) return false;
+        const op = { type: 'move', id, parentId, beforeId: before ? marble.id(before) : null };
+        marble.apply(op);
+        marble.record({ redo: [op], undo: [{ type: 'move', id, parentId, beforeId: was ? marble.id(was) : null }] });
+        marble.op(op, { immediate: true });
+        drawRows();
+        const all = noteEls();
+        say('Moved to ' + (all.indexOf(el) + 1) + ' of ' + all.length + ' — ' + KEY('Mod', 'Z') + ' puts it back');
+        return true;
+      }
+
+      let drag = null;
+      let swallow = false;
+
+      rows.addEventListener('pointerdown', (event) => {
+        if (drag || event.button !== 0 || !event.isPrimary) return;
+        const row = event.target.closest('.row');
+        if (!row || !rowNote.has(row) || event.target.closest('.drop')) return;
+        if (rowEls().length < 2) return;
+        const touch = event.pointerType !== 'mouse';
+        drag = { row, id: event.pointerId, ox: event.clientX, oy: event.clientY, px: event.clientX, py: event.clientY, touch, live: false };
+        if (touch) drag.timer = setTimeout(lift, 320);
+      });
+
+      function lift() {
+        const d = drag;
+        if (!d || d.live) return;
+        clearTimeout(d.timer);
+        const all = rowEls();
+        const x = across();
+        const start = x ? 'left' : 'top';
+        const size = x ? 'width' : 'height';
+        const boxes = all.map((row) => row.getBoundingClientRect());
+        Object.assign(d, {
+          live: true, all, boxes, x, start, size,
+          from: all.indexOf(d.row),
+          to: all.indexOf(d.row),
+          // What each row passed over steps aside by: the lifted row, and the
+          // gap the list leaves between rows.
+          pitch: boxes[all.indexOf(d.row)][size] + (boxes.length > 1 ? Math.max(0, boxes[1][start] - boxes[0][start] - boxes[0][size]) : 0),
+          scroll0: x ? rows.scrollLeft : rows.scrollTop,
+        });
+        try { d.row.setPointerCapture(d.id); } catch { /* the gesture still works, it just stops at the rail's edge */ }
+        rows.classList.add('marble-sorting');
+        d.row.classList.add('marble-lifted');
+        if (d.touch) navigator.vibrate?.(8);
+        follow();
+        d.raf = requestAnimationFrame(edge);
+      }
+
+      function follow() {
+        const d = drag;
+        if (!d?.live) return;
+        const scrolled = (d.x ? rows.scrollLeft : rows.scrollTop) - d.scroll0;
+        const mine = d.boxes[d.from];
+        const first = d.boxes[0];
+        const last = d.boxes[d.boxes.length - 1];
+        // Held inside the list: past either end there is nowhere to put it.
+        const shift = Math.min(
+          last[d.start] + last[d.size] - (mine[d.start] + mine[d.size]),
+          Math.max(first[d.start] - mine[d.start], (d.x ? d.px - d.ox : d.py - d.oy) + scrolled),
+        );
+        d.row.style.transform = d.x ? `translate(${shift}px, 0)` : `translate(0, ${shift}px)`;
+        // Its middle past a neighbour's middle is past that neighbour — and
+        // reaching it counts, or a row held against either end could never
+        // take the end place.
+        const middle = mine[d.start] + mine[d.size] / 2 + shift;
+        let to = 0;
+        d.boxes.forEach((box, i) => {
+          const theirs = box[d.start] + box[d.size] / 2;
+          if (i < d.from ? theirs < middle : i > d.from && theirs <= middle) to += 1;
+        });
+        if (to === d.to) return;
+        d.to = to;
+        d.all.forEach((row, i) => {
+          if (row === d.row) return;
+          const by =
+            d.from < to && i > d.from && i <= to ? -d.pitch :
+            d.from > to && i >= to && i < d.from ? d.pitch : 0;
+          row.style.transform = by ? (d.x ? `translate(${by}px, 0)` : `translate(0, ${by}px)`) : '';
+        });
+      }
+
+      // Held near either end of a list longer than the rail, the list comes to
+      // meet the row — faster the closer it is held to the edge.
+      function edge() {
+        const d = drag;
+        if (!d?.live) return;
+        const box = rows.getBoundingClientRect();
+        const at = d.x ? d.px : d.py;
+        const lo = (d.x ? box.left : box.top) + 36;
+        const hi = (d.x ? box.right : box.bottom) - 36;
+        const by = at < lo ? -(lo - at) : at > hi ? at - hi : 0;
+        if (by) {
+          const step = Math.max(-16, Math.min(16, by / 2.5));
+          if (d.x) rows.scrollLeft += step;
+          else rows.scrollTop += step;
+          follow();
+        }
+        d.raf = requestAnimationFrame(edge);
+      }
+
+      // `keep` false puts it back where it was picked up from.
+      function drop(keep) {
+        const d = drag;
+        drag = null;
+        if (!d) return;
+        clearTimeout(d.timer);
+        if (!d.live) return;
+        cancelAnimationFrame(d.raf);
+        swallow = true;
+        setTimeout(() => (swallow = false), 0);
+        try { d.row.releasePointerCapture(d.id); } catch { /* already gone */ }
+        const el = rowNote.get(d.row);
+        flip(() => {
+          rows.classList.remove('marble-sorting');
+          d.row.classList.remove('marble-lifted');
+          for (const row of d.all) row.style.transform = '';
+          if (keep && d.to !== d.from) reorder(el, d.all.map((row) => rowNote.get(row)), d.to);
+        }, el);
+      }
+
+      addEventListener('pointermove', (event) => {
+        const d = drag;
+        if (!d || event.pointerId !== d.id) return;
+        d.px = event.clientX;
+        d.py = event.clientY;
+        if (!d.live) {
+          const far = Math.hypot(d.px - d.ox, d.py - d.oy);
+          // A finger that moves before it has held is scrolling.
+          if (d.touch ? far > 8 : far > 4) d.touch ? drop(false) : lift();
+          return;
+        }
+        event.preventDefault();
+        follow();
+      });
+      addEventListener('pointerup', (event) => { if (drag && event.pointerId === drag.id) drop(true); });
+      addEventListener('pointercancel', (event) => { if (drag && event.pointerId === drag.id) drop(false); });
+      addEventListener('blur', () => drop(false));
+      rows.addEventListener('scroll', follow, { passive: true });
+      // Once a row is up, the finger is carrying it rather than scrolling.
+      rows.addEventListener('touchmove', (event) => { if (drag?.live) event.preventDefault(); }, { passive: false });
+      rows.addEventListener('contextmenu', (event) => { if (drag?.touch) event.preventDefault(); });
+      // A drop is not also a click on the row it landed.
+      addEventListener('click', (event) => {
+        if (!swallow) return;
+        swallow = false;
+        event.preventDefault();
+        event.stopPropagation();
+      }, true);
+      addEventListener('keydown', (event) => {
+        if (!drag?.live || event.key !== 'Escape') return;
+        event.preventDefault();
+        event.stopPropagation();
+        drop(false);
+      }, true);
+
+      rows.addEventListener('keydown', (event) => {
+        const mod = event.metaKey || event.ctrlKey;
+        // Undo from the rail is the rail's to redraw, so it goes the same way
+        // back() goes from the page rather than to the shared handler.
+        if (mod && !event.altKey && 'zy'.includes(event.key.toLowerCase())) {
+          event.preventDefault();
+          event.stopPropagation();
+          back(event.key.toLowerCase() === 'y' || event.shiftKey);
+          return;
+        }
+        if (!event.altKey || mod || event.shiftKey || drag) return;
+        const by = { ArrowUp: -1, ArrowLeft: -1, ArrowDown: 1, ArrowRight: 1 }[event.key];
+        const row = event.target.closest('.row');
+        if (!by || !row || !rowNote.has(row)) return;
+        event.preventDefault();
+        const all = rowEls();
+        const to = all.indexOf(row) + by;
+        if (to < 0 || to >= all.length) return;
+        flip(() => reorder(rowNote.get(row), all.map((one) => rowNote.get(one)), to));
+        rowOf(rowNote.get(row))?.scrollIntoView({ block: 'nearest', inline: 'nearest' });
+      });
+
+      // However the notes changed order — an undo, another window, an agent —
+      // the rail is read back from them, and glides there rather than jumping.
+      new MutationObserver(() => {
+        if (drag) drop(false);
+        flip(() => drawRows());
+      }).observe(notes, { childList: true });
+
+      // ------------------------------------------------------------ the toolbar
+      //
+      // Every button here is a key that already exists, drawn where a pointer can
+      // find it: a heading, a mark, a list, a quote, a rule. It files nothing of
+      // its own — each one runs the same command the keyboard runs, through the
+      // same change() — and it is page chrome, so it is transient and the file
+      // never holds it. Which buttons are lit is read off the line the caret is
+      // in, the same way the file would answer.
+
+      const MAC = /Mac|iP(hone|ad|od)/.test(navigator.platform);
+      const KEY = (...keys) => keys.map((k) => (k === 'Mod' ? (MAC ? '⌘' : 'Ctrl') : k === 'Alt' ? (MAC ? '⌥' : 'Alt') : k === 'Shift' ? (MAC ? '⇧' : 'Shift') : k)).join(MAC ? '' : '+');
+
+      const ICON = {
+        bullet: '<circle cx="5" cy="6.5" r="1.4" fill="currentColor" stroke="none"/><circle cx="5" cy="12" r="1.4" fill="currentColor" stroke="none"/><circle cx="5" cy="17.5" r="1.4" fill="currentColor" stroke="none"/><path d="M9.5 6.5H20M9.5 12H20M9.5 17.5H20"/>',
+        number: '<path d="M9.5 6.5H20M9.5 12H20M9.5 17.5H20"/><text x="5" y="8.6" text-anchor="middle" font-size="6.2" font-weight="700" fill="currentColor" stroke="none" font-family="system-ui,sans-serif">1</text><text x="5" y="14.1" text-anchor="middle" font-size="6.2" font-weight="700" fill="currentColor" stroke="none" font-family="system-ui,sans-serif">2</text><text x="5" y="19.6" text-anchor="middle" font-size="6.2" font-weight="700" fill="currentColor" stroke="none" font-family="system-ui,sans-serif">3</text>',
+        check: '<rect x="3" y="3.8" width="6.2" height="6.2" rx="1.4"/><path d="M4.4 7l1.3 1.3 2.2-2.5"/><rect x="3" y="14" width="6.2" height="6.2" rx="1.4"/><path d="M12.5 7H21M12.5 17H21"/>',
+        quote: '<path d="M5 4.5v15" stroke-width="2.6" stroke-linecap="butt"/><path d="M10 7.5h10M10 12h10M10 16.5h6.5"/>',
+        rule: '<path d="M3.5 12h17"/><path d="M7 6.5h10M7 17.5h10" opacity=".35"/>',
+        outdent: '<path d="M11 6.5h9M11 12h9M11 17.5h9"/><path d="M7.5 9 4.5 12l3 3"/>',
+        indent: '<path d="M11 6.5h9M11 12h9M11 17.5h9"/><path d="M4.5 9l3 3-3 3"/>',
+        clear: '<path d="M5 5.5h10M10 5.5v12"/><path d="M14.5 14l5 5M19.5 14l-5 5"/>',
+      };
+      const svg = (name) =>
+        '<svg viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">' + ICON[name] + '</svg>';
+
+      // [kind, name, face, label, keys]. A face in <b> is a word, not a drawing.
+      const TOOLS = [
+        ['style', 'h1', 'H1', 'Heading', KEY('Mod', 'Alt', '1') + '  or  # space'],
+        ['style', 'h2', 'H2', 'Subheading', KEY('Mod', 'Alt', '2') + '  or  ## space'],
+        ['style', 'h3', 'H3', 'Small heading', KEY('Mod', 'Alt', '3') + '  or  ### space'],
+        null,
+        ['mark', 'bold', '<b>B</b>', 'Bold', KEY('Mod', 'B')],
+        ['mark', 'italic', '<i>I</i>', 'Italic', KEY('Mod', 'I')],
+        ['mark', 'underline', '<u>U</u>', 'Underline', KEY('Mod', 'U')],
+        ['mark', 'strike', '<s>S</s>', 'Strikethrough', KEY('Mod', 'Shift', 'X')],
+        null,
+        ['list', 'bullet', svg('bullet'), 'Bulleted list', KEY('Mod', 'Shift', '8') + '  or  - space'],
+        ['list', 'number', svg('number'), 'Numbered list', KEY('Mod', 'Shift', '7') + '  or  1. space'],
+        ['list', 'check', svg('check'), 'Checklist', KEY('Mod', 'Shift', '9') + '  or  [] space'],
+        ['cmd', 'outdent', svg('outdent'), 'Less indent', KEY('Shift', 'Tab')],
+        ['cmd', 'indent', svg('indent'), 'More indent', 'Tab'],
+        null,
+        ['style', 'quote', svg('quote'), 'Quote', '> space'],
+        ['cmd', 'rule', svg('rule'), 'Divider', '--- Enter'],
+        ['cmd', 'clear', svg('clear'), 'Clear formatting', KEY('Mod', '\\')],
+      ];
+
+      const RUN = {
+        style: (name) => restyle(styleOf(chosen()[0]) === name ? 'body' : name),
+        mark: (name) => markUp(name),
+        list: (name) => toggleList(name),
+        cmd: (name) =>
+          name === 'rule' ? addRule() : name === 'clear' ? clearAll() : indent(name === 'indent' ? 1 : -1),
+      };
+
+      const tools = document.createElement('div');
+      tools.className = 'tools';
+      tools.setAttribute('data-marble-transient', '');
+      tools.setAttribute('role', 'toolbar');
+      tools.setAttribute('aria-label', 'Formatting');
+      for (const tool of TOOLS) {
+        if (!tool) {
+          const gap = document.createElement('span');
+          gap.className = 'gap';
+          gap.setAttribute('aria-hidden', 'true');
+          tools.append(gap);
+          continue;
+        }
+        const [kind, name, face, label, keys] = tool;
+        const b = document.createElement('button');
+        b.type = 'button';
+        b.className = 'tool';
+        b.dataset.kind = kind;
+        b.dataset.name = name;
+        b.innerHTML = face;
+        b.title = label + (keys ? '  (' + keys + ')' : '');
+        b.setAttribute('aria-label', label);
+        if (kind !== 'cmd') b.setAttribute('aria-pressed', 'false');
+        tools.append(b);
+      }
+      sheet.prepend(tools);
+
+      // A press on the toolbar must not take the caret out of the text it is
+      // about to act on.
+      tools.addEventListener('mousedown', (event) => {
+        if (event.target.closest('.tool')) event.preventDefault();
+      });
+      tools.addEventListener('click', (event) => {
+        const b = event.target.closest('.tool');
+        if (!b || !flow || isView(flow)) return;
+        RUN[b.dataset.kind]?.(b.dataset.name);
+        lights();
+      });
+
+      // One stop on the way through the page, not eighteen: the arrows walk the
+      // buttons, the way role="toolbar" promises.
+      tools.addEventListener('keydown', (event) => {
+        if (event.key !== 'ArrowLeft' && event.key !== 'ArrowRight' && event.key !== 'Home' && event.key !== 'End') return;
+        const all = [...tools.querySelectorAll('.tool')];
+        const at = all.indexOf(document.activeElement);
+        if (at < 0) return;
+        event.preventDefault();
+        const to =
+          event.key === 'Home' ? 0 : event.key === 'End' ? all.length - 1 :
+          (at + (event.key === 'ArrowRight' ? 1 : -1) + all.length) % all.length;
+        for (const b of all) b.tabIndex = -1;
+        all[to].tabIndex = 0;
+        all[to].focus();
+      });
+      [...tools.querySelectorAll('.tool')].forEach((b, i) => (b.tabIndex = i ? -1 : 0));
+
+      // A mark is lit when the characters the caret is among, or every
+      // character selected, already carry it — asked of the markup, never of
+      // the weight on the screen.
+      function markedHere(name) {
+        const sel = getSelection();
+        if (!sel || !sel.rangeCount || !flow?.contains(sel.anchorNode)) return false;
+        if (!sel.isCollapsed) return marked(name);
+        const node = sel.anchorNode.nodeType === Node.TEXT_NODE ? sel.anchorNode.parentElement : sel.anchorNode;
+        return Boolean(node?.closest(TAG[name]) && flow.contains(node.closest(TAG[name])));
+      }
+
+      function lights() {
+        const on = Boolean(flow) && !isView(flow);
+        tools.hidden = !on;
+        if (!on) return;
+        const els = chosen();
+        const style = styleOf(els[0]);
+        for (const b of tools.querySelectorAll('.tool[aria-pressed]')) {
+          const { kind, name } = b.dataset;
+          const lit =
+            kind === 'style' ? style === name :
+            kind === 'list' ? els.length > 0 && els.every((el) => listOf(el) === name) :
+            markedHere(name);
+          b.setAttribute('aria-pressed', String(lit));
+        }
+      }
+
+      let lighting = false;
+      document.addEventListener('selectionchange', () => {
+        if (lighting) return;
+        lighting = true;
+        requestAnimationFrame(() => {
+          lighting = false;
+          lights();
+        });
+      });
+
 
       // -------------------------------------------------------- searching them
 
@@ -1421,9 +2286,29 @@ __ICON__
       // Bound to the container rather than to the note, so switching notes
       // rebinds nothing: only one of them is ever contenteditable.
 
-      notes.addEventListener('input', () => {
+      notes.addEventListener('input', (event) => {
+        if (inEmbed(event.target)) return;
         tidyUp();
         file(true);
+      });
+
+      // An embed has filed its own change. Close the burst of typing first, so
+      // undo keeps the two apart, then take the embed's new source as written
+      // down — otherwise the next keystroke in the text would file it again.
+      notes.addEventListener('marble-embed', (event) => {
+        const el = event.target;
+        if (!flow || isView(flow) || !isEmbed(el) || el.parentElement !== flow) return;
+        event.detail.handled = true;
+        settle();
+        event.detail.run();
+        const id = marble.id(el);
+        if (!shadow.some((b) => b.id === id)) {
+          shadow = readFlow();
+          return;
+        }
+        const outer = marble.source.outer(el);
+        shadow = shadow.map((b) => (b.id === id ? { ...b, outer } : b));
+        filed.set(id, { id, tag: el.tagName, outer });
       });
 
       notes.addEventListener('focusout', () => {
@@ -1432,8 +2317,20 @@ __ICON__
       });
 
       notes.addEventListener('paste', (event) => {
+        if (inEmbed(event.target)) return;
         event.preventDefault();
         pasteText(event.clipboardData?.getData('text/plain') ?? '');
+      });
+
+      notes.addEventListener('mousedown', (event) => {
+        if (!flow || isView(flow) || event.button !== 0) return;
+        const el = event.target.closest?.('[data-list="check"]');
+        if (!el || el.parentElement !== flow) return;
+        const box = el.getBoundingClientRect();
+        const edge = box.left + parseFloat(getComputedStyle(el).paddingLeft);
+        if (event.clientX > edge) return;
+        event.preventDefault();
+        tick(el);
       });
 
       notes.addEventListener('click', () => {
@@ -1463,12 +2360,15 @@ __ICON__
         const target = event.target;
         if (target instanceof HTMLInputElement || target instanceof HTMLTextAreaElement) return;
         if (target instanceof HTMLElement && target.isContentEditable && !flow?.contains(target)) return;
+        if (inEmbed(target)) return;
         event.preventDefault();
         selectAll();
       });
 
       notes.addEventListener('keydown', (event) => {
         const mod = event.metaKey || event.ctrlKey;
+        // A search field keeps its own undo.
+        if (event.target instanceof HTMLInputElement) return;
 
         // Undo is this document's to handle in here. The shared `history` part
         // steps aside for any contenteditable that is not a data-marble-editable
@@ -1481,6 +2381,10 @@ __ICON__
           back(event.key.toLowerCase() === 'y' || event.shiftKey);
           return;
         }
+
+        // Undo is the note's everywhere; every other key inside an embed is
+        // the embed's.
+        if (inEmbed(event.target)) return;
 
         if (event.key === 'Enter' && !event.shiftKey && !mod) {
           event.preventDefault();
@@ -1497,10 +2401,30 @@ __ICON__
         // character on a Mac, so Ctrl+Alt+1 arrives as "¡" and a document that
         // matched on the character would work on one platform only.
         if (mod && event.altKey) {
-          const digit = /^Digit([0-2])$/.exec(event.code)?.[1];
+          const digit = /^Digit([0-3])$/.exec(event.code)?.[1];
           if (!digit) return;
           event.preventDefault();
           return restyle(digit === '0' ? 'body' : 'h' + digit);
+        }
+
+        // Shift and a number: the three lists, where Google Docs and Notion
+        // put them. Read off event.code, because Shift+8 is "*" on one
+        // keyboard and "(" on another.
+        if (mod && event.shiftKey && !event.altKey) {
+          const list = { Digit7: 'number', Digit8: 'bullet', Digit9: 'check' }[event.code];
+          if (list) {
+            event.preventDefault();
+            return toggleList(list);
+          }
+          if (event.code === 'KeyX') {
+            event.preventDefault();
+            return markUp('strike');
+          }
+        }
+
+        if (mod && !event.altKey && !event.shiftKey && event.key === '\\') {
+          event.preventDefault();
+          return clearAll();
         }
 
         if (mod && !event.altKey && !event.shiftKey) {
@@ -1510,16 +2434,41 @@ __ICON__
           return markUp(key === 'b' ? 'bold' : key === 'i' ? 'italic' : 'underline');
         }
 
-        // Backspace at the very start peels the bullet off before it joins the
-        // line to the one above, which the browser is welcome to do because
-        // joining two lines is an ordinary edit inside one field.
+        if (event.key === 'Tab' && !mod && !event.altKey) {
+          if (indent(event.shiftKey ? -1 : 1)) event.preventDefault();
+          return;
+        }
+
+        // Backspace at the very start steps a list line out a level, then
+        // peels the list off, and turns a heading or a quote back into a
+        // paragraph — each before it joins the line to the one above, which
+        // the browser is welcome to do because joining two lines is an
+        // ordinary edit inside one field.
         const sel = getSelection();
+        if ((event.key === 'Backspace' || event.key === 'Delete') && sel?.isCollapsed) {
+          const el = blockOf(sel.anchorNode);
+          const at = markRange()?.a.offset;
+          const edge =
+            event.key === 'Backspace'
+              ? at === 0 && isEmbed(el?.previousElementSibling)
+              : el && at === marble.text(el).length && isEmbed(el.nextElementSibling);
+          if (edge) {
+            event.preventDefault();
+            return;
+          }
+        }
         if (event.key === 'Backspace' && sel?.isCollapsed) {
           const el = blockOf(sel.anchorNode);
           const mark = markRange();
-          if (el && mark?.a.offset === 0 && el.hasAttribute('data-list')) {
-            event.preventDefault();
-            setOn('data-list', null);
+          if (el && mark?.a.offset === 0 && el !== flow.firstElementChild) {
+            if (el.hasAttribute('data-list')) {
+              event.preventDefault();
+              if (depthOf(el)) indent(-1);
+              else unlist();
+            } else if (styleOf(el) !== 'body') {
+              event.preventDefault();
+              restyle('body');
+            }
           }
         }
       });
@@ -1528,6 +2477,7 @@ __ICON__
       // in its text — on the line you pointed at, not at the end of it.
       sheet.addEventListener('mousedown', (event) => {
         if (event.target !== sheet && event.target !== notes) return;
+        if (isView(flow)) return;
         const all = blocks().filter(isText);
         if (!all.length) return;
         event.preventDefault();
@@ -1569,6 +2519,873 @@ __ICON__
       addEventListener('beforeunload', settle);
     };
 
+    if (window.marble) begin(window.marble);
+    else addEventListener('marble:ready', (event) => begin(event.detail), { once: true });
+  })();
+</script>
+
+<script>
+  // A table's own behaviour — any `.tt` a note holds, such as a timeline of
+  // weeks.
+  //
+  // What a table says is all in the file: its columns, its rows, what each
+  // cell holds, which columns are tucked away, how far along each row is. Every
+  // gesture here changes one of those and files it with its way back. What is
+  // drawn around it — the bar, the row handles, the column options, the status
+  // chips, the menu — is the page's and marked transient, and the week numbers
+  // are counted by the stylesheet from the order of the rows, so nothing is
+  // written down twice.
+  //
+  // The note's editor owns the flow a table sits in and leaves its insides
+  // alone, because the table is marked data-embed. Every change a table makes
+  // goes through one door, `commit`, which lets the note close its own burst of
+  // typing first and take the table's new source as the last thing written
+  // down — so the note never files the table a second time.
+  (() => {
+    const ROOT = '.tt[data-embed]';
+    const ID = 'data-marble-id';
+    const T = 'data-marble-transient';
+    const STATUSES = [['idea', 'Idea'], ['draft', 'Draft'], ['ready', 'Ready']];
+    const statusLabel = (value) => STATUSES.find(([key]) => key === value)?.[1] ?? '';
+    const MAC = /Mac|iP(hone|ad|od)/.test(navigator.platform);
+    const KEY = MAC ? '⌘' : 'Ctrl+';
+    const ALT = MAC ? '⌥' : 'Alt+';
+    const esc = (s) => s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+    const mod = (event) => event.metaKey || event.ctrlKey;
+    const dots = (cells) =>
+      `<svg viewBox="0 0 24 24" aria-hidden="true">${cells.map(([x, y]) => `<circle cx="${x}" cy="${y}" r="1.7"/>`).join('')}</svg>`;
+    const GRIP = dots([[9, 6], [15, 6], [9, 12], [15, 12], [9, 18], [15, 18]]);
+    const MORE = dots([[6, 12], [12, 12], [18, 12]]);
+
+    const begin = (marble) => {
+      // ------------------------------------------------------------ reading it
+
+      const parts = (root) => {
+        const table = root.querySelector('table');
+        return { table, head: table?.tHead?.rows[0] ?? null, body: table?.tBodies[0] ?? null };
+      };
+      const heads = (root) => [...(parts(root).head?.cells ?? [])];
+      const rows = (root) => [...(parts(root).body?.rows ?? [])];
+      const kind = (cell) =>
+        cell.classList.contains('tt-wk') ? 'week' : cell.classList.contains('tt-st') ? 'status' : 'text';
+      const labelOf = (th) => th.querySelector(':scope > .tt-h');
+      const colName = (th) => marble.text(labelOf(th) ?? th).trim() || 'Untitled';
+      const isFinal = (tr) => tr.getAttribute('data-kind') === 'finals';
+      const weekOf = (tr) => {
+        if (isFinal(tr)) return 'Finals';
+        let n = 0;
+        for (const row of rows(tr.closest(ROOT))) {
+          if (!isFinal(row)) n++;
+          if (row === tr) break;
+        }
+        return String(n);
+      };
+      const rowName = (tr) => (isFinal(tr) ? 'Finals week' : `Week ${weekOf(tr)}`);
+      const hiddenIds = (root) => new Set((root.getAttribute('data-hidden') ?? '').split(/\s+/).filter(Boolean));
+      const isHidden = (cell) => cell.classList.contains('marble-hide');
+      const isMissed = (tr) => tr.classList.contains('marble-miss');
+
+      // A field is anything you type into: a cell with words in it, or the
+      // name of a column.
+      const isField = (el) =>
+        el instanceof HTMLElement &&
+        (el.classList.contains('tt-h') || (el.tagName === 'TD' && kind(el) === 'text'));
+      const fieldOf = (node) => {
+        const el = (node?.nodeType === Node.TEXT_NODE ? node.parentElement : node)?.closest?.('.tt-h, td');
+        return isField(el) ? el : null;
+      };
+
+      // ------------------------------------------------------- writing it down
+      //
+      // `redo` has already happened on the page when it is typing; everything
+      // else is applied here, so a gesture moves the page and files itself in
+      // one breath.
+
+      function commit(root, redo, undo, { applied = false, coalesce = false } = {}) {
+        const run = () => {
+          if (!applied) for (const op of redo) marble.apply(op);
+          marble.record({ redo, undo }, { coalesce });
+          for (const op of redo) marble.op(op);
+        };
+        const ask = new CustomEvent('marble-embed', { bubbles: true, detail: { run, handled: false } });
+        root.dispatchEvent(ask);
+        if (!ask.detail.handled) run();
+        if (!applied) wire(root);
+      }
+
+      const byId = (id) => document.querySelector(`[${ID}="${id}"]`);
+
+      function say(root, text) {
+        const out = root.querySelector('.tt-say');
+        if (!out) return;
+        out.textContent = text;
+        clearTimeout(out.marbleTimer);
+        out.marbleTimer = setTimeout(() => { out.textContent = ''; }, 4000);
+      }
+
+      function flash(tr) {
+        if (!tr) return;
+        tr.classList.remove('marble-fresh');
+        void tr.offsetWidth;
+        tr.classList.add('marble-fresh');
+        setTimeout(() => tr.classList.remove('marble-fresh'), 1500);
+      }
+
+      // --------------------------------------------------------------- rows
+
+      const cellHtml = (th, text = '') => {
+        const id = marble.newId();
+        const k = kind(th);
+        if (k === 'week') return `<td class="tt-wk" ${ID}="${id}"></td>`;
+        if (k === 'status') return `<td class="tt-st" ${ID}="${id}"></td>`;
+        return `<td ${ID}="${id}">${esc(text)}</td>`;
+      };
+
+      // A new row, or a copy of one, placed before `before` (null: at the end).
+      function insertRow(root, before, { from = null, focusAt = null } = {}) {
+        const { body } = parts(root);
+        if (!body) return null;
+        const id = marble.newId();
+        const texts = from ? [...from.cells].map((c) => marble.text(c)) : [];
+        const status = from?.getAttribute('data-status');
+        const html =
+          `<tr ${ID}="${id}"${status ? ` data-status="${status}"` : ''}>` +
+          heads(root).map((th, i) => cellHtml(th, texts[i] ?? '')).join('') +
+          '</tr>';
+        commit(
+          root,
+          [{ type: 'insert', html, parentId: marble.id(body), beforeId: before ? marble.id(before) : null }],
+          [{ type: 'remove', id }],
+        );
+        const tr = byId(id);
+        flash(tr);
+        say(root, `${rowName(tr)} added`);
+        const cells = [...tr.cells];
+        const target =
+          (focusAt !== null && isField(cells[focusAt]) && !isHidden(cells[focusAt]) && cells[focusAt]) ||
+          cells.find((c) => isField(c) && !isHidden(c));
+        if (target) focusField(target);
+        return tr;
+      }
+
+      function deleteRow(root, tr) {
+        const next = tr.nextElementSibling;
+        const name = rowName(tr);
+        const land = next ?? tr.previousElementSibling;
+        commit(
+          root,
+          [{ type: 'remove', id: marble.id(tr) }],
+          [{ type: 'insert', html: marble.source.outer(tr), parentId: marble.id(tr.parentElement), beforeId: next ? marble.id(next) : null }],
+        );
+        say(root, `${name} deleted — ${KEY}Z puts it back`);
+        land?.querySelector('.tt-grip')?.focus({ preventScroll: true });
+      }
+
+      function moveRow(root, tr, before) {
+        const was = tr.nextElementSibling;
+        if (before === tr || before === was) return;
+        const parentId = marble.id(tr.parentElement);
+        commit(
+          root,
+          [{ type: 'move', id: marble.id(tr), parentId, beforeId: before ? marble.id(before) : null }],
+          [{ type: 'move', id: marble.id(tr), parentId, beforeId: was ? marble.id(was) : null }],
+        );
+        flash(tr);
+        say(root, `Moved to ${rowName(tr)}`);
+        tr.querySelector('.tt-grip')?.focus({ preventScroll: true });
+      }
+
+      function setStatus(root, tr, value) {
+        const old = tr.getAttribute('data-status');
+        if (old === value) return;
+        const id = marble.id(tr);
+        commit(
+          root,
+          [{ type: 'setAttr', id, name: 'data-status', value }],
+          [{ type: 'setAttr', id, name: 'data-status', value: old }],
+        );
+      }
+
+      // ------------------------------------------------------------ columns
+
+      // A new column before index `at`: a header and one empty cell a row.
+      function insertCol(root, at) {
+        const hs = heads(root);
+        const thId = marble.newId();
+        const labelId = marble.newId();
+        const redo = [{
+          type: 'insert',
+          html: `<th ${ID}="${thId}"><span class="tt-h" ${ID}="${labelId}">New column</span></th>`,
+          parentId: marble.id(parts(root).head),
+          beforeId: hs[at] ? marble.id(hs[at]) : null,
+        }];
+        const undo = [{ type: 'remove', id: thId }];
+        for (const tr of rows(root)) {
+          const id = marble.newId();
+          const ref = tr.cells[at];
+          redo.push({ type: 'insert', html: `<td ${ID}="${id}"></td>`, parentId: marble.id(tr), beforeId: ref ? marble.id(ref) : null });
+          undo.push({ type: 'remove', id });
+        }
+        commit(root, redo, undo);
+        say(root, 'Column added — type its name');
+        const label = byId(labelId);
+        if (label) focusField(label, 'all');
+      }
+
+      function deleteCol(root, th) {
+        const i = heads(root).indexOf(th);
+        const name = colName(th);
+        const cells = [th, ...rows(root).map((tr) => tr.cells[i]).filter(Boolean)];
+        const undo = cells.map((c) => {
+          const next = c.nextElementSibling;
+          return { type: 'insert', html: marble.source.outer(c), parentId: marble.id(c.parentElement), beforeId: next ? marble.id(next) : null };
+        });
+        commit(root, cells.map((c) => ({ type: 'remove', id: marble.id(c) })), undo);
+        say(root, `“${name}” deleted — ${KEY}Z puts it back`);
+      }
+
+      // One step left or right, the header and every row alike. Only among
+      // the columns you write in: the week stays first and the status last.
+      function moveCol(root, th, dir) {
+        const hs = heads(root);
+        const i = hs.indexOf(th);
+        const j = i + dir;
+        if (!hs[j] || kind(hs[j]) !== 'text' || kind(th) !== 'text') return;
+        const redo = [];
+        const undo = [];
+        for (const line of [parts(root).head, ...rows(root)]) {
+          const c = line.cells[i];
+          const other = line.cells[j];
+          if (!c || !other) continue;
+          const was = c.nextElementSibling;
+          const before = dir < 0 ? other : other.nextElementSibling;
+          const parentId = marble.id(line);
+          redo.push({ type: 'move', id: marble.id(c), parentId, beforeId: before ? marble.id(before) : null });
+          undo.push({ type: 'move', id: marble.id(c), parentId, beforeId: was ? marble.id(was) : null });
+        }
+        commit(root, redo, undo);
+        th.querySelector('.tt-hm')?.focus({ preventScroll: true });
+      }
+
+      function toggleHidden(root, th) {
+        const ids = hiddenIds(root);
+        const id = marble.id(th);
+        if (ids.has(id)) ids.delete(id);
+        else ids.add(id);
+        const rootId = marble.id(root);
+        commit(
+          root,
+          [{ type: 'setAttr', id: rootId, name: 'data-hidden', value: [...ids].join(' ') || null }],
+          [{ type: 'setAttr', id: rootId, name: 'data-hidden', value: root.getAttribute('data-hidden') }],
+        );
+      }
+
+      // ------------------------------------------------------------ fields
+
+      function focusField(el, how = 'end') {
+        el.focus({ preventScroll: true });
+        const range = document.createRange();
+        range.selectNodeContents(el);
+        if (how === 'end') range.collapse(false);
+        const sel = getSelection();
+        sel.removeAllRanges();
+        sel.addRange(range);
+        el.scrollIntoView({ block: 'nearest', inline: 'nearest' });
+      }
+
+      // Where the caret is, as a character offset, or null for a selection.
+      function caret(el) {
+        const sel = getSelection();
+        if (!sel?.rangeCount || !sel.isCollapsed || !el.contains(sel.anchorNode)) return null;
+        const range = sel.getRangeAt(0).cloneRange();
+        range.setStart(el, 0);
+        return range.toString().length;
+      }
+
+      // The fields as the eye reads them: the header, then each row still
+      // showing, and in each only the columns still showing.
+      function grid(root) {
+        const lines = [parts(root).head, ...rows(root).filter((tr) => !isMissed(tr))].filter(Boolean);
+        return lines.map((line) =>
+          [...line.cells].map((c) =>
+            isHidden(c) ? null : c.tagName === 'TH' ? labelOf(c) : kind(c) === 'text' ? c : null,
+          ),
+        );
+      }
+
+      function go(root, field, where) {
+        const g = grid(root);
+        const r = g.findIndex((line) => line.includes(field));
+        if (r < 0) return false;
+        let to = null;
+        if (where === 'up' || where === 'down') {
+          const c = g[r].indexOf(field);
+          const d = where === 'up' ? -1 : 1;
+          for (let i = r + d; i >= 0 && i < g.length && !to; i += d) to = g[i][c] ?? null;
+        } else {
+          const flat = g.flat().filter(Boolean);
+          to = flat[flat.indexOf(field) + (where === 'next' ? 1 : -1)] ?? null;
+        }
+        if (!to) return false;
+        focusField(to);
+        return true;
+      }
+
+      // ------------------------------------------------------------- the menu
+
+      const menu = document.createElement('div');
+      menu.className = 'tt-menu';
+      menu.setAttribute('popover', '');
+      menu.setAttribute('role', 'menu');
+      menu.setAttribute(T, '');
+      document.body.append(menu);
+      let opener = null;
+      let closed = { by: null, at: 0 };
+
+      menu.addEventListener('toggle', (event) => {
+        if (event.newState !== 'closed') return;
+        const back = opener;
+        opener = null;
+        back?.setAttribute('aria-expanded', 'false');
+        closed = { by: back, at: performance.now() };
+        const now = document.activeElement;
+        if (back?.isConnected && (!now || now === document.body || menu.contains(now))) back.focus({ preventScroll: true });
+      });
+
+      menu.addEventListener('keydown', (event) => {
+        const items = [...menu.querySelectorAll('button:not(:disabled)')];
+        const i = items.indexOf(document.activeElement);
+        const to =
+          event.key === 'ArrowDown' ? items[(i + 1) % items.length] :
+          event.key === 'ArrowUp' ? items[(i - 1 + items.length) % items.length] :
+          event.key === 'Home' ? items[0] :
+          event.key === 'End' ? items[items.length - 1] : null;
+        if (!to) return;
+        event.preventDefault();
+        to.focus();
+      });
+
+      // The same anchor pressed while its menu is open closes it: the press
+      // outside already did, a moment before this click arrived.
+      const justClosed = (anchor) => closed.by === anchor && performance.now() - closed.at < 300;
+
+      function openMenu(anchor, items) {
+        if (!menu.isConnected) document.body.append(menu);
+        menu.replaceChildren();
+        for (const item of items) {
+          if (item === '-') {
+            const rule = document.createElement('hr');
+            rule.setAttribute('role', 'separator');
+            menu.append(rule);
+            continue;
+          }
+          const b = document.createElement('button');
+          b.type = 'button';
+          b.setAttribute('role', item.checked ? 'menuitemcheckbox' : item.radio !== undefined ? 'menuitemradio' : 'menuitem');
+          if (item.checked) b.setAttribute('aria-checked', String(item.checked()));
+          if (item.radio !== undefined) b.setAttribute('aria-checked', String(item.radio));
+          if (item.danger) b.className = 'danger';
+          b.disabled = Boolean(item.disabled);
+          const label = document.createElement('span');
+          label.textContent = item.label;
+          b.append(label);
+          if (item.hint) {
+            const hint = document.createElement('kbd');
+            hint.textContent = item.hint;
+            b.append(hint);
+          }
+          b.addEventListener('click', () => {
+            if (item.checked) {
+              item.run();
+              b.setAttribute('aria-checked', String(item.checked()));
+              return;
+            }
+            menu.hidePopover();
+            item.run();
+          });
+          menu.append(b);
+        }
+        opener?.setAttribute('aria-expanded', 'false');
+        opener = anchor;
+        anchor.setAttribute('aria-expanded', 'true');
+        if (!menu.matches(':popover-open')) menu.showPopover();
+        const a = anchor.getBoundingClientRect();
+        const m = menu.getBoundingClientRect();
+        const left = Math.max(8, Math.min(a.left, innerWidth - m.width - 8));
+        let top = a.bottom + 4;
+        if (top + m.height > innerHeight - 8) top = Math.max(8, a.top - m.height - 4);
+        menu.style.left = `${left}px`;
+        menu.style.top = `${top}px`;
+        (menu.querySelector('[aria-checked="true"]:not(:disabled)') ?? menu.querySelector('button:not(:disabled)'))?.focus();
+      }
+
+      function rowMenu(root, tr, anchor) {
+        const prev = tr.previousElementSibling;
+        const next = tr.nextElementSibling;
+        openMenu(anchor, [
+          { label: 'Insert row above', run: () => insertRow(root, tr) },
+          { label: 'Insert row below', hint: `${KEY}↵`, run: () => insertRow(root, next) },
+          { label: 'Duplicate row', run: () => insertRow(root, next, { from: tr }) },
+          '-',
+          { label: 'Move up', hint: `${ALT}↑`, disabled: !prev, run: () => moveRow(root, tr, prev) },
+          { label: 'Move down', hint: `${ALT}↓`, disabled: !next, run: () => moveRow(root, tr, next?.nextElementSibling ?? null) },
+          '-',
+          { label: 'Delete row', hint: 'Del', danger: true, run: () => deleteRow(root, tr) },
+        ]);
+      }
+
+      function statusMenu(root, tr, anchor) {
+        const now = tr.getAttribute('data-status');
+        openMenu(anchor, [
+          ...STATUSES.map(([key, label]) => ({ label, radio: key === now, run: () => setStatus(root, tr, key) })),
+          '-',
+          { label: 'No status', radio: !now, run: () => setStatus(root, tr, null) },
+        ]);
+      }
+
+      function colMenu(root, th, anchor) {
+        const hs = heads(root);
+        const i = hs.indexOf(th);
+        const text = kind(th) === 'text';
+        const items = [{ label: 'Rename', run: () => focusField(labelOf(th), 'all') }];
+        if (text) {
+          items.push(
+            { label: 'Insert column left', run: () => insertCol(root, i) },
+            { label: 'Insert column right', run: () => insertCol(root, i + 1) },
+            '-',
+            { label: 'Move left', disabled: !hs[i - 1] || kind(hs[i - 1]) !== 'text', run: () => moveCol(root, th, -1) },
+            { label: 'Move right', disabled: !hs[i + 1] || kind(hs[i + 1]) !== 'text', run: () => moveCol(root, th, 1) },
+          );
+        }
+        items.push('-', { label: 'Hide column', run: () => toggleHidden(root, th) });
+        if (text) items.push({ label: 'Delete column', danger: true, run: () => deleteCol(root, th) });
+        openMenu(anchor, items);
+      }
+
+      function columnsMenu(root, anchor) {
+        openMenu(anchor, heads(root).filter((th) => kind(th) !== 'week').map((th) => ({
+          label: colName(th),
+          checked: () => !hiddenIds(root).has(marble.id(th)),
+          run: () => toggleHidden(root, th),
+        })));
+      }
+
+      // ------------------------------------------------------------ reading out
+
+      function markdown(root) {
+        const shown = heads(root).map((th, i) => [th, i]).filter(([th]) => !isHidden(th));
+        const cell = (s) => s.trim().replace(/\|/g, '\\|').replace(/\n/g, '<br>');
+        const out = [
+          `| ${shown.map(([th]) => cell(colName(th))).join(' | ')} |`,
+          `| ${shown.map(() => '---').join(' | ')} |`,
+        ];
+        for (const tr of rows(root)) {
+          if (isMissed(tr)) continue;
+          out.push(`| ${shown.map(([th, i]) => {
+            const k = kind(th);
+            if (k === 'week') return cell(weekOf(tr));
+            if (k === 'status') return cell(statusLabel(tr.getAttribute('data-status')));
+            return cell(tr.cells[i] ? marble.text(tr.cells[i]) : '');
+          }).join(' | ')} |`);
+        }
+        return out.join('\n');
+      }
+
+      function filter(root) {
+        const words = (root.querySelector('.tt-find')?.value ?? '').trim().toLowerCase().split(/\s+/).filter(Boolean);
+        const active = document.activeElement;
+        for (const tr of rows(root)) {
+          // The row you are typing in stays, even as it stops matching.
+          if (tr.contains(active) && isField(active)) continue;
+          const hay = [rowName(tr), statusLabel(tr.getAttribute('data-status')), ...[...tr.cells].map((c) => marble.text(c))]
+            .join(' ').toLowerCase();
+          tr.classList.toggle('marble-miss', words.length > 0 && !words.every((w) => hay.includes(w)));
+        }
+        const all = rows(root);
+        const showing = all.filter((tr) => !isMissed(tr)).length;
+        const tucked = heads(root).filter(isHidden).length;
+        const text =
+          (showing === all.length ? `${all.length} rows` : `${showing} of ${all.length} rows`) +
+          (tucked ? ` · ${tucked} column${tucked > 1 ? 's' : ''} hidden` : '');
+        const count = root.querySelector('.tt-count');
+        if (count && count.textContent !== text) count.textContent = text;
+      }
+
+      // ------------------------------------------------------------ the chrome
+      //
+      // Drawn from the file and nothing else, every time anything arrives. It
+      // only ever adds what is missing and changes what differs, so drawing it
+      // twice is drawing it once.
+
+      const setIf = (el, name, value) => {
+        if (el.getAttribute(name) !== value) el.setAttribute(name, value);
+      };
+
+      function chrome(className, svg, label) {
+        const b = document.createElement('button');
+        b.type = 'button';
+        b.className = className;
+        b.setAttribute(T, '');
+        b.setAttribute('aria-haspopup', 'menu');
+        b.setAttribute('aria-expanded', 'false');
+        if (label) b.title = label;
+        b.innerHTML = svg;
+        return b;
+      }
+
+      function editable(el, spell) {
+        if (el.isContentEditable) return;
+        el.setAttribute('contenteditable', 'plaintext-only');
+        if (el.contentEditable !== 'plaintext-only') el.setAttribute('contenteditable', 'true');
+        el.spellcheck = spell;
+      }
+
+      function bar(root) {
+        if (root.querySelector(':scope > .tt-bar')) return;
+        const el = document.createElement('div');
+        el.className = 'tt-bar';
+        el.setAttribute(T, '');
+        el.innerHTML =
+          '<input class="tt-find" type="search" placeholder="Filter rows" aria-label="Filter rows" autocomplete="off" spellcheck="false">' +
+          '<button class="tt-btn" type="button" data-act="cols" aria-haspopup="menu" aria-expanded="false">Columns</button>' +
+          '<span class="tt-say" role="status" aria-live="polite"></span><span class="tt-count"></span>' +
+          '<button class="tt-btn" type="button" data-act="copy" title="Copy the rows showing as a Markdown table">Copy as Markdown</button>' +
+          '<button class="tt-btn" type="button" data-act="addcol">+ Column</button>' +
+          '<button class="tt-btn tt-add" type="button" data-act="addrow">+ Week</button>';
+        root.prepend(el);
+      }
+
+      function wire(root) {
+        root.classList.add('marble-live');
+        // The table is an island in the note's text: the note types around it,
+        // its fields type inside it.
+        setIf(root, 'contenteditable', 'false');
+        bar(root);
+        const hidden = hiddenIds(root);
+        const hs = heads(root);
+        for (const th of hs) {
+          const k = kind(th);
+          th.classList.toggle('marble-hide', k !== 'week' && hidden.has(marble.id(th)));
+          const label = labelOf(th);
+          if (label) editable(label, false);
+          if (k === 'week') continue;
+          let b = th.querySelector(':scope > .tt-hm');
+          if (!b) th.append((b = chrome('tt-hm', MORE)));
+          setIf(b, 'aria-label', `${colName(th)} column options`);
+        }
+        for (const tr of rows(root)) {
+          [...tr.cells].forEach((c, i) => {
+            c.classList.toggle('marble-hide', Boolean(hs[i] && isHidden(hs[i])));
+            const k = kind(c);
+            if (k === 'text') editable(c, true);
+            else if (k === 'week') {
+              let g = c.querySelector(':scope > .tt-grip');
+              if (!g) c.append((g = chrome('tt-grip', GRIP, 'Drag to move · click for options')));
+              setIf(g, 'aria-label', `${rowName(tr)} options`);
+            } else {
+              let chip = c.querySelector(':scope > .tt-chip');
+              if (!chip) c.append((chip = chrome('tt-chip', '')));
+              const s = tr.getAttribute('data-status') ?? '';
+              const text = statusLabel(s) || 'Set';
+              if (chip.textContent !== text) chip.textContent = text;
+              setIf(chip, 'data-s', statusLabel(s) ? s : 'none');
+              setIf(chip, 'aria-label', `${rowName(tr)} status: ${statusLabel(s) || 'none'}`);
+            }
+          });
+        }
+        filter(root);
+      }
+
+      // ------------------------------------------------------------ the hands
+
+      const ready = new WeakSet();
+      const pending = new Set();
+      let frame = 0;
+      const soon = (root) => {
+        pending.add(root);
+        frame ||= requestAnimationFrame(() => {
+          frame = 0;
+          for (const r of pending) if (r.isConnected) wire(r);
+          pending.clear();
+        });
+      };
+
+      function setup(root) {
+        if (ready.has(root)) return wire(root);
+        ready.add(root);
+        const priors = new WeakMap();
+        let drag = null;
+        let swallow = false;
+
+        root.addEventListener('focusin', (event) => {
+          const f = fieldOf(event.target);
+          if (f && !priors.has(f)) priors.set(f, marble.text(f));
+        });
+        root.addEventListener('focusout', (event) => {
+          const f = fieldOf(event.target);
+          if (!f) return;
+          priors.delete(f);
+          marble.flush();
+          soon(root);
+        });
+
+        root.addEventListener('input', (event) => {
+          if (event.target.classList?.contains('tt-find')) return filter(root);
+          const f = fieldOf(event.target);
+          if (!f) return;
+          const id = marble.id(f);
+          const text = marble.text(f);
+          commit(
+            root,
+            [{ type: 'setText', id, text }],
+            [{ type: 'setText', id, text: priors.get(f) ?? text }],
+            { applied: true, coalesce: true },
+          );
+        });
+
+        root.addEventListener('paste', (event) => {
+          const f = fieldOf(event.target);
+          if (!f) return;
+          event.preventDefault();
+          let text = (event.clipboardData?.getData('text/plain') ?? '').replace(/\r\n?/g, '\n');
+          if (f.classList.contains('tt-h')) text = text.replace(/\s*\n\s*/g, ' ');
+          document.execCommand('insertText', false, text);
+        });
+
+        root.addEventListener('keydown', (event) => {
+          const target = event.target;
+          if (target.classList?.contains('tt-find')) {
+            if (event.key === 'Escape' && target.value) {
+              event.preventDefault();
+              target.value = '';
+              filter(root);
+            }
+            return;
+          }
+          const f = fieldOf(target);
+          if (f) return fieldKey(f, event);
+          const grip = target.closest?.('.tt-grip');
+          if (grip) return gripKey(grip.closest('tr'), event);
+        });
+
+        function fieldKey(f, event) {
+          const cell = f.tagName === 'TD';
+          if (event.key === 'Escape') {
+            event.preventDefault();
+            f.blur();
+            return;
+          }
+          if (event.key === 'Enter' && mod(event)) {
+            // Here it makes a row, not a note.
+            event.preventDefault();
+            event.stopPropagation();
+            if (cell) insertRow(root, f.parentElement.nextElementSibling, { focusAt: f.cellIndex });
+            return;
+          }
+          if (event.key === 'Enter' && event.shiftKey && cell) {
+            event.preventDefault();
+            document.execCommand('insertText', false, '\n');
+            return;
+          }
+          if (event.key === 'Enter' && !event.altKey) {
+            event.preventDefault();
+            if (!go(root, f, 'down')) f.blur();
+            return;
+          }
+          if (event.key === 'Tab' && !mod(event) && !event.altKey) {
+            if (go(root, f, event.shiftKey ? 'prev' : 'next')) event.preventDefault();
+            return;
+          }
+          if (event.altKey || mod(event) || event.shiftKey) return;
+          const at = caret(f);
+          if (at === null) return;
+          const end = marble.text(f).length;
+          const where =
+            event.key === 'ArrowUp' && at === 0 ? 'up' :
+            event.key === 'ArrowDown' && at === end ? 'down' :
+            event.key === 'ArrowLeft' && at === 0 ? 'prev' :
+            event.key === 'ArrowRight' && at === end ? 'next' : null;
+          if (where && go(root, f, where)) event.preventDefault();
+        }
+
+        function gripKey(tr, event) {
+          if (event.altKey && (event.key === 'ArrowUp' || event.key === 'ArrowDown')) {
+            event.preventDefault();
+            if (event.key === 'ArrowUp' && tr.previousElementSibling) moveRow(root, tr, tr.previousElementSibling);
+            if (event.key === 'ArrowDown' && tr.nextElementSibling) moveRow(root, tr, tr.nextElementSibling.nextElementSibling);
+            return;
+          }
+          if (event.key === 'Delete' || event.key === 'Backspace') {
+            event.preventDefault();
+            deleteRow(root, tr);
+            return;
+          }
+          if (mod(event) || event.altKey) return;
+          if (event.key === 'ArrowUp' || event.key === 'ArrowDown') {
+            event.preventDefault();
+            const other = event.key === 'ArrowUp' ? tr.previousElementSibling : tr.nextElementSibling;
+            other?.querySelector('.tt-grip')?.focus();
+          } else if (event.key === 'ArrowRight') {
+            const first = [...tr.cells].find((c) => isField(c) && !isHidden(c));
+            if (first) {
+              event.preventDefault();
+              focusField(first);
+            }
+          }
+        }
+
+        root.addEventListener('click', (event) => {
+          const b = event.target.closest?.('button');
+          if (!b || !root.contains(b)) return;
+          if (justClosed(b)) return;
+          const act = b.dataset.act;
+          if (act === 'addrow') insertRow(root, rows(root).find(isFinal) ?? null);
+          else if (act === 'addcol') {
+            const hs = heads(root);
+            const at = hs.findIndex((th) => kind(th) === 'status');
+            insertCol(root, at < 0 ? hs.length : at);
+          } else if (act === 'cols') columnsMenu(root, b);
+          else if (act === 'copy') {
+            const was = b.textContent;
+            navigator.clipboard.writeText(markdown(root)).then(
+              () => {
+                b.textContent = 'Copied';
+                setTimeout(() => { b.textContent = was; }, 1400);
+              },
+              () => say(root, 'The clipboard said no — try again from a click'),
+            );
+          } else if (b.classList.contains('tt-grip')) {
+            if (swallow) {
+              swallow = false;
+              return;
+            }
+            rowMenu(root, b.closest('tr'), b);
+          } else if (b.classList.contains('tt-chip')) statusMenu(root, b.closest('tr'), b);
+          else if (b.classList.contains('tt-hm')) colMenu(root, b.closest('th'), b);
+        });
+
+        // Reordering: the handle is picked up, the row it belongs to dims, and
+        // a rule shows where it will land. One `move` on release.
+        root.addEventListener('pointerdown', (event) => {
+          const g = event.target.closest?.('.tt-grip');
+          swallow = false;
+          if (!g || event.button !== 0) return;
+          drag = { tr: g.closest('tr'), y: event.clientY, id: event.pointerId, live: false, before: undefined };
+          g.setPointerCapture(event.pointerId);
+        });
+        root.addEventListener('pointermove', (event) => {
+          if (!drag || event.pointerId !== drag.id) return;
+          if (!drag.live) {
+            if (Math.abs(event.clientY - drag.y) < 5) return;
+            drag.live = true;
+            drag.tr.classList.add('marble-lifted');
+            root.classList.add('marble-sorting');
+          }
+          event.preventDefault();
+          const showing = rows(root).filter((tr) => !isMissed(tr));
+          let before = null;
+          for (const tr of showing) {
+            const box = tr.getBoundingClientRect();
+            if (event.clientY < box.top + box.height / 2) {
+              before = tr;
+              break;
+            }
+          }
+          drag.before = before;
+          for (const tr of rows(root)) tr.classList.remove('marble-drop-before', 'marble-drop-after');
+          if (before === drag.tr || before === drag.tr.nextElementSibling) return;
+          if (before) before.classList.add('marble-drop-before');
+          else showing[showing.length - 1]?.classList.add('marble-drop-after');
+        });
+        const drop = (keep) => {
+          if (!drag) return;
+          const d = drag;
+          drag = null;
+          for (const tr of rows(root)) tr.classList.remove('marble-drop-before', 'marble-drop-after', 'marble-lifted');
+          root.classList.remove('marble-sorting');
+          if (!d.live) return;
+          swallow = true;
+          if (keep && d.before !== undefined) moveRow(root, d.tr, d.before);
+        };
+        root.addEventListener('pointerup', (event) => { if (drag && event.pointerId === drag.id) drop(true); });
+        root.addEventListener('pointercancel', (event) => { if (drag && event.pointerId === drag.id) drop(false); });
+
+        // Anything that arrives from outside — an undo, an agent's op, the file
+        // edited in another window — is drawn again from what it left.
+        new MutationObserver(() => soon(root)).observe(root, {
+          childList: true,
+          subtree: true,
+          attributes: true,
+          attributeFilter: ['data-hidden', 'data-status', 'data-kind'],
+        });
+        wire(root);
+      }
+
+      marble.register((scope) => {
+        if (!menu.isConnected) document.body.append(menu);
+        const found = new Set(scope.querySelectorAll?.(ROOT) ?? []);
+        if (scope.matches?.(ROOT)) found.add(scope);
+        const up = scope.parentElement?.closest?.(ROOT);
+        if (up) found.add(up);
+        for (const root of found) setup(root);
+      });
+    };
+
+    // No carrier, no hands: opened straight off the disk the table is still a
+    // table, with its weeks counted and its statuses read out.
+    if (window.marble) begin(window.marble);
+    else addEventListener('marble:ready', (event) => begin(event.detail), { once: true });
+  })();
+</script>
+
+<script>
+  // Folding the rail. One attribute on <html>, remembered per document in this
+  // browser and nowhere else — which way a window is arranged is not something
+  // the notes should ever have to file. Mod+Shift+\ rather than Mod+\, which is
+  // the note's own key for clearing formatting.
+  (() => {
+    const root = document.documentElement;
+    const key = 'marble:rail-folded:' + location.pathname;
+    let folded = false;
+    try { folded = localStorage.getItem(key) === '1'; } catch { /* no storage: start open */ }
+
+    const draw = () => {
+      if (folded) root.setAttribute('data-rail', 'off');
+      else root.removeAttribute('data-rail');
+      document.querySelector('[data-cmd="rail"]')?.setAttribute('aria-expanded', String(!folded));
+    };
+
+    const toggle = () => {
+      folded = !folded;
+      // Folding away the field or row that had the focus would drop it on the
+      // floor; it goes to the button that can bring them back instead.
+      const had = document.activeElement;
+      const lost = folded && had?.closest?.('.rail') && !had.closest('.railhead');
+      draw();
+      if (lost) document.querySelector('[data-cmd="rail"]')?.focus();
+      try { localStorage.setItem(key, folded ? '1' : '0'); } catch { /* remembered for this visit only */ }
+    };
+
+    addEventListener('click', (event) => {
+      if (event.target.closest?.('[data-cmd="rail"]')) toggle();
+    });
+    // Captured, so a note that handles its own keys never sees this one.
+    addEventListener('keydown', (event) => {
+      if (event.isComposing || event.altKey || !event.shiftKey) return;
+      if (!(event.metaKey || event.ctrlKey)) return;
+      if (event.code !== 'Backslash') return;
+      event.preventDefault();
+      event.stopPropagation();
+      toggle();
+    }, true);
+
+    draw();
+    // The file says <html> carries nothing, so putting the page back takes the
+    // fold off; it is drawn again each time.
+    const begin = (marble) => {
+      marble.pageOnly?.('aria-expanded');
+      marble.register(draw);
+    };
     if (window.marble) begin(window.marble);
     else addEventListener('marble:ready', (event) => begin(event.detail), { once: true });
   })();

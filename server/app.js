@@ -1083,6 +1083,9 @@ export async function createDrive(config, { log = console, agentProviders = null
         const loopback = address.family === 'IPv6' ? '[::1]' : '127.0.0.1';
         return `http://${loopback}:${address.port}`;
       },
+      // A browser the host opens on its own documents — the picture of what
+      // Describe mode marked — gets through the gate as a person's does.
+      cookie: () => (gate.open ? null : { name: gate.cookieName, value: gate.issue() }),
       providers: agentProviders ?? null,
       log,
       usage,

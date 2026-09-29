@@ -127,7 +127,7 @@ export function createActions({ sprites, inspector, jobs, workshop, src, self, s
       if (jobs.running('fleet')) throw bad('shipping is under way; wait for it', 409);
       return jobs.start({
         kind: 'deploy',
-        title: local ? `Deploy the workshop's copy to ${name}` : `Deploy main to ${name}`,
+        title: local ? `Try the workshop copy on ${name}` : `Update ${name} to main`,
         target: name,
         meta: { source, ref },
         run: async (ctx) => {
@@ -215,7 +215,7 @@ export function createActions({ sprites, inspector, jobs, workshop, src, self, s
   function rollback(name) {
     return drive(name).then(() => jobs.start({
       kind: 'rollback',
-      title: `Roll ${name} back`,
+      title: `Undo the last update to ${name}`,
       target: name,
       run: async (ctx) => {
         await ctx.exec('bash', [path.join(md, 'tools', 'sprite-deploy.sh'), name, '--rollback'], { cwd: md, env: jobEnv });

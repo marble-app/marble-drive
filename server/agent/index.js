@@ -15,6 +15,7 @@ import { createKeyStore } from './keys.js';
 import { findProject } from './projects.js';
 import { createAgentRoutes } from './routes.js';
 import { nameConversation } from './namer.js';
+import { createMarkedShots } from './marked.js';
 import { createRunner } from './runner.js';
 import { listSkills, skillDirs } from './skills.js';
 import { createAgentStore } from './store.js';
@@ -99,7 +100,7 @@ async function claimHost(dir) {
   return { held: null, release: null, why: 'could not take host.lock' };
 }
 
-export async function createAgents({ config, store, writeOps, createDocument, origin, providers, log = console, usage = null, usageHistory = null, sandbox = null, restore = null, onLook = null, forgetWriter = null, awake, progress, streams = null, onActivity = null }) {
+export async function createAgents({ config, store, writeOps, createDocument, origin, providers, log = console, usage = null, usageHistory = null, sandbox = null, restore = null, onLook = null, forgetWriter = null, awake, progress, streams = null, onActivity = null, cookie = () => null }) {
   const dir = path.join(store.marbleDir, 'agents');
   const lock = await claimHost(dir);
   if (!lock.release) {
@@ -109,14 +110,14 @@ export async function createAgents({ config, store, writeOps, createDocument, or
     throw Object.assign(new Error(why), { code: 'EAGENTSHELD' });
   }
   try {
-    return await boot({ config, store, writeOps, createDocument, origin, providers, log, dir, lock, usage, usageHistory, sandbox, restore, onLook, forgetWriter, awake, progress, streams, onActivity });
+    return await boot({ config, store, writeOps, createDocument, origin, providers, log, dir, lock, usage, usageHistory, sandbox, restore, onLook, forgetWriter, awake, progress, streams, onActivity, cookie });
   } catch (err) {
     await lock.release();
     throw err;
   }
 }
 
-async function boot({ config, store, writeOps, createDocument, origin, providers, log, dir, lock, usage, usageHistory = null, sandbox = null, restore = null, onLook = null, forgetWriter = null, awake, progress, streams = null, onActivity = null }) {
+async function boot({ config, store, writeOps, createDocument, origin, providers, log, dir, lock, usage, usageHistory = null, sandbox = null, restore = null, onLook = null, forgetWriter = null, awake, progress, streams = null, onActivity = null, cookie = () => null }) {
   const agentStore = createAgentStore({ dir, defaultProvider: config.agentProvider, log });
   await agentStore.ready();
   const keys = createKeyStore({ file: config.agentKeysFile });
@@ -160,7 +161,11 @@ async function boot({ config, store, writeOps, createDocument, origin, providers
     messaging,
   });
   const projects = { find: async (id) => findProject({ settings: await agentStore.settings(), root: config.root }, id) };
+  // The picture of what Describe mode marked: the document opened here, on
+  // loopback, signed in the way a person's browser is.
+  const shots = createMarkedShots({ origin, cookie, log });
   const runner = createRunner({
+    shots,
     store: agentStore,
     tools,
     providers: liveProviders,
@@ -261,6 +266,7 @@ async function boot({ config, store, writeOps, createDocument, origin, providers
     runner,
     async close() {
       await runner.close();
+      await shots.close();
       hub.close();
       await lock.release();
     },

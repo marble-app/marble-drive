@@ -18,6 +18,7 @@ import { json, readJson, send } from '../http.js';
 import { parsePath } from '../paths.js';
 import { sameOrigin } from '../sessions.js';
 import { driveWhere, pickCursorPickerModels, sortProviders } from './catalog.js';
+import { cleanMarked } from './marked.js';
 import { findProject, listProjects, validateProjectPath } from './projects.js';
 import { summarize } from './store.js';
 import { normalizeUndo, undoTurn } from './undo.js';
@@ -489,6 +490,10 @@ export function createAgentRoutes({ store, runner, tools, hub, providers, writeO
         // Where the words were typed, when that is not a document being worked
         // on: the Chat app sends `chat`, so the agent answers rather than edits.
         if (body.context.surface === 'chat') context.surface = 'chat';
+        // Sent from Describe mode: what the marks were over, for the picture and
+        // the prompt (server/agent/marked.js).
+        const marked = cleanMarked(body.context.marked);
+        if (marked) context.marked = marked;
         return json(res, 202, await runner.send(id, {
           prompt: String(body.prompt ?? ''),
           context,
