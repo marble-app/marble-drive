@@ -334,3 +334,32 @@ test('a torn last inbox line is skipped, not fatal', async () => {
   await fsp.appendFile(path.join(dir, b.id, 'inbox.jsonl'), '{"id":"tor');
   assert.deepEqual((await store.inbox(b.id)).map((m) => m.text), ['whole']);
 });
+
+test('events read again after more are appended: only the new lines are parsed, and a line mid-write waits', async () => {
+  const { dir, store } = await fresh();
+  const { id } = await store.createConversation({ provider: 'fake' });
+  await store.appendEvent(id, { type: 'user', text: 'one' });
+  await store.appendEvent(id, { type: 'text', text: 'two' });
+  const first = await store.events(id);
+  assert.deepEqual(first.map((e) => e.seq), [1, 2]);
+  await store.appendEvent(id, { type: 'text', text: 'three' });
+  assert.deepEqual((await store.events(id)).map((e) => e.text), ['one', 'two', 'three']);
+  // What a caller was handed is its own: a later read does not grow it.
+  assert.equal(first.length, 2);
+  // Half a line on disk, as a read racing an append would find it.
+  const file = path.join(dir, id, 'events.jsonl');
+  await fsp.appendFile(file, '{"seq":4,"t":1,"type":"text","te');
+  assert.deepEqual((await store.events(id)).map((e) => e.seq), [1, 2, 3]);
+  await fsp.appendFile(file, 'xt":"four"}\n');
+  assert.deepEqual((await store.events(id)).map((e) => e.text), ['one', 'two', 'three', 'four']);
+  assert.deepEqual((await store.events(id, { after: 3 })).map((e) => e.seq), [4]);
+});
+
+test('a discarded conversation leaves nothing behind in what the store remembers', async () => {
+  const { store } = await fresh();
+  const { id } = await store.createConversation({ provider: 'fake' });
+  await store.appendEvent(id, { type: 'turn.queued' });
+  assert.equal((await store.events(id)).length, 1);
+  await store.discardConversation(id);
+  assert.deepEqual(await store.events(id), []);
+});

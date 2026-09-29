@@ -161,7 +161,7 @@
 
     async function idsOf(id) {
       try {
-        const detail = await agent.conversation(id);
+        const detail = await agent.conversation(id, { turns: 0 });
         return detail?.turns?.at(-1)?.context?.selection ?? [];
       } catch { return []; }
     }

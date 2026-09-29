@@ -147,7 +147,10 @@
     let suspended = false;
 
     const openStream = (key, entry) => {
-      const url = key === '*' ? '/agent/events?all=1' : `/agent/events?conversation=${enc(key)}`;
+      // `after` is where a reader that already holds the history wants the
+      // stream to begin; a reconnect goes on from Last-Event-ID either way.
+      const url = key === '*' ? '/agent/events?all=1'
+        : `/agent/events?conversation=${enc(key)}${entry.after ? `&after=${entry.after}` : ''}`;
       const source = new EventSource(url);
       const current = entry;
       const deliver = (message) => {
@@ -158,6 +161,9 @@
           return;
         }
         if (current.history) current.history.push(data);
+        // A page back from the background opens a new EventSource, which has
+        // no Last-Event-ID: it goes on from here rather than from the top.
+        if (key !== '*' && data?.seq > current.after) current.after = data.seq;
         for (const handler of [...current.handlers]) handler(data);
       };
       if (key === '*') {
@@ -180,10 +186,13 @@
       entry.source = source;
     };
 
-    function on(key, fn) {
+    /** `after`: the last seq this reader already has. A stream it opens
+     *  starts there instead of replaying the whole conversation; one already
+     *  open hands over what it holds, and the reader skips what it has. */
+    function on(key, fn, { after = 0 } = {}) {
       let entry = streams.get(key);
       if (!entry) {
-        entry = { source: null, handlers: new Set(), history: key === '*' ? null : [] };
+        entry = { source: null, handlers: new Set(), history: key === '*' ? null : [], after: Number(after) || 0 };
         if (!suspended) openStream(key, entry);
         streams.set(key, entry);
       }
@@ -255,7 +264,12 @@
       usageHistory: (weeks) => ask(weeks ? `/agent/usage/history?weeks=${enc(weeks)}` : '/agent/usage/history'),
       workspace: () => ask('/agent/workspace'),
       conversations: ({ archived = false } = {}) => ask(`/agent/conversations${archived ? '?archived=1' : ''}`),
-      conversation: (id) => ask(`/agent/conversations/${enc(id)}`),
+      // `turns`: only the last few turns (or the few `before` a turn id), for
+      // a reader that draws the end of a long chat first. Without it, all.
+      // `after`: only events past that seq, for a reader holding the rest.
+      conversation: (id, { turns = null, before = null, after = null } = {}) => ask(`/agent/conversations/${enc(id)}${
+        turns !== null ? `?turns=${enc(turns)}${before ? `&before=${enc(before)}` : ''}`
+          : after !== null ? `?after=${enc(after)}` : ''}`),
       update: (id, patch) => ask(`/agent/conversations/${enc(id)}`, { method: 'PATCH', body: patch }),
       failover: (id) => ask(`/agent/conversations/${enc(id)}/failover`, { method: 'POST' }),
       leaveUsage: (id, turn) => ask(`/agent/conversations/${enc(id)}/usage-left`, { method: 'POST', body: { turn } }),

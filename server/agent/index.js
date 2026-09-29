@@ -267,6 +267,7 @@ async function boot({ config, store, writeOps, createDocument, origin, browserPa
     running: () => runner.running(),
     store: agentStore,
     runner,
+    hub,
     /** A document moved (server/app.js): the conversations aimed at it aim
      *  where it went, so the next turn writes to the document and not to its
      *  old address. `at` maps an old path to its new one, or null. */
