@@ -593,7 +593,7 @@ export async function createDrive(config, { log = console, agentProviders = null
       // The gate, and the two things that have to be reachable through it: the
       // form itself, and a health check a load balancer runs before anybody has
       // a cookie.
-      if (route === '/health') return json(res, 200, { ok: true, docs: channels.counts, streams: streams.count, memory: memoryGuard?.reading() ?? null });
+      if (route === '/health') return json(res, 200, { ok: true, docs: channels.counts, streams: streams.count, working: work().length, memory: memoryGuard?.reading() ?? null });
       // The mark, for the two pages that cannot carry it in their own head: a
       // document written before this host had one, and the gate. Everything
       // made here has it inline and never asks — which is why this is a

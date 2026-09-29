@@ -16,6 +16,9 @@
 # Memory: Sprites already makes a service the kernel's near-last choice when
 # the machine runs out (oom_score_adj -900), and the host inherits that; each
 # agent turn raises its own so it goes first (server/agent/first-to-go.js).
+#
+# With MARBLE_HUB_ENV set it asks tools/home-mode.mjs before every start, so a
+# host whose lease moved (it exits 75) comes back as standby.
 set -uo pipefail
 
 NODE="${MARBLE_SERVE_NODE:-$(command -v node)}"
@@ -41,7 +44,15 @@ trap stop TERM INT HUP
 wait_for=$FIRST_WAIT
 while :; do
   started=$SECONDS
-  "$NODE" --report-on-fatalerror --report-directory="$CRASH_DIR" bin/marble-drive.js serve &
+  # Two homes (the owner's Mac and Fly): the lease says whether this machine
+  # serves the drive or stands by (tools/home-mode.mjs). Every other drive has
+  # no MARBLE_HUB_ENV and always serves.
+  mode=serve
+  if [[ -n "${MARBLE_HUB_ENV:-}" ]]; then
+    mode="$("$NODE" tools/home-mode.mjs 2>>"$CRASH_LOG" || echo standby)"
+    [[ "$mode" == serve || "$mode" == standby ]] || mode=standby
+  fi
+  "$NODE" --report-on-fatalerror --report-directory="$CRASH_DIR" bin/marble-drive.js "$mode" &
   pid=$!
   # `wait` returns early when a signal lands; wait again until the host is gone.
   status=0

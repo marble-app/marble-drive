@@ -2,6 +2,7 @@
 // The command.
 //
 //   marble-drive serve            serve the drive (the default)
+//   marble-drive standby          the host on a machine that is not this drive's home: writes nothing
 //   marble-drive new <path>       a document from a starter, without a browser
 //   marble-drive icon [path]      give a document already in the drive its mark
 //   marble-drive weigh [path]     what the documents weigh, and how much is base64
@@ -18,6 +19,7 @@
 // implementations of one idea.
 
 import { spawn } from 'node:child_process';
+import fs from 'node:fs';
 import path from 'node:path';
 
 import { createDrive } from '../server/app.js';
@@ -32,6 +34,10 @@ import { splitPath, parsePath } from '../server/paths.js';
 import { updateApps } from '../server/app-updates.js';
 import { seedAgents, seedBoard, seedChat, seedConsole, seedDesignDonts, seedDesignSystem, seedDrive } from '../server/seed.js';
 import { createStore } from '../server/store/index.js';
+import { createStandby } from '../server/standby.js';
+import { createLeaseClient } from '../server/hub/lease-client.js';
+import { holdPath, loadHubSettings } from '../server/hub/settings.js';
+import { scheduleUploads } from '../server/hub/schedule.js';
 
 const [command = 'serve', ...rest] = process.argv.slice(2);
 
@@ -55,6 +61,9 @@ const kb = (n) => (n < 1024 ? `${n} B` : n < 1048576 ? `${(n / 1024).toFixed(0)}
 switch (command) {
   case 'serve':
     await serve();
+    break;
+  case 'standby':
+    await standby();
     break;
   case 'new':
     await make();
@@ -89,7 +98,44 @@ switch (command) {
 
 // ---------------------------------------------------------------------- serve
 
+async function standby() {
+  // A standby must answer /health whatever state the hub settings are in: a
+  // host that died here would crash-loop, and fail every deploy's health check.
+  let lease = null;
+  try {
+    const settings = loadHubSettings(config.hubEnv);
+    lease = settings ? await createLeaseClient({ settings }).cached() : null;
+  } catch (err) {
+    console.error(`[drive] standby: ${err.message}; standing by without a remembered lease`);
+  }
+  const server = createStandby({ home: lease?.home ?? null, since: lease?.since ?? null });
+  server.listen(Number(flags.port ?? config.port), config.host, () => {
+    console.log(`[drive] standby on ${config.host}:${flags.port ?? config.port}: this drive's home is ${lease?.home ?? 'elsewhere'}`);
+  });
+}
+
 async function serve() {
+  // Two homes (the owner's Mac and Fly): with MARBLE_HUB_ENV set, this host may
+  // write only with the hub's settings in hand and no hold on it. Checked
+  // before the drive is opened; exit 75 so the keeper (tools/sprite/serve.sh)
+  // asks home-mode.mjs again, which says standby for the same reason.
+  let hubSettings = null;
+  if (config.hubEnv) {
+    try {
+      hubSettings = loadHubSettings(config.hubEnv);
+    } catch (err) {
+      console.error(`[drive] hub: ${err.message}; not serving`);
+      process.exit(75);
+    }
+    if (!hubSettings) {
+      console.error(`[drive] hub: no settings in ${config.hubEnv}; not serving`);
+      process.exit(75);
+    }
+    if (fs.existsSync(holdPath(hubSettings))) {
+      console.error(`[drive] hub: held by drive-home (${holdPath(hubSettings)}); not serving`);
+      process.exit(75);
+    }
+  }
   const drive = await createDrive(config);
   await seedDrive(drive.store, { name: config.home });
   await seedAgents(drive.store);
@@ -122,6 +168,19 @@ async function serve() {
         config,
         write: (where, text, { label }) => drive.putDocument(where, text, { label, event: 'changed' }),
       }).catch((err) => console.error('[apps] could not bring app pages forward:', err.message));
+    }
+    // Two homes (the owner's Mac and Fly): keep the hub current, and step down
+    // the moment the lease names the other machine. Exit 75 so the keeper
+    // (tools/sprite/serve.sh) starts again, asks home-mode.mjs, and comes back
+    // as standby.
+    if (hubSettings) {
+      scheduleUploads({
+        root: config.root,
+        settings: hubSettings,
+        client: createLeaseClient({ settings: hubSettings }),
+        onLost: () => setTimeout(() => process.exit(75), 100),
+      });
+      console.log(`[drive] hub: uploading ${hubSettings.HUB_DRIVE} from ${hubSettings.HUB_MACHINE} while it is home`);
     }
     const url = `http://localhost:${port}/`;
     console.log('[drive] serving at');
