@@ -6,7 +6,8 @@
 //   <bucket>/<drive>/data/…       rclone crypt: drive/ and trash/<utc>/, names and contents encrypted
 //
 // rclone is configured through the environment only, so no config file holds
-// a key. The passphrase and salt are obscured by rclone itself at call time.
+// a key. The passphrase and salt are obscured by rclone itself at call time,
+// handed to it on stdin.
 
 import { spawn } from 'node:child_process';
 import fsp from 'node:fs/promises';
@@ -81,7 +82,9 @@ const rawBase = (s) =>
   s.HUB_BACKEND === 'local' ? `hubraw:${path.join(s.HUB_LOCAL_DIR, s.HUB_DRIVE)}` : `hubraw:${s.R2_BUCKET}/${s.HUB_DRIVE}`;
 
 export async function rcloneEnv(s, run = rclone) {
-  const obscure = async (value) => (await run(['obscure', value], {})).stdout.trim();
+  // On stdin, not argv: argv shows in `ps`, and a value starting with '-' would
+  // be read as a flag (and echoed back in rclone's error).
+  const obscure = async (value) => (await run(['obscure', '-'], {}, { input: value })).stdout.trim();
   const env = {
     RCLONE_CONFIG_HUB_TYPE: 'crypt',
     RCLONE_CONFIG_HUB_REMOTE: `${rawBase(s)}/data`,

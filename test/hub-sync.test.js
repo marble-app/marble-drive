@@ -151,3 +151,22 @@ test('trashPrefix names the encrypted folder the trash lands in', needsRclone, a
   const inside = await fsp.readdir(path.join(s.HUB_LOCAL_DIR, 'bryan', 'data', folder));
   assert.equal(inside.length, 1); // the one upload stamp
 });
+
+test('the passphrase and salt reach rclone obscure on stdin, never on argv', async () => {
+  const calls = [];
+  const run = async (args, env, opts = {}) => { calls.push({ args, input: opts.input }); return { stdout: 'obscured\n' }; };
+  const s = { ...(await settings()), HUB_PASSPHRASE: '-starts-with-dash', HUB_SALT: '--salt' };
+  const env = await rcloneEnv(s, run);
+  assert.equal(env.RCLONE_CONFIG_HUB_PASSWORD, 'obscured');
+  assert.deepEqual(calls.map((c) => c.args), [['obscure', '-'], ['obscure', '-']]);
+  assert.deepEqual(calls.map((c) => c.input), ['-starts-with-dash', '--salt']);
+});
+
+test('a passphrase that starts with a dash round-trips through rclone', needsRclone, async () => {
+  const s = { ...(await settings()), HUB_PASSPHRASE: '-p secret', HUB_SALT: '-s' };
+  const env = await rcloneEnv(s);
+  assert.equal((await rclone(['reveal', env.RCLONE_CONFIG_HUB_PASSWORD], {})).stdout.trim(), '-p secret');
+  assert.equal((await rclone(['reveal', env.RCLONE_CONFIG_HUB_PASSWORD2], {})).stdout.trim(), '-s');
+  const root = await fixture();
+  assert.equal((await up({ root, settings: s, epoch: 0 })).ok, true);
+});
