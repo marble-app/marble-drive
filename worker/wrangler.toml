@@ -1,0 +1,15 @@
+# worker/wrangler.toml
+# The lease Worker (docs/HOSTING.md, "The owner's drive on the Mac").
+# Deploy: cd worker && npx wrangler@latest deploy
+# Its one secret: npx wrangler@latest secret put LEASE_TOKEN
+name = "marble-lease"
+main = "src/index.js"
+compatibility_date = "2026-09-01"
+
+[[durable_objects.bindings]]
+name = "LEASE"
+class_name = "Lease"
+
+[[migrations]]
+tag = "v1"
+new_sqlite_classes = ["Lease"]
