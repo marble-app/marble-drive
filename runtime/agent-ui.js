@@ -1954,6 +1954,350 @@
     flush();
   }
 
+  // ------------------------------------------------------------ progress in plain words
+
+  // Two ways to watch a turn. Technical is the log above: every call, in the
+  // agent's own words. Simple — the default — is one card per turn that says
+  // where the work is (Explore, Build, Check, Done), what is happening now in
+  // a sentence anyone can read, and what is being made. The rows are still
+  // built underneath, so switching is a style, not a re-render. It is the
+  // reader's choice, not the conversation's: kept per browser, and every
+  // conversation on the page follows it.
+  const DETAIL_KEY = 'marble:chat-detail';
+  const readDetail = () => {
+    try { return localStorage.getItem(DETAIL_KEY) === 'technical' ? 'technical' : 'simple'; } catch { return 'simple'; }
+  };
+  const writeDetail = (mode) => {
+    try { localStorage.setItem(DETAIL_KEY, mode); } catch { /* private browsing: this page still follows */ }
+    dispatchEvent(new CustomEvent('marble:chat-detail', { detail: mode }));
+  };
+  addEventListener('storage', (event) => {
+    if (event.key === DETAIL_KEY) dispatchEvent(new CustomEvent('marble:chat-detail', { detail: readDetail() }));
+  });
+
+  const STAGES = [
+    { key: 'look', name: 'Explore', gist: 'Getting to know what is there' },
+    { key: 'build', name: 'Build', gist: 'Making the changes you asked for' },
+    { key: 'check', name: 'Check', gist: 'Making sure it works' },
+    { key: 'done', name: 'Done', gist: '' },
+  ];
+  const stageIndex = (key) => STAGES.findIndex((s) => s.key === key);
+
+  const docName = (path) => tail(path).replace(/\.mrbl$/, '') || 'this document';
+
+  // A shell command says what it is for in its description; the words there
+  // are the only honest hint whether it looked, made, or tested.
+  const CHECK_WORDS = /\b(test|tests|testing|spec|verify|verifies|check|checks|lint|screenshot|render|renders|playwright|smoke|assert)\b/i;
+  const BUILD_WORDS = /\b(install|build|compile|bundle|mkdir|create|creates|write|writes|generate|commit|deploy|push|patch|apply|migrate|copy|move|rename|replace|update|updates|add|adds)\b/i;
+
+  /** A call in words anyone can read: the stage it belongs to (null keeps
+   *  the stage the turn is in), a sentence, and the document it makes. */
+  function plainStep(name, input = {}, built = false) {
+    const doc = input.path ? docName(input.path) : '';
+    const step = (stage, say, extra = {}) => ({ stage, say, ...extra });
+    switch (name) {
+      case 'read_document':
+      case 'read_affordances':
+        return step('look', doc ? `Reading ${doc}` : 'Reading the document');
+      case 'list_documents': return step('look', 'Looking through your drive');
+      case 'read_guide': return step('look', 'Reading up on how this works');
+      case 'create_document': return step('build', `Creating ${doc || 'a new document'}`, { makes: input.path });
+      case 'apply_ops': {
+        // The note is written for whoever is watching ("Stage 2 of 4: the
+        // cards"), so it is the best sub-line there is.
+        const note = String(input.note ?? '').trim();
+        return step('build', doc ? `Updating ${doc}` : 'Updating the document', { makes: input.path, note });
+      }
+      case 'act': return step(built ? 'check' : 'build', doc ? `Using ${doc}` : 'Using the app', { makes: input.path });
+      case 'check_document': return step('check', doc ? `Double-checking ${doc}` : 'Double-checking the document');
+      case 'browser_navigate':
+      case 'browser_tabs':
+        return step(built ? 'check' : 'look', built ? 'Opening the page to see the result' : 'Opening the page');
+      case 'browser_snapshot':
+      case 'browser_take_screenshot':
+        return step(built ? 'check' : 'look', built ? 'Looking at how it turned out' : 'Looking at the page');
+      case 'browser_click':
+      case 'browser_type':
+        return step(built ? 'check' : 'look', built ? 'Trying it out' : 'Clicking around the page');
+      case 'browser_close':
+      case 'browser_navigate_back':
+        return step(null, 'Looking at the page');
+      case 'WebSearch':
+      case 'web_search': {
+        const q = trimTo(input.search_term || input.query || '', 48);
+        return step('look', q ? `Searching the web for “${q}”` : 'Searching the web');
+      }
+      case 'WebFetch': return step('look', `Reading ${hostOf(input.url)}`);
+      case 'Read':
+      case 'read':
+      case 'read_file':
+        return step('look', 'Reading through the files');
+      case 'Grep':
+      case 'grep':
+      case 'Glob':
+      case 'glob':
+      case 'LS':
+      case 'ToolSearch':
+        return step('look', 'Searching for the right place');
+      case 'Edit':
+      case 'edit':
+      case 'MultiEdit':
+      case 'NotebookEdit':
+        return step('build', 'Writing the changes', { file: input.file_path ?? input.notebook_path ?? input.path });
+      case 'Write':
+      case 'write':
+        return step('build', 'Writing a new piece', { file: input.file_path ?? input.path });
+      case 'Bash':
+      case 'Shell':
+      case 'shell': {
+        const said = String(input.description || input.command || input.cmd || input.preview || '');
+        if (CHECK_WORDS.test(said)) return step('check', 'Testing that it works');
+        if (BUILD_WORDS.test(said)) return step('build', 'Putting the pieces in place');
+        return step('look', 'Looking around behind the scenes');
+      }
+      case 'Task':
+      case 'task':
+      case 'Agent': return step(null, 'Handing part of the work to a helper');
+      case 'TodoWrite':
+      case 'updateTodos':
+        return step(null, 'Making a plan');
+      case 'Skill': return step('look', input.skill ? `Following the ${input.skill} playbook` : 'Following a playbook');
+      case 'send_message':
+      case 'SendMessage':
+      case 'wait_for_reply':
+      case 'list_agents':
+      case 'ListAgents':
+        return step(null, 'Checking in with another agent');
+      case 'Monitor': return step(null, 'Waiting for something to finish');
+      case 'list_events':
+      case 'search_events':
+      case 'get_event':
+        return step('look', 'Checking your calendar');
+      case 'search_threads':
+      case 'get_thread':
+      case 'get_message':
+        return step('look', 'Checking your email');
+      default: return step(null, 'Working on it');
+    }
+  }
+
+  /** A plan the agent wrote down, as `{ text, status }` rows: Claude's
+   *  TodoWrite hands the list itself, Cursor's updateTodos a JSON preview. */
+  function readTodos(input = {}) {
+    let todos = input.todos;
+    let merge = Boolean(input.merge);
+    if (!Array.isArray(todos) && typeof input.preview === 'string') {
+      try {
+        const parsed = JSON.parse(input.preview);
+        todos = parsed.todos;
+        merge = Boolean(parsed.merge);
+      } catch { return null; }
+    }
+    if (!Array.isArray(todos)) return null;
+    const status = (s) => {
+      const word = String(s ?? '').toLowerCase();
+      if (word.includes('complet') || word === 'done') return 'done';
+      if (word.includes('progress') || word === 'active') return 'now';
+      if (word.includes('cancel')) return 'dropped';
+      return 'next';
+    };
+    return {
+      merge,
+      todos: todos.map((t) => ({
+        id: t.id ?? t.content,
+        text: String((status(t.status) === 'now' && t.activeForm) || t.content || '').trim(),
+        status: status(t.status),
+      })).filter((t) => t.text),
+    };
+  }
+
+  // Drawn, not named: a lens while it explores, blocks going up while it
+  // builds, a tick being drawn while it checks. CSS moves them.
+  const STAGE_GLYPHS = {
+    look: '<svg viewBox="0 0 24 24" aria-hidden="true"><g class="g-lens"><circle cx="10.5" cy="10.5" r="5.5" fill="none" stroke="currentColor" stroke-width="2"/><path d="M14.6 14.6 19 19" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"/></g></svg>',
+    build: '<svg viewBox="0 0 24 24" aria-hidden="true"><rect class="g-b1" x="4" y="14" width="7" height="6" rx="1.4" fill="currentColor"/><rect class="g-b2" x="13" y="14" width="7" height="6" rx="1.4" fill="currentColor"/><rect class="g-b3" x="8.5" y="6.5" width="7" height="6" rx="1.4" fill="currentColor"/></svg>',
+    check: '<svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="8.5" fill="none" stroke="currentColor" stroke-width="1.6" opacity=".35"/><path class="g-tick" d="M7.8 12.4l2.8 2.8 5.6-6" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/></svg>',
+    done: '<svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="9" fill="currentColor"/><path d="M7.8 12.4l2.8 2.8 5.6-6" fill="none" stroke="var(--card)" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/></svg>',
+    failed: '<svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="9" fill="currentColor"/><path d="M12 7.5v5.5" stroke="var(--card)" stroke-width="2.2" stroke-linecap="round"/><circle cx="12" cy="16.4" r="1.3" fill="var(--card)"/></svg>',
+    stopped: '<svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="9" fill="currentColor"/><rect x="8.6" y="8.6" width="6.8" height="6.8" rx="1.2" fill="var(--card)"/></svg>',
+  };
+  STAGE_GLYPHS.ask = '<svg viewBox="0 0 24 24" aria-hidden="true"><g class="g-ask"><path d="M7 4h10a3 3 0 0 1 3 3v5a3 3 0 0 1-3 3h-6l-4 3.5V15a3 3 0 0 1-3-3V7a3 3 0 0 1 3-3z" fill="currentColor"/><path d="M10.3 7.6a1.8 1.8 0 1 1 2.5 1.7c-.5.2-.8.6-.8 1.1v.3" fill="none" stroke="var(--card)" stroke-width="1.6" stroke-linecap="round"/><circle cx="12" cy="12.4" r=".95" fill="var(--card)"/></g></svg>';
+  const DOC_GLYPH = '<svg viewBox="0 0 12 12" aria-hidden="true"><path d="M3 1.5h4l2.5 2.5v6.5H3z" fill="none" stroke="currentColor" stroke-width="1.1" stroke-linejoin="round"/><path d="M7 1.5V4h2.5" fill="none" stroke="currentColor" stroke-width="1.1" stroke-linejoin="round"/></svg>';
+  const DETAIL_ICONS = {
+    simple: '<svg width="14" height="14" viewBox="0 0 14 14" aria-hidden="true"><circle cx="3" cy="7" r="1.6" fill="currentColor"/><circle cx="7" cy="7" r="1.6" fill="currentColor" opacity=".6"/><circle cx="11" cy="7" r="1.6" fill="none" stroke="currentColor" stroke-width="1.1"/></svg>',
+    technical: '<svg width="14" height="14" viewBox="0 0 14 14" aria-hidden="true"><path d="M2.5 4l3 3-3 3" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/><path d="M7 10.5h4.5" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/></svg>',
+  };
+
+
+  // What an apply_ops call changes, read off its own ops: the few elements,
+  // each in the simplest words that still say what it is. An insert is named
+  // by its first heading or line and sized by what it holds; a style that
+  // sets a colour is that colour; a removal is a removal.
+  const COLOR = /#[0-9a-f]{3,8}\b|rgba?\([^)]*\)|hsla?\([^)]*\)/gi;
+  const colorsIn = (text) => [...new Set(String(text ?? '').match(COLOR) ?? [])].slice(0, 3);
+  const plainCount = (n, one, many = `${one}s`) => `${n} ${n === 1 ? one : many}`;
+  function sketchHtml(html) {
+    const box = document.createElement('template');
+    box.innerHTML = String(html ?? '');
+    const root = box.content;
+    const heading = root.querySelector('h1, h2, h3, h4, h5, h6, legend, summary, [aria-label], label');
+    const lead = heading?.getAttribute?.('aria-label') || heading?.textContent || root.textContent || '';
+    const name = trimTo(lead, 40) || 'A new element';
+    const count = (sel) => root.querySelectorAll(sel).length;
+    const parts = [];
+    // The wrapper an insert arrives in is the element itself, not a group in it.
+    const top = new Set(root.children);
+    const groups = [...root.querySelectorAll('section, fieldset, ul, ol, table, .group, [class*="group"]')].filter((el) => !top.has(el)).length;
+    const items = count('li, tr, .item, [class*="item"]');
+    const boxes = count('input[type="checkbox"]');
+    const controls = count('button, input:not([type="checkbox"]), select, textarea');
+    const pictures = count('img, svg, canvas, video');
+    if (groups > 1) parts.push(plainCount(groups, 'group'));
+    if (items) parts.push(plainCount(items, 'item'));
+    if (boxes) parts.push(plainCount(boxes, 'tick box', 'tick boxes'));
+    if (controls) parts.push(plainCount(controls, 'control'));
+    if (pictures) parts.push(plainCount(pictures, 'picture'));
+    return { name, parts, colors: colorsIn(html) };
+  }
+
+  /** One apply_ops call → rows of `{ op: '+'|'~'|'-', text, colors, parts }`.
+   *  `nameOf(id)` names an element the page can see ("Research Garden"),
+   *  so a change to it says whose it was; it answers '' for any other. */
+  function readOps(ops, nameOf = () => '') {
+    const rows = [];
+    const removed = [];
+    let moved = 0;
+    const of = (id) => {
+      const name = nameOf(id);
+      return name ? ` of “${name}”` : '';
+    };
+    for (const op of Array.isArray(ops) ? ops : []) {
+      switch (op?.type) {
+        case 'insert': {
+          const { name, parts, colors } = sketchHtml(op.html);
+          rows.push({ op: '+', text: name, parts, colors });
+          break;
+        }
+        case 'setText': rows.push({ op: '~', text: `Text: “${trimTo(op.text, 48)}”` }); break;
+        case 'setInner': {
+          const { name, parts, colors } = sketchHtml(op.html);
+          const whose = nameOf(op.id);
+          rows.push({ op: '~', text: whose ? `Rewrote “${whose}”` : name === 'A new element' ? 'Rewrote an element' : `Rewrote ${name}`, parts, colors });
+          break;
+        }
+        case 'setAttr': {
+          const colors = colorsIn(op.value);
+          if (op.name === 'style' && colors.length) rows.push({ op: '~', text: `Colour${of(op.id)}`, colors });
+          else if (op.name === 'style') rows.push({ op: '~', text: `Look${of(op.id)}` });
+          else if (op.name === 'hidden') rows.push({ op: '~', text: `${op.value == null ? 'Showed' : 'Hid'}${of(op.id) ? ` “${nameOf(op.id)}”` : ' an element'}` });
+          else rows.push({ op: '~', text: `Setting: ${op.name}${of(op.id)}` });
+          break;
+        }
+        case 'remove': removed.push(nameOf(op.id)); break;
+        case 'move': moved += 1; break;
+        default:
+      }
+    }
+    if (moved) rows.push({ op: '~', text: `Moved ${plainCount(moved, 'element')}` });
+    if (removed.length === 1 && removed[0]) rows.push({ op: '-', text: `Took away “${removed[0]}”` });
+    else if (removed.length) rows.push({ op: '-', text: `Took away ${plainCount(removed.length, 'element')}` });
+    return rows;
+  }
+
+  /** What a permission would let the agent do, in a sentence. */
+  function plainAskOf(event) {
+    const input = event.input ?? {};
+    const tool = String(event.tool ?? '');
+    const what = input.description || '';
+    if (/^(Bash|Shell|shell)$/.test(tool)) return what ? `Run: ${trimTo(what, 70)}` : 'Run a command on your computer';
+    if (/^(Write|Edit|MultiEdit|NotebookEdit)$/.test(tool)) return `Change ${tail(input.file_path ?? input.notebook_path ?? '')}`;
+    if (tool === 'WebFetch') return `Open ${hostOf(input.url)}`;
+    if (/send|email|message/i.test(tool)) return 'Send a message for you';
+    if (/delete|trash|remove/i.test(tool)) return 'Delete something';
+    return `Use ${event.displayName || toolShortName(tool)}`;
+  }
+
+  // What the person can do next, by how the turn stands. `send` says it for
+  // them, `draft` puts the caret in the box with a question, the rest act.
+  function nextSteps(state, ctx = {}) {
+    const doc = ctx.docs?.[0];
+    switch (state) {
+      case 'running': return { quiet: true, acts: [
+        { label: 'Add a note', kind: 'draft', placeholder: 'Tell it something while it works…' },
+        { label: 'Stop', kind: 'stop' },
+      ] };
+      case 'asking': return { q: 'Is that OK?', acts: [
+        { label: 'Allow once', kind: 'choose', value: 'allow', primary: true },
+        { label: 'Don’t allow', kind: 'choose', value: 'deny' },
+        { label: 'Ask why first', kind: 'send', text: 'Why do you need to do that, and what happens if I say no?' },
+      ] };
+      case 'completed': return doc
+        ? { q: 'How did it turn out?', acts: [
+          { label: `Open ${docName(doc)}`, kind: 'open', value: doc, primary: true },
+          { label: 'Looks good', kind: 'send', text: 'Looks good, thanks!' },
+          { label: 'Change something…', kind: 'draft', placeholder: 'What should be different?' },
+          ...(ctx.undoable ? [{ label: 'Undo', kind: 'undo' }] : []),
+        ] }
+        : { q: 'Was this what you needed?', acts: [
+          { label: 'Yes, thanks', kind: 'send', text: 'Yes, thanks!', primary: true },
+          { label: 'Save it as a note', kind: 'send', text: 'Save this as a note in my drive.' },
+          { label: 'Dig deeper…', kind: 'draft', placeholder: 'What should it look into more?' },
+        ] };
+      case 'declined': return { q: 'You said no, so it stopped there. What would you like instead?', acts: [
+        { label: 'Allow it and try again', kind: 'send', text: 'Go ahead, you can do that. Try again.', primary: true },
+        { label: 'Do it another way…', kind: 'draft', placeholder: 'How should it go about it instead?' },
+        { label: 'Leave it', kind: 'send', text: 'Let’s leave it there.' },
+      ] };
+      case 'failed': return { q: 'It hit a problem it couldn’t fix on its own. What would you like to do?', acts: [
+        { label: 'Try again', kind: 'send', text: 'Try that again.', primary: true },
+        { label: 'What went wrong?', kind: 'send', text: 'What went wrong, in plain words?' },
+        { label: 'Give it a hint…', kind: 'draft', placeholder: 'What should it try?' },
+        ...(ctx.undoable ? [{ label: 'Undo its changes', kind: 'undo' }] : []),
+      ] };
+      case 'cancelled': return { q: 'You stopped it partway. What next?', acts: [
+        { label: 'Keep going', kind: 'send', text: 'Keep going from where you stopped.', primary: true },
+        ...(ctx.undoable ? [{ label: 'Undo what it did', kind: 'undo' }] : []),
+        { label: 'Do something else…', kind: 'draft', placeholder: 'What should it do instead?' },
+      ] };
+      case 'interrupted': return { q: 'Marble restarted before it finished.', acts: [
+        { label: 'Pick up where it left off', kind: 'send', text: 'Pick up where you left off.', primary: true },
+        { label: 'What got done?', kind: 'send', text: 'What did you get done before you stopped?' },
+      ] };
+      default: return null;
+    }
+  }
+
+  // Patch a preview in place rather than redraw it. What is on screen stays
+  // put, a changed word is swapped where it stands, and only a node that was
+  // not there before gets data-enter, the one thing entrances key on.
+  const kindOf = (n) => (n.nodeType === 1 ? `${n.tagName}.${n.classList[0] ?? ''}#${n.dataset.k ?? ''}` : `#${n.nodeType}`);
+  function patchNode(have, want, enter) {
+    if (have.nodeType === 3) { if (have.data !== want.data) have.data = want.data; return; }
+    if (have.nodeType !== 1) return;
+    for (const a of [...have.attributes]) if (a.name !== 'data-enter' && !want.hasAttribute(a.name)) have.removeAttribute(a.name);
+    for (const a of [...want.attributes]) if (have.getAttribute(a.name) !== a.value) have.setAttribute(a.name, a.value);
+    patchChildren(have, want, enter);
+  }
+  function patchChildren(from, to, enter) {
+    const wanted = [...to.childNodes];
+    wanted.forEach((want, i) => {
+      const have = from.childNodes[i];
+      if (have && kindOf(have) === kindOf(want)) { patchNode(have, want, enter); return; }
+      const key = want.nodeType === 1 ? want.dataset.k : '';
+      const moved = key ? [...from.children].find((c, j) => j >= i && c.dataset.k === key) : null;
+      if (moved) { from.insertBefore(moved, have ?? null); patchNode(moved, want, enter); return; }
+      if (enter && want.nodeType === 1) want.setAttribute('data-enter', '');
+      from.insertBefore(want, have ?? null);
+    });
+    while (from.childNodes.length > wanted.length) from.lastChild.remove();
+  }
+  /** `build(root)` fills a scratch node; `el` is patched to match it. */
+  function morph(el, build, enter) {
+    const next = document.createElement('div');
+    build(next);
+    patchChildren(el, next, enter);
+  }
+
   // ------------------------------------------------------------ the view
 
   // The ask card's rules stand alone so a page drawing the card outside a
@@ -2208,6 +2552,218 @@
     .turn-footer button:hover { background: var(--accent-soft); }
     .turn-footer button:disabled { color: var(--faint); cursor: default; }
     .turn-footer .watch { color: var(--caution); }
+    /* Simple: the rows are still built and stand back behind the card. An
+       act keeps its line, because it happened in the person's own app. A
+       refusal and a permission prompt are said by the card, in words, with
+       what to do about them; so is Undo, which is one of the card's answers. */
+    .log[data-detail="simple"] > .tool:not([data-reveal]):not([data-kind="act"]),
+    .log[data-detail="simple"] > .tool-group:not([data-reveal]),
+    .log[data-detail="simple"] > .ask:not([data-kind="question"]):not([data-reveal]) { display: none; }
+    .log[data-detail="technical"] > .progress { display: none; }
+    .log[data-detail="simple"] > .turn-footer[data-plain] > :not(.watch, .restore) { display: none; }
+    .log[data-detail="simple"] > .turn-footer[data-plain]:not(:has(.watch)) { display: none; }
+    .progress {
+      --p-ink: var(--accent-ink);
+      display: flex; flex-direction: column; gap: 12px;
+      margin: 4px 0 8px; padding: 12px 14px 14px;
+      border: 1px solid var(--line); border-radius: var(--radius);
+      background: var(--card); box-shadow: var(--shadow-rest);
+      font-size: 13px; line-height: 1.4;
+    }
+    .progress-top { display: flex; align-items: center; gap: 11px; min-width: 0; }
+    .progress-glyph {
+      flex: none; width: 34px; height: 34px; border-radius: 10px;
+      display: grid; place-items: center;
+      background: color-mix(in srgb, var(--p-ink) 14%, var(--card)); color: var(--p-ink);
+    }
+    .progress-glyph svg { width: 20px; height: 20px; display: block; overflow: visible; }
+    .progress-words { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 1px; }
+    .progress-say, .progress-sub { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .progress-say { font-weight: 600; color: var(--ink); font-size: 13.5px; }
+    .progress-sub { font-size: 12px; color: var(--muted); }
+    .progress-sub:empty { display: none; }
+    .progress-more {
+      flex: none; appearance: none; border: 0; background: none; font: inherit; font-size: 12px;
+      color: var(--faint); padding: 3px 8px; border-radius: 7px; cursor: pointer;
+      transition: background-color .13s var(--snap), color .13s var(--snap);
+    }
+    .progress-more:hover { background: var(--paper-2); color: var(--ink); }
+    .progress-more[aria-expanded="true"] { color: var(--accent-ink); background: var(--accent-soft); }
+    .progress-more:focus-visible { outline: 2px solid var(--accent-ink); outline-offset: 1px; }
+    /* Four stops on one line. Each stop draws the stretch of line from the
+       stop before it, grey underneath and ink over the top, so the ink runs
+       out along the line as the turn gets further. */
+    .progress-track { list-style: none; margin: 0; padding: 0 2px; display: grid; grid-template-columns: repeat(4, 1fr); }
+    .progress-stop { position: relative; display: flex; flex-direction: column; align-items: center; gap: 6px; font-size: 11px; color: var(--faint); min-width: 0; }
+    .progress-stop::before, .progress-stop::after {
+      content: ''; position: absolute; top: 5px; right: 50%; width: 100%; height: 2px; border-radius: 1px;
+    }
+    .progress-stop::before { background: var(--line); }
+    .progress-stop::after { background: var(--p-ink); transform-origin: left center; transform: scaleX(0); transition: transform .6s var(--settle); }
+    .progress-stop:first-child::before, .progress-stop:first-child::after { display: none; }
+    .progress-stop:is([data-at="past"], [data-at="now"])::after { transform: scaleX(1); }
+    .progress-node {
+      position: relative; z-index: 1; width: 12px; height: 12px; border-radius: 50%; box-sizing: border-box;
+      background: var(--card); border: 2px solid var(--line);
+      transition: background-color .3s var(--snap), border-color .3s var(--snap), box-shadow .3s var(--snap);
+    }
+    .progress-stop[data-at="past"] .progress-node { background: var(--p-ink); border-color: var(--p-ink); }
+    .progress-stop[data-at="now"] .progress-node {
+      background: var(--p-ink); border-color: var(--p-ink);
+      box-shadow: 0 0 0 4px color-mix(in srgb, var(--p-ink) 22%, transparent);
+      animation: stop-breathe 1.8s var(--snap) infinite;
+    }
+    .progress-stop[data-at="past"] .progress-name { color: var(--muted); }
+    .progress-stop[data-at="now"] .progress-name { color: var(--ink); font-weight: 600; }
+    .progress-name { max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    @keyframes stop-breathe {
+      0%, 100% { box-shadow: 0 0 0 3px color-mix(in srgb, var(--p-ink) 26%, transparent); }
+      50% { box-shadow: 0 0 0 6px color-mix(in srgb, var(--p-ink) 8%, transparent); }
+    }
+    .progress-plan { display: flex; flex-direction: column; gap: 7px; }
+    .progress-plan[hidden] { display: none; }
+    .progress-meter { display: flex; align-items: center; gap: 10px; font-size: 11.5px; color: var(--muted); }
+    .progress-bar { flex: 1; height: 6px; border-radius: 3px; background: var(--paper-3); overflow: hidden; }
+    .progress-fill { display: block; height: 100%; width: 0; border-radius: inherit; background: var(--p-ink); transition: width .6s var(--settle); }
+    .progress-count { flex: none; }
+    .progress-todos { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 3px; font-size: 12.5px; color: var(--muted); }
+    .progress-todos li { display: flex; align-items: baseline; gap: 8px; }
+    .progress-todos li::before {
+      content: ''; flex: none; width: 10px; height: 10px; border-radius: 50%; box-sizing: border-box;
+      border: 1.5px solid var(--line); transform: translateY(1px);
+    }
+    .progress-todos li[data-status="done"] { color: var(--faint); text-decoration: line-through; text-decoration-color: var(--line); }
+    .progress-todos li[data-status="done"]::before { background: var(--p-ink); border-color: var(--p-ink); }
+    .progress-todos li[data-status="now"] { color: var(--ink); }
+    .progress-todos li[data-status="now"]::before { border: 2px solid var(--p-ink); animation: pulse 1.2s var(--snap) infinite; }
+    .progress-made { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; font-size: 12px; color: var(--faint); }
+    .progress-made[hidden] { display: none; }
+    .progress-chip {
+      display: inline-flex; align-items: center; gap: 5px; max-width: 100%;
+      padding: 2px 9px 2px 7px; border-radius: 999px;
+      background: var(--paper-2); color: var(--ink); font-size: 12px; text-decoration: none;
+    }
+    a.progress-chip:hover { background: var(--accent-soft); color: var(--accent-ink); }
+    .progress-chip svg { flex: none; width: 12px; height: 12px; color: var(--accent-ink); }
+    .progress-chip.files { color: var(--muted); }
+    /* The glyph moves only while the turn does. */
+    .progress[data-state="running"] .g-lens { animation: lens-scan 2.6s ease-in-out infinite; }
+    .progress[data-state="running"] :is(.g-b1, .g-b2, .g-b3) { transform-box: fill-box; animation: block-drop 2.4s var(--settle) infinite; }
+    .progress[data-state="running"] .g-b2 { animation-delay: .22s; }
+    .progress[data-state="running"] .g-b3 { animation-delay: .44s; }
+    .g-tick { stroke-dasharray: 16; }
+    .progress[data-state="running"] .g-tick { animation: tick-draw 1.9s var(--snap) infinite; }
+    @keyframes lens-scan {
+      0%, 100% { transform: translate(0, 0); } 25% { transform: translate(2px, -1.5px); }
+      50% { transform: translate(0, -2.5px); } 75% { transform: translate(-2px, -1px); }
+    }
+    @keyframes block-drop {
+      0% { transform: translateY(-8px); opacity: 0; } 22%, 78% { transform: none; opacity: 1; } 100% { transform: none; opacity: 0; }
+    }
+    @keyframes tick-draw { 0% { stroke-dashoffset: 16; } 45%, 85% { stroke-dashoffset: 0; opacity: 1; } 100% { stroke-dashoffset: 0; opacity: 0; } }
+    /* Finished, the card sits down: one line of what came of it, and what it
+       made. The stops and the plan were for watching. */
+    .progress:not([data-state="running"]):not([data-state="asking"]) { gap: 8px; padding: 10px 12px; box-shadow: none; background: var(--paper); }
+    .progress:not([data-state="running"]):not([data-state="asking"]) :is(.progress-track, .progress-plan) { display: none; }
+    .progress:not([data-state="running"]):not([data-state="asking"]) .progress-glyph { width: 26px; height: 26px; border-radius: 8px; background: none; }
+    .progress:not([data-state="running"]):not([data-state="asking"]) .progress-glyph svg { width: 22px; height: 22px; }
+    .progress[data-state="failed"] { --p-ink: var(--danger); }
+    .progress:is([data-state="cancelled"], [data-state="interrupted"], [data-state="declined"]) { --p-ink: var(--faint); }
+    /* Waiting on you is the one state that should pull the eye. */
+    .progress[data-state="asking"] {
+      --p-ink: var(--caution);
+      border-color: color-mix(in srgb, var(--caution) 50%, var(--line));
+      box-shadow: 0 0 0 3px color-mix(in srgb, var(--caution) 14%, transparent), var(--shadow-rest);
+    }
+    .progress[data-state="asking"] .g-ask { transform-box: fill-box; transform-origin: 30% 100%; animation: ask-nudge 2s var(--settle) infinite; }
+    @keyframes ask-nudge { 0%, 60%, 100% { transform: none; } 70% { transform: rotate(-8deg); } 80% { transform: rotate(6deg); } 90% { transform: rotate(-3deg); } }
+    /* While it works, the sentence stays in view however tall the card gets. */
+    .progress:is([data-state="running"], [data-state="asking"]) .progress-top {
+      position: sticky; top: -12px; z-index: 2; margin: -12px -14px 0; padding: 12px 14px 8px;
+      background: var(--card); border-radius: var(--radius) var(--radius) 0 0;
+    }
+
+    /* What the person can do next. */
+    .progress-next { display: flex; flex-direction: column; gap: 8px; padding-top: 10px; border-top: 1px solid var(--paper-3); }
+    .progress-next[hidden], .progress-said[hidden] { display: none; }
+    .progress-q { margin: 0; font-size: 13px; line-height: 1.4; color: var(--ink); }
+    .progress-acts { display: flex; flex-wrap: wrap; gap: 6px; }
+    .act {
+      appearance: none; border: 0; font: inherit; font-size: 12.5px; font-weight: 500; line-height: 1; padding: 7px 11px; border-radius: 8px; cursor: pointer;
+      background: var(--paper-2); color: var(--ink); box-shadow: inset 0 0 0 1px var(--line);
+      transition: background-color .13s var(--snap);
+    }
+    .act:hover { background: var(--paper-3); }
+    .act:focus-visible { outline: 2px solid var(--accent-ink); outline-offset: 2px; }
+    .act.primary { background: var(--ink); color: var(--paper); box-shadow: none; }
+    .act.primary:hover { background: color-mix(in srgb, var(--ink) 85%, var(--paper)); }
+    .progress[data-state="asking"] .act.primary { background: var(--caution); color: var(--card); }
+    .progress-next[data-quiet="true"] { flex-direction: row; justify-content: flex-end; padding-top: 0; border-top: 0; margin-top: -6px; }
+    .progress-next[data-quiet="true"] .progress-q { display: none; }
+    .progress-next[data-quiet="true"] .progress-acts { gap: 2px; }
+    .progress-next[data-quiet="true"] .act { background: none; box-shadow: none; color: var(--faint); padding: 4px 8px; font-size: 12px; }
+    .progress-next[data-quiet="true"] .act:hover { background: var(--paper-2); color: var(--ink); }
+    .progress-said { font-size: 12px; color: var(--muted); padding-top: 8px; border-top: 1px solid var(--paper-3); }
+    .progress-said::before { content: '↳ '; color: var(--faint); }
+    .composer.is-drafting .field { box-shadow: 0 0 0 2px var(--accent-ink); }
+
+    /* The close-up: not the page, the few things changing in it. */
+    .pv { display: flex; flex-direction: column; gap: 8px; }
+    .pv[hidden], .pv-steps[hidden] { display: none; }
+    .pv-frame { border-radius: 10px; overflow: hidden; border: 1px solid var(--line); background: var(--card); }
+    .pv-bar { display: flex; align-items: center; gap: 8px; padding: 6px 10px; font-size: 11.5px; color: var(--muted); border-bottom: 1px solid var(--paper-3); background: var(--paper); }
+    .pv-where { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 500; }
+    .pv-tag { flex: none; font-size: 10.5px; font-weight: 600; letter-spacing: .02em; color: var(--faint); }
+    .pv-tag[data-live="true"] { color: var(--p-ink); display: inline-flex; align-items: center; gap: 5px; }
+    .pv-tag[data-live="true"]::before { content: ''; width: 6px; height: 6px; border-radius: 50%; background: currentColor; animation: pulse 1.2s var(--snap) infinite; }
+    .pv-view { padding: 12px; display: flex; flex-direction: column; gap: 10px; }
+    .pv-foot { display: flex; align-items: center; gap: 10px; min-width: 0; }
+    .pv-cap { flex: 1; min-width: 0; font-size: 12px; color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .pv-cap:empty { display: none; }
+    .pv-steps { flex: none; display: flex; gap: 3px; margin-left: auto; }
+    .pv-step { appearance: none; width: 20px; height: 20px; padding: 0; border: 0; border-radius: 6px; font: inherit; font-size: 10.5px; font-weight: 600; line-height: 1; color: var(--muted); background: var(--paper-2); box-shadow: inset 0 0 0 1px var(--line); cursor: pointer; }
+    .pv-step:hover { color: var(--ink); }
+    .pv-step[aria-pressed="true"] { background: var(--p-ink); color: var(--card); box-shadow: none; }
+    .f-focus { display: flex; flex-direction: column; gap: 8px; min-width: 0; font-size: 12.5px; }
+    .f-el { display: flex; flex-direction: column; gap: 6px; padding: 8px 10px; border-radius: 8px; background: var(--paper-2); }
+    .f-el-new { background: var(--card); box-shadow: 0 0 0 1.5px color-mix(in srgb, var(--p-ink) 55%, transparent); }
+    .f-el-name { display: flex; align-items: center; gap: 6px; font-weight: 600; min-width: 0; }
+    .f-el-text { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .f-new { flex: none; padding: 1px 6px; border-radius: 4px; font-size: 10px; font-weight: 600; background: color-mix(in srgb, #3f8a5c 16%, var(--card)); color: #3f8a5c; }
+    .f-parts, .f-swatches { display: flex; flex-wrap: wrap; gap: 4px; }
+    .f-part { padding: 1px 7px; border-radius: 5px; font-size: 11.5px; color: var(--muted); background: var(--paper-2); box-shadow: inset 0 0 0 1px var(--line); }
+    .f-sw { width: 22px; height: 16px; border-radius: 4px; background: var(--c); box-shadow: inset 0 0 0 1px rgba(0,0,0,.1); }
+    .f-note { font-size: 12px; color: var(--muted); }
+    .f-src { display: grid; grid-template-columns: 22px minmax(0, 1fr) auto; align-items: center; gap: 8px; }
+    .f-src b { font-weight: 500; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .f-src > span:last-child { color: var(--faint); font-size: 11.5px; }
+    .f-fav { width: 22px; height: 22px; border-radius: 6px; display: grid; place-items: center; background: hsl(var(--h) 45% 48%); color: #fff; font-weight: 700; font-size: 11px; }
+    .f-path { display: flex; align-items: center; }
+    .f-node { display: inline-flex; align-items: center; padding: 5px 10px; border-radius: 8px; background: var(--paper-2); font-weight: 500; }
+    .f-node.stuck { color: var(--danger); background: color-mix(in srgb, var(--danger) 10%, var(--card)); }
+    .f-link { flex: 1; min-width: 30px; position: relative; height: 2px; margin: 0 6px; background: repeating-linear-gradient(90deg, var(--faint) 0 4px, transparent 4px 8px); }
+    .f-link span { position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%); width: 16px; height: 16px; border-radius: 50%; display: grid; place-items: center; font-size: 10px; background: var(--danger); color: var(--card); }
+    .f-changes { list-style: none; margin: 0; padding: 8px 0 0; border-top: 1px solid var(--paper-3); display: flex; flex-direction: column; gap: 3px; font-size: 12.5px; }
+    .f-changes:empty { display: none; }
+    .f-changes li { display: flex; align-items: baseline; gap: 7px; margin: 0; min-width: 0; }
+    .f-op { flex: none; width: 16px; height: 16px; border-radius: 4px; display: inline-grid; place-items: center; font: 700 11px/1 ui-monospace, SFMono-Regular, Menlo, monospace; transform: translateY(2px); }
+    .f-changes [data-op="plus"] .f-op { background: color-mix(in srgb, #3f8a5c 16%, var(--card)); color: #3f8a5c; }
+    .f-changes [data-op="change"] .f-op { background: var(--accent-soft); color: var(--accent-ink); }
+    .f-changes [data-op="minus"] .f-op { background: color-mix(in srgb, var(--danger) 12%, var(--card)); color: var(--danger); }
+    /* Older turns keep just their list of changes. */
+    .progress[data-old] .pv-frame { border: 0; background: none; }
+    .progress[data-old] :is(.pv-bar, .f-focus, .pv-foot) { display: none; }
+    .progress[data-old] .pv-view { padding: 0; }
+    .progress[data-old] .f-changes { border-top: 0; padding-top: 0; }
+    /* Only what is new moves: a preview is patched in place, and a node that
+       arrives wears data-enter; nothing already on screen replays. */
+    .pv-view [data-enter], .progress-chip[data-enter] { animation: plain-enter .42s var(--settle) both; }
+    @keyframes plain-enter { from { opacity: 0; transform: translateY(4px) scale(.97); } }
+    :host([data-chrome="phone"]) .progress-say { font-size: 15px; }
+    :host([data-chrome="phone"]) .progress-sub, :host([data-chrome="phone"]) .progress-todos { font-size: 13.5px; }
+    @media (prefers-reduced-motion: reduce) {
+      .progress *, .progress-stop::after { animation: none !important; transition: none !important; }
+    }
     .system { align-self: center; font-size: 12px; color: var(--faint); text-align: center; max-width: 90%; padding: 8px 0; }
     .system.error { color: var(--danger); }
     /* Prompts waiting their turn hover over the composer rather than pushing
@@ -2502,6 +3058,19 @@
     .failover:hover { color: var(--ink); background: var(--paper-2); }
     .failover-mark { display: inline-flex; flex: none; }
     .failover svg { display: block; flex: none; }
+    /* Its neighbour and its twin: how much of the work to show, drawn — three
+       dots for the stops, a prompt for the steps — with its name in the tip. */
+    .detail {
+      appearance: none; border: 0; background: none; color: var(--muted);
+      flex: none; align-self: center; margin: 0; font: inherit;
+      min-width: 22px; height: 22px; padding: 0 4px; border-radius: 7px; cursor: pointer;
+      display: inline-flex; align-items: center; justify-content: center; gap: 5px;
+      transition: background-color .13s var(--snap), color .13s var(--snap);
+    }
+    .detail:hover { color: var(--ink); background: var(--paper-2); }
+    .detail-mark { display: inline-flex; flex: none; }
+    .detail svg { display: block; flex: none; }
+    .detail-word { display: none; font-size: 11px; font-weight: 500; }
     /* The word rides along only where nothing can be hovered to ask: the phone
        sheet has the room, and a bare glyph there names nothing. */
     .failover-word { display: none; font-size: 11px; font-weight: 500; }
@@ -2943,6 +3512,7 @@
     :host([data-chrome="phone"]) .setup-sheet .presets-more,
     :host([data-chrome="phone"]) .setup-sheet .custom-toggle,
     :host([data-chrome="phone"]) .setup-sheet .failover,
+    :host([data-chrome="phone"]) .setup-sheet .detail,
     :host([data-chrome="phone"]) .setup-sheet .mode {
       box-sizing: border-box; display: inline-flex; align-items: center; justify-content: center;
       min-height: 44px; min-width: 44px; padding: 0 16px; border-radius: 12px;
@@ -2955,6 +3525,8 @@
     :host([data-chrome="phone"]) .setup-sheet .mode { color: var(--accent-ink); align-self: flex-start; margin-top: 0; }
     :host([data-chrome="phone"]) .setup-sheet .failover { color: var(--ink); gap: 8px; }
     :host([data-chrome="phone"]) .setup-sheet .failover-word { display: block; font-size: 15px; }
+    :host([data-chrome="phone"]) .setup-sheet .detail { color: var(--ink); gap: 8px; }
+    :host([data-chrome="phone"]) .setup-sheet .detail-word { display: block; font-size: 15px; }
     /* Hidden still means hidden: these selectors are heavier than the [hidden]
        rules they sit under, so they have to say it themselves. */
     :host([data-chrome="phone"]) .setup-sheet .setup[hidden],
@@ -3334,6 +3906,7 @@
                   <div class="presets" role="radiogroup" aria-label="Saved setups" hidden></div>
                   <button type="button" class="custom-toggle" aria-expanded="false" hidden>Custom</button>
                   <button type="button" class="failover" data-failover="auto" aria-label="When Claude usage stops"><span class="failover-mark"></span><span class="failover-word"></span></button>
+                  <button type="button" class="detail" data-detail="simple"><span class="detail-mark"></span><span class="detail-word"></span></button>
                   <div class="scrub" role="slider" aria-label="Model setup" aria-valuemin="0" tabindex="-1"></div>
                 </div>
                 <div class="picker">
@@ -3393,6 +3966,15 @@
       this.usageLeft = new Set();
       this.pendingFailover = null;
       this.failoverButton.addEventListener('click', () => this.flipFailover());
+      this.detailButton = root.querySelector('.detail');
+      this.detailMark = root.querySelector('.detail-mark');
+      this.detailWord = root.querySelector('.detail-word');
+      armHint(this.detailButton, () => (readDetail() === 'simple'
+        ? 'Simple progress\nClick to see every technical step'
+        : 'Every technical step\nClick for simple progress'));
+      this.detailButton.addEventListener('click', () => writeDetail(readDetail() === 'simple' ? 'technical' : 'simple'));
+      this.onDetail = () => this.paintDetail();
+      this.paintDetail();
       this.usageSwitch.addEventListener('click', () => this.switchFromUsage());
       this.usageLeave.addEventListener('click', () => this.leaveUsage());
       this.dispatchEl = root.querySelector('.dispatch');
@@ -3659,6 +4241,8 @@
       armScrubKeys();
       this.unwatchTheme = watchPageTheme(this);
       addEventListener('marble:agent-context', this.onContext);
+      addEventListener('marble:chat-detail', this.onDetail);
+      this.paintDetail();
       this.updateContext();
       this.load();
       this.fitObserver = new ResizeObserver(() => this.fitSetup());
@@ -3682,6 +4266,7 @@
       this.unwatchTheme?.();
       this.unwatchTheme = null;
       removeEventListener('marble:agent-context', this.onContext);
+      removeEventListener('marble:chat-detail', this.onDetail);
       this.off?.();
       this.offAll?.();
       this.offQueue?.();
@@ -4997,6 +5582,12 @@
 
     async submit({ dispatch = null } = {}) {
       if (this.sending) return;
+      // A drafted question was for this one message.
+      if (this.draftPlaceholder != null) {
+        this.input.dataset.placeholder = this.draftPlaceholder;
+        this.draftPlaceholder = null;
+        this.form.classList.remove('is-drafting');
+      }
       const mode = dispatch ?? (this.running ? radioValue(this.shadowRoot, 'dispatch') || 'queue' : 'queue');
       let typed = this.input.value.trim();
       const slash = this.matchSlash(typed);
@@ -5571,9 +6162,13 @@
       }
       const stuck = this.logEl.scrollHeight - this.logEl.scrollTop - this.logEl.clientHeight < 48;
       const turn = event.turn;
+      // Live, or history being replayed as the conversation opens. Only live
+      // news may move: a transcript read back should arrive already still.
+      this.fresh = !event.t || Date.now() - event.t < 5000;
       switch (event.type) {
         case 'user': {
           this.endLive();
+          this.plainSettleAll();
           // What was typed, not what was attached: a title and a queue row are
           // both one line, and a pasted file would be all of it.
           const said = splitPasted(event.text).rest || String(event.text ?? '');
@@ -5681,7 +6276,7 @@
     }
 
     record(turn) {
-      if (!this.turns.has(turn)) this.turns.set(turn, { tools: new Map(), applies: [], applied: 0, footer: null, asks: new Map() });
+      if (!this.turns.has(turn)) this.turns.set(turn, { tools: new Map(), applies: [], applied: 0, footer: null, asks: new Map(), progress: null });
       return this.turns.get(turn);
     }
 
@@ -5702,7 +6297,8 @@
       card = this.buildAskCard(event, submit);
       this.record(turn).asks.set(event.requestId, card);
       this.append(turn, card);
-      card.querySelector('button')?.focus({ preventScroll: true });
+      if (event.kind !== 'question') this.plainAsk(turn, event, card);
+      if (this.logEl.dataset.detail !== 'simple' || event.kind === 'question') card.querySelector('button')?.focus({ preventScroll: true });
     }
 
     /** The card an ask becomes: a permission prompt with Allow / Deny and a
@@ -5845,6 +6441,7 @@
       if (!card) return;
       card.remove();
       record.asks.delete(event.requestId);
+      this.plainAskClosed(turn, event, card);
       if (event.type === 'ask.void' && event.why !== 'cancelled') this.system('The agent stopped waiting for that answer.');
     }
 
@@ -5856,7 +6453,12 @@
     append(turn, node) {
       if (turn && node.classList?.contains('msg')) node.dataset.turn = turn;
       const footer = turn ? this.turns.get(turn)?.footer : null;
-      if (footer?.isConnected) this.logEl.insertBefore(node, footer);
+      // The card is the turn's latest word: whatever the turn says next goes
+      // in above it. The card itself never moves, because moving it would
+      // restart every animation inside it.
+      const card = turn ? this.turns.get(turn)?.progress?.el : null;
+      const before = card && card !== node && card.isConnected ? card : footer?.isConnected ? footer : null;
+      if (before) this.logEl.insertBefore(node, before);
       else this.logEl.append(node);
     }
 
@@ -5928,7 +6530,15 @@
      *  other chrome leaves the button hidden, so this costs nothing there. */
     tick() {
       if (this.dataset.chrome !== 'callout' || !this.ticker) return;
-      const last = [...this.logEl.children].reverse().find((el) => !el.classList.contains('turn-footer'));
+      const simple = this.logEl.dataset.detail === 'simple';
+      const last = [...this.logEl.children].reverse().find((el) => !el.classList.contains('turn-footer')
+        && (simple ? !(el.matches('.tool, .tool-group') && getComputedStyle(el).display === 'none') : !el.classList.contains('progress')));
+      if (last?.classList.contains('progress')) {
+        const said = last.querySelector('.progress-say')?.textContent ?? '';
+        this.ticker.textContent = said;
+        this.ticker.hidden = !said;
+        return;
+      }
       // Not textContent: a paragraph followed by a list would run together
       // into onesentence. Blocks are spaced, inline runs are not, so bold
       // text keeps its punctuation.
@@ -6132,6 +6742,7 @@
       record.tools.set(event.callId, row);
       if (event.name === 'apply_ops') record.applies.push({ row, path: event.input?.path });
       this.append(turn, row);
+      this.plainCall(turn, event);
     }
 
     /** The nodes that belong to a turn: everything between the previous
@@ -6150,6 +6761,7 @@
 
     regroup(turn) {
       collapseToolRows(this.turnNodes(turn));
+      if (this.turns.get(turn)?.progress?.open) this.markReveal(turn);
     }
 
     toolResult(turn, event) {
@@ -6179,6 +6791,7 @@
         // access when most of it was the agent tripping over its own shell.
         const denied = Boolean(event.denied);
         row.dataset.state = denied ? 'refused' : 'failed';
+        this.plainFailed(turn, row, event);
         row.title = event.summary ?? '';
         if (!['list_documents', 'read_document', 'apply_ops', 'create_document', 'read_guide', 'check_document', 'affordance_script'].includes(row.dataset.name)) {
           // The label already says what the step was ("Ran the runner tests");
@@ -6199,6 +6812,7 @@
       if (event.path) {
         this.editedFiles.add(event.path);
         this.paintStatus();
+        this.plainMade(turn, event.path);
       }
       const record = this.record(turn);
       record.applied += event.count;
@@ -6213,6 +6827,7 @@
       if (event.path) {
         this.editedFiles.add(event.path);
         this.paintStatus();
+        this.plainMade(turn, event.path);
       }
       const record = this.record(turn);
       record.changed = (record.changed ?? 0) + 1;
@@ -6415,6 +7030,7 @@
         this.logEl.append(record.footer);
       }
       record.footer.dataset.status = status;
+      if (record.progress) record.footer.dataset.plain = '';
       record.footer.replaceChildren();
       if (status === 'running') {
         record.footer.append(h('span', 'pulse'), h('span', 'status', 'Working…'));
@@ -6437,6 +7053,7 @@
         interrupted: 'Interrupted when the host stopped',
       }[status];
       footer.append(h('span', 'status', `${words}${took}`));
+      this.plainFinish(turn, status, event);
 
       if ((applied || docs) && !record.undone) {
         const undo = h('button', 'undo', 'Undo turn');
@@ -6493,6 +7110,534 @@
       // The chooser takes room from the setup; refit it, or wrap the bar.
       this.fitSetup();
       this.dispatchEvent(new CustomEvent('running', { detail: this.running ?? { turn: null }, bubbles: true, composed: true }));
+    }
+
+    // ---------------------------------------------------------- simple progress
+
+    paintDetail() {
+      const mode = readDetail();
+      this.logEl.dataset.detail = mode;
+      if (!this.detailButton) return;
+      this.detailButton.dataset.detail = mode;
+      this.detailMark.innerHTML = DETAIL_ICONS[mode];
+      this.detailWord.textContent = mode === 'simple' ? 'Simple progress' : 'Technical steps';
+      this.detailButton.setAttribute('aria-label', mode === 'simple'
+        ? 'Showing simple progress. Click to see every technical step.'
+        : 'Showing every technical step. Click for simple progress.');
+    }
+
+    /** The turn's card, made the first time the turn does anything. */
+    plainCard(turn) {
+      const record = this.record(turn);
+      if (record.progress) return record.progress;
+      const el = h('div', 'progress');
+      el.dataset.state = 'running';
+      const top = h('div', 'progress-top');
+      const glyph = h('span', 'progress-glyph');
+      const words = h('div', 'progress-words');
+      const say = h('div', 'progress-say');
+      const sub = h('div', 'progress-sub');
+      words.append(say, sub);
+      const more = h('button', 'progress-more', 'Details');
+      more.type = 'button';
+      more.setAttribute('aria-expanded', 'false');
+      top.append(glyph, words, more);
+
+      const pv = h('div', 'pv');
+      pv.hidden = true;
+      const frame = h('div', 'pv-frame');
+      const bar = h('div', 'pv-bar');
+      const where = h('span', 'pv-where');
+      const tag = h('span', 'pv-tag');
+      bar.append(where, tag);
+      const view = h('div', 'pv-view');
+      frame.append(bar, view);
+      const foot = h('div', 'pv-foot');
+      const cap = h('span', 'pv-cap');
+      const steps = h('div', 'pv-steps');
+      steps.hidden = true;
+      foot.append(cap, steps);
+      pv.append(frame, foot);
+
+      const track = h('ol', 'progress-track');
+      track.setAttribute('aria-hidden', 'true');
+      for (const stage of STAGES) {
+        const stop = h('li', 'progress-stop');
+        stop.dataset.stage = stage.key;
+        stop.dataset.at = 'next';
+        stop.append(h('span', 'progress-node'), h('span', 'progress-name', stage.name));
+        track.append(stop);
+      }
+      const plan = h('div', 'progress-plan');
+      plan.hidden = true;
+      const meter = h('div', 'progress-meter');
+      const barEl = h('span', 'progress-bar');
+      const fill = h('span', 'progress-fill');
+      barEl.append(fill);
+      const count = h('span', 'progress-count');
+      meter.append(barEl, count);
+      const todos = h('ul', 'progress-todos');
+      plan.append(meter, todos);
+      const made = h('div', 'progress-made');
+      made.hidden = true;
+      const madeLabel = h('span', 'progress-made-label', 'Working on');
+      made.append(madeLabel);
+      const said = h('div', 'progress-said');
+      said.hidden = true;
+      const next = h('div', 'progress-next');
+      next.hidden = true;
+      const q = h('p', 'progress-q');
+      const acts = h('div', 'progress-acts');
+      next.append(q, acts);
+      el.append(top, pv, track, plan, made, said, next);
+      const card = {
+        el, glyph, glyphStage: '', say, sub, more, pv, where, tag, view, cap, steps, track, plan, fill, count, todos,
+        made, madeLabel, said, next, q, acts,
+        stage: null, reached: -1, built: false, running: true, open: false,
+        docs: new Map(), files: new Set(), filesChip: null, todoList: [],
+        edits: [], sources: [], stuck: null, ask: null, shown: -1,
+      };
+      more.addEventListener('click', () => this.revealSteps(turn, !card.open));
+      record.progress = card;
+      if (record.footer) record.footer.dataset.plain = '';
+      this.append(turn, el);
+      this.setNext(turn, 'running');
+      return card;
+    }
+
+    plainCall(turn, event) {
+      const card = this.plainCard(turn);
+      const input = event.input ?? {};
+      const step = plainStep(event.name, input, card.built);
+      if (event.name === 'TodoWrite' || event.name === 'updateTodos') this.plainTodos(card, input);
+      if (step.makes) this.plainMade(turn, step.makes);
+      if (step.file) this.plainFile(card, step.file);
+      if (event.name === 'apply_ops' && input.path) {
+        const rows = readOps(input.ops, (id) => this.nameOnPage(input.path, id));
+        if (rows.length) {
+          card.edits.push({ path: input.path, note: String(input.note ?? '').trim(), rows });
+          this.showEdit(card, card.edits.length - 1, this.fresh);
+        }
+      }
+      if (/^(WebFetch|WebSearch|web_search)$/.test(event.name)) {
+        const site = event.name === 'WebFetch' ? hostOf(input.url) : 'Web search';
+        const title = event.name === 'WebFetch' ? trimTo(String(input.url ?? '').replace(/^https?:\/\/[^/]+/, '') || '/', 48) : trimTo(input.search_term || input.query || '', 48);
+        if (!card.sources.some((s) => s.site === site && s.title === title)) card.sources.push({ site, title });
+        if (!card.edits.length) this.showSources(card, this.fresh);
+      }
+      const stage = step.stage ?? card.stage ?? 'look';
+      if (stage === 'build') card.built = true;
+      this.plainPaint(card, stage, step.say, step.note);
+      if (card.open) this.markReveal(turn);
+    }
+
+    plainPaint(card, stage, say, note = '') {
+      const at = stageIndex(stage);
+      card.stage = stage;
+      card.reached = Math.max(card.reached, at);
+      card.el.dataset.stage = stage;
+      if (card.glyphStage !== stage) {
+        card.glyph.innerHTML = STAGE_GLYPHS[stage] ?? '';
+        card.glyphStage = stage;
+      }
+      if (card.say.textContent !== say) {
+        card.say.textContent = say;
+        card.say.title = say;
+        if (this.fresh && card.el.isConnected) {
+          card.say.animate?.([{ opacity: 0, transform: 'translateY(3px)' }, { opacity: 1, transform: 'none' }], { duration: 260, easing: 'cubic-bezier(.22, 1, .36, 1)' });
+        }
+      }
+      card.sub.textContent = note || STAGES[at]?.gist || '';
+      card.sub.title = card.sub.textContent;
+      [...card.track.children].forEach((stop, i) => {
+        stop.dataset.at = i === at ? 'now' : i <= card.reached ? 'past' : 'next';
+      });
+    }
+
+    // ---------------------------------------------------------- the close-up
+
+    /** The words an element on this page goes by, when the edit is to the
+     *  document open here. Any other document's elements are out of sight. */
+    nameOnPage(path, id) {
+      if (!id) return '';
+      const here = this.api?.context?.().viewing;
+      if (!here || String(path ?? '').replace(/\.mrbl$/, '') !== String(here).replace(/\.mrbl$/, '')) return '';
+      const el = document.querySelector(`[data-marble-id="${CSS.escape(String(id))}"]`);
+      if (!el) return '';
+      const text = trimTo(el.getAttribute('aria-label') || el.textContent || '', 32);
+      if (text) return text;
+      const kind = { H1: 'the heading', H2: 'a heading', H3: 'a heading', P: 'a paragraph', UL: 'a list', OL: 'a list', IMG: 'a picture', BUTTON: 'a button', BODY: 'the page' }[el.tagName];
+      return kind ?? '';
+    }
+
+    /** One edit's elements, and everything the turn has changed in that
+     *  document so far. Patched in place: only what is new moves. */
+    showEdit(card, i, enter = false, { all = false } = {}) {
+      const edit = card.edits[i];
+      card.shown = i;
+      card.pv.hidden = false;
+      card.where.textContent = docName(edit.path);
+      const latest = i === card.edits.length - 1;
+      card.tag.textContent = card.running && latest ? 'Live' : latest ? 'Now' : `Step ${i + 1} of ${card.edits.length}`;
+      card.tag.dataset.live = String(card.running && latest);
+      // Live, the sub-line already says the note; the caption is for a step
+      // you went back to, and for the record once it is over.
+      card.cap.textContent = card.running && latest ? '' : all ? plainCount(card.edits.length, 'step') : edit.note;
+      const upto = card.edits.slice(0, i + 1).filter((e) => e.path === edit.path);
+      const changes = [];
+      for (const e of upto) {
+        for (const row of e.rows) {
+          const at = changes.findIndex((c) => c.text === row.text && c.op === row.op);
+          if (at >= 0) changes.splice(at, 1);
+          changes.push(row);
+        }
+      }
+      morph(card.view, (root) => {
+        const focus = h('div', 'f-focus');
+        // Finished, the close-up is everything the turn made here, newest last.
+        const pool = all ? changes : edit.rows;
+        const shown = pool.filter((r) => r.op !== '-').slice(-3);
+        for (const row of shown) focus.append(this.elementSketch(row));
+        if (!shown.length) focus.append(h('div', 'f-note', 'Tidied things away'));
+        root.append(focus, this.changeList(changes.slice(-6)));
+      }, enter);
+      this.paintSteps(card);
+    }
+
+    elementSketch(row) {
+      const box = h('div', row.op === '+' ? 'f-el f-el-new' : 'f-el');
+      box.dataset.k = row.text;
+      const head = h('div', 'f-el-name');
+      head.append(h('span', 'f-el-text', row.text));
+      if (row.op === '+') head.append(h('span', 'f-new', 'New'));
+      box.append(head);
+      if (row.colors?.length) {
+        const swatches = h('div', 'f-swatches');
+        for (const color of row.colors) {
+          const sw = h('span', 'f-sw');
+          sw.dataset.k = color;
+          sw.style.setProperty('--c', color);
+          sw.title = color;
+          swatches.append(sw);
+        }
+        box.append(swatches);
+      }
+      if (row.parts?.length) {
+        const parts = h('div', 'f-parts');
+        for (const part of row.parts) {
+          const pill = h('span', 'f-part', part);
+          pill.dataset.k = part.replace(/^\d+\s*/, '');
+          parts.append(pill);
+        }
+        box.append(parts);
+      }
+      return box;
+    }
+
+    changeList(rows) {
+      const list = h('ul', 'f-changes');
+      for (const row of rows) {
+        const li = h('li');
+        li.dataset.k = `${row.op}${row.text}`;
+        li.dataset.op = row.op === '+' ? 'plus' : row.op === '-' ? 'minus' : row.op === '~' ? 'change' : 'same';
+        li.append(h('span', 'f-op', row.op === '-' ? '−' : row.op), row.text);
+        list.append(li);
+      }
+      return list;
+    }
+
+    showSources(card, enter = false) {
+      card.pv.hidden = false;
+      card.where.textContent = 'Where the answer comes from';
+      card.tag.textContent = card.running ? 'Live' : '';
+      card.tag.dataset.live = String(card.running);
+      card.cap.textContent = plainCount(card.sources.length, 'source');
+      morph(card.view, (root) => {
+        const focus = h('div', 'f-focus');
+        for (const src of card.sources.slice(-5)) {
+          const row = h('div', 'f-src');
+          row.dataset.k = `${src.site}${src.title}`;
+          const fav = h('span', 'f-fav', (src.site[0] ?? '?').toUpperCase());
+          fav.style.setProperty('--h', String([...src.site].reduce((n, ch) => (n * 31 + ch.charCodeAt(0)) % 360, 7)));
+          row.append(fav, h('b', '', src.title || src.site), h('span', '', src.site));
+          focus.append(row);
+        }
+        root.append(focus);
+      }, enter);
+    }
+
+    showStuck(card, enter = false) {
+      if (!card.stuck) return;
+      card.pv.hidden = false;
+      card.where.textContent = 'Where it got stuck';
+      card.tag.textContent = '';
+      card.tag.dataset.live = 'false';
+      card.cap.textContent = '';
+      morph(card.view, (root) => {
+        const focus = h('div', 'f-focus');
+        const path = h('div', 'f-path');
+        const link = h('span', 'f-link');
+        link.append(h('span', '', '✕'));
+        path.append(h('span', 'f-node', 'Agent'), link, h('span', 'f-node stuck', card.stuck.what));
+        focus.append(path, h('div', 'f-note', card.stuck.why));
+        root.append(focus);
+      }, enter);
+    }
+
+    paintSteps(card) {
+      card.steps.hidden = card.edits.length < 2;
+      if (card.steps.hidden) return;
+      card.steps.replaceChildren(...card.edits.map((edit, k) => {
+        const b = h('button', 'pv-step', String(k + 1));
+        b.type = 'button';
+        b.title = edit.note || docName(edit.path);
+        b.setAttribute('aria-pressed', String(k === card.shown));
+        b.setAttribute('aria-label', `Show step ${k + 1}${edit.note ? `: ${edit.note}` : ''}`);
+        b.addEventListener('click', () => this.showEdit(card, k, false));
+        return b;
+      }));
+    }
+
+    // ---------------------------------------------------------- chips, plan
+
+    /** A document the turn is making, as a chip that opens it. */
+    plainMade(turn, path) {
+      if (!path) return;
+      const card = this.plainCard(turn);
+      const key = String(path).replace(/\.mrbl$/, '');
+      if (card.docs.has(key)) return;
+      const href = window.marble?.href?.(key);
+      const chip = h(href ? 'a' : 'span', 'progress-chip');
+      if (href) chip.href = href;
+      chip.title = href ? `Open ${key}` : key;
+      chip.innerHTML = DOC_GLYPH;
+      chip.append(docName(key));
+      if (this.fresh) chip.setAttribute('data-enter', '');
+      card.docs.set(key, chip);
+      if (card.filesChip) card.filesChip.before(chip);
+      else card.made.append(chip);
+      card.made.hidden = false;
+      card.built = true;
+    }
+
+    /** Files that are not documents are counted, not named: to someone who
+     *  does not write code, `agent-ui.js` says nothing that "2 files" does not. */
+    plainFile(card, file) {
+      if (!file || /\.mrbl$/.test(file)) return;
+      card.files.add(file);
+      if (!card.filesChip) {
+        card.filesChip = h('span', 'progress-chip files');
+        if (this.fresh) card.filesChip.setAttribute('data-enter', '');
+        card.made.append(card.filesChip);
+      }
+      card.filesChip.textContent = `${plural(card.files.size, 'file')} behind the scenes`;
+      card.made.hidden = false;
+    }
+
+    plainTodos(card, input) {
+      const read = readTodos(input);
+      if (!read) return;
+      if (read.merge && card.todoList.length) {
+        for (const todo of read.todos) {
+          const at = card.todoList.findIndex((t) => t.id === todo.id);
+          if (at < 0) card.todoList.push(todo);
+          else card.todoList[at] = { ...card.todoList[at], status: todo.status, text: todo.text || card.todoList[at].text };
+        }
+      } else {
+        card.todoList = read.todos;
+      }
+      const list = card.todoList.filter((t) => t.text && t.status !== 'dropped');
+      const done = list.filter((t) => t.status === 'done').length;
+      card.plan.hidden = !list.length;
+      card.fill.style.width = list.length ? `${Math.round((done / list.length) * 100)}%` : '0';
+      card.count.textContent = `${done} of ${list.length} done`;
+      card.todos.replaceChildren(...list.map((t) => {
+        const li = h('li', '', t.text);
+        li.dataset.status = t.status;
+        return li;
+      }));
+    }
+
+    // ---------------------------------------------------------- asks, failures, the end
+
+    /** A permission, folded into the card in words: what it would let the
+     *  agent do, and three answers. The ask card stays underneath for
+     *  Technical, and the card's buttons press its buttons. */
+    plainAsk(turn, event, askCard) {
+      const card = this.plainCard(turn);
+      card.ask = { requestId: event.requestId, askCard, choice: null };
+      card.el.dataset.state = 'asking';
+      card.glyph.innerHTML = STAGE_GLYPHS.ask;
+      card.glyphStage = 'ask';
+      card.say.textContent = 'Needs your OK';
+      card.sub.textContent = plainAskOf(event);
+      card.sub.title = card.sub.textContent;
+      this.setNext(turn, 'asking');
+    }
+
+    plainAskClosed(turn, event, askCard) {
+      const card = this.turns.get(turn)?.progress;
+      if (!card?.ask || card.ask.askCard !== askCard) return;
+      const allowed = event.type === 'ask.answered' && event.response?.behavior === 'allow';
+      const voided = event.type === 'ask.void';
+      card.ask = null;
+      if (!card.running) return;
+      card.el.dataset.state = 'running';
+      card.glyphStage = '';
+      this.settle(turn, voided ? '' : allowed ? 'You allowed it' : 'You didn’t allow it');
+      this.plainPaint(card, card.stage ?? 'look', voided ? 'Going on without an answer' : allowed ? 'Going ahead' : 'Stopping there');
+      this.setNext(turn, 'running');
+    }
+
+    /** A step that failed is the agent's to fix; it is kept only so a turn
+     *  that ends failed can say where it got stuck. */
+    plainFailed(turn, row, event) {
+      const card = this.turns.get(turn)?.progress;
+      if (!card) return;
+      const step = plainStep(row.dataset.name, {}, card.built);
+      card.stuck = {
+        what: event.denied ? 'Your OK' : step.say.replace(/^(\w)/, (c) => c.toUpperCase()),
+        why: firstSentence(event.summary) || (event.denied ? 'That was turned down.' : 'That step failed.'),
+        denied: Boolean(event.denied),
+      };
+    }
+
+    plainFinish(turn, status, event) {
+      const record = this.turns.get(turn);
+      const card = record?.progress;
+      if (!card) return;
+      card.running = false;
+      const declined = status === 'failed' && card.stuck?.denied;
+      const state = declined ? 'declined' : status;
+      card.el.dataset.state = state;
+      const names = [...card.docs.keys()].map(docName);
+      const listed = names.length <= 2 ? names.join(' and ') : `${names.slice(0, 2).join(', ')} and ${names.length - 2} more`;
+      const took = record.started && event.t ? seconds(event.t - record.started) : '';
+      const say = {
+        completed: names.length ? `Updated ${listed}` : card.built ? 'Made the changes' : 'All done',
+        declined: 'Stopped at your call',
+        failed: 'Something went wrong',
+        cancelled: 'Stopped',
+        interrupted: 'Interrupted',
+      }[state] ?? 'Done';
+      const sub = {
+        completed: took ? `Finished in ${took}` : 'Finished',
+        declined: 'Nothing else was changed',
+        failed: firstSentence(event.error) || 'The agent could not finish',
+        cancelled: took ? `Stopped after ${took}` : 'Stopped before it finished',
+        interrupted: 'Marble restarted before it finished',
+      }[state] ?? '';
+      card.glyph.innerHTML = STAGE_GLYPHS[state === 'completed' ? 'done' : state === 'failed' ? 'failed' : 'stopped'];
+      card.glyphStage = state;
+      card.say.textContent = say;
+      card.say.title = say;
+      card.sub.textContent = sub;
+      card.sub.title = sub;
+      card.madeLabel.textContent = state === 'completed' ? 'Worked on' : 'Touched';
+      for (const stop of card.track.children) stop.dataset.at = 'past';
+      if (card.edits.length) this.showEdit(card, card.edits.length - 1, false, { all: true });
+      else if (card.sources.length) this.showSources(card);
+      if ((state === 'failed' || state === 'declined') && card.stuck) this.showStuck(card, this.fresh);
+      const undoable = Boolean((event.applied ?? record.applied) || record.changed) && !record.undone;
+      this.setNext(turn, state, { docs: [...card.docs.keys()], undoable });
+    }
+
+    // ---------------------------------------------------------- next steps
+
+    setNext(turn, state, ctx = {}) {
+      const card = this.turns.get(turn)?.progress;
+      if (!card) return;
+      const next = nextSteps(state, ctx);
+      card.next.hidden = !next;
+      if (!next) return;
+      card.next.dataset.quiet = String(Boolean(next.quiet));
+      card.q.textContent = next.q ?? '';
+      card.acts.replaceChildren(...next.acts.map((action) => {
+        const b = h('button', action.primary ? 'act primary' : 'act', action.label);
+        b.type = 'button';
+        b.addEventListener('click', () => this.act(turn, action));
+        return b;
+      }));
+    }
+
+    settle(turn, said) {
+      const card = this.turns.get(turn)?.progress;
+      if (!card) return;
+      card.next.hidden = true;
+      if (said) {
+        card.said.textContent = said;
+        card.said.hidden = false;
+      }
+    }
+
+    /** Anything new from the person makes an earlier turn's questions moot,
+     *  and folds that turn's card down to what it changed. */
+    plainSettleAll() {
+      for (const [turn, record] of this.turns) {
+        const card = record.progress;
+        if (!card || card.running) continue;
+        card.el.dataset.old = '';
+        if (!card.next.hidden) this.settle(turn, '');
+      }
+    }
+
+    act(turn, action) {
+      const record = this.turns.get(turn);
+      const card = record?.progress;
+      switch (action.kind) {
+        case 'send':
+          this.settle(turn, `You said “${action.text}”`);
+          this.input.value = action.text;
+          this.submit();
+          break;
+        case 'draft':
+          this.draftPlaceholder ??= this.input.dataset.placeholder ?? '';
+          this.input.value = action.text ?? '';
+          this.input.dataset.placeholder = action.placeholder || this.draftPlaceholder;
+          this.input.focus();
+          this.form.classList.remove('is-drafting');
+          void this.form.offsetWidth;
+          this.form.classList.add('is-drafting');
+          break;
+        case 'stop':
+          this.api.cancel(turn).catch((err) => this.system(err.message, true));
+          break;
+        case 'undo':
+          this.settle(turn, 'You undid it');
+          this.api.undo(turn).catch((err) => this.system(err.message, true));
+          break;
+        case 'open': {
+          const href = window.marble?.href?.(String(action.value).replace(/\.mrbl$/, ''));
+          if (href) window.location.assign(href);
+          break;
+        }
+        case 'choose': {
+          const ask = card?.ask;
+          if (!ask) return;
+          ask.choice = action.value;
+          ask.askCard.querySelector(action.value === 'allow' ? 'button.allow' : 'button.deny')?.click();
+          break;
+        }
+        default:
+      }
+    }
+
+    revealSteps(turn, open) {
+      const card = this.turns.get(turn)?.progress;
+      if (!card) return;
+      card.open = open;
+      card.more.setAttribute('aria-expanded', String(open));
+      card.more.textContent = open ? 'Hide details' : 'Details';
+      this.markReveal(turn);
+    }
+
+    /** One turn's steps shown in the simple view, for whoever asked to see
+     *  how it was done without switching every conversation over. */
+    markReveal(turn) {
+      const open = Boolean(this.turns.get(turn)?.progress?.open);
+      for (const node of this.turnNodes(turn)) {
+        if (node.classList?.contains('tool') || node.classList?.contains('tool-group') || node.classList?.contains('ask')) node.toggleAttribute('data-reveal', open);
+      }
     }
   }
 
