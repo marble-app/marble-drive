@@ -2616,6 +2616,7 @@
       border: 1px solid var(--line); border-radius: var(--radius);
       background: var(--card); box-shadow: var(--shadow-rest);
       font-size: 13px; line-height: 1.4;
+      transition: background-color .3s var(--settle), border-color .3s var(--settle), box-shadow .3s var(--settle);
     }
     .progress-top { display: flex; align-items: center; gap: 11px; min-width: 0; }
     .progress-glyph {
@@ -2710,7 +2711,16 @@
     @keyframes tick-draw { 0% { stroke-dashoffset: 16; } 45%, 85% { stroke-dashoffset: 0; opacity: 1; } 100% { stroke-dashoffset: 0; opacity: 0; } }
     /* Finished, the card sits down: one line of what came of it, and what it
        made. The stops and the plan were for watching. */
-    .progress:not([data-state="running"]):not([data-state="asking"]) { gap: 8px; padding: 10px 12px; box-shadow: none; background: var(--paper); }
+    /* Live, the card is a lifted white sheet with an edge. Done, it sits
+       down into the log: no edge, no shadow, just a shade of whatever the
+       chat is drawn on, so it still reads as one thing without asking for
+       the eye. The edge stays transparent rather than going, so nothing moves. */
+    .progress:not([data-state="running"]):not([data-state="asking"]) {
+      gap: 8px; padding: 10px 12px; box-shadow: none; border-color: transparent;
+      background: color-mix(in srgb, var(--ink) 4%, var(--conv-surface, var(--paper)));
+    }
+    .progress:not([data-state="running"]):not([data-state="asking"]) .pv-frame { border-color: transparent; }
+    .progress:not([data-state="running"]):not([data-state="asking"]) .progress-chip { background: var(--card); }
     .progress:not([data-state="running"]):not([data-state="asking"]) :is(.progress-track, .progress-plan) { display: none; }
     .progress:not([data-state="running"]):not([data-state="asking"]) .progress-glyph { width: 26px; height: 26px; border-radius: 8px; background: none; }
     .progress:not([data-state="running"]):not([data-state="asking"]) .progress-glyph svg { width: 22px; height: 22px; }
