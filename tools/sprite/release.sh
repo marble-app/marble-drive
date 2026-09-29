@@ -55,6 +55,41 @@ health() { # health <port> <seconds>
   return 1
 }
 
+# The hub (server/hub/sync.js) runs rclone: one pinned copy per sprite in
+# ~/.local/bin (tools/sprite/rclone-version), checked against its pinned sha256
+# (tools/sprite/rclone-sha256). Only a sprite whose sprite.env sets
+# MARBLE_HUB_ENV uses the hub, so only that one fetches it. Returns non-zero
+# (after saying why) instead of stopping the stage.
+install_rclone() {
+  grep -q '^MARBLE_HUB_ENV=.' "$SPRITE_ENV" 2>/dev/null || return 0
+  local want arch sum tmp got
+  want="$(tr -d '[:space:]' < tools/sprite/rclone-version 2>/dev/null)"
+  [[ -n "$want" ]] || { say "warning: no rclone version pinned"; return 1; }
+  [[ "$("$HOME/.local/bin/rclone" version 2>/dev/null | head -1)" == "rclone v$want" ]] && return 0
+  case "$(uname -m)" in
+    x86_64) arch=amd64 ;;
+    aarch64|arm64) arch=arm64 ;;
+    *) say "warning: no rclone for $(uname -m)"; return 1 ;;
+  esac
+  sum="$(awk -v arch="linux-$arch" '$2 == arch { print $1 }' tools/sprite/rclone-sha256 2>/dev/null)"
+  [[ -n "$sum" ]] || { say "warning: no pinned sha256 for rclone linux-$arch"; return 1; }
+  say "installing rclone $want"
+  tmp="$(mktemp -d)" || return 1
+  if ! curl -fsSL "https://downloads.rclone.org/v$want/rclone-v$want-linux-$arch.zip" -o "$tmp/rclone.zip"; then
+    say "warning: could not download rclone $want"; rm -rf "$tmp"; return 1
+  fi
+  got="$(sha256sum "$tmp/rclone.zip" 2>/dev/null | awk '{ print $1 }')"
+  if [[ "$got" != "$sum" ]]; then
+    say "warning: the rclone $want download does not match its pinned sha256"; rm -rf "$tmp"; return 1
+  fi
+  if ! python3 -c "import zipfile,sys; zipfile.ZipFile(sys.argv[1]).extractall(sys.argv[2])" "$tmp/rclone.zip" "$tmp" ||
+     ! mkdir -p "$HOME/.local/bin" ||
+     ! install -m 755 "$tmp/rclone-v$want-linux-$arch/rclone" "$HOME/.local/bin/rclone"; then
+    say "warning: could not unpack rclone $want"; rm -rf "$tmp"; return 1
+  fi
+  rm -rf "$tmp"
+}
+
 stage() {
   local name=$1 source=$2 marble=$3 claude=$4
   local dir="$RELEASES/$name"
@@ -96,21 +131,8 @@ stage() {
   fi
   say "installing Chromium for the agents' browser"
   "$NODE" "$playwright" install chromium >/dev/null
-  # The hub (server/hub/sync.js) runs rclone. One pinned copy per sprite in
-  # ~/.local/bin, fetched when missing or when the pin moves.
-  local rclone_want
-  rclone_want="$(tr -d '[:space:]' < tools/sprite/rclone-version 2>/dev/null || true)"
-  if [[ -n "$rclone_want" ]] && [[ "$("$HOME/.local/bin/rclone" version 2>/dev/null | head -1)" != "rclone v$rclone_want" ]]; then
-    say "installing rclone $rclone_want"
-    local arch zip
-    case "$(uname -m)" in x86_64) arch=amd64 ;; aarch64|arm64) arch=arm64 ;; *) die "no rclone for $(uname -m)" ;; esac
-    zip="$(mktemp -d)"
-    curl -fsSL "https://downloads.rclone.org/v$rclone_want/rclone-v$rclone_want-linux-$arch.zip" -o "$zip/rclone.zip"
-    python3 -c "import zipfile,sys; zipfile.ZipFile(sys.argv[1]).extractall(sys.argv[2])" "$zip/rclone.zip" "$zip"
-    mkdir -p "$HOME/.local/bin"
-    install -m 755 "$zip/rclone-v$rclone_want-linux-$arch/rclone" "$HOME/.local/bin/rclone"
-    rm -rf "$zip"
-  fi
+  # Not under set -e: a friend's deploy must never fail on the hub's tool.
+  install_rclone || say "warning: rclone $(tr -d '[:space:]' < tools/sprite/rclone-version 2>/dev/null) was not installed; the hub cannot sync on this sprite until a deploy installs it"
   say "launching the agents' browser"
   "$NODE" --input-type=module -e "
     import { loadChromium } from './server/agent/browser.js';

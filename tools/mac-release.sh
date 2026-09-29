@@ -52,8 +52,14 @@ echo "$NAME" >>"$APP/history"
 keep="$( (tail -3 "$APP/history"; echo "$NAME") | sort -u)"
 for old in $(ls -1 "$APP/releases"); do grep -qx "$old" <<<"$keep" || rm -rf "${APP:?}/releases/$old"; done
 say "current: $NAME"
+# Every drive gets its turn: one that does not come back is reported at the
+# end rather than leaving the rest on the old release.
+failed=()
 for plist in "$HOME"/Library/LaunchAgents/com.marble.drive.home.*.plist; do
   [[ -e "$plist" ]] || continue
   name="${plist##*/com.marble.drive.home.}"; name="${name%.plist}"
-  /bin/zsh "$REPO/macos/launchd/home.sh" restart "$name"
+  /bin/zsh "$REPO/macos/launchd/home.sh" restart "$name" || failed+=("$name")
 done
+if (( ${#failed[@]} > 0 )); then
+  die "current is $NAME, but these did not restart: ${failed[*]} (macos/launchd/home.sh status <name>)"
+fi
