@@ -160,8 +160,26 @@ The service's environment is the release script's defaults
   shell's view (8 GB total) updates in steps and misleads. `/health` reports
   the host's reading; each ledger line has `total`, `procs` (MB for the host,
   the agents' turns, their browsers, the rest) and `relieved`. On a sprite,
-  run browser tests one file at a time (`--test-concurrency=1`): `node --test`
-  otherwise runs a Chromium per core.
+  browser tests go through `node tools/browser-tests.mjs <files>`: on
+  admin-p2, while the owner's Mac is watching, they run on the Mac (below);
+  otherwise here, one file at a time (`node --test` alone runs a Chromium per
+  core).
+- **Browser tests on the owner's Mac:** `tools/test-runner.mjs`, kept running
+  by `macos/launchd/test-runner.sh install` (installed 2026-09-29), watches
+  admin-p2 as the backup agent does: the Sprites API for awake or asleep, and
+  only while awake a look in `~/app/runner` there, every 3 s while an agent's
+  turn or a tab keeps the drive busy and once a minute when not (so its looking
+  never keeps the sprite up). It leaves a check-in (`mac.json`); a run asked
+  for is a request file it takes, copies the checkout and `marble` into
+  `~/Library/Caches/marble-runner/admin-p2/` (rsync through `sprite-rsh.sh`,
+  without `node_modules` and `.git`), installs packages when `package.json` or
+  the lock changed, runs `node --test --test-concurrency=2` on the files, and
+  sends the output back every 2 s. The sprite's side prints it as it comes;
+  stopping it stops the Mac's run. A checkout must be under `/home/sprite/src`
+  and every file under its `test-browser/`, and nothing but `node --test` is
+  ever run. The tests run as the owner, as his own Claude Code sessions do.
+  No Mac (or one that does not take the run in 75 s, or goes quiet for 60 s):
+  the run happens on the sprite. Log: `~/Library/Logs/marble-drive/test-runner.log`.
 - **Page weight:** the host compresses text (Brotli, else gzip; Fly's edge
   gzips anyway), and a page names each runtime file at `?v=<hash>`, which the
   browser keeps until the file changes. Moving between documents downloads
@@ -262,6 +280,8 @@ admin-p2 (`~/.config/marble-drive/testers.json`), the machine that made it.
 | `tools/drive-backup.sh [<sprite>] [--to <dir>] [--link <path>]` | a Fly checkpoint, then the one copy of a drive (default admin-p2) in `~/Marble Backups/<utc>/`, linked from `~/Marble Drive`; unchanged files hard-linked to the copy before, so a run moves only what changed |
 | `macos/launchd/backup.sh install [<sprite>]` | runs `tools/backup-agent.mjs` every minute and at login; `status`, `run`, `logs`, `uninstall` |
 | `tools/backup-agent.mjs [<sprite>]` | the Mac's half of the Console's Backups view: backs up after changes (10 quiet minutes, hourly at most), takes the Console's requests and reports back, touching the sprite only while it is awake |
+| `node tools/browser-tests.mjs [<files>]` | browser tests: on the owner's Mac when it is watching this sprite, else here one file at a time |
+| `macos/launchd/test-runner.sh install [<sprite>]` | keeps `tools/test-runner.mjs` running: the Mac's half of the above (default admin-p2); `status`, `uninstall`, `logs` |
 | `tools/drive-restore.sh <snapshot> <sprite> [--yes]` | puts a snapshot back on a sprite: stops the host, sets `/drive` aside, copies in, starts it, checks `/health` |
 | `tools/drive-pull.sh [<sprite>] [--into <dir>]` | a one-way mirror of a drive (default admin-p2) into this checkout's `drive/`, the last one set aside |
 | `tools/sprite-provision.sh <person> [--agent api\|subscription] [--key-file f] [--local]` | makes `t-<person>`: passphrase, `sprite.env`, optional preloaded key, deploy, public URL, outside check, roster entry, a note to send |

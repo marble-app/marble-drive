@@ -469,6 +469,28 @@ reading: it acts at about 4.6–5 GB of load, with 1.1–1.5 GB left.
 init runs at the turns' kill score: the first version would have counted it
 as a turn. Test the guard's aim before its trigger, and with a backstop.
 
+### 27. The owner's browser tests run on his Mac
+
+**Problem.** Browser test runs were the biggest single user of memory on the
+workshop sprite (4.9 GB of Chromium in one run on 2026-09-28), and the Mac has
+room to spare.
+
+**Options.** Tailscale on both, so the sprite could reach the Mac directly (a
+key for each, and a way in to the owner's machine); a runner sprite with no
+keys (still Fly's memory); the Mac doing the talking, as the backup agent does.
+
+**Chosen.** The Mac does the talking: it checks in while the sprite is awake,
+takes requests from `~/app/runner`, and streams output back. Owner-only by
+construction, since only admin-p2 has a Mac watching it; bounded to `node
+--test` on `test-browser/` files of a checkout under `/home/sprite/src`. The
+sprite falls back to running the tests itself, one at a time.
+
+**Cost or lesson.** Tried from a scratch checkout on admin-p2: 2 files in 11 s
+(copy, packages and run), 5 files (26 tests) in 6 s, and a 40-file run
+stopped at 10 s with nothing left running on the Mac. A Mac that looked every
+few seconds would itself keep the sprite awake and billed; it looks often only
+while the drive is busy of itself.
+
 ## Traps worth remembering
 
 | Trap | How it showed up | Lesson |
@@ -498,3 +520,4 @@ as a turn. Test the guard's aim before its trigger, and with a backstop.
 | The runtime was `no-store` | every page switch refetched 14 scripts (~265 KB compressed) | name each at `?v=<hash>` and let the browser keep it; `no-cache` + ETag for any other address |
 | A test of a memory ceiling run before checking the ceiling was set | a 64 MB cgroup could not be made, the hog ran unbounded and t-bryan thrashed (load 30) until the kernel killed it | prove the guard is in place before testing what it guards |
 | A watchdog tested from a script whose only timer was `unref`'d | the script exited at once, the hog ran to its cap and the machine thrashed | keep the test process alive, and give every hog its own backstop |
+| `node --test` inside another `node --test` | the inner run printed nothing: it reported to the outer runner through `NODE_TEST_CONTEXT` | drop that variable when a test runs a test runner |
