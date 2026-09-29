@@ -1,0 +1,2217 @@
+<!doctype html>
+<html lang="en" data-marble="1">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="marble:capabilities" content="storage; net=none">
+<title>__TITLE__</title>
+__ICON__
+<style>
+  /* Marble Drive — design don'ts.
+
+     The Design System's other half: what the apps refuse. The token block and
+     the shell are the Design System's own, copied, so this page is drawn with
+     the system it defends; where they drift, that page is the source. */
+  :root {
+    color-scheme: light dark;
+    /* ---- ink. Three greys for text, and a fourth that exists only because
+       --faint does not clear 4.5:1 and a placeholder has to. */
+    --ink: light-dark(#111111, #e8e6e1);
+    --muted: light-dark(#5a5a5a, #a3a7ab);
+    --faint: light-dark(#8a8a8a, #71767a);
+    --placeholder: light-dark(#767676, #8d9296);
+    --line: light-dark(#e6e2d8, #272c30);
+    /* ---- paper. The interface is off-white; a document is white to the edge.
+       Each step back is structure, not content: a shelf the page sits on. */
+    --paper: light-dark(#fafaf7, #16181a);
+    --paper-2: light-dark(#f3f1ea, #1e2124);
+    --paper-3: light-dark(#eceae1, #262a2e);
+    --well: light-dark(#efece3, #101214);
+    --card: light-dark(#ffffff, #1c1f22);
+    --pane-rest: light-dark(#fafaf7, #16181a);
+    --pane-lit: light-dark(#f1efe6, #0e1012);
+    /* ---- the one accent. A dusty blue does all the accenting; after dark it
+       is the light colour of the pair, so what sits on it is the paper. */
+    --accent: light-dark(#9bb6cf, #7fa8c9);
+    --accent-soft: light-dark(#f1f5f8, #1d2932);
+    --accent-ink: light-dark(#738698, #9dc0dc);
+    /* ---- the two words the accent cannot say. */
+    --danger: light-dark(#b4533e, #e08a74);
+    --caution: light-dark(#a07a2c, #d9b25e);
+    /* ---- light catching a translucent bar: falls on paper, scratches a dark
+       screen, so the strength is a token and dark dims it. */
+    --edge-lit: light-dark(rgba(255,255,255,.4), rgba(255,255,255,.08));
+    /* ---- depth. Warm shadows on paper, black ones after dark — never a
+       color-mix on --ink, which glows white in the dark. */
+    --shadow: 0 1px 2px light-dark(rgba(74,66,52,.05), rgba(0,0,0,.28)), 0 2px 4px light-dark(rgba(74,66,52,.03), rgba(0,0,0,.18));
+    --shadow-rest: 0 1px 2px light-dark(rgba(74,66,52,.06), rgba(0,0,0,.40)), 0 6px 16px light-dark(rgba(74,66,52,.08), rgba(0,0,0,.28));
+    --shadow-lift: 0 2px 6px light-dark(rgba(74,66,52,.07), rgba(0,0,0,.32)), 0 8px 18px light-dark(rgba(74,66,52,.08), rgba(0,0,0,.26));
+    /* ---- shape. */
+    --r: 12px;        /* a card, a popover, a row menu */
+    --r-pane: 16px;   /* a pane on the well, the floating composer field */
+    --r-sheet: 14px;  /* a sheet, the New menu */
+    --r-sm: 8px;      /* a small control, an inline code chip */
+    --r-text: 4px;    /* editable text under the pointer */
+    --pill: 999px;
+    --pane-gap: 5px;  /* the gap is the divider */
+    --seam: 8px;
+    --bar-h: 2.25rem;
+    /* ---- motion. One family of curves: an ease-out that decelerates hard,
+       so the last third of a move is a quiet settle; a gentler one for colour
+       on rows and buttons; and a snap for the instant a press registers. */
+    --ease-out: cubic-bezier(.22, 1, .36, 1);
+    --ease: cubic-bezier(.22, .61, .36, 1);
+    --snap: cubic-bezier(.4, 0, .2, 1);
+    --t-fast: 110ms;
+    --t: 200ms;
+    --t-slow: 340ms;
+    --t-snap: 300ms;
+    --t-room: 520ms;
+    /* ---- type. The chrome is one sans at 14px/1.5. Documents read in a
+       serif; code in the machine's mono. No document names a webfont. */
+    --ui: "Google Sans", Roboto, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    --serif: ui-serif, "New York", "Iowan Old Style", "Palatino Linotype", Palatino, Georgia, serif;
+    --mono: ui-monospace, "SF Mono", SFMono-Regular, Menlo, Consolas, monospace;
+    /* ---- one drawn chevron, masked in currentColor, so a disclosure arrow
+       weighs what every other icon on the page weighs. */
+    --chevron: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Cpath d='M4 6.5 8 10.5 12 6.5' fill='none' stroke='black' stroke-width='1.6' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
+  }
+  /* The stage can pin a scheme for looking at the other one. The fact is one
+     attribute; the page follows it through the root's colour scheme. */
+  :root:has(.stage[data-scheme="light"]) { color-scheme: light; }
+  :root:has(.stage[data-scheme="dark"]) { color-scheme: dark; }
+
+  /* Every width answer is asked of the root, not the window: a host that docks
+     a panel beside the page shrinks <html> and leaves the viewport alone. */
+  html { container: doc / inline-size; }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; background: var(--paper); color: var(--ink);
+    font: 14px/1.5 var(--ui); -webkit-font-smoothing: antialiased;
+    transition: background-color var(--t-room) var(--ease-out), color var(--t-room) var(--ease-out);
+  }
+  button { font: inherit; }
+  a { color: var(--accent-ink); }
+
+  /* ------------------------------------------------------------- shell */
+  .stage {
+    display: grid; grid-template-columns: 12rem minmax(0, 1fr); column-gap: 3rem;
+    max-width: 82rem; margin: 0 auto; padding: 0 2rem 8rem;
+  }
+  .rail {
+    grid-row: 1 / span 2; position: sticky; top: 0; align-self: start;
+    max-height: 100vh; overflow: auto; padding: 3.1rem 0 2rem;
+    display: flex; flex-direction: column; gap: .1rem;
+  }
+  .rail a {
+    display: block; padding: .3rem .65rem; border-radius: var(--pill);
+    color: var(--muted); text-decoration: none; font-size: .82rem;
+    transition: background var(--t) var(--ease), color var(--t) var(--ease);
+  }
+  .rail a:hover, .rail a:focus-visible { background: var(--paper-3); color: var(--ink); outline: none; }
+  .rail a.marble-current { color: var(--ink); background: var(--paper-2); }
+  .rail .rail-k {
+    margin: 0 0 .5rem .65rem; font: 600 .72rem/1 var(--ui); letter-spacing: .12em;
+    text-transform: uppercase; color: var(--faint);
+  }
+  .mast { grid-column: 2; padding: 3rem 0 .5rem; max-width: 46rem; }
+  .mast .k { margin: 0 0 .6rem; }
+  .mast h1 { margin: 0 0 .6rem; font-size: 2rem; font-weight: 500; letter-spacing: -.02em; line-height: 1.15; }
+  .mast .lede { margin: 0 0 1.1rem; font-size: 1rem; line-height: 1.55; color: var(--muted); text-wrap: pretty; }
+  .mast .scheme { display: flex; align-items: center; gap: .6rem; color: var(--faint); font-size: .78rem; }
+  .stream { grid-column: 2; min-width: 0; }
+
+  /* An eyebrow: what a section is, at a size you read second. */
+  .k { font: 600 .72rem/1 var(--ui); letter-spacing: .12em; text-transform: uppercase; color: var(--muted); }
+  .sec { padding: 2.4rem 0 1rem; border-top: 1px solid var(--line); scroll-margin-top: 1rem; }
+  .sec > .k { margin: 0 0 .5rem; }
+  .sec > h2 { margin: 0 0 .5rem; font-size: 1.3rem; font-weight: 500; letter-spacing: -.015em; line-height: 1.25; }
+  .sec > .lede, .sec > p { max-width: 46rem; margin: 0 0 1rem; text-wrap: pretty; }
+  .sec > .lede { color: var(--muted); font-size: .95rem; line-height: 1.55; }
+  .sec h3 { margin: 1.6rem 0 .4rem; font-size: .95rem; font-weight: 600; letter-spacing: -.005em; }
+  .sec h3 + p { margin-top: 0; }
+  code, kbd { font: .86em/1.4 var(--mono); }
+  code { background: var(--paper-2); padding: 1px 4px; border-radius: var(--r-text); }
+  kbd {
+    display: inline-block; min-width: 1.5em; text-align: center; padding: 0 .3em;
+    color: var(--faint); border: 1px solid var(--line); border-radius: 4px; background: none;
+  }
+  [data-marble-editable] { outline: none; border-radius: var(--r-text); transition: background var(--t-fast) var(--snap); }
+  [data-marble-editable]:hover, [data-marble-editable]:focus-within { background: var(--accent-soft); }
+  [data-marble-editable]:focus { background: var(--card); box-shadow: 0 0 0 1px var(--accent), 0 0 0 4px var(--accent-soft); }
+  /* Keyboard focus is its own state: one ring, everywhere a key can land. */
+  button:focus-visible, .tok:focus-visible, .row:focus-visible { outline: none; box-shadow: 0 0 0 2px var(--accent); }
+  /* A press answers on the way down, in colour. Nothing on this page pops. */
+  button:active { filter: brightness(.9); }
+
+  /* ------------------------------------------------------------ sources */
+  .srcs { display: flex; flex-wrap: wrap; gap: .45rem; margin: .2rem 0 1rem; padding: 0; list-style: none; }
+  .src {
+    display: inline-flex; align-items: center; gap: .45rem; padding: .3rem .7rem .3rem .5rem;
+    border: 1px solid var(--line); border-radius: var(--pill); background: var(--card);
+    color: var(--ink); text-decoration: none; font-size: .82rem;
+    transition: background var(--t) var(--ease), box-shadow var(--t) var(--ease);
+  }
+  .src:hover, .src:focus-visible { background: var(--paper-3); box-shadow: var(--shadow); outline: none; }
+  .src .sw1 { width: 10px; height: 10px; border-radius: 3px; background: var(--c, var(--accent)); flex: none; }
+  .src .nm { white-space: nowrap; }
+  .src .why { color: var(--muted); min-width: 0; }
+  .src .why::before { content: '·'; color: var(--faint); margin-right: .35rem; }
+
+  /* --------------------------------------------------------- principles */
+  .rules { margin: 0; padding: 0; list-style: none; counter-reset: rule; display: grid; gap: .1rem; max-width: 52rem; }
+  .rule {
+    position: relative; display: grid; grid-template-columns: 2.2rem minmax(0, 1fr) auto; gap: .2rem .6rem;
+    padding: .7rem .6rem .7rem .4rem; border-radius: var(--r-sm);
+    transition: background var(--t) var(--ease);
+  }
+  .rule:hover { background: var(--paper-2); }
+  .rule::before {
+    counter-increment: rule; content: counter(rule, decimal-leading-zero);
+    grid-row: 1 / span 2; align-self: start; padding-top: .15rem;
+    font: 500 .78rem/1.5 var(--mono); color: var(--faint); font-variant-numeric: tabular-nums;
+  }
+  .rule .rt { margin: 0; font-weight: 600; letter-spacing: -.005em; }
+  .rule .rb { grid-column: 2 / span 2; margin: 0; color: var(--muted); text-wrap: pretty; max-width: 44rem; }
+  .rule .from { font-size: .72rem; color: var(--faint); white-space: nowrap; padding-top: .2rem; }
+  @media (prefers-reduced-motion: reduce) {
+    *, *::before, *::after { animation-duration: .001ms !important; animation-iteration-count: 1 !important; transition-duration: .001ms !important; scroll-behavior: auto !important; }
+  }
+  .seg {
+    position: relative; isolation: isolate; display: inline-flex; align-items: stretch; flex: none;
+    border: 1px solid var(--line); border-radius: var(--pill); padding: 1px; background: var(--paper-3);
+  }
+  .seg > button {
+    position: relative; z-index: 1; appearance: none; border: 0; background: none; color: var(--muted);
+    padding: .12rem .55rem; cursor: pointer; font-size: .75rem; line-height: 1.25; font-weight: 500;
+    border-radius: var(--pill); white-space: nowrap; transition: color var(--t) var(--ease);
+  }
+  .seg > button:hover, .seg > button:focus-visible { color: var(--ink); }
+  .seg > button[aria-pressed="true"] { color: var(--ink); }
+  .seg:not(:has(> .seg-thumb)) > button[aria-pressed="true"] { background: var(--card); box-shadow: var(--shadow); }
+  .seg .seg-thumb {
+    position: absolute; top: 1px; bottom: 1px; left: 0; width: 0; z-index: 0;
+    border-radius: var(--pill); background: var(--card); box-shadow: var(--shadow);
+    transition: transform var(--t) var(--ease-out), width var(--t) var(--ease-out);
+  }
+  .btn-quiet {
+    appearance: none; border: 0; background: none; color: var(--faint);
+    display: inline-flex; align-items: center; gap: .35rem; padding: .2rem .55rem; border-radius: var(--pill); cursor: pointer;
+    font-size: .75rem; font-weight: 500; line-height: 1.25; transition: color var(--t) var(--ease), background var(--t) var(--ease);
+  }
+  .btn-quiet:hover, .btn-quiet:focus-visible, .btn-quiet[aria-expanded="true"] { color: var(--ink); background: var(--paper-3); }
+  .btn-quiet .mark { width: 5px; height: 5px; border-radius: 999px; background: var(--accent-ink); }
+  .btn-line {
+    appearance: none; border: 1px solid var(--line); background: none; color: var(--muted);
+    padding: .35rem .85rem; border-radius: var(--pill); cursor: pointer; font-size: .85rem;
+    transition: color var(--t) var(--ease), background var(--t) var(--ease);
+  }
+  .btn-line:hover, .btn-line:focus-visible { color: var(--ink); background: var(--paper-3); }
+  .btn-fill {
+    appearance: none; border: 1px solid var(--line); background: var(--ink); color: var(--paper);
+    padding: .35rem .85rem; border-radius: var(--pill); cursor: pointer; font-size: .85rem;
+    transition: box-shadow var(--t) var(--ease);
+  }
+  .btn-fill:hover, .btn-fill:focus-visible { box-shadow: var(--shadow); }
+  .plain { max-width: 48rem; margin: .2rem 0 1rem; padding-left: 1.1rem; color: var(--muted); display: grid; gap: .4rem; }
+  .plain li b { color: var(--ink); font-weight: 500; }
+  .plain li i { color: var(--faint); font-style: normal; }
+
+  /* ------------------------------------------------------------ starting */
+  .copyblock { position: relative; max-width: 56rem; }
+  .copyblock pre {
+    margin: .4rem 0 1rem; padding: .9rem 1rem; font: 12px/1.6 var(--mono); color: var(--muted);
+    background: var(--paper-2); border: 1px solid var(--line); border-radius: var(--r); overflow: auto; white-space: pre;
+  }
+  .copyblock .btn-line { position: absolute; top: 1rem; right: .6rem; font-size: .75rem; padding: .25rem .65rem; }
+  .checks { max-width: 48rem; margin: .2rem 0 1rem; padding-left: 1.2rem; display: grid; gap: .35rem; }
+  .checks li b { font-weight: 500; }
+  .checks li i { color: var(--faint); font-style: normal; }
+
+  /* ============================================================ the don'ts
+     Everything above is the Design System's own sheet, copied, so this page
+     is drawn with the system it defends. Everything below is the page's own:
+     the pairs, and the deliberately wrong specimens inside them. A specimen
+     under .dont is the mistake itself, painted for real, so it is scoped
+     there and nowhere else. */
+
+  /* The verdict is a word in the file, coloured: danger for a don't, the
+     accent's ink for a do. Never a red box, never an icon. */
+  .verdict { margin: 0 0 .55rem; font: 600 13px/1.2 var(--ui); }
+  .dont > .verdict { color: var(--danger); }
+  .do > .verdict { color: var(--accent-ink); }
+  .pair {
+    display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: var(--pane-gap);
+    margin: .7rem 0 .4rem; max-width: 52rem;
+  }
+  .pair > div { min-width: 0; padding: 1rem 1.1rem 1.1rem; background: var(--well); border-radius: var(--r-pane); }
+  .pair .cap { margin: .65rem 0 0; font-size: .78rem; color: var(--muted); text-wrap: pretty; }
+  .pair .spot { display: flex; flex-wrap: wrap; align-items: center; gap: .5rem; min-height: 3.2rem; }
+
+  /* The hero pair is bigger: this is the one that must never ship. */
+  .hero .pair > div { padding: 1.3rem 1.4rem 1.3rem; }
+  .hero .spot { min-height: 6.5rem; align-items: stretch; }
+
+  /* A plain card, as the system draws one: white, 1px of line, twelve at the
+     corner. Both halves of a pair start from this. */
+  .card-s {
+    position: relative; flex: 1 1 12rem; min-width: 0; padding: .8rem 1rem;
+    background: var(--card); border: 1px solid var(--line); border-radius: var(--r);
+  }
+  .card-s .t { margin: 0 0 .15rem; font-weight: 500; }
+  .card-s .m { margin: 0; font-size: .78rem; color: var(--muted); }
+
+  /* ---- 1. the fingernail. A thick single side on a rounded box: the border
+     follows the radius, tapers to nothing at both corners, and the stripe
+     comes out shaped like a nail. */
+  .dont .nail { border-left: 4px solid #8b7ad9; }
+  .dont .nail-top { border-top: 3px solid #6aa7d9; }
+  /* The do: the edge stays one weight, one colour. If the row truly needs a
+     colour, it is a straight segment inside the edge, clear of the radius. */
+  .do .rule-in::before {
+    content: ''; position: absolute; left: 0; top: var(--r); bottom: var(--r); width: 2px;
+    border-radius: 0 2px 2px 0; background: var(--c, var(--accent));
+  }
+  .do .dotted .t::before {
+    content: ''; display: inline-block; width: 7px; height: 7px; margin: 0 .45rem .1rem 0;
+    border-radius: 999px; background: var(--c, var(--accent)); vertical-align: middle;
+  }
+
+  /* ---- 2. gradients, and the purple they love. */
+  .dont .grad-btn {
+    appearance: none; border: 0; color: #fff; font-weight: 600; padding: .5rem 1.1rem; border-radius: 10px;
+    background: linear-gradient(135deg, #7c3aed, #db2777); box-shadow: 0 6px 18px rgba(124,58,237,.35);
+  }
+  .dont .grad-text {
+    font-size: 1.15rem; font-weight: 700; letter-spacing: -.01em;
+    background: linear-gradient(90deg, #6366f1, #a855f7, #ec4899); -webkit-background-clip: text; background-clip: text; color: transparent;
+  }
+  .do .plain-t { font-size: 1.15rem; font-weight: 500; letter-spacing: -.015em; }
+
+  /* ---- 3. rainbow. */
+  .chip {
+    display: inline-flex; align-items: center; padding: .15rem .6rem; border-radius: var(--pill);
+    font-size: .75rem; font-weight: 500; line-height: 1.5; background: var(--paper-2); color: var(--muted);
+  }
+  .do .chip[aria-pressed="true"] { background: var(--card); color: var(--accent-ink); box-shadow: inset 0 0 0 1px var(--accent); }
+  .dont .chip:nth-child(1) { background: #fde68a; color: #92400e; }
+  .dont .chip:nth-child(2) { background: #bbf7d0; color: #166534; }
+  .dont .chip:nth-child(3) { background: #fbcfe8; color: #9d174d; }
+  .dont .chip:nth-child(4) { background: #c7d2fe; color: #3730a3; }
+  .dont .chip:nth-child(5) { background: #fed7aa; color: #9a3412; }
+
+  /* ---- 4. pulsing badges. The don't pulses forever about a state that never
+     changes. The do's dot moves only because work is happening right now. */
+  .dont .badge {
+    display: inline-flex; align-items: center; gap: .4rem; padding: .15rem .6rem; border-radius: var(--pill);
+    background: #dcfce7; color: #15803d; font-size: .75rem; font-weight: 600;
+  }
+  .dont .badge i { width: 7px; height: 7px; border-radius: 999px; background: #22c55e; animation: x-pulse 1.4s ease-in-out infinite; }
+  @keyframes x-pulse { 0%, 100% { box-shadow: 0 0 0 0 rgba(34,197,94,.6); } 50% { box-shadow: 0 0 0 6px rgba(34,197,94,0); } }
+  .do .working { display: inline-flex; align-items: center; gap: .45rem; font-size: .82rem; color: var(--muted); }
+  .do .working i { width: 7px; height: 7px; border-radius: 999px; background: var(--accent-ink); animation: x-breathe 1.8s var(--ease) infinite; }
+  @keyframes x-breathe { 0%, 100% { opacity: 1; } 50% { opacity: .35; } }
+  .do .working b { color: var(--ink); font-weight: 500; }
+
+  /* ---- 5. emoji as decoration. */
+  .nav-s { display: flex; flex-wrap: wrap; gap: .15rem; font-size: .85rem; }
+  .nav-s span { display: inline-flex; align-items: center; gap: .4rem; padding: .3rem .6rem; border-radius: var(--pill); color: var(--muted); }
+  .nav-s span:first-child { background: var(--paper-3); color: var(--ink); }
+  .nav-s svg { width: 16px; height: 16px; flex: none; }
+
+  /* ---- 6. misalignment. */
+  .figs { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; gap: .2rem .6rem; align-items: center; width: 100%; font-size: .85rem; }
+  .figs svg { width: 14px; height: 14px; color: var(--muted); }
+  .dont .figs svg:nth-of-type(2) { transform: translateY(3px); }
+  .dont .figs svg:nth-of-type(3) { width: 11px; height: 11px; transform: translate(2px, -2px); }
+  .dont .figs .n { text-align: left; }
+  .do .figs .n { text-align: right; font-variant-numeric: tabular-nums; }
+
+  /* ---- 7. the default fonts. The system stack has no webfont to fall back
+     from, so the don't shows the tell a font leaves behind: the mono
+     comment-slash eyebrow. */
+  .dont .slash { font: 500 .75rem/1.2 var(--mono); letter-spacing: .08em; text-transform: uppercase; color: var(--faint); }
+  .dont .slash-h { font: 700 1.05rem/1.3 var(--mono); letter-spacing: -.02em; }
+  .do .label-s { font: 600 13px/1.2 var(--ui); color: var(--muted); }
+  .do .label-h { font: 500 1.05rem/1.3 var(--ui); letter-spacing: -.015em; }
+  .stack { display: grid; gap: .3rem; }
+
+  /* ---- 8. words from the chat. */
+  .foot-s { width: 100%; padding-top: .6rem; border-top: 1px solid var(--line); font-size: .75rem; color: var(--faint); }
+  .none-s { font-size: .82rem; color: var(--faint); }
+
+  /* ---- 10. hype. */
+  .dont .hype-h { margin: 0; font-size: 1.35rem; font-weight: 700; letter-spacing: -.02em; }
+  .dont .hype-s { margin: .2rem 0 0; font-size: .85rem; color: var(--faint); }
+  .do .work-h { margin: 0 0 .35rem; font-size: 1.15rem; font-weight: 500; letter-spacing: -.015em; }
+  .do .work-r { margin: 0; font-size: .85rem; color: var(--muted); }
+  .do .work-r b { color: var(--ink); font-weight: 500; }
+
+  /* ---- glass. A frosted bar is only glass if something moves behind it,
+     so the good one sits over a scroll of rows; the bad one is a pane of
+     frost on flat paper with a blob parked behind it to have something to
+     blur. */
+  .glass-s { position: relative; width: 100%; height: 9.5rem; overflow: hidden; border-radius: var(--r); background: var(--card); border: 1px solid var(--line); }
+  .glass-s .rows { position: absolute; inset: 0; padding: .9rem .9rem 1rem; display: grid; gap: .45rem; align-content: start; overflow: auto; scrollbar-width: none; }
+  .glass-s .rows::-webkit-scrollbar { display: none; }
+  .glass-s .rows > b { display: block; margin-top: .35rem; font-size: .8rem; font-weight: 500; color: var(--ink); }
+  .glass-s .rows i { display: block; height: .7rem; border-radius: 3px; background: var(--paper-3); }
+  .glass-s .rows i:nth-child(3n) { width: 62%; background: var(--accent-soft); }
+  .glass-s .rows i:nth-child(3n+1) { width: 88%; }
+  .do .glass-s .bar-g {
+    position: absolute; left: 0; right: 0; top: 0; height: 2.25rem; display: flex; align-items: center; gap: .6rem; padding: 0 .9rem;
+    background: color-mix(in srgb, var(--paper) 78%, transparent);
+    backdrop-filter: blur(20px) saturate(160%); -webkit-backdrop-filter: blur(20px) saturate(160%);
+    border-top: 1px solid var(--edge-lit); border-bottom: 1px solid var(--line); font-size: .82rem; color: var(--muted);
+  }
+  .do .glass-s .bar-g b { color: var(--ink); font-weight: 500; }
+  .dont .glass-s { background: var(--paper); }
+  .dont .glass-s .blob { position: absolute; width: 7rem; height: 7rem; border-radius: 999px; filter: blur(8px); }
+  .dont .glass-s .blob:nth-child(1) { left: -1rem; top: -1.5rem; background: #a855f7; }
+  .dont .glass-s .blob:nth-child(2) { right: -1rem; bottom: -2rem; background: #22d3ee; }
+  .dont .glass-s .panes { position: absolute; inset: .7rem; display: grid; grid-template-columns: 1fr 1fr; gap: .5rem; }
+  .dont .glass-s .panes > span {
+    border-radius: 18px; border: 1px solid rgba(255,255,255,.45); padding: .55rem .7rem; font-size: .75rem; color: var(--ink);
+    background: rgba(255,255,255,.18); backdrop-filter: blur(14px); -webkit-backdrop-filter: blur(14px);
+    box-shadow: 0 8px 24px rgba(0,0,0,.12), inset 0 1px 0 rgba(255,255,255,.5);
+  }
+  @media (prefers-reduced-transparency: reduce) {
+    .do .glass-s .bar-g, .dont .glass-s .panes > span { backdrop-filter: none; -webkit-backdrop-filter: none; background: var(--paper); }
+  }
+
+  /* ---- the tells, as rows. The principles' row, with a "catch it" line: the
+     pattern an agent can grep for before it ships. */
+  .catch { margin: .35rem 0 0; font-size: .78rem; color: var(--faint); }
+  .tell .catch { grid-column: 2 / span 2; }
+  .sec > .catch { max-width: 46rem; }
+  .catch code { color: var(--muted); }
+  .tell .pair { grid-column: 2 / span 2; }
+  .tell .instead { grid-column: 2 / span 2; margin: .35rem 0 0; color: var(--ink); text-wrap: pretty; max-width: 44rem; }
+  .tell .instead b { font-weight: 500; }
+  /* The hero is 01; the list carries on from 02. */
+  .tells { counter-reset: rule 1; }
+
+  /* An allowance, not a ban: glass has its own list of where it goes. */
+  .where { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: .4rem 2rem; max-width: 52rem; margin: .6rem 0 1rem; }
+  .where h3 { margin: 0 0 .3rem; }
+  .where ul { margin: 0; padding-left: 1.1rem; color: var(--muted); display: grid; gap: .3rem; }
+  .where li b { color: var(--ink); font-weight: 500; }
+  .where .yes h3 { color: var(--accent-ink); }
+  .where .no h3 { color: var(--danger); }
+
+  .add-row { margin: .2rem 0 1rem; }
+  .copyblock .btn-line .done { display: none; }
+  .copyblock .btn-line.marble-copied .done { display: inline; }
+  .copyblock .btn-line.marble-copied .idle { display: none; }
+  .src-pill { margin: .2rem 0 1.2rem; }
+
+  @container doc (max-width: 40rem) {
+    .pair, .where { grid-template-columns: minmax(0, 1fr); }
+  }
+  /* ------------------------------------------------------------ narrow */
+  @container doc (max-width: 62rem) {
+    .spec, .demo-motion { grid-template-columns: minmax(0, 1fr); }
+    .notes { padding-top: 0; }
+  }
+  @container doc (max-width: 52rem) {
+    .stage { grid-template-columns: minmax(0, 1fr); column-gap: 0; padding: 0 1rem 6rem; }
+    .rail {
+      grid-row: auto; grid-column: 1; max-height: none; overflow-x: auto; overflow-y: hidden;
+      flex-direction: row; gap: .2rem; padding: .5rem 0; margin: 0 -1rem; padding-inline: 1rem;
+      background: color-mix(in srgb, var(--paper) 86%, transparent); backdrop-filter: blur(20px) saturate(160%); -webkit-backdrop-filter: blur(20px) saturate(160%);
+      border-bottom: 1px solid var(--line); z-index: 5; scrollbar-width: none;
+    }
+    .rail::-webkit-scrollbar { display: none; }
+    .rail .rail-k { display: none; }
+    .rail a { white-space: nowrap; }
+    .mast, .stream { grid-column: 1; }
+    .mast { padding-top: 1.6rem; }
+    .srcs li, .src { width: 100%; }
+    .mast h1 { font-size: 1.6rem; }
+    .rule { grid-template-columns: 2rem minmax(0, 1fr); }
+    .rule .from { grid-column: 2; padding-top: 0; }
+    .rule .rb { grid-column: 2; }
+    .ty { grid-template-columns: minmax(0, 1fr); gap: .1rem; }
+    .clock { grid-template-columns: auto minmax(0, 1fr); }
+    .clock dd:not(.cd) { grid-column: 1 / -1; margin-bottom: .35rem; }
+    .two { grid-template-columns: minmax(0, 1fr); }
+    .spec-well { grid-template-columns: minmax(0, 1fr); }
+    .basins { grid-template-columns: minmax(0, 1fr); }
+  }
+  /* A finger is not a mouse: it is about 9mm across and it has no hover. */
+  @media (pointer: coarse) {
+    .rail a { padding: .55rem .8rem; }
+    .seg > button { padding: .4rem .7rem; }
+    .btn-line, .btn-fill, .btn-quiet { min-height: 2.75rem; }
+    .row { min-height: 2.75rem; }
+  }
+  @media (hover: none) {
+    .row:active, .starter:active, .tok:active { background: var(--paper-2); filter: none; }
+  }
+</style>
+</head>
+<body>
+<main class="stage" data-marble-id="stage" data-scheme="auto">
+
+  <nav class="rail" data-marble-id="rail" aria-label="Sections">
+    <p class="rail-k" data-marble-id="rail-k">On this page</p>
+    <a href="#fingernail" data-marble-id="rl-nail">The fingernail</a>
+    <a href="#tells" data-marble-id="rl-tells">Nine more tells</a>
+    <a href="#glass" data-marble-id="rl-glass">Glass, in its place</a>
+    <a data-marble-id="0ngr4txv" href="#words">Words</a>
+    <a href="#more" data-marble-id="rl-more">More we've caught</a>
+    <a href="#ship" data-marble-id="rl-ship">Before you ship</a>
+  </nav>
+
+  <header class="mast" data-marble-id="mast">
+    <p class="k" data-marble-id="mast-k" data-marble-editable>Marble Drive</p>
+    <h1 data-marble-id="title" data-marble-editable>What not to build</h1>
+    <p class="lede" data-marble-id="lede" data-marble-editable>The Design System says what the drive's apps agree on. This is the other half: the things that make a page look generated rather than made. Most are defaults a model reaches for because every page it learned from reached for them. Each tell below is painted for real, next to what the system does instead. Read this after the Design System and before you ship. Where the two disagree, the Design System wins.</p>
+    <p class="src-pill" data-marble-id="mast-src"><a class="src" href="Design System.mrbl" data-doc="Design System" data-marble-id="mast-src-a" style="--c: var(--accent)"><i class="sw1"></i><span class="nm" data-marble-id="mast-src-n">Design System</span><span class="why" data-marble-id="mast-src-w" data-marble-editable>read it first; its "What was rejected" list is part of this one</span></a></p>
+    <div class="scheme" data-marble-id="scheme">
+      <span data-marble-id="scheme-l">Look at it</span>
+      <span class="seg" data-marble-choose="data-scheme" data-marble-of=".stage" data-marble-id="scheme-seg" aria-label="Colour scheme">
+        <button type="button" data-marble-value="auto" data-marble-id="sch-auto">Auto</button>
+        <button type="button" data-marble-value="light" data-marble-id="sch-light">Light</button>
+        <button type="button" data-marble-value="dark" data-marble-id="sch-dark">Dark</button>
+      </span>
+    </div>
+  </header>
+
+  <div class="stream" data-marble-id="stream">
+
+    <!-- ========================================================= fingernail -->
+    <section class="sec hero" id="fingernail" data-marble-id="s-nail">
+      <p class="k" data-marble-id="nail-k">00 · The one to check first</p>
+      <h2 data-marble-id="nail-h" data-marble-editable>No fingernails</h2>
+      <p class="lede" data-marble-id="nail-lede" data-marble-editable>A thick coloured border down one side of a rounded card. The border follows the radius, so it tapers to nothing at both corners and the stripe comes out shaped like a fingernail. Nobody decides a card needs one. It is on every generated page because it is on every page the model learned from, and that is exactly what it says about yours.</p>
+      <div class="pair" data-marble-id="nail-pair">
+        <div class="dont" data-marble-id="nail-dont">
+          <p class="verdict" data-marble-id="nail-dont-v">Don't</p>
+          <div class="spot" data-marble-id="nail-dont-s">
+            <div class="card-s nail" data-marble-id="nail-d1"><p class="t" data-marble-id="nail-d1t">Weekly review</p><p class="m" data-marble-id="nail-d1m">3 items · due Friday</p></div>
+            <div class="card-s nail-top" data-marble-id="nail-d2"><p class="t" data-marble-id="nail-d2t">Reading list</p><p class="m" data-marble-id="nail-d2m">12 papers</p></div>
+          </div>
+          <p class="cap" data-marble-id="nail-dont-c" data-marble-editable>A 4px left border on a 12px radius, and its cousin across the top. Look at the ends: both bend away.</p>
+        </div>
+        <div class="do" data-marble-id="nail-do">
+          <p class="verdict" data-marble-id="nail-do-v">Do</p>
+          <div class="spot" data-marble-id="nail-do-s">
+            <div class="card-s" data-marble-id="nail-o1"><p class="t" data-marble-id="nail-o1t">Weekly review</p><p class="m" data-marble-id="nail-o1m">3 items · due Friday</p></div>
+            <div class="card-s dotted" style="--c: #6f8f7d" data-marble-id="nail-o2"><p class="t" data-marble-id="nail-o2t">Reading list</p><p class="m" data-marble-id="nail-o2m">12 papers</p></div>
+          </div>
+          <p class="cap" data-marble-id="nail-do-c" data-marble-editable>One weight, one colour, all the way round. If the card really belongs to a coloured thing, say so with a dot by its name, or a straight 2px segment inside the edge that stops short of the corners.</p>
+        </div>
+      </div>
+      <ul class="plain" data-marble-id="nail-rules">
+        <li data-marble-id="nail-r1" data-marble-editable><b>No single thick side on anything rounded.</b> Not left, not top, not as a hover state. A border is 1px of <code>--line</code> on every side, or none.</li>
+        <li data-marble-id="nail-r2" data-marble-editable><b>No stripe to say "this is a card".</b> The card's edge already says that. A stripe with no meaning is decoration that looks like it means something.</li>
+        <li data-marble-id="nail-r3" data-marble-editable><b>When colour carries meaning,</b> like a folder's colour or a realm, use a dot or a straight segment inset past the radius. Never bend it around a corner. This is rule 22 of the Design System's rejected list, and it came back twice before it was written down.</li>
+        <li data-marble-id="nail-r4" data-marble-editable><b>Callouts too.</b> A note, a warning or a quote is not a rounded box with a stripe. A quote in a document is an indent in the serif. A warning is danger-coloured words.</li>
+      </ul>
+      <p class="catch" data-marble-id="nail-catch">Catch it: <code>border-(left|top|right|bottom)(-width)?:\s*[2-9]px</code> on anything with a <code>border-radius</code>, and <code>box-shadow: inset [2-9]px 0</code>, the same nail drawn another way.</p>
+    </section>
+
+    <!-- ============================================================== tells -->
+    <section class="sec" id="tells" data-marble-id="s-tells">
+      <p class="k" data-marble-id="tells-k">01 · The tells</p>
+      <h2 data-marble-id="tells-h" data-marble-editable>Nine more ways a page says a model made it</h2>
+      <p class="lede" data-marble-id="tells-lede" data-marble-editable>From Heretic Pleb's "10 tells of a slop UI", checked against this drive's system. Each says what the tell looks like, why it reads as slop, what to do instead, and what to grep for. Drag to reorder, type to change, and add the next one when you spot it.</p>
+      <ol class="rules tells" id="tells-list" data-marble-id="tells" data-marble-sortable="tells">
+
+        <li class="rule tell" data-marble-id="t-grad" data-marble-removable>
+          <p class="rt" data-marble-id="t-grad-t" data-marble-editable>Gradients on everything, usually purple.</p>
+          <span class="from" data-marble-id="t-grad-f">colour</span>
+          <p class="rb" data-marble-id="t-grad-b" data-marble-editable>Buttons, backgrounds, headings, avatars, all fading violet into pink. A gradient says "premium" when there is nothing to say. Here it is also wrong twice, because violet is reserved for an agent working in the document.</p>
+          <div class="pair" data-marble-id="t-grad-p">
+            <div class="dont" data-marble-id="t-grad-d"><p class="verdict" data-marble-id="t-grad-dv">Don't</p><div class="spot" data-marble-id="t-grad-ds"><span class="grad-text" data-marble-id="t-grad-d1">Your insights</span><button type="button" class="grad-btn" data-marble-id="t-grad-d2">Get started</button></div></div>
+            <div class="do" data-marble-id="t-grad-o"><p class="verdict" data-marble-id="t-grad-ov">Do</p><div class="spot" data-marble-id="t-grad-os"><span class="plain-t" data-marble-id="t-grad-o1">Insights</span><button type="button" class="btn-fill" data-marble-id="t-grad-o2">New</button></div></div>
+          </div>
+          <p class="instead" data-marble-id="t-grad-i" data-marble-editable><b>Instead:</b> flat paper, ink and one accent. The filled ink pill is the loudest thing on a page, and it is spent once. A gradient is allowed where it does a physical job: a scrim under text on a photo, or a fade at the edge of something that scrolls.</p>
+          <p class="catch" data-marble-id="t-grad-c">Catch it: <code>linear-gradient</code>, <code>radial-gradient</code>, <code>background-clip: text</code>, <code>#7c3aed</code>, <code>#8b5cf6</code>, <code>#a855f7</code>, <code>#6366f1</code>, <code>purple</code>, <code>violet</code>, <code>indigo</code></p>
+        </li>
+
+        <li class="rule tell" data-marble-id="t-rain" data-marble-removable>
+          <p class="rt" data-marble-id="t-rain-t" data-marble-editable>A rainbow of tags.</p>
+          <span class="from" data-marble-id="t-rain-f">colour</span>
+          <p class="rb" data-marble-id="t-rain-b" data-marble-editable>Every category gets its own saturated pastel, picked to be different, not to go together. Five colours are five claims, and a person reads each as a meaning they then have to learn.</p>
+          <div class="pair" data-marble-id="t-rain-p">
+            <div class="dont" data-marble-id="t-rain-d"><p class="verdict" data-marble-id="t-rain-dv">Don't</p><div class="spot" data-marble-id="t-rain-ds"><span class="chip" data-marble-id="t-rain-d1">Design</span><span class="chip" data-marble-id="t-rain-d2">Research</span><span class="chip" data-marble-id="t-rain-d3">Personal</span><span class="chip" data-marble-id="t-rain-d4">Travel</span><span class="chip" data-marble-id="t-rain-d5">Admin</span></div></div>
+            <div class="do" data-marble-id="t-rain-o"><p class="verdict" data-marble-id="t-rain-ov">Do</p><div class="spot" data-marble-id="t-rain-os"><span class="chip" aria-pressed="true" data-marble-id="t-rain-o1">Design</span><span class="chip" data-marble-id="t-rain-o2">Research</span><span class="chip" data-marble-id="t-rain-o3">Personal</span><span class="chip" data-marble-id="t-rain-o4">Travel</span><span class="chip" data-marble-id="t-rain-o5">Admin</span></div></div>
+          </div>
+          <p class="instead" data-marble-id="t-rain-i" data-marble-editable><b>Instead:</b> the tags are paper, and the chosen one takes the accent. An app picks one accent from the family. Danger and caution are the only other hues, and they mean what they say.</p>
+          <p class="catch" data-marble-id="t-rain-c">Catch it: more than one accent-like hex outside the token block, or <code>:nth-child</code> rules that hand out colours.</p>
+        </li>
+
+        <li class="rule tell" data-marble-id="t-pulse" data-marble-removable>
+          <p class="rt" data-marble-id="t-pulse-t" data-marble-editable>Badges that pulse about nothing.</p>
+          <span class="from" data-marble-id="t-pulse-f">motion</span>
+          <p class="rb" data-marble-id="t-pulse-b" data-marble-editable>A green "Active" pill with a throbbing dot, on a thing that is never inactive. "Verified", "Live", "Online", "New" on everything. Motion pulls the eye, and it spends that pull on a state that never changes.</p>
+          <div class="pair" data-marble-id="t-pulse-p">
+            <div class="dont" data-marble-id="t-pulse-d"><p class="verdict" data-marble-id="t-pulse-dv">Don't</p><div class="spot" data-marble-id="t-pulse-ds"><span class="badge" data-marble-id="t-pulse-d1"><i></i>Active</span><span class="badge" data-marble-id="t-pulse-d2"><i></i>Verified</span></div></div>
+            <div class="do" data-marble-id="t-pulse-o"><p class="verdict" data-marble-id="t-pulse-ov">Do</p><div class="spot" data-marble-id="t-pulse-os"><span class="working" data-marble-id="t-pulse-o1"><i></i><b>Claude</b> writing the rail</span></div></div>
+          </div>
+          <p class="instead" data-marble-id="t-pulse-i" data-marble-editable><b>Instead:</b> a steady state is not shown at all, or is a word in the meta line. Something moves only while work is happening, like an agent's dot while it runs, and it stops when the work does. A dot says something is hidden and the popover says what. Never put a digit on a button.</p>
+          <p class="catch" data-marble-id="t-pulse-c">Catch it: <code>animation: … infinite</code>, <code>@keyframes pulse|ping|glow|shimmer</code> on anything that is not a running agent or a loading state.</p>
+        </li>
+
+        <li class="rule tell" data-marble-id="t-emoji" data-marble-removable>
+          <p class="rt" data-marble-id="t-emoji-t" data-marble-editable>Emoji for icons.</p>
+          <span class="from" data-marble-id="t-emoji-f">icons</span>
+          <p class="rb" data-marble-id="t-emoji-b" data-marble-editable>A rocket by Projects, sparkles by Insights, a chart by Stats, a party popper when something saves. Each emoji brings its own colour, weight and baseline, so no two sit alike, and they read as a chat message, not a tool.</p>
+          <div class="pair" data-marble-id="t-emoji-p">
+            <div class="dont" data-marble-id="t-emoji-d"><p class="verdict" data-marble-id="t-emoji-dv">Don't</p><div class="spot" data-marble-id="t-emoji-ds"><div class="nav-s" data-marble-id="t-emoji-dn"><span>🚀 Projects</span><span>✨ Insights</span><span>📊 Stats</span></div></div></div>
+            <div class="do" data-marble-id="t-emoji-o"><p class="verdict" data-marble-id="t-emoji-ov">Do</p><div class="spot" data-marble-id="t-emoji-os"><div class="nav-s" data-marble-id="t-emoji-on">
+              <span><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round" aria-hidden="true"><path d="M2 4.5c0-.6.4-1 1-1h3.2l1.3 1.5H13c.6 0 1 .4 1 1V12c0 .6-.4 1-1 1H3c-.6 0-1-.4-1-1z"/></svg>Projects</span>
+              <span><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" aria-hidden="true"><path d="M8 2v2.5M8 11.5V14M2 8h2.5M11.5 8H14M4 4l1.6 1.6M10.4 10.4 12 12M12 4l-1.6 1.6M5.6 10.4 4 12"/></svg>Insights</span>
+              <span><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" aria-hidden="true"><path d="M3 13V8M8 13V3M13 13v-3"/></svg>Stats</span>
+            </div></div></div>
+          </div>
+          <p class="instead" data-marble-id="t-emoji-i" data-marble-editable><b>Instead:</b> icons are drawn, one SVG in <code>currentColor</code>, 20 inside a 44 hit box, all at one stroke weight. Most rows need no icon at all. An emoji belongs on the page only when a person typed it.</p>
+          <p class="catch" data-marble-id="t-emoji-c">Catch it: any emoji in markup or script strings, <code>[\x{1F300}-\x{1FAFF}\x{2600}-\x{27BF}]</code>, outside text a person wrote.</p>
+        </li>
+
+        <li class="rule tell" data-marble-id="t-align" data-marble-removable>
+          <p class="rt" data-marble-id="t-align-t" data-marble-editable>Things that almost line up.</p>
+          <span class="from" data-marble-id="t-align-f">layout</span>
+          <p class="rb" data-marble-id="t-align-b" data-marble-editable>Icons a few pixels off the text's baseline, numbers that don't line up in a column, ASCII art and drawn diagrams sliding out of their boxes, a timetable whose blocks miss their hour lines. A model writes the markup and never looks at it.</p>
+          <div class="pair" data-marble-id="t-align-p">
+            <div class="dont" data-marble-id="t-align-d"><p class="verdict" data-marble-id="t-align-dv">Don't</p><div class="spot" data-marble-id="t-align-ds"><div class="figs" data-marble-id="t-align-df">
+              <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true"><circle cx="8" cy="8" r="5.5"/></svg><span>Open</span><span class="n">1,204</span>
+              <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true"><circle cx="8" cy="8" r="5.5"/></svg><span>Waiting</span><span class="n">87</span>
+              <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true"><circle cx="8" cy="8" r="5.5"/></svg><span>Done</span><span class="n">11,090</span>
+            </div></div></div>
+            <div class="do" data-marble-id="t-align-o"><p class="verdict" data-marble-id="t-align-ov">Do</p><div class="spot" data-marble-id="t-align-os"><div class="figs" data-marble-id="t-align-of">
+              <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true"><circle cx="8" cy="8" r="5.5"/></svg><span>Open</span><span class="n">1,204</span>
+              <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true"><circle cx="8" cy="8" r="5.5"/></svg><span>Waiting</span><span class="n">87</span>
+              <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true"><circle cx="8" cy="8" r="5.5"/></svg><span>Done</span><span class="n">11,090</span>
+            </div></div></div>
+          </div>
+          <p class="instead" data-marble-id="t-align-i" data-marble-editable><b>Instead:</b> put things on one grid and one baseline. Numbers in a column are right-aligned in tabular figures. Icons sit in a fixed box, centred. Then render it, at 360, 460, 620, 820 and 1100 wide, in both schemes, and look. If you did not look at it, it is not done.</p>
+          <p class="catch" data-marble-id="t-align-c">Catch it: numbers in a column without <code>font-variant-numeric: tabular-nums</code>, and <code>translateY</code> used to nudge an icon onto the text. Mostly, though, it takes a screenshot.</p>
+        </li>
+
+        <li class="rule tell" data-marble-id="t-font" data-marble-removable>
+          <p class="rt" data-marble-id="t-font-t" data-marble-editable>Inter, JetBrains Mono, and a "//" before every label.</p>
+          <span class="from" data-marble-id="t-font-f">type</span>
+          <p class="rb" data-marble-id="t-font-b" data-marble-editable>The two fonts every template ships, linked in from a font service, with mono eyebrows dressed up as code comments near anything technical. It is a costume of a developer tool, not a choice.</p>
+          <div class="pair" data-marble-id="t-font-p">
+            <div class="dont" data-marble-id="t-font-d"><p class="verdict" data-marble-id="t-font-dv">Don't</p><div class="spot" data-marble-id="t-font-ds"><div class="stack" data-marble-id="t-font-dk"><span class="slash">// features</span><span class="slash-h">Built for speed_</span></div></div></div>
+            <div class="do" data-marble-id="t-font-o"><p class="verdict" data-marble-id="t-font-ov">Do</p><div class="spot" data-marble-id="t-font-os"><div class="stack" data-marble-id="t-font-ok"><span class="label-s">Features</span><span class="label-h">What it does</span></div></div></div>
+          </div>
+          <p class="instead" data-marble-id="t-font-i" data-marble-editable><b>Instead:</b> the system's one sans, <code>--ui</code>, at 14/1.5, weights 400, 500 and 600. Documents read in <code>--serif</code>. <code>--mono</code> is for code and nothing else. No document names a webfont or links a stylesheet.</p>
+          <p class="catch" data-marble-id="t-font-c">Catch it: <code>Inter</code>, <code>JetBrains Mono</code>, <code>Space Grotesk</code>, <code>Poppins</code>, <code>fonts.googleapis</code>, <code>@import url(</code>, and <code>//</code> or <code>&gt;_</code> in visible text.</p>
+        </li>
+
+        <li class="rule tell" data-marble-id="t-chat" data-marble-removable>
+          <p class="rt" data-marble-id="t-chat-t" data-marble-editable>Words that leaked out of the chat.</p>
+          <span class="from" data-marble-id="t-chat-f">voice</span>
+          <p class="rb" data-marble-id="t-chat-b" data-marble-editable>"Built with Marble." "Styled to match your design system." "Powered by Claude." "Everything saves automatically." These are in the page because they were in the prompt, not because the person using it needs to know. The page is talking to the person who asked for it, about how it was made.</p>
+          <div class="pair" data-marble-id="t-chat-p">
+            <div class="dont" data-marble-id="t-chat-d"><p class="verdict" data-marble-id="t-chat-dv">Don't</p><div class="spot" data-marble-id="t-chat-ds"><p class="foot-s" data-marble-id="t-chat-d1">Built with Marble · Follows your design system · Every change is saved to the file</p></div></div>
+            <div class="do" data-marble-id="t-chat-o"><p class="verdict" data-marble-id="t-chat-ov">Do</p><div class="spot" data-marble-id="t-chat-os"><p class="none-s" data-marble-id="t-chat-o1">Nothing. The page is the work.</p></div></div>
+          </div>
+          <p class="instead" data-marble-id="t-chat-i" data-marble-editable><b>Instead:</b> every word on the page is for the person using it, about the thing in front of them. How it was built belongs in your reply in the chat, or in a comment in the stylesheet, never on the page. This includes restating the request as a heading, and a page that narrates its own build.</p>
+          <p class="catch" data-marble-id="t-chat-c">Catch it: <code>built with</code>, <code>powered by</code>, <code>made with</code>, <code>design system</code>, <code>automatically</code>, a model's or tool's name in visible text.</p>
+        </li>
+
+        <li class="rule tell" data-marble-id="t-hype" data-marble-removable>
+          <p class="rt" data-marble-id="t-hype-t" data-marble-editable>A landing page where a tool should be.</p>
+          <span class="from" data-marble-id="t-hype-f">voice</span>
+          <p class="rb" data-marble-id="t-hype-b" data-marble-editable>"Welcome back, Alex ✨" in bold, with a grey line under it that says "Elevate your workflow with seamless insights." Every screen opens like it is selling itself to someone who already has it open.</p>
+          <div class="pair" data-marble-id="t-hype-p">
+            <div class="dont" data-marble-id="t-hype-d"><p class="verdict" data-marble-id="t-hype-dv">Don't</p><div class="spot" data-marble-id="t-hype-ds"><div data-marble-id="t-hype-dk"><p class="hype-h" data-marble-id="t-hype-d1">Welcome back, Alex ✨</p><p class="hype-s" data-marble-id="t-hype-d2">Supercharge your day with seamless, AI-powered insights.</p></div></div></div>
+            <div class="do" data-marble-id="t-hype-o"><p class="verdict" data-marble-id="t-hype-ov">Do</p><div class="spot" data-marble-id="t-hype-os"><div data-marble-id="t-hype-ok"><p class="work-h" data-marble-id="t-hype-o1">Today</p><p class="work-r" data-marble-id="t-hype-o2"><b>Send the syllabus</b> · due 3 PM</p></div></div></div>
+          </div>
+          <p class="instead" data-marble-id="t-hype-i" data-marble-editable><b>Instead:</b> a tool opens on the work. The title is the name of the thing, 1.15rem at 500. Say it once, in sentence case, and skip the subtitle unless it tells you something the title can't. Buttons are verbs or the name of what they open.</p>
+          <p class="catch" data-marble-id="t-hype-c">Catch it: <code>elevate</code>, <code>seamless</code>, <code>supercharge</code>, <code>unleash</code>, <code>effortless</code>, <code>empower</code>, <code>next-level</code>, <code>welcome back</code>, <code>at your fingertips</code>.</p>
+        </li>
+
+        <li class="rule tell" data-marble-id="t-glass" data-marble-removable>
+          <p class="rt" data-marble-id="t-glass-t" data-marble-editable>Glass on everything.</p>
+          <span class="from" data-marble-id="t-glass-f">material</span>
+          <p class="rb" data-marble-id="t-glass-b" data-marble-editable>Frosted cards, frosted buttons, frosted panels on frosted panels, over blurred blobs parked behind them so there is something to frost. Glass is good. Glass everywhere is not. It gets its own section below.</p>
+          <p class="instead" data-marble-id="t-glass-i"><b>Instead:</b> see <a href="#glass" data-marble-id="t-glass-a">Glass, in its place</a>.</p>
+          <p class="catch" data-marble-id="t-glass-c">Catch it: count <code>backdrop-filter</code>. More than the bars and sheets that float is too many.</p>
+        </li>
+
+      </ol>
+      <p class="add-row" data-marble-id="tells-add-row"><button type="button" class="btn-line" data-marble-add="#tpl-tell" data-marble-into="#tells-list" data-marble-id="tells-add">Add a tell</button></p>
+    </section>
+
+    <!-- ============================================================== glass -->
+    <section class="sec" id="glass" data-marble-id="s-glass">
+      <p class="k" data-marble-id="glass-k">02 · Glass, in its place</p>
+      <h2 data-marble-id="glass-h" data-marble-editable>Frost is for what floats</h2>
+      <p class="lede" data-marble-id="glass-lede" data-marble-editable>This one is not a ban. A frosted bar, done well, is one of the nicest things on the page: it says this is a layer above the content, and the content scrolling faintly under it is what says so. The trouble is only overuse. Frost has one job, so it goes where that job is, and nowhere else.</p>
+      <div class="pair" data-marble-id="glass-pair">
+        <div class="dont" data-marble-id="glass-dont">
+          <p class="verdict" data-marble-id="glass-dont-v">Don't</p>
+          <div class="spot" data-marble-id="glass-dont-s"><div class="glass-s" data-marble-id="glass-dont-g"><i class="blob"></i><i class="blob"></i><div class="panes"><span>Revenue</span><span>Users</span><span>Growth</span><span>Churn</span></div></div></div>
+          <p class="cap" data-marble-id="glass-dont-c" data-marble-editable>Content cards made of frost, over flat paper, with coloured blobs placed behind them so the blur has something to do.</p>
+        </div>
+        <div class="do" data-marble-id="glass-do">
+          <p class="verdict" data-marble-id="glass-do-v">Do</p>
+          <div class="spot" data-marble-id="glass-do-s"><div class="glass-s" data-marble-id="glass-do-g"><div class="rows"><b>Fold the rail into piles</b><i></i><i></i><i></i><b>Tidy the room</b><i></i><i></i><i></i><b>Glass, in its place</b><i></i><i></i><i></i><i></i><i></i><i></i></div><div class="bar-g"><b>Agents</b><span>4 working</span></div></div></div>
+          <p class="cap" data-marble-id="glass-do-c" data-marble-editable>One bar that floats over rows that scroll (scroll them): paper at 78% over a 20px blur, with <code>--edge-lit</code> along the top.</p>
+        </div>
+      </div>
+      <div class="where" data-marble-id="glass-where">
+        <div class="yes" data-marble-id="glass-yes">
+          <h3 data-marble-id="glass-yes-h">Where it goes</h3>
+          <ul data-marble-id="glass-yes-l">
+            <li data-marble-id="gy-1" data-marble-editable><b>A topbar or rail</b> that content scrolls under. Paper at 78% over <code>blur(20px) saturate(160%)</code>.</li>
+            <li data-marble-id="gy-2" data-marble-editable><b>A sheet or a popover</b> over the page. Paper at 88% over 24px.</li>
+            <li data-marble-id="gy-3" data-marble-editable><b>A floating composer or toolbar</b> that sits over a document you keep reading.</li>
+            <li data-marble-id="gy-4" data-marble-editable><b>One layer of it at a time.</b> If you can see frost through frost, one of them should be solid.</li>
+          </ul>
+        </div>
+        <div class="no" data-marble-id="glass-no">
+          <h3 data-marble-id="glass-no-h">Where it doesn't</h3>
+          <ul data-marble-id="glass-no-l">
+            <li data-marble-id="gn-1" data-marble-editable><b>Content.</b> Cards, rows, tiles and panes are solid: <code>--card</code> on <code>--well</code>. You read through content, not past it.</li>
+            <li data-marble-id="gn-2" data-marble-editable><b>Over nothing.</b> Frost over flat paper is just grey with a border. If nothing moves behind it, it isn't glass.</li>
+            <li data-marble-id="gn-3" data-marble-editable><b>Blobs behind it.</b> Coloured orbs put there only to give the blur something to show.</li>
+            <li data-marble-id="gn-4" data-marble-editable><b>Glass buttons,</b> white inner-glow rims, and 1px white borders at 40%. That is a costume of the material, not the material.</li>
+          </ul>
+        </div>
+      </div>
+      <p data-marble-id="glass-rt" data-marble-editable>And always the escape: under <code>prefers-reduced-transparency</code>, every translucent bar turns opaque paper. This page does it too.</p>
+    </section>
+
+    <!-- =============================================================== more -->
+    <section data-marble-id="tqcbr6mm" class="sec words" id="words">
+      <style data-marble-id="0auqg7jc">
+  /* ---- words. The same empty panel written twice: the don't in the voice a
+     model defaults to, the do in the drive's. The drawing is identical, so
+     only the words differ. */
+  .copy-s { flex: 1 1 14rem; min-width: 0; display: grid; gap: .35rem; justify-items: start; padding: .9rem 1rem 1rem; background: var(--card); border: 1px solid var(--line); border-radius: var(--r); }
+  .copy-s p { margin: 0; text-wrap: pretty; }
+  .copy-s .cs-h { font-size: 1.05rem; font-weight: 500; letter-spacing: -.015em; }
+  .copy-s .cs-sub { font-size: .82rem; color: var(--faint); }
+  .copy-s .cs-body { margin: .35rem 0 .4rem; font-size: .85rem; color: var(--muted); }
+  .words .pair .spot { align-items: stretch; }
+</style>
+      <p data-marble-id="11kyv02l" class="k">03 · Words</p>
+      <h2 data-marble-id="rqgmhrha" data-marble-editable>Write what the person needs, then stop</h2>
+      <p data-marble-id="wyi1rv4m" class="lede" data-marble-editable>The tells above are in the pixels. These are in the text. A model fills a screen with words because an empty region looks unfinished to it, and the words it reaches for are the ones every page it learned from used. Each line on a screen costs the person a read. Before you keep one, ask what they would lose if it were gone. If the answer is nothing, it goes.</p>
+      <div data-marble-id="sbs0sur7" class="pair">
+        <div data-marble-id="t3y07p1x" class="dont">
+          <p data-marble-id="df2czafu" class="verdict">Don't</p>
+          <div data-marble-id="zbc8mybt" class="spot"><div data-marble-id="pz0qrogq" class="copy-s"><p data-marble-id="9m9icm35" class="cs-h">Your Reading List</p><p data-marble-id="93tcx9s0" class="cs-sub">Easily organize, track and manage all of your research papers in one convenient place.</p><p data-marble-id="8ijhxa2x" class="cs-body">It looks like you haven't added any papers yet! Get started by clicking the button below to add your very first paper.</p><button data-marble-id="9xd8mca2" type="button" class="btn-line">Get Started</button></div></div>
+          <p data-marble-id="pi8dyw9t" class="cap" data-marble-editable>Forty-one words, and the person learns one thing: the list is empty. The subtitle sells the page to someone already on it, the empty state explains a button they can see, and the button doesn't say what it does.</p>
+        </div>
+        <div data-marble-id="hl3pjb5g" class="do">
+          <p data-marble-id="660farbf" class="verdict">Do</p>
+          <div data-marble-id="ddxgnoi6" class="spot"><div data-marble-id="jeo1ntv5" class="copy-s"><p data-marble-id="n53tv3rk" class="cs-h">Reading list</p><p data-marble-id="78yh9soo" class="cs-body">No papers yet. Paste a link or drop a PDF here.</p><button data-marble-id="tj31zvr4" type="button" class="btn-fill">Add paper</button></div></div>
+          <p data-marble-id="3b8b9wx6" class="cap" data-marble-editable>Fourteen words. The empty state says what is missing and the two ways to fill it, which the button can't show. The button names what it does.</p>
+        </div>
+      </div>
+      <h3 data-marble-id="94k1rkwa">The tells in the text</h3>
+      <ul data-marble-id="wr0gjnqm" class="plain" id="words-ul">
+        <li data-marble-id="6pu9et3k" data-marble-removable><b data-marble-id="0ibl4vcf" data-marble-editable>Text that restates the screen.</b> <span data-marble-id="dv3flq26" data-marble-editable>"Click the button below to add a paper." "Use the search bar to search." Helper text that repeats the label above it. The person can see the button. Helper text is for what the control can't show: a format, a limit, or what happens next.</span></li>
+        <li data-marble-id="sarswe5k" data-marble-removable><b data-marble-id="dg3geob5" data-marble-editable>A subtitle under every heading.</b> <span data-marble-id="anyumokq" data-marble-editable>A grey line that paraphrases the title ("Manage your tasks with ease"), an "Overview" that says what the page is, a closing line that says the section again. Keep a subtitle only if it carries a fact: a count, a date, a state, a source.</span></li>
+        <li data-marble-id="sto9rm9j" data-marble-removable><b data-marble-id="iyf4pq6d" data-marble-editable>Labels that fit any app.</b> <span data-marble-id="1mr1buuk" data-marble-editable>"Get started", "Learn more", "Submit", "Click here", "Manage". A button is a verb and its object, two to four words: "Add paper", "Send to Ana". What follows it uses the same verb: "Publish" gives "Published". One thing has one name everywhere, not "folder" in the rail and "collection" in the menu.</span></li>
+        <li data-marble-id="t2rz5n0d" data-marble-removable><b data-marble-id="yuo10t76" data-marble-editable>Made-up facts.</b> <span data-marble-id="on9i20zz" data-marble-editable>"Trusted by 10,000+ teams", "99.9% uptime", "Saves you 5 hours a week", "Experts agree", a quote from Sarah K., sample rows called Project Alpha. A number on a page is a claim, and a person believes it. Show their real data or an honest empty state. Never invent a figure that looks measured, or a person who looks real.</span></li>
+        <li data-marble-id="3yr3pwjc" data-marble-removable><b data-marble-id="z0bbwaad" data-marble-editable>The model's vocabulary.</b> <span data-marble-id="t2af0v51" data-marble-editable>Delve, tapestry, underscore, showcase, foster, landscape, robust, leverage, streamline, comprehensive, crucial, pivotal, vibrant, intuitive, a sentence that opens on "Additionally", "in today's fast-paced world", "whether you're a student or a pro". These are measured, not a hunch: "delves" turned up 28 times more often in 2024 paper abstracts than before chatbots. Use the plain word, or cut the sentence.</span></li>
+        <li data-marble-id="qkut8hmt" data-marble-removable><b data-marble-id="aqpwatwe" data-marble-editable>Words that inflate.</b> <span data-marble-id="k70n79og" data-marble-editable>"Serves as", "stands as a testament to", "plays a pivotal role", "boasts" where "is" and "has" would do, and a trailing clause that claims a meaning nobody asked for: "…, ensuring you never miss a beat." A tool is not significant. It shows three papers, due Friday.</span></li>
+        <li data-marble-id="vtpywda2" data-marble-removable><b data-marble-id="2d32thc5" data-marble-editable>Rhetoric where a fact should be.</b> <span data-marble-id="k3mpuknt" data-marble-editable>Three adjectives in a row ("fast, simple and powerful"), "It's not just a to-do list, it's a second brain", "Your notes, reimagined". Each is a shape of sentence, not a thing said. Say the one thing it does.</span></li>
+        <li data-marble-id="3qfjltyb" data-marble-removable><b data-marble-id="uouhnaw6" data-marble-editable>A voice that performs.</b> <span data-marble-id="1wtvkjwz" data-marble-editable>Cheer ("You're all set!"), apology ("Oops! Something went wrong"), and throat-clearing ("Please note that", "Simply", "Just", "It's important to"). The interface is calm and says what happened. An error names what failed and what to do next: "Couldn't save. The file is read-only."</span></li>
+        <li data-marble-id="lo3pk54z" data-marble-removable><b data-marble-id="r9m6q275" data-marble-editable>Title Case And Bold Everywhere.</b> <span data-marble-id="tpk4pmkl" data-marble-editable>Headings, buttons and menu items are sentence case. Bold marks the one thing to find in a line, not every noun in it.</span></li>
+        <li data-marble-id="vwpxpdpz" data-marble-removable><b data-marble-id="6zjdvpq2" data-marble-editable>Em dashes as the only joint.</b> <span data-marble-id="w6w387ei" data-marble-editable>An aside set off by dashes in every other sentence, and taglines hung on a colon. A dash now and then is a choice. One in every sentence is a habit, and a comma or a full stop is usually the honest join.</span></li>
+        <li data-marble-id="f2vxwhp9" data-marble-removable><b data-marble-id="tuqdu7ka" data-marble-editable>Filler left standing.</b> <span data-marble-id="0j5w5qtp" data-marble-editable>"Lorem ipsum", "Item 1", "Description goes here", "[Your name]", a TODO in visible text. If there is no real text yet, the element waits empty, with a placeholder that says what goes there.</span></li>
+      </ul>
+      <p data-marble-id="dqqoc26h" class="catch">Catch it: the words part of the scan in <a data-marble-id="iprzkpni" href="#ship">Before you ship</a>. It reads only the visible text, so a hit is something a person will read.</p>
+      <p data-marble-id="m5czdrq3" class="add-row"><button data-marble-id="a8pjx5z0" type="button" class="btn-line" data-marble-add="#tpl-more" data-marble-into="#words-ul">Add one</button></p>
+      <p data-marble-id="9fl3ihmi">The tells come from Wikipedia's <a data-marble-id="zr0x56v3" href="https://en.wikipedia.org/wiki/Wikipedia:Signs_of_AI_writing">Signs of AI writing</a>, Kobak and others' <a data-marble-id="s72tgkh0" href="https://arxiv.org/abs/2406.07016">count of excess words</a> in 15 million abstracts, and the writing guides in <a data-marble-id="y2omtzqf" href="https://developer.apple.com/design/human-interface-guidelines/writing">Apple's HIG</a>, <a data-marble-id="xthut1n1" href="https://www.nngroup.com/articles/ui-copy/">NN/g</a>, <a data-marble-id="e2ogph6e" href="https://guidance.publishing.service.gov.uk/writing-to-gov-uk-standards/style-guides/a-to-z-style-guide/">GOV.UK</a> and <a data-marble-id="7rans6a1" href="https://styleguide.mailchimp.com/web-elements/">Mailchimp</a>. The agent skills that police prose, <a data-marble-id="100v4fhe" href="https://github.com/hardikpandya/stop-slop">stop-slop</a>, <a data-marble-id="jrm6jbun" href="https://github.com/blader/humanizer">humanizer</a> and <a data-marble-id="xd1poojv" href="https://github.com/thrash-d/slop-linter">slop-linter</a>, do what this section does: a list of tells, and a scan that hands every hit back to be fixed.</p>
+    </section>
+    <section class="sec" id="more" data-marble-id="s-more">
+      <p class="k" data-marble-id="more-k">04 · More we've caught</p>
+      <h2 data-marble-id="more-h" data-marble-editable>The same instinct, in other clothes</h2>
+      <p class="lede" data-marble-id="more-lede" data-marble-editable>Not in the article, but from the same place. Each one is a default that shows up because it was common, not because the page needed it.</p>
+      <ul class="plain" id="more-ul" data-marble-id="more-list">
+        <li data-marble-id="m-1" data-marble-editable data-marble-removable><b>Cards in cards.</b> A bordered box inside a bordered box inside a pane. One surface per level of the hierarchy, and a row inside a card is a row, not another card.</li>
+        <li data-marble-id="m-2" data-marble-editable data-marble-removable><b>The icon tile.</b> A glyph in a tinted rounded square before every heading or feature. It is a feature grid from a landing page. If the heading needs an icon, draw one bare, in ink.</li>
+        <li data-marble-id="m-3" data-marble-editable data-marble-removable><b>Stat tiles nobody asked for.</b> A row of huge numbers with tiny captions and a green up-arrow, opening a tool whose job is a list. Show the numbers someone will act on, in the line where they act.</li>
+        <li data-marble-id="m-4" data-marble-editable data-marble-removable><b>Lift on hover.</b> Cards that rise 2px and grow a heavier shadow under the pointer. A hover is a shade of paper, <code>--paper-3</code>, and nothing moves.</li>
+        <li data-marble-id="m-5" data-marble-editable data-marble-removable><b>Glow.</b> A coloured shadow on the primary button or the focused card. Shadows are warm on paper and black after dark, and they are never tinted with the accent.</li>
+        <li data-marble-id="m-6" data-marble-editable data-marble-removable><b>Everything centred.</b> A hero block, a centred title and a centred button, where the person expected their things. Tools align to a left edge. The only thing that centres is a single sentence in an empty view.</li>
+        <li data-marble-id="m-7" data-marble-editable data-marble-removable><b>Celebrations.</b> Toasts, confetti and "🎉 Saved!" for something that just happened where the person pressed. The control answers in place. The status pill says whether the file took it.</li>
+        <li data-marble-id="m-8" data-marble-editable data-marble-removable><b>Navy and neon for dark.</b> Dark is the same paper, unlit: neutral greys matched in luminance, and the accent is the light half of its pair.</li>
+        <li data-marble-id="m-9" data-marble-editable data-marble-removable><b>Radius on everything, all the same size.</b> The system has a scale: 3 for a document page, 8 for a control, 12 for a card, 16 for a pane, a pill for a pill. A 24px radius on a row is a bubble.</li>
+      </ul>
+      <p class="add-row" data-marble-id="more-add-row"><button type="button" class="btn-line" data-marble-add="#tpl-more" data-marble-into="#more-ul" data-marble-id="more-add">Add one</button></p>
+    </section>
+
+    <!-- =============================================================== ship -->
+    <section class="sec" id="ship" data-marble-id="s-ship">
+      <p class="k" data-marble-id="ship-k">05 · Before you ship</p>
+      <h2 data-marble-id="ship-h" data-marble-editable>Scan it, then look at it</h2>
+      <p class="lede" data-marble-id="ship-lede" data-marble-editable>An agent that built a page runs this against the file before it says it is done. Every hit is a question, not a verdict: a gradient can be a scrim, and a pulse can be an agent at work. The ones it can't answer, it fixes. Then it renders the page and looks, because half of this list only shows up on screen.</p>
+      <div class="copyblock" data-marble-id="scan">
+        <button type="button" class="btn-line" data-marble-id="copy-scan"><span class="idle">Copy</span><span class="done">Copied</span></button>
+        <pre data-marble-id="scan-pre">f="Your page.mrbl"
+# the fingernail: a thick single side, or the same thing as an inset shadow
+grep -nE 'border-(left|top|right|bottom)(-width)?:\s*[2-9]px|box-shadow:\s*inset\s+[2-9]px\s+0' "$f"
+# gradients and the purple family
+grep -nE 'linear-gradient|radial-gradient|conic-gradient|background-clip:\s*text' "$f"
+grep -niE '#(7c3aed|8b5cf6|a855f7|6366f1|9333ea)|\b(purple|violet|indigo)\b' "$f"
+# motion that never stops
+grep -nE 'animation:[^;]*infinite|@keyframes\s+\w*(pulse|ping|glow|shimmer)' "$f"
+# glass: count the layers
+grep -c 'backdrop-filter' "$f"
+# emoji in markup or strings
+grep -nP '[\x{1F300}-\x{1FAFF}\x{2600}-\x{27BF}]' "$f"
+# the template fonts, and anything linked in
+grep -nE '\bInter\b|JetBrains Mono|Space Grotesk|Poppins|fonts\.googleapis|@import url\(' "$f"
+# hype, and words from the chat
+grep -niE 'elevate|seamless|supercharge|unleash|effortless|empower|next-level|welcome back|built with|powered by' "$f"
+# words: the visible text only, with styles, scripts and comments stripped
+v=$(perl -0777 -pe 's/&lt;(script|style)\b.*?&lt;\/\1&gt;|&lt;!--.*?--&gt;//gs; s/&lt;[^&gt;]+&gt;/ /g' "$f")
+# the model's vocabulary, filler, and labels that fit any app
+printf '%s\n' "$v" | grep -niE '\b(delves?|tapestry|underscores?|showcas\w*|fostering|testament|boasts|robust|leverage|streamline|comprehensive|crucial|pivotal|vibrant|intuitive|reimagined)\b|serves as|^\s*additionally|fast-paced|whether you.re|your go-to|not just an?\b|click (here|below|the button)|get started|learn more|lorem ipsum|goes here|oops|you.re all set|please note|it.s important to|\bsimply\b'
+# made-up proof: round numbers with a plus, uptime, testimonials
+printf '%s\n' "$v" | grep -nE '[0-9][0-9,.]*[kKmM]?\+|99\.9|trusted by|loved by'
+# em dashes: a few is a choice, one a sentence is a habit
+printf '%s\n' "$v" | grep -o '—' | wc -l</pre>
+      </div>
+      <ol class="checks" data-marble-id="ship-checks">
+        <li data-marble-id="sc-1" data-marble-editable><b>No fingernails.</b> Every border is one weight, one colour, all the way round.</li>
+        <li data-marble-id="sc-2" data-marble-editable><b>One accent,</b> no gradient doing a colour's job, and no violet unless an agent is at work.</li>
+        <li data-marble-id="sc-3" data-marble-editable><b>Nothing moves at rest</b> unless work is happening right now.</li>
+        <li data-marble-id="sc-4" data-marble-editable><b>No emoji the person didn't type;</b> icons are drawn.</li>
+        <li data-marble-id="sc-5" data-marble-editable><b>Frost only on what floats,</b> one layer deep, opaque under reduced transparency.</li>
+        <li data-marble-id="sc-6" data-marble-editable><b>The system's type,</b> with no webfont and no "//".</li>
+        <li data-marble-id="sc-7" data-marble-editable><b>Every word is for the person using it:</b> no hype, no welcome, nothing about how it was built.</li>
+        <li data-marble-id="s1m472a0"><b data-marble-id="7kqkex57" data-marble-editable>Every line would be missed.</b> <span data-marble-id="m8olv793" data-marble-editable>Buttons are verbs with objects, nothing restates what is on screen, no number is invented, and no word is one only a model would choose.</span></li>
+        <li data-marble-id="sc-8" data-marble-editable><b>Rendered and looked at,</b> in both schemes and at phone and desk widths, with nothing almost lined up.</li>
+      </ol>
+      <p data-marble-id="ship-src">Tells 1 to 10 come from <a href="https://hereticpleb.vercel.app/blog/10-tells-of-slop" data-marble-id="ship-src-a">"10 tells of a slop UI"</a> by Heretic Pleb. The rest, and what to do instead, come from this drive's Design System.</p>
+    </section>
+
+  </div>
+</main>
+
+<template id="tpl-tell">
+  <li class="rule tell" data-marble-removable>
+    <p class="rt" data-marble-editable>The tell, in a few words.</p>
+    <span class="from">new</span>
+    <p class="rb" data-marble-editable>What it looks like, and why it reads as made by a model.</p>
+    <p class="instead" data-marble-editable><b>Instead:</b> what the system does.</p>
+  </li>
+</template>
+<template id="tpl-more">
+  <li data-marble-editable data-marble-removable><b>The thing.</b> Why it shows up, and what to do instead.</li>
+</template>
+<script>
+/* The page's own behaviour. One fact a person can change here, the scheme,
+   is written by the choose affordance in the next script; everything else
+   below is derived on the way to the screen and kept nowhere. */
+(() => {
+  const $ = (s, r = document) => r.querySelector(s);
+  const $$ = (s, r = document) => [...r.querySelectorAll(s)];
+
+  // ---- the scheme switch. Which segment is current is one attribute on the
+  // stage; the pressed look and the thumb are derived from it. With no host
+  // the choose affordance never runs, so this derives the pressed state too.
+  function syncSeg(seg) {
+    const name = seg.getAttribute('data-marble-choose');
+    const sel = seg.getAttribute('data-marble-of');
+    const node = sel ? seg.closest(sel) : seg;
+    if (!name || !node) return;
+    const current = node.getAttribute(name);
+    for (const b of $$('[data-marble-value]', seg)) {
+      b.setAttribute('aria-pressed', String(b.getAttribute('data-marble-value') === current));
+    }
+  }
+  function paintThumb(seg) {
+    let thumb = $(':scope > .seg-thumb', seg);
+    if (!thumb) {
+      thumb = document.createElement('i');
+      thumb.className = 'seg-thumb';
+      thumb.setAttribute('data-marble-transient', '');
+      seg.prepend(thumb);
+    }
+    const on = $(':scope > button[aria-pressed="true"]', seg);
+    if (!on) { thumb.style.width = '0px'; return; }
+    thumb.style.width = `${on.offsetWidth}px`;
+    thumb.style.transform = `translateX(${on.offsetLeft - 1}px)`;
+  }
+  function wireSegs(root = document) {
+    for (const seg of $$('.seg[data-marble-choose]', root)) {
+      if (seg.marbleSegWired) continue;
+      seg.marbleSegWired = true;
+      const name = seg.getAttribute('data-marble-choose');
+      const sel = seg.getAttribute('data-marble-of');
+      const node = sel ? seg.closest(sel) : seg;
+      syncSeg(seg); paintThumb(seg);
+      // Standalone, a click still moves the page; it just is not kept.
+      for (const b of $$('[data-marble-value]', seg)) {
+        b.addEventListener('click', () => {
+          if (window.marble) return;
+          node.setAttribute(name, b.getAttribute('data-marble-value'));
+        });
+      }
+      if (node) new MutationObserver(() => { syncSeg(seg); paintThumb(seg); })
+        .observe(node, { attributes: true, attributeFilter: [name] });
+      new MutationObserver(() => paintThumb(seg)).observe(seg, { attributes: true, subtree: true, attributeFilter: ['aria-pressed'] });
+    }
+  }
+  addEventListener('resize', () => { for (const seg of $$('.seg[data-marble-choose]')) paintThumb(seg); });
+  if (document.fonts?.ready) document.fonts.ready.then(() => { for (const seg of $$('.seg[data-marble-choose]')) paintThumb(seg); });
+  wireSegs();
+
+  // ---- the scan. Copy answers at the button, in words, and goes back.
+  const scan = $('[data-marble-id="copy-scan"]');
+  scan?.addEventListener('click', async () => {
+    try { await navigator.clipboard.writeText($('[data-marble-id="scan-pre"]').textContent); } catch { return; }
+    scan.classList.add('marble-copied');
+    setTimeout(() => scan.classList.remove('marble-copied'), 1400);
+  });
+
+  // ---- which section you are in: where you are, never written down.
+  const links = $$('.rail a[href^="#"]');
+  const byId = new Map(links.map((a) => [a.getAttribute('href').slice(1), a]));
+  const seen = new Map();
+  const io = new IntersectionObserver((entries) => {
+    for (const e of entries) seen.set(e.target.id, e.isIntersecting ? e.boundingClientRect.top : Infinity);
+    let best = null, top = Infinity;
+    for (const [id, y] of seen) if (y < top) { top = y; best = id; }
+    for (const [id, a] of byId) a.classList.toggle('marble-current', id === best);
+  }, { rootMargin: '-10% 0px -70% 0px', threshold: [0, .1] });
+  for (const id of byId.keys()) { const sec = document.getElementById(id); if (sec) io.observe(sec); }
+
+  // ---- links to neighbours. The href in the file is the neighbour file, which
+  // is right with no host; under one, the carrier says where a name lives.
+  for (const a of $$('a[data-doc]')) {
+    a.addEventListener('click', (e) => {
+      if (!window.marble?.href) return;
+      e.preventDefault();
+      location.href = window.marble.href(a.getAttribute('data-doc'));
+    });
+  }
+
+  function begin(marble) {
+    marble.register((root) => { wireSegs(root); for (const seg of $$('.seg[data-marble-choose]')) paintThumb(seg); });
+  }
+  if (window.marble) begin(window.marble);
+  else addEventListener('marble:ready', (event) => begin(event.detail), { once: true });
+})();
+</script>
+<script>
+// The default affordances — a template, not a dependency.
+//
+// This file is never served and never imported. It is copied into a `.mrbl`
+// document's own `<script>`, because a host that shipped it would be taking a
+// design position on every document it ever opened: "drag to reorder" is not
+// one behaviour, it is one behaviour with particular chrome, particular
+// styling, and a particular animation, and an app is entitled to disagree
+// about all three. What the host provides instead is `window.marble` — the
+// ability to address the file and change it. Everything below is written
+// against that surface and nothing else.
+//
+// Copy the parts an app uses. The markers are cut points: `shared`, `history`,
+// `reversal` and `tail` are always needed, `grip` is needed by `sortable`,
+// `removable` and `note`, and the rest are independent. Forking a part after
+// copying it is the intended use, not a hazard — that is the whole reason this
+// is not a library.
+//
+// `history` and `reversal` are on that always list for a reason. They were cut
+// points once, and half the documents that copied this file dropped them while
+// keeping every gesture that writes — including one shipping 252 deletable
+// elements with no way to undo any of them. A gesture is a commit here, so the
+// way back is not a feature of a document, it is a property of the format.
+//
+// With no host there is no `window.marble`, nothing below ever runs, and the
+// document is a page you can read and interact with but not change.
+
+// ==== part: shared ====
+(() => {
+  const begin = (marble) => {
+    const TRANSIENT = 'data-marble-transient';
+    const ID = 'data-marble-id';
+
+    const isTransient = (el) => el.hasAttribute(TRANSIENT);
+    const persistentChildren = (el) => [...el.children].filter((c) => !isTransient(c));
+
+    function nextPersistentSibling(el) {
+      let sibling = el.nextElementSibling;
+      while (sibling && isTransient(sibling)) sibling = sibling.nextElementSibling;
+      return sibling;
+    }
+
+    // An element can hold several roles at once — a beat is both editable and a
+    // sortable item — so wiring is tracked per role, not per element.
+    const roles = new WeakMap();
+    function claim(el, role) {
+      const held = roles.get(el) ?? new Set();
+      if (held.has(role)) return false;
+      held.add(role);
+      roles.set(el, held);
+      return true;
+    }
+
+    const within = (root, selector) => [
+      ...(root.matches?.(selector) ? [root] : []),
+      ...root.querySelectorAll(selector),
+    ];
+
+    // Each part contributes its own styling, its own wiring pass, and the
+    // selector for what it makes touchable — so removing a part removes all
+    // three and nothing dangles.
+    const css = [];
+    const wirers = [];
+    const addressable = [];
+    // False during the first register pass (the document as it loaded), true
+    // afterwards. A row that is wired later is a row that just arrived, and
+    // its chrome should say so rather than waiting for a hover.
+    let live = false;
+
+    // A subtree that isn't in the document yet can't be addressed by path, so
+    // it carries its ids with it — they are serialized into the insert op.
+    function assignIdsIn(root) {
+      for (const el of [root, ...root.querySelectorAll('*')]) {
+        if (isTransient(el) || marble.id(el)) continue;
+        if (el === root || el.matches(ADDRESSABLE)) el.setAttribute(ID, marble.newId());
+      }
+    }
+
+    // ==== part: grip ====
+
+    css.push(`
+      .marble-item { position: relative; }
+      .marble-item.marble-dragging {
+        z-index: 40;
+        filter: drop-shadow(0 10px 22px rgba(0, 0, 0, .16));
+      }
+      .marble-grip {
+        position: absolute; left: -1.55rem; top: .05rem;
+        display: flex; flex-direction: column; align-items: center; gap: 1px;
+        opacity: 0; transition: opacity .14s ease;
+      }
+      .marble-item:hover > .marble-grip,
+      .marble-item:focus-within > .marble-grip,
+      .marble-item.marble-item-new > .marble-grip,
+      .marble-grip:focus-within { opacity: 1; }
+      /* A pointer is not the only way in. Without this the grip is invisible on
+         a tablet, which means nothing in the document can be deleted or
+         reordered there at all. */
+      @media (hover: none) { .marble-grip { left: -2rem; opacity: .55; } }
+      @media (prefers-reduced-motion: reduce) { .marble-grip { transition: none; } }
+      .marble-btn {
+        width: 1.25rem; height: 1.25rem; padding: 0; border: 0; border-radius: 4px;
+        background: none; color: currentColor; opacity: .4;
+        font: 500 12px/1.25rem ui-monospace, SFMono-Regular, Menlo, monospace;
+        text-align: center; cursor: pointer;
+      }
+      .marble-btn:hover { opacity: 1; background: rgba(127, 127, 127, .14); }
+      .marble-btn:focus-visible {
+        opacity: 1; outline: 2px solid currentColor; outline-offset: 1px;
+      }
+      .marble-btn:active { transform: scale(.92); }
+      @media (hover: none) {
+        .marble-btn { width: 1.7rem; height: 1.7rem; font-size: 14px; line-height: 1.7rem; }
+      }
+      @media (prefers-reduced-motion: reduce) { .marble-btn:active { transform: none; } }
+    `);
+
+    function grip(item) {
+      let grip = item.querySelector(':scope > .marble-grip');
+      if (!grip) {
+        grip = document.createElement('div');
+        grip.className = 'marble-grip';
+        grip.setAttribute(TRANSIENT, '');
+        // The item may itself be editable, so the chrome has to be an atomic
+        // island the caret can't wander into.
+        grip.setAttribute('contenteditable', 'false');
+        item.prepend(grip);
+        item.classList.add('marble-item');
+      }
+      return grip;
+    }
+
+    // ==== part: editable ====
+
+    // These live in the page and never in the file, which the carrier has no
+    // way to know until it is told.
+    marble.pageOnly('contenteditable', 'spellcheck');
+    addressable.push('[data-marble-editable]');
+    wirers.push(wireEditable);
+
+    function wireEditable(root) {
+      for (const el of within(root, '[data-marble-editable]')) {
+        if (!claim(el, 'editable')) continue;
+
+        // plaintext-only keeps the browser from injecting <div> and <br> soup
+        // on Enter, so textContent stays the whole truth and setText is safe.
+        el.setAttribute('contenteditable', 'plaintext-only');
+        if (el.contentEditable !== 'plaintext-only') el.setAttribute('contenteditable', 'true');
+        el.spellcheck = false;
+
+        // One undo step per edit session: prior text is captured on focus, and
+        // keystrokes coalesce against that same entry until blur.
+        let prior = null;
+        el.addEventListener('focus', () => {
+          prior = marble.text(el);
+        });
+        el.addEventListener('input', (event) => {
+          // The browser's own undo inside the field arrives here as an input
+          // like any other, and it is not a new edit. Recording it put the state
+          // just undone back on the ring — and cleared the redo with it — so the
+          // next Mod+Z moved the document forward instead of back. File where
+          // the text ended up, and let the session start again from there.
+          if (event.inputType === 'historyUndo' || event.inputType === 'historyRedo') {
+            prior = text;
+            marble.op(op);
+            return;
+          }
+          const id = marble.id(el);
+          const text = marble.text(el);
+          const op = { type: 'setText', id, text };
+          if (prior !== null && text !== prior) {
+            marble.record(
+              { redo: [op], undo: [{ type: 'setText', id, text: prior }] },
+              { coalesce: true },
+            );
+          }
+          marble.op(op);
+        });
+        el.addEventListener('blur', () => {
+          prior = null;
+          marble.flush();
+        });
+
+        // Most editable nodes here are a heading or a single line, where Enter
+        // means "done" and a newline buried in the text is a mistake you can't
+        // see. Shift-Enter still breaks the line where a break is wanted.
+        el.addEventListener('keydown', (event) => {
+          if (event.key === 'Escape' || (event.key === 'Enter' && !event.shiftKey)) {
+            event.preventDefault();
+            el.blur();
+          }
+        });
+      }
+    }
+
+    // ==== part: removable ====
+
+    css.push(`.marble-remove:hover, .marble-remove:focus-visible { color: #b4544f; }`);
+    addressable.push('[data-marble-removable]');
+    wirers.push(wireRemovable);
+
+    function wireRemovable(root) {
+      for (const el of within(root, '[data-marble-removable]')) {
+        if (!claim(el, 'removable')) continue;
+
+        const button = document.createElement('button');
+        button.className = 'marble-btn marble-remove';
+        button.setAttribute(TRANSIENT, '');
+        button.setAttribute('aria-label', 'Delete');
+        button.title = 'Delete';
+        button.textContent = '×';
+        button.addEventListener('click', () => {
+          const id = marble.id(el);
+          // Both captured against the live node — after remove, they are gone.
+          const inverse = marble.invert({ type: 'remove', id });
+          const label = marble.text(el);
+          el.remove();
+          const op = { type: 'remove', id };
+          if (inverse) marble.record({ redo: [op], undo: [inverse] });
+          marble.op(op, { immediate: true });
+          // The corner pill says "saved", which is the wrong thing to hear
+          // when something has just gone. Say what left, and offer it back.
+          if (typeof offerUndo === 'function' && inverse) {
+            const what = label.trim();
+            offerUndo(what ? `Removed “${what.slice(0, 40)}”` : 'Removed');
+          }
+        });
+        grip(el).append(button);
+      }
+    }
+
+    // ==== part: sortable ====
+
+    // Reordering is pointer-driven, not HTML5 drag-and-drop. The native API
+    // gives you a detached ghost pinned at a fixed offset and reorders in hard
+    // jumps, so the row you grabbed is never the row under your finger and the
+    // list snaps between states. What a list actually wants is physical: the
+    // row stays where you grabbed it, and its neighbours slide out of the way.
+    //
+    // Three rules make that work. Track 1:1 from the grab point, so the row
+    // never leaps to centre itself. Animate the neighbours with FLIP — move the
+    // DOM first, then play them from where they were to where they now are.
+    // And start every animation from the element's *presentation* value, the
+    // position the eye last saw, not its layout box; that is what lets a drag
+    // be reversed halfway without a jump.
+
+    const DRAG_EASE = 'cubic-bezier(.2, .8, .2, 1)';
+    const SLIDE_MS = 220;   // a neighbour getting out of the way
+    const SETTLE_MS = 260;  // the row landing in its slot
+    const LIFT_PX = 4;      // a press is not yet a drag
+    const EDGE_PX = 72;     // autoscroll band at the top and bottom of the view
+
+    const reduced = matchMedia('(prefers-reduced-motion: reduce)');
+    const sliding = new WeakMap();  // element -> the slide currently playing on it
+
+    css.push(`
+      .marble-handle { cursor: grab; touch-action: none; }
+      .marble-handle:active { cursor: grabbing; }
+      .marble-dragging { position: relative; z-index: 40; will-change: transform;
+        pointer-events: none; }
+      [data-marble-sortable].marble-sorting { cursor: grabbing; }
+      body.marble-dragging-now, body.marble-dragging-now * { user-select: none !important; }
+      body.marble-dragging-now { cursor: grabbing; }
+    `);
+    addressable.push('[data-marble-sortable]', '[data-marble-sortable] > *');
+    wirers.push(wireSortable);
+
+    let drag = null;
+    let edgeRaf = 0;
+
+    // Items move freely between containers declaring the same group.
+    const group = (el) => el?.getAttribute('data-marble-sortable') ?? null;
+
+    const rectsOf = (els) => new Map([...els].map((el) => [el, el.getBoundingClientRect()]));
+
+    // Play each element from where it was to where it is now. The `first` rects
+    // are read live, so an element already mid-slide is measured where it looks
+    // rather than where it will end up — cancel only after that reading, or the
+    // new slide starts from a position the user never saw.
+    function flip(first) {
+      if (reduced.matches) return;
+      for (const [el, from] of first) {
+        sliding.get(el)?.cancel();
+        const to = el.getBoundingClientRect();
+        const dx = from.left - to.left, dy = from.top - to.top;
+        if (Math.abs(dx) < 0.5 && Math.abs(dy) < 0.5) continue;
+        const anim = el.animate(
+          [{ transform: `translate(${dx}px, ${dy}px)` }, { transform: 'translate(0, 0)' }],
+          { duration: SLIDE_MS, easing: DRAG_EASE },
+        );
+        sliding.set(el, anim);
+        anim.finished.then(() => { if (sliding.get(el) === anim) sliding.delete(el); }, () => {});
+      }
+    }
+
+    // Keep the row under the finger. Its layout slot moves as the list reorders
+    // around it, so the offset is recomputed from where it actually sits rather
+    // than accumulated — that is why reordering never nudges it.
+    function follow() {
+      const box = drag.item.getBoundingClientRect();
+      drag.tx = drag.px - drag.grabX - (box.left - drag.tx);
+      drag.ty = drag.py - drag.grabY - (box.top - drag.ty);
+      drag.item.style.transform = `translate(${drag.tx}px, ${drag.ty}px)`;
+    }
+
+    // The dragged row is pointer-events:none, so this sees the list underneath.
+    // Walk out of a nested sortable of a different group rather than giving up
+    // on the first mismatch — a card list lives inside a column list.
+    function containerUnder(x, y) {
+      let node = document.elementFromPoint(x, y);
+      while (node) {
+        const hit = node.closest?.('[data-marble-sortable]');
+        if (!hit) return null;
+        if (group(hit) === drag.group) return hit;
+        node = hit.parentElement;
+      }
+      return null;
+    }
+
+    function reorder() {
+      const container = containerUnder(drag.px, drag.py) || drag.item.parentElement;
+      if (group(container) !== drag.group) return;
+      const before = persistentChildren(container)
+        .filter((child) => child !== drag.item)
+        .find((child) => {
+          const r = child.getBoundingClientRect();
+          return drag.py < r.top + r.height / 2;
+        }) ?? null;
+      if (drag.item.parentElement === container && before === nextPersistentSibling(drag.item)) return;
+
+      const affected = new Set([
+        ...persistentChildren(drag.item.parentElement),
+        ...persistentChildren(container),
+      ]);
+      affected.delete(drag.item);
+      const first = rectsOf(affected);
+      container.insertBefore(drag.item, before);
+      flip(first);
+      follow();
+    }
+
+    // Dragging to the edge of the window scrolls it, so a long list can be
+    // crossed without letting go.
+    function edgeScroll() {
+      edgeRaf = 0;
+      if (!drag?.lifted) return;
+      const over = drag.py - EDGE_PX;
+      const under = innerHeight - drag.py - EDGE_PX;
+      const dy = over < 0 ? Math.max(-22, (over / EDGE_PX) * 22)
+        : under < 0 ? Math.min(22, (-under / EDGE_PX) * 22) : 0;
+      if (dy) { scrollBy(0, dy); follow(); reorder(); }
+      edgeRaf = requestAnimationFrame(edgeScroll);
+    }
+
+    function settle(d) {
+      const land = () => {
+        d.item.style.transform = '';
+        d.item.classList.remove('marble-dragging');
+        sliding.delete(d.item);
+        commitMove(d);
+      };
+      if (reduced.matches || (!d.tx && !d.ty)) return land();
+      // A throw earns a little overshoot; a placement does not.
+      const thrown = Math.abs(d.vy) > 900;
+      const anim = d.item.animate(
+        [{ transform: `translate(${d.tx}px, ${d.ty}px)` }, { transform: 'translate(0, 0)' }],
+        { duration: thrown ? 320 : SETTLE_MS, easing: thrown ? 'cubic-bezier(.2, .9, .25, 1.06)' : DRAG_EASE },
+      );
+      sliding.set(d.item, anim);
+      anim.finished.then(land, land);
+    }
+
+    function wireSortableItem(item) {
+      if (!claim(item, 'sortable-item')) return;
+
+      const handle = document.createElement('button');
+      handle.className = 'marble-btn marble-handle';
+      handle.setAttribute(TRANSIENT, '');
+      handle.setAttribute('aria-label', 'Reorder — drag, or focus and press the arrow keys');
+      handle.title = 'Drag to reorder';
+      handle.textContent = '⠿';
+
+      const onMove = (event) => {
+        if (!drag || event.pointerId !== drag.pointerId) return;
+        event.preventDefault();
+        drag.px = event.clientX; drag.py = event.clientY;
+
+        if (!drag.lifted) {
+          if (Math.hypot(drag.px - drag.startX, drag.py - drag.startY) < LIFT_PX) return;
+          drag.lifted = true;
+          item.classList.add('marble-dragging');
+          drag.originParent.classList.add('marble-sorting');
+          document.body.classList.add('marble-dragging-now');
+          if (!edgeRaf) edgeRaf = requestAnimationFrame(edgeScroll);
+        }
+
+        const dt = event.timeStamp - drag.lastT;
+        if (dt > 0) drag.vy = ((event.clientY - drag.lastY) / dt) * 1000;
+        drag.lastT = event.timeStamp; drag.lastY = event.clientY;
+
+        follow();
+        reorder();
+      };
+
+      const release = (event) => {
+        if (!drag || (event && event.pointerId !== drag.pointerId)) return;
+        const d = drag;
+        drag = null;
+        if (edgeRaf) { cancelAnimationFrame(edgeRaf); edgeRaf = 0; }
+        removeEventListener('pointermove', onMove);
+        removeEventListener('pointerup', release);
+        removeEventListener('pointercancel', release);
+        d.originParent.classList.remove('marble-sorting');
+        document.body.classList.remove('marble-dragging-now');
+        if (d.lifted) settle(d);      // otherwise it was a click on the handle
+      };
+
+      handle.addEventListener('pointerdown', (event) => {
+        if (event.button !== 0 || drag) return;
+        // Grabbing a row that is still settling takes it from where it is now.
+        sliding.get(item)?.cancel();
+        item.style.transform = '';
+        const box = item.getBoundingClientRect();
+        drag = {
+          item, handle, pointerId: event.pointerId,
+          group: group(item.parentElement),
+          originParent: item.parentElement,
+          originBefore: nextPersistentSibling(item),
+          grabX: event.clientX - box.left, grabY: event.clientY - box.top,
+          startX: event.clientX, startY: event.clientY,
+          px: event.clientX, py: event.clientY,
+          tx: 0, ty: 0, vy: 0, lifted: false,
+          lastT: event.timeStamp, lastY: event.clientY,
+        };
+        addEventListener('pointermove', onMove, { passive: false });
+        addEventListener('pointerup', release);
+        addEventListener('pointercancel', release);
+        event.preventDefault();
+      });
+
+      // The same move without a pointer. A handle you can tab to is the only
+      // way this is reorderable at all for anyone not using a mouse.
+      handle.addEventListener('keydown', (event) => {
+        const dir = event.key === 'ArrowUp' ? -1 : event.key === 'ArrowDown' ? 1 : 0;
+        if (!dir) return;
+        const parent = item.parentElement;
+        const kids = persistentChildren(parent);
+        const at = kids.indexOf(item);
+        const swap = kids[at + dir];
+        if (!swap) return;
+        event.preventDefault();
+        const d = { item, originParent: parent, originBefore: nextPersistentSibling(item) };
+        const first = rectsOf(kids);
+        parent.insertBefore(item, dir < 0 ? swap : nextPersistentSibling(swap));
+        flip(first);
+        commitMove(d);
+        handle.focus();
+      });
+
+      grip(item).prepend(handle);
+      if (live) {
+        item.classList.add('marble-item-new');
+        setTimeout(() => item.classList.remove('marble-item-new'), 1600);
+      }
+    }
+
+    function wireSortable(root) {
+      for (const container of within(root, '[data-marble-sortable]')) {
+        for (const item of persistentChildren(container)) wireSortableItem(item);
+        claim(container, 'sortable');
+      }
+      // Newly inserted items are adopted as themselves. The sortable attribute
+      // lives on the parent list, so the walk above never sees them — which is
+      // why a new row could be deleted (that attribute is on the row) but not
+      // reordered until the next full-document wire on refresh.
+      if (root.nodeType === Node.ELEMENT_NODE) {
+        const container = root.parentElement?.closest('[data-marble-sortable]');
+        if (container && persistentChildren(container).includes(root)) wireSortableItem(root);
+      }
+    }
+
+    // Moving the element *is* the code change, not a trigger for one — so this
+    // only reports where it came to rest.
+    function commitMove(d) {
+      const parent = d.item.parentElement;
+      const before = nextPersistentSibling(d.item);
+      if (parent === d.originParent && before === d.originBefore) return;
+
+      const op = {
+        type: 'move',
+        id: marble.id(d.item),
+        parentId: marble.id(parent),
+        beforeId: marble.id(before),
+      };
+      const inverse = {
+        type: 'move',
+        id: marble.id(d.item),
+        parentId: marble.id(d.originParent),
+        beforeId: marble.id(d.originBefore),
+      };
+      marble.record({ redo: [op], undo: [inverse] });
+      marble.op(op, { immediate: true });
+    }
+
+
+    // ==== part: canvas ====
+
+    // A sortable answers "in what order", which is all a list needs. A canvas
+    // answers "where", which a list has no way to say. The position is an
+    // inline style on the item itself, so it is one attribute in the file
+    // rather than a coordinate table kept beside the document.
+    //
+    //   <div data-marble-canvas>
+    //     <svg data-marble-id="a" style="left:24px;top:12px">…</svg>
+    //
+    // The attribute's value says whether the canvas is currently accepting
+    // drags. A canvas showing a settled arrangement should not be nudged by a
+    // stray click, and withdrawing the affordance is itself an ordinary
+    // setAttr.
+
+    css.push(`
+      [data-marble-canvas]:not([data-marble-canvas="off"]) > * { cursor: grab; }
+      [data-marble-canvas] > .marble-moving { cursor: grabbing; user-select: none; }
+    `);
+    addressable.push('[data-marble-canvas]', '[data-marble-canvas] > *');
+    wirers.push(wireCanvas);
+
+    const SNAP = 4;
+    const snap = (n) => Math.round(n / SNAP) * SNAP;
+
+    // Reading the attribute back off the element would hand the file the
+    // browser's own serialization — respaced, reordered, semicolon appended —
+    // which is the same renormalization the patcher exists to avoid. The value
+    // is composed here instead, so the bytes in the page and the bytes in the
+    // file are the same bytes. Anything else on the element is carried through:
+    // a canvas owns where a piece is and nothing else about it.
+    function withPosition(style, x, y) {
+      const rest = (style ?? '')
+        .split(';')
+        .map((declaration) => declaration.trim())
+        .filter((declaration) => declaration && !/^(left|top)\s*:/i.test(declaration));
+      return [`left:${x}px`, `top:${y}px`, ...rest].join(';');
+    }
+
+    function wireCanvas(root) {
+      for (const canvas of within(root, '[data-marble-canvas]')) {
+        if (!claim(canvas, 'canvas')) continue;
+
+        // Delegated, so a piece arriving later needs no wiring of its own.
+        canvas.addEventListener('pointerdown', (event) => {
+          if (canvas.getAttribute('data-marble-canvas') === 'off') return;
+          if (event.button !== 0) return;
+
+          const item = [...persistentChildren(canvas)].find((child) =>
+            child.contains(event.target),
+          );
+          if (!item || !marble.id(item)) return;
+
+          event.preventDefault();
+          item.classList.add('marble-moving');
+          canvas.setPointerCapture(event.pointerId);
+
+          // Measured rather than read off the style, because a piece may be an
+          // <svg>, which has no offsetLeft, and may not carry a position yet.
+          const held = item.getBoundingClientRect();
+          const grabX = event.clientX - held.left;
+          const grabY = event.clientY - held.top;
+          const priorStyle = item.getAttribute('style');
+
+          // The page moves during the drag and the file hears about it once,
+          // on release: an op per pointermove would be a hundred splices for
+          // one gesture, and every one of them a lie about where the piece
+          // ended up. Stays null until the pointer actually travels, so a click
+          // that only meant to select something doesn't file an op saying it
+          // moved.
+          let at = null;
+          const move = (event) => {
+            const box = canvas.getBoundingClientRect();
+            const x = event.clientX - box.left - grabX;
+            const y = event.clientY - box.top - grabY;
+            // Shift is the escape hatch from the grid, for the piece that has
+            // to sit half a step over.
+            at = event.shiftKey
+              ? { x: Math.round(x), y: Math.round(y) }
+              : { x: snap(x), y: snap(y) };
+            item.style.left = `${at.x}px`;
+            item.style.top = `${at.y}px`;
+          };
+
+          const drop = () => {
+            canvas.removeEventListener('pointermove', move);
+            item.classList.remove('marble-moving');
+            if (!at) return;
+            const value = withPosition(item.getAttribute('style'), at.x, at.y);
+            item.setAttribute('style', value);
+            const op = { type: 'setAttr', id: marble.id(item), name: 'style', value };
+            marble.record({
+              redo: [op],
+              undo: [{ type: 'setAttr', id: marble.id(item), name: 'style', value: priorStyle }],
+            });
+            marble.op(op, { immediate: true });
+          };
+
+          canvas.addEventListener('pointermove', move);
+          canvas.addEventListener('pointerup', drop, { once: true });
+          canvas.addEventListener('pointercancel', drop, { once: true });
+        });
+      }
+    }
+
+    // ==== part: add ====
+
+    // <button data-marble-add="#tpl-section" data-marble-into="#outline">
+    wirers.push(wireAdders);
+
+    function wireAdders(root) {
+      for (const button of within(root, '[data-marble-add]')) {
+        if (!claim(button, 'adder')) continue;
+
+        button.addEventListener('click', () => {
+          const template = document.querySelector(button.dataset.marbleAdd);
+          const into = button.dataset.marbleInto;
+          // "prev" targets the list right before the button, so per-item adders
+          // don't each need a unique selector.
+          const container =
+            into === 'prev' ? button.previousElementSibling : document.querySelector(into);
+          const seed = template?.content?.firstElementChild;
+          if (!seed || !container) {
+            console.error('[marble] add: missing template or container', button.dataset);
+            return;
+          }
+
+          const node = seed.cloneNode(true);
+          assignIdsIn(node);
+          // Serialized before wiring, so no transient chrome lands in the file.
+          const html = marble.source.outer(node);
+
+          container.append(node);
+          marble.adopt(node);
+          const op = { type: 'insert', html, parentId: marble.id(container), beforeId: null };
+          const inverse = marble.invert(op);
+          if (inverse) marble.record({ redo: [op], undo: [inverse] });
+          marble.op(op, { immediate: true });
+
+          node.querySelector('[data-marble-editable]')?.focus();
+        });
+      }
+    }
+
+    // ==== part: alternatives ====
+
+    // HTML represents exactly one state: a heading is whatever it says, and the
+    // three phrasings you were choosing between live in your head or in a
+    // comment. <marble-alt> holds them as siblings and shows one. Which one is
+    // showing is an attribute in the file, so switching is an ordinary setAttr.
+    //
+    //   <marble-alt data-marble-id="title" data-marble-active="v2">
+    //     <h1 data-marble-alt="v1" data-marble-editable>…</h1>
+    //     <h1 data-marble-alt="v2" data-marble-editable>…</h1>
+    //   </marble-alt>
+    //
+    // Which one *displays* is the app's own stylesheet, not this file's
+    // business — a document has to show the right version with no host at all.
+
+    css.push(`
+      .marble-alts {
+        display: inline-flex; align-items: center; gap: 3px; margin-top: .5rem;
+        font: 500 10px ui-monospace, SFMono-Regular, Menlo, monospace;
+        user-select: none; opacity: .35; transition: opacity .14s ease;
+      }
+      marble-alt:hover .marble-alts, .marble-alts:focus-within { opacity: 1; }
+      .marble-alts-track {
+        position: relative; display: flex; padding: 2px; border-radius: 999px;
+        background: rgba(127, 127, 127, .13);
+      }
+      .marble-alts-thumb {
+        position: absolute; top: 2px; bottom: 2px; left: 0; width: 0;
+        border-radius: 999px; background: rgba(255, 255, 255, .95);
+        box-shadow: 0 1px 2px rgba(0, 0, 0, .16);
+        transition: transform .18s cubic-bezier(.32, .72, 0, 1), width .18s cubic-bezier(.32, .72, 0, 1);
+      }
+      .marble-alts-v {
+        position: relative; padding: 2px 8px; border: 0; border-radius: 999px;
+        background: none; color: currentColor; opacity: .5; cursor: pointer;
+        font: inherit; letter-spacing: .04em;
+      }
+      .marble-alts-v[aria-pressed="true"] { opacity: 1; }
+      .marble-alts-v:focus-visible { outline: 1px solid #5b8def; outline-offset: 1px; }
+      .marble-alts button.marble-alts-edge {
+        width: 16px; height: 16px; padding: 0; border: 0; border-radius: 999px;
+        background: none; color: currentColor; opacity: .4; cursor: pointer;
+        font: inherit; line-height: 16px;
+      }
+      .marble-alts button.marble-alts-edge:hover { opacity: 1; background: rgba(127, 127, 127, .16); }
+      .marble-alts .marble-alts-drop:hover { color: #b4544f; }
+      marble-alt > [data-marble-alt] { display: none; }
+      marble-alt > .marble-alt-shown { display: block; }
+    `);
+    addressable.push('marble-alt', 'marble-alt > *');
+    wirers.push(wireAlternatives);
+
+    const ALT = 'data-marble-alt';
+    const ACTIVE = 'data-marble-active';
+
+    const nameOf = (el) => el?.getAttribute(ALT) ?? null;
+
+    function activeVersion(alt) {
+      const versions = persistentChildren(alt);
+      // An unrecognized name means the file was hand-edited into disagreement.
+      // Falling back to the first version keeps something on screen either way.
+      return versions.find((el) => nameOf(el) === alt.getAttribute(ACTIVE)) ?? versions[0] ?? null;
+    }
+
+    function nextName(versions) {
+      const numbered = versions
+        .map((el) => Number(/^v(\d+)$/.exec(nameOf(el) ?? '')?.[1]))
+        .filter(Number.isFinite);
+      return `v${Math.max(versions.length, ...numbered) + 1}`;
+    }
+
+    function wireAlternatives(root) {
+      for (const alt of within(root, 'marble-alt')) {
+        if (!claim(alt, 'alt')) continue;
+
+        const widget = document.createElement('div');
+        widget.className = 'marble-alts';
+        widget.setAttribute(TRANSIENT, '');
+        // The versions may themselves be editable, so the chrome has to be an
+        // island the caret can't wander into.
+        widget.setAttribute('contenteditable', 'false');
+        widget.innerHTML = `
+          <span class="marble-alts-track" role="group" aria-label="Versions">
+            <span class="marble-alts-thumb"></span>
+          </span>
+          <button class="marble-alts-edge marble-alts-add" title="Add a version">+</button>
+          <button class="marble-alts-edge marble-alts-drop" title="Delete this version">×</button>
+        `;
+        const track = widget.querySelector('.marble-alts-track');
+        const thumb = widget.querySelector('.marble-alts-thumb');
+        const drop = widget.querySelector('.marble-alts-drop');
+
+        // No control decides what is on screen: each one writes the attribute
+        // and the stylesheet reads it. That is why a switch arriving from a
+        // text editor or a model lands exactly the way a click does.
+        function setActive(name) {
+          if (!name || alt.getAttribute(ACTIVE) === name) return null;
+          const id = marble.id(alt);
+          const undo = { type: 'setAttr', id, name: ACTIVE, value: alt.getAttribute(ACTIVE) };
+          const redo = { type: 'setAttr', id, name: ACTIVE, value: name };
+          alt.setAttribute(ACTIVE, name);
+          marble.op(redo, { immediate: true });
+          return { redo, undo };
+        }
+
+        function show(name) {
+          const step = setActive(name);
+          if (step) marble.record({ redo: [step.redo], undo: [step.undo] });
+          render();
+        }
+
+        function render() {
+          const versions = persistentChildren(alt);
+
+          // A hand-written alternative needn't be named; naming it is a splice,
+          // exactly like the ids assigned on first sight.
+          versions.forEach((version, index) => {
+            if (nameOf(version)) return;
+            const name = `v${index + 1}`;
+            version.setAttribute(ALT, name);
+            if (marble.id(version)) {
+              marble.op({ type: 'setAttr', id: marble.id(version), name: ALT, value: name });
+            }
+          });
+
+          const current = activeVersion(alt);
+
+          for (const version of versions) {
+            version.classList.toggle('marble-alt-shown', version === current);
+          }
+
+          // Rebuilt only when the set of versions changes, so an ordinary
+          // switch moves the thumb rather than replacing the control under the
+          // cursor.
+          const names = versions.map(nameOf);
+          if (track.dataset.names !== names.join('\u0000')) {
+            track.dataset.names = names.join('\u0000');
+            for (const stale of track.querySelectorAll('button')) stale.remove();
+            for (const name of names) {
+              const button = document.createElement('button');
+              button.className = 'marble-alts-v';
+              button.dataset.name = name;
+              button.textContent = name;
+              button.addEventListener('click', () => show(name));
+              track.append(button);
+            }
+          }
+
+          for (const button of track.querySelectorAll('button')) {
+            const on = button.dataset.name === nameOf(current);
+            button.setAttribute('aria-pressed', String(on));
+            if (!on) continue;
+            thumb.style.width = `${button.offsetWidth}px`;
+            thumb.style.transform = `translateX(${button.offsetLeft}px)`;
+          }
+          drop.hidden = versions.length < 2;
+        }
+
+        widget.querySelector('.marble-alts-add').addEventListener('click', () => {
+          const current = activeVersion(alt);
+          if (!current) return;
+
+          // The new version starts as a copy of the one on screen, because a
+          // candidate phrasing is nearly always an edit of the current one.
+          const version = marble.clone(current);
+          for (const el of [version, ...version.querySelectorAll(`[${ID}]`)]) {
+            el.removeAttribute(ID);
+          }
+          const name = nextName(persistentChildren(alt));
+          version.setAttribute(ALT, name);
+          assignIdsIn(version);
+
+          const html = marble.source.outer(version);
+          alt.insertBefore(version, widget);
+          marble.adopt(version);
+          const insert = { type: 'insert', html, parentId: marble.id(alt), beforeId: null };
+          marble.op(insert, { immediate: true });
+          const active = setActive(name);
+          const undo = [marble.invert(insert), active?.undo].filter(Boolean);
+          const redo = [insert, active?.redo].filter(Boolean);
+          if (undo.length && redo.length) marble.record({ redo, undo });
+          render();
+
+          version.focus();
+          getSelection()?.selectAllChildren(version);
+        });
+
+        drop.addEventListener('click', () => {
+          const versions = persistentChildren(alt);
+          if (versions.length < 2) return;
+          const at = versions.indexOf(activeVersion(alt));
+          const doomed = versions[at];
+          const next = nameOf(versions[at + 1] ?? versions[at - 1]);
+          const remove = { type: 'remove', id: marble.id(doomed) };
+          const removeUndo = marble.invert(remove);
+          const active = setActive(next);
+          doomed.remove();
+          marble.op(remove, { immediate: true });
+          const undo = [removeUndo, active?.undo].filter(Boolean);
+          const redo = [active?.redo, remove].filter(Boolean);
+          if (undo.length && redo.length) marble.record({ redo, undo });
+          render();
+        });
+
+        track.addEventListener('keydown', (event) => {
+          const step = { ArrowLeft: -1, ArrowRight: 1 }[event.key];
+          if (!step) return;
+          event.preventDefault();
+          const versions = persistentChildren(alt);
+          const at = versions.indexOf(activeVersion(alt));
+          const name = nameOf(versions[(at + step + versions.length) % versions.length]);
+          show(name);
+          track.querySelector(`[data-name="${CSS.escape(name)}"]`)?.focus();
+        });
+
+        alt.append(widget);
+        render();
+        // The thumb is measured, so it needs one frame in which the text has
+        // been laid out — and the widget may have been wired before its font
+        // arrived.
+        requestAnimationFrame(render);
+
+        new MutationObserver(render).observe(alt, {
+          attributes: true,
+          attributeFilter: [ACTIVE],
+          childList: true,
+        });
+      }
+    }
+
+    // ==== part: state ====
+
+    // Five interactions that every real document turned out to need and, before
+    // they were named, hand-rolled — a checkable row, a view switcher, a
+    // disclosure, a counter, a note. Hand-rolled they were written well only if
+    // whoever wrote it remembered to, which is why the corpus has 177 hover
+    // rules and 8 focus-visible ones. Named, they are written well once.
+    //
+    // All five share one shape. The fact lives in **one attribute on one target**
+    // and everything else is derived from it: the appearance by the document's
+    // CSS, the announced state by the wiring below, and both re-derived from a
+    // MutationObserver so an undo, a hand edit, or another tab writing the file
+    // can never leave the two disagreeing.
+    //
+    //   data-marble-of="<selector>"  the target, via closest(). Default: itself.
+
+    marble.pageOnly('aria-pressed', 'aria-expanded', 'aria-current', 'aria-disabled', 'tabindex', 'role');
+
+    // The target has to be in the file before an op can name it.
+    function resolve(el) {
+      const selector = el.getAttribute('data-marble-of');
+      const node = selector ? el.closest(selector) : el;
+      if (!node) return null;
+      if (!marble.id(node)) marble.address([node]);
+      return marble.id(node) ? node : null;
+    }
+
+    // One attribute, one op, and its inverse — the whole of what these five do.
+    function setAttr(node, name, value) {
+      const id = marble.id(node);
+      if (!id) return;
+      const prior = node.getAttribute(name);
+      node.setAttribute(name, value);
+      const op = { type: 'setAttr', id, name, value };
+      marble.record({ redo: [op], undo: [{ type: 'setAttr', id, name, value: prior }] });
+      marble.op(op, { immediate: true });
+    }
+
+    const observe = (node, name, sync) =>
+      new MutationObserver(sync).observe(node, { attributes: true, attributeFilter: [name] });
+
+    // A <button> is focusable, announces itself, and fires on Enter and Space
+    // for free. Anything else needs all four of tabindex, role, the keys, and
+    // the ARIA state, or it is furniture with a cursor.
+    function control(el, role) {
+      if (!(el instanceof HTMLButtonElement)) {
+        if (!el.hasAttribute('tabindex')) el.setAttribute('tabindex', '0');
+        if (!el.hasAttribute('role')) el.setAttribute('role', role);
+        el.addEventListener('keydown', (event) => {
+          if (event.key !== 'Enter' && event.key !== ' ') return;
+          event.preventDefault();
+          el.click();
+        });
+      }
+      // The sentence that tells the intent layer what this is for is also the
+      // only description a screen reader has, when the control is a bare glyph.
+      const instruction = el.getAttribute('data-marble-instruction');
+      if (instruction && !el.hasAttribute('aria-label') && !marble.text(el).trim()) {
+        el.setAttribute('aria-label', instruction);
+      }
+    }
+
+    // ---- toggle: data-marble-toggle="data-done:yes|no"
+
+    addressable.push('[data-marble-toggle]');
+    wirers.push(wireToggle);
+
+    function wireToggle(root) {
+      for (const el of within(root, '[data-marble-toggle]')) {
+        if (!claim(el, 'toggle')) continue;
+        const spec = el.getAttribute('data-marble-toggle') || '';
+        const cut = spec.indexOf(':');
+        const name = spec.slice(0, cut).trim();
+        const [on, off] = spec.slice(cut + 1).split('|').map((v) => v.trim());
+        const node = resolve(el);
+        if (!name || !on || off === undefined || !node) continue;
+
+        control(el, 'button');
+        const sync = () => el.setAttribute('aria-pressed', String(node.getAttribute(name) === on));
+        sync();
+        observe(node, name, sync);
+        el.addEventListener('click', () => {
+          setAttr(node, name, node.getAttribute(name) === on ? off : on);
+          sync();
+        });
+      }
+    }
+
+    // ---- choose: one of a set is current
+    //
+    //   <span data-marble-choose="data-view" data-marble-of=".comp">
+    //     <button data-marble-value="list">Reading</button>
+    //     <button data-marble-value="cal">Front page</button>
+    //   </span>
+
+    addressable.push('[data-marble-choose]');
+    wirers.push(wireChoose);
+
+    function wireChoose(root) {
+      for (const box of within(root, '[data-marble-choose]')) {
+        if (!claim(box, 'choose')) continue;
+        const name = (box.getAttribute('data-marble-choose') || '').trim();
+        const node = resolve(box);
+        const options = [...box.querySelectorAll('[data-marble-value]')];
+        if (!name || !node || !options.length) continue;
+
+        if (!box.hasAttribute('role')) box.setAttribute('role', 'group');
+        const sync = () => {
+          const current = node.getAttribute(name);
+          for (const option of options) {
+            option.setAttribute('aria-pressed', String(option.getAttribute('data-marble-value') === current));
+          }
+        };
+        for (const option of options) {
+          control(option, 'button');
+          option.addEventListener('click', () => {
+            setAttr(node, name, option.getAttribute('data-marble-value'));
+            sync();
+          });
+        }
+        sync();
+        observe(node, name, sync);
+
+        // A segmented control is one stop on the tab ring and the arrows move
+        // within it — what every other segmented control on the platform does.
+        box.addEventListener('keydown', (event) => {
+          const step = event.key === 'ArrowRight' || event.key === 'ArrowDown' ? 1
+            : event.key === 'ArrowLeft' || event.key === 'ArrowUp' ? -1 : 0;
+          const at = options.indexOf(document.activeElement);
+          if (!step || at < 0) return;
+          event.preventDefault();
+          options[(at + step + options.length) % options.length].focus();
+        });
+      }
+    }
+
+    // ---- expand: a second reading, in place
+
+    addressable.push('[data-marble-expand]');
+    wirers.push(wireExpand);
+
+    function wireExpand(root) {
+      for (const el of within(root, '[data-marble-expand]')) {
+        if (!claim(el, 'expand')) continue;
+        const node = resolve(el);
+        if (!node) continue;
+        const NAME = 'data-expanded';
+
+        control(el, 'button');
+        const panel = el.getAttribute('data-marble-controls');
+        const panelId = panel && marble.id(document.querySelector(panel));
+        if (panelId) el.setAttribute('aria-controls', panelId);
+
+        const sync = () => el.setAttribute('aria-expanded', String(node.getAttribute(NAME) === 'yes'));
+        sync();
+        observe(node, NAME, sync);
+        el.addEventListener('click', () => {
+          setAttr(node, NAME, node.getAttribute(NAME) === 'yes' ? 'no' : 'yes');
+          sync();
+        });
+      }
+    }
+
+    // ---- step: data-marble-step="data-weeks:1:12" data-marble-by="-1"
+
+    addressable.push('[data-marble-step]');
+    wirers.push(wireStep);
+
+    function wireStep(root) {
+      for (const el of within(root, '[data-marble-step]')) {
+        if (!claim(el, 'step')) continue;
+        const [name, min, max] = (el.getAttribute('data-marble-step') || '').split(':').map((v) => v.trim());
+        const node = resolve(el);
+        const low = Number(min);
+        const high = Number(max);
+        const by = Number(el.getAttribute('data-marble-by') || 1);
+        if (!name || !node || !Number.isFinite(low) || !Number.isFinite(high)) continue;
+
+        control(el, 'button');
+        const at = () => {
+          const now = Number(node.getAttribute(name));
+          return Number.isFinite(now) ? now : low;
+        };
+        // A stepper at its bound stays where it is and says so, rather than
+        // going quiet and leaving you pressing a live-looking button.
+        const sync = () => {
+          const blocked = at() + by < low || at() + by > high;
+          el.setAttribute('aria-disabled', String(blocked));
+          el.classList.toggle('marble-at-end', blocked);
+        };
+        sync();
+        observe(node, name, sync);
+        el.addEventListener('click', () => {
+          const next = Math.min(high, Math.max(low, at() + by));
+          if (next === at()) return;
+          setAttr(node, name, String(next));
+          sync();
+        });
+      }
+    }
+
+    // ---- note: say something about a row without changing the row
+    //
+    // The annotation is ordinary content in the file, so it is addressable,
+    // editable, greppable and diffable — which is what turns a note from a
+    // comment into an instruction a later run can act on.
+
+    css.push(`
+      .marble-note:hover, .marble-note:focus-visible { color: #6f8fb0; }
+      [data-marble-note-body] { margin: .25rem 0 0; }
+      [data-marble-note-body]:empty::before {
+        content: attr(data-ph); opacity: .4; font-style: italic;
+      }
+    `);
+    addressable.push('[data-marble-note]');
+    wirers.push(wireNote);
+
+    function wireNote(root) {
+      for (const el of within(root, '[data-marble-note]')) {
+        if (!claim(el, 'note')) continue;
+
+        const button = document.createElement('button');
+        button.className = 'marble-btn marble-note';
+        button.setAttribute(TRANSIENT, '');
+        button.setAttribute('aria-label', 'Add a note');
+        button.title = 'Add a note';
+        button.textContent = '✎';
+        button.addEventListener('click', () => {
+          let body = el.querySelector(':scope > [data-marble-note-body]');
+          if (!body) {
+            const id = marble.newId();
+            const op = {
+              type: 'insert',
+              parentId: marble.id(el),
+              beforeId: null,
+              html: `<p data-marble-id="${id}" data-marble-note-body data-marble-editable data-ph="Note"></p>`,
+            };
+            // apply adopts what it inserts, so the note is editable on arrival.
+            marble.apply(op);
+            marble.op(op);
+            marble.record({ redo: [op], undo: [{ type: 'remove', id }] });
+            body = marble.byId(id);
+          }
+          body?.focus();
+        });
+        grip(el).append(button);
+      }
+    }
+
+    // ==== part: reversal ====
+
+    // The carrier records an inverse for every gesture above. Until something
+    // draws a way to reach it, that history is a correct, complete, unreachable
+    // thing — which is what half the documents in the corpus shipped.
+    //
+    // This is also what a confirm dialog is for, done better. A dialog asks
+    // before every delete and trains people to dismiss it; a reversal offered
+    // where the loss happened costs nothing until you need it.
+
+    css.push(`
+      .marble-reversal {
+        position: fixed; left: 1rem; bottom: 1rem; z-index: 9999;
+        display: flex; align-items: center; gap: .6rem;
+        padding: .45rem .5rem .45rem .8rem; border-radius: 8px;
+        font: 500 12px/1.3 system-ui, sans-serif;
+        background: rgba(20, 22, 26, .94); color: #dfe4ea;
+        border: 1px solid rgba(255,255,255,.12);
+        box-shadow: 0 6px 24px rgba(0,0,0,.3);
+        opacity: 0; transform: translateY(4px);
+        transition: opacity .18s ease, transform .18s ease;
+        pointer-events: none;
+      }
+      .marble-reversal[data-open] { opacity: 1; transform: none; pointer-events: auto; }
+      .marble-reversal button {
+        border: 0; border-radius: 5px; padding: .25rem .55rem; cursor: pointer;
+        font: 600 12px system-ui, sans-serif;
+        background: rgba(255,255,255,.14); color: #fff;
+      }
+      .marble-reversal button:hover { background: rgba(255,255,255,.24); }
+      .marble-reversal button:focus-visible { outline: 2px solid #8ab4f8; outline-offset: 2px; }
+      @media (prefers-reduced-motion: reduce) {
+        .marble-reversal { transition: opacity .18s ease; transform: none; }
+      }
+    `);
+
+    const reversal = document.createElement('div');
+    reversal.className = 'marble-reversal';
+    reversal.setAttribute(TRANSIENT, '');
+    // Announced when it appears, so the offer is not pointer-only.
+    reversal.setAttribute('role', 'status');
+    const reversalText = document.createElement('span');
+    const reversalButton = document.createElement('button');
+    reversalButton.textContent = 'Undo';
+    reversal.append(reversalText, reversalButton);
+    document.body.append(reversal);
+
+    let reversalTimer = null;
+    function offerUndo(label) {
+      reversalText.textContent = label;
+      reversal.setAttribute('data-open', '');
+      clearTimeout(reversalTimer);
+      reversalTimer = setTimeout(() => reversal.removeAttribute('data-open'), 7000);
+    }
+    reversalButton.addEventListener('click', () => {
+      reversal.removeAttribute('data-open');
+      if (marble.canUndo) marble.undo();
+      syncHistory();
+    });
+
+    // Whether there is a way back is a live fact about the document, so it is
+    // derived into a marble- class like any other — never mirrored into a
+    // variable a script has to remember to update.
+    function syncHistory() {
+      document.body.classList.toggle('marble-can-undo', !!marble.canUndo);
+      document.body.classList.toggle('marble-can-redo', !!marble.canRedo);
+    }
+    addEventListener('pointerup', syncHistory, true);
+    addEventListener('keyup', syncHistory, true);
+    wirers.push(syncHistory);
+
+    // ==== part: history ====
+
+    // Undo/redo is a carrier capability; binding the keys is the app's call,
+    // same as drawing a save indicator. Native inputs keep the browser's own
+    // undo — marble editables preventDefault so the stacks do not fight.
+    addEventListener('keydown', (event) => {
+      const mod = event.metaKey || event.ctrlKey;
+      if (!mod || event.altKey) return;
+      const key = event.key.toLowerCase();
+      const isUndo = key === 'z' && !event.shiftKey;
+      const isRedo = (key === 'z' && event.shiftKey) || key === 'y';
+      if (!isUndo && !isRedo) return;
+
+      const target = event.target;
+      if (
+        target instanceof HTMLInputElement ||
+        target instanceof HTMLTextAreaElement ||
+        (target instanceof HTMLElement &&
+          target.isContentEditable &&
+          !target.hasAttribute('data-marble-editable') &&
+          !target.closest('[data-marble-editable]'))
+      ) {
+        return;
+      }
+
+      // A staged proposal is not history yet — Mod+Z discards it instead.
+      if (isUndo && typeof marble.discardStaged === 'function' && marble.discardStaged()) {
+        event.preventDefault();
+        return;
+      }
+
+      // Anything still here with a caret in it is a marble editable — the guard
+      // above sent the native inputs home. Inside one, the carrier owns the
+      // history whether or not there is a step left in it: letting the key
+      // through at the bottom of the ring handed the document to the browser's
+      // own undo, which rewrites the field without the file hearing about it.
+      const editing = target instanceof HTMLElement && target.isContentEditable;
+
+      if (isUndo && marble.canUndo) {
+        event.preventDefault();
+        marble.undo();
+      } else if (isRedo && marble.canRedo) {
+        event.preventDefault();
+        marble.redo();
+      } else if (editing) {
+        event.preventDefault();
+      }
+    });
+
+    // ==== part: status ====
+
+    // The carrier reports whether a change reached the file; drawing that is
+    // the app's call, and an app that wants no save indicator deletes this.
+
+    css.push(`
+      .marble-status {
+        position: fixed; right: 1rem; bottom: 1rem; z-index: 9999;
+        padding: .3rem .6rem; border-radius: 999px;
+        font: 500 11px ui-monospace, SFMono-Regular, Menlo, monospace;
+        letter-spacing: .04em; pointer-events: none;
+        opacity: 0; transition: opacity .25s ease;
+        background: rgba(20, 22, 26, .92); color: #b7c0cc; border: 1px solid rgba(255,255,255,.12);
+      }
+      .marble-status[data-state="saving"] { opacity: 1; }
+      .marble-status[data-state="saved"]  { opacity: .55; }
+      .marble-status[data-state="error"]  { opacity: 1; background: #46201f; color: #ff9b9b; }
+    `);
+
+    const status = document.createElement('div');
+    status.className = 'marble-status';
+    status.setAttribute(TRANSIENT, '');
+    document.body.append(status);
+
+    let statusTimer = null;
+    document.addEventListener('marble:status', ({ detail }) => {
+      status.dataset.state = detail.state;
+      status.textContent =
+        detail.state === 'saving'
+          ? 'saving…'
+          : detail.state === 'saved'
+            ? 'saved'
+            : `error — ${detail.message}`;
+      clearTimeout(statusTimer);
+      if (detail.state === 'saved') {
+        statusTimer = setTimeout(() => (status.dataset.state = 'idle'), 1200);
+      }
+    });
+
+    // ==== part: tail ====
+
+    const style = document.createElement('style');
+    style.setAttribute(TRANSIENT, '');
+    style.textContent = css.join('\n');
+    document.head.append(style);
+
+    // Anything a hand can act on has to be addressable in the file first.
+    const ADDRESSABLE = addressable.join(', ');
+    marble.address(document.querySelectorAll(ADDRESSABLE));
+
+    // Runs now over the document as it stands, and again over anything that
+    // arrives later — an insert, an accepted proposal, an edit made to the file
+    // in another window.
+    marble.register((root) => {
+      for (const wirer of wirers) wirer(root);
+      live = true;
+    });
+  };
+
+  // The carrier is injected after the document has been parsed, so this waits
+  // rather than the other way round. No carrier, no affordances: the document
+  // is still a page you can read, it just isn't one you can change.
+  if (window.marble) begin(window.marble);
+  else addEventListener('marble:ready', (event) => begin(event.detail), { once: true });
+})();
+
+</script>
+</body>
+</html>

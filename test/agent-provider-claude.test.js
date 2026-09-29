@@ -289,6 +289,13 @@ test('each capability and project kind gets its own instructions', () => {
   assert.match(DRIVE_INSTRUCTIONS, /apply_ops/);
   assert.match(DRIVE_INSTRUCTIONS, /Grep/);
   assert.match(DRIVE_INSTRUCTIONS, /check_document/);
+  // Both drive texts send an agent to the design pages before it styles
+  // anything: a documents agent has no skills to find them by.
+  for (const text of [DOCS, DRIVE_INSTRUCTIONS]) {
+    assert.match(text, /"Design System"/);
+    assert.match(text, /"Design Don'ts"/);
+  }
+  assert.match(DRIVE_INSTRUCTIONS, /marble-drive:design-system/);
   // A skill the person asks for is theirs: it goes in their drive.
   assert.match(DRIVE_INSTRUCTIONS, /\.claude\/skills\/<name>/);
 

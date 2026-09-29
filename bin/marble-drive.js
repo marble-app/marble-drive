@@ -30,7 +30,7 @@ import { build as buildStarter, list as listStarters } from '../server/gallery.j
 import { check as checkRemote, serveOff, serveOn, serveStatus, tailnetUrl } from '../server/remote.js';
 import { splitPath, parsePath } from '../server/paths.js';
 import { updateApps } from '../server/app-updates.js';
-import { seedAgents, seedBoard, seedChat, seedConsole, seedDesignSystem, seedDrive } from '../server/seed.js';
+import { seedAgents, seedBoard, seedChat, seedConsole, seedDesignDonts, seedDesignSystem, seedDrive } from '../server/seed.js';
 import { createStore } from '../server/store/index.js';
 
 const [command = 'serve', ...rest] = process.argv.slice(2);
@@ -96,6 +96,7 @@ async function serve() {
   await seedChat(drive.store);
   await seedBoard(drive.store);
   await seedDesignSystem(drive.store);
+  await seedDesignDonts(drive.store);
   if (drive.console) await seedConsole(drive.store);
   // Not awaited: the host should answer requests while it reads the drive, and
   // a document served before its baseline lands sets its own on the way out.

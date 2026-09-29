@@ -5,7 +5,7 @@ import path from 'node:path';
 import test from 'node:test';
 
 import { createStore } from '../server/store/index.js';
-import { seedAgents, seedChat, seedDesignSystem, seedDrive } from '../server/seed.js';
+import { seedAgents, seedChat, seedDesignDonts, seedDesignSystem, seedDrive } from '../server/seed.js';
 
 const fresh = async () => {
   const root = await fsp.mkdtemp(path.join(os.tmpdir(), 'marble-agents-seed-'));
@@ -62,4 +62,27 @@ test('the Design System is seeded once, and a drive that already has one keeps i
   const kept = await seedDesignSystem(theirs);
   assert.equal(kept.seeded, false);
   assert.match(await theirs.read('Design System'), /<title>Mine<\/title>/);
+});
+
+test("the Design Don'ts are seeded once, beside the Design System, and a drive that already has them keeps them", async () => {
+  const { store } = await fresh();
+  const first = await seedDesignDonts(store);
+  assert.equal(first.seeded, true);
+  assert.equal(first.path, "Design Don'ts");
+  const source = await store.read("Design Don'ts");
+  assert.match(source, /<title>Design don'ts<\/title>/);
+  assert.doesNotMatch(source, /__(ID|TITLE|ICON|SCRIPT)__/);
+  // The one it is there to catch comes first, and the scan an agent runs is in it.
+  assert.match(source, /id="fingernail"/);
+  assert.match(source, /data-marble-id="scan-pre"/);
+  const markup = source.replace(/<script>[\s\S]*?<\/script>/g, '');
+  const ids = [...markup.matchAll(/data-marble-id="([^"]+)"/g)].map((m) => m[1]);
+  assert.equal(new Set(ids).size, ids.length);
+  assert.equal((await seedDesignDonts(store)).seeded, false);
+
+  const { store: theirs } = await fresh();
+  await theirs.write("Design Don'ts", '<!doctype html><title>Mine</title>', { label: 'edit' });
+  const kept = await seedDesignDonts(theirs);
+  assert.equal(kept.seeded, false);
+  assert.match(await theirs.read("Design Don'ts"), /<title>Mine<\/title>/);
 });

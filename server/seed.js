@@ -1,8 +1,8 @@
 // What a brand new drive has in it after the host seeds it.
 //
-// The Drive document, the Agents library, the Chat app, the Board and the
-// Design System — each written once, the first time the host sees the drive
-// without it.
+// The Drive document, the Agents library, the Chat app, the Board, the
+// Design System and its Don'ts — each written once, the first time the host
+// sees the drive without it.
 // Not because a drive should arrive full, but because the alternative is a host
 // that serves a folder with nothing in it and an address that 404s — and because
 // the Drive being an ordinary document in the drive is the claim this whole repo
@@ -117,6 +117,22 @@ export async function buildDesignSystem({ title = 'Design system' } = {}) {
 
 export async function seedDesignSystem(store, { name = 'Design System', title = 'Design system' } = {}) {
   return seedOnce(store, 'design-system', name, () => buildDesignSystem({ title }));
+}
+
+/** The design system's other half: what the drive's apps refuse — the tells
+ *  that make a page look generated, the fingernail border first, each painted
+ *  beside what the system does instead, and a scan to run before shipping.
+ *  The same skill sends an agent here after the Design System. */
+export async function buildDesignDonts({ title = "Design don'ts" } = {}) {
+  const template = await fsp.readFile(path.join(REPO, 'templates', 'design-donts.mrbl'), 'utf8');
+  return template
+    .replaceAll('__TITLE__', title)
+    .replace('__ICON__', () => iconLink('doc'))
+    .replace(/__ID__/g, () => newId());
+}
+
+export async function seedDesignDonts(store, { name = "Design Don'ts", title = "Design don'ts" } = {}) {
+  return seedOnce(store, 'design-donts', name, () => buildDesignDonts({ title }));
 }
 
 /** The Console: every drive, from one page. Only where the console is on

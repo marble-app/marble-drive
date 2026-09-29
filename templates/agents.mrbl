@@ -1504,6 +1504,15 @@ __ICON__
     border-radius: 10px; background: var(--card); border: 1px solid var(--line);
     padding: .65rem .75rem;
   }
+  /* A board card is rounded, so the folder's colour cannot be its left
+     border: a coloured side on a radius bends round both corners into a
+     fingernail. It is the straight inset rule the Folders and Library views
+     draw, and the card's edge stays one line all the way round, phone too. */
+  .board .column .conv, body[data-phone] .board .column .conv { border-left: 1px solid var(--line); }
+  .board .column .conv[data-color] {
+    background-image: linear-gradient(color-mix(in srgb, var(--folder) 55%, transparent), color-mix(in srgb, var(--folder) 55%, transparent));
+    background-repeat: no-repeat; background-size: 3px calc(100% - 20px); background-position: .3rem center;
+  }
   /* Too thin for three abreast — one column of three stages, scrolling as one. */
   .board[data-stack] { flex-direction: column; overflow-y: auto; overflow-x: hidden; gap: .75rem; }
   .board[data-stack] .column { flex: none; min-width: 0; overflow: visible; }

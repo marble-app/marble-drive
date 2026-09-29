@@ -83,6 +83,7 @@ test('the app ships design-system in its plugin, and its fallback tokens are the
   assert.match(skill.description, /^Use /);
   const body = await fsp.readFile(path.join(skill.dir, 'SKILL.md'), 'utf8');
   assert.match(body, /seeded\["design-system"\]/);
+  assert.match(body, /seeded\["design-donts"\]/);
 
   // Every token the template declares, with the same value, and nothing else.
   const tokens = (css) => new Map([...css.matchAll(/^\s*(--[\w-]+):\s*([^;]+);/gm)].map((m) => [m[1], m[2].trim()]));

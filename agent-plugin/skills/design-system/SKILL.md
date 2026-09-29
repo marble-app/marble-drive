@@ -1,12 +1,12 @@
 ---
 name: design-system
-description: Use before styling anything in a Marble drive — a new document or app, a card, pane, row, control or popover added to a page, a restyle, a dark mode, a phone layout, motion on a gesture. The drive's Design System page holds its tokens, type, shape, motion, parts and the rules behind them; this skill says how to read it and apply it so what you build looks like it belongs to the drive's own apps.
+description: Use before styling anything in a Marble drive — a new document or app, a card, pane, row, control or popover added to a page, a restyle, a dark mode, a phone layout, motion on a gesture. The drive's Design System page holds its tokens, type, shape, motion, parts and the rules behind them; its Design Don'ts page holds what they refuse, the fingernail border first; this skill says how to read both and apply them so what you build looks like it belongs to the drive's own apps.
 ---
 
 # The drive's design system
 
-Every drive is seeded with a **Design System** page next to Agents, Chat and
-Board. It is not a picture of the styles. The Agents page and the Drive are
+Every drive is seeded with a **Design System** page, and its **Design
+Don'ts**, next to Agents, Chat and Board. It is not a picture of the styles. The Agents page and the Drive are
 drawn with those tokens, and the page is drawn with them too. It is the source
 of truth. This skill is a map of it. Where they disagree, the page wins,
 because its owner may have changed it and this skill cannot know.
@@ -32,6 +32,39 @@ space), `s-mot` (motion), `s-int` (interaction), `s-cmp` (components), `s-lay`
 (layout and touch), `s-voc` (voice), `s-bld` (building it in Marble), `s-rej`
 (what was rejected) and `s-sta` (starting an app). Read the section for what you
 are about to build. For a new app, always read `s-sta` and `s-rej`.
+
+## Then read its Don'ts
+
+Next to it is a second page, **Design Don'ts**. It is the system's other half:
+what the apps refuse, and mostly the tells that make a page look generated
+rather than made. Each tell is painted for real next to what the system does
+instead. `.marble/apps.json` records where it is under
+`seeded["design-donts"]`. It defaults to `Design Don'ts` at the root. Where the
+two pages disagree, the Design System wins.
+
+```sh
+d="$(node -e 'const m=require("./.marble/apps.json");console.log((m.seeded["design-donts"]||"Design Don\x27ts")+".mrbl")' 2>/dev/null || echo "Design Don'ts.mrbl")"
+grep -n 'class="k"' "$d"                                # the section map
+sed -n '/id="fingernail"/,/<\/section>/p' "$d"          # the one to check first
+sed -n '/data-marble-id="scan-pre">/,/<\/pre>/p' "$d"   # the scan to run before shipping
+```
+
+Its sections are `#fingernail`, `#tells`, `#glass`, `#words`, `#more` and
+`#ship`. In short:
+
+- **No fingernails.** Never put a thick coloured side, left or top, on a
+  rounded box, because it bends with the radius. If a colour means something,
+  use a dot, or a straight segment inset past the radius (see Shape below).
+- **No gradients doing a colour's job**, and no rainbow of tags. Violet
+  belongs to agents.
+- **Nothing pulses at rest.** Motion means work is happening now.
+- **No emoji as icons**, nothing that almost lines up, and no Inter,
+  JetBrains Mono or `//` eyebrows.
+- **Glass only on what floats**: bars, sheets and popovers, one layer deep.
+  Never on content, never over flat paper, never with blobs behind it.
+- **Words:** every heading, label, button, empty state and error tells the
+  person something they need, in plain words. No hype, no "welcome back", no
+  words that leaked from the chat, no made-up numbers.
 
 ## When it applies, and when the document already has a look
 
@@ -235,5 +268,6 @@ is a regression. The ones that recur most:
 Render it in both schemes and at phone and desk widths (360, 460, 620, 820,
 1100). Look for hover-only controls, sideways overflow, and contrast of
 `--faint` text under 4.5:1 where it carries meaning. Run `check_document`
-after any rewrite. If what you built looks wrong next to the Agents page, it is
-wrong.
+after any rewrite. Run the Don'ts page's scan against the file and answer
+every hit: fix it, or know why it is legitimate. If what you built looks wrong
+next to the Agents page, it is wrong.
