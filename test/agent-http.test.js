@@ -728,7 +728,7 @@ test("a document is served with the agent scripts after the Drive's, when agents
   );
   assert.match(
     page,
-    /<script src="\/runtime\/agent-scope\.js\?v=[0-9a-f]{12}" data-marble-transient><\/script>\n<script src="\/runtime\/agent-offer\.js\?v=[0-9a-f]{12}" data-marble-transient><\/script>\n<script src="\/runtime\/agent-callout\.js\?v=[0-9a-f]{12}"[^>]*><\/script>\n<script src="\/runtime\/agent-glints\.js\?v=[0-9a-f]{12}" data-marble-transient><\/script>\n<script src="\/runtime\/agent-run\.js\?v=[0-9a-f]{12}" data-marble-transient><\/script>\n<script src="\/runtime\/agent-marks-geometry\.js\?v=[0-9a-f]{12}" data-marble-transient><\/script>\n<script src="\/runtime\/agent-marks\.js\?v=[0-9a-f]{12}" data-marble-transient><\/script>\n<script src="\/runtime\/agent-variations\.js\?v=[0-9a-f]{12}" data-marble-transient><\/script>/,
+    /<script src="\/runtime\/agent-scope\.js\?v=[0-9a-f]{12}" data-marble-transient><\/script>\n<script src="\/runtime\/agent-offer\.js\?v=[0-9a-f]{12}" data-marble-transient><\/script>\n<script src="\/runtime\/agent-callout\.js\?v=[0-9a-f]{12}"[^>]*><\/script>\n<script src="\/runtime\/agent-glints\.js\?v=[0-9a-f]{12}" data-marble-transient><\/script>\n<script src="\/runtime\/agent-work\.js\?v=[0-9a-f]{12}" data-marble-transient><\/script>\n<script src="\/runtime\/agent-run\.js\?v=[0-9a-f]{12}" data-marble-transient><\/script>\n<script src="\/runtime\/agent-marks-geometry\.js\?v=[0-9a-f]{12}" data-marble-transient><\/script>\n<script src="\/runtime\/agent-marks\.js\?v=[0-9a-f]{12}" data-marble-transient><\/script>\n<script src="\/runtime\/agent-variations\.js\?v=[0-9a-f]{12}" data-marble-transient><\/script>/,
     'the scope finder and the offer come before the callout that uses them, the glints follow the callout they ask, the marks layer follows the callout it hands its ids to, its geometry is read on the way in, and the variations surface comes after both',
   );
   // The marks layer asks the drawer's tray for its slots at boot and takes
@@ -740,7 +740,7 @@ test("a document is served with the agent scripts after the Drive's, when agents
     ui < page.search(/<script src="\/runtime\/agent-marks\.js\?v=[0-9a-f]{12}" data-marble-transient><\/script>/),
     'agent-ui.js mounts the drawer before agent-marks.js asks it for a slot',
   );
-  for (const file of ['agent-scope.js', 'agent-offer.js', 'agent-callout.js', 'agent-glints.js', 'agent-run.js', 'agent-marks-geometry.js', 'agent-marks.js', 'agent-variations.js']) {
+  for (const file of ['agent-scope.js', 'agent-offer.js', 'agent-callout.js', 'agent-glints.js', 'agent-work.js', 'agent-run.js', 'agent-marks-geometry.js', 'agent-marks.js', 'agent-variations.js']) {
     const response = await fetch(`${base}/runtime/${file}`);
     assert.equal(response.status, 200, file);
     assert.match(response.headers.get('content-type'), /javascript/);

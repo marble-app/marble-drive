@@ -2632,6 +2632,75 @@
     return work;
   }
 
+  // The kit's rules stand alone, so the island a page shows while the chat
+  // is closed can draw a live view with the same look.
+  const WORK_VIEW_CSS = `
+    .v { --agent: color-mix(in srgb, #6d55d4 78%, var(--ink)); }
+    /* The kit. Every view is rows or a picture, never a box in the card. */
+    .v { display: flex; flex-direction: column; gap: 6px; min-width: 0; font-size: 12.5px; }
+    .v-read { flex-direction: row; flex-wrap: wrap; gap: 4px 6px; }
+    .v-read-c { display: inline-flex; align-items: center; gap: 5px; padding: 2px 8px 2px 6px; border-radius: 999px; background: var(--paper-2); font-size: 12px; }
+    .v-read-c svg { width: 11px; height: 11px; color: var(--accent-ink); }
+    .v-sw-rows { display: grid; grid-template-columns: minmax(0, auto) minmax(0, 1fr) 16px minmax(0, 1fr); gap: 6px 8px; align-items: center; }
+    .v-sw-lab { font-size: 12px; color: var(--muted); max-width: 120px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .v-sw-chip { display: flex; align-items: center; justify-content: space-between; gap: 6px; height: 34px; padding: 0 9px; border-radius: 8px; background: var(--c); color: var(--t); font-weight: 600; font-size: 14px; box-shadow: inset 0 0 0 1px rgba(0,0,0,.08); min-width: 0; }
+    .v-sw-chip[data-none] { background: none; color: var(--faint); box-shadow: inset 0 0 0 1px var(--line); font-weight: 400; }
+    .v-sw-chip small { font-weight: 500; font-size: 10.5px; text-align: right; opacity: .95; overflow: hidden; }
+    .v-sw-verdict { display: block; }
+    .v-sw-arrow { color: var(--faint); display: grid; place-items: center; }
+    .v-sw-arrow svg { width: 14px; height: 14px; }
+    .v-red-item { display: flex; flex-direction: column; gap: 2px; }
+    .v-red-item + .v-red-item { border-top: 1px solid var(--paper-3); padding-top: 6px; }
+    .v-red-where { font-size: 12px; color: var(--muted); }
+    .v-red-text { margin: 0; font-size: 13px; line-height: 1.45; color: var(--muted); display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; }
+    .v-map { display: grid; grid-template-columns: 58px minmax(0, 1fr); gap: 10px; align-items: start; }
+    .v-map-page { display: flex; flex-direction: column; gap: 3px; padding: 6px 5px; border-radius: 5px; background: var(--card); box-shadow: inset 0 0 0 1px var(--line); }
+    .v-map-page[hidden] { display: none; }
+    .v-map:has(.v-map-page[hidden]) { grid-template-columns: minmax(0, 1fr); }
+    .v-map-page i { display: block; height: var(--h, 4px); border-radius: 2px; background: var(--paper-3); transition: background-color .4s var(--settle), box-shadow .4s var(--settle); }
+    .v-map-page i[data-fresh] { background: color-mix(in srgb, var(--agent) 32%, var(--card)); box-shadow: inset 0 0 0 1.5px var(--agent); }
+    .v-map-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; }
+    .v-map-list li { display: flex; align-items: baseline; gap: 6px; padding: 3px 0; font-size: 12.5px; flex-wrap: wrap; }
+    .v-map-list li + li { border-top: 1px solid var(--paper-3); }
+    .v-map-list li svg { width: 11px; height: 11px; color: #3f8a5c; flex: none; transform: translateY(1px); }
+    .v-map-list small { color: var(--muted); font-size: 12px; }
+    .v-map-more { color: var(--faint); font-size: 12px; }
+    .v-src { gap: 0; }
+    .v-src-r, .v-src-q { display: grid; grid-template-columns: 22px minmax(0, 1fr) auto; align-items: center; gap: 8px; padding: 4px 0; }
+    .v-src > * + * { border-top: 1px solid var(--paper-3); }
+    .v-src-q { grid-template-columns: 22px minmax(0, 1fr); color: var(--muted); }
+    .v-src-q svg { width: 13px; height: 13px; justify-self: center; }
+    .v-fav { width: 22px; height: 22px; border-radius: 6px; display: grid; place-items: center; background: hsl(var(--h) 45% 48%); color: #fff; font-weight: 700; font-size: 11px; }
+    .v-src-t { min-width: 0; display: flex; flex-direction: column; }
+    .v-src-t b { font-weight: 500; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .v-src-t small { color: var(--faint); font-size: 12px; }
+    .v-src-st { display: inline-flex; align-items: center; gap: 4px; font-size: 12px; color: var(--faint); }
+    .v-src-st svg { width: 12px; height: 12px; }
+    .v-src-r[data-st="skip"] .v-src-st { color: var(--danger); }
+    .v-src-r[data-st="read"] .v-src-st { color: #3f8a5c; }
+    .v-ts-h { font-size: 12.5px; color: var(--muted); }
+    .v-ts-h b { color: var(--ink); font-size: 15px; margin-right: 2px; }
+    .v-ts-dots { display: flex; flex-wrap: wrap; gap: 3px; }
+    .v-ts-dots i { width: 8px; height: 8px; border-radius: 50%; background: #3f8a5c; }
+    .v-ts-dots i[data-st="fail"] { background: var(--danger); }
+    .v-ts-fail { display: flex; align-items: flex-start; gap: 6px; font-size: 12px; color: var(--danger); }
+    .v-ts-fail svg { width: 12px; height: 12px; flex: none; margin-top: 2px; }
+    .v-pm-t { margin: 0; font-size: 13px; color: var(--ink); }
+    .v-pm-rows { display: flex; flex-direction: column; }
+    .v-pm-r { display: grid; grid-template-columns: 70px minmax(0, 1fr); gap: 8px; padding: 3px 0; font-size: 12px; }
+    .v-pm-r + .v-pm-r { border-top: 1px solid var(--paper-3); }
+    .v-pm-r b { font-weight: 500; color: var(--muted); }
+    .v-pm-r span { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .v-halt p { margin: 0; font-size: 12.5px; color: var(--muted); }
+    .f-path { display: flex; align-items: center; }
+    .f-node { display: inline-flex; align-items: center; padding: 4px 9px; border-radius: 8px; background: var(--paper-2); font-weight: 500; font-size: 12px; }
+    .f-node.stuck { color: var(--danger); background: color-mix(in srgb, var(--danger) 10%, var(--card)); }
+    .f-link { flex: 1; min-width: 24px; position: relative; height: 2px; margin: 0 6px; background: repeating-linear-gradient(90deg, var(--faint) 0 4px, transparent 4px 8px); }
+    .f-link span { position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%); width: 16px; height: 16px; border-radius: 50%; display: grid; place-items: center; font-size: 10px; background: var(--danger); color: var(--card); }
+    .v-red-text del { color: var(--danger); text-decoration-color: color-mix(in srgb, var(--danger) 55%, transparent); }
+    .v-red-text ins { text-decoration: none; color: var(--ink); background: color-mix(in srgb, #3f8a5c 16%, transparent); border-radius: 3px; padding: 0 2px; }
+  `;
+
   // ------------------------------------------------------------ the view
 
   // The ask card's rules stand alone so a page drawing the card outside a
@@ -3000,6 +3069,8 @@
     .w-sec { display: flex; flex-direction: column; gap: 6px; }
     .w-sec-h { display: flex; align-items: center; gap: 8px; font-size: 12px; font-weight: 600; color: var(--muted); }
     .w-docs { display: inline-flex; flex-wrap: wrap; gap: 4px; margin-left: auto; font-weight: 400; }
+    .w-sec-h .w-review { font-weight: 400; margin-left: auto; }
+    .w-docs + .w-review { margin-left: 0; }
     .w-cm { display: grid; grid-template-columns: 44px minmax(0, 1fr); gap: 10px; align-items: start; }
     .w-cm.w-cm-flat { grid-template-columns: minmax(0, 1fr); }
     .w-mini { display: flex; flex-direction: column; gap: 3px; padding: 5px 4px; border-radius: 4px; background: var(--card); box-shadow: inset 0 0 0 1px var(--line); }
@@ -3063,67 +3134,7 @@
     .progress:not([data-state="running"]):not([data-state="asking"]) :is(.act:not(.primary), .w-quiet, .w-vb):hover { background: var(--paper-3); }
     .progress:not([data-state="running"]):not([data-state="asking"]) :is(.progress-said, .progress-next) { border-top-color: var(--paper-3); }
 
-    /* The kit. Every view is rows or a picture, never a box in the card. */
-    .v { display: flex; flex-direction: column; gap: 6px; min-width: 0; font-size: 12.5px; }
-    .v-read { flex-direction: row; flex-wrap: wrap; gap: 4px 6px; }
-    .v-read-c { display: inline-flex; align-items: center; gap: 5px; padding: 2px 8px 2px 6px; border-radius: 999px; background: var(--paper-2); font-size: 12px; }
-    .v-read-c svg { width: 11px; height: 11px; color: var(--accent-ink); }
-    .v-sw-rows { display: grid; grid-template-columns: minmax(0, auto) minmax(0, 1fr) 16px minmax(0, 1fr); gap: 6px 8px; align-items: center; }
-    .v-sw-lab { font-size: 12px; color: var(--muted); max-width: 120px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-    .v-sw-chip { display: flex; align-items: center; justify-content: space-between; gap: 6px; height: 34px; padding: 0 9px; border-radius: 8px; background: var(--c); color: var(--t); font-weight: 600; font-size: 14px; box-shadow: inset 0 0 0 1px rgba(0,0,0,.08); min-width: 0; }
-    .v-sw-chip[data-none] { background: none; color: var(--faint); box-shadow: inset 0 0 0 1px var(--line); font-weight: 400; }
-    .v-sw-chip small { font-weight: 500; font-size: 10.5px; text-align: right; opacity: .95; overflow: hidden; }
-    .v-sw-verdict { display: block; }
-    .v-sw-arrow { color: var(--faint); display: grid; place-items: center; }
-    .v-sw-arrow svg { width: 14px; height: 14px; }
-    .v-red-item { display: flex; flex-direction: column; gap: 2px; }
-    .v-red-item + .v-red-item { border-top: 1px solid var(--paper-3); padding-top: 6px; }
-    .v-red-where { font-size: 12px; color: var(--muted); }
-    .v-red-text { margin: 0; font-size: 13px; line-height: 1.45; color: var(--muted); display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; }
-    .v-map { display: grid; grid-template-columns: 58px minmax(0, 1fr); gap: 10px; align-items: start; }
-    .v-map-page { display: flex; flex-direction: column; gap: 3px; padding: 6px 5px; border-radius: 5px; background: var(--card); box-shadow: inset 0 0 0 1px var(--line); }
-    .v-map-page[hidden] { display: none; }
-    .v-map:has(.v-map-page[hidden]) { grid-template-columns: minmax(0, 1fr); }
-    .v-map-page i { display: block; height: var(--h, 4px); border-radius: 2px; background: var(--paper-3); transition: background-color .4s var(--settle), box-shadow .4s var(--settle); }
-    .v-map-page i[data-fresh] { background: color-mix(in srgb, var(--agent) 32%, var(--card)); box-shadow: inset 0 0 0 1.5px var(--agent); }
-    .v-map-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; }
-    .v-map-list li { display: flex; align-items: baseline; gap: 6px; padding: 3px 0; font-size: 12.5px; flex-wrap: wrap; }
-    .v-map-list li + li { border-top: 1px solid var(--paper-3); }
-    .v-map-list li svg { width: 11px; height: 11px; color: #3f8a5c; flex: none; transform: translateY(1px); }
-    .v-map-list small { color: var(--muted); font-size: 12px; }
-    .v-map-more { color: var(--faint); font-size: 12px; }
-    .v-src { gap: 0; }
-    .v-src-r, .v-src-q { display: grid; grid-template-columns: 22px minmax(0, 1fr) auto; align-items: center; gap: 8px; padding: 4px 0; }
-    .v-src > * + * { border-top: 1px solid var(--paper-3); }
-    .v-src-q { grid-template-columns: 22px minmax(0, 1fr); color: var(--muted); }
-    .v-src-q svg { width: 13px; height: 13px; justify-self: center; }
-    .v-fav { width: 22px; height: 22px; border-radius: 6px; display: grid; place-items: center; background: hsl(var(--h) 45% 48%); color: #fff; font-weight: 700; font-size: 11px; }
-    .v-src-t { min-width: 0; display: flex; flex-direction: column; }
-    .v-src-t b { font-weight: 500; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-    .v-src-t small { color: var(--faint); font-size: 12px; }
-    .v-src-st { display: inline-flex; align-items: center; gap: 4px; font-size: 12px; color: var(--faint); }
-    .v-src-st svg { width: 12px; height: 12px; }
-    .v-src-r[data-st="skip"] .v-src-st { color: var(--danger); }
-    .v-src-r[data-st="read"] .v-src-st { color: #3f8a5c; }
-    .v-ts-h { font-size: 12.5px; color: var(--muted); }
-    .v-ts-h b { color: var(--ink); font-size: 15px; margin-right: 2px; }
-    .v-ts-dots { display: flex; flex-wrap: wrap; gap: 3px; }
-    .v-ts-dots i { width: 8px; height: 8px; border-radius: 50%; background: #3f8a5c; }
-    .v-ts-dots i[data-st="fail"] { background: var(--danger); }
-    .v-ts-fail { display: flex; align-items: flex-start; gap: 6px; font-size: 12px; color: var(--danger); }
-    .v-ts-fail svg { width: 12px; height: 12px; flex: none; margin-top: 2px; }
-    .v-pm-t { margin: 0; font-size: 13px; color: var(--ink); }
-    .v-pm-rows { display: flex; flex-direction: column; }
-    .v-pm-r { display: grid; grid-template-columns: 70px minmax(0, 1fr); gap: 8px; padding: 3px 0; font-size: 12px; }
-    .v-pm-r + .v-pm-r { border-top: 1px solid var(--paper-3); }
-    .v-pm-r b { font-weight: 500; color: var(--muted); }
-    .v-pm-r span { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-    .v-halt p { margin: 0; font-size: 12.5px; color: var(--muted); }
-    .f-path { display: flex; align-items: center; }
-    .f-node { display: inline-flex; align-items: center; padding: 4px 9px; border-radius: 8px; background: var(--paper-2); font-weight: 500; font-size: 12px; }
-    .f-node.stuck { color: var(--danger); background: color-mix(in srgb, var(--danger) 10%, var(--card)); }
-    .f-link { flex: 1; min-width: 24px; position: relative; height: 2px; margin: 0 6px; background: repeating-linear-gradient(90deg, var(--faint) 0 4px, transparent 4px 8px); }
-    .f-link span { position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%); width: 16px; height: 16px; border-radius: 50%; display: grid; place-items: center; font-size: 10px; background: var(--danger); color: var(--card); }
+    ${WORK_VIEW_CSS}
 
     /* Older turns keep what changed, and small frames. */
     .progress[data-old] :is(.w-live, .w-proof-sec, .w-time-sec, .progress-next, .w-steer) { display: none; }
@@ -7915,12 +7926,30 @@
       [...card.stops.children].forEach((stop, i) => { stop.dataset.at = i === at ? 'now' : i <= card.reached ? 'past' : ''; });
       card.stops.setAttribute('aria-label', `${STAGES[at]?.name ?? ''}, stop ${at + 1} of 4`);
       if (note) card.say.title = `${say} — ${note}`;
+      this.publishLine(card);
     }
 
     glyphFor(card, key) {
       if (card.glyphStage === key) return;
       card.glyph.innerHTML = STAGE_GLYPHS[key] ?? '';
       card.glyphStage = key;
+    }
+
+    /** The turn's line, for the island a page shows while this chat is closed. */
+    publishLine(card) {
+      if (!this.isConnected || !this.fresh) return;
+      const record = this.turns.get(card.turn);
+      const target = record?.target ?? this.meta?.target ?? null;
+      dispatchEvent(new CustomEvent('marble-work:line', { detail: {
+        conversation: this.getAttribute('conversation'),
+        target,
+        state: card.el.dataset.state,
+        say: card.say.textContent,
+        started: record?.started ?? card.firstAt ?? null,
+        took: card.running ? '' : card.time.textContent,
+        changes: [...card.changes.values()].some((c) => this.onThisPage(c.path)),
+        view: card.live.hidden ? null : card.slot.firstElementChild,
+      } }));
     }
 
     // ---------------------------------------------------------- the live view and its frames
@@ -7949,6 +7978,7 @@
       } else {
         v.frame = this.addFrame(card, v, enter);
       }
+      this.publishLine(card);
     }
 
     paintViewHead(card, v) {
@@ -8129,6 +8159,7 @@
       if (input.url) rows.push({ k: 'Site', v: hostOf(input.url) });
       this.showView(card, 'perm', { t: plainAskOf(event), rows }, { name: '', key: `perm:${event.requestId}` });
       this.setNext(turn, 'asking');
+      this.publishLine(card);
     }
 
     plainAskClosed(turn, event, askCard) {
@@ -8201,6 +8232,7 @@
       this.drawReceipt(card, record, event, state);
       const undoable = Boolean((event.applied ?? record.applied) || record.changed) && !record.undone;
       this.setNext(turn, state, { docs: [...card.docs.keys()], undoable });
+      this.publishLine(card);
     }
 
     /** The receipt: what changed (named by its part, with what changed in
@@ -8227,7 +8259,10 @@
           const href = window.marble?.href?.(path);
           return href ? `<a class="progress-chip" href="${wesc(href)}" title="Open ${wesc(path)}">${DOC_GLYPH}${wesc(name)}</a>` : `<span class="progress-chip">${DOC_GLYPH}${wesc(name)}</span>`;
         }).join('');
-        R.append(wel(`<div class="w-sec"><div class="w-sec-h">What changed${docs ? `<span class="w-docs">${docs}</span>` : ''}</div><div class="w-cm${mini ? '' : ' w-cm-flat'}">${mini}<ul class="w-changes">${rows}</ul></div>${more}</div>`));
+        const sec = wel(`<div class="w-sec"><div class="w-sec-h">What changed${docs ? `<span class="w-docs">${docs}</span>` : ''}${here ? '<button type="button" class="w-quiet w-review">Review on the page</button>' : ''}</div><div class="w-cm${mini ? '' : ' w-cm-flat'}">${mini}<ul class="w-changes">${rows}</ul></div>${more}</div>`);
+        // The walk through the changes starts only when asked for.
+        sec.querySelector('.w-review')?.addEventListener('click', () => dispatchEvent(new CustomEvent('marble-work:review', { detail: { conversation: this.getAttribute('conversation') } })));
+        R.append(sec);
       } else if (card.docs.size) {
         const docs = [...card.docs.entries()].map(([path, name]) => `<span class="progress-chip">${DOC_GLYPH}${wesc(name)}</span>`).join('');
         R.append(wel(`<div class="w-sec"><div class="w-sec-h">Worked on<span class="w-docs">${docs}</span></div></div>`));
@@ -10044,7 +10079,7 @@
 
   const buildAskCard = (event, submit) => MarbleConversation.prototype.buildAskCard(event, submit);
   window.marbleAgentUI = { stateOf, STATE_CSS, renderText, spring, project, TOKENS, watchPageTheme, keepKeys, buildAskCard, ASK_CSS, conversationTags, eventBelongsToConversation, askResponse, TAG_CSS, fillMeters, usageAvailable, usageTone, formatReset, formatAsOf, USAGE_CSS, pageTheme, applyPageTheme, fillRadios, fitPicker, fitPresets, sortProviders };
-  Object.assign(window.marbleAgentUI, { collapseToolRows, toolShortName, toolLabel });
+  Object.assign(window.marbleAgentUI, { collapseToolRows, toolShortName, toolLabel, WORK_VIEW_CSS });
 
   if (window.marble?.agent) mount();
   else addEventListener('marble:agent', mount, { once: true });

@@ -146,6 +146,9 @@ const RUNTIME = {
   // Glints: a dot on each element an agent is on, for the chats nobody here
   // is following — the callout's quiet counterpart.
   'agent-glints.js': () => path.join(REPO, 'runtime', 'agent-glints.js'),
+  // The work, on the page: dots on what an agent changed, a rail, the island
+  // while the chat is closed, and the walk through a turn's changes.
+  'agent-work.js': () => path.join(REPO, 'runtime', 'agent-work.js'),
   // Automations: a [data-marble-run] button starts an agent with its brief.
   'agent-run.js': () => path.join(REPO, 'runtime', 'agent-run.js'),
   // Marks: Select and Sketch, the tray's two tools for briefing an agent
@@ -364,6 +367,7 @@ export async function createDrive(config, { log = console, agentProviders = null
     if (agents) tags += `\n<script src="${runtimeUrl('agent-callout.js')}" data-marble-transient></script>`;
     // After the callout, which it asks what it already shows.
     if (agents) tags += `\n<script src="${runtimeUrl('agent-glints.js')}" data-marble-transient></script>`;
+    if (agents) tags += `\n<script src="${runtimeUrl('agent-work.js')}" data-marble-transient></script>`;
     if (agents) tags += `\n<script src="${runtimeUrl('agent-run.js')}" data-marble-transient></script>`;
     // After the callout, whose handle both tools hand their ids to, and after
     // agent-ui.js, whose tray is the only place these tools are reachable from
