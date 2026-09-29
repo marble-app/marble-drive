@@ -54,6 +54,9 @@
       --marks-mark: var(--accent-ink, color-mix(in srgb, #6d55d4 78%, var(--ink, #222)));
       --marks-paper: var(--card, var(--paper, #fff));
       --marks-ink: var(--ink, #222);
+      /* The mode's own colour: the caution tone, never the accent, so being in
+         Describe mode cannot be mistaken for anything else on the page. */
+      --marks-notice: var(--caution, #a07a2c);
       font: 400 13px/1.35 var(--ui-font, system-ui, -apple-system, sans-serif);
       color: var(--marks-ink);
     }
@@ -79,6 +82,27 @@
        tab ring, invisibly. It flips after the fade on the way out and
        immediately on the way in, which is the difference between a fade and a
        blink. */
+    /* The notice: a ring round the window's edge and a line at the top, for
+       as long as the mode lasts. You cannot be looking at the page without
+       seeing that you are in it. */
+    .marble-marks-ring {
+      position: fixed; inset: 0; pointer-events: none;
+      box-shadow: inset 0 0 0 3px var(--marks-notice), inset 0 0 38px color-mix(in srgb, var(--marks-notice) 20%, transparent);
+    }
+    .marble-marks-notice {
+      position: fixed; top: 12px; left: 50%; transform: translateX(-50%);
+      display: flex; align-items: center; gap: 10px; padding: 6px 6px 6px 13px; border-radius: 999px;
+      background: var(--marks-notice); color: #fff; white-space: nowrap; pointer-events: auto;
+      font: 500 12.5px/1 var(--ui-font, system-ui, -apple-system, sans-serif);
+      box-shadow: 0 4px 10px rgba(0,0,0,.12), 0 14px 28px rgba(0,0,0,.14);
+    }
+    .marble-marks-notice b { font-weight: 650; }
+    .marble-marks-notice .marble-marks-notice-sep { opacity: .55; }
+    .marble-marks-notice button {
+      font: inherit; font-size: 12px; color: #fff; background: rgba(255,255,255,.22); border: 0;
+      border-radius: 999px; padding: 5px 10px; cursor: pointer;
+    }
+    .marble-marks-notice button:hover { background: rgba(255,255,255,.34); }
     .marble-marks-layer { opacity: 1; visibility: visible; transition: opacity 200ms ${EASE}, visibility 0s; }
     .marble-marks-layer:not([data-describing]) {
       opacity: 0; visibility: hidden;
@@ -389,6 +413,26 @@
     const clearButton = button('clear', 'Clear marks', GLYPHS.clear);
     el('span', 'marble-marks-sep', bar);
     const doneButton = button('done', 'Done', GLYPHS.done, { key: 'Esc' });
+
+    // The notice, shown with the rest of the layer only while describing.
+    const ring = el('div', 'marble-marks-ring', layer);
+    ring.setAttribute('aria-hidden', 'true');
+    const notice = el('div', 'marble-marks-notice', layer);
+    notice.setAttribute('role', 'status');
+    const noticeTitle = document.createElement('b');
+    noticeTitle.textContent = 'Describe mode';
+    const noticeSep = document.createElement('span');
+    noticeSep.className = 'marble-marks-notice-sep';
+    noticeSep.textContent = '·';
+    const noticeLine = document.createElement('span');
+    noticeLine.textContent = 'Mark what you mean — nothing you draw changes the page';
+    const noticeLeave = document.createElement('button');
+    noticeLeave.type = 'button';
+    noticeLeave.textContent = 'Esc to leave';
+    noticeLeave.setAttribute('aria-label', 'Leave Describe mode');
+    noticeLeave.addEventListener('click', () => setDescribing(false));
+    for (const node of [noticeTitle, noticeSep, noticeLine, noticeLeave]) node.setAttribute(TRANSIENT, '');
+    notice.append(noticeTitle, noticeSep, noticeLine, noticeLeave);
 
     // ------------------------------------------------------------ Explore ask
 
@@ -1128,7 +1172,17 @@
     clearButton.addEventListener('click', () => { clearMarks(); syncBrief(); });
     // Another door in: the shell's bar (runtime/shell.js), or anything else
     // that wants to offer Describe without a tray of its own.
-    addEventListener('marble-marks:toggle', (event) => setDescribing(event.detail?.on ?? !describing));
+    // The callout's Describe door arrives with what the card was about, so
+    // the mode opens with it already marked.
+    addEventListener('marble-marks:toggle', (event) => {
+      const on = event.detail?.on ?? !describing;
+      setDescribing(on);
+      const ids = event.detail?.ids;
+      if (!on || !Array.isArray(ids) || !ids.length) return;
+      area = ids.filter((id) => typeof id === 'string' && document.querySelector(`[data-marble-id="${CSS.escape(id)}"]`));
+      syncSelection();
+      syncBrief();
+    });
     doneButton.addEventListener('click', () => setDescribing(false));
 
     // --------------------------------------------------------------- pointer

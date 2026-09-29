@@ -101,6 +101,34 @@
     .marble-callout-tip[hidden] { display: none; }
     .marble-callout marble-conversation { display: flex; max-height: min(70vh, 560px); }
     .marble-callout[hidden] { display: none; }
+    /* Resting the pointer: the element is outlined with one soft line and the
+       faintest wash, and the mark waits in its left margin. Quieter than the
+       selection's handle, because a rest is not a choice. */
+    .marble-callout-hover {
+      position: fixed; pointer-events: none; border-radius: 8px; opacity: 1;
+      border: 1px solid color-mix(in srgb, var(--callout-mark) 34%, transparent);
+      background: color-mix(in srgb, var(--accent, #9bb6cf) 5%, transparent);
+      transition: opacity 160ms ease, left 180ms ${EASE}, top 180ms ${EASE}, width 180ms ${EASE}, height 180ms ${EASE}, display 160ms allow-discrete;
+    }
+    @starting-style { .marble-callout-hover { opacity: 0; } }
+    .marble-callout-hover[hidden] { display: none; opacity: 0; }
+    .marble-callout-handle.is-quiet { width: 22px; height: 22px; opacity: .92; }
+    .marble-callout-handle.is-quiet svg { width: 22px; height: 22px; }
+    /* A fresh card: what it is about is outlined, and the rest of the page
+       steps back so the offer reads over quiet paper. */
+    .marble-callout-frame {
+      position: fixed; pointer-events: none; border-radius: 8px;
+      border: 1.5px solid var(--callout-mark);
+      box-shadow: 0 0 0 200vmax color-mix(in srgb, var(--callout-paper) 78%, transparent);
+      opacity: 1; transition: opacity ${MOTION}ms ease, left ${MOTION}ms ${EASE}, top ${MOTION}ms ${EASE}, width ${MOTION}ms ${EASE}, height ${MOTION}ms ${EASE};
+    }
+    @starting-style { .marble-callout-frame { opacity: 0; } }
+    .marble-callout-frame.is-out { opacity: 0; }
+    .marble-callout[data-offer] {
+      width: min(540px, calc(100vw - ${PAD * 2}px)); background: none; border: 0; box-shadow: none; overflow: visible;
+    }
+    .marble-callout[data-offer] .marble-callout-head,
+    .marble-callout[data-offer] marble-conversation { display: none; }
     .marble-callout-pick {
       position: fixed; pointer-events: none; border: 1.5px solid var(--callout-mark); border-radius: 6px;
       opacity: 1;
@@ -237,6 +265,12 @@
         return;
       }
       const r = anchor.getBoundingClientRect();
+      if (record.frame) {
+        Object.assign(record.frame.style, {
+          left: `${Math.round(r.left - 4)}px`, top: `${Math.round(r.top - 3)}px`,
+          width: `${Math.round(r.width + 8)}px`, height: `${Math.round(r.height + 6)}px`,
+        });
+      }
       const h = el.offsetHeight;
       const w = el.offsetWidth;
       const left = Math.min(Math.max(PAD, r.left - 10), Math.max(PAD, innerWidth - PAD - w));
@@ -279,6 +313,7 @@
       record.el.hidden = false;
       const at = records.indexOf(record);
       if (at >= 0) records.splice(at, 1);
+      endOffer(record);
       vanish(record.el, () => record.el.remove());
       placeHandle();
       held();
@@ -287,7 +322,7 @@
       dispatchEvent(new CustomEvent('marble-callout:removed', { detail: { id: record.id } }));
     }
 
-    function openCard({ id = null, ids, state = 'card', focus = true, owner = null }) {
+    function openCard({ id = null, ids, state = 'card', focus = true, owner = null, scope = null }) {
       const existing = recordOf(id);
       if (existing) {
         setState(existing, state);
@@ -380,7 +415,11 @@
       // Not on the way in for a lent card: it appears the moment something is
       // marked, often while a note is still being typed, and taking the caret
       // out of that note would be the card interrupting the thing it is for.
-      if (state === 'card' && focus) convo.focusInput?.();
+      // A fresh card offers before it asks: the light input, the four
+      // doors and the suggestions (agent-offer.js). A lent card is the
+      // brief's own composer and a card for a chat already has one.
+      if (!id && !owner && globalThis.marbleOffer) startOffer(record, scope);
+      else if (state === 'card' && focus) convo.focusInput?.();
       // A card is the one place a brief made somewhere else can land. The
       // marks layer listens for this to write a sketch's reading into the
       // composer; anything else that briefs an agent about a region can do
@@ -524,10 +563,28 @@
       const marksLayer = document.querySelector('.marble-marks-layer');
       const marking = Boolean(marksLayer?.dataset.mode) || Boolean(marksLayer?.hasAttribute('data-describing'));
       const target = pointerDown || !ids.length || drawn || marking ? null : anchorOf(ids);
-      if (!target) { handle.hidden = true; return; }
+      if (!target) {
+        // No selection: a rested-on element may still be offering.
+        if (hover && !drawn && !marking && !pointerDown) placeQuiet();
+        else { handle.hidden = true; handle.classList.remove('is-quiet'); }
+        return;
+      }
+      clearHover();
+      handle.classList.remove('is-quiet');
+      handle.setAttribute('aria-label', 'Ask an agent about this selection');
       const r = target.getBoundingClientRect();
       handle.style.left = `${Math.round(Math.max(PAD, r.left - 10))}px`;
       handle.style.top = `${Math.round(Math.min(innerHeight - 30, r.bottom + 4))}px`;
+      handle.hidden = false;
+    }
+    // The rested-on element's mark sits in its left margin, at its first line,
+    // where a block handle sits in a notes app.
+    function placeQuiet() {
+      const r = hover.element.getBoundingClientRect();
+      handle.classList.add('is-quiet');
+      handle.setAttribute('aria-label', `Ask an agent about this ${marbleScope.kindOf(hover.element)}`);
+      handle.style.left = `${Math.round(Math.max(4, r.left - 32))}px`;
+      handle.style.top = `${Math.round(r.top + Math.min(r.height / 2 - 11, 2))}px`;
       handle.hidden = false;
     }
     addEventListener('pointerdown', (event) => {
@@ -548,9 +605,26 @@
         dispatchEvent(new CustomEvent('marble-marks:focus'));
         return true;
       }
-      const ids = agent.context().selection;
+      let ids = agent.context().selection;
+      let scope = null;
+      // Words are a selection of their own only when they are part of an
+      // element; selecting all of a heading is selecting the heading.
+      const sel = getSelection();
+      const said = sel && !sel.isCollapsed ? sel.toString().replace(/\s+/g, ' ').trim() : '';
+      const whole = ids.length ? (anchorOf(ids)?.textContent ?? '').replace(/\s+/g, ' ').trim() : '';
+      const words = Boolean(said && said !== whole);
+      if (!ids.length && hover) {
+        // Nothing selected, but the pointer rested on something: that is
+        // what ⌘J and the mark mean. Pinned, so the brief carries it.
+        ids = [hover.element.getAttribute('data-marble-id')];
+        scope = { chain: hover.chain, index: hover.index };
+        agent.select(ids);
+      } else if (ids.length) {
+        scope = { words, chain: marbleScope?.chainFrom(anchorOf(ids)) ?? [], index: 0 };
+      }
       if (!ids.length) return false;
       handle.hidden = true;
+      clearHover();
       if (PHONE.matches) {
         // No room for a card beside the text on a phone; the drawer already
         // carries the selection as its own control. Opening it takes focus,
@@ -564,12 +638,197 @@
         else agent.open();
         return true;
       }
-      openCard({ ids });
+      openCard({ ids, scope });
       return true;
     }
     addEventListener('marble-callout:summon', (event) => {
       if (summon()) event.preventDefault();
     });
+
+    // ------------------------------------------------------------ the offer
+
+    const kindWord = (kind) => ({ part: 'part', words: 'selection' })[kind] ?? kind;
+    async function fetchOffer(record) {
+      const words = record.scope?.words ? getSelection()?.toString().trim().slice(0, 400) : '';
+      try {
+        const res = await fetch('/agent/offer', {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({ path: app, ids: record.ids, words }),
+        });
+        return res.ok ? await res.json() : null;
+      } catch { return null; }
+    }
+
+    function startOffer(record, scope) {
+      record.scope = scope ?? { chain: [], index: 0 };
+      const anchor = anchorOf(record.ids);
+      const kind = record.scope.words ? 'words' : marbleScope?.kindOf(anchor) ?? 'part';
+      const box = document.createElement('div');
+      box.className = 'marble-callout-offer';
+      record.el.insertBefore(box, record.convo);
+      record.el.dataset.offer = '';
+      const frame = document.createElement('div');
+      frame.className = 'marble-callout-frame';
+      frame.setAttribute(TRANSIENT, '');
+      layer.insertBefore(frame, record.el);
+      record.frame = frame;
+      record.offer = marbleOffer.mount({
+        container: box,
+        ids: record.ids,
+        kind,
+        what: kindWord(kind),
+        tip: (anchorEl, text) => (anchorEl ? showTip(anchorEl, text) : hideTip()),
+        onResize: () => placeCard(record),
+        fetchOffer: () => fetchOffer(record),
+        onSend: (brief, meta) => {
+          if (meta.mode === 'variations') dispatchEvent(new CustomEvent('marble-variations:watch', { detail: { ids: [...record.ids] } }));
+          // Pinned for the send, so the brief carries what the card is about,
+          // and let go after it: the next selection is the person's again.
+          agent.select(record.ids);
+          endOffer(record);
+          placeCard(record);
+          Promise.resolve(record.convo.sendNow(brief)).finally(() => agent.select(null));
+        },
+        onDescribe: () => {
+          const ids = [...record.ids];
+          remove(record);
+          dispatchEvent(new CustomEvent('marble-marks:toggle', { detail: { on: true, ids } }));
+        },
+      });
+      placeCard(record);
+      requestAnimationFrame(() => record.offer?.focus());
+    }
+
+    /** The offer goes, the card stays: after a send it is an ordinary
+     *  callout on the work, and on the way out it goes with the card. */
+    function endOffer(record) {
+      if (!record.offer) return;
+      record.offer.destroy();
+      record.offer = null;
+      delete record.el.dataset.offer;
+      record.el.querySelector('.marble-callout-offer')?.remove();
+      const frame = record.frame;
+      record.frame = null;
+      if (frame) vanish(frame, () => frame.remove());
+      hideTip();
+    }
+
+    // An offer nobody used is put away by looking elsewhere: a click outside
+    // it, or Escape. A card with a chat in it stays until it is closed.
+    const offering = () => records.find((r) => r.offer);
+    addEventListener('pointerdown', (event) => {
+      const record = offering();
+      if (!record || layer.contains(event.target) || event.composedPath().some((n) => n?.localName === 'marble-agent-drawer')) return;
+      remove(record);
+      agent.select(null);
+    }, true);
+    addEventListener('keydown', (event) => {
+      const record = offering();
+      if (!record) return;
+      if (event.key === 'Escape') {
+        event.preventDefault();
+        event.stopPropagation();
+        remove(record);
+        agent.select(null);
+        return;
+      }
+      // [ takes in the containing element, ] steps back in, while the input
+      // does not have the keys.
+      if ((event.key === '[' || event.key === ']') && !event.target?.isContentEditable) {
+        const { chain } = record.scope;
+        const next = record.scope.index + (event.key === '[' ? 1 : -1);
+        if (!chain?.[next]) return;
+        event.preventDefault();
+        record.scope.index = next;
+        const ids = [chain[next].getAttribute('data-marble-id')];
+        record.ids = ids;
+        agent.select(ids);
+        endOffer(record);
+        startOffer(record, { ...record.scope, words: false });
+      }
+    }, true);
+
+    // ------------------------------------------------------------ hover
+    // Resting the pointer on something long enough offers the bubble for it,
+    // at the right scope (agent-scope.js). Quiet: mouse and pen only, never
+    // while typing, dragging, scrolling or marking, and if three offers in a
+    // row are passed by, the rest doubles for the session.
+
+    const HOVER_DWELL = 400;
+    const HOME = document.querySelector('script[data-home]')?.dataset.home ?? null;
+    const hoverFrame = document.createElement('div');
+    hoverFrame.className = 'marble-callout-hover';
+    hoverFrame.setAttribute(TRANSIENT, '');
+    hoverFrame.hidden = true;
+    layer.insertBefore(hoverFrame, handle);
+    let hover = null;
+    let dwellTimer = 0;
+    let lastX = -99;
+    let lastY = -99;
+    let passedBy = 0;
+
+    const typing = () => {
+      const a = document.activeElement;
+      return Boolean(a && (a.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(a.tagName)));
+    };
+    const marking = () => {
+      const marksLayer = document.querySelector('.marble-marks-layer');
+      return Boolean(marksLayer?.dataset.mode) || Boolean(marksLayer?.hasAttribute('data-describing'));
+    };
+    function canHover() {
+      if (!globalThis.marbleScope || PHONE.matches || pointerDown || typing() || marking()) return false;
+      // The Drive's own listing is made of things to open, not to ask about.
+      if (HOME && app === HOME) return false;
+      if (records.some((r) => r.offer || (r.id === null && !r.owner))) return false;
+      const sel = getSelection();
+      return !(sel && !sel.isCollapsed);
+    }
+    function showHover(found) {
+      hover = found;
+      const r = found.element.getBoundingClientRect();
+      Object.assign(hoverFrame.style, {
+        left: `${Math.round(r.left - 4)}px`, top: `${Math.round(r.top - 3)}px`,
+        width: `${Math.round(r.width + 8)}px`, height: `${Math.round(r.height + 6)}px`,
+      });
+      hoverFrame.hidden = false;
+      placeHandle();
+    }
+    function clearHover(passed = false) {
+      clearTimeout(dwellTimer);
+      if (!hover) return;
+      if (passed && !handle.hidden) passedBy += 1;
+      hover = null;
+      hoverFrame.hidden = true;
+      if (handle.classList.contains('is-quiet')) { handle.hidden = true; handle.classList.remove('is-quiet'); }
+    }
+    const inGrace = (x, y) => {
+      if (!hover) return false;
+      const r = hover.element.getBoundingClientRect();
+      return x >= r.left - 40 && x <= r.right + 4 && y >= r.top - 6 && y <= r.bottom + 6;
+    };
+    addEventListener('pointermove', (event) => {
+      if (event.pointerType === 'touch' || event.buttons) return;
+      if (layer.contains(event.target)) return;
+      if (Math.hypot(event.clientX - lastX, event.clientY - lastY) < 4) return;
+      lastX = event.clientX;
+      lastY = event.clientY;
+      clearTimeout(dwellTimer);
+      if (hover && inGrace(lastX, lastY)) return;
+      if (hover) clearHover(true);
+      if (!canHover()) return;
+      // Controls are for using: the offer waits twice as long on them.
+      const slow = event.target?.closest?.('button, a[href], input, select, textarea') ? 2 : 1;
+      dwellTimer = setTimeout(() => {
+        if (!canHover()) return;
+        const found = marbleScope.at(lastX, lastY);
+        if (found) showHover(found);
+      }, HOVER_DWELL * slow * (passedBy >= 3 ? 2 : 1));
+    }, { passive: true });
+    addEventListener('scroll', () => clearHover(), true);
+    document.addEventListener('pointerleave', () => clearHover(true));
+    // The mark is how the offer is taken: passing it by is counted, using it resets.
+    handle.addEventListener('click', () => { passedBy = 0; }, true);
 
     // A top-layer sheet shown later paints over one shown earlier. Describe
     // mode's overlay takes the pointer across the window, and the card it

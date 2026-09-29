@@ -138,10 +138,16 @@ const RUNTIME = {
   'agent-usage-charts.js': () => path.join(REPO, 'runtime', 'agent-usage-charts.js'),
   'collab.js': () => path.join(REPO, 'runtime', 'collab.js'),
   // The callout: a conversation drawn at the region of a document it is about.
+  // The scope finder and the offer: which element a resting pointer means,
+  // and what a fresh callout card offers before anything is sent.
+  'agent-scope.js': () => path.join(REPO, 'runtime', 'agent-scope.js'),
+  'agent-offer.js': () => path.join(REPO, 'runtime', 'agent-offer.js'),
   'agent-callout.js': () => path.join(REPO, 'runtime', 'agent-callout.js'),
   // Glints: a dot on each element an agent is on, for the chats nobody here
   // is following — the callout's quiet counterpart.
   'agent-glints.js': () => path.join(REPO, 'runtime', 'agent-glints.js'),
+  // Automations: a [data-marble-run] button starts an agent with its brief.
+  'agent-run.js': () => path.join(REPO, 'runtime', 'agent-run.js'),
   // Marks: Select and Sketch, the tray's two tools for briefing an agent
   // about a region. Geometry first; the layer reads it off globalThis.
   'agent-marks-geometry.js': () => path.join(REPO, 'runtime', 'agent-marks-geometry.js'),
@@ -350,9 +356,15 @@ export async function createDrive(config, { log = console, agentProviders = null
       tags += `\n<script src="${runtimeUrl('console.js')}" data-marble-transient></script>`;
     }
     // After collab.js: the callout hangs its card with the zone's own geometry.
+    // The callout reads the scope finder and mounts the offer, so both first.
+    if (agents) {
+      tags += `\n<script src="${runtimeUrl('agent-scope.js')}" data-marble-transient></script>`;
+      tags += `\n<script src="${runtimeUrl('agent-offer.js')}" data-marble-transient></script>`;
+    }
     if (agents) tags += `\n<script src="${runtimeUrl('agent-callout.js')}" data-marble-transient></script>`;
     // After the callout, which it asks what it already shows.
     if (agents) tags += `\n<script src="${runtimeUrl('agent-glints.js')}" data-marble-transient></script>`;
+    if (agents) tags += `\n<script src="${runtimeUrl('agent-run.js')}" data-marble-transient></script>`;
     // After the callout, whose handle both tools hand their ids to, and after
     // agent-ui.js, whose tray is the only place these tools are reachable from
     // — a register nobody answers takes the layer back down.

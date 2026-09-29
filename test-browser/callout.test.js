@@ -23,7 +23,13 @@ const AGENTS = (await fsp.readFile(AGENTS_TEMPLATE, 'utf8'))
   .replaceAll('__ID__', () => Math.random().toString(36).slice(2, 10))
   .replace('__ICON__', '');
 
-const host = await startDrive({ scripts: SCRIPTS, documents: { garden: GARDEN, Agents: AGENTS } });
+// A document with an automation in it: a button carrying its own brief.
+const RUNNABLE = `<!doctype html><html><head><title>Reading list</title></head>
+<body data-marble-id="b"><table data-marble-id="t"><tbody data-marble-id="tb">
+<tr data-marble-id="r2"><td data-marble-id="c1">Generative Agents <button data-marble-id="fill" data-marble-run="script:quiet Look it up by its title and fill the rest." data-marble-scope="r2" data-marble-on="press">Fill</button></td><td data-marble-id="c2">—</td></tr>
+</tbody></table></body></html>`;
+
+const host = await startDrive({ scripts: SCRIPTS, documents: { garden: GARDEN, Agents: AGENTS, runnable: RUNNABLE } });
 test.after(() => host.close());
 
 // A reset drive keeps its conversations, and this layer rebuilds a callout
@@ -100,17 +106,106 @@ test('a settled selection grows a handle, and collapsing takes it away', async (
   await page.locator('.marble-callout-handle[hidden]').waitFor({ state: 'attached' });
 });
 
-test('the handle opens a card holding a callout conversation, and typing does not lose the selection', async () => {
+test('the handle opens a fresh card on the offer, and typing does not lose the selection', async () => {
   const page = await open();
   await select(page, 'q1');
   await handle(page).click();
   await card(page).waitFor();
-  const convo = card(page).locator('marble-conversation[data-chrome="callout"]');
-  await convo.locator('.editor').waitFor();
-  assert.equal(await page.locator('.marble-callout-status').innerText(), 'Ask about this');
-  await convo.locator('.editor').click();
+  await offerInput(page).waitFor();
+  // The offer: one quiet input named for what it is about, four doors, and
+  // suggestions under it. The conversation is there, not shown, until a send.
+  assert.equal(await offerInput(page).getAttribute('data-placeholder'), 'Ask about this item…', 'all of an element selected is that element');
+  assert.deepEqual(
+    await page.locator('.marble-offer-icon').evaluateAll((els) => els.map((el) => el.getAttribute('aria-label'))),
+    ['Variations', 'Make it automatic', 'Make it interactive', 'Describe'],
+  );
+  await page.locator('.marble-offer-bubble').first().waitFor();
+  assert.equal(await page.locator('.marble-offer-bubble').count(), 3);
+  assert.equal(await card(page).locator('marble-conversation[data-chrome="callout"]').isVisible(), false);
+  assert.equal(await page.locator('.marble-callout-frame').count(), 1, 'what it is about is outlined');
+  await offerInput(page).click();
   assert.deepEqual(await page.evaluate(() => window.marble.agent.context().selection), ['q1'], 'focus into the card is not a new selection');
   assert.equal(await handle(page).count(), 0, 'the handle steps aside for the card');
+});
+
+test('a door is a mode: it drafts its prompt with the idea selected, hides the suggestions, and sends its brief', async () => {
+  const page = await open();
+  await select(page, 'q1');
+  await handle(page).click();
+  await offerInput(page).waitFor();
+  await page.locator('.marble-offer-icon[data-door="interactive"]').click();
+  const draft = await offerInput(page).textContent();
+  assert.match(draft, /^Make this item interactive: /);
+  assert.equal(await page.evaluate(() => getSelection().toString()), draft.split(': ')[1], 'the idea is selected, to type over');
+  assert.equal(await page.locator('.marble-offer-bubble').count(), 0, 'no suggestions while a door is on');
+  assert.equal(await page.locator('.marble-offer-send').isVisible(), true, 'a drafted prompt can be sent as it is');
+  await page.keyboard.type('click to open it');
+  await page.keyboard.press('Enter');
+  await page.waitForFunction(() => !document.querySelector('.marble-callout[data-offer]'));
+  await until(page, async () => {
+    const [s] = await window.marble.agent.conversations();
+    return Boolean(s && (await window.marble.agent.conversation(s.id)).turns?.length);
+  });
+  const { detail } = await firstConversation(page);
+  assert.match(detail.turns[0].prompt, /^Make this item interactive: click to open it/);
+  assert.match(detail.turns[0].prompt, /in place/, 'the door\'s own brief goes with it');
+  assert.deepEqual(detail.turns[0].context.selection, ['q1']);
+
+  // Leaving a door takes an untouched draft with it.
+  await select(page, 'h');
+  await handle(page).click();
+  await offerInput(page).waitFor();
+  await page.locator('.marble-offer-icon[data-door="variations"]').click();
+  assert.equal(await offerInput(page).textContent(), 'Explore 3 variations of this heading');
+  await page.locator('.marble-offer-icon[data-door="variations"]').click();
+  assert.equal(await offerInput(page).textContent(), '');
+  await page.locator('.marble-offer-bubble').first().waitFor();
+});
+
+test('Describe opens the mode with the element marked, and says so on the page', async () => {
+  const page = await open();
+  await select(page, 'q1');
+  await handle(page).click();
+  await offerInput(page).waitFor();
+  await page.locator('.marble-offer-icon[data-door="describe"]').click();
+  await page.locator('.marble-marks-layer[data-describing]').waitFor({ state: 'attached' });
+  await page.locator('.marble-marks-notice', { hasText: 'Describe mode' }).waitFor();
+  assert.equal(await page.locator('.marble-marks-ring').isVisible(), true);
+  assert.deepEqual(await page.evaluate(() => window.marble.agent.context().selection), ['q1'], 'arrives with the element marked');
+  assert.equal(await page.locator('.marble-callout[data-offer]').count(), 0, 'the offer steps aside for the mode');
+  await page.locator('.marble-marks-notice button').click();
+  await page.waitForFunction(() => !document.querySelector('.marble-marks-layer[data-describing]'));
+});
+
+test('an offer nobody used goes with Escape or a click elsewhere', async () => {
+  const page = await open();
+  await select(page, 'q1');
+  await handle(page).click();
+  await offerInput(page).waitFor();
+  await page.keyboard.press('Escape');
+  await page.waitForFunction(() => document.querySelectorAll('.marble-callout, .marble-callout-frame').length === 0);
+  await select(page, 'q1');
+  await handle(page).click();
+  await offerInput(page).waitFor();
+  await page.mouse.click(5, 700);
+  await page.waitForFunction(() => document.querySelectorAll('.marble-callout, .marble-callout-frame').length === 0);
+});
+
+test('resting the pointer on an element offers the bubble for it, and the bubble opens its offer', async () => {
+  const page = await open();
+  const li = await page.locator('[data-marble-id="q1"]').boundingBox();
+  await page.mouse.move(li.x + 20, li.y + li.height / 2, { steps: 3 });
+  const quiet = page.locator('.marble-callout-handle.is-quiet:not([hidden])');
+  await quiet.waitFor({ timeout: 3000 });
+  await page.locator('.marble-callout-hover:not([hidden])').waitFor({ state: 'attached' });
+  const mark = await quiet.boundingBox();
+  assert.ok(mark.x < li.x, 'the mark waits in the left margin');
+  await page.mouse.move(mark.x + mark.width / 2, mark.y + mark.height / 2, { steps: 4 });
+  await quiet.click();
+  await offerInput(page).waitFor();
+  assert.deepEqual(await page.evaluate(() => window.marble.agent.context().selection), ['q1'], 'the rested-on element is what the card is about');
+  assert.equal(await offerInput(page).getAttribute('data-placeholder'), 'Ask about this item…');
+  await page.keyboard.press('Escape');
 });
 
 test('⌘J with a selection summons a card; without one it toggles the drawer', async () => {
@@ -195,8 +290,12 @@ test('Option-clicking the same element twice takes it back off', async () => {
   assert.equal(await page.locator('.marble-callout-pick:not([hidden])').count(), 0, 'the outline goes with the key');
 });
 
+// A fresh card is the offer (agent-offer.js): its own light input sends the
+// first brief. After that the card is the callout conversation.
+const offerInput = (page) => page.locator('.marble-callout[data-offer] .marble-offer-input');
 const sendFromCard = async (page, prompt) => {
-  const editor = card(page).locator('marble-conversation .editor');
+  const fresh = await offerInput(page).count();
+  const editor = fresh ? offerInput(page) : card(page).locator('marble-conversation .editor');
   await editor.click();
   await page.keyboard.type(prompt);
   await page.keyboard.press('Enter');
@@ -207,6 +306,17 @@ const cancelLast = (page) => page.evaluate(async () => {
   await window.marble.agent.cancel(d.turns.at(-1).id);
 });
 
+// waitForFunction does not wait on an async predicate (a Promise is truthy),
+// so a question for the host is asked again until it has an answer.
+const until = async (page, fn, arg, { timeout = 10_000 } = {}) => {
+  const end = Date.now() + timeout;
+  for (;;) {
+    const value = await page.evaluate(fn, arg);
+    if (value) return value;
+    if (Date.now() > end) throw new Error('timed out waiting for the host');
+    await page.waitForTimeout(100);
+  }
+};
 const firstConversation = (page) => page.evaluate(async () => {
   const [summary] = await window.marble.agent.conversations();
   return summary ? { summary, detail: await window.marble.agent.conversation(summary.id) } : null;
@@ -376,7 +486,9 @@ test('the corner buttons line up, and resting on one names it', async () => {
   const page = await open();
   await select(page, 'h');
   await handle(page).click();
-  await card(page).waitFor();
+  // The corners belong to a card with a chat in it; the offer has none.
+  await sendFromCard(page, 'script:quiet');
+  await page.locator('.marble-callout-status', { hasText: 'No changes' }).waitFor({ timeout: 10_000 });
   const side = page.getByRole('button', { name: 'Open this chat on the side' });
   const minimize = page.getByRole('button', { name: 'Close' });
   // Measured once the card has arrived: it grows in from .98.
@@ -399,27 +511,6 @@ test('the corner buttons line up, and resting on one names it', async () => {
   await page.locator('.marble-callout-tip', { hasText: 'Close' }).waitFor();
 });
 
-test('the side button is on the card before a chat exists, and it does not resume the last one', async () => {
-  const page = await open();
-  const earlier = await page.evaluate(async () => {
-    const id = await window.marble.agent.start({ provider: 'fake' });
-    window.marble.agent.remember(id);
-    return id;
-  });
-  await select(page, 'h');
-  await handle(page).click();
-  await card(page).waitFor();
-  assert.equal(await page.getByRole('button', { name: 'Open this chat on the side' }).isVisible(), true);
-  assert.equal(await page.getByRole('button', { name: 'Close' }).isVisible(), true);
-  assert.equal(await page.getByRole('button', { name: 'Open this chat on the Agents page' }).isVisible(), false);
-
-  await page.getByRole('button', { name: 'Open this chat on the side' }).click();
-  await page.waitForFunction(() => document.querySelectorAll('.marble-callout').length === 0);
-  await page.waitForFunction(() => document.querySelector('marble-agent-drawer')?.isOpen === true);
-  const drawerId = await page.evaluate(() => document.querySelector('marble-agent-drawer').shadowRoot.querySelector('marble-conversation').getAttribute('conversation'));
-  assert.notEqual(drawerId, earlier, 'opening the side before a send does not resume the last chat');
-});
-
 test('Open in Agents leaves for the Agents page with the chat open', async () => {
   const page = await open();
   await select(page, 'h');
@@ -435,12 +526,6 @@ test('Open in Agents leaves for the Agents page with the chat open', async () =>
 
 test('Close puts the card away and leaves nothing on the page', async () => {
   const page = await open();
-  await select(page, 'p');
-  await handle(page).click();
-  await card(page).waitFor();
-  await page.getByRole('button', { name: 'Close' }).click();
-  await page.waitForFunction(() => document.querySelectorAll('.marble-callout').length === 0);
-
   await select(page, 'p');
   await handle(page).click();
   await sendFromCard(page, 'script:quiet');
@@ -531,4 +616,20 @@ test('the drawer\'s switcher lists this app\'s agents first, apart from the rest
   const order = await drawer.locator('.menu.recent').evaluate((menu) => [...menu.children].map((el) => el.className || el.getAttribute('role')));
   assert.equal(order[0], 'seg');
   assert.equal(order[1], 'menuitem', 'this app\'s chat comes straight under its heading');
+});
+
+test('a data-marble-run button starts an agent with its brief, aimed at its element', async () => {
+  const page = await open('runnable');
+  await page.getByRole('button', { name: 'Fill' }).click();
+  const run = await until(page, async () => {
+    for (const s of await window.marble.agent.conversations()) {
+      const turn = (await window.marble.agent.conversation(s.id)).turns?.[0];
+      if (turn?.prompt) return { id: s.id, prompt: turn.prompt, context: turn.context };
+    }
+    return null;
+  });
+  assert.match(run.prompt, /Look it up by its title and fill the rest\./);
+  assert.equal(run.context.target, 'runnable');
+  assert.deepEqual(run.context.selection, ['r2'], 'the scope it names');
+  assert.equal(await page.evaluate((cid) => window.marble.agent.attending(cid), run.id), true, 'pressed here, so followed here');
 });

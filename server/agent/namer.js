@@ -93,7 +93,7 @@ export function cleanTitle(raw) {
 /** The CLIs are asked from an empty directory with `--setting-sources project`
  *  (claude) or a throwaway workspace (cursor): naming a chat must not run the
  *  person's hooks, skills or memory, and must not touch their project. */
-async function scratch() {
+export async function scratch() {
   const dir = path.join(os.tmpdir(), 'marble-agent-namer');
   await fsp.mkdir(dir, { recursive: true });
   return dir;

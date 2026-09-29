@@ -14,6 +14,7 @@
 
 import crypto from 'node:crypto';
 
+import { sliceOf } from '../engine.js';
 import { json, readJson, send } from '../http.js';
 import { parsePath } from '../paths.js';
 import { sameOrigin } from '../sessions.js';
@@ -100,11 +101,13 @@ const publicMeter = (meter) => {
   return out;
 };
 
-export function createAgentRoutes({ store, runner, tools, hub, providers, writeOps, restore, maxBody, gated = false, keys = null, anthropicBase = 'https://api.anthropic.com', skills = [], usage = null, usageHistory = null, root = null, streams = null }) {
+export function createAgentRoutes({ store, runner, tools, hub, providers, writeOps, restore, maxBody, gated = false, keys = null, anthropicBase = 'https://api.anthropic.com', skills = [], usage = null, usageHistory = null, root = null, streams = null, offer = null, readSource = null }) {
   let detected = null;
   // Turns being undone right now. The undoneAt check alone lets two requests
   // that arrive together both pass it before either has written.
   const undoing = new Set();
+  // Offers already written, by element and content (POST /agent/offer).
+  const offers = new Map();
 
   // One Claude, signed in one of two ways: the Claude login
   // (claude-subscription) or an API key (claude-api). `claudeAuth` says which;
@@ -406,6 +409,32 @@ export function createAgentRoutes({ store, runner, tools, hub, providers, writeO
         }
         return json(res, 200, await publicSettings());
       }
+    }
+
+    // What a fresh callout card offers for one element: suggestions written
+    // for it, read from the stored document rather than the page's copy. 204
+    // when this host writes none (no model, a document it cannot read, no
+    // answer); the card keeps its plain defaults. One answer per element and
+    // content, for a while, so reopening a card does not ask again.
+    if (route === '/agent/offer' && method === 'POST') {
+      const body = await readJson(req, maxBody);
+      const docPath = typeof body.path === 'string' ? body.path : '';
+      const ids = (Array.isArray(body.ids) ? body.ids : []).filter((id) => typeof id === 'string' && id).slice(0, 8);
+      const words = typeof body.words === 'string' ? body.words.slice(0, 400) : '';
+      if (!offer || !readSource || !docPath || !ids.length) { res.writeHead(204); return res.end(); }
+      const source = await readSource(docPath).catch(() => null);
+      if (!source) { res.writeHead(204); return res.end(); }
+      const html = ids.map((id) => { try { return sliceOf(source, id).html; } catch { return ''; } }).join('\n');
+      const key = crypto.createHash('sha1').update(`${docPath}\0${ids.join(',')}\0${words}\0${html}`).digest('hex');
+      let written = offers.get(key);
+      if (written === undefined) {
+        const title = /<title[^>]*>([^<]*)<\/title>/i.exec(source)?.[1]?.trim() ?? '';
+        written = await offer({ title, html, words }).catch(() => null);
+        offers.set(key, written);
+        if (offers.size > 200) offers.delete(offers.keys().next().value);
+      }
+      if (!written) { res.writeHead(204); return res.end(); }
+      return json(res, 200, written);
     }
 
     // An image pasted or dropped into a composer. It becomes a file because
