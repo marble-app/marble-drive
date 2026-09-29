@@ -58,7 +58,11 @@ test('already there, but that side is on standby: an error that names lease-to',
   const fly = side('fly', log, { health: async () => ({ ok: true, standby: true }) });
   const result = await moveHome({ to: 'fly', sides: { mac: side('mac', log), fly }, client: lease(), ...quick });
   assert.deepEqual([result.ok, result.step], [false, 'already']);
-  assert.match(result.why, /on standby.*lease-to fly/);
+  // The usual way here is a move that stopped on an unverified copy: the safe
+  // command gives the drive back to the other side, so it comes first.
+  assert.match(result.why, /on standby.*run drive-home lease-to mac.*lease-to fly/);
+  assert.match(result.why, /lease-to fly only if you know fly's copy is current/);
+  assert.ok(result.why.indexOf('lease-to mac') < result.why.indexOf('lease-to fly'));
   assert.deepEqual(log, []);
 });
 
@@ -215,6 +219,18 @@ test('an unreadable lease while settling releases nothing', async () => {
   assert.deepEqual(log, ['fly.hold', 'fly.upload@0']);
 });
 
+test('a failed hold of the arriving side during hand-back is carried into the error', async () => {
+  const log = [];
+  const client = lease();
+  const mac = side('mac', log, { healthy: async () => false, hold: async () => boom() });
+  const result = await moveHome({ to: 'mac', sides: { mac, fly: side('fly', log) }, client, ...quick });
+  assert.deepEqual([result.ok, result.step], [false, 'start']);
+  assert.deepEqual(client.current, { home: 'fly', epoch: 2 });
+  assert.match(result.why, /did not come up as home; also, holding mac failed: boom — it may still be serving; the lease no longer names it, so its uploads stop/);
+  assert.match(result.why, /the lease names fly \(epoch 2\), which was released/);
+  assert.equal(log.at(-1), 'fly.release');
+});
+
 test('a leaving host that cannot be held: old home released, lease untouched', async () => {
   const log = [];
   const client = lease();
@@ -351,6 +367,42 @@ test('lease-to moves nothing when the other side cannot be held', async () => {
   assert.deepEqual([result.ok, result.step], [false, 'hold']);
   assert.deepEqual(client.current, { home: 'mac', epoch: 1 });
   assert.deepEqual(log, []);
+  // The hold file may already be written: the side would come up on standby.
+  assert.match(result.why, /a hold file may have been left on mac \(hold-<drive> in its config folder\)/);
+  assert.match(result.why, /on standby at its next restart until the file is removed/);
+});
+
+test('lease-to: a failed hold names the hold file when the side knows it', async () => {
+  const log = [];
+  const client = lease({ home: 'mac', epoch: 1 });
+  const mac = side('mac', log, { holdFile: '/Users/b/.config/marble-drive/hold-bryan', health: async () => ({ ok: true, standby: true }), hold: async () => boom() });
+  const result = await leaseTo({ to: 'fly', sides: { mac, fly: side('fly', log) }, client, log: () => {} });
+  assert.deepEqual([result.ok, result.step], [false, 'hold']);
+  assert.match(result.why, /mac could not be held \(boom\)/);
+  assert.match(result.why, /a hold file may have been left on mac \(\/Users\/b\/\.config\/marble-drive\/hold-bryan\)/);
+});
+
+test('lease-to refuses when the side the lease names cannot be read: nothing changes', async () => {
+  const log = [];
+  const client = lease({ home: 'mac', epoch: 1 });
+  const mac = side('mac', log, { health: async () => { throw new Error('connection refused'); } });
+  const result = await leaseTo({ to: 'fly', sides: { mac, fly: side('fly', log) }, client, log: () => {} });
+  assert.deepEqual([result.ok, result.step], [false, 'health']);
+  assert.match(result.why, /mac's \/health could not be read \(connection refused\)/);
+  assert.match(result.why, /nothing changed; run drive-home lease-to fly again once mac answers/);
+  assert.deepEqual(log, []);
+  assert.deepEqual(client.current, { home: 'mac', epoch: 1 });
+});
+
+test('lease-to refuses when the side the lease names answers without saying standby', async () => {
+  const log = [];
+  const client = lease({ home: 'mac', epoch: 1 });
+  const mac = side('mac', log, { health: async () => ({ ok: false }) });
+  const result = await leaseTo({ to: 'fly', sides: { mac, fly: side('fly', log) }, client, log: () => {} });
+  assert.deepEqual([result.ok, result.step], [false, 'health']);
+  assert.match(result.why, /does not say standby/);
+  assert.deepEqual(log, []);
+  assert.deepEqual(client.current, { home: 'mac', epoch: 1 });
 });
 
 test('lease-to: a lease move that fails leaves the other side held and releases nothing', async () => {

@@ -10,6 +10,7 @@
 // A side is { working, hold, release, health, healthy, upload, download }:
 // hold() returns once the side answers /health on standby; release() once it
 // answers at all; healthy() waits for it to answer as home (not standby).
+// holdFile, if a side has one, names where its hold file is, for messages.
 //
 // Every failure after the leaving host was held goes through settle(): it
 // reads the lease fresh and releases only the side the lease names (never one
@@ -54,7 +55,9 @@ export async function moveHome({
       return fail('already', `the lease names ${to} (epoch ${lease.epoch}), but ${to} does not answer /health (${err.message})`);
     }
     if (!health?.ok || health.standby) {
-      return fail('already', `the lease names ${to} (epoch ${lease.epoch}), but ${to} is on standby (held, or its copy not verified); if ${to}'s copy is good, run drive-home lease-to ${to} to release it`);
+      // The usual way here is a move that stopped on a copy it could not
+      // verify, so the safe command, giving the drive back, comes first.
+      return fail('already', `the lease names ${to} (epoch ${lease.epoch}), but ${to} is on standby (held, or its copy not verified); run drive-home lease-to ${from} to give the drive back to ${from}, whose copy is good (run drive-home lease-to ${to} only if you know ${to}'s copy is current)`);
     }
     return { ok: true, already: true, lease };
   }
@@ -135,10 +138,17 @@ export async function moveHome({
 
   const handBack = async (step, why) => {
     await giveBack(moved.epoch);
+    let after = null;
     try {
-      const after = await client.get();
-      if (after.home === from) await arriving.hold().catch(() => {});
+      after = await client.get();
     } catch { /* settle reports it */ }
+    if (after?.home === from) {
+      try {
+        await arriving.hold();
+      } catch (err) {
+        why = `${why}; also, holding ${to} failed: ${err.message} — it may still be serving; the lease no longer names it, so its uploads stop`;
+      }
+    }
     return settle(step, why);
   };
 
@@ -183,7 +193,9 @@ export async function moveHome({
 // not verified (moveHome's message names it), or a side left on standby. The
 // other side is held first, so there is never a moment with two homes; it
 // refuses when the other side is serving as home, because its newest changes
-// would be left behind (and then overwritten in the hub): use moveHome.
+// would be left behind (and then overwritten in the hub): use moveHome. It
+// fails closed: when the lease names the other side, that side must say
+// standby on /health, and one that cannot be read may be serving.
 export async function leaseTo({ to, sides, client, log = console.log }) {
   const other = otherOf(to);
   let lease;
@@ -193,9 +205,17 @@ export async function leaseTo({ to, sides, client, log = console.log }) {
     return fail('lease', `the lease could not be read (${err.message}); nothing was touched`);
   }
   if (lease.home === other) {
-    const health = await sides[other].health().catch(() => null);
+    let health;
+    try {
+      health = await sides[other].health();
+    } catch (err) {
+      return fail('health', `the lease names ${other} (epoch ${lease.epoch}), and ${other}'s /health could not be read (${err.message}), so it may be serving as home; nothing changed; run drive-home lease-to ${to} again once ${other} answers`);
+    }
     if (health?.ok && !health.standby) {
       return fail('serving', `${other} is serving the drive as home (epoch ${lease.epoch}); moving only the lease would leave its newest changes behind: run drive-home to ${to}`);
+    }
+    if (!health?.ok || health.standby !== true) {
+      return fail('health', `the lease names ${other} (epoch ${lease.epoch}), and ${other} does not say standby on /health, so it may be serving as home; nothing changed; run drive-home lease-to ${to} again once ${other} answers on standby`);
     }
   }
 
@@ -203,7 +223,8 @@ export async function leaseTo({ to, sides, client, log = console.log }) {
   try {
     await sides[other].hold();
   } catch (err) {
-    return fail('hold', `${other} could not be held (${err.message}); the lease was not moved (it names ${lease.home}, epoch ${lease.epoch})`);
+    const file = sides[other].holdFile ?? 'hold-<drive> in its config folder';
+    return fail('hold', `${other} could not be held (${err.message}); the lease was not moved (it names ${lease.home}, epoch ${lease.epoch}); a hold file may have been left on ${other} (${file}), and ${other} will come up on standby at its next restart until the file is removed`);
   }
 
   if (lease.home !== to) {

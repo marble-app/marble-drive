@@ -100,6 +100,7 @@ function macSide() {
       unmark: () => fsp.rm(hold, { force: true }),
       restart: () => run('/bin/zsh', [home, 'restart', drive]),
     }),
+    holdFile: hold,
     upload: async ({ epoch }) => json((await run(process.execPath, [tool, 'up', '--root', mac.root, '--epoch', String(epoch)], { env })).stdout),
     download: async () => json((await run(process.execPath, [tool, 'down', '--root', mac.root], { env })).stdout),
   };
@@ -118,6 +119,7 @@ function flySide() {
       unmark: () => sh(`rm -f ${hold}`),
       restart: () => sh('bash ~/app/release.sh apply'),
     }),
+    holdFile: `${hold} on ${sprite}`,
     upload: async ({ epoch }) => json((await sh(`${tool} up --root /drive --epoch ${epoch}`)).stdout),
     download: async () => json((await sh(`${tool} down --root /drive`)).stdout),
   };
