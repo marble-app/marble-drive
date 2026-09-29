@@ -9,7 +9,9 @@
 // believes should serve), and it never throws. If the lease cannot be read it
 // starts nothing and says so. After the lease moved, a failure first tries to
 // hand the lease back; the arriving side is started (as standby) only if the
-// lease then names the old home.
+// lease then names the old home. A lease that names the arriving side is
+// obeyed only if its download verified in this run; an unverified copy started
+// as home would upload over the hub, so then nothing is started.
 
 const fail = (step, why) => ({ ok: false, step, why });
 
@@ -28,7 +30,12 @@ export async function moveHome({
   const arriving = sides[to];
   const started = Date.now();
 
-  const lease = await client.get();
+  let lease;
+  try {
+    lease = await client.get();
+  } catch (err) {
+    return fail('lease', `the lease could not be read (${err.message}); nothing was stopped`);
+  }
   if (lease.home === to) return { ok: true, already: true, lease };
 
   if (!now) {
@@ -47,12 +54,16 @@ export async function moveHome({
     }
   }
 
+  let verified = false;
   const settle = async (step, why) => {
     let current;
     try {
       current = await client.get();
     } catch (err) {
       return fail(step, `${why}; the lease could not be read (${err.message}), so nothing was started; run drive-home again once it is reachable`);
+    }
+    if (current.home === to && !verified) {
+      return fail(step, `${why}; the lease still names ${to} (epoch ${current.epoch}), whose copy is not verified, so nothing was started; run drive-home to ${from} once the lease is reachable`);
     }
     try {
       await sides[current.home].start();
@@ -64,11 +75,9 @@ export async function moveHome({
 
   const giveBack = async (epoch) => {
     try {
-      const back = await client.move(from, epoch);
-      return back;
+      await client.move(from, epoch);
     } catch (err) {
       log(`[move] could not hand the lease back: ${err.message}`);
-      return null;
     }
   };
 
@@ -86,18 +95,20 @@ export async function moveHome({
     moved = await client.move(to, lease.epoch);
   } catch (err) {
     // The request may have committed even though it threw: look, and undo it.
-    try {
-      const fresh = await client.get();
-      if (fresh.home === to) await giveBack(fresh.epoch);
-    } catch { /* settle reports an unreadable lease */ }
+    if (err.status !== 409) {
+      try {
+        const fresh = await client.get();
+        if (fresh.home === to) await giveBack(fresh.epoch);
+      } catch { /* settle reports an unreadable lease */ }
+    }
     return settle('lease', `the lease could not move (${err.message})`);
   }
 
   const handBack = async (step, why) => {
     await giveBack(moved.epoch);
     try {
-      const now2 = await client.get();
-      if (now2.home === from) await arriving.start().catch(() => {}); // comes up standby
+      const after = await client.get();
+      if (after.home === from) await arriving.start().catch(() => {}); // comes up standby
     } catch { /* settle reports it */ }
     return settle(step, why);
   };
@@ -108,6 +119,7 @@ export async function moveHome({
   if (!down.matches) {
     return handBack('verify', `counts differ: hub ${down.state.files}/${down.state.documents}, here ${down.counts.files}/${down.counts.documents}`);
   }
+  verified = true;
   try {
     await arriving.start();
     if (!(await arriving.healthy())) return handBack('start', `${to} did not come up as home`);

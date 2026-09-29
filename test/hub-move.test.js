@@ -131,7 +131,7 @@ test('an arriving host that is not healthy hands the lease back', async () => {
   assert.equal(log.at(-1), 'fly.start');
 });
 
-test('a failed hand-back starts the side the lease still names, not the old home', async () => {
+test('a failed hand-back with an unverified arriving copy starts nothing', async () => {
   const log = [];
   const client = lease();
   const base = client.move;
@@ -140,9 +140,8 @@ test('a failed hand-back starts the side the lease still names, not the old home
   const mac = side('mac', log, { download: async () => ({ ok: false, why: 'disk' }) });
   const result = await moveHome({ to: 'mac', sides: { mac, fly: side('fly', log) }, client, ...quick });
   assert.equal(result.step, 'download');
-  assert.match(result.why, /lease names mac/);
-  assert.equal(log.at(-1), 'mac.start');
-  assert.ok(!log.includes('fly.start'));
+  assert.match(result.why, /lease still names mac.*not verified.*nothing was started/);
+  assert.deepEqual(log, ['fly.stop', 'fly.upload@0']);
 });
 
 test('a lease move that committed but threw is handed back', async () => {
@@ -218,4 +217,40 @@ test('an unreachable leaving host during the idle wait names --now', async () =>
   assert.deepEqual([result.ok, result.step], [false, 'idle']);
   assert.match(result.why, /--now/);
   assert.deepEqual(log, []);
+});
+
+test('a forward move refused with 409 is not handed back and starts nothing if it names mac', async () => {
+  const log = [];
+  let current = { home: 'fly', epoch: 0 };
+  let moves = 0;
+  const client = {
+    get: async () => current,
+    move: async () => { moves += 1; current = { home: 'mac', epoch: 1 }; throw Object.assign(new Error('stale'), { status: 409, lease: current }); },
+  };
+  const result = await moveHome({ to: 'mac', sides: { mac: side('mac', log), fly: side('fly', log) }, client, ...quick });
+  assert.equal(result.step, 'lease');
+  assert.equal(moves, 1);
+  assert.match(result.why, /lease still names mac/);
+  assert.deepEqual(log, ['fly.stop', 'fly.upload@0']);
+});
+
+test('an unreadable first lease touches no side', async () => {
+  const log = [];
+  const client = { get: async () => { throw new Error('offline'); }, move: async () => {} };
+  const result = await moveHome({ to: 'mac', sides: { mac: side('mac', log), fly: side('fly', log) }, client, ...quick });
+  assert.deepEqual([result.ok, result.step], [false, 'lease']);
+  assert.deepEqual(log, []);
+});
+
+test('a verified arriving copy whose start fails and hand-back fails is started by settle', async () => {
+  const log = [];
+  const client = lease();
+  const base = client.move;
+  let calls = 0;
+  client.move = async (to, epoch) => { calls += 1; if (calls === 2) throw new Error('hub down'); return base(to, epoch); };
+  const mac = side('mac', log, { start: async () => { log.push('mac.start'); throw new Error('nope'); } });
+  const result = await moveHome({ to: 'mac', sides: { mac, fly: side('fly', log) }, client, ...quick });
+  assert.equal(result.step, 'start');
+  assert.deepEqual(log.slice(-2), ['mac.start', 'mac.start']);
+  assert.ok(!log.includes('fly.start'));
 });
