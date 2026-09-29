@@ -36,6 +36,7 @@ import { createStore } from '../server/store/index.js';
 import { createStandby } from '../server/standby.js';
 import { createLeaseClient } from '../server/hub/lease-client.js';
 import { loadHubSettings } from '../server/hub/settings.js';
+import { scheduleUploads } from '../server/hub/schedule.js';
 
 const [command = 'serve', ...rest] = process.argv.slice(2);
 
@@ -138,6 +139,20 @@ async function serve() {
         config,
         write: (where, text, { label }) => drive.putDocument(where, text, { label, event: 'changed' }),
       }).catch((err) => console.error('[apps] could not bring app pages forward:', err.message));
+    }
+    // Two homes (the owner's Mac and Fly): keep the hub current, and step down
+    // the moment the lease names the other machine. Exit 75 so the keeper
+    // (tools/sprite/serve.sh) starts again, asks home-mode.mjs, and comes back
+    // as standby.
+    const hubSettings = loadHubSettings(config.hubEnv);
+    if (hubSettings) {
+      scheduleUploads({
+        root: config.root,
+        settings: hubSettings,
+        client: createLeaseClient({ settings: hubSettings }),
+        onLost: () => setTimeout(() => process.exit(75), 100),
+      });
+      console.log(`[drive] hub: uploading ${hubSettings.HUB_DRIVE} from ${hubSettings.HUB_MACHINE} while it is home`);
     }
     const url = `http://localhost:${port}/`;
     console.log('[drive] serving at');
