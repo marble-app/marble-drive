@@ -42,6 +42,7 @@ import {
   titleize,
 } from '../paths.js';
 import { createBlobs } from './blobs.js';
+import { dataUri as markUri } from '../favicon.js';
 
 const HIDDEN = /^\./;
 
@@ -69,6 +70,25 @@ const dayOf = (source) =>
   source.match(
     /<meta[^>]+name="(?:day|newsletter):date"[^>]+content="(\d{4}-\d{2}-\d{2})"/i,
   )?.[1] ?? null;
+
+// The icon a document draws for itself, when it is its own: a data URI in its
+// head, because a .mrbl is one file (server/favicon.js). The marble every new
+// document starts with says nothing about which one this is, so it is left
+// out, and so is anything but a picture, or one too big to be an icon.
+const MARKS = new Set([markUri('doc'), markUri('drive')]);
+const ICON_MAX = 8 * 1024;
+const iconOf = (source) => {
+  const end = source.search(/<\/head>/i);
+  const head = end < 0 ? source.slice(0, 65536) : source.slice(0, end);
+  for (const tag of head.match(/<link\b[^>]*>/gi) ?? []) {
+    if (!/\brel=["']?(?:shortcut )?icon\b/i.test(tag)) continue;
+    const href = tag.match(/\bhref=(?:"([^"]*)"|'([^']*)')/i);
+    const uri = href?.[1] ?? href?.[2] ?? '';
+    if (uri.startsWith('data:image/') && uri.length <= ICON_MAX && !MARKS.has(uri)) return uri;
+    return null;
+  }
+  return null;
+};
 
 // What a .mrbl document is worth measuring in — how much of it a hand or a model
 // can address. Kept identical to Marble's own count so two hosts agree.
@@ -232,6 +252,7 @@ export function createFsStore({ root }) {
     ]);
     if (!info || source === null) return null;
     const { parent, name } = splitPath(clean);
+    const icon = iconOf(source);
     return {
       kind: 'doc',
       path: clean,
@@ -243,6 +264,7 @@ export function createFsStore({ root }) {
       bytes: info.size,
       modified: info.mtimeMs,
       created: info.birthtimeMs || info.ctimeMs,
+      ...(icon ? { icon } : {}),
     };
   }
 

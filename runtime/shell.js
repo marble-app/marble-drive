@@ -1,15 +1,17 @@
 // The shell: ⌘J opens the drive around the document you are in.
 //
 // The tree on the left, the chat on the right where it already is, and a thin
-// bar across the top that says where you are and lets you share it. Fit gives
-// the document the space the three leave; Float lays them over it as cards and
-// leaves the document where it was. Closed — App alone — nothing sits on the
-// page but a pill that rises at the top-left corner when the pointer goes
-// there, and the agent button in the other corner.
+// bar across the top that says where you are and lets you share it. Each side
+// is pinned or on hover, by its own button at its end of the bar: pinned, it
+// keeps a column and the document takes the space that is left; on hover, it
+// waits just off its edge and slides over the document as a card when the
+// pointer reaches for it. Closed — App alone — nothing sits on the page but a
+// pill that rises at the top-left corner when the pointer goes there, and the
+// agent button in the other corner.
 //
 // Everything here is transient chrome in an open shadow root, like the drawer:
-// the file on disk never hears about it. What it remembers (open or not, Fit or
-// Float, the tree shown or not, which folders are unfolded) is this browser's,
+// the file on disk never hears about it. What it remembers (open or not, which
+// sides are pinned, which folders are unfolded) is this browser's,
 // in localStorage, and it follows you from document to document because the
 // shell is the drive's, not any one page's.
 //
@@ -34,8 +36,8 @@
   const NAV_MAX = 520;
   // However wide the two panels are pulled, the document keeps this much.
   const PAGE_MIN = 360;
-  // Float keeps the sidebars out of the way until the pointer reaches for
-  // them: this close to the window's edge, and this long after it leaves.
+  // A side on hover stays out of the way until the pointer reaches for it:
+  // this close to the window's edge, and this long after it leaves.
   const EDGE = 10;
   const LINGER = 320;
   const GAP = 8;
@@ -101,8 +103,6 @@
   const PATHS = {
     nav: '<rect x="2" y="2.75" width="12" height="10.5" rx="2"/><path d="M6.25 2.75v10.5"/>',
     chat: '<rect x="2" y="2.75" width="12" height="10.5" rx="2"/><path d="M9.75 2.75v10.5"/>',
-    fit: '<rect x="2" y="2.75" width="12" height="10.5" rx="2"/><path d="M5.75 2.75v10.5M10.25 2.75v10.5"/>',
-    float: '<rect x="2" y="2.75" width="12" height="10.5" rx="2"/><path d="M5 5.75v4.5M11 5.75v4.5"/>',
     chev: '<path d="M6.75 5.25 9.5 8l-2.75 2.75"/>',
     down: '<path d="M5.25 6.75 8 9.5l2.75-2.75"/>',
     search: '<circle cx="7.25" cy="7.25" r="4.25"/><path d="m10.5 10.5 3 3"/>',
@@ -121,6 +121,21 @@
     grip: '<path d="M6 4h.01M10 4h.01M6 8h.01M10 8h.01M6 12h.01M10 12h.01" stroke-width="2"/>',
   };
   const icon = (name) => `<svg class="i" viewBox="0 0 16 16" aria-hidden="true">${PATHS[name]}</svg>`;
+  // The colour a folder wears on the Drive (templates/drive.mrbl, .item[data-realm]
+  // --folder), light and dark, so a row here is the same colour as its tile there.
+  const REALMS = {
+    research: ['#2f6f5b', '#6fbfa2'],
+    fun: ['#c45c3e', '#e08a6a'],
+    days: ['#6f8f7d', '#8fb09a'],
+    marble: ['#7e91a3', '#9bb0c0'],
+    travel: ['#3d6b8a', '#7aa0b8'],
+  };
+  const REALM_CSS = Object.entries(REALMS).map(([name, [light]]) => `[data-realm="${name}"] { --tint: ${light}; }`).join('\n    ')
+    + `\n    @media (prefers-color-scheme: dark) { ${Object.entries(REALMS).map(([name, [, dark]]) => `[data-realm="${name}"] { --tint: ${dark}; }`).join(' ')} }`;
+  const tidyHex = (value) => {
+    const m = String(value ?? '').trim().match(/^#([0-9a-f]{6})$/i);
+    return m ? `#${m[1].toLowerCase()}` : '';
+  };
   const LOGO = '<span class="logo" aria-hidden="true"><svg viewBox="0 0 20 20"><path d="M10 6 14 10 10 14 6 10z"/></svg></span>';
 
   const STYLE = `
@@ -158,9 +173,6 @@
     .spacer { flex: 1; }
     .share { height: 28px; padding: 0 12px; border-radius: 8px; background: var(--ink); color: var(--paper); font-weight: 600; font-size: 12.5px; display: flex; align-items: center; gap: 6px; flex: none; }
     .share[aria-expanded="true"] { background: var(--accent-ink); }
-    .seg { display: flex; padding: 2px; border-radius: 8px; background: var(--paper-2); flex: none; }
-    .seg button { width: 26px; height: 24px; border-radius: 6px; display: grid; place-items: center; color: var(--faint); }
-    .seg button[aria-pressed="true"] { background: var(--card); color: var(--ink); box-shadow: var(--shadow-rest); }
     .vr { width: 1px; height: 18px; background: var(--line); margin: 0 4px; flex: none; }
     button:focus-visible, a:focus-visible, input:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
 
@@ -204,6 +216,11 @@
     .row[aria-expanded="true"] .car { transform: rotate(90deg); }
     .row[aria-current="page"] { background: var(--accent-soft); color: var(--ink); font-weight: 560; }
     .row[aria-current="page"] .i { color: var(--accent-ink); }
+    /* A row wears its folder's colour, the one its tile has on the Drive; a
+       document with a favicon of its own shows that instead. */
+    ${REALM_CSS}
+    :is([data-realm], [data-tinted]) > .i:not(.car) { color: var(--tint); }
+    img.i { stroke: none; object-fit: contain; border-radius: 3px; }
     .row .where { margin-left: auto; padding-left: 8px; font-size: 11px; color: var(--faint); font-weight: 400; overflow: hidden; text-overflow: ellipsis; flex: 0 1 auto; }
     .empty { padding: 6px 10px; color: var(--faint); font-size: 12px; }
 
@@ -264,19 +281,19 @@
       transition: background-color 120ms var(--settle); }
     .edge:hover::before, .edge:focus-visible::before, :host([data-resizing]) .edge::before { background: var(--accent-ink); }
     .edge:focus-visible { outline: none; }
-    :host([data-mode="float"]) .edge::before { top: 14px; bottom: 14px; }
+    :host([data-nav="hover"]) .edge::before { top: 14px; bottom: 14px; }
     /* Under the hand the panel follows at once; easing would trail it. */
     :host([data-resizing]) .nav { transition: none; }
 
-    /* ── Float: the two sidebars as cards over the page ──
-       The bar stays where Fit has it in either mode. It is the one line that
+    /* ── On hover: a side as a card over the page ──
+       The bar stays docked whatever the sides do. It is the one line that
        says where you are, and a page that slid under it would lose its top
-       edge to it; Float is about the sidebars, not the bar. */
-    :host([data-mode="float"]) .nav { top: ${BAR + GAP}px; left: ${GAP}px; bottom: ${GAP}px; border: 1px solid var(--line); border-radius: 16px;
+       edge to it. */
+    :host([data-nav="hover"]) .nav { top: ${BAR + GAP}px; left: ${GAP}px; bottom: ${GAP}px; border: 1px solid var(--line); border-radius: 16px;
       box-shadow: var(--shadow-lift); background: color-mix(in srgb, var(--paper) 82%, transparent); -webkit-backdrop-filter: blur(18px) saturate(1.3); backdrop-filter: blur(18px) saturate(1.3); }
-    @media (prefers-reduced-transparency: reduce) { :host([data-mode="float"]) .nav { background: var(--paper); -webkit-backdrop-filter: none; backdrop-filter: none; } }
+    @media (prefers-reduced-transparency: reduce) { :host([data-nav="hover"]) .nav { background: var(--paper); -webkit-backdrop-filter: none; backdrop-filter: none; } }
 
-    /* ── Float, at rest: the sidebars wait at the edges ──
+    /* ── On hover, at rest: the side waits at its edge ──
        Each is a hand's reach away — the pointer at that edge brings it out —
        and a thin mark on the edge says that something is there. */
     :host([data-hide-nav]) .nav { transform: translateX(calc(-100% - 24px)); opacity: 0; pointer-events: none; visibility: hidden; --hide-after: ${MOTION}ms; }
@@ -286,13 +303,13 @@
     .hint[data-side="chat"] { right: 3px; }
     :host([data-hide-nav]) .hint[data-side="nav"], :host([data-hide-chat]) .hint[data-side="chat"] { opacity: 1; pointer-events: auto; }
 
-    /* ── Closed, or the tree put away ── */
+    /* ── Closed ── */
     :host(:not([data-open])) .bar { transform: translateY(-100%); opacity: 0; pointer-events: none; visibility: hidden; --hide-after: ${MOTION}ms; }
-    :host(:not([data-open])) .nav, :host([data-nav="off"]) .nav { transform: translateX(calc(-100% - 24px)); opacity: 0; pointer-events: none; visibility: hidden; --hide-after: ${MOTION}ms; }
-    /* In Fit each panel travels exactly as far as the page's edge does, on the
+    :host(:not([data-open])) .nav { transform: translateX(calc(-100% - 24px)); opacity: 0; pointer-events: none; visibility: hidden; --hide-after: ${MOTION}ms; }
+    /* Pinned, the tree travels exactly as far as the page's edge does, on the
        same curve, so the page is never seen pulling away from a panel that has
-       not arrived yet. Floating cards clear their own shadow on the way out. */
-    :host([data-mode="fit"]:not([data-open])) .nav, :host([data-mode="fit"][data-nav="off"]) .nav { transform: translateX(-100%); }
+       not arrived yet. A card on hover clears its own shadow on the way out. */
+    :host([data-nav="pin"]:not([data-open])) .nav { transform: translateX(-100%); }
 
     /* ── App alone: a pill at the top-left corner, only when the pointer rests there ──
        The hot strip is thin on purpose, and it asks for a moment's rest rather
@@ -388,18 +405,14 @@
         <div class="hint" data-side="chat" aria-hidden="true"></div>
         <button type="button" class="pill" aria-label="Open the drive (⌘J)">${LOGO}<b></b><kbd>⌘J</kbd></button>
         <header class="bar" aria-label="Drive">
-          <button type="button" class="ib" data-act="nav" aria-pressed="true" aria-label="Tree" title="Tree (⌘\\)">${icon('nav')}</button>
+          <button type="button" class="ib" data-act="nav" aria-pressed="true" aria-label="Pin the tree" title="Pin the tree (⌘\\)">${icon('nav')}</button>
           <a class="home" aria-label="Drive" title="Drive">${LOGO}</a>
           <nav class="crumbs" aria-label="Where you are"></nav>
           <span class="spacer"></span>
           <button type="button" class="ib" data-act="describe" aria-pressed="false" aria-label="Describe a change (⌘⇧D)" title="Describe a change (⌘⇧D)" hidden>${icon('describe')}</button>
           <button type="button" class="share" data-act="share" aria-haspopup="dialog" aria-expanded="false">${icon('share')}Share</button>
           <span class="vr"></span>
-          <span class="seg" role="group" aria-label="Layout">
-            <button type="button" data-act="fit" aria-pressed="true" aria-label="Fit" title="Fit — the document takes the space that is left">${icon('fit')}</button>
-            <button type="button" data-act="float" aria-pressed="false" aria-label="Float" title="Float — the panels lie over the document">${icon('float')}</button>
-          </span>
-          <button type="button" class="ib" data-act="chat" aria-pressed="true" aria-label="Chat" title="Chat" hidden>${icon('chat')}</button>
+          <button type="button" class="ib" data-act="chat" aria-pressed="true" aria-label="Pin the chat" title="Pin the chat" hidden>${icon('chat')}</button>
           <button type="button" class="ib" data-act="close" aria-label="Hide everything" title="Hide everything (⌘J)">${icon('collapse')}</button>
         </header>
         <nav class="nav" aria-label="Drive tree">
@@ -431,8 +444,8 @@
       this.sharing = this.$('.sharing');
       this.moving = this.$('.moving');
       this.phone = matchMedia(PHONE);
-      // A pointer that can hover is what Float's reaching is for; on a touch
-      // screen the sidebars simply stay out, as they always have.
+      // A pointer that can hover is what reaching for a side is for; on a
+      // touch screen every side simply stays pinned.
       this.fine = matchMedia('(hover: hover) and (pointer: fine)');
       this.shown = { nav: false, chat: false };
       this.quiet = { nav: false, chat: false };
@@ -441,11 +454,14 @@
       this.hideTimers = {};
       this.reduced = matchMedia('(prefers-reduced-motion: reduce)');
 
+      // Each side is pinned or on hover. Until one is chosen, it follows what
+      // this browser had before there was a choice per side: Float was both
+      // on hover, and a side put away was one out of the way.
+      const float = stored('mode', 'fit') === 'float';
       this.state = {
         open: stored('open', '0') === '1',
-        mode: stored('mode', 'fit') === 'float' ? 'float' : 'fit',
-        nav: stored('nav', '1') !== '0',
-        chat: stored('chat', '1') !== '0',
+        pinNav: stored('pinNav', float || stored('nav', '1') === '0' ? '0' : '1') === '1',
+        pinChat: stored('pinChat', float || stored('chat', '1') === '0' ? '0' : '1') === '1',
       };
       this.folded = new Set(JSON.parse(stored('folded', '[]')));
       this.unfolded = new Set(JSON.parse(stored('unfolded', '[]')));
@@ -462,9 +478,16 @@
       return window.marble?.app ?? '';
     }
 
-    /** Float, with a pointer that can reach: the sidebars hide until wanted. */
-    get autoHide() {
-      return this.state.open && this.state.mode === 'float' && this.fine.matches && !this.phone.matches;
+    /** A side on hover, with a pointer that can reach: it hides until wanted. */
+    hovers(side) {
+      const pinned = side === 'nav' ? this.state.pinNav : this.state.pinChat;
+      return this.state.open && !pinned && this.fine.matches && !this.phone.matches;
+    }
+
+    /** Whether a side takes a column of its own: pinned, or on a screen with
+     *  no pointer to reach for it with. */
+    docked(side) {
+      return !this.hovers(side);
     }
 
     get drawer() {
@@ -474,20 +497,24 @@
     /** What the drawer and anything else sitting in the page needs to know. */
     get layout() {
       const active = this.state.open && !this.phone.matches;
+      const chatDocked = this.docked('chat');
       return {
         open: active,
-        mode: this.state.mode,
-        nav: this.state.nav,
-        chat: this.state.chat,
-        top: this.state.mode === 'float' ? BAR + GAP : BAR,
+        // The chat's own: docked beside the page, or a card over it.
+        mode: chatDocked ? 'fit' : 'float',
+        nav: true,
+        chat: true,
+        pinNav: this.state.pinNav,
+        pinChat: this.state.pinChat,
+        top: chatDocked ? BAR : BAR + GAP,
         gap: GAP,
         // How much of the window the tree takes, so the chat's edge knows
         // how far it may be pulled.
-        side: active && this.state.nav ? this.navWidth + (this.state.mode === 'float' ? GAP : 0) : 0,
-        // In Float the chat is out only while it is reached for; `focusChat`
+        side: active ? this.navWidth + (this.docked('nav') ? 0 : GAP) : 0,
+        // On hover the chat is out only while it is reached for; `focusChat`
         // is a one-time ask to put the caret in it, for a reveal somebody
         // asked for rather than one a passing pointer caused.
-        chatShown: !this.autoHide || this.shown.chat,
+        chatShown: chatDocked || this.shown.chat,
         focusChat: Boolean(this.focusChat),
       };
     }
@@ -515,9 +542,8 @@
 
       this.bar.addEventListener('click', (event) => {
         const act = event.target.closest('[data-act]')?.dataset.act;
-        if (act === 'nav') this.set({ nav: !this.state.nav });
-        else if (act === 'fit' || act === 'float') this.set({ mode: act });
-        else if (act === 'chat') this.set({ chat: !this.state.chat });
+        if (act === 'nav') this.pin('nav', !this.state.pinNav);
+        else if (act === 'chat') this.pin('chat', !this.state.pinChat);
         else if (act === 'close') this.setOpen(false);
         else if (act === 'share') this.toggleSharing();
         else if (act === 'describe') dispatchEvent(new CustomEvent('marble-marks:toggle'));
@@ -632,13 +658,23 @@
       for (const [name, value] of Object.entries(patch)) {
         store(name, typeof value === 'boolean' ? (value ? '1' : '0') : value);
       }
-      // Arriving in Float shows both sidebars once, so it is plain what and
-      // where they are; the first thing done on the page puts them away.
-      if (this.autoHide && (patch.mode === 'float' && was.mode !== 'float' || patch.open && !was.open)) this.startIntro();
-      // Turned on while floating: out, for the hand that just asked for it.
-      if (this.autoHide && patch.nav && !was.nav) this.shown.nav = true;
-      if (this.autoHide && patch.chat && !was.chat) { this.shown.chat = true; this.focusChat = true; }
+      // Opening onto a side on hover shows it once, so it is plain what and
+      // where it is; the first thing done on the page puts it away.
+      if (patch.open && !was.open && (this.hovers('nav') || this.hovers('chat'))) this.startIntro();
       this.apply();
+    }
+
+    /** Pin a side, or set it on hover. Unpinned, it goes to its edge and
+     *  stays there until the hand that unpinned it has left and comes back. */
+    pin(side, pinned) {
+      const key = side === 'nav' ? 'pinNav' : 'pinChat';
+      if (this.state[key] === pinned) return;
+      clearTimeout(this.hideTimers[side]);
+      this.hideTimers[side] = null;
+      this.shown[side] = false;
+      this.quiet[side] = !pinned;
+      if (!pinned && side === 'nav' && this.nav.contains(this.shadowRoot.activeElement)) this.shadowRoot.activeElement.blur();
+      this.set({ [key]: pinned });
     }
 
     setOpen(open) {
@@ -647,7 +683,7 @@
       if (open) {
         // ⌘J has always meant "the agent": opening onto the chat puts you in
         // its box, and a shell without a chat puts you in the search.
-        if (!(this.state.chat && this.drawer)) this.search.focus({ preventScroll: true });
+        if (!this.drawer) this.search.focus({ preventScroll: true });
       } else {
         this.hidePops();
         if (this.shadowRoot.activeElement) this.shadowRoot.activeElement.blur();
@@ -665,18 +701,18 @@
       else this.peekTimer = setTimeout(() => this.removeAttribute('data-peek'), 140);
     }
 
-    // ------------------------------------------------------------ Float's reach
+    // ------------------------------------------------------------ reaching for a side
 
     startIntro() {
       this.intro = true;
-      this.shown.nav = this.state.nav;
-      this.shown.chat = this.state.chat && Boolean(this.drawer);
+      this.shown.nav = this.hovers('nav');
+      this.shown.chat = this.hovers('chat') && Boolean(this.drawer);
     }
 
     /** Bring a side out on purpose — ⌘K, the chat button, a conversation
      *  opened — rather than because the pointer passed by. */
     reveal(side, { focus = false } = {}) {
-      if (!this.autoHide) return;
+      if (!this.hovers(side)) return;
       this.quiet[side] = false;
       if (this.shown[side] && !(focus && side === 'chat')) return;
       clearTimeout(this.hideTimers[side]);
@@ -688,7 +724,7 @@
     /** Put a side away now, pointer or not: it stays away until the pointer
      *  has left and comes back for it. */
     conceal(side) {
-      if (!this.autoHide) return;
+      if (!this.hovers(side)) return;
       this.quiet[side] = true;
       const drawer = this.drawer;
       if (side === 'chat' && document.activeElement === drawer) {
@@ -708,9 +744,8 @@
 
     /** Whether a side is being reached for, read, typed in or resized. */
     wanted(side) {
-      if (!this.autoHide) return false;
-      if (side === 'nav' && !this.state.nav) return false;
-      if (side === 'chat' && (!this.state.chat || !this.drawer)) return false;
+      if (!this.hovers(side)) return false;
+      if (side === 'chat' && !this.drawer) return false;
       if (this.intro) return true;
       const focused = side === 'nav'
         ? this.nav.contains(this.shadowRoot.activeElement)
@@ -720,12 +755,15 @@
       const p = this.pointer;
       if (!p) return false;
       const atEdge = p.y > BAR && (side === 'nav' ? p.x <= EDGE : p.x >= innerWidth - EDGE);
+      // The side's own button in the bar is a reach for it too.
+      const b = this.$(`[data-act="${side}"]`).getBoundingClientRect();
+      const onButton = b.width > 0 && p.x >= b.left && p.x <= b.right && p.y >= b.top && p.y <= b.bottom;
       let over = false;
       if (this.shown[side]) {
         const r = this.rectOf(side);
         over = Boolean(r && r.width && p.x >= r.left - 16 && p.x <= r.right + 16 && p.y >= r.top - 16 && p.y <= r.bottom + 16);
       }
-      const reaching = atEdge || over;
+      const reaching = atEdge || onButton || over;
       // Put away on purpose: the same hand has to leave before it can call
       // the side back.
       if (this.quiet[side]) {
@@ -738,9 +776,9 @@
     /** Out at once when wanted; away a beat after it stops being wanted, so
      *  a hand crossing the gap between the edge and the card keeps it. */
     settle() {
-      if (!this.autoHide) return;
       let changed = false;
       for (const side of ['nav', 'chat']) {
+        if (!this.hovers(side)) continue;
         if (this.wanted(side)) {
           clearTimeout(this.hideTimers[side]);
           this.hideTimers[side] = null;
@@ -788,21 +826,25 @@
     }
 
     apply({ animate = true } = {}) {
-      const { open, mode, nav, chat } = this.layout;
+      const { open } = this.layout;
+      const { pinNav, pinChat } = this.state;
       this.toggleAttribute('data-open', open);
-      this.dataset.mode = mode;
-      this.dataset.nav = nav ? 'on' : 'off';
-      this.$('[data-act="nav"]').setAttribute('aria-pressed', String(nav));
-      this.$('[data-act="fit"]').setAttribute('aria-pressed', String(mode === 'fit'));
-      this.$('[data-act="float"]').setAttribute('aria-pressed', String(mode === 'float'));
+      this.dataset.nav = this.docked('nav') ? 'pin' : 'hover';
+      this.dataset.chat = this.docked('chat') ? 'pin' : 'hover';
+      const navButton = this.$('[data-act="nav"]');
+      navButton.setAttribute('aria-pressed', String(pinNav));
+      navButton.setAttribute('aria-label', pinNav ? 'Unpin the tree' : 'Pin the tree');
+      navButton.title = `${pinNav ? 'Unpin the tree: it waits at the edge' : 'Pin the tree'} (⌘\\)`;
       const chatButton = this.$('[data-act="chat"]');
       chatButton.hidden = !this.drawer;
+      chatButton.setAttribute('aria-pressed', String(pinChat));
+      chatButton.setAttribute('aria-label', pinChat ? 'Unpin the chat' : 'Pin the chat');
+      chatButton.title = pinChat ? 'Unpin the chat: it waits at the edge' : 'Pin the chat';
       this.$('[data-act="describe"]').hidden = !document.querySelector('.marble-marks-layer');
-      chatButton.setAttribute('aria-pressed', String(chat));
-      const auto = this.autoHide;
-      this.toggleAttribute('data-hide-nav', auto && nav && !this.shown.nav);
-      this.toggleAttribute('data-hide-chat', auto && chat && Boolean(this.drawer) && !this.shown.chat);
-      this.nav.inert = !open || !nav || (auto && !this.shown.nav);
+      const hoverNav = this.hovers('nav');
+      this.toggleAttribute('data-hide-nav', hoverNav && !this.shown.nav);
+      this.toggleAttribute('data-hide-chat', this.hovers('chat') && Boolean(this.drawer) && !this.shown.chat);
+      this.nav.inert = !open || (hoverNav && !this.shown.nav);
       this.bar.inert = !open;
       this.navWidth = this.clampNav(this.navWidth);
       this.style.setProperty('--nav-w', `${this.navWidth}px`);
@@ -810,7 +852,7 @@
       edge.setAttribute('aria-valuenow', String(this.navWidth));
       edge.setAttribute('aria-valuemin', String(NAV_MIN));
       edge.setAttribute('aria-valuemax', String(this.clampNav(NAV_MAX)));
-      this.dock(open ? { top: BAR, left: mode === 'fit' && nav ? this.navWidth : 0 } : null, { animate: animate && !this.hasAttribute('data-still') });
+      this.dock(open ? { top: BAR, left: this.docked('nav') ? this.navWidth : 0 } : null, { animate: animate && !this.hasAttribute('data-still') });
       if (open && !this.tree) this.load();
       this.announce();
     }
@@ -1004,7 +1046,7 @@
     // ------------------------------------------------------------ the tree's edge
 
     clampNav(px) {
-      const chat = this.state.chat && this.drawer?.isOpen ? this.drawer.width ?? 0 : 0;
+      const chat = this.drawer?.isOpen ? this.drawer.width ?? 0 : 0;
       const room = innerWidth - chat - PAGE_MIN;
       return Math.round(Math.max(NAV_MIN, Math.min(NAV_MAX, room, Number(px) || NAV)));
     }
@@ -1082,14 +1124,13 @@
         event.preventDefault();
         event.stopPropagation();
         if (!this.state.open) this.set({ open: true });
-        if (!this.state.nav) this.set({ nav: true });
         this.reveal('nav');
         this.search.focus({ preventScroll: true });
         this.search.select();
       } else if (mod && !event.shiftKey && event.key === '\\' && this.state.open) {
         event.preventDefault();
         event.stopPropagation();
-        this.set({ nav: !this.state.nav });
+        this.pin('nav', !this.state.pinNav);
       } else if (event.key === 'Escape' && (!this.menu.hidden || !this.sharing.hidden || !this.moving.hidden)) {
         event.stopPropagation();
         this.hidePops();
@@ -1256,8 +1297,15 @@
         });
       }
       this.watchAgents();
-      const [tree] = await Promise.all([drive.tree(''), this.pins && !this.pinsStale ? null : this.loadPins()]);
+      const [tree] = await Promise.all([
+        drive.tree(''),
+        this.pins && !this.pinsStale ? null : this.loadPins(),
+        // The drive's realms: which top-level folders wear which colour
+        // (server/drive-settings.js). Read once; they change by hand.
+        this.realms ? null : (drive.settings?.() ?? Promise.resolve(null)).then((s) => { this.realms = s?.realms ?? {}; }, () => { this.realms = {}; }),
+      ]);
       this.tree = tree;
+      this.byPath = new Map(this.docs().map((d) => [d.path, d]));
       this.drawTree();
     }
 
@@ -1275,8 +1323,46 @@
           kind: li.dataset.kind === 'folder' ? 'folder' : 'doc',
           label: [...li.querySelectorAll('[data-marble-editable]')].at(-1)?.textContent.trim() || nameOf(li.dataset.path),
         }));
+        // A colour somebody gave a folder on the Drive, kept in the same file
+        // beside the pins; the longest path that holds a row wins.
+        this.tints = [...doc.querySelectorAll('#folder-tints > [data-path][data-tint]')]
+          .map((li) => ({ path: li.dataset.path, hex: tidyHex(li.dataset.tint) }))
+          .filter((t) => t.path && t.hex)
+          .sort((a, b) => b.path.length - a.path.length);
       } catch {
         this.pins = [];
+        this.tints = [];
+      }
+    }
+
+    /** The colour a row wears: its folder's tint if somebody gave it one on
+     *  the Drive, else its realm's; a document takes the folder it is in. */
+    wear(el, path, kind) {
+      const folder = kind === 'folder' ? path : folderOf(path);
+      if (!folder) return;
+      const tint = this.tints?.find((t) => folder === t.path || folder.startsWith(`${t.path}/`));
+      if (tint) {
+        el.dataset.tinted = '';
+        el.style.setProperty('--tint', tint.hex);
+        return;
+      }
+      const realm = this.realms?.[splitPath(folder)[0]];
+      if (REALMS[realm]) el.dataset.realm = realm;
+    }
+
+    /** A row's glyph: the document's own favicon when it has one, else the
+     *  folder or the document, in the row's colour. */
+    glyph(el, path, kind) {
+      const own = kind === 'doc' ? this.byPath?.get(path)?.icon : null;
+      if (own) {
+        const img = h('img', 'i');
+        img.src = own;
+        img.alt = '';
+        img.decoding = 'async';
+        el.prepend(img);
+      } else {
+        el.insertAdjacentHTML('afterbegin', icon(kind === 'folder' ? 'folder' : 'doc'));
+        this.wear(el, path, kind);
       }
     }
 
@@ -1420,13 +1506,11 @@
     /** Opens the conversation at its document, with the chat beside it. */
     openThread(c) {
       if (c.target === this.here) {
-        if (!this.state.chat) this.set({ chat: true });
         dispatchEvent(new CustomEvent('marble:agent-open', { detail: { id: c.id } }));
         return;
       }
       // The drawer on the next page picks the conversation up from the hash
       // and opens with it, the way the Drive hands one over.
-      if (!this.state.chat) this.set({ chat: true });
       location.href = `${window.marble.href(c.target)}#chat=${encodeURIComponent(c.id)}`;
     }
 
@@ -1455,8 +1539,8 @@
         go.type = 'button';
         go.dataset.thread = app.threads[0].id;
         go.title = `${app.path} — open with its chat`;
-        go.innerHTML = icon('doc');
         go.append(h('span', 'name', nameOf(app.path)));
+        this.glyph(go, app.path, 'doc');
         // Unfolded, these fade and the rows below say it agent by agent.
         row.append(go, this.pips(app.threads));
         li.append(row);
@@ -1569,8 +1653,8 @@
     docRow(entry, { where = false } = {}) {
       const a = h('a', 'row');
       a.href = window.marble?.href?.(entry.path) ?? '#';
-      a.innerHTML = icon('doc');
       a.append(h('span', '', entry.name));
+      this.glyph(a, entry.path, 'doc');
       a.title = entry.path;
       if (where) {
         const folder = folderOf(entry.path);
@@ -1621,8 +1705,9 @@
           b.type = 'button';
           b.dataset.folder = child.path;
           b.setAttribute('aria-expanded', String(open));
-          b.innerHTML = `<svg class="i car" viewBox="0 0 16 16" aria-hidden="true">${PATHS.chev}</svg>${icon('folder')}`;
           b.append(h('span', '', child.name));
+          this.glyph(b, child.path, 'folder');
+          b.insertAdjacentHTML('afterbegin', `<svg class="i car" viewBox="0 0 16 16" aria-hidden="true">${PATHS.chev}</svg>`);
           li.append(b);
           if (open) li.append(this.branch(child));
         } else {
@@ -1653,8 +1738,8 @@
         for (const pin of this.pins) {
           const a = h('a', 'row');
           a.href = pin.kind === 'folder' ? this.folderHref(pin.path) : window.marble?.href?.(pin.path) ?? '#';
-          a.innerHTML = icon(pin.kind === 'folder' ? 'folder' : 'doc');
           a.append(h('span', '', pin.label));
+          this.glyph(a, pin.path, pin.kind);
           a.title = pin.path;
           const folder = folderOf(pin.path);
           if (folder) a.append(h('span', 'where', nameOf(folder)));
@@ -1825,11 +1910,12 @@
       layout: null,
       toggle: () => el.setOpen(!el.state.open),
       setOpen: (open) => el.setOpen(open),
-      setChat: (chat) => el.set({ chat }),
+      // The chat pinned, or on hover: there is no chat turned off in the shell.
+      setChat: (pinned) => el.pin('chat', pinned),
       reveal: (side, options) => el.reveal(side, options),
       conceal: (side) => el.conceal(side),
-      // Whether the sidebars are floating and hiding until reached for.
-      get autoHide() { return el.autoHide; },
+      // Whether the chat is on hover, hiding until reached for.
+      get autoHide() { return el.hovers('chat'); },
       // The drawer leaves ⌘J to the shell wherever the shell can open.
       get takesKeys() { return !el.phone.matches; },
     };

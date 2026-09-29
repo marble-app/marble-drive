@@ -218,3 +218,15 @@ test('every method refuses a path that leaves the drive', async () => {
 });
 
 test.after(() => fsp.rm(ROOT, { recursive: true, force: true }));
+
+test('a document\'s own favicon rides along; the marble every document starts with does not', async () => {
+  const { link } = await import('../server/favicon.js');
+  const own = "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg'/%3E";
+  const withIcon = (href) => doc('Icon').replace('</title>', `</title><link rel="icon" href="${href}">`);
+  await store.write('icons/own', withIcon(own));
+  await store.write('icons/marble', doc('Marble').replace('</title>', `</title>${link('doc')}`));
+  await store.write('icons/remote', withIcon('https://example.com/icon.png'));
+  assert.equal((await store.stat('icons/own')).icon, own);
+  assert.equal('icon' in (await store.stat('icons/marble')), false);
+  assert.equal('icon' in (await store.stat('icons/remote')), false, 'only a picture carried in the file');
+});

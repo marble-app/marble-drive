@@ -18,7 +18,8 @@
 //   has(path)           → boolean          a document is there
 //   hasFolder(path)     → boolean          a folder is there
 //   hasFile(path)       → boolean          something that is neither is there
-//   stat(path)          → entry|null       {kind,path,name,folder,title,day,nodes,bytes,modified,created}
+//   stat(path)          → entry|null       {kind,path,name,folder,title,day,nodes,bytes,modified,created,icon?}
+//                                          icon: the document's own favicon, a data URI, when not the marble
 //   list({folder,recursive,files}) → entry[]  flat, newest first, folders included;
 //                                            `files` adds kind:'file' for what is
 //                                            in the folder but is not a document

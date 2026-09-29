@@ -1,18 +1,26 @@
 // The shell: ⌘J opens the drive around the open document — the tree, the bar,
 // and the chat where it already was. What it has to get right is that the
-// document is still the document: Fit moves it with a transient stylesheet and
-// nothing else, Float leaves it where it was, and closing takes every trace of
-// the shell off the page but a pill that only rises when the pointer asks.
+// document is still the document: a pinned side moves it with a transient
+// stylesheet and nothing else, a side on hover leaves it where it was, and
+// closing takes every trace of the shell off the page but a pill that only
+// rises when the pointer asks.
 import assert from 'node:assert/strict';
+import fsp from 'node:fs/promises';
+import path from 'node:path';
 import test from 'node:test';
 
 import { GARDEN, startDrive } from './harness.js';
 
 const NOTES = GARDEN.replace('Research Garden', 'Field notes').replace('<title>Garden</title>', '<title>Field notes</title>');
+// A document that draws its own icon, and one that keeps the marble.
+const OWN_ICON = "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='8' fill='%23222'/%3E%3C/svg%3E";
+const BOARD = GARDEN.replace('</title>', `</title>\n<link rel="icon" href="${OWN_ICON}">`);
 
 const host = await startDrive({
-  documents: { garden: GARDEN, 'Research/Specs/Field notes': NOTES, 'Travel/plans': GARDEN, drive: GARDEN },
+  documents: { garden: GARDEN, 'Research/Specs/Field notes': NOTES, 'Travel/plans': GARDEN, 'Travel/Board': BOARD, drive: GARDEN },
 });
+// Research wears a realm's colour, as its tile does on the Drive.
+await fsp.writeFile(path.join(host.drive.store.marbleDir, 'drive.json'), JSON.stringify({ realms: { Research: 'research' } }));
 test.after(() => host.close());
 
 async function visit(path = 'Research/Specs/Field notes', options) {
@@ -61,7 +69,7 @@ test('closed, the page is the page: no bar, no tree, no margin, and a pill only 
   assert.deepEqual(errors.filter((m) => !/favicon/.test(m)), []);
 });
 
-test('⌘J opens Fit: the page gives up the top, the left and the right, and the chat sits under the bar', async () => {
+test('⌘J opens with both sides pinned: the page gives up the top, the left and the right, and the chat sits under the bar', async () => {
   const { page, shell, panel } = await visit();
   await page.keyboard.press('Control+j');
   await page.waitForFunction(() => document.querySelector('marble-agent-drawer').isOpen === true);
@@ -84,38 +92,80 @@ test('⌘J opens Fit: the page gives up the top, the left and the right, and the
   assert.deepEqual(await margins(page), { top: '0px', left: '0px', right: '0px' });
 });
 
-test('Float lays the sidebars over the page; the bar stays docked above it', async () => {
+// Each side's own button, at its end of the bar, pins it or sets it on hover.
+const unpin = async (shell, ...sides) => {
+  for (const side of sides) {
+    const button = shell.locator(`[data-act="${side}"]`);
+    if (await button.getAttribute('aria-pressed') === 'true') await button.click();
+  }
+};
+
+test('a side on hover lies over the page as a card when it comes out; the bar stays docked above it', async () => {
   const { page, shell, panel } = await visit();
   await page.keyboard.press('Control+j');
-  await shell.locator('[data-act="float"]').click();
+  await margins(page);
+  await unpin(shell, 'nav', 'chat');
   assert.deepEqual(await margins(page), { top: '44px', left: '0px', right: '0px' });
-  assert.equal(await panel.getAttribute('data-shell'), 'float');
+  assert.equal(await shell.locator('[data-act="nav"]').getAttribute('aria-pressed'), 'false');
+  assert.equal(await shell.locator('[data-act="chat"]').getAttribute('aria-label'), 'Pin the chat');
   assert.deepEqual(await shell.locator('.bar').evaluate((el) => { const r = el.getBoundingClientRect(); return [r.top, r.left, r.width]; }), [0, 0, 1280]);
-  // The cards sit just under the bar; the chat's glides from Fit's place.
+  // Reached for, the cards sit just under the bar, over the page.
+  await page.mouse.move(640, 420);
+  await page.mouse.move(3, 420);
+  await page.waitForFunction(() => !document.querySelector('marble-shell').hasAttribute('data-hide-nav'));
   assert.equal(await shell.locator('.nav').evaluate((el) => el.getBoundingClientRect().top), 44 + 8);
+  assert.equal((await margins(page)).left, '0px', 'the page stays where it was');
+  await page.mouse.move(1277, 420);
   await page.waitForFunction(() => document.querySelector('marble-agent-drawer').shadowRoot.querySelector('.panel').getBoundingClientRect().top === 44 + 8);
-  assert.equal(await shell.locator('[data-act="float"]').getAttribute('aria-pressed'), 'true');
-  await shell.locator('[data-act="fit"]').click();
-  assert.equal((await margins(page)).top, '44px');
+  assert.equal(await panel.getAttribute('data-shell'), 'float');
+  await page.mouse.move(640, 420);
+  await shell.locator('[data-act="nav"]').click();
+  await shell.locator('[data-act="chat"]').click();
+  assert.equal((await margins(page)).left, '260px', 'pinned again, the tree takes its column');
+  assert.equal(await panel.getAttribute('data-shell'), 'fit');
 });
 
-test('the tree and the chat each put away on their own, and the choice follows you to the next page', async () => {
+test('the tree and the chat pin on their own, and the choice follows you to the next page', async () => {
   const { page, shell } = await visit();
   await page.keyboard.press('Control+j');
-  await shell.locator('[data-act="chat"]').click();
+  await margins(page);
+  await unpin(shell, 'chat');
+  await page.mouse.move(640, 420);
   await page.waitForFunction(() => document.querySelector('marble-agent-drawer').isOpen === false);
   assert.equal(await isOpen(page), true, 'the shell stays');
   assert.equal((await margins(page)).right, '0px');
+  assert.equal((await margins(page)).left, '260px', 'the tree is still pinned');
   await page.keyboard.press('Control+\\');
-  assert.equal((await margins(page)).left, '0px');
-  await shell.locator('.nav').waitFor({ state: 'hidden' });
+  assert.equal((await margins(page)).left, '0px', '⌘\\ unpins the tree');
+  await page.waitForFunction(() => document.querySelector('marble-shell').hasAttribute('data-hide-nav'));
 
   await page.goto(`${host.base}/a/garden`);
   await page.waitForFunction(() => document.querySelector('marble-shell')?.hasAttribute('data-open'));
+  await page.mouse.move(640, 420);
   assert.equal((await margins(page)).top, '44px', 'still open on the next document');
-  assert.equal((await margins(page)).left, '0px', 'still without the tree');
-  assert.equal(await page.evaluate(() => document.querySelector('marble-agent-drawer').isOpen), false, 'still without the chat');
+  assert.equal((await margins(page)).left, '0px', 'the tree still on hover');
+  assert.equal(await page.evaluate(() => document.querySelector('marble-agent-drawer').isOpen), false, 'the chat still on hover');
   assert.equal(await shell.locator('.crumbs .here').innerText(), 'garden');
+  await page.keyboard.press('Control+\\');
+  assert.equal((await margins(page)).left, '260px', 'and ⌘\\ pins it back');
+});
+
+test('a row wears its folder\'s colour, and a document with its own favicon shows it', async () => {
+  const { page, shell } = await visit();
+  await page.keyboard.press('Control+j');
+  const research = shell.locator('button.row[data-folder="Research"]');
+  await research.waitFor();
+  assert.equal(await research.getAttribute('data-realm'), 'research');
+  assert.equal(await research.locator('.i:not(.car)').evaluate((el) => getComputedStyle(el).color), 'rgb(47, 111, 91)');
+  // A document takes the folder it is in; one outside any realm stays grey.
+  const notes = shell.locator('.sec[data-sec="drive"] a.row[title="Research/Specs/Field notes"]');
+  assert.equal(await notes.getAttribute('data-realm'), 'research');
+  assert.equal(await shell.locator('.sec[data-sec="drive"] a.row[title="garden"]').getAttribute('data-realm'), null);
+  await shell.locator('button.row[data-folder="Travel"]').click();
+  const board = shell.locator('.sec[data-sec="drive"] a.row[title="Travel/Board"]');
+  assert.equal(await board.locator('img.i').getAttribute('src'), OWN_ICON);
+  // The marble every document starts with is not an icon of its own.
+  assert.equal(await shell.locator('.sec[data-sec="drive"] a.row[title="Travel/plans"] img').count(), 0);
 });
 
 test('the tree unfolds to where you are, marks it, and opens what you pick', async () => {
@@ -263,15 +313,17 @@ test('a page that loads under a pointer resting in the corner keeps its corner',
   assert.equal(await page.evaluate(() => document.querySelector('marble-shell').hasAttribute('data-peek')), false);
 });
 
-// Float: the sidebars wait at the edges, and come out when reached for.
+// On hover: a side waits at its edge, and comes out when reached for.
 const navOut = (page) => page.evaluate(() => !document.querySelector('marble-shell').hasAttribute('data-hide-nav'));
 const chatOut = (page) => page.evaluate(() => document.querySelector('marble-agent-drawer').isOpen);
 
-test('Float shows both sidebars on arriving, and puts them away at the first thing done on the page', async () => {
+test('opening onto sides on hover shows them once, and puts them away at the first thing done on the page', async () => {
   const { page, shell } = await visit();
   await page.keyboard.press('Control+j');
   await margins(page);
-  await shell.locator('[data-act="float"]').click();
+  await unpin(shell, 'nav', 'chat');
+  await page.keyboard.press('Control+j');
+  await page.keyboard.press('Control+j');
   assert.equal(await navOut(page), true, 'the tree, so it is plain it is there');
   assert.equal(await chatOut(page), true, 'and the chat');
   await page.mouse.click(640, 420);
@@ -280,10 +332,11 @@ test('Float shows both sidebars on arriving, and puts them away at the first thi
   await page.waitForFunction(() => ['nav', 'chat'].every((side) => getComputedStyle(document.querySelector('marble-shell').shadowRoot.querySelector(`.hint[data-side="${side}"]`)).opacity === '1'));
 });
 
-test('in Float the pointer at an edge brings that sidebar out, and leaving puts it back; typing in it keeps it', async () => {
+test('on hover the pointer at an edge brings that side out, and leaving puts it back; typing in it keeps it', async () => {
   const { page } = await visit();
   await page.keyboard.press('Control+j');
-  await page.locator('marble-shell').locator('[data-act="float"]').click();
+  await margins(page);
+  await unpin(page.locator('marble-shell'), 'nav', 'chat');
   await page.mouse.click(640, 420);
   await page.waitForFunction(() => document.querySelector('marble-shell').hasAttribute('data-hide-nav'));
 
@@ -308,10 +361,11 @@ test('in Float the pointer at an edge brings that sidebar out, and leaving puts 
   await page.waitForFunction(() => !document.querySelector('marble-agent-drawer').isOpen);
 });
 
-test('a page opened in Float starts with the sidebars away, and ⌘K brings the tree out to search', async () => {
+test('a page opened with the sides on hover starts with them away, and ⌘K brings the tree out to search', async () => {
   const { page } = await visit();
   await page.keyboard.press('Control+j');
-  await page.locator('marble-shell').locator('[data-act="float"]').click();
+  await margins(page);
+  await unpin(page.locator('marble-shell'), 'nav', 'chat');
   await page.goto(`${host.base}/a/garden`);
   await page.waitForFunction(() => document.querySelector('marble-shell')?.hasAttribute('data-open') && document.querySelector('marble-agent-drawer'));
   await page.mouse.move(640, 420);
@@ -322,4 +376,19 @@ test('a page opened in Float starts with the sidebars away, and ⌘K brings the 
   await page.keyboard.type('field');
   await page.waitForTimeout(600);
   assert.equal(await navOut(page), true, 'searching keeps it out');
+});
+
+test('the side\'s own button in the bar reaches for it too, once the hand that unpinned it has left', async () => {
+  const { page, shell } = await visit();
+  await page.keyboard.press('Control+j');
+  await margins(page);
+  await unpin(shell, 'nav');
+  await page.waitForTimeout(500);
+  assert.equal(await navOut(page), false, 'unpinned under the hand, it goes to its edge');
+  await page.mouse.move(640, 420);
+  const b = await shell.locator('[data-act="nav"]').boundingBox();
+  await page.mouse.move(b.x + b.width / 2, b.y + b.height / 2);
+  await page.waitForFunction(() => !document.querySelector('marble-shell').hasAttribute('data-hide-nav'));
+  await page.mouse.move(640, 420, { steps: 4 });
+  await page.waitForFunction(() => document.querySelector('marble-shell').hasAttribute('data-hide-nav'));
 });

@@ -7508,8 +7508,8 @@
 
     close() {
       if (this.shell) {
-        // Floating, closing puts the chat back at its edge; docked, it is the
-        // chat turned off.
+        // On hover, closing puts the chat back at its edge; pinned, it
+        // unpins it, which puts it there too.
         if (window.marbleShell.autoHide) window.marbleShell.conceal('chat');
         else window.marbleShell.setChat(false);
         this.launcher.focus({ preventScroll: true });
