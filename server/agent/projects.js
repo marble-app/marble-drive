@@ -11,9 +11,28 @@ export const DRIVE_PROJECT_ID = 'drive';
 
 export const driveProject = (root) => ({ id: DRIVE_PROJECT_ID, name: 'Drive', path: root, builtIn: true });
 
+// A drive moves between the owner's Mac and Fly (docs/superpowers/specs/
+// 2026-09-29-mac-home-drive-design.md, piece 4), and its projects name the
+// paths of whichever machine registered them. Each machine lists the other's
+// prefixes as its own (MARBLE_PROJECT_PREFIXES=/home/sprite/src=/Users/…), so
+// the settings stay as they were written and read right on both.
+export const parsePrefixes = (text) =>
+  String(text ?? '')
+    .split(',')
+    .map((pair) => pair.split('='))
+    .filter((pair) => pair.length === 2 && pair[0] && pair[1])
+    .map(([from, to]) => [from.replace(/\/$/, ''), to.replace(/\/$/, '')]);
+
+export function mapProjectPath(p, prefixes = parsePrefixes(process.env.MARBLE_PROJECT_PREFIXES)) {
+  for (const [from, to] of prefixes) {
+    if (p === from || p.startsWith(`${from}/`)) return to + p.slice(from.length);
+  }
+  return p;
+}
+
 const registered = (settings) => (Array.isArray(settings?.projects) ? settings.projects : [])
   .filter((p) => p && typeof p.id === 'string' && typeof p.path === 'string')
-  .map((p) => ({ id: p.id, name: String(p.name || path.basename(p.path)), path: p.path, builtIn: false }));
+  .map((p) => ({ id: p.id, name: String(p.name || path.basename(p.path)), path: mapProjectPath(p.path), builtIn: false }));
 
 export function listProjects({ settings, root }) {
   return [driveProject(root), ...registered(settings).sort((a, b) => a.name.localeCompare(b.name))];
