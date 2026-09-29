@@ -1,9 +1,10 @@
 // server/hub/schedule.js
-// The home host keeps the hub current: once a minute, only when something in
-// the drive is newer than the last upload, and only while the lease still names
-// this machine. A lease that moved means another machine is home, so this
-// host stops (onLost) instead of uploading over it. A lease it cannot reach
-// means waiting a minute, never uploading blind.
+// The home host keeps the hub current. Every minute it checks the lease, even
+// when the drive is idle: a lease that moved means another machine is home, so
+// this host stops (onLost) instead of uploading over it. A lease it cannot
+// reach means waiting a minute, never uploading blind. It uploads only when the
+// drive differs from the last upload (something newer, or files or documents
+// added or deleted).
 
 import { scan, up } from './sync.js';
 
@@ -18,14 +19,12 @@ export function scheduleUploads({
   log = console.log,
   schedule = setInterval,
 }) {
-  let uploadedAt = 0;
+  let last = null; // the scan taken at the last successful upload
   let running = false;
   const tick = async () => {
     if (running) return;
     running = true;
     try {
-      const { newest } = await scanImpl(root);
-      if (newest <= uploadedAt) return;
       let lease;
       try {
         lease = await client.get();
@@ -38,10 +37,12 @@ export function scheduleUploads({
         onLost(lease);
         return;
       }
+      const seen = await scanImpl(root);
+      if (last && seen.newest === last.newest && seen.files === last.files && seen.documents === last.documents) return;
       const started = Date.now();
       const result = await upload({ root, settings, epoch: lease.epoch });
       if (result.ok) {
-        uploadedAt = started;
+        last = seen;
         log(`[hub] uploaded seq ${result.state.seq}: ${result.counts.files} files in ${Date.now() - started}ms`);
       } else {
         log(`[hub] upload refused: ${result.why}`);

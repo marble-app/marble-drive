@@ -6,18 +6,18 @@ import { scheduleUploads } from '../server/hub/schedule.js';
 const settings = { HUB_MACHINE: 'mac' };
 function harness({ lease = { home: 'mac', epoch: 2 }, newest = 1000, leaseError = null } = {}) {
   const calls = { uploads: [], lost: [], logs: [] };
-  const state = { newest };
+  const state = { newest, files: 5 };
   const loop = scheduleUploads({
     root: '/drive',
     settings,
     client: { get: async () => { if (leaseError) throw leaseError; return lease; } },
-    scanImpl: async () => ({ files: 5, documents: 2, newest: state.newest }),
+    scanImpl: async () => ({ files: state.files, documents: 2, newest: state.newest }),
     upload: async (args) => { calls.uploads.push(args); return { ok: true, state: { seq: calls.uploads.length }, counts: { files: 5 } }; },
     onLost: (l) => calls.lost.push(l),
     log: (m) => calls.logs.push(m),
     schedule: null,
   });
-  return { loop, calls, state };
+  return { loop, calls, state, setLease: (l) => { lease = l; } };
 }
 
 test('a change is uploaded with the epoch the lease is at', async () => {
@@ -27,10 +27,10 @@ test('a change is uploaded with the epoch the lease is at', async () => {
   assert.equal(calls.uploads[0].epoch, 2);
 });
 
-test('nothing changed since the last upload: no upload, no lease call', async () => {
+test('nothing changed since the last upload: no upload', async () => {
   const { loop, calls, state } = harness();
   await loop.tick();
-  state.newest = 500; // older than the upload
+  state.newest = 1000; // unchanged
   await loop.tick();
   assert.equal(calls.uploads.length, 1);
 });
@@ -60,4 +60,36 @@ test('a refused upload is said, and tried again next minute', async () => {
   await loop.tick();
   await loop.tick();
   assert.equal(calls.filter((m) => /refused: the drive has no documents/.test(m)).length, 2);
+});
+
+test('an idle drive whose lease moved still stops the host', async () => {
+  const { loop, calls, setLease } = harness();
+  await loop.tick();
+  setLease({ home: 'fly', epoch: 6 });
+  await loop.tick();
+  assert.equal(calls.uploads.length, 1);
+  assert.deepEqual(calls.lost, [{ home: 'fly', epoch: 6 }]);
+});
+
+test('a deletion (fewer files, nothing newer) is uploaded', async () => {
+  const { loop, calls, state } = harness();
+  await loop.tick();
+  state.files = 4;
+  await loop.tick();
+  assert.equal(calls.uploads.length, 2);
+});
+
+test('an upload that throws is logged, and the next tick still runs', async () => {
+  const logs = [];
+  let n = 0;
+  const loop = scheduleUploads({
+    root: '/d', settings, client: { get: async () => ({ home: 'mac', epoch: 1 }) },
+    scanImpl: async () => ({ newest: 1, files: 1, documents: 1 }),
+    upload: async () => { if (++n === 1) throw new Error('boom'); return { ok: true, state: { seq: 1 }, counts: { files: 1 } }; },
+    onLost: () => {}, log: (m) => logs.push(m), schedule: null,
+  });
+  await loop.tick();
+  await loop.tick();
+  assert.match(logs.join('\n'), /\[hub\] upload failed: boom/);
+  assert.equal(n, 2);
 });
