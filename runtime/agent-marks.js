@@ -54,9 +54,14 @@
       --marks-mark: var(--accent-ink, color-mix(in srgb, #6d55d4 78%, var(--ink, #222)));
       --marks-paper: var(--card, var(--paper, #fff));
       --marks-ink: var(--ink, #222);
-      /* The mode's own colour: the caution tone, never the accent, so being in
-         Describe mode cannot be mistaken for anything else on the page. */
-      --marks-notice: var(--caution, #a07a2c);
+      /* The mode's own colour: leaf green, a pen rather than a warning. Not the
+         caution gold, which means an agent is waiting on you; not the accent;
+         not an agent's violet. So being in Describe mode cannot be mistaken
+         for anything else on the page. A document may set --sketch and
+         --sketch-on; text on the colour flips with the scheme, because white
+         on the light green reads and white on the dark one does not. */
+      --marks-notice: var(--sketch, light-dark(#2b8052, #7fd3a0));
+      --marks-notice-on: var(--sketch-on, light-dark(#ffffff, #1c1f22));
       font: 400 13px/1.35 var(--ui-font, system-ui, -apple-system, sans-serif);
       color: var(--marks-ink);
     }
@@ -92,17 +97,17 @@
     .marble-marks-notice {
       position: fixed; top: 12px; left: 50%; transform: translateX(-50%);
       display: flex; align-items: center; gap: 10px; padding: 6px 6px 6px 13px; border-radius: 999px;
-      background: var(--marks-notice); color: #fff; white-space: nowrap; pointer-events: auto;
+      background: var(--marks-notice); color: var(--marks-notice-on); white-space: nowrap; pointer-events: auto;
       font: 500 12.5px/1 var(--ui-font, system-ui, -apple-system, sans-serif);
       box-shadow: 0 4px 10px rgba(0,0,0,.12), 0 14px 28px rgba(0,0,0,.14);
     }
     .marble-marks-notice b { font-weight: 650; }
     .marble-marks-notice .marble-marks-notice-sep { opacity: .55; }
     .marble-marks-notice button {
-      font: inherit; font-size: 12px; color: #fff; background: rgba(255,255,255,.22); border: 0;
+      font: inherit; font-size: 12px; color: var(--marks-notice-on); background: color-mix(in srgb, var(--marks-notice-on) 18%, transparent); border: 0;
       border-radius: 999px; padding: 5px 10px; cursor: pointer;
     }
-    .marble-marks-notice button:hover { background: rgba(255,255,255,.34); }
+    .marble-marks-notice button:hover { background: color-mix(in srgb, var(--marks-notice-on) 30%, transparent); }
     .marble-marks-layer { opacity: 1; visibility: visible; transition: opacity 200ms ${EASE}, visibility 0s; }
     .marble-marks-layer:not([data-describing]) {
       opacity: 0; visibility: hidden;
