@@ -117,8 +117,44 @@ export function createAgentStore({ dir, defaultProvider = 'claude-subscription',
     return out;
   }
 
+  // The events of the conversations read lately, parsed, with how many bytes
+  // of the file they came from. The file only ever grows, so a read that
+  // finds it longer parses just the new lines: opening a long chat was
+  // re-reading and re-parsing megabytes every time.
+  const parsed = new Map();
+  const PARSED_KEEP = 8;
+
   async function events(id, { after = 0 } = {}) {
-    return parseEvents(id, await eventsText(id)).filter((event) => event.seq > after);
+    let handle;
+    try {
+      handle = await fsp.open(eventsFile(id), 'r');
+    } catch (err) {
+      if (err.code === 'ENOENT') return [];
+      throw err;
+    }
+    let hit;
+    try {
+      const { size } = await handle.stat();
+      hit = parsed.get(id);
+      if (!hit || size < hit.size) hit = { size: 0, events: [] };
+      if (size > hit.size) {
+        const fresh = Buffer.alloc(size - hit.size);
+        const { bytesRead } = await handle.read(fresh, 0, fresh.length, hit.size);
+        // Only whole lines: one still being appended is read next time.
+        const whole = fresh.subarray(0, bytesRead).lastIndexOf(0x0a) + 1;
+        if (whole) {
+          const events = hit.events.slice();
+          for (const event of parseEvents(id, fresh.subarray(0, whole).toString('utf8'))) events.push(event);
+          hit = { size: hit.size + whole, events };
+        }
+      }
+    } finally {
+      await handle.close();
+    }
+    parsed.delete(id);
+    parsed.set(id, hit);
+    if (parsed.size > PARSED_KEEP) parsed.delete(parsed.keys().next().value);
+    return hit.events.filter((event) => event.seq > after);
   }
 
   async function conversation(id) {
@@ -410,6 +446,7 @@ export function createAgentStore({ dir, defaultProvider = 'claude-subscription',
       const meta = await conversation(id);
       await fsp.rm(convDir(id), { recursive: true, force: true });
       counters.delete(id);
+      parsed.delete(id);
       await serial('folders', async () => {
         const state = await readFolders();
         const before = JSON.stringify(state);

@@ -1963,6 +1963,47 @@
   // built underneath, so switching is a style, not a re-render. It is the
   // reader's choice, not the conversation's: kept per browser, and every
   // conversation on the page follows it.
+  // A chat opens on its last few turns; the rest arrive a few at a time as
+  // the reader scrolls up to them (server/agent/slice.js).
+  const TAIL_TURNS = 3;
+  const EARLIER_TURNS = 6;
+
+  // The end of each chat this tab has had open, as its last page left it.
+  // Every click in the tree is a new page, and a chat drawn from here appears
+  // with the page instead of a round trip later; what happened since arrives
+  // as events after the copy's last seq (the log is append-only, so that is
+  // the whole difference). Per tab, a few chats, none large.
+  const TAIL_KEY = 'marble-chat-tail:';
+  const TAILS_KEY = 'marble-chat-tails';
+  const TAIL_KEEP = 8;
+  const TAIL_MAX = 300_000;
+  // More new events than this since the copy, and the chat is drawn from its
+  // new end instead: laid over the copy they would be most of the work.
+  const CATCH_UP_MAX = 400;
+
+  const readTail = (id) => {
+    try {
+      const tail = JSON.parse(sessionStorage.getItem(TAIL_KEY + id) ?? 'null');
+      return tail?.v === 1 && tail.meta && Array.isArray(tail.events) && Number.isFinite(tail.seq) ? tail : null;
+    } catch {
+      return null;
+    }
+  };
+  const writeTail = (id, tail) => {
+    try {
+      const ids = JSON.parse(sessionStorage.getItem(TAILS_KEY) ?? '[]').filter((other) => other !== id);
+      const text = tail ? JSON.stringify({ v: 1, ...tail }) : '';
+      if (!text || text.length > TAIL_MAX) {
+        sessionStorage.removeItem(TAIL_KEY + id);
+      } else {
+        ids.push(id);
+        while (ids.length > TAIL_KEEP) sessionStorage.removeItem(TAIL_KEY + ids.shift());
+        sessionStorage.setItem(TAIL_KEY + id, text);
+      }
+      sessionStorage.setItem(TAILS_KEY, JSON.stringify(ids));
+    } catch { /* full, or private: the next page asks, as it always did */ }
+  };
+
   const DETAIL_KEY = 'marble:chat-detail';
   const readDetail = () => {
     try { return localStorage.getItem(DETAIL_KEY) === 'technical' ? 'technical' : 'simple'; } catch { return 'simple'; }
@@ -2551,6 +2592,12 @@
     .turn-footer button { font: inherit; color: var(--accent-ink); background: none; border: 0; padding: 2px 6px; margin: -2px -6px; border-radius: 6px; cursor: pointer; }
     .turn-footer button:hover { background: var(--accent-soft); }
     .turn-footer button:disabled { color: var(--faint); cursor: default; }
+    /* Above the first turn drawn, when there are turns above it: the footer's
+       text button, set where a system line sits. Usually fetched before it
+       is reached; there for a reader who gets there first. */
+    .earlier { align-self: center; font: inherit; font-size: 12px; color: var(--accent-ink); background: none; border: 0; padding: 4px 8px; margin: 2px 0 10px; border-radius: 6px; cursor: pointer; }
+    .earlier:hover { background: var(--accent-soft); }
+    .earlier:disabled { color: var(--faint); background: none; cursor: default; }
     .turn-footer .watch { color: var(--caution); }
     /* Simple: the rows are still built and stand back behind the card. An
        act keeps its line, because it happened in the person's own app. A
@@ -4023,6 +4070,7 @@
       this.stopButton = root.querySelector('.stop');
 
       this.seen = 0;
+      this.seenQueue = 0;
       this.turns = new Map();
       this.prompts = new Map();
       this.live = null;
@@ -4242,6 +4290,8 @@
       this.unwatchTheme = watchPageTheme(this);
       addEventListener('marble:agent-context', this.onContext);
       addEventListener('marble:chat-detail', this.onDetail);
+      this.onLeave ??= () => this.saveTail();
+      addEventListener('pagehide', this.onLeave);
       this.paintDetail();
       this.updateContext();
       this.load();
@@ -4267,6 +4317,8 @@
       this.unwatchTheme = null;
       removeEventListener('marble:agent-context', this.onContext);
       removeEventListener('marble:chat-detail', this.onDetail);
+      removeEventListener('pagehide', this.onLeave);
+      this.saveTail();
       this.off?.();
       this.offAll?.();
       this.offQueue?.();
@@ -4333,35 +4385,43 @@
     // ---------------------------------------------------------- loading
 
     async load() {
+      this.saveTail();
+      this.tail = null;
       this.off?.();
       this.off = null;
       this.offQueue?.();
       this.offQueue = null;
-      this.logEl.replaceChildren();
-      for (const item of this.queuedEl.querySelectorAll('.queued-item')) item.remove();
-      this.queuedEl.hidden = true;
-      this.queuedBar.hidden = true;
-      this.measureQueue();
+      this.resetLog();
       this.applyQueueCombine(false);
       this.composerChips = this.composerChips.filter((chip) => chip.kind === 'model' || chip.kind === 'effort');
       this.renderChips();
       this.clearAttachments();
       this.skipSelection = false;
       this.updateContext();
-      this.seen = 0;
-      this.turns.clear();
-      this.usageLeft = new Set();
-      this.hideUsageNote();
-      this.prompts.clear();
-      this.live = null;
       this.editedFiles = new Set();
-      this.setRunning(null);
 
       const id = this.getAttribute('conversation');
       this.loadedId = id;
       const token = Symbol('load');
       this.loading = token;
-      this.skills = await this.api?.skills?.().catch(() => []) ?? [];
+      // Everything a chat opens with is asked for at once. The transcript is
+      // what the person came for, so it is drawn the moment it lands; the
+      // setup around it (models, usage) fills in as its own answers come.
+      const cached = id ? readTail(id) : null;
+      const skills = this.api?.skills?.().catch(() => []) ?? [];
+      const opened = id ? this.api.conversation(id, cached ? { after: cached.seq } : { turns: TAIL_TURNS }) : null;
+      opened?.catch(() => {});
+      const providers = id ? this.api.providers().catch(() => []) : null;
+      const projects = id ? this.api.projects?.().catch(() => []) ?? [] : null;
+      if (cached) {
+        this.meta = cached.meta;
+        this.paintMast();
+        this.replay(cached.events);
+        this.seen = Math.max(this.seen, cached.seq);
+        this.setEarlier(cached);
+        this.tail = { ...cached, events: [...cached.events] };
+      }
+      this.skills = await skills;
 
       if (!id) {
         this.meta = null;
@@ -4375,18 +4435,39 @@
       // A started conversation keeps its project; the picker is for new ones.
       this.projectLabel.hidden = true;
       try {
-        const [{ meta }, providers, projects] = await Promise.all([
-          this.api.conversation(id),
-          this.api.providers().catch(() => []),
-          this.api.projects?.().catch(() => []) ?? [],
-        ]);
+        let slice = await opened;
         if (this.loading !== token) return;
+        let over = Boolean(cached);
+        if (over && (slice.events?.length ?? 0) > CATCH_UP_MAX) {
+          this.resetLog();
+          over = false;
+          slice = await this.api.conversation(id, { turns: TAIL_TURNS });
+          if (this.loading !== token) return;
+        }
+        const { meta } = slice;
+        const events = slice.events ?? [];
         this.meta = meta;
+        this.paintMast();
+        if (over) {
+          // The copy is on screen; what happened since goes on after it.
+          this.replay(events);
+          this.tail.meta = meta;
+          for (const event of events) this.tail.events.push(event);
+        } else {
+          this.replay(events);
+          this.seen = Math.max(this.seen, slice.seq ?? 0);
+          this.setEarlier(slice);
+          this.tail = { meta, events: [...events], earlier: slice.earlier ?? null, older: slice.older ?? [], seq: this.seen };
+        }
+        this.tail.seq = this.seen;
+        this.follow(id, token);
+        const [providerList, projectList] = await Promise.all([providers, projects]);
+        if (this.loading !== token) return;
         this.pendingFailover = null;
         this.paintFailover();
         this.applyQueueCombine(Boolean(meta.queueCombine));
-        this.projectList = projects;
-        this.providerList = sortProviders(providers);
+        this.projectList = projectList;
+        this.providerList = sortProviders(providerList);
         this.mode = meta.mode || '';
         this.fillAgents(meta.provider);
         await this.syncCatalog({ model: meta.model, effort: meta.effort });
@@ -4394,20 +4475,18 @@
         this.paintMast();
         this.dispatchEvent(new CustomEvent('meta', { detail: { meta }, bubbles: true, composed: true }));
       } catch (err) {
-        if (this.loading === token) this.system(`This conversation could not be opened: ${err.message}`, true);
+        if (this.loading !== token) return;
+        // A copy of a chat the host no longer has is not the chat.
+        if (cached) {
+          writeTail(id, null);
+          this.tail = null;
+          this.resetLog();
+        }
+        this.system(`This conversation could not be opened: ${err.message}`, true);
         return;
       }
       await this.refreshChrome();
       if (this.loading !== token) return;
-      this.off?.();
-      this.off = this.api.on(id, (event) => {
-        if (this.loading !== token) return;
-        this.receive(event);
-      });
-      this.offQueue = this.api.on(id, (event) => {
-        if (this.loading !== token) return;
-        this.receiveQueue(event);
-      });
       this.offAll?.();
       this.others = new Map();
       this.offAll = this.api.on('*', (summary) => {
@@ -5110,7 +5189,11 @@
     }
 
     fitSetup() {
-      requestAnimationFrame(() => {
+      // Once a frame: every turn a transcript reads back starts and stops the
+      // running state, and each fit lays the whole pane out.
+      if (this.fitFrame) return;
+      this.fitFrame = requestAnimationFrame(() => {
+        this.fitFrame = 0;
         // One row first; the fits below wrap the bar only if they must.
         delete this.bar.dataset.wrap;
         delete this.setupRow?.dataset.wrap;
@@ -6153,14 +6236,206 @@
 
     // ---------------------------------------------------------- receiving
 
+    /** An empty log, and none of what the last one knew about its turns. */
+    resetLog() {
+      this.logEl.replaceChildren();
+      for (const item of this.queuedEl.querySelectorAll('.queued-item')) item.remove();
+      this.queuedEl.hidden = true;
+      this.queuedBar.hidden = true;
+      this.measureQueue();
+      this.seen = 0;
+      this.seenQueue = 0;
+      this.turns.clear();
+      this.usageLeft = new Set();
+      this.hideUsageNote();
+      this.prompts.clear();
+      this.live = null;
+      this.lastAsk = null;
+      this.earlier = null;
+      this.olderTurns = new Set();
+      this.heldOlder = [];
+      this.fetchingEarlier = null;
+      this.setRunning(null);
+    }
+
+    /** This tab's copy of the chat's end, for the next page (readTail). */
+    saveTail() {
+      if (!this.tail || !this.loadedId) return;
+      writeTail(this.loadedId, { ...this.tail, meta: this.meta ?? this.tail.meta, seq: this.seen });
+    }
+
+    /** A conversation's history, drawn in one pass: nothing is measured or
+     *  scrolled until the last event is in, and then the log is laid out
+     *  once and left at its foot. */
+    replay(events) {
+      const log = this.logEl;
+      const stuck = !log.childElementCount || log.scrollHeight - log.scrollTop - log.clientHeight < 48;
+      this.replaying = true;
+      try {
+        for (const event of events) {
+          this.receive(event);
+          this.receiveQueue(event);
+        }
+      } finally {
+        this.replaying = false;
+      }
+      this.focusAsk();
+      this.measureQueue();
+      if (stuck) log.scrollTop = log.scrollHeight;
+      // The turns read back started and stopped the running state without
+      // saying so; say once where it ended.
+      this.dispatchEvent(new CustomEvent('running', { detail: this.running ?? { turn: null }, bubbles: true, composed: true }));
+    }
+
+    /** Whether there are turns above the ones drawn, and the row at the top
+     *  of the log that fetches them as the reader scrolls toward it. */
+    setEarlier({ earlier = null, older = [] } = {}) {
+      this.earlier = earlier;
+      this.olderTurns = new Set(older);
+      if (!earlier) {
+        this.earlierEl?.remove();
+        return;
+      }
+      if (!this.earlierEl) {
+        this.earlierEl = h('button', 'earlier', 'Show earlier messages');
+        this.earlierEl.type = 'button';
+        this.earlierEl.addEventListener('click', () => this.loadEarlier());
+        // Well before it is reached: a screen's worth of scrolling is time
+        // enough to fetch and draw the turns above.
+        this.earlierWatch = new IntersectionObserver((entries) => {
+          if (entries.some((entry) => entry.isIntersecting)) this.loadEarlier();
+        }, { root: this.logEl, rootMargin: '1200px 0px 0px 0px' });
+        this.earlierWatch.observe(this.earlierEl);
+      }
+      this.earlierEl.disabled = false;
+      this.earlierEl.textContent = 'Show earlier messages';
+      if (this.logEl.firstChild !== this.earlierEl) this.logEl.prepend(this.earlierEl);
+    }
+
+    loadEarlier() {
+      const id = this.getAttribute('conversation');
+      if (!id || !this.earlier || this.fetchingEarlier) return this.fetchingEarlier;
+      const token = this.loading;
+      this.earlierEl.disabled = true;
+      this.fetchingEarlier = (async () => {
+        try {
+          const slice = await this.api.conversation(id, { turns: EARLIER_TURNS, before: this.earlier });
+          if (this.loading !== token) return;
+          this.backfill(slice.events ?? []);
+          this.setEarlier(slice);
+          this.releaseHeld(slice.events ?? []);
+        } catch {
+          if (this.loading !== token || !this.earlierEl) return;
+          this.earlierEl.disabled = false;
+          this.earlierEl.textContent = 'Couldn’t load earlier messages. Try again';
+          return;
+        } finally {
+          if (this.loading === token) this.fetchingEarlier = null;
+        }
+        // Still within reach (a short slice, a tall pane): the watcher saw it
+        // once and will not say so again, so keep going from here.
+        const log = this.logEl;
+        if (this.earlier && this.earlierEl?.isConnected && log.scrollTop < 1200) this.loadEarlier();
+      })();
+      return this.fetchingEarlier;
+    }
+
+    /** Late news of turns now drawn, that their own fetch did not carry. */
+    releaseHeld(fetched) {
+      if (!this.heldOlder.length) return;
+      const got = new Set(fetched.map((event) => event.seq));
+      const still = [];
+      // Drawn on its turn and nothing else: it is an old turn's news.
+      this.backfilling = true;
+      try {
+        for (const event of this.heldOlder) {
+          if (this.olderTurns.has(event.turn)) still.push(event);
+          else if (!got.has(event.seq)) {
+            this.receive(event);
+            this.receiveQueue(event);
+          }
+        }
+      } finally {
+        this.backfilling = false;
+      }
+      this.heldOlder = still;
+    }
+
+    /** Earlier turns, drawn out of sight and then set in above the ones on
+     *  screen, with the reader left looking at what they were reading. The
+     *  drawing is the same as any history's; what it must not touch is the
+     *  state of now — the live turn, what is running, the chat's target. */
+    backfill(events) {
+      const log = this.logEl;
+      const holder = h('div');
+      holder.hidden = true;
+      holder.dataset.detail = log.dataset.detail;
+      log.before(holder);
+      const saved = { live: this.live, running: this.running, meta: this.meta, lastAsk: this.lastAsk, fresh: this.fresh };
+      const had = new Set(this.turns.keys());
+      this.live = null;
+      this.logEl = holder;
+      this.replaying = true;
+      this.backfilling = true;
+      try {
+        for (const event of events) {
+          this.receive(event);
+          this.receiveQueue(event);
+        }
+      } finally {
+        this.logEl = log;
+        this.replaying = false;
+        this.backfilling = false;
+        Object.assign(this, saved);
+      }
+      // Every one of these was followed by a turn already on screen, so each
+      // card folds down the way a newer prompt folds it.
+      for (const [turn, record] of this.turns) {
+        if (had.has(turn) || !record.progress || record.progress.running) continue;
+        record.progress.el.dataset.old = '';
+        this.settle(turn, '');
+      }
+      const fromFoot = log.scrollHeight - log.scrollTop;
+      if (this.earlierEl?.isConnected) this.earlierEl.after(...holder.childNodes);
+      else log.prepend(...holder.childNodes);
+      holder.remove();
+      log.scrollTop = log.scrollHeight - fromFoot;
+      this.paintMast();
+    }
+
+    /** Live events from where the history ended. */
+    follow(id, token) {
+      this.off?.();
+      this.offQueue?.();
+      const after = this.seen;
+      this.off = this.api.on(id, (event) => {
+        if (this.loading !== token) return;
+        if (event?.seq > this.seen) this.tail?.events.push(event);
+        this.receive(event);
+      }, { after });
+      this.offQueue = this.api.on(id, (event) => {
+        if (this.loading !== token) return;
+        this.receiveQueue(event);
+      }, { after });
+    }
+
     receive(event) {
       const id = this.getAttribute('conversation');
       if (!eventBelongsToConversation(event, id)) return;
-      if (event.seq) {
+      if (event.seq && !this.backfilling) {
         if (event.seq <= this.seen) return;
         this.seen = event.seq;
       }
-      const stuck = this.logEl.scrollHeight - this.logEl.scrollTop - this.logEl.clientHeight < 48;
+      // A turn above the part drawn so far comes whole when it is scrolled
+      // to; news of it now (an undo) has nowhere to go yet, so it waits for
+      // the turn (loadEarlier), in case it missed the fetch that brings it.
+      if (event.turn && !this.backfilling && this.olderTurns?.has(event.turn)) {
+        this.heldOlder.push(event);
+        return;
+      }
+      // Read back as one batch, the log is laid out once at the end rather
+      // than once an event: 2,000 events measured one by one took seconds.
+      const stuck = !this.replaying && this.logEl.scrollHeight - this.logEl.scrollTop - this.logEl.clientHeight < 48;
       const turn = event.turn;
       // Live, or history being replayed as the conversation opens. Only live
       // news may move: a transcript read back should arrive already still.
@@ -6168,7 +6443,7 @@
       switch (event.type) {
         case 'user': {
           this.endLive();
-          this.plainSettleAll();
+          if (!this.backfilling) this.plainSettleAll();
           // What was typed, not what was attached: a title and a queue row are
           // both one line, and a pasted file would be all of it.
           const said = splitPasted(event.text).rest || String(event.text ?? '');
@@ -6220,7 +6495,7 @@
         // The construction zone this turn is drawing on its document, sent here
         // too because the chat may be read from another page entirely.
         case 'zone':
-          this.showZone(event.ids?.length ? event : null);
+          if (!this.backfilling) this.showZone(event.ids?.length ? event : null);
           break;
         case 'document.changed':
           this.documentChanged(turn, event);
@@ -6247,7 +6522,7 @@
         case 'turn.interrupted':
           this.endLive();
           this.finish(turn, event);
-          if (event.type === 'turn.failed' && event.usageStopped && this.failoverMode() === 'pause') this.showUsageNote(event);
+          if (event.type === 'turn.failed' && event.usageStopped && this.failoverMode() === 'pause' && !this.backfilling) this.showUsageNote(event);
           break;
         case 'turn.undone':
           this.undone(turn, event);
@@ -6256,7 +6531,7 @@
           this.system(event.from ? 'Continued from an earlier conversation.' : 'Continued in a new conversation.');
           break;
         case 'usage.continued':
-          this.hideUsageNote();
+          if (!this.backfilling) this.hideUsageNote();
           this.system(`Claude usage stopped. Continuing on ${event.label}.`);
           break;
         case 'usage.left':
@@ -6298,7 +6573,16 @@
       this.record(turn).asks.set(event.requestId, card);
       this.append(turn, card);
       if (event.kind !== 'question') this.plainAsk(turn, event, card);
-      if (this.logEl.dataset.detail !== 'simple' || event.kind === 'question') card.querySelector('button')?.focus({ preventScroll: true });
+      // Read back, most asks were answered a few events later; only the one
+      // still open when the history ends is focused (replay, below).
+      this.lastAsk = { card, kind: event.kind };
+      if (!this.replaying) this.focusAsk();
+    }
+
+    focusAsk() {
+      const { card, kind } = this.lastAsk ?? {};
+      if (!card?.isConnected) return;
+      if (this.logEl.dataset.detail !== 'simple' || kind === 'question') card.querySelector('button')?.focus({ preventScroll: true });
     }
 
     /** The card an ask becomes: a permission prompt with Allow / Deny and a
@@ -6523,7 +6807,7 @@
 
     system(message, error = false) {
       this.logEl.append(h('div', error ? 'system error' : 'system', message));
-      this.logEl.scrollTop = this.logEl.scrollHeight;
+      if (!this.replaying) this.logEl.scrollTop = this.logEl.scrollHeight;
     }
 
     /** The callout's one line: whatever the log said last, on one line. Any
@@ -6853,6 +7137,11 @@
     receiveQueue(event) {
       const id = this.getAttribute('conversation');
       if (!eventBelongsToConversation(event, id)) return;
+      if (event.seq && !this.backfilling) {
+        if (event.seq <= this.seenQueue) return;
+        this.seenQueue = event.seq;
+      }
+      if (event.turn && !this.backfilling && this.olderTurns?.has(event.turn)) return;
       const turn = event.turn;
       switch (event.type) {
         case 'turn.queued':
@@ -6935,6 +7224,7 @@
     /** Hold the foot of the log open by however tall the floating stack is,
      *  and stay at the bottom if that is where the reader already was. */
     measureQueue() {
+      if (this.replaying) return;
       const space = this.queuedEl.hidden ? 0 : Math.round(this.queuedEl.getBoundingClientRect().height);
       if (space === this.queuedSpace) return;
       const stuck = this.logEl.scrollHeight - this.logEl.scrollTop - this.logEl.clientHeight < 48;
@@ -7099,6 +7389,8 @@
     }
 
     setRunning(turn) {
+      // Earlier turns drawn in above started and stopped long ago.
+      if (this.backfilling) return;
       // Nothing is running, so nothing is being worked on: the zone on the
       // document is already gone and the row that points at it goes with it.
       if (!turn) this.showZone(null);
@@ -7109,6 +7401,7 @@
       else requestAnimationFrame(() => slideThumb(this.dispatchEl, { animate: false }));
       // The chooser takes room from the setup; refit it, or wrap the bar.
       this.fitSetup();
+      if (this.replaying) return;
       this.dispatchEvent(new CustomEvent('running', { detail: this.running ?? { turn: null }, bubbles: true, composed: true }));
     }
 

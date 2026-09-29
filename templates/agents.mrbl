@@ -4661,7 +4661,7 @@ __ICON__
       const hit = peekCache.get(id);
       if (hit && hit.key === key) return hit.peek;
       let detail = null;
-      try { detail = await agent.conversation(id); } catch { return hit?.peek ?? null; }
+      try { detail = await agent.conversation(id, { turns: 3 }); } catch { return hit?.peek ?? null; }
       const peek = window.marbleAgentFolders?.peekOf?.(detail) ?? null;
       // A hover sweep across a full canvas would otherwise keep every chat it
       // crossed alive for the life of the page.
@@ -7975,7 +7975,7 @@ __ICON__
       paintBars();
       if (!id || !agent) return;
       try {
-        const detail = await agent.conversation(id);
+        const detail = await agent.conversation(id, { turns: 1 });
         const target = lastTarget(detail) ?? detail.meta?.target;
         if (target) targets.set(id, target);
       } catch { /* header still has the title */ }
@@ -8559,7 +8559,7 @@ __ICON__
       el.querySelector('.manage').append(menu);
       more?.setAttribute('aria-expanded', 'true');
       let detail = null;
-      try { if (agent) detail = await agent.conversation(id); } catch { /* archive still works */ }
+      try { if (agent) detail = await agent.conversation(id, { turns: 0 }); } catch { /* archive still works */ }
       if (!menu.isConnected) return;
       const turn = undoable(detail?.turns);
       if (turn) add('Undo last turn', 'undo', async () => { await agent.undo(turn.id); if (openId === id) fillChrome(id); });
@@ -8630,7 +8630,7 @@ __ICON__
           el.style.removeProperty('--swipe-x');
           const job = (async () => {
             try {
-              const { turns } = await agent.conversation(el.dataset.id);
+              const { turns } = await agent.conversation(el.dataset.id, { turns: 0 });
               const last = undoable(turns);
               if (last) await agent.undo(last.id);
             } catch (err) { showEmpty(err.message); }
@@ -8720,7 +8720,7 @@ __ICON__
         if (existing != null) {
           focusSlot(existing, id);
           if (!summaries.has(id) && agent) {
-            try { upsert((await agent.conversation(id)).meta); } catch { /* opened from a stale id */ }
+            try { upsert((await agent.conversation(id, { turns: 0 })).meta); } catch { /* opened from a stale id */ }
           }
           markSeen(id);
           await fillChrome(id);
@@ -8758,7 +8758,7 @@ __ICON__
         dock.focus = 'primary';
       }
       if (id && !summaries.has(id) && agent) {
-        try { upsert((await agent.conversation(id)).meta); } catch { /* opened from a stale id */ }
+        try { upsert((await agent.conversation(id, { turns: 0 })).meta); } catch { /* opened from a stale id */ }
       }
       markSeen(id);
       paintOpen();
@@ -9381,7 +9381,7 @@ __ICON__
     };
 
     const runningTurnOf = async (id) => {
-      const { turns } = await agent.conversation(id);
+      const { turns } = await agent.conversation(id, { turns: 0 });
       return turns.find((t) => t.status === 'running' || t.status === 'queued') ?? null;
     };
 
@@ -10483,7 +10483,7 @@ __ICON__
         // splits a seat for it instead of the open swapping out a pin.
         if ((document.body.getAttribute('data-view') || 'library') === 'focus') {
           if (!summaries.has(id)) {
-            try { upsert((await agent.conversation(id)).meta); } catch { /* the stream will bring it */ }
+            try { upsert((await agent.conversation(id, { turns: 0 })).meta); } catch { /* the stream will bring it */ }
           }
           await pinFocus(id, { keepOpen: true });
         }

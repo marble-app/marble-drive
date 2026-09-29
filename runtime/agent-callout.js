@@ -496,7 +496,7 @@
 
     async function undoLast(record) {
       let detail = null;
-      try { detail = await agent.conversation(record.id); } catch { return; }
+      try { detail = await agent.conversation(record.id, { turns: 0 }); } catch { return; }
       const turn = [...(detail?.turns ?? [])].reverse().find((t) => t.status === 'completed' && t.applied && !t.undoneAt);
       if (!turn) return;
       try { await agent.undo(turn.id); } catch { return; }

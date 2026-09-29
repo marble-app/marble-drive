@@ -22,6 +22,7 @@ import { driveWhere, pickCursorPickerModels, sortProviders } from './catalog.js'
 import { checkAnthropicKey } from './key-check.js';
 import { findProject, listProjects, validateProjectPath } from './projects.js';
 import { summarize } from './store.js';
+import { sliceTurns } from './slice.js';
 import { normalizeUndo, undoTurn } from './undo.js';
 
 const LOOPBACK = new Set(['127.0.0.1', '::1', '::ffff:127.0.0.1']);
@@ -560,11 +561,14 @@ export function createAgentRoutes({ store, runner, tools, hub, providers, writeO
         }));
       }
       if (!turns && method === 'GET') {
-        return json(res, 200, {
-          meta: await store.summary(id),
-          turns: await store.turns(id),
-          events: await store.events(id, { after: Number(url.searchParams.get('after') ?? 0) }),
-        });
+        const events = await store.events(id, { after: Number(url.searchParams.get('after') ?? 0) });
+        const body = { meta: await store.summary(id), turns: await store.turns(id) };
+        // `turns=N`: only the last N turns (or the N before `before`), for a
+        // page that draws the end of a long chat first. Without it, all.
+        const last = url.searchParams.get('turns');
+        if (last === null) body.events = events;
+        else Object.assign(body, sliceTurns(events, { last: Number(last), before: url.searchParams.get('before') }));
+        return json(res, 200, body);
       }
       /** A chat that was started and never used, discarded rather than
        *  filed: pressing the close button on a brand-new pane should leave

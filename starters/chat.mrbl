@@ -771,7 +771,7 @@ __ICON__
     paintSend();
     if (!id || !agent) return;
     listen(view);
-    agent.conversation(id).then(({ meta }) => {
+    agent.conversation(id, { turns: 0 }).then(({ meta }) => {
       if (view.id !== id) return;
       view.meta = { ...(view.meta ?? {}), ...meta };
       paintBar();
