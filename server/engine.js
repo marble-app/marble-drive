@@ -17,6 +17,7 @@
 // still reached as files. `@bdhmin/marble/package.json` *is* exported, which is
 // what gives us the package root to resolve against.
 
+import { fileURLToPath } from 'node:url';
 const ROOT = new URL('./', import.meta.resolve('@bdhmin/marble/package.json'));
 
 const load = (relative) => import(new URL(relative, ROOT).href);
@@ -36,7 +37,7 @@ const [patcher, guard, history, ops, intent, providers, scaffold, doctor, collab
 /** Absolute path to a file inside the Marble package — the carrier, the
  *  affordance library, the starter template. Read, never imported: these are
  *  served to a browser or spliced into a new document as text. */
-export const enginePath = (relative) => new URL(relative, ROOT).pathname;
+export const enginePath = (relative) => fileURLToPath(new URL(relative, ROOT)); // decoded: the Mac's app folder has a space in it
 
 export const { applyOp, applyOps, indexIds, knownIds, parseSource, sliceOf } = patcher;
 export const { guardOps } = guard;

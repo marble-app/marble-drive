@@ -96,6 +96,21 @@ stage() {
   fi
   say "installing Chromium for the agents' browser"
   "$NODE" "$playwright" install chromium >/dev/null
+  # The hub (server/hub/sync.js) runs rclone. One pinned copy per sprite in
+  # ~/.local/bin, fetched when missing or when the pin moves.
+  local rclone_want
+  rclone_want="$(tr -d '[:space:]' < tools/sprite/rclone-version 2>/dev/null || true)"
+  if [[ -n "$rclone_want" ]] && [[ "$("$HOME/.local/bin/rclone" version 2>/dev/null | head -1)" != "rclone v$rclone_want" ]]; then
+    say "installing rclone $rclone_want"
+    local arch zip
+    case "$(uname -m)" in x86_64) arch=amd64 ;; aarch64|arm64) arch=arm64 ;; *) die "no rclone for $(uname -m)" ;; esac
+    zip="$(mktemp -d)"
+    curl -fsSL "https://downloads.rclone.org/v$rclone_want/rclone-v$rclone_want-linux-$arch.zip" -o "$zip/rclone.zip"
+    python3 -c "import zipfile,sys; zipfile.ZipFile(sys.argv[1]).extractall(sys.argv[2])" "$zip/rclone.zip" "$zip"
+    mkdir -p "$HOME/.local/bin"
+    install -m 755 "$zip/rclone-v$rclone_want-linux-$arch/rclone" "$HOME/.local/bin/rclone"
+    rm -rf "$zip"
+  fi
   say "launching the agents' browser"
   "$NODE" --input-type=module -e "
     import { loadChromium } from './server/agent/browser.js';
