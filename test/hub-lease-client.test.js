@@ -87,3 +87,52 @@ test('offline with no lease ever seen: standby', async () => {
   assert.equal(decided.mode, 'standby');
   assert.match(decided.why, /none remembered/);
 });
+
+test('a hold file means standby without asking the lease', async () => {
+  const s = await settingsFor('http://127.0.0.1:1', 'mac');
+  let asked = 0;
+  const client = { get: async () => { asked += 1; return { home: 'mac', epoch: 1 }; }, cached: async () => ({ home: 'mac', epoch: 1 }) };
+  await fsp.writeFile(path.join(path.dirname(s.file), 'hold-bryan'), '');
+  const decided = await decideMode({ settings: s, client });
+  assert.equal(decided.mode, 'standby');
+  assert.match(decided.why, /held by drive-home/);
+  assert.equal(asked, 0);
+});
+
+test('a lease that refuses this machine (401/403/404) means standby, even with a remembered lease naming it', async () => {
+  const s = await settingsFor('http://127.0.0.1:1', 'mac');
+  for (const status of [401, 403, 404]) {
+    const client = {
+      get: async () => { throw Object.assign(new Error(`the lease answered ${status}`), { status }); },
+      cached: async () => ({ home: 'mac', epoch: 3 }),
+    };
+    const decided = await decideMode({ settings: s, client });
+    assert.equal(decided.mode, 'standby', `status ${status}`);
+    assert.match(decided.why, new RegExp(String(status)));
+  }
+});
+
+test('a real Worker with the wrong token: standby, not the cache', async () => {
+  const w = await worker();
+  try {
+    const s = await settingsFor(w.url, 'mac');
+    await createLeaseClient({ settings: s }).move('mac', 0); // remembered: mac is home
+    const wrong = createLeaseClient({ settings: { ...s, LEASE_TOKEN: 'nope' } });
+    const decided = await decideMode({ settings: s, client: wrong });
+    assert.equal(decided.mode, 'standby');
+    assert.match(decided.why, /401/);
+  } finally {
+    w.close();
+  }
+});
+
+test('offline, a remembered lease naming the other machine: standby', async () => {
+  const w = await worker();
+  const s = await settingsFor(w.url, 'fly');
+  await createLeaseClient({ settings: s }).move('mac', 0);
+  w.close();
+  const offline = createLeaseClient({ settings: { ...s, LEASE_URL: 'http://127.0.0.1:1' }, timeoutMs: 500 });
+  const decided = await decideMode({ settings: s, client: offline });
+  assert.equal(decided.mode, 'standby');
+  assert.match(decided.why, /last one seen/);
+});

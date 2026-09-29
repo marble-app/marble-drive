@@ -50,3 +50,60 @@ test('the standby command touches nothing in the drive', async () => {
     child.kill('SIGTERM');
   }
 });
+
+// A host that serves instead of exiting would hang the test: give it 15 s.
+const exitOf = (child) => new Promise((resolve) => {
+  const timer = setTimeout(() => child.kill('SIGKILL'), 15_000);
+  child.on('exit', (code) => { clearTimeout(timer); resolve(code); });
+});
+const SETTINGS = 'HUB_DRIVE=bryan\nHUB_MACHINE=mac\nHUB_PASSPHRASE=p\nHUB_SALT=s\nLEASE_URL=http://127.0.0.1:1\nLEASE_TOKEN=t\nHUB_BACKEND=local\nHUB_LOCAL_DIR=/nowhere\n';
+
+test('serve with MARBLE_HUB_ENV naming a missing file exits 75 before opening the drive', async () => {
+  const root = await fsp.mkdtemp(path.join(os.tmpdir(), 'serve-nohub-'));
+  const missing = path.join(root, '..', `${path.basename(root)}-hub.env`);
+  let stderr = '';
+  const child = spawn(process.execPath, ['bin/marble-drive.js', 'serve'], {
+    env: { ...process.env, MARBLE_DRIVE_ROOT: root, PORT: '4496', HOST: '127.0.0.1', MARBLE_HUB_ENV: missing, MARBLE_DRIVE_AGENTS: '0' },
+    stdio: ['ignore', 'ignore', 'pipe'],
+  });
+  child.stderr.on('data', (d) => (stderr += d));
+  assert.equal(await exitOf(child), 75);
+  assert.ok(stderr.includes(missing), stderr);
+  assert.deepEqual(await fsp.readdir(root), []);
+});
+
+test('serve with a hold file beside the hub settings exits 75 before opening the drive', async () => {
+  const root = await fsp.mkdtemp(path.join(os.tmpdir(), 'serve-held-'));
+  const config = await fsp.mkdtemp(path.join(os.tmpdir(), 'serve-held-config-'));
+  await fsp.writeFile(path.join(config, 'hub-bryan.env'), SETTINGS);
+  await fsp.writeFile(path.join(config, 'hold-bryan'), '');
+  let stderr = '';
+  const child = spawn(process.execPath, ['bin/marble-drive.js', 'serve'], {
+    env: { ...process.env, MARBLE_DRIVE_ROOT: root, PORT: '4496', HOST: '127.0.0.1', MARBLE_HUB_ENV: path.join(config, 'hub-bryan.env'), MARBLE_DRIVE_AGENTS: '0' },
+    stdio: ['ignore', 'ignore', 'pipe'],
+  });
+  child.stderr.on('data', (d) => (stderr += d));
+  assert.equal(await exitOf(child), 75);
+  assert.match(stderr, /held by drive-home/);
+  assert.deepEqual(await fsp.readdir(root), []);
+});
+
+test('standby with a malformed hub file still answers /health', async () => {
+  const root = await fsp.mkdtemp(path.join(os.tmpdir(), 'standby-bad-'));
+  const bad = path.join(root, '..', `${path.basename(root)}-hub.env`);
+  await fsp.writeFile(bad, 'HUB_DRIVE=bryan\n'); // missing every other key
+  const child = spawn(process.execPath, ['bin/marble-drive.js', 'standby'], {
+    env: { ...process.env, MARBLE_DRIVE_ROOT: root, PORT: '4495', HOST: '127.0.0.1', MARBLE_HUB_ENV: bad },
+    stdio: 'ignore',
+  });
+  try {
+    let health = null;
+    for (let i = 0; i < 40 && !health; i += 1) {
+      await new Promise((r) => setTimeout(r, 100));
+      health = await fetch('http://127.0.0.1:4495/health').then((r) => r.json(), () => null);
+    }
+    assert.deepEqual(health, { ok: true, standby: true, home: null, working: 0 });
+  } finally {
+    child.kill('SIGTERM');
+  }
+});

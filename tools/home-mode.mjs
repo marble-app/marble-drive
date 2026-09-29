@@ -1,8 +1,10 @@
 #!/usr/bin/env node
 // Which way this machine should start its host: `serve` or `standby`
 // (tools/sprite/serve.sh asks before every start). Without MARBLE_HUB_ENV the
-// drive has one home, so always `serve`. A hub file that cannot be read means
-// `standby`: better a drive that waits than two that write.
+// drive has one home, so always `serve`. A hub file that cannot be read (or
+// is not there) means `standby`, and so does drive-home's hold file beside it
+// (server/hub/settings.js, holdPath): better a drive that waits than two that
+// write.
 
 import { createLeaseClient, decideMode } from '../server/hub/lease-client.js';
 import { loadHubSettings } from '../server/hub/settings.js';

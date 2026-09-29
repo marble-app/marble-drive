@@ -4,7 +4,7 @@ import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
 
-import { loadHubSettings, parseEnvFile } from '../server/hub/settings.js';
+import { holdPath, loadHubSettings, parseEnvFile } from '../server/hub/settings.js';
 
 const dir = await fsp.mkdtemp(path.join(os.tmpdir(), 'hub-settings-'));
 const write = async (name, text) => {
@@ -18,9 +18,20 @@ test('KEY=value lines, comments and quotes', () => {
   assert.deepEqual(parseEnvFile('# c\nA=1\nB="two words"\n  C = 3 \nbad line\n'), { A: '1', B: 'two words', C: '3' });
 });
 
-test('no file named, or no file there: the hub is off', async () => {
+test('no file named: the hub is off', async () => {
   assert.equal(loadHubSettings(null), null);
-  assert.equal(loadHubSettings(path.join(dir, 'nope.env')), null);
+  assert.equal(loadHubSettings(''), null);
+  assert.equal(loadHubSettings(undefined), null);
+});
+
+test('a file named but not there is an error that names it, never "no hub"', async () => {
+  const missing = path.join(dir, 'nope.env');
+  assert.throws(() => loadHubSettings(missing), (err) => err.message.includes(missing));
+});
+
+test('the hold file sits beside the settings, one per drive', async () => {
+  assert.equal(holdPath({ file: '/h/.config/marble-drive/hub-bryan.env', HUB_DRIVE: 'bryan' }), '/h/.config/marble-drive/hold-bryan');
+  assert.equal(holdPath({ file: '/h/.config/marble-drive/hub.env', HUB_DRIVE: 't-bryan' }), '/h/.config/marble-drive/hold-t-bryan');
 });
 
 test('a file missing keys says which', async () => {

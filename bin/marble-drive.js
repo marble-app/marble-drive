@@ -19,6 +19,7 @@
 // implementations of one idea.
 
 import { spawn } from 'node:child_process';
+import fs from 'node:fs';
 import path from 'node:path';
 
 import { createDrive } from '../server/app.js';
@@ -35,7 +36,7 @@ import { seedAgents, seedBoard, seedChat, seedConsole, seedDesignDonts, seedDesi
 import { createStore } from '../server/store/index.js';
 import { createStandby } from '../server/standby.js';
 import { createLeaseClient } from '../server/hub/lease-client.js';
-import { loadHubSettings } from '../server/hub/settings.js';
+import { holdPath, loadHubSettings } from '../server/hub/settings.js';
 import { scheduleUploads } from '../server/hub/schedule.js';
 
 const [command = 'serve', ...rest] = process.argv.slice(2);
@@ -98,8 +99,15 @@ switch (command) {
 // ---------------------------------------------------------------------- serve
 
 async function standby() {
-  const settings = loadHubSettings(config.hubEnv);
-  const lease = settings ? await createLeaseClient({ settings }).cached() : null;
+  // A standby must answer /health whatever state the hub settings are in: a
+  // host that died here would crash-loop, and fail every deploy's health check.
+  let lease = null;
+  try {
+    const settings = loadHubSettings(config.hubEnv);
+    lease = settings ? await createLeaseClient({ settings }).cached() : null;
+  } catch (err) {
+    console.error(`[drive] standby: ${err.message}; standing by without a remembered lease`);
+  }
   const server = createStandby({ home: lease?.home ?? null, since: lease?.since ?? null });
   server.listen(Number(flags.port ?? config.port), config.host, () => {
     console.log(`[drive] standby on ${config.host}:${flags.port ?? config.port}: this drive's home is ${lease?.home ?? 'elsewhere'}`);
@@ -107,6 +115,27 @@ async function standby() {
 }
 
 async function serve() {
+  // Two homes (the owner's Mac and Fly): with MARBLE_HUB_ENV set, this host may
+  // write only with the hub's settings in hand and no hold on it. Checked
+  // before the drive is opened; exit 75 so the keeper (tools/sprite/serve.sh)
+  // asks home-mode.mjs again, which says standby for the same reason.
+  let hubSettings = null;
+  if (config.hubEnv) {
+    try {
+      hubSettings = loadHubSettings(config.hubEnv);
+    } catch (err) {
+      console.error(`[drive] hub: ${err.message}; not serving`);
+      process.exit(75);
+    }
+    if (!hubSettings) {
+      console.error(`[drive] hub: no settings in ${config.hubEnv}; not serving`);
+      process.exit(75);
+    }
+    if (fs.existsSync(holdPath(hubSettings))) {
+      console.error(`[drive] hub: held by drive-home (${holdPath(hubSettings)}); not serving`);
+      process.exit(75);
+    }
+  }
   const drive = await createDrive(config);
   await seedDrive(drive.store, { name: config.home });
   await seedAgents(drive.store);
@@ -144,7 +173,6 @@ async function serve() {
     // the moment the lease names the other machine. Exit 75 so the keeper
     // (tools/sprite/serve.sh) starts again, asks home-mode.mjs, and comes back
     // as standby.
-    const hubSettings = loadHubSettings(config.hubEnv);
     if (hubSettings) {
       scheduleUploads({
         root: config.root,

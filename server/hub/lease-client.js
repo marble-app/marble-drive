@@ -2,10 +2,16 @@
 // The lease Worker, from a host or a tool. Every answer is remembered beside
 // the hub settings, so a machine that starts with no network (the Mac on a
 // plane) goes by the last lease it saw: it serves if that named it. A machine
-// that never saw one stays on standby.
+// that never saw one stays on standby. A lease that refuses this machine
+// (401/403/404: a wrong token or URL) is not "unreachable": the remembered
+// lease is not used, and the machine stands by. A hold file (drive-home's)
+// means standby before the lease is asked at all.
 
+import fs from 'node:fs';
 import fsp from 'node:fs/promises';
 import path from 'node:path';
+
+import { holdPath } from './settings.js';
 
 export function createLeaseClient({
   settings,
@@ -47,12 +53,18 @@ export function createLeaseClient({
   };
 }
 
-export async function decideMode({ settings, client }) {
+const REFUSED = [401, 403, 404];
+
+export async function decideMode({ settings, client, held = (s) => fs.existsSync(holdPath(s)) }) {
   if (!settings) return { mode: 'serve', why: 'no hub settings: this drive has one home' };
+  if (held(settings)) return { mode: 'standby', why: `held by drive-home (${holdPath(settings)})` };
   const verdict = (lease, why) => ({ mode: lease.home === settings.HUB_MACHINE ? 'serve' : 'standby', why, lease });
   try {
     return verdict(await client.get(), 'the lease');
   } catch (err) {
+    if (REFUSED.includes(err.status)) {
+      return { mode: 'standby', why: `the lease refused this machine (${err.status}): check LEASE_URL and LEASE_TOKEN; the remembered lease is not used` };
+    }
     const lease = await client.cached();
     if (!lease) return { mode: 'standby', why: `the lease is unreachable (${err.message}) and none remembered` };
     return verdict(lease, `the lease is unreachable (${err.message}); going by the last one seen`);
