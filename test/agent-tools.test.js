@@ -12,8 +12,8 @@ process.env.MARBLE_DRIVE_BACKUP_CMD = '';
 
 const { createDrive } = await import('../server/app.js');
 const { loadConfig } = await import('../server/config.js');
-const { enginePath } = await import('../server/engine.js');
-const { build } = await import('../server/gallery.js');
+const { enginePath, examine } = await import('../server/engine.js');
+const { build, composeScript } = await import('../server/gallery.js');
 const { createTools, TOOL_SCHEMAS } = await import('../server/agent/tools.js');
 
 const drive = await createDrive(loadConfig(), { log: { log() {}, error() {} } });
@@ -54,7 +54,7 @@ async function freshTurn(conversationId = `c${++n}`) {
 
 test('the schemas name the marble tools', () => {
   assert.deepEqual(TOOL_SCHEMAS.map((t) => t.name).sort(), [
-    'apply_ops', 'check_document', 'create_document', 'list_agents', 'list_documents', 'read_document', 'read_guide', 'send_message', 'wait_for_reply',
+    'affordance_script', 'apply_ops', 'check_document', 'create_document', 'list_agents', 'list_documents', 'read_document', 'read_guide', 'send_message', 'wait_for_reply',
   ]);
   for (const t of TOOL_SCHEMAS) assert.equal(t.inputSchema.type, 'object');
 });
@@ -390,6 +390,26 @@ test('check_document is offered to agents', () => {
     buildStarter: async () => '', guidePath: '/dev/null', examine: () => [],
   });
   assert.ok(checking.schemas.some((s) => s.name === 'check_document'));
+});
+
+test('affordance_script composes what the markers need, the way a starter does', async () => {
+  const composing = createTools({
+    store: {}, writeOps: async () => ({}), createDocument: async () => {},
+    buildStarter: async () => '', composeAffordances: composeScript, guidePath: '/dev/null', examine: () => [],
+  });
+  const { script } = await composing.call('affordance_script', { affords: ['editable', 'toggle'] });
+  // History always; the five small interactions are one part; each marker named in full.
+  assert.match(script, /^\/\/ Affordances: history, editable, state /);
+  for (const name of ['data-marble-editable', 'data-marble-toggle']) assert.ok(script.includes(name), name);
+  assert.doesNotMatch(script, /data-marble-sortable/);
+  // The doctor agrees that a document carrying it is wired.
+  const doc = `<!doctype html><html data-marble="1"><body>
+    <h1 data-marble-id="h" data-marble-editable>Title</h1>
+    <button data-marble-id="b" data-marble-toggle="data-done:yes|no">Done</button>
+    <script>${script}</script></body></html>`;
+  assert.deepEqual(examine('x.mrbl', doc).filter((f) => /no script in this document reads/.test(f.message)), []);
+
+  assert.match((await composing.call('affordance_script', { affords: ['wobble'] })).error, /no affordance "wobble"/);
 });
 
 test.after(() => drive.close());

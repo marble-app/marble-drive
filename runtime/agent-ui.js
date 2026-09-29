@@ -1788,6 +1788,7 @@
       case 'create_document': return out(`Creating${where}`, input.path ?? '');
       case 'read_guide': return out(input.section ? `Read the guide · ${input.section}` : 'Read the guide', input.section ?? '');
       case 'check_document': return out(`Check${where}`, input.path ?? '');
+      case 'affordance_script': return out('Affordance script', Array.isArray(input.affords) ? input.affords.join(', ') : '');
       case 'browser_navigate': return out(input.url ? `Open ${input.url}` : 'Open page', hostOf(input.url));
       case 'browser_snapshot': return out('Snapshot page');
       case 'browser_click': return out(input.ref ? `Click ${input.ref}` : 'Click', input.ref ?? '');
@@ -6179,7 +6180,7 @@
         const denied = Boolean(event.denied);
         row.dataset.state = denied ? 'refused' : 'failed';
         row.title = event.summary ?? '';
-        if (!['list_documents', 'read_document', 'apply_ops', 'create_document', 'read_guide', 'check_document'].includes(row.dataset.name)) {
+        if (!['list_documents', 'read_document', 'apply_ops', 'create_document', 'read_guide', 'check_document', 'affordance_script'].includes(row.dataset.name)) {
           // The label already says what the step was ("Ran the runner tests");
           // keep it, because what was refused is the useful half.
           row.textContent = `${denied ? 'Blocked' : 'Failed'}: ${row.dataset.was ?? row.dataset.name}`;

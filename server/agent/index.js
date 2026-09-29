@@ -9,7 +9,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 import { enginePath, examine } from '../engine.js';
-import { build as buildStarter } from '../gallery.js';
+import { build as buildStarter, composeScript } from '../gallery.js';
 import { createHub } from './hub.js';
 import { createKeyStore } from './keys.js';
 import { findProject } from './projects.js';
@@ -154,6 +154,7 @@ async function boot({ config, store, writeOps, createDocument, origin, browserPa
     writeOps,
     createDocument,
     buildStarter,
+    composeAffordances: composeScript,
     guidePath: enginePath('skills/build-in-marble/SKILL.md'),
     examine,
     onLook: look,

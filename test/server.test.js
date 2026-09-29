@@ -434,7 +434,7 @@ test('a copy is a copy of the bytes, because a document is one file', async () =
 // arriving from outside.
 const brought = (title, id = 'aa11bb22') =>
   `<!doctype html>\n<html lang="en" data-marble="1">\n<head><meta charset="utf-8"><title>${title}</title></head>\n` +
-  `<body data-marble-id="body${id}">\n<h1 data-marble-id="${id}" data-marble-editable>${title}</h1>\n</body>\n</html>\n`;
+  `<body data-marble-id="body${id}">\n<h1 data-marble-id="${id}">${title}</h1>\n</body>\n</html>\n`;
 
 const collabDoc = (title) =>
   `<!doctype html>\n<html lang="en" data-marble="1">\n<head><meta charset="utf-8"><title>${title}</title></head>\n` +

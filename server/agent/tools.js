@@ -79,12 +79,26 @@ export const TOOL_SCHEMAS = [
   {
     name: 'check_document',
     description:
-      'Check a document against the format\'s own invariants — the ids and structure Marble needs to address it. ' +
+      'Check a document against the format\'s own invariants — the ids and structure Marble needs to address it, ' +
+      'affordance markers no script wires, and scripts that change the page without saving it. ' +
       'Call this after rewriting a document with your own tools. No findings means it is well formed.',
     inputSchema: {
       type: 'object',
       required: ['path'],
       properties: { path: { type: 'string' } },
+    },
+  },
+  {
+    name: 'affordance_script',
+    description:
+      'The script that makes affordance markers work, composed the way starters are. Name every affordance the ' +
+      'document uses (editable, sortable, canvas, resizable, removable, add, toggle, choose, expand, step, note, ' +
+      'alternatives, status); history is always included. It is one closure: put it whole in one <script> before ' +
+      '</body>, and to add an affordance later, call again with the full list and replace that script.',
+    inputSchema: {
+      type: 'object',
+      required: ['affords'],
+      properties: { affords: { type: 'array', items: { type: 'string' } } },
     },
   },
   {
@@ -128,7 +142,11 @@ export const TOOL_SCHEMAS = [
   },
 ];
 
-export function createTools({ store, writeOps, createDocument, buildStarter, guidePath, examine, onLook, messaging = null }) {
+// The five small interactions are one part of the library, `state`; an agent
+// names them by the attribute it wrote, not by where they are kept.
+const STATE_KINDS = new Set(['toggle', 'choose', 'expand', 'step', 'note']);
+
+export function createTools({ store, writeOps, createDocument, buildStarter, composeAffordances, guidePath, examine, onLook, messaging = null }) {
   // conversationId → docPath → Map<id, hash>
   const ledgers = new Map();
 
@@ -293,6 +311,22 @@ export function createTools({ store, writeOps, createDocument, buildStarter, gui
       // asked on demand — a full agent rewriting a file is a document arriving
       // from outside, it just happens to be one we started.
       return { path: docPath, findings: examine(`${splitPath(docPath).name}.mrbl`, source) ?? [] };
+    },
+
+    // A document written from scratch has markers and nothing reading them,
+    // because the host ships no affordances. This is the starters' own
+    // composition, Drive overrides included, handed over as text: the parts are
+    // pieces of one closure, so copying one out of lib/affordances.js by hand is
+    // how a document ends up with a syntax error instead of a checkbox.
+    async affordance_script(input) {
+      if (!composeAffordances) return { error: 'this host cannot compose affordances' };
+      const affords = (Array.isArray(input.affords) ? input.affords : []).map(String);
+      const parts = [...new Set(['history', ...affords.map((a) => (STATE_KINDS.has(a) ? 'state' : a))])];
+      const script = await composeAffordances(parts);
+      return {
+        affords,
+        script: `// Affordances: ${parts.join(', ')} — composed from Marble's lib/affordances.js. One closure: replace it whole.\n${script}`,
+      };
     },
 
     // Messaging lives on the runner, which is created after the tools; the

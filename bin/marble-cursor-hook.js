@@ -22,6 +22,7 @@ const MARBLE = new Set([
   'MCP:create_document',
   'MCP:read_guide',
   'MCP:check_document',
+  'MCP:affordance_script',
   'MCP:list_agents',
   'MCP:send_message',
   'MCP:wait_for_reply',
@@ -55,7 +56,7 @@ process.stdin.on('end', () => {
           : 'Marble agents can only use Marble tools',
         agent_message: full
           ? 'Cursor\'s own tools, Marble\'s tools, and Marble\'s browser are available here. Another MCP server is not.'
-          : 'Only the marble tools are available here: list_documents, read_document, apply_ops, create_document, check_document, read_guide, list_agents, send_message and wait_for_reply.',
+          : 'Only the marble tools are available here: list_documents, read_document, apply_ops, create_document, check_document, affordance_script, read_guide, list_agents, send_message and wait_for_reply.',
       };
   process.stdout.write(JSON.stringify(answer));
 });

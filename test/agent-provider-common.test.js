@@ -7,7 +7,7 @@ import { runCommand } from '../server/agent/providers/exec.js';
 
 test('the instructions name every tool and the rules the tools enforce', () => {
   for (const { name } of TOOL_SCHEMAS) {
-    const text = name === 'check_document' ? instructionsFor('full') : INSTRUCTIONS;
+    const text = ['check_document', 'affordance_script'].includes(name) ? instructionsFor('full') : INSTRUCTIONS;
     assert.ok(text.includes(name), name);
   }
   assert.match(INSTRUCTIONS, /read before you edit/i);
@@ -94,4 +94,19 @@ test('a probe gets exactly the environment it is given', async () => {
     env: { PATH: process.env.PATH, MARBLE_PROBE: 'seen' },
   });
   assert.equal(result.stdout.trim(), 'seen');
+});
+
+test('an agent is told the file is the state and the markers need the document\'s own script', () => {
+  const full = instructionsFor('full');
+  assert.match(full, /The file is the app's state/);
+  assert.match(full, /window\.marble\.op/);
+  assert.match(full, /localStorage or a shadow root/);
+  assert.match(full, /host ships no affordances/);
+  assert.match(full, /affordance_script/);
+  assert.match(full, /create_document from a starter/);
+  // A documents agent cannot insert a whole affordance script under the op size
+  // limit, so it is pointed at what it can do: markers already wired, starters.
+  assert.match(INSTRUCTIONS, /host ships none/);
+  assert.match(INSTRUCTIONS, /start a new document from a starter/);
+  assert.match(INSTRUCTIONS, /window\.marble\.op/);
 });
