@@ -43,9 +43,10 @@
     restore: ['Restore', 'Restoring…', 'Restored'],
     remove: ['Remove this drive', 'Removing…', 'Removed'],
     ship: ['Ship', 'Shipping…', 'Shipped'],
-    pull: ['Pull', 'Pulling…', 'Pulled'],
-    test: ['Run tests', 'Testing…', 'Passed'],
+    pull: ['Get the latest from GitHub', 'Getting it…', 'Got it'],
+    test: ['Run the tests', 'Testing…', 'Passed'],
     publish: ['Publish', 'Publishing…', 'Published'],
+    'npm-login': ['Sign in to npm', 'Waiting for npm…', 'Signed in'],
   };
 
   // ----------------------------------------------------------------- store
@@ -77,6 +78,7 @@
     fleetError: null,
     self: null,
     workshop: null,
+    shut: new Set(), // workshop jobs whose panel was put away
     jobs: [],
     outputs: new Map(),
     pending: new Map(), // drive → { set: {}, unset: [] }
@@ -1299,6 +1301,16 @@
 
   // -------------------------------------------------------------- workshop
 
+  const plural = (n, one, many = `${one}s`) => `${n} ${n === 1 ? one : many}`;
+  const SHOP_KINDS = ['pull', 'test', 'publish', 'npm-login'];
+  const shopJobs = () => S.jobs.filter((j) => j.target === 'workshop' && SHOP_KINDS.includes(j.kind));
+  const repoOf = (j) => j.meta?.repo ?? (/\bmarble-drive\b/.test(j.title) ? 'marble-drive' : j.kind === 'publish' || /\bmarble\b/.test(j.title) ? 'marble' : null);
+  /** This checkout's job worth showing: one running, or one that ended in the
+   *  last half hour and has not been put away. */
+  const shownJob = (name) => shopJobs().find((j) => repoOf(j) === name
+    && (j.state === 'running' || (Date.now() - (j.endedAt ?? 0) < 30 * MIN && !S.shut.has(j.id))));
+
+
   // The chat card is built once and kept: a <marble-conversation> taken out of
   // the page and put back loses its stream, so only the cards around it are
   // redrawn.
@@ -1308,7 +1320,7 @@
   shopGrid.append(reposHolder, chatHolder);
   shopPage.append(shopGrid);
   function drawWorkshop() {
-    if (!changed('workshop', [S.workshop, liveJobs(), notes(''), S.chat, S.chatConversation, S.projects, S.conversations, S.arrived.has('workshop')])) return;
+    if (!changed('workshop', [S.workshop, liveJobs(), shopJobs().map((j) => [j.id, j.state, j.error, j.fix, j.links, j.steps?.map((st) => st.state)]), [...S.shut], notes(''), S.chat, S.chatConversation, S.projects, S.conversations, S.arrived.has('workshop')])) return;
     const shop = S.workshop;
     const repos = shop?.repos ?? [];
     shopGrid.classList.toggle('still', S.arrived.has('workshop'));
@@ -1317,42 +1329,157 @@
     chatCard();
   }
 
-  function repoCard(r, i, shop) {
-    if (!r.exists) {
-      return h('div.card', { style: { '--i': String(i) } }, h('div.card-head', {}, h('h2', { text: r.name })),
-        h('div.card-body', {}, h('p.soft', { text: `No checkout at ${r.path}. tools/sprite-workshop.sh makes it.` })));
+  // A checkout's card reads top to bottom as: where it stands, in a sentence;
+  // the one thing to do about it, and what that does; what it is doing now, if
+  // anything; the facts behind the sentence; and everything else it can do,
+  // each with what it does. The server works out where it stands (`next`, in
+  // server/console/workshop.js), so the words here only have to say it.
+  function whereItStands(r, next, shop) {
+    const m = shop.marble ?? {};
+    const edits = plural(r.changed.length, 'edit');
+    switch (next.state) {
+      case 'missing': return { tone: 'warn', say: `There is no copy of ${r.name} here.`, more: 'tools/sprite-workshop.sh makes it.' };
+      case 'edited': return { tone: 'warn', say: `This copy has ${edits} that ${r.changed.length === 1 ? 'is' : 'are'} not committed.`,
+        more: r.name === 'marble' ? 'Publishing waits until they are committed or dropped: it publishes exactly what is committed. The workshop chat can do either.'
+          : 'Deploying the workshop’s copy takes them with it; deploying main does not. The workshop chat can commit or drop them.' };
+      case 'behind': return { tone: 'warn', say: `GitHub has ${plural(next.count, 'change')} this copy does not have yet.`,
+        more: r.name === 'marble' ? 'Get them first: Publish builds from this copy.' : 'Deploying the workshop’s copy would leave them out.' };
+      case 'no-upstream': return { tone: 'warn', say: 'This copy is not following a branch on GitHub.', more: 'Nothing here can tell whether it is up to date.' };
+      case 'ahead': return { tone: 'soft', say: `This copy has ${plural(next.count, 'commit')} GitHub does not have yet.`, more: 'Push them from the workshop chat when they are ready.' };
+      case 'npm-unknown': return { tone: 'soft', say: 'npm could not be reached, so nothing here can say what it has.', more: 'It is asked again every ten minutes.' };
+      case 'older': return { tone: 'warn', say: `npm has ${next.npm}, which is newer than this copy’s ${next.version}.`, more: 'Someone published it from another copy. Get the latest from GitHub.' };
+      case 'untagged': return { tone: 'soft', say: `npm has ${next.version}, but its tag v${next.version} is not in this copy, so what has changed since is unknown.` };
+      case 'current': return r.name === 'marble'
+        ? { tone: 'good', say: `npm has everything here: ${next.version} is the latest.`, more: 'Nothing to publish.' }
+        : { tone: 'good', say: 'This copy has GitHub’s latest.' };
+      case 'unreleased': return { tone: 'act', say: `${plural(next.count, 'change')} since ${next.npm} ${next.count === 1 ? 'is' : 'are'} not on npm yet.`,
+        list: m.unreleased,
+        more: next.signedOut ? 'This machine is not signed in to npm, so sign in first. Publishing checks that before it changes anything.'
+          : `Publishing makes ${next.version} and uploads it.${next.ahead ? ` It also pushes the ${plural(next.ahead, 'commit')} GitHub does not have yet.` : ''}` };
+      case 'prepared': return { tone: 'act', say: `${next.version} has been made, but it never reached npm.`, list: m.unreleased,
+        more: next.signedOut ? `npm has ${next.npm}. The upload stopped because this machine is not signed in to npm: sign in, then finish.`
+          : `npm has ${next.npm}. Finishing uploads ${next.version} as it is; it does not make another version.` };
+      default: return { tone: 'soft', say: '' };
     }
-    const step = r.ahead === 0 && r.behind === 0 ? h('span.good', { text: 'In step with origin' })
-      : h('span.warn', { text: [r.ahead ? `${r.ahead} ahead` : null, r.behind ? `${r.behind} behind` : null].filter(Boolean).join(', ') || 'No upstream' });
-    const busy = running('workshop');
-    return h('div.card', { style: { '--i': String(i) } },
-      h('div.card-head', {}, h('h2', { text: r.name }), h('span.soft', { text: r.branch }),
-        h('div.end', {},
-          jobButton({ key: `pull:${r.name}`, target: 'workshop', kind: 'pull', cls: 'quiet', disabled: Boolean(busy && busy.kind !== 'pull') || r.changed.length > 0, title: r.changed.length ? 'It has changes; a pull only fast-forwards a clean checkout' : null, onclick: () => start(`pull:${r.name}`, () => api(`workshop/${r.name}/pull`, { method: 'POST' })) }),
-          jobButton({ key: `test:${r.name}`, target: 'workshop', kind: 'test', cls: 'quiet', disabled: Boolean(busy && busy.kind !== 'test'), onclick: () => start(`test:${r.name}`, () => api(`workshop/${r.name}/test`, { method: 'POST' })) }),
-          r.name === 'marble' ? jobButton({ key: 'publish', target: 'workshop', kind: 'publish', disabled: Boolean(busy && busy.kind !== 'publish'), onclick: (e) => publishPlan(e.currentTarget, shop) }) : null)),
-      h('div.card-body', {},
-        r.head ? h('p.lede', {}, h('span.sha', { text: r.head.sha.slice(0, 7) }), ' ', h('b', { text: r.head.subject }), h('span.faint', { text: ` · ${since(r.head.at)}` })) : null,
-        h('p.stat-line', {}, step, r.changed.length ? h('span.warn', { text: `${r.changed.length} changed` }) : h('span', { text: 'Clean' }),
-          r.name === 'marble' ? h('span', {}, 'npm ', h('b', { text: shop.marble.npm ?? '—' }), ' · here ', h('b', { text: shop.marble.repo ?? '—' })) : h('span', {}, 'wants marble ', h('b', { text: shop.marble.dependency ?? '—' }), ' · Claude ', h('b', { text: shop.claudePin ?? '—' }))),
-        r.changed.length ? h('ul.files', {}, r.changed.slice(0, 40).map((f) => h('li', {}, h('span.st', { text: f.status }), f.file))) : null,
-        said(`pull:${r.name}`), said(`test:${r.name}`), r.name === 'marble' ? said('publish') : null));
   }
 
-  function publishPlan(trigger, shop) {
-    const next = (() => {
-      const m = /^(\d+)\.(\d+)\.(\d+)/.exec(shop.marble.repo ?? '');
-      return m ? `${m[1]}.${m[2]}.${Number(m[3]) + 1}` : 'the next patch';
-    })();
+  // The one thing to do, and what it does, said before it is pressed.
+  function goButton(r, next, shop, busy) {
+    const wait = busy ? `Waiting for “${busy.title}” to finish.` : null;
+    const make = (kind, key, label, caption, onclick) => h('div.go', {},
+      jobButton({ key, target: 'workshop', kind, label, cls: 'primary', disabled: Boolean(busy && busy.kind !== kind), onclick }),
+      h('span.caption', { text: wait && busy.kind !== kind ? wait : caption }));
+    switch (next.action) {
+      case 'pull': return make('pull', `pull:${r.name}`, null, 'Moves this copy forward to GitHub’s. Changes nothing else, and stops if it cannot simply move forward.',
+        () => start(`pull:${r.name}`, () => api(`workshop/${r.name}/pull`, { method: 'POST' })));
+      case 'publish': return make('publish', 'publish', `Publish ${next.version}…`, `Makes ${next.version}, pushes it to GitHub and uploads it to npm. You see every step first. Nothing reaches a drive until you ship.`,
+        (e) => publishPlan(e.currentTarget, shop, next));
+      case 'finish': return make('publish', 'publish', `Finish publishing ${next.version}`, `Uploads ${next.version} as it is. No new version.`,
+        () => start('publish', () => api('workshop/marble/publish', { method: 'POST' })));
+      case 'npm-login': return make('npm-login', 'npm-login', null, 'npm gives you a link. Approve it on npmjs.com and this machine stays signed in.',
+        () => start('npm-login', () => api('workshop/marble/npm-login', { method: 'POST' })));
+      default: return null;
+    }
+  }
+
+  // What a job is doing, step by step, and how it ended: what went wrong in
+  // words and the button that puts it right, or what it achieved.
+  function jobPanel(j, next) {
+    const mark = { done: '✓', running: '', failed: '✕', stopped: '–' };
+    const ended = j.state !== 'running';
+    const DONE = {
+      publish: () => `${j.result?.version ?? 'It'} is on npm. The next deploy installs it; nothing reaches a drive until you ship.`,
+      'npm-login': () => `Signed in to npm as ${j.result?.user ?? 'you'}.`,
+      test: () => 'Every test passed.',
+      pull: () => 'This copy has GitHub’s latest.',
+    };
+    const fixes = {
+      'npm-login': () => jobButton({ key: 'npm-login', target: 'workshop', kind: 'npm-login', cls: 'primary', onclick: () => start('npm-login', () => api('workshop/marble/npm-login', { method: 'POST' })) }),
+      finish: () => jobButton({ key: 'publish', target: 'workshop', kind: 'publish', cls: 'primary', label: next?.version ? `Finish publishing ${next.version}` : 'Finish publishing', onclick: () => start('publish', () => api('workshop/marble/publish', { method: 'POST' })) }),
+    };
+    const openLog = () => { setView('activity'); pickJob(j.id); };
+    return h('section.job-now', { 'data-state': j.state, 'aria-live': 'polite' },
+      h('div.job-now-head', {},
+        h('span.dot', { 'data-state': j.state }),
+        h('b', { text: j.title }),
+        h('span.faint', { text: ended ? `${stateWord({ ...j, error: null })} ${since(j.endedAt)}` : `Running since ${clock(j.startedAt)}` }),
+        h('div.end', {},
+          j.state === 'running' ? h('button.btn.quiet', { type: 'button', text: 'Stop', onclick: () => api(`jobs/${j.id}/cancel`, { method: 'POST' }).catch(() => {}) }) : null,
+          h('button.btn.quiet', { type: 'button', text: 'Full output', onclick: openLog }),
+          ended ? h('button.btn.quiet', { type: 'button', 'aria-label': 'Put this away', text: '✕', onclick: () => { S.shut.add(j.id); paint(); } }) : null)),
+      j.steps?.length ? h('ol.progress', {}, j.steps.map((st) => h('li', { 'data-state': st.state }, h('span.tick', { 'aria-hidden': 'true', text: mark[st.state] ?? '' }), st.name))) : null,
+      !ended && j.links?.length ? h('div.go', {}, j.links.map((l) => h('a.btn.primary', { href: l.url, target: '_blank', rel: 'noopener', text: `${l.label} ↗` })),
+        h('span.caption', { text: 'npm is waiting for you. This carries on by itself once you have.' })) : null,
+      j.state === 'done' ? h('p.job-said.good', { text: (DONE[j.kind] ?? (() => 'Done.'))() }) : null,
+      j.state === 'failed' ? h('p.job-said.bad', { text: j.error ?? 'It failed; the full output says why.' }) : null,
+      // The fix, unless it is already the one thing the card offers above.
+      j.state === 'failed' && fixes[j.fix] && j.fix !== next?.action ? h('div.go', {}, fixes[j.fix]()) : null,
+      j.state === 'interrupted' ? h('p.job-said.bad', { text: 'The Console restarted while this ran, so how far it got is unknown. The full output shows what it had done.' }) : null);
+  }
+
+  const EDIT = { '??': 'new', M: 'changed', A: 'added', D: 'deleted', R: 'renamed', C: 'copied', U: 'conflict' };
+  function repoCard(r, i, shop) {
+    const next = r.next ?? { state: r.exists ? 'current' : 'missing', action: null };
+    const head = h('div.card-head', {}, h('h2', { text: r.name }), r.exists ? h('span.soft', { text: `admin-p2’s copy · ${r.branch}` }) : null);
+    const where = whereItStands(r, next, shop);
+    if (!r.exists) return h('div.card', { style: { '--i': String(i) } }, head, h('div.card-body', {}, h('p.where', { 'data-tone': 'warn', text: where.say }), h('p.soft', { text: where.more })));
+
+    const busy = running('workshop');
+    const job = shownJob(r.name);
+    const m = shop.marble ?? {};
+    const github = r.behind === null ? 'Not following a branch'
+      : r.ahead === 0 && r.behind === 0 ? 'Same as this copy'
+        : [r.behind ? `${plural(r.behind, 'change')} newer` : null, r.ahead ? `missing ${plural(r.ahead, 'commit')} from here` : null].filter(Boolean).join(', ');
+    const facts = [
+      ['This copy', h('span', {}, h('span.sha', { text: r.head?.sha.slice(0, 7) ?? '—' }), ' ', r.head?.subject ?? '', h('span.faint', { text: r.head ? ` · ${since(r.head.at)}` : '' }))],
+      ['GitHub', github],
+      ...(r.name === 'marble' ? [
+        ['On npm', m.npm ?? 'Could not ask'],
+        ['This copy’s version', m.repo ?? '—'],
+        ['npm sign-in', m.npmUser ? `Signed in as ${m.npmUser}` : m.npmUser === false ? 'Not signed in' : 'Could not ask'],
+      ] : [
+        ['A deploy installs', `marble ${m.repo ?? '—'} · Claude Code ${shop.claudePin ?? '—'}`],
+      ]),
+    ];
+    const also = [
+      next.action !== 'pull' ? h('div.also-row', {},
+        jobButton({ key: `pull:${r.name}`, target: 'workshop', kind: 'pull', cls: 'quiet', disabled: Boolean(busy && busy.kind !== 'pull') || r.changed.length > 0,
+          onclick: () => start(`pull:${r.name}`, () => api(`workshop/${r.name}/pull`, { method: 'POST' })) }),
+        h('span.caption', { text: busy && busy.kind !== 'pull' ? `Waiting for “${busy.title}” to finish.` : r.changed.length ? 'Waits until the edits are committed or dropped.' : 'Moves this copy forward to GitHub’s, if GitHub has anything newer.' })) : null,
+      h('div.also-row', {},
+        jobButton({ key: `test:${r.name}`, target: 'workshop', kind: 'test', cls: 'quiet', disabled: Boolean(busy && busy.kind !== 'test'),
+          onclick: () => start(`test:${r.name}`, () => api(`workshop/${r.name}/test`, { method: 'POST' })) }),
+        h('span.caption', { text: busy && busy.kind !== 'test' ? `Waiting for “${busy.title}” to finish.` : 'Runs npm test in this copy. Changes nothing and sends nothing.' })),
+    ];
+    return h('div.card.repo', { style: { '--i': String(i) }, 'data-repo': r.name, 'data-state': next.state },
+      head,
+      h('div.card-body', {},
+        h('div.where-block', { 'data-tone': where.tone },
+          h('p.where', { text: where.say }),
+          where.list?.length ? h('ul.changes', {}, where.list.slice(0, 6).map((c) => h('li', {}, h('span.sha', { text: c.sha.slice(0, 7) }), ' ', c.subject)),
+            where.list.length > 6 ? h('li.faint', { text: `and ${where.list.length - 6} more` }) : null) : null,
+          where.more ? h('p.soft', { text: where.more }) : null,
+          job?.state === 'running' ? null : goButton(r, next, shop, busy)),
+        job ? jobPanel(job, next) : null,
+        said(`pull:${r.name}`), said(`test:${r.name}`), r.name === 'marble' ? [said('publish'), said('npm-login')] : null,
+        h('dl.facts', {}, facts.map(([k, v]) => [h('dt', { text: k }), h('dd', {}, v)])),
+        r.changed.length ? h('ul.files.edits', {}, r.changed.slice(0, 40).map((f) => h('li', {}, h('span.st', { text: EDIT[f.status[0]] ?? EDIT[f.status] ?? 'changed' }), f.file))) : null,
+        h('div.also', {}, h('h3', { text: 'Also' }), also)));
+  }
+
+  function publishPlan(trigger, shop, next) {
+    const version = next?.version ?? 'the next patch';
+    const changes = shop.marble?.unreleased ?? [];
     openPop(trigger, (close) => h('div.pop-body', {},
-      h('h4', { text: `Publish marble ${next}` }),
+      h('h4', { text: `Publish marble ${version}` }),
+      changes.length ? h('p.soft', { text: `Takes ${plural(changes.length, 'change')} to npm: ${changes.slice(0, 3).map((c) => c.subject).join('; ')}${changes.length > 3 ? '; …' : ''}` }) : null,
       h('ol.steps', {},
-        h('li', { text: 'Stops if marble has uncommitted changes' }),
-        h('li', { text: `Moves package.json and both plugin manifests to ${next}; commits, tags and pushes` }),
-        h('li', { text: 'Publishes to npm, after its own guard and unit tests; npm may print a link for you to approve' }),
-        h('li', { text: `marble-drive needs nothing: the next deploy installs ${next}. Nothing reaches a drive until you ship` })),
+        h('li', { text: 'Checks this copy has no loose edits, has GitHub’s latest, and is signed in to npm. If not, it stops there and nothing is changed' }),
+        h('li', { text: `Makes ${version}: package.json and both plugin manifests, committed, tagged and pushed to GitHub` }),
+        h('li', { text: 'Uploads it to npm after marble’s own checks and tests. npm may give you a link to approve' }),
+        h('li', { text: `marble-drive needs nothing: the next deploy installs ${version}. Nothing reaches a drive until you ship` })),
       h('div.foot', {}, h('button.btn.quiet', { type: 'button', text: 'Cancel', onclick: close }),
-        h('button.btn.primary', { type: 'button', text: `Publish ${next}`, onclick: () => { close(); start('publish', () => api('workshop/marble/publish', { method: 'POST' })); } }))));
+        h('button.btn.primary', { type: 'button', text: `Publish ${version}`, onclick: () => { close(); start('publish', () => api('workshop/marble/publish', { method: 'POST' })); } }))));
   }
 
   // The workshop chat: a real conversation, in the project the choice names.

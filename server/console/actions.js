@@ -18,6 +18,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 import { isSecret, parse, patch } from './envfile.js';
+import { compareVersions, nextPatch } from './workshop.js';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const REPO = path.resolve(HERE, '..', '..');
@@ -430,13 +431,25 @@ export function createActions({ sprites, inspector, jobs, workshop, src, self, s
     throw bad(`no checkout called ${repo}`, 404);
   };
 
+  // Each workshop job says its steps as it goes, so the card can show where it
+  // is, and says what went wrong in words, with the button that fixes it
+  // (`fix`) when there is one. A failure also says whether anything changed,
+  // because that is the first thing anyone wants to know.
+
   function pull(repo) {
     const dir = repoDir(repo);
     return jobs.start({
       kind: 'pull',
-      title: `Pull ${repo}`,
+      title: `Get the latest ${repo} from GitHub`,
       target: 'workshop',
-      run: (ctx) => ctx.exec('git', ['-C', dir, 'pull', '--ff-only'], { env: jobEnv }),
+      meta: { repo },
+      run: async (ctx) => {
+        ctx.step('Get the latest from GitHub');
+        const got = await ctx.exec('git', ['-C', dir, 'pull', '--ff-only'], { env: jobEnv, allowFail: true });
+        if (got.code !== 0) {
+          throw new Error(`This copy of ${repo} could not simply move forward to GitHub's: it has edits or commits of its own that GitHub does not. Nothing was changed.`);
+        }
+      },
     });
   }
 
@@ -446,47 +459,140 @@ export function createActions({ sprites, inspector, jobs, workshop, src, self, s
       kind: 'test',
       title: `Test ${repo}`,
       target: 'workshop',
-      run: (ctx) => ctx.exec('npm', ['test'], { cwd: dir, env: jobEnv }),
+      meta: { repo },
+      run: async (ctx) => {
+        ctx.step('Run the tests');
+        const ran = await ctx.exec('npm', ['test'], { cwd: dir, env: jobEnv, allowFail: true });
+        if (ran.code !== 0) throw new Error(`Some of ${repo}'s tests failed; the full output says which. Nothing was changed.`);
+      },
     });
   }
 
-  /** marble, published: the next patch version in package.json and both
-   *  plugin manifests (marble's own test holds them together), committed,
-   *  tagged and pushed (its prepublish guard wants every packed file pushed),
-   *  then published; prepublishOnly runs the guard and the unit tests. Nothing
-   *  in marble-drive changes: it depends on ../marble, and a deploy installs
-   *  whatever version that checkout declares. npm may ask the owner to approve
-   *  the publish; the link it prints is in the job's output. */
+  // npm prints the page to open when it wants the owner: a sign-in, or an
+  // approval for a publish. Either becomes a button on the card.
+  const NPM_LINK = /https:\/\/www\.npmjs\.com\/\S+/;
+  const watchNpm = (ctx, label) => ctx.onLine((line) => {
+    const url = NPM_LINK.exec(line)?.[0];
+    if (url) ctx.link(url.replace(/[.,)]+$/, ''), label);
+  });
+
+  const npmSignedIn = async () => {
+    const who = await quick('npm', ['whoami'], { env: jobEnv, timeout: 30_000 });
+    return who.code === 0 ? who.out.trim() || null : null;
+  };
+
+  /** Sign this machine in to npm, through the browser: npm prints a link,
+   *  the owner approves it on npmjs.com, and npm keeps the token itself. */
+  function npmLogin() {
+    return jobs.start({
+      kind: 'npm-login',
+      title: 'Sign in to npm',
+      target: 'workshop',
+      meta: { repo: 'marble' },
+      run: async (ctx) => {
+        watchNpm(ctx, 'Sign in on npmjs.com');
+        try {
+          ctx.step('Wait for you to sign in on npmjs.com');
+          const login = await ctx.exec('npm', ['login', '--auth-type=web'], { env: jobEnv, allowFail: true });
+          ctx.step('Check the sign-in');
+          const user = await npmSignedIn();
+          if (!user) throw new Error(login.code === 0 ? 'npm says it signed in, but still does not know who this is.' : 'The sign-in did not finish. Nothing was changed; try again.');
+          ctx.say(`Signed in to npm as ${user}.`);
+          return { user };
+        } finally {
+          workshop.forgetNpm?.();
+        }
+      },
+    });
+  }
+
+  /** Why npm would not take it, in words, and which button puts it right.
+   *  By now the version is committed and pushed, so the way on is always to
+   *  upload that version, never to make another. */
+  function publishFailed(version, text) {
+    // npm's own reason, skipping its "code E500" line for the one that says what happened.
+    const said = text.split('\n').filter((l) => /^npm (error|ERR!)/.test(l)).map((l) => l.replace(/^npm (error|ERR!)\s*/, '').trim())
+      .filter((l) => l && !/^code \S+$/.test(l) && !/complete log of this run/i.test(l));
+    const kept = `${version} is committed and pushed, so Finish publishing uploads it without making a new version.`;
+    if (/E401|ENEEDAUTH|E404[\s\S]*PUT/.test(text)) {
+      return Object.assign(new Error(`npm refused the upload: this machine is not signed in to npm, or its account cannot publish @bdhmin/marble. ${kept}`), { fix: 'npm-login' });
+    }
+    if (/EOTP|one-time password/i.test(text)) {
+      return Object.assign(new Error(`npm wanted you to approve the upload and did not hear back in time. ${kept}`), { fix: 'finish' });
+    }
+    if (/cannot publish over|previously published/i.test(text)) {
+      return new Error(`npm already has ${version}, so there was nothing to upload.`);
+    }
+    return Object.assign(new Error(`npm did not take ${version}${said[0] ? `: ${said[0]}` : ''}. ${kept}`), { fix: 'finish' });
+  }
+
+  /** marble, published. In order, and nothing changes until the checks pass:
+   *  this copy has no loose edits, it has GitHub's latest, and npm knows who
+   *  this is. Then a new patch version (package.json and both plugin
+   *  manifests, which marble's own test holds together), committed, tagged
+   *  and pushed, and uploaded; prepublishOnly runs marble's guard and unit
+   *  tests. A version made before and never uploaded is uploaded as it is:
+   *  pressing again finishes the job rather than making 0.2.4 on top of an
+   *  unpublished 0.2.3. marble-drive needs nothing: it depends on ../marble,
+   *  and a deploy installs whatever version that checkout declares. */
   function publish() {
     return jobs.start({
       kind: 'publish',
       title: 'Publish marble',
       target: 'workshop',
+      meta: { repo: 'marble' },
       run: async (ctx) => {
-        const { out: dirty } = await ctx.exec('git', ['-C', marbleDir, 'status', '--porcelain'], { env: jobEnv, quiet: true });
-        if (dirty.trim()) throw new Error('marble has changes that are not committed; commit them first');
-        ctx.say('==> marble: the next patch version');
-        const { out: bumped } = await ctx.exec('npm', ['version', 'patch', '--no-git-tag-version'], { cwd: marbleDir, env: jobEnv });
-        const version = bumped.trim().split('\n').pop().replace(/^v/, '');
-        for (const file of ['.claude-plugin/plugin.json', '.claude-plugin/marketplace.json']) {
-          const full = path.join(marbleDir, file);
-          const text = await fsp.readFile(full, 'utf8').catch(() => null);
-          if (text === null) continue;
-          await fsp.writeFile(full, text.replace(/("version":\s*")[^"]*(")/g, `$1${version}$2`));
-        }
-        await ctx.exec('git', ['-C', marbleDir, 'commit', '-q', '-am', `marble ${version}`], { env: jobEnv });
-        await ctx.exec('git', ['-C', marbleDir, 'tag', `v${version}`], { env: jobEnv });
-        ctx.say(`==> marble: pushing ${version}`);
-        await ctx.exec('git', ['-C', marbleDir, 'push', '--quiet', '--follow-tags'], { env: jobEnv });
-        ctx.say(`==> marble: publishing ${version} (npm may print a link for you to approve it)`);
-        const published = await ctx.exec('npm', ['publish'], { cwd: marbleDir, env: jobEnv, allowFail: true });
-        if (published.code !== 0) {
-          if (/EOTP|one-time password/.test(`${published.out}${published.err}`)) {
-            throw new Error(`npm wants your approval: ${version} is committed and pushed; publish it from a console on this sprite (cd ~/src/marble && npm publish)`);
+        watchNpm(ctx, 'Approve on npmjs.com');
+        try {
+          ctx.step('Check this copy has no loose edits');
+          const { out: dirty } = await ctx.exec('git', ['-C', marbleDir, 'status', '--porcelain'], { env: jobEnv, quiet: true });
+          if (dirty.trim()) throw new Error('marble has edits that are not committed. Commit or drop them first; nothing was changed.');
+
+          ctx.step('Get the latest from GitHub');
+          const got = await ctx.exec('git', ['-C', marbleDir, 'pull', '--ff-only'], { env: jobEnv, allowFail: true });
+          if (got.code !== 0) throw new Error("This copy could not simply move forward to GitHub's, so it was not published. Nothing was changed.");
+
+          ctx.step('Check this machine is signed in to npm');
+          const user = await npmSignedIn();
+          if (!user) throw Object.assign(new Error('This machine is not signed in to npm, so it cannot publish. Nothing was changed.'), { fix: 'npm-login' });
+          ctx.say(`Signed in to npm as ${user}.`);
+
+          const pkgFile = path.join(marbleDir, 'package.json');
+          const here = JSON.parse(await fsp.readFile(pkgFile, 'utf8')).version;
+          const seen = await quick('npm', ['view', '@bdhmin/marble', 'version'], { cwd: marbleDir, env: jobEnv, timeout: 30_000 });
+          const onNpm = seen.code === 0 ? seen.out.trim() : null;
+          const prepared = onNpm && compareVersions(here, onNpm) > 0;
+
+          let version = here;
+          if (prepared) {
+            ctx.say(`${here} was made before and never reached npm; uploading it as it is.`);
+          } else {
+            version = nextPatch(here);
+            ctx.step(`Make version ${version}`);
+            await ctx.exec('npm', ['version', 'patch', '--no-git-tag-version'], { cwd: marbleDir, env: jobEnv });
+            for (const file of ['.claude-plugin/plugin.json', '.claude-plugin/marketplace.json']) {
+              const full = path.join(marbleDir, file);
+              const text = await fsp.readFile(full, 'utf8').catch(() => null);
+              if (text === null) continue;
+              await fsp.writeFile(full, text.replace(/("version":\s*")[^"]*(")/g, `$1${version}$2`));
+            }
+            await ctx.exec('git', ['-C', marbleDir, 'commit', '-q', '-am', `marble ${version}`], { env: jobEnv });
           }
-          throw new Error(`npm did not publish ${version}`);
+          // Annotated, because --follow-tags pushes only annotated tags.
+          const tagged = await ctx.exec('git', ['-C', marbleDir, 'rev-parse', '-q', '--verify', `refs/tags/v${version}`], { env: jobEnv, allowFail: true, quiet: true });
+          if (tagged.code !== 0) await ctx.exec('git', ['-C', marbleDir, 'tag', '-a', `v${version}`, '-m', `marble ${version}`], { env: jobEnv });
+
+          ctx.step('Push it to GitHub');
+          await ctx.exec('git', ['-C', marbleDir, 'push', '--quiet', 'origin', 'HEAD', `refs/tags/v${version}`], { env: jobEnv });
+
+          ctx.step(`Test and upload ${version} to npm`);
+          const published = await ctx.exec('npm', ['publish'], { cwd: marbleDir, env: jobEnv, allowFail: true });
+          if (published.code !== 0) throw publishFailed(version, `${published.out}\n${published.err}`);
+          ctx.say(`${version} is on npm. The next deploy installs it; nothing reaches a drive until you ship.`);
+          return { version };
+        } finally {
+          workshop.forgetNpm?.();
         }
-        return { version };
       },
     });
   }
@@ -531,6 +637,7 @@ export function createActions({ sprites, inspector, jobs, workshop, src, self, s
     pull,
     test: runTests,
     publish,
+    npmLogin,
     look,
     reveal,
     log,

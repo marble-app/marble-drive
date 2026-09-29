@@ -380,6 +380,7 @@ export async function createConsole({ config, store, streams = null, ledger = nu
         if (method === 'POST' && c === 'pull') return json(res, 202, actions.pull(b));
         if (method === 'POST' && c === 'test') return json(res, 202, actions.test(b));
         if (method === 'POST' && b === 'marble' && c === 'publish') return json(res, 202, actions.publish());
+        if (method === 'POST' && b === 'marble' && c === 'npm-login') return json(res, 202, actions.npmLogin());
       }
       return json(res, 404, { error: 'not found' });
     } catch (err) {
@@ -394,6 +395,7 @@ export async function createConsole({ config, store, streams = null, ledger = nu
     state,
     jobs,
     actions,
+    workshop,
     usage,
     close() {
       if (timer) clearInterval(timer);

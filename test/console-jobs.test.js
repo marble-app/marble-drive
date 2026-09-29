@@ -99,3 +99,30 @@ test('a secret known only by where it is printed is masked there', async () => {
   assert.match(out, /passphrase: ••••/);
   assert.ok(!out.includes('Zx81kQ'));
 });
+
+test('a job says which step it is on, the links it wants opened, and what would fix it', async () => {
+  const { jobs, events } = await setup();
+  const job = jobs.start({ kind: 'publish', title: 'Publish', target: 'workshop', run: async (ctx) => {
+    ctx.onLine((line) => {
+      const url = /https:\/\/\S+/.exec(line)?.[0];
+      if (url) ctx.link(url, 'Approve');
+    });
+    ctx.step('Check');
+    ctx.step('Upload');
+    ctx.say('Open https://example.test/approve please');
+    ctx.say('Open https://example.test/approve please');
+    throw Object.assign(new Error('npm refused it'), { fix: 'npm-login' });
+  } });
+  const done = await settle(jobs, job.id);
+  assert.equal(done.state, 'failed');
+  assert.deepEqual(done.steps.map((s) => [s.name, s.state]), [['Check', 'done'], ['Upload', 'failed']]);
+  assert.deepEqual(done.links, [{ url: 'https://example.test/approve', label: 'Approve' }], 'once, however often it is printed');
+  assert.equal(done.fix, 'npm-login');
+  assert.match(await jobs.output(job.id), /==> Check\n==> Upload\n/);
+  // The page hears each step as it starts, not only at the end.
+  assert.ok(events.some((e) => e.type === 'job' && e.job.state === 'running' && e.job.steps.length === 1));
+
+  const ok = await settle(jobs, jobs.start({ kind: 'test', title: 'Test', target: 'workshop', run: (ctx) => ctx.step('Only') }).id);
+  assert.deepEqual(ok.steps.map((s) => s.state), ['done']);
+  assert.equal(ok.fix, null);
+});

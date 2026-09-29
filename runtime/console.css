@@ -558,12 +558,53 @@ button, input, select, textarea { font: inherit; color: inherit; }
 
 .files { list-style: none; margin: .5rem 0 0; padding: 0; font: 12px/1.6 var(--mono); color: var(--muted); max-height: 9rem; overflow: auto; }
 .files .st { display: inline-block; width: 1.6rem; color: var(--faint); }
+.files.edits .st { width: 4.2rem; font-family: var(--ui); font-size: .78rem; }
 
 /* The workshop: the checkouts at the top, and the chat takes the height that is
    left, so its composer is always on screen. */
 .shop { display: flex; flex-direction: column; gap: var(--pane-gap); min-height: 100%; }
 .repos { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: var(--pane-gap); align-items: start; }
 .chat-card { flex: 1 1 0; min-height: 26rem; display: flex; flex-direction: column; }
+
+/* A checkout's card: where it stands in a sentence, the one thing to do and
+   what it does, the job running now, the facts behind the sentence, and the
+   rest of what it can do. Tone is a tint, never a stripe. */
+a.btn { text-decoration: none; }
+.where-block { padding: .8rem .95rem .85rem; border-radius: var(--r); background: var(--paper-2); margin: .15rem 0 .8rem; }
+.where-block[data-tone="good"] { background: var(--accent-soft); }
+.where-block[data-tone="warn"] { background: color-mix(in srgb, var(--caution) 11%, var(--card)); }
+.where { margin: 0; font-size: .98rem; font-weight: 500; color: var(--ink); text-wrap: pretty; }
+.where-block .soft { margin: .3rem 0 0; font-size: .85rem; text-wrap: pretty; }
+.changes { list-style: none; margin: .45rem 0 0; padding: 0; display: grid; gap: .15rem; font-size: .85rem; color: var(--ink); }
+.go { display: flex; align-items: center; flex-wrap: wrap; gap: .5rem .8rem; margin-top: .75rem; }
+.caption { flex: 1 1 13rem; min-width: 0; font-size: .8rem; line-height: 1.35; color: var(--muted); text-wrap: pretty; }
+
+.job-now { border: 1px solid var(--line); border-radius: var(--r); padding: .65rem .9rem .75rem; margin: 0 0 .8rem; animation: arrive var(--t) var(--ease-out); }
+.job-now-head { display: flex; align-items: center; flex-wrap: wrap; gap: .25rem .5rem; font-size: .88rem; }
+.job-now-head b { font-weight: 500; }
+.job-now-head .end { margin-left: auto; display: flex; gap: .1rem; }
+.job-now-head .btn.quiet { padding: .2rem .6rem; font-size: .8rem; }
+.progress { list-style: none; margin: .55rem 0 0; padding: 0; display: grid; gap: .28rem; font-size: .85rem; color: var(--muted); }
+.progress li { display: flex; align-items: center; gap: .55rem; }
+.progress .tick { flex: none; width: 1rem; height: 1rem; display: grid; place-items: center; font-size: .75rem; color: var(--faint); }
+.progress li[data-state="done"] .tick { color: var(--accent-ink); }
+.progress li[data-state="running"] { color: var(--ink); }
+.progress li[data-state="running"] .tick::before { content: ""; width: .7rem; height: .7rem; border-radius: 50%; border: 1.5px solid var(--line); border-top-color: var(--accent-ink); animation: spin .9s linear infinite; }
+.progress li[data-state="failed"] { color: var(--danger); }
+.progress li[data-state="failed"] .tick { color: var(--danger); }
+@keyframes spin { to { transform: rotate(1turn); } }
+@media (prefers-reduced-motion: reduce) { .progress li[data-state="running"] .tick::before { animation: none; border-color: var(--accent-ink); } }
+.job-said { margin: .6rem 0 0; font-size: .88rem; line-height: 1.4; text-wrap: pretty; }
+.job-said.bad { color: var(--danger); }
+
+.facts { display: grid; grid-template-columns: max-content minmax(0, 1fr); gap: .3rem 1rem; margin: .1rem 0 .85rem; font-size: .85rem; }
+.facts dt { color: var(--faint); }
+.facts dd { margin: 0; color: var(--ink); min-width: 0; overflow-wrap: anywhere; }
+.also { border-top: 1px solid var(--line); margin-top: .85rem; padding-top: .7rem; display: grid; gap: .3rem; }
+.also h3 { margin: 0 0 .1rem; font-size: .72rem; font-weight: 500; letter-spacing: .06em; text-transform: uppercase; color: var(--faint); }
+.also-row { display: flex; align-items: center; flex-wrap: wrap; gap: .1rem .6rem; }
+.also-row .btn.quiet { margin-left: -.85rem; color: var(--ink); }
+.also-row .btn.quiet:disabled { color: var(--faint); }
 .still.shop .card { animation: none; }
 /* The workshop chat is a real conversation, on the page. */
 .chat { display: flex; flex-direction: column; min-height: 0; }
@@ -810,6 +851,9 @@ select.small { font: inherit; font-size: .8rem; color: var(--ink); background: v
 
 /* One thing at a time: the list, and a tap slides the detail in. */
 @container (max-width: 760px) {
+  /* A caption under its button, every time, rather than wherever it fits. */
+  .also-row { display: grid; justify-items: start; gap: 0 0; margin-bottom: .35rem; }
+  .go .caption { flex-basis: 100%; }
   :root { --bar-h: 3rem; }
   .cx-bar { gap: .5rem; padding: 0 .6rem; padding-top: env(safe-area-inset-top); }
   .cx-title { display: none; }
