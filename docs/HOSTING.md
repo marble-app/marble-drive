@@ -277,7 +277,8 @@ admin-p2 (`~/.config/marble-drive/testers.json`), the machine that made it.
 | `… --print-plan` | say what would be deployed, and stop |
 | `… --when-idle` | stage now, switch when no agent is working (always so from the sprite itself); for a drive in use |
 | `tools/sprite-deploy.sh --all [--list]` | every sprite labelled `marble-tester` or `marble-user`; continues past a failure; `--list` only names them |
-| `tools/drive-backup.sh [<sprite>] [--to <dir>] [--link <path>]` | a Fly checkpoint, then the one copy of a drive (default admin-p2) in `~/Marble Backups/<utc>/`, linked from `~/Marble Drive`; unchanged files hard-linked to the copy before, so a run moves only what changed |
+| `tools/drive-backup.sh [<sprite>] [--to <dir>] [--link <path>]` | a Fly checkpoint, then the one copy of a drive (default admin-p2) in `~/Marble Backups/<utc>/`, linked from `~/Marble Drive`; unchanged files hard-linked to the copy before, so a run moves only what changed. Then the workshop (`/home/sprite/src`, with `.git`, without `node_modules`) into `~/Marble Backups/workshop/<utc>/`, linked from `~/Marble Workshop`, with `workshop.json` naming the checkouts whose work is nowhere else (`--no-workshop` to skip) |
+| `tools/workshop-restore.sh <sprite> [<checkout>...] [--yes]` | puts the workshop's checkouts back on a sprite from `~/Marble Workshop`, setting aside any already there; says what it would do without `--yes` |
 | `macos/launchd/backup.sh install [<sprite>]` | runs `tools/backup-agent.mjs` every minute and at login; `status`, `run`, `logs`, `uninstall` |
 | `tools/backup-agent.mjs [<sprite>]` | the Mac's half of the Console's Backups view: backs up after changes (10 quiet minutes, hourly at most), takes the Console's requests and reports back, touching the sprite only while it is awake |
 | `node tools/browser-tests.mjs [<files>]` | browser tests: on the owner's Mac when it is watching this sprite, else here one file at a time |
@@ -321,7 +322,16 @@ on Fly, as checkpoints. Each backup (`tools/drive-backup.sh`) makes a Fly
 checkpoint (`backup <utc>`), copies the drive into a new `<utc>/` with every
 unchanged file a hard link to the copy before (so only what changed moves),
 points `~/Marble Drive` at it and removes the old one; a failed run leaves the
-old copy and link alone. The copy carries its sync reference in
+old copy and link alone. The same run then copies the workshop,
+`/home/sprite/src`, every checkout with its `.git` and uncommitted work (not
+`node_modules`), into `~/Marble Backups/workshop/<utc>/`, linked from
+`~/Marble Workshop`, so code not yet pushed survives its sprite (added
+2026-09-29, when admin-p2's disk failed; 232 MB, 14 s for drive and workshop).
+Its `workshop.json` lists each checkout's branch, files changed and commits no
+remote has, and the log line names the ones with work nowhere else. The
+worktrees' `.git` names their repository by its path on the sprite, which the
+report follows into the copy. Sign-ins are not copied. A workshop failure
+leaves the last copy and never fails the drive's backup. The copy carries its sync reference in
 `.marble/sync.json`: the drive, when, the Fly checkpoint it matches (or why
 there is none: Sprites' checkpoint store can get stuck, and then the copy goes
 ahead without), documents, files, bytes added.

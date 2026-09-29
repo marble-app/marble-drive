@@ -3,7 +3,7 @@
 # point on Fly, so a drive survives its sprite (docs/HOSTING.md, "Back a drive
 # up here").
 #
-#   tools/drive-backup.sh [<sprite>] [--org <org>] [--to <dir>] [--link <path>] [--why <text>] [--no-checkpoint]
+#   tools/drive-backup.sh [<sprite>] [--org <org>] [--to <dir>] [--link <path>] [--why <text>] [--no-checkpoint] [--no-workshop]
 #
 # <sprite> defaults to admin-p2, --to to ~/Marble Backups, --link to
 # ~/Marble Drive. The copy is <to>/<utc>/, the whole drive as it was at <utc>;
@@ -17,11 +17,26 @@
 # the Fly checkpoint it matches, documents, files, bytes added, seconds, why.
 # tools/drive-restore.sh leaves that file behind.
 #
+# Then the workshop, where the sprite has one: its checkouts
+# (/home/sprite/src), each with its .git (local commits, branches, stashes)
+# and its uncommitted work, so code not yet pushed survives the sprite too.
+# One copy, <to>/workshop/<utc>/, linked from --workshop-link (~/Marble
+# Workshop), made the same way; node_modules stays behind (npm install brings
+# it back). Its workshop.json says which checkouts hold work that is nowhere
+# else: uncommitted changes, or commits no remote has. A failure there is said
+# and leaves the last copy; the drive's backup stands. tools/workshop-restore.sh
+# puts checkouts back on a sprite. Sign-ins are not copied: they are the
+# owner's to carry.
+#
 # When to run is tools/backup-agent.mjs's call; this only runs.
 set -euo pipefail
 
 HERE="$(cd "$(dirname "$0")" && pwd)"
 SPRITE=admin-p2 ORG=marble-drive TO="$HOME/Marble Backups" LINK="$HOME/Marble Drive" WHY=asked CHECKPOINT=1
+WORKSHOP=1 WLINK="$HOME/Marble Workshop"
+# Where things are on the sprite, and how rsync gets there; only tests change them.
+REMOTE_DRIVE="${BACKUP_REMOTE_DRIVE:-/drive}" REMOTE_SRC="${BACKUP_REMOTE_SRC:-/home/sprite/src}"
+RSH="${BACKUP_RSH:-$HERE/sprite-rsh.sh}"
 usage() { awk 'NR > 1 && /^#/ { sub(/^# ?/, ""); print; next } NR > 1 { exit }' "$0"; exit 2; }
 if [[ $# -gt 0 && "$1" != -* ]]; then SPRITE=$1; shift; fi
 while [[ $# -gt 0 ]]; do
@@ -31,6 +46,8 @@ while [[ $# -gt 0 ]]; do
     --link) LINK=$2; shift 2 ;;
     --why) WHY=$2; shift 2 ;;
     --no-checkpoint) CHECKPOINT=0; shift ;;
+    --no-workshop) WORKSHOP=0; shift ;;
+    --workshop-link) WLINK=$2; shift 2 ;;
     -h|--help) usage ;;
     *) echo "drive-backup: unknown option $1"; usage ;;
   esac
@@ -79,7 +96,7 @@ LINKDEST=()
 [[ -n "$OLD" ]] && LINKDEST=(--link-dest="$TO/$OLD/")
 set +e
 rsync -a --delete --exclude=/.marble/agents/host.lock --exclude=/.marble/sync.json ${LINKDEST[@]+"${LINKDEST[@]}"} \
-  -e "$HERE/sprite-rsh.sh" "$SPRITE:/drive/" "$PARTIAL/"
+  -e "$RSH" "$SPRITE:$REMOTE_DRIVE/" "$PARTIAL/"
 code=$?
 set -e
 # 24: files vanished while being read, which a live drive does. The next copy
@@ -110,3 +127,58 @@ for snap in $(ls -1 "$TO" | grep -E "$SNAP"); do
 done
 find "$TO" -maxdepth 1 -name ".partial-*" -exec rm -rf {} +
 say "done: $NAME, $docs documents${checkpoint:+, Fly checkpoint $checkpoint}"
+
+[[ $WORKSHOP == 1 ]] || exit 0
+W="$TO/workshop"
+mkdir -p "$W"
+WOLD="$(ls -1 "$W" | grep -E "$SNAP" | sort | tail -1 || true)"
+WPARTIAL="$W/.partial-$NAME"
+WLINKDEST=()
+[[ -n "$WOLD" ]] && WLINKDEST=(--link-dest="$W/$WOLD/")
+set +e
+rsync -a --delete --exclude=node_modules/ ${WLINKDEST[@]+"${WLINKDEST[@]}"} -e "$RSH" "$SPRITE:$REMOTE_SRC/" "$WPARTIAL/" 2>"$W/.rsync-err"
+code=$?
+set -e
+if [[ $code != 0 && $code != 24 ]]; then
+  if grep -q -i "no such file" "$W/.rsync-err"; then say "no workshop on $SPRITE"; else say "workshop FAILED: rsync exit $code ($(tail -1 "$W/.rsync-err")); the copy from ${WOLD:-nothing} stays"; fi
+  rm -rf "$WPARTIAL" "$W/.rsync-err"
+  exit 0
+fi
+rm -f "$W/.rsync-err"
+# What is nowhere else: per checkout, files changed and not committed, and
+# commits on no remote. Read from the copy, which has each .git.
+report="" held=""
+# A worktree's .git names its repository by where it is on the sprite; here
+# that is the same place in this copy. Unpushed is per checkout: commits on its
+# HEAD that no remote has (worktrees share branches). A checkout git cannot
+# read here is a "?", never a failed backup.
+for dir in "$WPARTIAL"/*/; do
+  dir="${dir%/}"
+  [[ -e "$dir/.git" ]] || continue
+  name="$(basename "$dir")"
+  g=(git -C "$dir")
+  if [[ -f "$dir/.git" ]]; then
+    gitdir="$(sed -n 's/^gitdir: //p' "$dir/.git")"
+    [[ "$gitdir" == "$REMOTE_SRC/"* ]] && g=(git --git-dir="$WPARTIAL/${gitdir#"$REMOTE_SRC/"}" --work-tree="$dir")
+  fi
+  if changed="$("${g[@]}" status --porcelain 2>/dev/null)" && unpushed="$("${g[@]}" log HEAD --not --remotes --oneline 2>/dev/null)"; then
+    changed="$(printf '%s' "$changed" | grep -c . || true)"
+    unpushed="$(printf '%s' "$unpushed" | grep -c . || true)"
+    (( changed + unpushed > 0 )) && held="$held${held:+, }$name ($changed changed, $unpushed unpushed)"
+  else
+    changed='"?"' unpushed='"?"'
+    held="$held${held:+, }$name (unreadable here)"
+  fi
+  branch="$("${g[@]}" branch --show-current 2>/dev/null || true)"
+  report="$report${report:+,}{\"checkout\":$(json "$name"),\"branch\":$(json "$branch"),\"changed\":$changed,\"unpushed\":$unpushed}"
+done
+wfiles="$(find "$WPARTIAL" -type f | wc -l | tr -d ' ')"
+printf '{"from":%s,"name":%s,"syncedAt":%s,"drive":%s,"files":%s,"checkouts":[%s]}\n' \
+  "$(json "$SPRITE")" "$(json "$NAME")" "$(json "$(stamp)")" "$(json "$NAME")" "$wfiles" "$report" >"$WPARTIAL/workshop.json"
+mv "$WPARTIAL" "$W/$NAME"
+ln -sfn "$W/$NAME" "$WLINK"
+for snap in $(ls -1 "$W" | grep -E "$SNAP"); do
+  [[ "$snap" == "$NAME" ]] || rm -rf "${W:?}/$snap"
+done
+find "$W" -maxdepth 1 -name ".partial-*" -exec rm -rf {} +
+say "workshop: $wfiles files${held:+; only here: $held}"
