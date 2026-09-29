@@ -107,3 +107,115 @@ test('where each drive lives on the Mac', () => {
   assert.equal(macPaths('t-bryan', '/Users/b').root, '/Users/b/Marble Drive (t-bryan)');
   assert.equal(macPaths('t-bryan', '/Users/b').port, 4402);
 });
+
+// Rollback branches.
+const boom = () => { throw new Error('boom'); };
+
+test('a download that throws hands the lease back and serves from the old home', async () => {
+  const log = [];
+  const client = lease();
+  const mac = side('mac', log, { download: async () => boom() });
+  const result = await moveHome({ to: 'mac', sides: { mac, fly: side('fly', log) }, client, ...quick });
+  assert.deepEqual([result.ok, result.step], [false, 'download']);
+  assert.deepEqual(client.current, { home: 'fly', epoch: 2 });
+  assert.equal(log.at(-1), 'fly.start');
+});
+
+test('an arriving host that is not healthy hands the lease back', async () => {
+  const log = [];
+  const client = lease();
+  const mac = side('mac', log, { healthy: async () => false });
+  const result = await moveHome({ to: 'mac', sides: { mac, fly: side('fly', log) }, client, ...quick });
+  assert.deepEqual([result.ok, result.step], [false, 'start']);
+  assert.deepEqual(client.current, { home: 'fly', epoch: 2 });
+  assert.equal(log.at(-1), 'fly.start');
+});
+
+test('a failed hand-back starts the side the lease still names, not the old home', async () => {
+  const log = [];
+  const client = lease();
+  const base = client.move;
+  let calls = 0;
+  client.move = async (to, epoch) => { calls += 1; if (calls === 2) throw new Error('hub down'); return base(to, epoch); };
+  const mac = side('mac', log, { download: async () => ({ ok: false, why: 'disk' }) });
+  const result = await moveHome({ to: 'mac', sides: { mac, fly: side('fly', log) }, client, ...quick });
+  assert.equal(result.step, 'download');
+  assert.match(result.why, /lease names mac/);
+  assert.equal(log.at(-1), 'mac.start');
+  assert.ok(!log.includes('fly.start'));
+});
+
+test('a lease move that committed but threw is handed back', async () => {
+  const log = [];
+  const client = lease();
+  const base = client.move;
+  let first = true;
+  client.move = async (to, epoch) => {
+    const r = await base(to, epoch);
+    if (first) { first = false; throw new Error('timeout'); }
+    return r;
+  };
+  const result = await moveHome({ to: 'mac', sides: { mac: side('mac', log), fly: side('fly', log) }, client, ...quick });
+  assert.deepEqual([result.ok, result.step], [false, 'lease']);
+  assert.equal(client.current.home, 'fly');
+  assert.equal(log.at(-1), 'fly.start');
+});
+
+test('an unreadable lease while settling starts nothing', async () => {
+  const log = [];
+  const client = lease();
+  const base = client.get;
+  let down = false;
+  client.get = async () => { if (down) throw new Error('offline'); return base(); };
+  const mac = side('mac', log, { download: async () => { down = true; return { ok: false, why: 'disk' }; } });
+  const result = await moveHome({ to: 'mac', sides: { mac, fly: side('fly', log) }, client, ...quick });
+  assert.equal(result.step, 'download');
+  assert.match(result.why, /could not be read/);
+  assert.deepEqual(log, ['fly.stop', 'fly.upload@0']);
+});
+
+test('a leaving host that will not stop: old home serves, lease untouched', async () => {
+  const log = [];
+  const client = lease();
+  const fly = side('fly', log, { stop: async () => boom() });
+  const result = await moveHome({ to: 'mac', sides: { mac: side('mac', log), fly }, client, ...quick });
+  assert.deepEqual([result.ok, result.step], [false, 'stop']);
+  assert.deepEqual(log, ['fly.start']);
+  assert.deepEqual(client.current, { home: 'fly', epoch: 0 });
+});
+
+test('an arriving host whose start throws hands the lease back', async () => {
+  const log = [];
+  const client = lease();
+  let n = 0;
+  const mac = side('mac', log, { start: async () => { n += 1; if (n === 1) boom(); log.push('mac.start'); } });
+  const result = await moveHome({ to: 'mac', sides: { mac, fly: side('fly', log) }, client, ...quick });
+  assert.deepEqual([result.ok, result.step], [false, 'start']);
+  assert.deepEqual(client.current, { home: 'fly', epoch: 2 });
+  assert.equal(log.at(-1), 'fly.start');
+});
+
+test('a leaving host that will not restart after a good move only warns', async () => {
+  const log = [];
+  const fly = side('fly', log, { start: async () => boom() });
+  const result = await moveHome({ to: 'mac', sides: { mac: side('mac', log), fly }, client: lease(), ...quick });
+  assert.equal(result.ok, true);
+  assert.match(result.warning, /fly did not restart as standby/);
+});
+
+test('waits while an agent works, then moves', async () => {
+  const log = [];
+  const seq = [2, 0];
+  const fly = side('fly', log, { working: async () => seq.shift() });
+  const result = await moveHome({ to: 'mac', sides: { mac: side('mac', log), fly }, client: lease(), waitIdleMs: 60_000, ...quick });
+  assert.equal(result.ok, true);
+});
+
+test('an unreachable leaving host during the idle wait names --now', async () => {
+  const log = [];
+  const fly = side('fly', log, { working: async () => boom() });
+  const result = await moveHome({ to: 'mac', sides: { mac: side('mac', log), fly }, client: lease(), ...quick });
+  assert.deepEqual([result.ok, result.step], [false, 'idle']);
+  assert.match(result.why, /--now/);
+  assert.deepEqual(log, []);
+});

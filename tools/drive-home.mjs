@@ -82,7 +82,10 @@ const result = await moveHome({
   now: args.includes('--now'),
 });
 if (result.already) console.log(`${drive} is already at home on ${to} (epoch ${result.lease.epoch})`);
-else if (result.ok) console.log(`${drive} is at home on ${to} (epoch ${result.lease.epoch}), moved in ${result.seconds}s`);
+else if (result.ok) {
+  console.log(`${drive} is at home on ${to} (epoch ${result.lease.epoch}), moved in ${result.seconds}s`);
+  if (result.warning) console.error(`drive-home: warning: ${result.warning}`);
+}
 else {
   console.error(`drive-home: stopped at ${result.step}: ${result.why}`);
   process.exit(1);
