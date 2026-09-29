@@ -961,8 +961,10 @@ test('the process gets the allowlisted environment plus what the provider adds, 
   });
   await runner.boot();
 
-  const saved = { secret: process.env.MARBLE_DRIVE_SECRET, foo: process.env.FOO, key: process.env.SOME_API_KEY };
+  const saved = { secret: process.env.MARBLE_DRIVE_SECRET, foo: process.env.FOO, key: process.env.SOME_API_KEY, hub: process.env.MARBLE_HUB_ENV };
   process.env.MARBLE_DRIVE_SECRET = 'hunter2';
+  // A home host's hub settings: a server an agent starts must not join the hub.
+  process.env.MARBLE_HUB_ENV = '/nonexistent/hub.env';
   process.env.FOO = 'inherited';
   process.env.SOME_API_KEY = 'sk-inherited';
   const envOf = async (provider) => {
@@ -976,6 +978,7 @@ test('the process gets the allowlisted environment plus what the provider adds, 
     assert.equal(bare.MARBLE_DRIVE_SECRET, undefined);
     assert.equal(bare.FOO, undefined, 'nothing is inherited past the allowlist');
     assert.equal(bare.SOME_API_KEY, undefined);
+    assert.equal(bare.MARBLE_HUB_ENV, undefined, 'an agent never gets the hub settings');
     assert.equal(bare.PATH, process.env.PATH);
     assert.equal(bare.MARBLE_AGENT_TOKEN.length, 64, 'the bridge still gets its token');
 
@@ -984,7 +987,7 @@ test('the process gets the allowlisted environment plus what the provider adds, 
     assert.equal(extra.FOO, 'y');
     assert.equal(extra.SOME_API_KEY, undefined);
   } finally {
-    for (const [name, value] of [['MARBLE_DRIVE_SECRET', saved.secret], ['FOO', saved.foo], ['SOME_API_KEY', saved.key]]) {
+    for (const [name, value] of [['MARBLE_DRIVE_SECRET', saved.secret], ['FOO', saved.foo], ['SOME_API_KEY', saved.key], ['MARBLE_HUB_ENV', saved.hub]]) {
       if (value === undefined) delete process.env[name];
       else process.env[name] = value;
     }

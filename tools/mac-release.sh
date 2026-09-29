@@ -38,7 +38,8 @@ npx --no-install playwright install chromium >/dev/null
 
 say "smoke test on :4498 with a throwaway drive"
 scratch="$(mktemp -d)"
-MARBLE_DRIVE_ROOT="$scratch" PORT=4498 HOST=127.0.0.1 MARBLE_DRIVE_AGENTS=0 node bin/marble-drive.js serve >"$scratch.log" 2>&1 &
+# Without MARBLE_HUB_ENV: a throwaway drive must never take part in the hub.
+env -u MARBLE_HUB_ENV MARBLE_DRIVE_ROOT="$scratch" PORT=4498 HOST=127.0.0.1 MARBLE_DRIVE_AGENTS=0 node bin/marble-drive.js serve >"$scratch.log" 2>&1 &
 pid=$!
 ok=0
 for _ in $(seq 1 30); do curl -fsS http://127.0.0.1:4498/health >/dev/null 2>&1 && { ok=1; break; }; sleep 1; done

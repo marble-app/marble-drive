@@ -143,7 +143,8 @@ stage() {
   say "smoke test on :4499 with a throwaway drive"
   local scratch
   scratch="$(mktemp -d)"
-  MARBLE_DRIVE_ROOT="$scratch" PORT=4499 HOST=127.0.0.1 MARBLE_DRIVE_AGENTS=0 \
+  # Without MARBLE_HUB_ENV: a throwaway drive must never take part in the hub.
+  env -u MARBLE_HUB_ENV MARBLE_DRIVE_ROOT="$scratch" PORT=4499 HOST=127.0.0.1 MARBLE_DRIVE_AGENTS=0 \
     "$NODE" bin/marble-drive.js serve >"$scratch.log" 2>&1 &
   local pid=$!
   if ! health 4499 30; then
