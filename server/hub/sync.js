@@ -105,7 +105,9 @@ export async function rcloneEnv(s, run = rclone) {
 
 export async function readState({ settings, env, run = rclone }) {
   try {
-    return JSON.parse((await run(['cat', `${rawBase(settings)}/state.json`], env)).stdout);
+    // R2 answers a missing object with exit 0 and nothing; the local backend errors.
+    const { stdout } = await run(['cat', `${rawBase(settings)}/state.json`], env);
+    return stdout.trim() ? JSON.parse(stdout) : null;
   } catch (err) {
     if (/not found|no such file|doesn't exist/i.test(err.stderr ?? err.message)) return null;
     throw err;

@@ -5,7 +5,7 @@ import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
 
-import { EXCLUDES, down, looksWrong, rclone, rcloneEnv, scan, trashPrefix, up } from '../server/hub/sync.js';
+import { EXCLUDES, down, looksWrong, rclone, rcloneEnv, readState, scan, trashPrefix, up } from '../server/hub/sync.js';
 
 let hasRclone = true;
 try { execFileSync('rclone', ['version'], { stdio: 'ignore' }); } catch { hasRclone = false; }
@@ -169,4 +169,13 @@ test('a passphrase that starts with a dash round-trips through rclone', needsRcl
   assert.equal((await rclone(['reveal', env.RCLONE_CONFIG_HUB_PASSWORD2], {})).stdout.trim(), '-s');
   const root = await fixture();
   assert.equal((await up({ root, settings: s, epoch: 0 })).ok, true);
+});
+
+// R2 (rclone's s3 backend) answers `cat` of a missing object with exit 0 and
+// no output, where the local backend errors. Seen on the first real bucket.
+test('an empty answer from the hub means no upload yet, as R2 gives it', async () => {
+  const settings = { HUB_DRIVE: 'bryan', HUB_BACKEND: 'local', HUB_LOCAL_DIR: '/x' };
+  assert.equal(await readState({ settings, env: {}, run: async () => ({ stdout: '', stderr: '' }) }), null);
+  assert.equal(await readState({ settings, env: {}, run: async () => ({ stdout: ' \n', stderr: '' }) }), null);
+  assert.deepEqual(await readState({ settings, env: {}, run: async () => ({ stdout: '{"seq":3}', stderr: '' }) }), { seq: 3 });
 });
