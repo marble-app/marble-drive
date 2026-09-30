@@ -52,7 +52,12 @@ while :; do
     mode="$("$NODE" tools/home-mode.mjs 2>>"$CRASH_LOG" || echo standby)"
     [[ "$mode" == serve || "$mode" == standby ]] || mode=standby
   fi
-  "$NODE" --report-on-fatalerror --report-directory="$CRASH_DIR" bin/marble-drive.js "$mode" &
+  # MARBLE_SERVE_ENV_FILE: extra settings for this host (the Mac's home service,
+  # macos/launchd/home.sh), read by node itself so secrets stay out of the plist.
+  # node's --env-file never overrides what is already in the environment.
+  env_file=()
+  [[ -n "${MARBLE_SERVE_ENV_FILE:-}" ]] && env_file=(--env-file-if-exists="$MARBLE_SERVE_ENV_FILE")
+  "$NODE" ${env_file[@]+"${env_file[@]}"} --report-on-fatalerror --report-directory="$CRASH_DIR" bin/marble-drive.js "$mode" &
   pid=$!
   # `wait` returns early when a signal lands; wait again until the host is gone.
   status=0

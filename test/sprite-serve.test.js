@@ -96,3 +96,18 @@ test('on Linux, the turn\'s score is raised', { skip: !fs.existsSync('/proc/self
   const launch = firstToGo({ command: 'cat', args: ['/proc/self/oom_score_adj'] });
   assert.equal(spawnSync(launch.command, launch.args, { encoding: 'utf8' }).stdout.trim(), '500');
 });
+
+// The Mac's home service keeps its own settings (and a key or two) in a file
+// the keeper hands to node, not in the launchd plist; a sprite names none.
+test('MARBLE_SERVE_ENV_FILE is handed to node, and nothing is when it is unset', async () => {
+  const withFile = await keeper({ env: { MARBLE_SERVE_ENV_FILE: '/tmp/some settings.env' } });
+  assert.ok(await until(async () => (await withFile.lines('starts')).length >= 1));
+  assert.match((await withFile.lines('starts'))[0], /^--env-file-if-exists=\/tmp\/some settings\.env --report-on-fatalerror /);
+  withFile.child.kill('SIGTERM');
+  await withFile.exited;
+  const without = await keeper({ env: { MARBLE_SERVE_ENV_FILE: '' } });
+  assert.ok(await until(async () => (await without.lines('starts')).length >= 1));
+  assert.match((await without.lines('starts'))[0], /^--report-on-fatalerror /);
+  without.child.kill('SIGTERM');
+  await without.exited;
+});

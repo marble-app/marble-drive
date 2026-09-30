@@ -36,6 +36,7 @@
     <key>MARBLE_DRIVE_AGENT_KEYS</key><string>@HOME@/.config/marble-drive/agent-keys</string>
     <key>MARBLE_HUB_ENV</key><string>@HUB_ENV@</string>
     <key>MARBLE_PROJECT_PREFIXES</key><string>/home/sprite/src=@SRC@</string>
+    <key>MARBLE_SERVE_ENV_FILE</key><string>@HOME@/.config/marble-drive/mac-@NAME@.env</string>
     <key>MARBLE_SERVE_CRASH_DIR</key><string>@HOME@/Library/Logs/marble-drive/home-@NAME@-crash</string>
   </dict>
 </dict>
