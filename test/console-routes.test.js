@@ -33,9 +33,9 @@ async function host(env = {}) {
     const res = await fetch(`${base}/gate`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ secret: config.secret }) });
     cookie = (res.headers.get('set-cookie') ?? '').split(';')[0];
   }
-  const call = (route, { method = 'GET', body, origin = base } = {}) => fetch(`${base}${route}`, {
+  const call = (route, { method = 'GET', body, origin = base, headers = {} } = {}) => fetch(`${base}${route}`, {
     method,
-    headers: { cookie, ...(body ? { 'Content-Type': 'application/json' } : {}), ...(origin ? { Origin: origin } : {}) },
+    headers: { cookie, ...(body ? { 'Content-Type': 'application/json' } : {}), ...(origin ? { Origin: origin } : {}), ...headers },
     body: body ? JSON.stringify(body) : undefined,
   });
   return { drive, base, call, fleet, close: () => drive.close() };
@@ -74,6 +74,17 @@ test('the console answers the signed-in page, and only its own origin may change
   assert.equal(revealed.passphrase, 'pass-t-sam');
   assert.equal((await h.call('/console/api/drives/nobody/look', { method: 'POST' })).status, 404);
   assert.equal((await h.call('/console/api/drives/..%2Fetc/look', { method: 'POST' })).status, 400);
+});
+
+test('behind the front door, the public name is the console\'s own origin', async (t) => {
+  const h = await host({ MARBLE_DRIVE_CONSOLE: '1', MARBLE_DRIVE_SECRET: 'pw-1234' });
+  t.after(() => h.close());
+  const front = { 'X-Forwarded-Host': 'bryan.marbledrive.app' };
+  const look = (origin, headers) => h.call('/console/api/drives/t-sam/look', { method: 'POST', origin, headers });
+  assert.equal((await look('https://bryan.marbledrive.app', front)).status, 200);
+  assert.equal((await look('https://evil.example', front)).status, 403);
+  assert.equal((await look(null, front)).status, 403, 'still needs an Origin');
+  assert.equal((await look(h.base, front)).status, 403, 'the forwarded name wins over the socket\'s host');
 });
 
 test('the live stream sends the fleet as soon as a page is watching', async (t) => {

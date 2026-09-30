@@ -253,11 +253,14 @@ export async function createConsole({ config, store, streams = null, ledger = nu
 
   /** A changing request comes from this page's own origin, on top of the
    *  SameSite cookie the gate already set. */
+  // A page behind the front door (marbledrive.app) arrives with its public
+  // name in X-Forwarded-Host, as server/sessions.js sameOrigin reads it; an
+  // Origin is still required here.
   function sameOrigin(req) {
     const origin = req.headers.origin;
     if (!origin) return false;
     try {
-      return new URL(origin).host === req.headers.host;
+      return new URL(origin).host === (req.headers['x-forwarded-host'] || req.headers.host);
     } catch {
       return false;
     }
