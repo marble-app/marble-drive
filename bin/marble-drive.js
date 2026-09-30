@@ -38,6 +38,7 @@ import { createStandby, whereIsHome } from '../server/standby.js';
 import { createLeaseClient } from '../server/hub/lease-client.js';
 import { holdPath, loadHubSettings } from '../server/hub/settings.js';
 import { scheduleUploads } from '../server/hub/schedule.js';
+import { createKeepAwake } from '../server/keep-awake.js';
 
 const [command = 'serve', ...rest] = process.argv.slice(2);
 
@@ -177,12 +178,16 @@ async function serve() {
     // (tools/sprite/serve.sh) starts again, asks home-mode.mjs, and comes back
     // as standby.
     if (hubSettings) {
-      scheduleUploads({
+      const uploads = scheduleUploads({
         root: config.root,
         settings: hubSettings,
         client: createLeaseClient({ settings: hubSettings }),
         onLost: () => setTimeout(() => process.exit(75), 100),
       });
+      // A sprite pauses ~30 s after its last connection: keep it up until
+      // what changed is in the hub. Without the sprite's socket (the Mac) this
+      // does nothing.
+      createKeepAwake({ socket: config.spriteSocket, busy: () => uploads.dirty(), name: 'marble-drive-hub' }).start();
       console.log(`[drive] hub: uploading ${hubSettings.HUB_DRIVE} from ${hubSettings.HUB_MACHINE} while it is home`);
     }
     const url = `http://localhost:${port}/`;

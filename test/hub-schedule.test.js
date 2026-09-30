@@ -93,3 +93,81 @@ test('an upload that throws is logged, and the next tick still runs', async () =
   assert.match(logs.join('\n'), /\[hub\] upload failed: boom/);
   assert.equal(n, 2);
 });
+
+// A sprite pauses ~30 s after its last connection, freezing timers: the host
+// keeps it awake while dirty(), so an edit made just before it dozes is
+// uploaded first.
+
+test('dirty after a change until the upload succeeds, clean after', async () => {
+  const { loop, state } = harness();
+  await loop.tick();
+  assert.equal(loop.dirty(), false);
+  await loop.refresh();
+  assert.equal(loop.dirty(), false, 'nothing changed since the upload');
+  state.newest = 2000;
+  await loop.refresh();
+  assert.equal(loop.dirty(), true);
+  await loop.tick();
+  assert.equal(loop.dirty(), false);
+});
+
+test('before the first upload, a drive that was scanned is dirty', async () => {
+  const { loop } = harness();
+  assert.equal(loop.dirty(), false, 'nothing scanned yet');
+  await loop.refresh();
+  assert.equal(loop.dirty(), true);
+});
+
+test('dirty while an upload is in flight', async () => {
+  let finish;
+  let started;
+  const begun = new Promise((r) => { started = r; });
+  const loop = scheduleUploads({
+    root: '/d', settings, client: { get: async () => ({ home: 'mac', epoch: 0 }) },
+    scanImpl: async () => ({ newest: 1, files: 1, documents: 1 }),
+    upload: () => { started(); return new Promise((r) => { finish = () => r({ ok: true, state: { seq: 1 }, counts: { files: 1 }, changed: 1, deleted: 0 }); }); },
+    onLost: () => {}, log: () => {}, schedule: null,
+  });
+  const ticking = loop.tick();
+  await begun;
+  assert.equal(loop.dirty(), true);
+  finish();
+  await ticking;
+  assert.equal(loop.dirty(), false);
+});
+
+test('a refused or failed upload stays dirty', async () => {
+  for (const upload of [async () => ({ ok: false, why: 'the drive has no documents' }), async () => { throw new Error('boom'); }]) {
+    const loop = scheduleUploads({
+      root: '/d', settings, client: { get: async () => ({ home: 'mac', epoch: 0 }) },
+      scanImpl: async () => ({ newest: 1, files: 1, documents: 1 }), upload,
+      onLost: () => {}, log: () => {}, schedule: null,
+    });
+    await loop.tick();
+    assert.equal(loop.dirty(), true);
+  }
+});
+
+test('the upload line says how many files changed and were deleted', async () => {
+  const logs = [];
+  const loop = scheduleUploads({
+    root: '/d', settings, client: { get: async () => ({ home: 'mac', epoch: 0 }) },
+    scanImpl: async () => ({ newest: 1, files: 9, documents: 1 }),
+    upload: async () => ({ ok: true, state: { seq: 4 }, counts: { files: 9 }, changed: 3, deleted: 2 }),
+    onLost: () => {}, log: (m) => logs.push(m), schedule: null,
+  });
+  await loop.tick();
+  assert.match(logs.join('\n'), /uploaded seq 4: 9 files, 3 changed, 2 deleted, in \d+ms/);
+});
+
+test('the refresh runs on its own timer, apart from the uploads', () => {
+  const timers = [];
+  const loop = scheduleUploads({
+    root: '/d', settings, client: { get: async () => ({ home: 'mac', epoch: 0 }) },
+    scanImpl: async () => ({ newest: 1, files: 1, documents: 1 }), upload: async () => ({ ok: true }),
+    onLost: () => {}, log: () => {}, everyMs: 60_000, watchMs: 15_000,
+    schedule: (fn, ms) => { timers.push(ms); return { unref() {} }; },
+  });
+  assert.deepEqual(timers.sort(), [15_000, 60_000]);
+  loop.stop();
+});
