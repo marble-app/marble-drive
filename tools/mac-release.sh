@@ -59,6 +59,23 @@ failed=()
 for plist in "$HOME"/Library/LaunchAgents/com.marble.drive.home.*.plist; do
   [[ -e "$plist" ]] || continue
   name="${plist##*/com.marble.drive.home.}"; name="${name%.plist}"
+  # A restart ends any agent turn the host is running, so wait until none is
+  # (up to MARBLE_RELEASE_IDLE_WAIT seconds, default 600), as a sprite's
+  # hand-off does. A host still busy then keeps the release it has.
+  port=$([[ $name == bryan ]] && echo 4401 || echo 4402)
+  waited=0
+  while :; do
+    working="$(curl -fsS --max-time 5 "http://127.0.0.1:$port/health" 2>/dev/null | sed -n 's/.*"working":\([0-9]*\).*/\1/p')"
+    [[ -z "$working" || "$working" == 0 ]] && break
+    (( waited >= ${MARBLE_RELEASE_IDLE_WAIT:-600} )) && break
+    (( waited == 0 )) && say "$name: waiting for $working running agent turn(s) to finish before restarting"
+    sleep 10; waited=$((waited + 10))
+  done
+  if [[ -n "$working" && "$working" != 0 ]]; then
+    say "$name: an agent was still working after ${waited}s; not restarted (it runs the old release until: macos/launchd/home.sh restart $name)"
+    failed+=("$name")
+    continue
+  fi
   /bin/zsh "$REPO/macos/launchd/home.sh" restart "$name" || failed+=("$name")
 done
 if (( ${#failed[@]} > 0 )); then
