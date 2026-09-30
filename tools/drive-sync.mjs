@@ -25,7 +25,8 @@ const print = (value) => process.stdout.write(`${JSON.stringify(value)}\n`);
 try {
   const root = flag('root') ?? process.env.MARBLE_DRIVE_ROOT;
   if (command === 'counts') {
-    print(await scan(root));
+    const { byPath, ...counts } = await scan(root); // not the file list: thousands of lines
+    print(counts);
   } else {
     const settings = loadHubSettings(process.env.MARBLE_HUB_ENV);
     if (!settings) throw new Error('no hub: set MARBLE_HUB_ENV to the hub settings file');

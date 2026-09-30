@@ -55,12 +55,38 @@ Considered and set aside:
   - `workshop/`: uncommitted code (piece 6).
   - `trash/<utc>/`: anything an upload overwrote or deleted, removed after 7
     days by a bucket lifecycle rule.
+  - `manifest.json`: the file list (below). Inside the crypt, so encrypted.
   - `state.json`: what the last upload was (below). Not encrypted, and it
     holds no content.
+- **The file list.** R2 answers each request in up to several seconds, and
+  `rclone sync` over crypt makes one request per file to compare modtimes: on
+  t-bryan a 55-file upload took 402 s and a no-change sync 95 s, and the
+  owner's drive has ~6,500 files. So every upload also writes
+  `manifest.json`, the files `drive/` holds as that upload saw them:
+
+  ```json
+  { "seq": 5031, "at": "…", "files": { "Notes/a.mrbl": [2048, 1790776273415] } }
+  ```
+
+  Each entry is `[size, mtimeMs]` (rounded to the millisecond), paths use `/`,
+  and the left-out files below are never in it. Both sides compare their
+  drive against it and move only what differs, so requests scale with what
+  changed, not with the drive. Two files are the same when their sizes match
+  and their mtimes are within 1 ms (the s3 backend keeps an mtime as a float
+  of seconds, which can round a millisecond either side); never by size
+  alone. The lists handed to rclone are read with `--files-from-raw`: plain
+  `--files-from` skips names starting with `#` or `;` and trims spaces.
 - **Upload** (home → R2), `tools/drive-sync.mjs up`. It runs about once a
   minute on the home machine, and only when something changed since the last
-  upload. It uses `rclone sync` with `--backup-dir` into `trash/`, then writes
-  `state.json`:
+  upload. It diffs the drive against `manifest.json`: changed and new files
+  go up by `rclone copy --files-from-raw … --no-traverse --ignore-times
+  --backup-dir trash/<utc>` (an overwritten version lands in the trash);
+  files gone from the drive are moved into `trash/<utc>/` by `rclone move
+  --files-from-raw`. With no list yet (the first upload, or a hub uploaded
+  before the list existed) it runs `rclone sync` with `--backup-dir` into
+  `trash/`. Then it writes `manifest.json`, then `state.json`, in that order:
+  an upload cut off part way leaves the old list, and the next one diffs
+  against it and moves the rest. `state.json` says what the upload was:
 
   ```json
   { "home": "mac", "epoch": 12, "seq": 5031, "at": "…",
@@ -69,9 +95,16 @@ Considered and set aside:
 
   It refuses, and says so in Console, when the source has no documents or far
   fewer files than the last upload (the check `drive-pull.sh` already makes).
-- **Download** (R2 → taking-over machine), `drive-sync.mjs down`. It uses
-  `rclone sync` into the machine's drive. Files it replaces locally go to
-  `<drive>.trash/<utc>/`, kept 7 days.
+- **Download** (R2 → taking-over machine), `drive-sync.mjs down`. It diffs
+  `manifest.json` against the machine's drive: files missing or different
+  locally are fetched by `rclone copy --files-from-raw … --no-traverse
+  --ignore-times` (rclone sets each one's mtime from the hub's, so afterwards
+  it matches the list), and local files the list does not hold are moved
+  aside, never deleted. Both what it replaces and what it moves aside go to
+  a local trash (`~/.cache/marble-drive/hub-trash/<drive>/<utc>/`), kept 7
+  days. It then scans again and says the drive matches only when every entry
+  in the list agrees and nothing extra is left. A hub with no list yet is
+  downloaded by `rclone sync`, as before.
 - **What is left out:**
   - the host lock (`.marble/agents/host.lock`),
   - each machine's usage ledger (`.marble/usage/`),

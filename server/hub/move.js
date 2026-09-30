@@ -156,7 +156,9 @@ export async function moveHome({
   const down = await arriving.download().catch((err) => ({ ok: false, why: err.message }));
   if (!down.ok) return handBack('download', `the download on ${to} failed (${down.why})`);
   if (!down.matches) {
-    return handBack('verify', `counts differ: hub ${down.state.files}/${down.state.documents}, here ${down.counts.files}/${down.counts.documents}`);
+    // With the hub's file list, sizes and mtimes are compared file by file, so
+    // the counts can agree while a file does not.
+    return handBack('verify', `the download does not match the hub: hub ${down.state.files}/${down.state.documents}, here ${down.counts.files}/${down.counts.documents}`);
   }
   verified = true;
   try {
