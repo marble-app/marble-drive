@@ -6,7 +6,9 @@ import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
 
-import { createStandby } from '../server/standby.js';
+import http from 'node:http';
+
+import { createStandby, whereIsHome } from '../server/standby.js';
 
 async function listen(server) {
   await new Promise((r) => server.listen(0, '127.0.0.1', r));
@@ -105,5 +107,56 @@ test('standby with a malformed hub file still answers /health', async () => {
     assert.deepEqual(health, { ok: true, standby: true, home: null, working: 0 });
   } finally {
     child.kill('SIGTERM');
+  }
+});
+
+test('a held machine says the drive is served from the other one, naming no place', async () => {
+  const server = createStandby({ home: 'fly', since: '2026-09-30T10:00:00.000Z', held: true });
+  const base = await listen(server);
+  try {
+    assert.deepEqual(await (await fetch(`${base}/health`)).json(), { ok: true, standby: true, home: 'fly', working: 0 });
+    const text = await (await fetch(`${base}/`)).text();
+    assert.match(text, /This drive is being served from the other machine/);
+    assert.doesNotMatch(text, /on Fly|on the Mac|since/);
+  } finally {
+    server.close();
+  }
+});
+
+test('where home is: a fresh lease over the remembered one, the remembered one when the lease is unreachable', async () => {
+  const settings = { HUB_DRIVE: 'bryan', file: '/x/hub.env' };
+  const client = (get) => ({ get, cached: async () => ({ home: 'fly', since: 'old' }) });
+  const notHeld = () => false;
+  assert.deepEqual(await whereIsHome({ settings, client: client(async () => ({ home: 'mac', since: 'new' })), held: notHeld }), { home: 'mac', since: 'new', held: false });
+  assert.deepEqual(await whereIsHome({ settings, client: client(async () => { throw new Error('offline'); }), held: notHeld }), { home: 'fly', since: 'old', held: false });
+  assert.equal((await whereIsHome({ settings, client: client(async () => ({ home: 'mac' })), held: () => true })).held, true);
+  assert.deepEqual(await whereIsHome({ settings: null, client: null }), { home: null, since: null, held: false });
+});
+
+test('the standby command asks the lease afresh, over a stale remembered one', async () => {
+  const lease = http.createServer((req, res) => {
+    res.writeHead(200, { 'content-type': 'application/json' });
+    res.end(JSON.stringify({ home: 'mac', epoch: 7 }));
+  });
+  const leaseUrl = await listen(lease);
+  const root = await fsp.mkdtemp(path.join(os.tmpdir(), 'standby-fresh-'));
+  const config = await fsp.mkdtemp(path.join(os.tmpdir(), 'standby-fresh-config-'));
+  await fsp.writeFile(path.join(config, 'hub-bryan.env'), SETTINGS.replace('HUB_MACHINE=mac', 'HUB_MACHINE=fly').replace('http://127.0.0.1:1', leaseUrl));
+  await fsp.writeFile(path.join(config, 'lease-bryan.json'), JSON.stringify({ home: 'fly', epoch: 6 }));
+  const child = spawn(process.execPath, ['bin/marble-drive.js', 'standby'], {
+    env: { ...process.env, MARBLE_DRIVE_ROOT: root, PORT: '4494', HOST: '127.0.0.1', MARBLE_HUB_ENV: path.join(config, 'hub-bryan.env') },
+    stdio: 'ignore',
+  });
+  try {
+    let health = null;
+    for (let i = 0; i < 60 && !health; i += 1) {
+      await new Promise((r) => setTimeout(r, 100));
+      health = await fetch('http://127.0.0.1:4494/health').then((r) => r.json(), () => null);
+    }
+    assert.equal(health?.home, 'mac');
+    assert.match(await (await fetch('http://127.0.0.1:4494/')).text(), /on the Mac right now/);
+  } finally {
+    child.kill('SIGTERM');
+    lease.close();
   }
 });

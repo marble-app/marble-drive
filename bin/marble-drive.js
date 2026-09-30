@@ -34,7 +34,7 @@ import { splitPath, parsePath } from '../server/paths.js';
 import { updateApps } from '../server/app-updates.js';
 import { seedAgents, seedBoard, seedChat, seedConsole, seedDesignDonts, seedDesignSystem, seedDrive } from '../server/seed.js';
 import { createStore } from '../server/store/index.js';
-import { createStandby } from '../server/standby.js';
+import { createStandby, whereIsHome } from '../server/standby.js';
 import { createLeaseClient } from '../server/hub/lease-client.js';
 import { holdPath, loadHubSettings } from '../server/hub/settings.js';
 import { scheduleUploads } from '../server/hub/schedule.js';
@@ -101,16 +101,19 @@ switch (command) {
 async function standby() {
   // A standby must answer /health whatever state the hub settings are in: a
   // host that died here would crash-loop, and fail every deploy's health check.
-  let lease = null;
+  // The lease is asked afresh, briefly, and the remembered one is the
+  // fallback: after a move the remembered one names the wrong machine.
+  let where = { home: null, since: null, held: false };
   try {
     const settings = loadHubSettings(config.hubEnv);
-    lease = settings ? await createLeaseClient({ settings }).cached() : null;
+    if (settings) where = await whereIsHome({ settings, client: createLeaseClient({ settings, timeoutMs: 3_000 }) });
   } catch (err) {
     console.error(`[drive] standby: ${err.message}; standing by without a remembered lease`);
   }
-  const server = createStandby({ home: lease?.home ?? null, since: lease?.since ?? null });
+  const server = createStandby(where);
   server.listen(Number(flags.port ?? config.port), config.host, () => {
-    console.log(`[drive] standby on ${config.host}:${flags.port ?? config.port}: this drive's home is ${lease?.home ?? 'elsewhere'}`);
+    const said = where.held ? 'held; served from the other machine' : `this drive's home is ${where.home ?? 'elsewhere'}`;
+    console.log(`[drive] standby on ${config.host}:${flags.port ?? config.port}: ${said}`);
   });
 }
 
