@@ -33,9 +33,13 @@ test('a write request holds the hub keep-awake at once', async () => {
     'HUB_DRIVE=bryan', 'HUB_MACHINE=fly', 'HUB_PASSPHRASE=p', 'HUB_SALT=s', `LEASE_URL=http://127.0.0.1:${lease.address().port}`,
     'LEASE_TOKEN=t', 'HUB_BACKEND=local', `HUB_LOCAL_DIR=${path.join(dir, 'hub')}`, '',
   ].join('\n'));
+  const free = http.createServer();
+  await new Promise((r) => free.listen(0, '127.0.0.1', r));
+  const port = String(free.address().port);
+  await new Promise((r) => free.close(r));
   const child = spawn(process.execPath, ['bin/marble-drive.js', 'serve'], {
     env: {
-      ...process.env, MARBLE_DRIVE_ROOT: root, PORT: '4493', HOST: '127.0.0.1', MARBLE_HUB_ENV: path.join(dir, 'hub-bryan.env'),
+      ...process.env, MARBLE_DRIVE_ROOT: root, PORT: port, HOST: '127.0.0.1', MARBLE_HUB_ENV: path.join(dir, 'hub-bryan.env'),
       MARBLE_DRIVE_SPRITE_SOCKET: socket, MARBLE_DRIVE_AGENTS: '0', MARBLE_DRIVE_APP_UPDATES: '0', MARBLE_DRIVE_SECRET: '',
     },
     stdio: 'ignore',
@@ -44,14 +48,14 @@ test('a write request holds the hub keep-awake at once', async () => {
     let up = false;
     for (let i = 0; i < 100 && !up; i += 1) {
       await new Promise((r) => setTimeout(r, 100));
-      up = await fetch('http://127.0.0.1:4493/health').then((r) => r.ok, () => false);
+      up = await fetch(`http://127.0.0.1:${port}/health`).then((r) => r.ok, () => false);
     }
     assert.ok(up, 'the host answered /health');
     const hubHolds = () => tasks.filter((t) => t.method === 'POST' && t.url === '/v1/tasks' && JSON.parse(t.body).name === 'marble-drive-hub');
     await new Promise((r) => setTimeout(r, 300));
     const before = hubHolds().length;
     const sent = Date.now();
-    await fetch('http://127.0.0.1:4493/no-such-route', { method: 'POST', body: '{}' }).catch(() => {});
+    await fetch(`http://127.0.0.1:${port}/no-such-route`, { method: 'POST', body: '{}' }).catch(() => {});
     for (let i = 0; i < 20 && hubHolds().length === before; i += 1) await new Promise((r) => setTimeout(r, 100));
     const held = hubHolds().filter((t) => t.at >= sent);
     // Either this request made the hold, or one was already made at start; a

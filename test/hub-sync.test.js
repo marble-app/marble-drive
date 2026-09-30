@@ -353,7 +353,7 @@ test('a file list behind state.json is not trusted: down and up sync in full', n
   const c = counting();
   const back = await down({ root: here, settings: s, trashRoot, run: c.run, now: at('2026-09-30T11:00:00Z') });
   assert.deepEqual(c.moves(), ['sync']);
-  assert.match(back.full, /behind/);
+  assert.match(back.full, /does not match/);
   assert.equal(back.matches, true);
   assert.deepEqual(shown(await tree(here)), shown(await tree(root)));
 
@@ -361,7 +361,7 @@ test('a file list behind state.json is not trusted: down and up sync in full', n
   const c2 = counting();
   const next = await up({ root, settings: s, epoch: 0, run: c2.run });
   assert.deepEqual(c2.moves(), ['sync']);
-  assert.match(next.full, /behind/);
+  assert.match(next.full, /does not match/);
   assert.equal(next.state.seq, 3);
   assert.equal(JSON.parse(await hubCat(s, 'hub:manifest.json')).seq, 3);
   const c3 = counting();
@@ -369,7 +369,10 @@ test('a file list behind state.json is not trusted: down and up sync in full', n
   assert.deepEqual(c3.moves(), [], 'the fresh list is trusted again');
 });
 
-test('a file list ahead of state.json (cut off between the two) is trusted', needsRclone, async () => {
+// A list ahead of state.json is left by an upload cut off between its two
+// writes; trusting it would let an older release, which then writes state
+// N+1 without a list, leave a list that looks current. It costs one full pass.
+test('a file list ahead of state.json is not trusted either', needsRclone, async () => {
   const s = await settings();
   const root = await fixture();
   await up({ root, settings: s, epoch: 0 });
@@ -378,8 +381,25 @@ test('a file list ahead of state.json (cut off between the two) is trusted', nee
   await rclone(['rcat', 'hub:manifest.json'], env, { input: JSON.stringify({ ...list, seq: 2 }) });
   const c = counting();
   const back = await down({ root: await tmp('other'), settings: s, trashRoot: await tmp('trash'), run: c.run });
-  assert.deepEqual(c.moves(), ['copy']);
+  assert.deepEqual(c.moves(), ['sync']);
+  assert.match(back.full, /does not match/);
   assert.equal(back.matches, true);
+  const c2 = counting();
+  const next = await up({ root, settings: s, epoch: 0, run: c2.run });
+  assert.deepEqual(c2.moves(), ['sync']);
+  assert.equal(next.state.seq, 2);
+  assert.equal(JSON.parse(await hubCat(s, 'hub:manifest.json')).seq, 2);
+});
+
+test('an upload moves deletions to the trash before it copies changes', needsRclone, async () => {
+  const s = await settings();
+  const root = await fixture();
+  await up({ root, settings: s, epoch: 0 });
+  await put(root, 'notes.mrbl', '<html>notes, edited</html>');
+  await fsp.rm(path.join(root, "Design Don'ts.mrbl"));
+  const c = counting();
+  await up({ root, settings: s, epoch: 0, run: c.run });
+  assert.deepEqual(c.moves(), ['move', 'copy']);
 });
 
 test('a download sets extras aside before it fetches', needsRclone, async () => {

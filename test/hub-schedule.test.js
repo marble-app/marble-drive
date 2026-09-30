@@ -206,7 +206,7 @@ test('after giving up, a new change or a success re-arms it', async () => {
   assert.equal(loop.wantsAwake(), true, 'a fresh dirty stretch after a success');
 });
 
-test('a write request keeps it dirty until an upload that started after it succeeds', async () => {
+test('a write request keeps it dirty until a tick that started after it has looked', async () => {
   let release;
   const results = [];
   const loop = scheduleUploads({
@@ -215,20 +215,40 @@ test('a write request keeps it dirty until an upload that started after it succe
     upload: () => new Promise((r) => { release = () => r({ ok: true, state: { seq: results.push(1) }, counts: { files: 1 } }); }),
     onLost: () => {}, log: () => {}, schedule: null,
   });
-  let ticking = loop.tick();
+  const ticking = loop.tick();
   await new Promise((r) => setImmediate(r));
   loop.touch(); // arrives while the first upload is running
   release();
   await ticking;
   assert.equal(loop.dirty(), true, 'the upload started before the touch');
-  ticking = loop.tick(); // nothing changed on disk, but the touch asks for an upload
-  await new Promise((r) => setImmediate(r));
-  release();
-  await ticking;
-  assert.equal(results.length, 2);
-  assert.equal(loop.dirty(), false);
+  // The next tick's scan was taken after the touch and equals what was
+  // uploaded: the request wrote nothing, so there is nothing to upload.
   await loop.tick();
-  assert.equal(results.length, 2, 'untouched and unchanged: no upload');
+  assert.equal(results.length, 1);
+  assert.equal(loop.dirty(), false);
+});
+
+test('a touch with a changed drive uploads; a touch with nothing changed costs nothing', async () => {
+  const drive = { newest: 1 };
+  const uploads = [];
+  const loop = scheduleUploads({
+    root: '/d', settings, client: { get: async () => ({ home: 'mac', epoch: 0 }) },
+    scanImpl: async () => ({ newest: drive.newest, files: 1, documents: 1 }),
+    upload: async () => { uploads.push(1); return { ok: true, state: { seq: uploads.length }, counts: { files: 1 } }; },
+    onLost: () => {}, log: () => {}, schedule: null,
+  });
+  await loop.tick();
+  assert.equal(uploads.length, 1);
+  loop.touch(); // a POST that wrote nothing (presence, intent, zoom)
+  assert.equal(loop.dirty(), true);
+  await loop.tick();
+  assert.equal(uploads.length, 1);
+  assert.equal(loop.dirty(), false);
+  loop.touch();
+  drive.newest = 2; // a POST that wrote
+  await loop.tick();
+  assert.equal(uploads.length, 2);
+  assert.equal(loop.dirty(), false);
 });
 
 test('dirty stays true through an upload even when a rescan sees the drive as last uploaded', async () => {

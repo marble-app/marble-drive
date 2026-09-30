@@ -4,10 +4,11 @@
 // this host stops (onLost) instead of uploading over it. A lease it cannot
 // reach means waiting a minute, never uploading blind. It uploads only when the
 // drive differs from the last upload (any file added, removed, renamed, or of
-// another size or mtime), or a write request came in since (touch).
+// another size or mtime).
 //
 // dirty() says whether the hub is behind: an upload is running, a write
-// request came in that no upload started after it has covered, or the drive
+// request came in that no tick started after it has covered (by uploading,
+// or by a scan that found nothing new), or the drive
 // last seen differs from the one last uploaded. A sprite pauses about a second
 // after its last connection, freezing every timer, so the host keeps it awake
 // while wantsAwake() (bin/marble-drive.js): dirty(), for at most giveUpMs of
@@ -90,7 +91,14 @@ export function scheduleUploads({
       }
       const carries = touches;
       const sig = await look();
-      if (last !== null && sig === last && carries <= covered) return;
+      if (last !== null && sig === last) {
+        // Nothing to upload. The scan came after every touch counted in
+        // `carries`, so it saw whatever those requests wrote: they are
+        // covered. A POST that writes nothing (presence, intent) costs no
+        // upload.
+        covered = Math.max(covered, carries);
+        return;
+      }
       const started = Date.now();
       uploading = true;
       let result;
@@ -140,7 +148,8 @@ export function scheduleUploads({
     refresh,
     dirty,
     wantsAwake,
-    /** A write request came in: dirty until an upload started after it succeeds. */
+    /** A write request came in: dirty until a tick started after it finds
+     *  nothing new, or its upload succeeds. */
     touch() {
       touches += 1;
       failingSince = null;

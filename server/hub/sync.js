@@ -155,14 +155,17 @@ async function withList(paths, fn) {
   }
 }
 
-/** Why the hub's file list cannot be used for this pass, or null. A list
- *  older than state.json was left behind by an upload that did not write one
- *  (a release from before the list, a rollback, the other machine on an older
- *  release): diffing against it would miss that upload's changes. A list
- *  ahead of state.json (cut off between the two writes) is fine. */
+/** Why the hub's file list cannot be used for this pass, or null. Only a
+ *  list written by the same upload as state.json (the same seq) is used. One
+ *  behind was left by an upload that wrote no list (a release from before
+ *  the list, a rollback, the other machine on an older release): diffing
+ *  against it would miss that upload's changes. One ahead was left by an
+ *  upload cut off between its two writes, and an older release could then
+ *  write that seq's state.json without a list, making a stale list look
+ *  current. Either costs one full pass. */
 function untrusted(manifest, seq) {
   if (!manifest) return 'the hub has no file list';
-  if (!((manifest.seq ?? -1) >= seq)) return `the file list (seq ${manifest.seq}) is behind the last upload (seq ${seq})`;
+  if (manifest.seq !== seq) return `the file list (seq ${manifest.seq}) does not match the last upload (seq ${seq})`;
   return null;
 }
 // A list file is one path a line: a name holding a line break cannot be said.
@@ -189,12 +192,15 @@ export async function up({ root, settings, epoch, force = false, run = rclone, n
     changed = counts.files;
     deleted = 0;
   } else {
+    // Deletions first, as a download sets extras aside first: on a store that
+    // folds case, moving "notes.mrbl" away after copying "Notes.mrbl" would
+    // take the fresh copy with it.
+    if (extra.length) {
+      await withList(extra, (list) => run(['move', 'hub:drive', trash, '--files-from-raw', list, '--no-traverse', '--transfers', '8'], env));
+    }
     if (differ.length) {
       await withList(differ, (list) =>
         run(['copy', root, 'hub:drive', '--files-from-raw', list, '--no-traverse', '--ignore-times', '--backup-dir', trash, '--transfers', '8'], env));
-    }
-    if (extra.length) {
-      await withList(extra, (list) => run(['move', 'hub:drive', trash, '--files-from-raw', list, '--no-traverse', '--transfers', '8'], env));
     }
   }
   const seq = (last?.seq ?? 0) + 1;

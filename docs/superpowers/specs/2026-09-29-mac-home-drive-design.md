@@ -78,21 +78,26 @@ Considered and set aside:
   `--files-from` skips names starting with `#` or `;` and trims spaces. A
   name holding a line break cannot go in a list, so a pass that would list
   one syncs in full instead (and says so).
-- **When the list is trusted.** Only when its `seq` is at least
-  `state.json`'s. An upload that wrote `state.json` without a list (a release
-  from before the list, a rollback, the Mac and Fly on different releases)
-  leaves the list behind the hub's `drive/`; diffing against it would miss
-  that upload's changes, and a download would report a match with them
-  missing. So a list behind `state.json` is ignored: that upload or download
-  syncs in full, and the upload writes a fresh list. A list ahead of
-  `state.json` (an upload cut off between the two writes) is trusted.
+- **When the list is trusted.** Only when its `seq` equals `state.json`'s,
+  so both were written by the same upload. An upload that wrote
+  `state.json` without a list (a release from before the list, a rollback,
+  the Mac and Fly on different releases) leaves the list behind the hub's
+  `drive/`; diffing against it would miss that upload's changes, and a
+  download would report a match with them missing. A list ahead of
+  `state.json` was left by an upload cut off between its two writes, and an
+  older release could then write that seq's `state.json` without a list,
+  making a stale list look current. Either way that upload or download syncs
+  in full, and the upload writes a fresh list; the cost is one full pass.
 - **Upload** (home → R2), `tools/drive-sync.mjs up`. It runs about once a
   minute on the home machine, and only when something changed since the last
-  upload. It diffs the drive against `manifest.json`: changed and new files
-  go up by `rclone copy --files-from-raw … --no-traverse --ignore-times
-  --backup-dir trash/<utc>` (an overwritten version lands in the trash);
-  files gone from the drive are moved into `trash/<utc>/` by `rclone move
-  --files-from-raw`. With no list yet (the first upload, or a hub uploaded
+  upload. It diffs the drive against `manifest.json`: files gone from the
+  drive are first moved into `trash/<utc>/` by `rclone move
+  --files-from-raw`, then changed and new files go up by `rclone copy
+  --files-from-raw … --no-traverse --ignore-times --backup-dir trash/<utc>`
+  (an overwritten version lands in the trash). Deletions go first for the
+  same reason a download sets extras aside first: on a store that folds
+  case, moving `notes.mrbl` away after copying `Notes.mrbl` would take the
+  fresh copy with it. With no list yet (the first upload, or a hub uploaded
   before the list existed) it runs `rclone sync` with `--backup-dir` into
   `trash/`. Then it writes `manifest.json`, then `state.json`, in that order:
   an upload cut off part way leaves the old list, and the next one diffs
@@ -127,8 +132,10 @@ Considered and set aside:
   at once, before its connection closes, and again when its response
   closes (finished, or given up by the client): the first comes with the headers, before the write lands, so
   an upload starting in between would carry it without the write; the
-  second post-dates both. Only an upload started after the last such mark
-  clears it. A change an agent makes with no
+  second post-dates both. Only a tick started after the last such mark
+  clears it: by uploading, or, when its scan equals the last upload, at no
+  cost (the scan already saw whatever the request wrote, so a POST that
+  writes nothing, such as presence, costs no upload). A change an agent makes with no
   request is seen only by the uploader's rescan every 15 s, so one made just
   as the sprite dozes can still wait for the next wake. The rescan compares
   a hash of every path, size and mtime, so a rename or an older-dated
