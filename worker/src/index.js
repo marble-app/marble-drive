@@ -2,8 +2,11 @@
 // The lease, on Cloudflare: one Durable Object per drive, so a read after a
 // move always sees it (KV can lag by a minute). The Mac, the sprite and
 // tools/drive-home.mjs are its only callers, with one shared bearer token.
+// Its second job is the front door: a marbledrive.app name is routed to its
+// drive (router.js) and never needs the token.
 
 import { INITIAL, move } from './lease.js';
+import { isFrontDoor, route } from './router.js';
 
 const json = (status, body) =>
   new Response(JSON.stringify(body), { status, headers: { 'content-type': 'application/json', 'cache-control': 'no-store' } });
@@ -33,6 +36,7 @@ export class Lease {
 }
 
 export async function handle(request, env) {
+  if (isFrontDoor(new URL(request.url).hostname)) return route(request, env);
   if (!env.LEASE_TOKEN) return json(500, { why: 'LEASE_TOKEN is not set on this Worker' });
   if (request.headers.get('authorization') !== `Bearer ${env.LEASE_TOKEN}`) return json(401, { why: 'unauthorised' });
   const match = /^\/lease\/([a-z0-9-]+)(\/move)?$/.exec(new URL(request.url).pathname);

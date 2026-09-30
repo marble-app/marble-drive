@@ -1,10 +1,27 @@
 # worker/wrangler.toml
-# The lease Worker (docs/HOSTING.md, "The owner's drive on the Mac").
+# The lease Worker (docs/HOSTING.md, "The owner's drive on the Mac"), and the
+# front door at marbledrive.app (docs/HOSTING.md, "The front door").
 # Deploy: cd worker && npx wrangler@latest deploy
-# Its one secret: npx wrangler@latest secret put LEASE_TOKEN
+# Its secrets: npx wrangler@latest secret put LEASE_TOKEN
+#              npx wrangler@latest secret put SPRITES_TOKEN   (optional; without
+#              it a drive at home on Fly redirects to its sprite URL)
 name = "marble-lease"
 main = "src/index.js"
 compatibility_date = "2026-09-01"
+# The lease API stays on workers.dev.
+workers_dev = true
+
+# Explicit names, never a wildcard: mac-<name>.marbledrive.app is a drive's
+# Cloudflare tunnel and must not pass through this Worker.
+routes = [
+  { pattern = "marbledrive.app/*", zone_name = "marbledrive.app" },
+  { pattern = "www.marbledrive.app/*", zone_name = "marbledrive.app" },
+  { pattern = "bryan.marbledrive.app/*", zone_name = "marbledrive.app" },
+]
+
+[vars]
+# Each drive's two homes; its lease says which one it is at.
+DRIVES = '{"bryan":{"mac":"https://mac-bryan.marbledrive.app","fly":"https://admin-p2-b3fwm.sprites.app"}}'
 
 [[durable_objects.bindings]]
 name = "LEASE"
