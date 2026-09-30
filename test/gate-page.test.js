@@ -11,7 +11,13 @@ import test from 'node:test';
 import { createDrive } from '../server/app.js';
 import { loadConfig } from '../server/config.js';
 
-const decode = (s) => s.replace(/&#39;/g, "'").replace(/&quot;/g, '"').replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&amp;/g, '&');
+// What the browser hands the script from the attribute: decimal and hex
+// character references (escapeHtml writes &#39; &#34; &#60; &#62; &#38;) and
+// the named ones, decoded in one pass so &#38;#39; stays literal.
+const NAMED = { amp: '&', lt: '<', gt: '>', quot: '"', apos: "'" };
+const decode = (s) => s.replace(/&(?:#(\d+)|#x([0-9a-f]+)|([a-z]+));/gi, (m, dec, hex, name) =>
+  dec ? String.fromCodePoint(Number(dec)) : hex ? String.fromCodePoint(parseInt(hex, 16)) : NAMED[name.toLowerCase()] ?? m);
+
 
 test('the gate page puts no part of `to` into script, and keeps only a path on this host', async (t) => {
   const root = await fsp.mkdtemp(path.join(os.tmpdir(), 'gate-page-'));
@@ -29,6 +35,11 @@ test('the gate page puts no part of `to` into script, and keeps only a path on t
     '//evil.example': '/',
     '/\\evil.example': '/',
     '/a/drive?x=1': '/a/drive?x=1',
+    '/a/drive?q=a&b="c"': '/a/drive?q=a&b=%22c%22',
+    '/.//evil.example/phish': '/',
+    '/a/..//evil.example': '/',
+    '/%2E%2E//evil.example': '/',
+    '/a/../\\evil.example': '/',
     '/"><script>alert(1)</script>': null,
   };
   for (const [to, expected] of Object.entries(cases)) {
@@ -42,5 +53,6 @@ test('the gate page puts no part of `to` into script, and keeps only a path on t
     const target = decode(data[1]);
     if (expected !== null) assert.equal(target, expected, to);
     assert.equal(new URL(target, 'http://x').origin, 'http://x', `${to}: stays on this host`);
+    assert.ok(!target.startsWith('//') && !target.startsWith('/\\'), `${to}: ${target}`);
   }
 });

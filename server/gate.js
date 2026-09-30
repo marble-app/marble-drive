@@ -40,13 +40,19 @@ const equal = (a, b) => {
 /** Where the gate page may send someone after they sign in: a path on this
  *  host, else `/`. `to` comes from the URL, so it is untrusted: no scheme
  *  (`javascript:`), no other host (`//evil`, `/\\evil`), and no control
- *  characters, which the URL parser would drop to make `//` out of `/\t/`. */
+ *  characters, which the URL parser would drop to make `//` out of `/\t/`.
+ *  The parsed result is checked again: dot segments can make a `//` too. */
 export function returnPath(to) {
   if (typeof to !== 'string' || !to.startsWith('/') || to.startsWith('//') || to.startsWith('/\\')) return '/';
   if (/[\u0000-\u001f\u007f]/.test(to)) return '/';
   try {
     const url = new URL(to, 'http://x');
-    return url.origin === 'http://x' ? url.pathname + url.search + url.hash : '/';
+    if (url.origin !== 'http://x') return '/';
+    // Removing dot segments can leave a leading // (`/.//evil`, `/%2e//evil`),
+    // so the result is checked again, as the browser will read it.
+    const result = url.pathname + url.search + url.hash;
+    if (result.startsWith('//') || result.startsWith('/\\')) return '/';
+    return new URL(result, 'http://x').origin === 'http://x' ? result : '/';
   } catch {
     return '/';
   }
