@@ -125,7 +125,7 @@ Considered and set aside:
   keep-awake task, `marble-drive-hub`. Any request other than GET or HEAD
   (except a tab's `/tab/alive`) marks the drive dirty and asks for the hold
   at once, before its connection closes, and again when its response
-  finishes: the first comes with the headers, before the write lands, so
+  closes (finished, or given up by the client): the first comes with the headers, before the write lands, so
   an upload starting in between would carry it without the write; the
   second post-dates both. Only an upload started after the last such mark
   clears it. A change an agent makes with no

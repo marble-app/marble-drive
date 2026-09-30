@@ -68,8 +68,8 @@ test('a write request holds the hub keep-awake at once', async () => {
 // The request event fires when the headers arrive, before the handler has
 // written anything: an upload that starts in that gap would carry the touch
 // without the write. So a write request touches again when its response
-// finishes, after whatever it wrote has landed.
-test('a write request touches when it arrives and again when its response finishes', async () => {
+// closes (after it finished, or when the client gave up).
+test('a write request touches when it arrives and again when its response ends, finished or aborted', async () => {
   let wrote = false;
   const touches = [];
   const server = http.createServer((req, res) => {
@@ -91,6 +91,15 @@ test('a write request touches when it arrives and again when its response finish
     }
     await new Promise((r) => setTimeout(r, 20));
     assert.equal(touches.length, 2, 'reads and the tab heartbeat do not touch');
+
+    // A client that gives up before the response still gets its second touch.
+    const gone = new AbortController();
+    const aborted = fetch(`${base}/api/doc`, { method: 'POST', body: '{}', signal: gone.signal }).catch(() => 'aborted');
+    await new Promise((r) => setTimeout(r, 10));
+    gone.abort();
+    assert.equal(await aborted, 'aborted');
+    await new Promise((r) => setTimeout(r, 100));
+    assert.equal(touches.length, 4, 'one on arrival, one when the connection closed');
   } finally {
     server.close();
   }

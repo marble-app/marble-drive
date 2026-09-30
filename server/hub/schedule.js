@@ -155,15 +155,16 @@ export function scheduleUploads({
 /** Calls onWrite for every request that may write the drive (anything but
  *  GET and HEAD, and not a tab's "still here", which writes nothing): once
  *  when it arrives, so the sprite is held before its connection closes, and
- *  again when its response finishes. The request event comes with the
- *  headers, before the handler has written anything, so an upload starting
- *  in between would carry the first touch without the write; the second
- *  touch post-dates the write, and so the start of any upload that missed it. */
+ *  once when its response closes. The request event comes with the headers,
+ *  before the handler has written anything, so an upload starting in between
+ *  would carry the first touch without the write; the second post-dates the
+ *  write, and so the start of any upload that missed it. 'close' fires after
+ *  'finish', and also when the client gave up before the response. */
 export function touchOnWrites(server, onWrite) {
   server.on('request', (req, res) => {
     if (req.method === 'GET' || req.method === 'HEAD') return;
     if (req.url.split('?')[0] === '/tab/alive') return;
     onWrite();
-    res.once('finish', onWrite);
+    res.once('close', onWrite);
   });
 }

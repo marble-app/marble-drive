@@ -188,7 +188,7 @@ async function serve() {
       // until what changed is in the hub, giving up after 30 min of failed
       // tries. A write request marks the drive dirty when it arrives, before
       // the connection that made it closes, and again when its response
-      // finishes (touchOnWrites); a change an agent makes on its own is seen
+      // closes (touchOnWrites); a change an agent makes on its own is seen
       // by the uploader's 15 s rescan. Without the sprite's socket (the Mac)
       // the keep-awake does nothing.
       const hubAwake = createKeepAwake({ socket: config.spriteSocket, busy: () => uploads.wantsAwake(), name: 'marble-drive-hub' });
