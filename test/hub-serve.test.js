@@ -10,6 +10,8 @@ import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
 
+import { touchOnWrites } from '../server/hub/schedule.js';
+
 test('a write request holds the hub keep-awake at once', async () => {
   const dir = await fsp.mkdtemp(path.join(os.tmpdir(), 'hs-'));
   const root = path.join(dir, 'drive');
@@ -60,5 +62,36 @@ test('a write request holds the hub keep-awake at once', async () => {
     child.kill('SIGTERM');
     sprite.close();
     lease.close();
+  }
+});
+
+// The request event fires when the headers arrive, before the handler has
+// written anything: an upload that starts in that gap would carry the touch
+// without the write. So a write request touches again when its response
+// finishes, after whatever it wrote has landed.
+test('a write request touches when it arrives and again when its response finishes', async () => {
+  let wrote = false;
+  const touches = [];
+  const server = http.createServer((req, res) => {
+    setTimeout(() => {
+      wrote = true; // the write lands after the headers came in
+      res.end('ok');
+    }, 50);
+  });
+  touchOnWrites(server, () => touches.push({ wrote }));
+  await new Promise((r) => server.listen(0, '127.0.0.1', r));
+  const base = `http://127.0.0.1:${server.address().port}`;
+  try {
+    await (await fetch(`${base}/api/doc`, { method: 'POST', body: '{}' })).text();
+    await new Promise((r) => setTimeout(r, 20));
+    assert.deepEqual(touches.map((t) => t.wrote), [false, true], 'once on arrival, once after the write');
+    for (const [method, route] of [['GET', '/doc.mrbl'], ['HEAD', '/doc.mrbl'], ['POST', '/tab/alive'], ['POST', '/tab/alive?x=1']]) {
+      wrote = false;
+      await (await fetch(`${base}${route}`, { method, ...(method === 'POST' && { body: '{}' }) })).text();
+    }
+    await new Promise((r) => setTimeout(r, 20));
+    assert.equal(touches.length, 2, 'reads and the tab heartbeat do not touch');
+  } finally {
+    server.close();
   }
 });

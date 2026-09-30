@@ -124,7 +124,11 @@ Considered and set aside:
   that differs from the last upload) the home host holds a second
   keep-awake task, `marble-drive-hub`. Any request other than GET or HEAD
   (except a tab's `/tab/alive`) marks the drive dirty and asks for the hold
-  at once, before its connection closes. A change an agent makes with no
+  at once, before its connection closes, and again when its response
+  finishes: the first comes with the headers, before the write lands, so
+  an upload starting in between would carry it without the write; the
+  second post-dates both. Only an upload started after the last such mark
+  clears it. A change an agent makes with no
   request is seen only by the uploader's rescan every 15 s, so one made just
   as the sprite dozes can still wait for the next wake. The rescan compares
   a hash of every path, size and mtime, so a rename or an older-dated

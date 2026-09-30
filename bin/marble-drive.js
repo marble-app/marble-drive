@@ -37,7 +37,7 @@ import { createStore } from '../server/store/index.js';
 import { createStandby, whereIsHome } from '../server/standby.js';
 import { createLeaseClient } from '../server/hub/lease-client.js';
 import { holdPath, loadHubSettings } from '../server/hub/settings.js';
-import { scheduleUploads } from '../server/hub/schedule.js';
+import { scheduleUploads, touchOnWrites } from '../server/hub/schedule.js';
 import { createKeepAwake } from '../server/keep-awake.js';
 
 const [command = 'serve', ...rest] = process.argv.slice(2);
@@ -186,16 +186,14 @@ async function serve() {
       });
       // A sprite pauses about a second after its last connection: keep it up
       // until what changed is in the hub, giving up after 30 min of failed
-      // tries. A write request marks the drive dirty at once, before the
-      // connection that made it closes; a change an agent makes on its own is
-      // seen by the uploader's 15 s rescan. Without the sprite's socket (the
-      // Mac) the keep-awake does nothing.
+      // tries. A write request marks the drive dirty when it arrives, before
+      // the connection that made it closes, and again when its response
+      // finishes (touchOnWrites); a change an agent makes on its own is seen
+      // by the uploader's 15 s rescan. Without the sprite's socket (the Mac)
+      // the keep-awake does nothing.
       const hubAwake = createKeepAwake({ socket: config.spriteSocket, busy: () => uploads.wantsAwake(), name: 'marble-drive-hub' });
       hubAwake.start();
-      drive.server.on('request', (req) => {
-        if (req.method === 'GET' || req.method === 'HEAD') return;
-        // A tab's once-a-minute "still here" writes nothing to the drive.
-        if (req.url === '/tab/alive') return;
+      touchOnWrites(drive.server, () => {
         uploads.touch();
         hubAwake.nudge();
       });
