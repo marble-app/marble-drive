@@ -2339,6 +2339,368 @@
     patchChildren(el, next, enter);
   }
 
+
+  // ------------------------------------------------------------ v2: the work, shown
+  // The card is one line while it works (glyph, sentence, four stops, time),
+  // a live view under it drawn from what the agent is doing, a strip of
+  // frames for the steps it has finished, and at the end a receipt: what
+  // changed, what was checked, where the time went, and your call. Each view
+  // makes itself from its data and sets itself in place, so only what is new
+  // moves. The kit is small on purpose: the same kind of work always gets the
+  // same picture.
+  const wsvg = (d) => `<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${d}</svg>`;
+  const WI = {
+    doc: wsvg('<path d="M4 1.8h5l3 3v9.4H4z"/><path d="M9 1.8v3h3"/>'),
+    search: wsvg('<circle cx="7" cy="7" r="4.2"/><path d="m10.2 10.2 3.3 3.3"/>'),
+    globe: wsvg('<circle cx="8" cy="8" r="5.8"/><path d="M2.2 8h11.6M8 2.2c-1.8 1.7-2.6 3.6-2.6 5.8s.8 4.1 2.6 5.8c1.8-1.7 2.6-3.6 2.6-5.8S9.8 3.9 8 2.2"/>'),
+    lock: wsvg('<rect x="3.5" y="7" width="9" height="6.5" rx="1.5"/><path d="M5.5 7V5.2a2.5 2.5 0 0 1 5 0V7"/>'),
+    tick: wsvg('<path d="m3.5 8.5 3 3 6-7"/>'),
+    alert: wsvg('<circle cx="8" cy="8" r="5.8"/><path d="M8 5v3.6M8 11h0"/>'),
+    x: wsvg('<path d="m4.5 4.5 7 7M11.5 4.5l-7 7"/>'),
+    arrowR: wsvg('<path d="M3 8h9.5M9.5 5l3 3-3 3"/>'),
+    reply: wsvg('<path d="M6.5 4 3 7.5 6.5 11"/><path d="M3.5 7.5h5.5a4 4 0 0 1 4 4v1"/>'),
+    drop: wsvg('<path d="M8 2.2c2.4 3 4 5.1 4 7.1a4 4 0 0 1-8 0c0-2 1.6-4.1 4-7.1z"/>'),
+    words: wsvg('<path d="M3 4.5h10M3 8h10M3 11.5h6"/>'),
+    layout: wsvg('<rect x="3" y="2" width="10" height="12" rx="1.5"/><path d="M5.5 5h5M5.5 7.5h5M5.5 10h3"/>'),
+    dots: wsvg('<circle cx="4" cy="5" r="1" fill="currentColor"/><circle cx="8" cy="5" r="1" fill="currentColor"/><circle cx="12" cy="5" r="1" fill="currentColor"/><circle cx="4" cy="11" r="1" fill="currentColor"/><circle cx="8" cy="11" r="1" fill="currentColor"/><circle cx="12" cy="11" r="1" fill="currentColor"/>'),
+    choose: wsvg('<path d="M5.5 2.5v7.2l1.8-1.6 1.3 3.2 1.5-.6-1.3-3.2 2.4-.2z"/>'),
+    pause: wsvg('<path d="M6 4v8M10 4v8"/>'),
+    plus: wsvg('<path d="M8 3.5v9M3.5 8h9"/>'),
+  };
+  const wesc = (s) => String(s ?? '').replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+  const wel = (html) => { const t = document.createElement('template'); t.innerHTML = String(html).trim(); return t.content.firstElementChild; };
+  const wflag = (n, name, on, value = '') => { if (!n) return; if (on) n.setAttribute(name, value); else n.removeAttribute(name); };
+  const wclock = (ms) => { const s = Math.max(0, Math.round(ms / 1000)); return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`; };
+
+  // Contrast is computed, never typed: a ratio on the screen is a claim.
+  const rgbCache = new Map();
+  function toRgb(color) {
+    const key = String(color ?? '').trim();
+    if (!key) return null;
+    if (rgbCache.has(key)) return rgbCache.get(key);
+    const probe = document.createElement('span');
+    probe.style.color = key;
+    if (!probe.style.color) { rgbCache.set(key, null); return null; }
+    probe.style.display = 'none';
+    document.documentElement.append(probe);
+    const m = /rgba?\(([\d.]+),\s*([\d.]+),\s*([\d.]+)/.exec(getComputedStyle(probe).color);
+    probe.remove();
+    const rgb = m ? [Number(m[1]), Number(m[2]), Number(m[3])] : null;
+    rgbCache.set(key, rgb);
+    return rgb;
+  }
+  const lin = (c) => { const v = c / 255; return v <= 0.03928 ? v / 12.92 : ((v + 0.055) / 1.055) ** 2.4; };
+  const lum = ([r, g, b]) => 0.2126 * lin(r) + 0.7152 * lin(g) + 0.0722 * lin(b);
+  function contrast(a, b) {
+    const x = toRgb(a); const y = toRgb(b);
+    if (!x || !y) return null;
+    const [hi, lo] = [lum(x), lum(y)].sort((p, q) => q - p);
+    return (hi + 0.05) / (lo + 0.05);
+  }
+  const verdict = (r) => (r == null ? '' : r >= 4.5 ? 'reads as text' : r >= 3 ? 'large text only' : 'too faint');
+
+  // Words, not characters: what a redline shows is which words went and came.
+  function wordDiff(before, after) {
+    const a = String(before ?? '').split(/(\s+)/).filter(Boolean);
+    const b = String(after ?? '').split(/(\s+)/).filter(Boolean);
+    if (a.length * b.length > 40000) return [['-', before], ['+', after]];
+    const dp = Array.from({ length: a.length + 1 }, () => new Array(b.length + 1).fill(0));
+    for (let i = a.length - 1; i >= 0; i -= 1) for (let j = b.length - 1; j >= 0; j -= 1) dp[i][j] = a[i] === b[j] ? dp[i + 1][j + 1] + 1 : Math.max(dp[i + 1][j], dp[i][j + 1]);
+    const out = [];
+    const push = (op, t) => { const last = out[out.length - 1]; if (last && last[0] === op) last[1] += t; else out.push([op, t]); };
+    let i = 0; let j = 0;
+    while (i < a.length && j < b.length) {
+      if (a[i] === b[j]) { push('=', a[i]); i += 1; j += 1; } else if (dp[i + 1][j] >= dp[i][j + 1]) { push('-', a[i]); i += 1; } else { push('+', b[j]); j += 1; }
+    }
+    while (i < a.length) { push('-', a[i]); i += 1; }
+    while (j < b.length) { push('+', b[j]); j += 1; }
+    // Long unchanged runs are cut to their ends, so the change is the line.
+    return out.map(([op, t]) => (op === '=' && t.length > 60 ? ['=', `${t.slice(0, 24)} … ${t.slice(-24)}`] : [op, t]));
+  }
+
+  // Test output, read for its counts. Node's runner, mocha, jest and pytest
+  // all say how many passed and failed in a line of their own.
+  function readTests(text) {
+    const s = String(text ?? '');
+    const num = (re) => { const m = re.exec(s); return m ? Number(m[1]) : null; };
+    const pass = num(/ℹ pass (\d+)/) ?? num(/(\d+) passing/) ?? num(/Tests?:\s+(?:\d+ failed, )?(\d+) passed/) ?? num(/(\d+) passed/);
+    const fail = num(/ℹ fail (\d+)/) ?? num(/(\d+) failing/) ?? num(/(\d+) failed/) ?? 0;
+    if (pass == null) return null;
+    const failLine = /✖ (?!failing tests)([^\n(]+)/.exec(s)?.[1]?.trim() ?? '';
+    return { passed: pass, failed: fail, total: pass + fail, failLine };
+  }
+
+  const WV = {};
+  WV.read = {
+    icon: 'doc', label: 'Reading',
+    make: (d) => wel(`<div class="v v-read">${d.items.map((x) => `<span class="v-read-c" data-k="${wesc(x)}">${WI.doc}${wesc(x)}</span>`).join('')}</div>`),
+    set(n, d, enter) { d.items.slice(n.children.length).forEach((x) => { const c = wel(`<span class="v-read-c" data-k="${wesc(x)}">${WI.doc}${wesc(x)}</span>`); wflag(c, 'data-enter', enter); n.append(c); }); },
+  };
+  // A colour is a swatch with the words on it and whether they read.
+  WV.swatch = {
+    icon: 'drop', label: 'Colour',
+    row(c) {
+      const chip = (color, isNew) => {
+        if (!color) return '<span class="v-sw-chip" data-none>—</span>';
+        const r = contrast(color, c.on || '#ffffff');
+        const inkOn = (contrast(color, '#ffffff') ?? 0) >= (contrast(color, '#111111') ?? 0) ? '#ffffff' : '#111111';
+        const asText = c.prop === 'color';
+        return `<span class="v-sw-chip"${isNew ? ' data-new' : ''} style="--c:${wesc(asText ? (c.on || '#ffffff') : color)};--t:${wesc(asText ? color : inkOn)}" title="${wesc(color)}">Aa<small>${r == null ? '' : `${r.toFixed(1)}:1<span class="v-sw-verdict"> ${verdict(r)}</span>`}</small></span>`;
+      };
+      return `<span class="v-sw-lab">${wesc(c.name)}</span>${chip(c.from)}<span class="v-sw-arrow">${WI.arrowR}</span>${chip(c.to, true)}`;
+    },
+    make: (d) => wel(`<div class="v v-sw"><div class="v-sw-rows">${d.rows.map((c) => WV.swatch.row(c)).join('')}</div></div>`),
+    set(n, d, enter) {
+      const rows = n.querySelector('.v-sw-rows');
+      const have = rows.children.length / 4;
+      d.rows.slice(have).forEach((c) => { const t = document.createElement('template'); t.innerHTML = WV.swatch.row(c); for (const x of [...t.content.children]) { wflag(x, 'data-enter', enter); rows.append(x); } });
+    },
+  };
+  WV.redline = {
+    icon: 'words', label: 'Words',
+    line: (l) => `<div class="v-red-item" data-k="${wesc(l.where)}${wesc(l.after).slice(0, 24)}">${l.where ? `<div class="v-red-where">${wesc(l.where)}</div>` : ''}<p class="v-red-text">${(l.before == null ? [['+', l.after]] : wordDiff(l.before, l.after)).map(([op, t]) => (op === '-' ? `<del>${wesc(t)}</del>` : op === '+' ? `<ins>${wesc(t)}</ins>` : wesc(t))).join('')}</p></div>`,
+    make: (d) => wel(`<div class="v v-red">${d.lines.slice(-3).map((l) => WV.redline.line(l)).join('')}</div>`),
+    set(n, d, enter) {
+      const want = d.lines.slice(-3).map((l) => wel(WV.redline.line(l)));
+      const next = document.createElement('div');
+      next.append(...want);
+      for (const node of next.children) if (![...n.children].some((c) => c.dataset.k === node.dataset.k)) wflag(node, 'data-enter', enter);
+      n.replaceChildren(...next.children);
+    },
+  };
+  // The page, drawn as blocks: what the agent added glows, the newest named.
+  WV.map = {
+    icon: 'layout', label: 'The page',
+    make(d) { const n = wel('<div class="v v-map"><div class="v-map-page"></div><ul class="v-map-list"></ul></div>'); WV.map.set(n, d, false); return n; },
+    set(n, d, enter) {
+      const page = n.querySelector('.v-map-page');
+      const list = n.querySelector('.v-map-list');
+      if (d.blocks) {
+        const have = new Map([...page.children].map((i) => [i.dataset.k, i]));
+        let prev = null;
+        for (const b of d.blocks) {
+          let i = have.get(b.k);
+          if (!i) { i = document.createElement('i'); i.dataset.k = b.k; wflag(i, 'data-enter', enter && b.fresh); }
+          i.style.setProperty('--h', `${b.h}px`);
+          wflag(i, 'data-fresh', b.fresh);
+          if (prev ? prev.nextElementSibling !== i : page.firstElementChild !== i) (prev ? prev.after(i) : page.prepend(i));
+          prev = i;
+          have.delete(b.k);
+        }
+        for (const gone of have.values()) gone.remove();
+      }
+      page.hidden = !d.blocks?.length;
+      const names = d.added.slice(-4);
+      const got = new Map([...list.querySelectorAll('li[data-k]')].map((li) => [li.dataset.k, li]));
+      for (const [k, li] of got) if (!names.some((a) => a.name === k)) li.remove();
+      for (const a of names) {
+        if (got.has(a.name)) continue;
+        const li = wel(`<li data-k="${wesc(a.name)}">${WI.plus}<span>${wesc(a.name)}</span>${a.parts?.length ? `<small>${wesc(a.parts.join(' · '))}</small>` : ''}</li>`);
+        wflag(li, 'data-enter', enter);
+        list.append(li);
+      }
+      let more = list.querySelector('.v-map-more');
+      if (d.added.length > names.length) { if (!more) { more = wel('<li class="v-map-more"></li>'); list.prepend(more); } more.textContent = `${d.added.length - names.length} earlier`; } else more?.remove();
+    },
+  };
+  WV.sources = {
+    icon: 'globe', label: 'Sources',
+    row: (r) => (r.q
+      ? `<div class="v-src-q" data-k="q${wesc(r.q)}">${WI.search}<span>${wesc(r.q)}</span></div>`
+      : `<div class="v-src-r" data-k="${wesc(r.site)}${wesc(r.t)}" data-st="${r.st}"><span class="v-fav" style="--h:${r.hue}">${wesc(r.site[0] ?? '?').toUpperCase()}</span><span class="v-src-t"><b>${wesc(r.t || r.site)}</b><small>${wesc(r.site)}</small></span><span class="v-src-st">${r.st === 'skip' ? `${WI.lock}Couldn’t open` : r.st === 'read' ? WI.tick : ''}</span></div>`),
+    make(d) { const n = wel('<div class="v v-src"></div>'); WV.sources.set(n, d, false); return n; },
+    set(n, d, enter) {
+      d.rows.slice(-5).forEach((r, i) => {
+        const next = wel(WV.sources.row(r));
+        const have = [...n.children].find((c) => c.dataset.k === next.dataset.k);
+        if (!have) { wflag(next, 'data-enter', enter); n.append(next); } else if (have.dataset.st !== next.dataset.st) { have.replaceWith(next); }
+      });
+      while (n.children.length > 5) n.firstElementChild.remove();
+    },
+  };
+  WV.tests = {
+    icon: 'dots', label: 'Tests',
+    make(d) {
+      const shown = Math.min(d.total, 120);
+      const n = wel(`<div class="v v-ts"><div class="v-ts-h"><b>${d.passed}</b> of ${d.total} passed${d.total > shown ? ` <small>(${shown} shown)</small>` : ''}</div><div class="v-ts-dots">${Array.from({ length: shown }, (_, i) => `<i data-st="${i < d.failed ? 'fail' : 'pass'}"></i>`).join('')}</div>${d.failed ? `<div class="v-ts-fail">${WI.x}<span>${wesc(d.failLine || `${plural(d.failed, 'test')} failed`)}</span></div>` : ''}</div>`);
+      return n;
+    },
+    set(n, d) { n.replaceWith(WV.tests.make(d)); },
+  };
+  WV.perm = {
+    icon: 'lock', label: 'Permission',
+    make: (d) => wel(`<div class="v v-pm"><p class="v-pm-t">${wesc(d.t)}</p>${d.rows.length ? `<div class="v-pm-rows">${d.rows.map((r) => `<div class="v-pm-r"><b>${wesc(r.k)}</b><span>${wesc(r.v)}</span></div>`).join('')}</div>` : ''}</div>`),
+    set() {},
+  };
+  WV.halt = {
+    icon: 'pause', label: 'Stopped',
+    make: (d) => wel(`<div class="v v-halt">${d.path ? `<div class="f-path"><span class="f-node">Agent</span><span class="f-link"><span>✕</span></span><span class="f-node stuck">${wesc(d.path)}</span></div>` : ''}<p>${wesc(d.line)}</p></div>`),
+    set() {},
+  };
+
+  /** A prompt another chat sent (server/agent/messages.js renders it): each
+   *  block's sender and body, without the reply instructions meant for the agent. */
+  function parseRelayed(text) {
+    const raw = String(text ?? '');
+    if (!raw.startsWith('Message from the conversation "')) return null;
+    const blocks = raw.split(/\n\n---\n\n/).map((block) => {
+      const m = /^Message from the conversation "([^"]*)" \(([^,)]+)[^)]*\):\n\n([\s\S]*?)\n\n(?:\[About: [^\]]*\]\n)?Reply with send_message[^\n]*$/.exec(block.trim());
+      return m ? { title: m[1], id: m[2], body: m[3].trim() } : null;
+    });
+    return blocks.every(Boolean) ? blocks : null;
+  }
+
+  /** The page this chat is on, as blocks: its top-level parts, sized by how
+   *  tall they are, each keyed by its id. Only for the document open here. */
+  function pageOutline() {
+    const root = document.querySelector('main[data-marble-id], article[data-marble-id]') ?? document.body;
+    let parts = [...root.children].filter((el) => el.dataset?.marbleId && !el.matches('script, style, marble-conversation, marble-agent-drawer') && el.getBoundingClientRect().height > 4);
+    // A page wrapped in one container is outlined by what is in it.
+    if (parts.length === 1 && parts[0].children.length > 1) parts = [...parts[0].children].filter((el) => el.dataset?.marbleId && el.getBoundingClientRect().height > 4);
+    const heights = parts.map((el) => el.getBoundingClientRect().height);
+    const total = heights.reduce((a, b) => a + b, 0) || 1;
+    return parts.slice(0, 24).map((el, i) => ({ k: el.dataset.marbleId, el, h: Math.max(3, Math.round((heights[i] / total) * 110)) }));
+  }
+
+  /** An element in the words it goes by: its label, its heading, or the start
+   *  of what it says, and what kind of thing it is when it says nothing. */
+  function partName(el) {
+    if (!el) return '';
+    const own = el.getAttribute?.('aria-label') || (el.matches?.('h1,h2,h3,h4,h5,h6') ? el.textContent : '') || el.querySelector?.('h1,h2,h3,h4,h5,h6,legend,summary')?.textContent || el.textContent || '';
+    const text = trimTo(own, 36);
+    if (text) return `“${text}”`;
+    return { H1: 'the heading', H2: 'a heading', H3: 'a heading', P: 'a paragraph', UL: 'a list', OL: 'a list', LI: 'a list item', IMG: 'a picture', BUTTON: 'a button', SECTION: 'a section', TABLE: 'a table', BODY: 'the page' }[el.tagName] ?? 'an element';
+  }
+  const styleColors = (value) => {
+    const out = [];
+    for (const m of String(value ?? '').matchAll(/(^|;)\s*(color|background(?:-color)?|border(?:-color)?|fill|stroke)\s*:\s*([^;]+)/gi)) {
+      const c = colorsIn(m[3])[0] ?? (toRgb(m[3].trim()) ? m[3].trim() : null);
+      if (c) out.push({ prop: m[2].toLowerCase().startsWith('background') ? 'background' : m[2].toLowerCase(), color: c });
+    }
+    return out;
+  };
+  const cssProp = { background: 'backgroundColor', color: 'color', border: 'borderTopColor', 'border-color': 'borderTopColor', fill: 'fill', stroke: 'stroke' };
+
+  /** One apply_ops call, read for what it changes. `find(id)` is the element
+   *  on this page, before the ops land, or null for another document's.
+   *  Returns rows for the receipt and the data the live views draw. */
+  function readWork(ops, find = () => null) {
+    const work = { rows: [], added: [], colors: [], lines: [] };
+    for (const op of Array.isArray(ops) ? ops : []) {
+      const el = op?.id ? find(op.id) : null;
+      const name = partName(el);
+      switch (op?.type) {
+        case 'insert': {
+          const { name: added, parts } = sketchHtml(op.html);
+          work.added.push({ name: added, parts });
+          work.rows.push({ key: `+${added}`, op: '+', label: `Added ${added}`, parts });
+          break;
+        }
+        case 'setText':
+        case 'setInner': {
+          const before = el ? (el.textContent ?? '').replace(/\s+/g, ' ').trim() : null;
+          const after = op.type === 'setText' ? String(op.text ?? '') : (() => { const t = document.createElement('template'); t.innerHTML = String(op.html ?? ''); return t.content.textContent ?? ''; })().replace(/\s+/g, ' ').trim();
+          if (before === after) break;
+          const where = name || 'Some words';
+          work.lines.push({ where, before, after });
+          work.rows.push({ key: `~w${op.id}`, op: '~', label: `Words in ${where}`, before, after });
+          break;
+        }
+        case 'setAttr': {
+          const found = op.name === 'style' ? styleColors(op.value) : [];
+          if (found.length) {
+            const style = el ? getComputedStyle(el) : null;
+            for (const { prop, color } of found) {
+              const from = style ? style[cssProp[prop] ?? 'color'] : null;
+              const on = prop === 'color' && el ? getComputedStyle(el.parentElement ?? el).backgroundColor : null;
+              const onColor = on && !/rgba\(0, 0, 0, 0\)|transparent/.test(on) ? on : '#ffffff';
+              const label = `${prop === 'background' ? 'Fill' : prop === 'color' ? 'Text colour' : 'Colour'} of ${name || 'an element'}`;
+              work.colors.push({ name: name || 'Colour', prop, from, to: color, on: onColor });
+              work.rows.push({ key: `~c${op.id}${prop}`, op: '~', label, from, to: color });
+            }
+          } else {
+            const what = op.name === 'style' ? 'Look' : op.name === 'hidden' ? (op.value == null ? 'Showed' : 'Hid') : `Setting “${op.name}”`;
+            work.rows.push({ key: `~a${op.id}${op.name}`, op: '~', label: op.name === 'hidden' ? `${what} ${name || 'an element'}` : `${what} of ${name || 'an element'}` });
+          }
+          break;
+        }
+        case 'remove': work.rows.push({ key: `-${op.id}`, op: '-', label: `Took away ${name || 'an element'}` }); break;
+        case 'move': work.rows.push({ key: `m${op.id}`, op: '~', label: `Moved ${name || 'an element'}` }); break;
+        default:
+      }
+    }
+    return work;
+  }
+
+  // The kit's rules stand alone, so the island a page shows while the chat
+  // is closed can draw a live view with the same look.
+  const WORK_VIEW_CSS = `
+    .v { --agent: color-mix(in srgb, #6d55d4 78%, var(--ink)); }
+    /* The kit. Every view is rows or a picture, never a box in the card. */
+    .v { display: flex; flex-direction: column; gap: 6px; min-width: 0; font-size: 12.5px; }
+    .v-read { flex-direction: row; flex-wrap: wrap; gap: 4px 6px; }
+    .v-read-c { display: inline-flex; align-items: center; gap: 5px; padding: 2px 8px 2px 6px; border-radius: 999px; background: var(--paper-2); font-size: 12px; }
+    .v-read-c svg { width: 11px; height: 11px; color: var(--accent-ink); }
+    .v-sw-rows { display: grid; grid-template-columns: minmax(0, auto) minmax(0, 1fr) 16px minmax(0, 1fr); gap: 6px 8px; align-items: center; }
+    .v-sw-lab { font-size: 12px; color: var(--muted); max-width: 120px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .v-sw-chip { display: flex; align-items: center; justify-content: space-between; gap: 6px; height: 34px; padding: 0 9px; border-radius: 8px; background: var(--c); color: var(--t); font-weight: 600; font-size: 14px; box-shadow: inset 0 0 0 1px rgba(0,0,0,.08); min-width: 0; }
+    .v-sw-chip[data-none] { background: none; color: var(--faint); box-shadow: inset 0 0 0 1px var(--line); font-weight: 400; }
+    .v-sw-chip small { font-weight: 500; font-size: 10.5px; text-align: right; opacity: .95; overflow: hidden; }
+    .v-sw-verdict { display: block; }
+    .v-sw-arrow { color: var(--faint); display: grid; place-items: center; }
+    .v-sw-arrow svg { width: 14px; height: 14px; }
+    .v-red-item { display: flex; flex-direction: column; gap: 2px; }
+    .v-red-item + .v-red-item { border-top: 1px solid var(--paper-3); padding-top: 6px; }
+    .v-red-where { font-size: 12px; color: var(--muted); }
+    .v-red-text { margin: 0; font-size: 13px; line-height: 1.45; color: var(--muted); display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; }
+    .v-map { display: grid; grid-template-columns: 58px minmax(0, 1fr); gap: 10px; align-items: start; }
+    .v-map-page { display: flex; flex-direction: column; gap: 3px; padding: 6px 5px; border-radius: 5px; background: var(--card); box-shadow: inset 0 0 0 1px var(--line); }
+    .v-map-page[hidden] { display: none; }
+    .v-map:has(.v-map-page[hidden]) { grid-template-columns: minmax(0, 1fr); }
+    .v-map-page i { display: block; height: var(--h, 4px); border-radius: 2px; background: var(--paper-3); transition: background-color .4s var(--settle), box-shadow .4s var(--settle); }
+    .v-map-page i[data-fresh] { background: color-mix(in srgb, var(--agent) 32%, var(--card)); box-shadow: inset 0 0 0 1.5px var(--agent); }
+    .v-map-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; }
+    .v-map-list li { display: flex; align-items: baseline; gap: 6px; padding: 3px 0; font-size: 12.5px; flex-wrap: wrap; }
+    .v-map-list li + li { border-top: 1px solid var(--paper-3); }
+    .v-map-list li svg { width: 11px; height: 11px; color: #3f8a5c; flex: none; transform: translateY(1px); }
+    .v-map-list small { color: var(--muted); font-size: 12px; }
+    .v-map-more { color: var(--faint); font-size: 12px; }
+    .v-src { gap: 0; }
+    .v-src-r, .v-src-q { display: grid; grid-template-columns: 22px minmax(0, 1fr) auto; align-items: center; gap: 8px; padding: 4px 0; }
+    .v-src > * + * { border-top: 1px solid var(--paper-3); }
+    .v-src-q { grid-template-columns: 22px minmax(0, 1fr); color: var(--muted); }
+    .v-src-q svg { width: 13px; height: 13px; justify-self: center; }
+    .v-fav { width: 22px; height: 22px; border-radius: 6px; display: grid; place-items: center; background: hsl(var(--h) 45% 48%); color: #fff; font-weight: 700; font-size: 11px; }
+    .v-src-t { min-width: 0; display: flex; flex-direction: column; }
+    .v-src-t b { font-weight: 500; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .v-src-t small { color: var(--faint); font-size: 12px; }
+    .v-src-st { display: inline-flex; align-items: center; gap: 4px; font-size: 12px; color: var(--faint); }
+    .v-src-st svg { width: 12px; height: 12px; }
+    .v-src-r[data-st="skip"] .v-src-st { color: var(--danger); }
+    .v-src-r[data-st="read"] .v-src-st { color: #3f8a5c; }
+    .v-ts-h { font-size: 12.5px; color: var(--muted); }
+    .v-ts-h b { color: var(--ink); font-size: 15px; margin-right: 2px; }
+    .v-ts-dots { display: flex; flex-wrap: wrap; gap: 3px; }
+    .v-ts-dots i { width: 8px; height: 8px; border-radius: 50%; background: #3f8a5c; }
+    .v-ts-dots i[data-st="fail"] { background: var(--danger); }
+    .v-ts-fail { display: flex; align-items: flex-start; gap: 6px; font-size: 12px; color: var(--danger); }
+    .v-ts-fail svg { width: 12px; height: 12px; flex: none; margin-top: 2px; }
+    .v-pm-t { margin: 0; font-size: 13px; color: var(--ink); }
+    .v-pm-rows { display: flex; flex-direction: column; }
+    .v-pm-r { display: grid; grid-template-columns: 70px minmax(0, 1fr); gap: 8px; padding: 3px 0; font-size: 12px; }
+    .v-pm-r + .v-pm-r { border-top: 1px solid var(--paper-3); }
+    .v-pm-r b { font-weight: 500; color: var(--muted); }
+    .v-pm-r span { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .v-halt p { margin: 0; font-size: 12.5px; color: var(--muted); }
+    .f-path { display: flex; align-items: center; }
+    .f-node { display: inline-flex; align-items: center; padding: 4px 9px; border-radius: 8px; background: var(--paper-2); font-weight: 500; font-size: 12px; }
+    .f-node.stuck { color: var(--danger); background: color-mix(in srgb, var(--danger) 10%, var(--card)); }
+    .f-link { flex: 1; min-width: 24px; position: relative; height: 2px; margin: 0 6px; background: repeating-linear-gradient(90deg, var(--faint) 0 4px, transparent 4px 8px); }
+    .f-link span { position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%); width: 16px; height: 16px; border-radius: 50%; display: grid; place-items: center; font-size: 10px; background: var(--danger); color: var(--card); }
+    .v-red-text del { color: var(--danger); text-decoration-color: color-mix(in srgb, var(--danger) 55%, transparent); }
+    .v-red-text ins { text-decoration: none; color: var(--ink); background: color-mix(in srgb, #3f8a5c 16%, transparent); border-radius: 3px; padding: 0 2px; }
+  `;
+
   // ------------------------------------------------------------ the view
 
   // The ask card's rules stand alone so a page drawing the card outside a
@@ -2609,142 +2971,140 @@
     .log[data-detail="technical"] > .progress { display: none; }
     .log[data-detail="simple"] > .turn-footer[data-plain] > :not(.watch, .restore) { display: none; }
     .log[data-detail="simple"] > .turn-footer[data-plain]:not(:has(.watch)) { display: none; }
+    /* Another chat's message is its words; in Simple, three lines, and a tap for the rest. */
+    .log[data-detail="simple"] .msg.me[data-relayed]:not([data-open]) .msg-text { display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; cursor: pointer; }
+    /* The turn is the card: one surface, nothing boxed inside it. Live, it is
+       a white sheet with an edge; done, it sits down into the log as the
+       prompt's paper-2, with no edge, and what is inside steps to paper. */
     .progress {
       --p-ink: var(--accent-ink);
-      display: flex; flex-direction: column; gap: 12px;
-      margin: 4px 0 8px; padding: 12px 14px 14px;
+      --agent: color-mix(in srgb, #6d55d4 78%, var(--ink));
+      container-type: inline-size;
+      display: flex; flex-direction: column; gap: 9px;
+      margin: 4px 0 8px; padding: 10px 11px 11px;
       border: 1px solid var(--line); border-radius: var(--radius);
       background: var(--card); box-shadow: var(--shadow-rest);
       font-size: 13px; line-height: 1.4;
       transition: background-color .3s var(--settle), border-color .3s var(--settle), box-shadow .3s var(--settle);
     }
-    .progress-top { display: flex; align-items: center; gap: 11px; min-width: 0; }
-    .progress-glyph {
-      flex: none; width: 34px; height: 34px; border-radius: 10px;
-      display: grid; place-items: center;
-      background: color-mix(in srgb, var(--p-ink) 14%, var(--card)); color: var(--p-ink);
+    .progress:not([data-state="running"]):not([data-state="asking"]) {
+      box-shadow: none; border-color: transparent; background: var(--paper-2);
     }
-    .progress-glyph svg { width: 20px; height: 20px; display: block; overflow: visible; }
-    .progress-words { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 1px; }
-    .progress-say, .progress-sub { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-    .progress-say { font-weight: 600; color: var(--ink); font-size: 13.5px; }
-    .progress-sub { font-size: 12px; color: var(--muted); }
-    .progress-sub:empty { display: none; }
-    .progress-more {
-      flex: none; appearance: none; border: 0; background: none; font: inherit; font-size: 12px;
-      color: var(--faint); padding: 3px 8px; border-radius: 7px; cursor: pointer;
-      transition: background-color .13s var(--snap), color .13s var(--snap);
+    .progress[data-state="failed"] { --p-ink: var(--danger); }
+    .progress:is([data-state="cancelled"], [data-state="interrupted"], [data-state="declined"]) { --p-ink: var(--faint); }
+    .progress[data-state="asking"] {
+      --p-ink: var(--caution);
+      border-color: color-mix(in srgb, var(--caution) 55%, var(--line));
+      box-shadow: 0 0 0 3px color-mix(in srgb, var(--caution) 14%, transparent), var(--shadow-rest);
     }
-    .progress-more:hover { background: var(--paper-2); color: var(--ink); }
-    .progress-more[aria-expanded="true"] { color: var(--accent-ink); background: var(--accent-soft); }
-    .progress-more:focus-visible { outline: 2px solid var(--accent-ink); outline-offset: 1px; }
-    /* Four stops on one line. Each stop draws the stretch of line from the
-       stop before it, grey underneath and ink over the top, so the ink runs
-       out along the line as the turn gets further. */
-    .progress-track { list-style: none; margin: 0; padding: 0 2px; display: grid; grid-template-columns: repeat(4, 1fr); }
-    .progress-stop { position: relative; display: flex; flex-direction: column; align-items: center; gap: 6px; font-size: 11px; color: var(--faint); min-width: 0; }
-    .progress-stop::before, .progress-stop::after {
-      content: ''; position: absolute; top: 5px; right: 50%; width: 100%; height: 2px; border-radius: 1px;
-    }
-    .progress-stop::before { background: var(--line); }
-    .progress-stop::after { background: var(--p-ink); transform-origin: left center; transform: scaleX(0); transition: transform .6s var(--settle); }
-    .progress-stop:first-child::before, .progress-stop:first-child::after { display: none; }
-    .progress-stop:is([data-at="past"], [data-at="now"])::after { transform: scaleX(1); }
-    .progress-node {
-      position: relative; z-index: 1; width: 12px; height: 12px; border-radius: 50%; box-sizing: border-box;
-      background: var(--card); border: 2px solid var(--line);
-      transition: background-color .3s var(--snap), border-color .3s var(--snap), box-shadow .3s var(--snap);
-    }
-    .progress-stop[data-at="past"] .progress-node { background: var(--p-ink); border-color: var(--p-ink); }
-    .progress-stop[data-at="now"] .progress-node {
-      background: var(--p-ink); border-color: var(--p-ink);
-      box-shadow: 0 0 0 4px color-mix(in srgb, var(--p-ink) 22%, transparent);
-      animation: stop-breathe 1.8s var(--snap) infinite;
-    }
-    .progress-stop[data-at="past"] .progress-name { color: var(--muted); }
-    .progress-stop[data-at="now"] .progress-name { color: var(--ink); font-weight: 600; }
-    .progress-name { max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-    @keyframes stop-breathe {
-      0%, 100% { box-shadow: 0 0 0 3px color-mix(in srgb, var(--p-ink) 26%, transparent); }
-      50% { box-shadow: 0 0 0 6px color-mix(in srgb, var(--p-ink) 8%, transparent); }
-    }
-    .progress-plan { display: flex; flex-direction: column; gap: 7px; }
-    .progress-plan[hidden] { display: none; }
-    .progress-meter { display: flex; align-items: center; gap: 10px; font-size: 11.5px; color: var(--muted); }
-    .progress-bar { flex: 1; height: 6px; border-radius: 3px; background: var(--paper-3); overflow: hidden; }
-    .progress-fill { display: block; height: 100%; width: 0; border-radius: inherit; background: var(--p-ink); transition: width .6s var(--settle); }
-    .progress-count { flex: none; }
-    .progress-todos { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 3px; font-size: 12.5px; color: var(--muted); }
-    .progress-todos li { display: flex; align-items: baseline; gap: 8px; }
-    .progress-todos li::before {
-      content: ''; flex: none; width: 10px; height: 10px; border-radius: 50%; box-sizing: border-box;
-      border: 1.5px solid var(--line); transform: translateY(1px);
-    }
-    .progress-todos li[data-status="done"] { color: var(--faint); text-decoration: line-through; text-decoration-color: var(--line); }
-    .progress-todos li[data-status="done"]::before { background: var(--p-ink); border-color: var(--p-ink); }
-    .progress-todos li[data-status="now"] { color: var(--ink); }
-    .progress-todos li[data-status="now"]::before { border: 2px solid var(--p-ink); animation: pulse 1.2s var(--snap) infinite; }
-    .progress-made { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; font-size: 12px; color: var(--faint); }
-    .progress-made[hidden] { display: none; }
-    .progress-chip {
-      display: inline-flex; align-items: center; gap: 5px; max-width: 100%;
-      padding: 2px 9px 2px 7px; border-radius: 999px;
-      background: var(--paper-2); color: var(--ink); font-size: 12px; text-decoration: none;
-    }
-    a.progress-chip:hover { background: var(--accent-soft); color: var(--accent-ink); }
-    .progress-chip svg { flex: none; width: 12px; height: 12px; color: var(--accent-ink); }
-    .progress-chip.files { color: var(--muted); }
-    /* The glyph moves only while the turn does. */
+
+    /* One line: the glyph, what is happening, the four stops, the time. */
+    .w-tick { display: flex; align-items: center; gap: 8px; min-width: 0; }
+    .w-glyph { flex: none; width: 22px; height: 22px; display: grid; place-items: center; color: var(--p-ink); }
+    .w-glyph svg { width: 18px; height: 18px; overflow: visible; display: block; }
+    .w-say { flex: 1; min-width: 0; font-weight: 500; font-size: 13px; color: var(--ink); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .w-time { flex: none; font-size: 12px; color: var(--faint); font-variant-numeric: tabular-nums; }
+    .w-stops { flex: none; display: grid; grid-template-columns: repeat(4, 9px); gap: 2px; }
+    .w-stops i { height: 4px; border-radius: 2px; background: var(--line); transition: background-color .4s var(--snap); }
+    .w-stops i[data-at="past"] { background: var(--p-ink); }
+    .w-stops i[data-at="now"] { background: var(--p-ink); animation: w-breathe 1.6s var(--snap) infinite; }
+    .progress:not([data-state="running"]):not([data-state="asking"]) .w-stops { display: none; }
+    @keyframes w-breathe { 0%, 100% { opacity: .45; } 50% { opacity: 1; } }
     .progress[data-state="running"] .g-lens { animation: lens-scan 2.6s ease-in-out infinite; }
     .progress[data-state="running"] :is(.g-b1, .g-b2, .g-b3) { transform-box: fill-box; animation: block-drop 2.4s var(--settle) infinite; }
     .progress[data-state="running"] .g-b2 { animation-delay: .22s; }
     .progress[data-state="running"] .g-b3 { animation-delay: .44s; }
     .g-tick { stroke-dasharray: 16; }
     .progress[data-state="running"] .g-tick { animation: tick-draw 1.9s var(--snap) infinite; }
-    @keyframes lens-scan {
-      0%, 100% { transform: translate(0, 0); } 25% { transform: translate(2px, -1.5px); }
-      50% { transform: translate(0, -2.5px); } 75% { transform: translate(-2px, -1px); }
-    }
-    @keyframes block-drop {
-      0% { transform: translateY(-8px); opacity: 0; } 22%, 78% { transform: none; opacity: 1; } 100% { transform: none; opacity: 0; }
-    }
-    @keyframes tick-draw { 0% { stroke-dashoffset: 16; } 45%, 85% { stroke-dashoffset: 0; opacity: 1; } 100% { stroke-dashoffset: 0; opacity: 0; } }
-    /* Finished, the card sits down: one line of what came of it, and what it
-       made. The stops and the plan were for watching. */
-    /* Live, the card is a lifted white sheet with an edge. Done, it sits
-       down into the log as the same paper-2 a prompt wears (the page's own
-       palette, when it has one): no edge, no shadow. The edge stays, only
-       transparent, so nothing moves. What was paper-2 inside it steps the
-       other way to paper, so every level is still one shade from the next. */
-    .progress:not([data-state="running"]):not([data-state="asking"]) {
-      gap: 8px; padding: 10px 12px; box-shadow: none; border-color: transparent;
-      background: var(--paper-2);
-    }
-    .progress:not([data-state="running"]):not([data-state="asking"]) .pv-frame { border-color: transparent; background: var(--paper); }
-    .progress:not([data-state="running"]):not([data-state="asking"]) .pv-bar { background: transparent; border-bottom-color: var(--paper-2); }
-    .progress:not([data-state="running"]):not([data-state="asking"]) :is(.progress-chip, .pv-step:not([aria-pressed="true"]), .act:not(.primary)) { background: var(--paper); }
-    .progress:not([data-state="running"]):not([data-state="asking"]) :is(.act:not(.primary), .progress-more):hover { background: var(--paper-3); }
-    .progress:not([data-state="running"]):not([data-state="asking"]) :is(.progress-said, .progress-next) { border-top-color: var(--paper-3); }
-    .progress:not([data-state="running"]):not([data-state="asking"]) :is(.progress-track, .progress-plan) { display: none; }
-    .progress:not([data-state="running"]):not([data-state="asking"]) .progress-glyph { width: 26px; height: 26px; border-radius: 8px; background: none; }
-    .progress:not([data-state="running"]):not([data-state="asking"]) .progress-glyph svg { width: 22px; height: 22px; }
-    .progress[data-state="failed"] { --p-ink: var(--danger); }
-    .progress:is([data-state="cancelled"], [data-state="interrupted"], [data-state="declined"]) { --p-ink: var(--faint); }
-    /* Waiting on you is the one state that should pull the eye. */
-    .progress[data-state="asking"] {
-      --p-ink: var(--caution);
-      border-color: color-mix(in srgb, var(--caution) 50%, var(--line));
-      box-shadow: 0 0 0 3px color-mix(in srgb, var(--caution) 14%, transparent), var(--shadow-rest);
-    }
     .progress[data-state="asking"] .g-ask { transform-box: fill-box; transform-origin: 30% 100%; animation: ask-nudge 2s var(--settle) infinite; }
+    @keyframes lens-scan { 0%, 100% { transform: translate(0, 0); } 25% { transform: translate(2px, -1.5px); } 50% { transform: translate(0, -2.5px); } 75% { transform: translate(-2px, -1px); } }
+    @keyframes block-drop { 0% { transform: translateY(-8px); opacity: 0; } 22%, 78% { transform: none; opacity: 1; } 100% { transform: none; opacity: 0; } }
+    @keyframes tick-draw { 0% { stroke-dashoffset: 16; } 45%, 85% { stroke-dashoffset: 0; opacity: 1; } 100% { stroke-dashoffset: 0; opacity: 0; } }
     @keyframes ask-nudge { 0%, 60%, 100% { transform: none; } 70% { transform: rotate(-8deg); } 80% { transform: rotate(6deg); } 90% { transform: rotate(-3deg); } }
-    /* While it works, the sentence stays in view however tall the card gets. */
-    .progress:is([data-state="running"], [data-state="asking"]) .progress-top {
-      position: sticky; top: -12px; z-index: 2; margin: -12px -14px 0; padding: 12px 14px 8px;
-      background: var(--card); border-radius: var(--radius) var(--radius) 0 0;
-    }
 
-    /* What the person can do next. */
+    /* The live view: what is happening now, on the card, no taller than it needs. */
+    .w-live { display: flex; flex-direction: column; gap: 7px; max-height: 260px; overflow: hidden; }
+    .w-live[hidden] { display: none; }
+    .w-vh { display: flex; align-items: center; gap: 6px; min-width: 0; font-size: 12px; color: var(--muted); }
+    .w-vh svg { flex: none; width: 13px; height: 13px; color: var(--p-ink); }
+    .w-vh b { font-weight: 600; color: var(--ink); white-space: nowrap; }
+    .w-vname { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .w-vbtns { margin-left: auto; display: flex; gap: 2px; }
+    .w-vb { appearance: none; border: 0; background: none; color: var(--faint); font: inherit; font-size: 12px; padding: 2px 6px; border-radius: 6px; cursor: pointer; display: inline-flex; align-items: center; gap: 4px; }
+    .w-vb svg { width: 11px; height: 11px; color: currentColor; }
+    .w-vb:hover { background: var(--paper-2); color: var(--ink); }
+    .w-cap { margin: 0; font-size: 12px; color: var(--muted); }
+    .w-cap:empty { display: none; }
+    .w-back { font-size: 12px; color: var(--muted); display: flex; align-items: center; gap: 6px; }
+    .w-back[hidden] { display: none; }
+    .w-back button { appearance: none; border: 0; background: none; color: var(--accent-ink); font: inherit; font-size: 12px; padding: 0; cursor: pointer; }
+
+    /* Frames: each finished step, the size of a thumbnail, to tap back to. */
+    .w-strip { display: grid; grid-template-columns: repeat(auto-fill, minmax(58px, 1fr)); gap: 6px; }
+    /* "Steps" names the strip only once the turn is over and it is a record. */
+    .w-strip:empty, .progress .w-strip-h { display: none; }
+    .progress:not([data-state="running"]):not([data-state="asking"]):not([data-old]) .w-strip-h:has(+ .w-strip:not(:empty)) { display: flex; }
+    .w-frame { appearance: none; border: 0; padding: 0; background: none; font: inherit; color: var(--muted); cursor: pointer; display: flex; flex-direction: column; gap: 3px; text-align: left; min-width: 0; }
+    .w-thumb { position: relative; height: 40px; border-radius: 6px; background: var(--paper-2); box-shadow: inset 0 0 0 1px var(--line); overflow: hidden; }
+    .w-thumb > .w-shrink { position: absolute; left: 4px; top: 4px; width: 280px; zoom: .19; pointer-events: none; }
+    .w-frame:hover .w-thumb { box-shadow: inset 0 0 0 1px var(--muted); }
+    .w-frame[data-on] .w-thumb { box-shadow: inset 0 0 0 2px var(--p-ink); }
+    .w-frame[data-st="todo"] { cursor: default; }
+    .w-frame[data-st="todo"] .w-thumb { background: none; box-shadow: inset 0 0 0 1px var(--line); }
+    .w-frame[data-st="now"] .w-thumb { box-shadow: inset 0 0 0 1.5px var(--p-ink); }
+    .w-frame[data-st="halt"] .w-thumb { box-shadow: inset 0 0 0 1px var(--faint); }
+    .w-flab { font-size: 12px; line-height: 1.25; overflow: hidden; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; }
+    .w-frame[data-st="todo"] .w-flab { color: var(--faint); }
+    .w-fnum { font-variant-numeric: tabular-nums; color: var(--faint); margin-right: 3px; }
+    .w-foot { display: flex; align-items: center; gap: 2px; margin: -4px -4px -4px -6px; }
+    .w-steer { display: flex; gap: 2px; margin-left: auto; }
+    .w-quiet { flex: none; appearance: none; border: 0; background: none; color: var(--faint); font: inherit; font-size: 12px; padding: 3px 6px; border-radius: 6px; cursor: pointer; }
+    .w-quiet:hover { background: var(--paper-2); color: var(--ink); }
+    .w-quiet[aria-expanded="true"] { color: var(--accent-ink); background: var(--accent-soft); }
+    .w-quiet:focus-visible, .w-vb:focus-visible, .w-frame:focus-visible { outline: 2px solid var(--accent-ink); outline-offset: 1px; }
+
+    /* The receipt: sections of rows with a hairline between, nothing boxed. */
+    .w-receipt { display: flex; flex-direction: column; gap: 12px; }
+    .w-receipt[hidden] { display: none; }
+    .w-sec { display: flex; flex-direction: column; gap: 6px; }
+    .w-sec-h { display: flex; align-items: center; gap: 8px; font-size: 12px; font-weight: 600; color: var(--muted); }
+    .w-docs { display: inline-flex; flex-wrap: wrap; gap: 4px; margin-left: auto; font-weight: 400; }
+    .w-sec-h .w-review { font-weight: 400; margin-left: auto; }
+    .w-docs + .w-review { margin-left: 0; }
+    .w-cm { display: grid; grid-template-columns: 44px minmax(0, 1fr); gap: 10px; align-items: start; }
+    .w-cm.w-cm-flat { grid-template-columns: minmax(0, 1fr); }
+    .w-mini { display: flex; flex-direction: column; gap: 3px; padding: 5px 4px; border-radius: 4px; background: var(--card); box-shadow: inset 0 0 0 1px var(--line); }
+    .w-mini i { display: block; height: var(--h, 4px); border-radius: 2px; background: var(--paper-3); }
+    .w-mini i[data-pin] { background: color-mix(in srgb, var(--agent) 32%, var(--card)); box-shadow: inset 0 0 0 1.5px var(--agent); }
+    .w-changes { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; }
+    .w-change { display: flex; align-items: flex-start; gap: 7px; margin: 0; padding: 4px 0; font-size: 12.5px; min-width: 0; }
+    .w-change + .w-change { border-top: 1px solid var(--paper-3); }
+    .w-cn { flex: none; width: 16px; height: 16px; margin-top: 1px; border-radius: 50%; display: grid; place-items: center; font-size: 10px; font-weight: 600; background: color-mix(in srgb, var(--agent) 16%, var(--card)); color: var(--agent); }
+    .w-change[data-op="minus"] .w-cn { background: color-mix(in srgb, var(--danger) 12%, var(--card)); color: var(--danger); }
+    .w-ct { flex: 1; min-width: 0; line-height: 1.35; display: flex; flex-direction: column; gap: 1px; }
+    .w-cwords { font-size: 12px; color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .w-cwords del, .v-red-text del { color: var(--danger); text-decoration-color: color-mix(in srgb, var(--danger) 55%, transparent); }
+    .w-cwords ins, .v-red-text ins { text-decoration: none; color: var(--ink); background: color-mix(in srgb, #3f8a5c 16%, transparent); border-radius: 3px; padding: 0 2px; }
+    .w-cfig { flex: none; display: inline-flex; align-items: center; gap: 3px; margin-top: 2px; }
+    .w-cfig svg { width: 10px; height: 10px; color: var(--faint); }
+    .w-dot { width: 12px; height: 12px; border-radius: 50%; background: var(--c); box-shadow: inset 0 0 0 1px rgba(0,0,0,.1); display: inline-block; }
+    .w-kept { margin: 0; font-size: 12px; color: var(--muted); }
+    .w-proof { display: grid; grid-template-columns: 96px minmax(0, 1fr); gap: 10px; align-items: center; }
+    .w-proof-fig { position: relative; height: 58px; border-radius: 6px; background: var(--card); box-shadow: inset 0 0 0 1px var(--line); overflow: hidden; }
+    .w-proof-fig > .w-shrink { position: absolute; left: 4px; top: 4px; width: 280px; zoom: .315; pointer-events: none; }
+    .w-proof-line { font-size: 12.5px; color: var(--ink); }
+    .w-bar { display: flex; height: 6px; border-radius: 3px; overflow: hidden; gap: 2px; }
+    .w-bar i { display: block; height: 100%; border-radius: 2px; }
+    .w-bar i[data-k="look"] { background: var(--paper-3); box-shadow: inset 0 0 0 1px var(--line); }
+    .w-bar i[data-k="build"] { background: var(--accent); }
+    .w-bar i[data-k="check"] { background: var(--accent-ink); }
+    .w-bar-key { display: flex; flex-wrap: wrap; gap: 2px 12px; font-size: 12px; color: var(--muted); font-variant-numeric: tabular-nums; }
+    .w-bar-key span { display: inline-flex; align-items: center; gap: 5px; }
+    .w-bar-key span::before { content: ''; width: 8px; height: 8px; border-radius: 2px; background: var(--paper-3); box-shadow: inset 0 0 0 1px var(--line); }
+    .w-bar-key span[data-k="build"]::before { background: var(--accent); box-shadow: none; }
+    .w-bar-key span[data-k="check"]::before { background: var(--accent-ink); box-shadow: none; }
+
+    /* Your call: the question, set apart, as buttons. */
     .progress-next { display: flex; flex-direction: column; gap: 8px; padding-top: 10px; border-top: 1px solid var(--paper-3); }
     .progress-next[hidden], .progress-said[hidden] { display: none; }
     .progress-q { margin: 0; font-size: 13px; line-height: 1.4; color: var(--ink); }
@@ -2759,72 +3119,35 @@
     .act.primary { background: var(--ink); color: var(--paper); box-shadow: none; }
     .act.primary:hover { background: color-mix(in srgb, var(--ink) 85%, var(--paper)); }
     .progress[data-state="asking"] .act.primary { background: var(--caution); color: var(--card); }
-    .progress-next[data-quiet="true"] { flex-direction: row; justify-content: flex-end; padding-top: 0; border-top: 0; margin-top: -6px; }
-    .progress-next[data-quiet="true"] .progress-q { display: none; }
-    .progress-next[data-quiet="true"] .progress-acts { gap: 2px; }
-    .progress-next[data-quiet="true"] .act { background: none; box-shadow: none; color: var(--faint); padding: 4px 8px; font-size: 12px; }
-    .progress-next[data-quiet="true"] .act:hover { background: var(--paper-2); color: var(--ink); }
     .progress-said { font-size: 12px; color: var(--muted); padding-top: 8px; border-top: 1px solid var(--paper-3); }
     .progress-said::before { content: '↳ '; color: var(--faint); }
     .composer.is-drafting .field { box-shadow: 0 0 0 2px var(--accent-ink); }
-
-    /* The close-up: not the page, the few things changing in it. */
-    .pv { display: flex; flex-direction: column; gap: 8px; }
-    .pv[hidden], .pv-steps[hidden] { display: none; }
-    .pv-frame { border-radius: 10px; overflow: hidden; border: 1px solid var(--line); background: var(--card); }
-    .pv-bar { display: flex; align-items: center; gap: 8px; padding: 6px 10px; font-size: 11.5px; color: var(--muted); border-bottom: 1px solid var(--paper-3); background: var(--paper); }
-    .pv-where { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 500; }
-    .pv-tag { flex: none; font-size: 10.5px; font-weight: 600; letter-spacing: .02em; color: var(--faint); }
-    .pv-tag[data-live="true"] { color: var(--p-ink); display: inline-flex; align-items: center; gap: 5px; }
-    .pv-tag[data-live="true"]::before { content: ''; width: 6px; height: 6px; border-radius: 50%; background: currentColor; animation: pulse 1.2s var(--snap) infinite; }
-    .pv-view { padding: 12px; display: flex; flex-direction: column; gap: 10px; }
-    .pv-foot { display: flex; align-items: center; gap: 10px; min-width: 0; }
-    .pv-cap { flex: 1; min-width: 0; font-size: 12px; color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-    .pv-cap:empty { display: none; }
-    .pv-steps { flex: none; display: flex; gap: 3px; margin-left: auto; }
-    .pv-step { appearance: none; width: 20px; height: 20px; padding: 0; border: 0; border-radius: 6px; font: inherit; font-size: 10.5px; font-weight: 600; line-height: 1; color: var(--muted); background: var(--paper-2); box-shadow: inset 0 0 0 1px var(--line); cursor: pointer; }
-    .pv-step:hover { color: var(--ink); }
-    .pv-step[aria-pressed="true"] { background: var(--p-ink); color: var(--card); box-shadow: none; }
-    .f-focus { display: flex; flex-direction: column; gap: 8px; min-width: 0; font-size: 12.5px; }
-    .f-el { display: flex; flex-direction: column; gap: 6px; padding: 8px 10px; border-radius: 8px; background: var(--paper-2); }
-    .f-el-new { background: var(--card); box-shadow: 0 0 0 1.5px color-mix(in srgb, var(--p-ink) 55%, transparent); }
-    .f-el-name { display: flex; align-items: center; gap: 6px; font-weight: 600; min-width: 0; }
-    .f-el-text { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-    .f-new { flex: none; padding: 1px 6px; border-radius: 4px; font-size: 10px; font-weight: 600; background: color-mix(in srgb, #3f8a5c 16%, var(--card)); color: #3f8a5c; }
-    .f-parts, .f-swatches { display: flex; flex-wrap: wrap; gap: 4px; }
-    .f-part { padding: 1px 7px; border-radius: 5px; font-size: 11.5px; color: var(--muted); background: var(--paper-2); box-shadow: inset 0 0 0 1px var(--line); }
-    .f-sw { width: 22px; height: 16px; border-radius: 4px; background: var(--c); box-shadow: inset 0 0 0 1px rgba(0,0,0,.1); }
-    .f-note { font-size: 12px; color: var(--muted); }
-    .f-src { display: grid; grid-template-columns: 22px minmax(0, 1fr) auto; align-items: center; gap: 8px; }
-    .f-src b { font-weight: 500; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-    .f-src > span:last-child { color: var(--faint); font-size: 11.5px; }
-    .f-fav { width: 22px; height: 22px; border-radius: 6px; display: grid; place-items: center; background: hsl(var(--h) 45% 48%); color: #fff; font-weight: 700; font-size: 11px; }
-    .f-path { display: flex; align-items: center; }
-    .f-node { display: inline-flex; align-items: center; padding: 5px 10px; border-radius: 8px; background: var(--paper-2); font-weight: 500; }
-    .f-node.stuck { color: var(--danger); background: color-mix(in srgb, var(--danger) 10%, var(--card)); }
-    .f-link { flex: 1; min-width: 30px; position: relative; height: 2px; margin: 0 6px; background: repeating-linear-gradient(90deg, var(--faint) 0 4px, transparent 4px 8px); }
-    .f-link span { position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%); width: 16px; height: 16px; border-radius: 50%; display: grid; place-items: center; font-size: 10px; background: var(--danger); color: var(--card); }
-    .f-changes { list-style: none; margin: 0; padding: 8px 0 0; border-top: 1px solid var(--paper-3); display: flex; flex-direction: column; gap: 3px; font-size: 12.5px; }
-    .f-changes:empty { display: none; }
-    .f-changes li { display: flex; align-items: baseline; gap: 7px; margin: 0; min-width: 0; }
-    .f-op { flex: none; width: 16px; height: 16px; border-radius: 4px; display: inline-grid; place-items: center; font: 700 11px/1 ui-monospace, SFMono-Regular, Menlo, monospace; transform: translateY(2px); }
-    .f-changes [data-op="plus"] .f-op { background: color-mix(in srgb, #3f8a5c 16%, var(--card)); color: #3f8a5c; }
-    .f-changes [data-op="change"] .f-op { background: var(--accent-soft); color: var(--accent-ink); }
-    .f-changes [data-op="minus"] .f-op { background: color-mix(in srgb, var(--danger) 12%, var(--card)); color: var(--danger); }
-    /* Older turns keep just their list of changes. */
-    .progress[data-old] .pv-frame { border: 0; background: none; }
-    .progress[data-old] :is(.pv-bar, .f-focus, .pv-foot) { display: none; }
-    .progress[data-old] .pv-view { padding: 0; }
-    .progress[data-old] .f-changes { border-top: 0; padding-top: 0; }
-    /* Only what is new moves: a preview is patched in place, and a node that
-       arrives wears data-enter; nothing already on screen replays. */
-    .pv-view [data-enter], .progress-chip[data-enter] { animation: plain-enter .42s var(--settle) both; }
-    @keyframes plain-enter { from { opacity: 0; transform: translateY(4px) scale(.97); } }
-    :host([data-chrome="phone"]) .progress-say { font-size: 15px; }
-    :host([data-chrome="phone"]) .progress-sub, :host([data-chrome="phone"]) .progress-todos { font-size: 13.5px; }
-    @media (prefers-reduced-motion: reduce) {
-      .progress *, .progress-stop::after { animation: none !important; transition: none !important; }
+    .progress-chip {
+      display: inline-flex; align-items: center; gap: 5px; max-width: 100%;
+      padding: 2px 9px 2px 7px; border-radius: 999px;
+      background: var(--paper-2); color: var(--ink); font-size: 12px; text-decoration: none;
     }
+    a.progress-chip:hover { background: var(--accent-soft); color: var(--accent-ink); }
+    .progress-chip svg { flex: none; width: 12px; height: 12px; color: var(--accent-ink); }
+    /* Sat down on paper-2, what was paper-2 inside it steps up to paper. */
+    .progress:not([data-state="running"]):not([data-state="asking"]) :is(.progress-chip, .act:not(.primary), .w-thumb, .v-read-c, .v-src-q) { background: var(--paper); }
+    .progress:not([data-state="running"]):not([data-state="asking"]) :is(.act:not(.primary), .w-quiet, .w-vb):hover { background: var(--paper-3); }
+    .progress:not([data-state="running"]):not([data-state="asking"]) :is(.progress-said, .progress-next) { border-top-color: var(--paper-3); }
+
+    ${WORK_VIEW_CSS}
+
+    /* Older turns keep what changed, and small frames. */
+    .progress[data-old] :is(.w-live, .w-proof-sec, .w-time-sec, .progress-next, .w-steer) { display: none; }
+    .progress[data-old] .w-strip { grid-template-columns: repeat(auto-fill, minmax(40px, 1fr)); }
+    .progress[data-old] .w-thumb { height: 28px; }
+    .progress[data-old] .w-flab { display: none; }
+    :host([data-chrome="phone"]) .w-say { font-size: 15px; }
+    /* Only what is new moves: views patch in place, and a node that arrives
+       wears data-enter; nothing already on screen replays. */
+    .progress :is(.w-slot > .v, .v [data-enter], .w-frame[data-enter] .w-thumb, .w-receipt[data-enter])[data-enter],
+    .progress .w-frame[data-enter] .w-thumb { animation: plain-enter .38s var(--settle) both; }
+    @media (prefers-reduced-motion: reduce) { .progress *, .progress { animation: none !important; transition: none !important; } }
+    @keyframes plain-enter { from { opacity: 0; transform: translateY(3px) scale(.98); } }
     .system { align-self: center; font-size: 12px; color: var(--faint); text-align: center; max-width: 90%; padding: 8px 0; }
     .system.error { color: var(--danger); }
     /* Prompts waiting their turn hover over the composer rather than pushing
@@ -6169,6 +6492,13 @@
 
     /** What a sent message looks like: its attachments as the cards they were,
      *  then whatever the person actually typed around them. */
+    relayedMessage(block) {
+      const node = this.userMessage(block.body, { conversation: block.id, title: block.title });
+      node.dataset.relayed = '';
+      node.querySelector('.msg-text')?.addEventListener('click', () => node.toggleAttribute('data-open'));
+      return node;
+    }
+
     userMessage(text, from = null) {
       const { blocks, rest } = splitPasted(text);
       const node = h('div', 'msg me');
@@ -6471,7 +6801,11 @@
             };
             this.paintMast();
           }
-          this.append(turn, this.userMessage(event.text, event.from ?? null));
+          // A message relayed from another chat is that chat's words, not
+          // the envelope the agent reads them in.
+          const relayed = parseRelayed(event.text);
+          if (relayed) for (const block of relayed) this.append(turn, this.relayedMessage(block));
+          else this.append(turn, this.userMessage(event.text, event.from ?? null));
           break;
         }
         case 'turn.queued':
@@ -6832,7 +7166,7 @@
       const last = [...this.logEl.children].reverse().find((el) => !el.classList.contains('turn-footer')
         && (simple ? !(el.matches('.tool, .tool-group') && getComputedStyle(el).display === 'none') : !el.classList.contains('progress')));
       if (last?.classList.contains('progress')) {
-        const said = last.querySelector('.progress-say')?.textContent ?? '';
+        const said = last.querySelector('.w-say')?.textContent ?? '';
         this.ticker.textContent = said;
         this.ticker.hidden = !said;
         return;
@@ -7065,6 +7399,7 @@
     toolResult(turn, event) {
       const row = this.record(turn).tools.get(event.callId);
       if (!row || row.dataset.state === 'refused') return;
+      this.plainResult(turn, row, event);
       // The one row its result is allowed to rewrite. "Pressing sort-btn" is
       // the call; "Pressed Sort · 12 changes" is what happened, and only the
       // host — which read the control's own words and counted the ops — can
@@ -7419,7 +7754,7 @@
       this.dispatchEvent(new CustomEvent('running', { detail: this.running ?? { turn: null }, bubbles: true, composed: true }));
     }
 
-    // ---------------------------------------------------------- simple progress
+    // ---------------------------------------------------------- simple progress (v2: the work, shown)
 
     paintDetail() {
       const mode = readDetail();
@@ -7437,105 +7772,144 @@
     plainCard(turn) {
       const record = this.record(turn);
       if (record.progress) return record.progress;
-      const el = h('div', 'progress');
-      el.dataset.state = 'running';
-      const top = h('div', 'progress-top');
-      const glyph = h('span', 'progress-glyph');
-      const words = h('div', 'progress-words');
-      const say = h('div', 'progress-say');
-      const sub = h('div', 'progress-sub');
-      words.append(say, sub);
-      const more = h('button', 'progress-more', 'Details');
-      more.type = 'button';
-      more.setAttribute('aria-expanded', 'false');
-      top.append(glyph, words, more);
-
-      const pv = h('div', 'pv');
-      pv.hidden = true;
-      const frame = h('div', 'pv-frame');
-      const bar = h('div', 'pv-bar');
-      const where = h('span', 'pv-where');
-      const tag = h('span', 'pv-tag');
-      bar.append(where, tag);
-      const view = h('div', 'pv-view');
-      frame.append(bar, view);
-      const foot = h('div', 'pv-foot');
-      const cap = h('span', 'pv-cap');
-      const steps = h('div', 'pv-steps');
-      steps.hidden = true;
-      foot.append(cap, steps);
-      pv.append(frame, foot);
-
-      const track = h('ol', 'progress-track');
-      track.setAttribute('aria-hidden', 'true');
-      for (const stage of STAGES) {
-        const stop = h('li', 'progress-stop');
-        stop.dataset.stage = stage.key;
-        stop.dataset.at = 'next';
-        stop.append(h('span', 'progress-node'), h('span', 'progress-name', stage.name));
-        track.append(stop);
-      }
-      const plan = h('div', 'progress-plan');
-      plan.hidden = true;
-      const meter = h('div', 'progress-meter');
-      const barEl = h('span', 'progress-bar');
-      const fill = h('span', 'progress-fill');
-      barEl.append(fill);
-      const count = h('span', 'progress-count');
-      meter.append(barEl, count);
-      const todos = h('ul', 'progress-todos');
-      plan.append(meter, todos);
-      const made = h('div', 'progress-made');
-      made.hidden = true;
-      const madeLabel = h('span', 'progress-made-label', 'Working on');
-      made.append(madeLabel);
-      const said = h('div', 'progress-said');
-      said.hidden = true;
-      const next = h('div', 'progress-next');
-      next.hidden = true;
-      const q = h('p', 'progress-q');
-      const acts = h('div', 'progress-acts');
-      next.append(q, acts);
-      el.append(top, pv, track, plan, made, said, next);
+      const el = wel(`<div class="progress" data-state="running">
+        <div class="w-tick"><span class="w-glyph"></span><span class="w-say"></span><span class="w-stops" role="img" aria-label="Explore, stop 1 of 4"><i></i><i></i><i></i><i></i></span><span class="w-time"></span></div>
+        <div class="w-live" hidden><div class="w-vh"></div><div class="w-slot"></div><p class="w-cap"></p><div class="w-back" hidden><span></span><button type="button">Back to now</button></div></div>
+        <div class="w-receipt" hidden></div>
+        <div class="w-sec-h w-strip-h">Steps</div>
+        <div class="w-strip"></div>
+        <div class="progress-said" hidden></div>
+        <div class="progress-next" hidden><p class="progress-q"></p><div class="progress-acts"></div></div>
+        <div class="w-foot"><button type="button" class="w-quiet w-det progress-more" aria-expanded="false">Details</button><span class="w-steer"></span></div>
+      </div>`);
+      const q = (s) => el.querySelector(s);
       const card = {
-        el, glyph, glyphStage: '', say, sub, more, pv, where, tag, view, cap, steps, track, plan, fill, count, todos,
-        made, madeLabel, said, next, q, acts,
+        el, turn, glyph: q('.w-glyph'), glyphStage: '', say: q('.w-say'), stops: q('.w-stops'), time: q('.w-time'),
+        live: q('.w-live'), vh: q('.w-vh'), slot: q('.w-slot'), cap: q('.w-cap'), back: q('.w-back'),
+        receipt: q('.w-receipt'), strip: q('.w-strip'), said: q('.progress-said'), next: q('.progress-next'), q: q('.progress-q'), acts: q('.progress-acts'),
+        more: q('.w-det'), steer: q('.w-steer'),
         stage: null, reached: -1, built: false, running: true, open: false,
-        docs: new Map(), files: new Set(), filesChip: null, todoList: [],
-        edits: [], sources: [], stuck: null, ask: null, shown: -1,
+        docs: new Map(), files: new Set(), todoList: [], plan: null, stageIdx: -1,
+        frames: [], cur: null, shown: null, spent: { look: 0, build: 0, check: 0 }, lastAt: null,
+        changes: new Map(), added: [], colors: [], lines: [], sources: [], reads: [], tests: null, stuck: null, ask: null,
       };
-      more.addEventListener('click', () => this.revealSteps(turn, !card.open));
+      card.more.addEventListener('click', () => this.revealSteps(turn, !card.open));
+      card.back.querySelector('button').addEventListener('click', () => this.recallFrame(card, null));
+      card.strip.addEventListener('click', (e) => {
+        const f = e.target.closest('.w-frame');
+        if (f && f.dataset.st !== 'todo') this.recallFrame(card, card.frames[Number(f.dataset.i)]);
+      });
+      card.vh.addEventListener('click', (e) => {
+        if (e.target.closest('button[data-a="reply"]')) this.replyAbout(card);
+      });
       record.progress = card;
       if (record.footer) record.footer.dataset.plain = '';
       this.append(turn, el);
       this.setNext(turn, 'running');
+      this.tickClock(card);
       return card;
+    }
+
+    /** The time on the line, every second while it works. */
+    tickClock(card) {
+      const record = this.turns.get(card.turn);
+      const paint = () => {
+        const from = record?.started ?? card.firstAt ?? Date.now();
+        card.time.textContent = wclock(Date.now() - from);
+      };
+      paint();
+      clearInterval(card.timer);
+      card.timer = setInterval(() => {
+        if (!card.running || !card.el.isConnected) { clearInterval(card.timer); return; }
+        paint();
+      }, 1000);
+    }
+
+    /** Where the time went: each gap between steps goes to the stage it was spent in. */
+    spend(card, at) {
+      const t = at ?? Date.now();
+      if (card.lastAt != null && card.stage) card.spent[card.stage] = (card.spent[card.stage] ?? 0) + Math.max(0, t - card.lastAt);
+      card.lastAt = t;
     }
 
     plainCall(turn, event) {
       const card = this.plainCard(turn);
       const input = event.input ?? {};
       const step = plainStep(event.name, input, card.built);
+      this.spend(card, event.t);
+      card.firstAt ??= event.t;
       if (event.name === 'TodoWrite' || event.name === 'updateTodos') this.plainTodos(card, input);
       if (step.makes) this.plainMade(turn, step.makes);
       if (step.file) this.plainFile(card, step.file);
-      if (event.name === 'apply_ops' && input.path) {
-        const rows = readOps(input.ops, (id) => this.nameOnPage(input.path, id));
-        if (rows.length) {
-          card.edits.push({ path: input.path, note: String(input.note ?? '').trim(), rows });
-          this.showEdit(card, card.edits.length - 1, this.fresh);
-        }
-      }
-      if (/^(WebFetch|WebSearch|web_search)$/.test(event.name)) {
-        const site = event.name === 'WebFetch' ? hostOf(input.url) : 'Web search';
-        const title = event.name === 'WebFetch' ? trimTo(String(input.url ?? '').replace(/^https?:\/\/[^/]+/, '') || '/', 48) : trimTo(input.search_term || input.query || '', 48);
-        if (!card.sources.some((s) => s.site === site && s.title === title)) card.sources.push({ site, title });
-        if (!card.edits.length) this.showSources(card, this.fresh);
-      }
       const stage = step.stage ?? card.stage ?? 'look';
       if (stage === 'build') card.built = true;
       this.plainPaint(card, stage, step.say, step.note);
+
+      // A stage in the agent's note ("Stage 2 of 5: the cards") is the plan.
+      const staged = /^\s*stage\s+(\d+)\s+of\s+(\d+)\s*[:—-]?\s*(.*)$/i.exec(String(input.note ?? ''));
+      if (event.name === 'apply_ops' && staged) this.planFromNote(card, Number(staged[1]), Number(staged[2]), staged[3]);
+
+      if (event.name === 'apply_ops' && input.path) {
+        const here = this.onThisPage(input.path);
+        const work = readWork(input.ops, (id) => (here ? document.querySelector(`[data-marble-id="${CSS.escape(String(id))}"]`) : null));
+        for (const row of work.rows) { card.changes.delete(row.key); card.changes.set(row.key, { ...row, path: input.path }); }
+        card.added.push(...work.added);
+        card.colors.push(...work.colors);
+        card.lines.push(...work.lines);
+        const note = String(input.note ?? '').trim();
+        const doc = docName(input.path);
+        if (work.colors.length) this.showView(card, 'swatch', { rows: card.colors }, { name: doc, cap: note, key: `sw:${input.path}` });
+        else if (work.lines.length && !work.added.length) this.showView(card, 'redline', { lines: card.lines }, { name: doc, cap: note, key: `red:${input.path}` });
+        else if (work.added.length || work.rows.length) {
+          this.showView(card, 'map', { blocks: here ? this.outlineBlocks(card) : null, added: card.added }, { name: doc, cap: note, key: `map:${input.path}`, here });
+          if (here) card.awaitOutline = input.path;
+        }
+      }
+      if (/^(WebFetch|WebSearch|web_search)$/.test(event.name)) {
+        const fetch = event.name === 'WebFetch';
+        const site = fetch ? hostOf(input.url) : '';
+        const row = fetch
+          ? { site, t: trimTo(String(input.url ?? '').replace(/^https?:\/\/[^/]+/, '') || '/', 48), st: 'reading', hue: [...site].reduce((n, ch) => (n * 31 + ch.charCodeAt(0)) % 360, 7), callId: event.callId }
+          : { q: trimTo(input.search_term || input.query || '', 60), callId: event.callId };
+        card.sources.push(row);
+        this.showView(card, 'sources', { rows: card.sources }, { name: '', key: 'sources' });
+      }
+      if (event.name === 'read_document' && input.path) {
+        const doc = docName(input.path);
+        if (!card.reads.includes(doc)) card.reads.push(doc);
+      }
       if (card.open) this.markReveal(turn);
+    }
+
+    /** A step's result: a test run is counted, a page that would not open is marked. */
+    plainResult(turn, row, event) {
+      const card = this.turns.get(turn)?.progress;
+      if (!card) return;
+      const src = card.sources.find((s) => s.callId === event.callId);
+      if (src && !src.q) {
+        src.st = event.ok ? 'read' : 'skip';
+        this.showView(card, 'sources', { rows: card.sources }, { name: '', key: 'sources' });
+      }
+      const name = row.dataset.name;
+      const said = row.dataset.was ?? '';
+      if (/^(Bash|Shell|shell)$/.test(name) && CHECK_WORDS.test(said)) {
+        const counts = readTests(event.summary);
+        if (counts) {
+          card.tests = counts;
+          this.showView(card, 'tests', counts, { name: '', key: `tests:${event.callId}`, cap: counts.failed ? '' : 'All passing' });
+        }
+      }
+    }
+
+    onThisPage(path) {
+      const here = this.api?.context?.().viewing;
+      return Boolean(here) && String(path ?? '').replace(/\.mrbl$/, '') === String(here).replace(/\.mrbl$/, '');
+    }
+
+    /** The outline of this page as blocks, with what this turn added lit. */
+    outlineBlocks(card) {
+      card.seen ??= new Set(pageOutline().map((b) => b.k));
+      return pageOutline().map((b) => ({ k: b.k, h: b.h, fresh: !card.seen.has(b.k) }));
     }
 
     plainPaint(card, stage, say, note = '') {
@@ -7543,202 +7917,169 @@
       card.stage = stage;
       card.reached = Math.max(card.reached, at);
       card.el.dataset.stage = stage;
-      if (card.glyphStage !== stage) {
-        card.glyph.innerHTML = STAGE_GLYPHS[stage] ?? '';
-        card.glyphStage = stage;
-      }
+      this.glyphFor(card, stage);
       if (card.say.textContent !== say) {
         card.say.textContent = say;
         card.say.title = say;
-        if (this.fresh && card.el.isConnected) {
-          card.say.animate?.([{ opacity: 0, transform: 'translateY(3px)' }, { opacity: 1, transform: 'none' }], { duration: 260, easing: 'cubic-bezier(.22, 1, .36, 1)' });
-        }
+        if (this.fresh && card.el.isConnected) card.say.animate?.([{ opacity: 0, transform: 'translateY(2px)' }, { opacity: 1, transform: 'none' }], { duration: 260, easing: 'cubic-bezier(.22, 1, .36, 1)' });
       }
-      card.sub.textContent = note || STAGES[at]?.gist || '';
-      card.sub.title = card.sub.textContent;
-      [...card.track.children].forEach((stop, i) => {
-        stop.dataset.at = i === at ? 'now' : i <= card.reached ? 'past' : 'next';
-      });
+      [...card.stops.children].forEach((stop, i) => { stop.dataset.at = i === at ? 'now' : i <= card.reached ? 'past' : ''; });
+      card.stops.setAttribute('aria-label', `${STAGES[at]?.name ?? ''}, stop ${at + 1} of 4`);
+      if (note) card.say.title = `${say} — ${note}`;
+      this.publishLine(card);
     }
 
-    // ---------------------------------------------------------- the close-up
-
-    /** The words an element on this page goes by, when the edit is to the
-     *  document open here. Any other document's elements are out of sight. */
-    nameOnPage(path, id) {
-      if (!id) return '';
-      const here = this.api?.context?.().viewing;
-      if (!here || String(path ?? '').replace(/\.mrbl$/, '') !== String(here).replace(/\.mrbl$/, '')) return '';
-      const el = document.querySelector(`[data-marble-id="${CSS.escape(String(id))}"]`);
-      if (!el) return '';
-      const text = trimTo(el.getAttribute('aria-label') || el.textContent || '', 32);
-      if (text) return text;
-      const kind = { H1: 'the heading', H2: 'a heading', H3: 'a heading', P: 'a paragraph', UL: 'a list', OL: 'a list', IMG: 'a picture', BUTTON: 'a button', BODY: 'the page' }[el.tagName];
-      return kind ?? '';
+    glyphFor(card, key) {
+      if (card.glyphStage === key) return;
+      card.glyph.innerHTML = STAGE_GLYPHS[key] ?? '';
+      card.glyphStage = key;
     }
 
-    /** One edit's elements, and everything the turn has changed in that
-     *  document so far. Patched in place: only what is new moves. */
-    showEdit(card, i, enter = false, { all = false } = {}) {
-      const edit = card.edits[i];
-      card.shown = i;
-      card.pv.hidden = false;
-      card.where.textContent = docName(edit.path);
-      const latest = i === card.edits.length - 1;
-      card.tag.textContent = card.running && latest ? 'Live' : latest ? 'Now' : `Step ${i + 1} of ${card.edits.length}`;
-      card.tag.dataset.live = String(card.running && latest);
-      // Live, the sub-line already says the note; the caption is for a step
-      // you went back to, and for the record once it is over.
-      card.cap.textContent = card.running && latest ? '' : all ? plainCount(card.edits.length, 'step') : edit.note;
-      const upto = card.edits.slice(0, i + 1).filter((e) => e.path === edit.path);
-      const changes = [];
-      for (const e of upto) {
-        for (const row of e.rows) {
-          const at = changes.findIndex((c) => c.text === row.text && c.op === row.op);
-          if (at >= 0) changes.splice(at, 1);
-          changes.push(row);
-        }
+    /** The turn's line, for the island a page shows while this chat is closed. */
+    publishLine(card) {
+      if (!this.isConnected || !this.fresh) return;
+      const record = this.turns.get(card.turn);
+      const target = record?.target ?? this.meta?.target ?? null;
+      dispatchEvent(new CustomEvent('marble-work:line', { detail: {
+        conversation: this.getAttribute('conversation'),
+        target,
+        state: card.el.dataset.state,
+        say: card.say.textContent,
+        started: record?.started ?? card.firstAt ?? null,
+        took: card.running ? '' : card.time.textContent,
+        changes: [...card.changes.values()].some((c) => this.onThisPage(c.path)),
+        view: card.live.hidden ? null : card.slot.firstElementChild,
+      } }));
+    }
+
+    // ---------------------------------------------------------- the live view and its frames
+
+    /** Show a view. The same kind, for the same thing, is set in place; a
+     *  new one files the old into its frame and takes the stage. */
+    showView(card, kind, d, meta = {}) {
+      const K = WV[kind];
+      const enter = this.fresh;
+      if (card.cur && card.cur.meta.key === meta.key && card.cur.kind === kind) {
+        card.cur.d = d;
+        Object.assign(card.cur.meta, meta);
+        if (kind === 'tests') { card.cur.node = K.make(d); if (!card.shown) card.slot.replaceChildren(card.cur.node); } else K.set(card.cur.node, d, enter);
+        if (!card.shown) { card.cap.textContent = meta.cap ?? ''; this.paintViewHead(card, card.cur); }
+        if (card.cur.frame) this.refreshFrame(card, card.cur);
+        return;
       }
-      morph(card.view, (root) => {
-        const focus = h('div', 'f-focus');
-        // Finished, the close-up is everything the turn made here, newest last.
-        const pool = all ? changes : edit.rows;
-        const shown = pool.filter((r) => r.op !== '-').slice(-3);
-        for (const row of shown) focus.append(this.elementSketch(row));
-        if (!shown.length) focus.append(h('div', 'f-note', 'Tidied things away'));
-        root.append(focus, this.changeList(changes.slice(-6)));
-      }, enter);
-      this.paintSteps(card);
-    }
-
-    elementSketch(row) {
-      const box = h('div', row.op === '+' ? 'f-el f-el-new' : 'f-el');
-      box.dataset.k = row.text;
-      const head = h('div', 'f-el-name');
-      head.append(h('span', 'f-el-text', row.text));
-      if (row.op === '+') head.append(h('span', 'f-new', 'New'));
-      box.append(head);
-      if (row.colors?.length) {
-        const swatches = h('div', 'f-swatches');
-        for (const color of row.colors) {
-          const sw = h('span', 'f-sw');
-          sw.dataset.k = color;
-          sw.style.setProperty('--c', color);
-          sw.title = color;
-          swatches.append(sw);
-        }
-        box.append(swatches);
+      if (card.cur) this.fileFrame(card, card.cur);
+      const v = { kind, d, node: K.make(d), meta };
+      card.cur = v;
+      card.shown = null;
+      this.paintLive(card, v, enter);
+      if (card.plan) {
+        v.frame = card.frames[Math.max(0, card.stageIdx)];
+        if (v.frame) { v.frame.v = v; this.refreshFrame(card, v); }
+      } else {
+        v.frame = this.addFrame(card, v, enter);
       }
-      if (row.parts?.length) {
-        const parts = h('div', 'f-parts');
-        for (const part of row.parts) {
-          const pill = h('span', 'f-part', part);
-          pill.dataset.k = part.replace(/^\d+\s*/, '');
-          parts.append(pill);
-        }
-        box.append(parts);
+      this.publishLine(card);
+    }
+
+    paintViewHead(card, v) {
+      const K = WV[v.kind];
+      card.vh.innerHTML = `${WI[K.icon] ?? ''}<b>${wesc(v.meta.label ?? K.label)}</b>${v.meta.name ? `<span class="w-vname">· ${wesc(v.meta.name)}</span>` : ''}<span class="w-vbtns"><button type="button" class="w-vb" data-a="reply">${WI.reply}Reply</button></span>`;
+    }
+
+    paintLive(card, v, enter) {
+      card.live.hidden = false;
+      this.paintViewHead(card, v);
+      card.slot.replaceChildren(v.node);
+      card.cap.textContent = v.meta.cap ?? '';
+      if (enter) { v.node.setAttribute('data-enter', ''); }
+      const past = card.shown && card.shown !== card.cur;
+      card.back.hidden = !past;
+      if (past) card.back.querySelector('span').textContent = card.running ? 'An earlier step.' : 'A step from this turn.';
+      for (const f of card.strip.children) wflag(f, 'data-on', past && card.frames[Number(f.dataset.i)]?.v === card.shown);
+    }
+
+    thumbOf(v) {
+      const w = document.createElement('div');
+      w.className = 'w-shrink';
+      const c = v.node.cloneNode(true);
+      c.removeAttribute('data-enter');
+      for (const x of c.querySelectorAll('[data-enter]')) x.removeAttribute('data-enter');
+      for (const b of c.querySelectorAll('button')) b.tabIndex = -1;
+      w.append(c);
+      return w;
+    }
+
+    addFrame(card, v, enter) {
+      const i = card.frames.length;
+      const label = v.meta.flab ?? (v.meta.name ? `${WV[v.kind].label} · ${v.meta.name}` : WV[v.kind].label);
+      const f = { el: wel(`<button type="button" class="w-frame" data-i="${i}" data-st="now"><span class="w-thumb"></span><span class="w-flab">${wesc(label)}</span></button>`), v };
+      f.el.querySelector('.w-thumb').append(this.thumbOf(v));
+      f.el.setAttribute('aria-label', `Show the step: ${label}`);
+      wflag(f.el, 'data-enter', enter);
+      card.frames.push(f);
+      card.strip.append(f.el);
+      return f;
+    }
+
+    refreshFrame(card, v) {
+      const f = v.frame;
+      if (!f) return;
+      f.v = v;
+      f.el.querySelector('.w-thumb').replaceChildren(this.thumbOf(v));
+    }
+
+    fileFrame(card, v) {
+      if (!v.frame) return;
+      this.refreshFrame(card, v);
+      if (!card.plan) v.frame.el.dataset.st = 'done';
+    }
+
+    recallFrame(card, frame) {
+      if (!frame || frame.v === card.cur) {
+        card.shown = null;
+        if (!card.running) { card.live.hidden = true; for (const f of card.strip.children) wflag(f, 'data-on', false); return; }
+        if (card.cur) this.paintLive(card, card.cur, false);
+        return;
       }
-      return box;
+      if (!frame.v) return;
+      card.shown = frame.v;
+      this.paintLive(card, frame.v, false);
+      card.back.hidden = false;
+      card.back.querySelector('button').textContent = card.running ? 'Back to now' : 'Close';
     }
 
-    changeList(rows) {
-      const list = h('ul', 'f-changes');
-      for (const row of rows) {
-        const li = h('li');
-        li.dataset.k = `${row.op}${row.text}`;
-        li.dataset.op = row.op === '+' ? 'plus' : row.op === '-' ? 'minus' : row.op === '~' ? 'change' : 'same';
-        li.append(h('span', 'f-op', row.op === '-' ? '−' : row.op), row.text);
-        list.append(li);
+    /** The agent's own plan, from a stage note or its to-do list, as frames
+     *  that fill as it goes: done, now, and still to do. */
+    planFromNote(card, at, of, name) {
+      if (!card.plan || card.plan.length !== of) {
+        const carried = card.plan ? card.frames : [];
+        card.plan = Array.from({ length: of }, (_, i) => card.plan?.[i] ?? `Stage ${i + 1}`);
+        card.strip.replaceChildren();
+        card.frames = card.plan.map((label, i) => this.planFrame(card, i, label, carried[i]?.v ?? null));
       }
-      return list;
-    }
-
-    showSources(card, enter = false) {
-      card.pv.hidden = false;
-      card.where.textContent = 'Where the answer comes from';
-      card.tag.textContent = card.running ? 'Live' : '';
-      card.tag.dataset.live = String(card.running);
-      card.cap.textContent = plainCount(card.sources.length, 'source');
-      morph(card.view, (root) => {
-        const focus = h('div', 'f-focus');
-        for (const src of card.sources.slice(-5)) {
-          const row = h('div', 'f-src');
-          row.dataset.k = `${src.site}${src.title}`;
-          const fav = h('span', 'f-fav', (src.site[0] ?? '?').toUpperCase());
-          fav.style.setProperty('--h', String([...src.site].reduce((n, ch) => (n * 31 + ch.charCodeAt(0)) % 360, 7)));
-          row.append(fav, h('b', '', src.title || src.site), h('span', '', src.site));
-          focus.append(row);
-        }
-        root.append(focus);
-      }, enter);
-    }
-
-    showStuck(card, enter = false) {
-      if (!card.stuck) return;
-      card.pv.hidden = false;
-      card.where.textContent = 'Where it got stuck';
-      card.tag.textContent = '';
-      card.tag.dataset.live = 'false';
-      card.cap.textContent = '';
-      morph(card.view, (root) => {
-        const focus = h('div', 'f-focus');
-        const path = h('div', 'f-path');
-        const link = h('span', 'f-link');
-        link.append(h('span', '', '✕'));
-        path.append(h('span', 'f-node', 'Agent'), link, h('span', 'f-node stuck', card.stuck.what));
-        focus.append(path, h('div', 'f-note', card.stuck.why));
-        root.append(focus);
-      }, enter);
-    }
-
-    paintSteps(card) {
-      card.steps.hidden = card.edits.length < 2;
-      if (card.steps.hidden) return;
-      card.steps.replaceChildren(...card.edits.map((edit, k) => {
-        const b = h('button', 'pv-step', String(k + 1));
-        b.type = 'button';
-        b.title = edit.note || docName(edit.path);
-        b.setAttribute('aria-pressed', String(k === card.shown));
-        b.setAttribute('aria-label', `Show step ${k + 1}${edit.note ? `: ${edit.note}` : ''}`);
-        b.addEventListener('click', () => this.showEdit(card, k, false));
-        return b;
-      }));
-    }
-
-    // ---------------------------------------------------------- chips, plan
-
-    /** A document the turn is making, as a chip that opens it. */
-    plainMade(turn, path) {
-      if (!path) return;
-      const card = this.plainCard(turn);
-      const key = String(path).replace(/\.mrbl$/, '');
-      if (card.docs.has(key)) return;
-      const href = window.marble?.href?.(key);
-      const chip = h(href ? 'a' : 'span', 'progress-chip');
-      if (href) chip.href = href;
-      chip.title = href ? `Open ${key}` : key;
-      chip.innerHTML = DOC_GLYPH;
-      chip.append(docName(key));
-      if (this.fresh) chip.setAttribute('data-enter', '');
-      card.docs.set(key, chip);
-      if (card.filesChip) card.filesChip.before(chip);
-      else card.made.append(chip);
-      card.made.hidden = false;
-      card.built = true;
-    }
-
-    /** Files that are not documents are counted, not named: to someone who
-     *  does not write code, `agent-ui.js` says nothing that "2 files" does not. */
-    plainFile(card, file) {
-      if (!file || /\.mrbl$/.test(file)) return;
-      card.files.add(file);
-      if (!card.filesChip) {
-        card.filesChip = h('span', 'progress-chip files');
-        if (this.fresh) card.filesChip.setAttribute('data-enter', '');
-        card.made.append(card.filesChip);
+      if (name) {
+        card.plan[at - 1] = name;
+        const lab = card.frames[at - 1]?.el.querySelector('.w-flab');
+        if (lab) lab.innerHTML = `<span class="w-fnum">${at}</span>${wesc(name)}`;
       }
-      card.filesChip.textContent = `${plural(card.files.size, 'file')} behind the scenes`;
-      card.made.hidden = false;
+      this.planAt(card, at - 1);
+    }
+
+    planFrame(card, i, label, v) {
+      const f = { el: wel(`<button type="button" class="w-frame" data-i="${i}" data-st="${v ? 'done' : 'todo'}"><span class="w-thumb"></span><span class="w-flab"><span class="w-fnum">${i + 1}</span>${wesc(label)}</span></button>`), v };
+      if (v) f.el.querySelector('.w-thumb').append(this.thumbOf(v));
+      f.el.setAttribute('aria-label', `Stage ${i + 1}: ${label}`);
+      wflag(f.el, 'data-enter', this.fresh);
+      card.strip.append(f.el);
+      return f;
+    }
+
+    planAt(card, i) {
+      if (card.cur) this.fileFrame(card, card.cur);
+      card.stageIdx = i;
+      card.frames.forEach((f, k) => { f.el.dataset.st = k < i ? 'done' : k === i ? 'now' : f.v && k < i ? 'done' : 'todo'; });
+      // The live view belongs to the stage it is drawn in.
+      if (card.cur) card.cur.frame = card.frames[i];
     }
 
     plainTodos(card, input) {
@@ -7754,32 +8095,71 @@
         card.todoList = read.todos;
       }
       const list = card.todoList.filter((t) => t.text && t.status !== 'dropped');
-      const done = list.filter((t) => t.status === 'done').length;
-      card.plan.hidden = !list.length;
-      card.fill.style.width = list.length ? `${Math.round((done / list.length) * 100)}%` : '0';
-      card.count.textContent = `${done} of ${list.length} done`;
-      card.todos.replaceChildren(...list.map((t) => {
-        const li = h('li', '', t.text);
-        li.dataset.status = t.status;
-        return li;
-      }));
+      if (!list.length) return;
+      const names = list.map((t) => t.text);
+      if (!card.plan || card.plan.length !== names.length || card.plan.some((n, i) => n !== names[i])) {
+        const carried = card.frames;
+        card.plan = names;
+        card.strip.replaceChildren();
+        card.frames = names.map((label, i) => this.planFrame(card, i, label, carried[i]?.v ?? null));
+      }
+      const now = list.findIndex((t) => t.status === 'now');
+      const firstOpen = list.findIndex((t) => t.status !== 'done');
+      this.planAt(card, now >= 0 ? now : firstOpen >= 0 ? firstOpen : list.length - 1);
+      list.forEach((t, k) => { if (t.status === 'done') card.frames[k].el.dataset.st = 'done'; });
+    }
+
+    /** Reply about this view: it goes in the message box, so "darker" means that swatch. */
+    replyAbout(card) {
+      const v = card.shown ?? card.cur;
+      if (!v) return;
+      const about = `About the ${(v.meta.label ?? WV[v.kind].label).toLowerCase()}${v.meta.name ? ` in ${v.meta.name}` : ''}: `;
+      this.act(card.turn, { kind: 'draft', text: about, placeholder: 'What about it?' });
+    }
+
+    // ---------------------------------------------------------- chips
+
+    /** A document the turn is making, kept for the receipt's links. */
+    plainMade(turn, path) {
+      if (!path) return;
+      const card = this.plainCard(turn);
+      const key = String(path).replace(/\.mrbl$/, '');
+      if (!card.docs.has(key)) card.docs.set(key, docName(key));
+      card.built = true;
+      // Once the ops have landed on this page, the outline can show what came.
+      if (card.awaitOutline && this.onThisPage(card.awaitOutline) && card.cur?.kind === 'map') {
+        requestAnimationFrame(() => {
+          if (card.cur?.kind !== 'map') return;
+          card.cur.d = { ...card.cur.d, blocks: this.outlineBlocks(card) };
+          WV.map.set(card.cur.node, card.cur.d, this.fresh);
+          this.refreshFrame(card, card.cur);
+        });
+      }
+    }
+
+    /** Files that are not documents are counted, not named. */
+    plainFile(card, file) {
+      if (!file || /\.mrbl$/.test(file)) return;
+      card.files.add(file);
     }
 
     // ---------------------------------------------------------- asks, failures, the end
 
-    /** A permission, folded into the card in words: what it would let the
-     *  agent do, and three answers. The ask card stays underneath for
-     *  Technical, and the card's buttons press its buttons. */
+    /** A permission, drawn in the live view in words, with the answers under it. */
     plainAsk(turn, event, askCard) {
       const card = this.plainCard(turn);
       card.ask = { requestId: event.requestId, askCard, choice: null };
       card.el.dataset.state = 'asking';
-      card.glyph.innerHTML = STAGE_GLYPHS.ask;
-      card.glyphStage = 'ask';
+      this.glyphFor(card, 'ask');
       card.say.textContent = 'Needs your OK';
-      card.sub.textContent = plainAskOf(event);
-      card.sub.title = card.sub.textContent;
+      const input = event.input ?? {};
+      const rows = [];
+      if (input.command) rows.push({ k: 'Command', v: trimTo(input.command, 80) });
+      if (input.file_path || input.path) rows.push({ k: 'File', v: tail(input.file_path ?? input.path) });
+      if (input.url) rows.push({ k: 'Site', v: hostOf(input.url) });
+      this.showView(card, 'perm', { t: plainAskOf(event), rows }, { name: '', key: `perm:${event.requestId}` });
       this.setNext(turn, 'asking');
+      this.publishLine(card);
     }
 
     plainAskClosed(turn, event, askCard) {
@@ -7796,8 +8176,7 @@
       this.setNext(turn, 'running');
     }
 
-    /** A step that failed is the agent's to fix; it is kept only so a turn
-     *  that ends failed can say where it got stuck. */
+    /** A step that failed is the agent's to fix; kept so a failed turn can say where it got stuck. */
     plainFailed(turn, row, event) {
       const card = this.turns.get(turn)?.progress;
       if (!card) return;
@@ -7813,40 +8192,106 @@
       const record = this.turns.get(turn);
       const card = record?.progress;
       if (!card) return;
+      this.spend(card, event.t);
       card.running = false;
+      clearInterval(card.timer);
       const declined = status === 'failed' && card.stuck?.denied;
       const state = declined ? 'declined' : status;
       card.el.dataset.state = state;
-      const names = [...card.docs.keys()].map(docName);
+      const names = [...card.docs.values()];
       const listed = names.length <= 2 ? names.join(' and ') : `${names.slice(0, 2).join(', ')} and ${names.length - 2} more`;
       const took = record.started && event.t ? seconds(event.t - record.started) : '';
-      const say = {
+      card.say.textContent = {
         completed: names.length ? `Updated ${listed}` : card.built ? 'Made the changes' : 'All done',
         declined: 'Stopped at your call',
         failed: 'Something went wrong',
         cancelled: 'Stopped',
         interrupted: 'Interrupted',
       }[state] ?? 'Done';
-      const sub = {
-        completed: took ? `Finished in ${took}` : 'Finished',
-        declined: 'Nothing else was changed',
-        failed: firstSentence(event.error) || 'The agent could not finish',
-        cancelled: took ? `Stopped after ${took}` : 'Stopped before it finished',
-        interrupted: 'Marble restarted before it finished',
-      }[state] ?? '';
-      card.glyph.innerHTML = STAGE_GLYPHS[state === 'completed' ? 'done' : state === 'failed' ? 'failed' : 'stopped'];
-      card.glyphStage = state;
-      card.say.textContent = say;
-      card.say.title = say;
-      card.sub.textContent = sub;
-      card.sub.title = sub;
-      card.madeLabel.textContent = state === 'completed' ? 'Worked on' : 'Touched';
-      for (const stop of card.track.children) stop.dataset.at = 'past';
-      if (card.edits.length) this.showEdit(card, card.edits.length - 1, false, { all: true });
-      else if (card.sources.length) this.showSources(card);
-      if ((state === 'failed' || state === 'declined') && card.stuck) this.showStuck(card, this.fresh);
+      card.say.title = card.say.textContent;
+      card.time.textContent = took;
+      this.glyphFor(card, state === 'completed' ? 'done' : state === 'failed' ? 'failed' : 'stopped');
+      if (card.cur) this.fileFrame(card, card.cur);
+      for (const f of card.strip.children) if (f.dataset.st === 'now') f.dataset.st = state === 'completed' ? 'done' : 'halt';
+      card.shown = null;
+
+      // Stopped, failed or turned down: the live view stays, frozen where it
+      // stopped, and says what was done and what was not.
+      if (state !== 'completed') {
+        const done = card.plan ? card.frames.filter((f) => f.el.dataset.st === 'done').length : null;
+        const line = state === 'failed' || state === 'declined'
+          ? (card.stuck?.why || firstSentence(event.error) || 'It could not finish.')
+          : `${state === 'interrupted' ? 'Marble restarted' : 'Stopped'}${took ? ` after ${took}` : ''}.${done != null ? ` ${done} of ${card.plan.length} stages done; nothing was lost.` : ' Nothing was lost.'}`;
+        const v = { kind: 'halt', d: { line, path: (state === 'failed' || state === 'declined') && card.stuck ? card.stuck.what : '' }, meta: { label: state === 'failed' ? 'Where it got stuck' : 'Stopped', key: 'halt' } };
+        v.node = WV.halt.make(v.d);
+        card.cur = v;
+        this.paintLive(card, v, this.fresh);
+      } else {
+        card.live.hidden = true;
+      }
+      this.drawReceipt(card, record, event, state);
       const undoable = Boolean((event.applied ?? record.applied) || record.changed) && !record.undone;
       this.setNext(turn, state, { docs: [...card.docs.keys()], undoable });
+      this.publishLine(card);
+    }
+
+    /** The receipt: what changed (named by its part, with what changed in
+     *  it), what was checked, where the time went. The agent's own words are
+     *  the message above it; the question is the row below. */
+    drawReceipt(card, record, event, state) {
+      const R = card.receipt;
+      R.replaceChildren();
+      const changes = [...card.changes.values()];
+      if (changes.length) {
+        const here = [...card.docs.keys()].some((p) => this.onThisPage(p));
+        const blocks = here ? this.outlineBlocks(card) : null;
+        let n = 0;
+        const rows = changes.slice(-8).map((c) => {
+          n += 1;
+          const fig = c.from || c.to ? `<span class="w-cfig">${c.from ? `<i class="w-dot" style="--c:${wesc(c.from)}"></i>${WI.arrowR}` : ''}<i class="w-dot" style="--c:${wesc(c.to)}"></i></span>` : '';
+          const words = c.before != null || c.after != null ? `<span class="w-cwords">${(c.before == null ? [['+', c.after]] : wordDiff(c.before, c.after)).filter(([op]) => op !== '=').slice(0, 2).map(([op, t]) => (op === '-' ? `<del>${wesc(trimTo(t, 40))}</del>` : `<ins>${wesc(trimTo(t, 40))}</ins>`)).join(' ')}</span>` : '';
+          const parts = c.parts?.length ? `<span class="w-cwords">${wesc(c.parts.join(' · '))}</span>` : '';
+          return `<li class="w-change" data-op="${c.op === '+' ? 'plus' : c.op === '-' ? 'minus' : 'change'}"><span class="w-cn">${n}</span><span class="w-ct">${wesc(c.label)}${words}${parts}</span>${fig}</li>`;
+        }).join('');
+        const more = changes.length > 8 ? `<p class="w-kept">${plural(changes.length - 8, 'earlier change')} not listed</p>` : '';
+        const mini = blocks?.length ? `<div class="w-mini" aria-hidden="true">${blocks.map((b) => `<i style="--h:${Math.max(3, Math.round(b.h * 0.6))}px"${b.fresh ? ' data-pin' : ''}></i>`).join('')}</div>` : '';
+        const docs = [...card.docs.entries()].map(([path, name]) => {
+          const href = window.marble?.href?.(path);
+          return href ? `<a class="progress-chip" href="${wesc(href)}" title="Open ${wesc(path)}">${DOC_GLYPH}${wesc(name)}</a>` : `<span class="progress-chip">${DOC_GLYPH}${wesc(name)}</span>`;
+        }).join('');
+        const sec = wel(`<div class="w-sec"><div class="w-sec-h">What changed${docs ? `<span class="w-docs">${docs}</span>` : ''}${here ? '<button type="button" class="w-quiet w-review">Review on the page</button>' : ''}</div><div class="w-cm${mini ? '' : ' w-cm-flat'}">${mini}<ul class="w-changes">${rows}</ul></div>${more}</div>`);
+        // The walk through the changes starts only when asked for.
+        sec.querySelector('.w-review')?.addEventListener('click', () => dispatchEvent(new CustomEvent('marble-work:review', { detail: { conversation: this.getAttribute('conversation') } })));
+        R.append(sec);
+      } else if (card.docs.size) {
+        const docs = [...card.docs.entries()].map(([path, name]) => `<span class="progress-chip">${DOC_GLYPH}${wesc(name)}</span>`).join('');
+        R.append(wel(`<div class="w-sec"><div class="w-sec-h">Worked on<span class="w-docs">${docs}</span></div></div>`));
+      }
+      if (card.files.size) R.append(wel(`<p class="w-kept">${plural(card.files.size, 'file')} changed behind the scenes</p>`));
+
+      // Checked: the proof itself, with one line.
+      const proof = card.tests
+        ? { kind: 'tests', line: card.tests.failed ? `${card.tests.passed} of ${card.tests.total} tests passed` : `All ${card.tests.total} tests passed` }
+        : card.sources.some((s) => !s.q)
+          ? { kind: 'sources', line: `Read ${plural(card.sources.filter((s) => s.st === 'read').length, 'source')}${card.sources.some((s) => s.st === 'skip') ? `, ${card.sources.filter((s) => s.st === 'skip').length} couldn’t be opened` : ''}` }
+          : null;
+      if (proof) {
+        const src = [...card.frames].reverse().find((f) => f.v?.kind === proof.kind);
+        const sec = wel(`<div class="w-sec w-proof-sec"><div class="w-sec-h">Checked</div><div class="w-proof"><div class="w-proof-fig"></div><div class="w-proof-line">${wesc(proof.line)}</div></div></div>`);
+        if (src) sec.querySelector('.w-proof-fig').append(this.thumbOf(src.v));
+        else sec.querySelector('.w-proof-fig').remove();
+        R.append(sec);
+      }
+
+      const spent = card.spent;
+      const total = spent.look + spent.build + spent.check;
+      if (total > 4000) {
+        const names = { look: 'Reading', build: 'Making', check: 'Checking' };
+        const parts = ['look', 'build', 'check'].filter((k) => spent[k] > 0);
+        R.append(wel(`<div class="w-sec w-time-sec"><div class="w-sec-h">Where the time went</div><div class="w-bar">${parts.map((k) => `<i data-k="${k}" style="flex:${spent[k]}"></i>`).join('')}</div><div class="w-bar-key">${parts.map((k) => `<span data-k="${k}">${names[k]} ${seconds(spent[k])}</span>`).join('')}</div></div>`));
+      }
+      R.hidden = !R.children.length;
+      wflag(R, 'data-enter', this.fresh);
     }
 
     // ---------------------------------------------------------- next steps
@@ -7855,9 +8300,16 @@
       const card = this.turns.get(turn)?.progress;
       if (!card) return;
       const next = nextSteps(state, ctx);
-      card.next.hidden = !next;
-      if (!next) return;
-      card.next.dataset.quiet = String(Boolean(next.quiet));
+      // While it works the offer is two quiet words beside Details; after,
+      // it is a question with answers under the receipt.
+      card.steer.replaceChildren(...(next?.quiet ? next.acts.map((action) => {
+        const b = h('button', 'w-quiet', action.label);
+        b.type = 'button';
+        b.addEventListener('click', () => this.act(turn, action));
+        return b;
+      }) : []));
+      card.next.hidden = !next || next.quiet;
+      if (!next || next.quiet) return;
       card.q.textContent = next.q ?? '';
       card.acts.replaceChildren(...next.acts.map((action) => {
         const b = h('button', action.primary ? 'act primary' : 'act', action.label);
@@ -7884,6 +8336,7 @@
         const card = record.progress;
         if (!card || card.running) continue;
         card.el.dataset.old = '';
+        card.live.hidden = true;
         if (!card.next.hidden) this.settle(turn, '');
       }
     }
@@ -7938,8 +8391,7 @@
       this.markReveal(turn);
     }
 
-    /** One turn's steps shown in the simple view, for whoever asked to see
-     *  how it was done without switching every conversation over. */
+    /** One turn's steps shown in the simple view, without switching every conversation over. */
     markReveal(turn) {
       const open = Boolean(this.turns.get(turn)?.progress?.open);
       for (const node of this.turnNodes(turn)) {
@@ -9627,7 +10079,7 @@
 
   const buildAskCard = (event, submit) => MarbleConversation.prototype.buildAskCard(event, submit);
   window.marbleAgentUI = { stateOf, STATE_CSS, renderText, spring, project, TOKENS, watchPageTheme, keepKeys, buildAskCard, ASK_CSS, conversationTags, eventBelongsToConversation, askResponse, TAG_CSS, fillMeters, usageAvailable, usageTone, formatReset, formatAsOf, USAGE_CSS, pageTheme, applyPageTheme, fillRadios, fitPicker, fitPresets, sortProviders };
-  Object.assign(window.marbleAgentUI, { collapseToolRows, toolShortName, toolLabel });
+  Object.assign(window.marbleAgentUI, { collapseToolRows, toolShortName, toolLabel, WORK_VIEW_CSS });
 
   if (window.marble?.agent) mount();
   else addEventListener('marble:agent', mount, { once: true });
