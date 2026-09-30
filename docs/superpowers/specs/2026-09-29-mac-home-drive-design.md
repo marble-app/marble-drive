@@ -75,7 +75,17 @@ Considered and set aside:
   and their mtimes are within 1 ms (the s3 backend keeps an mtime as a float
   of seconds, which can round a millisecond either side); never by size
   alone. The lists handed to rclone are read with `--files-from-raw`: plain
-  `--files-from` skips names starting with `#` or `;` and trims spaces.
+  `--files-from` skips names starting with `#` or `;` and trims spaces. A
+  name holding a line break cannot go in a list, so a pass that would list
+  one syncs in full instead (and says so).
+- **When the list is trusted.** Only when its `seq` is at least
+  `state.json`'s. An upload that wrote `state.json` without a list (a release
+  from before the list, a rollback, the Mac and Fly on different releases)
+  leaves the list behind the hub's `drive/`; diffing against it would miss
+  that upload's changes, and a download would report a match with them
+  missing. So a list behind `state.json` is ignored: that upload or download
+  syncs in full, and the upload writes a fresh list. A list ahead of
+  `state.json` (an upload cut off between the two writes) is trusted.
 - **Upload** (home → R2), `tools/drive-sync.mjs up`. It runs about once a
   minute on the home machine, and only when something changed since the last
   upload. It diffs the drive against `manifest.json`: changed and new files
@@ -100,11 +110,28 @@ Considered and set aside:
   locally are fetched by `rclone copy --files-from-raw … --no-traverse
   --ignore-times` (rclone sets each one's mtime from the hub's, so afterwards
   it matches the list), and local files the list does not hold are moved
-  aside, never deleted. Both what it replaces and what it moves aside go to
+  aside, never deleted. Those are moved aside first, then the fetch: on a
+  case-insensitive disk, setting aside `notes.mrbl` after fetching
+  `Notes.mrbl` would take the fetched file with it. Both what it replaces and what it moves aside go to
   a local trash (`~/.cache/marble-drive/hub-trash/<drive>/<utc>/`), kept 7
   days. It then scans again and says the drive matches only when every entry
   in the list agrees and nothing extra is left. A hub with no list yet is
   downloaded by `rclone sync`, as before.
+- **Fly stays awake until its changes are up.** A sprite pauses about a
+  second after its last connection, freezing every timer, so an edit made
+  just before would wait for the next wake. While the drive is dirty (an
+  upload running, a write request no later upload has covered, or a rescan
+  that differs from the last upload) the home host holds a second
+  keep-awake task, `marble-drive-hub`. Any request other than GET or HEAD
+  (except a tab's `/tab/alive`) marks the drive dirty and asks for the hold
+  at once, before its connection closes. A change an agent makes with no
+  request is seen only by the uploader's rescan every 15 s, so one made just
+  as the sprite dozes can still wait for the next wake. The rescan compares
+  a hash of every path, size and mtime, so a rename or an older-dated
+  replacement counts too. After 30 minutes of refused or failed uploads, or
+  an unreachable lease, the hold lets go (the project's rule for holds); a
+  new change or a successful upload arms it again. On the Mac there is no
+  sprite socket and none of this runs.
 - **What is left out:**
   - the host lock (`.marble/agents/host.lock`),
   - each machine's usage ledger (`.marble/usage/`),

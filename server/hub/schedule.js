@@ -3,17 +3,35 @@
 // when the drive is idle: a lease that moved means another machine is home, so
 // this host stops (onLost) instead of uploading over it. A lease it cannot
 // reach means waiting a minute, never uploading blind. It uploads only when the
-// drive differs from the last upload (something newer, or files or documents
-// added or deleted).
+// drive differs from the last upload (any file added, removed, renamed, or of
+// another size or mtime), or a write request came in since (touch).
 //
-// dirty() says whether the hub is behind: an upload is running, or the drive
-// last seen differs from the one last uploaded. A sprite pauses ~30 s after
-// its last connection, freezing every timer, so the host keeps it awake while
-// dirty() (bin/marble-drive.js). A separate timer (watchMs) rescans for it, so
-// an edit is seen within seconds, not at the next minute; dirty() itself only
-// reads what the scans left.
+// dirty() says whether the hub is behind: an upload is running, a write
+// request came in that no upload started after it has covered, or the drive
+// last seen differs from the one last uploaded. A sprite pauses about a second
+// after its last connection, freezing every timer, so the host keeps it awake
+// while wantsAwake() (bin/marble-drive.js): dirty(), for at most giveUpMs of
+// unsuccessful attempts (a refused upload, a failing one, an unreachable
+// lease), after which it lets the sprite sleep until something changes again.
+// A write request touches at once; a change made by an agent with no request
+// is seen by a separate rescan (watchMs). dirty() itself only reads what the
+// scans left.
+
+import crypto from 'node:crypto';
 
 import { scan, up } from './sync.js';
+
+/** What a scan says about the drive, as one string: a hash of every file's
+ *  path, size and mtime when the scan lists them, else its counts. */
+export function signature(seen) {
+  if (!seen.byPath) return `${seen.newest}|${seen.files}|${seen.documents}`;
+  const hash = crypto.createHash('sha1');
+  for (const rel of Object.keys(seen.byPath).sort()) {
+    const [size, mtime] = seen.byPath[rel];
+    hash.update(`${rel}\0${size}\0${mtime}\n`);
+  }
+  return hash.digest('hex');
+}
 
 export function scheduleUploads({
   root,
@@ -23,26 +41,35 @@ export function scheduleUploads({
   scanImpl = scan,
   everyMs = 60_000,
   watchMs = 15_000,
+  giveUpMs = 30 * 60_000,
+  now = Date.now,
   onLost,
   log = console.log,
   schedule = setInterval,
 }) {
-  let last = null; // the scan taken at the last successful upload
-  let seen = null; // the newest scan, by either timer
+  let last = null; // the signature at the last successful upload
+  let seen = null; // the newest scan's signature, by either timer
   let scans = 0; // numbers each scan, so a slow one never overwrites a newer
   let seenNo = 0;
+  let touches = 0; // write requests so far
+  let covered = 0; // the touches an upload that started after them has carried
+  let failingSince = null; // the first unsuccessful attempt of this dirty stretch
   let running = false;
   let uploading = false;
   let refreshing = false;
-  const same = (a, b) => a.newest === b.newest && a.files === b.files && a.documents === b.documents;
   const look = async () => {
     const no = ++scans;
-    const result = await scanImpl(root);
+    const sig = signature(await scanImpl(root));
     if (no > seenNo) {
-      seen = result;
+      // A new change re-arms a sprite that gave up waiting.
+      if (seen !== null && sig !== seen) failingSince = null;
+      seen = sig;
       seenNo = no;
     }
-    return result;
+    return sig;
+  };
+  const failed = () => {
+    if (failingSince === null) failingSince = now();
   };
   const tick = async () => {
     if (running) return;
@@ -52,6 +79,7 @@ export function scheduleUploads({
       try {
         lease = await client.get();
       } catch (err) {
+        failed();
         log(`[hub] upload waits: the lease is unreachable (${err.message})`);
         return;
       }
@@ -60,8 +88,9 @@ export function scheduleUploads({
         onLost(lease);
         return;
       }
-      const now = await look();
-      if (last && same(now, last)) return;
+      const carries = touches;
+      const sig = await look();
+      if (last !== null && sig === last && carries <= covered) return;
       const started = Date.now();
       uploading = true;
       let result;
@@ -71,13 +100,18 @@ export function scheduleUploads({
         uploading = false;
       }
       if (result.ok) {
-        last = now;
+        last = sig;
+        covered = Math.max(covered, carries);
+        failingSince = null;
         const moved = result.changed === undefined ? '' : ` ${result.changed} changed, ${result.deleted} deleted,`;
-        log(`[hub] uploaded seq ${result.state.seq}: ${result.counts.files} files,${moved} in ${Date.now() - started}ms`);
+        const full = result.full ? ` (full sync: ${result.full})` : '';
+        log(`[hub] uploaded seq ${result.state.seq}: ${result.counts.files} files,${moved} in ${Date.now() - started}ms${full}`);
       } else {
+        failed();
         log(`[hub] upload refused: ${result.why}`);
       }
     } catch (err) {
+      failed();
       log(`[hub] upload failed: ${err.message}`);
     } finally {
       running = false;
@@ -94,7 +128,8 @@ export function scheduleUploads({
       refreshing = false;
     }
   };
-  const dirty = () => uploading || (seen !== null && (last === null || !same(seen, last)));
+  const dirty = () => uploading || touches > covered || (seen !== null && seen !== last);
+  const wantsAwake = () => dirty() && (failingSince === null || now() - failingSince < giveUpMs);
   const timer = schedule ? schedule(tick, everyMs) : null;
   timer?.unref?.();
   const watch = schedule ? schedule(refresh, watchMs) : null;
@@ -104,6 +139,12 @@ export function scheduleUploads({
     tick,
     refresh,
     dirty,
+    wantsAwake,
+    /** A write request came in: dirty until an upload started after it succeeds. */
+    touch() {
+      touches += 1;
+      failingSince = null;
+    },
     stop: () => {
       if (timer) clearInterval(timer);
       if (watch) clearInterval(watch);

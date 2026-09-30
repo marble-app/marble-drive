@@ -325,3 +325,116 @@ test('a download says it does not match when a file differs afterwards', needsRc
   assert.equal(back.ok, true);
   assert.equal(back.matches, false);
 });
+
+// ------------------------------------------------------------ fix round 1
+
+/** An upload the way it was before the file list: sync, then state.json. A
+ *  release from before this change, or a rollback, still writes the hub so. */
+async function oldUp(root, s) {
+  const env = await rcloneEnv(s);
+  const last = await readState({ settings: s, env });
+  await rclone(['sync', root, 'hub:drive', ...EXCLUDES.flatMap((p) => ['--exclude', p])], env);
+  const counts = await scan(root);
+  const state = { ...last, seq: last.seq + 1, files: counts.files, documents: counts.documents };
+  await rclone(['rcat', `hubraw:${path.join(s.HUB_LOCAL_DIR, s.HUB_DRIVE)}/state.json`], env, { input: JSON.stringify(state) });
+}
+
+test('a file list behind state.json is not trusted: down and up sync in full', needsRclone, async () => {
+  const s = await settings();
+  const root = await fixture();
+  await up({ root, settings: s, epoch: 0 });
+  const here = await tmp('here');
+  const trashRoot = await tmp('trash');
+  await down({ root: here, settings: s, trashRoot, now: at('2026-09-30T10:00:00Z') });
+  await put(root, 'notes.mrbl', '<html>the day\'s edits</html>');
+  await put(root, 'Later.mrbl', '<html>later</html>');
+  await oldUp(root, s); // state seq 2; the list still says seq 1
+
+  const c = counting();
+  const back = await down({ root: here, settings: s, trashRoot, run: c.run, now: at('2026-09-30T11:00:00Z') });
+  assert.deepEqual(c.moves(), ['sync']);
+  assert.match(back.full, /behind/);
+  assert.equal(back.matches, true);
+  assert.deepEqual(shown(await tree(here)), shown(await tree(root)));
+
+  await put(root, 'notes.mrbl', '<html>more edits</html>');
+  const c2 = counting();
+  const next = await up({ root, settings: s, epoch: 0, run: c2.run });
+  assert.deepEqual(c2.moves(), ['sync']);
+  assert.match(next.full, /behind/);
+  assert.equal(next.state.seq, 3);
+  assert.equal(JSON.parse(await hubCat(s, 'hub:manifest.json')).seq, 3);
+  const c3 = counting();
+  await up({ root, settings: s, epoch: 0, run: c3.run });
+  assert.deepEqual(c3.moves(), [], 'the fresh list is trusted again');
+});
+
+test('a file list ahead of state.json (cut off between the two) is trusted', needsRclone, async () => {
+  const s = await settings();
+  const root = await fixture();
+  await up({ root, settings: s, epoch: 0 });
+  const env = await rcloneEnv(s);
+  const list = JSON.parse(await hubCat(s, 'hub:manifest.json'));
+  await rclone(['rcat', 'hub:manifest.json'], env, { input: JSON.stringify({ ...list, seq: 2 }) });
+  const c = counting();
+  const back = await down({ root: await tmp('other'), settings: s, trashRoot: await tmp('trash'), run: c.run });
+  assert.deepEqual(c.moves(), ['copy']);
+  assert.equal(back.matches, true);
+});
+
+test('a download sets extras aside before it fetches', needsRclone, async () => {
+  const s = await settings();
+  const root = await fixture();
+  await up({ root, settings: s, epoch: 0 });
+  const here = await tmp('here');
+  await put(here, 'stray.mrbl', '<html>stray</html>');
+  let strayAtCopy = null;
+  const c = counting();
+  const run = async (args, env, opts) => {
+    if (args[0] === 'copy') strayAtCopy = await fsp.stat(path.join(here, 'stray.mrbl')).then(() => true, () => false);
+    return c.run(args, env, opts);
+  };
+  const back = await down({ root: here, settings: s, trashRoot: await tmp('trash'), run });
+  assert.equal(strayAtCopy, false);
+  assert.equal(back.matches, true);
+});
+
+const caseInsensitive = await (async () => {
+  const dir = await tmp('case');
+  await fsp.writeFile(path.join(dir, 'a'), '');
+  return fsp.stat(path.join(dir, 'A')).then(() => true, () => false);
+})();
+
+test('a case-only rename downloads onto a case-insensitive disk', { skip: !hasRclone ? 'rclone is not installed' : !caseInsensitive && 'this disk is case-sensitive' }, async () => {
+  const s = await settings();
+  const root = await fixture();
+  await up({ root, settings: s, epoch: 0 });
+  const here = await tmp('here');
+  const trashRoot = await tmp('trash');
+  await down({ root: here, settings: s, trashRoot, now: at('2026-09-30T10:00:00Z') });
+  await fsp.rename(path.join(root, 'notes.mrbl'), path.join(root, 'x.tmp'));
+  await fsp.rename(path.join(root, 'x.tmp'), path.join(root, 'Notes.mrbl'));
+  await up({ root, settings: s, epoch: 0 });
+  const back = await down({ root: here, settings: s, trashRoot, now: at('2026-09-30T11:00:00Z') });
+  assert.equal(back.matches, true);
+  assert.ok((await fsp.readdir(here)).includes('Notes.mrbl'));
+  assert.equal((await tree(here))['Notes.mrbl'], '<html>notes</html>');
+});
+
+test('a name with a line break cannot go in a list, so that pass syncs in full', needsRclone, async () => {
+  const s = await settings();
+  const root = await fixture();
+  await up({ root, settings: s, epoch: 0 });
+  await put(root, 'two\nlines.mrbl', '<html>odd</html>');
+  const c = counting();
+  const second = await up({ root, settings: s, epoch: 0, run: c.run });
+  assert.deepEqual(c.moves(), ['sync']);
+  assert.match(second.full, /line break/);
+  const c2 = counting();
+  const other = await tmp('other');
+  const back = await down({ root: other, settings: s, trashRoot: await tmp('trash'), run: c2.run });
+  assert.deepEqual(c2.moves(), ['sync']);
+  assert.match(back.full, /line break/);
+  assert.equal(back.matches, true);
+  assert.equal((await tree(other))['two\nlines.mrbl'], '<html>odd</html>');
+});

@@ -155,6 +155,19 @@ async function withList(paths, fn) {
   }
 }
 
+/** Why the hub's file list cannot be used for this pass, or null. A list
+ *  older than state.json was left behind by an upload that did not write one
+ *  (a release from before the list, a rollback, the other machine on an older
+ *  release): diffing against it would miss that upload's changes. A list
+ *  ahead of state.json (cut off between the two writes) is fine. */
+function untrusted(manifest, seq) {
+  if (!manifest) return 'the hub has no file list';
+  if (!((manifest.seq ?? -1) >= seq)) return `the file list (seq ${manifest.seq}) is behind the last upload (seq ${seq})`;
+  return null;
+}
+// A list file is one path a line: a name holding a line break cannot be said.
+const unlistable = (paths) => (paths.some((rel) => /[\r\n]/.test(rel)) ? 'a file name holds a line break' : null);
+
 // Data, then the list, then state.json: an upload cut off part way leaves the
 // old list, and the next one diffs against it and moves the rest.
 export async function up({ root, settings, epoch, force = false, run = rclone, now = () => new Date() }) {
@@ -166,16 +179,16 @@ export async function up({ root, settings, epoch, force = false, run = rclone, n
   const manifest = await readManifest({ env, run });
   const when = now();
   const trash = `hub:trash/${stampOf(when)}`;
-  let changed;
-  let deleted;
-  if (!manifest) {
+  let full = untrusted(manifest, last?.seq ?? 0);
+  const { differ, extra } = full ? { differ: [], extra: [] } : compare(byPath, manifest.files ?? {});
+  full ??= unlistable([...differ, ...extra]);
+  let changed = differ.length;
+  let deleted = extra.length;
+  if (full) {
     await run(['sync', root, 'hub:drive', '--backup-dir', trash, ...filters(), '--fast-list', '--transfers', '8'], env);
     changed = counts.files;
     deleted = 0;
   } else {
-    const { differ, extra } = compare(byPath, manifest.files ?? {});
-    changed = differ.length;
-    deleted = extra.length;
     if (differ.length) {
       await withList(differ, (list) =>
         run(['copy', root, 'hub:drive', '--files-from-raw', list, '--no-traverse', '--ignore-times', '--backup-dir', trash, '--transfers', '8'], env));
@@ -195,7 +208,7 @@ export async function up({ root, settings, epoch, force = false, run = rclone, n
     documents: counts.documents,
   };
   await run(['rcat', `${rawBase(settings)}/state.json`], env, { input: JSON.stringify(state) });
-  return { ok: true, state, counts, changed, deleted };
+  return { ok: true, state, counts, changed, deleted, ...(full && { full }) };
 }
 
 async function pruneTrash(dir, keepDays, now) {
@@ -224,31 +237,37 @@ export async function down({
   const trash = path.join(trashRoot, stampOf(when));
   await fsp.mkdir(root, { recursive: true });
   await fsp.mkdir(trashRoot, { recursive: true });
-  if (!manifest) {
-    // A hub uploaded before the list existed.
+  let full = untrusted(manifest, state.seq);
+  const want = full ? null : manifest.files ?? {};
+  const { differ: fetch, extra: remove } = full ? { differ: [], extra: [] } : compare(want, (await scan(root)).byPath);
+  full ??= unlistable([...fetch, ...remove]);
+  if (full) {
     await run(['sync', 'hub:drive', root, '--backup-dir', trash, ...filters(), '--fast-list', '--transfers', '8'], env);
-    await pruneTrash(trashRoot, keepDays, when);
-    const { byPath, ...counts } = await scan(root);
-    return { ok: true, state, counts, matches: counts.files === state.files && counts.documents === state.documents };
+  } else {
+    // Extras first: on a case-insensitive disk "notes.mrbl" set aside after
+    // "Notes.mrbl" was fetched would take the fetched file with it.
+    for (const rel of remove) await setAside(path.join(root, rel), path.join(trash, rel));
+    if (fetch.length) {
+      // rclone sets each file's mtime from the hub's, so afterwards it matches the list.
+      await withList(fetch, (list) =>
+        run(['copy', 'hub:drive', root, '--files-from-raw', list, '--no-traverse', '--ignore-times', '--backup-dir', trash, '--transfers', '8'], env));
+    }
   }
-  const want = manifest.files ?? {};
-  const { differ: fetch, extra: remove } = compare(want, (await scan(root)).byPath);
-  if (fetch.length) {
-    // rclone sets each file's mtime from the hub's, so afterwards it matches the list.
-    await withList(fetch, (list) =>
-      run(['copy', 'hub:drive', root, '--files-from-raw', list, '--no-traverse', '--ignore-times', '--backup-dir', trash, '--transfers', '8'], env));
-  }
-  for (const rel of remove) await setAside(path.join(root, rel), path.join(trash, rel));
   await pruneTrash(trashRoot, keepDays, when);
   const { byPath, ...counts } = await scan(root);
-  const after = compare(want, byPath);
+  let matches;
+  if (want) {
+    const after = compare(want, byPath);
+    matches = after.differ.length === 0 && after.extra.length === 0;
+  } else {
+    matches = counts.files === state.files && counts.documents === state.documents;
+  }
   return {
     ok: true,
     state,
     counts,
-    fetched: fetch.length,
-    removed: remove.length,
-    matches: after.differ.length === 0 && after.extra.length === 0,
+    matches,
+    ...(full ? { full } : { fetched: fetch.length, removed: remove.length }),
   };
 }
 
