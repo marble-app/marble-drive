@@ -81,11 +81,18 @@ export function looksWrong(counts, last) {
   return null;
 }
 
+// From the owner's home network, R2 now and then leaves a request unanswered
+// for 5–90 s after connecting, while the same request from Fly answers in
+// 0.3 s (measured 2026-09-30). rclone would wait out its 5-minute default, so
+// a 2-file upload took 12 minutes. A stalled request is given up after a few
+// seconds and retried instead; a retry almost always answers at once.
+export const PATIENCE = { RCLONE_TIMEOUT: '10s', RCLONE_CONTIMEOUT: '5s', RCLONE_LOW_LEVEL_RETRIES: '20' };
+
 export function rclone(args, env, { input = '' } = {}) {
   const bin = process.env.MARBLE_RCLONE || 'rclone';
   return new Promise((resolve, reject) => {
     const child = spawn(bin, args, {
-      env: { PATH: process.env.PATH, HOME: process.env.HOME, RCLONE_CONFIG: '/dev/null', ...env },
+      env: { PATH: process.env.PATH, HOME: process.env.HOME, RCLONE_CONFIG: '/dev/null', ...PATIENCE, ...env },
       stdio: ['pipe', 'pipe', 'pipe'],
     });
     let stdout = '';

@@ -5,7 +5,7 @@ import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
 
-import { EXCLUDES, compare, down, looksWrong, rclone, rcloneEnv, readState, scan, trashPrefix, up } from '../server/hub/sync.js';
+import { EXCLUDES, PATIENCE, compare, down, looksWrong, rclone, rcloneEnv, readState, scan, trashPrefix, up } from '../server/hub/sync.js';
 
 let hasRclone = true;
 try { execFileSync('rclone', ['version'], { stdio: 'ignore' }); } catch { hasRclone = false; }
@@ -457,4 +457,22 @@ test('a name with a line break cannot go in a list, so that pass syncs in full',
   assert.match(back.full, /line break/);
   assert.equal(back.matches, true);
   assert.equal((await tree(other))['two\nlines.mrbl'], '<html>odd</html>');
+});
+
+// A request R2 leaves hanging is given up and retried within seconds, not
+// waited out for rclone's default five minutes.
+test('every rclone call gives up on a stalled request quickly and retries', async () => {
+  const dir = await fsp.mkdtemp(path.join(os.tmpdir(), 'hub-fake-rclone-'));
+  const fake = path.join(dir, 'rclone');
+  await fsp.writeFile(fake, '#!/bin/sh\nenv | grep "^RCLONE_\\(TIMEOUT\\|CONTIMEOUT\\|LOW_LEVEL_RETRIES\\)=" | sort\n', { mode: 0o755 });
+  const before = process.env.MARBLE_RCLONE;
+  process.env.MARBLE_RCLONE = fake;
+  try {
+    const { stdout } = await rclone(['version'], {});
+    assert.deepEqual(stdout.trim().split('\n'), ['RCLONE_CONTIMEOUT=5s', 'RCLONE_LOW_LEVEL_RETRIES=20', 'RCLONE_TIMEOUT=10s']);
+    assert.deepEqual(PATIENCE, { RCLONE_TIMEOUT: '10s', RCLONE_CONTIMEOUT: '5s', RCLONE_LOW_LEVEL_RETRIES: '20' });
+  } finally {
+    if (before === undefined) delete process.env.MARBLE_RCLONE;
+    else process.env.MARBLE_RCLONE = before;
+  }
 });
