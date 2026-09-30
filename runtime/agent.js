@@ -131,6 +131,15 @@
       notify();
     });
 
+    // One brief for the next send, and only that one: a card hands it over
+    // just before it sends, and a send that never comes lets it lapse.
+    let pendingBrief = null;
+    const takeBrief = () => {
+      const held = pendingBrief;
+      pendingBrief = null;
+      return held && Date.now() - held.at < 15_000 ? held.text : null;
+    };
+
     const context = () => ({
       viewing: marble.app,
       target: aimed ?? marble.app,
@@ -300,7 +309,7 @@
       },
       handoff: (id, provider) => agent.start({ provider, handoffFrom: id }),
 
-      send(id, { prompt, target, viewing, selection, also, dispatch, surface } = {}) {
+      send(id, { prompt, target, viewing, selection, also, dispatch, surface, brief } = {}) {
         const here = context();
         const body = {
           prompt,
@@ -311,6 +320,11 @@
             also: also ?? here.also,
           },
         };
+        // A brief the page adds without showing it: handed over for the next
+        // send (agent.brief), or passed here. The agent reads it; the chat
+        // shows only the prompt.
+        const hidden = brief ?? takeBrief();
+        if (hidden) body.context.brief = hidden;
         if (dispatch) body.dispatch = dispatch;
         // Where it was typed, when that is an app for talking rather than a
         // document being worked on. Only `chat` is understood.
@@ -356,6 +370,11 @@
       resume,
       streamsOpen,
       context,
+      /** Add `text` to the next send's prompt without showing it in the chat. */
+      brief(text) {
+        const said = String(text ?? '').trim();
+        pendingBrief = said ? { text: said, at: Date.now() } : null;
+      },
       select(ids) {
         chosen = Array.isArray(ids) && ids.length ? [...ids] : null;
         notify();

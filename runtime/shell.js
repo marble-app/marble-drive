@@ -1134,8 +1134,10 @@
         event.stopPropagation();
         // A selection still decides first: the callout takes ⌘J when it can
         // draw a card at what you are holding.
+        // The selection, the caret's block or what the pointer is over first;
+        // with the shell open and nothing selected, ⌘J closes it.
         const selected = window.marble?.agent?.context?.().selection?.length;
-        if (selected && !dispatchEvent(new CustomEvent('marble-callout:summon', { cancelable: true }))) return;
+        if ((selected || !this.state.open) && !dispatchEvent(new CustomEvent('marble-callout:summon', { cancelable: true }))) return;
         this.setOpen(!this.state.open);
       } else if (mod && !event.shiftKey && k === 'k') {
         event.preventDefault();

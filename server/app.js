@@ -146,6 +146,12 @@ const RUNTIME = {
   // Glints: a dot on each element an agent is on, for the chats nobody here
   // is following — the callout's quiet counterpart.
   'agent-glints.js': () => path.join(REPO, 'runtime', 'agent-glints.js'),
+  // Notes: ⇧⏎ in a card keeps the ask as a pin, and Send all is one brief.
+  'agent-notes.js': () => path.join(REPO, 'runtime', 'agent-notes.js'),
+  // Offers after edits: one quiet chip when a hand edit leaves a next step.
+  'agent-nudge.js': () => path.join(REPO, 'runtime', 'agent-nudge.js'),
+  // The agent in the text: a caret, thinking and typing, for work on words.
+  'agent-text.js': () => path.join(REPO, 'runtime', 'agent-text.js'),
   // The work, on the page: dots on what an agent changed, a rail, the island
   // while the chat is closed, and the walk through a turn's changes.
   'agent-work.js': () => path.join(REPO, 'runtime', 'agent-work.js'),
@@ -367,6 +373,13 @@ export async function createDrive(config, { log = console, agentProviders = null
     if (agents) tags += `\n<script src="${runtimeUrl('agent-callout.js')}" data-marble-transient></script>`;
     // After the callout, which it asks what it already shows.
     if (agents) tags += `\n<script src="${runtimeUrl('agent-glints.js')}" data-marble-transient></script>`;
+    // After the callout, which hands them its asks, and after collab.js,
+    // whose zones step back for work drawn in the text.
+    if (agents) {
+      tags += `\n<script src="${runtimeUrl('agent-notes.js')}" data-marble-transient></script>`;
+      tags += `\n<script src="${runtimeUrl('agent-nudge.js')}" data-marble-transient></script>`;
+      tags += `\n<script src="${runtimeUrl('agent-text.js')}" data-marble-transient></script>`;
+    }
     if (agents) tags += `\n<script src="${runtimeUrl('agent-work.js')}" data-marble-transient></script>`;
     if (agents) tags += `\n<script src="${runtimeUrl('agent-run.js')}" data-marble-transient></script>`;
     // After the callout, whose handle both tools hand their ids to, and after

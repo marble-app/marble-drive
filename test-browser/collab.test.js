@@ -4,7 +4,10 @@ import test from 'node:test';
 import { GARDEN, startDrive } from './harness.js';
 
 // The fake agents these tests put on the page, followed from this tab as if
-// it had asked for the work: only followed work draws a zone.
+// it had asked for the work: only followed work draws a zone. The zone is
+// for work on a region; work inside one block of text is a caret instead
+// (agent-text.js, test-browser/agent-text.test.js), so what the agents here
+// work on is a section, not a lone paragraph.
 const FOLLOWED = ['c1', 'open'];
 
 const FORKED = `<!doctype html>
@@ -16,7 +19,7 @@ const FORKED = `<!doctype html>
     <h1 data-marble-id="hy" data-marble-alt="you" data-marble-by="person">Yours</h1>
     <h1 data-marble-id="ha" data-marble-alt="agent:c1" data-marble-by="agent">Theirs</h1>
   </marble-alt>
-  <p data-marble-id="p">A paragraph the fork does not own.</p>
+  <section data-marble-id="p"><p>A paragraph the fork does not own.</p><p>And a second, so it is a region and not a line of words.</p></section>
 </body></html>
 `;
 
@@ -46,7 +49,7 @@ const TYPING = `<!doctype html>
 </head>
 <body data-marble-id="b">
   <h1 data-marble-id="h" contenteditable="true">Head</h1>
-  <p data-marble-id="p">A paragraph the agent is on.</p>
+  <section data-marble-id="p"><p>A paragraph the agent is on.</p></section>
 </body></html>
 `;
 
@@ -330,7 +333,7 @@ test('the construction zone finds its target again after it is replaced', async 
     window.marble.apply({ type: 'remove', id: 'p' });
     window.marble.apply({
       type: 'insert',
-      html: '<div data-marble-id="tall" style="height:400px"></div><p data-marble-id="p">Back again.</p>',
+      html: '<div data-marble-id="tall" style="height:400px"></div><section data-marble-id="p"><p>Back again.</p></section>',
       parentId: 'b',
       beforeId: null,
     });

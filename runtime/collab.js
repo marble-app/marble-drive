@@ -800,6 +800,8 @@
       return !id || typeof agentApi?.attending !== 'function' || agentApi.attending(id);
     };
     addEventListener('marble:attending', () => paintZones());
+    const inText = (client) => Boolean(window.marbleText?.claims?.(client));
+    addEventListener('marble-text:claims', () => paintZones());
 
     function zonesToPaint() {
       const zones = [];
@@ -809,9 +811,12 @@
         // around the button as well would say the agent is rewriting it.
         if (acts.has(detail.client)) continue;
         // A zone is for work this tab is following: asked from here, or
-        // opened to follow. Any other agent on the page is a glint on its
+        // opened to follow. Any other agent on the page is a dot on its
         // element (agent-glints.js), not a box and a label over the page.
         if (!attended(detail.client)) continue;
+        // Work inside one block of text is drawn in the text: a caret, not a
+        // box (agent-text.js, v3).
+        if (inText(detail.client)) continue;
         const target = tapeTarget((detail.ids ?? []).map((id) => byId(id)).filter(Boolean));
         if (target) zones.push({ detail, target });
       }
@@ -836,7 +841,10 @@
       const zones = zonesToPaint();
       const hidden = zonesHidden();
       document.documentElement.classList.toggle('marble-zones-off', hidden);
-      if (!zones.length) {
+      // Work drawn in the text is still work on this page: the same toggle
+      // hides and shows its caret (agent-text.js reads marble-zones-off).
+      const inTextWork = [...presence.values()].some((d) => isAgent(d.client) && attended(d.client) && inText(d.client));
+      if (!zones.length && !inTextWork) {
         offerWork('none');
         return;
       }
@@ -1484,7 +1492,9 @@
         // before the page has been told a press happened, so played back as
         // they arrive these would be the document telling its own history
         // backwards. They wait for the ring to let go.
-        if (op.id) {
+        // Words an agent is typing are shown in the words (agent-text.js);
+        // a ring round the whole block would be the box that replaced.
+        if (op.id && !inText(detail?.client)) {
           if (act?.frame && !act.ending) act.held.push(op.id);
           else flash(op.id);
         }

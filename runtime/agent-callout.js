@@ -3,7 +3,16 @@
 // The fifth view of a conversation. The drawer and the Agents page show the
 // same object in a panel and in panes; this shows it in situ — a handle at
 // your selection, a card when you summon, and the zone's own label while the
-// agent works there. Closing a card puts it away: it never folds into a pill
+// agent works there.
+//
+// Quiet until reached (v2, Notes and Sketches/Ask at Anything): nothing about
+// asking appears until the person does something only someone who wants to
+// change the thing would do. Select words and the bubble hangs under them.
+// Hold ⌥ and what is under the pointer is outlined at the right scope, with
+// its name; click to ask about it, [ and ] to widen or narrow it first, and
+// ⌥-click something else with a card open to add it. ⌘J asks about the
+// selection, the block the caret is in, or what the pointer is over. Resting
+// the pointer offers nothing unless Offer when I rest is on in the tray. Closing a card puts it away: it never folds into a pill
 // left on the page. Chats nobody here is looking at are a glint on their
 // element instead (agent-glints.js). Everything here is transient chrome in
 // one fixed layer; no document is edited to get a callout.
@@ -124,6 +133,9 @@
     }
     @starting-style { .marble-callout-frame { opacity: 0; } }
     .marble-callout-frame.is-out { opacity: 0; }
+    /* Several things in one card: a line round each, and no dimming, which
+       would stack where the frames meet. */
+    .marble-callout-frame.is-group { box-shadow: none; }
     .marble-callout[data-offer] {
       width: min(540px, calc(100vw - ${PAD * 2}px)); background: none; border: 0; box-shadow: none; overflow: visible;
     }
@@ -139,6 +151,31 @@
     }
     @starting-style { .marble-callout-pick { opacity: 0; } }
     .marble-callout-pick[hidden] { display: none; opacity: 0; }
+    /* Its name at the corner, the way a person would point at it. */
+    .marble-callout-pick-name {
+      position: absolute; left: -1.5px; bottom: calc(100% + 4px); white-space: nowrap; pointer-events: none;
+      font: 500 11px/1 var(--ui-font, system-ui, -apple-system, "Segoe UI", sans-serif); padding: 4px 7px; border-radius: 6px;
+      color: var(--callout-mark); background: var(--callout-paper);
+      border: 1px solid color-mix(in srgb, var(--callout-mark) 28%, transparent); box-shadow: 0 2px 8px rgba(0,0,0,.08);
+    }
+    .marble-callout-pick.is-low .marble-callout-pick-name { bottom: auto; top: calc(100% + 4px); }
+    /* ⌥-pointing at something else while a card is open adds it: dashed. */
+    .marble-callout-pick.is-adding { border-style: dashed; }
+    /* Point at something, from the tray: one line at the top says what a
+       click will do now, and how to leave. */
+    .marble-callout-latch {
+      position: fixed; left: 50%; top: 12px; transform: translateX(-50%); pointer-events: none;
+      display: flex; align-items: center; gap: 8px; white-space: nowrap;
+      font: 500 12.5px/1 var(--ui-font, system-ui, -apple-system, "Segoe UI", sans-serif);
+      padding: 7px 8px 7px 12px; border-radius: 999px; color: var(--callout-ink); background: var(--callout-paper);
+      border: 1px solid color-mix(in srgb, var(--callout-ink) 12%, transparent); box-shadow: 0 8px 28px rgba(0,0,0,.14);
+    }
+    .marble-callout-latch[hidden] { display: none; }
+    .marble-callout-latch kbd {
+      font: 500 10.5px/1 ui-monospace, "SF Mono", Menlo, monospace; color: var(--faint, #8a8a8a); padding: 2px 5px; border-radius: 4px;
+      border: 1px solid color-mix(in srgb, var(--callout-ink) 14%, transparent);
+    }
+    html.marble-callout-latched, html.marble-callout-latched * { cursor: default !important; }
     /* The layer is in the top layer so a document's own stacking contexts
        cannot cover it; the UA sheet for [popover] would otherwise centre it
        and give it a border. */
@@ -180,6 +217,19 @@
       const els = elementsOf(ids);
       if (!els.length) return null;
       return marble.collab?.tapeTarget?.(els) ?? els[0];
+    };
+
+    // The box round several things, for a card about all of them: their
+    // common ancestor is often the whole list, which is not where they are.
+    const boxOf = (ids) => {
+      const els = elementsOf(ids);
+      if (els.length < 2) return null;
+      const rs = els.map((el) => el.getBoundingClientRect());
+      const left = Math.min(...rs.map((r) => r.left));
+      const top = Math.min(...rs.map((r) => r.top));
+      const right = Math.max(...rs.map((r) => r.right));
+      const bottom = Math.max(...rs.map((r) => r.bottom));
+      return { left, top, right, bottom, width: right - left, height: bottom - top };
     };
 
     const button = (text, label, onClick) => {
@@ -264,11 +314,15 @@
         Object.assign(el.style, { left: 'auto', top: 'auto', right: `${PAD}px`, bottom: `${bottom}px` });
         return;
       }
-      const r = anchor.getBoundingClientRect();
-      if (record.frame) {
-        Object.assign(record.frame.style, {
-          left: `${Math.round(r.left - 4)}px`, top: `${Math.round(r.top - 3)}px`,
-          width: `${Math.round(r.width + 8)}px`, height: `${Math.round(r.height + 6)}px`,
+      const r = boxOf(record.ids) ?? anchor.getBoundingClientRect();
+      if (record.frames?.length) {
+        const els = record.frames.length > 1 ? elementsOf(record.ids) : [anchor];
+        record.frames.forEach((frame, i) => {
+          const b = (els[i] ?? anchor).getBoundingClientRect();
+          Object.assign(frame.style, {
+            left: `${Math.round(b.left - 4)}px`, top: `${Math.round(b.top - 3)}px`,
+            width: `${Math.round(b.width + 8)}px`, height: `${Math.round(b.height + 6)}px`,
+          });
         });
       }
       const h = el.offsetHeight;
@@ -322,7 +376,7 @@
       dispatchEvent(new CustomEvent('marble-callout:removed', { detail: { id: record.id } }));
     }
 
-    function openCard({ id = null, ids, state = 'card', focus = true, owner = null, scope = null }) {
+    function openCard({ id = null, ids, state = 'card', focus = true, owner = null, scope = null, first = null, draft = null, action = null, from = null }) {
       const existing = recordOf(id);
       if (existing) {
         setState(existing, state);
@@ -355,7 +409,7 @@
       convo.setAttribute('data-folded', '');
       el.append(head, convo);
 
-      const record = { id, ids: [...ids], el, convo, head, live, status, actions, tools, state, changed: new Set(), docked: false, title: '', zone: null, said: false, owner, label: '' };
+      const record = { id, ids: [...ids], asked: [...ids], el, convo, head, live, status, actions, tools, state, changed: new Set(), docked: false, title: '', zone: null, said: false, owner, label: '' };
       records.push(record);
 
       // The two corner controls. The side icon puts the card away and opens
@@ -418,7 +472,7 @@
       // A fresh card offers before it asks: the light input, the four
       // doors and the suggestions (agent-offer.js). A lent card is the
       // brief's own composer and a card for a chat already has one.
-      if (!id && !owner && globalThis.marbleOffer) startOffer(record, scope);
+      if (!id && !owner && globalThis.marbleOffer) startOffer(record, scope, { first, draft, action, from });
       else if (state === 'card' && focus) convo.focusInput?.();
       // A card is the one place a brief made somewhere else can land. The
       // marks layer listens for this to write a sketch's reading into the
@@ -471,7 +525,11 @@
       if (!client.startsWith('agent:')) return;
       const record = recordOf(client.slice('agent:'.length));
       if (!record) return;
-      for (const op of detail.ops ?? []) if (op.id) record.changed.add(op.id);
+      // An insert changes the element it goes into.
+      for (const op of detail.ops ?? []) {
+        const id = op.id ?? op.parentId;
+        if (id) record.changed.add(id);
+      }
     });
 
     // ------------------------------------------------------------ finishing
@@ -501,9 +559,13 @@
       if (!turn) return;
       try { await agent.undo(turn.id); } catch { return; }
       record.changed.clear();
-      record.status.textContent = 'Undone';
-      record.said = true;
-      record.actions.replaceChildren(button('Done', 'Mark reviewed and put the callout away', () => done(record)));
+      // Undo is a verdict on the change, not on the wish: the card comes back
+      // on the element with Try variations first, since what was made was
+      // not it (v2). Seeing it and undoing it is reviewing it.
+      // What the card was asked about, not what the agent last read.
+      const ids = [...(record.asked ?? record.ids)];
+      await done(record);
+      if (elementsOf(ids).length) openCard({ ids, first: 'variations', from: 'undo' });
     }
 
     // Seeing it and saying done is reviewing it — the rule the Focus pane
@@ -539,6 +601,10 @@
     // the zone uses, so the thing you summon it with already looks like it.
     handle.innerHTML = '<svg viewBox="0 0 24 24" width="24" height="24" aria-hidden="true" fill="var(--callout-paper)" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"><path d="M6.5 15.1A8 8 0 1 1 10.9 18.2L4.9 21.1a.6.6 0 0 1-.72-.85Z"/></svg>';
     handle.hidden = true;
+    // A tip that says what a press does, and the key that does it too.
+    handle.addEventListener('pointerenter', (event) => { if (event.pointerType !== 'touch') showTip(handle, 'Ask about this · ⌘J'); });
+    handle.addEventListener('pointerleave', hideTip);
+    handle.addEventListener('click', hideTip);
     // A mousedown on a button would collapse the very selection it is about.
     handle.addEventListener('pointerdown', (event) => event.preventDefault());
     handle.addEventListener('click', () => summon());
@@ -605,8 +671,16 @@
         dispatchEvent(new CustomEvent('marble-marks:focus'));
         return true;
       }
+      // A card still waiting to be sent: a second ⌘J goes past it to the chat.
+      const waiting = records.find((r) => r.offer);
+      if (waiting) {
+        remove(waiting);
+        agent.select(null);
+        return false;
+      }
       let ids = agent.context().selection;
       let scope = null;
+      let from = ids.length ? 'selection' : 'point';
       // Words are a selection of their own only when they are part of an
       // element; selecting all of a heading is selecting the heading.
       const sel = getSelection();
@@ -620,7 +694,21 @@
         scope = { chain: hover.chain, index: hover.index };
         agent.select(ids);
       } else if (ids.length) {
-        scope = { words, chain: marbleScope?.chainFrom(anchorOf(ids)) ?? [], index: 0 };
+        // The words themselves ride along, so the agent's caret can wait at
+        // their end while it works (agent-text.js).
+        const range = words && sel.rangeCount ? sel.getRangeAt(0).cloneRange() : null;
+        scope = { words, range, chain: marbleScope?.chainFrom(anchorOf(ids)) ?? [], index: 0 };
+      }
+      if (!ids.length) {
+        // Nothing selected: the block the caret is in while typing, for
+        // writers, or else what the pointer is over, with no wait.
+        const found = caretUnit() ?? (pointerX != null && globalThis.marbleScope ? marbleScope.at(pointerX, pointerY) : null);
+        if (found) {
+          ids = [found.element.getAttribute('data-marble-id')];
+          scope = { words: false, chain: found.chain, index: found.index };
+          from = 'point';
+          agent.select(ids);
+        }
       }
       if (!ids.length) return false;
       handle.hidden = true;
@@ -638,8 +726,20 @@
         else agent.open();
         return true;
       }
-      openCard({ ids, scope });
+      openCard({ ids, scope, from });
       return true;
+    }
+
+    /** The unit around the caret, while the person is typing in the page. */
+    function caretUnit() {
+      const active = document.activeElement;
+      if (!globalThis.marbleScope || !active?.isContentEditable || active.closest(`[${TRANSIENT}]`)) return null;
+      const sel = getSelection();
+      if (!sel?.rangeCount || !active.contains(sel.anchorNode)) return null;
+      const chain = marbleScope.chainFrom(sel.anchorNode);
+      if (!chain.length) return null;
+      const index = marbleScope.unitIndex(chain);
+      return { chain, index, element: chain[index] };
     }
     addEventListener('marble-callout:summon', (event) => {
       if (summon()) event.preventDefault();
@@ -660,44 +760,88 @@
       } catch { return null; }
     }
 
-    function startOffer(record, scope) {
+    // The first three cards opened from a selection carry one faint line
+    // that teaches ⌥, and then never again (v2's Teaching).
+    const TAUGHT = 'marble-ask-taught';
+    const teach = () => {
+      let n = 0;
+      try { n = Number(localStorage.getItem(TAUGHT) || 0); } catch { return false; }
+      if (n >= 3) return false;
+      try { localStorage.setItem(TAUGHT, String(n + 1)); } catch { /* private mode */ }
+      return true;
+    };
+
+    function startOffer(record, scope, { first = null, draft = null, action = null, from = null } = {}) {
       record.scope = scope ?? { chain: [], index: 0 };
       const anchor = anchorOf(record.ids);
-      const kind = record.scope.words ? 'words' : marbleScope?.kindOf(anchor) ?? 'part';
+      const count = record.ids.length;
+      const kinds = [...new Set(elementsOf(record.ids).map((el) => marbleScope?.kindOf(el) ?? 'part'))];
+      const kind = record.scope.words ? 'words' : count > 1 ? (kinds.length === 1 ? kinds[0] : 'part') : marbleScope?.kindOf(anchor) ?? 'part';
       const box = document.createElement('div');
       box.className = 'marble-callout-offer';
       record.el.insertBefore(box, record.convo);
       record.el.dataset.offer = '';
-      const frame = document.createElement('div');
-      frame.className = 'marble-callout-frame';
-      frame.setAttribute(TRANSIENT, '');
-      layer.insertBefore(frame, record.el);
-      record.frame = frame;
+      record.frames = (count > 1 ? elementsOf(record.ids) : [anchor]).map(() => {
+        const frame = document.createElement('div');
+        frame.className = `marble-callout-frame${count > 1 ? ' is-group' : ''}`;
+        frame.setAttribute(TRANSIENT, '');
+        layer.insertBefore(frame, record.el);
+        return frame;
+      });
       record.offer = marbleOffer.mount({
         container: box,
         ids: record.ids,
         kind,
         what: kindWord(kind),
+        count,
+        element: anchor,
+        draft,
+        action,
+        first,
+        teach: from === 'selection' && teach(),
         tip: (anchorEl, text) => (anchorEl ? showTip(anchorEl, text) : hideTip()),
         onResize: () => placeCard(record),
         fetchOffer: () => fetchOffer(record),
-        onSend: (brief, meta) => {
+        onSend: (text, meta) => {
           if (meta.mode === 'variations') dispatchEvent(new CustomEvent('marble-variations:watch', { detail: { ids: [...record.ids] } }));
           // Pinned for the send, so the brief carries what the card is about,
           // and let go after it: the next selection is the person's again.
+          // What the action means rides beside the words, not in them.
           agent.select(record.ids);
+          agent.brief?.(meta.brief);
+          if (record.scope?.range) dispatchEvent(new CustomEvent('marble-text:words', { detail: { range: record.scope.range } }));
           endOffer(record);
           placeCard(record);
-          Promise.resolve(record.convo.sendNow(brief)).finally(() => agent.select(null));
+          Promise.resolve(record.convo.sendNow(text)).finally(() => agent.select(null));
         },
-        onDescribe: () => {
+        // ⇧⏎: the ask waits as a note on its thing (agent-notes.js), and the
+        // card goes, so the next thing can be pointed at.
+        onKeep: window.marbleNotes ? (text, meta) => {
+          window.marbleNotes.add({ ids: [...record.ids], text, brief: meta.brief, name: nameFor(record.ids) });
+          remove(record);
+          agent.select(null);
+        } : null,
+        onSketch: () => {
           const ids = [...record.ids];
           remove(record);
           dispatchEvent(new CustomEvent('marble-marks:toggle', { detail: { on: true, ids } }));
         },
       });
       placeCard(record);
+      // At once, so the first key typed lands in it; and again once the card
+      // has its place, in case the layer took focus back while it was drawn.
+      record.offer.focus();
       requestAnimationFrame(() => record.offer?.focus());
+    }
+
+    /** A name for what a set of ids is: "Row · Generative Agents", "2 items". */
+    function nameFor(ids) {
+      const els = elementsOf(ids);
+      if (els.length > 1) {
+        const kinds = [...new Set(els.map((el) => marbleScope?.kindOf(el) ?? 'part'))];
+        return `${els.length} ${kinds.length === 1 ? `${kinds[0]}s` : 'things'}`;
+      }
+      return els[0] ? (marbleScope?.nameOf(els[0]) ?? '') : '';
     }
 
     /** The offer goes, the card stays: after a send it is an ordinary
@@ -708,9 +852,9 @@
       record.offer = null;
       delete record.el.dataset.offer;
       record.el.querySelector('.marble-callout-offer')?.remove();
-      const frame = record.frame;
-      record.frame = null;
-      if (frame) vanish(frame, () => frame.remove());
+      const frames = record.frames ?? [];
+      record.frames = [];
+      for (const frame of frames) vanish(frame, () => frame.remove());
       hideTip();
     }
 
@@ -719,7 +863,8 @@
     const offering = () => records.find((r) => r.offer);
     addEventListener('pointerdown', (event) => {
       const record = offering();
-      if (!record || layer.contains(event.target) || event.composedPath().some((n) => n?.localName === 'marble-agent-drawer')) return;
+      // ⌥ held is pointing, not looking away: it adds to the card.
+      if (!record || event.altKey || latched || layer.contains(event.target) || event.composedPath().some((n) => n?.localName === 'marble-agent-drawer')) return;
       remove(record);
       agent.select(null);
     }, true);
@@ -734,8 +879,10 @@
         return;
       }
       // [ takes in the containing element, ] steps back in, while the input
-      // does not have the keys.
-      if ((event.key === '[' || event.key === ']') && !event.target?.isContentEditable) {
+      // has nothing in it to type them into.
+      const input = record.offer?.input;
+      const free = !event.target?.isContentEditable || (event.target === input && !input.textContent);
+      if ((event.key === '[' || event.key === ']') && free && !event.altKey && record.ids.length === 1) {
         const { chain } = record.scope;
         const next = record.scope.index + (event.key === '[' ? 1 : -1);
         if (!chain?.[next]) return;
@@ -743,17 +890,32 @@
         record.scope.index = next;
         const ids = [chain[next].getAttribute('data-marble-id')];
         record.ids = ids;
+        record.asked = [...ids];
         agent.select(ids);
         endOffer(record);
-        startOffer(record, { ...record.scope, words: false });
+        startOffer(record, { ...record.scope, words: false, range: null });
       }
     }, true);
 
     // ------------------------------------------------------------ hover
-    // Resting the pointer on something long enough offers the bubble for it,
-    // at the right scope (agent-scope.js). Quiet: mouse and pen only, never
-    // while typing, dragging, scrolling or marking, and if three offers in a
-    // row are passed by, the rest doubles for the session.
+    // Offer when I rest: resting the pointer on something long enough offers
+    // the bubble for it, at the right scope (agent-scope.js). Off unless the
+    // person turns it on in the tray, per browser: resting is what reading
+    // looks like, and a page that outlines whatever you rest on feels like it
+    // is watching (v2). When on, it is quiet: mouse and pen only, never while
+    // typing, dragging, scrolling or marking, and if three offers in a row
+    // are passed by, the rest doubles for the session.
+
+    const REST_KEY = 'marble-ask-rest';
+    const restOn = () => {
+      try { return localStorage.getItem(REST_KEY) === '1'; } catch { return false; }
+    };
+    const setRest = (on) => {
+      try { localStorage.setItem(REST_KEY, on ? '1' : '0'); } catch { /* private mode */ }
+      if (!on) clearHover();
+      offerTray();
+    };
+    addEventListener('storage', (event) => { if (event.key === REST_KEY) { if (!restOn()) clearHover(); offerTray(); } });
 
     const HOVER_DWELL = 400;
     const HOME = document.querySelector('script[data-home]')?.dataset.home ?? null;
@@ -777,6 +939,7 @@
       return Boolean(marksLayer?.dataset.mode) || Boolean(marksLayer?.hasAttribute('data-describing'));
     };
     function canHover() {
+      if (!restOn() || altHeld || latched) return false;
       if (!globalThis.marbleScope || PHONE.matches || pointerDown || typing() || marking()) return false;
       // The Drive's own listing is made of things to open, not to ask about.
       if (HOME && app === HOME) return false;
@@ -826,7 +989,7 @@
       }, HOVER_DWELL * slow * (passedBy >= 3 ? 2 : 1));
     }, { passive: true });
     addEventListener('scroll', () => clearHover(), true);
-    document.addEventListener('pointerleave', () => clearHover(true));
+    document.addEventListener('pointerleave', () => { clearHover(true); pointerX = null; pointerY = null; });
     // The mark is how the offer is taken: passing it by is counted, using it resets.
     handle.addEventListener('click', () => { passedBy = 0; }, true);
 
@@ -869,75 +1032,164 @@
       };
     });
 
-    // ------------------------------------------------------------ pick mode
-    // Option held: the pointer names an element instead of firing it. Holding
-    // a key is the only way a click on a page full of live controls can mean
-    // "this one" without setting it off, and Option is already Marble's pick
-    // modifier — the Drive listing's lasso is Option-drag.
+    // ------------------------------------------------------------ pointing
+    // Option held: the pointer names a thing instead of firing it. Holding a
+    // key is the only way a click on a page full of live controls can mean
+    // "this one" without setting it off, and Nobody holds ⌥ by accident. The
+    // outline is at the unit a person would name (agent-scope.js), with that
+    // name at its corner; [ and ] widen and narrow it while ⌥ is held. Click
+    // and the card opens on it. With a card already open, ⌥-click something
+    // else and it joins that card ("these 2 rows"). Let go of ⌥ without
+    // clicking and nothing happened.
+    //
+    // Point at something, in the tray, does the same for one click, for
+    // anyone who does not know the key.
 
     const pickFrame = document.createElement('div');
     pickFrame.className = 'marble-callout-pick';
     pickFrame.setAttribute(TRANSIENT, '');
     pickFrame.hidden = true;
+    const pickName = document.createElement('span');
+    pickName.className = 'marble-callout-pick-name';
+    pickFrame.append(pickName);
     layer.append(pickFrame);
-    const picked = new Set();
-    let hovered = null;
+    const latchLine = document.createElement('div');
+    latchLine.className = 'marble-callout-latch';
+    latchLine.setAttribute(TRANSIENT, '');
+    latchLine.hidden = true;
+    latchLine.innerHTML = '<span>Click anything to ask about it</span><kbd>esc</kbd>';
+    layer.append(latchLine);
 
-    const addressedAt = (x, y) => {
-      const hit = document.elementFromPoint(x, y)?.closest?.('[data-marble-id]');
-      if (!hit || hit === document.body || hit === document.documentElement || hit.closest(`[${TRANSIENT}]`)) return null;
-      return hit;
-    };
-    const outline = (el) => {
-      hovered = el;
-      if (!el) { pickFrame.hidden = true; return; }
+    let aim = null; // { chain, index }
+    let altHeld = false;
+    let latched = false;
+    let pointerX = null;
+    let pointerY = null;
+
+    const aimedAt = () => (aim ? aim.chain[aim.index] : null);
+    function aimAt(x, y) {
+      if (!globalThis.marbleScope || x == null) { outline(null); return; }
+      const found = marbleScope.at(x, y);
+      if (!found) { outline(null); return; }
+      // Still over the same thing: keep how far [ and ] moved the scope.
+      if (!(aim && aim.chain[0] === found.chain[0])) aim = { chain: found.chain, index: found.index };
+      outline(aimedAt());
+    }
+    function outline(el) {
+      if (!el) {
+        aim = el === null ? null : aim;
+        pickFrame.hidden = true;
+        return;
+      }
       const r = el.getBoundingClientRect();
+      const card = offering();
+      const adding = Boolean(card && !card.scope?.words && !card.ids.includes(el.getAttribute('data-marble-id')));
+      pickFrame.classList.toggle('is-adding', adding);
+      pickFrame.classList.toggle('is-low', r.top < 28);
+      pickName.textContent = `${adding ? '+ ' : ''}${marbleScope.nameOf(el)}`;
       Object.assign(pickFrame.style, {
-        left: `${r.left - 3}px`, top: `${r.top - 3}px`, width: `${r.width + 6}px`, height: `${r.height + 6}px`,
+        left: `${r.left - 4}px`, top: `${r.top - 3}px`, width: `${r.width + 8}px`, height: `${r.height + 6}px`,
       });
       pickFrame.hidden = false;
-    };
-    const commitPicks = () => agent.select(picked.size ? [...picked] : null);
+    }
+    const stopPointing = () => { outline(null); aim = null; };
+
+    function setLatched(on) {
+      latched = on;
+      latchLine.hidden = !on;
+      document.documentElement.classList.toggle('marble-callout-latched', on);
+      if (on) aimAt(pointerX, pointerY);
+      else if (!altHeld) stopPointing();
+    }
 
     addEventListener('pointermove', (event) => {
-      if (!event.altKey) { if (hovered) outline(null); return; }
-      outline(addressedAt(event.clientX, event.clientY));
+      if (event.pointerType === 'touch') return;
+      if (!layer.contains(event.target)) { pointerX = event.clientX; pointerY = event.clientY; }
+      if ((event.altKey && !event.buttons) || latched) { altHeld = event.altKey || altHeld; aimAt(event.clientX, event.clientY); return; }
+      if (altHeld && !event.altKey) altHeld = false;
+      if (aim) stopPointing();
+    }, true);
+    addEventListener('keydown', (event) => {
+      if (event.key === 'Alt') {
+        altHeld = true;
+        if (!marking()) aimAt(pointerX, pointerY);
+        return;
+      }
+      if (aim && (altHeld || latched) && (event.code === 'BracketLeft' || event.code === 'BracketRight')) {
+        const next = aim.index + (event.code === 'BracketLeft' ? 1 : -1);
+        event.preventDefault();
+        event.stopPropagation();
+        if (!aim.chain[next]) return;
+        aim.index = next;
+        outline(aimedAt());
+        return;
+      }
+      if (event.key === 'Escape' && latched) {
+        event.preventDefault();
+        event.stopPropagation();
+        setLatched(false);
+      }
     }, true);
     addEventListener('keyup', (event) => {
-      if (event.key === 'Alt' && hovered) outline(null);
+      if (event.key !== 'Alt') return;
+      altHeld = false;
+      if (!latched) stopPointing();
     }, true);
+    addEventListener('blur', () => { altHeld = false; if (!latched) stopPointing(); });
     addEventListener('click', (event) => {
-      if (!event.altKey || layer.contains(event.target)) return;
-      const el = addressedAt(event.clientX, event.clientY);
-      if (!el) return;
+      if (!(event.altKey || latched) || layer.contains(event.target)) return;
+      if (event.composedPath().some((n) => n?.localName === 'marble-agent-drawer')) return;
+      if (marking()) return;
+      if (!aim) aimAt(event.clientX, event.clientY);
+      const el = aimedAt();
       // The page never sees this click: it is a name, not a press.
       event.preventDefault();
       event.stopPropagation();
+      if (latched) setLatched(false);
+      if (!el) return;
       const id = el.getAttribute('data-marble-id');
-      if (picked.has(id)) picked.delete(id); else picked.add(id);
-      commitPicks();
+      const card = offering();
+      if (card && event.altKey && !card.scope?.words) {
+        if (!card.ids.includes(id)) addToCard(card, id);
+      } else {
+        const scope = { words: false, chain: aim?.chain ?? [el], index: aim?.index ?? 0 };
+        if (card) remove(card);
+        openCard({ ids: [id], scope, from: 'point' });
+      }
+      aim = null;
+      if (event.altKey) aimAt(event.clientX, event.clientY);
+      else stopPointing();
     }, true);
-    addEventListener('keydown', (event) => {
-      if (event.key !== 'Escape' || !picked.size) return;
-      // A marks tool mode owns Escape while it is on — this listener runs
-      // first, because this script is injected first, so without the check its
-      // Escape would clear the picks before the mode ever saw the key. The
-      // picks are still there when the mode ends.
-      if (document.querySelector('.marble-marks-layer')?.dataset.mode) return;
-      picked.clear();
-      commitPicks();
-    }, true);
-    // A fresh text selection is the person choosing something else; the two
-    // must never disagree about what is selected.
-    document.addEventListener('selectionchange', () => {
-      const selection = getSelection();
-      if (!picked.size || !selection || selection.isCollapsed || !selection.rangeCount) return;
-      const node = selection.anchorNode;
-      const anchor = node?.nodeType === Node.ELEMENT_NODE ? node : node?.parentElement;
-      if (!anchor || anchor.closest(`[${TRANSIENT}]`)) return;
-      picked.clear();
-      agent.select(null);
-    });
+
+    /** ⌥-click with a card open: the thing joins the card's scope. What was
+     *  typed stays; the card is redrawn about all of them. */
+    function addToCard(record, id) {
+      const said = record.offer?.input?.textContent ?? '';
+      record.ids = [...record.ids, id];
+      record.asked = [...record.ids];
+      agent.select(record.ids);
+      endOffer(record);
+      startOffer(record, { words: false, chain: [], index: 0 }, { draft: said.trim() || null });
+    }
+
+    // The tray's two rows for pointing: Point at something (⌥ for one click),
+    // and Offer when I rest, v1's dwell kept as a switch, off by default.
+    const POINT_ICON = '<svg viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round" stroke-linecap="round"><path d="M5 3.5l13 6.2-5.6 1.7-1.7 5.6z"/><path d="M12.6 12.6 19 19"/></svg>';
+    const REST_ICON = '<svg viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="8"/><path d="M12 7.5V12l3 2"/></svg>';
+    let trayHeld = false;
+    function offerTray() {
+      const specs = [
+        { id: 'point', order: 8, label: 'Point at something', key: '⌥', icon: POINT_ICON, always: true, onSelect: () => setLatched(true) },
+        { id: 'rest', order: 40, label: 'Offer when I rest', icon: REST_ICON, always: true, active: restOn(), onSelect: () => setRest(!restOn()) },
+      ];
+      if (!trayHeld) {
+        trayHeld = specs.every((spec) => !dispatchEvent(new CustomEvent('marble-tray:register', { cancelable: true, detail: spec })));
+        return;
+      }
+      for (const spec of specs) dispatchEvent(new CustomEvent('marble-tray:update', { detail: spec }));
+    }
+    addEventListener('marble-tray:ready', () => { trayHeld = false; offerTray(); });
+    offerTray();
 
     // Reviewed somewhere else — the drawer, the Agents page, a glint's Done:
     // the trail was about being unread. A card is only ever for a chat this
@@ -948,6 +1200,37 @@
       if (summary.running === false && summary.needsReview === false) {
         document.dispatchEvent(new CustomEvent('marble-callout:reviewed', { detail: { id: summary.id } }));
       }
+    });
+
+    // A card with something already in it, from somewhere else on the page:
+    // a note's pin taken back (agent-notes.js), or an offer after an edit
+    // (agent-nudge.js). `action` drafts one of the four for this thing; a
+    // suggestion drafts, it never sends.
+    addEventListener('marble-callout:ask', (event) => {
+      const ids = (event.detail?.ids ?? []).filter((id) => byId(id));
+      if (!ids.length) return;
+      event.preventDefault();
+      const open = offering();
+      if (open) remove(open);
+      const el = byId(ids[0]);
+      const chain = ids.length === 1 ? (marbleScope?.chainFrom(el) ?? [el]) : [];
+      openCard({ ids, scope: { words: false, chain, index: 0 }, draft: event.detail?.draft ?? null, action: event.detail?.action ?? null, from: event.detail?.from ?? 'note' });
+    });
+
+    // Sent from somewhere else, as one ask from a card at the things: Send
+    // all from the notes. The card is an ordinary callout on the work after.
+    addEventListener('marble-callout:send', (event) => {
+      const { ids = [], text = '', brief = '' } = event.detail ?? {};
+      if (!String(text).trim()) return;
+      event.preventDefault();
+      const open = offering();
+      if (open) remove(open);
+      const record = openCard({ ids, focus: false, owner: 'send' });
+      record.owner = null;
+      placeCard(record);
+      agent.select(ids.length ? ids : null);
+      agent.brief?.(brief);
+      Promise.resolve(record.convo.sendNow(text)).finally(() => agent.select(null));
     });
 
     // The zone's Open chat, offered to the callout first: being taken to a

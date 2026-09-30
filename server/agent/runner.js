@@ -21,6 +21,7 @@ import { pickEnv } from './env.js';
 import { MAX_HOP, MAX_SENDS, clampSeconds, pickTarget, renderMessages, validateText } from './messages.js';
 import { MESSAGING_INSTRUCTIONS } from './instructions.js';
 import { firstToGo } from './first-to-go.js';
+import { buildsSomething, marbleWay } from './marble-way.js';
 import {
   CLAUDE_PROVIDERS,
   CONTINUE,
@@ -245,6 +246,13 @@ export function createRunner({ store, tools, providers, workdir, origin, bridgeP
       );
     }
     if (context.selectionSource) lines.push('- They selected these elements:', '', context.selectionSource);
+    // What the page added to the ask without showing it, and the Marble way
+    // for any ask that builds (marble-way.js). Neither is part of the message
+    // the chat shows; both are part of what the agent is asked to do.
+    if (context.brief) lines.push('', context.brief);
+    if (kind === 'drive' && context.surface !== 'chat' && buildsSomething(turn.prompt, context.brief, ...(turn.bundle ?? []))) {
+      lines.push('', marbleWay(turn.capability));
+    }
     const others = runningTurns().filter((t) => t.id !== turn.id && t.project?.id === project.id).length;
     if (others) {
       lines.push('', `${others} other agent conversation(s) are running in this project right now. Do not stash, reset, check out or discard changes you did not make.`);
@@ -308,6 +316,7 @@ export function createRunner({ store, tools, providers, workdir, origin, bridgeP
 
     const frozen = { viewing: context.viewing ?? null, target: context.target, selection: context.selection ?? [] };
     if (context.surface === 'chat') frozen.surface = 'chat';
+    if (typeof context.brief === 'string' && context.brief.trim()) frozen.brief = context.brief.trim();
     const also = [...new Set((Array.isArray(context.also) ? context.also : []).map((item) => String(item).trim()).filter(Boolean))]
       .filter((doc) => doc !== frozen.target && doc !== frozen.viewing);
     if (also.length) frozen.also = also;

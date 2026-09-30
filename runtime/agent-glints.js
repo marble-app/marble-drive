@@ -1,17 +1,21 @@
-// Glints: every agent on this document, marked on the thing it is about.
+// Working agents: every agent at work on this document, marked on the thing
+// it is working on.
 //
 // A chat about this page that nobody here is following — running somewhere
-// else, asking a question, finished and not yet looked at — used to hang on
-// the page as a callout pill. Now it is a glint: a small dot at the corner of
-// its element, in the same state language as the drawer and the Agents page
-// (a caution ring that pulses when it needs you, a breathing accent dot while
-// it works, an ink dot when it is done and unseen).
+// else, or asking a question mid-turn — is a small dot at the corner of its
+// element, in the same state language as the drawer and the Agents page (a
+// caution ring when it needs you, a breathing accent dot while it works).
+// The dot is only there while the turn is: a finished chat leaves nothing on
+// the page. The chat button's dot and the Agents page are where finished
+// work waits, and a dot that stayed would look the same as one that meant
+// "working" (v3, Notes and Sketches/Ask at Anything). The code still calls
+// the dot a glint; nothing a person reads does.
 //
-// Hover the glint and the element is outlined, softly. Click it and a small
+// Hover the dot and the element is outlined, softly. Click it and a small
 // card opens just below the element with two buttons, never more: Follow (or
-// Answer, when it is asking you), and Hide while it is still going or Done
-// once it has finished. Hide lasts until someone sends in that chat again.
-// The launcher's tray holds one switch for all of them.
+// Answer, when it is asking you), and Hide. Hide lasts until someone sends
+// in that chat again. The launcher's tray holds one switch for all of them,
+// Hide working agents / Show working agents.
 //
 // Nothing here edits the document: the layer is transient chrome in a shadow
 // root, the way the callout is.
@@ -20,9 +24,10 @@
   const TRANSIENT = 'data-marble-transient';
   const OFF_KEY = 'marble-glints-off';
   const stillness = matchMedia('(prefers-reduced-motion: reduce)');
-  // What a glint is shown for. Idle chats are history, not presence.
-  const SHOWN = new Set(['waiting', 'working', 'unseen', 'failed']);
-  const WORD = { waiting: 'Needs you', working: 'Working', unseen: 'Done', failed: 'Failed' };
+  // What a dot is shown for: a turn that is still open. Finished, failed and
+  // idle chats are history, not presence.
+  const SHOWN = new Set(['waiting', 'working']);
+  const WORD = { waiting: 'Needs you', working: 'Working' };
 
   const DOT_ICON = '<svg viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.7"><circle cx="12" cy="12" r="3.2" fill="currentColor" stroke="none"/><circle cx="12" cy="12" r="7.5"/></svg>';
 
@@ -284,23 +289,10 @@
         agent.open(id);
       });
       acts.append(follow);
-      if (state === 'working' || state === 'waiting') {
-        const hide = h('button', '', 'Hide');
-        hide.type = 'button';
-        hide.addEventListener('click', () => { close(); setHidden(id, true); schedule(); });
-        acts.append(hide);
-      } else {
-        const done = h('button', '', 'Done');
-        done.type = 'button';
-        done.addEventListener('click', async () => {
-          close();
-          entries.delete(id);
-          schedule();
-          try { await agent.markReviewed(id); } catch { /* the glint still goes */ }
-          document.dispatchEvent(new CustomEvent('marble-callout:reviewed', { detail: { id } }));
-        });
-        acts.append(done);
-      }
+      const hide = h('button', '', 'Hide');
+      hide.type = 'button';
+      hide.addEventListener('click', () => { close(); setHidden(id, true); schedule(); });
+      acts.append(hide);
       peek.append(acts);
       peek.addEventListener('pointerdown', (event) => event.stopPropagation());
       layer.append(peek);
@@ -375,7 +367,7 @@
     agent.on('*', (summary) => { upsert(summary); });
 
     // ------------------------------------------------------------ the tray
-    // One switch for every glint, in the launcher's tray beside New chat and
+    // One switch for every working agent's dot, in the launcher's tray beside New chat and
     // All agents. It is this browser's view, not the chats' state.
 
     let inTray = false;
@@ -385,7 +377,7 @@
       const spec = {
         id: 'glints',
         order: 12,
-        label: off ? 'Show glints' : 'Hide glints',
+        label: off ? 'Show working agents' : 'Hide working agents',
         icon: DOT_ICON,
         hidden: !off && !any,
         onSelect: () => {

@@ -9044,6 +9044,7 @@
       opacity: 0; transform: translateX(5px);
       transition: opacity 120ms var(--settle), transform 120ms var(--settle); }
     .tool:hover .tool-label, .tool:focus-visible .tool-label { opacity: 1; transform: none; }
+    .tool-label kbd { margin-left: 8px; font: 500 10.5px/1 var(--mono, ui-monospace, Menlo, monospace); color: var(--faint); padding: 2px 5px; border-radius: 4px; border: 1px solid var(--line); }
     /* No hover to reveal with, so the contextual tools simply stand there —
        there are seldom more than one. The two that are always available do
        not, because on a phone they would be permanent furniture, and the
@@ -9264,11 +9265,12 @@
           // Where the shell can open, ⌘J opens it, chat and all.
           if (window.marbleShell?.takesKeys) return;
           event.preventDefault();
-          // One key for "agent", and the selection decides where the agent
-          // appears: the callout layer takes it when it can draw a card at
-          // what you are holding.
+          // One key for "agent", and what you are holding decides where the
+          // agent appears: the callout layer takes it when it can draw a card
+          // at the selection, the caret's block or what the pointer is over.
+          // With the chat open and nothing selected, ⌘J closes the chat.
           const selected = window.marble?.agent?.context?.().selection?.length;
-          if (selected && !dispatchEvent(new CustomEvent('marble-callout:summon', { cancelable: true }))) return;
+          if ((selected || !this.isOpen) && !dispatchEvent(new CustomEvent('marble-callout:summon', { cancelable: true }))) return;
           if (this.isOpen) this.close();
           else this.open();
         } else if (event.key === 'Escape' && this.isOpen && this.shadowRoot.activeElement !== null) {
@@ -9700,7 +9702,11 @@
           icon.dataset.icon = spec.icon ?? '';
           icon.innerHTML = spec.icon ?? '';
         }
-        el.querySelector('.tool-label').textContent = spec.label ?? '';
+        const label = el.querySelector('.tool-label');
+        label.textContent = spec.label ?? '';
+        // The key that does the same, shown beside the words, so the key is
+        // learned by using the row.
+        if (spec.key) label.append(h('kbd', '', spec.key));
         el.setAttribute('aria-label', spec.label ?? '');
         el.dataset.always = String(Boolean(spec.always));
         // Only a tool that says whether it is active is a toggle; the rest are

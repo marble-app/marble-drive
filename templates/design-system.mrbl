@@ -863,7 +863,7 @@ __ICON__
       </ul>
 
       <h3 data-marble-id="col-h-fam" data-marble-editable>The family</h3>
-      <p data-marble-id="col-fam-p" data-marble-editable>One accent per app, all of them muted, and the drive's folders wear one each so Research stays green deep in the tree. Violet is deliberately outside the vocabulary: it is the colour of an agent working in your document, and it must not read as a part of the app.</p>
+      <p data-marble-id="col-fam-p" data-marble-editable>One accent per app, all of them muted, and the drive's folders wear one each so Research stays green deep in the tree. Violet is deliberately outside the vocabulary: it is the colour of an agent working in your document, and it must not read as a part of the app. Leaf green (<code>--sketch</code>) is outside it too: it is Sketch it, the mode for drawing on a page, and nothing else wears it.</p>
       <ul class="fam" data-marble-id="fam">
         <li data-marble-id="f-1" style="--c: #9bb6cf"><i class="disc"></i><span class="fn" data-marble-id="f-1n">Dusty blue</span><span class="fw" data-marble-id="f-1w">Agents · Drive · documents</span></li>
         <li data-marble-id="f-2" style="--c: #2f6f5b"><i class="disc"></i><span class="fn" data-marble-id="f-2n">Research green</span><span class="fw" data-marble-id="f-2w">Research Vision · the Research realm</span></li>

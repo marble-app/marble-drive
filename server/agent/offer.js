@@ -4,8 +4,9 @@
 // row, a heading) so it is never empty. Then it asks here, once, for
 // suggestions written for *this* element: a small model reads the element's
 // own markup — from the store, never the page's copy — and answers with
-// three things a person might want done to it, plus the idea the Make it
-// automatic and Make it interactive doors should start from.
+// three things a person might want done to it, plus the idea the Automate it
+// and Make it interactive actions should start from, and what Try variations
+// should vary.
 //
 // The same plumbing as the chat namer (namer.js): the installed CLI on the
 // login, never a key, a hard timeout, and no answer is not an error. The page
@@ -41,11 +42,12 @@ export function offerPrompt({ title = '', html = '', words = '' }) {
     ...(said ? ['', 'They selected these words in it:', '"""', said, '"""'] : []),
     '',
     'Reply with ONLY a JSON object, no prose and no code fence:',
-    '{"suggestions": ["…", "…", "…"], "automatic": "…", "interactive": "…"}',
+    '{"suggestions": ["…", "…", "…"], "automatic": "…", "interactive": "…", "variations": "…"}',
     '',
     '- suggestions: three short requests, each under 60 characters, written as the person would type them, specific to this content (not generic advice like "improve it").',
     '- automatic: one short phrase for what could happen here by itself or at the press of a button, e.g. "a Fill button that looks up the authors from the title".',
     '- interactive: one short phrase for how it could be acted on rather than read, e.g. "click a status to flip it".',
+    '- variations: three ways three versions of it could differ, as one short phrase, e.g. "as a card, compact, or title first".',
   ].join('\n');
 }
 
@@ -67,11 +69,14 @@ export function readOffer(raw) {
     .filter(Boolean)
     .slice(0, 3);
   if (!suggestions.length) return null;
-  return {
+  const read = {
     suggestions,
     automatic: clean(value.automatic, 90),
     interactive: clean(value.interactive, 90),
   };
+  const variations = clean(value.variations, 70);
+  if (variations) read.variations = variations;
+  return read;
 }
 
 /** Ask the installed CLI. Returns null — never throws — without an answer. */

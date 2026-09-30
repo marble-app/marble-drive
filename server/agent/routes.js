@@ -24,6 +24,7 @@ import { findProject, listProjects, validateProjectPath } from './projects.js';
 import { summarize } from './store.js';
 import { sliceTurns } from './slice.js';
 import { normalizeUndo, undoTurn } from './undo.js';
+import { BRIEF_MAX } from './marble-way.js';
 
 const LOOPBACK = new Set(['127.0.0.1', '::1', '::ffff:127.0.0.1']);
 const LOCAL_NAMES = new Set(['localhost', '127.0.0.1', '[::1]']);
@@ -554,6 +555,12 @@ export function createAgentRoutes({ store, runner, tools, hub, providers, writeO
         // Where the words were typed, when that is not a document being worked
         // on: the Chat app sends `chat`, so the agent answers rather than edits.
         if (body.context.surface === 'chat') context.surface = 'chat';
+        // What the page adds to the ask without showing it in the chat: the
+        // callout's four actions say how to build here (agent-offer.js). It
+        // rides in the prompt the agent reads, never in the message.
+        if (typeof body.context.brief === 'string' && body.context.brief.trim()) {
+          context.brief = body.context.brief.trim().slice(0, BRIEF_MAX);
+        }
         return json(res, 202, await runner.send(id, {
           prompt: String(body.prompt ?? ''),
           context,

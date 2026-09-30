@@ -1937,3 +1937,26 @@ test('a turn frozen with its sprite is not stalled when the sprite wakes', async
   assert.equal((await store.turn(turnId)).status, 'completed');
   await runner.close();
 });
+
+test('a hidden brief rides in the prompt, never in the message the chat shows', async () => {
+  const { store, runner, spawned } = await setup();
+  const { id } = await store.createConversation({ provider: 'fake' });
+  const brief = 'Wrap it in a <marble-alt> and add 2 more versions.';
+  const { turnId } = await runner.send(id, { prompt: 'script:hello Explore 3 variations of this row', context: { target: 'notes', brief } });
+  await finished(store, turnId);
+  assert.ok(spawned[0].prompt.includes(brief), 'the agent reads the brief');
+  const user = (await store.events(id)).find((e) => e.type === 'user');
+  assert.ok(!user.text.includes(brief), 'the chat shows only what was typed');
+  await runner.close();
+});
+
+test('an ask that builds carries the Marble way; a question does not', async () => {
+  const { store, runner, spawned } = await setup();
+  const { id } = await store.createConversation({ provider: 'fake' });
+  await finished(store, (await runner.send(id, { prompt: 'script:hello make this list interactive', context: { target: 'notes' } })).turnId);
+  await finished(store, (await runner.send(id, { prompt: 'script:hello what does this paragraph mean?', context: { target: 'notes' } })).turnId);
+  assert.match(spawned[0].prompt, /Build it the Marble way/);
+  assert.match(spawned[0].prompt, /read_guide "Persistence"/, 'a documents agent is pointed at the guide');
+  assert.doesNotMatch(spawned[1].prompt, /Build it the Marble way/);
+  await runner.close();
+});
