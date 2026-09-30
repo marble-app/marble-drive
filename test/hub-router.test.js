@@ -2,10 +2,12 @@
 // The front door: marbledrive.app names go to wherever the drive's lease says
 // it lives; every other hostname is still the lease API behind its token.
 import assert from 'node:assert/strict';
-import test from 'node:test';
+import test, { beforeEach } from 'node:test';
 
-import { handle } from '../worker/src/index.js';
-import { route } from '../worker/src/router.js';
+import { handle, Lease } from '../worker/src/index.js';
+import { forgetLeases, LEASE_TTL_MS, route } from '../worker/src/router.js';
+
+beforeEach(() => forgetLeases());
 
 const DRIVES = JSON.stringify({ bryan: { mac: 'https://mac-bryan.marbledrive.app', fly: 'https://admin-p2-b3fwm.sprites.app' } });
 
@@ -173,4 +175,82 @@ test('handle sends marbledrive.app names to the router without the lease token; 
   assert.equal(api.status, 401);
   const lookalike = await handle(new Request('https://notmarbledrive.app/lease/bryan'), env);
   assert.equal(lookalike.status, 401, 'only marbledrive.app and its subdomains are routed');
+});
+
+test('a path that looks like another host never leaves the drive\'s origin', async () => {
+  const MAC = 'https://mac-bryan.marbledrive.app';
+  const FLY = 'https://admin-p2-b3fwm.sprites.app';
+  for (const p of ['//evil.example/x', '/\\evil.example/x', '//evil.example:443/x?y=1']) {
+    forgetLeases();
+    const mac = upstream();
+    await route(new Request(`https://bryan.marbledrive.app${p}`, { headers: { cookie: 'marble_drive=abc' } }), fakeEnv(), { fetchImpl: mac.fetchImpl });
+    assert.equal(mac.calls.length, 1, p);
+    assert.equal(new URL(mac.calls[0].url).origin, MAC, `${p}: mac`);
+
+    forgetLeases();
+    const fly = upstream();
+    await route(new Request(`https://bryan.marbledrive.app${p}`), fakeEnv({ lease: { home: 'fly', epoch: 2 }, SPRITES_TOKEN: 'sprites-token' }), { fetchImpl: fly.fetchImpl });
+    assert.equal(fly.calls.length, 1, p);
+    assert.equal(new URL(fly.calls[0].url).origin, FLY, `${p}: the token goes only to the sprite`);
+
+    forgetLeases();
+    const away = upstream();
+    const res = await route(new Request(`https://bryan.marbledrive.app${p}`), fakeEnv({ lease: { home: 'fly', epoch: 2 } }), { fetchImpl: away.fetchImpl });
+    assert.equal(res.status, 302);
+    const location = res.headers.get('location');
+    assert.ok(location.startsWith(`${FLY}/`), `${p}: redirected to ${location}`);
+    assert.equal(new URL(location).origin, FLY);
+    assert.equal(away.calls.length, 0);
+  }
+});
+
+test('an isolate keeps a lease for a few seconds, then reads it again', async () => {
+  const env = fakeEnv();
+  const up = upstream();
+  const at = (now) => route(new Request('https://bryan.marbledrive.app/'), env, { fetchImpl: up.fetchImpl, now });
+  await at(1_000);
+  await at(1_000 + LEASE_TTL_MS - 1);
+  assert.equal(env.asked.length, 1, 'one read within the TTL');
+  await at(1_000 + LEASE_TTL_MS);
+  assert.equal(env.asked.length, 2, 'read again after it');
+  assert.equal(up.calls.length, 3);
+});
+
+test('a lease that could not be read is not kept', async () => {
+  const env = fakeEnv({ leaseFails: true });
+  const up = upstream();
+  assert.equal((await route(new Request('https://bryan.marbledrive.app/'), env, { fetchImpl: up.fetchImpl, now: 1 })).status, 503);
+  assert.equal((await route(new Request('https://bryan.marbledrive.app/'), env, { fetchImpl: up.fetchImpl, now: 2 })).status, 503);
+  assert.equal(env.asked.length, 2);
+});
+
+test('the lease API under the public name is only a path on the drive: it never moves the lease', async () => {
+  const objects = new Map();
+  const seen = [];
+  const env = {
+    DRIVES,
+    LEASE_TOKEN: 'secret',
+    LEASE: {
+      idFromName: (name) => name,
+      get: (id) => {
+        if (!objects.has(id)) {
+          const store = new Map();
+          const lease = new Lease({ storage: { get: async (k) => store.get(k), put: async (k, v) => store.set(k, v) } });
+          objects.set(id, { fetch: (req) => { seen.push(`${req.method} ${req.url}`); return lease.fetch(req); } });
+        }
+        return objects.get(id);
+      },
+    },
+  };
+  // Home on Fly with no Sprites token: the router answers without any fetch.
+  const res = await handle(new Request('https://bryan.marbledrive.app/lease/bryan/move', {
+    method: 'POST',
+    headers: { authorization: 'Bearer secret', 'content-type': 'application/json' },
+    body: JSON.stringify({ to: 'mac', epoch: 0 }),
+  }), env);
+  assert.equal(res.status, 302);
+  assert.equal(res.headers.get('location'), 'https://admin-p2-b3fwm.sprites.app/lease/bryan/move');
+  assert.deepEqual(seen, ['GET https://lease/lease/bryan'], 'the Durable Object saw only the router\'s own read');
+  const lease = await (await handle(new Request('https://marble-lease.example.workers.dev/lease/bryan', { headers: { authorization: 'Bearer secret' } }), env)).json();
+  assert.deepEqual(lease, { home: 'fly', epoch: 0, since: null });
 });

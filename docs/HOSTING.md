@@ -428,7 +428,13 @@ names and taking over a drive on a request are not built.
   from the Durable Object and passes the request through to that home whole
   (method, body, cookies; `X-Forwarded-Host` set to the public name,
   `X-Forwarded-Proto: https`, redirects not followed). The answer comes back
-  untouched, so every `Set-Cookie` survives and SSE streams.
+  untouched, so every `Set-Cookie` survives and SSE streams. The path is always
+  joined to the home's own origin, never resolved against it, so `//other.host/`
+  cannot send the request (its cookie, or the Sprites token) anywhere else.
+  Each Worker isolate keeps a lease it read for 5 s, so not every request reads
+  the Durable Object (the Free plan's quota is shared with the lease API); for
+  those seconds after a move a request can reach the side just left, which
+  answers as a standby.
 - **When a home does not answer:** the Mac (a network failure, or Cloudflare's
   530 for a tunnel with no connector) gives a 503 saying the Mac is asleep or
   offline and that `node tools/drive-home.mjs to fly` on the Mac moves the
@@ -445,9 +451,12 @@ names and taking over a drive on a request are not built.
 - **`SPRITES_TOKEN`** (optional Worker secret, `wrangler secret put
   SPRITES_TOKEN`). admin-p2's URL is private to the Fly org. With the token set,
   a request for a drive at home on Fly carries it as `Authorization: Bearer`
-  (never over an `Authorization` the browser sent). Without it, the request is
-  redirected (302) to the same path on the sprite URL, where the owner signs in
-  to Sprites. A bearer through the Sprites proxy is untested.
+  (never over an `Authorization` the browser sent). **Setting it takes that
+  privacy away in front of admin-p2:** anyone on the internet reaches its host
+  through `bryan.marbledrive.app`, and the drive's passphrase is then its only
+  lock, as it is on the Mac. Without it, the request is redirected (302) to the
+  same path on the sprite URL, where the owner signs in to Sprites. A bearer
+  through the Sprites proxy is untested.
 - **The tunnel** (`macos/launchd/tunnel.sh`). Once, after `cloudflared tunnel
   login` (pick the `marbledrive.app` zone): `zsh macos/launchd/tunnel.sh setup
   bryan mac-bryan.marbledrive.app` creates the tunnel `marble-bryan-mac`, writes
@@ -457,11 +466,18 @@ names and taking over a drive on a request are not built.
   launchd as `com.marble.drive.tunnel.bryan` (KeepAlive; log
   `~/Library/Logs/marble-drive/tunnel-bryan.log`); also `start`, `stop`,
   `restart`, `status`, `logs`, `uninstall` (which leaves the tunnel and its DNS
-  record at Cloudflare).
+  record at Cloudflare), and `check`, which says whether `install` would be
+  allowed. `setup` takes only a single-label name under `marbledrive.app` that
+  the Worker does not route (`worker/wrangler.toml`), so a routed name's DNS is
+  never pointed at the tunnel.
 - **The tunnel is only for a gated drive.** `install`, `start` and `restart`
-  refuse unless `~/.config/marble-drive/mac-<name>.env` has a non-empty
-  `MARBLE_DRIVE_SECRET=`: the tunnel name is public, and anyone can reach it
-  without passing the Worker. Use the drive's Fly passphrase, so one sign-in
+  refuse unless `~/.config/marble-drive/mac-<name>.env` sets a non-empty
+  `MARBLE_DRIVE_SECRET` as node reads the file (the host reads it the same
+  way), and unless the host answering on the drive's port asks for it: `/`
+  without a cookie is sent to `/gate` or refused (401), or the host is a
+  standby. A passphrase added to the file counts only once the home service
+  has restarted. The tunnel name is public, and anyone can reach it without
+  passing the Worker. Use the drive's Fly passphrase, so one sign-in
   cookie is good on both machines.
 - **Signing in.** The drive's gate does it, as on a sprite. Its cookie is
   host-only, so `bryan.marbledrive.app` has its own sign-in, apart from
@@ -551,7 +567,7 @@ admin-p2 (`~/.config/marble-drive/testers.json`), the machine that made it.
 | `node tools/drive-sync.mjs up\|down\|counts\|state\|trash-prefix` | the hub by hand and what `drive-home` runs on each machine; settings from `MARBLE_HUB_ENV` |
 | `tools/mac-release.sh [--ref <commit>]` | a release of this repo on the Mac, made current, and every home service restarted onto it |
 | `macos/launchd/home.sh install\|start\|stop\|restart\|status\|logs\|uninstall [<name>]` | a drive's host on the Mac under launchd, `com.marble.drive.home.<name>` (default `bryan`) |
-| `macos/launchd/tunnel.sh setup <name> <hostname>`; `install\|start\|stop\|restart\|status\|logs\|uninstall <name>` | a drive's Cloudflare tunnel on the Mac for the front door, `com.marble.drive.tunnel.<name>`; refuses to run for a drive with no passphrase |
+| `macos/launchd/tunnel.sh setup <name> <hostname>`; `check\|install\|start\|stop\|restart\|status\|logs\|uninstall <name>` | a drive's Cloudflare tunnel on the Mac for the front door, `com.marble.drive.tunnel.<name>`; refuses to run for a drive with no passphrase, or one whose host answers without it |
 | `node tools/home-mode.mjs` | prints `serve` or `standby`; what `serve.sh` asks before every start |
 | `tools/drive-restore.sh <snapshot> <sprite> [--yes]` | puts a snapshot back on a sprite: stops the host, sets `/drive` aside, copies in, starts it, checks `/health` |
 | `tools/drive-pull.sh [<sprite>] [--into <dir>]` | a one-way mirror of a drive (default admin-p2) into this checkout's `drive/`, the last one set aside |

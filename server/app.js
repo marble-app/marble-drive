@@ -1146,10 +1146,11 @@ export async function createDrive(config, { log = console, agentProviders = null
         const blob = await store.blobs.get(route.slice('/blob/'.length));
         if (!blob) return text(res, 404, 'no such blob');
         // Content-addressed, so the bytes behind a hash never change and this is
-        // the one thing in the whole host that is safe to cache forever.
+        // the one thing in the whole host that is safe to cache forever; private,
+        // as it sits behind the gate and no shared cache may keep it.
         return send(res, 200, blob.data, {
           'Content-Type': blob.type,
-          'Cache-Control': 'public, max-age=31536000, immutable',
+          'Cache-Control': 'private, max-age=31536000, immutable',
         });
       }
 

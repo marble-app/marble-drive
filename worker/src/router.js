@@ -35,13 +35,25 @@ function drives(env) {
   }
 }
 
-async function readLease(env, name) {
+// Each public request would otherwise read the Durable Object, and the Free
+// plan's request quota is shared with the lease API. So an isolate keeps what
+// it read for a few seconds. A route that is stale for those seconds during a
+// move reaches the side just left, which answers as a standby.
+export const LEASE_TTL_MS = 5000;
+const leases = new Map(); // name -> { lease, at }
+export const forgetLeases = () => leases.clear();
+
+async function readLease(env, name, now) {
+  const kept = leases.get(name);
+  if (kept && now - kept.at >= 0 && now - kept.at < LEASE_TTL_MS) return kept.lease;
   const res = await env.LEASE.get(env.LEASE.idFromName(name)).fetch(new Request(`https://lease/lease/${name}`));
   if (!res.ok) throw new Error(`lease read: ${res.status}`);
-  return res.json();
+  const lease = await res.json();
+  leases.set(name, { lease, at: now });
+  return lease;
 }
 
-export async function route(request, env, { fetchImpl = fetch } = {}) {
+export async function route(request, env, { fetchImpl = fetch, now = Date.now() } = {}) {
   const url = new URL(request.url);
   const host = url.hostname;
   if (host === APEX || host === `www.${APEX}`) return placeholder();
@@ -52,7 +64,7 @@ export async function route(request, env, { fetchImpl = fetch } = {}) {
 
   let lease;
   try {
-    lease = await readLease(env, name);
+    lease = await readLease(env, name, now);
   } catch {
     return lost();
   }
@@ -60,7 +72,11 @@ export async function route(request, env, { fetchImpl = fetch } = {}) {
   const origin = (home === 'mac' || home === 'fly') && table[name][home];
   if (!origin) return lost();
 
-  const target = new URL(url.pathname + url.search, origin);
+  // Never resolve the path against the origin: `//evil.example/x` would then
+  // name another host, taking the cookie and the Sprites token with it.
+  const base = new URL(origin);
+  const target = new URL(base.origin + url.pathname + url.search);
+  if (target.origin !== base.origin) return nobody();
   if (home === 'fly' && !env.SPRITES_TOKEN) {
     // The sprite URL is private to the Fly org; the owner signs in there.
     return new Response(null, { status: 302, headers: { location: target.href, 'cache-control': 'no-store' } });
