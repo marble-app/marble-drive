@@ -45,10 +45,32 @@ need_cloudflared() {
 # So node reads it here too, and the two can never disagree. Never print it.
 gated() {
   command -v node >/dev/null || { print -u2 "tunnel: node is not on PATH; cannot read $settings"; return 1 }
-  env -u MARBLE_DRIVE_SECRET node --env-file-if-exists="$settings" -e 'process.exit(process.env.MARBLE_DRIVE_SECRET?.trim() ? 0 : 1)' 2>/dev/null && return 0
+  local rc
+  env -u MARBLE_DRIVE_SECRET node --env-file-if-exists="$settings" -e 'process.exit(process.env.MARBLE_DRIVE_SECRET?.trim() ? 0 : 1)' >/dev/null 2>&1
+  rc=$?
+  (( rc == 0 )) && return 0
+  if (( rc != 1 )); then
+    # Not an answer: node itself failed. Its output is not shown (it read the file).
+    if ! node --env-file-if-exists=/dev/null -e 0 >/dev/null 2>&1; then
+      print -u2 "tunnel: refusing: node ($(command -v node)) is too old to read the settings file (needs --env-file-if-exists, node 22.9 or later)."
+    else
+      print -u2 "tunnel: refusing: node could not read $settings (exit $rc)."
+    fi
+    return 1
+  fi
   print -u2 "tunnel: refusing: $settings sets no non-empty MARBLE_DRIVE_SECRET (as node reads it)."
   print -u2 "tunnel: without a passphrase the drive is ungated, and this tunnel would put it on the internet for anyone."
   print -u2 "tunnel: set the passphrase there (the same one the drive uses on Fly), restart the home service, then try again."
+  return 1
+}
+
+# The port the tunnel really forwards to: the first `service:` in its config,
+# which must be http on loopback. (The computed $port is only what setup writes.)
+config_port() {
+  local svc
+  svc=$(awk '/^[[:space:]]*-?[[:space:]]*service:/ { sub(/^[^:]*:[[:space:]]*/, ""); if ($0 !~ /^http_status:/) { print $1; exit } }' "$config" 2>/dev/null)
+  [[ $svc =~ '^http://(127\.0\.0\.1|localhost):([0-9]+)/?$' ]] && { print -r -- "${match[2]}"; return 0 }
+  print -u2 "tunnel: refusing: $config forwards to ${svc:-nothing}, not to http on 127.0.0.1:<port>, so the drive behind it cannot be checked."
   return 1
 }
 
@@ -58,6 +80,8 @@ gated() {
 # /health says standby) holds no drive to show; it reads the file when it
 # starts serving.
 served_gated() {
+  local port
+  port=$(config_port) || return 1
   local url="http://127.0.0.1:$port" answer code where
   answer=$(curl -s -o /dev/null --max-time 5 -H 'Accept: text/html' -w '%{http_code} %{redirect_url}' "$url/")
   code="${answer%% *}"; where="${answer#* }"
@@ -153,7 +177,7 @@ restart() {
 
 case "$verb" in
   setup) setup "${3:-}" ;;
-  check) ready && print -r -- "$tunnel may run: $settings sets a passphrase and the drive on :$port asks for it" ;;
+  check) ready && print -r -- "$tunnel may run: $settings sets a passphrase and the drive behind the tunnel asks for it" ;;
   install|start) ready && need_cloudflared && boot_out && render && boot_in ;;
   restart) ready && need_cloudflared && restart ;;
   stop) boot_out && print -r -- "$tunnel stopped (start: macos/launchd/tunnel.sh start $name)" ;;

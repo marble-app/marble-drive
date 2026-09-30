@@ -473,10 +473,12 @@ names and taking over a drive on a request are not built.
 - **The tunnel is only for a gated drive.** `install`, `start` and `restart`
   refuse unless `~/.config/marble-drive/mac-<name>.env` sets a non-empty
   `MARBLE_DRIVE_SECRET` as node reads the file (the host reads it the same
-  way), and unless the host answering on the drive's port asks for it: `/`
-  without a cookie is sent to `/gate` or refused (401), or the host is a
-  standby. A passphrase added to the file counts only once the home service
-  has restarted. The tunnel name is public, and anyone can reach it without
+  way; a node too old for `--env-file-if-exists` is refused by name), and
+  unless the host on the loopback port the tunnel's config forwards to asks for
+  it: `/` without a cookie is sent to `/gate` or refused (401), or the host is
+  a standby. A config that forwards anywhere but http on loopback is refused. A
+  passphrase added to the file counts only once the home service has
+  restarted. The tunnel name is public, and anyone can reach it without
   passing the Worker. Use the drive's Fly passphrase, so one sign-in
   cookie is good on both machines.
 - **Signing in.** The drive's gate does it, as on a sprite. Its cookie is

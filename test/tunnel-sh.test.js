@@ -16,6 +16,7 @@ const zsh = spawnSync('zsh', ['-c', 'true']).status === 0;
 const skip = !zsh && 'no zsh';
 const SETTINGS = '.config/marble-drive/mac-bryan.env';
 const CONFIG = '.cloudflared/marble-bryan.yml';
+const config = (service) => `tunnel: x\ncredentials-file: /x.json\ningress:\n  - hostname: mac-bryan.marbledrive.app\n    service: ${service}\n  - service: http_status:404\n`;
 
 // Async, so a server in this process can answer the script's curl.
 function run(args, files = {}, env = {}) {
@@ -76,7 +77,7 @@ test('with a passphrase set, it still needs setup first (and says so) before tou
 });
 
 test('the drive answering now must ask for its passphrase', { skip }, async () => {
-  const files = { [SETTINGS]: 'MARBLE_DRIVE_SECRET=pw-1234\n', [CONFIG]: 'tunnel: x\n' };
+  const secret = { [SETTINGS]: 'MARBLE_DRIVE_SECRET=pw-1234\n' };
   const answers = {
     open: [(req, res) => res.end('<!doctype html>the drive'), false],
     gated: [(req, res) => { res.writeHead(302, { location: `/gate?to=${encodeURIComponent(req.url)}` }); res.end(); }, true],
@@ -91,7 +92,8 @@ test('the drive answering now must ask for its passphrase', { skip }, async () =
   for (const [kind, [answer, allowed]] of Object.entries(answers)) {
     const h = await host(answer);
     try {
-      const res = await run(['check', 'bryan'], files, { MARBLE_TUNNEL_PORT: h.port });
+      const files = { ...secret, [CONFIG]: config(`http://127.0.0.1:${h.port}`) };
+      const res = await run(['check', 'bryan'], files);
       if (allowed) {
         assert.equal(res.status, 0, `${kind}: ${res.stderr}`);
         assert.match(res.stdout, /may run/);
@@ -101,7 +103,7 @@ test('the drive answering now must ask for its passphrase', { skip }, async () =
         assert.match(res.stderr, /home\.sh restart bryan/, kind);
       }
       if (!allowed) {
-        const install = await run(['install', 'bryan'], files, { MARBLE_TUNNEL_PORT: h.port });
+        const install = await run(['install', 'bryan'], files);
         assert.notEqual(install.status, 0, `${kind}: install`);
         assert.match(install.stderr, /answers without its passphrase/);
       }
@@ -112,9 +114,42 @@ test('the drive answering now must ask for its passphrase', { skip }, async () =
   const nobody = await host(() => {});
   const port = nobody.port;
   await nobody.close();
-  const res = await run(['start', 'bryan'], files, { MARBLE_TUNNEL_PORT: port });
+  const res = await run(['start', 'bryan'], { ...secret, [CONFIG]: config(`http://localhost:${port}/`) });
   assert.notEqual(res.status, 0);
   assert.match(res.stderr, /nothing answers/);
+});
+
+test('the port checked is the one the tunnel forwards to, from its config', { skip }, async () => {
+  const gated = await host((req, res) => { res.writeHead(401); res.end(); });
+  const open = await host((req, res) => res.end('the drive'));
+  try {
+    const secret = { [SETTINGS]: 'MARBLE_DRIVE_SECRET=pw-1234\n' };
+    // The computed port says gated; the config forwards to an open host.
+    const res = await run(['check', 'bryan'], { ...secret, [CONFIG]: config(`http://127.0.0.1:${open.port}`) }, { MARBLE_TUNNEL_PORT: gated.port });
+    assert.notEqual(res.status, 0);
+    assert.match(res.stderr, new RegExp(`:${open.port} answers without its passphrase`));
+    for (const service of ['http://192.168.1.2:4401', 'https://127.0.0.1:4401', 'unix:/tmp/x.sock', 'http_status:404']) {
+      const odd = await run(['check', 'bryan'], { ...secret, [CONFIG]: config(service) }, { MARBLE_TUNNEL_PORT: gated.port });
+      assert.notEqual(odd.status, 0, service);
+      assert.match(odd.stderr, /not to http on 127\.0\.0\.1/, service);
+    }
+  } finally {
+    await gated.close();
+    await open.close();
+  }
+});
+
+test('a node too old to read the settings file is named, and the tunnel refused', { skip }, async () => {
+  const bin = fs.mkdtempSync(path.join(os.tmpdir(), 'old-node-'));
+  fs.writeFileSync(path.join(bin, 'node'), '#!/bin/sh\necho "node: bad option: --env-file-if-exists=x" >&2\nexit 9\n', { mode: 0o755 });
+  try {
+    const res = await run(['check', 'bryan'], { [SETTINGS]: 'MARBLE_DRIVE_SECRET=pw-1234\n' }, { PATH: `${bin}:${process.env.PATH}` });
+    assert.notEqual(res.status, 0);
+    assert.match(res.stderr, /too old to read the settings file \(needs --env-file-if-exists/);
+    assert.doesNotMatch(res.stderr, /pw-1234/);
+  } finally {
+    fs.rmSync(bin, { recursive: true, force: true });
+  }
 });
 
 test('setup takes only a tunnel name of its own under marbledrive.app', { skip }, async () => {

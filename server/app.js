@@ -26,7 +26,7 @@ import { bytesOf, chooseProvider, enginePath, examine, guardOps, idsOfOps, merge
 import { dataUri as iconUri, svg as iconSvg } from './favicon.js';
 import { blobsIn, extract, flatten } from './flatten.js';
 import { createTouched } from './touched.js';
-import { createGate } from './gate.js';
+import { createGate, returnPath } from './gate.js';
 import { escapeHtml, html, json, readBody, readJson, send, text } from './http.js';
 import { createIntents } from './intent-routes.js';
 import { createOpLog } from './oplog.js';
@@ -1310,7 +1310,9 @@ export async function createDrive(config, { log = console, agentProviders = null
     // The only HTML this host ships, and it is one form. Anything more would be
     // the host having an interface, which is the thing the Drive exists not to
     // need — but a door has to be openable before there is a document to open.
-    const to = escapeHtml(url.searchParams.get('to') ?? '/');
+    // `to` is untrusted: kept only as a path on this host, and handed to the
+    // page's fixed script as data, never written into script.
+    const to = escapeHtml(returnPath(url.searchParams.get('to')));
     return html(res, 200, `<!doctype html><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1"><title>Marble Drive</title>
 <link rel="icon" href="${iconUri('drive')}">
@@ -1318,8 +1320,9 @@ export async function createDrive(config, { log = console, agentProviders = null
 form{display:flex;gap:.5rem}input,button{font:inherit;padding:.6rem .8rem;border:1px solid #ddd9cf;border-radius:8px}
 button{background:#738698;color:#fafaf7;border-color:#738698;cursor:pointer}p{color:#5a5a5a}</style>
 <div><p>This drive is closed.</p>
-<form onsubmit="event.preventDefault();fetch('/gate',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({secret:this.secret.value})}).then(r=>r.ok?location.replace('${to}'):this.secret.select())">
-<input name="secret" type="password" placeholder="Secret" autofocus><button>Open</button></form></div>`);
+<form data-to="${to}">
+<input name="secret" type="password" placeholder="Secret" autofocus><button>Open</button></form></div>
+<script>const f=document.querySelector('form');f.addEventListener('submit',(e)=>{e.preventDefault();fetch('/gate',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({secret:f.secret.value})}).then((r)=>r.ok?location.replace(f.dataset.to):f.secret.select())})</script>`);
   }
 
   /** A name that is not taken. Drive appends "(1)" and so does this, because

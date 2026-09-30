@@ -87,3 +87,16 @@ test('asking for Secure still means always', () => {
   const gate = createGate({ secret: 'x', secure: true });
   assert.ok(gate.cookieHeader(arriving('127.0.0.1')).includes('; Secure'));
 });
+
+test('where the gate sends you after signing in is a path on this host, or /', async () => {
+  const { returnPath } = await import('../server/gate.js');
+  const home = [
+    undefined, null, '', 'a/drive', '//evil.example', '//evil.example/x', '/\\evil.example', '/\\/evil.example',
+    'javascript:alert(1)', 'JavaScript:alert(1)', ' /a', 'https://evil.example/', '/\t/evil.example', '/\n/evil.example',
+    "');fetch('https://x/?'+this.secret.value);('", '/a\u0000b', '/a\u007fb',
+  ];
+  for (const to of home) assert.equal(returnPath(to), '/', JSON.stringify(to));
+  assert.equal(returnPath('/a/drive?x=1'), '/a/drive?x=1');
+  assert.equal(returnPath('/a/My%20Notes#top'), '/a/My%20Notes#top');
+  assert.equal(returnPath('/'), '/');
+});

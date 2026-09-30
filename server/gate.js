@@ -37,6 +37,21 @@ const equal = (a, b) => {
   );
 };
 
+/** Where the gate page may send someone after they sign in: a path on this
+ *  host, else `/`. `to` comes from the URL, so it is untrusted: no scheme
+ *  (`javascript:`), no other host (`//evil`, `/\\evil`), and no control
+ *  characters, which the URL parser would drop to make `//` out of `/\t/`. */
+export function returnPath(to) {
+  if (typeof to !== 'string' || !to.startsWith('/') || to.startsWith('//') || to.startsWith('/\\')) return '/';
+  if (/[\u0000-\u001f\u007f]/.test(to)) return '/';
+  try {
+    const url = new URL(to, 'http://x');
+    return url.origin === 'http://x' ? url.pathname + url.search + url.hash : '/';
+  } catch {
+    return '/';
+  }
+}
+
 export function createGate({ secret, cookieName = 'marble_drive', days = 30, secure = false }) {
   const open = !secret;
 

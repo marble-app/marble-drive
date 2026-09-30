@@ -14,7 +14,10 @@ import { loadConfig } from '../server/config.js';
 test('a blob is cached privately, forever', async (t) => {
   const root = await fsp.mkdtemp(path.join(os.tmpdir(), 'blob-cache-'));
   const drive = await createDrive(loadConfig({ MARBLE_DRIVE_ROOT: root }), { log: { log() {}, error() {}, info() {} }, agents: false });
-  t.after(() => drive.close());
+  t.after(async () => {
+    await drive.close();
+    await fsp.rm(root, { recursive: true, force: true });
+  });
   const port = await new Promise((r) => drive.server.listen(0, '127.0.0.1', () => r(drive.server.address().port)));
   const base = `http://127.0.0.1:${port}`;
   const put = await (await fetch(`${base}/blob`, { method: 'POST', headers: { 'Content-Type': 'text/plain' }, body: 'hello' })).json();
