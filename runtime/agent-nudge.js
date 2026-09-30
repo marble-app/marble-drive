@@ -202,8 +202,12 @@
       const el = byId(s.id);
       if (!el || !offersOn()) return;
       // Still in it, typing: the edit has not settled. Leaving it will.
+      // Where the caret is, not what has focus: a note is often one editable
+      // surface, and moving to the next line is leaving this one.
       const active = document.activeElement;
-      if (active?.isContentEditable && (active === el || active.contains(el) || el.contains(active)) && !s.left) {
+      const sel = getSelection();
+      const caretIn = sel?.rangeCount && active?.contains?.(sel.anchorNode) ? el.contains(sel.anchorNode) : (active === el || el.contains(active));
+      if (active?.isContentEditable && caretIn && !s.left) {
         settling = { ...s, timer: setTimeout(settle, SETTLE) };
         return;
       }

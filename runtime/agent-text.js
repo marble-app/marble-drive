@@ -259,10 +259,14 @@
     }
 
     // The person's own caret in the same block: the agent's steps aside.
+    // A note is often one editable surface for the whole page, so having it
+    // focused says nothing: where the person's caret is does.
     function personIn(block) {
       const active = document.activeElement;
       if (!active?.isContentEditable || active.closest(`[${TRANSIENT}]`)) return false;
-      return active === block || active.contains(block) || block.contains(active);
+      const sel = getSelection();
+      if (sel?.rangeCount && active.contains(sel.anchorNode)) return block.contains(sel.anchorNode);
+      return active === block || block.contains(active);
     }
 
     function setScope(a, range) {
