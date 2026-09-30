@@ -20,6 +20,11 @@ runbooks and troubleshooting: `docs/HOSTING.md`; why each choice was made:
 - **t-bryan**: the owner's test user, on an API key. Try changes here first.
 - **t-irene, t-sam, t-sangho, t-peiling**: friends testing Marble. They are
   real people's drives: never edit them directly.
+- **The Mac as a drive's home**: built and tried on t-bryan (`tools/drive-home.mjs`,
+  `tools/mac-release.sh`, `macos/launchd/home.sh`; encrypted R2 hub, Worker lease,
+  one home at a time; `docs/HOSTING.md`). The owner's real drive has **not**
+  moved: admin-p2 still serves it. Move it only when the owner says to, and
+  never run `drive-home` from a conversation hosted on either side.
 
 `tools/sprite-deploy.sh --all --list` shows who `--all` reaches.
 
@@ -51,6 +56,8 @@ It runs the same tools, so a change to them reaches it.
    - Then `tools/sprite-deploy.sh admin-p2`. From admin-p2 itself this stages
      the release and switches only when no agent is working, so this
      conversation is not cut off (`~/app/switch.log`).
+   - Once the owner's drive is at home on the Mac (not before),
+     `tools/mac-release.sh` updates the Mac's copy to match.
 6. Report what shipped, where, and anything that failed.
 
 `tools/sprite-deploy.sh <sprite> --rollback` undoes a deploy on one sprite.

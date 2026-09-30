@@ -1,11 +1,11 @@
 # Taking Marble Drive to the cloud: the decision record
 
-What was decided between 2026-09-22 and 2026-09-24, in the order it was
+What was decided between 2026-09-22 and 2026-09-30, in the order it was
 decided: the problem, the options weighed, what was chosen and why, and what it
 cost or taught. The design and the build were done in one long session between
 the owner and Claude (Claude Code). How things work now is in
 [`HOSTING.md`](HOSTING.md); the specs behind each stage are in
-`docs/superpowers/specs/` (2026-09-22 to 2026-09-24).
+`docs/superpowers/specs/` (2026-09-22 to 2026-09-29).
 
 ## How the work was done
 
@@ -490,6 +490,82 @@ sprite falls back to running the tests itself, one at a time.
 stopped at 10 s with nothing left running on the Mac. A Mac that looked every
 few seconds would itself keep the sprite awake and billed; it looks often only
 while the drive is busy of itself.
+
+### 28. A drive at home on the Mac; Fly stands by through R2
+
+Amends 24. Decision 24 made the Mac a mirror, pulled one way on request. This
+lets the owner's drive live on the Mac, and keeps 24's reason: two hosts writing
+one drive fork it.
+
+**Problem.** The owner wants to work at the Mac's speed (36 GB and 12 cores
+against a sprite's 8 GB with no swap, and a sprite that stalls), without paying
+for a sprite that is awake while he does. If the Mac sleeps, dies or drops off
+the network, the drive should still be reachable, from Fly, with the latest
+state.
+
+**Chose.**
+
+| Decision | Chose | Why |
+|---|---|---|
+| Where the drive lives | the Mac is home; the sprite stands by | speed, and the stalls |
+| How the two stay in step | R2 is the hub: the home uploads its changes; a machine taking over downloads first | Fly stays asleep while the Mac is home, and still starts from the latest state |
+| Who may write | one home at a time, by a lease in a Cloudflare Worker with a Durable Object per drive | strongly consistent (KV can lag by a minute); every move names the epoch it moves from, so two moves cannot both win |
+| Encryption | on the machine before upload (rclone `crypt`, names and contents) | the drive holds drafts and agent transcripts; Cloudflare holds only ciphertext. Without the passphrase and salt R2 is unreadable, so the owner keeps them in his password manager |
+| What code runs the drive on the Mac | a release, like a sprite's (`tools/mac-release.sh`), not the dev checkout | experiments in the repo never touch real documents, and both homes run the same code |
+| Undo | the trash: every upload and download sets aside what it replaces, 7 days | nothing is ever deleted outright |
+
+**Set aside.**
+
+- Two-way live sync: two writers fork a drive, and a crash is when they
+  disagree (24).
+- The Mac pushing straight to the sprite every 15 minutes: it wakes Fly on every
+  push, and a crash leaves Fly up to 15 minutes behind.
+- Cloudflare instead of Fly for the computer: its containers lose their disk
+  when they sleep. Cloudflare holds the lease and the copy; a VM is still the
+  computer.
+- restic for the copy: dated snapshots, but restoring a delta onto a live copy
+  and pruning minute-by-minute snapshots cost more than they give. The trash
+  covers "undo that".
+- A second domain for drives (like `github.io`): safer, but not bought.
+- Fly taking over by itself when the Mac goes quiet, and the front door at
+  `marbledrive.app`: designed (the spec's phases 2 and 3), not built. A move is
+  a command, `tools/drive-home.mjs`, for now.
+
+**What the trial changed.**
+
+- **An encrypted file list.** The first design let `rclone sync` compare the two
+  sides. Over crypt on S3 it asks R2 once per file: a 55-file upload took 402 s
+  and a sync with nothing to send 95 s, and the real drive has about 6,500 files.
+  So each upload writes `manifest.json` (size and mtime per file), both sides
+  diff against it, and requests scale with what changed. A move on a 56-file
+  drive: 211 s and 121 s before, 15–24 s (Fly to Mac) and 59–113 s (Mac to Fly)
+  after. The list is trusted only when its `seq` matches `state.json`'s; else the
+  pass is a full sync.
+- **A hold file, not a stopped service.** The leaving side was first to be
+  stopped, but the Sprites proxy starts a stopped service on the next request,
+  and it would come up serving as home. `hold-<drive>` beside the hub settings
+  makes the host answer standby whatever the lease says, across restarts and
+  reboots. `drive-home` holds the leaving side before its last upload and
+  releases the arriving one only once its download matches.
+- **Short rclone timeouts.** From the owner's home network R2 sometimes leaves a
+  request unanswered 5–90 s after connecting, while `curl` connects in 0.05 s
+  and from Fly every request answers in 0.3 s. Every call now times out at 10 s
+  (5 s to connect) and retries up to 20 times. This is why the Mac side is
+  slower.
+- **A second keep-awake.** A sprite pauses about a second after its last
+  connection, freezing an upload. `marble-drive-hub` holds it while changes are
+  not yet in the hub, taken on each write request and a 15 s rescan, and let go
+  after 30 minutes of failed tries.
+- **A host that cannot reach the lease** goes by the last lease it saw, unless
+  the lease refused it (401, 403, 404: a wrong token or URL), or it is held.
+
+**Cost or lesson.** A move that fails must say where the lease is and what it
+started, and must be undoable without an upload (`drive-home lease-to`). Do not
+run `drive-home` from a conversation hosted on either side: it stops that host.
+A rollback of admin-p2 past the hub, while the Mac is home, would bring it up
+serving. As of 2026-09-30 `t-bryan` is at home on Fly and the Mac has a service
+for it; the owner's own drive has not moved, and the backup agent (24) still
+runs until it does.
 
 ## Traps worth remembering
 

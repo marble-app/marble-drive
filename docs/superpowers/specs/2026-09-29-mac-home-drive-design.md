@@ -180,7 +180,15 @@ lease(bryan) = { home: "mac" | "fly", epoch, macSeenAt, macAway: bool, seq }
   upgrades (`app-updates.js`), upload sweep, ledger or backups;
 - never opens `/drive` for writing.
 
-A host also stays on standby when it cannot confirm it holds the lease.
+A host stays on standby when it is **held**: a `hold-<drive>` file beside its
+hub settings forces standby whatever the lease says (`drive-home` holds the side
+a drive leaves, because a stopped Sprites service is started again by the proxy,
+as home). Otherwise it goes by the lease. A host that cannot reach the lease
+(no network) goes by the **last lease it saw**, kept beside its settings: the
+Mac on a plane goes on serving if that lease named it, and a host that never saw
+one stands by. A lease that **refuses** the host (401, 403, 404: a wrong token
+or URL) is not "unreachable": the remembered lease is not used, and the host
+stands by.
 
 ### 4. The Mac as a host
 

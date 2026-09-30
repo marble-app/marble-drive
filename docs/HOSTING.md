@@ -1,6 +1,6 @@
 # Hosting Marble Drive
 
-How Marble Drive runs in the cloud as of 2026-09-28: what runs where, what is
+How Marble Drive runs in the cloud as of 2026-09-30: what runs where, what is
 on each machine, and how to ship, add people, recover and troubleshoot. The
 reasoning behind each of these choices is in
 [`HOSTING-DECISIONS.md`](HOSTING-DECISIONS.md); running a single drive on your
@@ -23,12 +23,22 @@ runs on a laptop. One person, one sprite, one drive.
 | `t-irene`, `t-sam` | friends | their drives; agents on the owner's Claude login | `marble-tester` | `--all` |
 | `t-sangho`, `t-peiling` | friends | their drives; agents on their own API keys | `marble-tester` | `--all` |
 
-The owner's MacBook holds no drive of its own. Its `drive/` is a **mirror** of
-admin-p2, pulled one way on request (`tools/drive-pull.sh`), so big changes to
-Marble run their tests and harnesses on the Mac, against real documents, and
-not on a sprite's compute. Anything written to the mirror is lost at the next
-pull; real edits happen on admin-p2. Until the first pull it was a frozen backup
-from 2026-09-24 01:15 UTC (kept at `drive.kept-<utc>/` when it is replaced).
+A drive can also have its **home on the owner's MacBook**, with its sprite
+standing by: one home at a time, the two kept in step through an encrypted copy
+in Cloudflare R2 and a lease held by a Cloudflare Worker (see "A drive at home
+on the Mac"). That is built and tried on `t-bryan`, which is at home on Fly
+(epoch 6) with a service installed on the Mac. **The owner's real drive has not
+moved.** admin-p2 still serves it exactly as before, and the backup agent still
+copies it to `~/Marble Drive`. When the owner says so, the drive (`bryan`) moves
+to the Mac and admin-p2 becomes its standby, and still the workshop.
+
+Until then the MacBook holds no real drive. Its dev checkout's `drive/` is a
+**mirror** of admin-p2, pulled one way on request (`tools/drive-pull.sh`), so big
+changes to Marble run their tests and harnesses on the Mac, against real
+documents, and not on a sprite's compute. Anything written to the mirror is lost
+at the next pull; real edits happen on admin-p2. Until the first pull it was a
+frozen backup from 2026-09-24 01:15 UTC (kept at `drive.kept-<utc>/` when it is
+replaced).
 
 ## Three layers, three ways of saving
 
@@ -212,6 +222,196 @@ only, never over local changes), installs them and re-registers the projects.
 
 The same steps work from the MacBook, where this repo also lives.
 
+## A drive at home on the Mac
+
+Built 2026-09-29 and 2026-09-30; tried on `t-bryan` (a 56-file drive), not yet
+on the owner's drive. The design is in
+[`superpowers/specs/2026-09-29-mac-home-drive-design.md`](superpowers/specs/2026-09-29-mac-home-drive-design.md);
+why, in decision 28. Only a drive whose `sprite.env` sets `MARBLE_HUB_ENV` takes
+part. Every other drive is one host on one sprite, as before.
+
+**One home at a time.** The drive lives on one machine, its **home**, and the
+other stands by. Two hosts writing one drive fork it, so nothing is synced both
+ways. The home uploads its changes to R2; a machine taking over downloads them
+first.
+
+| Part | What it is |
+|---|---|
+| **The hub** | Cloudflare R2 bucket `marble-drives` (Western North America), prefix `<drive>/`. Files are encrypted on the machine before upload (rclone `crypt`: names and contents), so R2 holds only ciphertext. Code: `server/hub/sync.js`; by hand: `tools/drive-sync.mjs` |
+| **The lease** | the Worker `marble-lease` (`worker/`) at `https://marble-lease.bryandhmin.workers.dev`, on the Cloudflare account `bryandhmin@gmail.com`. One Durable Object per drive holds `{home: mac or fly, epoch, since}`. Every move names the epoch it moves from and raises it, so two moves at once cannot both win. One secret, `LEASE_TOKEN` (`wrangler secret put`); every call carries it as a bearer token |
+| **Home and standby** | a host serves the drive only while the lease names its machine. Otherwise it runs `marble-drive standby` (`server/standby.js`): `/health` (`standby: true`) and a page saying where the drive is, and nothing that writes: no agents, no daily run, no uploads |
+| **The Mac's host** | a release under `~/Library/Application Support/Marble Drive/app` (`tools/mac-release.sh`), run by launchd as `com.marble.drive.home.<name>` (`macos/launchd/home.sh`) through the same `tools/sprite/serve.sh` a sprite uses. `bryan` is `~/Marble Drive` on port **4401**; any other name is `~/Marble Drive (<name>)` on **4402**. The dev checkout keeps port 4400 and its throwaway `drive/` |
+
+### What the hub holds
+
+- `<drive>/state.json`: the last upload (who, epoch, `seq`, counts, time). Plain;
+  no content.
+- `<drive>/data/`: encrypted. `drive/` (the drive), `manifest.json` (the file
+  list) and `trash/<utc>/` (anything an upload overwrote or deleted).
+- **Left out:** the host lock (`.marble/agents/host.lock`), each machine's usage
+  ledger (`.marble/usage/`) and Console's backup reports
+  (`.marble/console/backups/`).
+- **The file list.** Over an encrypted store rclone asks R2 once per file to
+  compare times, and R2 answers slowly: a 55-file upload took 402 s. So every
+  upload writes `manifest.json`, `[size, mtimeMs]` for each file, and both sides
+  compare their drive to it and move only what differs. Two files are the same
+  when their sizes match and their times are within 1 ms. The list is trusted
+  only when its `seq` equals `state.json`'s; if not (an older release wrote the
+  hub, or an upload was cut off between the two writes) the pass is a full sync
+  and writes a fresh list.
+- **Trash.** Every upload puts what it replaces or removes in `trash/<utc>/`;
+  every download puts what it replaces or sets aside in
+  `~/.cache/marble-drive/hub-trash/<drive>/<utc>/` on that machine, 7 days.
+  Nothing is deleted outright. In R2 a lifecycle rule **"trash 7 days"** on each
+  drive's trash prefix removes the old ones; `node tools/drive-sync.mjs
+  trash-prefix` prints the prefix (`<drive>/data/<encoded trash>/`). The rule is
+  set by hand in the Cloudflare dashboard, once per drive.
+- **Upload** (`drive-sync up`): the home host checks the lease every minute and
+  uploads only when the drive differs from its last upload. It refuses, and
+  says so in the log, when the drive has no documents or under half the files
+  of the last upload ("looks empty": nothing is sent). A host that finds the
+  lease has moved stops (exit 75; `serve.sh` starts it again on standby). One
+  that cannot reach the lease waits a minute; it never uploads blind.
+  A change on the Mac reaches R2 in about 1.5–2 minutes.
+- **Download** (`drive-sync down`): fetches what differs, sets aside what the
+  hub does not hold, and says it matches only when a fresh scan agrees with the
+  list entry by entry.
+- **A sprite stays awake until its changes are up.** A sprite pauses about a
+  second after its last connection, which would freeze an upload. While changes
+  are not yet in the hub, the home host holds a second keep-awake task,
+  `marble-drive-hub`, taken on each write request (anything but GET or HEAD, when
+  it arrives and again when its response closes) and on a rescan every 15 s. It
+  lets go after 30 minutes of failed or refused tries, or of an unreachable
+  lease, and a new change takes it again. The Mac has no such task.
+
+### Which way a host starts
+
+`tools/sprite/serve.sh` asks `tools/home-mode.mjs` before every start (only
+where `MARBLE_HUB_ENV` is set), and it answers `serve` or `standby`, logging
+`[home] <mode>: <why>` to `~/app/crash/crashes.log` (the Mac:
+`~/Library/Logs/marble-drive/home-<name>-crash/`):
+
+1. A **hold file** beside the hub settings, `hold-<drive>`, forces standby,
+   whatever the lease says. `drive-home` puts one on the side a drive leaves.
+   The Sprites proxy starts a stopped service on the next request, and a
+   reboot starts the Mac's, so stopping a host is no hold; the file is.
+2. Else the lease: it names this machine, `serve`; it names the other, `standby`.
+3. A lease that cannot be reached (no network) is answered by the last lease
+   this machine saw, kept beside the settings as `lease-<drive>.json`: the Mac
+   on a plane goes on serving if that lease named it. A machine that never saw
+   one stands by.
+4. A lease that **refuses** this machine (401, 403, 404: a wrong `LEASE_URL` or
+   `LEASE_TOKEN`) is not unreachable: the remembered lease is not used, and the
+   machine stands by.
+5. Settings that cannot be read: standby.
+
+### Settings
+
+| Where | File |
+|---|---|
+| Mac | `~/.config/marble-drive/hub-<name>.env` (mode 600) |
+| sprite | `~/.config/marble-drive/hub.env` (mode 600), named by `MARBLE_HUB_ENV=/home/sprite/.config/marble-drive/hub.env` in `sprite.env` |
+
+Both hold the same keys, `HUB_MACHINE` being `mac` in one and `fly` in the
+other: `HUB_DRIVE`, `HUB_MACHINE`, `R2_ACCOUNT_ID`, `R2_ACCESS_KEY_ID`,
+`R2_SECRET_ACCESS_KEY`, `R2_BUCKET`, `HUB_PASSPHRASE`, `HUB_SALT`, `LEASE_URL`,
+`LEASE_TOKEN`. The host reads the file itself, so the R2 keys never reach an
+agent's processes. **Without `HUB_PASSPHRASE` and `HUB_SALT` the R2 copy can
+never be read.** The owner keeps both in his password manager. A file named but unreadable stops the host on standby; it is
+never read as "no hub".
+
+`sprite.env` on a sprite in the hub also has `MARBLE_PROJECT_PREFIXES=/Users/bryanmin/Development/3rd-year-projects=/home/sprite/src`.
+Agent projects name paths on the machine that made them; each host maps the
+other's prefix to its own, so the same conversation opens on either. (The Mac's
+launchd job carries the reverse.) Like any `sprite.env` value it may not contain
+a comma.
+
+The **R2 access key** lives in these two files and nowhere in this repository.
+
+### rclone
+
+Pinned for sprites at 1.75.1 (`tools/sprite/rclone-version`, and
+`tools/sprite/rclone-sha256` for each architecture) and installed by the release
+script into `~/.local/bin` only on a sprite whose `sprite.env` sets
+`MARBLE_HUB_ENV`, so no friend's deploy fetches it. A failed install warns and
+never fails a deploy. The Mac uses Homebrew's.
+
+From the owner's home network, R2 sometimes leaves a request unanswered 5–90 s
+after connecting (measured 2026-09-30: `curl` connects in 0.05 s, and from Fly
+every request answers in 0.3 s). So every rclone call times out after 10 s (5 s
+to connect) and retries up to 20 times (`PATIENCE` in `server/hub/sync.js`). The
+Mac's side is slower for this reason, and only this.
+
+### How a move goes
+
+`node tools/drive-home.mjs to <mac|fly> [--drive bryan] [--sprite admin-p2] [--now]`,
+run **on the Mac**:
+
+1. Read the lease. If it already names the target and the target serves, done.
+2. Wait until no agent is working on the side being left (up to 10 minutes;
+   `--now` skips the wait and stops the running turns, whose conversations stay
+   readable).
+3. **Hold** the leaving side (its hold file, then a restart): it comes back on
+   standby.
+4. Its final upload.
+5. Move the lease (epoch + 1).
+6. The arriving side downloads and checks that it matches the hub.
+7. Release the arriving side (remove its hold file, restart) and wait for
+   `/health` to say it is serving. The leaving side stays held, and must say
+   standby on `/health`.
+
+Nothing is deleted at any step. A step that fails puts things back: the lease is
+handed back if it moved, the side the lease names is released, and the message
+says where the lease is and what was started. If the lease names a copy that was
+not verified, that side is held, not released (it would upload over the hub),
+and the message says so.
+
+`node tools/drive-home.mjs lease-to <mac|fly> [--drive bryan]` moves only the
+lease, with no upload or download, to a side whose copy is good: it holds the
+other side, moves the lease, releases the target. It refuses while the other
+side is serving as home, since its newest changes would be left behind (use
+`to`). This is the way out of a move that stopped with the lease on a copy that
+could not be verified.
+
+**Never run `drive-home` from a conversation hosted on either side.** It stops
+that host, and the conversation with it.
+
+Measured 2026-09-30 on `t-bryan`, 56 files:
+
+| | Fly to Mac | Mac to Fly |
+|---|---|---|
+| with the file list | 15–24 s | 59–113 s |
+| before the file list | 211 s | 121 s |
+
+### Day to day
+
+- **The Mac is home:** open `http://127.0.0.1:4401` (`bryan`) or `:4402`
+  (a trial drive). The sprite's URL shows "This drive is being served from the
+  other machine". Check: `zsh macos/launchd/home.sh status bryan`, and
+  `node tools/drive-sync.mjs state` (with `MARBLE_HUB_ENV` set to the Mac's
+  file) for the last upload.
+- **The Mac's code.** `tools/mac-release.sh [--ref <commit>]` builds a release
+  from the same sources a sprite runs (this repo, `@bdhmin/marble` from npm, the
+  pinned Claude), smoke-tests it on a throwaway drive with no hub, switches
+  `current`, and restarts every `com.marble.drive.home.*` job (one that fails is
+  named at the end). Keep three.
+- **Install a name:** `zsh macos/launchd/home.sh install <name>` after the
+  first `mac-release.sh`; it comes up on standby if the lease says Fly. Also
+  `start`, `stop`, `restart`, `status`, `logs`, `uninstall` (the drive's folder
+  is left as it is).
+- **Give the drive up on a stuck or wrong side:** `drive-home lease-to <side>`
+  (above). **Hold a side by hand:** create `hold-<drive>` beside its hub
+  settings and restart it; remove it and restart to release.
+- **Rolling back admin-p2** to a release from before the hub while the Mac is
+  home brings admin-p2 up serving, a second writer. Don't:
+  `tools/sprite-deploy.sh admin-p2 --rollback` only while admin-p2 is at home.
+- **Not yet moved: the owner's drive.** The next step, only on the owner's go-ahead:
+  the plan's Task 10, Step 9
+  (`docs/superpowers/plans/2026-09-29-mac-home-phase-1.md`) has the commands,
+  from `tools/sprite-deploy.sh admin-p2` through `drive-home to mac`. The backup
+  agent (`macos/launchd/backup.sh`) keeps running until then and is uninstalled
+  in that step.
+
 ## The console
 
 **Console** is a document in admin-p2's drive (`/a/Console`): every drive and
@@ -283,6 +483,11 @@ admin-p2 (`~/.config/marble-drive/testers.json`), the machine that made it.
 | `tools/backup-agent.mjs [<sprite>]` | the Mac's half of the Console's Backups view: backs up after changes (10 quiet minutes, hourly at most), takes the Console's requests and reports back, touching the sprite only while it is awake |
 | `node tools/browser-tests.mjs [<files>]` | browser tests: on the owner's Mac when it is watching this sprite, else here one file at a time |
 | `macos/launchd/test-runner.sh install [<sprite>]` | keeps `tools/test-runner.mjs` running: the Mac's half of the above (default admin-p2); `status`, `uninstall`, `logs` |
+| `node tools/drive-home.mjs to <mac\|fly> [--drive <name>] [--now]` | moves a drive's home (see "How a move goes"), from the Mac; `lease-to <side>` moves only the lease |
+| `node tools/drive-sync.mjs up\|down\|counts\|state\|trash-prefix` | the hub by hand and what `drive-home` runs on each machine; settings from `MARBLE_HUB_ENV` |
+| `tools/mac-release.sh [--ref <commit>]` | a release of this repo on the Mac, made current, and every home service restarted onto it |
+| `macos/launchd/home.sh install\|start\|stop\|restart\|status\|logs\|uninstall [<name>]` | a drive's host on the Mac under launchd, `com.marble.drive.home.<name>` (default `bryan`) |
+| `node tools/home-mode.mjs` | prints `serve` or `standby`; what `serve.sh` asks before every start |
 | `tools/drive-restore.sh <snapshot> <sprite> [--yes]` | puts a snapshot back on a sprite: stops the host, sets `/drive` aside, copies in, starts it, checks `/health` |
 | `tools/drive-pull.sh [<sprite>] [--into <dir>]` | a one-way mirror of a drive (default admin-p2) into this checkout's `drive/`, the last one set aside |
 | `tools/sprite-provision.sh <person> [--agent api\|subscription] [--key-file f] [--local]` | makes `t-<person>`: passphrase, `sprite.env`, optional preloaded key, deploy, public URL, outside check, roster entry, a note to send |
@@ -428,6 +633,14 @@ nothing can wake its host, relabel it, `macos/launchd/backup.sh install
 | `/today` lands somewhere odd | `latest` in `/drive/.marble/drive.json`, or `MARBLE_DRIVE_LATEST_DOC` | set `latest` |
 | Agents: "Playwright is not available … node_modules/@bdhmin/marble/node_modules/playwright" | npm hoisted Playwright beside marble (every sprite) and the host looked only inside it | fixed 2026-09-25: `playwrightEntry` resolves it either way |
 | Agents' browser lands on `/gate` | the turn's browser had no pass | fixed 2026-09-25: the runner hands it one; a stage fails if Chromium will not launch |
+| Sprite URL shows "This drive is being served from the other machine" | the sprite is held: the drive's home is the Mac | use `http://127.0.0.1:4401` on the Mac (`4402` for a trial drive); `node tools/drive-sync.mjs state` says who is home. Not a fault |
+| A move or upload says "the drive has no documents" or "under half of the … last uploaded" | the folder looks empty or far smaller than before (a wrong or unmounted `--root`, a folder swapped out); nothing was sent | look at the folder. On the Mac, `~/Marble Drive` must be a real folder, not the backup agent's link |
+| Log: `[home] standby: the lease refused this machine (401)` | the Worker did not accept the token or URL: `LEASE_URL` or `LEASE_TOKEN` in the hub settings is wrong (or the Worker's secret changed) | fix the settings file, restart. The remembered lease is deliberately not used, so this machine stands by until it is fixed |
+| Log: `[hub] upload waits: the lease is unreachable` | no network, or the Worker is down; the host goes by the last lease it saw and uploads nothing | wait, or check `LEASE_URL`; the drive itself is fine |
+| `drive-home` stops at a step, saying where the lease is and what was started | a failed move; nothing was deleted | read the message. If the lease names a side whose copy was not verified, `drive-home lease-to <side>` gives the lease back to the good one with no upload |
+| `drive-home` reports `verify-standby` | the target is home and serving, but the side left does not say standby | make sure the old side is not serving; `drive-home lease-to <target>` holds it again |
+| The hub is slow from the Mac; rclone calls take minutes | R2 leaves some requests unanswered 5–90 s from the owner's home network (not from Fly) | expected; timeouts are 10 s with 20 retries. A Mac move is 59–113 s for a small drive |
+| admin-p2 serves the drive after a rollback while the Mac is home | a release from before the hub does not know the lease | roll forward (`tools/sprite-deploy.sh admin-p2`) and hold admin-p2 (`drive-home lease-to mac`). Don't roll admin-p2 back past the hub |
 | The gate check says 401 where a browser gets the passphrase page | the gate redirects only requests asking for `text/html` | send `Accept: text/html` |
 
 ## Costs

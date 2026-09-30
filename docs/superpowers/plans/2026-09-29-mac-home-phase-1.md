@@ -2387,9 +2387,15 @@ git push origin main
    ```
 5. Step 5's lifecycle rule for `bryan`.
 6. `zsh macos/launchd/home.sh install bryan` (standby), then
-   `node tools/drive-home.mjs to mac`. Expected: `bryan is at home on mac`.
-   This waits for agents on admin-p2 to finish. **Do not run it from a
-   conversation hosted on admin-p2**: it stops that host.
+   `node tools/drive-home.mjs to mac`. Expected: `bryan is at home on mac
+   (epoch <n>), moved in <n>s`. This waits for agents on admin-p2 to finish,
+   then **holds** admin-p2 (a `hold-bryan` file beside its `hub.env`, and a
+   restart onto standby; it stays held, whatever the lease says), uploads,
+   moves the lease, downloads on the Mac and releases it. **Do not run it from
+   a conversation hosted on either side**: it stops that host. If it stops
+   part way it says where the lease is; `node tools/drive-home.mjs lease-to
+   fly` gives the drive back to admin-p2 with no upload. Do not roll admin-p2
+   back to a release from before the hub while the Mac is home.
 7. Say what to look at: `http://127.0.0.1:4401` is the owner's drive. The
    admin-p2 URL shows the standby page. Console, if he wants it on the Mac,
    needs `MARBLE_DRIVE_CONSOLE=1` added to the plist env (phase 2 revisits
