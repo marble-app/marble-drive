@@ -338,7 +338,7 @@ live() {
 
 mkdir -p "$RELEASES"
 case "${1:-}" in
-  stage) stage "$2" "$3" "$4" "$5" ;;
+  stage) stage "$2" "$3" "$4" "$5" "${6:-}" ;;
   switch) switch "$2" ;;
   rollback) rollback ;;
   hand-off) hand_off "$2" ;;
@@ -346,5 +346,5 @@ case "${1:-}" in
   switch-when-idle) switch_when_idle "$2" ;;
   apply) name="$(live)" || exit 1; switch "$name" ;;
   apply-when-idle) name="$(live)" || exit 1; hand_off "$name" ;;
-  *) die "usage: release.sh stage <name> <source> <marble> <claude> | switch <name> | rollback | apply" ;;
+  *) die "usage: release.sh stage <name> <source> <marble> <claude> [<codex>] | switch <name> | rollback | apply" ;;
 esac
