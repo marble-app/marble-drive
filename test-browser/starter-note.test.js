@@ -263,6 +263,48 @@ test('the markers are the formatting: # a heading, - a bullet, --- a rule', asyn
   assert.deepEqual(errors, []);
 });
 
+test('four heading sizes: #### and Ctrl+Alt+4 make the smallest, in the face of the text', async () => {
+  const { page, errors } = await open();
+  await caretToEndOf(page, 1);
+  await page.keyboard.press('Enter');
+  await page.keyboard.type('### Small');
+  await page.keyboard.press('Enter');
+  await page.keyboard.type('#### Smallest');
+  await page.keyboard.press('Enter');
+  await page.keyboard.type('Body');
+  await page.waitForTimeout(150);
+  let all = await blocks(page);
+  assert.deepEqual(all.slice(2, 5).map((b) => [b.tag, b.text]), [['H4', 'Small'], ['H5', 'Smallest'], ['P', 'Body']]);
+
+  const look = await page.evaluate(() => {
+    const note = document.querySelector('.note.marble-open');
+    const of = (el) => {
+      const s = getComputedStyle(el);
+      return { size: parseFloat(s.fontSize), weight: s.fontWeight, family: s.fontFamily, caps: s.textTransform, line: s.textDecorationLine };
+    };
+    return { small: of(note.children[2]), smallest: of(note.children[3]), body: of(note.children[4]) };
+  });
+  assert.equal(look.small.caps, 'none', 'the small heading is not set in capitals');
+  assert.equal(look.small.family, look.body.family, 'and is in the text\'s face');
+  assert.ok(look.small.size > look.body.size, 'and is bigger than the text');
+  assert.equal(look.smallest.size, look.body.size, 'the smallest is the text\'s size');
+  assert.equal(look.smallest.weight, '600');
+  assert.equal(look.smallest.line, 'underline');
+
+  // Ctrl+Alt+4 makes a line the smallest heading, and Ctrl+Alt+0 makes it plain.
+  await caretToEndOf(page, 4);
+  await page.keyboard.press('Control+Alt+Digit4');
+  await page.waitForTimeout(150);
+  all = await blocks(page);
+  assert.equal(all[4].tag, 'H5');
+  const source = await filed(page);
+  assert.match(source, /<h5[^>]*>Smallest<\/h5>/);
+  await page.keyboard.press('Control+Alt+Digit0');
+  await page.waitForTimeout(150);
+  assert.equal((await blocks(page))[4].tag, 'P');
+  assert.deepEqual(errors, []);
+});
+
 test('bold marks exactly what was selected, across lines', async () => {
   const { page, errors } = await open();
   // The second line of this note already holds two marks of its own, so the
