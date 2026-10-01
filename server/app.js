@@ -952,13 +952,13 @@ export async function createDrive(config, { log = console, agentProviders = null
       // here: a link never opens a /drive route.
       if (route === '/drive/shares' && req.method === 'GET') {
         const docPath = parsePath(url.searchParams.get('path'), { allowRoot: false });
-        return json(res, 200, { open: gate.open, links: await shares.forPath(docPath) });
+        return json(res, 200, { open: gate.open, base: config.publicUrl, links: await shares.forPath(docPath) });
       }
       if (route === '/drive/shares' && req.method === 'POST') {
         const body = await readJson(req, 4096);
         const docPath = parsePath(body.path, { allowRoot: false });
         if (!(await store.has(docPath))) return json(res, 404, { error: `no document "${docPath}"` });
-        return json(res, 200, { open: gate.open, link: await shares.make(docPath, body.role) });
+        return json(res, 200, { open: gate.open, base: config.publicUrl, link: await shares.make(docPath, body.role) });
       }
       if (route === '/drive/shares/off' && req.method === 'POST') {
         const body = await readJson(req, 4096);
@@ -1456,6 +1456,9 @@ export async function createDrive(config, { log = console, agentProviders = null
     if (!share || !(await store.has(share.path))) return linkIsOff(res);
     const to = `/a/${encodeURIComponent(share.path)}`;
     if (gate.allows(req)) return send(res, 302, '', { ...quiet, Location: to });
+    // When it was last used is the owner's to read; failing to note it is no
+    // reason to turn the visitor away.
+    await shares.opened(share.id).catch((err) => log.error(`[share] could not note an open: ${err.message}`));
     return send(res, 302, '', { ...quiet, Location: to, 'Set-Cookie': await shares.cookieWith(req, token) });
   }
 

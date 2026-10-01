@@ -494,6 +494,12 @@ names and taking over a drive on a request are not built.
   host's same-origin checks (`server/sessions.js`, and Console's) compare
   `Origin` with `X-Forwarded-Host`, so pages served under the public name can
   post.
+- **Share links.** The owner opens the Mac's drive at `127.0.0.1`, and a link
+  written there would open only on the Mac. `mac-<name>.env` sets
+  `MARBLE_DRIVE_PUBLIC_URL=https://<name>.marbledrive.app` so links are written
+  at the front door (`docs/SHARING.md`); it counts once the home service has
+  restarted. The Worker passes `/s/<token>` and the cookie it sets through
+  untouched.
 - **Adding a drive later:** add it to `DRIVES` and a route line for
   `<name>.marbledrive.app` in `worker/wrangler.toml`, plus a proxied DNS record
   for that name; deploy the Worker. For its Mac home, run `tunnel.sh setup

@@ -193,25 +193,57 @@ test('⌘K searches the drive by name and Enter opens the first match', async ()
   await page.waitForURL(/Field%20notes$/);
 });
 
-test('Share makes a link at each level, shows the ones that are on, and turns one off', async () => {
-  const { page, shell } = await visit();
+test('Share: choose a level, copy its link in one press, see which are on, turn one off', async () => {
+  const { page, shell, errors } = await visit();
+  await page.context().grantPermissions(['clipboard-read', 'clipboard-write'], { origin: host.base });
   await page.keyboard.press('Control+\\');
   await shell.locator('[data-act="share"]').click();
-  await shell.locator('.sharing').waitFor();
-  assert.deepEqual(await shell.locator('.level .lv-name').allInnerTexts(), ['Read only', 'Read & write', 'Read, write & modify']);
-  const row = shell.locator('.level[data-role="view"]');
-  assert.equal(await row.locator('.lv-off').isVisible(), false, 'no link yet, so nothing to turn off');
-  await row.locator('.lv-copy').click();
-  const url = row.locator('.lv-url');
-  await url.waitFor();
-  assert.match(await url.inputValue(), new RegExp(`^${host.base}/s/[A-Za-z0-9_-]{38}$`));
-  // Two presses: the first asks.
-  await row.locator('.lv-off').click();
-  assert.equal(await row.locator('.lv-off').innerText(), 'Yes, turn off');
-  await row.locator('.lv-off').click();
-  await url.waitFor({ state: 'hidden' });
+  const pop = shell.locator('.sharing');
+  await pop.waitFor();
+  const chosen = () => pop.locator('.level[aria-checked="true"]').getAttribute('data-role');
+  assert.deepEqual(await pop.locator('.level .lv-name').allInnerTexts(), ['Read only', 'Read & write', 'Read, write & modify']);
+  // Read only to begin with, and nothing out yet: no address, nothing to turn off.
+  assert.equal(await chosen(), 'view');
+  assert.equal(await pop.locator('.url').inputValue(), '');
+  assert.equal(await pop.locator('.off').isVisible(), false);
+  assert.equal(await pop.locator('.lv-on:visible').count(), 0);
+  // Opened at 127.0.0.1 with no public address, so it says where the link works.
+  assert.match(await pop.locator('.warn').innerText(), /only on this computer/);
+  // The arrows choose inside the group; one press makes the link and copies it.
+  await pop.locator('.level[data-role="view"]').focus();
+  await page.keyboard.press('ArrowDown');
+  assert.equal(await chosen(), 'edit');
+  await pop.locator('.copy').click();
+  await page.waitForFunction(() => document.querySelector('marble-shell').shadowRoot.querySelector('.sharing .url').value);
+  const href = await pop.locator('.url').inputValue();
+  assert.match(href, new RegExp(`^${host.base}/s/[A-Za-z0-9_-]{38}$`));
+  assert.equal(await page.evaluate(() => navigator.clipboard.readText()), href);
+  assert.equal(await pop.locator('.level[data-role="edit"] .lv-on').isVisible(), true);
+  assert.equal(await pop.locator('.level[data-role="view"] .lv-on').isVisible(), false);
+  assert.equal(await pop.locator('.meta > span').innerText(), 'Made just now · not opened yet');
+  // Read only has no link of its own: choosing it shows none.
+  await pop.locator('.level[data-role="view"]').click();
+  assert.equal(await pop.locator('.url').inputValue(), '');
+  assert.equal(await pop.locator('.url').getAttribute('placeholder'), 'No Read only link yet');
+  // Opened again, it comes back to the link that is out.
   await page.keyboard.press('Escape');
-  assert.equal(await shell.locator('.sharing').isVisible(), false);
+  await shell.locator('[data-act="share"]').click();
+  await page.waitForFunction(() => document.querySelector('marble-shell').shadowRoot.querySelector('.sharing .url').value);
+  assert.equal(await chosen(), 'edit');
+  assert.equal(await pop.locator('.url').inputValue(), href);
+  // Two presses: the first asks.
+  await pop.locator('.off').click();
+  assert.equal(await pop.locator('.off').innerText(), 'Yes, turn off');
+  await pop.locator('.off').click();
+  await pop.locator('.off').waitFor({ state: 'hidden' });
+  assert.equal(await pop.locator('.url').inputValue(), '');
+  assert.equal(await pop.locator('.lv-on:visible').count(), 0);
+  assert.deepEqual(errors, []);
+  // (The 404 below is the point, and the console logs it.)
+  const gone = await page.evaluate((path) => fetch(path, { redirect: 'manual' }).then((res) => res.status), new URL(href).pathname);
+  assert.equal(gone, 404, 'the link opens nothing once it is off');
+  await page.keyboard.press('Escape');
+  assert.equal(await pop.isVisible(), false);
 });
 
 test('at phone width there is no shell to open: ⌘J opens the drawer, as before', async () => {

@@ -21,12 +21,12 @@ const DOC = `<!doctype html>
 </body></html>
 `;
 
-async function boot(t) {
+async function boot(t, env = {}) {
   const root = await fsp.mkdtemp(path.join(os.tmpdir(), 'shares-'));
   await fsp.writeFile(path.join(root, 'Potluck.mrbl'), DOC);
   await fsp.writeFile(path.join(root, 'Private.mrbl'), DOC.replace('Potluck', 'Private'));
   const drive = await createDrive(
-    loadConfig({ MARBLE_DRIVE_ROOT: root, MARBLE_DRIVE_SECRET: 'hunter2' }),
+    loadConfig({ MARBLE_DRIVE_ROOT: root, MARBLE_DRIVE_SECRET: 'hunter2', ...env }),
     { log: { log() {}, error() {}, info() {}, warn() {} }, agents: false },
   );
   t.after(async () => {
@@ -210,4 +210,40 @@ test('a link reads only the blobs its page names', async (t) => {
   // Named by the page, though not stored: the host is asked, and has none.
   assert.equal((await ask(`/blob/${'a'.repeat(64)}`, { cookie })).status, 404);
   assert.equal((await ask(`/blob/${'b'.repeat(64)}`, { cookie })).status, 403);
+});
+
+test('the owner is told when a link was last opened, and not by their own visits', async (t) => {
+  const { ask, owner, make, open } = await boot(t);
+  const link = await make('view');
+  const opened = async () => (await (await ask('/drive/shares?path=Potluck', { cookie: owner })).json()).links[0].opened;
+  assert.equal(link.opened, null);
+  await ask(link.href, { cookie: owner, html: true });
+  assert.equal(await opened(), null, 'the owner following their own link is not someone opening it');
+  const before = Date.now();
+  await open(link.href);
+  const at = Date.parse(await opened());
+  assert.ok(at >= before - 1000 && at <= Date.now() + 1000);
+});
+
+test('links are written against the drive’s public address when it has one', async (t) => {
+  const plain = await boot(t);
+  assert.equal((await (await plain.ask('/drive/shares?path=Potluck', { cookie: plain.owner })).json()).base, null);
+  const { ask, owner } = await boot(t, { MARBLE_DRIVE_PUBLIC_URL: 'https://bryan.marbledrive.app/a/ignored?x=1' });
+  assert.equal((await (await ask('/drive/shares?path=Potluck', { cookie: owner })).json()).base, 'https://bryan.marbledrive.app');
+  const made = await (await ask('/drive/shares', { cookie: owner, method: 'POST', body: { path: 'Potluck', role: 'edit' } })).json();
+  assert.equal(made.base, 'https://bryan.marbledrive.app');
+  assert.match(made.link.href, /^\/s\/[A-Za-z0-9_-]{38}$/);
+});
+
+test('a public address that is not http(s) is ignored', () => {
+  assert.equal(loadConfig({ MARBLE_DRIVE_PUBLIC_URL: 'javascript:alert(1)' }).publicUrl, null);
+  assert.equal(loadConfig({ MARBLE_DRIVE_PUBLIC_URL: 'not a url' }).publicUrl, null);
+  assert.equal(loadConfig({}).publicUrl, null);
+});
+
+test('links made at once are each kept', async (t) => {
+  const { ask, owner, make } = await boot(t);
+  await Promise.all([make('view'), make('edit'), make('modify'), make('view', 'Private')]);
+  const listed = await (await ask('/drive/shares?path=Potluck', { cookie: owner })).json();
+  assert.deepEqual(listed.links.map((l) => l.role).sort(), ['edit', 'modify', 'view']);
 });

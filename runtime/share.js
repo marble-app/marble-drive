@@ -14,12 +14,13 @@
   const ROLE = script?.dataset.role ?? 'view';
   const NAME = { view: 'Read only', edit: 'Read & write', modify: 'Read, write & modify' };
   const SAYS = {
-    view: 'You can read this page and see changes as they happen.',
+    view: 'You can read this page and see changes as they happen, but not change it.',
     edit: 'You can type, tick, add and reorder where the page allows it.',
-    modify: 'You can change this page, and restyle it. Its code stays with its owner.',
+    modify: 'You can change and restyle any part of this page.',
   };
   const READ_ONLY = 'This link can only read the page';
   const OFF = 'This link was turned off';
+  const OFF_SAYS = 'This link was turned off. Ask whoever shared it for a new one.';
 
   document.documentElement.setAttribute('data-marble-share', ROLE);
 
@@ -32,14 +33,24 @@
     /* Bottom left: a document keeps its own controls at the top, and its
        save status bottom right. */
     :host { all: initial; position: fixed; left: 12px; bottom: 12px; z-index: 2147483000;
-      --ink: #111111; --muted: #5f6368; --line: #e4e1da; --card: #ffffff; --danger: #b4533e;
+      --ink: #111111; --muted: #5f6368; --line: #e4e1da; --card: #ffffff; --paper: #f3f1ea; --accent: #9bb6cf; --danger: #b4533e;
       font: 500 12.5px/1.2 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; color: var(--ink); }
     @media (prefers-color-scheme: dark) {
-      :host { --ink: #e8e6e1; --muted: #a3a7ab; --line: #2f3438; --card: #1c1f22; --danger: #e08a74; }
+      :host { --ink: #e8e6e1; --muted: #a3a7ab; --line: #2f3438; --card: #1c1f22; --paper: #262a2e; --accent: #7fa8c9; --danger: #e08a74; }
     }
+    button { font: inherit; color: inherit; margin: 0; cursor: pointer; }
     .mark { display: flex; align-items: center; gap: 6px; height: 28px; padding: 0 10px; border-radius: 999px;
-      background: var(--card); border: 1px solid var(--line); box-shadow: 0 1px 2px rgba(0,0,0,.08), 0 6px 16px rgba(0,0,0,.08); }
+      background: var(--card); border: 1px solid var(--line); box-shadow: 0 1px 2px rgba(0,0,0,.08), 0 6px 16px rgba(0,0,0,.08);
+      transition: background-color 110ms ease; }
+    .mark:hover, .mark[aria-expanded="true"] { background: var(--paper); }
+    .mark:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
     .mark[data-off] { color: var(--danger); }
+    /* What the link lets this person do: a press on the mark says it, in a
+       card just above, and a press anywhere else puts it away. */
+    .says { position: absolute; left: 0; bottom: 36px; width: max-content; max-width: min(16rem, calc(100vw - 24px));
+      padding: 8px 11px; border-radius: 12px; background: var(--card); border: 1px solid var(--line);
+      box-shadow: 0 1px 2px rgba(0,0,0,.08), 0 6px 16px rgba(0,0,0,.08); font-weight: 400; line-height: 1.4; color: var(--ink); }
+    .says[hidden] { display: none; }
     .i { width: 14px; height: 14px; fill: none; stroke: currentColor; stroke-width: 1.5; stroke-linecap: round; stroke-linejoin: round; flex: none; }
     .toast { position: fixed; left: 50%; bottom: 24px; transform: translate(-50%, 8px); opacity: 0; pointer-events: none;
       background: var(--ink); color: var(--card); border-radius: 999px; padding: 7px 14px; white-space: nowrap;
@@ -47,13 +58,26 @@
     .toast[data-on] { opacity: 1; transform: translate(-50%, 0); }
     @media (prefers-reduced-motion: reduce) { .toast { transition: opacity 120ms linear; transform: translate(-50%, 0); } }
   </style>
-  <div class="mark" role="status" title="${SAYS[ROLE] ?? ''}">
+  <p class="says" id="says" hidden>${SAYS[ROLE] ?? SAYS.view}</p>
+  <button type="button" class="mark" aria-expanded="false" aria-controls="says" aria-label="${NAME[ROLE] ?? NAME.view} link: what you can do">
     <svg class="i" viewBox="0 0 16 16" aria-hidden="true"><path d="M6.75 9.25a2.75 2.75 0 0 0 3.9 0l2.1-2.1a2.75 2.75 0 0 0-3.9-3.9l-.6.6"/><path d="M9.25 6.75a2.75 2.75 0 0 0-3.9 0l-2.1 2.1a2.75 2.75 0 0 0 3.9 3.9l.6-.6"/></svg>
     <span class="name">${NAME[ROLE] ?? NAME.view}</span>
-  </div>
+  </button>
   <div class="toast" role="status" aria-live="polite"></div>`;
   const mark = root.querySelector('.mark');
+  const says = root.querySelector('.says');
   const toast = root.querySelector('.toast');
+  const showSays = (on) => {
+    says.hidden = !on;
+    mark.setAttribute('aria-expanded', String(on));
+  };
+  mark.addEventListener('click', () => showSays(says.hidden));
+  addEventListener('pointerdown', (event) => {
+    if (!says.hidden && !event.composedPath().includes(host)) showSays(false);
+  }, { capture: true });
+  addEventListener('keydown', (event) => {
+    if (event.key === 'Escape' && !says.hidden) showSays(false);
+  });
   let toastTimer = 0;
   const say = (text) => {
     toast.textContent = text;
@@ -78,7 +102,8 @@
     off = true;
     mark.setAttribute('data-off', '');
     mark.querySelector('.name').textContent = 'Link turned off';
-    mark.title = OFF;
+    mark.setAttribute('aria-label', 'Link turned off: what that means');
+    says.textContent = OFF_SAYS;
     document.documentElement.setAttribute('data-marble-share', 'view');
   };
 

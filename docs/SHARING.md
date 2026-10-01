@@ -3,7 +3,7 @@
 The passphrase opens the whole drive: every page, the agents, the shell. A
 share link opens one page, at one of three levels, for someone who does not
 have the passphrase. The owner makes and turns off links from **Share** in the
-bar (`runtime/shell.js`); the host keeps them in `server/shares.js` and judges
+bar (`runtime/shell.js`, below); the host keeps them in `server/shares.js` and judges
 every change a link files in `server/share-policy.js`.
 
 ## The three levels
@@ -35,6 +35,39 @@ runs: `/a/<its page>`, that page's `/events`, `/presence` and (from `edit` up)
 `/ops`, `/runtime/*`, `/tab/alive`, and `/blob/<hash>` for blobs its page
 names.
 
+## The Share panel
+
+**Share** in the bar opens one panel for the page you are on:
+
+- Three levels as a radio group, Read only chosen to begin with. A level whose
+  link is out says **Link on** on its row. Opening the panel on a page that
+  already has a link out chooses the newest one, ready to copy again.
+- One **Copy link** for the chosen level. The first press makes the link and
+  copies it; the button says **Copied** where it was pressed. If the browser
+  refuses the clipboard, the link is left selected for ⌘C.
+- Under it, when that level's link is on: when it was made, when someone last
+  came in by it (or "not opened yet"), and **Turn off** (two presses).
+- A warning in caution ink when the link would open only here: the drive is
+  open at `127.0.0.1`, `localhost` or a private network address and has no
+  public address (below).
+- **Your own link**, last and quiet: the page's ordinary address, which asks
+  for the passphrase.
+
+Each level is its own link on purpose. Handing one person Read & write never
+raises what a Read only link already out there can do; to take a level back,
+turn that link off.
+
+## The address a link is written at
+
+A link is written against `MARBLE_DRIVE_PUBLIC_URL` when the drive has one
+(`server/config.js`; an http(s) origin, anything after it dropped), and
+against the address the owner has the drive open at otherwise. A drive at home
+on the Mac is opened at `http://127.0.0.1:4401`, which nobody else can reach,
+so its `~/.config/marble-drive/mac-<name>.env` sets
+`MARBLE_DRIVE_PUBLIC_URL=https://<name>.marbledrive.app`. A sprite is opened at
+its own URL, which is already the address to hand out (admin-p2's is private
+to the Fly org, so links to it open only for someone signed in to Fly).
+
 ## Why "its code stays yours" is the line
 
 A document's scripts run with the authority of whoever is reading it, and the
@@ -53,8 +86,12 @@ through.
 
 - A link is `/s/<token>`: a 12-byte random id and a 128-bit HMAC of it under
   `.marble/shares.key` (made on the first link, mode 600). `.marble/shares.json`
-  holds `{ id, path, role, made }`, with no secret in it, so the owner can copy
-  a link again and the list can be read without handing links out.
+  holds `{ id, path, role, made, opened }`, with no secret in it, so the owner
+  can copy a link again and the list can be read without handing links out.
+  `opened` is the last time someone without the passphrase came in by the
+  link (noted at most once a minute; the owner following it does not count).
+  The file is read once and written one write at a time, so links made at the
+  same moment are all kept.
 - Opening it trades the token for an HttpOnly, SameSite=Lax cookie
   (`marble_share`, up to 24 links per browser) and redirects to `/a/<path>`, so
   the address bar never keeps the token and the carrier's own requests carry
@@ -67,7 +104,8 @@ through.
   looked at.
 - A link follows its page through a move or rename (`followMove`).
 - The visitor's page gets no shell and no agents. `runtime/share.js` shows the
-  level in the bottom-left corner, says why a change was refused, and for a
+  level in the bottom-left corner (pressed, it says what the level lets them
+  do), says why a change was refused, and for a
   read-only link blocks typing and puts back anything the page's own script
   tries to file.
 - A drive with no passphrase is open to anyone who can reach it, links or not,

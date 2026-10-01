@@ -18,8 +18,10 @@
 // so `/ops`, `/events` and `/presence` need no token in their URLs and the
 // address bar never shows one after the first hop.
 //
-// `.marble/shares.json` holds `{ id, path, role, made }`, rewritten whole
-// (it is short), and follows a document when it moves.
+// `.marble/shares.json` holds `{ id, path, role, made, opened }`, rewritten
+// whole (it is short), and follows a document when it moves. `opened` is the
+// last time someone without the passphrase came in by the link, so the owner
+// can tell a link nobody uses from one that is out there working.
 
 import crypto from 'node:crypto';
 import fsp from 'node:fs/promises';
@@ -28,6 +30,8 @@ import path from 'node:path';
 import { ROLES } from './share-policy.js';
 
 const DAY = 24 * 60 * 60 * 1000;
+/** A link opened again inside this long is not news worth a write. */
+const OPENED_EVERY = 60 * 1000;
 const ID_BYTES = 12; // 16 base64url characters
 const MAC_CHARS = 22; // 128 bits of HMAC-SHA256
 const TOKEN = /^[A-Za-z0-9_-]{38}$/;
@@ -45,24 +49,39 @@ export function createShares({ dir, cookieName = 'marble_share', days = 30, secu
   // than on the next reload: the page stops hearing the document change.
   const open = new Map();
 
+  // Read once, by whoever asks first. Two first requests that each read the
+  // file would each hold their own list, and the second to write would drop
+  // the link the first one made.
+  let loading = null;
   async function load() {
     if (list) return list;
-    try {
-      const raw = JSON.parse(await fsp.readFile(file, 'utf8'));
-      list = Array.isArray(raw)
-        ? raw.filter((s) => s && typeof s.id === 'string' && typeof s.path === 'string' && ROLES.includes(s.role))
-        : [];
-    } catch {
-      list = [];
-    }
-    return list;
+    loading ??= (async () => {
+      try {
+        const raw = JSON.parse(await fsp.readFile(file, 'utf8'));
+        list = Array.isArray(raw)
+          ? raw.filter((s) => s && typeof s.id === 'string' && typeof s.path === 'string' && ROLES.includes(s.role))
+          : [];
+      } catch {
+        list = [];
+      }
+      return list;
+    })();
+    return loading;
   }
 
-  async function save() {
+  // One write at a time: two at once would share the temp file, and the
+  // second rename would find it gone.
+  let saving = Promise.resolve();
+  async function write() {
     await fsp.mkdir(dir, { recursive: true });
     const tmp = `${file}.${process.pid}.tmp`;
     await fsp.writeFile(tmp, `${JSON.stringify(list, null, 2)}\n`);
     await fsp.rename(tmp, file);
+  }
+  function save() {
+    const run = saving.then(write, write);
+    saving = run.catch(() => {});
+    return run;
   }
 
   async function secret() {
@@ -95,6 +114,7 @@ export function createShares({ dir, cookieName = 'marble_share', days = 30, secu
     path: share.path,
     role: share.role,
     made: share.made,
+    opened: share.opened ?? null,
     href: `/s/${await tokenOf(share.id)}`,
   });
 
@@ -136,6 +156,16 @@ export function createShares({ dir, cookieName = 'marble_share', days = 30, secu
     for (const res of open.get(id) ?? []) res.end();
     open.delete(id);
     return true;
+  }
+
+  /** Someone came in by this link. At most one write a minute per link. */
+  async function opened(id) {
+    const share = (await load()).find((s) => s.id === id);
+    if (!share) return;
+    const now = Date.now();
+    if (share.opened && now - Date.parse(share.opened) < OPENED_EVERY) return;
+    share.opened = new Date(now).toISOString();
+    await save();
   }
 
   /** A document moved (`at` maps an old path to its new one, or null), so its
@@ -203,5 +233,5 @@ export function createShares({ dir, cookieName = 'marble_share', days = 30, secu
   /** Did this browser come by a link at all, on or off? */
   const carries = (req) => tokensIn(req).length > 0;
 
-  return { resolve, forPath, make, off, moved, visitor, carries, cookieWith, track, cookieName };
+  return { resolve, forPath, make, off, opened, moved, visitor, carries, cookieWith, track, cookieName };
 }

@@ -8,6 +8,17 @@
 import os from 'node:os';
 import path from 'node:path';
 
+/** An http(s) origin, or null: a path or a query on it would only mislead. */
+function originOf(value) {
+  if (!value) return null;
+  try {
+    const url = new URL(value);
+    return url.protocol === 'https:' || url.protocol === 'http:' ? url.origin : null;
+  } catch {
+    return null;
+  }
+}
+
 export function loadConfig(env = process.env) {
   // Read off the env that was handed in, not off `process.env` — a test that
   // builds a second configuration to check the gate has to be able to say so
@@ -89,6 +100,11 @@ export function loadConfig(env = process.env) {
     sessionCookie: str('MARBLE_DRIVE_SESSION_COOKIE', 'marble_session'),
     sessionDays: num('MARBLE_DRIVE_SESSION_DAYS', 30),
     secureCookie: bool('MARBLE_DRIVE_SECURE_COOKIE', str('NODE_ENV', '') === 'production'),
+    // The address other people reach this drive at, when it is not the one
+    // its owner has open: a drive at home on the Mac is opened at 127.0.0.1,
+    // and a share link made there would open only on that Mac. Share links
+    // are written against this origin (`https://bryan.marbledrive.app`).
+    publicUrl: originOf(str('MARBLE_DRIVE_PUBLIC_URL', null)),
 
     // Multi-tenant, or not, and where its data lives. `accountsDir` is
     // deliberately not under any drive root — a file the Drive can see is a
