@@ -450,6 +450,13 @@ The rules an agent writes them by are in the `visuals-in-chat` skill
 both widths in both schemes by `node tools/visual-shots.mjs`. Design:
 [`superpowers/specs/2026-09-22-visuals-in-chat-design.md`](superpowers/specs/2026-09-22-visuals-in-chat-design.md).
 
+The owner's **triage** skill (`agent-plugin/skills/triage/`, loaded as
+`marble-drive:triage`) groups the workshop's chats, commits, worktrees and
+specs into features for the Console's Features view. It reads and saves only
+through `triage.mjs` beside it, never deploys or commits, and answers with a
+link to `/a/Console?view=features`. On a drive with no workshop checkout it
+says so and stops.
+
 ## Messages
 
 Agents in one project can talk to each other. Three tools, on every

@@ -64,6 +64,7 @@ test('skills come from the drive, the app\'s plugin and the person\'s home, neve
     'marble-drive:design-system',
     'marble-drive:genui-author',
     'marble-drive:growing-the-open-page',
+    'marble-drive:triage',
     'marble-drive:typesafe-ai',
     'marble-drive:visuals-in-chat',
     'mine',

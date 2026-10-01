@@ -259,6 +259,7 @@ button, input, select, textarea { font: inherit; color: inherit; }
 .cx[data-view="dashboard"] .cx-view[data-view="dashboard"],
 .cx[data-view="drives"] .cx-view[data-view="drives"],
 .cx[data-view="ship"] .cx-view[data-view="ship"],
+.cx[data-view="features"] .cx-view[data-view="features"],
 .cx[data-view="workshop"] .cx-view[data-view="workshop"],
 .cx[data-view="backups"] .cx-view[data-view="backups"],
 .cx[data-view="activity"] .cx-view[data-view="activity"] {
@@ -925,3 +926,163 @@ select.small { font: inherit; font-size: .8rem; color: var(--ink); background: v
 .snap-group:first-child { margin-top: .25rem; }
 /* Times line up whatever their width. */
 .snaps .sha { min-width: 4.6rem; }
+
+/* ---------------------------------------------------------------- features */
+/* Every feature as a line from spec to every drive (runtime/console-features.js;
+   the spec is the drive page Notes and Sketches/Features view). One card, the
+   width of the view, because a line needs the room. */
+
+.fx {
+  /* Violet is outside the palette on purpose: it means an agent is working.
+     Here it marks a feature with a chat running now, and nothing else. */
+  --agent: light-dark(#6d55d4, #a596f2);
+  /* The rail: accent ink where a feature has been, the hairline where it has
+     not gone yet, so the unbuilt track still reads as a track. */
+  --rail-on: var(--accent-ink);
+  --rail-off: var(--line);
+}
+.fx .card-head .soft { font-size: .8rem; }
+.fx-note, .fx-said { margin: 0; padding: 0 1.1rem .5rem; font-size: .85rem; }
+
+.fx-lines { display: grid; grid-template-columns: var(--fx-cols); padding: 0 0 .6rem; }
+.fx-head, .fx-group, .fx-feat, .fx-line { display: grid; grid-template-columns: subgrid; }
+.fx-head, .fx-group, .fx-feat { grid-column: name / end; }
+.fx [data-c="name"] { grid-column: name; } .fx [data-c="spec"] { grid-column: spec; } .fx [data-c="plan"] { grid-column: plan; }
+.fx [data-c="build"] { grid-column: build; } .fx [data-c="commit"] { grid-column: commit; } .fx [data-c="push"] { grid-column: push; }
+.fx [data-c="yours"] { grid-column: yours; } .fx [data-c="tb"] { grid-column: tb; } .fx [data-c="all"] { grid-column: all; }
+.fx [data-c="next"] { grid-column: next; }
+
+.fx-head { padding: .4rem 0 .4rem; border-bottom: 1px solid var(--line); align-items: end; }
+/* Every label on the first row, whatever order the columns come in. */
+.fx-head > span { grid-row: 1; text-align: center; font-size: 12.5px; font-weight: 500; color: var(--muted); line-height: 1.25; }
+.fx-head > span small { display: block; font-size: 11.5px; font-weight: 400; color: var(--faint); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.fx-head > .h-name { text-align: left; padding-left: 1.1rem; }
+.fx-head > .h-next { text-align: left; }
+
+.fx-group > h3 { grid-column: name / end; margin: 0; padding: 1rem 1.1rem .3rem; font-size: 13px; font-weight: 600; color: var(--muted); }
+
+/* A line is a row: a shade under the pointer, never a lift or a scale. */
+.fx-feat { align-items: center; margin: 0 .35rem; border-radius: var(--r-sm); transition: background-color var(--t) var(--ease); }
+.fx-feat:hover, .fx-feat:focus-within, .fx-feat[data-open] { background: var(--paper-2); }
+.fx-feat[data-hidden] .fx-name { color: var(--muted); }
+.fx-id { grid-column: name; grid-row: 1; display: grid; grid-template-columns: 1.75rem minmax(0, 1fr); align-items: start; padding: .5rem 0 .5rem .1rem; }
+.fx-open { grid-row: 1 / span 2; width: 1.75rem; height: 1.75rem; margin-top: -.1rem; border: 0; border-radius: var(--r-sm); background: none; color: var(--muted); cursor: pointer; display: grid; place-items: center; }
+.fx-open:hover { background: var(--paper-3); color: var(--ink); }
+.fx-open::before { content: ""; width: 16px; height: 16px; background: currentColor; -webkit-mask: var(--chevron) center / 16px no-repeat; mask: var(--chevron) center / 16px no-repeat; transform: rotate(-90deg); transition: transform var(--t) var(--ease-out); }
+.fx-feat[data-open] .fx-open::before { transform: none; }
+.fx-name { font-weight: 500; line-height: 1.35; }
+/* A chat in this feature is working now. Still: the dot is a reading of who
+   is working, not the work, so it does not move. */
+.fx-name[data-working]::after { content: ""; display: inline-block; width: 7px; height: 7px; margin: 0 0 .1rem .45rem; border-radius: 50%; background: var(--agent); vertical-align: middle; }
+.fx-meta { grid-column: 2; font-size: .78rem; color: var(--muted); }
+
+.fx-line { grid-column: spec / next; grid-row: 1; height: 100%; cursor: pointer; }
+.fx-lives { grid-column: commit / next; grid-row: 1; align-self: center; padding: 0 .75rem; font-size: 12.5px; color: var(--muted); }
+.fx-next { grid-column: next; grid-row: 1; align-self: center; padding: .4rem 1rem .4rem .5rem; font-size: 12.5px; line-height: 1.35; color: var(--muted); }
+.fx-next[data-wait]::before { content: ""; display: inline-block; width: 7px; height: 7px; margin: 0 .4rem .1rem 0; border-radius: 50%; background: var(--caution); vertical-align: middle; }
+
+/* A stop. The rail is two halves, one either side, so a ring a ship skipped
+   shows as a gap. */
+.fx-cell { position: relative; display: flex; align-items: center; justify-content: center; min-height: 2.6rem; }
+.fx-cell::before, .fx-cell::after { content: ""; position: absolute; top: 50%; height: 2px; margin-top: -1px; background: var(--rail-off); }
+.fx-cell::before { left: 0; right: 50%; }
+.fx-cell::after { left: 50%; right: 0; }
+.fx-cell.first::before, .fx-cell.last::after { display: none; }
+.fx-cell.l::before, .fx-cell.r::after { background: var(--rail-on); }
+.fx-dot, .fx-dv { position: relative; z-index: 1; display: block; border-radius: 50%; background: var(--card); box-shadow: inset 0 0 0 1.5px var(--faint); }
+.fx-feat:is(:hover, :focus-within, [data-open]) .fx-cell:not(.on) .fx-dot,
+.fx-feat:is(:hover, :focus-within, [data-open]) .fx-dv:not(.lit) { background: var(--paper-2); }
+.fx-dot { width: 10px; height: 10px; }
+.fx-cell.on .fx-dot { background: var(--rail-on); box-shadow: none; }
+.fx-cell.here .fx-dot { width: 15px; height: 15px; background: var(--card); box-shadow: inset 0 0 0 4px var(--rail-on); }
+/* Passed with nothing written: the rail runs through, the stop stays open. */
+.fx-cell.on.skip .fx-dot { width: 7px; height: 7px; background: var(--card); box-shadow: inset 0 0 0 1.5px var(--rail-on); }
+.fx-feat:is(:hover, :focus-within, [data-open]) .fx-cell.on.skip .fx-dot { background: var(--paper-2); }
+/* A ring is its drives, one dot each, on a pill when the feature is there. */
+.fx-pill { position: relative; z-index: 1; display: flex; gap: 3px; padding: 4px 5px; border-radius: var(--pill); }
+.fx-cell.here.ring .fx-pill { background: var(--accent-soft); box-shadow: inset 0 0 0 1px var(--accent); }
+.fx-dv { width: 9px; height: 9px; }
+.fx-dv.lit { background: var(--rail-on); box-shadow: none; }
+/* Tried with sprite-deploy --local: an outline in the rail's ink, never filled. */
+.fx-dv.tried { box-shadow: inset 0 0 0 1.5px var(--rail-on); }
+
+/* A line, opened. */
+.fx-more { grid-column: name / end; padding: .25rem 1.1rem 1rem 2.1rem; animation: arrive var(--t-slow) var(--ease-out) both; }
+.fx-cols { display: grid; grid-template-columns: repeat(auto-fit, minmax(15rem, 1fr)); gap: 1rem 2rem; }
+.fx-col h4 { margin: 0 0 .3rem; font-size: 13px; font-weight: 600; color: var(--muted); }
+.fx-col ul { list-style: none; margin: 0; padding: 0; }
+.fx-col li { display: flex; gap: .5rem; align-items: baseline; padding: .2rem 0; line-height: 1.4; min-width: 0; }
+.fx-col li a { font-weight: 500; color: var(--ink); text-decoration: none; overflow-wrap: anywhere; }
+.fx-col li a:hover { text-decoration: underline; text-underline-offset: 2px; }
+.fx-age, .fx-kind { margin-left: auto; flex: none; font-size: .78rem; color: var(--muted); font-variant-numeric: tabular-nums; }
+.fx-age[data-running] { color: var(--agent); }
+.fx-path { font: 12px/1.45 var(--mono); color: var(--muted); overflow-wrap: anywhere; }
+.fx-term { display: grid; min-width: 0; }
+.fx-term > span:first-child { font-weight: 500; }
+.fx-commits li { align-items: baseline; }
+.fx-sha { flex: none; font: 12px var(--mono) !important; padding: .05rem .35rem; border-radius: var(--r-sm); background: var(--paper-3); }
+.fx-commits li > span { color: var(--muted); font-size: 13px; }
+.fx-edit { display: flex; flex-wrap: wrap; align-items: end; gap: .55rem 1rem; margin-top: .9rem; padding-top: .7rem; border-top: 1px solid var(--line); }
+.fx-field { display: grid; gap: .2rem; font-size: 12.5px; color: var(--muted); }
+.fx-field input { font: inherit; font-size: 13.5px; color: var(--ink); width: min(22rem, 70vw); padding: .3rem .55rem; border: 1px solid var(--line); border-radius: var(--r-sm); background: var(--card); transition: border-color var(--t) var(--ease), box-shadow var(--t) var(--ease); }
+.fx-field input:focus { outline: none; border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-soft); }
+.fx-stage { display: grid; gap: .2rem; font-size: 12.5px; color: var(--muted); }
+
+.fx-loose { margin: .2rem 1.1rem 0; padding: .7rem 0 .3rem; border-top: 1px solid var(--line); font-size: 13px; color: var(--muted); }
+.fx-loose a { color: var(--ink); font-weight: 500; text-decoration: none; }
+.fx-loose a:hover { text-decoration: underline; }
+
+/* Drives: the same facts turned round, each place and what has not reached it. */
+.fx-drives { display: grid; grid-template-columns: repeat(auto-fit, minmax(12rem, 1fr)); gap: 1.4rem; padding: .9rem 1.1rem 1.2rem; }
+.fx-ring > h3 { margin: 0 0 .5rem; font-size: 13px; font-weight: 600; color: var(--muted); }
+.fx-node { margin: 0 0 .55rem; padding: .6rem .75rem .65rem; background: var(--paper); border: 1px solid var(--line); border-radius: var(--r); }
+.fx-node .nm { font-weight: 500; }
+.fx-node .role { font-size: .78rem; color: var(--muted); }
+.fx-node .rel { display: inline-block; margin-top: .3rem; font: 12px var(--mono); padding: .05rem .35rem; border-radius: var(--r-sm); background: var(--paper-2); }
+.fx-waits { margin-top: .5rem; }
+.fx-waits .wl, .fx-waits .none { font-size: 12.5px; color: var(--muted); }
+.fx-waits button, .fx-cfeats button { display: flex; width: 100%; gap: .6rem; align-items: baseline; text-align: left; border: 0; background: none; color: var(--ink); font: inherit; font-size: 13px; padding: .2rem .4rem; margin: 0 -.4rem; border-radius: var(--r-sm); cursor: pointer; transition: background-color var(--t) var(--ease); }
+.fx-waits button:hover, .fx-cfeats button:hover { background: var(--paper-3); }
+
+/* Chats: each chat once, the features it moved under it. */
+.fx-chats { display: grid; grid-template-columns: repeat(auto-fill, minmax(21rem, 1fr)); gap: 0 1rem; padding: .3rem .35rem .9rem; }
+.fx-crow { padding: .55rem .75rem .6rem; border-bottom: 1px solid var(--line); min-width: 0; }
+.fx-chead { display: flex; align-items: baseline; gap: .6rem; min-width: 0; }
+.fx-chead a { font-weight: 500; color: var(--ink); text-decoration: none; overflow-wrap: anywhere; }
+.fx-chead a:hover { text-decoration: underline; text-underline-offset: 2px; }
+.fx-crow[data-running] .fx-chead > a::after { content: ""; display: inline-block; width: 7px; height: 7px; margin: 0 0 .1rem .45rem; border-radius: 50%; background: var(--agent); vertical-align: middle; }
+.fx-cfeats { margin-top: .2rem; }
+.fx-cfeats button { padding-left: 1rem; margin: 0; }
+.fx-cfeats .wh { margin-left: auto; flex: none; font-size: 12.5px; color: var(--muted); }
+.fx-cloose { display: flex; flex-wrap: wrap; gap: .2rem .9rem; margin-top: .2rem; padding-left: 1rem; font-size: 13px; }
+.fx-cloose a { color: var(--ink); font-weight: 500; text-decoration: none; }
+
+/* Narrow: the line drops under its name, and the stop names turn a quarter
+   so eight of them fit across without going sideways. */
+@container (width < 760px) {
+  .fx-lines { grid-template-columns: var(--fx-cols-narrow); padding-inline: .2rem; }
+  .fx-head > .h-name, .fx-head > .h-next { display: none; }
+  .fx-head > span { writing-mode: vertical-rl; transform: rotate(180deg); justify-self: center; text-align: left; font-size: 12px; }
+  .fx-head > span small { display: none; }
+  .fx-group > h3 { padding-inline: .6rem; }
+  .fx-feat { margin: 0; }
+  .fx-id { grid-column: name / end; padding: .55rem .4rem 0 0; }
+  .fx-line, .fx-lives { grid-row: 2; }
+  .fx-next { grid-column: spec / end; grid-row: 3; padding: 0 .6rem .55rem 2.1rem; }
+  .fx-more { padding: .25rem .6rem 1rem 1.2rem; }
+  .fx-pill { gap: 2px; padding: 3px; }
+  .fx-dv { width: 7px; height: 7px; }
+  .fx-chats { grid-template-columns: minmax(0, 1fr); }
+}
+@container (760px <= width < 1000px) {
+  .fx-head > span:not(.h-name, .h-next) { writing-mode: vertical-rl; transform: rotate(180deg); justify-self: center; text-align: left; font-size: 12px; }
+  .fx-head > span small { display: none; }
+}
+@media (hover: none) {
+  .fx-feat:hover { background: none; }
+  .fx-open:hover, .fx-waits button:hover, .fx-cfeats button:hover { background: none; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .fx-feat, .fx-open::before, .fx-field input, .fx-waits button, .fx-cfeats button { transition: none; }
+  .fx-more { animation: none; }
+}

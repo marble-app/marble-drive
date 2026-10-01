@@ -19,7 +19,21 @@
   window.marbleConsoleReady = { redraw: () => { drawn.clear(); paint(); } };
 
   const TRANSIENT = 'data-marble-transient';
-  const VIEWS = [['dashboard', 'Dashboard'], ['drives', 'Drives'], ['backups', 'Backups'], ['ship', 'Ship'], ['workshop', 'Workshop'], ['activity', 'Activity']];
+  const VIEWS = [['dashboard', 'Dashboard'], ['drives', 'Drives'], ['backups', 'Backups'], ['ship', 'Ship'], ['features', 'Features'], ['workshop', 'Workshop'], ['activity', 'Activity']];
+  // A link can open a view, and Features at one line: ?view=features&feature=<id>
+  // (the triage skill answers with one). Read once, then taken off the address
+  // so a reload opens where the owner left it.
+  const arrival = (() => {
+    const url = new URL(location.href);
+    const view = url.searchParams.get('view');
+    const feature = url.searchParams.get('feature');
+    if (view || feature) {
+      url.searchParams.delete('view');
+      url.searchParams.delete('feature');
+      history.replaceState(history.state, '', url.href);
+    }
+    return { view: VIEWS.some(([v]) => v === view) ? view : null, feature };
+  })();
   const LIMITS = [
     ['MARBLE_DRIVE_TAB_HIDDEN_SECONDS', 'A hidden tab rests after', 's', 60],
     ['MARBLE_DRIVE_TAB_IDLE_MINUTES', 'An idle tab rests after', 'min', 10],
@@ -68,8 +82,8 @@
   };
 
   const S = {
-    // The Console opens on the dashboard; the other views are a tap away.
-    view: 'dashboard',
+    // The Console opens on the dashboard, or on the view a link asked for.
+    view: arrival.view ?? 'dashboard',
     drive: store.get('drive'),
     job: store.get('job'),
     open: false, // the detail slid in, on a phone
@@ -401,6 +415,11 @@
 
   const shipPage = h('div.page');
   views.ship.append(shipPage);
+  // Features is its own file (runtime/console-features.js), drawn with this
+  // page's helpers so it looks and refreshes like the rest.
+  const featuresPage = h('div.page');
+  views.features.append(featuresPage);
+  let features = null;
   const backupsPage = h('div.page');
   views.backups.append(backupsPage);
   const shopPage = h('div.page');
@@ -425,6 +444,7 @@
     placeThumb();
     if (id === 'workshop') loadChats();
     if (id === 'dashboard') loadUsage(S.range);
+    if (id === 'features') features?.load();
     paint();
   }
 
@@ -2100,6 +2120,7 @@
     if (S.view === 'dashboard') drawDashboard();
     if (S.view === 'backups') drawBackups();
     if (S.view === 'ship') drawShip();
+    if (S.view === 'features') features?.draw();
     if (S.view === 'workshop') drawWorkshop();
     if (S.view === 'activity') drawActivity();
   }
@@ -2165,12 +2186,15 @@
     S.workshop = JSON.parse(e.data);
     paint();
   });
+  // The board was saved (triage finished) or corrected in another tab.
+  events.addEventListener('features', () => features?.load());
 
   // Ages move on their own.
   setInterval(() => {
     if (!document.hidden && !window.marbleTabRest?.resting) paint();
   }, 15_000);
 
+  features = window.marbleConsoleFeatures?.mount(featuresPage, { h, api, ago, segmented, paint, feature: arrival.feature }) ?? null;
   placeThumb();
   refresh();
   loadChats();

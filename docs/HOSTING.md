@@ -502,9 +502,13 @@ names and taking over a drive on a request are not built.
 
 ## The console
 
-**Console** is a document in admin-p2's drive (`/a/Console`): every drive and
-everything done to them, from one page. It is on only where `sprite.env` says
-`MARBLE_DRIVE_CONSOLE=1` and the drive has a passphrase, which is admin-p2. Its
+**Console** is a document in the owner's drive (`/a/Console`): every drive and
+everything done to them, from one page. It is on only where the drive's
+settings say `MARBLE_DRIVE_CONSOLE=1` and the drive has a passphrase: admin-p2's
+`sprite.env`, and, since the drive's home moved to the Mac, the Mac's
+`~/.config/marble-drive/mac-bryan.env` too (with `MARBLE_DRIVE_CONSOLE_SRC`
+pointing at the Mac's checkouts and `MARBLE_DRIVE_CONSOLE_SPRITE` at the
+`sprite` CLI, since launchd's PATH has neither). Its
 code is the host's (`server/console/`, `runtime/console.js`, `console.css`),
 so it ships with every deploy; the document is only where it lives.
 
@@ -515,6 +519,7 @@ so it ships with every deploy; the document is only where it lives.
 | **Backups** | the Mac's backup of this drive, as the Mac last reported it: when it last backed up and why, whether changes are waiting and when they will be copied, when the Mac last checked in; warnings when it stops checking in, a backup fails or changes are overdue (they mark the tab); **Schedule** on/off and **Back up now**; **On the Mac**: the one copy (`~/Marble Drive`), its documents, size and matching Fly checkpoint, with **Restore…** onto this or another drive; **History on Fly**: the drive's checkpoints, each with **Restore…** (the Mac does it); names typed to confirm; the terminal command for when this drive is down. Buttons leave requests the Mac picks up within a minute (see "Back a drive up here") |
 | **Ship** | main's recent commits and which drives have them; each drive against main; **Ship** shows the plan (`sprite-deploy.sh --print-plan`) before deploying main to every user and then admin-p2; **Try the workshop on t-bryan** |
 | **Workshop** | a card per checkout that says where it stands in a sentence and offers the one next step (`next` in `server/console/workshop.js`): get GitHub's latest, publish, finish a publish, or sign in to npm; each button says what it does before it is pressed, and a running job shows its steps, npm's approval link as a button, and on failure what went wrong and the button that fixes it. **Publish** marble checks first and changes nothing if this copy has loose edits, cannot fast-forward to GitHub, or is not signed in to npm; then the next patch in package.json and both plugin manifests, committed, an annotated tag, pushed, then `npm publish` (marble's guard and unit tests). A version made but never uploaded is uploaded as it is (**Finish publishing**), never bumped again. **Sign in to npm** runs `npm login --auth-type=web` and shows its link; admin-p2 needs it once. marble-drive needs no change: it depends on `file:../marble`, and a deploy installs the version that checkout declares. Also a workshop chat in the Marble Drive or Marble project |
+| **Features** | every change the owner is making, as a line: Spec → Plan → Build → Commit → Push, then the drives in rings (Yours: the Mac and admin-p2; t-bryan; everyone). **Lines**, **Drives** (each place and what has not reached it) and **Chats** (each chat once, with the features it moved). The board is the `triage` skill's (`agent-plugin/skills/triage`), saved to `.marble/console/features.json` only when the owner asks: **Run triage** starts a chat that runs it, or the owner asks in any chat, and the agent answers with `/a/Console?view=features&feature=<id>`. Where each feature is, is the server's, from git and the releases (`server/console/features.js`); a release the Console has not seen comes from the deploys' own `done: … is live on …` lines. Name, next step, stage and hidden are the owner's corrections, kept beside the board through every triage. Spec: the drive page `Notes and Sketches/Features view` |
 | **Activity** | every job the console ran, its output streamed and kept |
 
 How it knows things: the Sprites API for the list, awake or asleep

@@ -12,9 +12,11 @@
 
 import os from 'node:os';
 import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 
 import { createActions } from './actions.js';
 import { createBackups } from './backups.js';
+import { createFeatures, ownRelease, ringDrives } from './features.js';
 import { createInspector } from './inspect.js';
 import { createJobs } from './jobs.js';
 import { createSprites } from './sprites.js';
@@ -71,6 +73,14 @@ export async function createConsole({ config, store, streams = null, ledger = nu
   const workshop = createWorkshop({ src: config.consoleSrc });
   const backups = createBackups({ dir: path.join(dir, 'backups') });
   const actions = createActions({ sprites, inspector, jobs, workshop, src: config.consoleSrc, self, stateDir: dir });
+  // Every feature from spec to every drive. Triage is the skill's, run when
+  // the owner asks; this only keeps the board and places it (features.js).
+  const features = createFeatures({ dir, driveDir: path.dirname(store.marbleDir), src: config.consoleSrc, log });
+  const selfRelease = ownRelease(fileURLToPath(import.meta.url));
+  // On the owner's Mac, running a release, the drive is at home here and is
+  // not a sprite, so it is a drive of its own on the line, before admin-p2.
+  // A checkout on a Mac (a test, a dev host) is not a drive's home.
+  const onMac = process.platform === 'darwin' && Boolean(selfRelease);
 
   // ---------------------------------------------------------------- state
 
@@ -145,6 +155,8 @@ export async function createConsole({ config, store, streams = null, ledger = nu
       };
     }));
   }
+
+  const drivesList = () => drives();
 
   async function state() {
     if (!fleetAt) await readFleet();
@@ -228,11 +240,28 @@ export async function createConsole({ config, store, streams = null, ledger = nu
     send('backups', await backups.list().catch(() => []));
   }
 
+  // A saved board (the skill finished, or a correction from another tab).
+  let featuresSeen = null;
+  async function featuresChanged() {
+    const sig = await features.signature().catch(() => null);
+    if (featuresSeen === null) {
+      featuresSeen = sig;
+      return;
+    }
+    if (sig === featuresSeen) return;
+    featuresSeen = sig;
+    send('features', { at: Date.now() });
+  }
+
   const watching = () => {
     if (timer || !listeners.size) return;
     timer = setInterval(tick, FLEET_EVERY);
     timer.unref?.();
-    backupsTimer = setInterval(() => backupsChanged().catch(() => {}), BACKUPS_EVERY);
+    featuresChanged().catch(() => {});
+    backupsTimer = setInterval(() => {
+      backupsChanged().catch(() => {});
+      featuresChanged().catch(() => {});
+    }, BACKUPS_EVERY);
     backupsTimer.unref?.();
     tick();
   };
@@ -311,6 +340,20 @@ export async function createConsole({ config, store, streams = null, ledger = nu
         return json(res, result.ok ? 200 : 400, result.ok ? result : { ...result, error: result.line ? `${result.why}: “${result.line}”` : result.why });
       }
       if (a === 'budget' && method === 'PUT') return json(res, 200, { monthly: await usage.setBudget(body.monthly) });
+
+      if (a === 'features') {
+        if (!b && method === 'GET') {
+          if (!fleetAt) await readFleet();
+          const drives = ringDrives({ fleet: await drivesList(), self, selfRelease, mac: onMac });
+          return json(res, 200, { ...(await features.view({ drives })), self, mac: onMac });
+        }
+        if (b && method === 'POST' && c === 'correct') {
+          const out = await features.correct(b, body);
+          featuresSeen = await features.signature().catch(() => featuresSeen);
+          send('features', { at: Date.now(), id: b });
+          return json(res, 200, out);
+        }
+      }
 
       if (a === 'plan' && method === 'GET') {
         return json(res, 200, await actions.plan({
@@ -400,6 +443,7 @@ export async function createConsole({ config, store, streams = null, ledger = nu
     actions,
     workshop,
     usage,
+    features,
     close() {
       if (timer) clearInterval(timer);
       if (pending) clearTimeout(pending);
