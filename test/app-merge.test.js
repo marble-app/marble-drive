@@ -57,6 +57,22 @@ test('different edits to one place conflict, and nothing is written', () => {
   assert.equal(r.text, null);
 });
 
+test('an addition the document already holds, among its own, is not added twice', () => {
+  const base = '<body>\n<main>x</main>\n</body>\n';
+  const ours = '<body>\n<main>x</main>\n<script data-marble-id="ours0001">pics()</script>\n<style data-marble-id="ours0002">.w {}</style>\n</body>\n';
+  const theirs = '<body>\n<main>x</main>\n<style data-marble-id="thrs0001">.w {}</style>\n</body>\n';
+  const r = run(base, ours, theirs);
+  assert.equal(r.conflicts.length, 0);
+  assert.equal(r.text, ours);
+
+  // Only an addition: two edits that each replace a line still conflict.
+  const changed = run('a\nb\nc\n', 'a\nmine\nB\nc\n', 'a\nB\nc\n');
+  assert.equal(changed.conflicts.length, 1);
+  // And a template addition the document holds only part of still conflicts.
+  const part = run(base, ours, '<body>\n<main>x</main>\n<style data-marble-id="thrs0001">.w {}</style>\n<p>new</p>\n</body>\n');
+  assert.equal(part.conflicts.length, 1);
+});
+
 test('nothing moved in the template means the document comes back as it was', () => {
   const ours = 'a\n<p data-marble-id="k1">edited</p>\nc\n';
   const r = run('a\n<p data-marble-id="z9">b</p>\nc\n', ours, 'a\n<p data-marble-id="q7">b</p>\nc\n');

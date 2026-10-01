@@ -293,8 +293,9 @@ __ICON__
 
   /* A run of numbered lines counts itself. Anything that is not a list line
      ends the run; a line at one depth starts the count again for the depths
-     under it. */
-  .note { counter-reset: n0 n1 n2 n3; }
+     under it. The note itself must not reset these: a counter the parent
+     holds outranks the ones its lines reset, and every list in a note would
+     carry on from the one before. */
   .note > :not([data-list]) { counter-reset: n0 n1 n2 n3; }
   .note > [data-list]:not([data-indent]) { counter-reset: n1 n2 n3; }
   .note > [data-list][data-indent="1"] { counter-reset: n2 n3; }
@@ -538,10 +539,11 @@ __ICON__
   /* ---------------------------------------------------------- folded
 
      Mod+Shift+\ or the mark at the top of the rail folds it to a strip holding
-     just its two buttons, so the page can have the width. Where the rail is
-     already a strip across the top, folding it takes the notes away and leaves
-     the name. Whether it is folded is a reading of this window, never a fact
-     about the notes: it sits on <html>, which the file says carries nothing. */
+     its two buttons and a square for each note, so the page can have the
+     width. Where the rail is already a strip across the top, folding it takes
+     the notes away and leaves the name. Whether it is folded is a reading of
+     this window, never a fact about the notes: it sits on <html>, which the
+     file says carries nothing. */
   [data-rail="off"] .rail > :not(.railhead) { display: none !important; }
   @container app (min-width: 42.01rem) {
     [data-rail="off"] body.app { grid-template-columns: auto minmax(0, 1fr); }
@@ -782,7 +784,7 @@ __ICON__
 <h4 data-marble-id="__ID__" data-marble-rich>Marks and notes</h4>
 <p data-marble-id="__ID__" data-marble-rich data-list="number"><b>Ctrl+B</b>, <b>Ctrl+I</b>, <b>Ctrl+U</b> and <b>Ctrl+Shift+X</b> mark whatever is selected; <b>Ctrl+\</b> clears it.</p>
 <p data-marble-id="__ID__" data-marble-rich data-list="number"><b>Ctrl+K</b> makes a link of whatever is selected, and an address pasted or typed becomes one by itself. Put the caret in a link to open, change or remove it.</p>
-<p data-marble-id="__ID__" data-marble-rich data-list="number"><b>Ctrl+Enter</b> starts a new note. <b>Ctrl+Alt+↑</b> and <b>↓</b> walk to the note above or below. <b>Ctrl+Shift+\</b> folds the list away and brings it back.</p>
+<p data-marble-id="__ID__" data-marble-rich data-list="number"><b>Ctrl+Enter</b> starts a new note. <b>Ctrl+Alt+↑</b> and <b>↓</b> walk to the note above or below. <b>Ctrl+Shift+\</b> folds the list down to each note's initials and brings it back.</p>
 <p data-marble-id="__ID__" data-marble-rich data-list="number"><b>Ctrl+Z</b> takes back the last change, whoever made it — you, an agent, or another window.</p>
 <p data-marble-id="__ID__" data-marble-rich>The page is one field rather than a column of boxes, so a drag highlights across paragraphs and <b>Ctrl+A</b> takes the whole note. Paste arrives as plain text, with its line breaks kept and its addresses made links.</p>
     </article>
@@ -3888,5 +3890,216 @@ __ICON__
 </script>
 
 __SCRIPT__
+  <style data-marble-id="__ID__">
+  /* ------------------------------------------------------------- the width
+
+     Whether the page is a column in the middle of the sheet or runs to its
+     edges is one attribute on the sheet, data-width. With none, the page is a
+     column about as wide as a printed page with its margins; "full" is the
+     whole sheet. A screen only: print sets its own measure.
+
+     Both are a max-width, 100% or 48rem, so the change between them can be
+     eased rather than cut: the column opens out from the middle, and the
+     toolbar's ends travel with it. */
+  @media screen {
+    .sheet .notes > .note {
+      width: 100%; max-width: 100%; margin-inline: auto;
+      transition: max-width 320ms var(--ease-out);
+    }
+    .sheet:not([data-width="full"]) .notes > .note { max-width: 48rem; }
+  }
+
+  /* The switch sits apart from the formatting, at the far end of the row, and
+     is lit the way a pressed tool is. */
+  .tool[data-kind="width"] { margin-left: auto; }
+  .tool[aria-checked="true"] { background: var(--paper-3); color: var(--accent-ink); }
+
+  /* With margins, the toolbar's ends stand over the column's, so the tools
+     are above the text they act on and the switch marks the column's edge. */
+  @container app (min-width: 42.01rem) {
+    .sheet > .tools { padding-inline: 1.1rem; transition: padding 320ms var(--ease-out); }
+    .sheet:not([data-width="full"]) > .tools { padding-inline: max(1.1rem, calc((100% - 48rem) / 2 + 1.1rem)); }
+  }
+  /* A phone's page has no margins to give, so there is nothing to switch. */
+  @container app (max-width: 42rem) {
+    .tool[data-kind="width"] { display: none; }
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .sheet .notes > .note, .sheet > .tools { transition: none; }
+  }
+</style>
+  <script data-marble-id="__ID__">
+  // The width switch. What it changes is the file's: data-width on the sheet,
+  // "full" or nothing. The button is chrome at the end of the toolbar, so it is
+  // the page's, and it asks the sheet which way it is lit every time.
+  (() => {
+    const FACE =
+      '<svg viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">' +
+      '<path d="M3.5 5v14M20.5 5v14"/><path d="M7.5 12h9"/><path d="m10 9-2.5 3 2.5 3M14 9l2.5 3-2.5 3"/></svg>';
+
+    const begin = (marble) => {
+      const sheet = document.getElementById('sheet');
+      if (!sheet) return;
+      const full = () => sheet.getAttribute('data-width') === 'full';
+      let button = null;
+
+      const draw = () => {
+        if (!button) return;
+        button.setAttribute('aria-checked', String(full()));
+        button.title = full() ? 'Full width. Click for margins' : 'Margins. Click for full width';
+      };
+
+      const flip = () => {
+        const id = marble.id(sheet);
+        if (!id) return;
+        const was = sheet.getAttribute('data-width');
+        const op = { type: 'setAttr', id, name: 'data-width', value: full() ? null : 'full' };
+        marble.apply(op);
+        marble.record({ redo: [op], undo: [{ type: 'setAttr', id, name: 'data-width', value: was }] });
+        marble.op(op, { immediate: true });
+        draw();
+      };
+
+      const addTool = () => {
+        const tools = sheet.querySelector(':scope > .tools');
+        if (!tools) return false;
+        button = tools.querySelector('.tool[data-kind="width"]');
+        if (!button) {
+          button = document.createElement('button');
+          button.type = 'button';
+          button.className = 'tool';
+          button.dataset.kind = 'width';
+          button.dataset.name = 'width';
+          button.setAttribute('role', 'switch');
+          button.setAttribute('aria-label', 'Full width');
+          button.innerHTML = FACE;
+          button.tabIndex = -1;
+          // The caret stays in the text, as it does for every other tool.
+          button.addEventListener('mousedown', (event) => event.preventDefault());
+          button.addEventListener('click', flip);
+          tools.append(button);
+        }
+        draw();
+        return true;
+      };
+      if (!addTool()) {
+        let tries = 0;
+        const again = () => { if (!addTool() && ++tries < 20) requestAnimationFrame(again); };
+        requestAnimationFrame(again);
+      }
+      // Undo, another window, or the page put back from the file can change
+      // the attribute under us; the switch follows the sheet whichever it was.
+      new MutationObserver(draw).observe(sheet, { attributes: true, attributeFilter: ['data-width'] });
+      marble.register(draw);
+    };
+
+    if (window.marble) begin(window.marble);
+    else addEventListener('marble:ready', (event) => begin(event.detail), { once: true });
+  })();
+</script>
+  <script data-marble-id="__ID__">
+  // The folded rail's notes. Folded, each row is a square holding the note's
+  // initials, and the name it stands for comes up beside it under the pointer
+  // or the keyboard. Both are readings of the rows, which are the page's and
+  // drawn afresh whenever a note changes, so nothing here is filed.
+  (() => {
+    const rows = document.getElementById('rows');
+    if (!rows) return;
+    const root = document.documentElement;
+
+    // "Formative Study Plans" is FS, "Keys" is K, a note with no words yet is N.
+    const initials = (title) => {
+      const words = title.match(/[\p{L}\p{N}][\p{L}\p{N}'’]*/gu) || [];
+      if (!words.length) return 'N';
+      return (words[0][0] + (words[1]?.[0] ?? '')).toUpperCase();
+    };
+    const nameOf = (open) => open.querySelector('.t')?.textContent.trim() || 'New note';
+    const mark = () => {
+      for (const open of rows.querySelectorAll('.open')) open.dataset.mono = initials(nameOf(open) === 'New note' ? '' : nameOf(open));
+    };
+    new MutationObserver(mark).observe(rows, { childList: true });
+    mark();
+
+    // The name, beside the square. Fixed to the window, because the list
+    // scrolls and would clip anything that stood outside it.
+    const tip = document.createElement('div');
+    tip.className = 'foldtip';
+    tip.setAttribute('data-marble-transient', '');
+    tip.setAttribute('aria-hidden', 'true');
+    tip.hidden = true;
+    document.body.append(tip);
+
+    const folded = () => root.getAttribute('data-rail') === 'off' && getComputedStyle(rows).display !== 'none';
+    const show = (open) => {
+      if (!open || !folded()) return;
+      tip.textContent = nameOf(open);
+      const r = open.getBoundingClientRect();
+      tip.style.left = r.right + 10 + 'px';
+      tip.style.top = r.top + r.height / 2 + 'px';
+      tip.hidden = false;
+    };
+    const hide = () => { tip.hidden = true; };
+
+    rows.addEventListener('pointerover', (event) => {
+      if (event.pointerType === 'mouse' || event.pointerType === 'pen') show(event.target.closest('.open'));
+    });
+    rows.addEventListener('pointerleave', hide);
+    rows.addEventListener('focusin', (event) => {
+      const open = event.target.closest('.open');
+      if (open?.matches(':focus-visible')) show(open);
+    });
+    rows.addEventListener('focusout', hide);
+    rows.addEventListener('scroll', hide, { passive: true });
+    rows.addEventListener('click', hide);
+    new MutationObserver(hide).observe(root, { attributes: true, attributeFilter: ['data-rail'] });
+  })();
+</script>
+  <style data-marble-id="__ID__">
+  /* ------------------------------------------------------ folded, with notes
+
+     Folded beside the page, the rail is still the way between notes: under its
+     two buttons, a square for each note holding its initials, the open one
+     white like its row. The search and the count stay folded away. Where the
+     rail is a strip across the top, folding still takes the notes away. */
+  @container app (min-width: 42.01rem) {
+    [data-rail="off"] nav.rail > .rows {
+      display: flex !important; flex-direction: column; align-items: center; gap: .25rem;
+      padding: .7rem .45rem max(1rem, env(safe-area-inset-bottom, 0px));
+      overflow-x: hidden; scrollbar-width: none;
+    }
+    [data-rail="off"] .rows::-webkit-scrollbar { display: none; }
+    [data-rail="off"] .rows:empty::before { content: none; }
+    [data-rail="off"] .row { display: block; }
+    [data-rail="off"] .row .drop { display: none; }
+    [data-rail="off"] .open { width: 2rem; height: 2rem; padding: 0; display: grid; place-items: center; }
+    [data-rail="off"] .open::before {
+      content: attr(data-mono) / "";
+      font: 600 .7rem/1 var(--ui); letter-spacing: .03em; color: var(--muted);
+    }
+    [data-rail="off"] .row.marble-current .open::before { color: var(--ink); }
+    [data-rail="off"] .open .s { display: none; }
+    /* Out of sight but still the button's name, so a screen reader hears the
+       note rather than its letters. */
+    [data-rail="off"] .open .t {
+      position: absolute; width: 1px; height: 1px; overflow: hidden;
+      clip-path: inset(50%); white-space: nowrap;
+    }
+    @media (hover: none), (pointer: coarse) {
+      [data-rail="off"] .open { width: 2.75rem; height: 2.75rem; }
+    }
+  }
+
+  /* The name beside the square, set like the link box: a card that floats,
+     one line, gone the moment the pointer or the focus leaves. */
+  .foldtip {
+    position: fixed; z-index: 6; transform: translateY(-50%);
+    max-width: 18rem; padding: .35rem .6rem;
+    background: var(--card); color: var(--ink);
+    border: 1px solid var(--line); border-radius: var(--r-sm); box-shadow: var(--shadow);
+    font: 500 .82rem/1.3 var(--ui);
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis; pointer-events: none;
+  }
+  .foldtip[hidden] { display: none; }
+</style>
 </body>
 </html>

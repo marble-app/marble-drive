@@ -229,7 +229,11 @@ export function merge3(base, ours, theirs) {
       // reworded — the owner's words win. Only a disagreement over the app
       // itself holds the page back.
       const words = base.slice(start, end).every(isWords) && theirs.slice(tSpan[0], tSpan[1]).every(isWords);
-      if (same) emitOurs(oSpan[0], oSpan[1]);
+      // Both added lines at one place, and what the owner added already holds
+      // what the template adds, line for line: the owner has it already, most
+      // often because the change was made in their copy first.
+      const holds = start === end && contains(oCodes, tCodes);
+      if (same || holds) emitOurs(oSpan[0], oSpan[1]);
       else if (words) { emitOurs(oSpan[0], oSpan[1]); kept++; }
       else conflicts.push({ base: [start, end], ours: oSpan, theirs: tSpan });
     }
@@ -238,6 +242,17 @@ export function merge3(base, ours, theirs) {
   }
   emitOurs(o, ours.length);
   return { lines: out, conflicts, changed, kept };
+}
+
+/** Whether `needle` runs, unbroken and in order, somewhere inside `hay`. */
+function contains(hay, needle) {
+  if (!needle.length) return true;
+  for (let i = 0; i + needle.length <= hay.length; i++) {
+    let k = 0;
+    while (k < needle.length && hay[i + k] === needle[k]) k++;
+    if (k === needle.length) return true;
+  }
+  return false;
 }
 
 // ------------------------------------------------------------------- the ids

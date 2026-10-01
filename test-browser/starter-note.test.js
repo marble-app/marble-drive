@@ -846,3 +846,80 @@ test('the rail says what it is to somebody who cannot see it', async () => {
   assert.ok(!/role="list(item)?"/.test(source.replace('role="list"', '')), 'a row role is a reading, not a fact');
   assert.deepEqual(errors, []);
 });
+
+test('the page has margins until the switch says full width, and the file keeps which', async () => {
+  const { page, errors } = await open();
+  const measure = () =>
+    page.evaluate(() => ({
+      note: Math.round(document.querySelector('.note.marble-open').getBoundingClientRect().width),
+      sheet: Math.round(document.querySelector('.sheet').getBoundingClientRect().width),
+      lit: document.querySelector('.tool[data-kind="width"]')?.getAttribute('aria-checked'),
+      width: document.querySelector('.sheet').getAttribute('data-width'),
+    }));
+
+  const before = await measure();
+  assert.equal(before.lit, 'false', 'the switch is in the toolbar, off');
+  assert.equal(before.width, null);
+  assert.ok(before.note <= 768, `with margins the page is a column, not ${before.note}px`);
+  assert.ok(before.sheet - before.note > 100, 'and there is margin either side of it');
+
+  await page.click('.tool[data-kind="width"]');
+  await page.waitForTimeout(450);
+  const full = await measure();
+  assert.equal(full.lit, 'true');
+  assert.equal(full.width, 'full');
+  assert.equal(full.note, full.sheet, 'full width runs to the edges of the sheet');
+  const sheetTag = async () => (await filed(page)).match(/<main\b[^>]*id="sheet"[^>]*>/)[0];
+  assert.match(await sheetTag(), / data-width="full"/);
+
+  // The caret was never taken from the text, and one undo puts the margins back.
+  await page.keyboard.press('ControlOrMeta+z');
+  await page.waitForTimeout(450);
+  const back = await measure();
+  assert.equal(back.width, null);
+  assert.equal(back.lit, 'false');
+  assert.doesNotMatch(await sheetTag(), /data-width/);
+
+  // A phone's page has no margins to give, so it has no switch.
+  const phone = await openPhone();
+  assert.equal(await phone.page.evaluate(() => getComputedStyle(document.querySelector('.tool[data-kind="width"]')).display), 'none');
+  assert.deepEqual(errors, []);
+  assert.deepEqual(phone.errors, []);
+});
+
+test('folded, the rail keeps a square for each note, and the name comes up beside it', async () => {
+  const { page, errors } = await open();
+  await page.click('[data-cmd="rail"]');
+  await page.waitForTimeout(200);
+  const folded = await page.evaluate(() => ({
+    rail: Math.round(document.querySelector('.rail').getBoundingClientRect().width),
+    rows: getComputedStyle(document.querySelector('#rows')).display,
+    find: getComputedStyle(document.querySelector('.find')).display,
+    marks: [...document.querySelectorAll('.row .open')].map((el) => el.dataset.mono),
+    names: [...document.querySelectorAll('.row .open .t')].map((el) => el.textContent.trim()),
+    expanded: document.querySelector('[data-cmd="rail"]').getAttribute('aria-expanded'),
+  }));
+  assert.ok(folded.rail < 80, `the folded rail is a strip, not ${folded.rail}px`);
+  assert.notEqual(folded.rows, 'none', 'the notes stay in it');
+  assert.equal(folded.find, 'none', 'the search folds away');
+  assert.deepEqual(folded.marks, ['S', 'K']);
+  assert.equal(folded.names[1], 'Keys', 'a screen reader still hears the name');
+  assert.equal(folded.expanded, 'false');
+
+  // The pointer brings the name up beside the square; a click opens the note.
+  await page.hover('.row:nth-child(2) .open');
+  await page.waitForTimeout(100);
+  assert.equal(await page.evaluate(() => { const t = document.querySelector('.foldtip'); return t.hidden ? null : t.textContent; }), 'Keys');
+  await page.click('.row:nth-child(2) .open');
+  await page.waitForTimeout(200);
+  assert.equal(await page.evaluate(() => document.querySelector('.note.marble-open').firstElementChild.textContent), 'Keys');
+
+  const source = await filed(page);
+  assert.ok(!/data-mono=|<div class="foldtip"|<html[^>]*data-rail/.test(source), 'the folded rail is a reading, not a fact');
+
+  // Unfolded, the rows are rows again.
+  await page.click('[data-cmd="rail"]');
+  await page.waitForTimeout(200);
+  assert.ok(await page.evaluate(() => document.querySelector('.rail').getBoundingClientRect().width > 200));
+  assert.deepEqual(errors, []);
+});
