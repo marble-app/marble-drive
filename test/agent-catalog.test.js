@@ -5,6 +5,7 @@ import test from 'node:test';
 
 import {
   CLAUDE_MODES,
+  CODEX_MODES,
   CURSOR_MODES,
   composeCursorModel,
   driveWhere,
@@ -79,14 +80,15 @@ test('the Cursor picker only offers Auto and the best Grok family', () => {
   assert.equal(resolveCursorModel('grok-4.7', 'high', 'composer-2.5'), 'grok-4.7-high');
 });
 
-test('picker providers sort Claude, Cursor, then the API-key Claude', () => {
+test('picker providers sort Claude, Codex, Cursor, then the API-key Claude', () => {
   const sorted = sortProviders([
     { id: 'claude-api', label: 'Claude API' },
     { id: 'fake', label: 'Fake' },
     { id: 'cursor', label: 'Cursor' },
+    { id: 'codex', label: 'Codex' },
     { id: 'claude-subscription', label: 'Claude' },
   ]);
-  assert.deepEqual(sorted.map((item) => item.id), ['claude-subscription', 'cursor', 'claude-api', 'fake']);
+  assert.deepEqual(sorted.map((item) => item.id), ['claude-subscription', 'codex', 'cursor', 'claude-api', 'fake']);
 });
 
 test('Shift+Tab walks each CLI’s modes and wraps', () => {
@@ -96,6 +98,9 @@ test('Shift+Tab walks each CLI’s modes and wraps', () => {
   assert.equal(nextMode(CURSOR_MODES, 'agent'), 'plan');
   assert.equal(nextMode(CURSOR_MODES, 'review'), 'agent');
   assert.equal(CURSOR_MODES[0].label, 'Run Everything');
+  assert.equal(nextMode(CODEX_MODES, 'read'), 'full');
+  assert.equal(nextMode(CODEX_MODES, 'auto'), 'full', 'a Claude mode left on the chat steps onto Codex\'s wheel');
+  assert.equal(CODEX_MODES[0].label, 'Full access');
 });
 
 test('files-edited copy is countable English', () => {

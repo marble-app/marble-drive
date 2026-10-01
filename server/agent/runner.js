@@ -611,6 +611,9 @@ export function createRunner({ store, tools, providers, workdir, origin, bridgeP
         model: meta.model,
         effort: meta.effort,
         mode: meta.mode,
+        // A CLI that takes its MCP servers as flags (Codex) needs the browser
+        // here; one that reads a config file got it in prepare.
+        browser,
         env: base,
         capability,
         kind,
@@ -718,7 +721,9 @@ export function createRunner({ store, tools, providers, workdir, origin, bridgeP
         const ok = (code === 0 || turn.lingered) && turn.done?.ok !== false;
         safeFinish(turn, turn.cancelled ?? {
           status: ok ? 'completed' : 'failed',
-          error: ok ? null : turn.done?.error ?? (clipFailure(turn.stderrHead || turn.stderr) || `exited with ${code}`),
+          // A provider that knows how its CLI says what went wrong reads
+          // stderr itself; the first lines are often someone else's log.
+          error: ok ? null : turn.done?.error ?? (clipFailure(turn.provider?.failure?.(turn.stderr) || turn.stderrHead || turn.stderr) || `exited with ${code}`),
         });
       });
     } catch (err) {

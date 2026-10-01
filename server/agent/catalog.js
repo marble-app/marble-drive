@@ -1,6 +1,6 @@
 // Shared catalog helpers for the Agents picker: Cursor’s model list bakes
-// effort and speed into the id, Claude’s does not, and each CLI has its own
-// Shift+Tab mode cycle.
+// effort and speed into the id, Claude’s and Codex’s do not, and each CLI has
+// its own Shift+Tab mode cycle.
 
 import os from 'node:os';
 import path from 'node:path';
@@ -13,6 +13,16 @@ export const CLAUDE_MODES = [
   { id: 'plan', label: 'Plan' },
   { id: 'manual', label: 'Ask me' },
   { id: 'bypassPermissions', label: 'Bypass permissions' },
+];
+
+// Codex in exec has no channel for asking, so a mode is how much its sandbox
+// lets it do, chosen up front. Full access is the terminal's own reach, the
+// way Cursor's Run Everything is; auto-review is not offered, because in exec
+// it blocks the network and never escalates (checked 2026-10-01).
+export const CODEX_MODES = [
+  { id: 'full', label: 'Full access' },
+  { id: 'workspace', label: 'Workspace' },
+  { id: 'read', label: 'Read only' },
 ];
 
 export const CURSOR_MODES = [
@@ -129,7 +139,7 @@ export function pickCursorPickerModels(models) {
   return [auto, best].filter(Boolean);
 }
 
-export const PICKER_PROVIDER_ORDER = ['claude-subscription', 'cursor', 'claude-api'];
+export const PICKER_PROVIDER_ORDER = ['claude-subscription', 'codex', 'cursor', 'claude-api'];
 
 export function sortProviders(list) {
   const rank = (id) => {

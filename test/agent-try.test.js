@@ -12,9 +12,9 @@ const { createDrive } = await import('../server/app.js');
 
 const scratchDirs = async () => (await fsp.readdir(os.tmpdir())).filter((name) => /^marble-try-(drive|work)-/.test(name));
 
-test('the built-in providers are Claude on either billing, and Cursor', () => {
+test('the built-in providers are Claude on either billing, Codex, and Cursor', () => {
   const providers = builtInProviders({ env: {} });
-  assert.deepEqual([...providers.keys()], ['claude-subscription', 'claude-api', 'cursor']);
+  assert.deepEqual([...providers.keys()], ['claude-subscription', 'claude-api', 'codex', 'cursor']);
   for (const provider of providers.values()) {
     for (const member of ['detect', 'prepare', 'spawn', 'parse']) assert.equal(typeof provider[member], 'function', `${provider.id}.${member}`);
   }
@@ -116,5 +116,5 @@ test('`agents try` with an unknown id names the real ones, and never claims to s
   await fsp.rm(root, { recursive: true, force: true });
   assert.equal(run.status, 1);
   assert.doesNotMatch(run.stdout, /quota/);
-  assert.match(run.stderr, /no provider "nope" — there is: claude-subscription, claude-api, cursor/);
+  assert.match(run.stderr, /no provider "nope" — there is: claude-subscription, claude-api, codex, cursor/);
 });

@@ -38,7 +38,7 @@ async function hostWith({ capability, power = '', sandbox = null, secret = '' } 
   else if (capability) provider.capability = capability;
   const spawn = provider.spawn.bind(provider);
   provider.spawn = (opts) => {
-    seen.push({ capability: opts.capability, cwd: opts.cwd, prompt: opts.prompt });
+    seen.push({ capability: opts.capability, cwd: opts.cwd, prompt: opts.prompt, browser: opts.browser ?? null });
     const spec = spawn(opts);
     return opts.capability === 'full' && opts.cwd ? { ...spec, cwd: opts.cwd } : spec;
   };
@@ -63,7 +63,7 @@ async function hostWith({ capability, power = '', sandbox = null, secret = '' } 
   });
   await new Promise((resolve) => drive.server.listen(0, '127.0.0.1', resolve));
   await drive.createDocument('notes', SOURCE);
-  return { drive, config, seen, prepared, root, scripts, port: drive.server.address().port };
+  return { drive, config, seen, prepared, root, scripts, provider, port: drive.server.address().port };
 }
 
 /** Run one turn and wait for it to leave the runner. */
@@ -95,6 +95,8 @@ test('a full turn hands prepare a browser MCP spec; documents does not', async (
     assert.equal(full.prepared[0].browser.command, process.execPath);
     assert.match(full.prepared[0].browser.args[0], /marble-browser-mcp\.js$/);
     assert.match(full.prepared[0].browser.env.MARBLE_BROWSER_PROFILE, /browser-profile$/);
+    // A CLI that takes its servers as flags (Codex) is handed the same spec at spawn.
+    assert.deepEqual(full.seen[0].browser, full.prepared[0].browser);
   } finally {
     await full.drive.close();
   }
@@ -104,6 +106,7 @@ test('a full turn hands prepare a browser MCP spec; documents does not', async (
     await runTurn(docs.drive);
     assert.equal(docs.prepared[0].capability, 'documents');
     assert.equal(docs.prepared[0].browser, null);
+    assert.equal(docs.seen[0].browser, null);
   } finally {
     await docs.drive.close();
   }
@@ -330,3 +333,30 @@ test('undo of a turn that both wrote and filed ops lands on the pre-turn state',
   }
 });
 
+
+test('a run that ends without a result is reported in the provider\'s own reading of stderr', async () => {
+  const { drive, provider: target } = await hostWith({ capability: 'full' });
+  try {
+    // Codex logs the person's MCP servers to stderr before it says what went
+    // wrong; the first line is noise, its own `Error:` line is the reason.
+    const noisy = (opts) => ({
+      command: process.execPath,
+      args: ['-e', "process.stderr.write('2026-10-01 ERROR rmcp::transport: worker quit\\nError: the real reason\\n'); process.exit(1)"],
+      env: opts.env,
+      stdin: '',
+    });
+    target.spawn = noisy;
+    target.failure = (stderr) => /^Error: (.*)$/m.exec(stderr)?.[1] ?? null;
+    const { turnId } = await runTurn(drive);
+    const turn = await drive.agents.store.turn(turnId);
+    assert.equal(turn.status, 'failed');
+    assert.equal(turn.error, 'the real reason');
+
+    // A provider with no reading of its own keeps the old one.
+    delete target.failure;
+    const second = await runTurn(drive);
+    assert.match((await drive.agents.store.turn(second.turnId)).error, /ERROR rmcp/);
+  } finally {
+    await drive.close();
+  }
+});
