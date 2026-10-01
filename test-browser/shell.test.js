@@ -69,9 +69,9 @@ test('closed, the page is the page: no bar, no tree, no margin, and a pill only 
   assert.deepEqual(errors.filter((m) => !/favicon/.test(m)), []);
 });
 
-test('⌘J opens with both sides pinned: the page gives up the top, the left and the right, and the chat sits under the bar', async () => {
+test('⌘\\ opens with both sides pinned: the page gives up the top, the left and the right, and the chat sits under the bar', async () => {
   const { page, shell, panel } = await visit();
-  await page.keyboard.press('Control+j');
+  await page.keyboard.press('Control+\\');
   await page.waitForFunction(() => document.querySelector('marble-agent-drawer').isOpen === true);
   assert.equal(await isOpen(page), true);
   const m = await margins(page);
@@ -86,7 +86,7 @@ test('⌘J opens with both sides pinned: the page gives up the top, the left and
   assert.equal(await shell.locator('.crumbs .here').innerText(), 'Field notes');
   assert.equal(await shell.locator('.crumbs a').nth(2).getAttribute('href'), `/#/${encodeURIComponent('Research/Specs')}`);
 
-  await page.keyboard.press('Control+j');
+  await page.keyboard.press('Control+\\');
   await page.waitForFunction(() => document.querySelector('marble-agent-drawer').isOpen === false);
   assert.equal(await isOpen(page), false);
   assert.deepEqual(await margins(page), { top: '0px', left: '0px', right: '0px' });
@@ -102,7 +102,7 @@ const unpin = async (shell, ...sides) => {
 
 test('a side on hover lies over the page as a card when it comes out; the bar stays docked above it', async () => {
   const { page, shell, panel } = await visit();
-  await page.keyboard.press('Control+j');
+  await page.keyboard.press('Control+\\');
   await margins(page);
   await unpin(shell, 'nav', 'chat');
   assert.deepEqual(await margins(page), { top: '44px', left: '0px', right: '0px' });
@@ -127,7 +127,7 @@ test('a side on hover lies over the page as a card when it comes out; the bar st
 
 test('the tree and the chat pin on their own, and the choice follows you to the next page', async () => {
   const { page, shell } = await visit();
-  await page.keyboard.press('Control+j');
+  await page.keyboard.press('Control+\\');
   await margins(page);
   await unpin(shell, 'chat');
   await page.mouse.move(640, 420);
@@ -135,7 +135,7 @@ test('the tree and the chat pin on their own, and the choice follows you to the 
   assert.equal(await isOpen(page), true, 'the shell stays');
   assert.equal((await margins(page)).right, '0px');
   assert.equal((await margins(page)).left, '260px', 'the tree is still pinned');
-  await page.keyboard.press('Control+\\');
+  await page.keyboard.press('Control+Shift+\\');
   assert.equal((await margins(page)).left, '0px', '⌘\\ unpins the tree');
   await page.waitForFunction(() => document.querySelector('marble-shell').hasAttribute('data-hide-nav'));
 
@@ -146,13 +146,13 @@ test('the tree and the chat pin on their own, and the choice follows you to the 
   assert.equal((await margins(page)).left, '0px', 'the tree still on hover');
   assert.equal(await page.evaluate(() => document.querySelector('marble-agent-drawer').isOpen), false, 'the chat still on hover');
   assert.equal(await shell.locator('.crumbs .here').innerText(), 'garden');
-  await page.keyboard.press('Control+\\');
+  await page.keyboard.press('Control+Shift+\\');
   assert.equal((await margins(page)).left, '260px', 'and ⌘\\ pins it back');
 });
 
 test('a row wears its folder\'s colour, and a document with its own favicon shows it', async () => {
   const { page, shell } = await visit();
-  await page.keyboard.press('Control+j');
+  await page.keyboard.press('Control+\\');
   const research = shell.locator('button.row[data-folder="Research"]');
   await research.waitFor();
   assert.equal(await research.getAttribute('data-realm'), 'research');
@@ -170,7 +170,7 @@ test('a row wears its folder\'s colour, and a document with its own favicon show
 
 test('the tree unfolds to where you are, marks it, and opens what you pick', async () => {
   const { page, shell } = await visit();
-  await page.keyboard.press('Control+j');
+  await page.keyboard.press('Control+\\');
   const current = shell.locator('.sec[data-sec="drive"] [aria-current="page"]');
   await current.waitFor();
   assert.equal(await current.innerText(), 'Field notes');
@@ -195,7 +195,7 @@ test('⌘K searches the drive by name and Enter opens the first match', async ()
 
 test('Share hands you the document\'s link', async () => {
   const { page, shell } = await visit();
-  await page.keyboard.press('Control+j');
+  await page.keyboard.press('Control+\\');
   await shell.locator('[data-act="share"]').click();
   const input = shell.locator('.sharing input');
   await input.waitFor();
@@ -204,7 +204,7 @@ test('Share hands you the document\'s link', async () => {
   assert.equal(await shell.locator('.sharing').isVisible(), false);
 });
 
-test('at phone width there is no shell to open: ⌘J is the drawer\'s, as before', async () => {
+test('at phone width there is no shell to open: ⌘J opens the drawer, as before', async () => {
   const { page } = await visit('garden', { viewport: { width: 393, height: 700 } });
   await page.keyboard.press('Control+j');
   await page.waitForFunction(() => document.querySelector('marble-agent-drawer').isOpen === true);
@@ -229,11 +229,11 @@ test('the page glides into the room the shell makes, and back out of it', async 
     });
     return seen;
   }, key);
-  const opening = await track('j');
+  const opening = await track('\\');
   assert.ok(opening.some((x) => x > 20 && x < 240), `passes through the middle: ${opening.join(' ')}`);
   assert.equal(opening.at(-1), 260);
   assert.ok(opening.every((x, i) => i === 0 || x >= opening[i - 1]), 'never backs up');
-  const closing = await track('j');
+  const closing = await track('\\');
   assert.ok(closing.some((x) => x > 20 && x < 240), 'and on the way out');
   assert.equal(closing.at(-1), 0);
   assert.equal(await page.evaluate(() => document.getElementById('marble-shell-dock')), null, 'gone once it has arrived');
@@ -241,20 +241,20 @@ test('the page glides into the room the shell makes, and back out of it', async 
 
 test('asked for less motion, the page moves at once', async () => {
   const { page } = await visit('garden', { reducedMotion: 'reduce' });
-  await page.keyboard.press('Control+j');
+  await page.keyboard.press('Control+\\');
   assert.equal(await page.evaluate(() => getComputedStyle(document.documentElement).marginLeft), '260px');
 });
 
 test('on the Drive itself the bar says Drive, not the name of its file', async () => {
   const { page, shell } = await visit('drive');
-  await page.keyboard.press('Control+j');
+  await page.keyboard.press('Control+\\');
   assert.deepEqual(await shell.locator('.crumbs > *').allInnerTexts(), ['Drive']);
   assert.equal(await shell.locator('.crumbs a').getAttribute('aria-current'), 'page');
 });
 
 test('the tree\'s edge drags wider and narrower, the page follows, and the width follows you', async () => {
   const { page, shell } = await visit();
-  await page.keyboard.press('Control+j');
+  await page.keyboard.press('Control+\\');
   await margins(page);
   const edge = shell.locator('.edge');
   const box = await edge.boundingBox();
@@ -287,7 +287,7 @@ test('the tree\'s edge drags wider and narrower, the page follows, and the width
 
 test('the chat\'s edge drags too inside the shell, and never takes the page from the tree', async () => {
   const { page } = await visit();
-  await page.keyboard.press('Control+j');
+  await page.keyboard.press('Control+\\');
   const before = await margins(page);
   const handle = page.locator('marble-agent-drawer').locator('.resize');
   const box = await handle.boundingBox();
@@ -319,11 +319,11 @@ const chatOut = (page) => page.evaluate(() => document.querySelector('marble-age
 
 test('opening onto sides on hover shows them once, and puts them away at the first thing done on the page', async () => {
   const { page, shell } = await visit();
-  await page.keyboard.press('Control+j');
+  await page.keyboard.press('Control+\\');
   await margins(page);
   await unpin(shell, 'nav', 'chat');
-  await page.keyboard.press('Control+j');
-  await page.keyboard.press('Control+j');
+  await page.keyboard.press('Control+\\');
+  await page.keyboard.press('Control+\\');
   assert.equal(await navOut(page), true, 'the tree, so it is plain it is there');
   assert.equal(await chatOut(page), true, 'and the chat');
   await page.mouse.click(640, 420);
@@ -334,7 +334,7 @@ test('opening onto sides on hover shows them once, and puts them away at the fir
 
 test('on hover the pointer at an edge brings that side out, and leaving puts it back; typing in it keeps it', async () => {
   const { page } = await visit();
-  await page.keyboard.press('Control+j');
+  await page.keyboard.press('Control+\\');
   await margins(page);
   await unpin(page.locator('marble-shell'), 'nav', 'chat');
   await page.mouse.click(640, 420);
@@ -363,7 +363,7 @@ test('on hover the pointer at an edge brings that side out, and leaving puts it 
 
 test('a page opened with the sides on hover starts with them away, and ⌘K brings the tree out to search', async () => {
   const { page } = await visit();
-  await page.keyboard.press('Control+j');
+  await page.keyboard.press('Control+\\');
   await margins(page);
   await unpin(page.locator('marble-shell'), 'nav', 'chat');
   await page.goto(`${host.base}/a/garden`);
@@ -380,7 +380,7 @@ test('a page opened with the sides on hover starts with them away, and ⌘K brin
 
 test('the side\'s own button in the bar reaches for it too, once the hand that unpinned it has left', async () => {
   const { page, shell } = await visit();
-  await page.keyboard.press('Control+j');
+  await page.keyboard.press('Control+\\');
   await margins(page);
   await unpin(shell, 'nav');
   await page.waitForTimeout(500);

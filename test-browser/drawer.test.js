@@ -78,9 +78,9 @@ test('the drawer is on the page and not in the document', async () => {
   assert.deepEqual(errors, []);
 });
 
-test('⌘J and Ctrl+J open the shell with the chat in it, focused; Escape hands the keys back', async () => {
+test('⌘\\ and Ctrl+\\ open the shell with the chat in it, focused; Escape hands the keys back', async () => {
   const { page, panel, view } = await visit();
-  await page.keyboard.press('Meta+j');
+  await page.keyboard.press('Meta+\\');
   await opened(panel);
   await page.waitForFunction(() => {
     const view = document.querySelector('marble-agent-drawer').shadowRoot.querySelector('marble-conversation');
@@ -91,10 +91,23 @@ test('⌘J and Ctrl+J open the shell with the chat in it, focused; Escape hands 
   await view.locator('.editor').press('Escape');
   await page.waitForFunction(() => document.activeElement === document.body);
   assert.equal(await panel.getAttribute('data-open'), 'true');
-  await page.keyboard.press('Control+j');
+  await page.keyboard.press('Control+\\');
   await panel.locator('xpath=self::*[@data-open="false"]').waitFor();
-  await page.keyboard.press('Control+j');
+  await page.keyboard.press('Control+\\');
   await opened(panel);
+});
+
+test('⌘J only asks: with nothing to ask about it opens the chat, and never moves the drive around the page', async () => {
+  const { page, panel } = await visit();
+  const shellOpen = () => page.evaluate(() => document.querySelector('marble-shell')?.state?.open ?? null);
+  const before = await shellOpen();
+  await page.keyboard.press('Control+j');
+  await page.waitForFunction(() => document.querySelector('marble-agent-drawer')?.isOpen === true);
+  assert.equal(await shellOpen(), before, 'the shell stays as it was');
+  // Again: the chat keeps the keys rather than closing.
+  await page.keyboard.press('Control+j');
+  await page.waitForTimeout(200);
+  assert.equal(await page.evaluate(() => document.querySelector('marble-agent-drawer').isOpen), true);
 });
 
 test('a conversation from the drawer edits the page, and stays with that page', async () => {

@@ -1,4 +1,5 @@
-// The shell: ⌘J opens the drive around the document you are in.
+// The shell: ⌘\ opens the drive around the document you are in. (⌘J asks
+// about what you are on, in place: agent-callout.js.)
 //
 // The tree on the left, the chat on the right where it already is, and a thin
 // bar across the top that says where you are and lets you share it. Each side
@@ -419,9 +420,9 @@
         <div class="zone" aria-hidden="true"></div>
         <div class="hint" data-side="nav" aria-hidden="true"></div>
         <div class="hint" data-side="chat" aria-hidden="true"></div>
-        <button type="button" class="pill" aria-label="Open the drive (⌘J)">${LOGO}<b></b><kbd>⌘J</kbd></button>
+        <button type="button" class="pill" aria-label="Open the drive (⌘\\)">${LOGO}<b></b><kbd>⌘\\</kbd></button>
         <header class="bar" aria-label="Drive">
-          <button type="button" class="ib" data-act="nav" aria-pressed="true" aria-label="Pin the tree" title="Pin the tree (⌘\\)">${icon('nav')}</button>
+          <button type="button" class="ib" data-act="nav" aria-pressed="true" aria-label="Pin the tree" title="Pin the tree (⌘⇧\\)">${icon('nav')}</button>
           <a class="home" aria-label="Drive" title="Drive">${LOGO}</a>
           <nav class="crumbs" aria-label="Where you are"></nav>
           <span class="spacer"></span>
@@ -429,7 +430,7 @@
           <button type="button" class="share" data-act="share" aria-haspopup="dialog" aria-expanded="false">${icon('share')}Share</button>
           <span class="vr"></span>
           <button type="button" class="ib" data-act="chat" aria-pressed="true" aria-label="Pin the chat" title="Pin the chat" hidden>${icon('chat')}</button>
-          <button type="button" class="ib" data-act="close" aria-label="Hide everything" title="Hide everything (⌘J)">${icon('collapse')}</button>
+          <button type="button" class="ib" data-act="close" aria-label="Hide everything" title="Hide everything (⌘\\)">${icon('collapse')}</button>
         </header>
         <nav class="nav" aria-label="Drive tree">
           <button type="button" class="edge" role="separator" aria-orientation="vertical" aria-label="Resize the tree" title="Drag to resize · double-click to reset"></button>
@@ -698,8 +699,8 @@
       if (open === this.state.open) return;
       this.set({ open });
       if (open) {
-        // ⌘J has always meant "the agent": opening onto the chat puts you in
-        // its box, and a shell without a chat puts you in the search.
+        // Opening onto the chat puts you in its box, and a shell without a
+        // chat puts you in the search.
         if (!this.drawer) this.search.focus({ preventScroll: true });
       } else {
         this.hidePops();
@@ -851,7 +852,7 @@
       const navButton = this.$('[data-act="nav"]');
       navButton.setAttribute('aria-pressed', String(pinNav));
       navButton.setAttribute('aria-label', pinNav ? 'Unpin the tree' : 'Pin the tree');
-      navButton.title = `${pinNav ? 'Unpin the tree: it waits at the edge' : 'Pin the tree'} (⌘\\)`;
+      navButton.title = `${pinNav ? 'Unpin the tree: it waits at the edge' : 'Pin the tree'} (⌘⇧\\)`;
       const chatButton = this.$('[data-act="chat"]');
       chatButton.hidden = !this.drawer;
       chatButton.setAttribute('aria-pressed', String(pinChat));
@@ -1130,14 +1131,18 @@
       const mod = event.metaKey || event.ctrlKey;
       const k = event.key.toLowerCase();
       if (mod && !event.shiftKey && k === 'j') {
+        // One key, one meaning: ⌘J asks in place — a card at the selection,
+        // the caret's block or what the pointer is over (agent-callout.js).
+        // With nothing to ask about it opens the chat. It never moves the
+        // shell; that is ⌘\.
         event.preventDefault();
         event.stopPropagation();
-        // A selection still decides first: the callout takes ⌘J when it can
-        // draw a card at what you are holding.
-        // The selection, the caret's block or what the pointer is over first;
-        // with the shell open and nothing selected, ⌘J closes it.
-        const selected = window.marble?.agent?.context?.().selection?.length;
-        if ((selected || !this.state.open) && !dispatchEvent(new CustomEvent('marble-callout:summon', { cancelable: true }))) return;
+        if (!dispatchEvent(new CustomEvent('marble-callout:summon', { cancelable: true }))) return;
+        window.marble?.agent?.open?.();
+      } else if (mod && !event.shiftKey && event.key === '\\') {
+        // ⌘\ shows and hides the whole drive around the page.
+        event.preventDefault();
+        event.stopPropagation();
         this.setOpen(!this.state.open);
       } else if (mod && !event.shiftKey && k === 'k') {
         event.preventDefault();
@@ -1146,7 +1151,7 @@
         this.reveal('nav');
         this.search.focus({ preventScroll: true });
         this.search.select();
-      } else if (mod && !event.shiftKey && event.key === '\\' && this.state.open) {
+      } else if (mod && event.shiftKey && (event.key === '\\' || event.key === '|') && this.state.open) {
         event.preventDefault();
         event.stopPropagation();
         this.pin('nav', !this.state.pinNav);
@@ -2017,7 +2022,7 @@
       conceal: (side) => el.conceal(side),
       // Whether the chat is on hover, hiding until reached for.
       get autoHide() { return el.hovers('chat'); },
-      // The drawer leaves ⌘J to the shell wherever the shell can open.
+      // The drawer leaves ⌘J and ⌘\\ to the shell wherever the shell can open.
       get takesKeys() { return !el.phone.matches; },
     };
     document.body.append(el);

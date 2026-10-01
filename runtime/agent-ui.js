@@ -9162,7 +9162,7 @@
       const root = this.attachShadow({ mode: 'open' });
       root.innerHTML = `<style>${TOKENS}${DRAWER_CSS}</style>
         <div class="tray" data-open="false" data-away="false">
-          <button type="button" class="launcher" aria-label="Agent (⌘J)" aria-expanded="false">${ICONS.launcher}<span class="launcher-dot" hidden></span></button>
+          <button type="button" class="launcher" aria-label="Agent" aria-expanded="false">${ICONS.launcher}<span class="launcher-dot" hidden></span></button>
           <div class="tools" role="group" aria-label="Agent tools"></div>
         </div>
         <aside class="panel" role="dialog" aria-label="Agent" data-open="false" data-pinned="false" inert>
@@ -9262,17 +9262,16 @@
 
       this.onKey = (event) => {
         if ((event.metaKey || event.ctrlKey) && !event.altKey && !event.shiftKey && event.key.toLowerCase() === 'j') {
-          // Where the shell can open, ⌘J opens it, chat and all.
+          // Where the shell can open, it hears ⌘J first (shell.js), the same way.
           if (window.marbleShell?.takesKeys) return;
           event.preventDefault();
-          // One key for "agent", and what you are holding decides where the
-          // agent appears: the callout layer takes it when it can draw a card
-          // at the selection, the caret's block or what the pointer is over.
-          // With the chat open and nothing selected, ⌘J closes the chat.
-          const selected = window.marble?.agent?.context?.().selection?.length;
-          if ((selected || !this.isOpen) && !dispatchEvent(new CustomEvent('marble-callout:summon', { cancelable: true }))) return;
-          if (this.isOpen) this.close();
-          else this.open();
+          // ⌘J asks in place: the callout layer draws a card at the
+          // selection, the caret's block or what the pointer is over. With
+          // nothing to ask about, the chat opens, or takes the keys if it is
+          // open. Escape is how it closes.
+          if (!dispatchEvent(new CustomEvent('marble-callout:summon', { cancelable: true }))) return;
+          if (!this.isOpen) this.open();
+          else this.view?.focusInput?.();
         } else if (event.key === 'Escape' && this.isOpen && this.shadowRoot.activeElement !== null) {
           if (!this.recent.hidden || !this.actions.hidden) this.hideMenus();
           // The shell's chat is one of its panels, not a sheet over the page:
@@ -9620,9 +9619,9 @@
       addEventListener('marble-tray:update', this.onTrayUpdate);
       addEventListener('marble-tray:unregister', this.onTrayRemove);
 
-      // Ask here summons the callout at the selection — the same door ⌘J
+      // Ask here summons the callout at the selection — a door ⌘J also
       // opens. It is in the tray only while there is a selection to hang it
-      // on, which is also the only time ⌘J means this rather than "drawer".
+      // on.
       this.addTool({
         id: 'ask',
         order: 5,

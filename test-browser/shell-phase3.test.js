@@ -33,7 +33,7 @@ test('typing in the chat or the tree\'s search is typing: the page\'s shortcuts 
   await page.keyboard.press('v');
   assert.deepEqual(await heard(page), ['v'], 'on the page, the page\'s keys are the page\'s');
 
-  await page.keyboard.press('Control+j');
+  await page.keyboard.press('Control+\\');
   const editor = page.locator('marble-agent-drawer').locator('marble-conversation').locator('.editor');
   await editor.waitFor();
   await editor.click();
@@ -52,7 +52,7 @@ test('typing in the chat or the tree\'s search is typing: the page\'s shortcuts 
 
 test('Describe opens from the bar or ⌘⇧D, every tool has a key, and V is the app again', async () => {
   const { page, shell } = await visit('Research/atlas');
-  await page.keyboard.press('Control+j');
+  await page.keyboard.press('Control+\\');
   const button = shell.locator('[data-act="describe"]');
   await button.waitFor();
   await button.click();
@@ -87,7 +87,7 @@ test('Move or rename: the document moves, the page opens at its new address wher
     await window.marble.agent.send(id, { prompt: 'script:slow', target: 'Travel/plans', viewing: 'Travel/plans' });
     return id;
   });
-  await page.keyboard.press('Control+j');
+  await page.keyboard.press('Control+\\');
   await shell.locator('.crumbs .here').click();
   await shell.locator('[data-pick="move"]').click();
   const dialog = shell.locator('.moving');
@@ -114,7 +114,7 @@ test('Move or rename: the document moves, the page opens at its new address wher
 
 test('a name already taken, or one with a slash in it, is refused before anything moves', async () => {
   const { page, shell } = await visit('Research/atlas');
-  await page.keyboard.press('Control+j');
+  await page.keyboard.press('Control+\\');
   await shell.locator('.crumbs .here').click();
   await shell.locator('[data-pick="move"]').click();
   const dialog = shell.locator('.moving');

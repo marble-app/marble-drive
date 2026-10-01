@@ -40,7 +40,7 @@ async function visit(path = 'garden') {
 }
 
 const open = async (page) => {
-  await page.keyboard.press('Control+j');
+  await page.keyboard.press('Control+\\');
   await page.locator('marble-shell').locator('.sec[data-sec="drive"]').waitFor();
 };
 const order = (shell) => shell.locator('.scroll > .sec').evaluateAll((els) => els.map((el) => el.dataset.sec));

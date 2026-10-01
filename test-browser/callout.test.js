@@ -241,11 +241,11 @@ test('resting the pointer offers nothing until Offer when I rest is on in the tr
   await page.evaluate(() => localStorage.removeItem('marble-ask-rest'));
 });
 
-test('⌘J with a selection summons a card; without one it toggles the drawer', async () => {
+test('⌘J with a selection summons a card; with nothing to ask about it opens the chat', async () => {
   const page = await open();
   await page.keyboard.press('Control+j');
   await page.waitForFunction(() => document.querySelector('marble-agent-drawer')?.isOpen === true);
-  await page.keyboard.press('Control+j');
+  await page.evaluate(() => window.marble.agent.close?.() ?? dispatchEvent(new CustomEvent('marble:agent-close')));
   await page.waitForFunction(() => document.querySelector('marble-agent-drawer')?.isOpen === false);
   await select(page, 'p');
   await page.keyboard.press('Control+j');
@@ -349,12 +349,10 @@ test('⌘J with nothing selected asks about the block the caret is in, or what t
   await offerInput(page).waitFor();
   assert.equal(await offerInput(page).getAttribute('data-placeholder'), 'Ask about this item…');
   assert.equal(await page.evaluate(() => document.querySelector('marble-agent-drawer')?.isOpen), false, 'the chat stays shut');
-  // Again, with a card waiting: past it, to the chat.
+  // Again, with a card waiting: it puts the card away, and nothing else.
   await page.keyboard.press('Control+j');
-  await page.waitForFunction(() => document.querySelector('marble-agent-drawer')?.isOpen === true);
-  assert.equal(await page.locator('.marble-callout[data-offer]').count(), 0);
-  await page.keyboard.press('Control+j');
-  await page.waitForFunction(() => document.querySelector('marble-agent-drawer')?.isOpen === false);
+  await page.waitForFunction(() => !document.querySelector('.marble-callout[data-offer]'));
+  assert.equal(await page.evaluate(() => document.querySelector('marble-agent-drawer')?.isOpen), false);
 
   // The caret, while typing.
   await page.evaluate(() => {

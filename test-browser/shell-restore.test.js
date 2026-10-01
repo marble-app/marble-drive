@@ -31,7 +31,7 @@ test('the next page draws the sidebar before the drive has answered, and reads t
   const { page, errors } = await host.newPage();
   await page.goto(`${host.base}/a/garden`);
   await page.waitForFunction(() => document.querySelector('marble-shell')?.shadowRoot);
-  await page.keyboard.press('Control+j');
+  await page.keyboard.press('Control+\\');
   await page.locator('marble-shell').locator('.sec[data-sec="pinned"] a.row').first().waitFor();
   // Leaving is when it is kept.
   await page.waitForFunction(() => localStorage.getItem('marble-shell:last'));

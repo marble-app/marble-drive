@@ -11,7 +11,8 @@
 // Hold ⌥ and what is under the pointer is outlined at the right scope, with
 // its name; click to ask about it, [ and ] to widen or narrow it first, and
 // ⌥-click something else with a card open to add it. ⌘J asks about the
-// selection, the block the caret is in, or what the pointer is over. Resting
+// selection, the block the caret is in, or what the pointer is over, and
+// only that: the drive around the page is ⌘\ (shell.js). Resting
 // the pointer offers nothing unless Offer when I rest is on in the tray. Closing a card puts it away: it never folds into a pill
 // left on the page. Chats nobody here is looking at are a glint on their
 // element instead (agent-glints.js). Everything here is transient chrome in
@@ -671,12 +672,12 @@
         dispatchEvent(new CustomEvent('marble-marks:focus'));
         return true;
       }
-      // A card still waiting to be sent: a second ⌘J goes past it to the chat.
+      // A card still waiting to be sent: a second ⌘J puts it away.
       const waiting = records.find((r) => r.offer);
       if (waiting) {
         remove(waiting);
         agent.select(null);
-        return false;
+        return true;
       }
       let ids = agent.context().selection;
       let scope = null;
