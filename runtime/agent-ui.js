@@ -1160,7 +1160,7 @@
     }
     slideThumb(track, { animate: false });
   };
-  const PICKER_PROVIDER_ORDER = ['claude-subscription', 'cursor', 'claude-api'];
+  const PICKER_PROVIDER_ORDER = ['claude-subscription', 'codex', 'cursor', 'claude-api'];
   const sortProviders = (list) => {
     const rank = (id) => {
       const index = PICKER_PROVIDER_ORDER.indexOf(id);
@@ -1184,6 +1184,9 @@
     // are about to talk to, not the company that made it.
     anthropic: '<svg class="brand" viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" d="M12 1.6c.5 0 .9.4.9.9v6.06l4.29-4.28a.9.9 0 0 1 1.27 1.27l-4.28 4.29h6.06a.9.9 0 0 1 0 1.8h-6.06l4.28 4.29a.9.9 0 1 1-1.27 1.27l-4.29-4.28v6.06a.9.9 0 0 1-1.8 0v-6.06l-4.29 4.28a.9.9 0 0 1-1.27-1.27l4.28-4.29H3.76a.9.9 0 0 1 0-1.8h6.06L5.54 5.55a.9.9 0 0 1 1.27-1.27l4.29 4.28V2.5c0-.5.4-.9.9-.9z"/></svg>',
     cursor: '<svg class="brand" viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" d="M3.2 2.4 20.6 12 11.4 13.7 9.5 21.6z"/></svg>',
+    // Codex's own mark, a prompt in a cloud: like Claude's, it names the agent
+    // you are about to talk to rather than the company behind it.
+    codex: '<svg class="brand" viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" fill-rule="evenodd" clip-rule="evenodd" d="M8.086.457a6.105 6.105 0 0 1 3.046-.415c1.333.153 2.521.72 3.564 1.7a.117.117 0 0 0 .107.029c1.408-.346 2.762-.224 4.061.366l.063.03.154.076c1.357.703 2.33 1.77 2.918 3.198a5.62 5.62 0 0 1 .421 2.126 5.655 5.655 0 0 1-.18 1.631.167.167 0 0 0 .04.155 5.982 5.982 0 0 1 1.578 2.891c.385 1.901-.01 3.615-1.183 5.14l-.182.22a6.063 6.063 0 0 1-2.934 1.851.162.162 0 0 0-.108.102c-.255.736-.511 1.364-.987 1.992-1.199 1.582-2.962 2.462-4.948 2.451-1.583-.008-2.986-.587-4.21-1.736a.145.145 0 0 0-.14-.032c-.518.167-1.04.191-1.604.185a5.924 5.924 0 0 1-2.595-.622 6.058 6.058 0 0 1-2.146-1.781c-.203-.269-.404-.522-.551-.821a7.74 7.74 0 0 1-.495-1.283 6.11 6.11 0 0 1-.017-3.064.166.166 0 0 0 .008-.074.115.115 0 0 0-.037-.064 5.958 5.958 0 0 1-1.38-2.202 5.196 5.196 0 0 1-.333-1.589 6.915 6.915 0 0 1 .188-2.132c.45-1.484 1.309-2.648 2.577-3.493.282-.188.55-.334.802-.438.286-.12.573-.22.861-.304a.129.129 0 0 0 .087-.087A6.016 6.016 0 0 1 5.635 2.31C6.315 1.464 7.132.846 8.086.457zm-.804 7.85a.848.848 0 0 0-1.473.842l1.694 2.965-1.688 2.848a.849.849 0 0 0 1.46.864l1.94-3.272a.849.849 0 0 0 .007-.854l-1.94-3.393zm5.446 6.24a.849.849 0 0 0 0 1.695h4.848a.849.849 0 0 0 0-1.696h-4.848z"/></svg>',
   };
   const PRESETS = [
     // Weakest first, which is the menu and the scrubber: a slider is pushed
@@ -1194,10 +1197,13 @@
     // that stays a step on the effort slider rather than the saved setup.
     { id: 'sonnet-high', provider: 'claude-subscription', model: 'sonnet', effort: 'high', name: 'Sonnet High', brand: 'anthropic' },
     { id: 'grok-high', provider: 'cursor', model: 'grok-4.7', effort: 'high', name: 'Grok 4.7 High', brand: 'cursor' },
+    // Codex's setup is the first model its catalog lists, which is the one it
+    // leads with; the name comes from the catalog too, so it moves with it.
+    { id: 'codex-high', provider: 'codex', model: '', effort: 'high', name: 'Codex High', brand: 'codex' },
     { id: 'opus-high', provider: 'claude-subscription', model: 'opus', effort: 'high', name: 'Opus 5.5 High', brand: 'anthropic' },
     { id: 'fable-high', provider: 'claude-subscription', model: 'fable', effort: 'high', name: 'Fable 5.1 High', brand: 'anthropic' },
   ];
-  const EFFORT_WORD = { low: 'Low', medium: 'Medium', high: 'High', xhigh: 'Extra High', max: 'Max' };
+  const EFFORT_WORD = { minimal: 'Minimal', low: 'Low', medium: 'Medium', high: 'High', xhigh: 'Extra High', max: 'Max', ultra: 'Ultra' };
   /** Every effort word stacked in one grid cell, only the current one lit.
    *  Two things fall out of that. The cell is always as wide as the longest
    *  word, so "Low" and "Extra High" take the same room and the model name
@@ -1285,6 +1291,7 @@
   const providerHue = (id) => {
     if (String(id).startsWith('claude')) return 1;
     if (id === 'cursor') return 0;
+    if (id === 'codex') return 3;
     return hueIndex(id);
   };
 
@@ -1292,6 +1299,7 @@
     'claude-subscription': 'Claude',
     'claude-api': 'Claude',
     'cursor': 'Cursor',
+    'codex': 'Codex',
   };
 
   const KNOWN_MODELS = [
@@ -1319,6 +1327,8 @@
     const lower = String(id).toLowerCase();
     const grok = lower.match(/grok[^\d]*(\d+(?:\.\d+)?)/);
     if (grok) return `Grok ${grok[1]}`;
+    // Written the way Codex's catalog writes them: gpt-6-astra is GPT-6-Astra.
+    if (lower.startsWith('gpt-')) return `GPT-${String(id).slice(4).split('-').map((part) => part.charAt(0).toUpperCase() + part.slice(1)).join('-')}`;
     for (const [key, name] of KNOWN_MODELS) {
       if (lower === key || lower.includes(key)) return name;
     }
@@ -5027,8 +5037,9 @@
     }
 
     preferredProvider(usable = []) {
-      const cursor = usable.find((item) => item.id === 'cursor');
-      if (cursor && (this.claudeUnavailable() || Number(this.claudeMeter()?.used) >= 100)) return cursor;
+      // Claude spent: Cursor if it is here, else Codex.
+      const elsewhere = usable.find((item) => item.id === 'cursor') ?? usable.find((item) => item.id === 'codex');
+      if (elsewhere && (this.claudeUnavailable() || Number(this.claudeMeter()?.used) >= 100)) return elsewhere;
       return usable.find((item) => item.default) ?? usable[0] ?? null;
     }
 
@@ -5184,6 +5195,7 @@
       const models = this.pickerModels(provider);
       if (models.some((item) => item.id === preset.model)) return preset.model;
       if (preset.provider === 'cursor') return models.find((item) => /grok/i.test(item.id))?.id || preset.model;
+      if (preset.provider === 'codex') return models[0]?.id || preset.model;
       return preset.model;
     }
 
@@ -5193,7 +5205,7 @@
      *  Sonnet and Fable keep the name on the preset. */
     presetShownName(preset) {
       const word = EFFORT_WORD[preset?.effort] ?? '';
-      const numbered = preset?.model === 'opus' || /grok/i.test(preset?.model ?? '') || preset?.provider === 'cursor';
+      const numbered = preset?.model === 'opus' || /grok/i.test(preset?.model ?? '') || preset?.provider === 'cursor' || preset?.provider === 'codex';
       if (!numbered) return preset?.name ?? '';
       const provider = this.resolvePresetProvider(preset);
       const id = provider ? this.resolvePresetModel(preset, provider) : preset.model;
@@ -5246,7 +5258,7 @@
       const provider = String(this.currentProvider()?.id ?? '');
       this.presetsEl.dataset.custom = custom;
       this.presetsEl.dataset.customBrand = custom
-        ? (provider.startsWith('claude') ? 'anthropic' : provider === 'cursor' ? 'cursor' : '')
+        ? (provider.startsWith('claude') ? 'anthropic' : provider === 'cursor' || provider === 'codex' ? provider : '')
         : '';
     }
 
@@ -8630,7 +8642,7 @@
       this.usagePane.replaceChildren(h('p', 'empty', 'Loading…'));
       this.setTab(this.tab);
       let providers = [];
-      let settings = { defaultProvider: '', models: {}, keys: { anthropic: false, cursor: false } };
+      let settings = { defaultProvider: '', models: {}, keys: { anthropic: false, cursor: false, openai: false } };
       let usage = { meters: [] };
       try {
         [providers, settings, usage] = await Promise.all([
@@ -8688,10 +8700,12 @@
       }
       const keys = document.createElement('fieldset');
       keys.append(h('legend', '', 'API keys'));
+      // Codex runs on this key when one is set, and on the ChatGPT login when not.
+      keys.append(this.keyRow('openai', 'OpenAI API key, for Codex', settings.keys?.openai));
       keys.append(this.keyRow('cursor', 'Cursor API key', settings.keys?.cursor));
       const projects = document.createElement('fieldset');
       projects.append(h('legend', '', 'Projects'));
-      projects.append(h('p', 'hint', 'A full agent runs with your own Claude Code (or Cursor) configuration — your plugins, skills, hooks, MCP servers and permission rules — in the project you choose. It is exactly as capable, and as powerful, as the terminal. What it may run is decided there, not here: in Auto, Claude Code\u2019s classifier refuses some commands outright, and the cure is a permission rule in your own settings.'));
+      projects.append(h('p', 'hint', 'A full agent runs with your own Claude Code, Codex or Cursor configuration — your plugins, skills, hooks, MCP servers and permission rules — in the project you choose. It is exactly as capable, and as powerful, as the terminal. What it may run is decided there, not here: in Auto, Claude Code\u2019s classifier refuses some commands outright, and the cure is a permission rule in your own settings.'));
       let list = [];
       try {
         list = await this.api.projects();
@@ -8858,8 +8872,10 @@
       const keys = {};
       const anthropic = this.shadowRoot.querySelector('input[name="key-anthropic"]')?.value.trim();
       const cursor = this.shadowRoot.querySelector('input[name="key-cursor"]')?.value.trim();
+      const openai = this.shadowRoot.querySelector('input[name="key-openai"]')?.value.trim();
       if (anthropic) keys.anthropic = anthropic;
       if (cursor) keys.cursor = cursor;
+      if (openai) keys.openai = openai;
       if (Object.keys(keys).length) patch.keys = keys;
       try {
         await this.api.saveSettings(patch);
@@ -8876,11 +8892,12 @@
 
   // ------------------------------------------------------------ first visit
 
-  // A drive whose Claude has neither a signed-in login nor an API key cannot
-  // run an agent, and nothing said so until a turn failed. On the first page
-  // of a visit this asks the host (GET /agent/setup) and, when neither is
-  // there, offers the key field right away. The host checks the key with
-  // Anthropic before keeping it; the page never holds it past the request.
+  // A drive that can run no agent — Claude with neither a login nor a key,
+  // and Codex the same — said nothing until a turn failed. On the first page
+  // of a visit this asks the host (GET /agent/setup) and, when none can run,
+  // offers a key field right away: for Claude, for Codex, or a choice of the
+  // two when the drive has both. The host checks the key with Anthropic or
+  // OpenAI before keeping it; the page never holds it past the request.
   // "Not now" lasts the tab, so moving between documents does not ask again.
   const SETUP_DISMISSED = 'marble-agent-setup-dismissed';
   const SETUP_CSS = `
@@ -8915,7 +8932,29 @@
     button[hidden] { display: none; }
     button:focus-visible { outline: 2px solid var(--accent-ink); outline-offset: 2px; }
     .alt { margin: 16px 0 0; padding-top: 12px; border-top: 1px solid var(--line); font-size: 12px; color: var(--faint); }
+    /* Which agent the key is for: a setting, so an outline, the chosen half one
+       shade back — the same control as Claude's login / API key switch. */
+    .agent-choice { display: inline-flex; margin: 0 0 14px; border: 1px solid var(--line); border-radius: 8px; overflow: hidden; }
+    .agent-choice[hidden] { display: none; }
+    .agent-choice label { position: relative; flex-direction: row; align-items: center; gap: 6px; padding: 6px 14px; font-size: 13px; color: var(--muted); cursor: pointer; transition: background var(--t, 200ms) var(--ease, ease), color var(--t, 200ms) var(--ease, ease); }
+    .agent-choice label + label { border-left: 1px solid var(--line); }
+    .agent-choice input { position: absolute; opacity: 0; pointer-events: none; width: auto; }
+    .agent-choice label:has(input:checked) { background: var(--paper-2); color: var(--ink); }
+    .agent-choice label:has(input:focus-visible) { outline: 2px solid var(--accent-ink); outline-offset: -2px; }
+    .agent-choice .brand { width: 13px; height: 13px; flex: none; }
+    @media (pointer: coarse) { .agent-choice label { min-height: 44px; padding: 0 18px; } }
+    @media (prefers-reduced-motion: reduce) { .agent-choice label { transition: none; } }
   `;
+
+  // What the popup says about each agent: where its key comes from, what one
+  // looks like, and who checks it.
+  const SETUP_AGENTS = {
+    claude: { name: 'Claude', company: 'Anthropic', placeholder: 'sk-ant-…', link: 'https://console.anthropic.com/settings/keys', site: 'console.anthropic.com', account: 'a Claude account' },
+    codex: { name: 'Codex', company: 'OpenAI', placeholder: 'sk-proj-…', link: 'https://platform.openai.com/api-keys', site: 'platform.openai.com', account: 'a ChatGPT account' },
+  };
+  /** The agent a pasted key belongs to, read off its prefix: Anthropic's keys
+   *  start sk-ant-, OpenAI's sk- and something else. */
+  const keyAgent = (key) => (/^sk-ant-/.test(key) ? 'claude' : /^sk-/.test(key) ? 'codex' : null);
 
   class MarbleAgentSetup extends HTMLElement {
     constructor() {
@@ -8926,6 +8965,10 @@
           <form>
             <h2 id="agent-setup-title">Connect Claude</h2>
             <p class="lede" id="agent-setup-lede">Agents on this drive run on Claude. Paste an Anthropic API key to turn them on.</p>
+            <div class="agent-choice" role="radiogroup" aria-label="Agent" hidden>
+              <label>${BRAND.anthropic}<input type="radio" name="agent" value="claude" checked>Claude</label>
+              <label>${BRAND.codex}<input type="radio" name="agent" value="codex">Codex</label>
+            </div>
             <label>API key
               <input name="key" type="password" autocomplete="off" spellcheck="false" placeholder="sk-ant-…">
             </label>
@@ -8940,10 +8983,17 @@
         </dialog>`;
       this.dialog = root.querySelector('dialog');
       this.form = root.querySelector('form');
-      this.input = root.querySelector('input');
+      this.input = root.querySelector('input[name="key"]');
       this.status = root.querySelector('.status');
       this.saveButton = root.querySelector('.save');
       this.laterButton = root.querySelector('.later');
+      this.choice = root.querySelector('.agent-choice');
+      this.heading = root.querySelector('h2');
+      this.lede = root.querySelector('.lede');
+      this.hint = root.querySelector('.hint');
+      this.alt = root.querySelector('.alt');
+      this.offers = ['claude'];
+      this.agent = 'claude';
       this.done = false;
     }
 
@@ -8959,6 +9009,16 @@
         else this.connect();
       });
       this.laterButton.addEventListener('click', () => this.later());
+      this.choice.addEventListener('change', (event) => {
+        if (event.target.name !== 'agent') return;
+        this.choose(event.target.value);
+        this.input.focus();
+      });
+      // A pasted key says whose it is; the choice follows it.
+      this.input.addEventListener('input', () => {
+        const owner = keyAgent(this.input.value.trim());
+        if (owner && owner !== this.agent && this.offers.includes(owner)) this.choose(owner);
+      });
       // Escape: the dialog's own cancel, which is the same as Not now.
       this.dialog.addEventListener('cancel', (event) => {
         event.preventDefault();
@@ -8986,7 +9046,30 @@
       } catch {
         return;
       }
-      if (state?.needed && this.isConnected) this.open();
+      if (!state?.needed || !this.isConnected) return;
+      const offers = (Array.isArray(state.offers) ? state.offers : ['claude']).filter((id) => SETUP_AGENTS[id]);
+      this.offers = offers.length ? offers : ['claude'];
+      this.choice.hidden = this.offers.length < 2;
+      this.choose(this.offers[0]);
+      this.open();
+    }
+
+    /** Point the popup at one agent: its key, its link, its words. */
+    choose(agent) {
+      this.agent = SETUP_AGENTS[agent] ? agent : 'claude';
+      const it = SETUP_AGENTS[this.agent];
+      const both = this.offers.length > 1;
+      for (const radio of this.choice.querySelectorAll('input[name="agent"]')) radio.checked = radio.value === this.agent;
+      this.heading.textContent = both ? 'Connect an agent' : `Connect ${it.name}`;
+      this.lede.textContent = both
+        ? 'Agents on this drive run on Claude or Codex. Paste an API key for either to turn them on.'
+        : `Agents on this drive run on ${it.name}. Paste an ${it.company} API key to turn them on.`;
+      this.input.placeholder = it.placeholder;
+      const link = this.hint.querySelector('a');
+      link.href = it.link;
+      link.textContent = it.site;
+      this.alt.textContent = `Or ask whoever runs this drive to sign it in to ${both ? 'a Claude or ChatGPT account' : it.account}.`;
+      this.say('');
     }
 
     open() {
@@ -9013,20 +9096,22 @@
         return;
       }
       this.saveButton.disabled = true;
-      this.say('Checking the key with Anthropic…');
+      const { company } = SETUP_AGENTS[this.agent];
+      this.say(`Checking the key with ${company}…`);
       try {
-        const answer = await this.api.connectClaude(key);
+        const answer = await this.api.connectAgent(this.agent, key);
         this.input.value = '';
         dispatchEvent(new CustomEvent('marble:agent-settings-saved'));
         this.done = true;
         this.laterButton.hidden = true;
         this.input.disabled = true;
+        for (const radio of this.choice.querySelectorAll('input')) radio.disabled = true;
         if (answer.checked) {
           this.say('Connected. Agents are ready.');
           setTimeout(() => this.dialog.close(), 900);
         } else {
-          // Kept, but Anthropic could not be asked: say so, and let it be read.
-          this.say("Saved. Anthropic couldn't be reached to check it, so the first chat will say if it's wrong.");
+          // Kept, but the company could not be asked: say so, and let it be read.
+          this.say(`Saved. ${company} couldn't be reached to check it, so the first chat will say if it's wrong.`);
           this.saveButton.textContent = 'Done';
         }
       } catch (err) {

@@ -263,10 +263,11 @@
       providers: () => ask('/agent/providers'),
       settings: () => ask('/agent/settings'),
       saveSettings: (patch) => ask('/agent/settings', { method: 'PUT', body: patch }),
-      // Can this drive run Claude: a signed-in login, or a key. And the key
-      // itself, checked with Anthropic before the drive keeps it.
+      // Can this drive run an agent: Claude or Codex, signed in or on a key.
+      // And a key itself, checked with Anthropic or OpenAI before it is kept.
       setup: () => ask('/agent/setup'),
       connectClaude: (key) => ask('/agent/setup', { method: 'POST', body: { key } }),
+      connectAgent: (provider, key) => ask('/agent/setup', { method: 'POST', body: { provider, key } }),
       skills: (provider = null) => ask(provider ? `/agent/skills?provider=${enc(provider)}` : '/agent/skills'),
       usage: () => ask('/agent/usage'),
       asks: () => ask('/agent/asks'),

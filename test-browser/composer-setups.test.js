@@ -39,6 +39,21 @@ const PROVIDERS = [
     efforts: [],
     modes: [{ id: 'agent', label: 'Run Everything' }],
   },
+  {
+    id: 'codex',
+    label: 'Codex',
+    installed: true,
+    signedIn: true,
+    detail: 'signed in with ChatGPT',
+    defaultModel: null,
+    // Codex's catalog: each model with its own efforts, first is its default.
+    models: [
+      { id: 'gpt-6-astra', label: 'GPT-6-Astra', hasBare: true, efforts: ['low', 'medium', 'high', 'xhigh', 'max', 'ultra'].map((id) => ({ id, label: id })) },
+      { id: 'gpt-5.6-luna', label: 'GPT-5.6-Luna', hasBare: true, efforts: ['low', 'medium', 'high'].map((id) => ({ id, label: id })) },
+    ],
+    efforts: ['low', 'medium', 'high', 'xhigh'],
+    modes: [{ id: 'full', label: 'Full access' }, { id: 'workspace', label: 'Workspace' }, { id: 'read', label: 'Read only' }],
+  },
 ];
 
 /** A bare composer with the real setups available: the drive's own fake agent
@@ -136,5 +151,42 @@ test('a model chosen in the custom picker is named by the setup word', async () 
   const word = await setupWord(view);
   assert.ok(!/Sonnet|Opus/.test(word), `the setup word says "${word}" while the model is Haiku`);
   assert.match(word, /Haiku/);
+  assert.deepEqual(errors, []);
+});
+
+test('a signed-in Codex adds its setup, named from its own catalog and wearing its mark', async () => {
+  const { view, errors } = await mount();
+  const setup = await view.evaluate((el) => {
+    const label = el.shadowRoot.querySelector('input[name="preset"][value="codex-high"]')?.closest('label');
+    return label ? { text: label.textContent.trim(), brand: Boolean(label.querySelector('svg.brand')) } : null;
+  });
+  assert.ok(setup, 'Codex has a saved setup');
+  assert.equal(setup.text, 'GPT-6-Astra High');
+  assert.equal(setup.brand, true);
+  await pick(view, 'preset', 'codex-high');
+  await settled(view);
+  assert.equal(await setupWord(view), 'GPT-6-Astra High');
+  assert.deepEqual(await view.evaluate((el) => [
+    el.shadowRoot.querySelector('input[name="agent"]:checked')?.value,
+    el.shadowRoot.querySelector('input[name="model"]:checked')?.value,
+    el.shadowRoot.querySelector('input[name="effort"]:checked')?.value,
+  ]), ['codex', 'gpt-6-astra', 'high']);
+  assert.deepEqual(errors, []);
+});
+
+test('Codex at an effort only it has is named by its own model and that effort', async () => {
+  const { view, errors } = await mount();
+  await pick(view, 'preset', 'codex-high');
+  await settled(view);
+  await pick(view, 'effort', 'ultra');
+  await settled(view);
+  assert.equal(await setupWord(view), 'GPT-6-Astra Ultra');
+  assert.deepEqual(errors, []);
+});
+
+test('a conversation on Codex opens on its setup', async () => {
+  const { view, errors } = await mount({ meta: { provider: 'codex', model: 'gpt-6-astra', effort: 'high' } });
+  await settled(view);
+  assert.equal(await setupWord(view), 'GPT-6-Astra High');
   assert.deepEqual(errors, []);
 });
