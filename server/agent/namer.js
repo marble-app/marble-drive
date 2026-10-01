@@ -91,8 +91,9 @@ export function cleanTitle(raw) {
 }
 
 /** The CLIs are asked from an empty directory with `--setting-sources project`
- *  (claude) or a throwaway workspace (cursor): naming a chat must not run the
- *  person's hooks, skills or memory, and must not touch their project. */
+ *  (claude), a throwaway workspace (cursor) or `--ignore-user-config` (codex):
+ *  naming a chat must not run the person's hooks, skills or memory, and must
+ *  not touch their project. */
 export async function scratch() {
   const dir = path.join(os.tmpdir(), 'marble-agent-namer');
   await fsp.mkdir(dir, { recursive: true });
@@ -127,12 +128,27 @@ export async function nameConversation({
   const cwd = await scratch();
   const clean = pickEnv(env);
   // Haiku over the login, the same way a subscription turn runs: no key in
-  // the environment, so naming never bills an API account by accident.
+  // the environment, so naming never bills an API account by accident. The
+  // same holds for Codex: a drive whose Codex runs on a key keeps the
+  // placeholder rather than pay for a title.
   const attempts = [
     { command: 'claude', args: claudeArgs(model, ask) },
     { command: 'cursor-agent', args: ['-p', '--mode', 'ask', '--trust', '--workspace', cwd, '--output-format', 'text', '--', ask] },
+    // Codex last, so a drive that has only Codex still gets names. Its own
+    // default model at low effort, read-only, none of the person's config,
+    // nothing kept; plain exec prints only the answer on stdout. Asked only
+    // when its login answers: without one it spends fifteen seconds on 401s.
+    {
+      command: 'codex',
+      args: ['exec', '--skip-git-repo-check', '--ephemeral', '--ignore-user-config', '-s', 'read-only', '-c', 'model_reasoning_effort="low"', '--', ask],
+      ready: async () => {
+        const status = await exec('codex', ['login', 'status'], { timeout: 5_000, env: clean, cwd, signal });
+        return status.code === 0 && !/not logged in/i.test(`${status.stdout ?? ''}${status.stderr ?? ''}`);
+      },
+    },
   ];
   for (const attempt of attempts) {
+    if (attempt.ready && !(await attempt.ready())) continue;
     const result = await exec(attempt.command, attempt.args, { timeout, env: clean, cwd, signal });
     if (result.aborted) return null;
     if (result.missing) continue; // that CLI is not installed; try the next

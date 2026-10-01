@@ -106,3 +106,50 @@ test('a prompt with nothing in it is not worth a model call', async () => {
   assert.equal(title, null);
   assert.equal(called, false);
 });
+
+test('a drive with only Codex still gets a title, from Codex on its login', async () => {
+  const tried = [];
+  let codexCall = null;
+  const title = await nameConversation({
+    prompt: 'make the board readable',
+    reply: 'renamed every chat',
+    env: { PATH: '/bin', HOME: '/home/me', CODEX_API_KEY: 'sk-proj-k', OPENAI_API_KEY: 'sk-o' },
+    exec: async (command, args, options) => {
+      tried.push(command);
+      if (command !== 'codex') return { missing: true, code: null, stdout: '', stderr: '' };
+      if (args[0] === 'login') return { missing: false, code: 0, stdout: '', stderr: 'Logged in using ChatGPT\n' };
+      codexCall = { args, env: options.env };
+      return { missing: false, code: 0, stdout: 'Readable Agent Board\n', stderr: '' };
+    },
+  });
+  assert.deepEqual(tried, ['claude', 'cursor-agent', 'codex', 'codex']);
+  assert.equal(title, 'Readable Agent Board');
+  // Read-only, none of the person's Codex config, nothing kept, and the
+  // question after `--` so it can never be read as a flag.
+  assert.deepEqual(codexCall.args.slice(0, 2), ['exec', '--skip-git-repo-check']);
+  for (const flag of ['--ephemeral', '--ignore-user-config']) assert.ok(codexCall.args.includes(flag), flag);
+  assert.equal(codexCall.args[codexCall.args.indexOf('-s') + 1], 'read-only');
+  assert.equal(codexCall.args.at(-2), '--');
+  assert.match(codexCall.args.at(-1), /make the board readable/);
+  // Naming never bills a key by accident.
+  assert.ok(!('CODEX_API_KEY' in codexCall.env));
+  assert.ok(!('OPENAI_API_KEY' in codexCall.env));
+});
+
+test('a Codex with no login is not asked: it would spend its retries on a 401', async () => {
+  const ran = [];
+  const errors = [];
+  const title = await nameConversation({
+    prompt: 'anything',
+    exec: async (command, args) => {
+      ran.push(`${command} ${args[0]}`);
+      if (command !== 'codex') return { missing: true, code: null, stdout: '', stderr: '' };
+      if (args[0] === 'login') return { missing: false, code: 1, stdout: '', stderr: 'Not logged in\n' };
+      return { missing: false, code: 0, stdout: 'Should Not Run\n', stderr: '' };
+    },
+    log: { error: (message) => errors.push(message) },
+  });
+  assert.equal(title, null);
+  assert.deepEqual(ran.filter((r) => r.startsWith('codex')), ['codex login']);
+  assert.deepEqual(errors, []);
+});
