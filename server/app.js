@@ -26,11 +26,13 @@ import { bytesOf, chooseProvider, enginePath, examine, guardOps, idsOfOps, merge
 import { dataUri as iconUri, svg as iconSvg } from './favicon.js';
 import { blobsIn, extract, flatten } from './flatten.js';
 import { createTouched } from './touched.js';
-import { createGate, returnPath } from './gate.js';
+import { createGate, overHttps, returnPath } from './gate.js';
 import { escapeHtml, html, json, readBody, readJson, send, text } from './http.js';
 import { createIntents } from './intent-routes.js';
 import { createOpLog } from './oplog.js';
 import { createMoves } from './moves.js';
+import { shareRefusal } from './share-policy.js';
+import { RANK, createShares } from './shares.js';
 import { createPendingWrites } from './pending-writes.js';
 import { PathError, joinPath, parsePath, safePath, safeSegment, splitPath, withoutDocExt } from './paths.js';
 import { build as buildStarter, list as listStarters, preview as starterPreview } from './gallery.js';
@@ -137,6 +139,8 @@ const RUNTIME = {
   'chat-visual.js': () => path.join(REPO, 'runtime', 'chat-visual.js'),
   'agent-usage-charts.js': () => path.join(REPO, 'runtime', 'agent-usage-charts.js'),
   'collab.js': () => path.join(REPO, 'runtime', 'collab.js'),
+  // What a page opened by a share link wears instead of the shell.
+  'share.js': () => path.join(REPO, 'runtime', 'share.js'),
   // The callout: a conversation drawn at the region of a document it is about.
   // The scope finder and the offer: which element a resting pointer means,
   // and what a fresh callout card offers before anything is sent.
@@ -222,6 +226,13 @@ export async function createDrive(config, { log = console, agentProviders = null
     cookieName: config.cookieName,
     days: config.sessionDays,
     secure: config.secureCookie,
+  });
+  // Links to one page each, for people who do not have the passphrase
+  // (server/shares.js). The gate still decides who the owner is.
+  const shares = createShares({
+    dir: store.marbleDir,
+    days: config.sessionDays,
+    secureFor: (req) => Boolean(config.secureCookie) || overHttps(req),
   });
   const intents = createIntents({ store, log });
   const stems = createStems({ store, channels, log });
@@ -340,13 +351,23 @@ export async function createDrive(config, { log = console, agentProviders = null
 
   // ------------------------------------------------------------------ serving
 
-  const injectCarrier = (source, docPath) => {
+  const injectCarrier = (source, docPath, visit = null) => {
     // tab-rest.js first: it stands in for EventSource before any stream opens.
     let tags =
       `<script src="${runtimeUrl('tab-rest.js')}" data-hidden-ms="${config.tabHiddenSeconds * 1000}" data-idle-ms="${config.tabIdleMinutes * 60_000}" data-marble-transient></script>\n` +
       `<script src="${runtimeUrl('marble.js')}" data-marble-app="${escapeHtml(docPath)}" data-marble-transient></script>\n` +
       `<script src="${runtimeUrl('drive.js')}" data-marble-transient></script>\n` +
       `<script src="${runtimeUrl('affords.js')}" data-marble-transient></script>`;
+    // Someone who came by a share link gets the page and nothing of the
+    // drive around it: no shell, no agents, no console. share.js says what
+    // their link lets them do, and keeps a read-only page read-only.
+    if (visit) {
+      tags += `\n<script src="${runtimeUrl('collab.js')}" data-marble-transient></script>`;
+      tags += `\n<script src="${runtimeUrl('share.js')}" data-role="${escapeHtml(visit.role)}" data-marble-transient></script>`;
+      return source.includes('</body>')
+        ? source.replace(/<\/body>/i, () => `${tags}\n</body>`)
+        : source + tags;
+    }
     if (agents) {
       tags += `\n<script src="${runtimeUrl('agent.js')}" data-marble-transient></script>`;
       // Custom meta skips the drawer mount in runtime/agent-ui.js, not this script —
@@ -428,6 +449,11 @@ export async function createDrive(config, { log = console, agentProviders = null
       await agents?.followMove?.(at);
     } catch (err) {
       log.error(`[move] conversations did not follow ${from} → ${to}: ${err.message}`);
+    }
+    try {
+      await shares.moved(at);
+    } catch (err) {
+      log.error(`[move] share links did not follow ${from} → ${to}: ${err.message}`);
     }
     try {
       const home = config.home;
@@ -625,17 +651,38 @@ export async function createDrive(config, { log = console, agentProviders = null
       }
       if (route === '/favicon.ico') return send(res, 302, '', { Location: '/favicon.svg' });
       if (route === '/gate') return gateRoute(req, res, url);
+      // A share link: in front of the gate, because the person holding one
+      // has no passphrase. It trades the token for a cookie and goes on to
+      // the page (server/shares.js).
+      const link = /^\/s\/([A-Za-z0-9_-]+)$/.exec(route);
+      if (link && req.method === 'GET') return shareDoor(req, res, link[1]);
       // In front of the gate: the MCP bridge carries a turn's token, not the
       // drive's secret, and the tool routes check that token themselves.
       if (route === '/agent/tools' || route.startsWith('/agent/tools/')) {
         // Awaited, so a refusal thrown inside reaches the catch below as a status.
         return agents ? await agents.handleTools(req, res, url) : text(res, 404, 'not found');
       }
+      // Not the owner, but maybe someone holding a share link. `visit` is the
+      // link's grant for the one document this request is about; everything
+      // a link does not open is turned away here, before any route runs.
+      let visit = null;
       if (!gate.allows(req)) {
-        if ((req.headers.accept ?? '').includes('text/html')) {
-          return send(res, 302, '', { Location: `/gate?to=${encodeURIComponent(req.url)}` });
+        const grants = await shares.visitor(req);
+        const asked = grants ? await visitorMay(req, url, route, grants) : null;
+        if (asked?.redirect) return send(res, 302, '', { Location: asked.redirect });
+        if (!asked?.ok) {
+          // Someone whose every link has been turned off is told that, not
+          // shown a passphrase form they were never given.
+          const lapsed = !grants && shares.carries(req);
+          if ((req.headers.accept ?? '').includes('text/html')) {
+            if (lapsed) return linkIsOff(res);
+            return send(res, 302, '', { Location: `/gate?to=${encodeURIComponent(req.url)}` });
+          }
+          if (lapsed) return json(res, 403, { error: 'This link was turned off' });
+          if (grants) return json(res, 403, { error: asked?.error ?? 'a shared link opens one page, not the drive' });
+          return json(res, 401, { error: 'this drive is closed', hint: 'POST /gate with the secret' });
         }
-        return json(res, 401, { error: 'this drive is closed', hint: 'POST /gate with the secret' });
+        visit = asked.grant;
       }
       if (route.startsWith('/agent/')) {
         return agents ? await agents.handle(req, res, url) : text(res, 404, 'not found');
@@ -710,7 +757,7 @@ export async function createDrive(config, { log = console, agentProviders = null
         // A visit, not a preview: the Drive draws live pages in iframes.
         const dest = req.headers['sec-fetch-dest'];
         if (!dest || dest === 'document') ledger.count('opens');
-        return html(res, 200, injectCarrier(source, docPath));
+        return html(res, 200, injectCarrier(source, docPath, visit));
       }
 
       // ------------------------------------------------- the carrier's surface
@@ -762,6 +809,7 @@ export async function createDrive(config, { log = console, agentProviders = null
         const off = url.searchParams.get('drive')
           ? channels.subscribeDrive(client)
           : channels.subscribeDoc(parsePath(url.searchParams.get('app'), { allowRoot: false }), client);
+        if (visit) shares.track(visit.id, res);
         req.on('close', () => {
           off();
           if (!url.searchParams.get('drive') && client.id) {
@@ -802,9 +850,19 @@ export async function createDrive(config, { log = console, agentProviders = null
         const ops = JSON.parse((await readBody(req, config.maxBodyBytes)).toString('utf8'));
         if (!Array.isArray(ops)) return json(res, 400, { error: 'expected an array of ops' });
 
+        // A share link's batch is judged against the document as it is inside
+        // the queue, by what its level may change (server/share-policy.js),
+        // and refused whole. A refusal is a 403 so the page puts itself back.
+        const prepare = visit
+          ? (source) => {
+            const why = shareRefusal(source, ops, visit.role);
+            return why ? { refused: why } : { ops };
+          }
+          : null;
         // The echo is for the other tabs, the other devices, the other people,
         // and the agent — never for whoever filed it.
-        const result = await writeOps(docPath, ops, { client });
+        const result = await writeOps(docPath, ops, { client, prepare });
+        if (result.refused) return json(res, 403, { error: result.refused });
         return json(res, 200, { ok: true, ...result });
       }
 
@@ -888,6 +946,23 @@ export async function createDrive(config, { log = console, agentProviders = null
 
       // The drive's own choices (server/drive-settings.js): which folders wear
       // a realm, which document /today opens. Empty for a drive with none.
+      // Share links for one document (server/shares.js). Only the owner gets
+      // here: a link never opens a /drive route.
+      if (route === '/drive/shares' && req.method === 'GET') {
+        const docPath = parsePath(url.searchParams.get('path'), { allowRoot: false });
+        return json(res, 200, { open: gate.open, links: await shares.forPath(docPath) });
+      }
+      if (route === '/drive/shares' && req.method === 'POST') {
+        const body = await readJson(req, 4096);
+        const docPath = parsePath(body.path, { allowRoot: false });
+        if (!(await store.has(docPath))) return json(res, 404, { error: `no document "${docPath}"` });
+        return json(res, 200, { open: gate.open, link: await shares.make(docPath, body.role) });
+      }
+      if (route === '/drive/shares/off' && req.method === 'POST') {
+        const body = await readJson(req, 4096);
+        return json(res, 200, { ok: await shares.off(String(body.id ?? '')) });
+      }
+
       if (route === '/drive/settings' && req.method === 'GET') {
         return json(res, 200, await readDriveSettings(store.marbleDir));
       }
@@ -1171,6 +1246,9 @@ export async function createDrive(config, { log = console, agentProviders = null
         return send(res, 200, blob.data, {
           'Content-Type': blob.type,
           'Cache-Control': 'private, max-age=31536000, immutable',
+          // A blob is whatever type its uploader said. Never let a browser
+          // decide it is a page instead.
+          'X-Content-Type-Options': 'nosniff',
         });
       }
 
@@ -1314,6 +1392,81 @@ export async function createDrive(config, { log = console, agentProviders = null
   }
 
   // ------------------------------------------------------------------ helpers
+
+  /** What a share link may ask for: its document's page, stream, presence and
+   *  (by level) ops; the runtime that page loads; the blobs that page names.
+   *  Everything else belongs to the drive and is refused before any route
+   *  runs, so a route added later is the owner's until it is listed here.
+   *  `{ ok, grant }` with the grant for the document the request is about. */
+  async function visitorMay(req, url, route, grants) {
+    const { method } = req;
+    const grantFor = (docPath) => (grants.has(docPath) ? { ...grants.get(docPath), path: docPath } : null);
+    const named = (raw) => {
+      try {
+        return parsePath(raw, { allowRoot: false });
+      } catch {
+        return null;
+      }
+    };
+    // The carrier's tab id, and nothing that could pass for an agent's.
+    const client = url.searchParams.get('client');
+    if (client !== null && !/^[a-z0-9]{1,16}$/i.test(client)) return { error: 'that is not a tab' };
+
+    if (route.startsWith('/runtime/') && method === 'GET') return { ok: true, grant: null };
+    if (route === '/tab/alive' && method === 'POST') return { ok: true, grant: null };
+
+    if (route.startsWith('/a/') && method === 'GET') {
+      const docPath = named(decodeURIComponent(route.slice(3)));
+      const grant = docPath && grantFor(docPath);
+      if (grant) return { ok: true, grant };
+      // A page that moved after the link was opened: the link moved with it.
+      const went = docPath && (await moves.resolve(docPath));
+      if (went && grants.has(went)) return { redirect: `/a/${encodeURIComponent(went)}` };
+      return null;
+    }
+
+    const docPath = named(url.searchParams.get('app'));
+    const grant = docPath && grantFor(docPath);
+    if (route === '/events' && grant && !url.searchParams.get('drive')) return { ok: true, grant };
+    if (route === '/presence' && grant && (method === 'GET' || method === 'POST')) return { ok: true, grant };
+    if (route === '/ops' && grant && method === 'POST') {
+      if (RANK[grant.role] < RANK.edit) return { error: 'This link can only read the page' };
+      return { ok: true, grant };
+    }
+
+    if (route.startsWith('/blob/') && method === 'GET') {
+      const hash = route.slice('/blob/'.length);
+      if (!/^[0-9a-f]{64}$/.test(hash)) return null;
+      for (const [path] of grants) {
+        if (((await store.read(path)) ?? '').includes(hash)) return { ok: true, grant: grantFor(path) };
+      }
+      return null;
+    }
+    return null;
+  }
+
+  /** `/s/<token>`: the owner goes straight to the page; anyone else is handed
+   *  a cookie for this link and then goes there. A link that is off says so,
+   *  and says nothing about what it was for. */
+  async function shareDoor(req, res, token) {
+    const share = await shares.resolve(token);
+    const quiet = { 'Cache-Control': 'no-store', 'Referrer-Policy': 'no-referrer' };
+    if (!share || !(await store.has(share.path))) return linkIsOff(res);
+    const to = `/a/${encodeURIComponent(share.path)}`;
+    if (gate.allows(req)) return send(res, 302, '', { ...quiet, Location: to });
+    return send(res, 302, '', { ...quiet, Location: to, 'Set-Cookie': await shares.cookieWith(req, token) });
+  }
+
+  /** The page for a link that opens nothing: it says so, and nothing about
+   *  what the link was for or whose drive this is. */
+  function linkIsOff(res) {
+    return html(res, 404, `<!doctype html><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1"><title>Marble Drive</title>
+<link rel="icon" href="${iconUri('drive')}">
+<style>body{font:15px/1.5 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;display:grid;place-items:center;height:100vh;margin:0;padding:0 24px;background:#fafaf7;color:#111111}p{color:#5a5a5a;margin:0}
+@media (prefers-color-scheme: dark){body{background:#161616;color:#ededed}p{color:#a3a3a3}}</style>
+<p>This link doesn’t open anything. Whoever shared it may have turned it off.</p>`, { 'Cache-Control': 'no-store', 'Referrer-Policy': 'no-referrer' });
+  }
 
   function gateRoute(req, res, url) {
     if (gate.open) return send(res, 302, '', { Location: '/' });

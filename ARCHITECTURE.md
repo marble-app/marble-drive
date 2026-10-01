@@ -51,6 +51,8 @@ What is here is everything to do with there being more than one folder:
 | `server/watch.js` | a recursive watcher, with a walk for the platforms that have no recursive flag |
 | `server/oplog.js` | the op log, with `client` and `seq` alongside `t` |
 | `server/gate.js` | one shared secret and a signed cookie. Thrown away at G2 |
+| `server/shares.js` | share links: one document each, at a level, good until turned off (docs/SHARING.md) |
+| `server/share-policy.js` | what each level may change, and what no link may: the page's code |
 | `server/sse.js` | two channels: this document moved, and the folder did |
 | `server/gallery.js` | starters, composed from Marble's affordance parts |
 | `server/favicon.js` | the mark: one marble, bare for a document and tiled for the Drive, inline in the head of both |
@@ -120,5 +122,7 @@ named work rather than an implied refactor. Both are done here, and both are
 done for the reason it gives — they are free now and a migration later.
 
 What is deliberately *not* here is anything from G2 onward: no wildcard origin,
-no accounts, no capability URLs, no per-document storage. The gate is a
-placeholder that says so in its own header comment.
+no accounts, no per-document storage. The gate is a placeholder that says so in
+its own header comment. The one capability URL is the share link
+(docs/SHARING.md): it opens one document for someone without the passphrase,
+and is checked before any route runs.

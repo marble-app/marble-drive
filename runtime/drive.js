@@ -273,6 +273,15 @@
     const restore = (id, to = null) => ask('/drive/untrash', { method: 'POST', body: { id, to } });
     const weigh = (path) => ask(`/drive/weigh?path=${encodeURIComponent(path)}`);
 
+    // Share links: one document each, at a level — 'view', 'edit' or
+    // 'modify' (server/shares.js). `make` hands back the link that is on at
+    // that level, or a new one; `off` stops one opening anything.
+    const shares = {
+      list: (path) => ask(`/drive/shares?path=${encodeURIComponent(path)}`),
+      make: (path, role) => ask('/drive/shares', { method: 'POST', body: { path, role } }),
+      off: (id) => ask('/drive/shares/off', { method: 'POST', body: { id } }),
+    };
+
     // A self-contained copy, blobs and all. The promise that makes blobs safe
     // to take is only a promise if it is one click away.
     const downloadHref = (path) => `/drive/download?path=${encodeURIComponent(path)}`;
@@ -525,6 +534,7 @@
       remove,
       restore,
       weigh,
+      shares,
       downloadHref,
       fileHref,
       thumbHref,

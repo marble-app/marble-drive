@@ -193,13 +193,23 @@ test('⌘K searches the drive by name and Enter opens the first match', async ()
   await page.waitForURL(/Field%20notes$/);
 });
 
-test('Share hands you the document\'s link', async () => {
+test('Share makes a link at each level, shows the ones that are on, and turns one off', async () => {
   const { page, shell } = await visit();
   await page.keyboard.press('Control+\\');
   await shell.locator('[data-act="share"]').click();
-  const input = shell.locator('.sharing input');
-  await input.waitFor();
-  assert.equal(await input.inputValue(), `${host.base}${await page.evaluate(() => window.marble.href(window.marble.app))}`);
+  await shell.locator('.sharing').waitFor();
+  assert.deepEqual(await shell.locator('.level .lv-name').allInnerTexts(), ['Read only', 'Read & write', 'Read, write & modify']);
+  const row = shell.locator('.level[data-role="view"]');
+  assert.equal(await row.locator('.lv-off').isVisible(), false, 'no link yet, so nothing to turn off');
+  await row.locator('.lv-copy').click();
+  const url = row.locator('.lv-url');
+  await url.waitFor();
+  assert.match(await url.inputValue(), new RegExp(`^${host.base}/s/[A-Za-z0-9_-]{38}$`));
+  // Two presses: the first asks.
+  await row.locator('.lv-off').click();
+  assert.equal(await row.locator('.lv-off').innerText(), 'Yes, turn off');
+  await row.locator('.lv-off').click();
+  await url.waitFor({ state: 'hidden' });
   await page.keyboard.press('Escape');
   assert.equal(await shell.locator('.sharing').isVisible(), false);
 });

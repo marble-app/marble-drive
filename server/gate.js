@@ -23,7 +23,7 @@ const LOOPBACK = new Set(['127.0.0.1', '::1', '::ffff:127.0.0.1']);
 /** Did this request reach the host over HTTPS? Only a proxy on this machine is
  *  believed when it says so — Tailscale Serve terminates TLS and forwards to
  *  loopback — because a header is a thing anybody can type. */
-const overHttps = (req) =>
+export const overHttps = (req) =>
   LOOPBACK.has(req?.socket?.remoteAddress) && req.headers?.['x-forwarded-proto'] === 'https';
 
 const equal = (a, b) => {

@@ -128,6 +128,14 @@
     grip: '<path d="M6 4h.01M10 4h.01M6 8h.01M10 8h.01M6 12h.01M10 12h.01" stroke-width="2"/>',
   };
   const icon = (name) => `<svg class="i" viewBox="0 0 16 16" aria-hidden="true">${PATHS[name]}</svg>`;
+  // What each share link lets its holder do (server/share-policy.js says the
+  // same thing as rules). The names are the ones the owner chose.
+  const SHARE_LEVELS = [
+    ['view', 'Read only', 'Sees the page and its changes as they happen.'],
+    ['edit', 'Read &amp; write', 'Can type, tick, add and reorder where the page allows it.'],
+    ['modify', 'Read, write &amp; modify', 'Can also rewrite and restyle the page. Its code stays yours.'],
+  ];
+  const LEVEL_NAME = { view: 'Read only', edit: 'Read & write', modify: 'Read, write & modify' };
   // The colour a folder wears on the Drive (templates/drive.mrbl, .item[data-realm]
   // --folder), light and dark, so a row here is the same colour as its tile there.
   const REALMS = {
@@ -341,12 +349,26 @@
     .menu button { display: flex; align-items: center; gap: 9px; width: 100%; padding: 7px 10px; border-radius: 8px; color: var(--ink); text-align: left; }
     .menu button:hover, .menu button:focus-visible { background: var(--paper-2); outline: none; }
     .menu .i { color: var(--muted); }
-    .sharing { width: 320px; padding: 12px; }
-    .sharing h3 { margin: 0 0 2px; font-size: 13.5px; font-weight: 600; }
-    .sharing p { margin: 0 0 10px; color: var(--muted); font-size: 12.5px; }
-    .sharing .link { display: flex; gap: 6px; }
-    .sharing input { flex: 1; min-width: 0; height: 30px; border: 1px solid var(--line); border-radius: 8px; padding: 0 8px; font: 12px/1 ui-monospace, SFMono-Regular, Menlo, monospace; color: var(--muted); background: var(--paper); }
-    .sharing .copy { height: 30px; padding: 0 12px; border-radius: 8px; background: var(--ink); color: var(--paper); font-weight: 600; font-size: 12.5px; display: flex; align-items: center; gap: 6px; }
+    /* Share: a link per level, each its own row, and the owner's own address
+       last. A row that has a link shows it, so what is out there is on screen. */
+    .sharing { width: min(340px, calc(100vw - 16px)); padding: 12px; }
+    .sharing h3 { margin: 0 0 2px; font-size: 13.5px; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .sharing .lede { margin: 0 0 8px; color: var(--muted); font-size: 12.5px; }
+    .sharing .lede[data-open] { color: var(--caution); }
+    .levels { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; }
+    .level, .own { display: grid; grid-template-columns: 1fr auto; align-items: center; column-gap: 8px; row-gap: 2px; padding: 9px 0; border-top: 1px solid var(--line); }
+    .lv-name { font-weight: 600; color: var(--ink); white-space: nowrap; }
+    .lv-says { grid-column: 1 / -1; color: var(--muted); font-size: 12px; text-wrap: pretty; }
+    .lv-acts { display: flex; gap: 4px; }
+    .lv-acts button, .own button { height: 28px; padding: 0 10px; border-radius: 8px; font-weight: 600; font-size: 12.5px; display: flex; align-items: center; gap: 6px; }
+    .lv-copy, .own button { background: var(--ink); color: var(--paper); }
+    .lv-copy:active, .own button:active { background: var(--accent-ink); }
+    .lv-off { color: var(--muted); }
+    .lv-off:hover { background: var(--paper-2); color: var(--ink); }
+    .lv-off[data-sure] { color: var(--danger, #b4533e); background: var(--paper-2); }
+    .lv-off[hidden], .lv-url[hidden] { display: none; }
+    .lv-url { grid-column: 1 / -1; margin-top: 4px; width: 100%; min-width: 0; height: 28px; border: 1px solid var(--line); border-radius: 8px; padding: 0 8px; font: 11.5px/1 ui-monospace, SFMono-Regular, Menlo, monospace; color: var(--muted); background: var(--paper); }
+    .sharing button:disabled { opacity: .5; cursor: default; }
     /* Move or rename: the name, then where. */
     .moving { width: 320px; padding: 12px; display: flex; flex-direction: column; gap: 8px; }
     .moving h3 { margin: 0; font-size: 13.5px; font-weight: 600; }
@@ -440,8 +462,20 @@
         <div class="pop menu" role="menu" aria-label="This document" hidden></div>
         <div class="pop sharing" role="dialog" aria-label="Share" hidden>
           <h3></h3>
-          <p>Anyone who can open this drive can open this link.</p>
-          <div class="link"><input readonly aria-label="Link"><button type="button" class="copy">${icon('link')}Copy</button></div>
+          <p class="lede">A link opens this page and nothing else in your drive.</p>
+          <ul class="levels">
+            ${SHARE_LEVELS.map(([role, name, says]) => `<li class="level" data-role="${role}">
+              <span class="lv-name">${name}</span>
+              <span class="lv-acts"><button type="button" class="lv-off" hidden>Turn off</button><button type="button" class="lv-copy">${icon('link')}Copy link</button></span>
+              <span class="lv-says">${says}</span>
+              <input class="lv-url" readonly aria-label="${name} link" hidden>
+            </li>`).join('')}
+          </ul>
+          <div class="own">
+            <span class="lv-name">Your link</span>
+            <button type="button" class="copy">Copy</button>
+            <span class="lv-says">Asks for your drive’s passphrase.</span>
+          </div>
         </div>
         <div class="pop moving" role="dialog" aria-label="Move or rename" hidden>
           <h3>Move or rename</h3>
@@ -566,7 +600,13 @@
         else if (act === 'describe') dispatchEvent(new CustomEvent('marble-marks:toggle'));
         else if (act === 'doc') this.toggleMenu(event.target.closest('[data-act]'));
       });
-      this.sharing.querySelector('.copy').addEventListener('click', () => this.copyLink());
+      this.sharing.querySelector('.own .copy').addEventListener('click', () => this.copyLink());
+      this.sharing.querySelector('.levels').addEventListener('click', (event) => {
+        const row = event.target.closest('.level');
+        if (!row) return;
+        if (event.target.closest('.lv-copy')) this.copyShare(row);
+        else if (event.target.closest('.lv-off')) this.turnOff(row, event.target.closest('.lv-off'));
+      });
       this.bindMove();
       this.arrive();
       this.menu.addEventListener('click', (event) => {
@@ -1278,13 +1318,115 @@
       if (!opening) return;
       const button = this.$('[data-act="share"]');
       this.sharing.querySelector('h3').textContent = `Share ${nameOf(this.here) || document.title}`;
-      const input = this.sharing.querySelector('input');
-      input.value = this.link();
+      this.drawShares(null);
       this.sharing.hidden = false;
       button.setAttribute('aria-expanded', 'true');
       this.place(this.sharing, button, 'right');
-      input.focus({ preventScroll: true });
-      input.select();
+      this.sharing.querySelector('.lv-copy')?.focus({ preventScroll: true });
+      this.loadShares();
+    }
+
+    // ------------------------------------------------------------ share links
+
+    async loadShares() {
+      const shares = window.marble?.drive?.shares;
+      if (!shares || !this.here) return;
+      const asked = (this.sharesAsked ?? 0) + 1;
+      this.sharesAsked = asked;
+      try {
+        const answer = await shares.list(this.here);
+        if (asked === this.sharesAsked) this.drawShares(answer);
+      } catch {
+        // The rows still make links; they just do not know which are on.
+      }
+    }
+
+    /** The rows as the drive says they are: a level with a link on shows its
+     *  address and a way to turn it off. `null` while that is not known. */
+    drawShares(answer) {
+      const lede = this.sharing.querySelector('.lede');
+      const open = Boolean(answer?.open);
+      lede.toggleAttribute('data-open', open);
+      lede.textContent = open
+        ? 'This drive has no passphrase, so anyone who can reach it can already change everything.'
+        : 'A link opens this page and nothing else in your drive.';
+      this.shareLinks = new Map((answer?.links ?? []).map((link) => [link.role, link]));
+      for (const row of this.sharing.querySelectorAll('.level')) this.drawShareRow(row);
+    }
+
+    drawShareRow(row) {
+      const link = this.shareLinks?.get(row.dataset.role);
+      const off = row.querySelector('.lv-off');
+      const url = row.querySelector('.lv-url');
+      off.hidden = !link;
+      off.removeAttribute('data-sure');
+      off.textContent = 'Turn off';
+      url.hidden = !link;
+      url.value = link ? new URL(link.href, location.href).href : '';
+    }
+
+    /** Copy this level's link, making it if there is none. The clipboard is
+     *  handed a promise inside the press, because Safari will not take text
+     *  that arrives after a request has gone out and come back. */
+    async copyShare(row) {
+      const role = row.dataset.role;
+      const shares = window.marble?.drive?.shares;
+      if (!shares || !this.here) return;
+      const button = row.querySelector('.lv-copy');
+      button.disabled = true;
+      const making = this.shareLinks?.get(role)
+        ? Promise.resolve(this.shareLinks.get(role))
+        : shares.make(this.here, role).then((answer) => answer.link);
+      const href = making.then((link) => new URL(link.href, location.href).href);
+      let copied = false;
+      try {
+        if (window.ClipboardItem && navigator.clipboard?.write) {
+          await navigator.clipboard.write([new ClipboardItem({ 'text/plain': href.then((text) => new Blob([text], { type: 'text/plain' })) })]);
+        } else {
+          await navigator.clipboard.writeText(await href);
+        }
+        copied = true;
+      } catch {
+        copied = await href.then((text) => navigator.clipboard.writeText(text)).then(() => true, () => false);
+      }
+      try {
+        const link = await making;
+        this.shareLinks?.set(role, link);
+        this.drawShareRow(row);
+        this.say(copied ? `${LEVEL_NAME[role]} link copied` : 'Could not copy the link');
+        if (!copied) row.querySelector('.lv-url').select();
+      } catch (err) {
+        this.say(err?.message ? `No link: ${err.message}` : 'Could not make the link');
+      } finally {
+        button.disabled = false;
+      }
+    }
+
+    /** Two presses: the first asks, the second turns the link off for
+     *  everyone who has it. Whoever had it is out on their next request, and
+     *  an open page stops hearing changes at once. */
+    async turnOff(row, button) {
+      const link = this.shareLinks?.get(row.dataset.role);
+      if (!link) return;
+      if (!button.hasAttribute('data-sure')) {
+        button.setAttribute('data-sure', '');
+        button.textContent = 'Yes, turn off';
+        clearTimeout(this.sureTimer);
+        this.sureTimer = setTimeout(() => this.drawShareRow(row), 4000);
+        return;
+      }
+      clearTimeout(this.sureTimer);
+      button.disabled = true;
+      try {
+        await window.marble.drive.shares.off(link.id);
+        this.shareLinks.delete(row.dataset.role);
+        this.say(`${LEVEL_NAME[row.dataset.role]} link turned off`);
+      } catch {
+        this.say('Could not turn the link off');
+      } finally {
+        button.disabled = false;
+        this.drawShareRow(row);
+      }
     }
 
     async copyLink() {
