@@ -410,6 +410,22 @@ test('moving, trashing and restoring, over HTTP', async () => {
   assert.equal((await get('/a/archive%2Fscratch')).status, 200);
 });
 
+test('a rename retitles the document, and a move alone leaves its title be', async () => {
+  await asJson(await post('/drive/new', { path: 'first name', from: 'doc' }));
+  const titled = (await drive.store.read('first name')).replace(/<title>[^<]*<\/title>/, '<title data-marble-id="t1">Kept &amp; mine</title>');
+  await drive.store.write('first name', titled, { label: 'test' });
+
+  // Into a folder under the same name: the person named nothing.
+  await asJson(await post('/drive/move', { from: 'first name', to: 'shelf/first name' }));
+  assert.match(await drive.store.read('shelf/first name'), /<title data-marble-id="t1">Kept &amp; mine<\/title>/);
+
+  // A new name is the name the tab says, and the title keeps its id.
+  await asJson(await post('/drive/move', { from: 'shelf/first name', to: 'shelf/second name' }));
+  const renamed = await drive.store.read('shelf/second name');
+  assert.match(renamed, /<title data-marble-id="t1">second name<\/title>/);
+  assert.equal(renamed.replace(/<title[^>]*>[^<]*/, ''), titled.replace(/<title[^>]*>[^<]*/, ''));
+});
+
 test('a name that is taken gets a number rather than a refusal', async () => {
   const first = await asJson(await post('/drive/new', { path: 'twice', from: 'doc' }));
   const second = await asJson(await post('/drive/new', { path: 'twice', from: 'doc' }));

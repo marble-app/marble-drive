@@ -986,6 +986,13 @@ export async function createDrive(config, { log = console, agentProviders = null
           lastKnown.delete(moved.from);
         }
         pendingWrites.move(moved.from, moved.to);
+        // A rename is the person naming the document, so the tab says the
+        // new name too. A move that kept the name leaves the title alone.
+        if (moved.kind === 'doc' && splitPath(moved.from).name !== splitPath(moved.to).name) {
+          const source = await store.read(moved.to);
+          const next = source === null ? null : retitled(source, splitPath(moved.to).name);
+          if (next !== null && next !== source) await putDocument(moved.to, next, { label: 'renamed', event: 'changed' });
+        }
         channels.toDrive('moved', moved);
         await followMove(moved.from, moved.to);
         return json(res, 200, { ok: true, ...moved });
@@ -1414,8 +1421,13 @@ button{background:#738698;color:#fafaf7;border-color:#738698;cursor:pointer}p{co
   async function copyOf(from, to) {
     const source = await store.read(parsePath(from, { allowRoot: false }));
     if (source === null) throw Object.assign(new Error(`no document "${from}"`), { status: 404 });
-    return source.replace(/<title>([^<]*)<\/title>/i, () => `<title>${escapeHtml(splitPath(to).name)}</title>`);
+    return retitled(source, splitPath(to).name);
   }
+
+  /** The document's <title> says `name`, keeping whatever the tag carries
+   *  (its data-marble-id most of all). */
+  const retitled = (source, name) =>
+    source.replace(/<title(\s[^>]*)?>[^<]*<\/title>/i, (_, attrs = '') => `<title${attrs}>${escapeHtml(name)}</title>`);
 
   /** What a document weighs, in the terms that decide whether blobs are a
    *  nicety or a blocker: total bytes, how many of them are base64, and how
