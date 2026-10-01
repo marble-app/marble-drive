@@ -357,3 +357,14 @@ test('Codex\'s own browser and computer use are off: they cannot work headless, 
     for (const feature of ['browser_use', 'browser_use_external', 'computer_use', 'in_app_browser']) assert.ok(off.includes(feature), `${capability}: ${feature}`);
   }
 });
+
+test('a sandboxed mode cannot be escalated out of, whatever reviewer the person\'s own Codex runs', () => {
+  // With approvals_reviewer = "auto_review" in ~/.codex, a write in read-only
+  // was asked for and approved (2026-10-01); a Marble mode's word has to hold.
+  for (const mode of ['workspace', 'read']) {
+    assert.equal(config(createCodexProvider({ env: {} }).spawn(turn({ mode })).args, 'approval_policy'), '"never"', mode);
+  }
+  assert.equal(config(createCodexProvider({ env: {} }).spawn(turn({ capability: 'documents', cwd: null })).args, 'approval_policy'), '"never"');
+  // Full access has nothing to escalate to; the person's own policy stands.
+  assert.equal(config(createCodexProvider({ env: {} }).spawn(turn({ mode: 'full' })).args, 'approval_policy'), undefined);
+});

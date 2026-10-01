@@ -319,6 +319,10 @@ export function createCodexProvider({ exec = runCommand, env = process.env, secr
         ? [instructionsFor('full', kind), BROWSER_NOTE, appSkillsText()].filter(Boolean).join('\n\n')
         : instructionsFor('documents');
       const args = ['exec', '--json', '--skip-git-repo-check', '-C', where, '-s', sandbox];
+      // A sandbox Marble chose is the mode's word, and nobody can be asked in
+      // exec — but a reviewer in the person's own config (approvals_reviewer)
+      // would approve an escalation out of it. So nothing escalates.
+      if (sandbox !== SANDBOX.full) args.push('-c', 'approval_policy="never"');
       // A documents turn gets none of the person's own Codex — no MCP servers
       // of theirs, no instructions, no hooks — and no shell: Marble's tools
       // are all it has, as Claude's `--tools ""` and Cursor's hook leave them.

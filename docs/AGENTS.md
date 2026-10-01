@@ -279,7 +279,9 @@ headless they only fail, and the model reached for them before Marble's
 signed-in browser. The mode is its sandbox: **Full access**
 (`danger-full-access`, the default), **Workspace** (`workspace-write`: writes
 only in the project, no network for the shell) and **Documents only**
-(`read-only`: the shell only reads; Marble's tools still edit documents). A
+(`read-only`: the shell only reads; Marble's tools still edit documents). The
+two sandboxed modes run with `approval_policy="never"`, so a reviewer in the
+person's own Codex config cannot approve an escalation out of them. A
 host where `codex sandbox -- true` fails — every sprite, where bubblewrap will
 not start — offers only Full access. exec has no channel for asking, so Codex
 asks its questions in text, like Cursor. Its key, when one is set, goes in as
