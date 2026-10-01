@@ -233,6 +233,7 @@ test('TOML strings survive quotes, newlines, backslashes and spaces in paths', (
 });
 
 test('detect: not installed, on a key, on the ChatGPT login, and signed out', async () => {
+  const sign = (answer) => ({ installed: answer.installed, signedIn: answer.signedIn, detail: answer.detail });
   const answers = (map) => async (command, args) => map[args.join(' ')] ?? { code: 0, stdout: '', stderr: '', missing: false };
   const missing = createCodexProvider({ exec: async () => ({ code: null, stdout: '', stderr: '', missing: true }), env: {} });
   assert.deepEqual(await missing.detect(), { installed: false, signedIn: false, detail: 'codex is not installed' });
@@ -246,11 +247,11 @@ test('detect: not installed, on a key, on the ChatGPT login, and signed out', as
     env: { PATH: '/bin', MARBLE_DRIVE_SECRET: 's' },
     secrets: () => ({ CODEX_API_KEY: 'sk-proj-k' }),
   });
-  assert.deepEqual(await keyed.detect(), { installed: true, signedIn: true, detail: 'on an OpenAI API key' });
+  assert.deepEqual(sign(await keyed.detect()), { installed: true, signedIn: true, detail: 'on an OpenAI API key' });
   assert.ok(seen.every((env) => !('MARBLE_DRIVE_SECRET' in env)));
 
   const login = createCodexProvider({ exec: answers({ 'login status': { code: 0, stdout: '', stderr: 'Logged in using ChatGPT\n', missing: false } }), env: {} });
-  assert.deepEqual(await login.detect(), { installed: true, signedIn: true, detail: 'signed in with ChatGPT' });
+  assert.deepEqual(sign(await login.detect()), { installed: true, signedIn: true, detail: 'signed in with ChatGPT' });
 
   const out = createCodexProvider({ exec: answers({ 'login status': { code: 1, stdout: '', stderr: 'Not logged in\n', missing: false } }), env: {} });
   const answer = await out.detect();
@@ -274,4 +275,31 @@ test('a thread Codex no longer has is a lost session, and stderr\'s Error line i
   assert.equal(provider.lostSession(failure), true);
   assert.equal(provider.lostSession('unexpected status 401 Unauthorized'), false);
   assert.equal(provider.failure('just noise\n'), null);
+});
+
+test('a machine whose sandbox cannot start offers only Full access', async () => {
+  const probe = (sandboxCode) => {
+    const asked = [];
+    const exec = async (command, args) => {
+      asked.push(args.join(' '));
+      if (args[0] === 'sandbox') return { code: sandboxCode, stdout: '', stderr: sandboxCode ? 'bwrap: Unexpected capabilities but not setuid' : '' };
+      if (args[0] === 'login') return { code: 0, stdout: '', stderr: 'Logged in using ChatGPT' };
+      return { code: 0, stdout: 'codex-cli 0.159.3', stderr: '' };
+    };
+    return { provider: createCodexProvider({ exec, env: {} }), asked };
+  };
+  // A sprite: bubblewrap refuses to run there, so Workspace and Read only
+  // would fail every command the agent ran.
+  const sprite = probe(1);
+  const answer = await sprite.provider.detect();
+  assert.equal(answer.signedIn, true);
+  assert.deepEqual(answer.modes.map((m) => m.id), ['full']);
+  await sprite.provider.detect();
+  assert.equal(sprite.asked.filter((a) => a.startsWith('sandbox')).length, 1, 'asked once per host, not per detection');
+  // A Mac: the sandbox runs, every mode is offered.
+  const mac = probe(0);
+  assert.deepEqual((await mac.provider.detect()).modes.map((m) => m.id), ['full', 'workspace', 'read']);
+  // Not installed: nothing to probe.
+  const none = createCodexProvider({ exec: async () => ({ code: null, missing: true, stdout: '', stderr: '' }), env: {} });
+  assert.equal((await none.detect()).modes, undefined);
 });

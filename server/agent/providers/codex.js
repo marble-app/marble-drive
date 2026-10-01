@@ -222,6 +222,17 @@ export function createCodexProvider({ exec = runCommand, env = process.env, secr
   const live = () => ({ ...env, ...(typeof secrets === 'function' ? secrets() : secrets ?? {}) });
   const keyOf = (current) => String(current.CODEX_API_KEY ?? '').trim();
 
+  // Workspace and Read only are Codex's own sandbox, which is Seatbelt on a
+  // Mac and bubblewrap on Linux. Bubblewrap will not start inside a sprite
+  // ("Unexpected capabilities but not setuid", 2026-10-01), and there every
+  // command a sandboxed turn ran would fail. So the host asks once whether
+  // the sandbox runs, and offers only Full access where it does not.
+  let sandboxRuns = null;
+  const modesHere = async (probeEnv) => {
+    sandboxRuns ??= exec('codex', ['sandbox', '--', 'true'], { env: probeEnv, timeout: 10_000 }).then((r) => r.code === 0);
+    return (await sandboxRuns) ? CODEX_MODES : CODEX_MODES.filter((mode) => mode.id === 'full');
+  };
+
   return {
     id: 'codex',
     label: 'Codex',
@@ -245,16 +256,18 @@ export function createCodexProvider({ exec = runCommand, env = process.env, secr
       const probeEnv = pickEnv(current);
       const version = await exec('codex', ['--version'], { env: probeEnv });
       if (version.missing) return { installed: false, signedIn: false, detail: 'codex is not installed' };
-      if (keyOf(current)) return { installed: true, signedIn: true, detail: 'on an OpenAI API key' };
+      const modes = await modesHere(probeEnv);
+      if (keyOf(current)) return { installed: true, signedIn: true, detail: 'on an OpenAI API key', modes };
       const status = await exec('codex', ['login', 'status'], { env: probeEnv });
       const text = `${status.stdout ?? ''}\n${status.stderr ?? ''}`;
       if (status.code === 0 && /\blogged in\b/i.test(text) && !/\bnot logged in\b/i.test(text)) {
-        return { installed: true, signedIn: true, detail: /chatgpt/i.test(text) ? 'signed in with ChatGPT' : 'signed in' };
+        return { installed: true, signedIn: true, detail: /chatgpt/i.test(text) ? 'signed in with ChatGPT' : 'signed in', modes };
       }
       return {
         installed: true,
         signedIn: false,
         detail: status.timedOut ? 'codex login status timed out' : 'add an OpenAI API key, or run `codex login`',
+        modes,
       };
     },
 
