@@ -169,7 +169,7 @@
    * @param {Element} [o.element]     the thing itself, to read its gaps
    * @param {string} [o.draft]        words to open with (a note)
    * @param {string} [o.action]       an action to open drafted (a chip)
-   * @param {boolean} [o.teach]       add the line that teaches ⌥
+   * @param {boolean} [o.teach]       add the line that teaches asking without selecting
    * @param {string} [o.first]        an action to lead the suggestions with
    * @param {(text: string, meta: object) => void} o.onSend
    * @param {(text: string, meta: object) => void} [o.onKeep]  ⇧⏎
@@ -349,7 +349,7 @@
       key('⏎', 'send');
       if (o.onKeep) key('⇧⏎', 'keep as a note');
       key('⌥⏎', 'new line');
-      if (o.teach) hint.append(h('span', 'marble-offer-teach', 'Hold ⌥ and click anything to ask about it.'));
+      if (o.teach) hint.append(h('span', 'marble-offer-teach', 'No need to select: ⌘J asks about what the pointer is on.'));
     }
 
     let lastEmpty = null;

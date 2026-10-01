@@ -35,8 +35,6 @@
   const SHOWN = new Set(['waiting', 'working']);
   const WORD = { waiting: 'Needs you', working: 'Working' };
 
-  const DOT_ICON = '<svg viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.7"><circle cx="12" cy="12" r="3.2" fill="currentColor" stroke="none"/><circle cx="12" cy="12" r="7.5"/></svg>';
-
   const STYLE = `
     :host { all: initial; }
     .layer { position: fixed; inset: 0; pointer-events: none;
@@ -163,9 +161,6 @@
     const glintsOff = () => {
       try { return localStorage.getItem(ON_KEY) !== '1'; } catch { return true; }
     };
-    // How many marks on what agents changed are on this page (agent-work.js).
-    let changedHere = 0;
-    addEventListener('marble-work:dots', (event) => { changedHere = Number(event.detail?.count) || 0; offerTray(); });
 
     // id -> { summary, ids }
     const entries = new Map();
@@ -200,7 +195,6 @@
       let list = [];
       try { list = await agent.conversations(); } catch { return; }
       await Promise.all(list.filter(mine).map(upsert));
-      offerTray();
     }
 
     // Whose zone or card is already on the page says the same thing louder;
@@ -254,7 +248,6 @@
       }
       if (open && !keep.has(open.id)) close();
       else if (open) { placePeek(); showOutline(open.id, true); }
-      offerTray();
     }
 
     function showOutline(id, on, ids = null) {
@@ -375,39 +368,17 @@
 
     agent.on('*', (summary) => { upsert(summary); });
 
-    // ------------------------------------------------------------ the tray
-    // One switch for every working agent's dot, in the launcher's tray beside New chat and
-    // All agents. It is this browser's view, not the chats' state.
-
-    let inTray = false;
-    function offerTray() {
-      const off = glintsOff();
-      // agent-work.js may have painted before this layer listened.
-      const changed = Math.max(changedHere, window.marbleWork?.dots?.().length ?? 0);
-      const any = changed > 0 || [...entries.keys()].some((id) => !hiddenIds().has(id));
-      // In the tray while there is something it would show, or while it is
-      // on, so it can be turned off again.
-      const spec = {
-        id: 'glints',
-        order: 12,
-        label: off ? 'Show agent dots' : 'Hide agent dots',
-        icon: DOT_ICON,
-        active: !off,
-        hidden: off && !any,
-        onSelect: () => {
-          try { localStorage.setItem(ON_KEY, glintsOff() ? '1' : '0'); } catch { /* private mode */ }
-          close({ quiet: true });
-          schedule();
-          dispatchEvent(new CustomEvent('marble-agent-dots'));
-        },
-      };
-      if (!inTray) {
-        inTray = !dispatchEvent(new CustomEvent('marble-tray:register', { cancelable: true, detail: spec }));
-        return;
-      }
-      dispatchEvent(new CustomEvent('marble-tray:update', { detail: spec }));
-    }
-    addEventListener('marble-tray:ready', () => { inTray = false; offerTray(); });
+    // ------------------------------------------------------------ the switch
+    // One switch for every working agent's dot and every changed-part dot
+    // (agent-work.js), off by default. It is this browser's view, not the
+    // chats' state, and since v4 it lives in Agent settings › Chat
+    // (agent-ui.js) rather than the tray, which keeps to things to do.
+    addEventListener('marble-agent-prefs', (event) => {
+      if (event.detail?.key !== ON_KEY) return;
+      close({ quiet: true });
+      schedule();
+      dispatchEvent(new CustomEvent('marble-agent-dots'));
+    });
     // Another tab turned them off or on.
     addEventListener('storage', (event) => { if (event.key === ON_KEY || event.key === HIDDEN_KEY) schedule(); });
 

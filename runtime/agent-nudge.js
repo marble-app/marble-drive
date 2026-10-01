@@ -324,33 +324,13 @@
     watched.marbleNudged = true;
     marble.op = watched;
 
-    // ------------------------------------------------------------ the tray
-
-    const ICON = '<svg viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"><path d="M6.5 15.1A8 8 0 1 1 10.9 18.2L4.9 21.1a.6.6 0 0 1-.72-.85Z"/></svg>';
-    let inTray = false;
-    function offerTray() {
-      const spec = {
-        id: 'offers',
-        order: 41,
-        label: 'Offers after edits',
-        icon: ICON,
-        always: true,
-        active: offersOn(),
-        onSelect: () => {
-          try { localStorage.setItem(ON_KEY, offersOn() ? '0' : '1'); } catch { /* private mode */ }
-          if (!offersOn()) hide(true);
-          offerTray();
-        },
-      };
-      if (!inTray) {
-        inTray = !dispatchEvent(new CustomEvent('marble-tray:register', { cancelable: true, detail: spec }));
-        return;
-      }
-      dispatchEvent(new CustomEvent('marble-tray:update', { detail: spec }));
-    }
-    addEventListener('marble-tray:ready', () => { inTray = false; offerTray(); });
-    addEventListener('storage', (event) => { if (event.key === ON_KEY) offerTray(); });
-    offerTray();
+    // Offers after edits is on unless turned off in Agent settings › Chat
+    // (agent-ui.js), this tab or another; turned off, an offer standing now
+    // goes too. It stood in the tray until v4, which kept the tray for things
+    // to do.
+    const offersChanged = (key) => { if (key === ON_KEY && !offersOn()) hide(true); };
+    addEventListener('storage', (event) => offersChanged(event.key));
+    addEventListener('marble-agent-prefs', (event) => offersChanged(event.detail?.key));
 
     window.marbleNudge = { settle, show, hide, allowed, budget };
   };

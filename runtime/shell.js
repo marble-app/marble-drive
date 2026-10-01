@@ -429,7 +429,7 @@
           <button type="button" class="ib" data-act="describe" aria-pressed="false" aria-label="Describe a change (⌘⇧D)" title="Describe a change (⌘⇧D)" hidden>${icon('describe')}</button>
           <button type="button" class="share" data-act="share" aria-haspopup="dialog" aria-expanded="false">${icon('share')}Share</button>
           <span class="vr"></span>
-          <button type="button" class="ib" data-act="chat" aria-pressed="true" aria-label="Pin the chat" title="Pin the chat" hidden>${icon('chat')}</button>
+          <button type="button" class="ib" data-act="chat" aria-pressed="true" aria-label="Pin the chat" title="Pin the chat (⌘⇧J)" aria-keyshortcuts="Meta+Shift+J" hidden>${icon('chat')}</button>
           <button type="button" class="ib" data-act="close" aria-label="Hide everything" title="Hide everything (⌘\\)">${icon('collapse')}</button>
         </header>
         <nav class="nav" aria-label="Drive tree">
@@ -857,7 +857,7 @@
       chatButton.hidden = !this.drawer;
       chatButton.setAttribute('aria-pressed', String(pinChat));
       chatButton.setAttribute('aria-label', pinChat ? 'Unpin the chat' : 'Pin the chat');
-      chatButton.title = pinChat ? 'Unpin the chat: it waits at the edge' : 'Pin the chat';
+      chatButton.title = `${pinChat ? 'Unpin the chat: it waits at the edge' : 'Pin the chat'} (⌘⇧J)`;
       this.$('[data-act="describe"]').hidden = !document.querySelector('.marble-marks-layer');
       const hoverNav = this.hovers('nav');
       this.toggleAttribute('data-hide-nav', hoverNav && !this.shown.nav);

@@ -8,12 +8,13 @@
 // Quiet until reached (v2, Notes and Sketches/Ask at Anything): nothing about
 // asking appears until the person does something only someone who wants to
 // change the thing would do. Select words and the bubble hangs under them.
-// Hold ⌥ and what is under the pointer is outlined at the right scope, with
-// its name; click to ask about it, [ and ] to widen or narrow it first, and
-// ⌥-click something else with a card open to add it. ⌘J asks about the
-// selection, the block the caret is in, or what the pointer is over, and
-// only that: the drive around the page is ⌘\ (shell.js). Resting
-// the pointer offers nothing unless Offer when I rest is on in the tray. Closing a card puts it away: it never folds into a pill
+// ⌘J asks about the selection, the block the caret is in, or what the
+// pointer is over, and only that: the drive around the page is ⌘\
+// (shell.js). Point at something, in the tray, outlines what is under the
+// pointer at the right scope, with its name; click to ask about it, [ and ]
+// to widen or narrow it first, ⇧-click to add more. ⌥ does nothing here
+// (v4): it is the key that moves the caret by a word. Resting the pointer
+// offers nothing unless it is turned on in Agent settings › Chat. Closing a card puts it away: it never folds into a pill
 // left on the page. Chats nobody here is looking at are a glint on their
 // element instead (agent-glints.js). Everything here is transient chrome in
 // one fixed layer; no document is edited to get a callout.
@@ -160,7 +161,7 @@
       border: 1px solid color-mix(in srgb, var(--callout-mark) 28%, transparent); box-shadow: 0 2px 8px rgba(0,0,0,.08);
     }
     .marble-callout-pick.is-low .marble-callout-pick-name { bottom: auto; top: calc(100% + 4px); }
-    /* ⌥-pointing at something else while a card is open adds it: dashed. */
+    /* ⇧-clicking something else while a card is open adds it: dashed. */
     .marble-callout-pick.is-adding { border-style: dashed; }
     /* Point at something, from the tray: one line at the top says what a
        click will do now, and how to leave. */
@@ -762,7 +763,8 @@
     }
 
     // The first three cards opened from a selection carry one faint line
-    // that teaches ⌥, and then never again (v2's Teaching).
+    // that teaches asking without selecting, and then never again (v2's
+    // Teaching, taught with ⌘J since v4).
     const TAUGHT = 'marble-ask-taught';
     const teach = () => {
       let n = 0;
@@ -864,8 +866,8 @@
     const offering = () => records.find((r) => r.offer);
     addEventListener('pointerdown', (event) => {
       const record = offering();
-      // ⌥ held is pointing, not looking away: it adds to the card.
-      if (!record || event.altKey || latched || layer.contains(event.target) || event.composedPath().some((n) => n?.localName === 'marble-agent-drawer')) return;
+      // Pointing is not looking away: a ⇧-click adds to the card.
+      if (!record || latched || layer.contains(event.target) || event.composedPath().some((n) => n?.localName === 'marble-agent-drawer')) return;
       remove(record);
       agent.select(null);
     }, true);
@@ -901,7 +903,7 @@
     // ------------------------------------------------------------ hover
     // Offer when I rest: resting the pointer on something long enough offers
     // the bubble for it, at the right scope (agent-scope.js). Off unless the
-    // person turns it on in the tray, per browser: resting is what reading
+    // person turns it on in Agent settings › Chat, per browser: resting is what reading
     // looks like, and a page that outlines whatever you rest on feels like it
     // is watching (v2). When on, it is quiet: mouse and pen only, never while
     // typing, dragging, scrolling or marking, and if three offers in a row
@@ -911,12 +913,11 @@
     const restOn = () => {
       try { return localStorage.getItem(REST_KEY) === '1'; } catch { return false; }
     };
-    const setRest = (on) => {
-      try { localStorage.setItem(REST_KEY, on ? '1' : '0'); } catch { /* private mode */ }
-      if (!on) clearHover();
-      offerTray();
-    };
-    addEventListener('storage', (event) => { if (event.key === REST_KEY) { if (!restOn()) clearHover(); offerTray(); } });
+    // Turned on and off in Agent settings › Chat (agent-ui.js), this tab or
+    // another one.
+    const restChanged = (key) => { if (key === REST_KEY && !restOn()) clearHover(); };
+    addEventListener('storage', (event) => restChanged(event.key));
+    addEventListener('marble-agent-prefs', (event) => restChanged(event.detail?.key));
 
     const HOVER_DWELL = 400;
     const HOME = document.querySelector('script[data-home]')?.dataset.home ?? null;
@@ -940,7 +941,7 @@
       return Boolean(marksLayer?.dataset.mode) || Boolean(marksLayer?.hasAttribute('data-describing'));
     };
     function canHover() {
-      if (!restOn() || altHeld || latched) return false;
+      if (!restOn() || latched) return false;
       if (!globalThis.marbleScope || PHONE.matches || pointerDown || typing() || marking()) return false;
       // The Drive's own listing is made of things to open, not to ask about.
       if (HOME && app === HOME) return false;
@@ -1034,17 +1035,16 @@
     });
 
     // ------------------------------------------------------------ pointing
-    // Option held: the pointer names a thing instead of firing it. Holding a
-    // key is the only way a click on a page full of live controls can mean
-    // "this one" without setting it off, and Nobody holds ⌥ by accident. The
-    // outline is at the unit a person would name (agent-scope.js), with that
-    // name at its corner; [ and ] widen and narrow it while ⌥ is held. Click
-    // and the card opens on it. With a card already open, ⌥-click something
-    // else and it joins that card ("these 2 rows"). Let go of ⌥ without
-    // clicking and nothing happened.
+    // Point at something, in the tray: the pointer names a thing instead of
+    // firing it, so a click on a page full of live controls can mean "this
+    // one" without setting it off. The outline is at the unit a person would
+    // name (agent-scope.js), with that name at its corner; [ and ] widen and
+    // narrow it. Click and the card opens on it, and pointing ends. ⇧-click
+    // and the thing joins the card ("these 2 rows"), and pointing goes on.
+    // Escape leaves with nothing done.
     //
-    // Point at something, in the tray, does the same for one click, for
-    // anyone who does not know the key.
+    // Until v4 holding ⌥ did the same. It is gone: ⌥ is how a Mac moves the
+    // caret by a word, and every ⌥← drew an outline under a resting pointer.
 
     const pickFrame = document.createElement('div');
     pickFrame.className = 'marble-callout-pick';
@@ -1058,11 +1058,10 @@
     latchLine.className = 'marble-callout-latch';
     latchLine.setAttribute(TRANSIENT, '');
     latchLine.hidden = true;
-    latchLine.innerHTML = '<span>Click anything to ask about it</span><kbd>esc</kbd>';
+    latchLine.innerHTML = '<span>Click anything to ask about it. ⇧-click to add more.</span><kbd>esc</kbd>';
     layer.append(latchLine);
 
     let aim = null; // { chain, index }
-    let altHeld = false;
     let latched = false;
     let pointerX = null;
     let pointerY = null;
@@ -1100,23 +1099,17 @@
       latchLine.hidden = !on;
       document.documentElement.classList.toggle('marble-callout-latched', on);
       if (on) aimAt(pointerX, pointerY);
-      else if (!altHeld) stopPointing();
+      else stopPointing();
     }
 
     addEventListener('pointermove', (event) => {
       if (event.pointerType === 'touch') return;
       if (!layer.contains(event.target)) { pointerX = event.clientX; pointerY = event.clientY; }
-      if ((event.altKey && !event.buttons) || latched) { altHeld = event.altKey || altHeld; aimAt(event.clientX, event.clientY); return; }
-      if (altHeld && !event.altKey) altHeld = false;
+      if (latched) { aimAt(event.clientX, event.clientY); return; }
       if (aim) stopPointing();
     }, true);
     addEventListener('keydown', (event) => {
-      if (event.key === 'Alt') {
-        altHeld = true;
-        if (!marking()) aimAt(pointerX, pointerY);
-        return;
-      }
-      if (aim && (altHeld || latched) && (event.code === 'BracketLeft' || event.code === 'BracketRight')) {
+      if (aim && latched && (event.code === 'BracketLeft' || event.code === 'BracketRight')) {
         const next = aim.index + (event.code === 'BracketLeft' ? 1 : -1);
         event.preventDefault();
         event.stopPropagation();
@@ -1131,14 +1124,8 @@
         setLatched(false);
       }
     }, true);
-    addEventListener('keyup', (event) => {
-      if (event.key !== 'Alt') return;
-      altHeld = false;
-      if (!latched) stopPointing();
-    }, true);
-    addEventListener('blur', () => { altHeld = false; if (!latched) stopPointing(); });
     addEventListener('click', (event) => {
-      if (!(event.altKey || latched) || layer.contains(event.target)) return;
+      if (!latched || layer.contains(event.target)) return;
       if (event.composedPath().some((n) => n?.localName === 'marble-agent-drawer')) return;
       if (marking()) return;
       if (!aim) aimAt(event.clientX, event.clientY);
@@ -1146,11 +1133,14 @@
       // The page never sees this click: it is a name, not a press.
       event.preventDefault();
       event.stopPropagation();
-      if (latched) setLatched(false);
+      // A plain click is one thing named, and pointing is over; ⇧ says there
+      // are more to come.
+      const adding = event.shiftKey;
+      if (!adding) setLatched(false);
       if (!el) return;
       const id = el.getAttribute('data-marble-id');
       const card = offering();
-      if (card && event.altKey && !card.scope?.words) {
+      if (card && adding && !card.scope?.words) {
         if (!card.ids.includes(id)) addToCard(card, id);
       } else {
         const scope = { words: false, chain: aim?.chain ?? [el], index: aim?.index ?? 0 };
@@ -1158,11 +1148,10 @@
         openCard({ ids: [id], scope, from: 'point' });
       }
       aim = null;
-      if (event.altKey) aimAt(event.clientX, event.clientY);
-      else stopPointing();
+      if (adding) aimAt(event.clientX, event.clientY);
     }, true);
 
-    /** ⌥-click with a card open: the thing joins the card's scope. What was
+    /** ⇧-click with a card open: the thing joins the card's scope. What was
      *  typed stays; the card is redrawn about all of them. */
     function addToCard(record, id) {
       const said = record.offer?.input?.textContent ?? '';
@@ -1173,21 +1162,18 @@
       startOffer(record, { words: false, chain: [], index: 0 }, { draft: said.trim() || null });
     }
 
-    // The tray's two rows for pointing: Point at something (⌥ for one click),
-    // and Offer when I rest, v1's dwell kept as a switch, off by default.
+    // The tray's row for pointing. Offer when I rest, v1's dwell kept as a
+    // switch and off by default, is a setting since v4 (Agent settings ›
+    // Chat), not something to do.
     const POINT_ICON = '<svg viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round" stroke-linecap="round"><path d="M5 3.5l13 6.2-5.6 1.7-1.7 5.6z"/><path d="M12.6 12.6 19 19"/></svg>';
-    const REST_ICON = '<svg viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="8"/><path d="M12 7.5V12l3 2"/></svg>';
     let trayHeld = false;
     function offerTray() {
-      const specs = [
-        { id: 'point', order: 8, label: 'Point at something', key: '⌥', icon: POINT_ICON, always: true, onSelect: () => setLatched(true) },
-        { id: 'rest', order: 40, label: 'Offer when I rest', icon: REST_ICON, always: true, active: restOn(), onSelect: () => setRest(!restOn()) },
-      ];
+      const spec = { id: 'point', order: 8, label: 'Point at something', icon: POINT_ICON, always: true, onSelect: () => setLatched(true) };
       if (!trayHeld) {
-        trayHeld = specs.every((spec) => !dispatchEvent(new CustomEvent('marble-tray:register', { cancelable: true, detail: spec })));
+        trayHeld = !dispatchEvent(new CustomEvent('marble-tray:register', { cancelable: true, detail: spec }));
         return;
       }
-      for (const spec of specs) dispatchEvent(new CustomEvent('marble-tray:update', { detail: spec }));
+      dispatchEvent(new CustomEvent('marble-tray:update', { detail: spec }));
     }
     addEventListener('marble-tray:ready', () => { trayHeld = false; offerTray(); });
     offerTray();

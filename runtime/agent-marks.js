@@ -311,6 +311,7 @@
       id: 'marks-describe',
       order: 10,
       label: 'Describe a change',
+      key: '⌘⇧D',
       icon: GLYPHS.describe,
       always: true,
       active: false,

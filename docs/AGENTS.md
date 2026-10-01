@@ -531,6 +531,21 @@ starter, a custom theme, or Drive cream. Drive UIST warm / Dusk is only
 the fallback. Below 720 px
 it is a full-screen sheet. Drag the header away to dismiss it.
 
+Hovering the launcher hangs a small menu over it: the things an agent can do
+from here, each a row with its key — **New chat** (`⌘⇧O`), **Ask here** (`⌘J`,
+while there is a selection), **Point at something** (click a part to ask about
+it, ⇧-click to add more), **Describe a change** (`⌘⇧D`), and **Hide work**
+while an agent's work is drawn. Switches for how agents behave on the page —
+offers after edits, offers on rest, agent dots — are in Settings › **Chat**,
+with the keys. The launcher wears one dot for the most pressing chat: it
+breathes while an agent works, is a ring while one needs you, and is ink when
+one finished unread.
+
+The keys hold on every page, while typing too: `⌘J` asks in place, `⌘⇧J` shows
+and hides the chat (inside the drive shell it pins and unpins it, as `⌘⇧\`
+does the tree), and `⌘⇧O` opens the chat on a new conversation. ⌥ does
+nothing here: it is how a Mac moves the caret by a word.
+
 The conversation you had open follows you from page to page. A turn keeps the
 document it started on: when you are looking at another page, the header says
 which file it is editing. Each finished turn shows what changed with **Undo
@@ -639,7 +654,8 @@ document at the root, seeded the same way Drive is: written only if it is
 not already there. It is a library of conversations in five views: **List**,
 **Board**, **Folders**, **Focus**, and **Deck**. `V` cycles that order.
 `⌘⇧O` starts a new chat from anywhere on the page — the same thing **New**
-does, and it keeps working while the caret is in a composer. The
+does, and it keeps working while the caret is in a composer. (On every other
+page the drawer answers it, opening the side chat on a new conversation.) The
 drawer's **Open Agents** appears once that document exists.
 
 The page uses `window.marble.agent` and the same `<marble-conversation>`

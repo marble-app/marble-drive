@@ -166,7 +166,7 @@ test('the third same change to siblings offers the rest', async () => {
   assert.deepEqual(await page.evaluate(() => window.marble.agent.context().selection), ['t']);
 });
 
-test('the chip goes on the next action, and a kind dismissed twice stops; the tray switch turns it off', async () => {
+test('the chip goes on the next action, and a kind dismissed twice stops; Agent settings › Chat turns it off', async () => {
   const page = await open('papers');
   await edit(page, 'c51', 'Tree of Thoughts');
   const chip = page.locator('.marble-nudge:not(.is-out)');
@@ -185,12 +185,13 @@ test('the chip goes on the next action, and a kind dismissed twice stops; the tr
   assert.equal(await chip.count(), 0, 'dismissed twice: it stops on this document');
 
   await page.evaluate(() => localStorage.removeItem('marble-nudge:papers'));
-  const drawer = page.locator('marble-agent-drawer');
-  await drawer.locator('.launcher').hover();
-  const offers = drawer.locator('.tool[data-tool="offers"]');
-  await offers.waitFor();
-  assert.equal(await offers.getAttribute('aria-pressed'), 'true');
-  await offers.click();
+  await page.evaluate(() => window.marble.agent.openSettings('chat'));
+  const sheet = page.locator('marble-agent-settings');
+  const offers = sheet.getByRole('checkbox', { name: 'Offer a next step after I edit' });
+  assert.equal(await offers.isChecked(), true, 'on by default');
+  await offers.uncheck();
+  await sheet.getByRole('button', { name: 'Save' }).click();
+  await page.waitForFunction(() => document.querySelector('marble-agent-settings')?.getAttribute('data-open') === 'false');
   await edit(page, 'c51', 'Voyager 2');
   await page.waitForTimeout(2200);
   assert.equal(await chip.count(), 0, 'Offers after edits, off');

@@ -151,20 +151,16 @@
     addEventListener('scroll', schedule, { passive: true });
     addEventListener('resize', schedule);
 
-    // The one switch for every agent dot on the page, off unless asked for.
+    // The one switch for every agent dot on the page, off unless asked for
+    // in Agent settings › Chat (agent-ui.js).
     const DOTS_KEY = 'marble-agent-dots';
     const dotsOn = () => { try { return localStorage.getItem(DOTS_KEY) === '1'; } catch { return false; } };
     addEventListener('marble-agent-dots', schedule);
+    addEventListener('marble-agent-prefs', (event) => { if (event.detail?.key === DOTS_KEY) schedule(); });
     addEventListener('storage', (event) => { if (event.key === DOTS_KEY) schedule(); });
-    let told = -1;
 
     function paint() {
       const live = [...dots.keys()].map((id) => [id, byId(id)]).filter(([, el]) => el && shown(el));
-      // Say how many there are, so the tray can offer to show them.
-      if (live.length !== told) {
-        told = live.length;
-        dispatchEvent(new CustomEvent('marble-work:dots', { detail: { count: live.length } }));
-      }
       if (!dotsOn()) {
         dotsEl.replaceChildren();
         rail.hidden = true;

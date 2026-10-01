@@ -1,7 +1,8 @@
-// The tray: the launcher, and above it the agent tools that have something to
-// do right now. What it has to get right is restraint — at rest it is one
-// round button and nothing else, and no agent affordance is pinned to a corner
-// the document already owns.
+// The tray: the launcher, and over it a menu of what an agent can do from
+// here. What it has to get right is restraint — at rest it is one round
+// button and nothing else, no agent affordance is pinned to a corner the
+// document already owns — and, since v4, a card the hand can stay on, with
+// switches kept in Agent settings rather than in it.
 import assert from 'node:assert/strict';
 import test from 'node:test';
 
@@ -43,9 +44,7 @@ test('at rest the tray is the launcher and nothing else', async () => {
   const { page, tray, launcher, errors } = await visit();
 
   assert.equal(await launcher.isVisible(), true);
-  for (const tool of await tray.locator('.tool').all()) {
-    assert.equal(await tool.evaluate((el) => getComputedStyle(el).opacity), '0', 'no tool is drawn before you ask');
-  }
+  assert.equal(await tray.locator('.tools').isVisible(), false, 'no menu is drawn before you ask');
   // The column above the launcher is empty air: the page under it takes the
   // click, or the tray is standing over a document saying nothing.
   const box = await launcher.boundingBox();
@@ -63,16 +62,76 @@ test('hovering the launcher raises the tools, and leaving puts them down', async
 
   await launcher.hover();
   const newChat = tray.locator('.tool[data-tool="new"]');
-  const agents = tray.locator('.tool[data-tool="agents"]');
   await newChat.waitFor({ state: 'visible' });
-  assert.equal(await agents.isVisible(), true);
   assert.equal(await newChat.getAttribute('aria-label'), 'New chat');
-  assert.equal(await agents.getAttribute('aria-label'), 'All agents');
+  assert.equal(await newChat.locator('.tool-label').innerText(), 'New chat', 'the row says it in words');
+  assert.equal(await newChat.locator('.tool-key').innerText(), '⌘⇧O');
 
   await tray.page().mouse.move(10, 10);
   await tray.page().waitForFunction(
     () => document.querySelector('marble-agent-drawer')?.shadowRoot.querySelector('.tray')?.dataset.open === 'false',
   );
+});
+
+test('the menu is one surface: crossing from the launcher to a row keeps it open', async () => {
+  await host.reset();
+  const { page, tray, launcher } = await visit();
+  await launcher.hover();
+  const card = tray.locator('.tools');
+  await card.waitFor({ state: 'visible' });
+  const a = await launcher.boundingBox();
+  const b = await card.boundingBox();
+  assert.ok(b.y + b.height <= a.y, 'the card hangs over the launcher');
+  assert.ok(Math.abs((b.x + b.width) - (a.x + a.width)) <= 1, 'and lines up with its right edge');
+  // Rest in the air between the two, longer than the menu waits to close.
+  await page.mouse.move(a.x + a.width / 2, (b.y + b.height + a.y) / 2, { steps: 4 });
+  await page.waitForTimeout(450);
+  assert.equal(await tray.evaluate((el) => el.dataset.open), 'true', 'the gap is the card\'s, to the hand');
+  const rows = await tray.locator('.tool:not([hidden])').evaluateAll((els) => els.map((el) => el.dataset.tool));
+  assert.ok(rows.includes('new') && rows.includes('point'), `what an agent can do from here: ${rows}`);
+  for (const gone of ['agents', 'offers', 'rest', 'glints']) {
+    assert.ok(!rows.includes(gone), `${gone} is not a row: a switch is a setting, and All agents is in the chat's More menu`);
+  }
+});
+
+test('the switches that left the tray are in Agent settings › Chat', async () => {
+  await host.reset();
+  const { page } = await visit();
+  await page.evaluate(() => window.marble.agent.openSettings('chat'));
+  const sheet = page.locator('marble-agent-settings');
+  const boxes = sheet.getByRole('checkbox');
+  await boxes.first().waitFor();
+  const named = await boxes.evaluateAll((els) => els.map((el) => [el.dataset.pref, el.checked]));
+  assert.deepEqual(named, [['marble-ask-offers', true], ['marble-ask-rest', false], ['marble-agent-dots', false]]);
+  assert.match(await sheet.locator('.keys').innerText(), /⌘⇧J\s+Show or hide the chat/);
+  await sheet.getByRole('checkbox', { name: 'Show agent dots' }).check();
+  await sheet.getByRole('button', { name: 'Cancel' }).click();
+  assert.equal(await page.evaluate(() => localStorage.getItem('marble-agent-dots')), null, 'Cancel keeps what was there');
+  await page.evaluate(() => window.marble.agent.openSettings('chat'));
+  await sheet.getByRole('checkbox', { name: 'Show agent dots' }).check();
+  await sheet.getByRole('button', { name: 'Save' }).click();
+  assert.equal(await page.evaluate(() => localStorage.getItem('marble-agent-dots')), '1');
+});
+
+test('the launcher has one mark: a dot that breathes while an agent works, and no spinner', async () => {
+  await host.reset();
+  const { page, drawer, launcher } = await visit();
+  const dot = drawer.locator('.launcher-dot');
+  assert.equal(await dot.isVisible(), false, 'nothing to say, no mark');
+  await page.evaluate(async () => {
+    const post = (url, body) => fetch(url, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) }).then((r) => r.json());
+    const { id } = await post('/agent/conversations', { provider: 'fake' });
+    window.__held = id;
+    await post(`/agent/conversations/${id}/turns`, { prompt: 'script:hold', context: { target: 'garden', viewing: 'garden', selection: [], also: [] } });
+  });
+  await page.waitForFunction(() => document.querySelector('marble-agent-drawer').shadowRoot.querySelector('.launcher-dot')?.dataset.state === 'working');
+  assert.equal(await dot.evaluate((el) => getComputedStyle(el).animationName), 'launcher-breathe');
+  assert.equal(await launcher.evaluate((el) => getComputedStyle(el, '::after').content), 'none', 'no arc spins round the button');
+  assert.match(await launcher.getAttribute('aria-label'), /an agent is working/);
+  await page.evaluate(async () => {
+    const d = await window.marble.agent.conversation(window.__held);
+    await window.marble.agent.cancel(d.turns.at(-1).id);
+  });
 });
 
 test('a tool is in the tray only while it has something to do', async () => {

@@ -483,7 +483,7 @@
   function keepKeys(root) {
     const keep = (event) => {
       if (!typingIn(event) || event.key === 'Escape' || event.key === 'Tab') return;
-      if ((event.metaKey || event.ctrlKey) && event.shiftKey && /^[od]$/i.test(event.key)) return;
+      if ((event.metaKey || event.ctrlKey) && event.shiftKey && /^[odj]$/i.test(event.key)) return;
       event.stopPropagation();
     };
     for (const type of ['keydown', 'keypress', 'keyup']) root.addEventListener(type, keep);
@@ -8451,7 +8451,15 @@
     .status { font-size: 12px; color: var(--faint); min-height: 1.2em; }
     .status.error { color: var(--danger); }
     .pane-usage { display: flex; flex-direction: column; gap: 16px; }
-    .pane-usage[hidden], .body[hidden] { display: none; }
+    .pane-usage[hidden], .body[hidden], .pane-chat[hidden] { display: none; }
+    /* Chat: how agents show up on the page, and the keys. */
+    .pane-chat { display: flex; flex-direction: column; gap: 14px; }
+    .pref { display: grid; grid-template-columns: auto 1fr; gap: 2px 10px; align-items: start; font-size: 13px; cursor: pointer; }
+    .pref input { margin: 3px 0 0; accent-color: var(--accent-ink); }
+    .pref .detail { grid-column: 2; color: var(--muted); font-size: 12px; }
+    .keys { display: grid; grid-template-columns: auto 1fr; gap: 6px 14px; margin: 0; font-size: 13px; }
+    .keys dt { font-family: inherit; font-size: 13px; line-height: 1.5; letter-spacing: .06em; color: var(--muted); }
+    .keys dd { margin: 0; }
     .pane-usage .empty { margin: 0; color: var(--faint); font-size: 13px; }
     .usage-group h3 { margin: 0 0 8px; font-size: 13px; font-weight: 600; letter-spacing: -.01em; }
     .usage-group .subhead { margin: 10px 0 6px; font-size: 11.5px; color: var(--muted); }
@@ -8480,6 +8488,30 @@
     .usage-group .reset { grid-column: 2 / 4; font-size: 11.5px; color: var(--faint); }
   `;
 
+  // How agents show up on the page, in this browser. Until v4 these were
+  // switches in the launcher's tray; a switch is a setting, and the tray keeps
+  // to things to do. Each layer reads its own key (agent-nudge.js,
+  // agent-callout.js, agent-glints.js and agent-work.js) and hears
+  // `marble-agent-prefs` from this tab, `storage` from another.
+  const PAGE_PREFS = [
+    { key: 'marble-ask-offers', byDefault: true, label: 'Offer a next step after I edit', detail: 'A quiet chip by what you changed, when there is an obvious next step.' },
+    { key: 'marble-ask-rest', byDefault: false, label: 'Offer to ask when I rest the pointer', detail: 'Rest on a part of the page and its ask bubble appears.' },
+    { key: 'marble-agent-dots', byDefault: false, label: 'Show agent dots', detail: 'A dot where an agent is working, and on the parts agents changed.' },
+  ];
+  const prefOn = (pref) => {
+    try {
+      const value = localStorage.getItem(pref.key);
+      return value === null ? pref.byDefault : value === '1';
+    } catch { return pref.byDefault; }
+  };
+  const TABS = new Set(['settings', 'chat', 'usage']);
+  const CHAT_KEYS = [
+    ['⌘J', 'Ask about the selection, or what the pointer is on'],
+    ['⌘⇧J', 'Show or hide the chat'],
+    ['⌘⇧O', 'New chat'],
+    ['⌘⇧D', 'Describe a change by drawing on the page'],
+  ];
+
   class MarbleAgentSettings extends HTMLElement {
     constructor() {
       super();
@@ -8490,9 +8522,11 @@
           <h2 id="agent-settings-title">Agent settings</h2>
           <div class="tabs" role="tablist" aria-label="Settings sections">
             <button type="button" role="tab" data-tab="settings" aria-selected="true">Settings</button>
+            <button type="button" role="tab" data-tab="chat" aria-selected="false">Chat</button>
             <button type="button" role="tab" data-tab="usage" aria-selected="false">Usage</button>
           </div>
           <div class="body" data-pane="settings"></div>
+          <div class="pane-chat" data-pane="chat" hidden></div>
           <div class="pane-usage" data-pane="usage" hidden></div>
           <p class="status"></p>
           <div class="actions">
@@ -8501,6 +8535,7 @@
           </div>
         </div>`;
       this.body = root.querySelector('.body');
+      this.chatPane = root.querySelector('.pane-chat');
       this.usagePane = root.querySelector('.pane-usage');
       this.status = root.querySelector('.status');
       this.saveButton = root.querySelector('.save');
@@ -8542,7 +8577,7 @@
     }
 
     open(tab) {
-      if (tab) this.tab = tab === 'usage' ? 'usage' : 'settings';
+      if (tab) this.tab = TABS.has(tab) ? tab : 'settings';
       this.setAttribute('data-open', 'true');
       this.fill();
     }
@@ -8553,20 +8588,44 @@
     }
 
     setTab(tab) {
-      this.tab = tab === 'usage' ? 'usage' : 'settings';
+      this.tab = TABS.has(tab) ? tab : 'settings';
       for (const button of this.shadowRoot.querySelectorAll('[role="tab"]')) {
         button.setAttribute('aria-selected', String(button.dataset.tab === this.tab));
       }
       this.body.hidden = this.tab !== 'settings';
+      this.chatPane.hidden = this.tab !== 'chat';
       this.usagePane.hidden = this.tab !== 'usage';
       this.shadowRoot.querySelector('.sheet').dataset.tab = this.tab;
       this.saveButton.hidden = this.tab === 'usage';
       this.closeButton.textContent = this.tab === 'usage' ? 'Close' : 'Cancel';
     }
 
+    /** Read straight from this browser, so it is there before the host answers. */
+    fillChat() {
+      const page = document.createElement('fieldset');
+      page.append(h('legend', '', 'On the page'));
+      for (const pref of PAGE_PREFS) {
+        const row = h('label', 'pref');
+        const box = document.createElement('input');
+        box.type = 'checkbox';
+        box.dataset.pref = pref.key;
+        box.checked = prefOn(pref);
+        row.append(box, h('span', '', pref.label), h('span', 'detail', pref.detail));
+        page.append(row);
+      }
+      const keys = document.createElement('fieldset');
+      keys.append(h('legend', '', 'Keys'));
+      const list = h('dl', 'keys');
+      for (const [key, what] of CHAT_KEYS) list.append(h('dt', '', key), h('dd', '', what));
+      keys.append(list);
+      this.chatPane.replaceChildren(page, keys);
+    }
+
     async fill() {
       this.status.textContent = '';
       this.status.classList.remove('error');
+      this.loaded = false;
+      this.fillChat();
       this.body.replaceChildren(h('p', 'status', 'Loading…'));
       this.usagePane.replaceChildren(h('p', 'empty', 'Loading…'));
       this.setTab(this.tab);
@@ -8679,6 +8738,7 @@
       add.append(name, dir, button);
       projects.append(add);
       this.body.replaceChildren(agents, keys, projects);
+      this.loaded = true;
       fillUsageDetail(this.usagePane, usage.meters ?? []);
       this.loadHistory();
     }
@@ -8766,6 +8826,18 @@
 
     async save() {
       this.status.classList.remove('error');
+      for (const pref of PAGE_PREFS) {
+        const box = this.chatPane.querySelector(`input[data-pref="${pref.key}"]`);
+        if (!box || box.checked === prefOn(pref)) continue;
+        try { localStorage.setItem(pref.key, box.checked ? '1' : '0'); } catch { /* private mode */ }
+        dispatchEvent(new CustomEvent('marble-agent-prefs', { detail: { key: pref.key, on: box.checked } }));
+      }
+      // The agent half is only sent once it has been read: saving a form that
+      // never loaded would clear every model it did not show.
+      if (!this.loaded) {
+        this.close();
+        return;
+      }
       const defaultProvider = this.shadowRoot.querySelector('input[name="default"]:checked')?.value;
       const models = {};
       for (const input of this.shadowRoot.querySelectorAll('[data-model]')) {
@@ -8988,11 +9060,10 @@
        clickable it swallows whatever sits in the bottom-right corner of the
        page behind it — which is where a composer's send and stop buttons are. */
     :host { position: fixed; inset: auto 0 0 auto; z-index: 2147483000; pointer-events: none; }
-    /* The tray. At rest it is exactly what it has always been — one round
-       button in the corner — and the column above it is empty air the page
-       can still be clicked through. The tools rise on hover, and only the
-       ones with something to do are in the column at all, so an agent
-       affordance never stands over a document saying nothing.
+    /* The tray. At rest it is one round button in the corner, and the air
+       above it is page the hand can still click through. Hovering it (or
+       focusing it) hangs a small menu over it: the things an agent can do
+       from here, each a row with its words and its key.
 
        --tray-inset is how far the pinned panel has pushed the page across.
        Keeping it here is the whole reason the tray can stay up beside a
@@ -9000,7 +9071,7 @@
     .tray { pointer-events: none; position: fixed;
       right: calc(20px + env(safe-area-inset-right, 0px) + var(--tray-inset, 0px));
       bottom: calc(20px + env(safe-area-inset-bottom, 0px));
-      display: flex; flex-direction: column-reverse; align-items: center; gap: 10px;
+      display: flex; flex-direction: column-reverse; align-items: flex-end; gap: 10px;
       transition: opacity 200ms var(--settle), right 220ms var(--settle); }
     /* An overlay panel covers the page the tools act on; a pinned one does not. */
     .tray[data-away="true"] { opacity: 0; }
@@ -9011,48 +9082,69 @@
       box-shadow: var(--shadow-lift); cursor: pointer; display: grid; place-items: center; padding: 0;
       transition: opacity 200ms var(--settle); }
     .launcher svg { width: 20px; height: 20px; }
-    .launcher-dot { position: absolute; top: 6px; right: 6px; width: 9px; height: 9px; border-radius: 50%; background: var(--accent-ink); box-shadow: 0 0 0 2px var(--card); }
+    /* One mark on the launcher, in the words every list of chats uses
+       (STATE_CSS): a dot that breathes while an agent works, a ring while one
+       needs you, ink when one finished and is unread, danger when one failed.
+       Until v4 this corner had a dot and a spinning arc at once: two things
+       moving to say one. */
+    .launcher-dot { position: absolute; top: 7px; right: 7px; width: 8px; height: 8px; border-radius: 50%;
+      box-sizing: border-box; background: var(--ink); box-shadow: 0 0 0 2px var(--card); }
     .launcher-dot[hidden] { display: none; }
-    .launcher.running::after { content: ''; position: absolute; inset: -4px; border-radius: 50%; border: 2px solid transparent; border-top-color: var(--accent); animation: spin 1s linear infinite; }
+    .launcher-dot[data-state="working"] { background: var(--accent-ink); animation: launcher-breathe 1.6s ease-in-out infinite; }
+    .launcher-dot[data-state="waiting"] { background: var(--card); border: 2px solid var(--caution); }
+    .launcher-dot[data-state="failed"] { background: var(--danger); }
+    @keyframes launcher-breathe { 0%, 100% { opacity: 1; } 50% { opacity: .45; } }
 
-    /* column-reverse twice over: the first tool in the DOM is the one nearest
-       the thumb, so Tab walks the column bottom-up the way the eye does. */
-    .tools { display: flex; flex-direction: column-reverse; align-items: center; gap: 8px; }
+    /* The menu is one card, so the hand has a surface to stay on while it
+       chooses, and every row says what it does in words. Until v4 the tools
+       were loose rounds with a name only under the pointer, and the gaps
+       between them were page: the column closed under a hand on its way up.
+       Only what can be done here is a row (Ask here while there is a
+       selection, Hide work while an agent's work is drawn); a switch for how
+       agents behave is a setting, in Agent settings › Chat.
+       column-reverse: the first tool in the DOM is the one nearest the
+       thumb, so Tab walks the card bottom-up the way the eye does. */
+    .tools { pointer-events: none; position: relative; visibility: hidden; opacity: 0;
+      display: flex; flex-direction: column-reverse; gap: 1px; min-width: 15rem; box-sizing: border-box;
+      padding: 5px; border-radius: 12px; background: var(--card); border: 1px solid var(--line); box-shadow: var(--shadow-lift);
+      transform: translateY(3px) scale(.98); transform-origin: 100% 100%;
+      transition: opacity 200ms var(--settle), transform 200ms var(--settle), visibility 0s linear 200ms; }
     .tools:empty { display: none; }
-    .tool { pointer-events: none; position: relative; flex: none; width: 34px; height: 34px; padding: 0;
-      display: grid; place-items: center; border-radius: 50%; border: 1px solid var(--line);
-      background: var(--card); color: var(--muted); cursor: pointer; box-shadow: var(--shadow-rest);
-      opacity: 0; transform: translateY(10px) scale(.86); transform-origin: 50% 100%;
-      transition: opacity 180ms var(--settle), transform 180ms var(--settle),
-        color 140ms var(--settle), background 140ms var(--settle); }
+    /* The air between the card and the launcher is the card's, to the hand:
+       crossing it never puts the menu away. */
+    .tools::after { content: ''; position: absolute; left: 0; right: 0; top: 100%; height: 12px; }
+    .tray[data-open="true"] .tools { pointer-events: auto; visibility: visible; opacity: 1; transform: none;
+      transition: opacity 200ms var(--settle), transform 200ms var(--settle), visibility 0s; }
+    .tool { flex: none; display: flex; align-items: center; gap: 10px; width: 100%; height: 34px; margin: 0;
+      padding: 0 9px; box-sizing: border-box; border: 0; border-radius: 8px; background: none;
+      font: inherit; font-size: 13px; line-height: 1; color: var(--ink); text-align: left; cursor: pointer;
+      transition: background-color 140ms var(--settle), color 140ms var(--settle); }
     .tool[hidden] { display: none; }
-    .tool svg { width: 17px; height: 17px; }
-    .tray[data-open="true"] .tool { pointer-events: auto; opacity: 1; transform: none;
-      transition-delay: calc(var(--i, 0) * 26ms); }
-    .tool:hover, .tool:focus-visible { color: var(--ink); background: var(--paper-2); outline: none; }
-    .tool:focus-visible { border-color: var(--accent-ink); }
-    .tool:active { transform: scale(.94); }
-    /* Some tools are modes — Select and Sketch put the page in one. While a
-       mode is on its tool wears the accent, so the column says which one of
-       them has the pointer without a second piece of chrome saying it. */
-    .tool[data-active="true"] { color: var(--accent-ink); background: var(--accent-soft); border-color: var(--accent-ink); }
-    /* The name is a pill beside the icon, not inside it: a button the width of
-       its label would make the column ragged and the hit target a moving edge. */
-    .tool-label { position: absolute; right: calc(100% + 8px); white-space: nowrap; pointer-events: none;
-      font: 500 12px/1 inherit; color: var(--ink); background: var(--card);
-      border: 1px solid var(--line); border-radius: 999px; padding: 5px 9px; box-shadow: var(--shadow-rest);
-      opacity: 0; transform: translateX(5px);
-      transition: opacity 120ms var(--settle), transform 120ms var(--settle); }
-    .tool:hover .tool-label, .tool:focus-visible .tool-label { opacity: 1; transform: none; }
-    .tool-label kbd { margin-left: 8px; font: 500 10.5px/1 var(--mono, ui-monospace, Menlo, monospace); color: var(--faint); padding: 2px 5px; border-radius: 4px; border: 1px solid var(--line); }
-    /* No hover to reveal with, so the contextual tools simply stand there —
-       there are seldom more than one. The two that are always available do
-       not, because on a phone they would be permanent furniture, and the
-       drawer's own bar already carries both. */
+    .tool-icon { flex: none; display: grid; place-items: center; width: 18px; height: 18px; color: var(--muted); }
+    .tool-icon svg { width: 17px; height: 17px; }
+    .tool-label { flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    /* Keys in the interface's own face, as a Mac menu sets them: in a
+       monospace the ⇧ shrinks to a speck and O reads as zero. */
+    .tool-key { flex: none; margin-left: 12px; font-family: inherit; font-size: 12px; font-weight: 400; line-height: 1; letter-spacing: .06em; color: var(--muted); }
+    .tool-key:empty { display: none; }
+    .tool:hover, .tool:focus-visible { background: var(--paper-3); outline: none; }
+    .tool:hover .tool-icon, .tool:focus-visible .tool-icon { color: var(--ink); }
+    .tool:focus-visible { box-shadow: inset 0 0 0 2px var(--accent-ink); }
+    .tool:active { background: color-mix(in srgb, var(--ink) 9%, var(--card)); }
+    /* Some tools are modes (Point at something, Describe a change). While
+       one is on, its row wears the accent, so the menu says which. */
+    .tool[data-active="true"], .tool[data-active="true"] .tool-icon { color: var(--accent-ink); }
+    .tool[data-active="true"] { background: var(--accent-soft); }
+    /* No hover to open it with, so the rows that only apply now simply stand
+       there, and the card with them; there are seldom more than one. The
+       ones always available do not, because on a phone they would be
+       permanent furniture, and the drawer's own bar already carries New. */
     @media (hover: none) {
-      .tool { pointer-events: auto; opacity: 1; transform: none; transition-delay: 0s !important; }
+      .tools { pointer-events: auto; visibility: visible; opacity: 1; transform: none; transition: none; min-width: 0; }
+      .tool { height: 44px; }
       .tool[data-always="true"] { display: none; }
-      .tool-label { display: none; }
+      .tool-key { display: none; }
+      .tools:not(:has(.tool:not([hidden]):not([data-always="true"]))) { display: none; }
     }
 
     .panel { pointer-events: auto; position: fixed; top: 0; right: 0; bottom: 0; width: ${WIDTH}px; max-width: 100vw; display: flex; flex-direction: column;
@@ -9131,13 +9223,10 @@
     }
     @media (prefers-reduced-motion: reduce) {
       .panel { transition: opacity 150ms linear; }
-      .launcher.running::after { animation: none; }
-      .tray, .tool-label { transition: none; }
-      .tool { transition: none; transform: none; transition-delay: 0s !important; }
-      .tray[data-open="true"] .tool { transform: none; }
-      .tool:active { transform: none; }
+      .launcher-dot { animation: none; }
+      .tray, .tools, .tool { transition: none; }
+      .tools { transform: none; }
     }
-    @keyframes spin { to { transform: rotate(360deg); } }
   `;
 
   const ICONS = {
@@ -9149,11 +9238,9 @@
     close: '<svg width="16" height="16" viewBox="0 0 16 16" aria-hidden="true"><path d="M4 4l8 8M12 4l-8 8" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg>',
     // Tray tools. Ask here borrows the callout's own mark — the beaked bubble
     // that hangs at a selection — because it summons exactly that, and a
-    // second glyph for one affordance would be a second affordance. The
-    // overlapping rounds are two conversations at once, which is the Agents
-    // page. Both are drawn on the 24-box the callout's mark was drawn on.
+    // second glyph for one affordance would be a second affordance. Drawn on
+    // the 24-box the callout's mark was drawn on.
     ask: '<svg viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round"><g transform="translate(2.6 -.6) scale(.8)"><path d="M6.5 15.1A8 8 0 1 1 10.9 18.2L4.9 21.1a.6.6 0 0 1-.72-.85Z" stroke-width="2.2"/></g><path d="M4.5 21.4h15" stroke-width="2.2"/></svg>',
-    agents: '<svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="3" width="10" height="10" rx="3" fill="none" stroke="currentColor" stroke-width="1.7"/><rect x="11" y="11" width="10" height="10" rx="3" fill="none" stroke="currentColor" stroke-width="1.7"/></svg>',
   };
 
   class MarbleAgentDrawer extends HTMLElement {
@@ -9162,7 +9249,7 @@
       const root = this.attachShadow({ mode: 'open' });
       root.innerHTML = `<style>${TOKENS}${DRAWER_CSS}</style>
         <div class="tray" data-open="false" data-away="false">
-          <button type="button" class="launcher" aria-label="Agent" aria-expanded="false">${ICONS.launcher}<span class="launcher-dot" hidden></span></button>
+          <button type="button" class="launcher" aria-label="Chat" aria-expanded="false">${ICONS.launcher}<span class="launcher-dot" hidden></span></button>
           <div class="tools" role="group" aria-label="Agent tools"></div>
         </div>
         <aside class="panel" role="dialog" aria-label="Agent" data-open="false" data-pinned="false" inert>
@@ -9261,6 +9348,25 @@
       });
 
       this.onKey = (event) => {
+        const mod = (event.metaKey || event.ctrlKey) && !event.altKey;
+        // ⌘⇧J shows and hides the chat, the way ⌘⇧\ does the tree (shell.js).
+        // ⌘⇧O is New chat, from any page: the panel opens on a fresh
+        // conversation. Both hold while typing, in the page or the chat; the
+        // moment you most want a new chat is mid-sentence in the wrong one.
+        // Read by code as well as key: with ⇧ held, some layouts report
+        // the key's other character.
+        if (mod && event.shiftKey && (event.code === 'KeyJ' || event.key.toLowerCase() === 'j')) {
+          event.preventDefault();
+          event.stopPropagation();
+          if (!event.repeat) this.toggleChat();
+          return;
+        }
+        if (mod && event.shiftKey && (event.code === 'KeyO' || event.key.toLowerCase() === 'o')) {
+          event.preventDefault();
+          event.stopPropagation();
+          if (!event.repeat) this.startNew({ keys: true });
+          return;
+        }
         if ((event.metaKey || event.ctrlKey) && !event.altKey && !event.shiftKey && event.key.toLowerCase() === 'j') {
           // Where the shell can open, it hears ⌘J first (shell.js), the same way.
           if (window.marbleShell?.takesKeys) return;
@@ -9594,8 +9700,8 @@
     // ---------------------------------------------------------------- tray
 
     /** A tool is a small named action that only appears when it applies. The
-     *  drawer owns the tray; anything else that wants a slot in it — today
-     *  that is collab.js's work toggle — asks by dispatching a *cancelable*
+     *  drawer owns the tray; anything else that wants a slot in it — collab.js's
+     *  work toggle, the callout's Point at something, Describe — asks by dispatching a *cancelable*
      *  `marble-tray:register`, and the tray answers by preventing it. An
      *  unanswered ask means there is no tray on this page (a page with
      *  `<meta name="marble-agent" content="custom">` mounts no drawer), and
@@ -9621,11 +9727,14 @@
 
       // Ask here summons the callout at the selection — a door ⌘J also
       // opens. It is in the tray only while there is a selection to hang it
-      // on.
+      // on. New chat is the row nearest the hand: it is the one most used.
+      // All agents left the tray in v4: the chat's More menu and the drive's
+      // tree both open the Agents page, and the tray keeps to things to do.
       this.addTool({
         id: 'ask',
         order: 5,
         label: 'Ask here',
+        key: '⌘J',
         icon: ICONS.ask,
         hidden: true,
         onSelect: () => {
@@ -9633,15 +9742,7 @@
           this.open();
         },
       });
-      this.addTool({ id: 'new', order: 20, label: 'New chat', icon: ICONS.plus, always: true, onSelect: () => this.startNew() });
-      this.addTool({
-        id: 'agents',
-        order: 30,
-        label: 'All agents',
-        icon: ICONS.agents,
-        always: true,
-        onSelect: () => { location.href = window.marble?.href?.('Agents') ?? '/a/Agents'; },
-      });
+      this.addTool({ id: 'new', order: 1, label: 'New chat', key: '⌘⇧O', icon: ICONS.plus, always: true, onSelect: () => this.startNew() });
 
       this.onContext = () => {
         const selected = this.api?.context?.().selection?.length ?? 0;
@@ -9659,7 +9760,11 @@
       // The delay is what makes the column one surface to the hand.
       this.tray.addEventListener('pointerenter', () => this.setTray(true));
       this.tray.addEventListener('pointerleave', leave);
-      this.tray.addEventListener('focusin', () => this.setTray(true));
+      // Keys open it; the focus a closing panel hands back to the launcher
+      // does not, or putting the chat away would hang the menu up.
+      this.tray.addEventListener('focusin', (event) => {
+        if (event.target.matches?.(':focus-visible')) this.setTray(true);
+      });
       this.tray.addEventListener('focusout', (event) => {
         if (!this.tray.contains(event.relatedTarget)) leave();
       });
@@ -9682,14 +9787,13 @@
       for (const [id, el] of this.toolEls) {
         if (!this.toolSpecs.has(id)) { el.remove(); this.toolEls.delete(id); }
       }
-      let shown = 0;
       for (const spec of wanted) {
         let el = this.toolEls.get(spec.id);
         if (!el) {
           el = h('button', 'tool');
           el.type = 'button';
           el.dataset.tool = spec.id;
-          el.append(h('span', 'tool-icon'), h('span', 'tool-label'));
+          el.append(h('span', 'tool-icon'), h('span', 'tool-label'), h('kbd', 'tool-key'));
           el.addEventListener('click', () => {
             this.setTray(false);
             this.toolSpecs.get(spec.id)?.onSelect?.();
@@ -9701,12 +9805,13 @@
           icon.dataset.icon = spec.icon ?? '';
           icon.innerHTML = spec.icon ?? '';
         }
-        const label = el.querySelector('.tool-label');
-        label.textContent = spec.label ?? '';
+        el.querySelector('.tool-label').textContent = spec.label ?? '';
         // The key that does the same, shown beside the words, so the key is
         // learned by using the row.
-        if (spec.key) label.append(h('kbd', '', spec.key));
+        el.querySelector('.tool-key').textContent = spec.key ?? '';
         el.setAttribute('aria-label', spec.label ?? '');
+        if (spec.key) el.setAttribute('aria-keyshortcuts', spec.key.replace('⌘', 'Meta+').replace('⇧', 'Shift+'));
+        else el.removeAttribute('aria-keyshortcuts');
         el.dataset.always = String(Boolean(spec.always));
         // Only a tool that says whether it is active is a toggle; the rest are
         // actions, and pressing an action is not a state to announce.
@@ -9715,9 +9820,6 @@
           el.setAttribute('aria-pressed', String(Boolean(spec.active)));
         }
         el.hidden = Boolean(spec.hidden);
-        // The stagger counts visible tools, so a hidden one does not leave a
-        // beat of silence in the middle of the column.
-        if (!el.hidden) el.style.setProperty('--i', String(shown++));
         if (el.parentNode !== this.tools) this.tools.append(el);
       }
       const order = wanted.map((spec) => this.toolEls.get(spec.id));
@@ -9848,14 +9950,60 @@
 
     // ---------------------------------------------------------- content
 
-    startNew() {
+    startNew({ keys = false } = {}) {
       this.hideMenus();
+      if (keys && !this.isOpen) this.keepReturn();
       this.api.remember(null);
       this.view.removeAttribute('conversation');
       this.meta = null;
       this.showMeta(null);
       if (!this.isOpen) this.open();
       else this.view.focusInput();
+    }
+
+    /** ⌘⇧J. Inside the shell the chat is one of its sides, so this pins and
+     *  unpins it, as ⌘⇧\ pins and unpins the tree; a chat out on hover is
+     *  put back at its edge. Without the shell, the panel opens and closes.
+     *  Put away by key, the caret goes back where it was before the chat
+     *  took it, rather than to the launcher. */
+    toggleChat() {
+      if (this.isOpen) {
+        const back = this.returnTo;
+        this.returnTo = null;
+        let focused = document.activeElement;
+        while (focused?.shadowRoot?.activeElement) focused = focused.shadowRoot.activeElement;
+        // Only a caret in the chat is handed back: one the person has since
+        // put somewhere else on the page stays where they put it.
+        let node = focused;
+        while (node && node !== this) node = node.parentNode ?? node.host ?? null;
+        const inChat = node === this;
+        if (this.shell) {
+          if (window.marbleShell.autoHide) window.marbleShell.conceal('chat');
+          else window.marbleShell.setChat(false);
+        } else {
+          this.isOpen = false;
+          this.api.storage.set(this.api.here(OPEN_KEY), '0');
+          this.hideMenus();
+          this.animateTo(0);
+        }
+        if (inChat) {
+          focused?.blur?.();
+          if (back?.isConnected) back.focus({ preventScroll: true });
+        }
+        return;
+      }
+      this.keepReturn();
+      if (this.shell) {
+        window.marbleShell.setChat(true);
+        this.view.focusInput();
+      } else this.open();
+    }
+
+    /** Where the caret was before a key brought the chat out. */
+    keepReturn() {
+      let focused = document.activeElement;
+      while (focused?.shadowRoot?.activeElement && focused !== this) focused = focused.shadowRoot.activeElement;
+      this.returnTo = focused && focused !== document.body && focused !== this ? focused : null;
     }
 
     switchTo(id) {
@@ -9886,11 +10034,23 @@
       }
     }
 
+    /** The launcher's one mark: the most pressing state among the chats.
+     *  Needs you outranks working, which outranks a failure, which outranks
+     *  something finished and unread. The chat showing in the panel is being
+     *  read, so it is never unread. */
     showLauncherState() {
       const list = [...this.summaries.values()].filter((s) => !s.archived);
-      this.launcher.classList.toggle('running', list.some((s) => s.status === 'running'));
       const openId = this.isOpen ? this.view.getAttribute('conversation') : null;
-      this.dot.hidden = !list.some((s) => s.needsReview && s.id !== openId);
+      const states = new Set(list.map((s) => {
+        const state = stateOf(s);
+        return s.id === openId && (state === 'unseen' || state === 'failed') ? 'idle' : state;
+      }));
+      const state = ['waiting', 'working', 'failed', 'unseen'].find((one) => states.has(one)) ?? null;
+      this.dot.hidden = !state;
+      if (state) this.dot.dataset.state = state;
+      else delete this.dot.dataset.state;
+      const words = { waiting: 'an agent needs you', working: 'an agent is working', failed: 'a chat failed', unseen: 'a chat finished' };
+      this.launcher.setAttribute('aria-label', state ? `Chat, ${words[state]}` : 'Chat');
     }
 
     // ---------------------------------------------------------- menus
@@ -9986,7 +10146,7 @@
 
     async fillActions() {
       this.actions.replaceChildren();
-      this.item(this.actions, 'Settings', 'Default agent, model, and API keys', () => {
+      this.item(this.actions, 'Settings', 'Agent and model, keys, and what agents do on the page', () => {
         this.hideMenus();
         this.api.openSettings();
       });
@@ -10040,21 +10200,26 @@
     document.body.append(el);
   };
 
-  // ⌘⇧O is New chat, the chord the CLI and the desktop app use. The Agents
-  // page answers it in its own script, where the Focus stage and the folders
-  // are in scope; this is the fallback for a page whose script predates that,
-  // and it presses the page's own New button so both routes do exactly the
-  // same thing. A page that has the chord says so in `marbleAgentNewChatKey`,
-  // and then nothing here fires.
+  // ⌘⇧O is New chat, the chord the CLI and the desktop app use. On a page
+  // with the drawer, the drawer answers it (MarbleAgentDrawer.onKey): the
+  // side chat opens on a new conversation, wherever you are. The Agents page
+  // has no drawer and answers it in its own script, where the Focus stage and
+  // the folders are in scope; this is the fallback for a page with no drawer
+  // whose script predates that, and it presses the page's own New chat
+  // button so both routes do exactly the same thing. A page that has the
+  // chord says so in `marbleAgentNewChatKey`, and then nothing here fires.
+  // Never the Drive's New: that makes a document, not a chat.
   let newChatKeyBound = false;
   const bindNewChatKey = () => {
     if (newChatKeyBound) return;
     newChatKeyBound = true;
     addEventListener('keydown', (event) => {
-      if (window.marbleAgentNewChatKey) return;
+      if (window.marbleAgentNewChatKey || event.defaultPrevented) return;
+      if (document.querySelector('marble-agent-drawer')) return;
       if (!(event.metaKey || event.ctrlKey) || !event.shiftKey || event.altKey || event.repeat) return;
       if (event.code !== 'KeyO' && String(event.key).toLowerCase() !== 'o') return;
-      const button = document.querySelector('header.topbar .new');
+      if (!document.querySelector('meta[name="marble-agent"][content="custom"]')) return;
+      const button = document.querySelector('header.topbar .new, header [data-cmd="new"]');
       if (!button) return;
       event.preventDefault();
       button.click();
