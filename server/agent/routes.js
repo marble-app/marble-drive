@@ -19,7 +19,7 @@ import { json, readJson, send } from '../http.js';
 import { parsePath } from '../paths.js';
 import { sameOrigin } from '../sessions.js';
 import { driveWhere, pickCursorPickerModels, sortProviders } from './catalog.js';
-import { checkAnthropicKey } from './key-check.js';
+import { checkAnthropicKey, checkOpenAIKey } from './key-check.js';
 import { findProject, listProjects, validateProjectPath } from './projects.js';
 import { summarize } from './store.js';
 import { sliceTurns } from './slice.js';
@@ -103,7 +103,7 @@ const publicMeter = (meter) => {
   return out;
 };
 
-export function createAgentRoutes({ store, runner, tools, hub, providers, writeOps, restore, maxBody, gated = false, keys = null, anthropicBase = 'https://api.anthropic.com', skills = [], usage = null, usageHistory = null, root = null, streams = null, offer = null, readSource = null }) {
+export function createAgentRoutes({ store, runner, tools, hub, providers, writeOps, restore, maxBody, gated = false, keys = null, anthropicBase = 'https://api.anthropic.com', openaiBase = 'https://api.openai.com', skills = [], usage = null, usageHistory = null, root = null, streams = null, offer = null, readSource = null }) {
   let detected = null;
   // Turns being undone right now. The undoneAt check alone lets two requests
   // that arrive together both pass it before either has written.
@@ -121,30 +121,64 @@ export function createAgentRoutes({ store, runner, tools, hub, providers, writeO
       : settings.defaultProvider === CLAUDE.api ? 'api' : 'login';
   const activeClaude = (settings) => CLAUDE[claudeAuth(settings)];
   const isClaude = (id) => id === CLAUDE.login || id === CLAUDE.api;
+  // Codex is one agent either way: its key, when set, is what it runs on.
+  const CODEX = 'codex';
+  const NO_KEYS = { anthropic: false, cursor: false, openai: false };
 
   const publicSettings = async () => {
     const settings = await store.settings();
     return {
       ...settings,
       claudeAuth: claudeAuth(settings),
-      keys: keys ? await keys.flags() : { anthropic: false, cursor: false },
+      keys: keys ? await keys.flags() : NO_KEYS,
     };
   };
 
-  // Whether this drive can run Claude at all: a Claude login that is signed
-  // in, or an API key. A page asks once a visit and, when neither, offers the
-  // key field (runtime/agent-ui.js, <marble-agent-setup>). A drive with no
-  // Claude agent has nothing to set up.
+  // Whether this drive can run an agent at all: Claude on its login or a key,
+  // or Codex on the ChatGPT login or a key. A page asks once a visit and, when
+  // none, offers a key field for each agent there is (runtime/agent-ui.js,
+  // <marble-agent-setup>). A drive with neither agent has nothing to set up.
   const setupState = async () => {
     const settings = await store.settings();
     const hasClaude = providers.has(CLAUDE.login) || providers.has(CLAUDE.api);
-    const key = keys ? (await keys.flags()).anthropic : false;
-    // The login is only asked about when it matters: the probe runs the CLI.
+    const hasCodex = providers.has(CODEX);
+    const flags = keys ? await keys.flags() : NO_KEYS;
+    const key = Boolean(flags.anthropic);
+    const openai = Boolean(flags.openai);
+    // The CLIs are only asked about when it matters: the probe runs them.
+    const found = !key && !openai && (hasClaude || hasCodex) ? await detectAll() : [];
     const login = hasClaude && !key && providers.has(CLAUDE.login)
-      ? Boolean((await detectAll()).find((p) => p.id === CLAUDE.login)?.signedIn)
+      ? Boolean(found.find((p) => p.id === CLAUDE.login)?.signedIn)
       : false;
-    return { needed: hasClaude && !key && !login, login, key, claudeAuth: claudeAuth(settings) };
+    const codexFound = found.find((p) => p.id === CODEX);
+    const codex = {
+      installed: hasCodex && (openai || Boolean(codexFound?.installed)),
+      signedIn: hasCodex && (openai || Boolean(codexFound?.signedIn)),
+      key: openai,
+    };
+    const offers = [...(hasClaude ? ['claude'] : []), ...(codex.installed ? ['codex'] : [])];
+    const ready = (hasClaude && (key || login)) || codex.signedIn;
+    return { needed: offers.length > 0 && !ready, login, key, claudeAuth: claudeAuth(settings), offers, codex };
   };
+
+  /** POST /agent/setup for Codex: the key checked with OpenAI and kept, and
+   *  Codex made the agent new chats start on when the one they start on now
+   *  cannot run. Answers `[status, body]`. */
+  async function connectCodex(key) {
+    if (!providers.has(CODEX)) return [400, { error: "This drive doesn't have Codex." }];
+    if (!key || /\s/.test(key)) return [400, { error: 'Paste the whole key. It starts with sk-.' }];
+    if (key.startsWith('sk-ant-')) return [400, { error: "That's an Anthropic key. Choose Claude to use it." }];
+    const verdict = await checkOpenAIKey(key, { baseURL: openaiBase });
+    if (verdict === 'rejected') return [400, { error: "OpenAI didn't accept that key. Check that it was copied whole." }];
+    // Kept even when OpenAI could not be asked, as a Claude key is.
+    await keys.write({ openai: key });
+    detected = null;
+    const settings = await store.settings();
+    const current = isClaude(settings.defaultProvider) ? activeClaude(settings) : settings.defaultProvider;
+    const runs = (await detectAll()).find((p) => p.id === current)?.signedIn;
+    if (!runs) await store.saveSettings({ defaultProvider: CODEX });
+    return [200, { ...(await setupState()), checked: verdict === 'ok' }];
+  }
 
   async function detectAll() {
     if (detected && Date.now() - detected.at < DETECT_CACHE) return detected.list;
@@ -350,6 +384,7 @@ export function createAgentRoutes({ store, runner, tools, hub, providers, writeO
       if (!keys) return json(res, 409, { error: 'this drive keeps no keys' });
       const body = await readJson(req, maxBody);
       const key = typeof body.key === 'string' ? body.key.trim() : '';
+      if (body.provider === CODEX) return json(res, ...(await connectCodex(key)));
       if (!key || /\s/.test(key)) return json(res, 400, { error: 'Paste the whole key. It starts with sk-ant-.' });
       const verdict = await checkAnthropicKey(key, { baseURL: anthropicBase });
       if (verdict === 'rejected') {

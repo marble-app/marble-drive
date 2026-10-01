@@ -206,6 +206,7 @@ export function loadConfig(env = process.env) {
     agentKeysFile: path.resolve(str('MARBLE_DRIVE_AGENT_KEYS', path.join(process.cwd(), '.agent-keys.local'))),
     // Where a pasted API key is checked before it is kept (server/agent/key-check.js).
     anthropicBase: str('MARBLE_DRIVE_ANTHROPIC_BASE', 'https://api.anthropic.com'),
+    openaiBase: str('MARBLE_DRIVE_OPENAI_BASE', 'https://api.openai.com'),
 
     // Recursive Subquestions on Monitor. The key never lives in a document.
     typesafeApiKey: str('TYPESAFE_API_KEY', null),

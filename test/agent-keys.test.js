@@ -14,7 +14,7 @@ const scratch = async () => {
 test('an empty store reports no keys and writes nothing', async () => {
   const { file } = await scratch();
   const keys = createKeyStore({ file });
-  assert.deepEqual(await keys.flags(), { anthropic: false, cursor: false });
+  assert.deepEqual(await keys.flags(), { anthropic: false, cursor: false, openai: false });
   assert.deepEqual(keys.asEnv(), {});
   await assert.rejects(fsp.stat(file), { code: 'ENOENT' });
 });
@@ -24,7 +24,7 @@ test('saving a key is later visible as a flag, never as the secret, and lives on
   const keys = createKeyStore({ file });
   const secret = 'sk-ant-test-secret-do-not-echo';
   await keys.write({ anthropic: secret });
-  assert.deepEqual(await keys.flags(), { anthropic: true, cursor: false });
+  assert.deepEqual(await keys.flags(), { anthropic: true, cursor: false, openai: false });
   assert.deepEqual(keys.asEnv(), { ANTHROPIC_API_KEY: secret });
   const raw = await fsp.readFile(file, 'utf8');
   assert.match(raw, /sk-ant-test-secret-do-not-echo/);
@@ -39,6 +39,21 @@ test('an empty string clears a key, and env from the file then falls back to not
   const keys = createKeyStore({ file });
   await keys.write({ anthropic: 'sk-one', cursor: 'ck-one' });
   await keys.write({ anthropic: '' });
-  assert.deepEqual(await keys.flags(), { anthropic: false, cursor: true });
+  assert.deepEqual(await keys.flags(), { anthropic: false, cursor: true, openai: false });
   assert.deepEqual(keys.asEnv(), { CURSOR_API_KEY: 'ck-one' });
+});
+
+test('an OpenAI key is kept beside the others and reaches Codex as CODEX_API_KEY', async () => {
+  const { file } = await scratch();
+  const keys = createKeyStore({ file });
+  await keys.write({ anthropic: 'sk-ant-one' });
+  await keys.write({ openai: '  sk-proj-two\n' });
+  assert.deepEqual(await keys.flags(), { anthropic: true, cursor: false, openai: true });
+  assert.deepEqual(keys.asEnv(), { ANTHROPIC_API_KEY: 'sk-ant-one', CODEX_API_KEY: 'sk-proj-two' });
+  // A new store reads it back from the file; saving one key keeps the others.
+  const again = createKeyStore({ file });
+  assert.deepEqual(again.asEnv(), { ANTHROPIC_API_KEY: 'sk-ant-one', CODEX_API_KEY: 'sk-proj-two' });
+  await again.write({ openai: '' });
+  assert.deepEqual(await again.flags(), { anthropic: true, cursor: false, openai: false });
+  assert.doesNotMatch(await fsp.readFile(file, 'utf8'), /sk-proj-two/);
 });

@@ -424,7 +424,7 @@ test('settings are read and saved', async () => {
   assert.equal(saved.body.models.fake, 'm1');
   assert.equal(saved.body.efforts.fake, 'high');
   assert.equal((await api('GET', '/agent/settings')).body.defaultProvider, 'fake');
-  assert.deepEqual((await api('GET', '/agent/settings')).body.keys, { anthropic: false, cursor: false });
+  assert.deepEqual((await api('GET', '/agent/settings')).body.keys, { anthropic: false, cursor: false, openai: false });
 });
 
 test('a new conversation can name its effort, and a later patch changes model and effort', async () => {

@@ -240,6 +240,7 @@ async function boot({ config, store, writeOps, createDocument, origin, browserPa
     gated: Boolean(config.secret),
     keys,
     anthropicBase: config.anthropicBase,
+    openaiBase: config.openaiBase,
     skills,
     // Not a plain 60 s cache: the usage API rate-limits, and retrying on that
     // cadence keeps the limit tripped while the sliders read Unavailable. The
