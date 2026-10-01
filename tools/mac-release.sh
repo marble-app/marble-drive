@@ -3,7 +3,7 @@
 # it: the Mac's counterpart of tools/sprite/release.sh (docs/HOSTING.md, "The
 # owner's drive on the Mac"). The same sources a sprite runs: marble-drive at
 # --ref (default origin/main), @bdhmin/marble at ../marble's version from npm,
-# Claude Code at tools/sprite/claude-version.
+# Claude Code at tools/sprite/claude-version, Codex at tools/sprite/codex-version.
 #
 #   tools/mac-release.sh [--ref <commit>]
 set -euo pipefail
@@ -21,19 +21,21 @@ git -C "$REPO" fetch -q origin
 SHA="$(git -C "$REPO" rev-parse "$REF")"
 MARBLE_VERSION="$(node -p "require('$MARBLE_DIR/package.json').version")"
 CLAUDE_VERSION="$(tr -d '[:space:]' <"$HERE/sprite/claude-version")"
+CODEX_VERSION="$(tr -d '[:space:]' <"$HERE/sprite/codex-version")"
 NAME="$(date -u +%Y%m%dT%H%M%SZ)-${SHA:0:7}"
 DIR="$APP/releases/$NAME/marble-drive"
 mkdir -p "$DIR"
 trap 'rm -rf "$APP/releases/$NAME"' EXIT
 
-say "marble-drive $SHA, marble $MARBLE_VERSION, claude $CLAUDE_VERSION"
+say "marble-drive $SHA, marble $MARBLE_VERSION, claude $CLAUDE_VERSION, codex $CODEX_VERSION"
 git -C "$REPO" archive "$SHA" | tar -x -C "$DIR"
 cd "$DIR"
 npm pkg delete dependencies.@bdhmin/marble
-npm install --omit=dev --no-audit --no-fund --loglevel=error "@bdhmin/marble@$MARBLE_VERSION" "@anthropic-ai/claude-code@$CLAUDE_VERSION"
+npm install --omit=dev --no-audit --no-fund --loglevel=error "@bdhmin/marble@$MARBLE_VERSION" "@anthropic-ai/claude-code@$CLAUDE_VERSION" "@openai/codex@$CODEX_VERSION"
 # npm may block install scripts; Claude Code's own installer swaps in the binary.
 node node_modules/@anthropic-ai/claude-code/install.cjs >/dev/null
 [[ "$(node_modules/.bin/claude --version 2>/dev/null)" == "$CLAUDE_VERSION"* ]] || die "claude $CLAUDE_VERSION did not install"
+[[ "$(node_modules/.bin/codex --version 2>/dev/null)" == "codex-cli $CODEX_VERSION" ]] || die "codex $CODEX_VERSION did not install"
 npx --no-install playwright install chromium >/dev/null
 
 say "smoke test on :4498 with a throwaway drive"

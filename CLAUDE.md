@@ -72,7 +72,8 @@ It runs the same tools, so a change to them reaches it.
   After changing a template or starter listed in `server/app-lineage.js`, run
   `node tools/app-lineage.mjs` and commit `templates/lineage/` with it.
   Still: do not patch an existing user's pages by hand without the owner asking.
-- The Claude Code version every sprite runs is `tools/sprite/claude-version`.
-  Bump it in its own commit, after trying it on t-bryan.
-- Never print, commit or copy a key: GitHub, npm, Sprites, Anthropic, or a
+- The Claude Code version every sprite runs is `tools/sprite/claude-version`,
+  and the Codex version `tools/sprite/codex-version`. Bump each in its own
+  commit, after trying it on t-bryan.
+- Never print, commit or copy a key: GitHub, npm, Sprites, Anthropic, OpenAI, or a
   sprite's passphrase (`~/.config/marble-drive/testers.json` on the owner's Mac).

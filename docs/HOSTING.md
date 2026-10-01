@@ -112,7 +112,13 @@ The service's environment is the release script's defaults
   under Claude.
 - Each release carries its own Claude Code at the version in
   `tools/sprite/claude-version` (the Sprites image's `claude` is older and lacks
-  flags the host passes). The owner's subscription is shared with two friends
+  flags the host passes), and its own Codex at `tools/sprite/codex-version`
+  (`@openai/codex`, whose native binary is an optional dependency).
+- **Codex:** the person pastes an OpenAI key in the first-visit popup or
+  Agents → Settings, and Codex runs on it. A ChatGPT login works too
+  (`sprite console`, then `codex login --device-auth`). Codex keeps its
+  threads in `~/.codex`, which does not travel with a drive that moves between
+  the Mac and Fly: a chat resumed on the other side starts a new thread. The owner's subscription is shared with two friends
   by his choice; Anthropic's consumer terms are for one person, so a
   Console key per friend is the path for anyone else.
 - **Staying awake, and sleeping:** a sprite pauses about a second after its

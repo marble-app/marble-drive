@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # The sprite's half of a deploy (tools/sprite-deploy.sh is the Mac's half).
 #
-#   release.sh stage <name> <source> <marble> <claude>   build a release beside the others
+#   release.sh stage <name> <source> <marble> <claude> [<codex>]   build a release beside the others
 #   release.sh switch <name>                    make it current and (re)start the service
 #   release.sh rollback                         go back to the release before current
 #   release.sh hand-off <name>                  switch later, when no agent is working
@@ -16,7 +16,9 @@
 # @bdhmin/marble@0.2.1, or the path of an `npm pack` tarball.
 # <claude> is the Claude Code version the release carries: the host passes
 # flags a given CLI must know, so the CLI is pinned with the release rather than
-# left to whatever the sprite's image ships.
+# left to whatever the sprite's image ships. <codex> is the same for Codex
+# (tools/sprite/codex-version); a deploy from before Codex passes none, and that
+# release carries no Codex.
 #
 # A release that fails to install or to answer /health is removed and never
 # becomes current; a switch whose service does not come up goes back to the
@@ -91,7 +93,7 @@ install_rclone() {
 }
 
 stage() {
-  local name=$1 source=$2 marble=$3 claude=$4
+  local name=$1 source=$2 marble=$3 claude=$4 codex=${5:-}
   local dir="$RELEASES/$name"
   [[ -e "$dir" ]] && die "release $name already exists"
   mkdir -p "$dir/marble-drive"
@@ -106,15 +108,20 @@ stage() {
     *) die "unknown source $source" ;;
   esac
 
-  say "installing (marble: $marble, claude: $claude)"
+  say "installing (marble: $marble, claude: $claude, codex: ${codex:-none})"
   cd "$dir/marble-drive"
   npm pkg delete dependencies.@bdhmin/marble
-  npm install --omit=dev --no-audit --no-fund --loglevel=error "$marble" "@anthropic-ai/claude-code@$claude"
+  # Codex's native binary is an optional dependency of @openai/codex, one per
+  # platform, so it needs no install script of its own.
+  npm install --omit=dev --no-audit --no-fund --loglevel=error "$marble" "@anthropic-ai/claude-code@$claude" ${codex:+"@openai/codex@$codex"}
   # npm on the sprite blocks install scripts it has not been told to allow, and
   # Claude Code's is the one that puts its native binary in place. Run that one
   # script, for that one package, and nothing else.
   node node_modules/@anthropic-ai/claude-code/install.cjs >/dev/null
   [[ "$(node_modules/.bin/claude --version 2>/dev/null)" == "$claude"* ]] || die "claude $claude did not install"
+  if [[ -n "$codex" ]]; then
+    [[ "$(node_modules/.bin/codex --version 2>/dev/null)" == "codex-cli $codex" ]] || die "codex $codex did not install"
+  fi
 
   # The agents' browser: the Chromium build this release's Playwright drives,
   # through the same lookup the host makes (server/agent/browser.js). Its system

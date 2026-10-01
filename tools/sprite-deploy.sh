@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Deploy Marble Drive to a Fly Sprite (docs/DEPLOY.md, "On a Fly Sprite").
 #
-#   tools/sprite-deploy.sh <sprite> [--org <org>] [--ref <commit>] [--marble <version>] [--claude <version>]
+#   tools/sprite-deploy.sh <sprite> [--org <org>] [--ref <commit>] [--marble <version>] [--claude <version>] [--codex <version>]
 #   tools/sprite-deploy.sh <sprite> [--org <org>] --local
 #   tools/sprite-deploy.sh <sprite> [--org <org>] --rollback
 #   ... --no-checkpoint   skip the restore point, only when Sprites cannot make one
@@ -15,7 +15,8 @@
 # origin/main) from GitHub, and @bdhmin/marble@<version> (default: the local
 # ../marble's version) from npm, with Claude Code pinned at --claude (default:
 # tools/sprite/claude-version, bumped deliberately: the host passes flags a given
-# CLI must know, and the machine running this may have an older one). Nothing
+# CLI must know, and the machine running this may have an older one), and Codex
+# pinned the same way at --codex (default: tools/sprite/codex-version). Nothing
 # secret is copied to the sprite.
 # --local deploys this Mac's working copies instead (marble-drive's tracked and
 # untracked-but-not-ignored files, and `npm pack` of ../marble), for trying
@@ -69,13 +70,14 @@ fi
 
 [[ $# -ge 1 && "$1" != -* ]] || usage
 SPRITE=$1; shift
-ORG=marble-drive REF=origin/main MARBLE_VERSION="" CLAUDE_VERSION="" LOCAL=0 ROLLBACK=0 CHECKPOINT=1 PRINT_PLAN=0 WHEN_IDLE=0
+ORG=marble-drive REF=origin/main MARBLE_VERSION="" CLAUDE_VERSION="" CODEX_VERSION="" LOCAL=0 ROLLBACK=0 CHECKPOINT=1 PRINT_PLAN=0 WHEN_IDLE=0
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --org) ORG=$2; shift 2 ;;
     --ref) REF=$2; shift 2 ;;
     --marble) MARBLE_VERSION=$2; shift 2 ;;
     --claude) CLAUDE_VERSION=$2; shift 2 ;;
+    --codex) CODEX_VERSION=$2; shift 2 ;;
     --local) LOCAL=1; shift ;;
     --rollback) ROLLBACK=1; shift ;;
     --no-checkpoint) CHECKPOINT=0; shift ;;
@@ -112,9 +114,13 @@ fi
 [[ -n "$CLAUDE_VERSION" ]] || { echo "sprite-deploy: no tools/sprite/claude-version — pass --claude <version>" >&2; exit 1; }
 npm view "@anthropic-ai/claude-code@$CLAUDE_VERSION" version >/dev/null 2>&1 \
   || { echo "sprite-deploy: @anthropic-ai/claude-code@$CLAUDE_VERSION is not on npm" >&2; exit 1; }
+[[ -n "$CODEX_VERSION" ]] || CODEX_VERSION="$(tr -d '[:space:]' <"$HERE/sprite/codex-version" 2>/dev/null)"
+[[ -n "$CODEX_VERSION" ]] || { echo "sprite-deploy: no tools/sprite/codex-version — pass --codex <version>" >&2; exit 1; }
+npm view "@openai/codex@$CODEX_VERSION" version >/dev/null 2>&1 \
+  || { echo "sprite-deploy: @openai/codex@$CODEX_VERSION is not on npm" >&2; exit 1; }
 
 print_plan() { # print_plan <name> <source> <marble>
-  printf 'target: %s (%s)\nrelease: %s\nsource: %s\nmarble: %s\nclaude: %s\n' "$SPRITE" "$ORG" "$1" "$2" "$3" "$CLAUDE_VERSION"
+  printf 'target: %s (%s)\nrelease: %s\nsource: %s\nmarble: %s\nclaude: %s\ncodex: %s\n' "$SPRITE" "$ORG" "$1" "$2" "$3" "$CLAUDE_VERSION" "$CODEX_VERSION"
   if [[ $WHEN_IDLE == 1 ]]; then echo "switch: when no agent is working"; else echo "switch: now"; fi
   exit 0
 }
@@ -178,7 +184,7 @@ else
 fi
 
 say "staging $NAME"
-on ${FILES[@]+"${FILES[@]}"} -- "$REMOTE/release.sh" stage "$NAME" "$SOURCE" "$MARBLE" "$CLAUDE_VERSION"
+on ${FILES[@]+"${FILES[@]}"} -- "$REMOTE/release.sh" stage "$NAME" "$SOURCE" "$MARBLE" "$CLAUDE_VERSION" "$CODEX_VERSION"
 if [[ $WHEN_IDLE == 1 ]]; then
   on -- "$REMOTE/release.sh" hand-off "$NAME"
   on -- sh -c "rm -f $REMOTE/incoming/$NAME*"

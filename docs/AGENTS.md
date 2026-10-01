@@ -14,18 +14,25 @@ MARBLE_DRIVE_AGENT_PROVIDER=claude-subscription
 
 API keys belong in `.agent-keys.local` (gitignored) or `MARBLE_DRIVE_AGENT_KEYS`,
 not in the drive and not in `.marble/`. The settings panel writes them there.
-`.env.local` can still hold `ANTHROPIC_API_KEY` / `CURSOR_API_KEY` for a host
-that has no panel-set key; both files are gitignored.
+`.env.local` can still hold `ANTHROPIC_API_KEY` / `CURSOR_API_KEY` /
+`CODEX_API_KEY` for a host that has no panel-set key; both files are gitignored.
 
-A drive whose Claude has neither a signed-in login nor a key says so on the
-first page of a visit: a **Connect Claude** popup (`<marble-agent-setup>` in
-`runtime/agent-ui.js`) with a field to paste an API key into. `GET
-/agent/setup` answers whether it is needed; `POST /agent/setup {key}` checks
-the key with Anthropic (the model list, via `@anthropic-ai/sdk`; nothing is
-spent) and keeps it only if Anthropic does not refuse it, then switches Claude
-to the key. An unreachable Anthropic keeps it and says it went unchecked.
-"Not now" lasts the tab; a page inside another page never asks.
-`MARBLE_DRIVE_ANTHROPIC_BASE` points the check elsewhere (the tests' fake).
+A drive that can run no agent — Claude with neither a signed-in login nor a
+key, and Codex the same — says so on the first page of a visit: a popup
+(`<marble-agent-setup>` in `runtime/agent-ui.js`) with a field to paste an API
+key into. It reads **Connect Claude** on a drive that has only Claude, and
+**Connect an agent**, with a Claude | Codex choice, on one that has both; a
+pasted `sk-ant-` key moves the choice to Claude and another `sk-` key to Codex.
+`GET /agent/setup` answers whether it is needed and which agents a key could
+connect (`offers`); `POST /agent/setup {key}` checks a Claude key with
+Anthropic (the model list, via `@anthropic-ai/sdk`; nothing is spent) and
+keeps it only if Anthropic does not refuse it, then switches Claude to the key.
+`POST /agent/setup {provider: 'codex', key}` does the same with OpenAI's model
+list, keeps the key for Codex, and makes Codex the agent new chats start on if
+the current one cannot run. An unreachable company keeps the key and says it
+went unchecked. "Not now" lasts the tab; a page inside another page never asks.
+`MARBLE_DRIVE_ANTHROPIC_BASE` and `MARBLE_DRIVE_OPENAI_BASE` point the checks
+elsewhere (the tests' fakes).
 
 Refused, with the reason printed at boot, on a multi-tenant host, on an
 ungated host that is not listening on loopback, and on a host bound to one
@@ -251,6 +258,21 @@ Cursor's file tools are pointed at the project with `--add-dir`; the shell's
 cwd is the project; `--sandbox disabled` lets its native `WebSearch` /
 `WebFetch` and the browser reach the network. Cursor has no host-answered
 prompt channel, so it runs `--yolo` and asks its questions in text.
+
+A `full` Codex turn is the terminal's Codex too: `codex exec --json` in the
+project, with the person's own `~/.codex` config, skills, `AGENTS.md` and MCP
+servers. Marble's document and browser servers are added with `-c` as
+`marble_drive` and `marble_browser`, approved up front (Marble's tools refuse
+what its rules forbid themselves, and a sandboxed exec would otherwise refuse
+every call it cannot ask about); the turn token is named in `env_vars` and
+travels in the environment, never in argv. Marble's rules go in as
+`developer_instructions`, with the app's own skills listed by path, since
+Codex cannot be handed them as a plugin. The mode is its sandbox: **Full
+access** (`danger-full-access`, the default), **Workspace** (`workspace-write`:
+writes only in the project, no network for the shell) and **Read only**.
+exec has no channel for asking, so Codex asks its questions in text, like
+Cursor. Its key, when one is set, goes in as `CODEX_API_KEY` (`codex exec`
+ignores `OPENAI_API_KEY`); without one, the ChatGPT login does.
 
 The drawer on a document and the Agents page start the same runner. A turn's
 *target* is the page you asked from; its *tools* are not smaller there.
@@ -479,6 +501,7 @@ the value. Backups of `.marble/` therefore do not take them.
 | `claude-subscription` | `claude -p --input-format stream-json`, the initialize handshake then the prompt on stdin, `--model` / `--effort` from the conversation (none means your own settings), `--permission-mode` from the conversation (`auto` unless picked) | `full`: the terminal's own configuration, cwd the project, every built-in tool, plus Marble's document MCP and browser MCP; prompts and questions come back to the drawer |
 | `claude-api` | the same, with `ANTHROPIC_API_KEY`; without it the turn fails rather than fall back to the login | the same |
 | `cursor` | `cursor-agent -p`, model `composer-2.5` unless the conversation names one, prompt passed after `--` (a dash-leading prompt would otherwise be parsed as a flag) | `full`: `--add-dir` the drive, `--sandbox disabled`, cwd the drive, hook allows Cursor's own tools, Marble's document tools, and Marble's `MCP:browser_*` (`bin/marble-cursor-hook.js`) |
+| `codex` | `codex exec --json`, prompt on stdin, `resume <thread>` after the first turn, `-m` / `model_reasoning_effort` from the conversation (none means `~/.codex/config.toml`), the sandbox from its mode, `CODEX_API_KEY` when a key is set | `full`: the person's own Codex, cwd the project, plus `marble_drive` and `marble_browser`; `documents`: `--ignore-user-config`, read-only, in the empty workspace |
 
 The Cursor hook sees a tool's name (`MCP:read_document`) but not which MCP
 server it belongs to, and `--approve-mcps` approves every server Cursor loads,
@@ -516,7 +539,11 @@ A provider is `{ id, label, detect, prepare, spawn, parse }`, and optionally
 has the session. The runner then forgets the session, says so in the turn's
 error, and the next message starts a new one (it does not retry). A parser is
 tested against streams recorded from real runs in `test/fixtures/providers/`;
-record a new one when a CLI changes its output. Codex arrives in Plan 5.
+record a new one when a CLI changes its output. A provider may also offer
+`failure(stderr)`: the reason a run that ended without a result died, read the
+way its CLI writes it (Codex's own `Error:` line, past its MCP servers' logs).
+Codex's models and efforts come from `codex debug models` (the ones it lists);
+naming falls back to Codex last, only on its login.
 
 ## The drawer
 
