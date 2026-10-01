@@ -610,8 +610,25 @@ const startElsewhere = (page, { target = 'garden', selection = ['q1'], prompt = 
   return id;
 }, { target, selection, prompt });
 
+test('an agent this tab is not following draws nothing until Show agent dots is on', async () => {
+  const page = await open();
+  await startElsewhere(page);
+  await page.waitForTimeout(800);
+  assert.equal(await page.locator('.marble-glints-host .glint').count(), 0, 'no dots by default');
+  assert.equal(await page.locator('.marble-zone').count(), 0);
+  const drawer = page.locator('marble-agent-drawer');
+  await drawer.locator('.launcher').hover();
+  const tool = drawer.locator('.tool[data-tool="glints"]');
+  await tool.waitFor();
+  assert.equal(await tool.getAttribute('aria-label'), 'Show agent dots');
+  await tool.click();
+  await page.locator('.marble-glints-host .glint').waitFor();
+  await cancelLast(page);
+});
+
 test('an agent this tab is not following is a glint, not a zone: Follow opens it, Hide puts it away until someone sends', async () => {
   const page = await open();
+  await page.evaluate(() => localStorage.setItem('marble-agent-dots', '1'));
   const id = await startElsewhere(page);
   const glint = page.locator('.marble-glints-host .glint');
   await glint.waitFor();
@@ -646,6 +663,7 @@ test('an agent this tab is not following is a glint, not a zone: Follow opens it
 
 test('the launcher\'s tray hides and shows every glint', async () => {
   const page = await open();
+  await page.evaluate(() => localStorage.setItem('marble-agent-dots', '1'));
   await startElsewhere(page);
   const glint = page.locator('.marble-glints-host .glint');
   await glint.waitFor();
@@ -653,11 +671,11 @@ test('the launcher\'s tray hides and shows every glint', async () => {
   await drawer.locator('.launcher').hover();
   const tool = drawer.locator('.tool[data-tool="glints"]');
   await tool.waitFor();
-  assert.equal(await tool.getAttribute('aria-label'), 'Hide working agents');
+  assert.equal(await tool.getAttribute('aria-label'), 'Hide agent dots');
   await tool.click();
   await glint.waitFor({ state: 'detached' });
   await drawer.locator('.launcher').hover();
-  await page.waitForFunction(() => document.querySelector('marble-agent-drawer').shadowRoot.querySelector('.tool[data-tool="glints"]')?.getAttribute('aria-label') === 'Show working agents');
+  await page.waitForFunction(() => document.querySelector('marble-agent-drawer').shadowRoot.querySelector('.tool[data-tool="glints"]')?.getAttribute('aria-label') === 'Show agent dots');
   await drawer.locator('.tool[data-tool="glints"]').click();
   await glint.waitFor();
   await cancelLast(page);

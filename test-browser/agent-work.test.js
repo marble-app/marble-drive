@@ -47,11 +47,16 @@ async function mount() {
   return { page, errors, view, send, work };
 }
 
-test('each part an agent changed keeps a dot and a tick on the rail, until cleared', async () => {
+test('each part an agent changed keeps a dot and a tick on the rail, shown only once asked for, until cleared', async () => {
   const { page, errors, view, send, work } = await mount();
   await send('script:building');
   await view.locator('.progress[data-state="completed"]').waitFor();
   await page.waitForFunction(() => window.marbleWork.dots().length >= 2);
+  await page.waitForTimeout(200);
+  assert.equal(await work('.dot'), 0, 'no dots on the page by default');
+  assert.equal(await page.evaluate(() => document.querySelector('marble-work').shadowRoot.querySelector('.rail').hidden), true);
+  await page.evaluate(() => { localStorage.setItem('marble-agent-dots', '1'); dispatchEvent(new CustomEvent('marble-agent-dots')); });
+  await page.waitForFunction(() => document.querySelector('marble-work').shadowRoot.querySelectorAll('.dot').length >= 2);
   assert.ok(await work('.dot') >= 2);
   assert.ok(await work('.tick') >= 2);
   // Kept per page in this browser: a reload still has them.

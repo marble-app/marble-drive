@@ -11,18 +11,24 @@
 // "working" (v3, Notes and Sketches/Ask at Anything). The code still calls
 // the dot a glint; nothing a person reads does.
 //
+// None of it is drawn unless the person asks: the dots are off by default,
+// and Show agent dots in the chat button's tray turns them on — these, and
+// the marks on what agents changed (agent-work.js). A page full of dots by
+// default was the interface talking over the document.
+//
 // Hover the dot and the element is outlined, softly. Click it and a small
 // card opens just below the element with two buttons, never more: Follow (or
 // Answer, when it is asking you), and Hide. Hide lasts until someone sends
 // in that chat again. The launcher's tray holds one switch for all of them,
-// Hide working agents / Show working agents.
+// Show agent dots / Hide agent dots.
 //
 // Nothing here edits the document: the layer is transient chrome in a shadow
 // root, the way the callout is.
 
 (() => {
   const TRANSIENT = 'data-marble-transient';
-  const OFF_KEY = 'marble-glints-off';
+  // On only when the person turned it on, in this browser.
+  const ON_KEY = 'marble-agent-dots';
   const stillness = matchMedia('(prefers-reduced-motion: reduce)');
   // What a dot is shown for: a turn that is still open. Finished, failed and
   // idle chats are history, not presence.
@@ -155,8 +161,11 @@
       try { localStorage.setItem(HIDDEN_KEY, JSON.stringify([...set].slice(-200))); } catch { /* private mode */ }
     };
     const glintsOff = () => {
-      try { return localStorage.getItem(OFF_KEY) === '1'; } catch { return false; }
+      try { return localStorage.getItem(ON_KEY) !== '1'; } catch { return true; }
     };
+    // How many marks on what agents changed are on this page (agent-work.js).
+    let changedHere = 0;
+    addEventListener('marble-work:dots', (event) => { changedHere = Number(event.detail?.count) || 0; offerTray(); });
 
     // id -> { summary, ids }
     const entries = new Map();
@@ -373,17 +382,23 @@
     let inTray = false;
     function offerTray() {
       const off = glintsOff();
-      const any = [...entries.keys()].some((id) => !hiddenIds().has(id));
+      // agent-work.js may have painted before this layer listened.
+      const changed = Math.max(changedHere, window.marbleWork?.dots?.().length ?? 0);
+      const any = changed > 0 || [...entries.keys()].some((id) => !hiddenIds().has(id));
+      // In the tray while there is something it would show, or while it is
+      // on, so it can be turned off again.
       const spec = {
         id: 'glints',
         order: 12,
-        label: off ? 'Show working agents' : 'Hide working agents',
+        label: off ? 'Show agent dots' : 'Hide agent dots',
         icon: DOT_ICON,
-        hidden: !off && !any,
+        active: !off,
+        hidden: off && !any,
         onSelect: () => {
-          try { localStorage.setItem(OFF_KEY, glintsOff() ? '0' : '1'); } catch { /* private mode */ }
+          try { localStorage.setItem(ON_KEY, glintsOff() ? '1' : '0'); } catch { /* private mode */ }
           close({ quiet: true });
           schedule();
+          dispatchEvent(new CustomEvent('marble-agent-dots'));
         },
       };
       if (!inTray) {
@@ -394,7 +409,7 @@
     }
     addEventListener('marble-tray:ready', () => { inTray = false; offerTray(); });
     // Another tab turned them off or on.
-    addEventListener('storage', (event) => { if (event.key === OFF_KEY || event.key === HIDDEN_KEY) schedule(); });
+    addEventListener('storage', (event) => { if (event.key === ON_KEY || event.key === HIDDEN_KEY) schedule(); });
 
     window.marbleGlints = { refresh: load, entries: () => [...entries.keys()], toggle };
     load();

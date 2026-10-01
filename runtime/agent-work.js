@@ -2,9 +2,12 @@
 // named (collab.js). This file adds what stays after:
 //
 //   Dots.   Every part an agent changed keeps a small violet dot, until you
-//           clear them. Kept per page in this browser.
+//           clear them. Kept per page in this browser, and drawn only while
+//           Show agent dots is on in the chat button's tray: by default the
+//           page carries no dots at all (agent-glints.js owns the switch).
 //   Rail.   A tick down the page's right edge for each dot, so nothing below
 //           the fold is missed. A tick scrolls to its part; Clear clears.
+//           It shows and hides with the dots.
 //   Where.  When the work you're following is out of view, a small button
 //           says which way it is. The page never scrolls by itself.
 //   Island. With the chat closed, a pill at the corner carries the turn's
@@ -148,8 +151,28 @@
     addEventListener('scroll', schedule, { passive: true });
     addEventListener('resize', schedule);
 
+    // The one switch for every agent dot on the page, off unless asked for.
+    const DOTS_KEY = 'marble-agent-dots';
+    const dotsOn = () => { try { return localStorage.getItem(DOTS_KEY) === '1'; } catch { return false; } };
+    addEventListener('marble-agent-dots', schedule);
+    addEventListener('storage', (event) => { if (event.key === DOTS_KEY) schedule(); });
+    let told = -1;
+
     function paint() {
       const live = [...dots.keys()].map((id) => [id, byId(id)]).filter(([, el]) => el && shown(el));
+      // Say how many there are, so the tray can offer to show them.
+      if (live.length !== told) {
+        told = live.length;
+        dispatchEvent(new CustomEvent('marble-work:dots', { detail: { count: live.length } }));
+      }
+      if (!dotsOn()) {
+        dotsEl.replaceChildren();
+        rail.hidden = true;
+        fresh.clear();
+        paintWhere();
+        if (tourState) placeOutline(tourState.els[tourState.at]);
+        return;
+      }
       // Dots, at the top-left corner of each part, where a glint never sits.
       const have = new Map([...dotsEl.children].map((d) => [d.dataset.id, d]));
       for (const [id, el] of live) {
