@@ -6,6 +6,7 @@
 // turn's process dies. This file is that child — Playwright is the one
 // `@bdhmin/marble` depends on, so there is one Chromium build to install.
 
+import fs from 'node:fs';
 import { createRequire } from 'node:module';
 import { pathToFileURL } from 'node:url';
 
@@ -159,6 +160,22 @@ export function passCookies(pass) {
     httpOnly: true,
     sameSite: 'Lax',
   }));
+}
+
+/** The pass a browser server was started with: in its environment (Claude and
+ *  Cursor, whose MCP config is a private file), or in a private file that the
+ *  environment names (Codex, which hands its own environment to every command
+ *  it runs). A file that is gone is no pass. */
+export function passFromEnv(env = process.env) {
+  let cookie = env.MARBLE_BROWSER_PASS;
+  if (!cookie && env.MARBLE_BROWSER_PASS_FILE) {
+    try {
+      cookie = fs.readFileSync(env.MARBLE_BROWSER_PASS_FILE, 'utf8').trim();
+    } catch {
+      cookie = '';
+    }
+  }
+  return cookie ? { origin: env.MARBLE_BROWSER_ORIGIN, cookie } : undefined;
 }
 
 export function createBrowserSession({ chromium, userDataDir, pass } = {}) {

@@ -101,6 +101,8 @@ test('Shift+Tab walks each CLI’s modes and wraps', () => {
   assert.equal(nextMode(CODEX_MODES, 'read'), 'full');
   assert.equal(nextMode(CODEX_MODES, 'auto'), 'full', 'a Claude mode left on the chat steps onto Codex\'s wheel');
   assert.equal(CODEX_MODES[0].label, 'Full access');
+  // Marble's tools still edit documents in it, so its name may not say "read only".
+  assert.equal(CODEX_MODES.find((m) => m.id === 'read').label, 'Documents only');
 });
 
 test('files-edited copy is countable English', () => {

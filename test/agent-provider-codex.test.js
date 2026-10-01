@@ -1,5 +1,7 @@
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
+import fsp from 'node:fs/promises';
+import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
 import { fileURLToPath } from 'node:url';
@@ -8,6 +10,7 @@ import { CODEX_MODES } from '../server/agent/catalog.js';
 import { DRIVE_INSTRUCTIONS, INSTRUCTIONS } from '../server/agent/instructions.js';
 import { createCodexProvider, parseCodexLine, parseCodexModels, tomlString } from '../server/agent/providers/codex.js';
 import { builtInProviders } from '../server/agent/providers/index.js';
+import { WAIT_MAX } from '../server/agent/messages.js';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const FIXTURES = path.join(HERE, 'fixtures', 'providers');
@@ -155,7 +158,7 @@ test('a first turn is codex exec --json in the project, prompt on stdin, Marble 
   assert.equal(config(spec.args, 'mcp_servers.marble_drive.args'), '["/app/bin/marble-mcp.js"]');
   assert.equal(config(spec.args, 'mcp_servers.marble_drive.env_vars'), '["MARBLE_DRIVE_URL", "MARBLE_AGENT_TOKEN"]');
   assert.equal(config(spec.args, 'mcp_servers.marble_browser.args'), '["/app/bin/marble-browser-mcp.js"]');
-  assert.equal(config(spec.args, 'mcp_servers.marble_browser.env_vars'), '["MARBLE_BROWSER_PROFILE", "MARBLE_BROWSER_ORIGIN", "MARBLE_BROWSER_PASS"]');
+  assert.equal(config(spec.args, 'mcp_servers.marble_browser.env_vars'), '["MARBLE_BROWSER_PROFILE", "MARBLE_BROWSER_ORIGIN", "MARBLE_BROWSER_PASS_FILE"]');
   // Marble's tools refuse what their rules forbid. In a sandbox, Codex would
   // otherwise want an approval nobody can give, and refuse every call.
   assert.equal(config(spec.args, 'mcp_servers.marble_drive.default_tools_approval_mode'), '"approve"');
@@ -164,12 +167,15 @@ test('a first turn is codex exec --json in the project, prompt on stdin, Marble 
   assert.ok(!spec.args.join(' ').includes('tok-7f3a91'));
   assert.ok(!spec.args.join(' ').includes('pass-9c1e44'));
   assert.equal(spec.env.MARBLE_AGENT_TOKEN, 'tok-7f3a91');
-  assert.equal(spec.env.MARBLE_BROWSER_PASS, 'pass-9c1e44');
+  assert.ok(!('MARBLE_BROWSER_PASS' in spec.env), 'the pass is a file, not the environment');
 
   const instructions = JSON.parse(config(spec.args, 'developer_instructions'));
   assert.ok(instructions.startsWith(DRIVE_INSTRUCTIONS.slice(0, 80)));
   assert.match(instructions, /marble-drive:visuals-in-chat/);
   assert.match(instructions, /agent-plugin\/skills\/visuals-in-chat\/SKILL\.md/);
+  // The person's own Codex may bring a browser of its own; Marble's is the
+  // one signed in to this drive.
+  assert.match(instructions, /marble_browser/);
 });
 
 test('a later turn resumes its thread, with the same flags before resume', () => {
@@ -302,4 +308,52 @@ test('a machine whose sandbox cannot start offers only Full access', async () =>
   // Not installed: nothing to probe.
   const none = createCodexProvider({ exec: async () => ({ code: null, missing: true, stdout: '', stderr: '' }), env: {} });
   assert.equal((await none.detect()).modes, undefined);
+});
+
+test('the browser\'s pass is a private file the server reads, never in the environment a command inherits', async () => {
+  const workspace = await fsp.mkdtemp(path.join(os.tmpdir(), 'marble-codex-pass-'));
+  const provider = createCodexProvider({ env: {} });
+  await provider.prepare({ workspace, mcp: MCP, browser: BROWSER, capability: 'full' });
+  const file = path.join(workspace, 'browser-pass');
+  assert.equal(await fsp.readFile(file, 'utf8'), 'pass-9c1e44');
+  assert.equal((await fsp.stat(file)).mode & 0o777, 0o600);
+  const spec = provider.spawn(turn({ workspace }));
+  assert.ok(!('MARBLE_BROWSER_PASS' in spec.env), 'Codex hands its env to every command it runs');
+  assert.equal(spec.env.MARBLE_BROWSER_PASS_FILE, file);
+  assert.equal(config(spec.args, 'mcp_servers.marble_browser.env_vars'), '["MARBLE_BROWSER_PROFILE", "MARBLE_BROWSER_ORIGIN", "MARBLE_BROWSER_PASS_FILE"]');
+  assert.ok(!JSON.stringify(spec).includes('pass-9c1e44'));
+  // An open drive's browser has no pass, and gets no file.
+  const open = await fsp.mkdtemp(path.join(os.tmpdir(), 'marble-codex-nopass-'));
+  const bare = { ...BROWSER, env: { MARBLE_BROWSER_PROFILE: '/w/p', MARBLE_BROWSER_ORIGIN: 'http://127.0.0.1:4400' } };
+  await provider.prepare({ workspace: open, mcp: MCP, browser: bare, capability: 'full' });
+  await assert.rejects(fsp.stat(path.join(open, 'browser-pass')), { code: 'ENOENT' });
+  assert.ok(!('MARBLE_BROWSER_PASS_FILE' in provider.spawn(turn({ workspace: open, browser: bare })).env));
+});
+
+test('a wait for another agent outlasts Codex\'s own tool timeout', () => {
+  const { args } = createCodexProvider({ env: {} }).spawn(turn());
+  // Codex gives up on an MCP call after 60 s by default; wait_for_reply may
+  // block for WAIT_MAX, and a reply that lands after Codex gave up is lost.
+  assert.ok(Number(config(args, 'mcp_servers.marble_drive.tool_timeout_sec')) > WAIT_MAX);
+  assert.ok(Number(config(args, 'mcp_servers.marble_browser.tool_timeout_sec')) >= 120);
+});
+
+// Features are turned off with -c, never --disable: an unknown --disable is a
+// hard error, so a Codex that drops a feature would fail every turn.
+const featuresOff = (args) => args.flatMap((a, i) => (a === '-c' && /^features\.\w+=false$/.test(args[i + 1]) ? [args[i + 1].slice(9, -6)] : [])).sort();
+
+test('a documents turn has no shell at all, as Claude and Cursor have none there', () => {
+  const { args } = createCodexProvider({ env: {} }).spawn(turn({ capability: 'documents', cwd: null }));
+  assert.ok(!args.includes('--disable'));
+  assert.ok(featuresOff(args).includes('shell_tool'));
+  assert.ok(featuresOff(args).includes('unified_exec'));
+  const full = createCodexProvider({ env: {} }).spawn(turn()).args;
+  assert.ok(!featuresOff(full).includes('shell_tool'), 'a full turn keeps the terminal\'s shell');
+});
+
+test('Codex\'s own browser and computer use are off: they cannot work headless, and Marble\'s browser is signed in', () => {
+  for (const capability of ['full', 'documents']) {
+    const off = featuresOff(createCodexProvider({ env: {} }).spawn(turn({ capability, cwd: capability === 'full' ? '/drive' : null })).args);
+    for (const feature of ['browser_use', 'browser_use_external', 'computer_use', 'in_app_browser']) assert.ok(off.includes(feature), `${capability}: ${feature}`);
+  }
 });

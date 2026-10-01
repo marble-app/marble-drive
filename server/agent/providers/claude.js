@@ -49,6 +49,12 @@ export function claudeModelArg(model, version) {
   return model;
 }
 export const CLAUDE_EFFORTS = ['low', 'medium', 'high', 'xhigh', 'max'];
+// A chat that switched agents can still carry the last one's model or effort.
+// Claude would refuse those outright, so they are left out and Claude runs on
+// the person's own settings instead.
+const OTHER_AGENTS_MODEL = /^(gpt|o\d|codex|grok|composer|auto$)/i;
+const claudeModel = (model) => (model && !OTHER_AGENTS_MODEL.test(String(model)) ? model : null);
+const claudeEffort = (effort) => (CLAUDE_EFFORTS.includes(effort) ? effort : null);
 // The request id Marble gives the stream-json initialize handshake. Its reply
 // carries the CLI's own skills list.
 export const INIT_REQUEST_ID = 'marble-init';
@@ -275,8 +281,8 @@ export function createClaudeProvider({ auth = 'subscription', exec = runCommand,
         if (mode === 'bypassPermissions') args.push('--allow-dangerously-skip-permissions');
       }
       // No model or effort means the person's own settings.json — the terminal default.
-      if (model) args.push('--model', claudeModelArg(model, cliVersion));
-      if (effort) args.push('--effort', effort);
+      if (claudeModel(model)) args.push('--model', claudeModelArg(model, cliVersion));
+      if (claudeEffort(effort)) args.push('--effort', effort);
       if (resume) args.push('--resume', resume);
       // Without a key the CLI would fall back to the login, and bill the
       // subscription for a conversation someone chose to put on the API.

@@ -143,7 +143,9 @@ export async function nameConversation({
       args: ['exec', '--skip-git-repo-check', '--ephemeral', '--ignore-user-config', '-s', 'read-only', '-c', 'model_reasoning_effort="low"', '--', ask],
       ready: async () => {
         const status = await exec('codex', ['login', 'status'], { timeout: 5_000, env: clean, cwd, signal });
-        return status.code === 0 && !/not logged in/i.test(`${status.stdout ?? ''}${status.stderr ?? ''}`);
+        // The ChatGPT login only: `codex login --with-api-key` is a key too.
+        const text = `${status.stdout ?? ''}${status.stderr ?? ''}`;
+        return status.code === 0 && /using chatgpt/i.test(text);
       },
     },
   ];

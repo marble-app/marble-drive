@@ -22,7 +22,9 @@ export const CLAUDE_MODES = [
 export const CODEX_MODES = [
   { id: 'full', label: 'Full access' },
   { id: 'workspace', label: 'Workspace' },
-  { id: 'read', label: 'Read only' },
+  // Its shell only reads; Marble's tools still edit documents, so the word
+  // says that rather than "read only".
+  { id: 'read', label: 'Documents only' },
 ];
 
 export const CURSOR_MODES = [

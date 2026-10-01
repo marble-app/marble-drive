@@ -64,7 +64,7 @@ const openaiBase = await new Promise((resolve) => {
 const drives = [];
 /** A drive of its own per test: detection is cached, so a login that changes
  *  mid-test would not be seen, and each test wants its own key file. */
-async function makeDrive({ login = false, claude = true, codex = null } = {}) {
+async function makeDrive({ login = false, claude = true, codex = null, fake = true } = {}) {
   const root = await fsp.mkdtemp(path.join(os.tmpdir(), 'marble-drive-setup-'));
   const work = await fsp.mkdtemp(path.join(os.tmpdir(), 'marble-drive-setup-work-'));
   const keys = path.join(work, 'agent-keys.local');
@@ -81,6 +81,8 @@ async function makeDrive({ login = false, claude = true, codex = null } = {}) {
     MARBLE_DRIVE_OPENAI_BASE: openaiBase,
   });
   const providers = new Map([['fake', createFakeProvider()]]);
+  // `fake: false` is a drive where the scripted agent cannot run either.
+  if (!fake) providers.get('fake').detect = async () => ({ installed: true, signedIn: false, detail: 'signed out' });
   if (claude) {
     const subscription = createFakeProvider({ id: 'claude-subscription' });
     subscription.detect = async () => ({ installed: true, signedIn: login, detail: login ? 'signed in' : 'run `claude` once to sign in' });
@@ -282,4 +284,21 @@ test('an Anthropic key pasted for Codex, and Codex on a drive without it, are re
   const none = await makeDrive();
   assert.equal((await none.api('POST', '/agent/setup', { provider: 'codex', key: OPENAI_GOOD })).status, 400);
   assert.equal(openaiSeen.length, 0);
+});
+
+test('new chats and runs start on an agent that can run, not a saved default that cannot', async () => {
+  // Codex signed in with ChatGPT; the saved default is still a signed-out Claude.
+  const codexOnly = await makeDrive({ codex: { installed: true, login: true } });
+  const settings = (await codexOnly.api('GET', '/agent/settings')).body;
+  assert.equal(settings.defaultProvider, 'codex');
+  // What a Run button and the day do with it.
+  const made = await codexOnly.api('POST', '/agent/conversations', { provider: settings.defaultProvider });
+  assert.equal(made.body.provider, 'codex');
+
+  // A Claude that can run stays the default.
+  const both = await makeDrive({ login: true, codex: { installed: true, login: true } });
+  assert.equal((await both.api('GET', '/agent/settings')).body.defaultProvider, 'claude-subscription');
+  // And with nothing that can run, the saved choice is left as it is.
+  const none = await makeDrive({ codex: { installed: true }, fake: false });
+  assert.equal((await none.api('GET', '/agent/settings')).body.defaultProvider, 'claude-subscription');
 });

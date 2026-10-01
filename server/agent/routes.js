@@ -125,10 +125,24 @@ export function createAgentRoutes({ store, runner, tools, hub, providers, writeO
   const CODEX = 'codex';
   const NO_KEYS = { anthropic: false, cursor: false, openai: false };
 
+  /** The agent new chats start on: the saved default when it can run, else
+   *  the first that can, in the picker's order. A drive that signed Codex in
+   *  by its login, or put a key in Settings, would otherwise start every Run
+   *  button and the day on a Claude that is not signed in. With nothing that
+   *  can run, the saved choice stands. */
+  async function runnableDefault(settings) {
+    const saved = isClaude(settings.defaultProvider) ? activeClaude(settings) : settings.defaultProvider;
+    const list = await detectAll();
+    if (list.find((p) => p.id === saved)?.signedIn) return saved;
+    const ready = list.find((p) => p.signedIn && (!isClaude(p.id) || p.id === activeClaude(settings)));
+    return ready?.id ?? saved;
+  }
+
   const publicSettings = async () => {
     const settings = await store.settings();
     return {
       ...settings,
+      defaultProvider: await runnableDefault(settings),
       claudeAuth: claudeAuth(settings),
       keys: keys ? await keys.flags() : NO_KEYS,
     };
@@ -294,7 +308,7 @@ export function createAgentRoutes({ store, runner, tools, hub, providers, writeO
    *  host starts on its own (server/daily.js). */
   async function startRun({ prompt, target, title = null, project = null }) {
     const settings = await store.settings();
-    const made = await startConversation({ provider: settings.defaultProvider, project });
+    const made = await startConversation({ provider: await runnableDefault(settings), project });
     if (made.error) throw Object.assign(new Error(made.error), { status: made.status });
     const { id } = made.summary;
     if (title) {

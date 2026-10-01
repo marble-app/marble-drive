@@ -404,3 +404,18 @@ test('no shipped host, page code or template names a lab', () => {
   const found = spawnSync('git', ['grep', '-l', 'KIXLAB', '--', 'server', 'runtime', 'templates', 'starters', 'agent-plugin'], { encoding: 'utf8' });
   assert.equal(found.stdout.trim(), '');
 });
+
+test('a model or effort another agent left on the chat is not handed to Claude', () => {
+  const sub = createClaudeProvider({ auth: 'subscription', env: {} });
+  const run = (model, effort) => sub.spawn({ workspace: '/w', prompt: 'x', capability: 'full', kind: 'drive', cwd: '/d', model, effort, env: {} }).args;
+  for (const model of ['gpt-6-astra', 'gpt-5.5', 'grok-4.7', 'composer-2.5', 'auto']) {
+    assert.ok(!run(model, null).includes('--model'), model);
+  }
+  for (const effort of ['ultra', 'minimal', 'high-fast']) {
+    assert.ok(!run('opus', effort).includes('--effort'), effort);
+  }
+  // Claude's own still go through, family or full id.
+  const own = run('claude-sonnet-5', 'max');
+  assert.equal(own[own.indexOf('--model') + 1], 'claude-sonnet-5');
+  assert.equal(own[own.indexOf('--effort') + 1], 'max');
+});

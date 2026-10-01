@@ -26,8 +26,10 @@ import path from 'node:path';
 import { CODEX_MODES } from '../catalog.js';
 import { pickEnv } from '../env.js';
 import { instructionsFor } from '../instructions.js';
+import { WAIT_MAX } from '../messages.js';
 import { PLUGIN_DIR, PLUGIN_NAME } from '../skills.js';
 import { runCommand } from './exec.js';
+import { writePrivateFile } from './private-file.js';
 
 // The efforts every listed model shares, for the settings panel's one menu.
 // The composer offers each model its own (parseCodexModels).
@@ -36,6 +38,22 @@ const EFFORTS = new Set(['minimal', 'low', 'medium', 'high', 'xhigh', 'max', 'ul
 const EFFORT_LABELS = { minimal: 'Minimal', low: 'Low', medium: 'Medium', high: 'High', xhigh: 'Extra High', max: 'Max', ultra: 'Ultra' };
 const SANDBOX = { full: 'danger-full-access', workspace: 'workspace-write', read: 'read-only' };
 const SUMMARY = 200;
+// Codex gives up on an MCP call after 60 s unless told otherwise, and
+// wait_for_reply may block for WAIT_MAX: a reply that lands after Codex gave
+// up is taken from the inbox and answered into nothing. A browser step can be
+// a slow page load on a cold sprite.
+const TOOL_TIMEOUT = { marble_drive: WAIT_MAX + 30, marble_browser: 180 };
+// The browser's pass is a login to the drive. Codex hands its own environment
+// to every command it runs, so the pass is a private file the server reads.
+const PASS_FILE = 'browser-pass';
+// Codex's own browser and computer use need its desktop app to run or to
+// approve them, and in exec they only fail ("No browser is available",
+// "not approved"), after the model reached for them instead of Marble's
+// browser. Off, with -c rather than --disable: an unknown --disable is a hard
+// error, so a Codex that drops one of these would otherwise fail every turn.
+const HEADLESS_OFF = ['browser_use', 'browser_use_external', 'computer_use', 'in_app_browser'];
+const NO_SHELL = ['shell_tool', 'unified_exec'];
+const featuresOff = (names) => names.flatMap((name) => ['-c', `features.${name}=false`]);
 
 /** A TOML basic string. JSON's escapes are TOML's, except that TOML refuses a
  *  raw DEL and an escaped lone surrogate, so neither is left to reach it. */
@@ -176,6 +194,11 @@ export function parseCodexLine(line, state = {}) {
   }
 }
 
+// The person's Codex may bring a browser or computer use of its own, and it
+// reaches for those first (seen 2026-10-01). Marble's is the one signed in to
+// this drive.
+const BROWSER_NOTE = 'The browser tools above are the marble_browser MCP server. It is signed in to this drive, so use it, not any other browser or computer-use tool, to open or check pages of this drive.';
+
 /** The app's own skills, which Codex cannot be handed as a plugin. They are
  *  named with where they are, and Codex reads one when it fits — how it uses
  *  its own skills too. Read once: they ship with the release. */
@@ -216,7 +239,15 @@ const serverArgs = (name, server) => [
   '-c', `mcp_servers.${name}.args=${tomlList(server.args ?? [])}`,
   '-c', `mcp_servers.${name}.env_vars=${tomlList(Object.keys(server.env ?? {}))}`,
   '-c', `mcp_servers.${name}.default_tools_approval_mode="approve"`,
+  '-c', `mcp_servers.${name}.tool_timeout_sec=${TOOL_TIMEOUT[name] ?? 120}`,
 ];
+
+/** The browser server's environment as Codex is given it: the pass swapped
+ *  for the path of the file prepare wrote it to. */
+function browserEnv(browser, workspace) {
+  const { MARBLE_BROWSER_PASS: pass, ...rest } = browser.env ?? {};
+  return pass ? { ...rest, MARBLE_BROWSER_PASS_FILE: path.join(workspace, PASS_FILE) } : rest;
+}
 
 export function createCodexProvider({ exec = runCommand, env = process.env, secrets } = {}) {
   const live = () => ({ ...env, ...(typeof secrets === 'function' ? secrets() : secrets ?? {}) });
@@ -271,9 +302,13 @@ export function createCodexProvider({ exec = runCommand, env = process.env, secr
       };
     },
 
-    // Nothing to write: Codex takes its servers and instructions as flags, so
-    // the turn token is never in a file of its own.
-    async prepare() {},
+    // Codex takes its servers and instructions as flags. The one thing written
+    // is the browser's pass, mode 600 in the conversation's workspace, outside
+    // the drive, rewritten each turn as Claude's mcp.json is.
+    async prepare({ workspace, browser = null, capability = 'documents' }) {
+      const pass = capability === 'full' ? browser?.env?.MARBLE_BROWSER_PASS : null;
+      if (pass) await writePrivateFile(path.join(workspace, PASS_FILE), pass);
+    },
 
     spawn({ workspace, prompt, resume = null, model = null, effort = null, mode = null, capability = 'documents', kind = 'drive', cwd = null, mcp, browser = null }) {
       const current = live();
@@ -281,20 +316,23 @@ export function createCodexProvider({ exec = runCommand, env = process.env, secr
       const where = full ? cwd : workspace;
       const sandbox = full ? SANDBOX[mode] ?? SANDBOX.full : SANDBOX.read;
       const instructions = full
-        ? [instructionsFor('full', kind), appSkillsText()].filter(Boolean).join('\n\n')
+        ? [instructionsFor('full', kind), BROWSER_NOTE, appSkillsText()].filter(Boolean).join('\n\n')
         : instructionsFor('documents');
       const args = ['exec', '--json', '--skip-git-repo-check', '-C', where, '-s', sandbox];
-      // A documents turn gets none of the person's own Codex: no MCP servers
-      // of theirs, no instructions, no hooks. Its shell can only read.
-      if (!full) args.push('--ignore-user-config');
+      // A documents turn gets none of the person's own Codex — no MCP servers
+      // of theirs, no instructions, no hooks — and no shell: Marble's tools
+      // are all it has, as Claude's `--tools ""` and Cursor's hook leave them.
+      if (!full) args.push('--ignore-user-config', ...featuresOff(NO_SHELL));
+      args.push(...featuresOff(HEADLESS_OFF));
       if (isCodexModel(model)) args.push('-m', String(model));
       if (EFFORTS.has(effort)) args.push('-c', `model_reasoning_effort=${tomlString(effort)}`);
       args.push('-c', `developer_instructions=${tomlString(instructions)}`);
       const childEnv = { ...(mcp?.env ?? {}) };
       if (mcp) args.push(...serverArgs('marble_drive', mcp));
       if (full && browser) {
-        args.push(...serverArgs('marble_browser', browser));
-        Object.assign(childEnv, browser.env ?? {});
+        const env = browserEnv(browser, workspace);
+        args.push(...serverArgs('marble_browser', { ...browser, env }));
+        Object.assign(childEnv, env);
       }
       const key = keyOf(current);
       if (key) childEnv.CODEX_API_KEY = key;

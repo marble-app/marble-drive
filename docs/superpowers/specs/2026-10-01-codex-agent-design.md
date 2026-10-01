@@ -16,7 +16,7 @@ which waited on a ChatGPT plan that was at its limit.
 | How Marble's rules reach it | `-c developer_instructions=…` | the same text Claude gets with `--append-system-prompt`; the project's own `AGENTS.md` still loads |
 | The app's own skills | listed in the instructions by name, description and path | Codex has no `--plugin-dir`; it reads a `SKILL.md` when one fits, which is how it uses its own |
 | Models and efforts | `codex debug models`, `visibility: list` only, each model with its own efforts | the catalog moves faster than this file; it answers without a login |
-| Modes (Shift+Tab) | **Full access** (default) `-s danger-full-access`; **Workspace** `-s workspace-write`; **Read only** `-s read-only` | auto-review (`--approve-for-me`) in exec blocks the network and never escalates, so it is not offered |
+| Modes (Shift+Tab) | **Full access** (default) `-s danger-full-access`; **Workspace** `-s workspace-write`; **Documents only** `-s read-only` (Marble's tools still edit documents, so the name says so); only Full access where `codex sandbox -- true` fails (sprites) | auto-review (`--approve-for-me`) in exec blocks the network and never escalates, so it is not offered |
 | Asks | none; Codex asks in text, like Cursor | exec has no channel for an approval; the app-server protocol does, and is a later round |
 | Checking a key | `GET /v1/models` at OpenAI before it is kept | spends nothing; a wrong paste is caught where it was made |
 | Naming a chat | Codex after Claude and Cursor, on the login only | naming never bills an API key by accident (the rule Claude already keeps) |

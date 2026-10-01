@@ -190,3 +190,38 @@ test('a conversation on Codex opens on its setup', async () => {
   assert.equal(await setupWord(view), 'GPT-6-Astra High');
   assert.deepEqual(errors, []);
 });
+
+const checked = (view, name) => view.evaluate((el, n) => el.shadowRoot.querySelector(`input[name="${n}"]:checked`)?.value ?? null, name);
+
+test('switching to Claude leaves Codex\'s model and effort behind, and does not save them as Claude\'s', async () => {
+  const { view, errors } = await mount();
+  await pick(view, 'preset', 'codex-high');
+  await settled(view);
+  await pick(view, 'effort', 'ultra');
+  await settled(view);
+  await pick(view, 'agent', 'claude-subscription');
+  await settled(view);
+  const model = await checked(view, 'model');
+  const effort = await checked(view, 'effort');
+  assert.ok(!/^gpt-/.test(model ?? ''), `Claude is left on Codex's model: ${model}`);
+  assert.notEqual(effort, 'ultra');
+  const options = await view.evaluate((el) => [...el.shadowRoot.querySelectorAll('input[name="model"]')].map((i) => i.value));
+  assert.ok(!options.includes('gpt-6-astra'), 'Codex\'s model is not offered under Claude');
+  const saved = await (await fetch(`${host.base}/agent/settings`)).json();
+  assert.ok(!/^gpt-/.test(saved.models?.['claude-subscription'] ?? ''), 'not remembered as Claude\'s model');
+  assert.deepEqual(errors, []);
+});
+
+test('a model that does not take the chosen effort drops it', async () => {
+  const { view, errors } = await mount();
+  await pick(view, 'preset', 'codex-high');
+  await settled(view);
+  await pick(view, 'effort', 'ultra');
+  await settled(view);
+  await pick(view, 'model', 'gpt-5.6-luna');
+  await settled(view);
+  assert.ok(['', 'low', 'medium', 'high'].includes(await checked(view, 'effort')), `effort ${await checked(view, 'effort')}`);
+  const options = await view.evaluate((el) => [...el.shadowRoot.querySelectorAll('input[name="effort"]')].map((i) => i.value));
+  assert.ok(!options.includes('ultra'));
+  assert.deepEqual(errors, []);
+});

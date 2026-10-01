@@ -153,3 +153,18 @@ test('a Codex with no login is not asked: it would spend its retries on a 401', 
   assert.deepEqual(ran.filter((r) => r.startsWith('codex')), ['codex login']);
   assert.deepEqual(errors, []);
 });
+
+test('a Codex signed in with an API key is a key, and naming does not bill it', async () => {
+  const ran = [];
+  const title = await nameConversation({
+    prompt: 'anything',
+    exec: async (command, args) => {
+      ran.push(`${command} ${args[0]}`);
+      if (command !== 'codex') return { missing: true, code: null, stdout: '', stderr: '' };
+      if (args[0] === 'login') return { missing: false, code: 0, stdout: '', stderr: 'Logged in using an API key - sk-proj-***\n' };
+      return { missing: false, code: 0, stdout: 'Billed Title\n', stderr: '' };
+    },
+  });
+  assert.equal(title, null);
+  assert.deepEqual(ran.filter((r) => r.startsWith('codex')), ['codex login']);
+});

@@ -106,7 +106,8 @@ test('a wrong OpenAI key is refused in place; a right one connects Codex and clo
 
   const settings = await (await fetch(`${host.base}/agent/settings`)).json();
   assert.equal(settings.keys.openai, true);
-  assert.equal(settings.defaultProvider, 'codex', 'new chats start on the agent that can run');
+  // The stand-in Codex here ignores keys, so read the saved choice itself.
+  assert.equal((await host.drive.agents.store.settings()).defaultProvider, 'codex', 'new chats start on the agent that can run');
   // The refused key's 400 is the browser logging an answer the popup read.
   assert.deepEqual(errors.filter((e) => !/status of 400/.test(e)), []);
 });

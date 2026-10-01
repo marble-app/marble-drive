@@ -5,7 +5,7 @@ import readline from 'node:readline';
 import test from 'node:test';
 import { fileURLToPath } from 'node:url';
 
-import { BROWSER_TOOLS } from '../server/agent/browser.js';
+import { BROWSER_TOOLS, passFromEnv } from '../server/agent/browser.js';
 
 const BRIDGE = path.join(path.dirname(fileURLToPath(import.meta.url)), '..', 'bin', 'marble-browser-mcp.js');
 
@@ -78,4 +78,16 @@ test('ending stdin closes the process', async () => {
     });
   });
   assert.equal(code, 0);
+});
+
+test('the pass comes from the environment or from the private file it names', async () => {
+  const fsp = await import('node:fs/promises');
+  const os = await import('node:os');
+  assert.equal(passFromEnv({}), undefined);
+  assert.deepEqual(passFromEnv({ MARBLE_BROWSER_ORIGIN: 'http://o', MARBLE_BROWSER_PASS: 'c1' }), { origin: 'http://o', cookie: 'c1' });
+  const dir = await fsp.mkdtemp(path.join(os.tmpdir(), 'marble-pass-'));
+  const file = path.join(dir, 'browser-pass');
+  await fsp.writeFile(file, 'c2\n', { mode: 0o600 });
+  assert.deepEqual(passFromEnv({ MARBLE_BROWSER_ORIGIN: 'http://o', MARBLE_BROWSER_PASS_FILE: file }), { origin: 'http://o', cookie: 'c2' });
+  assert.equal(passFromEnv({ MARBLE_BROWSER_ORIGIN: 'http://o', MARBLE_BROWSER_PASS_FILE: path.join(dir, 'gone') }), undefined);
 });

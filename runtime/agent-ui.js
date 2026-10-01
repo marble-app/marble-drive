@@ -4440,20 +4440,25 @@
 
       this.picker.addEventListener('change', (event) => {
         const name = event.target?.name;
+        // Read now: the radio is in a shadow root, and once the event has
+        // been dispatched its target is cleared, so after the await below
+        // `event.target` is null and the bar was never repainted.
+        const track = event.target?.closest?.('.seg-opts') ?? null;
         const run = async () => {
           if (name === 'agent') {
             this.mode = this.currentProvider()?.modes?.[0]?.id ?? this.mode;
-            await this.syncCatalog();
+            await this.syncCatalog({ switched: true });
             this.persistCatalog();
             this.persistMode();
             this.paintStatus();
             this.paintTags();
           }
-          if (name === 'model') { this.syncEfforts(); this.persistCatalog(); this.paintStatus(); this.paintTags(); }
+          if (name === 'model') { this.syncEfforts({ fit: true }); this.persistCatalog(); this.paintStatus(); this.paintTags(); }
           if (name === 'effort') { this.persistCatalog(); this.paintStatus(); this.paintTags(); }
-          const track = event.target?.closest?.('.seg-opts');
-          syncSegCurrent(track);
-          slideThumb(track, { animate: true });
+          if (track) {
+            syncSegCurrent(track);
+            slideThumb(track, { animate: true });
+          }
           closeSegMenus(this.shadowRoot);
           this.paintPresets();
           this.fitSetup();
@@ -5069,7 +5074,10 @@
       };
     }
 
-    async syncCatalog({ model, effort } = {}) {
+    /** `switched` is a pick of another agent: a model or an effort only the
+     *  last agent knew is left behind, not carried over and saved as this
+     *  one's (gpt-6-astra as Claude's model fails Claude's first turn). */
+    async syncCatalog({ model, effort, switched = false } = {}) {
       const provider = this.currentProvider();
       if (provider?.id && this.api?.skills) {
         this.skills = await this.api.skills(provider.id).catch(() => this.skills ?? []);
@@ -5105,6 +5113,12 @@
         if (!effortValue) effortValue = split.effort;
         modelValue = split.family;
       }
+      if (switched && modelValue && !models.some((item) => item.id === modelValue)) {
+        const saved = settings.models?.[id] ?? '';
+        const savedFamily = splitCursorModel(saved).family || saved;
+        modelValue = models.some((item) => item.id === savedFamily) ? savedFamily : '';
+        effortValue = settings.efforts?.[id] ?? '';
+      }
       const lockClaude = this.claudeUnavailable() && String(id ?? '').startsWith('claude');
       this.modelLabel.hidden = !models.length;
       fillRadios(this.modelBox, 'model', models, {
@@ -5112,13 +5126,15 @@
         value: modelValue,
         disabled: lockClaude ? new Set(models.map((item) => item.id)) : new Set(),
       });
-      this.syncEfforts({ effort: effortValue });
+      this.syncEfforts({ effort: effortValue, fit: switched });
       if (!this.mode) this.mode = provider?.modes?.[0]?.id ?? '';
       this.paintStatus();
       this.fitSetup();
     }
 
-    syncEfforts({ effort } = {}) {
+    /** `fit` is a pick of another model or agent: an effort this one does not
+     *  take is let go rather than kept as a choice of its own. */
+    syncEfforts({ effort, fit = false } = {}) {
       const family = this.currentModel();
       const nested = family?.efforts ?? [];
       const efforts = nested.length
@@ -5126,9 +5142,12 @@
         : (this.currentProvider()?.efforts ?? []).map((level) => ({ id: level, label: level }));
       this.effortLabel.hidden = !efforts.length;
       const lockClaude = this.claudeUnavailable() && String(this.currentProvider()?.id ?? '').startsWith('claude');
+      const bare = !(nested.length && !family?.hasBare);
+      let value = effort ?? radioValue(this.shadowRoot, 'effort') ?? nested[0]?.id ?? '';
+      if (fit && value && !efforts.some((item) => item.id === value)) value = bare ? '' : nested[0]?.id ?? '';
       fillRadios(this.effortBox, 'effort', efforts, {
-        empty: nested.length && !family?.hasBare ? null : 'Default',
-        value: effort ?? radioValue(this.shadowRoot, 'effort') ?? nested[0]?.id ?? '',
+        empty: bare ? 'Default' : null,
+        value,
         disabled: lockClaude ? new Set(efforts.map((item) => item.id)) : new Set(),
       });
       this.fitSetup();
