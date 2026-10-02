@@ -98,14 +98,17 @@ test('a Drive its owner rebuilt is left exactly as it is, and not retried', asyn
 });
 
 test('where the owner and the template changed the same lines, nothing is written', async () => {
-  const base = await buildApp(drive, previous.source, { title: 'My Drive' });
   const theirs = target.source.split('\n');
-  const old = previous.source.split('\n');
-  // A line today's template changed, changed by the owner too.
-  const changed = old.find((l) => l.length > 30 && !l.includes('__') && !theirs.includes(l));
-  assert.ok(changed, 'a line the template has since changed');
+  // A line today's template changed, changed by the owner too. The version
+  // just before today's may only have had lines added to it, so the copy is
+  // made from the newest one that today's template actually rewrote a line of.
+  const rewritten = (v) => v.source.split('\n').find((l) => l.length > 30 && !l.includes('__') && !theirs.includes(l));
+  const from = [...versions].reverse().find((v) => v.id !== target.id && v.date && rewritten(v));
+  assert.ok(from, 'a version with a line the template has since changed');
+  const changed = rewritten(from);
+  const base = await buildApp(drive, from.source, { title: 'My Drive' });
   const ours = base.replace(changed, `${changed} /* the owner's version */`);
-  const plan = await planCopy(drive, ours, { known: previous.id });
+  const plan = await planCopy(drive, ours, { known: from.id });
   assert.equal(plan.status, 'held');
   assert.equal(plan.reason, 'conflicts');
 });
