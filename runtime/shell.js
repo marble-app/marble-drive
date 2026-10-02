@@ -2249,8 +2249,8 @@
           a.append(h('span', '', pin.label));
           this.glyph(a, pin.path, pin.kind);
           a.title = pin.path;
-          const folder = folderOf(pin.path);
-          if (folder) a.append(h('span', 'where', nameOf(folder)));
+          // A pin is something you chose by name: the name is the row, and
+          // where it lives is the tooltip's (the path, above).
           if (pin.path === this.here) a.setAttribute('aria-current', 'page');
           ul.append(this.item(a));
         }

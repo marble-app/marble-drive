@@ -48,7 +48,7 @@ test('the next page draws the sidebar before the drive has answered, and reads t
 
   await page.goto(`${host.base}/a/Research%2Fatlas`);
   await page.locator('marble-shell').locator('.sec[data-sec="drive"] .row').first().waitFor();
-  assert.deepEqual(await rows(page, 'pinned'), ['plansTravel'], 'the pins, from the last page');
+  assert.deepEqual(await rows(page, 'pinned'), ['plans'], 'the pins, from the last page');
   assert.ok((await rows(page, 'drive')).includes('Research'), 'the tree, from the last page');
   assert.equal(await page.locator('marble-shell').locator('button.row[data-folder="Research"]').getAttribute('data-realm'), 'research', 'in its colours, too');
   // Where you are is this page's, not the last one's.
