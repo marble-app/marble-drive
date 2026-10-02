@@ -73,6 +73,8 @@
   // The Drive's own path, from the host (server/app.js), which is the one
   // that knows what this drive calls it.
   const HOME_DOC = document.currentScript?.dataset.home ?? null;
+  // Who files a pin from here, so the Drive open in another tab hears it.
+  const CLIENT = Math.random().toString(36).slice(2, 10);
 
   const stored = (name, fallback) => {
     try { return localStorage.getItem(KEY + name) ?? fallback; } catch { return fallback; }
@@ -126,7 +128,22 @@
     // Two ticks: every one of them, read.
     read: '<path d="m1.75 8.5 2.75 2.75 5-5.75"/><path d="m7.75 11 .25.25 5.5-6"/>',
     grip: '<path d="M6 4h.01M10 4h.01M6 8h.01M10 8h.01M6 12h.01M10 12h.01" stroke-width="2"/>',
+    pin: '<path d="M6 2.25h4M6.75 2.25v4L4.5 9.25h7l-2.25-3v-4M8 9.25v4.5"/>',
+    tab: '<path d="M9.25 2.75h4v4M13.25 2.75 7.5 8.5"/><path d="M11.5 9.5v2.75c0 .83-.67 1.5-1.5 1.5H3.75c-.83 0-1.5-.67-1.5-1.5V6c0-.83.67-1.5 1.5-1.5H6.5"/>',
+    copy: '<rect x="5.25" y="5.25" width="8.5" height="8.5" rx="1.75"/><path d="M10.75 5.25V3.75c0-.83-.67-1.5-1.5-1.5h-5.5c-.83 0-1.5.67-1.5 1.5v5.5c0 .83.67 1.5 1.5 1.5h1.5"/>',
+    edit: '<path d="M10.25 3.25 12.75 5.75 6 12.5l-3.25.75.75-3.25z"/><path d="M8.75 4.75l2.5 2.5"/>',
+    path: '<path d="M2.25 8h11.5M10.5 4.75 13.75 8l-3.25 3.25"/><path d="M2.25 4.25v7.5"/>',
+    trash: '<path d="M2.75 4.25h10.5M6.25 4.25v-1c0-.55.45-1 1-1h1.5c.55 0 1 .45 1 1v1"/><path d="M4 4.25l.6 8.3c.06.8.72 1.45 1.53 1.45h3.74c.8 0 1.47-.64 1.53-1.45l.6-8.3"/>',
   };
+  // A pin's glyph as the Drive draws it (templates/drive.mrbl, ICON), so a pin
+  // filed from here looks like one filed there.
+  const PIN_GLYPH = {
+    folder: '<svg class="glyph" viewBox="0 0 16 16" aria-hidden="true" focusable="false"><path fill="currentColor" d="M2.4 3.404h2.796a.9.9 0 0 1 .9.9v.598a.8.8 0 0 0 .8.8h6.454a1.15 1.15 0 0 1 1.15 1.15v4.594a1.15 1.15 0 0 1-1.15 1.15H2.65A1.15 1.15 0 0 1 1.5 11.446V4.304a.9.9 0 0 1 .9-.9z"/></svg>',
+    doc: '<svg class="glyph" viewBox="0 0 16 16" aria-hidden="true" focusable="false"><rect x="2.2" y="2.7" width="11.6" height="10.6" rx="2.1" fill="none" stroke="currentColor" stroke-width="1.3"/><path stroke="currentColor" stroke-width="1.3" d="M2.2 6.2h11.6"/><circle cx="4.6" cy="4.45" r=".78" fill="currentColor"/></svg>',
+  };
+  const escapeHtml = (s) => String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+  // How long a finger rests on a row before its menu opens.
+  const PRESS = 500;
   const icon = (name) => `<svg class="i" viewBox="0 0 16 16" aria-hidden="true">${PATHS[name]}</svg>`;
   // What each share link lets its holder do (server/share-policy.js says the
   // same thing as rules). The names are the ones the owner chose.
@@ -349,6 +366,31 @@
     .menu button { display: flex; align-items: center; gap: 9px; width: 100%; padding: 7px 10px; border-radius: 8px; color: var(--ink); text-align: left; }
     .menu button:hover, .menu button:focus-visible { background: var(--paper-2); outline: none; }
     .menu .i { color: var(--muted); }
+    .menu button > span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .menu hr { border: 0; border-top: 1px solid var(--line); margin: 5px 4px; }
+    .menu button[data-danger]:is(:hover, :focus-visible), .menu button[data-danger]:is(:hover, :focus-visible) .i { color: var(--danger, #b4533e); }
+
+    /* ── A row's menu, and what you carry out of a row ──
+       The row a menu is about keeps its hover while the menu is open. What
+       you drag tracks the pointer one to one with no transition; the folder
+       it would land in answers with a ring inside its edge, and in Pinned the
+       room opens where it would go. */
+    .row[data-menu] { background: var(--paper-2); color: var(--ink); }
+    .row { -webkit-touch-callout: none; }
+    .ghost { position: fixed; top: 0; left: 0; z-index: 3; display: flex; align-items: center; gap: 7px; max-width: 240px; padding: 5px 10px;
+      background: var(--card); color: var(--ink); border: 1px solid var(--line); border-radius: 8px; box-shadow: var(--shadow-lift);
+      font-size: 13px; white-space: nowrap; pointer-events: none; transform-origin: 0 0; }
+    .ghost > span { overflow: hidden; text-overflow: ellipsis; }
+    .ghost .i { color: var(--faint); }
+    .row[data-carried] { opacity: .45; }
+    .row[data-drop] { background: var(--accent-soft); color: var(--ink); box-shadow: inset 0 0 0 2px var(--accent); }
+    .sec-h[data-drop] .sec-fold { color: var(--ink); background: var(--accent-soft); box-shadow: inset 0 0 0 2px var(--accent); }
+    li.slot > .row { background: var(--accent-soft); color: var(--ink); }
+    ul:has(> li.slot) > li.empty { display: none; }
+    :host([data-carrying]) .scroll { user-select: none; cursor: grabbing; }
+    :host([data-carrying]) .row:hover:not([data-drop]) { background: none; }
+    .row input.rename { flex: 1; min-width: 0; font: inherit; color: var(--ink); background: var(--card); border: 0; border-radius: 4px;
+      padding: 0 4px; margin: -1px -4px; outline: 2px solid var(--accent); outline-offset: 0; }
     /* Share: a link per level, each its own row, and the owner's own address
        last. A row that has a link shows it, so what is out there is on screen. */
     .sharing { width: min(340px, calc(100vw - 16px)); padding: 12px; }
@@ -609,14 +651,29 @@
       });
       this.bindMove();
       this.arrive();
-      this.menu.addEventListener('click', (event) => {
+      this.menu.addEventListener('click', async (event) => {
         const pick = event.target.closest('[data-pick]')?.dataset.pick;
-        if (!pick) return;
+        const fn = pick === undefined ? null : this.menuFns?.get(pick);
+        if (!fn) return;
         this.hidePops();
-        if (pick === 'link') this.copyLink();
-        else if (pick === 'move') this.openMove();
-        else if (pick === 'drive') location.href = this.folderHref(folderOf(this.here));
-        else if (pick === 'download') location.href = window.marble.drive.downloadHref(this.here);
+        try {
+          await fn();
+        } catch (err) {
+          this.say(err?.message || 'That did not work');
+        }
+      });
+      // Up and Down walk an open menu, the way every menu you right-click on
+      // a desktop lets you.
+      this.menu.addEventListener('keydown', (event) => {
+        if (!['ArrowDown', 'ArrowUp', 'Home', 'End'].includes(event.key)) return;
+        const buttons = [...this.menu.querySelectorAll(':scope > button')];
+        if (!buttons.length) return;
+        event.preventDefault();
+        const at = buttons.indexOf(this.shadowRoot.activeElement);
+        const next = event.key === 'Home' ? 0
+          : event.key === 'End' ? buttons.length - 1
+          : (at + (event.key === 'ArrowDown' ? 1 : -1) + buttons.length) % buttons.length;
+        buttons[next].focus();
       });
       this.shadowRoot.addEventListener('pointerdown', (event) => {
         if (!event.composedPath().some((node) => node === this.menu || node === this.sharing || node === this.moving || node?.dataset?.act === 'share' || node?.dataset?.act === 'doc')) this.hidePops();
@@ -654,6 +711,7 @@
         }
       });
       this.bindReorder();
+      this.bindRows();
       this.scroll.addEventListener('keydown', (event) => this.walkRows(event));
 
       this.onKey = (event) => this.key(event);
@@ -805,6 +863,9 @@
       if (!this.hovers(side)) return false;
       if (side === 'chat' && !this.drawer) return false;
       if (this.intro) return true;
+      // A row's menu or dialog is open, something is being carried out of
+      // the tree, or a pin is being renamed: the tree stays for it.
+      if (side === 'nav' && (this.popRow || this.carrying || this.editing)) return true;
       const focused = side === 'nav'
         ? this.nav.contains(this.shadowRoot.activeElement)
         : document.activeElement === this.drawer;
@@ -969,21 +1030,25 @@
 
     // ------------------------------------------------------------ moving this document
 
-    /** Move or rename the document you are in. The host does the moving and
-     *  makes the old address forward (server/moves.js), so a link or a tab
-     *  left on it still lands; this page is bound to the old address, so it
-     *  opens again at the new one, where you were on it. */
-    openMove() {
+    /** Move or rename a document or a folder: the one you are in, from the
+     *  bar, or any row's, from its menu. The host does the moving and makes
+     *  the old address forward (server/moves.js), so a link or a tab left on
+     *  it still lands, and the Drive's pins follow it. A page bound to an
+     *  address that moved opens again at the new one, where you were on it. */
+    openMove(subject = null) {
       this.hidePops();
       const dialog = this.moving;
-      this.moveTo = { folder: folderOf(this.here) };
-      dialog.querySelector('.name').value = nameOf(this.here);
+      const path = subject?.path ?? this.here;
+      const kind = subject?.kind ?? 'doc';
+      this.moveTo = { path, kind, folder: folderOf(path) };
+      dialog.querySelector('.name').value = nameOf(path);
       dialog.querySelector('.find').value = '';
       dialog.hidden = false;
-      const anchor = this.$('.crumbs .here');
-      this.place(dialog, anchor, 'left');
+      const anchor = subject?.row?.isConnected ? subject.row : this.$('.crumbs .here');
+      if (subject?.row?.isConnected) this.holdRow(subject.row);
       if (!this.tree) this.load().then(() => this.drawDests());
       this.drawDests();
+      this.place(dialog, anchor, 'left');
       const name = dialog.querySelector('.name');
       name.focus({ preventScroll: true });
       name.select();
@@ -1006,9 +1071,12 @@
     drawDests() {
       const list = this.moving.querySelector('.dests');
       const query = this.moving.querySelector('.find').value.trim().toLowerCase();
+      const { path: moving, kind } = this.moveTo;
       list.replaceChildren();
       for (const folder of this.folders()) {
         if (query && !folder.path.toLowerCase().includes(query) && !(folder.path === '' && 'drive'.includes(query))) continue;
+        // A folder cannot go inside itself.
+        if (kind === 'folder' && (folder.path === moving || folder.path.startsWith(`${moving}/`))) continue;
         const b = h('button', 'dest');
         b.type = 'button';
         b.setAttribute('role', 'option');
@@ -1017,7 +1085,7 @@
         b.setAttribute('aria-selected', String(folder.path === this.moveTo.folder));
         b.innerHTML = icon('folder');
         b.append(h('span', '', query && folder.path ? folder.path : folder.name));
-        if (folder.path === folderOf(this.here)) b.append(h('span', 'here-tag', 'now'));
+        if (folder.path === folderOf(moving)) b.append(h('span', 'here-tag', 'now'));
         list.append(b);
       }
       this.checkMove();
@@ -1028,19 +1096,24 @@
       return { name, path: [this.moveTo.folder, name].filter(Boolean).join('/') };
     }
 
+    /** Whether something other than `except` already has this address. */
+    taken(path, except = null) {
+      return path !== except && (this.docs().some((d) => d.path === path) || this.folders().some((f) => f.path && f.path === path));
+    }
+
     checkMove() {
       const { name, path } = this.target();
+      const from = this.moveTo.path;
       const note = this.moving.querySelector('.note');
       const ok = this.moving.querySelector('.ok');
-      const taken = path !== this.here && this.docs().some((d) => d.path === path);
-      const bad = !name ? 'A document needs a name.'
+      const bad = !name ? (this.moveTo.kind === 'folder' ? 'A folder needs a name.' : 'A document needs a name.')
         : /[\/\\]/.test(name) ? 'A name cannot hold a slash; pick the folder below.'
-        : taken ? `Something called ${name} is already there.`
+        : this.taken(path, from) ? `Something called ${name} is already there.`
         : null;
       note.toggleAttribute('data-bad', Boolean(bad));
-      note.textContent = bad ?? (path === this.here ? '' : 'Links to it keep working: the old address sends them here.');
-      ok.disabled = Boolean(bad) || path === this.here;
-      ok.textContent = folderOf(path) === folderOf(this.here) ? 'Rename' : 'Move';
+      note.textContent = bad ?? (path === from ? '' : 'Links to it keep working: the old address sends them here.');
+      ok.disabled = Boolean(bad) || path === from;
+      ok.textContent = folderOf(path) === folderOf(from) ? 'Rename' : 'Move';
     }
 
     bindMove() {
@@ -1067,13 +1140,11 @@
     async commitMove() {
       const ok = this.moving.querySelector('.ok');
       const { path } = this.target();
-      if (ok.disabled || path === this.here) return;
+      const from = this.moveTo.path;
+      if (ok.disabled || path === from) return;
       ok.disabled = true;
       try {
-        // Whatever is still on its way to the file lands at the old address
-        // first; the move carries it.
-        await window.marble.flush?.();
-        await window.marble.drive.move(this.here, path);
+        await this.moveItem(from, path);
       } catch (err) {
         const note = this.moving.querySelector('.note');
         note.setAttribute('data-bad', '');
@@ -1081,10 +1152,35 @@
         ok.disabled = false;
         return;
       }
-      try {
-        sessionStorage.setItem(`${KEY}arrive`, JSON.stringify({ path, x: scrollX, y: scrollY, renamed: folderOf(path) === folderOf(this.here) }));
-      } catch { /* a fresh page at the top is all that is lost */ }
-      location.replace(`${window.marble.href(path)}${location.hash}`);
+      this.hidePops();
+    }
+
+    /** The one way anything here moves, from the dialog or a drop. A move
+     *  that carries the page you are on (it, or a folder it is in) opens the
+     *  page again at its new address; any other says where it went. */
+    async moveItem(from, to) {
+      const carries = from === this.here || this.here.startsWith(`${from}/`);
+      // Whatever is still on its way to the file lands at the old address
+      // first; the move carries it.
+      if (carries) await window.marble.flush?.();
+      await window.marble.drive.move(from, to);
+      const renamed = folderOf(to) === folderOf(from);
+      if (carries) {
+        const next = to + this.here.slice(from.length);
+        try {
+          sessionStorage.setItem(`${KEY}arrive`, JSON.stringify({ path: next, x: scrollX, y: scrollY, renamed, to }));
+        } catch { /* a fresh page at the top is all that is lost */ }
+        location.replace(`${window.marble.href(next)}${location.hash}`);
+        return;
+      }
+      // A folder that was open stays open under its new name.
+      if (this.unfolded.has(from)) {
+        this.unfolded.delete(from);
+        this.unfolded.add(to);
+        store('unfolded', JSON.stringify([...this.unfolded]));
+      }
+      this.say(renamed ? `Renamed to ${nameOf(to)}` : `Moved ${nameOf(to)} to ${nameOf(folderOf(to)) || 'Drive'}`);
+      this.load();
     }
 
     /** Arriving at a document this page just moved: back to where you were on it. */
@@ -1098,7 +1194,9 @@
       const go = () => scrollTo(at.x, at.y);
       if (document.readyState === 'complete') requestAnimationFrame(go);
       else addEventListener('load', () => requestAnimationFrame(go), { once: true });
-      this.say(at.renamed ? `Renamed to ${nameOf(at.path)}` : `Moved to ${nameOf(folderOf(at.path)) || 'Drive'}`);
+      // What moved may have been a folder this page is in.
+      const moved = at.to ?? at.path;
+      this.say(at.renamed ? `Renamed to ${nameOf(moved)}` : `Moved to ${nameOf(folderOf(moved)) || 'Drive'}`);
     }
 
     // ------------------------------------------------------------ the tree's edge
@@ -1203,6 +1301,8 @@
 
     // Up and Down walk the visible rows; Right and Left unfold and fold.
     walkRows(event) {
+      // Alt and the arrows move what is focused (a section, a pin), not focus.
+      if (event.altKey) return;
       const rows = [...this.scroll.querySelectorAll('.row:is(a, button), .row .go, .sec-fold')].filter((el) => el.offsetParent && !el.closest('[inert]'));
       const at = rows.indexOf(this.shadowRoot.activeElement);
       if (at < 0) return;
@@ -1265,11 +1365,16 @@
     // ------------------------------------------------------------ popovers
 
     hidePops() {
+      const held = this.popRow;
       this.menu.hidden = true;
       this.sharing.hidden = true;
       this.moving.hidden = true;
       this.$('.crumbs .here')?.setAttribute('aria-expanded', 'false');
       this.$('[data-act="share"]').setAttribute('aria-expanded', 'false');
+      this.popRow?.removeAttribute('data-menu');
+      this.popRow = null;
+      // A tree on hover that stayed out for its menu may go now.
+      if (held) this.settle();
     }
 
     place(pop, anchor, align) {
@@ -1280,28 +1385,60 @@
         pop.style.right = `${Math.max(8, innerWidth - r.right)}px`;
       } else {
         pop.style.right = '';
-        pop.style.left = `${Math.max(8, r.left)}px`;
+        pop.style.left = `${Math.max(8, Math.min(r.left, innerWidth - pop.offsetWidth - 8))}px`;
       }
+      // Too near the foot of the window, it opens upward instead.
+      if (r.bottom + 6 + pop.offsetHeight > innerHeight - 8) pop.style.top = `${Math.max(8, r.top - 6 - pop.offsetHeight)}px`;
+    }
+
+    /** Where a right-click was: the menu's corner at the pointer, flipped to
+     *  stay on screen. */
+    placeAt(pop, x, y) {
+      pop.style.right = '';
+      const w = pop.offsetWidth;
+      const ht = pop.offsetHeight;
+      pop.style.left = `${Math.max(8, x + w + 8 > innerWidth ? x - w : x)}px`;
+      pop.style.top = `${Math.max(8, y + ht + 8 > innerHeight ? y - ht : y)}px`;
+    }
+
+    /** One menu, whatever it is about: each entry is [glyph, label, what it
+     *  does, { pick, danger }], and '-' is a rule between groups. An entry is
+     *  known by its pick, its glyph's name unless it says otherwise. */
+    fillMenu(entries, label) {
+      this.menu.replaceChildren();
+      this.menu.setAttribute('aria-label', label);
+      this.menuFns = new Map();
+      for (const entry of entries) {
+        if (!entry) continue;
+        if (entry === '-') {
+          if (this.menu.lastChild && this.menu.lastChild.localName !== 'hr') this.menu.append(h('hr'));
+          continue;
+        }
+        const [glyph, text, fn, { pick = glyph, danger = false } = {}] = entry;
+        const b = h('button');
+        b.type = 'button';
+        b.setAttribute('role', 'menuitem');
+        b.dataset.pick = pick;
+        if (danger) b.dataset.danger = '';
+        b.innerHTML = icon(glyph);
+        b.append(h('span', '', text));
+        this.menuFns.set(pick, fn);
+        this.menu.append(b);
+      }
+      while (this.menu.lastChild?.localName === 'hr') this.menu.lastChild.remove();
     }
 
     toggleMenu(anchor) {
       const opening = this.menu.hidden;
       this.hidePops();
       if (!opening) return;
-      this.menu.replaceChildren();
-      const item = (pick, glyph, label) => {
-        const b = h('button');
-        b.type = 'button';
-        b.setAttribute('role', 'menuitem');
-        b.dataset.pick = pick;
-        b.innerHTML = icon(glyph);
-        b.append(label);
-        this.menu.append(b);
-      };
-      item('link', 'link', 'Copy link');
-      if (window.marble?.drive?.move) item('move', 'move', 'Move or rename…');
-      item('drive', 'open', 'Show in Drive');
-      if (window.marble?.drive?.downloadHref) item('download', 'download', 'Download');
+      const drive = window.marble?.drive;
+      this.fillMenu([
+        ['link', 'Copy link', () => this.copyLink()],
+        drive?.move && ['move', 'Move or rename…', () => this.openMove()],
+        ['open', 'Show in Drive', () => { location.href = this.folderHref(folderOf(this.here)); }, { pick: 'drive' }],
+        drive?.downloadHref && ['download', 'Download', () => { location.href = drive.downloadHref(this.here); }],
+      ], 'This document');
       this.menu.hidden = false;
       anchor.setAttribute('aria-expanded', 'true');
       this.place(this.menu, anchor, 'left');
@@ -1512,20 +1649,7 @@
       this.pinsStale = false;
       if (!HOME_DOC || !window.marble?.href) { this.pins = []; return; }
       try {
-        const res = await fetch(window.marble.href(HOME_DOC), { cache: 'no-store' });
-        if (!res.ok) throw new Error(String(res.status));
-        const doc = new DOMParser().parseFromString(await res.text(), 'text/html');
-        this.pins = [...doc.querySelectorAll('#pins > .pin[data-path]')].map((li) => ({
-          path: li.dataset.path,
-          kind: li.dataset.kind === 'folder' ? 'folder' : 'doc',
-          label: [...li.querySelectorAll('[data-marble-editable]')].at(-1)?.textContent.trim() || nameOf(li.dataset.path),
-        }));
-        // A colour somebody gave a folder on the Drive, kept in the same file
-        // beside the pins; the longest path that holds a row wins.
-        this.tints = [...doc.querySelectorAll('#folder-tints > [data-path][data-tint]')]
-          .map((li) => ({ path: li.dataset.path, hex: tidyHex(li.dataset.tint) }))
-          .filter((t) => t.path && t.hex)
-          .sort((a, b) => b.path.length - a.path.length);
+        this.readPins(await this.homeDoc({ file: true }));
         this.pinsStamp = stamp;
       } catch {
         // Unread is not empty: the pins and tints already drawn stay, and the
@@ -1533,6 +1657,135 @@
         this.pins ??= [];
         this.tints ??= [];
         this.pinsStamp = null;
+      }
+    }
+
+    readPins(doc) {
+      this.pins = [...doc.querySelectorAll('#pins > .pin[data-path]')].map((li) => {
+        const label = [...li.querySelectorAll('[data-marble-editable]')].at(-1);
+        return {
+          path: li.dataset.path,
+          kind: li.dataset.kind === 'folder' ? 'folder' : 'doc',
+          label: label?.textContent.trim() || nameOf(li.dataset.path),
+        };
+      });
+      // A colour somebody gave a folder on the Drive, kept in the same file
+      // beside the pins; the longest path that holds a row wins.
+      this.tints = [...doc.querySelectorAll('#folder-tints > [data-path][data-tint]')]
+        .map((li) => ({ path: li.dataset.path, hex: tidyHex(li.dataset.tint) }))
+        .filter((t) => t.path && t.hex)
+        .sort((a, b) => b.path.length - a.path.length);
+    }
+
+    /** The Drive's document: this page, when you are on the Drive (only
+     *  what is drawn is current there), else its file as it is now. */
+    async homeDoc({ file = false } = {}) {
+      if (!file && HOME_DOC === this.here) return document;
+      const res = await fetch(window.marble.href(HOME_DOC), { cache: 'no-store' });
+      if (!res.ok) throw new Error(`The Drive did not open (${res.status})`);
+      return new DOMParser().parseFromString(await res.text(), 'text/html');
+    }
+
+    pinned(path) {
+      return this.pins?.find((p) => p.path === path) ?? null;
+    }
+
+    // ------------------------------------------------------------ pinning
+    //
+    // A pin is markup in the Drive's own file (templates/drive.mrbl, #pins),
+    // so pinning from here files the same ops the Drive files: an insert, a
+    // remove, a move, a label's text. Each is built against the file as it is
+    // at that moment, by its ids, so it lands on the pin it means even if the
+    // Drive is open somewhere else; that tab hears it like any other edit.
+    // On the Drive itself the page files it, so ⌘Z takes it back there.
+
+    async editPins(build) {
+      if (!HOME_DOC || !window.marble?.href) throw new Error('This drive has no Drive page to pin to');
+      const doc = await this.homeDoc();
+      const list = doc.querySelector('#pins');
+      const listId = list?.getAttribute('data-marble-id');
+      if (!listId) throw new Error('The Drive page has no Pinned list');
+      const pins = [...list.querySelectorAll(':scope > .pin[data-path]')];
+      const idOf = (el) => el?.getAttribute('data-marble-id') ?? null;
+      const ops = build({ doc, listId, pins, idOf, find: (path) => pins.find((li) => li.dataset.path === path) ?? null });
+      if (!ops?.length) return false;
+      const m = window.marble;
+      if (HOME_DOC === this.here && m?.apply && m?.op) {
+        const undo = [];
+        for (const op of ops) {
+          const inverse = m.invert?.(op);
+          m.apply(op);
+          if (inverse) undo.unshift(inverse);
+        }
+        m.record?.({ redo: ops, undo });
+        for (const op of ops) m.op(op, { immediate: true });
+        this.readPins(document);
+      } else {
+        const res = await fetch(`/ops?app=${encodeURIComponent(HOME_DOC)}&client=shell-${CLIENT}`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(ops),
+        });
+        if (!res.ok) {
+          const why = await res.json().catch(() => ({}));
+          throw new Error(why.error || `The Drive did not take the change (${res.status})`);
+        }
+        this.readPins(await this.homeDoc({ file: true }));
+      }
+      // The Drive's file changed under the stamp the tree last saw.
+      this.pinsStamp = null;
+      this.pinsSaid = JSON.stringify([this.pins, this.tints, this.realms]);
+      this.redraw('pinned');
+      this.remember();
+      return true;
+    }
+
+    /** Pin a document or folder, before the pin at `before` (last if none).
+     *  One already pinned is moved there instead. */
+    pinPath(path, kind, before = null) {
+      return this.editPins(({ doc, listId, pins, find, idOf }) => {
+        const at = before ? idOf(find(before)) : null;
+        const already = find(path);
+        if (already) {
+          // Already where it was asked to go: nothing to file.
+          if (before === path || idOf(pins[pins.indexOf(already) + 1]) === at) return [];
+          return [{ type: 'move', id: idOf(already), parentId: listId, beforeId: at }];
+        }
+        const taken = new Set([...doc.querySelectorAll('[data-marble-id]')].map(idOf));
+        const fresh = () => {
+          let id;
+          do id = Math.random().toString(36).slice(2, 10);
+          while (taken.has(id));
+          taken.add(id);
+          return id;
+        };
+        const html = `<li class="pin" data-marble-id="${fresh()}" data-path="${escapeHtml(path)}" data-kind="${kind === 'folder' ? 'folder' : 'doc'}" data-marble-removable>`
+          + `<span class="ico" data-marble-id="${fresh()}">${PIN_GLYPH[kind === 'folder' ? 'folder' : 'doc']}</span>`
+          + `<span data-marble-id="${fresh()}" data-marble-editable>${escapeHtml(nameOf(path))}</span></li>`;
+        return [{ type: 'insert', html, parentId: listId, beforeId: at }];
+      });
+    }
+
+    unpin(path) {
+      return this.editPins(({ find, idOf }) => {
+        const li = find(path);
+        return li ? [{ type: 'remove', id: idOf(li) }] : [];
+      });
+    }
+
+    relabelPin(path, label) {
+      return this.editPins(({ find, idOf }) => {
+        const span = [...(find(path)?.querySelectorAll('[data-marble-editable]') ?? [])].at(-1);
+        return span && span.textContent.trim() !== label ? [{ type: 'setText', id: idOf(span), text: label }] : [];
+      });
+    }
+
+    async togglePin(subject) {
+      const { path, kind } = subject;
+      if (this.pinned(path)) {
+        if (await this.unpin(path)) this.say(`Unpinned ${this.label(subject)}`);
+      } else if (await this.pinPath(path, kind)) {
+        this.say(`Pinned ${nameOf(path)}`);
       }
     }
 
@@ -1901,6 +2154,7 @@
     docRow(entry, { where = false } = {}) {
       const a = h('a', 'row');
       a.href = window.marble?.href?.(entry.path) ?? '#';
+      a.dataset.path = entry.path;
       a.append(h('span', '', entry.name));
       this.glyph(a, entry.path, 'doc');
       a.title = entry.path;
@@ -1981,11 +2235,17 @@
     /** One section, built fresh; null when it has nothing to say at all. */
     build(name) {
       if (name === 'pinned') {
-        if (!this.pins?.length) return null;
-        const ul = h('ul');
-        for (const pin of this.pins) {
+        // With somewhere to pin to, Pinned is there even empty: it is where a
+        // row is dragged to pin it, and a drop zone that only appeared for a
+        // drag would move the whole tree the moment you lifted something.
+        if (!this.pins?.length && !(HOME_DOC && window.marble?.drive)) return null;
+        const ul = h('ul', 'pins');
+        for (const pin of this.pins ?? []) {
           const a = h('a', 'row');
           a.href = pin.kind === 'folder' ? this.folderHref(pin.path) : window.marble?.href?.(pin.path) ?? '#';
+          a.dataset.path = pin.path;
+          a.dataset.kind = pin.kind;
+          a.dataset.pin = '';
           a.append(h('span', '', pin.label));
           this.glyph(a, pin.path, pin.kind);
           a.title = pin.path;
@@ -1994,6 +2254,7 @@
           if (pin.path === this.here) a.setAttribute('aria-current', 'page');
           ul.append(this.item(a));
         }
+        if (!this.pins?.length) ul.append(h('li', 'empty', 'Drag a page or folder here to pin it.'));
         return this.section(name, ul);
       }
       if (name === 'recent') {
@@ -2012,7 +2273,7 @@
      *  seconds should not rebuild the whole tree under your pointer. */
     redraw(name) {
       if (!this.tree || this.search.value.trim()) return;
-      if (this.dragging) { this.dirty = true; return; }
+      if (this.dragging || this.editing) { this.dirty = true; return; }
       const old = this.scroll.querySelector(`:scope > .sec[data-sec="${name}"]`);
       if (!old) { this.drawTree(); return; }
       const next = this.build(name);
@@ -2022,7 +2283,7 @@
 
     drawTree() {
       if (!this.tree) return;
-      if (this.dragging) { this.dirty = true; return; }
+      if (this.dragging || this.editing) { this.dirty = true; return; }
       const keep = this.scroll.scrollTop;
       const query = this.search.value.trim().toLowerCase();
       if (query) {
@@ -2139,6 +2400,463 @@
         addEventListener('pointerup', up);
         addEventListener('pointercancel', up);
       });
+    }
+
+    // ------------------------------------------------------------ a row's menu
+    //
+    // Right-click a row (or hold a finger on it, or press the menu key on it)
+    // and it offers what you would do with that page or folder: open it,
+    // pin it, rename or move it, copy it, throw it away. The same verbs the
+    // Drive's own menu has, so a thing is not done one way there and another
+    // here, and each goes through the same host verb (runtime/drive.js).
+
+    /** What a row is about: a path, a kind, and the row itself. A pin is
+     *  about its pin; an agent's row about its document. */
+    subjectOf(row) {
+      if (!row || !this.scroll.contains(row) || row.classList.contains('thread')) return null;
+      if (row.dataset.pin !== undefined) {
+        const pin = this.pinned(row.dataset.path);
+        return pin ? { path: pin.path, kind: pin.kind, pin, row } : null;
+      }
+      if (row.dataset.folder !== undefined) return { path: row.dataset.folder, kind: 'folder', row };
+      if (row.dataset.app) return { path: row.dataset.app, kind: 'doc', row };
+      if (row.dataset.path) return { path: row.dataset.path, kind: 'doc', row };
+      return null;
+    }
+
+    label(subject) {
+      return subject.pin?.label || nameOf(subject.path) || 'Drive';
+    }
+
+    hrefOf({ path, kind }) {
+      return kind === 'folder' ? this.folderHref(path) : window.marble?.href?.(path) ?? '#';
+    }
+
+    /** The row keeps its hover for as long as its menu or dialog is open. */
+    holdRow(row) {
+      this.popRow?.removeAttribute('data-menu');
+      this.popRow = row;
+      row.setAttribute('data-menu', '');
+    }
+
+    rowMenu(subject, at) {
+      const drive = window.marble?.drive;
+      const { path, kind, pin } = subject;
+      const folder = kind === 'folder';
+      const pinnable = Boolean(HOME_DOC && window.marble?.drive);
+      const pinnedNow = this.pinned(path);
+      const open = (href) => () => { location.href = href; };
+      const entries = pin
+        ? [
+          // A pin is a shortcut: what it offers is the shortcut's, and the
+          // page or folder it points at keeps its own menu in the tree.
+          folder ? ['open', 'Open in Drive', open(this.folderHref(path))] : ['open', 'Show in Drive', open(this.folderHref(folderOf(path)))],
+          ['tab', 'Open in new tab', () => window.open(this.hrefOf(subject), '_blank')],
+          '-',
+          ['edit', 'Rename pin', () => this.renamePin(subject), { pick: 'rename' }],
+          ['link', 'Copy link', () => this.copyText(new URL(this.hrefOf(subject), location.href).href, 'Link copied')],
+          ['path', 'Copy path', () => this.copyText(path, 'Path copied')],
+          '-',
+          ['pin', 'Unpin', () => this.togglePin(subject)],
+        ]
+        : [
+          folder ? ['open', 'Open in Drive', open(this.folderHref(path))] : ['open', 'Show in Drive', open(this.folderHref(folderOf(path)))],
+          ['tab', 'Open in new tab', () => window.open(this.hrefOf(subject), '_blank')],
+          '-',
+          pinnable && ['pin', pinnedNow ? 'Unpin' : 'Pin', () => this.togglePin(subject)],
+          drive?.move && ['edit', 'Rename or move…', () => this.openMove(subject), { pick: 'move' }],
+          !folder && drive?.create && ['copy', 'Make a copy', () => this.copyDoc(path)],
+          '-',
+          ['link', 'Copy link', () => this.copyText(new URL(this.hrefOf(subject), location.href).href, 'Link copied')],
+          ['path', 'Copy path', () => this.copyText(path, 'Path copied')],
+          !folder && drive?.downloadHref && ['download', 'Download', () => { location.href = drive.downloadHref(path); }],
+          '-',
+          drive?.remove && ['trash', 'Move to trash', () => this.trash(subject), { danger: true }],
+        ];
+      this.hidePops();
+      this.fillMenu(entries, this.label(subject));
+      this.menu.hidden = false;
+      this.holdRow(subject.row);
+      if (at) this.placeAt(this.menu, at.x, at.y);
+      else this.place(this.menu, subject.row, 'left');
+      this.menu.querySelector('button')?.focus({ preventScroll: true });
+    }
+
+    async copyText(text, said) {
+      try {
+        await navigator.clipboard.writeText(text);
+        this.say(said);
+      } catch {
+        this.say('Could not copy');
+      }
+    }
+
+    /** A copy beside the original, named the way the Drive names one. */
+    async copyDoc(path) {
+      let to = `${path} copy`;
+      for (let n = 2; this.taken(to); n += 1) to = `${path} copy ${n}`;
+      await window.marble.drive.create({ path: to, copy: path });
+      this.say(`Made ${nameOf(to)}`);
+      this.load();
+    }
+
+    /** To the trash, from where the Drive's Trash brings it back. Throwing
+     *  away the page you are on (or a folder it is in) takes you to the
+     *  folder it was in. */
+    async trash(subject) {
+      const { path } = subject;
+      const carries = path === this.here || this.here.startsWith(`${path}/`);
+      if (carries) await window.marble.flush?.();
+      await window.marble.drive.remove(path);
+      if (carries) {
+        location.href = this.folderHref(folderOf(path));
+        return;
+      }
+      this.say(`Moved ${nameOf(path)} to trash`);
+      this.load();
+    }
+
+    /** A pin's name, typed over in place: Enter or leaving keeps it, Escape
+     *  puts it back. Only the pin's label changes; the page keeps its name. */
+    renamePin(subject) {
+      const row = subject.row?.isConnected ? subject.row : this.scroll.querySelector(`.row[data-pin][data-path="${CSS.escape(subject.path)}"]`);
+      const span = row?.querySelector(':scope > span:not(.where)');
+      if (!span) return;
+      const was = subject.pin.label;
+      const input = h('input', 'rename');
+      input.value = was;
+      input.setAttribute('aria-label', 'Name of the pin');
+      input.spellcheck = false;
+      this.editing = true;
+      span.replaceWith(input);
+      input.focus();
+      input.select();
+      let done = false;
+      const finish = async (keep) => {
+        if (done) return;
+        done = true;
+        const label = input.value.trim().replace(/\s+/g, ' ');
+        this.editing = false;
+        if (keep && label && label !== was) span.textContent = label;
+        input.replaceWith(span);
+        row.focus({ preventScroll: true });
+        this.settle();
+        try {
+          if (keep && label && label !== was) await this.relabelPin(subject.path, label);
+        } catch (err) {
+          span.textContent = was;
+          this.say(err?.message || 'The pin kept its name');
+        }
+        if (this.dirty) { this.dirty = false; this.drawTree(); }
+      };
+      // Inside a link: a press in the box places the caret, it does not open.
+      input.addEventListener('click', (event) => { event.preventDefault(); event.stopPropagation(); });
+      input.addEventListener('keydown', (event) => {
+        event.stopPropagation();
+        if (event.key === 'Enter') { event.preventDefault(); finish(true); }
+        else if (event.key === 'Escape') { event.preventDefault(); finish(false); }
+      });
+      input.addEventListener('blur', () => finish(true));
+    }
+
+    bindRows() {
+      this.scroll.addEventListener('contextmenu', (event) => {
+        if (event.target.closest('input')) return;
+        const subject = this.subjectOf(event.target.closest('.row'));
+        if (!subject) return;
+        event.preventDefault();
+        this.rowMenu(subject, { x: event.clientX, y: event.clientY });
+      });
+
+      // A held finger opens the menu: a phone has no right button, and iOS
+      // fires no contextmenu at all. The press that opened it opens nothing.
+      let press = null;
+      const unpress = () => { clearTimeout(press?.timer); press = null; };
+      this.scroll.addEventListener('pointerdown', (event) => {
+        if (event.pointerType !== 'touch') return;
+        const subject = this.subjectOf(event.target.closest('.row'));
+        if (!subject) return;
+        unpress();
+        press = {
+          x: event.clientX,
+          y: event.clientY,
+          timer: setTimeout(() => {
+            press = null;
+            this.swallowClick = true;
+            this.rowMenu(subject, { x: event.clientX, y: event.clientY });
+          }, PRESS),
+        };
+      });
+      this.scroll.addEventListener('pointermove', (event) => {
+        if (press && Math.hypot(event.clientX - press.x, event.clientY - press.y) > 8) unpress();
+      });
+      for (const type of ['pointerup', 'pointercancel', 'scroll']) this.scroll.addEventListener(type, unpress, { passive: true });
+      // A drag or a held finger ends in a click on whatever it let go over;
+      // that click is the gesture's, not a press of the row.
+      this.scroll.addEventListener('click', (event) => {
+        if (!this.swallowClick) return;
+        this.swallowClick = false;
+        event.preventDefault();
+        event.stopImmediatePropagation();
+      }, true);
+
+      this.scroll.addEventListener('keydown', (event) => {
+        const row = event.target.closest?.('.row, .go');
+        const subject = this.subjectOf(row?.classList.contains('go') ? row.closest('.row') : row);
+        if (!subject) return;
+        // The menu key, or Shift+F10: the menu, under the row.
+        if (event.key === 'ContextMenu' || (event.shiftKey && event.key === 'F10')) {
+          event.preventDefault();
+          this.rowMenu(subject, null);
+          return;
+        }
+        // Alt and the arrows move a pin up and down Pinned, the way they move
+        // a section by its grip.
+        if (subject.pin && event.altKey && (event.key === 'ArrowUp' || event.key === 'ArrowDown')) {
+          event.preventDefault();
+          const paths = this.pins.map((p) => p.path);
+          const at = paths.indexOf(subject.path);
+          const to = at + (event.key === 'ArrowUp' ? -1 : 1);
+          if (to < 0 || to >= paths.length) return;
+          const before = event.key === 'ArrowUp' ? paths[to] : paths[to + 1] ?? null;
+          this.pinPath(subject.path, subject.kind, before)
+            .then(() => this.scroll.querySelector(`.row[data-pin][data-path="${CSS.escape(subject.path)}"]`)?.focus({ preventScroll: true }))
+            .catch((err) => this.say(err?.message || 'The pin stayed where it was'));
+        }
+      });
+
+      this.bindCarry();
+    }
+
+    // ------------------------------------------------------------ carrying a row
+    //
+    // Press a row and move, and you are carrying it. Into Pinned, it pins
+    // there, and a pin carried up or down Pinned moves; onto a folder in the
+    // tree, it moves into that folder, and onto the Drive heading, to the top.
+    // Pointer events rather than drag and drop, like the Drive's own drags:
+    // the drag image is a picture, and what you hold should be the row.
+    // A finger keeps the list's scroll; its hold opens the menu instead.
+
+    bindCarry() {
+      // An <a> would start the browser's own drag of its address.
+      this.scroll.addEventListener('dragstart', (event) => event.preventDefault());
+      this.scroll.addEventListener('pointerdown', (event) => {
+        if (event.button !== 0 || event.pointerType === 'touch' || this.carrying) return;
+        if (event.target.closest('.sec-grip, .fold, input')) return;
+        const subject = this.subjectOf(event.target.closest('.row'));
+        if (!subject) return;
+        const start = { x: event.clientX, y: event.clientY };
+        let held = null;
+        const move = (ev) => {
+          if (!held) {
+            if (Math.hypot(ev.clientX - start.x, ev.clientY - start.y) < 5) return;
+            held = this.lift(subject, start);
+          }
+          this.carry(held, ev);
+        };
+        const end = (ev) => {
+          removeEventListener('pointermove', move, true);
+          removeEventListener('pointerup', end, true);
+          removeEventListener('pointercancel', end, true);
+          removeEventListener('keydown', esc, true);
+          if (held) this.drop(held, ev?.type !== 'pointerup');
+        };
+        const esc = (ev) => {
+          if (ev.key !== 'Escape' || !held) return;
+          ev.preventDefault();
+          ev.stopPropagation();
+          end(null);
+        };
+        addEventListener('pointermove', move, true);
+        addEventListener('pointerup', end, true);
+        addEventListener('pointercancel', end, true);
+        addEventListener('keydown', esc, true);
+      });
+    }
+
+    lift(subject, start) {
+      this.hidePops();
+      const row = subject.row;
+      const ghost = h('div', 'ghost');
+      ghost.innerHTML = icon(subject.kind === 'folder' ? 'folder' : 'doc');
+      ghost.append(h('span', '', this.label(subject)));
+      this.shadowRoot.append(ghost);
+      const held = {
+        subject,
+        ghost,
+        slot: null,
+        target: null,
+        // A pin carried along Pinned is its own slot, and goes back if it
+        // is let go of anywhere else.
+        home: subject.pin ? { li: row.closest('li'), next: row.closest('li').nextElementSibling } : null,
+        x: start.x,
+        y: start.y,
+      };
+      row.setAttribute('data-carried', '');
+      this.carrying = held;
+      this.dragging = true;
+      this.setAttribute('data-carrying', '');
+      getSelection()?.removeAllRanges();
+      const style = document.createElement('style');
+      style.id = 'marble-shell-carrying';
+      style.setAttribute('data-marble-transient', '');
+      style.textContent = 'html, html * { cursor: grabbing !important; user-select: none !important; }';
+      document.getElementById(style.id)?.remove();
+      document.head.append(style);
+      this.scrollLoop(held);
+      return held;
+    }
+
+    /** The list scrolls itself while a carried row is held near its top or
+     *  foot, so Pinned is in reach from anywhere in a long tree. */
+    scrollLoop(held) {
+      const step = () => {
+        if (this.carrying !== held) return;
+        const r = this.scroll.getBoundingClientRect();
+        const near = 36;
+        const dy = held.y < r.top + near ? -Math.ceil((r.top + near - held.y) / 4)
+          : held.y > r.bottom - near ? Math.ceil((held.y - (r.bottom - near)) / 4)
+          : 0;
+        if (dy && held.x >= r.left && held.x <= r.right) {
+          this.scroll.scrollTop += dy;
+          this.aim(held);
+        }
+        requestAnimationFrame(step);
+      };
+      requestAnimationFrame(step);
+    }
+
+    carry(held, event) {
+      held.x = event.clientX;
+      held.y = event.clientY;
+      // One to one, and no transition: it is where the hand is, just below
+      // and beside the pointer, so the row it would land on stays readable.
+      held.ghost.style.transform = `translate(${held.x + 14}px, ${held.y + 12}px) scale(1.02)`;
+      this.aim(held);
+    }
+
+    /** What the carried row would land in, if let go here. */
+    aim(held) {
+      const { subject } = held;
+      const el = this.shadowRoot.elementFromPoint(held.x, held.y);
+      const inNav = el && this.nav.contains(el);
+      const pinsSec = inNav ? el.closest('.sec[data-sec="pinned"]') : null;
+      let target = null;
+      if (pinsSec && !pinsSec.hasAttribute('data-folded') && HOME_DOC) {
+        target = { type: 'pin', before: this.openRoom(held, pinsSec.querySelector(':scope > ul')) };
+      } else {
+        this.closeRoom(held);
+        const folderRow = inNav ? el.closest('.sec[data-sec="drive"] button.row[data-folder]') : null;
+        const driveHead = inNav ? el.closest('.sec[data-sec="drive"] > .sec-h') : null;
+        const into = folderRow ? folderRow.dataset.folder : driveHead ? '' : null;
+        const fits = into !== null && into !== folderOf(subject.path) && !subject.pin
+          && !(subject.kind === 'folder' && (into === subject.path || into.startsWith(`${subject.path}/`)));
+        if (fits) target = { type: 'move', folder: into, el: folderRow ?? driveHead };
+      }
+      if (held.target?.el !== target?.el) {
+        held.target?.el?.removeAttribute('data-drop');
+        target?.el?.setAttribute('data-drop', '');
+      }
+      held.target = target;
+    }
+
+    /** The room opens in Pinned where the carried row would go: a slot in
+     *  the list, the others sliding to make it. Answers the pin it would go
+     *  before, or null for last. */
+    openRoom(held, ul) {
+      let slot = held.slot;
+      if (!slot) {
+        if (held.home) {
+          slot = held.home.li;
+        } else {
+          slot = h('li', 'slot');
+          const row = h('div', 'row');
+          row.innerHTML = icon(held.subject.kind === 'folder' ? 'folder' : 'doc');
+          row.append(h('span', '', nameOf(held.subject.path)));
+          slot.append(row);
+        }
+        held.slot = slot;
+      }
+      const pins = [...ul.querySelectorAll(':scope > li:not(.empty)')].filter((li) => li !== slot);
+      const next = pins.find((li) => {
+        const r = li.getBoundingClientRect();
+        return held.y < r.top + r.height / 2;
+      }) ?? null;
+      const before = next ?? ul.querySelector(':scope > li.empty');
+      if (slot.parentNode !== ul || slot.nextElementSibling !== before) this.slide(ul, () => ul.insertBefore(slot, before));
+      return next?.querySelector('.row')?.dataset.path ?? null;
+    }
+
+    closeRoom(held) {
+      const slot = held.slot;
+      if (!slot) return;
+      held.slot = null;
+      if (held.home) {
+        // A pin goes back to where it was in the list.
+        const { li, next } = held.home;
+        if (li.nextElementSibling !== next) this.slide(li.parentNode, () => li.parentNode.insertBefore(li, next?.isConnected ? next : null));
+      } else if (slot.isConnected) {
+        const ul = slot.parentNode;
+        this.slide(ul, () => slot.remove());
+      }
+    }
+
+    /** Moves rows in a list and lets the others slide to their new places
+     *  (FLIP), as the sections do. */
+    slide(ul, change) {
+      const rows = [...ul.children];
+      const before = new Map(rows.map((el) => [el, el.getBoundingClientRect().top]));
+      change();
+      if (this.reduced.matches) return;
+      for (const el of rows) {
+        if (!el.isConnected || el.classList.contains('slot')) continue;
+        const dy = before.get(el) - el.getBoundingClientRect().top;
+        if (dy) el.animate([{ transform: `translateY(${dy}px)` }, { transform: 'none' }], { duration: 180, easing: EASE });
+      }
+    }
+
+    async drop(held, cancelled) {
+      const { subject, ghost } = held;
+      const target = cancelled ? null : held.target;
+      this.carrying = null;
+      this.removeAttribute('data-carrying');
+      document.getElementById('marble-shell-carrying')?.remove();
+      target?.el?.removeAttribute('data-drop');
+      subject.row.removeAttribute('data-carried');
+      this.swallowClick = !cancelled;
+      setTimeout(() => { this.swallowClick = false; }, 0);
+      // It springs to where it is going: the slot, the folder, or home.
+      const to = (target?.type === 'pin' ? held.slot : target?.el ?? (subject.row.isConnected ? subject.row : null))?.getBoundingClientRect();
+      if (to && !this.reduced.matches) {
+        const from = ghost.style.transform;
+        ghost.animate([{ transform: from }, { transform: `translate(${to.left}px, ${to.top}px) scale(${target?.type === 'move' ? 0.6 : 1})`, opacity: target?.type === 'move' ? 0 : 1 }],
+          { duration: 220, easing: EASE }).finished.then(() => ghost.remove(), () => ghost.remove());
+      } else {
+        ghost.remove();
+      }
+      let failed = null;
+      try {
+        if (target?.type === 'pin') {
+          const was = this.pinned(subject.path);
+          const filed = await this.pinPath(subject.path, subject.kind, target.before);
+          if (filed && !was) this.say(`Pinned ${nameOf(subject.path)}`);
+        } else if (target?.type === 'move') {
+          const to = [target.folder, nameOf(subject.path)].filter(Boolean).join('/');
+          if (this.taken(to)) throw new Error(`Something called ${nameOf(subject.path)} is already in ${nameOf(target.folder) || 'Drive'}`);
+          await this.moveItem(subject.path, to);
+        }
+      } catch (err) {
+        failed = err;
+      }
+      // Whatever the file now says is what is drawn: a slot that was not
+      // filed, or a pin put back, goes with the redraw.
+      if (held.slot && !held.home && held.slot.isConnected && (failed || target?.type !== 'pin')) held.slot.remove();
+      if (held.home && (failed || !target)) this.closeRoom(held);
+      this.dragging = false;
+      this.dirty = false;
+      this.drawTree();
+      this.settle();
+      if (failed) this.say(failed.message || 'That did not move');
     }
   }
 
