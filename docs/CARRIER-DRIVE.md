@@ -39,7 +39,7 @@ The `k-tree` card is explicit that this is the shape of the change:
 | `marble.drive.weigh(path)` | bytes, nodes, and how much of it is base64 |
 | `marble.drive.downloadHref(path)` | one self-contained file, blobs inlined |
 | `marble.drive.fileHref(path)` | where a `kind: 'file'` entry lives — the one address in the drive that is not a document's, so its path carries its extension |
-| `marble.drive.git.status(path)` / `.publish(path)` | a folder that is its own git repository: its branch, what changed, what is unpushed; and Publish, which commits what changed and pushes it. Only where the drive has `MARBLE_DRIVE_GIT` on, and 404 everywhere else |
+| `marble.drive.git.status(path, {fetch})` / `.publish(path, {message})` | a folder that is its own git repository: branch, upstream, what changed and how, the last commit and its GitHub link, and with `fetch` what GitHub has that it lacks; Publish commits (with `message`, or the automatic one) and pushes. Only where the drive has `MARBLE_DRIVE_GIT` on, and 404 everywhere else. A page opens the Publish popover with `dispatchEvent(new CustomEvent('marble:publish', {detail: {path}}))`, naming no route |
 | `marble.drive.on(event, fn)` | `created`, `changed`, `moved`, `trashed`, `restored`, `removed`, or `'*'` |
 | `marble.drive.resolveBlobs(root)` | resolve `data-marble-blob` to a source. Registered already; exposed for a document that inserts markup itself |
 | `marble.drive.client` | this page's id, so the Drive can ignore its own echoes |
