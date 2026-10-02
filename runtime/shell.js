@@ -148,6 +148,20 @@
   // How long a finger rests on a row before its menu opens.
   const PRESS = 500;
   const icon = (name) => `<svg class="i" viewBox="0 0 16 16" aria-hidden="true">${PATHS[name]}</svg>`;
+  // GitHub's own mark (Octicons mark-github), filled: a brand is drawn the way
+  // the brand draws it, as the agent chips do theirs (runtime/agent-ui.js).
+  const GITHUB_PATH = 'M8 0c4.42 0 8 3.58 8 8a8.013 8.013 0 0 1-5.45 7.59c-.4.08-.55-.17-.55-.38 0-.27.01-1.13.01-2.2 0-.75-.25-1.23-.54-1.48 1.78-.2 3.65-.88 3.65-3.95 0-.88-.31-1.59-.82-2.15.08-.2.36-1.02-.08-2.12 0 0-.67-.22-2.2.82-.64-.18-1.32-.27-2-.27-.68 0-1.36.09-2 .27-1.53-1.03-2.2-.82-2.2-.82-.44 1.1-.16 1.92-.08 2.12-.51.56-.82 1.28-.82 2.15 0 3.06 1.86 3.75 3.64 3.95-.23.2-.44.55-.51 1.07-.46.21-1.61.55-2.33-.66-.15-.24-.6-.83-1.23-.82-.67.01-.27.38.01.53.34.19.73.9.82 1.13.16.45.68 1.31 2.69.94 0 .67.01 1.3.01 1.49 0 .21-.15.45-.55.38A7.995 7.995 0 0 1 0 8c0-4.42 3.58-8 8-8Z';
+  const github = (cls, label = '') =>
+    `<svg class="gh ${cls}" viewBox="0 0 16 16" ${label ? `role="img" aria-label="${label}"` : 'aria-hidden="true"'}><path fill="currentColor" d="${GITHUB_PATH}"/></svg>`;
+  /** When a commit was made, the way a person says it: "just now", "at 3:42 PM"
+   *  today, "on Sep 28" this year, with the year before that. */
+  const whenOf = (iso) => {
+    const at = new Date(iso);
+    const now = new Date();
+    if (now - at < 60_000) return 'just now';
+    if (at.toDateString() === now.toDateString()) return `at ${at.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}`;
+    return `on ${at.toLocaleDateString([], { month: 'short', day: 'numeric', ...(at.getFullYear() === now.getFullYear() ? {} : { year: 'numeric' }) })}`;
+  };
   // What each share link lets its holder do (server/share-policy.js says the
   // same thing as rules). The names are the ones the owner chose.
   const SHARE_LEVELS = [
@@ -435,6 +449,49 @@
     .moving .cancel:hover { background: var(--paper-2); color: var(--ink); }
     .moving .ok { background: var(--ink); color: var(--paper); }
     .moving .ok:disabled { opacity: .4; cursor: default; }
+    /* ── A folder that is its own git repository (server/git.js) ── */
+    .gh { width: 14px; height: 14px; flex: none; stroke: none; }
+    /* Publish on the bar is words on the bar, as every control there is but
+       Share: the filled pill is spent once. A dot says there is something to
+       publish; the popover says what. */
+    .ib.git { width: auto; padding: 0 9px; gap: 6px; display: flex; align-items: center; font-weight: 600; font-size: 12.5px; position: relative; }
+    .ib.git[hidden] { display: none; }
+    .ib.git[aria-expanded="true"] { background: var(--paper-2); color: var(--ink); }
+    .ib.git[data-dirty]::after { content: ''; position: absolute; top: 5px; right: 3px; width: 6px; height: 6px; border-radius: 50%; background: var(--accent); }
+    .ib.git[data-busy] .gh { animation: gh-busy 900ms ease-in-out infinite alternate; }
+    @keyframes gh-busy { to { opacity: .3; } }
+    @media (prefers-reduced-motion: reduce) { .ib.git[data-busy] .gh { animation: none; } }
+    /* In the tree, the mark is on the right of a repository's row while the
+       row is under the pointer, focused or holding its menu; on a touch
+       screen, where nothing is under a pointer, always. */
+    .row .mark { margin-left: auto; color: var(--faint); opacity: 0; transition: opacity 120ms var(--settle); }
+    .row:is(:hover, :focus-visible, [data-menu]) .mark { opacity: 1; }
+    @media (hover: none) { .row .mark { opacity: 1; } }
+    .publishing { width: min(340px, calc(100vw - 16px)); padding: 12px; display: flex; flex-direction: column; gap: 8px; }
+    .publishing h3 { margin: 0; font-size: 13.5px; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .publishing p { margin: 0; }
+    .publishing .where { display: flex; gap: 8px; align-items: baseline; color: var(--muted); font-size: 12px; min-width: 0; }
+    .publishing .branch { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
+    .publishing .web { margin-left: auto; color: var(--muted); text-decoration: none; white-space: nowrap; }
+    .publishing .web:hover { color: var(--ink); text-decoration: underline; }
+    .publishing :is(.web, .result, .last)[hidden], .publishing .changes:empty { display: none; }
+    .publishing .state { color: var(--ink); text-wrap: pretty; }
+    .publishing .state .quiet { color: var(--muted); }
+    .publishing .changes { list-style: none; margin: 0; padding: 4px 0; border-top: 1px solid var(--line); border-bottom: 1px solid var(--line); max-height: 180px; overflow: auto; }
+    .publishing .changes li { display: flex; gap: 8px; padding: 3px 0; font-size: 12.5px; min-width: 0; }
+    .publishing .changes .file { color: var(--ink); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
+    .publishing .changes .kind { margin-left: auto; color: var(--muted); flex: none; }
+    .publishing .changes .more { color: var(--muted); }
+    .publishing .msg { height: 30px; border: 1px solid var(--line); border-radius: 8px; padding: 0 8px; font: inherit; color: var(--ink); background: var(--paper); min-width: 0; }
+    .publishing .msg:focus { outline: 2px solid var(--accent); outline-offset: -1px; }
+    .publishing .go { display: flex; justify-content: flex-end; }
+    .publishing .publish { height: 30px; padding: 0 14px; border-radius: 8px; font-weight: 600; font-size: 12.5px; background: var(--ink); color: var(--paper); }
+    .publishing .publish:active { background: var(--accent-ink); }
+    .publishing .publish:disabled { opacity: .4; cursor: default; }
+    .publishing .result { font-size: 12.5px; color: var(--ink); }
+    .publishing .result[data-bad] { color: var(--danger, #b4533e); }
+    .publishing :is(.result, .last) a { color: inherit; }
+    .publishing .last { color: var(--faint); font-size: 12px; }
     .toast { position: fixed; left: 50%; bottom: 24px; transform: translate(-50%, 8px); opacity: 0; pointer-events: none; background: var(--ink); color: var(--paper);
       border-radius: 999px; padding: 7px 14px; font-size: 12.5px; transition: opacity 160ms var(--settle), transform 160ms var(--settle); }
     .toast[data-on] { opacity: 1; transform: translate(-50%, 0); }
@@ -494,6 +551,7 @@
           <nav class="crumbs" aria-label="Where you are"></nav>
           <span class="spacer"></span>
           <button type="button" class="ib" data-act="describe" aria-pressed="false" aria-label="Describe a change (⌘⇧D)" title="Describe a change (⌘⇧D)" hidden>${icon('describe')}</button>
+          <button type="button" class="ib git" data-act="publish" aria-haspopup="dialog" aria-expanded="false" title="Publish this folder to GitHub" hidden>${github('')}<span>Publish</span></button>
           <button type="button" class="share" data-act="share" aria-haspopup="dialog" aria-expanded="false">${icon('share')}Share</button>
           <span class="vr"></span>
           <button type="button" class="ib" data-act="chat" aria-pressed="true" aria-label="Pin the chat" title="Pin the chat (⌘⇧J)" aria-keyshortcuts="Meta+Shift+J" hidden>${icon('chat')}</button>
@@ -522,6 +580,16 @@
             <span class="lv-says">Asks for your drive’s passphrase.</span>
           </div>
         </div>
+        <div class="pop publishing" role="dialog" aria-label="Publish" hidden>
+          <h3></h3>
+          <p class="where"><span class="branch"></span><a class="web" target="_blank" rel="noopener" hidden></a></p>
+          <p class="state" role="status"></p>
+          <ul class="changes"></ul>
+          <input class="msg" aria-label="Message" maxlength="500" autocomplete="off">
+          <div class="go"><button type="button" class="publish" disabled>Publish</button></div>
+          <p class="result" hidden></p>
+          <p class="last" hidden></p>
+        </div>
         <div class="pop moving" role="dialog" aria-label="Move or rename" hidden>
           <h3>Move or rename</h3>
           <input class="name" aria-label="Name" spellcheck="false" autocomplete="off">
@@ -538,6 +606,7 @@
       this.search = this.$('.nav .search input');
       this.menu = this.$('.menu');
       this.sharing = this.$('.sharing');
+      this.publishing = this.$('.publishing');
       this.moving = this.$('.moving');
       this.phone = matchMedia(PHONE);
       // A pointer that can hover is what reaching for a side is for; on a
@@ -642,6 +711,7 @@
         else if (act === 'chat') this.pin('chat', !this.state.pinChat);
         else if (act === 'close') this.setOpen(false);
         else if (act === 'share') this.toggleSharing();
+        else if (act === 'publish') this.togglePublishing(this.repoOf(this.here));
         else if (act === 'describe') dispatchEvent(new CustomEvent('marble-marks:toggle'));
         else if (act === 'doc') this.toggleMenu(event.target.closest('[data-act]'));
       });
@@ -651,6 +721,18 @@
         if (!row) return;
         if (event.target.closest('.lv-copy')) this.copyShare(row);
         else if (event.target.closest('.lv-off')) this.turnOff(row, event.target.closest('.lv-off'));
+      });
+      this.publishing.querySelector('.publish').addEventListener('click', () => this.publishNow());
+      this.publishing.querySelector('.msg').addEventListener('keydown', (event) => {
+        if (event.key !== 'Enter' || event.isComposing) return;
+        event.preventDefault();
+        this.publishNow();
+      });
+      // A document asks for the popover by name and path, never by route:
+      // the Drive page's toolbar does, inside a repository (templates/drive.mrbl).
+      addEventListener('marble:publish', (event) => {
+        const path = event.detail?.path;
+        if (GIT && window.marble?.drive?.git && typeof path === 'string' && path) this.togglePublishing(path);
       });
       this.bindMove();
       this.arrive();
@@ -679,7 +761,7 @@
         buttons[next].focus();
       });
       this.shadowRoot.addEventListener('pointerdown', (event) => {
-        if (!event.composedPath().some((node) => node === this.menu || node === this.sharing || node === this.moving || node?.dataset?.act === 'share' || node?.dataset?.act === 'doc')) this.hidePops();
+        if (!event.composedPath().some((node) => node === this.menu || node === this.sharing || node === this.publishing || node === this.moving || node?.dataset?.act === 'share' || node?.dataset?.act === 'publish' || node?.dataset?.act === 'doc')) this.hidePops();
       });
       this.onOutside = (event) => {
         if (!event.composedPath().includes(this)) this.hidePops();
@@ -1296,7 +1378,7 @@
         event.preventDefault();
         event.stopPropagation();
         this.pin('nav', !this.state.pinNav);
-      } else if (event.key === 'Escape' && (!this.menu.hidden || !this.sharing.hidden || !this.moving.hidden)) {
+      } else if (event.key === 'Escape' && (!this.menu.hidden || !this.sharing.hidden || !this.publishing.hidden || !this.moving.hidden)) {
         event.stopPropagation();
         this.hidePops();
       }
@@ -1371,9 +1453,11 @@
       const held = this.popRow;
       this.menu.hidden = true;
       this.sharing.hidden = true;
+      this.publishing.hidden = true;
       this.moving.hidden = true;
       this.$('.crumbs .here')?.setAttribute('aria-expanded', 'false');
       this.$('[data-act="share"]').setAttribute('aria-expanded', 'false');
+      this.$('[data-act="publish"]').setAttribute('aria-expanded', 'false');
       this.popRow?.removeAttribute('data-menu');
       this.popRow = null;
       // A tree on hover that stayed out for its menu may go now.
@@ -1464,6 +1548,198 @@
       this.place(this.sharing, button, 'right');
       this.sharing.querySelector('.lv-copy')?.focus({ preventScroll: true });
       this.loadShares();
+    }
+
+    // ------------------------------------------------------------ publishing
+
+    /** The repository a path is in: the nearest folder at or above it that
+     *  has its own `.git`, read off the tree. Null outside one, or before the
+     *  tree has come. */
+    repoOf(path) {
+      if (!this.tree || !path) return null;
+      let node = this.tree;
+      let found = null;
+      for (const part of String(path).split('/')) {
+        node = (node.children ?? []).find((child) => child.kind === 'folder' && child.name === part);
+        if (!node) break;
+        if (node.repo) found = node.path;
+      }
+      return found;
+    }
+
+    /** The bar's Publish: there inside a repository, with a dot while
+     *  something is unpublished. Asked again a moment after the drive changes,
+     *  not on every keystroke's save. */
+    drawGit() {
+      const button = this.$('[data-act="publish"]');
+      const repo = GIT && window.marble?.drive?.git ? this.repoOf(this.here) : null;
+      button.hidden = !repo;
+      if (!repo) {
+        this.gitBar = null;
+        return;
+      }
+      const fresh = repo !== this.gitBar;
+      this.gitBar = repo;
+      button.title = `Publish ${nameOf(repo)} to GitHub`;
+      clearTimeout(this.gitDotTimer);
+      this.gitDotTimer = setTimeout(() => this.refreshGitDot(repo), fresh ? 0 : 1500);
+    }
+
+    async refreshGitDot(repo) {
+      try {
+        const status = await window.marble.drive.git.status(repo);
+        if (repo !== this.gitBar) return;
+        this.$('[data-act="publish"]').toggleAttribute('data-dirty', Boolean(status.repo && (status.changed > 0 || status.ahead > 0)));
+      } catch {
+        // No dot is the honest answer when the drive cannot be asked.
+      }
+    }
+
+    /** One popover for every way in: the bar, a folder's menu in the tree,
+     *  and a document asking with `marble:publish`. It hangs from the bar's
+     *  button when that button is this repository's, else from what opened it. */
+    togglePublishing(path, anchor = null) {
+      const opening = this.publishing.hidden || path !== this.gitPath;
+      this.hidePops();
+      if (!opening || !path) return;
+      this.gitPath = path;
+      const pop = this.publishing;
+      pop.querySelector('h3').textContent = `Publish ${nameOf(path)}`;
+      pop.querySelector('.msg').value = '';
+      pop.querySelector('.result').hidden = true;
+      this.drawPublishing(null);
+      pop.hidden = false;
+      const button = this.$('[data-act="publish"]');
+      if (!button.hidden && this.hasAttribute('data-open') && path === this.gitBar) {
+        button.setAttribute('aria-expanded', 'true');
+        this.place(pop, button, 'right');
+      } else if (anchor?.isConnected) {
+        this.place(pop, anchor, 'left');
+      } else {
+        pop.style.left = '';
+        pop.style.right = '16px';
+        pop.style.top = `${BAR + 8}px`;
+      }
+      pop.querySelector('.msg').focus({ preventScroll: true });
+      this.loadPublishing(path);
+    }
+
+    async loadPublishing(path) {
+      const asked = (this.gitAsked ?? 0) + 1;
+      this.gitAsked = asked;
+      try {
+        const status = await window.marble.drive.git.status(path, { fetch: true });
+        if (asked === this.gitAsked && path === this.gitPath) this.drawPublishing(status);
+      } catch (err) {
+        if (asked === this.gitAsked) this.drawPublishing({ error: err?.message || 'Could not read this repository' });
+      }
+    }
+
+    /** The popover as the repository is. `null` while it is being asked. */
+    drawPublishing(status) {
+      const pop = this.publishing;
+      const $ = (selector) => pop.querySelector(selector);
+      const state = $('.state');
+      const list = $('.changes');
+      const go = $('.publish');
+      const web = $('.web');
+      const last = $('.last');
+      list.replaceChildren();
+      $('.msg').placeholder = 'Message (optional)';
+      if (!status || status.error || !status.repo) {
+        $('.branch').textContent = '';
+        web.hidden = true;
+        last.hidden = true;
+        go.disabled = true;
+        state.textContent = !status ? 'Checking GitHub…'
+          : status.error ? status.error
+          : 'This folder is no longer a git repository.';
+        return;
+      }
+      $('.branch').textContent = status.upstream ? `${status.branch} → ${status.upstream}` : (status.branch ?? 'not on a branch');
+      web.hidden = !status.web;
+      if (status.web) {
+        web.href = status.web;
+        web.textContent = `${status.web.replace(/^https:\/\//, '')} ↗`;
+      }
+      const files = status.files ?? [];
+      state.textContent = status.behind > 0 ? 'GitHub has changes this folder doesn’t. Pull them in a terminal first.'
+        : files.length ? `${files.length} ${files.length === 1 ? 'change' : 'changes'} not published`
+        : status.ahead > 0 ? `${status.ahead} ${status.ahead === 1 ? 'commit' : 'commits'} waiting to push`
+        : !status.upstream ? 'This branch has no upstream yet. Push it once with git push -u.'
+        : 'Everything is published';
+      if (status.fetched === false) state.append(h('span', 'quiet', ' Couldn’t check GitHub.'));
+      const KIND = { new: 'New', changed: 'Changed', deleted: 'Deleted' };
+      for (const file of files.slice(0, 8)) {
+        const li = h('li');
+        li.title = file.path;
+        li.append(h('span', 'file', file.path), h('span', 'kind', KIND[file.change] ?? 'Changed'));
+        list.append(li);
+      }
+      if (files.length > 8) list.append(h('li', 'more', `and ${files.length - 8} more`));
+      if (status.message) $('.msg').placeholder = status.message;
+      go.disabled = Boolean(this.gitBusy) || !status.upstream || status.behind > 0 || (!files.length && !(status.ahead > 0));
+      last.hidden = !status.last;
+      if (status.last) last.replaceChildren(`${status.ahead > 0 || files.length ? 'Last commit' : 'Last published'} ${whenOf(status.last.when)} · `, this.commitLink(status.last));
+    }
+
+    commitLink(last) {
+      if (!last) return '';
+      if (!last.url) return h('span', '', last.short);
+      const a = h('a', '', `${last.short} ↗`);
+      a.href = last.url;
+      a.target = '_blank';
+      a.rel = 'noopener';
+      return a;
+    }
+
+    /** Publish, and say so where it was pressed: the button while it runs, the
+     *  commit it made under it after, and the bar's label for a moment. If the
+     *  popover was closed meanwhile, the answer comes as a toast. */
+    async publishNow() {
+      const path = this.gitPath;
+      const pop = this.publishing;
+      const go = pop.querySelector('.publish');
+      const result = pop.querySelector('.result');
+      const bar = this.$('[data-act="publish"]');
+      const label = bar.querySelector('span');
+      if (!path || this.gitBusy || go.disabled) return;
+      this.gitBusy = true;
+      go.disabled = true;
+      go.textContent = 'Publishing…';
+      result.hidden = true;
+      result.removeAttribute('data-bad');
+      if (path === this.gitBar) {
+        bar.setAttribute('data-busy', '');
+        label.textContent = 'Publishing…';
+      }
+      try {
+        await window.marble.flush?.();
+        const done = await window.marble.drive.git.publish(path, { message: pop.querySelector('.msg').value });
+        const said = done.nothing ? 'Nothing to publish' : `Published to ${done.branch} · `;
+        result.replaceChildren(said, ...(done.nothing ? [] : [this.commitLink(done.last)]));
+        result.hidden = false;
+        pop.querySelector('.msg').value = '';
+        if (pop.hidden) this.say(done.nothing ? 'Nothing to publish' : `Published ${nameOf(path)} to ${done.branch}`, 3000);
+        if (path === this.gitBar) {
+          label.textContent = done.nothing ? 'Publish' : 'Published';
+          clearTimeout(this.gitLabelTimer);
+          this.gitLabelTimer = setTimeout(() => { label.textContent = 'Publish'; }, 3000);
+          this.refreshGitDot(path);
+        }
+      } catch (err) {
+        result.textContent = err?.message || 'Could not publish';
+        result.setAttribute('data-bad', '');
+        result.hidden = false;
+        label.textContent = 'Publish';
+        if (pop.hidden) this.say(err?.message || 'Could not publish', 8000);
+      } finally {
+        this.gitBusy = false;
+        go.textContent = 'Publish';
+        bar.removeAttribute('data-busy');
+        go.disabled = false;
+        if (!pop.hidden && path === this.gitPath) this.loadPublishing(path);
+      }
     }
 
     // ------------------------------------------------------------ share links
@@ -1595,6 +1871,7 @@
       const drive = window.marble?.drive;
       if (!drive) return;
       if (!this.tree) this.restore();
+      this.drawGit();
       if (!this.offDrive && drive.on) {
         let queued = 0;
         this.offDrive = drive.on('*', (change) => {
@@ -1638,6 +1915,7 @@
       const pinsSaid = JSON.stringify([this.pins, this.tints, this.realms]);
       const same = said === this.treeSaid && pinsSaid === this.pinsSaid;
       this.tree = tree;
+      this.drawGit();
       this.byPath = new Map(this.docs().map((d) => [d.path, d]));
       this.treeSaid = said;
       this.pinsSaid = pinsSaid;
@@ -2212,6 +2490,7 @@
           b.setAttribute('aria-expanded', String(open));
           b.append(h('span', '', child.name));
           this.glyph(b, child.path, 'folder');
+          if (GIT && child.repo) b.insertAdjacentHTML('beforeend', github('mark', 'Git repository'));
           b.insertAdjacentHTML('afterbegin', `<svg class="i car" viewBox="0 0 16 16" aria-hidden="true">${PATHS.chev}</svg>`);
           li.append(b);
           if (open) li.append(this.branch(child));
@@ -2449,13 +2728,9 @@
       const pinnable = Boolean(HOME_DOC && window.marble?.drive);
       const pinnedNow = this.pinned(path);
       const open = (href) => () => { location.href = href; };
-      // Publish is offered on a folder once the host has said it is a
-      // repository. Asked the first time its menu opens, and the menu is
-      // filled again with the answer if it is still open.
-      this.repos ??= new Map();
-      const publishable = GIT && folder && drive?.git;
-      const publish = publishable && this.repos.get(path) === true
-        && ['share', 'Publish', () => this.publish(path), { pick: 'publish' }];
+      // A repository's folder offers Publish, which opens its popover.
+      const publish = GIT && folder && drive?.git && this.repoOf(path) === path
+        && ['share', 'Publish…', () => this.togglePublishing(path, subject.row), { pick: 'publish' }];
       const entries = pin
         ? [
           // A pin is a shortcut: what it offers is the shortcut's, and the
@@ -2493,30 +2768,6 @@
       if (at) this.placeAt(this.menu, at.x, at.y);
       else this.place(this.menu, subject.row, 'left');
       this.menu.querySelector('button')?.focus({ preventScroll: true });
-      if (publishable && !this.repos.has(path)) {
-        drive.git.status(path).then((answer) => {
-          this.repos.set(path, answer.repo === true);
-          if (answer.repo && !this.menu.hidden && this.popRow === subject.row) this.rowMenu(subject, at);
-        }, () => {});
-      }
-    }
-
-    /** Commit and push a folder that is its own repository (server/git.js).
-     *  The page this is on may still have edits on their way to disk, and the
-     *  commit has to have them, so they are sent first. A refusal stays up
-     *  long enough to read, because it says what to do next. */
-    async publish(path) {
-      this.say('Publishing…', 60_000);
-      try {
-        await window.marble.flush?.();
-        const done = await window.marble.drive.git.publish(path);
-        const count = done.files.length;
-        this.say(done.nothing
-          ? 'Nothing to publish'
-          : count ? `Published ${count} ${count === 1 ? 'file' : 'files'} to ${done.branch}` : `Published to ${done.branch}`, 3000);
-      } catch (err) {
-        this.say(err?.message || 'Could not publish', 8000);
-      }
     }
 
     async copyText(text, said) {
