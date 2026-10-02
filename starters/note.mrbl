@@ -50,12 +50,25 @@ __ICON__
     /* The chrome is one sans at 14/1.5. The notes read in a serif, because
        that is what a document does. No webfont is named, and no brand face
        either: the first name here is whatever the machine calls its own, so a
-       note looks like it belongs to the person rather than to a company. */
-    --ui: "Google Sans", Roboto, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
-    --serif: ui-serif, "New York", "Iowan Old Style", "Palatino Linotype", Palatino, Georgia, serif;
+       note looks like it belongs to the person rather than to a company.
+       "Note arrows" is not a face: it is the nine arrows typing draws, and
+       nothing else (see the rules after this block). */
+    --ui: "Note arrows", "Google Sans", Roboto, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    --serif: "Note arrows", ui-serif, "New York", "Iowan Old Style", "Palatino Linotype", Palatino, Georgia, serif;
     --rail: 15.5rem;
     --measure: 34rem;
   }
+
+  /* The arrows typing makes (-> is →, --> is ⟶). No system sans draws the long
+     ones, so the browser borrows them from a symbol font, thin and sitting low,
+     and ↔ ⇒ come out a size smaller than the → beside them. These nine are
+     drawn to sit on the middle of the lowercase at the text's own stroke, a
+     regular and a bold, and unicode-range keeps them off every other
+     character. Made by tools/note-arrows.py in the repo. */
+  @font-face { font-family: "Note arrows"; font-weight: 100 549; unicode-range: U+2190, U+2192, U+2194, U+21D0, U+21D2, U+21D4, U+27F5-27F7;
+    src: url(data:font/woff2;base64,d09GMgABAAAAAAJgAAoAAAAABUQAAAIXAAEAAAAAAAAAAAAAAAAAAAAAAAAAAAAABmAAagqEJIMSATYCJAMoCxYABCAFbAd+G+cDAB6F6baTjRiMkcjozfcy/0nOxAP/x77ui4kOkArLBhqdARwajxYb4NbVb9tgexb//9zvvfdnHU+giKSKXoAM9IkuQEbjiPKkDTbgiKNFY1p8kqe/n/p/L0N4gDMbYGUCFnAD7QacbdN3M2sdzdxMJNgpoZ2DIA4//COQ0na4UiIrzH7w0tcBBq7ynywtGkDqd4BfH5HQjCzI/0VxDNQTIDNwxQ13fBs4HDge+/kvWqGvxO30dsQ5htsJmQACocwJ0FK00tKsjV7iCzsOAsVjFVsYQUR19Q2084NoMpzgqTvcy4UjiViSH3ipfVVuL6RizXCimDahIgEIRUKsh4VqiLyDjuxNS4Kj7uiQp+ZwIWexNuxJbuAlT/iBk1q0hQ4XWkHejfHxS45fvsvlF4WBvfeuivc+YLhMhupUKRQGOdUpw7v74I6+Bvbh7W2m6e2N84CHj2clLvpikeZz3C+1vLQJEk4XiLW2uvR/Val4lIJXv+dQhXA/AAQE+rrfz0v8+X8MMvkd8Pdl6rfeZikeUbbiEZBEELhVdfmdhQUxRMCCleET52JZ0JM4v2OkVUrevAJRqQ0JsjTJbBICWgW7HpWpkoTMhKCVSC9Gtca/2Dkr03dF86uvxRA0MtcgVZHh6fqVmaiGloW+pwMSBlZJiEhGClKRhnRkIBNZ9MVZR6U0qmRcgWqEep8O16J6odKjwhVGDQA=) format("woff2"); }
+  @font-face { font-family: "Note arrows"; font-weight: 550 900; unicode-range: U+2190, U+2192, U+2194, U+21D0, U+21D2, U+21D4, U+27F5-27F7;
+    src: url(data:font/woff2;base64,d09GMgABAAAAAAJoAAoAAAAABUQAAAIeAAEAAAAAAAAAAAAAAAAAAAAAAAAAAAAABmAAagqELIMnATYCJAMoCxYABCAFYwd+G/MDAC4HbGMa1BchhnJjmyOGgnp+ho8n2XK+xnj4Gmvv7+4he4hnD5XkkiRZiHgl5IuUTKMfKYhNh3wXa2uRJNbFQnHVTGY6idAJjSHekP1DtfYwkWNJKSBsfnsCIvK2JCX0vcQRQ82Qk5qJy+nPUfs8ixKPJMAf2xqb5sJtgfxlCzzwKJvaZbbBlnqiymzm/JV26Th33G+BnJ/TGgrHTgKX3w4w1eo82QHypIt+e0LGGIzgn4V1CgyhwDDVAgVx67fTyQLfhXnveofsfkQAQb5wB3AXXMExsA98RN/gkiXMn8WeqVmbOdc6NDg41HUVjVRCYQL0k5BkqByNEFF9YpTVqqureZUmPKLLqNBLAaqDihqSYZCzVhVFUjTS5RsJMHgSIu1YGTiNkrcVU2qFeFghbSFyaB+5QRrN4/36ID2ECEEG9mXDNJtRkUgrVwhRP3d+frm/HpGq9dZriXfSm8yYtY7dTqO1XXBNp3M6ddpC8XSWnC6DTp1OAevB6njR2pkdV1tu/a9AJNcDQCC42AHVJVn135PzL3xf+jfPo3MpQZZA8Kj1lbYFKsUCweVq/OniVBfw5C9tTN4hyoFcHagmYOYkCCrmoXRCkziblAHkqdIrTCBbM+kx9xkvlh+8bKR/Ff8HeHSNlLHkDQx0TQ0ZdLWUoOGySqTIUaIRXdEdPdEbtfuhUxfw5QKO8mCRV2qRoGJY6uWbBCjPEgEAAA==) format("woff2"); }
 
   /* Every width answer is asked of the root, not the window: a host that docks
      a panel beside the page shrinks <html> and leaves the viewport alone.
@@ -781,6 +794,7 @@ __ICON__
 <h4 data-marble-id="__ID__" data-marble-rich>Lines</h4>
 <p data-marble-id="__ID__" data-marble-rich data-list="bullet"><b>#</b>, <b>##</b>, <b>###</b> or <b>####</b> then a space starts a heading; <b>&gt;</b> a quote. <b>---</b> and Enter draws a rule.</p>
 <p data-marble-id="__ID__" data-marble-rich data-list="bullet"><b>Ctrl+Alt+1</b>, <b>2</b>, <b>3</b>, <b>4</b> and <b>0</b> make a line a heading, a subheading, a small heading, a smallest heading, or plain again.</p>
+<p data-marble-id="__ID__" data-marble-rich data-list="bullet"><b>-&gt;</b> turns into →, <b>--&gt;</b> into ⟶, <b>&lt;-</b> into ←, <b>&lt;-&gt;</b> into ↔ and <b>=&gt;</b> into ⇒. <b>Backspace</b> straight after puts back what you typed.</p>
 <h4 data-marble-id="__ID__" data-marble-rich>Lists</h4>
 <p data-marble-id="__ID__" data-marble-rich data-list="bullet"><b>-</b> then a space starts a bulleted line, <b>1.</b> a numbered one, <b>[]</b> a checkbox.</p>
 <p data-marble-id="__ID__" data-marble-rich data-list="bullet" data-indent="1"><b>Tab</b> and <b>Shift+Tab</b> move a line in and out; numbers count themselves at every depth.</p>
@@ -2716,9 +2730,70 @@ __ICON__
 
       notes.addEventListener('input', (event) => {
         if (inEmbed(event.target)) return;
+        arrowed = null;
         tidyUp();
         file(true);
+        if (event.inputType === 'insertText' && !event.isComposing) arrow();
       });
+
+      // Arrows, from the characters you would type to sketch one: -> is →,
+      // --> the long ⟶, <- and <-> point back and both ways, => is ⇒. The
+      // last key lands as typed and goes in with the rest of the burst; the
+      // arrow is a step of its own after it, so Ctrl+Z gives the characters
+      // back, and so does Backspace straight after. `typed` is what Backspace
+      // restores, since <-- and <-> pass through ← on the way.
+      const ARROWS = [
+        { from: '⟵>', to: '⟷', typed: '<-->' },
+        { from: '←>', to: '↔', typed: '<->' },
+        { from: '←-', to: '⟵', typed: '<--' },
+        { from: '<=>', to: '⇔', typed: '<=>' },
+        { from: '-->', to: '⟶', typed: '-->' },
+        // A Mac set to turn -- into a dash as you type has already done so.
+        { from: '—>', to: '⟶', typed: '—>' },
+        { from: '->', to: '→', typed: '->' },
+        { from: '<-', to: '←', typed: '<-' },
+        { from: '=>', to: '⇒', typed: '=>' },
+      ];
+      let arrowed = null;
+
+      function arrow() {
+        const sel = getSelection();
+        const node = sel?.anchorNode;
+        if (!sel?.isCollapsed || node?.nodeType !== Node.TEXT_NODE || !flow?.contains(node)) return;
+        const end = sel.anchorOffset;
+        const found = ARROWS.find(({ from }) => node.data.slice(0, end).endsWith(from));
+        const el = blockOf(node);
+        const mark = markRange();
+        if (!found || !el || !mark) return;
+        const offset = mark.a.offset - found.from.length + found.to.length;
+        change(() => {
+          node.replaceData(end - found.from.length, found.from.length, found.to);
+          return { a: { at: mark.a.at, offset }, b: { at: mark.a.at, offset } };
+        });
+        arrowed = { el, offset, ...found };
+      }
+
+      // Backspace straight after an arrow puts back what was typed.
+      function unarrow() {
+        const was = arrowed;
+        arrowed = null;
+        const mark = markRange();
+        if (!was || !mark || blockOf(getSelection().anchorNode) !== was.el) return false;
+        if (mark.a.offset !== was.offset || mark.b.offset !== was.offset) return false;
+        const start = was.offset - was.to.length;
+        if (marble.text(was.el).slice(start, was.offset) !== was.to) return false;
+        const offset = start + was.typed.length;
+        change(() => {
+          const range = rangeIn(was.el, start, was.offset);
+          range.deleteContents();
+          range.insertNode(document.createTextNode(was.typed));
+          was.el.normalize();
+          return { a: { at: mark.a.at, offset }, b: { at: mark.a.at, offset } };
+        });
+        return true;
+      }
+
+      notes.addEventListener('pointerdown', () => (arrowed = null));
 
       // An embed has filed its own change. Close the burst of typing first, so
       // undo keeps the two apart, then take the embed's new source as written
@@ -2830,6 +2905,7 @@ __ICON__
 
       notes.addEventListener('keydown', (event) => {
         const mod = event.metaKey || event.ctrlKey;
+        if (event.key !== 'Backspace') arrowed = null;
         // A search field keeps its own undo.
         if (event.target instanceof HTMLInputElement) return;
 
@@ -2848,6 +2924,11 @@ __ICON__
         // Undo is the note's everywhere; every other key inside an embed is
         // the embed's.
         if (inEmbed(event.target)) return;
+
+        if (event.key === 'Backspace' && !mod && !event.altKey && unarrow()) {
+          event.preventDefault();
+          return;
+        }
 
         if (mod && !event.altKey && !event.shiftKey && event.key.toLowerCase() === 'k') {
           event.preventDefault();

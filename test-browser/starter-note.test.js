@@ -263,6 +263,46 @@ test('the markers are the formatting: # a heading, - a bullet, --- a rule', asyn
   assert.deepEqual(errors, []);
 });
 
+test('arrows draw themselves: -> is →, --> is ⟶, and Backspace or undo puts back what was typed', async () => {
+  const { page, errors } = await open();
+  await caretToEndOf(page, 1);
+  await page.keyboard.press('Enter');
+  await page.keyboard.type('a -> b --> c <- d <-> e <-- f <--> g => h <=> i');
+  await page.waitForTimeout(150);
+  assert.equal((await blocks(page))[2].text, 'a → b ⟶ c ← d ↔ e ⟵ f ⟷ g ⇒ h ⇔ i');
+  assert.ok((await filed(page)).includes('a → b ⟶ c ← d ↔ e ⟵ f ⟷ g ⇒ h ⇔ i'), 'the arrows reached the file');
+
+  // Backspace straight after an arrow gives the characters back, and only once.
+  await page.keyboard.type(' x -->');
+  await page.keyboard.press('Backspace');
+  await page.waitForTimeout(150);
+  assert.ok((await blocks(page))[2].text.endsWith(' x -->'));
+  await page.keyboard.press('Backspace');
+  await page.waitForTimeout(150);
+  assert.ok((await blocks(page))[2].text.endsWith(' x --'), 'a second Backspace deletes as usual');
+
+  // The arrow is its own step of undo, after the keystroke that drew it.
+  await page.keyboard.type('> y ->');
+  await page.waitForTimeout(150);
+  assert.ok((await blocks(page))[2].text.endsWith(' x ⟶ y →'));
+  await page.keyboard.press('ControlOrMeta+z');
+  await page.waitForTimeout(250);
+  assert.ok((await blocks(page))[2].text.endsWith(' x ⟶ y ->'));
+  assert.ok((await filed(page)).includes(' x ⟶ y -&gt;'), 'and so is the file');
+
+  // An arrow typed in front of words leaves the line's list alone.
+  await caretToEndOf(page, 1);
+  await page.keyboard.press('Enter');
+  await page.keyboard.type('- list');
+  await page.keyboard.press('Home');
+  await page.keyboard.type('=>');
+  await page.waitForTimeout(150);
+  const made = (await blocks(page))[2];
+  assert.equal(made.list, 'bullet', 'a dash and a space still start a list');
+  assert.equal(made.text, '⇒list');
+  assert.deepEqual(errors, []);
+});
+
 test('four heading sizes: #### and Ctrl+Alt+4 make the smallest, in the face of the text', async () => {
   const { page, errors } = await open();
   await caretToEndOf(page, 1);
