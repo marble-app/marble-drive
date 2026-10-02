@@ -243,6 +243,8 @@ test('Share: choose a level, copy its link in one press, see which are on, turn 
   const gone = await page.evaluate((path) => fetch(path, { redirect: 'manual' }).then((res) => res.status), new URL(href).pathname);
   assert.equal(gone, 404, 'the link opens nothing once it is off');
   await page.keyboard.press('Escape');
+  // A popover fades out where it was rather than vanishing.
+  await pop.waitFor({ state: 'hidden', timeout: 1000 });
   assert.equal(await pop.isVisible(), false);
 });
 
