@@ -22,6 +22,10 @@ import { parsePath, resolveUnder, splitPath } from './paths.js';
 // whatever network the drive has. Both get longer than a question does.
 const ASK = 15_000;
 const CHANGE = 120_000;
+// Asking GitHub what it has: long enough for a slow network, short enough
+// that a popover waiting on it is not left asking.
+const FETCH = 10_000;
+const MESSAGE_MAX = 500;
 
 export function gitAllowed(config) {
   if (!config.git) return { ok: false, why: 'MARBLE_DRIVE_GIT is not set' };
@@ -44,15 +48,26 @@ function complaint(result) {
   return told.replace(/^(fatal|error):\s*/, '');
 }
 
-/** `git status -z` as the paths it names. A rename names two, the new one first. */
+/** A remote's page on GitHub, or null for anything that is not GitHub. A
+ *  token written into an https remote is dropped: this goes to a page. */
+export function githubWeb(remoteUrl) {
+  const found = /^(?:https?:\/\/(?:[^@/]+@)?github\.com\/|git@github\.com:|ssh:\/\/git@github\.com(?::\d+)?\/)([\w.-]+)\/([\w.-]+?)(?:\.git)?\/?$/i
+    .exec(String(remoteUrl ?? '').trim());
+  return found ? `https://github.com/${found[1]}/${found[2]}` : null;
+}
+
+/** `git status -z` as what changed and how. A rename names two paths, the new
+ *  one first, and counts as a change to the new one. */
 function changedFiles(porcelain) {
   const parts = porcelain.split('\0');
   const files = [];
   for (let i = 0; i < parts.length; i += 1) {
     const entry = parts[i];
     if (entry.length < 4) continue;
-    files.push(entry.slice(3));
-    if (entry[0] === 'R' || entry[0] === 'C') i += 1;
+    const code = entry.slice(0, 2);
+    const change = code === '??' || code.includes('A') ? 'new' : code.includes('D') ? 'deleted' : 'changed';
+    files.push({ path: entry.slice(3), change });
+    if (code[0] === 'R' || code[0] === 'C') i += 1;
   }
   return files;
 }
@@ -119,22 +134,63 @@ export function createGit({ root, run = runCommand }) {
     return Number(counted.stdout.trim());
   }
 
-  async function status(folder) {
+  /** The repository's page on GitHub, from the remote the branch pushes to. */
+  async function webOf(at, upstream) {
+    const remote = upstream?.remote ?? 'origin';
+    return githubWeb((await git(at, ['config', '--get', `remote.${remote}.url`])).stdout);
+  }
+
+  /** HEAD as a person reads it, or null on a branch with no commits yet. */
+  async function lastOf(at, web) {
+    const shown = await git(at, ['log', '-1', '--format=%H%x00%h%x00%s%x00%cI']);
+    if (shown.code !== 0 || !shown.stdout.trim()) return null;
+    const [commit, short, message, when] = shown.stdout.trim().split('\0');
+    return { commit, short, message, when, url: web ? `${web}/commit/${commit}` : null };
+  }
+
+  /** Commits the upstream has that HEAD lacks, as of the last fetch. */
+  async function behindOf(at, upstream) {
+    const counted = await git(at, ['rev-list', '--count', `HEAD..${upstream.name}`]);
+    return counted.code === 0 ? Number(counted.stdout.trim()) : null;
+  }
+
+  async function status(folder, { fetch = false } = {}) {
     const { folder: clean, at } = await repoAt(folder);
     if (!at) return { repo: false, path: clean };
     const branch = await branchOf(at);
     const upstream = await upstreamOf(at, branch);
+    // Asking GitHub is the slow part and the only one that leaves the
+    // machine, so it happens when a person opens the popover, not on every
+    // look at the bar.
+    let fetched = null;
+    let fetchError = null;
+    if (fetch && upstream) {
+      const got = await git(at, ['fetch', '--quiet', upstream.remote], FETCH);
+      fetched = got.code === 0;
+      if (!fetched) fetchError = complaint(got);
+    }
+    const files = await changes(at);
+    const web = await webOf(at, upstream);
     return {
       repo: true,
       path: clean,
       branch,
       upstream: upstream?.name ?? null,
-      changed: (await changes(at)).length,
+      changed: files.length,
+      files,
       ahead: upstream ? await aheadOf(at, upstream) : null,
+      behind: fetch && upstream ? await behindOf(at, upstream) : null,
+      fetched,
+      fetchError,
+      web,
+      last: await lastOf(at, web),
+      message: files.length ? messageFor(files.map((file) => file.path)) : null,
     };
   }
 
-  async function publishNow(folder) {
+  async function publishNow(folder, { message = '' } = {}) {
+    const said = String(message ?? '').trim();
+    if (said.length > MESSAGE_MAX) throw bad(`a message is at most ${MESSAGE_MAX} characters`);
     const { folder: clean, at } = await repoAt(folder);
     if (!at) throw bad(`"${clean}" is not a git repository`);
     const branch = await branchOf(at);
@@ -144,10 +200,10 @@ export function createGit({ root, run = runCommand }) {
       throw bad(`${branch} has no upstream yet: push it once from a terminal with git push -u`, 409);
     }
 
-    const files = await changes(at);
+    const files = (await changes(at)).map((file) => file.path);
     if (files.length) {
       await must(at, ['add', '-A'], CHANGE);
-      await must(at, ['commit', '--quiet', '-m', messageFor(files)], CHANGE);
+      await must(at, ['commit', '--quiet', '-m', said || messageFor(files)], CHANGE);
     }
     const commit = (await must(at, ['rev-parse', 'HEAD'])).trim();
     if (!files.length && (await aheadOf(at, upstream)) === 0) {
@@ -165,12 +221,12 @@ export function createGit({ root, run = runCommand }) {
       }
       throw bad(`${kept}: ${complaint(pushed)}`, 502);
     }
-    return { ok: true, branch, upstream: upstream.name, commit, files };
+    return { ok: true, branch, upstream: upstream.name, commit, files, last: await lastOf(at, await webOf(at, upstream)) };
   }
 
-  function publish(folder) {
+  function publish(folder, options = {}) {
     const key = parsePath(folder, { allowRoot: false });
-    const next = (chains.get(key) ?? Promise.resolve()).then(() => publishNow(key), () => publishNow(key));
+    const next = (chains.get(key) ?? Promise.resolve()).then(() => publishNow(key, options), () => publishNow(key, options));
     chains.set(key, next.catch(() => {}));
     return next;
   }
