@@ -313,6 +313,10 @@ export function createFsStore({ root }) {
     async function walk(relative) {
       const here = abs(relative);
       const entries = await fsp.readdir(here, { withFileTypes: true }).catch(() => []);
+      // Before the dotfiles are dropped: a folder with its own `.git` (a
+      // directory, or a file in a worktree) is a repository, and the tree says
+      // so here because the entries are already in hand (server/git.js).
+      const repo = entries.some((entry) => entry.name === '.git');
       const each = await Promise.all(entries.map(async (entry) => {
         if (HIDDEN.test(entry.name)) return [];
         const child = joinPath(relative, entry.name);
@@ -328,6 +332,7 @@ export function createFsStore({ root }) {
             folder: relative,
             title: titleize(entry.name),
             modified: info?.mtimeMs ?? 0,
+            ...(inside.repo ? { repo: true } : {}),
           }, ...inside];
         }
         // A name the grammar refuses is a file somebody put there by hand. It
@@ -356,7 +361,9 @@ export function createFsStore({ root }) {
         const info = await stat(docPath);
         return info ? [info] : [];
       }));
-      return each.flat();
+      const found = each.flat();
+      if (repo) found.repo = true;
+      return found;
     }
 
     const out = await walk(base);
