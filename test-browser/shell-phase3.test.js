@@ -126,5 +126,7 @@ test('a name already taken, or one with a slash in it, is refused before anythin
   assert.match(await dialog.locator('.note').innerText(), /already there/);
   assert.equal(await dialog.locator('.ok').isDisabled(), true);
   await page.keyboard.press('Escape');
+  // A popover fades out where it was rather than vanishing.
+  await dialog.waitFor({ state: 'hidden', timeout: 1000 });
   assert.equal(await dialog.isVisible(), false);
 });

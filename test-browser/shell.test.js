@@ -211,6 +211,8 @@ test('Share makes a link at each level, shows the ones that are on, and turns on
   await row.locator('.lv-off').click();
   await url.waitFor({ state: 'hidden' });
   await page.keyboard.press('Escape');
+  // A popover fades out where it was rather than vanishing.
+  await shell.locator('.sharing').waitFor({ state: 'hidden', timeout: 1000 });
   assert.equal(await shell.locator('.sharing').isVisible(), false);
 });
 
