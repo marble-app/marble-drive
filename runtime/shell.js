@@ -222,6 +222,11 @@
     .spacer { flex: 1; }
     .share { height: 28px; padding: 0 12px; border-radius: 8px; background: var(--ink); color: var(--paper); font-weight: 600; font-size: 12.5px; display: flex; align-items: center; gap: 6px; flex: none; }
     .share[aria-expanded="true"] { background: var(--accent-ink); }
+    /* A button gives a little on the way down, and its colour follows. */
+    .share { position: relative; transition: background-color 110ms var(--settle), transform 110ms var(--settle); }
+    .share:active { transform: scale(.97); }
+    .share[hidden] { display: none; }
+    @media (prefers-reduced-motion: reduce) { .share:active { transform: none; } }
     .vr { width: 1px; height: 18px; background: var(--line); margin: 0 4px; flex: none; }
     button:focus-visible, a:focus-visible, input:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
 
@@ -378,7 +383,17 @@
 
     /* ── Popovers: Share and the document's menu ── */
     .pop { position: fixed; z-index: 2; background: var(--card); border: 1px solid var(--line); border-radius: 12px; box-shadow: var(--shadow-lift); padding: 6px; font-size: 13px; }
-    .pop[hidden] { display: none; }
+    /* Materialise rather than appear: a popover stays in the render tree,
+       unreachable and invisible while closed, and grows from the corner
+       nearest the button that opened it (--from, set when it is placed). A
+       popover that only appears reads as a layer that was already there. */
+    .pop { transform-origin: var(--from, right top); transition: opacity 200ms var(--settle), transform 200ms var(--settle), visibility 0s; }
+    .pop[hidden] { display: var(--shown-as, block); visibility: hidden; opacity: 0; transform: scale(.94); pointer-events: none;
+      transition: opacity 140ms ease, transform 140ms ease, visibility 0s linear 140ms; }
+    @media (prefers-reduced-motion: reduce) {
+      .pop { transform: none; transition: opacity 150ms linear; }
+      .pop[hidden] { transform: none; transition: opacity 150ms linear, visibility 0s linear 150ms; }
+    }
     .menu { min-width: 200px; }
     .menu button { display: flex; align-items: center; gap: 9px; width: 100%; padding: 7px 10px; border-radius: 8px; color: var(--ink); text-align: left; }
     .menu button:hover, .menu button:focus-visible { background: var(--paper-2); outline: none; }
@@ -429,7 +444,7 @@
     .lv-url { grid-column: 1 / -1; margin-top: 4px; width: 100%; min-width: 0; height: 28px; border: 1px solid var(--line); border-radius: 8px; padding: 0 8px; font: 11.5px/1 ui-monospace, SFMono-Regular, Menlo, monospace; color: var(--muted); background: var(--paper); }
     .sharing button:disabled { opacity: .5; cursor: default; }
     /* Move or rename: the name, then where. */
-    .moving { width: 320px; padding: 12px; display: flex; flex-direction: column; gap: 8px; }
+    .moving { width: 320px; padding: 12px; display: flex; flex-direction: column; gap: 8px; --shown-as: flex; }
     .moving h3 { margin: 0; font-size: 13.5px; font-weight: 600; }
     .moving .name { height: 30px; border: 1px solid var(--line); border-radius: 8px; padding: 0 8px; font: inherit; color: var(--ink); background: var(--paper); }
     .moving .name:focus { outline: 2px solid var(--accent); outline-offset: -1px; }
@@ -451,47 +466,53 @@
     .moving .ok:disabled { opacity: .4; cursor: default; }
     /* ── A folder that is its own git repository (server/git.js) ── */
     .gh { width: 14px; height: 14px; flex: none; stroke: none; }
-    /* Publish on the bar is words on the bar, as every control there is but
-       Share: the filled pill is spent once. A dot says there is something to
+    /* Publish is Share's pill, beside it, because they are the two ways a
+       page leaves this drive. A dot on its corner says there is something to
        publish; the popover says what. */
-    .ib.git { width: auto; padding: 0 9px; gap: 6px; display: flex; align-items: center; font-weight: 600; font-size: 12.5px; position: relative; }
-    .ib.git[hidden] { display: none; }
-    .ib.git[aria-expanded="true"] { background: var(--paper-2); color: var(--ink); }
-    .ib.git[data-dirty]::after { content: ''; position: absolute; top: 5px; right: 3px; width: 6px; height: 6px; border-radius: 50%; background: var(--accent); }
-    .ib.git[data-busy] .gh { animation: gh-busy 900ms ease-in-out infinite alternate; }
+    .share.git[data-dirty]::after { content: ''; position: absolute; top: -3px; right: -3px; width: 8px; height: 8px; border-radius: 50%;
+      background: var(--accent); box-shadow: 0 0 0 2px var(--paper); animation: gh-dot 200ms var(--settle); }
+    @keyframes gh-dot { from { transform: scale(0); } }
+    .share.git[data-busy] .gh { animation: gh-busy 900ms ease-in-out infinite alternate; }
     @keyframes gh-busy { to { opacity: .3; } }
-    @media (prefers-reduced-motion: reduce) { .ib.git[data-busy] .gh { animation: none; } }
+    @media (prefers-reduced-motion: reduce) { .share.git[data-busy] .gh, .share.git[data-dirty]::after { animation: none; } }
     /* In the tree, the mark is on the right of a repository's row while the
        row is under the pointer, focused or holding its menu; on a touch
        screen, where nothing is under a pointer, always. */
     .row .mark { margin-left: auto; color: var(--faint); opacity: 0; transition: opacity 120ms var(--settle); }
     .row:is(:hover, :focus-visible, [data-menu]) .mark { opacity: 1; }
     @media (hover: none) { .row .mark { opacity: 1; } }
-    .publishing { width: min(340px, calc(100vw - 16px)); padding: 12px; display: flex; flex-direction: column; gap: 8px; }
-    .publishing h3 { margin: 0; font-size: 13.5px; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    /* Publish: laid out as Share is. The title and where it goes, then
+       rows on hairlines: what is waiting, the message with its button, and
+       the last commit. Content that changes eases in rather than jumping. */
+    .publishing { width: min(340px, calc(100vw - 16px)); padding: 12px; }
+    .publishing h3 { margin: 0 0 2px; font-size: 13.5px; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
     .publishing p { margin: 0; }
-    .publishing .where { display: flex; gap: 8px; align-items: baseline; color: var(--muted); font-size: 12px; min-width: 0; }
+    .publishing .lede { display: flex; gap: 8px; align-items: baseline; margin: 0 0 8px; color: var(--muted); font-size: 12.5px; min-width: 0; }
     .publishing .branch { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
-    .publishing .web { margin-left: auto; color: var(--muted); text-decoration: none; white-space: nowrap; }
+    .publishing .web { margin-left: auto; color: var(--muted); text-decoration: none; white-space: nowrap; flex: none; }
     .publishing .web:hover { color: var(--ink); text-decoration: underline; }
     .publishing :is(.web, .result, .last)[hidden], .publishing .changes:empty { display: none; }
-    .publishing .state { color: var(--ink); text-wrap: pretty; }
-    .publishing .state .quiet { color: var(--muted); }
-    .publishing .changes { list-style: none; margin: 0; padding: 4px 0; border-top: 1px solid var(--line); border-bottom: 1px solid var(--line); max-height: 180px; overflow: auto; }
-    .publishing .changes li { display: flex; gap: 8px; padding: 3px 0; font-size: 12.5px; min-width: 0; }
+    .publishing .status { padding: 9px 0; border-top: 1px solid var(--line); }
+    .publishing .state { color: var(--ink); font-weight: 600; text-wrap: pretty; }
+    .publishing .state .quiet { color: var(--muted); font-weight: 400; }
+    .publishing .changes { list-style: none; margin: 6px 0 0; padding: 0; max-height: 180px; overflow: auto; }
+    .publishing .changes li { display: flex; gap: 8px; padding: 2px 0; font-size: 12.5px; min-width: 0; }
     .publishing .changes .file { color: var(--ink); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
     .publishing .changes .kind { margin-left: auto; color: var(--muted); flex: none; }
     .publishing .changes .more { color: var(--muted); }
-    .publishing .msg { height: 30px; border: 1px solid var(--line); border-radius: 8px; padding: 0 8px; font: inherit; color: var(--ink); background: var(--paper); min-width: 0; }
+    .publishing .compose { display: flex; gap: 6px; padding-top: 9px; border-top: 1px solid var(--line); }
+    .publishing .msg { flex: 1; height: 28px; border: 1px solid var(--line); border-radius: 8px; padding: 0 8px; font: inherit; font-size: 12.5px; color: var(--ink); background: var(--paper); min-width: 0;
+      transition: border-color 110ms var(--settle); }
     .publishing .msg:focus { outline: 2px solid var(--accent); outline-offset: -1px; }
-    .publishing .go { display: flex; justify-content: flex-end; }
-    .publishing .publish { height: 30px; padding: 0 14px; border-radius: 8px; font-weight: 600; font-size: 12.5px; background: var(--ink); color: var(--paper); }
-    .publishing .publish:active { background: var(--accent-ink); }
+    .publishing .publish { height: 28px; padding: 0 12px; border-radius: 8px; font-weight: 600; font-size: 12.5px; background: var(--ink); color: var(--paper); flex: none;
+      display: flex; align-items: center; transition: background-color 110ms var(--settle), opacity 200ms var(--settle), transform 110ms var(--settle); }
+    .publishing .publish:active:not(:disabled) { background: var(--accent-ink); transform: scale(.97); }
     .publishing .publish:disabled { opacity: .4; cursor: default; }
-    .publishing .result { font-size: 12.5px; color: var(--ink); }
+    .publishing .result { margin-top: 8px; font-size: 12.5px; color: var(--ink); }
     .publishing .result[data-bad] { color: var(--danger, #b4533e); }
     .publishing :is(.result, .last) a { color: inherit; }
-    .publishing .last { color: var(--faint); font-size: 12px; }
+    .publishing .last { margin-top: 9px; padding-top: 9px; border-top: 1px solid var(--line); color: var(--faint); font-size: 12px; }
+    @media (prefers-reduced-motion: reduce) { .publishing .publish:active:not(:disabled) { transform: none; } }
     .toast { position: fixed; left: 50%; bottom: 24px; transform: translate(-50%, 8px); opacity: 0; pointer-events: none; background: var(--ink); color: var(--paper);
       border-radius: 999px; padding: 7px 14px; font-size: 12.5px; transition: opacity 160ms var(--settle), transform 160ms var(--settle); }
     .toast[data-on] { opacity: 1; transform: translate(-50%, 0); }
@@ -551,7 +572,7 @@
           <nav class="crumbs" aria-label="Where you are"></nav>
           <span class="spacer"></span>
           <button type="button" class="ib" data-act="describe" aria-pressed="false" aria-label="Describe a change (⌘⇧D)" title="Describe a change (⌘⇧D)" hidden>${icon('describe')}</button>
-          <button type="button" class="ib git" data-act="publish" aria-haspopup="dialog" aria-expanded="false" title="Publish this folder to GitHub" hidden>${github('')}<span>Publish</span></button>
+          <button type="button" class="share git" data-act="publish" aria-haspopup="dialog" aria-expanded="false" title="Publish this folder to GitHub" hidden>${github('')}<span>Publish</span></button>
           <button type="button" class="share" data-act="share" aria-haspopup="dialog" aria-expanded="false">${icon('share')}Share</button>
           <span class="vr"></span>
           <button type="button" class="ib" data-act="chat" aria-pressed="true" aria-label="Pin the chat" title="Pin the chat (⌘⇧J)" aria-keyshortcuts="Meta+Shift+J" hidden>${icon('chat')}</button>
@@ -582,11 +603,9 @@
         </div>
         <div class="pop publishing" role="dialog" aria-label="Publish" hidden>
           <h3></h3>
-          <p class="where"><span class="branch"></span><a class="web" target="_blank" rel="noopener" hidden></a></p>
-          <p class="state" role="status"></p>
-          <ul class="changes"></ul>
-          <input class="msg" aria-label="Message" maxlength="500" autocomplete="off">
-          <div class="go"><button type="button" class="publish" disabled>Publish</button></div>
+          <p class="lede"><span class="branch"></span><a class="web" target="_blank" rel="noopener" hidden></a></p>
+          <div class="status"><p class="state" role="status"></p><ul class="changes"></ul></div>
+          <div class="compose"><input class="msg" aria-label="Message" maxlength="500" autocomplete="off"><button type="button" class="publish" disabled>Publish</button></div>
           <p class="result" hidden></p>
           <p class="last" hidden></p>
         </div>
@@ -1478,7 +1497,10 @@
         pop.style.left = `${Math.max(8, Math.min(r.left, innerWidth - pop.offsetWidth - 8))}px`;
       }
       // Too near the foot of the window, it opens upward instead.
-      if (r.bottom + 6 + pop.offsetHeight > innerHeight - 8) pop.style.top = `${Math.max(8, r.top - 6 - pop.offsetHeight)}px`;
+      const up = r.bottom + 6 + pop.offsetHeight > innerHeight - 8;
+      if (up) pop.style.top = `${Math.max(8, r.top - 6 - pop.offsetHeight)}px`;
+      // It grows from the corner nearest the button that opened it.
+      pop.style.setProperty('--from', `${align === 'right' ? 'right' : 'left'} ${up ? 'bottom' : 'top'}`);
     }
 
     /** Where a right-click was: the menu's corner at the pointer, flipped to
@@ -1487,8 +1509,12 @@
       pop.style.right = '';
       const w = pop.offsetWidth;
       const ht = pop.offsetHeight;
-      pop.style.left = `${Math.max(8, x + w + 8 > innerWidth ? x - w : x)}px`;
-      pop.style.top = `${Math.max(8, y + ht + 8 > innerHeight ? y - ht : y)}px`;
+      const back = x + w + 8 > innerWidth;
+      const up = y + ht + 8 > innerHeight;
+      pop.style.left = `${Math.max(8, back ? x - w : x)}px`;
+      pop.style.top = `${Math.max(8, up ? y - ht : y)}px`;
+      // A menu at the pointer grows from the pointer.
+      pop.style.setProperty('--from', `${back ? 'right' : 'left'} ${up ? 'bottom' : 'top'}`);
     }
 
     /** One menu, whatever it is about: each entry is [glyph, label, what it
@@ -1623,6 +1649,7 @@
         pop.style.left = '';
         pop.style.right = '16px';
         pop.style.top = `${BAR + 8}px`;
+        pop.style.setProperty('--from', 'right top');
       }
       pop.querySelector('.msg').focus({ preventScroll: true });
       this.loadPublishing(path);
@@ -1639,8 +1666,41 @@
       }
     }
 
+    /** Text that changes in place crossfades with a short rise. */
+    swapText(el, text) {
+      if (el.textContent === text) return;
+      el.textContent = text;
+      this.settleIn(el);
+    }
+
+    /** Something new in a popover settles in: a fade and a two-pixel rise. */
+    settleIn(el) {
+      if (this.reduced.matches || !el.isConnected) return;
+      el.animate([{ opacity: 0, transform: 'translateY(2px)' }, { opacity: 1, transform: 'none' }], { duration: 200, easing: EASE });
+    }
+
+    /** A popover whose content changed grows or shrinks to it, the way the
+     *  room moves, instead of jumping to its new height. */
+    growTo(pop, from) {
+      const to = pop.offsetHeight;
+      if (pop.hidden || !from || from === to || this.reduced.matches) return;
+      pop.animate([{ height: `${from}px`, overflow: 'hidden' }, { height: `${to}px`, overflow: 'hidden' }], { duration: 200, easing: EASE });
+    }
+
     /** The popover as the repository is. `null` while it is being asked. */
     drawPublishing(status) {
+      const pop = this.publishing;
+      const from = pop.hidden ? 0 : pop.offsetHeight;
+      const was = this.gitShown;
+      this.paintPublishing(status);
+      if (status && !was) {
+        this.settleIn(pop.querySelector('.status'));
+        this.settleIn(pop.querySelector('.last'));
+      }
+      this.growTo(pop, from);
+    }
+
+    paintPublishing(status) {
       const pop = this.publishing;
       const $ = (selector) => pop.querySelector(selector);
       const state = $('.state');
@@ -1717,45 +1777,51 @@
       const mine = () => !pop.hidden && this.gitPath === path;
       this.gitBusy = path;
       go.disabled = true;
-      go.textContent = 'Publishing…';
+      this.swapText(go, 'Publishing…');
       result.hidden = true;
       result.removeAttribute('data-bad');
       if (path === this.gitBar) {
         bar.setAttribute('data-busy', '');
-        label.textContent = 'Publishing…';
+        this.swapText(label, 'Publishing…');
       }
       try {
         await window.marble.flush?.();
         const done = await window.marble.drive.git.publish(path, { message: pop.querySelector('.msg').value });
         if (mine()) {
+          const from = pop.offsetHeight;
           const said = done.nothing ? 'Nothing to publish' : `Published to ${done.branch} · `;
           result.replaceChildren(said, ...(done.nothing ? [] : [this.commitLink(done.last)]));
           result.dataset.commit = done.last?.commit ?? '';
           result.hidden = false;
+          this.settleIn(result);
+          this.growTo(pop, from);
           pop.querySelector('.msg').value = '';
         } else {
           this.say(done.nothing ? 'Nothing to publish' : `Published ${nameOf(path)} to ${done.branch}`, 3000);
         }
         if (path === this.gitBar) {
-          label.textContent = done.nothing ? 'Publish' : 'Published';
+          this.swapText(label, done.nothing ? 'Publish' : 'Published');
           clearTimeout(this.gitLabelTimer);
-          this.gitLabelTimer = setTimeout(() => { label.textContent = 'Publish'; }, 3000);
+          this.gitLabelTimer = setTimeout(() => this.swapText(label, 'Publish'), 3000);
           this.refreshGitDot(path);
         }
       } catch (err) {
         if (mine()) {
+          const from = pop.offsetHeight;
           result.textContent = err?.message || 'Could not publish';
           result.dataset.commit = '';
           result.setAttribute('data-bad', '');
           result.hidden = false;
+          this.settleIn(result);
+          this.growTo(pop, from);
         } else {
           this.say(err?.message || 'Could not publish', 8000);
         }
-        label.textContent = 'Publish';
+        this.swapText(label, 'Publish');
       } finally {
         this.gitBusy = null;
         bar.removeAttribute('data-busy');
-        if (!pop.hidden) go.textContent = 'Publish';
+        if (!pop.hidden) this.swapText(go, 'Publish');
         // This repository's popover stays disabled until its status is read
         // again; another repository's is drawn from the status it already has.
         if (mine()) this.loadPublishing(path);
