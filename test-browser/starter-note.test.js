@@ -393,6 +393,46 @@ test('a mark with nothing selected opens at the caret and eats nothing', async (
   assert.deepEqual(errors, []);
 });
 
+test('Backspace at the head of a numbered line gives back the "1. " that made it', async () => {
+  const { page, errors } = await open();
+  await caretToEndOf(page, 1);
+  await page.keyboard.press('Enter');
+  await page.keyboard.type('1. ');
+  await page.waitForTimeout(150);
+  assert.equal((await blocks(page))[2].list, 'number');
+
+  await page.keyboard.press('Backspace');
+  await page.waitForTimeout(150);
+  let made = (await blocks(page))[2];
+  assert.equal(made.list, null, 'the line is no longer a list line');
+  assert.equal(made.text, '1. ', 'and the marker is back as text');
+  await page.keyboard.type('two');
+  await page.waitForTimeout(150);
+  assert.equal((await blocks(page))[2].text, '1. two', 'the caret sits after the marker');
+
+  // Further down a list, the number the line showed is what comes back.
+  await page.keyboard.press('Enter');
+  await page.keyboard.type('1. first');
+  await page.keyboard.press('Enter');
+  await page.keyboard.type('second');
+  await page.keyboard.press('Home');
+  await page.keyboard.press('Backspace');
+  await page.waitForTimeout(150);
+  made = (await blocks(page))[4];
+  assert.equal(made.list, null);
+  assert.equal(made.text, '2. second');
+  assert.equal((await blocks(page))[3].list, 'number', 'the line above stays in its list');
+
+  // One press of undo puts the numbered line back.
+  await page.keyboard.press('ControlOrMeta+z');
+  await page.waitForTimeout(150);
+  made = (await blocks(page))[4];
+  assert.equal(made.list, 'number');
+  assert.equal(made.text, 'second');
+  assert.ok((await filed(page)).includes('1. two'));
+  assert.deepEqual(errors, []);
+});
+
 test('an emptied line keeps its caret, wherever the bullet is drawn', async () => {
   const { page, errors } = await open();
   await caretToEndOf(page, 1);

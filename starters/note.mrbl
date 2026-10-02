@@ -1523,6 +1523,24 @@ __ICON__
           return mark;
         });
 
+      // Backspace at the head of an outermost numbered line takes the shortcut
+      // back rather than the list: the line is plain text again, starting with
+      // the number it showed and a space, and the caret sits after them.
+      function unnumber(el) {
+        let n = 1;
+        for (let prev = el.previousElementSibling; prev?.hasAttribute('data-list'); prev = prev.previousElementSibling) {
+          if (listOf(prev) === 'number' && !depthOf(prev)) n += 1;
+        }
+        const typed = `${n}. `;
+        change(() => {
+          for (const name of LISTY) el.removeAttribute(name);
+          el.prepend(typed);
+          el.normalize();
+          const spot = { at: at(el), offset: typed.length };
+          return { a: spot, b: spot };
+        });
+      }
+
       const depthOf = (el) => Number(el?.getAttribute('data-indent') ?? 0) || 0;
 
       // Tab and Shift+Tab. Only a list line has a depth; a paragraph is where
@@ -3011,7 +3029,10 @@ __ICON__
         if (event.key === 'Backspace' && sel?.isCollapsed) {
           const el = blockOf(sel.anchorNode);
           const mark = markRange();
-          if (el && mark?.a.offset === 0 && el !== flow.firstElementChild) {
+          if (el && mark?.a.offset === 0 && listOf(el) === 'number' && !depthOf(el)) {
+            event.preventDefault();
+            unnumber(el);
+          } else if (el && mark?.a.offset === 0 && el !== flow.firstElementChild) {
             if (el.hasAttribute('data-list')) {
               event.preventDefault();
               if (depthOf(el)) indent(-1);
