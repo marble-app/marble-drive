@@ -1677,6 +1677,7 @@
       pop.querySelector('h3').textContent = `Publish ${nameOf(path)}`;
       pop.querySelector('.msg').value = '';
       pop.querySelector('.result').hidden = true;
+      pop.querySelector('.publish').textContent = this.gitBusy === path ? 'Publishing…' : 'Publish';
       this.drawPublishing(null);
       pop.hidden = false;
       const button = this.$('[data-act="publish"]');
@@ -1714,6 +1715,7 @@
       const go = $('.publish');
       const web = $('.web');
       const last = $('.last');
+      this.gitShown = status;
       list.replaceChildren();
       $('.msg').placeholder = 'Message (optional)';
       if (!status || status.error || !status.repo) {
@@ -1767,8 +1769,10 @@
     }
 
     /** Publish, and say so where it was pressed: the button while it runs, the
-     *  commit it made under it after, and the bar's label for a moment. If the
-     *  popover was closed meanwhile, the answer comes as a toast. */
+     *  commit it made under it after, and the bar's label for a moment. The
+     *  popover may be showing another repository, or be closed, by the time
+     *  this one answers; then the answer is a toast and that popover is left
+     *  to its own repository. */
     async publishNow() {
       const path = this.gitPath;
       const pop = this.publishing;
@@ -1777,7 +1781,8 @@
       const bar = this.$('[data-act="publish"]');
       const label = bar.querySelector('span');
       if (!path || this.gitBusy || go.disabled) return;
-      this.gitBusy = true;
+      const mine = () => !pop.hidden && this.gitPath === path;
+      this.gitBusy = path;
       go.disabled = true;
       go.textContent = 'Publishing…';
       result.hidden = true;
@@ -1789,12 +1794,15 @@
       try {
         await window.marble.flush?.();
         const done = await window.marble.drive.git.publish(path, { message: pop.querySelector('.msg').value });
-        const said = done.nothing ? 'Nothing to publish' : `Published to ${done.branch} · `;
-        result.replaceChildren(said, ...(done.nothing ? [] : [this.commitLink(done.last)]));
-        result.dataset.commit = done.last?.commit ?? '';
-        result.hidden = false;
-        pop.querySelector('.msg').value = '';
-        if (pop.hidden) this.say(done.nothing ? 'Nothing to publish' : `Published ${nameOf(path)} to ${done.branch}`, 3000);
+        if (mine()) {
+          const said = done.nothing ? 'Nothing to publish' : `Published to ${done.branch} · `;
+          result.replaceChildren(said, ...(done.nothing ? [] : [this.commitLink(done.last)]));
+          result.dataset.commit = done.last?.commit ?? '';
+          result.hidden = false;
+          pop.querySelector('.msg').value = '';
+        } else {
+          this.say(done.nothing ? 'Nothing to publish' : `Published ${nameOf(path)} to ${done.branch}`, 3000);
+        }
         if (path === this.gitBar) {
           label.textContent = done.nothing ? 'Publish' : 'Published';
           clearTimeout(this.gitLabelTimer);
@@ -1802,18 +1810,23 @@
           this.refreshGitDot(path);
         }
       } catch (err) {
-        result.textContent = err?.message || 'Could not publish';
-        result.dataset.commit = '';
-        result.setAttribute('data-bad', '');
-        result.hidden = false;
+        if (mine()) {
+          result.textContent = err?.message || 'Could not publish';
+          result.dataset.commit = '';
+          result.setAttribute('data-bad', '');
+          result.hidden = false;
+        } else {
+          this.say(err?.message || 'Could not publish', 8000);
+        }
         label.textContent = 'Publish';
-        if (pop.hidden) this.say(err?.message || 'Could not publish', 8000);
       } finally {
-        this.gitBusy = false;
-        go.textContent = 'Publish';
+        this.gitBusy = null;
         bar.removeAttribute('data-busy');
-        go.disabled = false;
-        if (!pop.hidden && path === this.gitPath) this.loadPublishing(path);
+        if (!pop.hidden) go.textContent = 'Publish';
+        // This repository's popover stays disabled until its status is read
+        // again; another repository's is drawn from the status it already has.
+        if (mine()) this.loadPublishing(path);
+        else if (!pop.hidden) this.drawPublishing(this.gitShown);
       }
     }
 
