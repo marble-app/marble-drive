@@ -1064,7 +1064,7 @@ export async function createDrive(config, { log = console, agentProviders = null
       // Drive's own page — an Origin is required, not just tolerated.
       if (route === '/drive/git' && req.method === 'GET') {
         if (!git) return text(res, 404, 'not found');
-        return json(res, 200, await git.status(url.searchParams.get('path') ?? ''));
+        return json(res, 200, await git.status(url.searchParams.get('path') ?? '', { fetch: url.searchParams.get('fetch') === '1' }));
       }
       if (route === '/drive/git/publish' && req.method === 'POST') {
         if (!git) return text(res, 404, 'not found');
@@ -1076,7 +1076,7 @@ export async function createDrive(config, { log = console, agentProviders = null
         // Every write already queued for a document in the folder lands
         // before anything is committed, so a publish never takes half a save.
         await Promise.all([...queues].filter(([docPath]) => isInside(docPath, folder)).map(([, queued]) => queued));
-        return json(res, 200, await git.publish(folder));
+        return json(res, 200, await git.publish(folder, { message: body.message }));
       }
 
       if (route === '/drive/settings' && req.method === 'GET') {

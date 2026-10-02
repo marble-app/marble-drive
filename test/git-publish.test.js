@@ -187,3 +187,75 @@ test('the shell is told publishing is on, and only then', async (t) => {
   const plain = await (await off.ask('/a/Site%2Fpage')).text();
   assert.doesNotMatch(plain, /data-git=/);
 });
+
+test('status lists each change with its kind, and the message a publish would use', async (t) => {
+  const { status, site } = await boot(t);
+  await fsp.writeFile(path.join(site, 'page.mrbl'), DOC.replace('Page</h1>', 'Changed</h1>'));
+  await fsp.writeFile(path.join(site, 'new.mrbl'), DOC);
+  await fsp.rm(path.join(site, 'Nested/inner.mrbl'));
+  const answer = await (await status('Site')).json();
+  const byPath = Object.fromEntries(answer.files.map((f) => [f.path, f.change]));
+  assert.deepEqual(byPath, { 'page.mrbl': 'changed', 'new.mrbl': 'new', 'Nested/inner.mrbl': 'deleted' });
+  assert.equal(answer.changed, 3);
+  assert.match(answer.message, /^Publish from Marble Drive: /);
+  assert.equal(answer.behind, null);
+  assert.equal(answer.fetched, null);
+});
+
+test('status names the last commit; a remote that is not GitHub has no links', async (t) => {
+  const { status, site } = await boot(t);
+  const answer = await (await status('Site')).json();
+  assert.equal(answer.last.message, 'first');
+  assert.equal(answer.last.commit, git(site, 'rev-parse', 'HEAD'));
+  assert.ok(answer.last.short.length >= 7);
+  assert.ok(!Number.isNaN(Date.parse(answer.last.when)));
+  assert.equal(answer.last.url, null);
+  assert.equal(answer.web, null);
+  assert.equal(answer.message, null);
+});
+
+test('with fetch, status counts what the remote has that the folder does not', async (t) => {
+  const { ask, remote, tmp } = await boot(t);
+  const other = path.join(tmp, 'other');
+  execFileSync('git', ['clone', '-q', remote, other]);
+  git(other, 'config', 'user.name', 'Other');
+  git(other, 'config', 'user.email', 'other@example.com');
+  await fsp.writeFile(path.join(other, 'theirs.txt'), 'theirs');
+  git(other, 'add', '-A');
+  git(other, 'commit', '-qm', 'theirs');
+  git(other, 'push', '-q');
+  const answer = await (await ask('/drive/git?path=Site&fetch=1')).json();
+  assert.equal(answer.fetched, true);
+  assert.equal(answer.behind, 1);
+});
+
+test('a remote that cannot be reached is said, not thrown', async (t) => {
+  const { ask, site, tmp } = await boot(t);
+  git(site, 'remote', 'set-url', 'origin', path.join(tmp, 'gone.git'));
+  const res = await ask('/drive/git?path=Site&fetch=1');
+  assert.equal(res.status, 200);
+  const answer = await res.json();
+  assert.equal(answer.fetched, false);
+  assert.ok(answer.fetchError);
+});
+
+test('publish uses the message given, and answers with the commit it made', async (t) => {
+  const { publish, site, remote } = await boot(t);
+  await fsp.writeFile(path.join(site, 'page.mrbl'), DOC.replace('Page</h1>', 'Bio</h1>'));
+  const res = await publish('Site', { body: { path: 'Site', message: '  Update the bio  ' } });
+  assert.equal(res.status, 200);
+  const answer = await res.json();
+  assert.equal(git(site, 'log', '-1', '--format=%s'), 'Update the bio');
+  assert.equal(answer.last.message, 'Update the bio');
+  assert.equal(answer.last.commit, git(remote, 'rev-parse', 'main'));
+});
+
+test('a message over 500 characters is refused and nothing is committed', async (t) => {
+  const { publish, site, remote } = await boot(t);
+  const before = git(remote, 'rev-parse', 'main');
+  await fsp.writeFile(path.join(site, 'page.mrbl'), DOC.replace('Page</h1>', 'Long</h1>'));
+  const res = await publish('Site', { body: { path: 'Site', message: 'x'.repeat(501) } });
+  assert.equal(res.status, 400);
+  assert.equal(git(site, 'rev-parse', 'HEAD'), before);
+  assert.equal(git(remote, 'rev-parse', 'main'), before);
+});

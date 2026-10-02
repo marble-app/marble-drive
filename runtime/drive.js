@@ -286,8 +286,10 @@
     // (server/git.js). Only where the drive turned it on — elsewhere both
     // answer 404, and the shell never offers it.
     const git = {
-      status: (path) => ask(`/drive/git?path=${encodeURIComponent(path)}`),
-      publish: (path) => ask('/drive/git/publish', { method: 'POST', body: { path } }),
+      status: (path, { fetch = false } = {}) =>
+        ask(`/drive/git?path=${encodeURIComponent(path)}${fetch ? '&fetch=1' : ''}`),
+      publish: (path, { message = '' } = {}) =>
+        ask('/drive/git/publish', { method: 'POST', body: { path, message } }),
     };
 
     // A self-contained copy, blobs and all. The promise that makes blobs safe
