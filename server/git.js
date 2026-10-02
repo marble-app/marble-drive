@@ -98,7 +98,9 @@ export function createGit({ root, run = runCommand }) {
   const git = (at, args, timeout = ASK) =>
     run('git', ['-C', at, ...args], {
       timeout,
-      env: { ...process.env, GIT_CEILING_DIRECTORIES: path.dirname(at), GIT_TERMINAL_PROMPT: '0' },
+      // No optional locks: a look at the status from the bar must never hold
+      // the index lock a publish's `add` is about to need.
+      env: { ...process.env, GIT_CEILING_DIRECTORIES: path.dirname(at), GIT_TERMINAL_PROMPT: '0', GIT_OPTIONAL_LOCKS: '0' },
     });
 
   async function must(at, args, timeout) {
@@ -119,11 +121,28 @@ export function createGit({ root, run = runCommand }) {
     const remote = (await git(at, ['config', '--get', `branch.${branch}.remote`])).stdout.trim();
     const ref = (await git(at, ['config', '--get', `branch.${branch}.merge`])).stdout.trim();
     if (!remote || !ref) return null;
-    return { remote, ref, name: `${remote}/${ref.replace(/^refs\/heads\//, '')}` };
+    // A branch may push to a URL rather than to a named remote, and that URL
+    // may carry a token. The name goes to a page, so it goes without one.
+    const shown = remote.replace(/^([a-z][\w+.-]*:\/\/)[^/@]*@/i, '$1');
+    return { remote, ref, name: `${shown}/${ref.replace(/^refs\/heads\//, '')}` };
   }
 
-  const changes = async (at) =>
-    changedFiles(await must(at, ['status', '--porcelain=v1', '-z', '--untracked-files=all']));
+  /** What changed, and the repositories inside this one that are not part of
+   *  it. Edits inside a tracked inner repository are its own to publish, and
+   *  an untracked one would be filed as a bare link, so neither is a change
+   *  here; `nested` is what `add` has to leave out. */
+  async function changes(at) {
+    const listed = changedFiles(await must(at, ['status', '--porcelain=v1', '-z', '--untracked-files=all', '--ignore-submodules=dirty']));
+    const files = [];
+    const nested = [];
+    for (const file of listed) {
+      const inner = file.change === 'new' && file.path.endsWith('/')
+        && await fsp.stat(path.join(at, file.path, '.git')).catch(() => null);
+      if (inner) nested.push(file.path.slice(0, -1));
+      else files.push(file);
+    }
+    return { files, nested };
+  }
 
   /** Commits on this branch its upstream does not have. */
   async function aheadOf(at, upstream) {
@@ -137,6 +156,7 @@ export function createGit({ root, run = runCommand }) {
   /** The repository's page on GitHub, from the remote the branch pushes to. */
   async function webOf(at, upstream) {
     const remote = upstream?.remote ?? 'origin';
+    if (/:\/\/|^[\w.-]+@[\w.-]+:/.test(remote)) return githubWeb(remote);
     return githubWeb((await git(at, ['config', '--get', `remote.${remote}.url`])).stdout);
   }
 
@@ -169,7 +189,7 @@ export function createGit({ root, run = runCommand }) {
       fetched = got.code === 0;
       if (!fetched) fetchError = complaint(got);
     }
-    const files = await changes(at);
+    const { files } = await changes(at);
     const web = await webOf(at, upstream);
     return {
       repo: true,
@@ -200,9 +220,10 @@ export function createGit({ root, run = runCommand }) {
       throw bad(`${branch} has no upstream yet: push it once from a terminal with git push -u`, 409);
     }
 
-    const files = (await changes(at)).map((file) => file.path);
+    const { files: changed, nested } = await changes(at);
+    const files = changed.map((file) => file.path);
     if (files.length) {
-      await must(at, ['add', '-A'], CHANGE);
+      await must(at, ['add', '-A', '--', '.', ...nested.map((inner) => `:(exclude)${inner}`)], CHANGE);
       await must(at, ['commit', '--quiet', '-m', said || messageFor(files)], CHANGE);
     }
     const commit = (await must(at, ['rev-parse', 'HEAD'])).trim();
