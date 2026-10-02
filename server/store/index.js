@@ -25,6 +25,8 @@
 //                                            in the folder but is not a document
 //   tree({folder,files}) → folder node with `children`; files included unless
 //                          `files` is false
+//                          a folder that is its own git repository carries
+//                          `repo: true`
 //   write(path, source, {label, ops}) → {path, bytes, sha}
 //   mark(path, source, label)              a restore point for a state nobody replaced
 //   create(path, source)                   refuses to overwrite
