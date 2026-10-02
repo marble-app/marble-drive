@@ -34,7 +34,7 @@ import { createMoves } from './moves.js';
 import { shareRefusal } from './share-policy.js';
 import { RANK, createShares } from './shares.js';
 import { createPendingWrites } from './pending-writes.js';
-import { PathError, joinPath, parsePath, safePath, safeSegment, splitPath, withoutDocExt } from './paths.js';
+import { PathError, isInside, joinPath, parsePath, safePath, safeSegment, splitPath, withoutDocExt } from './paths.js';
 import { build as buildStarter, list as listStarters, preview as starterPreview } from './gallery.js';
 import { createChannels } from './sse.js';
 import { createStore } from './store/index.js';
@@ -46,6 +46,8 @@ import { createLedger } from './ledger.js';
 import { createMemoryGuard } from './memory-guard.js';
 import { createStreams } from './streams.js';
 import { consoleAllowed, createConsole } from './console/index.js';
+import { createGit, gitAllowed } from './git.js';
+import { sameOrigin } from './sessions.js';
 import { createStems } from './stems/index.js';
 import { cleanFileName, createUploads } from './uploads.js';
 import { DRAWN_MAX_BYTES, createThumbs } from './thumbs.js';
@@ -417,7 +419,8 @@ export async function createDrive(config, { log = console, agentProviders = null
     // mounts one, and reads the drawer's tokens off window.marbleAgentUI.
     // It is told which document is the Drive, so on the Drive itself the bar
     // says Drive rather than naming its file.
-    tags += `\n<script src="${runtimeUrl('shell.js')}" data-home="${escapeHtml(config.home)}" data-marble-transient></script>`;
+    // And whether a folder can be published from its menu (server/git.js).
+    tags += `\n<script src="${runtimeUrl('shell.js')}" data-home="${escapeHtml(config.home)}"${git ? ' data-git="1"' : ''} data-marble-transient></script>`;
     return source.includes('</body>')
       ? source.replace(/<\/body>/i, () => `${tags}\n</body>`)
       : source + tags;
@@ -623,8 +626,98 @@ export async function createDrive(config, { log = console, agentProviders = null
   let daily = null;
   // The console (server/console): on only where MARBLE_DRIVE_CONSOLE says so.
   let consoleApp = null;
+  // Publish (server/git.js): on only where MARBLE_DRIVE_GIT says so.
+  let git = null;
   // Why `agents` is null, when it is — for the boot line.
   let agentsWhy = withAgents ? agentsAllowed(config).why : 'not started for this command';
+
+  /** A file that is not a document, answered the one way the drive answers
+   *  one: inert unless the allowlist says otherwise, and seekable. */
+  function sendFile(req, res, file) {
+    const type = INLINE_TYPES[file.ext] ?? null;
+    const headers = {
+      'Cache-Control': 'no-store',
+      'Content-Type': type ?? 'application/octet-stream',
+      // Two headers doing one job, because getting this wrong is a script
+      // running on the drive's own origin with the drive's own cookie.
+      // `nosniff` stops the browser deciding for itself that a .txt is
+      // HTML, and the sandbox policy makes it inert even if it decides
+      // anyway.
+      'X-Content-Type-Options': 'nosniff',
+      'Content-Security-Policy': "default-src 'none'; sandbox",
+      // Anything not on the allowlist is downloaded rather than rendered.
+      // The list is short on purpose: `.svg` is missing from it because an
+      // SVG can carry script, and it looks like a picture right up until
+      // it is one.
+      'Content-Disposition':
+        `${type ? 'inline' : 'attachment'}; filename="${file.name.replace(/["\\]/g, '')}"`,
+      // A song is played by seeking into it. Without this a browser will
+      // play one from the top and refuse to move the playhead anywhere.
+      'Accept-Ranges': 'bytes',
+    };
+    // A PDF is the one exception to the sandbox. The browser's viewer is a
+    // plugin, and it refuses to draw inside a sandboxed page (or under a
+    // policy that forbids objects) — so a PDF under the header above opens
+    // as a blank tab. The viewer runs its own document, not script on
+    // this origin, so the file has nothing to reach even without it.
+    if (file.ext === 'pdf') delete headers['Content-Security-Policy'];
+
+    const range = /^bytes=(\d*)-(\d*)$/.exec(req.headers.range ?? '');
+    if (range && file.bytes > 0 && (range[1] || range[2])) {
+      // `bytes=500-` is from 500 on, `bytes=-500` is the last 500.
+      let start = range[1] ? Number(range[1]) : Math.max(0, file.bytes - Number(range[2]));
+      let end = range[1] && range[2] ? Math.min(Number(range[2]), file.bytes - 1) : file.bytes - 1;
+      if (start > end || start >= file.bytes) {
+        res.writeHead(416, { ...headers, 'Content-Range': `bytes */${file.bytes}` });
+        return res.end();
+      }
+      res.writeHead(206, {
+        ...headers,
+        'Content-Range': `bytes ${start}-${end}/${file.bytes}`,
+        'Content-Length': end - start + 1,
+      });
+      return file.open({ start, end }).pipe(res);
+    }
+    res.writeHead(200, { ...headers, 'Content-Length': file.bytes });
+    return file.open().pipe(res);
+  }
+
+  /**
+   * A file a document names from the root, the way a website names its own:
+   * `/thumbnails/a.png`. A document that is also a site is published from its
+   * folder, so that folder is its root — and the folder's `public/` too, which
+   * is where a site keeps what it serves at its root. In the Drive there is no
+   * such root, so the path is read beside the document that asked, which the
+   * browser names in `Referer`. Only after every route of the host's own has
+   * passed on it, so a document can never shadow one.
+   *
+   * Null for anything else: no document asking, another site asking, a path
+   * the grammar refuses, or a document rather than a file.
+   */
+  async function besideReferrer(req, route) {
+    let from;
+    let asked;
+    try {
+      from = new URL(req.headers.referer ?? '');
+      asked = decodeURIComponent(route);
+    } catch {
+      return null;
+    }
+    if (from.host !== (req.headers['x-forwarded-host'] || req.headers.host)) return null;
+    if (!from.pathname.startsWith('/a/')) return null;
+    let docPath;
+    try {
+      docPath = parsePath(decodeURIComponent(from.pathname.slice(3)), { allowRoot: false });
+    } catch {
+      return null;
+    }
+    const { parent } = splitPath(docPath);
+    for (const candidate of [joinPath(parent, asked), joinPath(parent, 'public', asked)]) {
+      const file = await store.readRaw(candidate).catch(() => null);
+      if (file) return file;
+    }
+    return null;
+  }
 
   const server = http.createServer(async (req, res) => {
     const url = new URL(req.url, `http://${req.headers.host ?? 'localhost'}`);
@@ -965,6 +1058,27 @@ export async function createDrive(config, { log = console, agentProviders = null
         return json(res, 200, { ok: await shares.off(String(body.id ?? '')) });
       }
 
+      // Publish (server/git.js): a folder that is its own git repository,
+      // committed and pushed. Owner-only like every /drive route, and a
+      // change that leaves the machine, so it also has to come from the
+      // Drive's own page — an Origin is required, not just tolerated.
+      if (route === '/drive/git' && req.method === 'GET') {
+        if (!git) return text(res, 404, 'not found');
+        return json(res, 200, await git.status(url.searchParams.get('path') ?? ''));
+      }
+      if (route === '/drive/git/publish' && req.method === 'POST') {
+        if (!git) return text(res, 404, 'not found');
+        if (!req.headers.origin || !sameOrigin(req)) {
+          return json(res, 403, { error: "publishing acts only for the Drive's own page" });
+        }
+        const body = await readJson(req, 4096);
+        const folder = parsePath(body.path, { allowRoot: false });
+        // Every write already queued for a document in the folder lands
+        // before anything is committed, so a publish never takes half a save.
+        await Promise.all([...queues].filter(([docPath]) => isInside(docPath, folder)).map(([, queued]) => queued));
+        return json(res, 200, await git.publish(folder));
+      }
+
       if (route === '/drive/settings' && req.method === 'GET') {
         return json(res, 200, await readDriveSettings(store.marbleDir));
       }
@@ -1101,52 +1215,7 @@ export async function createDrive(config, { log = console, agentProviders = null
       if (route === '/drive/file' && req.method === 'GET') {
         const file = await store.readRaw(url.searchParams.get('path') ?? '');
         if (!file) return text(res, 404, `no file "${url.searchParams.get('path')}"`);
-        const type = INLINE_TYPES[file.ext] ?? null;
-        const headers = {
-          'Cache-Control': 'no-store',
-          'Content-Type': type ?? 'application/octet-stream',
-          // Two headers doing one job, because getting this wrong is a script
-          // running on the drive's own origin with the drive's own cookie.
-          // `nosniff` stops the browser deciding for itself that a .txt is
-          // HTML, and the sandbox policy makes it inert even if it decides
-          // anyway.
-          'X-Content-Type-Options': 'nosniff',
-          'Content-Security-Policy': "default-src 'none'; sandbox",
-          // Anything not on the allowlist is downloaded rather than rendered.
-          // The list is short on purpose: `.svg` is missing from it because an
-          // SVG can carry script, and it looks like a picture right up until
-          // it is one.
-          'Content-Disposition':
-            `${type ? 'inline' : 'attachment'}; filename="${file.name.replace(/["\\]/g, '')}"`,
-          // A song is played by seeking into it. Without this a browser will
-          // play one from the top and refuse to move the playhead anywhere.
-          'Accept-Ranges': 'bytes',
-        };
-        // A PDF is the one exception to the sandbox. The browser's viewer is a
-        // plugin, and it refuses to draw inside a sandboxed page (or under a
-        // policy that forbids objects) — so a PDF under the header above opens
-        // as a blank tab. The viewer runs its own document, not script on
-        // this origin, so the file has nothing to reach even without it.
-        if (file.ext === 'pdf') delete headers['Content-Security-Policy'];
-
-        const range = /^bytes=(\d*)-(\d*)$/.exec(req.headers.range ?? '');
-        if (range && file.bytes > 0 && (range[1] || range[2])) {
-          // `bytes=500-` is from 500 on, `bytes=-500` is the last 500.
-          let start = range[1] ? Number(range[1]) : Math.max(0, file.bytes - Number(range[2]));
-          let end = range[1] && range[2] ? Math.min(Number(range[2]), file.bytes - 1) : file.bytes - 1;
-          if (start > end || start >= file.bytes) {
-            res.writeHead(416, { ...headers, 'Content-Range': `bytes */${file.bytes}` });
-            return res.end();
-          }
-          res.writeHead(206, {
-            ...headers,
-            'Content-Range': `bytes ${start}-${end}/${file.bytes}`,
-            'Content-Length': end - start + 1,
-          });
-          return file.open({ start, end }).pipe(res);
-        }
-        res.writeHead(200, { ...headers, 'Content-Length': file.bytes });
-        return file.open().pipe(res);
+        return sendFile(req, res, file);
       }
 
       // A picture of a file, for the tile it sits in: a PDF's first page, a
@@ -1301,6 +1370,11 @@ export async function createDrive(config, { log = console, agentProviders = null
         return json(res, 200, weigh(docPath, source));
       }
 
+      if (req.method === 'GET') {
+        const beside = await besideReferrer(req, route);
+        if (beside) return sendFile(req, res, beside);
+      }
+
       return text(res, 404, 'not found');
     } catch (err) {
       if (!(err instanceof PathError)) log.error(`[drive] ${req.method} ${route} — ${err.message}`);
@@ -1392,6 +1466,9 @@ export async function createDrive(config, { log = console, agentProviders = null
   } else if (config.console) {
     log.error?.(`[console] not started: ${consoleWhy.why}`);
   }
+  const gitWhy = gitAllowed(config);
+  if (gitWhy.ok) git = createGit({ root: config.root });
+  else if (config.git) log.error?.(`[git] publishing is off: ${gitWhy.why}`);
 
   // ------------------------------------------------------------------ helpers
 

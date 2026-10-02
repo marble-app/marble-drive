@@ -160,6 +160,9 @@ export function loadConfig(env = process.env) {
     spriteSocket: str('MARBLE_DRIVE_SPRITE_SOCKET', '/.sprite/api.sock'),
     // The console: every drive, from one page (server/console). admin-p2 only.
     console: bool('MARBLE_DRIVE_CONSOLE', false),
+    // Publish: commit and push a folder that is its own git repository
+    // (server/git.js). Off by default, and off anyway without a passphrase.
+    git: bool('MARBLE_DRIVE_GIT', false),
     // Stop the heaviest thing an agent runs before the machine runs out of
     // memory (server/memory-guard.js); off only to see a machine without it.
     memoryGuard: bool('MARBLE_DRIVE_MEMORY_GUARD', true),

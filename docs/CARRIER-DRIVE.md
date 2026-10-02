@@ -39,6 +39,7 @@ The `k-tree` card is explicit that this is the shape of the change:
 | `marble.drive.weigh(path)` | bytes, nodes, and how much of it is base64 |
 | `marble.drive.downloadHref(path)` | one self-contained file, blobs inlined |
 | `marble.drive.fileHref(path)` | where a `kind: 'file'` entry lives — the one address in the drive that is not a document's, so its path carries its extension |
+| `marble.drive.git.status(path)` / `.publish(path)` | a folder that is its own git repository: its branch, what changed, what is unpushed; and Publish, which commits what changed and pushes it. Only where the drive has `MARBLE_DRIVE_GIT` on, and 404 everywhere else |
 | `marble.drive.on(event, fn)` | `created`, `changed`, `moved`, `trashed`, `restored`, `removed`, or `'*'` |
 | `marble.drive.resolveBlobs(root)` | resolve `data-marble-blob` to a source. Registered already; exposed for a document that inserts markup itself |
 | `marble.drive.client` | this page's id, so the Drive can ignore its own echoes |
@@ -56,6 +57,14 @@ allowlist of types — because a file served under a type the browser executes i
 a script running on the drive's own origin with the drive's own cookie. A
 document asking for the href is deliberately not making that call, and could not
 make it correctly if it wanted to.
+
+**A site's own paths resolve beside it.** A document that is also a website
+names its files from the root, the way the site will be served:
+`/thumbnails/a.png`. When no route of the host's answers a path like that, the
+host reads it from the folder of the document that asked (the browser names it in
+`Referer`), then from that folder's `public/`, and serves it the way
+`fileHref` would. A link with `rel="noreferrer"` does not say who asked, so it
+finds nothing.
 
 **The blob resolution is page-only.** A document whose heavy bytes have been
 extracted carries `data-marble-blob="<hash>"` and a placeholder `src`. The

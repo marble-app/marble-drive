@@ -564,6 +564,27 @@ No passphrase or key reaches a log or a cache file; a passphrase reaches the
 page only on **Show** or **Copy**. A new drive's roster entry is written on
 admin-p2 (`~/.config/marble-drive/testers.json`), the machine that made it.
 
+## Publishing a folder with git
+
+A folder in the drive can be a git repository of its own: a website, say, whose
+documents are edited here and deployed by a push. Where the drive's settings say
+`MARBLE_DRIVE_GIT=1` and the drive has a passphrase, such a folder's menu in the
+sidebar has **Publish**: the open page's edits are saved, everything changed in
+the folder is committed as `Publish from Marble Drive: <names>`, and the branch is
+pushed to its upstream (`server/git.js`). The repository's own hooks run.
+
+- Only a folder with its own `.git` counts. Nothing walks up to a repository the
+  folder sits inside, and the drive root is never one.
+- Never forced. A remote with commits the folder lacks is refused with "pull them
+  first", and the commit stays in the folder.
+- A branch with no upstream is refused; push it once with `git push -u`.
+- The push uses whatever credentials git finds as the user the host runs as: on
+  the Mac, the login keychain or an SSH agent. `GIT_TERMINAL_PROMPT=0`, so a
+  missing credential fails rather than waits.
+- It is the one git change Marble makes on purpose
+  (`test/drive-git-boundary.test.js` is about everything else). It is on for
+  `bryan`'s Mac home (`mac-bryan.env`) and nowhere else.
+
 ## Tools
 
 | Command | Does |
