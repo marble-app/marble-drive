@@ -3018,8 +3018,9 @@ __ICON__
         // handler awaits, and after the await the event's currentTarget is gone.
         sheet.setAttribute('data-open', '1');
         const box = newButton.getBoundingClientRect();
-        sheet.style.left = Math.max(8, Math.min(box.left, innerWidth - sheet.offsetWidth - 8)) + 'px';
-        sheet.style.top = Math.max(8, Math.min(box.bottom + 6, innerHeight - sheet.offsetHeight - 8)) + 'px';
+        const r = room();
+        sheet.style.left = Math.max(r.left, Math.min(box.left, r.right - sheet.offsetWidth)) + 'px';
+        sheet.style.top = Math.max(r.top, Math.min(box.bottom + 6, r.bottom - sheet.offsetHeight)) + 'px';
         // Open to type: the field has the keyboard before the menu has finished
         // growing, so the first keystroke after New is the first word.
         document.querySelector('#ask').focus({ preventScroll: true });
@@ -3353,8 +3354,23 @@ __ICON__
         placeMenu(point);
       }
 
+      // What of the window this page has to itself. The shell's bar, its
+      // docked tree and a docked chat each take their share as a margin on the
+      // root, a chat floating over the page says what it covers, and a popover
+      // kept inside the bare window would open under any of them.
+      function room() {
+        const css = getComputedStyle(document.documentElement);
+        const cover = parseFloat(css.getPropertyValue('--marble-chat-cover')) || 0;
+        return {
+          left: (parseFloat(css.marginLeft) || 0) + 8,
+          top: (parseFloat(css.marginTop) || 0) + 8,
+          right: innerWidth - (parseFloat(css.marginRight) || 0) - cover - 8,
+          bottom: innerHeight - 8,
+        };
+      }
+
       // Hung under an element, or opened at a point, and kept inside the
-      // window either way. Measured after it opens, because what it holds
+      // page either way. Measured after it opens, because what it holds
       // sets how tall it is.
       function placeMenu(anchor) {
         menu.setAttribute('role', 'menu');
@@ -3363,25 +3379,26 @@ __ICON__
         menu.setAttribute('data-open', '1');
         const w = menu.offsetWidth;
         const h = menu.offsetHeight;
+        const r = room();
         let x;
         let y;
         if (anchor instanceof Element) {
           const box = anchor.getBoundingClientRect();
           x = box.left;
           y = box.bottom + 4;
-          if (y + h > innerHeight - 8) y = Math.max(8, box.top - h - 4);
+          if (y + h > r.bottom) y = Math.max(r.top, box.top - h - 4);
           menu.style.transformOrigin = 'top left';
         } else {
           x = anchor.x;
           y = anchor.y;
           // Near the bottom or right edge a context menu flips to open away
           // from the edge rather than sliding off it, the way a desktop does.
-          if (x + w > innerWidth - 8) x = Math.max(8, x - w);
-          if (y + h > innerHeight - 8) y = Math.max(8, y - h);
+          if (x + w > r.right) x = Math.max(r.left, x - w);
+          if (y + h > r.bottom) y = Math.max(r.top, y - h);
           menu.style.transformOrigin = (x < anchor.x ? 'right' : 'left') + ' ' + (y < anchor.y ? 'bottom' : 'top');
         }
-        menu.style.left = Math.max(8, Math.min(x, innerWidth - w - 8)) + 'px';
-        menu.style.top = Math.max(8, Math.min(y, innerHeight - h - 8)) + 'px';
+        menu.style.left = Math.max(r.left, Math.min(x, r.right - w)) + 'px';
+        menu.style.top = Math.max(r.top, Math.min(y, r.bottom - h)) + 'px';
       }
 
       // Where a thing can be reached from outside this tab: a document's own

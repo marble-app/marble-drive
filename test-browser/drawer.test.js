@@ -172,6 +172,8 @@ test('overlay leaves the page’s layout alone; pinning docks it, and it stays t
   await drawer.locator('.launcher').click();
   await opened(panel);
   assert.equal(await page.evaluate(() => document.documentElement.clientWidth), widthBefore, 'overlay does not reflow');
+  // It says what it covers, so the page's own menus can open clear of it.
+  assert.equal(await page.evaluate(() => getComputedStyle(document.documentElement).getPropertyValue('--marble-chat-cover').trim()), '420px');
 
   await drawer.locator('button.pin').click();
   await panel.locator('xpath=self::*[@data-pinned="true"]').waitFor();

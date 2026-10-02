@@ -9732,7 +9732,7 @@
       this.pinButton.setAttribute('aria-pressed', String(this.pinned));
       this.panel.style.width = phone ? '' : `${this.width}px`;
       const docked = this.isOpen && !phone && (shell ? shell.mode === 'fit' : this.pinned);
-      this.dock(docked);
+      this.dock(docked, this.isOpen && !phone && !docked ? this.width + gap : 0);
       // Pinned, the page is still there to act on and the tray goes with it.
       // Overlaying, the panel is the whole of what you are looking at — unless
       // it is the shell's card, which leaves the page beside it.
@@ -9780,25 +9780,30 @@
     }
 
     /** Docking moves the page, which is the whole point of pinning — and is
-     *  done with a transient stylesheet, so nothing about the document changes. */
-    dock(on) {
+     *  done with a transient stylesheet, so nothing about the document changes.
+     *  A chat that floats over the page instead moves nothing, but says how
+     *  much of the window's right side it covers (--marble-chat-cover), so a
+     *  menu the page opens near that edge can open clear of it. */
+    dock(on, cover = 0) {
       const existing = document.getElementById('marble-agent-dock');
-      if (on) {
-        // The width is said as well as taken, so chrome that centres itself on
-        // the page (Describe's toolbar) can centre on what is left of it.
-        const css = `html { margin-inline-end: ${this.width}px !important; --marble-dock-right: ${this.width}px; }`;
-        if (existing) {
-          existing.textContent = css;
-          return;
-        }
-        const style = document.createElement('style');
-        style.id = 'marble-agent-dock';
-        style.setAttribute('data-marble-transient', '');
-        style.textContent = css;
-        document.head.append(style);
-      } else if (existing) {
-        existing.remove();
+      // The width is said as well as taken, so chrome that centres itself on
+      // the page (Describe's toolbar) can centre on what is left of it.
+      const css = on ? `html { margin-inline-end: ${this.width}px !important; --marble-dock-right: ${this.width}px; }`
+        : cover ? `html { --marble-chat-cover: ${cover}px; }`
+        : '';
+      if (!css) {
+        existing?.remove();
+        return;
       }
+      if (existing) {
+        existing.textContent = css;
+        return;
+      }
+      const style = document.createElement('style');
+      style.id = 'marble-agent-dock';
+      style.setAttribute('data-marble-transient', '');
+      style.textContent = css;
+      document.head.append(style);
     }
 
     // ---------------------------------------------------------------- tray

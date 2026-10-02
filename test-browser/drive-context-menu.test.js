@@ -147,6 +147,33 @@ test('near the edges it flips to stay on screen', async () => {
   await page.context().close();
 });
 
+test('a docked chat or tree is an edge too: the menu stays on the page beside them', async () => {
+  const { page } = await openDrive({ width: 1000, height: 600 });
+  // What the shell and a pinned chat write: their share as margins on the root.
+  await page.addStyleTag({ content: 'html { margin-inline-end: 360px !important; margin-left: 120px !important; }' });
+  const items = await page.locator('#items').boundingBox();
+  const x = items.x + items.width - 6;
+  await page.mouse.click(x, items.y + 20, { button: 'right' });
+  await opened(page);
+  const box = await page.locator('#menu').boundingBox();
+  assert.ok(box.x >= 120 && box.x + box.width <= 1000 - 360, JSON.stringify({ box, x }));
+  assert.ok(Math.abs(box.x + box.width - x) < 3, JSON.stringify({ box, x }));
+  await page.context().close();
+});
+
+test('a chat floating over the page is an edge as well', async () => {
+  const { page } = await openDrive({ width: 1000, height: 600 });
+  // What a chat card over the page writes: what it covers, and no margin.
+  await page.addStyleTag({ content: 'html { --marble-chat-cover: 380px; }' });
+  const x = 1000 - 380 - 20;
+  const items = await page.locator('#items').boundingBox();
+  await page.mouse.click(x, items.y + 20, { button: 'right' });
+  await opened(page);
+  const box = await page.locator('#menu').boundingBox();
+  assert.ok(box.x + box.width <= 1000 - 380, JSON.stringify({ box, x }));
+  await page.context().close();
+});
+
 test('the arrow keys walk it and Enter presses the item', async () => {
   const { page } = await openDrive();
   await rightClick(page, row(page, 'Papers').locator('.name'));
