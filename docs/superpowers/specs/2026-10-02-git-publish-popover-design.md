@@ -51,6 +51,7 @@ Extends v1's status. Adds:
 | `web` | the repository's page on GitHub (`https://github.com/<owner>/<repo>`), or null |
 | `behind` | commits the upstream has that HEAD lacks; only when `fetch=1`, else null |
 | `fetched` | whether a fetch was attempted and succeeded; `false` with `fetchError` when it failed |
+| `message` | what a publish with no message would say, or null when nothing changed (the popover's placeholder) |
 
 `fetch=1` runs `git fetch --quiet <remote>` with a 10 s limit before counting.
 `changed` stays (the count) for v1 callers.
@@ -70,8 +71,8 @@ second request.
 
 ### The mark
 
-A filled GitHub mark in a 24-unit viewBox, `fill="currentColor"`, following
-`runtime/agent-ui.js`'s `BRAND` pattern. Drawn at 14 px in rows and 16 px in the
+GitHub's own mark (the 16-unit Octicon `mark-github`), filled with
+`currentColor`, as `runtime/agent-ui.js` draws its brand marks. Drawn at 14 px in rows and 16 px in the
 bar.
 
 ### Which repository a page is in
