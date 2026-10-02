@@ -448,6 +448,10 @@ __ICON__
   .pin .ico { display: flex; color: var(--folder); }
   .pin[data-kind="doc"] .ico { color: var(--accent-ink); }
   .item .name b { font-weight: 500; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  /* A folder that is its own git repository wears GitHub's mark after its
+     name, quietly; Publish is a chip in the toolbar while you are inside it. */
+  .item .name .gh, .chip .gh { width: .85rem; height: .85rem; flex: 0 0 auto; color: var(--faint); }
+  .chip .gh { color: inherit; }
   .item .row-meta { color: var(--faint); font-size: .82rem; white-space: nowrap; }
   /* What a drop would land in. One rule rather than one per target, because a
      row, a breadcrumb and a nav entry all mean the same thing when something is
@@ -1515,6 +1519,12 @@ __ICON__
       // A folder is drawn as a folder and a document as a window, because a
       // document here is an app you open. Written down once: the listing draws
       // these and so does a pin, and a pin is markup that goes in the file.
+      // GitHub's own mark (Octicons mark-github), as the shell draws it.
+      const GH = '<svg class="gh" viewBox="0 0 16 16" role="img" aria-label="Git repository"><path fill="currentColor" d=M8 0c4.42 0 8 3.58 8 8a8.013 8.013 0 0 1-5.45 7.59c-.4.08-.55-.17-.55-.38 0-.27.01-1.13.01-2.2 0-.75-.25-1.23-.54-1.48 1.78-.2 3.65-.88 3.65-3.95 0-.88-.31-1.59-.82-2.15.08-.2.36-1.02-.08-2.12 0 0-.67-.22-2.2.82-.64-.18-1.32-.27-2-.27-.68 0-1.36.09-2 .27-1.53-1.03-2.2-.82-2.2-.82-.44 1.1-.16 1.92-.08 2.12-.51.56-.82 1.28-.82 2.15 0 3.06 1.86 3.75 3.64 3.95-.23.2-.44.55-.51 1.07-.46.21-1.61.55-2.33-.66-.15-.24-.6-.83-1.23-.82-.67.01-.27.38.01.53.34.19.73.9.82 1.13.16.45.68 1.31 2.69.94 0 .67.01 1.3.01 1.49 0 .21-.15.45-.55.38A7.995 7.995 0 0 1 0 8c0-4.42 3.58-8 8-8Z"/></svg>';
+      // Whether this drive publishes repositories: the host says so on the
+      // shell's script tag. Read when drawing, by which time the tag is there.
+      const gitOn = () => document.querySelector('script[data-git="1"]') !== null;
+
       const ICON = {
         folder:
           '<svg class="glyph" viewBox="0 0 16 16" aria-hidden="true" focusable="false">' +
@@ -1701,6 +1711,7 @@ __ICON__
         // calls itself is its own business and lives in the tooltip, which is
         // where the two are allowed to disagree after a rename.
         el.querySelector('b').textContent = entry.name ?? leaf(entry.path);
+        if (entry.kind === 'folder' && entry.repo && gitOn()) el.querySelector('.name').insertAdjacentHTML('beforeend', GH);
         el.title = entry.title && entry.title !== entry.name ? entry.title : '';
         // A trashed folder is the one folder that says how much is in it in
         // words: the trash has no tile in list view, and "how much comes back"
@@ -2575,6 +2586,7 @@ __ICON__
 
           draw();
           drawCrumbs();
+          drawGitChip();
           drawPins();
           weigh();
         } catch (err) {
@@ -2600,6 +2612,41 @@ __ICON__
         kinds: entry.kinds,
         trashId: entry.id,
       });
+
+      /** The repository the folder on screen is in: the nearest folder at or
+       *  above it with its own `.git`. */
+      function repoAt(path) {
+        let node = root;
+        let found = null;
+        for (const part of path ? path.split('/') : []) {
+          node = (node?.children ?? []).find((child) => child.kind === 'folder' && leaf(child.path) === part);
+          if (!node) break;
+          if (node.repo) found = node.path;
+        }
+        return found;
+      }
+
+      /** Publish, in the toolbar, inside a repository. It asks the Drive's
+       *  chrome for the popover by event; this page names no route. */
+      function drawGitChip() {
+        let chip = document.querySelector('#git');
+        const repo = view === 'drive' && root && gitOn() ? repoAt(here) : null;
+        if (!repo) {
+          chip?.remove();
+          return;
+        }
+        if (!chip) {
+          chip = document.createElement('button');
+          chip.className = 'chip';
+          chip.id = 'git';
+          chip.setAttribute('data-marble-transient', '');
+          chip.innerHTML = GH.replace('role="img" aria-label="Git repository"', 'aria-hidden="true"') + '<span>Publish</span>';
+          chip.addEventListener('click', () => dispatchEvent(new CustomEvent('marble:publish', { detail: { path: chip.dataset.repo } })));
+          document.querySelector('#up').after(chip);
+        }
+        chip.dataset.repo = repo;
+        chip.title = `Publish ${leaf(repo)} to GitHub`;
+      }
 
       function at(folder, path) {
         if (!path) return folder;
@@ -2698,6 +2745,7 @@ __ICON__
         items.dataset.gallery = '1';
         items.replaceChildren(lead, grid);
         drawCrumbs();
+        drawGitChip();
       }
 
       // ------------------------------------------------------------ the brief
