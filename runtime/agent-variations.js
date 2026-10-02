@@ -13,6 +13,12 @@
 // compare surface that lays the versions out in the space the page actually
 // has left, measured rather than assumed.
 //
+// None of that is on the page at rest. A pill on every element that once had
+// a second version reads as clutter over the thing itself, so the pills (and
+// the document's own v1 v2 + × row) wait behind Reveal variations in the
+// launcher's menu, which is only there while this page has any. Asking for
+// variations (Describe's Explore, Try variations) reveals them when they land.
+//
 // Spec: docs/superpowers/specs/2026-09-21-describe-mode-design.md
 
 (() => {
@@ -21,6 +27,7 @@
   const ACTIVE = 'data-marble-active';
   const WHY = 'data-why';
   const MINE = 'marble-variations';
+  const REVEALED = 'marble-variations-revealed';
   const EASE = 'cubic-bezier(.2, .8, .3, 1)';
   const CARD_MIN = 240;
   const STAGE_MAX = 280;
@@ -41,6 +48,12 @@
        that shows, and the rest stand down. It sets no display on the shown
        child: whatever the document makes that element is what it stays. */
     marble-alt.${MINE}:has(> .marble-alt-shown) > [${ALT}]:not(.marble-alt-shown) { display: none; }
+
+    /* Hidden until revealed: this layer's pills, and the version row each
+       document's own affordances draw under a <marble-alt>. Which version
+       shows is untouched; only the ways of changing it stand down. */
+    html:not(.${REVEALED}) .marble-alts,
+    html:not(.${REVEALED}) .marble-variations-pill { display: none; }
 
     .marble-variations-layer {
       position: fixed; inset: 0; width: auto; height: auto; margin: 0; padding: 0; border: 0;
@@ -311,6 +324,59 @@
       pill.node.style.top = `${Math.round(top)}px`;
     };
 
+    // ---------------------------------------------------------------- reveal
+
+    // The row lives in the launcher's menu, which belongs to the drawer; the
+    // ask is cancelable and preventing it is the tray saying it took the row
+    // (the same handshake collab.js's Hide work uses). A page with no tray has
+    // no way to reveal, and keeps its versions out of sight like any other.
+    let revealed = false;
+    let trayHeld = false;
+    let sets = 0;
+    const askTray = () => {
+      if (trayHeld) return true;
+      trayHeld = !dispatchEvent(new CustomEvent('marble-tray:register', {
+        cancelable: true,
+        detail: {
+          id: 'variations',
+          order: 12,
+          hidden: true,
+          label: 'Reveal variations',
+          icon: GLYPHS.grid,
+          onSelect: () => reveal(!revealed),
+        },
+      }));
+      return trayHeld;
+    };
+    const offerTray = () => {
+      if (!askTray()) return;
+      dispatchEvent(new CustomEvent('marble-tray:update', {
+        detail: {
+          id: 'variations',
+          hidden: !sets,
+          label: revealed ? 'Hide variations' : 'Reveal variations',
+          active: revealed,
+        },
+      }));
+    };
+    addEventListener('marble-tray:ready', () => { trayHeld = false; offerTray(); });
+
+    const reveal = (on) => {
+      revealed = Boolean(on);
+      document.documentElement.classList.toggle(REVEALED, revealed);
+      if (!revealed) shutPanel();
+      offerTray();
+      if (!revealed) return;
+      for (const alt of pills.keys()) placePill(alt);
+      // Revealing is asking where they are. When none of them is in view,
+      // the first one is brought to it rather than leaving a menu that said
+      // there were some over a page that shows none.
+      const all = [...pills.keys()];
+      if (all.length && all.every((alt) => pills.get(alt).node.hidden)) {
+        all[0].scrollIntoView({ block: 'center', behavior: matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth' });
+      }
+    };
+
     const scan = () => {
       const live = new Set();
       for (const alt of document.querySelectorAll('marble-alt')) {
@@ -334,6 +400,11 @@
         alt.classList.remove(MINE);
       }
       for (const alt of live) placePill(alt);
+      // Any <marble-alt> counts for the menu, a single version included: the
+      // document's own row under it is where a second one is added.
+      sets = [...document.querySelectorAll('marble-alt')]
+        .filter((alt) => !alt.closest(`[${TRANSIENT}]`) && !alt.classList.contains('marble-forked')).length;
+      offerTray();
       if (open.alt && !live.has(open.alt)) shutPanel();
       else if (open.alt) fillPanel();
       // Something was asked for, and it has landed.
@@ -342,6 +413,7 @@
           const id = marble.id(alt);
           if (!waiting.has(id) && !waiting.has(marble.id(alt.parentElement))) continue;
           waiting.clear();
+          reveal(true);
           openPanel(alt);
           break;
         }

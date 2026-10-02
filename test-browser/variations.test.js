@@ -27,23 +27,99 @@ const STUDIO = `<!doctype html>
 </body></html>
 `;
 
-const host = await startDrive({ documents: { studio: STUDIO } });
+// A page with nothing to vary: the menu has no Reveal variations row for it.
+const PLAIN = `<!doctype html>
+<html><head><meta charset="utf-8"><title>Plain</title></head>
+<body data-marble-id="b"><p data-marble-id="p">One version of everything.</p></body></html>
+`;
+
+const host = await startDrive({ documents: { studio: STUDIO, plain: PLAIN } });
 test.after(() => host.close());
 
 const pages = [];
 test.after(async () => { for (const page of pages.splice(0)) await page.close().catch(() => {}); });
 
-const open = async ({ width = 1280, height = 860 } = {}) => {
+const drawer = (page) => page.locator('marble-agent-drawer');
+const revealRow = (page) => drawer(page).locator('.tool[data-tool="variations"]');
+
+/** Hover the chat circle and press Reveal variations (or Hide variations). */
+const pressReveal = async (page) => {
+  await drawer(page).locator('.launcher').hover();
+  await revealRow(page).waitFor({ state: 'visible' });
+  await revealRow(page).click();
+};
+
+const visit = async (path, { width = 1280, height = 860 } = {}) => {
   for (const page of pages.splice(0)) await page.close().catch(() => {});
   await host.reset();
   const { page } = await host.newPage();
   pages.push(page);
   await page.setViewportSize({ width, height });
-  await page.goto(`${host.base}/a/studio`);
+  await page.goto(`${host.base}/a/${path}`);
   await page.waitForFunction(() => Boolean(window.marble));
+  await page.waitForFunction(() => Boolean(document.querySelector('marble-agent-drawer')?.shadowRoot?.querySelector('.launcher')));
+  return page;
+};
+
+const open = async (size) => {
+  const page = await visit('studio', size);
+  await pressReveal(page);
   await page.locator('.marble-variations-pill:not([hidden])').waitFor();
   return page;
 };
+
+test('at rest the versions are out of sight, and the chat circle offers to reveal them', async () => {
+  const page = await visit('studio');
+  await page.locator('.marble-variations-pill').first().waitFor({ state: 'attached' });
+  assert.equal(await page.locator('.marble-variations-pill').isVisible(), false, 'no pill on the page by default');
+  assert.deepEqual(await shown(page), ['v1'], 'the version in use still shows');
+
+  await drawer(page).locator('.launcher').hover();
+  await revealRow(page).waitFor({ state: 'visible' });
+  assert.equal(await revealRow(page).locator('.tool-label').innerText(), 'Reveal variations');
+  await revealRow(page).click();
+  await pill(page).waitFor({ state: 'visible' });
+  assert.match(await pill(page).textContent(), /v1\s*1\/3/);
+
+  // The same row puts them away again, and says so while they are out.
+  await drawer(page).locator('.launcher').hover();
+  await revealRow(page).waitFor({ state: 'visible' });
+  assert.equal(await revealRow(page).locator('.tool-label').innerText(), 'Hide variations');
+  assert.equal(await revealRow(page).getAttribute('aria-pressed'), 'true');
+  await revealRow(page).click();
+  await pill(page).waitFor({ state: 'hidden' });
+});
+
+test('the document\'s own v1 v2 + × row waits behind the reveal too', async () => {
+  const page = await visit('studio');
+  // A bare fixture has no affordance script, so stand one row in for it.
+  await page.evaluate(() => {
+    const row = document.createElement('div');
+    row.className = 'marble-alts';
+    row.setAttribute('data-marble-transient', '');
+    row.textContent = 'v1 v2 v3 + ×';
+    document.querySelector('marble-alt').append(row);
+  });
+  assert.equal(await page.locator('.marble-alts').isVisible(), false);
+  await pressReveal(page);
+  await page.locator('.marble-alts').waitFor({ state: 'visible' });
+});
+
+test('a page with no variations has no Reveal variations row', async () => {
+  const page = await visit('plain');
+  await drawer(page).locator('.launcher').hover();
+  await drawer(page).locator('.tool[data-tool="new"]').waitFor({ state: 'visible' });
+  assert.equal(await revealRow(page).isVisible(), false);
+});
+
+test('asking for variations reveals them when they land', async () => {
+  const page = await visit('studio');
+  await page.evaluate(() => dispatchEvent(new CustomEvent('marble-variations:watch', { detail: { ids: ['card'] } })));
+  // Any op rescans; the set is already here, so the next scan finds it.
+  await page.evaluate(() => document.dispatchEvent(new CustomEvent('marble:ops')));
+  await panel(page).waitFor();
+  await pill(page).waitFor({ state: 'visible' });
+});
 
 const pill = (page) => page.locator('.marble-variations-pill');
 const panel = (page) => page.locator('.marble-variations-panel');
@@ -85,6 +161,10 @@ test('the pill steps through the set, and a step is an op the document keeps and
   await page.waitForFunction(() => document.querySelector('marble-alt').getAttribute('data-marble-active') === 'tight');
   await page.waitForTimeout(500);
   await page.reload();
+  // A reload comes back with the versions out of sight again; revealing is
+  // a look, not a setting the page keeps.
+  await page.waitForFunction(() => Boolean(document.querySelector('marble-agent-drawer')?.shadowRoot?.querySelector('.launcher')));
+  await pressReveal(page);
   await page.locator('.marble-variations-pill:not([hidden])').waitFor();
   assert.equal(await activeName(page), 'tight');
   assert.deepEqual(await shown(page), ['tight']);
