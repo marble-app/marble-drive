@@ -73,6 +73,9 @@
   // The Drive's own path, from the host (server/app.js), which is the one
   // that knows what this drive calls it.
   const HOME_DOC = document.currentScript?.dataset.home ?? null;
+  // Whether this drive publishes folders that are git repositories
+  // (server/git.js). The host says so only where MARBLE_DRIVE_GIT is on.
+  const GIT = document.currentScript?.dataset.git === '1';
   // Who files a pin from here, so the Drive open in another tab hears it.
   const CLIENT = Math.random().toString(36).slice(2, 10);
 
@@ -1575,12 +1578,12 @@
       }
     }
 
-    say(text) {
+    say(text, ms = 1600) {
       const toast = this.$('.toast');
       toast.textContent = text;
       toast.setAttribute('data-on', '');
       clearTimeout(this.toastTimer);
-      this.toastTimer = setTimeout(() => toast.removeAttribute('data-on'), 1600);
+      this.toastTimer = setTimeout(() => toast.removeAttribute('data-on'), ms);
     }
 
     // ------------------------------------------------------------ the tree
@@ -2446,6 +2449,13 @@
       const pinnable = Boolean(HOME_DOC && window.marble?.drive);
       const pinnedNow = this.pinned(path);
       const open = (href) => () => { location.href = href; };
+      // Publish is offered on a folder once the host has said it is a
+      // repository. Asked the first time its menu opens, and the menu is
+      // filled again with the answer if it is still open.
+      this.repos ??= new Map();
+      const publishable = GIT && folder && drive?.git;
+      const publish = publishable && this.repos.get(path) === true
+        && ['share', 'Publish', () => this.publish(path), { pick: 'publish' }];
       const entries = pin
         ? [
           // A pin is a shortcut: what it offers is the shortcut's, and the
@@ -2457,6 +2467,7 @@
           ['link', 'Copy link', () => this.copyText(new URL(this.hrefOf(subject), location.href).href, 'Link copied')],
           ['path', 'Copy path', () => this.copyText(path, 'Path copied')],
           '-',
+          publish,
           ['pin', 'Unpin', () => this.togglePin(subject)],
         ]
         : [
@@ -2471,6 +2482,8 @@
           ['path', 'Copy path', () => this.copyText(path, 'Path copied')],
           !folder && drive?.downloadHref && ['download', 'Download', () => { location.href = drive.downloadHref(path); }],
           '-',
+          publish,
+          '-',
           drive?.remove && ['trash', 'Move to trash', () => this.trash(subject), { danger: true }],
         ];
       this.hidePops();
@@ -2480,6 +2493,30 @@
       if (at) this.placeAt(this.menu, at.x, at.y);
       else this.place(this.menu, subject.row, 'left');
       this.menu.querySelector('button')?.focus({ preventScroll: true });
+      if (publishable && !this.repos.has(path)) {
+        drive.git.status(path).then((answer) => {
+          this.repos.set(path, answer.repo === true);
+          if (answer.repo && !this.menu.hidden && this.popRow === subject.row) this.rowMenu(subject, at);
+        }, () => {});
+      }
+    }
+
+    /** Commit and push a folder that is its own repository (server/git.js).
+     *  The page this is on may still have edits on their way to disk, and the
+     *  commit has to have them, so they are sent first. A refusal stays up
+     *  long enough to read, because it says what to do next. */
+    async publish(path) {
+      this.say('Publishing…', 60_000);
+      try {
+        await window.marble.flush?.();
+        const done = await window.marble.drive.git.publish(path);
+        const count = done.files.length;
+        this.say(done.nothing
+          ? 'Nothing to publish'
+          : count ? `Published ${count} ${count === 1 ? 'file' : 'files'} to ${done.branch}` : `Published to ${done.branch}`, 3000);
+      } catch (err) {
+        this.say(err?.message || 'Could not publish', 8000);
+      }
     }
 
     async copyText(text, said) {

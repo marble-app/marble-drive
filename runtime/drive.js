@@ -282,6 +282,14 @@
       off: (id) => ask('/drive/shares/off', { method: 'POST', body: { id } }),
     };
 
+    // Publish: a folder that is its own git repository, committed and pushed
+    // (server/git.js). Only where the drive turned it on — elsewhere both
+    // answer 404, and the shell never offers it.
+    const git = {
+      status: (path) => ask(`/drive/git?path=${encodeURIComponent(path)}`),
+      publish: (path) => ask('/drive/git/publish', { method: 'POST', body: { path } }),
+    };
+
     // A self-contained copy, blobs and all. The promise that makes blobs safe
     // to take is only a promise if it is one click away.
     const downloadHref = (path) => `/drive/download?path=${encodeURIComponent(path)}`;
@@ -535,6 +543,7 @@
       restore,
       weigh,
       shares,
+      git,
       downloadHref,
       fileHref,
       thumbHref,

@@ -1,8 +1,11 @@
-// Using Marble never makes a git change. A development drive sits inside the
-// app's checkout, so this stands one up: a git repository with the drive
-// ignored inside it, the host working in the drive, and git asked from the
-// drive the way an agent's turn would ask it (server/agent/runner.js sets the
-// same ceiling).
+// Using Marble never makes a git change. (The one exception is Publish, which a
+// drive turns on with MARBLE_DRIVE_GIT and which commits only a folder that is
+// its own repository: server/git.js, test/git-publish.test.js.)
+//
+// A development drive sits inside the app's checkout, so this stands one up: a
+// git repository with the drive ignored inside it, the host working in the
+// drive, and git asked from the drive the way an agent's turn would ask it
+// (server/agent/runner.js sets the same ceiling).
 
 import assert from 'node:assert/strict';
 import { execFileSync, spawnSync } from 'node:child_process';
