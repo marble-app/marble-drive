@@ -259,3 +259,63 @@ test('a message over 500 characters is refused and nothing is committed', async 
   assert.equal(git(site, 'rev-parse', 'HEAD'), before);
   assert.equal(git(remote, 'rev-parse', 'main'), before);
 });
+
+test('a branch that pushes to a URL with a token in it never shows the token', async (t) => {
+  const { ask, site } = await boot(t);
+  git(site, 'config', 'branch.main.remote', 'https://someone:ghp_SECRET123@127.0.0.1:9/o/r.git');
+  const said = await (await ask('/drive/git?path=Site&fetch=1')).text();
+  assert.doesNotMatch(said, /ghp_SECRET123/);
+  assert.doesNotMatch(said, /someone:/);
+});
+
+test("a repository inside the folder is neither a change nor committed as a link", async (t) => {
+  const { status, publish, site } = await boot(t);
+  // One untracked, with its own commit: `add -A` would file it as a gitlink.
+  const inner = path.join(site, 'Embedded');
+  await fsp.mkdir(inner);
+  git(inner, 'init', '-q', '-b', 'main');
+  git(inner, 'config', 'user.name', 'T');
+  git(inner, 'config', 'user.email', 't@x');
+  await fsp.writeFile(path.join(inner, 'x.txt'), 'x');
+  git(inner, 'add', '-A');
+  git(inner, 'commit', '-qm', 'inner');
+  const answer = await (await status('Site')).json();
+  assert.deepEqual(answer.files, []);
+  await fsp.writeFile(path.join(site, 'page.mrbl'), DOC.replace('Page</h1>', 'Outer</h1>'));
+  const res = await publish('Site');
+  assert.equal(res.status, 200);
+  assert.equal(git(site, 'ls-tree', 'HEAD', 'Embedded'), '');
+});
+
+test('edits inside a tracked inner repository do not make the folder look changed', async (t) => {
+  const { status, publish, site } = await boot(t);
+  const inner = path.join(site, 'Sub');
+  await fsp.mkdir(inner);
+  git(inner, 'init', '-q', '-b', 'main');
+  git(inner, 'config', 'user.name', 'T');
+  git(inner, 'config', 'user.email', 't@x');
+  await fsp.writeFile(path.join(inner, 'x.txt'), 'x');
+  git(inner, 'add', '-A');
+  git(inner, 'commit', '-qm', 'inner');
+  git(site, 'add', 'Sub');
+  git(site, 'commit', '-qm', 'track Sub');
+  git(site, 'push', '-q');
+  await fsp.writeFile(path.join(inner, 'x.txt'), 'edited, not committed');
+  const answer = await (await status('Site')).json();
+  assert.deepEqual(answer.files, []);
+  const res = await publish('Site');
+  assert.equal(res.status, 200);
+  assert.equal((await res.json()).nothing, true);
+});
+
+test('asking for status never writes the index, so it cannot hold a lock a publish needs', async (t) => {
+  const { status, site } = await boot(t);
+  const index = path.join(site, '.git/index');
+  // Same bytes, newer time: an ordinary `git status` refreshes the index for it.
+  const later = new Date(Date.now() + 5_000);
+  await fsp.utimes(path.join(site, 'page.mrbl'), later, later);
+  const before = (await fsp.stat(index)).mtimeMs;
+  await new Promise((r) => setTimeout(r, 20));
+  await (await status('Site')).json();
+  assert.equal((await fsp.stat(index)).mtimeMs, before);
+});
