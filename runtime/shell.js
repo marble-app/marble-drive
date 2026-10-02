@@ -732,7 +732,8 @@
       // the Drive page's toolbar does, inside a repository (templates/drive.mrbl).
       addEventListener('marble:publish', (event) => {
         const path = event.detail?.path;
-        if (GIT && window.marble?.drive?.git && typeof path === 'string' && path) this.togglePublishing(path);
+        const anchor = event.detail?.anchor instanceof Element ? event.detail.anchor : null;
+        if (GIT && window.marble?.drive?.git && typeof path === 'string' && path) this.togglePublishing(path, anchor);
       });
       this.bindMove();
       this.arrive();
@@ -1469,7 +1470,9 @@
       pop.style.top = `${r.bottom + 6}px`;
       if (align === 'right') {
         pop.style.left = '';
-        pop.style.right = `${Math.max(8, innerWidth - r.right)}px`;
+        // Never past the left edge either: on a phone the button is nearer
+        // the middle than the popover is wide.
+        pop.style.right = `${Math.max(8, Math.min(innerWidth - r.right, innerWidth - pop.offsetWidth - 8))}px`;
       } else {
         pop.style.right = '';
         pop.style.left = `${Math.max(8, Math.min(r.left, innerWidth - pop.offsetWidth - 8))}px`;
@@ -1679,7 +1682,10 @@
       if (files.length > 8) list.append(h('li', 'more', `and ${files.length - 8} more`));
       if (status.message) $('.msg').placeholder = status.message;
       go.disabled = Boolean(this.gitBusy) || !status.upstream || status.behind > 0 || (!files.length && !(status.ahead > 0));
-      last.hidden = !status.last;
+      // Said once: just after a publish, the line under the button already
+      // names this commit.
+      const result = $('.result');
+      last.hidden = !status.last || (!result.hidden && result.dataset.commit === status.last.commit);
       if (status.last) last.replaceChildren(`${status.ahead > 0 || files.length ? 'Last commit' : 'Last published'} ${whenOf(status.last.when)} · `, this.commitLink(status.last));
     }
 
@@ -1718,6 +1724,7 @@
         const done = await window.marble.drive.git.publish(path, { message: pop.querySelector('.msg').value });
         const said = done.nothing ? 'Nothing to publish' : `Published to ${done.branch} · `;
         result.replaceChildren(said, ...(done.nothing ? [] : [this.commitLink(done.last)]));
+        result.dataset.commit = done.last?.commit ?? '';
         result.hidden = false;
         pop.querySelector('.msg').value = '';
         if (pop.hidden) this.say(done.nothing ? 'Nothing to publish' : `Published ${nameOf(path)} to ${done.branch}`, 3000);
@@ -1729,6 +1736,7 @@
         }
       } catch (err) {
         result.textContent = err?.message || 'Could not publish';
+        result.dataset.commit = '';
         result.setAttribute('data-bad', '');
         result.hidden = false;
         label.textContent = 'Publish';

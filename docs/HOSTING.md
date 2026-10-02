@@ -562,10 +562,16 @@ admin-p2 (`~/.config/marble-drive/testers.json`), the machine that made it.
 
 A folder in the drive can be a git repository of its own: a website, say, whose
 documents are edited here and deployed by a push. Where the drive's settings say
-`MARBLE_DRIVE_GIT=1` and the drive has a passphrase, such a folder's menu in the
-sidebar has **Publish**: the open page's edits are saved, everything changed in
-the folder is committed as `Publish from Marble Drive: <names>`, and the branch is
-pushed to its upstream (`server/git.js`). The repository's own hooks run.
+`MARBLE_DRIVE_GIT=1` and the drive has a passphrase, such a folder shows GitHub's
+mark (on its row in the tree when hovered, after its name on the Drive page),
+and inside it **Publish** sits beside Share in the bar and in the Drive page's
+toolbar; the folder's menu in the tree has it too. Each opens one popover: the
+branch and its GitHub page, whether everything is published (checked against
+GitHub when it opens), the changed files, an optional message, and Publish. The
+open page's edits are saved, everything changed in the folder is committed with
+the message or as `Publish from Marble Drive: <names>`, and the branch is pushed
+to its upstream (`server/git.js`); the popover then links the commit. The
+repository's own hooks run.
 
 - Only a folder with its own `.git` counts. Nothing walks up to a repository the
   folder sits inside, and the drive root is never one.
