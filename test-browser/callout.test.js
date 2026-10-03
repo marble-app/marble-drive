@@ -397,20 +397,31 @@ test('a brief sent from the line carries the selection, is marked part by part, 
   await marksGone(page);
   assert.equal(await line(page).count(), 0, 'a change that landed opens nothing');
 
+  // Nothing of the change stays on the page: no card with Changed, Undo and
+  // Done. Resting on it draws it with its own bar instead (change-review.js).
+  await page.waitForFunction(() => window.marbleReview?.groups().length === 1, null, { timeout: 5000 });
+  assert.equal(await page.locator('.marble-review-bar').count(), 0, 'at rest, nothing');
+  // Rest on the question it added.
+  const added = await page.locator('[data-marble-id="q"] li').last().boundingBox();
+  await page.mouse.move(added.x + 20, added.y + added.height / 2);
+  await page.locator('.marble-review-bar').waitFor({ timeout: 2000 });
+  assert.deepEqual(await page.locator('.marble-review-bar button').allInnerTexts(), ['Change more', 'Keep', 'Undo']);
+  assert.equal(await page.locator('.marble-review-add').count(), 1, 'the question it added is tinted');
+
   await page.evaluate(() => {
     window.__undoTinted = false;
     new MutationObserver(() => {
       if (document.querySelector('.marble-change-tint')) window.__undoTinted = true;
     }).observe(document.querySelector('.marble-change-layer'), { childList: true, subtree: true });
   });
-  await page.evaluate(async () => {
-    const [s] = await window.marble.agent.conversations();
-    const d = await window.marble.agent.conversation(s.id);
-    await window.marble.agent.undo(d.turns.at(-1).id);
-  });
+  await page.locator('.marble-review-bar button[data-act="undo"]').click();
   await page.waitForFunction(() => document.querySelectorAll('[data-marble-id="q"] li').length === 2);
-  // The undo is tinted where it lands, and leaves nothing behind.
+  // The undo is tinted where it lands, the bar offers Redo while you are
+  // there, and nothing is left behind once you leave.
   await page.waitForFunction(() => window.__undoTinted, null, { timeout: 5000 });
+  await page.locator('.marble-review-bar button[data-act="redo"]').waitFor();
+  await page.mouse.move(1100, 60);
+  await page.waitForFunction(() => !document.querySelector('.marble-review-group'), null, { timeout: 2000 });
   await marksGone(page);
   assert.equal(await page.locator('.marble-zone').count(), 0);
   assert.equal(await page.locator('.marble-callout').count(), 0);

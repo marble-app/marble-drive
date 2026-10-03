@@ -414,7 +414,7 @@
       convo.setAttribute('data-folded', '');
       el.append(head, convo);
 
-      const record = { id, ids: [...ids], asked: [...ids], el, convo, head, live, status, actions, tools, state, changed: new Set(), docked: false, title: '', zone: null, said: false, owner, label: '' };
+      const record = { id, ids: [...ids], asked: [...ids], el, convo, head, live, status, actions, tools, state, changed: new Set(), docked: false, title: '', zone: null, said: false, owner, label: '', described: owner === 'describe' };
       records.push(record);
 
       // The two corner controls. The side icon puts the card away and opens
@@ -539,10 +539,16 @@
 
     // ------------------------------------------------------------ finishing
 
+    // Since v5 an ask's change is reviewed where it happened: rest on it, or
+    // Show what changed, for Keep, Undo and Change more (change-review.js).
+    // The card is not used for asks any more, so it says nothing at the end
+    // of one. Describe mode's card still closes with what it changed and
+    // Done, which puts the marks it was made of away and reviews the chat.
     function endRow(record, event) {
       delete record.el.dataset.live;
       record.zone = null;
       syncDock(record);
+      if (!record.described) return;
       const n = record.changed.size;
       const ok = event.type === 'turn.completed';
       record.status.textContent = !ok
@@ -552,29 +558,13 @@
       // A failure is a thing to read, not a thing to summarise in one line.
       if (event.type === 'turn.failed') record.convo.removeAttribute('data-folded');
       record.actions.replaceChildren();
-      if (ok && n) record.actions.append(button('Undo', 'Undo this turn', () => undoLast(record)));
+      // Undo is the change's own bar now, on the page (change-review.js).
       record.actions.append(button('Done', 'Mark reviewed and put the callout away', () => done(record)));
       placeCard(record);
     }
 
-    async function undoLast(record) {
-      let detail = null;
-      try { detail = await agent.conversation(record.id, { turns: 0 }); } catch { return; }
-      const turn = [...(detail?.turns ?? [])].reverse().find((t) => t.status === 'completed' && t.applied && !t.undoneAt);
-      if (!turn) return;
-      try { await agent.undo(turn.id); } catch { return; }
-      record.changed.clear();
-      // Undo is a verdict on the change, not on the wish: the card comes back
-      // on the element with Try variations first, since what was made was
-      // not it (v2). Seeing it and undoing it is reviewing it.
-      // What the card was asked about, not what the agent last read.
-      const ids = [...(record.asked ?? record.ids)];
-      await done(record);
-      if (elementsOf(ids).length) openCard({ ids, first: 'variations', from: 'undo' });
-    }
-
     // Seeing it and saying done is reviewing it — the rule the Focus pane
-    // already uses. The trail goes with the review.
+    // already uses. Describe mode's card only: an ask is kept from its bar.
     async function done(record) {
       if (record.id) {
         try { await agent.markReviewed(record.id); } catch { /* the callout still goes */ }
