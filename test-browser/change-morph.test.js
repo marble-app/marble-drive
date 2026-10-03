@@ -51,6 +51,29 @@ const MANY = `<!doctype html>
 </body></html>
 `;
 
+// A long list, to scroll down and change what is above the window.
+const ROWS = `<!doctype html>
+<html><head><meta charset="utf-8"><title>Rows</title>
+<style>body { font: 15px/1.5 system-ui, sans-serif; margin: 40px; } ul { padding: 0; list-style: none; } li { height: 40px; margin: 0; }
+  .pinned { position: fixed; right: 20px; top: 20px; width: 120px; }</style></head>
+<body data-marble-id="b">
+  <ul data-marble-id="u">${Array.from({ length: 60 }, (_, i) => `<li data-marble-id="r${i}">Row ${i}</li>`).join('')}</ul>
+  <div class="pinned" data-marble-id="pin">Pinned</div>
+</body></html>
+`;
+
+// A section that brings its own sheet: once it is gone, its rule is too.
+const SHEET = `<!doctype html>
+<html><head><meta charset="utf-8"><title>Sheet</title>
+<style>body { font: 15px/1.5 system-ui, sans-serif; margin: 40px; }</style></head>
+<body data-marble-id="b">
+  <section data-marble-id="s"><style>p.flag { color: rgb(255, 0, 0); }</style><link rel="stylesheet" href="data:text/css,p.flag%7Bbackground-color%3Argb(0%2C0%2C255)%7D"><p>The section</p><svg width="20" height="20"><style>p.flag { outline: 3px solid rgb(0, 128, 0); }</style><rect width="20" height="20"/></svg></section>
+  <p class="flag" data-marble-id="f">A paragraph the section's sheet colours</p>
+  <p data-marble-id="ghostly" style="opacity: 0">Not seen</p>
+  <div data-marble-id="veil" style="opacity: 0"><p data-marble-id="under">Under a veil</p></div>
+</body></html>
+`;
+
 const CARD_IDS = ['c1', 'c2', 'c3', 'c4', 'c5', 'c6'];
 
 const SCRIPTS = {
@@ -64,7 +87,7 @@ const SCRIPTS = {
   ],
 };
 
-const host = await startDrive({ scripts: SCRIPTS, documents: { cards: CARDS, many: MANY } });
+const host = await startDrive({ scripts: SCRIPTS, documents: { cards: CARDS, many: MANY, rows: ROWS, sheet: SHEET } });
 test.after(() => host.close());
 
 const pages = [];
@@ -192,8 +215,8 @@ test('a sheet that rounds six cards plays each card’s corners from 0 to 16px, 
   assert.deepEqual(seen.keys, ['0px', '16px']);
   assert.equal(seen.easing, 'cubic-bezier(0.22, 1, 0.36, 1)');
   assert.equal(seen.fill, 'backwards', 'the corners hold what was until their batch starts');
-  assert.ok(new Set(seen.delays).size > 1, `the cards start in batches, not all at once (${seen.delays})`);
-  assert.ok(seen.delays.every((d) => d >= 0 && d <= 600));
+  // Six cards may be dealt as one batch of six; the dealer's own test covers the batches.
+  assert.ok(seen.delays.every((d) => d >= 0 && d <= 600), `delays ${seen.delays}`);
   assert.equal(seen.radius, '16px');
   assert.equal(seen.left, 0, 'no motion of the engine’s is left on the page');
   assert.deepEqual(seen.phases.filter(([, phase]) => phase === 'end'), [['look', 'end']]);
@@ -490,4 +513,201 @@ test('a followed turn that restyles six cards lifts each card’s tint only once
   assert.doesNotMatch(source, /marble-morph|marble-change/);
   assert.deepEqual(errors.filter((message) => !/favicon/.test(message)), []);
   await host.reset();
+});
+
+// ------------------------------------------------------------ review, round 1
+
+test('a row put in above the window moves nothing in view: on a scrolled page each row is first drawn where it was', async () => {
+  const { page } = await open({ doc: 'rows' });
+  await page.evaluate(() => window.scrollTo(0, 1000));
+  await page.waitForFunction(() => scrollY === 1000);
+  const seen = await page.evaluate(async (ours) => {
+    const viewOf = (id) => document.querySelector(`[data-marble-id="${id}"]`).getBoundingClientRect();
+    const shown = Array.from({ length: 60 }, (_, i) => `r${i}`)
+      .filter((id) => { const r = viewOf(id); return r.top >= 0 && r.bottom <= innerHeight; });
+    const was = Object.fromEntries([...shown, 'pin'].map((id) => [id, Math.round(viewOf(id).top)]));
+    const inserts = [{ parentId: 'u', beforeId: 'r3', ids: ['n'] }];
+    const snap = window.marbleMorph.capture(['n'], { kind: 'structure', inserts });
+    window.marble.apply({ type: 'insert', parentId: 'u', beforeId: 'r3', html: '<li data-marble-id="n" style="height: 200px">A tall new row</li>' });
+    const played = window.marbleMorph.play(snap, {});
+    const moved = [...shown, 'pin'].filter((id) => document.querySelector(`[data-marble-id="${id}"]`).getAnimations()
+      .some((a) => a.id === ours && a.effect.getKeyframes().some((k) => /translate/.test(k.transform ?? ''))));
+    const first = await new Promise((resolve) => requestAnimationFrame(() => resolve(
+      Object.fromEntries([...shown, 'pin'].map((id) => [id, Math.round(viewOf(id).top)])),
+    )));
+    await played;
+    return { shown: shown.length, was, first, moved, scrolled: scrollY };
+  }, OURS);
+  assert.ok(seen.shown > 5, `rows in view (${seen.shown})`);
+  assert.equal(seen.scrolled, 1200, 'the page kept its place by scrolling past the new row');
+  assert.deepEqual(seen.moved, [], 'nothing in view slides');
+  assert.deepEqual(seen.first, seen.was, 'every row in view, and what is pinned, is first drawn where it was');
+});
+
+test('a ghost carries no sheet: a section taken out with its own style never restyles the page while it fades', async () => {
+  const { page } = await open({ doc: 'sheet' });
+  const seen = await page.evaluate(async () => {
+    const flag = document.querySelector('[data-marble-id="f"]');
+    const look = () => {
+      const css = getComputedStyle(flag);
+      return `${css.color}|${css.backgroundColor}|${css.outlineStyle}`;
+    };
+    const before = look();
+    const snap = window.marbleMorph.capture(['s'], { kind: 'structure', removes: ['s'] });
+    window.marble.apply({ type: 'remove', id: 's' });
+    const after = look();
+    const played = window.marbleMorph.play(snap, {});
+    const looks = new Set([look()]);
+    const ghost = document.querySelector('.marble-morph-layer')?.firstElementChild;
+    const sheets = ghost ? ghost.querySelectorAll('style, link').length + (ghost.matches('style, link') ? 1 : 0) : -1;
+    let watching = true;
+    const watch = () => { looks.add(look()); if (watching) requestAnimationFrame(watch); };
+    requestAnimationFrame(watch);
+    await played;
+    watching = false;
+    return { before, after, looks: [...looks], sheets, text: ghost?.textContent.trim() ?? null };
+  });
+  assert.notEqual(seen.before, seen.after, 'the section’s sheet coloured the paragraph until it went');
+  assert.equal(seen.text, 'The section', 'the section is drawn fading where it stood');
+  assert.equal(seen.sheets, 0, 'the ghost has no style or stylesheet link of its own');
+  assert.deepEqual(seen.looks, [seen.after], 'the paragraph never takes the sheet back while the ghost fades');
+});
+
+test('what was not seen leaves no ghost: an element at opacity 0, or under one, is not drawn fading', async () => {
+  const { page } = await open({ doc: 'sheet' });
+  const seen = await page.evaluate(async () => {
+    const shown = [];
+    const snap = window.marbleMorph.capture(['ghostly', 'under'], { kind: 'structure', removes: ['ghostly', 'under'] });
+    window.marble.apply({ type: 'remove', id: 'ghostly' });
+    window.marble.apply({ type: 'remove', id: 'under' });
+    const played = window.marbleMorph.play(snap, {});
+    const look = () => {
+      for (const ghost of document.querySelector('.marble-morph-layer')?.children ?? []) shown.push(Number(getComputedStyle(ghost).opacity));
+    };
+    look();
+    await new Promise(requestAnimationFrame);
+    look();
+    await played;
+    return shown;
+  });
+  assert.ok(seen.every((opacity) => opacity === 0), `no ghost is seen (${seen})`);
+});
+
+test('a click that leaves a caret in plain words holds nothing still; a caret in editable words, a selection or focus does', async () => {
+  const { page } = await open();
+  const radiusMoves = (ids) => page.evaluate(async ({ cards, ours }) => {
+    const snap = window.marbleMorph.capture(['look'], { kind: 'look' });
+    const radius = document.querySelector('[data-marble-id="look"]').textContent.includes('16px') ? '0' : '16px';
+    window.marble.apply({ type: 'setInner', id: 'look', html: `.card { border-radius: ${radius}; }` });
+    const played = window.marbleMorph.play(snap, {});
+    const moving = Object.fromEntries(cards.map((id) => [id, document.querySelector(`[data-marble-id="${id}"]`).getAnimations().some((a) => a.id === ours)]));
+    await played;
+    return moving;
+  }, { cards: ids, ours: OURS });
+  // A click in plain words: a collapsed selection there, focus nowhere.
+  await page.evaluate(() => {
+    document.activeElement?.blur?.();
+    getSelection().collapse(document.querySelector('[data-marble-id="c1"]').firstChild, 1);
+  });
+  assert.deepEqual(await radiusMoves(['c1', 'c2']), { c1: true, c2: true }, 'a caret in words that cannot be edited holds nothing');
+  // Words selected: what holds the selection's start stays still.
+  await page.evaluate(() => {
+    const range = document.createRange();
+    range.selectNodeContents(document.querySelector('[data-marble-id="c2"]'));
+    getSelection().removeAllRanges();
+    getSelection().addRange(range);
+  });
+  assert.deepEqual(await radiusMoves(['c1', 'c2']), { c1: true, c2: false });
+  // A caret in editable words.
+  await page.evaluate(() => {
+    getSelection().removeAllRanges();
+    const card = document.querySelector('[data-marble-id="c4"]');
+    card.focus();
+    getSelection().collapse(card.firstChild, 2);
+  });
+  assert.deepEqual(await radiusMoves(['c1', 'c4']), { c1: true, c4: false });
+});
+
+test('a part never starts after it has ended, even when its motion is cut short', async () => {
+  const { page } = await open();
+  const phases = await page.evaluate(async (ours) => {
+    const out = [];
+    const inserts = [{ parentId: 'l', beforeId: 'l2', ids: ['l9'] }];
+    const snap = window.marbleMorph.capture(['c1', 'l9'], { kind: 'mixed', inserts });
+    window.marble.apply({ type: 'setAttr', id: 'c1', name: 'class', value: 'card alert' });
+    window.marble.apply({ type: 'insert', parentId: 'l', beforeId: 'l2', html: '<li data-marble-id="l9">What is a part?</li>' });
+    const played = window.marbleMorph.play(snap, { onPart: (id, phase) => out.push(`${id}:${phase}`) });
+    // One part cut short while the rest still move (as a hand landing on it does).
+    for (const a of document.querySelector('[data-marble-id="c1"]').getAnimations()) if (a.id === ours) a.cancel();
+    await played;
+    await new Promise((resolve) => setTimeout(resolve, 700));
+    return out;
+  }, OURS);
+  for (const id of ['c1', 'l9']) {
+    const mine = phases.filter((p) => p.startsWith(`${id}:`));
+    assert.deepEqual(mine, [`${id}:start`, `${id}:end`], `${id} went ${mine}`);
+  }
+});
+
+test('a hand that lands mid-motion stops it at once: a press, focus, or a drag beginning', async () => {
+  const { page } = await open();
+  const seen = await page.evaluate(async (ours) => {
+    const ofOurs = (el) => el.getAnimations().filter((a) => a.id === ours).length;
+    const byId = (id) => document.querySelector(`[data-marble-id="${id}"]`);
+    const inserts = [{ parentId: 'l', beforeId: 'l1', ids: ['l9'] }];
+    const snap = window.marbleMorph.capture(['l9', 'look'], { kind: 'mixed', inserts });
+    window.marble.apply({ type: 'insert', parentId: 'l', beforeId: 'l1', html: '<li data-marble-id="l9">What is a part?</li>' });
+    window.marble.apply({ type: 'setInner', id: 'look', html: '.card { border-radius: 16px; }' });
+    const played = window.marbleMorph.play(snap, {});
+    await new Promise((resolve) => setTimeout(resolve, 60));
+    const out = { before: { l3: ofOurs(byId('l3')), c2: ofOurs(byId('c2')), c3: ofOurs(byId('c3')), l2: ofOurs(byId('l2')) } };
+    // A press on a row sliding into place.
+    byId('l3').dispatchEvent(new PointerEvent('pointerdown', { bubbles: true, composed: true, pointerId: 1 }));
+    out.pressed = ofOurs(byId('l3'));
+    out.others = ofOurs(byId('l2'));
+    // Focus coming to a card whose corners are moving.
+    byId('c4').focus();
+    out.focused = ofOurs(byId('c4'));
+    // A drag beginning on another.
+    byId('c2').classList.add('marble-dragging');
+    await Promise.resolve();
+    out.dragged = ofOurs(byId('c2'));
+    byId('c3').setAttribute('data-marble-dragging', '');
+    await Promise.resolve();
+    out.marked = ofOurs(byId('c3'));
+    out.still = ofOurs(byId('c5'));
+    await played;
+    return out;
+  }, OURS);
+  assert.ok(seen.before.l3 > 0 && seen.before.c2 > 0 && seen.before.c3 > 0 && seen.before.l2 > 0, `moving before the hand came (${JSON.stringify(seen.before)})`);
+  assert.equal(seen.pressed, 0, 'a press stops what is under it');
+  assert.ok(seen.others > 0, 'and nothing else');
+  assert.equal(seen.focused, 0, 'focus stops what it lands in');
+  assert.equal(seen.dragged, 0, 'a drag stops what is dragged');
+  assert.equal(seen.marked, 0);
+  assert.ok(seen.still > 0, 'the rest keep moving');
+});
+
+test('words the edit left alone stay seen while only the new ones are written in', async () => {
+  const { page } = await open();
+  const seen = await page.evaluate(async () => {
+    window.marble.apply({ type: 'setText', id: 'p', text: 'Hello there world.' });
+    const snap = window.marbleMorph.capture(['p'], { kind: 'words' });
+    window.marble.apply({ type: 'setText', id: 'p', text: 'Hello you world.' });
+    const hidden = new Set();
+    const look = () => {
+      for (const range of CSS.highlights.get('marble-morph-unwritten') ?? []) hidden.add(range.toString());
+    };
+    const played = window.marbleMorph.play(snap, {});
+    look();
+    let watching = true;
+    const watch = () => { look(); if (watching) requestAnimationFrame(watch); };
+    requestAnimationFrame(watch);
+    await played;
+    watching = false;
+    return [...hidden];
+  });
+  assert.ok(seen.length > 0, 'the new words were written in');
+  for (const words of seen) assert.doesNotMatch(words, /world/, `"${words}" was hidden`);
+  assert.ok(seen.some((words) => words.includes('you')));
 });

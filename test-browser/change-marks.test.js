@@ -726,3 +726,28 @@ test('an undo whose last frames never come lifts its marks after a while, and le
   assert.equal(await page.evaluate(() => window.marbleChange.claims('agent-undo:c1')), false);
   assert.deepEqual(await page.evaluate(() => window.marbleChange.runs()), []);
 });
+
+// ------------------------------------------------------------ the engine's review, round 1
+
+test('a part an undo takes out before anything is painted is still tinted where it stood, and lifts', async () => {
+  await settle();
+  const { page } = await open({ attending: [] });
+  await record(page);
+  const r3 = await page.locator('[data-marble-id="r3"]').boundingBox();
+  // The undo's frame and its ops in one task: no paint comes between them.
+  await page.evaluate(() => {
+    document.dispatchEvent(new CustomEvent('marble:presence', {
+      detail: { client: 'agent-undo:c1', ids: ['r3'], phase: 'writing', stage: 'before', turn: 'c1-t1', parts: ['r3'] },
+    }));
+    const ops = [{ type: 'remove', id: 'r3' }];
+    for (const op of ops) window.marble.apply(op);
+    document.dispatchEvent(new CustomEvent('marble:ops', { detail: { ops, client: 'agent-undo:c1' } }));
+  });
+  const tint = page.locator('.marble-change-tint[data-id="r3"]');
+  await tint.waitFor({ state: 'attached', timeout: 1000 });
+  const box = await tint.evaluate((el) => { const r = el.getBoundingClientRect(); return { x: r.x, y: r.y, w: r.width, h: r.height }; });
+  assert.ok(Math.abs(box.y - r3.y) < 8 && Math.abs(box.h - r3.height) < 16, `tinted where the row stood (${JSON.stringify(box)} vs ${JSON.stringify(r3)})`);
+  await page.waitForFunction(() => document.querySelector('.marble-change-tint[data-id="r3"]')?.dataset.state === 'lift', null, { timeout: 2000 });
+  await layerEmpty(page, 4000);
+  assert.ok((await recorded(page)).states.r3?.includes('now'), 'it was drawn landing before it lifted');
+});

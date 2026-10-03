@@ -47,6 +47,7 @@
   const SKIP = new Set(['HTML', 'BODY', 'HEAD', 'STYLE', 'SCRIPT', 'LINK', 'META', 'TITLE', 'TEMPLATE', 'NOSCRIPT']);
   const UNDO_IDLE = 8000;    // ms an undo's marks wait for its next frame before they lift
   const RAIL_MAX = 400;      // parts the rail measures in one paint
+  const MOST_GOING = 60;     // parts of one batch measured ahead in case they go
 
   const STYLE = `
     .marble-change-layer { position: fixed; inset: 0; pointer-events: none; z-index: 2147482900;
@@ -469,6 +470,23 @@
       } else if (typeof morph?.capture === 'function') {
         try { batch.snapshot = morph.capture(parts, d); } catch { batch.snapshot = null; }
       }
+      // What this batch may take out is measured now, while it is here: its
+      // ops can land before the next paint, and it is still tinted where it
+      // stood. A frame that does not say its kind (an undo's) does not say
+      // what it takes out either.
+      if (!landed) for (const id of (d.kind ? list(d.removes) : parts).slice(0, MOST_GOING)) markWhereItIs(run, id);
+    }
+
+    /** A part's tint box, from where it stands now, kept for when it is gone. */
+    function markWhereItIs(run, id) {
+      const part = run.parts.get(id);
+      const el = part && resolve(part);
+      if (!drawable(el)) return;
+      const r = rectOf(el);
+      if (!r) return;
+      const box = partBox(r, shapeOf(part, el));
+      part.box = { ...page(box), radius: box.radius };
+      part.seeded = true;
     }
 
     function onAfter(run, d) {
@@ -738,7 +756,9 @@
         const shape = shapeOf(holder, holder.node);
         box = kind === 'scope' ? scopeBox(r, shape) : partBox(r, shape);
         holder.box = { ...page(box), radius: box.radius };
-      } else if (existing && holder.box) {
+      } else if (holder.box && (existing || (holder.seeded && !holder.node))) {
+        // Gone: its tint stays where it last stood, or where it stood when
+        // its batch began if it went before a paint came.
         box = { ...view(holder.box), radius: holder.box.radius };
       }
       if (!box) return existing ? { holder, key, remove: true } : null;
@@ -1242,6 +1262,7 @@
       for (const mark of run.scope.values()) if (mark.el || (mark.state === 'soon' && drawable(resolve(mark)))) return true;
       for (const part of run.parts.values()) {
         if (part.tint || part.dot) return true;
+        if (part.seeded && !part.lifted && part.state !== 'soon' && !resolve(part)) return true;
         const creatable = part.dotted ? !run.gone : part.state === 'soon' || part.state === 'now';
         if (creatable && drawable(resolve(part))) return true;
       }

@@ -126,15 +126,18 @@
     }
   };
 
-  /** Where an element stands, in page coordinates, as it is drawn now
-   *  (a motion in flight included: a new motion starts from there). */
+  /** Where an element stands in the window, as it is drawn now (a motion
+   *  in flight included: a new motion starts from there). In the window and
+   *  not on the page: what the person sees is what must not jump. When
+   *  something above the window grows, the browser scrolls to keep what is
+   *  in view where it was (scroll anchoring), and that has not moved. */
   function rectOf(el) {
     const r = el.getBoundingClientRect();
-    return { left: r.left + scrollX, top: r.top + scrollY, width: r.width, height: r.height };
+    return { left: r.left, top: r.top, width: r.width, height: r.height };
   }
   const inView = (r) => Boolean(r) && (r.width > 0 || r.height > 0)
-    && r.top - scrollY < innerHeight && r.top - scrollY + r.height > 0
-    && r.left - scrollX < innerWidth && r.left - scrollX + r.width > 0;
+    && r.top < innerHeight && r.top + r.height > 0
+    && r.left < innerWidth && r.left + r.width > 0;
   const centreOf = (r) => ({ x: r.left + r.width / 2, y: r.top + r.height / 2 });
 
   function propsOf(el) {
@@ -482,6 +485,36 @@
   }
   const ended = (a) => a.finished.then(() => {}, () => {});
 
+  // ------------------------------------------------------------ under a hand
+  //
+  // Nothing eases under a hand. A press, focus, or a drag that begins while
+  // something is moving stops this engine's motion on what it lands on (and
+  // on what carries that, and what is in it) at once, where it is going.
+
+  const beingWritten = new Map(); // element -> finish, for words being written in
+  let playing = 0;
+  function letGoUnder(el) {
+    if (!el || el.nodeType !== 1 || transient(el)) return;
+    for (let up = el; up && up !== document.documentElement; up = up.parentElement) cancelOwn(up);
+    if (el !== document.body && el !== document.documentElement) {
+      for (const a of el.getAnimations({ subtree: true })) if (a.id === TAG) a.cancel();
+    }
+    for (const [node, finish] of [...beingWritten]) if (node === el || el.contains(node) || node.contains(el)) finish();
+  }
+  addEventListener('pointerdown', (event) => { if (playing) letGoUnder(event.target); }, true);
+  addEventListener('focusin', (event) => { if (playing) letGoUnder(event.target); }, true);
+  const drags = new MutationObserver((records) => {
+    for (const { target } of records) if (target.nodeType === 1 && target.matches(DRAGGED)) letGoUnder(target);
+  });
+  function begin() {
+    playing += 1;
+    if (playing === 1) drags.observe(document.documentElement, { subtree: true, attributes: true, attributeFilter: ['class', 'data-marble-dragging'] });
+  }
+  function done() {
+    playing = Math.max(0, playing - 1);
+    if (!playing) drags.disconnect();
+  }
+
   // ------------------------------------------------------------ ghosts
 
   // What a ghost needs of each element to look as it did: its box, its
@@ -507,6 +540,7 @@
     'position', 'top', 'right', 'bottom', 'left', 'float', 'aspect-ratio', 'transform', 'filter',
     'fill', 'stroke', 'stroke-width',
   ];
+  const UNGHOSTED = new Set(['script', 'style', 'link', 'meta', 'base', 'title', 'iframe', 'object', 'embed', 'noscript', 'template', 'frame', 'frameset']);
   const STRIP = ['id', ID, 'name', 'for', 'form', 'autofocus', 'autoplay', 'contenteditable', 'tabindex', 'accesskey', 'popover', 'draggable'];
 
   /** A copy of `el` that looks as it does, drawn on its own outside the
@@ -523,7 +557,9 @@
     }
     for (const node of to) {
       if (!node.isConnected && node !== clone && !clone.contains(node)) continue;
-      if (node !== clone && (node.hasAttribute(TRANSIENT) || /^(SCRIPT|IFRAME|OBJECT|EMBED|NOSCRIPT|TEMPLATE)$/.test(node.tagName))) {
+      // No scripts, frames or sheets: a ghost's look is already its own, and
+      // a sheet in it would restyle the page under it while it fades.
+      if (node !== clone && (node.hasAttribute(TRANSIENT) || UNGHOSTED.has(node.localName))) {
         node.remove();
         continue;
       }
@@ -548,12 +584,24 @@
     clone.setAttribute(TRANSIENT, '');
     clone.setAttribute('aria-hidden', 'true');
     clone.setAttribute('inert', '');
-    return { node: clone, opacity: Number(getComputedStyle(el).opacity) || 1, styled };
+    return { node: clone, opacity: seenOpacity(el), styled };
+  }
+
+  /** How much of an element shows: its opacity and every one above it. */
+  function seenOpacity(el) {
+    if (getComputedStyle(el).visibility !== 'visible') return 0;
+    let seen = 1;
+    for (let node = el; node && node !== document.documentElement; node = node.parentElement) {
+      const o = Number(getComputedStyle(node).opacity);
+      seen *= Number.isFinite(o) ? o : 1;
+      if (seen < 0.01) return 0;
+    }
+    return seen;
   }
 
   function placeGhost(node, rect) {
-    node.style.setProperty('left', `${rect.left - scrollX}px`);
-    node.style.setProperty('top', `${rect.top - scrollY}px`);
+    node.style.setProperty('left', `${rect.left}px`);
+    node.style.setProperty('top', `${rect.top}px`);
     layerOf().append(node);
   }
 
@@ -713,10 +761,10 @@
     const ghostable = snap.kind ? removes : [...new Set([...removes, ...parts])];
     for (const id of ghostable) {
       const entry = snap.entries.find((e) => e.part === id);
-      if (!entry || !inView(entry.rect) || budget <= 0) continue;
+      if (!entry || !inView(entry.rect) || budget <= 0 || !seenOpacity(entry.el)) continue;
       const ghost = ghostOf(entry.el, entry.rect, Math.min(GHOST_STYLED, budget));
       budget -= ghost.styled;
-      snap.ghosts.set(id, { rect: entry.rect, node: ghost.node, opacity: ghost.opacity });
+      snap.ghosts.set(id, { rect: entry.rect, node: ghost.node, opacity: ghost.opacity, parent: entry.el.parentElement });
     }
     return snap;
   }
@@ -727,7 +775,9 @@
    *  their caret is in), and where a selection they made starts. What is
    *  focused or being typed in holds what is inside it too; a selection
    *  holds only what holds it. A note is often one editable surface for the
-   *  whole page, so there the caret's block is the hand, not the note. */
+   *  whole page, so there the caret's block is the hand, not the note. A
+   *  click in words that cannot be edited leaves a caret there too, which
+   *  is no hand at all. */
   function handNodes() {
     const out = [];
     const active = document.activeElement;
@@ -737,8 +787,9 @@
     if (active && active !== document.body && active !== document.documentElement && !transient(active)) {
       out.push({ node: active.isContentEditable && anchorEl && active.contains(anchorEl) ? anchorEl : active, inside: true });
     }
-    if (anchorEl && anchorEl !== document.body && anchorEl !== document.documentElement && !transient(anchorEl)) {
-      out.push({ node: anchorEl, inside: anchorEl.isContentEditable });
+    const editing = Boolean(anchorEl?.isContentEditable);
+    if (anchorEl && anchorEl !== document.body && anchorEl !== document.documentElement && !transient(anchorEl) && (editing || !sel.isCollapsed)) {
+      out.push({ node: anchorEl, inside: editing });
     }
     return out;
   }
@@ -801,12 +852,12 @@
    *  the way agent-text.js types at its caret. Returns how long it takes in
    *  all, or 0 when there is nothing new to write. */
   function writeWords({ el, id, before, after, rect, delay, waits, motion, finishers }) {
-    const { start, end, oldEnd, tail } = diff(before, after);
+    const { start, end, oldEnd } = diff(before, after);
     const removed = before.slice(start, oldEnd);
     if (end <= start && !removed.trim()) return 0;
-    // A short ending the edit left alone ("." after the new words) waits
-    // with them; a long one is the rest of the paragraph and stays.
-    const hideTo = tail <= 40 ? after.length : end;
+    // What the edit left alone after the new words stays seen; only the new
+    // words are written in.
+    const hideTo = end;
     const length = Math.max(0, end - start);
     const writing = length ? clamp((length / RATE) * 1000, WRITE_MIN, WRITE_MAX) : 0;
     let ghost = null;
@@ -833,9 +884,11 @@
       hidden = null;
       ghost?.remove();
       drop(id, finish);
+      if (beingWritten.get(el) === finish) beingWritten.delete(el);
       resolve();
     };
     keep(id, finish);
+    beingWritten.set(el, finish);
     finishers.push(finish);
     waits.push(done);
     if (!marks) {
@@ -894,12 +947,15 @@
       }
       return letGo();
     }
+    begin();
+    let played;
     try {
-      return run(snap, onPart);
+      played = run(snap, onPart);
     } catch (err) {
       console.error('[marble-morph]', err);
-      return letGo();
+      played = letGo();
     }
+    return played.finally(done);
   }
 
   function liveOf(entry) {
@@ -1048,26 +1104,39 @@
       };
       flips.push(plan);
     }
-    // Inside something that moves, an element moves only by what it moves
-    // on its own, in step with what holds it. (Plans are in document order,
-    // so a holder is always settled before what it holds.)
+    // Inside something that shifts, an element moves only by what it moves
+    // on its own, in step with what holds it. A box that only grew or shrank
+    // carries nothing, and is not stretched while anything in it moves.
     const flipOf = new Map(flips.map((plan) => [plan.el, plan]));
     for (const plan of flips) {
-      let up = plan.el.parentElement;
-      while (up && up !== document.body && !flipOf.has(up)) up = up.parentElement;
-      const holder = up ? flipOf.get(up) : null;
+      let holder = null;
+      for (let up = plan.el.parentElement; up && up !== document.body; up = up.parentElement) {
+        const above = flipOf.get(up);
+        if (!above) continue;
+        above.flip.holds = true;
+        if (!holder && (Math.abs(above.flip.dx) >= 0.5 || Math.abs(above.flip.dy) >= 0.5)) holder = above;
+      }
       if (!holder) continue;
-      holder.flip.holds = true;
       plan.flip.holder = holder;
       plan.flip.ownX = plan.flip.dx - holder.flip.dx;
       plan.flip.ownY = plan.flip.dy - holder.flip.dy;
     }
+    const moving = (plan) => Boolean(plan.nums.length || plan.cols.length || plan.flip || plan.words || plan.fade || plan.attrs);
+    // What holds something that moves, comes or goes: a box that grew or
+    // shrank for that reason is not crossfaded, or what is coming would be
+    // dimmed with it.
+    const holdsMotion = new Set();
+    const markAbove = (el, inclusive) => {
+      for (let up = inclusive ? el : el.parentElement; up && up !== document.body && !holdsMotion.has(up); up = up.parentElement) holdsMotion.add(up);
+    };
+    for (const plan of plans) if (moving(plan)) markAbove(plan.el, false);
+    for (const a of coming) markAbove(a.el, false);
+    for (const g of ghosts) if (g.parent?.isConnected) markAbove(g.parent, true);
 
     // 6. Who leads each motion: a part leads its own, its insides and its
     //    neighbours; on a sheet's change, the outermost element that changed.
     const leads = new Map(); // key -> { key, id, rect }
     const leadFor = (key, id, rect) => leads.get(key) ?? leads.set(key, { key, id, rect }).get(key);
-    const moving = (plan) => Boolean(plan.nums.length || plan.cols.length || plan.flip || plan.words || plan.fade || plan.attrs);
     const changed = new Set(plans.filter(moving).map((plan) => plan.el));
     const rectOfPart = (id) => {
       const entry = partEntries.get(id);
@@ -1135,7 +1204,7 @@
         }
         // Words that grew or shrank with their box are not stretched: the
         // box moves, and what is in it crossfades.
-        if (words && !plan.words && !fades) plan.fade = true;
+        if (words && !plan.words && !fades && !holdsMotion.has(plan.el)) plan.fade = true;
       }
       if (plan.words) {
         const took = writeWords({
@@ -1186,9 +1255,19 @@
       }
       const delay = lead ? when(lead).delay : Math.min(...dealt.map((d) => d.delay));
       let started = false;
-      timers.push(setTimeout(() => { started = true; tell(onPart, id, 'start'); }, delay));
+      let over = false;
+      const timer = setTimeout(() => {
+        if (started || over) return;
+        started = true;
+        tell(onPart, id, 'start');
+      }, delay);
+      timers.push(timer);
+      // A motion cut short ends its part early: it has started by then, and
+      // never starts again.
       all.push(Promise.all(its).then(() => {
+        clearTimeout(timer);
         if (!started) { started = true; tell(onPart, id, 'start'); }
+        over = true;
         tell(onPart, id, 'end');
       }));
     }
