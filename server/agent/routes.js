@@ -400,8 +400,10 @@ export function createAgentRoutes({ store, runner, tools, hub, providers, writeO
     if (route === '/agent/review' && method === 'GET') {
       const docPath = url.searchParams.get('path') ?? '';
       if (!docPath) return json(res, 400, { error: 'path is required' });
-      if (!readSource) return json(res, 200, { turns: [] });
-      return json(res, 200, await listReview({ store, docPath, read: readSource }));
+      // `now` is the host's clock, so a page can tell what finished before or
+      // after its own last edit (⌘Z) whatever its clock says.
+      if (!readSource) return json(res, 200, { turns: [], now: Date.now() });
+      return json(res, 200, { ...(await listReview({ store, docPath, read: readSource })), now: Date.now() });
     }
 
     if (route === '/agent/setup' && method === 'GET') return json(res, 200, await setupState());

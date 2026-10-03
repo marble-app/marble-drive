@@ -29,7 +29,9 @@
         body: body ? JSON.stringify(body) : undefined,
       });
       const answer = await response.json().catch(() => ({}));
-      if (!response.ok) throw new Error(answer.error ?? `${route} answered ${response.status}`);
+      // The status rides on the error: a caller can tell "not possible" (409)
+      // from "the host failed".
+      if (!response.ok) throw Object.assign(new Error(answer.error ?? `${route} answered ${response.status}`), { status: response.status });
       return answer;
     };
 

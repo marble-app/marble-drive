@@ -59,6 +59,61 @@ const KINDS = `<!doctype html>
 </body></html>
 `;
 
+// A board: cards in two columns.
+const BOARD = `<!doctype html>
+<html><head><meta charset="utf-8"><title>Board</title>
+<style>
+  body { font: 15px/1.5 system-ui, sans-serif; margin: 40px; max-width: 640px; }
+  .cols { display: flex; gap: 16px; }
+  .col { flex: 1; display: flex; flex-direction: column; gap: 10px; }
+  .card { border: 1px solid #bbb; border-radius: 10px; padding: 10px; }
+  h3 { margin: 0; font-size: 15px; }
+  .due { margin: 4px 0 0; font-size: 13px; color: #555; }
+</style></head>
+<body data-marble-id="bb">
+  <main data-marble-id="board" class="board"><div data-marble-id="cols" class="cols">
+    <section data-marble-id="ca" class="col">
+      <article data-marble-id="c1" class="card"><h3 data-marble-id="c1t">Malleable software</h3></article>
+      <article data-marble-id="c2" class="card"><h3 data-marble-id="c2t">Local-first</h3></article>
+    </section>
+    <section data-marble-id="cb" class="col">
+      <article data-marble-id="c3" class="card"><h3 data-marble-id="c3t">Dynamicland</h3></article>
+      <article data-marble-id="c4" class="card"><h3 data-marble-id="c4t">Potluck</h3></article>
+    </section>
+  </div></main>
+</body></html>
+`;
+
+// A shelf whose rows and card take their look from the section they are in:
+// .shelf .list > li and .shelf .card.round.
+const SHELF = `<!doctype html>
+<html><head><meta charset="utf-8"><title>Shelf</title>
+<style>
+  body { font: 16px/1.5 system-ui, sans-serif; margin: 40px; max-width: 560px; }
+  .shelf .list { list-style: none; margin: 0 0 20px; padding: 0; }
+  .shelf .list > li { padding: 11px 0; color: rgb(40, 60, 90); letter-spacing: .5px; }
+  .shelf .card { padding: 12px; border: 1px solid #bbb; }
+  .shelf .card.round { border-radius: 14px; }
+</style></head>
+<body data-marble-id="sb">
+  <section class="shelf" data-marble-id="shelf">
+    <ul class="list" data-marble-id="sl"><li data-marble-id="s1">First</li><li data-marble-id="s2">Second</li><li data-marble-id="s3">Third</li></ul>
+    <div class="card round" data-marble-id="sc">A card</div>
+  </section>
+</body></html>
+`;
+
+// A component of the page's own, which counts every instance of itself.
+const CUSTOM = `<!doctype html>
+<html><head><meta charset="utf-8"><title>Custom</title>
+<style>body { font: 16px/1.5 system-ui, sans-serif; margin: 40px; } review-card { display: block; padding: 12px; border: 1px solid #bbb; } .wide { padding: 20px; }</style>
+</head>
+<body data-marble-id="xb">
+  <review-card data-marble-id="rc" class="card"><b data-marble-id="rct">A card</b></review-card>
+  <script data-marble-id="xs">customElements.define('review-card', class extends HTMLElement { constructor() { super(); window.__made = (window.__made || 0) + 1; } });</script>
+</body></html>
+`;
+
 const read = (path = 'list') => ({ call: 'read_document', args: { path } });
 const batch = (args, path = 'list') => ({ call: 'apply_ops', args: { path, ...args } });
 const date = (row, text) => ({ type: 'insert', parentId: row, beforeId: null, html: `<span class="date" data-marble-kind="date">${text}</span>` });
@@ -66,7 +121,17 @@ const date = (row, text) => ({ type: 'insert', parentId: row, beforeId: null, ht
 const SCRIPTS = {
   dates: [read(), batch({ note: 'Add a date to each row.', ops: [date('r1', 'Oct 9'), date('r2', 'Oct 14'), date('r3', 'Oct 21')] }), { say: 'Done.' }],
   firstTwo: [read(), batch({ note: 'Date the first two.', ops: [date('r1', 'Oct 9'), date('r2', 'Oct 14')] }), { say: 'Done.' }],
-  third: [read(), batch({ note: 'Date the third.', ops: [date('r3', 'Oct 21')] }), { say: 'Done.' }],
+  // A second ask on the same list: a row in it.
+  addRow: [read(), batch({ note: 'Add Potluck.', ops: [{ type: 'insert', parentId: 'list', beforeId: null, html: '<li><span>Potluck</span><span>Unread</span></li>' }] }), { say: 'Done.' }],
+  rename: [read(), batch({ note: 'Rename the list.', ops: [{ type: 'setText', id: 'h', text: 'Papers to read' }] }), { say: 'Done.' }],
+  spread: [read('board'), batch({ note: 'Due dates on two cards.', ops: [
+    { type: 'insert', parentId: 'c1', beforeId: null, html: '<p class="due">Due Oct 9</p>' },
+    { type: 'insert', parentId: 'c3', beforeId: null, html: '<p class="due">Due Oct 21</p>' },
+  ] }, 'board'), { say: 'Done.' }],
+  cardTitle: [read('board'), batch({ note: 'Retitle one card.', ops: [{ type: 'setText', id: 'c2t', text: 'Local-first, revisited' }] }, 'board'), { say: 'Done.' }],
+  shelfRemove: [read('shelf'), batch({ note: 'Take out the second.', ops: [{ type: 'remove', id: 's2' }] }, 'shelf'), { say: 'Done.' }],
+  shelfLook: [read('shelf'), batch({ note: 'Square the card.', ops: [{ type: 'setAttr', id: 'sc', name: 'class', value: 'card' }] }, 'shelf'), { say: 'Done.' }],
+  custom: [read('custom'), batch({ note: 'Widen the card.', ops: [{ type: 'setAttr', id: 'rc', name: 'class', value: 'card wide' }] }, 'custom'), { say: 'Done.' }],
   retitle: [read(), batch({ note: 'Shorter titles.', ops: [
     { type: 'setText', id: 'r1n', text: 'Malleable' },
     { type: 'setText', id: 'r2n', text: 'Local' },
@@ -81,7 +146,12 @@ const SCRIPTS = {
   ] }, 'kinds'), { say: 'Done.' }],
 };
 
-const host = await startDrive({ scripts: SCRIPTS, documents: { list: LIST, kinds: KINDS } });
+const host = await startDrive({ scripts: SCRIPTS, documents: { list: LIST, kinds: KINDS, board: BOARD, shelf: SHELF, custom: CUSTOM } });
+const MOD = process.platform === 'darwin' ? 'Meta' : 'Control';
+const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+// Each of the page's asks of the host for what is left to review, held back
+// a while, as a slow host would.
+const slowReview = (page, ms) => page.route('**/agent/review?*', async (route) => { await sleep(ms); await route.continue().catch(() => {}); });
 test.after(() => host.close());
 
 const pages = [];
@@ -156,6 +226,12 @@ const tagText = (page) => page.locator('.marble-review-tag').innerText();
 const nothingDrawn = (page, timeout = 1500) => page.waitForFunction(() => !document.querySelector('.marble-review-host .marble-review-group'), null, { timeout });
 // Anything of the drawing on screen: a change drawn, or a tip.
 const shownAtAll = (page) => page.locator('.marble-review-group, .marble-review-tip:not([hidden])').count();
+// Which stop of the drawing has the keys: the tag, a bar button, or a part.
+const focused = (page) => page.evaluate(() => {
+  const a = document.activeElement;
+  if (a?.closest('.marble-review-tag')) return 'tag';
+  return a?.dataset.act ?? a?.getAttribute('data-marble-id') ?? a?.localName ?? null;
+});
 const dates = (page) => page.evaluate(() => document.querySelectorAll('[data-marble-id="list"] .date').length);
 
 test.beforeEach(async () => {
@@ -234,6 +310,19 @@ test('Undo takes the dates back and offers Redo while you are there; Redo puts t
   const page = await open({ attending: [id] });
   await ask(id, 'dates');
   await groups(page, 1);
+  // One answer about what is left to review can be held back: asked of the
+  // host before the redo, handed to the page after it.
+  const gate = { armed: false };
+  gate.asked = new Promise((resolve) => { gate.got = resolve; });
+  gate.open = new Promise((resolve) => { gate.release = resolve; });
+  await page.route(/\/agent\/review\?/, async (route) => {
+    if (!gate.armed) return route.continue();
+    gate.armed = false;
+    const response = await route.fetch();
+    gate.got();
+    await gate.open;
+    await route.fulfill({ response });
+  });
   await restOn(page, 'r1');
   await act(page, 'undo').click();
   await page.waitForFunction(() => document.querySelectorAll('[data-marble-id="list"] .date').length === 0, null, { timeout: 5000 });
@@ -242,15 +331,25 @@ test('Undo takes the dates back and offers Redo while you are there; Redo puts t
   assert.match(await bar(page).innerText(), /Undone/);
   assert.equal(await act(page, 'keep').count(), 0);
 
+  // Something asks the host what is left (here, an undo's end heard again)
+  // just before the redo; its answer, from before the redo, comes after it.
+  await page.waitForTimeout(400);
+  gate.armed = true;
+  await page.evaluate(() => document.dispatchEvent(new CustomEvent('marble-change:end', { detail: { client: 'agent-undo:elsewhere' } })));
+  await gate.asked;
   // Pressed with the pointer still, so nothing but Redo can draw it again.
+  const redone = page.waitForResponse((r) => /\/redo$/.test(r.url()));
   await act(page, 'redo').dispatchEvent('click');
+  await redone;
+  await page.waitForTimeout(200);
+  gate.release();
   await page.waitForFunction(() => document.querySelectorAll('[data-marble-id="list"] .date').length === 3, null, { timeout: 5000 });
   assert.match(await file(), /Oct 9/);
-  // Back in the list of changes, and drawn again where it is, by the same bar.
+  // Back in the list of changes, and drawn again where it is, by the same bar:
+  // the redo waits for an answer asked after it, not the one on its way.
   await groups(page, 1);
-  await act(page, 'keep').waitFor({ timeout: 2000 });
-  // Still there once anything put away would have faded.
-  await page.waitForTimeout(400);
+  await act(page, 'keep').waitFor({ timeout: 3000 });
+  await page.waitForTimeout(300);
   assert.equal(await drawing(page).count(), 1, 'the same drawing stays up, not one put away');
   assert.equal(await page.locator('.marble-review-group[data-state]').count(), 0);
   assert.equal(await page.locator('.marble-review-add').count(), 3);
@@ -263,12 +362,12 @@ test('two asks on one list are one change; holding Undo takes back both', async 
   const id = await newChat();
   const page = await open({ attending: [id] });
   await ask(id, 'firstTwo');
-  await ask(id, 'third');
+  await ask(id, 'addRow');
   await groups(page, 1);
   await page.waitForFunction(() => window.marbleReview.groups()[0]?.turns.length === 2);
   await restOn(page, 'r2');
   await bar(page).waitFor();
-  assert.match(await tagText(page), /^3 dates added · 2 asks$/);
+  assert.match(await tagText(page), /^3 parts added · 2 asks$/);
 
   const undo = await act(page, 'undo').boundingBox();
   await page.mouse.move(undo.x + undo.width / 2, undo.y + undo.height / 2);
@@ -277,10 +376,12 @@ test('two asks on one list are one change; holding Undo takes back both', async 
   await page.mouse.down();
   await page.waitForTimeout(700);
   await page.mouse.up();
-  await page.waitForFunction(() => document.querySelectorAll('[data-marble-id="list"] .date').length === 0, null, { timeout: 8000 });
+  await page.waitForFunction(() => document.querySelectorAll('[data-marble-id="list"] .date').length === 0
+    && document.querySelectorAll('[data-marble-id="list"] > li').length === 3, null, { timeout: 8000 });
   const turns = (await api('GET', `/agent/conversations/${id}`)).turns;
   assert.ok(turns.every((t) => t.undoneAt), 'both asks are undone');
   await act(page, 'redo').waitFor();
+  assert.match(await bar(page).innerText(), /^Undone/);
 });
 
 test('holding the tag shows the list as it was, over it; letting go brings the change back, and nothing is undone', async () => {
@@ -476,7 +577,7 @@ test('Show what changed is in the chat button\'s menu only while something is un
   assert.equal(await row.count(), 0, 'kept: the row goes');
 });
 
-test('from the keyboard: Tab into a changed part draws it, Tab reaches Keep, and Enter keeps', async () => {
+test('from the keyboard: Tab into a changed part draws it, Tab walks the tag, Change more and Keep, and Enter keeps', async () => {
   const id = await newChat();
   const page = await open({ attending: [id] });
   await ask(id, 'one');
@@ -489,12 +590,14 @@ test('from the keyboard: Tab into a changed part draws it, Tab reaches Keep, and
   assert.equal(await page.evaluate(() => document.activeElement?.getAttribute('data-marble-id')), 'r1n');
   await bar(page).waitFor({ timeout: 500 });
   await page.keyboard.press('Tab');
-  assert.equal(await page.evaluate(() => document.activeElement?.dataset.act), 'keep');
+  assert.equal(await focused(page), 'tag', 'Tab from the change reaches its tag first');
   await page.keyboard.press('Shift+Tab');
   assert.equal(await page.evaluate(() => document.activeElement?.getAttribute('data-marble-id')), 'r1n', 'Shift+Tab goes back');
   // Esc from the bar puts the drawing away and gives the keys back, and
   // the keys coming back do not draw it again.
   await page.keyboard.press('Tab');
+  await page.keyboard.press('Tab');
+  assert.equal(await focused(page), 'more');
   await page.keyboard.press('Escape');
   await nothingDrawn(page);
   await page.waitForTimeout(400);
@@ -505,8 +608,10 @@ test('from the keyboard: Tab into a changed part draws it, Tab reaches Keep, and
   await page.keyboard.press('Shift+Tab');
   assert.equal(await page.evaluate(() => document.activeElement?.getAttribute('data-marble-id')), 'r1n');
   await bar(page).waitFor({ timeout: 500 });
-  await page.keyboard.press('Tab');
-  assert.equal(await page.evaluate(() => document.activeElement?.dataset.act), 'keep');
+  for (const want of ['tag', 'more', 'keep']) {
+    await page.keyboard.press('Tab');
+    assert.equal(await focused(page), want);
+  }
   await page.keyboard.press('Enter');
   await groups(page, 0);
   assert.deepEqual((await review()).turns, []);
@@ -566,7 +671,363 @@ test('with reduced motion the drawing appears and goes at once, and Keep does no
   await page.waitForTimeout(LEAVE_AND_A_FRAME);
   assert.equal(await page.locator('.marble-review-group').count(), 0, 'gone the moment it is put away');
   await restOn(page, 'r1');
+  await page.evaluate(() => {
+    window.__lifting = false;
+    new MutationObserver(() => { if (document.querySelector('.marble-review-group[data-state="lift"]')) window.__lifting = true; })
+      .observe(document.querySelector('.marble-review-host'), { subtree: true, childList: true, attributes: true });
+  });
   await act(page, 'keep').click();
-  assert.equal(await page.locator('.marble-review-group').count(), 0, 'kept: no lift to wait for');
   await groups(page, 0);
+  await nothingDrawn(page, 500);
+  assert.equal(await page.evaluate(() => window.__lifting), false, 'kept: gone at once, no lift to wait for');
+});
+
+// ------------------------------------------------------------ fix round 1
+
+test('on a board, an ask spread over two columns and a later ask on one card are two changes; Undo on the card takes back only its ask', async () => {
+  const id = await newChat();
+  const page = await open({ doc: 'board', attending: [id] });
+  await ask(id, 'spread', 'board');
+  await ask(id, 'cardTitle', 'board');
+  await groups(page, 2);
+  // A card nothing changed is not a change, however high the board.
+  await restOn(page, 'c4t', { wait: 750 });
+  assert.equal(await page.locator('.marble-review-group').count(), 0, 'resting on an unchanged card draws nothing');
+
+  await restOn(page, 'c2t');
+  await bar(page).waitFor();
+  assert.equal(await tagText(page), '1 heading changed');
+  await act(page, 'undo').click();
+  await page.waitForFunction(() => document.querySelector('[data-marble-id="c2t"]').textContent === 'Local-first', null, { timeout: 5000 });
+  await page.waitForTimeout(300);
+  assert.equal(await page.locator('[data-marble-id="board"] .due').count(), 2, 'the spread ask stands');
+  const turns = (await api('GET', `/agent/conversations/${id}`)).turns;
+  assert.equal(turns[0].undoneAt ?? null, null, 'the spread ask is not undone');
+  assert.ok(turns[1].undoneAt, 'the card\'s ask is');
+  await groups(page, 1);
+
+  // The spread ask is still one change, drawn whichever of its parts you rest on.
+  await away(page);
+  await nothingDrawn(page);
+  await restOn(page, 'c3t');
+  await bar(page).waitFor();
+  assert.equal(await page.locator('.marble-review-add').count(), 2);
+});
+
+test('holding the tag of one row added shows the list without it', async () => {
+  const id = await newChat();
+  const page = await open({ attending: [id] });
+  await ask(id, 'addRow');
+  await groups(page, 1);
+  const row = page.locator('[data-marble-id="list"] > li').last();
+  const r = await row.boundingBox();
+  await page.mouse.move(r.x + 20, r.y + r.height / 2);
+  await page.waitForTimeout(600);
+  await bar(page).waitFor();
+  assert.equal(await tagText(page), '1 row added');
+  const tag = await page.locator('.marble-review-tag button').boundingBox();
+  await page.mouse.move(tag.x + tag.width / 2, tag.y + tag.height / 2);
+  await page.mouse.down();
+  await page.waitForTimeout(400);
+  const held = await page.evaluate(() => {
+    const before = document.querySelector('.marble-review-before');
+    return { rows: before?.querySelectorAll('li').length ?? -1, words: before?.innerText.replace(/\s+/g, ' ').trim() ?? '' };
+  });
+  await page.mouse.up();
+  assert.equal(held.rows, 3, 'the list as it was: three rows');
+  assert.doesNotMatch(held.words, /Potluck/);
+});
+
+test('a Keep or an Undo the host refuses says so on the bar, changes nothing, and can be tried again', async () => {
+  const id = await newChat();
+  const page = await open({ attending: [id] });
+  await ask(id, 'dates');
+  await groups(page, 1);
+  await page.evaluate(() => {
+    window.__reviewed = 0;
+    document.addEventListener('marble-callout:reviewed', () => { window.__reviewed += 1; });
+  });
+  const refuse = (route) => route.fulfill({ status: 500, contentType: 'application/json', body: '{"error":"boom"}' });
+
+  await page.route('**/agent/turns/*/keep', refuse);
+  await restOn(page, 'r1');
+  await act(page, 'keep').click();
+  await page.waitForFunction(() => /Couldn't keep it\. Try again\./.test(document.querySelector('.marble-review-bar')?.innerText ?? ''));
+  assert.equal(await page.locator('.marble-review-group[data-state="lift"]').count(), 0, 'nothing lifts');
+  assert.equal(await drawing(page).count(), 1, 'the drawing stays');
+  assert.equal(await page.evaluate(() => window.__reviewed), 0, 'nobody hears it was reviewed');
+  assert.equal((await review()).turns.length, 1);
+  assert.equal(await page.evaluate(() => getComputedStyle(document.querySelector('.marble-review-bar [data-failed]')).color), await page.evaluate(() => {
+    const probe = document.createElement('i');
+    probe.style.color = 'var(--danger, light-dark(#5f6267, #a6a9ae))';
+    document.body.append(probe);
+    const c = getComputedStyle(probe).color;
+    probe.remove();
+    return c;
+  }));
+
+  await page.route('**/agent/turns/*/undo', refuse);
+  await act(page, 'undo').click();
+  await page.waitForFunction(() => /Couldn't undo it\. Try again\./.test(document.querySelector('.marble-review-bar')?.innerText ?? ''));
+  assert.equal(await dates(page), 3, 'nothing was taken back');
+  assert.equal(await act(page, 'redo').count(), 0, 'and nothing offers to be redone');
+
+  await page.unroute('**/agent/turns/*/keep');
+  await page.unroute('**/agent/turns/*/undo');
+  await act(page, 'keep').click();
+  await page.locator('.marble-review-group[data-state="lift"]').waitFor({ state: 'attached', timeout: 2000 });
+  await groups(page, 0);
+  assert.equal(await page.evaluate(() => window.__reviewed), 1);
+});
+
+test('an Undo of two asks that stops halfway says how far it got and takes the rest on a retry; a Redo refused says so, one not possible goes', async () => {
+  const id = await newChat();
+  const page = await open({ attending: [id] });
+  await ask(id, 'firstTwo');
+  await ask(id, 'addRow');
+  await groups(page, 1);
+  let undos = 0;
+  await page.route('**/agent/turns/*/undo', (route) => {
+    undos += 1;
+    if (undos === 2) return route.fulfill({ status: 500, contentType: 'application/json', body: '{"error":"boom"}' });
+    return route.continue();
+  });
+  await restOn(page, 'r2');
+  const undo = await act(page, 'undo').boundingBox();
+  await page.mouse.move(undo.x + undo.width / 2, undo.y + undo.height / 2);
+  await page.mouse.down();
+  await page.waitForTimeout(700);
+  await page.mouse.up();
+  await page.waitForFunction(() => /Undid 1 of 2\. Try again\./.test(document.querySelector('.marble-review-bar')?.innerText ?? ''), null, { timeout: 5000 });
+  assert.equal(await page.locator('[data-marble-id="list"] > li').count(), 3, 'the newest ask, the row, is taken back');
+  assert.equal(await dates(page), 2, 'the first ask still stands');
+  // Try again: Undo takes the rest.
+  await act(page, 'undo').click();
+  await page.waitForFunction(() => document.querySelectorAll('[data-marble-id="list"] .date').length === 0, null, { timeout: 5000 });
+  await page.waitForFunction(() => /^Undone/.test(document.querySelector('.marble-review-bar')?.innerText ?? ''));
+
+  // A Redo the host fails: said, and Redo stays to try again.
+  await page.route('**/agent/turns/*/redo', (route) => route.fulfill({ status: 500, contentType: 'application/json', body: '{"error":"boom"}' }));
+  await act(page, 'redo').click();
+  await page.waitForFunction(() => /Couldn't redo\. Try again\./.test(document.querySelector('.marble-review-bar')?.innerText ?? ''));
+  assert.equal(await act(page, 'redo').count(), 1);
+  // A Redo that is not possible (R4): Redo goes, nothing else is said.
+  await page.unroute('**/agent/turns/*/redo');
+  await page.route('**/agent/turns/*/redo', (route) => route.fulfill({ status: 409, contentType: 'application/json', body: '{"error":"there is nothing to redo"}' }));
+  await act(page, 'redo').click();
+  await page.waitForFunction(() => !document.querySelector('.marble-review-bar button[data-act="redo"]'));
+  assert.match(await bar(page).innerText(), /^Undone$/);
+});
+
+test('Tab walks into the change, through its tag, Change more, Keep and Undo, and on out; Shift+Tab walks back', async () => {
+  const id = await newChat();
+  const page = await open({ attending: [id] });
+  await ask(id, 'retitle');
+  await groups(page, 1);
+  await page.mouse.move(1000, 120);
+  await page.locator('[data-marble-id="h"]').evaluate((el) => { el.tabIndex = -1; el.focus(); });
+  // The parts first, as they are in the page: the bar only after the last.
+  for (const want of ['r1n', 'r2n', 'r3n', 'tag', 'more', 'keep', 'undo', 'p']) {
+    await page.keyboard.press('Tab');
+    assert.equal(await focused(page), want);
+  }
+  // Out of the change: the drawing goes.
+  await nothingDrawn(page);
+  await page.keyboard.press('Shift+Tab');
+  assert.equal(await focused(page), 'r3n');
+  await bar(page).waitFor({ timeout: 500 });
+  for (let i = 0; i < 4; i += 1) await page.keyboard.press('Tab');
+  assert.equal(await focused(page), 'undo');
+  for (const want of ['keep', 'more', 'tag', 'r3n', 'r2n']) {
+    await page.keyboard.press('Shift+Tab');
+    assert.equal(await focused(page), want);
+  }
+  assert.equal(await drawing(page).count(), 1, 'drawn the whole way');
+});
+
+test('the thing as it was, and an old shape, take the look the page gives them where they stand', async () => {
+  const one = await newChat();
+  const two = await newChat();
+  const page = await open({ doc: 'shelf', attending: [one, two] });
+  await ask(one, 'shelfRemove', 'shelf');
+  await ask(two, 'shelfLook', 'shelf');
+  await page.waitForFunction(() => window.marbleReview.groups().length === 2, null, { timeout: 10_000 });
+
+  // The old card had round corners, from .shelf .card.round.
+  await restOn(page, 'sc');
+  await page.locator('.marble-review-outline').waitFor({ timeout: 1000 });
+  assert.equal(await page.evaluate(() => parseFloat(getComputedStyle(document.querySelector('.marble-review-outline')).borderTopLeftRadius)), 14);
+  await away(page);
+  await nothingDrawn(page);
+
+  // The removed row comes back in the copy styled as its neighbours are.
+  await restOn(page, 's3');
+  await bar(page).waitFor();
+  const tag = await page.locator('.marble-review-tag button').boundingBox();
+  await page.mouse.move(tag.x + tag.width / 2, tag.y + tag.height / 2);
+  await page.mouse.down();
+  await page.waitForTimeout(400);
+  const seen = await page.evaluate(() => {
+    const copy = document.querySelector('.marble-review-before');
+    const list = document.querySelector('[data-marble-id="sl"]');
+    const back = [...(copy?.querySelectorAll('li') ?? [])].find((li) => li.textContent === 'Second');
+    const pick = (el) => { const c = getComputedStyle(el); return [c.paddingTop, c.color, c.letterSpacing].join(' '); };
+    return {
+      beside: list.nextElementSibling === copy,
+      transient: copy?.hasAttribute('data-marble-transient'),
+      inert: copy?.inert,
+      hidden: copy?.getAttribute('aria-hidden'),
+      events: copy ? getComputedStyle(copy).pointerEvents : null,
+      back: back ? pick(back) : null,
+      sibling: pick(document.querySelector('[data-marble-id="s1"]')),
+      original: getComputedStyle(list).visibility,
+    };
+  });
+  await page.mouse.up();
+  assert.equal(seen.beside, true, 'the copy stands right after the list');
+  assert.equal(seen.transient, true);
+  assert.equal(seen.inert, true);
+  assert.equal(seen.hidden, 'true');
+  assert.equal(seen.events, 'none');
+  assert.equal(seen.original, 'hidden');
+  assert.equal(seen.back, seen.sibling, 'the removed row looks as its neighbours do');
+  await page.waitForFunction(() => !document.querySelector('.marble-review-before'));
+});
+
+test('a held ⌘Z repeating while the change is being taken back never reaches your own undo', async () => {
+  const id = await newChat();
+  const page = await open({ attending: [id] });
+  await page.locator('[data-marble-id="p"]').click();
+  await page.keyboard.press('End');
+  await page.keyboard.type(' Mine.');
+  await page.keyboard.press('Enter');
+  await page.waitForTimeout(500);
+  await ask(id, 'dates');
+  await groups(page, 1);
+  await page.route('**/agent/turns/*/undo', async (route) => { await sleep(900); await route.continue(); });
+  await page.evaluate(() => document.activeElement?.blur?.());
+  await page.keyboard.down(MOD);
+  await page.keyboard.down('z');
+  await page.waitForTimeout(150);
+  await page.keyboard.down('z');
+  await page.keyboard.down('z');
+  await page.keyboard.up('z');
+  await page.keyboard.up(MOD);
+  await page.waitForFunction(() => document.querySelectorAll('[data-marble-id="list"] .date').length === 0, null, { timeout: 5000 });
+  await page.waitForTimeout(300);
+  assert.equal(await page.locator('[data-marble-id="p"]').textContent(), 'Notes for the week. Mine.', 'your edit stands');
+});
+
+test('a second ⌘Z while one change is being taken back is ignored', async () => {
+  const a = await newChat();
+  const b = await newChat();
+  const page = await open({ attending: [a, b] });
+  await ask(a, 'dates');
+  await ask(b, 'rename');
+  await groups(page, 2);
+  let undos = 0;
+  await page.route('**/agent/turns/*/undo', async (route) => { undos += 1; await sleep(900); await route.continue(); });
+  await page.evaluate(() => document.activeElement?.blur?.());
+  await page.keyboard.press(`${MOD}+z`);
+  await page.waitForTimeout(150);
+  await page.keyboard.press(`${MOD}+z`);
+  await page.waitForFunction(() => document.querySelector('[data-marble-id="h"]').textContent === 'Reading list', null, { timeout: 5000 });
+  await page.waitForTimeout(600);
+  assert.equal(undos, 1, 'one undo asked of the host');
+  assert.equal(await dates(page), 3, 'the other change stands');
+});
+
+test('⌘Z goes by when the change finished, not when the page heard of it', async () => {
+  const id = await newChat();
+  const page = await open({ attending: [id] });
+  await slowReview(page, 1500);
+  await ask(id, 'dates');
+  // Your edit after the change had finished, before the page had listed it.
+  await page.locator('[data-marble-id="p"]').click();
+  await page.keyboard.press('End');
+  await page.keyboard.type(' Mine.');
+  await groups(page, 1);
+  await page.keyboard.press(`${MOD}+z`);
+  await page.waitForFunction(() => document.querySelector('[data-marble-id="p"]').textContent === 'Notes for the week.');
+  await page.waitForTimeout(400);
+  assert.equal(await dates(page), 3, 'the change stands');
+});
+
+test('the thing as it was goes back the moment the window loses the hold', async () => {
+  const id = await newChat();
+  const page = await open({ attending: [id] });
+  await ask(id, 'dates');
+  await groups(page, 1);
+  await restOn(page, 'r1');
+  for (const event of ['blur', 'pagehide']) {
+    const tag = await page.locator('.marble-review-tag button').boundingBox();
+    await page.mouse.move(tag.x + tag.width / 2, tag.y + tag.height / 2);
+    await page.mouse.down();
+    await page.locator('.marble-review-before').waitFor({ state: 'attached' });
+    await page.evaluate((type) => dispatchEvent(new Event(type)), event);
+    await page.waitForFunction(() => !document.querySelector('.marble-review-before')
+      && getComputedStyle(document.querySelector('[data-marble-id="list"]')).visibility === 'visible', null, { timeout: 1000 });
+    await page.mouse.up();
+  }
+});
+
+test('no rest is drawn while typing has just happened, or with a button held', async () => {
+  const id = await newChat();
+  const page = await open({ attending: [id] });
+  await ask(id, 'dates');
+  await groups(page, 1);
+  await page.locator('[data-marble-id="p"]').click();
+  await page.keyboard.type('x');
+  await restOn(page, 'r1', { wait: 650 });
+  assert.equal(await page.locator('.marble-review-group').count(), 0, 'just typed: no drawing');
+  await page.waitForTimeout(300);
+  const r = await box(page, 'r2');
+  await page.mouse.move(r.x + 30, r.y + r.height / 2);
+  await page.waitForTimeout(650);
+  await bar(page).waitFor({ timeout: 500 });
+
+  await away(page);
+  await nothingDrawn(page);
+  await page.mouse.down();
+  await restOn(page, 'r3', { wait: 700 });
+  assert.equal(await page.locator('.marble-review-group').count(), 0, 'dragging: no drawing');
+  await page.mouse.up();
+});
+
+test('a write from outside the page is not the person: ⌘Z after it still takes back the change', async () => {
+  const id = await newChat();
+  const page = await open({ attending: [id] });
+  await page.locator('[data-marble-id="p"]').click();
+  await page.keyboard.press('End');
+  await page.keyboard.type(' Mine.');
+  await page.keyboard.press('Enter');
+  await page.waitForTimeout(500);
+  await ask(id, 'dates');
+  await groups(page, 1);
+  await page.mouse.move(1000, 120);
+  await page.waitForTimeout(2200);
+  const source = await host.drive.store.read('list');
+  await host.drive.putDocument('list', source.replace('>Reading list</h1>', '>Reading list, shared</h1>'), { label: 'outside' });
+  await page.waitForFunction(() => document.querySelector('[data-marble-id="h"]').textContent === 'Reading list, shared', null, { timeout: 5000 });
+  await page.waitForTimeout(200);
+  await page.evaluate(() => document.activeElement?.blur?.());
+  await page.keyboard.press(`${MOD}+z`);
+  await page.waitForFunction(() => document.querySelectorAll('[data-marble-id="list"] .date').length === 0, null, { timeout: 5000 });
+});
+
+test('a component of the page\'s own is never brought to life a second time by a copy of it', async () => {
+  const id = await newChat();
+  const page = await open({ doc: 'custom', attending: [id] });
+  await ask(id, 'custom', 'custom');
+  await page.waitForFunction(() => window.marbleReview.groups().length === 1, null, { timeout: 10_000 });
+  assert.equal(await page.evaluate(() => window.__made), 1);
+  await restOn(page, 'rct');
+  await page.locator('.marble-review-outline').waitFor({ timeout: 1000 });
+  const tag = await page.locator('.marble-review-tag button').boundingBox();
+  await page.mouse.move(tag.x + tag.width / 2, tag.y + tag.height / 2);
+  await page.mouse.down();
+  await page.locator('.marble-review-before').waitFor({ state: 'attached' });
+  const seen = await page.evaluate(() => ({ made: window.__made, cards: document.querySelectorAll('review-card').length }));
+  await page.mouse.up();
+  assert.deepEqual(seen, { made: 1, cards: 1 });
 });

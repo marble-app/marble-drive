@@ -415,6 +415,32 @@ test('a turn runs, streams into the transcript, and completes', async () => {
   await runner.close();
 });
 
+test('a finished turn says so once more after its own record is final, for a page asking what is left to review', async () => {
+  const order = [];
+  const { store, runner, published } = await setup({
+    onPublish: () => {
+      const last = published.at(-1);
+      if (last?.summary) order.push('summary');
+    },
+  });
+  const update = store.updateTurn;
+  store.updateTurn = async (turnId, patch) => {
+    const result = await update(turnId, patch);
+    if (['completed', 'failed', 'cancelled', 'interrupted'].includes(patch?.status)) order.push('final');
+    return result;
+  };
+  const { id } = await store.createConversation({ provider: 'fake' });
+  const { turnId } = await runner.send(id, { prompt: 'script:hello', context: { target: 'notes', selection: [] } });
+  await finished(store, turnId);
+  await new Promise((resolve) => setTimeout(resolve, 50));
+  const final = order.indexOf('final');
+  assert.ok(final >= 0, 'the turn record was finalised');
+  assert.ok(order.slice(final + 1).includes('summary'), `a summary follows the final write: ${order.join(', ')}`);
+  const last = published.filter((p) => p.summary).at(-1);
+  assert.equal(last.summary.running, false);
+  await runner.close();
+});
+
 test('a finished turn tells the host to forget what that writer touched', async () => {
   const released = [];
   const { store, runner } = await setup({ onFinish: (conversationId) => released.push(conversationId) });
@@ -1669,8 +1695,9 @@ test('a chat is named by a model once its first turn is over', async () => {
   assert.equal(asked[0].prompt, 'script:hello');
   assert.match(asked[0].reply, /Hello from the fake agent/);
 
-  // Lists hear about it without asking.
-  const meta = published.find((p) => p.conversationId === chat.id && p.event.type === 'meta');
+  // Lists hear about it without asking. (The turn's own end is said as a
+  // meta summary too, before the name; the name's is the last.)
+  const meta = published.filter((p) => p.conversationId === chat.id && p.event.type === 'meta').at(-1);
   assert.equal(meta.summary.title, 'Fake Agent Says Hello');
   await runner.close();
 });

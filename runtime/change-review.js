@@ -31,8 +31,11 @@
 // after a reload too, because the host keeps each turn's parts (GET
 // /agent/review). The page asks it on load, when a change ends here, and when
 // a chat about this page says something changed; never on a timer.
-// Everything here is transient chrome in one top-layer host; nothing it draws
-// is filed as an op. It never says Agent.
+// Everything here is transient chrome in one top-layer host, but for the
+// thing as it was while its tag is held (and the moment an old shape is
+// measured): that copy stands right after its original, marked transient,
+// inert and out of the flow, so the page's own rules style it as they style
+// the original. Nothing is filed as an op. It never says Agent.
 
 (() => {
   const TRANSIENT = 'data-marble-transient';
@@ -49,6 +52,8 @@
   const TIP = 750;           // ms of rest before a control's tip
   const LOOKS = 1500;        // elements whose look a copy takes over
   const SOON = 120;          // ms a burst of reasons to ask the host is gathered into one
+  const TYPING = 800;        // ms after a key or an input before a rest may draw
+  const GESTURE = 2000;      // ms a history change may come after the person's own hand
   const EASE = 'cubic-bezier(.22, 1, .36, 1)';    // arriving and settling
   const COLOUR = 'cubic-bezier(.22, .61, .36, 1)'; // colour only
   const stillness = matchMedia('(prefers-reduced-motion: reduce)');
@@ -110,9 +115,9 @@
     .marble-review-ghost table { border-collapse: collapse; width: 100%; }
     .marble-review-ghost ul, .marble-review-ghost ol, .marble-review-ghost dl { margin: 0; padding: 0; list-style: none; }
 
-    /* The page as it was, while the tag is held: a copy laid over the thing. */
-    .marble-review-before { position: fixed; left: 0; top: 0; margin: 0; pointer-events: none; box-sizing: border-box; }
-    .marble-review-before > * { margin: 0 !important; }
+    /* The page as it was, while the tag is held: a copy right after the
+       thing, laid over it (placed inline, where it stands). */
+    .marble-review-before { pointer-events: none !important; }
 
     /* The tag says what the change did, in ink on the page's card: it is the
        page's own state now, not work going on. Its squared corner points at
@@ -153,7 +158,10 @@
       color: var(--review-faint); font-weight: 400; }
     .marble-review-bar [data-act="more"] > span { overflow: hidden; text-overflow: ellipsis; }
     .marble-review-bar [data-act="keep"] { color: var(--review-ink); }
-    .marble-review-say { flex: 1 1 auto; min-width: 0; padding-left: 8px; color: var(--review-muted); }
+    .marble-review-say { flex: 1 1 auto; min-width: 0; padding-left: 8px; color: var(--review-muted);
+      overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    /* What did not happen, in the page's own word for a failure. */
+    .marble-review-say[data-failed] { color: var(--danger, var(--review-muted)); }
     /* Holding Undo fills it across, at the pace of the hold: a meter of time,
        so it moves evenly. */
     .marble-review-fill { position: absolute !important; inset: 0 auto 0 0; width: 0; pointer-events: none;
@@ -194,9 +202,8 @@
   const UNSAFE = new Set(['script', 'style', 'link', 'meta', 'base', 'iframe', 'frame', 'frameset', 'object', 'embed', 'template', 'noscript', 'dialog']);
   const UNSAFE_ATTRS = new Set(['id', 'tabindex', 'name', 'for', 'autofocus', 'autoplay', 'popover', 'popovertarget', 'popovertargetaction',
     'contenteditable', 'draggable', 'accesskey', 'form', 'formaction', 'action', 'srcdoc', 'ping']);
-  // What a copy takes over from each element it copies, so it reads as the
-  // page out of its place: the box, the type and the colours, not the size,
-  // which the copy's own content decides.
+  // What the copy of a whole page takes over from the body it stands in for:
+  // the box, the type and the colours, not the size.
   const LOOK = [
     'display', 'box-sizing', 'position', 'float', 'clear',
     'margin-top', 'margin-right', 'margin-bottom', 'margin-left',
@@ -214,7 +221,6 @@
     'grid-template-columns', 'grid-template-rows', 'grid-auto-flow', 'grid-auto-columns', 'grid-auto-rows', 'grid-column-start', 'grid-column-end', 'grid-row-start', 'grid-row-end',
     'border-collapse', 'border-spacing', 'table-layout', 'min-width', 'max-width',
   ];
-  const REPLACED = /^(img|svg|video|canvas|picture|iframe|input|select|textarea|progress|meter)$/i;
 
   const boot = (marble) => {
     const agent = marble?.agent;
@@ -279,7 +285,13 @@
     // ------------------------------------------------------------ state
 
     let turns = [];               // the host's list for this page, newest first
-    const known = new Map();      // turn id -> when this page first heard it was over (this page's clock)
+    const known = new Map();      // turn id -> when this page first listed it (this page's clock), for a host without one
+    let offset = null;            // the host's clock minus this page's, from its own answers
+    const redoneAt = new Map();   // turn id -> when this page redid it (the host's clock)
+    let inFlight = false;         // a Keep, Undo or Redo the host has not answered yet
+    let tookZ = false;            // this ⌘Z press was the change's, repeats and all
+    let typedAt = 0;              // the person's last key or input (this page's clock)
+    let gestureAt = 0;            // the person's last own gesture of any kind
     const keptHere = new Set();   // kept from here, before the host's list says so
     const undoneHere = [];        // { turn, at }: undone from here, newest last, for ⇧⌘Z
     const yours = new Set();      // `${turn}|${part}`: a person's own edit made it theirs
@@ -293,15 +305,63 @@
 
     // ------------------------------------------------------------ one change, since you last kept
 
-    /** Where a part is, or was: the element itself, and for a part that left
-     *  its place, the place it left. */
-    function anchorsOf(part) {
+    function common(els) {
+      let at = els[0] ?? null;
+      for (const el of els.slice(1)) while (at && !at.contains(el)) at = at.parentElement;
+      return at;
+    }
+
+    /** Up from an element to the block it sits in: past runs of words and
+     *  boxes that lay out nothing of their own, a cell to its row, a row
+     *  group to its table; with `addressed`, to one the file names. The page
+     *  itself is none. */
+    function blockUp(el, { addressed = false } = {}) {
+      let at = el ?? null;
+      while (at && !whole(at)) {
+        if (/^(TD|TH)$/.test(at.tagName)) { at = at.parentElement; continue; }
+        if (/^(TBODY|THEAD|TFOOT)$/.test(at.tagName)) { at = at.closest('table') ?? at.parentElement; continue; }
+        const display = getComputedStyle(at).display;
+        if (display.startsWith('inline') || display === 'contents' || (addressed && !at.hasAttribute('data-marble-id'))) { at = at.parentElement; continue; }
+        break;
+      }
+      return whole(at) ? null : at;
+    }
+
+    /** Whether an element is a piece of a larger thing: its parent lays its
+     *  children out in a row (a date in a row, a title beside a chip), or is
+     *  a box of its own (a card, a bordered row). */
+    function pieceOf(parent) {
+      if (!parent || whole(parent)) return false;
+      const css = getComputedStyle(parent);
+      if (/flex/.test(css.display) && !css.flexDirection.startsWith('column')) return true;
+      if (css.display === 'table-row') return true;
+      return parseFloat(css.borderTopWidth) > 0 || opaque(css.backgroundColor) || (css.boxShadow && css.boxShadow !== 'none');
+    }
+
+    /** Where a part is found on the page: the block it is, or the row or
+     *  card it is a piece of (a date is found on its row, a due line on its
+     *  card), one level up and no more; for one that is gone, what took its
+     *  place, else what held it. Resting there draws its change. */
+    function homeOf(part) {
       if (part.kind === 'removed') {
-        const parent = byId(part.parentId) ?? byId(part.beforeId)?.parentElement ?? null;
-        return parent ? [parent] : [];
+        const next = byId(part.beforeId);
+        if (next) return next;
+        const parent = byId(part.parentId);
+        return whole(parent) ? null : parent;
       }
       const el = byId(part.id);
-      const out = el ? [el] : [];
+      if (!el) return null;
+      const home = blockUp(el) ?? el;
+      return pieceOf(home.parentElement) ? (blockUp(home.parentElement) ?? home.parentElement) : home;
+    }
+    const homesOf = (parts) => [...new Set(parts.map(homeOf).filter(Boolean))];
+
+    /** What a part hangs from: its parent, and for one that left its place,
+     *  the parent it left as well. */
+    function parentsOf(part) {
+      if (part.kind === 'removed') return [byId(part.parentId)].filter(Boolean);
+      const el = byId(part.id);
+      const out = el?.parentElement ? [el.parentElement] : [];
       if (part.kind === 'moved') {
         const from = byId(part.parentId);
         if (from) out.push(from);
@@ -309,37 +369,22 @@
       return out;
     }
 
-    function common(els) {
-      let at = els[0] ?? null;
-      for (const el of els.slice(1)) while (at && !at.contains(el)) at = at.parentElement;
-      return at;
-    }
-
-    /** The nearest block that holds all of `els`: a row for its cells, a
-     *  table for its rows, never a run of words. The page itself is none. */
-    function blockOf(els) {
-      let at = common(els.filter(Boolean));
-      while (at && !whole(at)) {
-        if (/^(TD|TH)$/.test(at.tagName)) { at = at.parentElement; continue; }
-        if (/^(TBODY|THEAD|TFOOT)$/.test(at.tagName)) { at = at.closest('table') ?? at.parentElement; continue; }
-        const display = getComputedStyle(at).display;
-        if (display.startsWith('inline') || display === 'contents' || !at.hasAttribute('data-marble-id')) { at = at.parentElement; continue; }
-        break;
-      }
-      return whole(at) ? null : at;
-    }
-
-    /** Turns that touched the same part, or whose parts sit in the same block
-     *  (or one block holds the other), are one change. */
+    /** One change, since you last kept (ruling R23). Two asks are one change
+     *  only when a part of one is, holds or is inside a part of the other,
+     *  or when their parts hang from the same block: the common ancestor of
+     *  their parents. A high block both happen to sit in (a board, a page's
+     *  column) never makes them one. An ask's own parts are always one. */
     function rebuild() {
       const items = [];
       for (const turn of turns) {
         if (keptHere.has(turn.id) || undone(turn.id)) continue;
         const parts = (turn.parts ?? []).filter((p) => p?.id && !yours.has(`${turn.id}|${p.id}`));
         if (!parts.length) continue;
-        const anchors = parts.flatMap(anchorsOf);
-        if (!anchors.length) continue;
-        items.push({ turn, parts, anchors, block: blockOf(anchors), ids: new Set(parts.map((p) => p.id)) });
+        const homes = homesOf(parts);
+        if (!homes.length) continue;
+        const els = parts.filter((p) => p.kind !== 'removed').map((p) => byId(p.id)).filter(Boolean);
+        const parents = parts.flatMap(parentsOf);
+        items.push({ turn, parts, els, ids: new Set(parts.map((p) => p.id)), under: parents.length ? blockUp(common(parents)) : null });
       }
       const root = items.map((_, i) => i);
       const find = (i) => (root[i] === i ? i : (root[i] = find(root[i])));
@@ -347,9 +392,10 @@
         for (let j = i + 1; j < items.length; j += 1) {
           const a = items[i];
           const b = items[j];
-          const shared = [...a.ids].some((id) => b.ids.has(id));
-          const near = a.block && b.block && (a.block.contains(b.block) || b.block.contains(a.block));
-          if (shared || near) root[find(i)] = find(j);
+          const shared = [...a.ids].some((id) => b.ids.has(id))
+            || a.els.some((x) => b.els.some((y) => x.contains(y) || y.contains(x)));
+          const hung = Boolean(a.under) && a.under === b.under;
+          if (shared || hung) root[find(i)] = find(j);
         }
       }
       const sets = new Map();
@@ -363,15 +409,30 @@
         // it: what it was before this change began.
         const parts = new Map();
         for (const m of [...members].reverse()) for (const p of m.parts) if (!parts.has(p.id)) parts.set(p.id, { ...p, turn: m.turn.id });
-        return {
-          turns: members.map((m) => m.turn),
-          members,
-          parts: [...parts.values()],
-          block: blockOf(members.flatMap((m) => m.anchors)),
-        };
+        return { turns: members.map((m) => m.turn), members, parts: [...parts.values()] };
       });
       settleViews();
       offerTray();
+    }
+
+    /** The block the change is shown as it was in: what holds every part a
+     *  structural change put in, took out or moved (a list for one row
+     *  added), and the part itself for one changed in place. */
+    function beforeBlockOf(group) {
+      const els = [];
+      for (const m of group.members) {
+        for (const part of m.parts) {
+          const el = part.kind === 'removed' ? null : byId(part.id);
+          if (part.kind === 'added' || part.kind === 'moved') { if (el?.parentElement) els.push(el.parentElement); }
+          else if (el) els.push(el);
+          if (part.kind === 'removed' || part.kind === 'moved') {
+            const from = byId(part.parentId);
+            if (from) els.push(from);
+          }
+        }
+      }
+      if (!els.length) return null;
+      return blockUp(common(els), { addressed: true }) ?? document.body;
     }
 
     const turnIds = (g) => new Set(g.turns.map((t) => t.id));
@@ -395,32 +456,49 @@
 
     // ------------------------------------------------------------ asking the host
 
-    let loading = null;
-    let again = false;
-    async function load() {
-      if (loading) { again = true; return loading; }
-      loading = (async () => {
-        const asked = Date.now();
-        try {
-          const body = await agent.review(app);
-          const now = Date.now();
-          turns = Array.isArray(body?.turns) ? body.turns : [];
-          for (const t of turns) if (!known.has(t.id)) known.set(t.id, now);
-          // Undone from here and listed again, by a list asked for after the
-          // undo: it was redone somewhere else.
-          for (let i = undoneHere.length - 1; i >= 0; i -= 1) {
-            const u = undoneHere[i];
-            if (u.at < asked && turns.some((t) => t.id === u.turn)) undoneHere.splice(i, 1);
-          }
-          for (const id of [...keptHere]) if (!turns.some((t) => t.id === id)) keptHere.delete(id);
-          rebuild();
-        } catch {
-          // The host could not say: what was known stands.
-        }
-      })();
-      try { await loading; } finally { loading = null; }
-      if (again) { again = false; await load(); }
+    // What is left to review, asked of the host. One answer on its way was
+    // asked before whatever asks now (a redo, a keep), so a caller then gets
+    // a fresh one asked after it, never the one already travelling.
+    let current = null;
+    let queued = null;
+    function load() {
+      if (!current) {
+        current = fetchList().finally(() => { current = null; });
+        return current;
+      }
+      queued ??= current.then(() => { queued = null; return load(); });
+      return queued;
     }
+    async function fetchList() {
+      const asked = Date.now();
+      let body;
+      try {
+        body = await agent.review(app);
+      } catch {
+        return; // The host could not say: what was known stands.
+      }
+      const answered = Date.now();
+      // The host's clock against this page's, to the middle of the trip.
+      if (Number.isFinite(body?.now)) offset = body.now - (asked + answered) / 2;
+      turns = Array.isArray(body?.turns) ? body.turns : [];
+      for (const t of turns) if (!known.has(t.id)) known.set(t.id, answered);
+      // Undone from here and listed again, by a list asked for after the
+      // undo: it was redone somewhere else.
+      for (let i = undoneHere.length - 1; i >= 0; i -= 1) {
+        const u = undoneHere[i];
+        if (u.at < asked && turns.some((t) => t.id === u.turn)) undoneHere.splice(i, 1);
+      }
+      for (const id of [...keptHere]) if (!turns.some((t) => t.id === id)) keptHere.delete(id);
+      rebuild();
+    }
+    /** When a turn's change last landed on the page, by the host's clock. */
+    const landedAt = (t) => Math.max(Number(t.finishedAt) || 0, redoneAt.get(t.id) ?? 0);
+    /** Whether a change came after the person's own last edit: by the
+     *  host's clock, the page's own edit put on it; a host that does not
+     *  say its clock, by when this page first listed the change. */
+    const cameAfterPerson = (t) => (offset !== null && Number(t.finishedAt)
+      ? landedAt(t) > personAt + offset
+      : (known.get(t.id) ?? 0) > personAt);
     let soonTimer = 0;
     const soon = () => { clearTimeout(soonTimer); soonTimer = setTimeout(load, SOON); };
 
@@ -476,7 +554,11 @@
       marks.setAttribute('aria-hidden', 'true');
       const view = {
         group, by, state: 'normal', busy: false, root, marks, made: new Map(), shapes: new Map(),
-        rect: null, area: [], leave: 0, focusFrom: null, before: null, undone: [], redoable: false,
+        rect: null, area: [], leave: 0, focusFrom: null, before: null, frame: null,
+        // After an undo: what it took back, what is left to take back (a hold
+        // that stopped halfway), whether Redo can be offered, and what the
+        // bar says. `error`: a verdict the host refused, said in its place.
+        undone: [], pending: [], redoable: false, said: 'Undone', failed: false, error: null,
       };
       view.tag = makeTag(view);
       view.bar = makeBar(view);
@@ -588,34 +670,51 @@
       return { left, top: r.top + parseFloat(css.borderTopWidth) + parseFloat(css.paddingTop), width: Math.max(0, right - left), ref: null };
     }
 
-    /** The shape a look change took away: the element copied into this layer
-     *  with its old value, out of sight at the same place, measured, and
-     *  gone again. Read once per element. */
+    /** Placed absolutely right after its original, then moved onto it: an
+     *  element out of the flow takes no room, and standing beside its
+     *  original it keeps every rule its ancestors give it. */
+    function layOver(copy, original) {
+      for (const [k, v] of [['position', 'absolute'], ['left', '0px'], ['top', '0px'], ['margin', '0'], ['box-sizing', 'border-box'],
+        ['transition', 'none'], ['animation', 'none']]) copy.style.setProperty(k, v, 'important');
+      if (original === document.body) document.body.append(copy);
+      else original.after(copy);
+      fitOver(copy, original);
+    }
+    function fitOver(copy, original) {
+      const b = original.getBoundingClientRect();
+      const c = copy.getBoundingClientRect();
+      const dx = b.left - c.left;
+      const dy = b.top - c.top;
+      if (Math.abs(dx) < 0.5 && Math.abs(dy) < 0.5) return;
+      copy.style.setProperty('left', `${(parseFloat(copy.style.left) || 0) + dx}px`, 'important');
+      copy.style.setProperty('top', `${(parseFloat(copy.style.top) || 0) + dy}px`, 'important');
+    }
+
+    /** The shape a look change took away: the element copied with its old
+     *  value, set right after it out of sight, measured, and gone again, in
+     *  the same task. Read once per element. */
     function oldShape(view, part, el, r) {
       const cached = view.shapes.get(`old:${part.id}`);
       if (cached && cached.el === el) return cached;
-      const css = getComputedStyle(el.parentElement ?? el);
-      const room = document.createElement('div');
-      room.setAttribute(TRANSIENT, '');
-      room.style.cssText = `position:fixed;left:0;top:0;width:0;height:0;overflow:visible;visibility:hidden;pointer-events:none;`
-        + `font:${css.font};line-height:${css.lineHeight};letter-spacing:${css.letterSpacing};color:${css.color};white-space:${css.whiteSpace}`;
-      const copy = el.cloneNode(true);
-      sanitize(copy);
+      const copy = sanitize(copyOf(el));
+      if (!copy) return null;
       if (part.before == null) copy.removeAttribute(part.name);
       else copy.setAttribute(part.name, part.before);
+      copy.setAttribute(TRANSIENT, '');
+      copy.setAttribute('aria-hidden', 'true');
+      copy.inert = true;
+      copy.style.setProperty('visibility', 'hidden', 'important');
+      copy.style.setProperty('pointer-events', 'none', 'important');
       const sized = part.name === 'style' && /(^|;)\s*width\s*:/i.test(String(part.before ?? ''));
-      for (const [k, v] of [['position', 'fixed'], ['left', `${r.left}px`], ['top', `${r.top}px`], ['margin', '0'],
-        ['visibility', 'hidden'], ['transition', 'none'], ['animation', 'none'], ['box-sizing', 'border-box'],
-        ...(sized ? [] : [['width', `${r.width}px`]])]) copy.style.setProperty(k, v, 'important');
-      room.append(copy);
-      host.append(room);
+      if (!sized) copy.style.setProperty('width', `${r.width}px`, 'important');
+      layOver(copy, el);
       const got = copy.getBoundingClientRect();
       const was = getComputedStyle(copy);
       const shape = {
         el, dx: got.left - r.left, dy: got.top - r.top, width: got.width, height: got.height,
         radius: `${was.borderTopLeftRadius} ${was.borderTopRightRadius} ${was.borderBottomRightRadius} ${was.borderBottomLeftRadius}`,
       };
-      room.remove();
+      copy.remove();
       view.shapes.set(`old:${part.id}`, shape);
       return shape;
     }
@@ -623,29 +722,44 @@
     // --------------------------------------------------------- copies of the page
 
     /** Nothing that runs, loads, takes focus or names an element; ids kept
-     *  only while the copy still has inverses to take by id. */
+     *  only while the copy still has inverses to take by id. A custom element
+     *  becomes a plain box, the root as well, so a copy never comes to life
+     *  as a second one of itself. Returns the root, replaced or not. */
     function sanitize(root, { ids = false } = {}) {
+      if (!root) return root;
       const all = root.nodeType === 11 ? [...root.querySelectorAll('*')] : [root, ...root.querySelectorAll('*')];
+      let top = root;
       for (const el of all) {
         const tag = el.localName?.toLowerCase();
-        if (UNSAFE.has(tag) || el.hasAttribute('popover') || (el !== root && el.hasAttribute(TRANSIENT))) { el.remove(); continue; }
+        if (el !== root && (UNSAFE.has(tag) || el.hasAttribute('popover') || el.hasAttribute(TRANSIENT))) { el.remove(); continue; }
         for (const { name } of [...el.attributes]) {
           const n = name.toLowerCase();
           if (n.startsWith('on') || UNSAFE_ATTRS.has(n)) el.removeAttribute(name);
           else if (n.startsWith('data-marble') && !(ids && n === 'data-marble-id')) el.removeAttribute(name);
           else if ((n === 'href' || n === 'src' || n === 'xlink:href') && /^\s*javascript:/i.test(el.getAttribute(name) ?? '')) el.removeAttribute(name);
         }
-        // A custom element in a copy would come to life as a second one of
-        // itself (open streams, mount a drawer): it stays a plain box.
-        if (tag?.includes('-') && el !== root && el.namespaceURI === 'http://www.w3.org/1999/xhtml') {
-          const box = document.createElement('div');
+        if (tag?.includes('-') && el.namespaceURI === 'http://www.w3.org/1999/xhtml') {
+          const box = (el.ownerDocument ?? document).createElement('div');
           for (const { name, value } of [...el.attributes]) box.setAttribute(name, value);
           box.append(...el.childNodes);
-          el.replaceWith(box);
+          if (el.parentNode) el.replaceWith(box);
+          if (el === root) top = box;
         }
       }
-      return root;
+      return top;
     }
+
+    /** A copy of an element made from its markup, in an inert document: no
+     *  handler, load or component of it stirs on the way. Ids are kept for
+     *  the inverses to find their parts by. The page's body copies as a box
+     *  of its children. */
+    function copyOf(el) {
+      const t = document.createElement('template');
+      t.innerHTML = el === document.body ? `<div>${el.innerHTML}</div>` : el.outerHTML;
+      sanitize(t.content, { ids: true });
+      return t.content.firstElementChild;
+    }
+
     function fragmentOf(html, { ids = false } = {}) {
       const t = document.createElement('template');
       t.innerHTML = String(html ?? '');
@@ -697,27 +811,14 @@
       return ghost;
     }
 
-    /** The thing as it was before this change: a copy of the change's block,
-     *  wearing each element's look as it stands, with every ask's inverse
-     *  applied to the copy by id, newest ask first. Nothing is undone. */
+    /** The thing as it was before this change: a copy of the block that
+     *  holds it, with every ask's inverse applied to the copy by id, newest
+     *  ask first. Nothing is undone. */
     function beforeOf(view) {
-      const block = view.group.block ?? document.body;
-      const copy = block.cloneNode(true);
-      const from = [block, ...block.querySelectorAll('*')];
-      const to = [copy, ...copy.querySelectorAll('*')];
-      const own = new WeakMap();
-      const n = Math.min(from.length, to.length, LOOKS);
-      for (let i = 0; i < n; i += 1) {
-        const css = getComputedStyle(from[i]);
-        own.set(to[i], from[i].getAttribute('style'));
-        let text = LOOK.map((p) => `${p}:${css.getPropertyValue(p)}`).join(';');
-        if (i === 0) text += `;position:static;margin:0;box-sizing:border-box;width:${block.getBoundingClientRect().width}px`;
-        else if (REPLACED.test(from[i].localName)) text += `;width:${css.width};height:${css.height}`;
-        to[i].setAttribute('style', text);
-      }
-      // In the same task the copy was made in, so no handler it carried ever
-      // hears an event; ids stay until the inverses have found their parts.
-      sanitize(copy, { ids: true });
+      const block = beforeBlockOf(view.group);
+      if (!block) return null;
+      const copy = copyOf(block);
+      if (!copy) return null;
       const find = (id) => {
         if (id == null) return null;
         if (copy.getAttribute('data-marble-id') === id) return copy;
@@ -737,12 +838,6 @@
             case 'look':
             case 'attr':
               if (!el) break;
-              // Its old look is its own again, not the one copied from now.
-              if (part.kind === 'look') {
-                const was = own.get(el);
-                if (was == null) el.removeAttribute('style');
-                else el.setAttribute('style', was);
-              }
               if (part.before == null) el.removeAttribute(part.name);
               else el.setAttribute(part.name, part.before);
               break;
@@ -767,29 +862,32 @@
           }
         }
       }
-      sanitize(copy);
+      const done = sanitize(copy);
+      // The body's copy is a box of its children: it wears the body's look.
       if (block === document.body) {
-        const div = document.createElement('div');
-        div.setAttribute('style', copy.getAttribute('style') ?? '');
-        div.append(...copy.childNodes);
-        return { block, copy: div };
+        const css = getComputedStyle(block);
+        done.setAttribute('style', LOOK.map((p) => `${p}:${css.getPropertyValue(p)}`).join(';'));
       }
-      return { block, copy };
+      return { block, copy: done };
     }
 
     function showBefore(view) {
       if (view.before || view.state !== 'normal' || view.busy) return;
       let made;
-      try { made = beforeOf(view); } catch { return; }
-      const wrap = h('div', 'marble-review-before');
-      wrap.inert = true;
-      wrap.setAttribute('aria-hidden', 'true');
-      wrap.append(made.copy);
-      view.root.prepend(wrap);
-      view.before = { wrap, block: made.block };
-      const id = made.block.getAttribute('data-marble-id');
+      try { made = beforeOf(view); } catch { made = null; }
+      if (!made) return;
+      const { block, copy } = made;
+      copy.classList.add('marble-review-before');
+      copy.setAttribute(TRANSIENT, '');
+      copy.setAttribute('aria-hidden', 'true');
+      copy.inert = true;
+      copy.style.setProperty('pointer-events', 'none', 'important');
+      copy.style.setProperty('width', `${block.getBoundingClientRect().width}px`, 'important');
+      layOver(copy, block);
+      view.before = { copy, block };
+      const id = block.getAttribute('data-marble-id');
       const sel = id ? `[data-marble-id="${id.replace(/["\\]/g, '\\$&')}"]` : null;
-      hiding.textContent = made.block === document.body
+      hiding.textContent = block === document.body
         ? `body > :not([${TRANSIENT}]) { visibility: hidden !important; }`
         : sel ? `${sel} { visibility: hidden !important; }` : '';
       view.tag.root.toggleAttribute('data-held', true);
@@ -799,12 +897,18 @@
 
     function hideBefore(view) {
       if (!view.before) return;
-      view.before.wrap.remove();
+      view.before.copy.remove();
       view.before = null;
       hiding.textContent = '';
       view.tag.root.removeAttribute('data-held');
       schedule();
     }
+    /** Every held Before goes back: the window lost the hold. */
+    const letGoAll = () => { for (const view of views) hideBefore(view); };
+    addEventListener('blur', letGoAll);
+    addEventListener('pagehide', letGoAll);
+    addEventListener('pointercancel', letGoAll, true);
+    document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'hidden') letGoAll(); });
 
     // ------------------------------------------------------------ painting
 
@@ -931,18 +1035,21 @@
       }
       for (const [key, el] of view.made) if (!seen.has(key)) { el.remove(); view.made.delete(key); }
 
-      // What the change covers: its block, or the parts themselves when it
-      // is spread across the page; and what is drawn for it.
-      const block = group.block?.isConnected ? group.block.getBoundingClientRect() : null;
-      const rect = (block && (block.width || block.height) ? union([block, ...boxes]) : union(boxes)) ?? union(drawn) ?? view.rect;
+      // What the change covers: where its parts are found; and the block they
+      // share, when they fill most of it (three dated rows are their list),
+      // so the bar is flush with that. A block they barely touch (a board, a
+      // column) is not the change.
+      const homes = homesOf(group.parts);
+      const found = union([...homes.map((el) => el.getBoundingClientRect()), ...boxes]);
+      const shared = homes.length > 1 ? blockUp(common(homes)) : homes[0] ?? null;
+      const frameRect = shared?.isConnected ? shared.getBoundingClientRect() : null;
+      view.frame = frameRect && found && found.height >= frameRect.height * 0.5 ? shared : null;
+      const rect = (view.frame ? union([frameRect, found]) : found) ?? union(drawn) ?? view.rect;
       if (!rect) { view.tag.root.hidden = true; view.bar.root.hidden = true; return; }
       view.rect = rect;
       const under = Math.max(rect.bottom, ...drawn.map((d) => d.top + d.height));
 
-      if (view.before) {
-        const b = view.before.block.getBoundingClientRect();
-        place(view.before.wrap, { left: b.left, top: b.top, width: b.width });
-      }
+      if (view.before?.block.isConnected) fitOver(view.before.copy, view.before.block);
 
       fillTag(view);
       fillBar(view);
@@ -988,7 +1095,7 @@
           view.tag.size = [view.tag.press.offsetWidth, view.tag.press.offsetHeight];
         }
         const [tw, th] = view.tag.size;
-        const edged = !flip && group.block?.isConnected && shapeOf(view, group.block).shaped;
+        const edged = !flip && Boolean(view.frame) && shapeOf(view, view.frame).shaped;
         const tx = clamp(edged ? rect.left + 12 : rect.left, INSIDE, vw - INSIDE - tw);
         const ty = clamp(edged ? rect.top - th / 2 : (flip ? top : rect.top) - 6 - th, INSIDE, vh - INSIDE - th);
         tag.toggleAttribute('data-edge', Boolean(edged));
@@ -1110,7 +1217,9 @@
       undo.prepend(fill);
       const redo = button('redo', 'Redo', REDO);
       const say = h('span', 'marble-review-say', 'Undone');
-      const bar = { root, more, keep, undo, redo, say, key: '' };
+      const error = h('span', 'marble-review-say');
+      error.toggleAttribute('data-failed', true);
+      const bar = { root, more, keep, undo, redo, say, error, key: '' };
 
       more.addEventListener('click', () => changeMore(view));
       keep.addEventListener('click', () => keepView(view));
@@ -1122,7 +1231,7 @@
       const stop = () => { clearTimeout(holding); undo.removeAttribute('data-holding'); };
       undo.addEventListener('pointerdown', (event) => {
         held = false;
-        if (event.button !== 0 || view.group.turns.length < 2) return;
+        if (event.button !== 0 || view.state !== 'normal' || view.group.turns.length < 2) return;
         undo.toggleAttribute('data-holding', true);
         holding = setTimeout(() => {
           held = true;
@@ -1135,7 +1244,8 @@
       undo.addEventListener('click', () => {
         if (held) { held = false; return; }
         stop();
-        undoTurns(view, view.group.turns.slice(0, 1));
+        // After an undo that stopped halfway, Undo takes the rest.
+        undoTurns(view, view.state === 'undone' ? [...view.pending] : view.group.turns.slice(0, 1));
       });
       tipOn(undo, () => (view.group.turns.length > 1 ? `Hold to undo all ${view.group.turns.length}` : null));
       return bar;
@@ -1143,51 +1253,85 @@
 
     function fillBar(view) {
       const bar = view.bar;
-      const want = view.state === 'undone' ? (view.redoable ? [bar.say, bar.redo] : [bar.say]) : [bar.more, bar.keep, bar.undo];
-      const key = view.state === 'undone' ? `undone:${view.redoable}` : 'normal';
+      let want;
+      if (view.state === 'undone') {
+        bar.say.textContent = view.said;
+        bar.say.toggleAttribute('data-failed', view.failed);
+        want = [bar.say, ...(view.pending.length ? [bar.undo] : []), ...(view.redoable ? [bar.redo] : [])];
+      } else {
+        bar.error.textContent = view.error ?? '';
+        want = [view.error ? bar.error : bar.more, bar.keep, bar.undo];
+      }
+      const key = `${view.state}|${want.map((el) => el.dataset.act ?? 'say').join()}|${view.said}|${view.error ?? ''}`;
       if (bar.key !== key) {
         const hadKeys = bar.root.contains(document.activeElement);
         bar.key = key;
         bar.root.replaceChildren(...want);
-        if (hadKeys) (want.find((el) => el.localName === 'button') ?? null)?.focus({ preventScroll: true });
+        if (hadKeys && !bar.root.contains(document.activeElement)) (want.find((el) => el.localName === 'button') ?? null)?.focus({ preventScroll: true });
       }
       for (const b of [bar.more, bar.keep, bar.undo, bar.redo]) b.disabled = view.busy;
       const n = view.group.turns.length;
-      if (n > 1) bar.undo.setAttribute('aria-description', `Hold to undo all ${n}`);
+      if (n > 1 && view.state === 'normal') bar.undo.setAttribute('aria-description', `Hold to undo all ${n}`);
       else bar.undo.removeAttribute('aria-description');
-      const name = view.state === 'undone' ? 'Undone' : said(tagPieces(view.group));
+      const name = view.state === 'undone' ? view.said : view.error ?? said(tagPieces(view.group));
       if (bar.root.getAttribute('aria-label') !== name) bar.root.setAttribute('aria-label', name);
     }
 
     // ------------------------------------------------------------ verdicts
 
-    /** Keep: the change is the page now. Its drawing lifts and never shows
-     *  again, and the chat it came from is reviewed when nothing of it is
-     *  left waiting. */
-    async function keepView(view) {
-      const list = [...view.group.turns];
-      for (const t of list) keptHere.add(t.id);
-      // Lifting before the list moves on, and the keys going back after it,
-      // so neither puts it away twice nor draws it again.
-      const back = view.root.contains(document.activeElement) ? view.focusFrom : null;
-      putAway(view, { lift: true, keys: false });
-      rebuild();
-      if (back?.isConnected) giveBack(back);
-      else if (view.root.contains(document.activeElement)) document.activeElement.blur();
-      aloud.textContent = 'Kept';
-      await Promise.allSettled(list.map((t) => agent.keep(t.id)));
-      // Other listeners still hear that these chats were reviewed here.
+    const reviewed = (list) => {
       for (const id of new Set(list.map((t) => t.conversationId))) {
         document.dispatchEvent(new CustomEvent('marble-callout:reviewed', { detail: { id } }));
       }
-      await load();
+    };
+
+    /** Keep: the change is the page now. Once the host says so, its drawing
+     *  lifts and never shows again, and the chats it came from are reviewed
+     *  here. A Keep the host refuses changes nothing and says so. */
+    async function keepView(view) {
+      if (inFlight || view.busy) return;
+      inFlight = true;
+      view.busy = true;
+      view.error = null;
+      paint(view, handNodes());
+      const list = [...view.group.turns];
+      const results = await Promise.allSettled(list.map((t) => agent.keep(t.id)));
+      inFlight = false;
+      view.busy = false;
+      const kept = list.filter((_, i) => results[i].status === 'fulfilled');
+      for (const t of kept) keptHere.add(t.id);
+      if (kept.length && kept.length === list.length && views.has(view)) {
+        // Lifting before the list moves on, and the keys going back after
+        // it, so neither puts it away twice nor draws it again.
+        const back = view.root.contains(document.activeElement) ? view.focusFrom : null;
+        putAway(view, { lift: true, keys: false });
+        rebuild();
+        if (back?.isConnected) giveBack(back);
+        else if (view.root.contains(document.activeElement)) document.activeElement.blur();
+        aloud.textContent = 'Kept';
+        reviewed(kept);
+        await load();
+        return;
+      }
+      if (kept.length) reviewed(kept);
+      if (kept.length < list.length) {
+        view.error = "Couldn't keep it. Try again.";
+        aloud.textContent = view.error;
+      }
+      rebuild();
+      if (views.has(view)) paint(view, handNodes());
     }
 
     /** Undo, newest first. The marks and the engine play it as it lands
-     *  (agent-undo frames); the bar says so and offers Redo while you are here. */
+     *  (agent-undo frames); the bar says so, and offers Redo while you are
+     *  here. One that stops partway says how far it got, and Undo takes the
+     *  rest. Nothing else is asked of the host while one is on its way. */
     async function undoTurns(view, list) {
-      if (!list.length) return;
-      if (view) { view.busy = true; hideBefore(view); paint(view, handNodes()); }
+      if (!list.length || inFlight || view?.busy) return;
+      inFlight = true;
+      const before = view?.state === 'undone' ? view.undone.length : 0;
+      const all = before + list.length;
+      if (view) { view.busy = true; view.error = null; hideBefore(view); paint(view, handNodes()); }
       const done = [];
       for (const turn of list) {
         try {
@@ -1198,46 +1342,83 @@
         done.push(turn);
         undoneHere.push({ turn: turn.id, at: Date.now() });
       }
+      inFlight = false;
+      // A ⌘Z with nothing drawn that the host refused is drawn now, so what
+      // happened is said where the change is.
+      if (!view && !done.length) {
+        const g = groups.find((one) => one.turns.some((t) => t.id === list[0].id));
+        if (g) view = viewOf(g) ?? draw(g, 'keys');
+      }
       if (view && views.has(view)) {
         view.busy = false;
-        if (done.length) {
+        const got = before + done.length;
+        if (got) {
           view.state = 'undone';
-          view.undone = done;
+          view.undone = [...view.undone, ...done];
+          view.pending = list.slice(done.length);
           view.redoable = true;
+          view.failed = got < all;
+          view.said = got < all ? `Undid ${got} of ${all}. Try again.` : 'Undone';
+        } else {
+          view.error = "Couldn't undo it. Try again.";
         }
         paint(view, handNodes());
       }
-      if (done.length) aloud.textContent = 'Undone';
+      aloud.textContent = done.length === list.length ? 'Undone' : view?.said && view.state === 'undone' ? view.said : "Couldn't undo it. Try again.";
       rebuild();
       await load();
     }
 
     /** Redo puts back what this bar undid, the oldest first. A turn with
-     *  nothing kept to redo it from (a whole-file restore) offers none. */
+     *  nothing kept to redo it from (a whole-file restore: the host answers
+     *  409) offers no Redo; any other refusal says so and Redo stays. */
     async function redoTurns(view, ids) {
+      if (!ids.length || inFlight || view?.busy) return;
+      inFlight = true;
       if (view) { view.busy = true; paint(view, handNodes()); }
-      let ok = 0;
+      const back = [];
+      let refused = false;
+      let failed = false;
       for (const id of ids) {
         try {
           await agent.redo(id);
-        } catch {
-          if (view) view.redoable = false;
+        } catch (err) {
+          if (err?.status === 409) refused = true;
+          else failed = true;
           break;
         }
-        ok += 1;
+        back.push(id);
         const at = undoneHere.findIndex((u) => u.turn === id);
         if (at >= 0) undoneHere.splice(at, 1);
+        redoneAt.set(id, Date.now() + (offset ?? 0));
         known.set(id, Date.now());
       }
+      inFlight = false;
       // Back on the host's list before the drawing comes back over it.
       await load();
       if (view && views.has(view)) {
         view.busy = false;
-        if (ok === ids.length) { view.state = 'normal'; view.undone = []; }
+        view.undone = view.undone.filter((t) => !back.includes(t.id));
+        if (!view.undone.length) {
+          // All of it back: the drawing over it again, as it was.
+          view.state = 'normal';
+          view.pending = [];
+          view.failed = false;
+          view.said = 'Undone';
+        } else if (refused) {
+          // Not possible, not a failure: no Redo, and nothing more to say.
+          view.redoable = false;
+          view.failed = false;
+          view.said = 'Undone';
+        } else if (failed) {
+          view.failed = true;
+          view.said = "Couldn't redo. Try again.";
+        }
         settleViews();
         paint(view, handNodes());
       }
-      if (ok) aloud.textContent = 'Redone';
+      if (back.length === ids.length) aloud.textContent = 'Redone';
+      else if (failed) aloud.textContent = "Couldn't redo. Try again.";
     }
     const redoView = (view) => redoTurns(view, [...view.undone].reverse().map((t) => t.id));
 
@@ -1248,7 +1429,7 @@
       const present = g.parts.filter((p) => p.kind !== 'removed').map((p) => byId(p.id)).filter(Boolean);
       const outer = present.filter((el) => !present.some((o) => o !== el && o.contains(el)));
       let ids = outer.map((el) => el.getAttribute('data-marble-id'));
-      if (!ids.length && g.block) ids = [g.block.getAttribute('data-marble-id')];
+      if (!ids.length) ids = homesOf(g.parts).map((el) => el.getAttribute('data-marble-id')).filter(Boolean);
       const conversation = g.turns[0]?.conversationId ?? null;
       putAway(view, { keys: false });
       if (window.marbleLine?.open) window.marbleLine.open({ ids, conversation, from: 'review' });
@@ -1311,18 +1492,15 @@
       return (window.marbleChange?.runs?.() ?? []).some((r) => String(r.client).startsWith('agent:') && !ended.has(`${r.client}|${r.turn}`));
     }
 
-    /** What the pointer is on belongs to a change: it is in a changed part,
-     *  or in the block the change happened in. The innermost wins. */
+    /** What the pointer is on belongs to a change: it is where one of the
+     *  change's parts is found (a date's row, a card, what took a removed
+     *  row's place). Not merely inside some block the change is in. The
+     *  innermost wins. */
     function groupAt(target) {
       let best = null;
       let depth = -1;
       for (const g of groups) {
-        let hit = null;
-        for (const p of g.parts) {
-          for (const el of anchorsOf(p)) if (!whole(el) && el.contains(target)) { hit = el; break; }
-          if (hit) break;
-        }
-        if (!hit && g.block?.contains(target)) hit = g.block;
+        const hit = homesOf(g.parts).find((el) => el.contains(target)) ?? null;
         if (!hit) continue;
         let d = 0;
         for (let n = hit; n; n = n.parentElement) d += 1;
@@ -1333,6 +1511,9 @@
 
     function onRest() {
       if (!pointer || !groups.length || pressing || busyElsewhere()) return;
+      // Hands on the keys a moment ago: a rest is the pointer left where it
+      // was, not a request.
+      if (Date.now() - typedAt < TYPING) return;
       const target = document.elementFromPoint(pointer.x, pointer.y);
       if (!target || host.contains(target) || target.closest(`[${TRANSIENT}]`) || target.getRootNode() !== document) return;
       const g = groupAt(target);
@@ -1352,6 +1533,13 @@
     addEventListener('pointermove', (event) => {
       if (event.pointerType === 'touch') return;
       pointer = { x: event.clientX, y: event.clientY };
+      // A drag is under way: nothing it passes over is a rest.
+      if (event.buttons) {
+        restAt = null;
+        clearTimeout(restTimer);
+        checkLeave();
+        return;
+      }
       if (!restAt || Math.hypot(pointer.x - restAt.x, pointer.y - restAt.y) >= DRIFT) {
         restAt = pointer;
         clearTimeout(restTimer);
@@ -1431,17 +1619,29 @@
     }
     document.addEventListener('input', (event) => mine(event.composedPath()[0] ?? event.target), true);
 
-    // The person's own history, by its time. A ring the host's ops pruned is
-    // not the person: those ops are heard in the same task, before this
-    // looks again.
+    // The person's own history, by its time. Only a change that follows the
+    // person's own hand is theirs: a ring the host's ops pruned (those ops
+    // are heard in the same task, before this looks again), or one a write
+    // from outside the page emptied (no key, input or press of theirs
+    // shortly before), is not.
     let opsSeen = 0;
     document.addEventListener('marble:ops', () => { opsSeen += 1; }, true);
+    for (const type of ['keydown', 'input', 'pointerup', 'drop', 'paste', 'cut']) {
+      addEventListener(type, (event) => {
+        if (!event.isTrusted) return;
+        gestureAt = Date.now();
+        // Typing: a key that writes or edits, not one that moves or leaves.
+        const writes = type === 'keydown' && !event.metaKey && !event.ctrlKey
+          && (event.key.length === 1 || ['Backspace', 'Delete', 'Enter'].includes(event.key));
+        if (type === 'input' || writes) typedAt = gestureAt;
+      }, true);
+    }
     document.addEventListener('marble:history', () => {
       const seen = opsSeen;
       const at = Date.now();
       const where = handNodes().at(-1) ?? null;
       queueMicrotask(() => {
-        if (opsSeen !== seen) return;
+        if (opsSeen !== seen || at - gestureAt > GESTURE) return;
         personAt = at;
         if (where) mine(where);
       });
@@ -1480,26 +1680,67 @@
         ?? (shown.length === 1 ? shown[0] : null);
     }
 
+    // The stops of a drawing, in the order Tab walks them: its tag, then its
+    // bar's buttons. The page's own stops, as Tab would find them.
+    const stopsOf = (view) => [view.tag.press, ...view.bar.root.querySelectorAll('button')]
+      .filter((el) => el.isConnected && !el.disabled && !el.closest('[hidden]'));
+    const TABBABLE = 'a[href], area[href], button, input:not([type="hidden"]), select, textarea, iframe, summary, audio[controls], video[controls], [contenteditable], [tabindex]';
+    // An editable root takes Tab though it reports a tabIndex of -1.
+    const stopIndex = (el) => (el.isContentEditable && !el.hasAttribute('tabindex') ? 0 : el.tabIndex);
+    const tabbable = (el) => !el.closest(`[${TRANSIENT}]`) && !el.closest('[inert]') && !el.disabled && stopIndex(el) >= 0
+      && !(el.isContentEditable && el.parentElement?.isContentEditable)
+      && (typeof el.checkVisibility !== 'function' || el.checkVisibility({ visibilityProperty: true }));
+    const pageStops = () => [...document.querySelectorAll(TABBABLE)].filter(tabbable);
+    const partEls = (view) => view.group.parts.filter((p) => p.kind !== 'removed').map((p) => byId(p.id)).filter(Boolean);
+    /** The change's own last stop: after it, Tab reaches the drawing. */
+    function lastStopIn(view) {
+      const els = partEls(view);
+      return pageStops().filter((s) => els.some((el) => el.contains(s))).at(-1) ?? null;
+    }
+    /** The first stop in the page after the change, where Tab goes on from
+     *  the drawing's last. */
+    function stopAfter(view) {
+      const els = partEls(view);
+      const from = lastStopIn(view) ?? els.at(-1);
+      if (!from) return null;
+      return pageStops().find((s) => (from.compareDocumentPosition(s) & Node.DOCUMENT_POSITION_FOLLOWING)
+        && !els.some((el) => el.contains(s))) ?? null;
+    }
+
+    addEventListener('keyup', (event) => { if (event.key.toLowerCase() === 'z') tookZ = false; }, true);
+
     addEventListener('keydown', (event) => {
       if (event.defaultPrevented || event.isComposing) return;
       const key = event.key;
       const mod = (event.metaKey || event.ctrlKey) && !event.altKey;
+      const take = () => { event.preventDefault(); event.stopImmediatePropagation(); };
 
       // ⌘Z: the change, when it came after the person's own last edit.
-      if (mod && key.toLowerCase() === 'z' && !event.repeat) {
+      if (mod && key.toLowerCase() === 'z') {
         if (!pageHasKey(event)) return;
+        // A key held down repeats: while a change is being taken back, or
+        // when this press was the change's, the repeats are too, so none of
+        // them falls through to the person's own undo.
+        if (event.repeat) {
+          if (inFlight || tookZ) take();
+          return;
+        }
+        tookZ = false;
+        // One verdict at a time: a second ⌘Z while one is on its way is
+        // heard and does nothing.
+        if (inFlight) { take(); tookZ = true; return; }
         if (!event.shiftKey) {
           const turn = newest();
-          if (!turn || (known.get(turn.id) ?? 0) <= personAt) return;
-          event.preventDefault();
-          event.stopImmediatePropagation();
+          if (!turn || !cameAfterPerson(turn)) return;
+          take();
+          tookZ = true;
           const view = shownViews().find((v) => v.group.turns.some((t) => t.id === turn.id)) ?? null;
           undoTurns(view, [turn]);
         } else {
           const last = undoneHere.at(-1);
           if (!last || last.at <= personAt) return;
-          event.preventDefault();
-          event.stopImmediatePropagation();
+          take();
+          tookZ = true;
           const view = shownViews().find((v) => v.state === 'undone' && v.undone.some((t) => t.id === last.turn)) ?? null;
           redoTurns(view, [last.turn]);
         }
@@ -1514,21 +1755,34 @@
         return;
       }
 
-      // Tab from a part focus drew reaches the bar; ⇧Tab from the bar goes back.
+      // Tab: the drawing is a stop of the page's own, right after the
+      // change's last stop. Tab from there reaches the tag, then Change more,
+      // Keep and Undo, then goes on to the page's next stop after the change;
+      // Shift+Tab walks back into the change.
       if (key === 'Tab' && !event.altKey && !event.ctrlKey && !event.metaKey) {
-        const view = shownViews().find((v) => v.by === 'focus');
-        if (!view) return;
         const a = deepActive();
-        const first = view.bar.root.querySelector('button[data-act="keep"]') ?? view.bar.root.querySelector('button');
-        if (!event.shiftKey && holding(view, a) && first) {
+        const shown = shownViews();
+        const view = shown.find((v) => v.root.contains(a)) ?? shown.find((v) => v.by === 'focus' && holding(v, a));
+        if (!view) return;
+        const stops = stopsOf(view);
+        const i = stops.indexOf(a);
+        if (i < 0) {
+          if (event.shiftKey || !stops.length || a !== lastStopIn(view)) return;
           event.preventDefault();
           view.focusFrom = a;
-          first.focus({ preventScroll: true });
-        } else if (event.shiftKey && (a === first || a === view.bar.more)) {
-          event.preventDefault();
-          const back = view.focusFrom?.isConnected ? view.focusFrom
-            : view.group.parts.map((p) => byId(p.id)).find(Boolean);
+          stops[0].focus({ preventScroll: true });
+          return;
+        }
+        event.preventDefault();
+        if (event.shiftKey) {
+          const back = i > 0 ? stops[i - 1] : (lastStopIn(view) ?? (view.focusFrom?.isConnected ? view.focusFrom : null));
           back?.focus({ preventScroll: true });
+        } else if (i < stops.length - 1) {
+          stops[i + 1].focus({ preventScroll: true });
+        } else {
+          const next = stopAfter(view);
+          if (next) next.focus({ preventScroll: true });
+          else { putAway(view, { keys: false }); a.blur(); }
         }
       }
     }, true);
@@ -1565,8 +1819,10 @@
     addEventListener('scroll', schedule, true);
     addEventListener('resize', schedule);
     document.addEventListener('marble:ops', schedule);
+    // The page's own changes move a drawing; its copies and measures (in
+    // the document, marked transient) do not.
     new MutationObserver((records) => {
-      if (views.size && records.some(({ target }) => !host.contains(target))) schedule();
+      if (views.size && records.some(({ target }) => !elementOf(target)?.closest(`[${TRANSIENT}]`))) schedule();
     }).observe(document.body ?? document.documentElement, { subtree: true, childList: true, characterData: true, attributes: true });
 
     // A change that ended here: its turn is on the host's list once the host

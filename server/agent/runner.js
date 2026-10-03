@@ -994,6 +994,15 @@ export function createRunner({ store, tools, providers, workdir, origin, bridgeP
       turn.status = status;
       if (turn.token) tokens.delete(turn.token);
       live.delete(turn.id);
+      // The turn's own record is the last thing written, after the closing
+      // event and its summary went out. Said once more now it is final, so a
+      // page that asks what is left to review on hearing it (GET
+      // /agent/review, runtime/change-review.js) finds the turn there.
+      try {
+        publish(turn.conversationId, { type: 'meta' }, await store.summary(turn.conversationId));
+      } catch (err) {
+        log.error(`[agents] ${err.message}`);
+      }
       // The writer is done: whatever the host remembers it touching is no
       // longer being worked on. Told after the turn has left the runner, so
       // the host cannot see a still-running turn with nothing to its name.
