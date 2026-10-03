@@ -159,6 +159,9 @@ const RUNTIME = {
   'agent-nudge.js': () => path.join(REPO, 'runtime', 'agent-nudge.js'),
   // The agent in the text: a caret, thinking and typing, for work on words.
   'agent-text.js': () => path.join(REPO, 'runtime', 'agent-text.js'),
+  // The engine (v5): a change moves from what was to what is, in loose
+  // batches. Nothing that writes to a page animates it; this does.
+  'change-morph.js': () => path.join(REPO, 'runtime', 'change-morph.js'),
   // The marks (v5): each part a change touches is tinted as it lands, one tag
   // counts, and a rail stands for parts out of view. The zone box steps aside.
   'change-marks.js': () => path.join(REPO, 'runtime', 'change-marks.js'),
@@ -407,6 +410,8 @@ export async function createDrive(config, { log = console, agentProviders = null
       tags += `\n<script src="${runtimeUrl('agent-notes.js')}" data-marble-transient></script>`;
       tags += `\n<script src="${runtimeUrl('agent-nudge.js')}" data-marble-transient></script>`;
       tags += `\n<script src="${runtimeUrl('agent-text.js')}" data-marble-transient></script>`;
+      // The engine, before the marks that hand it each batch to play.
+      tags += `\n<script src="${runtimeUrl('change-morph.js')}" data-marble-transient></script>`;
       // After the caret in the text, whose claims it defers to, and after
       // collab.js, whose zones step aside for what it marks.
       tags += `\n<script src="${runtimeUrl('change-marks.js')}" data-marble-transient></script>`;

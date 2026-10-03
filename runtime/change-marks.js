@@ -509,15 +509,31 @@
       if (!run.hang || !drawable(byId(run.hang))) {
         run.hang = [...batch.parts, ...batch.inserted].find((id) => drawable(byId(id))) ?? run.hang;
       }
+      // The engine (change-morph.js) plays the batch from what was to what
+      // is; each part lifts as its own motion ends, and the batch lands once
+      // all of it has. A part with nothing to play (past the engine's budget,
+      // or nothing of it seen to change) still shows that it landed: none
+      // lifts sooner than it would with no engine at all.
       const morph = window.marbleMorph;
       if (batch.snapshot && typeof morph?.play === 'function') {
         let played = null;
+        batch.moving = true;
+        const opsAt = performance.now();
+        const settled = (fn) => {
+          const wait = opsAt + LAND_AFTER - performance.now();
+          if (wait > 0) after(run, wait, fn);
+          else fn();
+        };
         try {
           played = morph.play(batch.snapshot, {
-            onPart: (id, phase) => { if (phase === 'end' && runs.get(run.client) === run) { landPart(run, id); schedule(); } },
+            onPart: (id, phase) => {
+              if (phase === 'end' && runs.get(run.client) === run) settled(() => { landPart(run, id); schedule(); });
+            },
           });
         } catch { played = null; }
-        Promise.resolve(played).then(() => land(run, batch), () => land(run, batch));
+        batch.snapshot = null;
+        const landed = () => settled(() => { batch.moving = false; land(run, batch); });
+        Promise.resolve(played).then(landed, landed);
       } else {
         after(run, LAND_AFTER, () => land(run, batch));
       }
@@ -540,8 +556,10 @@
       run.done = done;
       run.reading = false;
       run.endedAt = performance.now();
-      for (const batch of [...run.batches]) land(run, batch);
-      for (const id of run.parts.keys()) landPart(run, id);
+      // A batch still moving lands when its motion ends, not before.
+      const moving = new Set(run.batches.filter((b) => b.moving).flatMap((b) => b.parts));
+      for (const batch of [...run.batches]) if (!batch.moving) land(run, batch);
+      for (const id of run.parts.keys()) if (!moving.has(id)) landPart(run, id);
       liftScope(run);
       document.dispatchEvent(new CustomEvent('marble-change:end', { detail: { client: run.client, turn: run.turn, done } }));
       const shown = run.tag && done;
