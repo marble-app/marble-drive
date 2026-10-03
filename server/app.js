@@ -165,6 +165,9 @@ const RUNTIME = {
   // The marks (v5): each part a change touches is tinted as it lands, one tag
   // counts, and a rail stands for parts out of view. The zone box steps aside.
   'change-marks.js': () => path.join(REPO, 'runtime', 'change-marks.js'),
+  // The line (v5): what ⌘J opens, one line flush under the thing, where
+  // words go in and come back. The callout decides what it is about.
+  'change-line.js': () => path.join(REPO, 'runtime', 'change-line.js'),
   // The work, on the page: dots on what an agent changed, a rail, the island
   // while the chat is closed, and the walk through a turn's changes.
   'agent-work.js': () => path.join(REPO, 'runtime', 'agent-work.js'),
@@ -415,6 +418,9 @@ export async function createDrive(config, { log = console, agentProviders = null
       // After the caret in the text, whose claims it defers to, and after
       // collab.js, whose zones step aside for what it marks.
       tags += `\n<script src="${runtimeUrl('change-marks.js')}" data-marble-transient></script>`;
+      // After the marks, whose tints its own tint gives way to, and after the
+      // callout, which opens it.
+      tags += `\n<script src="${runtimeUrl('change-line.js')}" data-marble-transient></script>`;
     }
     if (agents) tags += `\n<script src="${runtimeUrl('agent-work.js')}" data-marble-transient></script>`;
     if (agents) tags += `\n<script src="${runtimeUrl('agent-run.js')}" data-marble-transient></script>`;
