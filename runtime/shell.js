@@ -552,10 +552,10 @@
     .publishing .changes .kind { margin-left: auto; color: var(--muted); flex: none; }
     .publishing .changes .more { color: var(--muted); }
     .publishing .compose { display: flex; gap: 6px; padding-top: 9px; border-top: 1px solid var(--line); }
-    .publishing .msg { flex: 1; height: 28px; border: 1px solid var(--line); border-radius: 8px; padding: 0 8px; font: inherit; font-size: 12.5px; color: var(--ink); background: var(--paper); min-width: 0;
+    .publishing .msg { flex: 1; height: 32px; border: 1px solid var(--line); border-radius: 8px; padding: 0 9px; font: inherit; font-size: 12.5px; color: var(--ink); background: var(--paper); min-width: 0;
       transition: border-color 110ms var(--settle); }
     .publishing .msg:focus { outline: 2px solid var(--accent); outline-offset: -1px; }
-    .publishing .publish { height: 28px; padding: 0 12px; border-radius: 8px; font-weight: 600; font-size: 12.5px; background: var(--ink); color: var(--paper); flex: none;
+    .publishing .publish { height: 32px; padding: 0 12px; border-radius: 8px; font-weight: 600; font-size: 12.5px; background: var(--ink); color: var(--paper); flex: none;
       display: flex; align-items: center; transition: background-color 110ms var(--settle), opacity 200ms var(--settle), transform 110ms var(--settle); }
     .publishing .publish:active:not(:disabled) { background: var(--accent-ink); transform: scale(.97); }
     .publishing .publish:disabled { opacity: .4; cursor: default; }
