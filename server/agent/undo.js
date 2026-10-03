@@ -10,6 +10,7 @@
 // are `{ steps, restores }`. `normalizeUndo` reads both.
 
 import { applyOp } from '../engine.js';
+import { inverseSteps } from './inverse.js';
 import { hashesOf, topLevelIds } from './source.js';
 
 export function normalizeUndo(saved) {
@@ -21,11 +22,16 @@ export function normalizeUndo(saved) {
   };
 }
 
-export async function undoTurn({ records, restores = [], writeOps, restore, client, turn = null, look = null }) {
+export async function undoTurn({ records, restores = [], writeOps, restore, client, turn = null, look = null, saveRedo = null }) {
   const restored = new Set();
   let reverted = 0;
   let kept = 0;
   const errors = [];
+  // The other direction, built as this one runs: for every inverse actually
+  // applied, the inverse of *that* — computed fresh, from the source right
+  // before it ran — is what would do it again. One entry per path, same
+  // shape as an undo record, so a later redo is just this fed back in.
+  const redoByPath = [];
 
   // A document the agent rewrote with its own tools goes back to where it
   // started, in one move. Its inverse ops are then skipped: the restore has
@@ -48,12 +54,14 @@ export async function undoTurn({ records, restores = [], writeOps, restore, clie
 
   for (const [docPath, steps] of [...byPath].reverse()) {
     let skipped = 0;
+    let redoSteps = [];
     const options = { client };
     options.prepare = async (source) => {
       let current = source;
       const ops = [];
       const ids = [];
       skipped = 0;
+      redoSteps = [];
       for (const step of steps.slice().reverse()) {
         if (!step.inverse) {
           skipped += 1;
@@ -67,8 +75,10 @@ export async function undoTurn({ records, restores = [], writeOps, restore, clie
           continue;
         }
         try {
+          const before = current;
           current = applyOp(current, step.inverse);
           ops.push(step.inverse);
+          redoSteps.push(...inverseSteps(before, [step.inverse]));
           // Undoing a `remove` reinserts the element: its inverse is an
           // `insert` addressed by `parentId`/`beforeId`, with no top-level
           // `.id` of its own — the id is inside `html`, the same place
@@ -87,11 +97,14 @@ export async function undoTurn({ records, restores = [], writeOps, restore, clie
       const result = await writeOps(docPath, [], options);
       reverted += result.applied;
       kept += skipped;
+      if (redoSteps.length) redoByPath.push({ path: docPath, steps: redoSteps });
     } catch (err) {
       kept += steps.length;
       errors.push(`${docPath}: ${err.message}`);
     }
   }
+
+  if (turn && saveRedo) await saveRedo(turn, { steps: redoByPath, restores: [] });
 
   return { reverted, kept, errors };
 }

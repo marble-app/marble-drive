@@ -355,6 +355,11 @@
       cancel: (turnId) => ask(`/agent/turns/${enc(turnId)}/cancel`, { method: 'POST' }),
       answer: (turnId, requestId, response) => ask(`/agent/turns/${enc(turnId)}/answer`, { method: 'POST', body: { requestId, response } }),
       undo: (turnId) => ask(`/agent/turns/${enc(turnId)}/undo`, { method: 'POST' }),
+      redo: (turnId) => ask(`/agent/turns/${enc(turnId)}/redo`, { method: 'POST' }),
+      keep: (turnId) => ask(`/agent/turns/${enc(turnId)}/keep`, { method: 'POST' }),
+      // What a document's agent turns still have to show: each one's parts
+      // still worth a Keep, Undo or Redo, newest first.
+      review: (docPath) => ask(`/agent/review?path=${enc(docPath)}`),
       dequeue: (turnId) => ask(`/agent/turns/${enc(turnId)}`, { method: 'DELETE' }),
       archive: (id, archived = true) => ask(`/agent/conversations/${enc(id)}`, { method: 'PATCH', body: { archived } }),
       markReviewed: (id) => ask(`/agent/conversations/${enc(id)}`, { method: 'PATCH', body: { reviewed: true } }),

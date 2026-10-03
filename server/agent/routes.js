@@ -14,6 +14,7 @@
 
 import crypto from 'node:crypto';
 
+import { conversationHasReview, listReview } from '../change/review.js';
 import { sliceOf } from '../engine.js';
 import { json, readJson, send } from '../http.js';
 import { parsePath } from '../paths.js';
@@ -58,7 +59,7 @@ const bearer = (req) => (req.headers.authorization ?? '').replace(/^Bearer\s+/i,
 const CONVERSATION = /^\/agent\/conversations\/([0-9a-f]{12})(\/turns)?$/;
 const FAILOVER = /^\/agent\/conversations\/([0-9a-f]{12})\/failover$/;
 const USAGE_LEFT = /^\/agent\/conversations\/([0-9a-f]{12})\/usage-left$/;
-const TURN = /^\/agent\/turns\/([0-9a-f]{12}-t\d+)(\/cancel|\/undo|\/answer)?$/;
+const TURN = /^\/agent\/turns\/([0-9a-f]{12}-t\d+)(\/cancel|\/undo|\/redo|\/keep|\/answer)?$/;
 const DISPATCH = new Set(['queue', 'steer', 'interrupt']);
 const FOLDER = /^\/agent\/folders\/([0-9a-f]{12})$/;
 const UPLOAD = /^\/agent\/uploads\/([0-9a-f]{16}\.(?:png|jpg|gif|webp))$/;
@@ -391,6 +392,16 @@ export function createAgentRoutes({ store, runner, tools, hub, providers, writeO
       } catch {
         return json(res, 200, { source: null, tz: null, from: null, to: null, days: [] });
       }
+    }
+
+    // What a turn of an agent's still stands to be reviewed, for one
+    // document: each turn that touched it, newest first, with the parts of
+    // it that are still there to Keep, Undo or Redo.
+    if (route === '/agent/review' && method === 'GET') {
+      const docPath = url.searchParams.get('path') ?? '';
+      if (!docPath) return json(res, 400, { error: 'path is required' });
+      if (!readSource) return json(res, 200, { turns: [] });
+      return json(res, 200, await listReview({ store, docPath, read: readSource }));
     }
 
     if (route === '/agent/setup' && method === 'GET') return json(res, 200, await setupState());
@@ -753,6 +764,7 @@ export function createAgentRoutes({ store, runner, tools, hub, providers, writeO
             client,
             turn: turn.id,
             look: onLook ? (docPath, ids, extra) => onLook(docPath, ids, client, extra) : null,
+            saveRedo: (id, record) => store.saveRedo(id, record),
           });
           await store.updateTurn(turnId, { undoneAt: Date.now() });
           await publishSummary(
@@ -763,6 +775,48 @@ export function createAgentRoutes({ store, runner, tools, hub, providers, writeO
         } finally {
           undoing.delete(turnId);
         }
+      }
+      if (action === '/redo' && method === 'POST') {
+        const turn = await store.turn(turnId);
+        if (!turn) return json(res, 404, { error: `no turn "${turnId}"` });
+        if (!turn.undoneAt) return json(res, 409, { error: 'this turn was not undone' });
+        if (undoing.has(turnId)) return json(res, 409, { error: 'this turn is being undone' });
+        undoing.add(turnId);
+        try {
+          const redoSaved = await store.redoRecords(turnId);
+          if (redoSaved == null) return json(res, 409, { error: 'there is nothing to redo' });
+          const saved = normalizeUndo(redoSaved);
+          const client = `agent-undo:${turn.conversationId}`;
+          const result = await undoTurn({
+            records: saved.steps,
+            restores: saved.restores,
+            writeOps,
+            restore,
+            client,
+            turn: turn.id,
+            look: onLook ? (docPath, ids, extra) => onLook(docPath, ids, client, extra) : null,
+          });
+          await store.updateTurn(turnId, { undoneAt: null });
+          await store.deleteRedo(turnId);
+          await publishSummary(
+            turn.conversationId,
+            await store.appendEvent(turn.conversationId, { type: 'turn.redone', turn: turnId, reverted: result.reverted, kept: result.kept }),
+          );
+          return json(res, 200, { reverted: result.reverted, kept: result.kept });
+        } finally {
+          undoing.delete(turnId);
+        }
+      }
+      if (action === '/keep' && method === 'POST') {
+        const turn = await store.turn(turnId);
+        if (!turn) return json(res, 404, { error: `no turn "${turnId}"` });
+        await store.updateTurn(turnId, { keptAt: Date.now() });
+        const stillNeedsReview = readSource
+          ? await conversationHasReview({ store, read: readSource, conversationId: turn.conversationId, excludeTurnId: turnId })
+          : true;
+        if (!stillNeedsReview) await store.updateConversation(turn.conversationId, { lastReviewedAt: Date.now() });
+        hub.publish(turn.conversationId, { type: 'meta' }, await store.summary(turn.conversationId));
+        return json(res, 200, { ok: true });
       }
     }
 

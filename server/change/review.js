@@ -1,0 +1,174 @@
+// What a turn changed, for a person to look back on: Keep it, or take it
+// back.
+//
+// A turn's `.undo.json` already knows, step by step, what an inverse would
+// put back — that is for running. `reviewPartsOf` reads the same steps the
+// other way, for showing: given one path's steps (already flattened to the
+// order they applied in) and the document as it stands now, which of them
+// are still worth drawing, and as what. `listReview` is the host half: it
+// finds the turns that touched a document and keeps the ones with something
+// left to show; `conversationHasReview` asks the same question across every
+// document a conversation's turns touched, which is what Keep needs before
+// it can clear a conversation's launcher dot.
+
+import { normalizeUndo } from '../agent/undo.js';
+import { hashesOf, idsIn } from '../agent/source.js';
+import { sliceOf } from '../engine.js';
+
+const LOOK_ATTRS = new Set(['style', 'class']);
+const MAX_TURNS = 20;
+const WINDOW_MS = 30 * 24 * 60 * 60 * 1000;
+const PROMPT_MAX = 300;
+const REVIEWABLE_STATUS = new Set(['completed', 'cancelled']);
+
+/** The children of an outer-HTML string — what's between its own open and
+ *  close tag. */
+function innerOf(outerHtml) {
+  const openEnd = outerHtml.indexOf('>');
+  const closeStart = outerHtml.lastIndexOf('<');
+  if (openEnd === -1 || closeStart === -1 || closeStart <= openEnd) return '';
+  return outerHtml.slice(openEnd + 1, closeStart);
+}
+
+/** The id a step is about: its own, or — for a step that undoes a `remove`
+ *  (so its own `id` is null) — the id the `remove` took away. Exactly one of
+ *  the two is ever set. */
+const keyOf = (step) => step.id ?? step.absent ?? null;
+
+/** Which of a turn's undo steps for one path are still worth showing, and as
+ *  what — pure, reading only the document as it stands now (`source`).
+ *
+ *  `steps` is the turn's recorded undo steps for this one path, already in
+ *  the order they applied (the order `undoTurn` would walk in reverse to
+ *  take them back). An id the turn touched more than once keeps only its
+ *  first step — the original is what "before" means — except the check for
+ *  whether the person has since changed it, which always asks the *last*
+ *  step's expectation, the one closest to how the document actually stood
+ *  when the turn finished. */
+export function reviewPartsOf({ source, steps }) {
+  const byId = new Map();
+  for (const step of steps ?? []) {
+    if (!step?.inverse) continue;
+    const key = keyOf(step);
+    if (!key) continue;
+    if (!byId.has(key)) byId.set(key, []);
+    byId.get(key).push(step);
+  }
+
+  const parts = [];
+  for (const [id, group] of byId) {
+    const first = group[0];
+    const last = group[group.length - 1];
+    const { inverse } = first;
+    const removed = inverse.type === 'insert' && first.id === null;
+
+    if (!removed) {
+      const hashes = hashesOf(source, [id]);
+      if (!hashes.has(id)) continue; // gone — nothing left to show it against
+      if (last.id && hashes.get(id) !== last.expect) continue; // theirs now
+    }
+
+    if (removed) {
+      parts.push({ id, kind: 'removed', html: inverse.html, parentId: inverse.parentId, beforeId: inverse.beforeId ?? null });
+    } else if (inverse.type === 'remove') {
+      parts.push({ id, kind: 'added' });
+    } else if (inverse.type === 'setInner') {
+      const before = inverse.html;
+      const current = innerOf(sliceOf(source, id).html);
+      const words = idsIn(before).length === 0 && idsIn(current).length === 0;
+      parts.push({ id, kind: words ? 'words' : 'changed', before });
+    } else if (inverse.type === 'setAttr') {
+      parts.push({ id, kind: LOOK_ATTRS.has(inverse.name) ? 'look' : 'attr', name: inverse.name, before: inverse.value ?? null });
+    } else if (inverse.type === 'move') {
+      parts.push({ id, kind: 'moved', parentId: inverse.parentId, beforeId: inverse.beforeId ?? null });
+    }
+  }
+  return parts;
+}
+
+/** The steps of a turn's saved undo record that are about one path, in the
+ *  order they applied — one turn's record holds one entry per `apply_ops`
+ *  call, in call order, and each entry's own `steps` are already in op
+ *  order, so concatenating in record order is enough. */
+function stepsForPath(saved, path) {
+  return saved.steps.filter((entry) => entry.path === path).flatMap((entry) => entry.steps);
+}
+
+/** The paths a turn's record touches at all: its target, and every path any
+ *  of its undo steps names. */
+function pathsOf(turn, saved) {
+  const paths = new Set(saved.steps.map((entry) => entry.path));
+  if (turn.context?.target) paths.add(turn.context.target);
+  return paths;
+}
+
+/** The cheap half of "is this turn worth reviewing": everything answerable
+ *  from the turn and conversation records alone, before a single document is
+ *  read. Shared by `listReview` (one path, every turn) and
+ *  `conversationHasReview` (every path, the rest of one conversation's
+ *  turns) so the two agree on what counts. */
+function isCandidate(turn, conversation, now) {
+  if (!REVIEWABLE_STATUS.has(turn.status)) return false;
+  if (!(turn.applied > 0)) return false;
+  if (turn.undoneAt || turn.keptAt) return false;
+  if (!turn.finishedAt || turn.finishedAt < now - WINDOW_MS) return false;
+  const reviewedAt = conversation.lastReviewedAt;
+  if (!(reviewedAt === null || reviewedAt === undefined || reviewedAt < turn.finishedAt)) return false;
+  return true;
+}
+
+/** Every turn still worth reviewing for one document: newest first, at most
+ *  20, finished in the last 30 days. `read` is how the current document is
+ *  read — `(path) => Promise<string|null>`. */
+export async function listReview({ store, docPath, read }) {
+  const source = await read(docPath);
+  if (source == null) return { turns: [] };
+
+  const now = Date.now();
+  const candidates = [];
+  for (const conversation of await store.conversations()) {
+    for (const turn of await store.turns(conversation.id)) {
+      if (!isCandidate(turn, conversation, now)) continue;
+      const target = turn.context?.target ?? null;
+      const saved = normalizeUndo(await store.undoRecords(turn.id));
+      if (target !== docPath && !saved.steps.some((entry) => entry.path === docPath)) continue;
+
+      const parts = reviewPartsOf({ source, steps: stepsForPath(saved, docPath) });
+      if (!parts.length) continue;
+
+      candidates.push({
+        id: turn.id,
+        conversationId: turn.conversationId,
+        prompt: String(turn.prompt ?? '').slice(0, PROMPT_MAX),
+        finishedAt: turn.finishedAt,
+        parts,
+      });
+    }
+  }
+
+  candidates.sort((a, b) => b.finishedAt - a.finishedAt);
+  return { turns: candidates.slice(0, MAX_TURNS) };
+}
+
+/** Whether any turn of `conversationId` other than `excludeTurnId` is still
+ *  listed for some path — the question Keep asks before it clears the
+ *  conversation's launcher dot. `read` is the same document reader
+ *  `listReview` takes; a path it cannot read is skipped, not counted. */
+export async function conversationHasReview({ store, read, conversationId, excludeTurnId = null }) {
+  const conversation = await store.conversation(conversationId);
+  if (!conversation) return false;
+
+  const now = Date.now();
+  for (const turn of await store.turns(conversationId)) {
+    if (turn.id === excludeTurnId) continue;
+    if (!isCandidate(turn, conversation, now)) continue;
+
+    const saved = normalizeUndo(await store.undoRecords(turn.id));
+    for (const path of pathsOf(turn, saved)) {
+      const source = await read(path).catch(() => null);
+      if (source == null) continue;
+      if (reviewPartsOf({ source, steps: stepsForPath(saved, path) }).length) return true;
+    }
+  }
+  return false;
+}

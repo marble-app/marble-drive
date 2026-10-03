@@ -62,6 +62,24 @@ const SCRIPTS = {
   ],
   hold: [{ silent: 20_000 }],
   permission: [{ ask: { tool: 'Bash', input: { command: 'rm -rf build' } } }, { say: 'after' }],
+  // Two documents of its own, so the review tests (keep; undo/redo) never
+  // race the undo test above, which expects `garden` untouched by anyone else.
+  review: [
+    { call: 'read_document', args: { path: 'meadow' } },
+    { call: 'apply_ops', args: { path: 'meadow', note: 'add a row and rename the heading', ops: [
+      { type: 'insert', parentId: 'q', beforeId: null, html: '<li data-marble-id="q2">Where?</li>' },
+      { type: 'setText', id: 'h', text: 'Backlog' },
+    ] } },
+    { say: 'Added a row and renamed the heading.' },
+  ],
+  reviewAgain: [
+    { call: 'read_document', args: { path: 'meadow2' } },
+    { call: 'apply_ops', args: { path: 'meadow2', note: 'add a row and rename the heading', ops: [
+      { type: 'insert', parentId: 'q', beforeId: null, html: '<li data-marble-id="r2">Where?</li>' },
+      { type: 'setText', id: 'h', text: 'Backlog' },
+    ] } },
+    { say: 'Added a row and renamed the heading.' },
+  ],
 };
 
 const config = loadConfig({
@@ -973,4 +991,61 @@ test('a run the host starts itself is named, aimed, and under way', async () => 
   assert.equal(body.meta.title, 'Today’s day');
   assert.equal(body.meta.provider, 'fake');
   assert.equal(body.events.find((e) => e.type === 'user').context.target, 'garden');
+});
+
+test('review lists what a turn changed, and Keep clears it and the launcher dot', async () => {
+  await drive.store.write('meadow', SOURCE.replace('Garden', 'Meadow'), { label: 'test' });
+  const run = await start('script:review\nAdd a row and rename the heading', 'meadow');
+  const { turn } = await finished(run.conversationId, run.turnId);
+  assert.equal(turn.status, 'completed');
+
+  const listed = await api('GET', '/agent/review?path=meadow');
+  assert.equal(listed.body.turns.length, 1);
+  const reviewed = listed.body.turns[0];
+  assert.equal(reviewed.id, run.turnId);
+  assert.equal(reviewed.conversationId, run.conversationId);
+  assert.deepEqual(reviewed.parts.map((p) => p.kind).sort(), ['added', 'words']);
+
+  const kept = await api('POST', `/agent/turns/${run.turnId}/keep`);
+  assert.deepEqual(kept.body, { ok: true });
+
+  assert.deepEqual((await api('GET', '/agent/review?path=meadow')).body.turns, []);
+  const conv = await api('GET', `/agent/conversations/${run.conversationId}`);
+  assert.equal(conv.body.meta.needsReview, false);
+});
+
+test('undo drops a turn from the review list, and redo brings it — and the row — back', async () => {
+  await drive.store.write('meadow2', SOURCE.replace('Garden', 'Meadow'), { label: 'test' });
+  const run = await start('script:reviewAgain\nAdd a row and rename the heading', 'meadow2');
+  const { turn } = await finished(run.conversationId, run.turnId);
+  assert.equal(turn.status, 'completed');
+  assert.equal((await api('GET', '/agent/review?path=meadow2')).body.turns.length, 1);
+
+  const undone = await api('POST', `/agent/turns/${run.turnId}/undo`);
+  assert.equal(undone.status, 200);
+  assert.deepEqual((await api('GET', '/agent/review?path=meadow2')).body.turns, []);
+  assert.doesNotMatch(await drive.store.read('meadow2'), /r2/);
+
+  const redone = await api('POST', `/agent/turns/${run.turnId}/redo`);
+  assert.equal(redone.status, 200);
+  assert.deepEqual(redone.body, { reverted: 2, kept: 0 });
+  assert.match(await drive.store.read('meadow2'), /r2/, 'the row an agent added is back in the file');
+
+  const afterRedo = await api('GET', '/agent/review?path=meadow2');
+  assert.equal(afterRedo.body.turns.length, 1, 'the turn is listed again');
+  assert.deepEqual(afterRedo.body.turns[0].parts.map((p) => p.kind).sort(), ['added', 'words']);
+
+  const redoneAgain = await api('POST', `/agent/turns/${run.turnId}/redo`);
+  assert.equal(redoneAgain.status, 409);
+
+  // A person's own later edit to the heading takes just that part off the
+  // list — it is theirs now — and leaves the row the agent added alone.
+  await fetch(`${base}/ops?app=meadow2&client=you`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify([{ type: 'setText', id: 'h', text: 'Mine' }]),
+  });
+  const afterPersonEdit = await api('GET', '/agent/review?path=meadow2');
+  assert.equal(afterPersonEdit.body.turns.length, 1);
+  assert.deepEqual(afterPersonEdit.body.turns[0].parts.map((p) => p.kind), ['added']);
 });

@@ -71,6 +71,7 @@ export function createAgentStore({ dir, defaultProvider = 'claude-subscription',
   const inboxFile = (id) => path.join(convDir(id), 'inbox.jsonl');
   const turnFile = (turnId) => path.join(convDir(conversationOf(turnId)), 'turns', `${turnId}.json`);
   const undoFile = (turnId) => path.join(convDir(conversationOf(turnId)), 'turns', `${turnId}.undo.json`);
+  const redoFile = (turnId) => path.join(convDir(conversationOf(turnId)), 'turns', `${turnId}.redo.json`);
   const rawFile = (turnId) => path.join(convDir(conversationOf(turnId)), 'raw', `${turnId}.jsonl`);
   const foldersFile = path.join(dir, 'folders.json');
 
@@ -579,6 +580,7 @@ export function createAgentStore({ dir, defaultProvider = 'claude-subscription',
           applied: 0,
           usage: null,
           undoneAt: null,
+          keptAt: null,
           ...(usageHandoff ? { usageHandoff: true } : {}),
         };
         await writeJson(turnFile(turn.id), turn);
@@ -631,6 +633,10 @@ export function createAgentStore({ dir, defaultProvider = 'claude-subscription',
 
     saveUndo: (turnId, records) => writeJson(undoFile(turnId), records),
     undoRecords: (turnId) => readJson(undoFile(turnId)),
+
+    saveRedo: (turnId, records) => writeJson(redoFile(turnId), records),
+    redoRecords: (turnId) => readJson(redoFile(turnId)),
+    deleteRedo: (turnId) => fsp.rm(redoFile(turnId), { force: true }),
 
     async appendRaw(turnId, line) {
       await fsp.mkdir(path.dirname(rawFile(turnId)), { recursive: true });
