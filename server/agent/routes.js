@@ -103,7 +103,7 @@ const publicMeter = (meter) => {
   return out;
 };
 
-export function createAgentRoutes({ store, runner, tools, hub, providers, writeOps, restore, maxBody, gated = false, keys = null, anthropicBase = 'https://api.anthropic.com', openaiBase = 'https://api.openai.com', skills = [], usage = null, usageHistory = null, root = null, streams = null, offer = null, readSource = null }) {
+export function createAgentRoutes({ store, runner, tools, hub, providers, writeOps, restore, maxBody, gated = false, keys = null, anthropicBase = 'https://api.anthropic.com', openaiBase = 'https://api.openai.com', skills = [], usage = null, usageHistory = null, root = null, streams = null, offer = null, readSource = null, onLook = null }) {
   let detected = null;
   // Turns being undone right now. The undoneAt check alone lets two requests
   // that arrive together both pass it before either has written.
@@ -744,12 +744,15 @@ export function createAgentRoutes({ store, runner, tools, hub, providers, writeO
         undoing.add(turnId);
         try {
           const saved = normalizeUndo(await store.undoRecords(turnId));
+          const client = `agent-undo:${turn.conversationId}`;
           const result = await undoTurn({
             records: saved.steps,
             restores: saved.restores,
             writeOps,
             restore,
-            client: `agent-undo:${turn.conversationId}`,
+            client,
+            turn: turn.id,
+            look: onLook ? (docPath, ids, extra) => onLook(docPath, ids, client, extra) : null,
           });
           await store.updateTurn(turnId, { undoneAt: Date.now() });
           await publishSummary(

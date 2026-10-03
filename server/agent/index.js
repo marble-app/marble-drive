@@ -257,6 +257,7 @@ async function boot({ config, store, writeOps, createDocument, origin, browserPa
     // naming: the login's small model, and off where naming is off.
     offer: config.agentNaming ? (input) => writeOffer({ ...input, model: config.agentNamingModel }) : null,
     readSource: (docPath) => store.read(docPath),
+    onLook: look,
   });
 
   return {

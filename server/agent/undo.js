@@ -21,7 +21,7 @@ export function normalizeUndo(saved) {
   };
 }
 
-export async function undoTurn({ records, restores = [], writeOps, restore, client }) {
+export async function undoTurn({ records, restores = [], writeOps, restore, client, turn = null, look = null }) {
   const restored = new Set();
   let reverted = 0;
   let kept = 0;
@@ -48,35 +48,38 @@ export async function undoTurn({ records, restores = [], writeOps, restore, clie
 
   for (const [docPath, steps] of [...byPath].reverse()) {
     let skipped = 0;
+    const options = { client };
+    options.prepare = async (source) => {
+      let current = source;
+      const ops = [];
+      const ids = [];
+      skipped = 0;
+      for (const step of steps.slice().reverse()) {
+        if (!step.inverse) {
+          skipped += 1;
+          continue;
+        }
+        const hashes = hashesOf(current, [step.id, step.absent].filter(Boolean));
+        const moved = step.absent && hashes.has(step.absent);
+        const edited = step.id && step.expect && hashes.get(step.id) !== step.expect;
+        if (moved || edited) {
+          skipped += 1;
+          continue;
+        }
+        try {
+          current = applyOp(current, step.inverse);
+          ops.push(step.inverse);
+          if (step.inverse.id) ids.push(step.inverse.id);
+        } catch {
+          skipped += 1;
+        }
+      }
+      look?.(docPath, ids, { stage: 'before', turn, parts: ids });
+      options.presence = { stage: 'after', turn, parts: ids };
+      return { ops };
+    };
     try {
-      const result = await writeOps(docPath, [], {
-        client,
-        prepare: async (source) => {
-          let current = source;
-          const ops = [];
-          skipped = 0;
-          for (const step of steps.slice().reverse()) {
-            if (!step.inverse) {
-              skipped += 1;
-              continue;
-            }
-            const hashes = hashesOf(current, [step.id, step.absent].filter(Boolean));
-            const moved = step.absent && hashes.has(step.absent);
-            const edited = step.id && step.expect && hashes.get(step.id) !== step.expect;
-            if (moved || edited) {
-              skipped += 1;
-              continue;
-            }
-            try {
-              current = applyOp(current, step.inverse);
-              ops.push(step.inverse);
-            } catch {
-              skipped += 1;
-            }
-          }
-          return { ops };
-        },
-      });
+      const result = await writeOps(docPath, [], options);
       reverted += result.applied;
       kept += skipped;
     } catch (err) {

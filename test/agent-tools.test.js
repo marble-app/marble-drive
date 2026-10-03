@@ -280,6 +280,32 @@ test('an insert of several elements is undone whole', async () => {
   assert.doesNotMatch(after, /two|three/);
 });
 
+test('undo looks before each batch and hands writeOps a matching after-presence', async () => {
+  const turn = await freshTurn();
+  await tools.call('read_document', { path: turn.target }, turn);
+  await tools.call('apply_ops', { path: turn.target, note: 'x', ops: [{ type: 'setText', id: 'h', text: 'Backlog' }] }, turn);
+  const looks = [];
+  const presences = [];
+  const recordingWriteOps = async (docPath, ops, options) => {
+    const result = await drive.writeOps(docPath, ops, options);
+    presences.push(options.presence);
+    return result;
+  };
+  const result = await undoTurn({
+    records: turn.undo,
+    writeOps: recordingWriteOps,
+    client: `agent-undo:${turn.conversationId}`,
+    turn: turn.id,
+    look: (docPath, ids, extra) => looks.push({ docPath, ids, extra }),
+  });
+  assert.equal(result.reverted, 1);
+  assert.equal(looks.length, 1);
+  assert.equal(looks[0].docPath, turn.target);
+  assert.deepEqual(looks[0].ids, ['h']);
+  assert.deepEqual(looks[0].extra, { stage: 'before', turn: turn.id, parts: ['h'] });
+  assert.deepEqual(presences[0], { stage: 'after', turn: turn.id, parts: ['h'] });
+});
+
 test('a refusal only counts as a read for elements it showed in full', async () => {
   const turn = await freshTurn();
   const para = (id) => `<section data-marble-id="${id}">${Array.from({ length: 90 }, (_, i) => `<p data-marble-id="${id}p${i}">Paragraph ${i} of a long section, long enough to matter.</p>`).join('')}</section>`;
@@ -382,6 +408,78 @@ test('a refused apply_ops does not tape off the page', async () => {
     path: turn.target, note: 'rename', ops: [{ type: 'setText', id: 'h', text: 'Backlog' }],
   }, turn);
   assert.equal(seen.length, 0);
+});
+
+test('apply_ops tells the page which parts, the step, a running count, and what is coming', async () => {
+  const looks = [];
+  const presences = [];
+  const recordingWriteOps = async (docPath, ops, options) => {
+    const result = await drive.writeOps(docPath, ops, options);
+    presences.push(options.presence);
+    return result;
+  };
+  const v5Tools = createTools({
+    store: drive.store,
+    writeOps: recordingWriteOps,
+    createDocument: drive.createDocument,
+    buildStarter: build,
+    guidePath: enginePath('skills/build-in-marble/SKILL.md'),
+    examine: () => [],
+    onLook: (docPath, ids, client, extra) => looks.push({ docPath, ids, client, extra }),
+  });
+  const turn = await freshTurn();
+  await v5Tools.call('read_document', { path: turn.target }, turn);
+
+  await v5Tools.call('apply_ops', {
+    path: turn.target, note: 'Stage 1 of 2: rename the title', total: 2,
+    ops: [{ type: 'setText', id: 'h', text: 'Backlog' }],
+  }, turn);
+  const before1 = looks.find((l) => l.extra?.stage === 'before');
+  assert.equal(before1.extra.turn, turn.id);
+  assert.deepEqual(before1.extra.parts, ['h']);
+  assert.equal(before1.extra.kind, 'words');
+  assert.equal(before1.extra.count, 1);
+  assert.deepEqual(before1.extra.step, { n: 1, of: 2, text: 'rename the title' });
+  assert.equal(before1.extra.total, 2);
+  assert.equal(before1.extra.reach, null);
+  assert.equal(presences[0].stage, 'after');
+  assert.deepEqual(presences[0].parts, ['h']);
+
+  looks.length = 0;
+  await v5Tools.call('apply_ops', {
+    path: turn.target, note: 'Stage 2 of 2: tidy the list',
+    ops: [{ type: 'setAttr', id: 'q', name: 'class', value: 'x' }],
+  }, turn);
+  const before2 = looks.find((l) => l.extra?.stage === 'before');
+  assert.equal(before2.extra.count, 2, 'count accumulates distinct parts across batches of the turn');
+  assert.equal(before2.extra.total, 2, 'total given once is repeated on later batches, even when this call omits it');
+});
+
+test('apply_ops reach drops ids that are not in the document', async () => {
+  const looks = [];
+  const v5Tools = createTools({
+    store: drive.store,
+    writeOps: drive.writeOps,
+    createDocument: drive.createDocument,
+    buildStarter: build,
+    guidePath: enginePath('skills/build-in-marble/SKILL.md'),
+    examine: () => [],
+    onLook: (docPath, ids, client, extra) => looks.push({ docPath, ids, client, extra }),
+  });
+  const turn = await freshTurn();
+  await v5Tools.call('read_document', { path: turn.target }, turn);
+  await v5Tools.call('apply_ops', {
+    path: turn.target, note: 'x', reach: ['h', 'q1', 'nope-not-here'],
+    ops: [{ type: 'setText', id: 'h', text: 'Backlog' }],
+  }, turn);
+  const before = looks.find((l) => l.extra?.stage === 'before');
+  assert.deepEqual(before.extra.reach, ['h', 'q1']);
+});
+
+test('apply_ops schema names reach and total', () => {
+  const applyOps = TOOL_SCHEMAS.find((t) => t.name === 'apply_ops');
+  assert.equal(applyOps.inputSchema.properties.reach.maxItems, 200);
+  assert.equal(applyOps.inputSchema.properties.total.minimum, 1);
 });
 
 test('check_document is offered to agents', () => {

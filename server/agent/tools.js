@@ -18,7 +18,8 @@
 
 import fsp from 'node:fs/promises';
 
-import { collectSlices, idsOfOps, OP, repairOps, validateOps } from '../engine.js';
+import { collectSlices, idsOfOps, knownIds, OP, repairOps, validateOps } from '../engine.js';
+import { partsOf, parseStep } from '../change/parts.js';
 import { parsePath, splitPath } from '../paths.js';
 import { inverseSteps } from './inverse.js';
 import { MAX_HOP, MAX_SENDS, MAX_TEXT, WAIT_DEFAULT, WAIT_MAX, WAIT_MIN } from './messages.js';
@@ -27,6 +28,7 @@ import { hashesOf, idsIn, tagsOf, topLevelIds } from './source.js';
 const READ_BUDGET = 24_000;
 const REFUSAL_BUDGET = 12_000;
 const INNER_LIMIT = 12_000;
+const REACH_MAX = 200;
 
 export const TOOL_SCHEMAS = [
   {
@@ -59,6 +61,17 @@ export const TOOL_SCHEMAS = [
         path: { type: 'string' },
         note: { type: 'string', description: 'One sentence: what this change does.' },
         ops: { type: 'array', items: OP, maxItems: 24 },
+        reach: {
+          type: 'array',
+          items: { type: 'string' },
+          maxItems: REACH_MAX,
+          description: 'Ids this step will touch, sent with its first batch, so the page can show the whole reach before anything changes.',
+        },
+        total: {
+          type: 'integer',
+          minimum: 1,
+          description: 'How many parts the whole change will touch, when you know it (e.g. 15 stills). The page counts toward it.',
+        },
       },
     },
   },
@@ -190,13 +203,13 @@ export function createTools({ store, writeOps, createDocument, buildStarter, com
       if (!ids && source.length <= READ_BUDGET) {
         const known = hashesOf(source);
         for (const [id, h] of known) ledger.set(id, h);
-        onLook?.(docPath, [...known.keys()], client, { phase: 'reading' });
+        onLook?.(docPath, [...known.keys()], client, { phase: 'reading', turn: turn.id });
         return { path: docPath, whole: true, source };
       }
 
       const slices = collectSlices(source, ids ?? topLevelIds(source), { budget: READ_BUDGET });
       remember(ledger, source, slices);
-      onLook?.(docPath, slices.map((slice) => slice.id), client, { phase: 'reading' });
+      onLook?.(docPath, slices.map((slice) => slice.id), client, { phase: 'reading', turn: turn.id });
       return {
         path: docPath,
         whole: false,
@@ -216,62 +229,95 @@ export function createTools({ store, writeOps, createDocument, buildStarter, com
       let steps = null;
       let introduced = [];
 
-      const result = await writeOps(docPath, [], {
+      const options = {
         client: `agent:${turn.conversationId}`,
         note: input.note,
-        prepare: async (source) => {
-          let ops;
-          try {
-            // repairOps only knows a setInner payload's own tag — and so only
-            // mints ids into markup it is confident is markup — when it is
-            // handed the same slices validateOps checks against.
-            const slices = tagsOf(source);
-            ops = repairOps(input.ops, source, { slices }).ops;
-            ops = validateOps(ops, source, { slices, innerLimit: INNER_LIMIT });
-          } catch (err) {
-            return { refused: { reason: err.message, current: [] } };
-          }
+      };
+      options.prepare = async (source) => {
+        let ops;
+        try {
+          // repairOps only knows a setInner payload's own tag — and so only
+          // mints ids into markup it is confident is markup — when it is
+          // handed the same slices validateOps checks against.
+          const slices = tagsOf(source);
+          ops = repairOps(input.ops, source, { slices }).ops;
+          ops = validateOps(ops, source, { slices, innerLimit: INNER_LIMIT });
+        } catch (err) {
+          return { refused: { reason: err.message, current: [] } };
+        }
 
-          const current = hashesOf(source);
-          const unread = [];
-          const stale = [];
-          for (const op of ops) {
-            if (op.type === 'insert' || !op.id) continue;
-            const known = ledger.get(op.id);
-            if (known === undefined) unread.push(op.id);
-            else if (known !== current.get(op.id)) stale.push(op.id);
-          }
-          const blocked = [...new Set([...stale, ...unread])];
-          if (blocked.length) {
-            const reason = stale.length
-              ? `${stale.map((id) => `"${id}"`).join(', ')} changed since you read ${stale.length === 1 ? 'it' : 'them'} — nothing was applied. Here is the current source; rebuild the edit against it.`
-              : `read ${unread.map((id) => `"${id}"`).join(', ')} before editing — nothing was applied. Here is the current source.`;
-            const shown = collectSlices(source, blocked, { budget: REFUSAL_BUDGET });
-            // The refusal is a read of what it shows in full, and only that: an
-            // element cut to an outline, or left out for budget, is still unread.
-            remember(ledger, source, shown);
-            return {
-              refused: { reason, current: shown.map(({ id, tag, html, shape }) => ({ id, tag, html, outline: Boolean(shape) })) },
-            };
-          }
+        const current = hashesOf(source);
+        const unread = [];
+        const stale = [];
+        for (const op of ops) {
+          if (op.type === 'insert' || !op.id) continue;
+          const known = ledger.get(op.id);
+          if (known === undefined) unread.push(op.id);
+          else if (known !== current.get(op.id)) stale.push(op.id);
+        }
+        const blocked = [...new Set([...stale, ...unread])];
+        if (blocked.length) {
+          const reason = stale.length
+            ? `${stale.map((id) => `"${id}"`).join(', ')} changed since you read ${stale.length === 1 ? 'it' : 'them'} — nothing was applied. Here is the current source; rebuild the edit against it.`
+            : `read ${unread.map((id) => `"${id}"`).join(', ')} before editing — nothing was applied. Here is the current source.`;
+          const shown = collectSlices(source, blocked, { budget: REFUSAL_BUDGET });
+          // The refusal is a read of what it shows in full, and only that: an
+          // element cut to an outline, or left out for budget, is still unread.
+          remember(ledger, source, shown);
+          return {
+            refused: { reason, current: shown.map(({ id, tag, html, shape }) => ({ id, tag, html, outline: Boolean(shape) })) },
+          };
+        }
 
-          steps = inverseSteps(source, ops);
-          introduced = ops.filter((op) => op.type === 'insert').flatMap((op) => idsIn(op.html));
-          onLook?.(docPath, idsOfOps(ops), `agent:${turn.conversationId}`, {
-            phase: 'writing',
-            note: input.note,
-          });
-          return { ops };
-        },
-        after: (_before, next) => {
-          const known = [...ledger.keys(), ...introduced];
-          const now = hashesOf(next, known);
-          for (const id of known) {
-            if (now.has(id)) ledger.set(id, now.get(id));
-            else ledger.delete(id);
-          }
-        },
-      });
+        // Which parts this batch touches, the step it says it is (if its note
+        // names one), a running count of distinct parts this turn has
+        // touched so far, and the two things an agent only has to say once —
+        // `total`, the size of the whole change, and `reach`, the ids a
+        // multi-batch step is about to touch — repeated here on every later
+        // batch of the same turn so the page never has to remember them on
+        // its own.
+        const { parts, inserts, removes, moves, kind } = partsOf(source, ops);
+        turn.v5 ??= { parts: new Set(), added: new Set(), removed: new Set(), total: null, reach: null };
+        for (const id of parts) turn.v5.parts.add(id);
+        for (const entry of inserts) for (const id of entry.ids) turn.v5.added.add(id);
+        for (const id of removes) turn.v5.removed.add(id);
+        if (input.total !== undefined && turn.v5.total === null) turn.v5.total = Number(input.total);
+        if (Array.isArray(input.reach)) {
+          const known = knownIds(source);
+          turn.v5.reach = input.reach.map(String).filter((id) => known.has(id)).slice(0, REACH_MAX);
+        }
+
+        const presence = {
+          phase: 'writing',
+          note: input.note,
+          turn: turn.id,
+          parts,
+          inserts,
+          removes,
+          moves,
+          kind,
+          step: parseStep(input.note),
+          count: turn.v5.parts.size,
+          total: turn.v5.total,
+          reach: turn.v5.reach,
+        };
+
+        steps = inverseSteps(source, ops);
+        introduced = ops.filter((op) => op.type === 'insert').flatMap((op) => idsIn(op.html));
+        onLook?.(docPath, idsOfOps(ops), `agent:${turn.conversationId}`, { ...presence, stage: 'before' });
+        options.presence = { ...presence, stage: 'after' };
+        return { ops };
+      };
+      options.after = (_before, next) => {
+        const known = [...ledger.keys(), ...introduced];
+        const now = hashesOf(next, known);
+        for (const id of known) {
+          if (now.has(id)) ledger.set(id, now.get(id));
+          else ledger.delete(id);
+        }
+      };
+
+      const result = await writeOps(docPath, [], options);
 
       if (result.refused) {
         turn.onEvent({ type: 'ops.refused', path: docPath, reason: result.refused.reason });

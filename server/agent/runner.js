@@ -514,12 +514,10 @@ export function createRunner({ store, tools, providers, workdir, origin, bridgeP
 
   function look(turn, extra = {}) {
     if (!onLook || !turn?.target) return;
+    const { ids: idsOverride, ...meta } = extra;
     const ids = Object.hasOwn(extra, 'ids')
-      ? extra.ids
+      ? idsOverride
       : (Array.isArray(turn.context?.selection) ? turn.context.selection.map(String) : []);
-    const meta = {};
-    if (extra.phase) meta.phase = extra.phase;
-    if (extra.note) meta.note = extra.note;
     try {
       onLook(turn.target, ids, `agent:${turn.conversationId}`, Object.keys(meta).length ? meta : undefined);
     } catch (err) {
@@ -560,7 +558,7 @@ export function createRunner({ store, tools, providers, workdir, origin, bridgeP
         activity: turn.from ? `Message from ${turn.from.title || turn.from.conversation}` : `Working on ${turn.target}`,
       });
       await emit(turn, { type: 'turn.started', provider: meta.provider });
-      look(turn, { phase: 'working' });
+      look(turn, { phase: 'working', stage: 'start', turn: turn.id, prompt: String(turn.prompt ?? '').slice(0, 300) });
 
       if (!provider) return safeFinish(turn, { status: 'failed', error: `no provider "${meta.provider}"` });
       turn.provider = provider;
@@ -877,7 +875,6 @@ export function createRunner({ store, tools, providers, workdir, origin, bridgeP
     // clobbers the next turn's fresher one.
     if (turn.finishing) return;
     turn.finishing = true;
-    look(turn, { ids: [] });
     clearTimeout(turn.settle);
     for (const clear of turn.timers) clear();
     turn.waiter?.(); // a wait parked on this turn returns now; the tool call is in `inflight` and drains below
@@ -887,7 +884,19 @@ export function createRunner({ store, tools, providers, workdir, origin, bridgeP
     } catch {
       // Already gone.
     }
+    // Waited for here, rather than before: `turn.v5` (what apply_ops's
+    // `prepare` tallies as each batch lands) is only complete once every
+    // in-flight call has actually returned, and the zone this clears is the
+    // same frame that carries its tally.
     if (turn.inflight.size) await Promise.allSettled([...turn.inflight]);
+    const v5 = turn.v5 ?? { parts: new Set(), added: new Set(), removed: new Set() };
+    const changed = [...v5.parts].filter((id) => !v5.added.has(id) && !v5.removed.has(id)).length;
+    look(turn, {
+      ids: [],
+      stage: 'end',
+      turn: turn.id,
+      done: { status, changed, added: v5.added.size, removed: v5.removed.size },
+    });
 
     // Compute everything up front: the stored turn, the conversation, and
     // the closing event all carry the same values.

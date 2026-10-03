@@ -568,6 +568,10 @@ export async function createDrive(config, { log = console, agentProviders = null
         if (String(client).startsWith('agent')) {
           payload.phase = 'writing';
           if (options.note) payload.note = options.note;
+          // The v5 presence fields (parts, kind, count, step, total, reach,
+          // turn, stage…) an agent's `prepare` already computed for the
+          // matching pre-write look — same batch, so they apply unchanged.
+          if (options.presence) Object.assign(payload, options.presence);
         }
         channels.toPresence(docPath, payload, { except });
       }
@@ -1428,12 +1432,16 @@ export async function createDrive(config, { log = console, agentProviders = null
       sandbox: agentSandbox ?? null,
       onLook: (docPath, ids, client, extra = {}) => {
         if (!client) return;
+        // Every field a caller hands in rides along untouched — the v5
+        // presence fields (parts, kind, count, step, total, reach, turn,
+        // stage, prompt, done…) included. `label` keeps its old default;
+        // `client` and `ids` are this function's own, never the caller's.
+        const { label, ...meta } = extra;
         const frame = {
           client,
           ids: Array.isArray(ids) ? ids : [],
-          label: extra.label ?? client,
-          ...(extra.phase ? { phase: extra.phase } : {}),
-          ...(extra.note ? { note: extra.note } : {}),
+          label: label ?? client,
+          ...meta,
         };
         rememberLook(docPath, frame);
         channels.toPresence(docPath, frame);

@@ -1,0 +1,192 @@
+// Which parts of a document an agent's batch touched — the shape later tasks
+// draw from.
+//
+// `apply_ops` already knows the ids an op addresses (idsOfOps), which is
+// enough to refuse a stale write. It is not enough to tell the page *what
+// kind* of change landed, or to narrow a `setInner` that rewrote a whole list
+// down to the one row that actually changed. `partsOf` answers that, from the
+// ops alone and the source they are about to apply to — nothing it does
+// writes anything or depends on a turn, a conversation, or the host.
+//
+// `parseStep` is the other half of the same idea in words: an agent that
+// narrates its own batches ("Stage 2 of 4: …") hands the page a step and a
+// count for free, if the note is read for it rather than only logged.
+
+import { indexIds, parseSource, sliceOf } from '../engine.js';
+import { hashesOf, idsIn, tagsOf, topLevelIds } from '../agent/source.js';
+
+const LOOK_ATTRS = new Set(['style', 'class']);
+// Union sizes above this are not worth naming one by one — the batch reports
+// its container instead, the same answer a `setInner` the model can't see
+// into gets.
+const UNION_LIMIT = 60;
+
+const ID_ATTR = 'data-marble-id';
+
+const idAttrOf = (node) => (node.attrs ?? []).find((a) => a.name === ID_ATTR)?.value ?? null;
+
+/** For each id, every ancestor (by data-marble-id) above it in `tree`. */
+function ancestorSetsOf(tree, ids) {
+  const byId = indexIds(tree);
+  const out = new Map();
+  for (const id of ids) {
+    const set = new Set();
+    let up = byId.get(id)?.parentNode;
+    while (up) {
+      const aid = idAttrOf(up);
+      if (aid) set.add(aid);
+      up = up.parentNode;
+    }
+    out.set(id, set);
+  }
+  return out;
+}
+
+/** The topmost of `union`: drop any id whose ancestor is also in the set.
+ *  `removedIds` live in the old document (`source`); everything else in
+ *  `union` is from the new fragment (`html`) — two different trees, so each
+ *  id's ancestors are read from whichever tree it actually belongs to. */
+function topmostOf(source, html, removedIds, union) {
+  if (!union.length) return union;
+  const removed = new Set(removedIds);
+  const oldAnc = ancestorSetsOf(parseSource(source), union.filter((id) => removed.has(id)));
+  const newAnc = ancestorSetsOf(parseSource(html), union.filter((id) => !removed.has(id)));
+  const unionSet = new Set(union);
+  return union.filter((id) => {
+    const anc = removed.has(id) ? oldAnc.get(id) : newAnc.get(id);
+    for (const a of anc ?? []) if (unionSet.has(a)) return false;
+    return true;
+  });
+}
+
+const stripTags = (html) => String(html).replace(/<[^>]*>/g, '').trim();
+
+/** The children of an outer-HTML string — what's between its own open and
+ *  close tag. Only ever asked of a non-raw-text element here (style/script
+ *  are short-circuited in `partsForOp` before this runs). */
+function innerOf(outerHtml) {
+  const openEnd = outerHtml.indexOf('>');
+  const closeStart = outerHtml.lastIndexOf('<');
+  if (openEnd === -1 || closeStart === -1 || closeStart <= openEnd) return '';
+  return outerHtml.slice(openEnd + 1, closeStart);
+}
+
+function setInnerParts(source, op) {
+  const { id, html } = op;
+  let outer;
+  try {
+    outer = sliceOf(source, id).html;
+  } catch {
+    // The id named by the op is not in the document the batch is about to
+    // apply to — the write itself will refuse this upstream; here it is
+    // just one part, generically.
+    return { parts: [id], kind: 'structure' };
+  }
+  const oldIds = idsIn(outer).filter((x) => x !== id);
+  const newIds = idsIn(html);
+  const oldHashes = hashesOf(source, oldIds);
+  const newHashes = hashesOf(html, newIds);
+  const changed = newIds.filter((nid) => oldHashes.get(nid) !== newHashes.get(nid));
+  const removed = oldIds.filter((oid) => !newIds.includes(oid));
+  const union = [...new Set([...changed, ...removed])];
+
+  if (union.length && union.length <= UNION_LIMIT) {
+    const topmost = topmostOf(source, html, removed, union);
+    const removedSet = new Set(removed);
+    return {
+      parts: topmost,
+      removes: topmost.filter((pid) => removedSet.has(pid)),
+      kind: 'structure',
+    };
+  }
+
+  // Neither side has any addressed children: this is a plain-text container,
+  // and the only question left is whether its words actually moved.
+  const words = !oldIds.length && !newIds.length && stripTags(innerOf(outer)) !== stripTags(html);
+  return { parts: [id], kind: words ? 'words' : 'structure' };
+}
+
+function partsForOp(source, op, tagById) {
+  switch (op.type) {
+    case 'setText':
+      return { parts: [op.id], kind: 'words' };
+    case 'setAttr':
+      return { parts: [op.id], kind: LOOK_ATTRS.has(op.name) ? 'look' : 'attr' };
+    case 'setInner': {
+      const tag = tagById.get(op.id);
+      if (tag === 'style') return { parts: [op.id], kind: 'look' };
+      if (tag === 'script') return { parts: [op.id], kind: 'attr' };
+      return setInnerParts(source, op);
+    }
+    case 'insert': {
+      const roots = topLevelIds(op.html);
+      return {
+        parts: roots,
+        inserts: [{ parentId: op.parentId, beforeId: op.beforeId ?? null, ids: roots }],
+        kind: 'structure',
+      };
+    }
+    case 'remove':
+      return { parts: [op.id], removes: [op.id], kind: 'structure' };
+    case 'move':
+      return { parts: [op.id], moves: [op.id], kind: 'structure' };
+    default:
+      return { parts: op.id ? [op.id] : [], kind: 'structure' };
+  }
+}
+
+/** Where each id in the document's own markup first appears — "document
+ *  order" for a batch that may touch ids from several different ops. An id
+ *  this batch is inserting has none yet, and sorts after every id that does,
+ *  in the order the batch introduced it (sort is stable). */
+function docOrderOf(source) {
+  const order = new Map();
+  let i = 0;
+  for (const m of String(source).matchAll(/data-marble-id="([^"]+)"/g)) {
+    if (!order.has(m[1])) order.set(m[1], i);
+    i += 1;
+  }
+  return order;
+}
+
+/** What one batch of ops touched: the parts to redraw, in document order,
+ *  and enough about each to say what kind of touch it was. Pure — it only
+ *  reads `source`, the document as it is before the batch applies. */
+export function partsOf(source, ops) {
+  const tagById = new Map(tagsOf(source).map((t) => [t.id, t.tag]));
+  const results = (ops ?? []).map((op) => partsForOp(source, op, tagById));
+
+  const kinds = new Set(results.map((r) => r.kind));
+  const kind = kinds.size === 0 ? 'structure' : kinds.size === 1 ? [...kinds][0] : 'mixed';
+
+  const order = docOrderOf(source);
+  const seen = new Set();
+  const parts = [];
+  for (const r of results) {
+    for (const id of r.parts) {
+      if (!seen.has(id)) {
+        seen.add(id);
+        parts.push(id);
+      }
+    }
+  }
+  parts.sort((a, b) => (order.get(a) ?? Infinity) - (order.get(b) ?? Infinity));
+
+  const inserts = results.flatMap((r) => r.inserts ?? []);
+  const removes = [...new Set(results.flatMap((r) => r.removes ?? []))];
+  const moves = [...new Set(results.flatMap((r) => r.moves ?? []))];
+
+  return { parts, inserts, removes, moves, kind };
+}
+
+const STEP_RE = /^(?:stage|step)\s+(\d+)\s*(?:of|\/)\s*(\d+)\s*(.*)$/i;
+const LEADING_PUNCT = /^[\s:\-\u2013\u2014]+/;
+
+/** "Stage 2 of 4: lay out the three columns" → { n: 2, of: 4, text: 'lay out
+ *  the three columns' }, read out of an agent's own note on a batch. Not
+ *  found: null — most notes are not a step, and that is the ordinary case. */
+export function parseStep(note) {
+  const m = STEP_RE.exec(String(note ?? '').trim());
+  if (!m) return null;
+  return { n: Number(m[1]), of: Number(m[2]), text: m[3].replace(LEADING_PUNCT, '').trim() };
+}

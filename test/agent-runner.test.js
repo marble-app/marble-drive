@@ -442,6 +442,59 @@ test('a turn tapes off the selection while it runs, then clears it', async () =>
   await runner.close();
 });
 
+test('the turn-start look names the turn and carries its prompt, cut to 300', async () => {
+  const looks = [];
+  const { store, runner } = await setup({
+    onLook: (doc, ids, client, extra) => looks.push({ doc, ids, client, extra }),
+  });
+  const { id } = await store.createConversation({ provider: 'fake' });
+  const longPrompt = `script:hello\n${'x'.repeat(400)}`;
+  const { turnId } = await runner.send(id, { prompt: longPrompt, context: { target: 'notes' } });
+  const start = await until(() => looks.find((look) => look.extra?.stage === 'start') ?? null);
+  assert.equal(start.extra.turn, turnId);
+  assert.equal(start.extra.prompt.length, 300);
+  assert.equal(start.extra.prompt, longPrompt.slice(0, 300));
+  await finished(store, turnId);
+  await runner.close();
+});
+
+test('the turn-end look reports what the turn did: added, removed, and the rest changed', async () => {
+  const looks = [];
+  const { store, runner } = await setup({
+    onLook: (doc, ids, client, extra) => looks.push({ doc, ids, client, extra }),
+    tools: {
+      call: async (name, input, turn) => {
+        // What a real apply_ops leaves on the turn (server/agent/tools.js):
+        // the union of parts touched this turn, and which of those were
+        // inserted or removed.
+        turn.v5 = {
+          parts: new Set(['a', 'b', 'c']),
+          added: new Set(['b']),
+          removed: new Set(['c']),
+          total: null,
+          reach: null,
+        };
+        turn.onEvent({ type: 'ops.applied', path: 'd', count: 1 });
+        return { ok: true };
+      },
+    },
+  });
+  const { id } = await store.createConversation({ provider: 'fake' });
+  const { turnId } = await runner.send(id, { prompt: 'script:stall', context: { target: 'd' } });
+  const live = await until(() => (runner.running()[0]?.token ? runner.running()[0] : null));
+  await runner.callTool(live.token, 'apply_ops', {});
+  await runner.cancel(turnId);
+  await finished(store, turnId);
+  const end = looks.find((look) => look.extra?.stage === 'end');
+  assert.equal(end.ids.length, 0);
+  assert.equal(end.extra.turn, turnId);
+  assert.equal(end.extra.done.status, 'cancelled');
+  assert.equal(end.extra.done.changed, 1, '"a" is neither added nor removed');
+  assert.equal(end.extra.done.added, 1);
+  assert.equal(end.extra.done.removed, 1);
+  await runner.close();
+});
+
 test('the prompt carries the target and the selected source', async () => {
   const { store, runner } = await setup();
   const { id } = await store.createConversation({ provider: 'fake' });
