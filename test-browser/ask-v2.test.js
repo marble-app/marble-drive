@@ -58,15 +58,17 @@ const select = async (page, id) => {
   await page.waitForFunction((mid) => window.marble.agent.context().selection.includes(mid), id);
 };
 const handle = (page) => page.locator('.marble-callout-handle:not([hidden])');
-const offerInput = (page) => page.locator('.marble-callout[data-offer] .marble-offer-input');
+// The line ⌘J and the handle open (change-line.js); one sent a moment ago may
+// still be folding away.
+const lineInput = (page) => page.locator('.marble-line:not([data-state="sent"]):not([data-leaving]) .marble-line-input');
 
 const keep = async (page, id, text) => {
   await select(page, id);
   await handle(page).click();
-  await offerInput(page).waitFor();
+  await lineInput(page).waitFor();
   await page.keyboard.type(text);
   await page.keyboard.press('Shift+Enter');
-  await page.waitForFunction(() => !document.querySelector('.marble-callout[data-offer]'));
+  await page.waitForFunction(() => !document.querySelector('.marble-line'));
 };
 
 // A hand edit, as the document's own editable wiring files one.
@@ -82,8 +84,8 @@ test('⇧⏎ keeps the ask as a numbered pin, the count sits by the chat button,
   const pin = page.locator('.marble-note-pin:not([hidden])');
   await pin.first().waitFor();
   assert.equal(await pin.first().textContent(), '1');
-  // The card goes, so the next thing can be pointed at.
-  await page.waitForFunction(() => document.querySelectorAll('.marble-callout').length === 0);
+  // The line goes, so the next thing can be pointed at.
+  await page.waitForFunction(() => document.querySelectorAll('.marble-line, .marble-callout').length === 0);
   await page.waitForTimeout(250); // the pin grows in from its corner
   const [li, dot] = await Promise.all([page.locator('[data-marble-id="q1"]').boundingBox(), pin.first().boundingBox()]);
   assert.ok(Math.abs(dot.y + 10 - li.y) < 4, 'the pin hangs at the thing\'s top corner');
@@ -144,9 +146,9 @@ test('a row finished by hand among filled ones gets one quiet offer, which draft
   const [gap, box] = await Promise.all([page.locator('[data-marble-id="c52"]').boundingBox(), chip.boundingBox()]);
   assert.ok(Math.abs(box.x - (gap.x + 4)) < 3 && Math.abs(box.y + box.height / 2 - (gap.y + gap.height / 2)) < 3, 'it sits where the empty cells are');
   await chip.locator('.marble-nudge-go').click();
-  await offerInput(page).waitFor();
-  assert.equal(await offerInput(page).textContent(), 'Automate this row: fill Authors, Venue and Year from the title');
-  assert.equal(await page.locator('.marble-offer-act[data-act="automate"]').getAttribute('aria-pressed'), 'true');
+  await lineInput(page).waitFor();
+  assert.equal(await lineInput(page).textContent(), 'Automate this row: fill Authors, Venue and Year from the title');
+  assert.equal(await page.evaluate(() => getSelection().toString()), 'fill Authors, Venue and Year from the title', 'the idea is selected, to type over');
   const list = await (await fetch(`${host.base}/agent/conversations`)).json();
   assert.equal(list.length, 0, 'a suggestion drafts, it never sends');
 });
@@ -161,8 +163,8 @@ test('the third same change to siblings offers the rest', async () => {
   await chip.waitFor({ timeout: 4000 });
   assert.equal(await chip.locator('.marble-nudge-go').innerText(), 'Do the other 2');
   await chip.locator('.marble-nudge-go').click();
-  await offerInput(page).waitFor();
-  assert.match(await offerInput(page).textContent(), /^Do the same to the other 2: set it to “Read”/);
+  await lineInput(page).waitFor();
+  assert.match(await lineInput(page).textContent(), /^Do the same to the other 2: set it to “Read”/);
   assert.deepEqual(await page.evaluate(() => window.marble.agent.context().selection), ['t']);
 });
 

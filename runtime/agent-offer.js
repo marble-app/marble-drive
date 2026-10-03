@@ -158,6 +158,31 @@
     return { cols: cols.length ? listed(cols) : 'the rest', from: first };
   }
 
+  /** "this row", "these 2 rows", "these words": what an action is about. */
+  function thisOf(kind, count, what = kind) {
+    if (kind === 'words') return 'these words';
+    return count > 1 ? `these ${count} ${PLURAL[DEFAULTS[kind] ? kind : 'part'] ?? 'things'}` : `this ${what}`;
+  }
+
+  /** What an action asks for, for a thing: the words it drafts, the lead
+   *  and the idea after it apart, so the idea can be selected to type over. */
+  function actionWords(id, thisWhat, offer) {
+    if (id === 'variations') return { lead: `Try 3 variations of ${thisWhat}: `, idea: offer.axes };
+    if (id === 'automate') return { lead: `Automate ${thisWhat}: `, idea: offer.auto };
+    if (id === 'interactive') return { lead: `Make ${thisWhat} interactive: `, idea: offer.interactive };
+    return { lead: '', idea: '', line: 'Mark and draw on the page what you mean' };
+  }
+
+  /** An action drafted for a thing outside a card: the line (change-line.js)
+   *  opens with these words when an offer after an edit names an action. */
+  function draftFor(id, { kind = 'part', count = 1, element = null } = {}) {
+    const k = DEFAULTS[kind] ? kind : 'part';
+    const offer = { ...DEFAULTS[k] };
+    const gaps = !(count > 1) && kind !== 'words' && kind !== 'table' ? gapsOf(element) : null;
+    if (gaps) offer.auto = `fill ${gaps.cols} from the ${gaps.from}`;
+    return actionWords(id, thisOf(kind, count, k === 'part' ? 'part' : kind), offer);
+  }
+
   /**
    * Draw the offer into `container`.
    * @param {object} o
@@ -183,9 +208,7 @@
     const offer = { ...DEFAULTS[kind] };
     const gaps = !(o.count > 1) && o.kind !== 'words' && o.kind !== 'table' ? gapsOf(o.element) : null;
     if (gaps) offer.auto = `fill ${gaps.cols} from the ${gaps.from}`;
-    const thisWhat = o.kind === 'words'
-      ? 'these words'
-      : o.count > 1 ? `these ${o.count} ${PLURAL[kind] ?? 'things'}` : `this ${o.what}`;
+    const thisWhat = thisOf(o.kind === 'words' ? 'words' : kind, o.count, o.what);
 
     const root = h('div', 'marble-offer');
     const pill = h('div', 'marble-offer-pill');
@@ -215,12 +238,7 @@
 
     // What an action asks for, for this thing: the words it drafts, with the
     // idea after the lead selected so typing replaces it.
-    function actionFor(id) {
-      if (id === 'variations') return { lead: `Try 3 variations of ${thisWhat}: `, idea: offer.axes };
-      if (id === 'automate') return { lead: `Automate ${thisWhat}: `, idea: offer.auto };
-      if (id === 'interactive') return { lead: `Make ${thisWhat} interactive: `, idea: offer.interactive };
-      return { lead: '', idea: '', line: 'Mark and draw on the page what you mean' };
-    }
+    const actionFor = (id) => actionWords(id, thisWhat, offer);
 
     const caret = (from = null, to = null) => {
       input.focus({ preventScroll: true });
@@ -425,5 +443,5 @@
     };
   }
 
-  globalThis.marbleOffer = { mount, briefFor, DEFAULTS, ACTIONS };
+  globalThis.marbleOffer = { mount, briefFor, draftFor, DEFAULTS, ACTIONS };
 })();

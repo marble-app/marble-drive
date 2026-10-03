@@ -97,17 +97,21 @@ test('⌘\\ and Ctrl+\\ open the shell with the chat in it, focused; Escape hand
   await opened(panel);
 });
 
-test('⌘J only asks: with nothing to ask about it opens the chat, and never moves the drive around the page', async () => {
-  const { page, panel } = await visit();
+test('⌘J only asks: with nothing to ask about it opens the page\'s line, never the chat, and never moves the drive around the page', async () => {
+  const { page } = await visit();
   const shellOpen = () => page.evaluate(() => document.querySelector('marble-shell')?.state?.open ?? null);
   const before = await shellOpen();
   await page.keyboard.press('Control+j');
-  await page.waitForFunction(() => document.querySelector('marble-agent-drawer')?.isOpen === true);
+  // Nothing under the pointer or the caret: the line at the foot of the
+  // window, about the page (change-line.js). The chat is ⌘⇧J.
+  await page.locator('.marble-line[data-scope="page"]').waitFor();
+  assert.equal(await page.evaluate(() => document.querySelector('marble-agent-drawer').isOpen), false);
   assert.equal(await shellOpen(), before, 'the shell stays as it was');
-  // Again: the chat keeps the keys rather than closing.
+  // Again: the line goes, and the chat stays shut.
   await page.keyboard.press('Control+j');
-  await page.waitForTimeout(200);
-  assert.equal(await page.evaluate(() => document.querySelector('marble-agent-drawer').isOpen), true);
+  await page.waitForFunction(() => !document.querySelector('.marble-line'));
+  assert.equal(await page.evaluate(() => document.querySelector('marble-agent-drawer').isOpen), false);
+  assert.equal(await shellOpen(), before);
 });
 
 test('a conversation from the drawer edits the page, and stays with that page', async () => {

@@ -73,9 +73,10 @@ const selectWords = async (page, id, words) => {
   }, { mid: id, said: words });
   await page.waitForFunction((mid) => window.marble.agent.context().selection.includes(mid), id);
 };
+// Asked from the line the handle opens (change-line.js).
 const ask = async (page, prompt) => {
   await page.locator('.marble-callout-handle:not([hidden])').click();
-  const input = page.locator('.marble-callout[data-offer] .marble-offer-input');
+  const input = page.locator('.marble-line:not([data-state="sent"]):not([data-leaving]) .marble-line-input');
   await input.waitFor();
   await page.keyboard.type(prompt);
   await page.keyboard.press('Enter');
@@ -108,7 +109,7 @@ test('work on words is a caret at their end, reading them, with a wash on them â
   assert.ok(Math.abs(bar.x - end.left) < 3 && Math.abs(bar.y - end.top) < 3, 'the caret waits at the end of the words');
   // A tag you can press is a way to the chat.
   await page.locator('.marble-text-tag').click();
-  await page.locator('.marble-callout[data-state="card"]').waitFor();
+  await page.waitForFunction(() => document.querySelector('marble-agent-drawer')?.isOpen === true);
 });
 
 test('its edit is typed out after the caret, and when the turn ends the caret goes', async () => {

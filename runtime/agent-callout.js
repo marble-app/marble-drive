@@ -8,11 +8,14 @@
 // Quiet until reached (v2, Notes and Sketches/Ask at Anything): nothing about
 // asking appears until the person does something only someone who wants to
 // change the thing would do. Select words and the bubble hangs under them.
-// ⌘J asks about the selection, the block the caret is in, or what the
-// pointer is over, and only that: the drive around the page is ⌘\
-// (shell.js). Point at something, in the tray, outlines what is under the
-// pointer at the right scope, with its name; click to ask about it, [ and ]
-// to widen or narrow it first, ⇧-click to add more. ⌥ does nothing here
+// ⌘J is about the selection, the block the caret is in, or what the pointer
+// is over, and with none of those, the page: the drive around the page is ⌘\
+// (shell.js). Since v5 what it opens is the line flush under the thing
+// (change-line.js), not a card; this layer only decides what it is about.
+// Point at something, in the tray, outlines what is under the pointer at the
+// right scope, with its name; click to open the line on it, [ and ] to widen
+// or narrow it first, ⇧-click to add more. The card stays for Describe mode,
+// which borrows it. ⌥ does nothing here
 // (v4): it is the key that moves the caret by a word. Resting the pointer
 // offers nothing unless it is turned on in Agent settings › Chat. Closing a card puts it away: it never folds into a pill
 // left on the page. Chats nobody here is looking at are a glint on their
@@ -296,7 +299,7 @@
     const recordOf = (id) => (id ? records.find((r) => r.id === id) ?? null : null);
     // A chat with a card on this page is shown by the card; its glint steps
     // back while the card is there (agent-glints.js asks).
-    window.marbleCallout = { holds: (id) => Boolean(recordOf(id)) };
+    window.marbleCallout = { holds: (id) => Boolean(recordOf(id)), nameFor: (ids) => nameFor(ids) };
     const held = () => dispatchEvent(new CustomEvent('marble-callout:held'));
 
     function placeCard(record) {
@@ -457,7 +460,7 @@
         if (record.zone) record.ids = [...record.zone.ids];
         if (zone) {
           record.status.textContent = zone.path === app
-            ? (marble.collab?.phaseLabel?.(zone) ?? 'Agent · working')
+            ? (marble.collab?.phaseLabel?.(zone) ?? 'Working')
             : `Building in ${zone.path}`;
         }
         syncDock(record);
@@ -598,13 +601,13 @@
     const handle = document.createElement('button');
     handle.type = 'button';
     handle.className = 'marble-callout-handle';
-    handle.setAttribute('aria-label', 'Ask an agent about this selection');
+    handle.setAttribute('aria-label', 'Change this selection');
     // Stroked in the mark, filled with the page's paper: the same two colours
     // the zone uses, so the thing you summon it with already looks like it.
     handle.innerHTML = '<svg viewBox="0 0 24 24" width="24" height="24" aria-hidden="true" fill="var(--callout-paper)" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"><path d="M6.5 15.1A8 8 0 1 1 10.9 18.2L4.9 21.1a.6.6 0 0 1-.72-.85Z"/></svg>';
     handle.hidden = true;
     // A tip that says what a press does, and the key that does it too.
-    handle.addEventListener('pointerenter', (event) => { if (event.pointerType !== 'touch') showTip(handle, 'Ask about this · ⌘J'); });
+    handle.addEventListener('pointerenter', (event) => { if (event.pointerType !== 'touch') showTip(handle, 'Change this · ⌘J'); });
     handle.addEventListener('pointerleave', hideTip);
     handle.addEventListener('click', hideTip);
     // A mousedown on a button would collapse the very selection it is about.
@@ -622,7 +625,7 @@
       const ids = agent.context().selection;
       // A card with no conversation yet is this selection's callout already.
       // A card Describe mode has borrowed is that mode's, and hides with it.
-      const drawn = records.some((r) => r.id === null && !r.owner);
+      const drawn = records.some((r) => r.id === null && !r.owner) || Boolean(window.marbleLine?.current());
       // Inside a marks tool mode an overlay in the top layer has the pointer,
       // so a handle drawn now would be visible and unclickable. The tray is
       // the way out of a mode; the handle comes back when the mode ends.
@@ -639,7 +642,7 @@
       }
       clearHover();
       handle.classList.remove('is-quiet');
-      handle.setAttribute('aria-label', 'Ask an agent about this selection');
+      handle.setAttribute('aria-label', 'Change this selection');
       const r = target.getBoundingClientRect();
       handle.style.left = `${Math.round(Math.max(PAD, r.left - 10))}px`;
       handle.style.top = `${Math.round(Math.min(innerHeight - 30, r.bottom + 4))}px`;
@@ -650,7 +653,7 @@
     function placeQuiet() {
       const r = hover.element.getBoundingClientRect();
       handle.classList.add('is-quiet');
-      handle.setAttribute('aria-label', `Ask an agent about this ${marbleScope.kindOf(hover.element)}`);
+      handle.setAttribute('aria-label', `Change this ${marbleScope.kindOf(hover.element)}`);
       handle.style.left = `${Math.round(Math.max(4, r.left - 32))}px`;
       handle.style.top = `${Math.round(r.top + Math.min(r.height / 2 - 11, 2))}px`;
       handle.hidden = false;
@@ -671,6 +674,13 @@
       // there, not a second one.
       if (document.querySelector('.marble-marks-layer[data-describing]')) {
         dispatchEvent(new CustomEvent('marble-marks:focus'));
+        return true;
+      }
+      // The line still being written: a second ⌘J puts it away, words kept.
+      const line = window.marbleLine;
+      if (line?.current()?.state === 'edit') {
+        line.close({ keep: true });
+        agent.select(null);
         return true;
       }
       // A card still waiting to be sent: a second ⌘J puts it away.
@@ -712,7 +722,14 @@
           agent.select(ids);
         }
       }
-      if (!ids.length) return false;
+      if (!ids.length) {
+        // Nothing under the pointer or the caret: ⌘J is about the page, and
+        // the line sits at the foot of the window. A phone opens the chat.
+        if (PHONE.matches || !line) return false;
+        handle.hidden = true;
+        clearHover();
+        return line.open({ ids: [], scope: 'page', from: 'key' });
+      }
       handle.hidden = true;
       clearHover();
       if (PHONE.matches) {
@@ -728,6 +745,7 @@
         else agent.open();
         return true;
       }
+      if (line) return line.open({ ids, scope, from: 'key' });
       openCard({ ids, scope, from });
       return true;
     }
@@ -945,7 +963,7 @@
       if (!globalThis.marbleScope || PHONE.matches || pointerDown || typing() || marking()) return false;
       // The Drive's own listing is made of things to open, not to ask about.
       if (HOME && app === HOME) return false;
-      if (records.some((r) => r.offer || (r.id === null && !r.owner))) return false;
+      if (records.some((r) => r.offer || (r.id === null && !r.owner)) || window.marbleLine?.current()) return false;
       const sel = getSelection();
       return !(sel && !sel.isCollapsed);
     }
@@ -1082,8 +1100,7 @@
         return;
       }
       const r = el.getBoundingClientRect();
-      const card = offering();
-      const adding = Boolean(card && !card.scope?.words && !card.ids.includes(el.getAttribute('data-marble-id')));
+      const adding = addsTo(el.getAttribute('data-marble-id'));
       pickFrame.classList.toggle('is-adding', adding);
       pickFrame.classList.toggle('is-low', r.top < 28);
       pickName.textContent = `${adding ? '+ ' : ''}${marbleScope.nameOf(el)}`;
@@ -1139,17 +1156,31 @@
       if (!adding) setLatched(false);
       if (!el) return;
       const id = el.getAttribute('data-marble-id');
+      const line = window.marbleLine;
+      const open = line?.current();
       const card = offering();
-      if (card && adding && !card.scope?.words) {
+      if (line && adding && open?.state === 'edit' && !open.words && !open.page) {
+        if (!open.ids.includes(id)) line.open({ ids: [...open.ids, id], draft: open.text || null, from: 'point' });
+      } else if (!line && card && adding && !card.scope?.words) {
         if (!card.ids.includes(id)) addToCard(card, id);
       } else {
         const scope = { words: false, chain: aim?.chain ?? [el], index: aim?.index ?? 0 };
         if (card) remove(card);
-        openCard({ ids: [id], scope, from: 'point' });
+        if (line) line.open({ ids: [id], scope, from: 'point' });
+        else openCard({ ids: [id], scope, from: 'point' });
       }
       aim = null;
       if (adding) aimAt(event.clientX, event.clientY);
     }, true);
+
+    /** Whether a ⇧-click on `id` would add it to what is open: the line
+     *  still being written about parts (not words, not the page), or a card. */
+    function addsTo(id) {
+      const open = window.marbleLine?.current();
+      if (open) return open.state === 'edit' && !open.words && !open.page && !open.ids.includes(id);
+      const card = offering();
+      return Boolean(card && !card.scope?.words && !card.ids.includes(id));
+    }
 
     /** ⇧-click with a card open: the thing joins the card's scope. What was
      *  typed stays; the card is redrawn about all of them. */
@@ -1199,6 +1230,12 @@
       event.preventDefault();
       const open = offering();
       if (open) remove(open);
+      // The line, with the words in it (or the action drafted for this thing).
+      const line = window.marbleLine;
+      if (line) {
+        line.open({ ids, draft: event.detail?.draft ?? null, action: event.detail?.action ?? null, from: event.detail?.from ?? 'note' });
+        return;
+      }
       const el = byId(ids[0]);
       const chain = ids.length === 1 ? (marbleScope?.chainFrom(el) ?? [el]) : [];
       openCard({ ids, scope: { words: false, chain, index: 0 }, draft: event.detail?.draft ?? null, action: event.detail?.action ?? null, from: event.detail?.from ?? 'note' });
@@ -1212,6 +1249,13 @@
       event.preventDefault();
       const open = offering();
       if (open) remove(open);
+      // One ask from the line at the things, sent at once.
+      const line = window.marbleLine;
+      if (line) {
+        const at = ids.filter((id) => byId(id));
+        line.open({ ids: at, scope: at.length ? null : 'page', draft: String(text), brief, send: true, from: 'note' });
+        return;
+      }
       const record = openCard({ ids, focus: false, owner: 'send' });
       record.owner = null;
       placeCard(record);

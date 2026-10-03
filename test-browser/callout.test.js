@@ -110,6 +110,10 @@ const select = async (page, id) => {
 
 const handle = (page) => page.locator('.marble-callout-handle:not([hidden])');
 const card = (page) => page.locator('.marble-callout[data-state="card"]');
+// What ⌘J, the handle and pointing open since v5: one line flush under the
+// thing (change-line.js). One sent a moment ago may still be folding away.
+const line = (page) => page.locator('.marble-line:not([data-state="sent"]):not([data-leaving])');
+const lineInput = (page) => page.locator('.marble-line:not([data-state="sent"]):not([data-leaving]) .marble-line-input');
 
 test('a settled selection grows a handle, and collapsing takes it away', async () => {
   const page = await open();
@@ -126,98 +130,33 @@ test('a settled selection grows a handle, and collapsing takes it away', async (
   await page.locator('.marble-callout-handle[hidden]').waitFor({ state: 'attached' });
 });
 
-test('the handle opens a fresh card on the offer, and typing does not lose the selection', async () => {
+test('the handle opens the line on the selection, and typing does not lose the selection', async () => {
   const page = await open();
   await select(page, 'q1');
   await handle(page).click();
-  await card(page).waitFor();
-  await offerInput(page).waitFor();
-  // The offer: one card, the input named for what it is about, the four
-  // actions in words, two suggestions, and one line of help. The
-  // conversation is there, not shown, until a send.
-  assert.equal(await offerInput(page).getAttribute('data-placeholder'), 'Ask about this item…', 'all of an element selected is that element');
-  assert.deepEqual(
-    await page.locator('.marble-offer-act').allInnerTexts(),
-    ['Try variations', 'Automate it', 'Make it interactive', 'Sketch it'],
-  );
-  await page.locator('.marble-offer-bubble').first().waitFor();
-  assert.equal(await page.locator('.marble-offer-bubble').count(), 2, 'two suggestions');
-  const help = await page.locator('.marble-offer-hint').innerText();
-  assert.match(help, /send/);
-  assert.match(help, /keep as a note/);
-  assert.match(help, /No need to select: ⌘J asks about what the pointer is on\./, 'the first cards from a selection teach asking without selecting');
-  assert.equal(await card(page).locator('marble-conversation[data-chrome="callout"]').isVisible(), false);
-  assert.equal(await page.locator('.marble-callout-frame').count(), 1, 'what it is about is outlined');
-  await offerInput(page).click();
-  assert.deepEqual(await page.evaluate(() => window.marble.agent.context().selection), ['q1'], 'focus into the card is not a new selection');
-  assert.equal(await handle(page).count(), 0, 'the handle steps aside for the card');
+  await lineInput(page).waitFor();
+  // One line under the thing, named for what it is about: no card, no
+  // tools, no suggestions, no conversation drawn.
+  assert.equal(await lineInput(page).getAttribute('data-placeholder'), 'Change this row', 'all of an element selected is that element');
+  assert.equal(await page.locator('.marble-callout').count(), 0);
+  assert.equal(await page.locator('.marble-line-scope:not([data-state="out"])').count(), 1, 'what it is about is tinted');
+  await lineInput(page).click();
+  assert.deepEqual(await page.evaluate(() => window.marble.agent.context().selection), ['q1'], 'focus into the line is not a new selection');
+  assert.equal(await handle(page).count(), 0, 'the handle steps aside for the line');
 });
 
-test('an action drafts its words with the idea selected, previews on hover, and sends what it means beside them', async () => {
+test('a line nobody used goes with Escape or a click elsewhere', async () => {
   const page = await open();
   await select(page, 'q1');
   await handle(page).click();
-  await offerInput(page).waitFor();
-  // Pointing at one says what it would ask for here, in the empty line.
-  await page.locator('.marble-offer-act[data-act="automate"]').hover();
-  assert.match(await offerInput(page).getAttribute('data-placeholder'), /^Automate this item: /);
-  await page.locator('.marble-offer-act[data-act="interactive"]').click();
-  const draft = await offerInput(page).textContent();
-  assert.match(draft, /^Make this item interactive: /);
-  assert.equal(await page.evaluate(() => getSelection().toString()), draft.split(': ')[1], 'the idea is selected, to type over');
-  assert.equal(await page.locator('.marble-offer-act[data-act="interactive"]').getAttribute('aria-pressed'), 'true');
-  assert.equal(await page.locator('.marble-offer-bubble').count(), 0, 'no suggestions once there are words');
-  assert.equal(await page.locator('.marble-offer-send').isVisible(), true, 'a drafted prompt can be sent as it is');
-  await page.keyboard.type('click to open it');
-  await page.keyboard.press('Enter');
-  await page.waitForFunction(() => !document.querySelector('.marble-callout[data-offer]'));
-  await until(page, async () => {
-    const [s] = await window.marble.agent.conversations();
-    return Boolean(s && (await window.marble.agent.conversation(s.id)).turns?.length);
-  });
-  const { detail } = await firstConversation(page);
-  assert.equal(detail.turns[0].prompt, 'Make this item interactive: click to open it', 'the chat shows only what was typed');
-  assert.match(detail.turns[0].context.brief, /in place/, 'what the action means rides beside it');
-  assert.deepEqual(detail.turns[0].context.selection, ['q1']);
-
-  // Pressing it again takes an untouched draft with it.
-  await select(page, 'h');
-  await handle(page).click();
-  await offerInput(page).waitFor();
-  await page.locator('.marble-offer-act[data-act="variations"]').click();
-  assert.equal(await offerInput(page).textContent(), 'Try 3 variations of this heading: shorter, bolder, or quieter');
-  await page.locator('.marble-offer-act[data-act="variations"]').click();
-  assert.equal(await offerInput(page).textContent(), '');
-  await page.locator('.marble-offer-bubble').first().waitFor();
-});
-
-test('Sketch it opens the mode with the element marked, and says so on the page', async () => {
-  const page = await open();
-  await select(page, 'q1');
-  await handle(page).click();
-  await offerInput(page).waitFor();
-  await page.locator('.marble-offer-act[data-act="sketch"]').click();
-  await page.locator('.marble-marks-layer[data-describing]').waitFor({ state: 'attached' });
-  await page.locator('.marble-marks-notice', { hasText: 'Describe mode' }).waitFor();
-  assert.equal(await page.locator('.marble-marks-ring').isVisible(), true);
-  assert.deepEqual(await page.evaluate(() => window.marble.agent.context().selection), ['q1'], 'arrives with the element marked');
-  assert.equal(await page.locator('.marble-callout[data-offer]').count(), 0, 'the offer steps aside for the mode');
-  await page.locator('.marble-marks-notice button').click();
-  await page.waitForFunction(() => !document.querySelector('.marble-marks-layer[data-describing]'));
-});
-
-test('an offer nobody used goes with Escape or a click elsewhere', async () => {
-  const page = await open();
-  await select(page, 'q1');
-  await handle(page).click();
-  await offerInput(page).waitFor();
+  await lineInput(page).waitFor();
   await page.keyboard.press('Escape');
-  await page.waitForFunction(() => document.querySelectorAll('.marble-callout, .marble-callout-frame').length === 0);
+  await page.waitForFunction(() => document.querySelectorAll('.marble-line, .marble-line-scope, .marble-callout').length === 0);
   await select(page, 'q1');
   await handle(page).click();
-  await offerInput(page).waitFor();
+  await lineInput(page).waitFor();
   await page.mouse.click(5, 700);
-  await page.waitForFunction(() => document.querySelectorAll('.marble-callout, .marble-callout-frame').length === 0);
+  await page.waitForFunction(() => document.querySelectorAll('.marble-line, .marble-line-scope, .marble-callout').length === 0);
 });
 
 test('resting the pointer offers nothing until it is turned on in Agent settings › Chat', async () => {
@@ -244,21 +183,25 @@ test('resting the pointer offers nothing until it is turned on in Agent settings
   assert.ok(mark.x < li.x, 'the mark waits in the left margin');
   await page.mouse.move(mark.x + mark.width / 2, mark.y + mark.height / 2, { steps: 4 });
   await quiet.click();
-  await offerInput(page).waitFor();
-  assert.deepEqual(await page.evaluate(() => window.marble.agent.context().selection), ['q1'], 'the rested-on element is what the card is about');
+  await lineInput(page).waitFor();
+  assert.equal(await lineInput(page).getAttribute('data-placeholder'), 'Change this row');
+  assert.deepEqual(await page.evaluate(() => window.marble.agent.context().selection), ['q1'], 'the rested-on element is what the line is about');
   await page.keyboard.press('Escape');
   await page.evaluate(() => localStorage.removeItem('marble-ask-rest'));
 });
 
-test('⌘J with a selection summons a card; with nothing to ask about it opens the chat', async () => {
+test('⌘J with a selection opens the line on it; with nothing to ask about it opens the page\'s line, not the chat', async () => {
   const page = await open();
   await page.keyboard.press('Control+j');
-  await page.waitForFunction(() => document.querySelector('marble-agent-drawer')?.isOpen === true);
-  await page.evaluate(() => window.marble.agent.close?.() ?? dispatchEvent(new CustomEvent('marble:agent-close')));
-  await page.waitForFunction(() => document.querySelector('marble-agent-drawer')?.isOpen === false);
+  await line(page).waitFor();
+  assert.equal(await line(page).getAttribute('data-scope'), 'page');
+  assert.equal(await page.evaluate(() => document.querySelector('marble-agent-drawer')?.isOpen), false, 'the drawer stayed shut');
+  await page.keyboard.press('Escape');
+  await page.waitForFunction(() => !document.querySelector('.marble-line'));
   await select(page, 'p');
   await page.keyboard.press('Control+j');
-  await card(page).waitFor();
+  await lineInput(page).waitFor();
+  assert.equal(await lineInput(page).getAttribute('data-placeholder'), 'Change this paragraph');
   assert.equal(await page.evaluate(() => document.querySelector('marble-agent-drawer')?.isOpen), false, 'the drawer stayed shut');
 });
 
@@ -315,10 +258,10 @@ test('holding ⌥ points at nothing: it is the key that moves the caret by a wor
   await page.mouse.click(q2.x + 10, q2.y + q2.height / 2);
   await page.keyboard.up('Alt');
   await page.waitForTimeout(250);
-  assert.equal(await offerInput(page).count(), 0, '⌥-click is an ordinary click');
+  assert.equal(await line(page).count(), 0, '⌥-click is an ordinary click');
 });
 
-test('pointing outlines what the pointer is over with its name; [ widens it, and a click opens its card', async () => {
+test('pointing outlines what the pointer is over with its name; [ widens it, and a click opens the line on it', async () => {
   const page = await open();
   const q2 = await page.locator('[data-marble-id="q2"]').boundingBox();
   await startPointing(page);
@@ -330,30 +273,32 @@ test('pointing outlines what the pointer is over with its name; [ widens it, and
   assert.match(await page.locator('.marble-callout-pick-name').textContent(), /^List · /, '[ takes in the containing element');
   await page.keyboard.press('BracketRight');
   await page.mouse.click(q2.x + 10, q2.y + q2.height / 2);
-  await offerInput(page).waitFor();
-  assert.equal(await offerInput(page).getAttribute('data-placeholder'), 'Ask about this item…');
+  await lineInput(page).waitFor();
+  assert.equal(await lineInput(page).getAttribute('data-placeholder'), 'Change this row');
   assert.equal(await pick.count(), 0, 'one click, and pointing is over');
 });
 
-test('⇧-click while pointing adds the thing to the open card', async () => {
+test('⇧-click while pointing adds the thing to the open line', async () => {
   const page = await open();
   const q1 = await page.locator('[data-marble-id="q1"]').boundingBox();
   const q2 = await page.locator('[data-marble-id="q2"]').boundingBox();
   await startPointing(page);
-  await page.mouse.move(q1.x + 10, q1.y + q1.height / 2);
-  await page.keyboard.down('Shift');
-  await page.mouse.click(q1.x + 10, q1.y + q1.height / 2);
-  await offerInput(page).waitFor();
+  // The lower one first: the line hangs over what is under its thing.
   await page.mouse.move(q2.x + 10, q2.y + q2.height / 2);
+  await page.keyboard.down('Shift');
+  await page.mouse.click(q2.x + 10, q2.y + q2.height / 2);
+  await lineInput(page).waitFor();
+  await page.mouse.move(q1.x + 10, q1.y + q1.height / 2);
   await page.locator('.marble-callout-pick.is-adding').waitFor();
   assert.match(await page.locator('.marble-callout-pick-name').textContent(), /^\+ Item/);
-  await page.mouse.click(q2.x + 10, q2.y + q2.height / 2);
+  await page.mouse.click(q1.x + 10, q1.y + q1.height / 2);
   await page.keyboard.up('Shift');
-  await page.waitForFunction(() => document.querySelector('.marble-callout[data-offer] .marble-offer-input')?.dataset.placeholder === 'Ask about these 2 items…');
-  // The old frame fades out as the card is redrawn about both.
-  await page.waitForFunction(() => document.querySelectorAll('.marble-callout-frame:not(.is-out)').length === 2);
-  assert.equal(await page.locator('.marble-callout-frame.is-group:not(.is-out)').count(), 2, 'a line round each');
-  assert.deepEqual(await page.evaluate(() => window.marble.agent.context().selection), ['q1', 'q2']);
+  await page.waitForFunction(() => document.querySelector('.marble-line:not([data-state="sent"]):not([data-leaving]) .marble-line-input')?.dataset.placeholder === 'Change these 2 rows');
+  // One tint round both, the old one fading as the line is redrawn about them.
+  await page.waitForFunction(() => document.querySelectorAll('.marble-line-scope:not([data-state="out"])').length === 1);
+  const tint = await page.locator('.marble-line-scope:not([data-state="out"])').boundingBox();
+  assert.ok(tint.y < q1.y && tint.y + tint.height > q2.y + q2.height, 'the tint is round both');
+  assert.deepEqual(await page.evaluate(() => window.marble.agent.context().selection), ['q2', 'q1']);
 });
 
 test('Point at something in the tray names one thing with one click', async () => {
@@ -370,22 +315,22 @@ test('Point at something in the tray names one thing with one click', async () =
   await page.mouse.move(p.x + 10, p.y + p.height / 2);
   await page.locator('.marble-callout-pick:not([hidden])').waitFor();
   await page.mouse.click(p.x + 10, p.y + p.height / 2);
-  await offerInput(page).waitFor();
+  await lineInput(page).waitFor();
   assert.equal(await page.locator('.marble-callout-latch:not([hidden])').count(), 0, 'one click, then it is over');
 });
 
-test('⌘J with nothing selected asks about the block the caret is in, or what the pointer is over', async () => {
+test('⌘J with nothing selected is about the block the caret is in, or what the pointer is over', async () => {
   const page = await open();
   // The pointer, with no wait.
   const q1 = await page.locator('[data-marble-id="q1"]').boundingBox();
   await page.mouse.move(q1.x + 10, q1.y + q1.height / 2);
   await page.keyboard.press('Control+j');
-  await offerInput(page).waitFor();
-  assert.equal(await offerInput(page).getAttribute('data-placeholder'), 'Ask about this item…');
+  await lineInput(page).waitFor();
+  assert.equal(await lineInput(page).getAttribute('data-placeholder'), 'Change this row');
   assert.equal(await page.evaluate(() => document.querySelector('marble-agent-drawer')?.isOpen), false, 'the chat stays shut');
-  // Again, with a card waiting: it puts the card away, and nothing else.
+  // Again, with the line waiting: it puts the line away, and nothing else.
   await page.keyboard.press('Control+j');
-  await page.waitForFunction(() => !document.querySelector('.marble-callout[data-offer]'));
+  await page.waitForFunction(() => !document.querySelector('.marble-line'));
   assert.equal(await page.evaluate(() => document.querySelector('marble-agent-drawer')?.isOpen), false);
 
   // The caret, while typing.
@@ -397,18 +342,15 @@ test('⌘J with nothing selected asks about the block the caret is in, or what t
   });
   await page.mouse.move(2, 790);
   await page.keyboard.press('Control+j');
-  await offerInput(page).waitFor();
-  assert.equal(await offerInput(page).getAttribute('data-placeholder'), 'Ask about this paragraph…');
+  await lineInput(page).waitFor();
+  assert.equal(await lineInput(page).getAttribute('data-placeholder'), 'Change this paragraph');
   assert.deepEqual(await page.evaluate(() => window.marble.agent.context().selection), ['p']);
 });
 
-// A fresh card is the offer (agent-offer.js): its own light input sends the
-// first brief. After that the card is the callout conversation.
-const offerInput = (page) => page.locator('.marble-callout[data-offer] .marble-offer-input');
-const sendFromCard = async (page, prompt) => {
-  const fresh = await offerInput(page).count();
-  const editor = fresh ? offerInput(page) : card(page).locator('marble-conversation .editor');
-  await editor.click();
+// The line sends the first brief; after that it folds into the thing, and
+// what answers is the page changing.
+const sendFromLine = async (page, prompt) => {
+  await lineInput(page).click();
   await page.keyboard.type(prompt);
   await page.keyboard.press('Enter');
 };
@@ -438,23 +380,22 @@ const firstConversation = (page) => page.evaluate(async () => {
 const marks = (page) => page.locator('.marble-change-layer > *');
 const marksGone = (page) => page.waitForFunction(() => document.querySelector('.marble-change-layer')?.children.length === 0, null, { timeout: 5000 });
 
-test('a brief sent from the card carries the selection, is marked part by part, and ends with Undo, which brings the card back with variations first', async () => {
+test('a brief sent from the line carries the selection, is marked part by part, and leaves no card; its undo is tinted too', async () => {
   const page = await open();
   await select(page, 'q');
   await handle(page).click();
-  await sendFromCard(page, 'script:listing');
+  await sendFromLine(page, 'script:listing');
   await page.locator('.marble-change-tag').waitFor();
-  const { summary, detail } = await firstConversation(page);
+  const { detail } = await firstConversation(page);
   assert.deepEqual(detail.turns[0].context.selection, ['q'], 'the turn carries the selection');
   assert.equal(detail.turns[0].context.target, 'garden');
-
-  await page.locator('.marble-callout-status', { hasText: 'Add a question' }).waitFor();
   assert.equal(await page.locator('.marble-zone').count(), 0, 'the marks stand where the box was');
-  assert.ok(await page.locator('.marble-callout[data-live]').count(), 'the head pulses while the turn runs');
+  assert.equal(await page.locator('.marble-callout').count(), 0, 'no card on the work');
 
-  await page.locator('.marble-callout-status', { hasText: 'Changed 1 element' }).waitFor({ timeout: 15_000 });
+  await page.waitForFunction(() => document.querySelectorAll('[data-marble-id="q"] li').length === 3, null, { timeout: 15_000 });
+  await until(page, async () => (await window.marble.agent.conversations())[0]?.running === false, null, { timeout: 15_000 });
   await marksGone(page);
-  assert.equal(await page.locator('[data-marble-id="q"] li').count(), 3);
+  assert.equal(await line(page).count(), 0, 'a change that landed opens nothing');
 
   await page.evaluate(() => {
     window.__undoTinted = false;
@@ -462,53 +403,49 @@ test('a brief sent from the card carries the selection, is marked part by part, 
       if (document.querySelector('.marble-change-tint')) window.__undoTinted = true;
     }).observe(document.querySelector('.marble-change-layer'), { childList: true, subtree: true });
   });
-  await page.getByRole('button', { name: 'Undo this turn' }).click();
+  await page.evaluate(async () => {
+    const [s] = await window.marble.agent.conversations();
+    const d = await window.marble.agent.conversation(s.id);
+    await window.marble.agent.undo(d.turns.at(-1).id);
+  });
   await page.waitForFunction(() => document.querySelectorAll('[data-marble-id="q"] li').length === 2);
-  // Undo is a verdict on the change, not on the wish.
-  await offerInput(page).waitFor();
-  await page.locator('.marble-offer-bubble').first().waitFor();
-  assert.equal(await page.locator('.marble-offer-bubble').first().getAttribute('data-act'), 'variations');
-  assert.match(await page.locator('.marble-offer-bubble').first().innerText(), /Try 3 variations of this list/);
   // The undo is tinted where it lands, and leaves nothing behind.
   await page.waitForFunction(() => window.__undoTinted, null, { timeout: 5000 });
   await marksGone(page);
   assert.equal(await page.locator('.marble-zone').count(), 0);
-  const after = await page.evaluate(async (cid) => (await window.marble.agent.conversations()).find((s) => s.id === cid), summary.id);
-  assert.equal(after.needsReview, false, 'seeing it and undoing it reviewed the chat');
+  assert.equal(await page.locator('.marble-callout').count(), 0);
 });
 
-test('closing a live card leaves nothing but the marks, whose tag opens the drawer', async () => {
+test('a sent line leaves nothing but the marks, whose tag opens the drawer', async () => {
   const page = await open();
   await select(page, 'q');
   await handle(page).click();
-  await sendFromCard(page, 'script:hold');
+  await sendFromLine(page, 'script:hold');
   await page.locator('.marble-change-tint[data-id="q"]').waitFor();
-
-  await page.getByRole('button', { name: 'Close' }).click();
-  // Put away, not folded: no pill is left on the page, and the change's own
-  // tag stays because this tab asked for the work.
-  await page.waitForFunction(() => document.querySelectorAll('.marble-callout').length === 0);
+  // Folded, not parked: no line and no card are left on the page, and the
+  // change's own tag stays because this tab asked for the work.
+  await page.waitForFunction(() => document.querySelectorAll('.marble-callout, .marble-line').length === 0);
   await page.locator('.marble-change-tag button').click();
   await page.waitForFunction(() => document.querySelector('marble-agent-drawer')?.isOpen === true);
   await cancelLast(page);
 });
 
-test('a turn that touches nothing reads No changes', async () => {
+test('a turn that touches nothing says so in the line, with the words given back', async () => {
   const page = await open();
   await select(page, 'p');
   await handle(page).click();
-  await sendFromCard(page, 'script:quiet');
-  await page.locator('.marble-callout-status', { hasText: 'No changes' }).waitFor({ timeout: 10_000 });
-  assert.equal(await page.getByRole('button', { name: 'Undo this turn' }).count(), 0, 'nothing to undo');
-  await page.getByRole('button', { name: 'Mark reviewed and put the callout away' }).waitFor();
+  await sendFromLine(page, 'script:quiet');
+  await page.locator('.marble-line[data-state="cant"]').waitFor({ timeout: 10_000 });
+  assert.equal(await page.locator('.marble-line-said').innerText(), 'Nothing to change.');
+  assert.equal(await lineInput(page).textContent(), 'script:quiet');
+  assert.equal(await page.getByRole('button', { name: /undo/i }).count(), 0, 'nothing to undo');
 });
 
-
-test('a reload while the agent works rebuilds no card; the marks stay for the tab that asked', async () => {
+test('a reload while the agent works rebuilds no card and no line; the marks stay for the tab that asked', async () => {
   const page = await open();
   await select(page, 'q');
   await handle(page).click();
-  await sendFromCard(page, 'script:hold');
+  await sendFromLine(page, 'script:hold');
   await page.locator('.marble-change-tint[data-id="q"]').waitFor();
 
   await page.reload();
@@ -516,7 +453,7 @@ test('a reload while the agent works rebuilds no card; the marks stay for the ta
   await page.locator('.marble-change-tag').waitFor();
   await page.locator('.marble-change-tint[data-id="q"]').waitFor();
   await page.waitForTimeout(400);
-  assert.equal(await page.locator('.marble-callout').count(), 0, 'no card comes back on its own');
+  assert.equal(await page.locator('.marble-callout, .marble-line').count(), 0, 'no card or line comes back on its own');
   assert.equal(await page.locator('.marble-glints-host .glint').count(), 0, 'the marks already say it: no glint beside them');
   await cancelLast(page);
 });
@@ -543,22 +480,25 @@ test('a finished chat leaves no dot on the page: working agents are marked only 
   const page = await open();
   await select(page, 'p');
   await handle(page).click();
-  await sendFromCard(page, 'script:building');
-  await page.locator('.marble-callout-status', { hasText: 'Changed' }).waitFor({ timeout: 15_000 });
-  // While its card is on the page, the card says it: no dot.
+  await sendFromLine(page, 'script:building');
+  await until(page, async () => {
+    const [s] = await window.marble.agent.conversations();
+    return Boolean(s && s.running === false && (await window.marble.agent.conversation(s.id)).turns?.[0]?.status === 'completed');
+  }, null, { timeout: 15_000 });
+  // Asked from here, so its marks said it while it worked: no dot.
   assert.equal(await page.locator('.marble-glints-host .glint').count(), 0);
   await page.reload();
   await page.waitForFunction(() => Boolean(window.marble?.agent));
   await page.waitForTimeout(600);
   assert.equal(await page.locator('.marble-glints-host .glint').count(), 0, 'finished work waits in the chat button and the Agents page, not on the page');
-  assert.equal(await page.locator('.marble-callout').count(), 0, 'no pill, no card');
+  assert.equal(await page.locator('.marble-callout, .marble-line').count(), 0, 'no pill, no card, no line');
   const { summary } = await firstConversation(page);
   assert.equal(summary.needsReview, true, 'it is still unread; the page just does not say so');
 });
 
-test('a summoned callout starts a new conversation, and Open beside moves that chat to the drawer', async () => {
+test('a summoned line starts a new conversation, and the chat this tab was in stays where it was', async () => {
   const page = await open();
-  // The chat this tab was last in. Spawning at a selection must not pick it up.
+  // The chat this tab was last in. Asking at a selection must not pick it up.
   const earlier = await page.evaluate(async () => {
     const id = await window.marble.agent.start({ provider: 'fake' });
     await window.marble.agent.send(id, { prompt: 'script:quiet', target: 'garden' });
@@ -570,33 +510,31 @@ test('a summoned callout starts a new conversation, and Open beside moves that c
   });
   await select(page, 'q2');
   await handle(page).click();
-  await card(page).waitFor();
-  assert.equal(await page.locator('.marble-callout-tools button', { hasText: 'Continue in' }).count(), 0);
-  const convo = card(page).locator('marble-conversation');
-  assert.equal(await convo.getAttribute('conversation'), null);
-
-  await sendFromCard(page, 'script:quiet');
-  await page.locator('.marble-callout-status', { hasText: 'No changes' }).waitFor({ timeout: 10_000 });
-  const id = await convo.getAttribute('conversation');
-  assert.ok(id && id !== earlier, 'the brief is a new conversation');
-
-  await page.getByRole('button', { name: 'Open this chat on the side' }).click();
-  await page.waitForFunction(() => document.querySelector('marble-agent-drawer')?.isOpen === true);
-  assert.equal(
-    await page.evaluate(() => document.querySelector('marble-agent-drawer').shadowRoot.querySelector('marble-conversation').getAttribute('conversation')),
-    id,
-  );
-  // Moved to the side, the card leaves the page rather than folding on it.
-  await page.waitForFunction(() => document.querySelectorAll('.marble-callout').length === 0);
+  await sendFromLine(page, 'script:quiet');
+  await page.locator('.marble-line[data-state="cant"]').waitFor({ timeout: 10_000 });
+  const ids = await page.evaluate(async () => (await window.marble.agent.conversations()).map((c) => c.id));
+  assert.equal(ids.length, 2);
+  assert.ok(ids.some((id) => id !== earlier), 'the brief is a new conversation');
+  assert.equal(await page.evaluate(() => window.marble.agent.current()), earlier, 'the chat this tab was in is still the one it opens');
 });
+
+// The card is Describe mode's composer now (agent-marks.js borrows it).
+const describeCard = async (page, id) => {
+  const drawer = page.locator('marble-agent-drawer');
+  await drawer.locator('.launcher').hover();
+  await drawer.locator('.tool[data-tool="marks-describe"]').click();
+  await page.locator('.marble-marks-bar').waitFor();
+  const r = await page.locator(`[data-marble-id="${id}"]`).boundingBox();
+  await page.mouse.move(r.x - 6, r.y - 6);
+  await page.mouse.down();
+  await page.mouse.move(r.x + r.width + 6, r.y + r.height + 6, { steps: 4 });
+  await page.mouse.up();
+  await card(page).waitFor();
+};
 
 test('the corner buttons line up, and resting on one names it', async () => {
   const page = await open();
-  await select(page, 'h');
-  await handle(page).click();
-  // The corners belong to a card with a chat in it; the offer has none.
-  await sendFromCard(page, 'script:quiet');
-  await page.locator('.marble-callout-status', { hasText: 'No changes' }).waitFor({ timeout: 10_000 });
+  await describeCard(page, 'h');
   const side = page.getByRole('button', { name: 'Open this chat on the side' });
   const minimize = page.getByRole('button', { name: 'Close' });
   // Measured once the card has arrived: it grows in from .98.
@@ -621,26 +559,28 @@ test('the corner buttons line up, and resting on one names it', async () => {
 
 test('Open in Agents leaves for the Agents page with the chat open', async () => {
   const page = await open();
-  await select(page, 'h');
-  await handle(page).click();
-  await sendFromCard(page, 'script:quiet');
-  await page.locator('.marble-callout-status', { hasText: 'No changes' }).waitFor({ timeout: 10_000 });
+  await describeCard(page, 'h');
+  await card(page).locator('marble-conversation .editor').click();
+  await page.keyboard.type('script:quiet');
+  await card(page).locator('marble-conversation .send').click();
+  const inAgents = page.getByRole('button', { name: 'Open this chat on the Agents page' });
+  await inAgents.waitFor({ timeout: 10_000 });
   const { summary } = await firstConversation(page);
-  await page.getByRole('button', { name: 'Open this chat on the Agents page' }).click();
+  await inAgents.click();
   await page.waitForURL((url) => url.pathname.endsWith('/a/Agents'));
   await page.waitForFunction((cid) => document.querySelector(`marble-conversation[conversation="${cid}"]`) !== null, summary.id);
   assert.equal(new URL(page.url()).searchParams.has('open'), false, 'the parameter is spent');
 });
 
-test('Close puts the card away and leaves nothing on the page', async () => {
+test('Esc puts an answered line away and leaves nothing on the page, without reviewing the chat', async () => {
   const page = await open();
   await select(page, 'p');
   await handle(page).click();
-  await sendFromCard(page, 'script:quiet');
-  await page.locator('.marble-callout-status', { hasText: 'No changes' }).waitFor({ timeout: 10_000 });
+  await sendFromLine(page, 'script:quiet');
+  await page.locator('.marble-line[data-state="cant"]').waitFor({ timeout: 10_000 });
   const { summary } = await firstConversation(page);
-  await page.getByRole('button', { name: 'Close' }).click();
-  await page.waitForFunction(() => document.querySelectorAll('.marble-callout').length === 0);
+  await page.keyboard.press('Escape');
+  await page.waitForFunction(() => document.querySelectorAll('.marble-line, .marble-callout').length === 0);
   const after = await page.evaluate(async (cid) => (await window.marble.agent.conversations()).find((s) => s.id === cid), summary.id);
   assert.equal(after.needsReview, true, 'closing does not review the chat');
   // Put away, and finished: nothing is left on the page for it.
