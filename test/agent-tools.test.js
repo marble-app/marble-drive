@@ -306,6 +306,32 @@ test('undo looks before each batch and hands writeOps a matching after-presence'
   assert.deepEqual(presences[0], { stage: 'after', turn: turn.id, parts: ['h'] });
 });
 
+test('undoing a remove reinserts the element, and names its id in the presence frames', async () => {
+  const turn = await freshTurn();
+  await tools.call('read_document', { path: turn.target }, turn);
+  await tools.call('apply_ops', { path: turn.target, note: 'x', ops: [{ type: 'remove', id: 'q2' }] }, turn);
+  const looks = [];
+  const presences = [];
+  const recordingWriteOps = async (docPath, ops, options) => {
+    const result = await drive.writeOps(docPath, ops, options);
+    presences.push(options.presence);
+    return result;
+  };
+  const result = await undoTurn({
+    records: turn.undo,
+    writeOps: recordingWriteOps,
+    client: `agent-undo:${turn.conversationId}`,
+    turn: turn.id,
+    look: (docPath, ids, extra) => looks.push({ docPath, ids, extra }),
+  });
+  assert.equal(result.reverted, 1);
+  assert.equal(looks.length, 1, 'the inverse of a remove is still one look, even though its own op carries no id');
+  assert.deepEqual(looks[0].ids, ['q2']);
+  assert.deepEqual(looks[0].extra, { stage: 'before', turn: turn.id, parts: ['q2'] });
+  assert.deepEqual(presences[0], { stage: 'after', turn: turn.id, parts: ['q2'] });
+  assert.match(await drive.store.read(turn.target), /data-marble-id="q2">How\?</, 'the element itself came back');
+});
+
 test('a refusal only counts as a read for elements it showed in full', async () => {
   const turn = await freshTurn();
   const para = (id) => `<section data-marble-id="${id}">${Array.from({ length: 90 }, (_, i) => `<p data-marble-id="${id}p${i}">Paragraph ${i} of a long section, long enough to matter.</p>`).join('')}</section>`;

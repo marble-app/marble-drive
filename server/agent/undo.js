@@ -10,7 +10,7 @@
 // are `{ steps, restores }`. `normalizeUndo` reads both.
 
 import { applyOp } from '../engine.js';
-import { hashesOf } from './source.js';
+import { hashesOf, topLevelIds } from './source.js';
 
 export function normalizeUndo(saved) {
   if (!saved) return { steps: [], restores: [] };
@@ -69,7 +69,12 @@ export async function undoTurn({ records, restores = [], writeOps, restore, clie
         try {
           current = applyOp(current, step.inverse);
           ops.push(step.inverse);
-          if (step.inverse.id) ids.push(step.inverse.id);
+          // Undoing a `remove` reinserts the element: its inverse is an
+          // `insert` addressed by `parentId`/`beforeId`, with no top-level
+          // `.id` of its own — the id is inside `html`, the same place
+          // `partsOf` reads a fresh insert's roots from.
+          if (step.inverse.type === 'insert') ids.push(...topLevelIds(step.inverse.html));
+          else if (step.inverse.id) ids.push(step.inverse.id);
         } catch {
           skipped += 1;
         }
