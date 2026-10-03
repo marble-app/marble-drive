@@ -298,14 +298,40 @@
       announce();
     }
 
+    // Ruling R6: the caret is for one part. A turn that has touched more than
+    // one part (the host's count, or the parts its frames named), or says it
+    // will (a total, a reach), is a change of several parts, and those are
+    // marked part by part (change-marks.js). The caret lets go of it and does
+    // not take it back for the rest of that turn.
+    const wide = new Map();      // client -> the turn that is wider than one part
+    const touched = new Map();   // client -> { turn, ids }
+    function widens(client, detail) {
+      const turn = detail.turn;
+      if (!turn) return false;
+      if (wide.get(client) === turn) return true;
+      let seen = touched.get(client);
+      if (seen?.turn !== turn) touched.set(client, (seen = { turn, ids: new Set() }));
+      for (const id of Array.isArray(detail.parts) ? detail.parts : []) if (id) seen.ids.add(String(id));
+      const many = (Number.isFinite(detail.count) && detail.count > 1)
+        || (Number.isFinite(detail.total) && detail.total > 1)
+        || (Array.isArray(detail.reach) && detail.reach.length > 1)
+        || seen.ids.size > 1;
+      if (!many) return false;
+      wide.set(client, turn);
+      touched.delete(client);
+      return true;
+    }
+
     function onPresence(detail) {
       const client = detail?.client;
       if (!client || !String(client).startsWith('agent:')) return;
       if (!attended(client)) { if (agents.has(client)) end(client); return; }
       const ids = Array.isArray(detail.ids) ? detail.ids.filter(Boolean) : [];
+      if (detail.stage === 'end') { wide.delete(client); touched.delete(client); }
       if (!ids.length) { end(client); return; }
       const phase = detail.phase;
       if (phase === 'acting') { const a = agents.get(client); if (a) { a.away = true; paintCaret(a); announce(); } return; }
+      if (widens(client, detail)) { if (agents.has(client)) end(client); return; }
       let a = agents.get(client);
       if (phase === 'working' || !a) {
         const block = oneBlock(ids);

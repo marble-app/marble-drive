@@ -814,7 +814,9 @@
       const zones = [];
       for (const detail of presence.values()) {
         if (!isAgent(detail.client)) continue;
-        if (String(detail.client).startsWith('agent-undo:')) continue;
+        // An undo is tinted where it lands (change-marks.js), and has no chat
+        // to offer; a page without that layer keeps its box.
+        if (window.marbleChange && String(detail.client).startsWith('agent-undo:')) continue;
         // A client mid-press has a ring, and the ring carries the label. A box
         // around the button as well would say the agent is rewriting it.
         if (acts.has(detail.client)) continue;

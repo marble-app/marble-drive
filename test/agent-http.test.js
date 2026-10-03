@@ -362,10 +362,16 @@ test('the conversation stream replays what happened and follows what happens nex
   await finished(conversationId, turnId);
 });
 
+// What a tab joining now is told is standing on a document: an undo that has
+// finished is not one of those things.
+const undoFrames = async (docPath) => (await api('GET', `/presence?app=${docPath}`)).body.frames
+  .filter((frame) => String(frame.client).startsWith('agent-undo:'));
+
 test('undo over HTTP puts the heading back, once', async () => {
   const first = await api('POST', `/agent/turns/${edited.turnId}/undo`);
   assert.deepEqual(first.body, { reverted: 1, kept: 0, errors: [] });
   assert.match(await drive.store.read('garden'), />Research Garden</);
+  assert.deepEqual(await undoFrames('garden'), [], 'a finished undo leaves no presence standing');
   const again = await api('POST', `/agent/turns/${edited.turnId}/undo`);
   assert.equal(again.status, 409);
   const { body } = await api('GET', `/agent/conversations/${edited.conversationId}`);
@@ -1026,9 +1032,12 @@ test('undo drops a turn from the review list, and redo brings it — and the row
   assert.deepEqual((await api('GET', '/agent/review?path=meadow2')).body.turns, []);
   assert.doesNotMatch(await drive.store.read('meadow2'), /r2/);
 
+  assert.deepEqual(await undoFrames('meadow2'), [], 'a finished undo leaves no presence standing');
+
   const redone = await api('POST', `/agent/turns/${run.turnId}/redo`);
   assert.equal(redone.status, 200);
   assert.deepEqual(redone.body, { reverted: 2, kept: 0 });
+  assert.deepEqual(await undoFrames('meadow2'), [], 'nor does a finished redo');
   assert.match(await drive.store.read('meadow2'), /r2/, 'the row an agent added is back in the file');
 
   const afterRedo = await api('GET', '/agent/review?path=meadow2');

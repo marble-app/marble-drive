@@ -23,6 +23,34 @@ const UNION_LIMIT = 60;
 
 const ID_ATTR = 'data-marble-id';
 
+// A fragment is parsed as a whole document, and the HTML parser drops what
+// cannot stand in a body on its own: a <tr> outside a table, a <td> outside a
+// row, a <tbody> outside a table. So a fragment is read inside the elements its
+// parent needs around it. The wrappers carry no ids, so they never become a
+// part; the fragment's own bytes, and so its hashes, are unchanged by them.
+const CONTEXT = {
+  table: ['<table>', '</table>'],
+  thead: ['<table><thead>', '</thead></table>'],
+  tbody: ['<table><tbody>', '</tbody></table>'],
+  tfoot: ['<table><tfoot>', '</tfoot></table>'],
+  tr: ['<table><tbody><tr>', '</tr></tbody></table>'],
+  colgroup: ['<table><colgroup>', '</colgroup></table>'],
+  select: ['<select>', '</select>'],
+  optgroup: ['<select><optgroup>', '</optgroup></select>'],
+  datalist: ['<datalist>', '</datalist>'],
+};
+// When the parent is not known, the fragment's first tag says what it needs.
+const PARENT_OF = {
+  tr: 'tbody', td: 'tr', th: 'tr', thead: 'table', tbody: 'table', tfoot: 'table',
+  caption: 'table', colgroup: 'table', col: 'colgroup', option: 'select', optgroup: 'select',
+};
+function inContext(html, parentTag) {
+  const first = /^\s*<([a-zA-Z][\w-]*)/.exec(String(html))?.[1]?.toLowerCase();
+  const tag = CONTEXT[parentTag] ? parentTag : PARENT_OF[first] ?? null;
+  const wrap = tag ? CONTEXT[tag] : null;
+  return wrap ? `${wrap[0]}${html}${wrap[1]}` : String(html);
+}
+
 const idAttrOf = (node) => (node.attrs ?? []).find((a) => a.name === ID_ATTR)?.value ?? null;
 
 /** For each id, every ancestor (by data-marble-id) above it in `tree`. */
@@ -71,8 +99,9 @@ function innerOf(outerHtml) {
   return outerHtml.slice(openEnd + 1, closeStart);
 }
 
-function setInnerParts(source, op) {
-  const { id, html } = op;
+function setInnerParts(source, op, tag) {
+  const { id } = op;
+  const html = inContext(op.html, tag);
   let outer;
   try {
     outer = sliceOf(source, id).html;
@@ -116,10 +145,10 @@ function partsForOp(source, op, tagById) {
       const tag = tagById.get(op.id);
       if (tag === 'style') return { parts: [op.id], kind: 'look' };
       if (tag === 'script') return { parts: [op.id], kind: 'attr' };
-      return setInnerParts(source, op);
+      return setInnerParts(source, op, tag);
     }
     case 'insert': {
-      const roots = topLevelIds(op.html);
+      const roots = topLevelIds(inContext(op.html, tagById.get(op.parentId)));
       return {
         parts: roots,
         inserts: [{ parentId: op.parentId, beforeId: op.beforeId ?? null, ids: roots }],

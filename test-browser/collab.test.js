@@ -470,6 +470,17 @@ test('an undo draws no zone, so it offers no chat', async () => {
   assert.equal(await page.getByRole('button', { name: 'Open the conversation working here' }).count(), 0);
 });
 
+test('on a page with its own conversation UI, where nothing tints parts, an undo still gets its box', async () => {
+  await host.reset();
+  const { page } = await host.newPage({ attending: FOLLOWED });
+  await page.goto(`${host.base}/a/custom`);
+  await page.waitForFunction(() => document.documentElement.classList.contains('marble-collab-host'));
+  assert.equal(await page.evaluate(() => Boolean(window.marbleChange)), false, 'no marks layer here');
+  await paint(page, { client: 'agent-undo:c1', ids: ['p'], phase: 'writing', stage: 'before', turn: 'c1-t1', parts: ['p'] });
+  await page.locator('.marble-zone').waitFor();
+  assert.equal(await page.getByRole('button', { name: 'Open the conversation working here' }).count(), 0, 'and still offers no chat');
+});
+
 test('arriving with #at= scrolls to the work, and spends the hash', async () => {
   await host.reset();
   const { page } = await host.newPage({ attending: FOLLOWED });

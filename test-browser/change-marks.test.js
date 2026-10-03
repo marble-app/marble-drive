@@ -44,6 +44,30 @@ const DEEP = `<!doctype html>
 </body></html>
 `;
 
+// Three questions, each one line of words: a turn that rewrites all three is a
+// change of three parts, not words in one block (ruling R6).
+const LINES = `<!doctype html>
+<html><head><meta charset="utf-8"><title>Questions</title>
+<style>body { font: 15px/1.5 system-ui, sans-serif; margin: 40px; }</style></head>
+<body data-marble-id="b">
+  <h1 data-marble-id="h">Questions</h1>
+  <ul data-marble-id="u">
+    <li data-marble-id="w1">Why do people stop using a tool?</li>
+    <li data-marble-id="w2">What makes an interface feel alive?</li>
+    <li data-marble-id="w3">Who is the page for?</li>
+  </ul>
+</body></html>
+`;
+
+// A long list, for how much painting a big change costs.
+const LONG = `<!doctype html>
+<html><head><meta charset="utf-8"><title>Long list</title>
+<style>body { font: 15px/1.5 system-ui, sans-serif; margin: 40px; } li { padding: 2px 0; }</style></head>
+<body data-marble-id="b">
+  <ul data-marble-id="u">${Array.from({ length: 150 }, (_, i) => `<li data-marble-id="x${i}"><b>Paper ${i + 1}</b> <button>Unread</button></li>`).join('')}</ul>
+</body></html>
+`;
+
 const due = (id, value) => ({ type: 'setAttr', id, name: 'data-due', value });
 const read = (path = 'list') => ({ call: 'read_document', args: { path } });
 const batch = (args, path = 'list') => ({ call: 'apply_ops', args: { path, ...args } });
@@ -86,6 +110,26 @@ const SCRIPTS = {
     { sleep: 1500 },
     { say: 'Done.' },
   ],
+  lines: [
+    read('lines'),
+    batch({ note: 'Make each question shorter.', ops: [{ type: 'setText', id: 'w1', text: 'Why stop using a tool?' }] }, 'lines'),
+    { sleep: 400 },
+    batch({ note: 'Make each question shorter.', ops: [{ type: 'setText', id: 'w2', text: 'What makes it feel alive?' }] }, 'lines'),
+    { sleep: 400 },
+    batch({ note: 'Make each question shorter.', ops: [{ type: 'setText', id: 'w3', text: 'Who is it for?' }] }, 'lines'),
+    { sleep: 600 },
+    { say: 'Done.' },
+  ],
+  linesKnown: [
+    read('lines'),
+    batch({ note: 'Make each question shorter.', total: 3, ops: [{ type: 'setText', id: 'w1', text: 'Why stop using a tool?' }] }, 'lines'),
+    { sleep: 400 },
+    batch({ note: 'Make each question shorter.', ops: [{ type: 'setText', id: 'w2', text: 'What makes it feel alive?' }] }, 'lines'),
+    { sleep: 400 },
+    batch({ note: 'Make each question shorter.', ops: [{ type: 'setText', id: 'w3', text: 'Who is it for?' }] }, 'lines'),
+    { sleep: 600 },
+    { say: 'Done.' },
+  ],
   slow: [
     read(),
     batch({ note: 'Add a due date to each row.', total: 3, ops: [due('r1', 'Oct 9')] }),
@@ -97,7 +141,7 @@ const SCRIPTS = {
   ],
 };
 
-const host = await startDrive({ scripts: SCRIPTS, documents: { list: LIST, deep: DEEP, garden: GARDEN } });
+const host = await startDrive({ scripts: SCRIPTS, documents: { list: LIST, deep: DEEP, garden: GARDEN, lines: LINES, long: LONG } });
 test.after(() => host.close());
 
 const pages = [];
@@ -270,6 +314,20 @@ test('stage notes become step tiles, and resting on the tag opens what was asked
   assert.match(text, /date the rows/i);
   assert.match(text, /\d:\d\d/);
   assert.doesNotMatch(text, /agent/i);
+  // The rule between the ask and its steps is the page's grey line, not a
+  // coloured edge.
+  const rule = await page.evaluate(() => {
+    const list = document.querySelector('.marble-change-steplist');
+    const probe = document.createElement('i');
+    probe.style.color = 'var(--change-line)';
+    document.querySelector('.marble-change-layer').append(probe);
+    const line = getComputedStyle(probe).color;
+    probe.remove();
+    const css = getComputedStyle(list);
+    return { top: css.borderTopColor, line, sides: [css.borderLeftWidth, css.borderRightWidth, css.borderBottomWidth] };
+  });
+  assert.equal(rule.top, rule.line);
+  assert.deepEqual(rule.sides, ['0px', '0px', '0px']);
   await page.mouse.move(5, 5);
   await ended(page);
 });
@@ -543,9 +601,128 @@ test('a press stays collab’s ring, and work with nothing of it here draws noth
   await settle();
   const { page } = await open({ attending: ['c1', 'c2'] });
   await frame(page, { client: 'agent:c1', ids: ['go'], phase: 'acting', note: 'Pressing Sort', turn: 'c1-t1' });
+  await page.evaluate(() => new Promise(requestAnimationFrame));
   assert.equal(await page.locator('.marble-act').count(), 1);
   assert.equal(await page.locator('.marble-change-layer > *').count(), 0);
   await frame(page, { client: 'agent:c2', ids: ['nowhere'], phase: 'writing', stage: 'before', turn: 'c2-t1', parts: ['nowhere'], kind: 'attr', count: 1 });
   await page.evaluate(() => new Promise(requestAnimationFrame));
   assert.equal(await page.locator('.marble-change-layer > *').count(), 0);
+});
+
+// ------------------------------------------------------------ fix round 1
+
+const caretUp = (page) => page.evaluate(() => document.querySelectorAll('.marble-text-caret:not([hidden])').length);
+
+test('a turn that rewrites three one-line rows is marked part by part and counted, not typed at a caret', async () => {
+  await settle();
+  const id = await newChat();
+  const { page } = await open({ doc: 'lines', attending: [id] });
+  await record(page);
+  await page.evaluate(() => {
+    window.__caretLater = 0;
+    document.addEventListener('marble:presence', (event) => {
+      if (event.detail?.stage !== 'before' || !(event.detail.count > 1)) return;
+      requestAnimationFrame(() => { window.__caretLater += document.querySelectorAll('.marble-text-caret:not([hidden])').length; });
+    });
+  });
+  await sendTurn(id, 'script:lines Make each question shorter', 'lines');
+  await ended(page);
+  const seen = await recorded(page);
+  assert.ok(seen.said.includes('Rewriting 2 rows') && seen.said.includes('Rewriting 3 rows'), `said ${JSON.stringify(seen.said)}`);
+  assert.equal(seen.said.at(-1), '3 changed');
+  assert.ok(seen.states.w2?.includes('now') && seen.states.w3?.includes('now'), 'the later rows were tinted');
+  assert.equal(await page.evaluate(() => window.__caretLater), 0, 'once a second row is touched, the caret lets go');
+});
+
+test('a turn that says it will touch three rows is marked from its first row, with no caret at all', async () => {
+  await settle();
+  const id = await newChat();
+  const { page } = await open({ doc: 'lines', attending: [id] });
+  await record(page);
+  await page.evaluate(() => {
+    window.__carets = 0;
+    new MutationObserver(() => { window.__carets += document.querySelectorAll('.marble-text-caret:not([hidden])').length; })
+      .observe(document.documentElement, { subtree: true, childList: true, attributes: true });
+  });
+  await sendTurn(id, 'script:linesKnown Make each question shorter', 'lines');
+  await ended(page);
+  const seen = await recorded(page);
+  assert.ok(seen.said.includes('Rewriting 1 of 3 rows'), `said ${JSON.stringify(seen.said)}`);
+  assert.ok(seen.states.w1?.includes('now'), 'the first row was tinted');
+  assert.equal(await page.evaluate(() => window.__carets), 0);
+});
+
+test('a change of 150 parts paints once a frame, measuring each part at most once a paint', async () => {
+  await settle();
+  const { page } = await open({ doc: 'long', attending: ['c1'] });
+  const seen = await page.evaluate(async () => {
+    const ids = Array.from({ length: 150 }, (_, i) => `x${i}`);
+    const fire = (d) => document.dispatchEvent(new CustomEvent('marble:presence', { detail: d }));
+    const before = window.marbleChange.stats();
+    fire({ client: 'agent:c1', ids: [], phase: 'working', stage: 'start', turn: 'c1-t1', prompt: 'Date them all' });
+    for (let b = 0; b < 15; b += 1) {
+      const parts = ids.slice(b * 10, b * 10 + 10);
+      const d = {
+        client: 'agent:c1', ids: parts, phase: 'writing', note: 'Date them.', turn: 'c1-t1', stage: 'before', parts, reach: ids,
+        kind: 'attr', count: (b + 1) * 10, total: 150, step: null, inserts: [], removes: [], moves: [],
+      };
+      fire(d);
+      document.dispatchEvent(new CustomEvent('marble:ops', { detail: { client: 'agent:c1', ops: [] } }));
+      fire({ ...d, stage: 'after' });
+    }
+    const heard = window.marbleChange.stats();
+    await new Promise(requestAnimationFrame);
+    await new Promise(requestAnimationFrame);
+    const painted = window.marbleChange.stats();
+    return {
+      whileHeard: heard.renders - before.renders,
+      painted: painted.renders - heard.renders,
+      rects: painted.rects - heard.rects,
+      styles: painted.styles - before.styles,
+      dots: document.querySelectorAll('.marble-change-dot').length,
+    };
+  });
+  assert.equal(seen.whileHeard, 0, 'nothing is painted while the frames are being heard');
+  assert.ok(seen.painted >= 1 && seen.painted <= 2, `one paint a frame (${seen.painted})`);
+  assert.ok(seen.rects <= seen.painted * 160, `each part measured at most once a paint (${seen.rects} rects in ${seen.painted} paints)`);
+  assert.ok(seen.styles <= 160, `what a part looks like is read once (${seen.styles})`);
+  assert.equal(seen.dots, 150);
+  const start = await page.evaluate(() => window.marbleChange.stats().renders);
+  await frame(page, { client: 'agent:c1', ids: [], stage: 'end', turn: 'c1-t1', done: { status: 'completed', changed: 150, added: 0, removed: 0 } });
+  await layerEmpty(page, 5000);
+  const through = await page.evaluate((n) => window.marbleChange.stats().renders - n, start);
+  assert.ok(through <= 40, `landing, lifting and going take a bounded number of paints (${through})`);
+});
+
+test('a change put out of mind mid-way still lets go of its marks at its end', async () => {
+  await settle();
+  const { page } = await open({ attending: ['c1'] });
+  await frame(page, before({ parts: ['r1'] }));
+  await page.locator('.marble-change-tint[data-id="r1"]').waitFor();
+  await page.evaluate(() => sessionStorage.setItem('marble-attending', '[]'));
+  await frame(page, { client: 'agent:c1', ids: [], stage: 'end', turn: 'c1-t1', done: { status: 'completed', changed: 1, added: 0, removed: 0 } });
+  assert.deepEqual(await page.evaluate(() => window.__ends.map((e) => e.turn)), ['c1-t1']);
+  await layerEmpty(page, 3500);
+
+  // And a frame from a chat no longer followed takes its run off the page.
+  await page.evaluate(() => sessionStorage.setItem('marble-attending', JSON.stringify(['c1'])));
+  await frame(page, before({ turn: 'c1-t2', parts: ['r2'] }));
+  await page.locator('.marble-change-tint[data-id="r2"]').waitFor();
+  await page.evaluate(() => sessionStorage.setItem('marble-attending', '[]'));
+  await frame(page, before({ turn: 'c1-t2', parts: ['r3'], count: 2 }));
+  await layerEmpty(page, 1000);
+  assert.equal(await page.evaluate(() => window.marbleChange.claims('agent:c1')), false);
+});
+
+test('an undo whose last frames never come lifts its marks after a while, and lets go', async () => {
+  await settle();
+  const { page } = await open({ attending: [] });
+  await frame(page, { client: 'agent-undo:c1', ids: ['r1'], phase: 'writing', stage: 'before', turn: 'c1-t1', parts: ['r1'] });
+  await page.locator('.marble-change-tint[data-state="now"]').waitFor();
+  assert.equal(await page.evaluate(() => window.marbleChange.claims('agent-undo:c1')), true);
+  await page.waitForTimeout(4000);
+  assert.equal(await page.locator('.marble-change-tint[data-state="now"]').count(), 1, 'it waits a while for the rest of the undo');
+  await layerEmpty(page, 8000);
+  assert.equal(await page.evaluate(() => window.marbleChange.claims('agent-undo:c1')), false);
+  assert.deepEqual(await page.evaluate(() => window.marbleChange.runs()), []);
 });

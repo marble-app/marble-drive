@@ -456,6 +456,12 @@ test('a brief sent from the card carries the selection, is marked part by part, 
   await marksGone(page);
   assert.equal(await page.locator('[data-marble-id="q"] li').count(), 3);
 
+  await page.evaluate(() => {
+    window.__undoTinted = false;
+    new MutationObserver(() => {
+      if (document.querySelector('.marble-change-tint')) window.__undoTinted = true;
+    }).observe(document.querySelector('.marble-change-layer'), { childList: true, subtree: true });
+  });
   await page.getByRole('button', { name: 'Undo this turn' }).click();
   await page.waitForFunction(() => document.querySelectorAll('[data-marble-id="q"] li').length === 2);
   // Undo is a verdict on the change, not on the wish.
@@ -464,6 +470,7 @@ test('a brief sent from the card carries the selection, is marked part by part, 
   assert.equal(await page.locator('.marble-offer-bubble').first().getAttribute('data-act'), 'variations');
   assert.match(await page.locator('.marble-offer-bubble').first().innerText(), /Try 3 variations of this list/);
   // The undo is tinted where it lands, and leaves nothing behind.
+  await page.waitForFunction(() => window.__undoTinted, null, { timeout: 5000 });
   await marksGone(page);
   assert.equal(await page.locator('.marble-zone').count(), 0);
   const after = await page.evaluate(async (cid) => (await window.marble.agent.conversations()).find((s) => s.id === cid), summary.id);

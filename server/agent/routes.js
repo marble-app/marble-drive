@@ -745,6 +745,15 @@ export function createAgentRoutes({ store, runner, tools, hub, providers, writeO
           throw err;
         }
       }
+      // An undo's looks are over when the undo is: each path it wrote to
+      // gets an empty look, so a tab that opens later is not told an undo
+      // is still standing on the document (/presence keeps the last look).
+      const endUndoLooks = (saved, client, turnIdOfUndo) => {
+        if (!onLook) return;
+        for (const docPath of new Set(saved.steps.map((record) => record?.path).filter(Boolean))) {
+          onLook(docPath, [], client, { stage: 'end', turn: turnIdOfUndo });
+        }
+      };
       if (action === '/undo' && method === 'POST') {
         const turn = await store.turn(turnId);
         if (!turn) return json(res, 404, { error: `no turn "${turnId}"` });
@@ -765,7 +774,7 @@ export function createAgentRoutes({ store, runner, tools, hub, providers, writeO
             turn: turn.id,
             look: onLook ? (docPath, ids, extra) => onLook(docPath, ids, client, extra) : null,
             saveRedo: (id, record) => store.saveRedo(id, record),
-          });
+          }).finally(() => endUndoLooks(saved, client, turn.id));
           await store.updateTurn(turnId, { undoneAt: Date.now() });
           await publishSummary(
             turn.conversationId,
@@ -795,7 +804,7 @@ export function createAgentRoutes({ store, runner, tools, hub, providers, writeO
             client,
             turn: turn.id,
             look: onLook ? (docPath, ids, extra) => onLook(docPath, ids, client, extra) : null,
-          });
+          }).finally(() => endUndoLooks(saved, client, turn.id));
           await store.updateTurn(turnId, { undoneAt: null });
           await store.deleteRedo(turnId);
           await publishSummary(

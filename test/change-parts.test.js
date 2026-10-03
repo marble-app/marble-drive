@@ -32,3 +32,25 @@ test('parseStep reads the stage out of a note', () => {
   assert.deepEqual(parseStep('step 1/3 — read it'), { n: 1, of: 3, text: 'read it' });
   assert.equal(parseStep('Rename the heading.'), null);
 });
+
+// A fragment that cannot stand in a document body on its own — a row outside
+// a table, a cell outside a row — is read inside the elements its parent
+// needs around it, so the parts it adds are named by their own ids.
+const TABLE = `<!doctype html><html><head></head><body data-marble-id="b">
+<table data-marble-id="t"><tbody data-marble-id="tb"><tr data-marble-id="r1"><td data-marble-id="c1">A</td></tr></tbody></table>
+<select data-marble-id="sel"><option data-marble-id="o1">One</option></select></body></html>`;
+
+test('an inserted table row is named by its own id', () => {
+  const r = partsOf(TABLE, [{ type: 'insert', parentId: 'tb', beforeId: null, html: '<tr data-marble-id="r2"><td data-marble-id="c2">B</td></tr>' }]);
+  assert.deepEqual(r.parts, ['r2']);
+  assert.deepEqual(r.inserts, [{ parentId: 'tb', beforeId: null, ids: ['r2'] }]);
+  assert.equal(r.kind, 'structure');
+});
+test('an inserted cell, and an inserted option, are named by their own ids', () => {
+  assert.deepEqual(partsOf(TABLE, [{ type: 'insert', parentId: 'r1', beforeId: null, html: '<td data-marble-id="c9">C</td>' }]).parts, ['c9']);
+  assert.deepEqual(partsOf(TABLE, [{ type: 'insert', parentId: 'sel', beforeId: null, html: '<option data-marble-id="o2">Two</option>' }]).parts, ['o2']);
+});
+test('setInner on a table body narrows to the row that changed, not its cells', () => {
+  const r = partsOf(TABLE, [{ type: 'setInner', id: 'tb', html: '<tr data-marble-id="r1"><td data-marble-id="c1">A</td></tr><tr data-marble-id="r2"><td data-marble-id="c2">B</td></tr>' }]);
+  assert.deepEqual(r.parts, ['r2']);
+});

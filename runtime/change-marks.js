@@ -26,9 +26,9 @@
 // stays on the page. Everything is transient chrome in one fixed layer;
 // nothing here is filed as an op. Only work this tab is following is drawn
 // (a chat nobody here follows is a glint, agent-glints.js); an undo is drawn
-// as tints, with no tag. Work inside one block of words is the caret's
-// (agent-text.js), and a press is collab.js's ring. What this layer draws,
-// the zone does not (`claims`).
+// as tints, with no tag. A change of one part inside one block of words is
+// the caret's (agent-text.js, rulings R2 and R6), and a press is collab.js's
+// ring. What this layer draws, the zone does not (`claims`).
 
 (() => {
   const TRANSIENT = 'data-marble-transient';
@@ -45,6 +45,8 @@
   const EASE = 'cubic-bezier(.22, 1, .36, 1)';
   const stillness = matchMedia('(prefers-reduced-motion: reduce)');
   const SKIP = new Set(['HTML', 'BODY', 'HEAD', 'STYLE', 'SCRIPT', 'LINK', 'META', 'TITLE', 'TEMPLATE', 'NOSCRIPT']);
+  const UNDO_IDLE = 8000;    // ms an undo's marks wait for its next frame before they lift
+  const RAIL_MAX = 400;      // parts the rail measures in one paint
 
   const STYLE = `
     .marble-change-layer { position: fixed; inset: 0; pointer-events: none; z-index: 2147482900;
@@ -126,8 +128,9 @@
     .marble-change-ask { margin: 0; font-weight: 600; overflow-wrap: anywhere; }
     .marble-change-ask:empty { display: none; }
     .marble-change-status time { display: block; margin-top: 3px; color: var(--change-muted); font-variant-numeric: tabular-nums; }
+    /* A rule in the page's grey line, between what was asked and its steps. */
     .marble-change-steplist { list-style: none; display: grid; gap: 6px; margin: 9px 0 0; padding: 9px 0 0;
-      border-top: 1px solid color-mix(in srgb, var(--change-ink) 20%, transparent); }
+      border-top: 1px solid var(--change-line); }
     .marble-change-steplist:empty { display: none; }
     .marble-change-steplist > li { display: flex; align-items: center; gap: 8px; color: var(--change-faint); }
     .marble-change-steplist .mark { flex: none; box-sizing: border-box; display: grid; place-items: center; width: 10px; height: 10px; border-radius: 50%;
@@ -197,6 +200,7 @@
     return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`;
   };
 
+
   const boot = (marble) => {
     const agent = marble?.agent;
     if (!agent || !marble.app) return;
@@ -222,6 +226,14 @@
 
     const byId = (id) => (id ? (marble.byId?.(id) ?? document.querySelector(`[data-marble-id="${CSS.escape(id)}"]`)) : null);
     const drawable = (el) => Boolean(el?.isConnected && !SKIP.has(el.tagName) && !el.closest(`[${TRANSIENT}]`));
+    /** A holder's element, kept between paints and looked up again only once
+     *  it has left the page (a part replaced under the same id). */
+    function resolve(holder) {
+      const el = holder.node;
+      if (el?.isConnected && el.getAttribute('data-marble-id') === holder.id) return el;
+      holder.node = byId(holder.id);
+      return holder.node;
+    }
     const conversationOf = (client) => /^agent(?:-undo)?:(.+)$/.exec(String(client ?? ''))?.[1] ?? null;
     const isUndo = (client) => String(client ?? '').startsWith('agent-undo:');
     // A chat this tab is following: asked from here, or opened to follow.
@@ -236,17 +248,6 @@
     // change's tag. Nothing of this layer is drawn for it meanwhile.
     const inText = (client) => Boolean(window.marbleText?.claims?.(client));
     const still = () => stillness.matches;
-
-    /** The person's hand: focus in the part, or their caret in it. */
-    function handIn(el) {
-      const active = document.activeElement;
-      if (active && active !== document.body && active !== document.documentElement
-        && !active.closest?.(`[${TRANSIENT}]`) && el.contains(active)) return true;
-      const sel = getSelection?.();
-      const node = sel?.rangeCount ? sel.anchorNode : null;
-      const at = node?.nodeType === 1 ? node : node?.parentElement;
-      return Boolean(at?.isContentEditable && el.contains(at));
-    }
 
     // ------------------------------------------------------------ state
 
@@ -264,7 +265,7 @@
         prompt: '',
         read: new Set(),
         reading: false,
-        scope: new Map(),     // id -> { id, state: 'soon'|'lift', el, delay }
+        scope: new Map(),     // id -> { id, state: 'soon'|'lift', el }
         parts: new Map(),     // id -> { id, state: 'soon'|'now'|'landed', lifted, dotted, unit, delay, tint, dot }
         reachKey: '',
         many: false,
@@ -274,6 +275,7 @@
         step: null,
         steps: new Map(),     // n -> what the note called it
         hang: null,
+        hangHolder: null,
         hangBox: null,
         tagOn: null,
         tag: null,
@@ -283,6 +285,7 @@
         gone: false,
         done: null,
         drawn: false,
+        idle: 0,
         timers: new Set(),
       };
     }
@@ -293,10 +296,11 @@
         if (runs.get(run.client) === run) fn();
       }, ms);
       run.timers.add(timer);
+      return timer;
     }
 
     function addPart(run, id, state, delay = 0) {
-      const part = { id, state, lifted: false, dotted: run.many, unit: null, delay, tint: null, dot: null };
+      const part = { id, state, lifted: false, dotted: run.many, unit: null, delay, tint: null, dot: null, node: null };
       run.parts.set(id, part);
       return part;
     }
@@ -305,7 +309,7 @@
       for (const mark of run.scope.values()) {
         if (mark.state === 'lift') continue;
         mark.state = 'lift';
-        after(run, GONE, () => { run.scope.delete(mark.id); mark.el?.remove(); render(); });
+        after(run, GONE, () => { run.scope.delete(mark.id); mark.el?.remove(); schedule(); });
       }
     }
 
@@ -313,17 +317,30 @@
       const part = run.parts.get(id);
       if (!part || part.state === 'landed') return;
       part.state = 'landed';
-      after(run, still() ? STILL : LIFT, () => { part.lifted = true; render(); });
+      after(run, still() ? STILL : LIFT, () => { part.lifted = true; schedule(); });
     }
 
-    function land(run, batch, { quiet = false } = {}) {
+    function land(run, batch) {
       if (batch.landed) return;
       batch.landed = true;
       batch.played = true;
       for (const id of batch.parts) landPart(run, id);
       run.batches = run.batches.filter((b) => b !== batch);
       document.dispatchEvent(new CustomEvent('marble-change:landed', { detail: { client: run.client, turn: run.turn, ids: [...batch.parts] } }));
-      if (!quiet) render();
+      schedule();
+    }
+
+    /** An undo has no end of its own to wait for if its last frames never
+     *  come: a while after the last one, its marks lift anyway. */
+    function touch(run) {
+      if (!run.undo) return;
+      clearTimeout(run.idle);
+      run.timers.delete(run.idle);
+      run.idle = after(run, UNDO_IDLE, () => {
+        for (const batch of [...run.batches]) land(run, batch);
+        for (const id of run.parts.keys()) landPart(run, id);
+        schedule();
+      });
     }
 
     function settleFields(run, d) {
@@ -381,8 +398,8 @@
       for (const id of ids.slice(0, 400)) {
         const el = byId(id);
         if (!drawable(el)) continue;
-        const r = el.getBoundingClientRect();
-        if (!r.width && !r.height) continue;
+        const r = rectOf(el);
+        if (!r) continue;
         if (r.bottom > 0 && r.top < innerHeight) return id;
         fallback ??= id;
       }
@@ -392,7 +409,7 @@
     function onStart(run, d) {
       run.startedAt = performance.now();
       for (const id of list(d.ids)) {
-        if (drawable(byId(id))) run.scope.set(id, { id, state: 'soon', el: null, delay: 0 });
+        if (drawable(byId(id))) run.scope.set(id, { id, state: 'soon', el: null, node: null });
       }
       run.hang ??= run.scope.keys().next().value ?? null;
     }
@@ -408,15 +425,16 @@
     function onBatch(run, d, { landed = false } = {}) {
       run.reading = false;
       settleFields(run, d);
-      // The batch's finest parts; a frame that names none falls back to the
-      // ids its ops address, and a row is one part with the cells inside it.
+      // The batch's finest parts (server/change/parts.js). A frame that names
+      // none, from a host before v5, falls back to the ids its ops address,
+      // and a row is one part with the cells inside it.
       const named = list(d.parts);
       const parts = topmost(named.length ? named : list(d.ids));
       const inserted = (Array.isArray(d.inserts) ? d.inserts : []).flatMap((entry) => list(entry?.ids));
       const reach = list(d.reach);
       // An earlier batch whose ops never came has landed as far as anyone
       // here will see. One still moving lands when its motion ends.
-      for (const old of run.batches.filter((b) => !b.played)) land(run, old, { quiet: true });
+      for (const old of run.batches.filter((b) => !b.played)) land(run, old);
       const distinct = new Set([...run.parts.keys(), ...parts, ...reach]);
       if (!run.many && Math.max(distinct.size, run.count, run.total ?? 0) > MANY) run.many = true;
       const reachKey = reach.join(',');
@@ -475,11 +493,15 @@
       const batch = run.batches.find((b) => !b.played);
       if (!batch) return;
       batch.played = true;
-      // What the ops brought in is on the page now: a row and its cells are
-      // one part, and parts that were not here before were added.
+      touch(run);
+      // What the ops brought in is on the page now. A row and its cells are
+      // one part; a part whose look the ops changed is measured afresh.
       const kept = topmost(batch.parts);
       for (const id of batch.parts) if (!kept.includes(id)) dropPart(run, id);
       batch.parts = kept;
+      for (const id of kept) { const part = run.parts.get(id); if (part) part.shape = null; }
+      // A frame that named no inserts or removes (a host before v5): parts
+      // that were not here before were added, parts that went were removed.
       if (batch.structure && !batch.named && kept.length) {
         if (kept.every((id) => batch.fresh.has(id) && byId(id))) run.verb = 'Adding';
         else if (kept.every((id) => !batch.fresh.has(id) && !byId(id))) run.verb = 'Removing';
@@ -492,14 +514,14 @@
         let played = null;
         try {
           played = morph.play(batch.snapshot, {
-            onPart: (id, phase) => { if (phase === 'end' && runs.get(run.client) === run) { landPart(run, id); render(); } },
+            onPart: (id, phase) => { if (phase === 'end' && runs.get(run.client) === run) { landPart(run, id); schedule(); } },
           });
         } catch { played = null; }
         Promise.resolve(played).then(() => land(run, batch), () => land(run, batch));
       } else {
         after(run, LAND_AFTER, () => land(run, batch));
       }
-      render();
+      schedule();
     }
 
     function endWords(done) {
@@ -518,23 +540,33 @@
       run.done = done;
       run.reading = false;
       run.endedAt = performance.now();
-      for (const batch of [...run.batches]) land(run, batch, { quiet: true });
+      for (const batch of [...run.batches]) land(run, batch);
       for (const id of run.parts.keys()) landPart(run, id);
       liftScope(run);
       document.dispatchEvent(new CustomEvent('marble-change:end', { detail: { client: run.client, turn: run.turn, done } }));
       const shown = run.tag && done;
       if (shown) aloud.textContent = endWords(done).map((bit) => bit.join(' ')).join(' · ');
-      render();
+      schedule();
       // The numbers stay up a moment; then everything goes, and the page is
       // the page.
       after(run, shown ? SHOWN : 0, () => {
         run.gone = true;
-        render();
+        schedule();
         after(run, GONE, () => forget(run));
       });
     }
 
-    function forget(run, { quiet = false } = {}) {
+    /** An undo's end (the host's empty look once it has written): what it
+     *  marked lifts as it lands, and the run goes once that has lifted. A
+     *  redo under the same client and turn picks the run up again. */
+    function endUndo(run) {
+      for (const batch of run.batches.filter((b) => !b.played)) land(run, batch);
+      document.dispatchEvent(new CustomEvent('marble-change:end', { detail: { client: run.client, turn: run.turn, done: null } }));
+      touch(run);
+      schedule();
+    }
+
+    function forget(run) {
       for (const timer of run.timers) clearTimeout(timer);
       run.timers.clear();
       for (const mark of run.scope.values()) mark.el?.remove();
@@ -542,7 +574,7 @@
       run.tag?.root.remove();
       run.tag = null;
       if (runs.get(run.client) === run) runs.delete(run.client);
-      if (!quiet) render();
+      schedule();
     }
 
     // ------------------------------------------------------------ frames
@@ -550,13 +582,21 @@
     function onPresence(detail, { caught = false } = {}) {
       const client = String(detail?.client ?? '');
       if (!/^agent(-undo)?:/.test(client)) return;
-      // Unattended: a dot on the element, if the person asked for dots.
-      if (!attended(client)) return;
       // A press is one control at one instant: collab.js rings it.
       if (detail.phase === 'acting') return;
       let run = runs.get(client);
+      // The end is heard whoever is following, so a chat put out of mind
+      // mid-change still lets go of its marks.
       if (detail.stage === 'end') {
-        if (run && (!detail.turn || detail.turn === run.turn)) end(run, detail.done ?? null);
+        if (run && (!detail.turn || detail.turn === run.turn)) {
+          if (run.undo) endUndo(run);
+          else end(run, detail.done ?? null);
+        }
+        return;
+      }
+      // Unattended: a dot on the element, if the person asked for dots.
+      if (!attended(client)) {
+        if (run) forget(run);
         return;
       }
       // A frame without a turn is from before the host said which parts:
@@ -576,12 +616,23 @@
       else if (detail.stage === 'before') onBatch(run, detail, { landed: caught });
       else if (detail.stage === 'after') onAfter(run, detail);
       else if (detail.phase === 'reading') onRead(run, detail);
-      render();
+      touch(run);
+      schedule();
     }
 
-    // ------------------------------------------------------------ drawing
+    // ------------------------------------------------------------ measuring
+    //
+    // One paint a frame, however many frames, ops and timers asked for one.
+    // A paint reads everything first (where each part is, what it looks
+    // like, where the person's hand is), then writes, then places the tags,
+    // whose size it can only know once their words are written. A part with
+    // nothing to draw is not measured; what a part looks like is read once
+    // per element and state, not every paint.
 
+    const stats = { renders: 0, rects: 0, styles: 0 };
+    let paint = 0;
     const rectOf = (el) => {
+      stats.rects += 1;
       const r = el.getBoundingClientRect();
       return r.width || r.height ? r : null;
     };
@@ -589,34 +640,103 @@
     const view = (b) => ({ left: b.left - scrollX, top: b.top - scrollY, width: b.width, height: b.height });
     const opaque = (colour) => colour && colour !== 'transparent' && !/rgba?\([^)]*,\s*0\)$/.test(colour) && !/\/\s*0\)$/.test(colour);
 
-    function scopeBox(el) {
-      const r = rectOf(el);
-      if (!r) return null;
-      const radius = getComputedStyle(el).borderRadius || '0px';
-      return {
-        left: r.left - OUT, top: r.top - OUT, width: r.width + OUT * 2, height: r.height + OUT * 2,
-        radius: radius.includes('%') ? radius : radius.replace(/([\d.]+)px/g, (_, n) => `${Number(n) + OUT}px`),
-      };
+    /** A holder's rect in this paint, measured at most once. */
+    function measure(holder) {
+      if (holder.rectAt === paint) return holder.rect;
+      const el = resolve(holder);
+      holder.rectAt = paint;
+      holder.rect = drawable(el) ? rectOf(el) : null;
+      return holder.rect;
     }
 
+    /** What a part looks like to its tint and its tag. */
+    function shapeOf(holder, el) {
+      if (holder.shape && holder.shapeEl === el && holder.shapeKey === holder.state) return holder.shape;
+      stats.styles += 1;
+      const css = getComputedStyle(el);
+      const edged = parseFloat(css.borderTopWidth) > 0;
+      const shaped = edged || parseFloat(css.borderLeftWidth) > 0 || opaque(css.backgroundColor) || (css.boxShadow && css.boxShadow !== 'none');
+      holder.shape = {
+        edged,
+        shaped,
+        words: !shaped && window.marbleText?.textBlockOf?.(el) === el,
+        radius: css.borderRadius || '0px',
+        rounded: parseFloat(css.borderTopLeftRadius) > 0,
+        rows: /^(list-item|table)/.test(css.display),
+      };
+      holder.shapeEl = el;
+      holder.shapeKey = holder.state;
+      return holder.shape;
+    }
+
+    const grow = (radius) => (radius.includes('%') ? radius : radius.replace(/([\d.]+)px/g, (_, n) => `${Number(n) + OUT}px`));
+    const scopeBox = (r, shape) => ({
+      left: r.left - OUT, top: r.top - OUT, width: r.width + OUT * 2, height: r.height + OUT * 2, radius: grow(shape.radius),
+    });
     /** A part with a shape of its own is tinted to its edge and corners;
      *  words have none, so they get a little room round them, as a
-     *  highlighter would leave. */
-    function partBox(el) {
-      const r = rectOf(el);
-      if (!r) return null;
-      const css = getComputedStyle(el);
-      const shaped = parseFloat(css.borderTopWidth) > 0 || parseFloat(css.borderLeftWidth) > 0
-        || opaque(css.backgroundColor) || (css.boxShadow && css.boxShadow !== 'none');
-      if (shaped) return { left: r.left, top: r.top, width: r.width, height: r.height, radius: css.borderRadius || '0px' };
-      const words = window.marbleText?.textBlockOf?.(el) === el;
-      if (!words) {
-        const radius = parseFloat(css.borderTopLeftRadius) > 0 ? css.borderRadius : '4px';
-        return { left: r.left, top: r.top, width: r.width, height: r.height, radius };
-      }
-      // Rows sit edge to edge; room above and below would wash into the next.
-      const y = /^(list-item|table)/.test(css.display) ? 0 : 3;
+     *  highlighter would leave. Rows sit edge to edge, so they get none above
+     *  and below, or it would wash into the next. */
+    function partBox(r, shape) {
+      if (shape.shaped) return { left: r.left, top: r.top, width: r.width, height: r.height, radius: shape.radius };
+      if (!shape.words) return { left: r.left, top: r.top, width: r.width, height: r.height, radius: shape.rounded ? shape.radius : '4px' };
+      const y = shape.rows ? 0 : 3;
       return { left: r.left - 6, top: r.top - y, width: r.width + 12, height: r.height + y * 2, radius: '6px' };
+    }
+
+    /** The person's hand: focus in a part, or their caret in it. */
+    function handNodes() {
+      const out = [];
+      const active = document.activeElement;
+      if (active && active !== document.body && active !== document.documentElement && !active.closest?.(`[${TRANSIENT}]`)) out.push(active);
+      const sel = getSelection?.();
+      const node = sel?.rangeCount ? sel.anchorNode : null;
+      const at = node?.nodeType === 1 ? node : node?.parentElement;
+      if (at?.isContentEditable) out.push(at);
+      return out;
+    }
+    const inHand = (el, hand) => Boolean(el) && hand.some((node) => el.contains(node));
+
+    // ------------------------------------------------------------ marks
+
+    function tintStateOf(run, part) {
+      let tint = null;
+      if (part.state === 'now') tint = 'now';
+      else if (part.state === 'soon' && !part.dotted) tint = 'soon';
+      else if (part.state === 'landed' && !part.lifted) tint = 'lift';
+      return run.gone && tint ? 'gone' : tint;
+    }
+
+    /** What one tint should be in this paint. Lifting and going are what a
+     *  tint already there does; nothing is made just to fade. A part that has
+     *  gone keeps its tint where it last stood while that lifts. */
+    function planTint(holder, key, state, kind, hand) {
+      const existing = holder[key];
+      const leaving = state === 'lift' || state === 'gone';
+      if (!state || (leaving && !existing)) return existing ? { holder, key, remove: true } : null;
+      const r = measure(holder);
+      let box = null;
+      if (r) {
+        const shape = shapeOf(holder, holder.node);
+        box = kind === 'scope' ? scopeBox(r, shape) : partBox(r, shape);
+        holder.box = { ...page(box), radius: box.radius };
+      } else if (existing && holder.box) {
+        box = { ...view(holder.box), radius: holder.box.radius };
+      }
+      if (!box) return existing ? { holder, key, remove: true } : null;
+      return { holder, key, kind, state, box, held: Boolean(r) && inHand(holder.node, hand) };
+    }
+
+    function planDot(part, state, hand) {
+      const existing = part.dot;
+      if (!state || (state === 'gone' && !existing)) return existing ? { holder: part, key: 'dot', remove: true } : null;
+      const r = measure(part);
+      if (!r && !existing) return null;
+      return {
+        holder: part, key: 'dot', kind: 'dot', state,
+        at: r ? { left: Math.max(6, r.left - 10), top: r.top + Math.min(r.height / 2, 11) } : null,
+        held: Boolean(r) && inHand(part.node, hand),
+      };
     }
 
     function fadeIn(el, delay = 0) {
@@ -625,74 +745,46 @@
       });
     }
 
-    function placeBox(el, box) {
-      Object.assign(el.style, {
-        left: `${Math.round(box.left)}px`, top: `${Math.round(box.top)}px`,
-        width: `${Math.round(box.width)}px`, height: `${Math.round(box.height)}px`, borderRadius: box.radius,
-      });
+    /** Only what moved is written. */
+    function place(el, box) {
+      const at = box.width === undefined
+        ? `${Math.round(box.left)},${Math.round(box.top)}`
+        : `${Math.round(box.left)},${Math.round(box.top)},${Math.round(box.width)},${Math.round(box.height)},${box.radius}`;
+      if (el.marblePlaced === at) return;
+      el.marblePlaced = at;
+      el.style.left = `${Math.round(box.left)}px`;
+      el.style.top = `${Math.round(box.top)}px`;
+      if (box.width !== undefined) {
+        el.style.width = `${Math.round(box.width)}px`;
+        el.style.height = `${Math.round(box.height)}px`;
+        el.style.borderRadius = box.radius;
+      }
     }
 
-    /** One tint: made when it is first wanted, kept in place, and taken off
-     *  when it is no longer wanted. A part that has gone keeps its tint
-     *  where it last stood while that lifts. */
-    function paintTint(holder, key, state, measure) {
-      const el = byId(holder.id);
-      const live = drawable(el) ? measure(el) : null;
-      if (live) holder.box = { ...page(live), radius: live.radius };
-      const box = live ?? (holder.box && holder[key] ? { ...view(holder.box), radius: holder.box.radius } : null);
-      // Lifting and going are what a tint already there does; nothing is
-      // made just to fade.
-      const leaving = state === 'lift' || state === 'gone';
-      if (!state || !box || (leaving && !holder[key])) {
+    function writeMark(plan) {
+      const { holder, key } = plan;
+      if (plan.remove) {
         holder[key]?.remove();
         holder[key] = null;
         return false;
       }
-      let tint = holder[key];
-      if (!tint) {
-        tint = document.createElement('i');
-        tint.className = 'marble-change-tint';
-        tint.setAttribute(TRANSIENT, '');
-        tint.setAttribute('aria-hidden', 'true');
-        tint.dataset.id = holder.id;
-        tint.dataset.state = state;
-        holder[key] = tint;
-        placeBox(tint, box);
-        layer.append(tint);
-        fadeIn(tint, holder.delay ?? 0);
+      let el = holder[key];
+      const box = plan.kind === 'dot' ? plan.at : plan.box;
+      if (!el) {
+        el = document.createElement('i');
+        el.className = plan.kind === 'dot' ? 'marble-change-dot' : 'marble-change-tint';
+        el.setAttribute(TRANSIENT, '');
+        el.setAttribute('aria-hidden', 'true');
+        el.dataset.id = holder.id;
+        el.dataset.state = plan.state;
+        holder[key] = el;
+        if (box) place(el, box);
+        layer.append(el);
+        fadeIn(el, plan.kind === 'dot' ? 0 : holder.delay ?? 0);
       }
-      if (tint.dataset.state !== state) tint.dataset.state = state;
-      placeBox(tint, box);
-      tint.hidden = Boolean(live && handIn(el));
-      return true;
-    }
-
-    function paintDot(part, state) {
-      const el = byId(part.id);
-      const r = drawable(el) ? rectOf(el) : null;
-      if (!state || (!r && !part.dot)) {
-        part.dot?.remove();
-        part.dot = null;
-        return false;
-      }
-      let dot = part.dot;
-      if (!dot && state === 'gone') return false;
-      if (!dot) {
-        dot = document.createElement('i');
-        dot.className = 'marble-change-dot';
-        dot.setAttribute(TRANSIENT, '');
-        dot.setAttribute('aria-hidden', 'true');
-        dot.dataset.id = part.id;
-        part.dot = dot;
-        layer.append(dot);
-        fadeIn(dot);
-      }
-      if (dot.dataset.state !== state) dot.dataset.state = state;
-      if (r) {
-        dot.style.left = `${Math.round(Math.max(6, r.left - 10))}px`;
-        dot.style.top = `${Math.round(r.top + Math.min(r.height / 2, 11))}px`;
-        dot.hidden = handIn(el);
-      }
+      if (el.dataset.state !== plan.state) el.dataset.state = plan.state;
+      if (box) place(el, box);
+      if (el.hidden !== plan.held) el.hidden = plan.held;
       return true;
     }
 
@@ -773,7 +865,7 @@
       const units = new Set();
       for (const part of run.parts.values()) {
         if (!part.unit) {
-          const el = byId(part.id);
+          const el = resolve(part);
           if (drawable(el)) part.unit = unitOf(el);
         }
         if (part.unit) units.add(part.unit.join('|'));
@@ -827,10 +919,13 @@
       const time = elapsed(run);
       if (tag.time.textContent !== time) tag.time.textContent = time;
       const metered = Boolean(run.total) && !run.ending && !run.reading && Boolean(run.verb);
-      tag.meter.hidden = !metered;
-      if (metered) tag.meter.firstChild.style.setProperty('--p', `${Math.round(Math.min(1, (run.count || 0) / run.total) * 100)}%`);
+      if (tag.meter.hidden !== !metered) tag.meter.hidden = !metered;
+      if (metered) {
+        const p = `${Math.round(Math.min(1, (run.count || 0) / run.total) * 100)}%`;
+        if (tag.meter.firstChild.style.getPropertyValue('--p') !== p) tag.meter.firstChild.style.setProperty('--p', p);
+      }
       const of = run.step?.of && run.step.of <= 12 ? run.step.of : 0;
-      tag.steps.hidden = !of;
+      if (tag.steps.hidden !== !of) tag.steps.hidden = !of;
       if (of) {
         while (tag.steps.children.length < of) tag.steps.append(document.createElement('i'));
         while (tag.steps.children.length > of) tag.steps.lastChild.remove();
@@ -890,34 +985,40 @@
       tag.status.style.left = over > 0 ? `${-Math.round(over)}px` : '0px';
     }
 
-    /** Where the tag hangs: the part changing now, else the last place it
-     *  hung while that part has gone. */
-    function hangBox(run) {
-      let el = byId(run.hang);
-      if (!drawable(el) || !rectOf(el)) {
-        // The part it hung from has gone: the newest part that has changed,
-        // else any still to come.
-        const shown = (part) => drawable(byId(part.id)) && rectOf(byId(part.id));
+    /** The holder for an id the tag may hang from: a part, the scope, or an
+     *  element read. */
+    function holderOf(run, id) {
+      if (!id) return null;
+      const known = run.parts.get(id) ?? run.scope.get(id);
+      if (known) return known;
+      if (run.hangHolder?.id !== id) run.hangHolder = { id, node: null };
+      return run.hangHolder;
+    }
+
+    /** Where the tag hangs: the part changing now; once that has gone, the
+     *  newest part that has changed, else any still to come; else the last
+     *  place it hung. */
+    function hangOf(run, plans) {
+      let holder = holderOf(run, run.hang);
+      let r = holder ? measure(holder) : null;
+      if (!r) {
         const parts = [...run.parts.values()].reverse();
-        const other = parts.find((part) => part.state !== 'soon' && shown(part)) ?? parts.find(shown);
-        if (other) { run.hang = other.id; el = byId(other.id); } else el = null;
+        holder = parts.find((part) => part.state !== 'soon' && measure(part)) ?? parts.find((part) => measure(part)) ?? null;
+        r = holder?.rect ?? null;
+        if (holder) run.hang = holder.id;
       }
-      if (el) {
-        const r = rectOf(el);
-        const edged = parseFloat(getComputedStyle(el).borderTopWidth) > 0;
-        const part = run.parts.get(run.hang);
-        const tint = part?.tint && !part.tint.hidden ? part.tint : run.scope.get(run.hang)?.el ?? null;
-        const box = tint ? tint.getBoundingClientRect() : null;
-        run.hangBox = { ...page(r), edged, tint: box ? page(box) : null };
+      if (r) {
+        const shape = shapeOf(holder, holder.node);
+        const tint = plans.find((plan) => plan && !plan.remove && plan.holder === holder && plan.kind !== 'dot'
+          && plan.state !== 'gone' && !plan.held && plan.box);
+        run.hangBox = { ...page(r), edged: shape.edged, tint: tint ? page(tint.box) : null };
       }
       if (!run.hangBox) return null;
       const b = run.hangBox;
       return { ...view(b), edged: b.edged, tint: b.tint ? view(b.tint) : null };
     }
 
-    function placeTag(run, tag, at) {
-      const w = tag.press.offsetWidth;
-      const h = tag.press.offsetHeight;
+    function placeTag(run, tag, at, [w, h]) {
       let x;
       let y;
       if (at.edged) {
@@ -935,49 +1036,47 @@
       }
       x = Math.max(INSIDE, Math.min(x, innerWidth - INSIDE - w));
       y = Math.max(INSIDE, Math.min(y, innerHeight - INSIDE - h));
-      tag.root.toggleAttribute('data-edge', at.edged);
+      if (tag.root.hasAttribute('data-edge') !== at.edged) tag.root.toggleAttribute('data-edge', at.edged);
       if (run.tagOn !== run.hang && run.tagOn !== null && !still()) {
         tag.root.toggleAttribute('data-glide', true);
         clearTimeout(tag.glide);
         tag.glide = setTimeout(() => tag.root.removeAttribute('data-glide'), 420);
       }
       run.tagOn = run.hang;
-      tag.root.style.left = `${Math.round(x)}px`;
-      tag.root.style.top = `${Math.round(y)}px`;
-    }
-
-    function paintTag(run, hidden) {
-      const at = !run.undo && !hidden ? hangBox(run) : null;
-      if (!at) {
-        run.tag?.root.remove();
-        run.tag = null;
-        return false;
-      }
-      run.tag ??= makeTag(run);
-      const tag = run.tag;
-      fillTag(run, tag);
-      placeTag(run, tag, at);
-      if (run.gone) tag.root.dataset.state = 'gone';
-      return true;
+      place(tag.root, { left: x, top: y });
     }
 
     // ------------------------------------------------------------ the rail
 
     let rail = null;
     let more = null;
-    function paintRail(entries) {
+
+    /** Where each part is against the window: rects only, and no more of
+     *  them than a rail can show. */
+    function planRail(entries) {
       const below = [];
       const above = [];
       const ticks = [];
-      const height = Math.max(1, document.documentElement.scrollHeight);
-      for (const { el, state } of entries) {
-        const r = rectOf(el);
+      let budget = RAIL_MAX;
+      for (const { holder, state } of entries) {
+        let r;
+        if (holder.rectAt === paint) r = holder.rect;
+        else if (budget > 0) { budget -= 1; r = measure(holder); } else continue;
         if (!r) continue;
-        if (r.top >= innerHeight) below.push({ el, r });
-        else if (r.bottom <= 0) above.push({ el, r });
-        ticks.push({ y: (r.top + scrollY) / height, state });
+        if (r.top >= innerHeight) below.push({ holder, r });
+        else if (r.bottom <= 0) above.push({ holder, r });
+        ticks.push({ top: r.top + scrollY, state });
       }
-      if (!below.length && !above.length) {
+      if (!below.length && !above.length) return null;
+      return {
+        below, above, ticks,
+        height: Math.max(1, document.documentElement.scrollHeight),
+        gone: entries.length > 0 && entries.every((e) => e.gone),
+      };
+    }
+
+    function writeRail(plan) {
+      if (!plan) {
         rail?.remove();
         more?.remove();
         rail = null;
@@ -991,15 +1090,16 @@
         rail.setAttribute('aria-hidden', 'true');
         layer.append(rail);
       }
-      while (rail.children.length < ticks.length) {
+      while (rail.children.length < plan.ticks.length) {
         const tick = document.createElement('i');
         tick.className = 'marble-change-tick';
         rail.append(tick);
       }
-      while (rail.children.length > ticks.length) rail.lastChild.remove();
-      ticks.forEach(({ y, state }, i) => {
+      while (rail.children.length > plan.ticks.length) rail.lastChild.remove();
+      plan.ticks.forEach(({ top, state }, i) => {
         const tick = rail.children[i];
-        tick.style.top = `${(Math.min(1, Math.max(0, y)) * 100).toFixed(2)}%`;
+        const y = `${(Math.min(1, Math.max(0, top / plan.height)) * 100).toFixed(2)}%`;
+        if (tick.style.top !== y) tick.style.top = y;
         if (tick.dataset.state !== state) tick.dataset.state = state;
       });
       if (!more) {
@@ -1013,12 +1113,12 @@
         });
         layer.append(more);
       }
-      const dir = below.length ? 'below' : 'above';
-      const out = dir === 'below' ? below : above;
+      const dir = plan.below.length ? 'below' : 'above';
+      const out = dir === 'below' ? plan.below : plan.above;
       const next = dir === 'below'
         ? out.reduce((a, b) => (b.r.top < a.r.top ? b : a))
         : out.reduce((a, b) => (b.r.bottom > a.r.bottom ? b : a));
-      more.target = next.el;
+      more.target = next.holder.node;
       const label = `${out.length} ${dir}`;
       if (more.dataset.label !== label) {
         more.dataset.label = label;
@@ -1026,57 +1126,73 @@
         more.innerHTML = `<span>${label}</span>${CHEVRON(dir)}`;
         more.setAttribute('aria-label', `${label}: show the next one`);
       }
-      const gone = entries.length && entries.every((e) => e.gone);
-      if (gone) { rail.dataset.state = 'gone'; more.dataset.state = 'gone'; } else { delete rail.dataset.state; delete more.dataset.state; }
+      for (const el of [rail, more]) {
+        if (plan.gone && el.dataset.state !== 'gone') el.dataset.state = 'gone';
+        else if (!plan.gone && el.dataset.state) delete el.dataset.state;
+      }
     }
 
     // ------------------------------------------------------------ painting
 
     let claimKey = '';
     let ticking = 0;
-
-    function paintRun(run) {
-      const hidden = inText(run.client);
-      let drawn = false;
-      for (const mark of run.scope.values()) {
-        const state = hidden ? null : run.gone ? 'gone' : mark.state;
-        drawn = paintTint(mark, 'el', state, scopeBox) || drawn;
-      }
-      const entries = [];
-      for (const part of run.parts.values()) {
-        let tint = null;
-        if (!hidden) {
-          if (part.state === 'now') tint = 'now';
-          else if (part.state === 'soon' && !part.dotted) tint = 'soon';
-          else if (part.state === 'landed' && !part.lifted) tint = 'lift';
-          if (run.gone && tint) tint = 'gone';
-        }
-        drawn = paintTint(part, 'tint', tint, partBox) || drawn;
-        const dot = hidden || !part.dotted ? null : run.gone ? 'gone' : part.state;
-        drawn = paintDot(part, dot) || drawn;
-        if (!hidden) {
-          const el = byId(part.id);
-          if (drawable(el)) entries.push({ el, state: part.state, gone: run.gone });
-        }
-      }
-      drawn = paintTag(run, hidden) || drawn;
-      run.drawn = drawn;
-      return entries;
-    }
+    let frame = 0;
+    const schedule = () => { if (!frame) frame = requestAnimationFrame(render); };
+    // The page moved under the marks: worth a paint only while there are any.
+    const nudge = () => { if (runs.size || layer.childElementCount) schedule(); };
 
     function render() {
-      const inset = Math.max(0, document.documentElement.clientWidth - document.documentElement.getBoundingClientRect().right);
-      layer.style.setProperty('--change-inset', `${Math.round(inset)}px`);
-      const entries = [];
+      frame = 0;
+      paint += 1;
+      stats.renders += 1;
+      // An undo has no end frame of its own to wait for: it is over once
+      // everything it marked has lifted.
       for (const run of [...runs.values()]) {
-        // An undo has no end frame: it is over once all it marked has lifted.
-        if (run.undo && !run.batches.length && [...run.parts.values()].every((p) => p.state === 'landed' && p.lifted)) {
-          forget(run, { quiet: true });
-          continue;
-        }
-        entries.push(...paintRun(run));
+        if (run.undo && !run.batches.length && [...run.parts.values()].every((p) => p.state === 'landed' && p.lifted)) forget(run);
       }
-      paintRail(entries);
+      // Read.
+      const hand = handNodes();
+      const html = document.documentElement;
+      const inset = Math.max(0, html.clientWidth - html.getBoundingClientRect().right);
+      const plans = [];
+      const entries = [];
+      for (const run of runs.values()) {
+        const hidden = inText(run.client);
+        const marks = [];
+        for (const mark of run.scope.values()) {
+          marks.push(planTint(mark, 'el', hidden ? null : run.gone ? 'gone' : mark.state, 'scope', hand));
+        }
+        for (const part of run.parts.values()) {
+          marks.push(planTint(part, 'tint', hidden ? null : tintStateOf(run, part), 'part', hand));
+          marks.push(planDot(part, hidden || !part.dotted ? null : run.gone ? 'gone' : part.state, hand));
+          if (!hidden) entries.push({ holder: part, state: part.state, gone: run.gone });
+        }
+        plans.push({ run, marks, at: hidden || run.undo ? null : hangOf(run, marks) });
+      }
+      const railPlan = planRail(entries);
+      // Write.
+      layer.style.setProperty('--change-inset', `${Math.round(inset)}px`);
+      const placing = [];
+      for (const { run, marks, at } of plans) {
+        let drawn = false;
+        for (const mark of marks) if (mark) drawn = writeMark(mark) || drawn;
+        if (at) {
+          run.tag ??= makeTag(run);
+          fillTag(run, run.tag);
+          if (run.gone && run.tag.root.dataset.state !== 'gone') run.tag.root.dataset.state = 'gone';
+          placing.push({ run, at });
+          drawn = true;
+        } else if (run.tag) {
+          run.tag.root.remove();
+          run.tag = null;
+        }
+        run.drawn = drawn;
+      }
+      writeRail(railPlan);
+      // The tags, once their words are written: their sizes, then their places.
+      const sizes = placing.map(({ run }) => [run.tag.press.offsetWidth, run.tag.press.offsetHeight]);
+      placing.forEach(({ run, at }, i) => placeTag(run, run.tag, at, sizes[i]));
+
       const tagged = [...runs.values()].some((run) => run.tag);
       if (tagged && !ticking) ticking = setInterval(tick, 1000);
       if (!tagged && ticking) { clearInterval(ticking); ticking = 0; }
@@ -1091,20 +1207,34 @@
       for (const run of runs.values()) if (run.tag) fillTag(run, run.tag);
     }
 
-    let frame = 0;
-    const schedule = () => { if (!frame && runs.size) frame = requestAnimationFrame(() => { frame = 0; render(); }); };
-    addEventListener('scroll', schedule, true);
-    addEventListener('resize', schedule);
-    document.addEventListener('focusin', schedule);
-    document.addEventListener('focusout', schedule);
-    document.addEventListener('selectionchange', schedule);
+    addEventListener('scroll', nudge, true);
+    addEventListener('resize', nudge);
+    document.addEventListener('focusin', nudge);
+    document.addEventListener('focusout', nudge);
+    document.addEventListener('selectionchange', nudge);
     new MutationObserver((records) => {
-      if (runs.size && records.some(({ target }) => !layer.contains(target) && target !== aloud)) schedule();
+      if (records.some(({ target }) => !layer.contains(target) && target !== aloud)) nudge();
     }).observe(document.documentElement, { subtree: true, childList: true, characterData: true, attributes: true });
+
+    /** Whether a run has something on the page, or will at the next paint —
+     *  asked from state, so the zone (collab.js) has its answer within the
+     *  same frame that started the run, before anything is painted. */
+    function wanted(run) {
+      if (run.tag) return true;
+      for (const mark of run.scope.values()) if (mark.el || (mark.state === 'soon' && drawable(resolve(mark)))) return true;
+      for (const part of run.parts.values()) {
+        if (part.tint || part.dot) return true;
+        const creatable = part.dotted ? !run.gone : part.state === 'soon' || part.state === 'now';
+        if (creatable && drawable(resolve(part))) return true;
+      }
+      if (run.undo) return false;
+      const hang = holderOf(run, run.hang);
+      return Boolean(run.hangBox) || Boolean(hang && drawable(resolve(hang)));
+    }
 
     function claims(client) {
       const run = runs.get(String(client ?? ''));
-      return Boolean(run && run.drawn && !inText(run.client));
+      return Boolean(run) && !inText(run.client) && wanted(run);
     }
 
     // ------------------------------------------------------------ listening
@@ -1114,7 +1244,7 @@
     // and says so with `marble-text:claims`.
     document.addEventListener('marble:presence', ({ detail }) => onPresence(detail), true);
     document.addEventListener('marble:ops', ({ detail }) => onOps(detail), true);
-    addEventListener('marble-text:claims', () => render());
+    addEventListener('marble-text:claims', schedule);
 
     // A presence frame is broadcast once, to whoever was listening; a tab
     // that opens mid-change asks for the frames that are standing.
@@ -1165,14 +1295,16 @@
         .map(({ client, turn, count, total }) => ({ client, turn, count, total })),
       tintFor(id) {
         for (const run of runs.values()) {
-          if (!claims(run.client)) continue;
+          if (inText(run.client) || run.gone) continue;
           const part = run.parts.get(String(id));
-          if (part && (part.state === 'soon' || part.state === 'now') && (part.tint || part.dot)) return part.state;
-          const scope = run.scope.get(String(id));
-          if (scope?.el && scope.state === 'soon') return 'soon';
+          if (part && (part.state === 'soon' || part.state === 'now') && drawable(resolve(part))) return part.state;
+          const mark = run.scope.get(String(id));
+          if (mark && mark.state === 'soon' && drawable(resolve(mark))) return 'soon';
         }
         return null;
       },
+      // How much painting it has done: paints, rects read, styles read.
+      stats: () => ({ ...stats }),
     };
   };
 
