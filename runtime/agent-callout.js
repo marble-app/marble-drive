@@ -676,11 +676,18 @@
         dispatchEvent(new CustomEvent('marble-marks:focus'));
         return true;
       }
-      // The line still being written: a second ⌘J puts it away, words kept.
+      // The line on screen: a second ⌘J puts away one being written, or one
+      // that has the keys, words kept; one that came back on its own (an
+      // answer, why nothing changed, a question) without the keys gets them.
       const line = window.marbleLine;
-      if (line?.current()?.state === 'edit') {
+      const shown = line?.current();
+      if (shown && (shown.state === 'edit' || shown.focused)) {
         line.close({ keep: true });
         agent.select(null);
+        return true;
+      }
+      if (shown && ['answer', 'cant', 'ask'].includes(shown.state)) {
+        line.focus();
         return true;
       }
       // A card still waiting to be sent: a second ⌘J puts it away.

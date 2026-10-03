@@ -283,22 +283,22 @@ test('⇧-click while pointing adds the thing to the open line', async () => {
   const q1 = await page.locator('[data-marble-id="q1"]').boundingBox();
   const q2 = await page.locator('[data-marble-id="q2"]').boundingBox();
   await startPointing(page);
-  // The lower one first: the line hangs over what is under its thing.
-  await page.mouse.move(q2.x + 10, q2.y + q2.height / 2);
-  await page.keyboard.down('Shift');
-  await page.mouse.click(q2.x + 10, q2.y + q2.height / 2);
-  await lineInput(page).waitFor();
   await page.mouse.move(q1.x + 10, q1.y + q1.height / 2);
+  await page.keyboard.down('Shift');
+  await page.mouse.click(q1.x + 10, q1.y + q1.height / 2);
+  await lineInput(page).waitFor();
+  // Under the line, and still pickable: pointing sees through it.
+  await page.mouse.move(q2.x + 10, q2.y + q2.height / 2);
   await page.locator('.marble-callout-pick.is-adding').waitFor();
   assert.match(await page.locator('.marble-callout-pick-name').textContent(), /^\+ Item/);
-  await page.mouse.click(q1.x + 10, q1.y + q1.height / 2);
+  await page.mouse.click(q2.x + 10, q2.y + q2.height / 2);
   await page.keyboard.up('Shift');
   await page.waitForFunction(() => document.querySelector('.marble-line:not([data-state="sent"]):not([data-leaving]) .marble-line-input')?.dataset.placeholder === 'Change these 2 rows');
   // One tint round both, the old one fading as the line is redrawn about them.
   await page.waitForFunction(() => document.querySelectorAll('.marble-line-scope:not([data-state="out"])').length === 1);
   const tint = await page.locator('.marble-line-scope:not([data-state="out"])').boundingBox();
   assert.ok(tint.y < q1.y && tint.y + tint.height > q2.y + q2.height, 'the tint is round both');
-  assert.deepEqual(await page.evaluate(() => window.marble.agent.context().selection), ['q2', 'q1']);
+  assert.deepEqual(await page.evaluate(() => window.marble.agent.context().selection), ['q1', 'q2']);
 });
 
 test('Point at something in the tray names one thing with one click', async () => {

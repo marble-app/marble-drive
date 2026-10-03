@@ -40,33 +40,16 @@
   const CLOSE = 220;       // ms the line takes to close into its thing
   const STILL = 150;       // ms, the one crossfade reduced motion keeps
   const LONG = 280;        // characters of an answer before it offers the chat
-  const EASE = 'cubic-bezier(.22, 1, .36, 1)';
+  const EASE = 'cubic-bezier(.22, 1, .36, 1)';    // arriving and settling
+  const COLOUR = 'cubic-bezier(.22, .61, .36, 1)'; // colour only
   const stillness = matchMedia('(prefers-reduced-motion: reduce)');
-  const QUESTION = /^(what|why|how|when|who|which|where|is|are|can|could|does|do|did|should|will|would)\b/i;
+  // A question is one that ends with a question mark or opens with a
+  // question word; "Do the same to the others" is a change (ruling R17).
+  const QUESTION = /^(what|why|how|when|who|which|where)\b/i;
   const ENDS = new Set(['turn.completed', 'turn.failed', 'turn.cancelled', 'turn.interrupted', 'turn.removed']);
 
-  // The parts' own unit, as the marks count them (change-marks.js), and the
-  // two a line is often about that a change rarely counts in.
-  const UNITS = [
-    ['li, tr', 'row', 'rows'],
-    ['td, th', 'cell', 'cells'],
-    ['p', 'paragraph', 'paragraphs'],
-    ['h1, h2, h3, h4, h5, h6', 'heading', 'headings'],
-    ['img, picture, figure', 'picture', 'pictures'],
-    ['section', 'section', 'sections'],
-    ['button', 'button', 'buttons'],
-    ['input, select, textarea', 'field', 'fields'],
-    ['a', 'link', 'links'],
-    ['svg', 'drawing', 'drawings'],
-    ['ul, ol, dl', 'list', 'lists'],
-    ['table', 'table', 'tables'],
-  ];
-  function unitOf(el) {
-    const kind = el?.getAttribute?.('data-marble-kind')?.trim();
-    if (kind) return [kind, `${kind}s`];
-    for (const [selector, one, many] of UNITS) if (el?.matches?.(selector)) return [one, many];
-    return ['part', 'parts'];
-  }
+  // The parts' own unit, named the way the marks count them (change-marks.js).
+  const unitOf = (el) => window.marbleChange?.unitOf?.(el) ?? ['part', 'parts'];
 
   const STYLE = `
     .marble-line-host {
@@ -79,17 +62,21 @@
       --line-muted: var(--muted, light-dark(#5f6267, #a6a9ae));
       --line-faint: var(--faint, light-dark(#8b8e93, #7e8187));
       --line-rule: var(--line, color-mix(in srgb, var(--line-text) 14%, transparent));
-      --line-ease: var(--ease-out, ${EASE});
       --line-font: var(--ui-font, var(--sans, system-ui, -apple-system, "Segoe UI", sans-serif));
       font: 14px/1.45 var(--line-font);
     }
     .marble-line-host:popover-open { position: fixed; inset: 0; }
+    /* While pointing (agent-callout.js), the pointer names what is under the
+       line, so the line lets it through. */
+    html.marble-callout-latched .marble-line-host * { pointer-events: none !important; }
+    .marble-line-aloud { position: fixed; width: 1px; height: 1px; margin: -1px; padding: 0; overflow: hidden;
+      clip: rect(0 0 0 0); clip-path: inset(50%); white-space: nowrap; border: 0; }
 
     /* What the line is about: a fill out past its edge, the way a selection
        is shown. Never a border down one side. */
     .marble-line-scope { position: fixed; left: 0; top: 0; box-sizing: border-box; border-radius: 12px; pointer-events: none;
       background-color: color-mix(in srgb, var(--line-accent) 14%, transparent);
-      opacity: 1; transition: opacity 200ms var(--line-ease); }
+      opacity: 1; transition: opacity 200ms ${EASE}; }
     @starting-style { .marble-line-scope { opacity: 0; } }
     .marble-line-scope[data-state="out"] { opacity: 0; }
     .marble-line-scope[hidden] { display: none; }
@@ -102,7 +89,7 @@
       box-shadow: 0 0 0 1px var(--line-ink), 0 0 0 4px color-mix(in srgb, var(--line-accent) 30%, transparent),
                   var(--shadow-lift, 0 10px 28px -12px rgba(0, 0, 0, .3));
       transform-origin: 50% 0; opacity: 1; transform: none;
-      transition: opacity 200ms var(--line-ease), transform 200ms var(--line-ease); }
+      transition: opacity 200ms ${EASE}, transform 200ms ${EASE}; }
     @starting-style { .marble-line { opacity: 0; transform: translateY(-4px); } }
     .marble-line[data-flip], .marble-line[data-scope="page"] { transform-origin: 50% 100%; }
     @starting-style { .marble-line[data-flip], .marble-line[data-scope="page"] { transform: translateY(4px); } }
@@ -128,7 +115,7 @@
       white-space: pre-wrap; overflow-wrap: anywhere; max-height: calc(6 * 1.45em); overflow-y: auto; }
     .marble-line-open { justify-self: start; appearance: none; margin: -2px 0 0 -6px; padding: 2px 6px; border: 0; border-radius: 6px;
       background: none; color: var(--line-ink); font-size: 12.5px; font-weight: 500; line-height: 1.4; cursor: pointer;
-      transition: background-color 120ms cubic-bezier(.22, .61, .36, 1); }
+      transition: background-color 120ms ${COLOUR}; }
     .marble-line-open:hover { background: color-mix(in srgb, var(--line-accent) 14%, transparent); }
     .marble-line-more { padding-top: 6px; border-top: 1px solid var(--line-rule); }
 
@@ -138,7 +125,7 @@
     .marble-line-opts { display: flex; flex-wrap: wrap; gap: 6px; }
     .marble-line-opt { appearance: none; margin: 0; padding: 3px 10px; border-radius: 999px; border: 1px solid var(--line-rule);
       background: var(--line-card); color: var(--line-text); font-size: 12.5px; font-weight: 500; line-height: 1.4; cursor: pointer;
-      transition: background-color 120ms cubic-bezier(.22, .61, .36, 1), border-color 120ms cubic-bezier(.22, .61, .36, 1); }
+      transition: background-color 120ms ${COLOUR}, border-color 120ms ${COLOUR}; }
     .marble-line-opt:hover { background: color-mix(in srgb, var(--line-accent) 14%, var(--line-card));
       border-color: color-mix(in srgb, var(--line-ink) 40%, transparent); }
     .marble-line-opt:active { background: color-mix(in srgb, var(--line-accent) 26%, var(--line-card)); }
@@ -174,6 +161,13 @@
     host.setAttribute('popover', 'manual');
     document.documentElement.append(host);
     try { host.showPopover(); } catch { /* no popover here: fixed positioning still stands */ }
+    // What the line says when it comes back on its own (an answer, why
+    // nothing changed, a question) is read out, whether or not it has the keys.
+    const aloud = document.createElement('div');
+    aloud.className = 'marble-line-aloud';
+    aloud.setAttribute('role', 'status');
+    aloud.setAttribute('aria-atomic', 'true');
+    host.append(aloud);
 
     const byId = (id) => {
       const el = id ? (marble.byId?.(id) ?? document.querySelector(`[data-marble-id="${CSS.escape(id)}"]`)) : null;
@@ -240,7 +234,7 @@
         action: null, conversation: conversation ?? null, convo: null, off: null, after: 0,
         turn: null, awaiting: false, asked: '', texts: [], ask: null,
         state: null, el: null, input: null, tint: null, handed: false, failed: false,
-        answer: '', said: '',
+        answer: '', said: '', returnTo: null, stop: false,
       };
     }
 
@@ -448,6 +442,27 @@
       sel.addRange(range);
     }
 
+    /** Where the keys were before the line took them: the element, and the
+     *  caret when it was in something editable. */
+    function keysNow() {
+      let a = document.activeElement;
+      while (a?.shadowRoot?.activeElement) a = a.shadowRoot.activeElement;
+      if (!a || a === document.body || a === document.documentElement || host.contains(a)) return null;
+      const sel = getSelection();
+      const range = a.isContentEditable && sel?.rangeCount && a.contains(sel.anchorNode) ? sel.getRangeAt(0).cloneRange() : null;
+      return { el: a, range };
+    }
+    function giveBack(to) {
+      if (!to?.el?.isConnected) return;
+      to.el.focus({ preventScroll: true });
+      if (to.range && to.el.contains(to.range.startContainer)) {
+        const sel = getSelection();
+        sel.removeAllRanges();
+        sel.addRange(to.range);
+      }
+    }
+    const holdsKeys = (s) => Boolean(s.el && s.el.contains(document.activeElement));
+
     // A line coming back on its own takes the keys only from nobody.
     const mayTakeFocus = () => {
       const a = document.activeElement;
@@ -456,7 +471,10 @@
 
     /** Draw `s` in the line, in `state`. */
     function show(s, state, { text = '', focus = true } = {}) {
-      if (shown && shown !== s) put(shown, { keep: true });
+      // A line taking the place of one that had the keys gives them back,
+      // when it goes, to where that one would have.
+      const inherited = shown && shown !== s && holdsKeys(shown) ? shown.returnTo : null;
+      if (shown && shown !== s) put(shown, { keep: true, restore: false });
       shown = s;
       s.state = state;
       let el = s.el;
@@ -496,7 +514,7 @@
           open.type = 'button';
           open.addEventListener('click', () => {
             const id = s.conversation;
-            put(s, { keep: false });
+            put(s, { keep: false, restore: false });
             agent.open?.(id);
           });
           el.append(open);
@@ -528,7 +546,11 @@
       s.input = input;
       paintScope(s);
       place();
+      if (state === 'answer' || state === 'cant' || state === 'ask') {
+        aloud.textContent = state === 'answer' ? s.answer : state === 'cant' ? s.said : (s.ask?.input?.questions?.[0]?.question ?? '');
+      } else aloud.textContent = '';
       if (input && focus) {
+        if (!holdsKeys(s)) s.returnTo = keysNow() ?? inherited;
         caretAt(input);
         // Again once it has its place, in case something took the keys back
         // while it was drawn.
@@ -554,13 +576,34 @@
       } catch { gone(); }
     }
 
-    /** Put the line away, keeping its words (or not) for this thing. */
-    function put(s, { keep = true } = {}) {
+    /** Put the line away, keeping its words (or not) for this thing, and
+     *  give the keys back to where they were if the line had them: at once
+     *  (`restore: true`), or after a press outside if that press did not take
+     *  them itself (`'press'`). */
+    function put(s, { keep = true, restore = true } = {}) {
       if (!s) return;
       const was = s.state;
-      if (s.input && (was === 'edit' || was === 'cant')) keepDraft(keyOf(s), keep ? said(s.input) : '');
+      const had = holdsKeys(s);
+      const to = s.returnTo;
+      // Words typed in any of its inputs (an ask, more to an answer, a draft)
+      // wait for the next ⌘J on the same thing.
+      if (s.input) {
+        const words = said(s.input);
+        if (keep && words) keepDraft(keyOf(s), words);
+        else if (!keep || was === 'edit' || was === 'cant') keepDraft(keyOf(s), '');
+      }
       if (shown === s) shown = null;
+      aloud.textContent = '';
       if (s.el) { const el = s.el; s.el = null; s.input = null; leave(el); }
+      if (had && restore === true) giveBack(to);
+      else if (had && restore === 'press') {
+        // Wait for the press to land: one that focused something has
+        // decided where the keys go.
+        addEventListener('pointerup', () => setTimeout(() => {
+          const a = document.activeElement;
+          if (!a || a === document.body || a === document.documentElement) giveBack(to);
+        }, 0), { once: true, capture: true });
+      }
       if (busy(s)) {
         // Its change still runs: the line goes, the session stays for what
         // the work says next.
@@ -573,17 +616,25 @@
       document.dispatchEvent(new CustomEvent('marble-line:closed'));
     }
 
-    /** ⏎: the words go and the line closes its height into the thing. */
+    /** ⏎: the words go and the line closes its height into the thing. The
+     *  keys go back where they were, unless that was inside the thing being
+     *  changed: a caret there would hold the change off its own part (the
+     *  engine and the marks leave a part with a hand in it alone). */
     function fold(s) {
       if (shown === s) shown = null;
       s.state = 'sent';
+      aloud.textContent = '';
       const el = s.el;
       if (!el) return;
       el.dataset.state = 'sent';
       el.style.pointerEvents = 'none';
       if (s.input) {
+        const had = holdsKeys(s);
         s.input.setAttribute('contenteditable', 'false');
         if (document.activeElement === s.input) s.input.blur();
+        const to = s.returnTo;
+        const inThing = to && elementsOf(s.ids).some((part) => part.contains(to.el) || to.el.contains(part));
+        if (had && to && !inThing) giveBack(to);
       }
       // A line that came back before it finished closing is not this one's.
       const gone = () => {
@@ -591,6 +642,7 @@
         s.el = null;
         s.input = null;
         el.remove();
+        document.dispatchEvent(new CustomEvent('marble-line:closed'));
       };
       try {
         if (stillness.matches) {
@@ -711,6 +763,7 @@
       s.texts = [];
       s.turn = null;
       s.awaiting = true;
+      s.stop = false;
       s.ask = null;
       s.failed = false;
       s.handed = false;
@@ -736,11 +789,14 @@
       // reason in its log.
       const stuck = String(convo.input?.value ?? '').trim() || !convo.getAttribute('conversation');
       if (stuck) {
+        // The host's own words are for the console; the page says it plainly.
         const why = [...(convo.shadowRoot?.querySelectorAll('.system.error') ?? [])].at(-1)?.textContent?.trim();
+        if (why) console.warn(`marble-line: the send was refused: ${why}`);
         try { convo.input.value = ''; } catch { /* nothing to clear */ }
         s.awaiting = false;
+        s.stop = false;
         s.failed = true;
-        s.said = why ? `Couldn't send. ${why}` : "Couldn't send.";
+        s.said = "Couldn't send. Try again.";
         handOff(s);
         reopen(s, 'cant', { text });
         return;
@@ -759,6 +815,8 @@
         s.awaiting = false;
         s.turn = event.turn;
         s.texts = [];
+        // Esc came before the turn had an id: it stops now.
+        if (s.stop) { s.stop = false; agent.cancel(s.turn).catch(() => { /* already over */ }); }
         return;
       }
       if (!s.turn || event.turn !== s.turn) return;
@@ -788,7 +846,9 @@
       const ask = s.ask;
       if (!ask || !s.turn) return;
       const q = ask.input.questions[0];
-      const response = { behavior: 'allow', updatedInput: { ...ask.input, answers: { [q.question]: label } } };
+      const picks = new Map([[q.question, new Set([label])]]);
+      const response = window.marbleAgentUI?.askResponse?.('question', ask.input, picks)
+        ?? { behavior: 'allow', updatedInput: { ...ask.input, answers: { [q.question]: label } } };
       const buttons = [...(s.el?.querySelectorAll('button') ?? [])];
       for (const b of buttons) b.disabled = true;
       try {
@@ -812,6 +872,7 @@
     function ended(s, event) {
       s.turn = null;
       s.awaiting = false;
+      s.stop = false;
       s.ask = null;
       handOff(s);
       const applied = Number(event.applied) || 0;
@@ -839,6 +900,8 @@
     function reopen(s, state, { text = '' } = {}) {
       if (!sessions.has(s)) return;
       show(s, state, { text, focus: mayTakeFocus() });
+      // The line speaks for this change now; the marks need not (ruling R16).
+      if (s.conversation) document.dispatchEvent(new CustomEvent('marble-line:speaks', { detail: { conversation: s.conversation, state } }));
     }
 
     // ------------------------------------------------------------ leaving
@@ -853,28 +916,57 @@
       if (host.contains(event.target)) return;
       if (event.composedPath().some((n) => n?.localName === 'marble-agent-drawer')) return;
       if (!s.page && elementsOf(s.ids).some((el) => el.contains(event.target))) return;
-      put(s, { keep: true });
+      put(s, { keep: true, restore: 'press' });
     }, true);
 
     // Esc while a change from the line runs stops it, but only when the page
-    // has the keys: never from a field, an editable, a dialog, a popover or a
-    // menu, and never when something else already took the key.
-    function pageHasKeys() {
+    // itself had the key. Where it came from is read off the event's path,
+    // not off the focus at the end: the chat hands the keys back to the page
+    // on Esc without taking the key, and a panel that closes on Esc leaves
+    // nothing open by the time the key bubbles. So it is judged in capture,
+    // before anything acts on it, and never from a field, an editable, a
+    // component (the chat), the drive's own chrome, a dialog, a popover or a
+    // menu, nor while the variations panel, the tour of a change, Describe
+    // mode or pointing is open.
+    function anotherOverlay() {
+      const html = document.documentElement;
+      if (html.classList.contains('marble-callout-latched')) return true;
+      const marks = document.querySelector('.marble-marks-layer');
+      if (marks && (marks.dataset.mode || marks.hasAttribute('data-describing'))) return true;
+      if (document.querySelector('.marble-variations-panel:not([hidden])')) return true;
+      if (document.querySelector('marble-work')?.shadowRoot?.querySelector('.tour:not([hidden])')) return true;
       try {
-        if (document.querySelector('[popover]:not([popover="manual"]):popover-open, dialog:modal')) return false;
-      } catch { /* an older engine: the focus test below still stands */ }
-      const a = document.activeElement;
-      if (!a || a === document.body || a === document.documentElement) return true;
-      if (a.closest(`[${TRANSIENT}]`) || a.shadowRoot) return false;
-      if (a.isContentEditable || a.matches('input, textarea, select')) return false;
-      return !a.closest('dialog, [role="dialog"], [role="alertdialog"], [popover], [role="menu"], [role="menubar"], [role="listbox"], [role="combobox"]');
+        if (document.querySelector('[popover]:not([popover="manual"]):popover-open, dialog:modal')) return true;
+      } catch { /* an older engine: the path test below still stands */ }
+      return false;
     }
+    const MENUS = 'dialog, [role="dialog"], [role="alertdialog"], [popover], [role="menu"], [role="menubar"], [role="listbox"], [role="combobox"]';
+    function pageHadKey(event) {
+      if (anotherOverlay()) return false;
+      for (const node of event.composedPath()) {
+        if (node === document.body || node === document.documentElement || node === document || node === window) break;
+        // Inside a component with its own keys: the chat, the drive's tree.
+        if (node instanceof ShadowRoot) return false;
+        if (!(node instanceof Element)) continue;
+        if (node.hasAttribute(TRANSIENT)) return false;
+        if (node.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(node.tagName)) return false;
+        if (node.matches(MENUS)) return false;
+      }
+      return true;
+    }
+    const judged = new WeakSet();
     addEventListener('keydown', (event) => {
-      if (event.key !== 'Escape' || event.defaultPrevented || event.isComposing) return;
-      const run = running();
-      if (!run || !pageHasKeys()) return;
+      if (event.key === 'Escape' && !event.isComposing && pageHadKey(event)) judged.add(event);
+    }, true);
+    addEventListener('keydown', (event) => {
+      if (event.key !== 'Escape' || event.defaultPrevented || !judged.has(event)) return;
+      let s = null;
+      for (const one of sessions) if (busy(one)) s = one;
+      if (!s) return;
       event.preventDefault();
-      agent.cancel(run.turn).catch(() => { /* already over */ });
+      // Sent, but the turn has no id yet: it stops the moment it has one.
+      if (!s.turn) { s.stop = true; return; }
+      agent.cancel(s.turn).catch(() => { /* already over */ });
     });
 
     // ------------------------------------------------------------ opening
@@ -900,7 +992,10 @@
         if (shown.input) caretAt(shown.input);
         return true;
       }
-      if (shown) put(shown, { keep: true });
+      // Words carried on to the new line (⇧-click adds a thing to it) moved
+      // with it: they are not kept under the old thing as well.
+      const carried = Boolean(shown?.input) && draft != null && said(shown.input) === String(draft).trim();
+      if (shown) put(shown, { keep: !carried, restore: false });
       sessions.add(s);
       let text = draft ?? drafts()[keyOf(s)] ?? '';
       let idea = null;
@@ -931,8 +1026,23 @@
       open,
       close: ({ keep = true } = {}) => { if (shown) put(shown, { keep }); },
       running,
-      /** The line on screen: what it is about and what it holds. */
-      current: () => (shown ? { ids: [...shown.ids], words: Boolean(shown.words), page: shown.page, state: shown.state, text: shown.input ? said(shown.input) : '' } : null),
+      /** The line on screen: what it is about, what it holds, whose
+       *  conversation it speaks for, and whether it has the keys. */
+      current: () => (shown ? {
+        ids: [...shown.ids], words: Boolean(shown.words), page: shown.page, state: shown.state,
+        text: shown.input ? said(shown.input) : '', conversation: shown.conversation, focused: holdsKeys(shown),
+      } : null),
+      /** Give the keys to the line on screen (⌘J, for one that came back on
+       *  its own), the caret at the end of its words. */
+      focus() {
+        if (!shown?.input) return false;
+        if (!holdsKeys(shown)) shown.returnTo = keysNow();
+        caretAt(shown.input);
+        return true;
+      },
+      /** Whether this conversation was asked from the line, so the line
+       *  speaks for how it ends (change-marks.js asks). */
+      owns: (conversation) => Boolean(conversation) && [...sessions].some((one) => one.conversation === conversation),
     };
   };
 

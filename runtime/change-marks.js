@@ -175,7 +175,8 @@
   const CHECK = '<svg viewBox="0 0 8 8" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><path d="M1.6 4.2l1.6 1.5 3.2-3.4"/></svg>';
 
   // The parts' own unit, from what they are. A kind the page cannot tell by
-  // its tag names itself (`data-marble-kind="chart"`).
+  // its tag names itself (`data-marble-kind="chart"`). The line ⌘J opens
+  // (change-line.js) names its thing with the same words.
   const UNITS = [
     ['li, tr', 'row', 'rows'],
     ['td, th', 'cell', 'cells'],
@@ -187,6 +188,8 @@
     ['input, select, textarea', 'field', 'fields'],
     ['a', 'link', 'links'],
     ['svg', 'drawing', 'drawings'],
+    ['ul, ol, dl', 'list', 'lists'],
+    ['table', 'table', 'tables'],
   ];
   function unitOf(el) {
     const kind = el.getAttribute('data-marble-kind')?.trim();
@@ -580,7 +583,10 @@
       for (const id of run.parts.keys()) if (!moving.has(id)) landPart(run, id);
       liftScope(run);
       document.dispatchEvent(new CustomEvent('marble-change:end', { detail: { client: run.client, turn: run.turn, done } }));
-      const shown = run.tag && done;
+      // Nothing changed, and the line this was asked from will say why (or
+      // answer): the marks say nothing more (ruling R16).
+      run.quiet = lineSpeaks(run, done);
+      const shown = run.tag && done && !run.quiet;
       if (shown) aloud.textContent = endWords(done).map((bit) => bit.join(' ')).join(' · ');
       schedule();
       // The numbers stay up a moment; then everything goes, and the page is
@@ -591,6 +597,25 @@
         after(run, GONE, () => forget(run));
       });
     }
+
+    /** Whether the line (change-line.js) will speak for this run's end: it
+     *  was asked from the line and nothing changed, so it comes back there
+     *  as an answer or as why, and an end tag would say it twice. */
+    function lineSpeaks(run, done) {
+      if (run.undo || !done || done.status === 'cancelled') return false;
+      if (done.changed || done.added || done.removed) return false;
+      return Boolean(window.marbleLine?.owns?.(run.conversation));
+    }
+    // The line spoke before the end was heard here: the marks go now.
+    document.addEventListener('marble-line:speaks', (event) => {
+      const run = runs.get(`agent:${event.detail?.conversation ?? ''}`);
+      if (!run || !run.ending || run.quiet || run.gone) return;
+      run.quiet = true;
+      aloud.textContent = '';
+      run.gone = true;
+      schedule();
+      after(run, GONE, () => forget(run));
+    });
 
     /** An undo's end (the host's empty look once it has written): what it
      *  marked lifts as it lands, and the run goes once that has lifted. A
@@ -913,7 +938,8 @@
 
     /** What the tag says, as pieces: words, and numbers to set in figures. */
     function tagWords(run) {
-      if (run.ending) return run.done ? endWords(run.done) : [];
+      // A change the line speaks for keeps its words while it goes.
+      if (run.ending) return run.quiet ? null : run.done ? endWords(run.done) : [];
       if (run.reading) return [['Reading'], [run.read.size, run.read.size === 1 ? 'part' : 'parts']];
       if (!run.verb) return [];
       const n = run.count || [...run.parts.values()].filter((p) => p.state !== 'soon').length;
@@ -953,7 +979,7 @@
 
     function fillTag(run, tag) {
       const pieces = tagWords(run);
-      writeSaid(tag.said, pieces);
+      if (pieces) writeSaid(tag.said, pieces);
       const time = elapsed(run);
       if (tag.time.textContent !== time) tag.time.textContent = time;
       const metered = Boolean(run.total) && !run.ending && !run.reading && Boolean(run.verb);
@@ -1330,6 +1356,7 @@
 
     window.marbleChange = {
       claims,
+      unitOf,
       runs: () => [...runs.values()].filter((run) => claims(run.client))
         .map(({ client, turn, count, total }) => ({ client, turn, count, total })),
       tintFor(id) {

@@ -372,3 +372,251 @@ test('Describe mode still borrows the card, and ⌘J there means that card', asy
   assert.equal(await page.locator('.marble-callout').count(), 1);
   assert.equal(await line(page).count(), 0);
 });
+
+// ------------------------------------------------------------ review round 1
+
+const turnStatus = (page, run) => page.evaluate(async ({ conversation, turn }) => (await window.marble.agent.conversation(conversation)).turns.find((t) => t.id === turn)?.status, run);
+const holdOn = async (page, id = 'r2') => {
+  await pointAt(page, id);
+  await summon(page);
+  await input(page).waitFor();
+  await page.keyboard.type('script:hold Add a due date');
+  await page.keyboard.press('Enter');
+  return until(page, () => window.marbleLine.running());
+};
+
+test('Esc that belongs to the chat, the variations panel, the tour or Describe mode never stops the change', async () => {
+  const page = await open();
+  const run = await holdOn(page);
+  const bodyHasKeys = async () => {
+    await page.mouse.click(900, 600);
+    assert.equal(await page.evaluate(() => document.activeElement === document.body), true);
+  };
+  // The chat, in the drive around the page: Esc in its composer hands the
+  // keys back to the page, and is the chat's, not the change's.
+  await page.keyboard.press('Control+\\');
+  await page.waitForFunction(() => {
+    const view = document.querySelector('marble-agent-drawer')?.shadowRoot?.querySelector('marble-conversation');
+    return view?.shadowRoot?.activeElement?.classList.contains('editor');
+  });
+  await page.keyboard.press('Escape');
+  await page.waitForTimeout(500);
+  assert.equal(await turnStatus(page, run), 'running', 'Esc in the chat');
+  await page.keyboard.press('Control+\\');
+  await page.waitForTimeout(300);
+  // The variations panel, open with the keys on the page.
+  await bodyHasKeys();
+  await page.evaluate(() => { document.querySelector('.marble-variations-panel').hidden = false; });
+  await page.keyboard.press('Escape');
+  await page.waitForTimeout(500);
+  assert.equal(await turnStatus(page, run), 'running', 'Esc with the variations panel open');
+  await page.evaluate(() => { document.querySelector('.marble-variations-panel').hidden = true; });
+  // The tour of a turn's changes.
+  await bodyHasKeys();
+  await page.evaluate(() => { document.querySelector('marble-work').shadowRoot.querySelector('.tour').hidden = false; });
+  await page.keyboard.press('Escape');
+  await page.waitForTimeout(500);
+  assert.equal(await turnStatus(page, run), 'running', 'Esc with the tour open');
+  await page.evaluate(() => { document.querySelector('marble-work').shadowRoot.querySelector('.tour').hidden = true; });
+  // Describe mode: Esc leaves its tool, then the mode.
+  const drawer = page.locator('marble-agent-drawer');
+  await drawer.locator('.launcher').hover();
+  await drawer.locator('.tool[data-tool="marks-describe"]').click();
+  await page.locator('.marble-marks-bar').waitFor();
+  await page.evaluate(() => document.activeElement?.blur?.());
+  assert.equal(await page.evaluate(() => document.activeElement === document.body), true);
+  await page.keyboard.press('Escape');
+  await page.waitForTimeout(300);
+  assert.equal(await turnStatus(page, run), 'running', 'Esc leaving Describe mode\'s tool');
+  await page.keyboard.press('Escape');
+  await page.waitForTimeout(500);
+  assert.equal(await turnStatus(page, run), 'running', 'Esc leaving Describe mode');
+  // And with nothing else open, Esc on the page is the change's.
+  await page.waitForFunction(() => !document.querySelector('.marble-marks-layer[data-describing]'));
+  await bodyHasKeys();
+  await page.keyboard.press('Escape');
+  await until(page, async (r) => (await window.marble.agent.conversation(r.conversation)).turns.find((t) => t.id === r.turn)?.status === 'cancelled', run);
+});
+
+test('Esc right after ⏎, before the turn has begun, still stops it', async () => {
+  const page = await open();
+  await pointAt(page, 'r2');
+  await summon(page);
+  await input(page).waitFor();
+  await page.keyboard.type('script:hold Add a due date');
+  await page.keyboard.press('Enter');
+  await page.keyboard.press('Escape');
+  await until(page, async () => {
+    const [s] = await window.marble.agent.conversations();
+    const turn = s && (await window.marble.agent.conversation(s.id)).turns?.[0];
+    return turn?.status === 'cancelled';
+  });
+});
+
+test('closing the line gives the keys back: the caret returns to where it was', async () => {
+  const page = await open();
+  await page.evaluate(() => {
+    const p = document.querySelector('[data-marble-id="p"]');
+    p.contentEditable = 'true';
+    p.focus();
+    getSelection().collapse(p.firstChild, 4);
+  });
+  await page.mouse.move(900, 600);
+  await summon(page);
+  await input(page).waitFor();
+  assert.equal(await input(page).getAttribute('data-placeholder'), 'Change this paragraph');
+  await page.keyboard.press('Escape');
+  await lineGone(page);
+  assert.deepEqual(await page.evaluate(() => {
+    const sel = getSelection();
+    return [document.activeElement?.getAttribute('data-marble-id'), sel.anchorNode === document.querySelector('[data-marble-id="p"]').firstChild, sel.anchorOffset];
+  }), ['p', true, 4]);
+});
+
+test('an answer that came back while you were elsewhere is read out, and ⌘J takes you to it', async () => {
+  const page = await open();
+  await pointAt(page, 'r2');
+  await summon(page);
+  await input(page).waitFor();
+  await page.keyboard.type('script:why Why is this still unread?');
+  await page.keyboard.press('Enter');
+  // Somewhere else while it answers: the answer does not take the keys.
+  await page.focus('[data-marble-id="note"]');
+  await page.locator('.marble-line[data-state="answer"]').waitFor({ timeout: 10_000 });
+  assert.equal(await page.evaluate(() => document.activeElement?.getAttribute('data-marble-id')), 'note');
+  assert.equal(await page.locator('.marble-line-host [role="status"]').textContent(), 'You opened it on Sep 28 and never marked it read.');
+  await summon(page);
+  assert.equal(await page.evaluate(() => document.activeElement?.classList.contains('marble-line-input')), true, '⌘J goes to the line');
+  assert.equal(await line(page).getAttribute('data-state'), 'answer', 'and leaves it as it was');
+});
+
+test('words carried to a wider line are not kept under the first thing too', async () => {
+  const page = await open();
+  const drawer = page.locator('marble-agent-drawer');
+  await drawer.locator('.launcher').hover();
+  await drawer.locator('.tool[data-tool="point"]').click();
+  await page.locator('.marble-callout-latch:not([hidden])').waitFor();
+  const r1 = await boxOf(page, 'r1');
+  const r2 = await boxOf(page, 'r2');
+  await page.mouse.move(r1.x + 12, r1.y + r1.height / 2);
+  await page.keyboard.down('Shift');
+  await page.mouse.click(r1.x + 12, r1.y + r1.height / 2);
+  await page.keyboard.up('Shift');
+  await input(page).waitFor();
+  await page.keyboard.type('script:due Add a due date');
+  // The row under the line can still be picked.
+  await page.mouse.move(r2.x + 12, r2.y + r2.height / 2);
+  await page.keyboard.down('Shift');
+  await page.mouse.click(r2.x + 12, r2.y + r2.height / 2);
+  await page.keyboard.up('Shift');
+  await page.waitForFunction(() => document.querySelector('.marble-line:not([data-state="sent"]):not([data-leaving]) .marble-line-input')?.dataset.placeholder === 'Change these 2 rows');
+  await page.keyboard.press('Escape'); // pointing ends
+  await input(page).click();
+  await page.keyboard.press('Enter');
+  await until(page, async () => (await window.marble.agent.conversations())[0]?.running === false);
+  await lineGone(page);
+  for (const id of ['r1', 'r2']) {
+    await pointAt(page, id);
+    await summon(page);
+    await input(page).waitFor();
+    assert.equal(await input(page).textContent(), '', `${id} opens empty`);
+    await page.keyboard.press('Escape');
+    await lineGone(page);
+  }
+});
+
+test('when the line says why nothing changed, the marks say nothing more', async () => {
+  const page = await open();
+  await page.evaluate(() => {
+    window.__ended = false;
+    new MutationObserver(() => {
+      if ([...document.querySelectorAll('.marble-change-tag')].some((t) => /Nothing changed/.test(t.textContent))) window.__ended = true;
+    }).observe(document.documentElement, { childList: true, subtree: true, characterData: true });
+  });
+  await pointAt(page, 'list');
+  await summon(page);
+  await input(page).waitFor();
+  await page.keyboard.type('script:cant Add a due date to each');
+  await page.keyboard.press('Enter');
+  await page.locator('.marble-line[data-state="cant"]').waitFor({ timeout: 10_000 });
+  await page.waitForTimeout(2500);
+  assert.equal(await page.evaluate(() => window.__ended), false, 'no end tag beside the line');
+});
+
+test('words that only sound like a question are a change: "Do the same…" gives the words back', async () => {
+  const page = await open();
+  await pointAt(page, 'list');
+  await summon(page);
+  await input(page).waitFor();
+  await page.keyboard.type('Do the same to the other rows');
+  await page.keyboard.press('Enter');
+  await page.locator('.marble-line[data-state="cant"]').waitFor({ timeout: 10_000 });
+  assert.equal(await input(page).textContent(), 'Do the same to the other rows');
+});
+
+test('words typed under an answer are kept for the next ⌘J there', async () => {
+  const page = await open();
+  await pointAt(page, 'r2');
+  await summon(page);
+  await input(page).waitFor();
+  await page.keyboard.type('script:why Why is this still unread?');
+  await page.keyboard.press('Enter');
+  await page.locator('.marble-line[data-state="answer"]').waitFor({ timeout: 10_000 });
+  await input(page).click();
+  await page.keyboard.type('And the others');
+  await page.keyboard.press('Escape');
+  await lineGone(page);
+  // The click into the line moved the pointer off the row: back onto it.
+  await pointAt(page, 'r2');
+  await summon(page);
+  await input(page).waitFor();
+  assert.equal(await input(page).textContent(), 'And the others');
+});
+
+test('a send the host refuses says so in plain words', async () => {
+  const page = await open();
+  await page.route('**/agent/conversations', (route) => (route.request().method() === 'POST'
+    ? route.fulfill({ status: 500, contentType: 'application/json', body: JSON.stringify({ error: 'Agents could not be listed: boom' }) })
+    : route.continue()));
+  await pointAt(page, 'r2');
+  await summon(page);
+  await input(page).waitFor();
+  await page.keyboard.type('Add a due date');
+  await page.keyboard.press('Enter');
+  await page.locator('.marble-line[data-state="cant"]').waitFor({ timeout: 10_000 });
+  const said = await page.locator('.marble-line-host').evaluate((el) => el.innerText);
+  assert.equal(await page.locator('.marble-line-said').innerText(), "Couldn't send. Try again.");
+  assert.doesNotMatch(said, /agent/i);
+});
+
+test('the line keeps its own curves, whatever the document calls ease-out', async () => {
+  const page = await open();
+  await page.evaluate(() => document.documentElement.style.setProperty('--ease-out', 'linear'));
+  await pointAt(page, 'r2');
+  await summon(page);
+  await line(page).waitFor();
+  const [lineEase, tintEase] = await page.evaluate(() => [
+    getComputedStyle(document.querySelector('.marble-line')).transitionTimingFunction,
+    getComputedStyle(document.querySelector('.marble-line-scope')).transitionTimingFunction,
+  ]);
+  assert.match(lineEase, /^cubic-bezier\(0\.22, 1, 0\.36, 1\)/);
+  assert.match(tintEase, /^cubic-bezier\(0\.22, 1, 0\.36, 1\)/);
+});
+
+test('the marks and the line name parts the same way', async () => {
+  const page = await open();
+  const units = await page.evaluate(() => ['list', 'r2', 'p'].map((id) => window.marbleChange.unitOf(document.querySelector(`[data-marble-id="${id}"]`))[0]));
+  assert.deepEqual(units, ['list', 'row', 'paragraph']);
+});
+
+test('a sent line says it has closed once it has folded away', async () => {
+  const page = await open();
+  await page.evaluate(() => { window.__closed = 0; document.addEventListener('marble-line:closed', () => { window.__closed += 1; }); });
+  await pointAt(page, 'r2');
+  await summon(page);
+  await input(page).waitFor();
+  await page.keyboard.type('script:due Add a due date');
+  await page.keyboard.press('Enter');
+  await lineGone(page);
+  assert.equal(await page.evaluate(() => window.__closed), 1);
+});
