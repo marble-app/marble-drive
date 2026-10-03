@@ -11,8 +11,10 @@
 //
 //   - a caret in the agent's colour where it will write: the end of the
 //     words the person asked about, or the end of the block;
-//   - a label hanging from it like a flag: "Agent · thinking" while it reads
-//     and plans, "Agent · typing" while its words land;
+//   - a tag hanging from it like a flag, saying what is happening to the
+//     words in numbers: "Reading 6 words" while it reads and plans, "Typing
+//     4 of 9 words" while its words land. Where a change happens the page
+//     never names who is making it (v5);
 //   - a faint wash on the words it was asked about while it works;
 //   - its edit, typed out after the caret at reading pace (60 characters a
 //     second, never more than a second and a half), the words it replaced
@@ -219,7 +221,20 @@
       return a;
     }
 
-    const WORDS = { thinking: 'thinking', reading: 'reading', typing: 'typing' };
+    const wordsIn = (text) => (String(text ?? '').match(/\S+/g) ?? []).length;
+    const ofWords = (n) => (n === 1 ? 'word' : 'words');
+    /** What the tag says: the words being read, or how many of the new ones
+     *  have landed. */
+    function caption(a) {
+      if (a.phase === 'typing') {
+        const count = a.typing?.count() ?? (a.lastTyped ? { n: a.lastTyped, m: a.lastTyped } : null);
+        return count ? `Typing ${count.n} of ${count.m} ${ofWords(count.m)}` : 'Typing';
+      }
+      const asked = a.words?.startContainer?.isConnected && a.block?.contains(a.words.startContainer) ? a.words.toString() : null;
+      const n = wordsIn(asked ?? textOf(a.block));
+      return `Reading ${n} ${ofWords(n)}`;
+    }
+
     function paintCaret(a) {
       const { caret, tag } = a;
       // Hide work in the tray hides this too; it is the same work.
@@ -229,8 +244,9 @@
       if (!at) { caret.hidden = true; return; }
       caret.hidden = false;
       caret.dataset.phase = a.phase;
-      tag.textContent = `Agent · ${WORDS[a.phase] ?? 'working'}`;
-      tag.setAttribute('aria-label', `Agent · ${WORDS[a.phase] ?? 'working'} · open its chat`);
+      const said = caption(a);
+      if (tag.textContent !== said) tag.textContent = said;
+      tag.setAttribute('aria-label', `${said} · open its chat`);
       Object.assign(caret.style, { left: `${Math.round(at.x)}px`, top: `${Math.round(at.top)}px`, height: `${Math.max(12, Math.round(at.height))}px` });
       caret.classList.toggle('is-flip', at.x > innerWidth - 150);
       caret.classList.toggle('is-low', at.top < 30);
@@ -331,7 +347,7 @@
         }
         // Before its edit lands: what the block says now is what the typing
         // is measured from.
-        if (!a.typing) a.snap.set(block, textOf(block));
+        if (!a.typing) { a.snap.set(block, textOf(block)); a.lastTyped = null; }
         a.phase = 'typing';
         paintCaret(a);
         return;
@@ -415,6 +431,7 @@
       if (stillness.matches || personIn(block) || !highlights) {
         mark('typed', whole);
         a.typed.push(whole);
+        a.lastTyped = wordsIn(after.slice(start, end));
         paintCaret(a);
         return;
       }
@@ -434,11 +451,14 @@
       const began = performance.now() + (ghost ? FADE_OLD : 0);
       let raf = 0;
       let done = false;
+      const total = wordsIn(after.slice(start, end));
       const typing = {
         at: () => rangeOf(block, shown, shown),
+        count: () => ({ n: Math.min(total, wordsIn(after.slice(start, shown))), m: total }),
         finish: () => {
           if (done) return;
           done = true;
+          a.lastTyped = total;
           cancelAnimationFrame(raf);
           ghost?.remove();
           unmark('untyped', hiddenRange);

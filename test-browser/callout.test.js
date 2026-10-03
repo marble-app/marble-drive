@@ -434,22 +434,26 @@ const firstConversation = (page) => page.evaluate(async () => {
   return summary ? { summary, detail: await window.marble.agent.conversation(summary.id) } : null;
 });
 
-test('a brief sent from the card carries the selection, docks to the zone, and ends with Undo, which brings the card back with variations first', async () => {
+// The marks: what a change draws on the page while it runs (change-marks.js).
+const marks = (page) => page.locator('.marble-change-layer > *');
+const marksGone = (page) => page.waitForFunction(() => document.querySelector('.marble-change-layer')?.children.length === 0, null, { timeout: 5000 });
+
+test('a brief sent from the card carries the selection, is marked part by part, and ends with Undo, which brings the card back with variations first', async () => {
   const page = await open();
   await select(page, 'q');
   await handle(page).click();
   await sendFromCard(page, 'script:listing');
-  await page.locator('.marble-zone').waitFor();
+  await page.locator('.marble-change-tag').waitFor();
   const { summary, detail } = await firstConversation(page);
   assert.deepEqual(detail.turns[0].context.selection, ['q'], 'the turn carries the selection');
   assert.equal(detail.turns[0].context.target, 'garden');
 
-  await page.locator('.marble-zone-label[hidden]').waitFor({ state: 'attached' });
-  await page.locator('.marble-callout-status', { hasText: 'Agent · add a question' }).waitFor();
+  await page.locator('.marble-callout-status', { hasText: 'Add a question' }).waitFor();
+  assert.equal(await page.locator('.marble-zone').count(), 0, 'the marks stand where the box was');
   assert.ok(await page.locator('.marble-callout[data-live]').count(), 'the head pulses while the turn runs');
 
   await page.locator('.marble-callout-status', { hasText: 'Changed 1 element' }).waitFor({ timeout: 15_000 });
-  assert.equal(await page.locator('.marble-zone').count(), 0, 'the zone went with the turn');
+  await marksGone(page);
   assert.equal(await page.locator('[data-marble-id="q"] li').count(), 3);
 
   await page.getByRole('button', { name: 'Undo this turn' }).click();
@@ -459,25 +463,25 @@ test('a brief sent from the card carries the selection, docks to the zone, and e
   await page.locator('.marble-offer-bubble').first().waitFor();
   assert.equal(await page.locator('.marble-offer-bubble').first().getAttribute('data-act'), 'variations');
   assert.match(await page.locator('.marble-offer-bubble').first().innerText(), /Try 3 variations of this list/);
-  assert.equal(await page.locator('.marble-trail').count(), 0);
+  // The undo is tinted where it lands, and leaves nothing behind.
+  await marksGone(page);
+  assert.equal(await page.locator('.marble-zone').count(), 0);
   const after = await page.evaluate(async (cid) => (await window.marble.agent.conversations()).find((s) => s.id === cid), summary.id);
   assert.equal(after.needsReview, false, 'seeing it and undoing it reviewed the chat');
 });
 
-test('closing a live card leaves nothing but the zone, whose Open chat opens the drawer', async () => {
+test('closing a live card leaves nothing but the marks, whose tag opens the drawer', async () => {
   const page = await open();
   await select(page, 'q');
   await handle(page).click();
   await sendFromCard(page, 'script:hold');
-  await page.locator('.marble-zone').waitFor();
-  await page.locator('.marble-zone-label[hidden]').waitFor({ state: 'attached' });
+  await page.locator('.marble-change-tint[data-id="q"]').waitFor();
 
   await page.getByRole('button', { name: 'Close' }).click();
-  // Put away, not folded: no pill is left on the page, and the zone's own
-  // label comes back because this tab asked for the work.
+  // Put away, not folded: no pill is left on the page, and the change's own
+  // tag stays because this tab asked for the work.
   await page.waitForFunction(() => document.querySelectorAll('.marble-callout').length === 0);
-  await page.locator('.marble-zone-label:not([hidden])').waitFor();
-  await page.locator('.marble-zone-label:not([hidden]) button', { hasText: 'Open chat' }).click();
+  await page.locator('.marble-change-tag button').click();
   await page.waitForFunction(() => document.querySelector('marble-agent-drawer')?.isOpen === true);
   await cancelLast(page);
 });
@@ -493,23 +497,24 @@ test('a turn that touches nothing reads No changes', async () => {
 });
 
 
-test('a reload while the agent works rebuilds no card; the zone stays for the tab that asked', async () => {
+test('a reload while the agent works rebuilds no card; the marks stay for the tab that asked', async () => {
   const page = await open();
   await select(page, 'q');
   await handle(page).click();
   await sendFromCard(page, 'script:hold');
-  await page.locator('.marble-zone').waitFor();
+  await page.locator('.marble-change-tint[data-id="q"]').waitFor();
 
   await page.reload();
   await page.waitForFunction(() => Boolean(window.marble?.agent));
-  await page.locator('.marble-zone-label:not([hidden])').waitFor();
+  await page.locator('.marble-change-tag').waitFor();
+  await page.locator('.marble-change-tint[data-id="q"]').waitFor();
   await page.waitForTimeout(400);
   assert.equal(await page.locator('.marble-callout').count(), 0, 'no card comes back on its own');
-  assert.equal(await page.locator('.marble-glints-host .glint').count(), 0, 'the zone already says it: no glint beside it');
+  assert.equal(await page.locator('.marble-glints-host .glint').count(), 0, 'the marks already say it: no glint beside them');
   await cancelLast(page);
 });
 
-test('a prompt sent from the drawer with a selection draws its zone, not a card', async () => {
+test('a prompt sent from the drawer with a selection draws its marks, not a card', async () => {
   const page = await open();
   // The drawer first, then the selection: opening the drawer takes focus, and
   // a selection made before it goes with it.
@@ -520,9 +525,10 @@ test('a prompt sent from the drawer with a selection draws its zone, not a card'
   await drawerEditor.click();
   await page.keyboard.type('script:hold');
   await page.keyboard.press('Enter');
-  await page.locator('.marble-zone').waitFor();
+  await page.locator('.marble-change-tint[data-id="q"]').waitFor();
   await page.waitForTimeout(400);
   assert.equal(await page.locator('.marble-callout').count(), 0);
+  assert.equal(await page.locator('.marble-zone').count(), 0);
   await cancelLast(page);
 });
 
@@ -664,6 +670,7 @@ test('an agent this tab is not following is a glint, not a zone: Follow opens it
   assert.equal(await glint.getAttribute('data-state'), 'working');
   await page.waitForTimeout(300);
   assert.equal(await page.locator('.marble-zone').count(), 0, 'work nobody here asked for draws no zone');
+  assert.equal(await marks(page).count(), 0, 'and no marks');
 
   await glint.click();
   const peek = page.locator('.marble-glints-host .peek');
@@ -685,8 +692,9 @@ test('an agent this tab is not following is a glint, not a zone: Follow opens it
     const drawer = document.querySelector('marble-agent-drawer');
     return drawer?.isOpen === true && drawer.shadowRoot.querySelector('marble-conversation')?.getAttribute('conversation') === cid;
   }, id);
-  // Followed: its work is now this tab's to watch, so the zone takes over.
-  await page.locator('.marble-zone').waitFor();
+  // Followed: its work is now this tab's to watch, so its marks take over.
+  await page.locator('.marble-change-tag').waitFor();
+  assert.equal(await page.locator('.marble-zone').count(), 0);
   await cancelLast(page);
 });
 

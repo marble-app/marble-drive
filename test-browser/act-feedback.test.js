@@ -63,7 +63,7 @@ test('a press is a ring on the control, not a zone around it', async () => {
 
   assert.equal(await page.locator('.marble-act').count(), 1);
   assert.equal(await page.locator('.marble-zone').count(), 0, 'a press is an event, not a region of work');
-  assert.match(await page.locator('.marble-act .marble-zone-label').innerText(), /Agent · pressing Sort/);
+  assert.match(await page.locator('.marble-act .marble-zone-label').innerText(), /^Pressing Sort/);
   assert.equal(
     await page.locator('[data-marble-id="sort"]').evaluate((el) => el.hasAttribute('data-marble-acting')),
     true,
@@ -98,7 +98,7 @@ test('the effect waits for the press: cause first, then what the app filed', asy
     null,
     { timeout: 4000 },
   );
-  assert.match(await page.locator('.marble-act .marble-zone-label').innerText(), /Agent · pressed Sort · 1 change\b/);
+  assert.match(await page.locator('.marble-act .marble-zone-label').innerText(), /^Pressed Sort · 1 change\b/);
 });
 
 test('an act too quick to see is still seen', async () => {
@@ -130,7 +130,7 @@ test('a deferred act has arrived and pressed nothing', async () => {
   // The gesture is dropped, because a deferred act has not been done: the
   // label names the control it is waiting on.
   await frame(page, { ...pressing, deferred: true });
-  assert.match(await page.locator('.marble-act .marble-zone-label').innerText(), /Agent · waiting for you · Sort(?! ·)/);
+  assert.match(await page.locator('.marble-act .marble-zone-label').innerText(), /^Waiting for you · Sort(?! ·)/);
   assert.equal(await page.locator('.marble-act-ring.marble-act-wait').count(), 1);
   assert.equal(
     await page.locator('[data-marble-id="sort"]').evaluate((el) => el.hasAttribute('data-marble-acting')),
@@ -165,6 +165,6 @@ test('an agent that moves on gets its zone back, and the act does not narrate it
   // Not a report on the press: the agent is writing somewhere else now.
   await frame(page, { client: 'agent:c1', ids: ['rows'], phase: 'writing', note: 'Rewrite the list.' });
   await page.waitForFunction(() => document.querySelector('.marble-zone'), null, { timeout: 4000 });
-  assert.match(await page.locator('.marble-zone').innerText(), /Agent · rewrite the list/);
+  assert.match(await page.locator('.marble-zone').innerText(), /^Rewrite the list/);
   assert.equal(await page.locator('.marble-act').count(), 0, 'the act label does not hold the zone off the page');
 });

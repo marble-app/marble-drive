@@ -2114,9 +2114,11 @@ test('the row names the other document, and pressing it opens that document at t
   await page.waitForFunction(() => document.documentElement.classList.contains('marble-collab-host'));
   assert.equal(await page.evaluate(() => location.hash), '', 'the hash is spent on arrival');
   // The tab arrived after the frame was broadcast, and is caught up on joining:
-  // landing on the page the agent is in and seeing no box would read as broken.
-  await page.locator('.marble-zone').waitFor();
-  assert.match(await page.locator('.marble-zone-label').innerText(), /Agent · rename the heading/);
+  // landing on the page the agent is in and seeing nothing marked would read
+  // as broken. The heading it renamed is tinted, and the change's tag counts it.
+  await page.locator('.marble-change-tag').waitFor();
+  assert.equal(await page.locator('.marble-change-tag .marble-change-said').innerText(), 'Rewriting 1 heading');
+  assert.equal(await page.locator('.marble-zone').count(), 0, 'the marks, not a box');
 });
 
 /** The same view in callout chrome: what the card at a selection holds. */

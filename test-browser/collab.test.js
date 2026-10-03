@@ -231,7 +231,8 @@ test('agent presence tapes off the region it is working on', async () => {
   });
   const zone = page.locator('.marble-zone');
   assert.equal(await zone.count(), 1);
-  assert.match(await zone.innerText(), /Agent · working/);
+  assert.match(await zone.innerText(), /^Working/);
+  assert.doesNotMatch(await zone.innerText(), /Agent/, 'where a change happens the page never names who is making it');
   assert.equal(
     await page.locator('[data-marble-id="p"]').evaluate((el) => el.classList.contains('marble-presence')),
     false,
@@ -257,7 +258,7 @@ test('the construction label uses the apply_ops note, and Hide puts it away', as
     }));
   });
   const zone = page.locator('.marble-zone');
-  assert.match(await zone.innerText(), /Agent · rename the heading(?!\.)/);
+  assert.match(await zone.innerText(), /^Rename the heading(?!\.)/);
 
   // Hide is in the zone's own pill; the way back is the work tool in the
   // tray above the launcher, which is where every agent affordance lives now.
@@ -371,7 +372,7 @@ test('agent work with nothing to point at draws nothing', async () => {
   );
 });
 
-test('the construction label keeps an all-caps first word and names the phase without a note', async () => {
+test('the construction label is the note as a sentence, keeps an all-caps first word, and names the phase without a note', async () => {
   await host.reset();
   const { page } = await host.newPage({ attending: FOLLOWED });
   await page.goto(`${host.base}/a/forked`);
@@ -382,10 +383,11 @@ test('the construction label keeps an all-caps first word and names the phase wi
     }, { client: 'agent:c1', ids: ['p'], ...detail });
     return (await page.locator('.marble-zone-label').innerText()).replace(/\s*Open chat\s*Hide\s*$/, '').trim();
   };
-  assert.equal(await labelFor({ phase: 'writing', note: 'PDF export gets a footer.' }), 'Agent · PDF export gets a footer');
-  assert.equal(await labelFor({ phase: 'reading' }), 'Agent · reading');
-  assert.equal(await labelFor({ phase: 'writing' }), 'Agent · writing');
-  assert.equal(await labelFor({ phase: 'working' }), 'Agent · working');
+  assert.equal(await labelFor({ phase: 'writing', note: 'PDF export gets a footer.' }), 'PDF export gets a footer');
+  assert.equal(await labelFor({ phase: 'writing', note: 'add a footer' }), 'Add a footer');
+  assert.equal(await labelFor({ phase: 'reading' }), 'Reading');
+  assert.equal(await labelFor({ phase: 'writing' }), 'Writing');
+  assert.equal(await labelFor({ phase: 'working' }), 'Working');
 });
 
 // ------------------------------------------------------- the zone is someone else
@@ -491,10 +493,11 @@ test('a conversation on the page it is working in scrolls there without a naviga
   assert.equal(await page.evaluate(() => location.hash), '', 'no hash left in the history to get back past');
 });
 
-// ---------------------------------------------------------------- the trail
+// ------------------------------------------------- what a change leaves behind
 // These drive collab.js the way the rest of this file does, with the events
-// the carrier and the host really send. The end-to-end path — a real turn
-// leaving a real trail — is test-browser/callout.test.js.
+// the carrier and the host really send. There is no trail any more: a change
+// is marked part by part while it runs (change-marks.js, whose own suite is
+// test-browser/change-marks.test.js), and nothing stays once it has landed.
 
 const onTyping = async () => {
   await host.reset();
@@ -512,31 +515,46 @@ const zoneFor = (page, client, detail = {}) => page.evaluate(([c, d]) => {
   document.dispatchEvent(new CustomEvent('marble:presence', { detail: { client: c, ...d } }));
 }, [client, detail]);
 
-test('an agent op leaves a trail on the element, and reviewing the chat clears it', async () => {
+const leftOn = (page, id) => page.locator(`[data-marble-id="${id}"]`).evaluate((el) => ({
+  classes: [...el.classList].filter((c) => c.startsWith('marble-')),
+  shadow: getComputedStyle(el).boxShadow,
+}));
+
+test('an agent op flashes the element once and leaves nothing on it', async () => {
   const page = await onTyping();
   await agentOps(page, 'agent:c1', [{ type: 'setText', id: 'h', text: 'Backlog' }]);
-  await page.locator('[data-marble-id="h"].marble-trail').waitFor();
-  // The flash is an animated box-shadow over the same element; the trail is
-  // what is left when it has gone.
+  await page.locator('[data-marble-id="h"].marble-flash').waitFor({ state: 'attached' });
   await page.locator('[data-marble-id="h"].marble-flash').waitFor({ state: 'detached' });
-  const shadow = await page.locator('[data-marble-id="h"]').evaluate((el) => getComputedStyle(el).boxShadow);
-  assert.match(shadow, /inset/, 'the trail is an inset rule, not a border');
-  await page.evaluate(() => document.dispatchEvent(new CustomEvent('marble-callout:reviewed', { detail: { id: 'c1' } })));
-  assert.equal(await page.locator('[data-marble-id="h"].marble-trail').count(), 0);
+  assert.deepEqual(await leftOn(page, 'h'), { classes: [], shadow: 'none' }, 'no trail, no rule down its side');
 });
 
-test('an undo of an agent turn takes the trail back off', async () => {
+test('an undo leaves no marks behind', async () => {
   const page = await onTyping();
-  await agentOps(page, 'agent:c1', [{ type: 'setText', id: 'h', text: 'Backlog' }]);
-  await page.locator('[data-marble-id="h"].marble-trail').waitFor();
-  await agentOps(page, 'agent-undo:c1', [{ type: 'setText', id: 'h', text: 'Head' }]);
-  assert.equal(await page.locator('[data-marble-id="h"].marble-trail').count(), 0);
+  await zoneFor(page, 'agent-undo:c1', { ids: ['p'], phase: 'writing', stage: 'before', turn: 'c1-t1', parts: ['p'] });
+  await page.locator('.marble-change-tint[data-id="p"]').waitFor();
+  assert.equal(await page.locator('.marble-zone').count(), 0, 'an undo draws no box');
+  await agentOps(page, 'agent-undo:c1', [{ type: 'setAttr', id: 'p', name: 'title', value: '' }]);
+  await zoneFor(page, 'agent-undo:c1', { ids: ['p'], phase: 'writing', stage: 'after', turn: 'c1-t1', parts: ['p'] });
+  await page.waitForFunction(() => document.querySelector('.marble-change-layer').children.length === 0, null, { timeout: 3000 });
+  assert.equal(await page.locator('.marble-zone').count(), 0, 'and none comes back once its tints have gone');
+  assert.deepEqual(await leftOn(page, 'p'), { classes: [], shadow: 'none' });
 });
 
-test("a person's own ops leave no trail", async () => {
+test("a person's own ops leave no marks", async () => {
   const page = await onTyping();
   await agentOps(page, 'person:someone', [{ type: 'setText', id: 'h', text: 'Mine' }]);
-  assert.equal(await page.locator('.marble-trail').count(), 0);
+  assert.equal(await page.locator('.marble-trail, .marble-change-layer > *').count(), 0);
+});
+
+test('work marked part by part draws no box; work the host names no parts for keeps it', async () => {
+  const page = await onTyping();
+  await zoneFor(page, 'agent:c1', { ids: ['p'], phase: 'writing', note: 'Grow the page.', stage: 'before', turn: 'c1-t1', parts: ['p'], kind: 'structure', count: 1 });
+  await page.locator('.marble-change-tint[data-id="p"]').waitFor();
+  assert.equal(await page.locator('.marble-zone').count(), 0);
+  await zoneFor(page, 'agent:c1', { ids: [], stage: 'end', turn: 'c1-t1', done: { status: 'completed', changed: 1, added: 0, removed: 0 } });
+  await zoneFor(page, 'agent:open', { ids: ['p'], phase: 'writing', note: 'Grow the page.' });
+  await page.locator('.marble-zone').waitFor();
+  assert.match(await page.locator('.marble-zone-label').innerText(), /^Grow the page/);
 });
 
 test('a claimed zone hides its label, and Open chat can be taken by a callout', async () => {
@@ -579,5 +597,5 @@ test('marble.collab exposes the zone geometry and label helpers', async () => {
       label: window.marble.collab.phaseLabel({ phase: 'writing', note: 'Rename the heading.' }),
     };
   });
-  assert.deepEqual(out, { tape: 'q', body: null, label: 'Agent · rename the heading' });
+  assert.deepEqual(out, { tape: 'q', body: null, label: 'Rename the heading' });
 });

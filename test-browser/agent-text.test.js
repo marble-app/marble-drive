@@ -1,6 +1,7 @@
 // The agent in the text (v3): work on words is a caret in the words — where
-// it will write, "thinking" while it reads, its edit typed out when it lands —
-// and work that is not words keeps its box (Notes and Sketches/Ask at Anything).
+// it will write, a count of the words it is reading, its edit typed out when
+// it lands — and work that is not words is marked part by part instead
+// (change-marks.js; Notes and Sketches/Ask at Anything, v5).
 
 import assert from 'node:assert/strict';
 import test from 'node:test';
@@ -82,13 +83,16 @@ const ask = async (page, prompt) => {
 const caret = (page) => page.locator('.marble-text-caret:not([hidden])');
 const marks = (page, name) => page.evaluate((n) => CSS.highlights.get(n)?.size ?? 0, name);
 
-test('work on words is a caret at their end, thinking, with a wash on them — not a box', async () => {
+test('work on words is a caret at their end, reading them, with a wash on them — not a box', async () => {
   const page = await open();
   await selectWords(page, 'p', 'keep coming back');
   await ask(page, 'script:think');
   await caret(page).waitFor();
-  await page.locator('.marble-text-tag', { hasText: /Agent · (thinking|reading)/ }).waitFor();
+  await page.locator('.marble-text-tag', { hasText: /^Reading \d+ words?$/ }).waitFor();
+  assert.equal(await page.locator('.marble-text-tag').innerText(), 'Reading 3 words', 'the words asked about');
+  assert.doesNotMatch(await page.locator('.marble-text-tag').getAttribute('aria-label'), /agent/i);
   assert.equal(await page.locator('.marble-zone').count(), 0, 'no box round the paragraph');
+  assert.equal(await page.locator('.marble-change-layer > *').count(), 0, 'and no tints or tag of the marks: the caret is the change’s tag');
   assert.equal(await marks(page, 'marble-agent-scope'), 1, 'the words asked about are washed');
   const [end, bar] = await Promise.all([
     page.evaluate(() => {
@@ -112,7 +116,8 @@ test('its edit is typed out after the caret, and when the turn ends the caret go
   await selectAll(page, 'p');
   await ask(page, 'script:retype');
   await caret(page).waitFor();
-  await page.locator('.marble-text-tag', { hasText: 'Agent · typing' }).waitFor({ timeout: 8000 });
+  // The count is of the new words: "returning to, and why they matter".
+  await page.locator('.marble-text-tag', { hasText: /^Typing \d of 6 words$/ }).waitFor({ timeout: 8000 });
   // Mid-type: some of the new words are still hidden, and nothing is boxed.
   await page.waitForFunction(() => (CSS.highlights.get('marble-agent-untyped')?.size ?? 0) > 0, null, { timeout: 4000 });
   assert.equal(await page.locator('.marble-zone').count(), 0);
@@ -139,13 +144,15 @@ test('with reduced motion nothing is typed: the words appear at once, washed', a
   assert.equal(hidden, 0);
 });
 
-test('work that is not words keeps its box, and no caret', async () => {
+test('work that is not words is marked part by part, with no caret and no box', async () => {
   const page = await open();
   await selectAll(page, 'q');
   await ask(page, 'script:hold');
-  await page.locator('.marble-zone').waitFor();
+  await page.locator('.marble-change-tint[data-id="q"]').waitFor();
+  await page.locator('.marble-change-tag').waitFor();
   await page.waitForTimeout(300);
   assert.equal(await caret(page).count(), 0);
+  assert.equal(await page.locator('.marble-zone').count(), 0);
 });
 
 test('while the person types in the same block, the agent\'s caret steps aside', async () => {

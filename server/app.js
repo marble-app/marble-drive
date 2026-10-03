@@ -159,6 +159,9 @@ const RUNTIME = {
   'agent-nudge.js': () => path.join(REPO, 'runtime', 'agent-nudge.js'),
   // The agent in the text: a caret, thinking and typing, for work on words.
   'agent-text.js': () => path.join(REPO, 'runtime', 'agent-text.js'),
+  // The marks (v5): each part a change touches is tinted as it lands, one tag
+  // counts, and a rail stands for parts out of view. The zone box steps aside.
+  'change-marks.js': () => path.join(REPO, 'runtime', 'change-marks.js'),
   // The work, on the page: dots on what an agent changed, a rail, the island
   // while the chat is closed, and the walk through a turn's changes.
   'agent-work.js': () => path.join(REPO, 'runtime', 'agent-work.js'),
@@ -404,6 +407,9 @@ export async function createDrive(config, { log = console, agentProviders = null
       tags += `\n<script src="${runtimeUrl('agent-notes.js')}" data-marble-transient></script>`;
       tags += `\n<script src="${runtimeUrl('agent-nudge.js')}" data-marble-transient></script>`;
       tags += `\n<script src="${runtimeUrl('agent-text.js')}" data-marble-transient></script>`;
+      // After the caret in the text, whose claims it defers to, and after
+      // collab.js, whose zones step aside for what it marks.
+      tags += `\n<script src="${runtimeUrl('change-marks.js')}" data-marble-transient></script>`;
     }
     if (agents) tags += `\n<script src="${runtimeUrl('agent-work.js')}" data-marble-transient></script>`;
     if (agents) tags += `\n<script src="${runtimeUrl('agent-run.js')}" data-marble-transient></script>`;

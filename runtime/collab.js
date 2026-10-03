@@ -67,13 +67,6 @@
         100% { box-shadow: 0 0 0 0 transparent; }
       }
 
-      /* Where an agent's turn landed, until the chat is reviewed. An inset
-         rule: it cannot move layout, it survives the element's own overflow,
-         and it goes when the class goes. */
-      html.marble-collab-host .marble-trail {
-        box-shadow: inset 2px 0 0 var(--accent-ink, color-mix(in srgb, #6d55d4 78%, var(--ink, #222)));
-      }
-
       .marble-fork {
         display: flex;
         flex-wrap: wrap;
@@ -575,9 +568,9 @@
       return node;
     }
 
-    // The note is written as a sentence ("Rename the heading."); after
-    // "Agent ·" it reads as a clause, so it loses its capital and its period —
-    // unless the first word is all capitals, which is a name, not a sentence.
+    // The note is written as a sentence ("Rename the heading."); after a "·"
+    // it reads as a clause, so it loses its capital and its period — unless
+    // the first word is all capitals, which is a name, not a sentence.
     function asClause(note) {
       const text = note.replace(/\.\s*$/, '');
       const first = text.match(/^\S+/)?.[0] ?? '';
@@ -605,6 +598,14 @@
       return PAST.has(words[0]?.toLowerCase()) ? words.slice(1).join(' ') : String(note ?? '').trim();
     }
 
+    // Standing alone, the note is what is changing, said as the page's own
+    // status: "Rename the heading", not "Agent · rename the heading". Where a
+    // change happens the page never names who is making it (v5).
+    function asLabel(note) {
+      const text = note.replace(/\.\s*$/, '');
+      return text.charAt(0).toUpperCase() + text.slice(1);
+    }
+
     function phaseLabel(detail) {
       const note = String(detail.note ?? '').trim();
       // A press is one control at one instant, and the sentence for it is the
@@ -613,14 +614,14 @@
       if (detail.phase === 'acting') {
         if (detail.deferred) {
           const what = bareNote(note);
-          return what ? `Agent · waiting for you · ${what}` : 'Agent · waiting for you';
+          return what ? `Waiting for you · ${what}` : 'Waiting for you';
         }
-        return note ? `Agent · ${asClause(note)}` : 'Agent · pressing';
+        return note ? asLabel(note) : 'Pressing';
       }
-      if (note) return `Agent · ${asClause(note)}`;
-      if (detail.phase === 'reading') return 'Agent · reading';
-      if (detail.phase === 'writing') return 'Agent · writing';
-      return 'Agent · working';
+      if (note) return asLabel(note);
+      if (detail.phase === 'reading') return 'Reading';
+      if (detail.phase === 'writing') return 'Writing';
+      return 'Working';
     }
 
     // The callout layer hangs its card where the zone hangs its label, and
@@ -632,8 +633,9 @@
     }
 
     // A zone is drawn by a client named `agent:<conversation>`; an undo writes
-    // as `agent-undo:<conversation>` and draws none, so only the first form is
-    // ever a chat you could be taken to.
+    // as `agent-undo:<conversation>` and draws none (its parts are tinted where
+    // they land, change-marks.js), so only the first form is ever a chat you
+    // could be taken to.
     const conversationOf = (client) => {
       const name = String(client ?? '');
       return name.startsWith('agent:') ? name.slice('agent:'.length) || null : null;
@@ -802,11 +804,17 @@
     addEventListener('marble:attending', () => paintZones());
     const inText = (client) => Boolean(window.marbleText?.claims?.(client));
     addEventListener('marble-text:claims', () => paintZones());
+    // Work marked part by part (change-marks.js, v5): a tint on each part and
+    // one counting tag say where it is better than a box round all of it.
+    const marked = (client) => Boolean(window.marbleChange?.claims?.(client));
+    const markedWork = () => (window.marbleChange?.runs?.() ?? []).length > 0;
+    addEventListener('marble-change:claims', () => paintZones());
 
     function zonesToPaint() {
       const zones = [];
       for (const detail of presence.values()) {
         if (!isAgent(detail.client)) continue;
+        if (String(detail.client).startsWith('agent-undo:')) continue;
         // A client mid-press has a ring, and the ring carries the label. A box
         // around the button as well would say the agent is rewriting it.
         if (acts.has(detail.client)) continue;
@@ -817,6 +825,9 @@
         // Work inside one block of text is drawn in the text: a caret, not a
         // box (agent-text.js, v3).
         if (inText(detail.client)) continue;
+        // Its parts are marked one by one; the box is left only for work
+        // with nothing of it on the page to mark.
+        if (marked(detail.client)) continue;
         const target = tapeTarget((detail.ids ?? []).map((id) => byId(id)).filter(Boolean));
         if (target) zones.push({ detail, target });
       }
@@ -842,9 +853,10 @@
       const hidden = zonesHidden();
       document.documentElement.classList.toggle('marble-zones-off', hidden);
       // Work drawn in the text is still work on this page: the same toggle
-      // hides and shows its caret (agent-text.js reads marble-zones-off).
+      // hides and shows its caret (agent-text.js reads marble-zones-off), and
+      // the marks on each part (change-marks.js hides its layer with it).
       const inTextWork = [...presence.values()].some((d) => isAgent(d.client) && attended(d.client) && inText(d.client));
-      if (!zones.length && !inTextWork) {
+      if (!zones.length && !inTextWork && !markedWork()) {
         offerWork('none');
         return;
       }
@@ -997,7 +1009,7 @@
         // An act that ran and changed nothing is a finding about the app, not
         // a failure of the press. Silence would read as the feedback breaking.
         : 'nothing changed';
-      return `${note ? `Agent · ${asClause(note)}` : 'Agent · pressed'} · ${said}`;
+      return `${note ? asLabel(note) : 'Pressed'} · ${said}`;
     }
 
     function beginAct(detail) {
@@ -1460,29 +1472,15 @@
     }).observe(document.documentElement, { subtree: true, childList: true, characterData: true, attributes: true });
     const sizes = typeof ResizeObserver === 'function' ? new ResizeObserver(scheduleRelayout) : null;
 
-    // The trail: what an agent's turn touched, kept per conversation so the
-    // one that wrote it is the one that can take it back. An undo writes as
-    // `agent-undo:<id>`, which lifts the trail its own turn left.
-    const trails = new Map();
-    const trailClient = (client) => {
-      const name = String(client ?? '');
-      if (name.startsWith('agent-undo:')) return { client: `agent:${name.slice('agent-undo:'.length)}`, undo: true };
-      if (name.startsWith('agent:')) return { client: name, undo: false };
-      return null;
-    };
-    const clearTrail = (client) => {
-      for (const id of trails.get(client) ?? []) byId(id)?.classList.remove('marble-trail');
-      trails.delete(client);
-    };
-    document.addEventListener('marble-callout:reviewed', (event) => {
-      if (event.detail?.id) clearTrail(`agent:${event.detail.id}`);
-    });
-
+    // What a turn changed leaves nothing on the page once it is done (v5);
+    // the change is drawn again only when someone asks to see it.
     document.addEventListener('marble:ops', ({ detail }) => {
       const ops = detail?.ops ?? [];
       const act = acts.get(detail?.client);
       const forked = new Set();
-      const trail = trailClient(detail?.client);
+      // A part already tinted as it lands (change-marks.js) needs no ring
+      // flashed round it as well. A press's effect still waits for its ring.
+      const tinted = marked(detail?.client);
       for (const op of ops) {
         if (op.type === 'insert' && /<marble-alt[\s>]/.test(op.html ?? '')) {
           const id = op.html.match(/data-marble-id="([^"]+)"/)?.[1];
@@ -1496,18 +1494,7 @@
         // a ring round the whole block would be the box that replaced.
         if (op.id && !inText(detail?.client)) {
           if (act?.frame && !act.ending) act.held.push(op.id);
-          else flash(op.id);
-        }
-        if (trail && op.id) {
-          const set = trails.get(trail.client) ?? new Set();
-          if (trail.undo) {
-            set.delete(op.id);
-            byId(op.id)?.classList.remove('marble-trail');
-          } else {
-            set.add(op.id);
-            byId(op.id)?.classList.add('marble-trail');
-          }
-          trails.set(trail.client, set);
+          else if (!tinted) flash(op.id);
         }
       }
       deriveAlts();
