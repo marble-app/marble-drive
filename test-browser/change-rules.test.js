@@ -53,7 +53,12 @@ const SCRIPTS = {
 };
 const host = await startDrive({
   scripts: SCRIPTS,
-  documents: { board: board(), inline: board({ inline: ' style="border-radius: 8px"' }) },
+  documents: {
+    board: board(),
+    inline: board({ inline: ' style="border-radius: 8px"' }),
+    // A card whose own style holds a semicolon inside a value: a data: URL.
+    dataurl: board({ inline: ` style='border-radius: 8px; background-image: url("data:image/svg+xml;utf8,%3Csvg xmlns=%22http://www.w3.org/2000/svg%22 width=%224%22 height=%224%22/%3E")'` }),
+  },
 });
 test.after(() => host.close());
 const MOD = process.platform === 'darwin' ? 'Meta' : 'Control';
@@ -812,4 +817,21 @@ test('a hand\'s change that no rule would reach lands on the part\'s own style, 
   assert.equal(await page.locator('[data-marble-id="c2"]').getAttribute('style'), 'border-radius: 16px');
   const [entry] = await page.evaluate(() => window.__records);
   assert.deepEqual(entry.redo.map((op) => op.type), ['setAttr']);
+});
+
+// ------------------------------------------------------------ final review
+
+test('a card\'s own style with a data: URL in it keeps the URL whole when the hand\'s value lands on it', async () => {
+  const page = await open({ doc: 'dataurl' });
+  const image = () => page.evaluate(() => getComputedStyle(document.querySelector('[data-marble-id="c2"]')).backgroundImage);
+  const was = await image();
+  assert.match(was, /svg\+xml;utf8,/);
+  const dot = await grab(page);
+  await dragBy(page, dot, 20, 20);
+  await page.mouse.up();
+  await page.waitForFunction(() => window.__records.length === 1);
+  const style = await page.locator('[data-marble-id="c2"]').getAttribute('style');
+  assert.match(style, /border-radius: 32px/);
+  assert.match(style, /data:image\/svg\+xml;utf8,/, `the URL is whole: ${style}`);
+  assert.equal(await image(), was, 'the background is the same picture');
 });

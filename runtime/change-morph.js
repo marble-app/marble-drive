@@ -543,14 +543,32 @@
   const UNGHOSTED = new Set(['script', 'style', 'link', 'meta', 'base', 'title', 'iframe', 'object', 'embed', 'noscript', 'template', 'frame', 'frameset']);
   const STRIP = ['id', ID, 'name', 'for', 'form', 'autofocus', 'autoplay', 'contenteditable', 'tabindex', 'accesskey', 'popover', 'draggable'];
 
+  const XHTML = 'http://www.w3.org/1999/xhtml';
+  const FOREIGN = { 'http://www.w3.org/2000/svg': 'svg', 'http://www.w3.org/1998/Math/MathML': 'math' };
+
+  /** A copy of `el` made from its markup in an inert document, as the
+   *  review's copies are (change-review.js): no constructor, handler or load
+   *  of it stirs on the way. A part of a drawing is parsed inside one. */
+  function inertCopyOf(el) {
+    const t = document.createElement('template');
+    const wrap = el.namespaceURI !== XHTML && !Object.values(FOREIGN).includes(el.localName) ? FOREIGN[el.namespaceURI] : null;
+    t.innerHTML = wrap ? `<${wrap}>${el.outerHTML}</${wrap}>` : el.outerHTML;
+    return (wrap ? t.content.firstElementChild?.firstElementChild : t.content.firstElementChild) ?? null;
+  }
+
   /** A copy of `el` that looks as it does, drawn on its own outside the
-   *  page: no ids, no scripts, nothing that can be pressed or focused. */
+   *  page: no ids, no scripts, nothing that can be pressed or focused, and
+   *  a component of the page's own is a plain box, so a ghost never comes
+   *  to life as a second one of itself. */
   function ghostOf(el, rect, most = GHOST_STYLED) {
-    const clone = el.cloneNode(true);
+    let clone = inertCopyOf(el) ?? document.createElement('div');
     const from = [el, ...el.querySelectorAll('*')];
     const to = [clone, ...clone.querySelectorAll('*')];
     const styled = Math.max(1, Math.min(from.length, to.length, most));
     for (let i = 0; i < styled; i += 1) {
+      // Markup the parser puts back otherwise than the page holds it: the
+      // look goes only where the copy has the same element.
+      if (to[i].localName !== from[i].localName) continue;
       const css = getComputedStyle(from[i]);
       const look = to[i].style;
       for (const name of LOOKS) look.setProperty(name, css.getPropertyValue(name));
@@ -566,6 +584,14 @@
       for (const name of STRIP) node.removeAttribute(name);
       for (const a of [...node.attributes]) if (/^on/i.test(a.name)) node.removeAttribute(a.name);
       for (const name of [...node.classList]) if (name.startsWith('marble-')) node.classList.remove(name);
+    }
+    for (const node of [clone, ...clone.querySelectorAll('*')]) {
+      if (!node.localName.includes('-') || node.namespaceURI !== XHTML) continue;
+      const box = node.ownerDocument.createElement('div');
+      for (const { name, value } of [...node.attributes]) box.setAttribute(name, value);
+      box.append(...node.childNodes);
+      if (node.parentNode) node.replaceWith(box);
+      if (node === clone) clone = box;
     }
     const display = getComputedStyle(el).display;
     const look = clone.style;
@@ -958,10 +984,12 @@
     return played.finally(done);
   }
 
+  /** A part's element now: the one read before the batch while it is still
+   *  on the page, else what took its id. A lookup reads the whole page. */
   function liveOf(entry) {
+    if (entry.el?.isConnected && !transient(entry.el)) return entry.el;
     const el = entry.id ? byId(entry.id) : null;
-    if (el && !transient(el)) return el;
-    return entry.el.isConnected && !transient(entry.el) ? entry.el : null;
+    return el && !transient(el) ? el : null;
   }
 
   const inOrder = (a, b) => (a.el.compareDocumentPosition(b.el) & Node.DOCUMENT_POSITION_FOLLOWING ? -1 : 1);

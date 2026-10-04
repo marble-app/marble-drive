@@ -74,6 +74,16 @@ const SHEET = `<!doctype html>
 </body></html>
 `;
 
+// A component of the page's own, which counts every instance of itself.
+const COMP = `<!doctype html>
+<html><head><meta charset="utf-8"><title>Component</title>
+<style>body { font: 15px/1.5 system-ui, sans-serif; margin: 40px; } morph-card { display: block; padding: 8px; border: 1px solid #bbb; }</style></head>
+<body data-marble-id="b">
+  <ul data-marble-id="u"><li data-marble-id="k1"><morph-card data-marble-id="mc"><b data-marble-id="mcb">Card</b></morph-card></li><li data-marble-id="k2">Two</li></ul>
+  <script data-marble-id="def">customElements.define('morph-card', class extends HTMLElement { constructor() { super(); window.__made = (window.__made || 0) + 1; } });</script>
+</body></html>
+`;
+
 const CARD_IDS = ['c1', 'c2', 'c3', 'c4', 'c5', 'c6'];
 
 const SCRIPTS = {
@@ -87,7 +97,7 @@ const SCRIPTS = {
   ],
 };
 
-const host = await startDrive({ scripts: SCRIPTS, documents: { cards: CARDS, many: MANY, rows: ROWS, sheet: SHEET } });
+const host = await startDrive({ scripts: SCRIPTS, documents: { cards: CARDS, many: MANY, rows: ROWS, sheet: SHEET, comp: COMP } });
 test.after(() => host.close());
 
 const pages = [];
@@ -710,4 +720,52 @@ test('words the edit left alone stay seen while only the new ones are written in
   assert.ok(seen.length > 0, 'the new words were written in');
   for (const words of seen) assert.doesNotMatch(words, /world/, `"${words}" was hidden`);
   assert.ok(seen.some((words) => words.includes('you')));
+});
+
+// ------------------------------------------------------------ final review
+
+test('a ghost never brings a component of the page\'s own to life a second time', async () => {
+  const { page } = await open({ doc: 'comp' });
+  const seen = await page.evaluate(async () => {
+    const made = window.__made;
+    const snap = window.marbleMorph.capture(['k1'], { kind: 'structure', removes: ['k1'] });
+    window.marble.apply({ type: 'remove', id: 'k1' });
+    const played = window.marbleMorph.play(snap, {});
+    const ghost = document.querySelector('.marble-morph-layer')?.firstElementChild;
+    const out = {
+      made,
+      during: window.__made,
+      tags: ghost ? [ghost, ...ghost.querySelectorAll('*')].map((n) => n.localName) : null,
+      text: ghost?.textContent.trim() ?? null,
+    };
+    await played;
+    out.after = window.__made;
+    return out;
+  });
+  assert.equal(seen.made, 1);
+  assert.equal(seen.text, 'Card', 'the row is drawn fading where it stood');
+  assert.ok(seen.tags.every((tag) => !tag.includes('-')), `no component in the ghost: ${seen.tags.join(' ')}`);
+  assert.equal(seen.during, 1, 'no second card is made for the ghost');
+  assert.equal(seen.after, 1);
+});
+
+test('a play reads each part from the element it captured, not by looking it up again', async () => {
+  const { page } = await open();
+  const lookups = await page.evaluate(async (ids) => {
+    const snap = window.marbleMorph.capture(ids, { kind: 'attr' });
+    for (const id of ids) window.marble.apply({ type: 'setAttr', id, name: 'class', value: 'card round' });
+    let n = 0;
+    const own = Document.prototype.querySelector;
+    document.querySelector = function querySelector(selector) {
+      if (/data-marble-id=/.test(selector)) n += 1;
+      return own.call(this, selector);
+    };
+    try {
+      await window.marbleMorph.play(snap, {});
+    } finally {
+      delete document.querySelector;
+    }
+    return n;
+  }, CARD_IDS);
+  assert.ok(lookups <= 1, `${lookups} lookups by id for six parts`);
 });

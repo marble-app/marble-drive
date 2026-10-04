@@ -338,14 +338,19 @@
     const frozen = (attrValue) => (attrValue && attrValue.trim() ? `${attrValue.trim().replace(/;?\s*$/, '; ')}${FROZEN}` : FROZEN);
     const setStyle = (el, value) => (value == null ? el.removeAttribute('style') : el.setAttribute('style', value));
     const read = (el, prop) => getComputedStyle(el).getPropertyValue(prop).trim();
-    /** A style attribute with `prop` set last, and anything it outvotes gone. */
+    /** A style attribute with `prop` set last, and anything it outvotes gone.
+     *  Edited the way the browser reads it, on an element of its own: a
+     *  value can hold a semicolon of its own (a data: URL, a quoted string),
+     *  so the attribute is never cut at each one. */
     function withProp(attrValue, prop, value) {
+      const probe = document.createElement('i');
+      probe.setAttribute('style', String(attrValue ?? ''));
+      const decl = probe.style;
       const over = LONGHANDS[prop];
-      const kept = String(attrValue ?? '').split(';').map((d) => d.trim()).filter(Boolean).filter((d) => {
-        const name = d.slice(0, d.indexOf(':')).trim().toLowerCase();
-        return name !== prop && !(over && over.test(name));
-      });
-      return [...kept, `${prop}: ${value}`].join('; ');
+      decl.removeProperty(prop);
+      if (over) for (const name of [...decl]) if (over.test(name)) decl.removeProperty(name);
+      decl.setProperty(prop, value);
+      return decl.cssText.replace(/;\s*$/, '');
     }
     function bodyId() {
       if (!idOf(document.body)) marble.address?.([document.body]);
