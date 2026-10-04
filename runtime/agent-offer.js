@@ -173,14 +173,49 @@
     return { lead: '', idea: '', line: 'Mark and draw on the page what you mean' };
   }
 
+  /** What a thing could become, by its kind, until the host writes better:
+   *  its suggestions and each action's idea (`offer`), the gaps of a row
+   *  still to fill, and how an action names it ("this row"). */
+  function offerFor({ kind = 'part', count = 1, element = null } = {}) {
+    const k = DEFAULTS[kind] ? kind : 'part';
+    const offer = { ...DEFAULTS[k], sugs: [...DEFAULTS[k].sugs] };
+    const gaps = !(count > 1) && kind !== 'words' && kind !== 'table' ? gapsOf(element) : null;
+    if (gaps) offer.auto = `fill ${gaps.cols} from the ${gaps.from}`;
+    return { offer, gaps, thisWhat: thisOf(kind, count, k === 'part' ? 'part' : kind) };
+  }
+
+  /** What the host wrote for this thing (POST /agent/offer), taken into
+   *  `offer`. True when it brought suggestions of its own. */
+  function takeWritten(offer, written, gaps = null) {
+    if (!written || typeof written !== 'object') return false;
+    if (written.automatic && !gaps) offer.auto = written.automatic;
+    if (written.interactive) offer.interactive = written.interactive;
+    if (written.variations) offer.axes = written.variations;
+    const got = (Array.isArray(written.suggestions) ? written.suggestions : [])
+      .map((s) => (typeof s === 'string' ? s : s?.label)).filter(Boolean).map(capital);
+    if (!got.length) return false;
+    offer.sugs = got;
+    return true;
+  }
+
+  /** Ask the host to write suggestions for these things: `{ suggestions,
+   *  automatic, interactive, variations }`, or null when it writes none. */
+  async function fetchOffer({ path, ids, words = '' } = {}) {
+    try {
+      const res = await fetch('/agent/offer', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ path, ids, words: String(words ?? '').slice(0, 400) }),
+      });
+      return res.ok && res.status !== 204 ? await res.json() : null;
+    } catch { return null; }
+  }
+
   /** An action drafted for a thing outside a card: the line (change-line.js)
    *  opens with these words when an offer after an edit names an action. */
   function draftFor(id, { kind = 'part', count = 1, element = null } = {}) {
-    const k = DEFAULTS[kind] ? kind : 'part';
-    const offer = { ...DEFAULTS[k] };
-    const gaps = !(count > 1) && kind !== 'words' && kind !== 'table' ? gapsOf(element) : null;
-    if (gaps) offer.auto = `fill ${gaps.cols} from the ${gaps.from}`;
-    return actionWords(id, thisOf(kind, count, k === 'part' ? 'part' : kind), offer);
+    const { offer, thisWhat } = offerFor({ kind, count, element });
+    return actionWords(id, thisWhat, offer);
   }
 
   /**
@@ -391,13 +426,7 @@
         try { written = await o.fetchOffer(); } catch { written = null; }
       }
       if (!root.isConnected || !written) return;
-      if (written.automatic && !gaps) offer.auto = written.automatic;
-      if (written.interactive) offer.interactive = written.interactive;
-      if (written.variations) offer.axes = written.variations;
-      const got = (written.suggestions ?? []).map((s) => (typeof s === 'string' ? s : s?.label)).filter(Boolean).map(capital);
-      if (!got.length) return;
-      offer.sugs = got;
-      if (!text()) paintSuggestions();
+      if (takeWritten(offer, written, gaps) && !text()) paintSuggestions();
     })();
 
     const finish = (keep) => {
@@ -443,5 +472,5 @@
     };
   }
 
-  globalThis.marbleOffer = { mount, briefFor, draftFor, DEFAULTS, ACTIONS };
+  globalThis.marbleOffer = { mount, briefFor, draftFor, offerFor, takeWritten, fetchOffer, actionWords, DEFAULTS, ACTIONS, ICONS };
 })();

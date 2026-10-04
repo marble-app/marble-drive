@@ -67,7 +67,8 @@ const keep = async (page, id, text) => {
   await handle(page).click();
   await lineInput(page).waitFor();
   await page.keyboard.type(text);
-  await page.keyboard.press('Shift+Enter');
+  // A click away keeps the words as a note (⇧⏎ breaks the line now).
+  await page.mouse.click(5, 700);
   await page.waitForFunction(() => !document.querySelector('.marble-line'));
 };
 
@@ -78,7 +79,7 @@ const edit = (page, id, text) => page.evaluate(({ mid, words }) => {
   window.marble.op({ type: 'setText', id: mid, text: words });
 }, { mid: id, words: text });
 
-test('⇧⏎ keeps the ask as a numbered pin, the count sits by the chat button, and notes last a reload', async () => {
+test('a click away keeps the ask as a numbered pin, the count sits by the chat button, and notes last a reload', async () => {
   const page = await open();
   await keep(page, 'q1', 'Say it more plainly');
   const pin = page.locator('.marble-note-pin:not([hidden])');

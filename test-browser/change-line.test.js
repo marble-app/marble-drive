@@ -76,11 +76,11 @@ const clearConversations = async () => {
   }
 };
 
-const open = async ({ viewport = { width: 1280, height: 800 } } = {}) => {
+const open = async ({ viewport = { width: 1280, height: 800 }, reducedMotion = 'no-preference' } = {}) => {
   await closePages();
   await host.reset();
   await clearConversations();
-  const { page, errors } = await host.newPage({ viewport });
+  const { page, errors } = await host.newPage({ viewport, reducedMotion });
   pages.push(page);
   await page.goto(`${host.base}/a/list`);
   await page.waitForFunction(() => Boolean(window.marble?.agent && window.marbleLine));
@@ -92,6 +92,8 @@ const open = async ({ viewport = { width: 1280, height: 800 } } = {}) => {
 // thing, and one put away may still be fading.
 const line = (page) => page.locator('.marble-line:not([data-state="sent"]):not([data-leaving])');
 const input = (page) => page.locator('.marble-line:not([data-state="sent"]):not([data-leaving]) .marble-line-input');
+// Once the line has arrived (it rises into place, as the card did).
+const settled = (page) => page.evaluate(() => Promise.all([...document.querySelectorAll('.marble-line')].flatMap((el) => el.getAnimations().map((a) => a.finished.catch(() => {})))));
 const lineGone = (page) => page.waitForFunction(() => !document.querySelector('.marble-line'), null, { timeout: 5000 });
 const boxOf = (page, id) => page.locator(`[data-marble-id="${id}"]`).boundingBox();
 const pointAt = async (page, id) => {
@@ -141,6 +143,7 @@ test('⌘J on a selected phrase hangs one line under its paragraph, flush with i
   await page.waitForFunction(() => window.marble.agent.context().selection.includes('p'));
   await summon(page);
   await line(page).waitFor();
+  await settled(page);
   assert.equal(await page.locator('.marble-callout').count(), 0, 'no card');
   const [para, box] = await Promise.all([boxOf(page, 'p'), line(page).boundingBox()]);
   assert.ok(Math.abs(box.x - para.x) <= 1, `left edges: ${box.x} vs ${para.x}`);
@@ -161,6 +164,7 @@ test('⌘J with nothing under the pointer or caret is about the page: one line a
   await page.mouse.move(900, 600);
   await summon(page);
   await line(page).waitFor();
+  await settled(page);
   assert.equal(await line(page).getAttribute('data-scope'), 'page');
   assert.equal(await input(page).getAttribute('data-placeholder'), 'Change this page');
   const box = await line(page).boundingBox();
@@ -339,6 +343,7 @@ test('[ widens the line from a row to its list, and ] narrows it back', async ()
   await page.keyboard.press('BracketLeft');
   assert.equal(await input(page).getAttribute('data-placeholder'), 'Change this list');
   assert.deepEqual(await page.evaluate(() => window.marble.agent.context().selection), ['list']);
+  await settled(page);
   const [list, box] = await Promise.all([boxOf(page, 'list'), line(page).boundingBox()]);
   assert.ok(Math.abs(box.y - (list.y + list.height + 10)) <= 1, 'it hangs under the list now');
   await page.keyboard.press('BracketRight');
@@ -719,4 +724,276 @@ test('a press outside that is cancelled leaves no promise behind: a later press 
   await page.evaluate(() => document.body.dispatchEvent(new PointerEvent('pointerup', { bubbles: true, composed: true, clientX: 900, clientY: 600 })));
   await page.waitForTimeout(100);
   assert.equal(await page.evaluate(() => document.activeElement === document.body), true, 'the keys stay where they are');
+});
+
+// ------------------------------------------------------------ the card's ways, back in the line
+
+// What each piece of the line, its tint and its chips ran as it arrived, and
+// what the line ran as it left: read the moment each is drawn, since an
+// entrance is over before the test could look.
+const watchMotion = (page) => page.evaluate(() => {
+  window.__arrived = [];
+  window.__left = [];
+  const read = (el) => el.getAnimations().map((a) => ({
+    easing: a.effect.getTiming().easing,
+    duration: a.effect.getTiming().duration,
+    props: [...new Set(a.effect.getKeyframes().flatMap((k) => Object.keys(k).filter((key) => !['offset', 'computedOffset', 'easing', 'composite'].includes(key))))],
+    first: a.effect.getKeyframes()[0],
+  }));
+  const seen = new WeakSet();
+  new MutationObserver(() => {
+    for (const el of document.querySelectorAll('.marble-line, .marble-line-scope, .marble-line-chip')) {
+      if (seen.has(el)) continue;
+      seen.add(el);
+      window.__arrived.push({ cls: el.classList[0], animations: read(el) });
+    }
+    for (const el of document.querySelectorAll('.marble-line[data-leaving]')) {
+      if (seen.has(el.dataset)) continue;
+      seen.add(el.dataset);
+      window.__left.push({ animations: read(el) });
+    }
+  }).observe(document.documentElement, { childList: true, subtree: true, attributes: true, attributeFilter: ['data-leaving'] });
+});
+const chips = (page) => page.locator('.marble-line:not([data-state="sent"]):not([data-leaving]) .marble-line-chip:not([hidden])');
+const chipTexts = (page) => chips(page).evaluateAll((els) => els.map((el) => el.textContent.trim()));
+const notes = (page) => page.evaluate(() => window.marbleNotes?.list() ?? []);
+
+test('the line, its tint and its chips arrive as the card did, on the house curve, and the line leaves the same way back', async () => {
+  const page = await open();
+  await watchMotion(page);
+  await pointAt(page, 'r2');
+  await summon(page);
+  await input(page).waitFor();
+  const arrived = await page.evaluate(() => window.__arrived);
+  const of = (cls) => arrived.filter((a) => a.cls === cls);
+  const [lineIn] = of('marble-line');
+  const moved = lineIn.animations.find((a) => a.props.includes('opacity') && a.props.includes('transform'));
+  assert.ok(moved, JSON.stringify(lineIn));
+  assert.equal(String(moved.first.opacity), '0');
+  assert.match(moved.first.transform, /translateY\(-?\d+px\) scale\(0\.98\)/);
+  assert.equal(moved.easing, 'cubic-bezier(0.22, 1, 0.36, 1)');
+  assert.ok(moved.duration >= 160 && moved.duration <= 260, String(moved.duration));
+  assert.ok(of('marble-line-scope')[0].animations.some((a) => a.props.includes('opacity') && a.easing === 'cubic-bezier(0.22, 1, 0.36, 1)'), 'the tint fades in');
+  const chipIns = of('marble-line-chip');
+  assert.ok(chipIns.length >= 4, 'chips arrived');
+  assert.ok(chipIns.every((c) => c.animations.some((a) => a.props.includes('opacity'))), 'each chip arrives');
+  await page.keyboard.press('Escape');
+  await lineGone(page);
+  const [left] = await page.evaluate(() => window.__left);
+  assert.ok(left.animations.some((a) => a.props.includes('opacity') && a.props.includes('transform') && a.easing === 'cubic-bezier(0.22, 1, 0.36, 1)'), JSON.stringify(left));
+});
+
+test('with reduced motion the line, its tint and its chips only fade', async () => {
+  const page = await open({ reducedMotion: 'reduce' });
+  await watchMotion(page);
+  await pointAt(page, 'r2');
+  await summon(page);
+  await input(page).waitFor();
+  const arrived = await page.evaluate(() => window.__arrived);
+  const all = arrived.flatMap((a) => a.animations);
+  assert.ok(arrived.find((a) => a.cls === 'marble-line').animations.length >= 1, 'the line still fades in');
+  assert.ok(all.every((a) => a.props.every((p) => p === 'opacity')), JSON.stringify(all));
+  await page.keyboard.press('Escape');
+  await lineGone(page);
+  const left = (await page.evaluate(() => window.__left)).flatMap((l) => l.animations);
+  assert.ok(left.every((a) => a.props.every((p) => p === 'opacity')), JSON.stringify(left));
+});
+
+test('the line offers what the thing could become: its kind\'s suggestions and the four actions, then the ones written for it', async () => {
+  const page = await open();
+  let release;
+  const held = new Promise((resolve) => { release = resolve; });
+  const asked = [];
+  await page.route('**/agent/offer', async (route) => {
+    asked.push(JSON.parse(route.request().postData() || '{}'));
+    await held;
+    await route.fulfill({ json: { suggestions: ['Mark it read', { label: 'say who wrote it' }], automatic: 'look up its author', interactive: 'click to mark it read', variations: 'plain, starred or struck' } });
+  });
+  await pointAt(page, 'r2');
+  await summon(page);
+  await input(page).waitFor();
+  await chips(page).first().waitFor();
+  // A row of a list is an item (marbleScope.kindOf).
+  assert.deepEqual(await chipTexts(page), ['Say it more plainly', 'Add a detail', 'Try variations', 'Automate it', 'Make it interactive', 'Sketch it']);
+  assert.deepEqual(asked.map((b) => b.ids), [['r2']]);
+  assert.equal(asked[0].path, 'list');
+  // Typing does not hide them.
+  await page.keyboard.type('Add');
+  assert.equal(await chips(page).count(), 6);
+  release();
+  await page.waitForFunction(() => [...document.querySelectorAll('.marble-line-chip')].some((b) => b.textContent.trim() === 'Mark it read'));
+  assert.deepEqual(await chipTexts(page), ['Mark it read', 'Say who wrote it', 'Try variations', 'Automate it', 'Make it interactive', 'Sketch it']);
+  assert.equal(await input(page).textContent(), 'Add', 'what was typed stays');
+  // An action drafts with what was written for this thing.
+  await chips(page).filter({ hasText: 'Automate it' }).click();
+  assert.equal(await input(page).textContent(), 'Automate this item: Add');
+  await page.keyboard.press('ControlOrMeta+a');
+  await page.keyboard.press('Backspace');
+  await chips(page).filter({ hasText: 'Automate it' }).click();
+  assert.equal(await input(page).textContent(), 'Automate this item: look up its author');
+  // Within the line's width, in two rows at most, and no word of who does it.
+  const [lineBox, rows] = await Promise.all([
+    line(page).boundingBox(),
+    chips(page).evaluateAll((els) => new Set(els.map((el) => Math.round(el.getBoundingClientRect().top))).size),
+  ]);
+  for (const box of await chips(page).evaluateAll((els) => els.map((el) => el.getBoundingClientRect().toJSON()))) {
+    assert.ok(box.right <= lineBox.x + lineBox.width + 0.5, 'inside the line');
+  }
+  assert.ok(rows <= 2, `${rows} rows`);
+  assert.doesNotMatch(await line(page).evaluate((el) => el.innerText), /\bagent\b/i);
+});
+
+test('at the narrowest a line can be, the chips keep to two rows', async () => {
+  const page = await open();
+  await page.evaluate(() => { document.body.style.maxWidth = '200px'; });
+  await pointAt(page, 'r2');
+  await summon(page);
+  await input(page).waitFor();
+  await chips(page).first().waitFor();
+  const box = await line(page).boundingBox();
+  assert.ok(box.width <= 321, String(box.width));
+  const rows = await chips(page).evaluateAll((els) => new Set(els.map((el) => Math.round(el.getBoundingClientRect().top))).size);
+  assert.ok(rows >= 1 && rows <= 2, `${rows} rows`);
+  for (const b of await chips(page).evaluateAll((els) => els.map((el) => el.getBoundingClientRect().toJSON()))) assert.ok(b.right <= box.x + box.width + 0.5);
+});
+
+test('pressing a suggestion fills the line with it, the caret at the end, and sends nothing; Tab reaches the chips', async () => {
+  const page = await open();
+  await pointAt(page, 'r2');
+  await summon(page);
+  await input(page).waitFor();
+  await chips(page).first().waitFor();
+  await chips(page).filter({ hasText: 'Add a detail' }).click();
+  assert.equal(await input(page).textContent(), 'Add a detail');
+  assert.equal(await caretAtEnd(page), true);
+  assert.equal(await line(page).getAttribute('data-state'), 'edit');
+  // From the words, Tab goes to the first chip, and a key presses it.
+  await page.keyboard.press('Tab');
+  assert.equal(await page.evaluate(() => document.activeElement?.textContent.trim()), 'Say it more plainly');
+  await page.keyboard.press('ArrowRight');
+  assert.equal(await page.evaluate(() => document.activeElement?.textContent.trim()), 'Add a detail');
+  await page.keyboard.press('ArrowLeft');
+  await page.keyboard.press('Enter');
+  assert.equal(await input(page).textContent(), 'Say it more plainly');
+  assert.equal(await caretAtEnd(page), true);
+  await page.waitForTimeout(200);
+  assert.equal((await conversations(page)).length, 0, 'nothing was sent');
+});
+
+test('Try variations drafts its words with the idea selected, and ⏎ sends it with what variations mean beside it', async () => {
+  const page = await open();
+  await pointAt(page, 'r2');
+  await summon(page);
+  await input(page).waitFor();
+  await chips(page).filter({ hasText: 'Try variations' }).click();
+  assert.equal(await input(page).textContent(), 'Try 3 variations of this item: plainer, shorter, or with a detail');
+  assert.equal(await page.evaluate(() => getSelection().toString()), 'plainer, shorter, or with a detail');
+  assert.equal(await chips(page).filter({ hasText: 'Try variations' }).getAttribute('aria-pressed'), 'true');
+  // Pressing it again clears its own draft.
+  await chips(page).filter({ hasText: 'Try variations' }).click();
+  assert.equal(await input(page).textContent(), '');
+  await chips(page).filter({ hasText: 'Try variations' }).click();
+  await page.evaluate(() => { window.__watched = null; addEventListener('marble-variations:watch', (e) => { window.__watched = e.detail.ids; }); });
+  await page.keyboard.press('Enter');
+  await until(page, async () => (await window.marble.agent.conversations()).length === 1);
+  const [{ detail }] = await until(page, async () => {
+    const list = [];
+    for (const s of await window.marble.agent.conversations()) list.push({ detail: await window.marble.agent.conversation(s.id) });
+    return list[0]?.detail?.turns?.length ? list : null;
+  });
+  assert.equal(detail.turns[0].prompt, 'Try 3 variations of this item: plainer, shorter, or with a detail');
+  assert.match(detail.turns[0].context.brief, /marble-alt/);
+  assert.deepEqual(await page.evaluate(() => window.__watched), ['r2']);
+});
+
+test('Sketch it puts the line away and opens Describe mode on the thing', async () => {
+  const page = await open();
+  await pointAt(page, 'r2');
+  await summon(page);
+  await input(page).waitFor();
+  await chips(page).filter({ hasText: 'Sketch it' }).click();
+  await lineGone(page);
+  await page.locator('.marble-marks-bar').waitFor();
+});
+
+test('the page\'s line offers nothing it could not mean', async () => {
+  const page = await open();
+  await page.mouse.move(900, 600);
+  await summon(page);
+  await input(page).waitFor();
+  await page.waitForTimeout(150);
+  assert.equal(await page.locator('.marble-line-chip').count(), 0);
+});
+
+test('the chips are only for words being written: not on an answer', async () => {
+  const page = await open();
+  await pointAt(page, 'r2');
+  await summon(page);
+  await input(page).waitFor();
+  await page.keyboard.type('script:why Why is this still unread?');
+  await page.keyboard.press('Enter');
+  await page.locator('.marble-line[data-state="answer"]').waitFor({ timeout: 10_000 });
+  assert.equal(await page.locator('.marble-line[data-state="answer"] .marble-line-chip').count(), 0);
+});
+
+test('⇧⏎ breaks the line: a new line in the words, nothing kept as a note, nothing sent', async () => {
+  const page = await open();
+  await pointAt(page, 'r2');
+  await summon(page);
+  await input(page).waitFor();
+  await page.keyboard.type('Add a due date');
+  await page.keyboard.press('Shift+Enter');
+  await page.keyboard.type('and a reminder');
+  assert.equal(await page.evaluate(() => window.marbleLine.current()?.text), 'Add a due date\nand a reminder');
+  assert.equal(await line(page).getAttribute('data-state'), 'edit');
+  assert.deepEqual(await notes(page), []);
+  await page.waitForTimeout(200);
+  assert.equal((await conversations(page)).length, 0);
+});
+
+test('a click away with words in the line keeps them as a note on the thing, once, and closes the line', async () => {
+  const page = await open();
+  await pointAt(page, 'r2');
+  await summon(page);
+  await input(page).waitFor();
+  await page.keyboard.type('Add a due date');
+  // Not away: a chip, the thing itself, or the tint just past its edge.
+  await chips(page).filter({ hasText: 'Make it interactive' }).hover();
+  const r2 = await boxOf(page, 'r2');
+  await page.mouse.click(r2.x + r2.width / 2, r2.y + r2.height / 2);
+  await page.mouse.click(r2.x + r2.width / 2, r2.y - 3);
+  assert.equal(await line(page).count(), 1, 'still open');
+  assert.deepEqual(await notes(page), []);
+  await page.mouse.click(1200, 700);
+  await lineGone(page);
+  const kept = await notes(page);
+  assert.equal(kept.length, 1);
+  assert.deepEqual(kept[0].ids, ['r2']);
+  assert.equal(kept[0].text, 'Add a due date');
+  assert.equal((await conversations(page)).length, 0, 'nothing was sent');
+  // Kept as a note, not also as a draft.
+  await pointAt(page, 'r2');
+  await summon(page);
+  await input(page).waitFor();
+  assert.equal(await input(page).textContent(), '');
+});
+
+test('a click away from an empty line only closes it; Esc keeps the words as a draft, not a note', async () => {
+  const page = await open();
+  await pointAt(page, 'r2');
+  await summon(page);
+  await input(page).waitFor();
+  await page.mouse.click(1200, 700);
+  await lineGone(page);
+  assert.deepEqual(await notes(page), []);
+  await pointAt(page, 'r2');
+  await summon(page);
+  await input(page).waitFor();
+  await page.keyboard.type('Add a due date');
+  await page.keyboard.press('Escape');
+  await lineGone(page);
+  assert.deepEqual(await notes(page), []);
+  await summon(page);
+  await input(page).waitFor();
+  assert.equal(await input(page).textContent(), 'Add a due date');
 });

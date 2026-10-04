@@ -773,16 +773,9 @@
     // ------------------------------------------------------------ the offer
 
     const kindWord = (kind) => ({ part: 'part', words: 'selection' })[kind] ?? kind;
-    async function fetchOffer(record) {
-      const words = record.scope?.words ? getSelection()?.toString().trim().slice(0, 400) : '';
-      try {
-        const res = await fetch('/agent/offer', {
-          method: 'POST',
-          headers: { 'content-type': 'application/json' },
-          body: JSON.stringify({ path: app, ids: record.ids, words }),
-        });
-        return res.ok ? await res.json() : null;
-      } catch { return null; }
+    function fetchOffer(record) {
+      const words = record.scope?.words ? getSelection()?.toString().trim() : '';
+      return marbleOffer.fetchOffer({ path: app, ids: record.ids, words });
     }
 
     // The first three cards opened from a selection carry one faint line

@@ -22,8 +22,17 @@
 //   - On a drive with nothing set up to make changes, ⏎ keeps the line open
 //     and says so, with Set up beside it (the drive's own Connect, agent-ui.js)
 //     rather than folding into a send that can only fail.
-//   - Esc puts the line away and keeps its words for the next ⌘J on the same
-//     thing. Esc while a change runs stops it, when the page has the keys.
+//   - While words are being written, a quiet row under them offers what the
+//     thing could become, as the card's offer did (agent-offer.js): two
+//     suggestions written for it, and the four actions. A suggestion fills
+//     the line; an action drafts its words; nothing is sent until ⏎.
+//   - ⇧⏎ (or ⌥⏎) breaks the line. Esc puts the line away and keeps its words
+//     for the next ⌘J on the same thing. A click away keeps them as a note on
+//     the thing (agent-notes.js) instead. Esc while a change runs stops it,
+//     when the page has the keys.
+//
+// The line, its tint and its chips arrive the way the card did: up out of
+// nothing, on the house curve, and leave the same way back.
 //
 // With nothing under the pointer or the caret, ⌘J is about the page, and the
 // line sits at the foot of the window. Nothing of the conversation (bubbles,
@@ -42,6 +51,10 @@
   const PAGE = 560;        // px, the page's line
   const FOOT = 16;         // px from the foot of the window, for the page's line
   const FADE = 120;        // ms the words take to go on ⏎
+  const ARRIVE = 180;      // ms the line and its tint take to arrive or leave, as the card did
+  const RISE = 6;          // px the line travels as it arrives
+  const CASCADE = 240;     // ms each chip takes to arrive
+  const STEP = 30;         // ms between one chip and the next
   const CLOSE = 220;       // ms the line takes to close into its thing
   const STILL = 150;       // ms, the one crossfade reduced motion keeps
   const LONG = 280;        // characters of an answer before it offers the chat
@@ -85,9 +98,7 @@
        is shown. Never a border down one side. */
     .marble-line-scope { position: fixed; left: 0; top: 0; box-sizing: border-box; border-radius: 12px; pointer-events: none;
       background-color: color-mix(in srgb, var(--line-accent) 14%, transparent);
-      opacity: 1; transition: opacity 200ms ${EASE}; }
-    @starting-style { .marble-line-scope { opacity: 0; } }
-    .marble-line-scope[data-state="out"] { opacity: 0; }
+      opacity: 1; transition: opacity ${ARRIVE}ms ${EASE}; }
     .marble-line-scope[hidden] { display: none; }
 
     /* The line: one ring of the accent all the way round, on the page's own
@@ -98,10 +109,8 @@
       box-shadow: 0 0 0 1px var(--line-ink), 0 0 0 4px color-mix(in srgb, var(--line-accent) 30%, transparent),
                   var(--shadow-lift, 0 10px 28px -12px rgba(0, 0, 0, .3));
       transform-origin: 50% 0; opacity: 1; transform: none;
-      transition: opacity 200ms ${EASE}, transform 200ms ${EASE}; }
-    @starting-style { .marble-line { opacity: 0; transform: translateY(-4px); } }
+      transition: opacity ${ARRIVE}ms ${EASE}, transform ${ARRIVE}ms ${EASE}; }
     .marble-line[data-flip], .marble-line[data-scope="page"] { transform-origin: 50% 100%; }
-    @starting-style { .marble-line[data-flip], .marble-line[data-scope="page"] { transform: translateY(4px); } }
     .marble-line button { font: inherit; }
     .marble-line button:focus-visible { outline: 2px solid var(--line-ink); outline-offset: 2px; }
 
@@ -143,13 +152,29 @@
     .marble-line-opt:active { background: color-mix(in srgb, var(--line-accent) 26%, var(--line-card)); }
     .marble-line-opt:disabled { opacity: .55; cursor: default; }
 
+    /* What the thing could become, while words are written: suggestions
+       and the four actions, as pills, two rows at most. */
+    .marble-line-offer { display: flex; flex-wrap: wrap; gap: 4px; min-width: 0; padding: 0 0 1px; }
+    .marble-line-chip { appearance: none; box-sizing: border-box; display: inline-flex; align-items: center; gap: 5px;
+      min-width: 0; max-width: 100%; margin: 0; padding: 2px 9px; border-radius: 999px; border: 1px solid var(--line-rule);
+      background: none; color: var(--line-muted); font-size: 12px; font-weight: 400; line-height: 1.45; white-space: nowrap; cursor: pointer;
+      transition: background-color 120ms ${COLOUR}, color 120ms ${COLOUR}, border-color 120ms ${COLOUR}; }
+    .marble-line-chip[data-act] { padding-left: 7px; }
+    .marble-line-chip > span { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+    .marble-line-chip svg { flex: none; width: 13px; height: 13px; color: var(--line-ink); }
+    .marble-line-chip:hover { background: var(--well, color-mix(in srgb, var(--line-text) 6%, transparent)); color: var(--line-text); }
+    .marble-line-chip[aria-pressed="true"] { color: var(--line-ink);
+      background: color-mix(in srgb, var(--line-accent) 14%, transparent); border-color: color-mix(in srgb, var(--line-ink) 40%, transparent); }
+    .marble-line-chip[hidden] { display: none; }
+    .marble-line-input.is-previewing:empty::before { color: color-mix(in srgb, var(--line-ink) 70%, var(--line-faint)); }
+
     /* The words a line is about, when it is about words. */
     ::highlight(marble-line-words) { background-color: color-mix(in srgb, var(--accent, light-dark(#9bb6cf, #7fa8c9)) 34%, transparent); }
 
     @media (prefers-reduced-motion: reduce) {
       .marble-line { transition: opacity ${STILL}ms linear; }
       .marble-line-scope { transition: opacity ${STILL}ms linear; }
-      .marble-line-open, .marble-line-opt { transition: none; }
+      .marble-line-open, .marble-line-opt, .marble-line-chip { transition: none; }
     }
   `;
 
@@ -190,6 +215,35 @@
     const viewW = () => document.documentElement.clientWidth || innerWidth;
     const viewH = () => document.documentElement.clientHeight || innerHeight;
     const clamp = (n, lo, hi) => Math.max(lo, Math.min(n, hi));
+
+    // ------------------------------------------------------------ motion
+    // Arriving and leaving are the card's small move run in opposite
+    // directions: out of the thing (or up from the foot) and back into it.
+    // Reduced motion keeps a short fade and nothing else.
+
+    const still = () => stillness.matches;
+    const motion = (el, frames, timing) => {
+      try { return el.animate(frames, timing); } catch { return null; }
+    };
+    const riseOf = (el) => (el.hasAttribute('data-flip') || el.dataset.scope === 'page' ? RISE : -RISE);
+    const away = (el) => `translateY(${riseOf(el)}px) scale(0.98)`;
+    function arrive(el) {
+      if (still()) return motion(el, [{ opacity: 0 }, { opacity: 1 }], { duration: STILL, easing: 'linear' });
+      return motion(el, [{ opacity: 0, transform: away(el) }, { opacity: 1, transform: 'none' }], { duration: ARRIVE, easing: EASE });
+    }
+    function depart(el) {
+      if (still()) return motion(el, [{ opacity: 1 }, { opacity: 0 }], { duration: STILL, easing: 'linear', fill: 'forwards' });
+      return motion(el, [{ opacity: 1, transform: 'none' }, { opacity: 0, transform: away(el) }], { duration: ARRIVE, easing: EASE, fill: 'forwards' });
+    }
+    function fadeIn(el) {
+      return motion(el, [{ opacity: 0 }, { opacity: 1 }], still() ? { duration: STILL, easing: 'linear' } : { duration: ARRIVE, easing: EASE });
+    }
+    function cascade(chips, after = 60) {
+      chips.forEach((chip, i) => {
+        if (still()) motion(chip, [{ opacity: 0 }, { opacity: 1 }], { duration: STILL, easing: 'linear', fill: 'backwards' });
+        else motion(chip, [{ opacity: 0, transform: 'translateY(-4px)' }, { opacity: 1, transform: 'none' }], { duration: CASCADE, delay: after + i * STEP, easing: EASE, fill: 'backwards' });
+      });
+    }
 
     // ------------------------------------------------------------ drafts
     // Words put away with Esc wait, per thing, for this tab's next ⌘J on it.
@@ -247,6 +301,7 @@
         turn: null, awaiting: false, asked: '', texts: [], ask: null,
         state: null, el: null, input: null, tint: null, handed: false, failed: false,
         answer: '', said: '', returnTo: null, stop: false, tried: false,
+        offer: null, chips: null, drafted: null,
       };
     }
 
@@ -282,11 +337,16 @@
         tint.setAttribute('aria-hidden', 'true');
         host.prepend(tint);
         s.tint = tint;
+        fadeIn(tint);
       } else if (!want && s.tint) {
         const tint = s.tint;
         s.tint = null;
         tint.dataset.state = 'out';
-        setTimeout(() => tint.remove(), stillness.matches ? STILL : 220);
+        for (const a of tint.getAnimations()) a.cancel();
+        const gone = () => tint.remove();
+        const out = motion(tint, [{ opacity: 1 }, { opacity: 0 }], still() ? { duration: STILL, easing: 'linear', fill: 'forwards' } : { duration: ARRIVE, easing: EASE, fill: 'forwards' });
+        if (out) out.finished.then(gone, gone);
+        else gone();
       }
       paintWords();
     }
@@ -337,6 +397,7 @@
       if (!r) {
         const width = Math.min(PAGE, vw - 32);
         el.style.width = `${Math.round(width)}px`;
+        fitChips(s);
         const h = el.offsetHeight;
         Object.assign(el.style, { left: `${Math.round((vw - width) / 2)}px`, top: `${Math.round(vh - FOOT - h)}px` });
         el.toggleAttribute('data-flip', false);
@@ -347,6 +408,7 @@
       // line can be.
       const left = clamp(r.width >= NARROW ? r.left : r.left + r.width / 2 - width / 2, INSIDE, vw - INSIDE - width);
       el.style.width = `${Math.round(width)}px`;
+      fitChips(s);
       const h = el.offsetHeight;
       let top = r.bottom + GAP;
       let flip = false;
@@ -421,6 +483,8 @@
       input.addEventListener('input', () => {
         // An emptied line holds a stray break, which would hide its placeholder.
         if (!input.textContent) input.replaceChildren();
+        // Clearing the line lets an action's draft go.
+        if (!said(input) && s.action) { s.action = null; s.drafted = null; paintActs(s); }
         schedule();
       });
       // A paste is words, not somebody else's markup.
@@ -437,6 +501,188 @@
       k.setAttribute('aria-hidden', 'true');
       return k;
     };
+
+    // ------------------------------------------------------------ the offer
+    // What the thing could become, under the words while they are written:
+    // its kind's two suggestions (then the ones the host writes for it), and
+    // the four actions, each as the card's offer had them (agent-offer.js).
+
+    const offering = () => globalThis.marbleOffer;
+
+    function kindOf(s, els = elementsOf(s.ids)) {
+      const kinds = [...new Set(els.map((el) => globalThis.marbleScope?.kindOf(el) ?? 'part'))];
+      return s.words ? 'words' : els.length > 1 ? (kinds.length === 1 ? kinds[0] : 'part') : kinds[0] ?? 'part';
+    }
+
+    /** The page's own line has nothing it could sensibly suggest. */
+    function offerOf(s) {
+      if (s.page || !offering()?.offerFor) return null;
+      const els = elementsOf(s.ids);
+      if (!els.length) return null;
+      return offering().offerFor({ kind: kindOf(s, els), count: els.length, element: els[0] });
+    }
+
+    /** Ask the host to write suggestions for this thing; they take the
+     *  defaults' place when they come. */
+    function askOffer(s) {
+      const o = offering();
+      const asked = s.offer;
+      if (!asked || !o?.fetchOffer || !o.takeWritten) return;
+      o.fetchOffer({ path: app, ids: [...s.ids], words: s.words?.text ?? '' }).then((written) => {
+        if (!sessions.has(s) || s.offer !== asked) return;
+        if (o.takeWritten(asked.offer, written, asked.gaps) && s.state === 'edit' && s.chips?.isConnected) paintSugs(s, { arriving: true });
+      }, () => { /* the defaults stand */ });
+    }
+
+    const wordsFor = (s, id) => offering().actionWords(id, s.offer.thisWhat, s.offer.offer);
+
+    function chip(text, icon = null) {
+      const b = h('button', 'marble-line-chip');
+      b.type = 'button';
+      if (icon) b.innerHTML = icon;
+      b.append(h('span', '', text));
+      // A press must not take the caret out of the words it is drafting into.
+      b.addEventListener('pointerdown', (event) => event.preventDefault());
+      return b;
+    }
+
+    function chipRow(s) {
+      const row = h('div', 'marble-line-offer');
+      row.setAttribute(TRANSIENT, '');
+      row.setAttribute('role', 'group');
+      row.setAttribute('aria-label', 'Suggestions');
+      row.addEventListener('keydown', (event) => {
+        if ((event.key !== 'ArrowRight' && event.key !== 'ArrowLeft') || event.altKey || event.metaKey || event.ctrlKey) return;
+        const list = [...row.querySelectorAll('.marble-line-chip:not([hidden])')];
+        const at = list.indexOf(document.activeElement);
+        if (at < 0) return;
+        event.preventDefault();
+        list[(at + (event.key === 'ArrowRight' ? 1 : -1) + list.length) % list.length].focus();
+      });
+      const icons = offering().ICONS ?? {};
+      for (const [id, name] of offering().ACTIONS ?? []) {
+        const b = chip(name, icons[id]);
+        b.dataset.act = id;
+        b.setAttribute('aria-pressed', 'false');
+        // Pointing at an action shows, in an empty line, what it would ask.
+        b.addEventListener('pointerenter', (event) => { if (event.pointerType !== 'touch') preview(s, id, true); });
+        b.addEventListener('pointerleave', () => preview(s, id, false));
+        b.addEventListener('focus', () => preview(s, id, true));
+        b.addEventListener('blur', () => preview(s, id, false));
+        b.addEventListener('click', () => pick(s, id));
+        row.append(b);
+      }
+      s.chips = row;
+      paintSugs(s);
+      paintActs(s);
+      return row;
+    }
+
+    function paintSugs(s, { arriving = false } = {}) {
+      const row = s.chips;
+      if (!row || !s.offer) return;
+      for (const old of row.querySelectorAll('[data-sug]')) old.remove();
+      const before = row.querySelector('[data-act]');
+      const made = s.offer.offer.sugs.slice(0, 2).map((text) => {
+        const b = chip(text);
+        b.dataset.sug = '';
+        b.addEventListener('click', () => suggest(s, text));
+        row.insertBefore(b, before);
+        return b;
+      });
+      row.fitted = null;
+      if (arriving) { cascade(made, 0); schedule(); }
+    }
+
+    const paintActs = (s) => {
+      for (const b of s.chips?.querySelectorAll('[data-act]') ?? []) b.setAttribute('aria-pressed', String(b.dataset.act === s.action?.mode));
+    };
+
+    /** At most two rows of chips inside the line: past that, the second
+     *  suggestion goes first, then the actions from the last, then the first
+     *  suggestion. Measured again only when the line's width or chips change. */
+    function fitChips(s) {
+      const row = s.chips;
+      if (!row?.isConnected) return;
+      const all = [...row.children];
+      const key = `${s.el?.style.width}|${all.map((c) => c.textContent).join('|')}`;
+      if (row.fitted === key) return;
+      row.fitted = key;
+      for (const c of all) c.hidden = false;
+      const rows = () => new Set(all.filter((c) => !c.hidden).map((c) => c.offsetTop)).size;
+      if (rows() <= 2) return;
+      const sugs = all.filter((c) => c.hasAttribute('data-sug'));
+      const act = (id) => all.find((c) => c.dataset.act === id);
+      const order = [...sugs.slice(1).reverse(), act('sketch'), act('interactive'), act('automate'), sugs[0], act('variations')];
+      for (const c of order.filter(Boolean)) {
+        if (rows() <= 2) break;
+        c.hidden = true;
+      }
+    }
+
+    /** A suggestion fills the line with its words, the caret at the end. */
+    function suggest(s, text) {
+      if (!s.input) return;
+      s.input.textContent = text;
+      s.action = null;
+      s.drafted = null;
+      paintActs(s);
+      caretAt(s.input);
+      schedule();
+    }
+
+    function preview(s, id, on) {
+      const input = s.input;
+      if (!input || !s.offer) return;
+      if (on && !input.textContent) {
+        const a = wordsFor(s, id);
+        input.dataset.placeholder = id === 'sketch' ? a.line : a.lead + a.idea;
+        input.classList.add('is-previewing');
+      } else {
+        input.dataset.placeholder = placeholderOf(s);
+        input.classList.remove('is-previewing');
+      }
+    }
+
+    /** An action, as the card's were: Sketch it hands the thing to Describe
+     *  mode; the others draft their words for it. On an empty line, or one
+     *  still holding an untouched draft, the draft replaces it, with the idea
+     *  after the lead selected to type over; over words the person typed, the
+     *  action only frames them. Pressing it again clears its own draft. */
+    function pick(s, id) {
+      const input = s.input;
+      if (!input || !s.offer) return;
+      if (id === 'sketch') {
+        const ids = [...s.ids];
+        put(s, { keep: true, restore: false });
+        dispatchEvent(new CustomEvent('marble-marks:toggle', { detail: { on: true, ids } }));
+        return;
+      }
+      const a = wordsFor(s, id);
+      const t = said(input);
+      const untouched = !t || t === s.drafted;
+      if (s.action?.mode === id && untouched) {
+        input.replaceChildren();
+        s.action = null;
+        s.drafted = null;
+        paintActs(s);
+        caretAt(input);
+        schedule();
+        return;
+      }
+      const leads = (offering().ACTIONS ?? []).map(([other]) => wordsFor(s, other).lead).filter(Boolean);
+      const had = leads.find((lead) => input.textContent.startsWith(lead));
+      const rest = untouched ? a.idea : had ? input.textContent.slice(had.length) : t;
+      input.textContent = a.lead + rest;
+      input.classList.remove('is-previewing');
+      input.dataset.placeholder = placeholderOf(s);
+      s.action = { mode: id, lead: a.lead.trim() };
+      s.drafted = said(input);
+      if (untouched && a.idea) caretAt(input, a.lead.length, a.lead.length + a.idea.length);
+      else caretAt(input);
+      paintActs(s);
+      schedule();
+    }
 
     function caretAt(input, from = null, to = null) {
       input.focus({ preventScroll: true });
@@ -490,6 +736,8 @@
       shown = s;
       s.state = state;
       let el = s.el;
+      // New, or coming back while it was still folding away: it arrives.
+      const arriving = !el || el.dataset.state === 'sent';
       if (!el) {
         el = h('div', 'marble-line');
         el.setAttribute(TRANSIENT, '');
@@ -510,6 +758,7 @@
       else delete el.dataset.scope;
       el.toggleAttribute('data-failed', state === 'cant' && s.failed);
       el.replaceChildren();
+      s.chips = null;
       let input = null;
       if (state === 'edit' || state === 'cant' || state === 'setup') {
         const label = placeholderOf(s);
@@ -526,6 +775,7 @@
         const row = h('div', 'marble-line-row');
         row.append(input, kbd('⏎'));
         el.append(row);
+        if (state === 'edit' && s.offer && offering()?.actionWords) el.append(chipRow(s));
       } else if (state === 'answer') {
         const answer = h('p', 'marble-line-answer', s.answer);
         el.append(answer);
@@ -566,6 +816,8 @@
       s.input = input;
       paintScope(s);
       place();
+      if (arriving) arrive(el);
+      if (s.chips) cascade([...s.chips.children].filter((c) => !c.hidden));
       if (state === 'answer' || state === 'cant' || state === 'ask' || state === 'setup') {
         aloud.textContent = state === 'answer' ? s.answer : state === 'cant' || state === 'setup' ? s.said : (s.ask?.input?.questions?.[0]?.question ?? '');
       } else aloud.textContent = '';
@@ -578,8 +830,8 @@
       }
     }
 
-    /** A line leaving: a short fade, then gone. One already folding into
-     *  its thing finishes folding instead. */
+    /** A line leaving: the way it came, back, then gone. One already
+     *  folding into its thing finishes folding instead. */
     function leave(el) {
       el.style.pointerEvents = 'none';
       // No longer the line: nothing should take it for the one on screen.
@@ -591,9 +843,9 @@
         return;
       }
       for (const a of el.getAnimations({ subtree: true })) a.cancel();
-      try {
-        el.animate([{ opacity: 1 }, { opacity: 0 }], { duration: stillness.matches ? STILL : FADE, easing: EASE, fill: 'forwards' }).finished.then(gone, gone);
-      } catch { gone(); }
+      const out = depart(el);
+      if (out) out.finished.then(gone, gone);
+      else gone();
     }
 
     /** Put the line away, keeping its words (or not) for this thing, and
@@ -689,9 +941,9 @@
       const input = s.input;
       if (event.key === 'Enter') {
         event.preventDefault();
-        if (event.altKey) { document.execCommand('insertText', false, '\n'); return; }
+        // ⇧⏎ (and ⌥⏎) break the line; the input grows to three lines, then scrolls.
+        if (event.shiftKey || event.altKey) { document.execCommand('insertLineBreak'); return; }
         const text = said(input);
-        if (event.shiftKey) { if (s.state === 'edit' || s.state === 'cant' || s.state === 'setup') keepAsNote(s, text); return; }
         if (!text) return;
         if (s.state === 'ask') reply(s, text);
         else send(s, text);
@@ -712,20 +964,26 @@
         const label = placeholderOf(s);
         input.dataset.placeholder = label;
         input.setAttribute('aria-label', label);
+        // What it could become is for the new thing now.
+        s.offer = offerOf(s);
+        if (s.offer && s.chips) { paintSugs(s, { arriving: true }); askOffer(s); }
         paintScope(s);
         place();
       }
     }
 
-    // ⇧⏎: the ask waits as a note on its thing (agent-notes.js), and the line
-    // goes, so the next thing can be pointed at.
-    function keepAsNote(s, text) {
+    // A click away from words being written: the ask waits as a note on its
+    // thing (agent-notes.js), not also as a draft, and the line goes, so the
+    // next thing can be pointed at. False when there is nowhere to keep it
+    // (the page's own line, a page without notes).
+    function stash(s, text, { restore = true } = {}) {
       const notes = window.marbleNotes;
-      if (!notes || !text || s.page) return;
+      if (!notes || !text || s.page || !s.ids.length) return false;
       const mode = s.action && text.startsWith(s.action.lead) ? s.action.mode : 'main';
       notes.add({ ids: [...s.ids], text, brief: globalThis.marbleOffer?.briefFor?.(mode, s.ids) ?? '', name: window.marbleCallout?.nameFor?.(s.ids) ?? '' });
-      put(s, { keep: false });
+      put(s, { keep: false, restore });
       agent.select(null);
+      return true;
     }
 
     // ------------------------------------------------------------ sending
@@ -1056,8 +1314,9 @@
 
     // ------------------------------------------------------------ leaving
 
-    // A line nobody is using is put away by looking elsewhere: a press
-    // outside it and outside its thing.
+    // A line is put away by looking elsewhere: a press outside it and outside
+    // its thing (and the tint round it). Words being written there are kept
+    // as a note on the thing; anything else typed waits as a draft.
     addEventListener('pointerdown', (event) => {
       const s = shown;
       if (!s?.el || s.state === 'sent') return;
@@ -1068,6 +1327,12 @@
       // them over the line), are not looking away either.
       if (event.composedPath().some((n) => ['marble-agent-drawer', 'marble-agent-setup', 'marble-agent-settings'].includes(n?.localName))) return;
       if (!s.page && elementsOf(s.ids).some((el) => el.contains(event.target))) return;
+      if (s.tint && !s.tint.hidden) {
+        const r = s.tint.getBoundingClientRect();
+        if (event.clientX >= r.left && event.clientX <= r.right && event.clientY >= r.top && event.clientY <= r.bottom) return;
+      }
+      const words = s.input ? said(s.input) : '';
+      if (words && (s.state === 'edit' || s.state === 'cant' || s.state === 'setup') && stash(s, words, { restore: 'press' })) return;
       put(s, { keep: true, restore: 'press' });
     }, true);
 
@@ -1156,15 +1421,15 @@
       // meaning beside them while they still lead.
       if (action && action !== 'sketch' && draft == null && globalThis.marbleOffer?.draftFor) {
         const els = elementsOf(s.ids);
-        const kinds = [...new Set(els.map((el) => globalThis.marbleScope?.kindOf(el) ?? 'part'))];
-        const kind = s.words ? 'words' : els.length > 1 ? (kinds.length === 1 ? kinds[0] : 'part') : kinds[0] ?? 'part';
-        const d = globalThis.marbleOffer.draftFor(action, { kind, count: els.length, element: els[0] ?? null });
+        const d = globalThis.marbleOffer.draftFor(action, { kind: kindOf(s, els), count: els.length, element: els[0] ?? null });
         if (d?.lead) {
           s.action = { mode: action, lead: d.lead.trim() };
           text = d.lead + (d.idea ?? '');
+          s.drafted = text.trim();
           if (d.idea) idea = [d.lead.length, text.length];
         }
       }
+      if (!now) s.offer = offerOf(s);
       agent.select(s.ids.length ? s.ids : null);
       show(s, 'edit', { text });
       if (idea && s.input) caretAt(s.input, idea[0], idea[1]);
@@ -1172,6 +1437,7 @@
       // and whether anything can take them, asked meanwhile too.
       convoFor(s);
       ready();
+      askOffer(s);
       if (now) send(s, text, { brief, keepWords: true });
       return true;
     }
