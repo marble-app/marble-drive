@@ -54,7 +54,7 @@ async function freshTurn(conversationId = `c${++n}`) {
 
 test('the schemas name the marble tools', () => {
   assert.deepEqual(TOOL_SCHEMAS.map((t) => t.name).sort(), [
-    'affordance_script', 'apply_ops', 'check_document', 'create_document', 'list_agents', 'list_documents', 'read_document', 'read_guide', 'send_message', 'wait_for_reply',
+    'affordance_script', 'apply_ops', 'check_document', 'create_document', 'fan_out', 'list_agents', 'list_documents', 'read_document', 'read_guide', 'send_message', 'wait_for_reply',
   ]);
   for (const t of TOOL_SCHEMAS) assert.equal(t.inputSchema.type, 'object');
 });

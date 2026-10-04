@@ -19,6 +19,7 @@
 import fsp from 'node:fs/promises';
 
 import { collectSlices, idsOfOps, knownIds, OP, repairOps, validateOps } from '../engine.js';
+import { IDS_MAX, MODELS, SHARDS_MAX, SHARDS_MIN, runFanOut } from '../change/fanout.js';
 import { partsOf, parseStep } from '../change/parts.js';
 import { parsePath, splitPath } from '../paths.js';
 import { inverseSteps } from './inverse.js';
@@ -72,6 +73,38 @@ export const TOOL_SCHEMAS = [
           minimum: 1,
           description: 'How many parts the whole change will touch, when you know it (e.g. 15 stills). The page counts toward it.',
         },
+      },
+    },
+  },
+  {
+    name: 'fan_out',
+    description:
+      'Change many parts that each need their own judgment (a label per row, an icon per item, a rewrite per paragraph) ' +
+      'by running one worker per shard in parallel. Every worker gets the same plan and only its shard\'s elements, ' +
+      'returns edits that are checked before they land, and lands as soon as it is done. A shard that fails leaves its ' +
+      'parts as they were and says why. Use it for six or more parts; for a few, use apply_ops.',
+    inputSchema: {
+      type: 'object',
+      required: ['path', 'note', 'plan', 'shards'],
+      properties: {
+        path: { type: 'string' },
+        note: { type: 'string', description: 'One sentence: what this change does.' },
+        plan: { type: 'string', description: 'What every part should become: the one instruction every worker follows.' },
+        shards: {
+          type: 'array',
+          minItems: SHARDS_MIN,
+          maxItems: SHARDS_MAX,
+          description: 'The parts, split into groups of ids that do not overlap. A worker may change only its ids and what is inside them.',
+          items: {
+            type: 'object',
+            required: ['ids'],
+            properties: {
+              ids: { type: 'array', items: { type: 'string' }, minItems: 1, maxItems: IDS_MAX },
+              brief: { type: 'string', description: 'What only this shard\'s worker needs to know.' },
+            },
+          },
+        },
+        model: { type: 'string', enum: MODELS, description: 'The workers\' model: sonnet unless the change is simple.' },
       },
     },
   },
@@ -159,7 +192,7 @@ export const TOOL_SCHEMAS = [
 // names them by the attribute it wrote, not by where they are kept.
 const STATE_KINDS = new Set(['toggle', 'choose', 'expand', 'step', 'note']);
 
-export function createTools({ store, writeOps, createDocument, buildStarter, composeAffordances, guidePath, examine, onLook, messaging = null }) {
+export function createTools({ store, writeOps, createDocument, buildStarter, composeAffordances, guidePath, examine, onLook, messaging = null, exec, log = console }) {
   // conversationId → docPath → Map<id, hash>
   const ledgers = new Map();
 
@@ -174,6 +207,123 @@ export function createTools({ store, writeOps, createDocument, buildStarter, com
   function remember(ledger, source, slices) {
     const shown = slices.filter((s) => !s.shape).flatMap((s) => idsIn(s.html));
     for (const [id, h] of hashesOf(source, shown)) ledger.set(id, h);
+  }
+
+  /** What a turn has done so far, for the page: the parts it has touched,
+   *  added and removed, the size of the change and the reach of its step,
+   *  and how many groups of a fan out failed. */
+  const tallyOf = (turn) => {
+    turn.v5 ??= { parts: new Set(), added: new Set(), removed: new Set(), total: null, reach: null, failed: 0 };
+    return turn.v5;
+  };
+
+  /**
+   * One batch of an agent's ops, landed the way every agent write lands —
+   * apply_ops, and each shard of a fan out. Inside the document's queue
+   * (`prepare`/`after`): repaired and validated against the document as it
+   * is, refused whole if an element it edits is not what `known` says the
+   * writer saw (`refusal(source, { stale, unread })` says how), tallied for
+   * the page, and said on it before and after the write; then recorded for
+   * undo, one record per batch.
+   *
+   * `known` is the conversation's ledger when the agent wrote the ops itself,
+   * and `learn` is that ledger again, brought up to date after the write: the
+   * agent knows what it wrote. A worker's ops are checked against what the
+   * worker was shown, and teach the agent nothing; it has not seen them.
+   * `frames()`, if given, adds fields to the batch's two frames.
+   */
+  async function writeBatch(turn, docPath, { ops: given, note, step = parseStep(note), known, refusal, learn = null, total, reach, frames = null }) {
+    const client = `agent:${turn.conversationId}`;
+    let steps = null;
+    let introduced = [];
+
+    const options = { client, note };
+    options.prepare = async (source) => {
+      let ops;
+      try {
+        // repairOps only knows a setInner payload's own tag — and so only
+        // mints ids into markup it is confident is markup — when it is
+        // handed the same slices validateOps checks against.
+        const slices = tagsOf(source);
+        ops = repairOps(given, source, { slices }).ops;
+        ops = validateOps(ops, source, { slices, innerLimit: INNER_LIMIT });
+      } catch (err) {
+        return { refused: { reason: err.message, current: [] } };
+      }
+
+      const current = hashesOf(source);
+      const unread = [];
+      const stale = [];
+      for (const op of ops) {
+        if (op.type === 'insert' || !op.id) continue;
+        const seen = known.get(op.id);
+        if (seen === undefined) unread.push(op.id);
+        else if (seen !== current.get(op.id)) stale.push(op.id);
+      }
+      if (stale.length || unread.length) return { refused: refusal(source, { stale, unread }) };
+
+      // Which parts this batch touches, the step it says it is (if its note
+      // names one), a running count of distinct parts this turn has
+      // touched so far, and the two things an agent only has to say once —
+      // `total`, the size of the whole change, and `reach`, the ids a
+      // multi-batch step is about to touch — repeated here on every later
+      // batch of the same turn so the page never has to remember them on
+      // its own.
+      const { parts, inserts, removes, moves, kind } = partsOf(source, ops);
+      const v5 = tallyOf(turn);
+      for (const id of parts) v5.parts.add(id);
+      for (const entry of inserts) for (const id of entry.ids) v5.added.add(id);
+      for (const id of removes) v5.removed.add(id);
+      if (total !== undefined && v5.total === null) v5.total = Number(total);
+      if (Array.isArray(reach)) {
+        const present = knownIds(source);
+        v5.reach = reach.map(String).filter((id) => present.has(id)).slice(0, REACH_MAX);
+      }
+
+      const presence = {
+        phase: 'writing',
+        note,
+        turn: turn.id,
+        parts,
+        inserts,
+        removes,
+        moves,
+        kind,
+        step,
+        count: v5.parts.size,
+        total: v5.total,
+        reach: v5.reach,
+      };
+      const more = frames?.() ?? {};
+
+      steps = inverseSteps(source, ops);
+      introduced = ops.filter((op) => op.type === 'insert').flatMap((op) => idsIn(op.html));
+      onLook?.(docPath, idsOfOps(ops), client, { ...presence, ...more.before, stage: 'before' });
+      options.presence = { ...presence, ...more.after, stage: 'after' };
+      return { ops };
+    };
+    if (learn) {
+      options.after = (_before, next) => {
+        const ids = [...learn.keys(), ...introduced];
+        const now = hashesOf(next, ids);
+        for (const id of ids) {
+          if (now.has(id)) learn.set(id, now.get(id));
+          else learn.delete(id);
+        }
+      };
+    }
+
+    const result = await writeOps(docPath, [], options);
+
+    if (result.refused) {
+      turn.onEvent({ type: 'ops.refused', path: docPath, reason: result.refused.reason });
+      return { refused: result.refused };
+    }
+    if (steps && result.applied) {
+      turn.undo.push({ path: docPath, steps });
+      turn.onEvent({ type: 'ops.applied', path: docPath, count: result.applied });
+    }
+    return { applied: result.applied, introduced };
   }
 
   const readable = async (input) => {
@@ -226,37 +376,15 @@ export function createTools({ store, writeOps, createDocument, buildStarter, com
         return { error: `"${docPath}" is not writable in this turn — the target is "${turn.target}"` };
       }
       const ledger = ledgerFor(turn.conversationId, docPath);
-      let steps = null;
-      let introduced = [];
-
-      const options = {
-        client: `agent:${turn.conversationId}`,
+      const landed = await writeBatch(turn, docPath, {
+        ops: input.ops,
         note: input.note,
-      };
-      options.prepare = async (source) => {
-        let ops;
-        try {
-          // repairOps only knows a setInner payload's own tag — and so only
-          // mints ids into markup it is confident is markup — when it is
-          // handed the same slices validateOps checks against.
-          const slices = tagsOf(source);
-          ops = repairOps(input.ops, source, { slices }).ops;
-          ops = validateOps(ops, source, { slices, innerLimit: INNER_LIMIT });
-        } catch (err) {
-          return { refused: { reason: err.message, current: [] } };
-        }
-
-        const current = hashesOf(source);
-        const unread = [];
-        const stale = [];
-        for (const op of ops) {
-          if (op.type === 'insert' || !op.id) continue;
-          const known = ledger.get(op.id);
-          if (known === undefined) unread.push(op.id);
-          else if (known !== current.get(op.id)) stale.push(op.id);
-        }
-        const blocked = [...new Set([...stale, ...unread])];
-        if (blocked.length) {
+        known: ledger,
+        learn: ledger,
+        total: input.total,
+        reach: input.reach,
+        refusal: (source, { stale, unread }) => {
+          const blocked = [...new Set([...stale, ...unread])];
           const reason = stale.length
             ? `${stale.map((id) => `"${id}"`).join(', ')} changed since you read ${stale.length === 1 ? 'it' : 'them'} — nothing was applied. Here is the current source; rebuild the edit against it.`
             : `read ${unread.map((id) => `"${id}"`).join(', ')} before editing — nothing was applied. Here is the current source.`;
@@ -264,70 +392,92 @@ export function createTools({ store, writeOps, createDocument, buildStarter, com
           // The refusal is a read of what it shows in full, and only that: an
           // element cut to an outline, or left out for budget, is still unread.
           remember(ledger, source, shown);
-          return {
-            refused: { reason, current: shown.map(({ id, tag, html, shape }) => ({ id, tag, html, outline: Boolean(shape) })) },
-          };
-        }
+          return { reason, current: shown.map(({ id, tag, html, shape }) => ({ id, tag, html, outline: Boolean(shape) })) };
+        },
+      });
+      if (landed.refused) return { refused: true, ...landed.refused };
+      return { applied: landed.applied, introduced: landed.introduced };
+    },
 
-        // Which parts this batch touches, the step it says it is (if its note
-        // names one), a running count of distinct parts this turn has
-        // touched so far, and the two things an agent only has to say once —
-        // `total`, the size of the whole change, and `reach`, the ids a
-        // multi-batch step is about to touch — repeated here on every later
-        // batch of the same turn so the page never has to remember them on
-        // its own.
-        const { parts, inserts, removes, moves, kind } = partsOf(source, ops);
-        turn.v5 ??= { parts: new Set(), added: new Set(), removed: new Set(), total: null, reach: null };
-        for (const id of parts) turn.v5.parts.add(id);
-        for (const entry of inserts) for (const id of entry.ids) turn.v5.added.add(id);
-        for (const id of removes) turn.v5.removed.add(id);
-        if (input.total !== undefined && turn.v5.total === null) turn.v5.total = Number(input.total);
-        if (Array.isArray(input.reach)) {
-          const known = knownIds(source);
-          turn.v5.reach = input.reach.map(String).filter((id) => known.has(id)).slice(0, REACH_MAX);
-        }
-
-        const presence = {
-          phase: 'writing',
-          note: input.note,
-          turn: turn.id,
-          parts,
-          inserts,
-          removes,
-          moves,
-          kind,
-          step: parseStep(input.note),
-          count: turn.v5.parts.size,
-          total: turn.v5.total,
-          reach: turn.v5.reach,
-        };
-
-        steps = inverseSteps(source, ops);
-        introduced = ops.filter((op) => op.type === 'insert').flatMap((op) => idsIn(op.html));
-        onLook?.(docPath, idsOfOps(ops), `agent:${turn.conversationId}`, { ...presence, stage: 'before' });
-        options.presence = { ...presence, stage: 'after' };
-        return { ops };
-      };
-      options.after = (_before, next) => {
-        const known = [...ledger.keys(), ...introduced];
-        const now = hashesOf(next, known);
-        for (const id of known) {
-          if (now.has(id)) ledger.set(id, now.get(id));
-          else ledger.delete(id);
-        }
-      };
-
-      const result = await writeOps(docPath, [], options);
-
-      if (result.refused) {
-        turn.onEvent({ type: 'ops.refused', path: docPath, reason: result.refused.reason });
-        return { refused: true, ...result.refused };
+    // Many parts that each need their own judgment (server/change/fanout.js):
+    // a worker per shard, and each shard landed through `writeBatch` as its
+    // own batch the moment its worker is done — checked against what that
+    // worker was shown, said on the page as one part of n, undone with the
+    // rest of the turn. A shard that fails is said on the page too, so its
+    // parts keep their marks.
+    async fan_out(input, turn) {
+      const docPath = parsePath(String(input.path ?? ''), { allowRoot: false });
+      if (!turn.writable.has(docPath)) {
+        return { error: `"${docPath}" is not writable in this turn — the target is "${turn.target}"` };
       }
-      if (steps && result.applied) {
-        turn.undo.push({ path: docPath, steps });
-        turn.onEvent({ type: 'ops.applied', path: docPath, count: result.applied });
+      const source = await store.read(docPath);
+      if (source === null) return { error: `no document "${docPath}"` };
+      const client = `agent:${turn.conversationId}`;
+      const note = String(input.note ?? '').trim() || 'Change each part.';
+      const step = parseStep(note);
+      const shards = Array.isArray(input.shards) ? input.shards : [];
+      const all = [...new Set(shards.flatMap((shard) => (Array.isArray(shard?.ids) ? shard.ids.map(String) : [])))];
+      const groups = { done: 0, failed: 0, of: shards.length };
+
+      const result = await runFanOut({
+        source,
+        docPath,
+        plan: input.plan,
+        note,
+        shards: input.shards,
+        model: input.model,
+        exec,
+        signal: turn.abort?.signal,
+        log,
+        apply: async (k, ops, { known }) => {
+          if (!ops.length) {
+            groups.done += 1;
+            return { applied: 0 };
+          }
+          const landed = await writeBatch(turn, docPath, {
+            ops,
+            note: `${note} · part ${k + 1} of ${shards.length}`,
+            step,
+            known,
+            total: all.length,
+            reach: all,
+            refusal: (_source, { stale }) => ({
+              reason: stale.length ? 'changed while it worked' : 'edited a part it was not shown whole',
+              current: [],
+            }),
+            // Counted as it is written, inside the queue, so two shards
+            // landing back to back never say the same number.
+            frames: () => {
+              groups.done += 1;
+              return { before: { groups: { ...groups, done: groups.done - 1 } }, after: { groups: { ...groups } } };
+            },
+          });
+          return landed.refused ? { error: landed.refused.reason } : { applied: landed.applied };
+        },
+        onFailed: (_k, ids) => {
+          groups.failed += 1;
+          const v5 = tallyOf(turn);
+          v5.failed = (v5.failed ?? 0) + 1;
+          v5.total ??= all.length;
+          onLook?.(docPath, ids, client, {
+            phase: 'writing',
+            note,
+            turn: turn.id,
+            stage: 'after',
+            failed: ids,
+            count: v5.parts.size,
+            total: v5.total,
+            reach: v5.reach ?? all.slice(0, REACH_MAX),
+            groups: { ...groups },
+          });
+        },
+      });
+
+      if (result.error) return { error: result.error };
+      if (result.missing && !result.applied) {
+        return { error: 'the claude CLI is not installed on this host, so no workers can run: make these edits yourself with apply_ops' };
       }
-      return { applied: result.applied, introduced };
+      return { applied: result.applied, shards: result.shards };
     },
 
     async create_document(input, turn) {

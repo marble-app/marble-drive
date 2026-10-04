@@ -22,6 +22,11 @@
 //   - a rail at the window's edge for parts out of view, with a pill that
 //     takes you to the next one. The page never scrolls by itself.
 //
+// A change fanned out to workers (server/change/fanout.js) lands a group at a
+// time. A group whose worker failed is said in a frame of its own (`failed`):
+// its parts keep their light tint until the change ends, and the tag counts
+// the groups ("3 of 4 groups done · 1 failed").
+//
 // Done, the tag says what changed in numbers, then every mark goes: nothing
 // stays on the page. Everything is transient chrome in one fixed layer;
 // nothing here is filed as an op. Only work this tab is following is drawn
@@ -85,6 +90,8 @@
     .marble-change-tint[data-state="gone"], .marble-change-dot[data-state="gone"], .marble-change-tag[data-state="gone"],
     .marble-change-rail[data-state="gone"], .marble-change-more[data-state="gone"] { opacity: 0; transition: opacity ${GONE}ms var(--change-ease); }
     .marble-change-tint[hidden], .marble-change-dot[hidden] { display: none; }
+    /* A part whose group of a fan out failed (data-state="failed") keeps
+       the light tint above, the one it had ahead: not yet changed. */
     /* Left out of a change made by hand: a full dashed ring, no fill. */
     .marble-change-tint[data-state="out"] { background-color: transparent;
       border: 1px dashed color-mix(in srgb, var(--change-ink) 70%, transparent); }
@@ -324,6 +331,8 @@
         total: null,
         step: null,
         steps: new Map(),     // n -> what the note called it
+        groups: null,         // a fan out's groups: { done, failed, of }
+        failedGroups: new Set(), // the failed frames heard, one per group
         hang: null,
         hangHolder: null,
         hangBox: null,
@@ -403,7 +412,20 @@
         run.step = { n: d.step.n, of: Number.isFinite(d.step.of) ? d.step.of : null };
         if (d.step.text) run.steps.set(d.step.n, String(d.step.text));
       }
+      // Frames of one fan out can cross on the way: the counts only go up.
+      const g = d.groups;
+      if (g && Number.isFinite(g.of) && g.of > 0) {
+        run.groups = {
+          of: g.of,
+          done: Math.max(run.groups?.done ?? 0, Number.isFinite(g.done) ? g.done : 0),
+          failed: Math.max(run.groups?.failed ?? 0, Number.isFinite(g.failed) ? g.failed : 0),
+        };
+      }
     }
+
+    /** How many groups of a fan out failed: as the host counted them, or as
+     *  many failures as this page heard, whichever is more. */
+    const failedOf = (run) => Math.max(run.groups?.failed ?? 0, run.failedGroups.size, Number.isFinite(run.done?.failed) ? run.done.failed : 0);
 
     // A batch's two frames carry the same count and parts; nothing else
     // names which batch an `after` closes.
@@ -557,6 +579,21 @@
       }
     }
 
+    /** A group whose worker failed: nothing of it changed, so its parts
+     *  keep a light tint until the change ends, and the tag counts it. */
+    function onFailed(run, d) {
+      settleFields(run, d);
+      const ids = topmost(list(d.failed));
+      run.failedGroups.add(ids.join(','));
+      for (const id of ids) {
+        const part = run.parts.get(id) ?? addPart(run, id, 'failed');
+        part.state = 'failed';
+        part.lifted = false;
+        part.delay = 0;
+      }
+      if (!run.hang || !drawable(byId(run.hang))) run.hang = firstShown(ids) ?? run.hang;
+    }
+
     function onOps(detail) {
       const run = runs.get(String(detail?.client ?? ''));
       if (!run || run.ending) return;
@@ -610,14 +647,15 @@
       schedule();
     }
 
-    function endWords(done) {
+    function endWords(done, failed = 0) {
       const counts = [];
       if (done?.changed) counts.push([done.changed, 'changed']);
       if (done?.added) counts.push([done.added, 'added']);
       if (done?.removed) counts.push([done.removed, 'removed']);
-      if (done?.status === 'cancelled') return [['Stopped'], ...counts];
-      if (done?.status === 'failed') return [['Didn\'t finish'], ...counts];
-      return counts.length ? counts : [['Nothing changed']];
+      const lost = failed ? [[failed, 'failed']] : [];
+      if (done?.status === 'cancelled') return [['Stopped'], ...counts, ...lost];
+      if (done?.status === 'failed') return [['Didn\'t finish'], ...counts, ...lost];
+      return [...(counts.length ? counts : [['Nothing changed']]), ...lost];
     }
 
     function end(run, done) {
@@ -636,7 +674,7 @@
       // answer): the marks say nothing more (ruling R16).
       run.quiet = lineSpeaks(run, done);
       const shown = run.tag && done && !run.quiet;
-      if (shown) aloud.textContent = endWords(done).map((bit) => bit.join(' ')).join(' · ');
+      if (shown) aloud.textContent = endWords(done, failedOf(run)).map((bit) => bit.join(' ')).join(' · ');
       schedule();
       // The numbers stay up a moment; then everything goes, and the page is
       // the page.
@@ -722,7 +760,8 @@
         runs.set(client, run);
       }
       if (detail.prompt) run.prompt = String(detail.prompt);
-      if (detail.stage === 'start') onStart(run, detail);
+      if (list(detail.failed).length) onFailed(run, detail);
+      else if (detail.stage === 'start') onStart(run, detail);
       else if (detail.stage === 'before') onBatch(run, detail, { landed: caught });
       else if (detail.stage === 'after') onAfter(run, detail);
       else if (detail.phase === 'reading') onRead(run, detail);
@@ -813,6 +852,7 @@
       let tint = null;
       if (part.state === 'out') tint = 'out';
       else if (part.state === 'now') tint = 'now';
+      else if (part.state === 'failed') tint = 'failed';
       else if (part.state === 'soon' && !part.dotted) tint = 'soon';
       else if (part.state === 'landed' && !part.lifted) tint = 'lift';
       return run.gone && tint ? 'gone' : tint;
@@ -998,20 +1038,26 @@
     function tagWords(run) {
       if (run.local) return run.ending ? run.endWords : run.words ?? [];
       // A change the line speaks for keeps its words while it goes.
-      if (run.ending) return run.quiet ? null : run.done ? endWords(run.done) : [];
+      if (run.ending) return run.quiet ? null : run.done ? endWords(run.done, failedOf(run)) : [];
       if (run.reading) return [['Reading'], [run.read.size, run.read.size === 1 ? 'part' : 'parts']];
-      if (!run.verb) return [];
-      const n = run.count || [...run.parts.values()].filter((p) => p.state !== 'soon').length;
+      // Some groups of a fan out failed: the tag counts groups, not parts.
+      const failed = failedOf(run);
+      if (failed && run.groups?.of) {
+        const { done, of } = run.groups;
+        return [[done, `of ${of} ${of === 1 ? 'group' : 'groups'} done`], [failed, 'failed']];
+      }
+      const lost = failed ? [[failed, 'failed']] : [];
+      if (!run.verb) return lost;
+      const n = run.count || [...run.parts.values()].filter((p) => p.state !== 'soon' && p.state !== 'failed').length;
       const [one, many] = unitWords(run);
       const howMany = run.total ?? n;
-      return run.total
-        ? [[run.verb], [n, `of ${run.total} ${howMany === 1 ? one : many}`]]
-        : [[run.verb], [n, n === 1 ? one : many]];
+      const count = run.total ? [n, `of ${run.total} ${howMany === 1 ? one : many}`] : [n, n === 1 ? one : many];
+      return lost.length ? [[run.verb, ...count], ...lost] : [[run.verb], count];
     }
 
     // The verb and its count read as one phrase; the end's tallies, a list.
     const VERBS = new Set(['Rewriting', 'Restyling', 'Changing', 'Adding', 'Removing', 'Reading']);
-    const isCount = (pieces) => pieces.length === 2 && VERBS.has(pieces[0][0]) && typeof pieces[1][0] === 'number';
+    const isCount = (pieces) => pieces.length === 2 && pieces[0].length === 1 && VERBS.has(pieces[0][0]) && typeof pieces[1][0] === 'number';
 
     function writeSaid(node, pieces) {
       const phrase = isCount(pieces);
@@ -1351,7 +1397,7 @@
       for (const part of run.parts.values()) {
         if (part.tint || part.dot) return true;
         if (part.seeded && !part.lifted && part.state !== 'soon' && !resolve(part)) return true;
-        const creatable = part.dotted ? !run.gone : part.state === 'soon' || part.state === 'now';
+        const creatable = part.dotted ? !run.gone : part.state === 'soon' || part.state === 'now' || part.state === 'failed';
         if (creatable && drawable(resolve(part))) return true;
       }
       if (run.undo) return false;
@@ -1510,7 +1556,7 @@
         for (const run of runs.values()) {
           if (run.local || inText(run.client) || run.gone) continue;
           const part = run.parts.get(String(id));
-          if (part && (part.state === 'soon' || part.state === 'now') && drawable(resolve(part))) return part.state;
+          if (part && (part.state === 'soon' || part.state === 'now' || part.state === 'failed') && drawable(resolve(part))) return part.state;
           const mark = run.scope.get(String(id));
           if (mark && mark.state === 'soon' && drawable(resolve(mark))) return 'soon';
         }

@@ -521,6 +521,72 @@ test('the turn-end look reports what the turn did: added, removed, and the rest 
   await runner.close();
 });
 
+test('cancel aborts the turn\'s signal, so the workers a tool started stop with it', async () => {
+  let seen = null;
+  const { store, runner } = await setup({
+    tools: {
+      call: async (name, input, turn) => {
+        seen = turn.abort.signal;
+        // What fan_out does: wait on its workers, which stop on this signal.
+        await new Promise((resolve) => turn.abort.signal.addEventListener('abort', resolve, { once: true }));
+        return { stopped: true };
+      },
+    },
+  });
+  const { id } = await store.createConversation({ provider: 'fake' });
+  const { turnId } = await runner.send(id, { prompt: 'script:stall', context: { target: 'd' } });
+  const live = await until(() => (runner.running()[0]?.token ? runner.running()[0] : null));
+  const call = runner.callTool(live.token, 'fan_out', {});
+  await until(() => seen);
+  assert.equal(seen.aborted, false);
+  const started = Date.now();
+  await runner.cancel(turnId);
+  assert.deepEqual(await call, { stopped: true });
+  const turn = await finished(store, turnId);
+  assert.equal(turn.status, 'cancelled');
+  assert.equal(seen.aborted, true);
+  assert.ok(Date.now() - started < 2_000, 'the turn does not wait out its workers');
+  await runner.close();
+});
+
+test('a turn that finishes on its own aborts its signal too', async () => {
+  const { store, runner } = await setup();
+  const { id } = await store.createConversation({ provider: 'fake' });
+  const { turnId } = await runner.send(id, { prompt: 'script:slow', context: { target: 'd' } });
+  const live = await until(() => (runner.running()[0]?.token ? runner.running()[0] : null));
+  assert.equal(live.abort.signal.aborted, false);
+  const turn = await finished(store, turnId);
+  assert.equal(turn.status, 'completed');
+  assert.equal(live.abort.signal.aborted, true, 'nothing a finished turn started keeps running');
+  await runner.close();
+});
+
+test('the turn-end look says how many groups of a fan out failed, and only when some did', async () => {
+  const looks = [];
+  const run = async (failed) => {
+    looks.length = 0;
+    const { store, runner } = await setup({
+      onLook: (doc, ids, client, extra) => looks.push({ doc, ids, client, extra }),
+      tools: {
+        call: async (name, input, turn) => {
+          turn.v5 = { parts: new Set(['a']), added: new Set(), removed: new Set(), total: null, reach: null, failed };
+          return { ok: true };
+        },
+      },
+    });
+    const { id } = await store.createConversation({ provider: 'fake' });
+    const { turnId } = await runner.send(id, { prompt: 'script:stall', context: { target: 'd' } });
+    const live = await until(() => (runner.running()[0]?.token ? runner.running()[0] : null));
+    await runner.callTool(live.token, 'fan_out', {});
+    await runner.cancel(turnId);
+    await finished(store, turnId);
+    await runner.close();
+    return looks.find((look) => look.extra?.stage === 'end').extra.done;
+  };
+  assert.equal((await run(2)).failed, 2);
+  assert.equal('failed' in (await run(0)), false);
+});
+
 test('the prompt carries the target and the selected source', async () => {
   const { store, runner } = await setup();
   const { id } = await store.createConversation({ provider: 'fake' });

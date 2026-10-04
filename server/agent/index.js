@@ -161,6 +161,7 @@ async function boot({ config, store, writeOps, createDocument, origin, browserPa
     examine,
     onLook: look,
     messaging,
+    log,
   });
   const projects = { find: async (id) => findProject({ settings: await agentStore.settings(), root: config.root }, id) };
   const runner = createRunner({

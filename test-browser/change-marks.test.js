@@ -751,3 +751,42 @@ test('a part an undo takes out before anything is painted is still tinted where 
   await layerEmpty(page, 4000);
   assert.ok((await recorded(page)).states.r3?.includes('now'), 'it was drawn landing before it lifted');
 });
+
+// ------------------------------------------------------------ fan out
+
+test('a group of a fan out that failed keeps its parts tinted until the end, and the tag and the end say so', async () => {
+  await settle();
+  const { page } = await open({ attending: ['c1'] });
+  const reach = ['r1', 'r2', 'r3', 's'];
+  const groups = (done, failed) => ({ done, failed, of: 4 });
+  const shard = async (id, k, count, done) => {
+    const at = { parts: [id], count, total: 4, reach, note: `Date the rows. · part ${k} of 4`, groups: groups(done, 0) };
+    await frame(page, before(at));
+    await opsFrom(page, 'agent:c1', [due(id, 'Oct 9')]);
+    await frame(page, { ...before(at), stage: 'after', groups: groups(done + 1, 0) });
+  };
+  await shard('r1', 1, 1, 0);
+  await shard('r3', 3, 2, 1);
+  await shard('s', 4, 3, 2);
+  // The second group's worker failed: its row was never changed.
+  await frame(page, {
+    client: 'agent:c1', ids: ['r2'], phase: 'writing', note: 'Date the rows.', turn: 'c1-t1', stage: 'after',
+    failed: ['r2'], count: 3, total: 4, reach, groups: groups(3, 1),
+  });
+  assert.equal(await tagSaid(page), '3 of 4 groups done · 1 failed');
+  // The rows that landed lift; the one that failed keeps its mark.
+  await page.waitForFunction(() => !document.querySelector('.marble-change-tint[data-id="r1"]'), null, { timeout: 4000 });
+  assert.equal(await page.locator('.marble-change-tint[data-id="r2"]').getAttribute('data-state'), 'failed');
+  assert.equal(await page.evaluate(() => window.marbleChange.tintFor('r2')), 'failed');
+  await frame(page, { client: 'agent:c1', ids: [], stage: 'end', turn: 'c1-t1', done: { status: 'completed', changed: 3, added: 0, removed: 0, failed: 1 } });
+  assert.equal(await tagSaid(page), '3 changed · 1 failed');
+  await layerEmpty(page, 4000);
+
+  // A failure said with nothing else known still says it, and still marks.
+  await frame(page, { client: 'agent:c1', ids: ['r2'], phase: 'writing', turn: 'c1-t2', stage: 'after', failed: ['r2'], total: 4 });
+  assert.match(await tagSaid(page), /1 failed$/);
+  await page.locator('.marble-change-tint[data-id="r2"][data-state="failed"]').waitFor();
+  await frame(page, { client: 'agent:c1', ids: [], stage: 'end', turn: 'c1-t2', done: { status: 'completed', changed: 0, added: 0, removed: 0 } });
+  assert.equal(await tagSaid(page), 'Nothing changed · 1 failed', 'the end counts the failure even when the host did not');
+  await layerEmpty(page, 4000);
+});

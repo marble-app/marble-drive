@@ -347,6 +347,9 @@ export function createRunner({ store, tools, providers, workdir, origin, bridgeP
       token: null,
       child: null,
       cancelled: null,
+      // Aborted when the turn is stopped or ends: what a tool started for it
+      // (fan_out's workers) stops with it rather than outliving it.
+      abort: new AbortController(),
       provider: null,
       project: null, // resolved at start; the cwd of a full turn
       asks: new Map(), // requestId → { closed }: prompts the process is waiting on
@@ -855,6 +858,7 @@ export function createRunner({ store, tools, providers, workdir, origin, bridgeP
   function stop(turn, outcome) {
     if (turn.cancelled) return;
     turn.cancelled = outcome;
+    turn.abort.abort();
     if (!turn.child) return;
     voidAsks(turn, 'cancelled', { deny: true }).catch((err) => log.error(`[agents] ${err.message}`));
     turn.child.kill('SIGTERM');
@@ -884,6 +888,9 @@ export function createRunner({ store, tools, providers, workdir, origin, bridgeP
     } catch {
       // Already gone.
     }
+    // A call still waiting on work it started (fan_out's workers) stops
+    // that work now: nobody is going to read what it would have made.
+    turn.abort.abort();
     // Waited for here, rather than before: `turn.v5` (what apply_ops's
     // `prepare` tallies as each batch lands) is only complete once every
     // in-flight call has actually returned, and the zone this clears is the
@@ -895,7 +902,8 @@ export function createRunner({ store, tools, providers, workdir, origin, bridgeP
       ids: [],
       stage: 'end',
       turn: turn.id,
-      done: { status, changed, added: v5.added.size, removed: v5.removed.size },
+      // `failed`: groups of a fan out whose workers failed, only when any did.
+      done: { status, changed, added: v5.added.size, removed: v5.removed.size, ...(v5.failed ? { failed: v5.failed } : {}) },
     });
 
     // Compute everything up front: the stored turn, the conversation, and
@@ -1434,6 +1442,7 @@ export function createRunner({ store, tools, providers, workdir, origin, bridgeP
       closed = true;
       const ending = runningTurns().map((turn) => {
         turn.cancelled ??= { status: 'cancelled', error: 'host closing' };
+        turn.abort.abort();
         turn.child?.kill('SIGKILL');
         return turn.ended;
       });
