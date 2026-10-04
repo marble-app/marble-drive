@@ -5,7 +5,7 @@ v5 (`z995hbxn`). Read it there; the frames are the design. This file records
 what the build decided where the spec leaves a question open, what it builds
 in this pass, and what it leaves for later and why.
 
-**Built**, Tasks 1–9, `origin/main..HEAD` (`fd2767e..c5f68fe` for the feature
+**Built**, Tasks 1–9, `origin/main..HEAD` (`fd2767e..9eb0e21` for the feature
 itself; Task 9 — this file's own update, the guide and the docs — follows on
 top). Every "Built in this pass" item below shipped; see "Rulings made during
 the build" for where an implementer resolved something this file left open or
