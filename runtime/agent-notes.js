@@ -33,10 +33,31 @@
       border: 1px solid color-mix(in srgb, var(--notes-mark) 40%, transparent);
       background: color-mix(in srgb, var(--notes-mark) 5%, transparent); }
     .marble-note-soft[hidden] { display: none; }
-    .marble-note-tip { position: fixed; pointer-events: none; max-width: 16rem; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
-      padding: 6px 10px; border-radius: 8px; font-size: 12.5px; line-height: 1.35; color: var(--notes-ink); background: var(--notes-paper);
-      border: 1px solid var(--line, #e6e2d8); box-shadow: 0 4px 10px rgba(0,0,0,.10); }
-    .marble-note-tip[hidden] { display: none; }
+    /* Resting on a pin opens its note: what was kept, and what to do with
+       it. A card, not a tip, because a tip cannot be acted on and a kept
+       note has to be easy to let go of. It hangs over its pin and stays up
+       while the pointer crosses into it. */
+    .marble-note-card { position: fixed; pointer-events: auto; box-sizing: border-box; width: max-content; min-width: 12rem; max-width: 17rem;
+      display: grid; gap: 4px; padding: 10px 8px 6px 12px; border-radius: 12px; color: var(--notes-ink);
+      background: color-mix(in srgb, var(--notes-paper) 92%, transparent);
+      -webkit-backdrop-filter: blur(24px) saturate(1.4); backdrop-filter: blur(24px) saturate(1.4);
+      border: 1px solid var(--line, #e6e2d8);
+      box-shadow: var(--shadow-lift, 0 2px 6px rgba(0,0,0,.08), 0 10px 26px rgba(0,0,0,.12));
+      font-size: 13px; line-height: 1.4; transition: opacity 140ms cubic-bezier(.22, 1, .36, 1), translate 140ms cubic-bezier(.22, 1, .36, 1); }
+    @starting-style { .marble-note-card { opacity: 0; translate: 0 3px; } }
+    .marble-note-card[hidden] { display: none; }
+    .marble-note-card-name { padding-right: 4px; font-size: 12px; color: var(--muted, #5a5a5a); }
+    .marble-note-card-text { padding-right: 4px; overflow: hidden; overflow-wrap: anywhere; display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 4; }
+    .marble-note-card-acts { display: flex; justify-content: flex-end; gap: 2px; margin-top: 2px; }
+    .marble-note-card-acts button, .marble-notes-del { appearance: none; margin: 0; border: 0; border-radius: 8px; background: none; cursor: pointer;
+      font: inherit; font-size: 12.5px; font-weight: 500; color: var(--notes-mark); transition: background-color 120ms cubic-bezier(.22, .61, .36, 1); }
+    .marble-note-card-acts button { height: 28px; padding: 0 9px; }
+    .marble-note-card-acts button:is(:hover, :focus-visible), .marble-notes-del:is(:hover, :focus-visible) {
+      background: var(--paper-3, color-mix(in srgb, var(--notes-ink) 7%, transparent)); outline: none; }
+    .marble-note-card-acts button:active, .marble-notes-del:active { background: color-mix(in srgb, var(--notes-ink) 12%, transparent); }
+    .marble-note-card-acts button.danger, .marble-notes-del { color: var(--danger, #b3261e); }
+    @media (prefers-reduced-transparency: reduce) { .marble-note-card { background: var(--notes-paper); -webkit-backdrop-filter: none; backdrop-filter: none; } }
+    @media (pointer: coarse) { .marble-note-card-acts button { height: 36px; padding: 0 12px; } }
     /* The count sits beside the chat button: words, and the one action. */
     .marble-notes-count { position: fixed; display: flex; align-items: center; gap: 8px; height: 32px; padding: 0 3px 0 4px; pointer-events: auto;
       border-radius: 999px; background: var(--notes-paper); color: var(--notes-ink); border: 1px solid var(--line, #e6e2d8);
@@ -52,9 +73,16 @@
       box-shadow: 0 2px 6px rgba(0,0,0,.08), 0 10px 26px rgba(0,0,0,.12); }
     .marble-notes-list[hidden] { display: none; }
     .marble-notes-head { padding: 6px 8px 4px; font-size: 13px; font-weight: 600; color: var(--muted, #5a5a5a); }
-    .marble-notes-row { display: flex; gap: 8px; align-items: baseline; width: 100%; padding: 6px 8px; border: 0; border-radius: 8px; text-align: left; cursor: pointer;
-      font: inherit; font-size: 12.5px; color: var(--muted, #5a5a5a); background: none; }
-    .marble-notes-row:hover, .marble-notes-row:focus-visible { background: var(--paper-2, color-mix(in srgb, var(--notes-ink) 5%, transparent)); outline: none; }
+    /* A row is the note, which opens it, and a way to let just that one go. */
+    .marble-notes-row { display: flex; align-items: center; gap: 2px; border-radius: 8px; }
+    .marble-notes-row:is(:hover, :focus-within) { background: var(--paper-2, color-mix(in srgb, var(--notes-ink) 5%, transparent)); }
+    .marble-notes-pick { flex: 1; min-width: 0; display: flex; gap: 8px; align-items: baseline; padding: 6px 8px; border: 0; border-radius: 8px; text-align: left; cursor: pointer;
+      font: inherit; font-size: 12.5px; color: var(--muted, #5a5a5a); background: none; outline: none; }
+    .marble-notes-del { flex: none; display: grid; place-items: center; width: 28px; height: 28px; padding: 0; color: var(--faint, #8a8a8a); opacity: 0; }
+    .marble-notes-del svg { width: 14px; height: 14px; }
+    .marble-notes-row:is(:hover, :focus-within) .marble-notes-del { opacity: 1; }
+    @media (hover: none) { .marble-notes-del { opacity: 1; } }
+    .marble-notes-del:is(:hover, :focus-visible) { color: var(--danger, #b3261e); }
     .marble-notes-row i { font-style: normal; flex: none; width: 17px; height: 17px; border-radius: 50% 50% 50% 3px; background: var(--notes-mark); color: var(--notes-paper);
       font: 650 10px/17px var(--ui-font, system-ui, sans-serif); text-align: center; }
     .marble-notes-row b { color: var(--notes-ink); font-weight: 500; }
@@ -63,7 +91,7 @@
       background: var(--notes-paper); color: var(--notes-ink); }
     .marble-notes-acts button.primary { background: var(--notes-mark); border-color: var(--notes-mark); color: var(--notes-paper); }
     .marble-notes-acts button.danger { color: var(--danger, #b3261e); }
-    @media (prefers-reduced-motion: reduce) { .marble-note-pin { transition: none; } }
+    @media (prefers-reduced-motion: reduce) { .marble-note-pin, .marble-note-card { transition: none; } }
   `;
 
   const boot = (marble) => {
@@ -168,9 +196,18 @@
 
     const soft = h('div', 'marble-note-soft');
     soft.hidden = true;
-    const tip = h('div', 'marble-note-tip');
-    tip.setAttribute('role', 'tooltip');
-    tip.hidden = true;
+    const card = h('div', 'marble-note-card');
+    card.setAttribute('role', 'dialog');
+    card.hidden = true;
+    const cardName = h('div', 'marble-note-card-name');
+    const cardText = h('div', 'marble-note-card-text');
+    const cardActs = h('div', 'marble-note-card-acts');
+    const cardOpen = h('button', '', 'Open');
+    cardOpen.type = 'button';
+    const cardDelete = h('button', 'danger', 'Delete');
+    cardDelete.type = 'button';
+    cardActs.append(cardOpen, cardDelete);
+    card.append(cardName, cardText, cardActs);
     const count = h('div', 'marble-notes-count');
     count.hidden = true;
     const openList = h('button', 'marble-notes-open');
@@ -183,7 +220,7 @@
     list.setAttribute('role', 'dialog');
     list.setAttribute('aria-label', 'Notes on this page');
     list.hidden = true;
-    layer.append(soft, count, list, tip);
+    layer.append(soft, count, list, card);
     const pins = new Map(); // note id -> button
 
     const outline = (ids) => {
@@ -192,17 +229,53 @@
       Object.assign(soft.style, { left: `${b.left - 4}px`, top: `${b.top - 3}px`, width: `${b.width + 8}px`, height: `${b.height + 6}px` });
       soft.hidden = false;
     };
-    const showTip = (anchor, text) => {
-      tip.textContent = text;
-      tip.hidden = false;
-      const a = anchor.getBoundingClientRect();
-      const t = tip.getBoundingClientRect();
+    // The note card: which note it is showing, and a short grace before it
+    // goes, so the pointer can cross from the pin into it.
+    let cardFor = null;
+    let cardTimer = 0;
+    const hover = matchMedia('(hover: hover)');
+    function showCard(pin, n) {
+      clearTimeout(cardTimer);
+      cardFor = n.id;
+      cardName.textContent = n.name || '';
+      cardName.hidden = !n.name;
+      cardText.textContent = n.text;
+      card.setAttribute('aria-label', `Note: ${n.text}`);
+      card.hidden = false;
+      const a = pin.getBoundingClientRect();
+      const t = card.getBoundingClientRect();
       let top = a.top - t.height - 8;
       if (top < 8) top = a.bottom + 8;
-      tip.style.left = `${Math.round(Math.max(8, Math.min(a.left + a.width / 2 - t.width / 2, innerWidth - t.width - 8)))}px`;
-      tip.style.top = `${Math.round(top)}px`;
-    };
-    const hideTip = () => { tip.hidden = true; };
+      card.style.left = `${Math.round(Math.max(8, Math.min(a.right - t.width + 6, innerWidth - t.width - 8)))}px`;
+      card.style.top = `${Math.round(top)}px`;
+      outline(n.ids);
+    }
+    function hideCard() {
+      clearTimeout(cardTimer);
+      if (card.hidden) return;
+      card.hidden = true;
+      cardFor = null;
+      outline(null);
+    }
+    const hideSoon = () => { clearTimeout(cardTimer); cardTimer = setTimeout(hideCard, 160); };
+    card.addEventListener('pointerenter', () => clearTimeout(cardTimer));
+    card.addEventListener('pointerleave', (event) => { if (event.pointerType !== 'touch') hideSoon(); });
+    card.addEventListener('focusout', (event) => { if (!card.contains(event.relatedTarget) && !pins.get(cardFor)?.contains(event.relatedTarget)) hideSoon(); });
+    cardOpen.addEventListener('click', () => { const id = cardFor; hideCard(); if (id) reopen(id); });
+    cardDelete.addEventListener('click', (event) => {
+      const id = cardFor;
+      const n = notes.find((x) => x.id === id);
+      const at = notes.indexOf(n);
+      hideCard();
+      if (!id) return;
+      drop(id);
+      // From the keys (a press with no pointer, or ⌫ on a pin), the keys go
+      // to the next pin, or the count, rather than nowhere. A click leaves
+      // them be, so no other card opens under the pointer.
+      if (event.detail !== 0) return;
+      const next = notes[Math.min(at, notes.length - 1)];
+      (next ? pins.get(next.id) : count.hidden ? null : openList)?.focus({ preventScroll: true });
+    });
 
     function paintPins() {
       const keep = new Set(notes.map((n) => n.id));
@@ -213,17 +286,30 @@
         if (!pin) {
           pin = h('button', 'marble-note-pin');
           pin.type = 'button';
-          pin.addEventListener('pointerenter', () => { outline(n.ids); showTip(pin, `${n.name ? `${n.name} · ` : ''}${clip(n.text, 48)}`); });
-          pin.addEventListener('pointerleave', () => { outline(null); hideTip(); });
-          pin.addEventListener('focus', () => { outline(n.ids); showTip(pin, `${n.name ? `${n.name} · ` : ''}${clip(n.text, 48)}`); });
-          pin.addEventListener('blur', () => { outline(null); hideTip(); });
-          // Pressing a pin takes the note back into a card, to change or send.
-          pin.addEventListener('click', () => reopen(n.id));
+          pin.addEventListener('pointerenter', (event) => { if (event.pointerType !== 'touch') showCard(pin, notes.find((x) => x.id === n.id) ?? n); });
+          pin.addEventListener('pointerleave', (event) => { if (event.pointerType !== 'touch') hideSoon(); });
+          pin.addEventListener('focus', () => showCard(pin, notes.find((x) => x.id === n.id) ?? n));
+          pin.addEventListener('blur', (event) => { if (!card.contains(event.relatedTarget)) hideSoon(); });
+          // Pressing a pin takes the note back into the line, to change or
+          // send. A finger has no hover to open the card with, so its first
+          // tap opens the card, and Open there takes it back.
+          pin.addEventListener('click', () => {
+            if (!hover.matches && cardFor !== n.id) { showCard(pin, notes.find((x) => x.id === n.id) ?? n); return; }
+            hideCard();
+            reopen(n.id);
+          });
+          // ⌫ or Delete on a pin lets just that note go.
+          pin.addEventListener('keydown', (event) => {
+            if (event.key !== 'Backspace' && event.key !== 'Delete') return;
+            event.preventDefault();
+            cardFor = n.id;
+            cardDelete.click();
+          });
           layer.insertBefore(pin, count);
           pins.set(n.id, pin);
         }
         pin.textContent = String(i + 1);
-        pin.setAttribute('aria-label', `Note ${i + 1}: ${n.text}`);
+        pin.setAttribute('aria-label', `Note ${i + 1}: ${n.text}. Press to open, Delete to remove`);
         const b = boxOf(n.ids);
         if (!b || b.bottom < 0 || b.top > innerHeight) { pin.hidden = true; return; }
         const key = n.ids.join(',');
@@ -240,7 +326,7 @@
       if (!n) return;
       drop(id);
       outline(null);
-      hideTip();
+      hideCard();
       agent.select(n.ids);
       dispatchEvent(new CustomEvent('marble-callout:ask', { detail: { ids: n.ids, draft: n.text } }));
     }
@@ -270,18 +356,25 @@
     function paintList() {
       list.replaceChildren(h('div', 'marble-notes-head', 'Notes on this page'));
       notes.forEach((n, i) => {
-        const row = h('button', 'marble-notes-row');
-        row.type = 'button';
-        row.append(h('i', '', String(i + 1)));
+        const row = h('div', 'marble-notes-row');
+        const pick = h('button', 'marble-notes-pick');
+        pick.type = 'button';
+        pick.append(h('i', '', String(i + 1)));
         const words = h('span');
         if (n.name) words.append(h('b', '', n.name), ' · ');
         words.append(clip(n.text, 44));
-        row.append(words);
+        pick.append(words);
+        pick.addEventListener('click', () => { closeList(); reopen(n.id); });
+        const del = h('button', 'marble-notes-del');
+        del.type = 'button';
+        del.innerHTML = '<svg viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M6 6l12 12M18 6 6 18"/></svg>';
+        del.setAttribute('aria-label', `Delete note ${i + 1}`);
+        del.addEventListener('click', () => { outline(null); drop(n.id); if (notes.length) list.querySelector('.marble-notes-pick')?.focus({ preventScroll: true }); });
+        row.append(pick, del);
         row.addEventListener('pointerenter', () => outline(n.ids));
         row.addEventListener('pointerleave', () => outline(null));
-        row.addEventListener('focus', () => outline(n.ids));
-        row.addEventListener('blur', () => outline(null));
-        row.addEventListener('click', () => { closeList(); reopen(n.id); });
+        row.addEventListener('focusin', () => outline(n.ids));
+        row.addEventListener('focusout', () => outline(null));
         list.append(row);
       });
       const acts = h('div', 'marble-notes-acts');
@@ -309,6 +402,7 @@
     send.addEventListener('click', sendAll);
 
     function paint() {
+      if (cardFor && !notes.some((n) => n.id === cardFor)) hideCard();
       paintPins();
       count.hidden = !notes.length;
       openList.textContent = `${notes.length} note${notes.length === 1 ? '' : 's'}`;
@@ -328,12 +422,16 @@
       if (!list.hidden && !event.composedPath().includes(layer)) closeList();
     }, true);
     addEventListener('keydown', (event) => {
+      if (event.key === 'Escape' && !card.hidden) { event.stopPropagation(); const pin = pins.get(cardFor); hideCard(); pin?.focus({ preventScroll: true }); return; }
       if (event.key === 'Escape' && !list.hidden) { event.stopPropagation(); closeList(); openList.focus({ preventScroll: true }); }
+    }, true);
+    addEventListener('pointerdown', (event) => {
+      if (!card.hidden && !event.composedPath().some((n) => n === card || n?.classList?.contains?.('marble-note-pin'))) hideCard();
     }, true);
     // Another tab kept or sent a note on this document.
     addEventListener('storage', (event) => { if (event.key === KEY) { notes = read(); paint(); } });
 
-    window.marbleNotes = { add, list: () => notes.map((n) => ({ ...n })), sendAll, clear, brief: () => briefOf(notes) };
+    window.marbleNotes = { add, list: () => notes.map((n) => ({ ...n })), sendAll, clear, remove: drop, brief: () => briefOf(notes) };
     paint();
     // The launcher mounts after this script, and the turn's pill comes and
     // goes by itself: while there are notes, the count checks its place.

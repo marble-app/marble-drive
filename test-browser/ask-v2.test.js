@@ -107,6 +107,45 @@ test('a click away keeps the ask as a numbered pin, the count sits by the chat b
   assert.equal(list.length, 0, 'nothing is sent until Send all');
 });
 
+test('resting on a pin opens its note as a card that can open it or let just that one go; ⌫ on a pin and the list do the same', async () => {
+  const page = await open();
+  await keep(page, 'q1', 'Say it more plainly');
+  await keep(page, 'h', 'Shorter');
+  await keep(page, 'p', 'Link it to the reading list');
+  const pins = page.locator('.marble-note-pin:not([hidden])');
+  await page.locator('.marble-notes-open', { hasText: '3 notes' }).waitFor();
+  await page.waitForTimeout(250);
+
+  // Rest on the first pin: its words and what to do with them, in a card the
+  // pointer can move into.
+  await pins.first().hover();
+  const card = page.locator('.marble-note-card:not([hidden])');
+  await card.waitFor();
+  assert.match(await card.innerText(), /Say it more plainly/);
+  await card.getByRole('button', { name: 'Delete' }).hover();
+  await page.waitForTimeout(300);
+  assert.equal(await card.isVisible(), true, 'the card stays up while the pointer is in it');
+  await card.getByRole('button', { name: 'Delete' }).click();
+  await page.locator('.marble-notes-open', { hasText: '2 notes' }).waitFor();
+  assert.deepEqual((await page.evaluate(() => window.marbleNotes.list())).map((n) => n.text), ['Shorter', 'Link it to the reading list']);
+  assert.equal(await page.locator('.marble-note-card:not([hidden])').count(), 0);
+
+  // ⌫ on a pin with the keys lets that note go too.
+  await pins.first().focus();
+  await page.keyboard.press('Backspace');
+  await page.locator('.marble-notes-open', { hasText: '1 note' }).waitFor();
+  assert.deepEqual((await page.evaluate(() => window.marbleNotes.list())).map((n) => n.text), ['Link it to the reading list']);
+
+  // And the list has a delete for each note, not only Clear.
+  await page.locator('.marble-notes-open').click();
+  const row = page.locator('.marble-notes-list:not([hidden]) .marble-notes-row');
+  await row.first().hover();
+  await row.first().getByRole('button', { name: 'Delete note 1' }).click();
+  await page.waitForFunction(() => !document.querySelector('.marble-note-pin'));
+  assert.equal(await page.locator('.marble-notes-count').isVisible(), false);
+  assert.deepEqual(await page.evaluate(() => window.marbleNotes.list()), []);
+});
+
 test('Send all is one brief to one agent, each note with its thing, and the pins go', async () => {
   const page = await open();
   await keep(page, 'q1', 'Say it more plainly');
