@@ -263,6 +263,7 @@ async function boot({ config, store, writeOps, createDocument, origin, browserPa
     intent: config.agentNaming ? (input) => readIntent({ ...input, model: config.agentNamingModel }) : null,
     readSource: (docPath) => store.read(docPath),
     onLook: look,
+    log,
   });
 
   return {

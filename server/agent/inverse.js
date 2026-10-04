@@ -12,20 +12,14 @@
 //     Undo compares against that, so an element somebody edited afterwards is
 //     left alone instead of being rolled back over their work.
 
-import { applyOp, indexIds, parseSource } from '../engine.js';
-import { hashesOf, idsIn } from './source.js';
+import { applyOp } from '../engine.js';
+import { idsIn, indexOf } from './source.js';
 
 const ID = 'data-marble-id';
 const TRANSIENT = 'data-marble-transient';
 
 const attr = (node, name) => (node.attrs ?? []).find((a) => a.name === name)?.value ?? null;
 const isElement = (node) => Boolean(node?.tagName);
-
-function innerOf(source, node) {
-  const loc = node.sourceCodeLocation;
-  if (!loc?.startTag || !loc?.endTag) return null;
-  return source.slice(loc.startTag.endOffset, loc.endTag.startOffset);
-}
 
 /** Where an element sits, as ids: its parent's, and the next addressed,
  *  non-transient sibling's. Null when the parent has no id to name it by. */
@@ -41,10 +35,11 @@ function placeOf(node) {
 /** The addressed elements an insert put in the document that nothing else it
  *  put there contains — one for each top-level element of the payload. Read
  *  from the document after the insert, not from the payload alone, so markup
- *  the parser places by context (a row, an item) lands where it really did. */
+ *  the parser places by context (a row, an item) lands where it really did.
+ *  `before` and `after` are the document's parses (`indexOf`) either side. */
 function insertedRoots(before, after, html) {
-  const existing = indexIds(parseSource(before));
-  const byId = indexIds(parseSource(after));
+  const existing = before.byId;
+  const { byId } = after;
   const added = new Set(idsIn(html).filter((id) => !existing.has(id) && byId.has(id)));
   return [...added].filter((id) => {
     for (let up = byId.get(id).parentNode; up; up = up.parentNode) {
@@ -54,13 +49,15 @@ function insertedRoots(before, after, html) {
   });
 }
 
-function inverseOf(source, op) {
-  const node = op.id ? indexIds(parseSource(source)).get(op.id) : null;
+/** `before` is the document's parse (`indexOf`) right before `op` runs. */
+function inverseOf(before, op) {
+  const node = op.id ? before.byId.get(op.id) : null;
+  const { source } = before;
 
   switch (op.type) {
     case 'setText':
     case 'setInner': {
-      const html = node && innerOf(source, node);
+      const html = node && before.innerOf(op.id);
       return html === null || html === undefined ? null : { type: 'setInner', id: op.id, html };
     }
     case 'setAttr':
@@ -80,32 +77,40 @@ function inverseOf(source, op) {
   }
 }
 
+/** The undo steps of one op, from the document's parse right before it ran
+ *  (`before`) and right after (`after`): one step, or for an insert one per
+ *  element it put at the top level. What `inverseSteps` records per op, and
+ *  what an undo records to redo each inverse it runs (server/agent/undo.js),
+ *  from parses it has made anyway. */
+export function stepsOf(op, before, after) {
+  if (op.type === 'insert') {
+    const roots = insertedRoots(before, after, op.html);
+    if (!roots.length) return [{ inverse: null, id: null, expect: null, absent: null }];
+    return roots.map((id) => ({ inverse: { type: 'remove', id }, id, expect: after.hashOf(id) ?? null, absent: null }));
+  }
+  const inverse = inverseOf(before, op);
+  const id = op.type === 'remove' ? null : op.id;
+  return [{
+    inverse,
+    id,
+    expect: id ? after.hashOf(id) ?? null : null,
+    absent: op.type === 'remove' ? op.id : null,
+  }];
+}
+
 /** One undo step per op, in the order the ops apply — except an insert, which
- *  has one step per element it put at the top level. */
-export function inverseSteps(source, ops) {
+ *  has one step per element it put at the top level. Each state of the
+ *  document is parsed once: the parse after one op is the parse before the
+ *  next. `index` is `indexOf(source)`, when the caller has it already. */
+export function inverseSteps(source, ops, { index = null } = {}) {
   const steps = [];
   let current = source;
+  let before = index ?? indexOf(source);
   for (const op of ops) {
-    if (op.type === 'insert') {
-      const before = current;
-      current = applyOp(current, op);
-      const roots = insertedRoots(before, current, op.html);
-      const expected = hashesOf(current, roots);
-      for (const id of roots) {
-        steps.push({ inverse: { type: 'remove', id }, id, expect: expected.get(id) ?? null, absent: null });
-      }
-      if (!roots.length) steps.push({ inverse: null, id: null, expect: null, absent: null });
-      continue;
-    }
-    const inverse = inverseOf(current, op);
     current = applyOp(current, op);
-    const id = op.type === 'remove' ? null : op.id;
-    steps.push({
-      inverse,
-      id,
-      expect: id ? hashesOf(current, [id]).get(id) ?? null : null,
-      absent: op.type === 'remove' ? op.id : null,
-    });
+    const after = indexOf(current);
+    steps.push(...stepsOf(op, before, after));
+    before = after;
   }
   return steps;
 }

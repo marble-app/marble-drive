@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { partsOf, parseStep } from '../server/change/parts.js';
+import { indexOf, watchParses } from '../server/agent/source.js';
 
 const DOC = `<!doctype html><html><head><style data-marble-id="st">.a{}</style></head><body data-marble-id="b">
 <ul data-marble-id="ul"><li data-marble-id="l1">One</li><li data-marble-id="l2">Two</li><li data-marble-id="l3">Three</li></ul>
@@ -53,4 +54,47 @@ test('an inserted cell, and an inserted option, are named by their own ids', () 
 test('setInner on a table body narrows to the row that changed, not its cells', () => {
   const r = partsOf(TABLE, [{ type: 'setInner', id: 'tb', html: '<tr data-marble-id="r1"><td data-marble-id="c1">A</td></tr><tr data-marble-id="r2"><td data-marble-id="c2">B</td></tr>' }]);
   assert.deepEqual(r.parts, ['r2']);
+});
+
+// Five lists, each of whose rows a batch rewrites, drops one of, or nests.
+const LISTS = Array.from({ length: 5 }, (_, k) =>
+  `<ul data-marble-id="u${k}">${[0, 1, 2].map((i) => `<li data-marble-id="u${k}i${i}">Item ${i}</li>`).join('')}</ul>`).join('\n');
+const PAGE = `<!doctype html><html><head></head><body data-marble-id="b">\n${LISTS}\n</body></html>`;
+const REWRITES = Array.from({ length: 5 }, (_, k) => ({
+  type: 'setInner',
+  id: `u${k}`,
+  html: `<li data-marble-id="u${k}i0">Item 0</li><li data-marble-id="u${k}i1">Changed</li>`,
+}));
+
+function parsesOf(source, run) {
+  let parses = 0;
+  watchParses((text) => {
+    if (text === source) parses += 1;
+  });
+  try {
+    return { result: run(), parses: () => parses };
+  } finally {
+    watchParses(null);
+  }
+}
+
+test('a batch of setInners is read against one parse of the page', () => {
+  const { result, parses } = parsesOf(PAGE, () => partsOf(PAGE, REWRITES));
+  assert.deepEqual(result.parts, ['u0i1', 'u0i2', 'u1i1', 'u1i2', 'u2i1', 'u2i2', 'u3i1', 'u3i2', 'u4i1', 'u4i2']);
+  assert.deepEqual(result.removes, ['u0i2', 'u1i2', 'u2i2', 'u3i2', 'u4i2']);
+  assert.equal(parses(), 1, 'one parse for five setInners');
+});
+
+test('a parse the caller already has is used, not made again', () => {
+  const index = indexOf(PAGE);
+  const { result, parses } = parsesOf(PAGE, () => partsOf(PAGE, REWRITES, { index }));
+  assert.deepEqual(result, partsOf(PAGE, REWRITES));
+  assert.equal(parses(), 0);
+});
+
+test('a removed row is dropped under the removed row that held it', () => {
+  const nested = '<!doctype html><html><head></head><body data-marble-id="b"><ul data-marble-id="ul"><li data-marble-id="a"><span data-marble-id="as">A</span></li><li data-marble-id="k">Keep</li></ul></body></html>';
+  const r = partsOf(nested, [{ type: 'setInner', id: 'ul', html: '<li data-marble-id="k">Keep</li>' }]);
+  assert.deepEqual(r.parts, ['a']);
+  assert.deepEqual(r.removes, ['a']);
 });

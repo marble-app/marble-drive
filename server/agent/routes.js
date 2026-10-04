@@ -106,7 +106,7 @@ const publicMeter = (meter) => {
   return out;
 };
 
-export function createAgentRoutes({ store, runner, tools, hub, providers, writeOps, restore, maxBody, gated = false, keys = null, anthropicBase = 'https://api.anthropic.com', openaiBase = 'https://api.openai.com', skills = [], usage = null, usageHistory = null, root = null, streams = null, offer = null, intent = null, readSource = null, onLook = null }) {
+export function createAgentRoutes({ store, runner, tools, hub, providers, writeOps, restore, maxBody, gated = false, keys = null, anthropicBase = 'https://api.anthropic.com', openaiBase = 'https://api.openai.com', skills = [], usage = null, usageHistory = null, root = null, streams = null, offer = null, intent = null, readSource = null, onLook = null, log = console }) {
   let detected = null;
   // Turns being undone right now. The undoneAt check alone lets two requests
   // that arrive together both pass it before either has written.
@@ -813,6 +813,8 @@ export function createAgentRoutes({ store, runner, tools, hub, providers, writeO
             turn: turn.id,
             look: onLook ? (docPath, ids, extra) => onLook(docPath, ids, client, extra) : null,
             saveRedo: (id, record) => store.saveRedo(id, record),
+            dropRedo: (id) => store.deleteRedo(id),
+            log,
           }).finally(() => endUndoLooks(saved, client, turn.id));
           await store.updateTurn(turnId, { undoneAt: Date.now() });
           await publishSummary(
@@ -831,9 +833,10 @@ export function createAgentRoutes({ store, runner, tools, hub, providers, writeO
         if (undoing.has(turnId)) return json(res, 409, { error: 'this turn is being undone' });
         undoing.add(turnId);
         try {
-          const redoSaved = await store.redoRecords(turnId);
-          if (redoSaved == null) return json(res, 409, { error: 'there is nothing to redo' });
-          const saved = normalizeUndo(redoSaved);
+          // No record, or one with no steps (left by an undo that only
+          // restored), is nothing to redo.
+          const saved = normalizeUndo(await store.redoRecords(turnId));
+          if (!saved.steps.length && !saved.restores.length) return json(res, 409, { error: 'there is nothing to redo' });
           const client = `agent-undo:${turn.conversationId}`;
           const result = await undoTurn({
             records: saved.steps,

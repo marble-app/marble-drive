@@ -18,13 +18,13 @@
 
 import fsp from 'node:fs/promises';
 
-import { collectSlices, guardOps, idsOfOps, knownIds, OP, repairOps, validateOps } from '../engine.js';
+import { collectSlices, guardOps, idsOfOps, OP, repairOps, validateOps } from '../engine.js';
 import { IDS_MAX, MODELS, SHARDS_MAX, SHARDS_MIN, runFanOut, targetsOf } from '../change/fanout.js';
 import { partsOf, parseStep } from '../change/parts.js';
 import { parsePath, splitPath } from '../paths.js';
 import { inverseSteps } from './inverse.js';
 import { MAX_HOP, MAX_SENDS, MAX_TEXT, WAIT_DEFAULT, WAIT_MAX, WAIT_MIN } from './messages.js';
-import { hashesOf, idsIn, tagsOf, topLevelIds } from './source.js';
+import { hashesOf, idsIn, indexOf, topLevelIds } from './source.js';
 
 const READ_BUDGET = 24_000;
 const REFUSAL_BUDGET = 12_000;
@@ -274,24 +274,26 @@ export function createTools({ store, writeOps, createDocument, buildStarter, com
     const options = { client, note };
     options.prepare = async (source) => {
       if (signal?.aborted) return { refused: { reason: 'stopped', current: [], stopped: true } };
+      // One parse of the document for every question this batch asks of
+      // it: tags, hashes, parts, reach.
+      const doc = indexOf(source);
       let ops;
       try {
         // repairOps only knows a setInner payload's own tag — and so only
         // mints ids into markup it is confident is markup — when it is
         // handed the same slices validateOps checks against.
-        const slices = tagsOf(source);
+        const slices = doc.tags();
         ops = repairOps(given, source, { slices }).ops;
         ops = validateOps(ops, source, { slices, innerLimit: INNER_LIMIT });
       } catch (err) {
         // An element the writer saw that has gone since is a change under
         // it, whatever the check that tripped over its absence.
-        const present = knownIds(source);
-        const gone = (Array.isArray(given) ? given : []).flatMap(targetsOf).filter((id) => known.has(id) && !present.has(id));
+        const gone = (Array.isArray(given) ? given : []).flatMap(targetsOf).filter((id) => known.has(id) && !doc.has(id));
         if (gone.length) return { refused: refusal(source, { stale: [], unread: [], gone: [...new Set(gone)], error: err.message }) };
         return { refused: { reason: err.message, current: [] } };
       }
 
-      const current = hashesOf(source);
+      const current = doc.hashes();
       const unread = [];
       const stale = [];
       for (const op of ops) {
@@ -324,15 +326,16 @@ export function createTools({ store, writeOps, createDocument, buildStarter, com
       // multi-batch step is about to touch — repeated here on every later
       // batch of the same turn so the page never has to remember them on
       // its own.
-      const { parts, inserts, removes, moves, kind } = partsOf(source, ops);
+      const { parts, inserts, removes, moves, kind } = partsOf(source, ops, { index: doc });
       const v5 = tallyOf(turn);
       for (const id of parts) v5.parts.add(id);
       for (const entry of inserts) for (const id of entry.ids) v5.added.add(id);
       for (const id of removes) v5.removed.add(id);
-      if (total !== undefined && v5.total === null) v5.total = Number(total);
+      // A whole number of parts, one or more, or nothing: a wrong total is
+      // never the one the page counts toward.
+      if (Number.isInteger(total) && total >= 1 && v5.total === null) v5.total = total;
       if (Array.isArray(reach)) {
-        const present = knownIds(source);
-        v5.reach = reach.map(String).filter((id) => present.has(id)).slice(0, REACH_MAX);
+        v5.reach = reach.map(String).filter((id) => doc.has(id)).slice(0, REACH_MAX);
       }
       settleLost(v5, ops);
       if (group) v5.fanout = group;
@@ -355,7 +358,7 @@ export function createTools({ store, writeOps, createDocument, buildStarter, com
         reach: v5.reach,
       };
 
-      steps = inverseSteps(source, ops);
+      steps = inverseSteps(source, ops, { index: doc });
       introduced = ops.filter((op) => op.type === 'insert').flatMap((op) => idsIn(op.html));
       onLook?.(docPath, idsOfOps(ops), client, { ...presence, ...(before ? { groups: before } : {}), stage: 'before' });
       options.presence = { ...presence, ...(after ? { groups: after } : {}), stage: 'after' };

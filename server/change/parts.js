@@ -12,16 +12,13 @@
 // narrates its own batches ("Stage 2 of 4: …") hands the page a step and a
 // count for free, if the note is read for it rather than only logged.
 
-import { indexIds, parseSource, sliceOf } from '../engine.js';
-import { hashesOf, idsIn, tagsOf, topLevelIds } from '../agent/source.js';
+import { idsIn, indexOf, topLevelIds } from '../agent/source.js';
 
 const LOOK_ATTRS = new Set(['style', 'class']);
 // Union sizes above this are not worth naming one by one — the batch reports
 // its container instead, the same answer a `setInner` the model can't see
 // into gets.
 const UNION_LIMIT = 60;
-
-const ID_ATTR = 'data-marble-id';
 
 // A fragment is parsed as a whole document, and the HTML parser drops what
 // cannot stand in a body on its own: a <tr> outside a table, a <td> outside a
@@ -51,38 +48,18 @@ function inContext(html, parentTag) {
   return wrap ? `${wrap[0]}${html}${wrap[1]}` : String(html);
 }
 
-const idAttrOf = (node) => (node.attrs ?? []).find((a) => a.name === ID_ATTR)?.value ?? null;
-
-/** For each id, every ancestor (by data-marble-id) above it in `tree`. */
-function ancestorSetsOf(tree, ids) {
-  const byId = indexIds(tree);
-  const out = new Map();
-  for (const id of ids) {
-    const set = new Set();
-    let up = byId.get(id)?.parentNode;
-    while (up) {
-      const aid = idAttrOf(up);
-      if (aid) set.add(aid);
-      up = up.parentNode;
-    }
-    out.set(id, set);
-  }
-  return out;
-}
-
 /** The topmost of `union`: drop any id whose ancestor is also in the set.
- *  `removedIds` live in the old document (`source`); everything else in
- *  `union` is from the new fragment (`html`) — two different trees, so each
- *  id's ancestors are read from whichever tree it actually belongs to. */
-function topmostOf(source, html, removedIds, union) {
+ *  `removedIds` live in the old document (`doc`, its one parse); everything
+ *  else in `union` is from the new fragment (`fragment`, its own) — two
+ *  different trees, so each id's ancestors are read from whichever tree it
+ *  actually belongs to. */
+function topmostOf(doc, fragment, removedIds, union) {
   if (!union.length) return union;
   const removed = new Set(removedIds);
-  const oldAnc = ancestorSetsOf(parseSource(source), union.filter((id) => removed.has(id)));
-  const newAnc = ancestorSetsOf(parseSource(html), union.filter((id) => !removed.has(id)));
   const unionSet = new Set(union);
   return union.filter((id) => {
-    const anc = removed.has(id) ? oldAnc.get(id) : newAnc.get(id);
-    for (const a of anc ?? []) if (unionSet.has(a)) return false;
+    const anc = removed.has(id) ? doc.ancestorsOf(id) : fragment.ancestorsOf(id);
+    for (const a of anc) if (unionSet.has(a)) return false;
     return true;
   });
 }
@@ -99,28 +76,26 @@ function innerOf(outerHtml) {
   return outerHtml.slice(openEnd + 1, closeStart);
 }
 
-function setInnerParts(source, op, tag) {
+function setInnerParts(doc, op, tag) {
   const { id } = op;
   const html = inContext(op.html, tag);
-  let outer;
-  try {
-    outer = sliceOf(source, id).html;
-  } catch {
-    // The id named by the op is not in the document the batch is about to
-    // apply to — the write itself will refuse this upstream; here it is
-    // just one part, generically.
-    return { parts: [id], kind: 'structure' };
-  }
+  const outer = doc.outerOf(id);
+  // The id named by the op is not in the document the batch is about to
+  // apply to — the write itself will refuse this upstream; here it is just
+  // one part, generically.
+  if (outer === null) return { parts: [id], kind: 'structure' };
   const oldIds = idsIn(outer).filter((x) => x !== id);
   const newIds = idsIn(html);
-  const oldHashes = hashesOf(source, oldIds);
-  const newHashes = hashesOf(html, newIds);
-  const changed = newIds.filter((nid) => oldHashes.get(nid) !== newHashes.get(nid));
+  const fragment = indexOf(html);
+  // Compared only with what was inside the element: an id from elsewhere
+  // on the page is new here, whatever its bytes.
+  const inside = new Set(oldIds);
+  const changed = newIds.filter((nid) => (inside.has(nid) ? doc.hashOf(nid) : undefined) !== fragment.hashOf(nid));
   const removed = oldIds.filter((oid) => !newIds.includes(oid));
   const union = [...new Set([...changed, ...removed])];
 
   if (union.length && union.length <= UNION_LIMIT) {
-    const topmost = topmostOf(source, html, removed, union);
+    const topmost = topmostOf(doc, fragment, removed, union);
     const removedSet = new Set(removed);
     return {
       parts: topmost,
@@ -135,7 +110,7 @@ function setInnerParts(source, op, tag) {
   return { parts: [id], kind: words ? 'words' : 'structure' };
 }
 
-function partsForOp(source, op, tagById) {
+function partsForOp(doc, op, tagById) {
   switch (op.type) {
     case 'setText':
       return { parts: [op.id], kind: 'words' };
@@ -145,7 +120,7 @@ function partsForOp(source, op, tagById) {
       const tag = tagById.get(op.id);
       if (tag === 'style') return { parts: [op.id], kind: 'look' };
       if (tag === 'script') return { parts: [op.id], kind: 'attr' };
-      return setInnerParts(source, op, tag);
+      return setInnerParts(doc, op, tag);
     }
     case 'insert': {
       const roots = topLevelIds(inContext(op.html, tagById.get(op.parentId)));
@@ -180,10 +155,13 @@ function docOrderOf(source) {
 
 /** What one batch of ops touched: the parts to redraw, in document order,
  *  and enough about each to say what kind of touch it was. Pure — it only
- *  reads `source`, the document as it is before the batch applies. */
-export function partsOf(source, ops) {
-  const tagById = new Map(tagsOf(source).map((t) => [t.id, t.tag]));
-  const results = (ops ?? []).map((op) => partsForOp(source, op, tagById));
+ *  reads `source`, the document as it is before the batch applies, parsed
+ *  once for the whole batch; `index` is that parse (`indexOf(source)`) when
+ *  the caller already has it. */
+export function partsOf(source, ops, { index = null } = {}) {
+  const doc = index ?? indexOf(source);
+  const tagById = new Map(doc.tags().map((t) => [t.id, t.tag]));
+  const results = (ops ?? []).map((op) => partsForOp(doc, op, tagById));
 
   const kinds = new Set(results.map((r) => r.kind));
   const kind = kinds.size === 0 ? 'structure' : kinds.size === 1 ? [...kinds][0] : 'mixed';

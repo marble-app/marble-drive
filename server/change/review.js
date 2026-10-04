@@ -10,16 +10,22 @@
 // left to show; `conversationHasReview` asks the same question across every
 // document a conversation's turns touched, which is what Keep needs before
 // it can clear a conversation's launcher dot.
+//
+// A document is parsed once per request, however many turns and parts are
+// read against it: on a large page a parse is most of a tenth of a second,
+// and this is asked on every page load and every turn's end, in every tab.
 
 import { normalizeUndo } from '../agent/undo.js';
-import { hashesOf, idsIn } from '../agent/source.js';
-import { sliceOf } from '../engine.js';
+import { idsIn, indexOf } from '../agent/source.js';
 
 const LOOK_ATTRS = new Set(['style', 'class']);
 const MAX_TURNS = 20;
 const WINDOW_MS = 30 * 24 * 60 * 60 * 1000;
 const PROMPT_MAX = 300;
 const REVIEWABLE_STATUS = new Set(['completed', 'cancelled']);
+// The most of any one part's before (or a removed part's markup) a response
+// carries. Past it the page is sent the words, cut here, and `truncated`.
+export const BEFORE_MAX = 20_000;
 
 /** The children of an outer-HTML string — what's between its own open and
  *  close tag. */
@@ -28,6 +34,27 @@ function innerOf(outerHtml) {
   const closeStart = outerHtml.lastIndexOf('<');
   if (openEnd === -1 || closeStart === -1 || closeStart <= openEnd) return '';
   return outerHtml.slice(openEnd + 1, closeStart);
+}
+
+const wordsOf = (html) => String(html).replace(/<[^>]*>/g, ' ').replace(/\s+/g, ' ').trim();
+
+/** A before the page can be sent: whole when it is short; past `BEFORE_MAX`,
+ *  its words (an attribute's value, as it is), cut. */
+function bounded(text, { markup }) {
+  if (text == null || text.length <= BEFORE_MAX) return { text, truncated: false };
+  const cut = (markup ? wordsOf(text) : text).slice(0, BEFORE_MAX);
+  return { text: cut, truncated: true };
+}
+
+/** A removed element too long to send: its own open tag, its words cut, and
+ *  its close, so the page still has an element of the right kind to draw. */
+function boundedOuter(html) {
+  if (html.length <= BEFORE_MAX) return { html, truncated: false };
+  const open = /^<([a-zA-Z][\w-]*)(?:"[^"]*"|'[^']*'|[^'">])*>/.exec(html);
+  if (!open || open[0].length > BEFORE_MAX / 2) return { html: wordsOf(html).slice(0, BEFORE_MAX), truncated: true };
+  const close = `</${open[1]}>`;
+  const words = wordsOf(html.slice(open[0].length)).slice(0, BEFORE_MAX - open[0].length - close.length);
+  return { html: `${open[0]}${words}${close}`, truncated: true };
 }
 
 /** The id a step is about: its own, or — for a step that undoes a `remove`
@@ -44,8 +71,15 @@ const keyOf = (step) => step.id ?? step.absent ?? null;
  *  first step — the original is what "before" means — except the check for
  *  whether the person has since changed it, which always asks the *last*
  *  step's expectation, the one closest to how the document actually stood
- *  when the turn finished. */
-export function reviewPartsOf({ source, steps }) {
+ *  when the turn finished.
+ *
+ *  `index` is `indexOf(source)`, for a caller asking of one document more
+ *  than once; without one, `source` is parsed here — once, and only if a
+ *  step needs it. A `before` (or a removed part's `html`) longer than
+ *  `BEFORE_MAX` is sent as its words, cut, with `truncated: true`. */
+export function reviewPartsOf({ source, steps, index = null }) {
+  let parsed = index;
+  const doc = () => (parsed ??= indexOf(source));
   const byId = new Map();
   for (const step of steps ?? []) {
     if (!step?.inverse) continue;
@@ -63,22 +97,24 @@ export function reviewPartsOf({ source, steps }) {
     const removed = inverse.type === 'insert' && first.id === null;
 
     if (!removed) {
-      const hashes = hashesOf(source, [id]);
-      if (!hashes.has(id)) continue; // gone — nothing left to show it against
-      if (last.id && hashes.get(id) !== last.expect) continue; // theirs now
+      const hash = doc().hashOf(id);
+      if (hash === undefined) continue; // gone — nothing left to show it against
+      if (last.id && hash !== last.expect) continue; // theirs now
     }
 
     if (removed) {
-      parts.push({ id, kind: 'removed', html: inverse.html, parentId: inverse.parentId, beforeId: inverse.beforeId ?? null });
+      const { html, truncated } = boundedOuter(inverse.html);
+      parts.push({ id, kind: 'removed', html, parentId: inverse.parentId, beforeId: inverse.beforeId ?? null, ...(truncated ? { truncated } : {}) });
     } else if (inverse.type === 'remove') {
       parts.push({ id, kind: 'added' });
     } else if (inverse.type === 'setInner') {
-      const before = inverse.html;
-      const current = innerOf(sliceOf(source, id).html);
-      const words = idsIn(before).length === 0 && idsIn(current).length === 0;
-      parts.push({ id, kind: words ? 'words' : 'changed', before });
+      const current = innerOf(doc().outerOf(id));
+      const words = idsIn(inverse.html).length === 0 && idsIn(current).length === 0;
+      const { text: before, truncated } = bounded(inverse.html, { markup: true });
+      parts.push({ id, kind: words ? 'words' : 'changed', before, ...(truncated ? { truncated } : {}) });
     } else if (inverse.type === 'setAttr') {
-      parts.push({ id, kind: LOOK_ATTRS.has(inverse.name) ? 'look' : 'attr', name: inverse.name, before: inverse.value ?? null });
+      const { text: before, truncated } = bounded(inverse.value ?? null, { markup: false });
+      parts.push({ id, kind: LOOK_ATTRS.has(inverse.name) ? 'look' : 'attr', name: inverse.name, before, ...(truncated ? { truncated } : {}) });
     } else if (inverse.type === 'move') {
       parts.push({ id, kind: 'moved', parentId: inverse.parentId, beforeId: inverse.beforeId ?? null });
     }
@@ -123,6 +159,9 @@ function isCandidate(turn, conversation, now) {
 export async function listReview({ store, docPath, read }) {
   const source = await read(docPath);
   if (source == null) return { turns: [] };
+  // Parsed the first time a turn needs it, then shared by every turn.
+  let index = null;
+  const doc = () => (index ??= indexOf(source));
 
   const now = Date.now();
   const candidates = [];
@@ -133,7 +172,7 @@ export async function listReview({ store, docPath, read }) {
       const saved = normalizeUndo(await store.undoRecords(turn.id));
       if (target !== docPath && !saved.steps.some((entry) => entry.path === docPath)) continue;
 
-      const parts = reviewPartsOf({ source, steps: stepsForPath(saved, docPath) });
+      const parts = reviewPartsOf({ source, steps: stepsForPath(saved, docPath), index: doc() });
       if (!parts.length) continue;
 
       candidates.push({
@@ -159,15 +198,24 @@ export async function conversationHasReview({ store, read, conversationId, exclu
   if (!conversation) return false;
 
   const now = Date.now();
+  // Each path read and parsed once, however many turns touched it.
+  const docs = new Map();
+  const docOf = async (path) => {
+    if (!docs.has(path)) {
+      const source = await read(path).catch(() => null);
+      docs.set(path, source == null ? null : indexOf(source));
+    }
+    return docs.get(path);
+  };
   for (const turn of await store.turns(conversationId)) {
     if (turn.id === excludeTurnId) continue;
     if (!isCandidate(turn, conversation, now)) continue;
 
     const saved = normalizeUndo(await store.undoRecords(turn.id));
     for (const path of pathsOf(turn, saved)) {
-      const source = await read(path).catch(() => null);
-      if (source == null) continue;
-      if (reviewPartsOf({ source, steps: stepsForPath(saved, path) }).length) return true;
+      const index = await docOf(path);
+      if (!index) continue;
+      if (reviewPartsOf({ source: index.source, steps: stepsForPath(saved, path), index }).length) return true;
     }
   }
   return false;

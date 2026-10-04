@@ -72,6 +72,13 @@ const SCRIPTS = {
     ] } },
     { say: 'Added a row and renamed the heading.' },
   ],
+  // One heading renamed, in a page of its own, for each test of what an
+  // undo leaves to redo.
+  ...Object.fromEntries(['meadow3', 'meadow4'].map((doc) => [doc, [
+    { call: 'read_document', args: { path: doc } },
+    { call: 'apply_ops', args: { path: doc, note: 'rename the heading', ops: [{ type: 'setText', id: 'h', text: 'Backlog' }] } },
+    { say: 'Renamed the heading.' },
+  ]])),
   reviewAgain: [
     { call: 'read_document', args: { path: 'meadow2' } },
     { call: 'apply_ops', args: { path: 'meadow2', note: 'add a row and rename the heading', ops: [
@@ -1054,7 +1061,65 @@ test('undo drops a turn from the review list, and redo brings it — and the row
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify([{ type: 'setText', id: 'h', text: 'Mine' }]),
   });
+
   const afterPersonEdit = await api('GET', '/agent/review?path=meadow2');
   assert.equal(afterPersonEdit.body.turns.length, 1);
   assert.deepEqual(afterPersonEdit.body.turns[0].parts.map((p) => p.kind), ['added']);
+});
+
+test('an undo that only put the page back leaves nothing to redo, even where a redo was left before', async () => {
+  const original = SOURCE.replace('Garden', 'Meadow');
+  await drive.store.write('meadow3', original, { label: 'test' });
+  const run = await start('script:meadow3\nRename the heading', 'meadow3');
+  assert.equal((await finished(run.conversationId, run.turnId)).turn.status, 'completed');
+  assert.match(await drive.store.read('meadow3'), /Backlog/);
+
+  // As a turn that rewrote the page with its own tools is undone: by the
+  // point it started from, and nothing else.
+  let sha = null;
+  for (const checkpoint of await drive.store.history('meadow3')) {
+    if ((await drive.store.snapshot('meadow3', checkpoint.sha)) === original) sha = checkpoint.sha;
+  }
+  assert.ok(sha, 'the page as it was is a checkpoint');
+  await drive.agents.store.saveUndo(run.turnId, { steps: [], restores: [{ path: 'meadow3', sha }] });
+  await drive.agents.store.saveRedo(run.turnId, {
+    steps: [{ path: 'meadow3', steps: [{ inverse: { type: 'setText', id: 'h', text: 'Stale' }, id: 'h', expect: null, absent: null }] }],
+    restores: [],
+  });
+
+  const undone = await api('POST', `/agent/turns/${run.turnId}/undo`);
+  assert.equal(undone.status, 200);
+  assert.equal(await drive.store.read('meadow3'), original);
+  assert.equal(await drive.agents.store.redoRecords(run.turnId), null, 'no redo is kept, and the old one is gone');
+
+  const redone = await api('POST', `/agent/turns/${run.turnId}/redo`);
+  assert.equal(redone.status, 409);
+  assert.equal(await drive.store.read('meadow3'), original);
+
+  // A record with no steps in it, however it got there, is nothing to redo.
+  await drive.agents.store.saveRedo(run.turnId, { steps: [], restores: [] });
+  assert.equal((await api('POST', `/agent/turns/${run.turnId}/redo`)).status, 409);
+});
+
+test('an undo whose redo could not be kept is still an undo', async () => {
+  const original = SOURCE.replace('Garden', 'Meadow');
+  await drive.store.write('meadow4', original, { label: 'test' });
+  const run = await start('script:meadow4\nRename the heading', 'meadow4');
+  assert.equal((await finished(run.conversationId, run.turnId)).turn.status, 'completed');
+
+  const saveRedo = drive.agents.store.saveRedo;
+  drive.agents.store.saveRedo = async () => {
+    throw new Error('disk full');
+  };
+  let undone;
+  try {
+    undone = await api('POST', `/agent/turns/${run.turnId}/undo`);
+  } finally {
+    drive.agents.store.saveRedo = saveRedo;
+  }
+  assert.equal(undone.status, 200);
+  assert.deepEqual(undone.body, { reverted: 1, kept: 0, errors: [] });
+  assert.equal(await drive.store.read('meadow4'), original);
+  assert.ok((await drive.agents.store.turn(run.turnId)).undoneAt, 'the turn is marked undone');
+  assert.equal((await api('POST', `/agent/turns/${run.turnId}/undo`)).status, 409, 'and is not undone twice');
 });
