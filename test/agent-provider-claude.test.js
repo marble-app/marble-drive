@@ -183,6 +183,7 @@ test('detect: signed in, signed out, not installed, and the API key', async () =
 
   const signedOut = createClaudeProvider({ exec: exec({ code: 1, stdout: '{"loggedIn": false}', stderr: '', missing: false }), env: {} });
   assert.equal((await signedOut.detect()).signedIn, false);
+  assert.equal((await signedOut.detect()).detail, 'run `claude` once to sign in');
 
   const missing = createClaudeProvider({ exec: exec({ code: null, stdout: '', stderr: '', missing: true }), env: {} });
   assert.deepEqual(await missing.detect(), { installed: false, signedIn: false, detail: 'claude is not installed' });
@@ -202,6 +203,16 @@ test('detect: signed in, signed out, not installed, and the API key', async () =
   key = 'sk-from-file';
   assert.equal((await late.detect()).signedIn, true);
   assert.equal(late.spawn({ workspace: '/w', prompt: 'x' }).env.ANTHROPIC_API_KEY, 'sk-from-file');
+});
+
+// A probe that ran past runCommand's clock (exec.js sets `timedOut`) never
+// learned whether the person is signed in. That is not the same thing as
+// having asked and heard no — change-line.js's ready() tells the two apart
+// by this detail, so a cold CLI cannot read as "not set up".
+test('detect: an auth-status probe past its clock is marked as timed out, not as a plain sign-out', async () => {
+  const exec = async () => ({ code: null, stdout: '', stderr: '', missing: false, timedOut: true });
+  const provider = createClaudeProvider({ exec, env: {} });
+  assert.deepEqual(await provider.detect(), { installed: true, signedIn: false, detail: 'claude auth status timed out' });
 });
 
 test('detection probes get the allowlisted environment, never the drive secret', async () => {

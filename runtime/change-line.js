@@ -893,16 +893,32 @@
     // agent, there and signed in, as the chat's own picker asks. A yes holds
     // for the tab; a no for a moment, and not past a setup saved here, so
     // setting one up is seen at the next ⏎. A host that cannot say is no
-    // answer: the send goes as it always did.
+    // answer: the send goes as it always did. Neither can one provider whose
+    // detection did not finish in time — a sprite just booted, a CLI probed
+    // against its own clock — so it is unknown, not "not set up".
     const NO_FOR = 5000;
     let readiness = null;         // { at, value: true | false | undefined while asked, answer }
     const fresh = (r) => r.value !== false || Date.now() - r.at < NO_FOR;
+    // Detection that could not finish in time says so in its detail rather
+    // than with a definite installed/signedIn — the race in
+    // server/agent/routes.js (detectAll) and a CLI's own probe past its
+    // clock (claude.js, codex.js, cursor.js) all end in some "... timed out".
+    const TIMED_OUT = /timed out/i;
+    const unknown = (p) => TIMED_OUT.test(String(p?.detail ?? ''));
+    /** true: a provider is there and signed in. false: every provider is
+     *  definitely not — known, not timed out. null: at least one could not
+     *  be determined, so there is no "not set up" to say yet. */
+    function verdict(list) {
+      if (!Array.isArray(list)) return null;
+      if (list.some((p) => p?.installed && p?.signedIn)) return true;
+      return list.some(unknown) ? null : false;
+    }
     function ready() {
       if (readiness && fresh(readiness)) return readiness.answer;
       const entry = { at: Date.now(), value: undefined, answer: null };
       entry.answer = Promise.resolve()
         .then(() => agent.providers())
-        .then((list) => (Array.isArray(list) ? list.some((p) => p?.installed && p?.signedIn) : null), () => null)
+        .then(verdict, () => null)
         .then((ok) => {
           entry.value = ok;
           if (ok === null && readiness === entry) readiness = null;

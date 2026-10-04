@@ -579,6 +579,33 @@ test('words typed under an answer are kept for the next ⌘J there', async () =>
   assert.equal(await input(page).textContent(), 'And the others');
 });
 
+// A provider that has not finished detecting (a sprite just booted, probing
+// a CLI against its own clock) is not the same as one the host asked about
+// and heard "not set up" for. ⏎ sends as it always did, rather than parking
+// the line on "Changes need setting up first." for however long the probe
+// takes to answer.
+test('a provider still detecting does not read as "nothing set up": ⏎ sends', async () => {
+  const page = await open();
+  // The drive's one provider (standing in for a real CLI), reported exactly
+  // as a cold sprite's probe would: present, but not yet known either way.
+  await page.route('**/agent/providers', (route) => route.fulfill({
+    status: 200,
+    contentType: 'application/json',
+    body: JSON.stringify([{ id: 'fake', label: 'Fake', installed: false, signedIn: false, detail: 'detection timed out' }]),
+  }));
+  await pointAt(page, 'r2');
+  await summon(page);
+  await input(page).waitFor();
+  await page.keyboard.type('script:due Add a due date');
+  await page.keyboard.press('Enter');
+  await page.waitForFunction(() => document.querySelector('.marble-line')?.dataset.state === 'sent', null, { timeout: 10_000 });
+  await lineGone(page);
+  // It really sent, rather than folding and then bouncing back: the change
+  // lands, as any other send would.
+  await page.waitForFunction(() => document.querySelector('[data-marble-id="r2"]')?.getAttribute('data-due') === 'Oct 9', null, { timeout: 8000 });
+  assert.equal(await line(page).count(), 0, 'no line left saying anything, let alone "Changes need setting up first."');
+});
+
 test('a send the host refuses says so in plain words', async () => {
   const page = await open();
   await page.route('**/agent/conversations', (route) => (route.request().method() === 'POST'
