@@ -178,6 +178,13 @@
         for (const handler of [...current.handlers]) handler(data);
       };
       if (key === '*') {
+        // Open again after it was away (a resting tab, a host restart, a page
+        // back from the background): whatever was said meanwhile reached
+        // nobody here, so the page is told to look again.
+        source.addEventListener('open', () => {
+          if (current.opened) dispatchEvent(new CustomEvent('marble:agent-reopened'));
+          current.opened = true;
+        });
         source.addEventListener('summary', deliver);
         source.addEventListener('folders', deliver);
         // An ask opening or closing anywhere, for a list that would

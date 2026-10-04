@@ -19,8 +19,10 @@
 //     Undo takes the last ask back (hold it for every ask since the last
 //     Keep), then offers Redo while you are there;
 //   - ⌘Z from anywhere on the page takes the change back when it came after
-//     your own last edit, and ⇧⌘Z puts it back; otherwise both are the
-//     document's own history;
+//     your own last edit and either ended while this tab was open or is drawn
+//     now, and ⇧⌘Z puts it back; otherwise both are the document's own
+//     history (a change from before a reload is not this tab's to take back
+//     unseen, ruling R42);
 //   - an edit of yours inside a changed part makes that part yours: its
 //     drawing goes, and the rest of the change still shows;
 //   - the chat button's menu has Show what changed while anything here is
@@ -259,9 +261,22 @@
       el.setAttribute(TRANSIENT, '');
       return el;
     };
+    // Where each part is, kept between lookups: a big page answers a lookup
+    // by reading the whole of itself, and a drawing paints every frame. An
+    // element is asked for again only once it has left the page (a part
+    // replaced under the same id); an id not found, once the page has
+    // changed since it was asked.
+    let pageAt = 0;               // bumped by every change of the page's own
+    const found = new Map();      // id -> { el, at }
+    const usable = (el, id) => el.isConnected && el.getAttribute('data-marble-id') === id && !el.closest(`[${TRANSIENT}]`);
     const byId = (id) => {
-      const el = id ? (marble.byId?.(id) ?? document.querySelector(`[data-marble-id="${CSS.escape(id)}"]`)) : null;
-      return el && el.isConnected && !el.closest(`[${TRANSIENT}]`) ? el : null;
+      if (!id) return null;
+      const known = found.get(id);
+      if (known && (known.el ? usable(known.el, id) : known.at === pageAt)) return known.el;
+      let el = marble.byId?.(id) ?? document.querySelector(`[data-marble-id="${CSS.escape(id)}"]`);
+      if (el && !usable(el, id)) el = null;
+      found.set(id, { el, at: pageAt });
+      return el;
     };
     const unitOf = (el) => window.marbleChange?.unitOf?.(el) ?? ['part', 'parts'];
     const still = () => stillness.matches;
@@ -300,6 +315,7 @@
     const views = new Set();      // what is drawn: one per change on screen
     let everything = false;       // Show what changed is up
     const ended = new Set();      // `${client}|${turn}`: changes whose end was heard here
+    const landedHere = new Set(); // turn ids that ended (or were redone) while this tab was open
 
     const undone = (id) => undoneHere.some((u) => u.turn === id);
 
@@ -829,6 +845,9 @@
       };
       for (const member of view.group.members) {
         for (const part of [...member.parts].reverse()) {
+          // A before sent cut (past the host's limit) is words, not the
+          // markup or the value it was: that part shows as it is now.
+          if (part.truncated) continue;
           const el = find(part.id);
           switch (part.kind) {
             case 'added':
@@ -926,7 +945,7 @@
           el.dataset.kind = part.kind;
           break;
         case 'was': {
-          const text = wordsOf(part.before);
+          const text = oldWords(part);
           if (!text) return null;
           el = h('div', 'marble-review-was', text);
           break;
@@ -959,6 +978,38 @@
       return left === Infinity ? null : { left, top, width: right - left, height: bottom - top, right, bottom };
     }
 
+    /** A part's old words, as the struck line says them: a before sent cut
+     *  (past the host's limit) ends in an ellipsis. Read once per part. */
+    function oldWords(part) {
+      if (part.was === undefined) {
+        const text = wordsOf(part.before);
+        part.was = text && part.truncated ? `${text}…` : text;
+      }
+      return part.was;
+    }
+    /** Whether a part's old words are the words there now: a word made bold,
+     *  or made a link, changed the markup and not the words, and its old
+     *  words under it would only say the same sentence twice. */
+    function sameWords(part, el) {
+      if (part.sameAs !== el) {
+        part.sameAs = el;
+        part.same = !part.truncated && oldWords(part) === (el.textContent ?? '').replace(/\s+/g, ' ').trim();
+      }
+      return part.same;
+    }
+
+    /** Where a drawing's parts are found, and the block they share: read
+     *  again only once the page has changed, not every frame. */
+    function homesFor(view) {
+      if (view.homesAt !== pageAt || view.homesFrom !== view.group) {
+        const homes = homesOf(view.group.parts);
+        view.homes = { homes, shared: homes.length > 1 ? blockUp(common(homes)) : homes[0] ?? null };
+        view.homesAt = pageAt;
+        view.homesFrom = view.group;
+      }
+      return view.homes;
+    }
+
     function paint(view, hand) {
       if (view.state === 'out' || view.state === 'lift') return;
       const { group } = view;
@@ -967,7 +1018,9 @@
       const boxes = [];
       for (const part of group.parts) {
         if (part.kind === 'removed') {
-          if (!marking) continue;
+          // One sent cut has no markup to draw back: the bar and the tag
+          // still count it.
+          if (!marking || part.truncated) continue;
           const at = oldPlace(part);
           if (at) specs.push({ key: `ghost:${part.id}`, part, kind: 'ghost', at });
           continue;
@@ -990,11 +1043,11 @@
           case 'changed': {
             const w = part.kind === 'words' ? wordsBox(view, el, r) : b;
             specs.push({ key: `tint:${part.id}`, part, kind: 'tint', box: w });
-            specs.push({ key: `was:${part.id}`, part, kind: 'was', at: { left: w.left, top: w.top + w.height + 2 }, max: Math.max(r.width, 200) });
+            if (!sameWords(part, el)) specs.push({ key: `was:${part.id}`, part, kind: 'was', at: { left: w.left, top: w.top + w.height + 2 }, max: Math.max(r.width, 200) });
             break;
           }
           case 'look': {
-            const o = oldShape(view, part, el, r);
+            const o = part.truncated ? null : oldShape(view, part, el, r);
             if (o) specs.push({ key: `outline:${part.id}`, part, kind: 'outline', box: { left: r.left + o.dx, top: r.top + o.dy, width: o.width, height: o.height, radius: o.radius } });
             break;
           }
@@ -1043,12 +1096,11 @@
       // share, when they fill most of it (three dated rows are their list),
       // so the bar is flush with that. A block they barely touch (a board, a
       // column) is not the change.
-      const homes = homesOf(group.parts);
-      const found = union([...homes.map((el) => el.getBoundingClientRect()), ...boxes]);
-      const shared = homes.length > 1 ? blockUp(common(homes)) : homes[0] ?? null;
+      const { homes, shared } = homesFor(view);
+      const covered = union([...homes.map((el) => el.getBoundingClientRect()), ...boxes]);
       const frameRect = shared?.isConnected ? shared.getBoundingClientRect() : null;
-      view.frame = frameRect && found && found.height >= frameRect.height * 0.5 ? shared : null;
-      const rect = (view.frame ? union([frameRect, found]) : found) ?? union(drawn) ?? view.rect;
+      view.frame = frameRect && covered && covered.height >= frameRect.height * 0.5 ? shared : null;
+      const rect = (view.frame ? union([frameRect, covered]) : covered) ?? union(drawn) ?? view.rect;
       if (!rect) { view.tag.root.hidden = true; view.bar.root.hidden = true; return; }
       view.rect = rect;
       const under = Math.max(rect.bottom, ...drawn.map((d) => d.top + d.height));
@@ -1408,6 +1460,7 @@
         if (at >= 0) undoneHere.splice(at, 1);
         redoneAt.set(id, Date.now() + (offset ?? 0));
         known.set(id, Date.now());
+        landedHere.add(id);
       }
       inFlight = false;
       // Back on the host's list before the drawing comes back over it.
@@ -1495,6 +1548,10 @@
     let restAt = null;
     let restTimer = 0;
     let pressing = false;
+    // How focus last moved: by a press, or by the keys.
+    let pressedAt = -Infinity;
+    let keyedAt = -Infinity;
+    addEventListener('keydown', () => { keyedAt = performance.now(); }, true);
     const inside = (view, p) => Boolean(p) && view.area.some((r) => p.x >= r.left - 1 && p.x <= r.left + r.width + 1 && p.y >= r.top - 1 && p.y <= r.top + r.height + 1);
 
     /** Something else has the page: the line is open, pointing or Describe is
@@ -1571,6 +1628,7 @@
     // bar does not.
     addEventListener('pointerdown', (event) => {
       pressing = true;
+      pressedAt = performance.now();
       clearTimeout(restTimer);
       if (host.contains(event.composedPath()[0])) return;
       const p = { x: event.clientX, y: event.clientY };
@@ -1587,12 +1645,18 @@
     // ------------------------------------------------------------ focus
 
     const holding = (view, node) => view.group.parts.some((p) => p.kind !== 'removed' && byId(p.id)?.contains(node));
+    const TEXT_ENTRY = 'textarea, input:not([type]), input[type="text"], input[type="search"], input[type="email"], input[type="url"], input[type="tel"], input[type="password"], input[type="number"]';
+    /** Focus that asks for the drawing: the keys walking into the change, or
+     *  a press on something there that is not for typing in. A press into
+     *  words to edit them is the hand going to work on them, and the change
+     *  drawn over them would only be in the way. */
+    const askedBy = (t) => !(t.isContentEditable || t.matches(TEXT_ENTRY)) || (keyedAt > pressedAt && t.matches(':focus-visible'));
 
     document.addEventListener('focusin', (event) => {
       const t = event.composedPath()[0] ?? event.target;
       if (!(t instanceof Element) || host.contains(t) || returning) return;
       for (const view of [...views]) if (view.by === 'focus' && view.state !== 'out' && view.state !== 'lift' && !holding(view, t)) putAway(view, { keys: false });
-      if (t.closest(`[${TRANSIENT}]`) || t.getRootNode() !== document) return;
+      if (t.closest(`[${TRANSIENT}]`) || t.getRootNode() !== document || !askedBy(t)) return;
       const g = groups.find((one) => one.parts.some((p) => p.kind !== 'removed' && byId(p.id)?.contains(t)));
       if (!g) return;
       const drawn = viewOf(g);
@@ -1623,12 +1687,19 @@
     function mine(node) {
       const el = elementOf(node);
       if (!el || el.closest(`[${TRANSIENT}]`) || el.getRootNode() !== document) return;
+      // What the edit is inside, read once from it up: a part holds the edit
+      // when it is one of these. Never a lookup per part per key.
+      const around = new Set();
+      for (let at = el; at; at = at.parentElement) {
+        const id = at.getAttribute('data-marble-id');
+        if (id) around.add(id);
+      }
       let changed = false;
       for (const turn of turns) {
         for (const p of turn.parts ?? []) {
-          if (p.kind === 'removed') continue;
+          if (p.kind === 'removed' || !around.has(p.id)) continue;
           const key = `${turn.id}|${p.id}`;
-          if (yours.has(key) || !byId(p.id)?.contains(el)) continue;
+          if (yours.has(key)) continue;
           yours.add(key);
           changed = true;
         }
@@ -1643,7 +1714,7 @@
     // from outside the page emptied (no key, input or press of theirs
     // shortly before), is not.
     let opsSeen = 0;
-    document.addEventListener('marble:ops', () => { opsSeen += 1; }, true);
+    document.addEventListener('marble:ops', () => { opsSeen += 1; pageAt += 1; }, true);
     for (const type of ['keydown', 'input', 'pointerup', 'drop', 'paste', 'cut']) {
       addEventListener(type, (event) => {
         if (!event.isTrusted) return;
@@ -1732,6 +1803,17 @@
         && !els.some((el) => el.contains(s))) ?? null;
     }
 
+    /** The last stop in the page before the change, where Shift+Tab goes
+     *  from the tag of a change with no stop of its own. */
+    function stopBefore(view) {
+      const els = partEls(view);
+      const anchors = els.length ? els : homesOf(view.group.parts);
+      const first = anchors.reduce((a, b) => (a && !(a.compareDocumentPosition(b) & Node.DOCUMENT_POSITION_PRECEDING) ? a : b), null);
+      if (!first) return null;
+      return pageStops().filter((s) => !anchors.some((el) => el.contains(s))
+        && (s.compareDocumentPosition(first) & Node.DOCUMENT_POSITION_FOLLOWING)).at(-1) ?? null;
+    }
+
     addEventListener('keyup', (event) => { if (event.key.toLowerCase() === 'z') tookZ = false; }, true);
 
     addEventListener('keydown', (event) => {
@@ -1757,9 +1839,13 @@
         if (!event.shiftKey) {
           const turn = newest();
           if (!turn || !cameAfterPerson(turn)) return;
+          // Only a change this tab saw land, or one drawn now: after a
+          // reload, or in a tab opened since, an old change is not taken
+          // back unseen, and ⌘Z is the document's (ruling R42).
+          const view = shownViews().find((v) => v.group.turns.some((t) => t.id === turn.id)) ?? null;
+          if (!view && !landedHere.has(turn.id)) return;
           take();
           tookZ = true;
-          const view = shownViews().find((v) => v.group.turns.some((t) => t.id === turn.id)) ?? null;
           undoTurns(view, [turn]);
         } else {
           const last = undoneHere.at(-1);
@@ -1800,8 +1886,10 @@
         }
         event.preventDefault();
         if (event.shiftKey) {
-          const back = i > 0 ? stops[i - 1] : (lastStopIn(view) ?? (view.focusFrom?.isConnected ? view.focusFrom : null));
-          back?.focus({ preventScroll: true });
+          const back = i > 0 ? stops[i - 1]
+            : lastStopIn(view) ?? (view.focusFrom?.isConnected ? view.focusFrom : null) ?? stopBefore(view);
+          if (back) back.focus({ preventScroll: true });
+          else { putAway(view, { keys: false }); a.blur(); }
         } else if (i < stops.length - 1) {
           stops[i + 1].focus({ preventScroll: true });
         } else {
@@ -1847,7 +1935,9 @@
     // The page's own changes move a drawing; its copies and measures (in
     // the document, marked transient) do not.
     new MutationObserver((records) => {
-      if (views.size && records.some(({ target }) => !elementOf(target)?.closest(`[${TRANSIENT}]`))) schedule();
+      if (!records.some(({ target }) => !elementOf(target)?.closest(`[${TRANSIENT}]`))) return;
+      pageAt += 1;
+      if (views.size) schedule();
     }).observe(document.body ?? document.documentElement, { subtree: true, childList: true, characterData: true, attributes: true });
 
     // A change that ended here: its turn is on the host's list once the host
@@ -1856,11 +1946,27 @@
       const d = event.detail ?? {};
       const client = String(d.client ?? '');
       if (d.turn) ended.add(`${client}|${d.turn}`);
+      if (d.turn && client.startsWith('agent:')) landedHere.add(String(d.turn));
       const done = d.done;
       const changed = done && (done.changed || done.added || done.removed) && done.status !== 'failed';
       if (client.startsWith('agent:') && d.turn && changed) expect(String(d.turn));
       else soon();
     });
+
+    // Any change's end heard here, followed or not: it landed while this tab
+    // was open, so ⌘Z may take it back.
+    document.addEventListener('marble:presence', (event) => {
+      const d = event.detail ?? {};
+      if (d.stage === 'end' && d.turn && String(d.client ?? '').startsWith('agent:')) landedHere.add(String(d.turn));
+    }, true);
+
+    // Back from the background, from a page cache, or with the drive's
+    // stream open again after it was away (a resting tab, a host restart):
+    // whatever ended meanwhile was heard by nobody here, so the list is
+    // asked again.
+    document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') soon(); });
+    addEventListener('pageshow', (event) => { if (event.persisted) soon(); });
+    addEventListener('marble:agent-reopened', soon);
 
     // A chat about this page (or one already on its list) changed: kept,
     // undone or redone somewhere else, or a turn just finished.

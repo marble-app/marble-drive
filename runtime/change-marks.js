@@ -57,6 +57,7 @@
   const stillness = matchMedia('(prefers-reduced-motion: reduce)');
   const SKIP = new Set(['HTML', 'BODY', 'HEAD', 'STYLE', 'SCRIPT', 'LINK', 'META', 'TITLE', 'TEMPLATE', 'NOSCRIPT']);
   const UNDO_IDLE = 8000;    // ms an undo's marks wait for its next frame before they lift
+  const QUIET = 120_000;     // ms a change may go without a frame before the host is asked whether it still runs
   const RAIL_MAX = 400;      // parts the rail measures in one paint
   const MOST_GOING = 60;     // parts of one batch measured ahead in case they go
 
@@ -346,6 +347,7 @@
         done: null,
         drawn: false,
         idle: 0,
+        lull: 0,              // the timer that asks after a change gone quiet
         timers: new Set(),
         local: false,         // a change the page makes itself (`begin`)
         words: null,          // what its tag says, as pieces
@@ -394,9 +396,17 @@
     }
 
     /** An undo has no end of its own to wait for if its last frames never
-     *  come: a while after the last one, its marks lift anyway. */
+     *  come: a while after the last one, its marks lift anyway. A change
+     *  that has said nothing for minutes is asked after: its end may have
+     *  come while nobody here was listening. */
     function touch(run) {
-      if (!run.undo) return;
+      if (!run.undo) {
+        if (run.local) return;
+        clearTimeout(run.lull);
+        run.timers.delete(run.lull);
+        run.lull = after(run, QUIET, () => { settle(run).then(() => { if (runs.get(run.client) === run && !run.ending) touch(run); }); });
+        return;
+      }
       clearTimeout(run.idle);
       run.timers.delete(run.idle);
       run.idle = after(run, UNDO_IDLE, () => {
@@ -1479,6 +1489,48 @@
     // from where it is.
     addEventListener('marble:attending', (event) => { if (event.detail?.id) catchUp(event.detail.id); });
 
+    /** Whether a change still runs, asked of the host: over (or gone), it
+     *  ends here quietly, with no numbers, as its end frame would have
+     *  ended it. A host that cannot say leaves it as it is. */
+    async function settle(run) {
+      if (runs.get(run.client) !== run || run.ending || !run.conversation) return;
+      let detail = null;
+      try {
+        detail = await agent.conversation(run.conversation, { turns: 1 });
+      } catch (err) {
+        if (err?.status !== 404) return;
+      }
+      if (runs.get(run.client) !== run || run.ending) return;
+      const turn = (detail?.turns ?? []).find((t) => t.id === run.turn);
+      if (turn && (turn.status === 'running' || turn.status === 'queued')) return;
+      end(run, null);
+    }
+
+    /** A tab back from resting, or from the background, or a host back from
+     *  a restart, heard none of the end frames sent meanwhile (a stream left
+     *  closed misses them; tab-rest.js closes a hidden tab's after a
+     *  minute). Each change still drawn is checked against what the host
+     *  has standing; one it no longer has is asked after. */
+    function recheck() {
+      const standing = [...runs.values()].filter((run) => !run.local && !run.undo && !run.ending);
+      if (!standing.length) return;
+      fetch(`/presence?app=${encodeURIComponent(marble.app)}`, { cache: 'no-store' })
+        .then((r) => (r.ok ? r.json() : null))
+        .then((body) => {
+          if (!body) return;
+          const frames = Array.isArray(body.frames) ? body.frames : [];
+          for (const run of standing) {
+            const frame = frames.find((f) => String(f?.client ?? '') === run.client);
+            if (frame && (!frame.turn || String(frame.turn) === run.turn)) continue;
+            settle(run);
+          }
+        })
+        .catch(() => { /* the host cannot say: what is drawn stands */ });
+    }
+    document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') recheck(); });
+    addEventListener('pageshow', (event) => { if (event.persisted) recheck(); });
+    addEventListener('marble:agent-reopened', recheck);
+
     // An end frame missed while the stream was away: the chat's summary says
     // it is no longer working, the host confirms the turn is over, and the
     // marks go. (A summary can arrive late, after the next turn has begun.)
@@ -1486,17 +1538,7 @@
       if (!summary?.id || summary.running || summary.queued) return;
       const run = runs.get(`agent:${summary.id}`);
       if (!run || run.ending) return;
-      setTimeout(async () => {
-        if (runs.get(run.client) !== run || run.ending) return;
-        try {
-          const detail = await agent.conversation(summary.id, { turns: 1 });
-          const turn = (detail?.turns ?? []).find((t) => t.id === run.turn);
-          if (turn && (turn.status === 'running' || turn.status === 'queued')) return;
-        } catch {
-          return;
-        }
-        if (runs.get(run.client) === run && !run.ending) end(run, null);
-      }, 1500);
+      setTimeout(() => settle(run), 1500);
     });
 
     // ------------------------------------------------------------ by hand

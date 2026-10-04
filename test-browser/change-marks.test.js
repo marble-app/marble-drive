@@ -879,3 +879,50 @@ test('a failed row keeps its mark when only what holds it or what is beside it c
   await frame(page, before({ turn: 'c1-t2', parts: ['n3'], ids: ['n3'], kind: 'structure', count: 3, total: 4, inserts: [{ parentId: 'r2', beforeId: null, ids: ['n3'] }] }));
   assert.doesNotMatch(await tagSaid(page), /failed/);
 });
+
+// ------------------------------------------------------------ final review
+
+test('the drive\'s stream open again after it was away: a change whose end went by unheard lets go of its marks', async () => {
+  await settle();
+  await closePages();
+  const { page } = await host.newPage({ attending: ['c1'] });
+  pages.push(page);
+  let streams = 0;
+  await page.route('**/agent/events?all=1*', (route) => {
+    streams += 1;
+    // The first stream ends at once, as a host going away ends it; the
+    // browser opens the next a moment later.
+    if (streams === 1) return route.fulfill({ status: 200, contentType: 'text/event-stream', body: 'retry: 2500\n\n' });
+    return route.continue();
+  });
+  await page.addInitScript(() => {
+    window.__reopened = 0;
+    addEventListener('marble:agent-reopened', () => { window.__reopened += 1; });
+  });
+  await page.goto(`${host.base}/a/list`);
+  await page.waitForFunction(() => Boolean(window.marble?.agent && window.marbleChange && document.querySelector('.marble-change-layer')));
+  // A change of a chat the host no longer has anything standing for.
+  await frame(page, before({ parts: ['r1'] }));
+  await page.locator('.marble-change-tint[data-id="r1"]').waitFor();
+  assert.equal(await page.evaluate(() => window.__reopened), 0);
+  await page.waitForFunction(() => window.__reopened > 0, null, { timeout: 8000 });
+  await layerEmpty(page, 5000);
+  assert.deepEqual(await page.evaluate(() => window.marbleChange.runs()), []);
+});
+
+test('a change that has said nothing for minutes is asked after, and lets go once the host says it is over', async () => {
+  await settle();
+  await closePages();
+  const { page } = await host.newPage({ attending: ['c1'] });
+  pages.push(page);
+  await page.clock.install();
+  await page.goto(`${host.base}/a/list`);
+  await page.waitForFunction(() => Boolean(window.marble?.agent && window.marbleChange && document.querySelector('.marble-change-layer')));
+  await frame(page, before({ parts: ['r1'] }));
+  await page.locator('.marble-change-tint[data-id="r1"]').waitFor();
+  await page.clock.fastForward('01:00');
+  assert.equal(await page.evaluate(() => window.marbleChange.runs().length), 1, 'a minute of quiet is still work');
+  await page.clock.fastForward('01:05');
+  await layerEmpty(page, 5000);
+  assert.deepEqual(await page.evaluate(() => window.marbleChange.runs()), []);
+});

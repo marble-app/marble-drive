@@ -140,6 +140,8 @@ const SCRIPTS = {
     { type: 'setText', id: 'r3n', text: 'Dynamic' },
   ] }), { say: 'Done.' }],
   one: [read(), batch({ note: 'Rename the first.', ops: [{ type: 'setText', id: 'r1n', text: 'Malleable software, again' }] }), { say: 'Done.' }],
+  // The same words, one of them made bold: the markup changed, not the words.
+  bolden: [read(), batch({ note: 'Bold the week.', ops: [{ type: 'setInner', id: 'p', html: 'Notes for the <b>week</b>.' }] }), { say: 'Done.' }],
   kinds: [read('kinds'), batch({ note: 'Tidy the board.', ops: [
     { type: 'setText', id: 'kh', text: 'Board, renamed' },
     { type: 'remove', id: 'a2' },
@@ -155,7 +157,14 @@ const TAIL = `<!doctype html>
 <body data-marble-id="tb"><h1 data-marble-id="th">Notes</h1><p data-marble-id="t1">One line.</p><p data-marble-id="t2">The last line.</p></body></html>
 `;
 
-const host = await startDrive({ scripts: SCRIPTS, documents: { list: LIST, kinds: KINDS, board: BOARD, shelf: SHELF, custom: CUSTOM, tail: TAIL } });
+// A big page: two thousand rows of ten elements each.
+const BIG = `<!doctype html>
+<html><head><meta charset="utf-8"><title>Big</title>
+<style>body { font: 13px/1.3 system-ui, sans-serif; margin: 20px; } li { display: flex; gap: 4px; }</style></head>
+<body data-marble-id="gb"><ul data-marble-id="gu">${Array.from({ length: 2000 }, (_, i) => `<li data-marble-id="g${i}"><b>${i}</b><i>a</i><i>b</i><i>c</i><i>d</i><i>e</i><i>f</i><i>g</i><span data-marble-id="g${i}t">Row ${i}</span></li>`).join('')}</ul></body></html>
+`;
+
+const host = await startDrive({ scripts: SCRIPTS, documents: { list: LIST, kinds: KINDS, board: BOARD, shelf: SHELF, custom: CUSTOM, tail: TAIL, big: BIG } });
 const MOD = process.platform === 'darwin' ? 'Meta' : 'Control';
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 // Each of the page's asks of the host for what is left to review, held back
@@ -211,6 +220,19 @@ const file = async (doc = 'list') => (await fetch(`${host.base}/a/${doc}`)).text
 const open = async ({ doc = 'list', attending = [], ...options } = {}) => {
   const { page, errors } = await host.newPage({ attending, ...options });
   pages.push(page);
+  await page.goto(`${host.base}/a/${doc}`);
+  await page.waitForFunction(() => Boolean(window.marble?.agent && window.marbleReview && document.querySelector('.marble-review-host')));
+  page.errors = errors;
+  return page;
+};
+
+// A page whose host answers what is left to review with `turns`, as given.
+const openWith = async (doc, turns) => {
+  const { page, errors } = await host.newPage({});
+  pages.push(page);
+  await page.route('**/agent/review?*', (route) => route.fulfill({
+    status: 200, contentType: 'application/json', body: JSON.stringify({ now: Date.now(), turns }),
+  }));
   await page.goto(`${host.base}/a/${doc}`);
   await page.waitForFunction(() => Boolean(window.marble?.agent && window.marbleReview && document.querySelector('.marble-review-host')));
   page.errors = errors;
@@ -378,10 +400,19 @@ test('two asks on one list are one change; holding Undo takes back both', async 
   await bar(page).waitFor();
   assert.match(await tagText(page), /^3 dates added · 2 asks$/);
 
+  // When the tip shows, timed in the page: after a rest, never at once.
+  await page.evaluate(() => {
+    window.__tipAt = 0;
+    const tip = document.querySelector('.marble-review-tip');
+    new MutationObserver(() => { if (!tip.hidden) window.__tipAt ||= performance.now(); }).observe(tip, { attributes: true });
+  });
   const undo = await act(page, 'undo').boundingBox();
+  const moved = await page.evaluate(() => performance.now());
   await page.mouse.move(undo.x + undo.width / 2, undo.y + undo.height / 2);
-  await page.waitForTimeout(800);
+  await page.locator('.marble-review-tip:not([hidden])').waitFor({ timeout: 3000 });
   assert.equal(await page.locator('.marble-review-tip').innerText(), 'Hold to undo all 2', 'the hold is named on a rest');
+  const after = await page.evaluate((from) => window.__tipAt - from, moved);
+  assert.ok(after >= 740, `the tip waits for a rest: ${Math.round(after)}ms`);
   await page.mouse.down();
   await page.waitForTimeout(700);
   await page.mouse.up();
@@ -987,15 +1018,27 @@ test('no rest is drawn while typing has just happened, or with a button held', a
   const page = await open({ attending: [id] });
   await ask(id, 'dates');
   await groups(page, 1);
-  await page.locator('[data-marble-id="p"]').click();
-  await page.keyboard.type('x');
-  await restOn(page, 'r1', { wait: 650 });
-  assert.equal(await page.locator('.marble-review-group').count(), 0, 'just typed: no drawing');
-  await page.waitForTimeout(300);
+  const r1 = await box(page, 'r1');
   const r = await box(page, 'r2');
+  await page.locator('[data-marble-id="p"]').click();
+  // The key and any drawing, timed in the page: however long the trips to
+  // the page take, nothing is drawn within 800ms of the key.
+  await page.evaluate(() => {
+    window.__typed = 0;
+    window.__drawnAt = 0;
+    addEventListener('keydown', () => { window.__typed = performance.now(); }, true);
+    new MutationObserver(() => { if (document.querySelector('.marble-review-group')) window.__drawnAt ||= performance.now(); })
+      .observe(document.querySelector('.marble-review-host'), { childList: true, subtree: true });
+  });
+  await page.keyboard.type('x');
+  await page.mouse.move(r1.x + 12, r1.y + r1.height / 2);
+  await page.waitForTimeout(900);
+  const { typed, drawnAt } = await page.evaluate(() => ({ typed: window.__typed, drawnAt: window.__drawnAt }));
+  assert.ok(typed > 0, 'the key was heard');
+  assert.ok(!drawnAt || drawnAt - typed >= 800, `just typed: no drawing (drawn ${Math.round(drawnAt - typed)}ms after the key)`);
+  // Long after the key, a rest draws.
   await page.mouse.move(r.x + 30, r.y + r.height / 2);
-  await page.waitForTimeout(650);
-  await bar(page).waitFor({ timeout: 500 });
+  await bar(page).waitFor({ timeout: 3000 });
 
   await away(page);
   await nothingDrawn(page);
@@ -1138,4 +1181,172 @@ test('a list and the card beside it in one section are one change: one level apa
   await ask(two, 'shelfLook', 'shelf');
   await page.waitForFunction(() => window.marbleReview.groups().length === 1
     && window.marbleReview.groups()[0].turns.length === 2, null, { timeout: 10_000 });
+});
+
+// ------------------------------------------------------------ final review
+
+test('after a reload ⌘Z is the document\'s: an old change is not taken back unseen, and one drawn is', async () => {
+  const id = await newChat();
+  let page = await open({ attending: [id] });
+  await ask(id, 'dates');
+  await groups(page, 1);
+  await page.close();
+  page = await open();
+  await groups(page, 1);
+  // Whether the document itself hears the key, as its own ⌘Z would.
+  await page.evaluate(() => {
+    window.__docZ = [];
+    document.addEventListener('keydown', (event) => {
+      if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 'z') window.__docZ.push(event.defaultPrevented);
+    });
+    document.activeElement?.blur?.();
+  });
+  await page.mouse.move(1000, 120);
+  await page.keyboard.press(`${MOD}+z`);
+  await page.waitForFunction(() => window.__docZ.length === 1, null, { timeout: 2000 });
+  assert.deepEqual(await page.evaluate(() => window.__docZ), [false], 'the document has the key, untouched');
+  await page.waitForTimeout(500);
+  assert.equal(await dates(page), 3, 'the change stands');
+  assert.equal((await api('GET', `/agent/conversations/${id}`)).turns.at(-1).undoneAt ?? null, null);
+  assert.equal((await review()).turns.length, 1);
+
+  // Drawn now, it is the change's to take back.
+  await restOn(page, 'r1');
+  await bar(page).waitFor({ timeout: 1000 });
+  await page.keyboard.press(`${MOD}+z`);
+  await page.waitForFunction(() => document.querySelectorAll('[data-marble-id="list"] .date').length === 0, null, { timeout: 5000 });
+});
+
+test('a change whose end this tab never heard (a resting tab, a host restart) lets go of its marks and is listed once the tab is back', async () => {
+  const id = await newChat();
+  const { page } = await host.newPage({ attending: [id] });
+  pages.push(page);
+  // The drive's stream is away, and the change's end frame never comes.
+  await page.route('**/agent/events?all=1*', (route) => route.abort());
+  await page.addInitScript(() => {
+    addEventListener('marble:presence', (event) => { if (event.detail?.stage === 'end') event.stopImmediatePropagation(); }, true);
+  });
+  await page.goto(`${host.base}/a/list`);
+  await page.waitForFunction(() => Boolean(window.marble?.agent && window.marbleReview && window.marbleChange));
+  await page.waitForTimeout(200);
+  await ask(id, 'dates');
+  await page.waitForFunction(() => document.querySelectorAll('[data-marble-id="list"] .date').length === 3);
+  await page.waitForTimeout(600);
+  assert.equal(await page.evaluate(() => window.marbleChange.runs().length), 1, 'missed: its marks still stand');
+  assert.equal(await page.evaluate(() => window.marbleReview.groups().length), 0, 'and it is not listed');
+
+  // The tab is shown again.
+  await page.evaluate(() => document.dispatchEvent(new Event('visibilitychange')));
+  await page.waitForFunction(() => window.marbleChange.runs().length === 0, null, { timeout: 5000 });
+  await page.waitForFunction(() => document.querySelector('.marble-change-layer').children.length === 0, null, { timeout: 5000 });
+  await groups(page, 1, 5000);
+});
+
+test('on a page of twenty thousand elements with sixty parts to review, a key and a frame look nothing up', async () => {
+  const parts = Array.from({ length: 60 }, (_, k) => ({ id: `g${k * 30}t`, kind: 'words', before: `Old row ${k * 30}` }));
+  const page = await openWith('big', [{ id: 'big-t1', conversationId: 'big', prompt: 'Retitle the rows', finishedAt: Date.now() - 1000, parts }]);
+  await groups(page, 1);
+  const counts = await page.evaluate(async () => {
+    const at = document.querySelector('[data-marble-id="g1501t"]');
+    const frame = () => new Promise((resolve) => requestAnimationFrame(resolve));
+    let n = 0;
+    const own = Document.prototype.querySelector;
+    document.querySelector = function querySelector(selector) {
+      if (/data-marble-id=/.test(selector)) n += 1;
+      return own.call(this, selector);
+    };
+    try {
+      // Twenty keys typed somewhere on the page.
+      for (let i = 0; i < 20; i += 1) at.dispatchEvent(new InputEvent('input', { bubbles: true, composed: true }));
+      const typing = n;
+      // Every change drawn, and ten frames of it.
+      window.marbleReview.showAll();
+      await frame();
+      await frame();
+      n = 0;
+      for (let i = 0; i < 10; i += 1) {
+        dispatchEvent(new Event('resize'));
+        await frame();
+      }
+      return { typing, painting: n, drawn: document.querySelectorAll('.marble-review-tint').length };
+    } finally {
+      delete document.querySelector;
+    }
+  });
+  assert.ok(counts.drawn > 0, 'the change is drawn');
+  assert.ok(counts.typing <= 2, `twenty keys looked up ${counts.typing} parts`);
+  assert.ok(counts.painting <= 10, `ten frames looked up ${counts.painting} parts`);
+});
+
+test('a press into changed words to edit them draws nothing over them; the keys walking in draw the change', async () => {
+  const id = await newChat();
+  const page = await open({ attending: [id] });
+  await ask(id, 'one');
+  await groups(page, 1);
+  await page.locator('[data-marble-id="r1n"]').click();
+  assert.equal(await page.evaluate(() => document.activeElement?.getAttribute('data-marble-id')), 'r1n');
+  await page.waitForTimeout(300);
+  assert.equal(await page.locator('.marble-review-group').count(), 0, 'pressed into to edit: nothing drawn');
+  await page.keyboard.press('Tab');
+  await page.keyboard.press('Shift+Tab');
+  assert.equal(await page.evaluate(() => document.activeElement?.getAttribute('data-marble-id')), 'r1n');
+  await bar(page).waitFor({ timeout: 1000 });
+});
+
+test('a word made bold is the same words: no old line under them, only the tint', async () => {
+  const id = await newChat();
+  const page = await open({ attending: [id] });
+  await ask(id, 'bolden');
+  await groups(page, 1);
+  await page.waitForFunction(() => Boolean(document.querySelector('[data-marble-id="p"] b')));
+  await restOn(page, 'p');
+  await bar(page).waitFor({ timeout: 1000 });
+  assert.equal(await page.locator('.marble-review-tint[data-id="p"]').count(), 1, 'tinted');
+  assert.equal(await page.locator('.marble-review-was').count(), 0, 'and not said again under itself');
+});
+
+test('Shift+Tab from the tag of a change with no stop of its own goes back to the page\'s stop before it', async () => {
+  const id = await newChat();
+  const page = await open({ attending: [id] });
+  await ask(id, 'dates');
+  await groups(page, 1);
+  await restOn(page, 'r1');
+  await bar(page).waitFor();
+  await page.locator('.marble-review-tag button').focus();
+  assert.equal(await focused(page), 'tag');
+  await page.keyboard.press('Shift+Tab');
+  assert.equal(await focused(page), 'r1n');
+});
+
+test('a before the host sent cut is words: they end in an ellipsis, and nothing of it is drawn back as markup or a value', async () => {
+  const turns = [{
+    id: 'cut-t1', conversationId: 'cut', prompt: 'Rewrite it all', finishedAt: Date.now() - 1000,
+    parts: [
+      { id: 'h', kind: 'words', before: 'Reading list, as it was before the long rewrite', truncated: true },
+      { id: 'list', kind: 'look', name: 'class', before: 'wide wide wide', truncated: true },
+      { id: 'gone', kind: 'removed', html: '<li>The removed row, cut short</li>', parentId: 'list', beforeId: 'r3', truncated: true },
+    ],
+  }];
+  const page = await openWith('list', turns);
+  await groups(page, 1);
+  await restOn(page, 'h');
+  await bar(page).waitFor({ timeout: 1000 });
+  assert.equal(await page.locator('.marble-review-tint[data-id="h"]').count(), 1, 'the tint still shows');
+  assert.equal(await page.locator('.marble-review-was').innerText(), 'Reading list, as it was before the long rewrite…');
+  assert.equal(await page.locator('.marble-review-ghost').count(), 0, 'no ghost of a part sent cut');
+  assert.equal(await page.locator('.marble-review-outline').count(), 0, 'no old shape from a value sent cut');
+  assert.match(await tagText(page), /1 removed/);
+
+  const tag = await page.locator('.marble-review-tag button').boundingBox();
+  await page.mouse.move(tag.x + tag.width / 2, tag.y + tag.height / 2);
+  await page.mouse.down();
+  await page.locator('.marble-review-before').waitFor({ state: 'attached', timeout: 2000 });
+  const held = await page.evaluate(() => {
+    const before = document.querySelector('.marble-review-before');
+    return { words: before.textContent.replace(/\s+/g, ' '), heading: before.querySelector('h1')?.textContent, wide: before.querySelectorAll('.wide').length };
+  });
+  await page.mouse.up();
+  assert.equal(held.heading, 'Reading list', 'the heading as it is now');
+  assert.doesNotMatch(held.words, /cut short/);
+  assert.equal(held.wide, 0);
 });
