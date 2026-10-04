@@ -164,9 +164,17 @@ the plan's "The shared contract: a v5 presence frame":
   turn: '<conversationId>-t<n>',
   stage: 'start' | 'before' | 'after' | 'end',
   prompt, parts, inserts, removes, moves, kind, step, count, total, reach,
-  failed, done: { status, changed, added, removed },
+  failed,                             // a fan out's failed ids
+  groups: { call, of, done, failed, seq },   // a fan out's groups, when the turn fans out
+  done: { status, changed, added, removed, failed? },  // `failed` whenever the turn fanned out
 }
 ```
+
+`client` and `ids` are always the look's own (`lookFrame`, `server/sse.js`);
+a caller's fields never replace them. Someone holding a share link is sent
+where the work is and how far along, never its words: their stream and
+`GET /presence` drop `prompt`, `note` and `step.text` (`forVisitor`,
+`server/sse.js`); the owner's tabs get the whole frame.
 
 Order on one document's SSE stream for one batch: `stage:'before'` presence
 (from `prepare`, before the write) → `ops` frame → `stage:'after'` presence.
@@ -183,14 +191,21 @@ is the host half (`GET /agent/review?path=`, `server/agent/routes.js`): every
 turn that touched a document, newest first, with the parts of it still there
 to Keep, Undo or Redo. `conversationHasReview` asks the same question across
 every document a conversation's turns touched, which is what `/keep` needs
-before it can clear a conversation's launcher dot.
+before it can clear a conversation's launcher dot. Each document is parsed
+once per request (`indexOf`, `server/agent/source.js`), however many turns
+and parts are read against it, and a part's `before` (or a removed part's
+`html`) past 20 KB is sent as its words, cut, with `truncated: true`.
 
 Turn actions, all under `POST /agent/turns/:turnId/<action>`: `/undo` and
 `/redo` run `undoTurn` (`server/agent/undo.js`) against the turn's saved
 records, publish `turn.undone` / `turn.redone`, and emit a `stage:'end'`
 presence frame on every path the undo touched so a tab opened later is not
-told an undo is still standing on the document. `/keep` marks the turn
-reviewed and clears the conversation's dot once nothing else needs review.
+told an undo is still standing on the document. An undo keeps a redo
+record only when it ran something to redo (one that only restored a page
+keeps none, and drops any left from before), so `/redo` with no steps is a
+409; a redo record that cannot be written is logged, and the undo still
+stands. `/keep` marks the turn reviewed and clears the conversation's dot
+once nothing else needs review.
 
 ### The intent route
 
@@ -201,8 +216,9 @@ selector, how many, how the first looks) and answers one selector and a few
 declarations, or `{ rule: null }`. The page re-checks the rule against what is
 really there before anything moves. At most two requests run at once; a third
 gets `{ rule: null }` immediately. Same plumbing as the callout's offer
-(`server/agent/offer.js`): the installed CLI on the login, no key, no tools, a
-hard timeout, and no answer is not an error.
+(`server/agent/offer.js`): the installed CLI on the login, no key, no tools
+and no MCP servers (`--strict-mcp-config`), a hard timeout, and no answer is
+not an error.
 
 ### `fan_out`
 
@@ -210,13 +226,14 @@ A new agent tool (`server/agent/tools.js`, schema + handler; `server/change/fano
 for the run itself) for parts that each need their own judgment — a label per
 row, an icon per item, a rewrite per paragraph — rather than one rule for all
 of them. The agent writes one plan and shards the ids; one worker per shard
-(the login's CLI, no tools, at most four shards at once) gets the plan, its
-shard's brief and only its shard's elements. A worker's reply is untrusted:
-`{"ops": […]}`, checked against its shard and the document, repaired and
-validated the same way `apply_ops` is (the two share the same prepare/after
-path in `tools.js`), then landed as each worker finishes. A shard that fails
-leaves its parts as they were, says why in the turn's `failed` ids, and the
-rest still lands.
+(the login's CLI, no tools and no MCP servers, started like a turn so it goes
+before the host when memory runs out, at most four shards at once) gets the
+plan, its shard's brief and only its shard's elements. A worker's reply is
+untrusted: `{"ops": […]}`, checked against its shard and the document,
+repaired and validated the same way `apply_ops` is (the two share the same
+prepare/after path in `tools.js`), then landed as each worker finishes. A
+shard that fails leaves its parts as they were, says why in the turn's
+`failed` ids, and the rest still lands.
 
 ### Load order
 
