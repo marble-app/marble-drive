@@ -4,6 +4,7 @@
 // declarations is no rule, and the words go to the agent as they were.
 
 import assert from 'node:assert/strict';
+import { EventEmitter } from 'node:events';
 import { Readable } from 'node:stream';
 import test from 'node:test';
 
@@ -72,11 +73,11 @@ test('padding and margin sides, gaps and type are allowed; a number for opacity 
     verb: 'tightening',
   }));
   assert.deepEqual(rule.declarations, { 'padding-top': '4px', 'margin-inline': '0', gap: '8px', 'font-weight': '600', opacity: '0.9', 'line-height': '1.4' });
-  assert.equal(rule.verb, 'Tightening');
+  assert.equal(rule.verb, 'Restyling', 'several kinds of look at once');
   assert.equal(parseIntent(JSON.stringify({ selector: 'li', declarations: {} })), null, 'nothing to set is no rule');
 });
 
-test('no CLI, a failure, an abort or a timeout is no rule, and the model is asked within 8 seconds on the login', async () => {
+test('no CLI, a failure, an abort or a timeout is no rule, and the model is asked within 6 seconds on the login', async () => {
   assert.equal(await readIntent({ words: 'round', outline: OUTLINE, exec: async () => ({ missing: true }), log: quiet }), null);
   assert.equal(await readIntent({ words: 'round', outline: OUTLINE, exec: async () => ({ code: 1, stderr: 'no' }), log: quiet }), null);
   assert.equal(await readIntent({ words: 'round', outline: OUTLINE, exec: async () => ({ timedOut: true }), log: quiet }), null);
@@ -92,18 +93,27 @@ test('no CLI, a failure, an abort or a timeout is no rule, and the model is aske
   assert.equal(seen.command, 'claude');
   assert.ok(seen.args.includes('haiku'));
   assert.deepEqual(seen.args.slice(seen.args.indexOf('--tools'), seen.args.indexOf('--tools') + 2), ['--tools', '']);
-  assert.equal(seen.options.timeout, 8000);
+  assert.equal(seen.options.timeout, 6000);
   assert.equal(seen.options.env.ANTHROPIC_API_KEY, undefined, 'never billed to a key');
 });
 
 // The route the line asks: POST /agent/change-intent.
-async function post(intent, body) {
+function fakeRes(out) {
+  const res = new EventEmitter();
+  res.writableEnded = false;
+  res.writeHead = (status) => { out.status = status; return res; };
+  res.end = (chunk) => { out.body = String(chunk ?? ''); res.writableEnded = true; };
+  return res;
+}
+const intentReq = (body) => Object.assign(Readable.from([Buffer.from(JSON.stringify(body))]), { method: 'POST', headers: { host: 'localhost' } });
+const routesWith = (intent) => {
   const hub = createHub();
-  const routes = createAgentRoutes({ store: {}, runner: {}, tools: {}, hub, providers: new Map(), writeOps: null, maxBody: 64 * 1024, intent });
-  const req = Object.assign(Readable.from([Buffer.from(JSON.stringify(body))]), { method: 'POST', headers: { host: 'localhost' } });
+  return { hub, routes: createAgentRoutes({ store: {}, runner: {}, tools: {}, hub, providers: new Map(), writeOps: null, maxBody: 64 * 1024, intent }) };
+};
+async function post(intent, body) {
+  const { hub, routes } = routesWith(intent);
   const out = { status: 0, body: '' };
-  const res = { writeHead(status) { out.status = status; return res; }, end(chunk) { out.body = String(chunk ?? ''); } };
-  await routes.handle(req, res, new URL('http://localhost/agent/change-intent'));
+  await routes.handle(intentReq(body), fakeRes(out), new URL('http://localhost/agent/change-intent'));
   hub.close();
   return { status: out.status, body: out.body ? JSON.parse(out.body) : null };
 }
@@ -125,4 +135,66 @@ test('the route answers no rule without a model, without words, or when the mode
   assert.deepEqual((await post(async () => { asked = true; return null; }, { words: '   ', outline: OUTLINE })).body, { rule: null });
   assert.equal(asked, false, 'no words, nothing asked');
   assert.deepEqual((await post(async () => { throw new Error('boom'); }, { words: 'round', outline: OUTLINE })).body, { rule: null });
+});
+
+test('the verb is the property\'s, never the model\'s word', () => {
+  const said = (declarations, verb) => parseIntent(JSON.stringify({ selector: '.card', declarations, unit: 'cards', verb })).verb;
+  assert.equal(said({ 'border-radius': '20px' }, 'Thinking'), 'Rounding');
+  assert.equal(said({ padding: '20px' }, 'Agenting'), 'Spacing');
+  assert.equal(said({ gap: '4px', 'row-gap': '2px' }, 'x'), 'Spacing');
+  assert.equal(said({ 'font-size': '18px' }, 'x'), 'Resizing');
+  assert.equal(said({ color: 'red', 'background-color': 'white' }, 'x'), 'Recolouring');
+  assert.equal(said({ opacity: '0.8' }, 'x'), 'Fading');
+  assert.equal(said({ 'font-size': '18px', color: 'red' }, 'x'), 'Restyling');
+  assert.doesNotMatch(intentPrompt({ words: 'x', outline: [] }), /verb/, 'the model is not asked for one');
+});
+
+test('the route reads at most two sets of words at once; more are no rule at once', async () => {
+  const { hub, routes } = routesWith(null);
+  let calls = 0;
+  const releases = [];
+  const intent = () => { calls += 1; return new Promise((resolve) => releases.push(() => resolve(null))); };
+  const busy = createAgentRoutes({ store: {}, runner: {}, tools: {}, hub, providers: new Map(), writeOps: null, maxBody: 64 * 1024, intent });
+  const outs = [{}, {}, {}];
+  const runs = outs.map((out) => busy.handle(intentReq({ words: 'round the corners', outline: OUTLINE }), fakeRes(out), new URL('http://localhost/agent/change-intent')));
+  await runs[2];
+  assert.equal(calls, 2, 'the third was not asked');
+  assert.deepEqual(JSON.parse(outs[2].body), { rule: null });
+  for (const release of releases) release();
+  await Promise.all(runs);
+  // Once they are done, the next is asked again.
+  const out = {};
+  const next = busy.handle(intentReq({ words: 'round', outline: OUTLINE }), fakeRes(out), new URL('http://localhost/agent/change-intent'));
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(calls, 3);
+  releases.at(-1)();
+  await next;
+  void routes;
+  hub.close();
+});
+
+test('the route lets the model go when the page stops waiting, and trims what it is sent', async () => {
+  const { hub, routes } = routesWith(null);
+  let signal = null;
+  let input = null;
+  const intent = (given) => { input = given; signal = given.signal; return new Promise((resolve) => given.signal.addEventListener('abort', () => resolve(null))); };
+  const slow = createAgentRoutes({ store: {}, runner: {}, tools: {}, hub, providers: new Map(), writeOps: null, maxBody: 64 * 1024, intent });
+  const out = {};
+  const res = fakeRes(out);
+  const long = 'x'.repeat(200);
+  const outline = [...Array(60)].map((_, i) => ({ selector: `div.k${i}${long}`, count: i, radius: long, padding: '4px', fontSize: '12px', color: long, background: 'red', extra: 'dropped' }));
+  const running = slow.handle(intentReq({ words: `round ${long}`, ids: [...Array(30)].map((_, i) => `i${i}`), outline }), res, new URL('http://localhost/agent/change-intent'));
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.ok(signal && !signal.aborted);
+  assert.ok(input.words.length <= 300);
+  assert.ok(input.ids.length <= 20);
+  assert.ok(input.outline.length <= 40);
+  assert.ok(input.outline.every((o) => o.selector.length <= 120 && o.radius.length <= 120 && !('extra' in o)));
+  res.emit('close');
+  await running;
+  assert.equal(signal.aborted, true, 'the page went away: so does the model');
+  // More than a page's words and outline is not read at all.
+  await assert.rejects(slow.handle(intentReq({ words: 'round', outline: [{ selector: 'x'.repeat(70_000) }] }), fakeRes({}), new URL('http://localhost/agent/change-intent')), /larger than/);
+  void routes;
+  hub.close();
 });

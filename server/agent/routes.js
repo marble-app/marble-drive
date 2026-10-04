@@ -65,6 +65,8 @@ const FOLDER = /^\/agent\/folders\/([0-9a-f]{12})$/;
 const UPLOAD = /^\/agent\/uploads\/([0-9a-f]{16}\.(?:png|jpg|gif|webp))$/;
 const PROJECT = /^\/agent\/projects\/([0-9a-f]{12}|drive)$/;
 const TOOL = /^\/agent\/tools\/([a-z_]+)$/;
+const INTENTS_AT_ONCE = 2;   // words read as one rule at a time
+const INTENT_BODY = 64 * 1024; // bytes a page's words and outline come in, at most
 
 const publicWindow = (window) => ({
   id: String(window?.id ?? ''),
@@ -111,6 +113,8 @@ export function createAgentRoutes({ store, runner, tools, hub, providers, writeO
   const undoing = new Set();
   // Offers already written, by element and content (POST /agent/offer).
   const offers = new Map();
+  // Words being read as one rule now (POST /agent/change-intent).
+  let intentsRunning = 0;
 
   // One Claude, signed in one of two ways: the Claude login
   // (claude-subscription) or an API key (claude-api). `claudeAuth` says which;
@@ -506,13 +510,31 @@ export function createAgentRoutes({ store, runner, tools, hub, providers, writeO
     // them beside the page's outline and answers one selector and a few
     // declarations, or none. No rule — no model here, no words, no answer, a
     // failure — is `{ rule: null }`, and the words go to the agent as asked.
+    //
+    // At most two are read at once (a third is no rule at once), what is
+    // sent is cut to size, and a page that stops waiting lets the model go.
     if (route === '/agent/change-intent' && method === 'POST') {
-      const body = await readJson(req, maxBody);
+      const body = await readJson(req, Math.min(maxBody, INTENT_BODY));
       const words = typeof body.words === 'string' ? body.words.trim().slice(0, 300) : '';
-      const ids = (Array.isArray(body.ids) ? body.ids : []).filter((id) => typeof id === 'string' && id).slice(0, 20);
-      const outline = (Array.isArray(body.outline) ? body.outline : []).filter((o) => o && typeof o === 'object').slice(0, 40);
-      if (!intent || !words) return json(res, 200, { rule: null });
-      const rule = await Promise.resolve().then(() => intent({ words, ids, outline })).catch(() => null);
+      const ids = (Array.isArray(body.ids) ? body.ids : []).filter((id) => typeof id === 'string' && id).slice(0, 20).map((id) => id.slice(0, 40));
+      const field = (value) => (typeof value === 'string' ? value.slice(0, 120) : '');
+      const outline = (Array.isArray(body.outline) ? body.outline : []).filter((o) => o && typeof o === 'object').slice(0, 40).map((o) => ({
+        selector: field(o.selector), count: Math.max(0, Math.min(Number(o.count) || 0, 10_000)),
+        radius: field(o.radius), padding: field(o.padding), fontSize: field(o.fontSize), color: field(o.color), background: field(o.background),
+      }));
+      if (!intent || !words || intentsRunning >= INTENTS_AT_ONCE) return json(res, 200, { rule: null });
+      const stop = new AbortController();
+      const gone = () => { if (!res.writableEnded) stop.abort(); };
+      res.on?.('close', gone);
+      intentsRunning += 1;
+      let rule = null;
+      try {
+        rule = await Promise.resolve().then(() => intent({ words, ids, outline, signal: stop.signal })).catch(() => null);
+      } finally {
+        intentsRunning -= 1;
+        res.off?.('close', gone);
+      }
+      if (stop.signal.aborted) return undefined;
       return json(res, 200, { rule: rule ?? null });
     }
 

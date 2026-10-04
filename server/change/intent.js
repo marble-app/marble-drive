@@ -24,7 +24,9 @@ const FIELD_MAX = 120;
 const SELECTOR_MAX = 300;
 const VALUE_MAX = 120;
 const DECLARATIONS_MAX = 6;
-export const TIMEOUT = 8_000;
+// The page waits as long, and no longer: an ask that is not a look (a dark
+// mode, a new column) goes to the agent within this.
+export const TIMEOUT = 6_000;
 
 const SIDES = '(?:-(?:top|right|bottom|left|inline|block|inline-start|inline-end|block-start|block-end))?';
 /** What one rule may set: a look that the engine can turn, nothing that
@@ -62,12 +64,11 @@ export function intentPrompt({ words = '', outline = [], ids = [] }) {
     ...(parts.length ? parts : ['- (none listed)']),
     '',
     'Reply with ONLY a JSON object, no prose and no code fence:',
-    '{"selector": "…", "declarations": {"property": "value"}, "unit": "…", "verb": "…"}',
+    '{"selector": "…", "declarations": {"property": "value"}, "unit": "…"}',
     '',
     `- selector: one CSS selector that matches exactly the parts the words are about, usually one of the selectors above${scope.length ? ', narrowed with the [data-marble-id="…"] it is inside' : ''}.`,
     `- declarations: one to six, using only these properties: ${PROPERTIES.join(', ')}. Plain values (px, em, numbers, colours, or the page's own var(--…)); no url().`,
     '- unit: the parts\' plural noun as a person would say it, e.g. "cards", "rows", "buttons".',
-    '- verb: one word ending in -ing for what is happening, e.g. "Rounding", "Squaring", "Spacing", "Tightening", "Resizing", "Recolouring", "Softening".',
     '',
     'If the words ask for anything one rule with those properties cannot do (new content, a different layout, judgment part by part, a question), reply {"selector": null}.',
   ].join('\n');
@@ -106,9 +107,23 @@ export function parseIntent(raw) {
     declarations[prop] = v;
   }
   const unit = typeof value.unit === 'string' && /^[a-z][a-z -]{0,23}$/i.test(value.unit.trim()) ? value.unit.trim().toLowerCase() : 'parts';
-  const said = typeof value.verb === 'string' ? value.verb.trim() : '';
-  const verb = /^[a-z]{2,20}ing$/i.test(said) ? said.charAt(0).toUpperCase() + said.slice(1).toLowerCase() : 'Changing';
-  return { selector, declarations, unit, verb };
+  return { selector, declarations, unit, verb: verbOf(declarations) };
+}
+
+/** What the page is doing, from what the rule sets: never a word of the
+ *  model's. The page says Squaring for a radius that goes down. */
+export function verbOf(declarations) {
+  const family = (prop) => {
+    if (prop === 'border-radius') return 'Rounding';
+    if (/^(?:padding|margin|gap|row-gap|column-gap|line-height|letter-spacing)/.test(prop)) return 'Spacing';
+    if (prop === 'font-size') return 'Resizing';
+    if (prop === 'font-weight') return 'Weighting';
+    if (/color$/.test(prop)) return 'Recolouring';
+    if (prop === 'opacity') return 'Fading';
+    return 'Restyling';
+  };
+  const verbs = new Set(Object.keys(declarations ?? {}).map(family));
+  return verbs.size === 1 ? [...verbs][0] : 'Restyling';
 }
 
 /** Ask the installed CLI. Returns null — never throws — without a rule. */

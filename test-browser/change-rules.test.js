@@ -186,7 +186,7 @@ test('a drag on one card\'s corner turns all four one to one, and letting go fil
   for (let i = 0; i < 40 && rules.length !== 1; i += 1) { rules = await rulesInFile(); if (rules.length !== 1) await page.waitForTimeout(100); }
   assert.equal(rules.length, 1);
   assert.equal(rules[0].key, 'div.card|border-radius');
-  assert.equal(rules[0].text.trim(), 'html div.card { border-radius: 32px; }');
+  assert.equal(rules[0].text.trim(), 'html div.card:not([data-marble-transient], [data-marble-transient] *) { border-radius: 32px; }');
   const id = await page.evaluate(() => document.querySelector('style[data-marble-rule]').dataset.marbleId);
   assert.ok(id && (await file()).split(`data-marble-id="${id}"`).length === 2, 'the rule has an id of its own');
   assert.deepEqual(examine('board.mrbl', await host.drive.store.read('board')) ?? [], [], 'the document is still sound');
@@ -218,7 +218,7 @@ test('a press on a marked card before the drag leaves it out: it keeps its corne
   await page.waitForFunction(() => document.querySelectorAll('style[data-marble-rule]').length === 1);
   assert.deepEqual(await radii(page), ['22px', '22px', '12px', '22px', '12px']);
   const text = await page.evaluate(() => document.querySelector('style[data-marble-rule]').textContent);
-  assert.equal(text.trim(), 'html div.card:not([data-marble-id="c3"]) { border-radius: 22px; }');
+  assert.equal(text.trim(), 'html div.card:not([data-marble-id="c3"]):not([data-marble-transient], [data-marble-transient] *) { border-radius: 22px; }');
   assert.deepEqual(page.errors, []);
 });
 
@@ -293,6 +293,9 @@ test('the keys: Tab reaches the dot, arrows move every card a pixel (⇧ four), 
   const card = await box(page, 'c1');
   await page.mouse.move(card.x + card.width / 2, card.y + card.height / 2);
   await corner(page).waitFor();
+  // The part under the pointer is the first stop, then its dot.
+  await page.keyboard.press('Tab');
+  assert.equal(await page.evaluate(() => document.activeElement?.classList.contains('marble-rules-ring') && window.marbleRules.part?.dataset.marbleId), 'c1');
   await page.keyboard.press('Tab');
   assert.equal(await page.evaluate(() => document.activeElement?.dataset.grip), 'corner');
   assert.equal(await corner(page).getAttribute('aria-label'), 'Corner radius, 12 px');
@@ -540,4 +543,266 @@ test('Hide work hides an agent\'s marks, not the person\'s own: Reshape stays dr
   const shown = await page.evaluate(() => [...document.querySelectorAll('.marble-change-tint')].every((t) => getComputedStyle(t).display !== 'none')
     && getComputedStyle(document.querySelector('.marble-change-layer')).display !== 'none');
   assert.ok(shown);
+});
+
+// ------------------------------------------------------------ review round 1
+
+const inlineStyles = (page) => page.evaluate(() => ['c1', 'c2', 'c3', 'c4'].map((id) => {
+  const el = document.querySelector(`[data-marble-id="${id}"]`);
+  return el ? el.getAttribute('style') : 'gone';
+}));
+const intentRule = (page, rule, { delay = 0 } = {}) => page.route('**/agent/change-intent', async (route) => {
+  if (delay) await new Promise((resolve) => setTimeout(resolve, delay));
+  await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ rule }) }).catch(() => {});
+});
+const say = async (page, words) => {
+  await page.evaluate(() => window.marbleLine.open({}));
+  await page.locator('.marble-line:not([data-state="sent"]):not([data-leaving]) .marble-line-input').waitFor();
+  // Words given back to the line before are not these.
+  await page.keyboard.press(`${MOD}+a`);
+  await page.keyboard.press('Backspace');
+  await page.keyboard.type(words);
+  await page.keyboard.press('Enter');
+};
+const turnsAsked = async () => {
+  const out = [];
+  for (const summary of await api('GET', '/agent/conversations')) out.push(...((await api('GET', `/agent/conversations/${summary.id}`)).turns ?? []).map((t) => t.prompt));
+  return out;
+};
+
+test('the part in hand leaving the page mid-drag puts every part back, files nothing, and leaves the page usable', async () => {
+  const page = await open();
+  const dot = await grab(page);
+  await dragBy(page, dot, 10, 10);
+  await page.evaluate(() => document.querySelector('[data-marble-id="c1"]').remove());
+  await page.mouse.move(dot.x + 14, dot.y + 14);
+  await page.waitForTimeout(150);
+  await page.mouse.up();
+  await page.waitForTimeout(200);
+  assert.deepEqual(await page.evaluate(() => [...document.documentElement.classList].filter((c) => c.startsWith('marble-rules-held'))), []);
+  assert.deepEqual((await inlineStyles(page)).slice(1), [null, null, null], 'no overrides left on the others');
+  assert.equal(await page.locator('[data-marble-dragging]').count(), 0);
+  assert.equal(await page.locator('style[data-marble-rule]').count(), 0);
+  assert.equal(await page.evaluate(() => window.__records.length), 0);
+  // A later drag files clean styles.
+  await page.mouse.move(700, 700);
+  const again = await grab(page, 'c2');
+  await dragBy(page, again, 4, 4);
+  await page.mouse.up();
+  await page.waitForFunction(() => document.querySelectorAll('style[data-marble-rule]').length === 1);
+  const text = await page.evaluate(() => document.querySelector('style[data-marble-rule]').textContent);
+  assert.doesNotMatch(text, /transition|!important/);
+  assert.deepEqual((await inlineStyles(page)).slice(1), [null, null, null]);
+  assert.deepEqual(page.errors, []);
+});
+
+test('⌘Z and ⇧⌘Z play a rule back and forth through the engine', async () => {
+  const page = await open();
+  const dot = await grab(page);
+  await dragBy(page, dot, 20, 20);
+  await page.mouse.up();
+  await page.waitForFunction(() => document.querySelectorAll('style[data-marble-rule]').length === 1);
+  await page.mouse.move(700, 700);
+  await page.evaluate(() => {
+    window.__moved = new Set();
+    const animate = Element.prototype.animate;
+    Element.prototype.animate = function (frames, timing) {
+      const list = Array.isArray(frames) ? frames : [];
+      if ((timing?.id ?? '') === 'marble-morph' || list.some((f) => f && 'borderTopLeftRadius' in f)) {
+        if (list.some((f) => f && 'borderTopLeftRadius' in f)) window.__moved.add(this.dataset?.marbleId);
+      }
+      return animate.call(this, frames, timing);
+    };
+    document.activeElement?.blur?.();
+  });
+  await page.keyboard.press(`${MOD}+z`);
+  await page.waitForFunction(() => !document.querySelector('style[data-marble-rule]'));
+  await page.waitForFunction(() => ['c1', 'c2', 'c3', 'c4'].every((id) => window.__moved.has(id)), null, { timeout: 2000 });
+  await radiiAre(page, ['12px', '12px', '12px', '12px', '12px']);
+  await page.evaluate(() => window.__moved.clear());
+  await page.keyboard.press(`${MOD}+Shift+z`);
+  await page.waitForFunction(() => document.querySelectorAll('style[data-marble-rule]').length === 1);
+  await page.waitForFunction(() => ['c1', 'c2', 'c3', 'c4'].every((id) => window.__moved.has(id)), null, { timeout: 2000 });
+  await radiiAre(page, ['32px', '32px', '32px', '32px', '12px']);
+  assert.deepEqual(page.errors, []);
+});
+
+test('Reshape turned on from the menu gives the keys back to the page, so Esc leaves it', async () => {
+  const page = await open();
+  const tray = page.locator('marble-agent-drawer .tray');
+  await tray.locator('.launcher').hover();
+  const row = tray.locator('.tool[data-tool="reshape"]');
+  await row.waitFor({ state: 'visible' });
+  await row.click();
+  await page.waitForFunction(() => document.documentElement.classList.contains('marble-reshaping'));
+  await page.waitForTimeout(50);
+  assert.ok(await page.evaluate(() => document.activeElement === document.body || !document.activeElement?.closest?.('[data-marble-transient]')), 'the keys are the page\'s');
+  await page.keyboard.press('Escape');
+  await page.waitForFunction(() => !document.documentElement.classList.contains('marble-reshaping'), null, { timeout: 2000 });
+});
+
+test('a drag while a rule from words is still playing in files clean styles: no hand of this page is taken for the page\'s own', async () => {
+  const page = await open();
+  await intentRule(page, { selector: 'div.card', declarations: { 'border-radius': '24px' }, unit: 'cards', verb: 'Rounding' });
+  await say(page, 'round the corners');
+  await page.waitForFunction(() => document.querySelectorAll('style[data-marble-rule]').length === 1, null, { timeout: 5000 });
+  // At once, while the engine plays it in: two drags, one after the other.
+  for (const by of [4, 4]) {
+    const dot = await grab(page);
+    await dragBy(page, dot, by, by, 2);
+    await page.mouse.up();
+  }
+  await page.waitForTimeout(1200);
+  assert.deepEqual(await inlineStyles(page), [null, null, null, null]);
+  assert.equal(await page.locator('[data-marble-dragging]').count(), 0);
+  let rules = [];
+  for (let i = 0; i < 40; i += 1) { rules = await rulesInFile(); if (rules.length === 1 && /32px/.test(rules[0].text)) break; await page.waitForTimeout(100); }
+  assert.doesNotMatch(await file(), /transition: none|!important/);
+  assert.deepEqual(await radii(page), ['32px', '32px', '32px', '32px', '12px']);
+});
+
+test('a rule from words steps round the drive\'s chrome too, even chrome that comes later', async () => {
+  const page = await open();
+  await intentRule(page, { selector: 'div.card', declarations: { 'border-radius': '24px' }, unit: 'cards', verb: 'Rounding' });
+  await say(page, 'round the corners');
+  await page.waitForFunction(() => document.querySelectorAll('style[data-marble-rule]').length === 1, null, { timeout: 5000 });
+  assert.match(await page.evaluate(() => document.querySelector('style[data-marble-rule]').textContent), /:not\(\[data-marble-transient\], \[data-marble-transient\] \*\)/);
+  const later = await page.evaluate(() => {
+    const chrome = document.createElement('div');
+    chrome.className = 'card';
+    chrome.setAttribute('data-marble-transient', '');
+    document.body.append(chrome);
+    return getComputedStyle(chrome).borderTopLeftRadius;
+  });
+  assert.equal(later, '12px');
+});
+
+test('on a touch screen Reshape is in the chat button\'s menu', async () => {
+  const page = await open({ viewport: { width: 390, height: 844 }, hasTouch: true, isMobile: true });
+  const row = page.locator('marble-agent-drawer .tool[data-tool="reshape"]');
+  await row.waitFor({ state: 'attached' });
+  assert.notEqual(await row.evaluate((el) => getComputedStyle(el).display), 'none');
+  assert.equal(await row.evaluate((el) => el.hidden), false);
+});
+
+test('with only the keys: Tab walks the parts, then a part\'s dot; arrows move every card like it; Enter files it', async () => {
+  const page = await open();
+  await page.evaluate(() => { document.activeElement?.blur?.(); window.marbleRules.reshape(true); });
+  await page.keyboard.press('Tab');
+  assert.ok(await page.evaluate(() => document.activeElement?.classList.contains('marble-rules-ring')), 'a ring on the first part');
+  assert.equal(await page.evaluate(() => window.marbleRules.part?.dataset.marbleId), 'c1');
+  // The arrows walk the parts; the ring follows.
+  await page.keyboard.press('ArrowRight');
+  assert.equal(await page.evaluate(() => window.marbleRules.part?.dataset.marbleId), 'c2');
+  await page.keyboard.press('ArrowLeft');
+  assert.equal(await page.evaluate(() => window.marbleRules.part?.dataset.marbleId), 'c1');
+  assert.equal(await page.evaluate(() => getComputedStyle(document.activeElement).outlineStyle), 'solid', 'a ring that is seen');
+  await page.keyboard.press('Tab');
+  assert.equal(await page.evaluate(() => document.activeElement?.dataset.grip), 'corner');
+  await page.keyboard.press('ArrowRight');
+  await page.keyboard.press('ArrowRight');
+  assert.deepEqual(await radii(page), ['14px', '14px', '14px', '14px', '12px']);
+  await page.keyboard.press('Enter');
+  await page.waitForFunction(() => document.querySelectorAll('style[data-marble-rule]').length === 1);
+  // On past the bar: the next part's ring.
+  await page.keyboard.press('Tab');
+  await page.keyboard.press('Tab');
+  assert.equal(await page.evaluate(() => document.activeElement?.classList.contains('marble-rules-ring') && window.marbleRules.part?.dataset.marbleId), 'c2');
+});
+
+test('a selector that only parses because the page closes it, a rule every part outvotes, and a leading html all hold up or go to the agent', async () => {
+  const page = await open({ doc: 'inline' });
+  // Unclosed: querySelectorAll closes it; a sheet does not.
+  await intentRule(page, { selector: 'div.card[data-marble-id^="c"', declarations: { 'border-radius': '24px' }, unit: 'cards', verb: 'Rounding' });
+  await say(page, 'round the corners');
+  for (let i = 0; i < 60 && !(await turnsAsked()).length; i += 1) await page.waitForTimeout(100);
+  assert.deepEqual(await turnsAsked(), ['round the corners'], 'a dead rule went to the agent');
+  assert.equal(await page.locator('style[data-marble-rule]').count(), 0);
+  assert.equal(await page.evaluate(() => window.__records.length), 0);
+  // A leading html is the page's own root: read without it.
+  assert.equal((await page.evaluate(() => window.marbleRules.check({ selector: 'html div.card', declarations: { 'border-radius': '20px' } }, [])))?.targets, 4);
+  assert.equal((await page.evaluate(() => window.marbleRules.check({ selector: ':root .cards > div.card', declarations: { 'border-radius': '20px' } }, [])))?.targets, 4);
+});
+
+test('a rule from words that every part it reaches outvotes is no rule: the agent is asked', async () => {
+  const page = await open({ doc: 'inline' });
+  await intentRule(page, { selector: '.cards > [data-marble-id="c2"]', declarations: { 'border-radius': '24px' }, unit: 'cards', verb: 'Rounding' });
+  await say(page, 'round the corners');
+  for (let i = 0; i < 60 && !(await turnsAsked()).length; i += 1) await page.waitForTimeout(100);
+  assert.deepEqual(await turnsAsked(), ['round the corners']);
+  assert.equal(await page.locator('style[data-marble-rule]').count(), 0);
+  assert.equal(await page.locator('[data-marble-id="c2"]').getAttribute('style'), 'border-radius: 8px');
+  assert.equal(await page.evaluate(() => window.__records.length), 0);
+});
+
+test('the tag\'s verb comes from what the rule sets, never from the model', async () => {
+  const page = await open();
+  await intentRule(page, { selector: 'div.card', declarations: { 'border-radius': '4px' }, unit: 'cards', verb: 'Thinking' });
+  await say(page, 'square the corners');
+  await tagSays(page, /^Squaring 4 cards$/);
+  await page.waitForFunction(() => document.querySelectorAll('style[data-marble-rule]').length === 1, null, { timeout: 5000 });
+  await tagSays(page, /^4 cards squared$/);
+});
+
+test('the words wait in the line\'s drafts until the rule has landed', async () => {
+  const page = await open();
+  await intentRule(page, { selector: 'div.card', declarations: { 'border-radius': '24px' }, unit: 'cards', verb: 'Rounding' }, { delay: 1200 });
+  await say(page, 'round the corners');
+  await page.waitForTimeout(300);
+  const drafts = () => page.evaluate(() => Object.entries(sessionStorage).filter(([k]) => k.startsWith('marble-line-drafts:')).map(([, v]) => v).join(''));
+  assert.match(await drafts(), /round the corners/, 'kept while the page reads them');
+  await page.waitForFunction(() => document.querySelectorAll('style[data-marble-rule]').length === 1, null, { timeout: 5000 });
+  for (let i = 0; i < 30 && /round the corners/.test(await drafts()); i += 1) await page.waitForTimeout(100);
+  assert.doesNotMatch(await drafts(), /round the corners/, 'and let go once they are the page');
+});
+
+test('after a change lands, a press on a card is the page\'s again', async () => {
+  const page = await open();
+  await page.evaluate(() => {
+    window.__pressed = 0;
+    document.querySelector('[data-marble-id="c3"]').addEventListener('click', () => { window.__pressed += 1; });
+  });
+  const dot = await grab(page);
+  await dragBy(page, dot, 6, 6);
+  await page.mouse.up();
+  await page.waitForFunction(() => document.querySelectorAll('style[data-marble-rule]').length === 1);
+  const c3 = center(await box(page, 'c3'));
+  await page.mouse.click(c3.x, c3.y);
+  assert.equal(await page.evaluate(() => window.__pressed), 1);
+  assert.equal(await page.locator('.marble-change-tint[data-state="out"]').count(), 0);
+});
+
+test('words that sound like a look, plural or compared, are tried as one rule first; others go straight to the agent', async () => {
+  const page = await open();
+  const asked = [];
+  await page.route('**/agent/change-intent', async (route) => {
+    asked.push(JSON.parse(route.request().postData()).words);
+    await route.fulfill({ status: 200, contentType: 'application/json', body: '{"rule":null}' });
+  });
+  const looks = ['fix the corners', 'thicker borders', 'make them squarer', 'rounder cards', 'more spacing out', 'bigger margins'];
+  for (const words of [...looks, 'add a row for Potluck']) {
+    await say(page, words);
+    for (let i = 0; i < 40 && !(await turnsAsked()).includes(words); i += 1) await page.waitForTimeout(100);
+  }
+  assert.deepEqual(asked, looks);
+});
+
+test('a hand\'s change that no rule would reach lands on the part\'s own style, with no dead rule filed', async () => {
+  const page = await open({ doc: 'inline' });
+  await page.evaluate(() => window.marbleRules.reshape(true));
+  const card = await box(page, 'c2');
+  await page.mouse.move(card.x + card.width / 2, card.y + card.height / 2);
+  await corner(page).waitFor();
+  const dot = center(await corner(page).boundingBox());
+  await page.mouse.move(dot.x, dot.y);
+  await page.keyboard.down('Shift');
+  await page.mouse.down();
+  await page.keyboard.up('Shift');
+  for (let i = 1; i <= 4; i += 1) await page.mouse.move(dot.x + 2 * i, dot.y + 2 * i);
+  await page.mouse.up();
+  await page.waitForFunction(() => window.__records.length === 1);
+  assert.equal(await page.locator('style[data-marble-rule]').count(), 0, 'no rule that reaches nothing');
+  assert.equal(await page.locator('[data-marble-id="c2"]').getAttribute('style'), 'border-radius: 16px');
+  const [entry] = await page.evaluate(() => window.__records);
+  assert.deepEqual(entry.redo.map((op) => op.type), ['setAttr']);
 });

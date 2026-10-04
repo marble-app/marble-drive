@@ -49,8 +49,9 @@
   // question word; "Do the same to the others" is a change (ruling R17).
   const QUESTION = /^(what|why|how|when|who|which|where)\b/i;
   // Words that sound like a look: they may be one rule the page can make
-  // itself (change-rules.js), asked before any agent is.
-  const LOOK = /\b(round(ed|er)?|square|corner|radius|padding|spac(e|ing)|tight(er)?|loose(r)?|roomier|bigger|smaller|larger|text size|font size|bold(er)?|light(er)?|dark(er)?|colou?r|background|border|calm(er)?|quiet(er)?|soft(er)?)\b/i;
+  // itself (change-rules.js), asked before any agent is. Plurals and
+  // comparatives too: "corners", "borders", "squarer", "spacing out".
+  const LOOK = /\b(round(ed|er|ing)?|squar(e|ed|er)|corners?|radius|radii|padd(ing|ed)|spac(e|es|ed|ing|ier)|tight(er|en)?|loose(r|n)?|roomier|bigger|smaller|larger|wider|narrower|text size|font size|bold(er)?|light(er|en)?|dark(er|en)?|colou?rs?|backgrounds?|borders?|margins?|gaps?|calm(er)?|quiet(er)?|soft(er|en)?)\b/i;
   const ENDS = new Set(['turn.completed', 'turn.failed', 'turn.cancelled', 'turn.interrupted', 'turn.removed']);
 
   // The parts' own unit, named the way the marks count them (change-marks.js).
@@ -776,7 +777,10 @@
       const ids = [...s.ids];
       const rule = oneRule(s, text, { brief, keepWords });
       s.tried = true;
-      if (!keepWords) keepDraft(keyOf(s), '');
+      // Words tried as one rule wait in the drafts until they are the page,
+      // or on their way to the agent: a reload meanwhile keeps them.
+      if (rule) keepDraft(keyOf(s), text);
+      else if (!keepWords) keepDraft(keyOf(s), '');
       s.asked = text;
       s.texts = [];
       s.turn = null;
@@ -800,6 +804,8 @@
           took = false;
         }
         if (took || s.stop || !sessions.has(s)) {
+          // Stopped, the words stay for the next ⌘J on the same thing.
+          if (took && !s.stop) keepDraft(keyOf(s), '');
           s.awaiting = false;
           s.stop = false;
           agent.select(null);
@@ -807,6 +813,7 @@
           return;
         }
         // Not one rule: the agent is asked, exactly as it would have been.
+        if (!keepWords) keepDraft(keyOf(s), '');
       }
       const mode = s.action && text.startsWith(s.action.lead) ? s.action.mode : 'main';
       const meaning = mode === 'main' ? '' : (globalThis.marbleOffer?.briefFor?.(mode, ids) ?? '');

@@ -23,8 +23,11 @@
 // inside its right edge for the padding. Resting on either marks every part
 // like it; dragging changes them all one to one, with nothing easing under the
 // hand, and letting go commits. ⇧ at the press changes only that one. The
-// grips take the keys too: Tab reaches them, the arrows step a pixel (⇧ four),
-// Enter commits and Esc puts it back. Esc with nothing in hand leaves Reshape.
+// keys have the same: in Reshape Tab walks the page's stops and its parts (a
+// ring round each part, its grips after what is inside it), the arrows on a
+// ring move to the next part, on a grip they step a pixel (⇧ four), Enter
+// commits and Esc puts it back. Esc with nothing in hand leaves Reshape.
+// ⌘Z and ⇧⌘Z play a rule out and back in through the engine.
 //
 // Or a few words in the line (change-line.js): words that sound like a look
 // are read by a small model beside an outline of the page (`/agent/change-
@@ -51,7 +54,7 @@
   const SCAN = 3000;        // parts the outline reads
   const OUTLINE = 40;       // kinds of part the outline lists
   const LOOK_AT = 500;      // ms the marks are seen before a rule from words lands
-  const ASK = 9000;         // ms the page waits for the words' rule (the host gives up at 8 s)
+  const ASK = 6000;         // ms the page waits for the words' rule (the host gives up at 6 s too)
   const SWITCH = 300;       // ms on a part of another kind before the marks let go of these
   const LEAVE = 250;        // ms off any part before the grips go
   const LEAVE_MARKED = 1200; // ms off any part before marks shown for a grip go
@@ -83,7 +86,19 @@
     loosening: 'loosened', resizing: 'resized', enlarging: 'enlarged', shrinking: 'shrunk', recolouring: 'recoloured',
     recoloring: 'recolored', softening: 'softened', darkening: 'darkened', lightening: 'lightened', bolding: 'bolded',
     calming: 'calmed', quieting: 'quieted', restyling: 'restyled', changing: 'changed', fading: 'faded', growing: 'grown',
+    weighting: 'weighted',
   };
+  // The tag's verb, from what a rule sets: never a word of the model's
+  // (server/change/intent.js says the same of the host's reply).
+  function familyOf(prop) {
+    if (prop === 'border-radius') return 'Rounding';
+    if (/^(?:padding|margin|gap|row-gap|column-gap|line-height|letter-spacing)/.test(prop)) return 'Spacing';
+    if (prop === 'font-size') return 'Resizing';
+    if (prop === 'font-weight') return 'Weighting';
+    if (/color$/.test(prop)) return 'Recolouring';
+    if (prop === 'opacity') return 'Fading';
+    return 'Restyling';
+  }
 
   const STYLE = `
     .marble-rules-host {
@@ -120,6 +135,13 @@
     /* While a grip is held the whole page shows the grip's own cursor. */
     html.marble-rules-held-corner, html.marble-rules-held-corner * { cursor: nwse-resize !important; user-select: none !important; }
     html.marble-rules-held-padding, html.marble-rules-held-padding * { cursor: ew-resize !important; user-select: none !important; }
+
+    /* The keys' way to a part: a ring round it, drawn only while it has
+       them. It takes no press; the pointer has the grips. */
+    .marble-rules-ring { position: fixed; left: 0; top: 0; box-sizing: border-box; margin: 0; padding: 0; appearance: none;
+      border: 0; background: none; color: inherit; font: inherit; pointer-events: none; outline: none; }
+    .marble-rules-ring:focus { outline: 2px solid var(--rules-ink); outline-offset: 2px; }
+    .marble-rules-ring[hidden] { display: none; }
 
     /* A finger has no hover: the grips are always drawn on the part it
        chose, as big as a fingertip needs to see, with 44px to land on. */
@@ -247,6 +269,30 @@
     const query = (selector) => {
       try { return [...document.querySelectorAll(selector)]; } catch { return null; }
     };
+    /** The selector's own list items, split where a comma is not inside
+     *  brackets or quotes. */
+    function itemsOf(selector) {
+      const items = [];
+      let depth = 0;
+      let quote = '';
+      let from = 0;
+      for (let i = 0; i < selector.length; i += 1) {
+        const ch = selector[i];
+        if (quote) { if (ch === '\\') i += 1; else if (ch === quote) quote = ''; continue; }
+        if (ch === '"' || ch === "'") quote = ch;
+        else if (ch === '(' || ch === '[') depth += 1;
+        else if (ch === ')' || ch === ']') depth -= 1;
+        else if (ch === ',' && depth === 0) { items.push(selector.slice(from, i)); from = i + 1; }
+      }
+      items.push(selector.slice(from));
+      return items.map((item) => item.trim());
+    }
+    /** A rule is written under `html` already: a selector that starts at
+     *  the root (`html .card`, `:root .card`) is read without it. */
+    function normalised(selector) {
+      const items = itemsOf(selector).map((item) => item.replace(/^(?:html|:root)(?=$|[\s>+~])\s*(?:>\s*)?/i, '').trim());
+      return items.every(Boolean) ? items.join(', ') : '';
+    }
 
     /** Declarations a rule may carry, or null: only the few properties, and
      *  values that parse as CSS for them and load or break out of nothing. */
@@ -270,8 +316,10 @@
      *  them, inside the scope when there is one. */
     function plan(rule, scope = []) {
       if (!rule || typeof rule !== 'object') return null;
-      const selector = typeof rule.selector === 'string' ? rule.selector.replace(/\s+/g, ' ').trim() : '';
-      if (!selector || selector.length > 300 || SELECTOR_BREAKS.test(selector)) return null;
+      const given = typeof rule.selector === 'string' ? rule.selector.replace(/\s+/g, ' ').trim() : '';
+      if (!given || given.length > 300 || SELECTOR_BREAKS.test(given)) return null;
+      const selector = normalised(given);
+      if (!selector) return null;
       const declarations = declarationsOf(rule.declarations);
       if (!declarations) return null;
       const reached = query(selector);
@@ -305,8 +353,12 @@
     }
     const rulesFor = (key) => [...document.querySelectorAll(`style[${RULE}]`)]
       .filter((el) => el.getAttribute(RULE) === key && el.hasAttribute(ID) && !el.closest(`[${TRANSIENT}]`));
+    // Parts carrying a hand's values now, with their own style from before:
+    // what is read as a part's style is always its own, never this page's
+    // values under a hand.
+    const handHeld = new Map();
+    const ownStyle = (el) => (handHeld.has(el) ? handHeld.get(el) : el.getAttribute('style'));
 
-    let committing = Promise.resolve();
     /**
      * Commit one rule: `selector` (the kind) with `declarations` reaches
      * `targets` and leaves `exclude` as they are. One style element per
@@ -314,15 +366,28 @@
      * get the value on their own style attribute in the same step. Filed as
      * one entry in the person's history. `originals` are the style
      * attributes from before a hand changed them; `play` plays it in with
-     * the engine, moving `marks` on as each part lands.
+     * the engine, moving `marks` on as each part lands. `strict` (words):
+     * a rule no part takes is a failure, not a change made all by fallbacks.
+     *
+     * The change itself is made at once, in the task that asks for it: only
+     * its playing-in is waited for.
      */
-    function commit(options) {
-      const run = committing.then(() => commitNow(options));
-      committing = run.catch(() => {});
-      return run;
+    async function commit(options) {
+      const done = applyRule(options);
+      if (done.snap && typeof window.marbleMorph?.play === 'function') {
+        try {
+          await window.marbleMorph.play(done.snap, {
+            onPart: (id, phase) => { if (phase === 'start') options.marks?.now([id]); else options.marks?.land([id]); },
+          });
+        } catch { /* it has landed all the same */ }
+      }
+      options.marks?.land(done.ids);
+      return done.result;
     }
 
-    async function commitNow({ selector, declarations, targets = [], exclude = [], originals = null, play = false, marks = null } = {}) {
+    /** One rule's ops, made and checked on the page: throws, with nothing
+     *  left behind, when it cannot be one rule. */
+    function applyRule({ selector, declarations, targets = [], exclude = [], originals = null, play = false, strict = false } = {}) {
       const base = String(selector ?? '').replace(/\s+/g, ' ').trim();
       if (!base || SELECTOR_BREAKS.test(base)) throw new Error('that is not a selector a rule can use');
       const props = Object.entries(declarationsOf(declarations) ?? {});
@@ -333,15 +398,13 @@
       const reached = query(base);
       if (!reached) throw new Error('that is not a selector a rule can use');
       if (aimed.some((el) => !reached.includes(el))) throw new Error('the rule does not reach every part');
-      // What the selector also reaches is left out by name; chrome it reaches
-      // is left out by being chrome.
+      // What the selector also reaches is left out by name; the drive's own
+      // chrome, now or later, is left out by being chrome.
       const others = reached.filter((el) => !aimed.includes(el) && !left.includes(el));
       const named = [...left, ...others.filter(own)];
       if (named.length > MOST_OUT) throw new Error('too many parts to leave out');
-      const chrome = others.some((el) => el.closest?.(`[${TRANSIENT}]`));
       const nots = named.map((el) => `:not([${ID}="${cssString(idOf(el))}"])`).join('');
-      const guard = chrome ? `:not([${TRANSIENT}], [${TRANSIENT}] *)` : '';
-      const ruleSelector = `html ${listed(base) ? `:is(${base})` : base}${nots}${guard}`;
+      const ruleSelector = `html ${listed(base) ? `:is(${base})` : base}${nots}:not([${TRANSIENT}], [${TRANSIENT}] *)`;
       if (!query(ruleSelector)) throw new Error('that is not a selector a rule can use');
       const parent = bodyId();
       if (!parent) throw new Error('the page has no place for a rule');
@@ -351,8 +414,8 @@
         const key = `${base}|${prop}`;
         const text = `${ruleSelector} { ${prop}: ${value}; }`;
         const [kept, ...twins] = rulesFor(key);
-        if (kept) ops.push({ type: 'setInner', id: idOf(kept), html: text });
-        else ops.push({ type: 'insert', parentId: parent, beforeId: null, html: `<style ${ID}="${marble.newId()}" ${RULE}="${attr(key)}">${text}</style>` });
+        if (kept) ops.push({ type: 'setInner', id: idOf(kept), html: text, rule: true });
+        else ops.push({ type: 'insert', parentId: parent, beforeId: null, html: `<style ${ID}="${marble.newId()}" ${RULE}="${attr(key)}">${text}</style>`, rule: true });
         // One rule per kind and property, however it came to be two.
         for (const twin of twins) ops.push({ type: 'remove', id: idOf(twin) });
       }
@@ -364,17 +427,17 @@
         const key = el.getAttribute(RULE) ?? '';
         const cut = key.lastIndexOf('|');
         const sel = key.slice(0, cut);
-        const own1 = /\[data-marble-id="[^"]*"\]$/.exec(sel)?.[0];
-        if (cut < 0 || !own1 || !mine.has(own1) || !setting.has(key.slice(cut + 1)) || sel === base) continue;
+        const alone = /\[data-marble-id="[^"]*"\]$/.exec(sel)?.[0];
+        if (cut < 0 || !alone || !mine.has(alone) || !setting.has(key.slice(cut + 1)) || sel === base) continue;
         if (!el.hasAttribute(ID) || el.closest(`[${TRANSIENT}]`)) continue;
         ops.push({ type: 'remove', id: idOf(el) });
       }
 
       // Every part this touches is held still: what it looked like before is
-      // read, the hand's own values come off, and the rule lands in the same
+      // read, a hand's own values come off, and the rule lands in the same
       // task, so nothing is painted in between.
       const held = [...aimed, ...left];
-      const saved = new Map(held.map((el) => [el, originals?.has(el) ? originals.get(el) : el.getAttribute('style')]));
+      const saved = new Map(held.map((el) => [el, originals?.has(el) ? originals.get(el) : ownStyle(el)]));
       const snap = play && typeof window.marbleMorph?.capture === 'function'
         ? (() => { try { return window.marbleMorph.capture(aimed.length <= 60 ? aimed.map(idOf) : [], { kind: 'look', scope: 'page' }); } catch { return null; } })()
         : null;
@@ -383,25 +446,60 @@
       const applied = [];
       const undoAll = () => {
         for (const { inverse } of [...applied].reverse()) { try { if (inverse) marble.apply(inverse); } catch { /* as far back as it goes */ } }
+        applied.length = 0;
+      };
+      const letGo = () => {
         for (const el of held) setStyle(el, saved.get(el));
+        for (const el of held) handHeld.delete(el);
+        watcher.takeRecords();
+      };
+      const run = (op) => {
+        const inverse = marble.invert(op);
+        marble.apply(op);
+        applied.push({ op, inverse });
       };
       try {
-        for (const op of ops) {
-          const inverse = marble.invert(op);
-          marble.apply(op);
-          applied.push({ op, inverse });
-        }
+        for (const { rule, ...op } of ops) run(op);
       } catch (err) {
         undoAll();
+        letGo();
         throw err;
+      }
+      // The rule must be one the page's sheet holds and that reaches what it
+      // is for: a selector the page closed for itself (`[a="b`) is no rule.
+      const sheetOk = ops.filter((op) => op.rule).every((op) => {
+        const el = op.type === 'setInner' ? byId(op.id) : byId(/data-marble-id="([^"]+)"/.exec(op.html)?.[1]);
+        const rules = el?.sheet?.cssRules;
+        const only = rules?.length === 1 ? rules[0] : null;
+        if (!only || typeof only.selectorText !== 'string') return false;
+        try { return aimed.every((t) => t.matches(only.selectorText)); } catch { return false; }
+      });
+      if (!sheetOk) {
+        undoAll();
+        letGo();
+        throw new Error('the rule does not hold in the page\'s sheet');
       }
 
       // Each part ends where the rule says, or keeps what it had: what the
       // rule cannot reach gets it on its own style attribute.
-      const now = aimed.map((el) => props.map(([prop]) => read(el, prop)));
+      const reads = () => aimed.map((el) => props.map(([prop]) => read(el, prop)));
+      const now = reads();
       aimed.forEach((el) => setStyle(el, `${frozen(saved.get(el))}; ${props.map(([p, v]) => `${p}: ${v} !important`).join('; ')}`));
-      const wanted = aimed.map((el) => props.map(([prop]) => read(el, prop)));
+      const wanted = reads();
       aimed.forEach((el) => setStyle(el, frozen(saved.get(el))));
+      const short = aimed.map((el, i) => props.some((_, j) => now[i][j] !== wanted[i][j]));
+      let ruled = true;
+      if (short.every(Boolean)) {
+        // No part takes the rule: from words it is no rule at all; under a
+        // hand, the parts keep the value on their own style, and no rule
+        // that reaches nothing is filed.
+        undoAll();
+        if (strict) {
+          letGo();
+          throw new Error('no part takes the rule');
+        }
+        ruled = false;
+      }
       const leftNow = left.map((el) => props.map(([prop]) => read(el, prop)));
       const fixes = [];
       aimed.forEach((el, i) => {
@@ -409,11 +507,13 @@
         props.forEach(([prop, v], j) => { if (now[i][j] !== wanted[i][j]) value = withProp(value, prop, v); });
         if (value !== saved.get(el)) fixes.push({ el, value });
       });
-      left.forEach((el, i) => {
-        let value = saved.get(el);
-        props.forEach(([prop], j) => { if (leftNow[i][j] !== kept[i][j]) value = withProp(value, prop, kept[i][j]); });
-        if (value !== saved.get(el)) fixes.push({ el, value });
-      });
+      if (ruled) {
+        left.forEach((el, i) => {
+          let value = saved.get(el);
+          props.forEach(([prop], j) => { if (leftNow[i][j] !== kept[i][j]) value = withProp(value, prop, kept[i][j]); });
+          if (value !== saved.get(el)) fixes.push({ el, value });
+        });
+      }
       for (const { el, value } of fixes) {
         const op = { type: 'setAttr', id: idOf(el), name: 'style', value };
         setStyle(el, frozen(value));
@@ -424,31 +524,25 @@
       for (const el of held) getComputedStyle(el).getPropertyValue('border-radius');
       const fixed = new Map(fixes.map(({ el, value }) => [el, value]));
       for (const el of held) setStyle(el, fixed.has(el) ? fixed.get(el) : saved.get(el));
+      for (const el of held) handHeld.delete(el);
+      // This page's own change is not one to play back (the watcher below).
+      watcher.takeRecords();
+      if (!applied.length) throw new Error('nothing changed');
 
       // Filed, as one step the person can take back.
       for (const { op } of applied) marble.op(op);
       marble.record({ redo: applied.map(({ op }) => op), undo: applied.map(({ inverse }) => inverse).filter(Boolean).reverse() });
       document.dispatchEvent(new CustomEvent('marble-rules:commit', { detail: { ids: aimed.map(idOf) } }));
       Promise.resolve(marble.flush?.()).catch(() => { /* the carrier says so itself */ });
-      const result = {
-        id: idOf(rulesFor(`${base}|${props[0][0]}`)[0]),
-        ops: applied.map(({ op }) => op),
-        undo: applied.map(({ inverse }) => inverse).filter(Boolean).reverse(),
+      return {
+        snap: ruled ? snap : null,
+        ids: aimed.map(idOf),
+        result: {
+          id: ruled ? idOf(rulesFor(`${base}|${props[0][0]}`)[0]) : null,
+          ops: applied.map(({ op }) => op),
+          undo: applied.map(({ inverse }) => inverse).filter(Boolean).reverse(),
+        },
       };
-
-      // The engine plays it in from what was; each part's mark lands with it.
-      if (snap && typeof window.marbleMorph?.play === 'function') {
-        const ids = aimed.map(idOf);
-        try {
-          await window.marbleMorph.play(snap, {
-            onPart: (id, phase) => { if (phase === 'start') marks?.now([id]); else marks?.land([id]); },
-          });
-        } catch { /* it has landed all the same */ }
-        marks?.land(ids);
-      } else {
-        marks?.land(aimed.map(idOf));
-      }
-      return result;
     }
 
     // ------------------------------------------------------------ a few words
@@ -482,6 +576,16 @@
     let wordsRun = 0;
     const wait = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
     const pastOf = (verb) => PAST[String(verb).toLowerCase()] ?? 'changed';
+    /** What the page is doing, said from what the rule sets: a radius that
+     *  goes down is Squaring. */
+    function verbOf(declarations, first) {
+      const verbs = new Set(Object.keys(declarations).map(familyOf));
+      const verb = verbs.size === 1 ? [...verbs][0] : 'Restyling';
+      if (verb !== 'Rounding' || !first) return verb;
+      const to = /^(-?[\d.]+)(px)?$/.exec(String(declarations['border-radius']).trim());
+      const from = shapeOf('corner', first)?.value;
+      return to && from != null && Number(to[1]) < from ? 'Squaring' : 'Rounding';
+    }
 
     /**
      * Words from the line (change-line.js). Resolves true when the page took
@@ -516,7 +620,7 @@
       const [one, many] = unitOf(found.targets[0]);
       const said = typeof rule.unit === 'string' && /^[a-z][a-z -]{0,23}$/i.test(rule.unit) ? rule.unit.toLowerCase() : null;
       const unit = one !== 'part' || !said ? (n === 1 ? one : many) : (n === 1 ? said.replace(/s$/, '') : said);
-      const verb = typeof rule.verb === 'string' && /^[a-z]{2,20}ing$/i.test(rule.verb) ? rule.verb.charAt(0).toUpperCase() + rule.verb.slice(1).toLowerCase() : 'Changing';
+      const verb = verbOf(found.declarations, found.targets[0]);
       const inView = found.targets.find((el) => { const r = el.getBoundingClientRect(); return r.bottom > 0 && r.top < innerHeight && (r.width || r.height); });
       wordsRun += 1;
       const marks = window.marbleChange?.begin?.({
@@ -528,7 +632,7 @@
       await wait(LOOK_AT);
       if (stopped()) { marks?.clear(); return true; }
       try {
-        await commit({ selector: found.selector, declarations: found.declarations, targets: found.targets, play: true, marks });
+        await commit({ selector: found.selector, declarations: found.declarations, targets: found.targets, play: true, strict: true, marks });
       } catch (err) {
         console.warn(`marble-rules: the rule was not filed: ${err?.message ?? err}`);
         marks?.clear();
@@ -580,6 +684,40 @@
     }
 
     const grips = { corner: makeGrip('corner'), padding: makeGrip('padding') };
+    // The keys' way to a part with nothing of its own to focus: a ring round
+    // it. The arrows move it to the next part, Tab goes on to its grips.
+    const ringHint = document.createElement('div');
+    ringHint.id = `marble-rules-ring-hint-${Math.random().toString(36).slice(2, 9)}`;
+    ringHint.hidden = true;
+    ringHint.textContent = 'Arrow keys move to another part. Tab reaches its corner and its edge.';
+    host.append(ringHint);
+    const ring = document.createElement('button');
+    ring.type = 'button';
+    ring.className = 'marble-rules-ring';
+    ring.hidden = true;
+    ring.setAttribute('aria-describedby', ringHint.id);
+    ring.addEventListener('focus', () => { pinned = true; });
+    ring.addEventListener('blur', (event) => { if (!host.contains(event.relatedTarget)) pinned = false; });
+    ring.addEventListener('click', (event) => event.preventDefault());
+    ring.addEventListener('keydown', (event) => {
+      const dir = { ArrowRight: 1, ArrowDown: 1, ArrowLeft: -1, ArrowUp: -1 }[event.key];
+      if (dir && !event.altKey && !event.metaKey && !event.ctrlKey) {
+        event.preventDefault();
+        event.stopPropagation();
+        const rings = walk().filter((step) => step.ring);
+        const i = rings.findIndex((step) => step.ring === part);
+        const next = rings[i + dir];
+        if (next) { setPart(next.ring); announce(ringLabel(next.ring)); }
+        return;
+      }
+      if (event.key === 'Enter' || event.key === ' ') {
+        event.preventDefault();
+        event.stopPropagation();
+        const first = Object.values(grips).find((g) => !g.hidden);
+        first?.focus();
+      }
+    });
+    host.append(ring);
     const PROP = { corner: 'border-radius', padding: 'padding' };
     const NAME = { corner: 'Corner radius', padding: 'Padding' };
 
@@ -743,16 +881,25 @@
     }
 
     function start(kind, grip, { by, only = false, x = 0, y = 0, pointerId = null }) {
-      const shape = shapeOf(kind, part);
-      if (!shape || !armed) return;
-      const others = armed.likes.filter((el) => el !== part);
-      const moving = only ? [part] : included();
-      if (!moving.includes(part)) moving.unshift(part);
+      const held = part;
+      if (!held || !armed || !own(held)) return;
+      const others = armed.likes.filter((el) => el !== held);
+      const moving = only ? [held] : included();
+      if (!moving.includes(held)) moving.unshift(held);
+      // A part the engine is still playing in is let go where it is going,
+      // so the hand starts from what is, not from a frame of the motion.
+      for (const el of moving) {
+        for (const a of el.getAnimations()) if (a.id === 'marble-morph') { try { a.finish(); } catch { a.cancel(); } }
+      }
+      const shape = shapeOf(kind, held);
+      if (!shape) return;
+      const originals = new Map(moving.map((el) => [el, ownStyle(el)]));
+      for (const [el, value] of originals) handHeld.set(el, value);
       hand = {
-        kind, grip, by, only, x, y, pointerId, shape,
-        start: shape.value, value: shape.value, most: Math.max(shape.value, most(kind, part)),
+        kind, grip, by, only, x, y, pointerId, shape, part: held,
+        start: shape.value, value: shape.value, most: Math.max(shape.value, most(kind, held)),
         included: moving,
-        originals: new Map(moving.map((el) => [el, el.getAttribute('style')])),
+        originals,
       };
       // ⇧: the others are left out of this one.
       if (only) armed.marks?.out(others.filter((el) => !armed.out.has(el)).map(idOf));
@@ -769,6 +916,8 @@
     /** Under the hand nothing eases: every part takes the value at once. */
     function set(value) {
       if (!hand) return;
+      // The part in hand left the page: everything goes back.
+      if (!own(hand.part)) { putBack(); return; }
       hand.value = value;
       const css = cssValue(hand.kind, hand.shape, value);
       for (const el of hand.included) el.style.setProperty(PROP[hand.kind], css, 'important');
@@ -782,7 +931,7 @@
       h.grip.removeAttribute('data-held');
       document.documentElement.classList.remove('marble-rules-held-corner', 'marble-rules-held-padding');
       for (const el of h.included) el.removeAttribute(DRAGGING);
-      if (h.only && armed) armed.marks?.soon(armed.likes.filter((el) => el !== part && !armed.out.has(el)).map(idOf));
+      if (h.only && armed) armed.marks?.soon(armed.likes.filter((el) => el !== h.part && !armed.out.has(el)).map(idOf));
     }
 
     /** Back to how it was; nothing filed. */
@@ -793,8 +942,9 @@
       // Held still while the old values come back, so the page's own
       // transitions do not play them.
       for (const el of h.included) setStyle(el, frozen(h.originals.get(el)));
-      for (const el of h.included) getComputedStyle(el).getPropertyValue(PROP[h.kind]);
+      for (const el of h.included) if (el.isConnected) getComputedStyle(el).getPropertyValue(PROP[h.kind]);
       for (const el of h.included) setStyle(el, h.originals.get(el));
+      for (const el of h.included) handHeld.delete(el);
       letGo(h);
       armed?.marks?.refresh();
       speak(h.kind);
@@ -806,36 +956,42 @@
     async function finish() {
       const h = hand;
       if (!h) return;
-      if (h.value === h.start) { putBack(); return; }
+      // Nothing moved, or the part in hand has left the page: back as it was.
+      if (h.value === h.start || !own(h.part)) { putBack(); return; }
       hand = null;
-      // ⇧: a rule for this one part, of its own, which outranks its kind's.
-      // Otherwise the kind's: what its selector reaches that is not of this
-      // kind (another class as well), and what was left out, keep their own;
-      // a part of the kind that is hidden now changes with the rest.
-      const kindSelector = h.only ? `${selectorOf(part)}[${ID}="${cssString(idOf(part))}"]` : selectorOf(part);
-      const reached = query(kindSelector) ?? [];
-      const same = reached.filter((el) => own(el) && sameKind(part, el));
-      const targets = h.only ? [part] : [...new Set([...h.included, ...same.filter((el) => !armed?.likes.includes(el))])];
-      const exclude = reached.filter((el) => own(el) && !targets.includes(el));
-      const value = cssValue(h.kind, h.shape, h.value);
+      const held = h.part;
       const was = armed;
       const marks = armed?.marks ?? null;
       const n = h.included.length;
-      const [one, many] = unitOf(part);
+      const [one, many] = unitOf(held);
+      let failed = null;
       try {
+        // ⇧: a rule for this one part, of its own, which outranks its kind's.
+        // Otherwise the kind's: what its selector reaches that is not of this
+        // kind (another class as well), and what was left out, keep their
+        // own; a part of the kind that is hidden now changes with the rest.
+        const kindSelector = h.only ? `${selectorOf(held)}[${ID}="${cssString(idOf(held))}"]` : selectorOf(held);
+        const reached = query(kindSelector) ?? [];
+        const same = reached.filter((el) => own(el) && sameKind(held, el));
+        const targets = h.only ? [held] : [...new Set([...h.included.filter(own), ...same.filter((el) => !was?.likes.includes(el))])];
+        const exclude = reached.filter((el) => own(el) && !targets.includes(el));
+        const value = cssValue(h.kind, h.shape, h.value);
         await commit({ selector: kindSelector, declarations: { [PROP[h.kind]]: value }, targets, exclude, originals: h.originals, marks });
       } catch (err) {
-        console.warn(`marble-rules: the change was not filed: ${err?.message ?? err}`);
+        failed = err;
+      }
+      letGo(h);
+      if (failed) {
+        console.warn(`marble-rules: the change was not filed: ${failed?.message ?? failed}`);
         hand = h;
         putBack();
         announce("Couldn't change them. Try again.");
         return;
-      } finally {
-        letGo(h);
       }
-      // The marks lift; the next reach of a grip marks them again.
+      // The marks lift, and a press on a part is the page's again; the next
+      // reach of a grip marks them afresh.
       marks?.end();
-      if (was && was.marks === marks) was.marks = null;
+      if (armed === was) armed = null;
       announce(`${n} ${n === 1 ? one : many} ${h.kind === 'corner' ? (h.value < h.start ? 'squared' : 'rounded') : 'padded'} to ${h.value} px`);
       label();
       schedule();
@@ -884,8 +1040,23 @@
     function place() {
       if (raf) cancelAnimationFrame(raf);
       raf = 0;
+      // The part in hand left the page: what the hand changed goes back.
+      if (hand && !own(hand.part)) putBack();
       const live = on && part?.isConnected && own(part);
       if (on && part && !live) { part = null; disarm(); }
+      if (!live) {
+        if (document.activeElement === ring) ring.blur();
+        ring.hidden = true;
+      } else {
+        const r = part.getBoundingClientRect();
+        ring.hidden = false;
+        Object.assign(ring.style, {
+          left: `${Math.round(r.left)}px`, top: `${Math.round(r.top)}px`,
+          width: `${Math.round(r.width)}px`, height: `${Math.round(r.height)}px`,
+          borderRadius: getComputedStyle(part).borderRadius,
+        });
+        ring.setAttribute('aria-label', ringLabel(part));
+      }
       for (const [kind, grip] of Object.entries(grips)) {
         const shape = live ? shapeOf(kind, part) : null;
         if (!shape) {
@@ -954,7 +1125,7 @@
     // no hover, so its press chooses the part.
     addEventListener('pointerdown', (event) => {
       if (!on || hand || host.contains(event.target)) return;
-      const like = armed?.likes.find((el) => el !== armed.part && el.contains(event.target)) ?? null;
+      const like = armed?.marks?.live ? armed.likes.find((el) => el !== armed.part && el.contains(event.target)) ?? null : null;
       if (like && event.button === 0) {
         event.preventDefault();
         event.stopPropagation();
@@ -986,14 +1157,50 @@
 
     // The stops of the page, as Tab would find them.
     const TABBABLE = 'a[href], area[href], button, input:not([type="hidden"]), select, textarea, iframe, summary, audio[controls], video[controls], [contenteditable], [tabindex]';
-    const tabbable = (el) => !el.closest(`[${TRANSIENT}]`) && !el.closest('[inert]') && !el.disabled
+    const tabbable = (el) => el.matches(TABBABLE) && !el.closest(`[${TRANSIENT}]`) && !el.closest('[inert]') && !el.disabled
       && (el.isContentEditable && !el.hasAttribute('tabindex') ? 0 : el.tabIndex) >= 0
       && !(el.isContentEditable && el.parentElement?.isContentEditable)
       && (typeof el.checkVisibility !== 'function' || el.checkVisibility({ visibilityProperty: true }));
-    const stopsIn = (el) => [el, ...el.querySelectorAll(TABBABLE)].filter((s) => s.matches(TABBABLE) && tabbable(s));
-    const stopAfter = (el) => [...document.querySelectorAll(TABBABLE)].filter(tabbable)
-      .find((s) => (el.compareDocumentPosition(s) & Node.DOCUMENT_POSITION_FOLLOWING) && !el.contains(s)) ?? null;
-    const shownGrips = () => Object.values(grips).filter((g) => !g.hidden);
+
+    /** The keys' way through the page in Reshape: its own stops and its
+     *  parts, in its order; each part is a ring first, and its grips come
+     *  after everything inside it. */
+    function walk() {
+      const out = [];
+      let looked = 0;
+      const visit = (el) => {
+        if (looked >= SCAN || el.hasAttribute(TRANSIENT)) return;
+        looked += 1;
+        const isPart = el.hasAttribute(ID) && reshapable(el);
+        if (isPart) out.push({ ring: el });
+        if (tabbable(el)) out.push({ stop: el });
+        if (el.localName !== 'svg') for (const child of el.children) visit(child);
+        if (isPart) {
+          if (shapeOf('corner', el)) out.push({ grip: 'corner', el });
+          out.push({ grip: 'padding', el });
+        }
+      };
+      for (const child of document.body?.children ?? []) visit(child);
+      return out;
+    }
+    /** Where the keys are in that walk. */
+    function whereIn(steps, a) {
+      if (a === ring) return steps.findIndex((s) => s.ring === part);
+      if (host.contains(a)) return steps.findIndex((s) => s.grip === a.dataset.grip && s.el === part);
+      return steps.findIndex((s) => s.stop && (s.stop === a || s.stop.contains(a)));
+    }
+    function go(step) {
+      if (step.stop) { step.stop.focus(); return; }
+      if (part !== (step.ring ?? step.el)) setPart(step.ring ?? step.el);
+      place();
+      if (step.ring) ring.focus();
+      else grips[step.grip].focus();
+    }
+    const ringLabel = (el) => {
+      const [one] = unitOf(el);
+      const words = (el.textContent ?? '').replace(/\s+/g, ' ').trim().slice(0, 60);
+      return `${one.charAt(0).toUpperCase()}${one.slice(1)}${words ? `: ${words}` : ''}`;
+    };
 
     /** Whether a key is the page's to take: not a field's, a chat's, a
      *  menu's, or another layer's of the drive. */
@@ -1027,33 +1234,119 @@
         return;
       }
       if (event.key !== 'Tab' || event.altKey || event.ctrlKey || event.metaKey) return;
-      const a = document.activeElement;
-      const stops = shownGrips();
-      if (host.contains(a)) {
-        // The grips are the part's last stops: then on to the page's next
-        // one after the part (or back into it), or out of the page as Tab
-        // would go from there.
-        const i = stops.indexOf(a);
-        const next = stops[i + (event.shiftKey ? -1 : 1)];
-        const to = next ?? (event.shiftKey ? (part ? stopsIn(part).at(-1) : null) : (part ? stopAfter(part) : null));
-        if (!to) return;
-        event.preventDefault();
-        if (!next) pinned = false;
-        to.focus();
-        return;
-      }
-      if (event.shiftKey || !part || !stops.length) return;
+      // Tab walks the page's stops and its parts; past either end it goes
+      // where Tab would. Keys in another layer (the line, a chat) are its own.
+      let a = document.activeElement;
+      if (a && a !== document.body && a.closest?.(`[${TRANSIENT}]`) && !host.contains(a)) return;
+      if (a?.shadowRoot && !pageHasKey(event)) return;
+      if (hand) finish();
+      const steps = walk();
+      if (!steps.length) return;
       const nowhere = !a || a === document.body || a === document.documentElement;
-      const last = stopsIn(part).at(-1) ?? null;
-      if (nowhere || (part.contains(a) && a === last)) {
-        event.preventDefault();
-        stops[0].focus();
-      }
+      let at = nowhere ? -1 : whereIn(steps, a);
+      let next;
+      if (nowhere && !event.shiftKey && part) next = steps.find((s) => s.ring === part) ?? steps[0];
+      else if (at < 0 && !nowhere) return;
+      else next = steps[at + (event.shiftKey ? -1 : 1)] ?? (nowhere && event.shiftKey ? steps.at(-1) : null);
+      if (!next) { pinned = false; return; }
+      event.preventDefault();
+      go(next);
     }, true);
 
     addEventListener('scroll', schedule, true);
     addEventListener('resize', schedule);
     document.addEventListener('marble:ops', schedule);
+
+    // ------------------------------------------------------------ undo and redo
+    //
+    // One change, one undo, and ⌘Z plays the same motion backwards: the
+    // person's history (the carrier's ring) takes a rule out, or puts it
+    // back, in one go. What that did is read off the page the moment it is
+    // done: it is wound back to read what was, wound forward again, and the
+    // engine plays the difference, every part held still meanwhile so the
+    // page's own transitions do not play it too. A host's ops (an agent, an
+    // agent's undo) are the marks' to play, and this page's own commits are
+    // played as they are made.
+
+    const isRule = (node) => node?.nodeType === 1 && node.tagName === 'STYLE' && node.hasAttribute(RULE);
+    let fromHost = false;
+    document.addEventListener('marble:ops', () => { fromHost = true; queueMicrotask(() => { fromHost = false; }); }, true);
+    const watcher = new MutationObserver((records) => {
+      if (fromHost) return;
+      try { playBack(records); } catch (err) { console.warn(`marble-rules: could not play that back: ${err?.message ?? err}`); }
+    });
+    if (document.body) {
+      watcher.observe(document.body, {
+        subtree: true, childList: true, characterData: true, characterDataOldValue: true,
+        attributes: true, attributeFilter: ['style'], attributeOldValue: true,
+      });
+    }
+
+    function playBack(records) {
+      const ruled = records.filter((r) => isRule(r.target) || (r.type === 'characterData' && isRule(r.target.parentNode))
+        || (r.type === 'childList' && [...r.addedNodes, ...r.removedNodes].some(isRule)));
+      if (!ruled.length || hand || typeof window.marbleMorph?.capture !== 'function') return;
+      const mine = records.filter((r) => ruled.includes(r) || (r.type === 'attributes' && own(r.target)));
+      // What the rules reach, as they were and as they are.
+      const texts = new Set();
+      for (const r of mine) {
+        for (const node of [r.target, r.target.parentNode, ...(r.addedNodes ?? []), ...(r.removedNodes ?? [])]) {
+          if (isRule(node)) texts.add(node.textContent);
+        }
+        if (r.type === 'childList' && isRule(r.target)) texts.add([...r.removedNodes].map((n) => n.textContent).join(''));
+        if (r.type === 'characterData' && isRule(r.target.parentNode)) texts.add(r.oldValue ?? '');
+      }
+      const parts = new Set();
+      for (const text of texts) {
+        const cut = text.indexOf('{');
+        for (const el of (cut > 0 ? query(text.slice(0, cut).trim()) : null) ?? []) if (own(el)) parts.add(el);
+      }
+      for (const r of mine) if (r.type === 'attributes') parts.add(r.target);
+      const els = [...parts].filter((el) => el.isConnected);
+      if (!els.length) return;
+
+      // Back to how it was.
+      const forward = new Map();
+      for (const r of [...mine].reverse()) {
+        if (r.type === 'attributes') {
+          forward.set(r, r.target.getAttribute(r.attributeName));
+          if (r.oldValue == null) r.target.removeAttribute(r.attributeName);
+          else r.target.setAttribute(r.attributeName, r.oldValue);
+        } else if (r.type === 'characterData') {
+          forward.set(r, r.target.data);
+          r.target.data = r.oldValue ?? '';
+        } else {
+          for (const node of r.addedNodes) if (node.parentNode === r.target) node.remove();
+          const at = r.nextSibling?.parentNode === r.target ? r.nextSibling : null;
+          for (const node of r.removedNodes) r.target.insertBefore(node, at);
+        }
+      }
+      const was = els.map((el) => el.getAttribute('style'));
+      els.forEach((el, i) => setStyle(el, frozen(was[i])));
+      let snap = null;
+      try { snap = window.marbleMorph.capture(els.length <= 60 ? els.map(idOf) : [], { kind: 'look', scope: 'page' }); } catch { snap = null; }
+      els.forEach((el, i) => setStyle(el, was[i]));
+      // And forward again, to how it is, without a frame in between.
+      for (const r of mine) {
+        if (r.type === 'attributes') {
+          const value = forward.get(r);
+          if (value == null) r.target.removeAttribute(r.attributeName);
+          else r.target.setAttribute(r.attributeName, value);
+        } else if (r.type === 'characterData') {
+          r.target.data = forward.get(r);
+        } else {
+          for (const node of r.removedNodes) if (node.parentNode === r.target) node.remove();
+          const at = r.nextSibling?.parentNode === r.target ? r.nextSibling : null;
+          for (const node of r.addedNodes) r.target.insertBefore(node, at);
+        }
+      }
+      const now = els.map((el) => el.getAttribute('style'));
+      els.forEach((el, i) => setStyle(el, frozen(now[i])));
+      for (const el of els) getComputedStyle(el).getPropertyValue('border-radius');
+      els.forEach((el, i) => setStyle(el, now[i]));
+      watcher.takeRecords();
+      if (snap) Promise.resolve(window.marbleMorph.play(snap)).catch(() => { /* it is there all the same */ });
+    }
 
     // ------------------------------------------------------------ on and off
 
@@ -1081,9 +1374,30 @@
       return on;
     }
 
+    // Where the keys were on the page before a menu took them: a mode turned
+    // on from the menu leaves them there, so the page's own keys (Esc, Tab)
+    // reach it.
+    let pageFocus = null;
+    document.addEventListener('focusin', (event) => {
+      const t = event.target;
+      if (t && t !== document.body && t.getRootNode?.() === document && !t.closest?.(`[${TRANSIENT}]`)) pageFocus = t;
+    }, true);
+    function keysBack() {
+      setTimeout(() => {
+        let a = document.activeElement;
+        if (!a || a === document.body || host.contains(a)) return;
+        if (pageFocus?.isConnected && pageFocus !== a) { pageFocus.focus({ preventScroll: true }); return; }
+        while (a?.shadowRoot?.activeElement) a = a.shadowRoot.activeElement;
+        a?.blur?.();
+        document.activeElement?.blur?.();
+      }, 0);
+    }
+
     let trayHeld = false;
     function offerTray() {
-      const spec = { id: 'reshape', order: 9, label: 'Reshape', icon: RESHAPE, always: true, active: on, onSelect: () => reshape(!on) };
+      // Not `always`: on a touch screen the menu shows only rows that are
+      // not always there, and Reshape must be reachable with a finger too.
+      const spec = { id: 'reshape', order: 9, label: 'Reshape', icon: RESHAPE, active: on, onSelect: () => { reshape(!on); keysBack(); } };
       if (!trayHeld) {
         trayHeld = !dispatchEvent(new CustomEvent('marble-tray:register', { cancelable: true, detail: spec }));
         return;
@@ -1105,6 +1419,8 @@
         return found ? { targets: found.targets.length, ids: found.targets.map(idOf), declarations: found.declarations } : null;
       },
       get on() { return on; },
+      /** The part the grips (and the keys' ring) are on now. */
+      get part() { return part; },
     };
   };
 
