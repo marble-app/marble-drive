@@ -16,6 +16,7 @@ import { findProject } from './projects.js';
 import { createAgentRoutes } from './routes.js';
 import { nameConversation } from './namer.js';
 import { writeOffer } from './offer.js';
+import { readIntent } from '../change/intent.js';
 import { createRunner } from './runner.js';
 import { listSkills, skillDirs } from './skills.js';
 import { createAgentStore } from './store.js';
@@ -256,6 +257,9 @@ async function boot({ config, store, writeOps, createDocument, origin, browserPa
     // The callout's suggestions for one element, on the same terms as
     // naming: the login's small model, and off where naming is off.
     offer: config.agentNaming ? (input) => writeOffer({ ...input, model: config.agentNamingModel }) : null,
+    // A few words about the look of the page, as one rule (change-line.js),
+    // on the same terms: the login's small model, off where naming is off.
+    intent: config.agentNaming ? (input) => readIntent({ ...input, model: config.agentNamingModel }) : null,
     readSource: (docPath) => store.read(docPath),
     onLook: look,
   });

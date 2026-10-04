@@ -104,7 +104,7 @@ const publicMeter = (meter) => {
   return out;
 };
 
-export function createAgentRoutes({ store, runner, tools, hub, providers, writeOps, restore, maxBody, gated = false, keys = null, anthropicBase = 'https://api.anthropic.com', openaiBase = 'https://api.openai.com', skills = [], usage = null, usageHistory = null, root = null, streams = null, offer = null, readSource = null, onLook = null }) {
+export function createAgentRoutes({ store, runner, tools, hub, providers, writeOps, restore, maxBody, gated = false, keys = null, anthropicBase = 'https://api.anthropic.com', openaiBase = 'https://api.openai.com', skills = [], usage = null, usageHistory = null, root = null, streams = null, offer = null, intent = null, readSource = null, onLook = null }) {
   let detected = null;
   // Turns being undone right now. The undoneAt check alone lets two requests
   // that arrive together both pass it before either has written.
@@ -499,6 +499,21 @@ export function createAgentRoutes({ store, runner, tools, hub, providers, writeO
       }
       if (!written) { res.writeHead(204); return res.end(); }
       return json(res, 200, written);
+    }
+
+    // A few words about the look of the page, as one rule (change-line.js
+    // asks before it sends words that sound like a look): a small model reads
+    // them beside the page's outline and answers one selector and a few
+    // declarations, or none. No rule — no model here, no words, no answer, a
+    // failure — is `{ rule: null }`, and the words go to the agent as asked.
+    if (route === '/agent/change-intent' && method === 'POST') {
+      const body = await readJson(req, maxBody);
+      const words = typeof body.words === 'string' ? body.words.trim().slice(0, 300) : '';
+      const ids = (Array.isArray(body.ids) ? body.ids : []).filter((id) => typeof id === 'string' && id).slice(0, 20);
+      const outline = (Array.isArray(body.outline) ? body.outline : []).filter((o) => o && typeof o === 'object').slice(0, 40);
+      if (!intent || !words) return json(res, 200, { rule: null });
+      const rule = await Promise.resolve().then(() => intent({ words, ids, outline })).catch(() => null);
+      return json(res, 200, { rule: rule ?? null });
     }
 
     // An image pasted or dropped into a composer. It becomes a file because
