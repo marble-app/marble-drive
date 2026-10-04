@@ -10,7 +10,9 @@
 //   - ⏎ folds the line back into the thing. What answers is the thing
 //     changing, marked part by part (change-marks.js), and this layer's tint
 //     steps aside the moment those marks arrive. A change that landed
-//     reopens nothing: rest on it to review it.
+//     reopens nothing: rest on it to review it. Words that sound like a look
+//     are tried first as one rule the page makes itself (change-rules.js);
+//     only what is not one goes to the agent.
 //   - A question comes back as its answer, in the line, with the line under
 //     it for the next one, in the same conversation.
 //   - A change that could not be made gives the words back, with why above
@@ -46,6 +48,9 @@
   // A question is one that ends with a question mark or opens with a
   // question word; "Do the same to the others" is a change (ruling R17).
   const QUESTION = /^(what|why|how|when|who|which|where)\b/i;
+  // Words that sound like a look: they may be one rule the page can make
+  // itself (change-rules.js), asked before any agent is.
+  const LOOK = /\b(round(ed|er)?|square|corner|radius|padding|spac(e|ing)|tight(er)?|loose(r)?|roomier|bigger|smaller|larger|text size|font size|bold(er)?|light(er)?|dark(er)?|colou?r|background|border|calm(er)?|quiet(er)?|soft(er)?)\b/i;
   const ENDS = new Set(['turn.completed', 'turn.failed', 'turn.cancelled', 'turn.interrupted', 'turn.removed']);
 
   // The parts' own unit, named the way the marks count them (change-marks.js).
@@ -234,7 +239,7 @@
         action: null, conversation: conversation ?? null, convo: null, off: null, after: 0,
         turn: null, awaiting: false, asked: '', texts: [], ask: null,
         state: null, el: null, input: null, tint: null, handed: false, failed: false,
-        answer: '', said: '', returnTo: null, stop: false,
+        answer: '', said: '', returnTo: null, stop: false, tried: false,
       };
     }
 
@@ -756,8 +761,21 @@
       s.off = agent.on(id, (event) => onEvent(s, event), { after: s.after });
     }
 
+    /** Whether these words are tried as one rule first: the first send of a
+     *  new ask in the line (not more to an answer, not a change more, not a
+     *  send again after one that could not be made), about parts rather than
+     *  words in a sentence, no question and no drafted action, and sounding
+     *  like a look. */
+    function oneRule(s, text, { brief, keepWords }) {
+      return typeof window.marbleRules?.fromWords === 'function' && !s.tried && s.state === 'edit'
+        && !s.conversation && !brief && !keepWords && !s.words
+        && !(s.action && text.startsWith(s.action.lead)) && !isQuestion(text) && LOOK.test(text);
+    }
+
     async function send(s, text, { brief = null, keepWords = false } = {}) {
       const ids = [...s.ids];
+      const rule = oneRule(s, text, { brief, keepWords });
+      s.tried = true;
       if (!keepWords) keepDraft(keyOf(s), '');
       s.asked = text;
       s.texts = [];
@@ -767,11 +785,34 @@
       s.ask = null;
       s.failed = false;
       s.handed = false;
+      if (rule) {
+        // The line folds in as for any send; the page marks what it will
+        // change (and the line's tint gives way to those marks), then changes
+        // it. Esc before it lands stops it, and nothing goes anywhere.
+        fold(s);
+        paintScope(s);
+        let took = false;
+        try {
+          took = await window.marbleRules.fromWords({
+            words: text, ids, onMarks: () => handOff(s), stopped: () => s.stop || !sessions.has(s),
+          });
+        } catch {
+          took = false;
+        }
+        if (took || s.stop || !sessions.has(s)) {
+          s.awaiting = false;
+          s.stop = false;
+          agent.select(null);
+          if (sessions.has(s)) drop(s);
+          return;
+        }
+        // Not one rule: the agent is asked, exactly as it would have been.
+      }
       const mode = s.action && text.startsWith(s.action.lead) ? s.action.mode : 'main';
       const meaning = mode === 'main' ? '' : (globalThis.marbleOffer?.briefFor?.(mode, ids) ?? '');
       const hidden = [briefFor(s), meaning, brief].filter(Boolean).join('\n\n');
       if (mode === 'variations') dispatchEvent(new CustomEvent('marble-variations:watch', { detail: { ids } }));
-      fold(s);
+      if (!rule) fold(s);
       paintScope(s);
       if (s.conversation && !s.off) await follow(s, s.conversation, { baseline: true });
       const convo = convoFor(s);

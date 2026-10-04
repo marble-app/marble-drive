@@ -29,6 +29,11 @@
 // as tints, with no tag. A change of one part inside one block of words is
 // the caret's (agent-text.js, rulings R2 and R6), and a press is collab.js's
 // ring. What this layer draws, the zone does not (`claims`).
+//
+// A change the page makes itself (a rule from Reshape or from a few words,
+// change-rules.js) is drawn with the same tints and tag through `begin`: no
+// presence frames, no conversation behind the tag, and a part can be left
+// out (a dashed ring, no fill). It is not work: Hide work leaves it drawn.
 
 (() => {
   const TRANSIENT = 'data-marble-transient';
@@ -62,8 +67,10 @@
       --change-colour: cubic-bezier(.22, .61, .36, 1);
       --change-inset: 0px;
       font: 500 11.5px/1 var(--ui-font, var(--sans, system-ui, -apple-system, "Segoe UI", sans-serif)); }
-    /* Hide work in the tray hides this too: it is the same work. */
-    html.marble-zones-off .marble-change-layer { display: none; }
+    /* Hide work in the tray hides this too: it is the same work. A change
+       the page is making by hand is not work, and stays. */
+    html.marble-zones-off .marble-change-layer:not(:has(> [data-local])),
+    html.marble-zones-off .marble-change-layer > :not([data-local]) { display: none; }
 
     /* A tint is a fill, the way a selection is shown: light ahead, deeper
        with a full hairline of the accent while the part lands, and it lifts
@@ -78,6 +85,9 @@
     .marble-change-tint[data-state="gone"], .marble-change-dot[data-state="gone"], .marble-change-tag[data-state="gone"],
     .marble-change-rail[data-state="gone"], .marble-change-more[data-state="gone"] { opacity: 0; transition: opacity ${GONE}ms var(--change-ease); }
     .marble-change-tint[hidden], .marble-change-dot[hidden] { display: none; }
+    /* Left out of a change made by hand: a full dashed ring, no fill. */
+    .marble-change-tint[data-state="out"] { background-color: transparent;
+      border: 1px dashed color-mix(in srgb, var(--change-ink) 70%, transparent); }
 
     /* Too many to mark: a dot in the margin beside each part. Faint ahead, a
        ring while it lands, solid once it has. */
@@ -97,6 +107,13 @@
       color: color-mix(in srgb, var(--change-ink) 70%, var(--change-text)); font: inherit; letter-spacing: -.005em;
       white-space: nowrap; cursor: pointer; transition: background-color 120ms var(--change-colour); }
     .marble-change-tag[data-edge] .marble-change-press { border-radius: 6px; }
+    /* A change made by hand: the tag only says what it is doing; it is no
+       way into a conversation, and never takes a press from the hand. */
+    .marble-change-tag[data-local] { pointer-events: none; }
+    .marble-change-tag[data-local] .marble-change-press { cursor: default; }
+    .marble-change-tag[data-local] .marble-change-time,
+    .marble-change-tag[data-local] .marble-change-meter,
+    .marble-change-tag[data-local] .marble-change-steps { display: none; }
     .marble-change-press:hover { background: color-mix(in srgb, var(--change-ink) 18%, var(--change-card)); }
     .marble-change-press:active { background: color-mix(in srgb, var(--change-ink) 24%, var(--change-card)); }
     .marble-change-press:focus-visible { outline: 2px solid color-mix(in srgb, var(--change-ink) 55%, transparent); outline-offset: 2px; }
@@ -176,7 +193,8 @@
 
   // The parts' own unit, from what they are. A kind the page cannot tell by
   // its tag names itself (`data-marble-kind="chart"`). The line ⌘J opens
-  // (change-line.js) names its thing with the same words.
+  // (change-line.js) and a rule (change-rules.js) name their things with the
+  // same words.
   const UNITS = [
     ['li, tr', 'row', 'rows'],
     ['td, th', 'cell', 'cells'],
@@ -191,9 +209,37 @@
     ['ul, ol, dl', 'list', 'lists'],
     ['table', 'table', 'tables'],
   ];
+  // A class that names a thing ("card", "v5-card", "paper_tile") says what a
+  // part is better than its tag does: a <div class="card"> is a card. Only
+  // the last word of a class counts ("card-header" is a header, not a card),
+  // and only these nouns, so a class that says how a part looks ("round",
+  // "wide", "active") never becomes its name.
+  const NOUNS = new Map(Object.entries({
+    card: 'cards', panel: 'panels', pane: 'panes', tile: 'tiles', chip: 'chips', tag: 'tags', pill: 'pills',
+    badge: 'badges', btn: ['button', 'buttons'], button: 'buttons', item: 'items', row: 'rows', cell: 'cells',
+    entry: 'entries', note: 'notes', post: 'posts', box: 'boxes', field: 'fields', tab: 'tabs', avatar: 'avatars',
+    thumb: ['thumbnail', 'thumbnails'], photo: 'photos', image: 'images', quote: 'quotes', callout: 'callouts',
+    banner: 'banners', step: 'steps', slide: 'slides', column: 'columns', col: ['column', 'columns'],
+    section: 'sections', link: 'links', icon: 'icons', label: 'labels', event: 'events', task: 'tasks',
+    paper: 'papers', list: 'lists', table: 'tables', chart: 'charts', widget: 'widgets', bubble: 'bubbles',
+    message: 'messages', comment: 'comments', block: 'blocks', group: 'groups', sheet: 'sheets',
+    dialog: 'dialogs', modal: ['dialog', 'dialogs'], toolbar: 'toolbars', menu: 'menus', stat: 'stats',
+  }));
+  function nounOf(el) {
+    for (const name of el.classList ?? []) {
+      if (name.startsWith('marble-')) continue;
+      const last = name.toLowerCase().split(/[-_]/).filter(Boolean).at(-1);
+      const many = last && NOUNS.get(last);
+      if (many) return Array.isArray(many) ? many : [last, many];
+    }
+    return null;
+  }
   function unitOf(el) {
+    if (!el) return ['part', 'parts'];
     const kind = el.getAttribute('data-marble-kind')?.trim();
     if (kind) return [kind, `${kind}s`];
+    const noun = nounOf(el);
+    if (noun) return noun;
     for (const [selector, one, many] of UNITS) if (el.matches(selector)) return [one, many];
     return ['part', 'parts'];
   }
@@ -291,6 +337,9 @@
         drawn: false,
         idle: 0,
         timers: new Set(),
+        local: false,         // a change the page makes itself (`begin`)
+        words: null,          // what its tag says, as pieces
+        endWords: null,
       };
     }
 
@@ -762,7 +811,8 @@
 
     function tintStateOf(run, part) {
       let tint = null;
-      if (part.state === 'now') tint = 'now';
+      if (part.state === 'out') tint = 'out';
+      else if (part.state === 'now') tint = 'now';
       else if (part.state === 'soon' && !part.dotted) tint = 'soon';
       else if (part.state === 'landed' && !part.lifted) tint = 'lift';
       return run.gone && tint ? 'gone' : tint;
@@ -840,6 +890,7 @@
         el.setAttribute('aria-hidden', 'true');
         el.dataset.id = holder.id;
         el.dataset.state = plan.state;
+        if (plan.local) el.toggleAttribute('data-local', true);
         holder[key] = el;
         if (box) place(el, box);
         layer.append(el);
@@ -896,6 +947,13 @@
       status.append(ask, ran, steplist);
       press.setAttribute('aria-describedby', status.id);
       root.append(press, status);
+      // A change made by hand says itself where the hand is (change-rules.js
+      // speaks for it); its tag is only drawn.
+      if (run.local) {
+        root.toggleAttribute('data-local', true);
+        root.setAttribute('aria-hidden', 'true');
+        press.tabIndex = -1;
+      }
 
       const tag = { root, press, said, meter, steps, time, status, ask, ran, steplist, rest: 0, at: null, over: false };
       const open = () => { root.toggleAttribute('data-open', true); fillStatus(run, tag); placeStatus(tag); };
@@ -938,6 +996,7 @@
 
     /** What the tag says, as pieces: words, and numbers to set in figures. */
     function tagWords(run) {
+      if (run.local) return run.ending ? run.endWords : run.words ?? [];
       // A change the line speaks for keeps its words while it goes.
       if (run.ending) return run.quiet ? null : run.done ? endWords(run.done) : [];
       if (run.reading) return [['Reading'], [run.read.size, run.read.size === 1 ? 'part' : 'parts']];
@@ -1006,7 +1065,7 @@
       // every second would be read out every second.
       const words = tag.said.textContent;
       const name = `${words ? `${words}. ` : ''}Open the conversation`;
-      if (tag.press.getAttribute('aria-label') !== name) tag.press.setAttribute('aria-label', name);
+      if (!run.local && tag.press.getAttribute('aria-label') !== name) tag.press.setAttribute('aria-label', name);
       if (tag.root.hasAttribute('data-open')) fillStatus(run, tag);
     }
 
@@ -1228,10 +1287,13 @@
         }
         for (const part of run.parts.values()) {
           marks.push(planTint(part, 'tint', hidden ? null : tintStateOf(run, part), 'part', hand));
-          marks.push(planDot(part, hidden || !part.dotted ? null : run.gone ? 'gone' : part.state, hand));
-          if (!hidden) entries.push({ holder: part, state: part.state, gone: run.gone });
+          marks.push(planDot(part, hidden || !part.dotted || part.state === 'out' ? null : run.gone ? 'gone' : part.state, hand));
+          if (!hidden && part.state !== 'out') entries.push({ holder: part, state: part.state, gone: run.gone });
         }
-        plans.push({ run, marks, at: hidden || run.undo ? null : hangOf(run, marks) });
+        if (run.local) for (const mark of marks) if (mark) mark.local = true;
+        // A change made by hand has a tag only while it has words to say.
+        const silent = run.local && !(run.ending ? run.endWords?.length : run.words?.length);
+        plans.push({ run, marks, at: hidden || run.undo || silent ? null : hangOf(run, marks) });
       }
       const railPlan = planRail(entries);
       // Write.
@@ -1260,7 +1322,7 @@
       const tagged = [...runs.values()].some((run) => run.tag);
       if (tagged && !ticking) ticking = setInterval(tick, 1000);
       if (!tagged && ticking) { clearInterval(ticking); ticking = 0; }
-      const key = [...runs.values()].filter((run) => claims(run.client)).map((run) => run.client).sort().join('\n');
+      const key = [...runs.values()].filter((run) => !run.local && claims(run.client)).map((run) => run.client).sort().join('\n');
       if (key !== claimKey) {
         claimKey = key;
         dispatchEvent(new CustomEvent('marble-change:claims'));
@@ -1354,14 +1416,99 @@
       }, 1500);
     });
 
+    // ------------------------------------------------------------ by hand
+
+    /**
+     * A change the page makes itself (change-rules.js), drawn with the same
+     * tints and tag as one that comes in frames. `ids` are tinted light at
+     * once; the handle moves each part on: `now` (landing), `land` (lifts
+     * over 900 ms), `out` (left out: a dashed ring) and `soon` (back in).
+     * `say` sets the tag's words as pieces (`[['Rounding', 4, 'cards']]`,
+     * numbers set in figures), `hang` the part it hangs from, `refresh`
+     * reads the parts' shapes again (a hand is changing them), `end` lets
+     * the marks go, saying `pieces` a moment first if given, and `clear`
+     * fades them at once when nothing changed.
+     */
+    function begin({ key = 'local', ids = [], hang = null, say = null } = {}) {
+      const client = `local:${key}`;
+      const old = runs.get(client);
+      if (old) forget(old);
+      const run = newRun(client, String(key));
+      run.local = true;
+      runs.set(client, run);
+      const mine = () => runs.get(client) === run && !run.ending;
+      const set = (given, state) => {
+        if (!mine()) return;
+        for (const id of list(given)) {
+          const part = run.parts.get(id) ?? addPart(run, id, state);
+          part.state = state;
+          part.lifted = false;
+          part.delay = 0;
+          part.shape = null;
+        }
+        schedule();
+      };
+      const first = list(ids);
+      run.many = first.length > MANY;
+      set(first, 'soon');
+      run.hang = hang ? String(hang) : first[0] ?? null;
+      run.words = Array.isArray(say) ? say : null;
+      return {
+        soon: (given) => set(given, 'soon'),
+        now: (given) => set(given, 'now'),
+        out: (given) => set(given, 'out'),
+        land(given) {
+          if (!mine()) return;
+          for (const id of list(given)) landPart(run, id);
+          schedule();
+        },
+        hang(id) { if (mine() && id) { run.hang = String(id); schedule(); } },
+        say(pieces) { if (mine()) { run.words = Array.isArray(pieces) ? pieces : null; schedule(); } },
+        refresh() {
+          if (!mine()) return;
+          for (const part of run.parts.values()) part.shape = null;
+          schedule();
+        },
+        end(pieces = null) {
+          if (!mine()) return;
+          run.ending = true;
+          run.endedAt = performance.now();
+          run.endWords = Array.isArray(pieces) && pieces.length ? pieces : null;
+          // What was left out was never changed: its ring goes now. The rest
+          // lift as they have landed.
+          for (const part of [...run.parts.values()]) {
+            if (part.state === 'out') dropPart(run, part.id);
+            else landPart(run, part.id);
+          }
+          schedule();
+          after(run, run.endWords ? SHOWN : still() ? STILL : LIFT, () => {
+            run.gone = true;
+            schedule();
+            after(run, GONE, () => forget(run));
+          });
+        },
+        /** Nothing was changed after all: every mark fades at once. */
+        clear() {
+          if (!mine()) return;
+          run.ending = true;
+          run.gone = true;
+          run.endWords = null;
+          schedule();
+          after(run, GONE, () => forget(run));
+        },
+        get live() { return mine(); },
+      };
+    }
+
     window.marbleChange = {
       claims,
       unitOf,
-      runs: () => [...runs.values()].filter((run) => claims(run.client))
+      runs: () => [...runs.values()].filter((run) => !run.local && claims(run.client))
         .map(({ client, turn, count, total }) => ({ client, turn, count, total })),
+      begin,
       tintFor(id) {
         for (const run of runs.values()) {
-          if (inText(run.client) || run.gone) continue;
+          if (run.local || inText(run.client) || run.gone) continue;
           const part = run.parts.get(String(id));
           if (part && (part.state === 'soon' || part.state === 'now') && drawable(resolve(part))) return part.state;
           const mark = run.scope.get(String(id));

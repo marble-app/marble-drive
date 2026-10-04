@@ -171,6 +171,9 @@ const RUNTIME = {
   // The change on request (v5): nothing stays after a change; rest on it to
   // see it drawn over what it made, then Keep, Undo or Change more.
   'change-review.js': () => path.join(REPO, 'runtime', 'change-review.js'),
+  // Find, mark, commit (v5): Reshape a part by hand and every part like it
+  // follows; a few words that are one rule become one. One undo either way.
+  'change-rules.js': () => path.join(REPO, 'runtime', 'change-rules.js'),
   // The work, on the page: dots on what an agent changed, a rail, the island
   // while the chat is closed, and the walk through a turn's changes.
   'agent-work.js': () => path.join(REPO, 'runtime', 'agent-work.js'),
@@ -427,6 +430,9 @@ export async function createDrive(config, { log = console, agentProviders = null
       // After the line, which its Change more opens, and the marks, whose
       // end it waits on to ask what is left to review.
       tags += `\n<script src="${runtimeUrl('change-review.js')}" data-marble-transient></script>`;
+      // After the marks, whose tints and tag it draws with, and the line,
+      // whose words it tries as one rule before they go to an agent.
+      tags += `\n<script src="${runtimeUrl('change-rules.js')}" data-marble-transient></script>`;
     }
     if (agents) tags += `\n<script src="${runtimeUrl('agent-work.js')}" data-marble-transient></script>`;
     if (agents) tags += `\n<script src="${runtimeUrl('agent-run.js')}" data-marble-transient></script>`;

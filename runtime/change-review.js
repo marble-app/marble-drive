@@ -1502,6 +1502,8 @@
      *  pointer down, which a rest already waits out.) */
     function busyElsewhere() {
       if (window.marbleLine?.current?.()) return true;
+      // Reshape (change-rules.js) has the pointer: a rest is a hand on a part.
+      if (document.documentElement.classList.contains('marble-reshaping')) return true;
       if (document.documentElement.classList.contains('marble-callout-latched')) return true;
       const marks = document.querySelector('.marble-marks-layer');
       if (marks?.dataset.mode || marks?.hasAttribute('data-describing')) return true;
@@ -1652,6 +1654,10 @@
         if (type === 'input' || writes) typedAt = gestureAt;
       }, true);
     }
+    // A rule the person made (change-rules.js: Reshape, or a few words the
+    // page made one rule of) is theirs however long after their hand it
+    // landed: ⌘Z takes it back before an agent's change.
+    document.addEventListener('marble-rules:commit', () => { personAt = Date.now(); });
     document.addEventListener('marble:history', (event) => {
       // Nothing to undo and nothing to redo: the ring was emptied, which is
       // the carrier hearing an outside write, never an edit of the person's.
