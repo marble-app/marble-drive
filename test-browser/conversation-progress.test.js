@@ -152,10 +152,11 @@ test('an edit draws the page growing, a colour as swatches, and a stage plan as 
   assert.match(rows[0], /^Added Shopping list/);
   assert.match(rows[1], /^Text colour of “Research Garden”/);
   assert.equal(await card.locator('.w-change .w-dot').count() >= 1, true);
-  // A finished frame opens its step again.
-  await card.locator('.w-frame').first().click();
+  // Done, the card keeps the last thing it showed, whole; no strip of
+  // earlier steps under it.
   assert.equal(await card.locator('.w-live').isVisible(), true);
-  assert.equal(await card.locator('.w-back button').textContent(), 'Close');
+  assert.equal(await card.locator('.w-live .v-sw-chip').count() >= 1, true);
+  assert.equal(await card.locator('.w-strip').isVisible(), false);
   await page.context().close();
 });
 
@@ -199,7 +200,11 @@ test('sources show where an answer comes from, and are the proof at the end', as
   assert.equal(await view.locator('.w-strip .v-src-q').first().textContent(), 'HCI grants 2027');
   assert.match(await view.locator('.w-strip .v-src-r').first().textContent(), /www\.nsf\.gov/);
   assert.equal(await view.locator('.w-strip .v-src-r').first().getAttribute('data-st'), 'read');
-  assert.match(await view.locator('.w-proof-line').textContent(), /^Read 1 source/);
+  // The sources were the last thing shown, so they are the proof, in the
+  // live view; no line repeats them and no thumbnail shrinks them.
+  assert.equal(await view.locator('.w-live .v-src-r').first().isVisible(), true);
+  assert.equal(await view.locator('.w-proof-line').count(), 0);
+  assert.equal(await view.locator('.w-thumb').first().isVisible(), false);
   await page.context().close();
 });
 
@@ -208,11 +213,35 @@ test('a test run is counted as dots, and a failure named', async () => {
   await send('script:testing');
   await view.locator('.progress[data-state="completed"]').waitFor();
   const card = view.locator('.progress');
-  assert.equal(await card.locator('.w-proof-line').textContent(), '11 of 12 tests passed');
-  await card.locator('.w-frame').first().click();
+  // The test run was the last thing shown: it is the card's picture at the
+  // end, at full size, with nothing to click to get it back.
+  assert.equal(await card.locator('.w-live').isVisible(), true);
+  assert.equal(await card.locator('.w-strip').isVisible(), false);
   assert.equal(await card.locator('.w-live .v-ts-dots i').count(), 12);
   assert.equal(await card.locator('.w-live .v-ts-dots i[data-st="fail"]').count(), 1);
   assert.match(await card.locator('.w-live .v-ts-fail').textContent(), /the footer says Done/);
+  await page.context().close();
+});
+
+test('a drawing from the drawer replaces the card\'s own view, and only the newest shows', async () => {
+  const { page, view, send } = await mount();
+  await send('script:testing');
+  await view.locator('.progress[data-state="completed"]').waitFor();
+  const card = view.locator('.progress');
+  const turn = await view.locator('.msg.me').first().getAttribute('data-turn');
+  const draw = (html, state) => view.evaluate((el, e) => el.receive({ type: 'progress.drawn', t: Date.now(), ...e }), { turn, html, state });
+  await draw('<div class="first">11 of 12</div>', 'working');
+  const frame = card.locator('.w-drawn iframe.visual-frame');
+  await frame.waitFor();
+  assert.equal(await card.locator('.w-live').isVisible(), false);
+  assert.equal(await card.locator('.w-receipt').isVisible(), false);
+  assert.equal(await frame.getAttribute('sandbox'), 'allow-scripts');
+  await page.frameLocator('body > marble-conversation >> .w-drawn iframe').locator('.first').waitFor();
+  await draw('<div class="last">All 12 checked</div>', 'done');
+  const inner = page.frameLocator('body > marble-conversation >> .w-drawn iframe');
+  await inner.locator('.last').waitFor();
+  assert.equal(await inner.locator('.first').count(), 0);
+  assert.equal(await card.locator('.w-drawn iframe').count(), 1, 'swapped in place, not a second frame');
   await page.context().close();
 });
 

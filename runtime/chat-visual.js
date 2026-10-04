@@ -116,6 +116,8 @@ const BASE = `
     color: var(--ink); -webkit-font-smoothing: antialiased; text-rendering: optimizeLegibility;
   }
   .marble-fit { padding: 12px; display: grid; gap: 10px; align-content: start; }
+  /* A progress drawing sits in a card that already has its margins. */
+  .marble-fit[data-flush] { padding: 2px 0; }
   h1, h2, h3, h4 { margin: 0; font-weight: 500; letter-spacing: -.01em; }
   h1 { font-size: 1.15rem; } h2 { font-size: 1rem; } h3 { font-size: .85rem; color: var(--muted); }
   p { margin: 0; } ul, ol { margin: 0; padding-left: 1.15em; }
@@ -212,6 +214,19 @@ const BRIDGE = `
         if (typeof event.data.dark === 'boolean') document.documentElement.style.colorScheme = event.data.dark ? 'dark' : 'light';
       }
       if (event.data.what === 'answered') document.documentElement.dataset.answered = '';
+      // A progress drawing is redrawn in place: the new markup replaces the
+      // old inside the same frame, so nothing reloads or flashes.
+      // Its script runs again, each in a block of its own so a second
+      // drawing's const does not collide with the first one's.
+      if (event.data.what === 'source' && typeof event.data.html === 'string') {
+        fit.innerHTML = event.data.html;
+        for (const old of fit.querySelectorAll('script')) {
+          const run = document.createElement('script');
+          run.textContent = '{\\n' + old.textContent + '\\n}';
+          old.replaceWith(run);
+        }
+        measure();
+      }
     });
     requestAnimationFrame(measure);
     setTimeout(measure, 120);
@@ -220,14 +235,14 @@ const BRIDGE = `
 
 /** The whole document a visual runs in. The fragment is written in as-is: this
  *  string never reaches the page, only the frame's own parser. */
-export function visualDocument({ source = '', tokens = {}, dark = false } = {}) {
+export function visualDocument({ source = '', tokens = {}, dark = false, flush = false } = {}) {
   return `<!doctype html>
 <html lang="en" style="color-scheme: ${dark ? 'dark' : 'light'}">
 <head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
 <style id="marble-theme">:root { ${declarations(tokens)} }</style>
 <style>${BASE}</style>
 </head>
-<body><div class="marble-fit">${source}</div>
+<body><div class="marble-fit"${flush ? ' data-flush' : ''}>${source}</div>
 <script>${BRIDGE}</script>
 </body></html>`;
 }
@@ -299,12 +314,25 @@ const el = (tag, className, text) => {
   return node;
 };
 
+// A drive's palette is written as light-dark(day, night) pairs. Inside the
+// frame those would resolve against the frame's own scheme, which is chosen
+// from --paper — and a pair is neither light nor dark until it is resolved.
+// So a colour is read back as the chrome is showing it, then sent.
+const resolveColor = (view, value) => {
+  const probe = document.createElement('span');
+  probe.style.cssText = `position:absolute;visibility:hidden;pointer-events:none;color:${value}`;
+  (view.shadowRoot ?? view).append(probe);
+  const color = getComputedStyle(probe).color;
+  probe.remove();
+  return color || value;
+};
+
 const tokensOf = (view) => {
   const style = getComputedStyle(view);
   const out = {};
   for (const name of TOKEN_NAMES) {
     const value = style.getPropertyValue(`--${name}`).trim();
-    if (value) out[name] = value;
+    if (value) out[name] = /light-dark\(/i.test(value) ? resolveColor(view, value) : value;
   }
   const log = view?.shadowRoot?.querySelector('.log');
   if (log) out['visual-font-size'] = getComputedStyle(log).fontSize;
@@ -318,7 +346,12 @@ export function paintVisuals(view) {
   if (!frames?.length) return;
   const tokens = tokensOf(view);
   const message = { marbleHost: true, what: 'theme', css: declarations(tokens), dark: isDark(tokens.paper) };
-  for (const frame of frames) frame.contentWindow?.postMessage(message, '*');
+  for (const frame of frames) {
+    // A drawing's frame is see-through, which it only is while the frame and
+    // its document agree on the scheme.
+    if (frame.hasAttribute('data-drawing')) frame.style.colorScheme = message.dark ? 'dark' : 'light';
+    frame.contentWindow?.postMessage(message, '*');
+  }
 }
 
 // One listener for every card on the page, pruning itself as cards leave. A
@@ -485,5 +518,59 @@ export function mountVisual(card, { info = '', body = '', view = null } = {}) {
 
   pending?.replaceWith(frame);
   live.add({ card, frame, handle });
+  listen();
+}
+
+// ------------------------------------------------------------------ a progress drawing
+
+/** The widget a turn's progress is drawn as (server/agent/drawer.js), in the
+ *  same sandbox as a visual. The first drawing makes the frame; every later
+ *  one is posted into it and swapped in place. `box` is the card's slot. */
+export function mountDrawing(box, { html = '', view = null } = {}) {
+  const source = String(html ?? '');
+  if (!box || !source || source.length > LIMITS.source) return;
+  const had = box.querySelector('.visual-frame');
+  if (had?.dataset.ready != null) {
+    had.contentWindow?.postMessage({ marbleHost: true, what: 'source', html: source }, '*');
+    return;
+  }
+  const tokens = tokensOf(view ?? box);
+  const dark = isDark(tokens.paper);
+  if (had) {
+    had.srcdoc = visualDocument({ source, tokens, dark, flush: true });
+    return;
+  }
+  const frame = document.createElement('iframe');
+  frame.className = 'visual-frame';
+  frame.setAttribute('data-drawing', '');
+  frame.setAttribute('sandbox', 'allow-scripts');
+  frame.setAttribute('referrerpolicy', 'no-referrer');
+  frame.setAttribute('title', 'Progress');
+  frame.style.colorScheme = dark ? 'dark' : 'light';
+  frame.addEventListener('load', () => { frame.dataset.ready = ''; });
+  frame.srcdoc = visualDocument({ source, tokens, dark, flush: true });
+
+  let sends = 0;
+  let lastSend = 0;
+  const handle = (data) => {
+    const message = readVisualMessage(data);
+    if (!message) return;
+    if (message.what === 'size') {
+      frame.style.height = `${message.height}px`;
+      return;
+    }
+    if (!view?.input) return;
+    view.input.value = message.text;
+    view.autosize?.();
+    view.updateSendable?.();
+    if (message.what !== 'answer') return;
+    const now = Date.now();
+    if (sends >= LIMITS.sends || now - lastSend < LIMITS.gapMs) return;
+    sends += 1;
+    lastSend = now;
+    view.submit?.();
+  };
+  box.replaceChildren(frame);
+  live.add({ card: box, frame, handle });
   listen();
 }

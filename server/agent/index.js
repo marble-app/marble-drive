@@ -15,6 +15,7 @@ import { createKeyStore } from './keys.js';
 import { findProject } from './projects.js';
 import { createAgentRoutes } from './routes.js';
 import { nameConversation } from './namer.js';
+import { drawWithCli } from './drawer.js';
 import { writeOffer } from './offer.js';
 import { readIntent } from '../change/intent.js';
 import { createRunner } from './runner.js';
@@ -210,6 +211,12 @@ async function boot({ config, store, writeOps, createDocument, origin, browserPa
     // never be billed to somebody's API account.
     nameConversation: config.agentNaming
       ? (input) => nameConversation({ ...input, model: config.agentNamingModel })
+      : null,
+    // Who draws a turn's progress widget: a small model on the login, told
+    // how by the drawing-progress skill. Null switches it off, and the card
+    // keeps its own views.
+    drawProgress: config.agentDrawing
+      ? (input) => drawWithCli({ ...input, model: config.agentDrawingModel, log })
       : null,
     // A turn's ops were filed as `agent:<id>` and its undo as `agent-undo:<id>`;
     // both are that conversation, and both are done when the turn is.

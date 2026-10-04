@@ -215,6 +215,11 @@ export function loadConfig(env = process.env) {
     agentNaming: bool('MARBLE_DRIVE_AGENT_NAMING', true),
     // Which model writes those names. Small and fast on purpose.
     agentNamingModel: str('MARBLE_DRIVE_AGENT_NAMING_MODEL', 'haiku'),
+    // Whether a small model draws each turn's progress widget while it runs
+    // (server/agent/drawer.js). Off wherever naming is off unless set: both
+    // spawn a CLI of their own, and a test host wants neither.
+    agentDrawing: bool('MARBLE_DRIVE_AGENT_DRAWING', bool('MARBLE_DRIVE_AGENT_NAMING', true)),
+    agentDrawingModel: str('MARBLE_DRIVE_AGENT_DRAWING_MODEL', 'haiku'),
     agentStallMinutes: num('MARBLE_DRIVE_AGENT_STALL_MINUTES', 30),
     // 0 is no cap: every conversation the person has started runs at once.
     agentMaxRunning: num('MARBLE_DRIVE_AGENT_MAX_RUNNING', 0),

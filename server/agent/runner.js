@@ -15,6 +15,7 @@ import path from 'node:path';
 import readline from 'node:readline';
 
 import { createAwakeClock, createProgress } from '../awake.js';
+import { createDrawer } from './drawer.js';
 import { collectSlices, shaOf } from '../engine.js';
 import { effectiveCapability } from './capability.js';
 import { pickEnv } from './env.js';
@@ -56,7 +57,7 @@ const BACKGROUND_SETTLE_MS = 60_000;
 const STEER_NOTE = 'While you were working I added this note. Treat it as course-correction.';
 const DISPATCH = new Set(['queue', 'steer', 'interrupt']);
 
-export function createRunner({ store, tools, providers, workdir, origin, bridgePath, browserPath, browserPass = null, readDocument, publish, publishAsk = () => {}, limits, log = console, skills = [], driveRoot, projects = null, power = '', sandbox = null, onLook = null, onFinish = null, nameConversation = null, awake = createAwakeClock(), progress = createProgress() }) {
+export function createRunner({ store, tools, providers, workdir, origin, bridgePath, browserPath, browserPass = null, readDocument, publish, publishAsk = () => {}, limits, log = console, skills = [], driveRoot, projects = null, power = '', sandbox = null, onLook = null, onFinish = null, nameConversation = null, drawProgress = null, awake = createAwakeClock(), progress = createProgress() }) {
   const live = new Map(); // turnId → live turn
   const order = []; // turnIds, in the order they were sent
   const tokens = new Map(); // token → live turn
@@ -154,6 +155,13 @@ export function createRunner({ store, tools, providers, workdir, origin, bridgeP
       return stored;
     });
   }
+
+  // ------------------------------------------------------------------ drawing
+  //
+  // A small model draws each turn's progress widget from its steps, as they
+  // happen and once at the end (drawer.js; how it draws is the
+  // drawing-progress skill). Null when the host does not draw.
+  const drawer = drawProgress ? createDrawer({ draw: drawProgress, emit, log }) : null;
 
   // ------------------------------------------------------------------ naming
   //
@@ -408,7 +416,11 @@ export function createRunner({ store, tools, providers, workdir, origin, bridgeP
             .then(() => store.saveUndo(turn.id, record))
             .catch((err) => log.error(`[agents] ${err.message}`));
         }
-        emit(turn, event).catch((err) => log.error(`[agents] ${err.message}`));
+        drawer?.note(turn, event);
+        // The end of a long result is for the drawer, which reads a test
+        // run's counts there; the transcript keeps its short summary.
+        const { tail: _tail, ...stored } = event;
+        emit(turn, stored).catch((err) => log.error(`[agents] ${err.message}`));
       },
     };
 
@@ -794,6 +806,7 @@ export function createRunner({ store, tools, providers, workdir, origin, bridgeP
         chained(turn.conversationId, () => store.updateConversation(turn.conversationId, { asking: true }))
           .then(async () => {
             await emit(turn, request);
+            drawer?.note(turn, request);
             publishAsk('ask', { conversation: turn.conversationId, turn: turn.id, requestId: event.requestId, request, since });
           })
           .catch((err) => log.error(`[agents] ${err.message}`));
@@ -1022,6 +1035,7 @@ export function createRunner({ store, tools, providers, workdir, origin, bridgeP
         log.error(`[agents] ${err.message}`);
       }
       nameIfUnnamed(turn).catch((err) => log.error(`[agents] naming ${turn.conversationId}: ${err.message}`));
+      drawer?.end(turn, status).catch((err) => log.error(`[agents] drawing ${turn.conversationId}: ${err.message}`));
       const idx = order.indexOf(turn.id);
       if (idx !== -1) order.splice(idx, 1);
       // This turn took the inbox in composePrompt() but never got to act on

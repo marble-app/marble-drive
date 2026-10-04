@@ -3060,7 +3060,19 @@
     .w-back[hidden] { display: none; }
     .w-back button { appearance: none; border: 0; background: none; color: var(--accent-ink); font: inherit; font-size: 12px; padding: 0; cursor: pointer; }
 
-    /* Frames: each finished step, the size of a thumbnail, to tap back to. */
+    /* A drawing: the widget a small model draws from the turn's steps
+       (server/agent/drawer.js). Once there is one it is the card's picture,
+       and the kit's own view gives way to it. */
+    .w-drawn { min-height: 0; }
+    .w-drawn[hidden] { display: none; }
+    .w-drawn .visual-frame { display: block; width: 100%; height: 72px; max-height: 300px; border: 0; border-radius: 0; background: transparent; transition: height 300ms var(--settle); }
+    .progress[data-drawn] .w-live { display: none; }
+    .progress[data-drawn]:not([data-state="running"]):not([data-state="asking"]) .w-receipt { display: none; }
+
+    /* Frames: each finished step, the size of a thumbnail. Not shown: the
+       card is the latest state, never a strip of earlier ones. The plan they
+       hold still steers the live view. */
+    .w-strip, .progress .w-strip-h { display: none !important; }
     .w-strip { display: grid; grid-template-columns: repeat(auto-fill, minmax(58px, 1fr)); gap: 6px; }
     /* "Steps" names the strip only once the turn is over and it is a record. */
     .w-strip:empty, .progress .w-strip-h { display: none; }
@@ -3158,7 +3170,7 @@
     ${WORK_VIEW_CSS}
 
     /* Older turns keep what changed, and small frames. */
-    .progress[data-old] :is(.w-live, .w-proof-sec, .w-time-sec, .progress-next, .w-steer) { display: none; }
+    .progress[data-old] :is(.w-live, .w-drawn, .w-proof-sec, .w-time-sec, .progress-next, .w-steer) { display: none; }
     .progress[data-old] .w-strip { grid-template-columns: repeat(auto-fill, minmax(40px, 1fr)); }
     .progress[data-old] .w-thumb { height: 28px; }
     .progress[data-old] .w-flab { display: none; }
@@ -6882,6 +6894,9 @@
         case 'ops.applied':
           this.opsApplied(turn, event);
           break;
+        case 'progress.drawn':
+          this.plainDrawn(turn, event);
+          break;
         // The construction zone this turn is drawing on its document, sent here
         // too because the chat may be read from another page entirely.
         case 'zone':
@@ -7817,6 +7832,7 @@
       const el = wel(`<div class="progress" data-state="running">
         <div class="w-tick"><span class="w-glyph"></span><span class="w-say"></span><span class="w-stops" role="img" aria-label="Explore, stop 1 of 4"><i></i><i></i><i></i><i></i></span><span class="w-time"></span></div>
         <div class="w-live" hidden><div class="w-vh"></div><div class="w-slot"></div><p class="w-cap"></p><div class="w-back" hidden><span></span><button type="button">Back to now</button></div></div>
+        <div class="w-drawn" hidden></div>
         <div class="w-receipt" hidden></div>
         <div class="w-sec-h w-strip-h">Steps</div>
         <div class="w-strip"></div>
@@ -7828,7 +7844,7 @@
       const card = {
         el, turn, glyph: q('.w-glyph'), glyphStage: '', say: q('.w-say'), stops: q('.w-stops'), time: q('.w-time'),
         live: q('.w-live'), vh: q('.w-vh'), slot: q('.w-slot'), cap: q('.w-cap'), back: q('.w-back'),
-        receipt: q('.w-receipt'), strip: q('.w-strip'), said: q('.progress-said'), next: q('.progress-next'), q: q('.progress-q'), acts: q('.progress-acts'),
+        receipt: q('.w-receipt'), drawn: q('.w-drawn'), drawing: null, strip: q('.w-strip'), said: q('.progress-said'), next: q('.progress-next'), q: q('.progress-q'), acts: q('.progress-acts'),
         more: q('.w-det'), steer: q('.w-steer'),
         stage: null, reached: -1, built: false, running: true, open: false,
         docs: new Map(), files: new Set(), todoList: [], plan: null, stageIdx: -1,
@@ -8230,6 +8246,23 @@
       };
     }
 
+    /** The turn's widget as the drawer last drew it. Only the newest is
+     *  shown; a transcript read back draws its last one once. */
+    plainDrawn(turn, event) {
+      const card = this.turns.get(turn)?.progress;
+      if (!card || typeof event.html !== 'string' || !event.html.trim()) return;
+      card.drawing = event.html;
+      if (card.drawPending) return;
+      card.drawPending = true;
+      loadVisual().then((mod) => {
+        card.drawPending = false;
+        if (!mod?.mountDrawing || !card.drawing) return;
+        card.el.dataset.drawn = '';
+        card.drawn.hidden = false;
+        mod.mountDrawing(card.drawn, { html: card.drawing, view: this });
+      });
+    }
+
     plainFinish(turn, status, event) {
       const record = this.turns.get(turn);
       const card = record?.progress;
@@ -8268,6 +8301,9 @@
         v.node = WV.halt.make(v.d);
         card.cur = v;
         this.paintLive(card, v, this.fresh);
+      } else if (card.cur) {
+        // Done: the last thing it showed stays, whole, as the result.
+        this.paintLive(card, card.cur, false);
       } else {
         card.live.hidden = true;
       }
@@ -8317,12 +8353,10 @@
         : card.sources.some((s) => !s.q)
           ? { kind: 'sources', line: `Read ${plural(card.sources.filter((s) => s.st === 'read').length, 'source')}${card.sources.some((s) => s.st === 'skip') ? `, ${card.sources.filter((s) => s.st === 'skip').length} couldn’t be opened` : ''}` }
           : null;
-      if (proof) {
-        const src = [...card.frames].reverse().find((f) => f.v?.kind === proof.kind);
-        const sec = wel(`<div class="w-sec w-proof-sec"><div class="w-sec-h">Checked</div><div class="w-proof"><div class="w-proof-fig"></div><div class="w-proof-line">${wesc(proof.line)}</div></div></div>`);
-        if (src) sec.querySelector('.w-proof-fig').append(this.thumbOf(src.v));
-        else sec.querySelector('.w-proof-fig').remove();
-        R.append(sec);
+      // The proof in one line; the picture of it is the live view above,
+      // when that is what the turn showed last.
+      if (proof && card.cur?.kind !== proof.kind) {
+        R.append(wel(`<div class="w-sec w-proof-sec"><div class="w-sec-h">Checked</div><div class="w-proof-line">${wesc(proof.line)}</div></div>`));
       }
 
       const spent = card.spent;

@@ -59,6 +59,7 @@ const claudeEffort = (effort) => (CLAUDE_EFFORTS.includes(effort) ? effort : nul
 // carries the CLI's own skills list.
 export const INIT_REQUEST_ID = 'marble-init';
 const SUMMARY = 200;
+const TAIL = 600;
 
 const toolName = (name) => String(name ?? '').replace(/^mcp__[a-zA-Z0-9_-]+__/, '');
 const textOf = (content) =>
@@ -159,6 +160,9 @@ export function parseClaudeLine(line, state = {}) {
           ok: !block.is_error,
           denied: Boolean(block.is_error) && isDenial(text),
           summary: text.slice(0, SUMMARY),
+          // Not stored: the runner hands it to the progress drawer and drops
+          // it. A test run prints its counts at the end, past the summary.
+          ...(text.length > SUMMARY ? { tail: text.slice(-TAIL) } : {}),
         });
       }
       return events;
