@@ -92,6 +92,8 @@ test('the menu is one surface: crossing from the launcher to a row keeps it open
   for (const gone of ['agents', 'offers', 'rest', 'glints']) {
     assert.ok(!rows.includes(gone), `${gone} is not a row: a switch is a setting, and All agents is in the chat's More menu`);
   }
+  // Reshape by hand is not a default: its row waits for Settings › Chat.
+  assert.ok(!rows.includes('reshape'), `reshape is not a row by default: ${rows}`);
 });
 
 test('the switches that left the tray are in Agent settings › Chat', async () => {
@@ -102,7 +104,7 @@ test('the switches that left the tray are in Agent settings › Chat', async () 
   const boxes = sheet.getByRole('checkbox');
   await boxes.first().waitFor();
   const named = await boxes.evaluateAll((els) => els.map((el) => [el.dataset.pref, el.checked]));
-  assert.deepEqual(named, [['marble-ask-offers', true], ['marble-ask-rest', false], ['marble-agent-dots', false]]);
+  assert.deepEqual(named, [['marble-ask-offers', true], ['marble-ask-rest', false], ['marble-agent-dots', false], ['marble-reshape', false]]);
   assert.match(await sheet.locator('.keys').innerText(), /⌘⇧J\s+Show or hide the chat/);
   await sheet.getByRole('checkbox', { name: 'Show agent dots' }).check();
   await sheet.getByRole('button', { name: 'Cancel' }).click();

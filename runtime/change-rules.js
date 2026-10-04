@@ -1398,8 +1398,20 @@
       }, 0);
     }
 
+    // Reshape by hand is not on every page by default: its row waits behind
+    // Settings › Chat › Reshape by hand (agent-ui.js), off until turned on.
+    // Asking for a look in words needs no row and is not affected.
+    const RESHAPE_KEY = 'marble-reshape';
+    const allowed = () => { try { return localStorage.getItem(RESHAPE_KEY) === '1'; } catch { return false; } };
     let trayHeld = false;
     function offerTray() {
+      if (!allowed()) {
+        if (trayHeld) {
+          trayHeld = false;
+          dispatchEvent(new CustomEvent('marble-tray:unregister', { detail: { id: 'reshape' } }));
+        }
+        return;
+      }
       // `always`: on a touch screen the tray shows only contextual tools, so
       // Reshape by hand is a pointer-and-keys feature; a phone asks in words.
       const spec = { id: 'reshape', order: 9, label: 'Reshape', icon: RESHAPE, always: true, active: on, onSelect: () => { reshape(!on); keysBack(); } };
@@ -1410,6 +1422,10 @@
       dispatchEvent(new CustomEvent('marble-tray:update', { detail: spec }));
     }
     addEventListener('marble-tray:ready', () => { trayHeld = false; offerTray(); });
+    // Turned off while Reshape is on: it ends, with its row.
+    const prefChanged = () => { if (!allowed() && on) reshape(false); offerTray(); };
+    addEventListener('marble-agent-prefs', (event) => { if (event.detail?.key === RESHAPE_KEY) prefChanged(); });
+    addEventListener('storage', (event) => { if (event.key === RESHAPE_KEY) prefChanged(); });
     offerTray();
 
     window.marbleRules = {

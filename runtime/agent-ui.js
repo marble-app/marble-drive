@@ -8567,12 +8567,15 @@
   // How agents show up on the page, in this browser. Until v4 these were
   // switches in the launcher's tray; a switch is a setting, and the tray keeps
   // to things to do. Each layer reads its own key (agent-nudge.js,
-  // agent-callout.js, agent-glints.js and agent-work.js) and hears
+  // agent-callout.js, agent-glints.js, agent-work.js, change-rules.js) and hears
   // `marble-agent-prefs` from this tab, `storage` from another.
   const PAGE_PREFS = [
     { key: 'marble-ask-offers', byDefault: true, label: 'Offer a next step after I edit', detail: 'A quiet chip by what you changed, when there is an obvious next step.' },
     { key: 'marble-ask-rest', byDefault: false, label: 'Offer to ask when I rest the pointer', detail: 'Rest on a part of the page and its ask bubble appears.' },
     { key: 'marble-agent-dots', byDefault: false, label: 'Show agent dots', detail: 'A dot where an agent is working, and on the parts agents changed.' },
+    // Off unless asked for: dragging one part to change every part like it is
+    // a power tool, not something every page offers (change-rules.js).
+    { key: 'marble-reshape', byDefault: false, label: 'Reshape by hand', detail: 'Reshape in the chat button\'s menu: drag a part\'s corner or edge and every part like it follows.' },
   ];
   const prefOn = (pref) => {
     try {

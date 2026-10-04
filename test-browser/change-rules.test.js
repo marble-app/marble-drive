@@ -100,6 +100,11 @@ const open = async ({ doc = 'board', ...options } = {}) => {
   page.errors = errors;
   return page;
 };
+// Reshape by hand is off unless Settings › Chat turns it on.
+const allowReshape = (page, yes = true) => page.evaluate((yes) => {
+  localStorage.setItem('marble-reshape', yes ? '1' : '0');
+  dispatchEvent(new CustomEvent('marble-agent-prefs', { detail: { key: 'marble-reshape', on: yes } }));
+}, yes);
 
 const box = (page, id) => page.locator(`[data-marble-id="${id}"]`).boundingBox();
 const radius = (page, id) => page.evaluate((i) => getComputedStyle(document.querySelector(`[data-marble-id="${i}"]`)).borderTopLeftRadius, id);
@@ -146,8 +151,23 @@ test('likes: a card is like the other cards and not the panel; ⇧ means just th
   assert.deepEqual(page.errors, []);
 });
 
+test('Reshape is not in the chat button\'s menu until Settings turns it on, and goes again when it is turned off', async () => {
+  const page = await open();
+  const row = page.locator('marble-agent-drawer .tool[data-tool="reshape"]');
+  await page.locator('marble-agent-drawer .tool[data-tool="ask"]').waitFor({ state: 'attached' });
+  await page.waitForTimeout(200);
+  assert.equal(await row.count(), 0, 'not a default');
+  await allowReshape(page);
+  await row.waitFor({ state: 'attached' });
+  await page.evaluate(() => window.marbleRules.reshape(true));
+  await allowReshape(page, false);
+  await page.waitForFunction(() => !document.documentElement.classList.contains('marble-reshaping'));
+  await page.waitForFunction(() => !document.querySelector('marble-agent-drawer').shadowRoot.querySelector('.tool[data-tool="reshape"]'));
+});
+
 test('Reshape is a toggle in the chat button\'s menu, and Esc leaves it', async () => {
   const page = await open();
+  await allowReshape(page);
   const row = page.locator('marble-agent-drawer .tool[data-tool="reshape"]');
   await row.waitFor({ state: 'attached' });
   assert.equal(await row.getAttribute('aria-pressed'), 'false');
@@ -634,6 +654,7 @@ test('⌘Z and ⇧⌘Z play a rule back and forth through the engine', async () 
 
 test('Reshape turned on from the menu gives the keys back to the page, so Esc leaves it', async () => {
   const page = await open();
+  await allowReshape(page);
   const tray = page.locator('marble-agent-drawer .tray');
   await tray.locator('.launcher').hover();
   const row = tray.locator('.tool[data-tool="reshape"]');
@@ -684,12 +705,14 @@ test('a rule from words steps round the drive\'s chrome too, even chrome that co
 
 test('Reshape by hand stands in the chat button\'s menu on a desktop, not on a touch screen', async () => {
   const touch = await open({ viewport: { width: 390, height: 844 }, hasTouch: true, isMobile: true });
+  await allowReshape(touch);
   const touchRow = touch.locator('marble-agent-drawer .tool[data-tool="reshape"]');
   await touchRow.waitFor({ state: 'attached' });
   assert.equal(await touch.evaluate(() => matchMedia('(hover: none)').matches), true);
   assert.equal(await touchRow.evaluate((el) => getComputedStyle(el).display), 'none', 'no hover, so the row stands down; a phone asks in words');
 
   const desk = await open();
+  await allowReshape(desk);
   const deskRow = desk.locator('marble-agent-drawer .tool[data-tool="reshape"]');
   await deskRow.waitFor({ state: 'attached' });
   assert.equal(await desk.evaluate(() => matchMedia('(hover: none)').matches), false);
