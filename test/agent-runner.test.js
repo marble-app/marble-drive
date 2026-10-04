@@ -432,7 +432,9 @@ test('a finished turn says so once more after its own record is final, for a pag
   const { id } = await store.createConversation({ provider: 'fake' });
   const { turnId } = await runner.send(id, { prompt: 'script:hello', context: { target: 'notes', selection: [] } });
   await finished(store, turnId);
-  await new Promise((resolve) => setTimeout(resolve, 50));
+  // The summary is published after the final write lands, which can be a
+  // moment after the turn reads as finished: waited for, not slept on.
+  await until(() => order.indexOf('final') >= 0 && order.slice(order.indexOf('final') + 1).includes('summary')).catch(() => {});
   const final = order.indexOf('final');
   assert.ok(final >= 0, 'the turn record was finalised');
   assert.ok(order.slice(final + 1).includes('summary'), `a summary follows the final write: ${order.join(', ')}`);

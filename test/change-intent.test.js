@@ -93,6 +93,8 @@ test('no CLI, a failure, an abort or a timeout is no rule, and the model is aske
   assert.equal(seen.command, 'claude');
   assert.ok(seen.args.includes('haiku'));
   assert.deepEqual(seen.args.slice(seen.args.indexOf('--tools'), seen.args.indexOf('--tools') + 2), ['--tools', '']);
+  assert.ok(seen.args.includes('--strict-mcp-config'), 'and no MCP server of the login\'s either');
+  assert.deepEqual(seen.args.slice(-2, -1), ['--'], 'the words go last, after the flags');
   assert.equal(seen.options.timeout, 6000);
   assert.equal(seen.options.env.ANTHROPIC_API_KEY, undefined, 'never billed to a key');
 });

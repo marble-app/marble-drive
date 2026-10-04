@@ -94,7 +94,7 @@ export async function writeOffer({
   if (!readable(html) && !String(words).trim()) return null;
   const ask = offerPrompt({ title, html, words });
   const cwd = await scratch();
-  const result = await exec('claude', ['-p', '--model', model, '--tools', '', '--setting-sources', 'project', '--output-format', 'text', '--', ask], {
+  const result = await exec('claude', ['-p', '--model', model, '--tools', '', '--strict-mcp-config', '--setting-sources', 'project', '--output-format', 'text', '--', ask], {
     timeout, env: pickEnv(env), cwd, signal,
   });
   if (result.aborted || result.missing) return null;

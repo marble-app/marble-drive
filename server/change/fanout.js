@@ -18,8 +18,11 @@
 //
 // The same plumbing as the callout's offer (server/agent/offer.js): the
 // installed CLI on the login, never a key, a hard timeout for each worker,
-// and the turn's own signal to stop all of them.
+// and the turn's own signal to stop all of them. Started the way a turn is
+// (server/agent/first-to-go.js): four workers at once are an agent's load,
+// and go before the host does.
 
+import { firstToGo } from '../agent/first-to-go.js';
 import { pickEnv } from '../agent/env.js';
 import { scratch } from '../agent/namer.js';
 import { runCommand } from '../agent/providers/exec.js';
@@ -194,6 +197,19 @@ function writesScript(op, parts) {
   return false;
 }
 
+/** Run one worker like a turn: through `firstToGo`, so the kernel takes it
+ *  before the host when memory runs out and the memory guard
+ *  (server/memory-guard.js) counts it among the agents' processes. Through
+ *  the shell, a `claude` that is not installed is its exit 127, not ENOENT:
+ *  either way it is `missing`. `can` is whether there is a score to raise
+ *  (first-to-go.js's own answer unless given). */
+export async function launchWorker(command, args, options, { run = runCommand, can } = {}) {
+  const launch = firstToGo({ command, args }, can);
+  const result = await run(launch.command, launch.args, options);
+  if (launch.command !== command && result?.code === 127) return { ...result, missing: true };
+  return result;
+}
+
 const firstLine = (text) => String(text ?? '').split('\n').map((line) => line.trim()).find(Boolean)?.slice(0, WHY_MAX) ?? '';
 
 /**
@@ -216,7 +232,7 @@ export async function runFanOut({
   note = '',
   shards,
   model,
-  exec = runCommand,
+  exec = launchWorker,
   env = process.env,
   signal,
   apply,

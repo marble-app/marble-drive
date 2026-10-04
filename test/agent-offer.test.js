@@ -44,6 +44,8 @@ test('the model is asked on the login, and its answer comes back read', async ()
   });
   assert.equal(seen.command, 'claude');
   assert.ok(seen.args.includes('haiku'));
+  assert.deepEqual(seen.args.slice(seen.args.indexOf('--tools'), seen.args.indexOf('--tools') + 2), ['--tools', ''], 'no tools');
+  assert.ok(seen.args.includes('--strict-mcp-config'), 'and no MCP server of the login\'s either');
   assert.equal(seen.env.ANTHROPIC_API_KEY, undefined, 'never billed to a key');
   assert.deepEqual(written, { suggestions: ['A shorter title'], automatic: null, interactive: null });
 });

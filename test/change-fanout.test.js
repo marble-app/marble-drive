@@ -23,7 +23,7 @@ const { enginePath } = await import('../server/engine.js');
 const { build } = await import('../server/gallery.js');
 const { createTools, TOOL_SCHEMAS } = await import('../server/agent/tools.js');
 const { undoTurn } = await import('../server/agent/undo.js');
-const { CONCURRENCY, TIMEOUT, fanOutPrompt, readOps, runFanOut } = await import('../server/change/fanout.js');
+const { CONCURRENCY, TIMEOUT, fanOutPrompt, launchWorker, readOps, runFanOut } = await import('../server/change/fanout.js');
 
 const ROWS = Array.from({ length: 12 }, (_, i) => i + 1);
 const SOURCE = `<!doctype html>
@@ -96,6 +96,53 @@ test('every worker gets the same plan, its own brief and only its shard, with no
   assert.match(first, /data-marble-id="p1t"/);
   assert.doesNotMatch(first, /data-marble-id="p3"/, 'another shard\'s parts are not shown');
   assert.match(first, /"p1", "p2"/, 'the ids it may change');
+});
+
+test('a worker starts the way a turn does: first to go when memory runs out, and counted by the memory guard', async () => {
+  const runs = [];
+  const run = async (command, args, options) => {
+    runs.push({ command, args, options });
+    return { code: 0, stdout: '{"ops": []}', stderr: '' };
+  };
+  const options = { timeout: 5, env: { PATH: '/bin' }, cwd: '/tmp' };
+  await launchWorker('claude', ['-p', '--', 'ask'], options, { run, can: true });
+  assert.equal(runs[0].command, 'sh');
+  assert.deepEqual(runs[0].args.slice(2), ['marble-agent', 'claude', '-p', '--', 'ask'], 'the worker itself is what the shell becomes');
+  assert.match(runs[0].args[1], /echo 500 > \/proc\/\$\$\/oom_score_adj/, 'with the score the memory guard looks for');
+  assert.match(runs[0].args[1], /exec "\$@"/);
+  assert.equal(runs[0].options, options);
+
+  // Where there is no such score to raise (a Mac), the worker starts as it is.
+  await launchWorker('claude', ['-p'], options, { run, can: false });
+  assert.deepEqual([runs[1].command, runs[1].args], ['claude', ['-p']]);
+
+  // A claude that is not installed is the shell's 127, read as missing.
+  const absent = await launchWorker('claude', ['-p'], options, { run: async () => ({ code: 127, stdout: '', stderr: 'sh: exec: claude: not found' }), can: true });
+  assert.equal(absent.missing, true);
+  const failed = await launchWorker('claude', ['-p'], options, { run: async () => ({ code: 1, stdout: '', stderr: 'no' }), can: true });
+  assert.equal(failed.missing, undefined);
+});
+
+test('without an exec of its own, a fan out launches its workers that way', async () => {
+  // A claude of this test's own, first on the PATH: it answers one label.
+  const bin = await fsp.mkdtemp(path.join(os.tmpdir(), 'marble-fanout-bin-'));
+  await fsp.writeFile(path.join(bin, 'claude'), `#!/bin/sh\necho '{"ops": [{"type": "setText", "id": "p1t", "text": "From the launched worker"}]}'\n`, { mode: 0o755 });
+  const { landed, apply } = applier();
+  try {
+    const result = await runFanOut({
+      source: SOURCE,
+      docPath: 'papers',
+      plan: 'Label it.',
+      shards: [{ ids: ['p1'] }, { ids: ['p3'] }],
+      env: { PATH: `${bin}:/usr/bin:/bin`, HOME: os.homedir() },
+      apply,
+      log: quiet,
+    });
+    assert.equal(result.error, undefined);
+  } finally {
+    await fsp.rm(bin, { recursive: true, force: true });
+  }
+  assert.deepEqual(landed.find(([k]) => k === 0)?.[1], [{ type: 'setText', id: 'p1t', text: 'From the launched worker' }]);
 });
 
 test('the prompt says which ids may change and that inserts go inside them', () => {
