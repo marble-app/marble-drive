@@ -150,7 +150,7 @@
     .marble-review-bar button:hover { background: var(--review-well); }
     .marble-review-bar button:active { background: color-mix(in srgb, var(--review-text) 10%, var(--review-card)); }
     .marble-review-bar button:focus-visible { outline: 2px solid var(--review-ink); outline-offset: 1px; }
-    .marble-review-bar button:disabled { opacity: .55; cursor: default; }
+    .marble-review-bar button[aria-disabled="true"] { opacity: .55; cursor: default; }
     .marble-review-bar button > * { position: relative; }
     .marble-review-bar svg { width: 14px; height: 14px; flex: none; }
     /* Change more reads as the line it opens: words to type, not a button. */
@@ -369,19 +369,21 @@
       return out;
     }
 
-    /** One change, since you last kept (ruling R23). Two asks are one change
-     *  only when a part of one is, holds or is inside a part of the other,
-     *  or when their parts hang from the same block: the common ancestor of
-     *  their parents. A high block both happen to sit in (a board, a page's
-     *  column) never makes them one. An ask's own parts are always one. */
+    /** One change, since you last kept (rulings R23, R26). Two asks are one
+     *  change only when a part of one is, holds or is inside a part of the
+     *  other, or when their parts hang from the same block (the common
+     *  ancestor of their parents), or from blocks one level apart: a list,
+     *  and one of its rows. A higher block both happen to sit in (a board, a
+     *  page's column) never makes them one. An ask's own parts are always one. */
     function rebuild() {
       const items = [];
       for (const turn of turns) {
         if (keptHere.has(turn.id) || undone(turn.id)) continue;
         const parts = (turn.parts ?? []).filter((p) => p?.id && !yours.has(`${turn.id}|${p.id}`));
         if (!parts.length) continue;
-        const homes = homesOf(parts);
-        if (!homes.length) continue;
+        // Nothing of it to rest on (only the last thing on the page taken
+        // out): it is still a change, drawn where that was.
+        if (!homesOf(parts).length && !parts.some((p) => p.kind === 'removed' && oldPlace(p))) continue;
         const els = parts.filter((p) => p.kind !== 'removed').map((p) => byId(p.id)).filter(Boolean);
         const parents = parts.flatMap(parentsOf);
         items.push({ turn, parts, els, ids: new Set(parts.map((p) => p.id)), under: parents.length ? blockUp(common(parents)) : null });
@@ -394,7 +396,8 @@
           const b = items[j];
           const shared = [...a.ids].some((id) => b.ids.has(id))
             || a.els.some((x) => b.els.some((y) => x.contains(y) || y.contains(x)));
-          const hung = Boolean(a.under) && a.under === b.under;
+          const hung = Boolean(a.under && b.under) && (a.under === b.under
+            || blockUp(a.under.parentElement) === b.under || blockUp(b.under.parentElement) === a.under);
           if (shared || hung) root[find(i)] = find(j);
         }
       }
@@ -657,9 +660,9 @@
         if (r.width || r.height) return { left: r.left, top: r.top, width: r.width, ref: next };
       }
       if (!parent) return null;
+      // After the last thing in it that shows (a script or a style is no place).
       const kids = [...parent.children].filter((k) => !k.hasAttribute(TRANSIENT) && k.getAttribute('data-marble-id') !== part.id);
-      const last = kids.at(-1);
-      if (last) {
+      for (const last of kids.reverse()) {
         const r = last.getBoundingClientRect();
         if (r.width || r.height) return { left: r.left, top: r.bottom, width: r.width, ref: last };
       }
@@ -904,7 +907,8 @@
       schedule();
     }
     /** Every held Before goes back: the window lost the hold. */
-    const letGoAll = () => { for (const view of views) hideBefore(view); };
+    // A hold not yet shown is let go too, or it would show after.
+    const letGoAll = () => { for (const view of views) { clearTimeout(view.tag.timer); hideBefore(view); } };
     addEventListener('blur', letGoAll);
     addEventListener('pagehide', letGoAll);
     addEventListener('pointercancel', letGoAll, true);
@@ -1150,17 +1154,16 @@
       const words = h('span', 'marble-review-said');
       press.append(words);
       root.append(press);
-      const tag = { root, press, words, key: '' };
+      const tag = { root, press, words, key: '', timer: 0 };
 
       // Held, it shows the thing as it was; let go, the change is back.
-      let timer = 0;
-      const let_go = () => { clearTimeout(timer); hideBefore(view); };
+      const let_go = () => { clearTimeout(tag.timer); hideBefore(view); };
       press.addEventListener('pointerdown', (event) => {
         if (event.button !== 0) return;
         event.preventDefault();
         try { press.setPointerCapture(event.pointerId); } catch { /* the pointer is gone already */ }
-        clearTimeout(timer);
-        timer = setTimeout(() => showBefore(view), HOLD_TAG);
+        clearTimeout(tag.timer);
+        tag.timer = setTimeout(() => showBefore(view), HOLD_TAG);
       });
       press.addEventListener('pointerup', let_go);
       press.addEventListener('pointercancel', let_go);
@@ -1221,7 +1224,7 @@
       error.toggleAttribute('data-failed', true);
       const bar = { root, more, keep, undo, redo, say, error, key: '' };
 
-      more.addEventListener('click', () => changeMore(view));
+      more.addEventListener('click', () => { if (!view.busy) changeMore(view); });
       keep.addEventListener('click', () => keepView(view));
       redo.addEventListener('click', () => redoView(view));
 
@@ -1264,12 +1267,25 @@
       }
       const key = `${view.state}|${want.map((el) => el.dataset.act ?? 'say').join()}|${view.said}|${view.error ?? ''}`;
       if (bar.key !== key) {
-        const hadKeys = bar.root.contains(document.activeElement);
+        // Only what goes is taken out and only what comes is put in, so the
+        // button with the keys stays where it is; if it went, the keys go to
+        // the button for the same action, else the first.
+        const had = bar.root.contains(document.activeElement) ? document.activeElement : null;
         bar.key = key;
-        bar.root.replaceChildren(...want);
-        if (hadKeys && !bar.root.contains(document.activeElement)) (want.find((el) => el.localName === 'button') ?? null)?.focus({ preventScroll: true });
+        for (const el of [...bar.root.children]) if (!want.includes(el)) el.remove();
+        want.forEach((el, i) => { if (bar.root.children[i] !== el) bar.root.insertBefore(el, bar.root.children[i] ?? null); });
+        if (had && document.activeElement !== had) {
+          const same = bar.root.contains(had) ? had : want.find((el) => el.dataset.act && el.dataset.act === had.dataset.act);
+          (same ?? want.find((el) => el.localName === 'button'))?.focus({ preventScroll: true });
+        }
       }
-      for (const b of [bar.more, bar.keep, bar.undo, bar.redo]) b.disabled = view.busy;
+      // Busy, not disabled: a disabled button would drop the keys to the
+      // page, and the drawing focus asked for with them. Every press waits
+      // on the host anyway.
+      for (const b of [bar.more, bar.keep, bar.undo, bar.redo]) {
+        if (view.busy) b.setAttribute('aria-disabled', 'true');
+        else b.removeAttribute('aria-disabled');
+      }
       const n = view.group.turns.length;
       if (n > 1 && view.state === 'normal') bar.undo.setAttribute('aria-description', `Hold to undo all ${n}`);
       else bar.undo.removeAttribute('aria-description');
@@ -1636,7 +1652,10 @@
         if (type === 'input' || writes) typedAt = gestureAt;
       }, true);
     }
-    document.addEventListener('marble:history', () => {
+    document.addEventListener('marble:history', (event) => {
+      // Nothing to undo and nothing to redo: the ring was emptied, which is
+      // the carrier hearing an outside write, never an edit of the person's.
+      if (event.detail?.canUndo === false && event.detail?.canRedo === false) return;
       const seen = opsSeen;
       const at = Date.now();
       const where = handNodes().at(-1) ?? null;
@@ -1683,7 +1702,7 @@
     // The stops of a drawing, in the order Tab walks them: its tag, then its
     // bar's buttons. The page's own stops, as Tab would find them.
     const stopsOf = (view) => [view.tag.press, ...view.bar.root.querySelectorAll('button')]
-      .filter((el) => el.isConnected && !el.disabled && !el.closest('[hidden]'));
+      .filter((el) => el.isConnected && !el.closest('[hidden]'));
     const TABBABLE = 'a[href], area[href], button, input:not([type="hidden"]), select, textarea, iframe, summary, audio[controls], video[controls], [contenteditable], [tabindex]';
     // An editable root takes Tab though it reports a tabIndex of -1.
     const stopIndex = (el) => (el.isContentEditable && !el.hasAttribute('tabindex') ? 0 : el.tabIndex);
