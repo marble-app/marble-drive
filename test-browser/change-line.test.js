@@ -47,10 +47,16 @@ const SCRIPTS = {
     { say: 'Done.' },
   ],
   hold: [{ silent: 20_000 }],
+  // The host's own words for a turn that did not finish.
+  failed: [{ fail: 'stalled: no output for 90s from provider "claude"' }],
 };
 
 const host = await startDrive({ scripts: SCRIPTS, documents: { list: LIST } });
 test.after(() => host.close());
+// A drive with nothing set up to make changes: Claude is there but signed
+// out, and so is the scripted stand-in.
+const bare = await startDrive({ scripts: SCRIPTS, documents: { list: LIST }, providers: ['claude-subscription'], signedOut: ['fake', 'claude-subscription'] });
+test.after(() => bare.close());
 
 const pages = [];
 const closePages = async () => { for (const page of pages.splice(0)) await page.close().catch(() => {}); };
@@ -619,4 +625,71 @@ test('a sent line says it has closed once it has folded away', async () => {
   await page.keyboard.press('Enter');
   await lineGone(page);
   assert.equal(await page.evaluate(() => window.__closed), 1);
+});
+
+// ------------------------------------------------------------ final review
+
+test('on a drive with nothing set up to make changes, ⏎ keeps the line open, says so, and Set up opens the drive\'s Connect', async () => {
+  await closePages();
+  const { page } = await bare.newPage();
+  pages.push(page);
+  // Connect was offered once this visit already, and put off.
+  await page.addInitScript(() => { try { sessionStorage.setItem('marble-agent-setup-dismissed', '1'); } catch { /* opaque origin */ } });
+  await page.goto(`${bare.base}/a/list`);
+  await page.waitForFunction(() => Boolean(window.marble?.agent && window.marbleLine));
+  await pointAt(page, 'r2');
+  await summon(page);
+  await input(page).waitFor();
+  await page.keyboard.type('Add a due date');
+  await page.keyboard.press('Enter');
+  await page.locator('.marble-line[data-state="setup"]').waitFor({ timeout: 3000 });
+  assert.equal(await page.locator('.marble-line-said').innerText(), 'Changes need setting up first.');
+  assert.equal(await input(page).textContent(), 'Add a due date', 'the words stay');
+  assert.equal(await page.evaluate(() => document.activeElement?.classList.contains('marble-line-input')), true, 'and the keys with them');
+  const words = await page.locator('.marble-line-host').evaluate((el) => [el.innerText, ...[...el.querySelectorAll('[aria-label]')].map((n) => n.getAttribute('aria-label'))].join(' '));
+  assert.doesNotMatch(words, /\bagent\b/i);
+  assert.deepEqual(await (await fetch(`${bare.base}/agent/conversations`)).json(), [], 'nothing was sent');
+  await page.locator('.marble-line button', { hasText: 'Set up' }).click();
+  await page.waitForFunction(() => document.querySelector('marble-agent-setup')?.shadowRoot?.querySelector('dialog')?.open === true, null, { timeout: 3000 });
+  assert.equal(await line(page).count(), 1, 'the line is still there under it');
+});
+
+test('a change the host could not finish says so in plain words, and the host\'s own words go to the console', async () => {
+  const page = await open();
+  const warned = [];
+  page.on('console', (message) => { if (message.type() === 'warning') warned.push(message.text()); });
+  await pointAt(page, 'r2');
+  await summon(page);
+  await input(page).waitFor();
+  await page.keyboard.type('script:failed Add a due date');
+  await page.keyboard.press('Enter');
+  await page.locator('.marble-line[data-state="cant"]').waitFor({ timeout: 10_000 });
+  assert.equal(await page.locator('.marble-line-said').innerText(), "Didn't finish. Try again.");
+  assert.equal(await input(page).textContent(), 'script:failed Add a due date');
+  assert.ok(warned.some((text) => /stalled/.test(text)), warned.join(' | '));
+});
+
+test('a press outside that is cancelled leaves no promise behind: a later press elsewhere does not pull the keys back', async () => {
+  const page = await open();
+  await page.evaluate(() => {
+    const p = document.querySelector('[data-marble-id="p"]');
+    p.contentEditable = 'true';
+    p.focus();
+    getSelection().collapse(p.firstChild, 4);
+  });
+  await page.mouse.move(900, 600);
+  await summon(page);
+  await input(page).waitFor();
+  // A press outside the line that the browser cancels (a touch that became a scroll).
+  await page.evaluate(() => {
+    const at = { bubbles: true, composed: true, clientX: 900, clientY: 600, pointerId: 7, isPrimary: true };
+    document.body.dispatchEvent(new PointerEvent('pointerdown', at));
+    document.body.dispatchEvent(new PointerEvent('pointercancel', at));
+  });
+  await lineGone(page);
+  await page.evaluate(() => document.activeElement?.blur?.());
+  // Later, a press of something else ends.
+  await page.evaluate(() => document.body.dispatchEvent(new PointerEvent('pointerup', { bubbles: true, composed: true, clientX: 900, clientY: 600 })));
+  await page.waitForTimeout(100);
+  assert.equal(await page.evaluate(() => document.activeElement === document.body), true, 'the keys stay where they are');
 });

@@ -19,6 +19,9 @@
 //     them, so it can be said another way.
 //   - A question back from the work opens the line with its choices; a press
 //     answers it and the work carries on.
+//   - On a drive with nothing set up to make changes, ⏎ keeps the line open
+//     and says so, with Set up beside it (the drive's own Connect, agent-ui.js)
+//     rather than folding into a send that can only fail.
 //   - Esc puts the line away and keeps its words for the next ⌘J on the same
 //     thing. Esc while a change runs stops it, when the page has the keys.
 //
@@ -124,6 +127,9 @@
       transition: background-color 120ms ${COLOUR}; }
     .marble-line-open:hover { background: color-mix(in srgb, var(--line-accent) 14%, transparent); }
     .marble-line-more { padding-top: 6px; border-top: 1px solid var(--line-rule); }
+    /* Why nothing can be sent yet, and the way to set it up, on one line. */
+    .marble-line-setup { display: flex; align-items: baseline; justify-content: space-between; gap: 10px; }
+    .marble-line-setup .marble-line-open { flex: none; margin: -2px -2px 0 0; }
 
     /* A question back: what it asks, and a press for each choice. */
     .marble-line-ask { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 10px; }
@@ -505,9 +511,17 @@
       el.toggleAttribute('data-failed', state === 'cant' && s.failed);
       el.replaceChildren();
       let input = null;
-      if (state === 'edit' || state === 'cant') {
+      if (state === 'edit' || state === 'cant' || state === 'setup') {
         const label = placeholderOf(s);
         if (state === 'cant') el.append(h('p', 'marble-line-said', s.said));
+        if (state === 'setup') {
+          const why = h('div', 'marble-line-setup');
+          const go = h('button', 'marble-line-open', 'Set up');
+          go.type = 'button';
+          go.addEventListener('click', () => openSetup());
+          why.append(h('p', 'marble-line-said', s.said), go);
+          el.append(why);
+        }
         input = makeInput(s, label, text);
         const row = h('div', 'marble-line-row');
         row.append(input, kbd('⏎'));
@@ -552,8 +566,8 @@
       s.input = input;
       paintScope(s);
       place();
-      if (state === 'answer' || state === 'cant' || state === 'ask') {
-        aloud.textContent = state === 'answer' ? s.answer : state === 'cant' ? s.said : (s.ask?.input?.questions?.[0]?.question ?? '');
+      if (state === 'answer' || state === 'cant' || state === 'ask' || state === 'setup') {
+        aloud.textContent = state === 'answer' ? s.answer : state === 'cant' || state === 'setup' ? s.said : (s.ask?.input?.questions?.[0]?.question ?? '');
       } else aloud.textContent = '';
       if (input && focus) {
         if (!holdsKeys(s)) s.returnTo = keysNow() ?? inherited;
@@ -596,7 +610,7 @@
       if (s.input) {
         const words = said(s.input);
         if (keep && words) keepDraft(keyOf(s), words);
-        else if (!keep || was === 'edit' || was === 'cant') keepDraft(keyOf(s), '');
+        else if (!keep || was === 'edit' || was === 'cant' || was === 'setup') keepDraft(keyOf(s), '');
       }
       if (shown === s) shown = null;
       aloud.textContent = '';
@@ -604,11 +618,18 @@
       if (had && restore === true) giveBack(to);
       else if (had && restore === 'press') {
         // Wait for the press to land: one that focused something has
-        // decided where the keys go.
-        addEventListener('pointerup', () => setTimeout(() => {
-          const a = document.activeElement;
-          if (!a || a === document.body || a === document.documentElement) giveBack(to);
-        }, 0), { once: true, capture: true });
+        // decided where the keys go. A press cancelled lands nowhere, and
+        // the next one is not this one.
+        const heard = new AbortController();
+        const listening = { capture: true, signal: heard.signal };
+        addEventListener('pointerup', () => {
+          heard.abort();
+          setTimeout(() => {
+            const a = document.activeElement;
+            if (!a || a === document.body || a === document.documentElement) giveBack(to);
+          }, 0);
+        }, listening);
+        addEventListener('pointercancel', () => heard.abort(), listening);
       }
       if (busy(s)) {
         // Its change still runs: the line goes, the session stays for what
@@ -618,7 +639,7 @@
         s.state = null;
         drop(s);
       }
-      if (was === 'edit') agent.select(null);
+      if (was === 'edit' || was === 'setup') agent.select(null);
       document.dispatchEvent(new CustomEvent('marble-line:closed'));
     }
 
@@ -670,7 +691,7 @@
         event.preventDefault();
         if (event.altKey) { document.execCommand('insertText', false, '\n'); return; }
         const text = said(input);
-        if (event.shiftKey) { if (s.state === 'edit' || s.state === 'cant') keepAsNote(s, text); return; }
+        if (event.shiftKey) { if (s.state === 'edit' || s.state === 'cant' || s.state === 'setup') keepAsNote(s, text); return; }
         if (!text) return;
         if (s.state === 'ask') reply(s, text);
         else send(s, text);
@@ -776,6 +797,11 @@
     async function send(s, text, { brief = null, keepWords = false } = {}) {
       const ids = [...s.ids];
       const rule = oneRule(s, text, { brief, keepWords });
+      // Nothing here can take it, as already known (asked when the line
+      // opened): the line stays as it is and says so, rather than folding
+      // into a send that can only fail. A rule needs nobody, so it is tried
+      // first all the same.
+      if (!rule && readyNow() === false) { unready(s, text); return; }
       s.tried = true;
       // Words tried as one rule wait in the drafts until they are the page,
       // or on their way to the agent: a reload meanwhile keeps them.
@@ -821,6 +847,15 @@
       if (mode === 'variations') dispatchEvent(new CustomEvent('marble-variations:watch', { detail: { ids } }));
       if (!rule) fold(s);
       paintScope(s);
+      // Not known yet whether anything can take it: asked now, and a no
+      // brings the line back with the words, before anything is sent. (Esc
+      // meanwhile stops it, as for any send without a turn yet.)
+      if (readyNow() !== true && (await ready()) === false) {
+        s.awaiting = false;
+        s.stop = false;
+        if (sessions.has(s)) unready(s, text);
+        return;
+      }
       if (s.conversation && !s.off) await follow(s, s.conversation, { baseline: true });
       const convo = convoFor(s);
       // Pinned for the send, so the brief carries what the line is about,
@@ -850,6 +885,54 @@
         return;
       }
       document.dispatchEvent(new CustomEvent('marble-line:sent', { detail: { conversation: s.conversation, ids } }));
+    }
+
+    // ------------------------------------------------------------ set up
+
+    // Whether anything on this drive can make a change: some way to run an
+    // agent, there and signed in, as the chat's own picker asks. A yes holds
+    // for the tab; a no for a moment, and not past a setup saved here, so
+    // setting one up is seen at the next ⏎. A host that cannot say is no
+    // answer: the send goes as it always did.
+    const NO_FOR = 5000;
+    let readiness = null;         // { at, value: true | false | undefined while asked, answer }
+    const fresh = (r) => r.value !== false || Date.now() - r.at < NO_FOR;
+    function ready() {
+      if (readiness && fresh(readiness)) return readiness.answer;
+      const entry = { at: Date.now(), value: undefined, answer: null };
+      entry.answer = Promise.resolve()
+        .then(() => agent.providers())
+        .then((list) => (Array.isArray(list) ? list.some((p) => p?.installed && p?.signedIn) : null), () => null)
+        .then((ok) => {
+          entry.value = ok;
+          if (ok === null && readiness === entry) readiness = null;
+          return ok;
+        });
+      readiness = entry;
+      return entry.answer;
+    }
+    /** What is known now, without asking: true, false, or not yet. */
+    const readyNow = () => (readiness && fresh(readiness) ? readiness.value : undefined);
+    addEventListener('marble:agent-settings-saved', () => { readiness = null; });
+
+    /** The line, open still, saying changes need setting up first, with the
+     *  words as they were. */
+    function unready(s, text) {
+      s.failed = false;
+      s.said = 'Changes need setting up first.';
+      const back = s.returnTo;
+      show(s, 'setup', { text, focus: holdsKeys(s) || mayTakeFocus() });
+      if (back) s.returnTo = back;
+    }
+
+    /** Set up: the drive's own Connect when the host says one is needed,
+     *  else the settings where the way changes are made is chosen. */
+    async function openSetup() {
+      const sheet = document.querySelector('marble-agent-setup');
+      try {
+        if (typeof sheet?.offer === 'function' && await sheet.offer()) return;
+      } catch { /* the settings, then */ }
+      agent.openSettings?.('settings');
     }
 
     // ------------------------------------------------------------ the work
@@ -938,8 +1021,11 @@
         return;
       }
       s.failed = event.type !== 'turn.completed';
-      const why = firstSentences(last, 2);
-      s.said = why || (s.failed ? (firstSentences(event.error, 1) ? `Didn't finish. ${firstSentences(event.error, 1)}` : "Didn't finish.") : 'Nothing changed.');
+      // One that did not finish says so, and only that: what the work said
+      // last was on its way somewhere, not why, and the host's own words (a
+      // provider's id, a stall) are for the console.
+      if (s.failed && event.error) console.warn(`marble-line: the change did not finish: ${event.error}`);
+      s.said = s.failed ? "Didn't finish. Try again." : firstSentences(last, 2) || 'Nothing changed.';
       reopen(s, 'cant', { text: s.asked });
     }
 
@@ -962,7 +1048,9 @@
       // Pointing (agent-callout.js) is not looking away: ⇧-click adds to it.
       if (document.documentElement.classList.contains('marble-callout-latched')) return;
       if (host.contains(event.target)) return;
-      if (event.composedPath().some((n) => n?.localName === 'marble-agent-drawer')) return;
+      // The chat, and the drive's own setup and settings (Set up opens
+      // them over the line), are not looking away either.
+      if (event.composedPath().some((n) => ['marble-agent-drawer', 'marble-agent-setup', 'marble-agent-settings'].includes(n?.localName))) return;
       if (!s.page && elementsOf(s.ids).some((el) => el.contains(event.target))) return;
       put(s, { keep: true, restore: 'press' });
     }, true);
@@ -1064,8 +1152,10 @@
       agent.select(s.ids.length ? s.ids : null);
       show(s, 'edit', { text });
       if (idea && s.input) caretAt(s.input, idea[0], idea[1]);
-      // The conversation's composer, loading while the words are written.
+      // The conversation's composer, loading while the words are written,
+      // and whether anything can take them, asked meanwhile too.
       convoFor(s);
+      ready();
       if (now) send(s, text, { brief, keepWords: true });
       return true;
     }

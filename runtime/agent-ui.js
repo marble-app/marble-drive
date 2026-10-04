@@ -9077,6 +9077,25 @@
         return;
       }
       if (!state?.needed || !this.isConnected) return;
+      this.present(state);
+    }
+
+    /** Opened on request (the line's Set up, change-line.js), whatever Not
+     *  now said for this tab: someone asked for it. Answers whether the host
+     *  had anything to connect. */
+    async offer() {
+      let state = null;
+      try {
+        state = await this.api?.setup();
+      } catch {
+        return false;
+      }
+      if (!state?.needed || !this.isConnected) return false;
+      this.present(state);
+      return true;
+    }
+
+    present(state) {
       const offers = (Array.isArray(state.offers) ? state.offers : ['claude']).filter((id) => SETUP_AGENTS[id]);
       this.offers = offers.length ? offers : ['claude'];
       this.choice.hidden = this.offers.length < 2;

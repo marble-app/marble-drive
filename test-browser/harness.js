@@ -83,12 +83,13 @@ export async function startDrive({ scripts = {}, agents = true, documents = { ga
     log: quiet,
     // `providers` adds scripted stand-ins under real ids (claude-subscription,
     // claude-api, cursor) for tests of what the page does with those ids.
-    // `signedOut` names the ones among them that report no sign-in.
-    agentProviders: new Map([['fake', createFakeProvider({ scripts })], ...providers.map((id) => {
+    // `signedOut` names the ones among them that report no sign-in, `fake`
+    // too, for a drive with nothing set up to run.
+    agentProviders: new Map(['fake', ...providers].map((id) => {
       const provider = createFakeProvider({ scripts, id });
       if (signedOut.includes(id)) provider.detect = async () => ({ installed: true, signedIn: false, detail: 'signed out' });
       return [id, provider];
-    })]),
+    })),
     genui,
     usageHistory: async ({ weeks = 26 } = {}) => usageHistoryStub(weeks),
     usage: async () => ({
