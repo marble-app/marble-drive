@@ -379,24 +379,17 @@ test('a part with the person’s caret in it is not tinted while it is', async (
   assert.equal(await page.evaluate(() => document.activeElement.getAttribute('data-marble-id')), 'r2n', 'and the caret stayed');
 });
 
-test('parts below the fold put a rail at the window’s edge and an N below pill; the page never scrolls by itself', async () => {
+test('parts below the fold put an N below pill, and no rail down the window’s edge; the page never scrolls by itself', async () => {
   await settle();
   const id = await newChat();
   const { page } = await open({ doc: 'deep', attending: [id] });
   const before = await page.evaluate(() => scrollY);
   await sendTurn(id, 'script:deep Add a due date to each row', 'deep');
-  await page.locator('.marble-change-rail .marble-change-tick').first().waitFor({ state: 'attached' });
   const more = page.locator('.marble-change-more');
   await more.waitFor();
   assert.match(await more.innerText(), /^3 below$/);
   assert.equal(await more.locator('svg').count(), 1, 'a drawn chevron');
-  const rail = await page.locator('.marble-change-rail').evaluate((el) => {
-    const r = el.getBoundingClientRect();
-    return { width: r.width, right: innerWidth - r.right, ticks: el.querySelectorAll('.marble-change-tick').length };
-  });
-  assert.equal(rail.width, 2);
-  assert.ok(rail.right >= 0 && rail.right < 24, 'inside the right edge of the window');
-  assert.equal(rail.ticks, 3, 'a tick per part');
+  assert.equal(await page.locator('.marble-change-rail, .marble-change-tick').count(), 0, 'no rail of ticks');
   await page.waitForTimeout(500);
   assert.equal(await page.evaluate(() => scrollY), before, 'the page did not scroll by itself');
   await more.click();

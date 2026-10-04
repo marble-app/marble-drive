@@ -19,8 +19,9 @@
 //     doing in the parts' own unit, how many, a meter when the total is
 //     known, the steps, and the time. Resting on it opens what was asked and
 //     the steps so far; a press opens the conversation. It never says Agent;
-//   - a rail at the window's edge for parts out of view, with a pill that
-//     takes you to the next one. The page never scrolls by itself.
+//   - for parts out of view, a pill that says how many and takes you to the
+//     next one. The page never scrolls by itself. (A rail of ticks down the
+//     window's edge was taken out: the owner did not want it.)
 //
 // A change fanned out to workers (server/change/fanout.js) lands a group at a
 // time. A group whose worker failed is said in a frame of its own (`failed`):
@@ -68,7 +69,7 @@
   const SKIP = new Set(['HTML', 'BODY', 'HEAD', 'STYLE', 'SCRIPT', 'LINK', 'META', 'TITLE', 'TEMPLATE', 'NOSCRIPT']);
   const UNDO_IDLE = 8000;    // ms an undo's marks wait for its next frame before they lift
   const QUIET = 120_000;     // ms a change may go without a frame before the host is asked whether it still runs
-  const RAIL_MAX = 400;      // parts the rail measures in one paint
+  const OUT_MAX = 400;       // parts measured in one paint for the pill
   const MOST_GOING = 60;     // parts of one batch measured ahead in case they go
 
   const STYLE = `
@@ -100,7 +101,7 @@
     .marble-change-tint[data-state="lift"] { opacity: 0;
       transition: background-color 240ms var(--change-colour), box-shadow 240ms var(--change-colour), opacity ${LIFT}ms var(--change-ease); }
     .marble-change-tint[data-state="gone"], .marble-change-dot[data-state="gone"], .marble-change-tag[data-state="gone"],
-    .marble-change-rail[data-state="gone"], .marble-change-more[data-state="gone"] { opacity: 0; transition: opacity ${GONE}ms var(--change-ease); }
+    .marble-change-more[data-state="gone"] { opacity: 0; transition: opacity ${GONE}ms var(--change-ease); }
     .marble-change-tint[hidden], .marble-change-dot[hidden] { display: none; }
     /* A part whose group of a fan out failed (data-state="failed") keeps
        the light tint above, the one it had ahead: not yet changed. */
@@ -180,14 +181,7 @@
     .marble-change-steplist > li[data-state="now"] .mark { border-color: var(--change-ink); }
     .marble-change-steplist > li[data-state="more"] { padding-left: 18px; }
 
-    /* Out of view: the rail stands for the whole page, a tick per part at
-       its place, and the pill takes you to the next one. */
-    .marble-change-rail { position: fixed; right: calc(6px + var(--change-inset)); top: 12px; bottom: 12px; width: 2px; border-radius: 1px;
-      background: color-mix(in srgb, var(--change-ink) 14%, transparent); transition: opacity ${GONE}ms var(--change-ease); }
-    .marble-change-tick { position: absolute; left: -4px; top: 0; width: 10px; height: 3px; margin-top: -1.5px; border-radius: 2px;
-      background: color-mix(in srgb, var(--change-ink) 32%, transparent); }
-    .marble-change-tick[data-state="landed"] { background: var(--change-ink); }
-    .marble-change-tick[data-state="now"] { left: -6px; width: 14px; height: 4px; margin-top: -2px; background: var(--change-ink); }
+    /* Out of view: a pill that says how many, and takes you to the next one. */
     .marble-change-more { position: fixed; right: calc(20px + var(--change-inset)); bottom: 80px; pointer-events: auto; appearance: none; margin: 0;
       display: inline-flex; align-items: center; gap: 4px; padding: 5px 8px 5px 11px; border-radius: 999px;
       border: 1px solid var(--change-line); background: var(--change-card); color: var(--change-text);
@@ -1631,62 +1625,37 @@
       place(tag.root, { left: x, top: y });
     }
 
-    // ------------------------------------------------------------ the rail
+    // ------------------------------------------------------------ out of view
 
-    let rail = null;
     let more = null;
 
-    /** Where each part is against the window: rects only, and no more of
-     *  them than a rail can show. */
-    function planRail(entries) {
+    /** Which parts are out of view, and which way: rects only, and no more
+     *  of them than one paint can afford to measure. */
+    function planOut(entries) {
       const below = [];
       const above = [];
-      const ticks = [];
-      let budget = RAIL_MAX;
-      for (const { holder, state } of entries) {
+      let budget = OUT_MAX;
+      for (const { holder } of entries) {
         let r;
         if (holder.rectAt === paint) r = holder.rect;
         else if (budget > 0) { budget -= 1; r = measure(holder); } else continue;
         if (!r) continue;
         if (r.top >= innerHeight) below.push({ holder, r });
         else if (r.bottom <= 0) above.push({ holder, r });
-        ticks.push({ top: r.top + scrollY, state });
       }
       if (!below.length && !above.length) return null;
       return {
-        below, above, ticks,
-        height: Math.max(1, document.documentElement.scrollHeight),
+        below, above,
         gone: entries.length > 0 && entries.every((e) => e.gone),
       };
     }
 
-    function writeRail(plan) {
+    function writeOut(plan) {
       if (!plan) {
-        rail?.remove();
         more?.remove();
-        rail = null;
         more = null;
         return;
       }
-      if (!rail) {
-        rail = document.createElement('div');
-        rail.className = 'marble-change-rail';
-        rail.setAttribute(TRANSIENT, '');
-        rail.setAttribute('aria-hidden', 'true');
-        layer.append(rail);
-      }
-      while (rail.children.length < plan.ticks.length) {
-        const tick = document.createElement('i');
-        tick.className = 'marble-change-tick';
-        rail.append(tick);
-      }
-      while (rail.children.length > plan.ticks.length) rail.lastChild.remove();
-      plan.ticks.forEach(({ top, state }, i) => {
-        const tick = rail.children[i];
-        const y = `${(Math.min(1, Math.max(0, top / plan.height)) * 100).toFixed(2)}%`;
-        if (tick.style.top !== y) tick.style.top = y;
-        if (tick.dataset.state !== state) tick.dataset.state = state;
-      });
       if (!more) {
         more = document.createElement('button');
         more.type = 'button';
@@ -1711,10 +1680,8 @@
         more.innerHTML = `<span>${label}</span>${CHEVRON(dir)}`;
         more.setAttribute('aria-label', `${label}: show the next one`);
       }
-      for (const el of [rail, more]) {
-        if (plan.gone && el.dataset.state !== 'gone') el.dataset.state = 'gone';
-        else if (!plan.gone && el.dataset.state) delete el.dataset.state;
-      }
+      if (plan.gone && more.dataset.state !== 'gone') more.dataset.state = 'gone';
+      else if (!plan.gone && more.dataset.state) delete more.dataset.state;
     }
 
     // ------------------------------------------------------------ painting
@@ -1758,7 +1725,7 @@
         const silent = run.local && !(run.ending ? run.endWords?.length : run.words?.length);
         plans.push({ run, marks, tools, at: hidden || run.undo || silent ? null : hangOf(run, marks) });
       }
-      const railPlan = planRail(entries);
+      const outPlan = planOut(entries);
       // Write.
       layer.style.setProperty('--change-inset', `${Math.round(inset)}px`);
       const placing = [];
@@ -1778,7 +1745,7 @@
         }
         run.drawn = drawn;
       }
-      writeRail(railPlan);
+      writeOut(outPlan);
       // The tags, once their words are written: their sizes, then their places.
       const sizes = placing.map(({ run }) => [run.tag.press.offsetWidth, run.tag.press.offsetHeight]);
       placing.forEach(({ run, at }, i) => placeTag(run, run.tag, at, sizes[i]));

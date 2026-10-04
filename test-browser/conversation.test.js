@@ -2078,27 +2078,6 @@ test('a running conversation says where its hands are, and the row goes when the
   assert.deepEqual(errors, []);
 });
 
-test('Follow ties you to the agent, crosses to its document, and says so there', async () => {
-  const { page, view } = await mount();
-  await view.locator('input[name="agent"][value="fake"]').waitFor();
-  await page.evaluate(() => window.marble.agent.aim('atlas'));
-  await sendFrom(view, 'script:elsewhere');
-
-  const follow = view.locator('.zone-follow');
-  await follow.waitFor();
-  assert.equal(await follow.getAttribute('aria-pressed'), 'false');
-  assert.equal((await follow.textContent()).trim(), 'Follow');
-
-  // Going along, not going once: the tether rides the hash to the document the
-  // work is in, and is tied there on arrival.
-  await follow.click();
-  await page.waitForURL(/\/a\/atlas/);
-  await page.waitForFunction(() => document.documentElement.classList.contains('marble-collab-host'));
-  await page.locator('.marble-follow').waitFor();
-  assert.match(await page.locator('.marble-follow').innerText(), /Following/);
-  assert.equal(await page.evaluate(() => location.hash), '');
-});
-
 test('the row names the other document, and pressing it opens that document at the work', async () => {
   const { page, view } = await mount();
   await view.locator('input[name="agent"][value="fake"]').waitFor();

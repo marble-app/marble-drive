@@ -2933,32 +2933,9 @@
       transition: background-color .13s var(--snap), color .13s var(--snap);
     }
     .zone-jump[hidden] { display: none; }
-    /* Going once and going along are the same errand at two lengths, so they
-       share a row: the arrow takes you there now, the eye keeps you with the
-       agent as it moves — to the next element, and on to the next document. */
     .zone-row { display: flex; align-items: center; gap: 4px; min-width: 0; }
     .zone-row[hidden] { display: none; }
     .zone-row .zone-jump { min-width: 0; }
-    .zone-follow {
-      --zone-mark: var(--accent-ink, color-mix(in srgb, #6d55d4 78%, var(--ink)));
-      flex: none;
-      display: inline-flex;
-      align-items: center;
-      gap: 4px;
-      padding: 3px 8px 3px 6px;
-      border: 1px solid color-mix(in srgb, var(--zone-mark) 30%, transparent);
-      border-radius: 999px;
-      background: color-mix(in srgb, var(--zone-mark) 10%, transparent);
-      color: color-mix(in srgb, var(--zone-mark) 64%, var(--ink));
-      font: inherit;
-      cursor: pointer;
-    }
-    .zone-follow svg { width: 13px; height: 13px; display: block; }
-    .zone-follow:hover { background: color-mix(in srgb, var(--zone-mark) 18%, transparent); color: var(--zone-mark); }
-    .zone-follow:focus-visible { outline: 2px solid var(--zone-mark); outline-offset: 2px; }
-    /* On, it is not an offer any more: it is a state you are in. */
-    .zone-follow[aria-pressed="true"] { background: var(--zone-mark); border-color: var(--zone-mark); color: var(--paper); }
-    .zone-follow[aria-pressed="true"]:hover { color: var(--paper); opacity: .88; }
     .zone-jump:hover { background: color-mix(in srgb, var(--zone-mark) 18%, transparent); color: var(--zone-mark); }
     .zone-jump:focus-visible { outline: 2px solid var(--zone-mark); outline-offset: 2px; }
     .zone-jump .zone-live { flex: none; width: 6px; height: 6px; border-radius: 50%; background: var(--zone-mark); animation: pulse 1.2s var(--snap) infinite; }
@@ -4031,7 +4008,6 @@
   /** The arrow leaving its box: the one glyph that says a name is a way out of
    *  this chat and into another document. Drawn at the mast's type size so it
    *  sits on the same line as the tags beside it. */
-  const EYE_ICON = '<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M2.5 12S6 5.5 12 5.5 21.5 12 21.5 12 18 18.5 12 18.5 2.5 12 2.5 12Z"/><circle cx="12" cy="12" r="2.8"/></svg>';
   const OUT_ICON = '<svg width="11" height="11" viewBox="0 0 16 16" aria-hidden="true"><path d="M6.5 3.5H3.5v9h9v-3" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/><path d="M9.5 3.5h3v3M12.5 3.5 7.5 8.5" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>';
 
   // ------------------------------------------------------------ the editor
@@ -4273,10 +4249,6 @@
               <span class="zone-what"></span>
               <span class="zone-go" aria-hidden="true">→</span>
             </button>
-            <button type="button" class="zone-follow" aria-pressed="false">
-              <span class="zone-eye" aria-hidden="true">${EYE_ICON}</span>
-              <span class="zone-follow-what">Follow</span>
-            </button>
           </div>
           <button type="button" class="also" hidden>
             <span class="also-long"></span>
@@ -4415,9 +4387,6 @@
       this.armSetupSheet();
       this.zoneJump = root.querySelector('.zone-jump');
       this.zoneRow = root.querySelector('.zone-row');
-      this.zoneFollow = root.querySelector('.zone-follow');
-      this.zoneFollowWhat = root.querySelector('.zone-follow-what');
-      this.zoneFollow.addEventListener('click', () => this.toggleFollow());
       this.zoneWhat = root.querySelector('.zone-what');
       this.zone = null;
       this.zoneJump.addEventListener('click', () => this.goToZone());
@@ -5835,7 +5804,6 @@
     showZone(zone) {
       this.zone = zone && Array.isArray(zone.ids) && zone.ids.length ? zone : null;
       this.zoneRow.hidden = !this.zone;
-      this.paintFollow();
       if (!this.zone) {
         this.dispatchEvent(new CustomEvent('zone', { detail: { zone: null }, bubbles: true, composed: true }));
         return;
@@ -5849,47 +5817,6 @@
       this.dispatchEvent(new CustomEvent('zone', { detail: { zone: this.zone }, bubbles: true, composed: true }));
     }
 
-    /** Is this page already tied to this conversation? The tether lives on the
-     *  document — collab.js owns it, because it is the thing that moves your
-     *  view — and answers by cancelling the question. */
-    followingHere() {
-      const id = this.getAttribute('conversation');
-      if (!id) return false;
-      return !dispatchEvent(new CustomEvent('marble:following?', { cancelable: true, detail: { id } }));
-    }
-
-    paintFollow(on = this.followingHere()) {
-      this.zoneFollow.setAttribute('aria-pressed', String(on));
-      this.zoneFollowWhat.textContent = on ? 'Following' : 'Follow';
-      this.zoneFollow.title = on
-        ? 'Stop following this agent'
-        : 'Follow this agent: your view goes where its work goes, here and into other documents';
-      this.zoneFollow.setAttribute('aria-label', this.zoneFollow.title);
-    }
-
-    /** Going once and going along. A jump is spent on arrival; a tether keeps
-     *  taking you — to the next element, and on to the next document — until
-     *  you stop it. Following includes the first jump, because a tether that
-     *  leaves you where you were has not started. */
-    toggleFollow() {
-      const id = this.getAttribute('conversation');
-      if (!id) return;
-      if (this.followingHere()) {
-        dispatchEvent(new CustomEvent('marble:follow', { detail: { id: null } }));
-        this.paintFollow(false);
-        return;
-      }
-      const zone = this.zone;
-      if (zone && zone.path !== window.marble?.app) {
-        // Another document: the tether rides the hash and is tied on arrival.
-        const at = zone.ids.map(encodeURIComponent).join(',');
-        location.href = `/a/${encodeURIComponent(zone.path)}#follow=${encodeURIComponent(id)}&at=${at}`;
-        return;
-      }
-      dispatchEvent(new CustomEvent('marble:follow', { detail: { id } }));
-      this.paintFollow(true);
-      if (zone) this.goToZone();
-    }
 
     /** Same document: scroll to it. Another document: the jump is a navigation,
      *  and the ids ride in the hash so collab.js can land you on them. */
