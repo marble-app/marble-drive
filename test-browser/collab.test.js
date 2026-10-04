@@ -82,7 +82,7 @@ const host = await startDrive({
 });
 test.after(() => host.close());
 
-test('a conflict fork says why it is there, and shows Yours, The new one, Keep this, and Ask an agent to combine', async () => {
+test('a conflict fork says why it is there, and shows Yours, The new one, Keep this, and Combine them, never an agent', async () => {
   await host.reset();
   const { page, errors } = await host.newPage({ attending: FOLLOWED });
   await page.goto(`${host.base}/a/forked`);
@@ -91,7 +91,12 @@ test('a conflict fork says why it is there, and shows Yours, The new one, Keep t
   await bar.waitFor();
 
   const labels = await bar.locator('button').allTextContents();
-  assert.deepEqual(labels.map((t) => t.trim()), ['Yours', 'The new one', 'Keep this', 'Ask an agent to combine']);
+  assert.deepEqual(labels.map((t) => t.trim()), ['Yours', 'The new one', 'Keep this', 'Combine them']);
+  const merge = bar.getByRole('button', { name: 'Write one version from both' });
+  assert.equal(await merge.getAttribute('title'), 'Writes a third version from both');
+  const said = await bar.evaluate((el) => [el.innerText, ...[...el.querySelectorAll('[aria-label], [title]')]
+    .flatMap((n) => [n.getAttribute('aria-label'), n.getAttribute('title')])].join(' '));
+  assert.doesNotMatch(said, /\bagent\b/i);
   assert.equal(await bar.locator('.marble-fork-why').textContent(), 'This changed while you were editing it.');
   assert.equal(await bar.getByRole('button', { name: 'Approve' }).count(), 0);
   assert.equal(await bar.getByRole('button', { name: 'Reject' }).count(), 0);
@@ -99,7 +104,7 @@ test('a conflict fork says why it is there, and shows Yours, The new one, Keep t
   assert.deepEqual(errors.filter((message) => !/favicon/.test(message)), []);
 });
 
-test('Ask an agent to combine hands both versions to the agent drawer', async () => {
+test('Combine them hands both versions to the agent drawer', async () => {
   await host.reset();
   const { page } = await host.newPage({ attending: FOLLOWED });
   await page.goto(`${host.base}/a/forked`);
@@ -115,7 +120,7 @@ test('Ask an agent to combine hands both versions to the agent drawer', async ()
       open: () => { window.__agent.opened += 1; },
     };
   });
-  await page.getByRole('button', { name: 'Ask an agent to combine both versions' }).click();
+  await page.getByRole('button', { name: 'Write one version from both' }).click();
   const seen = await page.evaluate(() => window.__agent);
   assert.deepEqual(seen.selected, ['hy', 'ha']);
   assert.equal(seen.opened, 1);

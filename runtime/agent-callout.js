@@ -201,6 +201,12 @@
     if (document.querySelector('meta[name="marble-agent"][content="custom"]')) return;
     if (document.querySelector('.marble-callout-layer')) return;
     const app = marble.app;
+    // The Drive's own listing: the document the drive lands on. Asked when
+    // it matters, since the shell's tag that names it comes after this one.
+    const atHome = () => {
+      const home = document.querySelector('script[data-home]')?.dataset.home ?? null;
+      return Boolean(home) && app === home;
+    };
 
     const style = document.createElement('style');
     style.setAttribute(TRANSIENT, '');
@@ -721,8 +727,10 @@
       }
       if (!ids.length) {
         // Nothing under the pointer or the caret: ⌘J is about the page, and
-        // the line sits at the foot of the window. A phone opens the chat.
-        if (PHONE.matches || !line) return false;
+        // the line sits at the foot of the window. A phone opens the chat,
+        // and so does the Drive's own listing, which is a place to open
+        // things from, not a page to change (ruling R44).
+        if (PHONE.matches || !line || atHome()) return false;
         handle.hidden = true;
         clearHover();
         return line.open({ ids: [], scope: 'page', from: 'key' });
@@ -935,7 +943,6 @@
     addEventListener('marble-agent-prefs', (event) => restChanged(event.detail?.key));
 
     const HOVER_DWELL = 400;
-    const HOME = document.querySelector('script[data-home]')?.dataset.home ?? null;
     const hoverFrame = document.createElement('div');
     hoverFrame.className = 'marble-callout-hover';
     hoverFrame.setAttribute(TRANSIENT, '');
@@ -959,7 +966,7 @@
       if (!restOn() || latched) return false;
       if (!globalThis.marbleScope || PHONE.matches || pointerDown || typing() || marking()) return false;
       // The Drive's own listing is made of things to open, not to ask about.
-      if (HOME && app === HOME) return false;
+      if (atHome()) return false;
       if (records.some((r) => r.offer || (r.id === null && !r.owner)) || window.marbleLine?.current()) return false;
       const sel = getSelection();
       return !(sel && !sel.isCollapsed);

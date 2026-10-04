@@ -40,7 +40,12 @@ const RUNNABLE = `<!doctype html><html><head><title>Reading list</title></head>
 <tr data-marble-id="r2"><td data-marble-id="c1">Generative Agents <button data-marble-id="fill" data-marble-run="script:quiet Look it up by its title and fill the rest." data-marble-scope="r2" data-marble-on="press">Fill</button></td><td data-marble-id="c2">—</td></tr>
 </tbody></table></body></html>`;
 
-const host = await startDrive({ scripts: SCRIPTS, documents: { garden: GARDEN, Agents: AGENTS, runnable: RUNNABLE } });
+// The Drive's own listing: the document the drive lands on (config.home).
+const DRIVE = `<!doctype html><html><head><title>Drive</title>
+<style>body { font: 16px/1.5 system-ui, sans-serif; margin: 40px; max-width: 480px; }</style></head>
+<body data-marble-id="b"><h1 data-marble-id="h">Drive</h1><p data-marble-id="p">Everything on this drive.</p></body></html>`;
+
+const host = await startDrive({ scripts: SCRIPTS, documents: { garden: GARDEN, Agents: AGENTS, runnable: RUNNABLE, drive: DRIVE } });
 test.after(() => host.close());
 
 // A reset drive keeps its conversations, and this layer rebuilds a callout
@@ -705,4 +710,12 @@ test('a data-marble-run button starts an agent with its brief, aimed at its elem
   assert.equal(run.context.target, 'runnable');
   assert.deepEqual(run.context.selection, ['r2'], 'the scope it names');
   assert.equal(await page.evaluate((cid) => window.marble.agent.attending(cid), run.id), true, 'pressed here, so followed here');
+});
+
+test('on the Drive\'s own page, ⌘J with nothing under the pointer opens the chat, not a line', async () => {
+  const page = await open('drive');
+  await page.mouse.move(1100, 700);
+  await page.keyboard.press('Control+j');
+  await page.waitForFunction(() => document.querySelector('marble-agent-drawer')?.isOpen === true, null, { timeout: 3000 });
+  assert.equal(await line(page).count(), 0, 'no line');
 });

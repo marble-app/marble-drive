@@ -114,8 +114,8 @@ Being on the page is not a claim on it. Where your caret is has no bearing on
 what the agent may change; only an edit you made **after its turn began**
 counts as a conflict with an edit of the same element by the agent. When that
 happens, nothing is overwritten: the element becomes two versions with a bar
-above — *You* and *Agent* to look at each, *Keep this* to settle on the one
-showing, and *Ask an agent to combine* to send both to an agent that writes a
+above — *Yours* and *The new one* to look at each, *Keep this* to settle on
+the one showing, and *Combine them* to send both to an agent that writes a
 third. A turn's ending forgets what it touched, and an undo claims nothing it
 restores, so an agent's claims never outlive its work.
 

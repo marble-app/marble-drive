@@ -1644,10 +1644,10 @@
         });
         const merge = document.createElement('button');
         merge.type = 'button';
-        // It does not merge; it hands both versions to an agent for a third.
-        merge.textContent = 'Ask an agent to combine';
-        merge.setAttribute('aria-label', 'Ask an agent to combine both versions');
-        merge.title = 'Sends both versions to an agent, which writes a third';
+        // It does not merge: both versions are sent on, and a third comes back.
+        merge.textContent = 'Combine them';
+        merge.setAttribute('aria-label', 'Write one version from both');
+        merge.title = 'Writes a third version from both';
         merge.addEventListener('click', () => askMerge(alt));
         acts.append(keep, merge);
       };
