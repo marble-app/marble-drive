@@ -36,7 +36,7 @@ import { RANK, createShares } from './shares.js';
 import { createPendingWrites } from './pending-writes.js';
 import { PathError, isInside, joinPath, parsePath, safePath, safeSegment, splitPath, withoutDocExt } from './paths.js';
 import { build as buildStarter, list as listStarters, preview as starterPreview } from './gallery.js';
-import { createChannels } from './sse.js';
+import { createChannels, forVisitor, lookFrame } from './sse.js';
 import { createStore } from './store/index.js';
 import { readDriveSettings } from './drive-settings.js';
 import { createAwakeClock, createProgress } from './awake.js';
@@ -937,7 +937,9 @@ export async function createDrive(config, { log = console, agentProviders = null
           'X-Accel-Buffering': 'no',
         });
         res.write(': connected\n\n');
-        const client = { id: url.searchParams.get('client'), res };
+        // A share link's listener is told where work is, never its words
+        // (`forVisitor`, server/sse.js).
+        const client = { id: url.searchParams.get('client'), res, visitor: Boolean(visit) };
 
         const off = url.searchParams.get('drive')
           ? channels.subscribeDrive(client)
@@ -963,7 +965,8 @@ export async function createDrive(config, { log = console, agentProviders = null
       // catch one by listening. It asks instead.
       if (route === '/presence' && req.method === 'GET') {
         const docPath = parsePath(url.searchParams.get('app'), { allowRoot: false });
-        return json(res, 200, { frames: [...(looking.get(docPath)?.values() ?? [])] });
+        const frames = [...(looking.get(docPath)?.values() ?? [])];
+        return json(res, 200, { frames: visit ? frames.map(forVisitor) : frames });
       }
 
       if (route === '/presence' && req.method === 'POST') {
@@ -1466,17 +1469,10 @@ export async function createDrive(config, { log = console, agentProviders = null
       sandbox: agentSandbox ?? null,
       onLook: (docPath, ids, client, extra = {}) => {
         if (!client) return;
-        // Every field a caller hands in rides along untouched — the v5
-        // presence fields (parts, kind, count, step, total, reach, turn,
-        // stage, prompt, done…) included. `label` keeps its old default;
-        // `client` and `ids` are this function's own, never the caller's.
-        const { label, ...meta } = extra;
-        const frame = {
-          client,
-          ids: Array.isArray(ids) ? ids : [],
-          label: label ?? client,
-          ...meta,
-        };
+        // Every field a caller hands in rides along — the v5 presence fields
+        // (parts, kind, count, step, total, reach, turn, stage, prompt,
+        // done…) included — except `client` and `ids`, this look's own.
+        const frame = lookFrame(client, ids, extra);
         rememberLook(docPath, frame);
         channels.toPresence(docPath, frame);
       },

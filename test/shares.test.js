@@ -8,6 +8,7 @@ import test from 'node:test';
 
 import { createDrive } from '../server/app.js';
 import { loadConfig } from '../server/config.js';
+import { createFakeProvider } from './fixtures/fake-provider.js';
 
 const DOC = `<!doctype html>
 <html data-marble-id="h"><head data-marble-id="hd"><title data-marble-id="t">Potluck</title></head>
@@ -21,13 +22,13 @@ const DOC = `<!doctype html>
 </body></html>
 `;
 
-async function boot(t, env = {}) {
+async function boot(t, env = {}, deps = {}) {
   const root = await fsp.mkdtemp(path.join(os.tmpdir(), 'shares-'));
   await fsp.writeFile(path.join(root, 'Potluck.mrbl'), DOC);
   await fsp.writeFile(path.join(root, 'Private.mrbl'), DOC.replace('Potluck', 'Private'));
   const drive = await createDrive(
     loadConfig({ MARBLE_DRIVE_ROOT: root, MARBLE_DRIVE_SECRET: 'hunter2', ...env }),
-    { log: { log() {}, error() {}, info() {}, warn() {} }, agents: false },
+    { log: { log() {}, error() {}, info() {}, warn() {} }, agents: false, ...deps },
   );
   t.after(async () => {
     await drive.close();
@@ -58,7 +59,38 @@ async function boot(t, env = {}) {
   const ops = (cookie, list, docPath = 'Potluck') =>
     ask(`/ops?app=${encodeURIComponent(docPath)}&client=tab1`, { cookie, method: 'POST', body: list });
   const file = (name = 'Potluck') => fsp.readFile(path.join(root, `${name}.mrbl`), 'utf8');
-  return { root, ask, owner, make, open, ops, file };
+  return { root, ask, at, owner, make, open, ops, file };
+}
+
+/** The presence frames a document's stream carries for `cookie`, until
+ *  `stop(frames)` or the deadline. */
+async function presenceFrames(at, cookie, client, stop, ms = 15_000) {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), ms);
+  const seen = [];
+  try {
+    const res = await fetch(at(`/events?app=Potluck&client=${client}`), { signal: controller.signal, headers: { Cookie: cookie, Accept: 'text/event-stream' } });
+    assert.equal(res.status, 200);
+    const reader = res.body.getReader();
+    const decoder = new TextDecoder();
+    let buffer = '';
+    while (!stop(seen)) {
+      const { value, done } = await reader.read();
+      if (done) break;
+      buffer += decoder.decode(value, { stream: true });
+      const parts = buffer.split('\n\n');
+      buffer = parts.pop();
+      for (const part of parts) {
+        if (!/^event: presence$/m.test(part)) continue;
+        seen.push(JSON.parse(part.match(/^data: (.*)$/m)[1]));
+      }
+    }
+  } catch {
+    // stopped
+  }
+  clearTimeout(timer);
+  controller.abort();
+  return seen;
 }
 
 test('a link opens its one page, and nothing else in the drive', async (t) => {
@@ -246,4 +278,71 @@ test('links made at once are each kept', async (t) => {
   await Promise.all([make('view'), make('edit'), make('modify'), make('view', 'Private')]);
   const listed = await (await ask('/drive/shares?path=Potluck', { cookie: owner })).json();
   assert.deepEqual(listed.links.map((l) => l.role).sort(), ['edit', 'modify', 'view']);
+});
+
+test('someone holding a link sees where the work is, never the words asked for, noted or stepped', async (t) => {
+  const work = await fsp.mkdtemp(path.join(os.tmpdir(), 'shares-work-'));
+  t.after(() => fsp.rm(work, { recursive: true, force: true }));
+  const fake = createFakeProvider({
+    scripts: {
+      park: [
+        { sleep: 1500 },
+        { call: 'read_document', args: { path: 'Potluck' } },
+        { call: 'apply_ops', args: { path: 'Potluck', note: 'Stage 1 of 2: give Ana her surname', ops: [{ type: 'setText', id: 'r1n', text: 'Ana B' }] } },
+        { sleep: 300 },
+        { say: 'Done.' },
+      ],
+    },
+  });
+  const { ask, at, owner, make, open } = await boot(t, {
+    MARBLE_DRIVE_AGENTS: '1',
+    MARBLE_DRIVE_AGENT_NAMING: '0',
+    MARBLE_DRIVE_AGENT_PROVIDER: 'fake',
+    MARBLE_DRIVE_AGENT_WORKDIR: work,
+    MARBLE_DRIVE_AGENT_KEYS: path.join(work, 'keys'),
+  }, { agents: undefined, agentProviders: new Map([['fake', fake]]) });
+  const { cookie: visitor } = await open((await make('view')).href);
+
+  const ended = (frames) => frames.some((frame) => frame.stage === 'end');
+  const visitorSees = presenceFrames(at, visitor, 'vis1', ended);
+  const ownerSees = presenceFrames(at, owner, 'own1', ended);
+  await new Promise((resolve) => setTimeout(resolve, 200));
+
+  const conversation = await (await ask('/agent/conversations', { cookie: owner, method: 'POST', body: { provider: 'fake' } })).json();
+  const prompt = 'script:park\nAna told me in confidence her surname is B';
+  const sent = await ask(`/agent/conversations/${conversation.id}/turns`, {
+    cookie: owner, method: 'POST', body: { prompt, context: { target: 'Potluck', viewing: 'Potluck', selection: ['r1n'] } },
+  });
+  assert.ok(sent.ok, `${sent.status}`);
+
+  // A tab opening mid-turn asks what is standing: the turn's start, aimed at
+  // the selection, until the agent reads.
+  const standing = async (cookie) => (await (await ask('/presence?app=Potluck', { cookie })).json()).frames;
+  const deadline = Date.now() + 5_000;
+  let ownerStanding = [];
+  while (!ownerStanding.some((frame) => frame.stage === 'start') && Date.now() < deadline) {
+    ownerStanding = await standing(owner);
+    if (!ownerStanding.length) await new Promise((resolve) => setTimeout(resolve, 30));
+  }
+  assert.equal(ownerStanding[0]?.prompt, prompt.slice(0, 300), 'the owner is told what was asked');
+  const visitorStanding = await standing(visitor);
+  assert.deepEqual(visitorStanding.map((frame) => [frame.stage, frame.ids]), [['start', ['r1n']]], 'the visitor is told where');
+  assert.equal(JSON.stringify(visitorStanding).includes('confidence'), false, 'and not what was asked');
+  assert.equal('prompt' in visitorStanding[0], false);
+
+  const [mine, theirs] = await Promise.all([ownerSees, visitorSees]);
+  const all = (frames) => JSON.stringify(frames);
+  assert.match(all(mine), /in confidence/, 'the owner\'s stream carries the prompt');
+  assert.match(all(mine), /give Ana her surname/, 'and the note, and the step');
+  assert.ok(mine.some((frame) => frame.step?.text === 'give Ana her surname'));
+
+  assert.ok(theirs.some((frame) => frame.stage === 'start'), 'the visitor sees the turn start');
+  assert.ok(theirs.some((frame) => frame.stage === 'before' && frame.parts?.includes('r1n')), 'and the part it changes');
+  assert.ok(theirs.some((frame) => frame.step?.n === 1 && frame.step?.of === 2), 'and how far along it is');
+  assert.doesNotMatch(all(theirs), /in confidence|give Ana her surname/, 'never the words');
+  for (const frame of theirs) {
+    assert.equal('prompt' in frame, false);
+    assert.equal('note' in frame, false);
+    assert.equal(Boolean(frame.step && 'text' in frame.step), false);
+  }
 });
