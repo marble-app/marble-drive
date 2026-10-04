@@ -74,7 +74,8 @@ test('every worker gets the same plan, its own brief and only its shard, with no
   assert.equal(calls.length, 2);
   for (const { command, args, options } of calls) {
     assert.equal(command, 'claude');
-    assert.deepEqual(args.slice(0, -2), ['-p', '--model', 'sonnet', '--tools', '', '--setting-sources', 'project', '--output-format', 'text']);
+    assert.deepEqual(args.slice(0, -2), ['-p', '--model', 'sonnet', '--tools', '', '--strict-mcp-config', '--setting-sources', 'project', '--output-format', 'text']);
+    assert.ok(!args.includes('--mcp-config'), 'no MCP server attaches to a worker');
     assert.equal(args.at(-2), '--');
     assert.equal(options.timeout, TIMEOUT);
     assert.equal(TIMEOUT, 120_000);
@@ -167,21 +168,56 @@ test('an insert or a move is refused unless it lands inside the shard', async ()
   }
 });
 
-test('a worker may not write a script into the page', async () => {
+// Rows whose first holds a table and a script of its own, for what a worker
+// may not do to markup it is allowed to touch.
+const SCRIPTED = SOURCE.replace(
+  '<li data-marble-id="p1"><span data-marble-id="p1t">Paper 1</span></li>',
+  '<li data-marble-id="p1"><span data-marble-id="p1t">Paper 1</span><table data-marble-id="p1g"><tbody data-marble-id="p1b"></tbody></table><script data-marble-id="p1s">count()</script></li>',
+);
+const firstOf = (source, ops) => runFanOut({
+  source, docPath: 'd', plan: 'x', note: 'x', shards: pairs(2),
+  exec: async (_c, args) => (firstRow(args) === 1 ? reply(ops) : relabel(args)),
+  apply: applier().apply,
+  log: quiet,
+});
+
+test('a worker may not write a script into the page, however it is spelled', async () => {
   for (const ops of [
     [{ type: 'setInner', id: 'p1', html: '<script>fetch("//x")</script>' }],
     [{ type: 'setAttr', id: 'p1', name: 'onclick', value: 'go()' }],
     [{ type: 'setAttr', id: 'p1', name: 'href', value: 'javascript:go()' }],
+    [{ type: 'setAttr', id: 'p1', name: 'href', value: 'java\tscript:go()' }],
+    [{ type: 'setAttr', id: 'p1', name: 'href', value: ' \u0001JavaScript:go()' }],
+    [{ type: 'setAttr', id: 'p1', name: 'src', value: 'data:text/html,<b>hi</b>' }],
+    [{ type: 'setAttr', id: 'p1s', name: 'src', value: 'https://example.com/x.js' }],
+    [{ type: 'setInner', id: 'p1s', html: 'steal()' }],
     [{ type: 'insert', parentId: 'p1', beforeId: null, html: '<img src=x onerror="go()">' }],
+    [{ type: 'insert', parentId: 'p1', beforeId: null, html: '<img/onerror=go() src=x>' }],
+    [{ type: 'insert', parentId: 'p1', beforeId: null, html: '<svg/onload=go()></svg>' }],
+    [{ type: 'insert', parentId: 'p1', beforeId: null, html: '<a href="javas&#99;ript:go()">x</a>' }],
+    [{ type: 'insert', parentId: 'p1', beforeId: null, html: '<a href="java&Tab;script:go()">x</a>' }],
+    [{ type: 'insert', parentId: 'p1', beforeId: null, html: '<svg><a xlink:href="javascript:go()">x</a></svg>' }],
+    [{ type: 'insert', parentId: 'p1', beforeId: null, html: '<form action="vbscript:go()"></form>' }],
+    [{ type: 'insert', parentId: 'p1b', beforeId: null, html: '<tr onclick="go()"><td>x</td></tr>' }],
+    [{ type: 'insert', parentId: 'p1', beforeId: null, html: '<iframe srcdoc="&lt;script&gt;go()&lt;/script&gt;"></iframe>' }],
+    [{ type: 'insert', parentId: 'p1', beforeId: null, html: '<object data="x.swf"></object>' }],
+    [{ type: 'insert', parentId: 'p1', beforeId: null, html: '<embed src="x.swf">' }],
   ]) {
-    const result = await runFanOut({
-      source: SOURCE, docPath: 'd', plan: 'x', note: 'x', shards: pairs(2),
-      exec: async (_c, args) => (firstRow(args) === 1 ? reply(ops) : relabel(args)),
-      apply: applier().apply,
-      log: quiet,
-    });
-    assert.match(result.shards[0].error, /script/, JSON.stringify(ops));
+    const result = await firstOf(SCRIPTED, ops);
+    assert.match(result.shards[0].error ?? '', /script/, JSON.stringify(ops));
     assert.equal(result.shards[1].applied, 2);
+  }
+});
+
+test('words about scripts are not scripts', async () => {
+  for (const ops of [
+    [{ type: 'setText', id: 'p1t', text: 'javascript: the good parts' }],
+    [{ type: 'setInner', id: 'p1t', html: 'Learn <em>javascript:</em> carry on=1, <code>&lt;script&gt;</code>' }],
+    [{ type: 'setAttr', id: 'p1', name: 'title', value: 'javascript: a history' }],
+    [{ type: 'insert', parentId: 'p1', beforeId: null, html: '<a href="https://example.com/javascript:guide">guide</a><img src="data:image/png;base64,AAAA" alt="">' }],
+  ]) {
+    const result = await firstOf(SCRIPTED, ops);
+    assert.equal(result.shards[0].error, undefined, JSON.stringify(ops));
   }
 });
 
@@ -368,12 +404,13 @@ async function freshTurn() {
   };
 }
 
-function fanTools(exec) {
+function fanTools(exec, { beforeWrite = null } = {}) {
   const looks = [];
   const presences = [];
   const tools = createTools({
     store: drive.store,
     writeOps: async (docPath, ops, options) => {
+      await beforeWrite?.(options);
       const result = await drive.writeOps(docPath, ops, options);
       if (result.applied) presences.push(options.presence);
       return result;
@@ -523,4 +560,113 @@ test('fan_out stops with the turn', async () => {
   assert.equal(result.applied, 0);
   assert.equal(calls, 4);
   for (const shard of result.shards) assert.match(shard.error, /stopped/);
+});
+
+// ------------------------------------------------------------ review, round 1
+
+/** Every groups count the page was told, newest last. */
+const groupsSaid = (looks, presences) => [...looks.map((l) => l.extra?.groups), ...presences.map((p) => p?.groups)]
+  .filter(Boolean)
+  .sort((a, b) => a.seq - b.seq);
+
+test('a shard the write would refuse is not counted done, and its parts are not counted changed', async () => {
+  // setText on a row would wipe the addressed title inside it: the write
+  // refuses that, so nothing of the shard lands.
+  const { tools, looks, presences } = fanTools(async (_c, args) => (firstRow(args) === 3
+    ? reply([{ type: 'setText', id: 'p3', text: 'Flattened' }, label(4, 'Paper 4, relabelled')])
+    : relabel(args)));
+  const turn = await freshTurn();
+  const result = await tools.call('fan_out', { path: turn.target, note: 'Relabel.', plan: 'x', shards: pairs(3) }, turn);
+  assert.match(result.shards[1].error, /addressed element/);
+  assert.equal(result.applied, 4);
+  assert.equal(turn.v5.parts.size, 4, 'only the parts that landed are counted');
+  assert.equal(turn.v5.failed, 1);
+  assert.equal(looks.filter((l) => l.extra?.stage === 'before' && /part 2 of 3/.test(l.extra.note)).length, 0, 'a refused batch is never said as coming');
+  const last = groupsSaid(looks, presences).at(-1);
+  assert.deepEqual({ done: last.done, failed: last.failed, of: last.of }, { done: 2, failed: 1, of: 3 });
+  assert.match(await drive.store.read(turn.target), /Paper 3</, 'the row keeps its title');
+});
+
+test('apply_ops refuses a batch the write would refuse, before it says or counts anything', async () => {
+  const { tools, looks } = fanTools(async () => reply([]));
+  const turn = await freshTurn();
+  await tools.call('read_document', { path: turn.target }, turn);
+  looks.length = 0;
+  const result = await tools.call('apply_ops', { path: turn.target, note: 'x', ops: [{ type: 'setText', id: 'p3', text: 'Flattened' }] }, turn);
+  assert.equal(result.refused, true);
+  assert.match(result.reason, /addressed element/);
+  assert.equal(turn.v5, undefined);
+  assert.equal(looks.length, 0);
+  assert.equal(turn.undo.length, 0);
+});
+
+test('a failed group whose parts the agent lands itself is no longer counted failed', async () => {
+  const { tools, looks } = fanTools(async (_c, args) => (firstRow(args) === 3
+    ? reply([{ type: 'setText', id: 'h', text: 'Mine' }])
+    : relabel(args)));
+  const turn = await freshTurn();
+  await tools.call('read_document', { path: turn.target }, turn);
+  const result = await tools.call('fan_out', { path: turn.target, note: 'Relabel.', plan: 'x', shards: pairs(2) }, turn);
+  assert.match(result.shards[1].error, /outside its shard/);
+  assert.equal(turn.v5.failed, 1);
+  await tools.call('apply_ops', { path: turn.target, note: 'Finish the rest.', ops: [label(3, 'By hand')] }, turn);
+  assert.equal(turn.v5.failed, 1, 'half a group is still a failed group');
+  looks.length = 0;
+  await tools.call('apply_ops', { path: turn.target, note: 'Finish the rest.', ops: [label(4, 'By hand too')] }, turn);
+  assert.equal(turn.v5.failed, 0);
+  const before = looks.find((l) => l.extra?.stage === 'before');
+  assert.equal(before.extra.groups.failed, 0, 'the page is told the group is done after all');
+});
+
+test('a shard that lands after the turn is stopped is refused inside the queue', async () => {
+  const controller = new AbortController();
+  const { tools, looks } = fanTools(async (_c, args) => relabel(args), {
+    // The stop arrives while the batch waits its turn in the document's queue.
+    beforeWrite: () => controller.abort(),
+  });
+  const turn = { ...(await freshTurn()), abort: controller };
+  const result = await tools.call('fan_out', { path: turn.target, note: 'x', plan: 'x', shards: pairs(2) }, turn);
+  assert.equal(result.applied, 0);
+  for (const shard of result.shards) assert.match(shard.error, /stopped/);
+  assert.equal(turn.undo.length, 0);
+  assert.equal(await drive.store.read(turn.target), SOURCE);
+  assert.equal(looks.filter((l) => l.extra?.failed).length, 0, 'a stop is not a failure');
+  assert.equal(turn.events.filter((e) => e.type === 'ops.refused').length, 0);
+});
+
+test('two fan outs in one turn are counted apart', async () => {
+  const { tools, looks, presences } = fanTools(async (_c, args) => relabel(args));
+  const turn = await freshTurn();
+  await tools.call('fan_out', { path: turn.target, note: 'First.', plan: 'x', shards: pairs(3) }, turn);
+  const first = groupsSaid(looks, presences);
+  looks.length = 0;
+  presences.length = 0;
+  await tools.call('fan_out', { path: turn.target, note: 'Second.', plan: 'x', shards: [{ ids: ['p7', 'p8'] }, { ids: ['p9', 'p10'] }] }, turn);
+  const second = groupsSaid(looks, presences);
+  assert.notEqual(second[0].call, first[0].call);
+  assert.deepEqual({ done: second[0].done, of: second[0].of }, { done: 0, of: 2 });
+  assert.deepEqual({ done: second.at(-1).done, of: second.at(-1).of }, { done: 2, of: 2 });
+  assert.ok(second[0].seq > first.at(-1).seq, 'the newer count is said as newer');
+});
+
+test('a part the person deleted while its worker read it fails the shard as changed, not as a bad op', async () => {
+  let release;
+  const deleted = new Promise((resolve) => { release = resolve; });
+  let working;
+  const begun = new Promise((resolve) => { working = resolve; });
+  const { tools } = fanTools(async (_c, args) => {
+    if (firstRow(args) === 3) {
+      working();
+      await deleted;
+    }
+    return relabel(args);
+  });
+  const turn = await freshTurn();
+  const call = tools.call('fan_out', { path: turn.target, note: 'x', plan: 'x', shards: pairs(2) }, turn);
+  await begun;
+  await drive.writeOps(turn.target, [{ type: 'remove', id: 'p3' }], { client: 'tab' });
+  release();
+  const result = await call;
+  assert.equal(result.shards[1].error, 'changed while it worked');
+  assert.equal(result.shards[0].applied, 2);
 });

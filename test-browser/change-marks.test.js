@@ -790,3 +790,60 @@ test('a group of a fan out that failed keeps its parts tinted until the end, and
   assert.equal(await tagSaid(page), 'Nothing changed · 1 failed', 'the end counts the failure even when the host did not');
   await layerEmpty(page, 4000);
 });
+
+test('a failed group whose parts land later is no longer failed: its tint goes, and the tag and the end stop saying so', async () => {
+  await settle();
+  const { page } = await open({ attending: ['c1'] });
+  const reach = ['r1', 'r2', 'r3'];
+  await frame(page, before({ parts: ['r1'], count: 1, total: 3, reach, groups: { call: 1, done: 0, failed: 0, of: 2, seq: 1 } }));
+  await opsFrom(page, 'agent:c1', [due('r1', 'Oct 9')]);
+  await frame(page, {
+    client: 'agent:c1', ids: ['r2', 'r3'], phase: 'writing', turn: 'c1-t1', stage: 'after',
+    failed: ['r2', 'r3'], count: 1, total: 3, reach, groups: { call: 1, done: 1, failed: 1, of: 2, seq: 3 },
+  });
+  assert.equal(await tagSaid(page), '1 of 2 groups done · 1 failed');
+  // The agent finishes the group itself, a cell at a time; the host says so.
+  await frame(page, before({ parts: ['r2n'], kind: 'words', count: 2, total: 3, reach, groups: { call: 1, done: 1, failed: 1, of: 2, seq: 4 } }));
+  await opsFrom(page, 'agent:c1', [{ type: 'setText', id: 'r2n', text: 'Local-first, again' }]);
+  assert.equal(await page.evaluate(() => window.marbleChange.tintFor('r3')), 'failed', 'the rest of the group is still marked');
+  await frame(page, before({ parts: ['r3s'], kind: 'words', count: 3, total: 3, reach, groups: { call: 1, done: 1, failed: 0, of: 2, seq: 6 } }));
+  await opsFrom(page, 'agent:c1', [{ type: 'setText', id: 'r3s', text: 'Unread' }]);
+  assert.match(await tagSaid(page), /^Rewriting 3 of 3 \w+$/, 'counted as parts again, with no failure');
+  await page.waitForFunction(() => !document.querySelector('.marble-change-tint[data-state="failed"]'), null, { timeout: 2000 });
+  await frame(page, { client: 'agent:c1', ids: [], stage: 'end', turn: 'c1-t1', done: { status: 'completed', changed: 3, added: 0, removed: 0, failed: 0 } });
+  assert.equal(await tagSaid(page), '3 changed');
+  await layerEmpty(page, 4000);
+
+  // With nothing from the host to count by, the page sees the part land itself.
+  await frame(page, { client: 'agent:c1', ids: ['r2'], phase: 'writing', turn: 'c1-t2', stage: 'after', failed: ['r2'], total: 4 });
+  assert.match(await tagSaid(page), /1 failed$/);
+  await frame(page, before({ turn: 'c1-t2', parts: ['r2s'], kind: 'words', count: 1, total: 4 }));
+  assert.doesNotMatch(await tagSaid(page), /failed/);
+  await frame(page, { client: 'agent:c1', ids: [], stage: 'end', turn: 'c1-t2', done: { status: 'completed', changed: 1, added: 0, removed: 0 } });
+  assert.equal(await tagSaid(page), '1 changed');
+  await layerEmpty(page, 4000);
+});
+
+test('two fan outs in one change are counted apart', async () => {
+  await settle();
+  const { page } = await open({ attending: ['c1'] });
+  const reach = ['r1', 'r2', 'r3', 's'];
+  await frame(page, before({ parts: ['r1'], count: 1, total: 4, reach, groups: { call: 1, done: 0, failed: 0, of: 4, seq: 1 } }));
+  await frame(page, {
+    client: 'agent:c1', ids: ['r2'], phase: 'writing', turn: 'c1-t1', stage: 'after',
+    failed: ['r2'], count: 1, total: 4, reach, groups: { call: 1, done: 3, failed: 1, of: 4, seq: 5 },
+  });
+  assert.equal(await tagSaid(page), '3 of 4 groups done · 1 failed');
+  // The second fan out: a count of its own, from nothing.
+  await frame(page, {
+    client: 'agent:c1', ids: ['s'], phase: 'writing', turn: 'c1-t1', stage: 'after',
+    failed: ['s'], count: 3, total: 4, reach, groups: { call: 2, done: 0, failed: 1, of: 2, seq: 7 },
+  });
+  assert.equal(await tagSaid(page), '0 of 2 groups done · 1 failed');
+  // A frame of the first fan out that crossed on the way changes nothing.
+  await frame(page, { ...before({ parts: ['r3'], count: 2, total: 4, reach }), stage: 'after', groups: { call: 1, done: 3, failed: 1, of: 4, seq: 4 } });
+  assert.equal(await tagSaid(page), '0 of 2 groups done · 1 failed');
+  await frame(page, { client: 'agent:c1', ids: [], stage: 'end', turn: 'c1-t1', done: { status: 'completed', changed: 2, added: 0, removed: 0, failed: 2 } });
+  assert.equal(await tagSaid(page), '2 changed · 2 failed');
+  await layerEmpty(page, 4000);
+});

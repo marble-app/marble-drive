@@ -521,12 +521,17 @@ export async function createDrive(config, { log = console, agentProviders = null
       const source = await store.read(docPath);
       if (source === null) throw Object.assign(new Error(`no document "${docPath}"`), { status: 404 });
 
+      // A writer that ran the guard itself, to know the batch would land
+      // before saying so, hands on what it got rather than have it worked
+      // out twice (on a large page that is most of a second).
+      let guarded = null;
       if (prepare) {
         const planned = await prepare(source);
         if (planned.refused) {
           return { applied: 0, refused: planned.refused, bytes: bytesOf(source), sha: shaOf(source) };
         }
         ops = planned.ops;
+        if (typeof planned.html === 'string') guarded = planned.html;
       }
 
       // `after` is bookkeeping for a writer that has already won; it must not
@@ -560,7 +565,7 @@ export async function createDrive(config, { log = console, agentProviders = null
           });
           if (merged.forks.length) return { html: merged.source, ops: merged.ops, forks: merged.forks };
         }
-        return { html: guardOps(source, ops), ops, forks: [] };
+        return { html: guarded ?? guardOps(source, ops), ops, forks: [] };
       })();
 
       if (next.html === source) {

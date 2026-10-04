@@ -561,15 +561,15 @@ test('a turn that finishes on its own aborts its signal too', async () => {
   await runner.close();
 });
 
-test('the turn-end look says how many groups of a fan out failed, and only when some did', async () => {
+test('the turn-end look says how many groups of a fan out are still failed, whenever the turn fanned out', async () => {
   const looks = [];
-  const run = async (failed) => {
+  const run = async (failed, fanout = { call: 1, of: 3, done: 3 - failed }) => {
     looks.length = 0;
     const { store, runner } = await setup({
       onLook: (doc, ids, client, extra) => looks.push({ doc, ids, client, extra }),
       tools: {
         call: async (name, input, turn) => {
-          turn.v5 = { parts: new Set(['a']), added: new Set(), removed: new Set(), total: null, reach: null, failed };
+          turn.v5 = { parts: new Set(['a']), added: new Set(), removed: new Set(), total: null, reach: null, failed, lost: [], fanout };
           return { ok: true };
         },
       },
@@ -584,7 +584,8 @@ test('the turn-end look says how many groups of a fan out failed, and only when 
     return looks.find((look) => look.extra?.stage === 'end').extra.done;
   };
   assert.equal((await run(2)).failed, 2);
-  assert.equal('failed' in (await run(0)), false);
+  assert.equal((await run(0)).failed, 0, 'none failed, or the failed ones landed after all: said as 0, so a page counting its own knows');
+  assert.equal('failed' in (await run(0, null)), false, 'a turn that never fanned out says nothing of groups');
 });
 
 test('the prompt carries the target and the selected source', async () => {

@@ -902,8 +902,10 @@ export function createRunner({ store, tools, providers, workdir, origin, bridgeP
       ids: [],
       stage: 'end',
       turn: turn.id,
-      // `failed`: groups of a fan out whose workers failed, only when any did.
-      done: { status, changed, added: v5.added.size, removed: v5.removed.size, ...(v5.failed ? { failed: v5.failed } : {}) },
+      // `failed`: groups of a fan out whose workers failed and whose parts
+      // never landed after all — said, 0 included, whenever the turn fanned
+      // out, so a page counting on its own knows the host's answer.
+      done: { status, changed, added: v5.added.size, removed: v5.removed.size, ...(v5.fanout ? { failed: v5.failed ?? 0 } : {}) },
     });
 
     // Compute everything up front: the stored turn, the conversation, and

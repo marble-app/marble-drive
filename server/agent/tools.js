@@ -18,8 +18,8 @@
 
 import fsp from 'node:fs/promises';
 
-import { collectSlices, idsOfOps, knownIds, OP, repairOps, validateOps } from '../engine.js';
-import { IDS_MAX, MODELS, SHARDS_MAX, SHARDS_MIN, runFanOut } from '../change/fanout.js';
+import { collectSlices, guardOps, idsOfOps, knownIds, OP, repairOps, validateOps } from '../engine.js';
+import { IDS_MAX, MODELS, SHARDS_MAX, SHARDS_MIN, runFanOut, targetsOf } from '../change/fanout.js';
 import { partsOf, parseStep } from '../change/parts.js';
 import { parsePath, splitPath } from '../paths.js';
 import { inverseSteps } from './inverse.js';
@@ -210,11 +210,39 @@ export function createTools({ store, writeOps, createDocument, buildStarter, com
   }
 
   /** What a turn has done so far, for the page: the parts it has touched,
-   *  added and removed, the size of the change and the reach of its step,
-   *  and how many groups of a fan out failed. */
+   *  added and removed, the size of the change and the reach of its step.
+   *  A turn that fans out also keeps the groups that failed (`lost`, each
+   *  with the ids it has yet to land), how many of those are still failed
+   *  (`failed`), and the fan out the page was told of last (`fanout`). */
   const tallyOf = (turn) => {
-    turn.v5 ??= { parts: new Set(), added: new Set(), removed: new Set(), total: null, reach: null, failed: 0 };
+    turn.v5 ??= { parts: new Set(), added: new Set(), removed: new Set(), total: null, reach: null, failed: 0, lost: [], fanout: null };
     return turn.v5;
+  };
+
+  // Every count of groups the page is told is numbered, across all turns, so
+  // a frame that crossed a newer one on the way is known for older; a new
+  // fan out is a new `call`, counted from nothing.
+  let fanCalls = 0;
+  let groupSeq = 0;
+  /** The groups of the fan out the page heard of last, as the page is told
+   *  them: done and still failed, of how many. */
+  const groupsOf = (v5) => {
+    const fan = v5.fanout;
+    if (!fan) return undefined;
+    const failed = v5.lost.filter((group) => group.call === fan.call && group.left.size).length;
+    return { call: fan.call, of: fan.of, done: fan.done, failed, seq: ++groupSeq };
+  };
+  /** A failed group whose every part has since landed — at it, inside it —
+   *  in any batch of the turn is not failed any more. */
+  const settleLost = (v5, landed) => {
+    if (!v5.lost.length) return;
+    const touched = new Set(landed);
+    for (const group of v5.lost) {
+      for (const id of group.left) {
+        if ([...group.inside.get(id)].some((part) => touched.has(part))) group.left.delete(id);
+      }
+    }
+    v5.failed = v5.lost.filter((group) => group.left.size).length;
   };
 
   /**
@@ -222,23 +250,27 @@ export function createTools({ store, writeOps, createDocument, buildStarter, com
    * apply_ops, and each shard of a fan out. Inside the document's queue
    * (`prepare`/`after`): repaired and validated against the document as it
    * is, refused whole if an element it edits is not what `known` says the
-   * writer saw (`refusal(source, { stale, unread })` says how), tallied for
-   * the page, and said on it before and after the write; then recorded for
-   * undo, one record per batch.
+   * writer saw (`refusal(source, { stale, unread, gone, error })` says how —
+   * `gone` are elements it saw that are no longer there), refused if the
+   * write itself would refuse it, tallied for the page, and said on it
+   * before and after the write; then recorded for undo, one record per
+   * batch. Nothing is said or counted for a batch that will not land.
    *
    * `known` is the conversation's ledger when the agent wrote the ops itself,
    * and `learn` is that ledger again, brought up to date after the write: the
    * agent knows what it wrote. A worker's ops are checked against what the
    * worker was shown, and teach the agent nothing; it has not seen them.
-   * `frames()`, if given, adds fields to the batch's two frames.
+   * `signal`: a batch still waiting in the queue when it aborts is refused.
+   * `group`: the fan out this batch is one landed group of.
    */
-  async function writeBatch(turn, docPath, { ops: given, note, step = parseStep(note), known, refusal, learn = null, total, reach, frames = null }) {
+  async function writeBatch(turn, docPath, { ops: given, note, step = parseStep(note), known, refusal, learn = null, total, reach, signal = null, group = null }) {
     const client = `agent:${turn.conversationId}`;
     let steps = null;
     let introduced = [];
 
     const options = { client, note };
     options.prepare = async (source) => {
+      if (signal?.aborted) return { refused: { reason: 'stopped', current: [], stopped: true } };
       let ops;
       try {
         // repairOps only knows a setInner payload's own tag — and so only
@@ -248,6 +280,11 @@ export function createTools({ store, writeOps, createDocument, buildStarter, com
         ops = repairOps(given, source, { slices }).ops;
         ops = validateOps(ops, source, { slices, innerLimit: INNER_LIMIT });
       } catch (err) {
+        // An element the writer saw that has gone since is a change under
+        // it, whatever the check that tripped over its absence.
+        const present = knownIds(source);
+        const gone = (Array.isArray(given) ? given : []).flatMap(targetsOf).filter((id) => known.has(id) && !present.has(id));
+        if (gone.length) return { refused: refusal(source, { stale: [], unread: [], gone: [...new Set(gone)], error: err.message }) };
         return { refused: { reason: err.message, current: [] } };
       }
 
@@ -260,7 +297,22 @@ export function createTools({ store, writeOps, createDocument, buildStarter, com
         if (seen === undefined) unread.push(op.id);
         else if (seen !== current.get(op.id)) stale.push(op.id);
       }
-      if (stale.length || unread.length) return { refused: refusal(source, { stale, unread }) };
+      if (stale.length || unread.length) return { refused: refusal(source, { stale, unread, gone: [] }) };
+
+      // The write's own check, run here so that a batch it would refuse is
+      // refused before anything is counted or said; the write uses its
+      // result.
+      let html;
+      try {
+        html = guardOps(source, ops);
+      } catch (err) {
+        return { refused: { reason: err.message, current: [] } };
+      }
+      // A batch that changes nothing lands nothing: nothing to count or say.
+      if (html === source) {
+        if (group) group.done += 1;
+        return { ops, html };
+      }
 
       // Which parts this batch touches, the step it says it is (if its note
       // names one), a running count of distinct parts this turn has
@@ -279,6 +331,11 @@ export function createTools({ store, writeOps, createDocument, buildStarter, com
         const present = knownIds(source);
         v5.reach = reach.map(String).filter((id) => present.has(id)).slice(0, REACH_MAX);
       }
+      settleLost(v5, [...parts, ...ops.flatMap(targetsOf)]);
+      if (group) v5.fanout = group;
+      const before = groupsOf(v5);
+      if (group) group.done += 1;
+      const after = groupsOf(v5);
 
       const presence = {
         phase: 'writing',
@@ -294,13 +351,12 @@ export function createTools({ store, writeOps, createDocument, buildStarter, com
         total: v5.total,
         reach: v5.reach,
       };
-      const more = frames?.() ?? {};
 
       steps = inverseSteps(source, ops);
       introduced = ops.filter((op) => op.type === 'insert').flatMap((op) => idsIn(op.html));
-      onLook?.(docPath, idsOfOps(ops), client, { ...presence, ...more.before, stage: 'before' });
-      options.presence = { ...presence, ...more.after, stage: 'after' };
-      return { ops };
+      onLook?.(docPath, idsOfOps(ops), client, { ...presence, ...(before ? { groups: before } : {}), stage: 'before' });
+      options.presence = { ...presence, ...(after ? { groups: after } : {}), stage: 'after' };
+      return { ops, html };
     };
     if (learn) {
       options.after = (_before, next) => {
@@ -316,7 +372,8 @@ export function createTools({ store, writeOps, createDocument, buildStarter, com
     const result = await writeOps(docPath, [], options);
 
     if (result.refused) {
-      turn.onEvent({ type: 'ops.refused', path: docPath, reason: result.refused.reason });
+      // A stop is the turn ending, not something refused.
+      if (!result.refused.stopped) turn.onEvent({ type: 'ops.refused', path: docPath, reason: result.refused.reason });
       return { refused: result.refused };
     }
     if (steps && result.applied) {
@@ -383,7 +440,9 @@ export function createTools({ store, writeOps, createDocument, buildStarter, com
         learn: ledger,
         total: input.total,
         reach: input.reach,
-        refusal: (source, { stale, unread }) => {
+        refusal: (source, { stale, unread, gone, error }) => {
+          // Gone since it was read: what the checks said, as before.
+          if (gone.length) return { reason: error, current: [] };
           const blocked = [...new Set([...stale, ...unread])];
           const reason = stale.length
             ? `${stale.map((id) => `"${id}"`).join(', ')} changed since you read ${stale.length === 1 ? 'it' : 'them'} — nothing was applied. Here is the current source; rebuild the edit against it.`
@@ -417,7 +476,10 @@ export function createTools({ store, writeOps, createDocument, buildStarter, com
       const step = parseStep(note);
       const shards = Array.isArray(input.shards) ? input.shards : [];
       const all = [...new Set(shards.flatMap((shard) => (Array.isArray(shard?.ids) ? shard.ids.map(String) : [])))];
-      const groups = { done: 0, failed: 0, of: shards.length };
+      // This fan out's groups: how many have landed, of how many. Its failed
+      // ones are kept on the turn (`lost`), where a later batch can land them.
+      const fan = { call: ++fanCalls, of: shards.length, done: 0 };
+      const signal = turn.abort?.signal;
 
       const result = await runFanOut({
         source,
@@ -427,11 +489,11 @@ export function createTools({ store, writeOps, createDocument, buildStarter, com
         shards: input.shards,
         model: input.model,
         exec,
-        signal: turn.abort?.signal,
+        signal,
         log,
         apply: async (k, ops, { known }) => {
           if (!ops.length) {
-            groups.done += 1;
+            fan.done += 1;
             return { applied: 0 };
           }
           const landed = await writeBatch(turn, docPath, {
@@ -441,23 +503,20 @@ export function createTools({ store, writeOps, createDocument, buildStarter, com
             known,
             total: all.length,
             reach: all,
-            refusal: (_source, { stale }) => ({
-              reason: stale.length ? 'changed while it worked' : 'edited a part it was not shown whole',
+            signal,
+            group: fan,
+            refusal: (_source, { stale, gone }) => ({
+              reason: stale.length || gone.length ? 'changed while it worked' : 'edited a part it was not shown whole',
               current: [],
             }),
-            // Counted as it is written, inside the queue, so two shards
-            // landing back to back never say the same number.
-            frames: () => {
-              groups.done += 1;
-              return { before: { groups: { ...groups, done: groups.done - 1 } }, after: { groups: { ...groups } } };
-            },
           });
           return landed.refused ? { error: landed.refused.reason } : { applied: landed.applied };
         },
-        onFailed: (_k, ids) => {
-          groups.failed += 1;
+        onFailed: (_k, ids, _error, { inside }) => {
           const v5 = tallyOf(turn);
-          v5.failed = (v5.failed ?? 0) + 1;
+          v5.fanout = fan;
+          v5.lost.push({ call: fan.call, ids, left: new Set(ids), inside });
+          v5.failed = v5.lost.filter((group) => group.left.size).length;
           v5.total ??= all.length;
           onLook?.(docPath, ids, client, {
             phase: 'writing',
@@ -468,7 +527,7 @@ export function createTools({ store, writeOps, createDocument, buildStarter, com
             count: v5.parts.size,
             total: v5.total,
             reach: v5.reach ?? all.slice(0, REACH_MAX),
-            groups: { ...groups },
+            groups: groupsOf(v5),
           });
         },
       });

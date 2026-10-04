@@ -24,8 +24,9 @@
 //
 // A change fanned out to workers (server/change/fanout.js) lands a group at a
 // time. A group whose worker failed is said in a frame of its own (`failed`):
-// its parts keep their light tint until the change ends, and the tag counts
-// the groups ("3 of 4 groups done · 1 failed").
+// its parts keep their light tint until the change ends or they land after
+// all, and the tag counts the groups of the latest fan out ("3 of 4 groups
+// done · 1 failed").
 //
 // Done, the tag says what changed in numbers, then every mark goes: nothing
 // stays on the page. Everything is transient chrome in one fixed layer;
@@ -331,8 +332,8 @@
         total: null,
         step: null,
         steps: new Map(),     // n -> what the note called it
-        groups: null,         // a fan out's groups: { done, failed, of }
-        failedGroups: new Set(), // the failed frames heard, one per group
+        groups: null,         // the latest fan out's groups, as the host counts them: { call, done, failed, of, seq }
+        failedGroups: new Map(), // key -> { ids, left }: failed groups whose parts have not landed since
         hang: null,
         hangHolder: null,
         hangBox: null,
@@ -412,20 +413,49 @@
         run.step = { n: d.step.n, of: Number.isFinite(d.step.of) ? d.step.of : null };
         if (d.step.text) run.steps.set(d.step.n, String(d.step.text));
       }
-      // Frames of one fan out can cross on the way: the counts only go up.
+      // The host numbers every count it says: a frame that crossed a newer
+      // one on the way is older, and a new fan out (a newer count) starts
+      // its own from nothing.
       const g = d.groups;
       if (g && Number.isFinite(g.of) && g.of > 0) {
-        run.groups = {
-          of: g.of,
-          done: Math.max(run.groups?.done ?? 0, Number.isFinite(g.done) ? g.done : 0),
-          failed: Math.max(run.groups?.failed ?? 0, Number.isFinite(g.failed) ? g.failed : 0),
-        };
+        const seq = Number.isFinite(g.seq) ? g.seq : null;
+        if (!run.groups || seq === null || run.groups.seq === null || seq > run.groups.seq) {
+          run.groups = {
+            call: g.call ?? null,
+            of: g.of,
+            done: Number.isFinite(g.done) ? g.done : 0,
+            failed: Number.isFinite(g.failed) ? g.failed : 0,
+            seq,
+          };
+        }
       }
     }
 
-    /** How many groups of a fan out failed: as the host counted them, or as
-     *  many failures as this page heard, whichever is more. */
-    const failedOf = (run) => Math.max(run.groups?.failed ?? 0, run.failedGroups.size, Number.isFinite(run.done?.failed) ? run.done.failed : 0);
+    /** How many groups of a fan out are failed: at the end, as the host says;
+     *  while it runs, as the host counts the latest fan out; with nothing from
+     *  the host, the failed groups this page saw whose parts have not landed. */
+    function failedOf(run) {
+      if (run.ending && Number.isFinite(run.done?.failed)) return run.done.failed;
+      if (run.groups) return run.groups.failed;
+      return run.failedGroups.size;
+    }
+
+    /** Parts landing now that are, are inside, or hold a failed group's part:
+     *  that part has changed after all, and its mark goes as any landed
+     *  part's does. A group whose every part has landed is not failed. */
+    function recover(run, ids, landing) {
+      if (!run.failedGroups.size || !ids.length) return;
+      const els = ids.map(byId).filter(Boolean);
+      for (const [key, group] of run.failedGroups) {
+        for (const id of [...group.left]) {
+          const el = byId(id);
+          if (!ids.includes(id) && !(el && els.some((other) => el.contains(other) || other.contains(el)))) continue;
+          group.left.delete(id);
+          if (run.parts.get(id)?.state === 'failed' && !landing.includes(id)) landPart(run, id);
+        }
+        if (!group.left.size) run.failedGroups.delete(key);
+      }
+    }
 
     // A batch's two frames carry the same count and parts; nothing else
     // names which batch an `after` closes.
@@ -510,6 +540,7 @@
       // An earlier batch whose ops never came has landed as far as anyone
       // here will see. One still moving lands when its motion ends.
       for (const old of run.batches.filter((b) => !b.played)) land(run, old);
+      recover(run, [...parts, ...inserted, ...(Array.isArray(d.inserts) ? d.inserts : []).map((entry) => entry?.parentId).filter(Boolean)], parts);
       const distinct = new Set([...run.parts.keys(), ...parts, ...reach]);
       if (!run.many && Math.max(distinct.size, run.count, run.total ?? 0) > MANY) run.many = true;
       const reachKey = reach.join(',');
@@ -584,7 +615,7 @@
     function onFailed(run, d) {
       settleFields(run, d);
       const ids = topmost(list(d.failed));
-      run.failedGroups.add(ids.join(','));
+      run.failedGroups.set(`${d.groups?.call ?? ''}|${ids.join(',')}`, { ids, left: new Set(ids) });
       for (const id of ids) {
         const part = run.parts.get(id) ?? addPart(run, id, 'failed');
         part.state = 'failed';

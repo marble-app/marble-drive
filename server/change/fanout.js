@@ -24,6 +24,7 @@ import { pickEnv } from '../agent/env.js';
 import { scratch } from '../agent/namer.js';
 import { runCommand } from '../agent/providers/exec.js';
 import { subtreesOf } from '../agent/source.js';
+import { parseSource } from '../engine.js';
 
 export const CONCURRENCY = 4;
 export const TIMEOUT = 120_000;
@@ -137,20 +138,45 @@ function checkShards(lists, subtrees) {
 }
 
 /** Every id an op addresses: what it changes, and where it puts things. */
-const targetsOf = (op) => ['id', 'parentId', 'beforeId']
-  .filter((field) => op[field] !== undefined && op[field] !== null)
+export const targetsOf = (op) => ['id', 'parentId', 'beforeId']
+  .filter((field) => op?.[field] !== undefined && op?.[field] !== null)
   .map((field) => op[field]);
 
-// Markup that would run something, or load a page into this one, when the
-// document is opened: the agent may write it, a worker may not.
-const RUNS = /<\s*(?:script|iframe|frame|object|embed|base|meta)\b|<[^>]*\son[a-z]+\s*=|=\s*["']?\s*(?:javascript|vbscript)\s*:/i;
-const RUNS_ATTR = /^(?:on|srcdoc$|formaction$)/i;
-const RUNS_URL = /^\s*(?:javascript|vbscript)\s*:/i;
+// What would run something, or load a page into this one, when the document
+// is opened: the agent may write it, a worker may not. Read as a browser
+// reads it — parsed, entities decoded, a table row in a table — not matched
+// as text, which is spelled around in a dozen ways.
+const RUNS_TAGS = new Set(['script', 'iframe', 'frame', 'frameset', 'object', 'embed', 'applet', 'portal', 'base', 'meta']);
+const URL_ATTRS = new Set(['href', 'src', 'action', 'formaction', 'xlink:href', 'srcdoc', 'data', 'poster', 'background', 'ping', 'to', 'from', 'values']);
+// A URL is read with every control character and space taken out (a browser
+// drops tabs and newlines anywhere in one, and both ends' controls).
+const RUNS_URL = /^(?:javascript:|vbscript:|data:text\/html)/i;
+const runsAsUrl = (value) => RUNS_URL.test(String(value ?? '').replace(/[\u0000-\u0020\u007f-\u009f]/g, ''));
+const runsAttr = (name, value) => /^on/i.test(name) || (URL_ATTRS.has(name.toLowerCase()) && runsAsUrl(value));
+
+function markupRuns(html) {
+  // Inside a <template>, markup parses as it would where it lands: rows and
+  // cells keep their own tags and attributes instead of being dropped.
+  const tree = parseSource(`<!doctype html><template>${html}</template>`);
+  const walk = (node) => {
+    for (const child of [...(node.childNodes ?? []), ...(node.content ? [node.content] : [])]) {
+      if (child.tagName && RUNS_TAGS.has(child.tagName.toLowerCase())) return true;
+      for (const attr of child.attrs ?? []) {
+        if (runsAttr(attr.prefix ? `${attr.prefix}:${attr.name}` : attr.name, attr.value)) return true;
+      }
+      if (walk(child)) return true;
+    }
+    return false;
+  };
+  return walk(tree);
+}
 
 function writesScript(op, parts) {
-  if (typeof op.html === 'string' && RUNS.test(op.html)) return true;
-  if (op.type === 'setAttr' && (RUNS_ATTR.test(String(op.name ?? '')) || RUNS_URL.test(String(op.value ?? '')))) return true;
-  if ((op.type === 'setInner' || op.type === 'setText') && parts.get(op.id)?.tag === 'script') return true;
+  // A script already on the page is run by what it holds and where it is
+  // loaded from: a worker changes neither.
+  if (op.id && parts.get(op.id)?.tag === 'script' && op.type !== 'remove' && op.type !== 'move') return true;
+  if (op.type === 'setAttr') return runsAttr(String(op.name ?? ''), op.value);
+  if (typeof op.html === 'string') return markupRuns(op.html);
   return false;
 }
 
@@ -161,8 +187,9 @@ const firstLine = (text) => String(text ?? '').split('\n').map((line) => line.tr
  * checked reply to `apply(shardIndex, ops, { known })` as soon as it is in:
  * `known` is what the worker was shown, id → hash, and an `apply` that finds
  * one of those changed refuses the shard. `apply` answers `{ applied }` or
- * `{ error }`. `onFailed(shardIndex, ids, error)` hears each shard that
- * fails (not one stopped by `signal`). Never throws.
+ * `{ error }`. `onFailed(shardIndex, ids, error, { inside })` hears each shard
+ * that fails (not one stopped by `signal`); `inside` is each of its ids → the
+ * ids at or inside it. Never throws.
  *
  * Returns `{ applied, shards: [{ ids, applied, error? }] }`; `error` alone
  * when the shards are not a fan out; `missing: true` when there is no
@@ -207,7 +234,7 @@ export async function runFanOut({
     results[k].error = error;
     if (!said) return;
     try {
-      onFailed?.(k, results[k].ids, error);
+      onFailed?.(k, results[k].ids, error, { inside: subtrees[k].inside });
     } catch (err) {
       log.error?.(`[agents] fan out could not say shard ${k + 1} failed: ${err.message}`);
     }
@@ -228,7 +255,9 @@ export async function runFanOut({
     const ask = fanOutPrompt({ plan, brief: shards[k].brief ?? '', ids, markup });
     let result;
     try {
-      result = await exec('claude', ['-p', '--model', model ?? 'sonnet', '--tools', '', '--setting-sources', 'project', '--output-format', 'text', '--', ask], {
+      // No tools, and no MCP server of the login's either: a worker can only
+      // answer.
+      result = await exec('claude', ['-p', '--model', model ?? 'sonnet', '--tools', '', '--strict-mcp-config', '--setting-sources', 'project', '--output-format', 'text', '--', ask], {
         timeout, env: pickEnv(env), cwd, signal,
       });
     } catch (err) {
@@ -261,7 +290,9 @@ export async function runFanOut({
     } catch (err) {
       landed = { error: err.message };
     }
-    if (landed?.error) return fail(k, landed.error);
+    // Refused because the turn stopped while the batch waited its turn: a
+    // stop, not a failure.
+    if (landed?.error) return fail(k, landed.error, { said: !stopped() });
     results[k].applied = landed?.applied ?? 0;
   }
 
