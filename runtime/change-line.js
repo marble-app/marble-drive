@@ -84,6 +84,9 @@
       --line-muted: var(--muted, light-dark(#5f6267, #a6a9ae));
       --line-faint: var(--faint, light-dark(#8b8e93, #7e8187));
       --line-rule: var(--line, color-mix(in srgb, var(--line-text) 14%, transparent));
+      --line-soft: var(--accent-soft, color-mix(in srgb, var(--line-accent) 22%, transparent));
+      --line-well: var(--paper-3, var(--well, color-mix(in srgb, var(--line-text) 7%, transparent)));
+      --line-lift: var(--shadow-lift, 0 2px 6px rgba(0, 0, 0, .08), 0 10px 26px rgba(0, 0, 0, .12));
       --line-font: var(--ui-font, var(--sans, system-ui, -apple-system, "Segoe UI", sans-serif));
       font: 14px/1.45 var(--line-font);
     }
@@ -101,27 +104,55 @@
       opacity: 1; transition: opacity ${ARRIVE}ms ${EASE}; }
     .marble-line-scope[hidden] { display: none; }
 
-    /* The line: one ring of the accent all the way round, on the page's own
-       card, so it reads as part of the thing above it. */
+    /* The line is the composer's field, floating: a card a shade of glass,
+       rounded like a popover, lifted by its shadow with one hairline round
+       it, and no capsules inside it (Design System, "What was rejected":
+       capsules in the composer; the bar is words). While it has the caret
+       it wears the field's focus, a 1px accent ring in a soft halo, not a
+       dark rule. */
     .marble-line { position: fixed; left: 0; top: 0; box-sizing: border-box; pointer-events: auto;
-      display: grid; gap: 6px; padding: 6px 6px 6px 10px; border-radius: 10px;
-      background: var(--line-card); color: var(--line-text);
-      box-shadow: 0 0 0 1px var(--line-ink), 0 0 0 4px color-mix(in srgb, var(--line-accent) 30%, transparent),
-                  var(--shadow-lift, 0 10px 28px -12px rgba(0, 0, 0, .3));
+      display: grid; gap: 6px; padding: 6px 6px 6px 14px; border-radius: 14px;
+      background: color-mix(in srgb, var(--line-card) 90%, transparent);
+      -webkit-backdrop-filter: blur(24px) saturate(1.4); backdrop-filter: blur(24px) saturate(1.4);
+      color: var(--line-text);
+      box-shadow: 0 0 0 1px var(--line-rule), var(--line-lift);
       transform-origin: 50% 0; opacity: 1; transform: none;
-      transition: opacity ${ARRIVE}ms ${EASE}, transform ${ARRIVE}ms ${EASE}; }
+      transition: opacity ${ARRIVE}ms ${EASE}, transform ${ARRIVE}ms ${EASE}, box-shadow ${ARRIVE}ms ${COLOUR}; }
+    .marble-line:focus-within { box-shadow: 0 0 0 1px var(--line-accent), 0 0 0 4px var(--line-soft), var(--line-lift); }
     .marble-line[data-flip], .marble-line[data-scope="page"] { transform-origin: 50% 100%; }
-    .marble-line button { font: inherit; }
-    .marble-line button:focus-visible { outline: 2px solid var(--line-ink); outline-offset: 2px; }
+    .marble-line button { font: inherit; font-family: var(--line-font); }
+    .marble-line button:focus-visible { outline: 2px solid var(--line-accent); outline-offset: 1px; }
+    @media (prefers-reduced-transparency: reduce) {
+      .marble-line { background: var(--line-card); -webkit-backdrop-filter: none; backdrop-filter: none; }
+    }
 
-    .marble-line-row { display: flex; align-items: flex-start; gap: 8px; min-width: 0; }
-    .marble-line-input { flex: 1; min-width: 0; margin: 0; padding: 1px 0; outline: none;
+    .marble-line-row { display: flex; align-items: flex-end; gap: 8px; min-width: 0; }
+    .marble-line-input { flex: 1; min-width: 0; margin: 0; padding: 4px 0; outline: none;
       font-family: var(--line-font); font-size: 14px; font-weight: 400; line-height: 1.45; color: var(--line-text);
-      white-space: pre-wrap; overflow-wrap: anywhere; max-height: calc(3 * 1.45em); overflow-y: auto;
+      white-space: pre-wrap; overflow-wrap: anywhere; max-height: calc(3 * 1.45em + 8px); overflow-y: auto;
       caret-color: var(--line-ink); }
     .marble-line-input:empty::before { content: attr(data-placeholder); color: var(--placeholder, var(--line-faint)); pointer-events: none; }
-    .marble-line kbd { flex: none; margin-top: 1px; padding: 2px 5px; border-radius: 4px; border: 1px solid var(--line-rule);
-      font: 500 11px/1.2 ui-monospace, "SF Mono", Menlo, monospace; color: var(--line-faint); background: none; }
+    /* Send: an outline until there is something to send, when it fills to
+       ink; the fill is the affordance (Design System, the composer). */
+    .marble-line-send { position: relative; flex: none; appearance: none; box-sizing: border-box; display: grid; place-items: center;
+      width: 28px; height: 28px; margin: 0; padding: 0; border-radius: 999px; border: 1px solid var(--line-rule);
+      background: none; color: var(--line-faint); cursor: default;
+      transition: background-color 120ms ${COLOUR}, border-color 120ms ${COLOUR}, color 120ms ${COLOUR}; }
+    .marble-line-send svg { width: 15px; height: 15px; }
+    .marble-line-send[data-ready] { background: var(--line-ink); border-color: var(--line-ink); color: var(--line-card); cursor: pointer; }
+    .marble-line-send[data-ready]:active { background: color-mix(in srgb, var(--line-ink) 88%, #000); }
+
+    /* A tip for a control with no word: what a press does, and its key,
+       after a rest; at once for the keyboard; never for a finger. */
+    .marble-line [data-tip]:is(:hover, :focus-visible)::after { content: attr(data-tip); position: absolute; z-index: 1; right: -2px; bottom: calc(100% + 8px);
+      padding: 6px 10px; border-radius: 8px; border: 1px solid var(--line-rule); background: var(--line-card);
+      box-shadow: var(--shadow-rest, 0 1px 2px rgba(0, 0, 0, .06), 0 2px 6px rgba(0, 0, 0, .05));
+      color: var(--line-text); font: 400 12.5px/1.35 var(--line-font); white-space: nowrap; pointer-events: none;
+      animation: marble-line-tip 140ms ${EASE} 750ms both; }
+    .marble-line [data-tip]:focus-visible::after { animation-delay: 0ms; }
+    .marble-line[data-flip] [data-tip]::after { bottom: auto; top: calc(100% + 8px); }
+    @keyframes marble-line-tip { from { opacity: 0; translate: 0 3px; } to { opacity: 1; translate: 0 0; } }
+    @media (hover: none) { .marble-line [data-tip]::after { display: none; } }
 
     /* Why nothing changed, over the words given back. */
     .marble-line-said { margin: 0; font-size: 13px; line-height: 1.4; color: var(--line-muted); overflow-wrap: anywhere; }
@@ -144,7 +175,7 @@
     .marble-line-ask { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 10px; }
     .marble-line-question { flex: 1 1 12ch; min-width: 0; font-weight: 500; color: var(--line-text); overflow-wrap: anywhere; }
     .marble-line-opts { display: flex; flex-wrap: wrap; gap: 6px; }
-    .marble-line-opt { appearance: none; margin: 0; padding: 3px 10px; border-radius: 999px; border: 1px solid var(--line-rule);
+    .marble-line-opt { appearance: none; margin: 0; padding: 4px 10px; border-radius: 8px; border: 1px solid var(--line-rule);
       background: var(--line-card); color: var(--line-text); font-size: 12.5px; font-weight: 500; line-height: 1.4; cursor: pointer;
       transition: background-color 120ms ${COLOUR}, border-color 120ms ${COLOUR}; }
     .marble-line-opt:hover { background: color-mix(in srgb, var(--line-accent) 14%, var(--line-card));
@@ -152,20 +183,47 @@
     .marble-line-opt:active { background: color-mix(in srgb, var(--line-accent) 26%, var(--line-card)); }
     .marble-line-opt:disabled { opacity: .55; cursor: default; }
 
-    /* What the thing could become, while words are written: suggestions
-       and the four actions, as pills, two rows at most. */
-    .marble-line-offer { display: flex; flex-wrap: wrap; gap: 4px; min-width: 0; padding: 0 0 1px; }
-    .marble-line-chip { appearance: none; box-sizing: border-box; display: inline-flex; align-items: center; gap: 5px;
-      min-width: 0; max-width: 100%; margin: 0; padding: 2px 9px; border-radius: 999px; border: 1px solid var(--line-rule);
-      background: none; color: var(--line-muted); font-size: 12px; font-weight: 400; line-height: 1.45; white-space: nowrap; cursor: pointer;
-      transition: background-color 120ms ${COLOUR}, color 120ms ${COLOUR}, border-color 120ms ${COLOUR}; }
-    .marble-line-chip[data-act] { padding-left: 7px; }
-    .marble-line-chip > span { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
-    .marble-line-chip svg { flex: none; width: 13px; height: 13px; color: var(--line-ink); }
-    .marble-line-chip:hover { background: var(--well, color-mix(in srgb, var(--line-text) 6%, transparent)); color: var(--line-text); }
-    .marble-line-chip[aria-pressed="true"] { color: var(--line-ink);
-      background: color-mix(in srgb, var(--line-accent) 14%, transparent); border-color: color-mix(in srgb, var(--line-ink) 40%, transparent); }
+    /* What the thing could become, while words are written: the words it
+       could be told on the left, each led by the drawn corner arrow, and the
+       four actions on the right as icon and word. All are bare text until
+       reached for, as context is: a hover lays a well under one, a press
+       deepens it, nothing has a border. Two rows at most (fitChips). */
+    .marble-line-offer { display: flex; flex-wrap: wrap; align-items: center; gap: 2px; min-width: 0; margin: 0 0 0 -8px; }
+    .marble-line-chip { position: relative; appearance: none; box-sizing: border-box; display: inline-flex; align-items: center; gap: 6px;
+      min-width: 0; max-width: 100%; height: 28px; margin: 0; padding: 0 8px; border: 0; border-radius: 8px;
+      background: none; color: var(--line-muted); font-size: 12.5px; font-weight: 400; line-height: 1; white-space: nowrap; cursor: pointer;
+      transition: background-color 120ms ${COLOUR}, color 120ms ${COLOUR}; }
+    .marble-line-chip > span { min-width: 0; overflow: hidden; text-overflow: ellipsis; padding: 2px 0; }
+    .marble-line-chip svg { flex: none; width: 15px; height: 15px; color: var(--line-faint); transition: color 120ms ${COLOUR}; }
+    .marble-line-chip[data-sug] { color: var(--line-text); }
+    .marble-line-chip[data-sug] svg { color: var(--line-ink); }
+    .marble-line-chip:is(:hover, :focus-visible) { background: var(--line-well); color: var(--line-text); }
+    .marble-line-chip:is(:hover, :focus-visible) svg { color: var(--line-text); }
+    .marble-line-chip[data-sug]:is(:hover, :focus-visible) svg { color: var(--line-ink); }
+    .marble-line-chip:active { background: color-mix(in srgb, var(--line-text) 12%, transparent); }
+    /* The actions are one group at the right, after the suggestions; when
+       they cannot share a row with them they move down together, still at
+       the right, under the send. */
+    .marble-line-acts { display: flex; gap: 2px; margin-left: auto; min-width: 0; }
+    .marble-line-chip[aria-pressed="true"] { color: var(--line-ink); background: var(--line-soft); }
+    .marble-line-chip[aria-pressed="true"] svg { color: var(--line-ink); }
     .marble-line-chip[hidden] { display: none; }
+    /* When the words and the actions will not share one row, the actions
+       keep their icons and let their words go to a tip, so the suggestions
+       keep their room (fitChips measures it). A finger has no hover to see a
+       tip with, so on touch the words stay and the actions take a row. */
+    .marble-line-chip[data-act][data-tip]::after { content: none; }
+    @media (hover: hover) {
+      .marble-line-offer[data-compact] .marble-line-chip[data-act] { width: 28px; padding: 0; justify-content: center; }
+      .marble-line-offer[data-compact] .marble-line-chip[data-act] > span { display: none; }
+      .marble-line-offer[data-compact] .marble-line-chip[data-act][data-tip]:is(:hover, :focus-visible)::after { content: attr(data-tip); }
+    }
+    /* A finger needs room to land. */
+    @media (pointer: coarse) {
+      .marble-line-chip { height: 36px; font-size: 13.5px; }
+      .marble-line-send { width: 36px; height: 36px; }
+      .marble-line-input { font-size: 16px; padding: 6px 0; }
+    }
     .marble-line-input.is-previewing:empty::before { color: color-mix(in srgb, var(--line-ink) 70%, var(--line-faint)); }
 
     /* The words a line is about, when it is about words. */
@@ -174,7 +232,8 @@
     @media (prefers-reduced-motion: reduce) {
       .marble-line { transition: opacity ${STILL}ms linear; }
       .marble-line-scope { transition: opacity ${STILL}ms linear; }
-      .marble-line-open, .marble-line-opt, .marble-line-chip { transition: none; }
+      .marble-line-open, .marble-line-opt, .marble-line-chip, .marble-line-send, .marble-line-chip svg { transition: none; }
+      .marble-line [data-tip]::after { animation: none; }
     }
   `;
 
@@ -496,11 +555,29 @@
       });
       return input;
     }
-    const kbd = (text) => {
-      const k = h('kbd', '', text);
-      k.setAttribute('aria-hidden', 'true');
-      return k;
-    };
+    /** Send: the press that ⏎ is. It fills once there are words to send,
+     *  and a press must not take the caret out of them. */
+    const SEND_ICON = '<svg viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 19V5M6 11l6-6 6 6"/></svg>';
+    function sendButton(s, input, label = 'Send') {
+      const b = h('button', 'marble-line-send');
+      b.type = 'button';
+      b.innerHTML = globalThis.marbleOffer?.ICONS?.send ?? SEND_ICON;
+      b.setAttribute('aria-label', label);
+      b.dataset.tip = `${label} ⏎`;
+      // ⏎ is the keyboard's send, so Tab goes from the words to what they could become.
+      b.tabIndex = -1;
+      b.addEventListener('pointerdown', (event) => event.preventDefault());
+      b.addEventListener('click', () => {
+        const text = said(input);
+        if (!text || s.input !== input) return;
+        if (s.state === 'ask') reply(s, text);
+        else send(s, text);
+      });
+      const sync = () => b.toggleAttribute('data-ready', !!said(input));
+      new MutationObserver(sync).observe(input, { childList: true, characterData: true, subtree: true });
+      sync();
+      return b;
+    }
 
     // ------------------------------------------------------------ the offer
     // What the thing could become, under the words while they are written:
@@ -560,9 +637,13 @@
         list[(at + (event.key === 'ArrowRight' ? 1 : -1) + list.length) % list.length].focus();
       });
       const icons = offering().ICONS ?? {};
+      const acts = h('div', 'marble-line-acts');
+      row.append(acts);
       for (const [id, name] of offering().ACTIONS ?? []) {
         const b = chip(name, icons[id]);
         b.dataset.act = id;
+        b.dataset.tip = name;
+        b.setAttribute('aria-label', name);
         b.setAttribute('aria-pressed', 'false');
         // Pointing at an action shows, in an empty line, what it would ask.
         b.addEventListener('pointerenter', (event) => { if (event.pointerType !== 'touch') preview(s, id, true); });
@@ -570,7 +651,7 @@
         b.addEventListener('focus', () => preview(s, id, true));
         b.addEventListener('blur', () => preview(s, id, false));
         b.addEventListener('click', () => pick(s, id));
-        row.append(b);
+        acts.append(b);
       }
       s.chips = row;
       paintSugs(s);
@@ -582,9 +663,9 @@
       const row = s.chips;
       if (!row || !s.offer) return;
       for (const old of row.querySelectorAll('[data-sug]')) old.remove();
-      const before = row.querySelector('[data-act]');
+      const before = row.querySelector('.marble-line-acts');
       const made = s.offer.offer.sugs.slice(0, 2).map((text) => {
-        const b = chip(text);
+        const b = chip(text, offering().ICONS?.suggest ?? null);
         b.dataset.sug = '';
         b.addEventListener('click', () => suggest(s, text));
         row.insertBefore(b, before);
@@ -604,12 +685,15 @@
     function fitChips(s) {
       const row = s.chips;
       if (!row?.isConnected) return;
-      const all = [...row.children];
+      const all = [...row.querySelectorAll('.marble-line-chip')];
       const key = `${s.el?.style.width}|${all.map((c) => c.textContent).join('|')}`;
       if (row.fitted === key) return;
       row.fitted = key;
       for (const c of all) c.hidden = false;
+      row.removeAttribute('data-compact');
       const rows = () => new Set(all.filter((c) => !c.hidden).map((c) => c.offsetTop)).size;
+      // One row if the actions can give up their words for it (not on touch).
+      if (rows() > 1 && matchMedia('(hover: hover)').matches) row.setAttribute('data-compact', '');
       if (rows() <= 2) return;
       const sugs = all.filter((c) => c.hasAttribute('data-sug'));
       const act = (id) => all.find((c) => c.dataset.act === id);
@@ -773,7 +857,7 @@
         }
         input = makeInput(s, label, text);
         const row = h('div', 'marble-line-row');
-        row.append(input, kbd('⏎'));
+        row.append(input, sendButton(s, input));
         el.append(row);
         if (state === 'edit' && s.offer && offering()?.actionWords) el.append(chipRow(s));
       } else if (state === 'answer') {
@@ -791,7 +875,7 @@
         }
         input = makeInput(s, 'Ask more');
         const row = h('div', 'marble-line-row marble-line-more');
-        row.append(input, kbd('esc'));
+        row.append(input, sendButton(s, input, 'Ask'));
         el.append(row);
       } else if (state === 'ask') {
         const q = s.ask?.input?.questions?.[0] ?? {};
@@ -810,14 +894,14 @@
         el.append(ask);
         input = makeInput(s, 'Type an answer');
         const row = h('div', 'marble-line-row');
-        row.append(input, kbd('⏎'));
+        row.append(input, sendButton(s, input, 'Answer'));
         el.append(row);
       }
       s.input = input;
       paintScope(s);
       place();
       if (arriving) arrive(el);
-      if (s.chips) cascade([...s.chips.children].filter((c) => !c.hidden));
+      if (s.chips) cascade([...s.chips.querySelectorAll('.marble-line-chip')].filter((c) => !c.hidden));
       if (state === 'answer' || state === 'cant' || state === 'ask' || state === 'setup') {
         aloud.textContent = state === 'answer' ? s.answer : state === 'cant' || state === 'setup' ? s.said : (s.ask?.input?.questions?.[0]?.question ?? '');
       } else aloud.textContent = '';
