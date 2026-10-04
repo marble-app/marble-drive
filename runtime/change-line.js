@@ -40,6 +40,8 @@
 // transient chrome in one top-layer host; nothing here is filed as an op.
 //
 // agent-callout.js decides what ⌘J is about and calls `marbleLine.open`.
+// Describe mode (agent-marks.js) borrows this same line as its composer with
+// `marbleLine.lend`: one way to ask on a page, one look, not a second card.
 
 (() => {
   const TRANSIENT = 'data-marble-transient';
@@ -120,6 +122,7 @@
       transition: opacity ${ARRIVE}ms ${EASE}, transform ${ARRIVE}ms ${EASE}, box-shadow ${ARRIVE}ms ${COLOUR}; }
     .marble-line:focus-within { box-shadow: 0 0 0 1px var(--line-accent), 0 0 0 4px var(--line-soft), var(--line-lift); }
     .marble-line[data-flip], .marble-line[data-scope="page"] { transform-origin: 50% 100%; }
+    .marble-line[hidden] { display: none; }
     .marble-line button { font: inherit; font-family: var(--line-font); }
     .marble-line button:focus-visible { outline: 2px solid var(--line-accent); outline-offset: 1px; }
     @media (prefers-reduced-transparency: reduce) {
@@ -131,6 +134,11 @@
       font-family: var(--line-font); font-size: 14px; font-weight: 400; line-height: 1.45; color: var(--line-text);
       white-space: pre-wrap; overflow-wrap: anywhere; max-height: calc(3 * 1.45em + 8px); overflow-y: auto;
       caret-color: var(--line-ink); }
+    /* The line goes into any document, and a document's own rules for its
+       editable text (a focus ring, a hover tint, a border) must not draw a
+       box inside it: the line's own ring is the focus. */
+    .marble-line .marble-line-input, .marble-line .marble-line-input:is(:hover, :focus, :focus-visible) {
+      outline: none !important; border: 0 !important; box-shadow: none !important; background: none !important; border-radius: 0 !important; }
     .marble-line-input:empty::before { content: attr(data-placeholder); color: var(--placeholder, var(--line-faint)); pointer-events: none; }
     /* Send: an outline until there is something to send, when it fills to
        ink; the fill is the affordance (Design System, the composer). */
@@ -257,6 +265,9 @@
     host.setAttribute('popover', 'manual');
     document.documentElement.append(host);
     try { host.showPopover(); } catch { /* no popover here: fixed positioning still stands */ }
+    // Over Describe mode's layer, which is shown later and would paint later.
+    const raise = () => { try { host.hidePopover(); host.showPopover(); } catch { /* not a popover here */ } };
+    addEventListener('marble-callout:raise', raise);
     // What the line says when it comes back on its own (an answer, why
     // nothing changed, a question) is read out, whether or not it has the keys.
     const aloud = document.createElement('div');
@@ -330,6 +341,7 @@
     const keyOf = (s) => (s.page ? 'page' : s.words ? `words:${s.words.text}` : s.ids.join(','));
 
     function placeholderOf(s) {
+      if (s.lent) return s.lent.label || 'Describe the change';
       if (s.page) return 'Change this page';
       if (s.words) return 'Change these words';
       const els = elementsOf(s.ids);
@@ -360,7 +372,7 @@
         turn: null, awaiting: false, asked: '', texts: [], ask: null,
         state: null, el: null, input: null, tint: null, handed: false, failed: false,
         answer: '', said: '', returnTo: null, stop: false, tried: false,
-        offer: null, chips: null, drafted: null,
+        offer: null, chips: null, drafted: null, lent: null,
       };
     }
 
@@ -375,6 +387,7 @@
      *  conversation go. */
     function drop(s) {
       sessions.delete(s);
+      if (s.conversation) document.dispatchEvent(new CustomEvent('marble-line:done', { detail: { conversation: s.conversation } }));
       if (shown === s) shown = null;
       s.off?.();
       s.off = null;
@@ -388,7 +401,7 @@
     // ------------------------------------------------------------ the tint
 
     function paintScope(s) {
-      const want = !s.page && !s.words && !s.handed && sessions.has(s);
+      const want = !s.page && !s.words && !s.handed && !s.lent && sessions.has(s);
       if (want && !s.tint) {
         const tint = document.createElement('i');
         tint.className = 'marble-line-scope';
@@ -452,7 +465,8 @@
     function placeLine(s, r) {
       const el = s.el;
       const vw = viewW();
-      const vh = viewH();
+      // Describe mode's toolbar is the floor of a line lent to it.
+      const vh = Math.min(viewH(), s.lent?.floor?.() ?? Infinity);
       if (!r) {
         const width = Math.min(PAGE, vw - 32);
         el.style.width = `${Math.round(width)}px`;
@@ -493,6 +507,11 @@
       raf = 0;
       const watching = [];
       for (const s of [...sessions]) {
+        // Lent to Describe mode: it hangs under the marks, where the mode says.
+        if (s.lent) {
+          if (s === shown && s.el && !s.el.hidden && s.lent.span) { placeLine(s, s.lent.span); watching.push(s.el); }
+          continue;
+        }
         const els = s.page ? [] : elementsOf(s.ids);
         watching.push(...els);
         // The thing went: a line still being written goes with it, and keeps
@@ -555,6 +574,10 @@
       });
       return input;
     }
+    /** In Describe mode the marks can say it all: ⏎ with no words sends them. */
+    const MARKS_ONLY = 'Make the change these marks describe.';
+    const marksOnly = (s) => (s.lent && s.state === 'edit' && s.lent.brief?.() ? MARKS_ONLY : '');
+
     /** Send: the press that ⏎ is. It fills once there are words to send,
      *  and a press must not take the caret out of them. */
     const SEND_ICON = '<svg viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 19V5M6 11l6-6 6 6"/></svg>';
@@ -568,13 +591,14 @@
       b.tabIndex = -1;
       b.addEventListener('pointerdown', (event) => event.preventDefault());
       b.addEventListener('click', () => {
-        const text = said(input);
+        const text = said(input) || marksOnly(s);
         if (!text || s.input !== input) return;
         if (s.state === 'ask') reply(s, text);
         else send(s, text);
       });
-      const sync = () => b.toggleAttribute('data-ready', !!said(input));
+      const sync = () => b.toggleAttribute('data-ready', !!(said(input) || marksOnly(s)));
       new MutationObserver(sync).observe(input, { childList: true, characterData: true, subtree: true });
+      s.syncSend = sync;
       sync();
       return b;
     }
@@ -593,7 +617,7 @@
 
     /** The page's own line has nothing it could sensibly suggest. */
     function offerOf(s) {
-      if (s.page || !offering()?.offerFor) return null;
+      if (s.page || s.lent || !offering()?.offerFor) return null;
       const els = elementsOf(s.ids);
       if (!els.length) return null;
       return offering().offerFor({ kind: kindOf(s, els), count: els.length, element: els[0] });
@@ -939,6 +963,8 @@
     function put(s, { keep = true, restore = true } = {}) {
       if (!s) return;
       const was = s.state;
+      // Put away before it sent: the mode that lent it hangs a fresh one.
+      if (s.lent && was !== 'sent') { const closed = s.lent.onClose; s.lent = null; closed?.(); }
       const had = holdsKeys(s);
       const to = s.returnTo;
       // Words typed in any of its inputs (an ask, more to an answer, a draft)
@@ -1027,7 +1053,7 @@
         event.preventDefault();
         // ⇧⏎ (and ⌥⏎) break the line; the input grows to three lines, then scrolls.
         if (event.shiftKey || event.altKey) { document.execCommand('insertLineBreak'); return; }
-        const text = said(input);
+        const text = said(input) || marksOnly(s);
         if (!text) return;
         if (s.state === 'ask') reply(s, text);
         else send(s, text);
@@ -1076,7 +1102,9 @@
      *  the answer comes back. */
     function briefFor(s) {
       const at = s.ids.map((id) => `[data-marble-id="${id}"]`).join(', ');
-      const where = s.page
+      const where = s.lent
+        ? 'Asked in Describe mode, in a line under marks the person drew on the page; what they marked follows.'
+        : s.page
         ? 'Asked in a line at the foot of the page the person is looking at, about the whole page.'
         : s.words
           ? `Asked in a line under the words "${s.words.text.slice(0, 300)}" in ${at}, on the page the person is looking at.`
@@ -1137,8 +1165,12 @@
     }
 
     async function send(s, text, { brief = null, keepWords = false } = {}) {
+      // Lent to Describe mode, what is marked is read as it is sent: the
+      // marks may have changed since the line was lent.
+      if (s.lent?.ids) s.ids = s.lent.ids().filter((id) => byId(id));
       const ids = [...s.ids];
-      const rule = oneRule(s, text, { brief, keepWords });
+      // The marks say more than words can: a Describe brief is not one rule.
+      const rule = s.lent ? null : oneRule(s, text, { brief, keepWords });
       // Nothing here can take it, as already known (asked when the line
       // opened): the line stays as it is and says so, rather than folding
       // into a send that can only fail. A rule needs nobody, so it is tried
@@ -1185,7 +1217,7 @@
       }
       const mode = s.action && text.startsWith(s.action.lead) ? s.action.mode : 'main';
       const meaning = mode === 'main' ? '' : (globalThis.marbleOffer?.briefFor?.(mode, ids) ?? '');
-      const hidden = [briefFor(s), meaning, brief].filter(Boolean).join('\n\n');
+      const hidden = [briefFor(s), meaning, brief, s.lent?.brief?.()].filter(Boolean).join('\n\n');
       if (mode === 'variations') dispatchEvent(new CustomEvent('marble-variations:watch', { detail: { ids } }));
       if (!rule) fold(s);
       paintScope(s);
@@ -1227,6 +1259,8 @@
         return;
       }
       document.dispatchEvent(new CustomEvent('marble-line:sent', { detail: { conversation: s.conversation, ids } }));
+      // Describe mode lent it: the brief is the agent's now.
+      s.lent?.onSent?.({ id: s.conversation });
     }
 
     // ------------------------------------------------------------ set up
@@ -1404,6 +1438,8 @@
     addEventListener('pointerdown', (event) => {
       const s = shown;
       if (!s?.el || s.state === 'sent') return;
+      // Lent to Describe mode, a press on the page is a mark being drawn.
+      if (s.lent) return;
       // Pointing (agent-callout.js) is not looking away: ⇧-click adds to it.
       if (document.documentElement.classList.contains('marble-callout-latched')) return;
       if (host.contains(event.target)) return;
@@ -1526,8 +1562,75 @@
       return true;
     }
 
+    /**
+     * Lend the line to Describe mode as its composer (agent-marks.js): the
+     * same line, its words, its send and its conversation, hung under the
+     * marks rather than under a thing, with what the marks say as its
+     * placeholder and their reading sent unseen ahead of the words.
+     * @returns {{el: HTMLElement, label(text: string): void, show(on: boolean): void,
+     *   hang(span: object|null): void, focus(): boolean, release(ids?: string[]): void, discard(): void}}
+     */
+    function lend({ ids = () => [], label = '', brief = null, onSent = null, onClose = null, floor = null } = {}) {
+      const marked = () => (typeof ids === 'function' ? ids() : ids).map(String);
+      const present = marked().filter((id) => byId(id));
+      if (shown) put(shown, { keep: true, restore: false });
+      const s = makeSession({ ids: present, scope: null, from: 'describe', conversation: null });
+      s.lent = { label, brief, onSent, onClose, floor, span: null, ids: marked };
+      // The mode draws what is marked; the line adds no tint of its own.
+      s.handed = true;
+      sessions.add(s);
+      raise();
+      show(s, 'edit', { text: '', focus: false });
+      if (s.el) s.el.hidden = true;
+      convoFor(s);
+      ready();
+      return {
+        get el() { return s.el; },
+        label(text) {
+          if (!s.lent) return;
+          s.lent.label = text;
+          if (s.input && s.state === 'edit') {
+            const words = placeholderOf(s);
+            s.input.dataset.placeholder = words;
+            s.input.setAttribute('aria-label', words);
+          }
+          s.syncSend?.();
+        },
+        show(on) {
+          if (!s.el || shown !== s) return;
+          s.el.hidden = !on;
+          if (on) schedule();
+        },
+        hang(span) {
+          if (!s.lent) return;
+          s.lent.span = span ? { left: span.left, top: span.top, width: span.width, height: span.height, right: span.left + span.width, bottom: span.top + span.height } : null;
+          if (s.el && shown === s) s.el.hidden = !span;
+          place();
+        },
+        focus() {
+          if (!s.input || shown !== s) return false;
+          s.el.hidden = false;
+          if (!holdsKeys(s)) s.returnTo = keysNow();
+          caretAt(s.input);
+          return true;
+        },
+        /** Send these words from the line, as ⏎ would (Explore's ask). */
+        send: (text) => send(s, text),
+        /** Sent: an ordinary line now, about what was marked. */
+        release(about = []) {
+          const kept = about.map(String).filter((id) => byId(id));
+          s.ids = kept;
+          s.page = !kept.length;
+          s.lent = null;
+          schedule();
+        },
+        discard() { if (sessions.has(s)) { s.lent = null; put(s, { keep: false, restore: false }); } },
+      };
+    }
+
     window.marbleLine = {
       open,
+      lend,
       close: ({ keep = true } = {}) => { if (shown) put(shown, { keep }); },
       running,
       /** The line on screen: what it is about, what it holds, whose

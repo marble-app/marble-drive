@@ -1018,37 +1018,6 @@
       try { layer.hidePopover(); layer.showPopover(); } catch { /* not a popover here */ }
     });
 
-    // Describe mode borrows a card rather than drawing a composer of its own,
-    // so there is one way to talk to an agent on a page and it looks the same
-    // everywhere. The lender keeps the conversation model; the borrower says
-    // where the card hangs and what its head line reads, then hands it back
-    // once the brief is sent, when it becomes an ordinary callout on the work.
-    addEventListener('marble-callout:describe', (event) => {
-      const record = openCard({ ids: event.detail?.ids ?? [], focus: false, owner: 'describe' });
-      event.preventDefault();
-      event.detail.card = {
-        el: record.el,
-        convo: record.convo,
-        label(text) {
-          record.label = text;
-          if (!record.zone && !record.said && !record.actions.childElementCount) record.status.textContent = text || 'Ask about this';
-        },
-        focus() {
-          if (record.state !== 'card') setState(record, 'card');
-          record.convo.focusInput?.();
-        },
-        show(on) { record.el.hidden = !on; },
-        release(ids) {
-          record.owner = null;
-          record.label = '';
-          if (ids?.length) record.ids = [...ids];
-          record.el.hidden = false;
-          placeCard(record);
-        },
-        discard() { if (records.includes(record)) remove(record); },
-      };
-    });
-
     // ------------------------------------------------------------ pointing
     // Point at something, in the tray: the pointer names a thing instead of
     // firing it, so a click on a page full of live controls can mean "this

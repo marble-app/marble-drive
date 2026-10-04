@@ -13,8 +13,9 @@
 //
 // Nothing here edits the document: everything drawn is transient chrome in one
 // fixed layer, like the callout. Nothing here invents a way to send, either —
-// the composer hung on the marks is a callout card, borrowed, so the words go
-// out through the same component as every other chat on the page.
+// the composer hung on the marks is the ⌘J line (change-line.js), lent, so the
+// words go out through the same component, and look the same, as every other
+// ask on the page.
 //
 // Spec: docs/superpowers/specs/2026-09-21-describe-mode-design.md
 
@@ -494,7 +495,7 @@
     // out, so the context listener below does not read that as the person
     // choosing something else.
     let handling = false;
-    // The callout card this mode has borrowed as its composer, while it has one.
+    // The ⌘J line this mode has borrowed as its composer, while it has one.
     let card = null;
     // True while Explore's ask is on its way: that ask already carries the
     // marks' reading, so the card must not put it in front a second time.
@@ -755,18 +756,25 @@
       return parts.join(' · ');
     };
 
-    /** The composer is the callout's card, borrowed: the same component, with
-     *  the same model picker and send, as a chat anywhere else on the page.
-     *  One card for the whole mode, however the marks change; its head line
-     *  reads the marks and it sends their reading ahead of what is typed. */
+    /** The composer is the ⌘J line, lent (change-line.js): the same
+     *  component, words, send and conversation as every other ask on the
+     *  page, not a card of its own. One line for the whole mode, however the
+     *  marks change; its placeholder reads the marks and it sends their
+     *  reading, unseen, ahead of what is typed. */
     const borrowCard = () => {
       if (card) return card;
-      const detail = { ids: fromUs ? [...mine] : [] };
-      // Unanswered means no callout on this page, and so no card to hang.
-      if (dispatchEvent(new CustomEvent('marble-callout:describe', { detail, cancelable: true })) || !detail.card) return null;
-      card = detail.card;
-      card.convo.brief = () => (exploring ? '' : note());
-      card.convo.addEventListener('sent', onSent);
+      const line = window.marbleLine;
+      if (!line?.lend) return null;
+      card = line.lend({
+        ids: () => (fromUs ? [...mine] : []),
+        label: briefLine() || 'Describe the change',
+        brief: () => (exploring ? '' : note()),
+        onSent: (detail) => onSent({ detail }),
+        // Put away (Esc) before it sent: the next paint lends a fresh one.
+        onClose: () => { card = null; },
+        // The toolbar is the floor: a line on it is in the way of the tools.
+        floor: () => (describing && !bar.hidden ? bar.getBoundingClientRect().top - 10 : innerHeight - 8),
+      });
       return card;
     };
     const paintCard = (span) => {
@@ -775,8 +783,7 @@
       if (!lent) return;
       lent.label(briefLine() || 'Describe the change');
       lent.show(true);
-      hang(lent.el, span);
-      lent.convo.updateSendable?.();
+      lent.hang(span);
     };
     const paintExplore = (span) => {
       if (explore.hidden) return;
@@ -794,8 +801,6 @@
       for (const mark of drafts()) hold(mark, id);
       card = null;
       exploring = false;
-      lent.convo.brief = null;
-      lent.convo.removeEventListener('sent', onSent);
       lent.release(fromUs ? mine : []);
       area = [];
       setDescribing(false);
@@ -1109,7 +1114,6 @@
       clearButton.hidden = count === 0 && !(fromUs && mine.length);
       exploreButton.disabled = !(fromUs && mine.length);
       update({ id: 'ask', label: count && fromUs ? 'Ask about the sketch' : 'Ask here' });
-      card?.convo.updateSendable?.();
       paintFrame();
     };
 
@@ -1348,12 +1352,12 @@
       wantField.textContent = '';
       whyField.textContent = '';
       dispatchEvent(new CustomEvent('marble-variations:watch', { detail: { ids } }));
-      // The ask goes out through the same borrowed card as a sentence would,
+      // The ask goes out through the same borrowed line as a sentence would,
       // so it lands in the same kind of conversation and ends the same way.
       const lent = borrowCard();
       if (lent) {
         exploring = true;
-        lent.convo.sendNow(lines.join('\n')).finally(() => { exploring = false; });
+        lent.send(lines.join('\n')).finally(() => { exploring = false; });
       } else {
         agent.open();
       }
@@ -1495,6 +1499,11 @@
     // The callout an agent was briefed from is put away — Done, or closed —
     // and the marks it was working from go back to being kept marks: out of
     // sight outside the mode, dimmed inside it.
+    // The same when the line that carried the brief is done with it.
+    document.addEventListener('marble-line:done', (event) => {
+      const id = event.detail?.conversation ?? null;
+      for (const mark of marks) if (mark.working !== undefined && mark.working === id) unhold(mark);
+    });
     addEventListener('marble-callout:removed', (event) => {
       const id = event.detail?.id ?? null;
       for (const mark of marks) if (mark.working !== undefined && mark.working === id) unhold(mark);

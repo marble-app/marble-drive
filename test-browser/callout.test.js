@@ -534,17 +534,14 @@ test('a summoned line starts a new conversation, and the chat this tab was in st
   assert.equal(await page.evaluate(() => window.marble.agent.current()), earlier, 'the chat this tab was in is still the one it opens');
 });
 
-// The card is Describe mode's composer now (agent-marks.js borrows it).
-const describeCard = async (page, id) => {
-  const drawer = page.locator('marble-agent-drawer');
-  await drawer.locator('.launcher').hover();
-  await drawer.locator('.tool[data-tool="marks-describe"]').click();
-  await page.locator('.marble-marks-bar').waitFor();
-  const r = await page.locator(`[data-marble-id="${id}"]`).boundingBox();
-  await page.mouse.move(r.x - 6, r.y - 6);
-  await page.mouse.down();
-  await page.mouse.move(r.x + r.width + 6, r.y + r.height + 6, { steps: 4 });
-  await page.mouse.up();
+// The card is only the fallback now, for a page without the ⌘J line: Describe
+// mode borrows the line (agent-marks.js). So the card is reached by sending
+// from a page whose line is not there, which hangs it on the work.
+const describeCard = async (page, id, text = 'script:quiet') => {
+  await page.evaluate(({ id, text }) => {
+    delete window.marbleLine;
+    dispatchEvent(new CustomEvent('marble-callout:send', { detail: { ids: [id], text }, cancelable: true }));
+  }, { id, text });
   await card(page).waitFor();
 };
 
@@ -576,9 +573,6 @@ test('the corner buttons line up, and resting on one names it', async () => {
 test('Open in Agents leaves for the Agents page with the chat open', async () => {
   const page = await open();
   await describeCard(page, 'h');
-  await card(page).locator('marble-conversation .editor').click();
-  await page.keyboard.type('script:quiet');
-  await card(page).locator('marble-conversation .send').click();
   const inAgents = page.getByRole('button', { name: 'Open this chat on the Agents page' });
   await inAgents.waitFor({ timeout: 10_000 });
   const { summary } = await firstConversation(page);

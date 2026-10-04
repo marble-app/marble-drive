@@ -365,7 +365,7 @@ test('at phone width ⌘J opens the drawer, as before', async () => {
   assert.equal(await line(page).count(), 0);
 });
 
-test('Describe mode still borrows the card, and ⌘J there means that card', async () => {
+test('Describe mode borrows this line, not a card, and ⌘J there means that line', async () => {
   const page = await open();
   const drawer = page.locator('marble-agent-drawer');
   await drawer.locator('.launcher').hover();
@@ -376,12 +376,15 @@ test('Describe mode still borrows the card, and ⌘J there means that card', asy
   await page.mouse.down();
   await page.mouse.move(list.x + list.width + 6, list.y + list.height + 6, { steps: 4 });
   await page.mouse.up();
-  await page.locator('.marble-callout[data-state]').waitFor();
-  assert.equal(await line(page).count(), 0);
+  await input(page).waitFor();
+  // What the marks say is its placeholder; it offers no chips of its own.
+  assert.equal(await input(page).getAttribute('data-placeholder'), '1 element');
+  assert.equal(await page.locator('.marble-line-chip').count(), 0);
+  assert.equal(await page.locator('.marble-callout').count(), 0);
   await summon(page);
-  await page.waitForTimeout(200);
-  assert.equal(await page.locator('.marble-callout').count(), 1);
-  assert.equal(await line(page).count(), 0);
+  await page.waitForFunction(() => document.activeElement?.classList.contains('marble-line-input'));
+  assert.equal(await line(page).count(), 1);
+  assert.equal(await page.locator('.marble-callout').count(), 0);
 });
 
 // ------------------------------------------------------------ review round 1
@@ -912,8 +915,10 @@ test('Sketch it puts the line away and opens Describe mode on the thing', async 
   await summon(page);
   await input(page).waitFor();
   await chips(page).filter({ hasText: 'Sketch it' }).click();
-  await lineGone(page);
   await page.locator('.marble-marks-bar').waitFor();
+  // The same line hangs on the marks now, about what they say.
+  await page.waitForFunction(() => document.querySelector('.marble-line-input')?.dataset.placeholder === '1 element');
+  assert.equal(await page.locator('.marble-line').count(), 1);
 });
 
 test('the page\'s line offers nothing it could not mean', async () => {
