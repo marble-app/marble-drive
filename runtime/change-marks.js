@@ -36,6 +36,16 @@
 // the caret's (agent-text.js, rulings R2 and R6), and a press is collab.js's
 // ring. What this layer draws, the zone does not (`claims`).
 //
+// A change can say what it is in its own terms (v6, "The page draws its own
+// tools"; server/change/marks.js): the tag's verb and unit ("Picking 4 of 5
+// stations"), a measure in place of the count ("15 of 24 px"), and a few
+// marks anchored to parts — the tool where the work is now, what is still to
+// come in its own form, what was there before. They are drawn here as the
+// rest is, in the layer and never filed, kept clear of the person's hand,
+// and they go when the change ends. A path in a mark is rebuilt from an
+// allow-list of shapes and attributes; nothing an agent sends is ever set as
+// markup.
+//
 // A change the page makes itself (a rule from Reshape or from a few words,
 // change-rules.js) is drawn with the same tints and tag through `begin`: no
 // presence frames, no conversation behind the tag, and a part can be left
@@ -190,8 +200,66 @@
     .marble-change-more svg { width: 12px; height: 12px; flex: none; }
     .marble-change-said-aloud { position: fixed; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
 
+    /* A change's own tools (v6): drawn over, or beside, the part they stand
+       on, in the accent's ink. now is the tool at work; ahead is what is
+       still to come, dashed and faint; before is what was there, a ghost. */
+    .marble-change-draw { position: fixed; left: 0; top: 0; box-sizing: border-box; color: var(--change-ink);
+      transition: opacity ${GONE}ms var(--change-ease); }
+    .marble-change-draw[data-glide] { transition: left 400ms var(--change-ease), top 400ms var(--change-ease),
+      width 400ms var(--change-ease), height 400ms var(--change-ease), opacity ${GONE}ms var(--change-ease); }
+    .marble-change-draw[data-state="gone"] { opacity: 0; }
+    .marble-change-draw[hidden] { display: none; }
+    .marble-change-draw[data-as="before"] { color: color-mix(in srgb, var(--change-muted) 85%, transparent); }
+    .marble-change-draw > svg { position: absolute; inset: 0; width: 100%; height: 100%; overflow: visible; }
+    .marble-change-draw > svg * { fill: none; stroke: currentColor; stroke-width: 1.5px; vector-effect: non-scaling-stroke;
+      stroke-linecap: round; stroke-linejoin: round; }
+    .marble-change-draw > svg g { stroke: none; }
+    .marble-change-draw > svg .thin { stroke-width: 1px; }
+    .marble-change-draw > svg .fill { fill: color-mix(in srgb, var(--change-accent) 24%, transparent); stroke: none; }
+    .marble-change-draw > svg .solid { fill: currentColor; stroke: none; }
+    .marble-change-draw[data-as="ahead"] > svg *:not(.solid, .fill), .marble-change-draw > svg .ahead { stroke-dasharray: 4 3; opacity: .7; }
+    .marble-change-draw[data-as="before"] > svg *:not(.solid, .fill), .marble-change-draw > svg .before { stroke-dasharray: 3 3; }
+    .marble-change-draw > svg .before { stroke: var(--change-muted); opacity: .75; }
+    .marble-change-shape { position: absolute; box-sizing: border-box; }
+    .marble-change-shape[data-shape="ring"] { inset: -3px; border: 1.5px solid currentColor; border-radius: calc(var(--r, 4px) + 3px); }
+    .marble-change-shape[data-shape="fill"] { inset: 0; border-radius: var(--r, 4px); background: color-mix(in srgb, var(--change-accent) 24%, transparent); }
+    .marble-change-shape[data-shape="dot"] { left: var(--x, 50%); top: var(--y, 50%); width: 7px; height: 7px; margin: -3.5px 0 0 -3.5px;
+      border-radius: 50%; background: currentColor; }
+    .marble-change-shape[data-shape="line"] { border: 0 solid currentColor; }
+    .marble-change-draw[data-on="below"] > [data-shape="line"] { left: 0; right: 0; top: calc(100% + 3px); border-top-width: 2px; }
+    .marble-change-draw[data-on="above"] > [data-shape="line"] { left: 0; right: 0; bottom: calc(100% + 3px); border-top-width: 2px; }
+    /* A line at a part's start or end is a caret: a line of text tall at most. */
+    .marble-change-draw[data-on="start"] > [data-shape="line"] { top: 0; height: min(100%, 1.6em); left: -5px; border-left-width: 2px; }
+    .marble-change-draw[data-on="end"] > [data-shape="line"] { top: 0; height: min(100%, 1.6em); right: -5px; border-left-width: 2px; }
+    .marble-change-draw[data-on="over"] > [data-shape="line"] { top: -3px; bottom: -3px; left: var(--x, 0%); margin-left: -1px; border-left-width: 2px; }
+    .marble-change-draw[data-as="ahead"] > .marble-change-shape { border-style: dashed; opacity: .75; }
+    .marble-change-draw[data-as="ahead"] > [data-shape="ring"] { border-width: 1px; }
+    .marble-change-draw[data-as="ahead"] > [data-shape="fill"] { background: color-mix(in srgb, var(--change-accent) 10%, transparent); }
+    .marble-change-draw[data-as="ahead"] > [data-shape="dot"] { background: var(--change-card); box-shadow: inset 0 0 0 1.5px currentColor; }
+    .marble-change-draw[data-as="before"] > .marble-change-shape { border-style: dashed; }
+    .marble-change-draw[data-as="before"] > [data-shape="ring"] { border-width: 1px; }
+    .marble-change-draw[data-as="before"] > [data-shape="fill"] { background: color-mix(in srgb, var(--change-muted) 14%, transparent); }
+    .marble-change-draw[data-as="before"] > [data-shape="dot"] { opacity: .6; }
+    .marble-change-words { position: absolute; box-sizing: border-box; padding: 1px 4px; border-radius: 4px; white-space: nowrap;
+      background: color-mix(in srgb, var(--change-card) 90%, transparent); color: currentColor;
+      font: 600 11px/1.25 var(--ui-font, var(--sans, system-ui, -apple-system, "Segoe UI", sans-serif)); font-variant-numeric: tabular-nums; }
+    .marble-change-draw[data-on="over"][data-point] > .marble-change-words { left: var(--x, 50%); top: var(--y, 50%); transform: translate(-50%, -50%); }
+    /* Words with no point to sit at are a note beside the part, not a
+       label over it: a part is often smaller than what is said about it. */
+    .marble-change-draw[data-on="over"]:not([data-point]) > .marble-change-words { left: calc(100% + 8px); top: 50%; transform: translateY(-50%); }
+    .marble-change-draw[data-flip] > .marble-change-words { left: auto; right: 4px; }
+    .marble-change-draw[data-on="above"] > .marble-change-words { left: var(--x, 0%); bottom: calc(100% + 4px); }
+    .marble-change-draw[data-on="below"] > .marble-change-words { left: var(--x, 0%); top: calc(100% + 4px); }
+    .marble-change-draw[data-on="below"] > [data-shape="line"] ~ .marble-change-words { top: calc(100% + 9px); }
+    .marble-change-draw[data-on="above"] > [data-shape="line"] ~ .marble-change-words { bottom: calc(100% + 9px); }
+    .marble-change-draw[data-on="start"] > .marble-change-words { right: calc(100% + 10px); top: var(--y, 0%); }
+    .marble-change-draw[data-on="end"] > .marble-change-words { left: calc(100% + 10px); top: var(--y, 0%); }
+    .marble-change-draw[data-as="ahead"] > .marble-change-words { color: color-mix(in srgb, currentColor 70%, transparent); }
+    .marble-change-draw[data-as="before"] > .marble-change-words { text-decoration: line-through; font-weight: 500; }
+
     @media (prefers-reduced-motion: reduce) {
       .marble-change-tag[data-glide] { transition: none; }
+      .marble-change-draw[data-glide] { transition: opacity ${STILL}ms var(--change-ease); }
       .marble-change-tint[data-state="lift"] { transition-duration: ${STILL}ms; }
       .marble-change-meter > i { transition: none; }
     }
@@ -251,6 +319,85 @@
     if (noun) return noun;
     for (const [selector, one, many] of UNITS) if (el.matches(selector)) return [one, many];
     return ['part', 'parts'];
+  }
+
+  // A mark's path, rebuilt from what is allowed, never set as markup: shapes
+  // and their geometry, and a few classes the layer styles.
+  const SVG_NS = 'http://www.w3.org/2000/svg';
+  const SVG_TAGS = new Set(['path', 'line', 'polyline', 'polygon', 'rect', 'circle', 'ellipse', 'g']);
+  const SVG_NUMBERS = ['x', 'y', 'width', 'height', 'rx', 'ry', 'cx', 'cy', 'r', 'x1', 'y1', 'x2', 'y2', 'pathLength'];
+  const SVG_NUMBER = /^-?(\d+\.?\d*|\.\d+)(e-?\d+)?%?$/i;
+  const SVG_SHAPED = {
+    d: /^[\d\s.,eE+\-MmLlHhVvCcSsQqTtAaZz]{1,2400}$/,
+    points: /^[\d\s.,eE+\-]{1,2400}$/,
+    transform: /^(\s*(translate|scale|rotate)\(\s*-?[\d.]+(\s*[\s,]\s*-?[\d.]+){0,2}\s*\)\s*)+$/,
+    'stroke-dasharray': /^[\d.\s,]{1,40}$/,
+  };
+  const SVG_CLASSES = new Set(['ahead', 'before', 'fill', 'solid', 'thin']);
+  const SVG_MOST = 64;
+  function svgOf(markup) {
+    if (typeof markup !== 'string' || !markup.trim()) return null;
+    let root;
+    try {
+      const parsed = new DOMParser().parseFromString(`<svg xmlns="${SVG_NS}">${markup}</svg>`, 'image/svg+xml');
+      if (parsed.getElementsByTagName('parsererror').length) return null;
+      root = parsed.documentElement;
+    } catch {
+      return null;
+    }
+    if (root?.localName !== 'svg') return null;
+    const svg = document.createElementNS(SVG_NS, 'svg');
+    svg.setAttribute('viewBox', '0 0 100 100');
+    svg.setAttribute('preserveAspectRatio', 'none');
+    svg.setAttribute('aria-hidden', 'true');
+    svg.setAttribute('focusable', 'false');
+    let made = 0;
+    const copy = (from, into, depth) => {
+      for (const child of from.children) {
+        if (made >= SVG_MOST || depth > 3) return;
+        if (!SVG_TAGS.has(child.localName)) continue;
+        const el = document.createElementNS(SVG_NS, child.localName);
+        made += 1;
+        for (const name of SVG_NUMBERS) {
+          const value = child.getAttribute(name)?.trim();
+          if (value && SVG_NUMBER.test(value)) el.setAttribute(name, value);
+        }
+        for (const [name, shape] of Object.entries(SVG_SHAPED)) {
+          const value = child.getAttribute(name)?.trim();
+          if (value && shape.test(value)) el.setAttribute(name, value);
+        }
+        const classes = (child.getAttribute('class') ?? '').split(/\s+/).filter((name) => SVG_CLASSES.has(name));
+        if (classes.length) el.setAttribute('class', classes.join(' '));
+        into.append(el);
+        if (child.localName === 'g') copy(child, el, depth + 1);
+      }
+    };
+    copy(root, svg, 0);
+    return made ? svg : null;
+  }
+
+  const PLACES = new Set(['over', 'above', 'below', 'start', 'end']);
+  const AS = new Set(['now', 'ahead', 'before']);
+  const SHAPES = new Set(['ring', 'line', 'dot', 'fill']);
+  const percent = (value) => (Number.isFinite(value) ? Math.min(100, Math.max(0, value)) : null);
+  /** A mark as the host sent it, checked again: an anchor, a place, a state,
+   *  and something to draw. */
+  function markOf(value) {
+    if (!value || typeof value !== 'object' || typeof value.at !== 'string' || !value.at) return null;
+    const mark = {
+      at: value.at,
+      on: PLACES.has(value.on) ? value.on : 'over',
+      as: AS.has(value.as) ? value.as : 'now',
+      key: typeof value.key === 'string' && value.key ? value.key.slice(0, 24) : null,
+      shape: SHAPES.has(value.shape) ? value.shape : null,
+      text: typeof value.text === 'string' && value.text.trim() ? value.text.trim().slice(0, 48) : null,
+      svg: typeof value.svg === 'string' && value.svg.length <= 2400 ? value.svg : null,
+      x: percent(value.x),
+      y: percent(value.y),
+    };
+    // A path with nothing in it the layer would draw is no path.
+    if (mark.svg && !svgOf(mark.svg)) mark.svg = null;
+    return mark.shape || mark.text || mark.svg ? mark : null;
   }
 
   const list = (value) => (Array.isArray(value) ? [...new Set(value.map(String).filter(Boolean))] : []);
@@ -327,6 +474,9 @@
         scope: new Map(),     // id -> { id, state: 'soon'|'lift', el }
         parts: new Map(),     // id -> { id, state: 'soon'|'now'|'landed', lifted, dotted, unit, delay, tint, dot }
         reachKey: '',
+        reachIds: [],         // the step's reach, in order
+        reached: new Set(),   // every id named in a reach this turn
+        landedReach: new Set(), // the reached parts that have changed
         many: false,
         verb: null,
         count: 0,
@@ -349,6 +499,9 @@
         idle: 0,
         lull: 0,              // the timer that asks after a change gone quiet
         timers: new Set(),
+        look: null,           // what the change says it is (v6): { verb, unit, measure }
+        tools: new Map(),     // key -> { key, id, node, mark, el, moved }: the marks it draws
+        toolsKey: '',
         local: false,         // a change the page makes itself (`begin`)
         words: null,          // what its tag says, as pieces
         endWords: null,
@@ -547,7 +700,7 @@
       // none, from a host before v5, falls back to the ids its ops address,
       // and a row is one part with the cells inside it.
       const named = list(d.parts);
-      const parts = topmost(named.length ? named : list(d.ids));
+      let parts = topmost(named.length ? named : list(d.ids));
       const inserted = (Array.isArray(d.inserts) ? d.inserts : []).flatMap((entry) => list(entry?.ids));
       const reach = list(d.reach);
       // An earlier batch whose ops never came has landed as far as anyone
@@ -562,10 +715,30 @@
       const reachKey = reach.join(',');
       if (reach.length && reachKey !== run.reachKey) {
         run.reachKey = reachKey;
+        run.reachIds = reach;
         for (const id of reach) {
+          run.reached.add(id);
           if (!run.parts.has(id)) addPart(run, id, 'soon', still() ? 0 : Math.random() * SPREAD);
         }
       }
+      // A part of the step's reach that holds what this batch changes is
+      // changing too, and is the part: the row a cell is in, the day a figure
+      // is in. It is tinted, landed and counted as one.
+      // The nearest such part, so a reach that names a table and its rows
+      // marks the row.
+      if (run.reachIds.length && parts.length) {
+        const inReach = new Set(run.reachIds);
+        const holders = new Set();
+        for (const id of parts) {
+          if (inReach.has(id)) continue;
+          for (let el = byId(id)?.parentElement; el && el !== document.body; el = el.parentElement) {
+            const holder = el.getAttribute('data-marble-id');
+            if (holder && inReach.has(holder)) { holders.add(holder); break; }
+          }
+        }
+        if (holders.size) parts = topmost([...parts, ...holders]);
+      }
+      for (const id of parts) if (run.reached.has(id)) run.landedReach.add(id);
       for (const id of parts) {
         const part = run.parts.get(id) ?? addPart(run, id, 'soon');
         part.state = 'now';
@@ -573,7 +746,8 @@
         part.delay = 0;
       }
       if (parts.length) liftScope(run);
-      if (d.kind || !run.verb) run.verb = verbOf(d, parts, inserted);
+      if (run.look?.verb) run.verb = run.look.verb;
+      else if (d.kind || !run.verb) run.verb = verbOf(d, parts, inserted);
       const hang = parts.find((id) => drawable(byId(id)));
       if (hang) run.hang = hang;
       const key = batchKey(d);
@@ -608,6 +782,71 @@
       const box = partBox(r, shapeOf(part, el));
       part.box = { ...page(box), radius: box.radius };
       part.seeded = true;
+    }
+
+    /** What the change says it is (v6): its tag's verb, unit and measure,
+     *  and the marks it draws. A frame repeats the turn's marks; the same
+     *  marks again change nothing, and a mark with a key that moves to
+     *  another part glides there. */
+    function applyMarks(run, marks) {
+      if (!marks || typeof marks !== 'object') return;
+      const unit = Array.isArray(marks.unit) && marks.unit[0] ? [String(marks.unit[0]), String(marks.unit[1] ?? `${marks.unit[0]}s`)] : null;
+      const m = marks.measure;
+      const measure = m && Number.isFinite(m.now)
+        ? { now: m.now, of: Number.isFinite(m.of) && m.of > 0 ? m.of : null, unit: typeof m.unit === 'string' ? m.unit : '' }
+        : null;
+      const said = typeof marks.verb === 'string' ? marks.verb.replace(/\s+/g, ' ').trim().slice(0, 32) : '';
+      const verb = said ? said.charAt(0).toUpperCase() + said.slice(1) : null;
+      run.look = { verb, unit, measure };
+      if (verb) run.verb = verb;
+      if (!Array.isArray(marks.draw)) return;
+      const draw = marks.draw.map(markOf).filter(Boolean).slice(0, 24);
+      const key = JSON.stringify(draw);
+      if (key === run.toolsKey) return;
+      run.toolsKey = key;
+      const next = new Map();
+      for (const mark of draw) {
+        const k = mark.key ? `key:${mark.key}` : JSON.stringify(mark);
+        if (next.has(k)) continue;
+        const holder = run.tools.get(k) ?? { key: k, id: mark.at, node: null, mark: null, el: null, moved: false };
+        if (holder.id !== mark.at) {
+          holder.id = mark.at;
+          holder.node = null;
+          holder.moved = Boolean(holder.el);
+        }
+        if (JSON.stringify(holder.mark) !== JSON.stringify(mark)) holder.dirty = true;
+        holder.mark = mark;
+        next.set(k, holder);
+      }
+      for (const [k, holder] of run.tools) {
+        if (next.has(k) || !holder.el) continue;
+        const el = holder.el;
+        el.dataset.state = 'gone';
+        setTimeout(() => el.remove(), still() ? STILL : GONE);
+      }
+      run.tools = next;
+    }
+
+    /** A step said ahead of its first edit: its reach tinted, its marks
+     *  drawn, the tag counting from nothing. Nothing has changed yet. */
+    function onMark(run, d) {
+      run.reading = false;
+      settleFields(run, d);
+      const reach = list(d.reach);
+      if (!run.many && Math.max(reach.length, run.count, run.total ?? 0) > MANY) run.many = true;
+      const reachKey = reach.join(',');
+      if (reach.length && reachKey !== run.reachKey) {
+        run.reachKey = reachKey;
+        run.reachIds = reach;
+        for (const id of reach) {
+          run.reached.add(id);
+          if (!run.parts.has(id)) addPart(run, id, 'soon', still() ? 0 : Math.random() * SPREAD);
+        }
+      }
+      const at = [...run.tools.values()].filter((tool) => tool.mark.as === 'now').map((tool) => tool.id);
+      const hang = [...at, ...reach].find((id) => drawable(byId(id)));
+      if (hang) run.hang = hang;
+      if (reach.length || at.length) liftScope(run);
     }
 
     function onAfter(run, d) {
@@ -656,7 +895,7 @@
       for (const id of kept) { const part = run.parts.get(id); if (part) part.shape = null; }
       // A frame that named no inserts or removes (a host before v5): parts
       // that were not here before were added, parts that went were removed.
-      if (batch.structure && !batch.named && kept.length) {
+      if (batch.structure && !batch.named && kept.length && !run.look?.verb) {
         if (kept.every((id) => batch.fresh.has(id) && byId(id))) run.verb = 'Adding';
         else if (kept.every((id) => !batch.fresh.has(id) && !byId(id))) run.verb = 'Removing';
       }
@@ -766,6 +1005,8 @@
       run.timers.clear();
       for (const mark of run.scope.values()) mark.el?.remove();
       for (const part of run.parts.values()) { part.tint?.remove(); part.dot?.remove(); }
+      for (const tool of run.tools.values()) tool.el?.remove();
+      run.tools.clear();
       run.tag?.root.remove();
       run.tag = null;
       if (runs.get(run.client) === run) runs.delete(run.client);
@@ -807,7 +1048,9 @@
         runs.set(client, run);
       }
       if (detail.prompt) run.prompt = String(detail.prompt);
+      if (detail.marks) applyMarks(run, detail.marks);
       if (list(detail.failed).length) onFailed(run, detail);
+      else if (detail.stage === 'mark') onMark(run, detail);
       else if (detail.stage === 'start') onStart(run, detail);
       else if (detail.stage === 'before') onBatch(run, detail, { landed: caught });
       else if (detail.stage === 'after') onAfter(run, detail);
@@ -895,12 +1138,28 @@
 
     // ------------------------------------------------------------ marks
 
+    /** Past a dozen parts, a dot in the margin stands for each row. Only a
+     *  part that spans what holds it is a row: a dot beside a cell of a grid
+     *  or a word in a line would sit inside its neighbour, so those keep
+     *  their tint. Asked once per part, once it is on the page. */
+    function dotted(part) {
+      if (!part.dotted) return false;
+      if (part.rowLike !== undefined) return part.rowLike;
+      const el = resolve(part);
+      const holder = el?.parentElement;
+      if (!drawable(el) || !holder) return true;
+      const width = el.getBoundingClientRect().width;
+      const room = holder.getBoundingClientRect().width;
+      part.rowLike = !(width > 0 && room > 0) || width >= room * 0.6;
+      return part.rowLike;
+    }
+
     function tintStateOf(run, part) {
       let tint = null;
       if (part.state === 'out') tint = 'out';
       else if (part.state === 'now') tint = 'now';
       else if (part.state === 'failed') tint = 'failed';
-      else if (part.state === 'soon' && !part.dotted) tint = 'soon';
+      else if (part.state === 'soon' && !dotted(part)) tint = 'soon';
       else if (part.state === 'landed' && !part.lifted) tint = 'lift';
       return run.gone && tint ? 'gone' : tint;
     }
@@ -989,6 +1248,97 @@
       return true;
     }
 
+    // ------------------------------------------------------------ its own tools
+
+    /** Where one of the change's own marks stands in this paint. A part not
+     *  on screen hides it; the person's hand on the part hides it too. Once
+     *  the change ends, its tools go. */
+    function planTool(run, holder, hand) {
+      const r = measure(holder);
+      if (!r) return { holder, hide: true };
+      const radius = String(shapeOf(holder, holder.node).radius || '0px').split(' ')[0];
+      return {
+        holder,
+        box: { left: r.left, top: r.top, width: r.width, height: r.height, radius: '' },
+        radius,
+        held: inHand(holder.node, hand),
+        gone: run.gone || run.ending,
+      };
+    }
+
+    function fillTool(el, mark) {
+      el.dataset.on = mark.on;
+      el.dataset.as = mark.as;
+      el.toggleAttribute('data-point', mark.x !== null || mark.y !== null);
+      el.removeAttribute('data-flip');
+      for (const [name, value] of [['--x', mark.x], ['--y', mark.y]]) {
+        if (value === null) el.style.removeProperty(name);
+        else el.style.setProperty(name, `${value}%`);
+      }
+      const kids = [];
+      const svg = mark.svg ? svgOf(mark.svg) : null;
+      if (svg) kids.push(svg);
+      if (mark.shape) {
+        const shape = document.createElement('i');
+        shape.className = 'marble-change-shape';
+        shape.dataset.shape = mark.shape;
+        kids.push(shape);
+      }
+      if (mark.text) {
+        const words = document.createElement('span');
+        words.className = 'marble-change-words';
+        words.textContent = mark.text;
+        kids.push(words);
+      }
+      el.replaceChildren(...kids);
+    }
+
+    function writeTool(plan) {
+      const { holder } = plan;
+      let el = holder.el;
+      if (plan.hide) {
+        if (el && !el.hidden) el.hidden = true;
+        return false;
+      }
+      if (!el) {
+        el = document.createElement('div');
+        el.className = 'marble-change-draw';
+        el.setAttribute(TRANSIENT, '');
+        el.setAttribute('aria-hidden', 'true');
+        holder.el = el;
+        holder.dirty = true;
+        holder.moved = false;
+        place(el, plan.box);
+        layer.append(el);
+        fadeIn(el);
+      }
+      if (holder.dirty) {
+        fillTool(el, holder.mark);
+        holder.dirty = false;
+      }
+      // A tool moving on (the same key on another part) glides there.
+      if (holder.moved) {
+        holder.moved = false;
+        if (!still()) {
+          el.toggleAttribute('data-glide', true);
+          clearTimeout(holder.glide);
+          holder.glide = setTimeout(() => el.removeAttribute('data-glide'), 420);
+        }
+      }
+      if (el.style.getPropertyValue('--r') !== plan.radius) el.style.setProperty('--r', plan.radius);
+      place(el, plan.box);
+      const state = plan.gone ? 'gone' : '';
+      if ((el.dataset.state ?? '') !== state) {
+        if (state) el.dataset.state = state;
+        else delete el.dataset.state;
+      }
+      if (el.hidden !== plan.held) el.hidden = plan.held;
+      // Words beside a part that would run off the window sit inside its end.
+      const words = !plan.held && el.lastElementChild?.classList.contains('marble-change-words') ? el.lastElementChild : null;
+      if (words && !el.hasAttribute('data-flip') && words.getBoundingClientRect().right > innerWidth - INSIDE) el.toggleAttribute('data-flip', true);
+      return true;
+    }
+
     // ------------------------------------------------------------ the tag
 
     function openConversation(run) {
@@ -1069,7 +1419,17 @@
       return tag;
     }
 
+    /** How many of the change's parts have changed. A change that named
+     *  its reach and its size counts the parts of its reach it has changed,
+     *  step after step: days, not the cells inside them. Otherwise the host's
+     *  count of distinct parts. */
+    function doneOf(run) {
+      if (run.reached.size && run.total) return run.landedReach.size;
+      return run.count || [...run.parts.values()].filter((p) => p.state !== 'soon' && p.state !== 'failed').length;
+    }
+
     function unitWords(run) {
+      if (run.look?.unit) return run.look.unit;
       const units = new Set();
       for (const part of run.parts.values()) {
         if (!part.unit) {
@@ -1095,7 +1455,14 @@
       }
       const lost = failed ? [[failed, 'failed']] : [];
       if (!run.verb) return lost;
-      const n = run.count || [...run.parts.values()].filter((p) => p.state !== 'soon' && p.state !== 'failed').length;
+      // A measure in place of the count: how far along, in its own unit.
+      const m = run.look?.measure;
+      if (m) {
+        const unit = m.unit ? ` ${m.unit}` : '';
+        const measured = m.of ? [m.now, `of ${m.of}${unit}`] : unit ? [m.now, m.unit] : [m.now];
+        return lost.length ? [[run.verb, ...measured], ...lost] : [[run.verb], measured];
+      }
+      const n = doneOf(run);
       const [one, many] = unitWords(run);
       const howMany = run.total ?? n;
       const count = run.total ? [n, `of ${run.total} ${howMany === 1 ? one : many}`] : [n, n === 1 ? one : many];
@@ -1104,10 +1471,11 @@
 
     // The verb and its count read as one phrase; the end's tallies, a list.
     const VERBS = new Set(['Rewriting', 'Restyling', 'Changing', 'Adding', 'Removing', 'Reading']);
-    const isCount = (pieces) => pieces.length === 2 && pieces[0].length === 1 && VERBS.has(pieces[0][0]) && typeof pieces[1][0] === 'number';
+    const isCount = (pieces, verb = null) => pieces.length === 2 && pieces[0].length === 1
+      && (VERBS.has(pieces[0][0]) || (verb !== null && pieces[0][0] === verb)) && typeof pieces[1][0] === 'number';
 
-    function writeSaid(node, pieces) {
-      const phrase = isCount(pieces);
+    function writeSaid(node, pieces, verb = null) {
+      const phrase = isCount(pieces, verb);
       const key = JSON.stringify(pieces);
       if (node.dataset.key === key) return;
       node.dataset.key = key;
@@ -1131,13 +1499,14 @@
 
     function fillTag(run, tag) {
       const pieces = tagWords(run);
-      if (pieces) writeSaid(tag.said, pieces);
+      if (pieces) writeSaid(tag.said, pieces, run.look?.verb ?? null);
       const time = elapsed(run);
       if (tag.time.textContent !== time) tag.time.textContent = time;
-      const metered = Boolean(run.total) && !run.ending && !run.reading && Boolean(run.verb);
+      const m = run.look?.measure;
+      const metered = Boolean(m ? m.of : run.total) && !run.ending && !run.reading && Boolean(run.verb);
       if (tag.meter.hidden !== !metered) tag.meter.hidden = !metered;
       if (metered) {
-        const p = `${Math.round(Math.min(1, (run.count || 0) / run.total) * 100)}%`;
+        const p = `${Math.round(Math.min(1, Math.max(0, m ? m.now / m.of : doneOf(run) / run.total)) * 100)}%`;
         if (tag.meter.firstChild.style.getPropertyValue('--p') !== p) tag.meter.firstChild.style.setProperty('--p', p);
       }
       const of = run.step?.of && run.step.of <= 12 ? run.step.of : 0;
@@ -1380,21 +1749,23 @@
         }
         for (const part of run.parts.values()) {
           marks.push(planTint(part, 'tint', hidden ? null : tintStateOf(run, part), 'part', hand));
-          marks.push(planDot(part, hidden || !part.dotted || part.state === 'out' ? null : run.gone ? 'gone' : part.state, hand));
+          marks.push(planDot(part, hidden || !dotted(part) || part.state === 'out' ? null : run.gone ? 'gone' : part.state, hand));
           if (!hidden && part.state !== 'out') entries.push({ holder: part, state: part.state, gone: run.gone });
         }
         if (run.local) for (const mark of marks) if (mark) mark.local = true;
+        const tools = hidden || run.undo ? [] : [...run.tools.values()].map((tool) => planTool(run, tool, hand));
         // A change made by hand has a tag only while it has words to say.
         const silent = run.local && !(run.ending ? run.endWords?.length : run.words?.length);
-        plans.push({ run, marks, at: hidden || run.undo || silent ? null : hangOf(run, marks) });
+        plans.push({ run, marks, tools, at: hidden || run.undo || silent ? null : hangOf(run, marks) });
       }
       const railPlan = planRail(entries);
       // Write.
       layer.style.setProperty('--change-inset', `${Math.round(inset)}px`);
       const placing = [];
-      for (const { run, marks, at } of plans) {
+      for (const { run, marks, tools, at } of plans) {
         let drawn = false;
         for (const mark of marks) if (mark) drawn = writeMark(mark) || drawn;
+        for (const tool of tools) drawn = writeTool(tool) || drawn;
         if (at) {
           run.tag ??= makeTag(run);
           fillTag(run, run.tag);
@@ -1440,11 +1811,12 @@
      *  same frame that started the run, before anything is painted. */
     function wanted(run) {
       if (run.tag) return true;
+      if (!run.undo && !run.ending) for (const tool of run.tools.values()) if (tool.el || drawable(resolve(tool))) return true;
       for (const mark of run.scope.values()) if (mark.el || (mark.state === 'soon' && drawable(resolve(mark)))) return true;
       for (const part of run.parts.values()) {
         if (part.tint || part.dot) return true;
         if (part.seeded && !part.lifted && part.state !== 'soon' && !resolve(part)) return true;
-        const creatable = part.dotted ? !run.gone : part.state === 'soon' || part.state === 'now' || part.state === 'failed';
+        const creatable = dotted(part) ? !run.gone : part.state === 'soon' || part.state === 'now' || part.state === 'failed';
         if (creatable && drawable(resolve(part))) return true;
       }
       if (run.undo) return false;

@@ -728,3 +728,99 @@ test('affordance_script composes what the markers need, the way a starter does',
 });
 
 test.after(() => drive.close());
+
+// ------------------------------------------------------------ v6: marks
+
+const marksTools = (looks) => createTools({
+  store: drive.store,
+  writeOps: drive.writeOps,
+  createDocument: drive.createDocument,
+  buildStarter: build,
+  guidePath: enginePath('skills/build-in-marble/SKILL.md'),
+  examine: () => [],
+  onLook: (docPath, ids, client, extra) => looks.push({ docPath, ids, client, extra }),
+});
+
+test('apply_ops marks ride the batch\'s frames and every later batch of the turn, anchored to the document', async () => {
+  const looks = [];
+  const v6Tools = marksTools(looks);
+  const turn = await freshTurn();
+  await v6Tools.call('read_document', { path: turn.target }, turn);
+  const result = await v6Tools.call('apply_ops', {
+    path: turn.target, note: 'Answer the first question.', total: 2,
+    marks: { verb: 'answering', unit: ['question', 'questions'], draw: [{ at: 'q1', shape: 'ring', key: 'cursor' }, { at: 'nope', shape: 'dot' }] },
+    ops: [{ type: 'setText', id: 'q1', text: 'Why? Because.' }],
+  }, turn);
+  assert.equal(result.applied, 1);
+  const before1 = looks.find((l) => l.extra?.stage === 'before');
+  assert.deepEqual(before1.extra.marks, {
+    verb: 'Answering', unit: ['question', 'questions'], draw: [{ at: 'q1', on: 'over', as: 'now', key: 'cursor', shape: 'ring' }],
+  });
+
+  looks.length = 0;
+  await v6Tools.call('apply_ops', {
+    path: turn.target, note: 'Answer the second question.',
+    marks: { draw: [{ at: 'q2', shape: 'ring', key: 'cursor' }] },
+    ops: [{ type: 'setText', id: 'q2', text: 'How? Slowly.' }],
+  }, turn);
+  const before2 = looks.find((l) => l.extra?.stage === 'before');
+  assert.equal(before2.extra.marks.verb, 'Answering', 'words given once are kept for the turn');
+  assert.deepEqual(before2.extra.marks.draw.map((m) => m.at), ['q2'], 'a draw given replaces the last one');
+
+  looks.length = 0;
+  await v6Tools.call('apply_ops', {
+    path: turn.target, note: 'Retitle.', ops: [{ type: 'setText', id: 'h', text: 'Garden notes' }],
+  }, turn);
+  const before3 = looks.find((l) => l.extra?.stage === 'before');
+  assert.deepEqual(before3.extra.marks.draw.map((m) => m.at), ['q2'], 'no draw leaves the marks as they are');
+});
+
+test('apply_ops with no ops draws the reach and the marks ahead, and writes nothing', async () => {
+  const looks = [];
+  const v6Tools = marksTools(looks);
+  const turn = await freshTurn();
+  const sourceBefore = await drive.store.read(turn.target);
+  const result = await v6Tools.call('apply_ops', {
+    path: turn.target, note: 'Stage 1 of 2: find each question', total: 2, reach: ['q1', 'q2', 'nope'], ops: [],
+    marks: { verb: 'Answering', unit: ['question'], draw: [{ at: 'q1', as: 'ahead', shape: 'ring' }, { at: 'q2', as: 'ahead', shape: 'ring' }] },
+  }, turn);
+  assert.deepEqual(result, { applied: 0, marked: { reach: 2, draw: 2 } });
+  assert.equal(await drive.store.read(turn.target), sourceBefore, 'nothing is written');
+  assert.equal(turn.undo.length, 0, 'nothing is recorded for undo');
+  assert.equal(looks.length, 1);
+  const [mark] = looks;
+  assert.equal(mark.extra.stage, 'mark');
+  assert.equal(mark.extra.turn, turn.id);
+  assert.deepEqual(mark.extra.reach, ['q1', 'q2']);
+  assert.equal(mark.extra.total, 2);
+  assert.equal(mark.extra.count, 0);
+  assert.deepEqual(mark.extra.step, { n: 1, of: 2, text: 'find each question' });
+  assert.deepEqual(mark.ids.sort(), ['q1', 'q2']);
+  assert.equal(mark.extra.marks.draw.length, 2);
+
+  // The first edit after it carries the same marks and the same reach.
+  await v6Tools.call('read_document', { path: turn.target }, turn);
+  looks.length = 0;
+  await v6Tools.call('apply_ops', { path: turn.target, note: 'Stage 2 of 2: answer them', ops: [{ type: 'setText', id: 'q1', text: 'Why? Because.' }] }, turn);
+  const before = looks.find((l) => l.extra?.stage === 'before');
+  assert.deepEqual(before.extra.reach, ['q1', 'q2']);
+  assert.equal(before.extra.marks.verb, 'Answering');
+});
+
+test('apply_ops with no ops and nothing to draw is a batch that changes nothing', async () => {
+  const looks = [];
+  const v6Tools = marksTools(looks);
+  const turn = await freshTurn();
+  const result = await v6Tools.call('apply_ops', { path: turn.target, note: 'Nothing.', ops: [] }, turn);
+  assert.equal(result.marked, undefined);
+  assert.equal(looks.filter((l) => l.extra?.stage === 'mark').length, 0);
+});
+
+test('apply_ops and fan_out schemas name marks', () => {
+  for (const name of ['apply_ops', 'fan_out']) {
+    const schema = TOOL_SCHEMAS.find((t) => t.name === name).inputSchema.properties.marks;
+    assert.equal(schema.type, 'object', name);
+    assert.deepEqual(Object.keys(schema.properties), ['verb', 'unit', 'measure', 'draw']);
+    assert.equal(schema.properties.draw.maxItems, 24);
+  }
+});

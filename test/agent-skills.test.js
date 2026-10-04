@@ -62,6 +62,7 @@ test('skills come from the drive, the app\'s plugin and the person\'s home, neve
   const ids = (await listSkills(dirs)).map((s) => s.id).sort();
   assert.deepEqual(ids, [
     'marble-drive:design-system',
+    'marble-drive:drawing-the-change',
     'marble-drive:genui-author',
     'marble-drive:growing-the-open-page',
     'marble-drive:triage',

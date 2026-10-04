@@ -17,6 +17,13 @@ const VISUALS = `Answering with a visual: a fenced block tagged \`marble-visual\
 
 const AUTOMATIONS = `Making something automatic: a document cannot fetch or run anything on its own, so an automation is an element that carries its own brief, and the Drive runs it. Put data-marble-run="<the brief an agent should be given each time>" on a button, with data-marble-scope="<the data-marble-id it acts on>" and data-marble-on="press", labelled with what it does ("Fill"). Pressing it starts an agent with that brief, aimed at this document and that element; the agent does any looking-up, and its changes land like any other, with Undo. Build this instead of a script whenever you are asked to make something fill, fetch or update itself.`;
 
+/** How a change shows while it runs (v6): drawn by the page from what the
+ *  agent says, never written into the document. Named in both drive texts
+ *  because an agent left to itself builds its progress into the file. */
+const MARKS_COMMON = `the page draws the work, so nothing about it goes in the document: no status line, caption, overlay, state class or style for the working look, and no cleanup call. With apply_ops (and fan_out) send \`marks\` in the thing's own terms: the tag's \`verb\` and \`unit\` in its field's words ("Picking", stations, not "Changing", parts), and \`draw\` marks anchored to parts by id — the tool a person who works on that thing would hold, where you are working (\`as: "now"\`, with a \`key\` so it moves with you), what is still to come in its own form (\`as: "ahead"\`, dashed), what was there before (\`as: "before"\`). An apply_ops with no ops draws the reach and marks before anything moves. A change of one rule on many parts lands at once, not part by part.`;
+const MARKS_DOCUMENTS = `Showing a change while it runs: ${MARKS_COMMON}`;
+const MARKS_DRIVE = `Showing a change while it runs: ${MARKS_COMMON} There is no list of kinds to pick from; the \`marble-drive:drawing-the-change\` skill has the method and worked examples — use it for any change that touches more than one part of a page someone is looking at.`;
+
 /** What a drive's apps look like, and what they refuse. Named in both drive
  *  texts because a documents agent has no skills to find it by, and a full
  *  agent's skill only fires if the word "style" was in the request. */
@@ -38,6 +45,8 @@ How to work:
 - An affordance marker (data-marble-editable, -sortable, -toggle …) only works if the document's own script wires it; the host ships none. Use the markers the document's script already reads, and start a new document from a starter with create_document rather than building one from an empty page. A control you add in a <script> must change the page and file the same change with window.marble.op, or nothing a person does with it is kept.
 
 ${STYLE_DOCUMENTS}
+
+${MARKS_DOCUMENTS}
 
 ${VISUALS}
 
@@ -74,6 +83,8 @@ The browser is a fresh Chromium that dies when the turn ends. It is signed in to
 A skill the person asks you to make is theirs, so it lives in their drive: write it to .claude/skills/<name>/SKILL.md here, never in ~/.claude/skills or in any other repository.
 
 ${STYLE_DRIVE}
+
+${MARKS_DRIVE}
 
 ${VISUALS}
 

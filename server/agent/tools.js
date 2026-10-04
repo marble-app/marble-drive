@@ -20,6 +20,7 @@ import fsp from 'node:fs/promises';
 
 import { collectSlices, guardOps, idsOfOps, OP, repairOps, validateOps } from '../engine.js';
 import { IDS_MAX, MODELS, SHARDS_MAX, SHARDS_MIN, runFanOut, targetsOf } from '../change/fanout.js';
+import { anchorsOf, MARKS_MAX, marksOf, mergeMarks, PLACES, SHAPES, STATES } from '../change/marks.js';
 import { partsOf, parseStep } from '../change/parts.js';
 import { parsePath, splitPath } from '../paths.js';
 import { inverseSteps } from './inverse.js';
@@ -30,6 +31,51 @@ const READ_BUDGET = 24_000;
 const REFUSAL_BUDGET = 12_000;
 const INNER_LIMIT = 12_000;
 const REACH_MAX = 200;
+
+// What a change draws while it runs, in the words and tools of the thing it
+// changes (server/change/marks.js). Never filed: it is drawn on every open tab
+// of the document and lifts when the change ends.
+const MARKS = {
+  type: 'object',
+  description:
+    'How the page shows this change while it runs, in the thing\'s own terms — drawn, never saved. ' +
+    'verb and unit name the work on the tag ("Picking", ["station","stations"]); measure replaces the count when it is not parts ' +
+    '({now:15, of:24, unit:"px"}); draw anchors marks to parts by id: the tool where the work is now (as "now"), what is still to ' +
+    'come in its own form (as "ahead"), what was there before (as "before"). A draw given replaces the last one; [] clears it. ' +
+    'Use the marble-drive:drawing-the-change skill to decide what to draw.',
+  properties: {
+    verb: { type: 'string', maxLength: 32, description: 'What the change is doing, in the thing\'s own words: Picking, Transposing, Redlining.' },
+    unit: {
+      type: 'array', items: { type: 'string' }, minItems: 1, maxItems: 2,
+      description: 'What the count counts, one and many: ["bar","bars"], ["well","wells"].',
+    },
+    measure: {
+      type: 'object',
+      description: 'A measure in place of the count of parts: how far along, toward what.',
+      properties: { now: { type: 'number' }, of: { type: 'number' }, unit: { type: 'string', maxLength: 12 } },
+      required: ['now'],
+    },
+    draw: {
+      type: 'array',
+      maxItems: MARKS_MAX,
+      items: {
+        type: 'object',
+        required: ['at'],
+        properties: {
+          at: { type: 'string', description: 'The data-marble-id of the part the mark stands on.' },
+          on: { type: 'string', enum: PLACES, description: 'Over the part (default), or just above, below, before or after it.' },
+          as: { type: 'string', enum: STATES, description: 'now: the tool at work (solid ink). ahead: still to come (dashed, faint). before: what was there (a faint ghost; its words struck).' },
+          shape: { type: 'string', enum: SHAPES, description: 'ring hugs the part; line runs along the side named by on (over: a vertical line at x); dot sits at x,y; fill washes the part.' },
+          x: { type: 'number', minimum: 0, maximum: 100, description: 'Across the part, in percent: where a dot, an over line or words sit.' },
+          y: { type: 'number', minimum: 0, maximum: 100, description: 'Down the part, in percent.' },
+          text: { type: 'string', maxLength: 48, description: 'A few words or a number set small in the ink: "+24 px", "Dm7", "C3".' },
+          svg: { type: 'string', maxLength: 2400, description: 'SVG shapes (path, line, polyline, polygon, rect, circle, ellipse, g) in a 0–100 box stretched over the part; strokes keep their width. class may be ahead, before, fill, solid or thin.' },
+          key: { type: 'string', maxLength: 24, description: 'The same key on the next call glides this mark to its new place (a cursor moving on).' },
+        },
+      },
+    },
+  },
+};
 
 export const TOOL_SCHEMAS = [
   {
@@ -54,6 +100,7 @@ export const TOOL_SCHEMAS = [
       'Change a document with Marble ops (setText, setInner, setAttr, insert, move, remove) addressed by data-marble-id. ' +
       'At most 24 ops per call. If an element changed since you read it, nothing applies and you get its current source: ' +
       'rebuild your edit against that and call again. Inserted elements get ids minted for you. ' +
+      'With no ops, reach, total and marks are drawn ahead of the first edit, and nothing is written. ' +
       'Example op: {"type":"setText","id":"h1","text":"New title"}.',
     inputSchema: {
       type: 'object',
@@ -73,6 +120,7 @@ export const TOOL_SCHEMAS = [
           minimum: 1,
           description: 'How many parts the whole change will touch, when you know it (e.g. 15 stills). The page counts toward it.',
         },
+        marks: MARKS,
       },
     },
   },
@@ -105,6 +153,7 @@ export const TOOL_SCHEMAS = [
           },
         },
         model: { type: 'string', enum: MODELS, description: 'The workers\' model: sonnet unless the change is simple.' },
+        marks: MARKS,
       },
     },
   },
@@ -215,7 +264,7 @@ export function createTools({ store, writeOps, createDocument, buildStarter, com
    *  with the ids it has yet to land), how many of those are still failed
    *  (`failed`), and the fan out the page was told of last (`fanout`). */
   const tallyOf = (turn) => {
-    turn.v5 ??= { parts: new Set(), added: new Set(), removed: new Set(), total: null, reach: null, failed: 0, lost: [], fanout: null };
+    turn.v5 ??= { parts: new Set(), added: new Set(), removed: new Set(), total: null, reach: null, failed: 0, lost: [], fanout: null, marks: null };
     return turn.v5;
   };
 
@@ -266,7 +315,7 @@ export function createTools({ store, writeOps, createDocument, buildStarter, com
    * `signal`: a batch still waiting in the queue when it aborts is refused.
    * `group`: the fan out this batch is one landed group of.
    */
-  async function writeBatch(turn, docPath, { ops: given, note, step = parseStep(note), known, refusal, learn = null, total, reach, signal = null, group = null }) {
+  async function writeBatch(turn, docPath, { ops: given, note, step = parseStep(note), known, refusal, learn = null, total, reach, marks = null, signal = null, group = null }) {
     const client = `agent:${turn.conversationId}`;
     let steps = null;
     let introduced = [];
@@ -337,6 +386,12 @@ export function createTools({ store, writeOps, createDocument, buildStarter, com
       if (Array.isArray(reach)) {
         v5.reach = reach.map(String).filter((id) => doc.has(id)).slice(0, REACH_MAX);
       }
+      // What the change draws (v6): anchored to parts of the document, or to
+      // parts this batch puts in. Given once, repeated on every later batch.
+      if (marks) {
+        const fresh = new Set(inserts.flatMap((entry) => entry.ids));
+        v5.marks = mergeMarks(v5.marks, marksOf(marks, { has: (id) => doc.has(id) || fresh.has(id) }));
+      }
       settleLost(v5, ops);
       if (group) v5.fanout = group;
       const before = groupsOf(v5);
@@ -356,6 +411,7 @@ export function createTools({ store, writeOps, createDocument, buildStarter, com
         count: v5.parts.size,
         total: v5.total,
         reach: v5.reach,
+        ...(v5.marks ? { marks: v5.marks } : {}),
       };
 
       steps = inverseSteps(source, ops, { index: doc });
@@ -387,6 +443,34 @@ export function createTools({ store, writeOps, createDocument, buildStarter, com
       turn.onEvent({ type: 'ops.applied', path: docPath, count: result.applied });
     }
     return { applied: result.applied, introduced };
+  }
+
+  /** A step's reach, the size of the change and its marks, said ahead of
+   *  its first edit (`apply_ops` with no ops): the page tints the reach and
+   *  draws the marks before anything moves. Nothing is written, recorded or
+   *  counted as changed. */
+  async function markAhead(turn, docPath, input) {
+    const source = await store.read(docPath);
+    if (source === null) return { error: `no document "${docPath}"` };
+    const doc = indexOf(source);
+    const v5 = tallyOf(turn);
+    if (Number.isInteger(input.total) && input.total >= 1 && v5.total === null) v5.total = input.total;
+    if (Array.isArray(input.reach)) v5.reach = input.reach.map(String).filter((id) => doc.has(id)).slice(0, REACH_MAX);
+    if (input.marks) v5.marks = mergeMarks(v5.marks, marksOf(input.marks, { has: (id) => doc.has(id) }));
+    const note = String(input.note ?? '').trim();
+    const ids = [...new Set([...(v5.reach ?? []), ...anchorsOf(v5.marks)])];
+    onLook?.(docPath, ids, `agent:${turn.conversationId}`, {
+      phase: 'writing',
+      stage: 'mark',
+      note,
+      turn: turn.id,
+      step: parseStep(note),
+      count: v5.parts.size,
+      total: v5.total,
+      reach: v5.reach,
+      ...(v5.marks ? { marks: v5.marks } : {}),
+    });
+    return { applied: 0, marked: { reach: v5.reach?.length ?? 0, draw: v5.marks?.draw?.length ?? 0 } };
   }
 
   const readable = async (input) => {
@@ -438,6 +522,11 @@ export function createTools({ store, writeOps, createDocument, buildStarter, com
       if (!turn.writable.has(docPath)) {
         return { error: `"${docPath}" is not writable in this turn — the target is "${turn.target}"` };
       }
+      // No ops: the reach, the size and the marks of what comes next, drawn
+      // before anything moves. Nothing is written or recorded.
+      if (Array.isArray(input.ops) && input.ops.length === 0 && (input.marks || input.reach || input.total)) {
+        return markAhead(turn, docPath, input);
+      }
       const ledger = ledgerFor(turn.conversationId, docPath);
       const landed = await writeBatch(turn, docPath, {
         ops: input.ops,
@@ -446,6 +535,7 @@ export function createTools({ store, writeOps, createDocument, buildStarter, com
         learn: ledger,
         total: input.total,
         reach: input.reach,
+        marks: input.marks,
         refusal: (source, { stale, unread, gone, error }) => {
           // Gone since it was read: what the checks said, as before.
           if (gone.length) return { reason: error, current: [] };
@@ -486,6 +576,14 @@ export function createTools({ store, writeOps, createDocument, buildStarter, com
       // ones are kept on the turn (`lost`), where a later batch can land them.
       const fan = { call: ++fanCalls, of: shards.length, done: 0 };
       const signal = turn.abort?.signal;
+      // What the fan out draws while its workers run (v6): the words of its
+      // tag, and marks on the parts as they stand now. Every group's frame
+      // carries them.
+      if (input.marks) {
+        const doc = indexOf(source);
+        const v5 = tallyOf(turn);
+        v5.marks = mergeMarks(v5.marks, marksOf(input.marks, { has: (id) => doc.has(id) }));
+      }
 
       const result = await runFanOut({
         source,
@@ -534,6 +632,7 @@ export function createTools({ store, writeOps, createDocument, buildStarter, com
             total: v5.total,
             reach: v5.reach ?? all.slice(0, REACH_MAX),
             groups: groupsOf(v5),
+            ...(v5.marks ? { marks: v5.marks } : {}),
           });
         },
       });

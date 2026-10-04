@@ -14,3 +14,5 @@ Two tools this drive adds on top of that ritual:
 `apply_ops` takes `reach` and `total`. Send a step's ids ahead in `reach`, with its first batch, so the page can show the whole reach before any of it changes. Give `total` when you know how many parts the whole change will touch — fifteen stills, not just this call's four — and the page counts toward it as later batches land.
 
 `fan_out` is for six or more parts that each need their own judgment — a label per row, an icon per item, a rewrite per paragraph — not for a build's stages. Write one plan every worker follows, split the parts into shards, and each shard's worker returns edits that are checked before they land. A shard that fails leaves its parts as they were and says why; the rest still lands. For a few parts, or one change every part shares, apply_ops alone is simpler.
+
+What the page shows while you build — the tool where you are working, what is still to come, the tag's words in the thing's own terms — goes in `apply_ops`' `marks`, never in the document. The `drawing-the-change` skill says how to work out those marks for any kind of thing.

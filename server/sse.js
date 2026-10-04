@@ -14,6 +14,8 @@
 // told. So it is the client that is excluded, never the connection and never
 // the document.
 
+import { marksForVisitor } from './change/marks.js';
+
 const KEEPALIVE = 25_000;
 
 /** The frame an agent's look is said as: the caller's fields ride along,
@@ -31,11 +33,13 @@ export function lookFrame(client, ids, extra = {}) {
 
 /** A presence frame as someone holding a share link is sent it: where the
  *  work is and how far along, never the words — the prompt the owner asked
- *  with, an agent's note on a batch, or the words of the step it says it is
- *  on (its count stays). Everyone else is sent the frame whole. */
+ *  with, an agent's note on a batch, the words of the step it says it is on
+ *  (its count stays), or the words its marks say (their shapes stay).
+ *  Everyone else is sent the frame whole. */
 export function forVisitor(frame) {
   if (!frame || typeof frame !== 'object') return frame;
-  const { prompt, note, step, ...rest } = frame;
+  const { prompt, note, step, marks, ...rest } = frame;
+  if (marks !== undefined) rest.marks = marksForVisitor(marks);
   if (step && typeof step === 'object') {
     const { text, ...count } = step;
     rest.step = count;
