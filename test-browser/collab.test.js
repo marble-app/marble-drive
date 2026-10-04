@@ -82,7 +82,7 @@ const host = await startDrive({
 });
 test.after(() => host.close());
 
-test('a conflict fork says why it is there, and shows You, Agent, Keep this, and Ask an agent to combine', async () => {
+test('a conflict fork says why it is there, and shows Yours, The new one, Keep this, and Ask an agent to combine', async () => {
   await host.reset();
   const { page, errors } = await host.newPage({ attending: FOLLOWED });
   await page.goto(`${host.base}/a/forked`);
@@ -91,8 +91,8 @@ test('a conflict fork says why it is there, and shows You, Agent, Keep this, and
   await bar.waitFor();
 
   const labels = await bar.locator('button').allTextContents();
-  assert.deepEqual(labels.map((t) => t.trim()), ['You', 'Agent', 'Keep this', 'Ask an agent to combine']);
-  assert.equal(await bar.locator('.marble-fork-why').textContent(), 'You and the agent both changed this.');
+  assert.deepEqual(labels.map((t) => t.trim()), ['Yours', 'The new one', 'Keep this', 'Ask an agent to combine']);
+  assert.equal(await bar.locator('.marble-fork-why').textContent(), 'This changed while you were editing it.');
   assert.equal(await bar.getByRole('button', { name: 'Approve' }).count(), 0);
   assert.equal(await bar.getByRole('button', { name: 'Reject' }).count(), 0);
   assert.equal(await page.locator('h1.marble-alt-shown').textContent(), 'Yours');
@@ -129,7 +129,7 @@ test('Keep this commits the version that is showing', async () => {
   const bar = page.locator('marble-alt > .marble-fork');
   await bar.waitFor();
 
-  await bar.getByRole('button', { name: 'Agent', exact: true }).click();
+  await bar.getByRole('button', { name: 'The new one', exact: true }).click();
   await page.waitForFunction(() => document.querySelector('h1.marble-alt-shown')?.textContent === 'Theirs');
   await bar.getByRole('button', { name: 'Keep this' }).click();
 

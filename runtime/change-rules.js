@@ -1395,9 +1395,9 @@
 
     let trayHeld = false;
     function offerTray() {
-      // Not `always`: on a touch screen the menu shows only rows that are
-      // not always there, and Reshape must be reachable with a finger too.
-      const spec = { id: 'reshape', order: 9, label: 'Reshape', icon: RESHAPE, active: on, onSelect: () => { reshape(!on); keysBack(); } };
+      // `always`: on a touch screen the tray shows only contextual tools, so
+      // Reshape by hand is a pointer-and-keys feature; a phone asks in words.
+      const spec = { id: 'reshape', order: 9, label: 'Reshape', icon: RESHAPE, always: true, active: on, onSelect: () => { reshape(!on); keysBack(); } };
       if (!trayHeld) {
         trayHeld = !dispatchEvent(new CustomEvent('marble-tray:register', { cancelable: true, detail: spec }));
         return;

@@ -677,12 +677,19 @@ test('a rule from words steps round the drive\'s chrome too, even chrome that co
   assert.equal(later, '12px');
 });
 
-test('on a touch screen Reshape is in the chat button\'s menu', async () => {
-  const page = await open({ viewport: { width: 390, height: 844 }, hasTouch: true, isMobile: true });
-  const row = page.locator('marble-agent-drawer .tool[data-tool="reshape"]');
-  await row.waitFor({ state: 'attached' });
-  assert.notEqual(await row.evaluate((el) => getComputedStyle(el).display), 'none');
-  assert.equal(await row.evaluate((el) => el.hidden), false);
+test('Reshape by hand stands in the chat button\'s menu on a desktop, not on a touch screen', async () => {
+  const touch = await open({ viewport: { width: 390, height: 844 }, hasTouch: true, isMobile: true });
+  const touchRow = touch.locator('marble-agent-drawer .tool[data-tool="reshape"]');
+  await touchRow.waitFor({ state: 'attached' });
+  assert.equal(await touch.evaluate(() => matchMedia('(hover: none)').matches), true);
+  assert.equal(await touchRow.evaluate((el) => getComputedStyle(el).display), 'none', 'no hover, so the row stands down; a phone asks in words');
+
+  const desk = await open();
+  const deskRow = desk.locator('marble-agent-drawer .tool[data-tool="reshape"]');
+  await deskRow.waitFor({ state: 'attached' });
+  assert.equal(await desk.evaluate(() => matchMedia('(hover: none)').matches), false);
+  assert.notEqual(await deskRow.evaluate((el) => getComputedStyle(el).display), 'none');
+  assert.equal(await deskRow.evaluate((el) => el.hidden), false);
 });
 
 test('with only the keys: Tab walks the parts, then a part\'s dot; arrows move every card like it; Enter files it', async () => {

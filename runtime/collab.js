@@ -508,10 +508,10 @@
 
     const labelOf = (version) => {
       const by = version.getAttribute(BY) ?? '';
-      if (by === 'person') return 'You';
+      if (by === 'person') return 'Yours';
       const name = version.getAttribute(ALT) ?? '';
-      if (name === 'you') return 'You';
-      if (by.startsWith('agent') || name.startsWith('agent') || name === 'claude') return 'Agent';
+      if (name === 'you') return 'Yours';
+      if (by.startsWith('agent') || name.startsWith('agent') || name === 'claude') return 'The new one';
       return name || 'Version';
     };
 
@@ -1601,7 +1601,7 @@
       // Why the bar is here at all, before what to do about it.
       const why = document.createElement('div');
       why.className = 'marble-fork-why';
-      why.textContent = 'You and the agent both changed this.';
+      why.textContent = 'This changed while you were editing it.';
 
       const seg = document.createElement('div');
       seg.className = 'marble-fork-seg';
