@@ -10,6 +10,7 @@ const TOOL_ALIASES = new Map([
   ['updatetodos', 'Todos'],
   ['todowrite', 'Todos'],
   ['task', 'Task'],
+  ['fan_out', 'Change'],
 ]);
 
 function matchOption(line) {

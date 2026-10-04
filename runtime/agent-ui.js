@@ -1753,6 +1753,7 @@
   const SHORT_NAMES = new Map([
     ['shell', 'Shell'], ['bash', 'Shell'], ['read_document', 'Read'], ['read', 'Read'],
     ['apply_ops', 'Edit'], ['edit', 'Edit'], ['updatetodos', 'Todos'], ['todowrite', 'Todos'], ['task', 'Task'],
+    ['fan_out', 'Change'],
   ]);
   const toolShortName = (name) => {
     if (!name) return 'Tool';
@@ -1785,6 +1786,12 @@
         return out(`Read${where}${Array.isArray(input.ids) && input.ids.length ? ` · ${plural(input.ids.length, 'element')}` : ''}`, input.path ?? '');
       case 'apply_ops':
         return out(`Editing${where}${input.note ? ` — ${input.note}` : ''}`, input.path ?? '');
+      case 'fan_out': {
+        const n = Array.isArray(input.shards)
+          ? input.shards.reduce((sum, s) => sum + (Array.isArray(s?.ids) ? s.ids.length : 0), 0)
+          : 0;
+        return out(`Changing${where} · ${n ? plural(n, 'part') : 'parts'} side by side`, input.path ?? '');
+      }
       // Operating, not authoring. The gesture vocabulary is closed, so the
       // verb is a lookup; the control is an id until the act has run, and the
       // app says its own name back in the result (see toolResult).
@@ -2056,6 +2063,10 @@
       case 'apply_ops': {
         // The note is written for whoever is watching ("Stage 2 of 4: the
         // cards"), so it is the best sub-line there is.
+        const note = String(input.note ?? '').trim();
+        return step('build', doc ? `Updating ${doc}` : 'Updating the document', { makes: input.path, note });
+      }
+      case 'fan_out': {
         const note = String(input.note ?? '').trim();
         return step('build', doc ? `Updating ${doc}` : 'Updating the document', { makes: input.path, note });
       }

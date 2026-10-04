@@ -126,3 +126,105 @@ no accounts, no per-document storage. The gate is a placeholder that says so in
 its own header comment. The one capability URL is the share link
 (docs/SHARING.md): it opens one document for someone without the passphrase,
 and is checked before any route runs.
+
+## v5: the interface changes itself
+
+Design: `docs/superpowers/specs/2026-10-03-v5-self-modifying-design.md`; plan:
+`docs/superpowers/plans/2026-10-03-v5-self-modifying.md`. The interface is the
+thing that changes, in place, while you watch — no agent names, bubbles or
+"thinking" on the page. This is the first agent-facing layer `ARCHITECTURE.md`
+describes; everything above it is the store/server boundary Marble and the
+Drive agree on, and this sits above that, in `runtime/` and `server/agent/` +
+`server/change/`.
+
+### The five page modules
+
+Loaded in this order (right after `agent-text.js`, in the `agents` group of
+`injectCarrier`, `server/app.js`), each depending only on what loaded before it:
+
+| Module | Owns |
+|---|---|
+| `runtime/change-morph.js` | The engine. The only thing that animates a write. `capture(ids, opts)` reads what the page looks like just before a batch lands; `play(snapshot, opts)` reads it again after and plays the difference — numbers in a style, colour in OKLCH, position/size (FLIP), inserted/removed parts, words revealed at reading pace, a crossfade for the rest. `choreograph` spreads batches of 2–6 parts across the page, ~60 ms apart, all started within 600 ms. One 150 ms crossfade under `prefers-reduced-motion`. |
+| `runtime/change-marks.js` | The marks: replaces the old zone box. Tints each part a step touches (light for the reach, deepening with an accent hairline while it lands, lifting over 900 ms), one counting tag per change in the parts' own unit (with a meter once `total` is known), a rail at the window edge for parts out of view, and margin dots past 12 tinted parts. Steps aside where `agent-text.js` or a person's own caret/focus already claims a part. |
+| `runtime/change-line.js` | The ⌘J line: replaces the old wide card. One line flush under the thing (or the foot of the window for the whole page). Asks, answers, questions-back and "could not be made" all live here; ⏎ folds it in, Esc puts it away. Words that sound like a style change are tried first as a rule (via `/agent/change-intent`); only what is not one goes to the agent. |
+| `runtime/change-review.js` | The change on request: a finished turn leaves nothing drawn until you rest on it or focus it. Draws what changed (added/removed/moved/restyled), one tag that counts it, Keep / Undo (hold: everything since Keep) / Change more / Redo, and reads `/agent/review` on load and on turn end. ⌘Z / ⇧⌘Z from anywhere on the page act on the newest change after your own last edit. |
+| `runtime/change-rules.js` | Find, mark, commit: a style change becomes one rule. Reshape (a hand: corner + padding grips) or a few words in the line (via `change-line.js` → `/agent/change-intent`) both resolve to the same thing — the parts "like" the one in hand, marked at once, committed as a single `data-marble-rule` `<style>` element with one undo entry. |
+
+### The presence-frame contract
+
+Every v5 module reads or writes the same enriched presence frame (the
+`marble:presence` document event, and the SSE `presence` frame) — new fields
+are optional, so a page that does not know them ignores them. Full shape in
+the plan's "The shared contract: a v5 presence frame":
+
+```js
+{
+  client: 'agent:<conversationId>' | 'agent-undo:<conversationId>',
+  ids: ['…'], label, phase, note,     // as before v5
+  turn: '<conversationId>-t<n>',
+  stage: 'start' | 'before' | 'after' | 'end',
+  prompt, parts, inserts, removes, moves, kind, step, count, total, reach,
+  failed, done: { status, changed, added, removed },
+}
+```
+
+Order on one document's SSE stream for one batch: `stage:'before'` presence
+(from `prepare`, before the write) → `ops` frame → `stage:'after'` presence.
+`server/change/parts.js` (`partsOf`, `parseStep`) is what turns a batch of ops
+and an agent's own note ("Stage 2 of 4: …") into `parts`/`kind`/`step`/`count`
+without writing anything or depending on a turn or conversation.
+
+### The review API
+
+`server/change/review.js`: `reviewPartsOf` reads a turn's saved undo steps the
+other way — not "what would put this back" but "what of this is still worth
+drawing, and as what" — against the document as it stands now. `listReview`
+is the host half (`GET /agent/review?path=`, `server/agent/routes.js`): every
+turn that touched a document, newest first, with the parts of it still there
+to Keep, Undo or Redo. `conversationHasReview` asks the same question across
+every document a conversation's turns touched, which is what `/keep` needs
+before it can clear a conversation's launcher dot.
+
+Turn actions, all under `POST /agent/turns/:turnId/<action>`: `/undo` and
+`/redo` run `undoTurn` (`server/agent/undo.js`) against the turn's saved
+records, publish `turn.undone` / `turn.redone`, and emit a `stage:'end'`
+presence frame on every path the undo touched so a tab opened later is not
+told an undo is still standing on the document. `/keep` marks the turn
+reviewed and clears the conversation's dot once nothing else needs review.
+
+### The intent route
+
+`POST /agent/change-intent` (`server/change/intent.js`): the line tries a few
+words that sound like a look here before sending them to the agent. A small
+model reads them beside an outline of the page (each kind of part as a
+selector, how many, how the first looks) and answers one selector and a few
+declarations, or `{ rule: null }`. The page re-checks the rule against what is
+really there before anything moves. At most two requests run at once; a third
+gets `{ rule: null }` immediately. Same plumbing as the callout's offer
+(`server/agent/offer.js`): the installed CLI on the login, no key, no tools, a
+hard timeout, and no answer is not an error.
+
+### `fan_out`
+
+A new agent tool (`server/agent/tools.js`, schema + handler; `server/change/fanout.js`
+for the run itself) for parts that each need their own judgment — a label per
+row, an icon per item, a rewrite per paragraph — rather than one rule for all
+of them. The agent writes one plan and shards the ids; one worker per shard
+(the login's CLI, no tools, at most four shards at once) gets the plan, its
+shard's brief and only its shard's elements. A worker's reply is untrusted:
+`{"ops": […]}`, checked against its shard and the document, repaired and
+validated the same way `apply_ops` is (the two share the same prepare/after
+path in `tools.js`), then landed as each worker finishes. A shard that fails
+leaves its parts as they were, says why in the turn's `failed` ids, and the
+rest still lands.
+
+### Load order
+
+`change-morph.js` first (the engine, before anything hands it a batch to
+play), then `change-marks.js` (after the caret in `agent-text.js`, whose
+claims it defers to, and after `collab.js`, whose zones step aside for what it
+marks), then `change-line.js` (after the marks, whose tints its own tint gives
+way to), then `change-review.js` (after the line, which its Change more
+opens), then `change-rules.js` (after both marks and line, which it draws
+with and tries words through). All five carry `data-marble-transient` and are
+only injected when `agents` is true for the request.

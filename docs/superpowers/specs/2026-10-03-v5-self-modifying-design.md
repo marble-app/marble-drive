@@ -5,6 +5,12 @@ v5 (`z995hbxn`). Read it there; the frames are the design. This file records
 what the build decided where the spec leaves a question open, what it builds
 in this pass, and what it leaves for later and why.
 
+**Built**, Tasks 1–9, `origin/main..HEAD` (`fd2767e..c5f68fe` for the feature
+itself; Task 9 — this file's own update, the guide and the docs — follows on
+top). Every "Built in this pass" item below shipped; see "Rulings made during
+the build" for where an implementer resolved something this file left open or
+found the spec ambiguous on, while building it.
+
 ## What v5 is
 
 The interface is the thing that changes, in place, while you watch. No agent
@@ -21,7 +27,10 @@ nothing behind but the new page. What changed is drawn only when you ask for it
    come back in the line. No card, no trail. After a change: rest/focus draws it,
    with Keep, Undo (hold: all since Keep), Change more, hold the tag for Before,
    Redo while you are there, ⌘Z/⇧⌘Z, "Show what changed" in the chat button's
-   menu, and it survives a reload (the server keeps each turn's parts).
+   menu, and it survives a reload (the server keeps each turn's parts). Turns
+   that changed the same thing (one's part is, holds, or sits inside the
+   other's, or they share a close-enough parent) draw and undo together as
+   one bar — "· 2 asks" (R23, R26).
 2. **Part by part.** Each part an edit touches is tinted (light ahead, deeper
    with an accent hairline while it lands, lifting over 900 ms after). One tag
    per change counts in the parts' own unit, with a meter when the total is
@@ -44,7 +53,9 @@ nothing behind but the new page. What changed is drawn only when you ask for it
 5. **Grab one, all like it follow.** Reshape: a corner grip and a padding grip
    on the part under the pointer; every part like it is marked; a press on a
    mark leaves it out; dragging moves them all one to one; letting go commits
-   one rule. ⇧ while grabbing changes only that one.
+   one rule — or, for a part no rule could reach (its own style attribute, an
+   id rule), inline styles on the parts instead, filed as the same one undo
+   (R31). ⇧ while grabbing changes only that one.
 6. **Fan out.** `fan_out` tool: a plan and shards of ids; one worker per shard
    in parallel (the login's CLI, no tools); edits are staged, checked against the
    shard and the page, then streamed into the page as each worker returns; a
@@ -80,3 +91,43 @@ nothing behind but the new page. What changed is drawn only when you ask for it
   tag shows Before, and Undo/Redo play the change both ways.
 - Blueprint outlines for a new section before its content exists: ops arrive
   with their content, so there is nothing to outline ahead of them.
+
+## Rulings made during the build
+
+In commit order, the full ledger is `.superpowers/sdd/2026-10-03-v5-self-modifying/progress.md`. One line each:
+
+- Ruling R1: redo writes use client `agent-undo:<conversationId>` (like undo) — a redo is a retraction of a retraction; it must neither fork against the turn's own ids nor be noted in sessionTouched — if wrong: a redo could fork against a person's concurrent edit instead of being skipped by the hash guard, which the guard already prevents.
+- Ruling R2: when `marbleText.claims(client)` is true, change-marks draws nothing for that run (no tints, no tag); agent-text's caret tag ("Typing n of m words") is the run's tag — one tag per change, as the spec says — if wrong: a single-block word edit shows no meter/status card, only the caret's count.
+- Ruling R3: redo does not clear keptAt — a kept turn has been reviewed; putting it back after an undo is deliberate and need not be reviewed again — if wrong: a redone kept change is not drawn on rest (still in history/chat).
+- Ruling R4: turns that changed a document only by whole-file restore (agent file tools) have no per-part steps, so they are not listed for review and have no redo; the page hides Redo when the redo route 409s — if wrong: such turns can only be undone from the chat.
+- Ruling R5: /agent/review scans conversations per call (no index); the page calls it on boot and on turn end only, never polls — if wrong: slow lists on a drive with thousands of conversations.
+- Ruling R6 (supersedes part of R2): agent-text claims a run only while the turn has touched one part (frame.count ≤ 1, or no count); from the second part on change-marks owns the run (tints + counting tag) and agent-text releases its claim — the spec's replay counts many single-row batches as one change — if wrong: a multi-part word edit shows tints and the engine's word reveal instead of the v3 caret.
+- Ruling R7: fix partsOf's inserted-row parsing and clear agent-undo presence after an undo in Task 3's fix round (same implementer), since Task 3's page depends on both — if wrong: none (they are bugs).
+- Ruling R8: fold reviewer Minors 1 (end frame dropped when attendance lapses), 2 (undo run can stick), 4 (collab skips agent-undo zones even where change-marks does not boot), 7 (status card divider uses accent on one side) into fix round 1 — later tasks (review on end, undo playback) build on them — if wrong: a slightly larger fix diff.
+- Ruling R9: accept R6 widening — agent-text also steps aside when a frame's total > 1 or reach has > 1 id — a change that announces several parts is a counted change from its first part — if wrong: a declared multi-part word edit never shows the v3 caret on its first part.
+- Ruling R10: accept greedy batches + bounded reorder for spread, seeded test — the spec's "spread across the page" is the goal; greedy alone fails it — if wrong: none visible.
+- Ruling R11: accept change-marks additions (run end does not land a moving batch; 300 ms lift floor; engine infers arrivals/removals for undo frames; hand rule scope) — they make undo animate and over-budget batches visible — if wrong: tints linger ≤300 ms longer.
+- Ruling R12: the callout undo test flake (removal ops land before change-marks' first paint, so the removed row is never tinted) is a real timing gap, not test noise; it enters Task 4's fix loop — if wrong: one extra fix item.
+- Ruling R13: a collapsed selection outside editable content does not hold elements (supersedes the brief's literal "selection's anchor" for clicks in plain text) — otherwise any click freezes that paragraph's ancestors from every later motion — if wrong: an element a person clicked into (non-editable) may animate under their pointer.
+- Ruling R14: fold reviewer Minors 2 (opacity 0 ghost flashes at 1), 3 (onPart start after end), 4 (drag/focus starting mid-motion is not exempted), 6 (unchanged trailing words hidden before writing) into fix round 1 — visible glitches later tasks would inherit — if wrong: a larger fix diff.
+- Ruling R15: several parts read "Change these N <unit>" when they share a unit, else "these N parts" — plainer than the brief's verbatim — if wrong: placeholder wording.
+- Ruling R16: when the line speaks for a turn (answer / cant / ask), change-marks shows no end tag for that run ("Nothing changed" would say it twice and hangs over the row above) — enters Task 5's fix loop — if wrong: no end words for an empty run started from the line.
+- Ruling R17: a prompt is a question only if it ends with "?" or starts with a wh-word (what/why/how/when/who/which/where); is/are/can/do… no longer count — "Do the same…" and "Can you shorten…" are requests — if wrong: a yes/no question without "?" that changes nothing opens as cant (words back + the reply), still readable.
+- Ruling R18: fold reviewer Minors 4 (line blocks ⇧-click pick under it), 5 (Esc before turn.started does nothing — queue the cancel), 6 (Ask-more/ask words lost on Esc), 7 ("Agents" in send-failure text), 9 (hardcode the mandated curves), 10 (share unitOf with change-marks), 12 (marble-line:closed after a sent line folds) + R16 into fix round 1 — person-visible — if wrong: larger diff.
+- Ruling R19: keys go back where they were after ⏎ except into the part being changed (a caret there would hold the change off it) — if wrong: after ⏎ focus lands on body instead of the paragraph being rewritten.
+- Ruling R20: the host must publish the conversation summary again after the turn record is final (finish() writes status after the end frame and summary), so /agent/review never misses a just-finished turn; the page's bounded re-asks stay only as a fallback — enters Task 6's fix loop — if wrong: none.
+- Ruling R21: the held "Before" copy and the old-outline measuring clone go in the document beside the original (data-marble-transient, ids stripped, inert), not in the layer, so ancestor-dependent CSS still applies — enters Task 6's fix loop — if wrong: a transient sibling briefly in the document tree.
+- Ruling R22: accept the tag straddling a bordered block's top edge, and bars flipping above when below would cover another change in Show what changed — if wrong: placement.
+- Ruling R23 (grouping): turns join one group only when they changed the same thing — a part of one is, contains, or is inside a part of the other; or their parts' common parent block (the common ancestor of the parts' parents) is the same element. Mere containment of high blocks never groups. A turn's parts are always drawn together wherever you rest on any of them, and Undo in a group undoes the newest turn of that group — if wrong: two asks on neighbouring blocks show as two bars instead of one "· 2 asks".
+- Ruling R24: fold Minors (load() returning stale in-flight data; ⌘Z repeat falling through to the person's undo; overlapping undos; ⌘Z compares listing time not finishedAt; Before restore safety net on blur/pagehide/visibilitychange; rest drawing while typing; clearHistory after an external write counted as the person; live custom elements in copies) into fix round 1 with R20/R21 — they decide whether Undo/⌘Z hit the right thing — if wrong: larger diff.
+- Ruling R25: accept Tab order tag → Change more → Keep → Undo; a part found one level up (row/card) for rest; ⇧⌘Z refusal with nothing drawn announced via live region only; Before copy as next sibling (nth-child/+ rules may shift while held) — if wrong: minor visual shift while holding Before.
+- Ruling R26 (refines R23): two turns also group when one's parent block is the other's parent block's parent (one level of containment — a list and one of its rows); deeper containment never groups — the spec's "one change since you last kept" on one list — if wrong: a list-level and a row-level ask in nested lists may group.
+- Ruling R27: ⌘Z (and ⇧⌘Z) of a rule commit must play through the engine (spec: "⌘Z plays the same motion backwards") — enters Task 7's fix loop — if wrong: none.
+- Ruling R28: turning Reshape on from the tray row returns focus to the page so Esc leaves Reshape — enters the fix loop — if wrong: none.
+- Ruling R29: accept unitOf class nouns (div.card → "card") everywhere — if wrong: a class named like a noun mislabels a part.
+- Ruling R30: fold Minors 1 (drag captures another drag's overrides), 2 (chrome guard always), 3 (Reshape row hidden on touch), 4 (keyboard-only grips on cards with nothing focusable), 5 (dead rule → fall back to agent), 6 (verb whitelist; no "Thinking"), 8 (draft kept until commit/fallback), 9 (route: abort on disconnect, concurrency cap), 10 (presses on likes after commit swallowed), 12 (lexicon plurals/comparatives; shorter wait) + R27 + R28 into fix round 1 — person-visible or filing junk — if wrong: larger diff.
+- Ruling R31: a drag no rule would reach lands as inline styles on the parts (no rule filed) rather than failing; words still fall back to the agent — failing would undo every ⇧-drag on a part with its own inline style — if wrong: some drags file inline styles instead of a rule.
+- Ruling R32: accept subtreesOf (one parse) for worker markup; workers' edits not added to the agent's read ledger (the agent re-reads once — correct staleness); extra guards (no scripts/iframes/on*/javascript:, overlapping/unknown shard ids refused); presence `groups` field; no overall cap (worst ~245 s < bridge 300 s) — if wrong: an 8-shard fan-out can take 4 min.
+- Ruling R33: a failed group that later lands through apply_ops is no longer counted failed (tag and end text) — enters Task 8's fix loop — if wrong: none.
+- Ruling R34: fold Minors 1 (script guard as a parsed attribute walk), 2 (check abort inside prepare), 3 (group counts per fan_out call), 4 (deleted part reads "changed while it worked"), and workers run with --strict-mcp-config (no MCP servers attach) + R33 into fix round 1 — security/truthfulness — if wrong: larger diff.
+- Ruling R35: accept guardOps dry check inside the shared batch (apply_ops refusals now come back as `refused` with nothing counted instead of a thrown error after counting) and the planned.html hand-off in applyOps — if wrong: a core write-path change; re-review on the strongest model.
