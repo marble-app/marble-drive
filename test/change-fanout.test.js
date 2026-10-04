@@ -172,7 +172,8 @@ test('an insert or a move is refused unless it lands inside the shard', async ()
 // may not do to markup it is allowed to touch.
 const SCRIPTED = SOURCE.replace(
   '<li data-marble-id="p1"><span data-marble-id="p1t">Paper 1</span></li>',
-  '<li data-marble-id="p1"><span data-marble-id="p1t">Paper 1</span><table data-marble-id="p1g"><tbody data-marble-id="p1b"></tbody></table><script data-marble-id="p1s">count()</script></li>',
+  '<li data-marble-id="p1"><span data-marble-id="p1t">Paper 1</span><table data-marble-id="p1g"><tbody data-marble-id="p1b"></tbody></table><script data-marble-id="p1s">count()</script>'
+    + '<svg data-marble-id="p1v" viewBox="0 0 10 10"><path data-marble-id="p1vp" d="M0 0h10"/></svg><math data-marble-id="p1m"><mi data-marble-id="p1mi">x</mi></math></li>',
 );
 const firstOf = (source, ops) => runFanOut({
   source, docPath: 'd', plan: 'x', note: 'x', shards: pairs(2),
@@ -206,6 +207,32 @@ test('a worker may not write a script into the page, however it is spelled', asy
     const result = await firstOf(SCRIPTED, ops);
     assert.match(result.shards[0].error ?? '', /script/, JSON.stringify(ops));
     assert.equal(result.shards[1].applied, 2);
+  }
+});
+
+test('markup that is only words in a page is still refused if it would run where it lands: in an svg or in maths', async () => {
+  const breakout = (tag) => `<${tag}><img src=x onerror=go()></${tag}>`;
+  for (const tag of ['style', 'textarea', 'title', 'xmp', 'noembed', 'noframes', 'noscript']) {
+    for (const ops of [
+      [{ type: 'insert', parentId: 'p1v', beforeId: null, html: breakout(tag) }],
+      [{ type: 'setInner', id: 'p1v', html: breakout(tag) }],
+      [{ type: 'insert', parentId: 'p1m', beforeId: null, html: breakout(tag) }],
+      [{ type: 'insert', parentId: 'p1', beforeId: null, html: breakout(tag) }],
+    ]) {
+      const result = await firstOf(SCRIPTED, ops);
+      assert.match(result.shards[0].error ?? '', /script/, JSON.stringify(ops));
+    }
+  }
+});
+
+test('an icon drawn in svg is not a script', async () => {
+  for (const ops of [
+    [{ type: 'insert', parentId: 'p1v', beforeId: null, html: '<g fill="none" stroke="currentColor" stroke-width="2"><path d="M1 1L9 9"/><circle cx="5" cy="5" r="3"/></g>' }],
+    [{ type: 'setInner', id: 'p1v', html: '<title>Done</title><style>.tick { stroke: currentColor; }</style><path class="tick" d="M2 5l2 2 4-4" fill="none"/>' }],
+    [{ type: 'insert', parentId: 'p1', beforeId: null, html: '<svg viewBox="0 0 16 16" aria-hidden="true"><use href="#icon-check"/><rect x="1" y="1" width="14" height="14" rx="3"/></svg>' }],
+  ]) {
+    const result = await firstOf(SCRIPTED, ops);
+    assert.equal(result.shards[0].error, undefined, JSON.stringify(ops));
   }
 });
 
@@ -669,4 +696,30 @@ test('a part the person deleted while its worker read it fails the shard as chan
   const result = await call;
   assert.equal(result.shards[1].error, 'changed while it worked');
   assert.equal(result.shards[0].applied, 2);
+});
+
+// ------------------------------------------------------------ review, round 2
+
+test('a failed part lands only by an op on it or inside it, never beside it or on what holds it', async () => {
+  const { tools } = fanTools(async (_c, args) => (firstRow(args) === 3
+    ? reply([{ type: 'setText', id: 'h', text: 'Mine' }])
+    : relabel(args)));
+  const turn = await freshTurn();
+  await tools.call('read_document', { path: turn.target }, turn);
+  await tools.call('fan_out', { path: turn.target, note: 'Relabel.', plan: 'x', shards: pairs(2) }, turn);
+  assert.equal(turn.v5.failed, 1);
+  const still = async (ops, why) => {
+    const result = await tools.call('apply_ops', { path: turn.target, note: 'Around the rows.', ops }, turn);
+    assert.ok(result.applied, JSON.stringify(result));
+    assert.equal(turn.v5.failed, 1, why);
+    assert.deepEqual([...turn.v5.lost[0].left], left, why);
+  };
+  let left = ['p3', 'p4'];
+  await still([{ type: 'insert', parentId: 'u', beforeId: 'p3', html: '<li>A new paper</li>' }], 'an insert before a failed row is beside it');
+  await still([{ type: 'move', id: 'p1', parentId: 'u', beforeId: 'p4' }], 'a move to before a failed row is beside it');
+  await still([{ type: 'setAttr', id: 'u', name: 'class', value: 'papers' }], 'the list holding a failed row is not the row');
+  left = ['p4'];
+  await still([{ type: 'insert', parentId: 'p3', beforeId: null, html: '<em>new</em>' }], 'one of two failed rows landed is still a failed group');
+  await tools.call('apply_ops', { path: turn.target, note: 'Finish.', ops: [{ type: 'setAttr', id: 'p4', name: 'data-done', value: 'yes' }] }, turn);
+  assert.equal(turn.v5.failed, 0, 'an insert into one row and an op on the other land the group');
 });

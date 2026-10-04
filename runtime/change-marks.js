@@ -440,16 +440,19 @@
       return run.failedGroups.size;
     }
 
-    /** Parts landing now that are, are inside, or hold a failed group's part:
-     *  that part has changed after all, and its mark goes as any landed
-     *  part's does. A group whose every part has landed is not failed. */
+    /** A batch whose ops name a failed group's part, or something inside it
+     *  — change, remove or move it, or insert into it — has landed that part
+     *  after all, and its mark goes as any landed part's does. An op beside
+     *  it, or on what holds it, is not about it: the host's rule
+     *  (server/agent/tools.js, `settleLost`). A group whose every part has
+     *  landed is not failed. */
     function recover(run, ids, landing) {
       if (!run.failedGroups.size || !ids.length) return;
       const els = ids.map(byId).filter(Boolean);
       for (const [key, group] of run.failedGroups) {
         for (const id of [...group.left]) {
           const el = byId(id);
-          if (!ids.includes(id) && !(el && els.some((other) => el.contains(other) || other.contains(el)))) continue;
+          if (!ids.includes(id) && !(el && els.some((other) => el.contains(other)))) continue;
           group.left.delete(id);
           if (run.parts.get(id)?.state === 'failed' && !landing.includes(id)) landPart(run, id);
         }
@@ -540,7 +543,10 @@
       // An earlier batch whose ops never came has landed as far as anyone
       // here will see. One still moving lands when its motion ends.
       for (const old of run.batches.filter((b) => !b.played)) land(run, old);
-      recover(run, [...parts, ...inserted, ...(Array.isArray(d.inserts) ? d.inserts : []).map((entry) => entry?.parentId).filter(Boolean)], parts);
+      // What the batch's ops name (the frame's ids; a frame that names none,
+      // its parts), and where its inserts go.
+      const addressed = list(d.ids).length ? list(d.ids) : parts;
+      recover(run, [...addressed, ...(Array.isArray(d.inserts) ? d.inserts : []).map((entry) => entry?.parentId).filter(Boolean)], parts);
       const distinct = new Set([...run.parts.keys(), ...parts, ...reach]);
       if (!run.many && Math.max(distinct.size, run.count, run.total ?? 0) > MANY) run.many = true;
       const reachKey = reach.join(',');

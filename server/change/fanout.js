@@ -144,8 +144,9 @@ export const targetsOf = (op) => ['id', 'parentId', 'beforeId']
 
 // What would run something, or load a page into this one, when the document
 // is opened: the agent may write it, a worker may not. Read as a browser
-// reads it — parsed, entities decoded, a table row in a table — not matched
-// as text, which is spelled around in a dozen ways.
+// reads it — parsed, entities decoded, a table row in a table, an svg's
+// insides as an svg's — not matched as text, which is spelled around in a
+// dozen ways.
 const RUNS_TAGS = new Set(['script', 'iframe', 'frame', 'frameset', 'object', 'embed', 'applet', 'portal', 'base', 'meta']);
 const URL_ATTRS = new Set(['href', 'src', 'action', 'formaction', 'xlink:href', 'srcdoc', 'data', 'poster', 'background', 'ping', 'to', 'from', 'values']);
 // A URL is read with every control character and space taken out (a browser
@@ -154,21 +155,34 @@ const RUNS_URL = /^(?:javascript:|vbscript:|data:text\/html)/i;
 const runsAsUrl = (value) => RUNS_URL.test(String(value ?? '').replace(/[\u0000-\u0020\u007f-\u009f]/g, ''));
 const runsAttr = (name, value) => /^on/i.test(name) || (URL_ATTRS.has(name.toLowerCase()) && runsAsUrl(value));
 
+// Elements whose insides a page reads as text. Text with a tag in it is
+// markup as soon as the element sits in an <svg> or <math>, where these are
+// elements like any other and an <img> inside them breaks out to the page.
+const RAW_TEXT = new Set(['style', 'textarea', 'title', 'xmp', 'noembed', 'noframes', 'noscript', 'plaintext', 'iframe', 'script']);
+// Every place the markup can land, as a browser would parse it there: the
+// page (inside a <template>, rows and cells keep their own tags and
+// attributes instead of being dropped), an <svg>, and <math>.
+const CONTEXTS = [
+  (html) => `<!doctype html><template>${html}</template>`,
+  (html) => `<!doctype html><svg>${html}</svg>`,
+  (html) => `<!doctype html><math>${html}</math>`,
+];
+const textOf = (node) => (node.childNodes ?? []).map((child) => (child.nodeName === '#text' ? child.value : textOf(child))).join('');
+
 function markupRuns(html) {
-  // Inside a <template>, markup parses as it would where it lands: rows and
-  // cells keep their own tags and attributes instead of being dropped.
-  const tree = parseSource(`<!doctype html><template>${html}</template>`);
-  const walk = (node) => {
+  const runs = (node) => {
     for (const child of [...(node.childNodes ?? []), ...(node.content ? [node.content] : [])]) {
-      if (child.tagName && RUNS_TAGS.has(child.tagName.toLowerCase())) return true;
+      const tag = child.tagName?.toLowerCase();
+      if (tag && RUNS_TAGS.has(tag)) return true;
+      if (tag && RAW_TEXT.has(tag) && textOf(child).includes('<')) return true;
       for (const attr of child.attrs ?? []) {
         if (runsAttr(attr.prefix ? `${attr.prefix}:${attr.name}` : attr.name, attr.value)) return true;
       }
-      if (walk(child)) return true;
+      if (runs(child)) return true;
     }
     return false;
   };
-  return walk(tree);
+  return CONTEXTS.some((wrap) => runs(parseSource(wrap(html))));
 }
 
 function writesScript(op, parts) {

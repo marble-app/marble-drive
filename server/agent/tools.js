@@ -232,11 +232,14 @@ export function createTools({ store, writeOps, createDocument, buildStarter, com
     const failed = v5.lost.filter((group) => group.call === fan.call && group.left.size).length;
     return { call: fan.call, of: fan.of, done: fan.done, failed, seq: ++groupSeq };
   };
-  /** A failed group whose every part has since landed — at it, inside it —
-   *  in any batch of the turn is not failed any more. */
-  const settleLost = (v5, landed) => {
+  /** A failed group whose every part has since landed, in any batch of the
+   *  turn, is not failed any more. A part lands when an op names it or
+   *  something inside it: changes, removes or moves it, or inserts into it.
+   *  An op beside it (`beforeId`) or on what holds it is not about it. The
+   *  page holds to the same rule (runtime/change-marks.js, `recover`). */
+  const settleLost = (v5, ops) => {
     if (!v5.lost.length) return;
-    const touched = new Set(landed);
+    const touched = new Set(ops.map((op) => (op.type === 'insert' ? op.parentId : op.id)).filter(Boolean));
     for (const group of v5.lost) {
       for (const id of group.left) {
         if ([...group.inside.get(id)].some((part) => touched.has(part))) group.left.delete(id);
@@ -331,7 +334,7 @@ export function createTools({ store, writeOps, createDocument, buildStarter, com
         const present = knownIds(source);
         v5.reach = reach.map(String).filter((id) => present.has(id)).slice(0, REACH_MAX);
       }
-      settleLost(v5, [...parts, ...ops.flatMap(targetsOf)]);
+      settleLost(v5, ops);
       if (group) v5.fanout = group;
       const before = groupsOf(v5);
       if (group) group.done += 1;

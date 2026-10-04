@@ -847,3 +847,35 @@ test('two fan outs in one change are counted apart', async () => {
   assert.equal(await tagSaid(page), '2 changed · 2 failed');
   await layerEmpty(page, 4000);
 });
+
+test('a failed row keeps its mark when only what holds it or what is beside it changes', async () => {
+  await settle();
+  const { page } = await open({ attending: ['c1'] });
+  const reach = ['r1', 'r2', 'r3'];
+  await frame(page, before({ parts: ['r1'], count: 1, total: 3, reach, groups: { call: 1, done: 0, failed: 0, of: 2, seq: 1 } }));
+  await frame(page, {
+    client: 'agent:c1', ids: ['r2'], phase: 'writing', turn: 'c1-t1', stage: 'after',
+    failed: ['r2'], count: 1, total: 3, reach, groups: { call: 1, done: 1, failed: 1, of: 2, seq: 3 },
+  });
+  // A row added to the table that holds it, before it; then the table restyled.
+  await frame(page, before({
+    parts: ['n1'], ids: ['n1'], kind: 'structure', count: 2, total: 3, reach,
+    inserts: [{ parentId: 'tb', beforeId: 'r2', ids: ['n1'] }], groups: { call: 1, done: 1, failed: 1, of: 2, seq: 4 },
+  }));
+  await frame(page, before({ parts: ['t'], ids: ['t'], kind: 'look', count: 3, total: 3, reach, groups: { call: 1, done: 1, failed: 1, of: 2, seq: 6 } }));
+  await page.waitForTimeout(1500);
+  assert.equal(await page.evaluate(() => window.marbleChange.tintFor('r2')), 'failed');
+  assert.match(await tagSaid(page), /· 1 failed$/);
+
+  // Without the host's count the page holds to the same rule.
+  await frame(page, { client: 'agent:c1', ids: [], stage: 'end', turn: 'c1-t1', done: { status: 'completed', changed: 3, added: 1, removed: 0, failed: 1 } });
+  await layerEmpty(page, 4000);
+  await frame(page, { client: 'agent:c1', ids: ['r2'], phase: 'writing', turn: 'c1-t2', stage: 'after', failed: ['r2'], total: 4 });
+  await frame(page, before({ turn: 'c1-t2', parts: ['n2'], ids: ['n2'], kind: 'structure', count: 1, total: 4, inserts: [{ parentId: 'tb', beforeId: 'r2', ids: ['n2'] }] }));
+  await frame(page, before({ turn: 'c1-t2', parts: ['tb'], ids: ['tb'], kind: 'look', count: 2, total: 4 }));
+  assert.match(await tagSaid(page), /· 1 failed$/);
+  assert.equal(await page.evaluate(() => window.marbleChange.tintFor('r2')), 'failed');
+  // An insert into the row itself is the row.
+  await frame(page, before({ turn: 'c1-t2', parts: ['n3'], ids: ['n3'], kind: 'structure', count: 3, total: 4, inserts: [{ parentId: 'r2', beforeId: null, ids: ['n3'] }] }));
+  assert.doesNotMatch(await tagSaid(page), /failed/);
+});
