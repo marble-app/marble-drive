@@ -52,7 +52,7 @@
   // All a conversation's row and pips are drawn from.
   const CONV_KEEP = ['id', 'target', 'title', 'running', 'queued', 'asking', 'status', 'needsReview', 'updatedAt', 'lastFinishedAt', 'lastInteractedAt', 'createdAt'];
   const SECTIONS = ['pinned', 'recent', 'agents', 'drive', 'builtin'];
-  const LABELS = { pinned: 'Pinned', recent: 'Recent', agents: 'Agents', drive: 'Drive', builtin: 'Built-in' };
+  const LABELS = { pinned: 'Pinned', recent: 'Recent', agents: 'Modifying', drive: 'Drive', builtin: 'Built-in' };
   // Where the pages the drive runs on show (the Drive's Settings, kept on its
   // <body> as data-builtin): left out but found by search, a Built-in section
   // of their own, or with your files. A Drive that never chose keeps them with
@@ -608,11 +608,8 @@
     @container (max-width: 230px) { .head .search kbd { display: none; } }
     .foot { border-top: 1px solid var(--line); padding: 6px; }
     .foot .row { color: var(--muted); }
-    .ib.me { border-radius: 50%; position: relative; background: var(--paper-2); color: var(--accent-ink); }
+    .ib.me { border-radius: 50%; background: var(--paper-2); color: var(--accent-ink); }
     .ib.me:hover, .ib.me[aria-expanded="true"] { background: var(--accent-soft); color: var(--accent-ink); }
-    .ib.me .live { position: absolute; right: -1px; bottom: -1px; width: 8px; height: 8px; border-radius: 50%;
-      background: var(--accent-ink); box-shadow: 0 0 0 2px var(--paper); }
-    .ib.me .live[hidden] { display: none; }
     .ib[aria-expanded="true"] { background: var(--paper-2); color: var(--ink); }
     .pop h3 { margin: 0 0 2px; font-size: 13.5px; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
     .pop .sub { margin: 12px 2px 6px; font-size: 12.5px; font-weight: 600; color: var(--muted); }
@@ -631,15 +628,15 @@
     .send:active:not(:disabled) { background: var(--accent-ink); }
     .send:disabled { background: var(--paper-3); color: var(--faint); cursor: default; }
     .apps { display: grid; grid-template-columns: repeat(3, 1fr); gap: 6px; }
-    .app { display: grid; grid-template-columns: 16px 1fr; column-gap: 7px; align-items: center; padding: 8px 9px; border-radius: 10px;
+    .apps > .to { display: grid; grid-template-columns: 16px 1fr; column-gap: 7px; align-items: center; padding: 8px 9px; border-radius: 10px;
       border: 1px solid var(--line); text-align: left; min-width: 0; transition: background-color 110ms ease, border-color 110ms ease; }
-    .app:hover { background: var(--paper-2); }
-    .app[aria-pressed="true"] { background: var(--accent-soft); border-color: var(--accent); }
-    .app .i { color: var(--muted); }
-    .app[aria-pressed="true"] .i { color: var(--accent-ink); }
-    .app b { font-weight: 500; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-    .app small { grid-column: 1 / -1; font-size: 12px; color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-    .app[data-busy] { opacity: .6; pointer-events: none; }
+    .apps > .to:hover { background: var(--paper-2); }
+    .apps > .to[aria-pressed="true"] { background: var(--accent-soft); border-color: var(--accent); }
+    .apps > .to .i { color: var(--muted); }
+    .apps > .to[aria-pressed="true"] .i { color: var(--accent-ink); }
+    .apps > .to b { font-weight: 500; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .apps > .to small { grid-column: 1 / -1; font-size: 12px; color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .apps > .to[data-busy] { opacity: .6; pointer-events: none; }
     .tpls { display: grid; grid-template-columns: 1fr 1fr; gap: 2px; }
     .tpl { display: flex; align-items: center; gap: 8px; padding: 6px 8px; border-radius: 8px; text-align: left; min-width: 0; color: var(--ink); }
     .tpl:hover, .tpl:focus-visible { background: var(--paper-2); }
@@ -680,7 +677,8 @@
     .lines button:hover { background: var(--paper-2); }
     .lines .i { color: var(--muted); }
     .lines small { margin-left: auto; color: var(--faint); font-size: 12px; }
-    /* This drive: whose it is, where it lives, whether this page hears it. */
+    /* This drive: whose it is, where it lives, how much is in it. A page
+       that loaded is connected, so that goes unsaid. */
     .mepop { width: min(300px, calc(100vw - 16px)); padding: 14px; }
     .me-head { display: flex; align-items: center; gap: 10px; margin-bottom: 10px; }
     .me-av { width: 36px; height: 36px; border-radius: 50%; display: grid; place-items: center; flex: none; background: var(--paper-3); color: var(--accent-ink); }
@@ -689,8 +687,6 @@
     .me-head span { display: block; color: var(--muted); font-size: 12.5px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
     .me-head > div { min-width: 0; }
     .me-row { display: flex; align-items: center; gap: 8px; padding: 6px 0; border-top: 1px solid var(--line); color: var(--muted); font-size: 12.5px; font-variant-numeric: tabular-nums; }
-    .me-row .dot { width: 7px; height: 7px; border-radius: 50%; background: var(--faint); flex: none; }
-    .mepop[data-live] .me-row .dot { background: var(--accent-ink); }
     .me-row:empty { display: none; }
     .toast { position: fixed; left: 50%; bottom: 24px; transform: translate(-50%, 8px); opacity: 0; pointer-events: none; background: var(--ink); color: var(--paper);
       border-radius: 999px; padding: 7px 14px; font-size: 12.5px; transition: opacity 160ms var(--settle), transform 160ms var(--settle); }
@@ -754,7 +750,7 @@
           <button type="button" class="share git" data-act="publish" aria-haspopup="dialog" aria-expanded="false" title="Publish this folder to GitHub" hidden>${github('')}<span>Publish</span></button>
           <button type="button" class="share" data-act="share" aria-haspopup="dialog" aria-expanded="false">${icon('share')}Share</button>
           <button type="button" class="ib" data-act="settings" aria-haspopup="dialog" aria-expanded="false" aria-label="Settings" title="Settings">${icon('gear')}</button>
-          <button type="button" class="ib me" data-act="me" aria-haspopup="dialog" aria-expanded="false" aria-label="This drive" title="This drive">${icon('me')}<span class="live" hidden></span></button>
+          <button type="button" class="ib me" data-act="me" aria-haspopup="dialog" aria-expanded="false" aria-label="This drive" title="This drive">${icon('me')}</button>
           <span class="vr"></span>
           <button type="button" class="ib" data-act="chat" aria-pressed="true" aria-label="Pin the chat" title="Pin the chat (⌘⇧J)" aria-keyshortcuts="Meta+Shift+J" hidden>${icon('chat')}</button>
           <button type="button" class="ib" data-act="close" aria-label="Hide everything" title="Hide everything (⌘\\)">${icon('collapse')}</button>
@@ -776,7 +772,7 @@
             </form>
             <p class="sub">Prompt in</p>
             <div class="apps" role="group" aria-label="Prompt in">
-              ${PROMPT_APPS.map(([app, name, says, glyph]) => `<button type="button" class="app" data-app="${app}" data-name="${name}" aria-pressed="false"><svg class="i" viewBox="0 0 16 16" aria-hidden="true">${glyph}</svg><b>${name}</b><small>${says}</small></button>`).join('')}
+              ${PROMPT_APPS.map(([app, name, says, glyph]) => `<button type="button" class="to" data-app="${app}" data-name="${name}" aria-pressed="false"><svg class="i" viewBox="0 0 16 16" aria-hidden="true">${glyph}</svg><b>${name}</b><small>${says}</small></button>`).join('')}
             </div>
             <p class="sub">Start from a template</p>
             <div class="tpls"></div>
@@ -814,7 +810,6 @@
         </div>
         <div class="pop mepop" role="dialog" aria-label="This drive" hidden>
           <div class="me-head"><span class="me-av">${icon('me')}</span><div><b></b><span class="host"></span></div></div>
-          <div class="me-row state"><span class="dot"></span><span></span></div>
           <div class="me-row weight"></div>
         </div>
         <div class="pop menu" role="menu" aria-label="This document" hidden></div>
@@ -1929,7 +1924,7 @@
     }
 
     pickApp(app) {
-      const tiles = [...this.making.querySelectorAll('.app')];
+      const tiles = [...this.making.querySelectorAll('.apps > .to')];
       const tile = tiles.find((t) => t.dataset.app === app) ?? tiles[0];
       for (const t of tiles) t.setAttribute('aria-pressed', String(t === tile));
       const send = this.making.querySelector('.send');
@@ -1982,7 +1977,7 @@
         if (ask.value.trim()) this.promptIn(this.chosenApp(), { newTab: event.metaKey || event.ctrlKey });
       });
       pop.querySelector('.apps').addEventListener('click', (event) => {
-        const tile = event.target.closest('.app');
+        const tile = event.target.closest('.apps > .to');
         if (tile) this.promptIn(tile.dataset.app, { newTab: event.metaKey || event.ctrlKey });
       });
       pop.querySelector('.tpls').addEventListener('click', (event) => {
@@ -2021,7 +2016,7 @@
       let href = m.href(app);
       if (app === 'Agents') {
         if (words) {
-          const tile = this.making.querySelector('.app[data-app="Agents"]');
+          const tile = this.making.querySelector('.to[data-app="Agents"]');
           tile.setAttribute('data-busy', '');
           try {
             if (!m.agent?.start) throw new Error('There is no agent here to send it to');
@@ -2231,27 +2226,15 @@
       this.place(this.mePop, button, 'right');
     }
 
-    get live() {
-      return Boolean(window.marble?.drive && this.heard);
-    }
-
     fillMe() {
       const pop = this.mePop;
-      pop.toggleAttribute('data-live', this.live);
       pop.querySelector('.me-head b').textContent = this.driveName || 'My Drive';
       pop.querySelector('.me-head .host').textContent = location.host;
-      pop.querySelector('.state span:last-child').textContent = this.live ? 'Live: connected to this drive' : 'Offline: not connected';
       const docs = this.docs();
       const bytes = docs.reduce((sum, d) => sum + (d.bytes ?? 0), 0);
       pop.querySelector('.weight').textContent = this.tree
         ? `${docs.length.toLocaleString()} ${docs.length === 1 ? 'document' : 'documents'} · ${sizeOf(bytes)}`
         : '';
-    }
-
-    drawLive() {
-      this.$('[data-act="me"] .live').hidden = !this.live;
-      this.$('[data-act="me"]').title = this.live ? 'This drive · live' : 'This drive · offline';
-      if (!this.mePop.hidden) this.fillMe();
     }
 
     // ------------------------------------------------------------ publishing
@@ -2747,7 +2730,6 @@
       const pinsSaid = JSON.stringify([this.pins, this.tints, this.realms, this.builtinAt]);
       const same = said === this.treeSaid && pinsSaid === this.pinsSaid;
       this.tree = tree;
-      if (!this.heard) { this.heard = true; this.drawLive(); }
       this.drawGit();
       this.byPath = new Map(this.docs().map((d) => [d.path, d]));
       this.treeSaid = said;

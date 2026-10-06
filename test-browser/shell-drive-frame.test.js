@@ -59,6 +59,9 @@ test('elsewhere the shell is closed until asked, as before, and the page keeps i
   const { page, shell } = await visit('garden');
   assert.equal(await shell.evaluate((el) => el.hasAttribute('data-open')), false);
   assert.equal(await page.evaluate(() => document.documentElement.classList.contains('marble-shell-open')), false);
+  // Open, the section of documents with agents on them is called Modifying.
+  await page.keyboard.press('Control+\\');
+  assert.equal((await shell.locator('.sec[data-sec="agents"] .sec-fold').innerText()).trim(), 'Modifying');
   await page.context().close();
 });
 
@@ -69,8 +72,8 @@ test('New heads the tree on any page: a focused box, the three apps, the templat
   const pop = shell.locator('.making');
   await pop.waitFor({ state: 'visible' });
   assert.equal(await shell.evaluate((el) => el.shadowRoot.activeElement?.getAttribute('aria-label')), 'Describe an app to build');
-  assert.deepEqual(await pop.locator('.app b').allTextContents(), ['Chat', 'Agent', 'Board']);
-  assert.equal(await pop.locator('.app[aria-pressed="true"] b').textContent(), 'Chat');
+  assert.deepEqual(await pop.locator('.apps > .to b').allTextContents(), ['Chat', 'Agent', 'Board']);
+  assert.equal(await pop.locator('.apps > .to[aria-pressed="true"] b').textContent(), 'Chat');
   await pop.locator('.tpl').first().waitFor();
   assert.ok(await pop.locator('.tpl').count() >= 4);
   assert.equal(await pop.locator('.send').isDisabled(), true);
@@ -144,17 +147,18 @@ test('Settings says where the built-in apps show, files it on the Drive, and the
   await drive.page.context().close();
 });
 
-test('This drive says whose it is, where it lives, that it is live, and how much is in it', async () => {
+test('This drive says whose it is, where it lives, and how much is in it, and nothing about being connected', async () => {
   const { page, shell } = await visit('garden');
   await page.keyboard.press('Control+\\');
   await shell.locator('.sec[data-sec="drive"]').waitFor();
-  await page.waitForFunction(() => !document.querySelector('marble-shell').shadowRoot.querySelector('[data-act="me"] .live').hidden);
+  // A page that loaded is connected: no dot on the avatar to say so.
+  assert.equal(await shell.locator('[data-act="me"] .live').count(), 0);
   await shell.locator('[data-act="me"]').click();
   const pop = shell.locator('.mepop');
   await pop.waitFor({ state: 'visible' });
   assert.equal(await pop.locator('.me-head b').textContent(), 'My Drive');
   assert.equal(await pop.locator('.host').textContent(), new URL(host.base).host);
-  assert.match(await pop.locator('.state').textContent(), /^Live/);
+  assert.doesNotMatch(await pop.innerText(), /Live|connected|Offline/);
   assert.match(await pop.locator('.weight').textContent(), /^\d+ documents · /);
   await page.context().close();
 });

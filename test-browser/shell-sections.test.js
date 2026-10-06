@@ -82,6 +82,17 @@ test('Agents: a row per document, a mark per state most urgent first, bold while
   assert.match(await shell.locator('.sec[data-sec="agents"] .sec-meta').innerText(), /1 needs you/);
   // The one that needs you comes first.
   assert.equal(await shell.locator('.row.app').first().getAttribute('data-app'), 'Travel/plans');
+  // A row is a row: one line, its name beside its glyph, no box round it
+  // (New's tiles once lent it theirs).
+  const look = await plans.evaluate((row) => {
+    const s = getComputedStyle(row);
+    return { border: s.borderTopWidth, display: s.display, name: row.querySelector('.go .name')?.textContent, tall: row.getBoundingClientRect().height };
+  });
+  assert.equal(look.border, '0px');
+  assert.equal(look.display, 'flex');
+  assert.equal(look.name, 'plans');
+  assert.ok(look.tall < 34, `one line tall, not ${look.tall}px`);
+  assert.equal((await shell.locator('.sec[data-sec="agents"] .sec-fold').innerText()).trim(), 'Modifying');
   const atlas = shell.locator('.row.app[data-app="Research/atlas"]');
   await page.waitForFunction(() => document.querySelector('marble-shell').shadowRoot.querySelector('.row.app[data-app="Research/atlas"] .pip')?.dataset.st === 'done');
   assert.equal(await atlas.getAttribute('data-unread'), '', 'finished and not yet looked at');
