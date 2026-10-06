@@ -51,8 +51,28 @@
   const LAST_MAX = 1_500_000;
   // All a conversation's row and pips are drawn from.
   const CONV_KEEP = ['id', 'target', 'title', 'running', 'queued', 'asking', 'status', 'needsReview', 'updatedAt', 'lastFinishedAt', 'lastInteractedAt', 'createdAt'];
-  const SECTIONS = ['pinned', 'recent', 'agents', 'drive'];
-  const LABELS = { pinned: 'Pinned', recent: 'Recent', agents: 'Agents', drive: 'Drive' };
+  const SECTIONS = ['pinned', 'recent', 'agents', 'drive', 'builtin'];
+  const LABELS = { pinned: 'Pinned', recent: 'Recent', agents: 'Agents', drive: 'Drive', builtin: 'Built-in' };
+  // Where the pages the drive runs on show (the Drive's Settings, kept on its
+  // <body> as data-builtin): left out but found by search, a Built-in section
+  // of their own, or with your files. A Drive that never chose keeps them with
+  // your files, which is where they always were.
+  const BUILTIN = [
+    ['hidden', 'Hidden', 'Out of sight. Search still finds them.'],
+    ['sidebar', 'In the tree', 'A Built-in section of their own.'],
+    ['listing', 'With my files', 'Listed like any document.'],
+  ];
+  // The pages a drive is seeded with, at its top, as the Drive names them
+  // (templates/drive.mrbl, SYSTEM). The host may say so on the entry instead.
+  const SYSTEM = new Set(['drive', 'Agents', 'Chat', 'Board', 'Console', 'Design System', "Design Don'ts"]);
+  // The three apps New can send a sentence to, as the Drive's New menu has
+  // them, and which one Enter goes to: the one used last, shared with it.
+  const PROMPT_APPS = [
+    ['Chat', 'Chat', 'Talk it through', '<path d="M3 4.5A1.5 1.5 0 0 1 4.5 3h7A1.5 1.5 0 0 1 13 4.5v5a1.5 1.5 0 0 1-1.5 1.5H7.5L4.75 13.25V11h-.25A1.5 1.5 0 0 1 3 9.5z"/>'],
+    ['Agents', 'Agent', 'Let it run', '<path d="M8 2.25l1.3 3.45 3.45 1.3-3.45 1.3L8 11.75 6.7 8.3 3.25 7l3.45-1.3z"/><path d="M12.25 10.75l.45 1.05 1.05.45-1.05.45-.45 1.05-.45-1.05-1.05-.45 1.05-.45z"/>'],
+    ['Board', 'Board', 'Sketch it first', '<rect x="2.75" y="2.75" width="10.5" height="10.5" rx="1.5"/><rect x="5" y="5" width="3" height="3" rx=".5"/><path d="M9.5 10h1.75M5 10.5h2"/>'],
+  ];
+  const APP_KEY = 'marble-drive:new-app';
   // Most urgent first, everywhere a set of agents is drawn.
   const ORDER = ['waiting', 'working', 'done'];
   const WORDS = { waiting: 'needs you', working: 'working', done: 'done' };
@@ -136,6 +156,13 @@
     copy: '<rect x="5.25" y="5.25" width="8.5" height="8.5" rx="1.75"/><path d="M10.75 5.25V3.75c0-.83-.67-1.5-1.5-1.5h-5.5c-.83 0-1.5.67-1.5 1.5v5.5c0 .83.67 1.5 1.5 1.5h1.5"/>',
     edit: '<path d="M10.25 3.25 12.75 5.75 6 12.5l-3.25.75.75-3.25z"/><path d="M8.75 4.75l2.5 2.5"/>',
     path: '<path d="M2.25 8h11.5M10.5 4.75 13.75 8l-3.25 3.25"/><path d="M2.25 4.25v7.5"/>',
+    plus: '<path d="M8 3.25v9.5M3.25 8h9.5"/>',
+    // The Drive's own gear (it drew it on a 24-box), brought to this one at the same weight.
+    gear: '<g transform="scale(.6667)" stroke-width="2.25"><path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z"/><circle cx="12" cy="12" r="3"/></g>',
+    me: '<circle cx="8" cy="5.75" r="2.5"/><path d="M3.5 13.25c.8-2.4 2.6-3.6 4.5-3.6s3.7 1.2 4.5 3.6"/>',
+    send: '<path d="M8 12.75V3.5M4.25 7.25 8 3.5l3.75 3.75"/>',
+    back: '<path d="M9.25 4.75 6 8l3.25 3.25"/>',
+    usage: '<path d="M3.75 12.75v-3M8 12.75v-6M12.25 12.75v-9.5"/>',
     trash: '<path d="M2.75 4.25h10.5M6.25 4.25v-1c0-.55.45-1 1-1h1.5c.55 0 1 .45 1 1v1"/><path d="M4 4.25l.6 8.3c.06.8.72 1.45 1.53 1.45h3.74c.8 0 1.47-.64 1.53-1.45l.6-8.3"/>',
   };
   // A pin's glyph as the Drive draws it (templates/drive.mrbl, ICON), so a pin
@@ -144,6 +171,8 @@
     folder: '<svg class="glyph" viewBox="0 0 16 16" aria-hidden="true" focusable="false"><path fill="currentColor" d="M2.4 3.404h2.796a.9.9 0 0 1 .9.9v.598a.8.8 0 0 0 .8.8h6.454a1.15 1.15 0 0 1 1.15 1.15v4.594a1.15 1.15 0 0 1-1.15 1.15H2.65A1.15 1.15 0 0 1 1.5 11.446V4.304a.9.9 0 0 1 .9-.9z"/></svg>',
     doc: '<svg class="glyph" viewBox="0 0 16 16" aria-hidden="true" focusable="false"><rect x="2.2" y="2.7" width="11.6" height="10.6" rx="2.1" fill="none" stroke="currentColor" stroke-width="1.3"/><path stroke="currentColor" stroke-width="1.3" d="M2.2 6.2h11.6"/><circle cx="4.6" cy="4.45" r=".78" fill="currentColor"/></svg>',
   };
+  // A size as the Drive says one (templates/drive.mrbl, bytes).
+  const sizeOf = (n) => (n < 1024 ? `${n} B` : n < 1048576 ? `${(n / 1024).toFixed(1)} KB` : n < 1073741824 ? `${(n / 1048576).toFixed(1)} MB` : `${(n / 1073741824).toFixed(2)} GB`);
   const escapeHtml = (s) => String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
   // How long a finger rests on a row before its menu opens.
   const PRESS = 500;
@@ -564,6 +593,105 @@
     .publishing :is(.result, .last) a { color: inherit; }
     .publishing .last { margin-top: 9px; padding-top: 9px; border-top: 1px solid var(--line); color: var(--faint); font-size: 12px; }
     @media (prefers-reduced-motion: reduce) { .publishing .publish:active:not(:disabled) { transform: none; } }
+    /* ── New, Settings and This drive: what the Drive's own bars held ──
+       New heads the tree because it is the one thing you start from, and it
+       is a card rather than Share's ink so the bar keeps one loud button. */
+    .head { display: flex; align-items: center; gap: 6px; margin: 10px 10px 6px; }
+    .head .search { margin: 0; flex: 1; min-width: 0; }
+    .new { height: 32px; padding: 0 12px 0 9px; border-radius: 8px; display: flex; align-items: center; gap: 6px; flex: none;
+      background: var(--card); color: var(--ink); border: 1px solid var(--line); box-shadow: var(--shadow-rest); font-weight: 500;
+      transition: background-color 110ms var(--settle); }
+    .new:hover, .new[aria-expanded="true"] { background: var(--paper-2); }
+    .new:active { background: var(--paper-3); }
+    /* Narrow, the search keeps its word and loses its key. */
+    .nav:has(.head) { container-type: inline-size; }
+    @container (max-width: 230px) { .head .search kbd { display: none; } }
+    .foot { border-top: 1px solid var(--line); padding: 6px; }
+    .foot .row { color: var(--muted); }
+    .ib.me { border-radius: 50%; position: relative; background: var(--paper-2); color: var(--accent-ink); }
+    .ib.me:hover, .ib.me[aria-expanded="true"] { background: var(--accent-soft); color: var(--accent-ink); }
+    .ib.me .live { position: absolute; right: -1px; bottom: -1px; width: 8px; height: 8px; border-radius: 50%;
+      background: var(--accent-ink); box-shadow: 0 0 0 2px var(--paper); }
+    .ib.me .live[hidden] { display: none; }
+    .ib[aria-expanded="true"] { background: var(--paper-2); color: var(--ink); }
+    .pop h3 { margin: 0 0 2px; font-size: 13.5px; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .pop .sub { margin: 12px 2px 6px; font-size: 12.5px; font-weight: 600; color: var(--muted); }
+    .pop .say { margin: 0 0 8px; color: var(--muted); font-size: 12.5px; text-wrap: pretty; }
+    /* New: the sentence first, focused the moment it opens; then where it
+       goes; then the templates, each one a short form away from a new app. */
+    .making { width: min(380px, calc(100vw - 16px)); padding: 10px; overflow: auto; overscroll-behavior: contain; }
+    .making[data-step="brief"] .start, .making:not([data-step="brief"]) .brief { display: none; }
+    .ask { display: flex; align-items: flex-end; gap: 6px; padding: 6px 6px 6px 10px; border: 1px solid var(--line); border-radius: 12px; background: var(--paper); }
+    .ask:focus-within { box-shadow: inset 0 0 0 1px var(--accent); border-color: var(--accent); }
+    .ask textarea, .brief textarea { flex: 1; min-width: 0; min-height: 28px; max-height: 140px; border: 0; outline: 0; resize: none; background: none;
+      font: inherit; font-size: 13.5px; line-height: 1.45; color: var(--ink); padding: 4px 0; }
+    .ask textarea::placeholder, .brief textarea::placeholder, .brief input::placeholder { color: var(--faint); }
+    .send { width: 28px; height: 28px; border-radius: 50%; display: grid; place-items: center; flex: none;
+      background: var(--ink); color: var(--paper); transition: background-color 110ms var(--settle); }
+    .send:active:not(:disabled) { background: var(--accent-ink); }
+    .send:disabled { background: var(--paper-3); color: var(--faint); cursor: default; }
+    .apps { display: grid; grid-template-columns: repeat(3, 1fr); gap: 6px; }
+    .app { display: grid; grid-template-columns: 16px 1fr; column-gap: 7px; align-items: center; padding: 8px 9px; border-radius: 10px;
+      border: 1px solid var(--line); text-align: left; min-width: 0; transition: background-color 110ms ease, border-color 110ms ease; }
+    .app:hover { background: var(--paper-2); }
+    .app[aria-pressed="true"] { background: var(--accent-soft); border-color: var(--accent); }
+    .app .i { color: var(--muted); }
+    .app[aria-pressed="true"] .i { color: var(--accent-ink); }
+    .app b { font-weight: 500; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .app small { grid-column: 1 / -1; font-size: 12px; color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .app[data-busy] { opacity: .6; pointer-events: none; }
+    .tpls { display: grid; grid-template-columns: 1fr 1fr; gap: 2px; }
+    .tpl { display: flex; align-items: center; gap: 8px; padding: 6px 8px; border-radius: 8px; text-align: left; min-width: 0; color: var(--ink); }
+    .tpl:hover, .tpl:focus-visible { background: var(--paper-2); }
+    .tpl .i { color: var(--tint, var(--muted)); }
+    .tpl span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .tpls .empty { grid-column: 1 / -1; }
+    .all { margin: 6px 0 0; padding: 6px 8px; border-radius: 8px; color: var(--muted); font-size: 12.5px; }
+    .all:hover { background: var(--paper-2); color: var(--ink); }
+    .brief { display: flex; flex-direction: column; gap: 8px; }
+    .brief .top { display: flex; align-items: center; gap: 6px; }
+    .brief .top h3 { margin: 0; flex: 1; min-width: 0; }
+    .brief .top .i { color: var(--tint, var(--muted)); }
+    .brief .say { margin: 0; }
+    .brief label { font-size: 12.5px; font-weight: 600; color: var(--muted); display: flex; gap: 6px; }
+    .brief label small { font-weight: 400; color: var(--faint); font-size: 12px; }
+    .brief input, .brief textarea { border: 1px solid var(--line); border-radius: 8px; padding: 6px 8px; background: var(--paper); }
+    .brief input { height: 32px; font: inherit; color: var(--ink); }
+    .brief textarea { min-height: 64px; flex: none; }
+    .brief :is(input, textarea):focus { outline: 2px solid var(--accent); outline-offset: -1px; }
+    .brief .note { margin: 0; font-size: 12px; color: var(--danger, #b4533e); }
+    .brief .note:empty { display: none; }
+    :is(.brief, .moving) .go { display: flex; justify-content: flex-end; gap: 6px; }
+    .brief .go button { height: 30px; padding: 0 12px; border-radius: 8px; font-weight: 600; font-size: 12.5px; }
+    .brief .cancel { color: var(--muted); }
+    .brief .cancel:hover { background: var(--paper-2); color: var(--ink); }
+    .brief .ok { background: var(--ink); color: var(--paper); }
+    .brief .ok:disabled { opacity: .4; cursor: default; }
+    /* Settings: the Drive's own choices, laid out as Share is. */
+    .settings { width: min(360px, calc(100vw - 16px)); padding: 14px 14px 10px; overflow: auto; overscroll-behavior: contain; }
+    .settings .sub:first-of-type { margin-top: 8px; }
+    .chips { display: flex; flex-wrap: wrap; gap: 4px; margin: 0 0 8px; }
+    .chips a { height: 26px; padding: 0 10px; border-radius: 999px; border: 1px solid var(--line); display: inline-flex; align-items: center;
+      font-size: 12.5px; color: var(--muted); text-decoration: none; white-space: nowrap; }
+    .chips a:hover { background: var(--paper-2); color: var(--ink); }
+    .chips a[aria-current="page"] { color: var(--ink); font-weight: 500; }
+    .lines { display: flex; flex-direction: column; margin: 0 -6px; }
+    .lines button { display: flex; align-items: center; gap: 9px; padding: 7px 8px; border-radius: 8px; color: var(--ink); text-align: left; }
+    .lines button:hover { background: var(--paper-2); }
+    .lines .i { color: var(--muted); }
+    .lines small { margin-left: auto; color: var(--faint); font-size: 12px; }
+    /* This drive: whose it is, where it lives, whether this page hears it. */
+    .mepop { width: min(300px, calc(100vw - 16px)); padding: 14px; }
+    .me-head { display: flex; align-items: center; gap: 10px; margin-bottom: 10px; }
+    .me-av { width: 36px; height: 36px; border-radius: 50%; display: grid; place-items: center; flex: none; background: var(--paper-3); color: var(--accent-ink); }
+    .me-av .i { width: 20px; height: 20px; }
+    .me-head b { display: block; font-weight: 600; font-size: 13.5px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .me-head span { display: block; color: var(--muted); font-size: 12.5px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .me-head > div { min-width: 0; }
+    .me-row { display: flex; align-items: center; gap: 8px; padding: 6px 0; border-top: 1px solid var(--line); color: var(--muted); font-size: 12.5px; font-variant-numeric: tabular-nums; }
+    .me-row .dot { width: 7px; height: 7px; border-radius: 50%; background: var(--faint); flex: none; }
+    .mepop[data-live] .me-row .dot { background: var(--accent-ink); }
+    .me-row:empty { display: none; }
     .toast { position: fixed; left: 50%; bottom: 24px; transform: translate(-50%, 8px); opacity: 0; pointer-events: none; background: var(--ink); color: var(--paper);
       border-radius: 999px; padding: 7px 14px; font-size: 12.5px; transition: opacity 160ms var(--settle), transform 160ms var(--settle); }
     .toast[data-on] { opacity: 1; transform: translate(-50%, 0); }
@@ -625,15 +753,70 @@
           <button type="button" class="ib" data-act="describe" aria-pressed="false" aria-label="Describe a change (⌘⇧D)" title="Describe a change (⌘⇧D)" hidden>${icon('describe')}</button>
           <button type="button" class="share git" data-act="publish" aria-haspopup="dialog" aria-expanded="false" title="Publish this folder to GitHub" hidden>${github('')}<span>Publish</span></button>
           <button type="button" class="share" data-act="share" aria-haspopup="dialog" aria-expanded="false">${icon('share')}Share</button>
+          <button type="button" class="ib" data-act="settings" aria-haspopup="dialog" aria-expanded="false" aria-label="Settings" title="Settings">${icon('gear')}</button>
+          <button type="button" class="ib me" data-act="me" aria-haspopup="dialog" aria-expanded="false" aria-label="This drive" title="This drive">${icon('me')}<span class="live" hidden></span></button>
           <span class="vr"></span>
           <button type="button" class="ib" data-act="chat" aria-pressed="true" aria-label="Pin the chat" title="Pin the chat (⌘⇧J)" aria-keyshortcuts="Meta+Shift+J" hidden>${icon('chat')}</button>
           <button type="button" class="ib" data-act="close" aria-label="Hide everything" title="Hide everything (⌘\\)">${icon('collapse')}</button>
         </header>
         <nav class="nav" aria-label="Drive tree">
           <button type="button" class="edge" role="separator" aria-orientation="vertical" aria-label="Resize the tree" title="Drag to resize · double-click to reset"></button>
-          <label class="search">${icon('search')}<input type="search" placeholder="Search the drive" aria-label="Search the drive" autocomplete="off" spellcheck="false"><kbd>⌘K</kbd></label>
+          <div class="head">
+            <button type="button" class="new" aria-haspopup="dialog" aria-expanded="false">${icon('plus')}New</button>
+            <label class="search">${icon('search')}<input type="search" placeholder="Search" aria-label="Search the drive" autocomplete="off" spellcheck="false"><kbd>⌘K</kbd></label>
+          </div>
           <div class="scroll"></div>
+          <div class="foot" hidden><a class="row" data-view="trash">${icon('trash')}<span>Trash</span></a></div>
         </nav>
+        <div class="pop making" role="dialog" aria-label="New" hidden>
+          <div class="start">
+            <form class="ask" autocomplete="off">
+              <textarea rows="1" placeholder="Describe an app to build…" aria-label="Describe an app to build"></textarea>
+              <button type="submit" class="send" aria-label="Send to Chat" title="Send to Chat" disabled>${icon('send')}</button>
+            </form>
+            <p class="sub">Prompt in</p>
+            <div class="apps" role="group" aria-label="Prompt in">
+              ${PROMPT_APPS.map(([app, name, says, glyph]) => `<button type="button" class="app" data-app="${app}" data-name="${name}" aria-pressed="false"><svg class="i" viewBox="0 0 16 16" aria-hidden="true">${glyph}</svg><b>${name}</b><small>${says}</small></button>`).join('')}
+            </div>
+            <p class="sub">Start from a template</p>
+            <div class="tpls"></div>
+            <button type="button" class="all">All templates</button>
+          </div>
+          <div class="brief">
+            <div class="top"><button type="button" class="ib back" aria-label="Back to New" title="Back">${icon('back')}</button>${icon('doc')}<h3></h3></div>
+            <p class="say"></p>
+            <label for="mk-name">Name</label>
+            <input id="mk-name" class="name" autocomplete="off" spellcheck="false">
+            <label for="mk-words">What do you want to build? <small>optional</small></label>
+            <textarea id="mk-words" class="words" rows="3"></textarea>
+            <p class="note" role="status"></p>
+            <div class="go"><button type="button" class="cancel">Cancel</button><button type="button" class="ok">Create</button></div>
+          </div>
+        </div>
+        <div class="pop settings" role="dialog" aria-label="Settings" hidden>
+          <h3>Settings</h3>
+          <p class="sub">Built-in apps</p>
+          <p class="say">The pages this drive runs on. Choose where they show; they are yours to open either way.</p>
+          <div class="chips"></div>
+          <div class="levels builtin" role="radiogroup" aria-label="Where built-in apps show">
+            ${BUILTIN.map(([value, name, says]) => `<button type="button" class="level" role="radio" data-builtin="${value}" aria-checked="false" tabindex="-1">
+              <span class="lv-dot" aria-hidden="true"></span><span class="lv-name">${name}</span>
+              <span class="lv-says">${says}</span>
+            </button>`).join('')}
+          </div>
+          <div class="agentry" hidden>
+            <p class="sub">Agents</p>
+            <div class="lines">
+              <button type="button" data-tab="settings">${icon('gear')}<span>Agent settings</span><small>Models, keys</small></button>
+              <button type="button" data-tab="usage">${icon('usage')}<span>Usage</span><small>What they have used</small></button>
+            </div>
+          </div>
+        </div>
+        <div class="pop mepop" role="dialog" aria-label="This drive" hidden>
+          <div class="me-head"><span class="me-av">${icon('me')}</span><div><b></b><span class="host"></span></div></div>
+          <div class="me-row state"><span class="dot"></span><span></span></div>
+          <div class="me-row weight"></div>
+        </div>
         <div class="pop menu" role="menu" aria-label="This document" hidden></div>
         <div class="pop sharing" role="dialog" aria-label="Share" hidden>
           <h3></h3>
@@ -676,6 +859,10 @@
       this.sharing = this.$('.sharing');
       this.publishing = this.$('.publishing');
       this.moving = this.$('.moving');
+      this.making = this.$('.making');
+      this.settingsPop = this.$('.settings');
+      this.mePop = this.$('.mepop');
+      this.newButton = this.$('.nav .new');
       this.phone = matchMedia(PHONE);
       // A pointer that can hover is what reaching for a side is for; on a
       // touch screen every side simply stays pinned.
@@ -711,10 +898,22 @@
       return window.marble?.app ?? '';
     }
 
+    /** On the Drive itself the shell is the Drive's frame: its bar, its tree,
+     *  its New, Settings and This drive. The page draws none of its own then
+     *  (templates/drive.mrbl, html.marble-shell-open), so the shell stays
+     *  open there and cannot be put away to leave nothing. */
+    get home() {
+      return Boolean(HOME_DOC) && HOME_DOC === this.here;
+    }
+
+    get isOpen() {
+      return this.state.open || this.home;
+    }
+
     /** A side on hover, with a pointer that can reach: it hides until wanted. */
     hovers(side) {
       const pinned = side === 'nav' ? this.state.pinNav : this.state.pinChat;
-      return this.state.open && !pinned && this.fine.matches && !this.phone.matches;
+      return this.isOpen && !pinned && this.fine.matches && !this.phone.matches;
     }
 
     /** Whether a side takes a column of its own: pinned, or on a screen with
@@ -729,7 +928,7 @@
 
     /** What the drawer and anything else sitting in the page needs to know. */
     get layout() {
-      const active = this.state.open && !this.phone.matches;
+      const active = this.isOpen && !this.phone.matches;
       const chatDocked = this.docked('chat');
       return {
         open: active,
@@ -756,7 +955,7 @@
       if (UI?.watchPageTheme) this.unwatchTheme = UI.watchPageTheme(this);
       this.fillCrumbs();
       this.$('.pill b').textContent = nameOf(this.here) || document.title;
-      this.$('.home').href = HOME;
+      this.$('.home').href = this.home ? '#/' : HOME;
 
       this.$('.pill').addEventListener('click', () => this.setOpen(true));
       const zone = this.$('.zone');
@@ -779,6 +978,8 @@
         else if (act === 'chat') this.pin('chat', !this.state.pinChat);
         else if (act === 'close') this.setOpen(false);
         else if (act === 'share') this.toggleSharing();
+        else if (act === 'settings') this.toggleSettings();
+        else if (act === 'me') this.toggleMe();
         else if (act === 'publish') this.togglePublishing(this.repoOf(this.here));
         else if (act === 'describe') dispatchEvent(new CustomEvent('marble-marks:toggle'));
         else if (act === 'doc') this.toggleMenu(event.target.closest('[data-act]'));
@@ -818,6 +1019,13 @@
         if (GIT && window.marble?.drive?.git && typeof path === 'string' && path) this.togglePublishing(path, anchor);
       });
       this.bindMove();
+      this.bindMaking();
+      this.bindSettings();
+      this.$('.foot .row').addEventListener('click', (event) => this.openView('trash', event));
+      if (this.home) {
+        this.onHash = () => this.fillCrumbs();
+        addEventListener('hashchange', this.onHash);
+      }
       this.arrive();
       this.menu.addEventListener('click', async (event) => {
         const pick = event.target.closest('[data-pick]')?.dataset.pick;
@@ -844,7 +1052,8 @@
         buttons[next].focus();
       });
       this.shadowRoot.addEventListener('pointerdown', (event) => {
-        if (!event.composedPath().some((node) => node === this.menu || node === this.sharing || node === this.publishing || node === this.moving || node?.dataset?.act === 'share' || node?.dataset?.act === 'publish' || node?.dataset?.act === 'doc')) this.hidePops();
+        const path = event.composedPath();
+        if (!path.some((node) => this.pops().includes(node) || node === this.newButton || ['share', 'publish', 'doc', 'settings', 'me'].includes(node?.dataset?.act))) this.hidePops();
       });
       this.onOutside = (event) => {
         if (!event.composedPath().includes(this)) this.hidePops();
@@ -916,6 +1125,8 @@
       removeEventListener('pointerdown', this.onOutside);
       removeEventListener('marble-tray:ready', this.onDrawer);
       removeEventListener('marble-marks:mode', this.onMarks);
+      if (this.onHash) removeEventListener('hashchange', this.onHash);
+      document.documentElement.classList.remove('marble-shell-open');
       this.phone.removeEventListener('change', this.onViewport);
       removeEventListener('resize', this.onWindowResize);
       removeEventListener('pointermove', this.onPointer, true);
@@ -962,7 +1173,7 @@
     }
 
     setOpen(open) {
-      if (open === this.state.open) return;
+      if (open === this.state.open || (!open && this.home)) return;
       this.set({ open });
       if (open) {
         // Opening onto the chat puts you in its box, and a shell without a
@@ -1128,6 +1339,11 @@
       chatButton.setAttribute('aria-label', pinChat ? 'Unpin the chat' : 'Pin the chat');
       chatButton.title = `${pinChat ? 'Unpin the chat: it waits at the edge' : 'Pin the chat'} (⌘⇧J)`;
       this.$('[data-act="describe"]').hidden = !document.querySelector('.marble-marks-layer');
+      this.$('[data-act="close"]').hidden = this.home;
+      this.$('.foot').hidden = !(HOME_DOC && window.marble?.drive);
+      // A page can step aside for the frame: the Drive drops its own bars
+      // while this is on. A marble- class is the page's, never the file's.
+      document.documentElement.classList.toggle('marble-shell-open', open);
       const hoverNav = this.hovers('nav');
       this.toggleAttribute('data-hide-nav', hoverNav && !this.shown.nav);
       this.toggleAttribute('data-hide-chat', this.hovers('chat') && Boolean(this.drawer) && !this.shown.chat);
@@ -1449,21 +1665,23 @@
         // ⌘\ shows and hides the whole drive around the page.
         event.preventDefault();
         event.stopPropagation();
-        this.setOpen(!this.state.open);
+        if (!this.home) this.setOpen(!this.state.open);
       } else if (mod && !event.shiftKey && k === 'k') {
         event.preventDefault();
         event.stopPropagation();
-        if (!this.state.open) this.set({ open: true });
+        if (!this.isOpen) this.set({ open: true });
         this.reveal('nav');
         this.search.focus({ preventScroll: true });
         this.search.select();
-      } else if (mod && event.shiftKey && (event.key === '\\' || event.key === '|') && this.state.open) {
+      } else if (mod && event.shiftKey && (event.key === '\\' || event.key === '|') && this.isOpen) {
         event.preventDefault();
         event.stopPropagation();
         this.pin('nav', !this.state.pinNav);
-      } else if (event.key === 'Escape' && (!this.menu.hidden || !this.sharing.hidden || !this.publishing.hidden || !this.moving.hidden)) {
+      } else if (event.key === 'Escape' && this.pops().some((pop) => !pop.hidden)) {
         event.stopPropagation();
-        this.hidePops();
+        // The form under a template steps back to the list before New closes.
+        if (!this.making.hidden && this.making.dataset.step === 'brief') this.closeBrief();
+        else this.hidePops();
       }
     }
 
@@ -1490,7 +1708,17 @@
     // ------------------------------------------------------------ where you are
 
     folderHref(folder) {
+      // On the Drive a folder is its fragment: the page goes there without
+      // loading again (templates/drive.mrbl, hashchange).
+      if (this.home) return `#/${encodeURIComponent(folder)}`;
       return folder ? `${HOME}#/${encodeURIComponent(folder)}` : HOME;
+    }
+
+    /** The folder you are in: the Drive's, by its fragment, or the one this
+     *  document sits in. Where New makes things. */
+    folderHere() {
+      if (!this.home) return folderOf(this.here);
+      try { return decodeURIComponent(location.hash.replace(/^#\/?/, '')); } catch { return ''; }
     }
 
     fillCrumbs() {
@@ -1505,9 +1733,18 @@
       const top = h('a', '', 'Drive');
       top.href = this.folderHref('');
       crumbs.append(top);
-      if (HOME_DOC && HOME_DOC === this.here) {
-        top.setAttribute('aria-current', 'page');
-        top.classList.add('here');
+      if (this.home) {
+        // The Drive's crumbs are the folder it is showing.
+        const parts = splitPath(this.folderHere());
+        parts.forEach((part, i) => {
+          const a = h('a', '', part);
+          a.href = this.folderHref(parts.slice(0, i + 1).join('/'));
+          a.title = parts.slice(0, i + 1).join('/');
+          crumbs.append(sep(), a);
+        });
+        const last = crumbs.lastElementChild;
+        last.setAttribute('aria-current', 'page');
+        last.classList.add('here');
         return;
       }
       const parts = splitPath(this.here);
@@ -1538,6 +1775,10 @@
       this.sharing.hidden = true;
       this.publishing.hidden = true;
       this.moving.hidden = true;
+      this.making.hidden = true;
+      this.settingsPop.hidden = true;
+      this.mePop.hidden = true;
+      for (const b of [this.newButton, this.$('[data-act="settings"]'), this.$('[data-act="me"]')]) b.setAttribute('aria-expanded', 'false');
       this.$('.crumbs .here')?.setAttribute('aria-expanded', 'false');
       this.$('[data-act="share"]').setAttribute('aria-expanded', 'false');
       this.$('[data-act="publish"]').setAttribute('aria-expanded', 'false');
@@ -1644,6 +1885,373 @@
       this.sharing.style.maxHeight = `${Math.max(160, innerHeight - button.getBoundingClientRect().bottom - 14)}px`;
       this.sharing.querySelector('.copy').focus({ preventScroll: true });
       this.loadShares();
+    }
+
+    pops() {
+      return [this.menu, this.sharing, this.publishing, this.moving, this.making, this.settingsPop, this.mePop];
+    }
+
+    /** One of the Drive's own rooms (Trash, Templates): on the Drive, the page
+     *  goes there in place if it can; anywhere else, the Drive opens on it. */
+    openView(view, event = null) {
+      event?.preventDefault();
+      this.hidePops();
+      if (this.home && !dispatchEvent(new CustomEvent('marble:drive-view', { detail: { view }, cancelable: true }))) return;
+      if (!HOME_DOC || !window.marble?.href) return;
+      location.href = `${window.marble.href(HOME_DOC)}?view=${encodeURIComponent(view)}`;
+    }
+
+    // ------------------------------------------------------------ new
+    //
+    // The Drive's New menu (templates/drive.mrbl, #sheet), on every page: a
+    // sentence for Chat, an agent or the Board, or a template with a name and
+    // what to build in it. It makes things in the folder you are in.
+
+    toggleNew() {
+      const opening = this.making.hidden;
+      this.hidePops();
+      if (!opening) return;
+      if (!this.isOpen) this.set({ open: true });
+      this.reveal('nav');
+      this.making.dataset.step = 'start';
+      this.making.hidden = false;
+      this.newButton.setAttribute('aria-expanded', 'true');
+      this.pickApp(this.chosenApp());
+      this.drawTemplates();
+      this.place(this.making, this.newButton, 'left');
+      this.making.style.maxHeight = `${Math.max(200, innerHeight - this.newButton.getBoundingClientRect().bottom - 14)}px`;
+      // Open to type: the first key after New is the first word.
+      this.making.querySelector('.ask textarea').focus({ preventScroll: true });
+    }
+
+    chosenApp() {
+      try { return localStorage.getItem(APP_KEY) || 'Chat'; } catch { return 'Chat'; }
+    }
+
+    pickApp(app) {
+      const tiles = [...this.making.querySelectorAll('.app')];
+      const tile = tiles.find((t) => t.dataset.app === app) ?? tiles[0];
+      for (const t of tiles) t.setAttribute('aria-pressed', String(t === tile));
+      const send = this.making.querySelector('.send');
+      send.setAttribute('aria-label', `Send to ${tile.dataset.name}`);
+      send.title = `Send to ${tile.dataset.name}`;
+      return tile.dataset.app;
+    }
+
+    async drawTemplates() {
+      const list = this.making.querySelector('.tpls');
+      const drive = window.marble?.drive;
+      if (!this.starters && drive?.starters) {
+        const got = await drive.starters();
+        this.starters = Array.isArray(got) ? got : [];
+      }
+      list.replaceChildren();
+      for (const starter of this.starters ?? []) {
+        const b = h('button', 'tpl');
+        b.type = 'button';
+        b.dataset.id = starter.id;
+        // The card's sentence is the tip, as it is on the Drive's card.
+        b.title = starter.blurb ?? '';
+        if (starter.accent) b.style.setProperty('--tint', starter.accent);
+        b.innerHTML = icon('doc');
+        b.append(h('span', '', starter.title));
+        list.append(b);
+      }
+      if (!list.childElementCount) list.append(h('p', 'empty', 'No templates here.'));
+    }
+
+    bindMaking() {
+      const pop = this.making;
+      const ask = pop.querySelector('.ask textarea');
+      const send = pop.querySelector('.send');
+      const size = () => {
+        ask.style.height = 'auto';
+        ask.style.height = `${ask.scrollHeight}px`;
+        send.disabled = !ask.value.trim();
+      };
+      ask.addEventListener('input', size);
+      this.newButton.addEventListener('click', () => this.toggleNew());
+      pop.querySelector('.ask').addEventListener('submit', (event) => {
+        event.preventDefault();
+        if (ask.value.trim()) this.promptIn(this.chosenApp());
+      });
+      // Enter sends and Shift+Enter is a new line, as in every composer here.
+      ask.addEventListener('keydown', (event) => {
+        if (event.key !== 'Enter' || event.shiftKey || event.isComposing) return;
+        event.preventDefault();
+        if (ask.value.trim()) this.promptIn(this.chosenApp(), { newTab: event.metaKey || event.ctrlKey });
+      });
+      pop.querySelector('.apps').addEventListener('click', (event) => {
+        const tile = event.target.closest('.app');
+        if (tile) this.promptIn(tile.dataset.app, { newTab: event.metaKey || event.ctrlKey });
+      });
+      pop.querySelector('.tpls').addEventListener('click', (event) => {
+        const b = event.target.closest('.tpl');
+        const starter = b && this.starters?.find((st) => st.id === b.dataset.id);
+        if (starter) this.openBrief(starter);
+      });
+      pop.querySelector('.all').addEventListener('click', () => this.openView('templates'));
+      pop.querySelector('.back').addEventListener('click', () => this.closeBrief());
+      pop.querySelector('.cancel').addEventListener('click', () => this.closeBrief());
+      pop.querySelector('.ok').addEventListener('click', () => this.createFromBrief());
+      // A name is one line, so Enter makes it; in the wish Enter is a new
+      // line and ⌘Enter makes it.
+      pop.querySelector('.brief .name').addEventListener('keydown', (event) => {
+        if (event.key !== 'Enter' || event.isComposing) return;
+        event.preventDefault();
+        this.createFromBrief();
+      });
+      pop.querySelector('.brief .words').addEventListener('keydown', (event) => {
+        if (event.key !== 'Enter' || !(event.metaKey || event.ctrlKey)) return;
+        event.preventDefault();
+        this.createFromBrief();
+      });
+    }
+
+    /** Chat and Board take the words by address (#ask=) and send them
+     *  themselves; an agent is started here and handed over by id, as the
+     *  Drive's New menu does. */
+    async promptIn(app, { newTab = false } = {}) {
+      const ask = this.making.querySelector('.ask textarea');
+      const words = ask.value.trim();
+      this.pickApp(app);
+      try { localStorage.setItem(APP_KEY, app); } catch { /* private mode */ }
+      const m = window.marble;
+      if (!m?.href) return;
+      let href = m.href(app);
+      if (app === 'Agents') {
+        if (words) {
+          const tile = this.making.querySelector('.app[data-app="Agents"]');
+          tile.setAttribute('data-busy', '');
+          try {
+            if (!m.agent?.start) throw new Error('There is no agent here to send it to');
+            const settings = await m.agent.settings();
+            const id = await m.agent.start({ provider: settings.defaultProvider });
+            await m.agent.send(id, { prompt: words });
+            href += `?open=${encodeURIComponent(id)}`;
+          } catch (err) {
+            this.say(err?.message || 'The agent did not start', 2600);
+            return;
+          } finally {
+            tile.removeAttribute('data-busy');
+          }
+        }
+      } else {
+        href += words ? `#ask=${encodeURIComponent(words)}` : app === 'Chat' ? '#new' : '';
+      }
+      ask.value = '';
+      ask.dispatchEvent(new Event('input'));
+      this.hidePops();
+      if (newTab) window.open(href, '_blank');
+      else location.href = href;
+    }
+
+    openBrief(starter) {
+      const pop = this.making;
+      this.briefFor = starter;
+      pop.dataset.step = 'brief';
+      if (starter.accent) pop.style.setProperty('--tint', starter.accent);
+      else pop.style.removeProperty('--tint');
+      pop.querySelector('.brief h3').textContent = starter.title;
+      pop.querySelector('.brief .say').textContent = starter.blurb ?? '';
+      const name = pop.querySelector('.brief .name');
+      name.value = starter.title;
+      const words = pop.querySelector('.brief .words');
+      words.value = '';
+      words.placeholder = starter.hint ?? '';
+      pop.querySelector('.brief .note').textContent = '';
+      const ok = pop.querySelector('.brief .ok');
+      ok.disabled = false;
+      ok.textContent = 'Create';
+      name.focus({ preventScroll: true });
+      name.select();
+    }
+
+    closeBrief() {
+      this.briefFor = null;
+      this.making.dataset.step = 'start';
+      this.making.querySelector('.ask textarea').focus({ preventScroll: true });
+    }
+
+    async createFromBrief() {
+      const starter = this.briefFor;
+      const pop = this.making;
+      const ok = pop.querySelector('.brief .ok');
+      const note = pop.querySelector('.brief .note');
+      const m = window.marble;
+      if (!starter || ok.disabled || !m?.drive?.create) return;
+      const name = pop.querySelector('.brief .name').value.trim() || starter.title;
+      const words = pop.querySelector('.brief .words').value.trim();
+      if (/[\/\\]/.test(name)) { note.textContent = 'A name cannot hold a slash.'; return; }
+      ok.disabled = true;
+      ok.textContent = 'Creating…';
+      note.textContent = '';
+      let made;
+      try {
+        made = await m.drive.create({ path: [this.folderHere(), name].filter(Boolean).join('/'), from: starter.id });
+      } catch (err) {
+        ok.disabled = false;
+        ok.textContent = 'Create';
+        note.textContent = err?.message || 'It was not made.';
+        return;
+      }
+      if (!words) { location.href = made.href; return; }
+      // The document exists whatever happens next, so a missing agent is
+      // said and walked past rather than losing the file.
+      try {
+        const settings = await m.agent.settings();
+        const conversation = await m.agent.start({ provider: settings.defaultProvider });
+        await m.agent.send(conversation, {
+          prompt: `I just made this document from the “${starter.title}” template in Marble Drive — a fresh clone, so all of it is mine to change.\n\nWhat I want: ${words}\n\nBuild it in this document. Keep it one file that works on its own, the way the template does.`,
+          target: made.path,
+          viewing: made.path,
+          selection: [],
+        });
+        location.href = `${made.href}#chat=${encodeURIComponent(conversation)}`;
+      } catch {
+        location.href = made.href;
+      }
+    }
+
+    // ------------------------------------------------------------ settings
+
+    toggleSettings() {
+      const opening = this.settingsPop.hidden;
+      this.hidePops();
+      if (!opening) return;
+      const button = this.$('[data-act="settings"]');
+      this.fillSettings();
+      this.settingsPop.hidden = false;
+      button.setAttribute('aria-expanded', 'true');
+      this.place(this.settingsPop, button, 'right');
+      this.settingsPop.style.maxHeight = `${Math.max(200, innerHeight - button.getBoundingClientRect().bottom - 14)}px`;
+      this.settingsPop.querySelector('.level[aria-checked="true"]')?.focus({ preventScroll: true });
+      // The choice is the Drive's, in its file; read it fresh.
+      if (!this.tree) this.load().then(() => this.fillSettings());
+    }
+
+    get builtin() {
+      return BUILTIN.some(([v]) => v === this.builtinAt) ? this.builtinAt : 'listing';
+    }
+
+    isSystem(entry) {
+      return entry?.kind === 'doc' && (entry.system ?? (SYSTEM.has(entry.path) || entry.path === HOME_DOC));
+    }
+
+    /** Whether the tree's Drive and Recent leave this out: every choice but
+     *  "with my files". Search and pins still find it. */
+    setAside(entry) {
+      return this.builtin !== 'listing' && this.isSystem(entry);
+    }
+
+    fillSettings() {
+      const pop = this.settingsPop;
+      const chips = pop.querySelector('.chips');
+      chips.replaceChildren();
+      const order = [HOME_DOC, 'Agents', 'Chat', 'Board', 'Console', 'Design System', "Design Don'ts"];
+      const apps = this.docs().filter((d) => this.isSystem(d))
+        .sort((a, b) => (order.indexOf(a.path) + 1 || 99) - (order.indexOf(b.path) + 1 || 99));
+      for (const d of apps) {
+        const a = h('a', '', d.path === HOME_DOC ? 'Drive' : nameOf(d.path));
+        a.href = window.marble?.href?.(d.path) ?? '#';
+        if (d.path === this.here) a.setAttribute('aria-current', 'page');
+        chips.append(a);
+      }
+      chips.hidden = !apps.length;
+      const levels = [...pop.querySelectorAll('.builtin .level')];
+      for (const row of levels) {
+        const on = row.dataset.builtin === this.builtin;
+        row.setAttribute('aria-checked', String(on));
+        row.tabIndex = on ? 0 : -1;
+      }
+      // The choice is written in the Drive's file; without one, it is shown
+      // and not offered.
+      for (const row of levels) row.disabled = !HOME_DOC;
+      pop.querySelector('.agentry').hidden = !window.marble?.agent?.openSettings;
+    }
+
+    bindSettings() {
+      const pop = this.settingsPop;
+      const levels = pop.querySelector('.builtin');
+      levels.addEventListener('click', (event) => {
+        const row = event.target.closest('.level');
+        if (row) this.chooseBuiltin(row.dataset.builtin);
+      });
+      levels.addEventListener('keydown', (event) => {
+        const step = { ArrowDown: 1, ArrowRight: 1, ArrowUp: -1, ArrowLeft: -1 }[event.key];
+        if (!step) return;
+        event.preventDefault();
+        const rows = [...levels.querySelectorAll('.level')];
+        const at = rows.findIndex((row) => row.dataset.builtin === this.builtin);
+        const next = rows[(at + step + rows.length) % rows.length];
+        this.chooseBuiltin(next.dataset.builtin).then(() => next.focus());
+      });
+      pop.querySelector('.lines').addEventListener('click', (event) => {
+        const b = event.target.closest('[data-tab]');
+        if (!b) return;
+        this.hidePops();
+        window.marble?.agent?.openSettings?.(b.dataset.tab);
+      });
+    }
+
+    /** Where the built-in apps show: an attribute on the Drive's <body>,
+     *  filed as the Drive files it, so the Drive and this tree agree. */
+    async chooseBuiltin(next) {
+      if (next === this.builtin || !HOME_DOC) return;
+      const was = this.builtinAt;
+      this.builtinAt = next;
+      this.fillSettings();
+      this.drawTree();
+      try {
+        await this.fileHome((doc) => {
+          const id = doc.body?.getAttribute('data-marble-id');
+          if (!id) throw new Error('The Drive page cannot hold this choice');
+          return [{ type: 'setAttr', id, name: 'data-builtin', value: next }];
+        });
+        if (this.home) dispatchEvent(new CustomEvent('marble:drive-builtin', { detail: { builtin: next } }));
+        this.remember();
+      } catch (err) {
+        this.builtinAt = was;
+        this.fillSettings();
+        this.drawTree();
+        this.say(err?.message || 'That did not change', 2600);
+      }
+    }
+
+    // ------------------------------------------------------------ this drive
+
+    toggleMe() {
+      const opening = this.mePop.hidden;
+      this.hidePops();
+      if (!opening) return;
+      const button = this.$('[data-act="me"]');
+      this.fillMe();
+      this.mePop.hidden = false;
+      button.setAttribute('aria-expanded', 'true');
+      this.place(this.mePop, button, 'right');
+    }
+
+    get live() {
+      return Boolean(window.marble?.drive && this.heard);
+    }
+
+    fillMe() {
+      const pop = this.mePop;
+      pop.toggleAttribute('data-live', this.live);
+      pop.querySelector('.me-head b').textContent = this.driveName || 'My Drive';
+      pop.querySelector('.me-head .host').textContent = location.host;
+      pop.querySelector('.state span:last-child').textContent = this.live ? 'Live: connected to this drive' : 'Offline: not connected';
+      const docs = this.docs();
+      const bytes = docs.reduce((sum, d) => sum + (d.bytes ?? 0), 0);
+      pop.querySelector('.weight').textContent = this.tree
+        ? `${docs.length.toLocaleString()} ${docs.length === 1 ? 'document' : 'documents'} · ${sizeOf(bytes)}`
+        : '';
+    }
+
+    drawLive() {
+      this.$('[data-act="me"] .live').hidden = !this.live;
+      this.$('[data-act="me"]').title = this.live ? 'This drive · live' : 'This drive · offline';
+      if (!this.mePop.hidden) this.fillMe();
     }
 
     // ------------------------------------------------------------ publishing
@@ -2136,9 +2744,10 @@
       // Most of the time nothing moved since the last page: then what the
       // restore drew stands, and the row under the pointer is not rebuilt.
       const said = JSON.stringify(tree);
-      const pinsSaid = JSON.stringify([this.pins, this.tints, this.realms]);
+      const pinsSaid = JSON.stringify([this.pins, this.tints, this.realms, this.builtinAt]);
       const same = said === this.treeSaid && pinsSaid === this.pinsSaid;
       this.tree = tree;
+      if (!this.heard) { this.heard = true; this.drawLive(); }
       this.drawGit();
       this.byPath = new Map(this.docs().map((d) => [d.path, d]));
       this.treeSaid = said;
@@ -2180,6 +2789,9 @@
         .map((li) => ({ path: li.dataset.path, hex: tidyHex(li.dataset.tint) }))
         .filter((t) => t.path && t.hex)
         .sort((a, b) => b.path.length - a.path.length);
+      // The Drive's Settings and its name, kept in the same file.
+      this.builtinAt = doc.body?.getAttribute('data-builtin') ?? null;
+      this.driveName = doc.querySelector('.brand h1')?.textContent.trim() || null;
     }
 
     /** The Drive's document: this page, when you are on the Drive (only
@@ -2206,13 +2818,28 @@
 
     async editPins(build) {
       if (!HOME_DOC || !window.marble?.href) throw new Error('This drive has no Drive page to pin to');
+      const filed = await this.fileHome((doc) => {
+        const list = doc.querySelector('#pins');
+        const listId = list?.getAttribute('data-marble-id');
+        if (!listId) throw new Error('The Drive page has no Pinned list');
+        const pins = [...list.querySelectorAll(':scope > .pin[data-path]')];
+        const idOf = (el) => el?.getAttribute('data-marble-id') ?? null;
+        return build({ doc, listId, pins, idOf, find: (path) => pins.find((li) => li.dataset.path === path) ?? null });
+      });
+      if (!filed) return false;
+      this.redraw('pinned');
+      this.remember();
+      return true;
+    }
+
+    /** Ops on the Drive's own file, built against it as it is now: filed by
+     *  the page when you are on the Drive, so ⌘Z takes them back there, and
+     *  sent to its file from anywhere else. What the file then says about the
+     *  pins and the built-in apps is read back. */
+    async fileHome(build) {
+      if (!HOME_DOC || !window.marble?.href) throw new Error('This drive has no Drive page');
       const doc = await this.homeDoc();
-      const list = doc.querySelector('#pins');
-      const listId = list?.getAttribute('data-marble-id');
-      if (!listId) throw new Error('The Drive page has no Pinned list');
-      const pins = [...list.querySelectorAll(':scope > .pin[data-path]')];
-      const idOf = (el) => el?.getAttribute('data-marble-id') ?? null;
-      const ops = build({ doc, listId, pins, idOf, find: (path) => pins.find((li) => li.dataset.path === path) ?? null });
+      const ops = build(doc);
       if (!ops?.length) return false;
       const m = window.marble;
       if (HOME_DOC === this.here && m?.apply && m?.op) {
@@ -2239,9 +2866,7 @@
       }
       // The Drive's file changed under the stamp the tree last saw.
       this.pinsStamp = null;
-      this.pinsSaid = JSON.stringify([this.pins, this.tints, this.realms]);
-      this.redraw('pinned');
-      this.remember();
+      this.pinsSaid = JSON.stringify([this.pins, this.tints, this.realms, this.builtinAt]);
       return true;
     }
 
@@ -2335,7 +2960,7 @@
         for (const k of CONV_KEEP) if (c[k] !== undefined) slim[k] = c[k];
         return slim;
       });
-      const saved = JSON.stringify({ v: 1, tree: this.tree, pins: this.pins ?? null, pinsStamp: this.pinsStamp ?? null, tints: this.tints ?? null, realms: this.realms ?? null, convs });
+      const saved = JSON.stringify({ v: 1, tree: this.tree, pins: this.pins ?? null, pinsStamp: this.pinsStamp ?? null, tints: this.tints ?? null, realms: this.realms ?? null, builtin: this.builtinAt ?? null, driveName: this.driveName ?? null, convs });
       if (saved.length > LAST_MAX) return;
       try { localStorage.setItem(LAST, saved); } catch { /* full, or private: the next page asks, as it always did */ }
     }
@@ -2356,7 +2981,9 @@
         this.pins = last.pins;
         this.pinsStamp = last.pinsStamp;
         this.tints = last.tints ?? [];
-        this.pinsSaid = JSON.stringify([this.pins, this.tints, this.realms]);
+        this.builtinAt = last.builtin ?? null;
+        this.driveName = last.driveName ?? null;
+        this.pinsSaid = JSON.stringify([this.pins, this.tints, this.realms, this.builtinAt]);
       }
       this.restored = new Set();
       for (const c of last.convs ?? []) {
@@ -2702,7 +3329,7 @@
 
     branch(folder) {
       const ul = h('ul');
-      const kids = (folder.children ?? []).filter((c) => c.kind === 'folder' || c.kind === 'doc')
+      const kids = (folder.children ?? []).filter((c) => (c.kind === 'folder' || c.kind === 'doc') && !this.setAside(c))
         .sort((a, b) => (a.kind === b.kind ? a.name.localeCompare(b.name, undefined, { numeric: true, sensitivity: 'base' }) : a.kind === 'folder' ? -1 : 1));
       for (const child of kids) {
         const li = h('li');
@@ -2765,12 +3392,20 @@
       }
       if (name === 'recent') {
         const ul = h('ul');
-        for (const d of this.docs().sort((a, b) => b.modified - a.modified).slice(0, RECENT)) ul.append(this.item(this.docRow(d, { where: true })));
+        for (const d of this.docs().filter((d) => !this.setAside(d)).sort((a, b) => b.modified - a.modified).slice(0, RECENT)) ul.append(this.item(this.docRow(d, { where: true })));
         return this.section(name, ul);
       }
       if (name === 'agents') {
         if (!window.marble?.agent) return null;
         return this.section(name, this.agentsList(), this.agentsMeta(), this.agentsActions());
+      }
+      if (name === 'builtin') {
+        if (this.builtin !== 'sidebar') return null;
+        const apps = this.docs().filter((d) => this.isSystem(d)).sort((a, b) => a.name.localeCompare(b.name));
+        if (!apps.length) return null;
+        const ul = h('ul');
+        for (const d of apps) ul.append(this.item(this.docRow(d)));
+        return this.section(name, ul);
       }
       return this.section(name, this.branch(this.tree));
     }

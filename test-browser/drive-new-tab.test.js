@@ -1,6 +1,8 @@
 // Documents and files open in a tab of their own; the Drive stays the tab you
 // come back to. Folders are still somewhere you go, in place. A document you
 // just made is the one exception: that is where you meant to go next.
+// The Drive's own bars, as a phone or a page without the shell has them:
+// on a desk the shell frames the Drive and these are its (shell-drive-frame).
 
 import assert from 'node:assert/strict';
 import test from 'node:test';
@@ -17,7 +19,7 @@ test.after(() => host.close());
 
 async function openDrive() {
   await host.reset();
-  const { page } = await host.newPage();
+  const { page } = await host.newPage({ shell: false });
   await page.goto(`${host.base}/a/drive`);
   await page.locator('#items .item[data-path="garden"]').waitFor();
   return page;

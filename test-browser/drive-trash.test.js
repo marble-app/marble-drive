@@ -8,6 +8,8 @@
 //
 // Since then the key is gone altogether: moving to the trash is only ever
 // asked for by name, from a menu, so a stray keystroke never costs a file.
+// The Drive's own bars, as a phone or a page without the shell has them:
+// on a desk the shell frames the Drive and these are its (shell-drive-frame).
 
 import fsp from 'node:fs/promises';
 import assert from 'node:assert/strict';
@@ -33,7 +35,7 @@ test.after(() => host.close());
 
 async function openDrive() {
   await host.reset();
-  const { page } = await host.newPage();
+  const { page } = await host.newPage({ shell: false });
   await page.goto(`${host.base}/a/drive`);
   await page.locator('#items .item[data-path="garden"]').waitFor();
   return page;
@@ -170,7 +172,7 @@ test('the live drive document does all of the above', async (t) => {
     documents: { drive: live, garden: GARDEN, 'Papers/one': GARDEN, 'Papers/deep/two': GARDEN },
   });
   try {
-    const { page, errors } = await there.newPage();
+    const { page, errors } = await there.newPage({ shell: false });
     await page.goto(`${there.base}/a/drive`);
     await page.locator('#items .item[data-path="Papers"]').waitFor();
 

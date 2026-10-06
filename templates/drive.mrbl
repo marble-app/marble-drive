@@ -115,6 +115,14 @@ __ICON__
   .dot { width: 7px; height: 7px; border-radius: 999px; background: var(--faint); transition: background var(--t) var(--settle), box-shadow var(--t) var(--settle); }
   .status[data-live="1"] .dot { background: var(--accent-ink); box-shadow: 0 0 0 3px rgba(var(--accent-ink-rgb), .18); }
 
+  /* Framed by the drive's shell (runtime/shell.js): on a desk the shell's bar
+     and tree are this page's, with New, Settings and the drive's own card in
+     them, so the page draws neither bar of its own and the listing runs to
+     the frame. A phone has no shell, and keeps both. Only the drawing stops:
+     the pins and the labels stay in this file, where the shell reads them. */
+  html.marble-shell-open .topbar, html.marble-shell-open .side { display: none; }
+  html.marble-shell-open .main { margin: 0; border-radius: 0; }
+
   /* ------------------------------------------------------------------- shell */
   .shell { flex: 1 1 auto; display: flex; min-height: 0; }
   /* One shade back from the page: a sidebar is structure, not content, and
@@ -1475,6 +1483,19 @@ __ICON__
       // linkable without making it shared state.
       let here = decodeURIComponent(location.hash.replace(/^#\/?/, ''));
       let view = 'drive';
+      // The pages this drive runs on (the Drive, Agents, Chat, the Board, the
+      // Console, the two design pages) are documents like any other but the
+      // tools, not the work. The shell's Settings says where they show, kept
+      // here on <body> as data-builtin: with your files (the default, where
+      // they always were), in a Built-in section of the shell's tree, or
+      // hidden. Search still finds them, and they are still files either way.
+      const OWN = decodeURIComponent(location.pathname.replace(/^\/a\//, '')) || 'drive';
+      const SYSTEM = new Set([OWN, 'drive', 'Agents', 'Chat', 'Board', 'Console', 'Design System', "Design Don'ts"]);
+      const isSystem = (entry) => entry?.kind === 'doc' && (entry.system ?? SYSTEM.has(entry.path));
+      const setAside = (entry) => {
+        const v = document.body.getAttribute('data-builtin');
+        return (v === 'hidden' || v === 'sidebar') && isSystem(entry);
+      };
       let latest = null;
       let query = '';
 
@@ -2579,8 +2600,9 @@ __ICON__
         try {
           root = await drive.tree('');
           latest = view === 'drive' ? at(root, here) : null;
+          if (latest) latest = { ...latest, children: (latest.children ?? []).filter((e) => !setAside(e)) };
 
-          if (view === 'recent') latest = { children: flatten(root).filter((e) => e.kind === 'doc').slice(0, 40) };
+          if (view === 'recent') latest = { children: flatten(root).filter((e) => e.kind === 'doc' && !setAside(e)).slice(0, 40) };
           if (view === 'trash') latest = { children: (await drive.trash()).map(asTrash) };
           if (view === 'templates') return drawTemplates();
 
@@ -4344,6 +4366,23 @@ __ICON__
         drawNav();
         drawPins();
       });
+
+      // A room asked for by name: by the shell's Trash and All templates
+      // while it frames this page, or by address (?view=trash) from anywhere
+      // else. The address is read once and put back as it was.
+      const ROOMS = new Set(['drive', 'recent', 'templates', 'trash']);
+      addEventListener('marble:drive-view', (event) => {
+        if (!ROOMS.has(event.detail?.view)) return;
+        event.preventDefault();
+        goView(event.detail.view);
+      });
+      // Where the built-in apps show, chosen in the shell's Settings.
+      addEventListener('marble:drive-builtin', () => refresh());
+      const askedRoom = new URLSearchParams(location.search).get('view');
+      if (ROOMS.has(askedRoom)) {
+        history.replaceState(history.state, '', location.pathname + location.hash);
+        view = askedRoom;
+      }
 
       drawNav();
       positionThumb();

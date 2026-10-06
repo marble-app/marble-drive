@@ -3,6 +3,8 @@
 // Two claims are under test and they are the same claim twice: that a template
 // can be told apart without being read, and that picking one is the start of
 // saying what you want rather than the end of choosing.
+// The Drive's own bars, as a phone or a page without the shell has them:
+// on a desk the shell frames the Drive and these are its (shell-drive-frame).
 
 import assert from 'node:assert/strict';
 import test from 'node:test';
@@ -20,7 +22,7 @@ test.after(() => host.close());
 
 async function openTemplates() {
   await host.reset();
-  const { page, errors } = await host.newPage();
+  const { page, errors } = await host.newPage({ shell: false });
   await page.goto(`${host.base}/a/drive`);
   await page.locator('#items .item[data-path="garden"]').waitFor();
   await page.locator('#nav .nav-item[data-nav="templates"]').click();

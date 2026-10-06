@@ -141,8 +141,25 @@ export async function startDrive({ scripts = {}, agents = true, documents = { ga
     // `attending` names the chats this tab starts out following, as a tab
     // that asked for the work would: only those draw a zone on the page
     // (collab.js); any other agent is a glint.
-    async newPage({ viewport = { width: 1280, height: 800 }, reducedMotion = 'no-preference', colorScheme = 'light', hasTouch = false, isMobile = false, deviceScaleFactor = 1, attending = [], detail = 'technical' } = {}) {
+    async newPage({ viewport = { width: 1280, height: 800 }, reducedMotion = 'no-preference', colorScheme = 'light', hasTouch = false, isMobile = false, deviceScaleFactor = 1, attending = [], detail = 'technical', shell = true } = {}) {
       const context = await browser.newContext({ viewport, reducedMotion, colorScheme, hasTouch, isMobile, deviceScaleFactor });
+      // A page with the shell turned off, as a document turns it off for
+      // itself (<meta name="marble-shell" content="off">): the Drive then
+      // draws its own bars, as it does on a phone. The meta is in the head
+      // long before the shell's script, which is the last thing in the body.
+      if (!shell) {
+        await context.addInitScript(() => {
+          new MutationObserver((_, watch) => {
+            if (!document.head) return;
+            watch.disconnect();
+            const meta = document.createElement('meta');
+            meta.name = 'marble-shell';
+            meta.content = 'off';
+            meta.setAttribute('data-marble-transient', '');
+            document.head.append(meta);
+          }).observe(document, { childList: true, subtree: true });
+        });
+      }
       if (attending.length) {
         await context.addInitScript((ids) => { try { sessionStorage.setItem('marble-attending', JSON.stringify(ids)); } catch { /* opaque origin */ } }, attending);
       }

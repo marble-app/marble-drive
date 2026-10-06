@@ -1,6 +1,8 @@
 // Right-click asks a row what can be done with it. The answer is the same
 // menu its ⋮ opens, at the pointer, for the row or for the selection it is
 // part of; the gap between rows answers for the folder, a pin for itself.
+// The Drive's own bars, as a phone or a page without the shell has them:
+// on a desk the shell frames the Drive and these are its (shell-drive-frame).
 
 import assert from 'node:assert/strict';
 import test from 'node:test';
@@ -23,7 +25,7 @@ test.after(() => host.close());
 
 async function openDrive(viewport) {
   await host.reset();
-  const { page, errors } = await host.newPage(viewport ? { viewport } : {});
+  const { page, errors } = await host.newPage(viewport ? { viewport, shell: false } : { shell: false });
   await page.goto(`${host.base}/a/drive`);
   await page.locator('#items .item[data-path="garden"]').waitFor();
   return { page, errors };

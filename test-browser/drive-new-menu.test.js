@@ -2,6 +2,8 @@
 // sentence can go to (Chat, Agent, Board), then the templates. Chat and Board
 // are handed the words in the address, as #ask=<words>; an Agent conversation
 // is started here and opened on the Agents page by ?open=<id>.
+// The Drive's own bars, as a phone or a page without the shell has them:
+// on a desk the shell frames the Drive and these are its (shell-drive-frame).
 
 import assert from 'node:assert/strict';
 import test from 'node:test';
@@ -25,7 +27,7 @@ async function openMenu(page) {
 const pressed = (page) => page.locator('.sheet-app[aria-pressed="true"] b').textContent();
 
 test('New opens on a focused message box, the three apps, then the templates', async () => {
-  const { page, errors } = await host.newPage();
+  const { page, errors } = await host.newPage({ shell: false });
   await openMenu(page);
   assert.equal(await page.evaluate(() => document.activeElement?.id), 'ask');
   assert.deepEqual(await page.locator('#sheet .sheet-h').allTextContents(), ['Prompt in', 'Start from a template']);
@@ -43,7 +45,7 @@ test('New opens on a focused message box, the three apps, then the templates', a
 });
 
 test('Enter sends the words to Chat in the address, in this tab', async () => {
-  const { page } = await host.newPage();
+  const { page } = await host.newPage({ shell: false });
   await openMenu(page);
   await page.keyboard.type('a habit tracker');
   await page.keyboard.press('Enter');
@@ -53,7 +55,7 @@ test('Enter sends the words to Chat in the address, in this tab', async () => {
 });
 
 test('a tile with nothing typed opens its app, and is remembered for Enter', async () => {
-  const { page } = await host.newPage();
+  const { page } = await host.newPage({ shell: false });
   await openMenu(page);
   await page.locator('.sheet-app[data-name="Board"]').click();
   await page.waitForURL((url) => url.pathname === '/a/Board');
@@ -74,7 +76,7 @@ test('a tile with nothing typed opens its app, and is remembered for Enter', asy
 });
 
 test('Cmd-click opens the app in a new tab and leaves the Drive where it is', async () => {
-  const { page } = await host.newPage();
+  const { page } = await host.newPage({ shell: false });
   await openMenu(page);
   await page.keyboard.type('two words');
   const [popup] = await Promise.all([
@@ -87,7 +89,7 @@ test('Cmd-click opens the app in a new tab and leaves the Drive where it is', as
 });
 
 test('Agent starts the conversation here and opens it on the Agents page', async () => {
-  const { page } = await host.newPage();
+  const { page } = await host.newPage({ shell: false });
   await openMenu(page);
   await page.keyboard.type('build me a timer');
   await page.locator('.sheet-app[data-name="Agent"]').click();
