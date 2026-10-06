@@ -6,8 +6,10 @@
 # WSL stops a distro soon after its last program ends, and systemd's services
 # with it. This registers a task, "Marble Drive (WSL)", that starts at your
 # sign-in (and looks again every 5 minutes) and holds one program open in the
-# distro (sleep), so systemd and the
-# drive's services (linux/systemd/home.sh, tunnel.sh) keep running. After a
+# distro (sleep), so systemd and the drive's services (linux/systemd/home.sh,
+# tunnel.sh) keep running. Never restart WSL from inside it (a process started
+# there dies with it); after a wsl --shutdown, the 5-minute check brings it
+# back. After a
 # reboot (a Windows update), the drive is back once you sign in.
 #
 # -NoSleep also stops the PC from sleeping while it is plugged in: a sleeping
@@ -34,13 +36,16 @@ if ($names -notcontains $Distro) {
 
 # conhost --headless runs wsl.exe with no window to close by mistake.
 $action = New-ScheduledTaskAction -Execute "conhost.exe" -Argument "--headless wsl.exe -d $Distro --exec /bin/sleep infinity"
-# At sign-in, and every 5 minutes after: a keeper that ended (a wsl --shutdown,
-# a WSL update) is started again; one still running is left alone (IgnoreNew).
+# At sign-in, and every 5 minutes from now on: a keeper that ended (a
+# wsl --shutdown, a WSL update) is started again; one still running is left
+# alone (IgnoreNew). The 5 minutes hang off their own trigger, starting now:
+# repetition on the sign-in trigger would only begin at the next sign-in
+# (2026-10-06: WSL stayed down after a shutdown for that reason).
 $atLogOn = New-ScheduledTaskTrigger -AtLogOn -User "$env:USERDOMAIN\$env:USERNAME"
-$atLogOn.Repetition = (New-ScheduledTaskTrigger -Once -At (Get-Date) -RepetitionInterval (New-TimeSpan -Minutes 5)).Repetition
+$every5 = New-ScheduledTaskTrigger -Once -At (Get-Date).AddMinutes(1) -RepetitionInterval (New-TimeSpan -Minutes 5)
 $settings = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries `
   -ExecutionTimeLimit ([TimeSpan]::Zero) -MultipleInstances IgnoreNew
-Register-ScheduledTask -TaskName $TaskName -Action $action -Trigger $atLogOn -Settings $settings `
+Register-ScheduledTask -TaskName $TaskName -Action $action -Trigger @($atLogOn, $every5) -Settings $settings `
   -Description "Keeps WSL ($Distro) running for Marble Drive. Remove: wsl-home.ps1 -Remove" -Force | Out-Null
 Start-ScheduledTask -TaskName $TaskName
 Write-Host "Registered and started '$TaskName': $Distro stays up from each sign-in."
