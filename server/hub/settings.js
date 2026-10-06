@@ -19,6 +19,10 @@ export function parseEnvFile(text) {
   return out;
 }
 
+// The drive's homes: the owner's Mac, the owner's PC (WSL2) and Fly. The
+// lease names one; each machine knows which it is.
+export const MACHINES = ['mac', 'pc', 'fly'];
+
 const REQUIRED = ['HUB_DRIVE', 'HUB_MACHINE', 'HUB_PASSPHRASE', 'HUB_SALT', 'LEASE_URL', 'LEASE_TOKEN'];
 const R2 = ['R2_ACCOUNT_ID', 'R2_ACCESS_KEY_ID', 'R2_SECRET_ACCESS_KEY', 'R2_BUCKET'];
 
@@ -34,7 +38,7 @@ export function loadHubSettings(file) {
   const needs = [...REQUIRED, ...(s.HUB_BACKEND === 'local' ? ['HUB_LOCAL_DIR'] : R2)];
   const missing = needs.filter((key) => !s[key]);
   if (missing.length) throw new Error(`${file} is missing ${missing.join(', ')}`);
-  if (!['mac', 'fly'].includes(s.HUB_MACHINE)) throw new Error(`${file}: HUB_MACHINE must be mac or fly`);
+  if (!MACHINES.includes(s.HUB_MACHINE)) throw new Error(`${file}: HUB_MACHINE must be one of ${MACHINES.join(', ')}`);
   if (!/^[a-z0-9-]+$/.test(s.HUB_DRIVE)) throw new Error(`${file}: HUB_DRIVE must be lowercase letters, digits and dashes`);
   return { ...s, file };
 }

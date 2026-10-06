@@ -47,9 +47,11 @@ test('R2 keys are needed unless the backend is local', async () => {
   assert.equal(local.file, path.join(dir, 'local.env'));
 });
 
-test('the machine is mac or fly, and the drive a plain name', async () => {
-  const bad = await write('bad.env', BASE.replace('HUB_MACHINE=mac', 'HUB_MACHINE=pc') + 'HUB_BACKEND=local\nHUB_LOCAL_DIR=/x\n');
-  assert.throws(() => loadHubSettings(bad), /mac or fly/);
+test('the machine is mac, pc or fly, and the drive a plain name', async () => {
+  const pc = await write('pc.env', BASE.replace('HUB_MACHINE=mac', 'HUB_MACHINE=pc') + 'HUB_BACKEND=local\nHUB_LOCAL_DIR=/x\n');
+  assert.equal(loadHubSettings(pc).HUB_MACHINE, 'pc');
+  const bad = await write('bad.env', BASE.replace('HUB_MACHINE=mac', 'HUB_MACHINE=moon') + 'HUB_BACKEND=local\nHUB_LOCAL_DIR=/x\n');
+  assert.throws(() => loadHubSettings(bad), /one of mac, pc, fly/);
   const odd = await write('odd.env', BASE.replace('HUB_DRIVE=bryan', 'HUB_DRIVE=../x') + 'HUB_BACKEND=local\nHUB_LOCAL_DIR=/x\n');
   assert.throws(() => loadHubSettings(odd), /HUB_DRIVE/);
 });

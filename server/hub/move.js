@@ -23,7 +23,14 @@
 // owner is told to give the lease back by hand (leaseTo, `drive-home lease-to`).
 
 const fail = (step, why) => ({ ok: false, step, why });
-const otherOf = (side) => (side === 'mac' ? 'fly' : 'mac');
+// A move is between the two sides it is given: the machine drive-home runs on
+// (the Mac or the PC) and Fly. A lease that names a third machine is one this
+// run cannot hold, so it touches nothing.
+const otherOf = (sides, side) => Object.keys(sides).find((key) => key !== side);
+const beyond = (sides, lease) =>
+  Object.hasOwn(sides, lease.home)
+    ? null
+    : `the lease names ${lease.home} (epoch ${lease.epoch}), which this machine cannot reach; run drive-home to fly on ${lease.home} first; nothing was touched`;
 
 export async function moveHome({
   to,
@@ -35,7 +42,8 @@ export async function moveHome({
   sleep = (ms) => new Promise((r) => setTimeout(r, ms)),
   log = console.log,
 }) {
-  const from = otherOf(to);
+  if (Object.keys(sides).length !== 2 || !Object.hasOwn(sides, to)) return fail('sides', `a move needs ${to} and one other side`);
+  const from = otherOf(sides, to);
   const leaving = sides[from];
   const arriving = sides[to];
   const started = Date.now();
@@ -46,6 +54,7 @@ export async function moveHome({
   } catch (err) {
     return fail('lease', `the lease could not be read (${err.message}); nothing was held`);
   }
+  if (beyond(sides, lease)) return fail('lease', beyond(sides, lease));
   if (lease.home === to) {
     // The lease says so; make sure the side it names is really serving.
     let health;
@@ -96,6 +105,9 @@ export async function moveHome({
         held = `which could not be held (${err.message}): stop it by hand`;
       }
       return fail(step, `${why}; the lease still names ${to} (epoch ${current.epoch}), whose copy is not verified, so it was not released (${held}); run drive-home lease-to ${from} to give the drive back to ${from}, whose copy is good`);
+    }
+    if (!Object.hasOwn(sides, current.home)) {
+      return fail(step, `${why}; the lease now names ${current.home} (epoch ${current.epoch}), which this machine cannot reach, so nothing here was released`);
     }
     try {
       await sides[current.home].release();
@@ -199,13 +211,15 @@ export async function moveHome({
 // fails closed: when the lease names the other side, that side must say
 // standby on /health, and one that cannot be read may be serving.
 export async function leaseTo({ to, sides, client, log = console.log }) {
-  const other = otherOf(to);
+  if (Object.keys(sides).length !== 2 || !Object.hasOwn(sides, to)) return fail('sides', `a move needs ${to} and one other side`);
+  const other = otherOf(sides, to);
   let lease;
   try {
     lease = await client.get();
   } catch (err) {
     return fail('lease', `the lease could not be read (${err.message}); nothing was touched`);
   }
+  if (beyond(sides, lease)) return fail('lease', beyond(sides, lease));
   if (lease.home === other) {
     let health;
     try {
@@ -252,4 +266,54 @@ export async function leaseTo({ to, sides, client, log = console.log }) {
     return fail('start', `the lease names ${to} (epoch ${lease.epoch}), but ${to} could not be released (${err.message}); ${other} is held`);
   }
   return { ok: true, lease };
+}
+
+// When the lease names a machine that is gone (the PC switched off, asleep or
+// broken) and no move can hold it: give the drive to a side this run can
+// reach, from the hub as that machine last uploaded it. Changes it made after
+// its last upload stay on its own disk. It is not a second writer when it
+// comes back: its host asks the lease before serving, and its uploads stop
+// once they see the lease has moved. Asked for by name (`dead`), and only
+// while the lease still names it, so a slip can never take the drive from a
+// side that could have been moved properly. The arriving side is held until
+// its download matches the hub.
+export async function rescueTo({ to, dead, sides, client, log = console.log }) {
+  const arriving = sides[to];
+  if (!arriving) return fail('sides', `${to} is not a side this machine can reach`);
+  if (Object.hasOwn(sides, dead)) return fail('dead', `${dead} can be reached from here: use drive-home to ${to}, which takes its last changes`);
+  let lease;
+  try {
+    lease = await client.get();
+  } catch (err) {
+    return fail('lease', `the lease could not be read (${err.message}); nothing was touched`);
+  }
+  if (lease.home !== dead) return fail('lease', `the lease names ${lease.home} (epoch ${lease.epoch}), not ${dead}; nothing was touched`);
+
+  log(`[rescue] holding ${to}`);
+  try {
+    await arriving.hold();
+  } catch (err) {
+    return fail('hold', `${to} could not be held (${err.message}); the lease still names ${dead}`);
+  }
+  let moved;
+  try {
+    moved = await client.move(to, lease.epoch);
+  } catch (err) {
+    const fresh = await client.get().catch(() => null);
+    if (fresh?.home !== to) return fail('lease', `the lease could not move (${err.message}); ${to} is held, and the lease names ${fresh?.home ?? 'an unknown side'}`);
+    moved = fresh;
+  }
+  log(`[rescue] downloading on ${to}`);
+  const down = await arriving.download().catch((err) => ({ ok: false, why: err.message }));
+  if (!down.ok || !down.matches) {
+    const why = !down.ok ? `the download failed (${down.why})` : 'the download does not match the hub';
+    return fail('download', `${why}; the lease names ${to} (epoch ${moved.epoch}), which is held, so nothing serves; once a download on ${to} matches the hub (drive-sync down), drive-home lease-to ${to} releases it`);
+  }
+  try {
+    await arriving.release();
+    if (!(await arriving.healthy())) return fail('start', `the lease names ${to} (epoch ${moved.epoch}) and its copy matches the hub, but it did not come up as home`);
+  } catch (err) {
+    return fail('start', `the lease names ${to} (epoch ${moved.epoch}) and its copy matches the hub, but it could not be released (${err.message})`);
+  }
+  return { ok: true, lease: moved, state: down.state };
 }

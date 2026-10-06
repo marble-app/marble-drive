@@ -171,6 +171,12 @@ test('drives go in rings: this Mac and the owner\'s sprite, t-bryan, then everyo
   assert.equal(ownRelease('/Users/x/dev/marble-drive/server/console/index.js'), null);
 });
 
+test('on the PC the home drive is the PC, first on the line', () => {
+  const rings = ringDrives({ fleet: [{ name: 'admin-p2', role: 'owner', release: 'r-d1fe89a' }], home: 'pc', selfRelease: '20261006T1Z-abc1234' });
+  assert.deepEqual(rings.map((d) => [d.key, d.name, d.ring]), [['pc', 'PC', 'yours'], ['admin-p2', 'admin-p2', 'yours']]);
+  assert.deepEqual(ringDrives({ fleet: [], selfRelease: 'x' }), []);
+});
+
 test('the Console reads the board placed on its drives, and corrects only from its own page', async (t) => {
   const { createDrive } = await import('../server/app.js');
   const { loadConfig } = await import('../server/config.js');

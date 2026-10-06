@@ -1,15 +1,20 @@
 #!/usr/bin/env node
-// Move a drive's home between the owner's Mac and its sprite
-// (docs/HOSTING.md, "The owner's drive on the Mac").
+// Move a drive's home between this machine (the owner's Mac or PC) and its
+// sprite (docs/HOSTING.md, "A drive at home on the Mac or the PC").
 //
-//   node tools/drive-home.mjs to <mac|fly> [--drive bryan] [--sprite admin-p2] [--now]
-//   node tools/drive-home.mjs lease-to <mac|fly> [--drive bryan] [--sprite admin-p2]
+//   node tools/drive-home.mjs to <here|fly> [--drive bryan] [--sprite admin-p2] [--now]
+//   node tools/drive-home.mjs lease-to <here|fly> [--drive bryan] [--sprite admin-p2]
+//   node tools/drive-home.mjs rescue-to <here|fly> --from <mac|pc> [--drive bryan] [--sprite admin-p2]
 //
-// Runs on the Mac. `to` waits (up to 10 minutes) until no agent is working on
+// <here> is this machine's name in the hub, its HUB_MACHINE: mac on the Mac,
+// pc on the PC. Runs on that machine; the Mac and the PC never move a drive
+// straight to each other, but through Fly. `to` waits (up to 10 minutes) until no agent is working on
 // the side it leaves, unless --now, then holds that side, uploads, moves the
 // lease, downloads and releases the other. `lease-to` moves only the lease (no
 // upload, no download) to a side whose copy is good, holding the other side:
 // for after a move that stopped with the lease on a copy it could not verify.
+// `rescue-to` is for a home that is gone (the PC off or broken while the lease
+// names it): the drive comes back from the hub as that home last uploaded it.
 //
 // Holding a side = a hold file beside its hub settings (server/hub/settings.js,
 // holdPath) and a restart: tools/home-mode.mjs then says standby whatever the
@@ -22,9 +27,9 @@ import path from 'node:path';
 import { promisify } from 'node:util';
 
 import { createLeaseClient } from '../server/hub/lease-client.js';
-import { macPaths } from '../server/hub/mac-paths.js';
-import { leaseTo, moveHome } from '../server/hub/move.js';
-import { holdPath, loadHubSettings } from '../server/hub/settings.js';
+import { homePaths } from '../server/hub/home-paths.js';
+import { leaseTo, moveHome, rescueTo } from '../server/hub/move.js';
+import { holdPath, loadHubSettings, MACHINES } from '../server/hub/settings.js';
 
 const run = promisify(execFile);
 const args = process.argv.slice(2);
@@ -33,20 +38,31 @@ const flag = (name, fallback) => {
   return at < 0 ? fallback : args[at + 1];
 };
 const [command, to] = args;
-if (!['to', 'lease-to'].includes(command) || !['mac', 'fly'].includes(to)) {
-  console.error('usage: node tools/drive-home.mjs to <mac|fly> [--drive bryan] [--sprite admin-p2] [--now]');
-  console.error('       node tools/drive-home.mjs lease-to <mac|fly> [--drive bryan] [--sprite admin-p2]');
+const dead = flag('from', null);
+if (!['to', 'lease-to', 'rescue-to'].includes(command) || !MACHINES.includes(to) || (command === 'rescue-to' && !MACHINES.includes(dead))) {
+  console.error('usage: node tools/drive-home.mjs to <mac|pc|fly> [--drive bryan] [--sprite admin-p2] [--now]');
+  console.error('       node tools/drive-home.mjs lease-to <mac|pc|fly> [--drive bryan] [--sprite admin-p2]');
+  console.error('       node tools/drive-home.mjs rescue-to <mac|pc|fly> --from <mac|pc> [--drive bryan] [--sprite admin-p2]');
   process.exit(2);
 }
 const drive = flag('drive', 'bryan');
 const sprite = flag('sprite', drive === 'bryan' ? 'admin-p2' : drive);
-const mac = macPaths(drive);
+const local = homePaths(drive);
 let settings;
 try {
-  settings = loadHubSettings(mac.hubEnv);
+  settings = loadHubSettings(local.hubEnv);
 } catch (err) {
   console.error(`drive-home: ${err.message}`);
   process.exit(1);
+}
+const here = settings.HUB_MACHINE;
+if (here === 'fly') {
+  console.error(`drive-home: ${local.hubEnv} says this machine is fly; run drive-home on the Mac or the PC`);
+  process.exit(1);
+}
+if (to !== here && to !== 'fly') {
+  console.error(`drive-home: this machine is ${here}; to move the drive to ${to}, run drive-home on ${to} (move it to fly from here first if it is at home here)`);
+  process.exit(2);
 }
 
 const HEALTH_TIMEOUT_MS = 5_000;
@@ -88,21 +104,25 @@ function holding(name, { health, mark, unmark, restart }) {
   };
 }
 
-function macSide() {
-  const tool = path.join(mac.app, 'current', 'marble-drive', 'tools', 'drive-sync.mjs');
-  const env = { ...process.env, MARBLE_HUB_ENV: mac.hubEnv };
-  const home = path.join(import.meta.dirname, '..', 'macos', 'launchd', 'home.sh');
+// This machine: the Mac under launchd, or the PC (WSL2) under systemd.
+function localSide() {
+  const tool = path.join(local.app, 'current', 'marble-drive', 'tools', 'drive-sync.mjs');
+  const env = { ...process.env, MARBLE_HUB_ENV: local.hubEnv };
+  const repo = path.join(import.meta.dirname, '..');
+  const restart = process.platform === 'darwin'
+    ? () => run('/bin/zsh', [path.join(repo, 'macos', 'launchd', 'home.sh'), 'restart', drive])
+    : () => run('/bin/bash', [path.join(repo, 'linux', 'systemd', 'home.sh'), 'restart', drive]);
   const hold = holdPath(settings);
   return {
-    ...holding('mac', {
-      health: async () => (await fetch(`http://127.0.0.1:${mac.port}/health`, { signal: AbortSignal.timeout(HEALTH_TIMEOUT_MS) })).json(),
+    ...holding(here, {
+      health: async () => (await fetch(`http://127.0.0.1:${local.port}/health`, { signal: AbortSignal.timeout(HEALTH_TIMEOUT_MS) })).json(),
       mark: () => fsp.writeFile(hold, `held by drive-home at ${new Date().toISOString()}\n`),
       unmark: () => fsp.rm(hold, { force: true }),
-      restart: () => run('/bin/zsh', [home, 'restart', drive]),
+      restart,
     }),
     holdFile: hold,
-    upload: async ({ epoch }) => json((await run(process.execPath, [tool, 'up', '--root', mac.root, '--epoch', String(epoch)], { env })).stdout),
-    download: async () => json((await run(process.execPath, [tool, 'down', '--root', mac.root], { env })).stdout),
+    upload: async ({ epoch }) => json((await run(process.execPath, [tool, 'up', '--root', local.root, '--epoch', String(epoch)], { env })).stdout),
+    download: async () => json((await run(process.execPath, [tool, 'down', '--root', local.root], { env })).stdout),
   };
 }
 
@@ -125,12 +145,19 @@ function flySide() {
   };
 }
 
-const sides = { mac: macSide(), fly: flySide() };
+const sides = { [here]: localSide(), fly: flySide() };
 const client = createLeaseClient({ settings });
 
-if (command === 'lease-to') {
+if (command === 'rescue-to') {
+  const result = await rescueTo({ to, dead, sides, client });
+  if (result.ok) console.log(`${drive} is at home on ${to} (epoch ${result.lease.epoch}), from the hub as ${dead} last uploaded it (${result.state.at}); ${dead} stands by when it is back`);
+  else {
+    console.error(`drive-home: stopped at ${result.step}: ${result.why}`);
+    process.exit(1);
+  }
+} else if (command === 'lease-to') {
   const result = await leaseTo({ to, sides, client });
-  if (result.ok) console.log(`${drive} is at home on ${to} (epoch ${result.lease.epoch}); ${to === 'mac' ? 'fly' : 'mac'} is held`);
+  if (result.ok) console.log(`${drive} is at home on ${to} (epoch ${result.lease.epoch}); ${to === 'fly' ? here : 'fly'} is held`);
   else {
     console.error(`drive-home: stopped at ${result.step}: ${result.why}`);
     process.exit(1);

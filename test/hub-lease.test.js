@@ -8,7 +8,7 @@ const NOW = Date.parse('2026-09-30T10:00:00Z');
 
 test('a new lease says Fly is home at epoch 0, which is today', () => {
   assert.deepEqual(INITIAL, { home: 'fly', epoch: 0, since: null });
-  assert.deepEqual(MACHINES, ['mac', 'fly']);
+  assert.deepEqual(MACHINES, ['mac', 'pc', 'fly']);
 });
 
 test('a move names the current epoch, and raises it', () => {
@@ -26,7 +26,8 @@ test('a move with a stale epoch is refused with the lease as it is', () => {
   assert.match(result.why, /epoch 4, not 3/);
 });
 
-test('only mac or fly, and only integer epochs', () => {
-  assert.equal(move(null, { to: 'pc', epoch: 0, now: NOW }).status, 400);
+test('only mac, pc or fly, and only integer epochs', () => {
+  assert.equal(move(null, { to: 'moon', epoch: 0, now: NOW }).status, 400);
+  assert.equal(move(null, { to: 'pc', epoch: 0, now: NOW }).lease.home, 'pc');
   assert.equal(move(null, { to: 'mac', epoch: '0', now: NOW }).status, 400);
 });

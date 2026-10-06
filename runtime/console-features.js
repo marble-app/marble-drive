@@ -321,7 +321,7 @@
       for (const [ring, label] of rings()) {
         cols.push(h('div.fx-ring', { 'data-ring': ring }, h('h3', { text: label }), drivesIn(ring).map((d) => {
           const missing = feats.filter((f) => (f.on.length || f.at === 'push') && !f.on.includes(d.key));
-          const role = d.key === 'mac' ? 'your drive, at home' : ring === 'yours' ? 'standby and workshop' : ring === 'tb' ? 'not used for testing now' : null;
+          const role = d.role === 'home' ? 'your drive, at home' : ring === 'yours' ? 'standby and workshop' : ring === 'tb' ? 'not used for testing now' : null;
           return node(d.name, role, d.sha, missing, 'Not here yet', 'Has everything on main');
         })));
       }

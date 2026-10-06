@@ -1,0 +1,35 @@
+# The owner's drive on this PC (Linux under WSL2), run from a release
+# (tools/home-release.sh) through the same keeper a sprite uses. Rendered by
+# linux/systemd/home.sh into ~/.config/systemd/user/.
+[Unit]
+Description=Marble Drive (@NAME@): the drive's home on this PC
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=@APP@/current/marble-drive
+ExecStart=/bin/bash tools/sprite/serve.sh
+Restart=always
+RestartSec=10
+# TERM to serve.sh alone (it stops the host cleanly), and everything left is
+# killed after 25 s, as launchd does on the Mac.
+KillMode=mixed
+TimeoutStopSec=25
+Environment="HOME=@HOME@"
+Environment="PATH=@APP@/current/marble-drive/node_modules/.bin:@NODE_DIR@:@HOME@/.local/bin:/usr/local/bin:/usr/bin:/bin"
+Environment="MARBLE_DRIVE_ROOT=@ROOT@"
+Environment="PORT=@PORT@"
+Environment="HOST=127.0.0.1"
+Environment="MARBLE_DRIVE_AGENTS=1"
+Environment="MARBLE_DRIVE_AGENT_KEYS=@HOME@/.config/marble-drive/agent-keys"
+Environment="MARBLE_HUB_ENV=@HUB_ENV@"
+# Projects registered on Fly or on the Mac name those machines' checkouts.
+Environment="MARBLE_PROJECT_PREFIXES=/home/sprite/src=@SRC@,/Users/bryanmin/Development/3rd-year-projects=@SRC@"
+Environment="MARBLE_SERVE_ENV_FILE=@HOME@/.config/marble-drive/pc-@NAME@.env"
+Environment="MARBLE_SERVE_CRASH_DIR=@STATE@/home-@NAME@-crash"
+StandardOutput=append:@STATE@/home-@NAME@.log
+StandardError=append:@STATE@/home-@NAME@.log
+
+[Install]
+WantedBy=default.target

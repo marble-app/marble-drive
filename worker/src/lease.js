@@ -5,7 +5,8 @@
 // 2026-09-29-mac-home-drive-design.md, piece 2). Pure, so the Worker and the
 // Node tests run the same code.
 
-export const MACHINES = ['mac', 'fly'];
+// As server/hub/settings.js: the owner's Mac, the owner's PC, and Fly.
+export const MACHINES = ['mac', 'pc', 'fly'];
 
 // Fly was home before any of this existed.
 export const INITIAL = Object.freeze({ home: 'fly', epoch: 0, since: null });

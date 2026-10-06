@@ -567,6 +567,29 @@ serving. As of 2026-09-30 `t-bryan` is at home on Fly and the Mac has a service
 for it; the owner's own drive has not moved, and the backup agent (24) still
 runs until it does.
 
+### 29. The PC takes over from the Mac as the drive's home
+
+**Decided 2026-10-06.** The owner has a Windows PC that stays on, and wants the
+drive there instead of on the MacBook Pro: served from home, reached from
+anywhere at `bryan.marbledrive.app`, with the Mac able to pull a copy.
+
+| Question | Chose | Over | Why |
+|---|---|---|---|
+| How the PC runs the host | Ubuntu under WSL2, systemd `--user`, lingering, a Windows task holding WSL up from sign-in | Windows natively | every script and the host already run on Linux (a sprite is Linux); native Windows would mean porting bash, rclone paths and the agent runner |
+| How the PC fits the lease | a third machine name, `pc`, beside `mac` and `fly` | relabelling the PC as `mac` | two machines that both call themselves `mac` would both serve when the lease said so; a name per machine means a forgotten Mac service stands by on its own |
+| Which moves exist | between the machine you are on and Fly; Mac to PC goes through Fly | any machine to any machine | `drive-home` holds and restarts the side it leaves and the side it reaches; only Fly can be driven from elsewhere (`sprite exec`). Through Fly is the tested path and costs a minute or two of admin-p2 |
+| The PC's tunnel | its own, `marble-bryan-pc` for `pc-bryan.marbledrive.app`, `DRIVES.bryan.pc` | moving the Mac's tunnel credentials to the PC | two connectors on one tunnel would split requests between machines; a new tunnel needs no secret carried across |
+| Carrying settings across | one file encrypted with a passphrase typed by the owner (`tools/home-secrets.sh`) | pasting into a chat, or the hub | keys never pass through an agent; the file can travel any way |
+| Projects registered on other machines | `MARBLE_PROJECT_PREFIXES` with two pairs on the PC (Fly's and the Mac's checkouts both to the PC's) | a `/Users/bryanmin` symlink on the PC | honest paths; the variable already takes several pairs. A sprite takes one pair (no comma in `sprite.env`), so a project registered on the PC does not open on Fly |
+| The Mac afterwards | home service and tunnel uninstalled, a hold file, `~/Marble Drive` set aside; `drive-pull.sh --hub` for a copy | deleting it, or keeping it as a live second home | nothing deleted; a hold file means a reboot or a stray `home.sh install` stands by |
+
+**Cost or lesson.** The PC is a home only while Windows is signed in and awake:
+a reboot for an update stops the drive until the owner signs in
+(`bryan.marbledrive.app` then says the PC is out of reach). A home that is gone
+cannot be held, so `drive-home rescue-to <side> --from pc` takes the drive from
+the hub's last upload; the PC's unuploaded minutes stay on its disk. As with the Mac, never run `drive-home` from a conversation
+hosted on either side.
+
 ## Traps worth remembering
 
 | Trap | How it showed up | Lesson |

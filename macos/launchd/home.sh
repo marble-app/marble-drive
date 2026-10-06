@@ -1,6 +1,6 @@
 #!/bin/zsh
 # The owner's drive on this Mac, under launchd (docs/HOSTING.md, "The owner's
-# drive on the Mac"). Names match server/hub/mac-paths.js.
+# drive on the Mac"). Names match server/hub/home-paths.js.
 #
 #   macos/launchd/home.sh install [<name>]   render and start (name: bryan, or t-bryan for the trial)
 #   macos/launchd/home.sh start|stop|restart [<name>]

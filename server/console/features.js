@@ -117,6 +117,7 @@ export async function readTranscript(file, into) {
         if (/\bgit push\b/.test(cmd)) into.pushes += 1;
         for (const m of cmd.matchAll(DEPLOY)) into.deploys.add(`${m[1]}${/--local/.test(m[2]) ? ' --local' : ''}`);
         if (/mac-release\.sh/.test(cmd)) into.deploys.add('mac');
+        else if (/home-release\.sh/.test(cmd)) into.deploys.add(process.platform === 'darwin' ? 'mac' : 'pc');
         const cd = /(?:^|&&|;)\s*cd\s+("[^"]+"|'[^']+'|\S+)/.exec(cmd);
         if (cd) into.dirs.add(cd[1].replace(/^["']|["']$/g, '').replace(/^~(?=\/|$)/, os.homedir()));
       } else if (b?.type === 'tool_result') {
@@ -729,14 +730,15 @@ export function createFeatures({ dir, driveDir, src, log = console }) {
 
 // ------------------------------------------------------------------ drives
 
-/** The drives in their rings: Yours (this Mac, when it is a drive's home, and
- *  the owner's sprite), t-bryan, then everyone else. admin-p1 is retired and
- *  never deployed to (docs/HOSTING.md), so it is not on the line unless it is
- *  the console's own drive. */
-export function ringDrives({ fleet = [], self = null, selfRelease = null, mac = false }) {
+/** The drives in their rings: Yours (this Mac or PC, when it is a drive's
+ *  home, and the owner's sprite), t-bryan, then everyone else. admin-p1 is
+ *  retired and never deployed to (docs/HOSTING.md), so it is not on the line
+ *  unless it is the console's own drive. `home` is 'mac' or 'pc' (`mac: true`
+ *  is 'mac'). */
+export function ringDrives({ fleet = [], self = null, selfRelease = null, mac = false, home = mac ? 'mac' : null }) {
   const sha = (release) => /-([0-9a-f]{7,40})$/.exec(String(release ?? ''))?.[1] ?? null;
   const out = [];
-  if (mac) out.push({ key: 'mac', name: 'Mac', ring: 'yours', release: selfRelease, sha: sha(selfRelease), local: /-local-/.test(String(selfRelease ?? '')), role: 'home' });
+  if (home) out.push({ key: home, name: home === 'pc' ? 'PC' : 'Mac', ring: 'yours', release: selfRelease, sha: sha(selfRelease), local: /-local-/.test(String(selfRelease ?? '')), role: 'home' });
   for (const d of fleet) {
     if (d.name === 'admin-p1' && !d.self) continue;
     const ring = d.role === 'owner' ? 'yours' : d.name === 't-bryan' ? 'tb' : d.role === 'user' ? 'all' : null;
@@ -745,7 +747,7 @@ export function ringDrives({ fleet = [], self = null, selfRelease = null, mac = 
     out.push({ key: d.name, name: d.name, ring, release: release ?? null, sha: sha(release), local: /-local-/.test(String(release ?? '')), from: d.releaseFrom ?? null, awake: Boolean(d.awake) });
   }
   const order = { yours: 0, tb: 1, all: 2 };
-  return out.sort((a, b) => order[a.ring] - order[b.ring] || (a.key === 'mac' ? -1 : b.key === 'mac' ? 1 : a.name.localeCompare(b.name)));
+  return out.sort((a, b) => order[a.ring] - order[b.ring] || (a.role === 'home' ? -1 : b.role === 'home' ? 1 : a.name.localeCompare(b.name)));
 }
 
 /** The release this host runs, from where its code lives: …/releases/<name>/. */

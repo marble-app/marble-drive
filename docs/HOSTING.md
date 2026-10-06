@@ -228,25 +228,28 @@ only, never over local changes), installs them and re-registers the projects.
 
 The same steps work from the MacBook, where this repo also lives.
 
-## A drive at home on the Mac
+## A drive at home on the Mac or the PC
 
-Built 2026-09-29 and 2026-09-30; tried on `t-bryan` (a 56-file drive), not yet
-on the owner's drive. The design is in
+Built 2026-09-29 and 2026-09-30 for the Mac; tried on `t-bryan` (a 56-file
+drive), then the owner's drive moved to the Mac on 2026-09-30. The PC (Windows,
+the drive in Ubuntu under WSL2) joined as a third home on 2026-10-06, to take
+over from the Mac (decision 29). The design is in
 [`superpowers/specs/2026-09-29-mac-home-drive-design.md`](superpowers/specs/2026-09-29-mac-home-drive-design.md);
 why, in decision 28. Only a drive whose `sprite.env` sets `MARBLE_HUB_ENV` takes
 part. Every other drive is one host on one sprite, as before.
 
 **One home at a time.** The drive lives on one machine, its **home**, and the
-other stands by. Two hosts writing one drive fork it, so nothing is synced both
+others stand by. Two hosts writing one drive fork it, so nothing is synced both
 ways. The home uploads its changes to R2; a machine taking over downloads them
 first.
 
 | Part | What it is |
 |---|---|
 | **The hub** | Cloudflare R2 bucket `marble-drives` (Western North America), prefix `<drive>/`. Files are encrypted on the machine before upload (rclone `crypt`: names and contents), so R2 holds only ciphertext. Code: `server/hub/sync.js`; by hand: `tools/drive-sync.mjs` |
-| **The lease** | the Worker `marble-lease` (`worker/`) at `https://marble-lease.bryandhmin.workers.dev`, on the Cloudflare account `bryandhmin@gmail.com`. One Durable Object per drive holds `{home: mac or fly, epoch, since}`. Every move names the epoch it moves from and raises it, so two moves at once cannot both win. One secret, `LEASE_TOKEN` (`wrangler secret put`); every call carries it as a bearer token |
+| **The lease** | the Worker `marble-lease` (`worker/`) at `https://marble-lease.bryandhmin.workers.dev`, on the Cloudflare account `bryandhmin@gmail.com`. One Durable Object per drive holds `{home: mac, pc or fly, epoch, since}`. Every move names the epoch it moves from and raises it, so two moves at once cannot both win. One secret, `LEASE_TOKEN` (`wrangler secret put`); every call carries it as a bearer token |
 | **Home and standby** | a host serves the drive only while the lease names its machine. Otherwise it runs `marble-drive standby` (`server/standby.js`): `/health` (`standby: true`) and a page saying where the drive is, and nothing that writes: no agents, no daily run, no uploads |
-| **The Mac's host** | a release under `~/Library/Application Support/Marble Drive/app` (`tools/mac-release.sh`), run by launchd as `com.marble.drive.home.<name>` (`macos/launchd/home.sh`) through the same `tools/sprite/serve.sh` a sprite uses. `bryan` is `~/Marble Drive` on port **4401**; any other name is `~/Marble Drive (<name>)` on **4402**. The dev checkout keeps port 4400 and its throwaway `drive/` |
+| **The Mac's host** | a release under `~/Library/Application Support/Marble Drive/app` (`tools/home-release.sh`, also called `mac-release.sh`), run by launchd as `com.marble.drive.home.<name>` (`macos/launchd/home.sh`) through the same `tools/sprite/serve.sh` a sprite uses. `bryan` is `~/Marble Drive` on port **4401**; any other name is `~/Marble Drive (<name>)` on **4402**. The dev checkout keeps port 4400 and its throwaway `drive/` |
+| **The PC's host** | the same, in Ubuntu under WSL2: a release under `~/.local/share/marble-drive/app` (`tools/home-release.sh`), run by systemd as the user service `marble-drive-home-<name>` (`linux/systemd/home.sh`; lingering on, so no window need be open), the same ports and folder names (`~/Marble Drive`, which Windows sees at `\\wsl.localhost\Ubuntu\home\<user>\Marble Drive`). Logs in `~/.local/state/marble-drive/`. A Windows task, "Marble Drive (WSL)" (`windows/wsl-home.ps1`), keeps WSL running from each sign-in. Set up by `tools/pc-setup.sh` |
 
 ### What the hub holds
 
@@ -316,10 +319,10 @@ where `MARBLE_HUB_ENV` is set), and it answers `serve` or `standby`, logging
 | Where | File |
 |---|---|
 | Mac | `~/.config/marble-drive/hub-<name>.env` (mode 600) |
+| PC | `~/.config/marble-drive/hub-<name>.env` (mode 600), in Ubuntu |
 | sprite | `~/.config/marble-drive/hub.env` (mode 600), named by `MARBLE_HUB_ENV=/home/sprite/.config/marble-drive/hub.env` in `sprite.env` |
 
-Both hold the same keys, `HUB_MACHINE` being `mac` in one and `fly` in the
-other: `HUB_DRIVE`, `HUB_MACHINE`, `R2_ACCOUNT_ID`, `R2_ACCESS_KEY_ID`,
+All hold the same keys, `HUB_MACHINE` being `mac`, `pc` or `fly`: `HUB_DRIVE`, `HUB_MACHINE`, `R2_ACCOUNT_ID`, `R2_ACCESS_KEY_ID`,
 `R2_SECRET_ACCESS_KEY`, `R2_BUCKET`, `HUB_PASSPHRASE`, `HUB_SALT`, `LEASE_URL`,
 `LEASE_TOKEN`. The host reads the file itself, so the R2 keys never reach an
 agent's processes. **Without `HUB_PASSPHRASE` and `HUB_SALT` the R2 copy can
@@ -332,7 +335,14 @@ other's prefix to its own, so the same conversation opens on either. (The Mac's
 launchd job carries the reverse.) Like any `sprite.env` value it may not contain
 a comma.
 
-The **R2 access key** lives in these two files and nowhere in this repository.
+Beside the hub settings, each home has its own: `mac-<name>.env` on the Mac,
+`pc-<name>.env` on the PC (the drive's passphrase, the daily run, the TypeSafe
+key, Console). `tools/home-secrets.sh pack` on the Mac writes both files into
+one encrypted file (AES-256, from a passphrase you type) for you to carry to
+the PC however you like; `unpack` there writes the PC's copies, `HUB_MACHINE=pc`
+and the Mac's paths turned into the PC's. Run it in your own terminal.
+
+The **R2 access key** lives in these files and nowhere in this repository.
 
 ### rclone
 
@@ -346,12 +356,18 @@ From the owner's home network, R2 sometimes leaves a request unanswered 5–90 s
 after connecting (measured 2026-09-30: `curl` connects in 0.05 s, and from Fly
 every request answers in 0.3 s). So every rclone call times out after 10 s (5 s
 to connect) and retries up to 20 times (`PATIENCE` in `server/hub/sync.js`). The
-Mac's side is slower for this reason, and only this.
+Mac's side is slower for this reason, and only this. The PC uses the pinned
+rclone, installed by `tools/pc-setup.sh`.
 
 ### How a move goes
 
-`node tools/drive-home.mjs to <mac|fly> [--drive bryan] [--sprite admin-p2] [--now]`,
-run **on the Mac**:
+`node tools/drive-home.mjs to <here|fly> [--drive bryan] [--sprite admin-p2] [--now]`,
+run **on the Mac or the PC**, where `<here>` is that machine (`mac` or `pc`, its
+`HUB_MACHINE`). A move is always between that machine and Fly: the Mac and the
+PC never move a drive straight to each other. From the Mac to the PC is
+`drive-home to fly` on the Mac, then `drive-home to pc` on the PC. A lease that
+names a machine the run cannot reach (the Mac, run from the PC) stops it before
+anything is touched.
 
 1. Read the lease. If it already names the target and the target serves, done.
 2. Wait until no agent is working on the side being left (up to 10 minutes;
@@ -372,7 +388,18 @@ says where the lease is and what was started. If the lease names a copy that was
 not verified, that side is held, not released (it would upload over the hub),
 and the message says so.
 
-`node tools/drive-home.mjs lease-to <mac|fly> [--drive bryan]` moves only the
+`node tools/drive-home.mjs rescue-to <here|fly> --from <mac|pc>` is for a home
+that is gone: the PC switched off, asleep or broken while the lease names it,
+so nothing can hold it or take its last upload. Run where the drive should go
+next (on the Mac, or anywhere for Fly), it holds that side, moves the lease off
+the dead machine, downloads the hub (the drive as the dead machine last
+uploaded it, about two minutes behind) and releases it once the copy matches.
+It refuses unless the lease still names the machine called dead, and refuses a
+machine it can reach (use `to`). Changes the dead machine made after its last
+upload stay on its own disk; when it comes back it asks the lease and stands
+by, and its uploads stop as soon as they see the lease has moved.
+
+`node tools/drive-home.mjs lease-to <here|fly> [--drive bryan]` moves only the
 lease, with no upload or download, to a side whose copy is good: it holds the
 other side, moves the lease, releases the target. It refuses while the other
 side is serving as home, since its newest changes would be left behind (use
@@ -391,6 +418,15 @@ Measured 2026-09-30 on `t-bryan`, 56 files:
 
 ### Day to day
 
+- **The PC is home:** open `http://127.0.0.1:4401` in Windows (WSL passes
+  localhost through) or `https://bryan.marbledrive.app` anywhere. Check, in
+  Ubuntu: `linux/systemd/home.sh status bryan`; logs: `… logs bryan`.
+- **The PC's code.** `tools/home-release.sh` in the PC's checkout, as on the Mac.
+- **Pull a copy on the Mac** (or anywhere with the hub settings):
+  `tools/drive-pull.sh --hub` puts a read-only copy of the drive, as its home
+  last uploaded it, in the checkout's `drive/` (`--into <dir>` for elsewhere),
+  for the dev host on 4400. It reads the hub only; edits made there are lost
+  at the next pull. Each pull after the first fetches only what changed.
 - **The Mac is home:** open `http://127.0.0.1:4401` (`bryan`) or `:4402`
   (a trial drive). The sprite's URL shows "This drive is being served from the
   other machine". Check: `zsh macos/launchd/home.sh status bryan`, and
@@ -411,12 +447,13 @@ Measured 2026-09-30 on `t-bryan`, 56 files:
 - **Rolling back admin-p2** to a release from before the hub while the Mac is
   home brings admin-p2 up serving, a second writer. Don't:
   `tools/sprite-deploy.sh admin-p2 --rollback` only while admin-p2 is at home.
-- **Not yet moved: the owner's drive.** The next step, only on the owner's go-ahead:
-  the plan's Task 10, Step 9
-  (`docs/superpowers/plans/2026-09-29-mac-home-phase-1.md`) has the commands,
-  from `tools/sprite-deploy.sh admin-p2` through `drive-home to mac`. The backup
-  agent (`macos/launchd/backup.sh`) keeps running until then and is uninstalled
-  in that step.
+- **Retiring the Mac as a home** (once the drive is at home on the PC): on the
+  Mac, `zsh macos/launchd/tunnel.sh uninstall bryan`, `zsh
+  macos/launchd/home.sh uninstall bryan`, and a hold file
+  (`~/.config/marble-drive/hold-bryan`) so nothing there serves the drive
+  again. Its `~/Marble Drive` is set aside, not deleted. The Mac keeps its hub
+  settings for `drive-pull.sh --hub`, and could be a home again (`home.sh
+  install`, remove the hold, `drive-home to mac` from Fly).
 
 ### The front door (marbledrive.app)
 
@@ -463,6 +500,11 @@ names and taking over a drive on a request are not built.
   lock, as it is on the Mac. Without it, the request is redirected (302) to the
   same path on the sprite URL, where the owner signs in to Sprites. A bearer
   through the Sprites proxy is untested.
+- **The PC's tunnel** (`linux/systemd/tunnel.sh`, the same verbs and the same
+  refusals) is `marble-<name>-pc` for `pc-<name>.marbledrive.app`, run by
+  systemd as `marble-drive-tunnel-<name>`; its settings file is
+  `pc-<name>.env`. `DRIVES` names it as the drive's `pc` home. The 503 for a
+  home out of reach names the PC when the PC is home.
 - **The tunnel** (`macos/launchd/tunnel.sh`). Once, after `cloudflared tunnel
   login` (pick the `marbledrive.app` zone): `zsh macos/launchd/tunnel.sh setup
   bryan mac-bryan.marbledrive.app` creates the tunnel `marble-bryan-mac`, writes
@@ -609,14 +651,19 @@ repository's own hooks run.
 | `tools/backup-agent.mjs [<sprite>]` | the Mac's half of the Console's Backups view: backs up after changes (10 quiet minutes, hourly at most), takes the Console's requests and reports back, touching the sprite only while it is awake |
 | `node tools/browser-tests.mjs [<files>]` | browser tests: on the owner's Mac when it is watching this sprite, else here one file at a time |
 | `macos/launchd/test-runner.sh install [<sprite>]` | keeps `tools/test-runner.mjs` running: the Mac's half of the above (default admin-p2); `status`, `uninstall`, `logs` |
-| `node tools/drive-home.mjs to <mac\|fly> [--drive <name>] [--now]` | moves a drive's home (see "How a move goes"), from the Mac; `lease-to <side>` moves only the lease |
+| `node tools/drive-home.mjs to <here\|fly> [--drive <name>] [--now]` | moves a drive's home between this machine (the Mac or the PC) and Fly (see "How a move goes"); `lease-to <side>` moves only the lease; `rescue-to <side> --from <dead>` takes the drive from a home that is gone |
 | `node tools/drive-sync.mjs up\|down\|counts\|state\|trash-prefix` | the hub by hand and what `drive-home` runs on each machine; settings from `MARBLE_HUB_ENV` |
-| `tools/mac-release.sh [--ref <commit>]` | a release of this repo on the Mac, made current, and every home service restarted onto it |
+| `tools/home-release.sh [--ref <commit>]` (`mac-release.sh` on the Mac is the same) | a release of this repo on the Mac or the PC, made current, and every home service restarted onto it |
+| `tools/pc-setup.sh [<name>]` | in the PC's Ubuntu: what a home needs (node 22, rclone, cloudflared, sprite CLI, Chromium's libraries, systemd, lingering), a release, the home service; lists the sign-ins left |
+| `tools/home-secrets.sh pack [<name>]` / `unpack <file> [<name>]` | carries a drive's settings from the Mac to the PC in one encrypted file |
+| `linux/systemd/home.sh`, `linux/systemd/tunnel.sh` | the PC's `home.sh` and `tunnel.sh`, under systemd `--user` |
+| `windows/wsl-home.ps1 [-Distro Ubuntu] [-NoSleep] [-Remove]` | in Windows: keeps WSL running from each sign-in; `-NoSleep` keeps the PC awake while plugged in |
 | `macos/launchd/home.sh install\|start\|stop\|restart\|status\|logs\|uninstall [<name>]` | a drive's host on the Mac under launchd, `com.marble.drive.home.<name>` (default `bryan`) |
 | `macos/launchd/tunnel.sh setup <name> <hostname>`; `check\|install\|start\|stop\|restart\|status\|logs\|uninstall <name>` | a drive's Cloudflare tunnel on the Mac for the front door, `com.marble.drive.tunnel.<name>`; refuses to run for a drive with no passphrase, or one whose host answers without it |
 | `node tools/home-mode.mjs` | prints `serve` or `standby`; what `serve.sh` asks before every start |
 | `tools/drive-restore.sh <snapshot> <sprite> [--yes]` | puts a snapshot back on a sprite: stops the host, sets `/drive` aside, copies in, starts it, checks `/health` |
 | `tools/drive-pull.sh [<sprite>] [--into <dir>]` | a one-way mirror of a drive (default admin-p2) into this checkout's `drive/`, the last one set aside |
+| `tools/drive-pull.sh --hub [<drive>] [--into <dir>]` | the same mirror from the hub, wherever the drive is at home; wakes nothing, writes nothing to the hub |
 | `tools/sprite-provision.sh <person> [--agent api\|subscription] [--key-file f] [--local]` | makes `t-<person>`: passphrase, `sprite.env`, optional preloaded key, deploy, public URL, outside check, roster entry, a note to send |
 | `tools/sprite-provision.sh --resume <person>` | finish one that stopped part way |
 | `tools/sprite-provision.sh --remove <person>` | destroy after typing the name; drops the roster entry |
@@ -625,6 +672,38 @@ repository's own hooks run.
 | `node tools/sprite/smoke.mjs [base]` | Drive, drawn PDF picture, 100 MB upload with a cut chunk, through `sprite proxy` |
 
 ## Runbooks
+
+**Move the owner's drive from the Mac to the PC.** Once; each step can be
+run again.
+
+1. **Windows** (PowerShell as administrator): `wsl --install -d Ubuntu`,
+   reboot, open Ubuntu and make your user.
+2. **Ubuntu:** `sudo apt install -y gh && gh auth login`, then
+   `mkdir -p ~/Development/3rd-year-projects && cd $_ && gh repo clone
+   marble-app/marble-drive && gh repo clone bdhmin/marble`.
+3. **Ubuntu:** `cd marble-drive && tools/pc-setup.sh`. The first run turns
+   on systemd and asks for `wsl --shutdown`; run it again after. It ends with
+   a list of what is left:
+   - **Settings.** On the Mac, in Terminal: `tools/home-secrets.sh pack`.
+     Carry `~/Desktop/marble-bryan-settings.enc` to the PC (it is
+     encrypted), then in Ubuntu: `tools/home-secrets.sh unpack
+     /mnt/c/Users/<you>/Downloads/marble-bryan-settings.enc`. Delete the file.
+   - **Sign-ins:** Claude (`~/.local/share/marble-drive/app/current/marble-drive/node_modules/.bin/claude`,
+     `/login`), Codex too if the drive's agents use it, `sprite org auth`,
+     `cloudflared tunnel login` (pick `marbledrive.app`).
+4. **Ubuntu:** `linux/systemd/home.sh restart bryan` (it reads its settings;
+   it says standby: the lease names the Mac). Then `linux/systemd/tunnel.sh
+   setup bryan pc-bryan.marbledrive.app` and `linux/systemd/tunnel.sh install
+   bryan`.
+5. **Windows** (PowerShell): `powershell -ExecutionPolicy Bypass -File
+   \\wsl.localhost\Ubuntu\home\<user>\Development\3rd-year-projects\marble-drive\windows\wsl-home.ps1 -NoSleep`.
+6. **The Worker** (from the Mac, `worker/`): `npx wrangler@latest deploy`, so
+   `DRIVES` knows the PC.
+7. **Mac:** `node tools/drive-home.mjs to fly` (from Terminal, never from a
+   conversation hosted on the Mac). admin-p2 serves for the minute between.
+8. **PC:** `node tools/drive-home.mjs to pc`. Check
+   `https://bryan.marbledrive.app`.
+9. **Mac:** retire it as a home ("Day to day" above).
 
 **Add a friend.** Push `main` first. `tools/sprite-provision.sh <name> --agent
 api` (or `subscription`, then `claude login` in their console). Send the

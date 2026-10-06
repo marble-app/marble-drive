@@ -14,6 +14,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
+import { loadHubSettings } from '../hub/settings.js';
 import { createActions } from './actions.js';
 import { createBackups } from './backups.js';
 import { createFeatures, ownRelease, ringDrives } from './features.js';
@@ -22,6 +23,15 @@ import { createJobs } from './jobs.js';
 import { createSprites } from './sprites.js';
 import { createUsage } from './usage.js';
 import { createWorkshop } from './workshop.js';
+
+// This machine's name in the hub, or null with no hub (or one that cannot be read).
+function hubMachine() {
+  try {
+    return loadHubSettings(process.env.MARBLE_HUB_ENV)?.HUB_MACHINE ?? null;
+  } catch {
+    return null;
+  }
+}
 
 const FLEET_EVERY = 20_000;
 const LOOK_AWAKE_EVERY = 5 * 60_000;
@@ -77,10 +87,14 @@ export async function createConsole({ config, store, streams = null, ledger = nu
   // the owner asks; this only keeps the board and places it (features.js).
   const features = createFeatures({ dir, driveDir: path.dirname(store.marbleDir), src: config.consoleSrc, log });
   const selfRelease = ownRelease(fileURLToPath(import.meta.url));
-  // On the owner's Mac, running a release, the drive is at home here and is
-  // not a sprite, so it is a drive of its own on the line, before admin-p2.
-  // A checkout on a Mac (a test, a dev host) is not a drive's home.
-  const onMac = process.platform === 'darwin' && Boolean(selfRelease);
+  // On the owner's Mac or PC, running a release, the drive is at home here and
+  // is not a sprite, so it is a drive of its own on the line, before admin-p2.
+  // A checkout (a test, a dev host) is not a drive's home. The PC is Linux, as
+  // a sprite is, so it is known by its hub settings (HUB_MACHINE=pc).
+  const homeMachine = !selfRelease ? null
+    : process.platform === 'darwin' ? 'mac'
+      : hubMachine() === 'pc' ? 'pc' : null;
+  const onMac = homeMachine === 'mac';
 
   // ---------------------------------------------------------------- state
 
@@ -344,8 +358,8 @@ export async function createConsole({ config, store, streams = null, ledger = nu
       if (a === 'features') {
         if (!b && method === 'GET') {
           if (!fleetAt) await readFleet();
-          const drives = ringDrives({ fleet: await drivesList(), self, selfRelease, mac: onMac });
-          return json(res, 200, { ...(await features.view({ drives })), self, mac: onMac });
+          const drives = ringDrives({ fleet: await drivesList(), self, selfRelease, home: homeMachine });
+          return json(res, 200, { ...(await features.view({ drives })), self, mac: onMac, home: homeMachine });
         }
         if (b && method === 'POST' && c === 'correct') {
           const out = await features.correct(b, body);

@@ -1,8 +1,9 @@
 // test/tunnel-sh.test.js
-// macos/launchd/tunnel.sh never puts an ungated drive on the internet: it
-// will not start a tunnel unless the drive's settings file sets a passphrase
-// (as node reads it) and the drive answering on its port asks for it.
-// Everything here stops before launchd or cloudflared is touched.
+// macos/launchd/tunnel.sh (the Mac) and linux/systemd/tunnel.sh (the PC) never
+// put an ungated drive on the internet: neither will start a tunnel unless the
+// drive's settings file sets a passphrase (as node reads it) and the drive
+// answering on its port asks for it. Everything here stops before launchd,
+// systemd or cloudflared is touched.
 import assert from 'node:assert/strict';
 import { execFile, spawnSync } from 'node:child_process';
 import fs from 'node:fs';
@@ -11,12 +12,18 @@ import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
 
-const script = path.resolve(import.meta.dirname, '../macos/launchd/tunnel.sh');
-const zsh = spawnSync('zsh', ['-c', 'true']).status === 0;
-const skip = !zsh && 'no zsh';
-const SETTINGS = '.config/marble-drive/mac-bryan.env';
+const has = (shell) => spawnSync(shell, ['-c', 'true']).status === 0;
+const MACHINES = [
+  { machine: 'mac', shell: 'zsh', script: path.resolve(import.meta.dirname, '../macos/launchd/tunnel.sh') },
+  { machine: 'pc', shell: 'bash', script: path.resolve(import.meta.dirname, '../linux/systemd/tunnel.sh') },
+];
 const CONFIG = '.cloudflared/marble-bryan.yml';
-const config = (service) => `tunnel: x\ncredentials-file: /x.json\ningress:\n  - hostname: mac-bryan.marbledrive.app\n    service: ${service}\n  - service: http_status:404\n`;
+
+for (const { machine, shell, script } of MACHINES) {
+const skip = !has(shell) && `no ${shell}`;
+const SETTINGS = `.config/marble-drive/${machine}-bryan.env`;
+const config = (service) => `tunnel: x\ncredentials-file: /x.json\ningress:\n  - hostname: ${machine}-bryan.marbledrive.app\n    service: ${service}\n  - service: http_status:404\n`;
+const test_ = (name, opts, fn) => test(`${machine}: ${name}`, opts, fn);
 
 // Async, so a server in this process can answer the script's curl.
 function run(args, files = {}, env = {}) {
@@ -26,7 +33,7 @@ function run(args, files = {}, env = {}) {
     fs.writeFileSync(path.join(home, rel), text);
   }
   return new Promise((resolve) => {
-    execFile('zsh', [script, ...args], { env: { ...process.env, MARBLE_DRIVE_SECRET: '', ...env, HOME: home }, encoding: 'utf8' }, (error, stdout, stderr) => {
+    execFile(shell, [script, ...args], { env: { ...process.env, MARBLE_DRIVE_SECRET: '', ...env, HOME: home }, encoding: 'utf8' }, (error, stdout, stderr) => {
       fs.rmSync(home, { recursive: true, force: true });
       resolve({ status: error ? error.code : 0, stdout, stderr });
     });
@@ -40,12 +47,12 @@ async function host(answer) {
   return { port: String(server.address().port), close: () => new Promise((r) => server.close(r)) };
 }
 
-test('the script parses', { skip }, () => {
-  const res = spawnSync('zsh', ['-n', script], { encoding: 'utf8' });
+test_('the script parses', { skip }, () => {
+  const res = spawnSync(shell, ['-n', script], { encoding: 'utf8' });
   assert.equal(res.status, 0, res.stderr);
 });
 
-test('no passphrase, no tunnel: install, start and restart refuse and say why', { skip }, async () => {
+test_('no passphrase, no tunnel: install, start and restart refuse and say why', { skip }, async () => {
   const cases = [
     {},
     { [SETTINGS]: 'MARBLE_HUB_ENV=x\n' },
@@ -60,13 +67,13 @@ test('no passphrase, no tunnel: install, start and restart refuse and say why', 
       const res = await run([verb, 'bryan'], files);
       assert.notEqual(res.status, 0, `${verb} with ${JSON.stringify(files)}`);
       assert.match(res.stderr, /MARBLE_DRIVE_SECRET/);
-      assert.match(res.stderr, /mac-bryan\.env/);
+      assert.match(res.stderr, new RegExp(`${machine}-bryan\\.env`));
       assert.match(res.stderr, /ungated/);
     }
   }
 });
 
-test('with a passphrase set, it still needs setup first (and says so) before touching launchd', { skip }, async () => {
+test_('with a passphrase set, it still needs setup first (and says so) before touching launchd', { skip }, async () => {
   for (const line of ['MARBLE_DRIVE_SECRET=pw-1234\n', 'export MARBLE_DRIVE_SECRET="pw 1234"\n', 'MARBLE_DRIVE_SECRET=\nMARBLE_DRIVE_SECRET=pw-1234\n']) {
     const res = await run(['install', 'bryan'], { [SETTINGS]: line });
     assert.notEqual(res.status, 0);
@@ -76,7 +83,7 @@ test('with a passphrase set, it still needs setup first (and says so) before tou
   }
 });
 
-test('the drive answering now must ask for its passphrase', { skip }, async () => {
+test_('the drive answering now must ask for its passphrase', { skip }, async () => {
   const secret = { [SETTINGS]: 'MARBLE_DRIVE_SECRET=pw-1234\n' };
   const answers = {
     open: [(req, res) => res.end('<!doctype html>the drive'), false],
@@ -119,7 +126,7 @@ test('the drive answering now must ask for its passphrase', { skip }, async () =
   assert.match(res.stderr, /nothing answers/);
 });
 
-test('the port checked is the one the tunnel forwards to, from its config', { skip }, async () => {
+test_('the port checked is the one the tunnel forwards to, from its config', { skip }, async () => {
   const gated = await host((req, res) => { res.writeHead(401); res.end(); });
   const open = await host((req, res) => res.end('the drive'));
   try {
@@ -139,7 +146,7 @@ test('the port checked is the one the tunnel forwards to, from its config', { sk
   }
 });
 
-test('a node too old to read the settings file is named, and the tunnel refused', { skip }, async () => {
+test_('a node too old to read the settings file is named, and the tunnel refused', { skip }, async () => {
   const bin = fs.mkdtempSync(path.join(os.tmpdir(), 'old-node-'));
   fs.writeFileSync(path.join(bin, 'node'), '#!/bin/sh\necho "node: bad option: --env-file-if-exists=x" >&2\nexit 9\n', { mode: 0o755 });
   try {
@@ -152,23 +159,24 @@ test('a node too old to read the settings file is named, and the tunnel refused'
   }
 });
 
-test('setup takes only a tunnel name of its own under marbledrive.app', { skip }, async () => {
+test_('setup takes only a tunnel name of its own under marbledrive.app', { skip }, async () => {
   for (const name of ['bryan.marbledrive.app', 'www.marbledrive.app', 'marbledrive.app']) {
     const res = await run(['setup', 'bryan', name]);
     assert.equal(res.status, 2, name);
     assert.match(res.stderr, /routed through the front door Worker/, name);
   }
-  for (const name of ['evil.example', 'a.b.marbledrive.app', 'mac-bryan.marbledrive.app.evil.example']) {
+  for (const name of ['evil.example', 'a.b.marbledrive.app', `${machine}-bryan.marbledrive.app.evil.example`]) {
     const res = await run(['setup', 'bryan', name]);
     assert.equal(res.status, 2, name);
     assert.match(res.stderr, /one label under marbledrive\.app/, name);
   }
-  const fine = await run(['setup', 'bryan', 'mac-bryan.marbledrive.app']);
+  const fine = await run(['setup', 'bryan', `${machine}-bryan.marbledrive.app`]);
   assert.doesNotMatch(fine.stderr, /routed through|one label/);
 });
 
-test('an unknown verb is a usage error', { skip }, async () => {
+test_('an unknown verb is a usage error', { skip }, async () => {
   const res = await run(['fly', 'bryan']);
   assert.equal(res.status, 2);
   assert.match(res.stderr, /usage/);
 });
+}

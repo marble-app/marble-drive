@@ -1,8 +1,8 @@
 // worker/src/router.js
 // The front door (docs/HOSTING.md, "The front door (marbledrive.app)"):
 // <name>.marbledrive.app reaches that drive wherever its lease says it lives.
-// A drive at home on the Mac is reached through its Cloudflare tunnel; one on
-// Fly through its sprite URL. The request passes through whole (cookies,
+// A drive at home on the Mac or the PC is reached through that machine's
+// Cloudflare tunnel; one on Fly through its sprite URL. The request passes through whole (cookies,
 // body, method) and the answer comes back untouched, so Set-Cookie survives
 // and SSE streams. The drive's own gate does the signing in.
 
@@ -20,9 +20,10 @@ function page(status, title, text, headers = {}) {
 const placeholder = () => page(200, 'Marble Drive', 'Coming soon.');
 const nobody = () => page(404, 'No drive lives here', 'There is no Marble drive at this address.');
 const lost = () => page(503, 'Can’t tell where this drive lives right now', 'Try again in a minute.', { 'retry-after': '30' });
+const MACHINE_NAMES = { mac: 'Mac', pc: 'PC' };
 const away = (home) =>
-  home === 'mac'
-    ? page(503, 'This drive is out of reach', 'Your drive is at home on your Mac, which isn’t reachable right now (asleep or offline). On the Mac: <code>node tools/drive-home.mjs to fly</code> moves it to Fly.', { 'retry-after': '30' })
+  MACHINE_NAMES[home]
+    ? page(503, 'This drive is out of reach', `Your drive is at home on your ${MACHINE_NAMES[home]}, which isn’t reachable right now (asleep or offline). On the ${MACHINE_NAMES[home]}: <code>node tools/drive-home.mjs to fly</code> moves it to Fly. If the ${MACHINE_NAMES[home]} is off for good, from another machine: <code>node tools/drive-home.mjs rescue-to fly --from ${home}</code> brings it back from its last upload.`, { 'retry-after': '30' })
     : page(503, 'This drive is out of reach', 'Fly isn’t answering right now; try again in a minute.', { 'retry-after': '30' });
 
 function drives(env) {
@@ -69,7 +70,7 @@ export async function route(request, env, { fetchImpl = fetch, now = Date.now() 
     return lost();
   }
   const home = lease?.home;
-  const origin = (home === 'mac' || home === 'fly') && table[name][home];
+  const origin = (home === 'fly' || Object.hasOwn(MACHINE_NAMES, home)) && Object.hasOwn(table[name], home) && table[name][home];
   if (!origin) return lost();
 
   // Never resolve the path against the origin: `//evil.example/x` would then

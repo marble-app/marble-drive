@@ -2,8 +2,8 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 
-import { macPaths } from '../server/hub/mac-paths.js';
-import { leaseTo, moveHome } from '../server/hub/move.js';
+import { homePaths } from '../server/hub/home-paths.js';
+import { leaseTo, moveHome, rescueTo } from '../server/hub/move.js';
 
 // A side as drive-home drives it: hold() puts it on standby (a hold file and a
 // restart), release() takes the hold off, health() is its /health.
@@ -128,15 +128,26 @@ test('counts that do not match after download hand the lease back', async () => 
 });
 
 test('where each drive lives on the Mac', () => {
-  assert.deepEqual(macPaths('bryan', '/Users/b'), {
+  const mac = (name) => homePaths(name, { home: '/Users/b', platform: 'darwin' });
+  assert.deepEqual(mac('bryan'), {
     root: '/Users/b/Marble Drive',
     hubEnv: '/Users/b/.config/marble-drive/hub-bryan.env',
     port: 4401,
     label: 'com.marble.drive.home.bryan',
     app: '/Users/b/Library/Application Support/Marble Drive/app',
   });
-  assert.equal(macPaths('t-bryan', '/Users/b').root, '/Users/b/Marble Drive (t-bryan)');
-  assert.equal(macPaths('t-bryan', '/Users/b').port, 4402);
+  assert.equal(mac('t-bryan').root, '/Users/b/Marble Drive (t-bryan)');
+  assert.equal(mac('t-bryan').port, 4402);
+});
+
+test('and on the PC (Linux under WSL2)', () => {
+  assert.deepEqual(homePaths('bryan', { home: '/home/b', platform: 'linux' }), {
+    root: '/home/b/Marble Drive',
+    hubEnv: '/home/b/.config/marble-drive/hub-bryan.env',
+    port: 4401,
+    label: 'marble-drive-home-bryan',
+    app: '/home/b/.local/share/marble-drive/app',
+  });
 });
 
 // Rollback branches.
@@ -326,6 +337,48 @@ test('a verified arriving copy whose release fails and hand-back fails is releas
   assert.match(result.why, /names mac \(epoch 1\), which could not be released: nope/);
 });
 
+// The PC: the same move, between the PC and Fly. A lease on a machine this
+// run has no side for (the Mac, run from the PC) is beyond reach.
+test('a move between the PC and Fly runs the same way', async () => {
+  const log = [];
+  const client = lease();
+  const result = await moveHome({ to: 'pc', sides: { pc: side('pc', log), fly: side('fly', log) }, client, ...quick });
+  assert.equal(result.ok, true);
+  assert.deepEqual(log, ['fly.hold', 'fly.upload@0', 'pc.download', 'pc.release']);
+  assert.deepEqual(client.current, { home: 'pc', epoch: 1 });
+  const back = await moveHome({ to: 'fly', sides: { pc: side('pc', log), fly: side('fly', log) }, client, ...quick });
+  assert.equal(back.ok, true);
+  assert.deepEqual(client.current, { home: 'fly', epoch: 2 });
+});
+
+test('a lease on a machine this run cannot reach touches nothing: move and lease-to', async () => {
+  for (const to of ['pc', 'fly']) {
+    const log = [];
+    const client = lease({ home: 'mac', epoch: 4 });
+    const sides = { pc: side('pc', log), fly: side('fly', log) };
+    const moved = await moveHome({ to, sides, client, ...quick });
+    assert.deepEqual([moved.ok, moved.step], [false, 'lease']);
+    assert.match(moved.why, /names mac \(epoch 4\), which this machine cannot reach; run drive-home to fly on mac first/);
+    const leased = await leaseTo({ to, sides, client, log: () => {} });
+    assert.deepEqual([leased.ok, leased.step], [false, 'lease']);
+    assert.deepEqual(log, []);
+    assert.deepEqual(client.current, { home: 'mac', epoch: 4 });
+  }
+});
+
+test('a lease taken by a third machine mid-move releases nothing here', async () => {
+  const log = [];
+  const client = lease();
+  client.move = async () => { client.current; throw Object.assign(new Error('stale'), { status: 409 }); };
+  const base = client.get;
+  let reads = 0;
+  client.get = async () => (++reads === 1 ? base() : { home: 'mac', epoch: 1 });
+  const result = await moveHome({ to: 'pc', sides: { pc: side('pc', log), fly: side('fly', log) }, client, ...quick });
+  assert.deepEqual([result.ok, result.step], [false, 'lease']);
+  assert.match(result.why, /now names mac \(epoch 1\), which this machine cannot reach, so nothing here was released/);
+  assert.ok(!log.some((l) => l.endsWith('.release')));
+});
+
 // lease-to: the lease alone, to a side whose copy is good.
 test('lease-to gives the lease back to a side whose copy is good: the other is held first', async () => {
   const log = [];
@@ -434,4 +487,43 @@ test('lease-to: a released side that does not come up as home is an error', asyn
   const result = await leaseTo({ to: 'fly', sides: { mac: side('mac', log), fly: side('fly', log, { healthy: async () => false }) }, client, log: () => {} });
   assert.deepEqual([result.ok, result.step], [false, 'start']);
   assert.match(result.why, /did not come up as home; mac is held/);
+});
+
+// rescue-to: the home is gone, so the drive comes back from the hub.
+test('rescue: the lease leaves a home that is gone, and the side taking it downloads before it serves', async () => {
+  const log = [];
+  const client = lease({ home: 'pc', epoch: 5 });
+  const fly = side('fly', log);
+  const result = await rescueTo({ to: 'fly', dead: 'pc', sides: { mac: side('mac', log), fly }, client, log: () => {} });
+  assert.equal(result.ok, true);
+  assert.deepEqual(log, ['fly.hold', 'fly.download', 'fly.release']);
+  assert.deepEqual(client.current, { home: 'fly', epoch: 6 });
+});
+
+test('rescue refuses a home it can reach, and a lease that does not name the one called dead', async () => {
+  const log = [];
+  const sides = { mac: side('mac', log), fly: side('fly', log) };
+  const reach = await rescueTo({ to: 'fly', dead: 'mac', sides, client: lease({ home: 'mac', epoch: 1 }), log: () => {} });
+  assert.deepEqual([reach.ok, reach.step], [false, 'dead']);
+  const other = await rescueTo({ to: 'fly', dead: 'pc', sides, client: lease({ home: 'fly', epoch: 1 }), log: () => {} });
+  assert.deepEqual([other.ok, other.step], [false, 'lease']);
+  assert.deepEqual(log, []);
+});
+
+test('rescue: a download that does not match leaves the taking side held, never serving', async () => {
+  const log = [];
+  const client = lease({ home: 'pc', epoch: 2 });
+  const fly = side('fly', log, { download: async () => ({ ok: true, matches: false, state: {}, counts: {} }) });
+  const result = await rescueTo({ to: 'fly', dead: 'pc', sides: { mac: side('mac', log), fly }, client, log: () => {} });
+  assert.deepEqual([result.ok, result.step], [false, 'download']);
+  assert.equal(fly.held, true);
+  assert.ok(!log.includes('fly.release'));
+  assert.match(result.why, /lease-to fly/);
+});
+
+test('a move given the wrong sides touches nothing', async () => {
+  const log = [];
+  const result = await moveHome({ to: 'pc', sides: { mac: side('mac', log), fly: side('fly', log) }, client: lease(), ...quick });
+  assert.deepEqual([result.ok, result.step], [false, 'sides']);
+  assert.deepEqual(log, []);
 });

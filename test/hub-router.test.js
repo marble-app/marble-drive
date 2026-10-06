@@ -9,7 +9,7 @@ import { forgetLeases, LEASE_TTL_MS, route } from '../worker/src/router.js';
 
 beforeEach(() => forgetLeases());
 
-const DRIVES = JSON.stringify({ bryan: { mac: 'https://mac-bryan.marbledrive.app', fly: 'https://admin-p2-b3fwm.sprites.app' } });
+const DRIVES = JSON.stringify({ bryan: { mac: 'https://mac-bryan.marbledrive.app', pc: 'https://pc-bryan.marbledrive.app', fly: 'https://admin-p2-b3fwm.sprites.app' } });
 
 // A LEASE binding whose objects answer a GET with the given lease (or fail).
 function fakeEnv({ lease = { home: 'mac', epoch: 1, since: 1 }, leaseFails = false, ...vars } = {}) {
@@ -145,6 +145,32 @@ test('the Mac out of reach: 503 with the way to move the drive to Fly', async ()
     assert.match(body, /at home on your Mac/);
     assert.match(body, /node tools\/drive-home\.mjs to fly/);
   }
+});
+
+test('a drive at home on the PC goes through the PC\'s tunnel, and its absence names the PC', async () => {
+  const ok = upstream();
+  const env = fakeEnv({ lease: { home: 'pc', epoch: 7, since: 1 } });
+  const res = await route(new Request('https://bryan.marbledrive.app/a/Notes?x=1', { headers: { cookie: 'marble=1' } }), env, { fetchImpl: ok.fetchImpl });
+  assert.equal(res.status, 200);
+  assert.equal(ok.calls[0].url, 'https://pc-bryan.marbledrive.app/a/Notes?x=1');
+  assert.equal(ok.calls[0].headers.get('cookie'), 'marble=1');
+  assert.equal(ok.calls[0].headers.get('authorization'), null);
+  forgetLeases();
+  const down = upstream(() => new Response('', { status: 530 }));
+  const gone = await route(new Request('https://bryan.marbledrive.app/'), env, { fetchImpl: down.fetchImpl });
+  assert.equal(gone.status, 503);
+  const body = await gone.text();
+  assert.match(body, /at home on your PC/);
+  assert.match(body, /On the PC: <code>node tools\/drive-home\.mjs to fly/);
+  assert.match(body, /rescue-to fly --from pc/);
+});
+
+test('a home the drive has no address for: 503, nothing fetched', async () => {
+  const up = upstream();
+  const env = fakeEnv({ lease: { home: 'pc', epoch: 1 }, DRIVES: JSON.stringify({ bryan: { mac: 'https://m.example', fly: 'https://f.example' } }) });
+  const res = await route(new Request('https://bryan.marbledrive.app/'), env, { fetchImpl: up.fetchImpl });
+  assert.equal(res.status, 503);
+  assert.equal(up.calls.length, 0);
 });
 
 test('Fly out of reach: 503, try again', async () => {
