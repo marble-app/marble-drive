@@ -678,7 +678,8 @@ run again.
 
 1. **Windows** (PowerShell as administrator): `wsl --install -d Ubuntu`,
    reboot, open Ubuntu and make your user.
-2. **Ubuntu:** `sudo apt install -y gh && gh auth login`, then
+2. **Ubuntu:** `sudo apt update && sudo apt install -y gh && gh auth login`
+   (a new Ubuntu has no package list until `apt update`), then
    `mkdir -p ~/Development/3rd-year-projects && cd $_ && gh repo clone
    marble-app/marble-drive && gh repo clone bdhmin/marble`.
 3. **Ubuntu:** `cd marble-drive && tools/pc-setup.sh`. The first run turns
