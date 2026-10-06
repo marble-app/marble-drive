@@ -35,6 +35,52 @@ test('a release that fails to stage leaves no folder under releases/', async () 
   assert.deepEqual(await fsp.readdir(path.join(home, 'app', 'releases')), []);
 });
 
+// The other way out: a command that fails under set -e (npm, Playwright's
+// install). The EXIT trap then runs after stage() has returned, where its
+// local `dir` is gone; on the sprites (2026-10-06) that was "dir: unbound
+// variable", and the half-built release stayed.
+test('a stage cut short by a failing command leaves no folder either', async () => {
+  const home = await fsp.mkdtemp(path.join(os.tmpdir(), 'sprite-release-'));
+  const bin = path.join(home, 'bin');
+  const src = path.join(home, 'src');
+  await fsp.mkdir(bin, { recursive: true });
+  await fsp.mkdir(src, { recursive: true });
+  await fsp.writeFile(path.join(bin, 'npm'), '#!/bin/sh\n[ "$1" = install ] && exit 1\nexit 0\n', { mode: 0o755 });
+  await fsp.writeFile(path.join(src, 'package.json'), '{}');
+  execFileSync('tar', ['czf', path.join(home, 'src.tgz'), '-C', src, '.']);
+
+  const run = spawnSync('bash', [SCRIPT, 'stage', 'cut-short', `tar:${path.join(home, 'src.tgz')}`, 'x', '9.9.9'], {
+    env: { ...process.env, HOME: home, PATH: `${bin}:${process.env.PATH}` },
+    encoding: 'utf8',
+  });
+  assert.notEqual(run.status, 0, 'the stage failed');
+  assert.doesNotMatch(run.stderr, /unbound variable/);
+  assert.deepEqual(await fsp.readdir(path.join(home, 'app', 'releases')), []);
+});
+
+// One stage at a time: a second deploy finds the first one's lock and stops
+// before it touches anything. (flock is Linux's; a Mac skips this.)
+const hasFlock = spawnSync('sh', ['-c', 'command -v flock']).status === 0;
+test('a second stage while one runs stops at once and names the first', { skip: !hasFlock && 'no flock' }, async () => {
+  const home = await fsp.mkdtemp(path.join(os.tmpdir(), 'sprite-release-'));
+  await fsp.mkdir(path.join(home, 'app', 'releases'), { recursive: true });
+  await fsp.writeFile(path.join(home, 'app', 'stage.lock.who'), 'r-first, pid 1, since then\n');
+  const { spawn } = await import('node:child_process');
+  const holder = spawn('flock', [path.join(home, 'app', 'stage.lock'), 'sleep', '10']);
+  await new Promise((r) => setTimeout(r, 300));
+  try {
+    const run = spawnSync('bash', [SCRIPT, 'stage', 'r-second', 'tar:/nonexistent.tgz', 'x', '9.9.9'], {
+      env: { ...process.env, HOME: home },
+      encoding: 'utf8',
+    });
+    assert.notEqual(run.status, 0);
+    assert.match(run.stderr, /another deploy is staging on this sprite \(r-first, pid 1/);
+    assert.deepEqual(await fsp.readdir(path.join(home, 'app', 'releases')), []);
+  } finally {
+    holder.kill();
+  }
+});
+
 // Each sprite's own settings (~/.config/marble-drive/sprite.env: a tester's
 // passphrase, which agent pays) and its saved API keys live outside every
 // release, so a deploy keeps them. Stubs stand in for the sprite: `sprite-env`

@@ -92,14 +92,34 @@ install_rclone() {
   rm -rf "$tmp"
 }
 
+# One stage at a time on a sprite. Two deploys at once (2026-10-06: the Mac and
+# the PC shipping the same commit) share the smoke test's port and npm's
+# cache, and both half-fail. The second stops at once, before touching
+# anything, and names the first. The lock is the open file itself, so it
+# lets go when the deploy's process ends, however it ends. (No flock, as on a
+# Mac running the tests: no lock.)
+lock_stage() {
+  command -v flock >/dev/null || return 0
+  mkdir -p "$APP"
+  exec 9>>"$APP/stage.lock"
+  if ! flock -n 9; then
+    die "another deploy is staging on this sprite ($(cat "$APP/stage.lock.who" 2>/dev/null || echo 'who is not recorded')); try again once it is done"
+  fi
+  printf '%s, pid %s, since %s\n' "$1" "$$" "$(date -u +%FT%TZ)" > "$APP/stage.lock.who"
+}
+
 stage() {
   local name=$1 source=$2 marble=$3 claude=$4 codex=${5:-}
   local dir="$RELEASES/$name"
+  lock_stage "$name"
   [[ -e "$dir" ]] && die "release $name already exists"
   mkdir -p "$dir/marble-drive"
   # Any way out of a failed stage — a failed command or a `die` — takes the
-  # half-built release with it, so a folder under releases/ always worked.
-  trap 'rm -rf "$dir"' EXIT
+  # half-built release with it, so a folder under releases/ always worked. The
+  # path goes into the trap now: under bash 5 a command failing under set -e
+  # runs the trap after stage() has returned and its local `dir` is gone
+  # ("dir: unbound variable", 2026-10-06). A release name never holds a quote.
+  trap "rm -rf '$dir'" EXIT
 
   say "fetching marble-drive ($source)"
   case "$source" in
@@ -151,8 +171,9 @@ stage() {
   local scratch
   scratch="$(mktemp -d)"
   # Without MARBLE_HUB_ENV: a throwaway drive must never take part in the hub.
+  # 9>&-: the smoke host must not hold the stage lock if it outlives us.
   env -u MARBLE_HUB_ENV MARBLE_DRIVE_ROOT="$scratch" PORT=4499 HOST=127.0.0.1 MARBLE_DRIVE_AGENTS=0 \
-    "$NODE" bin/marble-drive.js serve >"$scratch.log" 2>&1 &
+    "$NODE" bin/marble-drive.js serve >"$scratch.log" 2>&1 9>&- &
   local pid=$!
   if ! health 4499 30; then
     kill "$pid" 2>/dev/null || true
