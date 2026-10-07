@@ -128,6 +128,59 @@ export function cleanDrawing(raw) {
   return html;
 }
 
+// The fingernail: a side of a box inked 2 px or more thicker than the rest,
+// as a border or as an inset shadow standing in for one. The skill says
+// never, and Design Don'ts puts it first, but the drawer is a small model
+// that still reaches for it to mark a note, so it is taken off here too.
+const SIDE = /\bborder-(?:left|right|top|bottom|inline|block|inline-start|inline-end|block-start|block-end)(?:-width)?\s*:\s*([^;}"]*);?/gi;
+const WIDTHS = /\bborder-width\s*:\s*([^;}"]*);?/gi;
+const INSET = /\bbox-shadow\s*:\s*([^;}"]*);?/gi;
+
+const px = (token) => {
+  const m = /^(-?\d*\.?\d+)(px|rem|em)?$/.exec(token);
+  if (!m) return token === 'thick' ? 5 : token === 'medium' ? 3 : token === 'thin' ? 1 : null;
+  return Math.abs(Number(m[1])) * (m[2] === 'rem' || m[2] === 'em' ? 16 : 1);
+};
+const thick = (value) => value.trim().split(/\s+/).some((t) => (px(t) ?? 0) >= 2);
+const lopsided = (value) => {
+  const w = value.trim().split(/\s+/).map(px);
+  return w.length > 1 && !w.includes(null) && Math.max(...w) >= 2 && Math.min(...w) !== Math.max(...w);
+};
+// One layer of `inset X Y [blur …]` with one offset 2 px or more, the other 0,
+// and no blur: a stripe. A ring (`inset 0 0 0 1px`) is not.
+const stripe = (value) => value.split(/,(?![^(]*\))/).some((layer) => {
+  const t = layer.trim().split(/\s+/);
+  if (t[0] !== 'inset') return false;
+  const [x, y, blur] = t.slice(1, 4).map(px);
+  if (x == null || y == null) return false;
+  return ((x >= 2) !== (y >= 2)) && Math.min(x, y) === 0 && !blur;
+});
+
+function nails(css, cut) {
+  return css
+    .replace(SIDE, (all, value) => (thick(value) ? cut(all) : all))
+    .replace(WIDTHS, (all, value) => (lopsided(value) ? cut(all) : all))
+    .replace(INSET, (all, value) => (stripe(value) ? cut(all) : all));
+}
+
+/** Whether markup or words carry a fingernail anywhere. */
+export function hasFingernail(text) {
+  let found = false;
+  nails(String(text ?? ''), (all) => { found = true; return all; });
+  return found;
+}
+
+/** The drawing with every fingernail in its styles taken off. Words are left
+ *  alone; only `<style>` blocks and `style` attributes are read. */
+export function unfingernail(html) {
+  const cut = () => '';
+  const off = (all, open, css, close) => open + nails(css, cut) + close;
+  return String(html)
+    .replace(/(<style\b[^>]*>)([\s\S]*?)(<\/style>)/gi, off)
+    .replace(/(\sstyle\s*=\s*")([^"]*)(")/gi, off)
+    .replace(/(\sstyle\s*=\s*')([^']*)(')/gi, off);
+}
+
 const ran = (ms) => {
   const s = Math.max(0, Math.round(ms / 1000));
   return s < 60 ? `${s} s` : `${Math.floor(s / 60)} min ${s % 60} s`;
@@ -204,7 +257,9 @@ export function createDrawer({ draw, emit, skill = readSkill, pace = PACE, now =
       try {
         const system = await skill();
         const prompt = drawPrompt({ ask: s.turn.prompt, state, ran: ran(now() - s.started), lines: s.lines, skipped: s.skipped, last: s.html });
-        const html = await draw({ system, prompt });
+        const drawn = await draw({ system, prompt });
+        // Unless the work is a side border itself, drawn on its silhouette.
+        const html = drawn && (hasFingernail(`${s.turn.prompt}\n${s.lines.join('\n')}`) ? drawn : unfingernail(drawn));
         // A running draw that comes back after the turn ended is stale; the
         // final one is on its way.
         if (!html || (s.ended && !final) || html === s.html) return;

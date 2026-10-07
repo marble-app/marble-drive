@@ -2,7 +2,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 
-import { cleanDrawing, createDrawer, drawPrompt, readSkill, SKILL_PATH, stepLine } from '../server/agent/drawer.js';
+import { cleanDrawing, createDrawer, drawPrompt, hasFingernail, readSkill, SKILL_PATH, stepLine, unfingernail } from '../server/agent/drawer.js';
 
 const tick = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 const PACE = { firstMs: 10, gapMs: 60, momentMs: 20, concurrent: 2 };
@@ -26,6 +26,53 @@ test('an answer is cut to its markup', () => {
   assert.equal(cleanDrawing('<html><body><div>x</div><script>d.append(1)</script></body></html> ok'), '<div>x</div><script>d.append(1)</script>');
   assert.equal(cleanDrawing('I cannot draw that.'), null);
   assert.equal(cleanDrawing(''), null);
+});
+
+test('a fingernail is taken off a drawing, and a ring, a hairline or a limit line are not', () => {
+  // The note the drawer made at the end of a deploy, on 7 October.
+  const note = '<style>.pw-note { padding: 8px; border-radius: 6px; background: var(--paper-2); border-left: 3px solid var(--caution); font-size: 12px; }</style><div class="pw-note">Reload t-bryan to see it.</div>';
+  assert.equal(unfingernail(note), '<style>.pw-note { padding: 8px; border-radius: 6px; background: var(--paper-2);  font-size: 12px; }</style><div class="pw-note">Reload t-bryan to see it.</div>');
+  for (const nail of [
+    'border-top: 4px solid var(--accent)',
+    'border-inline-start: 0.25rem solid red',
+    'border-left-width: thick',
+    'border-width: 0 0 0 3px',
+    'box-shadow: inset 3px 0 0 var(--accent)',
+    'box-shadow: 0 1px 2px #0001, inset 0 2px 0 var(--accent)',
+  ]) {
+    assert.ok(hasFingernail(nail), nail);
+    assert.equal(unfingernail(`<div style="${nail}">x</div>`), '<div style="">x</div>', nail);
+  }
+  for (const fine of [
+    'border-left: 1px dashed var(--danger)',
+    'border: 3px solid var(--line)',
+    'border-width: 2px',
+    'box-shadow: inset 0 0 0 1px var(--accent-ink)',
+    'box-shadow: inset 0 0 0 1.5px var(--danger)',
+  ]) {
+    assert.ok(!hasFingernail(fine), fine);
+    assert.equal(unfingernail(`<style>.a { ${fine}; }</style>`), `<style>.a { ${fine}; }</style>`, fine);
+  }
+  // Words about a border are words, not style.
+  assert.equal(unfingernail('<p>Set border-left: 4px on the card</p>'), '<p>Set border-left: 4px on the card</p>');
+});
+
+test('a fingernail is kept only when the work is one, and the skill draws a note without it', async () => {
+  const sent = [];
+  const nailed = '<style>.pw-n { border-left: 3px solid var(--caution); }</style><div class="pw-n">Note</div>';
+  const run = async (prompt, step) => {
+    const drawer = createDrawer({ draw: async () => nailed, emit: async (t, e) => sent.push(e.html), skill: async () => 'draw', pace: PACE, log: { error() {} } });
+    const turn = { id: `t${sent.length}`, prompt };
+    drawer.note(turn, { type: 'tool.call', name: 'Edit', input: { file_path: 'card.css', new_string: step } });
+    await drawer.end(turn, 'completed');
+  };
+  await run('Deploy to t-bryan', 'padding: 8px');
+  await run('Give the card a left accent', '.card { border-left: 4px solid #2f6f4f; }');
+  assert.doesNotMatch(sent[0], /border-left/);
+  assert.match(sent[1], /border-left: 3px/);
+  const skill = await readSkill();
+  assert.match(skill, /\.pw-note \{/);
+  assert.ok(!hasFingernail(skill), 'the skill teaches no fingernail by example');
 });
 
 test('the prompt carries the ask, the state, the steps and the last drawing', () => {

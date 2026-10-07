@@ -161,6 +161,10 @@ Copy the parts you use into your `<style>`; change sizes, never the meanings.
 .pw-n { font-size: 1.8rem; font-weight: 500; font-variant-numeric: tabular-nums; line-height: 1; }
 .pw-red del { color: var(--danger); }
 .pw-red ins { text-decoration: none; padding: 0 2px; border-radius: 3px; background: var(--accent-soft); }
+
+/* a note: the one thing that needs a look, set apart by its fill and a dot, never a stripe */
+.pw-note { display: flex; gap: 8px; align-items: baseline; padding: 8px 10px; border-radius: 8px; background: var(--paper-2); font-size: 12px; color: var(--ink); }
+.pw-note::before { content: ""; flex: none; width: 7px; height: 7px; border-radius: 50%; background: var(--caution); }
 ```
 
 ## How to draw it
@@ -214,7 +218,13 @@ smaller, their names can't.
 - A list of items as text: `<ul>`, `<ol>`, `<li>`, bullets, or a run of
   one-sentence paragraphs. Draw the items.
 - A widget that is only words.
-- A thick coloured border down one side or across the top of anything.
+- A fingernail: one side of anything inked heavier than the rest, in any
+  colour. That is `border-left`, `-right`, `-top`, `-bottom` or
+  `border-inline-start` at 2 px or more (3 px counts), a lopsided
+  `border-width`, or an `inset` box-shadow that does the same. It is the
+  first thing Design Don'ts refuses, and the host strips it from what you
+  answer, so a note drawn that way arrives as a bare grey box. For a note
+  that needs a look, use `.pw-note`: fill and a dot.
 - A gradient, a glow, a drop shadow (unless a shadow is the very style being
   changed, drawn on its silhouette).
 - Emoji, icons made of characters other than → and ↓, or more than one
