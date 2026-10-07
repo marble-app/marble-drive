@@ -38,9 +38,15 @@
   // However wide the two panels are pulled, the document keeps this much.
   const PAGE_MIN = 360;
   // A side on hover stays out of the way until the pointer reaches for it:
-  // this close to the window's edge, and this long after it leaves.
+  // this close to the window's edge. It goes when the pointer is this far
+  // past its card, this long after: enough to forgive a hand that wobbles
+  // over the line, short enough that leaving reads as leaving.
   const EDGE = 10;
-  const LINGER = 320;
+  const REACH = 8;
+  const LINGER = 90;
+  // A side leaves faster than it arrives: arriving, the eye follows it in;
+  // leaving, it only has to be out of the way.
+  const AWAY = 200;
   const GAP = 8;
   const PHONE = '(max-width: 719px)';
   const KEY = 'marble-shell:';
@@ -398,7 +404,8 @@
     /* ── On hover, at rest: the side waits at its edge ──
        Each is a hand's reach away — the pointer at that edge brings it out —
        and a thin mark on the edge says that something is there. */
-    :host([data-hide-nav]) .nav { transform: translateX(calc(-100% - 24px)); opacity: 0; pointer-events: none; visibility: hidden; --hide-after: ${MOTION}ms; }
+    :host([data-hide-nav]) .nav { transform: translateX(calc(-100% - 24px)); opacity: 0; pointer-events: none; visibility: hidden; --hide-after: ${AWAY}ms;
+      transition-duration: ${AWAY}ms, ${Math.round(AWAY * 0.7)}ms, ${AWAY}ms, ${AWAY}ms, ${AWAY}ms, ${AWAY}ms, ${AWAY}ms, ${AWAY}ms, ${AWAY}ms, 0s; }
     .hint { position: fixed; top: calc(${BAR}px + (100vh - ${BAR}px) / 2); width: 4px; height: 44px; margin-top: -22px; border-radius: 2px;
       background: color-mix(in srgb, var(--ink) 22%, transparent); opacity: 0; pointer-events: none; transition: opacity 200ms var(--settle); }
     .hint[data-side="nav"] { left: 3px; }
@@ -864,6 +871,10 @@
       this.fine = matchMedia('(hover: hover) and (pointer: fine)');
       this.shown = { nav: false, chat: false };
       this.quiet = { nav: false, chat: false };
+      // A side the keyboard is using: brought out on purpose, or typed in.
+      // Focus alone does not hold a side — a click inside leaves focus there,
+      // and a hand that clicked and moved on has moved on.
+      this.keyed = { nav: false, chat: false };
       this.intro = false;
       this.pointer = null;
       this.hideTimers = {};
@@ -1129,6 +1140,8 @@
       removeEventListener('focusin', this.onFocus, true);
       removeEventListener('focusout', this.onFocus, true);
       for (const type of ['pointerdown', 'wheel', 'keydown']) removeEventListener(type, this.onWork, true);
+      removeEventListener('keydown', this.onKeyed, true);
+      removeEventListener('pointerdown', this.onPress, true);
       this.fine.removeEventListener('change', this.onFine);
       this.offDrive?.();
       if (this.onHide) removeEventListener('pagehide', this.onHide);
@@ -1204,6 +1217,7 @@
     reveal(side, { focus = false } = {}) {
       if (!this.hovers(side)) return;
       this.quiet[side] = false;
+      this.keyed[side] = true;
       if (this.shown[side] && !(focus && side === 'chat')) return;
       clearTimeout(this.hideTimers[side]);
       this.shown[side] = true;
@@ -1216,6 +1230,7 @@
     conceal(side) {
       if (!this.hovers(side)) return;
       this.quiet[side] = true;
+      this.keyed[side] = false;
       const drawer = this.drawer;
       if (side === 'chat' && document.activeElement === drawer) {
         let focused = drawer;
@@ -1243,18 +1258,21 @@
       const focused = side === 'nav'
         ? this.nav.contains(this.shadowRoot.activeElement)
         : document.activeElement === this.drawer;
-      if (focused) return true;
+      if (focused && this.keyed[side]) return true;
       if (side === 'nav' ? this.hasAttribute('data-resizing') : this.rectOf('chat') && this.drawer.shadowRoot.querySelector('.panel')?.dataset.resizing === 'true') return true;
       const p = this.pointer;
       if (!p) return false;
-      const atEdge = p.y > BAR && (side === 'nav' ? p.x <= EDGE : p.x >= innerWidth - EDGE);
+      // The chat's edge stops short of the launcher in the corner: a hand
+      // aiming at that button, and running a little past it, is not asking
+      // for the panel.
+      const atEdge = p.y > BAR && (side === 'nav' ? p.x <= EDGE : p.x >= innerWidth - EDGE && p.y < this.launcherTop());
       // The side's own button in the bar is a reach for it too.
       const b = this.$(`[data-act="${side}"]`).getBoundingClientRect();
       const onButton = b.width > 0 && p.x >= b.left && p.x <= b.right && p.y >= b.top && p.y <= b.bottom;
       let over = false;
       if (this.shown[side]) {
         const r = this.rectOf(side);
-        over = Boolean(r && r.width && p.x >= r.left - 16 && p.x <= r.right + 16 && p.y >= r.top - 16 && p.y <= r.bottom + 16);
+        over = Boolean(r && r.width && p.x >= r.left - REACH && p.x <= r.right + REACH && p.y >= r.top - REACH && p.y <= r.bottom + REACH);
       }
       const reaching = atEdge || onButton || over;
       // Put away on purpose: the same hand has to leave before it can call
@@ -1264,6 +1282,13 @@
         return false;
       }
       return reaching;
+    }
+
+    /** Where the chat's edge ends above the drawer's launcher, with room
+     *  for a hand that overshoots it. */
+    launcherTop() {
+      const r = this.drawer?.shadowRoot?.querySelector('.launcher')?.getBoundingClientRect();
+      return r && r.height ? r.top - 16 : Infinity;
     }
 
     /** Out at once when wanted; away a beat after it stops being wanted, so
@@ -1299,7 +1324,22 @@
         this.pointer = null;
         this.settle();
       };
-      this.onFocus = () => setTimeout(() => this.settle(), 0);
+      this.onFocus = () => setTimeout(() => {
+        // Focus that has left a side takes the keyboard's hold with it.
+        if (!this.nav.contains(this.shadowRoot.activeElement)) this.keyed.nav = false;
+        if (document.activeElement !== this.drawer) this.keyed.chat = false;
+        this.settle();
+      }, 0);
+      // Keys in a side hold it; a press in it hands it back to the pointer.
+      const sideOf = (path) => (path.includes(this.nav) ? 'nav' : this.drawer && path.includes(this.drawer) ? 'chat' : null);
+      this.onKeyed = (event) => {
+        const side = sideOf(event.composedPath());
+        if (side) this.keyed[side] = true;
+      };
+      this.onPress = (event) => {
+        const side = sideOf(event.composedPath());
+        if (side) this.keyed[side] = false;
+      };
       // Doing something on the page — a press, a scroll, a key — is being
       // back at work, and the introduction is over.
       this.onWork = (event) => {
@@ -1314,6 +1354,8 @@
       addEventListener('focusin', this.onFocus, true);
       addEventListener('focusout', this.onFocus, true);
       for (const type of ['pointerdown', 'wheel', 'keydown']) addEventListener(type, this.onWork, { capture: true, passive: true });
+      addEventListener('keydown', this.onKeyed, { capture: true, passive: true });
+      addEventListener('pointerdown', this.onPress, { capture: true, passive: true });
       this.onFine = () => this.apply({ animate: false });
       this.fine.addEventListener('change', this.onFine);
     }

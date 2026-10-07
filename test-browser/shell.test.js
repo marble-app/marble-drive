@@ -436,3 +436,70 @@ test('the side\'s own button in the bar reaches for it too, once the hand that u
   await page.mouse.move(640, 420, { steps: 4 });
   await page.waitForFunction(() => document.querySelector('marble-shell').hasAttribute('data-hide-nav'));
 });
+
+test('on hover a side goes as soon as the hand leaves it, and a click in it does not hold it there', async () => {
+  const { page } = await visit();
+  await page.keyboard.press('Control+\\');
+  await margins(page);
+  await unpin(page.locator('marble-shell'), 'nav', 'chat');
+  await page.mouse.click(640, 420);
+  await page.waitForFunction(() => document.querySelector('marble-shell').hasAttribute('data-hide-nav'));
+
+  await page.mouse.move(3, 420);
+  await page.waitForFunction(() => !document.querySelector('marble-shell').hasAttribute('data-hide-nav'));
+  await page.mouse.move(640, 420, { steps: 4 });
+  await page.waitForTimeout(250);
+  assert.equal(await navOut(page), false, 'the tree is on its way within a quarter second');
+
+  await page.mouse.move(1277, 420);
+  await page.waitForFunction(() => document.querySelector('marble-agent-drawer').isOpen);
+  const panel = page.locator('marble-agent-drawer').locator('.panel');
+  const r = await panel.boundingBox();
+  await page.mouse.click(r.x + r.width / 2, r.y + 80);
+  await page.mouse.move(640, 420, { steps: 4 });
+  await page.waitForTimeout(250);
+  assert.equal(await chatOut(page), false, 'a click, then leaving, is leaving');
+});
+
+test('on hover the launcher is gone while the chat is out, and comes back without raising anything under a still hand', async () => {
+  const { page } = await visit();
+  await page.keyboard.press('Control+\\');
+  await margins(page);
+  await unpin(page.locator('marble-shell'), 'nav', 'chat');
+  await page.mouse.click(640, 420);
+  await page.waitForFunction(() => !document.querySelector('marble-agent-drawer').isOpen);
+  const tray = page.locator('marble-agent-drawer').locator('.tray');
+  const back = () => page.waitForFunction(() => document.querySelector('marble-agent-drawer').shadowRoot.querySelector('.tray').dataset.away === 'false');
+  await back();
+  // Unpinned, it slides from the page's corner beside the column to the window's.
+  await page.waitForFunction(() => document.querySelector('marble-agent-drawer').shadowRoot.querySelector('.launcher').getBoundingClientRect().right === innerWidth - 20);
+  const b = await page.locator('marble-agent-drawer').locator('.launcher').boundingBox();
+
+  await page.mouse.move(1277, 420);
+  await page.waitForFunction(() => document.querySelector('marble-agent-drawer').isOpen);
+  assert.equal(await tray.evaluate((el) => el.dataset.away), 'true', 'nothing beside the card to reach for');
+
+  // Over the card where the launcher waits, put the chat away (its close
+  // button, a key): the launcher comes back under the hand, and the hand
+  // resting there raises nothing.
+  await page.mouse.move(b.x + b.width / 2, b.y + b.height / 2, { steps: 6 });
+  await page.evaluate(() => document.querySelector('marble-agent-drawer').close());
+  await page.waitForFunction(() => !document.querySelector('marble-agent-drawer').isOpen);
+  await back();
+  await page.mouse.move(b.x + b.width / 2 + 2, b.y + b.height / 2);
+  await page.waitForTimeout(300);
+  assert.equal(await tray.evaluate((el) => el.dataset.open), 'false', 'a launcher that came back under the pointer waits');
+  assert.equal(await chatOut(page), false);
+
+  // Leave it and come back, and it is a launcher again.
+  await page.mouse.move(640, 420, { steps: 3 });
+  await page.mouse.move(b.x + b.width / 2, b.y + b.height / 2, { steps: 3 });
+  await page.waitForFunction(() => document.querySelector('marble-agent-drawer').shadowRoot.querySelector('.tray').dataset.open === 'true');
+
+  // Running past it into the edge beside it is not a reach for the panel.
+  await page.mouse.move(1279, b.y + b.height / 2, { steps: 3 });
+  await page.waitForTimeout(250);
+  assert.equal(await chatOut(page), false, 'the edge beside the launcher is the launcher\'s');
+  await page.mouse.move(1279, 300);
+  await page.waitForFunction(() => document.querySelector('marble-agent-drawer').isOpen);
+});

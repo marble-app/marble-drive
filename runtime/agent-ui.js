@@ -9152,6 +9152,8 @@
   const WIDTH_OVERLAY_KEY = 'marble-agent:width';
   const WIDTH_PINNED_KEY = 'marble-agent:width-pinned';
   const TOOLS = new Set(['button', 'select', 'textarea', 'input', 'a']);
+  // How long a pointer rests on the launcher before its menu rises.
+  const TRAY_REST = 90;
 
   const DRAWER_CSS = `
     /* The host is an anchor for two fixed children, not a surface: left
@@ -9576,6 +9578,7 @@
       removeEventListener('marble-tray:unregister', this.onTrayRemove);
       removeEventListener('marble:agent-context', this.onContext);
       clearTimeout(this.trayTimer);
+      if (this.onCalm) removeEventListener('pointermove', this.onCalm, true);
       this.phone.removeEventListener('change', this.onViewport);
       removeEventListener('resize', this.onWindowResize);
       this.offSummaries?.();
@@ -9654,8 +9657,10 @@
       this.isOpen = want;
       if (!want) this.hideMenus();
       // The shell's panels and the page ease over 340ms; this spring is tuned
-      // to land with them rather than a beat behind.
-      this.animateTo(want ? 1 : 0, { animate: !first, response: 0.25 });
+      // to land with them rather than a beat behind. A card on hover leaves
+      // faster than it came, as the tree does: the hand has already gone.
+      const away = !want && this.shell?.mode === 'float';
+      this.animateTo(want ? 1 : 0, { animate: !first, response: away ? 0.16 : 0.25 });
       if (want && !first) {
         // The caret goes in when the chat was asked for — the shell opening,
         // its button, a conversation opened — and never because a pointer
@@ -9728,10 +9733,15 @@
       const docked = this.isOpen && !phone && (shell ? shell.mode === 'fit' : this.pinned);
       this.dock(docked, this.isOpen && !phone && !docked ? this.width + gap : 0);
       // Pinned, the page is still there to act on and the tray goes with it.
-      // Overlaying, the panel is the whole of what you are looking at — unless
-      // it is the shell's card, which leaves the page beside it.
-      this.tray.dataset.away = String(this.isOpen && !docked && !shell);
-      const inset = docked ? this.width : shell && this.isOpen ? this.width + gap : 0;
+      // Over the page — the overlay, or the shell's card on hover — the panel
+      // is where the chat is, and the launcher goes until it has gone: a
+      // button beside the card is somewhere a hand on the card heads for, and
+      // leaving the card for it puts the card away. It comes back in the
+      // corner, never sliding there from beside the card.
+      const away = !docked && (this.isOpen || (!phone && p > 0.05));
+      if (this.tray.dataset.away === 'true' && !away) this.calmTray();
+      this.tray.dataset.away = String(away);
+      const inset = docked ? this.width : 0;
       this.tray.style.setProperty('--tray-inset', `${inset}px`);
       if (this.isOpen) this.setTray(false);
     }
@@ -9856,12 +9866,22 @@
 
       const leave = () => {
         clearTimeout(this.trayTimer);
+        this.trayCalm = false;
         this.trayTimer = setTimeout(() => this.setTray(false), 180);
       };
       // The gaps between the buttons do not take a pointer — the page under
       // them is still the page — so crossing one leaves the tray for a frame.
       // The delay is what makes the column one surface to the hand.
-      this.tray.addEventListener('pointerenter', () => this.setTray(true));
+      // Opening asks for a moment's rest on it, so a pointer on its way to the
+      // edge or the page's corner passes over the launcher and raises nothing;
+      // a launcher that has just come back under a still pointer waits until
+      // that pointer has left it once.
+      this.tray.addEventListener('pointerenter', () => {
+        if (this.trayCalm) return;
+        if (this.trayOpen) { this.setTray(true); return; }
+        clearTimeout(this.trayTimer);
+        this.trayTimer = setTimeout(() => this.setTray(true), TRAY_REST);
+      });
       this.tray.addEventListener('pointerleave', leave);
       // Keys open it; the focus a closing panel hands back to the launcher
       // does not, or putting the chat away would hang the menu up.
@@ -9928,6 +9948,19 @@
       const order = wanted.map((spec) => this.toolEls.get(spec.id));
       if (order.some((el, i) => this.tools.children[i] !== el)) this.tools.replaceChildren(...order);
       for (const el of this.toolEls.values()) el.tabIndex = this.trayOpen ? 0 : -1;
+    }
+
+    /** The launcher is back where a pointer may already be resting. Until
+     *  that pointer moves somewhere else, hovering it is not a request. */
+    calmTray() {
+      this.trayCalm = true;
+      removeEventListener('pointermove', this.onCalm, true);
+      this.onCalm = (event) => {
+        if (event.composedPath().includes(this.tray)) return;
+        this.trayCalm = false;
+        removeEventListener('pointermove', this.onCalm, true);
+      };
+      addEventListener('pointermove', this.onCalm, { capture: true, passive: true });
     }
 
     setTray(open) {
