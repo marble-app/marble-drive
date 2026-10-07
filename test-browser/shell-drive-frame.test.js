@@ -1,7 +1,7 @@
 // The shell is the Drive's frame. On a desk the Drive page draws no top bar or
 // sidebar of its own: the shell stays open around it, and what those bars held
-// is in the shell on every page — New at the head of the tree, Trash at its
-// foot, and Settings and This drive at the end of the bar. On a phone, where
+// is in the shell on every page — New and Share in the bar, Trash at the
+// tree's foot, and Settings and This drive at the end of the bar. On a phone, where
 // there is no shell, the Drive keeps its own bars.
 import assert from 'node:assert/strict';
 import test from 'node:test';
@@ -65,10 +65,10 @@ test('elsewhere the shell is closed until asked, as before, and the page keeps i
   await page.context().close();
 });
 
-test('New heads the tree on any page: a focused box, the three apps, the templates', async () => {
+test('New is in the bar on any page: a focused box, the three apps, the templates', async () => {
   const { page, shell, errors } = await visit('garden');
   await page.keyboard.press('Control+\\');
-  await shell.locator('.nav .new').click();
+  await shell.locator('.bar .new').click();
   const pop = shell.locator('.making');
   await pop.waitFor({ state: 'visible' });
   assert.equal(await shell.evaluate((el) => el.shadowRoot.activeElement?.getAttribute('aria-label')), 'Describe an app to build');
@@ -82,7 +82,7 @@ test('New heads the tree on any page: a focused box, the three apps, the templat
   // Escape puts it away, and a half-typed sentence is still there after.
   await page.keyboard.press('Escape');
   await pop.waitFor({ state: 'hidden' });
-  await shell.locator('.nav .new').click();
+  await shell.locator('.bar .new').click();
   assert.equal(await pop.locator('.ask textarea').inputValue(), 'a habit tracker');
   // Enter sends to the app used last, in the address.
   await page.keyboard.press('Enter');
@@ -95,7 +95,7 @@ test('New heads the tree on any page: a focused box, the three apps, the templat
 test('a template from New is named, made in the folder you are in, and opened', async () => {
   const { page, shell } = await visit('Research/notes');
   await page.keyboard.press('Control+\\');
-  await shell.locator('.nav .new').click();
+  await shell.locator('.bar .new').click();
   const pop = shell.locator('.making');
   await pop.locator('.tpl[data-id="doc"]').click();
   await pop.locator('.brief').waitFor({ state: 'visible' });

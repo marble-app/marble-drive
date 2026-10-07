@@ -601,12 +601,13 @@
     .publishing .last { margin-top: 9px; padding-top: 9px; border-top: 1px solid var(--line); color: var(--faint); font-size: 12px; }
     @media (prefers-reduced-motion: reduce) { .publishing .publish:active:not(:disabled) { transform: none; } }
     /* ── New, Settings and This drive: what the Drive's own bars held ──
-       New heads the tree because it is the one thing you start from, and it
-       is a card rather than Share's ink so the bar keeps one loud button. */
+       New sits in the bar beside Share, so it is there with the tree put
+       away; it is a card rather than Share's ink so the bar keeps one loud
+       button. */
     .head { display: flex; align-items: center; gap: 6px; margin: 10px 10px 6px; }
     .head .search { margin: 0; flex: 1; min-width: 0; }
-    .new { height: 32px; padding: 0 12px 0 9px; border-radius: 8px; display: flex; align-items: center; gap: 6px; flex: none;
-      background: var(--card); color: var(--ink); border: 1px solid var(--line); box-shadow: var(--shadow-rest); font-weight: 500;
+    .new { height: 28px; padding: 0 12px 0 9px; border-radius: 8px; display: flex; align-items: center; gap: 6px; flex: none;
+      background: var(--card); color: var(--ink); border: 1px solid var(--line); box-shadow: var(--shadow-rest); font-weight: 500; font-size: 12.5px;
       transition: background-color 110ms var(--settle); }
     .new:hover, .new[aria-expanded="true"] { background: var(--paper-2); }
     .new:active { background: var(--paper-3); }
@@ -754,6 +755,7 @@
           <nav class="crumbs" aria-label="Where you are"></nav>
           <span class="spacer"></span>
           <button type="button" class="ib" data-act="describe" aria-pressed="false" aria-label="Describe a change (⌘⇧D)" title="Describe a change (⌘⇧D)" hidden>${icon('describe')}</button>
+          <button type="button" class="new" aria-haspopup="dialog" aria-expanded="false">${icon('plus')}New</button>
           <button type="button" class="share git" data-act="publish" aria-haspopup="dialog" aria-expanded="false" title="Publish this folder to GitHub" hidden>${github('')}<span>Publish</span></button>
           <button type="button" class="share" data-act="share" aria-haspopup="dialog" aria-expanded="false">${icon('share')}Share</button>
           <button type="button" class="ib" data-act="settings" aria-haspopup="dialog" aria-expanded="false" aria-label="Settings" title="Settings">${icon('gear')}</button>
@@ -765,7 +767,6 @@
         <nav class="nav" aria-label="Drive tree">
           <button type="button" class="edge" role="separator" aria-orientation="vertical" aria-label="Resize the tree" title="Drag to resize · double-click to reset"></button>
           <div class="head">
-            <button type="button" class="new" aria-haspopup="dialog" aria-expanded="false">${icon('plus')}New</button>
             <label class="search">${icon('search')}<input type="search" placeholder="Search" aria-label="Search the drive" autocomplete="off" spellcheck="false"><kbd>⌘K</kbd></label>
           </div>
           <div class="scroll"></div>
@@ -864,7 +865,7 @@
       this.making = this.$('.making');
       this.settingsPop = this.$('.settings');
       this.mePop = this.$('.mepop');
-      this.newButton = this.$('.nav .new');
+      this.newButton = this.$('.bar .new');
       this.phone = matchMedia(PHONE);
       // A pointer that can hover is what reaching for a side is for; on a
       // touch screen every side simply stays pinned.
@@ -1949,13 +1950,12 @@
       this.hidePops();
       if (!opening) return;
       if (!this.isOpen) this.set({ open: true });
-      this.reveal('nav');
       this.making.dataset.step = 'start';
       this.making.hidden = false;
       this.newButton.setAttribute('aria-expanded', 'true');
       this.pickApp(this.chosenApp());
       this.drawTemplates();
-      this.place(this.making, this.newButton, 'left');
+      this.place(this.making, this.newButton, 'right');
       this.making.style.maxHeight = `${Math.max(200, innerHeight - this.newButton.getBoundingClientRect().bottom - 14)}px`;
       // Open to type: the first key after New is the first word.
       this.making.querySelector('.ask textarea').focus({ preventScroll: true });
