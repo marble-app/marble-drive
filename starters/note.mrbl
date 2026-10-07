@@ -584,8 +584,8 @@ __ICON__
   /* ------------------------------------------------------------- the count
 
      How long the open note is, in the corner. The first line is the note's
-     name and a quote is somebody else's words, so neither is counted: what is
-     counted is what you wrote. A name that says "200 words" is a limit, and
+     name, a quote is somebody else's words and the stamp is the clock's, so
+     none of them is counted: what is counted is what you wrote. A name that says "200 words" is a limit, and
      the count turns when the note goes past it. A selection is counted on its
      own. It is a reading of the page, so it is transient and never filed. */
   .wc {
@@ -3982,7 +3982,7 @@ __ICON__
       if (!note || note.hasAttribute('data-view')) { wc.textContent = ''; return; }
       const [name, ...rest] = [...note.children];
       const limit = Number((name?.textContent.match(/(\d[\d,]*)\s*words?\b/i)?.[1] ?? '').replace(/,/g, '')) || 0;
-      const n = rest.filter((b) => b.tagName !== 'BLOCKQUOTE').reduce((t, b) => t + words(b.textContent), 0);
+      const n = rest.filter((b) => b.tagName !== 'BLOCKQUOTE' && !b.classList.contains('stamp')).reduce((t, b) => t + words(b.textContent), 0);
       const sel = getSelection();
       const picked = sel && !sel.isCollapsed && note.contains(sel.anchorNode) ? words(sel.toString()) : 0;
       wc.textContent = picked
@@ -4038,6 +4038,160 @@ __SCRIPT__
     .sheet .notes > .note, .sheet > .tools { transition: none; }
   }
 </style>
+  <style data-marble-id="__ID__">
+  /* ------------------------------------------------------------ a stamp
+
+     When a note was made and when it last changed, one quiet line under its
+     title. It is an island like the table: the note types around it, and the
+     note's script moves Updated to the minute of each edit. */
+  .note > .stamp {
+    display: flex; flex-wrap: wrap; align-items: center; gap: .15rem .6rem;
+    white-space: normal; font: 12.5px/1.5 var(--ui); color: var(--faint);
+    font-variant-numeric: tabular-nums;
+  }
+  .note > * + .stamp { margin-top: .3rem; }
+  .note > .stamp + * { margin-top: .85em; }
+  .stamp time { color: var(--muted); }
+</style>
+  <script data-marble-id="__ID__">
+  // The stamp in a note. An island in the note's text, like the table and the
+  // diagram: its words are typed over on their own (data-marble-editable files
+  // them) and the note is told after each edit, so it takes the stamp's new
+  // source as written down.
+  //
+  // Updated keeps itself: any change inside a note (typing, a command, a
+  // table cell, an undo, an agent's edit) moves it to that minute. The new
+  // time is handed to the note as an embed's own change, so it is filed
+  // without becoming a step of undo. A note made on this page gets its stamp
+  // under its title once it has a title and a line under it, Created at its
+  // first change. A note made before the stamp, or anywhere it was not
+  // watching, is left without one: nothing here saw it made.
+  (() => {
+    const ROOT = '.stamp[data-embed]';
+    const ID = 'data-marble-id';
+    const QUIET = /^(class|style|contenteditable|spellcheck|tabindex|draggable|aria-|data-marble-)/;
+    const pad = (n) => String(n).padStart(2, '0');
+    const when = (d) => {
+      const off = -d.getTimezoneOffset();
+      const iso =
+        d.getFullYear() + '-' + pad(d.getMonth() + 1) + '-' + pad(d.getDate()) +
+        'T' + pad(d.getHours()) + ':' + pad(d.getMinutes()) +
+        (off < 0 ? '-' : '+') + pad(Math.floor(Math.abs(off) / 60)) + ':' + pad(Math.abs(off) % 60);
+      const text = d
+        .toLocaleString('en-US', { month: 'short', day: 'numeric', year: 'numeric', hour: 'numeric', minute: '2-digit' })
+        .replace(/\s/g, ' ');
+      return { iso, text };
+    };
+
+    const begin = (marble) => {
+      marble.pageOnly('contenteditable');
+      const wire = (scope) => {
+        const root = scope && scope.querySelectorAll ? scope : document;
+        const found = [...(root.matches?.(ROOT) ? [root] : []), ...root.querySelectorAll(ROOT)];
+        for (const el of found) {
+          if (el.getAttribute('contenteditable') !== 'false') el.setAttribute('contenteditable', 'false');
+          if (el.classList.contains('marble-stamp')) continue;
+          el.classList.add('marble-stamp');
+          el.addEventListener('input', () => {
+            const detail = { handled: false, run() {} };
+            el.dispatchEvent(new CustomEvent('marble-embed', { bubbles: true, detail }));
+          });
+        }
+      };
+      wire(document);
+      marble.register(wire);
+
+      // Page and file, told to the note as the stamp's own change.
+      const tell = (el, ops, applied) => {
+        const run = () => {
+          if (!applied) for (const op of ops) marble.apply(op);
+          for (const op of ops) marble.op(op);
+        };
+        const detail = { handled: false, run };
+        el.dispatchEvent(new CustomEvent('marble-embed', { bubbles: true, detail }));
+        if (!detail.handled) run();
+      };
+
+      const first = new Map();
+      const born = new WeakSet();
+      const span = (word, editable, at) =>
+        '<span ' + ID + '="' + marble.newId() + '">' + word + ' <time ' + ID + '="' + marble.newId() + '"' +
+        (editable ? ' data-marble-editable' : '') + ' datetime="' + at.iso + '">' + at.text + '</time></span>';
+      function touch(note) {
+        const now = when(new Date());
+        const stamp = note.querySelector(':scope > ' + ROOT);
+        if (!stamp) {
+          if (!born.has(note)) return;
+          const title = note.firstElementChild;
+          if (!title || !title.nextElementSibling || !marble.text(title).trim()) return;
+          const html =
+            '<div ' + ID + '="' + marble.newId() + '" class="stamp" data-embed>' +
+            span('Created', true, when(first.get(note) ?? new Date())) + span('Updated', false, now) + '</div>';
+          const op = { type: 'insert', html, parentId: marble.id(note), beforeId: marble.id(title.nextElementSibling) };
+          marble.apply(op);
+          const el = note.querySelector(':scope > ' + ROOT);
+          if (el) { wire(el); tell(el, [op], true); }
+          return;
+        }
+        const time = stamp.querySelector(':scope > span:last-of-type > time');
+        if (!time || (time.getAttribute('datetime') === now.iso && time.textContent === now.text)) return;
+        const id = marble.id(time);
+        tell(stamp, [
+          { type: 'setAttr', id, name: 'datetime', value: now.iso },
+          { type: 'setInner', id, html: now.text },
+        ]);
+      }
+
+      // What counts as a change: words, lines and the attributes a line keeps
+      // (a ticked box, a list, a link) — not the page's own marks, and never
+      // the stamp itself.
+      const inStamp = (node) =>
+        Boolean((node?.nodeType === Node.ELEMENT_NODE ? node : node?.parentElement)?.closest?.(ROOT));
+      const counts = (m) => {
+        if (inStamp(m.target)) return false;
+        if (m.type === 'attributes') return !QUIET.test(m.attributeName);
+        if (m.type === 'childList') return [...m.addedNodes, ...m.removedNodes].some((n) => !n.matches?.(ROOT));
+        return true;
+      };
+      const notes = document.getElementById('notes');
+      if (!notes) return;
+      // Stamped once typing stops, after the note has filed the burst and
+      // closed it: a stamp applied first would have the note re-read its text
+      // as already written down, and one applied mid-burst would split the
+      // burst in two for undo.
+      const changed = new Set();
+      let queued = 0;
+      const stampAll = () => {
+        clearTimeout(queued);
+        queued = 0;
+        for (const note of changed) if (note.isConnected) touch(note);
+        changed.clear();
+      };
+      new MutationObserver((list) => {
+        for (const m of list) {
+          // A note arrives empty when it is made here; one put back by undo
+          // or another window arrives with its words.
+          if (m.target === notes) {
+            for (const n of m.addedNodes) if (n.matches?.('article.note') && !marble.text(n).trim()) born.add(n);
+            continue;
+          }
+          if (!counts(m)) continue;
+          const node = m.target.nodeType === Node.ELEMENT_NODE ? m.target : m.target.parentElement;
+          const note = node?.closest?.('article.note');
+          if (!note || note.hasAttribute('data-view')) continue;
+          if (!first.has(note)) first.set(note, new Date());
+          changed.add(note);
+        }
+        if (!changed.size) return;
+        clearTimeout(queued);
+        queued = setTimeout(stampAll, 1000);
+      }).observe(notes, { subtree: true, childList: true, characterData: true, attributes: true });
+      addEventListener('pagehide', stampAll);
+    };
+    if (window.marble) begin(window.marble);
+    else addEventListener('marble:ready', (event) => begin(event.detail), { once: true });
+  })();
+</script>
   <script data-marble-id="__ID__">
   // The width switch. What it changes is the file's: data-width on the sheet,
   // "full" or nothing. The button is chrome at the end of the toolbar, so it is

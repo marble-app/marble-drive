@@ -508,6 +508,59 @@ test('a new note goes on top, is filed, and undo takes it back off', async () =>
   assert.deepEqual(errors, []);
 });
 
+test('a new note is stamped under its name, and Updated follows each edit without being undone', async () => {
+  const { page, errors } = await open();
+  await page.click('[data-cmd="new"]');
+  await page.waitForTimeout(250);
+  await page.keyboard.type('Lab meeting');
+  await page.keyboard.press('Enter');
+  await page.keyboard.type('Agenda');
+  // The stamp waits for typing to stop.
+  await page.waitForTimeout(1300);
+
+  let all = await blocks(page);
+  assert.deepEqual([all[0].text, all[2].text], ['Lab meeting', 'Agenda']);
+  assert.match(all[1].text, /^Created \w{3} \d+, \d{4}, \d+:\d\d [AP]MUpdated \w{3} \d+, \d{4}, \d+:\d\d [AP]M$/);
+  assert.equal(await page.textContent('.wc'), '1 word', 'the stamp is not counted');
+  assert.match(await filed(page), /class="stamp" data-embed>.*Created <time [^>]*data-marble-editable datetime=.*Updated <time [^>]*datetime=/);
+
+  // An Updated from long ago, as a note left alone would have.
+  await page.evaluate(() => {
+    const time = document.querySelector('.note.marble-open .stamp > span:last-of-type > time');
+    const id = window.marble.id(time);
+    for (const op of [
+      { type: 'setAttr', id, name: 'datetime', value: '2026-01-01T09:00-08:00' },
+      { type: 'setInner', id, html: 'Jan 1, 2026, 9:00 AM' },
+    ]) { window.marble.apply(op); window.marble.op(op); }
+  });
+  await page.waitForTimeout(150);
+  await caretToEndOf(page, 2);
+  await page.keyboard.type(' and notes');
+  await page.waitForTimeout(1300);
+  const updated = () => page.evaluate(() =>
+    document.querySelector('.note.marble-open .stamp > span:last-of-type > time').getAttribute('datetime'));
+  assert.notEqual(await updated(), '2026-01-01T09:00-08:00', 'the edit moved Updated');
+  let source = await filed(page);
+  assert.ok(source.includes('Agenda and notes'), 'the words that moved it reached the file too');
+  assert.ok(!source.includes('2026-01-01T09:00-08:00'));
+
+  await page.keyboard.press('ControlOrMeta+z');
+  await page.waitForTimeout(300);
+  all = await blocks(page);
+  assert.equal(all[2].text, 'Agenda', 'undo takes back the words');
+  assert.notEqual(await updated(), '2026-01-01T09:00-08:00', 'and leaves the clock');
+  assert.deepEqual(errors, []);
+});
+
+test('a note made before the stamp is left without one', async () => {
+  const { page, errors } = await open();
+  await caretToEndOf(page, 1);
+  await page.keyboard.type(' More.');
+  await page.waitForTimeout(300);
+  assert.equal(await page.locator('.note .stamp').count(), 0);
+  assert.deepEqual(errors, []);
+});
+
 test('the × forgets a note, and says how to get it back', async () => {
   const { page, errors } = await open();
   const doomed = await page.evaluate(() => document.querySelectorAll('.note')[1].getAttribute('data-marble-id'));
