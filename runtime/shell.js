@@ -601,15 +601,15 @@
     .publishing .last { margin-top: 9px; padding-top: 9px; border-top: 1px solid var(--line); color: var(--faint); font-size: 12px; }
     @media (prefers-reduced-motion: reduce) { .publishing .publish:active:not(:disabled) { transform: none; } }
     /* ── New, Settings and This drive: what the Drive's own bars held ──
-       New sits in the bar beside Share, so it is there with the tree put
-       away; it is a card rather than Share's ink so the bar keeps one loud
-       button. */
+       New sits in the bar after the logo, so it is there with the tree put
+       away and reads as "New in" the path beside it. It is drawn as the bar's
+       own chrome, a word and its icon bare until hovered, so Share stays the
+       bar's one loud button. */
     .head { display: flex; align-items: center; gap: 6px; margin: 10px 10px 6px; }
     .head .search { margin: 0; flex: 1; min-width: 0; }
-    .new { height: 28px; padding: 0 12px 0 9px; border-radius: 8px; display: flex; align-items: center; gap: 6px; flex: none;
-      background: var(--card); color: var(--ink); border: 1px solid var(--line); box-shadow: var(--shadow-rest); font-weight: 500; font-size: 12.5px;
-      transition: background-color 110ms var(--settle); }
-    .new:hover, .new[aria-expanded="true"] { background: var(--paper-2); }
+    .new { height: 28px; padding: 0 10px 0 7px; border-radius: 7px; display: flex; align-items: center; gap: 5px; flex: none;
+      color: var(--muted); font-weight: 500; transition: background-color 110ms var(--settle), color 110ms var(--settle); }
+    .new:hover, .new[aria-expanded="true"] { background: var(--paper-2); color: var(--ink); }
     .new:active { background: var(--paper-3); }
     /* Narrow, the search keeps its word and loses its key. */
     .nav:has(.head) { container-type: inline-size; }
@@ -752,10 +752,10 @@
         <header class="bar" aria-label="Drive">
           <button type="button" class="ib" data-act="nav" aria-pressed="true" aria-label="Pin the tree" title="Pin the tree (⌘⇧\\)">${icon('nav')}</button>
           <a class="home" aria-label="Drive" title="Drive">${LOGO}</a>
+          <button type="button" class="new" aria-haspopup="dialog" aria-expanded="false">${icon('plus')}New</button>
           <nav class="crumbs" aria-label="Where you are"></nav>
           <span class="spacer"></span>
           <button type="button" class="ib" data-act="describe" aria-pressed="false" aria-label="Describe a change (⌘⇧D)" title="Describe a change (⌘⇧D)" hidden>${icon('describe')}</button>
-          <button type="button" class="new" aria-haspopup="dialog" aria-expanded="false">${icon('plus')}New</button>
           <button type="button" class="share git" data-act="publish" aria-haspopup="dialog" aria-expanded="false" title="Publish this folder to GitHub" hidden>${github('')}<span>Publish</span></button>
           <button type="button" class="share" data-act="share" aria-haspopup="dialog" aria-expanded="false">${icon('share')}Share</button>
           <button type="button" class="ib" data-act="settings" aria-haspopup="dialog" aria-expanded="false" aria-label="Settings" title="Settings">${icon('gear')}</button>
@@ -1955,7 +1955,7 @@
       this.newButton.setAttribute('aria-expanded', 'true');
       this.pickApp(this.chosenApp());
       this.drawTemplates();
-      this.place(this.making, this.newButton, 'right');
+      this.place(this.making, this.newButton, 'left');
       this.making.style.maxHeight = `${Math.max(200, innerHeight - this.newButton.getBoundingClientRect().bottom - 14)}px`;
       // Open to type: the first key after New is the first word.
       this.making.querySelector('.ask textarea').focus({ preventScroll: true });

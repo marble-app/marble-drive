@@ -1,6 +1,6 @@
 // The shell is the Drive's frame. On a desk the Drive page draws no top bar or
 // sidebar of its own: the shell stays open around it, and what those bars held
-// is in the shell on every page — New and Share in the bar, Trash at the
+// is in the shell on every page — New after the logo and Share in the bar, Trash at the
 // tree's foot, and Settings and This drive at the end of the bar. On a phone, where
 // there is no shell, the Drive keeps its own bars.
 import assert from 'node:assert/strict';
