@@ -57,12 +57,24 @@ Three rules keep it honest.
 - **A folder of nothing but materials shows them.** Then the materials *are* the
   folder, so they are unfolded and there is no toggle, because a control that
   cannot change anything is worse than no control.
-- **It is derived, not stored.** `isMaterial` asks the tree the host handed
-  over. The one attribute it writes, `data-material`, is what both the CSS and
-  the colour stamp read, so there is one answer rather than two that can drift.
+- **The rule guesses; you decide.** `isMaterial` asks the tree the host handed
+  over, unless you have said otherwise. Hide in Materials and Unhide from
+  Materials, on any row's menu (one or many), write what you said into the file:
+  a row per path in `#placed`, `data-place="materials"` or `"drive"`, filed as an
+  op and undone with Mod+Z. A file you upload through the Drive is written
+  `"drive"` when it lands (a dropped folder once, at its top, and everything in
+  it follows), because a file you brought here on purpose is something you came
+  for. A move or a rename takes the row with it. The one attribute the listing
+  writes, `data-material`, is what both the CSS and the colour stamp read, so
+  there is one answer rather than two that can drift.
 
-The Map and the Pulse leave materials out entirely. Those are diagrams, not
-listings, and neither has a bottom to hang a footnote off.
+Every lens shows the folder's own materials under it, one level: Grid and List,
+and the Timeline and Weight too, which look through the subtree for what they
+draw but leave out whatever is inside a folded-away folder.
+
+A redraw because the drive changed somewhere is quiet: if this folder is as it
+was nothing is drawn, and if not, nothing replays its entrance, and the
+Materials line is handed back as the same element so a press on it lands.
 
 ## What that buys you
 

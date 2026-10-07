@@ -515,6 +515,11 @@ __ICON__
      different register, not a smaller one. So: no card, no preview, no folder
      colour, no weight bar — none of the identity the drive spends on documents. */
   .mats { grid-column: 1 / -1; margin: 1.4rem 0 0; }
+  /* A redraw because something changed somewhere in the drive is not an
+     arrival. Replaying the entrance on it set every row and the Materials
+     line in motion under the pointer, often enough that a press on the line
+     could not land. */
+  .items[data-quiet] .item { animation: none; }
   body[data-view="list"] .mats { margin: 1.4rem 1.4rem 0; }
   .mats-head {
     display: flex; align-items: center; gap: .5rem; width: 100%;
@@ -545,16 +550,14 @@ __ICON__
      knowing this strip exists. What `data-material` overrides is only how it
      looks — and it is written by the same line that decides it, so the CSS
      here and the tint stamp in script are reading one answer, not two. */
-  body[data-view="grid"] .item[data-material],
-  body[data-view="list"] .item[data-material] {
+  body[data-view] .item[data-material] {
     display: inline-flex; align-items: center; gap: .4rem;
     padding: .22rem .3rem .22rem .5rem; margin: 0;
     border: 1px solid transparent; border-radius: 999px;
     background: var(--paper-2); color: var(--muted);
     max-width: 20rem; min-width: 0; box-shadow: none; transform: none;
   }
-  body[data-view="grid"] .item[data-material]:hover,
-  body[data-view="list"] .item[data-material]:hover {
+  body[data-view] .item[data-material]:hover {
     background: var(--paper-3); border-color: var(--line); color: var(--ink);
     box-shadow: none; transform: none;
   }
@@ -581,8 +584,7 @@ __ICON__
   /* Held at a low opacity rather than revealed on hover: a menu you can only
      find by having a pointer is a menu a touch screen and a keyboard do not
      have, and this is the only way to rename or throw away a material. */
-  body[data-view="grid"] .item[data-material] .more,
-  body[data-view="list"] .item[data-material] .more {
+  body[data-view] .item[data-material] .more {
     position: static; opacity: .22; width: 1.05rem; height: 1.05rem; padding: 0;
     line-height: 1; font-size: .72rem; flex: 0 0 auto; justify-self: auto;
   }
@@ -987,8 +989,11 @@ __ICON__
   .menu button:active { transform: scale(.98); }
   .menu hr { border: 0; border-top: 1px solid var(--line); margin: .3rem 0; }
 
+  /* Both corner cards start where the page does, not where the window does:
+     a docked shell takes the left of the window (--marble-shell-left), and a
+     card at the window's corner was drawn under its sidebar. */
   .toast {
-    position: fixed; left: 1.2rem; bottom: 1.2rem; z-index: 40;
+    position: fixed; left: calc(var(--marble-shell-left, 0px) + 1.2rem); bottom: 1.2rem; z-index: 40;
     padding: .65rem 1rem; border-radius: 12px;
     background: rgba(var(--card-rgb), .82); backdrop-filter: blur(20px) saturate(160%);
     -webkit-backdrop-filter: blur(20px) saturate(160%);
@@ -1003,7 +1008,8 @@ __ICON__
      stays until it is done and shows it moving. Same corner as the toast,
      which it replaces while it is open. */
   .uploads {
-    position: fixed; left: 1.2rem; bottom: 1.2rem; z-index: 41; width: min(22rem, calc(100vw - 2.4rem));
+    position: fixed; left: calc(var(--marble-shell-left, 0px) + 1.2rem); bottom: 1.2rem; z-index: 41;
+    width: min(22rem, calc(100vw - var(--marble-shell-left, 0px) - 2.4rem));
     padding: .8rem .9rem .75rem; border-radius: 12px;
     background: rgba(var(--card-rgb), .9); backdrop-filter: blur(20px) saturate(160%);
     -webkit-backdrop-filter: blur(20px) saturate(160%);
@@ -1314,6 +1320,11 @@ __ICON__
            it is written here in the file and the folder gets the last word on
            whether it still opens. -->
     </ul>
+
+    <!-- Where you said something goes, when the rule would put it elsewhere:
+         one row per path, data-place "materials" (folded away by hand) or
+         "drive" (shown with the work). A file you upload is written "drive". -->
+    <ul class="placed" id="placed" data-marble-id="__ID__" hidden></ul>
 
     <div class="quota" data-marble-id="__ID__">
       <div data-marble-id="__ID__" id="weight">—</div>
@@ -1656,11 +1667,45 @@ __ICON__
       // path the carrier names it by): the interface, not something in the
       // drive, so it folds away with the materials. A renamed Drive still
       // knows itself.
-      const isMaterial = (entry) =>
-        view === 'drive' &&
-        ((entry.kind === 'doc' && entry.path === SELF) ||
-          (entry.kind === 'file' && !SHOWS.has(fileKind(entry))) ||
-          (entry.kind === 'folder' && holdsFiles(entry) && !holdsDocs(entry)));
+      const byRule = (entry) =>
+        (entry.kind === 'file' && !SHOWS.has(fileKind(entry))) ||
+        (entry.kind === 'folder' && holdsFiles(entry) && !holdsDocs(entry));
+
+      // The rule is a guess, and the person gets the last word. What they said
+      // is kept in the file, in #placed: a row per path, "materials" for
+      // something folded away by hand and "drive" for something shown with the
+      // work whatever the rule says. Everything uploaded through this page is
+      // written "drive" — a file you brought here on purpose is something you
+      // came for. Read into a map once per draw; the paths are what the rows
+      // and the tree share.
+      let placed = new Map();
+      const readPlaced = () => {
+        placed = new Map();
+        for (const li of document.querySelectorAll('#placed > li[data-path]')) placed.set(li.dataset.path, li.dataset.place);
+      };
+      // A folder dropped in is written once, at its top; what came in with it
+      // came in on purpose too.
+      const placeOf = (path) => {
+        if (placed.has(path)) return placed.get(path);
+        const parts = path.split('/');
+        for (let n = parts.length - 1; n > 0; n--) {
+          if (placed.get(parts.slice(0, n).join('/')) === 'drive') return 'drive';
+        }
+        return null;
+      };
+      // And a folder holding something you brought is a folder you go into.
+      const holdsPlaced = (folder) =>
+        (folder.children ?? []).some(
+          (child) => placed.get(child.path) === 'drive' || (child.kind === 'folder' && holdsPlaced(child)),
+        );
+      const isMaterial = (entry) => {
+        if (view !== 'drive') return false;
+        if (entry.kind === 'doc' && entry.path === SELF) return true;
+        const place = placeOf(entry.path);
+        if (place) return place === 'materials';
+        if (entry.kind === 'folder' && holdsPlaced(entry)) return false;
+        return byRule(entry);
+      };
 
       // Which rows are picked, held as a set of paths rather than elements,
       // because the listing is thrown away and rebuilt on every refresh and a
@@ -1795,6 +1840,10 @@ __ICON__
       // asking to see the materials is a way of working, not a fact about one
       // folder.
       let matsOpen = false;
+      // The last strip drawn, kept so a redraw that has the same materials
+      // hands back the same element: a press that started on the line ends on
+      // it, even when the drive changed in between.
+      let lastStrip = null;
 
       // The footnote. One line saying how much is down here, and the chips
       // behind it. `fixed` is the case where the folder holds nothing else:
@@ -1802,6 +1851,12 @@ __ICON__
       // toggle, because a control that cannot change anything is worse than no
       // control.
       function materialStrip(mats, { fixed = false } = {}) {
+        const key = [here, fixed, ...mats.map((e) => e.path + ':' + (e.children?.length ?? e.ext ?? ''))].join('\n');
+        if (lastStrip?.key === key) {
+          lastStrip.el.dataset.open = fixed || matsOpen ? '1' : '0';
+          for (const el of lastStrip.el.querySelectorAll('.item')) el.classList.toggle('marble-picked', picked.has(el.dataset.path));
+          return lastStrip.el;
+        }
         const folders = mats.filter((entry) => entry.kind === 'folder').length;
         const files = mats.length - folders;
         const open = fixed || matsOpen;
@@ -1838,6 +1893,7 @@ __ICON__
             head.setAttribute('aria-expanded', matsOpen ? 'true' : 'false');
           });
         }
+        lastStrip = { key, el: wrap };
         return wrap;
       }
 
@@ -2319,6 +2375,8 @@ __ICON__
         }
       }
 
+      const entryAt = (path) => (latest ? flatten(latest).find((entry) => entry.path === path) : null) ?? null;
+
       const flatten = (folder, out = []) => {
         for (const child of folder.children ?? []) {
           out.push(child);
@@ -2340,6 +2398,7 @@ __ICON__
       if (!MODES.has(document.body.getAttribute('data-view'))) document.body.setAttribute('data-view', 'grid');
       const mode = () => (MODES.has(document.body.getAttribute('data-view')) ? document.body.getAttribute('data-view') : 'grid');
 
+      let drawQuietly = false;
       function draw() {
         // Anything drawn into this container that is not the gallery is a
         // listing again, and wants the listing's own padding back.
@@ -2363,20 +2422,37 @@ __ICON__
               ? flatten(latest)
               : latest.children ?? [];
 
-        items.replaceChildren();
+        // Everything goes but the Materials line, which stays where it is until
+        // this draw knows whether it is still the same line: a press is
+        // dropped by the browser if what it went down on leaves the page, even
+        // for a moment.
+        const kept = lastStrip?.el.parentNode === items ? lastStrip.el : null;
+        for (const child of [...items.children]) if (child !== kept) child.remove();
+        items.toggleAttribute('data-quiet', drawQuietly);
+        readPlaced();
 
         // The split, once, before any lens draws: what the folder is for, and
         // what the folder needed. Every lens below draws the first, and the
         // second is appended in one place afterwards — so there is one answer
-        // to where a material goes rather than one per view.
-        const work = [];
-        const mats = [];
+        // to where a material goes rather than one per view. The materials are
+        // this folder's own, one level, in every lens: the timeline looks
+        // through the subtree for documents and the weight for bytes, but what
+        // is folded away here is a fact about here.
+        const level = latest.children ?? [];
         // A folder that holds nothing but files is those files: the songs,
         // the scans, the photos. Folded into a footnote there, they would be a
         // strip of names under an empty page, so they get tiles of their own.
+        // What you hid by hand stays hidden even then.
+        const byHand = (entry) => view === 'drive' && placeOf(entry.path) === 'materials';
+        const rest = level.filter((entry) => !byHand(entry));
         const onlyFiles =
-          view === 'drive' && !query && pool.length > 0 && pool.every((e) => e.kind === 'file' || isMaterial(e));
-        for (const entry of pool) (onlyFiles || !isMaterial(entry) ? work : mats).push(entry);
+          view === 'drive' && !query && rest.length > 0 && rest.every((e) => e.kind === 'file' || isMaterial(e));
+        const folded = (entry) => byHand(entry) || (!onlyFiles && isMaterial(entry));
+        // What is inside a folded-away folder is folded away with it, in the
+        // lenses that look through the subtree.
+        const under = query || onlyFiles ? [] : flatten(latest).filter((e) => e.kind === 'folder' && folded(e)).map((e) => e.path + '/');
+        const work = pool.filter((entry) => !folded(entry) && !under.some((top) => entry.path.startsWith(top)));
+        const mats = (query ? pool : view === 'drive' ? level : []).filter(folded);
         const footnote = mats.length;
 
         if (!work.length && !mats.length) {
@@ -2385,6 +2461,7 @@ __ICON__
           empty.innerHTML = query
             ? '<strong>Nothing matches</strong>Try a different word.'
             : '<strong>This folder is empty</strong>Press New to make something, or drop documents and files in from anywhere.';
+          kept?.remove();
           items.append(empty);
           return;
         }
@@ -2400,7 +2477,19 @@ __ICON__
             items.append(el);
           });
         }
-        if (footnote) items.append(materialStrip(mats, { fixed: !work.length }));
+        const strip = footnote ? materialStrip(mats, { fixed: !work.length }) : null;
+        if (strip && strip === kept) {
+          // The lens drew after it; what it drew goes back above it. Moved
+          // rather than reinserted where the browser can, so a preview that
+          // has started loading keeps loading.
+          while (strip.nextSibling) {
+            if (items.moveBefore) items.moveBefore(strip.nextSibling, strip);
+            else items.insertBefore(strip.nextSibling, strip);
+          }
+        } else {
+          kept?.remove();
+          if (strip) items.append(strip);
+        }
         // Keep the selection to what is actually on screen — a refresh, a
         // search or a folder change can retire a row that was picked.
         const shown = new Set([...items.querySelectorAll('.item')].map((el) => el.dataset.path));
@@ -2596,7 +2685,12 @@ __ICON__
 
       let root = null;
 
-      async function refresh() {
+      // `quiet` is a refresh because the drive changed, not because you went
+      // somewhere: with agents at work that is every few seconds, so one that
+      // leaves this folder as it was draws nothing, and one that does not
+      // redraws without the entrance.
+      let seen = '';
+      async function refresh({ quiet = false } = {}) {
         try {
           root = await drive.tree('');
           latest = view === 'drive' ? at(root, here) : null;
@@ -2606,7 +2700,15 @@ __ICON__
           if (view === 'trash') latest = { children: (await drive.trash()).map(asTrash) };
           if (view === 'templates') return drawTemplates();
 
-          draw();
+          const now = [view, here, mode(), query, JSON.stringify(latest)].join('\n');
+          if (quiet && now === seen) return;
+          seen = now;
+          drawQuietly = quiet;
+          try {
+            draw();
+          } finally {
+            drawQuietly = false;
+          }
           drawCrumbs();
           drawGitChip();
           drawPins();
@@ -3311,7 +3413,7 @@ __ICON__
             const results = await Promise.allSettled(
               paths.map(async (p) => {
                 const next = [folder, leaf(p)].filter(Boolean).join('/');
-                if (next !== p) await drive.move(p, next);
+                if (next !== p) await moveTo(p, next);
               }),
             );
             const failed = results.filter((r) => r.status === 'rejected').length;
@@ -3320,6 +3422,14 @@ __ICON__
             if (failed) say(failed + ' of ' + paths.length + ' could not be moved');
             else say('Moved ' + paths.length + ' to ' + (folder || 'My Drive'));
           });
+          const placeable = paths.map(entryAt).filter((entry) => entry && entry.path !== SELF);
+          if (view === 'drive' && placeable.length) {
+            const allHidden = placeable.every(isMaterial);
+            add(
+              allHidden ? 'Unhide ' + placeable.length + ' from Materials' : 'Hide ' + placeable.length + ' in Materials',
+              () => hide(placeable.map((entry) => entry.path), !allHidden),
+            );
+          }
           add('Copy ' + paths.length + ' links', () => copyText(paths.map((p) => linkFor(p)).join('\n'), 'Links copied'));
           add('Download ' + paths.length + ' as .zip', () => downloadZip(paths, leaf(here) || 'My Drive'));
           if (docs.length || foldersIn(paths)) {
@@ -3341,13 +3451,13 @@ __ICON__
             const name = prompt('New name', leaf(path));
             if (!name || name === leaf(path)) return;
             const parent = path.includes('/') ? path.slice(0, path.lastIndexOf('/')) : '';
-            await drive.move(path, [parent, name].filter(Boolean).join('/'));
+            await moveTo(path, [parent, name].filter(Boolean).join('/'));
             refresh();
           });
           add('Move to…', async () => {
             const to = prompt('Folder to move it into (blank for the top)', here);
             if (to === null) return;
-            await drive.move(path, [to.trim().replace(/^\/+|\/+$/g, ''), leaf(path)].filter(Boolean).join('/'));
+            await moveTo(path, [to.trim().replace(/^\/+|\/+$/g, ''), leaf(path)].filter(Boolean).join('/'));
             refresh();
           });
           if (!isFolder && !isFile) {
@@ -3359,6 +3469,13 @@ __ICON__
           // A pin is a shortcut to something you go into or open, and neither
           // is what a material is.
           if (!isFile) add(pinned(path) ? 'Unpin from sidebar' : 'Pin to sidebar', () => togglePin(path, isFolder));
+          // Materials are the folder's paperwork, folded under the listing.
+          // The rule guesses which those are; this is how you say otherwise.
+          const entry = entryAt(path);
+          if (view === 'drive' && entry && path !== SELF) {
+            const hidden = isMaterial(entry);
+            add(hidden ? 'Unhide from Materials' : 'Hide in Materials', () => hide([path], !hidden));
+          }
           rule();
           add('Copy link', () => copyText(linkFor(path), 'Link copied'));
           add('Copy path', () => copyText(path, 'Path copied'));
@@ -3763,6 +3880,79 @@ __ICON__
         else say(paths.length === 1 ? 'Moved to trash' : 'Moved ' + paths.length + ' to trash');
       }
 
+      // ------------------------------------------------------------- placing
+      //
+      // Where something goes, work or materials, when you say so rather than
+      // the rule (isMaterial, above). Markup like a pin: a row in #placed per
+      // path, set or added with an op, undoable as one step. `remember: false`
+      // is for what the page writes on your behalf — an upload — which is not
+      // a step you took back with Mod+Z.
+
+      function place(paths, where, { remember = true } = {}) {
+        const list = document.querySelector('#placed');
+        if (!list) return false;
+        const redo = [];
+        const undo = [];
+        for (const path of paths) {
+          const row = list.querySelector(':scope > li[data-path="' + CSS.escape(path) + '"]');
+          if (row) {
+            if (row.dataset.place === where) continue;
+            const id = marble.id(row);
+            redo.push({ type: 'setAttr', id, name: 'data-place', value: where });
+            undo.push({ type: 'setAttr', id, name: 'data-place', value: row.dataset.place });
+          } else {
+            const id = marble.newId();
+            const li = document.createElement('li');
+            li.setAttribute('data-marble-id', id);
+            li.setAttribute('data-path', path);
+            li.setAttribute('data-place', where);
+            redo.push({ type: 'insert', html: li.outerHTML, parentId: marble.id(list), beforeId: null });
+            undo.unshift({ type: 'remove', id });
+          }
+        }
+        if (!redo.length) return false;
+        for (const op of redo) {
+          marble.apply(op);
+          marble.op(op, { immediate: true });
+        }
+        if (remember) marble.record({ redo, undo });
+        return true;
+      }
+
+      // A move takes what you said about a thing with it, and about everything
+      // inside it.
+      function carryPlaces(from, to) {
+        for (const row of document.querySelectorAll('#placed > li[data-path]')) {
+          const path = row.dataset.path;
+          if (path !== from && !path.startsWith(from + '/')) continue;
+          const op = { type: 'setAttr', id: marble.id(row), name: 'data-path', value: to + path.slice(from.length) };
+          marble.apply(op);
+          marble.op(op, { immediate: true });
+        }
+      }
+      const moveTo = async (from, to) => {
+        const moved = await drive.move(from, to);
+        carryPlaces(moved?.from ?? from, moved?.to ?? to);
+        return moved;
+      };
+
+      function hide(paths, hidden) {
+        if (!document.querySelector('#placed')) return say('This Drive page is older than hiding — it updates with the next release');
+        place(paths, hidden ? 'materials' : 'drive');
+        draw();
+        const what = paths.length === 1 ? leaf(paths[0]) : paths.length + ' items';
+        say(hidden ? 'Hid ' + what + ' in Materials' : what + ' is back with the work');
+      }
+
+      // Redrawn whenever #placed changes from anywhere — an undo, a redo,
+      // another window — not only from here.
+      const placedList = document.querySelector('#placed');
+      if (placedList) {
+        new MutationObserver(() => {
+          if (view === 'drive' && latest) draw();
+        }).observe(placedList, { childList: true, subtree: true, attributes: true });
+      }
+
       // --------------------------------------------------------------- pinning
       //
       // The one place in this document where the listing and the file meet. A
@@ -3862,7 +4052,7 @@ __ICON__
         const from = item.dataset.path;
         const into = target.classList.contains('item') ? target.dataset.path : (target.dataset.path ?? '');
         try {
-          await drive.move(from, [into, leaf(from)].filter(Boolean).join('/'));
+          await moveTo(from, [into, leaf(from)].filter(Boolean).join('/'));
           say('Moved into ' + (into || 'My Drive'));
           refresh();
         } catch (err) {
@@ -4233,6 +4423,10 @@ __ICON__
         const controller = new AbortController();
         uploading = controller;
         const added = [];
+        // What you brought, written "drive" once it is in: the file, or for a
+        // folder you dropped, the folder at its top. A document is the work
+        // already; it is the files the rule would fold away.
+        const brought = new Set();
         const refused = [];
         const retry = [];
         let cancelled = false;
@@ -4267,6 +4461,10 @@ __ICON__
             );
             sent[i] = file.size;
             mark(i, 'done', 'added');
+            if (!DOCUMENT.test(file.name)) {
+              const top = folder ? [into, folder.split('/')[0]].filter(Boolean).join('/') : added[added.length - 1]?.path;
+              if (top) brought.add(top);
+            }
           } catch (err) {
             if (err?.name === 'AbortError') {
               cancelled = true;
@@ -4281,6 +4479,7 @@ __ICON__
         }
         uploading = null;
 
+        place([...brought].filter((path) => placeOf(path) !== 'drive'), 'drive', { remember: false });
         if (added.length) refresh();
         const tally = [];
         if (added.length === 1) tally.push('Added ' + added[0].path);
@@ -4355,7 +4554,7 @@ __ICON__
       drive.on('*', (event) => {
         if (view === 'templates') return;
         if (event.event === 'changed' && SELF && event.path === SELF) return;
-        refresh();
+        refresh({ quiet: true });
       });
       status.setAttribute('data-live', '1');
       document.querySelector('#status-text').textContent = 'live';
