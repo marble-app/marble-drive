@@ -115,6 +115,8 @@ export function createAgentRoutes({ store, runner, tools, hub, providers, writeO
   const offers = new Map();
   // Words being read as one rule now (POST /agent/change-intent).
   let intentsRunning = 0;
+  // Build mode's routes, once the builds exist (server/agent/index.js).
+  let buildRoutes = null;
 
   // One Claude, signed in one of two ways: the Claude login
   // (claude-subscription) or an API key (claude-api). `claudeAuth` says which;
@@ -334,6 +336,11 @@ export function createAgentRoutes({ store, runner, tools, hub, providers, writeO
       return json(res, 403, { error: 'an ungated drive answers agent routes only as localhost' });
     }
     if (method !== 'GET' && !sameOrigin(req)) return json(res, 403, { error: 'a change has to come from this drive' });
+
+    if (buildRoutes && (route.startsWith('/agent/builds') || route.startsWith('/agent/pieces'))) {
+      const answered = await buildRoutes.handle(req, res, url);
+      if (answered !== null) return answered;
+    }
 
     if (route === '/agent/providers' && method === 'GET') {
       const settings = await store.settings();
@@ -958,5 +965,13 @@ export function createAgentRoutes({ store, runner, tools, hub, providers, writeO
     return json(res, 404, { error: 'not found' });
   }
 
-  return { handle, handleTools, startRun };
+  return {
+    handle,
+    handleTools,
+    startRun,
+    startConversation,
+    defaultProvider: async () => runnableDefault(await store.settings()),
+    /** Build mode's routes (server/build/routes.js), behind these same checks. */
+    useBuilds(routes) { buildRoutes = routes; },
+  };
 }

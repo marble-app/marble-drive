@@ -63,6 +63,14 @@
   // <body> as data-builtin): left out but found by search, a Built-in section
   // of their own, or with your files. A Drive that never chose keeps them with
   // your files, which is where they always were.
+  // Build mode (runtime/build-mode.js), for this browser: on, every app opens
+  // in Describe and Build makes what is marked; off, Describe is a mode you
+  // turn on and the ⌘J line sends it to the chat.
+  const BUILD_MODES = [
+    ['on', 'On', 'Apps open with the tools out. Mark it up, press Build.'],
+    ['off', 'Off', 'Describe is a mode you turn on, and the chat makes the change.'],
+  ];
+  const buildMode = () => { try { return localStorage.getItem('marble-build') === 'off' ? 'off' : 'on'; } catch { return 'on'; } };
   const BUILTIN = [
     ['hidden', 'Hidden', 'Out of sight. Search still finds them.'],
     ['sidebar', 'In the tree', 'A Built-in section of their own.'],
@@ -74,11 +82,16 @@
   // The three apps New can send a sentence to, as the Drive's New menu has
   // them, and which one Enter goes to: the one used last, shared with it.
   const PROMPT_APPS = [
+    // Build mode: Enter makes the app and goes to it, and the words are its
+    // first note (runtime/build-mode.js). The others take the words elsewhere.
+    ['App', 'App', 'Build it here', '<rect x="2.75" y="2.75" width="10.5" height="10.5" rx="2.25"/><path d="M5.25 10c1.3-2.6 2.2-3.9 2.8-3.9.85 0 .2 3.9 1.05 3.9.55 0 1.05-.8 1.5-2.4"/>'],
     ['Chat', 'Chat', 'Talk it through', '<path d="M3 4.5A1.5 1.5 0 0 1 4.5 3h7A1.5 1.5 0 0 1 13 4.5v5a1.5 1.5 0 0 1-1.5 1.5H7.5L4.75 13.25V11h-.25A1.5 1.5 0 0 1 3 9.5z"/>'],
     ['Agents', 'Agent', 'Let it run', '<path d="M8 2.25l1.3 3.45 3.45 1.3-3.45 1.3L8 11.75 6.7 8.3 3.25 7l3.45-1.3z"/><path d="M12.25 10.75l.45 1.05 1.05.45-1.05.45-.45 1.05-.45-1.05-1.05-.45 1.05-.45z"/>'],
     ['Board', 'Board', 'Sketch it first', '<rect x="2.75" y="2.75" width="10.5" height="10.5" rx="1.5"/><rect x="5" y="5" width="3" height="3" rx=".5"/><path d="M9.5 10h1.75M5 10.5h2"/>'],
   ];
-  const APP_KEY = 'marble-drive:new-app';
+  // Its own key, not the Drive's: Build mode made App the default, and the
+  // Drive's own New menu has no App to go to.
+  const APP_KEY = 'marble-drive:new-app:build';
   // Most urgent first, everywhere a set of agents is drawn.
   const ORDER = ['waiting', 'working', 'done'];
   const WORDS = { waiting: 'needs you', working: 'working', done: 'done' };
@@ -153,6 +166,10 @@
     collapse: '<path d="M6 2.75V4.5c0 .83-.67 1.5-1.5 1.5H2.75M13.25 6H11.5c-.83 0-1.5-.67-1.5-1.5V2.75M2.75 10H4.5c.83 0 1.5.67 1.5 1.5v1.75M10 13.25V11.5c0-.83.67-1.5 1.5-1.5h1.75"/>',
     check: '<path d="m3.75 8.25 2.75 2.75 5.75-6.25"/>',
     describe: '<rect x="2.25" y="2.25" width="11.5" height="11.5" rx="2.75"/><path d="M5 10.25c1.5-3.1 2.55-4.65 3.2-4.65 1 0 .2 4.65 1.2 4.65.65 0 1.25-.95 1.75-2.85"/>',
+    // Build mode's Comments: the margin with every mark on the app.
+    comments: '<path d="M8 2.75a5.25 5.25 0 1 1-2.45 9.9L2.75 13.25l.6-2.7A5.25 5.25 0 0 1 8 2.75z"/>',
+    // Build mode's Pieces: four parts, one of them being added.
+    pieces: '<rect x="2.5" y="2.5" width="4.75" height="4.75" rx="1.2"/><rect x="8.75" y="2.5" width="4.75" height="4.75" rx="1.2"/><rect x="2.5" y="8.75" width="4.75" height="4.75" rx="1.2"/><path d="M11.1 9v4.25M9 11.1h4.25"/>',
     move: '<path d="M2 11.25v-6.5c0-.83.67-1.5 1.5-1.5h2.88c.4 0 .78.16 1.06.44l.62.62c.28.28.66.44 1.06.44h3.38c.83 0 1.5.67 1.5 1.5v4.99c0 .83-.67 1.5-1.5 1.5H3.5c-.83 0-1.5-.67-1.5-1.5z"/><path d="M6 9.25h4.25M8.75 7.5 10.5 9.25 8.75 11"/>',
     // Two ticks: every one of them, read.
     read: '<path d="m1.75 8.5 2.75 2.75 5-5.75"/><path d="m7.75 11 .25.25 5.5-6"/>',
@@ -282,6 +299,17 @@
     .share[hidden] { display: none; }
     @media (prefers-reduced-motion: reduce) { .share:active { transform: none; } }
     .vr { width: 1px; height: 18px; background: var(--line); margin: 0 4px; flex: none; }
+    /* A suggestion about where this page belongs (Build mode's folder): a
+       chip after the crumbs, its action in ink, and a way to say no. */
+    .offer { display: inline-flex; align-items: center; gap: .35rem; margin-left: .45rem; padding: 0 .2rem 0 .6rem; height: 26px; border: 1px solid var(--line); border-radius: 999px; font-size: 12.5px; color: var(--muted); background: var(--card); flex: none; min-width: 0; }
+    .offer[hidden] { display: none; }
+    .offer svg { width: 14px; height: 14px; flex: none; }
+    .offer .go { all: unset; cursor: pointer; color: var(--ink); font-weight: 500; padding: 0 .2rem; border-radius: 5px; white-space: nowrap; }
+    .offer .go:hover { text-decoration: underline; }
+    .offer .go:focus-visible, .offer .no:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+    .offer .no { all: unset; cursor: pointer; width: 20px; height: 20px; display: grid; place-items: center; border-radius: 50%; color: var(--faint); }
+    .offer .no:hover { background: var(--paper-2); color: var(--ink); }
+    @container (max-width: 620px) { .offer .lead { display: none; } }
     button:focus-visible, a:focus-visible, input:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
 
     /* ── The tree ── */
@@ -635,7 +663,10 @@
       background: var(--ink); color: var(--paper); transition: background-color 110ms var(--settle); }
     .send:active:not(:disabled) { background: var(--accent-ink); }
     .send:disabled { background: var(--paper-3); color: var(--faint); cursor: default; }
-    .apps { display: grid; grid-template-columns: repeat(3, 1fr); gap: 6px; }
+    .apps { display: grid; grid-template-columns: repeat(2, 1fr); gap: 6px; }
+    /* Three to a row when App is not one of them (Build mode off). */
+    .apps:has(> .to[hidden]) { grid-template-columns: repeat(3, 1fr); }
+    .apps > .to[hidden] { display: none; }
     .apps > .to { display: grid; grid-template-columns: 16px 1fr; column-gap: 7px; align-items: center; padding: 8px 9px; border-radius: 10px;
       border: 1px solid var(--line); text-align: left; min-width: 0; transition: background-color 110ms ease, border-color 110ms ease; }
     .apps > .to:hover { background: var(--paper-2); }
@@ -753,8 +784,13 @@
           <button type="button" class="ib" data-act="nav" aria-pressed="true" aria-label="Pin the tree" title="Pin the tree (⌘⇧\\)">${icon('nav')}</button>
           <a class="home" aria-label="Drive" title="Drive">${LOGO}</a>
           <nav class="crumbs" aria-label="Where you are"></nav>
+          <span class="offer" role="group" hidden></span>
           <span class="spacer"></span>
           <button type="button" class="ib" data-act="describe" aria-pressed="false" aria-label="Describe a change (⌘⇧D)" title="Describe a change (⌘⇧D)" hidden>${icon('describe')}</button>
+          <span class="vr" data-build-vr hidden></span>
+          <button type="button" class="ib" data-act="pieces" aria-pressed="false" aria-label="Pieces" title="Pieces" hidden>${icon('pieces')}</button>
+          <button type="button" class="ib" data-act="comments" aria-pressed="false" aria-label="Comments" title="Comments" hidden>${icon('comments')}</button>
+          <span class="vr" data-build-vr hidden></span>
           <button type="button" class="new" aria-haspopup="dialog" aria-expanded="false">${icon('plus')}New</button>
           <button type="button" class="share git" data-act="publish" aria-haspopup="dialog" aria-expanded="false" title="Publish this folder to GitHub" hidden>${github('')}<span>Publish</span></button>
           <button type="button" class="share" data-act="share" aria-haspopup="dialog" aria-expanded="false">${icon('share')}Share</button>
@@ -776,7 +812,7 @@
           <div class="start">
             <form class="ask" autocomplete="off">
               <textarea rows="1" placeholder="Describe an app to build…" aria-label="Describe an app to build"></textarea>
-              <button type="submit" class="send" aria-label="Send to Chat" title="Send to Chat" disabled>${icon('send')}</button>
+              <button type="submit" class="send" aria-label="Build it as a new app" title="Build it as a new app" disabled>${icon('send')}</button>
             </form>
             <p class="sub">Prompt in</p>
             <div class="apps" role="group" aria-label="Prompt in">
@@ -804,6 +840,14 @@
           <div class="chips"></div>
           <div class="levels builtin" role="radiogroup" aria-label="Where built-in apps show">
             ${BUILTIN.map(([value, name, says]) => `<button type="button" class="level" role="radio" data-builtin="${value}" aria-checked="false" tabindex="-1">
+              <span class="lv-dot" aria-hidden="true"></span><span class="lv-name">${name}</span>
+              <span class="lv-says">${says}</span>
+            </button>`).join('')}
+          </div>
+          <p class="sub">Build mode</p>
+          <p class="say">How you change an app, in this browser.</p>
+          <div class="levels buildmode" role="radiogroup" aria-label="Build mode">
+            ${BUILD_MODES.map(([value, name, says]) => `<button type="button" class="level" role="radio" data-build="${value}" aria-checked="false" tabindex="-1">
               <span class="lv-dot" aria-hidden="true"></span><span class="lv-name">${name}</span>
               <span class="lv-says">${says}</span>
             </button>`).join('')}
@@ -854,6 +898,7 @@
         </div>
         <div class="toast" role="status" aria-live="polite"></div>`;
       this.$ = (selector) => root.querySelector(selector);
+      this.$$ = (selector) => [...root.querySelectorAll(selector)];
       this.bar = this.$('.bar');
       this.nav = this.$('.nav');
       this.scroll = this.$('.scroll');
@@ -939,6 +984,9 @@
       const chatDocked = this.docked('chat');
       return {
         open: active,
+        // Whether the frame is showing at all (Hide everything takes it away),
+        // on a phone too, where it is never a column.
+        frame: this.isOpen,
         // The chat's own: docked beside the page, or a card over it.
         mode: chatDocked ? 'fit' : 'float',
         nav: true,
@@ -989,6 +1037,8 @@
         else if (act === 'me') this.toggleMe();
         else if (act === 'publish') this.togglePublishing(this.repoOf(this.here));
         else if (act === 'describe') dispatchEvent(new CustomEvent('marble-marks:toggle'));
+        else if (act === 'pieces') dispatchEvent(new CustomEvent('marble-build:toggle-pieces'));
+        else if (act === 'comments') dispatchEvent(new CustomEvent('marble-build:toggle-comments'));
         else if (act === 'doc') this.toggleMenu(event.target.closest('[data-act]'));
       });
       this.sharing.querySelector('.own-copy').addEventListener('click', () => this.copyLink());
@@ -1107,10 +1157,31 @@
       // Describe mode (runtime/agent-marks.js) is there only where the tray
       // is; its button here says whether it is on.
       this.onMarks = (event) => {
-        this.$('[data-act="describe"]').setAttribute('aria-pressed', String(Boolean(event.detail?.describing)));
-        this.$('[data-act="describe"]').hidden = false;
+        const on = Boolean(event.detail?.describing);
+        const describe = this.$('[data-act="describe"]');
+        describe.setAttribute('aria-pressed', String(on));
+        describe.hidden = false;
+        // A toggle's tip says what it is now and what a press makes it.
+        const tip = on ? 'Describe is on · press to use the app (⌘⇧D)' : 'Describe (⌘⇧D)';
+        describe.title = tip;
+        describe.setAttribute('aria-label', tip);
       };
       addEventListener('marble-marks:mode', this.onMarks);
+      // Build mode (runtime/build-mode.js): Pieces and Comments take the
+      // right side where the chat was, one at a time, and their buttons here
+      // say which has it. Three buttons, never one switch: Describe is a
+      // mode, and the other two are things that can take the side.
+      this.onBuild = () => {
+        for (const node of this.$$('[data-act="pieces"], [data-act="comments"], [data-build-vr]')) node.hidden = false;
+      };
+      this.onSide = (event) => {
+        const side = event.detail?.side ?? 'none';
+        this.$('[data-act="pieces"]').setAttribute('aria-pressed', String(side === 'pieces'));
+        this.$('[data-act="comments"]').setAttribute('aria-pressed', String(side === 'comments'));
+      };
+      addEventListener('marble-build:ready', this.onBuild);
+      addEventListener('marble-build:side', this.onSide);
+      if (window.marbleBuild) this.onBuild();
       this.onViewport = () => this.apply();
       this.phone.addEventListener('change', this.onViewport);
       this.onWindowResize = () => this.apply({ animate: false });
@@ -1953,6 +2024,7 @@
       this.making.dataset.step = 'start';
       this.making.hidden = false;
       this.newButton.setAttribute('aria-expanded', 'true');
+      this.making.querySelector('.to[data-app="App"]').hidden = buildMode() === 'off';
       this.pickApp(this.chosenApp());
       this.drawTemplates();
       this.place(this.making, this.newButton, 'right');
@@ -1962,7 +2034,13 @@
     }
 
     chosenApp() {
-      try { return localStorage.getItem(APP_KEY) || 'Chat'; } catch { return 'Chat'; }
+      // With Build mode off there is no App to go to: New is the chat's, as
+      // it was before it.
+      const fallback = buildMode() === 'off' ? 'Chat' : 'App';
+      try {
+        const kept = localStorage.getItem(APP_KEY) || fallback;
+        return kept === 'App' && buildMode() === 'off' ? 'Chat' : kept;
+      } catch { return fallback; }
     }
 
     pickApp(app) {
@@ -1970,8 +2048,9 @@
       const tile = tiles.find((t) => t.dataset.app === app) ?? tiles[0];
       for (const t of tiles) t.setAttribute('aria-pressed', String(t === tile));
       const send = this.making.querySelector('.send');
-      send.setAttribute('aria-label', `Send to ${tile.dataset.name}`);
-      send.title = `Send to ${tile.dataset.name}`;
+      const words = tile.dataset.app === 'App' ? 'Build it as a new app' : `Send to ${tile.dataset.name}`;
+      send.setAttribute('aria-label', words);
+      send.title = words;
       return tile.dataset.app;
     }
 
@@ -2055,6 +2134,7 @@
       try { localStorage.setItem(APP_KEY, app); } catch { /* private mode */ }
       const m = window.marble;
       if (!m?.href) return;
+      if (app === 'App') { if (words) await this.buildApp(words, { newTab }); return; }
       let href = m.href(app);
       if (app === 'Agents') {
         if (words) {
@@ -2081,6 +2161,51 @@
       this.hidePops();
       if (newTab) window.open(href, '_blank');
       else location.href = href;
+    }
+
+    /** A chip after the crumbs with one action and a way to dismiss it. */
+    offer(spec) {
+      const chip = this.$('.offer');
+      if (!chip) return;
+      if (!spec) { chip.hidden = true; chip.replaceChildren(); return; }
+      chip.innerHTML = `${spec.icon ?? ''}<span class="lead"></span><button type="button" class="go"></button><button type="button" class="no" aria-label="Not now">${'<svg viewBox="0 0 16 16" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"><path d="M5 5l6 6M11 5l-6 6"/></svg>'}</button>`;
+      chip.querySelector('.lead').textContent = `${spec.lead} ·`;
+      chip.querySelector('.go').textContent = spec.action;
+      chip.setAttribute('aria-label', `${spec.lead}: ${spec.action}`);
+      chip.querySelector('.go').addEventListener('click', () => spec.onAct?.());
+      chip.querySelector('.no').addEventListener('click', () => { chip.hidden = true; spec.onDismiss?.(); });
+      chip.hidden = false;
+    }
+
+    /** New, in Build mode: the app is made, empty and without a folder, and
+     *  the Drive goes to it, the words riding along to be its first note
+     *  (runtime/build-mode.js reads #build= once and builds from it). */
+    async buildApp(words, { newTab = false } = {}) {
+      const m = window.marble;
+      const ask = this.making.querySelector('.ask textarea');
+      const tile = this.making.querySelector('.to[data-app="App"]');
+      if (!m?.drive?.create) return;
+      tile?.setAttribute('data-busy', '');
+      let made;
+      try {
+        made = await m.drive.create({ path: 'Untitled', from: 'app' });
+      } catch (err) {
+        this.say(err?.message || 'The app was not made', 2600);
+        return;
+      } finally {
+        tile?.removeAttribute('data-busy');
+      }
+      const href = `${made.href}#build=${encodeURIComponent(words)}`;
+      ask.value = '';
+      ask.dispatchEvent(new Event('input'));
+      this.hidePops();
+      if (newTab) { window.open(href, '_blank'); return; }
+      // Going there is the point: the page fades as the address changes, so
+      // the empty app is plainly somewhere new rather than a reply.
+      if (!matchMedia('(prefers-reduced-motion: reduce)').matches) {
+        await document.documentElement.animate([{ opacity: 1 }, { opacity: 0 }], { duration: 150, easing: 'ease-out', fill: 'forwards' }).finished.catch(() => {});
+      }
+      location.href = href;
     }
 
     openBrief(starter) {
@@ -2204,11 +2329,26 @@
       // The choice is written in the Drive's file; without one, it is shown
       // and not offered.
       for (const row of levels) row.disabled = !HOME_DOC;
+      for (const row of pop.querySelectorAll('.buildmode .level')) {
+        const on = row.dataset.build === buildMode();
+        row.setAttribute('aria-checked', String(on));
+        row.tabIndex = on ? 0 : -1;
+      }
       pop.querySelector('.agentry').hidden = !window.marble?.agent?.openSettings;
     }
 
     bindSettings() {
       const pop = this.settingsPop;
+      pop.querySelector('.buildmode').addEventListener('click', (event) => {
+        const row = event.target.closest('.level');
+        if (!row || row.dataset.build === buildMode()) return;
+        try {
+          if (row.dataset.build === 'off') localStorage.setItem('marble-build', 'off');
+          else localStorage.removeItem('marble-build');
+        } catch { /* private mode: nothing to keep it in */ }
+        // The tools are set up as a page opens: it opens again with the other.
+        location.reload();
+      });
       const levels = pop.querySelector('.builtin');
       levels.addEventListener('click', (event) => {
         const row = event.target.closest('.level');
@@ -4055,6 +4195,8 @@
       get autoHide() { return el.hovers('chat'); },
       // The drawer leaves ⌘J and ⌘\\ to the shell wherever the shell can open.
       get takesKeys() { return !el.phone.matches; },
+      // A suggestion after the crumbs (Build mode's "Move to UCSD"), or none.
+      offer: (spec) => el.offer(spec),
     };
     document.body.append(el);
   };

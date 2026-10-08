@@ -75,6 +75,18 @@ const NEEDS = { sortable: ['grip'], removable: ['grip'] };
  */
 export const STARTERS = [
   {
+    // What New makes in Build mode (runtime/shell.js): an app with nothing in
+    // it yet but the drive's tokens and its name, which the first build fills.
+    // Not in the gallery: it is where an app starts, not a kind of document.
+    id: 'app',
+    title: 'Empty app',
+    blurb: 'An empty app. Mark up what you want on it and press Build.',
+    parts: ['editable', 'state', 'history'],
+    listed: false,
+    hint: 'A tracker for my review invitations',
+    ideas: [],
+  },
+  {
     id: 'doc',
     title: 'Document',
     blurb: 'Notes on a page. Select words and the toolbar acts on them; the toolbar is in the file.',
@@ -347,7 +359,8 @@ export async function preview(id) {
 }
 
 export const list = () =>
-  STARTERS.map(({ id, title, blurb, accent, hint, ideas }) => ({ id, title, blurb, accent, hint, ideas }));
+  STARTERS.filter((starter) => starter.listed !== false)
+    .map(({ id, title, blurb, accent, hint, ideas }) => ({ id, title, blurb, accent, hint, ideas }));
 
 // A fresh regex each time it is asked for. A shared one carries `lastIndex`
 // between a `test` and a `matchAll`, and the cost of that is one include

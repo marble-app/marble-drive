@@ -25,6 +25,11 @@ import { createTools } from './tools.js';
 import { builtInProviders } from './providers/index.js';
 import { collectUsage, createUsageReader } from './usage.js';
 import { createUsageHistory } from './usage-history.js';
+import { createBuilds } from '../build/index.js';
+import { createBuildRoutes } from '../build/routes.js';
+import { createBuildStore } from '../build/store.js';
+import { createDriveIndex, suggestPieces } from '../build/pieces.js';
+import { writeReply } from '../build/reply.js';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const BRIDGE = path.resolve(HERE, '..', '..', 'bin', 'marble-mcp.js');
@@ -102,7 +107,7 @@ async function claimHost(dir) {
   return { held: null, release: null, why: 'could not take host.lock' };
 }
 
-export async function createAgents({ config, store, writeOps, createDocument, origin, browserPass = null, providers, log = console, usage = null, usageHistory = null, sandbox = null, restore = null, onLook = null, forgetWriter = null, awake, progress, streams = null, onActivity = null }) {
+export async function createAgents({ config, store, writeOps, createDocument, putDocument = null, moveDocument = null, freePath = null, origin, browserPass = null, providers, log = console, usage = null, usageHistory = null, sandbox = null, restore = null, onLook = null, forgetWriter = null, awake, progress, streams = null, onActivity = null }) {
   const dir = path.join(store.marbleDir, 'agents');
   const lock = await claimHost(dir);
   if (!lock.release) {
@@ -112,14 +117,14 @@ export async function createAgents({ config, store, writeOps, createDocument, or
     throw Object.assign(new Error(why), { code: 'EAGENTSHELD' });
   }
   try {
-    return await boot({ config, store, writeOps, createDocument, origin, browserPass, providers, log, dir, lock, usage, usageHistory, sandbox, restore, onLook, forgetWriter, awake, progress, streams, onActivity });
+    return await boot({ config, store, writeOps, createDocument, putDocument, moveDocument, freePath, origin, browserPass, providers, log, dir, lock, usage, usageHistory, sandbox, restore, onLook, forgetWriter, awake, progress, streams, onActivity });
   } catch (err) {
     await lock.release();
     throw err;
   }
 }
 
-async function boot({ config, store, writeOps, createDocument, origin, browserPass, providers, log, dir, lock, usage, usageHistory = null, sandbox = null, restore = null, onLook = null, forgetWriter = null, awake, progress, streams = null, onActivity = null }) {
+async function boot({ config, store, writeOps, createDocument, putDocument = null, moveDocument = null, freePath = null, origin, browserPass, providers, log, dir, lock, usage, usageHistory = null, sandbox = null, restore = null, onLook = null, forgetWriter = null, awake, progress, streams = null, onActivity = null }) {
   const agentStore = createAgentStore({ dir, defaultProvider: config.agentProvider, log });
   await agentStore.ready();
   const keys = createKeyStore({ file: config.agentKeysFile });
@@ -152,6 +157,9 @@ async function boot({ config, store, writeOps, createDocument, origin, browserPa
   // messaging. `messaging` is created empty here, handed to the tools, and
   // filled in once the runner exists — see below.
   const messaging = {};
+  // The same for Build mode: the build_plan tool hands its plan to the
+  // builds, which need the runner to exist first.
+  const building = {};
   const tools = createTools({
     store,
     writeOps,
@@ -162,6 +170,7 @@ async function boot({ config, store, writeOps, createDocument, origin, browserPa
     examine,
     onLook: look,
     messaging,
+    building,
     log,
   });
   const projects = { find: async (id) => findProject({ settings: await agentStore.settings(), root: config.root }, id) };
@@ -188,6 +197,8 @@ async function boot({ config, store, writeOps, createDocument, origin, browserPa
     publish: (...args) => {
       hub.publish(...args);
       onActivity?.();
+      // A build is a turn: Build mode hears it end (server/build).
+      building.onEvent?.(args[0], args[1]);
     },
     publishAsk: hub.publishAsk,
     limits: {
@@ -273,6 +284,32 @@ async function boot({ config, store, writeOps, createDocument, origin, browserPa
     log,
   });
 
+  // Build mode (server/build): an app's marks, builds and pieces.
+  const builds = createBuilds({
+    buildStore: createBuildStore({ dir: path.join(store.marbleDir, 'builds') }),
+    store,
+    runner,
+    agentStore,
+    hub,
+    startConversation: (body) => routes.startConversation(body),
+    defaultProvider: () => routes.defaultProvider(),
+    putDocument: putDocument ?? ((docPath, source, options) => createDocument(docPath, source, options)),
+    moveDocument,
+    freePath,
+    reply: config.agentNaming ? (input) => writeReply({ ...input, model: config.agentNamingModel, log }) : null,
+    suggest: config.agentNaming ? (input) => suggestPieces({ ...input, model: config.agentNamingModel, log }) : null,
+    driveRegions: createDriveIndex({ store }),
+    log,
+  });
+  await builds.boot();
+  Object.assign(building, {
+    plan: (turn, input) => builds.plan(turn, input),
+    onEvent: (conversationId, event) => {
+      builds.onEvent(conversationId, event).catch((err) => log.error(`[builds] ${err.message}`));
+    },
+  });
+  routes.useBuilds(createBuildRoutes({ builds, hub, maxBody: config.maxBodyBytes }));
+
   return {
     handle: routes.handle,
     startRun: routes.startRun,
@@ -286,7 +323,9 @@ async function boot({ config, store, writeOps, createDocument, origin, browserPa
     /** A document moved (server/app.js): the conversations aimed at it aim
      *  where it went, so the next turn writes to the document and not to its
      *  old address. `at` maps an old path to its new one, or null. */
+    builds,
     async followMove(at) {
+      await builds.move(at).catch((err) => log.error(`[builds] ${err.message}`));
       for (const summary of [...await agentStore.conversations(), ...await agentStore.conversations({ archived: true })]) {
         const next = at(summary.target);
         if (!next) continue;

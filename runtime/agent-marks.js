@@ -41,6 +41,8 @@
     select: '<svg viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><rect x="4" y="4" width="16" height="16" rx="2" stroke-dasharray="3 2.5"/></svg>',
     sketch: '<svg viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M3.5 16.2c2.6-6.4 4.6-9.6 6-9.6 2 0 .4 9.6 2.4 9.6 1.4 0 3.1-3.2 5.1-9.6"/><path d="M4 20.2h16"/></svg>',
     text: '<svg viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M5 7.5V5.5h14v2"/><path d="M12 5.5v13"/><path d="M9 18.5h6"/></svg>',
+    // Build mode's one new tool: a pin with a thread, which the agent answers.
+    comment: '<svg viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 4.5a7.5 7.5 0 1 1-3.5 14.1L4.5 19.5l.9-3.9A7.5 7.5 0 0 1 12 4.5z"/></svg>',
     explore: '<svg viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round"><rect x="3" y="4" width="8" height="7" rx="2"/><rect x="13" y="4" width="8" height="7" rx="2"/><rect x="3" y="13" width="8" height="7" rx="2"/><rect x="13" y="13" width="8" height="7" rx="2"/></svg>',
     clear: '<svg viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M8.5 18.5 4 14a1.6 1.6 0 0 1 0-2.3l7-7a1.6 1.6 0 0 1 2.3 0l5.2 5.2a1.6 1.6 0 0 1 0 2.3l-6.3 6.3z"/><path d="M9 20h11"/></svg>',
     done: '<svg viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round"><path d="M6 6l12 12M18 6 6 18"/></svg>',
@@ -216,14 +218,15 @@
     .marble-marks-bar {
       position: fixed; transform: translateX(-50%);
       left: calc(var(--marble-shell-left, 0px) + (100vw - var(--marble-shell-left, 0px) - var(--marble-dock-right, 0px)) / 2);
-      bottom: calc(18px + env(safe-area-inset-bottom, 0px));
+      /* Above a sheet from the foot (Build mode's side on a phone). */
+      bottom: calc(18px + var(--marble-dock-bottom, 0px) + env(safe-area-inset-bottom, 0px));
       display: flex; align-items: center; gap: 2px; padding: 5px; border-radius: 15px;
       pointer-events: auto;
       background: color-mix(in srgb, var(--marks-paper) 74%, transparent);
       -webkit-backdrop-filter: blur(20px) saturate(180%); backdrop-filter: blur(20px) saturate(180%);
       box-shadow: inset 0 1px 0 color-mix(in srgb, #fff 40%, transparent),
         0 1px 2px rgba(0, 0, 0, .08), 0 12px 32px rgba(0, 0, 0, .16);
-      transition: opacity 180ms ${EASE}, transform 180ms ${EASE};
+      transition: opacity 180ms ${EASE}, transform 180ms ${EASE}, bottom 340ms ${EASE};
     }
     .marble-marks-bar[hidden] { display: none; }
     @starting-style { .marble-marks-bar { opacity: 0; transform: translateX(-50%) translateY(10px); } }
@@ -281,6 +284,94 @@
     }
     .marble-marks-go:active { transform: scale(.99); }
 
+    /* ---------------------------------------------------------- Build mode
+
+       Describe is where every app starts, so it says so with nothing but the
+       toolbar rising from the foot: no ring round the window, no line at its
+       top, and the app at full size. The bar is a rounded rectangle at the
+       sheet radius, its tools at 10px inside. */
+    .marble-marks-layer[data-build] .marble-marks-ring,
+    .marble-marks-layer[data-build] .marble-marks-notice { display: none; }
+    .marble-marks-layer[data-build] .marble-marks-bar { border-radius: 14px; transition: opacity 340ms ${EASE}, transform 340ms ${EASE}; }
+    .marble-marks-slot { display: contents; }
+    /* Comment is the one tool Describe did not have: a dot says so until it
+       is used once. */
+    .marble-marks-tool[data-new]::before {
+      content: ""; position: absolute; top: 6px; right: 6px; width: 6px; height: 6px; border-radius: 50%;
+      background: var(--accent, #9bb6cf); box-shadow: 0 0 0 2px var(--marks-paper);
+    }
+    .marble-marks-tool[aria-pressed="true"][data-new]::before { display: none; }
+    .marble-marks-layer[data-mode="comment"] .marble-marks-overlay { cursor: copy; }
+
+    /* A mark says where it is in the builds, in its foot: waiting for the
+       next one while a build runs, in the build, or built. Built marks stay,
+       faint, as the record of why a part looks as it does. */
+    .marble-marks-note-foot {
+      display: flex; align-items: center; gap: 5px; padding: 0 8px 6px; font-size: 11px; line-height: 1.2;
+      color: color-mix(in srgb, var(--marks-ink) 55%, transparent);
+    }
+    .marble-marks-note-foot[hidden] { display: none; }
+    .marble-marks-note-foot::before { content: ""; width: 5px; height: 5px; border-radius: 50%; background: currentColor; opacity: .7; }
+    .marble-marks-note[data-state="built"], .marble-marks-piece[data-state="built"] { opacity: .62; }
+    .marble-marks-stroke[data-state="built"] { opacity: .45; }
+
+    /* A comment is a numbered pin with its beak on the point, as a kept note
+       is (agent-notes.js); its thread opens beside it (build-mode.js). */
+    .marble-marks-pin {
+      position: fixed; width: 22px; height: 22px; padding: 0; margin: 0; border: 0; cursor: pointer; pointer-events: auto;
+      transform: translate(0, -100%);
+      border-radius: 50% 50% 50% 3px; background: var(--marks-mark); color: var(--marks-paper);
+      font: 650 11px/22px var(--ui-font, system-ui, sans-serif); text-align: center; box-shadow: 0 1px 3px rgba(0,0,0,.2);
+      transition: scale 140ms ${EASE};
+    }
+    .marble-marks-pin:hover, .marble-marks-pin:focus-visible, .marble-marks-pin[aria-expanded="true"] { scale: 1.12; outline: none; }
+    .marble-marks-pin[data-state="built"] { opacity: .62; }
+    .marble-marks-pin[hidden] { display: none; }
+    /* With Build mode's margin open (build-margin.js), the marks are read
+       there: the bodies of notes and pieces leave the app, sketches fade, and
+       the margin's own pins say where each one is. One being written stays
+       until it is left: a new note, a comment not yet posted. */
+    .marble-marks-layer[data-margin] :is(.marble-marks-note:not(:focus-within), .marble-marks-piece, .marble-marks-pin:not([data-local])) {
+      opacity: 0; visibility: hidden; pointer-events: none; transition: opacity 200ms ${EASE}, visibility 0s 200ms;
+    }
+    .marble-marks-layer[data-margin] .marble-marks-stroke { opacity: .35; }
+    @starting-style { .marble-marks-pin { scale: .4; } }
+
+    /* A piece put on the app: attached on top like a card on a canvas,
+       outlined dashed (a part still to come) until a build works it in. */
+    .marble-marks-piece {
+      position: fixed; pointer-events: auto; width: 268px; border-radius: 12px;
+      background: var(--marks-paper); color: var(--marks-ink);
+      box-shadow: 0 2px 6px rgba(0,0,0,.07), 0 8px 18px rgba(0,0,0,.08);
+      outline: 1px dashed color-mix(in srgb, var(--marks-mark) 75%, transparent); outline-offset: 3px;
+    }
+    .marble-marks-piece[hidden] { display: none; }
+    .marble-marks-piece-head {
+      display: flex; align-items: center; gap: 6px; padding: 7px 6px 6px 11px; cursor: grab; touch-action: none;
+      font-size: 12.5px; font-weight: 500;
+    }
+    .marble-marks-piece[data-dragging] .marble-marks-piece-head { cursor: grabbing; }
+    .marble-marks-piece-head span { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .marble-marks-piece-head small { font-weight: 400; color: color-mix(in srgb, var(--marks-ink) 50%, transparent); font-size: 12px; }
+    .marble-marks-piece iframe {
+      display: block; width: calc(100% - 16px); height: 132px; margin: 0 8px; border: 0; border-radius: 8px;
+      background: var(--paper, #fafaf7); pointer-events: none;
+    }
+    .marble-marks-piece .marble-marks-note-foot { padding: 7px 11px 8px; }
+
+    /* A phone has no room for the whole bar: the tools close up, the
+       hairlines go, and Clear waits for Select (its bar can remove what is
+       picked). Nothing runs off the side. */
+    @media (max-width: 520px) {
+      .marble-marks-layer[data-build] .marble-marks-bar { gap: 0; padding: 4px; max-width: calc(100vw - 16px); }
+      .marble-marks-layer[data-build] .marble-marks-tool { width: 31px; height: 36px; }
+      .marble-marks-layer[data-build] .marble-marks-sep { display: none; }
+      .marble-marks-layer[data-build] .marble-marks-tool[data-tool="clear"] { display: none; }
+    }
+
+    /* Picked, in Build mode: Select's outline and nothing filled. */
+    .marble-marks-layer[data-build] .marble-marks-frame { background: none; }
+
     @media (prefers-reduced-transparency: reduce) {
       .marble-marks-bar { background: var(--marks-paper); -webkit-backdrop-filter: none; backdrop-filter: none; }
     }
@@ -324,10 +415,24 @@
     style.textContent = STYLE;
     document.head.append(style);
 
+    // Build mode (build-mode.js): every app starts in Describe, its marks are
+    // kept for it by the host, and Build takes them. The Drive's own page is
+    // the frame apps sit in, not an app to build, and keeps Describe as it was.
+    // It can be turned off for this browser (the shell's Settings, "Build
+    // mode"), or by a page for itself (<meta name="marble-build" content="off">),
+    // and then Describe is the mode you turn on that sends from the ⌘J line.
+    const buildOff = () => {
+      if (document.querySelector('meta[name="marble-build"][content="off"]')) return true;
+      try { return localStorage.getItem('marble-build') === 'off'; } catch { return false; }
+    };
+    const building = !document.body?.classList.contains('drive') && !buildOff();
+    const app = marble.app;
+
     const layer = document.createElement('div');
     layer.className = 'marble-marks-layer';
     layer.setAttribute(TRANSIENT, '');
     layer.setAttribute('popover', 'manual');
+    layer.toggleAttribute('data-build', building);
     document.documentElement.append(layer);
     try { layer.showPopover(); } catch { /* no popover here: fixed positioning still stands */ }
 
@@ -415,10 +520,20 @@
       sketch: button('sketch', 'Sketch', GLYPHS.sketch, { pressed: false, key: 'P' }),
       text: button('text', 'Note', GLYPHS.text, { pressed: false, key: 'T' }),
     };
+    if (building) {
+      tools.comment = button('comment', 'Comment', GLYPHS.comment, { pressed: false, key: 'C' });
+      try { if (!localStorage.getItem('marble-build:commented')) tools.comment.dataset.new = ''; } catch { /* private mode */ }
+    }
     el('span', 'marble-marks-sep', bar);
+    // Build mode drops Explore from the bar: Build is what the marks are for.
     const exploreButton = button('explore', 'Explore variations', GLYPHS.explore, { key: 'E' });
+    if (building) exploreButton.remove();
     const clearButton = button('clear', 'Clear marks', GLYPHS.clear);
     el('span', 'marble-marks-sep', bar);
+    // Where Build mode puts the build: its status, Builds and Build.
+    const slot = el('span', 'marble-marks-slot', bar);
+    if (building) el('span', 'marble-marks-sep', bar);
+    else slot.remove();
     const doneButton = button('done', 'Done', GLYPHS.done, { key: 'Esc' });
 
     // The notice, shown with the rest of the layer only while describing.
@@ -502,6 +617,19 @@
     let exploring = false;
     const marks = [];
     const picked = new Set();
+    // Who wants to know (build-mode.js): that the marks changed (`watchers`),
+    // and what is picked and where (`pickers`), on every paint of the frame.
+    const watchers = new Set();
+    const pickers = new Set();
+    const tellPicked = (span) => {
+      if (!pickers.size) return;
+      const detail = {
+        marks: [...picked].map((mark) => mark.id).filter(Boolean),
+        parts: fromUs ? [...mine] : [],
+        span: span && describing ? { left: span.left, top: span.top, width: span.width, height: span.height } : null,
+      };
+      for (const fn of pickers) fn(detail);
+    };
 
     // ---------------------------------------------------------------- boxes
     //
@@ -603,7 +731,7 @@
     const spanOf = (mark) => {
       const box = boxOf(mark.anchorId);
       if (!box) return null;
-      if (mark.type === 'note') {
+      if (mark.el) {
         const r = mark.el.getBoundingClientRect();
         return r.width ? { left: r.left, top: r.top, width: r.width, height: r.height } : null;
       }
@@ -619,12 +747,14 @@
      *  sees under their own pointer. */
     const phraseOf = (mark) => {
       if (mark.type === 'note') return `a note on ${mark.anchorId}: "${mark.text}"`;
+      if (mark.type === 'comment') return `a comment on ${mark.anchorId}`;
+      if (mark.type === 'piece') return `the piece "${mark.piece?.title ?? 'a piece'}" on ${mark.anchorId}`;
       if (mark.kind === 'box') return `a box around ${names(mark.ids)}`;
       if (mark.kind === 'arrow') return `an arrow from ${mark.from ?? 'nothing'} to ${mark.to ?? 'nothing'}`;
       return `ink over ${names(mark.ids)}`;
     };
     const idsOf = (mark) => {
-      if (mark.type === 'note') return mark.anchorId ? [mark.anchorId] : [];
+      if (mark.type !== 'stroke') return mark.anchorId ? [mark.anchorId] : [];
       return mark.kind === 'arrow' ? [mark.from, mark.to].filter(Boolean) : mark.ids;
     };
     const drafts = () => marks.filter((mark) => !mark.sent);
@@ -636,7 +766,7 @@
     const repaint = () => {
       for (const mark of marks) {
         const box = boxOf(mark.anchorId);
-        if (mark.type === 'note') {
+        if (mark.el) {
           if (!box) { mark.el.hidden = true; continue; }
           mark.el.hidden = false;
           mark.el.style.left = `${Math.round(box.left + mark.u * box.width)}px`;
@@ -684,7 +814,9 @@
         const box = boxOf(id);
         if (box?.width || box?.height) spans.push(box);
       }
-      for (const mark of drafts()) {
+      // In Build mode the marks stay on the app between builds, so the frame
+      // is round what is picked, not round everything ever marked.
+      for (const mark of (building ? [...picked] : drafts())) {
         const span = spanOf(mark);
         if (span) spans.push(span);
       }
@@ -698,6 +830,7 @@
 
     const paintFrame = () => {
       const span = union();
+      if (building) tellPicked(span);
       if (!span) {
         frame.hidden = true;
         card?.show(false);
@@ -778,6 +911,9 @@
       return card;
     };
     const paintCard = (span) => {
+      // Build mode hangs its own bar on the selection (build-mode.js): Build
+      // these, and nothing sent from here.
+      if (building) return;
       if (!describing || explore.hidden === false) { card?.show(false); return; }
       const lent = borrowCard();
       if (!lent) return;
@@ -880,6 +1016,61 @@
       return null;
     };
 
+    // ------------------------------------------------------------- keeping
+    //
+    // In Build mode a mark outlives the tab: the host keeps every app's marks
+    // (server/build), and build-mode.js carries them there and back. Each mark
+    // gets an id when it is made; `keep` says it changed, `forget` that it is
+    // gone, and `load` draws what the host has, mark by mark, leaving alone
+    // the one under the hand.
+    const newMarkId = () => `m${Math.random().toString(36).slice(2, 10)}${Date.now().toString(36).slice(-3)}`;
+    const keepers = new Set();
+    const serial = (mark) => {
+      const out = {
+        id: mark.id, type: mark.type, anchorId: mark.anchorId, u: mark.u ?? 0, v: mark.v ?? 0, at: mark.at,
+        state: mark.state ?? 'waiting', build: mark.build ?? null,
+      };
+      if (mark.first) out.first = true;
+      if (mark.type === 'note') out.text = mark.text;
+      if (mark.type === 'stroke') {
+        Object.assign(out, { kind: mark.kind, ids: mark.ids, from: mark.from, to: mark.to, parts: mark.parts.map((part) => ({ pairs: part.pairs })) });
+      }
+      if (mark.type === 'comment') { out.thread = mark.thread ?? []; out.resolved = Boolean(mark.resolved); }
+      if (mark.type === 'piece') { out.piece = mark.piece; }
+      return out;
+    };
+    const keep = (mark) => {
+      if (!building || !mark?.id || mark.local) return;
+      for (const fn of keepers) fn({ type: 'put', mark: serial(mark) });
+    };
+    const forget = (list) => {
+      const ids = list.filter((mark) => mark?.id && !mark.local).map((mark) => mark.id);
+      if (!building || !ids.length) return;
+      for (const fn of keepers) fn({ type: 'remove', ids });
+    };
+    /** What a mark's foot says: where it is in the builds. */
+    let buildRunning = false;
+    const footOf = (mark) => {
+      if (mark.state === 'built') return mark.first ? 'Your prompt · built' : 'Built';
+      if (mark.held && mark.state === 'waiting') return 'Held back';
+      if (mark.state === 'building') return mark.first ? 'Your prompt · building' : 'In this build';
+      if (buildRunning) return 'Next build';
+      return mark.first ? 'Your prompt' : '';
+    };
+    const paintState = (mark) => {
+      const state = mark.state ?? 'waiting';
+      if (mark.type === 'stroke') { for (const part of mark.parts) part.el.dataset.state = state === 'waiting' ? 'draft' : state; return; }
+      if (!mark.el) return;
+      mark.el.dataset.state = state === 'waiting' ? 'draft' : state;
+      mark.el.toggleAttribute('data-first', Boolean(mark.first));
+      const foot = mark.el.querySelector(':scope > .marble-marks-note-foot');
+      if (foot) {
+        const words = mark.type === 'piece' && state === 'waiting' && !buildRunning ? 'Not built in yet' : footOf(mark);
+        foot.textContent = words;
+        foot.hidden = !words;
+      }
+    };
+
     const commitStroke = (points) => {
       const geometry = G();
       if (points.length < 3 || geometry.lengthOf(points) < SCRATCH) return false;
@@ -888,16 +1079,17 @@
       // put on it, not a second mark — and which end it is on is which way the
       // arrow points.
       const last = marks[marks.length - 1];
-      if (last && last.type === 'stroke' && !last.sent) {
+      if (last && last.type === 'stroke' && !last.sent && (last.state ?? 'waiting') === 'waiting') {
         // Measured where the shaft is *now*: the page may have scrolled
         // between the two strokes.
         const shaftBox = boxOf(last.anchorId);
         const shaft = shaftBox ? pointsOf(last.parts[0], shaftBox) : last.points;
-        const end = geometry.arrowHeadFor({ kind: last.kind, points: shaft }, points, { elapsed: Date.now() - last.at });
+        const end = shaft ? geometry.arrowHeadFor({ kind: last.kind, points: shaft }, points, { elapsed: Date.now() - last.at }) : null;
         if (end) {
           if (end === 'start') { const from = last.from; last.from = last.to; last.to = from; }
           const box = boxOf(last.anchorId) ?? geometry.boundsOf(points);
           last.parts.push({ pairs: geometry.toFractions(box, points), el: newPath() });
+          keep(last);
           return true;
         }
       }
@@ -906,11 +1098,13 @@
       const anchor = elementAt(centre.x, centre.y);
       if (!anchor) return false;
       const mark = {
+        id: newMarkId(),
         type: 'stroke',
         kind,
         anchorId: anchor.getAttribute('data-marble-id'),
         at: Date.now(),
         sent: false,
+        state: 'waiting',
         points,
         parts: [{ pairs: geometry.toFractions(anchor.getBoundingClientRect(), points), el: newPath() }],
         ids: [],
@@ -924,47 +1118,49 @@
         mark.ids = geometry.idsInRect(bounds, collectBoxes());
       }
       marks.push(mark);
+      keep(mark);
       return true;
     };
 
     // ------------------------------------------------------------------ Text
 
-    const placeNote = (x, y) => {
-      const anchor = elementAt(x, y);
-      if (!anchor) return null;
-      const box = anchor.getBoundingClientRect();
-      const node = el('div', 'marble-marks-note', notes);
-      node.dataset.state = 'draft';
-      const grip = el('div', 'marble-marks-note-grip', node);
-      el('span', 'marble-marks-note-dots', grip);
+    const closeButton = (label) => {
       const close = document.createElement('button');
       close.type = 'button';
       close.className = 'marble-marks-note-close';
       close.setAttribute(TRANSIENT, '');
-      close.setAttribute('aria-label', 'Remove this note');
+      close.setAttribute('aria-label', label);
       close.textContent = '×';
+      return close;
+    };
+
+    /** A note's card, for a note made here or one the host kept. */
+    const drawNote = (mark, { focus = false } = {}) => {
+      const node = el('div', 'marble-marks-note', notes);
+      node.dataset.state = 'draft';
+      const grip = el('div', 'marble-marks-note-grip', node);
+      el('span', 'marble-marks-note-dots', grip);
+      const close = closeButton('Remove this note');
       grip.append(close);
       const body = el('div', 'marble-marks-note-body', node);
       body.contentEditable = 'true';
       body.setAttribute('role', 'textbox');
       body.dataset.placeholder = 'Say what you want here…';
-      const mark = {
-        type: 'note',
-        kind: 'text',
-        anchorId: anchor.getAttribute('data-marble-id'),
-        at: Date.now(),
-        sent: false,
-        u: box.width ? (x - box.left) / box.width : 0,
-        v: box.height ? (y - box.top) / box.height : 0,
-        text: '',
-        el: node,
-      };
-      marks.push(mark);
+      body.textContent = mark.text ?? '';
+      const foot = el('div', 'marble-marks-note-foot', node);
+      foot.hidden = true;
+      mark.el = node;
+      mark.body = body;
       close.addEventListener('click', () => removeMark(mark));
       // A note names the element it was put on, the same way a stroke names
       // what it covers: what you wrote on is part of what you are pointing at.
+      let typed = 0;
       body.addEventListener('input', () => {
         mark.text = body.textContent.trim();
+        // Kept as it is typed, a beat after the last key, and for certain
+        // when the caret leaves it.
+        clearTimeout(typed);
+        if (mark.text) typed = setTimeout(() => { delete mark.local; keep(mark); }, 600);
         syncSelection();
         syncBrief();
       });
@@ -972,15 +1168,191 @@
         if (event.key === 'Escape') { event.stopPropagation(); body.blur(); }
       });
       // An empty note is a slip of the hand, not a mark.
-      body.addEventListener('blur', () => { if (!body.textContent.trim()) removeMark(mark); });
+      body.addEventListener('blur', () => {
+        clearTimeout(typed);
+        if (!body.textContent.trim()) { removeMark(mark); return; }
+        mark.text = body.textContent.trim();
+        delete mark.local;
+        keep(mark);
+      });
       grip.addEventListener('pointerdown', (event) => startMove(event, [mark], node));
+      paintState(mark);
+      if (focus) body.focus();
+      return mark;
+    };
+
+    const placeNote = (x, y, { text = '', anchor: given = null } = {}) => {
+      const anchor = given ?? elementAt(x, y);
+      if (!anchor) return null;
+      const box = anchor.getBoundingClientRect();
+      const mark = {
+        id: newMarkId(),
+        type: 'note',
+        kind: 'text',
+        anchorId: anchor.getAttribute('data-marble-id'),
+        at: Date.now(),
+        sent: false,
+        state: 'waiting',
+        // Not kept until there are words in it.
+        local: !text,
+        u: box.width ? (x - box.left) / box.width : 0,
+        v: box.height ? (y - box.top) / box.height : 0,
+        text,
+      };
+      marks.push(mark);
+      drawNote(mark, { focus: !text });
+      if (text) keep(mark);
       repaint();
-      body.focus();
+      return mark;
+    };
+
+    // --------------------------------------------------------------- Comment
+
+    /** The comments, numbered in the order they were made. */
+    const numberPins = () => {
+      let n = 0;
+      for (const mark of marks) if (mark.type === 'comment') mark.el.textContent = String(n += 1);
+    };
+    const drawComment = (mark) => {
+      const pin = document.createElement('button');
+      pin.type = 'button';
+      pin.className = 'marble-marks-pin';
+      pin.setAttribute(TRANSIENT, '');
+      pin.toggleAttribute('data-local', Boolean(mark.local));
+      pin.setAttribute('aria-expanded', 'false');
+      notes.append(pin);
+      mark.el = pin;
+      const label = () => {
+        const said = (mark.thread ?? []).filter((line) => line.text);
+        pin.setAttribute('aria-label', said.length ? `Comment: ${said[0].text}` : 'New comment');
+      };
+      mark.relabel = label;
+      label();
+      // A press opens the thread; a drag moves the pin.
+      pin.addEventListener('pointerdown', (event) => {
+        if (event.button !== 0) return;
+        const x0 = event.clientX;
+        const y0 = event.clientY;
+        const up = (end) => {
+          removeEventListener('pointerup', up, true);
+          if (Math.hypot(end.clientX - x0, end.clientY - y0) < 4) openComment(mark);
+        };
+        addEventListener('pointerup', up, true);
+        startMove(event, [mark], pin);
+      });
+      pin.addEventListener('keydown', (event) => {
+        if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); openComment(mark); }
+      });
+      paintState(mark);
+      numberPins();
+      return mark;
+    };
+    const openComment = (mark, { fresh = false } = {}) => {
+      for (const other of marks) if (other.type === 'comment') other.el.setAttribute('aria-expanded', String(other === mark));
+      dispatchEvent(new CustomEvent('marble-marks:comment', { detail: { id: mark.id, fresh } }));
+    };
+    const placeComment = (x, y) => {
+      const anchor = elementAt(x, y);
+      if (!anchor) return null;
+      const box = anchor.getBoundingClientRect();
+      const mark = {
+        id: newMarkId(),
+        type: 'comment',
+        anchorId: anchor.getAttribute('data-marble-id'),
+        at: Date.now(),
+        state: 'waiting',
+        // Kept once something is said in it (build-mode.js posts it).
+        local: true,
+        u: box.width ? (x - box.left) / box.width : 0,
+        v: box.height ? (y - box.top) / box.height : 0,
+        thread: [],
+      };
+      marks.push(mark);
+      drawComment(mark);
+      repaint();
+      openComment(mark, { fresh: true });
+      try { localStorage.setItem('marble-build:commented', '1'); } catch { /* private mode */ }
+      delete tools.comment?.dataset.new;
+      return mark;
+    };
+
+    // ----------------------------------------------------------------- Piece
+
+    /** A piece's card on the app: its name and where it is from, its own
+     *  markup drawn small in a frame where nothing runs, and its state. */
+    const drawPiece = (mark) => {
+      const node = el('div', 'marble-marks-piece', notes);
+      const head = el('div', 'marble-marks-piece-head', node);
+      const name = el('span', '', head);
+      name.textContent = mark.piece?.title ?? 'A piece';
+      const from = mark.piece?.source?.path ? mark.piece.source.path.split('/').pop() : '';
+      if (from) {
+        const small = el('small', '', name);
+        small.textContent = ` · ${from}`;
+      }
+      const close = closeButton('Take this piece off');
+      head.append(close);
+      const frameEl = document.createElement('iframe');
+      frameEl.setAttribute('sandbox', '');
+      frameEl.setAttribute('loading', 'lazy');
+      frameEl.setAttribute('tabindex', '-1');
+      frameEl.setAttribute('aria-hidden', 'true');
+      frameEl.setAttribute(TRANSIENT, '');
+      const p = mark.piece ?? {};
+      const query = p.id && !String(p.id).includes('#')
+        ? `id=${encodeURIComponent(p.id)}`
+        : `path=${encodeURIComponent(p.source?.path ?? '')}&at=${encodeURIComponent(p.source?.id ?? '')}`;
+      frameEl.src = `/agent/pieces/preview?${query}`;
+      node.append(frameEl);
+      const foot = el('div', 'marble-marks-note-foot', node);
+      foot.hidden = true;
+      mark.el = node;
+      close.addEventListener('click', () => removeMark(mark));
+      head.addEventListener('pointerdown', (event) => { if (event.target !== close) startMove(event, [mark], node); });
+      paintState(mark);
+      return mark;
+    };
+    /** A piece put on the app at a point (a drop), or near the top of what is
+     *  in view (Incorporate). */
+    const placePiece = (piece, at = null) => {
+      let x = at?.x;
+      let y = at?.y;
+      if (x == null || y == null) {
+        // In view, toward the right of the page, clear of the top bar; a few
+        // pieces in a row step down so none lands on the last.
+        const placedNow = marks.filter((m) => m.type === 'piece' && m.state === 'waiting').length;
+        x = Math.max(24, innerWidth - 268 - 48 - (Number.parseFloat(getComputedStyle(document.documentElement).getPropertyValue('--marble-dock-right')) || 0));
+        y = Math.min(innerHeight - 260, 96 + placedNow * 36);
+      }
+      const anchor = elementAt(x, y);
+      if (!anchor) return null;
+      const box = anchor.getBoundingClientRect();
+      const mark = {
+        id: newMarkId(),
+        type: 'piece',
+        anchorId: anchor.getAttribute('data-marble-id'),
+        at: Date.now(),
+        state: 'waiting',
+        u: box.width ? (x - box.left) / box.width : 0,
+        v: box.height ? (y - box.top) / box.height : 0,
+        piece: {
+          id: String(piece.id ?? ''),
+          title: String(piece.title ?? 'A piece'),
+          kind: String(piece.kind ?? ''),
+          line: String(piece.line ?? ''),
+          source: piece.source ?? null,
+        },
+      };
+      marks.push(mark);
+      drawPiece(mark);
+      keep(mark);
+      repaint();
+      syncBrief();
       return mark;
     };
 
     /** Each element a mark is drawn with, however it was drawn. */
-    const elsOf = (mark) => (mark.type === 'note' ? [mark.el] : mark.type === 'stroke' ? mark.parts.map((part) => part.el) : []);
+    const elsOf = (mark) => (mark.el ? [mark.el] : mark.type === 'stroke' ? mark.parts.map((part) => part.el) : []);
     /** Sent, and being worked from: into the held sheet, where leaving the
      *  mode does not reach. */
     const hold = (mark, id) => {
@@ -1002,31 +1374,102 @@
       }
     };
 
-    const removeMark = (mark) => {
+    const dropMark = (mark) => {
       const at = marks.indexOf(mark);
-      if (at < 0) return;
+      if (at < 0) return false;
       marks.splice(at, 1);
       picked.delete(mark);
-      if (mark.type === 'note') mark.el.remove();
-      else if (mark.type === 'stroke') for (const part of mark.parts) part.el.remove();
+      for (const node of elsOf(mark)) node.remove();
+      if (mark.type === 'comment') numberPins();
+      return true;
+    };
+    const removeMark = (mark) => {
+      // A mark a build is working from is its brief now.
+      if (mark.state === 'building') return;
+      if (!dropMark(mark)) return;
+      forget([mark]);
       syncSelection();
       syncBrief();
     };
     const clearMarks = () => {
       // What an agent is working from is its brief now, not this mode's to
-      // rub out; it goes when that callout is put away.
-      const keep = marks.filter((mark) => mark.working !== undefined);
+      // rub out; it goes when that callout is put away. A mark in a running
+      // build is the same.
+      const kept = marks.filter((mark) => mark.working !== undefined || mark.state === 'building');
+      const gone = [];
       for (const mark of marks.splice(0)) {
-        if (keep.includes(mark)) continue;
+        if (kept.includes(mark)) continue;
+        gone.push(mark);
         for (const node of elsOf(mark)) node.remove();
       }
-      marks.push(...keep);
+      marks.push(...kept);
+      forget(gone);
       picked.clear();
       caption.hidden = true;
       area = [];
+      numberPins();
       syncSelection();
       syncBrief();
       repaint();
+    };
+
+    /** The host's marks, drawn: new ones made, changed ones moved or
+     *  re-worded, gone ones taken off. A note with the caret in it, a mark
+     *  under the hand, and one not kept yet are left as they are. */
+    const load = (list) => {
+      const wanted = new Map((Array.isArray(list) ? list : []).filter((m) => m?.id).map((m) => [m.id, m]));
+      for (const mark of [...marks]) {
+        if (!mark.id || mark.local || wanted.has(mark.id)) continue;
+        if (mark.working !== undefined) continue;
+        dropMark(mark);
+      }
+      const held = moving ? new Set(moving.marks.map((item) => item.mark)) : new Set();
+      for (const [id, given] of wanted) {
+        let mark = marks.find((m) => m.id === id);
+        if (mark && (held.has(mark) || (mark.body && document.activeElement === mark.body))) {
+          mark.state = given.state;
+          mark.build = given.build;
+          mark.held = Boolean(given.held);
+          paintState(mark);
+          continue;
+        }
+        if (!mark) {
+          mark = { id, type: given.type, sent: false };
+          marks.push(mark);
+        }
+        Object.assign(mark, {
+          anchorId: given.anchorId, u: given.u ?? 0, v: given.v ?? 0, at: given.at ?? Date.now(),
+          state: given.state ?? 'waiting', build: given.build ?? null, first: Boolean(given.first),
+          // Set by their own presses on the host, never by this page.
+          held: Boolean(given.held),
+        });
+        if (given.type === 'note') {
+          mark.kind = 'text';
+          mark.text = given.text ?? '';
+          if (!mark.el) drawNote(mark);
+          else if (mark.body && mark.body.textContent !== mark.text) mark.body.textContent = mark.text;
+        } else if (given.type === 'stroke') {
+          Object.assign(mark, { kind: given.kind, ids: given.ids ?? [], from: given.from ?? null, to: given.to ?? null });
+          const parts = (given.parts ?? []).map((part) => ({ pairs: part.pairs }));
+          for (const old of mark.parts ?? []) old.el.remove();
+          mark.parts = parts.map((part) => ({ ...part, el: newPath() }));
+        } else if (given.type === 'comment') {
+          mark.thread = given.thread ?? [];
+          mark.resolved = Boolean(given.resolved);
+          if (!mark.el) drawComment(mark);
+          mark.relabel?.();
+        } else if (given.type === 'piece') {
+          mark.piece = given.piece;
+          if (!mark.el) drawPiece(mark);
+        }
+        paintState(mark);
+      }
+      // The order the host keeps is the order they were made in.
+      marks.sort((a, b) => (a.at ?? 0) - (b.at ?? 0));
+      numberPins();
+      repaint();
+      syncSelection();
+      syncBrief();
     };
     const undoStroke = () => {
       const mark = marks[marks.length - 1];
@@ -1070,6 +1513,7 @@
     };
     addEventListener('pointermove', (event) => {
       if (!moving || event.pointerId !== moving.id) return;
+      moving.travel = (moving.travel ?? 0) + Math.hypot(event.clientX - moving.x, event.clientY - moving.y);
       moveBy(event.clientX - moving.x, event.clientY - moving.y);
       moving.x = event.clientX;
       moving.y = event.clientY;
@@ -1078,8 +1522,12 @@
     const dropMove = (event) => {
       if (!moving || event.pointerId !== moving.id) return;
       delete moving.node.dataset.dragging;
+      const moved = moving.marks.map((item) => item.mark);
+      const travelled = moving.travel ?? 0;
       moving = null;
       repaint();
+      // Where it was put down is where it is kept.
+      if (travelled > 2) for (const mark of moved) keep(mark);
     };
     addEventListener('pointerup', dropMove);
     addEventListener('pointercancel', dropMove);
@@ -1090,6 +1538,14 @@
      *  kept in two lists so that drawing does not wipe a rectangle and rubbing
      *  a stroke out does not wipe the rectangle either. */
     const syncSelection = () => {
+      // In Build mode the marks are the brief, kept on the host and taken by
+      // Build: what the agent is pointed at is the parts picked with Select,
+      // and nothing is handed to the callout from here.
+      if (building) {
+        mine = area.filter((id) => document.querySelector(`[data-marble-id="${CSS.escape(id)}"]`));
+        fromUs = mine.length > 0;
+        return;
+      }
       const all = [...area];
       for (const mark of drafts()) for (const id of idsOf(mark)) if (id && !all.includes(id)) all.push(id);
       if (!all.length) {
@@ -1104,7 +1560,7 @@
       agent.select(all);
     };
     const syncBrief = () => {
-      const count = drafts().length;
+      const count = building ? marks.filter((mark) => mark.state !== 'building').length : drafts().length;
       // Out of the mode with marks still in hand: the way back says so, since
       // nothing else on the page does any more.
       update({
@@ -1113,6 +1569,7 @@
       });
       clearButton.hidden = count === 0 && !(fromUs && mine.length);
       exploreButton.disabled = !(fromUs && mine.length);
+      for (const fn of watchers) fn();
       update({ id: 'ask', label: count && fromUs ? 'Ask about the sketch' : 'Ask here' });
       paintFrame();
     };
@@ -1155,9 +1612,14 @@
       // it comes back when the mode ends.
       dispatchEvent(new CustomEvent('marble-marks:mode', { detail: { mode: next, describing } }));
     }
-    function setDescribing(on) {
+    // Turning Describe off is remembered for this app, in this browser: the
+    // next visit opens the way it was left. Every app starts in it otherwise.
+    const PREF = `marble-build:describe:${app}`;
+    const remembered = () => { try { return localStorage.getItem(PREF); } catch { return null; } };
+    function setDescribing(on, { remember = true } = {}) {
       if (describing === on) return;
       describing = on;
+      if (building && remember) { try { localStorage.setItem(PREF, on ? 'on' : 'off'); } catch { /* private mode */ } }
       layer.toggleAttribute('data-describing', on);
       explore.hidden = true;
       // The selection goes away with the sight of the marks and comes back
@@ -1170,9 +1632,12 @@
       handling = false;
       update({ id: 'marks-describe', active: on });
       // Figma opens on the picker, and so does this: the first thing a hand
-      // does in a mode like it is point at something.
-      setMode(on ? 'select' : null);
+      // does in a mode like it is point at something. In Build mode the app
+      // is still the app under the cursor, so it opens on that.
+      setMode(on && !building ? 'select' : null);
+      if (!on && building) { picked.clear(); area = []; syncSelection(); paintHalos(); }
       syncBrief();
+      dispatchEvent(new CustomEvent('marble-marks:describing', { detail: { on } }));
     }
 
     for (const [name, node] of Object.entries(tools)) {
@@ -1227,7 +1692,43 @@
         return;
       }
       if (mode === 'text') { placeNote(event.clientX, event.clientY); return; }
+      if (mode === 'comment') { placeComment(event.clientX, event.clientY); setMode(null); return; }
     });
+
+    /** The stroke under a point, if any: within a finger's width of its line. */
+    const strokeAt = (x, y) => {
+      for (const mark of [...marks].reverse()) {
+        if (mark.type !== 'stroke') continue;
+        const box = boxOf(mark.anchorId);
+        if (!box) continue;
+        for (const part of mark.parts) {
+          if (pointsOf(part, box).some((p) => Math.hypot(p.x - x, p.y - y) <= 12)) return mark;
+        }
+      }
+      return null;
+    };
+    // With Select on, a press on a note, pin or piece picks it (Shift adds),
+    // and a drag from there moves everything picked.
+    notes.addEventListener('pointerdown', (event) => {
+      if (!building || mode !== 'select' || event.button !== 0) return;
+      const mark = marks.find((m) => m.el && m.el.contains(event.target));
+      if (!mark) return;
+      if (event.target.closest('.marble-marks-note-close')) return;
+      event.preventDefault();
+      event.stopPropagation();
+      if (event.shiftKey) {
+        if (picked.has(mark)) picked.delete(mark);
+        else picked.add(mark);
+      } else if (!picked.has(mark)) {
+        picked.clear();
+        picked.add(mark);
+      }
+      area = [];
+      syncSelection();
+      paintHalos();
+      syncBrief();
+      if (picked.has(mark)) startMove(event, [...picked], mark.el);
+    }, true);
     overlay.addEventListener('pointermove', (event) => {
       if (drag && event.pointerId === drag.id) {
         drag.x1 = event.clientX;
@@ -1279,8 +1780,28 @@
       frameStep();
       const ids = drag.ids;
       const prior = event.shiftKey ? area : [];
+      const tiny = Math.abs(drag.x1 - drag.x0) < 4 && Math.abs(drag.y1 - drag.y0) < 4;
+      const caught = drag.marks;
       endDrag();
-      area = [...prior, ...ids.filter((id) => !prior.includes(id))];
+      if (building && tiny) {
+        // A click, not a rectangle: the mark under it, or the part of the app.
+        const hit = strokeAt(event.clientX, event.clientY);
+        if (!event.shiftKey) picked.clear();
+        if (hit) {
+          if (event.shiftKey && picked.has(hit)) picked.delete(hit);
+          else picked.add(hit);
+          area = event.shiftKey ? area : [];
+        } else {
+          const part = elementAt(event.clientX, event.clientY)?.getAttribute('data-marble-id');
+          area = part ? [...prior.filter((id) => id !== part), ...(prior.includes(part) ? [] : [part])] : prior;
+        }
+        paintHalos();
+      } else if (building && caught.length) {
+        // Marks were caught: those are what was meant, not the app under them.
+        area = event.shiftKey ? area : [];
+      } else {
+        area = [...prior, ...ids.filter((id) => !prior.includes(id))];
+      }
       syncSelection();
       syncBrief();
       // A marquee is one gesture and it is over; Select stays on, because the
@@ -1392,7 +1913,7 @@
     const typing = (node) => node?.isContentEditable || ['INPUT', 'TEXTAREA'].includes(node?.tagName);
     // One key per tool while describing, and ⌘⇧D in and out from anywhere —
     // a chord, so it is heard even mid-sentence in a composer.
-    const KEYS = { v: null, a: 'select', p: 'sketch', t: 'text' };
+    const KEYS = building ? { v: null, a: 'select', p: 'sketch', t: 'text', c: 'comment' } : { v: null, a: 'select', p: 'sketch', t: 'text' };
     addEventListener('keydown', (event) => {
       if ((event.metaKey || event.ctrlKey) && event.shiftKey && !event.altKey && event.key.toLowerCase() === 'd') {
         event.preventDefault();
@@ -1403,7 +1924,7 @@
       if (!describing || event.metaKey || event.ctrlKey || event.altKey || event.repeat || typing(event.composedPath()[0])) return;
       const key = event.key.toLowerCase();
       if (key === 'e') {
-        if (exploreButton.disabled || exploreButton.hidden) return;
+        if (building || exploreButton.disabled || exploreButton.hidden) return;
         event.preventDefault();
         event.stopPropagation();
         exploreButton.click();
@@ -1438,13 +1959,37 @@
         return;
       }
       if (event.key !== 'Escape') return;
+      // Escape inside Build mode's margin is the margin's: it lets go of the
+      // card picked there before anything here is left (build-margin.js).
+      if (event.composedPath().some((node) => node?.classList?.contains?.('marble-margin'))) return;
       if (!explore.hidden) { event.preventDefault(); event.stopPropagation(); explore.hidden = true; paintFrame(); return; }
       // Escape leaves the tool; Escape with no tool leaves Describe mode. The
       // ink stays either way, because it is the brief and not the mode.
       if (mode) { event.preventDefault(); event.stopPropagation(); setMode(null); return; }
+      if (building && (picked.size || area.length)) {
+        event.preventDefault();
+        event.stopPropagation();
+        picked.clear();
+        area = [];
+        syncSelection();
+        paintHalos();
+        syncBrief();
+        return;
+      }
+      // In Build mode the app is in use under the cursor, so its own Escape
+      // (a dialog, a field) goes first; one nobody took leaves Describe, below.
+      if (building) return;
       if (describing) { event.preventDefault(); event.stopPropagation(); setDescribing(false); return; }
       if (fromUs) { area = []; fromUs = false; mine = []; agent.select(null); syncBrief(); }
     }, true);
+    if (building) {
+      addEventListener('keydown', (event) => {
+        if (event.key !== 'Escape' || event.defaultPrevented || !describing || mode) return;
+        if (typing(event.composedPath()[0])) return;
+        event.preventDefault();
+        setDescribing(false);
+      });
+    }
 
     // A fresh text selection is the person choosing something else; so is any
     // other selection this layer did not make.
@@ -1509,8 +2054,74 @@
       for (const mark of marks) if (mark.working !== undefined && mark.working === id) unhold(mark);
     });
 
+    // ------------------------------------------------------------ Build mode
+
+    window.marbleMarks = {
+      building,
+      get describing() { return describing; },
+      get mode() { return mode; },
+      setDescribing: (on, options) => setDescribing(Boolean(on), options),
+      setMode: (next) => { if (!describing) setDescribing(true); setMode(next); },
+      /** The toolbar's place for the build's own controls. */
+      slot,
+      bar,
+      /** The marks as the host keeps them. */
+      list: () => marks.filter((mark) => mark.id && !mark.local).map(serial),
+      load,
+      /** One mark, as the host keeps it, by id. */
+      get: (id) => { const mark = marks.find((m) => m.id === id); return mark ? serial(mark) : null; },
+      /** Where a mark is on screen. */
+      spanOf: (id) => { const mark = marks.find((m) => m.id === id); return mark ? spanOf(mark) : null; },
+      elementOf: (id) => marks.find((m) => m.id === id)?.el ?? null,
+      onKeep: (fn) => { keepers.add(fn); return () => keepers.delete(fn); },
+      onChange: (fn) => { watchers.add(fn); return () => watchers.delete(fn); },
+      onPicked: (fn) => { pickers.add(fn); return () => pickers.delete(fn); },
+      picked: () => [...picked].map((mark) => mark.id).filter(Boolean),
+      parts: () => (fromUs ? [...mine] : []),
+      clearPicked: () => { picked.clear(); area = []; syncSelection(); paintHalos(); syncBrief(); },
+      remove: (ids) => { for (const mark of marks.filter((m) => ids.includes(m.id))) removeMark(mark); },
+      clear: () => clearMarks(),
+      /** A note, put on a part of the app or at a point. */
+      note: ({ x = null, y = null, anchorId = null, u = 0, v = 0, text = '', first = false } = {}) => {
+        if (!describing) setDescribing(true);
+        const anchor = anchorId ? document.querySelector(`[data-marble-id="${CSS.escape(anchorId)}"]`) : null;
+        let px = x;
+        let py = y;
+        if (anchor && (px == null || py == null)) {
+          const r = anchor.getBoundingClientRect();
+          px = r.left + u * r.width;
+          py = r.top + v * r.height;
+        }
+        const mark = placeNote(px ?? innerWidth / 2, py ?? innerHeight / 3, { text, anchor });
+        if (mark && first) { mark.first = true; paintState(mark); keep(mark); }
+        return mark ? mark.id : null;
+      },
+      piece: (piece, at = null) => {
+        if (!describing) setDescribing(true);
+        return placePiece(piece, at)?.id ?? null;
+      },
+      /** A comment's pin, taken off when its thread was never started. */
+      dropDraft: (id) => { const mark = marks.find((m) => m.id === id && m.local); if (mark) dropMark(mark); },
+      /** Kept now (a comment once its first line is posted). */
+      keepNow: (id) => { const mark = marks.find((m) => m.id === id); if (mark) { delete mark.local; mark.el?.removeAttribute?.('data-local'); keep(mark); } },
+      /** Build mode's margin is open: the marks are read there (build-margin.js). */
+      setMargin: (on) => layer.toggleAttribute('data-margin', Boolean(on)),
+      closeComments: () => { for (const mark of marks) if (mark.type === 'comment') mark.el.setAttribute('aria-expanded', 'false'); },
+      setRunning: (on) => {
+        if (buildRunning === Boolean(on)) return;
+        buildRunning = Boolean(on);
+        for (const mark of marks) paintState(mark);
+      },
+      elementAt: (x, y) => elementAt(x, y),
+    };
+
     setMode(null);
     syncBrief();
+    if (building) {
+      // Every app starts in Describe, unless it was turned off here last time.
+      if (remembered() !== 'off') setDescribing(true, { remember: false });
+      dispatchEvent(new CustomEvent('marble-marks:ready'));
+    }
     return true;
   };
 

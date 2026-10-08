@@ -183,6 +183,8 @@ const RUNTIME = {
   // about a region. Geometry first; the layer reads it off globalThis.
   'agent-marks-geometry.js': () => path.join(REPO, 'runtime', 'agent-marks-geometry.js'),
   'agent-marks.js': () => path.join(REPO, 'runtime', 'agent-marks.js'),
+  'build-mode.js': () => path.join(REPO, 'runtime', 'build-mode.js'),
+  'build-margin.js': () => path.join(REPO, 'runtime', 'build-margin.js'),
   // Variations: the version pill and the compare surface for a <marble-alt>.
   'agent-variations.js': () => path.join(REPO, 'runtime', 'agent-variations.js'),
   // The shell: ⌘J's tree, bar and chat around whatever document is open.
@@ -442,6 +444,10 @@ export async function createDrive(config, { log = console, agentProviders = null
     if (agents) {
       tags += `\n<script src="${runtimeUrl('agent-marks-geometry.js')}" data-marble-transient></script>`;
       tags += `\n<script src="${runtimeUrl('agent-marks.js')}" data-marble-transient></script>`;
+      // After Describe, whose marks and toolbar it builds from (Build mode).
+      tags += `\n<script src="${runtimeUrl('build-mode.js')}" data-marble-transient></script>`;
+      // Its margin: every mark beside the app, and how each is going.
+      tags += `\n<script src="${runtimeUrl('build-margin.js')}" data-marble-transient></script>`;
       tags += `\n<script src="${runtimeUrl('agent-variations.js')}" data-marble-transient></script>`;
     }
     // Last: the shell seats the drawer, so it comes after everything that
@@ -470,6 +476,32 @@ export async function createDrive(config, { log = console, agentProviders = null
    *  rewritten there as ops, so they are undoable like any other edit. Other
    *  documents' links are theirs; the forward is what keeps them working. */
   const unescapeAttr = (v) => v.replace(/&quot;/g, '"').replace(/&#39;/g, "'").replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&amp;/g, '&');
+
+  /** A document, file or folder to a new name, and everything that follows
+   *  the name: what this host remembers of it, its title, the conversations,
+   *  share links and builds aimed at it. The Drive's move, and a build naming
+   *  the app it made (server/build). */
+  async function moveDocument(from, to) {
+    const moved = await store.move(from, to);
+    // The name is the address, so a move is a change of identity. The
+    // bookkeeping this host holds in memory has to follow it or the next
+    // write is measured against the wrong baseline.
+    if (lastKnown.has(moved.from)) {
+      lastKnown.set(moved.to, lastKnown.get(moved.from));
+      lastKnown.delete(moved.from);
+    }
+    pendingWrites.move(moved.from, moved.to);
+    // A rename is the person naming the document, so the tab says the
+    // new name too. A move that kept the name leaves the title alone.
+    if (moved.kind === 'doc' && splitPath(moved.from).name !== splitPath(moved.to).name) {
+      const source = await store.read(moved.to);
+      const next = source === null ? null : retitled(source, splitPath(moved.to).name);
+      if (next !== null && next !== source) await putDocument(moved.to, next, { label: 'renamed', event: 'changed' });
+    }
+    channels.toDrive('moved', moved);
+    await followMove(moved.from, moved.to);
+    return moved;
+  }
 
   async function followMove(from, to) {
     const folder = (await store.has(to)) ? 'doc' : 'folder';
@@ -1209,24 +1241,7 @@ export async function createDrive(config, { log = console, agentProviders = null
 
       if (route === '/drive/move' && req.method === 'POST') {
         const body = await readJson(req, config.maxBodyBytes);
-        const moved = await store.move(body.from, body.to);
-        // The name is the address, so a move is a change of identity. The
-        // bookkeeping this host holds in memory has to follow it or the next
-        // write is measured against the wrong baseline.
-        if (lastKnown.has(moved.from)) {
-          lastKnown.set(moved.to, lastKnown.get(moved.from));
-          lastKnown.delete(moved.from);
-        }
-        pendingWrites.move(moved.from, moved.to);
-        // A rename is the person naming the document, so the tab says the
-        // new name too. A move that kept the name leaves the title alone.
-        if (moved.kind === 'doc' && splitPath(moved.from).name !== splitPath(moved.to).name) {
-          const source = await store.read(moved.to);
-          const next = source === null ? null : retitled(source, splitPath(moved.to).name);
-          if (next !== null && next !== source) await putDocument(moved.to, next, { label: 'renamed', event: 'changed' });
-        }
-        channels.toDrive('moved', moved);
-        await followMove(moved.from, moved.to);
+        const moved = await moveDocument(body.from, body.to);
         return json(res, 200, { ok: true, ...moved });
       }
 
@@ -1447,6 +1462,11 @@ export async function createDrive(config, { log = console, agentProviders = null
       writeOps,
       createDocument,
       restore: restoreDocument,
+      // What a build needs beyond a turn (server/build): to put a checkpoint
+      // back, and to name and file the app it made.
+      putDocument: (docPath, source, options) => putDocument(docPath, source, options),
+      moveDocument: (from, to) => moveDocument(from, to),
+      freePath: (wanted) => freePath(wanted),
       // An agent's turn ending is the end of its claim on what it touched. Kept
       // for the life of the process, a turn's touches forked every later edit
       // near them — the person against an agent that finished an hour ago.

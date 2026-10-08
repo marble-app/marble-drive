@@ -197,6 +197,36 @@ export const TOOL_SCHEMAS = [
     },
   },
   {
+    name: 'build_plan',
+    description:
+      'Build mode only: say the plan of the build you are running, and keep it current. The page draws it as the build\'s status: ' +
+      'each part with a few words, which one you are making now, which have landed. Call it before your first edit, and again ' +
+      '(with every part) whenever a part starts or lands. Give `title` when the app is still called Untitled, and `folder` ' +
+      'when a folder in the drive is plainly where it belongs.',
+    inputSchema: {
+      type: 'object',
+      required: ['parts'],
+      properties: {
+        parts: {
+          type: 'array',
+          maxItems: 24,
+          items: {
+            type: 'object',
+            required: ['title'],
+            properties: {
+              title: { type: 'string', maxLength: 80, description: 'The part, in a few words: "Invitations list".' },
+              detail: { type: 'string', maxLength: 120, description: 'Optional: how, in a few words: "one row per invitation", "reads Bryan\'s Days".' },
+              state: { type: 'string', enum: ['ahead', 'now', 'done'], description: 'ahead: still to come. now: being made. done: landed.' },
+              ids: { type: 'array', items: { type: 'string' }, description: 'Optional: the data-marble-ids of the part on the page, once it is there.' },
+            },
+          },
+        },
+        title: { type: 'string', maxLength: 80, description: 'A short name for the app, when it is still Untitled.' },
+        folder: { type: 'string', maxLength: 300, description: 'A folder of the drive the app belongs in, as a path.' },
+      },
+    },
+  },
+  {
     name: 'list_agents',
     description:
       'List the other agent conversations working in this project: id, title, provider, the document each works on, ' +
@@ -241,7 +271,7 @@ export const TOOL_SCHEMAS = [
 // names them by the attribute it wrote, not by where they are kept.
 const STATE_KINDS = new Set(['toggle', 'choose', 'expand', 'step', 'note']);
 
-export function createTools({ store, writeOps, createDocument, buildStarter, composeAffordances, guidePath, examine, onLook, messaging = null, exec, log = console }) {
+export function createTools({ store, writeOps, createDocument, buildStarter, composeAffordances, guidePath, examine, onLook, messaging = null, building = null, exec, log = console }) {
   // conversationId → docPath → Map<id, hash>
   const ledgers = new Map();
 
@@ -705,6 +735,12 @@ export function createTools({ store, writeOps, createDocument, buildStarter, com
         about: input.about ?? null,
         inReplyTo: input.inReplyTo ?? null,
       });
+    },
+
+    // Build mode's plan (server/build): bound once the builds exist.
+    async build_plan(input, turn) {
+      if (!building?.plan) return { error: 'Build mode is not available on this host' };
+      return building.plan(turn, input);
     },
 
     async wait_for_reply(input, turn) {

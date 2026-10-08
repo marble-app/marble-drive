@@ -96,7 +96,9 @@ for (const starter of STARTERS) {
     // every op after this one addressable.
     const ids = [...markup.matchAll(/data-marble-id="([^"]+)"/g)].map((m) => m[1]);
     assert.equal(new Set(ids).size, ids.length, 'ids are unique');
-    assert.ok(ids.length > 5, 'the document is actually addressable');
+    // The empty app (Build mode's) is its body, main and name until the
+    // first build fills it.
+    assert.ok(ids.length > (starter.id === 'app' ? 2 : 5), 'the document is actually addressable');
 
     // A starter that names a route would be a document that only opens here.
     assert.ok(!/\/(ops|intent|docs|events|drive)\?/.test(source), 'names no route');

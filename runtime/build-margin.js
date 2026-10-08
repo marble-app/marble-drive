@@ -1,0 +1,889 @@
+// Build mode's margin: every mark on the app, read beside it, and how far
+// each one has got.
+//
+// It is Docs' margin. A card for each mark (note, sketch, comment, piece)
+// stands level with the part it is about, the app narrowed to make room
+// (build-mode.js docks the side), and the one you pick comes level with its
+// pin and steps toward the app. The build is carried on the marks: each pin
+// says how its change is going, each card ends in one status line with the
+// one control that fits, and on Building the cards are headed by the build's
+// own card, its sentence, clock and the drawer's picture of the work. Nothing
+// here names a job, a part or an agent; the app answers in its own name.
+//
+// While the margin is open Describe's layer carries data-margin: the bodies
+// of notes and pieces leave the app and sketches fade, and the pins drawn
+// here stand in for them, so the app reads clear and still shows where each
+// thing is.
+//
+// Everything here is page-only (data-marble-transient): the marks are kept
+// on the host (server/build), and the side, the filter and the pick are this
+// browser's.
+//
+// Spec: Notes and Sketches/Build Mode (section 12, E); plan: Notes and
+// Sketches/Build Mode Plan.
+
+(() => {
+  // ------------------------------------------------------------ the rules
+  //
+  // Pure, so test/build-margin.test.js can run them without a page.
+
+  /** Where each card goes, as Docs places its comments. `items` are in page
+   *  order, each { id, want, height }: `want` is the top that would put it
+   *  level with its pin. Every card sits at its want unless the one above
+   *  reaches it, then `gap` below that one; none goes above `head`. A picked
+   *  card sits at its want and the ones above it move up out of its way, as
+   *  far as `head` allows; past that, they pack down from `head`.
+   *  Returns id → top. */
+  function stackCards(items, { head = 0, gap = 8, picked = null } = {}) {
+    const list = [...items].sort((a, b) => a.want - b.want);
+    const tops = list.map((item) => Math.max(item.want, head));
+    const down = (from) => {
+      for (let i = from; i < list.length; i++) {
+        if (i > 0) tops[i] = Math.max(list[i].want, head, tops[i - 1] + list[i - 1].height + gap);
+      }
+    };
+    const p = picked == null ? -1 : list.findIndex((item) => item.id === picked);
+    if (p < 0) down(1);
+    else {
+      tops[p] = Math.max(list[p].want, head);
+      for (let i = p - 1; i >= 0; i--) tops[i] = Math.min(Math.max(list[i].want, head), tops[i + 1] - gap - list[i].height);
+      // No room above for all of them: they pack down from the head, and the
+      // picked one comes as near its pin as that leaves.
+      if (tops[0] < head) {
+        tops[0] = head;
+        for (let i = 1; i <= p; i++) tops[i] = tops[i - 1] + list[i - 1].height + gap;
+      }
+      down(p + 1);
+    }
+    return new Map(list.map((item, i) => [item.id, Math.round(tops[i])]));
+  }
+
+  /** Where a mark stands, for its pin, its card's status line and the
+   *  filter. `builds` are the build state's; `holds(partIds, anchorId)` says
+   *  whether a part of the plan is about the mark's anchor (on a page, by
+   *  containment); `name` is the app's, which is who answers.
+   *
+   *  { key, words, show: open|build|done, act, ring (0..1 or null) } */
+  function statusOf(mark, { builds = [], holds = (ids, id) => ids.includes(id), name = 'The app' } = {}) {
+    const out = (key, words, show, act = null, ring = null) => ({ key, words, show, act, ring });
+    if (mark.type === 'comment') {
+      const thread = mark.thread ?? [];
+      const last = thread.at(-1);
+      if (mark.resolved) return out('resolved', 'Resolved', 'done', 'reopen');
+      if (last?.pending) return out('answering', `${name} is answering`, 'open');
+      if (last?.who === 'agent' && last.offer && last.offer.taken === null) return out('asking', `${name} asked you`, 'open', 'offer');
+      if (last?.who === 'agent') return out('answered', 'Answered', 'open', 'resolve');
+      return out('sent', 'Waits for an answer', 'open', 'resolve');
+    }
+    if (mark.state === 'built') {
+      const n = builds.find((b) => b.id === mark.build)?.n;
+      return out('built', n ? `Done in Build ${n}` : 'Done', 'done');
+    }
+    if (mark.state === 'building') {
+      const build = builds.find((b) => b.id === mark.build) ?? null;
+      const parts = build?.plan?.parts ?? [];
+      const part = parts.find((x) => x.state === 'now' && holds(x.ids ?? [], mark.anchorId))
+        ?? parts.find((x) => holds(x.ids ?? [], mark.anchorId));
+      const done = parts.filter((x) => x.state === 'done').length;
+      const ring = part ? { ahead: 0.08, now: 0.5, done: 1 }[part.state] ?? 0.08 : parts.length ? Math.max(0.08, done / parts.length) : 0.08;
+      if (build?.status === 'paused') return out('paused', 'Paused', 'build', null, ring);
+      if (part?.state === 'done') return out('made', 'Made · the build carries on', 'build', null, ring);
+      if (part?.state === 'now') return out('making', 'Being made', 'build', null, ring);
+      if (part) return out('ahead', 'In this build · still to come', 'build', null, ring);
+      return out('building', parts.length ? `In this build · ${done} of ${parts.length} parts made` : 'In this build', 'build', null, ring);
+    }
+    if (mark.held) return out('held', 'Held back', 'open', 'unhold');
+    return out('waiting', 'Waits for the next build', 'open', 'hold');
+  }
+
+  // Run again (a page put back in place runs its scripts again), the margin
+  // already there keeps its own.
+  if (globalThis.marbleMargin?.toggle) return;
+  globalThis.marbleMargin = { stackCards, statusOf };
+  if (typeof document === 'undefined') return;
+
+  // ------------------------------------------------------------ the page
+
+  const TRANSIENT = 'data-marble-transient';
+  const EASE = 'cubic-bezier(.22, 1, .36, 1)';
+  const W = 312;
+  const CARD = 276;
+  const HEAD = 52;
+  const GAP = 8;
+  const STEP = 12;
+  const PIN_LIFT = 10;
+  const SR_ONLY = 'position:absolute;width:1px;height:1px;overflow:hidden;clip-path:inset(50%);white-space:nowrap;';
+  const PHONE = '(max-width: 620px), (hover: none) and (pointer: coarse)';
+
+  const KIND = {
+    note: '<svg viewBox="0 0 16 16" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round"><path d="M3 2.5h10v7.5L9.5 13.5H3z"/><path d="M9.5 13.5V10H13"/></svg>',
+    comment: '<svg viewBox="0 0 16 16" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round"><path d="M8 2.5a5.5 5.5 0 1 1-2.6 10.3L2.5 13.5l.7-2.9A5.5 5.5 0 0 1 8 2.5z"/></svg>',
+    stroke: '<svg viewBox="0 0 16 16" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><path d="M2.5 12.5c2-4.5 3.6-7 4.6-7 1.6 0 .2 5.6 1.8 5.6 1 0 2-1.4 2.6-4"/><path d="M11 3.5l1.5 1.5"/></svg>',
+    piece: '<svg viewBox="0 0 16 16" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round"><rect x="2.5" y="2.5" width="4.5" height="4.5" rx="1.2"/><rect x="9" y="2.5" width="4.5" height="4.5" rx="1.2"/><rect x="2.5" y="9" width="4.5" height="4.5" rx="1.2"/><path d="M11.25 9.25v4M9.25 11.25h4" stroke-linecap="round"/></svg>',
+    plus: '<svg viewBox="0 0 16 16" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"><path d="M8 3.5v9M3.5 8h9"/></svg>',
+    close: '<svg viewBox="0 0 16 16" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"><path d="M4.5 4.5l7 7M11.5 4.5l-7 7"/></svg>',
+    send: '<svg viewBox="0 0 16 16" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M8 12.5v-9M4.5 7 8 3.5 11.5 7"/></svg>',
+  };
+  const CHECK = "url(\"data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Cpath d='M4 8.4 6.8 11 12 5' fill='none' stroke='black' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E\") center / 12px no-repeat";
+
+  const STYLE = `
+    /* ---- the margin: paper beside the app, docked where the chat docks. */
+    .marble-margin {
+      position: fixed; top: var(--marble-shell-top, 0px); right: 0; bottom: 0; width: ${W}px;
+      pointer-events: auto; box-sizing: border-box; overflow: hidden;
+      background: var(--b-paper); border-left: 1px solid var(--b-line);
+      transition: opacity 150ms linear;
+    }
+    @starting-style { .marble-margin { opacity: 0; } }
+    .marble-margin * { box-sizing: border-box; }
+    .marble-margin button { all: unset; box-sizing: border-box; cursor: pointer; }
+    .marble-margin button:focus-visible { outline: 2px solid var(--b-mark); outline-offset: 1px; }
+
+    /* Its head stays in reach while the cards go under it. */
+    .marble-margin .mh {
+      position: absolute; inset: 0 0 auto 0; height: ${HEAD}px; z-index: 2;
+      display: flex; align-items: center; gap: 6px; padding: 0 8px 0 12px;
+      background: var(--b-paper);
+    }
+    .marble-margin .filt { display: inline-flex; gap: 2px; padding: 2px; border-radius: 999px; background: var(--b-paper-2); }
+    .marble-margin .filt button { padding: 4px 11px; border-radius: 999px; font-size: 12.5px; line-height: 1.2; color: var(--b-muted); transition: background 200ms ${EASE}, color 200ms ${EASE}; }
+    .marble-margin .filt button:hover { color: var(--b-ink); }
+    .marble-margin .filt button:active { background: var(--b-paper-3); transition-duration: 110ms; }
+    .marble-margin .filt button[aria-pressed="true"] { background: var(--b-card); color: var(--b-ink); font-weight: 500; box-shadow: var(--shadow, 0 1px 2px rgba(74,66,52,.05), 0 2px 4px rgba(74,66,52,.03)); }
+    .marble-margin .mh .sp { flex: 1; }
+    .marble-margin .add { display: inline-flex; align-items: center; gap: 5px; height: 30px; padding: 0 10px; border-radius: 8px; font-size: 13px; color: var(--b-ink); transition: background 200ms ${EASE}; }
+    .marble-margin .add:hover { background: var(--b-paper-2); }
+    .marble-margin .add:active { background: var(--b-paper-3); transition-duration: 110ms; }
+    .marble-margin .add svg { width: 14px; height: 14px; color: var(--b-muted); }
+    .marble-margin .shut { display: none; width: 30px; height: 30px; border-radius: 8px; place-items: center; color: var(--b-muted); }
+    .marble-margin .shut:hover { background: var(--b-paper-2); color: var(--b-ink); }
+    .marble-margin .shut svg { width: 15px; height: 15px; }
+
+    /* The cards' ground scrolls with the page: one translate for all. */
+    .marble-margin .ground { position: absolute; top: ${HEAD}px; left: 0; right: 0; bottom: 0; overflow: hidden; }
+    .marble-margin .cards { position: absolute; inset: 0 0 auto 0; will-change: transform; }
+    .marble-margin .none { position: absolute; top: 18px; left: 18px; right: 22px; margin: 0; color: var(--b-muted); font-size: 13px; line-height: 1.45; text-align: center; }
+
+    /* ---- a card */
+    .marble-margin-card {
+      position: absolute; left: 18px; width: ${CARD}px; padding: 9px 12px 10px;
+      background: var(--b-card); border: 1px solid var(--b-line); border-radius: 12px;
+      box-shadow: var(--shadow, 0 1px 2px rgba(74,66,52,.05), 0 2px 4px rgba(74,66,52,.03));
+      font-size: 12.5px; line-height: 1.4; color: var(--b-ink); cursor: pointer; outline: none;
+      transition: top 340ms ${EASE}, left 200ms ${EASE}, box-shadow 200ms ${EASE}, opacity 200ms ${EASE};
+    }
+    .marble-margin[data-still] .marble-margin-card { transition: none; }
+    .marble-margin-card[data-hot] { box-shadow: var(--shadow-rest, 0 1px 2px rgba(74,66,52,.06), 0 6px 16px rgba(74,66,52,.08)); }
+    .marble-margin-card:focus-visible { box-shadow: 0 0 0 2px var(--b-mark); }
+    .marble-margin-card[aria-expanded="true"] { left: ${18 - STEP}px; cursor: default; box-shadow: var(--b-shadow); }
+    .marble-margin-card .k { display: flex; align-items: center; gap: 6px; margin-bottom: 3px; font-size: 11.5px; color: var(--b-muted); min-width: 0; }
+    .marble-margin-card .k svg { width: 13px; height: 13px; flex: none; color: var(--b-mark); }
+    .marble-margin-card .k span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .marble-margin-card .k .no { flex: none; min-width: 16px; height: 16px; padding: 0 4px; border-radius: 8px 8px 8px 2px; background: var(--b-accent-soft); color: var(--b-mark); font: 650 9.5px/16px var(--b-ui); text-align: center; font-variant-numeric: tabular-nums; }
+    .marble-margin-card .words { margin: 0; overflow-wrap: anywhere; }
+    .marble-margin-card .marble-build-line { padding: 5px 0 0; }
+    .marble-margin-card .marble-build-line .acts { display: none; }
+    .marble-margin-card .marble-build-line p { margin: 2px 0 0; }
+    .marble-margin-card:not([aria-expanded="true"]) :is(.words, .marble-build-line p) { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+    .marble-margin-card:not([aria-expanded="true"]) .marble-build-line:not(:first-child):not(:last-child) { display: none; }
+    /* Done: faint, and folded to its first line until it is picked. */
+    .marble-margin-card[data-show="done"] { background: var(--b-paper); box-shadow: none; }
+    .marble-margin-card[data-show="done"] :is(.words, .marble-build-line p) { color: var(--b-muted); }
+    .marble-margin-card[data-show="done"]:not([aria-expanded="true"]) :is(.words, .marble-build-line p) { -webkit-line-clamp: 1; }
+    .marble-margin-card[data-show="done"]:not([aria-expanded="true"]) :is(.marble-build-line:not(:first-child), .stl) { display: none; }
+
+    /* Its status: one line of words, and the one thing to do from there. */
+    .marble-margin-card .stl { margin-top: 8px; padding-top: 6px; border-top: 1px solid var(--b-line); }
+    .marble-margin-card .row { display: flex; align-items: center; gap: 7px; min-height: 26px; font-size: 12px; color: var(--b-muted); }
+    .marble-margin-card .row .w { flex: 1; min-width: 0; }
+    .marble-margin-card .dot { width: 7px; height: 7px; border-radius: 50%; flex: none; box-shadow: inset 0 0 0 1.5px var(--b-mark); }
+    .marble-margin-card[data-key="held"] .dot { box-shadow: none; border: 1.5px dashed var(--b-faint); }
+    .marble-margin-card:is([data-key="making"], [data-key="ahead"], [data-key="made"], [data-key="building"], [data-key="answered"], [data-key="answering"]) .dot { background: var(--b-mark); box-shadow: none; }
+    .marble-margin-card:is([data-key="paused"], [data-key="asking"]) .dot { background: var(--b-caution); box-shadow: none; }
+    .marble-margin-card:is([data-key="built"], [data-key="resolved"]) .dot { background: var(--b-faint); box-shadow: none; }
+    .marble-margin-card .sb { display: inline-flex; align-items: center; height: 24px; padding: 0 8px; border-radius: 7px; font-size: 12px; font-weight: 500; color: var(--b-ink); white-space: nowrap; transition: background 200ms ${EASE}; }
+    .marble-margin-card .sb:hover { background: var(--b-paper-2); }
+    .marble-margin-card .sb:active { background: var(--b-paper-3); transition-duration: 110ms; }
+    .marble-margin-card .sb.primary { background: var(--b-ink); color: var(--b-card); }
+    .marble-margin-card .sb.primary:hover { background: color-mix(in srgb, var(--b-ink) 84%, var(--b-card)); }
+    .marble-margin-card .meter { height: 3px; margin: 3px 0 2px; border-radius: 2px; background: var(--b-line); overflow: hidden; }
+    .marble-margin-card .meter i { display: block; height: 100%; width: var(--p, 8%); background: var(--b-mark); border-radius: 2px; transition: width 340ms ${EASE}; }
+    .marble-margin-card[data-key="paused"] .meter i { background: var(--b-caution); }
+    .marble-margin-card .offer { margin: 4px 0 0; color: var(--b-ink); }
+    .marble-margin-card .ask { display: flex; gap: 6px; margin-top: 6px; }
+
+    /* Its reply line, while it is picked. */
+    .marble-margin-card .reply { display: none; align-items: center; gap: 6px; margin-top: 8px; padding: 4px 4px 4px 10px; border: 1px solid var(--b-line); border-radius: 10px; background: var(--b-paper); }
+    .marble-margin-card[aria-expanded="true"] .reply { display: flex; }
+    .marble-margin-card .reply input { all: unset; flex: 1; min-width: 0; font-size: 12.5px; line-height: 22px; color: var(--b-ink); }
+    .marble-margin-card .reply input::placeholder { color: var(--b-faint); }
+    .marble-margin-card .reply button { width: 24px; height: 24px; border-radius: 7px; display: grid; place-items: center; background: var(--b-ink); color: var(--b-card); }
+    .marble-margin-card .reply button[aria-disabled="true"] { opacity: .3; cursor: default; }
+    .marble-margin-card .reply svg { width: 13px; height: 13px; }
+
+    /* ---- the build's own card, heading Building. */
+    .marble-margin-build { position: absolute; left: 18px; width: ${CARD}px; padding: 10px 12px 11px; background: var(--b-card); border: 1px solid var(--b-line); border-radius: 12px; box-shadow: var(--shadow, 0 1px 2px rgba(74,66,52,.05)); font-size: 12.5px; line-height: 1.4; }
+    .marble-margin-build .bh { display: flex; align-items: baseline; gap: 8px; }
+    .marble-margin-build .bh b { flex: 1; font-weight: 600; overflow-wrap: anywhere; }
+    .marble-margin-build .bh time { color: var(--b-muted); font-variant-numeric: tabular-nums; font-size: 12px; }
+    .marble-margin-build .bs { margin: 2px 0 0; color: var(--b-muted); }
+    .marble-margin-build[data-status="paused"] .bs { color: var(--b-caution); }
+    .marble-margin-build .parts { margin: 8px 0 0; color: var(--b-muted); }
+    .marble-margin-build .parts b { font-weight: 500; color: var(--b-ink); }
+    .marble-margin-build .drawn { margin: 8px -4px -3px; border-radius: 8px; overflow: hidden; }
+    .marble-margin-build .drawn:empty { display: none; }
+    .marble-margin-build .drawn iframe { display: block; width: 100%; border: 0; }
+
+    /* ---- the pins: each mark's number on the app, and how it is going. */
+    .marble-margin-pins { position: fixed; inset: 0; pointer-events: none; }
+    .marble-margin-pin {
+      all: unset; box-sizing: border-box; position: fixed; width: 22px; height: 22px; transform: translate(0, -100%);
+      border-radius: 50% 50% 50% 3px; pointer-events: auto; cursor: pointer;
+      background: var(--b-card); color: var(--b-mark); box-shadow: inset 0 0 0 1.5px var(--b-mark), 0 1px 3px rgba(0,0,0,.14);
+      font: 650 10.5px/22px var(--b-ui); text-align: center; font-variant-numeric: tabular-nums;
+      transition: scale 140ms ${EASE}, opacity 200ms ${EASE}, background 200ms ${EASE}, color 200ms ${EASE};
+    }
+    .marble-margin-pin:hover, .marble-margin-pin[data-hot], .marble-margin-pin:focus-visible { scale: 1.12; outline: none; }
+    .marble-margin-pin[data-picked] { box-shadow: 0 0 0 3px var(--b-accent-soft), 0 0 0 4.5px var(--b-mark), 0 1px 3px rgba(0,0,0,.14); }
+    .marble-margin-pin[data-key="held"] { box-shadow: none; border: 1.5px dashed var(--b-mark); line-height: 19px; }
+    /* In the build, or a comment answered: filled. */
+    .marble-margin-pin:is([data-key="making"], [data-key="ahead"], [data-key="made"], [data-key="building"], [data-key="paused"], [data-key="answered"], [data-key="answering"], [data-key="asking"], [data-key="sent"]) { background: var(--b-mark); color: var(--b-card); box-shadow: 0 1px 3px rgba(0,0,0,.18); }
+    /* The ring is a meter, so its fill is the one place a sweep is the
+       honest drawing: how much of this mark's change is made. */
+    .marble-margin-pin[data-ring]::after {
+      content: ""; position: absolute; inset: -5px; border-radius: 50%; pointer-events: none;
+      background: conic-gradient(var(--b-mark) var(--p, 0%), color-mix(in srgb, var(--b-mark) 22%, transparent) 0);
+      -webkit-mask: radial-gradient(circle, transparent 12.5px, black 13px); mask: radial-gradient(circle, transparent 12.5px, black 13px);
+    }
+    .marble-margin-pin[data-key="paused"] { background: var(--b-caution); }
+    .marble-margin-pin[data-key="paused"]::after { background: conic-gradient(var(--b-caution) var(--p, 0%), color-mix(in srgb, var(--b-caution) 22%, transparent) 0); }
+    /* The app asked you something. */
+    .marble-margin-pin[data-key="asking"]::before { content: ""; position: absolute; top: -3px; right: -3px; width: 8px; height: 8px; border-radius: 50%; background: var(--b-caution); box-shadow: 0 0 0 2px var(--b-card); }
+    /* Done: a faint check. */
+    .marble-margin-pin:is([data-key="built"], [data-key="resolved"]) { background: var(--b-mark); color: transparent; opacity: .45; box-shadow: none; }
+    .marble-margin-pin:is([data-key="built"], [data-key="resolved"])::before { content: ""; position: absolute; inset: 0; background: var(--b-card); -webkit-mask: ${CHECK}; mask: ${CHECK}; }
+    .marble-margin-pin[hidden] { display: none; }
+
+    /* The line from the picked pin to its card. */
+    .marble-margin-wire { position: fixed; inset: 0; width: 100vw; height: 100vh; pointer-events: none; overflow: visible; }
+    .marble-margin-wire path { fill: none; stroke: var(--b-mark); stroke-width: 1; opacity: .7; }
+
+    /* ---- on a phone: a sheet from the foot, the cards in page order. */
+    .marble-margin[data-sheet] {
+      top: auto; left: 0; width: auto; height: min(62vh, 520px); border-left: 0; border-top: 1px solid var(--b-line);
+      border-radius: 16px 16px 0 0; box-shadow: var(--b-shadow); transition: height 340ms ${EASE}, opacity 150ms linear;
+    }
+    .marble-margin[data-sheet][data-low] { height: 34vh; }
+    html:has(.marble-margin[data-sheet][data-low]:not([hidden])) { --marble-build-sheet: 34vh; }
+    .marble-margin[data-sheet] .shut { display: inline-grid; }
+    .marble-margin[data-sheet] .ground { overflow: auto; overscroll-behavior: contain; }
+    .marble-margin[data-sheet] .cards { position: static; transform: none !important; display: flex; flex-direction: column; gap: ${GAP}px; padding: 4px 12px 16px; }
+    .marble-margin[data-sheet] :is(.marble-margin-card, .marble-margin-build) { position: relative; top: auto !important; left: auto; width: auto; }
+    .marble-margin[data-sheet] .marble-margin-card[aria-expanded="true"] { left: auto; }
+    .marble-margin[data-sheet] .none { position: static; padding: 12px 18px; }
+
+    @media (prefers-reduced-motion: reduce) {
+      .marble-margin, .marble-margin *, .marble-margin-pin { transition: opacity 150ms linear !important; }
+      @starting-style { .marble-margin { opacity: 1; } }
+    }
+  `;
+
+  const h = (tag, className = '', text = null) => {
+    const node = document.createElement(tag);
+    if (className) node.className = className;
+    node.setAttribute(TRANSIENT, '');
+    if (text != null) node.textContent = text;
+    return node;
+  };
+  const button = (className, label, html = null) => {
+    const node = h('button', className);
+    node.type = 'button';
+    if (html) { node.innerHTML = html; if (label) node.append(label); } else node.textContent = label;
+    return node;
+  };
+  const clip = (text, n) => { const t = String(text ?? '').replace(/\s+/g, ' ').trim(); return t.length > n ? `${t.slice(0, n - 1)}…` : t; };
+  const plural = (n, one, many = `${one}s`) => `${n} ${n === 1 ? one : many}`;
+  const clock = (ms) => {
+    const s = Math.max(0, Math.round(ms / 1000));
+    return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`;
+  };
+  const byId = (id) => (id ? document.querySelector(`[data-marble-id="${CSS.escape(id)}"]`) : null);
+  /** On a page, a part of the plan is about a mark when one holds the other. */
+  const holds = (ids, anchorId) => {
+    const anchor = byId(anchorId);
+    if (!anchor) return ids.includes(anchorId);
+    return ids.some((id) => {
+      if (id === anchorId) return true;
+      const part = byId(id);
+      return Boolean(part && (part.contains(anchor) || anchor.contains(part)));
+    });
+  };
+
+  const boot = () => {
+    const M = window.marbleMarks;
+    const B = window.marbleBuild;
+    const layer = document.querySelector('.marble-build-layer');
+    if (!M || !B || !layer) return false;
+    if (layer.querySelector('.marble-margin')) return true;
+
+    const style = h('style');
+    style.textContent = STYLE;
+    document.head.append(style);
+
+    // The margin goes first in Build mode's layer, so its tips, the floating
+    // thread and the bar on a pick all paint over it.
+    const pins = h('div', 'marble-margin-pins');
+    const wire = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+    wire.setAttribute('class', 'marble-margin-wire');
+    wire.setAttribute('aria-hidden', 'true');
+    wire.setAttribute(TRANSIENT, '');
+    const wirePath = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+    wire.append(wirePath);
+    const panel = h('aside', 'marble-margin');
+    panel.setAttribute('aria-label', 'Marks');
+    panel.hidden = true;
+    pins.hidden = true;
+    wire.style.display = 'none';
+    layer.prepend(panel);
+    panel.before(pins);
+    pins.before(wire);
+
+    const head = h('div', 'mh');
+    const filt = h('div', 'filt');
+    filt.setAttribute('role', 'group');
+    filt.setAttribute('aria-label', 'Show');
+    const FILTERS = [['open', 'Open'], ['build', 'Building'], ['done', 'Done']];
+    const filterButtons = new Map();
+    for (const [key, label] of FILTERS) {
+      const b = button('', label);
+      b.dataset.show = key;
+      b.addEventListener('click', () => setShow(key));
+      filterButtons.set(key, b);
+      filt.append(b);
+    }
+    const add = button('add', 'Comment', KIND.plus);
+    B.tip(add, 'Press a part of the app to pin a comment to it');
+    add.addEventListener('click', () => { unpick(); M.setMode('comment'); });
+    const shut = button('shut', '', KIND.close);
+    shut.setAttribute('aria-label', 'Close');
+    shut.addEventListener('click', () => B.setSide('none'));
+    head.append(filt, h('span', 'sp'), add, shut);
+    const ground = h('div', 'ground');
+    const cards = h('div', 'cards');
+    const none = h('p', 'none');
+    none.setAttribute('role', 'status');
+    ground.append(cards, none);
+    panel.append(head, ground);
+
+    // ------------------------------------------------------------ the state
+
+    const SHOW_KEY = `marble-build:show:${B.app}`;
+    let show = 'open';
+    try { const kept = localStorage.getItem(SHOW_KEY); if (FILTERS.some(([k]) => k === kept)) show = kept; } catch { /* private mode */ }
+    let open = false;
+    let picked = null;
+    let extra = 0;
+    const sheet = matchMedia(PHONE);
+    const cardOf = new Map(); // id → { node, pin, status, sig }
+    let buildCard = null;
+
+    const marks = () => {
+      const server = new Map((B.state()?.marks ?? []).map((m) => [m.id, m]));
+      const here = M.list();
+      // What the page has, as the host keeps it where it has it; in the order
+      // they were made, which is what the pins count by.
+      return here.map((m) => ({ ...m, ...(server.get(m.id) ?? {}) })).sort((a, b) => (a.at ?? 0) - (b.at ?? 0));
+    };
+    const statusFor = (mark) => statusOf(mark, { builds: B.state()?.builds ?? [], holds, name: B.name });
+
+    const partName = (id) => {
+      const node = byId(id);
+      if (!node || node === document.body || node === document.documentElement) return 'the app';
+      const label = node.getAttribute('aria-label')
+        || node.querySelector(':scope > :is(h1, h2, h3, h4, h5, legend, caption, label, summary)')?.textContent
+        || node.querySelector('h1, h2, h3, h4, h5, legend, caption, th')?.textContent
+        || node.textContent;
+      return clip(label, 30) || 'the app';
+    };
+    const kindOf = (mark) => {
+      if (mark.type === 'note') return mark.first ? 'Your prompt' : 'Note';
+      if (mark.type === 'comment') return 'Comment';
+      if (mark.type === 'piece') return 'Piece';
+      if (mark.kind === 'box') return 'Box';
+      if (mark.kind === 'arrow') return 'Arrow';
+      return 'Sketch';
+    };
+    const whereOf = (mark) => {
+      if (mark.type === 'stroke' && mark.kind === 'arrow') return `from ${partName(mark.from)} to ${partName(mark.to)}`;
+      if (mark.type === 'stroke' && mark.kind === 'box') return `around ${partName(mark.ids?.[0] ?? mark.anchorId)}`;
+      return `on ${partName(mark.anchorId)}`;
+    };
+    const wordsOf = (mark) => {
+      if (mark.type === 'note') return mark.text || 'An empty note';
+      if (mark.type === 'piece') return mark.piece?.title ? `Put “${mark.piece.title}” here` : 'A piece to put here';
+      if (mark.type === 'stroke') return mark.kind === 'arrow' ? 'Move this there' : mark.kind === 'box' ? 'A box drawn around it' : 'Drawn over it';
+      return '';
+    };
+
+    /** Where a mark's pin goes, on screen: its point on the app; a sketch's
+     *  is the top right of what was drawn. */
+    const pointOf = (mark) => {
+      if (mark.type === 'stroke') {
+        const span = M.spanOf(mark.id);
+        return span ? { x: span.left + span.width, y: span.top } : null;
+      }
+      const anchor = byId(mark.anchorId);
+      if (!anchor) return null;
+      const r = anchor.getBoundingClientRect();
+      return { x: r.left + (mark.u ?? 0) * r.width, y: r.top + (mark.v ?? 0) * r.height };
+    };
+
+    // ------------------------------------------------------------ the cards
+
+    // A press on a card's control does its one thing and does not also pick
+    // the card.
+    const tapper = (node, fn, title) => {
+      node.addEventListener('click', (event) => { event.stopPropagation(); fn(); });
+      if (title) B.tip(node, title);
+      return node;
+    };
+
+    const drawCard = (mark, n, status) => {
+      const card = h('article', 'marble-margin-card');
+      card.tabIndex = 0;
+      card.dataset.id = mark.id;
+      const kind = h('div', 'k');
+      kind.innerHTML = KIND[mark.type] ?? KIND.note;
+      const no = h('b', 'no', String(n));
+      no.setAttribute('aria-hidden', 'true');
+      kind.prepend(no);
+      kind.append(h('span', '', `${kindOf(mark)} · ${whereOf(mark)}`));
+      card.append(kind);
+      if (mark.type === 'comment') {
+        const lines = h('div', 'lines');
+        B.drawLines(lines, mark);
+        card.append(lines);
+      } else card.append(h('p', 'words', wordsOf(mark)));
+
+      const stl = h('div', 'stl');
+      const row = h('div', 'row');
+      row.append(h('span', 'dot'), h('span', 'w', status.words));
+      let control = null;
+      if (status.act === 'hold') control = tapper(button('sb', 'Hold back'), () => B.hold(mark.id, true), 'Leave it out of the next build');
+      else if (status.act === 'unhold') control = tapper(button('sb', 'Put back'), () => B.hold(mark.id, false), 'Back in the next build');
+      else if (status.act === 'resolve') control = tapper(button('sb', 'Resolve'), () => B.resolve(mark.id, true), 'Put it under Done');
+      else if (status.act === 'reopen') control = tapper(button('sb', 'Reopen'), () => B.resolve(mark.id, false), 'Back under Open');
+      if (control) row.append(control);
+      stl.append(row);
+      if (status.ring != null) {
+        const meter = h('div', 'meter');
+        meter.setAttribute('aria-hidden', 'true');
+        const fill = h('i');
+        fill.style.setProperty('--p', `${Math.round(status.ring * 100)}%`);
+        meter.append(fill);
+        stl.append(meter);
+      }
+      if (status.act === 'offer') {
+        const offer = mark.thread?.at(-1)?.offer;
+        if (offer?.text) stl.append(h('p', 'offer', offer.text));
+        const ask = h('div', 'ask');
+        ask.append(
+          tapper(button('sb primary', 'Build that'), () => B.takeOffer(mark.id, true), 'Add it to the next build as a note'),
+          tapper(button('sb', 'Not now'), () => B.takeOffer(mark.id, false), 'Leave the app as it is'),
+        );
+        stl.append(ask);
+      }
+      card.append(stl);
+
+      if (mark.type === 'comment') {
+        const reply = h('form', 'reply');
+        const input = h('input');
+        input.type = 'text';
+        input.placeholder = 'Reply';
+        input.setAttribute('aria-label', `Reply to comment ${n}`);
+        const send = button('', '', KIND.send);
+        send.setAttribute('aria-label', 'Send');
+        send.setAttribute('aria-disabled', 'true');
+        input.addEventListener('input', () => send.setAttribute('aria-disabled', String(!input.value.trim())));
+        input.addEventListener('click', (event) => event.stopPropagation());
+        const post = async (event) => {
+          event?.preventDefault();
+          event?.stopPropagation();
+          const text = input.value.trim();
+          if (!text) return;
+          input.value = '';
+          send.setAttribute('aria-disabled', 'true');
+          await B.comment(mark.id, text);
+        };
+        send.addEventListener('click', post);
+        reply.addEventListener('submit', post);
+        reply.append(input, send);
+        card.append(reply);
+      }
+
+      card.addEventListener('click', (event) => {
+        if (event.target.closest('button, input, a')) return;
+        pick(picked === mark.id ? null : mark.id);
+      });
+      card.addEventListener('keydown', (event) => {
+        if (event.target !== card) return;
+        if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); pick(picked === mark.id ? null : mark.id); }
+      });
+      card.addEventListener('pointerenter', () => hot(mark.id, true));
+      card.addEventListener('pointerleave', () => hot(mark.id, false));
+      return card;
+    };
+
+    const drawPin = (mark, n) => {
+      const pin = button('marble-margin-pin', String(n));
+      pin.dataset.id = mark.id;
+      pin.addEventListener('click', (event) => {
+        event.stopPropagation();
+        const status = statusFor(mark);
+        if (status.show !== show) setShow(status.show, { quiet: true });
+        pick(picked === mark.id ? null : mark.id);
+      });
+      pin.addEventListener('pointerenter', () => hot(mark.id, true));
+      pin.addEventListener('pointerleave', () => hot(mark.id, false));
+      return pin;
+    };
+
+    const hot = (id, on) => {
+      const entry = cardOf.get(id);
+      entry?.node.toggleAttribute('data-hot', on);
+      entry?.pin.toggleAttribute('data-hot', on);
+    };
+
+    /** The build in hand (running or paused), or else the last one, which
+     *  says how it ended on Building until the next. */
+    const buildShown = () => B.current() ?? (B.state()?.builds ?? []).at(-1) ?? null;
+    const drawBuild = () => {
+      const b = show === 'build' ? buildShown() : null;
+      if (!b) { buildCard?.node.remove(); buildCard = null; return; }
+      if (!buildCard || buildCard.id !== b.id) {
+        buildCard?.node.remove();
+        const node = h('section', 'marble-margin-build');
+        node.setAttribute('aria-label', `Build ${b.n}`);
+        const bh = h('div', 'bh');
+        const title = h('b');
+        const time = h('time');
+        bh.append(title, time);
+        const said = h('p', 'bs');
+        said.setAttribute('role', 'status');
+        const parts = h('p', 'parts');
+        const drawn = h('div', 'drawn');
+        drawn.setAttribute('aria-hidden', 'true');
+        node.append(bh, said, parts, drawn);
+        cards.prepend(node);
+        buildCard = { id: b.id, node, title, time, said, parts, drawn, at: null };
+      }
+      const card = buildCard;
+      card.node.dataset.status = b.status;
+      card.title.textContent = b.title || `Build ${b.n}`;
+      const all = b.plan?.parts ?? [];
+      const done = all.filter((p) => p.state === 'done').length;
+      const now = all.find((p) => p.state === 'now');
+      card.said.textContent = {
+        running: all.length ? `Build ${b.n} · ${done} of ${all.length} parts made` : `Build ${b.n} · working out the plan`,
+        paused: all.length ? `Build ${b.n} · paused at ${done} of ${all.length} parts` : `Build ${b.n} · paused`,
+        finished: all.length ? `Build ${b.n} is done · ${plural(all.length, 'part')} made` : `Build ${b.n} is done`,
+        stopped: `Build ${b.n} stopped. The app is back as the last finished build left it, and its marks wait again.`,
+        failed: `Build ${b.n} did not finish${b.error ? `: ${b.error}` : '.'} Its marks wait again.`,
+      }[b.status] ?? `Build ${b.n}`;
+      // The plan's parts, as words: the one quiet line before the first
+      // picture, and what a screen reader is told all along.
+      card.parts.textContent = '';
+      if (all.length && (b.status === 'running' || b.status === 'paused')) {
+        all.forEach((p, i) => {
+          if (i) card.parts.append(' · ');
+          card.parts.append(p === now ? h('b', '', p.title) : `${p.title}${p.state === 'done' ? ' (made)' : ''}`);
+        });
+      }
+      const drawing = b.drawn;
+      // Once the picture comes, the parts are said only to a screen reader.
+      card.parts.hidden = !card.parts.textContent;
+      card.parts.style.cssText = drawing?.html ? SR_ONLY : '';
+      if (drawing?.html && drawing.at !== card.at) {
+        card.at = drawing.at;
+        B.mountDrawn(card.drawn, drawing.html);
+      }
+      if (!drawing?.html) { card.drawn.textContent = ''; card.at = null; }
+      tick();
+    };
+    let ticker = 0;
+    const tick = () => {
+      clearInterval(ticker);
+      ticker = 0;
+      if (!buildCard) return;
+      const b = (B.state()?.builds ?? []).find((x) => x.id === buildCard.id);
+      if (!b) return;
+      const paint = () => { buildCard && (buildCard.time.textContent = clock((b.endedAt ?? Date.now()) - b.startedAt)); };
+      paint();
+      if (b.status === 'running') ticker = setInterval(paint, 1000);
+    };
+
+    // ------------------------------------------------------------ drawing
+
+    let order = [];
+    const draw = () => {
+      if (!open) return;
+      const list = marks();
+      const live = new Set();
+      order = [];
+      list.forEach((mark, i) => {
+        const n = i + 1;
+        const status = statusFor(mark);
+        const sig = JSON.stringify([n, status, mark.text, mark.thread, mark.resolved, mark.held, mark.anchorId, mark.piece?.title, B.name]);
+        let entry = cardOf.get(mark.id);
+        if (!entry || entry.sig !== sig) {
+          const node = drawCard(mark, n, status);
+          const focused = entry?.node.contains(document.activeElement) ? document.activeElement : null;
+          const draft = entry?.node.querySelector('.reply input')?.value ?? '';
+          if (entry) entry.node.replaceWith(node); else cards.append(node);
+          const pin = entry?.pin ?? drawPin(mark, n);
+          if (!entry) pins.append(pin);
+          entry = { node, pin, status, sig, mark };
+          cardOf.set(mark.id, entry);
+          if (draft) { const input = node.querySelector('.reply input'); input.value = draft; input.dispatchEvent(new Event('input')); }
+          if (focused?.matches?.('.reply input')) node.querySelector('.reply input')?.focus({ preventScroll: true });
+          else if (focused) node.focus({ preventScroll: true });
+        }
+        entry.mark = mark;
+        entry.status = status;
+        const { node, pin } = entry;
+        node.dataset.key = status.key;
+        node.dataset.show = status.show;
+        node.hidden = status.show !== show;
+        node.setAttribute('aria-expanded', String(picked === mark.id));
+        node.setAttribute('aria-label', `${n}: ${kindOf(mark)} ${whereOf(mark)} · ${status.words}`);
+        pin.textContent = String(n);
+        pin.dataset.key = status.key;
+        pin.toggleAttribute('data-ring', status.ring != null);
+        if (status.ring != null) pin.style.setProperty('--p', `${Math.round(status.ring * 100)}%`);
+        pin.toggleAttribute('data-picked', picked === mark.id);
+        pin.setAttribute('aria-label', `${n}: ${kindOf(mark)} ${whereOf(mark)} · ${status.words}`);
+        live.add(mark.id);
+        order.push(mark.id);
+      });
+      for (const [id, entry] of cardOf) {
+        if (live.has(id)) continue;
+        entry.node.remove();
+        entry.pin.remove();
+        cardOf.delete(id);
+        if (picked === id) picked = null;
+      }
+      if (picked && cardOf.get(picked)?.node.hidden) picked = null;
+      drawBuild();
+      const shown = [...cardOf.values()].filter((e) => !e.node.hidden).length;
+      none.hidden = shown > 0 || Boolean(buildCard);
+      none.textContent = !list.length
+        ? 'Nothing on the app yet. Use + Comment to ask about a part, or Note and Sketch on the toolbar to say what to change.'
+        : {
+          open: 'Nothing open. What was built and what was resolved is under Done.',
+          build: 'Nothing is being built. Build on the toolbar sends the marks that wait.',
+          done: 'Nothing done yet. A mark comes here once it is built, and a comment once it is resolved.',
+        }[show];
+      for (const [key, b] of filterButtons) b.setAttribute('aria-pressed', String(key === show));
+      place();
+    };
+
+    // ------------------------------------------------------------ placing
+
+    let placing = 0;
+    const schedule = () => { if (open && !placing) placing = requestAnimationFrame(() => { placing = 0; place(); }); };
+    const place = () => {
+      if (!open) return;
+      const groundTop = ground.getBoundingClientRect().top;
+      const items = [];
+      for (const id of order) {
+        const entry = cardOf.get(id);
+        const point = pointOf(entry.mark);
+        entry.pin.hidden = !point || !M.describing;
+        if (point) {
+          entry.pin.style.left = `${Math.round(point.x)}px`;
+          entry.pin.style.top = `${Math.round(point.y)}px`;
+        }
+        if (entry.node.hidden) continue;
+        // Its top level with the pin's top, in the page's terms, so one
+        // translate moves them all with the scroll.
+        const pinTop = point ? point.y - 22 : groundTop;
+        items.push({ id, want: pinTop - PIN_LIFT - groundTop + scrollY, height: entry.node.offsetHeight });
+      }
+      if (panel.hasAttribute('data-sheet')) { wirePin(); return; }
+      let floor = GAP;
+      if (buildCard) {
+        buildCard.node.style.top = `${GAP}px`;
+        floor = GAP + buildCard.node.offsetHeight + GAP;
+      }
+      const tops = stackCards(items, { head: floor, gap: GAP, picked });
+      for (const [id, top] of tops) cardOf.get(id).node.style.top = `${top}px`;
+      // What runs on below the foot of the page can still be reached: the
+      // wheel over the margin takes the page as far as it goes, then the
+      // cards the rest of the way.
+      const last = Math.max(0, ...items.map((item) => (tops.get(item.id) ?? 0) + item.height));
+      const room = ground.clientHeight;
+      const end = Math.max(0, document.documentElement.scrollHeight - innerHeight);
+      maxExtra = Math.max(0, last + GAP * 2 - (end + room));
+      extra = Math.min(extra, maxExtra);
+      cards.style.transform = `translateY(${-(scrollY + extra)}px)`;
+      wirePin();
+    };
+    let maxExtra = 0;
+
+    const wirePin = () => {
+      const entry = picked && cardOf.get(picked);
+      if (!entry || entry.pin.hidden || entry.node.hidden || panel.hasAttribute('data-sheet')) { wire.style.display = 'none'; return; }
+      const p = entry.pin.getBoundingClientRect();
+      const c = entry.node.getBoundingClientRect();
+      const g = ground.getBoundingClientRect();
+      const y2 = Math.min(Math.max(c.top + 14, g.top), g.bottom);
+      const x1 = p.right;
+      const y1 = p.top + p.height / 2;
+      const edge = panel.getBoundingClientRect().left;
+      wirePath.setAttribute('d', `M${x1},${y1} H${Math.max(x1, edge - 10)} L${c.left},${y2}`);
+      wire.style.display = '';
+    };
+
+    // ------------------------------------------------------------ picking
+
+    function pick(id) {
+      picked = id && cardOf.has(id) ? id : null;
+      for (const [key, entry] of cardOf) {
+        entry.node.setAttribute('aria-expanded', String(key === picked));
+        entry.pin.toggleAttribute('data-picked', key === picked);
+      }
+      place();
+      const entry = picked && cardOf.get(picked);
+      if (!entry) return;
+      if (panel.hasAttribute('data-sheet')) {
+        // On a phone: the app goes to the pin, and the sheet lowers so it shows.
+        panel.setAttribute('data-low', '');
+        byId(entry.mark.anchorId)?.scrollIntoView({ block: 'center', behavior: matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth' });
+        entry.node.scrollIntoView({ block: 'nearest' });
+      } else {
+        // Off screen, the page comes to it, so the card and the pin are both
+        // in view.
+        const r = entry.pin.getBoundingClientRect();
+        const top = ground.getBoundingClientRect().top;
+        if (!entry.pin.hidden && (r.top < top || r.bottom > innerHeight - 24)) {
+          scrollBy({ top: r.top - top - innerHeight / 3, behavior: matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth' });
+        }
+      }
+      if (entry.mark.type === 'comment') requestAnimationFrame(() => entry.node.querySelector('.reply input')?.focus({ preventScroll: true }));
+    }
+    const unpick = () => { if (picked) pick(null); panel.removeAttribute('data-low'); };
+
+    function setShow(next, { quiet = false } = {}) {
+      show = FILTERS.some(([k]) => k === next) ? next : 'open';
+      try { localStorage.setItem(SHOW_KEY, show); } catch { /* private mode */ }
+      if (!quiet) unpick();
+      extra = 0;
+      draw();
+    }
+
+    // ------------------------------------------------------------ open, shut
+
+    const sync = () => {
+      const want = B.side === 'comments' && !B.sideHidden;
+      panel.toggleAttribute('data-sheet', sheet.matches);
+      if (want === open) { if (open) draw(); return; }
+      open = want;
+      panel.hidden = !open;
+      pins.hidden = !open;
+      if (!open) {
+        picked = null;
+        wire.style.display = 'none';
+        clearInterval(ticker);
+        panel.removeAttribute('data-low');
+        return;
+      }
+      panel.setAttribute('data-still', '');
+      draw();
+      requestAnimationFrame(() => requestAnimationFrame(() => panel.removeAttribute('data-still')));
+    };
+
+    addEventListener('marble-build:side', sync);
+    addEventListener('marble-build:state', () => draw());
+    addEventListener('marble-build:pick', (event) => {
+      const id = event.detail?.id;
+      if (!open || !id) return;
+      draw();
+      const status = cardOf.get(id)?.status;
+      if (status && status.show !== show) setShow(status.show, { quiet: true });
+      pick(id);
+    });
+    addEventListener('marble-marks:describing', () => schedule());
+    M.onChange(() => { if (open) draw(); });
+    sheet.addEventListener('change', sync);
+    addEventListener('scroll', (event) => {
+      if (!open) return;
+      // The page itself: one translate. Anything inside it that scrolls
+      // moves the parts the marks are on, so everything is placed again.
+      if (event.target === document || event.target === document.documentElement) {
+        if (scrollY < document.documentElement.scrollHeight - innerHeight - 1) extra = 0;
+        cards.style.transform = `translateY(${-(scrollY + extra)}px)`;
+      }
+      schedule();
+    }, { capture: true, passive: true });
+    addEventListener('resize', schedule);
+    new ResizeObserver(schedule).observe(document.documentElement);
+    if (document.body) new ResizeObserver(schedule).observe(document.body);
+    new ResizeObserver(schedule).observe(cards);
+    ground.addEventListener('wheel', (event) => {
+      if (panel.hasAttribute('data-sheet') || !maxExtra) return;
+      const end = document.documentElement.scrollHeight - innerHeight;
+      const dy = event.deltaY;
+      if (dy > 0 && scrollY >= end - 1) {
+        event.preventDefault();
+        extra = Math.min(maxExtra, extra + dy);
+        cards.style.transform = `translateY(${-(scrollY + extra)}px)`;
+        wirePin();
+      } else if (dy < 0 && extra > 0) {
+        event.preventDefault();
+        extra = Math.max(0, extra + dy);
+        cards.style.transform = `translateY(${-(scrollY + extra)}px)`;
+        wirePin();
+      }
+    }, { passive: false });
+
+    // Esc lets go of a pick; a second Esc is Describe's.
+    addEventListener('keydown', (event) => {
+      if (event.key !== 'Escape' || !open || !picked || event.defaultPrevented) return;
+      event.preventDefault();
+      event.stopPropagation();
+      const was = cardOf.get(picked)?.node;
+      unpick();
+      was?.focus({ preventScroll: true });
+    }, true);
+    // A press on the app, away from the marks, lets go too, as in Docs.
+    addEventListener('pointerdown', (event) => {
+      if (!open || !picked) return;
+      const path = event.composedPath();
+      // Build mode's own (the margin, its pins, a tip, the thread) and
+      // Describe's toolbar keep it.
+      if (path.includes(layer) || path.some((node) => node?.classList?.contains?.('marble-marks-layer'))) return;
+      unpick();
+    }, true);
+
+    // Defined, not assigned, so the getters stay live.
+    Object.defineProperties(globalThis.marbleMargin, Object.getOwnPropertyDescriptors({
+      get open() { return open; },
+      get show() { return show; },
+      get picked() { return picked; },
+      setShow,
+      pick,
+      /** The status mark's press: the margin on `next`, or put away when it
+       *  is already showing that. */
+      toggle(next = 'open') {
+        if (open && show === next) { B.setSide('none'); return; }
+        setShow(next, { quiet: true });
+        if (!open) B.setSide('comments');
+      },
+    }));
+    sync();
+    return true;
+  };
+
+  const start = () => { if (!boot()) addEventListener('marble-build:ready', boot, { once: true }); };
+  start();
+})();

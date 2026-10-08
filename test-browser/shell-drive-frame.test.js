@@ -72,7 +72,8 @@ test('New is in the bar on any page: a focused box, the three apps, the template
   const pop = shell.locator('.making');
   await pop.waitFor({ state: 'visible' });
   assert.equal(await shell.evaluate((el) => el.shadowRoot.activeElement?.getAttribute('aria-label')), 'Describe an app to build');
-  assert.deepEqual(await pop.locator('.apps > .to b').allTextContents(), ['Chat', 'Agent', 'Board']);
+  // With Build mode off (the harness's default) there is no App to go to.
+  assert.deepEqual(await pop.locator('.apps > .to:not([hidden]) b').allTextContents(), ['Chat', 'Agent', 'Board']);
   assert.equal(await pop.locator('.apps > .to[aria-pressed="true"] b').textContent(), 'Chat');
   await pop.locator('.tpl').first().waitFor();
   assert.ok(await pop.locator('.tpl').count() >= 4);
@@ -119,7 +120,7 @@ test('Settings says where the built-in apps show, files it on the Drive, and the
   const pop = shell.locator('.settings');
   await pop.waitFor({ state: 'visible' });
   // Never chosen: with my files, where they always were.
-  assert.equal(await pop.locator('.level[aria-checked="true"] .lv-name').textContent(), 'With my files');
+  assert.equal(await pop.locator('.builtin .level[aria-checked="true"] .lv-name').textContent(), 'With my files');
   assert.ok((await pop.locator('.chips a').allTextContents()).includes('Agents'));
 
   await pop.locator('.level[data-builtin="sidebar"]').click();
