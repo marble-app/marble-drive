@@ -363,6 +363,7 @@ export function createRunner({ store, tools, providers, workdir, origin, bridgeP
       provider: null,
       project: null, // resolved at start; the cwd of a full turn
       asks: new Map(), // requestId → { closed }: prompts the process is waiting on
+      calls: new Set(), // callIds of the process's own tool calls with no result yet
       holdStall: null,
       resumeStall: null,
       resume: null, // the provider session this turn was started to resume
@@ -799,7 +800,9 @@ export function createRunner({ store, tools, providers, workdir, origin, bridgeP
   function armEnd(turn, { drained = false } = {}) {
     if (!turn.stdinOpen) return; // a CLI handed its prompt on a closed stdin leaves by itself
     clearTimeout(turn.settle);
-    if (turn.background > 0) return;
+    // Nor while one of its own commands runs: background work can end in the
+    // middle of a silent foreground one, after a result.
+    if (turn.background > 0 || turn.calls.size) return;
     const wait = drained ? (limits.drainedSettleMs ?? DRAINED_SETTLE_MS) : (limits.settleMs ?? SETTLE_MS);
     turn.settle = setTimeout(() => endInput(turn), wait);
     turn.settle.unref?.();
@@ -833,9 +836,15 @@ export function createRunner({ store, tools, providers, workdir, origin, bridgeP
           publish(turn.conversationId, { turn: turn.id, ...event });
         });
         return;
-      case 'text':
       case 'tool.call':
+        turn.calls.add(event.callId);
+        turn.onEvent(event);
+        return;
       case 'tool.result':
+        turn.calls.delete(event.callId);
+        turn.onEvent(event);
+        return;
+      case 'text':
         turn.onEvent(event);
         return;
       case 'usage':
@@ -844,6 +853,9 @@ export function createRunner({ store, tools, providers, workdir, origin, bridgeP
         return;
       case 'done':
         turn.done = event;
+        // Nothing is in flight once the CLI has printed a result; a call
+        // whose result never came cannot hold the end off.
+        turn.calls.clear();
         // A result only *proposes* the end. A CLI prints one before it has
         // read the prompt at all when it has a queued notification to flush,
         // and prints one and keeps working when it has answered while a
