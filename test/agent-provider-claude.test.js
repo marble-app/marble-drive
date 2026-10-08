@@ -278,6 +278,18 @@ test('background work is counted from the CLI\'s own task lifecycle', () => {
   assert.deepEqual(ended('gone', 'stopped'), [{ type: 'background', pending: 0 }]);
 });
 
+test('the CLI\'s list of background tasks corrects a count that missed a notification', () => {
+  const state = {};
+  const line = (value) => parseClaudeLine(JSON.stringify(value), state);
+  const listed = (...ids) => line({ type: 'system', subtype: 'background_tasks_changed', tasks: ids.map((task_id) => ({ task_id, task_type: 'local_bash', description: task_id })) });
+  line({ type: 'system', subtype: 'task_started', task_id: 'tests', description: 'tests' });
+  line({ type: 'system', subtype: 'task_started', task_id: 'lost', description: 'lost' });
+  assert.deepEqual(listed('tests'), [{ type: 'background', pending: 1 }]);
+  assert.deepEqual(listed(), [{ type: 'background', pending: 0 }]);
+  // The notification that follows the list still counts for nothing more.
+  assert.deepEqual(line({ type: 'system', subtype: 'task_notification', task_id: 'tests', status: 'completed' }), [{ type: 'background', pending: 0 }]);
+});
+
 test('a subagent\'s deltas and tool results are not the turn\'s', () => {
   const delta = { type: 'stream_event', parent_tool_use_id: 'toolu_1', event: { type: 'content_block_delta', delta: { type: 'text_delta', text: 'inner' } } };
   const result = { type: 'user', parent_tool_use_id: 'toolu_1', message: { role: 'user', content: [{ type: 'tool_result', tool_use_id: 't9', content: 'inner' }] } };
@@ -349,6 +361,9 @@ test('a full-capability spawn is the terminal\'s, with Marble added and prompts 
   const lines = spec.stdin.trim().split('\n').map((line) => JSON.parse(line));
   assert.deepEqual(lines[0], { type: 'control_request', request_id: 'marble-init', request: { subtype: 'initialize', hooks: {} } });
   assert.deepEqual(lines[1], { type: 'user', message: { role: 'user', content: 'Rewrite it' } });
+  // A whole test suite in one command: the CLI's ten-minute ceiling is raised
+  // for a full agent, and only the ceiling.
+  assert.deepEqual(spec.env, { BASH_MAX_TIMEOUT_MS: String(30 * 60_000) });
 
   const project = sub.spawn({ workspace: '/w', prompt: 'x', capability: 'full', kind: 'project', cwd: '/repo', model: 'fable', effort: 'high', resume: 's1', mode: 'manual', env: {} });
   assert.equal(project.args[project.args.indexOf('--append-system-prompt') + 1], PROJECT_INSTRUCTIONS);

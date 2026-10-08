@@ -45,6 +45,21 @@ const SCRIPTS = {
     { say: 'the subagent finished' },
     { lingerUntilEof: true },
   ],
+  // A test run left going in the background: silent from start to end, and
+  // its report is what the agent answers after its result.
+  backgroundRun: [
+    { say: 'tests are running' },
+    { bg: 'start', id: 'tests' },
+    { done: true },
+    { silent: 1_500 },
+    { bg: 'end', id: 'tests' },
+    { sleep: 300 },
+    { say: 'the tests passed' },
+    { done: true },
+    { lingerUntilEof: true },
+  ],
+  // Background work that never ends, after the answer is in.
+  backgroundIdle: [{ say: 'started the server' }, { bg: 'start', id: 'server' }, { done: true }, { lingerUntilEof: true }],
   // A result, and then a process that neither reads its stdin nor takes SIGTERM.
   stubbornResult: [{ ignoreTerm: true }, { say: 'answer' }, { done: true }, { hang: true }],
   permission: [{ ask: { tool: 'Bash', input: { command: 'rm -rf build' } } }, { say: 'after' }],
@@ -1374,7 +1389,7 @@ test('a process that waits for more input after its result is ended by the runne
 });
 
 test('a result while background work is outstanding is not the end of the turn', async () => {
-  const { store, runner } = await setup({ capability: 'full', limits: { settleMs: 50, killGraceMs: 50, backgroundSettleMs: 5_000 } });
+  const { store, runner } = await setup({ capability: 'full', limits: { settleMs: 50, killGraceMs: 50 } });
   const { id } = await store.createConversation({ provider: 'fake' });
   await runner.send(id, { prompt: 'script:background', context: { target: 'garden' } });
   const turn = await finished(store, `${id}-t1`);
@@ -1382,6 +1397,31 @@ test('a result while background work is outstanding is not the end of the turn',
   assert.equal(turn.error, null);
   const said = (await store.events(id)).filter((e) => e.type === 'text').map((e) => e.text);
   assert.ok(said.includes('the subagent finished'), said.join(' | '));
+  await runner.close();
+});
+
+// A backgrounded command prints nothing while it runs. Ending the turn after
+// any stretch of silence closed the CLI under the run, and killed it.
+test('a silent background run outlives the settle window, and the agent answers after it', async () => {
+  const { store, runner } = await setup({ capability: 'full', limits: { settleMs: 50, drainedSettleMs: 1_000, killGraceMs: 50 } });
+  const { id } = await store.createConversation({ provider: 'fake' });
+  await runner.send(id, { prompt: 'script:backgroundRun', context: { target: 'garden' } });
+  const turn = await finished(store, `${id}-t1`);
+  assert.equal(turn.status, 'completed');
+  assert.equal(turn.error, null);
+  const said = (await store.events(id)).filter((e) => e.type === 'text').map((e) => e.text);
+  const answered = said.indexOf('the tests passed');
+  assert.ok(answered > said.indexOf('tests are running') && said.indexOf('tests are running') !== -1, said.join(' | '));
+  await runner.close();
+});
+
+test('background work gone quiet after the answer ends the turn as completed, not stalled', async () => {
+  const { store, runner } = await setup({ capability: 'full', limits: { settleMs: 50, killGraceMs: 50, stallMs: 400 } });
+  const { id } = await store.createConversation({ provider: 'fake' });
+  await runner.send(id, { prompt: 'script:backgroundIdle', context: { target: 'garden' } });
+  const turn = await finished(store, `${id}-t1`);
+  assert.equal(turn.status, 'completed');
+  assert.equal(turn.error, null);
   await runner.close();
 });
 
