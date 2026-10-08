@@ -133,6 +133,10 @@ for (const step of script) {
     out({ kind: 'call', name: step.tool, input: step.input ?? {}, callId });
     out({ kind: 'result', callId, ok: step.ok !== false, denied: step.denied === true, summary: step.summary ?? '' });
   }
+  // The same tool, its call and its result apart: a foreground command that
+  // runs silent in between.
+  if (step.toolStart) out({ kind: 'call', name: step.toolStart, input: {}, callId: step.id });
+  if (step.toolEnd) out({ kind: 'result', callId: step.toolEnd, ok: true, denied: false, summary: '' });
   // What a full agent does that a documents agent cannot: write the file
   // itself, with no op and no bridge. The host hears it from the watcher.
   if (step.write) {

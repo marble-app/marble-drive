@@ -58,6 +58,21 @@ const SCRIPTS = {
     { done: true },
     { lingerUntilEof: true },
   ],
+  // After the answer, the agent is in a long silent command of its own when its
+  // background run ends: the end of the run is not the end of the turn.
+  backgroundEndsMidCommand: [
+    { say: 'tests are running' },
+    { bg: 'start', id: 'tests' },
+    { done: true },
+    { sleep: 200 },
+    { toolStart: 'Bash', id: 'build' },
+    { bg: 'end', id: 'tests' },
+    { silent: 1_500 },
+    { toolEnd: 'build' },
+    { say: 'built and tested' },
+    { done: true },
+    { lingerUntilEof: true },
+  ],
   // Background work that never ends, after the answer is in.
   backgroundIdle: [{ say: 'started the server' }, { bg: 'start', id: 'server' }, { done: true }, { lingerUntilEof: true }],
   // A result, and then a process that neither reads its stdin nor takes SIGTERM.
@@ -1412,6 +1427,17 @@ test('a silent background run outlives the settle window, and the agent answers 
   const said = (await store.events(id)).filter((e) => e.type === 'text').map((e) => e.text);
   const answered = said.indexOf('the tests passed');
   assert.ok(answered > said.indexOf('tests are running') && said.indexOf('tests are running') !== -1, said.join(' | '));
+  await runner.close();
+});
+
+test('background work that ends during a silent command of the agent\'s own does not end the turn under it', async () => {
+  const { store, runner } = await setup({ capability: 'full', limits: { settleMs: 50, drainedSettleMs: 300, killGraceMs: 50 } });
+  const { id } = await store.createConversation({ provider: 'fake' });
+  await runner.send(id, { prompt: 'script:backgroundEndsMidCommand', context: { target: 'garden' } });
+  const turn = await finished(store, `${id}-t1`);
+  assert.equal(turn.status, 'completed');
+  const said = (await store.events(id)).filter((e) => e.type === 'text').map((e) => e.text);
+  assert.ok(said.includes('built and tested'), said.join(' | '));
   await runner.close();
 });
 
