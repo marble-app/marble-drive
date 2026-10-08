@@ -207,10 +207,11 @@ async function boot({ config, store, oplog = null, writeOps, createDocument, put
       stallMs: config.agentStallMinutes * 60_000,
       maxMs: config.agentMaxMinutes * 60_000,
       killGraceMs: 3_000,
-      // A result stands for half a second before the runner acts on it, and a
-      // minute while the CLI still has background work of its own in flight.
+      // A result stands for half a second before the runner acts on it, and
+      // five once the background work it left running has ended. While that
+      // work is out, only the stall rule ends the turn.
       settleMs: 500,
-      backgroundSettleMs: 60_000,
+      drainedSettleMs: 5_000,
     },
     log,
     skills,

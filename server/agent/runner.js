@@ -50,10 +50,12 @@ export function clipFailure(text) {
 // How long closing the host waits for its running turns to write their end.
 const CLOSE_GRACE_MS = 5_000;
 // How long a result has to stand unchallenged before the runner acts on it,
-// and how long it waits instead while the CLI still carries background work.
-// Both are `limits` a host can set; these are the fallbacks.
+// and how long a process gets once its last background work has ended: the
+// CLI takes that work's report as a new message, and says so within moments.
+// Both are `limits` a host can set; these are the fallbacks. While background
+// work is still out, no clock ends the turn (armEnd).
 const SETTLE_MS = 500;
-const BACKGROUND_SETTLE_MS = 60_000;
+const DRAINED_SETTLE_MS = 5_000;
 const STEER_NOTE = 'While you were working I added this note. Treat it as course-correction.';
 const DISPATCH = new Set(['queue', 'steer', 'interrupt']);
 
@@ -692,9 +694,19 @@ export function createRunner({ store, tools, providers, workdir, origin, bridgeP
           if (lastSample !== null) turn.lastProgress = awake.now();
           lastSample = measured;
         }
-        if (awake.now() - turn.lastProgress >= limits.stallMs) {
-          stop(turn, { status: 'failed', error: `stalled — no output and no work for ${Math.round(limits.stallMs / 1000)} s` });
+        if (awake.now() - turn.lastProgress < limits.stallMs) return;
+        // An answer that is in, waiting on background work that has gone
+        // quiet (a dev server, a hung run): the turn did what it was asked,
+        // so it ends as it would have, not as a failure.
+        if (turn.done && turn.background > 0) {
+          if (turn.stdinOpen && !turn.endingIdle) {
+            turn.endingIdle = true;
+            log.log(`[agents] ${turn.id}: background work idle for ${Math.round(limits.stallMs / 1000)} s after the answer; ending the turn`);
+            endInput(turn);
+          }
+          return;
         }
+        stop(turn, { status: 'failed', error: `stalled — no output and no work for ${Math.round(limits.stallMs / 1000)} s` });
       };
       const stallCheck = setInterval(checkStall, Math.max(50, Math.min(60_000, Math.floor(limits.stallMs / 4))));
       stallCheck.unref?.();
@@ -779,12 +791,16 @@ export function createRunner({ store, tools, providers, workdir, origin, bridgeP
 
   /** Take up a result's proposal to end the turn: if the process says nothing
    *  more for the settle window, close its stdin. One still carrying
-   *  background work gets a far longer window — what it waits on is its own
-   *  subagent, not us — and every line it prints resets the wait. */
-  function armEnd(turn) {
+   *  background work is not ended at all. A backgrounded test run is silent
+   *  for as long as it runs, and closing stdin under it ends the CLI and the
+   *  run with it, so the agent never hears how it went. The CLI wakes itself
+   *  when the work ends; the stall rule ends a wait whose work has gone
+   *  quiet. `drained` is the proposal standing again once that work is done. */
+  function armEnd(turn, { drained = false } = {}) {
     if (!turn.stdinOpen) return; // a CLI handed its prompt on a closed stdin leaves by itself
     clearTimeout(turn.settle);
-    const wait = turn.background > 0 ? (limits.backgroundSettleMs ?? BACKGROUND_SETTLE_MS) : (limits.settleMs ?? SETTLE_MS);
+    if (turn.background > 0) return;
+    const wait = drained ? (limits.drainedSettleMs ?? DRAINED_SETTLE_MS) : (limits.settleMs ?? SETTLE_MS);
     turn.settle = setTimeout(() => endInput(turn), wait);
     turn.settle.unref?.();
   }
@@ -840,7 +856,7 @@ export function createRunner({ store, tools, providers, workdir, origin, bridgeP
       // drained and the process has nothing more to say, not before.
       case 'background':
         turn.background = Number(event.pending) || 0;
-        if (turn.background === 0 && turn.done) armEnd(turn);
+        if (turn.background === 0 && turn.done) armEnd(turn, { drained: true });
         return;
       default:
     }
