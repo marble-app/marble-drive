@@ -90,3 +90,17 @@ export function summaryPrompt({ build, marks = [], now = Date.now() }) {
   lines.push('', 'Answer with the summary widget\'s HTML. Every name and number in it must be in what is above.');
   return lines.join('\n');
 }
+
+/** A build in a few lines, for answering what is said to it from its status
+ *  (reply.js): what it was asked, its parts, what it changed and said. */
+export function aboutBuild({ build: b, marks = [] }) {
+  const taken = marks.filter((m) => m.build === b.id || (b.marks ?? []).includes(m.id));
+  const state = { running: 'still running', paused: 'paused', finished: 'finished', stopped: 'stopped, and the app went back', failed: 'did not finish' }[b.status] ?? b.status;
+  return [
+    `Build ${b.n}, ${state}.`,
+    ...(taken.length ? ['Asked for:', ...taken.map((m) => `- ${wordsOf(m) || '(a mark)'}`)] : []),
+    ...((b.plan?.parts ?? []).length ? ['Its parts:', ...b.plan.parts.slice(0, PARTS_MAX).map((p) => `- ${p.title}${p.detail ? ` (${clip(p.detail, 120)})` : ''}: ${p.state === 'done' ? 'made' : p.state === 'now' ? 'being made' : 'not made yet'}`)] : []),
+    ...((b.log ?? []).some((step) => step.kind === 'change') ? ['What it changed:', ...b.log.filter((step) => step.kind === 'change').slice(-12).map((step) => `- ${clip(step.head, 160)}`)] : []),
+    ...(b.said ? [`What it said: ${clip(b.said, 400)}`] : []),
+  ].join('\n');
+}

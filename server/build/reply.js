@@ -23,7 +23,7 @@ const readable = (html) => String(html ?? '')
   .replace(/\s+/g, ' ')
   .trim();
 
-export function replyPrompt({ title = '', html = '', outline = '', thread = [] }) {
+export function replyPrompt({ title = '', html = '', about = '', outline = '', thread = [] }) {
   const said = thread.filter((line) => line.text).map((line) => `${line.who === 'agent' ? 'You' : 'Them'}: ${line.text}`);
   return [
     'You answer for an app in Marble Drive, as the app: the person pins comments to it and reads your answer in the comment\'s thread, signed with the app\'s name. They never see an agent, a model or a job, so never mention one; say "I" for the app and what it will do in the next build.',
@@ -33,10 +33,19 @@ export function replyPrompt({ title = '', html = '', outline = '', thread = [] }
     '"""',
     String(outline || '(empty)').slice(0, OUTLINE_MAX),
     '"""',
-    'The comment is pinned to this element:',
-    '"""',
-    readable(html).slice(0, HTML_MAX) || '(the page)',
-    '"""',
+    // Said to a build from its status: what that build was asked, made and
+    // said, in place of an element.
+    ...(about ? [
+      'This is said about one of its builds, a round of changes made to the app. What that build was asked, made and said:',
+      '"""',
+      String(about).slice(0, HTML_MAX),
+      '"""',
+    ] : [
+      'The comment is pinned to this element:',
+      '"""',
+      readable(html).slice(0, HTML_MAX) || '(the page)',
+      '"""',
+    ]),
     'The thread, oldest first:',
     ...said,
     '',
@@ -62,9 +71,9 @@ export function readReply(raw) {
 }
 
 /** Ask the installed CLI. Returns null — never throws — without an answer. */
-export async function writeReply({ title = '', html = '', outline = '', thread = [], model = 'haiku', exec = runCommand, env = process.env, timeout = 30_000, log = console } = {}) {
+export async function writeReply({ title = '', html = '', about = '', outline = '', thread = [], model = 'haiku', exec = runCommand, env = process.env, timeout = 30_000, log = console } = {}) {
   if (!thread.some((line) => line.who !== 'agent' && line.text)) return null;
-  const ask = replyPrompt({ title, html, outline, thread });
+  const ask = replyPrompt({ title, html, about, outline, thread });
   const cwd = await scratch();
   const result = await exec('claude', ['-p', '--model', model, '--tools', '', '--strict-mcp-config', '--setting-sources', 'project', '--output-format', 'text', '--', ask], {
     timeout, env: pickEnv(env), cwd,

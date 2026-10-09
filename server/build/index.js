@@ -11,10 +11,10 @@
 import { parsePath, splitPath } from '../paths.js';
 import { LOG_MAX, linesOf, partNow, stepOf } from './steps.js';
 import { timelineOf } from './history.js';
-import { summaryPrompt } from './summary.js';
+import { aboutBuild, summaryPrompt } from './summary.js';
 import { readSkill, unfingernail } from '../agent/drawer.js';
 import { indexOf } from '../agent/source.js';
-import { buildBrief, resumeBrief } from './brief.js';
+import { buildBrief, phraseOf, resumeBrief } from './brief.js';
 import { outlineOf, pieceFrom, previewOf } from './pieces.js';
 import { cleanMark, cleanPlan, newId, shaOf } from './store.js';
 
@@ -24,6 +24,7 @@ const TITLE_MAX = 48;
 const UNTITLED = /^Untitled( \d+)?$/;
 // A drawing is the drawer's widget, at most 40k characters (drawer.js).
 const DRAWN_MAX = 40_000;
+const THREAD_MAX = 40;
 
 const clip = (text, max = TITLE_MAX) => {
   const t = String(text ?? '').replace(/\s+/g, ' ').trim();
@@ -58,6 +59,8 @@ function publicState(state, current = null) {
     hasDrawn: Boolean(b.drawn),
     // What it made, said and was asked, drawn once it has ended (summary.js).
     summary: b.summary && b.id === lastEnded ? b.summary : null,
+    // What was said to it from its status, and its answers.
+    thread: b.thread ?? [],
     hasSummary: Boolean(b.summary),
     // Being drawn; a host that went down meanwhile does not leave it so.
     summing: Boolean(b.summing) && Date.now() - (b.endedAt ?? 0) < 180_000,
@@ -887,6 +890,78 @@ export function createBuilds({ buildStore, store, oplog = null, undoTurns = null
     });
   }
 
+  // ------------------------------------------------------- talking to one
+
+  /** A line said to a build, from its status card: a question about it is
+   *  answered in its thread; a change is made at once, worked into the
+   *  build while it runs, or once it has ended as a build of its own (or
+   *  into one running on the same parts). */
+  async function talk(docPath, id, text, { client = null, images = [] } = {}) {
+    const words = String(text ?? '').trim().slice(0, 2_000);
+    const pictures = (Array.isArray(images) ? images : []).filter((image) => typeof image?.name === 'string');
+    if (!words && !pictures.length) throw httpError(400, 'Say something first');
+    const { result: build } = await change(docPath, (s) => {
+      const b = find(s, id);
+      const said = cleanMark({ id: 'x', type: 'comment', thread: [{ who: 'you', text: words || 'This, as pasted.', images: pictures }] }).thread[0];
+      b.thread = [...(b.thread ?? []).filter((line) => !line.pending), { ...said, at: Date.now() }, { who: 'agent', text: '', pending: true, at: Date.now() }].slice(-THREAD_MAX);
+      return structuredClone(b);
+    }, { by: client });
+    answerBuild(docPath, build).catch((err) => log.error(`[builds] ${err.message}`));
+    return read(docPath);
+  }
+
+  async function answerBuild(docPath, build) {
+    const source = await store.read(docPath);
+    const marks = (await buildStore.read(docPath)).marks;
+    let said = null;
+    if (reply && source !== null) {
+      said = await reply({
+        title: splitPath(docPath).name,
+        about: aboutBuild({ build, marks }),
+        outline: outlineOf(source),
+        thread: (build.thread ?? []).filter((line) => !line.pending),
+      });
+    }
+    const making = !said || said.change;
+    let noteId = null;
+    const { state } = await change(docPath, (s) => {
+      const b = find(s, build.id);
+      b.thread = (b.thread ?? []).filter((line) => !line.pending);
+      if (!making) {
+        b.thread.push({ who: 'agent', text: said.answer, at: Date.now() });
+        return null;
+      }
+      // What was asked becomes a note on the part the build was about, and
+      // is made like any other.
+      const last = [...b.thread].reverse().find((line) => line.who !== 'agent');
+      const at = s.marks.find((m) => (b.marks ?? []).includes(m.id) && m.anchorId);
+      const note = cleanMark({ id: newId('m'), type: 'note', anchorId: at?.anchorId ?? null, u: at?.u ?? 0, v: at?.v ?? 0, text: last?.text ?? '', images: last?.images ?? [] });
+      s.marks.push(note);
+      noteId = note.id;
+      return null;
+    });
+    if (!making) return;
+    let line = '';
+    try {
+      if (state.builds.find((b) => b.id === build.id)?.status === 'running') {
+        await steer(docPath, { marks: [noteId], into: build.id });
+        line = `Working it into build ${build.n} now.`;
+      } else {
+        const got = await startOrJoin(docPath, { marks: [noteId] });
+        const n = got.joined ?? got.builds?.find((b) => (b.marks ?? []).includes(noteId))?.n;
+        line = got.joined ? `Making it now, in build ${n}, which is on the same parts.` : n ? `Making it now, in build ${n}.` : 'Making it now.';
+      }
+    } catch (err) {
+      log.error(`[builds] ${err.message}`);
+      line = 'I could not start making that just now. It waits on the app as a note.';
+    }
+    await change(docPath, (s) => {
+      const b = s.builds.find((x) => x.id === build.id);
+      if (b) b.thread = [...(b.thread ?? []).filter((l) => !l.pending), { who: 'agent', text: line, at: Date.now() }].slice(-THREAD_MAX);
+      return null;
+    });
+  }
+
   /** Build that, or Not now, on an answer that offered a change. */
   async function takeOffer(docPath, id, take, { client = null } = {}) {
     await change(docPath, (s) => {
@@ -1005,6 +1080,7 @@ export function createBuilds({ buildStore, store, oplog = null, undoTurns = null
     file,
     dismissFolder,
     comment,
+    talk,
     takeOffer,
     pieces,
     suggested,

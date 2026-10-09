@@ -6,11 +6,11 @@ import test from 'node:test';
 
 import { buildBrief, phraseOf, resumeBrief } from '../server/build/brief.js';
 import { kindOf, outlineOf, pieceFrom, previewOf, regionsOf } from '../server/build/pieces.js';
-import { readReply } from '../server/build/reply.js';
+import { readReply, replyPrompt } from '../server/build/reply.js';
 import { cleanMark, cleanPlan, createBuildStore } from '../server/build/store.js';
 import { linesOf, partNow, stepOf } from '../server/build/steps.js';
 import { timelineOf } from '../server/build/history.js';
-import { questionsOf, summaryPrompt, wordsOf } from '../server/build/summary.js';
+import { aboutBuild, questionsOf, summaryPrompt, wordsOf } from '../server/build/summary.js';
 import { askOf } from '../server/agent/drawer.js';
 
 const ROOT = await fsp.mkdtemp(path.join(os.tmpdir(), 'marble-drive-build-'));
@@ -555,4 +555,43 @@ test('a build that finishes is summed up by the drawer, kept with it and sent wh
   assert.match(asked.prompt, /Built the title\./);
   const got = await api('GET', `/agent/builds/${b.id}/drawn?path=Summed`);
   assert.equal(got.body.summary.html, b.summary.html, 'and asked for by History');
+});
+
+test('said to a build from its status: a change is made as a build of its own once it has ended', async () => {
+  const before = await until(async () => {
+    const got = await state('Summed');
+    return got.builds[0]?.status === 'finished' ? got : null;
+  });
+  assert.deepEqual(before.builds[0].thread, []);
+  const got = await api('POST', '/agent/builds/b1/reply?path=Summed', { text: 'script:summed Title it again' });
+  assert.equal(got.status, 200);
+  const s = await until(async () => {
+    const now = await state('Summed');
+    return now.builds[0].thread.some((line) => line.who === 'agent' && !line.pending) ? now : null;
+  });
+  assert.deepEqual(s.builds[0].thread.map((line) => [line.who, line.text]), [
+    ['you', 'script:summed Title it again'],
+    ['agent', 'Making it now, in build 2.'],
+  ]);
+  const made = s.builds.find((b) => b.n === 2);
+  const note = s.marks.find((m) => made.marks.includes(m.id));
+  assert.equal(note.text, 'script:summed Title it again', 'what was said is the new build\'s note');
+  await until(async () => (await state('Summed')).builds.find((b) => b.n === 2)?.status === 'finished');
+  assert.equal((await api('POST', '/agent/builds/b9/reply?path=Summed', { text: 'hi' })).status, 404);
+  assert.equal((await api('POST', '/agent/builds/b1/reply?path=Summed', { text: ' ' })).status, 400);
+});
+
+test('the answer to what is said to a build reads the build, not an element', () => {
+  const about = aboutBuild({
+    build: { id: 'b2', n: 2, status: 'running', marks: ['n1'], plan: { parts: [{ title: 'Two weeks', state: 'now' }] }, log: [{ kind: 'change', head: 'Added a week' }], said: '' },
+    marks: [{ id: 'n1', type: 'note', text: 'Show two weeks' }],
+  });
+  assert.match(about, /^Build 2, still running\./);
+  assert.match(about, /- Show two weeks/);
+  assert.match(about, /- Two weeks: being made/);
+  assert.match(about, /- Added a week/);
+  const prompt = replyPrompt({ title: 'Plan', about, outline: 'h1', thread: [{ who: 'you', text: 'Why two?' }] });
+  assert.match(prompt, /said about one of its builds/);
+  assert.doesNotMatch(prompt, /pinned to this element/);
+  assert.match(replyPrompt({ title: 'Plan', html: '<p>x</p>', thread: [] }), /pinned to this element/);
 });

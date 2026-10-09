@@ -319,6 +319,9 @@
     .marble-bst .bst-stage[data-state="now"] .bst-st span { font-weight: 600; }
     .marble-bst .bst-st small { display: block; color: var(--b-muted); font-size: 11.5px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
     .marble-bst .bst-n { color: var(--b-faint); font-size: 11.5px; font-variant-numeric: tabular-nums; }
+    .marble-bst .bst-talk { border-top: 1px solid var(--b-line); padding-bottom: 8px; }
+    .marble-bst .bst-lines:empty { display: none; }
+    .marble-bst .bst-lines { padding-bottom: 2px; }
     .marble-bst .bst-said { margin: 6px 6px 0; padding-top: 8px; border-top: 1px solid var(--b-line); color: var(--b-muted); font-size: 12px; }
     /* A stage's steps. */
     .marble-bst .bst-steps { list-style: none; margin: 0 0 4px 30px; padding: 0; border-left: 1px solid var(--b-line); }
@@ -1394,7 +1397,14 @@
       top.append(head, sub, pic);
       const stages = h('ol', 'bst-stages');
       stages.setAttribute('aria-label', 'Stages');
-      node.append(top, stages);
+      // What is said to the build, and its answers, over a box to say more:
+      // a question is answered here; a change is made (talk(), on the host).
+      const talk = h('div', 'bst-talk');
+      const said = h('div', 'bst-lines');
+      talk.append(said);
+      node.append(top, stages, talk);
+      let write = null;
+      let saidKey = '';
       const openStages = new Set();
       let build = null;
       let log = [];
@@ -1503,6 +1513,20 @@
           if (ended && changedIds.length) top.dataset.lights = '1'; else delete top.dataset.lights;
           if (drawing?.html && drawing.at !== picAt) { picAt = drawing.at; mountDrawn(pic, drawing.html); }
           if (!drawing?.html && changed) { pic.textContent = ''; picAt = null; }
+          const lines = next.thread ?? [];
+          const key = JSON.stringify(lines);
+          if (key !== saidKey) { saidKey = key; said.replaceChildren(); drawLines(said, { id: next.id, thread: lines }); }
+          const live = next.status === 'running';
+          if (!write) {
+            write = composer({
+              placeholder: '',
+              label: `Reply to build ${next.n}`,
+              onSend: ({ text, images }) => settled(ask('POST', route(`/${enc(build.id)}/reply`), { text, images })),
+            });
+            talk.append(write.node);
+          }
+          const field = write.node.querySelector('.field');
+          if (field) field.dataset.placeholder = live ? 'Ask about it, or steer it' : 'Ask about it, or say what to change';
           tick();
           drawStages();
         },

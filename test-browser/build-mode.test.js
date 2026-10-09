@@ -525,6 +525,30 @@ test('while a build runs, Build starts another alongside it, or joins it when th
   await go(page).click();
   const joined = await hostSays(page, (marks) => marks.find((m) => m.text === 'And make it bigger')?.state === 'building', 'it joins');
   assert.equal(joined.find((m) => m.text === 'And make it bigger').build, joined.find((m) => m.text === 'script:slow Half build it').build);
+  // In Marks each build heads the list; one opened pushes the rest down
+  // rather than lie over them.
+  await page.evaluate(() => dispatchEvent(new CustomEvent('marble-build:toggle-comments')));
+  const side = page.locator('marble-agent-drawer .marble-margin');
+  await side.waitFor();
+  await page.waitForFunction(() => document.querySelector('marble-agent-drawer').shadowRoot.querySelectorAll('.marble-margin .marble-bst').length >= 2);
+  const heads = side.locator('.marble-bst');
+  await heads.first().locator('.bst-top').click();
+  await heads.first().locator('.bst-stages').waitFor();
+  await page.waitForTimeout(400);
+  const overlaps = await page.evaluate(() => {
+    const root = document.querySelector('marble-agent-drawer').shadowRoot;
+    const boxes = [...root.querySelectorAll('.marble-margin .marble-bst, .marble-margin-card:not([hidden])')].map((n) => n.getBoundingClientRect()).filter((r) => r.height).sort((a, b) => a.top - b.top);
+    return boxes.slice(1).filter((r, i) => r.top < boxes[i].bottom - 1).length;
+  });
+  assert.equal(overlaps, 0, 'no card lies over another');
+  // A build takes a reply from its status: a change, while it runs, is
+  // worked into it.
+  const live = side.locator('.marble-bst[data-status="running"]').first();
+  await live.locator('.bst-talk .field').click();
+  await page.keyboard.type('Make the weeks start on Monday');
+  await page.keyboard.press('ControlOrMeta+Enter');
+  await live.locator('.marble-build-line[data-who="you"]', { hasText: 'Make the weeks start on Monday' }).waitFor();
+  await live.locator('.marble-build-line[data-who="agent"]', { hasText: /Working it into build \d+ now\./ }).waitFor({ timeout: 15_000 });
   for (const b of await running()) await api('POST', `/agent/builds/${b.id}/stop?path=Reviews`, {});
 });
 

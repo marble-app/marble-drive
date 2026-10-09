@@ -9,6 +9,7 @@ import { parsePath } from '../paths.js';
 const BUILD = /^\/agent\/builds\/(b\d{1,5}|origin)\/(pause|resume|stop|view)$/;
 const PIECE = /^\/agent\/pieces\/([\w-]{1,64})$/;
 const DRAWN = /^\/agent\/builds\/(b\d{1,5})\/drawn$/;
+const TALK = /^\/agent\/builds\/(b\d{1,5})\/reply$/;
 
 export function createBuildRoutes({ builds, hub, maxBody }) {
   const pathOf = (url) => parsePath(String(url.searchParams.get('path') ?? ''), { allowRoot: false });
@@ -89,6 +90,11 @@ export function createBuildRoutes({ builds, hub, maxBody }) {
       if (route === '/agent/builds/comment' && method === 'POST') {
         const body = await readJson(req, maxBody);
         return json(res, 200, await builds.comment(pathOf(url), String(body.id ?? ''), body.text, { client, images: Array.isArray(body.images) ? body.images : [] }));
+      }
+      const talkTo = TALK.exec(route);
+      if (talkTo && method === 'POST') {
+        const body = await readJson(req, maxBody);
+        return json(res, 200, await builds.talk(pathOf(url), talkTo[1], body.text, { client, images: Array.isArray(body.images) ? body.images : [] }));
       }
       if (route === '/agent/builds/offer' && method === 'POST') {
         const body = await readJson(req, maxBody);

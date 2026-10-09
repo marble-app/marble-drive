@@ -294,7 +294,8 @@
     /* ---- the build's status (build-mode.js statusCard), heading the list
        while a build is in hand, and the last one to end under them. */
     .marble-margin .marble-bst { position: absolute; left: 18px; right: 18px; z-index: 1; }
-    .marble-margin .marble-bst[data-folded]:not([data-open]) .bst-pic { display: none; }
+    .marble-margin .marble-bst[data-folded]:not([data-open]) .bst-pic,
+    .marble-margin .marble-bst[data-folded]:not([data-open]) .bst-talk { display: none; }
 
     /* ---- the pins: each mark's number on the app, and how it is going. */
     .marble-margin-pins { position: fixed; inset: 0; pointer-events: none; }
@@ -711,6 +712,7 @@
     // can run side by side. Under them, the last build to end stays, with its
     // summary, until another ends; History keeps every one.
     const statusCards = new Map(); // build id → statusCard
+    const cardSizes = new ResizeObserver(() => schedule());
     const drawBuild = (list = []) => {
       const hand = [...(B.inHand?.() ?? [B.current()].filter(Boolean))].reverse();
       const last = B.lastEnded?.();
@@ -719,11 +721,17 @@
       // its line; pressed, it opens on its summary again.
       const marking = Boolean(last?.endedAt) && list.some((m) => (m.at ?? 0) > last.endedAt);
       const keep = new Set(hand.map((b) => b.id));
-      for (const [id, card] of statusCards) if (!keep.has(id)) { card.node.remove(); statusCards.delete(id); }
+      for (const [id, card] of statusCards) if (!keep.has(id)) { cardSizes.unobserve(card.node); card.node.remove(); statusCards.delete(id); }
       let after = null;
       for (const b of hand) {
         let card = statusCards.get(b.id);
-        if (!card) { card = B.statusCard(); statusCards.set(b.id, card); }
+        if (!card) {
+          card = B.statusCard();
+          statusCards.set(b.id, card);
+          // Opened, answered or redrawn, a card grows: those under it, and the
+          // marks' cards, step down to make room rather than lie under it.
+          cardSizes.observe(card.node);
+        }
         card.update(b);
         card.node.toggleAttribute('data-folded', b.id === last?.id && marking);
         if (after) after.after(card.node); else cards.prepend(card.node);
