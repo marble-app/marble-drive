@@ -57,8 +57,12 @@ export function phraseOf(mark, { index = null, piece = null, imagePath = null } 
     if (mark.kind === 'arrow') return `An arrow sketched from ${mark.from ? `#${mark.from}` : 'nothing'} to ${mark.to ? `#${mark.to}` : 'nothing'}`;
     return `Ink sketched over ${names(mark.ids)}`;
   }
+  if (mark.type === 'move') {
+    const what = mark.from ? `#${mark.from}${near(index, mark.from)}` : 'a part';
+    return `A part dragged on the app to where it might go: move ${what} to ${on}, at about ${Math.round((mark.u ?? 0) * 100)}% across and ${Math.round((mark.v ?? 0) * 100)}% down it${mark.w && mark.h ? ` (it was ${mark.w}×${mark.h}px)` : ''}. Put it there in the app's own layout: before or after the part nearest that point, or inside it if it is a container.`;
+  }
   if (mark.type === 'comment') {
-    const lines = (mark.thread ?? []).filter((line) => line.text).map((line) => `${line.who === 'agent' ? 'Agent' : 'Person'}: ${line.text}`);
+    const lines = (mark.thread ?? []).filter((line) => line.text || line.images?.length).map((line) => `${line.who === 'agent' ? 'Agent' : 'Person'}: ${line.text}${line.images?.length && imagePath ? ` (with ${line.images.map((image) => imagePath(image.name)).filter(Boolean).join(', ')})` : ''}`);
     return `A comment thread pinned to ${on}:\n${lines.map((line) => `   ${line}`).join('\n')}`;
   }
   if (mark.type === 'piece') {

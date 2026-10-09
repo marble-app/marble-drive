@@ -133,7 +133,7 @@ const go = (page) => page.locator('.marble-build-go');
 const box = (page, id) => page.locator(`[data-marble-id="${id}"]`).boundingBox();
 
 const noteOn = async (page, id, text) => {
-  await page.keyboard.press('t');
+  await tool(page, 'text').click();
   const r = await box(page, id);
   await page.mouse.click(r.x + r.width - 80, r.y + 12);
   await page.keyboard.type(text);
@@ -301,12 +301,16 @@ test('Select picks marks to build, archive or delete; on a part of the app it op
   await page.locator('.marble-build-sel button', { hasText: 'Archive' }).click();
   await hostSays(page, (marks) => marks.find((m) => m.text === 'Two')?.archived === true, 'archived from the bar');
   assert.equal(await note.isVisible(), false);
+  // A pick hands the cursor back to the app; Select again to pick another.
+  assert.equal(await page.evaluate(() => window.marbleMarks.mode), null);
+  await tool(page, 'select').click();
   // Delete, from the bar, for the other.
   await page.locator('.marble-marks-note', { hasText: 'One' }).locator('.marble-marks-note-body').click();
   await page.locator('.marble-build-sel button', { hasText: 'Delete' }).click();
   await hostSays(page, (marks) => marks.length === 1, 'deleted from the bar');
   // A click on a part of the app picks the part, and the box to write in
   // comes up under it, with Save as piece.
+  await tool(page, 'select').click();
   const r = await box(page, 's2');
   await page.mouse.click(r.x + 300, r.y + 60);
   await page.locator('.marble-marks-note[data-writing] .marble-marks-note-body:focus').waitFor();
@@ -455,6 +459,62 @@ test('done marks leave the app for Archived; a build clears the comments it sett
   await hostSays(page, (list) => list.length === 1, 'the archived comment is deleted');
 });
 
+test('a pick hands the cursor back to the app; a press away lets it go, and a drag leaves a ghost where it would go', async () => {
+  const { page } = await open();
+  await tool(page, 'select').click();
+  const r = await box(page, 's1');
+  await page.mouse.click(r.x + 300, r.y + 20);
+  assert.equal(await page.evaluate(() => window.marbleMarks.mode), null, 'Use, with the part still picked');
+  await page.keyboard.press('Escape');
+  assert.deepEqual(await page.evaluate(() => window.marbleMarks.parts()), ['s1'], 'leaving the box keeps the pick');
+  // Dragged: a ghost of it, tinted, follows the hand; let go, it stays as a move.
+  await page.mouse.move(r.x + 200, r.y + 30);
+  await page.mouse.down();
+  const to = await box(page, 's2');
+  await page.mouse.move(to.x + 200, to.y + 50, { steps: 10 });
+  await page.locator('.marble-marks-drag').waitFor();
+  await page.mouse.up();
+  await page.locator('.marble-marks-move').waitFor();
+  const [move] = await hostSays(page, (marks) => marks.some((m) => m.type === 'move'), 'the move is kept');
+  assert.equal(move.from, 's1');
+  assert.match(move.anchorId, /^s2/);
+  // A press away lets go of what is picked.
+  await tool(page, 'select').click();
+  await page.mouse.click(r.x + 300, r.y + 20);
+  await page.keyboard.press('Escape');
+  await page.mouse.click(8, 700);
+  assert.deepEqual(await page.evaluate(() => window.marbleMarks.parts()), []);
+});
+
+test('while a build runs, Build queues what is marked and a selection can steer the build instead', async () => {
+  const { page } = await open();
+  await noteOn(page, 'h', 'script:slow Half build it');
+  await go(page).click();
+  await page.locator('.marble-build-run:not([hidden])').waitFor();
+  // The run says what it is doing in a line, over a dash for each stage.
+  await page.locator('.marble-build-meter i[data-state="now"]').waitFor();
+  assert.ok(await page.locator('.marble-build-run .w > span:first-child').textContent());
+  // Away from the building note's corner.
+  const noteAt = async (id, text) => {
+    await tool(page, 'text').click();
+    const at = await box(page, id);
+    await page.mouse.click(at.x + 40, at.y + at.height - 20);
+    await page.locator('.marble-marks-note-body:focus').waitFor();
+    await page.keyboard.type(text);
+    await page.locator('.marble-marks-note-body:focus').evaluate((node) => node.blur());
+  };
+  await noteAt('s1', 'After it');
+  assert.equal(await go(page).textContent(), 'Queue');
+  await go(page).click();
+  await hostSays(page, (marks) => marks.find((m) => m.text === 'After it')?.now === true, 'queued');
+  await noteAt('s2', 'Into it');
+  await tool(page, 'select').click();
+  await page.locator('.marble-marks-note', { hasText: 'Into it' }).locator('.marble-marks-note-body').click();
+  await page.locator('.marble-build-sel button', { hasText: 'Steer' }).click();
+  await hostSays(page, (marks) => marks.find((m) => m.text === 'Into it')?.state === 'building', 'it joins the running build');
+  await page.locator('.marble-build-run button[aria-label^="Stop"]').click();
+});
+
 // Marks, Pieces and History are views of the chat's sidebar, in the
 // drawer's shadow root: locators reach in; page.evaluate reads it through
 // `side()`.
@@ -567,12 +627,19 @@ test('in the margin a comment is a card: the app answers in its own name, and a 
   await openMargin(page);
   const card = page.locator('.marble-margin-card', { hasText: 'Can this show two weeks?' });
   await card.click();
-  await card.locator('.reply textarea').fill('And next month?');
-  await card.locator('.reply textarea').press('Enter');
+  // The same box as a note's: words, pasted pictures, and Send (⌘↵).
+  await card.locator('.reply .field').click();
+  await page.keyboard.type('And next month?');
+  await page.keyboard.press('Enter');
+  await page.keyboard.type('Or the one after.');
+  await page.keyboard.press('ControlOrMeta+Enter');
   // No model on a test host: the thread says so rather than hanging.
   await card.locator('.marble-build-line[data-who="agent"] p').waitFor();
-  assert.equal(await card.locator('.marble-build-line[data-who="agent"] b').textContent(), 'Reviews', 'signed with the app\'s name');
+  // Q and A, not a chat: the question slanted and faded, no faces, no names.
+  assert.equal(await card.locator('.marble-build-line[data-who="you"] p').first().evaluate((n) => getComputedStyle(n).fontStyle), 'italic');
+  assert.equal(await card.locator('.av, .who').count(), 0);
   assert.doesNotMatch(await margin(page).textContent(), /\bAgent\b/);
+  await hostSays(page, (marks) => marks.find((m) => m.type === 'comment')?.thread.some((l) => l.text === 'And next month?\nOr the one after.'), 'the reply is kept, its lines with it');
   // Resolved, it is put away under Archived; Put back there opens it again.
   await card.locator('.sb', { hasText: 'Resolve' }).click();
   await page.waitForFunction(() => !document.querySelector('marble-agent-drawer').shadowRoot.querySelector('.marble-margin-card'));

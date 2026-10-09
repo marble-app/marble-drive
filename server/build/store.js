@@ -37,7 +37,9 @@ export const IMAGE_BYTES_MAX = 8 * 1024 * 1024;
 const IMAGE_TYPES = { 'image/png': 'png', 'image/jpeg': 'jpg', 'image/webp': 'webp', 'image/gif': 'gif' };
 const TYPE_OF = { png: 'image/png', jpg: 'image/jpeg', webp: 'image/webp', gif: 'image/gif' };
 
-export const MARK_TYPES = new Set(['note', 'stroke', 'comment', 'piece']);
+// A move is a part dragged on the app to where it might go: the part it is
+// (from), the place it was dropped (anchorId, u, v), and its size then.
+export const MARK_TYPES = new Set(['note', 'stroke', 'comment', 'piece', 'move']);
 export const STROKE_KINDS = new Set(['box', 'arrow', 'ink']);
 export const MARK_STATES = new Set(['waiting', 'building', 'built']);
 export const PART_STATES = new Set(['ahead', 'now', 'done']);
@@ -66,6 +68,11 @@ function cleanLine(line) {
     if (text) out.offer = { text, taken: line.offer.taken === true ? true : line.offer.taken === false ? false : null };
   }
   if (line?.pending === true) out.pending = true;
+  // Pictures pasted into a reply, by the names the store gave them.
+  const images = (Array.isArray(line?.images) ? line.images : []).slice(0, IMAGES_MAX)
+    .filter((image) => IMAGE_NAME.test(String(image?.name ?? '')))
+    .map((image) => ({ name: image.name, w: Math.round(num(image.w, 0, 10_000)), h: Math.round(num(image.h, 0, 10_000)) }));
+  if (images.length) out.images = images;
   return out;
 }
 
@@ -116,9 +123,12 @@ export function cleanMark(raw) {
     if (about.length) mark.ids = about;
     // Sent: the comment it became.
     if (raw.sent) mark.sent = idOf(raw.sent);
-    // The model it is to be answered or made with, chosen on the note.
+    // The model it is to be answered or made with, chosen on the note, and
+    // how hard it thinks.
     const model = str(raw.model, 80).trim();
     if (model) mark.model = model;
+    const effort = str(raw.effort, 24).trim();
+    if (effort) mark.effort = effort;
   }
   if (raw.type === 'stroke') {
     mark.kind = STROKE_KINDS.has(raw.kind) ? raw.kind : 'ink';
@@ -137,6 +147,13 @@ export function cleanMark(raw) {
     mark.resolved = raw.resolved === true;
     // A comment a sent note became, and the note a build makes it from.
     if (raw.forNote) mark.forNote = idOf(raw.forNote);
+  }
+  if (raw.type === 'move') {
+    mark.from = idOf(raw.from);
+    if (!mark.from) return null;
+    mark.w = Math.round(num(raw.w, 0, 10_000));
+    mark.h = Math.round(num(raw.h, 0, 10_000));
+    mark.text = str(raw.text, 160).trim();
   }
   if (raw.type === 'piece') {
     const piece = raw.piece ?? {};

@@ -251,6 +251,16 @@ test('History: builds and the person\'s own edits on one timeline, each with wha
   assert.equal(edit.before, 'a'.repeat(64), 'the version just before it');
 });
 
+test('a moved part is kept and briefed as where it might go; a reply keeps its pictures', () => {
+  const move = cleanMark({ id: 'mv', type: 'move', from: 's1', anchorId: 's2', u: 0.25, v: 0.5, w: 320, h: 80, text: 'Invitations' });
+  assert.deepEqual([move.from, move.w, move.h], ['s1', 320, 80]);
+  assert.equal(cleanMark({ id: 'mv', type: 'move', anchorId: 's2' }), null, 'a move moves something');
+  assert.match(phraseOf(move), /move #s1 to #s2, at about 25% across and 50% down/);
+  const comment = cleanMark({ id: 'c', type: 'comment', thread: [{ who: 'you', text: 'Like this', images: [{ name: `${'b'.repeat(24)}.png`, w: 10, h: 10 }, { name: 'nope' }] }] });
+  assert.deepEqual(comment.thread[0].images, [{ name: `${'b'.repeat(24)}.png`, w: 10, h: 10 }]);
+  assert.equal(cleanMark({ id: 'n', type: 'note', text: 'x', model: 'opus', effort: 'high' }).effort, 'high');
+});
+
 test('pieces: regions of an app, taken whole with what draws them', () => {
   const regions = regionsOf(SOURCE_APP, 'Calendar');
   assert.deepEqual(regions.map((r) => r.title), ['Weeks ahead'], 'a short aside is not a piece');

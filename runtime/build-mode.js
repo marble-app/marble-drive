@@ -124,10 +124,15 @@
       font: 500 11.5px/1 var(--ui, system-ui, sans-serif); white-space: nowrap;
     }
     .marble-build-run[data-run="paused"] { --mark: var(--caution, #a07a2c); }
-    .marble-build-run .w { font-variant-numeric: tabular-nums; }
-    .marble-build-run .w b { font-weight: 650; color: var(--mark); }
-    .marble-build-meter { position: relative; flex: none; width: 40px; height: 4px; border-radius: 2px; overflow: hidden; background: color-mix(in srgb, var(--mark) 22%, transparent); }
-    .marble-build-meter i { position: absolute; inset: 0 auto 0 0; width: var(--p, 0%); border-radius: 2px; background: var(--mark); transition: width 240ms ${EASE}; }
+    /* What it is doing, in one line, over the stages as dashes: made ones
+       full, the one being made half, the ones to come faint. */
+    .marble-build-run .w { display: flex; flex-direction: column; justify-content: center; gap: 4px; min-width: 0; max-width: 260px; }
+    .marble-build-run .w span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 500; color: color-mix(in srgb, var(--mark) 55%, var(--ink, #111)); }
+    .marble-build-meter { display: flex; gap: 3px; flex: none; width: 100%; min-width: 60px; height: 4px; }
+    .marble-build-meter i { flex: 1; min-width: 6px; max-width: 28px; border-radius: 2px; background: color-mix(in srgb, var(--mark) 22%, transparent); transition: background 240ms ${EASE}; position: relative; overflow: hidden; }
+    .marble-build-meter i[data-state="done"] { background: var(--mark); }
+    .marble-build-meter i[data-state="now"]::before { content: ""; position: absolute; inset: 0 50% 0 0; background: var(--mark); border-radius: 2px; }
+    .marble-build-meter i[data-state="plan"] { max-width: none; }
     .marble-build-run button { all: unset; box-sizing: border-box; width: 30px; height: 30px; border-radius: 8px; display: grid; place-items: center; cursor: pointer; }
     .marble-build-run button:hover { background: color-mix(in srgb, var(--mark) 14%, transparent); }
     .marble-build-run button:focus-visible { outline: 2px solid var(--mark); outline-offset: 1px; }
@@ -205,7 +210,7 @@
     /* As wide as what is being written, from 300px to 440px, and as tall:
        the whole prompt is always in view. Put away, it folds into its pin. */
     .marble-build-thread {
-      position: fixed; pointer-events: auto; box-sizing: border-box; width: var(--thread-w, 300px); max-width: calc(100vw - 24px);
+      position: fixed; pointer-events: auto; box-sizing: border-box; width: var(--thread-w, 340px); max-width: calc(100vw - 24px);
       border-radius: 12px; padding: 4px 0 8px; transform-origin: var(--thread-from, 0 0);
       transition: width 200ms ${EASE}, opacity 180ms ${EASE}, scale 220ms ${EASE};
       background: color-mix(in srgb, var(--b-card) 92%, transparent);
@@ -215,14 +220,15 @@
     @starting-style { .marble-build-thread { opacity: 0; scale: .92; } }
     .marble-build-thread[data-leaving] { opacity: 0; scale: .12; pointer-events: none; }
     .marble-build-thread .lines { max-height: 300px; overflow: auto; }
-    .marble-build-line { padding: 8px 12px 2px; }
-    .marble-build-line .who { display: flex; align-items: center; gap: 6px; font-size: 12px; color: var(--b-muted); margin-bottom: 2px; }
-    .marble-build-line .who b { color: var(--b-ink); font-weight: 600; }
-    .marble-build-line .av { width: 18px; height: 18px; border-radius: 50%; display: grid; place-items: center; font: 600 9.5px/1 var(--b-ui); background: var(--b-paper-3); color: var(--b-ink); }
-    /* The app answers in its own name, with its tile: a rounded square, where
-       a person's is a circle. The agents that write it are never named. */
-    .marble-build-line[data-who="agent"] .av { border-radius: 5px; background: var(--b-accent-soft); color: var(--b-mark); }
-    .marble-build-line p { margin: 0; overflow-wrap: anywhere; }
+    /* Q and A: the question slanted and faded, the answer plain under it, a
+       little air before the next question. */
+    .marble-build-line { padding: 3px 12px 2px; }
+    .marble-build-line[data-who="you"] { padding-top: 10px; }
+    .marble-build-line[data-who="you"]:first-child { padding-top: 8px; }
+    .marble-build-line p { margin: 0; overflow-wrap: anywhere; white-space: pre-wrap; }
+    .marble-build-line[data-who="you"] p { font-style: italic; color: var(--b-muted); }
+    .marble-build-line .pics { display: flex; flex-wrap: wrap; gap: 4px; margin: 2px 0 4px; }
+    .marble-build-line .pics img { height: 48px; max-width: 120px; object-fit: cover; border-radius: 6px; box-shadow: 0 0 0 1px var(--b-line); }
     .marble-build-line .acts { display: flex; gap: 4px; padding-top: 6px; }
     .marble-build-line .done { color: var(--b-muted); font-size: 12px; padding-top: 4px; }
     .marble-build-dots { display: inline-flex; gap: 3px; padding: 4px 0; }
@@ -230,6 +236,30 @@
     .marble-build-dots i:nth-child(2) { animation-delay: .15s; }
     .marble-build-dots i:nth-child(3) { animation-delay: .3s; }
     @keyframes marble-build-dot { 0%, 80%, 100% { opacity: .25; } 40% { opacity: 1; } }
+    /* The box a reply is written in: the note's own (agent-marks.js), the
+       words, what was pasted, and Send, the up arrow on the accent with its
+       key. Enter is a new line; ⌘↵ sends. */
+    .marble-build-write { margin: 8px 8px 0; border-radius: 10px; background: var(--b-card); box-shadow: 0 0 0 1px var(--b-line); }
+    .marble-build-write:focus-within { box-shadow: 0 0 0 1px var(--b-accent), 0 0 0 4px var(--b-accent-soft); }
+    .marble-build-write .field { display: block; min-height: 1.45em; max-height: 40vh; overflow-y: auto; padding: 8px 10px 4px; outline: none;
+      font: 13px/1.45 var(--b-ui); color: var(--b-ink); white-space: pre-wrap; overflow-wrap: anywhere; caret-color: var(--b-mark); }
+    .marble-build-write .field:empty::before { content: attr(data-placeholder); color: var(--placeholder, #767676); }
+    .marble-build-write .pics { display: flex; flex-wrap: wrap; gap: 6px; padding: 2px 10px 0; }
+    .marble-build-write .pics:empty { display: none; }
+    .marble-build-write .pic { position: relative; }
+    .marble-build-write .pic img { display: block; height: 52px; max-width: 120px; object-fit: cover; border-radius: 6px; box-shadow: 0 0 0 1px var(--b-line); }
+    .marble-build-write .pic[data-loading] img { opacity: .5; }
+    .marble-build-write .pic button { all: unset; position: absolute; top: -6px; right: -6px; width: 18px; height: 18px; border-radius: 50%; display: grid; place-items: center;
+      background: var(--b-card); box-shadow: 0 0 0 1px var(--b-line); color: var(--b-muted); font-size: 12px; cursor: pointer; }
+    .marble-build-write .act { display: flex; align-items: center; gap: 6px; padding: 4px 6px 6px 10px; }
+    .marble-build-write .act .sp { flex: 1; }
+    .marble-build-send { all: unset; box-sizing: border-box; display: inline-flex; align-items: center; gap: 5px; height: 26px; padding: 0 9px 0 6px; border-radius: 999px; cursor: pointer;
+      background: var(--b-mark); color: var(--b-card); font: 500 11px/1 var(--b-ui); }
+    .marble-build-send:hover { background: color-mix(in srgb, var(--b-mark) 86%, var(--b-ink)); }
+    .marble-build-send:focus-visible { outline: 2px solid var(--b-mark); outline-offset: 2px; }
+    .marble-build-send[aria-disabled="true"] { opacity: .35; cursor: default; }
+    .marble-build-send svg { width: 14px; height: 14px; }
+    .marble-build-send kbd { font: inherit; opacity: .78; }
     .marble-build-compose { display: flex; align-items: flex-end; gap: 6px; margin: 8px 8px 0; padding: 4px 4px 4px 10px; border-radius: 10px; background: var(--b-card); box-shadow: 0 0 0 1px var(--b-line); }
     .marble-build-compose:focus-within { box-shadow: 0 0 0 1px var(--b-accent), 0 0 0 4px var(--b-accent-soft); }
     .marble-build-compose textarea { flex: 1; min-width: 0; border: 0; background: none; font: 13.5px/1.45 var(--b-ui); color: var(--b-ink); padding: 4px 0; margin: 0; caret-color: var(--b-mark);
@@ -402,7 +432,7 @@
     @media (max-width: 520px) {
       .marble-build-go { padding: 0 10px; margin: 0 1px; }
       .marble-build-run { padding-left: 8px; gap: 3px; }
-      .marble-build-run .marble-build-meter { display: none; }
+      .marble-build-run .w { max-width: 120px; }
     }
     @media (pointer: coarse) {
       .marble-build-btn { height: 36px; line-height: 36px; }
@@ -665,6 +695,7 @@
     // ---------------------------------------------------------- the reading
 
     const builds = () => state?.builds ?? [];
+    let workLine = null; // { say, at }: the running build's own line, newest
     const runningBuild = () => builds().find((b) => b.status === 'running') ?? null;
     const pausedBuild = () => [...builds()].reverse().find((b) => b.status === 'paused') ?? null;
     const current = () => runningBuild() ?? pausedBuild();
@@ -709,18 +740,34 @@
       const picked = M.picked();
       const chosen = picked.filter((id) => waiting().some((m) => m.id === id));
       go.textContent = chosen.length ? 'Build selection' : 'Build';
-      const can = (chosen.length || n > 0) && !build;
+      // Build is never shut: while one runs it queues what is marked, to be
+      // built as soon as that one is done.
+      const can = Boolean(chosen.length || n > 0);
       go.setAttribute('aria-disabled', String(!can));
-      go.hidden = Boolean(build);
+      go.hidden = Boolean(build) && !can;
+      if (build) go.textContent = chosen.length ? 'Queue selection' : 'Queue';
+      tipped(go, build ? 'Build these as soon as the running build is done' : 'Build what is marked');
       run.hidden = !build;
       if (build) {
         run.dataset.run = build.status === 'paused' ? 'paused' : 'building';
-        runWords.innerHTML = '';
-        const verb = build.status === 'paused' ? 'Paused' : 'Building';
-        if (of) {
-          runWords.append(`${verb} `, h('b', '', String(done)), ` of ${of}`);
-        } else runWords.append(build.status === 'paused' ? 'Paused' : 'Planning');
-        meter.style.setProperty('--p', `${of ? Math.round((done / of) * 100) : 6}%`);
+        const parts = build.plan?.parts ?? [];
+        const now = parts.find((p) => p.state === 'now');
+        // The one line: what it is doing now, in the words its steps or the
+        // work's own line use, else the stage it is on.
+        const lineOf = () => {
+          if (build.status === 'paused') return now ? `Paused · ${now.title}` : 'Paused';
+          const recent = workLine && Date.now() - workLine.at < 20_000 ? workLine.say : null;
+          return recent || build.log?.at(-1)?.head || now?.title || 'Working out the plan';
+        };
+        runWords.replaceChildren(h('span', '', lineOf()), meter);
+        meter.replaceChildren(...(parts.length ? parts.map((p) => {
+          const dash = h('i');
+          dash.dataset.state = p.state;
+          dash.title = p.title;
+          return dash;
+        }) : [(() => { const dash = h('i'); dash.dataset.state = 'plan'; return dash; })()]));
+        meter.setAttribute('aria-label', parts.length ? `${done} of ${of} stages made` : 'Working out the plan');
+        run.title = parts.length ? parts.map((p) => `${p.state === 'done' ? '✓' : p.state === 'now' ? '•' : '○'} ${p.title}`).join('\n') : '';
         if (build.status === 'paused') {
           pauseButton.innerHTML = ICON.play;
           tipped(pauseButton, 'Resume · carry on with the same plan');
@@ -799,13 +846,16 @@
     };
     const settled = (promise) => promise.then((next) => { if (next?.marks) apply(next); return next; }).catch((err) => { say(err.message || 'That did not work'); return null; });
 
-    const start = async ({ marks = null, words = '' } = {}) => {
-      if (runningBuild()) return null;
+    /** Build: started, or, while one runs, queued for after it; `steer`
+     *  sends the marks into the running build instead. */
+    const start = async ({ marks = null, words = '', steer = false } = {}) => {
       await flushing;
       flush();
       await flushing;
-      const made = await settled(ask('POST', route('/start'), { marks, words }));
+      const made = await settled(ask('POST', route('/start'), { marks, words, steer }));
       if (made?.conversation) agent.attend(made.conversation);
+      if (made?.queued) say(`${plural(made.queued, 'mark')} queued. ${made.queued === 1 ? 'It is' : 'They are'} built as soon as this build is done.`);
+      if (made?.steered) say(`${plural(made.steered, 'mark')} sent into the build running now.`);
       M.clearPicked();
       return made;
     };
@@ -853,7 +903,11 @@
     selArchive.type = 'button';
     const selB = h('button', 'marble-build-btn primary');
     selB.type = 'button';
-    sel.append(selLabel, selA, selArchive, selB);
+    const selSteer = h('button', 'marble-build-btn', 'Steer');
+    selSteer.type = 'button';
+    selSteer.hidden = true;
+    selSteer.title = 'Send these into the build running now, as a change of course';
+    sel.append(selLabel, selA, selArchive, selSteer, selB);
     layer.append(sel);
     let selNow = { marks: [], parts: [] };
     let promptedFor = '';
@@ -868,8 +922,11 @@
         selLabel.textContent = built === n ? `${plural(n, 'mark')}, built already` : plural(n, 'mark');
         selA.textContent = 'Delete';
         selArchive.hidden = false;
-        selB.textContent = 'Build these';
-        selB.setAttribute('aria-disabled', String(built === n || Boolean(current())));
+        // While a build runs: queue them for after it, or steer it with them.
+        const busy = Boolean(runningBuild());
+        selB.textContent = busy ? 'Queue' : 'Build these';
+        selB.setAttribute('aria-disabled', String(built === n));
+        selSteer.hidden = !busy || built === n;
         sel.dataset.kind = 'marks';
       } else {
         // Parts of the app: no bar. The box to write in comes up under them
@@ -905,6 +962,7 @@
       if (selB.getAttribute('aria-disabled') === 'true') return;
       start({ marks: selNow.marks });
     });
+    selSteer.addEventListener('click', () => start({ marks: [...selNow.marks], steer: true }));
     // Save as piece, from the box written on a selection.
     addEventListener('marble-marks:save-piece', async (event) => {
       const parts = event.detail?.ids ?? [];
@@ -925,14 +983,23 @@
      *  answer that offers a change carries Build that and Not now. */
     const tileOf = () => (name.trim().match(/[\p{L}\p{N}]/u)?.[0] ?? '·').toUpperCase();
     function drawLines(box, kept) {
+      // A question and its answer, not a chat: what you asked, slanted and
+      // faded; what the app says, plain under it. No faces and no names.
       for (const line of kept?.thread ?? []) {
         const row = h('div', 'marble-build-line');
         row.dataset.who = line.who;
-        const who = h('div', 'who');
-        const av = h('span', 'av', line.who === 'agent' ? tileOf() : 'Y');
-        av.setAttribute('aria-hidden', 'true');
-        who.append(av, h('b', '', line.who === 'agent' ? name : 'You'), h('span', '', line.pending ? '' : ago(line.at)));
-        row.append(who);
+        row.setAttribute('aria-label', line.who === 'agent' ? `${name} answers` : 'You asked');
+        if (line.images?.length) {
+          const pics = h('div', 'pics');
+          for (const image of line.images) {
+            const img = h('img');
+            img.alt = 'A pasted picture';
+            img.loading = 'lazy';
+            img.src = `/agent/builds/image?name=${enc(image.name)}`;
+            pics.append(img);
+          }
+          row.append(pics);
+        }
         if (line.pending) {
           const dots = h('span', 'marble-build-dots');
           dots.setAttribute('role', 'status');
@@ -959,6 +1026,91 @@
       }
     }
     const takeOffer = (id, take) => settled(ask('POST', route('/offer'), { id, take }));
+    /** The box a reply is written in, as a note is: words, pictures pasted
+     *  in, and Send (⌘↵). `onSend({ text, images })`. */
+    const composer = ({ placeholder = 'Reply', label = 'Reply', onSend, onEscape = null } = {}) => {
+      const node = h('div', 'marble-build-write');
+      const field = h('div', 'field');
+      field.contentEditable = 'plaintext-only';
+      if (field.contentEditable !== 'plaintext-only') field.contentEditable = 'true';
+      field.setAttribute('role', 'textbox');
+      field.setAttribute('aria-multiline', 'true');
+      field.setAttribute('aria-label', label);
+      field.dataset.placeholder = placeholder;
+      const pics = h('div', 'pics');
+      const act = h('div', 'act');
+      act.append(h('span', 'sp'));
+      const send = h('button', 'marble-build-send');
+      send.type = 'button';
+      send.innerHTML = `${M.sendGlyph ?? ICON.send}<kbd>${M.MOD ?? '⌘'}↵</kbd>`;
+      send.setAttribute('aria-label', 'Send');
+      send.title = 'Send';
+      act.append(send);
+      node.append(field, pics, act);
+      let images = [];
+      let busy = 0;
+      const text = () => field.innerText.replace(/\n+$/, '').trim();
+      const paint = () => send.setAttribute('aria-disabled', String((!text() && !images.length) || busy > 0));
+      const drawPics = () => {
+        pics.replaceChildren(...images.map((image) => {
+          const pic = h('span', 'pic');
+          pic.toggleAttribute('data-loading', !image.name);
+          const img = h('img');
+          img.alt = 'A pasted picture';
+          img.src = image.preview ?? `/agent/builds/image?name=${enc(image.name)}`;
+          const x = h('button', '', '×');
+          x.type = 'button';
+          x.setAttribute('aria-label', 'Take this picture off');
+          x.addEventListener('click', () => { images = images.filter((one) => one !== image); drawPics(); paint(); });
+          pic.append(img, x);
+          return pic;
+        }));
+      };
+      field.addEventListener('paste', (event) => {
+        const data = event.clipboardData;
+        if (!data) return;
+        const files = [...(data.files ?? [])].filter((file) => file.type.startsWith('image/'));
+        event.preventDefault();
+        if (files.length && M.keepPicture) {
+          for (const file of files.slice(0, 6)) {
+            const image = { name: null, preview: URL.createObjectURL(file) };
+            images.push(image);
+            busy += 1;
+            M.keepPicture(file).then((kept) => Object.assign(image, kept)).catch(() => { images = images.filter((one) => one !== image); })
+              .finally(() => { busy -= 1; drawPics(); paint(); });
+          }
+          drawPics();
+          paint();
+          return;
+        }
+        const words = data.getData('text/plain');
+        if (words) document.execCommand('insertText', false, words);
+      });
+      const go = () => {
+        if (send.getAttribute('aria-disabled') === 'true') return;
+        const said = { text: text(), images: images.filter((image) => image.name).map(({ name, w, h: hh }) => ({ name, w, h: hh })) };
+        field.textContent = '';
+        images = [];
+        drawPics();
+        paint();
+        onSend?.(said);
+      };
+      field.addEventListener('input', paint);
+      field.addEventListener('keydown', (event) => {
+        if (event.key === 'Enter' && (event.metaKey || event.ctrlKey)) { event.preventDefault(); event.stopPropagation(); go(); }
+        if (event.key === 'Escape' && onEscape) { event.preventDefault(); event.stopPropagation(); onEscape(); }
+      });
+      send.addEventListener('pointerdown', (event) => event.preventDefault());
+      send.addEventListener('click', (event) => { event.stopPropagation(); go(); });
+      node.addEventListener('click', (event) => event.stopPropagation());
+      paint();
+      return {
+        node,
+        focus: () => field.focus({ preventScroll: true }),
+        get typing() { return Boolean(text() || images.length); },
+        clear: () => { field.textContent = ''; images = []; drawPics(); paint(); },
+      };
+    };
     /** A note sent (⌘↵): the host makes it a comment, answered or built, and
      *  that comment's thread opens where the note was. */
     M.onSend(async (mark) => {
@@ -981,14 +1133,14 @@
       }
       return settled(ask('POST', route('/archive'), { ids: list, archived: Boolean(on) }));
     };
-    const postComment = async (id, text) => {
+    const postComment = async (id, text, images = []) => {
       if (!(state?.marks ?? []).some((m) => m.id === id)) {
         // Its first line: the pin is kept now, then the words go in it.
         const mark = M.get(id);
         if (mark) await ask('PUT', route('/marks'), { mark }).catch(() => null);
         M.keepNow(id);
       }
-      return settled(ask('POST', route('/comment'), { id, text }));
+      return settled(ask('POST', route('/comment'), { id, text, images }));
     };
 
     const thread = h('div', 'marble-build-thread');
@@ -997,6 +1149,7 @@
     thread.hidden = true;
     layer.append(thread);
     let threadFor = null;
+    let threadWrite = null; // the thread's reply box (composer), for threadFor
     let leaving = 0;
     const closeThread = ({ posting = false } = {}) => {
       if (!threadFor) return;
@@ -1032,10 +1185,9 @@
       if (!threadFor) return;
       const kept = (state?.marks ?? []).find((m) => m.id === threadFor);
       const lines = kept?.thread ?? [];
-      // What is half written survives the thread being drawn again.
-      const was = thread.querySelector('textarea');
-      const draft = was?.value ?? '';
-      const typing = Boolean(was && document.activeElement === was);
+      // One box for the thread, kept across redraws, so what is half written
+      // (and pasted) survives them.
+      const writing = threadWrite?.node.contains(document.activeElement);
       thread.replaceChildren();
       const top = h('div', 'top');
       if (kept) {
@@ -1057,51 +1209,32 @@
       const box = h('div', 'lines');
       drawLines(box, kept);
       thread.append(box);
-      const compose = h('form', 'marble-build-compose');
-      const input = h('textarea');
-      input.placeholder = lines.length ? 'Reply' : 'Add a comment';
-      input.setAttribute('aria-label', input.placeholder);
-      const post = h('button', 'marble-build-round');
-      post.type = 'submit';
-      post.innerHTML = ICON.send;
-      post.setAttribute('aria-label', 'Post');
-      post.setAttribute('aria-disabled', 'true');
-      input.addEventListener('input', () => post.setAttribute('aria-disabled', String(!input.value.trim())));
-      compose.append(input, post);
-      // The card widens with the longest line, 300 to 440px, then wraps.
-      const fit = growing(input, {
-        onWidth: (chars) => {
-          thread.style.setProperty('--thread-w', `${Math.round(Math.min(440, Math.max(300, chars * 7.4 + 70)))}px`);
-          placeThread();
-        },
-        onSend: () => compose.requestSubmit(),
-      });
-      if (draft) { input.value = draft; post.setAttribute('aria-disabled', String(!draft.trim())); requestAnimationFrame(fit); }
-      if (typing) requestAnimationFrame(() => input.focus({ preventScroll: true }));
-      compose.addEventListener('submit', async (event) => {
-        event.preventDefault();
-        const text = input.value.trim();
-        if (!text || !threadFor) return;
+      if (!threadWrite || threadWrite.for !== threadFor) {
         const id = threadFor;
-        input.value = '';
-        fit();
-        post.setAttribute('aria-disabled', 'true');
-        // With the margin open the box that wrote it folds into its pin now,
-        // and the comment is read in its card.
-        if (side === 'comments') closeThread({ posting: true });
-        await postComment(id, text);
-        if (side === 'comments') dispatchEvent(new CustomEvent('marble-build:pick', { detail: { id } }));
-      });
-      input.addEventListener('keydown', (event) => {
-        if (event.key === 'Escape') { event.preventDefault(); event.stopPropagation(); closeThread(); }
-      });
+        threadWrite = composer({
+          placeholder: lines.length ? 'Ask more, or say what to change' : 'Ask, or say what to change',
+          label: 'Reply',
+          onEscape: () => closeThread(),
+          onSend: async ({ text, images }) => {
+            if (!threadFor) return;
+            // With Marks open the box that wrote it folds into its pin now,
+            // and the comment is read in its card.
+            if (side === 'comments') closeThread({ posting: true });
+            await postComment(id, text, images);
+            if (side === 'comments') dispatchEvent(new CustomEvent('marble-build:pick', { detail: { id } }));
+          },
+        });
+        threadWrite.for = id;
+      }
+      const compose = threadWrite.node;
+      if (writing) requestAnimationFrame(() => threadWrite.focus());
       thread.append(compose);
       thread.hidden = false;
       placeThread();
       if (focus) {
         // After the press that made the pin has let go: the release would
         // otherwise take the caret back to the page.
-        const put = () => { if (input.isConnected) input.focus({ preventScroll: true }); };
+        const put = () => { if (compose.isConnected) threadWrite.focus(); };
         put();
         addEventListener('pointerup', () => setTimeout(put, 0), { once: true, capture: true });
         setTimeout(put, 120);
@@ -1123,6 +1256,14 @@
       if (path.includes(thread) || path.includes(M.elementOf(threadFor))) return;
       closeThread();
     }, true);
+
+    // The line the work itself says (agent-work.js), for the build's turns.
+    addEventListener('marble-work:line', (event) => {
+      const d = event.detail;
+      if (!d?.conversation || d.conversation !== state?.conversation) return;
+      workLine = d.say ? { say: d.say, at: Date.now() } : null;
+      paintBar();
+    });
 
     // ------------------------------------------------- following a build
     //
@@ -1745,6 +1886,7 @@
       archive,
       mountDrawn,
       statusCard,
+      composer,
       light,
       unlight,
       slide,

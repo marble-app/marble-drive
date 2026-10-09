@@ -303,9 +303,12 @@ export function createBuilds({ buildStore, store, oplog = null, runner, agentSto
     try {
       const conversation = await conversationFor(state, docPath);
       const taken = state.marks.filter((m) => build.marks.includes(m.id));
-      // A model chosen on what it takes (a note sent with one) is the build's.
+      // A model and effort chosen on what it takes (a note sent with them) are
+      // the build's.
       const wanted = model ?? taken.find((m) => m.model)?.model ?? null;
-      if (wanted) await agentStore.updateConversation(conversation, { model: wanted }).catch(() => {});
+      const effort = taken.find((m) => m.effort)?.effort ?? null;
+      const patch = { ...(wanted ? { model: wanted } : {}), ...(effort ? { effort } : {}) };
+      if (Object.keys(patch).length) await agentStore.updateConversation(conversation, patch).catch(() => {});
       // The comment a sent note became is that note's, not context.
       const context = state.marks.filter((m) => m.type === 'comment' && m.state === 'waiting' && !m.resolved && !m.archived && !m.forNote);
       const index = indexOf(source);
@@ -637,13 +640,15 @@ export function createBuilds({ buildStore, store, oplog = null, runner, agentSto
   // --------------------------------------------------------------- comments
 
   /** A line added to a comment's thread, and the agent's answer after it. */
-  async function comment(docPath, id, text, { client = null } = {}) {
+  async function comment(docPath, id, text, { client = null, images = [] } = {}) {
     const words = String(text ?? '').trim().slice(0, 2_000);
-    if (!words) throw httpError(400, 'Say something first');
+    const pictures = (Array.isArray(images) ? images : []).filter((image) => typeof image?.name === 'string');
+    if (!words && !pictures.length) throw httpError(400, 'Say something first');
     const { state, result: mark } = await change(docPath, (s) => {
       const m = s.marks.find((x) => x.id === id && x.type === 'comment');
       if (!m) throw httpError(404, 'That comment is gone');
-      m.thread = [...(m.thread ?? []).filter((line) => !line.pending), { who: 'you', text: words, at: Date.now() }, { who: 'agent', text: '', pending: true, at: Date.now() }];
+      const said = cleanMark({ id: 'x', type: 'comment', thread: [{ who: 'you', text: words || 'This, as pasted.', images: pictures }] }).thread[0];
+      m.thread = [...(m.thread ?? []).filter((line) => !line.pending), { ...said, at: Date.now() }, { who: 'agent', text: '', pending: true, at: Date.now() }];
       m.resolved = false;
       return m;
     }, { by: client });
@@ -672,6 +677,59 @@ export function createBuilds({ buildStore, store, oplog = null, runner, agentSto
         : { who: 'agent', text: 'I could not answer just now. It is kept for the next build.', at: Date.now() });
       return null;
     });
+  }
+
+  /** Build, pressed while a build runs: what it would take is queued, and
+   *  built as soon as this one is done (startNow, on its end). */
+  async function startOrQueue(docPath, options = {}) {
+    const state = await buildStore.read(docPath);
+    if (!state.builds.some((b) => b.status === 'running' || b.status === 'paused')) return start(docPath, options);
+    const wanted = Array.isArray(options.marks) && options.marks.length ? new Set(options.marks.map(String)) : null;
+    const { result: queued } = await change(docPath, (s) => {
+      const taken = s.marks.filter((m) => m.state === 'waiting' && m.type !== 'comment' && (wanted ? wanted.has(m.id) : !m.held && !m.archived));
+      if (!taken.length) throw httpError(409, 'Nothing is marked to build yet');
+      for (const m of taken) { m.now = true; delete m.held; }
+      return taken.length;
+    }, { by: options.client ?? null });
+    return { ...(await read(docPath)), queued };
+  }
+
+  /** Steer the running build: these marks join it now, sent into its turn as
+   *  a course-correction rather than waiting for the next build. */
+  async function steer(docPath, { marks: chosen = null, client = null } = {}) {
+    const before = await buildStore.read(docPath);
+    const running = before.builds.find((b) => b.status === 'running');
+    if (!running?.conversation) return start(docPath, { marks: chosen, client });
+    const wanted = Array.isArray(chosen) && chosen.length ? new Set(chosen.map(String)) : null;
+    const { result: taken } = await change(docPath, (s) => {
+      const b = find(s, running.id);
+      const list = s.marks.filter((m) => m.state === 'waiting' && m.type !== 'comment' && (wanted ? wanted.has(m.id) : !m.held && !m.archived));
+      if (!list.length) throw httpError(409, 'Nothing is marked to steer with');
+      for (const m of list) { m.state = 'building'; m.build = b.id; delete m.now; delete m.held; }
+      b.marks = [...new Set([...(b.marks ?? []), ...list.map((m) => m.id)])];
+      return list.map((m) => ({ ...m }));
+    }, { by: client });
+    const source = await store.read(docPath);
+    const index = source === null ? null : indexOf(source);
+    const lines = [
+      `More marks for this build (build ${running.n}), made on the app while it runs. Work them into the plan you are on: add them to build_plan's parts, and keep going.`,
+      '',
+      ...taken.map((mark, i) => `${i + 1}. ${phraseOf(mark, { index, imagePath: buildStore.imagePath })}`),
+    ];
+    const anchors = [...new Set(taken.map((m) => m.anchorId).filter((id) => id && index?.has(id)))].slice(0, 20);
+    const sent = await runner.send(running.conversation, {
+      prompt: lines.join('\n'),
+      context: { viewing: docPath, target: docPath, selection: anchors, also: [] },
+      dispatch: 'steer',
+    });
+    // The build is the steered turn now: it ends when that turn ends.
+    const { state } = await change(docPath, (s) => {
+      const b = find(s, running.id);
+      if (sent?.turnId && b.status === 'running') { b.turn = sent.turnId; b.turns = [...new Set([...(b.turns ?? []), sent.turnId])]; }
+      return null;
+    }, { by: client });
+    if (sent?.turnId) byConversation.set(running.conversation, docPath);
+    return { ...publicState(state, await currentSha(docPath).catch(() => null)), steered: taken.length };
   }
 
   /** A note sent with ⌘↵: it becomes a comment, which the app answers when
@@ -854,6 +912,8 @@ export function createBuilds({ buildStore, store, oplog = null, runner, agentSto
     archive,
     history,
     send,
+    startOrQueue,
+    steer,
     drawnOf,
     start,
     pause,

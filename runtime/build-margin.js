@@ -125,6 +125,8 @@
     comment: '<svg viewBox="0 0 16 16" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round"><path d="M8 2.5a5.5 5.5 0 1 1-2.6 10.3L2.5 13.5l.7-2.9A5.5 5.5 0 0 1 8 2.5z"/></svg>',
     stroke: '<svg viewBox="0 0 16 16" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><path d="M2.5 12.5c2-4.5 3.6-7 4.6-7 1.6 0 .2 5.6 1.8 5.6 1 0 2-1.4 2.6-4"/><path d="M11 3.5l1.5 1.5"/></svg>',
     piece: '<svg viewBox="0 0 16 16" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round"><rect x="2.5" y="2.5" width="4.5" height="4.5" rx="1.2"/><rect x="9" y="2.5" width="4.5" height="4.5" rx="1.2"/><rect x="2.5" y="9" width="4.5" height="4.5" rx="1.2"/><path d="M11.25 9.25v4M9.25 11.25h4" stroke-linecap="round"/></svg>',
+    // A part moved: the arrows of a move.
+    move: '<svg viewBox="0 0 16 16" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><path d="M8 2.5v11M2.5 8h11M8 2.5 6.5 4M8 2.5 9.5 4M8 13.5 6.5 12M8 13.5 9.5 12M2.5 8 4 6.5M2.5 8 4 9.5M13.5 8 12 6.5M13.5 8 12 9.5"/></svg>',
     plus: '<svg viewBox="0 0 16 16" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"><path d="M8 3.5v9M3.5 8h9"/></svg>',
     // A box with its lid on: put away, kept.
     archive: '<svg viewBox="0 0 16 16" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><rect x="2.25" y="3" width="11.5" height="3" rx="1"/><path d="M3.25 6v6.25c0 .55.45 1 1 1h7.5c.55 0 1-.45 1-1V6"/><path d="M6.5 8.75h3"/></svg>',
@@ -264,9 +266,24 @@
     .marble-margin-card .offer { margin: 4px 0 0; color: var(--b-ink); }
     .marble-margin-card .ask { display: flex; gap: 6px; margin-top: 6px; }
 
-    /* Its reply line, while it is picked. */
+    /* A waiting note's footer: its model and effort, and Send. */
+    .marble-margin-card .nfoot { display: flex; align-items: center; gap: 6px; margin-top: 6px; }
+    .marble-margin-card .nfoot .sp { flex: 1; }
+    .marble-margin-card .nfoot .model { display: inline-flex; align-items: center; gap: 3px; height: 24px; padding: 0 7px; border-radius: 7px; font-size: 12px; color: var(--b-muted); max-width: 170px; }
+    .marble-margin-card .nfoot .model span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .marble-margin-card .nfoot .model svg { width: 13px; height: 13px; flex: none; }
+    .marble-margin-card .nfoot .model:hover { background: var(--b-paper-2); color: var(--b-ink); }
+    .marble-margin-card .nfoot .send { display: inline-flex; align-items: center; gap: 5px; height: 26px; padding: 0 9px 0 6px; border-radius: 999px;
+      background: var(--b-mark); color: var(--b-card); font: 500 11px/1 var(--b-ui); }
+    .marble-margin-card .nfoot .send:hover { background: color-mix(in srgb, var(--b-mark) 86%, var(--b-ink)); }
+    .marble-margin-card .nfoot .send svg { width: 14px; height: 14px; }
+    .marble-margin-card .nfoot .send kbd { font: inherit; opacity: .78; }
+    .marble-margin-card[data-show="build"] .nfoot { display: none; }
+    /* Its reply box, while it is picked. */
     .marble-margin-card .reply { display: none; align-items: flex-end; gap: 6px; margin-top: 8px; padding: 4px 4px 4px 10px; border: 1px solid var(--b-line); border-radius: 10px; background: var(--b-card); }
-    .marble-margin-card[aria-expanded="true"] .reply { display: flex; }
+    .marble-margin-card[aria-expanded="true"] .reply { display: block; }
+    .marble-margin-card .reply { border: 0; padding: 0; background: none; }
+    .marble-margin-card .reply .marble-build-write { margin: 0; }
     .marble-margin-card .reply textarea { all: unset; flex: 1; min-width: 0; font-size: 12.5px; line-height: 18px; padding: 2px 0; color: var(--b-ink); white-space: pre-wrap; overflow-wrap: anywhere;
       field-sizing: content; min-height: 22px; max-height: 30vh; overflow-y: auto; }
     .marble-margin-card .reply textarea::placeholder { color: var(--b-faint); }
@@ -422,6 +439,7 @@
     let extra = 0;
     const sheet = matchMedia(PHONE);
     const cardOf = new Map(); // id → { node, pin, status, sig }
+    const writers = new Map(); // comment id → its reply box (build-mode.js composer)
     let buildCard = null;
 
     const marks = () => {
@@ -456,6 +474,7 @@
       if (mark.type === 'note') return mark.first ? 'Your prompt' : 'Note';
       if (mark.type === 'comment') return 'Comment';
       if (mark.type === 'piece') return 'Piece';
+      if (mark.type === 'move') return 'Move';
       if (mark.kind === 'box') return 'Box';
       if (mark.kind === 'arrow') return 'Arrow';
       return 'Sketch';
@@ -468,6 +487,7 @@
     const wordsOf = (mark) => {
       if (mark.type === 'note') return mark.text || 'An empty note';
       if (mark.type === 'piece') return mark.piece?.title ? `Put “${mark.piece.title}” here` : 'A piece to put here';
+      if (mark.type === 'move') return mark.text ? `Move “${clip(mark.text, 60)}” here` : 'Move this part here';
       if (mark.type === 'stroke') return mark.kind === 'arrow' ? 'Move this there' : mark.kind === 'box' ? 'A box drawn around it' : 'Drawn over it';
       return '';
     };
@@ -580,29 +600,38 @@
       card.append(stl);
 
       if (mark.type === 'comment') {
-        const reply = h('form', 'reply');
-        const input = h('textarea');
-        input.placeholder = 'Reply';
-        input.setAttribute('aria-label', `Reply to comment ${n}`);
-        const send = button('', '', KIND.send);
-        send.setAttribute('aria-label', 'Send');
-        send.setAttribute('aria-disabled', 'true');
-        input.addEventListener('input', () => send.setAttribute('aria-disabled', String(!input.value.trim())));
-        input.addEventListener('click', (event) => event.stopPropagation());
-        const post = async (event) => {
-          event?.preventDefault();
-          event?.stopPropagation();
-          const text = input.value.trim();
-          if (!text) return;
-          input.value = '';
-          send.setAttribute('aria-disabled', 'true');
-          await B.comment(mark.id, text);
-        };
-        send.addEventListener('click', post);
-        reply.addEventListener('submit', post);
-        B.growing?.(input, { onSend: () => post() });
-        reply.append(input, send);
+        // The same box as everywhere a thing is written: words, pasted
+        // pictures, Send (⌘↵). One per comment, kept across redraws.
+        let write = writers.get(mark.id);
+        if (!write) {
+          write = B.composer({
+            placeholder: 'Ask more, or say what to change',
+            label: `Reply to comment ${n}`,
+            onSend: ({ text, images }) => B.comment(mark.id, text, images),
+          });
+          writers.set(mark.id, write);
+        }
+        const reply = h('div', 'reply');
+        reply.append(write.node);
         card.append(reply);
+      }
+      // A note waiting for a build: the note's own footer, its model and
+      // effort, and Send (to be answered or made now, or queued behind a
+      // running build).
+      if (mark.type === 'note' && (mark.state ?? 'waiting') === 'waiting') {
+        const foot = h('div', 'nfoot');
+        const model = button('model', '');
+        model.append(h('span', '', 'Model'));
+        model.insertAdjacentHTML('beforeend', '<svg viewBox="0 0 16 16" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M5 6.5 8 9.5l3-3"/></svg>');
+        model.addEventListener('click', (event) => { event.stopPropagation(); M.pickModel?.(mark.id, model); });
+        M.paintModelOn?.(mark.id, model);
+        const send = button('send', '');
+        send.innerHTML = `${M.sendGlyph ?? KIND.send}<kbd>${M.MOD ?? '⌘'}↵</kbd>`;
+        send.setAttribute('aria-label', B.current() ? 'Queue: make it once the running build is done' : 'Send: ask it, or have it made now');
+        send.title = B.current() ? 'Queue it behind the running build' : 'Ask it, or have it made now';
+        send.addEventListener('click', (event) => { event.stopPropagation(); M.send?.(mark.id); });
+        foot.append(model, h('span', 'sp'), send);
+        card.append(foot);
       }
 
       card.addEventListener('click', (event) => {
@@ -610,6 +639,11 @@
         pick(picked === mark.id ? null : mark.id);
       });
       card.addEventListener('keydown', (event) => {
+        if (mark.type === 'note' && event.ctrlKey && event.altKey && !event.metaKey) {
+          const step = { ArrowLeft: ['model', -1], ArrowRight: ['model', 1], ArrowUp: ['effort', 1], ArrowDown: ['effort', -1] }[event.key];
+          if (step) { event.preventDefault(); event.stopPropagation(); M.stepModel?.(mark.id, ...step); return; }
+        }
+        if (mark.type === 'note' && event.key === 'Enter' && (event.metaKey || event.ctrlKey)) { event.preventDefault(); event.stopPropagation(); M.send?.(mark.id); return; }
         if (event.target !== card) return;
         if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); pick(picked === mark.id ? null : mark.id); }
       });
@@ -708,7 +742,7 @@
       list.forEach((mark, i) => {
         const n = i + 1;
         const status = statusFor(mark);
-        const sig = JSON.stringify([n, status, mark.text, mark.thread, mark.resolved, mark.held, mark.anchorId, mark.piece?.title, B.name]);
+        const sig = JSON.stringify([n, status, mark.text, mark.thread, mark.resolved, mark.held, mark.anchorId, mark.piece?.title, B.name, mark.model, mark.effort, Boolean(B.current())]);
         let entry = cardOf.get(mark.id);
         // The card whose words are being written is left as it is.
         const writing = entry?.node.querySelector('.words[contenteditable]');
@@ -716,14 +750,14 @@
         if (!entry || entry.sig !== sig) {
           const node = drawCard(mark, n, status);
           const focused = entry?.node.contains(active()) ? active() : null;
-          const draft = entry?.node.querySelector('.reply textarea')?.value ?? '';
+          const draft = '';
           if (entry) entry.node.replaceWith(node); else cards.append(node);
           const pin = entry?.pin ?? drawPin(mark, n);
           if (!entry) pins.append(pin);
           entry = { node, pin, status, sig, mark };
           cardOf.set(mark.id, entry);
-          if (draft) { const input = node.querySelector('.reply textarea'); input.value = draft; input.dispatchEvent(new Event('input')); }
-          if (focused?.matches?.('.reply textarea')) node.querySelector('.reply textarea')?.focus({ preventScroll: true });
+          void draft;
+          if (focused?.closest?.('.marble-build-write')) writers.get(mark.id)?.focus();
           else if (focused) node.focus({ preventScroll: true });
         }
         entry.mark = mark;
@@ -860,7 +894,7 @@
         }
       }
       if (keepFocus) return;
-      if (entry.mark.type === 'comment') requestAnimationFrame(() => entry.node.querySelector('.reply textarea')?.focus({ preventScroll: true }));
+      if (entry.mark.type === 'comment') requestAnimationFrame(() => writers.get(entry.mark.id)?.focus());
     }
     const unpick = () => { if (picked) pick(null); };
 

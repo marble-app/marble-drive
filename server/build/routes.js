@@ -66,12 +66,15 @@ export function createBuildRoutes({ builds, hub, maxBody }) {
 
       if (route === '/agent/builds/start' && method === 'POST') {
         const body = await readJson(req, maxBody);
-        return json(res, 202, await builds.start(pathOf(url), {
+        // Pressed while a build runs, it queues; steer sends into the build.
+        const options = {
           marks: Array.isArray(body.marks) ? body.marks : null,
           words: typeof body.words === 'string' ? body.words : '',
           anchor: typeof body.anchor === 'string' ? body.anchor : null,
           client,
-        }));
+        };
+        if (body.steer === true) return json(res, 202, await builds.steer(pathOf(url), options));
+        return json(res, 202, await builds.startOrQueue(pathOf(url), options));
       }
 
       const action = BUILD.exec(route);
@@ -85,7 +88,7 @@ export function createBuildRoutes({ builds, hub, maxBody }) {
 
       if (route === '/agent/builds/comment' && method === 'POST') {
         const body = await readJson(req, maxBody);
-        return json(res, 200, await builds.comment(pathOf(url), String(body.id ?? ''), body.text, { client }));
+        return json(res, 200, await builds.comment(pathOf(url), String(body.id ?? ''), body.text, { client, images: Array.isArray(body.images) ? body.images : [] }));
       }
       if (route === '/agent/builds/offer' && method === 'POST') {
         const body = await readJson(req, maxBody);

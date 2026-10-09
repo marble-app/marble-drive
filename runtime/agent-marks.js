@@ -224,8 +224,11 @@
     }
     .marble-marks-note-act button:hover { background: color-mix(in srgb, var(--marks-ink) 7%, transparent); color: var(--marks-ink); }
     .marble-marks-note-act button:focus-visible { outline: 2px solid var(--marks-mark); outline-offset: 1px; }
-    .marble-marks-note-act .send { background: var(--marks-ink); color: var(--marks-paper); }
-    .marble-marks-note-act .send:hover { background: color-mix(in srgb, var(--marks-ink) 84%, var(--marks-paper)); color: var(--marks-paper); }
+    /* Send is the composer's: the up arrow on the accent, its key beside it. */
+    .marble-marks-note-act .send { height: 26px; padding: 0 9px 0 6px; gap: 5px; border-radius: 999px; background: var(--marks-mark); color: var(--marks-paper); }
+    .marble-marks-note-act .send:hover { background: color-mix(in srgb, var(--marks-mark) 86%, var(--marks-ink)); color: var(--marks-paper); }
+    .marble-marks-note-act .send svg { width: 14px; height: 14px; }
+    .marble-marks-note-act .send kbd { font: 500 11px/1 var(--ui-font, system-ui, sans-serif); opacity: .78; }
     .marble-marks-note-act .send[aria-disabled="true"] { opacity: .35; cursor: default; }
     .marble-marks-note-act kbd { font: inherit; opacity: .6; }
     .marble-marks-note-act svg { width: 13px; height: 13px; }
@@ -450,6 +453,31 @@
     }
     .marble-marks-layer[data-margin] .marble-marks-stroke { opacity: .35; }
     @starting-style { .marble-marks-pin { scale: .4; } }
+
+    /* A part dragged to where it might go: a ghost of it, tinted in the
+       page's accent over a paper that lets the app show through, outlined
+       dashed as a part still to come. Dragging, it follows the hand; let go,
+       it stays there as a mark until a build moves the part. */
+    .marble-marks-move, .marble-marks-drag {
+      position: fixed; pointer-events: auto; box-sizing: border-box; border-radius: 10px; overflow: hidden; cursor: grab; touch-action: none;
+      background: color-mix(in srgb, var(--marks-paper) 68%, transparent);
+      outline: 1.5px dashed color-mix(in srgb, var(--accent-ink, var(--marks-mark)) 70%, transparent); outline-offset: 2px;
+      box-shadow: 0 10px 28px rgba(0, 0, 0, .16);
+      transition: opacity 200ms ${EASE}, scale 260ms ${EASE}, visibility 0s;
+    }
+    .marble-marks-drag { pointer-events: none; cursor: grabbing; box-shadow: 0 16px 36px rgba(0, 0, 0, .22); rotate: -.6deg; }
+    .marble-marks-move::after, .marble-marks-drag::after {
+      content: ""; position: absolute; inset: 0; pointer-events: none;
+      background: color-mix(in srgb, var(--accent, #9bb6cf) 42%, transparent); mix-blend-mode: multiply;
+    }
+    .marble-marks-move .mv-body, .marble-marks-drag .mv-body { position: relative; pointer-events: none; opacity: .88; }
+    .marble-marks-move .mv-body > *, .marble-marks-drag .mv-body > * { margin: 0 !important; box-sizing: border-box; }
+    .marble-marks-move .marble-marks-note-close { position: absolute; top: 4px; right: 4px; z-index: 1; background: color-mix(in srgb, var(--marks-paper) 85%, transparent); }
+    .marble-marks-move[data-dragging] { cursor: grabbing; }
+    /* Let go, it sits lighter on the app until a hand is on it. */
+    .marble-marks-move:not(:hover):not([data-dragging]) { opacity: .7; }
+    .marble-marks-layer[data-margin] .marble-marks-move { opacity: 0; scale: .08; visibility: hidden; pointer-events: none; transform-origin: 0 0;
+      transition: opacity 220ms ${EASE}, scale 260ms ${EASE}, visibility 0s 260ms; }
 
     /* A piece put on the app: attached on top like a card on a canvas,
        outlined dashed (a part still to come) until a build works it in. */
@@ -864,6 +892,7 @@
       if (mark.type === 'note') return `a note on ${mark.anchorId}: "${mark.text}"`;
       if (mark.type === 'comment') return `a comment on ${mark.anchorId}`;
       if (mark.type === 'piece') return `the piece "${mark.piece?.title ?? 'a piece'}" on ${mark.anchorId}`;
+      if (mark.type === 'move') return `${mark.from} moved to ${mark.anchorId}`;
       if (mark.kind === 'box') return `a box around ${names(mark.ids)}`;
       if (mark.kind === 'arrow') return `an arrow from ${mark.from ?? 'nothing'} to ${mark.to ?? 'nothing'}`;
       return `ink over ${names(mark.ids)}`;
@@ -1158,12 +1187,14 @@
         if (mark.clips?.length) out.clips = mark.clips.map(({ html, text }) => ({ html, text }));
         if (mark.ids?.length) out.ids = [...mark.ids];
         if (mark.model) out.model = mark.model;
+        if (mark.effort) out.effort = mark.effort;
       }
       if (mark.type === 'stroke') {
         Object.assign(out, { kind: mark.kind, ids: mark.ids, from: mark.from, to: mark.to, parts: mark.parts.map((part) => ({ pairs: part.pairs })) });
       }
       if (mark.type === 'comment') { out.thread = mark.thread ?? []; out.resolved = Boolean(mark.resolved); }
       if (mark.type === 'piece') { out.piece = mark.piece; }
+      if (mark.type === 'move') Object.assign(out, { from: mark.from, w: mark.w ?? 0, h: mark.h ?? 0, text: mark.text ?? '' });
       return out;
     };
     const keep = (mark) => {
@@ -1320,7 +1351,7 @@
         sendButton.type = 'button';
         sendButton.className = 'send';
         sendButton.setAttribute(TRANSIENT, '');
-        sendButton.innerHTML = `Send <kbd ${TRANSIENT}>${MOD}↵</kbd>`;
+        sendButton.innerHTML = `${GLYPHS.send}<kbd ${TRANSIENT}>${MOD}↵</kbd>`;
         sendButton.title = 'Ask it, or have it changed now';
         sendButton.setAttribute('aria-label', 'Send: ask it, or have it changed now');
         // A press here is not a blur that keeps the note.
@@ -1367,11 +1398,9 @@
       // An empty note is a slip of the hand, not a mark.
       body.addEventListener('blur', () => {
         clearTimeout(typed);
-        // Written on a selection: what was picked is let go with it.
-        if (mark.fromSelection) {
-          delete mark.fromSelection;
-          if (area.length) { area = []; syncSelection(); paintHalos(); syncBrief(); }
-        }
+        // Written on a selection: the box is a note now. What was picked stays
+        // picked, to drag or build, until a press away or Escape lets it go.
+        if (mark.fromSelection) delete mark.fromSelection;
         mark.text = body.innerText.trim();
         // Left: with the margin open it folds into its pin from here.
         node.removeAttribute('data-writing');
@@ -1399,19 +1428,58 @@
         const id = settings?.defaultProvider ?? list[0]?.id;
         const provider = list.find((p) => p.default) ?? list.find((p) => p.id === id) ?? list[0] ?? null;
         return {
-          models: (provider?.models ?? []).map((m) => ({ id: m.id, label: m.label ?? m.id, note: m.note ?? m.detail ?? '' })),
+          models: (provider?.models ?? []).map((m) => ({ id: m.id, label: m.label ?? m.id, efforts: m.efforts ?? null })),
+          efforts: (provider?.efforts ?? []).map((e) => (typeof e === 'string' ? e : e?.id)).filter(Boolean),
           fallback: settings?.models?.[provider?.id] ?? null,
+          fallbackEffort: settings?.efforts?.[provider?.id] ?? null,
         };
-      }).catch(() => ({ models: [], fallback: null }));
+      }).catch(() => ({ models: [], efforts: [], fallback: null, fallbackEffort: null }));
       return catalog;
     };
-    const paintModel = async (mark, button) => {
-      const { models: list, fallback } = await models();
-      const chosen = list.find((m) => m.id === (mark.model ?? fallback));
-      button.querySelector('span').textContent = chosen?.label ?? 'Default model';
-      button.hidden = !list.length;
-      button.setAttribute('aria-label', `Model: ${chosen?.label ?? 'the default'}. Press to choose another`);
+    const EFFORT_WORDS = { low: 'Low', medium: 'Medium', high: 'High', xhigh: 'Extra high', max: 'Max', minimal: 'Minimal' };
+    const effortsOf = (cat, modelId) => {
+      const own = cat.models.find((m) => m.id === modelId)?.efforts;
+      return (Array.isArray(own) && own.length ? own.map((e) => (typeof e === 'string' ? e : e?.id)).filter(Boolean) : cat.efforts);
     };
+    const paintModel = async (mark, button) => {
+      const cat = await models();
+      const chosen = cat.models.find((m) => m.id === (mark.model ?? cat.fallback));
+      const effort = mark.effort ?? cat.fallbackEffort;
+      const words = [chosen?.label ?? 'Default model', effort && effortsOf(cat, chosen?.id).includes(effort) ? EFFORT_WORDS[effort] ?? effort : null].filter(Boolean).join(' · ');
+      button.querySelector('span').textContent = words;
+      button.hidden = !cat.models.length;
+      button.setAttribute('aria-label', `Model: ${words}. Press to choose; ⌃⌥ and the arrows change it`);
+      button.title = `The model and effort it is answered or made with · ⌃⌥← → model, ⌃⌥↑ ↓ effort`;
+    };
+    /** ⌃⌥ and an arrow, as in the chat's composer: ← → the model, ↑ ↓ the
+     *  effort, on the note being written or under the hand. */
+    const stepModel = async (mark, axis, delta) => {
+      const cat = await models();
+      if (axis === 'model') {
+        if (!cat.models.length) return;
+        const at = Math.max(0, cat.models.findIndex((m) => m.id === (mark.model ?? cat.fallback)));
+        mark.model = cat.models[(at + delta + cat.models.length) % cat.models.length].id;
+      } else {
+        const list = effortsOf(cat, mark.model ?? cat.fallback);
+        if (!list.length) return;
+        const at = Math.max(0, list.indexOf(mark.effort ?? cat.fallbackEffort));
+        mark.effort = list[Math.min(list.length - 1, Math.max(0, at + delta))];
+      }
+      mark.paintModel?.();
+      if (!mark.local) keep(mark);
+      for (const fn of watchers) fn();
+    };
+    addEventListener('keydown', (event) => {
+      if (!building || !event.ctrlKey || !event.altKey || event.metaKey) return;
+      const step = { ArrowLeft: ['model', -1], ArrowRight: ['model', 1], ArrowUp: ['effort', 1], ArrowDown: ['effort', -1] }[event.key];
+      if (!step) return;
+      const focused = marks.find((m) => m.type === 'note' && m.el?.contains(document.activeElement));
+      const mark = focused ?? (hovered?.type === 'note' ? hovered : null);
+      if (!mark || mark.state !== 'waiting') return;
+      event.preventDefault();
+      event.stopPropagation();
+      stepModel(mark, ...step);
+    }, true);
     const modelMenu = el('div', 'marble-marks-models', layer);
     modelMenu.setAttribute('role', 'menu');
     modelMenu.hidden = true;
@@ -1419,25 +1487,32 @@
     const closeModels = () => { modelMenu.hidden = true; modelFor = null; };
     const pickModel = async (mark, button) => {
       if (modelFor === mark) { closeModels(); return; }
-      const { models: list, fallback } = await models();
+      const cat = await models();
       modelFor = mark;
-      modelMenu.replaceChildren();
-      for (const m of list) {
-        const item = document.createElement('button');
-        item.type = 'button';
-        item.setAttribute(TRANSIENT, '');
-        item.setAttribute('role', 'menuitemradio');
-        item.setAttribute('aria-checked', String(m.id === (mark.model ?? fallback)));
-        item.textContent = m.label;
-        item.addEventListener('pointerdown', (event) => event.preventDefault());
-        item.addEventListener('click', () => {
-          mark.model = m.id;
-          closeModels();
-          mark.paintModel?.();
-          if (!mark.local) keep(mark);
-        });
-        modelMenu.append(item);
-      }
+      const fill = () => {
+        modelMenu.replaceChildren();
+        const head = (words) => { const node = el('small', '', modelMenu); node.textContent = words; node.style.cssText = 'display:block;padding:6px 8px 2px'; };
+        const option = (label, checked, choose) => {
+          const item = document.createElement('button');
+          item.type = 'button';
+          item.setAttribute(TRANSIENT, '');
+          item.setAttribute('role', 'menuitemradio');
+          item.setAttribute('aria-checked', String(checked));
+          item.textContent = label;
+          item.addEventListener('pointerdown', (event) => event.preventDefault());
+          item.addEventListener('click', () => { choose(); mark.paintModel?.(); if (!mark.local) keep(mark); for (const fn of watchers) fn(); fill(); });
+          modelMenu.append(item);
+        };
+        head('Model');
+        for (const m of cat.models) option(m.label, m.id === (mark.model ?? cat.fallback), () => { mark.model = m.id; });
+        const efforts = effortsOf(cat, mark.model ?? cat.fallback);
+        if (efforts.length) {
+          head('Effort');
+          for (const e of efforts) option(EFFORT_WORDS[e] ?? e, e === (mark.effort ?? cat.fallbackEffort), () => { mark.effort = e; });
+        }
+        head('⌃⌥← → model · ⌃⌥↑ ↓ effort');
+      };
+      fill();
       modelMenu.hidden = false;
       const r = button.getBoundingClientRect();
       const t = modelMenu.getBoundingClientRect();
@@ -1727,6 +1802,126 @@
       return mark;
     };
 
+    // ------------------------------------------------------------------ Move
+    //
+    // In Build mode, a part picked with Select can be dragged: nothing on the
+    // app moves, a ghost of it does, and where it is let go it stays, as a
+    // mark saying "what if this were here?" for the next build.
+
+    const fillGhost = (box, id, w, h) => {
+      box.replaceChildren();
+      const source = id ? document.querySelector(`[data-marble-id="${CSS.escape(id)}"]`) : null;
+      if (source && source !== document.body) {
+        const clone = source.cloneNode(true);
+        for (const node of [clone, ...clone.querySelectorAll('*')]) {
+          node.removeAttribute?.('data-marble-id');
+          node.removeAttribute?.('id');
+          node.removeAttribute?.('contenteditable');
+        }
+        clone.setAttribute(TRANSIENT, '');
+        clone.style.width = `${w}px`;
+        box.append(clone);
+      }
+      box.style.width = `${w}px`;
+      box.style.height = `${h}px`;
+    };
+    const drawMove = (mark) => {
+      const node = el('div', 'marble-marks-move', notes);
+      const body = el('div', 'mv-body', node);
+      fillGhost(body, mark.from, Math.max(40, mark.w || 160), Math.max(24, mark.h || 60));
+      const close = closeButton('Take this move off');
+      node.append(close);
+      close.addEventListener('click', () => removeMark(mark));
+      node.addEventListener('pointerdown', (event) => { if (!event.target.closest('.marble-marks-note-close')) startMove(event, [mark], node); });
+      mark.el = node;
+      paintState(mark);
+      return mark;
+    };
+
+    const letGo = () => {
+      if (!picked.size && !area.length) return;
+      picked.clear();
+      area = [];
+      syncSelection();
+      paintHalos();
+      syncBrief();
+    };
+    let carry = null; // { id, x0, y0, part, rect, ghost, dx, dy }
+    const ours = (path) => path.some((node) => node === layer || node === held
+      || node?.classList?.contains?.('marble-build-layer') || node?.tagName === 'MARBLE-AGENT-DRAWER' || node?.tagName === 'MARBLE-SHELL');
+    addEventListener('pointerdown', (event) => {
+      if (!building || !describing || mode || event.button !== 0 || carry) return;
+      if (!picked.size && !area.length) return;
+      if (ours(event.composedPath())) return;
+      const span = union();
+      const inside = span && event.clientX >= span.left - 6 && event.clientX <= span.left + span.width + 6
+        && event.clientY >= span.top - 6 && event.clientY <= span.top + span.height + 6;
+      // A press away from what is picked lets it go, and is the app's.
+      if (!inside) { letGo(); return; }
+      const part = fromUs && mine.length ? document.querySelector(`[data-marble-id="${CSS.escape(mine[0])}"]`) : null;
+      if (!part) return;
+      carry = { id: event.pointerId, x0: event.clientX, y0: event.clientY, part, rect: part.getBoundingClientRect(), ghost: null };
+    }, true);
+    addEventListener('pointermove', (event) => {
+      if (!carry || event.pointerId !== carry.id) return;
+      if (!carry.ghost) {
+        if (Math.hypot(event.clientX - carry.x0, event.clientY - carry.y0) < 6) return;
+        const ghost = el('div', 'marble-marks-drag', layer);
+        const body = el('div', 'mv-body', ghost);
+        fillGhost(body, carry.part.getAttribute('data-marble-id'), Math.round(carry.rect.width), Math.round(carry.rect.height));
+        carry.ghost = ghost;
+        carry.dx = carry.x0 - carry.rect.left;
+        carry.dy = carry.y0 - carry.rect.top;
+        getSelection()?.removeAllRanges();
+      }
+      event.preventDefault();
+      carry.ghost.style.left = `${Math.round(event.clientX - carry.dx)}px`;
+      carry.ghost.style.top = `${Math.round(event.clientY - carry.dy)}px`;
+    }, true);
+    const drop = (event) => {
+      if (!carry || event.pointerId !== carry.id) return;
+      const { ghost, part, rect, dx, dy } = carry;
+      carry = null;
+      if (!ghost) return;
+      ghost.remove();
+      // What it was let go over, not itself.
+      const x = event.clientX;
+      const y = event.clientY;
+      let anchor = null;
+      for (const node of document.elementsFromPoint(x, y)) {
+        if (!node.closest || node.closest(`[${TRANSIENT}]`) || part.contains(node)) continue;
+        const addressed = node.closest('[data-marble-id]');
+        if (addressed && addressed !== document.body && addressed !== document.documentElement && !part.contains(addressed)) { anchor = addressed; break; }
+      }
+      anchor ??= part.parentElement?.closest('[data-marble-id]') ?? null;
+      if (!anchor) return;
+      // The press that ended a drag is not a click on the app.
+      addEventListener('click', (e) => { e.preventDefault(); e.stopPropagation(); }, { capture: true, once: true });
+      const box = anchor.getBoundingClientRect();
+      const left = x - dx;
+      const top = y - dy;
+      const mark = {
+        id: newMarkId(),
+        type: 'move',
+        anchorId: anchor.getAttribute('data-marble-id'),
+        from: part.getAttribute('data-marble-id'),
+        at: Date.now(),
+        state: 'waiting',
+        u: box.width ? (left - box.left) / box.width : 0,
+        v: box.height ? (top - box.top) / box.height : 0,
+        w: Math.round(rect.width),
+        h: Math.round(rect.height),
+        text: (part.innerText ?? '').replace(/\s+/g, ' ').trim().slice(0, 80),
+      };
+      marks.push(mark);
+      drawMove(mark);
+      keep(mark);
+      letGo();
+      repaint();
+    };
+    addEventListener('pointerup', drop, true);
+    addEventListener('pointercancel', (event) => { if (carry?.id === event.pointerId) { carry.ghost?.remove(); carry = null; } }, true);
+
     // ----------------------------------------------------------------- Piece
 
     /** A piece's card on the app: its name and where it is from, its own
@@ -1982,6 +2177,7 @@
         mark.text = given.text ?? '';
         mark.ids = given.ids ?? [];
         mark.model = given.model ?? null;
+        mark.effort = given.effort ?? null;
         const same = (a, b) => JSON.stringify(a ?? []) === JSON.stringify(b ?? []);
         const pictures = (given.images ?? []).map(({ name, w, h }) => ({ name, w, h }));
         const changed = !same((mark.images ?? []).filter((i) => i.name).map(({ name, w, h }) => ({ name, w, h })), pictures) || !same(mark.clips, given.clips);
@@ -2005,6 +2201,9 @@
       } else if (given.type === 'piece') {
         mark.piece = given.piece;
         if (!mark.el) drawPiece(mark);
+      } else if (given.type === 'move') {
+        Object.assign(mark, { from: given.from, w: given.w ?? 0, h: given.h ?? 0, text: given.text ?? '' });
+        if (!mark.el) drawMove(mark);
       }
       paintState(mark);
       return mark;
@@ -2039,7 +2238,7 @@
     const moveBy = (dx, dy) => {
       for (const { mark, box } of moving.marks) {
         if (!box.width || !box.height) continue;
-        if (mark.type === 'note') {
+        if (mark.type !== 'stroke') {
           mark.u += dx / box.width;
           mark.v += dy / box.height;
           continue;
@@ -2273,6 +2472,8 @@
       paintHalos();
       syncBrief();
       if (picked.has(mark)) startMove(event, [...picked], mark.el);
+      // Picked, the cursor is the app's again once the press is over.
+      if (!event.shiftKey) addEventListener('pointerup', () => setMode(null), { once: true, capture: true });
     }, true);
     overlay.addEventListener('pointermove', (event) => {
       if (drag && event.pointerId === drag.id) {
@@ -2349,8 +2550,11 @@
       }
       syncSelection();
       syncBrief();
-      // A marquee is one gesture and it is over; Select stays on, because the
-      // next thing a hand does in a picker is pick something else.
+      // A marquee is one gesture and it is over. In Build mode what it
+      // picked stays picked and the cursor is the app's again, where a press
+      // away lets it go and a drag from it moves it (Shift keeps picking).
+      // Elsewhere Select stays on, for the next pick.
+      if (building && !event.shiftKey && (area.length || picked.size)) setMode(null);
     };
     overlay.addEventListener('pointerup', finish);
     // A cancel is not a release: a pinch during a marquee — which the overlay's
@@ -2701,6 +2905,29 @@
         if (mark) mark.fromSelection = true;
         return mark?.id ?? null;
       },
+      /** A picture kept beside the builds, as a note keeps one: its name and
+       *  size, for a reply (build-mode.js composer). */
+      keepPicture: async (blob) => {
+        const small = await shrink(blob);
+        const response = await fetch(`/agent/builds/image?path=${encodeURIComponent(app)}`, {
+          method: 'POST', headers: { 'Content-Type': small.blob.type || 'image/png' }, body: small.blob,
+        });
+        const data = await response.json().catch(() => ({}));
+        if (!response.ok || !data.name) throw new Error(data.error || 'That picture was not kept');
+        return { name: data.name, w: small.w, h: small.h };
+      },
+      sendGlyph: GLYPHS.send,
+      MOD,
+      /** Send a note from elsewhere (its card in Marks), or step its model. */
+      send: (id) => { const mark = marks.find((m) => m.id === id); if (mark) sendNote(mark); },
+      stepModel: (id, axis, delta) => { const mark = marks.find((m) => m.id === id); if (mark) stepModel(mark, axis, delta); },
+      pickModel: (id, button) => {
+        const mark = marks.find((m) => m.id === id);
+        if (!mark) return;
+        mark.paintCard = () => paintModel(mark, button);
+        pickModel(mark, button);
+      },
+      paintModelOn: (id, button) => { const mark = marks.find((m) => m.id === id); if (mark) paintModel(mark, button); },
       /** A note sent (⌘↵): build-mode.js asks the host. */
       onSend: (fn) => { senders.add(fn); return () => senders.delete(fn); },
       /** A comment's pin, taken off when its thread was never started. */
