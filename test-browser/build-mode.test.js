@@ -31,6 +31,12 @@ const OTHER = `<!doctype html>
 </body></html>
 `;
 
+const LONG = `<!doctype html>
+<html><head><meta charset="utf-8"><title>Long</title>
+<style>body { font: 14px/1.5 system-ui, sans-serif; margin: 0; } main { max-width: 800px; margin: 0 auto; padding: 40px; } .card { border: 1px solid #ddd; border-radius: 12px; padding: 12px; margin: 12px 0; height: 160px; }</style></head>
+<body data-marble-id="b"><main data-marble-id="m">${Array.from({ length: 24 }, (_, i) => `<section class="card" data-marble-id="r${i}"><h2 data-marble-id="r${i}h">Row ${i}</h2></section>`).join('')}</main></body></html>
+`;
+
 const at = (doc) => ({ call: 'apply_ops', args: { path: doc } });
 const build = (doc) => [
   { call: 'build_plan', args: { parts: [{ title: 'Title', state: 'now' }, { title: 'Invitations list', state: 'ahead' }] } },
@@ -68,7 +74,7 @@ const SCRIPTS = {
   ],
 };
 
-const host = await startDrive({ scripts: SCRIPTS, documents: { Reviews: APP, Calendar: OTHER } });
+const host = await startDrive({ scripts: SCRIPTS, documents: { Reviews: APP, Calendar: OTHER, Long: LONG } });
 await host.drive.store.mkdir('UCSD').catch(() => {});
 test.after(() => host.close());
 
@@ -484,6 +490,30 @@ test('the margin: a card beside each mark, level with its pin, the app narrowed 
   // The side opens the shell's frame, whose tree asks for the drive's own
   // page, which a test drive does not have: that one 404 is the frame's.
   assert.deepEqual(errors.filter((e) => !/favicon|status of 404/.test(e)), []);
+});
+
+test('a picked card stands level with its mark after the page comes to it, with marks crowding the top', async () => {
+  const { page } = await open({ doc: 'Long', width: 1440, height: 900 });
+  // Four marks near the top, two at one height, as on a long spec page;
+  // and two far down, the way the whole page is anchored by a note on <main>.
+  const marks = [['a', 0.6, 0.022], ['b', 0.3, 0.03], ['c', 0.4, 0.032], ['d', 0.55, 0.032], ['e', 0.5, 0.55], ['f', 0.45, 0.8]];
+  for (const [id, u, v] of marks) {
+    await api('PUT', '/agent/builds/marks?path=Long', { mark: { id: `m${id}`, type: 'note', anchorId: 'm', u, v, at: id.charCodeAt(0), text: `Mark ${id}` } });
+  }
+  await page.waitForFunction(() => window.marbleMarks.list().length === 6);
+  await openMargin(page);
+  await page.waitForTimeout(800);
+  for (const id of ['me', 'mf', 'ma', 'me']) {
+    await page.locator(`.marble-margin-card[data-id="${id}"]`).evaluate((card) => card.click());
+    await page.waitForTimeout(1300);
+    const off = await page.evaluate((mark) => {
+      const card = document.querySelector(`.marble-margin-card[data-id="${mark}"]`).getBoundingClientRect();
+      const pin = document.querySelector(`.marble-margin-pin[data-id="${mark}"]`).getBoundingClientRect();
+      return { off: Math.round(card.top - (pin.top - 10)), pin: Math.round(pin.top), inView: pin.top > 44 && pin.bottom < innerHeight - 80 };
+    }, id);
+    assert.ok(Math.abs(off.off) <= 6 && off.inView, `${id}: ${JSON.stringify(off)}`);
+  }
+  await api('DELETE', '/agent/builds/marks?path=Long', { ids: marks.map(([id]) => `m${id}`) });
 });
 
 test('in the margin a comment is a card: the app answers in its own name, and a reply goes on in the card', async () => {

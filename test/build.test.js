@@ -187,6 +187,7 @@ test('a note keeps what was pasted onto it, and the brief says where to look', a
 test('archived is kept on a mark; a plan names the comments it settles; the brief asks for them by id', () => {
   assert.equal(cleanMark({ id: 'm1', type: 'note', text: 'x', archived: true }).archived, true);
   assert.equal(cleanMark({ id: 'm1', type: 'note', text: 'x', archived: 'yes' }).archived, undefined);
+  assert.equal(cleanMark({ id: 'm1', type: 'note', text: 'x', archived: false }).archived, false, 'put back is said');
   const plan = cleanPlan({ parts: [{ title: 'A' }], settled: ['mc1', { id: 'mc2', said: 'Shown now.' }, { said: 'no id' }] });
   assert.deepEqual(plan.settled, [{ id: 'mc1', said: '' }, { id: 'mc2', said: 'Shown now.' }]);
   assert.deepEqual(cleanPlan({ parts: [{ title: 'B' }] }, plan).settled, plan.settled, 'kept from before when not given');
@@ -198,6 +199,22 @@ test('archived is kept on a mark; a plan names the comments it settles; the brie
   assert.match(brief, /- Comment mc1, pinned to #s2/);
   assert.match(brief, /Person: Two weeks\?/);
   assert.match(brief, /build_plan's `settled`/);
+});
+
+test('marks done before the archive are read as archived; one put back stays put back', async () => {
+  const dir = await fsp.mkdtemp(path.join(os.tmpdir(), 'marble-build-old-'));
+  const store = createBuildStore({ dir });
+  await store.update('Old', (s) => {
+    s.marks.push(
+      { id: 'm1', type: 'note', text: 'built long ago', state: 'built' },
+      { id: 'm2', type: 'note', text: 'put back', state: 'built', archived: false },
+      { id: 'm3', type: 'comment', thread: [], resolved: true, state: 'waiting' },
+      { id: 'm4', type: 'note', text: 'waiting', state: 'waiting' },
+    );
+    return null;
+  });
+  const marks = Object.fromEntries((await store.read('Old')).marks.map((m) => [m.id, m.archived]));
+  assert.deepEqual(marks, { m1: true, m2: false, m3: true, m4: undefined });
 });
 
 test('pieces: regions of an app, taken whole with what draws them', () => {

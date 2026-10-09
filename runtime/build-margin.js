@@ -45,13 +45,17 @@
     const p = picked == null ? -1 : list.findIndex((item) => item.id === picked);
     if (p < 0) down(1);
     else {
+      // The ones above stack as they would with nothing picked, so cards
+      // that crowd each other near the top settle among themselves first.
+      for (let i = 1; i < p; i++) tops[i] = Math.max(list[i].want, head, tops[i - 1] + list[i - 1].height + gap);
       tops[p] = Math.max(list[p].want, head);
-      for (let i = p - 1; i >= 0; i--) tops[i] = Math.min(Math.max(list[i].want, head), tops[i + 1] - gap - list[i].height);
-      // No room above for all of them: they pack down from the head, and the
-      // picked one comes as near its pin as that leaves.
+      // Then each moves up only as far as the one under it needs.
+      for (let i = p - 1; i >= 0; i--) tops[i] = Math.min(tops[i], tops[i + 1] - gap - list[i].height);
+      // No room above for all of them: they come down from the head only as
+      // far as they must, and the picked one as near its pin as that leaves.
       if (tops[0] < head) {
         tops[0] = head;
-        for (let i = 1; i <= p; i++) tops[i] = tops[i - 1] + list[i - 1].height + gap;
+        for (let i = 1; i <= p; i++) tops[i] = Math.max(tops[i], tops[i - 1] + list[i - 1].height + gap);
       }
       down(p + 1);
     }

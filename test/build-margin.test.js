@@ -54,6 +54,18 @@ test('a picked card comes level with its pin and the ones above make way', () =>
   assert.deepEqual(tops(stackCards(roomy, { head: 8, gap: 8, picked: 'b' })), { a: 142, b: 210, c: 278 });
 });
 
+test('cards that crowd each other above a picked one settle among themselves, and the picked one stays level', () => {
+  // The spec page: four marks near the top, two at one height, and the
+  // picked one far down. Nothing near the top is in its way.
+  const items = [
+    { id: 'a', want: 52, height: 83 }, { id: 'e', want: 151, height: 60 }, { id: 'd', want: 176, height: 60 },
+    { id: 'f', want: 176, height: 60 }, { id: 'b', want: 968, height: 60 }, { id: 'g', want: 1043, height: 60 },
+  ];
+  const placed = tops(stackCards(items, { head: 8, gap: 8, picked: 'g' }));
+  assert.equal(placed.g, 1043, 'level with its pin');
+  assert.deepEqual(placed, tops(stackCards(items, { head: 8, gap: 8 })), 'nothing above had to move');
+});
+
 test('the cards under a picked one make way below it', () => {
   const placed = stackCards([
     { id: 'a', want: 10, height: 60 },

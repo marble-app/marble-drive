@@ -117,8 +117,8 @@ export function createBuilds({ buildStore, store, runner, agentStore, hub, start
         mark.build = prior.build;
         if (prior.held) mark.held = true;
         else delete mark.held;
-        if (prior.archived) mark.archived = true;
-        else delete mark.archived;
+        if (prior.archived === undefined) delete mark.archived;
+        else mark.archived = prior.archived;
         if (prior.type === 'comment') { mark.thread = prior.thread; mark.resolved = Boolean(prior.resolved); }
         state.marks[at] = mark;
       } else {
@@ -167,8 +167,7 @@ export function createBuilds({ buildStore, store, runner, agentStore, hub, start
       const mark = state.marks.find((m) => m.id === id && m.type === 'comment');
       if (!mark) throw httpError(404, 'That comment is gone');
       mark.resolved = Boolean(resolved);
-      if (mark.resolved) mark.archived = true;
-      else delete mark.archived;
+      mark.archived = mark.resolved;
       return null;
     }, { by: client });
     return read(docPath);
@@ -182,8 +181,7 @@ export function createBuilds({ buildStore, store, runner, agentStore, hub, start
     await change(docPath, (state) => {
       for (const mark of state.marks) {
         if (!wanted.has(mark.id) || mark.state === 'building') continue;
-        if (archived) mark.archived = true;
-        else delete mark.archived;
+        mark.archived = Boolean(archived);
       }
       return null;
     }, { by: client });

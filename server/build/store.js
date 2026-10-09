@@ -94,7 +94,8 @@ export function cleanMark(raw) {
   // Put away: off the app and out of the margin's list, kept in its Archived
   // list to bring back. A built mark and a resolved comment are archived by
   // the host; anything else by its own press.
-  if (raw.archived === true) mark.archived = true;
+  // False is said, not left out: a done mark put back stays put back.
+  if (raw.archived === true || raw.archived === false) mark.archived = raw.archived;
   if (raw.type === 'note') {
     mark.text = str(raw.text).trim();
     // What was pasted onto it: pictures, kept beside the builds by name, and
@@ -186,7 +187,13 @@ export function createBuildStore({ dir }) {
   async function read(docPath) {
     try {
       const value = JSON.parse(await fsp.readFile(fileOf(docPath), 'utf8'));
-      return value && value.path === docPath ? { ...fresh(docPath), ...value } : fresh(docPath);
+      if (!value || value.path !== docPath) return fresh(docPath);
+      // Marks done before there was an archive are archived, as a mark done
+      // now is; one put back by hand says archived: false and stays.
+      for (const m of Array.isArray(value.marks) ? value.marks : []) {
+        if (m.archived === undefined && (m.state === 'built' || (m.type === 'comment' && m.resolved))) m.archived = true;
+      }
+      return { ...fresh(docPath), ...value };
     } catch {
       return fresh(docPath);
     }
