@@ -117,6 +117,8 @@ export function createBuilds({ buildStore, store, runner, agentStore, hub, start
         mark.build = prior.build;
         if (prior.held) mark.held = true;
         else delete mark.held;
+        if (prior.archived) mark.archived = true;
+        else delete mark.archived;
         if (prior.type === 'comment') { mark.thread = prior.thread; mark.resolved = Boolean(prior.resolved); }
         state.marks[at] = mark;
       } else {
@@ -158,12 +160,31 @@ export function createBuilds({ buildStore, store, runner, agentStore, hub, start
     return read(docPath);
   }
 
-  /** A comment resolved, or opened again. */
+  /** A comment resolved, or opened again. Resolved is put away; opened
+   *  again is back on the app. */
   async function resolve(docPath, id, resolved, { client = null } = {}) {
     await change(docPath, (state) => {
       const mark = state.marks.find((m) => m.id === id && m.type === 'comment');
       if (!mark) throw httpError(404, 'That comment is gone');
       mark.resolved = Boolean(resolved);
+      if (mark.resolved) mark.archived = true;
+      else delete mark.archived;
+      return null;
+    }, { by: client });
+    return read(docPath);
+  }
+
+  /** Marks put away in the Archived list, or brought back. A mark a build is
+   *  working from stays where it is: it is that build's brief. */
+  async function archive(docPath, ids, archived, { client = null } = {}) {
+    const wanted = new Set((Array.isArray(ids) ? ids : []).map(String));
+    if (!wanted.size) throw httpError(400, 'Say which marks');
+    await change(docPath, (state) => {
+      for (const mark of state.marks) {
+        if (!wanted.has(mark.id) || mark.state === 'building') continue;
+        if (archived) mark.archived = true;
+        else delete mark.archived;
+      }
       return null;
     }, { by: client });
     return read(docPath);
@@ -227,7 +248,8 @@ export function createBuilds({ buildStore, store, runner, agentStore, hub, start
       // for is a note once Build that is pressed.
       // A mark held back waits out this build, unless it is one of the marks
       // picked to build by name (Build these), which lets it go.
-      const taken = state.marks.filter((m) => m.state === 'waiting' && m.type !== 'comment' && (wanted ? wanted.has(m.id) : !m.held));
+      // An archived mark is put away, and waits for nothing.
+      const taken = state.marks.filter((m) => m.state === 'waiting' && m.type !== 'comment' && (wanted ? wanted.has(m.id) : !m.held && !m.archived));
       if (!taken.length) throw httpError(409, 'Nothing is marked to build yet');
       state.n = (state.n ?? state.builds.length) + 1;
       const made = {
@@ -253,7 +275,7 @@ export function createBuilds({ buildStore, store, runner, agentStore, hub, start
     try {
       const conversation = await conversationFor(state, docPath);
       const taken = state.marks.filter((m) => build.marks.includes(m.id));
-      const context = state.marks.filter((m) => m.type === 'comment' && m.state === 'waiting' && !m.resolved);
+      const context = state.marks.filter((m) => m.type === 'comment' && m.state === 'waiting' && !m.resolved && !m.archived);
       const index = indexOf(source);
       const prompt = buildBrief({
         path: docPath,
@@ -469,7 +491,17 @@ export function createBuilds({ buildStore, store, runner, agentStore, hub, start
         b.status = 'finished';
         b.end = end;
         b.endedAt = Date.now();
-        for (const m of s.marks) if (m.build === b.id) m.state = 'built';
+        // Built is done with: off the app, into the Archived list.
+        for (const m of s.marks) if (m.build === b.id) { m.state = 'built'; m.archived = true; }
+        // The comments the build said it settled are answered, resolved and
+        // put away, in the app's name.
+        for (const { id, said } of b.plan?.settled ?? []) {
+          const m = s.marks.find((x) => x.id === id && x.type === 'comment' && !x.resolved);
+          if (!m) continue;
+          m.thread = [...(m.thread ?? []).filter((line) => !line.pending), { who: 'agent', text: said || `Done in Build ${b.n}.`, at: Date.now() }];
+          m.resolved = true;
+          m.archived = true;
+        }
         if (b.plan?.title && UNTITLED.test(splitPath(docPath).name) && !s.named) {
           named = b.plan.title;
           s.named = true;
@@ -585,6 +617,7 @@ export function createBuilds({ buildStore, store, runner, agentStore, hub, start
       if (take) {
         s.marks.push(cleanMark({ id: newId('m'), type: 'note', anchorId: m.anchorId, u: m.u, v: m.v + 0.02, text: line.offer.text, at: Date.now() }));
         m.resolved = true;
+        m.archived = true;
       }
       return null;
     }, { by: client });
@@ -675,6 +708,7 @@ export function createBuilds({ buildStore, store, runner, agentStore, hub, start
     removeMarks,
     hold,
     resolve,
+    archive,
     drawnOf,
     start,
     pause,

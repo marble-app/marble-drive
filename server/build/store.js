@@ -91,6 +91,10 @@ export function cleanMark(raw) {
   };
   if (raw.first === true) mark.first = true;
   if (raw.held === true) mark.held = true;
+  // Put away: off the app and out of the margin's list, kept in its Archived
+  // list to bring back. A built mark and a resolved comment are archived by
+  // the host; anything else by its own press.
+  if (raw.archived === true) mark.archived = true;
   if (raw.type === 'note') {
     mark.text = str(raw.text).trim();
     // What was pasted onto it: pictures, kept beside the builds by name, and
@@ -146,10 +150,19 @@ export function cleanPlan(raw, prior = null) {
   })).filter((part) => part.title);
   const title = str(raw?.title, 80).replace(/[/\\]/g, ' ').replace(/\s+/g, ' ').trim();
   const folder = str(raw?.folder, 300).trim().replace(/^\/+|\/+$/g, '');
+  // The comments the build settles, by id, each with a line saying how; the
+  // host resolves them when the build finishes.
+  const given = Array.isArray(raw?.settled) ? raw.settled : null;
+  const settled = given
+    ? given.slice(0, MARKS_MAX).map((item) => (typeof item === 'string' ? { id: item } : item))
+      .map((item) => ({ id: idOf(item?.id), said: str(item?.said, 400).trim() }))
+      .filter((item) => item.id)
+    : prior?.settled ?? [];
   return {
     parts: parts.length ? parts : prior?.parts ?? [],
     title: title || prior?.title || null,
     folder: folder || prior?.folder || null,
+    settled,
   };
 }
 

@@ -53,6 +53,12 @@ const SCRIPTS = {
     { sleep: 15000 },
     { say: 'late' },
   ],
+  settle: [
+    { call: 'build_plan', args: { parts: [{ title: 'Two weeks', state: 'now' }] } },
+    { call: 'read_document', args: { path: 'Reviews' } },
+    { call: 'build_plan', args: { parts: [{ title: 'Two weeks', state: 'done' }], settled: [{ id: 'mc1', said: 'It shows two weeks now.' }] } },
+    { say: 'Showed two weeks.' },
+  ],
   first: [
     { call: 'build_plan', args: { parts: [{ title: 'Title and summary', state: 'now' }], title: 'CHI reviews', folder: 'UCSD' } },
     { call: 'read_document', args: { path: 'Untitled' } },
@@ -91,6 +97,17 @@ const open = async ({ doc = 'Reviews', width = 1280, height = 820, colorScheme =
   await page.goto(`${host.base}/a/${encodeURIComponent(doc)}`);
   await page.waitForFunction(() => Boolean(window.marbleBuild?.state()));
   return { page, errors };
+};
+
+/** Waits until the host's state for Reviews says so. (waitForFunction takes a
+ *  promise for a yes, so a fetch in it is checked once and never again.) */
+const hostSays = async (page, test, label = 'the host never said so') => {
+  for (let i = 0; i < 100; i += 1) {
+    const marks = await page.evaluate(() => fetch('/agent/builds?path=Reviews').then((x) => x.json()).then((s) => s.marks));
+    if (test(marks)) return marks;
+    await page.waitForTimeout(100);
+  }
+  throw new Error(label);
 };
 
 const bar = (page) => page.locator('.marble-marks-bar');
@@ -173,8 +190,9 @@ test('Build hands the marks to one agent: the plan fills the status, what it rea
   assert.equal(await page.locator('.marble-build-pop').count(), 0, 'no plan popover');
   await page.locator('.marble-build-status[data-run="done"]').waitFor({ timeout: 15_000 });
   // Done: the build's card goes, and the mark says it was made in it.
-  // One list: the built mark stays in it, drawn as done.
-  await page.locator('.marble-margin-card[data-key="built"][data-show="done"]', { hasText: 'Done in Build 1' }).waitFor();
+  // Built is done with: it leaves the list and the app for Archived.
+  await page.waitForFunction(() => !document.querySelector('.marble-margin-card'));
+  await page.locator('.marble-margin .tray', { hasText: '1' }).waitFor();
   // Pressed again with no build in hand, the status mark puts the margin away.
   await page.locator('.marble-build-status').click();
   await page.locator('.marble-margin').waitFor({ state: 'hidden' });
@@ -182,7 +200,9 @@ test('Build hands the marks to one agent: the plan fills the status, what it rea
   const s = await state();
   assert.equal(s.builds.at(-1).status, 'finished');
   assert.equal(s.marks[0].state, 'built');
-  await page.locator('.marble-marks-note[data-state="built"]').waitFor();
+  assert.equal(s.marks[0].archived, true);
+  await page.locator('.marble-marks-note[data-state="built"][data-archived]').waitFor({ state: 'attached' });
+  assert.equal(await page.locator('.marble-marks-note').isVisible(), false, 'off the app, no faint note left');
   // Every build is kept: Builds lists it, showing, and the app before it.
   await page.locator('.marble-marks-tool[aria-label^="Builds"]').click();
   await page.locator('.marble-build-row[data-showing]', { hasText: 'Build' }).waitFor();
@@ -218,9 +238,14 @@ test('Select picks marks and builds only those; on parts of the app it saves a p
   await note.locator('.marble-marks-note-body').click();
   await page.locator('.marble-build-sel:not([hidden])', { hasText: '1 mark' }).waitFor();
   assert.equal(await go(page).textContent(), 'Build selection');
-  // Remove, from the bar.
-  await page.locator('.marble-build-sel button', { hasText: 'Remove' }).click();
-  await page.waitForFunction(() => fetch('/agent/builds?path=Reviews').then((r) => r.json()).then((s) => s.marks.length === 1));
+  // Archive, from the bar: off the app, kept.
+  await page.locator('.marble-build-sel button', { hasText: 'Archive' }).click();
+  await hostSays(page, (marks) => marks.find((m) => m.text === 'Two')?.archived === true, 'archived from the bar');
+  assert.equal(await note.isVisible(), false);
+  // Delete, from the bar, for the other.
+  await page.locator('.marble-marks-note', { hasText: 'One' }).locator('.marble-marks-note-body').click();
+  await page.locator('.marble-build-sel button', { hasText: 'Delete' }).click();
+  await hostSays(page, (marks) => marks.length === 1, 'deleted from the bar');
   // A click on a part of the app picks the part: Save as piece.
   const r = await box(page, 's2');
   await page.mouse.click(r.x + 300, r.y + 60);
@@ -259,17 +284,6 @@ test('a comment is a pin with a thread; the agent answers in it', async () => {
   await page.mouse.click(10, 10);
   await page.waitForFunction(() => document.querySelectorAll('.marble-marks-pin').length === 1);
 });
-
-/** Waits until the host's state for Reviews says so. (waitForFunction takes a
- *  promise for a yes, so a fetch in it is checked once and never again.) */
-const hostSays = async (page, test, label = 'the host never said so') => {
-  for (let i = 0; i < 100; i += 1) {
-    const marks = await page.evaluate(() => fetch('/agent/builds?path=Reviews').then((x) => x.json()).then((s) => s.marks));
-    if (test(marks)) return marks;
-    await page.waitForTimeout(100);
-  }
-  throw new Error(label);
-};
 
 test('a note is one press: the app is the app again after it, its × deletes it, and Undo puts it back', async () => {
   const { page } = await open();
@@ -346,6 +360,42 @@ test('with the margin open, a note being written stays on the app, then folds in
   await page.waitForFunction(() => getComputedStyle(document.querySelector('.marble-marks-note')).visibility === 'hidden');
   await page.locator('.marble-margin-card', { hasText: 'Shown while I write it' }).waitFor();
   assert.equal(await page.locator('.marble-margin-pin:not([hidden])').count(), 1);
+});
+
+test('done marks leave the app for Archived; a build clears the comments it settles; any mark can be archived and put back', async () => {
+  const { page } = await open();
+  await api('PUT', '/agent/builds/marks?path=Reviews', { mark: { id: 'mc1', type: 'comment', anchorId: 's2', u: 0.5, v: 0.2, at: Date.now(), thread: [{ who: 'you', text: 'Can this show two weeks?' }] } });
+  await page.locator('.marble-marks-pin:not([data-archived])').waitFor();
+  await noteOn(page, 's1', 'script:settle Show two weeks');
+  await go(page).click();
+  await page.locator('.marble-build-status[data-run="done"]').waitFor({ timeout: 15_000 });
+  const marks = await hostSays(page, (list) => list.find((m) => m.id === 'mc1')?.resolved === true, 'the comment is settled');
+  const comment = marks.find((m) => m.id === 'mc1');
+  assert.equal(comment.archived, true);
+  assert.equal(comment.thread.at(-1).text, 'It shows two weeks now.', 'answered in the app\'s name');
+  assert.equal(marks.find((m) => m.type === 'note').archived, true);
+  // Nothing done is left on the app: no faint note, no pin with a check.
+  await page.waitForFunction(() => ![...document.querySelectorAll('.marble-marks-note, .marble-marks-pin')].some((n) => n.checkVisibility()));
+
+  // The margin keeps them under Archived, to put back or delete.
+  await openMargin(page);
+  await page.locator('.marble-margin .tray', { hasText: '2' }).click();
+  assert.equal(await page.locator('.marble-margin-old').count(), 2);
+  await page.locator('.marble-margin-old', { hasText: 'Done in Build' }).locator('.sb', { hasText: 'Put back' }).click();
+  await page.locator('.marble-margin .back').click();
+  await page.locator('.marble-margin-card', { hasText: 'Show two weeks' }).waitFor();
+  await page.waitForFunction(() => [...document.querySelectorAll('.marble-marks-note')].some((n) => n.checkVisibility()));
+  // Archive on a card puts it away again, and Undo brings it back.
+  await page.locator('.marble-margin-card .arc').click();
+  await page.waitForFunction(() => !document.querySelector('.marble-margin-card'));
+  await hostSays(page, (list) => list.find((m) => m.type === 'note')?.archived === true, 'archived on the host');
+  await page.locator('.marble-marks-undo button').click();
+  await page.locator('.marble-margin-card', { hasText: 'Show two weeks' }).waitFor();
+  await hostSays(page, (list) => !list.find((m) => m.type === 'note')?.archived, 'back on the host');
+  // Delete all clears the Archived list.
+  await page.locator('.marble-margin .tray').click();
+  await page.locator('.marble-margin .gone').click();
+  await hostSays(page, (list) => list.length === 1, 'the archived comment is deleted');
 });
 
 const margin = (page) => page.locator('.marble-margin');
@@ -457,11 +507,13 @@ test('in the margin a comment is a card: the app answers in its own name, and a 
   await card.locator('.reply textarea').fill('And next month?');
   await card.locator('.reply textarea').press('Enter');
   await page.waitForFunction(() => fetch('/agent/builds?path=Reviews').then((x) => x.json()).then((s) => s.marks.find((m) => m.type === 'comment')?.thread.length === 4));
-  // Resolved, it stays in the list drawn as done; Reopen brings it back.
+  // Resolved, it is put away under Archived; Put back there opens it again.
   await card.locator('.sb', { hasText: 'Resolve' }).waitFor();
   await card.locator('.sb', { hasText: 'Resolve' }).click();
-  await page.locator('.marble-margin-card[data-key="resolved"][data-show="done"]').waitFor();
-  await page.locator('.marble-margin-card .sb', { hasText: 'Reopen' }).click();
+  await page.waitForFunction(() => !document.querySelector('.marble-margin-card'));
+  await page.locator('.marble-marks-undo:not([hidden])', { hasText: 'Comment resolved' }).waitFor();
+  await page.locator('.marble-margin .tray').click();
+  await page.locator('.marble-margin-old', { hasText: 'Resolved' }).locator('.sb', { hasText: 'Put back' }).click();
   await page.waitForFunction(() => fetch('/agent/builds?path=Reviews').then((x) => x.json()).then((s) => s.marks.find((m) => m.type === 'comment')?.resolved === false));
 });
 

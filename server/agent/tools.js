@@ -223,6 +223,19 @@ export const TOOL_SCHEMAS = [
         },
         title: { type: 'string', maxLength: 80, description: 'A short name for the app, when it is still Untitled.' },
         folder: { type: 'string', maxLength: 300, description: 'A folder of the drive the app belongs in, as a path.' },
+        settled: {
+          type: 'array',
+          maxItems: 60,
+          description: 'The comments on the app this build answers or makes moot, by their id from the brief, each with one plain sentence on how. They are resolved and put away when the build finishes. Name only ones the build really settles.',
+          items: {
+            type: 'object',
+            required: ['id'],
+            properties: {
+              id: { type: 'string', description: 'The comment\'s id, as the brief gives it.' },
+              said: { type: 'string', maxLength: 400, description: 'How it was settled: "The list now shows two weeks."' },
+            },
+          },
+        },
       },
     },
   },

@@ -367,6 +367,10 @@
     .marble-marks-note-foot::before { content: ""; width: 5px; height: 5px; border-radius: 50%; background: currentColor; opacity: .7; }
     .marble-marks-note[data-state="built"], .marble-marks-piece[data-state="built"] { opacity: .62; }
     .marble-marks-stroke[data-state="built"] { opacity: .45; }
+    /* Archived — built, resolved, or put away by hand — is off the app. It is
+       kept in the margin's Archived list (build-margin.js). */
+    .marble-marks-layer :is(.marble-marks-note, .marble-marks-piece, .marble-marks-pin)[data-archived],
+    .marble-marks-stroke[data-archived] { display: none; }
 
     /* A comment is a numbered pin with its beak on the point, as a kept note
        is (agent-notes.js); its thread opens beside it (build-mode.js). */
@@ -1035,7 +1039,7 @@
     /** Which marks a rectangle means. A mark has no id and never enters the
      *  selection; it is picked so it can be moved or taken off the page. */
     const marksInRect = (r) => marks.filter((mark) => {
-      if (mark.working !== undefined) return false;
+      if (mark.working !== undefined || mark.archived) return false;
       const span = spanOf(mark);
       return span ? G().coverage(r, span) >= 0.6 : false;
     });
@@ -1098,6 +1102,7 @@
         state: mark.state ?? 'waiting', build: mark.build ?? null,
       };
       if (mark.first) out.first = true;
+      if (mark.archived) out.archived = true;
       if (mark.type === 'note') {
         out.text = mark.text;
         if (mark.images?.length) out.images = mark.images.filter((image) => image.name).map(({ name, w, h }) => ({ name, w, h }));
@@ -1133,9 +1138,16 @@
     };
     const paintState = (mark) => {
       const state = mark.state ?? 'waiting';
-      if (mark.type === 'stroke') { for (const part of mark.parts) part.el.dataset.state = state === 'waiting' ? 'draft' : state; return; }
+      if (mark.type === 'stroke') {
+        for (const part of mark.parts) {
+          part.el.dataset.state = state === 'waiting' ? 'draft' : state;
+          part.el.toggleAttribute('data-archived', Boolean(mark.archived));
+        }
+        return;
+      }
       if (!mark.el) return;
       mark.el.dataset.state = state === 'waiting' ? 'draft' : state;
+      mark.el.toggleAttribute('data-archived', Boolean(mark.archived));
       mark.el.toggleAttribute('data-first', Boolean(mark.first));
       const foot = mark.el.querySelector(':scope > .marble-marks-note-foot');
       if (foot) {
@@ -1440,11 +1452,11 @@
     // --------------------------------------------------------------- Comment
 
     /** A comment's pin carries the number its card has in the margin: every
-     *  mark counts, in the order they were made. */
+     *  mark on the app counts, in the order they were made. */
     const numberPins = () => {
       let n = 0;
       for (const mark of marks) {
-        if (!mark.id) continue;
+        if (!mark.id || mark.archived) continue;
         n += 1;
         if (mark.type === 'comment') mark.el.textContent = String(n);
       }
@@ -1647,14 +1659,20 @@
     undoLine.append(undoButton);
     let undoTimer = 0;
     const KIND_WORDS = { note: 'Note', comment: 'Comment', piece: 'Piece', stroke: 'Sketch' };
-    const offerUndo = (list) => {
-      if (batching) { batching.push(list); return; }
-      undone.push(list);
+    const sayUndo = (entry) => {
+      undone.push(entry);
       if (undone.length > 20) undone.shift();
-      undoWords.textContent = list.length === 1 ? `${KIND_WORDS[list[0].type] ?? 'Mark'} deleted` : `${list.length} marks deleted`;
+      undoWords.textContent = entry.words;
       undoLine.hidden = false;
       clearTimeout(undoTimer);
       undoTimer = setTimeout(() => { undoLine.hidden = true; }, 8000);
+    };
+    const offerUndo = (list) => {
+      if (batching) { batching.push(list); return; }
+      sayUndo({
+        words: list.length === 1 ? `${KIND_WORDS[list[0].type] ?? 'Mark'} deleted` : `${list.length} marks deleted`,
+        run: () => restore(list),
+      });
     };
     // A Delete over several picked marks is one step to undo, not several.
     let batching = null;
@@ -1668,10 +1686,14 @@
       }
     };
     const undoLast = () => {
-      const list = undone.pop();
+      const entry = undone.pop();
       undoLine.hidden = true;
       clearTimeout(undoTimer);
-      if (!list) return false;
+      if (!entry) return false;
+      entry.run();
+      return true;
+    };
+    const restore = (list) => {
       for (const given of list) {
         if (marks.some((m) => m.id === given.id)) continue;
         const mark = upsert(given);
@@ -1682,7 +1704,6 @@
       repaint();
       syncSelection();
       syncBrief();
-      return true;
     };
     undoButton.addEventListener('click', undoLast);
     const clearMarks = () => {
@@ -1724,6 +1745,7 @@
           mark.state = given.state;
           mark.build = given.build;
           mark.held = Boolean(given.held);
+          mark.archived = Boolean(given.archived);
           paintState(mark);
           continue;
         }
@@ -1750,6 +1772,7 @@
         state: given.state ?? 'waiting', build: given.build ?? null, first: Boolean(given.first),
         // Set by their own presses on the host, never by this page.
         held: Boolean(given.held),
+        archived: Boolean(given.archived),
       });
       if (given.type === 'note') {
         mark.kind = 'text';
@@ -1870,7 +1893,7 @@
       agent.select(all);
     };
     const syncBrief = () => {
-      const count = building ? marks.filter((mark) => mark.state !== 'building').length : drafts().length;
+      const count = building ? marks.filter((mark) => mark.state !== 'building' && !mark.archived).length : drafts().length;
       // Out of the mode with marks still in hand: the way back says so, since
       // nothing else on the page does any more.
       update({
@@ -2011,7 +2034,7 @@
     /** The stroke under a point, if any: within a finger's width of its line. */
     const strokeAt = (x, y) => {
       for (const mark of [...marks].reverse()) {
-        if (mark.type !== 'stroke') continue;
+        if (mark.type !== 'stroke' || mark.archived) continue;
         const box = boxOf(mark.anchorId);
         if (!box) continue;
         for (const part of mark.parts) {
@@ -2134,7 +2157,7 @@
     const hover = (event) => {
       let found = null;
       for (const mark of marks) {
-        if (mark.type !== 'stroke') continue;
+        if (mark.type !== 'stroke' || mark.archived) continue;
         const box = boxOf(mark.anchorId);
         if (!box) continue;
         for (const part of mark.parts) {
@@ -2414,6 +2437,21 @@
         return true;
       },
       undo: () => undoLast(),
+      /** Archived on the host, drawn here now: off the app, or back on it. */
+      setArchived: (ids, on) => {
+        for (const mark of marks) {
+          if (!ids.includes(mark.id) || mark.state === 'building') continue;
+          mark.archived = Boolean(on);
+          picked.delete(mark);
+          paintState(mark);
+        }
+        numberPins();
+        repaint();
+        syncSelection();
+        syncBrief();
+      },
+      /** The line over the toolbar, for something else this page can undo. */
+      offerUndo: (words, run) => sayUndo({ words, run }),
       clear: () => clearMarks(),
       /** A note, put on a part of the app or at a point. */
       note: ({ x = null, y = null, anchorId = null, u = 0, v = 0, text = '', first = false } = {}) => {

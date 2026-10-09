@@ -610,7 +610,7 @@
     const runningBuild = () => builds().find((b) => b.status === 'running') ?? null;
     const pausedBuild = () => [...builds()].reverse().find((b) => b.status === 'paused') ?? null;
     const current = () => runningBuild() ?? pausedBuild();
-    const waiting = () => (state?.marks ?? []).filter((m) => m.state === 'waiting' && m.type !== 'comment');
+    const waiting = () => (state?.marks ?? []).filter((m) => m.state === 'waiting' && m.type !== 'comment' && !m.archived);
     const progressOf = (build) => {
       const parts = build?.plan?.parts ?? [];
       return { done: parts.filter((p) => p.state === 'done').length, of: parts.length };
@@ -856,9 +856,12 @@
     const selLabel = h('span', 'lbl');
     const selA = h('button', 'marble-build-btn quiet');
     selA.type = 'button';
+    // Picked marks can be put away together: off the app, into Archived.
+    const selArchive = h('button', 'marble-build-btn quiet', 'Archive');
+    selArchive.type = 'button';
     const selB = h('button', 'marble-build-btn primary');
     selB.type = 'button';
-    sel.append(selLabel, selA, selB);
+    sel.append(selLabel, selA, selArchive, selB);
     layer.append(sel);
     let selNow = { marks: [], parts: [] };
     M.onPicked((detail) => {
@@ -869,7 +872,8 @@
         const n = detail.marks.length;
         const built = detail.marks.filter((id) => waiting().every((m) => m.id !== id)).length;
         selLabel.textContent = built === n ? `${plural(n, 'mark')}, built already` : plural(n, 'mark');
-        selA.textContent = 'Remove';
+        selA.textContent = 'Delete';
+        selArchive.hidden = false;
         selB.textContent = 'Build these';
         selB.setAttribute('aria-disabled', String(built === n || Boolean(current())));
         sel.dataset.kind = 'marks';
@@ -877,6 +881,7 @@
         const n = detail.parts.length;
         selLabel.textContent = n === 1 ? 'This part of the app' : `${n} parts of the app`;
         selA.textContent = 'Note';
+        selArchive.hidden = true;
         selB.textContent = 'Save as piece';
         selB.setAttribute('aria-disabled', 'false');
         sel.dataset.kind = 'parts';
@@ -897,6 +902,11 @@
       M.clearPicked();
       M.setMode(null);
       M.note({ anchorId: part, u: 1, v: 0 });
+    });
+    selArchive.addEventListener('click', () => {
+      const ids = [...selNow.marks];
+      M.clearPicked();
+      archive(ids, true);
     });
     selB.addEventListener('click', async () => {
       if (selB.getAttribute('aria-disabled') === 'true') return;
@@ -955,6 +965,18 @@
       }
     }
     const takeOffer = (id, take) => settled(ask('POST', route('/offer'), { id, take }));
+    /** Put marks away, or bring them back: drawn at once, kept on the host,
+     *  and undoable from the line over the toolbar. */
+    const archive = (ids, on, { undo = true } = {}) => {
+      const list = ids.filter((id) => (state?.marks ?? []).some((m) => m.id === id && m.state !== 'building'));
+      if (!list.length) return Promise.resolve(null);
+      M.setArchived(list, on);
+      if (undo) {
+        const n = list.length;
+        M.offerUndo(on ? (n === 1 ? 'Archived' : `${n} marks archived`) : (n === 1 ? 'Back on the app' : `${n} marks back on the app`), () => archive(list, !on, { undo: false }));
+      }
+      return settled(ask('POST', route('/archive'), { ids: list, archived: Boolean(on) }));
+    };
     const postComment = async (id, text) => {
       if (!(state?.marks ?? []).some((m) => m.id === id)) {
         // Its first line: the pin is kept now, then the words go in it.
@@ -1632,7 +1654,13 @@
       comment: postComment,
       takeOffer,
       hold: (id, held) => settled(ask('POST', route('/hold'), { id, held: Boolean(held) })),
-      resolve: (id, resolved) => settled(ask('POST', route('/resolve'), { id, resolved: Boolean(resolved) })),
+      resolve: (id, resolved) => {
+        // Resolved is put away, so it says so and can be undone the same way.
+        if (resolved) M.offerUndo('Comment resolved', () => settled(ask('POST', route('/resolve'), { id, resolved: false })));
+        M.setArchived([id], Boolean(resolved));
+        return settled(ask('POST', route('/resolve'), { id, resolved: Boolean(resolved) }));
+      },
+      archive,
       mountDrawn,
       slide,
       growing,

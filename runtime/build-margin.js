@@ -121,6 +121,10 @@
     stroke: '<svg viewBox="0 0 16 16" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><path d="M2.5 12.5c2-4.5 3.6-7 4.6-7 1.6 0 .2 5.6 1.8 5.6 1 0 2-1.4 2.6-4"/><path d="M11 3.5l1.5 1.5"/></svg>',
     piece: '<svg viewBox="0 0 16 16" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round"><rect x="2.5" y="2.5" width="4.5" height="4.5" rx="1.2"/><rect x="9" y="2.5" width="4.5" height="4.5" rx="1.2"/><rect x="2.5" y="9" width="4.5" height="4.5" rx="1.2"/><path d="M11.25 9.25v4M9.25 11.25h4" stroke-linecap="round"/></svg>',
     plus: '<svg viewBox="0 0 16 16" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"><path d="M8 3.5v9M3.5 8h9"/></svg>',
+    // A box with its lid on: put away, kept.
+    archive: '<svg viewBox="0 0 16 16" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><rect x="2.25" y="3" width="11.5" height="3" rx="1"/><path d="M3.25 6v6.25c0 .55.45 1 1 1h7.5c.55 0 1-.45 1-1V6"/><path d="M6.5 8.75h3"/></svg>',
+    back: '<svg viewBox="0 0 16 16" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M9.75 4 5.75 8l4 4"/></svg>',
+    trash: '<svg viewBox="0 0 16 16" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><path d="M3 4.5h10M6.5 4.5V3h3v1.5M4.5 4.5l.6 8.25c.04.42.39.75.81.75h4.18c.42 0 .77-.33.81-.75l.6-8.25"/></svg>',
     close: '<svg viewBox="0 0 16 16" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"><path d="M4.5 4.5l7 7M11.5 4.5l-7 7"/></svg>',
     send: '<svg viewBox="0 0 16 16" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M8 12.5v-9M4.5 7 8 3.5 11.5 7"/></svg>',
   };
@@ -155,6 +159,35 @@
     .marble-margin .add:hover { background: var(--b-paper-2); }
     .marble-margin .add:active { background: var(--b-paper-3); transition-duration: 110ms; }
     .marble-margin .add svg { width: 14px; height: 14px; color: var(--b-muted); }
+    /* Archive: a card's own control, the head's way in, and its list. */
+    .marble-margin .arc, .marble-margin .icon { width: 28px; height: 28px; border-radius: 7px; display: inline-grid; place-items: center; color: var(--b-muted); flex: none; transition: background 200ms ${EASE}, color 200ms ${EASE}; }
+    .marble-margin .arc:hover, .marble-margin .icon:hover { background: var(--b-paper-2); color: var(--b-ink); }
+    .marble-margin .arc svg, .marble-margin .icon svg { width: 15px; height: 15px; }
+    .marble-margin-card .k .arc { width: 24px; height: 24px; margin: -4px -6px -4px auto; }
+    .marble-margin-card .k .arc svg { color: currentColor; }
+    .marble-margin .tray { display: inline-flex; align-items: center; gap: 4px; height: 30px; padding: 0 8px; border-radius: 8px; font-size: 12.5px; color: var(--b-muted); font-variant-numeric: tabular-nums; transition: background 200ms ${EASE}, color 200ms ${EASE}; }
+    .marble-margin .tray:hover { background: var(--b-paper-2); color: var(--b-ink); }
+    .marble-margin .tray svg { width: 15px; height: 15px; }
+    .marble-margin .back { display: inline-flex; align-items: center; gap: 2px; height: 30px; padding: 0 8px 0 4px; border-radius: 8px; font-size: 13px; font-weight: 500; color: var(--b-ink); }
+    .marble-margin .back:hover { background: var(--b-paper-2); }
+    .marble-margin .back svg { width: 15px; height: 15px; color: var(--b-muted); }
+    .marble-margin .gone { display: inline-flex; align-items: center; height: 30px; padding: 0 10px; border-radius: 8px; font-size: 12.5px; color: var(--b-muted); }
+    .marble-margin .gone:hover { background: var(--b-paper-2); color: var(--b-ink); }
+    .marble-margin[data-view="archive"] .cards, .marble-margin[data-view="archive"] .none { display: none; }
+    .marble-margin .arch { position: absolute; inset: 0; overflow: auto; overscroll-behavior: contain; padding: 4px 18px 18px; display: none; flex-direction: column; gap: ${GAP}px; }
+    .marble-margin[data-view="archive"] .arch { display: flex; }
+    .marble-margin-old { padding: 9px 12px 8px; border-radius: 12px; background: var(--b-paper-2); font-size: 12.5px; line-height: 1.4; color: var(--b-muted); }
+    .marble-margin-old .k { display: flex; align-items: center; gap: 6px; font-size: 11.5px; margin-bottom: 3px; min-width: 0; }
+    .marble-margin-old .k svg { width: 13px; height: 13px; flex: none; }
+    .marble-margin-old .k span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .marble-margin-old .words { margin: 0; color: var(--b-ink); overflow-wrap: anywhere; display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; }
+    .marble-margin-old .row { display: flex; align-items: center; gap: 6px; margin-top: 6px; min-height: 26px; font-size: 12px; }
+    .marble-margin-old .row .w { flex: 1; min-width: 0; }
+    .marble-margin-old .sb { display: inline-flex; align-items: center; height: 24px; padding: 0 8px; border-radius: 7px; font-size: 12px; font-weight: 500; color: var(--b-ink); transition: background 200ms ${EASE}; }
+    .marble-margin-old .sb:hover { background: var(--b-paper-3); }
+    .marble-margin-old .icon { width: 24px; height: 24px; }
+    .marble-margin-old .icon:hover { background: var(--b-paper-3); }
+    .marble-margin .arch .empty { margin: 14px 0 0; text-align: center; font-size: 13px; color: var(--b-muted); }
     .marble-margin .shut { display: none; width: 30px; height: 30px; border-radius: 8px; place-items: center; color: var(--b-muted); }
     .marble-margin .shut:hover { background: var(--b-paper-2); color: var(--b-ink); }
     .marble-margin .shut svg { width: 15px; height: 15px; }
@@ -281,9 +314,9 @@
     .marble-margin-pin[data-key="paused"]::after { background: conic-gradient(var(--b-caution) var(--p, 0%), color-mix(in srgb, var(--b-caution) 22%, transparent) 0); }
     /* The app asked you something. */
     .marble-margin-pin[data-key="asking"]::before { content: ""; position: absolute; top: -3px; right: -3px; width: 8px; height: 8px; border-radius: 50%; background: var(--b-caution); box-shadow: 0 0 0 2px var(--b-card); }
-    /* Done: a faint check. */
-    .marble-margin-pin:is([data-key="built"], [data-key="resolved"]) { background: var(--b-mark); color: transparent; opacity: .45; box-shadow: none; }
-    .marble-margin-pin:is([data-key="built"], [data-key="resolved"])::before { content: ""; position: absolute; inset: 0; background: var(--b-card); -webkit-mask: ${CHECK}; mask: ${CHECK}; }
+    /* Done and brought back from the archive: faint, its number and nothing
+       more. */
+    .marble-margin-pin:is([data-key="built"], [data-key="resolved"]) { opacity: .45; box-shadow: inset 0 0 0 1px var(--b-faint); color: var(--b-muted); }
     .marble-margin-pin[hidden] { display: none; }
 
 
@@ -370,12 +403,29 @@
     const shut = button('shut', '', KIND.close);
     shut.setAttribute('aria-label', 'Close');
     shut.addEventListener('click', () => B.setSide('none'));
-    head.append(sum, h('span', 'sp'), add, shut);
+    const tray = button('tray', '', KIND.archive);
+    const trayCount = h('span', '');
+    tray.append(trayCount);
+    B.tip(tray, 'Archived marks: built, resolved and put away. Bring one back or delete it there.');
+    tray.addEventListener('click', () => setView('archive'));
+    head.append(sum, h('span', 'sp'), tray, add, shut);
+    // The Archived list's own head: the way back, and clearing it out.
+    const back = button('back', 'Archived', KIND.back);
+    back.setAttribute('aria-label', 'Back to the marks');
+    back.addEventListener('click', () => setView('marks'));
+    const gone = button('gone', 'Delete all');
+    B.tip(gone, 'Delete every archived mark. Undo brings them back.');
+    gone.addEventListener('click', () => {
+      const ids = archived().map((m) => m.id);
+      if (ids.length) M.remove(ids);
+    });
     const ground = h('div', 'ground');
     const cards = h('div', 'cards');
     const none = h('p', 'none');
     none.setAttribute('role', 'status');
-    ground.append(cards, none);
+    const arch = h('div', 'arch');
+    arch.setAttribute('aria-label', 'Archived marks');
+    ground.append(cards, none, arch);
     panel.append(head, ground);
 
     // ------------------------------------------------------------ the state
@@ -392,8 +442,18 @@
       const here = M.list();
       // What the page has, as the host keeps it where it has it; in the order
       // they were made, which is what the pins count by.
-      return here.map((m) => ({ ...m, ...(server.get(m.id) ?? {}) })).sort((a, b) => (a.at ?? 0) - (b.at ?? 0));
+      return here.map((m) => ({ ...m, ...(server.get(m.id) ?? {}), archived: Boolean(m.archived) })).sort((a, b) => (a.at ?? 0) - (b.at ?? 0));
     };
+    const archived = () => marks().filter((m) => m.archived);
+    let view = 'marks';
+    function setView(next) {
+      view = next === 'archive' ? 'archive' : 'marks';
+      panel.dataset.view = view;
+      if (view === 'archive') unpick();
+      draw();
+      if (view === 'archive') back.focus({ preventScroll: true });
+      else tray.focus({ preventScroll: true });
+    }
     const statusFor = (mark) => statusOf(mark, { builds: B.state()?.builds ?? [], holds, name: B.name });
 
     const partName = (id) => {
@@ -458,6 +518,11 @@
       no.setAttribute('aria-hidden', 'true');
       kind.prepend(no);
       kind.append(h('span', '', `${kindOf(mark)} · ${whereOf(mark)}`));
+      if (mark.state !== 'building') {
+        const put = tapper(button('arc', '', KIND.archive), () => B.archive([mark.id], true), 'Archive: off the app, kept under Archived');
+        put.setAttribute('aria-label', `Archive ${kindOf(mark).toLowerCase()} ${n}`);
+        kind.append(put);
+      }
       card.append(kind);
       if (mark.type === 'comment') {
         const lines = h('div', 'lines');
@@ -652,12 +717,59 @@
       if (b.status === 'running') ticker = setInterval(paint, 1000);
     };
 
+    // ------------------------------------------------------------ archive
+
+    /** The Archived list: what was built, resolved or put away, newest first,
+     *  each with Put back and Delete. Only the margin draws it; nothing of it
+     *  is on the app. */
+    let headView = null;
+    function drawArchive(list) {
+      trayCount.textContent = String(list.length);
+      tray.setAttribute('aria-label', `Archived marks: ${list.length}`);
+      tray.hidden = !list.length;
+      if (view === 'archive' && !list.length) { view = 'marks'; panel.dataset.view = view; }
+      if (headView !== view) {
+        headView = view;
+        if (view === 'archive') head.replaceChildren(back, h('span', 'sp'), gone, shut);
+        else head.replaceChildren(sum, h('span', 'sp'), tray, add, shut);
+      }
+      if (view !== 'archive') return;
+      const builds = B.state()?.builds ?? [];
+      const rows = [...list].sort((a, b) => (b.at ?? 0) - (a.at ?? 0)).map((mark) => {
+        const card = h('article', 'marble-margin-old');
+        card.dataset.id = mark.id;
+        const kind = h('div', 'k');
+        kind.innerHTML = KIND[mark.type] ?? KIND.note;
+        kind.append(h('span', '', `${kindOf(mark)} · ${whereOf(mark)}`));
+        const words = mark.type === 'comment'
+          ? (mark.thread ?? []).find((line) => line.text)?.text ?? 'A comment'
+          : mark.type === 'note' ? (mark.text || 'An empty note') : wordsOf(mark);
+        const row = h('div', 'row');
+        const n = builds.find((b) => b.id === mark.build)?.n;
+        const was = mark.type === 'comment' && mark.resolved ? 'Resolved'
+          : mark.state === 'built' ? (n ? `Done in Build ${n}` : 'Done') : 'Archived';
+        const put = tapper(button('sb', 'Put back'), () => {
+          if (mark.type === 'comment' && mark.resolved) B.resolve(mark.id, false);
+          else B.archive([mark.id], false);
+        }, 'Back on the app and in the list');
+        const del = tapper(button('icon', '', KIND.trash), () => M.remove([mark.id]), 'Delete it. Undo brings it back.');
+        del.setAttribute('aria-label', `Delete this ${kindOf(mark).toLowerCase()}`);
+        row.append(h('span', 'w', was), put, del);
+        card.append(kind, h('p', 'words', words), row);
+        return card;
+      });
+      arch.replaceChildren(...rows);
+      if (!rows.length) arch.append(h('p', 'empty', 'Nothing archived.'));
+    }
+
     // ------------------------------------------------------------ drawing
 
     let order = [];
     const draw = () => {
       if (!open) return;
-      const list = marks();
+      const all = marks();
+      const list = all.filter((m) => !m.archived);
+      drawArchive(all.filter((m) => m.archived));
       const live = new Set();
       order = [];
       list.forEach((mark, i) => {
@@ -707,7 +819,9 @@
       }
       drawBuild();
       none.hidden = list.length > 0 || Boolean(buildCard);
-      none.textContent = 'Nothing on the app yet. Use + Comment to ask about a part, or Note and Sketch on the toolbar to say what to change.';
+      none.textContent = all.length
+        ? 'Nothing open on the app. What was built, resolved or put away is under Archived.'
+        : 'Nothing on the app yet. Use + Comment to ask about a part, or Note and Sketch on the toolbar to say what to change.';
       const count = { open: 0, build: 0, done: 0 };
       for (const id of order) count[cardOf.get(id).status.show] += 1;
       const said = [['open', 'open'], ['build', 'in the build'], ['done', 'done']].filter(([key]) => count[key]);

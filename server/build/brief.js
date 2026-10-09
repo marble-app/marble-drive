@@ -98,7 +98,11 @@ export function buildBrief({ path, n, marks, context = [], pieces = new Map(), i
   });
   if (context.length) {
     lines.push('', 'Also on the app, waiting for a later build (do not act on these unless a mark above needs them):');
-    for (const mark of context) lines.push(`- ${phraseOf(mark, { index }).split('\n')[0]}`);
+    for (const mark of context) {
+      const said = (mark.thread ?? []).filter((line) => line.text).map((line) => `${line.who === 'agent' ? 'Agent' : 'Person'}: ${line.text}`);
+      lines.push(`- Comment ${mark.id}, ${phraseOf(mark, { index }).split('\n')[0].replace(/^A comment thread /, '')}${said.length ? ` ${said.join(' / ')}` : ''}`);
+    }
+    lines.push('If what you build answers one of these comments or makes it moot, name it in build_plan\'s `settled` (its id and one sentence on how), and it is cleared from the app when the build finishes. Leave the rest alone.');
   }
   lines.push(
     '',

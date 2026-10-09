@@ -184,6 +184,22 @@ test('a note keeps what was pasted onto it, and the brief says where to look', a
   await assert.rejects(store.putImage(png, 'text/html'), /PNG, JPEG/);
 });
 
+test('archived is kept on a mark; a plan names the comments it settles; the brief asks for them by id', () => {
+  assert.equal(cleanMark({ id: 'm1', type: 'note', text: 'x', archived: true }).archived, true);
+  assert.equal(cleanMark({ id: 'm1', type: 'note', text: 'x', archived: 'yes' }).archived, undefined);
+  const plan = cleanPlan({ parts: [{ title: 'A' }], settled: ['mc1', { id: 'mc2', said: 'Shown now.' }, { said: 'no id' }] });
+  assert.deepEqual(plan.settled, [{ id: 'mc1', said: '' }, { id: 'mc2', said: 'Shown now.' }]);
+  assert.deepEqual(cleanPlan({ parts: [{ title: 'B' }] }, plan).settled, plan.settled, 'kept from before when not given');
+  const brief = buildBrief({
+    path: 'Reviews', n: 2,
+    marks: [cleanMark({ id: 'm1', type: 'note', anchorId: 'h', text: 'Bigger title' })],
+    context: [cleanMark({ id: 'mc1', type: 'comment', anchorId: 's2', thread: [{ who: 'you', text: 'Two weeks?' }] })],
+  });
+  assert.match(brief, /- Comment mc1, pinned to #s2/);
+  assert.match(brief, /Person: Two weeks\?/);
+  assert.match(brief, /build_plan's `settled`/);
+});
+
 test('pieces: regions of an app, taken whole with what draws them', () => {
   const regions = regionsOf(SOURCE_APP, 'Calendar');
   assert.deepEqual(regions.map((r) => r.title), ['Weeks ahead'], 'a short aside is not a piece');

@@ -185,6 +185,21 @@ Marked up on the spec page after using it:
   chat's, drawn as a speech balloon beside Pieces and Comments with the
   launcher's dot, and the launcher leaves the corner.
 
+## Archive (9 October)
+
+Marks pile up, so what is done leaves the app. A mark has `archived`: off the
+app and out of the margin's list, kept in the margin's Archived list (the box
+in its head) with Put back and Delete, and Delete all. A built mark and a
+resolved comment are archived by the host; any mark can be archived by hand,
+from its card's box or from the bar on picked marks, with Undo on the line
+over the toolbar. An archived mark waits for no build. Done pins no longer
+show a check.
+
+The build clears what it settles: the brief lists the open comments by id and
+asks the lead to name, in `build_plan`'s `settled`, the ones its build answers
+or makes moot, each with a sentence. When the build finishes those comments
+get that sentence in the app's name, and are resolved and archived.
+
 ## Left for later
 
 - Taking one finished part out of a stopped build (only looking at it is here).
